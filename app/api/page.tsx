@@ -1,5 +1,5 @@
 'use client';
-import { useChat } from 'ai/react';
+import { useChat } from '@ai-sdk/react';
 import { useState } from 'react';
 import { ModelKey } from '@/lib/models';
 

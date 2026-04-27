@@ -21,7 +21,7 @@
     "@ai-sdk/react": "^3.0.170",
     "@ai-sdk/xai": "^3.0.83",
     "@google/generative-ai": "^0.24.1",
-    "ai": "^5.0.179",
+    "ai": "^5.0.0",
     "anthropic": "^0.0.0",
     "autoprefixer": "^10.5.0",
     "axios": "^1.15.2",

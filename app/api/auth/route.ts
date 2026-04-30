@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-export const runtime = "nodejs"; // dôležité pre Vercel
+export const runtime = "nodejs";
 
 // ⚠️ TEMP DB (nahradiť DB neskôr)
 const users: any[] = [];
@@ -9,7 +9,7 @@ const users: any[] = [];
 // 🍪 COOKIE HELPER
 // ===============================
 function createSessionCookie(email: string) {
-  return `user=${email}; Path=/; HttpOnly; SameSite=Lax`;
+  return `user=${email}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`;
 }
 
 // ===============================
@@ -18,7 +18,6 @@ function createSessionCookie(email: string) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-
     const { email, password, action } = body;
 
     if (!email || !password) {
@@ -41,11 +40,10 @@ export async function POST(req: Request) {
         );
       }
 
-      // 🔥 jednoduché heslo (bez bcrypt)
       const user = {
         id: Date.now(),
         email,
-        password: password,
+        password,
         subscription: false,
         createdAt: new Date(),
       };
@@ -58,7 +56,6 @@ export async function POST(req: Request) {
       });
 
       res.headers.set("Set-Cookie", createSessionCookie(email));
-
       return res;
     }
 
@@ -75,7 +72,6 @@ export async function POST(req: Request) {
         );
       }
 
-      // 🔥 jednoduché porovnanie (bez bcrypt)
       const valid = password === user.password;
 
       if (!valid) {
@@ -92,7 +88,6 @@ export async function POST(req: Request) {
       });
 
       res.headers.set("Set-Cookie", createSessionCookie(email));
-
       return res;
     }
 
@@ -117,7 +112,6 @@ export async function POST(req: Request) {
       });
 
       res.headers.set("Set-Cookie", createSessionCookie(email));
-
       return res;
     }
 
@@ -156,7 +150,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ user: null });
     }
 
-    const email = match[1];
+    const email = decodeURIComponent(match[1]);
 
     const user = users.find((u) => u.email === email);
 
@@ -171,7 +165,8 @@ export async function GET(req: Request) {
       },
     });
 
-  } catch {
+  } catch (err) {
+    console.error("SESSION ERROR:", err);
     return NextResponse.json({ user: null });
   }
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
+// import pdf from "pdf-parse";
 
 // ⚠️ TEMP DB (nahraď neskôr DB - Prisma / Mongo)
 const users: any[] = [];

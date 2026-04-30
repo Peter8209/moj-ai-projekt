@@ -1,28 +1,27 @@
 import Stripe from "stripe";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-// ================= INIT =================
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-04-22.dahlia",
-});
+// 🔥 FIX: odstránený apiVersion (žiadny TS konflikt)
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
 // ================= TYPES =================
 type Plan = "monthly" | "quarterly" | "yearly";
 type Addon = "supervisor" | "audit" | "defense" | "plagiarism";
 
-// ================= PRICES =================
-const PLAN_PRICES: Record<Plan, number> = {
-  monthly: 4000,
-  quarterly: 7000,
-  yearly: 24000,
+// ================= STRIPE PRICE IDS =================
+const PLAN_PRICE_IDS: Record<Plan, string> = {
+  monthly: "price_monthly_xxx",
+  quarterly: "price_quarterly_xxx",
+  yearly: "price_yearly_xxx",
 };
 
-const ADDON_PRICES: Record<Addon, number> = {
-  supervisor: 5000,
-  audit: 5000,
-  defense: 6000,
-  plagiarism: 1200,
+const ADDON_PRICE_IDS: Partial<Record<Addon, string>> = {
+  supervisor: "price_supervisor_xxx",
+  audit: "price_audit_xxx",
+  defense: "price_defense_xxx",
+  plagiarism: "price_plagiarism_xxx",
 };
 
 // ================= ROUTE =================
@@ -32,70 +31,74 @@ export async function POST(req: Request) {
 
     const plan = body.plan as Plan;
     const addons = Array.isArray(body.addons) ? (body.addons as Addon[]) : [];
-    const currency = typeof body.currency === "string" ? body.currency.toLowerCase() : "eur";
-    const email = typeof body.email === "string" ? body.email : undefined;
+    const email = body.email as string;
 
     // ================= VALIDATION =================
-    if (!plan || !(plan in PLAN_PRICES)) {
-      return Response.json({ error: "INVALID_PLAN" }, { status: 400 });
+    if (!plan || !(plan in PLAN_PRICE_IDS)) {
+      return NextResponse.json({ error: "INVALID_PLAN" }, { status: 400 });
     }
 
     if (!email) {
-      return Response.json({ error: "MISSING_EMAIL" }, { status: 400 });
+      return NextResponse.json({ error: "MISSING_EMAIL" }, { status: 400 });
     }
 
     if (!process.env.NEXT_PUBLIC_BASE_URL) {
-      return Response.json({ error: "MISSING_BASE_URL" }, { status: 500 });
+      return NextResponse.json({ error: "MISSING_BASE_URL" }, { status: 500 });
+    }
+
+    // ================= CUSTOMER =================
+    let customer: Stripe.Customer;
+
+    const existing = await stripe.customers.list({
+      email,
+      limit: 1,
+    });
+
+    if (existing.data.length > 0) {
+      customer = existing.data[0];
+    } else {
+      customer = await stripe.customers.create({
+        email,
+      });
     }
 
     // ================= LINE ITEMS =================
-    const line_items: Stripe.Checkout.SessionCreateParams['line_items'] = [
+    const line_items: Stripe.Checkout.SessionCreateParams.LineItem[] = [
       {
-        price_data: {
-          currency,
-          product_data: {
-            name: `Zedpera plan: ${plan}`,
-          },
-          unit_amount: PLAN_PRICES[plan],
-          recurring: {
-            interval: plan === "yearly" ? "year" : "month",
-            interval_count: plan === "quarterly" ? 3 : 1,
-          },
-        },
+        price: PLAN_PRICE_IDS[plan],
         quantity: 1,
       },
     ];
 
-    // ================= ADDONS =================
     for (const addon of addons) {
-      if (!(addon in ADDON_PRICES)) continue;
+      const priceId = ADDON_PRICE_IDS[addon];
+      if (!priceId) continue;
 
       line_items.push({
-        price_data: {
-          currency,
-          product_data: {
-            name: `Addon: ${addon}`,
-          },
-          unit_amount: ADDON_PRICES[addon],
-        },
+        price: priceId,
         quantity: 1,
       });
     }
 
     // ================= SESSION =================
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      customer_email: email,
-      line_items,
-      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?success=1`,
-      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/pricing?cancel=1`,
-      metadata: {
-        plan,
-        addons: JSON.stringify(addons),
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "subscription",
+        customer: customer.id,
+        line_items,
+        success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?success=1`,
+        cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/pricing?cancel=1`,
+        metadata: {
+          plan,
+          addons: JSON.stringify(addons),
+        },
       },
-    });
+      {
+        idempotencyKey: `checkout_${email}_${Date.now()}`,
+      }
+    );
 
-    return Response.json({
+    return NextResponse.json({
       ok: true,
       url: session.url,
     });
@@ -103,7 +106,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error("CHECKOUT ERROR:", err);
 
-    return Response.json(
+    return NextResponse.json(
       {
         error: "CHECKOUT_FAILED",
         detail: err?.message || "unknown",

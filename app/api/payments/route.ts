@@ -1,3 +1,11 @@
+import Stripe from "stripe";
+import { NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+
+// ================= TYPES =================
 type Plan = "monthly" | "quarterly" | "yearly";
 
 type Addon =
@@ -6,130 +14,124 @@ type Addon =
   | "defense"
   | "plagiarism";
 
-const PLAN_PRICES = {
-  monthly: 40,
-  quarterly: 70,
-  yearly: 240,
+// ================= PRICES (v € centoch) =================
+const PLAN_PRICES: Record<Plan, number> = {
+  monthly: 4000,
+  quarterly: 7000,
+  yearly: 24000,
 };
 
-const ADDON_PRICES = {
-  supervisor: 50,
-  audit: 50,
-  defense: 60,
-  plagiarism: 12,
+const ADDON_PRICES: Record<Addon, number> = {
+  supervisor: 5000,
+  audit: 5000,
+  defense: 6000,
+  plagiarism: 1200,
 };
 
-// =====================================================
-// 🧠 MOCK USER STATE (nahradíš DB)
-// =====================================================
-let USER_SUBSCRIPTION: any = {
-  active: false,
-  plan: null,
-  addons: [],
-  expiresAt: null,
-};
-
-// =====================================================
-// 📥 GET – stav platby
-// =====================================================
+// ================= GET (optional debug) =================
 export async function GET() {
-  return Response.json({
+  return NextResponse.json({
     ok: true,
-    subscription: USER_SUBSCRIPTION,
+    message: "Stripe payments endpoint OK",
   });
 }
 
-// =====================================================
-// 📤 POST – create payment / upgrade
-// =====================================================
+// ================= POST =================
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const {
-      plan,
-      addons = [],
-      currency = "EUR",
-    } = body;
+    const plan = body.plan as Plan;
+    const addons = Array.isArray(body.addons) ? (body.addons as Addon[]) : [];
+    const currency = body.currency === "CZK" ? "czk" : "eur";
+    const email = body.email as string;
 
-    // =====================================================
-    // ❗ VALIDÁCIA
-    // =====================================================
-    if (!plan || !PLAN_PRICES[plan as Plan]) {
-      return Response.json({ error: "INVALID_PLAN" }, { status: 400 });
+    // ================= VALIDATION =================
+    if (!plan || !(plan in PLAN_PRICES)) {
+      return NextResponse.json({ error: "INVALID_PLAN" }, { status: 400 });
     }
 
-    // =====================================================
-    // 💰 CENA
-    // =====================================================
-    let total = PLAN_PRICES[plan as Plan];
-
-    // addons len ak už má plán alebo kupuje plán
-    if (addons.length > 0) {
-      for (const a of addons) {
-        if (!ADDON_PRICES[a as Addon]) {
-          return Response.json({ error: "INVALID_ADDON" }, { status: 400 });
-        }
-        total += ADDON_PRICES[a as Addon];
-      }
+    if (!email) {
+      return NextResponse.json({ error: "MISSING_EMAIL" }, { status: 400 });
     }
 
-    // =====================================================
-    // 💱 MENA (EUR / CZK)
-    // =====================================================
-    let finalAmount = total;
-
-    if (currency === "CZK") {
-      finalAmount = Math.round(total * 25); // jednoduchý prepočet
+    if (!process.env.NEXT_PUBLIC_BASE_URL) {
+      return NextResponse.json({ error: "MISSING_BASE_URL" }, { status: 500 });
     }
 
-    // =====================================================
-    // 🧠 AKTIVÁCIA (SIMULÁCIA)
-    // =====================================================
-    const now = new Date();
+    // ================= CUSTOMER =================
+    let customer;
 
-    let expires = new Date();
+    const existing = await stripe.customers.list({
+      email,
+      limit: 1,
+    });
 
-    if (plan === "monthly") {
-      expires.setMonth(now.getMonth() + 1);
+    if (existing.data.length > 0) {
+      customer = existing.data[0];
+    } else {
+      customer = await stripe.customers.create({ email });
     }
 
-    if (plan === "quarterly") {
-      expires.setMonth(now.getMonth() + 3);
-    }
+    // ================= LINE ITEMS =================
+    const line_items: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
 
-    if (plan === "yearly") {
-      expires.setFullYear(now.getFullYear() + 1);
-    }
-
-    USER_SUBSCRIPTION = {
-      active: true,
-      plan,
-      addons,
-      currency,
-      amount: finalAmount,
-      expiresAt: expires.toISOString(),
-    };
-
-    // =====================================================
-    // 🚀 RESPONSE
-    // =====================================================
-    return Response.json({
-      ok: true,
-      message: "PAYMENT_SUCCESS",
-      payment: {
-        plan,
-        addons,
+    // plán
+    line_items.push({
+      price_data: {
         currency,
-        amount: finalAmount,
+        product_data: {
+          name: `Zedpera plan: ${plan}`,
+        },
+        unit_amount:
+          currency === "czk"
+            ? Math.round(PLAN_PRICES[plan] * 0.025 * 25) // hrubý prepočet
+            : PLAN_PRICES[plan],
       },
-      subscription: USER_SUBSCRIPTION,
+      quantity: 1,
+    });
+
+    // addons
+    for (const addon of addons) {
+      if (!(addon in ADDON_PRICES)) continue;
+
+      line_items.push({
+        price_data: {
+          currency,
+          product_data: {
+            name: `Addon: ${addon}`,
+          },
+          unit_amount:
+            currency === "czk"
+              ? Math.round(ADDON_PRICES[addon] * 0.025 * 25)
+              : ADDON_PRICES[addon],
+        },
+        quantity: 1,
+      });
+    }
+
+    // ================= SESSION =================
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment", // 🔥 zatiaľ jednorazové (jednoduchšie)
+      customer: customer.id,
+      line_items,
+      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?success=1`,
+      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/pricing?cancel=1`,
+      metadata: {
+        plan,
+        addons: JSON.stringify(addons),
+      },
+    });
+
+    return NextResponse.json({
+      ok: true,
+      url: session.url,
     });
 
   } catch (err: any) {
     console.error("PAYMENT ERROR:", err);
 
-    return Response.json(
+    return NextResponse.json(
       {
         error: "PAYMENT_FAILED",
         detail: err?.message || "unknown",

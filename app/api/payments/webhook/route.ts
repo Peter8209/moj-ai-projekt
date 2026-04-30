@@ -2,10 +2,25 @@ import Stripe from "stripe";
 
 export const runtime = "nodejs";
 
-// ⚠️ Stripe init (SPRÁVNA VERZIA)
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-04-22.dahlia",
-});
+// ================= INIT =================
+const stripeSecret = process.env.STRIPE_SECRET_KEY;
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+if (!stripeSecret) {
+  throw new Error("Missing STRIPE_SECRET_KEY");
+}
+
+if (!webhookSecret) {
+  throw new Error("Missing STRIPE_WEBHOOK_SECRET");
+}
+
+const stripe = new Stripe(stripeSecret);
+
+// ================= TYPES =================
+type CheckoutMeta = {
+  plan?: string;
+  addons?: string;
+};
 
 // ================= ROUTE =================
 export async function POST(req: Request) {
@@ -15,7 +30,7 @@ export async function POST(req: Request) {
     return new Response("Missing signature", { status: 400 });
   }
 
-  // ⚠️ MUSÍ byť raw body (text)
+  // ⚠️ MUSÍ byť RAW body
   const body = await req.text();
 
   let event: Stripe.Event;
@@ -25,49 +40,111 @@ export async function POST(req: Request) {
     event = stripe.webhooks.constructEvent(
       body,
       signature,
-      process.env.STRIPE_WEBHOOK_SECRET!
+      webhookSecret
     );
   } catch (err: any) {
     console.error("❌ WEBHOOK VERIFY ERROR:", err.message);
-    return new Response("Webhook Error", { status: 400 });
+    return new Response("Invalid signature", { status: 400 });
   }
 
-  // ================= HANDLE EVENTS =================
+  // ================= IDEMPOTENCY (ochrana) =================
+  const eventId = event.id;
+
   try {
+    // 🔥 TODO: DB kontrola (zabráni double processing)
+    /*
+    const exists = await db.webhookEvent.findUnique({ where: { id: eventId } });
+    if (exists) return new Response("Already processed", { status: 200 });
+    */
+
     switch (event.type) {
-      // ================= PAYMENT SUCCESS =================
+
+      // =====================================================
+      // 💳 CHECKOUT SUCCESS
+      // =====================================================
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
 
-        const email = session.customer_email || "";
-        const plan = session.metadata?.plan || "unknown";
+        const email =
+          session.customer_email ||
+          (typeof session.customer === "string"
+            ? await getCustomerEmail(session.customer)
+            : "");
+
+        const metadata = (session.metadata || {}) as CheckoutMeta;
+
+        const plan = metadata.plan || "unknown";
 
         let addons: string[] = [];
         try {
-          addons = JSON.parse(session.metadata?.addons || "[]");
+          addons = metadata.addons ? JSON.parse(metadata.addons) : [];
         } catch {
           addons = [];
         }
 
-        console.log("✅ PAYMENT OK:", { email, plan, addons });
+        console.log("✅ PAYMENT SUCCESS:", {
+          eventId,
+          email,
+          plan,
+          addons,
+        });
 
-        // 🔥 TODO:
-        // await db.user.update(...)
+        // ================= DB LOGIKA =================
+        /*
+        await db.user.upsert({
+          where: { email },
+          update: {
+            plan,
+            addons,
+            status: "active",
+          },
+          create: {
+            email,
+            plan,
+            addons,
+            status: "active",
+          },
+        });
+
+        await db.webhookEvent.create({
+          data: { id: eventId },
+        });
+        */
+
         break;
       }
 
-      // ================= SUBSCRIPTION RENEW =================
+      // =====================================================
+      // 🔁 SUBSCRIPTION RENEW
+      // =====================================================
       case "invoice.paid": {
-        console.log("🔁 SUBSCRIPTION RENEWED");
+        const invoice = event.data.object as Stripe.Invoice;
+
+        console.log("🔁 SUBSCRIPTION RENEW:", {
+          eventId,
+          customer: invoice.customer,
+        });
+
+        // 🔥 DB: predĺženie platnosti
         break;
       }
 
-      // ================= SUBSCRIPTION CANCEL =================
+      // =====================================================
+      // ❌ SUBSCRIPTION CANCEL
+      // =====================================================
       case "customer.subscription.deleted": {
-        console.log("❌ SUBSCRIPTION CANCELLED");
+        const sub = event.data.object as Stripe.Subscription;
+
+        console.log("❌ SUBSCRIPTION CANCELLED:", {
+          eventId,
+          subId: sub.id,
+        });
+
+        // 🔥 DB: deaktivácia usera
         break;
       }
 
+      // =====================================================
       default:
         console.log("ℹ️ UNHANDLED EVENT:", event.type);
     }
@@ -77,5 +154,19 @@ export async function POST(req: Request) {
   } catch (err) {
     console.error("❌ WEBHOOK PROCESS ERROR:", err);
     return new Response("Processing Error", { status: 500 });
+  }
+}
+
+// ================= HELPER =================
+async function getCustomerEmail(customerId: string): Promise<string> {
+  try {
+    const customer = await stripe.customers.retrieve(customerId);
+
+    if (typeof customer === "string") return "";
+
+    return customer.email || "";
+  } catch (err) {
+    console.error("❌ CUSTOMER FETCH ERROR:", err);
+    return "";
   }
 }

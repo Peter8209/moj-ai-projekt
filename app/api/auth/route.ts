@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-// import pdf from "pdf-parse";
 
-// ⚠️ TEMP DB (nahraď neskôr DB - Prisma / Mongo)
+export const runtime = "nodejs"; // dôležité pre Vercel
+
+// ⚠️ TEMP DB (nahradiť DB neskôr)
 const users: any[] = [];
 
 // ===============================
@@ -31,8 +32,7 @@ export async function POST(req: Request) {
     // 🔐 REGISTER
     // ===============================
     if (action === "register") {
-
-      const existing = users.find(u => u.email === email);
+      const existing = users.find((u) => u.email === email);
 
       if (existing) {
         return NextResponse.json(
@@ -41,22 +41,20 @@ export async function POST(req: Request) {
         );
       }
 
-      // ⚡ PODĽA ZADANIA → jednoduché heslá OK
-      const hashed = await bcrypt.hash(password, 5);
-
+      // 🔥 jednoduché heslo (bez bcrypt)
       const user = {
         id: Date.now(),
         email,
-        password: hashed,
+        password: password,
         subscription: false,
-        createdAt: new Date()
+        createdAt: new Date(),
       };
 
       users.push(user);
 
       const res = NextResponse.json({
         ok: true,
-        message: "REGISTERED"
+        message: "REGISTERED",
       });
 
       res.headers.set("Set-Cookie", createSessionCookie(email));
@@ -68,8 +66,7 @@ export async function POST(req: Request) {
     // 🔑 LOGIN
     // ===============================
     if (action === "login") {
-
-      const user = users.find(u => u.email === email);
+      const user = users.find((u) => u.email === email);
 
       if (!user) {
         return NextResponse.json(
@@ -78,7 +75,8 @@ export async function POST(req: Request) {
         );
       }
 
-      const valid = await bcrypt.compare(password, user.password);
+      // 🔥 jednoduché porovnanie (bez bcrypt)
+      const valid = password === user.password;
 
       if (!valid) {
         return NextResponse.json(
@@ -90,7 +88,7 @@ export async function POST(req: Request) {
       const res = NextResponse.json({
         ok: true,
         message: "LOGGED_IN",
-        subscription: user.subscription
+        subscription: user.subscription,
       });
 
       res.headers.set("Set-Cookie", createSessionCookie(email));
@@ -102,8 +100,7 @@ export async function POST(req: Request) {
     // 🤖 AUTO LOGIN (po Stripe)
     // ===============================
     if (action === "auto") {
-
-      const user = users.find(u => u.email === email);
+      const user = users.find((u) => u.email === email);
 
       if (!user) {
         return NextResponse.json(
@@ -116,7 +113,7 @@ export async function POST(req: Request) {
 
       const res = NextResponse.json({
         ok: true,
-        message: "AUTO_LOGIN_SUCCESS"
+        message: "AUTO_LOGIN_SUCCESS",
       });
 
       res.headers.set("Set-Cookie", createSessionCookie(email));
@@ -124,7 +121,10 @@ export async function POST(req: Request) {
       return res;
     }
 
-    return NextResponse.json({ error: "INVALID_ACTION" }, { status: 400 });
+    return NextResponse.json(
+      { error: "INVALID_ACTION" },
+      { status: 400 }
+    );
 
   } catch (err: any) {
     console.error("AUTH ERROR:", err);
@@ -132,7 +132,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error: "AUTH_FAILED",
-        detail: err?.message || "unknown"
+        detail: err?.message || "unknown",
       },
       { status: 500 }
     );
@@ -158,7 +158,7 @@ export async function GET(req: Request) {
 
     const email = match[1];
 
-    const user = users.find(u => u.email === email);
+    const user = users.find((u) => u.email === email);
 
     if (!user) {
       return NextResponse.json({ user: null });
@@ -167,8 +167,8 @@ export async function GET(req: Request) {
     return NextResponse.json({
       user: {
         email: user.email,
-        subscription: user.subscription
-      }
+        subscription: user.subscription,
+      },
     });
 
   } catch {

@@ -1,7 +1,12 @@
 'use client';
-import { useChat } from '@ai-sdk/react';
+
 import { useState } from 'react';
 import { ModelKey } from '@/lib/models';
+
+type Message = {
+  role: 'user' | 'assistant';
+  content: string;
+};
 
 const MODEL_OPTIONS: ModelKey[] = [
   'gpt-4o',
@@ -17,13 +22,55 @@ const MODEL_OPTIONS: ModelKey[] = [
 
 export default function Page() {
   const [selectedModel, setSelectedModel] = useState<ModelKey>('gpt-4o');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const { messages, input, handleInputChange, handleSubmit } = useChat({
-    body: { modelKey: selectedModel },
-  });
+  const sendMessage = async () => {
+    if (!input.trim()) return;
+
+    const newMessages = [
+      ...messages,
+      { role: 'user', content: input },
+    ];
+
+    setMessages(newMessages);
+    setInput('');
+    setLoading(true);
+
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        messages: newMessages,
+        modelKey: selectedModel,
+      }),
+    });
+
+    const reader = res.body?.getReader();
+    const decoder = new TextDecoder();
+
+    let assistantText = '';
+
+    while (true) {
+      const { done, value } = await reader!.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+      assistantText += chunk;
+
+      // realtime streaming update
+      setMessages([
+        ...newMessages,
+        { role: 'assistant', content: assistantText },
+      ]);
+    }
+
+    setLoading(false);
+  };
 
   return (
-    <div>
+    <div style={{ padding: 20, maxWidth: 800, margin: '0 auto' }}>
+      {/* MODEL SELECT */}
       <select
         value={selectedModel}
         onChange={e => setSelectedModel(e.target.value as ModelKey)}
@@ -33,18 +80,27 @@ export default function Page() {
         ))}
       </select>
 
-      <div>
-        {messages.map(m => (
-          <div key={m.id}>
+      {/* CHAT */}
+      <div style={{ marginTop: 20 }}>
+        {messages.map((m, i) => (
+          <div key={i} style={{ marginBottom: 10 }}>
             <b>{m.role}:</b> {m.content}
           </div>
         ))}
       </div>
 
-      <form onSubmit={handleSubmit}>
-        <input value={input} onChange={handleInputChange} placeholder="Napíš správu..." />
-        <button type="submit">Odoslať</button>
-      </form>
+      {/* INPUT */}
+      <div style={{ marginTop: 20 }}>
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          placeholder="Napíš správu..."
+          style={{ width: '70%', marginRight: 10 }}
+        />
+        <button onClick={sendMessage} disabled={loading}>
+          {loading ? '...' : 'Odoslať'}
+        </button>
+      </div>
     </div>
   );
 }

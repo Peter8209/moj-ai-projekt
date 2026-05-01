@@ -3,7 +3,6 @@ import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
 import { groq } from '@ai-sdk/groq';
 import { mistral } from '@ai-sdk/mistral';
-import { xai } from '@ai-sdk/xai';
 import { perplexity } from '@ai-sdk/perplexity';
 import { createOllama } from 'ollama-ai-provider';
 
@@ -24,10 +23,12 @@ export const models = {
 
   'mistral-large':     mistral('mistral-large-latest'),
 
-  // 🔥 FIX: Cohere odstránené → fallback
+  // 🔥 fallback namiesto Cohere
   'command-r-plus':    openai('gpt-4o'),
 
-  'grok-2':            xai('grok-2-1212'),
+  // 🔥 FIX: xAI odstránené → fallback
+  'grok-2':            openai('gpt-4o'),
+
   'sonar-pro':         perplexity('sonar-pro'),
 
   'ollama-llama3':     ollama('llama3'),

@@ -2,22 +2,8 @@ import Stripe from "stripe";
 
 export const runtime = "nodejs";
 
-// ================= INIT =================
-const stripeSecret = process.env.STRIPE_SECRET_KEY;
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-if (!stripeSecret) {
-  throw new Error("Missing STRIPE_SECRET_KEY");
-}
-
-if (!webhookSecret) {
-  throw new Error("Missing STRIPE_WEBHOOK_SECRET");
-}
-
-// 🔥 TS FIX – garantovaný string
-const webhookSecretSafe: string = webhookSecret;
-
-const stripe = new Stripe(stripeSecret);
+// ❗ NEVALIDUJ ENV TU (build by padol)
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
 
 // ================= TYPES =================
 type CheckoutMeta = {
@@ -27,31 +13,42 @@ type CheckoutMeta = {
 
 // ================= ROUTE =================
 export async function POST(req: Request) {
-  const signature = req.headers.get("stripe-signature");
-
-  if (!signature) {
-    return new Response("Missing signature", { status: 400 });
-  }
-
-  const body = await req.text();
-
-  let event: Stripe.Event;
-
-  // ================= VERIFY =================
   try {
-    event = stripe.webhooks.constructEvent(
-      body,
-      signature,
-      webhookSecretSafe
-    );
-  } catch (err: any) {
-    console.error("❌ WEBHOOK VERIFY ERROR:", err.message);
-    return new Response("Invalid signature", { status: 400 });
-  }
+    const signature = req.headers.get("stripe-signature");
 
-  const eventId = event.id;
+    if (!signature) {
+      return new Response("Missing signature", { status: 400 });
+    }
 
-  try {
+    const stripeSecret = process.env.STRIPE_SECRET_KEY;
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+    // ✅ VALIDÁCIA AŽ TU (runtime)
+    if (!stripeSecret || !webhookSecret) {
+      console.error("❌ Missing Stripe ENV");
+      return new Response("Stripe config missing", { status: 500 });
+    }
+
+    // ⚠️ MUSÍ byť RAW BODY
+    const body = await req.text();
+
+    let event: Stripe.Event;
+
+    // ================= VERIFY =================
+    try {
+      event = stripe.webhooks.constructEvent(
+        body,
+        signature,
+        webhookSecret
+      );
+    } catch (err: any) {
+      console.error("❌ WEBHOOK VERIFY ERROR:", err.message);
+      return new Response("Invalid signature", { status: 400 });
+    }
+
+    const eventId = event.id;
+
+    // ================= HANDLE EVENTS =================
     switch (event.type) {
 
       case "checkout.session.completed": {
@@ -69,7 +66,9 @@ export async function POST(req: Request) {
 
         let addons: string[] = [];
         try {
-          addons = metadata.addons ? JSON.parse(metadata.addons) : [];
+          addons = metadata.addons
+            ? JSON.parse(metadata.addons)
+            : [];
         } catch {
           addons = [];
         }
@@ -80,6 +79,8 @@ export async function POST(req: Request) {
           plan,
           addons,
         });
+
+        // 👉 TU PRÍDE DB UPDATE
 
         break;
       }
@@ -123,7 +124,7 @@ async function getCustomerEmail(customerId: string): Promise<string> {
   try {
     const customer = await stripe.customers.retrieve(customerId);
 
-    // 🔥 FIX: type guard
+    // ✅ TYPE SAFE
     if (!customer || typeof customer === "string") return "";
 
     if ("deleted" in customer && customer.deleted) return "";

@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+// ❗ SAFE INIT (bez crashu pri build-e)
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
 
 // ================= TYPES =================
 type Plan = "monthly" | "quarterly" | "yearly";
@@ -14,7 +15,7 @@ type Addon =
   | "defense"
   | "plagiarism";
 
-// ================= PRICES (v € centoch) =================
+// ================= PRICES =================
 const PLAN_PRICES: Record<Plan, number> = {
   monthly: 4000,
   quarterly: 7000,
@@ -46,6 +47,9 @@ export async function POST(req: Request) {
     const currency = body.currency === "CZK" ? "czk" : "eur";
     const email = body.email as string;
 
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+    const stripeSecret = process.env.STRIPE_SECRET_KEY;
+
     // ================= VALIDATION =================
     if (!plan || !(plan in PLAN_PRICES)) {
       return NextResponse.json({ error: "INVALID_PLAN" }, { status: 400 });
@@ -55,12 +59,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "MISSING_EMAIL" }, { status: 400 });
     }
 
-    if (!process.env.NEXT_PUBLIC_BASE_URL) {
-      return NextResponse.json({ error: "MISSING_BASE_URL" }, { status: 500 });
+    if (!baseUrl || !stripeSecret) {
+      return NextResponse.json(
+        { error: "SERVER_CONFIG_ERROR" },
+        { status: 500 }
+      );
     }
 
     // ================= CUSTOMER =================
-    let customer: Stripe.Customer;
+    let customerId: string;
 
     const existing = await stripe.customers.list({
       email,
@@ -68,56 +75,51 @@ export async function POST(req: Request) {
     });
 
     if (existing.data.length > 0) {
-      customer = existing.data[0];
+      customerId = existing.data[0].id;
     } else {
-      customer = await stripe.customers.create({ email });
+      const created = await stripe.customers.create({ email });
+      customerId = created.id;
     }
 
     // ================= LINE ITEMS =================
-    // 🔥 FIX: odstránený chybný typ
-    const line_items = [];
-
-    // plán
-    line_items.push({
-      price_data: {
-        currency,
-        product_data: {
-          name: `Zedpera plan: ${plan}`,
-        },
-        unit_amount:
-          currency === "czk"
-            ? Math.round(PLAN_PRICES[plan] * 25) // jednoduchší prepočet
-            : PLAN_PRICES[plan],
-      },
-      quantity: 1,
-    });
-
-    // addons
-    for (const addon of addons) {
-      if (!(addon in ADDON_PRICES)) continue;
-
-      line_items.push({
+    const line_items = [
+      {
         price_data: {
           currency,
           product_data: {
-            name: `Addon: ${addon}`,
+            name: `Zedpera plan: ${plan}`,
           },
           unit_amount:
             currency === "czk"
-              ? Math.round(ADDON_PRICES[addon] * 25)
-              : ADDON_PRICES[addon],
+              ? Math.round(PLAN_PRICES[plan] * 25)
+              : PLAN_PRICES[plan],
         },
         quantity: 1,
-      });
-    }
+      },
+      ...addons
+        .filter((a) => a in ADDON_PRICES)
+        .map((addon) => ({
+          price_data: {
+            currency,
+            product_data: {
+              name: `Addon: ${addon}`,
+            },
+            unit_amount:
+              currency === "czk"
+                ? Math.round(ADDON_PRICES[addon] * 25)
+                : ADDON_PRICES[addon],
+          },
+          quantity: 1,
+        })),
+    ];
 
     // ================= SESSION =================
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      customer: customer.id,
+      customer: customerId,
       line_items,
-      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?success=1`,
-      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/pricing?cancel=1`,
+      success_url: `${baseUrl}/dashboard?success=1`,
+      cancel_url: `${baseUrl}/pricing?cancel=1`,
       metadata: {
         plan,
         addons: JSON.stringify(addons),

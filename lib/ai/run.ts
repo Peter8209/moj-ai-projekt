@@ -1,7 +1,7 @@
 import { generateText } from 'ai';
 import { pickModel, ModelKey } from './router';
 import { buildPrompt } from './prompts';
-import { getModel } from './models';
+import { getModel } from '../models'; // 🔥 FIX PATH
 
 // ================= TYPES =================
 type RunAIParams = {
@@ -21,13 +21,11 @@ export async function runAI({
   profile,
 }: RunAIParams) {
 
-  // 🔥 SAFE posledná správa
   const lastMessage =
     messages?.[messages.length - 1]?.content ?? '';
 
   const modelKey: ModelKey = pickModel(mode, agent);
 
-  // 🔥 LAZY MODEL (kľúčový fix)
   const model = getModel(modelKey);
 
   const prompt = buildPrompt({
@@ -51,7 +49,6 @@ export async function runAI({
   } catch (err) {
     console.error('AI FAIL:', err);
 
-    // 🔥 fallback (bezpečný)
     try {
       const fallbackModel = getModel('gpt-4o');
 

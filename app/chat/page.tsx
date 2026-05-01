@@ -63,46 +63,73 @@ export default function ChatPage() {
     plagiarism: 'Plagiátorstvo',
   }[mode]), [mode]);
 
-  // ================= SEND =================
-  const sendMessage = async () => {
-    const text = input?.trim();
-    if (!text || isLoading) return;
 
-    const userMsg = { role: 'user' as const, content: text };
-    const next = [...messages, userMsg];
 
-    setMessages(next);
-    setInput('');
-    setIsLoading(true);
+const sendMessage = async () => {
+  const text = input?.trim();
+  if (!text || isLoading) return;
 
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: next, mode, agent }),
+  const userMsg = { role: 'user' as const, content: text };
+  const next = [...messages, userMsg];
+
+  setMessages(next);
+  setInput('');
+  setIsLoading(true);
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: next, mode, agent }),
+    });
+
+    if (!res.body) throw new Error('No stream');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+
+    let fullText = '';
+
+    // 🔥 PRIDAJ PRÁZDNU AI SPRÁVU (pre live typing)
+    setMessages(prev => [
+      ...prev,
+      { role: 'assistant', content: '' }
+    ]);
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      fullText += chunk;
+
+      // 🔥 LIVE UPDATE poslednej správy
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: 'assistant',
+          content: fullText,
+        };
+        return updated;
       });
-
-      const data = await res.json();
-      const aiText = data?.content || '⚠️ Prázdna odpoveď';
-
-      setMessages(prev => [
-        ...prev,
-        { role: 'assistant', content: aiText }
-      ]);
-
-      const parsed = parseSections(aiText);
-      setPopupData(parsed);
-      setPopup(true);
-
-    } catch (err: any) {
-      setMessages(prev => [
-        ...prev,
-        { role: 'assistant', content: '❌ Chyba API' }
-      ]);
     }
 
-    setIsLoading(false);
-  };
+    // 🔥 PARSE až keď je hotovo
+    const parsed = parseSections(fullText);
+    setPopupData(parsed);
+    setPopup(true);
+
+  } catch (err) {
+    console.error(err);
+
+    setMessages(prev => [
+      ...prev,
+      { role: 'assistant', content: '❌ Chyba API' }
+    ]);
+  }
+
+  setIsLoading(false);
+};
 
   return (
     <div className="min-h-screen bg-[#020617] text-white p-6">

@@ -3,19 +3,8 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-// ================= INIT =================
-const stripeSecret = process.env.STRIPE_SECRET_KEY;
-const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
-
-if (!stripeSecret) {
-  throw new Error("Missing STRIPE_SECRET_KEY");
-}
-
-if (!baseUrl) {
-  throw new Error("Missing NEXT_PUBLIC_BASE_URL");
-}
-
-const stripe = new Stripe(stripeSecret);
+// ❗ SAFE INIT (build už nepadne)
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
 
 // ================= TYPES =================
 type Plan = "monthly" | "quarterly" | "yearly";
@@ -44,7 +33,17 @@ export async function POST(req: Request) {
     const addons = Array.isArray(body.addons) ? (body.addons as Addon[]) : [];
     const email = body.email as string;
 
-    // ================= VALIDATION =================
+    const stripeSecret = process.env.STRIPE_SECRET_KEY;
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+
+    // ✅ VALIDÁCIA AŽ TU (runtime)
+    if (!stripeSecret || !baseUrl) {
+      return NextResponse.json(
+        { error: "SERVER_CONFIG_ERROR" },
+        { status: 500 }
+      );
+    }
+
     if (!plan || !(plan in PLAN_PRICE_IDS)) {
       return NextResponse.json({ error: "INVALID_PLAN" }, { status: 400 });
     }

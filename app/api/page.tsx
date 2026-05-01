@@ -8,6 +8,7 @@ type Message = {
   content: string;
 };
 
+// 🔥 FIX: odstránený ollama-llama3
 const MODEL_OPTIONS: ModelKey[] = [
   'gpt-4o',
   'claude-3-5-sonnet',
@@ -17,7 +18,6 @@ const MODEL_OPTIONS: ModelKey[] = [
   'command-r-plus',
   'grok-2',
   'sonar-pro',
-  'ollama-llama3',
 ];
 
 export default function Page() {
@@ -30,9 +30,9 @@ export default function Page() {
     if (!input.trim()) return;
 
     const newMessages: Message[] = [
-  ...messages,
-  { role: 'user', content: input },
-];
+      ...messages,
+      { role: 'user', content: input },
+    ];
 
     setMessages(newMessages);
     setInput('');
@@ -58,7 +58,6 @@ export default function Page() {
       const chunk = decoder.decode(value);
       assistantText += chunk;
 
-      // realtime streaming update
       setMessages([
         ...newMessages,
         { role: 'assistant', content: assistantText },
@@ -70,6 +69,7 @@ export default function Page() {
 
   return (
     <div style={{ padding: 20, maxWidth: 800, margin: '0 auto' }}>
+      
       {/* MODEL SELECT */}
       <select
         value={selectedModel}
@@ -101,6 +101,7 @@ export default function Page() {
           {loading ? '...' : 'Odoslať'}
         </button>
       </div>
+
     </div>
   );
 }

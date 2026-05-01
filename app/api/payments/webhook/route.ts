@@ -1,40 +1,36 @@
 import Stripe from "stripe";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic"; // 🔥 dôležité
 
-// ❗ NEVALIDUJ ENV TU (build by padol)
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
-
-// ================= TYPES =================
-type CheckoutMeta = {
-  plan?: string;
-  addons?: string;
-};
+// ❗ nič na top-level!
+let stripe: Stripe | null = null;
 
 // ================= ROUTE =================
 export async function POST(req: Request) {
   try {
-    const signature = req.headers.get("stripe-signature");
+    const stripeSecret = process.env.STRIPE_SECRET_KEY;
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+    // 🔥 zabráni build crashu
+    if (!stripeSecret || !webhookSecret) {
+      return new Response("Missing config", { status: 500 });
+    }
+
+    // 🔥 init AŽ TU
+    if (!stripe) {
+      stripe = new Stripe(stripeSecret);
+    }
+
+    const signature = req.headers.get("stripe-signature");
     if (!signature) {
       return new Response("Missing signature", { status: 400 });
     }
 
-    const stripeSecret = process.env.STRIPE_SECRET_KEY;
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-    // ✅ VALIDÁCIA AŽ TU (runtime)
-    if (!stripeSecret || !webhookSecret) {
-      console.error("❌ Missing Stripe ENV");
-      return new Response("Stripe config missing", { status: 500 });
-    }
-
-    // ⚠️ MUSÍ byť RAW BODY
     const body = await req.text();
 
     let event: Stripe.Event;
 
-    // ================= VERIFY =================
     try {
       event = stripe.webhooks.constructEvent(
         body,
@@ -42,100 +38,32 @@ export async function POST(req: Request) {
         webhookSecret
       );
     } catch (err: any) {
-      console.error("❌ WEBHOOK VERIFY ERROR:", err.message);
+      console.error("❌ VERIFY ERROR:", err.message);
       return new Response("Invalid signature", { status: 400 });
     }
 
-    const eventId = event.id;
-
-    // ================= HANDLE EVENTS =================
+    // ================= EVENTS =================
     switch (event.type) {
-
-      case "checkout.session.completed": {
-        const session = event.data.object as Stripe.Checkout.Session;
-
-        const email =
-          session.customer_email ||
-          (typeof session.customer === "string"
-            ? await getCustomerEmail(session.customer)
-            : "");
-
-        const metadata = (session.metadata || {}) as CheckoutMeta;
-
-        const plan = metadata.plan ?? "unknown";
-
-        let addons: string[] = [];
-        try {
-          addons = metadata.addons
-            ? JSON.parse(metadata.addons)
-            : [];
-        } catch {
-          addons = [];
-        }
-
-        console.log("✅ PAYMENT SUCCESS:", {
-          eventId,
-          email,
-          plan,
-          addons,
-        });
-
-        // 👉 TU PRÍDE DB UPDATE
-
+      case "checkout.session.completed":
+        console.log("✅ PAYMENT OK");
         break;
-      }
 
-      case "invoice.paid": {
-        const invoice = event.data.object as Stripe.Invoice;
-
-        console.log("🔁 SUBSCRIPTION RENEW:", {
-          eventId,
-          customer: invoice.customer,
-        });
-
+      case "invoice.paid":
+        console.log("🔁 RENEW");
         break;
-      }
 
-      case "customer.subscription.deleted": {
-        const sub = event.data.object as Stripe.Subscription;
-
-        console.log("❌ SUBSCRIPTION CANCELLED:", {
-          eventId,
-          subId: sub.id,
-        });
-
+      case "customer.subscription.deleted":
+        console.log("❌ CANCEL");
         break;
-      }
 
       default:
-        console.log("ℹ️ UNHANDLED EVENT:", event.type);
+        console.log("ℹ️ EVENT:", event.type);
     }
 
     return new Response("OK", { status: 200 });
 
   } catch (err) {
-    console.error("❌ WEBHOOK PROCESS ERROR:", err);
-    return new Response("Processing Error", { status: 500 });
-  }
-}
-
-// ================= HELPER =================
-async function getCustomerEmail(customerId: string): Promise<string> {
-  try {
-    const customer = await stripe.customers.retrieve(customerId);
-
-    // ✅ TYPE SAFE
-    if (!customer || typeof customer === "string") return "";
-
-    if ("deleted" in customer && customer.deleted) return "";
-
-    if ("email" in customer && customer.email) {
-      return customer.email;
-    }
-
-    return "";
-  } catch (err) {
-    console.error("❌ CUSTOMER FETCH ERROR:", err);
-    return "";
+    console.error("❌ WEBHOOK ERROR:", err);
+    return new Response("Error", { status: 500 });
   }
 }

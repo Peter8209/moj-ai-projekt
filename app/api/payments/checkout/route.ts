@@ -63,12 +63,12 @@ export async function POST(req: Request) {
     }
 
     // ================= LINE ITEMS =================
-    const line_items: Stripe.Checkout.SessionCreateParams.LineItem[] = [
-      {
-        price: PLAN_PRICE_IDS[plan],
-        quantity: 1,
-      },
-    ];
+   const line_items = [
+  {
+    price: PLAN_PRICE_IDS[plan],
+    quantity: 1,
+  },
+];
 
     for (const addon of addons) {
       const priceId = ADDON_PRICE_IDS[addon];

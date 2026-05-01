@@ -1,43 +1,16 @@
 import { generateText } from 'ai';
 import { pickModel, ModelKey } from './router';
 import { buildPrompt } from './prompts';
+import { getModel } from './models';
 
-// 🔥 IMPORT PROVIDEROV
-import { openai } from '@ai-sdk/openai';
-import { anthropic } from '@ai-sdk/anthropic';
-import { google } from '@ai-sdk/google';
-import { mistral } from '@ai-sdk/mistral';
-import { groq } from '@ai-sdk/groq';
-
-// ================= MODEL MAPPER =================
-function getModel(modelKey: ModelKey) {
-  switch (modelKey) {
-    case 'gpt-4o':
-      return openai('gpt-4o');
-
-    case 'gpt-4-turbo':
-      return openai('gpt-4-turbo');
-
-    case 'claude-3-5-sonnet':
-      return anthropic('claude-3-5-sonnet-20241022');
-
-    case 'gemini-1.5-pro':
-      return google('gemini-1.5-pro');
-
-    case 'mixtral-8x7b':
-      return mistral('mixtral-8x7b');
-
-    case 'command-r-plus':
-      // 🔥 fallback namiesto Cohere
-      return openai('gpt-4o');
-
-    case 'sonar-pro':
-      return groq('llama-3.1-70b-versatile');
-
-    default:
-      return openai('gpt-4o');
-  }
-}
+// ================= TYPES =================
+type RunAIParams = {
+  messages: { role: 'user' | 'assistant'; content: string }[];
+  mode: any;
+  agent?: string;
+  project?: any;
+  profile?: any;
+};
 
 // ================= MAIN =================
 export async function runAI({
@@ -46,11 +19,15 @@ export async function runAI({
   agent,
   project,
   profile,
-}: any) {
+}: RunAIParams) {
 
-  const lastMessage = messages?.[messages.length - 1]?.content || '';
+  // 🔥 SAFE posledná správa
+  const lastMessage =
+    messages?.[messages.length - 1]?.content ?? '';
 
-  const modelKey = pickModel(mode, agent);
+  const modelKey: ModelKey = pickModel(mode, agent);
+
+  // 🔥 LAZY MODEL (kľúčový fix)
   const model = getModel(modelKey);
 
   const prompt = buildPrompt({
@@ -67,24 +44,34 @@ export async function runAI({
     });
 
     return {
-      text: result.text,
+      text: result.text ?? '',
       model: modelKey,
     };
 
   } catch (err) {
     console.error('AI FAIL:', err);
 
-    // 🔥 fallback
-    const fallbackModel = openai('gpt-4o');
+    // 🔥 fallback (bezpečný)
+    try {
+      const fallbackModel = getModel('gpt-4o');
 
-    const result = await generateText({
-      model: fallbackModel,
-      prompt,
-    });
+      const result = await generateText({
+        model: fallbackModel,
+        prompt,
+      });
 
-    return {
-      text: result.text,
-      model: 'gpt-4o-fallback',
-    };
+      return {
+        text: result.text ?? '',
+        model: 'gpt-4o-fallback',
+      };
+
+    } catch (fallbackErr) {
+      console.error('FALLBACK FAIL:', fallbackErr);
+
+      return {
+        text: 'Došlo k chybe pri spracovaní AI odpovede.',
+        model: 'error',
+      };
+    }
   }
 }

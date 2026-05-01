@@ -3,7 +3,6 @@ import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
 import { groq } from '@ai-sdk/groq';
 import { mistral } from '@ai-sdk/mistral';
-import { perplexity } from '@ai-sdk/perplexity';
 import { createOllama } from 'ollama-ai-provider';
 
 const ollama = createOllama();
@@ -26,10 +25,11 @@ export const models = {
   // 🔥 fallback namiesto Cohere
   'command-r-plus':    openai('gpt-4o'),
 
-  // 🔥 FIX: xAI odstránené → fallback
+  // 🔥 fallback namiesto xAI
   'grok-2':            openai('gpt-4o'),
 
-  'sonar-pro':         perplexity('sonar-pro'),
+  // 🔥 FIX: odstránený Perplexity → fallback
+  'sonar-pro':         openai('gpt-4o'),
 
   'ollama-llama3':     ollama('llama3'),
 } as const;

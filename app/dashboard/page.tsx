@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = "force-dynamic"; // 🔥 FIX pre Next.js 16
+
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -40,8 +42,14 @@ type View =
   | 'history'
   | 'settings';
 
+type FeatureCard = {
+  mode: Mode;
+  title: string;
+  icon: any;
+};
+
 // ================= FEATURE CARDS =================
-const featureCards = [
+const featureCards: FeatureCard[] = [
   { mode: 'write', title: 'AI písanie práce', icon: FileText },
   { mode: 'sources', title: 'Zdroje', icon: Library },
   { mode: 'supervisor', title: 'AI vedúci', icon: GraduationCap },
@@ -64,7 +72,7 @@ export default function Page() {
     if (searchParams.get("success")) {
       document.cookie = "sub_active=1; path=/";
     }
-  }, []);
+  }, [searchParams]);
 
   return (
     <div className="min-h-screen flex bg-[#020617] text-white">
@@ -75,7 +83,9 @@ export default function Page() {
         <Header view={view} />
 
         <div className="p-6">
-          {view === 'dashboard' && <Dashboard setView={setView} setMode={setMode} />}
+          {view === 'dashboard' && (
+            <Dashboard setView={setView} setMode={setMode} />
+          )}
           {view === 'chat' && <Chat />}
         </div>
       </main>
@@ -84,7 +94,13 @@ export default function Page() {
 }
 
 // ================= SIDEBAR =================
-function Sidebar({ view, setView }: any) {
+function Sidebar({
+  view,
+  setView,
+}: {
+  view: View;
+  setView: (v: View) => void;
+}) {
   return (
     <aside className="w-64 bg-black/40 p-4 space-y-3">
 
@@ -96,7 +112,13 @@ function Sidebar({ view, setView }: any) {
         ['dashboard', 'Dashboard'],
         ['chat', 'AI Chat'],
       ].map(([id, label]) => (
-        <button key={id} onClick={() => setView(id)}>
+        <button
+          key={id}
+          onClick={() => setView(id as View)}
+          className={`block w-full text-left ${
+            view === id ? 'text-white' : 'text-gray-400'
+          }`}
+        >
           {label}
         </button>
       ))}
@@ -106,7 +128,7 @@ function Sidebar({ view, setView }: any) {
 }
 
 // ================= HEADER =================
-function Header({ view }: any) {
+function Header({ view }: { view: View }) {
   return (
     <div className="p-4 border-b border-white/10">
       <h1>{view.toUpperCase()}</h1>
@@ -115,7 +137,13 @@ function Header({ view }: any) {
 }
 
 // ================= DASHBOARD =================
-function Dashboard({ setView, setMode }: any) {
+function Dashboard({
+  setView,
+  setMode,
+}: {
+  setView: (v: View) => void;
+  setMode: (m: Mode) => void;
+}) {
   return (
     <div>
       <h2 className="text-3xl mb-4">
@@ -123,13 +151,14 @@ function Dashboard({ setView, setMode }: any) {
       </h2>
 
       <div className="grid gap-3 mt-5">
-        {featureCards.map((f: any) => (
+        {featureCards.map((f) => (
           <button
             key={f.mode}
             onClick={() => {
               setMode(f.mode);
               setView('chat');
             }}
+            className="p-3 bg-white/5 hover:bg-white/10 rounded"
           >
             {f.title}
           </button>
@@ -156,4 +185,3 @@ function Chat() {
     </div>
   );
 }
-

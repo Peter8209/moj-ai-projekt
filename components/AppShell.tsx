@@ -15,12 +15,18 @@ import {
   Sparkles,
   Bell,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
+// ================= TYPES =================
+type NavItem = [string, string, LucideIcon];
+
+// ================= COMPONENT =================
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const pathname = usePathname();
+  const pathname = usePathname() || "";
 
-  const items = [
+  // 🔥 FIX: správne typovanie
+  const items: NavItem[] = [
     ['/dashboard', 'Dashboard', Home],
     ['/chat', 'AI Chat', Bot],
     ['/projects', 'Moje práce', BookOpen],
@@ -34,7 +40,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const isActive = (path: string) => pathname.startsWith(path);
 
-  const titleMap: any = {
+  // 🔥 FIX: typovanie + jednoduchšia logika
+  const titleMap: Record<string, string> = {
     '/dashboard': 'Dashboard',
     '/chat': 'AI Chat',
     '/projects': 'Moje práce',
@@ -47,10 +54,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   const title =
-    Object.keys(titleMap).find((key) => pathname.startsWith(key)) &&
-    titleMap[
-      Object.keys(titleMap).find((key) => pathname.startsWith(key))!
-    ];
+    Object.entries(titleMap).find(([key]) =>
+      pathname.startsWith(key)
+    )?.[1] || "Zedpera";
 
   return (
     <div className="flex min-h-screen">
@@ -81,7 +87,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <nav className="flex flex-col gap-2">
           {items.map(([path, label, Icon]) => (
             <button
-              key={path}
+              key={path} // ✅ už je string → OK
               onClick={() => router.push(path)}
               className={`flex items-center gap-3 rounded-xl px-3 py-2 text-left transition ${
                 isActive(path)
@@ -107,7 +113,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {/* HEADER */}
         <header className="flex items-center justify-between border-b border-white/10 bg-[#020617]/80 px-6 py-4 backdrop-blur">
           <div>
-            <h1 className="text-xl font-bold">{title || "Zedpera"}</h1>
+            <h1 className="text-xl font-bold">{title}</h1>
             <p className="text-xs text-gray-400">
               AI platforma pre akademické písanie
             </p>

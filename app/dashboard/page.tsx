@@ -139,3 +139,21 @@ function Dashboard({ setView, setMode }: any) {
   );
 }
 
+// ================= CHAT =================
+function Chat() {
+  return (
+    <div>
+      <h2 className="text-2xl mb-4">AI Chat</h2>
+
+      <textarea
+        className="w-full p-3 bg-black/40 border border-white/10 rounded"
+        placeholder="Napíš otázku..."
+      />
+
+      <button className="mt-3 px-4 py-2 bg-blue-600 rounded">
+        Odoslať
+      </button>
+    </div>
+  );
+}
+

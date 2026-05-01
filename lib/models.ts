@@ -4,27 +4,56 @@ import { google } from '@ai-sdk/google';
 import { groq } from '@ai-sdk/groq';
 import { mistral } from '@ai-sdk/mistral';
 
-// ================= MODELS =================
-export const models = {
-  'gpt-4o':            openai('gpt-4o'),
-  'gpt-4-turbo':       openai('gpt-4-turbo'),
+// ================= TYPES =================
+export type ModelKey =
+  | 'gpt-4o'
+  | 'gpt-4-turbo'
+  | 'claude-3-5-sonnet'
+  | 'claude-3-opus'
+  | 'gemini-2.0-flash'
+  | 'gemini-1.5-pro'
+  | 'llama-3.3-70b'
+  | 'mixtral-8x7b'
+  | 'mistral-large'
+  | 'command-r-plus'
+  | 'grok-2'
+  | 'sonar-pro';
 
-  'claude-3-5-sonnet': anthropic('claude-3-5-sonnet-20241022'),
-  'claude-3-opus':     anthropic('claude-3-opus-20240229'),
+// ================= LAZY MODEL FACTORY =================
+export function getModel(modelKey: ModelKey) {
+  switch (modelKey) {
+    case 'gpt-4o':
+      return openai('gpt-4o');
 
-  'gemini-2.0-flash':  google('gemini-2.0-flash'),
-  'gemini-1.5-pro':    google('gemini-1.5-pro'),
+    case 'gpt-4-turbo':
+      return openai('gpt-4-turbo');
 
-  'llama-3.3-70b':     groq('llama-3.3-70b-versatile'),
-  'mixtral-8x7b':      groq('mixtral-8x7b-32768'),
+    case 'claude-3-5-sonnet':
+      return anthropic('claude-3-5-sonnet-20241022');
 
-  'mistral-large':     mistral('mistral-large-latest'),
+    case 'claude-3-opus':
+      return anthropic('claude-3-opus-20240229');
 
-  // fallbacky
-  'command-r-plus':    openai('gpt-4o'),
-  'grok-2':            openai('gpt-4o'),
-  'sonar-pro':         openai('gpt-4o'),
+    case 'gemini-2.0-flash':
+      return google('gemini-2.0-flash');
 
-} as const;
+    case 'gemini-1.5-pro':
+      return google('gemini-1.5-pro');
 
-export type ModelKey = keyof typeof models;
+    case 'llama-3.3-70b':
+      return groq('llama-3.3-70b-versatile');
+
+    case 'mixtral-8x7b':
+      return groq('mixtral-8x7b-32768');
+
+    case 'mistral-large':
+      return mistral('mistral-large-latest');
+
+    // 🔥 fallback modely (aby nikdy nepadlo)
+    case 'command-r-plus':
+    case 'grok-2':
+    case 'sonar-pro':
+    default:
+      return openai('gpt-4o');
+  }
+}

@@ -3,14 +3,25 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-// 🔥 FIX: odstránený apiVersion (žiadny TS konflikt)
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+// ================= INIT =================
+const stripeSecret = process.env.STRIPE_SECRET_KEY;
+const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+
+if (!stripeSecret) {
+  throw new Error("Missing STRIPE_SECRET_KEY");
+}
+
+if (!baseUrl) {
+  throw new Error("Missing NEXT_PUBLIC_BASE_URL");
+}
+
+const stripe = new Stripe(stripeSecret);
 
 // ================= TYPES =================
 type Plan = "monthly" | "quarterly" | "yearly";
 type Addon = "supervisor" | "audit" | "defense" | "plagiarism";
 
-// ================= STRIPE PRICE IDS =================
+// ================= PRICE IDS =================
 const PLAN_PRICE_IDS: Record<Plan, string> = {
   monthly: "price_monthly_xxx",
   quarterly: "price_quarterly_xxx",
@@ -42,12 +53,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "MISSING_EMAIL" }, { status: 400 });
     }
 
-    if (!process.env.NEXT_PUBLIC_BASE_URL) {
-      return NextResponse.json({ error: "MISSING_BASE_URL" }, { status: 500 });
-    }
-
     // ================= CUSTOMER =================
-    let customer: Stripe.Customer;
+    let customerId: string;
 
     const existing = await stripe.customers.list({
       email,
@@ -55,39 +62,35 @@ export async function POST(req: Request) {
     });
 
     if (existing.data.length > 0) {
-      customer = existing.data[0];
+      customerId = existing.data[0].id;
     } else {
-      customer = await stripe.customers.create({
-        email,
-      });
+      const created = await stripe.customers.create({ email });
+      customerId = created.id;
     }
 
     // ================= LINE ITEMS =================
-   const line_items = [
-  {
-    price: PLAN_PRICE_IDS[plan],
-    quantity: 1,
-  },
-];
-
-    for (const addon of addons) {
-      const priceId = ADDON_PRICE_IDS[addon];
-      if (!priceId) continue;
-
-      line_items.push({
-        price: priceId,
+    const line_items = [
+      {
+        price: PLAN_PRICE_IDS[plan],
         quantity: 1,
-      });
-    }
+      },
+      ...addons
+        .map((addon) => ADDON_PRICE_IDS[addon])
+        .filter(Boolean)
+        .map((priceId) => ({
+          price: priceId as string,
+          quantity: 1,
+        })),
+    ];
 
     // ================= SESSION =================
     const session = await stripe.checkout.sessions.create(
       {
         mode: "subscription",
-        customer: customer.id,
+        customer: customerId,
         line_items,
-        success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?success=1`,
-        cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/pricing?cancel=1`,
+        success_url: `${baseUrl}/dashboard?success=1`,
+        cancel_url: `${baseUrl}/pricing?cancel=1`,
         metadata: {
           plan,
           addons: JSON.stringify(addons),

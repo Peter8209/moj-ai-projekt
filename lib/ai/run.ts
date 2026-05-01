@@ -1,8 +1,45 @@
 import { generateText } from 'ai';
-import { models } from './models';
-import { pickModel } from './router';
+import { pickModel, ModelKey } from './router';
 import { buildPrompt } from './prompts';
 
+// 🔥 IMPORT PROVIDEROV
+import { openai } from '@ai-sdk/openai';
+import { anthropic } from '@ai-sdk/anthropic';
+import { google } from '@ai-sdk/google';
+import { mistral } from '@ai-sdk/mistral';
+import { groq } from '@ai-sdk/groq';
+import { cohere } from '@ai-sdk/cohere';
+
+// ================= MODEL MAPPER =================
+function getModel(modelKey: ModelKey) {
+  switch (modelKey) {
+    case 'gpt-4o':
+      return openai('gpt-4o');
+
+    case 'gpt-4-turbo':
+      return openai('gpt-4-turbo');
+
+    case 'claude-3-5-sonnet':
+      return anthropic('claude-3-5-sonnet-20241022');
+
+    case 'gemini-1.5-pro':
+      return google('gemini-1.5-pro');
+
+    case 'mixtral-8x7b':
+      return mistral('mixtral-8x7b');
+
+    case 'command-r-plus':
+      return cohere('command-r-plus');
+
+    case 'sonar-pro':
+      return groq('llama-3.1-70b-versatile');
+
+    default:
+      return openai('gpt-4o');
+  }
+}
+
+// ================= MAIN =================
 export async function runAI({
   messages,
   mode,
@@ -11,10 +48,10 @@ export async function runAI({
   profile,
 }: any) {
 
-  const lastMessage = messages[messages.length - 1]?.content;
+  const lastMessage = messages?.[messages.length - 1]?.content || '';
 
   const modelKey = pickModel(mode, agent);
-  const model = models[modelKey];
+  const model = getModel(modelKey);
 
   const prompt = buildPrompt({
     mode,
@@ -35,14 +72,13 @@ export async function runAI({
     };
 
   } catch (err) {
-
-    // 🔥 fallback
     console.error('AI FAIL:', err);
 
-    const fallback = models['gpt-4o'];
+    // 🔥 fallback
+    const fallbackModel = getModel('gpt-4o');
 
     const result = await generateText({
-      model: fallback,
+      model: fallbackModel,
       prompt,
     });
 

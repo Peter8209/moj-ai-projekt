@@ -14,7 +14,7 @@ if (!webhookSecret) {
   throw new Error("Missing STRIPE_WEBHOOK_SECRET");
 }
 
-// 🔥 TS FIX – explicitne string
+// 🔥 TS FIX – garantovaný string
 const webhookSecretSafe: string = webhookSecret;
 
 const stripe = new Stripe(stripeSecret);
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
     event = stripe.webhooks.constructEvent(
       body,
       signature,
-      webhookSecretSafe // 🔥 FIX
+      webhookSecretSafe
     );
   } catch (err: any) {
     console.error("❌ WEBHOOK VERIFY ERROR:", err.message);
@@ -123,9 +123,16 @@ async function getCustomerEmail(customerId: string): Promise<string> {
   try {
     const customer = await stripe.customers.retrieve(customerId);
 
-    if (typeof customer === "string") return "";
+    // 🔥 FIX: type guard
+    if (!customer || typeof customer === "string") return "";
 
-    return customer.email ?? "";
+    if ("deleted" in customer && customer.deleted) return "";
+
+    if ("email" in customer && customer.email) {
+      return customer.email;
+    }
+
+    return "";
   } catch (err) {
     console.error("❌ CUSTOMER FETCH ERROR:", err);
     return "";

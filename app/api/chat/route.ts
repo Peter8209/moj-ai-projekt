@@ -3,7 +3,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { google } from "@ai-sdk/google";
 import { mistral } from "@ai-sdk/mistral";
 import { groq } from "@ai-sdk/groq";
-import { streamText } from "ai";
+import { generateText } from "ai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,10 +30,13 @@ function pickModel(agent: string) {
       case "mistral":
         return mistral("mistral-small");
 
+      case "openai":
+      case "auto":
       default:
         return openai("gpt-4o-mini");
     }
   } catch {
+    // fallback ak provider padne
     return openai("gpt-4o-mini");
   }
 }
@@ -59,29 +62,40 @@ function buildSystemPrompt(mode: string) {
     return `
 Si AI vedúci diplomovej práce.
 
-Formát:
+Formát odpovede:
 === VÝSTUP ===
 === ANALÝZA ===
 === SKÓRE ===
 === ODPORÚČANIA ===
+
+Buď kritický, konkrétny a odborný.
 `;
   }
 
   return `
 Si profesionálny AI asistent.
-Píš prirodzene, odborne a štruktúrovane.
+
+Pravidlá:
+- píš prirodzene
+- používaj štruktúru
+- nehalucinuj zdroje
+- ak si neistý, povedz to
 `;
 }
 
 // ================= ROUTE =================
 export async function POST(req: Request) {
   try {
+    // 🔐 kontrola API key
     if (!process.env.OPENAI_API_KEY) {
       return new Response(
         JSON.stringify({
           error: "MISSING_API_KEY",
         }),
-        { status: 500 }
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }
       );
     }
 
@@ -92,24 +106,39 @@ export async function POST(req: Request) {
     const mode = body.mode || "write";
 
     if (!messagesRaw.length) {
-      return new Response("EMPTY_MESSAGES", { status: 400 });
+      return new Response(
+        JSON.stringify({ error: "EMPTY_MESSAGES" }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
     }
 
     const messages = normalizeMessages(messagesRaw);
     const model = pickModel(agent);
     const system = buildSystemPrompt(mode);
 
- const result = await streamText({
-  model,
-  system,
-  messages: messages as any,
-  temperature: 0.7,
+    // ================= AI CALL =================
+    const result = await generateText({
+      model,
+      system,
+      messages: messages as any,
+      temperature: 0.7,
+      maxOutputTokens: 1000,
+    });
 
-  // 🔥 SPRÁVNE
-  maxOutputTokens: 1000,
-});
-
-    return result.toTextStreamResponse();
+    // ================= RESPONSE =================
+    return new Response(
+      JSON.stringify({
+        content: result.text || "⚠️ Prázdna odpoveď",
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
   } catch (err: any) {
     console.error("AI ERROR:", err);
@@ -119,7 +148,12 @@ export async function POST(req: Request) {
         error: "AI_ERROR",
         detail: err?.message || "unknown",
       }),
-      { status: 500 }
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
     );
   }
 }

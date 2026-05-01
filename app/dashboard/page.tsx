@@ -41,7 +41,7 @@ type View =
   | 'settings';
 
 // ================= FEATURE CARDS =================
-const featureCards = [
+const featureCards: { mode: Mode; title: string; icon: any }[] = [
   { mode: 'write', title: 'AI písanie práce', icon: FileText },
   { mode: 'sources', title: 'Zdroje', icon: Library },
   { mode: 'supervisor', title: 'AI vedúci', icon: GraduationCap },

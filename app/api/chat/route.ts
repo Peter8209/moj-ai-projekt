@@ -99,13 +99,15 @@ export async function POST(req: Request) {
     const model = pickModel(agent);
     const system = buildSystemPrompt(mode);
 
-    const result = await streamText({
-      model,
-      system,
-      messages: messages as any, // 🔥 kľúčový fix
-      temperature: 0.7,
-      maxTokens: 1000,
-    });
+ const result = await streamText({
+  model,
+  system,
+  messages: messages as any,
+  temperature: 0.7,
+
+  // 🔥 SPRÁVNE
+  maxOutputTokens: 1000,
+});
 
     return result.toTextStreamResponse();
 

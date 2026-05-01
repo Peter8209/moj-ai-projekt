@@ -8,7 +8,6 @@ import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
 import { mistral } from '@ai-sdk/mistral';
 import { groq } from '@ai-sdk/groq';
-import { cohere } from '@ai-sdk/cohere';
 
 // ================= MODEL MAPPER =================
 function getModel(modelKey: ModelKey) {
@@ -29,7 +28,8 @@ function getModel(modelKey: ModelKey) {
       return mistral('mixtral-8x7b');
 
     case 'command-r-plus':
-      return cohere('command-r-plus');
+      // 🔥 fallback namiesto Cohere
+      return openai('gpt-4o');
 
     case 'sonar-pro':
       return groq('llama-3.1-70b-versatile');
@@ -75,7 +75,7 @@ export async function runAI({
     console.error('AI FAIL:', err);
 
     // 🔥 fallback
-    const fallbackModel = getModel('gpt-4o');
+    const fallbackModel = openai('gpt-4o');
 
     const result = await generateText({
       model: fallbackModel,

@@ -3,10 +3,8 @@ import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
 import { groq } from '@ai-sdk/groq';
 import { mistral } from '@ai-sdk/mistral';
-import { createOllama } from 'ollama-ai-provider';
 
-const ollama = createOllama();
-
+// ================= MODELS =================
 export const models = {
   'gpt-4o':            openai('gpt-4o'),
   'gpt-4-turbo':       openai('gpt-4-turbo'),
@@ -22,16 +20,11 @@ export const models = {
 
   'mistral-large':     mistral('mistral-large-latest'),
 
-  // 🔥 fallback namiesto Cohere
+  // fallbacky
   'command-r-plus':    openai('gpt-4o'),
-
-  // 🔥 fallback namiesto xAI
   'grok-2':            openai('gpt-4o'),
-
-  // 🔥 FIX: odstránený Perplexity → fallback
   'sonar-pro':         openai('gpt-4o'),
 
-  'ollama-llama3':     ollama('llama3'),
 } as const;
 
 export type ModelKey = keyof typeof models;

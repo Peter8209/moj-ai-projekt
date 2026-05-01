@@ -1,8 +1,6 @@
 'use client';
 
-export const dynamic = "force-dynamic"; // 🔥 FIX pre Next.js 16
-
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   FileText,
@@ -42,14 +40,8 @@ type View =
   | 'history'
   | 'settings';
 
-type FeatureCard = {
-  mode: Mode;
-  title: string;
-  icon: any;
-};
-
 // ================= FEATURE CARDS =================
-const featureCards: FeatureCard[] = [
+const featureCards = [
   { mode: 'write', title: 'AI písanie práce', icon: FileText },
   { mode: 'sources', title: 'Zdroje', icon: Library },
   { mode: 'supervisor', title: 'AI vedúci', icon: GraduationCap },
@@ -62,8 +54,17 @@ const featureCards: FeatureCard[] = [
   { mode: 'plagiarism', title: 'Plagiátorstvo', icon: ShieldCheck },
 ];
 
-// ================= MAIN =================
+// ================= WRAPPER =================
 export default function Page() {
+  return (
+    <Suspense fallback={<div className="p-6 text-white">Loading...</div>}>
+      <DashboardPage />
+    </Suspense>
+  );
+}
+
+// ================= MAIN CONTENT =================
+function DashboardPage() {
   const [view, setView] = useState<View>('dashboard');
   const [mode, setMode] = useState<Mode>('write');
   const searchParams = useSearchParams();
@@ -115,9 +116,6 @@ function Sidebar({
         <button
           key={id}
           onClick={() => setView(id as View)}
-          className={`block w-full text-left ${
-            view === id ? 'text-white' : 'text-gray-400'
-          }`}
         >
           {label}
         </button>
@@ -158,7 +156,6 @@ function Dashboard({
               setMode(f.mode);
               setView('chat');
             }}
-            className="p-3 bg-white/5 hover:bg-white/10 rounded"
           >
             {f.title}
           </button>

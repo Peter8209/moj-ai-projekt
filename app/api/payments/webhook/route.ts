@@ -6,6 +6,7 @@ export const runtime = "nodejs";
 const stripeSecret = process.env.STRIPE_SECRET_KEY;
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+// ✅ SAFE CHECK (bez TS problémov)
 if (!stripeSecret) {
   throw new Error("Missing STRIPE_SECRET_KEY");
 }
@@ -30,13 +31,14 @@ export async function POST(req: Request) {
     return new Response("Missing signature", { status: 400 });
   }
 
-  // ⚠️ MUSÍ byť RAW body
+  // ⚠️ RAW BODY (dôležité pre Stripe)
   const body = await req.text();
 
   let event: Stripe.Event;
 
   // ================= VERIFY =================
   try {
+    // 🔥 TS FIX: webhookSecret je už garantovaný string
     event = stripe.webhooks.constructEvent(
       body,
       signature,
@@ -47,14 +49,18 @@ export async function POST(req: Request) {
     return new Response("Invalid signature", { status: 400 });
   }
 
-  // ================= IDEMPOTENCY (ochrana) =================
+  // ================= IDEMPOTENCY =================
   const eventId = event.id;
 
   try {
-    // 🔥 TODO: DB kontrola (zabráni double processing)
     /*
-    const exists = await db.webhookEvent.findUnique({ where: { id: eventId } });
-    if (exists) return new Response("Already processed", { status: 200 });
+    const exists = await db.webhookEvent.findUnique({
+      where: { id: eventId },
+    });
+
+    if (exists) {
+      return new Response("Already processed", { status: 200 });
+    }
     */
 
     switch (event.type) {
@@ -73,7 +79,7 @@ export async function POST(req: Request) {
 
         const metadata = (session.metadata || {}) as CheckoutMeta;
 
-        const plan = metadata.plan || "unknown";
+        const plan = metadata.plan ?? "unknown";
 
         let addons: string[] = [];
         try {
@@ -89,7 +95,6 @@ export async function POST(req: Request) {
           addons,
         });
 
-        // ================= DB LOGIKA =================
         /*
         await db.user.upsert({
           where: { email },
@@ -125,7 +130,6 @@ export async function POST(req: Request) {
           customer: invoice.customer,
         });
 
-        // 🔥 DB: predĺženie platnosti
         break;
       }
 
@@ -140,7 +144,6 @@ export async function POST(req: Request) {
           subId: sub.id,
         });
 
-        // 🔥 DB: deaktivácia usera
         break;
       }
 
@@ -164,7 +167,7 @@ async function getCustomerEmail(customerId: string): Promise<string> {
 
     if (typeof customer === "string") return "";
 
-    return customer.email || "";
+    return customer.email ?? "";
   } catch (err) {
     console.error("❌ CUSTOMER FETCH ERROR:", err);
     return "";

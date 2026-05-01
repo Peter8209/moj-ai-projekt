@@ -6,7 +6,6 @@ export const runtime = "nodejs";
 const stripeSecret = process.env.STRIPE_SECRET_KEY;
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
-// ✅ SAFE CHECK (bez TS problémov)
 if (!stripeSecret) {
   throw new Error("Missing STRIPE_SECRET_KEY");
 }
@@ -14,6 +13,9 @@ if (!stripeSecret) {
 if (!webhookSecret) {
   throw new Error("Missing STRIPE_WEBHOOK_SECRET");
 }
+
+// 🔥 TS FIX – explicitne string
+const webhookSecretSafe: string = webhookSecret;
 
 const stripe = new Stripe(stripeSecret);
 
@@ -31,43 +33,27 @@ export async function POST(req: Request) {
     return new Response("Missing signature", { status: 400 });
   }
 
-  // ⚠️ RAW BODY (dôležité pre Stripe)
   const body = await req.text();
 
   let event: Stripe.Event;
 
   // ================= VERIFY =================
   try {
-    // 🔥 TS FIX: webhookSecret je už garantovaný string
     event = stripe.webhooks.constructEvent(
       body,
       signature,
-      webhookSecret
+      webhookSecretSafe // 🔥 FIX
     );
   } catch (err: any) {
     console.error("❌ WEBHOOK VERIFY ERROR:", err.message);
     return new Response("Invalid signature", { status: 400 });
   }
 
-  // ================= IDEMPOTENCY =================
   const eventId = event.id;
 
   try {
-    /*
-    const exists = await db.webhookEvent.findUnique({
-      where: { id: eventId },
-    });
-
-    if (exists) {
-      return new Response("Already processed", { status: 200 });
-    }
-    */
-
     switch (event.type) {
 
-      // =====================================================
-      // 💳 CHECKOUT SUCCESS
-      // =====================================================
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
 
@@ -95,33 +81,9 @@ export async function POST(req: Request) {
           addons,
         });
 
-        /*
-        await db.user.upsert({
-          where: { email },
-          update: {
-            plan,
-            addons,
-            status: "active",
-          },
-          create: {
-            email,
-            plan,
-            addons,
-            status: "active",
-          },
-        });
-
-        await db.webhookEvent.create({
-          data: { id: eventId },
-        });
-        */
-
         break;
       }
 
-      // =====================================================
-      // 🔁 SUBSCRIPTION RENEW
-      // =====================================================
       case "invoice.paid": {
         const invoice = event.data.object as Stripe.Invoice;
 
@@ -133,9 +95,6 @@ export async function POST(req: Request) {
         break;
       }
 
-      // =====================================================
-      // ❌ SUBSCRIPTION CANCEL
-      // =====================================================
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
 
@@ -147,7 +106,6 @@ export async function POST(req: Request) {
         break;
       }
 
-      // =====================================================
       default:
         console.log("ℹ️ UNHANDLED EVENT:", event.type);
     }

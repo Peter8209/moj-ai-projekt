@@ -3,9 +3,6 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-// ❗ SAFE INIT (build už nepadne)
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
-
 // ================= TYPES =================
 type Plan = "monthly" | "quarterly" | "yearly";
 type Addon = "supervisor" | "audit" | "defense" | "plagiarism";
@@ -27,22 +24,25 @@ const ADDON_PRICE_IDS: Partial<Record<Addon, string>> = {
 // ================= ROUTE =================
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-
-    const plan = body.plan as Plan;
-    const addons = Array.isArray(body.addons) ? (body.addons as Addon[]) : [];
-    const email = body.email as string;
-
     const stripeSecret = process.env.STRIPE_SECRET_KEY;
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
 
-    // ✅ VALIDÁCIA AŽ TU (runtime)
+    // ✅ VALIDÁCIA AŽ TU
     if (!stripeSecret || !baseUrl) {
       return NextResponse.json(
         { error: "SERVER_CONFIG_ERROR" },
         { status: 500 }
       );
     }
+
+    // 🔥 Stripe init AŽ TU (kľúčový fix)
+    const stripe = new Stripe(stripeSecret);
+
+    const body = await req.json();
+
+    const plan = body.plan as Plan;
+    const addons = Array.isArray(body.addons) ? (body.addons as Addon[]) : [];
+    const email = body.email as string;
 
     if (!plan || !(plan in PLAN_PRICE_IDS)) {
       return NextResponse.json({ error: "INVALID_PLAN" }, { status: 400 });

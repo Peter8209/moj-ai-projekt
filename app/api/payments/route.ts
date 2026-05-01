@@ -2,9 +2,7 @@ import Stripe from "stripe";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
-
-// ❗ SAFE INIT (bez crashu pri build-e)
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
+export const dynamic = "force-dynamic"; // 🔥 zabráni pre-renderingu
 
 // ================= TYPES =================
 type Plan = "monthly" | "quarterly" | "yearly";
@@ -40,15 +38,28 @@ export async function GET() {
 // ================= POST =================
 export async function POST(req: Request) {
   try {
+    const stripeSecret = process.env.STRIPE_SECRET_KEY;
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+
+    // ✅ VALIDÁCIA AŽ TU (runtime)
+    if (!stripeSecret || !baseUrl) {
+      return NextResponse.json(
+        { error: "SERVER_CONFIG_ERROR" },
+        { status: 500 }
+      );
+    }
+
+    // 🔥 Stripe init AŽ TU (kľúčový fix)
+    const stripe = new Stripe(stripeSecret);
+
     const body = await req.json();
 
     const plan = body.plan as Plan;
-    const addons = Array.isArray(body.addons) ? (body.addons as Addon[]) : [];
+    const addons = Array.isArray(body.addons)
+      ? (body.addons as Addon[])
+      : [];
     const currency = body.currency === "CZK" ? "czk" : "eur";
     const email = body.email as string;
-
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
-    const stripeSecret = process.env.STRIPE_SECRET_KEY;
 
     // ================= VALIDATION =================
     if (!plan || !(plan in PLAN_PRICES)) {
@@ -57,13 +68,6 @@ export async function POST(req: Request) {
 
     if (!email) {
       return NextResponse.json({ error: "MISSING_EMAIL" }, { status: 400 });
-    }
-
-    if (!baseUrl || !stripeSecret) {
-      return NextResponse.json(
-        { error: "SERVER_CONFIG_ERROR" },
-        { status: 500 }
-      );
     }
 
     // ================= CUSTOMER =================

@@ -19,7 +19,7 @@ export type ModelKey =
   | 'grok-2'
   | 'sonar-pro';
 
-// ================= LAZY MODEL FACTORY =================
+// ================= LAZY MODEL =================
 export function getModel(modelKey: ModelKey) {
   switch (modelKey) {
     case 'gpt-4o':
@@ -49,10 +49,12 @@ export function getModel(modelKey: ModelKey) {
     case 'mistral-large':
       return mistral('mistral-large-latest');
 
-    // 🔥 fallback modely (aby nikdy nepadlo)
+    // fallbacky
     case 'command-r-plus':
     case 'grok-2':
     case 'sonar-pro':
+      return openai('gpt-4o');
+
     default:
       return openai('gpt-4o');
   }

@@ -2,7 +2,12 @@ import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
 
 // =====================================================
-// 🔎 MOCK DATA (fallback keď API nefunguje)
+// ⚙️ CONFIG
+// =====================================================
+const SEMANTIC_URL = "https://api.semanticscholar.org/graph/v1/paper/search";
+
+// =====================================================
+// 🔎 FALLBACK DATA
 // =====================================================
 const MOCK_SOURCES = [
   {
@@ -11,13 +16,6 @@ const MOCK_SOURCES = [
     year: 2022,
     abstract: "Study about AI optimization in logistics chains.",
     url: "https://example.com/ai-logistics",
-  },
-  {
-    title: "Automation in Industry 4.0",
-    authors: ["Novák P."],
-    year: 2021,
-    abstract: "Industrial automation and smart factories.",
-    url: "https://example.com/industry4",
   },
 ];
 
@@ -34,7 +32,7 @@ export async function POST(req: Request) {
     const citationStyle = body.citationStyle || "APA";
 
     // =====================================================
-    // 🔎 SEARCH SOURCES
+    // 🔎 SEARCH (Semantic Scholar)
     // =====================================================
     if (action === "search") {
 
@@ -42,31 +40,63 @@ export async function POST(req: Request) {
         return Response.json({ error: "QUERY_TOO_SHORT" }, { status: 400 });
       }
 
-      // =========================================
-      // 🔥 TU NAPOJÍŠ Semantic Scholar API
-      // =========================================
-      // teraz fallback:
+      try {
+        const url = `${SEMANTIC_URL}?query=${encodeURIComponent(query)}&limit=10&fields=title,abstract,authors,year,url`;
 
-      const results = MOCK_SOURCES.map((s, i) => ({
-        id: i + 1,
-        title: s.title,
-        authors: s.authors,
-        year: s.year,
-        abstract: s.abstract,
-        url: s.url,
-        citation: formatCitation(s, citationStyle),
-      }));
+        const res = await fetch(url, {
+          headers: {
+            "x-api-key": process.env.SEMANTIC_SCHOLAR_API_KEY!,
+          },
+        });
 
-      return Response.json({
-        ok: true,
-        source: "fallback",
-        count: results.length,
-        results,
-      });
+        const data = await res.json();
+
+        const results = (data.data || []).map((p: any, i: number) => ({
+          id: i + 1,
+          title: p.title,
+          authors: (p.authors || []).map((a: any) => a.name),
+          year: p.year,
+          abstract: p.abstract || "Bez abstraktu",
+          url: p.url,
+          citation: formatCitation({
+            title: p.title,
+            authors: (p.authors || []).map((a: any) => a.name),
+            year: p.year,
+          }, citationStyle),
+        }));
+
+        return Response.json({
+          ok: true,
+          source: "semantic_scholar",
+          count: results.length,
+          results,
+        });
+
+      } catch (apiErr) {
+        console.error("Semantic Scholar failed → fallback");
+
+        // 🔥 fallback
+        const results = MOCK_SOURCES.map((s, i) => ({
+          id: i + 1,
+          title: s.title,
+          authors: s.authors,
+          year: s.year,
+          abstract: s.abstract,
+          url: s.url,
+          citation: formatCitation(s, citationStyle),
+        }));
+
+        return Response.json({
+          ok: true,
+          source: "fallback",
+          count: results.length,
+          results,
+        });
+      }
     }
 
     // =====================================================
-    // 🧠 ANALYZE SOURCE (AI SUMMARY)
+    // 🧠 ANALYZE (AI)
     // =====================================================
     if (action === "analyze") {
 
@@ -106,7 +136,7 @@ ${text}
         return Response.json({
           ok: true,
           analysis: {
-            summary: "Nepodarilo sa presne analyzovať",
+            summary: result.text,
             key_points: [],
             usable_for: "",
             citation_hint: "",
@@ -138,9 +168,9 @@ ${text}
 // =====================================================
 function formatCitation(source: any, style: string): string {
 
-  const authors = source.authors.join(", ");
-  const year = source.year;
-  const title = source.title;
+  const authors = source.authors?.join(", ") || "Unknown";
+  const year = source.year || "n.d.";
+  const title = source.title || "Untitled";
 
   switch (style) {
     case "ISO":

@@ -5,62 +5,56 @@ import { useState } from 'react';
 // ================= TYPES =================
 type Source = {
   id: number;
-  name: string;
-  summary?: string;
+  title: string;
+  abstract?: string;
+  year?: number;
+  authors?: string[];
+  url?: string;
+  citation?: string;
 };
 
 // ================= PAGE =================
 export default function SourcesPage() {
 
-  const [file, setFile] = useState<File | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
   const [loading, setLoading] = useState(false);
-
   const [query, setQuery] = useState('');
 
-  // ================= UPLOAD =================
-  const upload = async () => {
-    if (!file) return;
-
-    setLoading(true);
-
-    const form = new FormData();
-    form.append('file', file);
-
-    const res = await fetch('/api/sources', {
-      method: 'POST',
-      body: form
-    });
-
-    const data = await res.json();
-
-    setSources(prev => [...prev, data.source]);
-
-    setLoading(false);
-  };
+  const [yearFilter, setYearFilter] = useState<string>('all');
 
   // ================= SEARCH =================
   const searchSources = async () => {
-
     if (!query) return;
 
     setLoading(true);
 
     const res = await fetch('/api/sources', {
-      method: 'PUT',
-      body: JSON.stringify({ query })
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: "search",
+        query,
+      }),
     });
 
     const data = await res.json();
 
     setSources(data.results || []);
-
     setLoading(false);
   };
 
-  // ================= USE SOURCE =================
-  const useSource = (s: Source) => {
+  // ================= FILTER =================
+  const filteredSources = sources.filter((s) => {
+    if (yearFilter === 'all') return true;
 
+    if (yearFilter === '2y') return s.year && s.year >= 2023;
+    if (yearFilter === '5y') return s.year && s.year >= 2020;
+
+    return true;
+  });
+
+  // ================= USE =================
+  const useSource = (s: Source) => {
     const existing = localStorage.getItem('used_sources');
     const parsed = existing ? JSON.parse(existing) : [];
 
@@ -73,99 +67,150 @@ export default function SourcesPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#020617] text-white p-6">
+    <div className="min-h-screen bg-[#020617] text-white">
 
-      {/* HEADER */}
-      <h1 className="text-3xl font-black mb-2">Zdroje</h1>
-      <p className="text-gray-400 mb-6">
-        Nahraj PDF alebo nájdi vedecké zdroje automaticky
-      </p>
+      {/* ================= HERO ================= */}
+      <div className="py-20 px-6 text-center bg-gradient-to-b from-purple-900/20 to-transparent">
 
-      {/* ================= UPLOAD ================= */}
-      <div className="mb-8 border border-white/10 p-4 rounded-xl">
+        <h1 className="text-5xl font-black mb-4">
+          Vyhľadávanie zdrojov
+        </h1>
 
-        <h2 className="font-bold mb-2">Upload PDF</h2>
+        <p className="text-gray-400 max-w-2xl mx-auto mb-10">
+          Nájdeš vedecké články zo Semantic Scholar.
+          AI automaticky optimalizuje tvoje vyhľadávanie.
+        </p>
 
-        <input
-          type="file"
-          onChange={(e: any) => setFile(e.target.files[0])}
-        />
+        {/* SEARCH BAR */}
+        <div className="max-w-3xl mx-auto flex gap-2 bg-white/5 p-2 rounded-2xl border border-white/10">
 
-        <button
-          onClick={upload}
-          className="mt-3 bg-violet-600 px-4 py-2 rounded-xl"
-        >
-          {loading ? "Nahrávam..." : "Nahrať a analyzovať"}
-        </button>
-
-      </div>
-
-      {/* ================= SEARCH ================= */}
-      <div className="mb-8 border border-white/10 p-4 rounded-xl">
-
-        <h2 className="font-bold mb-2">Vyhľadať zdroje</h2>
-
-        <div className="flex gap-2">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Téma alebo kľúčové slová..."
-            className="flex-1 bg-black/30 px-3 py-2 rounded"
+            placeholder="Zadaj otázku alebo kľúčové slová..."
+            className="flex-1 bg-transparent px-4 py-3 outline-none"
           />
 
           <button
             onClick={searchSources}
-            className="bg-violet-600 px-4 rounded"
+            className="bg-purple-600 px-6 rounded-xl"
           >
             Hľadať
           </button>
+
         </div>
 
       </div>
 
-      {/* ================= LIST ================= */}
-      <div className="grid gap-4">
+      {/* ================= FILTER BAR ================= */}
+      <div className="max-w-5xl mx-auto px-6 mb-10">
 
-        {sources.length === 0 && (
-          <p className="text-gray-400">
-            Zatiaľ nemáš žiadne zdroje
+        <div className="bg-white/5 p-4 rounded-2xl flex flex-wrap gap-3 border border-white/10">
+
+          <button
+            onClick={() => setYearFilter('all')}
+            className={`px-3 py-1 rounded-full ${
+              yearFilter === 'all' ? 'bg-purple-600' : 'bg-white/10'
+            }`}
+          >
+            Všetko
+          </button>
+
+          <button
+            onClick={() => setYearFilter('2y')}
+            className={`px-3 py-1 rounded-full ${
+              yearFilter === '2y' ? 'bg-purple-600' : 'bg-white/10'
+            }`}
+          >
+            Posledné 2 roky
+          </button>
+
+          <button
+            onClick={() => setYearFilter('5y')}
+            className={`px-3 py-1 rounded-full ${
+              yearFilter === '5y' ? 'bg-purple-600' : 'bg-white/10'
+            }`}
+          >
+            Posledných 5 rokov
+          </button>
+
+        </div>
+
+      </div>
+
+      {/* ================= RESULTS ================= */}
+      <div className="max-w-5xl mx-auto px-6 pb-20">
+
+        {loading && (
+          <p className="text-purple-400 text-center mb-10">
+            🔍 Hľadám najrelevantnejšie zdroje...
           </p>
         )}
 
-        {sources.map((s) => (
-          <div
-            key={s.id}
-            className="border border-white/10 p-4 rounded-xl"
-          >
+        {!loading && filteredSources.length === 0 && (
+          <p className="text-gray-400 text-center">
+            Zadaj tému a začni vyhľadávať
+          </p>
+        )}
 
-            <h3 className="font-bold">{s.name}</h3>
+        <div className="grid gap-6">
 
-            {s.summary && (
-              <p className="text-sm text-gray-400 mt-2">
-                {s.summary}
+          {filteredSources.map((s) => (
+            <div
+              key={s.id}
+              className="bg-white/5 p-6 rounded-2xl border border-white/10 hover:border-purple-500 transition"
+            >
+
+              {/* TITLE */}
+              <h3 className="text-xl font-bold mb-2">
+                {s.title}
+              </h3>
+
+              {/* META */}
+              <p className="text-sm text-gray-400">
+                {s.authors?.join(', ')} • {s.year}
               </p>
-            )}
 
-            <div className="mt-3 flex gap-2">
+              {/* ABSTRACT */}
+              <p className="text-gray-300 mt-3 line-clamp-4">
+                {s.abstract}
+              </p>
 
-              <button
-                onClick={() => useSource(s)}
-                className="bg-green-600 px-3 py-1 rounded"
-              >
-                Použiť v práci
-              </button>
+              {/* ACTIONS */}
+              <div className="mt-5 flex flex-wrap gap-3">
 
-              <button
-                onClick={() => alert("Preklad cez AI")}
-                className="bg-blue-600 px-3 py-1 rounded"
-              >
-                Preložiť
-              </button>
+                <button
+                  onClick={() => useSource(s)}
+                  className="bg-green-600 px-4 py-2 rounded-xl"
+                >
+                  Použiť v práci
+                </button>
+
+                {s.url && (
+                  <a
+                    href={s.url}
+                    target="_blank"
+                    className="bg-blue-600 px-4 py-2 rounded-xl"
+                  >
+                    Otvoriť článok
+                  </a>
+                )}
+
+                {s.citation && (
+                  <button
+                    onClick={() => navigator.clipboard.writeText(s.citation!)}
+                    className="bg-white/10 px-4 py-2 rounded-xl"
+                  >
+                    Kopírovať citáciu
+                  </button>
+                )}
+
+              </div>
 
             </div>
+          ))}
 
-          </div>
-        ))}
+        </div>
 
       </div>
 

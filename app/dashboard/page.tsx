@@ -9,17 +9,7 @@ import {
 } from 'lucide-react';
 
 // ================= TYPES =================
-type Mode =
-  | 'write'
-  | 'sources'
-  | 'supervisor'
-  | 'defense'
-  | 'audit'
-  | 'translate'
-  | 'analysis'
-  | 'planning'
-  | 'email'
-  | 'plagiarism';
+
 
 type View =
   | 'dashboard'
@@ -44,7 +34,10 @@ const featureCards = [
   { mode: 'planning', title: 'Plánovanie', icon: CalendarDays },
   { mode: 'email', title: 'Emaily', icon: Mail },
   { mode: 'plagiarism', title: 'Plagiátorstvo', icon: ShieldCheck },
-];
+] as const;
+
+// 👇 SEM PRESNE
+type Mode = typeof featureCards[number]['mode'];
 
 // ================= WRAPPER =================
 export default function Page() {

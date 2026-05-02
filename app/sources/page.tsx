@@ -1,8 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
-// ================= TYPES =================
 type Source = {
   id: number;
   title: string;
@@ -10,21 +9,75 @@ type Source = {
   year?: number;
   authors?: string[];
   url?: string;
-  citation?: string;
 };
 
-// ================= PAGE =================
 export default function SourcesPage() {
 
   const [sources, setSources] = useState<Source[]>([]);
   const [loading, setLoading] = useState(false);
-  const [query, setQuery] = useState('');
 
-  const [yearFilter, setYearFilter] = useState<string>('all');
+  const [query, setQuery] = useState('');
+  const [history, setHistory] = useState<string[]>([]);
+  const [recent, setRecent] = useState<Source[]>([]);
+  const [recommended, setRecommended] = useState<Source[]>([]);
+
+  const [sort, setSort] = useState('relevance');
+  const [onlyPdf, setOnlyPdf] = useState(false);
+
+  const [yearFrom, setYearFrom] = useState('');
+  const [yearTo, setYearTo] = useState('');
+  const [yearPreset, setYearPreset] = useState('all');
+
+  // ================= LOAD =================
+  useEffect(() => {
+    const h = localStorage.getItem('search_history');
+    const r = localStorage.getItem('recent_papers');
+
+    if (h) setHistory(JSON.parse(h));
+    if (r) setRecent(JSON.parse(r));
+  }, []);
+
+  // ================= HISTORY =================
+  const saveToHistory = (q: string) => {
+    const updated = [q, ...history.filter(x => x !== q)].slice(0, 3);
+    setHistory(updated);
+    localStorage.setItem('search_history', JSON.stringify(updated));
+
+    generateRecommendations(updated);
+  };
+
+  // ================= RECENT =================
+  const saveRecentPaper = (paper: Source) => {
+    const updated = [paper, ...recent.filter(p => p.title !== paper.title)].slice(0, 5);
+    setRecent(updated);
+    localStorage.setItem('recent_papers', JSON.stringify(updated));
+  };
+
+  // ================= AI RECOMMEND =================
+  const generateRecommendations = async (queries: string[]) => {
+    if (!queries.length) return;
+
+    try {
+      const res = await fetch('/api/sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: "search", query: queries.join(' ') })
+      });
+
+      const data = await res.json();
+      setRecommended(data.results?.slice(0, 3) || []);
+    } catch {
+      setRecommended([]);
+    }
+  };
 
   // ================= SEARCH =================
-  const searchSources = async () => {
-    if (!query) return;
+  const searchSources = async (customQuery?: string) => {
+    const q = customQuery || query;
+    if (!q) return;
+
+    setQuery(q);
+    saveToHistory(q);
 
     setLoading(true);
 
@@ -33,66 +86,74 @@ export default function SourcesPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: "search",
-        query,
+        query: q,
+        filters: { sort, onlyPdf, yearFrom, yearTo }
       }),
     });
 
     const data = await res.json();
-
     setSources(data.results || []);
     setLoading(false);
   };
 
-  // ================= FILTER =================
-  const filteredSources = sources.filter((s) => {
-    if (yearFilter === 'all') return true;
+  // ================= YEAR =================
+  const setYearPresetHandler = (type: string) => {
+    setYearPreset(type);
 
-    if (yearFilter === '2y') return s.year && s.year >= 2023;
-    if (yearFilter === '5y') return s.year && s.year >= 2020;
+    switch (type) {
+      case '2010-2015':
+        setYearFrom('2010-01-01');
+        setYearTo('2015-12-31');
+        break;
 
-    return true;
-  });
+      case '2015-2020':
+        setYearFrom('2015-01-01');
+        setYearTo('2020-12-31');
+        break;
 
-  // ================= USE =================
-  const useSource = (s: Source) => {
-    const existing = localStorage.getItem('used_sources');
-    const parsed = existing ? JSON.parse(existing) : [];
+      default:
+        setYearFrom('');
+        setYearTo('');
+    }
+  };
 
-    localStorage.setItem(
-      'used_sources',
-      JSON.stringify([...parsed, s])
-    );
-
-    alert("Zdroj pridaný do práce");
+  // ================= RESET =================
+  const resetFilters = () => {
+    setQuery('');
+    setSources([]);
+    setSort('relevance');
+    setOnlyPdf(false);
+    setYearFrom('');
+    setYearTo('');
+    setYearPreset('all');
   };
 
   return (
     <div className="min-h-screen bg-[#020617] text-white">
 
-      {/* ================= HERO ================= */}
-      <div className="py-20 px-6 text-center bg-gradient-to-b from-purple-900/20 to-transparent">
+      {/* HERO */}
+      <div className="py-20 text-center px-6">
 
         <h1 className="text-5xl font-black mb-4">
           Vyhľadávanie zdrojov
         </h1>
 
-        <p className="text-gray-400 max-w-2xl mx-auto mb-10">
-          Nájdeš vedecké články zo Semantic Scholar.
-          AI automaticky optimalizuje tvoje vyhľadávanie.
+        <p className="text-purple-400 text-sm mb-8">
+          🔬 viac ako 200 000 000 vedeckých článkov
         </p>
 
-        {/* SEARCH BAR */}
-        <div className="max-w-3xl mx-auto flex gap-2 bg-white/5 p-2 rounded-2xl border border-white/10">
+        {/* SEARCH */}
+        <div className="max-w-4xl mx-auto flex gap-2 bg-white/5 p-2 rounded-2xl border border-white/10">
 
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Zadaj otázku alebo kľúčové slová..."
+            placeholder="Zadaj otázku..."
             className="flex-1 bg-transparent px-4 py-3 outline-none"
           />
 
           <button
-            onClick={searchSources}
+            onClick={() => searchSources()}
             className="bg-purple-600 px-6 rounded-xl"
           >
             Hľadať
@@ -100,109 +161,120 @@ export default function SourcesPage() {
 
         </div>
 
+        {/* HISTORY */}
+        {history.length > 0 && (
+          <div className="flex gap-3 mt-6 justify-center flex-wrap">
+            {history.map((h, i) => (
+              <button
+                key={i}
+                onClick={() => searchSources(h)}
+                className="px-4 py-2 bg-white/10 hover:bg-purple-600/30 rounded-xl text-sm"
+              >
+                {h}
+              </button>
+            ))}
+          </div>
+        )}
+
       </div>
 
-      {/* ================= FILTER BAR ================= */}
-      <div className="max-w-5xl mx-auto px-6 mb-10">
+      {/* FILTERS */}
+      <div className="max-w-6xl mx-auto px-6 mb-10">
+        <div className="bg-white/5 p-4 rounded-2xl border border-white/10 flex flex-wrap gap-3 items-center">
 
-        <div className="bg-white/5 p-4 rounded-2xl flex flex-wrap gap-3 border border-white/10">
+          {/* SORT */}
+          {[
+            { value: 'relevance', label: 'Relevantné' },
+            { value: 'year', label: 'Najnovšie' },
+            { value: 'citations', label: 'Najcitovanejšie' },
+          ].map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => setSort(opt.value)}
+              className={`px-4 py-2 rounded-xl ${
+                sort === opt.value ? 'bg-purple-600' : 'bg-white/10'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
 
           <button
-            onClick={() => setYearFilter('all')}
-            className={`px-3 py-1 rounded-full ${
-              yearFilter === 'all' ? 'bg-purple-600' : 'bg-white/10'
+            onClick={() => setOnlyPdf(!onlyPdf)}
+            className={`px-4 py-2 rounded-xl ${
+              onlyPdf ? 'bg-green-600' : 'bg-white/10'
             }`}
           >
-            Všetko
+            📄 Len PDF
           </button>
 
-          <button
-            onClick={() => setYearFilter('2y')}
-            className={`px-3 py-1 rounded-full ${
-              yearFilter === '2y' ? 'bg-purple-600' : 'bg-white/10'
-            }`}
-          >
-            Posledné 2 roky
-          </button>
+          {[
+            { key: 'all', label: 'Všetko' },
+            { key: '2010-2015', label: '2010–2015' },
+            { key: '2015-2020', label: '2015–2020' },
+          ].map(y => (
+            <button
+              key={y.key}
+              onClick={() => setYearPresetHandler(y.key)}
+              className={`px-4 py-2 rounded-xl ${
+                yearPreset === y.key ? 'bg-purple-600' : 'bg-white/10'
+              }`}
+            >
+              {y.label}
+            </button>
+          ))}
 
+          {/* RESET */}
           <button
-            onClick={() => setYearFilter('5y')}
-            className={`px-3 py-1 rounded-full ${
-              yearFilter === '5y' ? 'bg-purple-600' : 'bg-white/10'
-            }`}
+            onClick={resetFilters}
+            className="bg-red-600 px-4 py-2 rounded-xl ml-auto"
           >
-            Posledných 5 rokov
+            Reset
           </button>
 
         </div>
-
       </div>
 
-      {/* ================= RESULTS ================= */}
+      {/* RESULTS */}
       <div className="max-w-5xl mx-auto px-6 pb-20">
 
         {loading && (
-          <p className="text-purple-400 text-center mb-10">
-            🔍 Hľadám najrelevantnejšie zdroje...
-          </p>
-        )}
-
-        {!loading && filteredSources.length === 0 && (
-          <p className="text-gray-400 text-center">
-            Zadaj tému a začni vyhľadávať
+          <p className="text-center text-purple-400">
+            🔍 Hľadám...
           </p>
         )}
 
         <div className="grid gap-6">
 
-          {filteredSources.map((s) => (
-            <div
-              key={s.id}
-              className="bg-white/5 p-6 rounded-2xl border border-white/10 hover:border-purple-500 transition"
-            >
+          {sources.map(s => (
+            <div key={s.id} className="bg-white/5 p-6 rounded-xl">
 
-              {/* TITLE */}
-              <h3 className="text-xl font-bold mb-2">
-                {s.title}
-              </h3>
+              <h3 className="font-bold text-lg">{s.title}</h3>
 
-              {/* META */}
-              <p className="text-sm text-gray-400">
+              <p className="text-gray-400 text-sm">
                 {s.authors?.join(', ')} • {s.year}
               </p>
 
-              {/* ABSTRACT */}
-              <p className="text-gray-300 mt-3 line-clamp-4">
-                {s.abstract}
-              </p>
+              <p className="mt-3 text-gray-300">{s.abstract}</p>
 
-              {/* ACTIONS */}
-              <div className="mt-5 flex flex-wrap gap-3">
+              <div className="mt-4 flex gap-3">
 
                 <button
-                  onClick={() => useSource(s)}
-                  className="bg-green-600 px-4 py-2 rounded-xl"
+                  onClick={() => saveRecentPaper(s)}
+                  className="bg-green-600 px-3 py-1 rounded"
                 >
-                  Použiť v práci
+                  Použiť
                 </button>
 
                 {s.url && (
                   <a
                     href={s.url}
                     target="_blank"
-                    className="bg-blue-600 px-4 py-2 rounded-xl"
+                    onClick={() => saveRecentPaper(s)}
+                    className="bg-blue-600 px-3 py-1 rounded"
                   >
-                    Otvoriť článok
+                    Otvoriť
                   </a>
-                )}
-
-                {s.citation && (
-                  <button
-                    onClick={() => navigator.clipboard.writeText(s.citation!)}
-                    className="bg-white/10 px-4 py-2 rounded-xl"
-                  >
-                    Kopírovať citáciu
-                  </button>
                 )}
 
               </div>
@@ -211,6 +283,48 @@ export default function SourcesPage() {
           ))}
 
         </div>
+
+        {/* RECENT */}
+        {recent.length > 0 && (
+          <div className="mt-16">
+            <h2 className="text-xl font-bold mb-4">
+              📄 Nedávno otvorené
+            </h2>
+
+            <div className="grid gap-3">
+              {recent.map((r, i) => (
+                <button
+                  key={i}
+                  onClick={() => searchSources(r.title)}
+                  className="bg-white/5 p-3 rounded hover:bg-purple-600/20 text-left"
+                >
+                  {r.title}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* RECOMMENDED */}
+        {recommended.length > 0 && (
+          <div className="mt-16">
+            <h2 className="text-xl font-bold mb-4">
+              🧠 Odporúčané pre teba
+            </h2>
+
+            <div className="grid gap-3">
+              {recommended.map((r, i) => (
+                <button
+                  key={i}
+                  onClick={() => searchSources(r.title)}
+                  className="bg-purple-600/10 p-3 rounded hover:bg-purple-600/30 text-left"
+                >
+                  {r.title}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
       </div>
 

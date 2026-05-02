@@ -32,7 +32,7 @@ export async function POST(req: Request) {
     const citationStyle = body.citationStyle || "APA";
 
     // =====================================================
-    // 🔎 SEARCH (Semantic Scholar)
+    // 🔎 SEARCH (KONTEXTA LEVEL)
     // =====================================================
     if (action === "search") {
 
@@ -40,43 +40,82 @@ export async function POST(req: Request) {
         return Response.json({ error: "QUERY_TOO_SHORT" }, { status: 400 });
       }
 
-      try {
-        const url = `${SEMANTIC_URL}?query=${encodeURIComponent(query)}&limit=10&fields=title,abstract,authors,year,url`;
+      // ================= AI EXPANSION =================
+      let queries: string[] = [];
 
-        const res = await fetch(url, {
-          headers: {
-            "x-api-key": process.env.SEMANTIC_SCHOLAR_API_KEY!,
-          },
+      try {
+        const aiRes = await generateText({
+          model: openai("gpt-4o-mini"),
+          prompt: `
+Convert this academic topic into 5 scientific search queries in English.
+
+Return ONLY queries, one per line.
+
+Topic:
+${query}
+`,
         });
 
-        const data = await res.json();
+        queries = aiRes.text
+          .split("\n")
+          .map(q => q.replace(/^\d+\.?\s*/, "").trim())
+          .filter(Boolean);
 
-        const results = (data.data || []).map((p: any, i: number) => ({
-          id: i + 1,
+      } catch {
+        queries = [query];
+      }
+
+      if (!queries.length) queries = [query];
+
+      // ================= MULTI SEARCH =================
+      let allResults: any[] = [];
+
+      for (const q of queries) {
+        try {
+          const url = `${SEMANTIC_URL}?query=${encodeURIComponent(q)}&limit=10&fields=title,abstract,authors,year,url`;
+
+          const res = await fetch(url, {
+            headers: {
+              "x-api-key": process.env.SEMANTIC_SCHOLAR_API_KEY!,
+            },
+          });
+
+          const data = await res.json();
+          allResults.push(...(data.data || []));
+
+        } catch (err) {
+          console.error("Query failed:", q);
+        }
+      }
+
+      // ================= DEDUPLICATION =================
+      const unique = Array.from(
+        new Map(allResults.map((item: any) => [item.title, item])).values()
+      );
+
+      // ================= MAP =================
+      let results = unique.map((p: any, i: number) => ({
+        id: i + 1,
+        title: p.title,
+        authors: (p.authors || []).map((a: any) => a.name),
+        year: p.year,
+        abstract: p.abstract || "Bez abstraktu",
+        url: p.url,
+        citation: formatCitation({
           title: p.title,
           authors: (p.authors || []).map((a: any) => a.name),
           year: p.year,
-          abstract: p.abstract || "Bez abstraktu",
-          url: p.url,
-          citation: formatCitation({
-            title: p.title,
-            authors: (p.authors || []).map((a: any) => a.name),
-            year: p.year,
-          }, citationStyle),
-        }));
+        }, citationStyle),
+      }));
 
-        return Response.json({
-          ok: true,
-          source: "semantic_scholar",
-          count: results.length,
-          results,
-        });
+      // ================= SORT =================
+      results.sort((a, b) => (b.year || 0) - (a.year || 0));
 
-      } catch (apiErr) {
-        console.error("Semantic Scholar failed → fallback");
+      // ================= FALLBACK =================
+      if (!results.length) {
+        console.warn("No results → fallback");
 
-        // 🔥 fallback
-        const results = MOCK_SOURCES.map((s, i) => ({
+        const fallback = MOCK_SOURCES.map((s, i) => ({
           id: i + 1,
           title: s.title,
           authors: s.authors,
@@ -89,10 +128,17 @@ export async function POST(req: Request) {
         return Response.json({
           ok: true,
           source: "fallback",
-          count: results.length,
-          results,
+          count: fallback.length,
+          results: fallback,
         });
       }
+
+      return Response.json({
+        ok: true,
+        source: "semantic_scholar_multi",
+        count: results.length,
+        results,
+      });
     }
 
     // =====================================================

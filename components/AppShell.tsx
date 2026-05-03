@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter, usePathname } from "next/navigation";
+import { useState } from "react";
 import {
   Home,
   Bot,
@@ -14,8 +15,12 @@ import {
   Plus,
   Sparkles,
   Bell,
+  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+
+// 🔥 IMPORTUJ COMPONENT (NIE page!)
+import ProfileForm from "@/components/ProfileForm";
 
 // ================= TYPES =================
 type NavItem = [string, string, LucideIcon];
@@ -25,7 +30,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname() || "";
 
-  // 🔥 FIX: správne typovanie
+  // 🔥 MODAL STATE
+  const [openProfile, setOpenProfile] = useState(false);
+
   const items: NavItem[] = [
     ['/dashboard', 'Dashboard', Home],
     ['/chat', 'AI Chat', Bot],
@@ -40,7 +47,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const isActive = (path: string) => pathname.startsWith(path);
 
-  // 🔥 FIX: typovanie + jednoduchšia logika
   const titleMap: Record<string, string> = {
     '/dashboard': 'Dashboard',
     '/chat': 'AI Chat',
@@ -59,7 +65,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     )?.[1] || "Zedpera";
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen bg-[#020617] text-white">
 
       {/* ================= SIDEBAR ================= */}
       <aside className="w-72 border-r border-white/10 bg-[#020617] p-5 flex flex-col">
@@ -75,10 +81,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        {/* NEW PROJECT */}
+        {/* 🔥 NEW PROJECT */}
         <button
-          onClick={() => router.push('/profile')}
-          className="mb-6 flex items-center justify-center gap-2 rounded-xl bg-violet-600 py-3 font-bold hover:bg-violet-700 transition"
+          onClick={() => {
+            localStorage.removeItem('profile'); // 🔥 reset
+            setOpenProfile(true);
+          }}
+          className="mb-6 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 py-3 font-bold hover:scale-[1.02] transition"
         >
           <Plus size={16} /> Nová práca
         </button>
@@ -87,7 +96,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <nav className="flex flex-col gap-2">
           {items.map(([path, label, Icon]) => (
             <button
-              key={path} // ✅ už je string → OK
+              key={path}
               onClick={() => router.push(path)}
               className={`flex items-center gap-3 rounded-xl px-3 py-2 text-left transition ${
                 isActive(path)
@@ -132,6 +141,29 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </main>
 
       </div>
+
+      {/* ================= MODAL ================= */}
+      {openProfile && (
+        <div className="fixed inset-0 z-50 bg-[#020617] overflow-y-auto">
+
+          <div className="relative min-h-screen w-full max-w-[1400px] mx-auto p-6">
+
+            {/* CLOSE */}
+            <button
+              onClick={() => setOpenProfile(false)}
+              className="fixed right-6 top-6 z-50 rounded-xl bg-white/10 p-2 text-gray-300 hover:text-white hover:bg-white/20 transition"
+            >
+              <X size={22} />
+            </button>
+
+            {/* 🔥 FORM */}
+            <ProfileForm
+              onClose={() => setOpenProfile(false)}
+            />
+
+          </div>
+        </div>
+      )}
     </div>
   );
 }

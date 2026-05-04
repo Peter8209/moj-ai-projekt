@@ -2,11 +2,13 @@ import { streamText } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
-import { groq } from '@ai-sdk/groq';
 import { mistral } from '@ai-sdk/mistral';
+import { xai } from '@ai-sdk/xai';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+
+// ================= TYPES =================
 
 type Agent = 'openai' | 'claude' | 'gemini' | 'grok' | 'mistral';
 
@@ -51,8 +53,17 @@ type SavedProfile = {
   };
 };
 
+type ModelResult = {
+  model: ReturnType<typeof openai>;
+  providerLabel: string;
+};
+
+// ================= HELPERS =================
+
 function parseJson<T>(value: FormDataEntryValue | null, fallback: T): T {
-  if (!value || typeof value !== 'string') return fallback;
+  if (!value || typeof value !== 'string') {
+    return fallback;
+  }
 
   try {
     return JSON.parse(value) as T;
@@ -61,50 +72,53 @@ function parseJson<T>(value: FormDataEntryValue | null, fallback: T): T {
   }
 }
 
+function isAllowedAgent(value: unknown): value is Agent {
+  return (
+    value === 'openai' ||
+    value === 'claude' ||
+    value === 'gemini' ||
+    value === 'grok' ||
+    value === 'mistral'
+  );
+}
+
+function normalizeMessages(messages: ChatMessage[]) {
+  return messages
+    .filter((message) => {
+      return (
+        message &&
+        (message.role === 'user' || message.role === 'assistant') &&
+        typeof message.content === 'string' &&
+        message.content.trim().length > 0
+      );
+    })
+    .map((message) => ({
+      role: message.role,
+      content: message.content.trim(),
+    }));
+}
+
 async function extractPdfTexts(files: File[]) {
   const results: string[] = [];
 
-  if (!files.length) return results;
+  if (!files.length) {
+    return results;
+  }
 
-  try {
-    const pdfParseModule = await import('pdf-parse');
-    const pdfParse = (pdfParseModule as any).default || pdfParseModule;
+  for (const file of files) {
+    const isPdf =
+      file.type === 'application/pdf' ||
+      file.name.toLowerCase().endsWith('.pdf');
 
-    for (const file of files) {
-      if (
-        file.type !== 'application/pdf' &&
-        !file.name.toLowerCase().endsWith('.pdf')
-      ) {
-        continue;
-      }
-
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const parsed = await pdfParse(buffer);
-
-        const text = String(parsed?.text || '')
-          .replace(/\s+\n/g, '\n')
-          .replace(/\n{3,}/g, '\n\n')
-          .trim();
-
-        if (text) {
-          results.push(
-            `PDF: ${file.name}\n${text.slice(0, 15000)}`
-          );
-        } else {
-          results.push(`PDF: ${file.name}\n[PDF neobsahovalo extrahovateľný text]`);
-        }
-      } catch {
-        results.push(`PDF: ${file.name}\n[Nepodarilo sa extrahovať obsah PDF]`);
-      }
+    if (!isPdf) {
+      continue;
     }
-  } catch {
-    for (const file of files) {
-      results.push(
-        `PDF: ${file.name}\n[Server nemá dostupnú PDF extrakciu. Nainštaluj balík pdf-parse.]`
-      );
-    }
+
+    results.push(
+      `PDF: ${file.name}
+Veľkosť: ${file.size} bajtov
+[PDF dokument bol priložený. V tejto verzii server zatiaľ neextrahuje plný text PDF. AI preto vie, že dokument existuje, ale nemá overený celý obsah súboru.]`
+    );
   }
 
   return results;
@@ -117,30 +131,39 @@ function buildSystemPrompt(profile: SavedProfile | null, pdfTexts: string[]) {
       : profile?.keywords || [];
 
   const structureText =
-    profile?.schema?.structure?.length
-      ? profile.schema.structure.map((item, index) => `${index + 1}. ${item}`).join('\n')
+    profile?.schema?.structure && profile.schema.structure.length > 0
+      ? profile.schema.structure
+          .map((item, index) => `${index + 1}. ${item}`)
+          .join('\n')
       : 'Neuvedené';
 
   const requiredSectionsText =
-    profile?.schema?.requiredSections?.length
+    profile?.schema?.requiredSections &&
+    profile.schema.requiredSections.length > 0
       ? profile.schema.requiredSections.map((item) => `- ${item}`).join('\n')
       : 'Neuvedené';
 
-  const pdfBlock = pdfTexts.length
-    ? `\nPRILOŽENÉ PDF DOKUMENTY - EXTRAHOVANÝ TEXT:\n${pdfTexts.join('\n\n-----------------\n\n')}\n`
-    : '\nPRILOŽENÉ PDF DOKUMENTY: Žiadne.\n';
+  const pdfBlock =
+    pdfTexts.length > 0
+      ? `\nPRILOŽENÉ PDF DOKUMENTY:\n${pdfTexts.join(
+          '\n\n-----------------\n\n'
+        )}\n`
+      : '\nPRILOŽENÉ PDF DOKUMENTY: Žiadne.\n';
 
   return `
-Si ZEDPERA, profesionálny akademický AI asistent.
+Si ZEDPERA, profesionálny akademický AI asistent a AI vedúci práce.
 
 HLAVNÉ PRAVIDLÁ:
 - Odpovedaj v jazyku práce: ${profile?.workLanguage || profile?.language || 'SK'}.
 - Vychádzaj prednostne z uloženého profilu práce.
-- Ak sú priložené PDF dokumenty, použi ich ako doplnkové zdroje.
+- Ak sú priložené PDF dokumenty, zohľadni ich ako doplnkové zdroje.
+- Ak nie je dostupný text PDF, jasne uveď, že obsah PDF nebol serverom extrahovaný.
 - Text má byť odborne napísaný, logický a vhodný pre akademické písanie.
 - Ak niečo v profile chýba, uveď, čo odporúčaš doplniť.
 - Nevymýšľaj konkrétne bibliografické údaje, ak nie sú priamo dostupné.
 - Ak používateľ žiada úvod, abstrakt, kapitoly alebo inú časť práce, vytvor ich na mieru podľa profilu.
+- Nepíš všeobecné frázy bez nadväznosti na profil práce.
+- Nepoužívaj falošné citácie, autorov, DOI ani názvy článkov.
 
 ULOŽENÝ PROFIL PRÁCE:
 Názov práce: ${profile?.title || 'Neuvedené'}
@@ -197,7 +220,7 @@ Požiadavky na zdroje:
 ${profile?.sourcesRequirement || 'Neuvedené'}
 
 Kľúčové slová:
-${keywords.length ? keywords.join(', ') : 'Neuvedené'}
+${keywords.length > 0 ? keywords.join(', ') : 'Neuvedené'}
 
 Štruktúra práce:
 ${structureText}
@@ -225,84 +248,222 @@ Uveď konkrétne odporúčania, čo má používateľ doplniť alebo skontrolova
 `;
 }
 
-function getAvailableModel(agent: Agent) {
-  const requested = agent;
+// ================= AI MODEL ROUTER =================
 
-  if (requested === 'openai' && process.env.OPENAI_API_KEY) {
-    return openai(process.env.OPENAI_MODEL || 'gpt-4o-mini');
+function getModelByAgent(agent: Agent): ModelResult {
+  if (agent === 'openai') {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('Chýba OPENAI_API_KEY pre GPT.');
+    }
+
+    return {
+      model: openai(process.env.OPENAI_MODEL || 'gpt-4o-mini'),
+      providerLabel: 'GPT',
+    };
   }
 
-  if (requested === 'claude' && process.env.ANTHROPIC_API_KEY) {
-    return anthropic(process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-latest');
+  if (agent === 'claude') {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error('Chýba ANTHROPIC_API_KEY pre Claude.');
+    }
+
+    return {
+      model: anthropic(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6') as any,
+      providerLabel: 'Claude',
+    };
   }
 
-  if (requested === 'gemini' && process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-    return google(process.env.GOOGLE_MODEL || 'gemini-1.5-flash');
+  if (agent === 'gemini') {
+    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+      throw new Error('Chýba GOOGLE_GENERATIVE_AI_API_KEY pre Gemini.');
+    }
+
+    return {
+      model: google(process.env.GOOGLE_MODEL || 'gemini-2.5-flash') as any,
+      providerLabel: 'Gemini',
+    };
   }
 
-  // "grok" je tu mapovaný cez Groq provider, aby to fungovalo stabilne
-  if (requested === 'grok' && process.env.GROQ_API_KEY) {
-    return groq(process.env.GROQ_MODEL || 'llama-3.1-70b-versatile');
+  if (agent === 'grok') {
+    if (!process.env.XAI_API_KEY) {
+      throw new Error('Chýba XAI_API_KEY pre Grok.');
+    }
+
+    return {
+      model: xai(process.env.XAI_MODEL || 'grok-3') as any,
+      providerLabel: 'Grok',
+    };
   }
 
-  if (requested === 'mistral' && process.env.MISTRAL_API_KEY) {
-    return mistral(process.env.MISTRAL_MODEL || 'mistral-small-latest');
+  if (agent === 'mistral') {
+    if (!process.env.MISTRAL_API_KEY) {
+      throw new Error('Chýba MISTRAL_API_KEY pre Mistral.');
+    }
+
+    return {
+      model: mistral(process.env.MISTRAL_MODEL || 'mistral-small-latest') as any,
+      providerLabel: 'Mistral',
+    };
   }
 
-  // Fallback poradie
+  throw new Error(`Neznámy AI agent: ${agent}`);
+}
+
+function getFallbackModel(): ModelResult {
   if (process.env.OPENAI_API_KEY) {
-    return openai(process.env.OPENAI_MODEL || 'gpt-4o-mini');
-  }
-
-  if (process.env.ANTHROPIC_API_KEY) {
-    return anthropic(process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-latest');
+    return {
+      model: openai(process.env.OPENAI_MODEL || 'gpt-4o-mini'),
+      providerLabel: 'GPT fallback',
+    };
   }
 
   if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-    return google(process.env.GOOGLE_MODEL || 'gemini-1.5-flash');
+    return {
+      model: google(process.env.GOOGLE_MODEL || 'gemini-2.5-flash') as any,
+      providerLabel: 'Gemini fallback',
+    };
   }
 
-  if (process.env.GROQ_API_KEY) {
-    return groq(process.env.GROQ_MODEL || 'llama-3.1-70b-versatile');
+  if (process.env.ANTHROPIC_API_KEY) {
+    return {
+      model: anthropic(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6') as any,
+      providerLabel: 'Claude fallback',
+    };
   }
 
   if (process.env.MISTRAL_API_KEY) {
-    return mistral(process.env.MISTRAL_MODEL || 'mistral-small-latest');
+    return {
+      model: mistral(process.env.MISTRAL_MODEL || 'mistral-small-latest') as any,
+      providerLabel: 'Mistral fallback',
+    };
+  }
+
+  if (process.env.XAI_API_KEY) {
+    return {
+      model: xai(process.env.XAI_MODEL || 'grok-3') as any,
+      providerLabel: 'Grok fallback',
+    };
   }
 
   throw new Error(
-    'Nie je nastavený žiadny AI provider. Doplň aspoň jeden API kľúč: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, GROQ_API_KEY alebo MISTRAL_API_KEY.'
+    'Nie je nastavený žiadny AI provider. Doplň aspoň jeden API kľúč.'
   );
 }
 
+function isModelNotFoundError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+
+  return (
+    message.includes('model') &&
+    (message.includes('not found') ||
+      message.includes('404') ||
+      message.includes('not supported'))
+  );
+}
+
+async function createStreamResponse({
+  model,
+  systemPrompt,
+  normalizedMessages,
+}: {
+  model: ModelResult['model'];
+  systemPrompt: string;
+  normalizedMessages: ReturnType<typeof normalizeMessages>;
+}) {
+  const result = streamText({
+    model,
+    system: systemPrompt,
+    messages: normalizedMessages,
+    temperature: 0.7,
+    maxOutputTokens: 4000,
+  });
+
+  return result.toTextStreamResponse();
+}
+
+// ================= API ROUTE =================
+
 export async function POST(req: Request) {
   try {
-    const formData = await req.formData();
+    const contentType = req.headers.get('content-type') || '';
 
-    const agent = (formData.get('agent') as Agent) || 'gemini';
-    const messages = parseJson<ChatMessage[]>(formData.get('messages'), []);
-    const profile = parseJson<SavedProfile | null>(formData.get('profile'), null);
-    const files = formData.getAll('files').filter((item): item is File => item instanceof File);
+    let rawAgent: unknown = 'gemini';
+    let messages: ChatMessage[] = [];
+    let profile: SavedProfile | null = null;
+    let files: File[] = [];
 
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return new Response('Chýbajú správy pre AI.', { status: 400 });
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await req.formData();
+
+      rawAgent = formData.get('agent') || 'gemini';
+      messages = parseJson<ChatMessage[]>(formData.get('messages'), []);
+      profile = parseJson<SavedProfile | null>(formData.get('profile'), null);
+
+      files = formData
+        .getAll('files')
+        .filter((item): item is File => item instanceof File);
+    } else {
+      const body = await req.json().catch(() => null);
+
+      rawAgent = body?.agent || 'gemini';
+      messages = Array.isArray(body?.messages) ? body.messages : [];
+      profile = body?.profile || null;
+      files = [];
+    }
+
+    if (!isAllowedAgent(rawAgent)) {
+      return new Response(`Neznámy AI agent: ${String(rawAgent)}`, {
+        status: 400,
+      });
+    }
+
+    const agent = rawAgent;
+    const normalizedMessages = normalizeMessages(messages);
+
+    if (normalizedMessages.length === 0) {
+      return new Response('Chýbajú správy pre AI.', {
+        status: 400,
+      });
     }
 
     const pdfTexts = await extractPdfTexts(files);
     const systemPrompt = buildSystemPrompt(profile, pdfTexts);
-    const model = getAvailableModel(agent);
 
-  const result = streamText({
-  model,
-  system: systemPrompt,
-  messages: messages.map((message) => ({
-    role: message.role,
-    content: message.content,
-  })),
-  temperature: 0.7,
-});
+    try {
+      const primary = getModelByAgent(agent);
 
-    return result.toTextStreamResponse();
+      return await createStreamResponse({
+        model: primary.model,
+        systemPrompt,
+        normalizedMessages,
+      });
+    } catch (primaryError) {
+      console.error('PRIMARY MODEL ERROR:', primaryError);
+
+      if (!isModelNotFoundError(primaryError)) {
+        throw primaryError;
+      }
+
+      const fallback = getFallbackModel();
+
+      const fallbackSystemPrompt = `
+${systemPrompt}
+
+TECHNICKÁ POZNÁMKA:
+Vybraný model nebol dostupný alebo bol odmietnutý poskytovateľom.
+Odpovedáš cez náhradný model: ${fallback.providerLabel}.
+`;
+
+      return await createStreamResponse({
+        model: fallback.model,
+        systemPrompt: fallbackSystemPrompt,
+        normalizedMessages,
+      });
+    }
   } catch (error) {
     console.error('CHAT API ERROR:', error);
 

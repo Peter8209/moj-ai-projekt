@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import {
   BookOpen,
   Brain,
+  Download,
+  FileDown,
   FileText,
   GraduationCap,
   History,
@@ -181,6 +183,7 @@ function createFileId() {
 
 function safeJsonParse<T>(value: string | null): T | null {
   if (!value) return null;
+
   try {
     return JSON.parse(value) as T;
   } catch {
@@ -201,6 +204,89 @@ function normalizeProfile(raw: any): SavedProfile | null {
   }
 
   return raw as SavedProfile;
+}
+
+function sanitizeFileName(value: string) {
+  return (
+    value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9-_]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .toLowerCase() || 'zedpera-vystup'
+  );
+}
+
+function htmlEscape(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function downloadBlob({
+  content,
+  fileName,
+  mimeType,
+}: {
+  content: BlobPart;
+  fileName: string;
+  mimeType: string;
+}) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  URL.revokeObjectURL(url);
+}
+
+function createDocHtml(title: string, text: string) {
+  const paragraphs = text
+    .split('\n')
+    .map((line) => {
+      if (!line.trim()) return '<p>&nbsp;</p>';
+      return `<p>${htmlEscape(line)}</p>`;
+    })
+    .join('');
+
+  return `
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${htmlEscape(title)}</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 12pt;
+      line-height: 1.6;
+      color: #111827;
+      padding: 40px;
+    }
+    h1 {
+      font-size: 22pt;
+      margin-bottom: 24px;
+    }
+    p {
+      margin: 0 0 12px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>${htmlEscape(title)}</h1>
+  ${paragraphs}
+</body>
+</html>
+`;
 }
 
 // ================= PAGE =================
@@ -232,6 +318,11 @@ export default function ChatPage() {
     return agents.find((item) => item.key === agent)?.label || 'Gemini';
   }, [agent]);
 
+  const exportTitle = useMemo(() => {
+    const base = activeProfile?.title || 'Zedpera výstup';
+    return base.trim() || 'Zedpera výstup';
+  }, [activeProfile]);
+
   useEffect(() => {
     const activeRaw = localStorage.getItem('active_profile');
     const profileRaw = localStorage.getItem('profile');
@@ -259,6 +350,21 @@ export default function ChatPage() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPopup(false);
+        setCanvasOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
 
   const handleFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -316,6 +422,7 @@ export default function ChatPage() {
 
     recognition.onresult = (event: any) => {
       const transcript = event.results?.[0]?.[0]?.transcript || '';
+
       if (transcript) {
         setInput((prev) => `${prev}${prev.trim() ? ' ' : ''}${transcript}`);
       }
@@ -325,6 +432,42 @@ export default function ChatPage() {
     recognition.onend = () => setIsListening(false);
 
     recognition.start();
+  };
+
+  const downloadDoc = () => {
+    const text = popupData?.output || canvasText || '';
+    if (!text.trim()) return;
+
+    const fileBase = sanitizeFileName(exportTitle);
+    const html = createDocHtml(exportTitle, text);
+
+    downloadBlob({
+      content: html,
+      fileName: `${fileBase}.doc`,
+      mimeType: 'application/msword;charset=utf-8',
+    });
+  };
+
+  const downloadPdf = () => {
+    const text = popupData?.output || canvasText || '';
+    if (!text.trim()) return;
+
+    const printWindow = window.open('', '_blank', 'width=900,height=700');
+
+    if (!printWindow) {
+      alert('Prehliadač zablokoval otvorenie PDF okna. Povoľ pop-up okná.');
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(createDocHtml(exportTitle, text));
+    printWindow.document.close();
+
+    printWindow.focus();
+
+    setTimeout(() => {
+      printWindow.print();
+    }, 400);
   };
 
   const sendPromptToApi = async ({
@@ -342,6 +485,7 @@ export default function ChatPage() {
     };
 
     const nextVisibleMessages = [...messages, visibleMessage];
+
     setMessages(nextVisibleMessages);
     setInput('');
     setIsLoading(true);
@@ -387,6 +531,7 @@ export default function ChatPage() {
 
       while (true) {
         const { done, value } = await reader.read();
+
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
@@ -394,10 +539,12 @@ export default function ChatPage() {
 
         setMessages((prev) => {
           const updated = [...prev];
+
           updated[updated.length - 1] = {
             role: 'assistant',
             content: fullText,
           };
+
           return updated;
         });
       }
@@ -405,7 +552,14 @@ export default function ChatPage() {
       setCanvasText(fullText);
 
       const parsed = parseSections(fullText);
-      if (parsed.analysis || parsed.score || parsed.tips) {
+
+      const looksLikeError =
+        parsed.output.includes('AI_APICallError') ||
+        parsed.output.includes('API error') ||
+        parsed.output.includes('model is not found') ||
+        parsed.output.includes('not found for API version');
+
+      if (!looksLikeError && (parsed.output || parsed.analysis || parsed.score || parsed.tips)) {
         setPopupData(parsed);
         setPopup(true);
       }
@@ -429,6 +583,7 @@ export default function ChatPage() {
 
   const sendMessage = async () => {
     const text = input.trim();
+
     if (!text || isLoading) return;
 
     await sendPromptToApi({
@@ -538,6 +693,7 @@ export default function ChatPage() {
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <h2 className="text-4xl font-black tracking-tight">CHAT</h2>
+
               <p className="mt-2 text-sm text-slate-400">
                 Chat čerpá z uloženého profilu práce, vybraného AI agenta a
                 pripojených PDF dokumentov.
@@ -784,19 +940,42 @@ export default function ChatPage() {
             <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
               <div>
                 <h2 className="text-2xl font-black">Canvas</h2>
+
                 <p className="text-sm text-slate-400">
                   Tu si môžeš upravovať, kopírovať alebo pripravovať výsledný
                   text.
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setCanvasOpen(false)}
-                className="rounded-2xl bg-white/10 p-3 text-slate-300 hover:bg-white/15 hover:text-white"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={downloadDoc}
+                  disabled={!canvasText.trim()}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Download className="h-4 w-4" />
+                  DOC
+                </button>
+
+                <button
+                  type="button"
+                  onClick={downloadPdf}
+                  disabled={!canvasText.trim()}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <FileDown className="h-4 w-4" />
+                  PDF
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCanvasOpen(false)}
+                  className="rounded-2xl bg-red-500/90 p-3 text-white hover:bg-red-400"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             <textarea
@@ -809,59 +988,104 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* POPUP */}
+      {/* POPUP RESULT */}
       {popup && popupData && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-          <div className="grid max-h-[90vh] w-full max-w-6xl gap-6 overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] p-6 shadow-2xl md:grid-cols-3">
-            <div className="col-span-2 overflow-y-auto pr-2">
-              <h2 className="mb-4 text-2xl font-black">📄 Výstup</h2>
+          <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
+            {/* POPUP HEADER */}
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[#070a16] px-6 py-4">
+              <div>
+                <h2 className="text-2xl font-black">📄 Výstup</h2>
 
-              <div className="whitespace-pre-wrap text-sm leading-7 text-slate-300">
-                {popupData.output}
+                <p className="text-sm text-slate-400">
+                  Výsledok môžeš zavrieť, otvoriť v Canvase alebo stiahnuť.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={downloadDoc}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15"
+                >
+                  <Download className="h-4 w-4" />
+                  Stiahnuť DOC
+                </button>
+
+                <button
+                  type="button"
+                  onClick={downloadPdf}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15"
+                >
+                  <FileDown className="h-4 w-4" />
+                  Stiahnuť PDF
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCanvasText(popupData.output || '');
+                    setCanvasOpen(true);
+                    setPopup(false);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-black text-white hover:bg-violet-500"
+                >
+                  <Paintbrush className="h-4 w-4" />
+                  Canvas
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPopup(false)}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-black text-white hover:bg-red-400"
+                >
+                  <X className="h-4 w-4" />
+                  Zavrieť
+                </button>
               </div>
             </div>
 
-            <div className="space-y-4 overflow-y-auto">
-              <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
-                <h3 className="mb-2 font-black">📊 Skóre</h3>
-                <div className="text-3xl font-black text-emerald-400">
-                  {popupData.score || '—'}
+            {/* POPUP BODY */}
+            <div className="grid min-h-0 flex-1 gap-6 overflow-hidden p-6 md:grid-cols-[1fr_380px]">
+              <div className="min-h-0 overflow-y-auto rounded-3xl border border-white/10 bg-black/10 p-6 pr-4">
+                <div className="whitespace-pre-wrap text-sm leading-8 text-slate-300">
+                  {popupData.output}
                 </div>
               </div>
 
-              <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
-                <h3 className="mb-2 font-black">⚠️ Analýza</h3>
-                <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
-                  {popupData.analysis || 'Bez analýzy.'}
+              <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
+                <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
+                  <h3 className="mb-2 font-black">📊 Skóre</h3>
+
+                  <div className="text-4xl font-black text-emerald-400">
+                    {popupData.score || '—'}
+                  </div>
                 </div>
-              </div>
 
-              <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
-                <h3 className="mb-2 font-black">✏️ Odporúčania</h3>
-                <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
-                  {popupData.tips || 'Bez odporúčaní.'}
+                <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
+                  <h3 className="mb-2 font-black">⚠️ Analýza</h3>
+
+                  <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                    {popupData.analysis || 'Bez analýzy.'}
+                  </div>
                 </div>
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
+                  <h3 className="mb-2 font-black">✏️ Odporúčania</h3>
+
+                  <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                    {popupData.tips || 'Bez odporúčaní.'}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setPopup(false)}
+                  className="w-full rounded-2xl bg-red-500 py-3 font-black text-white hover:bg-red-400"
+                >
+                  Zavrieť okno
+                </button>
               </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setCanvasText(popupData.output || '');
-                  setCanvasOpen(true);
-                  setPopup(false);
-                }}
-                className="w-full rounded-2xl bg-violet-600 py-3 font-black text-white hover:bg-violet-500"
-              >
-                Otvoriť v Canvase
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPopup(false)}
-                className="w-full rounded-2xl bg-red-500 py-3 font-black text-white hover:bg-red-400"
-              >
-                Zavrieť
-              </button>
             </div>
           </div>
         </div>

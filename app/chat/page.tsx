@@ -1,32 +1,115 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  BookOpen,
+  Brain,
+  FileText,
+  GraduationCap,
+  Library,
+  Mic,
+  MoreHorizontal,
+  Paintbrush,
+  Paperclip,
+  PenLine,
+  Send,
+  Sparkles,
+  UploadCloud,
+  X,
+} from 'lucide-react';
 
 // ================= TYPES =================
-type Mode =
-  | 'write'
-  | 'sources'
-  | 'supervisor'
-  | 'defense'
-  | 'audit'
-  | 'translate'
-  | 'analysis'
-  | 'planning'
-  | 'email'
-  | 'plagiarism';
+
+type Agent = 'openai' | 'claude' | 'gemini' | 'grok' | 'mistral';
+
+type ChatRole = 'user' | 'assistant';
 
 type ChatMessage = {
-  role: 'user' | 'assistant';
+  role: ChatRole;
   content: string;
 };
 
-const modes: Mode[] = [
-  'write','sources','supervisor','audit','defense',
-  'translate','analysis','planning','email','plagiarism'
+type AttachedFile = {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  uploadedAt: string;
+};
+
+type ParsedResult = {
+  output: string;
+  analysis: string;
+  score: string;
+  tips: string;
+};
+
+declare global {
+  interface Window {
+    webkitSpeechRecognition?: any;
+    SpeechRecognition?: any;
+  }
+}
+
+// ================= CONFIG =================
+
+const agents: {
+  key: Agent;
+  label: string;
+}[] = [
+  { key: 'openai', label: 'GPT' },
+  { key: 'claude', label: 'Claude' },
+  { key: 'gemini', label: 'Gemini' },
+  { key: 'grok', label: 'Grok' },
+  { key: 'mistral', label: 'Mistral' },
 ];
 
-// ================= PARSER =================
-function parseSections(text: string) {
+const suggestions: {
+  title: string;
+  prompt: string;
+  icon: any;
+}[] = [
+  {
+    title: 'Navrhni mi úvod mé práce',
+    prompt:
+      'Navrhni mi profesionálny úvod mojej záverečnej práce podľa profilu práce. Úvod má byť akademický, logicky členený a vhodný pre vysokú školu.',
+    icon: PenLine,
+  },
+  {
+    title: 'Napiš mi abstrakt',
+    prompt:
+      'Napíš mi abstrakt práce podľa profilu práce. Abstrakt má stručne obsahovať tému, cieľ, metodológiu, výsledky a prínos práce.',
+    icon: BookOpen,
+  },
+  {
+    title: 'Brainstormuj se mnou strukturu kapitol a podkapitol',
+    prompt:
+      'Navrhni detailnú štruktúru kapitol a podkapitol mojej práce. Štruktúra má byť logická, akademická a vhodná pre zvolený typ práce.',
+    icon: GraduationCap,
+  },
+  {
+    title: 'Teď mi pomůžeš napsat návrh kapitoly.',
+    prompt:
+      'Pomôž mi napísať návrh kapitoly mojej práce. Najprv navrhni osnovu kapitoly, potom odporúčané podkapitoly a následne ukážkový text.',
+    icon: FileText,
+  },
+  {
+    title: 'Pomoz mi citovat tento zdroj',
+    prompt:
+      'Pomôž mi správne citovať zdroj podľa citačnej normy mojej práce. Vysvetli, ako má byť citácia v texte aj v zozname literatúry.',
+    icon: Library,
+  },
+  {
+    title: 'Pomoz mi přepsat můj text do akademického jazyka.',
+    prompt:
+      'Prepíš môj text do akademického jazyka. Zachovaj význam, zlepši odborný štýl, logiku viet a odstráň neformálne formulácie.',
+    icon: BookOpen,
+  },
+];
+
+// ================= HELPERS =================
+
+function parseSections(text: string): ParsedResult {
   const get = (name: string) =>
     text.split(`=== ${name} ===`)[1]?.split('===')[0]?.trim() || '';
 
@@ -38,245 +121,644 @@ function parseSections(text: string) {
   };
 }
 
+function formatBytes(bytes: number) {
+  if (!bytes) return '0 B';
+
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const index = Math.floor(Math.log(bytes) / Math.log(1024));
+
+  return `${(bytes / Math.pow(1024, index)).toFixed(1)} ${units[index]}`;
+}
+
+function createFileId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 // ================= PAGE =================
+
 export default function ChatPage() {
-  const [mode, setMode] = useState<Mode>('write');
-  const [agent, setAgent] = useState<string>('auto');
+  const [agent, setAgent] = useState<Agent>('gemini');
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [isListening, setIsListening] = useState(false);
+
+  const [canvasOpen, setCanvasOpen] = useState(false);
+  const [canvasText, setCanvasText] = useState('');
+
   const [popup, setPopup] = useState(false);
-  const [popupData, setPopupData] = useState<any>(null);
+  const [popupData, setPopupData] = useState<ParsedResult | null>(null);
 
-  const modeName = useMemo(() => ({
-    write: 'AI písanie práce',
-    sources: 'Zdroje',
-    supervisor: 'AI vedúci práce',
-    audit: 'Kontrola kvality',
-    defense: 'Obhajoba',
-    translate: 'Preklad',
-    analysis: 'Analýza dát',
-    planning: 'Plánovanie',
-    email: 'Email',
-    plagiarism: 'Plagiátorstvo',
-  }[mode]), [mode]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
+  const activeAgentLabel = useMemo(() => {
+    return agents.find((item) => item.key === agent)?.label || 'Gemini';
+  }, [agent]);
 
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
 
-const sendMessage = async () => {
-  const text = input?.trim();
-  if (!text || isLoading) return;
+  const handleFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
 
-  const userMsg = { role: 'user' as const, content: text };
-  const next = [...messages, userMsg];
+    const nextFiles: AttachedFile[] = Array.from(files)
+      .filter((file) => {
+        const isPdf =
+          file.type === 'application/pdf' ||
+          file.name.toLowerCase().endsWith('.pdf');
 
-  setMessages(next);
-  setInput('');
-  setIsLoading(true);
+        return isPdf;
+      })
+      .map((file) => ({
+        id: createFileId(),
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/pdf',
+        uploadedAt: new Date().toISOString(),
+      }));
 
-  try {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: next, mode, agent }),
-    });
-
-    if (!res.body) throw new Error('No stream');
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-
-    let fullText = '';
-
-    // 🔥 PRIDAJ PRÁZDNU AI SPRÁVU (pre live typing)
-    setMessages(prev => [
-      ...prev,
-      { role: 'assistant', content: '' }
-    ]);
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value, { stream: true });
-      fullText += chunk;
-
-      // 🔥 LIVE UPDATE poslednej správy
-      setMessages(prev => {
-        const updated = [...prev];
-        updated[updated.length - 1] = {
-          role: 'assistant',
-          content: fullText,
-        };
-        return updated;
-      });
+    if (nextFiles.length === 0) {
+      alert('Priložiť je možné iba PDF dokumenty.');
+      return;
     }
 
-    // 🔥 PARSE až keď je hotovo
-    const parsed = parseSections(fullText);
-    setPopupData(parsed);
-    setPopup(true);
+    setAttachedFiles((prev) => [...prev, ...nextFiles]);
 
-  } catch (err) {
-    console.error(err);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
 
-    setMessages(prev => [
-      ...prev,
-      { role: 'assistant', content: '❌ Chyba API' }
-    ]);
-  }
+  const removeFile = (id: string) => {
+    setAttachedFiles((prev) => prev.filter((file) => file.id !== id));
+  };
 
-  setIsLoading(false);
-};
+  const startDictation = () => {
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert(
+        'Diktovanie nie je v tomto prehliadači podporované. Skús Google Chrome.'
+      );
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+
+    recognition.lang = 'sk-SK';
+    recognition.interimResults = false;
+    recognition.continuous = false;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results?.[0]?.[0]?.transcript || '';
+
+      if (transcript) {
+        setInput((prev) => {
+          const spacer = prev.trim() ? ' ' : '';
+          return `${prev}${spacer}${transcript}`;
+        });
+      }
+    };
+
+    recognition.onerror = () => {
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.start();
+  };
+
+  const applySuggestion = (prompt: string) => {
+    setInput(prompt);
+  };
+
+  const sendMessage = async () => {
+    const text = input.trim();
+
+    if (!text || isLoading) return;
+
+    const fileContext =
+      attachedFiles.length > 0
+        ? `\n\nPRILOŽENÉ PDF DOKUMENTY:\n${attachedFiles
+            .map((file, index) => {
+              return `${index + 1}. ${file.name} (${formatBytes(file.size)})`;
+            })
+            .join('\n')}`
+        : '';
+
+    const finalUserText = `${text}${fileContext}`;
+
+    const userMsg: ChatMessage = {
+      role: 'user',
+      content: finalUserText,
+    };
+
+    const nextMessages = [...messages, userMsg];
+
+    setMessages(nextMessages);
+    setInput('');
+    setIsLoading(true);
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: nextMessages,
+          agent,
+          attachedFiles,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`API error ${res.status}`);
+      }
+
+      if (!res.body) {
+        throw new Error('No stream');
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      let fullText = '';
+
+      setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        fullText += chunk;
+
+        setMessages((prev) => {
+          const updated = [...prev];
+
+          updated[updated.length - 1] = {
+            role: 'assistant',
+            content: fullText,
+          };
+
+          return updated;
+        });
+      }
+
+      setCanvasText(fullText);
+
+      const parsed = parseSections(fullText);
+
+      if (parsed.analysis || parsed.score || parsed.tips) {
+        setPopupData(parsed);
+        setPopup(true);
+      }
+    } catch (error) {
+      console.error(error);
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content:
+            '❌ Nastala chyba pri komunikácii s API. Skontroluj /api/chat, API kľúče a vybraného AI agenta.',
+        },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-[#020617] text-white p-6">
-
-      {/* HEADER */}
-      <h1 className="text-3xl font-black mb-4">{modeName}</h1>
-
-      {/* MODE SWITCH */}
-      <div className="flex gap-2 mb-4 flex-wrap">
-        {modes.map(m => (
-          <button
-            key={m}
-            onClick={() => setMode(m)}
-            className={`px-3 py-1 rounded-full text-sm font-semibold ${
-              mode === m
-                ? 'bg-purple-600'
-                : 'bg-white/10 text-gray-300'
-            }`}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
-
-      {/* 🔥 AGENT SWITCH */}
-      <div className="flex gap-2 mb-6 overflow-x-auto">
-        {[
-          ['auto','Auto'],
-          ['openai','GPT'],
-          ['claude','Claude'],
-          ['gemini','Gemini'],
-          ['grok','Grok'],
-          ['mistral','Mistral'],
-        ].map(([key,label]) => (
-          <button
-            key={key}
-            onClick={() => setAgent(key)}
-            className={`px-3 py-1 rounded-full text-xs font-semibold ${
-              agent === key
-                ? 'bg-purple-600'
-                : 'bg-white/10 text-gray-300'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* CHAT */}
-      <div className="h-[55vh] overflow-y-auto mb-6 space-y-4 bg-black/30 p-4 rounded-xl">
-
-        {messages.length === 0 && (
-          <div className="text-center opacity-50 mt-10">
-            Napíš zadanie a začni…
-          </div>
-        )}
-
-        {messages.map((m, i) => (
-          <div key={i} className={m.role === 'user' ? 'text-right' : ''}>
-            <div className="inline-block bg-white/10 p-3 rounded-xl max-w-[70%] whitespace-pre-line">
-              {m.content}
-            </div>
-          </div>
-        ))}
-
-        {isLoading && (
-          <div className="text-purple-400 animate-pulse">
-            🤖 Premýšľam...
-          </div>
-        )}
-      </div>
-
-      {/* INPUT */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          sendMessage();
-        }}
-        className="flex gap-2"
-      >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Napíš zadanie..."
-          className="flex-1 bg-black/40 p-3 rounded-xl outline-none"
-        />
-
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="bg-purple-600 px-5 rounded-xl"
-        >
-          Odoslať
-        </button>
-      </form>
-
-      {/* ================= POPUP ================= */}
-      {popup && popupData && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-
-          <div className="bg-[#020617] w-[95%] max-w-6xl p-6 rounded-xl grid grid-cols-3 gap-6 shadow-2xl">
-
-            {/* LEFT */}
-            <div className="col-span-2 overflow-y-auto max-h-[80vh]">
-              <h2 className="text-xl font-bold mb-3">📄 Výstup</h2>
-              <div className="whitespace-pre-line text-gray-300">
-                {popupData.output}
-              </div>
+    <div className="min-h-screen bg-[#050711] text-white">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1400px] flex-col px-4 py-6 md:px-8">
+        {/* TOP NAV */}
+        <header className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-blue-500 shadow-lg shadow-violet-700/30">
+              <Sparkles className="h-6 w-6 text-white" />
             </div>
 
-            {/* RIGHT */}
-            <div className="space-y-4">
+            <div>
+              <h1 className="text-2xl font-black tracking-tight">ZEDPERA</h1>
+              <p className="text-sm text-slate-400">AI vedúci práce</p>
+            </div>
+          </div>
 
-              <div className="bg-white/10 p-4 rounded-xl">
-                <h3>📊 Skóre</h3>
-                <div className="text-3xl text-green-400">
-                  {popupData.score || '—'}
+          <nav className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setMessages([]);
+                setInput('');
+                setCanvasText('');
+                setPopup(false);
+                setPopupData(null);
+              }}
+              className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-700/30"
+            >
+              + Nový chat
+            </button>
+
+            <button
+              type="button"
+              className="rounded-2xl bg-white/10 px-5 py-3 text-sm font-bold text-white"
+            >
+              Chat
+            </button>
+
+            <button
+              type="button"
+              className="rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
+            >
+              Historie
+            </button>
+
+            <button
+              type="button"
+              className="rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
+            >
+              Zdroje
+            </button>
+
+            <button
+              type="button"
+              className="rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
+            >
+              Profil
+            </button>
+
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+              Více
+            </button>
+          </nav>
+        </header>
+
+        {/* TITLE */}
+        <section className="mb-5">
+          <h2 className="text-4xl font-black tracking-tight">CHAT</h2>
+
+          <p className="mt-2 text-sm text-slate-400">
+            Vyber AI agenta, prilož PDF dokumenty alebo diktuj zadanie hlasom.
+          </p>
+        </section>
+
+        {/* AGENT SWITCH */}
+        <div className="mb-6 flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-violet-600 px-4 py-2 text-xs font-black uppercase tracking-wide text-white">
+            Model
+          </span>
+
+          {agents.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setAgent(item.key)}
+              className={`rounded-full px-4 py-2 text-sm font-black transition ${
+                agent === item.key
+                  ? 'bg-violet-600 text-white shadow-lg shadow-violet-700/30'
+                  : 'bg-white/10 text-slate-300 hover:bg-white/15 hover:text-white'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        {/* MAIN CHAT AREA */}
+        <div className="relative flex flex-1 flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl shadow-black/30">
+          {/* EMPTY STATE */}
+          {messages.length === 0 && (
+            <div className="flex flex-1 flex-col items-center justify-center px-5 py-10">
+              <div className="mb-6 text-center">
+                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
+                  <Brain className="h-7 w-7" />
                 </div>
+
+                <h3 className="text-3xl font-black">Začněte konverzaci</h3>
+
+                <p className="mt-2 text-slate-400">
+                  Zeptejte se na cokoliv ohledně vaší závěrečné práce.
+                </p>
               </div>
 
-              <div className="bg-white/10 p-4 rounded-xl">
-                <h3>⚠️ Analýza</h3>
-                <div className="text-sm whitespace-pre-line">
-                  {popupData.analysis}
+              <div className="grid w-full max-w-4xl gap-3 md:grid-cols-2">
+                {suggestions.map((item) => {
+                  const Icon = item.icon;
+
+                  return (
+                    <button
+                      key={item.title}
+                      type="button"
+                      onClick={() => applySuggestion(item.prompt)}
+                      className="group flex items-center gap-4 rounded-3xl border border-white/10 bg-white/[0.055] p-5 text-left transition hover:border-violet-400/50 hover:bg-white/[0.085]"
+                    >
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200 transition group-hover:bg-violet-600 group-hover:text-white">
+                        <Icon className="h-5 w-5" />
+                      </span>
+
+                      <span className="text-base font-bold leading-6 text-slate-200">
+                        {item.title}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* MESSAGES */}
+          {messages.length > 0 && (
+            <div className="flex-1 overflow-y-auto px-5 py-6 md:px-8">
+              <div className="mx-auto max-w-5xl space-y-5">
+                {messages.map((message, index) => (
+                  <div
+                    key={`${message.role}-${index}`}
+                    className={`flex ${
+                      message.role === 'user' ? 'justify-end' : 'justify-start'
+                    }`}
+                  >
+                    <div
+                      className={`max-w-[85%] whitespace-pre-wrap rounded-3xl px-5 py-4 text-sm leading-7 shadow-lg ${
+                        message.role === 'user'
+                          ? 'bg-violet-600 text-white shadow-violet-700/20'
+                          : 'border border-white/10 bg-white/[0.065] text-slate-200 shadow-black/20'
+                      }`}
+                    >
+                      {message.content}
+                    </div>
+                  </div>
+                ))}
+
+                {isLoading && (
+                  <div className="flex justify-start">
+                    <div className="rounded-3xl border border-white/10 bg-white/[0.065] px-5 py-4 text-sm font-bold text-violet-200">
+                      🤖 {activeAgentLabel} premýšľa...
+                    </div>
+                  </div>
+                )}
+
+                <div ref={chatEndRef} />
+              </div>
+            </div>
+          )}
+
+          {/* ATTACHED FILES */}
+          {attachedFiles.length > 0 && (
+            <div className="border-t border-white/10 px-5 py-4 md:px-8">
+              <div className="mx-auto max-w-5xl">
+                <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.15em] text-slate-400">
+                  <UploadCloud className="h-4 w-4 text-violet-300" />
+                  Pripojené súbory ({attachedFiles.length})
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {attachedFiles.map((file) => (
+                    <div
+                      key={file.id}
+                      className="inline-flex items-center gap-3 rounded-2xl border border-violet-400/30 bg-violet-500/15 px-4 py-3 text-sm text-violet-100"
+                    >
+                      <FileText className="h-4 w-4" />
+
+                      <span className="max-w-[220px] truncate font-bold">
+                        {file.name}
+                      </span>
+
+                      <span className="text-xs text-violet-200/70">
+                        {formatBytes(file.size)}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => removeFile(file.id)}
+                        className="rounded-full p-1 text-violet-100 hover:bg-white/10"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </div>
+            </div>
+          )}
 
-              <div className="bg-white/10 p-4 rounded-xl">
-                <h3>✏️ Odporúčania</h3>
-                <div className="text-sm whitespace-pre-line">
-                  {popupData.tips}
+          {/* INPUT PANEL */}
+          <div className="border-t border-white/10 bg-[#070a16] px-5 py-5 md:px-8">
+            <div className="mx-auto max-w-5xl rounded-[28px] border border-violet-500/40 bg-violet-950/30 p-4 shadow-2xl shadow-violet-950/40">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-black uppercase tracking-[0.2em] text-slate-500">
+                    Model
+                  </span>
+
+                  {agents.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setAgent(item.key)}
+                      className={`rounded-xl px-3 py-1.5 text-xs font-black transition ${
+                        agent === item.key
+                          ? 'bg-violet-600 text-white'
+                          : 'border border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => setCanvasOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-black text-slate-300 hover:bg-white/10 hover:text-white"
+                >
+                  <Paintbrush className="h-4 w-4" />
+                  Canvas
+                </button>
+              </div>
+
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  sendMessage();
+                }}
+                className="flex items-end gap-3"
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => handleFiles(event.target.files)}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-slate-300 transition hover:bg-white/10 hover:text-white"
+                  title="Priložiť PDF"
+                >
+                  <Paperclip className="h-6 w-6" />
+                </button>
+
+                <textarea
+                  value={input}
+                  rows={2}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      sendMessage();
+                    }
+                  }}
+                  placeholder="Napíšte správu..."
+                  className="min-h-[54px] flex-1 resize-none bg-transparent px-2 py-3 text-base leading-6 text-white outline-none placeholder:text-slate-500"
+                />
+
+                <button
+                  type="button"
+                  onClick={startDictation}
+                  className={`mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl transition ${
+                    isListening
+                      ? 'bg-red-500 text-white'
+                      : 'text-slate-300 hover:bg-white/10 hover:text-white'
+                  }`}
+                  title="Diktovať"
+                >
+                  <Mic className="h-5 w-5" />
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isLoading || !input.trim()}
+                  className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-600 text-white shadow-lg shadow-violet-700/40 transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  title="Odoslať"
+                >
+                  <Send className="h-5 w-5" />
+                </button>
+              </form>
+            </div>
+
+            <p className="mt-3 text-center text-xs text-slate-500">
+              Zedpera si může vymýšlet zdroje. Veškeré zdroje si zkontrolujte.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* CANVAS */}
+      {canvasOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">
+          <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+              <div>
+                <h2 className="text-2xl font-black">Canvas</h2>
+
+                <p className="text-sm text-slate-400">
+                  Tu si môžeš upravovať, kopírovať alebo pripravovať výsledný
+                  text.
+                </p>
               </div>
 
               <button
-                onClick={() => setPopup(false)}
-                className="bg-red-500 w-full py-2 rounded-xl"
+                type="button"
+                onClick={() => setCanvasOpen(false)}
+                className="rounded-2xl bg-white/10 p-3 text-slate-300 hover:bg-white/15 hover:text-white"
               >
-                Zavrieť
+                <X className="h-5 w-5" />
               </button>
-
             </div>
 
+            <textarea
+              value={canvasText}
+              onChange={(event) => setCanvasText(event.target.value)}
+              placeholder="Canvas je zatiaľ prázdny. Po odpovedi AI sa sem vloží posledný výstup."
+              className="flex-1 resize-none bg-[#050711] p-6 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-600"
+            />
           </div>
         </div>
       )}
 
+      {/* POPUP RESULT */}
+      {popup && popupData && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="grid max-h-[90vh] w-full max-w-6xl gap-6 overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] p-6 shadow-2xl md:grid-cols-3">
+            <div className="col-span-2 overflow-y-auto pr-2">
+              <h2 className="mb-4 text-2xl font-black">📄 Výstup</h2>
+
+              <div className="whitespace-pre-wrap text-sm leading-7 text-slate-300">
+                {popupData.output}
+              </div>
+            </div>
+
+            <div className="space-y-4 overflow-y-auto">
+              <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
+                <h3 className="mb-2 font-black">📊 Skóre</h3>
+
+                <div className="text-3xl font-black text-emerald-400">
+                  {popupData.score || '—'}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
+                <h3 className="mb-2 font-black">⚠️ Analýza</h3>
+
+                <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                  {popupData.analysis || 'Bez analýzy.'}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
+                <h3 className="mb-2 font-black">✏️ Odporúčania</h3>
+
+                <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                  {popupData.tips || 'Bez odporúčaní.'}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCanvasText(popupData.output || '');
+                  setCanvasOpen(true);
+                  setPopup(false);
+                }}
+                className="w-full rounded-2xl bg-violet-600 py-3 font-black text-white hover:bg-violet-500"
+              >
+                Otvoriť v Canvase
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPopup(false)}
+                className="w-full rounded-2xl bg-red-500 py-3 font-black text-white hover:bg-red-400"
+              >
+                Zavrieť
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   BookOpen,
   CheckCircle2,
@@ -1611,6 +1612,8 @@ const initialProfile: Profile = {
 // ================= COMPONENT =================
 
 export default function ProfileForm({ onClose, onSave }: ProfileFormProps) {
+  const router = useRouter();
+
   const [profile, setProfile] = useState<Profile>(initialProfile);
 
   const labels = UI[profile.language];
@@ -1685,21 +1688,37 @@ export default function ProfileForm({ onClose, onSave }: ProfileFormProps) {
     localStorage.setItem('profiles_full', JSON.stringify(newProfiles));
   };
 
-  const saveProfile = () => {
-    if (!profile.title.trim() || !profile.type) {
-      alert(labels.validation);
-      return;
-    }
+const saveProfile = () => {
+  if (!profile.title.trim()) {
+    alert(
+      profile.language === 'SK'
+        ? 'Vyplň názov práce.'
+        : 'Please fill in the title of the work.'
+    );
+    return;
+  }
 
-    const payload = createPayload();
-
-    savePayloadToStorage(payload);
-
-    onSave?.(payload);
-    onClose?.();
-
-    alert(profile.language === 'SK' ? 'Profil bol uložený.' : 'Profile saved.');
+  const payload: SavedProfile = {
+    ...profile,
+    id:
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : Date.now().toString(),
+    schema,
+    interfaceLanguage: profile.language,
+    workLanguage: profile.workLanguage,
+    savedAt: new Date().toISOString(),
   };
+
+  savePayloadToStorage(payload);
+
+  onSave?.(payload);
+  onClose?.();
+
+  alert(profile.language === 'SK' ? 'Profil bol uložený.' : 'Profile saved.');
+
+  router.push('/projects');
+};
 
   return (
     <main className="min-h-screen bg-[#f4f6fb] text-white">

@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   BookOpen,
   Brain,
   FileText,
   GraduationCap,
+  History,
   Library,
   Mic,
   MoreHorizontal,
@@ -15,6 +17,7 @@ import {
   Send,
   Sparkles,
   UploadCloud,
+  User,
   X,
 } from 'lucide-react';
 
@@ -44,6 +47,44 @@ type ParsedResult = {
   tips: string;
 };
 
+type SavedProfile = {
+  id?: string;
+  type?: string;
+  level?: string;
+  title?: string;
+  topic?: string;
+  field?: string;
+  supervisor?: string;
+  citation?: string;
+  language?: string;
+  workLanguage?: string;
+  annotation?: string;
+  goal?: string;
+  problem?: string;
+  methodology?: string;
+  hypotheses?: string;
+  researchQuestions?: string;
+  practicalPart?: string;
+  scientificContribution?: string;
+  businessProblem?: string;
+  businessGoal?: string;
+  implementation?: string;
+  caseStudy?: string;
+  reflection?: string;
+  sourcesRequirement?: string;
+  keywordsList?: string[];
+  keywords?: string[];
+  savedAt?: string;
+  schema?: {
+    label?: string;
+    description?: string;
+    recommendedLength?: string;
+    structure?: string[];
+    requiredSections?: string[];
+    aiInstruction?: string;
+  };
+};
+
 declare global {
   interface Window {
     webkitSpeechRecognition?: any;
@@ -66,43 +107,50 @@ const agents: {
 
 const suggestions: {
   title: string;
-  prompt: string;
+  actionTitle: string;
+  instruction: string;
   icon: any;
 }[] = [
   {
     title: 'Navrhni mi úvod mé práce',
-    prompt:
-      'Navrhni mi profesionálny úvod mojej záverečnej práce podľa profilu práce. Úvod má byť akademický, logicky členený a vhodný pre vysokú školu.',
+    actionTitle: 'Úvod práce',
+    instruction:
+      'Na základe uloženého profilu práce vytvor profesionálny akademický úvod práce. Úvod má vychádzať výlučne z profilu práce, témy, cieľa, odboru, typu práce, metodológie, anotácie a ďalších dostupných údajov. Úvod má byť plynulý, odborný, vhodný pre záverečnú prácu a bez zbytočných všeobecných fráz.',
     icon: PenLine,
   },
   {
     title: 'Napiš mi abstrakt',
-    prompt:
-      'Napíš mi abstrakt práce podľa profilu práce. Abstrakt má stručne obsahovať tému, cieľ, metodológiu, výsledky a prínos práce.',
+    actionTitle: 'Abstrakt',
+    instruction:
+      'Na základe uloženého profilu práce vytvor abstrakt. Abstrakt má obsahovať tému, cieľ práce, problém, metodológiu, očakávané výsledky alebo prínos práce. Text má byť akademický, stručný, vecný a pripravený na vloženie do práce.',
     icon: BookOpen,
   },
   {
     title: 'Brainstormuj se mnou strukturu kapitol a podkapitol',
-    prompt:
-      'Navrhni detailnú štruktúru kapitol a podkapitol mojej práce. Štruktúra má byť logická, akademická a vhodná pre zvolený typ práce.',
+    actionTitle: 'Štruktúra kapitol',
+    instruction:
+      'Na základe uloženého profilu práce navrhni detailnú štruktúru kapitol a podkapitol. Štruktúra musí rešpektovať typ práce, odporúčaný rozsah, cieľ, metodológiu, praktickú časť a citačný štýl. Ku každej kapitole doplň krátke vysvetlenie, čo má obsahovať.',
     icon: GraduationCap,
   },
   {
     title: 'Teď mi pomůžeš napsat návrh kapitoly.',
-    prompt:
-      'Pomôž mi napísať návrh kapitoly mojej práce. Najprv navrhni osnovu kapitoly, potom odporúčané podkapitoly a následne ukážkový text.',
+    actionTitle: 'Návrh kapitoly',
+    instruction:
+      'Na základe uloženého profilu práce priprav návrh kapitoly. Najprv navrhni vhodnú kapitolu, potom jej podkapitoly a následne napíš ukážkový akademický text. Text musí zodpovedať typu práce, odboru, cieľu a metodológii.',
     icon: FileText,
   },
   {
     title: 'Pomoz mi citovat tento zdroj',
-    prompt:
-      'Pomôž mi správne citovať zdroj podľa citačnej normy mojej práce. Vysvetli, ako má byť citácia v texte aj v zozname literatúry.',
+    actionTitle: 'Citovanie zdroja',
+    instruction:
+      'Na základe uloženého profilu práce a zvoleného citačného štýlu vysvetli, ako správne citovať zdroje v texte a v zozname literatúry. Ak sú priložené PDF dokumenty, zohľadni ich ako potenciálne zdroje a upozorni, že bibliografické údaje treba skontrolovať.',
     icon: Library,
   },
   {
     title: 'Pomoz mi přepsat můj text do akademického jazyka.',
-    prompt:
-      'Prepíš môj text do akademického jazyka. Zachovaj význam, zlepši odborný štýl, logiku viet a odstráň neformálne formulácie.',
+    actionTitle: 'Akademické preformulovanie',
+    instruction:
+      'Na základe uloženého profilu práce priprav akademický štýl písania pre túto prácu. Ak používateľ doplní text, prepíš ho odborne. Ak text nedoplnil, vytvor ukážku akademicky formulovaného odseku podľa témy, cieľa a odboru práce.',
     icon: BookOpen,
   },
 ];
@@ -134,10 +182,198 @@ function createFileId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function safeJsonParse<T>(value: string | null): T | null {
+  if (!value) return null;
+
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeProfile(raw: any): SavedProfile | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  if (raw.profile && typeof raw.profile === 'object') {
+    return {
+      ...raw.profile,
+      schema: raw.schema || raw.profile.schema,
+      interfaceLanguage: raw.interfaceLanguage,
+      workLanguage: raw.workLanguage || raw.profile.workLanguage,
+      savedAt: raw.savedAt || raw.generatedAt || raw.profile.savedAt,
+    };
+  }
+
+  return raw as SavedProfile;
+}
+
+function profileToPrompt(profile: SavedProfile | null) {
+  if (!profile) {
+    return `
+ULOŽENÝ PROFIL PRÁCE:
+Profil práce nie je dostupný. Používateľ pravdepodobne ešte neuložil profil práce.
+V odpovedi ho upozorni, že pre presnejší výstup má najprv vytvoriť a uložiť profil práce v sekcii Profil práce.
+`;
+  }
+
+  const keywords =
+    profile.keywordsList && profile.keywordsList.length > 0
+      ? profile.keywordsList
+      : profile.keywords || [];
+
+  return `
+ULOŽENÝ PROFIL PRÁCE:
+Názov práce: ${profile.title || 'Neuvedené'}
+Téma práce: ${profile.topic || 'Neuvedené'}
+Typ práce: ${profile.schema?.label || profile.type || 'Neuvedené'}
+Odbornosť / úroveň: ${profile.level || 'Neuvedené'}
+Odbor / predmet / oblasť: ${profile.field || 'Neuvedené'}
+Vedúci práce / školiteľ: ${profile.supervisor || 'Neuvedené'}
+Jazyk rozhrania: ${profile.language || 'Neuvedené'}
+Jazyk výslednej práce: ${profile.workLanguage || profile.language || 'SK'}
+Citačná norma: ${profile.citation || 'Neuvedené'}
+Odporúčaný rozsah: ${profile.schema?.recommendedLength || 'Neuvedené'}
+
+Anotácia:
+${profile.annotation || 'Neuvedené'}
+
+Cieľ práce:
+${profile.goal || 'Neuvedené'}
+
+Výskumný / odborný problém:
+${profile.problem || 'Neuvedené'}
+
+Metodológia:
+${profile.methodology || 'Neuvedené'}
+
+Hypotézy:
+${profile.hypotheses || 'Neuvedené'}
+
+Výskumné otázky:
+${profile.researchQuestions || 'Neuvedené'}
+
+Praktická / analytická časť:
+${profile.practicalPart || 'Neuvedené'}
+
+Vedecký / odborný prínos:
+${profile.scientificContribution || 'Neuvedené'}
+
+Firemný / manažérsky problém:
+${profile.businessProblem || 'Neuvedené'}
+
+Manažérsky cieľ:
+${profile.businessGoal || 'Neuvedené'}
+
+Implementácia:
+${profile.implementation || 'Neuvedené'}
+
+Prípadová štúdia / organizácia:
+${profile.caseStudy || 'Neuvedené'}
+
+Reflexia:
+${profile.reflection || 'Neuvedené'}
+
+Požiadavky na zdroje:
+${profile.sourcesRequirement || 'Neuvedené'}
+
+Kľúčové slová:
+${keywords.length > 0 ? keywords.join(', ') : 'Neuvedené'}
+
+Štruktúra práce podľa šablóny:
+${
+  profile.schema?.structure?.length
+    ? profile.schema.structure.map((item, index) => `${index + 1}. ${item}`).join('\n')
+    : 'Neuvedené'
+}
+
+Povinné časti:
+${
+  profile.schema?.requiredSections?.length
+    ? profile.schema.requiredSections.map((item) => `- ${item}`).join('\n')
+    : 'Neuvedené'
+}
+
+Špecifická AI inštrukcia typu práce:
+${profile.schema?.aiInstruction || 'Neuvedené'}
+`;
+}
+
+function filesToPrompt(files: AttachedFile[]) {
+  if (!files.length) return '';
+
+  return `
+PRIPOJENÉ PDF DOKUMENTY:
+${files
+  .map((file, index) => {
+    return `${index + 1}. ${file.name} (${formatBytes(file.size)})`;
+  })
+  .join('\n')}
+
+Poznámka:
+Ak backend tieto PDF dokumenty spracúva, použi ich obsah ako doplnkový zdroj.
+Ak backend posiela iba názvy súborov bez obsahu, výslovne upozorni, že nebolo možné overiť obsah PDF.
+`;
+}
+
+function buildPromptFromProfile({
+  userInstruction,
+  userText,
+  profile,
+  files,
+}: {
+  userInstruction: string;
+  userText?: string;
+  profile: SavedProfile | null;
+  files: AttachedFile[];
+}) {
+  const workLanguage = profile?.workLanguage || profile?.language || 'SK';
+
+  return `
+Si ZEDPERA, akademický AI asistent a AI vedúci práce.
+
+TVOJA ÚLOHA:
+${userInstruction}
+
+DÔLEŽITÉ PRAVIDLÁ:
+- Odpovedaj v jazyku práce: ${workLanguage}.
+- Čerpaj primárne z uloženého profilu práce.
+- Ak sú priložené PDF dokumenty, zohľadni ich ako doplnkové zdroje.
+- Nevymýšľaj konkrétne bibliografické údaje ako autor, rok, DOI alebo názov článku, ak ich nemáš overené.
+- Text má byť akademický, použiteľný v záverečnej práci a logicky členený.
+- Nepíš všeobecné frázy bez nadväznosti na profil práce.
+- Ak v profile chýbajú údaje, doplň ich rozumne, ale jasne uveď, čo by bolo vhodné doplniť.
+
+${profileToPrompt(profile)}
+
+${filesToPrompt(files)}
+
+DOPLŇUJÚCE ZADANIE OD POUŽÍVATEĽA:
+${userText?.trim() || 'Bez doplňujúceho zadania.'}
+
+FORMÁT ODPOVEDE:
+=== VÝSTUP ===
+Vytvor hlavný výsledný text.
+
+=== ANALÝZA ===
+Stručne vysvetli, z ktorých údajov profilu si čerpal.
+
+=== SKÓRE ===
+Ohodnoť použiteľnosť výstupu pre akademickú prácu od 0 do 100.
+
+=== ODPORÚČANIA ===
+Uveď konkrétne odporúčania, čo má používateľ doplniť alebo skontrolovať.
+`;
+}
+
 // ================= PAGE =================
 
 export default function ChatPage() {
+  const router = useRouter();
+
   const [agent, setAgent] = useState<Agent>('gemini');
+
+  const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -153,11 +389,36 @@ export default function ChatPage() {
   const [popupData, setPopupData] = useState<ParsedResult | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const scrollAreaRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const activeAgentLabel = useMemo(() => {
     return agents.find((item) => item.key === agent)?.label || 'Gemini';
   }, [agent]);
+
+  useEffect(() => {
+    const activeRaw = localStorage.getItem('active_profile');
+    const profileRaw = localStorage.getItem('profile');
+    const profilesRaw = localStorage.getItem('profiles_full');
+
+    const active = normalizeProfile(safeJsonParse<any>(activeRaw));
+    const profile = normalizeProfile(safeJsonParse<any>(profileRaw));
+    const profiles = safeJsonParse<any[]>(profilesRaw);
+
+    if (active) {
+      setActiveProfile(active);
+      return;
+    }
+
+    if (profile) {
+      setActiveProfile(profile);
+      return;
+    }
+
+    if (Array.isArray(profiles) && profiles.length > 0) {
+      setActiveProfile(normalizeProfile(profiles[0]));
+    }
+  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -241,29 +502,18 @@ export default function ChatPage() {
     recognition.start();
   };
 
-  const applySuggestion = (prompt: string) => {
-    setInput(prompt);
-  };
-
-  const sendMessage = async () => {
-    const text = input.trim();
-
-    if (!text || isLoading) return;
-
-    const fileContext =
-      attachedFiles.length > 0
-        ? `\n\nPRILOŽENÉ PDF DOKUMENTY:\n${attachedFiles
-            .map((file, index) => {
-              return `${index + 1}. ${file.name} (${formatBytes(file.size)})`;
-            })
-            .join('\n')}`
-        : '';
-
-    const finalUserText = `${text}${fileContext}`;
+  const sendPromptToApi = async ({
+    visibleUserText,
+    promptForApi,
+  }: {
+    visibleUserText: string;
+    promptForApi: string;
+  }) => {
+    if (isLoading) return;
 
     const userMsg: ChatMessage = {
       role: 'user',
-      content: finalUserText,
+      content: visibleUserText,
     };
 
     const nextMessages = [...messages, userMsg];
@@ -273,15 +523,24 @@ export default function ChatPage() {
     setIsLoading(true);
 
     try {
+      const apiMessages = [
+        ...messages,
+        {
+          role: 'user' as const,
+          content: promptForApi,
+        },
+      ];
+
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: nextMessages,
+          messages: apiMessages,
           agent,
           attachedFiles,
+          profile: activeProfile,
         }),
       });
 
@@ -344,151 +603,196 @@ export default function ChatPage() {
     }
   };
 
+  const sendMessage = async () => {
+    const text = input.trim();
+
+    if (!text || isLoading) return;
+
+    const promptForApi = buildPromptFromProfile({
+      userInstruction:
+        'Odpovedz na otázku alebo zadanie používateľa. Pri odpovedi vychádzaj z uloženého profilu práce a z priložených PDF dokumentov, ak sú dostupné.',
+      userText: text,
+      profile: activeProfile,
+      files: attachedFiles,
+    });
+
+    await sendPromptToApi({
+      visibleUserText: text,
+      promptForApi,
+    });
+  };
+
+  const runSuggestion = async (suggestion: (typeof suggestions)[number]) => {
+    const promptForApi = buildPromptFromProfile({
+      userInstruction: suggestion.instruction,
+      userText: '',
+      profile: activeProfile,
+      files: attachedFiles,
+    });
+
+    await sendPromptToApi({
+      visibleUserText: suggestion.title,
+      promptForApi,
+    });
+  };
+
+  const resetChat = () => {
+    setMessages([]);
+    setInput('');
+    setCanvasText('');
+    setPopup(false);
+    setPopupData(null);
+
+    if (scrollAreaRef.current) {
+      scrollAreaRef.current.scrollTop = 0;
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#050711] text-white">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1400px] flex-col px-4 py-6 md:px-8">
-        {/* TOP NAV */}
-        <header className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-blue-500 shadow-lg shadow-violet-700/30">
-              <Sparkles className="h-6 w-6 text-white" />
-            </div>
+    <div className="h-screen overflow-hidden bg-[#050711] text-white">
+      <div className="mx-auto flex h-screen w-full max-w-[1400px] flex-col px-4 py-4 md:px-8">
+        {/* TOP NAV FIXED */}
+        <header className="shrink-0 border-b border-white/10 pb-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <button
+              type="button"
+              onClick={() => router.push('/dashboard')}
+              className="flex items-center gap-4"
+            >
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-blue-500 shadow-lg shadow-violet-700/30">
+                <Sparkles className="h-6 w-6 text-white" />
+              </div>
 
-            <div>
-              <h1 className="text-2xl font-black tracking-tight">ZEDPERA</h1>
-              <p className="text-sm text-slate-400">AI vedúci práce</p>
-            </div>
+              <div className="text-left">
+                <h1 className="text-2xl font-black tracking-tight">ZEDPERA</h1>
+                <p className="text-sm text-slate-400">AI vedúci práce</p>
+              </div>
+            </button>
+
+            <nav className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={resetChat}
+                className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-700/30"
+              >
+                + Nový chat
+              </button>
+
+              <button
+                type="button"
+                onClick={() => router.push('/chat')}
+                className="rounded-2xl bg-white/10 px-5 py-3 text-sm font-bold text-white"
+              >
+                Chat
+              </button>
+
+              <button
+                type="button"
+                onClick={() => router.push('/history')}
+                className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
+              >
+                <History className="h-4 w-4" />
+                Historie
+              </button>
+
+              <button
+                type="button"
+                onClick={() => router.push('/sources')}
+                className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
+              >
+                <Library className="h-4 w-4" />
+                Zdroje
+              </button>
+
+              <button
+                type="button"
+                onClick={() => router.push('/profile')}
+                className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
+              >
+                <User className="h-4 w-4" />
+                Profil
+              </button>
+
+              <button
+                type="button"
+                onClick={() => router.push('/settings')}
+                className="inline-flex items-center gap-1 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+                Více
+              </button>
+            </nav>
           </div>
-
-          <nav className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setMessages([]);
-                setInput('');
-                setCanvasText('');
-                setPopup(false);
-                setPopupData(null);
-              }}
-              className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-700/30"
-            >
-              + Nový chat
-            </button>
-
-            <button
-              type="button"
-              className="rounded-2xl bg-white/10 px-5 py-3 text-sm font-bold text-white"
-            >
-              Chat
-            </button>
-
-            <button
-              type="button"
-              className="rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
-            >
-              Historie
-            </button>
-
-            <button
-              type="button"
-              className="rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
-            >
-              Zdroje
-            </button>
-
-            <button
-              type="button"
-              className="rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
-            >
-              Profil
-            </button>
-
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
-            >
-              <MoreHorizontal className="h-4 w-4" />
-              Více
-            </button>
-          </nav>
         </header>
 
-        {/* TITLE */}
-        <section className="mb-5">
-          <h2 className="text-4xl font-black tracking-tight">CHAT</h2>
+        {/* TITLE FIXED */}
+        <section className="shrink-0 py-4">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h2 className="text-4xl font-black tracking-tight">CHAT</h2>
 
-          <p className="mt-2 text-sm text-slate-400">
-            Vyber AI agenta, prilož PDF dokumenty alebo diktuj zadanie hlasom.
-          </p>
+              <p className="mt-2 text-sm text-slate-400">
+                Chat čerpá z uloženého profilu práce, vybraného AI agenta a
+                pripojených PDF dokumentov.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
+              Aktívny profil:{' '}
+              <span className="font-black text-white">
+                {activeProfile?.title || 'Nie je vybraný'}
+              </span>
+            </div>
+          </div>
         </section>
 
-        {/* AGENT SWITCH */}
-        <div className="mb-6 flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-violet-600 px-4 py-2 text-xs font-black uppercase tracking-wide text-white">
-            Model
-          </span>
+        {/* MAIN CHAT FIXED CONTAINER */}
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl shadow-black/30">
+          {/* SCROLLABLE INNER CONTENT */}
+          <div
+            ref={scrollAreaRef}
+            className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8"
+          >
+            {messages.length === 0 ? (
+              <div className="mx-auto flex min-h-full max-w-6xl flex-col items-center justify-center py-8">
+                <div className="mb-8 text-center">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
+                    <Brain className="h-7 w-7" />
+                  </div>
 
-          {agents.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => setAgent(item.key)}
-              className={`rounded-full px-4 py-2 text-sm font-black transition ${
-                agent === item.key
-                  ? 'bg-violet-600 text-white shadow-lg shadow-violet-700/30'
-                  : 'bg-white/10 text-slate-300 hover:bg-white/15 hover:text-white'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+                  <h3 className="text-3xl font-black">Začněte konverzaci</h3>
 
-        {/* MAIN CHAT AREA */}
-        <div className="relative flex flex-1 flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl shadow-black/30">
-          {/* EMPTY STATE */}
-          {messages.length === 0 && (
-            <div className="flex flex-1 flex-col items-center justify-center px-5 py-10">
-              <div className="mb-6 text-center">
-                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
-                  <Brain className="h-7 w-7" />
+                  <p className="mt-2 text-slate-400">
+                    Vyberte okno nižšie. AI použije uložený profil práce a
+                    pripojené PDF dokumenty.
+                  </p>
                 </div>
 
-                <h3 className="text-3xl font-black">Začněte konverzaci</h3>
+                <div className="grid w-full gap-4 md:grid-cols-2">
+                  {suggestions.map((item) => {
+                    const Icon = item.icon;
 
-                <p className="mt-2 text-slate-400">
-                  Zeptejte se na cokoliv ohledně vaší závěrečné práce.
-                </p>
+                    return (
+                      <button
+                        key={item.title}
+                        type="button"
+                        onClick={() => runSuggestion(item)}
+                        disabled={isLoading}
+                        className="group flex min-h-[110px] items-center gap-5 rounded-3xl border border-white/10 bg-white/[0.055] p-6 text-left transition hover:border-violet-400/50 hover:bg-white/[0.085] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200 transition group-hover:bg-violet-600 group-hover:text-white">
+                          <Icon className="h-6 w-6" />
+                        </span>
+
+                        <span className="text-lg font-black leading-7 text-slate-100">
+                          {item.title}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-
-              <div className="grid w-full max-w-4xl gap-3 md:grid-cols-2">
-                {suggestions.map((item) => {
-                  const Icon = item.icon;
-
-                  return (
-                    <button
-                      key={item.title}
-                      type="button"
-                      onClick={() => applySuggestion(item.prompt)}
-                      className="group flex items-center gap-4 rounded-3xl border border-white/10 bg-white/[0.055] p-5 text-left transition hover:border-violet-400/50 hover:bg-white/[0.085]"
-                    >
-                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200 transition group-hover:bg-violet-600 group-hover:text-white">
-                        <Icon className="h-5 w-5" />
-                      </span>
-
-                      <span className="text-base font-bold leading-6 text-slate-200">
-                        {item.title}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* MESSAGES */}
-          {messages.length > 0 && (
-            <div className="flex-1 overflow-y-auto px-5 py-6 md:px-8">
+            ) : (
               <div className="mx-auto max-w-5xl space-y-5">
                 {messages.map((message, index) => (
                   <div
@@ -519,19 +823,19 @@ export default function ChatPage() {
 
                 <div ref={chatEndRef} />
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* ATTACHED FILES */}
           {attachedFiles.length > 0 && (
-            <div className="border-t border-white/10 px-5 py-4 md:px-8">
+            <div className="shrink-0 border-t border-white/10 px-5 py-3 md:px-8">
               <div className="mx-auto max-w-5xl">
                 <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.15em] text-slate-400">
                   <UploadCloud className="h-4 w-4 text-violet-300" />
                   Pripojené súbory ({attachedFiles.length})
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="flex max-h-[92px] flex-wrap gap-2 overflow-y-auto pr-1">
                   {attachedFiles.map((file) => (
                     <div
                       key={file.id}
@@ -561,8 +865,8 @@ export default function ChatPage() {
             </div>
           )}
 
-          {/* INPUT PANEL */}
-          <div className="border-t border-white/10 bg-[#070a16] px-5 py-5 md:px-8">
+          {/* INPUT PANEL FIXED */}
+          <div className="shrink-0 border-t border-white/10 bg-[#070a16] px-5 py-4 md:px-8">
             <div className="mx-auto max-w-5xl rounded-[28px] border border-violet-500/40 bg-violet-950/30 p-4 shadow-2xl shadow-violet-950/40">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
                 <div className="flex flex-wrap items-center gap-2">

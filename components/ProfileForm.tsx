@@ -2,16 +2,13 @@
 
 import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   BookOpen,
-  Brain,
   CheckCircle2,
   FileText,
   GraduationCap,
   Languages,
   Library,
-  Loader2,
   Save,
   Sparkles,
   Target,
@@ -96,13 +93,8 @@ type Profile = {
   field: string;
   supervisor: string;
   citation: CitationKey;
-
-  // Jazyk rozhrania aplikácie
   language: Lang;
-
-  // Jazyk výslednej práce
   workLanguage: Lang;
-
   annotation: string;
   goal: string;
   problem: string;
@@ -221,7 +213,7 @@ const UI: Record<
     keywords: 'Kľúčové slová',
     keywordPlaceholder: 'Pridať kľúčové slovo',
     keywordsHint: 'Odporúčané: 5 – 15 kľúčových slov.',
-    validation: 'Vyplň názov práce, tému a typ práce.',
+    validation: 'Vyplň názov práce a typ práce.',
     activeTemplate: 'Aktívna šablóna',
     aiProfile: 'AI profil',
   },
@@ -252,7 +244,7 @@ const UI: Record<
     keywords: 'Klíčová slova',
     keywordPlaceholder: 'Přidat klíčové slovo',
     keywordsHint: 'Doporučeno: 5 – 15 klíčových slov.',
-    validation: 'Vyplň název práce, téma a typ práce.',
+    validation: 'Vyplň název práce a typ práce.',
     activeTemplate: 'Aktivní šablona',
     aiProfile: 'AI profil',
   },
@@ -283,7 +275,7 @@ const UI: Record<
     keywords: 'Keywords',
     keywordPlaceholder: 'Add keyword',
     keywordsHint: 'Recommended: 5–15 keywords.',
-    validation: 'Please fill in the title, topic and work type.',
+    validation: 'Please fill in the title and work type.',
     activeTemplate: 'Active template',
     aiProfile: 'AI profile',
   },
@@ -314,7 +306,7 @@ const UI: Record<
     keywords: 'Schlüsselwörter',
     keywordPlaceholder: 'Schlüsselwort hinzufügen',
     keywordsHint: 'Empfohlen: 5–15 Schlüsselwörter.',
-    validation: 'Bitte Titel, Thema und Arbeitstyp ausfüllen.',
+    validation: 'Bitte Titel und Arbeitstyp ausfüllen.',
     activeTemplate: 'Aktive Vorlage',
     aiProfile: 'KI-Profil',
   },
@@ -345,7 +337,7 @@ const UI: Record<
     keywords: 'Słowa kluczowe',
     keywordPlaceholder: 'Dodaj słowo kluczowe',
     keywordsHint: 'Zalecane: 5–15 słów kluczowych.',
-    validation: 'Uzupełnij tytuł, temat i typ pracy.',
+    validation: 'Uzupełnij tytuł i typ pracy.',
     activeTemplate: 'Aktywny szablon',
     aiProfile: 'Profil AI',
   },
@@ -376,7 +368,7 @@ const UI: Record<
     keywords: 'Kulcsszavak',
     keywordPlaceholder: 'Kulcsszó hozzáadása',
     keywordsHint: 'Ajánlott: 5–15 kulcsszó.',
-    validation: 'Töltse ki a címet, témát és a munka típusát.',
+    validation: 'Töltse ki a címet és a munka típusát.',
     activeTemplate: 'Aktív sablon',
     aiProfile: 'AI profil',
   },
@@ -545,18 +537,15 @@ function fieldText(
     annotation: {
       SK: {
         label: 'Anotácia',
-        placeholder:
-          'Stručne popíšte, o čom bude práca a aký problém rieši.',
+        placeholder: 'Stručne popíšte, o čom bude práca a aký problém rieši.',
       },
       CZ: {
         label: 'Anotace',
-        placeholder:
-          'Stručně popište, o čem bude práce a jaký problém řeší.',
+        placeholder: 'Stručně popište, o čem bude práce a jaký problém řeší.',
       },
       EN: {
         label: 'Annotation',
-        placeholder:
-          'Briefly describe the work and the problem it addresses.',
+        placeholder: 'Briefly describe the work and the problem it addresses.',
       },
       DE: {
         label: 'Annotation',
@@ -564,13 +553,11 @@ function fieldText(
       },
       PL: {
         label: 'Streszczenie',
-        placeholder:
-          'Krótko opisz temat pracy i problem, który rozwiązuje.',
+        placeholder: 'Krótko opisz temat pracy i problem, który rozwiązuje.',
       },
       HU: {
         label: 'Annotáció',
-        placeholder:
-          'Röviden írja le a dolgozat témáját és problémáját.',
+        placeholder: 'Röviden írja le a dolgozat témáját és problémáját.',
       },
     },
     goal: {
@@ -602,13 +589,11 @@ function fieldText(
     problem: {
       SK: {
         label: 'Výskumný problém',
-        placeholder:
-          'Aký odborný alebo výskumný problém bude práca riešiť?',
+        placeholder: 'Aký odborný alebo výskumný problém bude práca riešiť?',
       },
       CZ: {
         label: 'Výzkumný problém',
-        placeholder:
-          'Jaký odborný nebo výzkumný problém bude práce řešit?',
+        placeholder: 'Jaký odborný nebo výzkumný problém bude práce řešit?',
       },
       EN: {
         label: 'Research problem',
@@ -617,8 +602,7 @@ function fieldText(
       },
       DE: {
         label: 'Forschungsproblem',
-        placeholder:
-          'Welches Forschungs- oder Fachproblem wird behandelt?',
+        placeholder: 'Welches Forschungs- oder Fachproblem wird behandelt?',
       },
       PL: {
         label: 'Problem badawczy',
@@ -708,13 +692,11 @@ function fieldText(
       },
       PL: {
         label: 'Pytania badawcze',
-        placeholder:
-          'Wpisz główne i szczegółowe pytania badawcze.',
+        placeholder: 'Wpisz główne i szczegółowe pytania badawcze.',
       },
       HU: {
         label: 'Kutatási kérdések',
-        placeholder:
-          'Adja meg a fő és részletes kutatási kérdéseket.',
+        placeholder: 'Adja meg a fő és részletes kutatási kérdéseket.',
       },
     },
     practicalPart: {
@@ -725,8 +707,7 @@ function fieldText(
       },
       CZ: {
         label: 'Praktická část',
-        placeholder:
-          'Popište obsah praktické nebo analytické části.',
+        placeholder: 'Popište obsah praktické nebo analytické části.',
       },
       EN: {
         label: 'Practical part',
@@ -743,8 +724,7 @@ function fieldText(
       },
       HU: {
         label: 'Gyakorlati rész',
-        placeholder:
-          'Írja le a gyakorlati vagy elemző részt.',
+        placeholder: 'Írja le a gyakorlati vagy elemző részt.',
       },
     },
     scientificContribution: {
@@ -773,8 +753,7 @@ function fieldText(
       },
       HU: {
         label: 'Tudományos / szakmai hozzájárulás',
-        placeholder:
-          'Milyen új hozzájárulást nyújt a munka?',
+        placeholder: 'Milyen új hozzájárulást nyújt a munka?',
       },
     },
     businessProblem: {
@@ -844,18 +823,15 @@ function fieldText(
     implementation: {
       SK: {
         label: 'Implementačný plán',
-        placeholder:
-          'Ako sa má navrhnuté riešenie zaviesť do praxe?',
+        placeholder: 'Ako sa má navrhnuté riešenie zaviesť do praxe?',
       },
       CZ: {
         label: 'Implementační plán',
-        placeholder:
-          'Jak se má navržené řešení zavést do praxe?',
+        placeholder: 'Jak se má navržené řešení zavést do praxe?',
       },
       EN: {
         label: 'Implementation plan',
-        placeholder:
-          'How should the proposed solution be implemented?',
+        placeholder: 'How should the proposed solution be implemented?',
       },
       DE: {
         label: 'Implementierungsplan',
@@ -863,13 +839,11 @@ function fieldText(
       },
       PL: {
         label: 'Plan wdrożenia',
-        placeholder:
-          'Jak należy wdrożyć proponowane rozwiązanie?',
+        placeholder: 'Jak należy wdrożyć proponowane rozwiązanie?',
       },
       HU: {
         label: 'Megvalósítási terv',
-        placeholder:
-          'Hogyan kell bevezetni a javasolt megoldást?',
+        placeholder: 'Hogyan kell bevezetni a javasolt megoldást?',
       },
     },
     caseStudy: {
@@ -1637,10 +1611,7 @@ const initialProfile: Profile = {
 // ================= COMPONENT =================
 
 export default function ProfileForm({ onClose, onSave }: ProfileFormProps) {
-  const router = useRouter();
-
   const [profile, setProfile] = useState<Profile>(initialProfile);
-  const [loading, setLoading] = useState(false);
 
   const labels = UI[profile.language];
 
@@ -1715,7 +1686,7 @@ export default function ProfileForm({ onClose, onSave }: ProfileFormProps) {
   };
 
   const saveProfile = () => {
-    if (!profile.title.trim() || !profile.topic.trim() || !profile.type) {
+    if (!profile.title.trim() || !profile.type) {
       alert(labels.validation);
       return;
     }
@@ -1728,69 +1699,6 @@ export default function ProfileForm({ onClose, onSave }: ProfileFormProps) {
     onClose?.();
 
     alert(profile.language === 'SK' ? 'Profil bol uložený.' : 'Profile saved.');
-  };
-
-  const generate = async () => {
-    if (!profile.type || !profile.title.trim() || !profile.topic.trim()) {
-      alert(labels.validation);
-      return;
-    }
-
-    setLoading(true);
-
-    const payload = {
-      profile,
-      schema,
-      interfaceLanguage: profile.language,
-      workLanguage: profile.workLanguage,
-      workTypeLabel: schema.label,
-      levelLabel: LEVEL_LABELS[profile.level][profile.language],
-      citation: profile.citation,
-      generatedAt: new Date().toISOString(),
-    };
-
-    localStorage.setItem('profile', JSON.stringify(payload));
-
-    const prompt = buildPrompt(payload);
-
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          mode: 'write',
-          messages: [
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error('API error');
-      }
-
-      const text = await res.text();
-
-      localStorage.setItem('generated_structure', text);
-      localStorage.setItem('generated_prompt', prompt);
-
-      router.push('/editor');
-    } catch (error) {
-      console.error(error);
-
-      alert(
-        profile.language === 'SK'
-          ? 'Nastala chyba pri generovaní práce.'
-          : 'An error occurred while generating the work.'
-      );
-    } finally {
-      setLoading(false);
-    }
   };
 
   return (
@@ -1915,17 +1823,11 @@ export default function ProfileForm({ onClose, onSave }: ProfileFormProps) {
                 title={labels.basic}
                 icon={<FileText className="h-5 w-5" />}
               >
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-3">
                   <Input
                     value={profile.title}
                     placeholder={labels.titlePlaceholder}
                     onChange={(value) => update('title', value)}
-                  />
-
-                  <Input
-                    value={profile.topic}
-                    placeholder={labels.topicPlaceholder}
-                    onChange={(value) => update('topic', value)}
                   />
 
                   <Input
@@ -2006,25 +1908,6 @@ export default function ProfileForm({ onClose, onSave }: ProfileFormProps) {
 
               {/* CTA */}
               <div className="flex flex-col gap-3 sm:flex-row">
-                <button
-                  onClick={generate}
-                  disabled={loading}
-                  type="button"
-                  className="inline-flex items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 px-6 py-4 text-base font-black text-white transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                      {labels.generating}
-                    </>
-                  ) : (
-                    <>
-                      <Brain className="h-5 w-5" />
-                      {labels.generate}
-                    </>
-                  )}
-                </button>
-
                 <button
                   onClick={saveProfile}
                   type="button"
@@ -2127,110 +2010,6 @@ export default function ProfileForm({ onClose, onSave }: ProfileFormProps) {
       </div>
     </main>
   );
-}
-
-// ================= PROMPT BUILDER =================
-
-function buildPrompt(payload: {
-  profile: Profile;
-  schema: WorkSchema;
-  interfaceLanguage: Lang;
-  workLanguage: Lang;
-  workTypeLabel: string;
-  levelLabel: string;
-  citation: CitationKey;
-}) {
-  const {
-    profile,
-    schema,
-    interfaceLanguage,
-    workLanguage,
-    workTypeLabel,
-    levelLabel,
-    citation,
-  } = payload;
-
-  return `
-You are ZEDPERA, an advanced academic writing assistant.
-
-IMPORTANT:
-- Interface language of the form: ${interfaceLanguage}
-- Final output language of the academic work: ${workLanguage}
-- The whole generated academic work must be written in language: ${workLanguage}
-- Work type: ${workTypeLabel}
-- Citation style: ${citation}
-- Expertise level: ${levelLabel}
-- Strictly follow the selected work type schema.
-- Do not use one universal structure for all types.
-- If the work type is Essay, do not generate bachelor/master thesis methodology, hypotheses or empirical results.
-- If the work type is MBA, focus on business problem, analysis, solution and implementation.
-- If the work type is DBA, combine applied research with managerial contribution.
-- If the work type is Dissertation, require original scientific contribution, research design, methodology and discussion.
-- Use academic tone appropriate to the selected level.
-- Respect the selected citation style: ${citation}.
-- Do not mix languages. The final academic output must be only in: ${workLanguage}.
-
-SPECIFIC INSTRUCTION FOR THIS TYPE:
-${schema.aiInstruction}
-
-PROFILE:
-Interface language: ${interfaceLanguage}
-Final work language: ${workLanguage}
-Title: ${profile.title}
-Topic: ${profile.topic}
-Field: ${profile.field}
-Supervisor: ${profile.supervisor}
-Annotation: ${profile.annotation}
-Goal: ${profile.goal}
-Problem: ${profile.problem}
-Methodology: ${profile.methodology}
-Research questions: ${profile.researchQuestions}
-Hypotheses: ${profile.hypotheses}
-Practical part: ${profile.practicalPart}
-Scientific contribution: ${profile.scientificContribution}
-Business problem: ${profile.businessProblem}
-Business goal: ${profile.businessGoal}
-Implementation: ${profile.implementation}
-Case study: ${profile.caseStudy}
-Reflection: ${profile.reflection}
-Source requirements: ${profile.sourcesRequirement}
-Keywords: ${profile.keywordsList.join(', ')}
-
-REQUIRED STRUCTURE:
-${schema.structure.map((item, index) => `${index + 1}. ${item}`).join('\n')}
-
-REQUIRED SECTIONS:
-${schema.requiredSections.map((item) => `- ${item}`).join('\n')}
-
-GENERATE OUTPUT IN THIS FORMAT:
-
-=== PROFIL_PRACE ===
-Create a concise but precise profile of the work.
-
-=== OSNOVA ===
-Create a detailed academic outline according to the selected type.
-
-=== UVOD ===
-Draft the introduction.
-
-=== TEORETICKA_CAST ===
-Draft the theoretical part if appropriate for this work type.
-
-=== METODOLOGIA ===
-Generate methodology only if it is appropriate for this work type.
-
-=== PRAKTICKA_CAST ===
-Generate practical, analytical, empirical or business part according to the selected work type.
-
-=== DISKUSIA ===
-Generate discussion only if suitable for this type.
-
-=== ZAVER ===
-Generate the conclusion.
-
-=== ZDROJE_NAVRH ===
-Suggest types of sources and citation approach according to ${citation}.
-`;
 }
 
 // ================= UI COMPONENTS =================

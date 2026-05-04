@@ -1,7 +1,8 @@
 'use client';
 
-import { useRouter, usePathname } from "next/navigation";
-import { useState } from "react";
+import { useRouter, usePathname } from 'next/navigation';
+import { useState } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import {
   Home,
   Bot,
@@ -16,21 +17,30 @@ import {
   Sparkles,
   Bell,
   X,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+} from 'lucide-react';
 
-// 🔥 IMPORTUJ COMPONENT (NIE page!)
-import ProfileForm from "@/components/ProfileForm";
+// Importujeme pôvodný komponent
+import ProfileFormOriginal from '@/components/ProfileForm';
 
 // ================= TYPES =================
+
 type NavItem = [string, string, LucideIcon];
 
+type ProfileFormProps = {
+  onClose?: () => void;
+  onSave?: (data: unknown) => void;
+};
+
+// Toto rieši chybu:
+// Property 'onClose' does not exist on type 'IntrinsicAttributes'
+const ProfileForm = ProfileFormOriginal as unknown as React.ComponentType<ProfileFormProps>;
+
 // ================= COMPONENT =================
+
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const pathname = usePathname() || "";
+  const pathname = usePathname() || '';
 
-  // 🔥 MODAL STATE
   const [openProfile, setOpenProfile] = useState(false);
 
   const items: NavItem[] = [
@@ -60,42 +70,57 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   const title =
-    Object.entries(titleMap).find(([key]) =>
-      pathname.startsWith(key)
-    )?.[1] || "Zedpera";
+    Object.entries(titleMap).find(([key]) => pathname.startsWith(key))?.[1] ||
+    'Zedpera';
+
+  const openNewProfile = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('profile');
+      localStorage.removeItem('active_profile');
+    }
+
+    setOpenProfile(true);
+  };
+
+  const closeProfile = () => {
+    setOpenProfile(false);
+  };
 
   return (
     <div className="flex min-h-screen bg-[#020617] text-white">
-
       {/* ================= SIDEBAR ================= */}
-      <aside className="w-72 border-r border-white/10 bg-[#020617] p-5 flex flex-col">
 
+      <aside className="flex w-72 flex-col border-r border-white/10 bg-[#020617] p-5">
         {/* LOGO */}
-        <div className="flex items-center gap-3 mb-6">
-          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400 flex items-center justify-center">
+
+        <div className="mb-6 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400">
             <Sparkles className="text-white" size={20} />
           </div>
+
           <div>
             <div className="font-black text-white">ZEDPERA</div>
             <div className="text-xs text-gray-400">AI vedúci práce</div>
           </div>
         </div>
 
-        {/* 🔥 NEW PROJECT */}
+        {/* NEW PROJECT */}
+
         <button
-          onClick={() => {
-            localStorage.removeItem('profile'); // 🔥 reset
-            setOpenProfile(true);
-          }}
-          className="mb-6 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 py-3 font-bold hover:scale-[1.02] transition"
+          type="button"
+          onClick={openNewProfile}
+          className="mb-6 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 py-3 font-bold transition hover:scale-[1.02]"
         >
-          <Plus size={16} /> Nová práca
+          <Plus size={16} />
+          Nová práca
         </button>
 
         {/* NAVIGATION */}
+
         <nav className="flex flex-col gap-2">
           {items.map(([path, label, Icon]) => (
             <button
+              type="button"
               key={path}
               onClick={() => router.push(path)}
               className={`flex items-center gap-3 rounded-xl px-3 py-2 text-left transition ${
@@ -111,15 +136,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* FOOTER */}
+
         <div className="mt-auto text-xs text-gray-500">
           © {new Date().getFullYear()} Zedpera
         </div>
       </aside>
 
       {/* ================= CONTENT ================= */}
-      <div className="flex flex-1 flex-col">
 
+      <div className="flex flex-1 flex-col">
         {/* HEADER */}
+
         <header className="flex items-center justify-between border-b border-white/10 bg-[#020617]/80 px-6 py-4 backdrop-blur">
           <div>
             <h1 className="text-xl font-bold">{title}</h1>
@@ -129,38 +156,40 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-3">
-            <button className="text-gray-400 hover:text-white">
+            <button
+              type="button"
+              className="text-gray-400 hover:text-white"
+              aria-label="Notifikácie"
+            >
               <Bell size={20} />
             </button>
           </div>
         </header>
 
         {/* PAGE CONTENT */}
-        <main className="flex-1 p-6 overflow-auto">
-          {children}
-        </main>
 
+        <main className="flex-1 overflow-auto p-6">{children}</main>
       </div>
 
       {/* ================= MODAL ================= */}
+
       {openProfile && (
-        <div className="fixed inset-0 z-50 bg-[#020617] overflow-y-auto">
-
-          <div className="relative min-h-screen w-full max-w-[1400px] mx-auto p-6">
-
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-[#020617]">
+          <div className="relative mx-auto min-h-screen w-full max-w-[1400px] p-6">
             {/* CLOSE */}
+
             <button
-              onClick={() => setOpenProfile(false)}
-              className="fixed right-6 top-6 z-50 rounded-xl bg-white/10 p-2 text-gray-300 hover:text-white hover:bg-white/20 transition"
+              type="button"
+              onClick={closeProfile}
+              className="fixed right-6 top-6 z-50 rounded-xl bg-white/10 p-2 text-gray-300 transition hover:bg-white/20 hover:text-white"
+              aria-label="Zavrieť formulár"
             >
               <X size={22} />
             </button>
 
-            {/* 🔥 FORM */}
-            <ProfileForm
-              onClose={() => setOpenProfile(false)}
-            />
+            {/* FORM */}
 
+            <ProfileForm onClose={closeProfile} />
           </div>
         </div>
       )}

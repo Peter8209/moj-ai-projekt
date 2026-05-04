@@ -1,49 +1,22 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  BookOpen,
-  Brain,
-  CheckCircle2,
-  FileText,
-  GraduationCap,
-  Languages,
-  Library,
-  Loader2,
-  Save,
-  Sparkles,
-  Target,
-  Trash2,
-} from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 // ================= TYPES =================
 
-type Lang = 'SK' | 'CZ' | 'EN' | 'DE' | 'PL' | 'HU';
-
-type WorkTypeKey =
-  | 'seminar'
-  | 'essay'
-  | 'bachelor'
-  | 'master'
-  | 'dissertation'
-  | 'mba'
-  | 'dba';
-
-type LevelKey = 'expert' | 'academic' | 'standard';
-
-type CitationKey = 'APA7' | 'ISO690' | 'STN_ISO_690' | 'Harvard';
-
 type Profile = {
-  type: WorkTypeKey;
-  level: LevelKey;
+  id?: number;
+  type: string;
+  level: string;
   title: string;
   topic: string;
   field: string;
   supervisor: string;
-  citation: CitationKey;
-  language: Lang;
-  workLanguage: Lang;
+  citation: string;
+  language: string;
+  workLanguage: string;
   annotation: string;
   goal: string;
   methodology: string;
@@ -76,16 +49,20 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<Profile>(initialProfile);
   const [loading, setLoading] = useState(false);
 
-  // ================= AUTOSAVE =================
+  // ================= LOAD =================
 
   useEffect(() => {
-    const saved = localStorage.getItem('profile_draft');
-    if (saved) {
-      try {
-        setProfile(JSON.parse(saved));
-      } catch {}
+    const active = localStorage.getItem('active_profile');
+
+    if (active) {
+      setProfile(JSON.parse(active));
+    } else {
+      const draft = localStorage.getItem('profile_draft');
+      if (draft) setProfile(JSON.parse(draft));
     }
   }, []);
+
+  // ================= AUTOSAVE =================
 
   useEffect(() => {
     localStorage.setItem('profile_draft', JSON.stringify(profile));
@@ -103,15 +80,26 @@ export default function ProfilePage() {
   // ================= SAVE =================
 
   const saveProfile = () => {
-    const id = Date.now();
+    const id = profile.id || Date.now();
 
-    const payload = {
-      id,
+    const newProfile = {
       ...profile,
+      id,
       savedAt: new Date().toISOString(),
     };
 
-    localStorage.setItem(`profile_${id}`, JSON.stringify(payload));
+    // load existing
+    const stored = localStorage.getItem('profiles');
+    const profiles = stored ? JSON.parse(stored) : [];
+
+    // update or insert
+    const updated = profiles.filter((p: any) => p.id !== id);
+    updated.push(newProfile);
+
+    localStorage.setItem('profiles', JSON.stringify(updated));
+
+    // 🔥 nastav ako aktívny
+    localStorage.setItem('active_profile', JSON.stringify(newProfile));
 
     alert('Profil uložený');
   };
@@ -119,13 +107,17 @@ export default function ProfilePage() {
   // ================= GENERATE =================
 
   const generate = async () => {
-    if (!profile.title || !profile.topic) {
-      alert('Vyplň názov a tému');
+    const active = localStorage.getItem('active_profile');
+
+    if (!active) {
+      alert('Najprv ulož profil');
       return;
     }
 
-    if (profile.keywordsList.length < 3) {
-      alert('Minimálne 3 kľúčové slová');
+    const activeProfile = JSON.parse(active);
+
+    if (!activeProfile.title || !activeProfile.topic) {
+      alert('Vyplň názov a tému');
       return;
     }
 
@@ -135,7 +127,7 @@ export default function ProfilePage() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile }),
+        body: JSON.stringify({ profile: activeProfile }),
       });
 
       if (!res.ok) throw new Error();
@@ -158,9 +150,8 @@ export default function ProfilePage() {
     <main className="min-h-screen bg-[#050816] text-white p-6">
       <div className="max-w-5xl mx-auto space-y-6">
 
-        <h1 className="text-3xl font-black">ZEDPERA AI</h1>
+        <h1 className="text-3xl font-black">Profil práce</h1>
 
-        {/* INPUTS */}
         <input
           value={profile.title}
           onChange={(e) => update('title', e.target.value)}
@@ -182,31 +173,28 @@ export default function ProfilePage() {
           className="w-full p-3 bg-[#111525] rounded-xl"
         />
 
-        {/* KEYWORDS */}
         <KeywordsInput
           value={profile.keywordsList}
           onChange={(v) => update('keywordsList', v)}
         />
 
-        {/* BUTTONS */}
         <div className="flex gap-4">
           <button
             onClick={generate}
             className="bg-violet-600 px-6 py-3 rounded-xl font-bold"
           >
-            Generovať
+            Generovať z profilu
           </button>
 
           <button
             onClick={saveProfile}
             className="bg-white/10 px-6 py-3 rounded-xl"
           >
-            Uložiť
+            Uložiť profil
           </button>
         </div>
       </div>
 
-      {/* LOADING */}
       {loading && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center">
           <Loader2 className="animate-spin w-10 h-10" />
@@ -248,10 +236,7 @@ function KeywordsInput({
 
       <div className="flex gap-2 mt-2 flex-wrap">
         {value.map((k, i) => (
-          <span
-            key={i}
-            className="bg-violet-600 px-3 py-1 rounded-full text-xs"
-          >
+          <span key={i} className="bg-violet-600 px-3 py-1 rounded-full text-xs">
             {k}
           </span>
         ))}

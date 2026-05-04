@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import type { LucideIcon } from 'lucide-react';
 import {
   BarChart3,
   Bell,
@@ -30,9 +31,11 @@ import {
   X,
 } from 'lucide-react';
 
-import ProfileForm from '@/components/ProfileForm';
+import ProfileFormOriginal from '@/components/ProfileForm';
 
-// ================= TYPES =================
+// =====================================================
+// TYPES
+// =====================================================
 
 type View =
   | 'dashboard'
@@ -56,34 +59,56 @@ const featureCards = [
   { mode: 'plagiarism', title: 'Plagiátorstvo', icon: ShieldCheck },
 ] as const;
 
-type Mode = typeof featureCards[number]['mode'];
+type Mode = (typeof featureCards)[number]['mode'];
 
 type SavedProfile = {
   id: string;
   type?: string;
+  level?: string;
   title?: string;
   topic?: string;
   field?: string;
   supervisor?: string;
+  citation?: string;
   language?: string;
   workLanguage?: string;
+  annotation?: string;
   goal?: string;
   methodology?: string;
   keywords?: string[];
+  keywordsList?: string[];
   savedAt?: string;
 };
 
-// ================= WRAPPER =================
+// Toto rieši tvoju chybu:
+// ProfileForm je v súbore komponentu pravdepodobne definovaný bez props,
+// preto TypeScript odmietal <ProfileForm onSave={...} />.
+// Týmto mu povieme, že z dashboardu mu môžeme poslať voliteľný onSave.
+const ProfileForm = ProfileFormOriginal as unknown as React.ComponentType<{
+  onSave?: (data: SavedProfile) => void;
+}>;
+
+// =====================================================
+// PAGE WRAPPER
+// =====================================================
 
 export default function Page() {
   return (
-    <Suspense fallback={<div className="p-6 text-white bg-[#020617]">Loading...</div>}>
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#020617] p-6 text-white">
+          Načítavam...
+        </div>
+      }
+    >
       <DashboardPage />
     </Suspense>
   );
 }
 
-// ================= MAIN =================
+// =====================================================
+// MAIN DASHBOARD PAGE
+// =====================================================
 
 function DashboardPage() {
   const searchParams = useSearchParams();
@@ -97,34 +122,77 @@ function DashboardPage() {
   const [profiles, setProfiles] = useState<SavedProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
-  // ================= LOAD SUB =================
+  // =====================================================
+  // LOAD SUBSCRIPTION STATUS
+  // =====================================================
 
   useEffect(() => {
+    if (typeof document === 'undefined') return;
+
     if (document.cookie.includes('sub_active=1')) {
       setSubActive(true);
     }
   }, []);
 
   useEffect(() => {
+    if (typeof document === 'undefined') return;
+
     if (searchParams.get('success')) {
       document.cookie = 'sub_active=1; path=/';
       setSubActive(true);
     }
   }, [searchParams]);
 
-  // ================= LOAD PROFILES =================
+  // =====================================================
+  // LOAD PROFILES
+  // =====================================================
 
   useEffect(() => {
     loadProfiles();
   }, []);
 
+  const normalizeProfile = (profile: SavedProfile): SavedProfile => {
+    return {
+      ...profile,
+      id: profile.id || Date.now().toString(),
+      title: profile.title || 'Bez názvu',
+      savedAt: profile.savedAt || new Date().toISOString(),
+      keywords:
+        profile.keywords && profile.keywords.length > 0
+          ? profile.keywords
+          : profile.keywordsList || [],
+    };
+  };
+
   const loadProfiles = () => {
+    if (typeof window === 'undefined') return;
+
     try {
-      const list = JSON.parse(localStorage.getItem('profiles_full') || '[]');
+      const rawProfiles = localStorage.getItem('profiles_full');
+      const rawActive = localStorage.getItem('active_profile');
+
+      const list = rawProfiles ? JSON.parse(rawProfiles) : [];
+      const active = rawActive ? JSON.parse(rawActive) : null;
 
       if (Array.isArray(list)) {
-        setProfiles(list);
-        setActiveProfile(list[0] || null);
+        const normalizedList = list.map((item: SavedProfile) =>
+          normalizeProfile(item)
+        );
+
+        setProfiles(normalizedList);
+
+        if (active?.id) {
+          const found = normalizedList.find(
+            (item: SavedProfile) => item.id === active.id
+          );
+
+          setActiveProfile(found || normalizeProfile(active));
+        } else {
+          setActiveProfile(normalizedList[0] || null);
+        }
+      } else {
+        setProfiles([]);
+        setActiveProfile(null);
       }
     } catch {
       setProfiles([]);
@@ -132,17 +200,24 @@ function DashboardPage() {
     }
   };
 
-  // ================= SAVE PROFILE FROM MODAL =================
+  // =====================================================
+  // SAVE PROFILE FROM POPUP FORM
+  // =====================================================
 
   const handleProfileSave = (data: SavedProfile) => {
-    const payload: SavedProfile = {
-      ...data,
-      id: data.id || Date.now().toString(),
-      title: data.title || 'Bez názvu',
-      savedAt: data.savedAt || new Date().toISOString(),
-    };
+    if (typeof window === 'undefined') return;
 
-    const oldList = JSON.parse(localStorage.getItem('profiles_full') || '[]');
+    const payload = normalizeProfile(data);
+
+    let oldList: SavedProfile[] = [];
+
+    try {
+      const raw = localStorage.getItem('profiles_full');
+      const parsed = raw ? JSON.parse(raw) : [];
+      oldList = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      oldList = [];
+    }
 
     const newList = [
       payload,
@@ -159,20 +234,27 @@ function DashboardPage() {
     setView('profile');
   };
 
+  const closeProfileFormAndRefresh = () => {
+    setShowProfileForm(false);
+    loadProfiles();
+  };
+
   return (
-    <div className="min-h-screen flex bg-[#020617] text-white">
+    <div className="flex min-h-screen bg-[#020617] text-white">
       <Sidebar
         view={view}
         setView={setView}
         subActive={subActive}
         openForm={() => setShowProfileForm(true)}
-        openMyWorks={() => setShowProfileForm(true)}
+        openMyWorks={() => {
+          setShowProfileForm(true);
+        }}
       />
 
-      <main className="flex-1 min-w-0 flex flex-col">
+      <main className="flex min-w-0 flex-1 flex-col">
         <Header view={view} subActive={subActive} />
 
-        <div className="flex-1 p-6 md:p-8 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto p-6 md:p-8">
           {view === 'dashboard' && (
             <Dashboard
               setView={setView}
@@ -182,49 +264,92 @@ function DashboardPage() {
           )}
 
           {view === 'chat' && (
-            <Chat mode={mode} setMode={setMode} activeProfile={activeProfile} />
+            <Chat
+              mode={mode}
+              setMode={setMode}
+              activeProfile={activeProfile}
+            />
           )}
 
           {view === 'profile' && (
             <ProfileView
               profile={activeProfile}
               profiles={profiles}
-              setActiveProfile={setActiveProfile}
+              setActiveProfile={(profile) => {
+                setActiveProfile(profile);
+
+                if (typeof window !== 'undefined') {
+                  localStorage.setItem(
+                    'active_profile',
+                    JSON.stringify(profile)
+                  );
+                }
+              }}
               openForm={() => setShowProfileForm(true)}
             />
           )}
 
-          {view === 'packages' && <SimplePage title="Balíčky" text="Tu budú predplatné balíčky, doplnkové služby a aktivácia PRO funkcií." />}
-          {view === 'video' && <SimplePage title="Video návod" text="Tu bude video návod pre používateľa." />}
-          {view === 'history' && <SimplePage title="História" text="Tu bude história generovaní, auditov a uložených výstupov." />}
-          {view === 'settings' && <SimplePage title="Nastavenia" text="Tu budú nastavenia účtu, jazyka, fakturácie a aplikácie." />}
+          {view === 'packages' && (
+            <SimplePage
+              title="Balíčky"
+              text="Tu budú predplatné balíčky, doplnkové služby a aktivácia PRO funkcií."
+            />
+          )}
+
+          {view === 'video' && (
+            <SimplePage
+              title="Video návod"
+              text="Tu bude video návod pre používateľa."
+            />
+          )}
+
+          {view === 'history' && (
+            <SimplePage
+              title="História"
+              text="Tu bude história generovaní, auditov a uložených výstupov."
+            />
+          )}
+
+          {view === 'settings' && (
+            <SimplePage
+              title="Nastavenia"
+              text="Tu budú nastavenia účtu, jazyka, fakturácie a aplikácie."
+            />
+          )}
         </div>
       </main>
 
-      {/* ================= PROFILE MODAL ================= */}
+      {/* =====================================================
+          PROFILE POPUP MODAL
+      ===================================================== */}
+
       {showProfileForm && (
         <div className="fixed inset-0 z-[9999]">
-          <div
+          <button
+            type="button"
+            aria-label="Zavrieť popup"
             className="absolute inset-0 bg-black/75 backdrop-blur-sm"
-            onClick={() => setShowProfileForm(false)}
+            onClick={closeProfileFormAndRefresh}
           />
 
           <div className="absolute inset-0 flex items-center justify-center p-4">
             <div
-              onClick={(e) => e.stopPropagation()}
-              className="relative w-full max-w-5xl max-h-[92vh] overflow-y-auto rounded-3xl border border-white/10 bg-[#020617] shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+              className="relative max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-white/10 bg-[#020617] shadow-2xl"
             >
               <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/10 bg-[#020617]/95 px-6 py-5 backdrop-blur">
                 <div>
                   <h2 className="text-2xl font-black">Nová práca</h2>
                   <p className="text-sm text-gray-400">
-                    Vyplň profil práce. Po uložení sa údaje automaticky vložia do sekcie Profil práce.
+                    Vyplň profil práce. Po uložení sa údaje automaticky vložia
+                    do sekcie Profil práce.
                   </p>
                 </div>
 
                 <button
-                  onClick={() => setShowProfileForm(false)}
-                  className="rounded-xl bg-white/10 p-2 text-gray-300 hover:bg-white/20 hover:text-white"
+                  type="button"
+                  onClick={closeProfileFormAndRefresh}
+                  className="rounded-xl bg-white/10 p-2 text-gray-300 transition hover:bg-white/20 hover:text-white"
                 >
                   <X size={22} />
                 </button>
@@ -241,7 +366,9 @@ function DashboardPage() {
   );
 }
 
-// ================= SIDEBAR =================
+// =====================================================
+// SIDEBAR
+// =====================================================
 
 function Sidebar({
   view,
@@ -257,27 +384,28 @@ function Sidebar({
   openMyWorks: () => void;
 }) {
   return (
-    <aside className="w-[270px] shrink-0 bg-[#020617] border-r border-white/10 p-4 flex flex-col">
-      <div className="flex items-center gap-3 mb-8">
-        <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 flex items-center justify-center">
+    <aside className="flex w-[270px] shrink-0 flex-col border-r border-white/10 bg-[#020617] p-4">
+      <div className="mb-8 flex items-center gap-3">
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400">
           <Sparkles className="text-white" size={24} />
         </div>
 
         <div>
-          <div className="font-black text-xl leading-none">ZEDPERA</div>
+          <div className="text-xl font-black leading-none">ZEDPERA</div>
           <div className="text-sm text-gray-300">AI vedúci práce</div>
         </div>
 
         {subActive && (
-          <span className="ml-auto text-xs bg-purple-600 px-2 py-1 rounded">
+          <span className="ml-auto rounded bg-purple-600 px-2 py-1 text-xs">
             PRO
           </span>
         )}
       </div>
 
       <button
+        type="button"
         onClick={openForm}
-        className="mb-7 w-full rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 py-4 font-bold text-lg flex items-center justify-center gap-2 hover:opacity-90"
+        className="mb-7 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 py-4 text-lg font-bold transition hover:opacity-90"
       >
         <Plus size={20} />
         Nová práca
@@ -316,9 +444,7 @@ function Sidebar({
           active={view === 'chat'}
           icon={Library}
           label="Zdroje"
-          onClick={() => {
-            setView('chat');
-          }}
+          onClick={() => setView('chat')}
         />
 
         <SideItem
@@ -337,7 +463,7 @@ function Sidebar({
 
         <SideItem
           active={view === 'history'}
-          icon={ClockIcon}
+          icon={CalendarDays}
           label="História"
           onClick={() => setView('history')}
         />
@@ -352,7 +478,10 @@ function Sidebar({
 
       <div className="mt-auto pt-6">
         {!subActive && (
-          <button className="w-full flex items-center justify-center gap-2 bg-yellow-400 text-black py-3 rounded-xl font-bold">
+          <button
+            type="button"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-400 py-3 font-bold text-black"
+          >
             <Crown size={17} />
             Upgrade PRO
           </button>
@@ -362,10 +491,6 @@ function Sidebar({
   );
 }
 
-function ClockIcon(props: any) {
-  return <CalendarDays {...props} />;
-}
-
 function SideItem({
   active,
   icon: Icon,
@@ -373,16 +498,17 @@ function SideItem({
   onClick,
 }: {
   active: boolean;
-  icon: any;
+  icon: LucideIcon;
   label: string;
   onClick: () => void;
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      className={`w-full flex items-center gap-3 rounded-2xl px-4 py-3 text-left transition ${
+      className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition ${
         active
-          ? 'bg-white/10 text-white font-semibold'
+          ? 'bg-white/10 font-semibold text-white'
           : 'text-gray-300 hover:bg-white/5 hover:text-white'
       }`}
     >
@@ -392,7 +518,9 @@ function SideItem({
   );
 }
 
-// ================= HEADER =================
+// =====================================================
+// HEADER
+// =====================================================
 
 function Header({
   view,
@@ -412,15 +540,15 @@ function Header({
   };
 
   return (
-    <header className="h-20 flex items-center justify-between px-8 border-b border-white/10 bg-[#363946]">
+    <header className="flex h-20 items-center justify-between border-b border-white/10 bg-[#111827] px-8">
       <div>
-        <h1 className="text-2xl font-black text-black/80">{titleMap[view]}</h1>
+        <h1 className="text-2xl font-black text-white">{titleMap[view]}</h1>
         <p className="text-gray-300">AI platforma pre akademické písanie</p>
       </div>
 
       <div className="flex items-center gap-4">
         {subActive && (
-          <span className="text-purple-200 text-sm bg-purple-600/30 px-3 py-1 rounded-full">
+          <span className="rounded-full bg-purple-600/30 px-3 py-1 text-sm text-purple-200">
             PRO aktívne
           </span>
         )}
@@ -431,7 +559,9 @@ function Header({
   );
 }
 
-// ================= DASHBOARD =================
+// =====================================================
+// DASHBOARD
+// =====================================================
 
 function Dashboard({
   setView,
@@ -443,16 +573,16 @@ function Dashboard({
   openForm: () => void;
 }) {
   return (
-    <div className="max-w-7xl mx-auto space-y-10">
+    <div className="mx-auto max-w-7xl space-y-10">
       <section className="rounded-3xl border border-white/10 bg-[#050816] p-8">
         <div className="flex items-start justify-between gap-6">
           <div>
             <div className="mb-6 flex items-center gap-3">
               <Sparkles className="text-purple-400" />
-              <span className="font-black text-2xl">ZEDPERA</span>
+              <span className="text-2xl font-black">ZEDPERA</span>
             </div>
 
-            <h2 className="text-4xl md:text-5xl font-black leading-tight max-w-5xl">
+            <h2 className="max-w-5xl text-4xl font-black leading-tight md:text-5xl">
               Zisti čo je zlé na tvojej práci skôr než vedúci
             </h2>
 
@@ -463,37 +593,42 @@ function Dashboard({
           </div>
 
           <button
+            type="button"
             onClick={openForm}
-            className="shrink-0 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold flex items-center gap-2"
+            className="flex shrink-0 items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold"
           >
             <Plus size={20} />
             Nová práca
           </button>
         </div>
 
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-3">
           <Stat title="Projekty" value="3" />
           <Stat title="Texty" value="124" />
           <Stat title="AI skóre" value="87%" />
         </div>
 
-        <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {featureCards.map((f) => {
-            const Icon = f.icon;
+        <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {featureCards.map((feature) => {
+            const Icon = feature.icon;
 
             return (
               <button
-                key={f.mode}
+                type="button"
+                key={feature.mode}
                 onClick={() => {
-                  setMode(f.mode);
+                  setMode(feature.mode);
                   setView('chat');
                 }}
-                className="group rounded-3xl border border-white/10 bg-white/5 p-6 text-left hover:bg-white/10 transition"
+                className="group rounded-3xl border border-white/10 bg-white/5 p-6 text-left transition hover:bg-white/10"
               >
-                <Icon className="mb-5 text-purple-400 group-hover:scale-110 transition" size={30} />
-                <div className="font-bold text-lg">{f.title}</div>
+                <Icon
+                  className="mb-5 text-purple-400 transition group-hover:scale-110"
+                  size={30}
+                />
+                <div className="text-lg font-bold">{feature.title}</div>
                 <p className="mt-2 text-sm text-gray-400">
-                  {getModeDescription(f.mode)}
+                  {getModeDescription(feature.mode)}
                 </p>
               </button>
             );
@@ -504,7 +639,9 @@ function Dashboard({
   );
 }
 
-// ================= PROFILE VIEW =================
+// =====================================================
+// PROFILE VIEW
+// =====================================================
 
 function ProfileView({
   profile,
@@ -519,14 +656,19 @@ function ProfileView({
 }) {
   if (!profile) {
     return (
-      <div className="max-w-5xl mx-auto rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
+      <div className="mx-auto max-w-5xl rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
         <User className="mx-auto mb-4 text-purple-400" size={42} />
-        <h2 className="text-3xl font-black mb-2">Profil práce zatiaľ nie je vytvorený</h2>
-        <p className="text-gray-400 mb-6">
+
+        <h2 className="mb-2 text-3xl font-black">
+          Profil práce zatiaľ nie je vytvorený
+        </h2>
+
+        <p className="mb-6 text-gray-400">
           Klikni na tlačidlo nižšie a vytvor nový profil práce.
         </p>
 
         <button
+          type="button"
           onClick={openForm}
           className="rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-3 font-bold"
         >
@@ -536,8 +678,13 @@ function ProfileView({
     );
   }
 
+  const keywords =
+    profile.keywords && profile.keywords.length > 0
+      ? profile.keywords
+      : profile.keywordsList || [];
+
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-3xl font-black">Profil práce</h2>
@@ -547,6 +694,7 @@ function ProfileView({
         </div>
 
         <button
+          type="button"
           onClick={openForm}
           className="rounded-2xl bg-purple-600 px-5 py-3 font-bold"
         >
@@ -556,41 +704,51 @@ function ProfileView({
 
       {profiles.length > 1 && (
         <div className="flex flex-wrap gap-2 rounded-2xl border border-white/10 bg-white/5 p-3">
-          {profiles.map((p) => (
+          {profiles.map((item) => (
             <button
-              key={p.id}
-              onClick={() => setActiveProfile(p)}
+              type="button"
+              key={item.id}
+              onClick={() => setActiveProfile(item)}
               className={`rounded-xl px-4 py-2 text-sm ${
-                p.id === profile.id
+                item.id === profile.id
                   ? 'bg-purple-600 text-white'
                   : 'bg-white/10 text-gray-300 hover:bg-white/20'
               }`}
             >
-              {p.title || 'Bez názvu'}
+              {item.title || 'Bez názvu'}
             </button>
           ))}
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <ProfileCard label="Názov práce" value={profile.title} />
         <ProfileCard label="Typ práce" value={profile.type} />
-        <ProfileCard label="Jazyk práce" value={profile.workLanguage || profile.language} />
+        <ProfileCard label="Úroveň práce" value={profile.level} />
+        <ProfileCard
+          label="Jazyk práce"
+          value={profile.workLanguage || profile.language}
+        />
+        <ProfileCard label="Citovanie" value={profile.citation} />
+        <ProfileCard label="Vedúci práce" value={profile.supervisor} />
         <ProfileCard label="Téma" value={profile.topic} large />
         <ProfileCard label="Odbor" value={profile.field} />
-        <ProfileCard label="Vedúci práce" value={profile.supervisor} />
+        <ProfileCard label="Anotácia" value={profile.annotation} large />
         <ProfileCard label="Cieľ práce" value={profile.goal} large />
         <ProfileCard label="Metodológia" value={profile.methodology} large />
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-        <h3 className="text-lg font-bold mb-3">Kľúčové slová</h3>
+        <h3 className="mb-3 text-lg font-bold">Kľúčové slová</h3>
 
-        {profile.keywords?.length ? (
+        {keywords.length ? (
           <div className="flex flex-wrap gap-2">
-            {profile.keywords.map((k, i) => (
-              <span key={i} className="rounded-full bg-purple-600/30 px-3 py-1 text-purple-100">
-                {k}
+            {keywords.map((keyword, index) => (
+              <span
+                key={`${keyword}-${index}`}
+                className="rounded-full bg-purple-600/30 px-3 py-1 text-purple-100"
+              >
+                {keyword}
               </span>
             ))}
           </div>
@@ -612,16 +770,22 @@ function ProfileCard({
   large?: boolean;
 }) {
   return (
-    <div className={`rounded-3xl border border-white/10 bg-white/5 p-5 ${large ? 'lg:col-span-2' : ''}`}>
-      <div className="text-sm text-gray-400 mb-2">{label}</div>
-      <div className="text-lg font-semibold whitespace-pre-wrap">
+    <div
+      className={`rounded-3xl border border-white/10 bg-white/5 p-5 ${
+        large ? 'lg:col-span-2' : ''
+      }`}
+    >
+      <div className="mb-2 text-sm text-gray-400">{label}</div>
+      <div className="whitespace-pre-wrap text-lg font-semibold">
         {value || <span className="text-gray-600">Nevyplnené</span>}
       </div>
     </div>
   );
 }
 
-// ================= CHAT / MODULES =================
+// =====================================================
+// CHAT / MODULES
+// =====================================================
 
 function Chat({
   mode,
@@ -632,15 +796,20 @@ function Chat({
   setMode: (m: Mode) => void;
   activeProfile: SavedProfile | null;
 }) {
-  const current = featureCards.find((f) => f.mode === mode) || featureCards[0];
+  const current = useMemo(() => {
+    return featureCards.find((feature) => feature.mode === mode) || featureCards[0];
+  }, [mode]);
+
+  const CurrentIcon = current.icon;
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="mx-auto max-w-7xl space-y-6">
       <ModuleTabs mode={mode} setMode={setMode} />
 
       <div className="rounded-3xl border border-white/10 bg-[#050816] p-6">
         <div className="mb-6 flex items-center gap-3">
-          <current.icon className="text-purple-400" size={30} />
+          <CurrentIcon className="text-purple-400" size={30} />
+
           <div>
             <h2 className="text-3xl font-black">{current.title}</h2>
             <p className="text-gray-400">{getModeDescription(mode)}</p>
@@ -679,21 +848,22 @@ function ModuleTabs({
   return (
     <div className="rounded-3xl border border-white/10 bg-white/5 p-3">
       <div className="flex gap-2 overflow-x-auto">
-        {featureCards.map((f) => {
-          const Icon = f.icon;
+        {featureCards.map((feature) => {
+          const Icon = feature.icon;
 
           return (
             <button
-              key={f.mode}
-              onClick={() => setMode(f.mode)}
-              className={`shrink-0 rounded-2xl px-4 py-3 flex items-center gap-2 text-sm font-semibold ${
-                mode === f.mode
+              type="button"
+              key={feature.mode}
+              onClick={() => setMode(feature.mode)}
+              className={`flex shrink-0 items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold ${
+                mode === feature.mode
                   ? 'bg-purple-600 text-white'
                   : 'bg-white/10 text-gray-300 hover:bg-white/20'
               }`}
             >
               <Icon size={17} />
-              {f.title}
+              {feature.title}
             </button>
           );
         })}
@@ -702,14 +872,35 @@ function ModuleTabs({
   );
 }
 
-// ================= MODULE CONTENTS =================
+// =====================================================
+// MODULE CONTENTS
+// =====================================================
 
 function WriteModule() {
   return (
     <ModuleLayout>
-      <Input label="Názov kapitoly" placeholder="Napr. Teoretické východiská práce" />
-      <Select label="Typ výstupu" options={['Úvod', 'Kapitola', 'Podkapitola', 'Záver', 'Abstrakt', 'Anotácia']} />
-      <Textarea label="Zadanie pre AI" placeholder="Popíš, čo má AI napísať..." />
+      <Input
+        label="Názov kapitoly"
+        placeholder="Napr. Teoretické východiská práce"
+      />
+
+      <Select
+        label="Typ výstupu"
+        options={[
+          'Úvod',
+          'Kapitola',
+          'Podkapitola',
+          'Záver',
+          'Abstrakt',
+          'Anotácia',
+        ]}
+      />
+
+      <Textarea
+        label="Zadanie pre AI"
+        placeholder="Popíš, čo má AI napísať..."
+      />
+
       <ActionButton icon={FileText} label="Generovať text" />
     </ModuleLayout>
   );
@@ -718,12 +909,37 @@ function WriteModule() {
 function SourcesModule() {
   return (
     <ModuleLayout>
-      <Input label="Téma vyhľadávania" placeholder="Napr. inkluzívne vzdelávanie v predprimárnom veku" />
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Select label="Roky" options={['Bez obmedzenia', 'Posledné 2 roky', 'Posledných 5 rokov', '2010–2015', '2015–2020']} />
-        <Select label="Typ zdroja" options={['Všetko', 'Len PDF', 'Open Access', 'Články', 'Štúdie']} />
+      <Input
+        label="Téma vyhľadávania"
+        placeholder="Napr. inkluzívne vzdelávanie v predprimárnom veku"
+      />
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Select
+          label="Roky"
+          options={[
+            'Bez obmedzenia',
+            'Posledné 2 roky',
+            'Posledných 5 rokov',
+            '2010–2015',
+            '2015–2020',
+          ]}
+        />
+
+        <Select
+          label="Typ zdroja"
+          options={[
+            'Všetko',
+            'Len PDF',
+            'Open Access',
+            'Články',
+            'Štúdie',
+          ]}
+        />
+
         <Select label="Jazyk" options={['EN', 'SK', 'CZ', 'DE']} />
       </div>
+
       <ActionButton icon={Search} label="Vyhľadať zdroje" />
     </ModuleLayout>
   );
@@ -732,8 +948,21 @@ function SourcesModule() {
 function SupervisorModule() {
   return (
     <ModuleLayout>
-      <Textarea label="Vlož text práce" placeholder="Vlož kapitolu alebo časť práce na kritické posúdenie..." />
-      <Select label="Prísnosť hodnotenia" options={['Mierna', 'Štandardná', 'Prísna ako vedúci práce', 'Oponentská kritika']} />
+      <Textarea
+        label="Vlož text práce"
+        placeholder="Vlož kapitolu alebo časť práce na kritické posúdenie..."
+      />
+
+      <Select
+        label="Prísnosť hodnotenia"
+        options={[
+          'Mierna',
+          'Štandardná',
+          'Prísna ako vedúci práce',
+          'Oponentská kritika',
+        ]}
+      />
+
       <ActionButton icon={GraduationCap} label="Skontrolovať ako AI vedúci" />
     </ModuleLayout>
   );
@@ -742,12 +971,35 @@ function SupervisorModule() {
 function AuditModule() {
   return (
     <ModuleLayout>
-      <Textarea label="Text na audit kvality" placeholder="Vlož text, ktorý chceš skontrolovať..." />
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Select label="Kontrola" options={['Logika', 'Metodológia', 'Argumentácia', 'Štylistika', 'Všetko']} />
-        <Select label="Výstup" options={['Bodové hodnotenie', 'Detailná správa', 'Odporúčania']} />
+      <Textarea
+        label="Text na audit kvality"
+        placeholder="Vlož text, ktorý chceš skontrolovať..."
+      />
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Select
+          label="Kontrola"
+          options={[
+            'Logika',
+            'Metodológia',
+            'Argumentácia',
+            'Štylistika',
+            'Všetko',
+          ]}
+        />
+
+        <Select
+          label="Výstup"
+          options={[
+            'Bodové hodnotenie',
+            'Detailná správa',
+            'Odporúčania',
+          ]}
+        />
+
         <Select label="Norma" options={['APA', 'ISO 690', 'Harvard', 'MLA']} />
       </div>
+
       <ActionButton icon={FileCheck2} label="Spustiť audit kvality" />
     </ModuleLayout>
   );
@@ -757,8 +1009,17 @@ function DefenseModule() {
   return (
     <ModuleLayout>
       <Input label="Názov práce" placeholder="Názov záverečnej práce" />
-      <Textarea label="Stručný obsah práce" placeholder="Vlož abstrakt alebo stručný opis práce..." />
-      <Select label="Typ obhajoby" options={['Bakalárska', 'Diplomová', 'Seminárna', 'Dizertačná']} />
+
+      <Textarea
+        label="Stručný obsah práce"
+        placeholder="Vlož abstrakt alebo stručný opis práce..."
+      />
+
+      <Select
+        label="Typ obhajoby"
+        options={['Bakalárska', 'Diplomová', 'Seminárna', 'Dizertačná']}
+      />
+
       <ActionButton icon={Presentation} label="Pripraviť otázky na obhajobu" />
     </ModuleLayout>
   );
@@ -767,14 +1028,48 @@ function DefenseModule() {
 function TranslateModule() {
   return (
     <ModuleLayout>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Select label="Z jazyka" options={['Automaticky', 'Slovenčina', 'Čeština', 'Angličtina', 'Nemčina', 'Poľština', 'Maďarčina']} />
-        <Select label="Do jazyka" options={['Slovenčina', 'Čeština', 'Angličtina', 'Nemčina', 'Poľština', 'Maďarčina']} />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Select
+          label="Z jazyka"
+          options={[
+            'Automaticky',
+            'Slovenčina',
+            'Čeština',
+            'Angličtina',
+            'Nemčina',
+            'Poľština',
+            'Maďarčina',
+          ]}
+        />
+
+        <Select
+          label="Do jazyka"
+          options={[
+            'Slovenčina',
+            'Čeština',
+            'Angličtina',
+            'Nemčina',
+            'Poľština',
+            'Maďarčina',
+          ]}
+        />
       </div>
 
-      <Select label="Štýl prekladu" options={['Akademický', 'Odborný', 'Jednoduchý', 'Formálny', 'Doslovný']} />
+      <Select
+        label="Štýl prekladu"
+        options={[
+          'Akademický',
+          'Odborný',
+          'Jednoduchý',
+          'Formálny',
+          'Doslovný',
+        ]}
+      />
 
-      <Textarea label="Text na preklad" placeholder="Vlož text, ktorý chceš preložiť..." />
+      <Textarea
+        label="Text na preklad"
+        placeholder="Vlož text, ktorý chceš preložiť..."
+      />
 
       <ActionButton icon={Languages} label="Preložiť text" />
     </ModuleLayout>
@@ -784,8 +1079,21 @@ function TranslateModule() {
 function AnalysisModule() {
   return (
     <ModuleLayout>
-      <Textarea label="Dáta alebo tabuľka" placeholder="Vlož údaje, výsledky výskumu alebo popis dát..." />
-      <Select label="Typ analýzy" options={['Opisná štatistika', 'Korelácia', 'Interpretácia výsledkov', 'Grafické odporúčania']} />
+      <Textarea
+        label="Dáta alebo tabuľka"
+        placeholder="Vlož údaje, výsledky výskumu alebo popis dát..."
+      />
+
+      <Select
+        label="Typ analýzy"
+        options={[
+          'Opisná štatistika',
+          'Korelácia',
+          'Interpretácia výsledkov',
+          'Grafické odporúčania',
+        ]}
+      />
+
       <ActionButton icon={BarChart3} label="Analyzovať dáta" />
     </ModuleLayout>
   );
@@ -795,8 +1103,22 @@ function PlanningModule() {
   return (
     <ModuleLayout>
       <Input label="Termín odovzdania" placeholder="Napr. 30. 6. 2026" />
-      <Select label="Typ plánu" options={['Denný plán', 'Týždenný plán', 'Plán kapitol', 'Plán výskumu']} />
-      <Textarea label="Aktuálny stav práce" placeholder="Napíš, čo už máš hotové a čo ešte chýba..." />
+
+      <Select
+        label="Typ plánu"
+        options={[
+          'Denný plán',
+          'Týždenný plán',
+          'Plán kapitol',
+          'Plán výskumu',
+        ]}
+      />
+
+      <Textarea
+        label="Aktuálny stav práce"
+        placeholder="Napíš, čo už máš hotové a čo ešte chýba..."
+      />
+
       <ActionButton icon={CalendarDays} label="Vytvoriť plán práce" />
     </ModuleLayout>
   );
@@ -805,9 +1127,27 @@ function PlanningModule() {
 function EmailModule() {
   return (
     <ModuleLayout>
-      <Select label="Typ emailu" options={['Email vedúcemu', 'Žiadosť o konzultáciu', 'Odovzdanie kapitoly', 'Ospravedlnenie', 'Formálny email']} />
-      <Input label="Komu" placeholder="Napr. vedúci práce, školiteľ, konzultant" />
-      <Textarea label="Obsah / požiadavka" placeholder="Napíš, čo má email obsahovať..." />
+      <Select
+        label="Typ emailu"
+        options={[
+          'Email vedúcemu',
+          'Žiadosť o konzultáciu',
+          'Odovzdanie kapitoly',
+          'Ospravedlnenie',
+          'Formálny email',
+        ]}
+      />
+
+      <Input
+        label="Komu"
+        placeholder="Napr. vedúci práce, školiteľ, konzultant"
+      />
+
+      <Textarea
+        label="Obsah / požiadavka"
+        placeholder="Napíš, čo má email obsahovať..."
+      />
+
       <ActionButton icon={Mail} label="Vygenerovať email" />
     </ModuleLayout>
   );
@@ -816,14 +1156,29 @@ function EmailModule() {
 function PlagiarismModule() {
   return (
     <ModuleLayout>
-      <Textarea label="Text na kontrolu originality" placeholder="Vlož text, ktorý chceš preveriť..." />
-      <Select label="Typ kontroly" options={['Orientačná kontrola', 'Parafrázovanie', 'Rizikové pasáže', 'Odporúčania na úpravu']} />
+      <Textarea
+        label="Text na kontrolu originality"
+        placeholder="Vlož text, ktorý chceš preveriť..."
+      />
+
+      <Select
+        label="Typ kontroly"
+        options={[
+          'Orientačná kontrola',
+          'Parafrázovanie',
+          'Rizikové pasáže',
+          'Odporúčania na úpravu',
+        ]}
+      />
+
       <ActionButton icon={ShieldCheck} label="Skontrolovať originalitu" />
     </ModuleLayout>
   );
 }
 
-// ================= UI HELPERS =================
+// =====================================================
+// UI HELPERS
+// =====================================================
 
 function ModuleLayout({ children }: { children: React.ReactNode }) {
   return <div className="space-y-5">{children}</div>;
@@ -839,6 +1194,7 @@ function Input({
   return (
     <label className="block">
       <div className="mb-2 text-sm font-semibold text-gray-300">{label}</div>
+
       <input
         placeholder={placeholder}
         className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
@@ -857,6 +1213,7 @@ function Textarea({
   return (
     <label className="block">
       <div className="mb-2 text-sm font-semibold text-gray-300">{label}</div>
+
       <textarea
         placeholder={placeholder}
         rows={7}
@@ -876,9 +1233,10 @@ function Select({
   return (
     <label className="block">
       <div className="mb-2 text-sm font-semibold text-gray-300">{label}</div>
+
       <select className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500">
-        {options.map((o) => (
-          <option key={o}>{o}</option>
+        {options.map((option) => (
+          <option key={option}>{option}</option>
         ))}
       </select>
     </label>
@@ -889,11 +1247,14 @@ function ActionButton({
   icon: Icon,
   label,
 }: {
-  icon: any;
+  icon: LucideIcon;
   label: string;
 }) {
   return (
-    <button className="rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold flex items-center gap-2 hover:opacity-90">
+    <button
+      type="button"
+      className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90"
+    >
       <Icon size={20} />
       {label}
     </button>
@@ -911,8 +1272,8 @@ function Stat({ title, value }: { title: string; value: string }) {
 
 function SimplePage({ title, text }: { title: string; text: string }) {
   return (
-    <div className="max-w-5xl mx-auto rounded-3xl border border-white/10 bg-white/5 p-8">
-      <h2 className="text-3xl font-black mb-3">{title}</h2>
+    <div className="mx-auto max-w-5xl rounded-3xl border border-white/10 bg-white/5 p-8">
+      <h2 className="mb-3 text-3xl font-black">{title}</h2>
       <p className="text-gray-400">{text}</p>
     </div>
   );

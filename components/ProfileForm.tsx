@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -99,7 +100,7 @@ type Profile = {
   // Jazyk rozhrania aplikácie
   language: Lang;
 
-  // Jazyk, v ktorom sa má vygenerovať výsledná práca
+  // Jazyk výslednej práce
   workLanguage: Lang;
 
   annotation: string;
@@ -117,6 +118,18 @@ type Profile = {
   reflection: string;
   sourcesRequirement: string;
   keywordsList: string[];
+};
+
+type SavedProfile = Profile & {
+  id: string;
+  schema?: WorkSchema;
+  interfaceLanguage?: Lang;
+  savedAt?: string;
+};
+
+type ProfileFormProps = {
+  onClose?: () => void;
+  onSave?: (data: SavedProfile) => void;
 };
 
 // ================= OPTIONS =================
@@ -198,9 +211,11 @@ const UI: Record<
     citation: 'Citovanie',
     recommendedLength: 'Odporúčaný rozsah',
     preview: 'Náhľad profilu',
+    generate: 'Vytvoriť prácu',
+    generating: 'Generujem prácu...',
     save: 'Uložiť profil',
     titlePlaceholder: 'Názov práce',
-   
+    topicPlaceholder: 'Téma práce',
     fieldPlaceholder: 'Odbor / predmet / oblasť',
     supervisorPlaceholder: 'Vedúci práce / školiteľ',
     keywords: 'Kľúčové slová',
@@ -545,8 +560,7 @@ function fieldText(
       },
       DE: {
         label: 'Annotation',
-        placeholder:
-          'Beschreiben Sie kurz Thema und Problem der Arbeit.',
+        placeholder: 'Beschreiben Sie kurz Thema und Problem der Arbeit.',
       },
       PL: {
         label: 'Streszczenie',
@@ -690,8 +704,7 @@ function fieldText(
       },
       DE: {
         label: 'Forschungsfragen',
-        placeholder:
-          'Geben Sie Haupt- und Teilforschungsfragen ein.',
+        placeholder: 'Geben Sie Haupt- und Teilforschungsfragen ein.',
       },
       PL: {
         label: 'Pytania badawcze',
@@ -1621,9 +1634,9 @@ const initialProfile: Profile = {
   keywordsList: [],
 };
 
-// ================= PAGE =================
+// ================= COMPONENT =================
 
-export default function ProfilePage() {
+export default function ProfileForm({ onClose, onSave }: ProfileFormProps) {
   const router = useRouter();
 
   const [profile, setProfile] = useState<Profile>(initialProfile);
@@ -1637,6 +1650,13 @@ export default function ProfilePage() {
   );
 
   const update = <K extends keyof Profile>(key: K, value: Profile[K]) => {
+    setProfile((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
+
+  const updateDynamicField = (key: DynamicFieldKey, value: string) => {
     setProfile((prev) => ({
       ...prev,
       [key]: value,
@@ -1667,16 +1687,45 @@ export default function ProfilePage() {
     }));
   };
 
-  const saveProfile = () => {
-    const payload = {
+  const createPayload = (): SavedProfile => {
+    return {
       ...profile,
+      id: Date.now().toString(),
       schema,
       interfaceLanguage: profile.language,
       workLanguage: profile.workLanguage,
       savedAt: new Date().toISOString(),
     };
+  };
 
+  const savePayloadToStorage = (payload: SavedProfile) => {
     localStorage.setItem('profile', JSON.stringify(payload));
+    localStorage.setItem('active_profile', JSON.stringify(payload));
+
+    const oldProfilesRaw = localStorage.getItem('profiles_full');
+    const oldProfiles = oldProfilesRaw ? JSON.parse(oldProfilesRaw) : [];
+    const profiles = Array.isArray(oldProfiles) ? oldProfiles : [];
+
+    const newProfiles = [
+      payload,
+      ...profiles.filter((item: SavedProfile) => item.id !== payload.id),
+    ];
+
+    localStorage.setItem('profiles_full', JSON.stringify(newProfiles));
+  };
+
+  const saveProfile = () => {
+    if (!profile.title.trim() || !profile.topic.trim() || !profile.type) {
+      alert(labels.validation);
+      return;
+    }
+
+    const payload = createPayload();
+
+    savePayloadToStorage(payload);
+
+    onSave?.(payload);
+    onClose?.();
 
     alert(profile.language === 'SK' ? 'Profil bol uložený.' : 'Profile saved.');
   };
@@ -1692,13 +1741,8 @@ export default function ProfilePage() {
     const payload = {
       profile,
       schema,
-
-      // Jazyk aplikácie / formulára
       interfaceLanguage: profile.language,
-
-      // Jazyk výslednej práce
       workLanguage: profile.workLanguage,
-
       workTypeLabel: schema.label,
       levelLabel: LEVEL_LABELS[profile.level][profile.language],
       citation: profile.citation,
@@ -1738,6 +1782,7 @@ export default function ProfilePage() {
       router.push('/editor');
     } catch (error) {
       console.error(error);
+
       alert(
         profile.language === 'SK'
           ? 'Nastala chyba pri generovaní práce.'
@@ -1910,8 +1955,8 @@ export default function ProfilePage() {
 
                     <select
                       value={profile.citation}
-                      onChange={(e) =>
-                        update('citation', e.target.value as CitationKey)
+                      onChange={(event) =>
+                        update('citation', event.target.value as CitationKey)
                       }
                       className="w-full rounded-2xl border border-white/10 bg-[#111525] px-4 py-3 text-sm text-white outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10"
                     >
@@ -1938,7 +1983,9 @@ export default function ProfilePage() {
                       rows={field.rows || 4}
                       value={String(profile[field.key] || '')}
                       placeholder={field.placeholder}
-                      onChange={(value) => update(field.key, value as never)}
+                      onChange={(value) =>
+                        updateDynamicField(field.key, value)
+                      }
                     />
                   ))}
                 </div>
@@ -1959,7 +2006,24 @@ export default function ProfilePage() {
 
               {/* CTA */}
               <div className="flex flex-col gap-3 sm:flex-row">
-
+                <button
+                  onClick={generate}
+                  disabled={loading}
+                  type="button"
+                  className="inline-flex items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 px-6 py-4 text-base font-black text-white transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      {labels.generating}
+                    </>
+                  ) : (
+                    <>
+                      <Brain className="h-5 w-5" />
+                      {labels.generate}
+                    </>
+                  )}
+                </button>
 
                 <button
                   onClick={saveProfile}
@@ -2029,7 +2093,7 @@ export default function ProfilePage() {
                 <ol className="space-y-3">
                   {schema.structure.map((item, index) => (
                     <li
-                      key={item}
+                      key={`${item}-${index}`}
                       className="flex gap-3 text-sm text-slate-300"
                     >
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-xs font-black text-violet-200">
@@ -2047,9 +2111,9 @@ export default function ProfilePage() {
                 icon={<GraduationCap className="h-5 w-5" />}
               >
                 <div className="flex flex-wrap gap-2">
-                  {schema.requiredSections.map((item) => (
+                  {schema.requiredSections.map((item, index) => (
                     <span
-                      key={item}
+                      key={`${item}-${index}`}
                       className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-200"
                     >
                       {item}
@@ -2177,8 +2241,8 @@ function Section({
   children,
 }: {
   title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
+  icon: ReactNode;
+  children: ReactNode;
 }) {
   return (
     <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 md:p-7">
@@ -2203,8 +2267,8 @@ function Panel({
   children,
 }: {
   title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
+  icon: ReactNode;
+  children: ReactNode;
 }) {
   return (
     <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
@@ -2213,9 +2277,7 @@ function Panel({
           {icon}
         </div>
 
-        <h3 className="text-lg font-black text-white">
-          {title}
-        </h3>
+        <h3 className="text-lg font-black text-white">{title}</h3>
       </div>
 
       {children}
@@ -2280,7 +2342,7 @@ function Chip({
   active,
   onClick,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   active: boolean;
   onClick: () => void;
 }) {
@@ -2309,9 +2371,7 @@ function InfoBox({
 }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-[#111525] p-4">
-      <p className="text-xs text-slate-500">
-        {label}
-      </p>
+      <p className="text-xs text-slate-500">{label}</p>
 
       <p className="mt-1 text-sm font-black text-white">
         {value || '—'}

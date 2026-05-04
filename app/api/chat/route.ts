@@ -1,159 +1,318 @@
-import { openai } from "@ai-sdk/openai";
-import { anthropic } from "@ai-sdk/anthropic";
-import { google } from "@ai-sdk/google";
-import { mistral } from "@ai-sdk/mistral";
-import { groq } from "@ai-sdk/groq";
-import { generateText } from "ai";
+import { streamText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { anthropic } from '@ai-sdk/anthropic';
+import { google } from '@ai-sdk/google';
+import { groq } from '@ai-sdk/groq';
+import { mistral } from '@ai-sdk/mistral';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const maxDuration = 60;
 
-// ================= TYPES =================
+type Agent = 'openai' | 'claude' | 'gemini' | 'grok' | 'mistral';
+
 type ChatMessage = {
-  role: "user" | "assistant";
+  role: 'user' | 'assistant';
   content: string;
 };
 
-// ================= MODEL =================
-function pickModel(agent: string) {
+type SavedProfile = {
+  title?: string;
+  topic?: string;
+  type?: string;
+  level?: string;
+  field?: string;
+  supervisor?: string;
+  citation?: string;
+  language?: string;
+  workLanguage?: string;
+  annotation?: string;
+  goal?: string;
+  problem?: string;
+  methodology?: string;
+  hypotheses?: string;
+  researchQuestions?: string;
+  practicalPart?: string;
+  scientificContribution?: string;
+  businessProblem?: string;
+  businessGoal?: string;
+  implementation?: string;
+  caseStudy?: string;
+  reflection?: string;
+  sourcesRequirement?: string;
+  keywordsList?: string[];
+  keywords?: string[];
+  schema?: {
+    label?: string;
+    description?: string;
+    recommendedLength?: string;
+    structure?: string[];
+    requiredSections?: string[];
+    aiInstruction?: string;
+  };
+};
+
+function parseJson<T>(value: FormDataEntryValue | null, fallback: T): T {
+  if (!value || typeof value !== 'string') return fallback;
+
   try {
-    switch (agent) {
-      case "claude":
-        return anthropic("claude-3-haiku-20240307");
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
 
-      case "gemini":
-        return google("gemini-1.5-flash");
+async function extractPdfTexts(files: File[]) {
+  const results: string[] = [];
 
-      case "grok":
-        return groq("llama3-70b-8192");
+  if (!files.length) return results;
 
-      case "mistral":
-        return mistral("mistral-small");
+  try {
+    const pdfParseModule = await import('pdf-parse');
+    const pdfParse = (pdfParseModule as any).default || pdfParseModule;
 
-      case "openai":
-      case "auto":
-      default:
-        return openai("gpt-4o-mini");
+    for (const file of files) {
+      if (
+        file.type !== 'application/pdf' &&
+        !file.name.toLowerCase().endsWith('.pdf')
+      ) {
+        continue;
+      }
+
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const parsed = await pdfParse(buffer);
+
+        const text = String(parsed?.text || '')
+          .replace(/\s+\n/g, '\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+
+        if (text) {
+          results.push(
+            `PDF: ${file.name}\n${text.slice(0, 15000)}`
+          );
+        } else {
+          results.push(`PDF: ${file.name}\n[PDF neobsahovalo extrahovateľný text]`);
+        }
+      } catch {
+        results.push(`PDF: ${file.name}\n[Nepodarilo sa extrahovať obsah PDF]`);
+      }
     }
   } catch {
-    // fallback ak provider padne
-    return openai("gpt-4o-mini");
+    for (const file of files) {
+      results.push(
+        `PDF: ${file.name}\n[Server nemá dostupnú PDF extrakciu. Nainštaluj balík pdf-parse.]`
+      );
+    }
   }
+
+  return results;
 }
 
-// ================= NORMALIZE =================
-function normalizeMessages(messages: any[]): ChatMessage[] {
-  return messages
-    .filter((m) => m?.role && m?.content)
-    .map((m) => ({
-      role: m.role === "assistant" ? "assistant" : "user",
-      content:
-        typeof m.content === "string"
-          ? m.content
-          : Array.isArray(m.content)
-          ? m.content.map((c: any) => c?.text || "").join("")
-          : "",
-    }));
-}
+function buildSystemPrompt(profile: SavedProfile | null, pdfTexts: string[]) {
+  const keywords =
+    profile?.keywordsList && profile.keywordsList.length > 0
+      ? profile.keywordsList
+      : profile?.keywords || [];
 
-// ================= SYSTEM =================
-function buildSystemPrompt(mode: string) {
-  if (mode === "supervisor") {
-    return `
-Si AI vedúci diplomovej práce.
+  const structureText =
+    profile?.schema?.structure?.length
+      ? profile.schema.structure.map((item, index) => `${index + 1}. ${item}`).join('\n')
+      : 'Neuvedené';
 
-Formát odpovede:
-=== VÝSTUP ===
-=== ANALÝZA ===
-=== SKÓRE ===
-=== ODPORÚČANIA ===
+  const requiredSectionsText =
+    profile?.schema?.requiredSections?.length
+      ? profile.schema.requiredSections.map((item) => `- ${item}`).join('\n')
+      : 'Neuvedené';
 
-Buď kritický, konkrétny a odborný.
-`;
-  }
+  const pdfBlock = pdfTexts.length
+    ? `\nPRILOŽENÉ PDF DOKUMENTY - EXTRAHOVANÝ TEXT:\n${pdfTexts.join('\n\n-----------------\n\n')}\n`
+    : '\nPRILOŽENÉ PDF DOKUMENTY: Žiadne.\n';
 
   return `
-Si profesionálny AI asistent.
+Si ZEDPERA, profesionálny akademický AI asistent.
 
-Pravidlá:
-- píš prirodzene
-- používaj štruktúru
-- nehalucinuj zdroje
-- ak si neistý, povedz to
+HLAVNÉ PRAVIDLÁ:
+- Odpovedaj v jazyku práce: ${profile?.workLanguage || profile?.language || 'SK'}.
+- Vychádzaj prednostne z uloženého profilu práce.
+- Ak sú priložené PDF dokumenty, použi ich ako doplnkové zdroje.
+- Text má byť odborne napísaný, logický a vhodný pre akademické písanie.
+- Ak niečo v profile chýba, uveď, čo odporúčaš doplniť.
+- Nevymýšľaj konkrétne bibliografické údaje, ak nie sú priamo dostupné.
+- Ak používateľ žiada úvod, abstrakt, kapitoly alebo inú časť práce, vytvor ich na mieru podľa profilu.
+
+ULOŽENÝ PROFIL PRÁCE:
+Názov práce: ${profile?.title || 'Neuvedené'}
+Téma práce: ${profile?.topic || 'Neuvedené'}
+Typ práce: ${profile?.schema?.label || profile?.type || 'Neuvedené'}
+Úroveň / odbornosť: ${profile?.level || 'Neuvedené'}
+Odbor / predmet / oblasť: ${profile?.field || 'Neuvedené'}
+Vedúci práce: ${profile?.supervisor || 'Neuvedené'}
+Citačná norma: ${profile?.citation || 'Neuvedené'}
+Jazyk rozhrania: ${profile?.language || 'Neuvedené'}
+Jazyk práce: ${profile?.workLanguage || profile?.language || 'SK'}
+Odporúčaný rozsah: ${profile?.schema?.recommendedLength || 'Neuvedené'}
+
+Anotácia:
+${profile?.annotation || 'Neuvedené'}
+
+Cieľ práce:
+${profile?.goal || 'Neuvedené'}
+
+Výskumný problém:
+${profile?.problem || 'Neuvedené'}
+
+Metodológia:
+${profile?.methodology || 'Neuvedené'}
+
+Hypotézy:
+${profile?.hypotheses || 'Neuvedené'}
+
+Výskumné otázky:
+${profile?.researchQuestions || 'Neuvedené'}
+
+Praktická / analytická časť:
+${profile?.practicalPart || 'Neuvedené'}
+
+Vedecký / odborný prínos:
+${profile?.scientificContribution || 'Neuvedené'}
+
+Firemný / manažérsky problém:
+${profile?.businessProblem || 'Neuvedené'}
+
+Manažérsky cieľ:
+${profile?.businessGoal || 'Neuvedené'}
+
+Implementácia:
+${profile?.implementation || 'Neuvedené'}
+
+Prípadová štúdia:
+${profile?.caseStudy || 'Neuvedené'}
+
+Reflexia:
+${profile?.reflection || 'Neuvedené'}
+
+Požiadavky na zdroje:
+${profile?.sourcesRequirement || 'Neuvedené'}
+
+Kľúčové slová:
+${keywords.length ? keywords.join(', ') : 'Neuvedené'}
+
+Štruktúra práce:
+${structureText}
+
+Povinné časti:
+${requiredSectionsText}
+
+Špecifická inštrukcia typu práce:
+${profile?.schema?.aiInstruction || 'Neuvedené'}
+
+${pdfBlock}
+
+FORMÁT ODPOVEDE:
+=== VÝSTUP ===
+Sem napíš hlavný výstup.
+
+=== ANALÝZA ===
+Stručne vysvetli, z ktorých údajov profilu a zdrojov si čerpal.
+
+=== SKÓRE ===
+Ohodnoť použiteľnosť výstupu pre akademickú prácu od 0 do 100.
+
+=== ODPORÚČANIA ===
+Uveď konkrétne odporúčania, čo má používateľ doplniť alebo skontrolovať.
 `;
 }
 
-// ================= ROUTE =================
+function getAvailableModel(agent: Agent) {
+  const requested = agent;
+
+  if (requested === 'openai' && process.env.OPENAI_API_KEY) {
+    return openai(process.env.OPENAI_MODEL || 'gpt-4o-mini');
+  }
+
+  if (requested === 'claude' && process.env.ANTHROPIC_API_KEY) {
+    return anthropic(process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-latest');
+  }
+
+  if (requested === 'gemini' && process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    return google(process.env.GOOGLE_MODEL || 'gemini-1.5-flash');
+  }
+
+  // "grok" je tu mapovaný cez Groq provider, aby to fungovalo stabilne
+  if (requested === 'grok' && process.env.GROQ_API_KEY) {
+    return groq(process.env.GROQ_MODEL || 'llama-3.1-70b-versatile');
+  }
+
+  if (requested === 'mistral' && process.env.MISTRAL_API_KEY) {
+    return mistral(process.env.MISTRAL_MODEL || 'mistral-small-latest');
+  }
+
+  // Fallback poradie
+  if (process.env.OPENAI_API_KEY) {
+    return openai(process.env.OPENAI_MODEL || 'gpt-4o-mini');
+  }
+
+  if (process.env.ANTHROPIC_API_KEY) {
+    return anthropic(process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-latest');
+  }
+
+  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    return google(process.env.GOOGLE_MODEL || 'gemini-1.5-flash');
+  }
+
+  if (process.env.GROQ_API_KEY) {
+    return groq(process.env.GROQ_MODEL || 'llama-3.1-70b-versatile');
+  }
+
+  if (process.env.MISTRAL_API_KEY) {
+    return mistral(process.env.MISTRAL_MODEL || 'mistral-small-latest');
+  }
+
+  throw new Error(
+    'Nie je nastavený žiadny AI provider. Doplň aspoň jeden API kľúč: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, GROQ_API_KEY alebo MISTRAL_API_KEY.'
+  );
+}
+
 export async function POST(req: Request) {
   try {
-    // 🔐 kontrola API key
-    if (!process.env.OPENAI_API_KEY) {
-      return new Response(
-        JSON.stringify({
-          error: "MISSING_API_KEY",
-        }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+    const formData = await req.formData();
+
+    const agent = (formData.get('agent') as Agent) || 'gemini';
+    const messages = parseJson<ChatMessage[]>(formData.get('messages'), []);
+    const profile = parseJson<SavedProfile | null>(formData.get('profile'), null);
+    const files = formData.getAll('files').filter((item): item is File => item instanceof File);
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return new Response('Chýbajú správy pre AI.', { status: 400 });
     }
 
-    const body = await req.json();
+    const pdfTexts = await extractPdfTexts(files);
+    const systemPrompt = buildSystemPrompt(profile, pdfTexts);
+    const model = getAvailableModel(agent);
 
-    const messagesRaw = body.messages || [];
-    const agent = body.agent || "auto";
-    const mode = body.mode || "write";
+  const result = streamText({
+  model,
+  system: systemPrompt,
+  messages: messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+  })),
+  temperature: 0.7,
+});
 
-    if (!messagesRaw.length) {
-      return new Response(
-        JSON.stringify({ error: "EMPTY_MESSAGES" }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-    }
+    return result.toTextStreamResponse();
+  } catch (error) {
+    console.error('CHAT API ERROR:', error);
 
-    const messages = normalizeMessages(messagesRaw);
-    const model = pickModel(agent);
-    const system = buildSystemPrompt(mode);
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Neznáma chyba servera v /api/chat';
 
-    // ================= AI CALL =================
-    const result = await generateText({
-      model,
-      system,
-      messages: messages as any,
-      temperature: 0.7,
-      maxOutputTokens: 1000,
+    return new Response(`API error 500: ${message}`, {
+      status: 500,
     });
-
-    // ================= RESPONSE =================
-    return new Response(
-      JSON.stringify({
-        content: result.text || "⚠️ Prázdna odpoveď",
-      }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-  } catch (err: any) {
-    console.error("AI ERROR:", err);
-
-    return new Response(
-      JSON.stringify({
-        error: "AI_ERROR",
-        detail: err?.message || "unknown",
-      }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
   }
 }

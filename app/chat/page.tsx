@@ -24,7 +24,6 @@ import {
 // ================= TYPES =================
 
 type Agent = 'openai' | 'claude' | 'gemini' | 'grok' | 'mistral';
-
 type ChatRole = 'user' | 'assistant';
 
 type ChatMessage = {
@@ -38,6 +37,7 @@ type AttachedFile = {
   size: number;
   type: string;
   uploadedAt: string;
+  file: File;
 };
 
 type ParsedResult = {
@@ -94,10 +94,7 @@ declare global {
 
 // ================= CONFIG =================
 
-const agents: {
-  key: Agent;
-  label: string;
-}[] = [
+const agents: { key: Agent; label: string }[] = [
   { key: 'openai', label: 'GPT' },
   { key: 'claude', label: 'Claude' },
   { key: 'gemini', label: 'Gemini' },
@@ -115,42 +112,42 @@ const suggestions: {
     title: 'Navrhni mi úvod mé práce',
     actionTitle: 'Úvod práce',
     instruction:
-      'Na základe uloženého profilu práce vytvor profesionálny akademický úvod práce. Úvod má vychádzať výlučne z profilu práce, témy, cieľa, odboru, typu práce, metodológie, anotácie a ďalších dostupných údajov. Úvod má byť plynulý, odborný, vhodný pre záverečnú prácu a bez zbytočných všeobecných fráz.',
+      'Na základe uloženého profilu práce vytvor profesionálny akademický úvod práce. Úvod má vychádzať z profilu práce, témy, cieľa, metodológie, typu práce a ďalších údajov z profilu.',
     icon: PenLine,
   },
   {
     title: 'Napiš mi abstrakt',
     actionTitle: 'Abstrakt',
     instruction:
-      'Na základe uloženého profilu práce vytvor abstrakt. Abstrakt má obsahovať tému, cieľ práce, problém, metodológiu, očakávané výsledky alebo prínos práce. Text má byť akademický, stručný, vecný a pripravený na vloženie do práce.',
+      'Na základe uloženého profilu práce vytvor akademický abstrakt. Má obsahovať tému, cieľ, problém, metodológiu, výsledky alebo očakávaný prínos práce.',
     icon: BookOpen,
   },
   {
     title: 'Brainstormuj se mnou strukturu kapitol a podkapitol',
     actionTitle: 'Štruktúra kapitol',
     instruction:
-      'Na základe uloženého profilu práce navrhni detailnú štruktúru kapitol a podkapitol. Štruktúra musí rešpektovať typ práce, odporúčaný rozsah, cieľ, metodológiu, praktickú časť a citačný štýl. Ku každej kapitole doplň krátke vysvetlenie, čo má obsahovať.',
+      'Na základe uloženého profilu práce navrhni detailnú štruktúru kapitol a podkapitol. Rešpektuj typ práce, cieľ, metodológiu, praktickú časť a logické akademické členenie.',
     icon: GraduationCap,
   },
   {
     title: 'Teď mi pomůžeš napsat návrh kapitoly.',
     actionTitle: 'Návrh kapitoly',
     instruction:
-      'Na základe uloženého profilu práce priprav návrh kapitoly. Najprv navrhni vhodnú kapitolu, potom jej podkapitoly a následne napíš ukážkový akademický text. Text musí zodpovedať typu práce, odboru, cieľu a metodológii.',
+      'Na základe uloženého profilu práce priprav návrh kapitoly. Najprv navrhni osnovu kapitoly, potom podkapitoly a následne ukážkový odborný text.',
     icon: FileText,
   },
   {
     title: 'Pomoz mi citovat tento zdroj',
     actionTitle: 'Citovanie zdroja',
     instruction:
-      'Na základe uloženého profilu práce a zvoleného citačného štýlu vysvetli, ako správne citovať zdroje v texte a v zozname literatúry. Ak sú priložené PDF dokumenty, zohľadni ich ako potenciálne zdroje a upozorni, že bibliografické údaje treba skontrolovať.',
+      'Na základe uloženého profilu práce a zvoleného citačného štýlu vysvetli, ako správne citovať zdroj v texte a v zozname literatúry. Ak sú priložené PDF dokumenty, zohľadni ich.',
     icon: Library,
   },
   {
     title: 'Pomoz mi přepsat můj text do akademického jazyka.',
-    actionTitle: 'Akademické preformulovanie',
+    actionTitle: 'Akademický jazyk',
     instruction:
-      'Na základe uloženého profilu práce priprav akademický štýl písania pre túto prácu. Ak používateľ doplní text, prepíš ho odborne. Ak text nedoplnil, vytvor ukážku akademicky formulovaného odseku podľa témy, cieľa a odboru práce.',
+      'Na základe uloženého profilu práce prepíš text do akademického jazyka. Ak text od používateľa chýba, vytvor ukážku odborného formulovania podľa témy práce.',
     icon: BookOpen,
   },
 ];
@@ -184,7 +181,6 @@ function createFileId() {
 
 function safeJsonParse<T>(value: string | null): T | null {
   if (!value) return null;
-
   try {
     return JSON.parse(value) as T;
   } catch {
@@ -199,7 +195,6 @@ function normalizeProfile(raw: any): SavedProfile | null {
     return {
       ...raw.profile,
       schema: raw.schema || raw.profile.schema,
-      interfaceLanguage: raw.interfaceLanguage,
       workLanguage: raw.workLanguage || raw.profile.workLanguage,
       savedAt: raw.savedAt || raw.generatedAt || raw.profile.savedAt,
     };
@@ -208,171 +203,12 @@ function normalizeProfile(raw: any): SavedProfile | null {
   return raw as SavedProfile;
 }
 
-function profileToPrompt(profile: SavedProfile | null) {
-  if (!profile) {
-    return `
-ULOŽENÝ PROFIL PRÁCE:
-Profil práce nie je dostupný. Používateľ pravdepodobne ešte neuložil profil práce.
-V odpovedi ho upozorni, že pre presnejší výstup má najprv vytvoriť a uložiť profil práce v sekcii Profil práce.
-`;
-  }
-
-  const keywords =
-    profile.keywordsList && profile.keywordsList.length > 0
-      ? profile.keywordsList
-      : profile.keywords || [];
-
-  return `
-ULOŽENÝ PROFIL PRÁCE:
-Názov práce: ${profile.title || 'Neuvedené'}
-Téma práce: ${profile.topic || 'Neuvedené'}
-Typ práce: ${profile.schema?.label || profile.type || 'Neuvedené'}
-Odbornosť / úroveň: ${profile.level || 'Neuvedené'}
-Odbor / predmet / oblasť: ${profile.field || 'Neuvedené'}
-Vedúci práce / školiteľ: ${profile.supervisor || 'Neuvedené'}
-Jazyk rozhrania: ${profile.language || 'Neuvedené'}
-Jazyk výslednej práce: ${profile.workLanguage || profile.language || 'SK'}
-Citačná norma: ${profile.citation || 'Neuvedené'}
-Odporúčaný rozsah: ${profile.schema?.recommendedLength || 'Neuvedené'}
-
-Anotácia:
-${profile.annotation || 'Neuvedené'}
-
-Cieľ práce:
-${profile.goal || 'Neuvedené'}
-
-Výskumný / odborný problém:
-${profile.problem || 'Neuvedené'}
-
-Metodológia:
-${profile.methodology || 'Neuvedené'}
-
-Hypotézy:
-${profile.hypotheses || 'Neuvedené'}
-
-Výskumné otázky:
-${profile.researchQuestions || 'Neuvedené'}
-
-Praktická / analytická časť:
-${profile.practicalPart || 'Neuvedené'}
-
-Vedecký / odborný prínos:
-${profile.scientificContribution || 'Neuvedené'}
-
-Firemný / manažérsky problém:
-${profile.businessProblem || 'Neuvedené'}
-
-Manažérsky cieľ:
-${profile.businessGoal || 'Neuvedené'}
-
-Implementácia:
-${profile.implementation || 'Neuvedené'}
-
-Prípadová štúdia / organizácia:
-${profile.caseStudy || 'Neuvedené'}
-
-Reflexia:
-${profile.reflection || 'Neuvedené'}
-
-Požiadavky na zdroje:
-${profile.sourcesRequirement || 'Neuvedené'}
-
-Kľúčové slová:
-${keywords.length > 0 ? keywords.join(', ') : 'Neuvedené'}
-
-Štruktúra práce podľa šablóny:
-${
-  profile.schema?.structure?.length
-    ? profile.schema.structure.map((item, index) => `${index + 1}. ${item}`).join('\n')
-    : 'Neuvedené'
-}
-
-Povinné časti:
-${
-  profile.schema?.requiredSections?.length
-    ? profile.schema.requiredSections.map((item) => `- ${item}`).join('\n')
-    : 'Neuvedené'
-}
-
-Špecifická AI inštrukcia typu práce:
-${profile.schema?.aiInstruction || 'Neuvedené'}
-`;
-}
-
-function filesToPrompt(files: AttachedFile[]) {
-  if (!files.length) return '';
-
-  return `
-PRIPOJENÉ PDF DOKUMENTY:
-${files
-  .map((file, index) => {
-    return `${index + 1}. ${file.name} (${formatBytes(file.size)})`;
-  })
-  .join('\n')}
-
-Poznámka:
-Ak backend tieto PDF dokumenty spracúva, použi ich obsah ako doplnkový zdroj.
-Ak backend posiela iba názvy súborov bez obsahu, výslovne upozorni, že nebolo možné overiť obsah PDF.
-`;
-}
-
-function buildPromptFromProfile({
-  userInstruction,
-  userText,
-  profile,
-  files,
-}: {
-  userInstruction: string;
-  userText?: string;
-  profile: SavedProfile | null;
-  files: AttachedFile[];
-}) {
-  const workLanguage = profile?.workLanguage || profile?.language || 'SK';
-
-  return `
-Si ZEDPERA, akademický AI asistent a AI vedúci práce.
-
-TVOJA ÚLOHA:
-${userInstruction}
-
-DÔLEŽITÉ PRAVIDLÁ:
-- Odpovedaj v jazyku práce: ${workLanguage}.
-- Čerpaj primárne z uloženého profilu práce.
-- Ak sú priložené PDF dokumenty, zohľadni ich ako doplnkové zdroje.
-- Nevymýšľaj konkrétne bibliografické údaje ako autor, rok, DOI alebo názov článku, ak ich nemáš overené.
-- Text má byť akademický, použiteľný v záverečnej práci a logicky členený.
-- Nepíš všeobecné frázy bez nadväznosti na profil práce.
-- Ak v profile chýbajú údaje, doplň ich rozumne, ale jasne uveď, čo by bolo vhodné doplniť.
-
-${profileToPrompt(profile)}
-
-${filesToPrompt(files)}
-
-DOPLŇUJÚCE ZADANIE OD POUŽÍVATEĽA:
-${userText?.trim() || 'Bez doplňujúceho zadania.'}
-
-FORMÁT ODPOVEDE:
-=== VÝSTUP ===
-Vytvor hlavný výsledný text.
-
-=== ANALÝZA ===
-Stručne vysvetli, z ktorých údajov profilu si čerpal.
-
-=== SKÓRE ===
-Ohodnoť použiteľnosť výstupu pre akademickú prácu od 0 do 100.
-
-=== ODPORÚČANIA ===
-Uveď konkrétne odporúčania, čo má používateľ doplniť alebo skontrolovať.
-`;
-}
-
 // ================= PAGE =================
 
 export default function ChatPage() {
   const router = useRouter();
 
   const [agent, setAgent] = useState<Agent>('gemini');
-
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -432,7 +268,6 @@ export default function ChatPage() {
         const isPdf =
           file.type === 'application/pdf' ||
           file.name.toLowerCase().endsWith('.pdf');
-
         return isPdf;
       })
       .map((file) => ({
@@ -441,6 +276,7 @@ export default function ChatPage() {
         size: file.size,
         type: file.type || 'application/pdf',
         uploadedAt: new Date().toISOString(),
+        file,
       }));
 
     if (nextFiles.length === 0) {
@@ -476,49 +312,37 @@ export default function ChatPage() {
     recognition.interimResults = false;
     recognition.continuous = false;
 
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
+    recognition.onstart = () => setIsListening(true);
 
     recognition.onresult = (event: any) => {
       const transcript = event.results?.[0]?.[0]?.transcript || '';
-
       if (transcript) {
-        setInput((prev) => {
-          const spacer = prev.trim() ? ' ' : '';
-          return `${prev}${spacer}${transcript}`;
-        });
+        setInput((prev) => `${prev}${prev.trim() ? ' ' : ''}${transcript}`);
       }
     };
 
-    recognition.onerror = () => {
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
 
     recognition.start();
   };
 
   const sendPromptToApi = async ({
     visibleUserText,
-    promptForApi,
+    apiUserText,
   }: {
     visibleUserText: string;
-    promptForApi: string;
+    apiUserText: string;
   }) => {
     if (isLoading) return;
 
-    const userMsg: ChatMessage = {
+    const visibleMessage: ChatMessage = {
       role: 'user',
       content: visibleUserText,
     };
 
-    const nextMessages = [...messages, userMsg];
-
-    setMessages(nextMessages);
+    const nextVisibleMessages = [...messages, visibleMessage];
+    setMessages(nextVisibleMessages);
     setInput('');
     setIsLoading(true);
 
@@ -527,29 +351,31 @@ export default function ChatPage() {
         ...messages,
         {
           role: 'user' as const,
-          content: promptForApi,
+          content: apiUserText,
         },
       ];
 
+      const formData = new FormData();
+      formData.append('agent', agent);
+      formData.append('messages', JSON.stringify(apiMessages));
+      formData.append('profile', JSON.stringify(activeProfile || null));
+
+      attachedFiles.forEach((item) => {
+        formData.append('files', item.file, item.name);
+      });
+
       const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: apiMessages,
-          agent,
-          attachedFiles,
-          profile: activeProfile,
-        }),
+        body: formData,
       });
 
       if (!res.ok) {
-        throw new Error(`API error ${res.status}`);
+        const errorText = await res.text();
+        throw new Error(errorText || `API error ${res.status}`);
       }
 
       if (!res.body) {
-        throw new Error('No stream');
+        throw new Error('API nevrátilo stream odpovede.');
       }
 
       const reader = res.body.getReader();
@@ -561,7 +387,6 @@ export default function ChatPage() {
 
       while (true) {
         const { done, value } = await reader.read();
-
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
@@ -569,12 +394,10 @@ export default function ChatPage() {
 
         setMessages((prev) => {
           const updated = [...prev];
-
           updated[updated.length - 1] = {
             role: 'assistant',
             content: fullText,
           };
-
           return updated;
         });
       }
@@ -582,7 +405,6 @@ export default function ChatPage() {
       setCanvasText(fullText);
 
       const parsed = parseSections(fullText);
-
       if (parsed.analysis || parsed.score || parsed.tips) {
         setPopupData(parsed);
         setPopup(true);
@@ -595,7 +417,9 @@ export default function ChatPage() {
         {
           role: 'assistant',
           content:
-            '❌ Nastala chyba pri komunikácii s API. Skontroluj /api/chat, API kľúče a vybraného AI agenta.',
+            error instanceof Error
+              ? `❌ ${error.message}`
+              : '❌ Nastala chyba pri komunikácii s API.',
         },
       ]);
     } finally {
@@ -605,34 +429,18 @@ export default function ChatPage() {
 
   const sendMessage = async () => {
     const text = input.trim();
-
     if (!text || isLoading) return;
-
-    const promptForApi = buildPromptFromProfile({
-      userInstruction:
-        'Odpovedz na otázku alebo zadanie používateľa. Pri odpovedi vychádzaj z uloženého profilu práce a z priložených PDF dokumentov, ak sú dostupné.',
-      userText: text,
-      profile: activeProfile,
-      files: attachedFiles,
-    });
 
     await sendPromptToApi({
       visibleUserText: text,
-      promptForApi,
+      apiUserText: text,
     });
   };
 
-  const runSuggestion = async (suggestion: (typeof suggestions)[number]) => {
-    const promptForApi = buildPromptFromProfile({
-      userInstruction: suggestion.instruction,
-      userText: '',
-      profile: activeProfile,
-      files: attachedFiles,
-    });
-
+  const runSuggestion = async (item: (typeof suggestions)[number]) => {
     await sendPromptToApi({
-      visibleUserText: suggestion.title,
-      promptForApi,
+      visibleUserText: item.title,
+      apiUserText: item.instruction,
     });
   };
 
@@ -651,7 +459,7 @@ export default function ChatPage() {
   return (
     <div className="h-screen overflow-hidden bg-[#050711] text-white">
       <div className="mx-auto flex h-screen w-full max-w-[1400px] flex-col px-4 py-4 md:px-8">
-        {/* TOP NAV FIXED */}
+        {/* TOP NAV */}
         <header className="shrink-0 border-b border-white/10 pb-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <button
@@ -719,18 +527,17 @@ export default function ChatPage() {
                 className="inline-flex items-center gap-1 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
               >
                 <MoreHorizontal className="h-4 w-4" />
-                Více
+                Viac
               </button>
             </nav>
           </div>
         </header>
 
-        {/* TITLE FIXED */}
+        {/* TITLE */}
         <section className="shrink-0 py-4">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <h2 className="text-4xl font-black tracking-tight">CHAT</h2>
-
               <p className="mt-2 text-sm text-slate-400">
                 Chat čerpá z uloženého profilu práce, vybraného AI agenta a
                 pripojených PDF dokumentov.
@@ -746,9 +553,9 @@ export default function ChatPage() {
           </div>
         </section>
 
-        {/* MAIN CHAT FIXED CONTAINER */}
+        {/* MAIN CHAT */}
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl shadow-black/30">
-          {/* SCROLLABLE INNER CONTENT */}
+          {/* SCROLLABLE AREA */}
           <div
             ref={scrollAreaRef}
             className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8"
@@ -865,7 +672,7 @@ export default function ChatPage() {
             </div>
           )}
 
-          {/* INPUT PANEL FIXED */}
+          {/* INPUT */}
           <div className="shrink-0 border-t border-white/10 bg-[#070a16] px-5 py-4 md:px-8">
             <div className="mx-auto max-w-5xl rounded-[28px] border border-violet-500/40 bg-violet-950/30 p-4 shadow-2xl shadow-violet-950/40">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
@@ -977,7 +784,6 @@ export default function ChatPage() {
             <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
               <div>
                 <h2 className="text-2xl font-black">Canvas</h2>
-
                 <p className="text-sm text-slate-400">
                   Tu si môžeš upravovať, kopírovať alebo pripravovať výsledný
                   text.
@@ -1003,7 +809,7 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* POPUP RESULT */}
+      {/* POPUP */}
       {popup && popupData && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
           <div className="grid max-h-[90vh] w-full max-w-6xl gap-6 overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] p-6 shadow-2xl md:grid-cols-3">
@@ -1018,7 +824,6 @@ export default function ChatPage() {
             <div className="space-y-4 overflow-y-auto">
               <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
                 <h3 className="mb-2 font-black">📊 Skóre</h3>
-
                 <div className="text-3xl font-black text-emerald-400">
                   {popupData.score || '—'}
                 </div>
@@ -1026,7 +831,6 @@ export default function ChatPage() {
 
               <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
                 <h3 className="mb-2 font-black">⚠️ Analýza</h3>
-
                 <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
                   {popupData.analysis || 'Bez analýzy.'}
                 </div>
@@ -1034,7 +838,6 @@ export default function ChatPage() {
 
               <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
                 <h3 className="mb-2 font-black">✏️ Odporúčania</h3>
-
                 <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
                   {popupData.tips || 'Bez odporúčaní.'}
                 </div>

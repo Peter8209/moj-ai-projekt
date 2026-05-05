@@ -1,15 +1,23 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { LucideIcon } from 'lucide-react';
 import {
   BarChart3,
   Bell,
   BookOpen,
+  Bot,
   CalendarDays,
-  CheckCircle2,
   Crown,
+  ExternalLink,
   FileCheck2,
   FileText,
   GraduationCap,
@@ -21,7 +29,6 @@ import {
   MessageSquare,
   Plus,
   Presentation,
-  Save,
   Search,
   Settings,
   ShieldCheck,
@@ -80,11 +87,7 @@ type SavedProfile = {
   savedAt?: string;
 };
 
-// Toto rieši tvoju chybu:
-// ProfileForm je v súbore komponentu pravdepodobne definovaný bez props,
-// preto TypeScript odmietal <ProfileForm onSave={...} />.
-// Týmto mu povieme, že z dashboardu mu môžeme poslať voliteľný onSave.
-const ProfileForm = ProfileFormOriginal as unknown as React.ComponentType<{
+const ProfileForm = ProfileFormOriginal as unknown as ComponentType<{
   onSave?: (data: SavedProfile) => void;
 }>;
 
@@ -239,20 +242,17 @@ function DashboardPage() {
     loadProfiles();
   };
 
-  return (
-    <div className="flex min-h-screen bg-[#020617] text-white">
-      <Sidebar
-        view={view}
-        setView={setView}
-        subActive={subActive}
-        openForm={() => setShowProfileForm(true)}
-        openMyWorks={() => {
-          setShowProfileForm(true);
-        }}
-      />
+const showSidebar = view !== 'dashboard';
 
-      <main className="flex min-w-0 flex-1 flex-col">
-        <Header view={view} subActive={subActive} />
+return (
+  <div className="min-h-screen bg-[#020617] text-white">
+    <main className="flex min-w-0 flex-1 flex-col">
+        <Header
+  view={view}
+  mode={mode}
+  subActive={subActive}
+  setView={setView}
+/>
 
         <div className="flex-1 overflow-y-auto p-6 md:p-8">
           {view === 'dashboard' && (
@@ -366,157 +366,7 @@ function DashboardPage() {
   );
 }
 
-// =====================================================
-// SIDEBAR
-// =====================================================
 
-function Sidebar({
-  view,
-  setView,
-  subActive,
-  openForm,
-  openMyWorks,
-}: {
-  view: View;
-  setView: (v: View) => void;
-  subActive: boolean;
-  openForm: () => void;
-  openMyWorks: () => void;
-}) {
-  return (
-    <aside className="flex w-[270px] shrink-0 flex-col border-r border-white/10 bg-[#020617] p-4">
-      <div className="mb-8 flex items-center gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400">
-          <Sparkles className="text-white" size={24} />
-        </div>
-
-        <div>
-          <div className="text-xl font-black leading-none">ZEDPERA</div>
-          <div className="text-sm text-gray-300">AI vedúci práce</div>
-        </div>
-
-        {subActive && (
-          <span className="ml-auto rounded bg-purple-600 px-2 py-1 text-xs">
-            PRO
-          </span>
-        )}
-      </div>
-
-      <button
-        type="button"
-        onClick={openForm}
-        className="mb-7 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 py-4 text-lg font-bold transition hover:opacity-90"
-      >
-        <Plus size={20} />
-        Nová práca
-      </button>
-
-      <nav className="space-y-2">
-        <SideItem
-          active={view === 'dashboard'}
-          icon={Home}
-          label="Dashboard"
-          onClick={() => setView('dashboard')}
-        />
-
-        <SideItem
-          active={view === 'chat'}
-          icon={MessageSquare}
-          label="AI Chat"
-          onClick={() => setView('chat')}
-        />
-
-        <SideItem
-          active={false}
-          icon={BookOpen}
-          label="Moje práce"
-          onClick={openMyWorks}
-        />
-
-        <SideItem
-          active={view === 'profile'}
-          icon={User}
-          label="Profil práce"
-          onClick={() => setView('profile')}
-        />
-
-        <SideItem
-          active={view === 'chat'}
-          icon={Library}
-          label="Zdroje"
-          onClick={() => setView('chat')}
-        />
-
-        <SideItem
-          active={view === 'packages'}
-          icon={Menu}
-          label="Balíčky"
-          onClick={() => setView('packages')}
-        />
-
-        <SideItem
-          active={view === 'video'}
-          icon={Video}
-          label="Video návod"
-          onClick={() => setView('video')}
-        />
-
-        <SideItem
-          active={view === 'history'}
-          icon={CalendarDays}
-          label="História"
-          onClick={() => setView('history')}
-        />
-
-        <SideItem
-          active={view === 'settings'}
-          icon={Settings}
-          label="Nastavenia"
-          onClick={() => setView('settings')}
-        />
-      </nav>
-
-      <div className="mt-auto pt-6">
-        {!subActive && (
-          <button
-            type="button"
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-400 py-3 font-bold text-black"
-          >
-            <Crown size={17} />
-            Upgrade PRO
-          </button>
-        )}
-      </div>
-    </aside>
-  );
-}
-
-function SideItem({
-  active,
-  icon: Icon,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  icon: LucideIcon;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition ${
-        active
-          ? 'bg-white/10 font-semibold text-white'
-          : 'text-gray-300 hover:bg-white/5 hover:text-white'
-      }`}
-    >
-      <Icon size={20} />
-      <span>{label}</span>
-    </button>
-  );
-}
 
 // =====================================================
 // HEADER
@@ -524,14 +374,18 @@ function SideItem({
 
 function Header({
   view,
+  mode,
   subActive,
+  setView,
 }: {
   view: View;
+  mode: Mode;
   subActive: boolean;
+  setView: (v: View) => void;
 }) {
   const titleMap: Record<View, string> = {
     dashboard: 'Dashboard',
-    chat: 'AI Chat',
+    chat: getModeTitle(mode),
     profile: 'Profil práce',
     history: 'História',
     settings: 'Nastavenia',
@@ -546,15 +400,26 @@ function Header({
         <p className="text-gray-300">AI platforma pre akademické písanie</p>
       </div>
 
-      <div className="flex items-center gap-4">
-        {subActive && (
-          <span className="rounded-full bg-purple-600/30 px-3 py-1 text-sm text-purple-200">
-            PRO aktívne
-          </span>
-        )}
+     <div className="flex items-center gap-4">
+  {view !== 'dashboard' && (
+    <button
+      type="button"
+      onClick={() => setView('dashboard')}
+      className="rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20"
+    >
+      Dashboard
+    </button>
+  )}
 
-        <Bell className="text-gray-300" size={22} />
-      </div>
+  {subActive && (
+    <span className="rounded-full bg-purple-600/30 px-3 py-1 text-sm text-purple-200">
+      PRO aktívne
+    </span>
+  )}
+
+  <Bell className="text-gray-300" size={22} />
+</div>
+     
     </header>
   );
 }
@@ -797,7 +662,9 @@ function Chat({
   activeProfile: SavedProfile | null;
 }) {
   const current = useMemo(() => {
-    return featureCards.find((feature) => feature.mode === mode) || featureCards[0];
+    return (
+      featureCards.find((feature) => feature.mode === mode) || featureCards[0]
+    );
   }, [mode]);
 
   const CurrentIcon = current.icon;
@@ -823,11 +690,11 @@ function Chat({
           </div>
         )}
 
-        {mode === 'write' && <WriteModule />}
+       {mode === 'write' && <WriteModule activeProfile={activeProfile} />}
         {mode === 'sources' && <SourcesModule />}
-        {mode === 'supervisor' && <SupervisorModule />}
-        {mode === 'audit' && <AuditModule />}
-        {mode === 'defense' && <DefenseModule />}
+        {mode === 'supervisor' && <SupervisorModule activeProfile={activeProfile} />}
+      {mode === 'audit' && <AuditModule activeProfile={activeProfile} />}
+       {mode === 'defense' && <DefenseModule activeProfile={activeProfile} />}
         {mode === 'translate' && <TranslateModule />}
         {mode === 'analysis' && <AnalysisModule />}
         {mode === 'planning' && <PlanningModule />}
@@ -845,28 +712,41 @@ function ModuleTabs({
   mode: Mode;
   setMode: (m: Mode) => void;
 }) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-3">
-      <div className="flex gap-2 overflow-x-auto">
-        {featureCards.map((feature) => {
-          const Icon = feature.icon;
+  const firstRow = featureCards.slice(0, 5);
+  const secondRow = featureCards.slice(5, 10);
 
-          return (
-            <button
-              type="button"
-              key={feature.mode}
-              onClick={() => setMode(feature.mode)}
-              className={`flex shrink-0 items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold ${
-                mode === feature.mode
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-white/10 text-gray-300 hover:bg-white/20'
-              }`}
-            >
-              <Icon size={17} />
-              {feature.title}
-            </button>
-          );
-        })}
+  const renderTab = (feature: (typeof featureCards)[number]) => {
+    const Icon = feature.icon;
+
+    return (
+      <button
+        type="button"
+        key={feature.mode}
+        onClick={() => setMode(feature.mode)}
+        className={`flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-4 text-sm font-semibold transition ${
+          mode === feature.mode
+            ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white shadow-lg'
+            : 'bg-white/10 text-gray-300 hover:bg-white/20 hover:text-white'
+        }`}
+      >
+        <Icon size={18} />
+        <span className="truncate">{feature.title}</span>
+      </button>
+    );
+  };
+
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
+      <div className="flex flex-col gap-3">
+        {/* 1. riadok */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {firstRow.map(renderTab)}
+        </div>
+
+        {/* 2. riadok */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {secondRow.map(renderTab)}
+        </div>
       </div>
     </div>
   );
@@ -876,32 +756,204 @@ function ModuleTabs({
 // MODULE CONTENTS
 // =====================================================
 
-function WriteModule() {
+function WriteModule({
+  activeProfile,
+}: {
+  activeProfile: SavedProfile | null;
+}) {
+  const [chapterTitle, setChapterTitle] = useState('');
+  const [outputType, setOutputType] = useState('Kapitola');
+  const [assignment, setAssignment] = useState('');
+  const [generatedText, setGeneratedText] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [savedForSupervisor, setSavedForSupervisor] = useState(false);
+  const [error, setError] = useState('');
+
+  const saveForSupervisor = (text: string) => {
+    const cleanText = text.trim();
+
+    if (!cleanText) {
+      setError('Najprv vygeneruj alebo vlož text.');
+      return;
+    }
+
+    localStorage.setItem('latest_generated_work_text', cleanText);
+
+    setSavedForSupervisor(true);
+    setError('');
+
+    window.setTimeout(() => {
+      setSavedForSupervisor(false);
+    }, 2500);
+  };
+
+  const generateText = async () => {
+    setIsGenerating(true);
+    setError('');
+    setSavedForSupervisor(false);
+
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chapterTitle,
+          outputType,
+          assignment,
+          activeProfile,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || 'Nepodarilo sa vygenerovať text.');
+      }
+
+      const text = String(data?.text || '').trim();
+
+      if (!text) {
+        throw new Error('AI nevrátila žiadny text.');
+      }
+
+      setGeneratedText(text);
+
+      // Toto je hlavné prepojenie na AI vedúceho práce:
+      localStorage.setItem('latest_generated_work_text', text);
+
+      setSavedForSupervisor(true);
+
+      window.setTimeout(() => {
+        setSavedForSupervisor(false);
+      }, 2500);
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Neznáma chyba pri generovaní textu.';
+
+      setError(message);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <ModuleLayout>
-      <Input
-        label="Názov kapitoly"
-        placeholder="Napr. Teoretické východiská práce"
-      />
+      {activeProfile && (
+        <div className="rounded-2xl border border-purple-500/20 bg-purple-500/10 p-4 text-sm text-purple-100">
+          Text sa bude generovať podľa aktívneho profilu:{' '}
+          <strong>{activeProfile.title || 'Bez názvu'}</strong>
+          {activeProfile.topic ? ` — ${activeProfile.topic}` : ''}
+        </div>
+      )}
 
-      <Select
-        label="Typ výstupu"
-        options={[
-          'Úvod',
-          'Kapitola',
-          'Podkapitola',
-          'Záver',
-          'Abstrakt',
-          'Anotácia',
-        ]}
-      />
+      {!activeProfile && (
+        <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
+          Profil práce zatiaľ nie je vytvorený. Text sa dá generovať aj bez
+          profilu, ale výsledok bude menej presný.
+        </div>
+      )}
 
-      <Textarea
-        label="Zadanie pre AI"
-        placeholder="Popíš, čo má AI napísať..."
-      />
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Názov kapitoly
+        </div>
 
-      <ActionButton icon={FileText} label="Generovať text" />
+        <input
+          value={chapterTitle}
+          onChange={(event) => setChapterTitle(event.target.value)}
+          placeholder="Napr. Teoretické východiská práce"
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
+
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Typ výstupu
+        </div>
+
+        <select
+          value={outputType}
+          onChange={(event) => setOutputType(event.target.value)}
+          className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+        >
+          <option>Úvod</option>
+          <option>Kapitola</option>
+          <option>Podkapitola</option>
+          <option>Záver</option>
+          <option>Abstrakt</option>
+          <option>Anotácia</option>
+        </select>
+      </label>
+
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Zadanie pre AI
+        </div>
+
+        <textarea
+          value={assignment}
+          onChange={(event) => setAssignment(event.target.value)}
+          rows={7}
+          placeholder="Popíš, čo má AI napísať. Napr. Napíš teoretickú kapitolu o inkluzívnom vzdelávaní v rozsahu cca 2 strany..."
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
+
+      <div className="flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={generateText}
+          disabled={isGenerating}
+          className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <FileText size={20} />
+          {isGenerating ? 'Generujem text...' : 'Generovať text'}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => saveForSupervisor(generatedText)}
+          className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 font-bold transition hover:bg-white/15"
+        >
+          Uložiť pre AI vedúceho
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+          {error}
+        </div>
+      )}
+
+      {savedForSupervisor && (
+        <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-4 text-sm font-semibold text-green-200">
+          Text bol uložený pre AI vedúceho práce.
+        </div>
+      )}
+
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Vygenerovaný text
+        </div>
+
+        <textarea
+          value={generatedText}
+          onChange={(event) => {
+            setGeneratedText(event.target.value);
+            localStorage.setItem(
+              'latest_generated_work_text',
+              event.target.value
+            );
+          }}
+          rows={16}
+          placeholder="Tu sa zobrazí vygenerovaný text z AI..."
+          className="w-full rounded-2xl border border-purple-500/30 bg-[#0f1324] px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
     </ModuleLayout>
   );
 }
@@ -945,84 +997,631 @@ function SourcesModule() {
   );
 }
 
-function SupervisorModule() {
+// =====================================================
+// FASTBOTS AI VEDÚCI PRÁCE
+// =====================================================
+
+function SupervisorModule({
+  activeProfile,
+}: {
+  activeProfile: SavedProfile | null;
+}) {
+  const botId =
+    process.env.NEXT_PUBLIC_FASTBOTS_BOT_ID || 'cmonxnqsl0av1p81pwly2ti1x';
+
+  const fastbotUrl = `https://app.fastbots.ai/embed/${botId}`;
+
+  if (!botId) {
+    return (
+      <div className="rounded-3xl border border-red-500/40 bg-red-950/30 p-6 text-red-100">
+        <h3 className="text-xl font-black">Fastbots nie je nastavený</h3>
+        <p className="mt-2 text-sm text-red-200">
+          Do súboru .env.local pridaj premennú:
+        </p>
+
+        <pre className="mt-4 overflow-x-auto rounded-2xl bg-black/40 p-4 text-xs text-red-100">
+{`NEXT_PUBLIC_FASTBOTS_BOT_ID=cmonxnqsl0av1p81pwly2ti1x`}
+        </pre>
+      </div>
+    );
+  }
+
   return (
-    <ModuleLayout>
-      <Textarea
-        label="Vlož text práce"
-        placeholder="Vlož kapitolu alebo časť práce na kritické posúdenie..."
-      />
+    <div className="space-y-6">
+      <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-300 ring-1 ring-purple-400/30">
+              <Bot size={28} />
+            </div>
 
-      <Select
-        label="Prísnosť hodnotenia"
-        options={[
-          'Mierna',
-          'Štandardná',
-          'Prísna ako vedúci práce',
-          'Oponentská kritika',
-        ]}
-      />
+            <div>
+              <h3 className="text-2xl font-black text-white">
+                Fastbots AI vedúci práce
+              </h3>
 
-      <ActionButton icon={GraduationCap} label="Skontrolovať ako AI vedúci" />
-    </ModuleLayout>
-  );
-}
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-300">
+                Tento modul je napojený priamo na Fastbots AI. Používateľ vloží
+                text práce do chatbota a dostane odbornú spätnú väzbu ako od
+                vedúceho práce.
+              </p>
 
-function AuditModule() {
-  return (
-    <ModuleLayout>
-      <Textarea
-        label="Text na audit kvality"
-        placeholder="Vlož text, ktorý chceš skontrolovať..."
-      />
+              {activeProfile && (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-purple-100">
+                  <div>
+                    <span className="text-gray-400">Aktívna práca:</span>{' '}
+                    <strong>{activeProfile.title || 'Bez názvu'}</strong>
+                  </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <Select
-          label="Kontrola"
-          options={[
-            'Logika',
-            'Metodológia',
-            'Argumentácia',
-            'Štylistika',
-            'Všetko',
-          ]}
-        />
+                  {activeProfile.topic && (
+                    <div className="mt-1">
+                      <span className="text-gray-400">Téma:</span>{' '}
+                      {activeProfile.topic}
+                    </div>
+                  )}
 
-        <Select
-          label="Výstup"
-          options={[
-            'Bodové hodnotenie',
-            'Detailná správa',
-            'Odporúčania',
-          ]}
-        />
+                  {activeProfile.type && (
+                    <div className="mt-1">
+                      <span className="text-gray-400">Typ práce:</span>{' '}
+                      {activeProfile.type}
+                    </div>
+                  )}
 
-        <Select label="Norma" options={['APA', 'ISO 690', 'Harvard', 'MLA']} />
+                  {activeProfile.citation && (
+                    <div className="mt-1">
+                      <span className="text-gray-400">Citovanie:</span>{' '}
+                      {activeProfile.citation}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <a
+            href={fastbotUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/20"
+          >
+            Otvoriť samostatne
+            <ExternalLink size={17} />
+          </a>
+        </div>
       </div>
 
-      <ActionButton icon={FileCheck2} label="Spustiť audit kvality" />
+      <div className="overflow-hidden rounded-3xl border border-purple-500/30 bg-white shadow-2xl">
+        <iframe
+          title="Fastbots AI vedúci práce"
+          src={fastbotUrl}
+          className="h-[720px] w-full border-0"
+          allow="microphone; clipboard-read; clipboard-write"
+        />
+      </div>
+    </div>
+  );
+}
+
+function AuditModule({
+  activeProfile,
+}: {
+  activeProfile: SavedProfile | null;
+}) {
+  const [text, setText] = useState('');
+  const [checkType, setCheckType] = useState('Všetko');
+  const [outputType, setOutputType] = useState('Detailná správa');
+  const [citationStyle, setCitationStyle] = useState(
+    activeProfile?.citation || 'ISO 690'
+  );
+
+  const [result, setResult] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const runAudit = async () => {
+    setError('');
+    setResult('');
+
+    if (text.trim().length < 300) {
+      setError('Vlož aspoň 300 znakov textu na audit.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const response = await fetch('/api/audit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text,
+          checkType,
+          outputType,
+          citationStyle,
+          activeProfile,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error || 'Audit kvality zlyhal.');
+      }
+
+      setResult(data.result || '');
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Neznáma chyba pri audite kvality.';
+
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <ModuleLayout>
+      {activeProfile && (
+        <div className="rounded-2xl border border-purple-500/20 bg-purple-500/10 p-4 text-sm text-purple-100">
+          Audit sa vykoná podľa aktívneho profilu práce:{' '}
+          <strong>{activeProfile.title || 'Bez názvu'}</strong>
+          {activeProfile.topic ? ` — ${activeProfile.topic}` : ''}
+        </div>
+      )}
+
+      {!activeProfile && (
+        <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
+          Profil práce nie je vytvorený. Audit bude fungovať, ale bez kontextu
+          témy, metodológie a typu práce.
+        </div>
+      )}
+
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Text na audit kvality
+        </div>
+
+        <textarea
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          rows={12}
+          placeholder="Vlož sem kapitolu, úvod, záver alebo inú časť práce..."
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <label className="block">
+          <div className="mb-2 text-sm font-semibold text-gray-300">
+            Kontrola
+          </div>
+
+          <select
+            value={checkType}
+            onChange={(event) => setCheckType(event.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+          >
+            <option>Všetko</option>
+            <option>Logika</option>
+            <option>Metodológia</option>
+            <option>Argumentácia</option>
+            <option>Štylistika</option>
+            <option>Citácie</option>
+            <option>Štruktúra práce</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="mb-2 text-sm font-semibold text-gray-300">
+            Výstup
+          </div>
+
+          <select
+            value={outputType}
+            onChange={(event) => setOutputType(event.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+          >
+            <option>Detailná správa</option>
+            <option>Bodové hodnotenie</option>
+            <option>Odporúčania</option>
+            <option>Prísna kritika</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="mb-2 text-sm font-semibold text-gray-300">
+            Citačná norma
+          </div>
+
+          <select
+            value={citationStyle}
+            onChange={(event) => setCitationStyle(event.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+          >
+            <option>ISO 690</option>
+            <option>APA</option>
+            <option>APA 7</option>
+            <option>Harvard</option>
+            <option>MLA</option>
+            <option>Chicago</option>
+          </select>
+        </label>
+      </div>
+
+      <button
+        type="button"
+        onClick={runAudit}
+        disabled={loading}
+        className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <FileCheck2 size={20} />
+        {loading ? 'Prebieha audit...' : 'Spustiť audit kvality'}
+      </button>
+
+      {error && (
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div className="rounded-3xl border border-white/10 bg-[#0f1324] p-6">
+          <div className="mb-3 text-lg font-black text-white">
+            Výsledok auditu kvality
+          </div>
+
+          <div className="whitespace-pre-wrap text-sm leading-7 text-gray-200">
+            {result}
+          </div>
+        </div>
+      )}
     </ModuleLayout>
   );
 }
 
-function DefenseModule() {
+type DefenseSlide = {
+  title: string;
+  bullets: string[];
+  speakerNotes?: string;
+};
+
+function DefenseModule({
+  activeProfile,
+}: {
+  activeProfile: SavedProfile | null;
+}) {
+  const [title, setTitle] = useState(activeProfile?.title || '');
+  const [summary, setSummary] = useState(
+    activeProfile?.annotation ||
+      activeProfile?.goal ||
+      activeProfile?.topic ||
+      ''
+  );
+  const [defenseType, setDefenseType] = useState('Bakalárska');
+  const [slides, setSlides] = useState<DefenseSlide[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!activeProfile) return;
+
+    setTitle(activeProfile.title || '');
+    setSummary(
+      activeProfile.annotation ||
+        activeProfile.goal ||
+        activeProfile.topic ||
+        ''
+    );
+
+    if (activeProfile.type) {
+      setDefenseType(activeProfile.type);
+    }
+  }, [activeProfile]);
+
+  const generateDefense = async () => {
+    setError('');
+    setSlides([]);
+
+    if (!title.trim()) {
+      setError('Zadaj názov práce.');
+      return;
+    }
+
+    if (!summary.trim() || summary.trim().length < 100) {
+      setError('Vlož stručný obsah práce aspoň 100 znakov.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const response = await fetch('/api/defense', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title,
+          summary,
+          defenseType,
+          activeProfile,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error || 'Nepodarilo sa pripraviť obhajobu.');
+      }
+
+      setSlides(data.slides || []);
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Neznáma chyba pri príprave obhajoby.';
+
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const exportPptx = async () => {
+    if (!slides.length) {
+      setError('Najprv vygeneruj prezentáciu.');
+      return;
+    }
+
+    setExporting(true);
+    setError('');
+
+    try {
+      const response = await fetch('/api/defense/pptx', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title,
+          defenseType,
+          slides,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Export do PowerPointu zlyhal.');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${safeFileName(title || 'obhajoba')}.pptx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Export do PowerPointu zlyhal.';
+
+      setError(message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const exportPdf = async () => {
+    if (!slides.length) {
+      setError('Najprv vygeneruj prezentáciu.');
+      return;
+    }
+
+    setExporting(true);
+    setError('');
+
+    try {
+      const element = document.getElementById('defense-pdf-export');
+
+      if (!element) {
+        throw new Error('PDF obsah sa nenašiel.');
+      }
+
+      const html2pdfModule = await import('html2pdf.js');
+      const html2pdf = html2pdfModule.default;
+
+      await html2pdf()
+        .set({
+          margin: 8,
+          filename: `${safeFileName(title || 'obhajoba')}.pdf`,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: '#ffffff',
+          },
+          jsPDF: {
+            unit: 'mm',
+            format: 'a4',
+            orientation: 'landscape',
+          },
+        })
+        .from(element)
+        .save();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Export do PDF zlyhal.';
+
+      setError(message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <ModuleLayout>
-      <Input label="Názov práce" placeholder="Názov záverečnej práce" />
+      {activeProfile && (
+        <div className="rounded-2xl border border-purple-500/20 bg-purple-500/10 p-4 text-sm text-purple-100">
+          Prezentácia sa pripraví podľa aktívneho profilu práce:{' '}
+          <strong>{activeProfile.title || 'Bez názvu'}</strong>
+          {activeProfile.topic ? ` — ${activeProfile.topic}` : ''}
+        </div>
+      )}
 
-      <Textarea
-        label="Stručný obsah práce"
-        placeholder="Vlož abstrakt alebo stručný opis práce..."
-      />
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Názov práce
+        </div>
 
-      <Select
-        label="Typ obhajoby"
-        options={['Bakalárska', 'Diplomová', 'Seminárna', 'Dizertačná']}
-      />
+        <input
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder="Názov záverečnej práce"
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
 
-      <ActionButton icon={Presentation} label="Pripraviť otázky na obhajobu" />
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Stručný obsah práce
+        </div>
+
+        <textarea
+          value={summary}
+          onChange={(event) => setSummary(event.target.value)}
+          rows={8}
+          placeholder="Vlož abstrakt, cieľ práce, metodológiu alebo stručný opis práce..."
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
+
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Typ obhajoby
+        </div>
+
+        <select
+          value={defenseType}
+          onChange={(event) => setDefenseType(event.target.value)}
+          className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+        >
+          <option>Bakalárska</option>
+          <option>Diplomová</option>
+          <option>Seminárna</option>
+          <option>Dizertačná</option>
+          <option>Projektová</option>
+        </select>
+      </label>
+
+      <div className="flex flex-wrap gap-3">
+  <button
+    type="button"
+    onClick={generateDefense}
+    disabled={loading}
+    className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+  >
+    <Presentation size={20} />
+    {loading ? 'Vytváram prezentáciu...' : 'Vytvoriť prezentáciu'}
+  </button>
+
+  <button
+    type="button"
+    onClick={exportPptx}
+    disabled={!slides.length || exporting}
+    className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 font-bold transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+  >
+    Export PowerPoint
+  </button>
+
+  <button
+    type="button"
+    onClick={exportPdf}
+    disabled={!slides.length || exporting}
+    className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 font-bold transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+  >
+    Export PDF
+  </button>
+</div>
+
+      {error && (
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+          {error}
+        </div>
+      )}
+
+      {slides.length > 0 && (
+        <div className="space-y-5">
+          <div className="rounded-3xl border border-white/10 bg-[#0f1324] p-6">
+            <h3 className="mb-2 text-2xl font-black">
+              Náhľad prezentácie
+            </h3>
+            <p className="text-sm text-gray-400">
+              Táto prezentácia sa exportuje do PowerPointu aj PDF.
+            </p>
+          </div>
+
+          <div id="defense-pdf-export" className="space-y-6 bg-white p-6 text-black">
+            <div className="rounded-2xl border border-gray-300 bg-white p-8">
+              <div className="text-sm uppercase tracking-wide text-purple-700">
+                {defenseType} obhajoba
+              </div>
+              <h1 className="mt-4 text-4xl font-black">{title}</h1>
+              <p className="mt-4 text-lg text-gray-700">
+                Prezentácia pripravená systémom ZEDPERA
+              </p>
+            </div>
+
+            {slides.map((slide, index) => (
+              <div
+                key={`${slide.title}-${index}`}
+                className="rounded-2xl border border-gray-300 bg-white p-8"
+              >
+                <div className="mb-3 text-sm font-bold text-purple-700">
+                  Slide {index + 1}
+                </div>
+
+                <h2 className="mb-5 text-3xl font-black">{slide.title}</h2>
+
+                <ul className="space-y-3 text-lg">
+                  {slide.bullets.map((bullet, bulletIndex) => (
+                    <li key={`${bullet}-${bulletIndex}`} className="flex gap-3">
+                      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-purple-600" />
+                      <span>{bullet}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                {slide.speakerNotes && (
+                  <div className="mt-6 rounded-xl bg-gray-100 p-4 text-sm text-gray-700">
+                    <strong>Poznámky k prezentovaniu:</strong>{' '}
+                    {slide.speakerNotes}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </ModuleLayout>
   );
+}
+
+function safeFileName(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9-_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
 }
 
 function TranslateModule() {
@@ -1180,7 +1779,7 @@ function PlagiarismModule() {
 // UI HELPERS
 // =====================================================
 
-function ModuleLayout({ children }: { children: React.ReactNode }) {
+function ModuleLayout({ children }: { children: ReactNode }) {
   return <div className="space-y-5">{children}</div>;
 }
 
@@ -1277,6 +1876,23 @@ function SimplePage({ title, text }: { title: string; text: string }) {
       <p className="text-gray-400">{text}</p>
     </div>
   );
+}
+
+function getModeTitle(mode: Mode) {
+  const titles: Record<Mode, string> = {
+    write: 'AI Chat',
+    sources: 'Zdroje',
+    supervisor: 'AI vedúci',
+    audit: 'Audit kvality',
+    defense: 'Obhajoba',
+    translate: 'Preklad',
+    analysis: 'Analýza dát',
+    planning: 'Plánovanie',
+    email: 'Emaily',
+    plagiarism: 'Plagiátorstvo',
+  };
+
+  return titles[mode];
 }
 
 function getModeDescription(mode: Mode) {

@@ -173,42 +173,42 @@ const suggestions: {
   icon: any;
 }[] = [
   {
-    title: 'Navrhni mi úvod mé práce',
+    title: 'Navrhni mi úvod mojej práce',
     actionTitle: 'Úvod práce',
     instruction:
       'Na základe uloženého profilu práce vytvor profesionálny akademický úvod práce. Úvod má vychádzať z profilu práce, témy, cieľa, metodológie, typu práce a ďalších údajov z profilu.',
     icon: PenLine,
   },
   {
-    title: 'Napiš mi abstrakt',
+    title: 'Napíš mi abstrakt',
     actionTitle: 'Abstrakt',
     instruction:
       'Na základe uloženého profilu práce vytvor akademický abstrakt. Má obsahovať tému, cieľ, problém, metodológiu, výsledky alebo očakávaný prínos práce.',
     icon: BookOpen,
   },
   {
-    title: 'Brainstormuj se mnou strukturu kapitol a podkapitol',
+    title: 'Pomôž mi navrhnúť štruktúru kapitol a podkapitol',
     actionTitle: 'Štruktúra kapitol',
     instruction:
       'Na základe uloženého profilu práce navrhni detailnú štruktúru kapitol a podkapitol. Rešpektuj typ práce, cieľ, metodológiu, praktickú časť a logické akademické členenie.',
     icon: GraduationCap,
   },
   {
-    title: 'Teď mi pomůžeš napsat návrh kapitoly.',
+    title: 'Pomôž mi napísať návrh kapitoly.',
     actionTitle: 'Návrh kapitoly',
     instruction:
       'Na základe uloženého profilu práce priprav návrh kapitoly. Najprv navrhni osnovu kapitoly, potom podkapitoly a následne ukážkový odborný text.',
     icon: FileText,
   },
  {
-  title: 'Pomoz mi citovat tento zdroj',
+  title: 'Pomôž mi citovať tento zdroj',
   actionTitle: 'Citovanie zdroja',
   instruction:
     'Na základe uloženého profilu práce a zvoleného citačného štýlu vysvetli, ako správne citovať zdroj v texte a v zozname literatúry. Ak sú priložené súbory, napríklad PDF, Word dokumenty, texty, obrázky, tabuľky alebo prezentácie, zohľadni ich.',
   icon: Library,
 },
   {
-    title: 'Pomoz mi přepsat můj text do akademického jazyka.',
+    title: 'Pomôž mi prepísať môj text do akademického jazyka.',
     actionTitle: 'Akademický jazyk',
     instruction:
       'Na základe uloženého profilu práce prepíš text do akademického jazyka. Ak text od používateľa chýba, vytvor ukážku odborného formulovania podľa témy práce.',
@@ -216,17 +216,58 @@ const suggestions: {
   },
 ];
 
+
+function cleanAiOutput(text: string) {
+  return text
+    // odstráni BOM a neviditeľné znaky
+    .replace(/\uFEFF/g, '')
+    .replace(/\u200B/g, '')
+    .replace(/\u200C/g, '')
+    .replace(/\u200D/g, '')
+
+    // zjednotí konce riadkov
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+
+    // odstráni markdown nadpisy typu ### Nadpis
+    .replace(/^#{1,6}\s+/gm, '')
+
+    // odstráni markdown tučné / kurzíva značky
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+
+    // odstráni samostatné markdown oddeľovače
+    .replace(/^\s*[-*_]{3,}\s*$/gm, '')
+
+    // odstráni code block značky
+    .replace(/```[a-zA-Z]*\n?/g, '')
+    .replace(/```/g, '')
+
+    // upraví zvláštne typografické znaky na bežné
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+
+    // zredukuje príliš veľa prázdnych riadkov
+    .replace(/\n{4,}/g, '\n\n\n')
+
+    .trim();
+}
+
 // ================= HELPERS =================
 
 function parseSections(text: string): ParsedResult {
+  const cleanedText = cleanAiOutput(text);
+
   const get = (name: string) =>
-    text.split(`=== ${name} ===`)[1]?.split('===')[0]?.trim() || '';
+    cleanedText.split(`=== ${name} ===`)[1]?.split('===')[0]?.trim() || '';
 
   return {
-    output: get('VÝSTUP') || text,
-    analysis: get('ANALÝZA'),
-    score: get('SKÓRE'),
-    tips: get('ODPORÚČANIA'),
+    output: cleanAiOutput(get('VÝSTUP') || cleanedText),
+    analysis: cleanAiOutput(get('ANALÝZA')),
+    score: cleanAiOutput(get('SKÓRE')),
+    tips: cleanAiOutput(get('ODPORÚČANIA')),
   };
 }
 
@@ -622,28 +663,30 @@ export default function ChatPage() {
       setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
 
       while (true) {
-        const { done, value } = await reader.read();
+  const { done, value } = await reader.read();
 
-        if (done) break;
+  if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        fullText += chunk;
+  const chunk = decoder.decode(value, { stream: true });
+  fullText += chunk;
 
-        setMessages((prev) => {
-          const updated = [...prev];
+  const visibleText = cleanAiOutput(fullText);
 
-          updated[updated.length - 1] = {
-            role: 'assistant',
-            content: fullText,
-          };
+  setMessages((prev) => {
+    const updated = [...prev];
 
-          return updated;
-        });
-      }
+    updated[updated.length - 1] = {
+      role: 'assistant',
+      content: visibleText,
+    };
 
-      setCanvasText(fullText);
+    return updated;
+  });
+}
 
-      const parsed = parseSections(fullText);
+setCanvasText(cleanAiOutput(fullText));
+
+const parsed = parseSections(fullText);
 
       const looksLikeError =
         parsed.output.includes('AI_APICallError') ||
@@ -747,7 +790,7 @@ export default function ChatPage() {
                 className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
               >
                 <History className="h-4 w-4" />
-                Historie
+                História
               </button>
 
               <button
@@ -815,7 +858,7 @@ export default function ChatPage() {
                     <Brain className="h-7 w-7" />
                   </div>
 
-                  <h3 className="text-3xl font-black">Začněte konverzaci</h3>
+                  <h3 className="text-3xl font-black">Začnite konverzáciu</h3>
 
                  <p className="mt-2 text-slate-400">
   Vyberte okno nižšie. AI použije uložený profil práce a
@@ -967,13 +1010,13 @@ export default function ChatPage() {
                 className="flex items-end gap-3"
               >
                 <input
-  ref={fileInputRef}
-  type="file"
-  accept={allowedFileAccept}
-  multiple
-  className="hidden"
-  onChange={(event) => handleFiles(event.target.files)}
-/>
+                  ref={fileInputRef}
+                  type="file"
+                  accept={allowedFileAccept}
+                  multiple
+                  className="hidden"
+                  onChange={(event) => handleFiles(event.target.files)}
+                />
 
                 <button
                   type="button"
@@ -1021,14 +1064,8 @@ export default function ChatPage() {
                 </button>
               </form>
             </div>
-
-            <p className="mt-3 text-center text-xs text-slate-500">
-              Zedpera si může vymýšlet zdroje. Veškeré zdroje si zkontrolujte.
-            </p>
           </div>
-        </div>
-      </div>
-
+</div>
       {/* CANVAS */}
       {canvasOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">
@@ -1074,15 +1111,15 @@ export default function ChatPage() {
               </div>
             </div>
 
-            <textarea
-              value={canvasText}
-              onChange={(event) => setCanvasText(event.target.value)}
-              placeholder="Canvas je zatiaľ prázdny. Po odpovedi AI sa sem vloží posledný výstup."
-              className="flex-1 resize-none bg-[#050711] p-6 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-600"
-            />
-          </div>
-        </div>
-      )}
+         <textarea
+  value={canvasText}
+  onChange={(event) => setCanvasText(event.target.value)}
+  placeholder="Canvas je zatiaľ prázdny. Po odpovedi AI sa sem vloží posledný výstup."
+  className="flex-1 resize-none bg-[#050711] p-6 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-600"
+/>
+</div>
+</div>
+)}
 
       {/* POPUP RESULT */}
       {popup && popupData && (
@@ -1166,7 +1203,7 @@ export default function ChatPage() {
                   </div>
                 </div>
 
-                <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
+                               <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
                   <h3 className="mb-2 font-black">✏️ Odporúčania</h3>
 
                   <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
@@ -1185,7 +1222,8 @@ export default function ChatPage() {
             </div>
           </div>
         </div>
-      )}
+           )}
     </div>
-  );
+  </div>
+);
 }

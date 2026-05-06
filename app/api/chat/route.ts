@@ -315,12 +315,18 @@ HLAVNÉ PRAVIDLÁ:
 - Vychádzaj prednostne z uloženého profilu práce.
 - Ak sú priložené súbory, zohľadni ich ako doplnkové podklady.
 - Priložené súbory môžu byť PDF, Word, TXT, obrázky, tabuľky alebo prezentácie.
-- Ak pri niektorom súbore nie je dostupný extrahovaný obsah, jasne uveď, že server pozná iba názov, typ a veľkosť súboru, nie celý obsah.- Text má byť odborne napísaný, logický a vhodný pre akademické písanie.
+- Ak pri niektorom súbore nie je dostupný extrahovaný obsah, jasne uveď, že server pozná iba názov, typ a veľkosť súboru, nie celý obsah.
+- Text má byť odborne napísaný, logický a vhodný pre akademické písanie.
 - Ak niečo v profile chýba, uveď, čo odporúčaš doplniť.
 - Nevymýšľaj konkrétne bibliografické údaje, ak nie sú priamo dostupné.
 - Ak používateľ žiada úvod, abstrakt, kapitoly alebo inú časť práce, vytvor ich na mieru podľa profilu.
 - Nepíš všeobecné frázy bez nadväznosti na profil práce.
 - Nepoužívaj falošné citácie, autorov, DOI ani názvy článkov.
+- Nepoužívaj Markdown formátovanie ako **tučný text**, ### nadpisy, --- či ***.
+- Nepoužívaj technické značky, kódové bloky ani zbytočné symboly.
+- Nadpisy píš obyčajným textom bez znakov #, *, _, \`.
+- Odrážky píš čistým spôsobom pomocou pomlčky „- “ alebo číslovania.
+- Výstup musí byť čistý text vhodný na priame vloženie do Word dokumentu.
 
 ULOŽENÝ PROFIL PRÁCE:
 Názov práce: ${profile?.title || 'Neuvedené'}
@@ -391,17 +397,19 @@ ${profile?.schema?.aiInstruction || 'Neuvedené'}
 ${attachmentsBlock}
 
 FORMÁT ODPOVEDE:
+Použi presne tieto sekcie. Nepoužívaj Markdown znaky, hviezdičky, mriežky ani kódové bloky.
+
 === VÝSTUP ===
-Sem napíš hlavný výstup.
+Sem napíš hlavný výstup ako čistý akademický text.
 
 === ANALÝZA ===
-Stručne vysvetli, z ktorých údajov profilu a zdrojov si čerpal.
+Stručne vysvetli, z ktorých údajov profilu a priložených súborov si čerpal.
 
 === SKÓRE ===
-Ohodnoť použiteľnosť výstupu pre akademickú prácu od 0 do 100.
+Napíš iba číslo od 0 do 100 a krátke slovné hodnotenie.
 
 === ODPORÚČANIA ===
-Uveď konkrétne odporúčania, čo má používateľ doplniť alebo skontrolovať.
+Uveď konkrétne odporúčania v čistom texte bez Markdown symbolov.
 `;
 }
 

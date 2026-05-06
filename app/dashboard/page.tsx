@@ -3041,6 +3041,76 @@ POKYNY:
   );
 }
 
+
+const ORIGINALITY_ALLOWED_EXTENSIONS = [
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.txt',
+  '.rtf',
+  '.odt',
+  '.md',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.xls',
+  '.xlsx',
+  '.csv',
+  '.ppt',
+  '.pptx',
+];
+
+const ORIGINALITY_FILE_ACCEPT = ORIGINALITY_ALLOWED_EXTENSIONS.join(',');
+
+const ORIGINALITY_MAX_FILE_SIZE_MB = 30;
+const ORIGINALITY_MAX_FILE_SIZE_BYTES =
+  ORIGINALITY_MAX_FILE_SIZE_MB * 1024 * 1024;
+
+type OriginalityUploadedFile = {
+  file: File;
+  name: string;
+  size: number;
+  type: string;
+  extension: string;
+};
+
+function getOriginalityFileExtension(fileName: string) {
+  const index = fileName.lastIndexOf('.');
+  if (index === -1) return '';
+  return fileName.slice(index).toLowerCase();
+}
+
+function isOriginalityAllowedFile(file: File) {
+  const extension = getOriginalityFileExtension(file.name);
+  return ORIGINALITY_ALLOWED_EXTENSIONS.includes(extension);
+}
+
+function formatOriginalityFileSize(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function getOriginalityFileKind(extension: string) {
+  if (extension === '.pdf') return 'PDF';
+  if (['.doc', '.docx', '.rtf', '.odt', '.txt', '.md'].includes(extension)) {
+    return 'Dokument';
+  }
+  if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
+    return 'Obrázok';
+  }
+  if (['.xls', '.xlsx', '.csv'].includes(extension)) {
+    return 'Tabuľka';
+  }
+  if (['.ppt', '.pptx'].includes(extension)) {
+    return 'Prezentácia';
+  }
+
+  return 'Súbor';
+}
+
 function PlagiarismModule() {
   const [step, setStep] = useState(1);
 
@@ -3062,12 +3132,72 @@ function PlagiarismModule() {
   const [error, setError] = useState('');
   const [result, setResult] = useState<any | null>(null);
 
+  const originalityFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [uploadedWorkFile, setUploadedWorkFile] =
+    useState<OriginalityUploadedFile | null>(null);
+
+  const [fileUploadError, setFileUploadError] = useState('');
+  const [checkAuthenticity, setCheckAuthenticity] = useState(true);
+
+  const handleOriginalityFile = async (fileList: FileList | null) => {
+    setFileUploadError('');
+    setError('');
+
+    const file = fileList?.[0];
+
+    if (!file) return;
+
+    if (!isOriginalityAllowedFile(file)) {
+      setFileUploadError(
+        `Nepodporovaný formát súboru: ${file.name}. Povolené sú PDF, Word, TXT, RTF, ODT, obrázky, Excel, CSV a PowerPoint.`,
+      );
+      return;
+    }
+
+    if (file.size > ORIGINALITY_MAX_FILE_SIZE_BYTES) {
+      setFileUploadError(
+        `Súbor je príliš veľký. Maximálna veľkosť je ${ORIGINALITY_MAX_FILE_SIZE_MB} MB.`,
+      );
+      return;
+    }
+
+    const extension = getOriginalityFileExtension(file.name);
+
+    setUploadedWorkFile({
+      file,
+      name: file.name,
+      size: file.size,
+      type: file.type || 'application/octet-stream',
+      extension,
+    });
+
+    // TXT, MD a CSV vieme načítať priamo do textového poľa.
+    if (['.txt', '.md', '.csv'].includes(extension)) {
+      try {
+        const content = await file.text();
+
+        if (content.trim()) {
+          setText(content.slice(0, 50000));
+        }
+      } catch {
+        setFileUploadError(
+          'Súbor bol pridaný, ale jeho text sa nepodarilo automaticky načítať.',
+        );
+      }
+    }
+
+    if (originalityFileInputRef.current) {
+      originalityFileInputRef.current.value = '';
+    }
+  };
+
   const runOriginalityCheck = async () => {
     setError('');
     setResult(null);
 
-    if (text.trim().length < 300) {
-      setError('Vlož aspoň 300 znakov textu práce.');
+    if (!uploadedWorkFile && text.trim().length < 300) {
+      setError('Nahraj súbor práce alebo vlož aspoň 300 znakov textu.');
       return;
     }
 
@@ -3079,7 +3209,7 @@ function PlagiarismModule() {
           ? localStorage.getItem('active_profile')
           : null;
 
-      let activeProfile = null;
+      let activeProfile: any = null;
 
       try {
         activeProfile = activeRaw ? JSON.parse(activeRaw) : null;
@@ -3087,30 +3217,39 @@ function PlagiarismModule() {
         activeProfile = null;
       }
 
+      const formData = new FormData();
+
+      formData.append('title', title);
+      formData.append('authorName', authorName);
+      formData.append('school', school);
+      formData.append('faculty', faculty);
+      formData.append('studyProgram', studyProgram);
+      formData.append('supervisor', supervisor);
+      formData.append('workType', workType);
+      formData.append('citationStyle', citationStyle);
+      formData.append('language', language);
+      formData.append('agent', agent);
+      formData.append('text', text);
+      formData.append('checkAuthenticity', String(checkAuthenticity));
+
+      formData.append('activeProfile', JSON.stringify(activeProfile || null));
+      formData.append('profileId', activeProfile?.id || '');
+
+      if (uploadedWorkFile?.file) {
+        formData.append('file', uploadedWorkFile.file, uploadedWorkFile.name);
+      }
+
       const response = await fetch('/api/originality', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          authorName,
-          school,
-          faculty,
-          studyProgram,
-          supervisor,
-          workType,
-          citationStyle,
-          language,
-          text,
-          agent,
-          activeProfile,
-          profileId: activeProfile?.id || null,
-        }),
+        body: formData,
       });
 
       const data = await response.json();
 
       if (!response.ok || !data.ok) {
-        throw new Error(data?.message || data?.error || 'Kontrola originality zlyhala.');
+        throw new Error(
+          data?.message || data?.error || 'Kontrola originality zlyhala.',
+        );
       }
 
       setResult(data);
@@ -3127,17 +3266,23 @@ function PlagiarismModule() {
   return (
     <ModuleLayout>
       <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-6">
-        <h3 className="text-2xl font-black text-white">
-          Originalita práce
-        </h3>
+        <h3 className="text-2xl font-black text-white">Originalita práce</h3>
 
         <p className="mt-2 text-sm leading-6 text-gray-300">
-          Predbežná kontrola originality v štýle univerzitného krokového postupu.
-          Výsledok je orientačný a nenahrádza oficiálnu školskú kontrolu originality.
+          Predbežná kontrola originality v štýle univerzitného krokového
+          postupu. Výsledok je orientačný a nenahrádza oficiálnu školskú
+          kontrolu originality.
+        </p>
+
+        <p className="mt-3 text-xs leading-5 text-purple-100/80">
+          Súčasťou kontroly je aj posúdenie autentickosti a akademickej
+          prirodzenosti textu. Nástroj neslúži na obchádzanie AI detektorov,
+          ale na poctivé zlepšenie odbornosti, konkrétnosti, citovania a
+          vlastného autorského prínosu.
         </p>
       </div>
 
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
         {[
           'Nahratie práce',
           'Údaje o práci',
@@ -3152,10 +3297,10 @@ function PlagiarismModule() {
               key={label}
               type="button"
               onClick={() => setStep(currentStep)}
-              className={`rounded-2xl px-3 py-3 text-sm font-bold ${
+              className={`rounded-2xl px-3 py-3 text-sm font-bold transition ${
                 step === currentStep
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-white/10 text-gray-300'
+                  ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white'
+                  : 'bg-white/10 text-gray-300 hover:bg-white/15'
               }`}
             >
               {currentStep}. {label}
@@ -3166,25 +3311,120 @@ function PlagiarismModule() {
 
       {step === 1 && (
         <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-          <h4 className="mb-4 text-xl font-black">1. Nahratie / vloženie práce</h4>
+          <h4 className="mb-4 text-xl font-black">
+            1. Nahratie / vloženie práce
+          </h4>
+
+          <div className="mb-5 rounded-3xl border border-purple-500/30 bg-purple-500/10 p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="text-lg font-black text-white">
+                  Nahrať súbor práce
+                </div>
+
+                <p className="mt-2 text-sm leading-6 text-gray-300">
+                  Môžete nahrať celú prácu alebo časť práce. Podporované
+                  formáty: PDF, Word, TXT, RTF, ODT, obrázky, Excel, CSV a
+                  PowerPoint.
+                </p>
+
+                <p className="mt-1 text-xs text-gray-500">
+                  Maximálna veľkosť súboru: {ORIGINALITY_MAX_FILE_SIZE_MB} MB.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => originalityFileInputRef.current?.click()}
+                className="rounded-2xl bg-purple-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-purple-500"
+              >
+                Vybrať súbor
+              </button>
+            </div>
+
+            <input
+              ref={originalityFileInputRef}
+              type="file"
+              accept={ORIGINALITY_FILE_ACCEPT}
+              className="hidden"
+              onChange={(event) => handleOriginalityFile(event.target.files)}
+            />
+
+            {fileUploadError && (
+              <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
+                {fileUploadError}
+              </div>
+            )}
+
+            {uploadedWorkFile && (
+              <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0f1324] p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-bold text-white">
+                    {uploadedWorkFile.name}
+                  </div>
+
+                  <div className="mt-1 text-xs text-gray-500">
+                    {getOriginalityFileKind(uploadedWorkFile.extension)} ·{' '}
+                    {uploadedWorkFile.extension.toUpperCase()} ·{' '}
+                    {formatOriginalityFileSize(uploadedWorkFile.size)}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUploadedWorkFile(null);
+                    setFileUploadError('');
+                  }}
+                  className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/20"
+                >
+                  Odstrániť
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="mb-3 text-sm font-semibold text-gray-300">
+            Alebo vlož text ručne
+          </div>
 
           <textarea
             value={text}
             onChange={(event) => setText(event.target.value)}
             rows={16}
             placeholder="Vlož sem text práce, kapitolu alebo časť záverečnej práce..."
-            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            className="w-full rounded-2xl border border-purple-500/60 bg-[#0f1324] px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-400"
           />
+
+          <div className="mt-3 text-xs text-gray-500">
+            Aktuálny rozsah textu: {text.trim().length} znakov.
+          </div>
 
           <div className="mt-4 flex justify-end">
             <button
               type="button"
-              onClick={() => setStep(2)}
+              onClick={() => {
+                if (!uploadedWorkFile && text.trim().length < 300) {
+                  setError(
+                    'Nahraj súbor práce alebo vlož aspoň 300 znakov textu.',
+                  );
+                  return;
+                }
+
+                setError('');
+                setStep(2);
+              }}
               className="rounded-2xl bg-purple-600 px-6 py-3 font-bold text-white"
             >
               Pokračovať
             </button>
           </div>
+
+          {error && (
+            <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+              {error}
+            </div>
+          )}
         </div>
       )}
 
@@ -3193,19 +3433,63 @@ function PlagiarismModule() {
           <h4 className="mb-4 text-xl font-black">2. Údaje o práci</h4>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Názov práce" className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white" />
-            <input value={authorName} onChange={(e) => setAuthorName(e.target.value)} placeholder="Autor" className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white" />
-            <input value={school} onChange={(e) => setSchool(e.target.value)} placeholder="Škola / univerzita" className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white" />
-            <input value={faculty} onChange={(e) => setFaculty(e.target.value)} placeholder="Fakulta" className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white" />
-            <input value={studyProgram} onChange={(e) => setStudyProgram(e.target.value)} placeholder="Študijný program" className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white" />
-            <input value={supervisor} onChange={(e) => setSupervisor(e.target.value)} placeholder="Vedúci práce" className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white" />
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Názov práce"
+              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            />
+
+            <input
+              value={authorName}
+              onChange={(e) => setAuthorName(e.target.value)}
+              placeholder="Autor"
+              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            />
+
+            <input
+              value={school}
+              onChange={(e) => setSchool(e.target.value)}
+              placeholder="Škola / univerzita"
+              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            />
+
+            <input
+              value={faculty}
+              onChange={(e) => setFaculty(e.target.value)}
+              placeholder="Fakulta"
+              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            />
+
+            <input
+              value={studyProgram}
+              onChange={(e) => setStudyProgram(e.target.value)}
+              placeholder="Študijný program"
+              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            />
+
+            <input
+              value={supervisor}
+              onChange={(e) => setSupervisor(e.target.value)}
+              placeholder="Vedúci práce"
+              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            />
           </div>
 
           <div className="mt-4 flex justify-between">
-            <button type="button" onClick={() => setStep(1)} className="rounded-2xl bg-white/10 px-6 py-3 font-bold text-white">
+            <button
+              type="button"
+              onClick={() => setStep(1)}
+              className="rounded-2xl bg-white/10 px-6 py-3 font-bold text-white"
+            >
               Späť
             </button>
-            <button type="button" onClick={() => setStep(3)} className="rounded-2xl bg-purple-600 px-6 py-3 font-bold text-white">
+
+            <button
+              type="button"
+              onClick={() => setStep(3)}
+              className="rounded-2xl bg-purple-600 px-6 py-3 font-bold text-white"
+            >
               Pokračovať
             </button>
           </div>
@@ -3217,7 +3501,11 @@ function PlagiarismModule() {
           <h4 className="mb-4 text-xl font-black">3. Nastavenie kontroly</h4>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <select value={workType} onChange={(e) => setWorkType(e.target.value)} className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white">
+            <select
+              value={workType}
+              onChange={(e) => setWorkType(e.target.value)}
+              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            >
               <option>Bakalárska práca</option>
               <option>Diplomová práca</option>
               <option>Seminárna práca</option>
@@ -3225,7 +3513,11 @@ function PlagiarismModule() {
               <option>Rigorózna práca</option>
             </select>
 
-            <select value={citationStyle} onChange={(e) => setCitationStyle(e.target.value)} className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white">
+            <select
+              value={citationStyle}
+              onChange={(e) => setCitationStyle(e.target.value)}
+              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            >
               <option>ISO 690</option>
               <option>APA 7</option>
               <option>Harvard</option>
@@ -3233,14 +3525,22 @@ function PlagiarismModule() {
               <option>Chicago</option>
             </select>
 
-            <select value={language} onChange={(e) => setLanguage(e.target.value)} className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white">
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            >
               <option>SK</option>
               <option>CZ</option>
               <option>EN</option>
               <option>DE</option>
             </select>
 
-            <select value={agent} onChange={(e) => setAgent(e.target.value)} className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white">
+            <select
+              value={agent}
+              onChange={(e) => setAgent(e.target.value)}
+              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            >
               <option value="gemini">Gemini</option>
               <option value="openai">GPT</option>
               <option value="claude">Claude</option>
@@ -3248,11 +3548,41 @@ function PlagiarismModule() {
             </select>
           </div>
 
+          <label className="mt-5 flex items-start gap-3 rounded-2xl border border-white/10 bg-white/5 p-4">
+            <input
+              type="checkbox"
+              checked={checkAuthenticity}
+              onChange={(event) => setCheckAuthenticity(event.target.checked)}
+              className="mt-1"
+            />
+
+            <span>
+              <span className="block font-bold text-white">
+                Skontrolovať autentickosť a akademickú prirodzenosť textu
+              </span>
+
+              <span className="mt-1 block text-sm text-gray-400">
+                Systém označí príliš generické, šablónové alebo AI-pôsobiace
+                pasáže a navrhne poctivú akademickú úpravu. Neslúži na
+                obchádzanie AI detektorov.
+              </span>
+            </span>
+          </label>
+
           <div className="mt-4 flex justify-between">
-            <button type="button" onClick={() => setStep(2)} className="rounded-2xl bg-white/10 px-6 py-3 font-bold text-white">
+            <button
+              type="button"
+              onClick={() => setStep(2)}
+              className="rounded-2xl bg-white/10 px-6 py-3 font-bold text-white"
+            >
               Späť
             </button>
-            <button type="button" onClick={() => setStep(4)} className="rounded-2xl bg-purple-600 px-6 py-3 font-bold text-white">
+
+            <button
+              type="button"
+              onClick={() => setStep(4)}
+              className="rounded-2xl bg-purple-600 px-6 py-3 font-bold text-white"
+            >
               Pokračovať
             </button>
           </div>
@@ -3261,20 +3591,24 @@ function PlagiarismModule() {
 
       {step === 4 && (
         <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-          <h4 className="mb-4 text-xl font-black">4. Spracovanie originality</h4>
+          <h4 className="mb-4 text-xl font-black">
+            4. Spracovanie originality
+          </h4>
 
-          <p className="mb-4 text-sm text-gray-300">
+          <p className="mb-4 text-sm leading-6 text-gray-300">
             Systém vykoná predbežnú kontrolu originality, rizikových pasáží,
-            chýbajúcich citácií a generického štýlu textu.
+            chýbajúcich citácií, podobnosti textu a akademickej prirodzenosti.
           </p>
 
           <button
             type="button"
             onClick={runOriginalityCheck}
             disabled={loading}
-            className="rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold text-white disabled:opacity-50"
+            className="rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {loading ? 'Kontrolujem originalitu...' : 'Spustiť kontrolu originality'}
+            {loading
+              ? 'Kontrolujem originalitu...'
+              : 'Spustiť kontrolu originality'}
           </button>
 
           {error && (
@@ -3290,6 +3624,7 @@ function PlagiarismModule() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div className="rounded-3xl border border-green-500/30 bg-green-500/10 p-6">
               <div className="text-sm text-green-200">Skóre originality</div>
+
               <div className="mt-2 text-4xl font-black text-green-300">
                 {result.originalityScore ?? '—'} %
               </div>
@@ -3297,16 +3632,25 @@ function PlagiarismModule() {
 
             <div className="rounded-3xl border border-yellow-500/30 bg-yellow-500/10 p-6">
               <div className="text-sm text-yellow-200">Riziko podobnosti</div>
+
               <div className="mt-2 text-4xl font-black text-yellow-300">
                 {result.similarityRiskScore ?? '—'} %
               </div>
             </div>
 
             <div className="rounded-3xl border border-purple-500/30 bg-purple-500/10 p-6">
-              <div className="text-sm text-purple-200">AI / generický štýl</div>
-              <div className="mt-2 text-4xl font-black text-purple-300">
-                {result.aiStyleScore ?? '—'} %
+              <div className="text-sm text-purple-200">
+                Autentickosť textu
               </div>
+
+              <div className="mt-2 text-4xl font-black text-purple-300">
+                {result.authenticityScore ?? '—'} %
+              </div>
+
+              <p className="mt-2 text-xs text-purple-100/80">
+                Vyššie skóre znamená prirodzenejší, konkrétnejší a menej
+                šablónový akademický text.
+              </p>
             </div>
           </div>
 
@@ -3319,12 +3663,47 @@ function PlagiarismModule() {
               {result.report}
             </div>
           </div>
+
+          {result.authenticRewrite && (
+            <div className="rounded-3xl border border-purple-500/30 bg-purple-500/10 p-6">
+              <h4 className="mb-3 text-xl font-black text-white">
+                Autentická akademická úprava textu
+              </h4>
+
+              <p className="mb-4 text-sm leading-6 text-purple-100/80">
+                Táto časť neupravuje text na obchádzanie AI detektorov. Slúži
+                na poctivé zlepšenie prirodzenosti, konkrétnosti, odbornosti a
+                vlastného autorského prínosu.
+              </p>
+
+              <div className="whitespace-pre-wrap text-sm leading-7 text-purple-50">
+                {result.authenticRewrite}
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => setStep(1)}
+              className="rounded-2xl bg-white/10 px-6 py-3 font-bold text-white hover:bg-white/15"
+            >
+              Nová kontrola
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStep(4)}
+              className="rounded-2xl bg-purple-600 px-6 py-3 font-bold text-white hover:bg-purple-500"
+            >
+              Spustiť znova
+            </button>
+          </div>
         </div>
       )}
     </ModuleLayout>
   );
 }
-
 // =====================================================
 // UI HELPERS
 // =====================================================

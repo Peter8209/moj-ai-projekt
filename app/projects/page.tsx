@@ -15,9 +15,17 @@ import {
 } from 'lucide-react';
 
 import ProfileForm from '@/components/ProfileForm';
+import { createClient } from '@/lib/supabase/client';
 
 type SavedProfile = {
+  // =========================
+  // ZÁKLADNÉ ID
+  // =========================
   id: string;
+
+  // =========================
+  // ZÁKLADNÉ ÚDAJE PROFILU
+  // =========================
   type?: string;
   level?: string;
   title?: string;
@@ -27,6 +35,10 @@ type SavedProfile = {
   citation?: string;
   language?: string;
   workLanguage?: string;
+
+  // =========================
+  // AKADEMICKÝ OBSAH
+  // =========================
   annotation?: string;
   goal?: string;
   problem?: string;
@@ -35,22 +47,67 @@ type SavedProfile = {
   researchQuestions?: string;
   practicalPart?: string;
   scientificContribution?: string;
+
+  // =========================
+  // MANAŽÉRSKE / PRAKTICKÉ POLIA
+  // =========================
   businessProblem?: string;
   businessGoal?: string;
   implementation?: string;
   caseStudy?: string;
   reflection?: string;
   sourcesRequirement?: string;
+
+  // =========================
+  // KĽÚČOVÉ SLOVÁ
+  // =========================
   keywordsList?: string[];
   keywords?: string[];
+
+  // =========================
+  // DÁTUMY
+  // savedAt používa frontend
+  // created_at / updated_at prichádzajú zo Supabase
+  // =========================
   savedAt?: string;
+  created_at?: string;
+  updated_at?: string;
+
+  // =========================
+  // SCHÉMA PROFILU
+  // =========================
   schema?: {
+    typeKey?: string;
     label?: string;
-    recommendedLength?: string;
     description?: string;
+    recommendedLength?: string;
+    citationOptions?: string[];
     structure?: string[];
     requiredSections?: string[];
+    fields?: {
+      key: string;
+      label: string;
+      placeholder?: string;
+      required?: boolean;
+      rows?: number;
+    }[];
+    aiInstruction?: string;
   };
+
+  // =========================
+  // SUPABASE RAW FIELDS / FALLBACK
+  // =========================
+  full_profile?: any;
+
+  work_language?: string;
+  research_questions?: string;
+  practical_part?: string;
+  scientific_contribution?: string;
+  business_problem?: string;
+  business_goal?: string;
+  case_study?: string;
+  sources_requirement?: string;
+  keywords_list?: string[];
 };
 
 export default function ProjectsPage() {
@@ -70,29 +127,153 @@ export default function ProjectsPage() {
     loadProfiles();
   }, []);
 
-  const loadProfiles = () => {
-    try {
-      const raw = localStorage.getItem('profiles_full');
-      const parsed = raw ? JSON.parse(raw) : [];
+const loadProfiles = async () => {
+  try {
+    const supabase = createClient();
 
-      if (Array.isArray(parsed)) {
-        const normalized = parsed
-          .filter((item) => item && typeof item === 'object')
-          .map((item) => ({
-            ...item,
-            id: item.id || crypto.randomUUID(),
-            title: item.title || 'Bez názvu',
-            savedAt: item.savedAt || new Date().toISOString(),
-          }));
+    const { data, error } = await supabase
+      .from('zedpera_profiles')
+      .select('*')
+      .order('updated_at', { ascending: false });
 
-        setProfiles(normalized);
-      } else {
-        setProfiles([]);
+    if (error) {
+      console.error('SUPABASE LOAD PROFILES ERROR:', error);
+      loadProfilesFromLocalStorage();
+      return;
+    }
+
+    const supabaseProfiles: SavedProfile[] = (data || []).map((row: any) => {
+      const full = row.full_profile || {};
+
+      return {
+        ...full,
+
+        id: row.id || full.id || crypto.randomUUID(),
+
+        title: row.title || full.title || 'Bez názvu',
+        type: row.type || full.type,
+        level: row.level || full.level,
+        topic: row.topic || full.topic,
+        field: row.field || full.field,
+        supervisor: row.supervisor || full.supervisor,
+        citation: row.citation || full.citation,
+        language: row.language || full.language,
+
+        workLanguage:
+          row.work_language || full.workLanguage || full.work_language,
+
+        annotation: row.annotation || full.annotation,
+        goal: row.goal || full.goal,
+        problem: row.problem || full.problem,
+        methodology: row.methodology || full.methodology,
+        hypotheses: row.hypotheses || full.hypotheses,
+
+        researchQuestions:
+          row.research_questions ||
+          full.researchQuestions ||
+          full.research_questions,
+
+        practicalPart:
+          row.practical_part || full.practicalPart || full.practical_part,
+
+        scientificContribution:
+          row.scientific_contribution ||
+          full.scientificContribution ||
+          full.scientific_contribution,
+
+        businessProblem:
+          row.business_problem || full.businessProblem || full.business_problem,
+
+        businessGoal:
+          row.business_goal || full.businessGoal || full.business_goal,
+
+        implementation: row.implementation || full.implementation,
+
+        caseStudy:
+          row.case_study || full.caseStudy || full.case_study,
+
+        reflection: row.reflection || full.reflection,
+
+        sourcesRequirement:
+          row.sources_requirement ||
+          full.sourcesRequirement ||
+          full.sources_requirement,
+
+        keywordsList:
+          row.keywords_list ||
+          full.keywordsList ||
+          full.keywords ||
+          [],
+
+        keywords:
+          row.keywords_list ||
+          full.keywords ||
+          full.keywordsList ||
+          [],
+
+        schema: row.schema || full.schema,
+
+        savedAt:
+          row.updated_at ||
+          row.created_at ||
+          full.savedAt ||
+          new Date().toISOString(),
+
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        full_profile: row.full_profile,
+      };
+    });
+
+    setProfiles(supabaseProfiles);
+
+    localStorage.setItem('profiles_full', JSON.stringify(supabaseProfiles));
+
+    const activeRaw = localStorage.getItem('active_profile');
+    const active = activeRaw ? JSON.parse(activeRaw) : null;
+
+    if (active?.id) {
+      const found = supabaseProfiles.find(
+        (profile) => profile.id === active.id
+      );
+
+      if (found) {
+        localStorage.setItem('active_profile', JSON.stringify(found));
       }
-    } catch {
+    }
+  } catch (error) {
+    console.error('LOAD PROFILES ERROR:', error);
+    loadProfilesFromLocalStorage();
+  }
+};
+
+const loadProfilesFromLocalStorage = () => {
+  try {
+    const raw = localStorage.getItem('profiles_full');
+    const parsed = raw ? JSON.parse(raw) : [];
+
+    if (Array.isArray(parsed)) {
+      const normalized: SavedProfile[] = parsed
+        .filter((item) => item && typeof item === 'object')
+        .map((item) => ({
+          ...item,
+          id:
+            item.id ||
+            (typeof crypto !== 'undefined' && crypto.randomUUID
+              ? crypto.randomUUID()
+              : Date.now().toString()),
+          title: item.title || 'Bez názvu',
+          savedAt: item.savedAt || new Date().toISOString(),
+        }));
+
+      setProfiles(normalized);
+    } else {
       setProfiles([]);
     }
-  };
+  } catch {
+    setProfiles([]);
+  }
+};
 
   const filteredProfiles = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -130,7 +311,7 @@ const openEditProfile = (profile: SavedProfile) => {
   setProfileFormOpen(true);
 };
 
-  const deleteProfile = (id: string) => {
+const deleteProfile = async (id: string) => {
     const confirmDelete = window.confirm(
       'Naozaj chceš odstrániť túto prácu zo zoznamu?'
     );
@@ -152,12 +333,30 @@ const handleProfileSaved = (updatedProfile: SavedProfile) => {
   localStorage.setItem('profiles_full', JSON.stringify(nextProfiles));
   localStorage.setItem('profile', JSON.stringify(updatedProfile));
   localStorage.setItem('active_profile', JSON.stringify(updatedProfile));
+
+  void loadProfiles();
 };
 
     const next = profiles.filter((profile) => profile.id !== id);
 
     setProfiles(next);
     localStorage.setItem('profiles_full', JSON.stringify(next));
+
+try {
+  const supabase = createClient();
+
+  const { error } = await supabase
+    .from('zedpera_profiles')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error('SUPABASE DELETE PROFILE ERROR:', error);
+    alert(`Profil sa odstránil lokálne, ale nie zo Supabase: ${error.message}`);
+  }
+} catch (error) {
+  console.error('DELETE PROFILE ERROR:', error);
+}
 
     const activeRaw = localStorage.getItem('active_profile');
 

@@ -23,6 +23,7 @@ type AddonService = {
   id: string;
   name: string;
   price: string;
+  oldPrice?: string;
   description: string;
 };
 
@@ -30,8 +31,8 @@ const packagePlans: PackagePlan[] = [
   {
     id: 'week-mini',
     name: 'Týždeň MINI',
-    price: '9,90 €',
-    oldPrice: '14,90 €',
+    price: '13,20 €',
+    oldPrice: '9,90 €',
     period: '7 dní',
     pages: '25 strán',
     works: '1 práca',
@@ -50,8 +51,8 @@ const packagePlans: PackagePlan[] = [
   {
     id: 'week-student',
     name: 'Týždeň ŠTUDENT',
-    price: '19,90 €',
-    oldPrice: '24,90 €',
+    price: '26,50 €',
+    oldPrice: '19,90 €',
     period: '7 dní',
     pages: '50 strán',
     works: '2 práce',
@@ -70,8 +71,8 @@ const packagePlans: PackagePlan[] = [
   {
     id: 'week-pro',
     name: 'Týždeň PRO',
-    price: '29,90 €',
-    oldPrice: '39,90 €',
+    price: '39,90 €',
+    oldPrice: '29,90 €',
     period: '7 dní',
     pages: '100 strán',
     works: '3 práce',
@@ -91,8 +92,8 @@ const packagePlans: PackagePlan[] = [
   {
     id: 'monthly',
     name: 'Mesačný START',
-    price: '39,90 €',
-    oldPrice: '40 €',
+    price: '53,20 €',
+    oldPrice: '39,90 €',
     period: '1 mesiac',
     pages: '150 strán',
     works: '5 prác',
@@ -113,8 +114,8 @@ const packagePlans: PackagePlan[] = [
   {
     id: 'three-months',
     name: '3 mesiace ŠTUDENT',
-    price: '70 €',
-    oldPrice: '79,90 €',
+    price: '93,30 €',
+    oldPrice: '70 €',
     period: '3 mesiace',
     pages: '350 strán',
     works: '10 prác',
@@ -135,8 +136,8 @@ const packagePlans: PackagePlan[] = [
   {
     id: 'year-pro',
     name: 'Ročný PRO',
-    price: '240 €',
-    oldPrice: '299 €',
+    price: '320 €',
+    oldPrice: '240 €',
     period: '12 mesiacov',
     pages: '1 500 strán',
     works: 'Neobmedzené projekty',
@@ -157,7 +158,8 @@ const packagePlans: PackagePlan[] = [
   {
     id: 'year-max',
     name: 'Ročný MAX',
-    price: '399 €',
+    price: '532 €',
+    oldPrice: '399 €',
     period: '12 mesiacov',
     pages: '2 000 strán',
     works: 'Neobmedzené projekty',
@@ -181,49 +183,57 @@ const addonServices: AddonService[] = [
   {
     id: 'ai-supervisor',
     name: 'AI vedúci práce',
-    price: '29,90 €',
+    price: '39,90 €',
+    oldPrice: '29,90 €',
     description: 'Detailná spätná väzba do 100 strán.',
   },
   {
     id: 'quality-audit',
     name: 'Kontrola kvality práce',
-    price: '29,90 €',
+    price: '39,90 €',
+    oldPrice: '29,90 €',
     description: 'Audit logiky, metodológie, argumentácie a štruktúry.',
   },
   {
     id: 'defense',
     name: 'Obhajoba + prezentácia',
-    price: '39,90 €',
+    price: '53,20 €',
+    oldPrice: '39,90 €',
     description: 'Prezentácia, otázky komisie a návrhy odpovedí.',
   },
   {
     id: 'originality',
     name: 'Kontrola originality',
-    price: '12 €',
+    price: '16 €',
+    oldPrice: '12 €',
     description: 'Orientačný report originality a rizikových pasáží.',
   },
   {
     id: 'extra-50',
     name: 'Extra 50 strán',
-    price: '9,90 €',
+    price: '13,20 €',
+    oldPrice: '9,90 €',
     description: 'Doplnenie limitu o 50 strán.',
   },
   {
     id: 'extra-100',
     name: 'Extra 100 strán',
-    price: '19,90 €',
+    price: '26,50 €',
+    oldPrice: '19,90 €',
     description: 'Doplnenie limitu o 100 strán.',
   },
   {
     id: 'premium-model',
     name: 'Prémiový model Claude/Grok',
-    price: '9,90 €',
+    price: '13,20 €',
+    oldPrice: '9,90 €',
     description: 'Kvalitnejšia kritika, audit a odborné hodnotenie.',
   },
   {
     id: 'express',
     name: 'Expresné spracovanie',
-    price: '19,90 €',
+    price: '26,50 €',
+    oldPrice: '19,90 €',
     description: 'Prednostné spracovanie požiadaviek.',
   },
 ];
@@ -388,7 +398,13 @@ export default function PackagesPage() {
                 </div>
 
                 <div className="shrink-0 text-xl font-black text-white">
-                  {addon.price}
+                  <div>{addon.price}</div>
+
+                  {addon.oldPrice && (
+                    <div className="text-right text-xs font-semibold text-gray-500 line-through">
+                      {addon.oldPrice}
+                    </div>
+                  )}
                 </div>
               </button>
             );

@@ -1380,6 +1380,8 @@ function AuditModule({
 }: {
   activeProfile: SavedProfile | null;
 }) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [text, setText] = useState('');
   const [checkType, setCheckType] = useState('Všetko');
   const [outputType, setOutputType] = useState('Detailná správa');
@@ -1387,22 +1389,129 @@ function AuditModule({
     activeProfile?.citation || 'ISO 690'
   );
 
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [fileError, setFileError] = useState('');
+
   const [result, setResult] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const addAttachedFiles = (files: FileList | File[]) => {
+    setFileError('');
+
+    const incomingFiles = Array.from(files);
+
+    if (!incomingFiles.length) return;
+
+    setAttachedFiles((currentFiles) => {
+      const nextFiles = [...currentFiles];
+
+      for (const file of incomingFiles) {
+        const extension = getFileExtension(file.name);
+
+        if (!isSupportedFile(file)) {
+          setFileError(
+            `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, RTF, ODT, MD, obrázky, Excel, CSV a PowerPoint.`,
+          );
+          continue;
+        }
+
+        if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
+          setFileError(
+            `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť je ${MAX_UPLOAD_FILE_SIZE_MB} MB.`,
+          );
+          continue;
+        }
+
+        if (nextFiles.length >= MAX_UPLOAD_FILES) {
+          setFileError(`Môžete priložiť maximálne ${MAX_UPLOAD_FILES} súborov.`);
+          break;
+        }
+
+        const duplicate = nextFiles.some(
+          (item) => item.name === file.name && item.size === file.size,
+        );
+
+        if (duplicate) {
+          continue;
+        }
+
+        nextFiles.push({
+          id:
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random()}`,
+          file,
+          name: file.name,
+          size: file.size,
+          type: file.type || 'application/octet-stream',
+          extension,
+        });
+      }
+
+      return nextFiles;
+    });
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const removeAttachedFile = (id: string) => {
+    setAttachedFiles((currentFiles) =>
+      currentFiles.filter((file) => file.id !== id),
+    );
+  };
+
+  const uploadAttachedFiles = async () => {
+    if (!attachedFiles.length) {
+      return [];
+    }
+
+    const formData = new FormData();
+
+    for (const item of attachedFiles) {
+      formData.append('files', item.file, item.name);
+    }
+
+    const response = await fetch('/api/uploads', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        data?.message ||
+          data?.error ||
+          'Nepodarilo sa nahrať priložené súbory.',
+      );
+    }
+
+    return data.files || [];
+  };
+
   const runAudit = async () => {
     setError('');
+    setFileError('');
     setResult('');
 
-    if (text.trim().length < 300) {
-      setError('Vlož aspoň 300 znakov textu na audit.');
+    const hasText = text.trim().length >= 300;
+    const hasFiles = attachedFiles.length > 0;
+
+    if (!hasText && !hasFiles) {
+      setError(
+        'Vlož aspoň 300 znakov textu alebo nahraj prílohu na audit kvality.',
+      );
       return;
     }
 
     setLoading(true);
 
     try {
+      const uploadedFiles = await uploadAttachedFiles();
+
       const response = await fetch('/api/audit', {
         method: 'POST',
         headers: {
@@ -1414,6 +1523,7 @@ function AuditModule({
           outputType,
           citationStyle,
           activeProfile,
+          attachments: uploadedFiles,
         }),
       });
 
@@ -1462,10 +1572,117 @@ function AuditModule({
           value={text}
           onChange={(event) => setText(event.target.value)}
           rows={12}
-          placeholder="Vlož sem kapitolu, úvod, záver alebo inú časť práce..."
+          placeholder="Vlož sem kapitolu, úvod, záver alebo inú časť práce. Ak nechceš vkladať text ručne, nahraj súbor nižšie..."
           className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
         />
       </label>
+
+      {/* =====================================================
+          PRÍLOHY NA AUDIT KVALITY
+      ===================================================== */}
+
+      <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-lg font-bold text-white">
+              <Paperclip size={20} className="text-purple-400" />
+              Prílohy na audit kvality
+            </div>
+
+            <p className="mt-1 text-sm text-gray-400">
+              Používateľ môže nahrať prácu alebo kapitolu priamo z počítača.
+              Zedpera prílohu spracuje a použije ju pri audite kvality.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-purple-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-purple-500"
+          >
+            <UploadCloud size={18} />
+            Nahrať prílohu
+          </button>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={FILE_INPUT_ACCEPT}
+          className="hidden"
+          onChange={(event) => {
+            if (event.target.files) {
+              addAttachedFiles(event.target.files);
+            }
+          }}
+        />
+
+        <div
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+
+            if (event.dataTransfer.files) {
+              addAttachedFiles(event.dataTransfer.files);
+            }
+          }}
+          className="rounded-2xl border border-dashed border-white/15 bg-black/20 p-5 text-center text-sm text-gray-400"
+        >
+          Pretiahnite sem súbor alebo kliknite na tlačidlo „Nahrať prílohu“.
+          <div className="mt-2 text-xs text-gray-500">
+            Podporované formáty: PDF, Word, TXT, RTF, ODT, MD, obrázky, Excel,
+            CSV a PowerPoint. Maximálne {MAX_UPLOAD_FILES} súborov, každý do{' '}
+            {MAX_UPLOAD_FILE_SIZE_MB} MB.
+          </div>
+        </div>
+
+        {fileError && (
+          <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
+            {fileError}
+          </div>
+        )}
+
+        {attachedFiles.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <div className="text-xs font-black uppercase tracking-[0.15em] text-gray-500">
+              Priložené súbory na audit ({attachedFiles.length})
+            </div>
+
+            {attachedFiles.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0f1324] p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="rounded-xl bg-purple-600/20 px-3 py-2 text-xs font-bold text-purple-200">
+                    {getFileTypeLabel(item.extension)}
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-white">
+                      {item.name}
+                    </div>
+
+                    <div className="text-xs text-gray-500">
+                      {item.extension.toUpperCase()} · {formatFileSize(item.size)}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => removeAttachedFile(item.id)}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/20"
+                >
+                  <Trash2 size={14} />
+                  Odstrániť
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <label className="block">

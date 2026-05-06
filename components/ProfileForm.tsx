@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   BookOpen,
@@ -122,10 +122,10 @@ type SavedProfile = Profile & {
 };
 
 type ProfileFormProps = {
+  initialProfile?: SavedProfile | null;
   onClose?: () => void;
   onSave?: (data: SavedProfile) => void;
 };
-
 // ================= OPTIONS =================
 
 const LANGS: Lang[] = ['SK', 'CZ', 'EN', 'DE', 'PL', 'HU'];
@@ -1583,7 +1583,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
 
 // ================= INITIAL STATE =================
 
-const initialProfile: Profile = {
+const emptyProfile: Profile = {
   type: 'bachelor',
   level: 'expert',
   title: '',
@@ -1610,13 +1610,55 @@ const initialProfile: Profile = {
   keywordsList: [],
 };
 
+
 // ================= COMPONENT =================
 
-export default function ProfileForm({ onClose, onSave }: ProfileFormProps) {
+export default function ProfileForm({
+  initialProfile = null,
+  onClose,
+  onSave,
+}: ProfileFormProps) {
   const router = useRouter();
 
-  const [profile, setProfile] = useState<Profile>(initialProfile);
+const [profile, setProfile] = useState<Profile>(() => {
+  if (!initialProfile) return emptyProfile;
+
+  return {
+    ...emptyProfile,
+    ...initialProfile,
+    keywordsList:
+      initialProfile.keywordsList && Array.isArray(initialProfile.keywordsList)
+        ? initialProfile.keywordsList
+        : [],
+  };
+});
+
+ 
+
+  const [editingId, setEditingId] = useState<string | null>(
+    initialProfile?.id || null
+  );
+
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!initialProfile) {
+      setProfile(emptyProfile);
+      setEditingId(null);
+      return;
+    }
+
+    setProfile({
+      ...emptyProfile,
+      ...initialProfile,
+      keywordsList:
+        initialProfile.keywordsList && Array.isArray(initialProfile.keywordsList)
+          ? initialProfile.keywordsList
+          : [],
+    });
+
+    setEditingId(initialProfile.id || null);
+  }, [initialProfile]);
 
   const labels = UI[profile.language];
 
@@ -1663,32 +1705,37 @@ export default function ProfileForm({ onClose, onSave }: ProfileFormProps) {
     }));
   };
 
-  const createPayload = (): SavedProfile => {
-    return {
-      ...profile,
-      id: Date.now().toString(),
-      schema,
-      interfaceLanguage: profile.language,
-      workLanguage: profile.workLanguage,
-      savedAt: new Date().toISOString(),
-    };
+const createPayload = (): SavedProfile => {
+  return {
+    ...profile,
+    id:
+      editingId ||
+      (typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : Date.now().toString()),
+    schema,
+    interfaceLanguage: profile.language,
+    workLanguage: profile.workLanguage,
+    savedAt: new Date().toISOString(),
   };
+};
 
-  const savePayloadToStorage = (payload: SavedProfile) => {
-    localStorage.setItem('profile', JSON.stringify(payload));
-    localStorage.setItem('active_profile', JSON.stringify(payload));
+const savePayloadToStorage = (payload: SavedProfile) => {
+  localStorage.setItem('profile', JSON.stringify(payload));
+  localStorage.setItem('active_profile', JSON.stringify(payload));
 
-    const oldProfilesRaw = localStorage.getItem('profiles_full');
-    const oldProfiles = oldProfilesRaw ? JSON.parse(oldProfilesRaw) : [];
-    const profiles = Array.isArray(oldProfiles) ? oldProfiles : [];
+  const oldProfilesRaw = localStorage.getItem('profiles_full');
+  const oldProfiles = oldProfilesRaw ? JSON.parse(oldProfilesRaw) : [];
+  const profiles: SavedProfile[] = Array.isArray(oldProfiles) ? oldProfiles : [];
 
-    const newProfiles = [
-      payload,
-      ...profiles.filter((item: SavedProfile) => item.id !== payload.id),
-    ];
+  const exists = profiles.some((item) => item.id === payload.id);
 
-    localStorage.setItem('profiles_full', JSON.stringify(newProfiles));
-  };
+  const newProfiles = exists
+    ? profiles.map((item) => (item.id === payload.id ? payload : item))
+    : [payload, ...profiles];
+
+  localStorage.setItem('profiles_full', JSON.stringify(newProfiles));
+};
 const saveProfile = async () => {
   if (!profile.title.trim()) {
     alert(
@@ -1702,19 +1749,7 @@ const saveProfile = async () => {
   setIsSaving(true);
 
   try {
-    const profileId =
-      typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : Date.now().toString();
-
-    const payload: SavedProfile = {
-      ...profile,
-      id: profileId,
-      schema,
-      interfaceLanguage: profile.language,
-      workLanguage: profile.workLanguage,
-      savedAt: new Date().toISOString(),
-    };
+  const payload = createPayload();
 
     // 1. Uloženie lokálne do prehliadača
     savePayloadToStorage(payload);
@@ -1722,7 +1757,10 @@ const saveProfile = async () => {
 const supabase = createClient();
 
     // 2. Uloženie do Supabase
-    const { error } = await supabase.from('zedpera_profiles').insert({
+    const { error } = await supabase
+  .from('zedpera_profiles')
+  .upsert(
+    {
       id: payload.id,
       title: payload.title,
       type: payload.type,
@@ -1750,9 +1788,13 @@ const supabase = createClient();
       keywords_list: payload.keywordsList,
       schema: payload.schema,
       full_profile: payload,
-      created_at: payload.savedAt,
+            created_at: payload.savedAt,
       updated_at: payload.savedAt,
-    });
+    },
+    {
+      onConflict: 'id',
+    }
+  );
 
     if (error) {
       console.error('SUPABASE PROFILE SAVE ERROR:', error);
@@ -1799,7 +1841,7 @@ const supabase = createClient();
                 </div>
 
                 <h1 className="text-4xl font-black tracking-tight md:text-5xl">
-                  {labels.pageTitle}
+               {editingId ? 'Upraviť profil práce' : labels.pageTitle}
                 </h1>
 
                 <p className="mt-3 max-w-3xl text-base leading-7 text-slate-400 md:text-lg">
@@ -1907,25 +1949,31 @@ const supabase = createClient();
                 title={labels.basic}
                 icon={<FileText className="h-5 w-5" />}
               >
-                <div className="grid gap-4 md:grid-cols-3">
-                  <Input
-                    value={profile.title}
-                    placeholder={labels.titlePlaceholder}
-                    onChange={(value) => update('title', value)}
-                  />
+             <div className="grid gap-4 md:grid-cols-2">
+  <Input
+    value={profile.title}
+    placeholder={labels.titlePlaceholder}
+    onChange={(value) => update('title', value)}
+  />
 
-                  <Input
-                    value={profile.field}
-                    placeholder={labels.fieldPlaceholder}
-                    onChange={(value) => update('field', value)}
-                  />
+  <Input
+    value={profile.topic}
+    placeholder={labels.topicPlaceholder}
+    onChange={(value) => update('topic', value)}
+  />
 
-                  <Input
-                    value={profile.supervisor}
-                    placeholder={labels.supervisorPlaceholder}
-                    onChange={(value) => update('supervisor', value)}
-                  />
-                </div>
+  <Input
+    value={profile.field}
+    placeholder={labels.fieldPlaceholder}
+    onChange={(value) => update('field', value)}
+  />
+
+  <Input
+    value={profile.supervisor}
+    placeholder={labels.supervisorPlaceholder}
+    onChange={(value) => update('supervisor', value)}
+  />
+</div>
               </Section>
 
               {/* ACADEMIC SETTINGS */}
@@ -1999,7 +2047,11 @@ const supabase = createClient();
   className="inline-flex items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 text-base font-black text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
 >
   <Save className="h-5 w-5" />
-  {isSaving ? 'Ukladám...' : labels.save}
+{isSaving
+  ? 'Ukladám...'
+  : editingId
+    ? 'Uložiť zmeny profilu'
+    : labels.save}
 </button>
               </div>
             </div>

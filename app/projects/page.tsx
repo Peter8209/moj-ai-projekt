@@ -14,6 +14,8 @@ import {
   User,
 } from 'lucide-react';
 
+import ProfileForm from '@/components/ProfileForm';
+
 type SavedProfile = {
   id: string;
   type?: string;
@@ -56,6 +58,12 @@ export default function ProjectsPage() {
   const [selectedProfile, setSelectedProfile] = useState<SavedProfile | null>(
     null
   );
+
+  const [editingProfile, setEditingProfile] = useState<SavedProfile | null>(
+    null
+  );
+  const [profileFormOpen, setProfileFormOpen] = useState(false);
+
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -117,12 +125,34 @@ export default function ProjectsPage() {
     localStorage.setItem('active_profile', JSON.stringify(profile));
   };
 
+const openEditProfile = (profile: SavedProfile) => {
+  setEditingProfile(profile);
+  setProfileFormOpen(true);
+};
+
   const deleteProfile = (id: string) => {
     const confirmDelete = window.confirm(
       'Naozaj chceš odstrániť túto prácu zo zoznamu?'
     );
 
     if (!confirmDelete) return;
+
+const handleProfileSaved = (updatedProfile: SavedProfile) => {
+  const nextProfiles = profiles.some((profile) => profile.id === updatedProfile.id)
+    ? profiles.map((profile) =>
+        profile.id === updatedProfile.id ? updatedProfile : profile
+      )
+    : [updatedProfile, ...profiles];
+
+  setProfiles(nextProfiles);
+  setSelectedProfile(updatedProfile);
+  setEditingProfile(null);
+  setProfileFormOpen(false);
+
+  localStorage.setItem('profiles_full', JSON.stringify(nextProfiles));
+  localStorage.setItem('profile', JSON.stringify(updatedProfile));
+  localStorage.setItem('active_profile', JSON.stringify(updatedProfile));
+};
 
     const next = profiles.filter((profile) => profile.id !== id);
 
@@ -143,20 +173,41 @@ export default function ProjectsPage() {
       }
     }
 
+const editModal = profileFormOpen && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+    <div className="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-[32px] border border-white/10 bg-[#070a16] p-6 shadow-2xl">
+      <ProfileForm
+        initialProfile={editingProfile as any}
+        onSave={(updatedProfile) => handleProfileSaved(updatedProfile as any)}
+        onClose={() => {
+          setProfileFormOpen(false);
+          setEditingProfile(null);
+        }}
+      />
+    </div>
+  </div>
+);
+
+
     if (selectedProfile?.id === id) {
       setSelectedProfile(null);
     }
   };
 
-  if (selectedProfile) {
-    return (
+if (selectedProfile) {
+  return (
+    <>
       <ProjectDetail
         profile={selectedProfile}
         onBack={() => setSelectedProfile(null)}
         onDelete={() => deleteProfile(selectedProfile.id)}
+        onEdit={() => openEditProfile(selectedProfile)}
       />
-    );
-  }
+
+     
+    </>
+  );
+}
 
   return (
     <main className="min-h-screen bg-[#020617] text-white">
@@ -252,29 +303,38 @@ export default function ProjectsPage() {
                   </div>
                 </button>
 
-                <div className="mt-5 flex items-center justify-between gap-3">
-                  <button
-                    type="button"
-                    onClick={() => openProfile(profile)}
-                    className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-violet-500"
-                  >
-                    Otvoriť profil
-                  </button>
+                <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+  <button
+    type="button"
+    onClick={() => openProfile(profile)}
+    className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-violet-500"
+  >
+    Otvoriť profil
+  </button>
 
-                  <button
-                    type="button"
-                    onClick={() => deleteProfile(profile.id)}
-                    className="rounded-xl bg-red-500/10 p-2 text-red-300 transition hover:bg-red-500/20 hover:text-red-200"
-                    aria-label="Odstrániť prácu"
-                  >
-                    <Trash2 className="h-5 w-5" />
-                  </button>
-                </div>
+  <button
+    type="button"
+    onClick={() => openEditProfile(profile)}
+    className="rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm font-bold text-violet-100 transition hover:bg-violet-500/20"
+  >
+    Upraviť
+  </button>
+
+  <button
+    type="button"
+    onClick={() => deleteProfile(profile.id)}
+    className="rounded-xl bg-red-500/10 p-2 text-red-300 transition hover:bg-red-500/20 hover:text-red-200"
+    aria-label="Odstrániť prácu"
+  >
+    <Trash2 className="h-5 w-5" />
+  </button>
+</div>
               </article>
             ))}
           </div>
         )}
       </div>
+
     </main>
   );
 }
@@ -283,10 +343,12 @@ function ProjectDetail({
   profile,
   onBack,
   onDelete,
+  onEdit,
 }: {
   profile: SavedProfile;
   onBack: () => void;
   onDelete: () => void;
+  onEdit: () => void;
 }) {
   const keywords =
     profile.keywordsList && profile.keywordsList.length > 0
@@ -296,25 +358,36 @@ function ProjectDetail({
   return (
     <main className="min-h-screen bg-[#020617] text-white">
       <div className="mx-auto max-w-7xl px-4 py-8 md:px-8">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-          <button
-            type="button"
-            onClick={onBack}
-            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 font-bold text-slate-200 transition hover:bg-white/[0.1]"
-          >
-            <ArrowLeft className="h-5 w-5" />
-            Späť na moje práce
-          </button>
+  <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+  <button
+    type="button"
+    onClick={onBack}
+    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 font-bold text-slate-200 transition hover:bg-white/[0.1]"
+  >
+    <ArrowLeft className="h-5 w-5" />
+    Späť na moje práce
+  </button>
 
-          <button
-            type="button"
-            onClick={onDelete}
-            className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 font-bold text-red-200 transition hover:bg-red-500/20"
-          >
-            <Trash2 className="h-5 w-5" />
-            Odstrániť prácu
-          </button>
-        </div>
+  <div className="flex flex-wrap items-center gap-3">
+    <button
+      type="button"
+      onClick={onEdit}
+      className="inline-flex items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 font-bold text-violet-100 transition hover:bg-violet-500/20"
+    >
+      <FileText className="h-5 w-5" />
+      Upraviť profil
+    </button>
+
+    <button
+      type="button"
+      onClick={onDelete}
+      className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 font-bold text-red-200 transition hover:bg-red-500/20"
+    >
+      <Trash2 className="h-5 w-5" />
+      Odstrániť prácu
+    </button>
+  </div>
+</div>
 
         <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 md:p-8">
           <div className="mb-8 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">

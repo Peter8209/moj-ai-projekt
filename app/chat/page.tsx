@@ -96,6 +96,68 @@ declare global {
 
 // ================= CONFIG =================
 
+const allowedFileExtensions = [
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.txt',
+  '.rtf',
+  '.odt',
+  '.md',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.xls',
+  '.xlsx',
+  '.csv',
+  '.ppt',
+  '.pptx',
+];
+
+const allowedFileAccept = allowedFileExtensions.join(',');
+
+const maxFilesCount = 10;
+const maxFileSizeMb = 25;
+const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
+
+function getFileExtension(fileName: string) {
+  const index = fileName.lastIndexOf('.');
+  if (index === -1) return '';
+  return fileName.slice(index).toLowerCase();
+}
+
+function isAllowedUploadFile(file: File) {
+  const extension = getFileExtension(file.name);
+  return allowedFileExtensions.includes(extension);
+}
+
+function getFileKindLabel(fileName: string) {
+  const extension = getFileExtension(fileName);
+
+  if (extension === '.pdf') return 'PDF';
+
+  if (['.doc', '.docx', '.txt', '.rtf', '.odt', '.md'].includes(extension)) {
+    return 'Dokument';
+  }
+
+  if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
+    return 'Obrázok';
+  }
+
+  if (['.xls', '.xlsx', '.csv'].includes(extension)) {
+    return 'Tabuľka';
+  }
+
+  if (['.ppt', '.pptx'].includes(extension)) {
+    return 'Prezentácia';
+  }
+
+  return 'Súbor';
+}
+
+
 const agents: { key: Agent; label: string }[] = [
   { key: 'openai', label: 'GPT' },
   { key: 'claude', label: 'Claude' },
@@ -138,13 +200,13 @@ const suggestions: {
       'Na základe uloženého profilu práce priprav návrh kapitoly. Najprv navrhni osnovu kapitoly, potom podkapitoly a následne ukážkový odborný text.',
     icon: FileText,
   },
-  {
-    title: 'Pomoz mi citovat tento zdroj',
-    actionTitle: 'Citovanie zdroja',
-    instruction:
-      'Na základe uloženého profilu práce a zvoleného citačného štýlu vysvetli, ako správne citovať zdroj v texte a v zozname literatúry. Ak sú priložené PDF dokumenty, zohľadni ich.',
-    icon: Library,
-  },
+ {
+  title: 'Pomoz mi citovat tento zdroj',
+  actionTitle: 'Citovanie zdroja',
+  instruction:
+    'Na základe uloženého profilu práce a zvoleného citačného štýlu vysvetli, ako správne citovať zdroj v texte a v zozname literatúry. Ak sú priložené súbory, napríklad PDF, Word dokumenty, texty, obrázky, tabuľky alebo prezentácie, zohľadni ich.',
+  icon: Library,
+},
   {
     title: 'Pomoz mi přepsat můj text do akademického jazyka.',
     actionTitle: 'Akademický jazyk',
@@ -367,35 +429,65 @@ export default function ChatPage() {
   }, []);
 
   const handleFiles = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
+  if (!files || files.length === 0) return;
 
-    const nextFiles: AttachedFile[] = Array.from(files)
-      .filter((file) => {
-        const isPdf =
-          file.type === 'application/pdf' ||
-          file.name.toLowerCase().endsWith('.pdf');
-        return isPdf;
-      })
-      .map((file) => ({
-        id: createFileId(),
-        name: file.name,
-        size: file.size,
-        type: file.type || 'application/pdf',
-        uploadedAt: new Date().toISOString(),
-        file,
-      }));
+  const incomingFiles = Array.from(files);
+  const validFiles: AttachedFile[] = [];
 
-    if (nextFiles.length === 0) {
-      alert('Priložiť je možné iba PDF dokumenty.');
-      return;
+  for (const file of incomingFiles) {
+    if (!isAllowedUploadFile(file)) {
+      alert(
+        `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, RTF, ODT, obrázky, Excel, CSV a PowerPoint.`
+      );
+      continue;
     }
 
-    setAttachedFiles((prev) => [...prev, ...nextFiles]);
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+    if (file.size > maxFileSizeBytes) {
+      alert(
+        `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť jedného súboru je ${maxFileSizeMb} MB.`
+      );
+      continue;
     }
-  };
+
+    validFiles.push({
+      id: createFileId(),
+      name: file.name,
+      size: file.size,
+      type: file.type || 'application/octet-stream',
+      uploadedAt: new Date().toISOString(),
+      file,
+    });
+  }
+
+  if (validFiles.length === 0) {
+    return;
+  }
+
+  setAttachedFiles((prev) => {
+    const next = [...prev];
+
+    for (const file of validFiles) {
+      if (next.length >= maxFilesCount) {
+        alert(`Môžete priložiť maximálne ${maxFilesCount} súborov.`);
+        break;
+      }
+
+      const duplicate = next.some(
+        (item) => item.name === file.name && item.size === file.size
+      );
+
+      if (!duplicate) {
+        next.push(file);
+      }
+    }
+
+    return next;
+  });
+
+  if (fileInputRef.current) {
+    fileInputRef.current.value = '';
+  }
+};
 
   const removeFile = (id: string) => {
     setAttachedFiles((prev) => prev.filter((file) => file.id !== id));
@@ -694,10 +786,10 @@ export default function ChatPage() {
             <div>
               <h2 className="text-4xl font-black tracking-tight">CHAT</h2>
 
-              <p className="mt-2 text-sm text-slate-400">
-                Chat čerpá z uloženého profilu práce, vybraného AI agenta a
-                pripojených PDF dokumentov.
-              </p>
+             <p className="mt-2 text-sm text-slate-400">
+  Chat čerpá z uloženého profilu práce, vybraného AI agenta a
+  pripojených súborov: PDF, Word, TXT, obrázky, tabuľky alebo prezentácie.
+</p>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
@@ -725,10 +817,10 @@ export default function ChatPage() {
 
                   <h3 className="text-3xl font-black">Začněte konverzaci</h3>
 
-                  <p className="mt-2 text-slate-400">
-                    Vyberte okno nižšie. AI použije uložený profil práce a
-                    pripojené PDF dokumenty.
-                  </p>
+                 <p className="mt-2 text-slate-400">
+  Vyberte okno nižšie. AI použije uložený profil práce a
+  pripojené podklady vo formátoch PDF, Word, TXT, obrázky, tabuľky alebo prezentácie.
+</p>
                 </div>
 
                 <div className="grid w-full gap-4 md:grid-cols-2">
@@ -795,7 +887,7 @@ export default function ChatPage() {
               <div className="mx-auto max-w-5xl">
                 <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.15em] text-slate-400">
                   <UploadCloud className="h-4 w-4 text-violet-300" />
-                  Pripojené súbory ({attachedFiles.length})
+                  Pripojené podklady ({attachedFiles.length})
                 </div>
 
                 <div className="flex max-h-[92px] flex-wrap gap-2 overflow-y-auto pr-1">
@@ -806,13 +898,17 @@ export default function ChatPage() {
                     >
                       <FileText className="h-4 w-4" />
 
-                      <span className="max-w-[220px] truncate font-bold">
-                        {file.name}
-                      </span>
+<span className="rounded-lg bg-violet-600/30 px-2 py-1 text-[10px] font-black uppercase text-violet-100">
+  {getFileKindLabel(file.name)}
+</span>
 
-                      <span className="text-xs text-violet-200/70">
-                        {formatBytes(file.size)}
-                      </span>
+<span className="max-w-[220px] truncate font-bold">
+  {file.name}
+</span>
+
+<span className="text-xs text-violet-200/70">
+  {formatBytes(file.size)}
+</span>
 
                       <button
                         type="button"
@@ -871,19 +967,19 @@ export default function ChatPage() {
                 className="flex items-end gap-3"
               >
                 <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="application/pdf,.pdf"
-                  multiple
-                  className="hidden"
-                  onChange={(event) => handleFiles(event.target.files)}
-                />
+  ref={fileInputRef}
+  type="file"
+  accept={allowedFileAccept}
+  multiple
+  className="hidden"
+  onChange={(event) => handleFiles(event.target.files)}
+/>
 
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-slate-300 transition hover:bg-white/10 hover:text-white"
-                  title="Priložiť PDF"
+                  title="Priložiť súbory: PDF, Word, TXT, obrázky, Excel alebo PowerPoint"
                 >
                   <Paperclip className="h-6 w-6" />
                 </button>

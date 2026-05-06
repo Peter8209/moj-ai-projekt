@@ -132,7 +132,70 @@ function normalizeMessages(messages: ChatMessage[]) {
     }));
 }
 
-async function extractPdfTexts(files: File[]) {
+const allowedAttachmentExtensions = [
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.txt',
+  '.rtf',
+  '.odt',
+  '.md',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.xls',
+  '.xlsx',
+  '.csv',
+  '.ppt',
+  '.pptx',
+];
+
+function getFileExtension(fileName: string) {
+  const index = fileName.lastIndexOf('.');
+
+  if (index === -1) {
+    return '';
+  }
+
+  return fileName.slice(index).toLowerCase();
+}
+
+function isAllowedAttachment(file: File) {
+  const extension = getFileExtension(file.name);
+  return allowedAttachmentExtensions.includes(extension);
+}
+
+function getAttachmentLabel(fileName: string) {
+  const extension = getFileExtension(fileName);
+
+  if (extension === '.pdf') return 'PDF dokument';
+
+  if (['.doc', '.docx'].includes(extension)) {
+    return 'Word dokument';
+  }
+
+  if (['.txt', '.rtf', '.odt', '.md'].includes(extension)) {
+    return 'Textový dokument';
+  }
+
+  if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
+    return 'Obrázok';
+  }
+
+  if (['.xls', '.xlsx', '.csv'].includes(extension)) {
+    return 'Tabuľka';
+  }
+
+  if (['.ppt', '.pptx'].includes(extension)) {
+    return 'Prezentácia';
+  }
+
+  return 'Súbor';
+}
+
+async function extractAttachmentTexts(files: File[]) {
   const results: string[] = [];
 
   if (!files.length) {
@@ -140,25 +203,85 @@ async function extractPdfTexts(files: File[]) {
   }
 
   for (const file of files) {
-    const isPdf =
-      file.type === 'application/pdf' ||
-      file.name.toLowerCase().endsWith('.pdf');
-
-    if (!isPdf) {
+    if (!isAllowedAttachment(file)) {
+      results.push(
+        `NEPODPOROVANÝ SÚBOR: ${file.name}
+Typ: ${file.type || 'application/octet-stream'}
+Veľkosť: ${file.size} bajtov
+[Tento formát súboru nie je povolený.]`
+      );
       continue;
     }
 
-    results.push(
-      `PDF: ${file.name}
+    const extension = getFileExtension(file.name);
+    const label = getAttachmentLabel(file.name);
+
+    // TXT a MD vieme na serveri načítať hneď ako obyčajný text.
+    if (['.txt', '.md'].includes(extension)) {
+      try {
+        const content = await file.text();
+
+        results.push(
+          `${label}: ${file.name}
+Typ: ${file.type || 'text/plain'}
 Veľkosť: ${file.size} bajtov
-[PDF dokument bol priložený. V tejto verzii server zatiaľ neextrahuje plný text PDF. AI preto vie, že dokument existuje, ale nemá overený celý obsah súboru.]`
+
+EXTRAHOVANÝ TEXT:
+${content.slice(0, 20000)}`
+        );
+
+        continue;
+      } catch {
+        results.push(
+          `${label}: ${file.name}
+Typ: ${file.type || 'text/plain'}
+Veľkosť: ${file.size} bajtov
+[Textový obsah sa nepodarilo načítať.]`
+        );
+
+        continue;
+      }
+    }
+
+    // Ostatné formáty zatiaľ iba zaevidujeme ako prílohy.
+    // Neskôr môžeš doplniť reálnu extrakciu cez mammoth, pdf-parse, xlsx atď.
+    let note = '';
+
+    if (extension === '.pdf') {
+      note =
+        'PDF dokument bol priložený. V tejto verzii server zatiaľ neextrahuje plný text PDF.';
+    } else if (['.doc', '.docx', '.odt', '.rtf'].includes(extension)) {
+      note =
+        'Dokument bol priložený. V tejto verzii server zatiaľ neextrahuje plný text Word/ODT/RTF dokumentu.';
+    } else if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
+      note =
+        'Obrázok bol priložený. V tejto verzii server zatiaľ nerobí OCR ani vizuálnu analýzu obrázka.';
+    } else if (['.xls', '.xlsx', '.csv'].includes(extension)) {
+      note =
+        'Tabuľkový súbor bol priložený. V tejto verzii server zatiaľ neextrahuje obsah buniek.';
+    } else if (['.ppt', '.pptx'].includes(extension)) {
+      note =
+        'Prezentácia bola priložená. V tejto verzii server zatiaľ neextrahuje text zo slidov.';
+    } else {
+      note =
+        'Súbor bol priložený. V tejto verzii server zatiaľ neextrahuje jeho plný obsah.';
+    }
+
+    results.push(
+      `${label}: ${file.name}
+Typ: ${file.type || 'application/octet-stream'}
+Veľkosť: ${file.size} bajtov
+[${note} AI vie, že súbor existuje, ale nemá overený celý obsah súboru.]`
     );
   }
 
   return results;
 }
 
-function buildSystemPrompt(profile: SavedProfile | null, pdfTexts: string[]) {
+function buildSystemPrompt(
+  profile: SavedProfile | null,
+  attachmentTexts: string[]
+) {
   const keywords =
     profile?.keywordsList && profile.keywordsList.length > 0
       ? profile.keywordsList
@@ -177,12 +300,12 @@ function buildSystemPrompt(profile: SavedProfile | null, pdfTexts: string[]) {
       ? profile.schema.requiredSections.map((item) => `- ${item}`).join('\n')
       : 'Neuvedené';
 
-  const pdfBlock =
-    pdfTexts.length > 0
-      ? `\nPRILOŽENÉ PDF DOKUMENTY:\n${pdfTexts.join(
-          '\n\n-----------------\n\n'
-        )}\n`
-      : '\nPRILOŽENÉ PDF DOKUMENTY: Žiadne.\n';
+  const attachmentsBlock =
+  attachmentTexts.length > 0
+    ? `\nPRILOŽENÉ SÚBORY A PODKLADY:\n${attachmentTexts.join(
+        '\n\n-----------------\n\n'
+      )}\n`
+    : '\nPRILOŽENÉ SÚBORY A PODKLADY: Žiadne.\n';
 
   return `
 Si ZEDPERA, profesionálny akademický AI asistent a AI vedúci práce.
@@ -190,9 +313,9 @@ Si ZEDPERA, profesionálny akademický AI asistent a AI vedúci práce.
 HLAVNÉ PRAVIDLÁ:
 - Odpovedaj v jazyku práce: ${profile?.workLanguage || profile?.language || 'SK'}.
 - Vychádzaj prednostne z uloženého profilu práce.
-- Ak sú priložené PDF dokumenty, zohľadni ich ako doplnkové zdroje.
-- Ak nie je dostupný text PDF, jasne uveď, že obsah PDF nebol serverom extrahovaný.
-- Text má byť odborne napísaný, logický a vhodný pre akademické písanie.
+- Ak sú priložené súbory, zohľadni ich ako doplnkové podklady.
+- Priložené súbory môžu byť PDF, Word, TXT, obrázky, tabuľky alebo prezentácie.
+- Ak pri niektorom súbore nie je dostupný extrahovaný obsah, jasne uveď, že server pozná iba názov, typ a veľkosť súboru, nie celý obsah.- Text má byť odborne napísaný, logický a vhodný pre akademické písanie.
 - Ak niečo v profile chýba, uveď, čo odporúčaš doplniť.
 - Nevymýšľaj konkrétne bibliografické údaje, ak nie sú priamo dostupné.
 - Ak používateľ žiada úvod, abstrakt, kapitoly alebo inú časť práce, vytvor ich na mieru podľa profilu.
@@ -265,7 +388,7 @@ ${requiredSectionsText}
 Špecifická inštrukcia typu práce:
 ${profile?.schema?.aiInstruction || 'Neuvedené'}
 
-${pdfBlock}
+${attachmentsBlock}
 
 FORMÁT ODPOVEDE:
 === VÝSTUP ===
@@ -482,7 +605,7 @@ if (contentType.includes('multipart/form-data')) {
       });
     }
 
-    const uploadedPdfTexts = await extractPdfTexts(files);
+    const uploadedAttachmentTexts = await extractAttachmentTexts(files);
 
 const projectDocuments = await loadProjectDocuments(projectId);
 
@@ -495,9 +618,12 @@ Text:
 ${doc.extracted_text || '[Dokument nemá uložený extrahovaný text]'}`;
 });
 
-const pdfTexts = [...uploadedPdfTexts, ...projectDocumentTexts];
+const attachmentTexts = [
+  ...uploadedAttachmentTexts,
+  ...projectDocumentTexts,
+];
 
-const systemPrompt = buildSystemPrompt(profile, pdfTexts);
+const systemPrompt = buildSystemPrompt(profile, attachmentTexts);
 
     try {
       const primary = getModelByAgent(agent);

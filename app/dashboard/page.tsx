@@ -1572,6 +1572,8 @@ function DefenseModule({
 }: {
   activeProfile: SavedProfile | null;
 }) {
+  const reviewFileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [title, setTitle] = useState(activeProfile?.title || '');
   const [summary, setSummary] = useState(
     activeProfile?.annotation ||
@@ -1584,6 +1586,9 @@ function DefenseModule({
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
+
+  const [reviewFiles, setReviewFiles] = useState<AttachedFile[]>([]);
+  const [reviewFileError, setReviewFileError] = useState('');
 
   useEffect(() => {
     if (!activeProfile) return;
@@ -1601,8 +1606,79 @@ function DefenseModule({
     }
   }, [activeProfile]);
 
-  const generateDefense = async () => {
+  const addReviewFiles = (files: FileList | File[]) => {
+    setReviewFileError('');
+
+    const incomingFiles = Array.from(files);
+
+    if (!incomingFiles.length) return;
+
+    setReviewFiles((currentFiles) => {
+      const nextFiles = [...currentFiles];
+
+      for (const file of incomingFiles) {
+        const extension = getFileExtension(file.name);
+
+        if (!isSupportedFile(file)) {
+          setReviewFileError(
+            `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, RTF, ODT, obrázky, Excel, CSV a PowerPoint.`,
+          );
+          continue;
+        }
+
+        if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
+          setReviewFileError(
+            `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť je ${MAX_UPLOAD_FILE_SIZE_MB} MB.`,
+          );
+          continue;
+        }
+
+        if (nextFiles.length >= MAX_UPLOAD_FILES) {
+          setReviewFileError(
+            `Môžete priložiť maximálne ${MAX_UPLOAD_FILES} posudkov alebo podkladov.`,
+          );
+          break;
+        }
+
+        const duplicate = nextFiles.some(
+          (item) => item.name === file.name && item.size === file.size,
+        );
+
+        if (duplicate) {
+          continue;
+        }
+
+        nextFiles.push({
+          id:
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random()}`,
+          file,
+          name: file.name,
+          size: file.size,
+          type: file.type || 'application/octet-stream',
+          extension,
+        });
+      }
+
+      return nextFiles;
+    });
+
+    if (reviewFileInputRef.current) {
+      reviewFileInputRef.current.value = '';
+    }
+  };
+
+  const removeReviewFile = (id: string) => {
+    setReviewFiles((currentFiles) =>
+      currentFiles.filter((file) => file.id !== id),
+    );
+  };
+
+
+    const generateDefense = async () => {
     setError('');
+    setReviewFileError('');
     setSlides([]);
 
     if (!title.trim()) {
@@ -1618,17 +1694,20 @@ function DefenseModule({
     setLoading(true);
 
     try {
+      const formData = new FormData();
+
+      formData.append('title', title);
+      formData.append('summary', summary);
+      formData.append('defenseType', defenseType);
+      formData.append('activeProfile', JSON.stringify(activeProfile || null));
+
+      reviewFiles.forEach((item) => {
+        formData.append('reviews', item.file, item.name);
+      });
+
       const response = await fetch('/api/defense', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title,
-          summary,
-          defenseType,
-          activeProfile,
-        }),
+        body: formData,
       });
 
       const data = await response.json();
@@ -1766,6 +1845,113 @@ function DefenseModule({
           className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
         />
       </label>
+
+      {/* =====================================================
+          POSUDKY / PODKLADY K OBHAJOBE
+      ===================================================== */}
+
+      <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-lg font-bold text-white">
+              <Paperclip size={20} className="text-purple-400" />
+              Posudky k obhajobe
+            </div>
+
+            <p className="mt-1 text-sm text-gray-400">
+              Nahraj posudok vedúceho, posudok oponenta alebo ďalšie podklady.
+              Zedpera ich zapracuje do prezentácie, otázok, odpovedí a časti
+              „reakcia na pripomienky“.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => reviewFileInputRef.current?.click()}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-purple-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-purple-500"
+          >
+            <UploadCloud size={18} />
+            Nahrať posudky
+          </button>
+        </div>
+
+        <input
+          ref={reviewFileInputRef}
+          type="file"
+          multiple
+          accept={FILE_INPUT_ACCEPT}
+          className="hidden"
+          onChange={(event) => {
+            if (event.target.files) {
+              addReviewFiles(event.target.files);
+            }
+          }}
+        />
+
+        <div
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+
+            if (event.dataTransfer.files) {
+              addReviewFiles(event.dataTransfer.files);
+            }
+          }}
+          className="rounded-2xl border border-dashed border-white/15 bg-black/20 p-5 text-center text-sm text-gray-400"
+        >
+          Pretiahnite sem posudky alebo kliknite na tlačidlo „Nahrať posudky“.
+          <div className="mt-2 text-xs text-gray-500">
+            Maximálne {MAX_UPLOAD_FILES} súborov, každý do{' '}
+            {MAX_UPLOAD_FILE_SIZE_MB} MB.
+          </div>
+        </div>
+
+        {reviewFileError && (
+          <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
+            {reviewFileError}
+          </div>
+        )}
+
+        {reviewFiles.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <div className="text-xs font-black uppercase tracking-[0.15em] text-gray-500">
+              Priložené posudky ({reviewFiles.length})
+            </div>
+
+            {reviewFiles.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0f1324] p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="rounded-xl bg-purple-600/20 px-3 py-2 text-xs font-bold text-purple-200">
+                    {getFileTypeLabel(item.extension)}
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-white">
+                      {item.name}
+                    </div>
+
+                    <div className="text-xs text-gray-500">
+                      {item.extension.toUpperCase()} · {formatFileSize(item.size)}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => removeReviewFile(item.id)}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/20"
+                >
+                  <Trash2 size={14} />
+                  Odstrániť
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <label className="block">
         <div className="mb-2 text-sm font-semibold text-gray-300">

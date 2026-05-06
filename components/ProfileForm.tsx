@@ -2,7 +2,6 @@
 
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   BookOpen,
   CheckCircle2,
@@ -119,14 +118,16 @@ type SavedProfile = Profile & {
   schema?: WorkSchema;
   interfaceLanguage?: Lang;
   savedAt?: string;
+  keywords?: string[];
 };
 
 type ProfileFormProps = {
-  initialProfile?: SavedProfile | null;
+  initialProfile?: Partial<SavedProfile> | null;
   onClose?: () => void;
   onSave?: (data: SavedProfile) => void;
 };
-// ================= OPTIONS =================
+
+// ================= CONSTANTS =================
 
 const LANGS: Lang[] = ['SK', 'CZ', 'EN', 'DE', 'PL', 'HU'];
 
@@ -154,12 +155,40 @@ const WORK_TYPES: WorkTypeKey[] = [
   'msc',
 ];
 
+const emptyProfile: Profile = {
+  type: 'bachelor',
+  level: 'expert',
+  title: '',
+  topic: '',
+  field: '',
+  supervisor: '',
+  citation: 'STN_ISO_690',
+  language: 'SK',
+  workLanguage: 'SK',
+  annotation: '',
+  goal: '',
+  problem: '',
+  methodology: '',
+  hypotheses: '',
+  researchQuestions: '',
+  practicalPart: '',
+  scientificContribution: '',
+  businessProblem: '',
+  businessGoal: '',
+  implementation: '',
+  caseStudy: '',
+  reflection: '',
+  sourcesRequirement: '',
+  keywordsList: [],
+};
+
 // ================= TRANSLATIONS =================
 
 const UI: Record<
   Lang,
   {
     pageTitle: string;
+    editTitle: string;
     subtitle: string;
     workType: string;
     level: string;
@@ -173,9 +202,9 @@ const UI: Record<
     citation: string;
     recommendedLength: string;
     preview: string;
-    generate: string;
-    generating: string;
     save: string;
+    saveChanges: string;
+    saving: string;
     titlePlaceholder: string;
     topicPlaceholder: string;
     fieldPlaceholder: string;
@@ -183,15 +212,15 @@ const UI: Record<
     keywords: string;
     keywordPlaceholder: string;
     keywordsHint: string;
-    validation: string;
     activeTemplate: string;
     aiProfile: string;
   }
 > = {
   SK: {
     pageTitle: 'Nová práca',
+    editTitle: 'Upraviť profil práce',
     subtitle:
-      'AI z tohto profilu vytvorí celú akademickú prácu podľa zvoleného typu, jazyka práce a citačnej normy.',
+      'AI z tohto profilu vytvorí akademickú prácu podľa typu, jazyka práce a citačnej normy.',
     workType: 'Typ práce',
     level: 'Odbornosť',
     language: 'Jazyk rozhrania',
@@ -205,9 +234,9 @@ const UI: Record<
     citation: 'Citovanie',
     recommendedLength: 'Odporúčaný rozsah',
     preview: 'Náhľad profilu',
-    generate: 'Vytvoriť prácu',
-    generating: 'Generujem prácu...',
     save: 'Uložiť profil',
+    saveChanges: 'Uložiť zmeny profilu',
+    saving: 'Ukladám...',
     titlePlaceholder: 'Názov práce',
     topicPlaceholder: 'Téma práce',
     fieldPlaceholder: 'Odbor / predmet / oblasť',
@@ -215,14 +244,14 @@ const UI: Record<
     keywords: 'Kľúčové slová',
     keywordPlaceholder: 'Pridať kľúčové slovo',
     keywordsHint: 'Odporúčané: 5 – 15 kľúčových slov.',
-    validation: 'Vyplň názov práce a typ práce.',
     activeTemplate: 'Aktívna šablóna',
     aiProfile: 'AI profil',
   },
   CZ: {
     pageTitle: 'Profil práce',
+    editTitle: 'Upravit profil práce',
     subtitle:
-      'AI z tohoto profilu vytvoří celou akademickou práci podle zvoleného typu, jazyka práce a citační normy.',
+      'AI z tohoto profilu vytvoří akademickou práci podle typu, jazyka práce a citační normy.',
     workType: 'Typ práce',
     level: 'Odbornost',
     language: 'Jazyk rozhraní',
@@ -236,9 +265,9 @@ const UI: Record<
     citation: 'Citování',
     recommendedLength: 'Doporučený rozsah',
     preview: 'Náhled profilu',
-    generate: 'Vytvořit práci',
-    generating: 'Generuji práci...',
     save: 'Uložit profil',
+    saveChanges: 'Uložit změny profilu',
+    saving: 'Ukládám...',
     titlePlaceholder: 'Název práce',
     topicPlaceholder: 'Téma práce',
     fieldPlaceholder: 'Obor / předmět / oblast',
@@ -246,14 +275,14 @@ const UI: Record<
     keywords: 'Klíčová slova',
     keywordPlaceholder: 'Přidat klíčové slovo',
     keywordsHint: 'Doporučeno: 5 – 15 klíčových slov.',
-    validation: 'Vyplň název práce a typ práce.',
     activeTemplate: 'Aktivní šablona',
     aiProfile: 'AI profil',
   },
   EN: {
     pageTitle: 'Work Profile',
+    editTitle: 'Edit Work Profile',
     subtitle:
-      'AI will generate the full academic work according to the selected type, work language and citation standard.',
+      'AI will generate academic work according to the selected type, language and citation standard.',
     workType: 'Work type',
     level: 'Expertise level',
     language: 'Interface language',
@@ -267,9 +296,9 @@ const UI: Record<
     citation: 'Citation style',
     recommendedLength: 'Recommended length',
     preview: 'Profile preview',
-    generate: 'Generate work',
-    generating: 'Generating work...',
     save: 'Save profile',
+    saveChanges: 'Save profile changes',
+    saving: 'Saving...',
     titlePlaceholder: 'Title of the work',
     topicPlaceholder: 'Topic',
     fieldPlaceholder: 'Field / subject / area',
@@ -277,20 +306,20 @@ const UI: Record<
     keywords: 'Keywords',
     keywordPlaceholder: 'Add keyword',
     keywordsHint: 'Recommended: 5–15 keywords.',
-    validation: 'Please fill in the title and work type.',
     activeTemplate: 'Active template',
     aiProfile: 'AI profile',
   },
   DE: {
     pageTitle: 'Arbeitsprofil',
+    editTitle: 'Arbeitsprofil bearbeiten',
     subtitle:
-      'Die KI erstellt die vollständige akademische Arbeit nach Typ, Arbeitssprache und Zitiernorm.',
+      'Die KI erstellt die akademische Arbeit nach Typ, Sprache und Zitiernorm.',
     workType: 'Art der Arbeit',
     level: 'Fachniveau',
     language: 'Sprache der Oberfläche',
     workLanguage: 'Sprache der Arbeit',
     workLanguageHint:
-      'Wählen Sie die Sprache, in der die KI die endgültige akademische Arbeit erstellen soll.',
+      'Wählen Sie die Sprache, in der die KI die Arbeit erstellen soll.',
     basic: 'Grunddaten',
     academicProfile: 'Akademisches Profil',
     structure: 'Struktur der Arbeit',
@@ -298,9 +327,9 @@ const UI: Record<
     citation: 'Zitierweise',
     recommendedLength: 'Empfohlener Umfang',
     preview: 'Profilvorschau',
-    generate: 'Arbeit erstellen',
-    generating: 'Arbeit wird erstellt...',
     save: 'Profil speichern',
+    saveChanges: 'Änderungen speichern',
+    saving: 'Speichern...',
     titlePlaceholder: 'Titel der Arbeit',
     topicPlaceholder: 'Thema',
     fieldPlaceholder: 'Fachgebiet / Bereich',
@@ -308,14 +337,14 @@ const UI: Record<
     keywords: 'Schlüsselwörter',
     keywordPlaceholder: 'Schlüsselwort hinzufügen',
     keywordsHint: 'Empfohlen: 5–15 Schlüsselwörter.',
-    validation: 'Bitte Titel und Arbeitstyp ausfüllen.',
     activeTemplate: 'Aktive Vorlage',
     aiProfile: 'KI-Profil',
   },
   PL: {
     pageTitle: 'Profil pracy',
+    editTitle: 'Edytuj profil pracy',
     subtitle:
-      'AI utworzy pełną pracę akademicką zgodnie z typem, językiem pracy i normą cytowania.',
+      'AI utworzy pracę akademicką zgodnie z typem, językiem i normą cytowania.',
     workType: 'Typ pracy',
     level: 'Poziom specjalizacji',
     language: 'Język interfejsu',
@@ -329,9 +358,9 @@ const UI: Record<
     citation: 'Styl cytowania',
     recommendedLength: 'Zalecana objętość',
     preview: 'Podgląd profilu',
-    generate: 'Utwórz pracę',
-    generating: 'Generuję pracę...',
     save: 'Zapisz profil',
+    saveChanges: 'Zapisz zmiany profilu',
+    saving: 'Zapisuję...',
     titlePlaceholder: 'Tytuł pracy',
     topicPlaceholder: 'Temat pracy',
     fieldPlaceholder: 'Kierunek / przedmiot / obszar',
@@ -339,20 +368,20 @@ const UI: Record<
     keywords: 'Słowa kluczowe',
     keywordPlaceholder: 'Dodaj słowo kluczowe',
     keywordsHint: 'Zalecane: 5–15 słów kluczowych.',
-    validation: 'Uzupełnij tytuł i typ pracy.',
     activeTemplate: 'Aktywny szablon',
     aiProfile: 'Profil AI',
   },
   HU: {
     pageTitle: 'Dolgozatprofil',
+    editTitle: 'Dolgozatprofil szerkesztése',
     subtitle:
-      'Az AI a kiválasztott típus, dolgozatnyelv és hivatkozási szabvány szerint elkészíti a teljes munkát.',
+      'Az AI a kiválasztott típus, nyelv és hivatkozási szabvány szerint készíti el a munkát.',
     workType: 'Munka típusa',
     level: 'Szakmai szint',
     language: 'Felület nyelve',
     workLanguage: 'A dolgozat nyelve',
     workLanguageHint:
-      'Válassza ki, milyen nyelven készüljön el a végleges akadémiai munka.',
+      'Válassza ki, milyen nyelven készüljön el az akadémiai munka.',
     basic: 'Alapadatok',
     academicProfile: 'Akadémiai profil',
     structure: 'A munka szerkezete',
@@ -360,9 +389,9 @@ const UI: Record<
     citation: 'Hivatkozási stílus',
     recommendedLength: 'Ajánlott terjedelem',
     preview: 'Profil előnézet',
-    generate: 'Munka létrehozása',
-    generating: 'Munka generálása...',
     save: 'Profil mentése',
+    saveChanges: 'Módosítások mentése',
+    saving: 'Mentés...',
     titlePlaceholder: 'A munka címe',
     topicPlaceholder: 'Téma',
     fieldPlaceholder: 'Szak / tantárgy / terület',
@@ -370,7 +399,6 @@ const UI: Record<
     keywords: 'Kulcsszavak',
     keywordPlaceholder: 'Kulcsszó hozzáadása',
     keywordsHint: 'Ajánlott: 5–15 kulcsszó.',
-    validation: 'Töltse ki a címet és a munka típusát.',
     activeTemplate: 'Aktív sablon',
     aiProfile: 'AI profil',
   },
@@ -526,427 +554,244 @@ const LEVEL_LABELS: Record<LevelKey, Record<Lang, string>> = {
   },
 };
 
-// ================= FIELD LABELS =================
+// ================= HELPERS =================
+
+function isLang(value: unknown): value is Lang {
+  return LANGS.includes(value as Lang);
+}
+
+function isLevel(value: unknown): value is LevelKey {
+  return LEVELS.includes(value as LevelKey);
+}
+
+function isCitation(value: unknown): value is CitationKey {
+  return [
+    'APA7',
+    'ISO690',
+    'STN_ISO_690',
+    'Harvard',
+    'MLA9',
+    'Chicago',
+  ].includes(value as CitationKey);
+}
+
+function normalizeWorkType(value: unknown): WorkTypeKey {
+  const raw = String(value || '').toLowerCase().trim();
+
+  if (WORK_TYPES.includes(raw as WorkTypeKey)) {
+    return raw as WorkTypeKey;
+  }
+
+  if (raw.includes('semin')) return 'seminar';
+  if (raw.includes('esej') || raw.includes('essay')) return 'essay';
+  if (raw.includes('matur')) return 'maturita';
+  if (raw.includes('bakal') || raw.includes('bachelor')) return 'bachelor';
+  if (raw.includes('diplom') || raw.includes('master')) return 'master';
+  if (raw.includes('absolvent') || raw.includes('graduate')) return 'graduate';
+  if (raw.includes('rigor')) return 'rigorous';
+  if (raw.includes('dizert') || raw.includes('dissert')) return 'dissertation';
+  if (raw.includes('habil')) return 'habilitation';
+  if (raw.includes('mba')) return 'mba';
+  if (raw.includes('dba')) return 'dba';
+  if (raw.includes('atest')) return 'attestation';
+  if (raw.includes('msc')) return 'msc';
+
+  return 'bachelor';
+}
+
+function normalizeCitation(value: unknown): CitationKey {
+  const raw = String(value || '').trim();
+
+  if (isCitation(raw)) return raw;
+
+  const upper = raw.toUpperCase();
+
+  if (upper.includes('APA')) return 'APA7';
+  if (upper.includes('STN')) return 'STN_ISO_690';
+  if (upper.includes('ISO')) return 'ISO690';
+  if (upper.includes('HARVARD')) return 'Harvard';
+  if (upper.includes('MLA')) return 'MLA9';
+  if (upper.includes('CHICAGO')) return 'Chicago';
+
+  return 'STN_ISO_690';
+}
+
+function normalizeKeywords(value: unknown, fallback: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+
+  if (Array.isArray(fallback)) {
+    return fallback.map((item) => String(item).trim()).filter(Boolean);
+  }
+
+  return [];
+}
+
+function safeJsonParse<T>(value: string | null, fallback: T): T {
+  if (!value) return fallback;
+
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
 
 function fieldText(
   key: DynamicFieldKey,
   lang: Lang
 ): { label: string; placeholder: string } {
-  const map: Record<
-    DynamicFieldKey,
-    Record<Lang, { label: string; placeholder: string }>
-  > = {
+  const sk: Record<DynamicFieldKey, { label: string; placeholder: string }> = {
     annotation: {
-      SK: {
-        label: 'Anotácia',
-        placeholder: 'Stručne popíšte, o čom bude práca a aký problém rieši.',
-      },
-      CZ: {
-        label: 'Anotace',
-        placeholder: 'Stručně popište, o čem bude práce a jaký problém řeší.',
-      },
-      EN: {
+      label: 'Anotácia',
+      placeholder: 'Stručne popíšte, o čom bude práca a aký problém rieši.',
+    },
+    goal: {
+      label: 'Cieľ práce',
+      placeholder: 'Definujte hlavný cieľ práce.',
+    },
+    problem: {
+      label: 'Výskumný problém',
+      placeholder: 'Aký odborný alebo výskumný problém bude práca riešiť?',
+    },
+    methodology: {
+      label: 'Metodológia / metodika',
+      placeholder:
+        'Napr. analýza, komparácia, dotazník, rozhovor, prípadová štúdia, experiment.',
+    },
+    hypotheses: {
+      label: 'Hypotézy',
+      placeholder: 'Uveďte hypotézy, ktoré má práca overovať.',
+    },
+    researchQuestions: {
+      label: 'Výskumné otázky',
+      placeholder: 'Uveďte hlavné a čiastkové výskumné otázky.',
+    },
+    practicalPart: {
+      label: 'Praktická časť',
+      placeholder: 'Popíšte, čo má obsahovať praktická alebo analytická časť.',
+    },
+    scientificContribution: {
+      label: 'Vedecký / odborný prínos',
+      placeholder:
+        'Čo nové práca prináša do teórie, vedy alebo odbornej praxe?',
+    },
+    businessProblem: {
+      label: 'Firemný / manažérsky problém',
+      placeholder:
+        'Aký konkrétny problém vo firme, organizácii alebo procese má práca riešiť?',
+    },
+    businessGoal: {
+      label: 'Manažérsky cieľ',
+      placeholder:
+        'Napr. zníženie nákladov, optimalizácia procesov, zvýšenie výkonu.',
+    },
+    implementation: {
+      label: 'Implementačný plán',
+      placeholder: 'Ako sa má navrhnuté riešenie zaviesť do praxe?',
+    },
+    caseStudy: {
+      label: 'Prípadová štúdia / organizácia',
+      placeholder:
+        'Uveďte firmu, školu, inštitúciu, odvetvie alebo konkrétny prípad.',
+    },
+    reflection: {
+      label: 'Reflexia / hodnotenie',
+      placeholder:
+        'Popíšte vlastné hodnotenie, skúsenosti, limity a odporúčania.',
+    },
+    sourcesRequirement: {
+      label: 'Požiadavky na zdroje',
+      placeholder:
+        'Napr. minimálne 20 odborných zdrojov, vedecké články, normy, zákony, knihy.',
+    },
+  };
+
+  if (lang === 'CZ') {
+    return {
+      label: sk[key].label
+        .replace('Cieľ', 'Cíl')
+        .replace('Výskumný', 'Výzkumný')
+        .replace('Výskumné', 'Výzkumné')
+        .replace('Praktická časť', 'Praktická část')
+        .replace('Požiadavky', 'Požadavky'),
+      placeholder: sk[key].placeholder,
+    };
+  }
+
+  if (lang === 'EN') {
+    const en: Record<DynamicFieldKey, { label: string; placeholder: string }> = {
+      annotation: {
         label: 'Annotation',
         placeholder: 'Briefly describe the work and the problem it addresses.',
       },
-      DE: {
-        label: 'Annotation',
-        placeholder: 'Beschreiben Sie kurz Thema und Problem der Arbeit.',
-      },
-      PL: {
-        label: 'Streszczenie',
-        placeholder: 'Krótko opisz temat pracy i problem, który rozwiązuje.',
-      },
-      HU: {
-        label: 'Annotáció',
-        placeholder: 'Röviden írja le a dolgozat témáját és problémáját.',
-      },
-    },
-    goal: {
-      SK: {
-        label: 'Cieľ práce',
-        placeholder: 'Definujte hlavný cieľ práce.',
-      },
-      CZ: {
-        label: 'Cíl práce',
-        placeholder: 'Definujte hlavní cíl práce.',
-      },
-      EN: {
+      goal: {
         label: 'Objective',
         placeholder: 'Define the main objective of the work.',
       },
-      DE: {
-        label: 'Ziel der Arbeit',
-        placeholder: 'Definieren Sie das Hauptziel der Arbeit.',
-      },
-      PL: {
-        label: 'Cel pracy',
-        placeholder: 'Zdefiniuj główny cel pracy.',
-      },
-      HU: {
-        label: 'A munka célja',
-        placeholder: 'Határozza meg a dolgozat fő célját.',
-      },
-    },
-    problem: {
-      SK: {
-        label: 'Výskumný problém',
-        placeholder: 'Aký odborný alebo výskumný problém bude práca riešiť?',
-      },
-      CZ: {
-        label: 'Výzkumný problém',
-        placeholder: 'Jaký odborný nebo výzkumný problém bude práce řešit?',
-      },
-      EN: {
+      problem: {
         label: 'Research problem',
         placeholder:
           'What research or professional problem will the work address?',
       },
-      DE: {
-        label: 'Forschungsproblem',
-        placeholder: 'Welches Forschungs- oder Fachproblem wird behandelt?',
-      },
-      PL: {
-        label: 'Problem badawczy',
-        placeholder:
-          'Jaki problem badawczy lub zawodowy zostanie rozwiązany?',
-      },
-      HU: {
-        label: 'Kutatási probléma',
-        placeholder:
-          'Milyen szakmai vagy kutatási problémát vizsgál a munka?',
-      },
-    },
-    methodology: {
-      SK: {
-        label: 'Metodológia / metodika',
-        placeholder:
-          'Napr. analýza, komparácia, dotazník, rozhovor, prípadová štúdia, experiment.',
-      },
-      CZ: {
-        label: 'Metodologie / metodika',
-        placeholder:
-          'Např. analýza, komparace, dotazník, rozhovor, případová studie, experiment.',
-      },
-      EN: {
+      methodology: {
         label: 'Methodology',
         placeholder:
           'E.g. analysis, comparison, questionnaire, interview, case study, experiment.',
       },
-      DE: {
-        label: 'Methodik',
-        placeholder:
-          'Z. B. Analyse, Vergleich, Fragebogen, Interview, Fallstudie, Experiment.',
-      },
-      PL: {
-        label: 'Metodologia',
-        placeholder:
-          'Np. analiza, porównanie, ankieta, wywiad, studium przypadku, eksperyment.',
-      },
-      HU: {
-        label: 'Módszertan',
-        placeholder:
-          'Pl. elemzés, összehasonlítás, kérdőív, interjú, esettanulmány, kísérlet.',
-      },
-    },
-    hypotheses: {
-      SK: {
-        label: 'Hypotézy',
-        placeholder: 'Uveďte hypotézy, ktoré má práca overovať.',
-      },
-      CZ: {
-        label: 'Hypotézy',
-        placeholder: 'Uveďte hypotézy, které má práce ověřovat.',
-      },
-      EN: {
+      hypotheses: {
         label: 'Hypotheses',
         placeholder: 'Enter the hypotheses to be tested.',
       },
-      DE: {
-        label: 'Hypothesen',
-        placeholder: 'Geben Sie die zu prüfenden Hypothesen ein.',
-      },
-      PL: {
-        label: 'Hipotezy',
-        placeholder: 'Wpisz hipotezy do weryfikacji.',
-      },
-      HU: {
-        label: 'Hipotézisek',
-        placeholder: 'Adja meg az ellenőrizendő hipotéziseket.',
-      },
-    },
-    researchQuestions: {
-      SK: {
-        label: 'Výskumné otázky',
-        placeholder: 'Uveďte hlavné a čiastkové výskumné otázky.',
-      },
-      CZ: {
-        label: 'Výzkumné otázky',
-        placeholder: 'Uveďte hlavní a dílčí výzkumné otázky.',
-      },
-      EN: {
+      researchQuestions: {
         label: 'Research questions',
         placeholder: 'Enter main and partial research questions.',
       },
-      DE: {
-        label: 'Forschungsfragen',
-        placeholder: 'Geben Sie Haupt- und Teilforschungsfragen ein.',
-      },
-      PL: {
-        label: 'Pytania badawcze',
-        placeholder: 'Wpisz główne i szczegółowe pytania badawcze.',
-      },
-      HU: {
-        label: 'Kutatási kérdések',
-        placeholder: 'Adja meg a fő és részletes kutatási kérdéseket.',
-      },
-    },
-    practicalPart: {
-      SK: {
-        label: 'Praktická časť',
-        placeholder:
-          'Popíšte, čo má obsahovať praktická alebo analytická časť.',
-      },
-      CZ: {
-        label: 'Praktická část',
-        placeholder: 'Popište obsah praktické nebo analytické části.',
-      },
-      EN: {
+      practicalPart: {
         label: 'Practical part',
         placeholder: 'Describe the practical or analytical part.',
       },
-      DE: {
-        label: 'Praktischer Teil',
-        placeholder:
-          'Beschreiben Sie den praktischen oder analytischen Teil.',
-      },
-      PL: {
-        label: 'Część praktyczna',
-        placeholder: 'Opisz część praktyczną lub analityczną.',
-      },
-      HU: {
-        label: 'Gyakorlati rész',
-        placeholder: 'Írja le a gyakorlati vagy elemző részt.',
-      },
-    },
-    scientificContribution: {
-      SK: {
-        label: 'Vedecký / odborný prínos',
-        placeholder:
-          'Čo nové práca prináša do teórie, vedy alebo odbornej praxe?',
-      },
-      CZ: {
-        label: 'Vědecký / odborný přínos',
-        placeholder:
-          'Co nového práce přináší do teorie, vědy nebo odborné praxe?',
-      },
-      EN: {
+      scientificContribution: {
         label: 'Scientific / professional contribution',
         placeholder:
           'What new contribution does the work bring to theory, science or practice?',
       },
-      DE: {
-        label: 'Wissenschaftlicher / fachlicher Beitrag',
-        placeholder: 'Welchen neuen Beitrag leistet die Arbeit?',
-      },
-      PL: {
-        label: 'Wkład naukowy / zawodowy',
-        placeholder: 'Jaki nowy wkład wnosi praca?',
-      },
-      HU: {
-        label: 'Tudományos / szakmai hozzájárulás',
-        placeholder: 'Milyen új hozzájárulást nyújt a munka?',
-      },
-    },
-    businessProblem: {
-      SK: {
-        label: 'Firemný / manažérsky problém',
-        placeholder:
-          'Aký konkrétny problém vo firme, organizácii alebo procese má práca riešiť?',
-      },
-      CZ: {
-        label: 'Firemní / manažerský problém',
-        placeholder:
-          'Jaký konkrétní problém ve firmě nebo procesu má práce řešit?',
-      },
-      EN: {
+      businessProblem: {
         label: 'Business / management problem',
         placeholder:
           'What specific business, organizational or process problem should be solved?',
       },
-      DE: {
-        label: 'Unternehmens- / Managementproblem',
-        placeholder:
-          'Welches konkrete Unternehmens- oder Prozessproblem soll gelöst werden?',
-      },
-      PL: {
-        label: 'Problem biznesowy / menedżerski',
-        placeholder:
-          'Jaki konkretny problem firmy lub procesu ma zostać rozwiązany?',
-      },
-      HU: {
-        label: 'Üzleti / menedzsment probléma',
-        placeholder:
-          'Milyen konkrét üzleti vagy szervezeti problémát kell megoldani?',
-      },
-    },
-    businessGoal: {
-      SK: {
-        label: 'Manažérsky cieľ',
-        placeholder:
-          'Napr. zníženie nákladov, optimalizácia procesov, zvýšenie výkonu, stratégia rastu.',
-      },
-      CZ: {
-        label: 'Manažerský cíl',
-        placeholder:
-          'Např. snížení nákladů, optimalizace procesů, zvýšení výkonu.',
-      },
-      EN: {
+      businessGoal: {
         label: 'Management objective',
         placeholder:
-          'E.g. cost reduction, process optimization, performance improvement, growth strategy.',
+          'E.g. cost reduction, process optimization, performance improvement.',
       },
-      DE: {
-        label: 'Managementziel',
-        placeholder:
-          'Z. B. Kostensenkung, Prozessoptimierung, Leistungssteigerung.',
-      },
-      PL: {
-        label: 'Cel menedżerski',
-        placeholder:
-          'Np. redukcja kosztów, optymalizacja procesów, wzrost efektywności.',
-      },
-      HU: {
-        label: 'Menedzsment cél',
-        placeholder:
-          'Pl. költségcsökkentés, folyamatoptimalizálás, teljesítménynövelés.',
-      },
-    },
-    implementation: {
-      SK: {
-        label: 'Implementačný plán',
-        placeholder: 'Ako sa má navrhnuté riešenie zaviesť do praxe?',
-      },
-      CZ: {
-        label: 'Implementační plán',
-        placeholder: 'Jak se má navržené řešení zavést do praxe?',
-      },
-      EN: {
+      implementation: {
         label: 'Implementation plan',
         placeholder: 'How should the proposed solution be implemented?',
       },
-      DE: {
-        label: 'Implementierungsplan',
-        placeholder: 'Wie soll die Lösung umgesetzt werden?',
-      },
-      PL: {
-        label: 'Plan wdrożenia',
-        placeholder: 'Jak należy wdrożyć proponowane rozwiązanie?',
-      },
-      HU: {
-        label: 'Megvalósítási terv',
-        placeholder: 'Hogyan kell bevezetni a javasolt megoldást?',
-      },
-    },
-    caseStudy: {
-      SK: {
-        label: 'Prípadová štúdia / organizácia',
-        placeholder:
-          'Uveďte firmu, školu, inštitúciu, odvetvie alebo konkrétny prípad.',
-      },
-      CZ: {
-        label: 'Případová studie / organizace',
-        placeholder:
-          'Uveďte firmu, školu, instituci, odvětví nebo konkrétní případ.',
-      },
-      EN: {
+      caseStudy: {
         label: 'Case study / organization',
         placeholder:
           'Enter company, school, institution, sector or specific case.',
       },
-      DE: {
-        label: 'Fallstudie / Organisation',
-        placeholder:
-          'Geben Sie Unternehmen, Institution, Branche oder Fall ein.',
-      },
-      PL: {
-        label: 'Studium przypadku / organizacja',
-        placeholder:
-          'Wpisz firmę, instytucję, branżę lub konkretny przypadek.',
-      },
-      HU: {
-        label: 'Esettanulmány / szervezet',
-        placeholder:
-          'Adja meg a céget, intézményt, ágazatot vagy konkrét esetet.',
-      },
-    },
-    reflection: {
-      SK: {
-        label: 'Reflexia / hodnotenie',
-        placeholder:
-          'Popíšte vlastné hodnotenie, skúsenosti, limity a odporúčania.',
-      },
-      CZ: {
-        label: 'Reflexe / hodnocení',
-        placeholder:
-          'Popište vlastní hodnocení, zkušenosti, limity a doporučení.',
-      },
-      EN: {
+      reflection: {
         label: 'Reflection / evaluation',
         placeholder:
           'Describe evaluation, experience, limitations and recommendations.',
       },
-      DE: {
-        label: 'Reflexion / Bewertung',
-        placeholder:
-          'Beschreiben Sie Bewertung, Erfahrungen, Grenzen und Empfehlungen.',
-      },
-      PL: {
-        label: 'Refleksja / ocena',
-        placeholder:
-          'Opisz ocenę, doświadczenia, ograniczenia i rekomendacje.',
-      },
-      HU: {
-        label: 'Reflexió / értékelés',
-        placeholder:
-          'Írja le az értékelést, tapasztalatokat, korlátokat és ajánlásokat.',
-      },
-    },
-    sourcesRequirement: {
-      SK: {
-        label: 'Požiadavky na zdroje',
-        placeholder:
-          'Napr. minimálne 20 odborných zdrojov, vedecké články, normy, zákony, knihy.',
-      },
-      CZ: {
-        label: 'Požadavky na zdroje',
-        placeholder:
-          'Např. minimálně 20 odborných zdrojů, vědecké články, normy, zákony.',
-      },
-      EN: {
+      sourcesRequirement: {
         label: 'Source requirements',
         placeholder:
           'E.g. at least 20 scholarly sources, articles, standards, laws, books.',
       },
-      DE: {
-        label: 'Anforderungen an Quellen',
-        placeholder:
-          'Z. B. mindestens 20 Fachquellen, Artikel, Normen, Gesetze.',
-      },
-      PL: {
-        label: 'Wymagania dotyczące źródeł',
-        placeholder:
-          'Np. minimum 20 źródeł naukowych, artykuły, normy, ustawy.',
-      },
-      HU: {
-        label: 'Forráskövetelmények',
-        placeholder:
-          'Pl. legalább 20 szakmai forrás, cikkek, szabványok, törvények.',
-      },
-    },
-  };
+    };
 
-  return map[key][lang];
+    return en[key];
+  }
+
+  return sk[key];
 }
 
 function makeField(
@@ -966,11 +811,10 @@ function makeField(
   };
 }
 
-// ================= SCHEMA BY WORK TYPE =================
+// ================= SCHEMA =================
 
 function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
   const label = WORK_LABELS[type][lang];
-
   const commonCitation: CitationKey[] = [
     'APA7',
     'ISO690',
@@ -984,32 +828,12 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       label,
       description:
         lang === 'SK'
-          ? 'Esej je argumentačný alebo reflexívny text. Nepoužíva sa rovnaká štruktúra ako pri bakalárskej alebo diplomovej práci.'
-          : 'Essay is an argumentative or reflective text. It must not use the same structure as a bachelor or master thesis.',
+          ? 'Esej je argumentačný alebo reflexívny text. Nepoužíva sa rovnaká štruktúra ako pri bakalárskej práci.'
+          : 'Essay is an argumentative or reflective text.',
       recommendedLength: '3 – 8 strán',
       citationOptions: ['APA7', 'MLA9', 'Chicago', 'Harvard'],
-      structure:
-        lang === 'SK'
-          ? [
-              'Úvod',
-              'Hlavná téza',
-              'Argumentácia',
-              'Protiargumenty',
-              'Vlastný postoj',
-              'Záver',
-            ]
-          : [
-              'Introduction',
-              'Main thesis',
-              'Arguments',
-              'Counterarguments',
-              'Own position',
-              'Conclusion',
-            ],
-      requiredSections:
-        lang === 'SK'
-          ? ['Téza', 'Argumenty', 'Vlastný postoj', 'Záver']
-          : ['Thesis', 'Arguments', 'Own position', 'Conclusion'],
+      structure: ['Úvod', 'Hlavná téza', 'Argumentácia', 'Protiargumenty', 'Vlastný postoj', 'Záver'],
+      requiredSections: ['Téza', 'Argumenty', 'Vlastný postoj', 'Záver'],
       fields: [
         makeField('annotation', lang, false, 3),
         makeField('goal', lang, true, 3),
@@ -1017,7 +841,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('sourcesRequirement', lang, false, 3),
       ],
       aiInstruction:
-        'Generate an essay only. Do not create thesis methodology, hypotheses, research design, supervisor sections or empirical results. Use argumentative structure.',
+        'Generate an essay only. Use argumentative structure.',
     };
   }
 
@@ -1026,33 +850,11 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       typeKey: type,
       label,
       description:
-        lang === 'SK'
-          ? 'Seminárna práca má jednoduchšiu akademickú štruktúru. Zameriava sa na spracovanie témy, teóriu, základnú analýzu a zdroje.'
-          : 'Seminar paper uses a simpler academic structure focused on theory, basic analysis and sources.',
+        'Seminárna práca má jednoduchšiu akademickú štruktúru so zameraním na tému, teóriu, analýzu a zdroje.',
       recommendedLength: '8 – 20 strán',
       citationOptions: commonCitation,
-      structure:
-        lang === 'SK'
-          ? [
-              'Úvod',
-              'Teoretická časť',
-              'Analytická časť',
-              'Diskusia',
-              'Záver',
-              'Zoznam zdrojov',
-            ]
-          : [
-              'Introduction',
-              'Theoretical part',
-              'Analytical part',
-              'Discussion',
-              'Conclusion',
-              'References',
-            ],
-      requiredSections:
-        lang === 'SK'
-          ? ['Úvod', 'Teoretická časť', 'Analýza', 'Záver', 'Zdroje']
-          : ['Introduction', 'Theory', 'Analysis', 'Conclusion', 'References'],
+      structure: ['Úvod', 'Teoretická časť', 'Analytická časť', 'Diskusia', 'Záver', 'Zoznam zdrojov'],
+      requiredSections: ['Úvod', 'Teoretická časť', 'Analýza', 'Záver', 'Zdroje'],
       fields: [
         makeField('annotation', lang, false, 3),
         makeField('goal', lang, true, 3),
@@ -1060,7 +862,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('sourcesRequirement', lang, false, 3),
       ],
       aiInstruction:
-        'Generate a seminar paper. Use a simpler academic structure, theory, basic analysis and conclusion. Do not overcomplicate it as a dissertation.',
+        'Generate a seminar paper with theory, basic analysis and conclusion.',
     };
   }
 
@@ -1069,57 +871,30 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       typeKey: type,
       label,
       description:
-        lang === 'SK'
-          ? 'Bakalárska práca musí mať jasný cieľ, teoretickú časť, metodiku a praktickú alebo analytickú časť.'
-          : 'Bachelor thesis requires objective, theory, methodology and practical or analytical part.',
+        'Bakalárska práca musí mať jasný cieľ, teoretickú časť, metodiku a praktickú alebo analytickú časť.',
       recommendedLength: '30 – 45 strán',
       citationOptions: commonCitation,
-      structure:
-        lang === 'SK'
-          ? [
-              'Abstrakt',
-              'Úvod',
-              'Teoretické východiská',
-              'Cieľ práce',
-              'Metodika',
-              'Praktická / analytická časť',
-              'Diskusia',
-              'Záver',
-              'Zoznam literatúry',
-              'Prílohy',
-            ]
-          : [
-              'Abstract',
-              'Introduction',
-              'Theoretical background',
-              'Objective',
-              'Methodology',
-              'Practical / analytical part',
-              'Discussion',
-              'Conclusion',
-              'References',
-              'Appendices',
-            ],
-      requiredSections:
-        lang === 'SK'
-          ? [
-              'Abstrakt',
-              'Úvod',
-              'Cieľ',
-              'Metodika',
-              'Praktická časť',
-              'Záver',
-              'Zdroje',
-            ]
-          : [
-              'Abstract',
-              'Introduction',
-              'Objective',
-              'Methodology',
-              'Practical part',
-              'Conclusion',
-              'References',
-            ],
+      structure: [
+        'Abstrakt',
+        'Úvod',
+        'Teoretické východiská',
+        'Cieľ práce',
+        'Metodika',
+        'Praktická / analytická časť',
+        'Diskusia',
+        'Záver',
+        'Zoznam literatúry',
+        'Prílohy',
+      ],
+      requiredSections: [
+        'Abstrakt',
+        'Úvod',
+        'Cieľ',
+        'Metodika',
+        'Praktická časť',
+        'Záver',
+        'Zdroje',
+      ],
       fields: [
         makeField('annotation', lang, true, 3),
         makeField('problem', lang, true, 4),
@@ -1129,7 +904,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('sourcesRequirement', lang, false, 3),
       ],
       aiInstruction:
-        'Generate a bachelor thesis. Include theoretical background, objective, methodology, practical or analytical part, discussion and conclusion.',
+        'Generate a bachelor thesis with theory, objective, methodology and practical part.',
     };
   }
 
@@ -1138,63 +913,33 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       typeKey: type,
       label,
       description:
-        lang === 'SK'
-          ? 'Diplomová alebo MSc. práca musí obsahovať hlbšiu analýzu, metodológiu, výskumné otázky alebo hypotézy, výsledky a diskusiu.'
-          : 'Master or MSc thesis requires deeper analysis, methodology, research questions or hypotheses, results and discussion.',
+        'Diplomová alebo MSc. práca musí obsahovať hlbšiu analýzu, metodológiu, výskumné otázky alebo hypotézy, výsledky a diskusiu.',
       recommendedLength: '50 – 80 strán',
       citationOptions: commonCitation,
-      structure:
-        lang === 'SK'
-          ? [
-              'Abstrakt',
-              'Úvod',
-              'Súčasný stav riešenej problematiky',
-              'Ciele práce',
-              'Výskumné otázky / hypotézy',
-              'Metodológia',
-              'Výsledky',
-              'Diskusia',
-              'Návrh riešenia',
-              'Záver',
-              'Zoznam literatúry',
-              'Prílohy',
-            ]
-          : [
-              'Abstract',
-              'Introduction',
-              'State of the art',
-              'Objectives',
-              'Research questions / hypotheses',
-              'Methodology',
-              'Results',
-              'Discussion',
-              'Solution proposal',
-              'Conclusion',
-              'References',
-              'Appendices',
-            ],
-      requiredSections:
-        lang === 'SK'
-          ? [
-              'Abstrakt',
-              'Úvod',
-              'Ciele',
-              'Výskumné otázky / hypotézy',
-              'Metodológia',
-              'Výsledky',
-              'Diskusia',
-              'Záver',
-            ]
-          : [
-              'Abstract',
-              'Introduction',
-              'Objectives',
-              'Research questions / hypotheses',
-              'Methodology',
-              'Results',
-              'Discussion',
-              'Conclusion',
-            ],
+      structure: [
+        'Abstrakt',
+        'Úvod',
+        'Súčasný stav riešenej problematiky',
+        'Ciele práce',
+        'Výskumné otázky / hypotézy',
+        'Metodológia',
+        'Výsledky',
+        'Diskusia',
+        'Návrh riešenia',
+        'Záver',
+        'Zoznam literatúry',
+        'Prílohy',
+      ],
+      requiredSections: [
+        'Abstrakt',
+        'Úvod',
+        'Ciele',
+        'Výskumné otázky / hypotézy',
+        'Metodológia',
+        'Výsledky',
+        'Diskusia',
+        'Záver',
+      ],
       fields: [
         makeField('annotation', lang, true, 3),
         makeField('problem', lang, true, 4),
@@ -1206,7 +951,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('sourcesRequirement', lang, false, 3),
       ],
       aiInstruction:
-        'Generate a master/MSc thesis. Include deeper academic analysis, methodology, research questions or hypotheses, results, discussion and solution proposal.',
+        'Generate a master thesis with deeper analysis, methodology, research questions, results and discussion.',
     };
   }
 
@@ -1215,63 +960,33 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       typeKey: type,
       label,
       description:
-        lang === 'SK'
-          ? 'Dizertačná práca vyžaduje originálny vedecký prínos, výskumný dizajn, hypotézy, metodológiu, výsledky a publikovateľné závery.'
-          : 'Dissertation requires original scientific contribution, research design, hypotheses, methodology, results and publishable conclusions.',
+        'Dizertačná práca vyžaduje originálny vedecký prínos, výskumný dizajn, hypotézy, metodológiu, výsledky a publikovateľné závery.',
       recommendedLength: '100 – 180 strán',
       citationOptions: ['APA7', 'ISO690', 'STN_ISO_690', 'Chicago'],
-      structure:
-        lang === 'SK'
-          ? [
-              'Abstrakt',
-              'Úvod',
-              'Teoretický rámec',
-              'Prehľad súčasného stavu poznania',
-              'Výskumný problém',
-              'Ciele, otázky a hypotézy',
-              'Metodológia výskumu',
-              'Výsledky výskumu',
-              'Diskusia',
-              'Originálny vedecký prínos',
-              'Limity výskumu',
-              'Záver',
-              'Publikácie autora',
-              'Zoznam literatúry',
-            ]
-          : [
-              'Abstract',
-              'Introduction',
-              'Theoretical framework',
-              'State of knowledge',
-              'Research problem',
-              'Objectives, questions and hypotheses',
-              'Research methodology',
-              'Research results',
-              'Discussion',
-              'Original scientific contribution',
-              'Research limitations',
-              'Conclusion',
-              'Author publications',
-              'References',
-            ],
-      requiredSections:
-        lang === 'SK'
-          ? [
-              'Výskumný problém',
-              'Hypotézy',
-              'Metodológia',
-              'Výsledky',
-              'Diskusia',
-              'Vedecký prínos',
-            ]
-          : [
-              'Research problem',
-              'Hypotheses',
-              'Methodology',
-              'Results',
-              'Discussion',
-              'Scientific contribution',
-            ],
+      structure: [
+        'Abstrakt',
+        'Úvod',
+        'Teoretický rámec',
+        'Prehľad súčasného stavu poznania',
+        'Výskumný problém',
+        'Ciele, otázky a hypotézy',
+        'Metodológia výskumu',
+        'Výsledky výskumu',
+        'Diskusia',
+        'Originálny vedecký prínos',
+        'Limity výskumu',
+        'Záver',
+        'Publikácie autora',
+        'Zoznam literatúry',
+      ],
+      requiredSections: [
+        'Výskumný problém',
+        'Hypotézy',
+        'Metodológia',
+        'Výsledky',
+        'Diskusia',
+        'Vedecký prínos',
+      ],
       fields: [
         makeField('annotation', lang, true, 3),
         makeField('problem', lang, true, 5),
@@ -1283,75 +998,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('sourcesRequirement', lang, true, 3),
       ],
       aiInstruction:
-        'Generate a doctoral dissertation. Require original scientific contribution, research design, hypotheses, methodology, results, discussion and limitations.',
-    };
-  }
-
-  if (type === 'habilitation' || type === 'rigorous') {
-    return {
-      typeKey: type,
-      label,
-      description:
-        lang === 'SK'
-          ? 'Rigorózna alebo habilitačná práca musí preukázať vysokú odbornú úroveň, samostatný vedecký prístup a jasný prínos.'
-          : 'Rigorous or habilitation thesis must demonstrate advanced expertise, independent scientific approach and clear contribution.',
-      recommendedLength:
-        type === 'habilitation' ? '120 – 250 strán' : '70 – 120 strán',
-      citationOptions: ['APA7', 'ISO690', 'STN_ISO_690', 'Chicago'],
-      structure:
-        lang === 'SK'
-          ? [
-              'Abstrakt',
-              'Úvod',
-              'Teoretický rámec',
-              'Analýza súčasného stavu',
-              'Výskumný problém',
-              'Metodológia',
-              'Výsledky',
-              'Diskusia',
-              'Odborný / vedecký prínos',
-              'Záver',
-              'Literatúra',
-            ]
-          : [
-              'Abstract',
-              'Introduction',
-              'Theoretical framework',
-              'State-of-the-art analysis',
-              'Research problem',
-              'Methodology',
-              'Results',
-              'Discussion',
-              'Professional / scientific contribution',
-              'Conclusion',
-              'References',
-            ],
-      requiredSections:
-        lang === 'SK'
-          ? [
-              'Teoretický rámec',
-              'Výskumný problém',
-              'Metodológia',
-              'Výsledky',
-              'Prínos',
-            ]
-          : [
-              'Theoretical framework',
-              'Research problem',
-              'Methodology',
-              'Results',
-              'Contribution',
-            ],
-      fields: [
-        makeField('annotation', lang, true, 3),
-        makeField('problem', lang, true, 5),
-        makeField('goal', lang, true, 4),
-        makeField('methodology', lang, true, 5),
-        makeField('scientificContribution', lang, true, 5),
-        makeField('sourcesRequirement', lang, false, 3),
-      ],
-      aiInstruction:
-        'Generate an advanced academic thesis. Emphasize theoretical framework, methodology, results, discussion and scientific/professional contribution.',
+        'Generate a doctoral dissertation with original scientific contribution.',
     };
   }
 
@@ -1360,51 +1007,27 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       typeKey: type,
       label,
       description:
-        lang === 'SK'
-          ? 'MBA práca má praktický manažérsky charakter. Rieši problém firmy, procesov, stratégie alebo riadenia.'
-          : 'MBA thesis is practical and managerial. It solves a business, process, strategy or management problem.',
+        'MBA práca má praktický manažérsky charakter. Rieši problém firmy, procesov, stratégie alebo riadenia.',
       recommendedLength: '35 – 60 strán',
       citationOptions: ['APA7', 'Harvard', 'Chicago'],
-      structure:
-        lang === 'SK'
-          ? [
-              'Manažérske zhrnutie',
-              'Opis organizácie',
-              'Definícia firemného problému',
-              'Analýza súčasného stavu',
-              'Strategické možnosti',
-              'Návrh riešenia',
-              'Implementačný plán',
-              'Finančné a rizikové vyhodnotenie',
-              'Záver',
-            ]
-          : [
-              'Executive summary',
-              'Organization description',
-              'Business problem definition',
-              'Current-state analysis',
-              'Strategic options',
-              'Solution proposal',
-              'Implementation plan',
-              'Financial and risk evaluation',
-              'Conclusion',
-            ],
-      requiredSections:
-        lang === 'SK'
-          ? [
-              'Manažérske zhrnutie',
-              'Firemný problém',
-              'Analýza',
-              'Návrh riešenia',
-              'Implementácia',
-            ]
-          : [
-              'Executive summary',
-              'Business problem',
-              'Analysis',
-              'Solution proposal',
-              'Implementation',
-            ],
+      structure: [
+        'Manažérske zhrnutie',
+        'Opis organizácie',
+        'Definícia firemného problému',
+        'Analýza súčasného stavu',
+        'Strategické možnosti',
+        'Návrh riešenia',
+        'Implementačný plán',
+        'Finančné a rizikové vyhodnotenie',
+        'Záver',
+      ],
+      requiredSections: [
+        'Manažérske zhrnutie',
+        'Firemný problém',
+        'Analýza',
+        'Návrh riešenia',
+        'Implementácia',
+      ],
       fields: [
         makeField('caseStudy', lang, true, 3),
         makeField('businessProblem', lang, true, 4),
@@ -1414,7 +1037,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('sourcesRequirement', lang, false, 3),
       ],
       aiInstruction:
-        'Generate an MBA thesis. Do not use classical dissertation structure. Focus on business problem, current-state analysis, strategy, solution proposal and implementation.',
+        'Generate an MBA thesis focused on business problem, strategy and implementation.',
     };
   }
 
@@ -1423,49 +1046,26 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       typeKey: type,
       label,
       description:
-        lang === 'SK'
-          ? 'DBA práca kombinuje aplikovaný výskum, strategický manažment a originálny prínos pre prax.'
-          : 'DBA thesis combines applied research, strategic management and original contribution to practice.',
+        'DBA práca kombinuje aplikovaný výskum, strategický manažment a originálny prínos pre prax.',
       recommendedLength: '80 – 150 strán',
       citationOptions: ['APA7', 'Harvard', 'Chicago'],
-      structure:
-        lang === 'SK'
-          ? [
-              'Executive summary',
-              'Výskumný a manažérsky problém',
-              'Teoretický rámec',
-              'Aplikovaná metodológia',
-              'Empirická časť',
-              'Strategické vyhodnotenie',
-              'Originálny prínos pre prax',
-              'Implementácia',
-              'Záver',
-            ]
-          : [
-              'Executive summary',
-              'Research and management problem',
-              'Theoretical framework',
-              'Applied methodology',
-              'Empirical part',
-              'Strategic evaluation',
-              'Original contribution to practice',
-              'Implementation',
-              'Conclusion',
-            ],
-      requiredSections:
-        lang === 'SK'
-          ? [
-              'Výskumný problém',
-              'Aplikovaná metodológia',
-              'Empirické výsledky',
-              'Prínos pre prax',
-            ]
-          : [
-              'Research problem',
-              'Applied methodology',
-              'Empirical results',
-              'Contribution to practice',
-            ],
+      structure: [
+        'Executive summary',
+        'Výskumný a manažérsky problém',
+        'Teoretický rámec',
+        'Aplikovaná metodológia',
+        'Empirická časť',
+        'Strategické vyhodnotenie',
+        'Originálny prínos pre prax',
+        'Implementácia',
+        'Záver',
+      ],
+      requiredSections: [
+        'Výskumný problém',
+        'Aplikovaná metodológia',
+        'Empirické výsledky',
+        'Prínos pre prax',
+      ],
       fields: [
         makeField('caseStudy', lang, true, 3),
         makeField('businessProblem', lang, true, 4),
@@ -1476,7 +1076,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('implementation', lang, true, 5),
       ],
       aiInstruction:
-        'Generate a DBA thesis. Combine applied research, business strategy, empirical analysis and original contribution to managerial practice.',
+        'Generate a DBA thesis combining applied research, business strategy and empirical analysis.',
     };
   }
 
@@ -1485,47 +1085,25 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       typeKey: type,
       label,
       description:
-        lang === 'SK'
-          ? 'Atestačná práca sa zameriava na odbornú prax, pedagogické alebo profesijné kompetencie, metodické riešenie a reflexiu.'
-          : 'Attestation thesis focuses on professional practice, competencies, methodology and reflection.',
+        'Atestačná práca sa zameriava na odbornú prax, profesijné kompetencie, metodické riešenie a reflexiu.',
       recommendedLength: '25 – 50 strán',
       citationOptions: commonCitation,
-      structure:
-        lang === 'SK'
-          ? [
-              'Úvod',
-              'Profesijný kontext',
-              'Teoretické východiská',
-              'Opis problému z praxe',
-              'Metodické riešenie',
-              'Realizácia',
-              'Reflexia a hodnotenie',
-              'Záver',
-            ]
-          : [
-              'Introduction',
-              'Professional context',
-              'Theoretical background',
-              'Practice-based problem',
-              'Methodological solution',
-              'Implementation',
-              'Reflection and evaluation',
-              'Conclusion',
-            ],
-      requiredSections:
-        lang === 'SK'
-          ? [
-              'Profesijný problém',
-              'Metodické riešenie',
-              'Realizácia',
-              'Reflexia',
-            ]
-          : [
-              'Professional problem',
-              'Methodological solution',
-              'Implementation',
-              'Reflection',
-            ],
+      structure: [
+        'Úvod',
+        'Profesijný kontext',
+        'Teoretické východiská',
+        'Opis problému z praxe',
+        'Metodické riešenie',
+        'Realizácia',
+        'Reflexia a hodnotenie',
+        'Záver',
+      ],
+      requiredSections: [
+        'Profesijný problém',
+        'Metodické riešenie',
+        'Realizácia',
+        'Reflexia',
+      ],
       fields: [
         makeField('annotation', lang, true, 3),
         makeField('problem', lang, true, 4),
@@ -1534,7 +1112,49 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('reflection', lang, true, 4),
       ],
       aiInstruction:
-        'Generate an attestation thesis. Focus on professional practice, methodology, implementation, reflection and evaluation.',
+        'Generate an attestation thesis focused on professional practice and reflection.',
+    };
+  }
+
+  if (type === 'rigorous' || type === 'habilitation') {
+    return {
+      typeKey: type,
+      label,
+      description:
+        'Rigorózna alebo habilitačná práca musí preukázať vysokú odbornú úroveň, samostatný vedecký prístup a jasný prínos.',
+      recommendedLength:
+        type === 'habilitation' ? '120 – 250 strán' : '70 – 120 strán',
+      citationOptions: ['APA7', 'ISO690', 'STN_ISO_690', 'Chicago'],
+      structure: [
+        'Abstrakt',
+        'Úvod',
+        'Teoretický rámec',
+        'Analýza súčasného stavu',
+        'Výskumný problém',
+        'Metodológia',
+        'Výsledky',
+        'Diskusia',
+        'Odborný / vedecký prínos',
+        'Záver',
+        'Literatúra',
+      ],
+      requiredSections: [
+        'Teoretický rámec',
+        'Výskumný problém',
+        'Metodológia',
+        'Výsledky',
+        'Prínos',
+      ],
+      fields: [
+        makeField('annotation', lang, true, 3),
+        makeField('problem', lang, true, 5),
+        makeField('goal', lang, true, 4),
+        makeField('methodology', lang, true, 5),
+        makeField('scientificContribution', lang, true, 5),
+        makeField('sourcesRequirement', lang, false, 3),
+      ],
+      aiInstruction:
+        'Generate an advanced academic thesis emphasizing theory, methodology, results and contribution.',
     };
   }
 
@@ -1542,33 +1162,18 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
     typeKey: type,
     label,
     description:
-      lang === 'SK'
-        ? 'Tento typ práce má stredne náročnú odbornú štruktúru s dôrazom na zrozumiteľnosť, tému, cieľ, praktickú časť a záver.'
-        : 'This type of work uses a medium-level professional structure focused on clarity, topic, objective, practical part and conclusion.',
+      'Tento typ práce má stredne náročnú odbornú štruktúru s dôrazom na tému, cieľ, praktickú časť a záver.',
     recommendedLength: '15 – 35 strán',
     citationOptions: commonCitation,
-    structure:
-      lang === 'SK'
-        ? [
-            'Úvod',
-            'Teoretická časť',
-            'Praktická časť',
-            'Vyhodnotenie',
-            'Záver',
-            'Zdroje',
-          ]
-        : [
-            'Introduction',
-            'Theoretical part',
-            'Practical part',
-            'Evaluation',
-            'Conclusion',
-            'References',
-          ],
-    requiredSections:
-      lang === 'SK'
-        ? ['Úvod', 'Teória', 'Praktická časť', 'Záver']
-        : ['Introduction', 'Theory', 'Practical part', 'Conclusion'],
+    structure: [
+      'Úvod',
+      'Teoretická časť',
+      'Praktická časť',
+      'Vyhodnotenie',
+      'Záver',
+      'Zdroje',
+    ],
+    requiredSections: ['Úvod', 'Teória', 'Praktická časť', 'Záver'],
     fields: [
       makeField('annotation', lang, false, 3),
       makeField('goal', lang, true, 3),
@@ -1577,63 +1182,71 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       makeField('sourcesRequirement', lang, false, 3),
     ],
     aiInstruction:
-      'Generate a medium-level academic/professional work. Use clear structure, theory, practical part, evaluation and conclusion.',
+      'Generate a medium-level academic or professional work.',
   };
 }
 
-// ================= INITIAL STATE =================
+function normalizeInitialProfile(
+  initialProfile?: Partial<SavedProfile> | null
+): Profile {
+  if (!initialProfile) return emptyProfile;
 
-const emptyProfile: Profile = {
-  type: 'bachelor',
-  level: 'expert',
-  title: '',
-  topic: '',
-  field: '',
-  supervisor: '',
-  citation: 'STN_ISO_690',
-  language: 'SK',
-  workLanguage: 'SK',
-  annotation: '',
-  goal: '',
-  problem: '',
-  methodology: '',
-  hypotheses: '',
-  researchQuestions: '',
-  practicalPart: '',
-  scientificContribution: '',
-  businessProblem: '',
-  businessGoal: '',
-  implementation: '',
-  caseStudy: '',
-  reflection: '',
-  sourcesRequirement: '',
-  keywordsList: [],
-};
+  const language = isLang(initialProfile.language)
+    ? initialProfile.language
+    : emptyProfile.language;
 
+  const workLanguage = isLang(initialProfile.workLanguage)
+    ? initialProfile.workLanguage
+    : language;
+
+  const type = normalizeWorkType(initialProfile.type);
+
+  const level = isLevel(initialProfile.level)
+    ? initialProfile.level
+    : emptyProfile.level;
+
+  return {
+    ...emptyProfile,
+    type,
+    level,
+    title: String(initialProfile.title || ''),
+    topic: String(initialProfile.topic || ''),
+    field: String(initialProfile.field || ''),
+    supervisor: String(initialProfile.supervisor || ''),
+    citation: normalizeCitation(initialProfile.citation),
+    language,
+    workLanguage,
+    annotation: String(initialProfile.annotation || ''),
+    goal: String(initialProfile.goal || ''),
+    problem: String(initialProfile.problem || ''),
+    methodology: String(initialProfile.methodology || ''),
+    hypotheses: String(initialProfile.hypotheses || ''),
+    researchQuestions: String(initialProfile.researchQuestions || ''),
+    practicalPart: String(initialProfile.practicalPart || ''),
+    scientificContribution: String(initialProfile.scientificContribution || ''),
+    businessProblem: String(initialProfile.businessProblem || ''),
+    businessGoal: String(initialProfile.businessGoal || ''),
+    implementation: String(initialProfile.implementation || ''),
+    caseStudy: String(initialProfile.caseStudy || ''),
+    reflection: String(initialProfile.reflection || ''),
+    sourcesRequirement: String(initialProfile.sourcesRequirement || ''),
+    keywordsList: normalizeKeywords(
+      initialProfile.keywordsList,
+      initialProfile.keywords
+    ),
+  };
+}
 
 // ================= COMPONENT =================
 
 export default function ProfileForm({
-  initialProfile = null,
-  onClose,
   onSave,
+  onClose,
+  initialProfile,
 }: ProfileFormProps) {
-  const router = useRouter();
-
-const [profile, setProfile] = useState<Profile>(() => {
-  if (!initialProfile) return emptyProfile;
-
-  return {
-    ...emptyProfile,
-    ...initialProfile,
-    keywordsList:
-      initialProfile.keywordsList && Array.isArray(initialProfile.keywordsList)
-        ? initialProfile.keywordsList
-        : [],
-  };
-});
-
- 
+  const [profile, setProfile] = useState<Profile>(() =>
+    normalizeInitialProfile(initialProfile)
+  );
 
   const [editingId, setEditingId] = useState<string | null>(
     initialProfile?.id || null
@@ -1642,22 +1255,8 @@ const [profile, setProfile] = useState<Profile>(() => {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    if (!initialProfile) {
-      setProfile(emptyProfile);
-      setEditingId(null);
-      return;
-    }
-
-    setProfile({
-      ...emptyProfile,
-      ...initialProfile,
-      keywordsList:
-        initialProfile.keywordsList && Array.isArray(initialProfile.keywordsList)
-          ? initialProfile.keywordsList
-          : [],
-    });
-
-    setEditingId(initialProfile.id || null);
+    setProfile(normalizeInitialProfile(initialProfile));
+    setEditingId(initialProfile?.id || null);
   }, [initialProfile]);
 
   const labels = UI[profile.language];
@@ -1705,133 +1304,144 @@ const [profile, setProfile] = useState<Profile>(() => {
     }));
   };
 
-const createPayload = (): SavedProfile => {
-  return {
-    ...profile,
-    id:
+  const createPayload = (): SavedProfile => {
+    const id =
       editingId ||
+      initialProfile?.id ||
       (typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
-        : Date.now().toString()),
-    schema,
-    interfaceLanguage: profile.language,
-    workLanguage: profile.workLanguage,
-    savedAt: new Date().toISOString(),
+        : Date.now().toString());
+
+    return {
+      ...profile,
+      id,
+      schema,
+      interfaceLanguage: profile.language,
+      workLanguage: profile.workLanguage,
+      keywords: profile.keywordsList,
+      keywordsList: profile.keywordsList,
+      savedAt: new Date().toISOString(),
+    };
   };
-};
 
-const savePayloadToStorage = (payload: SavedProfile) => {
-  localStorage.setItem('profile', JSON.stringify(payload));
-  localStorage.setItem('active_profile', JSON.stringify(payload));
+  const savePayloadToStorage = (payload: SavedProfile) => {
+    localStorage.setItem('profile', JSON.stringify(payload));
+    localStorage.setItem('active_profile', JSON.stringify(payload));
 
-  const oldProfilesRaw = localStorage.getItem('profiles_full');
-  const oldProfiles = oldProfilesRaw ? JSON.parse(oldProfilesRaw) : [];
-  const profiles: SavedProfile[] = Array.isArray(oldProfiles) ? oldProfiles : [];
-
-  const exists = profiles.some((item) => item.id === payload.id);
-
-  const newProfiles = exists
-    ? profiles.map((item) => (item.id === payload.id ? payload : item))
-    : [payload, ...profiles];
-
-  localStorage.setItem('profiles_full', JSON.stringify(newProfiles));
-};
-const saveProfile = async () => {
-  if (!profile.title.trim()) {
-    alert(
-      profile.language === 'SK'
-        ? 'Vyplň názov práce.'
-        : 'Please fill in the title of the work.'
+    const oldProfiles = safeJsonParse<SavedProfile[]>(
+      localStorage.getItem('profiles_full'),
+      []
     );
-    return;
-  }
 
-  setIsSaving(true);
+    const profiles = Array.isArray(oldProfiles) ? oldProfiles : [];
 
-  try {
-  const payload = createPayload();
+    const exists = profiles.some((item) => item.id === payload.id);
 
-    // 1. Uloženie lokálne do prehliadača
-    savePayloadToStorage(payload);
+    const newProfiles = exists
+      ? profiles.map((item) => (item.id === payload.id ? payload : item))
+      : [payload, ...profiles];
 
-const supabase = createClient();
+    localStorage.setItem('profiles_full', JSON.stringify(newProfiles));
+  };
 
-    // 2. Uloženie do Supabase
-    const { error } = await supabase
-  .from('zedpera_profiles')
-  .upsert(
-    {
-      id: payload.id,
-      title: payload.title,
-      type: payload.type,
-      level: payload.level,
-      topic: payload.topic,
-      field: payload.field,
-      supervisor: payload.supervisor,
-      citation: payload.citation,
-      language: payload.language,
-      work_language: payload.workLanguage,
-      annotation: payload.annotation,
-      goal: payload.goal,
-      problem: payload.problem,
-      methodology: payload.methodology,
-      hypotheses: payload.hypotheses,
-      research_questions: payload.researchQuestions,
-      practical_part: payload.practicalPart,
-      scientific_contribution: payload.scientificContribution,
-      business_problem: payload.businessProblem,
-      business_goal: payload.businessGoal,
-      implementation: payload.implementation,
-      case_study: payload.caseStudy,
-      reflection: payload.reflection,
-      sources_requirement: payload.sourcesRequirement,
-      keywords_list: payload.keywordsList,
-      schema: payload.schema,
-      full_profile: payload,
-            created_at: payload.savedAt,
-      updated_at: payload.savedAt,
-    },
-    {
-      onConflict: 'id',
-    }
-  );
-
-    if (error) {
-      console.error('SUPABASE PROFILE SAVE ERROR:', error);
-
+  const saveProfile = async () => {
+    if (!profile.title.trim()) {
       alert(
         profile.language === 'SK'
-          ? `Profil sa uložil lokálne, ale nie do Supabase: ${error.message}`
-          : `Profile was saved locally, but not to Supabase: ${error.message}`
+          ? 'Vyplň názov práce.'
+          : 'Please fill in the title of the work.'
       );
-
       return;
     }
 
-    onSave?.(payload);
-    onClose?.();
+    setIsSaving(true);
 
-    alert(profile.language === 'SK' ? 'Profil bol uložený.' : 'Profile saved.');
+    try {
+      const payload = createPayload();
 
-    router.push('/projects');
-  } catch (error) {
-    console.error('PROFILE SAVE ERROR:', error);
+      savePayloadToStorage(payload);
 
-    alert(
-      profile.language === 'SK'
-        ? 'Nastala chyba pri ukladaní profilu.'
-        : 'An error occurred while saving the profile.'
-    );
-  } finally {
-    setIsSaving(false);
-  }
-};
+      const supabase = createClient();
+
+      const { error } = await supabase.from('zedpera_profiles').upsert(
+        {
+          id: payload.id,
+          title: payload.title,
+          type: payload.type,
+          level: payload.level,
+          topic: payload.topic,
+          field: payload.field,
+          supervisor: payload.supervisor,
+          citation: payload.citation,
+          language: payload.language,
+          work_language: payload.workLanguage,
+          annotation: payload.annotation,
+          goal: payload.goal,
+          problem: payload.problem,
+          methodology: payload.methodology,
+          hypotheses: payload.hypotheses,
+          research_questions: payload.researchQuestions,
+          practical_part: payload.practicalPart,
+          scientific_contribution: payload.scientificContribution,
+          business_problem: payload.businessProblem,
+          business_goal: payload.businessGoal,
+          implementation: payload.implementation,
+          case_study: payload.caseStudy,
+          reflection: payload.reflection,
+          sources_requirement: payload.sourcesRequirement,
+          keywords_list: payload.keywordsList,
+          schema: payload.schema,
+          full_profile: payload,
+          updated_at: payload.savedAt,
+        },
+        {
+          onConflict: 'id',
+        }
+      );
+
+      if (error) {
+        console.error('SUPABASE PROFILE SAVE ERROR:', error);
+
+        alert(
+          profile.language === 'SK'
+            ? `Profil sa uložil lokálne, ale nie do Supabase: ${error.message}`
+            : `Profile was saved locally, but not to Supabase: ${error.message}`
+        );
+
+        onSave?.(payload);
+        onClose?.();
+        return;
+      }
+
+      onSave?.(payload);
+      onClose?.();
+
+      alert(
+        profile.language === 'SK'
+          ? editingId
+            ? 'Profil bol upravený.'
+            : 'Profil bol uložený.'
+          : editingId
+            ? 'Profile updated.'
+            : 'Profile saved.'
+      );
+    } catch (error) {
+      console.error('PROFILE SAVE ERROR:', error);
+
+      alert(
+        profile.language === 'SK'
+          ? 'Nastala chyba pri ukladaní profilu.'
+          : 'An error occurred while saving the profile.'
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <main className="min-h-screen bg-[#f4f6fb] text-white">
       <div className="mx-auto max-w-[1500px] px-4 py-8 md:px-8">
         <div className="overflow-hidden rounded-[32px] border border-slate-800 bg-[#050816] shadow-2xl shadow-slate-950/40">
-          {/* HEADER */}
           <header className="border-b border-white/10 bg-[#050816] px-6 py-7 md:px-10">
             <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
               <div>
@@ -1841,7 +1451,7 @@ const supabase = createClient();
                 </div>
 
                 <h1 className="text-4xl font-black tracking-tight md:text-5xl">
-               {editingId ? 'Upraviť profil práce' : labels.pageTitle}
+                  {editingId ? labels.editTitle : labels.pageTitle}
                 </h1>
 
                 <p className="mt-3 max-w-3xl text-base leading-7 text-slate-400 md:text-lg">
@@ -1866,9 +1476,7 @@ const supabase = createClient();
           </header>
 
           <div className="grid gap-8 p-6 md:p-10 xl:grid-cols-[1fr_420px]">
-            {/* LEFT */}
             <div className="space-y-9">
-              {/* TYPE */}
               <Section
                 title={labels.workType}
                 icon={<BookOpen className="h-5 w-5" />}
@@ -1886,7 +1494,6 @@ const supabase = createClient();
                 </div>
               </Section>
 
-              {/* LEVEL */}
               <Section
                 title={labels.level}
                 icon={<GraduationCap className="h-5 w-5" />}
@@ -1904,7 +1511,6 @@ const supabase = createClient();
                 </div>
               </Section>
 
-              {/* INTERFACE LANGUAGE */}
               <Section
                 title={labels.language}
                 icon={<Languages className="h-5 w-5" />}
@@ -1922,7 +1528,6 @@ const supabase = createClient();
                 </div>
               </Section>
 
-              {/* WORK LANGUAGE */}
               <Section
                 title={labels.workLanguage}
                 icon={<Languages className="h-5 w-5" />}
@@ -1944,39 +1549,37 @@ const supabase = createClient();
                 </div>
               </Section>
 
-              {/* BASIC */}
               <Section
                 title={labels.basic}
                 icon={<FileText className="h-5 w-5" />}
               >
-             <div className="grid gap-4 md:grid-cols-2">
-  <Input
-    value={profile.title}
-    placeholder={labels.titlePlaceholder}
-    onChange={(value) => update('title', value)}
-  />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Input
+                    value={profile.title}
+                    placeholder={labels.titlePlaceholder}
+                    onChange={(value) => update('title', value)}
+                  />
 
-  <Input
-    value={profile.topic}
-    placeholder={labels.topicPlaceholder}
-    onChange={(value) => update('topic', value)}
-  />
+                  <Input
+                    value={profile.topic}
+                    placeholder={labels.topicPlaceholder}
+                    onChange={(value) => update('topic', value)}
+                  />
 
-  <Input
-    value={profile.field}
-    placeholder={labels.fieldPlaceholder}
-    onChange={(value) => update('field', value)}
-  />
+                  <Input
+                    value={profile.field}
+                    placeholder={labels.fieldPlaceholder}
+                    onChange={(value) => update('field', value)}
+                  />
 
-  <Input
-    value={profile.supervisor}
-    placeholder={labels.supervisorPlaceholder}
-    onChange={(value) => update('supervisor', value)}
-  />
-</div>
+                  <Input
+                    value={profile.supervisor}
+                    placeholder={labels.supervisorPlaceholder}
+                    onChange={(value) => update('supervisor', value)}
+                  />
+                </div>
               </Section>
 
-              {/* ACADEMIC SETTINGS */}
               <Section
                 title={labels.academicProfile}
                 icon={<Target className="h-5 w-5" />}
@@ -2025,7 +1628,6 @@ const supabase = createClient();
                 </div>
               </Section>
 
-              {/* KEYWORDS */}
               <Section
                 title={labels.keywords}
                 icon={<Library className="h-5 w-5" />}
@@ -2038,25 +1640,33 @@ const supabase = createClient();
                 />
               </Section>
 
-              {/* CTA */}
               <div className="flex flex-col gap-3 sm:flex-row">
                 <button
-  onClick={saveProfile}
-  disabled={isSaving}
-  type="button"
-  className="inline-flex items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 text-base font-black text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
->
-  <Save className="h-5 w-5" />
-{isSaving
-  ? 'Ukladám...'
-  : editingId
-    ? 'Uložiť zmeny profilu'
-    : labels.save}
-</button>
+                  onClick={saveProfile}
+                  disabled={isSaving}
+                  type="button"
+                  className="inline-flex items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 text-base font-black text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Save className="h-5 w-5" />
+                  {isSaving
+                    ? labels.saving
+                    : editingId
+                      ? labels.saveChanges
+                      : labels.save}
+                </button>
+
+                {onClose && (
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-4 text-base font-black text-white transition hover:bg-white/10"
+                  >
+                    Zavrieť
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* RIGHT PREVIEW */}
             <aside className="space-y-5">
               <Panel
                 title={labels.preview}
@@ -2078,20 +1688,14 @@ const supabase = createClient();
                   </p>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <InfoBox
-                      label={labels.language}
-                      value={profile.language}
-                    />
+                    <InfoBox label={labels.language} value={profile.language} />
 
                     <InfoBox
                       label={labels.workLanguage}
                       value={profile.workLanguage}
                     />
 
-                    <InfoBox
-                      label={labels.citation}
-                      value={profile.citation}
-                    />
+                    <InfoBox label={labels.citation} value={profile.citation} />
 
                     <InfoBox
                       label={labels.level}
@@ -2289,9 +1893,7 @@ function InfoBox({
     <div className="rounded-2xl border border-white/10 bg-[#111525] p-4">
       <p className="text-xs text-slate-500">{label}</p>
 
-      <p className="mt-1 text-sm font-black text-white">
-        {value || '—'}
-      </p>
+      <p className="mt-1 text-sm font-black text-white">{value || '—'}</p>
     </div>
   );
 }

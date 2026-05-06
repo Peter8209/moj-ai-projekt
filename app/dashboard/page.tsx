@@ -145,6 +145,7 @@ type Mode = (typeof featureCards)[number]['mode'];
 
 type SavedProfile = {
   id: string;
+
   type?: string;
   level?: string;
   title?: string;
@@ -154,16 +155,64 @@ type SavedProfile = {
   citation?: string;
   language?: string;
   workLanguage?: string;
+
   annotation?: string;
   goal?: string;
+  problem?: string;
   methodology?: string;
+  hypotheses?: string;
+  researchQuestions?: string;
+  practicalPart?: string;
+  scientificContribution?: string;
+
+  businessProblem?: string;
+  businessGoal?: string;
+  implementation?: string;
+  caseStudy?: string;
+  reflection?: string;
+  sourcesRequirement?: string;
+
   keywords?: string[];
   keywordsList?: string[];
+
   savedAt?: string;
+  created_at?: string;
+  updated_at?: string;
+
+  schema?: {
+    typeKey?: string;
+    label?: string;
+    description?: string;
+    recommendedLength?: string;
+    citationOptions?: string[];
+    structure?: string[];
+    requiredSections?: string[];
+    fields?: {
+      key: string;
+      label: string;
+      placeholder?: string;
+      required?: boolean;
+      rows?: number;
+    }[];
+    aiInstruction?: string;
+  };
+
+  full_profile?: any;
+
+  work_language?: string;
+  research_questions?: string;
+  practical_part?: string;
+  scientific_contribution?: string;
+  business_problem?: string;
+  business_goal?: string;
+  case_study?: string;
+  sources_requirement?: string;
+  keywords_list?: string[];
 };
 
 const ProfileForm = ProfileFormOriginal as unknown as ComponentType<{
   onSave?: (data: SavedProfile) => void;
+  initialProfile?: SavedProfile | null;
 }>;
 
 // =====================================================
@@ -196,9 +245,10 @@ function DashboardPage() {
 
   const [subActive, setSubActive] = useState(false);
   const [showProfileForm, setShowProfileForm] = useState(false);
+const [editingProfile, setEditingProfile] = useState<SavedProfile | null>(null);
 
-  const [profiles, setProfiles] = useState<SavedProfile[]>([]);
-  const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
+const [profiles, setProfiles] = useState<SavedProfile[]>([]);
+const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   // =====================================================
   // LOAD SUBSCRIPTION STATUS
@@ -282,40 +332,61 @@ function DashboardPage() {
   // SAVE PROFILE FROM POPUP FORM
   // =====================================================
 
-  const handleProfileSave = (data: SavedProfile) => {
-    if (typeof window === 'undefined') return;
+const openNewProfileForm = () => {
+  setEditingProfile(null);
+  setShowProfileForm(true);
+};
 
-    const payload = normalizeProfile(data);
+const openEditProfileForm = (profile: SavedProfile) => {
+  setEditingProfile(profile);
+  setShowProfileForm(true);
+};
 
-    let oldList: SavedProfile[] = [];
 
-    try {
-      const raw = localStorage.getItem('profiles_full');
-      const parsed = raw ? JSON.parse(raw) : [];
-      oldList = Array.isArray(parsed) ? parsed : [];
-    } catch {
-      oldList = [];
-    }
+const handleProfileSave = (data: SavedProfile) => {
+  if (typeof window === 'undefined') return;
 
-    const newList = [
-      payload,
-      ...oldList.filter((item: SavedProfile) => item.id !== payload.id),
-    ];
+  const payload = normalizeProfile({
+    ...data,
+    id: data.id || editingProfile?.id || Date.now().toString(),
+    savedAt: new Date().toISOString(),
+  });
 
-    localStorage.setItem('profiles_full', JSON.stringify(newList));
-    localStorage.setItem('active_profile', JSON.stringify(payload));
+  let oldList: SavedProfile[] = [];
 
-    setProfiles(newList);
-    setActiveProfile(payload);
+  try {
+    const raw = localStorage.getItem('profiles_full');
+    const parsed = raw ? JSON.parse(raw) : [];
+    oldList = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    oldList = [];
+  }
 
-    setShowProfileForm(false);
-    setView('profile');
-  };
+  const exists = oldList.some((item: SavedProfile) => item.id === payload.id);
 
-  const closeProfileFormAndRefresh = () => {
-    setShowProfileForm(false);
-    loadProfiles();
-  };
+  const newList = exists
+    ? oldList.map((item: SavedProfile) =>
+        item.id === payload.id ? payload : item
+      )
+    : [payload, ...oldList];
+
+  localStorage.setItem('profiles_full', JSON.stringify(newList));
+  localStorage.setItem('active_profile', JSON.stringify(payload));
+  localStorage.setItem('profile', JSON.stringify(payload));
+
+  setProfiles(newList);
+  setActiveProfile(payload);
+
+  setEditingProfile(null);
+  setShowProfileForm(false);
+  setView('profile');
+};
+
+ const closeProfileFormAndRefresh = () => {
+  setShowProfileForm(false);
+  setEditingProfile(null);
+  loadProfiles();
+};
 
 const showSidebar = view !== 'dashboard';
 
@@ -331,11 +402,11 @@ return (
 
         <div className="flex-1 overflow-y-auto p-6 md:p-8">
           {view === 'dashboard' && (
-            <Dashboard
-              setView={setView}
-              setMode={setMode}
-              openForm={() => setShowProfileForm(true)}
-            />
+         <Dashboard
+  setView={setView}
+  setMode={setMode}
+  openForm={openNewProfileForm}
+/>
           )}
 
           {view === 'chat' && (
@@ -346,23 +417,25 @@ return (
             />
           )}
 
-          {view === 'profile' && (
-            <ProfileView
-              profile={activeProfile}
-              profiles={profiles}
-              setActiveProfile={(profile) => {
-                setActiveProfile(profile);
+   {view === 'profile' && (
+  <ProfileView
+    profile={activeProfile}
+    profiles={profiles}
+    setActiveProfile={(profile) => {
+      setActiveProfile(profile);
 
-                if (typeof window !== 'undefined') {
-                  localStorage.setItem(
-                    'active_profile',
-                    JSON.stringify(profile)
-                  );
-                }
-              }}
-              openForm={() => setShowProfileForm(true)}
-            />
-          )}
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(
+          'active_profile',
+          JSON.stringify(profile)
+        );
+      }
+    }}
+    openForm={openNewProfileForm}
+    openEditForm={openEditProfileForm}
+  />
+)}
+          
 
          {view === 'packages' && <PackagesPage subActive={subActive} />}
 
@@ -409,11 +482,14 @@ return (
             >
               <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/10 bg-[#020617]/95 px-6 py-5 backdrop-blur">
                 <div>
-                  <h2 className="text-2xl font-black">Nová práca</h2>
+                  <h2 className="text-2xl font-black">
+  {editingProfile ? 'Upraviť profil práce' : 'Nová práca'}
+</h2>
                   <p className="text-sm text-gray-400">
-                    Vyplň profil práce. Po uložení sa údaje automaticky vložia
-                    do sekcie Profil práce.
-                  </p>
+  {editingProfile
+    ? 'Uprav uložený profil práce. Po uložení sa zmeny prepíšu v aktívnom profile.'
+    : 'Vyplň profil práce. Po uložení sa údaje automaticky vložia do sekcie Profil práce.'}
+</p>
                 </div>
 
                 <button
@@ -426,7 +502,10 @@ return (
               </div>
 
               <div className="p-6">
-                <ProfileForm onSave={handleProfileSave} />
+                <ProfileForm
+  onSave={handleProfileSave}
+  initialProfile={editingProfile}
+/>
               </div>
             </div>
           </div>
@@ -577,17 +656,18 @@ function Dashboard({
 // =====================================================
 // PROFILE VIEW
 // =====================================================
-
 function ProfileView({
   profile,
   profiles,
   setActiveProfile,
   openForm,
+  openEditForm,
 }: {
   profile: SavedProfile | null;
   profiles: SavedProfile[];
   setActiveProfile: (p: SavedProfile) => void;
   openForm: () => void;
+  openEditForm: (p: SavedProfile) => void;
 }) {
   if (!profile) {
     return (
@@ -605,7 +685,7 @@ function ProfileView({
         <button
           type="button"
           onClick={openForm}
-          className="rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-3 font-bold"
+          className="rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-3 font-bold text-white"
         >
           + Vytvoriť profil práce
         </button>
@@ -624,17 +704,27 @@ function ProfileView({
         <div>
           <h2 className="text-3xl font-black">Profil práce</h2>
           <p className="text-gray-400">
-            Tu sú údaje z uloženého popup formulára.
+            Tu sú údaje z uloženého profilu práce.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={openForm}
-          className="rounded-2xl bg-purple-600 px-5 py-3 font-bold"
-        >
-          + Nová práca
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => openEditForm(profile)}
+            className="rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-5 py-3 font-bold text-white"
+          >
+            Upraviť profil
+          </button>
+
+          <button
+            type="button"
+            onClick={openForm}
+            className="rounded-2xl border border-white/10 bg-white/10 px-5 py-3 font-bold text-white transition hover:bg-white/20"
+          >
+            + Nová práca
+          </button>
+        </div>
       </div>
 
       {profiles.length > 1 && (
@@ -658,19 +748,57 @@ function ProfileView({
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <ProfileCard label="Názov práce" value={profile.title} />
+
         <ProfileCard label="Typ práce" value={profile.type} />
+
         <ProfileCard label="Úroveň práce" value={profile.level} />
+
         <ProfileCard
           label="Jazyk práce"
           value={profile.workLanguage || profile.language}
         />
+
         <ProfileCard label="Citovanie" value={profile.citation} />
+
         <ProfileCard label="Vedúci práce" value={profile.supervisor} />
+
         <ProfileCard label="Téma" value={profile.topic} large />
+
         <ProfileCard label="Odbor" value={profile.field} />
+
         <ProfileCard label="Anotácia" value={profile.annotation} large />
+
         <ProfileCard label="Cieľ práce" value={profile.goal} large />
+
+        <ProfileCard label="Výskumný problém" value={profile.problem} large />
+
         <ProfileCard label="Metodológia" value={profile.methodology} large />
+
+        <ProfileCard label="Hypotézy" value={profile.hypotheses} large />
+
+        <ProfileCard
+          label="Výskumné otázky"
+          value={profile.researchQuestions}
+          large
+        />
+
+        <ProfileCard
+          label="Praktická časť"
+          value={profile.practicalPart}
+          large
+        />
+
+        <ProfileCard
+          label="Vedecký / odborný prínos"
+          value={profile.scientificContribution}
+          large
+        />
+
+        <ProfileCard
+          label="Požiadavky na zdroje"
+          value={profile.sourcesRequirement}
+          large
+        />
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
@@ -694,7 +822,6 @@ function ProfileView({
     </div>
   );
 }
-
 function ProfileCard({
   label,
   value,
@@ -766,7 +893,7 @@ function Chat({
       {mode === 'audit' && <AuditModule activeProfile={activeProfile} />}
        {mode === 'defense' && <DefenseModule activeProfile={activeProfile} />}
         {mode === 'translate' && <TranslateModule />}
-        {mode === 'analysis' && <AnalysisModule />}
+      {mode === 'analysis' && <AnalysisModule activeProfile={activeProfile} />}
         {mode === 'planning' && <PlanningModule />}
         {mode === 'email' && <EmailModule />}
         {mode === 'plagiarism' && <PlagiarismModule />}
@@ -2570,25 +2697,525 @@ function TranslateModule() {
   );
 }
 
-function AnalysisModule() {
+function AnalysisModule({
+  activeProfile,
+}: {
+  activeProfile: SavedProfile | null;
+}) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [analysisGoal, setAnalysisGoal] = useState('');
+  const [hypotheses, setHypotheses] = useState('');
+  const [methodology, setMethodology] = useState(
+    activeProfile?.methodology || ''
+  );
+  const [dataDescription, setDataDescription] = useState('');
+  const [analysisType, setAnalysisType] = useState(
+    'Výber výpočtov pre analytickú časť'
+  );
+  const [software, setSoftware] = useState('JASP');
+  const [outputStyle, setOutputStyle] = useState('Text do záverečnej práce');
+
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [fileError, setFileError] = useState('');
+
+  const [result, setResult] = useState('');
+  const [selectedCalculations, setSelectedCalculations] = useState('');
+  const [interpretation, setInterpretation] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!activeProfile) return;
+
+    if (activeProfile.goal && !analysisGoal) {
+      setAnalysisGoal(activeProfile.goal);
+    }
+
+    if (activeProfile.hypotheses && !hypotheses) {
+      setHypotheses(activeProfile.hypotheses);
+    }
+
+    if (activeProfile.methodology && !methodology) {
+      setMethodology(activeProfile.methodology);
+    }
+  }, [activeProfile]);
+
+  const addAttachedFiles = (files: FileList | File[]) => {
+    setFileError('');
+
+    const incomingFiles = Array.from(files);
+
+    if (!incomingFiles.length) return;
+
+    setAttachedFiles((currentFiles) => {
+      const nextFiles = [...currentFiles];
+
+      for (const file of incomingFiles) {
+        const extension = getFileExtension(file.name);
+
+        if (!isSupportedFile(file)) {
+          setFileError(
+            `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, RTF, ODT, MD, obrázky, Excel, CSV a PowerPoint.`,
+          );
+          continue;
+        }
+
+        if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
+          setFileError(
+            `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť je ${MAX_UPLOAD_FILE_SIZE_MB} MB.`,
+          );
+          continue;
+        }
+
+        if (nextFiles.length >= MAX_UPLOAD_FILES) {
+          setFileError(`Môžete priložiť maximálne ${MAX_UPLOAD_FILES} súborov.`);
+          break;
+        }
+
+        const duplicate = nextFiles.some(
+          (item) => item.name === file.name && item.size === file.size,
+        );
+
+        if (duplicate) {
+          continue;
+        }
+
+        nextFiles.push({
+          id:
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random()}`,
+          file,
+          name: file.name,
+          size: file.size,
+          type: file.type || 'application/octet-stream',
+          extension,
+        });
+      }
+
+      return nextFiles;
+    });
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const removeAttachedFile = (id: string) => {
+    setAttachedFiles((currentFiles) =>
+      currentFiles.filter((file) => file.id !== id),
+    );
+  };
+
+  const uploadAttachedFiles = async () => {
+    if (!attachedFiles.length) {
+      return [];
+    }
+
+    const formData = new FormData();
+
+    for (const item of attachedFiles) {
+      formData.append('files', item.file, item.name);
+    }
+
+    const response = await fetch('/api/uploads', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        data?.message ||
+          data?.error ||
+          'Nepodarilo sa nahrať priložené súbory.',
+      );
+    }
+
+    return data.files || [];
+  };
+
+  const runAnalysis = async () => {
+    setError('');
+    setFileError('');
+    setResult('');
+    setSelectedCalculations('');
+    setInterpretation('');
+
+    const hasFiles = attachedFiles.length > 0;
+    const hasDataDescription = dataDescription.trim().length >= 30;
+    const hasGoal = analysisGoal.trim().length >= 10;
+
+    if (!hasFiles && !hasDataDescription) {
+      setError(
+        'Nahraj súbor s výsledkami z JASP/SPSS/Excelu alebo vlož opis dát aspoň v rozsahu 30 znakov.',
+      );
+      return;
+    }
+
+    if (!hasGoal && !activeProfile?.goal) {
+      setError(
+        'Doplň cieľ práce. Bez cieľa práce nie je možné správne vybrať výpočty do analytickej časti.',
+      );
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const uploadedFiles = await uploadAttachedFiles();
+
+      const response = await fetch('/api/analysis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          analysisGoal,
+          hypotheses,
+          methodology,
+          dataDescription,
+          analysisType,
+          software,
+          outputStyle,
+          activeProfile,
+          attachments: uploadedFiles,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error || 'Analýza dát zlyhala.');
+      }
+
+      setResult(data.result || '');
+      setSelectedCalculations(data.selectedCalculations || '');
+      setInterpretation(data.interpretation || '');
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Neznáma chyba pri analýze dát.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <ModuleLayout>
-      <Textarea
-        label="Dáta alebo tabuľka"
-        placeholder="Vlož údaje, výsledky výskumu alebo popis dát..."
-      />
+      <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-6">
+        <div className="flex items-start gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-300">
+            <BarChart3 size={26} />
+          </div>
 
-      <Select
-        label="Typ analýzy"
-        options={[
-          'Opisná štatistika',
-          'Korelácia',
-          'Interpretácia výsledkov',
-          'Grafické odporúčania',
-        ]}
-      />
+          <div>
+            <h3 className="text-2xl font-black text-white">
+              Analýza dát z JASP / SPSS / Excelu
+            </h3>
 
-      <ActionButton icon={BarChart3} label="Analyzovať dáta" />
+            <p className="mt-2 text-sm leading-6 text-gray-300">
+              Nahraj výstupy z JASP, SPSS, Excelu alebo CSV. Zedpera pomôže
+              vybrať vhodné výpočty podľa cieľa práce, hypotéz a metodiky a
+              pripraví text do analytickej časti práce.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {activeProfile && (
+        <div className="rounded-2xl border border-purple-500/20 bg-purple-500/10 p-4 text-sm text-purple-100">
+          Analýza sa pripraví podľa aktívneho profilu práce:{' '}
+          <strong>{activeProfile.title || 'Bez názvu'}</strong>
+          {activeProfile.topic ? ` — ${activeProfile.topic}` : ''}
+        </div>
+      )}
+
+      {!activeProfile && (
+        <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
+          Profil práce nie je vytvorený. Analýza bude fungovať, ale odporúčam
+          doplniť cieľ práce, hypotézy a metodiku manuálne.
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <label className="block">
+          <div className="mb-2 text-sm font-semibold text-gray-300">
+            Softvér / zdroj výsledkov
+          </div>
+
+          <select
+            value={software}
+            onChange={(event) => setSoftware(event.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+          >
+            <option>JASP</option>
+            <option>SPSS</option>
+            <option>Excel</option>
+            <option>Jamovi</option>
+            <option>R</option>
+            <option>Python</option>
+            <option>Iné</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="mb-2 text-sm font-semibold text-gray-300">
+            Typ analýzy
+          </div>
+
+          <select
+            value={analysisType}
+            onChange={(event) => setAnalysisType(event.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+          >
+            <option>Výber výpočtov pre analytickú časť</option>
+            <option>Opis výskumného súboru</option>
+            <option>Frekvenčná analýza</option>
+            <option>Deskriptívna štatistika dotazníkov</option>
+            <option>Interpretácia JASP výstupov</option>
+            <option>Normalita a výber testov</option>
+            <option>Hypotézy a odporúčané testy</option>
+            <option>Text výsledkov do práce</option>
+            <option>Tabuľky do práce</option>
+            <option>Kompletná analytická časť</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="mb-2 text-sm font-semibold text-gray-300">
+            Typ výstupu
+          </div>
+
+          <select
+            value={outputStyle}
+            onChange={(event) => setOutputStyle(event.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+          >
+            <option>Text do záverečnej práce</option>
+            <option>Odborná interpretácia</option>
+            <option>Prehľad vhodných výpočtov</option>
+            <option>Tabuľka výsledkov</option>
+            <option>Odporúčania pre metodiku</option>
+            <option>Kontrola správnosti výberu testov</option>
+          </select>
+        </label>
+      </div>
+
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Cieľ práce / cieľ analytickej časti
+        </div>
+
+        <textarea
+          value={analysisGoal}
+          onChange={(event) => setAnalysisGoal(event.target.value)}
+          rows={4}
+          placeholder="Napr. Cieľom práce je zistiť vzťah medzi pracovnou spokojnosťou a psychickou pohodou zamestnancov..."
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
+
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Hypotézy / výskumné otázky
+        </div>
+
+        <textarea
+          value={hypotheses}
+          onChange={(event) => setHypotheses(event.target.value)}
+          rows={5}
+          placeholder="Napr. H1: Existuje štatisticky významný vzťah medzi pracovnou spokojnosťou a psychickou pohodou. H2: Existujú rozdiely podľa typu podniku..."
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
+
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Metodika práce / opis premenných
+        </div>
+
+        <textarea
+          value={methodology}
+          onChange={(event) => setMethodology(event.target.value)}
+          rows={5}
+          placeholder="Popíš výskumný súbor, použité dotazníky, premenné, škály, spôsob zberu dát a plánované štatistické testy..."
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
+
+      <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-lg font-bold text-white">
+              <Paperclip size={20} className="text-purple-400" />
+              Prílohy s výsledkami
+            </div>
+
+            <p className="mt-1 text-sm text-gray-400">
+              Nahraj výstup z JASP/SPSS/Excelu. Podporované sú napríklad DOCX,
+              XLSX, CSV, PDF, TXT alebo obrázky s tabuľkami.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-purple-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-purple-500"
+          >
+            <UploadCloud size={18} />
+            Nahrať výsledky
+          </button>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={FILE_INPUT_ACCEPT}
+          className="hidden"
+          onChange={(event) => {
+            if (event.target.files) {
+              addAttachedFiles(event.target.files);
+            }
+          }}
+        />
+
+        <div
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+
+            if (event.dataTransfer.files) {
+              addAttachedFiles(event.dataTransfer.files);
+            }
+          }}
+          className="rounded-2xl border border-dashed border-white/15 bg-black/20 p-5 text-center text-sm text-gray-400"
+        >
+          Pretiahnite sem výstupy z JASP/SPSS/Excelu alebo kliknite na tlačidlo
+          „Nahrať výsledky“.
+          <div className="mt-2 text-xs text-gray-500">
+            Maximálne {MAX_UPLOAD_FILES} súborov, každý do{' '}
+            {MAX_UPLOAD_FILE_SIZE_MB} MB.
+          </div>
+        </div>
+
+        {fileError && (
+          <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
+            {fileError}
+          </div>
+        )}
+
+        {attachedFiles.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <div className="text-xs font-black uppercase tracking-[0.15em] text-gray-500">
+              Priložené výsledky ({attachedFiles.length})
+            </div>
+
+            {attachedFiles.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0f1324] p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="rounded-xl bg-purple-600/20 px-3 py-2 text-xs font-bold text-purple-200">
+                    {getFileTypeLabel(item.extension)}
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-white">
+                      {item.name}
+                    </div>
+
+                    <div className="text-xs text-gray-500">
+                      {item.extension.toUpperCase()} · {formatFileSize(item.size)}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => removeAttachedFile(item.id)}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/20"
+                >
+                  <Trash2 size={14} />
+                  Odstrániť
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Doplnkový opis dát alebo poznámka
+        </div>
+
+        <textarea
+          value={dataDescription}
+          onChange={(event) => setDataDescription(event.target.value)}
+          rows={7}
+          placeholder="Sem môžeš doplniť, čo sa nachádza v súbore, čo chceš porovnať, ktoré premenné sú demografické, ktoré sú dotazníkové skóre a ktoré výpočty chceš použiť..."
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
+
+      <button
+        type="button"
+        onClick={runAnalysis}
+        disabled={loading}
+        className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <BarChart3 size={20} />
+        {loading ? 'Analyzujem výsledky...' : 'Analyzovať dáta'}
+      </button>
+
+      {error && (
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+          {error}
+        </div>
+      )}
+
+      {selectedCalculations && (
+        <div className="rounded-3xl border border-purple-500/30 bg-purple-500/10 p-6">
+          <div className="mb-3 text-lg font-black text-white">
+            Odporúčaný výber výpočtov do práce
+          </div>
+
+          <div className="whitespace-pre-wrap text-sm leading-7 text-purple-100">
+            {selectedCalculations}
+          </div>
+        </div>
+      )}
+
+      {interpretation && (
+        <div className="rounded-3xl border border-blue-500/30 bg-blue-500/10 p-6">
+          <div className="mb-3 text-lg font-black text-white">
+            Interpretácia výsledkov
+          </div>
+
+          <div className="whitespace-pre-wrap text-sm leading-7 text-blue-100">
+            {interpretation}
+          </div>
+        </div>
+      )}
+
+      {result && (
+        <div className="rounded-3xl border border-white/10 bg-[#0f1324] p-6">
+          <div className="mb-3 text-lg font-black text-white">
+            Text do analytickej časti práce
+          </div>
+
+          <div className="whitespace-pre-wrap text-sm leading-7 text-gray-200">
+            {result}
+          </div>
+        </div>
+      )}
     </ModuleLayout>
   );
 }

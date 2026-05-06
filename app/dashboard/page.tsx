@@ -2533,26 +2533,215 @@ function AnalysisModule() {
 }
 
 function PlanningModule() {
+  const [deadline, setDeadline] = useState('');
+  const [planType, setPlanType] = useState('Týždenný plán');
+  const [currentState, setCurrentState] = useState('');
+  const [availableTime, setAvailableTime] = useState('');
+  const [priority, setPriority] = useState('Dokončenie práce');
+  const [result, setResult] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const createPlan = async () => {
+    setError('');
+    setResult('');
+
+    if (!deadline.trim()) {
+      setError('Zadaj termín odovzdania práce.');
+      return;
+    }
+
+    if (!currentState.trim() || currentState.trim().length < 20) {
+      setError('Napíš aktuálny stav práce aspoň v rozsahu 20 znakov.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      let activeProfile = null;
+
+      if (typeof window !== 'undefined') {
+        const activeRaw = localStorage.getItem('active_profile');
+
+        try {
+          activeProfile = activeRaw ? JSON.parse(activeRaw) : null;
+        } catch {
+          activeProfile = null;
+        }
+      }
+
+      const response = await fetch('/api/planning', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          deadline,
+          planType,
+          currentState,
+          availableTime,
+          priority,
+          activeProfile,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error || 'Nepodarilo sa vytvoriť plán práce.');
+      }
+
+      setResult(data.plan || '');
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Neznáma chyba pri vytváraní plánu práce.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <ModuleLayout>
-      <Input label="Termín odovzdania" placeholder="Napr. 30. 6. 2026" />
+      <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-6">
+        <div className="flex items-start gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-300">
+            <CalendarDays size={26} />
+          </div>
 
-      <Select
-        label="Typ plánu"
-        options={[
-          'Denný plán',
-          'Týždenný plán',
-          'Plán kapitol',
-          'Plán výskumu',
-        ]}
-      />
+          <div>
+            <h3 className="text-2xl font-black text-white">
+              Plánovanie práce
+            </h3>
 
-      <Textarea
-        label="Aktuálny stav práce"
-        placeholder="Napíš, čo už máš hotové a čo ešte chýba..."
-      />
+            <p className="mt-2 text-sm leading-6 text-gray-300">
+              Zedpera vytvorí konkrétny plán postupu podľa termínu odovzdania,
+              aktuálneho stavu práce a typu plánu. Výstup môžeš použiť ako
+              denný, týždenný alebo kapitolový harmonogram.
+            </p>
+          </div>
+        </div>
+      </div>
 
-      <ActionButton icon={CalendarDays} label="Vytvoriť plán práce" />
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Termín odovzdania
+        </div>
+
+        <input
+          value={deadline}
+          onChange={(event) => setDeadline(event.target.value)}
+          placeholder="Napr. 30. 6. 2026 alebo 12.5.2027"
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <label className="block">
+          <div className="mb-2 text-sm font-semibold text-gray-300">
+            Typ plánu
+          </div>
+
+          <select
+            value={planType}
+            onChange={(event) => setPlanType(event.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+          >
+            <option>Denný plán</option>
+            <option>Týždenný plán</option>
+            <option>Mesačný plán</option>
+            <option>Plán kapitol</option>
+            <option>Plán výskumu</option>
+            <option>Plán pred odovzdaním</option>
+            <option>Plán pred obhajobou</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="mb-2 text-sm font-semibold text-gray-300">
+            Čas, ktorý máš k dispozícii
+          </div>
+
+          <select
+            value={availableTime}
+            onChange={(event) => setAvailableTime(event.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+          >
+            <option value="">Nešpecifikované</option>
+            <option>30 min denne</option>
+            <option>1 hodina denne</option>
+            <option>2 hodiny denne</option>
+            <option>3 až 4 hodiny denne</option>
+            <option>Iba víkendy</option>
+            <option>Intenzívne každý deň</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="mb-2 text-sm font-semibold text-gray-300">
+            Priorita
+          </div>
+
+          <select
+            value={priority}
+            onChange={(event) => setPriority(event.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+          >
+            <option>Dokončenie práce</option>
+            <option>Doplnenie teórie</option>
+            <option>Výskumná časť</option>
+            <option>Metodológia</option>
+            <option>Citácie a zdroje</option>
+            <option>Formálna úprava</option>
+            <option>Príprava na obhajobu</option>
+          </select>
+        </label>
+      </div>
+
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Aktuálny stav práce
+        </div>
+
+        <textarea
+          value={currentState}
+          onChange={(event) => setCurrentState(event.target.value)}
+          rows={8}
+          placeholder="Napíš, čo už máš hotové a čo ešte chýba. Napr. Začínam, mám tému a cieľ, chýba mi teória, metodológia, výskum, záver..."
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
+
+      <button
+        type="button"
+        onClick={createPlan}
+        disabled={loading}
+        className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <CalendarDays size={20} />
+        {loading ? 'Vytváram plán...' : 'Vytvoriť plán práce'}
+      </button>
+
+      {error && (
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div className="rounded-3xl border border-white/10 bg-[#0f1324] p-6">
+          <div className="mb-3 text-lg font-black text-white">
+            Výsledný plán práce
+          </div>
+
+          <div className="whitespace-pre-wrap text-sm leading-7 text-gray-200">
+            {result}
+          </div>
+        </div>
+      )}
     </ModuleLayout>
   );
 }

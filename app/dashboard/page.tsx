@@ -67,7 +67,7 @@ const featureCards = [
   { mode: 'analysis', title: 'Analýza dát', icon: BarChart3 },
   { mode: 'planning', title: 'Plánovanie', icon: CalendarDays },
   { mode: 'email', title: 'Emaily', icon: Mail },
-  { mode: 'plagiarism', title: 'Plagiátorstvo', icon: ShieldCheck },
+{ mode: 'plagiarism', title: 'Originalita práce', icon: ShieldCheck },
 ] as const;
 
 const SUPPORTED_FILE_EXTENSIONS = [
@@ -2375,24 +2375,285 @@ function EmailModule() {
 }
 
 function PlagiarismModule() {
+  const [step, setStep] = useState(1);
+
+  const [title, setTitle] = useState('');
+  const [authorName, setAuthorName] = useState('');
+  const [school, setSchool] = useState('');
+  const [faculty, setFaculty] = useState('');
+  const [studyProgram, setStudyProgram] = useState('');
+  const [supervisor, setSupervisor] = useState('');
+
+  const [workType, setWorkType] = useState('Bakalárska práca');
+  const [citationStyle, setCitationStyle] = useState('ISO 690');
+  const [language, setLanguage] = useState('SK');
+
+  const [text, setText] = useState('');
+  const [agent, setAgent] = useState('gemini');
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<any | null>(null);
+
+  const runOriginalityCheck = async () => {
+    setError('');
+    setResult(null);
+
+    if (text.trim().length < 300) {
+      setError('Vlož aspoň 300 znakov textu práce.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const activeRaw =
+        typeof window !== 'undefined'
+          ? localStorage.getItem('active_profile')
+          : null;
+
+      let activeProfile = null;
+
+      try {
+        activeProfile = activeRaw ? JSON.parse(activeRaw) : null;
+      } catch {
+        activeProfile = null;
+      }
+
+      const response = await fetch('/api/originality', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          authorName,
+          school,
+          faculty,
+          studyProgram,
+          supervisor,
+          workType,
+          citationStyle,
+          language,
+          text,
+          agent,
+          activeProfile,
+          profileId: activeProfile?.id || null,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.message || data?.error || 'Kontrola originality zlyhala.');
+      }
+
+      setResult(data);
+      setStep(5);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Neznáma chyba pri kontrole.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <ModuleLayout>
-      <Textarea
-        label="Text na kontrolu originality"
-        placeholder="Vlož text, ktorý chceš preveriť..."
-      />
+      <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-6">
+        <h3 className="text-2xl font-black text-white">
+          Originalita práce
+        </h3>
 
-      <Select
-        label="Typ kontroly"
-        options={[
-          'Orientačná kontrola',
-          'Parafrázovanie',
-          'Rizikové pasáže',
-          'Odporúčania na úpravu',
-        ]}
-      />
+        <p className="mt-2 text-sm leading-6 text-gray-300">
+          Predbežná kontrola originality v štýle univerzitného krokového postupu.
+          Výsledok je orientačný a nenahrádza oficiálnu školskú kontrolu originality.
+        </p>
+      </div>
 
-      <ActionButton icon={ShieldCheck} label="Skontrolovať originalitu" />
+      <div className="grid grid-cols-5 gap-3">
+        {[
+          'Nahratie práce',
+          'Údaje o práci',
+          'Nastavenie kontroly',
+          'Spracovanie',
+          'Výsledok',
+        ].map((label, index) => {
+          const currentStep = index + 1;
+
+          return (
+            <button
+              key={label}
+              type="button"
+              onClick={() => setStep(currentStep)}
+              className={`rounded-2xl px-3 py-3 text-sm font-bold ${
+                step === currentStep
+                  ? 'bg-purple-600 text-white'
+                  : 'bg-white/10 text-gray-300'
+              }`}
+            >
+              {currentStep}. {label}
+            </button>
+          );
+        })}
+      </div>
+
+      {step === 1 && (
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <h4 className="mb-4 text-xl font-black">1. Nahratie / vloženie práce</h4>
+
+          <textarea
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            rows={16}
+            placeholder="Vlož sem text práce, kapitolu alebo časť záverečnej práce..."
+            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+          />
+
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setStep(2)}
+              className="rounded-2xl bg-purple-600 px-6 py-3 font-bold text-white"
+            >
+              Pokračovať
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <h4 className="mb-4 text-xl font-black">2. Údaje o práci</h4>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Názov práce" className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white" />
+            <input value={authorName} onChange={(e) => setAuthorName(e.target.value)} placeholder="Autor" className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white" />
+            <input value={school} onChange={(e) => setSchool(e.target.value)} placeholder="Škola / univerzita" className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white" />
+            <input value={faculty} onChange={(e) => setFaculty(e.target.value)} placeholder="Fakulta" className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white" />
+            <input value={studyProgram} onChange={(e) => setStudyProgram(e.target.value)} placeholder="Študijný program" className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white" />
+            <input value={supervisor} onChange={(e) => setSupervisor(e.target.value)} placeholder="Vedúci práce" className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white" />
+          </div>
+
+          <div className="mt-4 flex justify-between">
+            <button type="button" onClick={() => setStep(1)} className="rounded-2xl bg-white/10 px-6 py-3 font-bold text-white">
+              Späť
+            </button>
+            <button type="button" onClick={() => setStep(3)} className="rounded-2xl bg-purple-600 px-6 py-3 font-bold text-white">
+              Pokračovať
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <h4 className="mb-4 text-xl font-black">3. Nastavenie kontroly</h4>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <select value={workType} onChange={(e) => setWorkType(e.target.value)} className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white">
+              <option>Bakalárska práca</option>
+              <option>Diplomová práca</option>
+              <option>Seminárna práca</option>
+              <option>Dizertačná práca</option>
+              <option>Rigorózna práca</option>
+            </select>
+
+            <select value={citationStyle} onChange={(e) => setCitationStyle(e.target.value)} className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white">
+              <option>ISO 690</option>
+              <option>APA 7</option>
+              <option>Harvard</option>
+              <option>MLA</option>
+              <option>Chicago</option>
+            </select>
+
+            <select value={language} onChange={(e) => setLanguage(e.target.value)} className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white">
+              <option>SK</option>
+              <option>CZ</option>
+              <option>EN</option>
+              <option>DE</option>
+            </select>
+
+            <select value={agent} onChange={(e) => setAgent(e.target.value)} className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white">
+              <option value="gemini">Gemini</option>
+              <option value="openai">GPT</option>
+              <option value="claude">Claude</option>
+              <option value="mistral">Mistral</option>
+            </select>
+          </div>
+
+          <div className="mt-4 flex justify-between">
+            <button type="button" onClick={() => setStep(2)} className="rounded-2xl bg-white/10 px-6 py-3 font-bold text-white">
+              Späť
+            </button>
+            <button type="button" onClick={() => setStep(4)} className="rounded-2xl bg-purple-600 px-6 py-3 font-bold text-white">
+              Pokračovať
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 4 && (
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <h4 className="mb-4 text-xl font-black">4. Spracovanie originality</h4>
+
+          <p className="mb-4 text-sm text-gray-300">
+            Systém vykoná predbežnú kontrolu originality, rizikových pasáží,
+            chýbajúcich citácií a generického štýlu textu.
+          </p>
+
+          <button
+            type="button"
+            onClick={runOriginalityCheck}
+            disabled={loading}
+            className="rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold text-white disabled:opacity-50"
+          >
+            {loading ? 'Kontrolujem originalitu...' : 'Spustiť kontrolu originality'}
+          </button>
+
+          {error && (
+            <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+              {error}
+            </div>
+          )}
+        </div>
+      )}
+
+      {step === 5 && result && (
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="rounded-3xl border border-green-500/30 bg-green-500/10 p-6">
+              <div className="text-sm text-green-200">Skóre originality</div>
+              <div className="mt-2 text-4xl font-black text-green-300">
+                {result.originalityScore ?? '—'} %
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-yellow-500/30 bg-yellow-500/10 p-6">
+              <div className="text-sm text-yellow-200">Riziko podobnosti</div>
+              <div className="mt-2 text-4xl font-black text-yellow-300">
+                {result.similarityRiskScore ?? '—'} %
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-purple-500/30 bg-purple-500/10 p-6">
+              <div className="text-sm text-purple-200">AI / generický štýl</div>
+              <div className="mt-2 text-4xl font-black text-purple-300">
+                {result.aiStyleScore ?? '—'} %
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-[#0f1324] p-6">
+            <h4 className="mb-3 text-xl font-black">
+              Protokol predbežnej kontroly originality
+            </h4>
+
+            <div className="whitespace-pre-wrap text-sm leading-7 text-gray-200">
+              {result.report}
+            </div>
+          </div>
+        </div>
+      )}
     </ModuleLayout>
   );
 }
@@ -2528,7 +2789,7 @@ function getModeDescription(mode: Mode) {
     analysis: 'Analýza dát, výsledkov výskumu a interpretácia.',
     planning: 'Plánovanie kapitol, termínov a postupu práce.',
     email: 'Formálne emaily pre vedúceho, školu alebo konzultanta.',
-    plagiarism: 'Orientačná kontrola originality a rizikových pasáží.',
+    plagiarism: 'Predbežná kontrola originality, citácií a rizikových pasáží.',
   };
 
   return descriptions[mode];

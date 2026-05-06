@@ -843,6 +843,13 @@ function WriteModule({
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [fileError, setFileError] = useState('');
 
+const minAssignmentLength = 100;
+const assignmentLength = assignment.trim().length;
+const assignmentTooShort =
+  assignmentLength > 0 && assignmentLength < minAssignmentLength;
+const assignmentIsEmpty = assignment.trim().length === 0;
+
+
   const addAttachedFiles = (files: FileList | File[]) => {
     setFileError('');
 
@@ -955,13 +962,22 @@ function WriteModule({
     }, 2500);
   };
 
-  const generateText = async () => {
-    setIsGenerating(true);
-    setError('');
-    setFileError('');
-    setSavedForSupervisor(false);
+const generateText = async () => {
+  setError('');
+  setFileError('');
+  setSavedForSupervisor(false);
 
-    try {
+  if (assignment.trim().length < minAssignmentLength) {
+    setError(
+      `Zadanie pre AI je príliš krátke. Doplň aspoň ${minAssignmentLength} znakov. Aktuálne máš ${assignment.trim().length} znakov.`
+    );
+    return;
+  }
+
+  setIsGenerating(true);
+
+  try {
+
       const uploadedFiles = await uploadAttachedFiles();
 
       const response = await fetch('/api/generate', {
@@ -1162,30 +1178,75 @@ function WriteModule({
         )}
       </div>
 
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Zadanie pre AI
-        </div>
+<label className="block">
+  <div className="mb-2 flex items-center justify-between gap-3">
+    <div className="text-sm font-semibold text-gray-300">
+      Zadanie pre AI
+    </div>
 
-        <textarea
-          value={assignment}
-          onChange={(event) => setAssignment(event.target.value)}
-          rows={7}
-          placeholder="Popíš, čo má AI napísať. Napr. Napíš teoretickú kapitolu o inkluzívnom vzdelávaní v rozsahu cca 2 strany..."
-          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-        />
-      </label>
+    <div
+      className={`rounded-full px-3 py-1 text-xs font-black ${
+        assignmentLength >= minAssignmentLength
+          ? 'bg-green-500/10 text-green-300'
+          : 'bg-yellow-500/10 text-yellow-300'
+      }`}
+    >
+      {assignmentLength}/{minAssignmentLength} znakov
+    </div>
+  </div>
+
+  <textarea
+    value={assignment}
+    onChange={(event) => {
+      setAssignment(event.target.value);
+
+      if (
+        error &&
+        event.target.value.trim().length >= minAssignmentLength
+      ) {
+        setError('');
+      }
+    }}
+    rows={7}
+    placeholder="Popíš, čo má AI napísať. Napr. Napíš teoretickú kapitolu o inkluzívnom vzdelávaní v rozsahu cca 2 strany..."
+    className={`w-full rounded-2xl border px-4 py-4 outline-none placeholder:text-gray-600 ${
+      assignmentTooShort
+        ? 'border-yellow-400/60 bg-yellow-500/5 focus:border-yellow-400'
+        : 'border-white/10 bg-white/5 focus:border-purple-500'
+    }`}
+  />
+
+  {assignmentIsEmpty && (
+    <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-sm leading-6 text-gray-400">
+      Pre kvalitný výstup napíš zadanie aspoň v rozsahu{' '}
+      <strong className="text-white">{minAssignmentLength} znakov</strong>.
+      Uveď, čo má AI vytvoriť, aký má byť rozsah, štýl a čo má zohľadniť
+      z priložených podkladov.
+    </div>
+  )}
+
+  {assignmentTooShort && (
+    <div className="mt-3 rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-sm leading-6 text-yellow-100">
+      Zadanie je príliš krátke. Doplň ešte aspoň{' '}
+      <strong>{minAssignmentLength - assignmentLength}</strong> znakov.
+    </div>
+  )}
+</label>
 
       <div className="flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={generateText}
-          disabled={isGenerating}
-          className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <FileText size={20} />
-          {isGenerating ? 'Generujem text...' : 'Generovať text'}
-        </button>
+ <button
+  type="button"
+  onClick={generateText}
+  disabled={isGenerating || assignmentLength < minAssignmentLength}
+  className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+>
+  <FileText size={20} />
+  {isGenerating
+    ? 'Generujem text...'
+    : assignmentLength < minAssignmentLength
+      ? `Doplň zadanie (${assignmentLength}/${minAssignmentLength})`
+      : 'Generovať text'}
+</button>
 
         <button
           type="button"

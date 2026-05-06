@@ -4,6 +4,7 @@ import {
   Suspense,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentType,
   type ReactNode,
@@ -27,12 +28,15 @@ import {
   Mail,
   Menu,
   MessageSquare,
+  Paperclip,
   Plus,
   Presentation,
   Search,
   Settings,
   ShieldCheck,
   Sparkles,
+  Trash2,
+  UploadCloud,
   User,
   Video,
   X,
@@ -65,6 +69,77 @@ const featureCards = [
   { mode: 'email', title: 'Emaily', icon: Mail },
   { mode: 'plagiarism', title: 'Plagiátorstvo', icon: ShieldCheck },
 ] as const;
+
+const SUPPORTED_FILE_EXTENSIONS = [
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.txt',
+  '.rtf',
+  '.odt',
+  '.md',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.xls',
+  '.xlsx',
+  '.csv',
+  '.ppt',
+  '.pptx',
+];
+
+const FILE_INPUT_ACCEPT = SUPPORTED_FILE_EXTENSIONS.join(',');
+
+const MAX_UPLOAD_FILES = 10;
+const MAX_UPLOAD_FILE_SIZE_MB = 25;
+const MAX_UPLOAD_FILE_SIZE_BYTES = MAX_UPLOAD_FILE_SIZE_MB * 1024 * 1024;
+
+type AttachedFile = {
+  id: string;
+  file: File;
+  name: string;
+  size: number;
+  type: string;
+  extension: string;
+};
+
+function getFileExtension(fileName: string) {
+  const index = fileName.lastIndexOf('.');
+  if (index === -1) return '';
+  return fileName.slice(index).toLowerCase();
+}
+
+function isSupportedFile(file: File) {
+  const extension = getFileExtension(file.name);
+  return SUPPORTED_FILE_EXTENSIONS.includes(extension);
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function getFileTypeLabel(extension: string) {
+  if (extension === '.pdf') return 'PDF';
+  if (['.doc', '.docx', '.odt', '.rtf', '.txt', '.md'].includes(extension)) {
+    return 'Dokument';
+  }
+  if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
+    return 'Obrázok';
+  }
+  if (['.xls', '.xlsx', '.csv'].includes(extension)) {
+    return 'Tabuľka';
+  }
+  if (['.ppt', '.pptx'].includes(extension)) {
+    return 'Prezentácia';
+  }
+
+  return 'Súbor';
+}
+
 
 type Mode = (typeof featureCards)[number]['mode'];
 
@@ -755,12 +830,13 @@ function ModuleTabs({
 // =====================================================
 // MODULE CONTENTS
 // =====================================================
-
 function WriteModule({
   activeProfile,
 }: {
   activeProfile: SavedProfile | null;
 }) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [chapterTitle, setChapterTitle] = useState('');
   const [outputType, setOutputType] = useState('Kapitola');
   const [assignment, setAssignment] = useState('');
@@ -768,6 +844,103 @@ function WriteModule({
   const [isGenerating, setIsGenerating] = useState(false);
   const [savedForSupervisor, setSavedForSupervisor] = useState(false);
   const [error, setError] = useState('');
+
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [fileError, setFileError] = useState('');
+
+  const addAttachedFiles = (files: FileList | File[]) => {
+    setFileError('');
+
+    const incomingFiles = Array.from(files);
+
+    if (!incomingFiles.length) return;
+
+    setAttachedFiles((currentFiles) => {
+      const nextFiles = [...currentFiles];
+
+      for (const file of incomingFiles) {
+        const extension = getFileExtension(file.name);
+
+        if (!isSupportedFile(file)) {
+          setFileError(
+            `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, obrázky, Excel, CSV a PowerPoint.`,
+          );
+          continue;
+        }
+
+        if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
+          setFileError(
+            `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť je ${MAX_UPLOAD_FILE_SIZE_MB} MB.`,
+          );
+          continue;
+        }
+
+        if (nextFiles.length >= MAX_UPLOAD_FILES) {
+          setFileError(`Môžete priložiť maximálne ${MAX_UPLOAD_FILES} súborov.`);
+          break;
+        }
+
+        const duplicate = nextFiles.some(
+          (item) => item.name === file.name && item.size === file.size,
+        );
+
+        if (duplicate) {
+          continue;
+        }
+
+        nextFiles.push({
+          id:
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random()}`,
+          file,
+          name: file.name,
+          size: file.size,
+          type: file.type || 'application/octet-stream',
+          extension,
+        });
+      }
+
+      return nextFiles;
+    });
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const removeAttachedFile = (id: string) => {
+    setAttachedFiles((currentFiles) =>
+      currentFiles.filter((file) => file.id !== id),
+    );
+  };
+
+  const uploadAttachedFiles = async () => {
+    if (!attachedFiles.length) {
+      return [];
+    }
+
+    const formData = new FormData();
+
+    for (const item of attachedFiles) {
+      formData.append('files', item.file);
+    }
+
+    const response = await fetch('/api/uploads', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        data?.message || data?.error || 'Nepodarilo sa nahrať priložené súbory.',
+      );
+    }
+
+    return data.files || [];
+  };
 
   const saveForSupervisor = (text: string) => {
     const cleanText = text.trim();
@@ -790,9 +963,12 @@ function WriteModule({
   const generateText = async () => {
     setIsGenerating(true);
     setError('');
+    setFileError('');
     setSavedForSupervisor(false);
 
     try {
+      const uploadedFiles = await uploadAttachedFiles();
+
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: {
@@ -803,6 +979,7 @@ function WriteModule({
           outputType,
           assignment,
           activeProfile,
+          attachments: uploadedFiles,
         }),
       });
 
@@ -820,7 +997,6 @@ function WriteModule({
 
       setGeneratedText(text);
 
-      // Toto je hlavné prepojenie na AI vedúceho práce:
       localStorage.setItem('latest_generated_work_text', text);
 
       setSavedForSupervisor(true);
@@ -889,6 +1065,108 @@ function WriteModule({
         </select>
       </label>
 
+      {/* =====================================================
+          PRÍLOHY / PODKLADY
+      ===================================================== */}
+
+      <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-lg font-bold text-white">
+              <Paperclip size={20} className="text-purple-400" />
+              Priložené podklady
+            </div>
+
+            <p className="mt-1 text-sm text-gray-400">
+              Klient môže nahrať viacero formátov, nielen PDF. Podporované sú
+              PDF, Word, TXT, obrázky, Excel, CSV a PowerPoint.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-purple-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-purple-500"
+          >
+            <UploadCloud size={18} />
+            Nahrať súbory
+          </button>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={FILE_INPUT_ACCEPT}
+          className="hidden"
+          onChange={(event) => {
+            if (event.target.files) {
+              addAttachedFiles(event.target.files);
+            }
+          }}
+        />
+
+        <div
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+
+            if (event.dataTransfer.files) {
+              addAttachedFiles(event.dataTransfer.files);
+            }
+          }}
+          className="rounded-2xl border border-dashed border-white/15 bg-black/20 p-5 text-center text-sm text-gray-400"
+        >
+          Pretiahnite sem súbory alebo kliknite na tlačidlo „Nahrať súbory“.
+          <div className="mt-2 text-xs text-gray-500">
+            Maximálne {MAX_UPLOAD_FILES} súborov, každý do{' '}
+            {MAX_UPLOAD_FILE_SIZE_MB} MB.
+          </div>
+        </div>
+
+        {fileError && (
+          <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
+            {fileError}
+          </div>
+        )}
+
+        {attachedFiles.length > 0 && (
+          <div className="mt-4 space-y-2">
+            {attachedFiles.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0f1324] p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="rounded-xl bg-purple-600/20 px-3 py-2 text-xs font-bold text-purple-200">
+                    {getFileTypeLabel(item.extension)}
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-white">
+                      {item.name}
+                    </div>
+
+                    <div className="text-xs text-gray-500">
+                      {item.extension.toUpperCase()} · {formatFileSize(item.size)}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => removeAttachedFile(item.id)}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/20"
+                >
+                  <Trash2 size={14} />
+                  Odstrániť
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <label className="block">
         <div className="mb-2 text-sm font-semibold text-gray-300">
           Zadanie pre AI
@@ -946,7 +1224,7 @@ function WriteModule({
             setGeneratedText(event.target.value);
             localStorage.setItem(
               'latest_generated_work_text',
-              event.target.value
+              event.target.value,
             );
           }}
           rows={16}

@@ -6,26 +6,19 @@ import {
   BookOpen,
   CalendarDays,
   FileText,
-  GraduationCap,
-  Languages,
   Library,
   Search,
   Trash2,
   User,
+  X,
 } from 'lucide-react';
 
 import ProfileForm from '@/components/ProfileForm';
 import { createClient } from '@/lib/supabase/client';
 
 type SavedProfile = {
-  // =========================
-  // ZÁKLADNÉ ID
-  // =========================
   id: string;
 
-  // =========================
-  // ZÁKLADNÉ ÚDAJE PROFILU
-  // =========================
   type?: string;
   level?: string;
   title?: string;
@@ -36,9 +29,6 @@ type SavedProfile = {
   language?: string;
   workLanguage?: string;
 
-  // =========================
-  // AKADEMICKÝ OBSAH
-  // =========================
   annotation?: string;
   goal?: string;
   problem?: string;
@@ -48,9 +38,6 @@ type SavedProfile = {
   practicalPart?: string;
   scientificContribution?: string;
 
-  // =========================
-  // MANAŽÉRSKE / PRAKTICKÉ POLIA
-  // =========================
   businessProblem?: string;
   businessGoal?: string;
   implementation?: string;
@@ -58,24 +45,13 @@ type SavedProfile = {
   reflection?: string;
   sourcesRequirement?: string;
 
-  // =========================
-  // KĽÚČOVÉ SLOVÁ
-  // =========================
   keywordsList?: string[];
   keywords?: string[];
 
-  // =========================
-  // DÁTUMY
-  // savedAt používa frontend
-  // created_at / updated_at prichádzajú zo Supabase
-  // =========================
   savedAt?: string;
   created_at?: string;
   updated_at?: string;
 
-  // =========================
-  // SCHÉMA PROFILU
-  // =========================
   schema?: {
     typeKey?: string;
     label?: string;
@@ -94,9 +70,6 @@ type SavedProfile = {
     aiInstruction?: string;
   };
 
-  // =========================
-  // SUPABASE RAW FIELDS / FALLBACK
-  // =========================
   full_profile?: any;
 
   work_language?: string;
@@ -113,11 +86,11 @@ type SavedProfile = {
 export default function ProjectsPage() {
   const [profiles, setProfiles] = useState<SavedProfile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<SavedProfile | null>(
-    null
+    null,
   );
 
   const [editingProfile, setEditingProfile] = useState<SavedProfile | null>(
-    null
+    null,
   );
   const [profileFormOpen, setProfileFormOpen] = useState(false);
 
@@ -127,153 +100,153 @@ export default function ProjectsPage() {
     loadProfiles();
   }, []);
 
-const loadProfiles = async () => {
-  try {
-    const supabase = createClient();
+  const loadProfiles = async () => {
+    try {
+      const supabase = createClient();
 
-    const { data, error } = await supabase
-      .from('zedpera_profiles')
-      .select('*')
-      .order('updated_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('zedpera_profiles')
+        .select('*')
+        .order('updated_at', { ascending: false });
 
-    if (error) {
-      console.error('SUPABASE LOAD PROFILES ERROR:', error);
-      loadProfilesFromLocalStorage();
-      return;
-    }
-
-    const supabaseProfiles: SavedProfile[] = (data || []).map((row: any) => {
-      const full = row.full_profile || {};
-
-      return {
-        ...full,
-
-        id: row.id || full.id || crypto.randomUUID(),
-
-        title: row.title || full.title || 'Bez názvu',
-        type: row.type || full.type,
-        level: row.level || full.level,
-        topic: row.topic || full.topic,
-        field: row.field || full.field,
-        supervisor: row.supervisor || full.supervisor,
-        citation: row.citation || full.citation,
-        language: row.language || full.language,
-
-        workLanguage:
-          row.work_language || full.workLanguage || full.work_language,
-
-        annotation: row.annotation || full.annotation,
-        goal: row.goal || full.goal,
-        problem: row.problem || full.problem,
-        methodology: row.methodology || full.methodology,
-        hypotheses: row.hypotheses || full.hypotheses,
-
-        researchQuestions:
-          row.research_questions ||
-          full.researchQuestions ||
-          full.research_questions,
-
-        practicalPart:
-          row.practical_part || full.practicalPart || full.practical_part,
-
-        scientificContribution:
-          row.scientific_contribution ||
-          full.scientificContribution ||
-          full.scientific_contribution,
-
-        businessProblem:
-          row.business_problem || full.businessProblem || full.business_problem,
-
-        businessGoal:
-          row.business_goal || full.businessGoal || full.business_goal,
-
-        implementation: row.implementation || full.implementation,
-
-        caseStudy:
-          row.case_study || full.caseStudy || full.case_study,
-
-        reflection: row.reflection || full.reflection,
-
-        sourcesRequirement:
-          row.sources_requirement ||
-          full.sourcesRequirement ||
-          full.sources_requirement,
-
-        keywordsList:
-          row.keywords_list ||
-          full.keywordsList ||
-          full.keywords ||
-          [],
-
-        keywords:
-          row.keywords_list ||
-          full.keywords ||
-          full.keywordsList ||
-          [],
-
-        schema: row.schema || full.schema,
-
-        savedAt:
-          row.updated_at ||
-          row.created_at ||
-          full.savedAt ||
-          new Date().toISOString(),
-
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        full_profile: row.full_profile,
-      };
-    });
-
-    setProfiles(supabaseProfiles);
-
-    localStorage.setItem('profiles_full', JSON.stringify(supabaseProfiles));
-
-    const activeRaw = localStorage.getItem('active_profile');
-    const active = activeRaw ? JSON.parse(activeRaw) : null;
-
-    if (active?.id) {
-      const found = supabaseProfiles.find(
-        (profile) => profile.id === active.id
-      );
-
-      if (found) {
-        localStorage.setItem('active_profile', JSON.stringify(found));
+      if (error) {
+        console.error('SUPABASE LOAD PROFILES ERROR:', error);
+        loadProfilesFromLocalStorage();
+        return;
       }
-    }
-  } catch (error) {
-    console.error('LOAD PROFILES ERROR:', error);
-    loadProfilesFromLocalStorage();
-  }
-};
 
-const loadProfilesFromLocalStorage = () => {
-  try {
-    const raw = localStorage.getItem('profiles_full');
-    const parsed = raw ? JSON.parse(raw) : [];
+      const supabaseProfiles: SavedProfile[] = (data || []).map((row: any) => {
+        const full = row.full_profile || {};
 
-    if (Array.isArray(parsed)) {
-      const normalized: SavedProfile[] = parsed
-        .filter((item) => item && typeof item === 'object')
-        .map((item) => ({
-          ...item,
+        return {
+          ...full,
+
           id:
-            item.id ||
+            row.id ||
+            full.id ||
             (typeof crypto !== 'undefined' && crypto.randomUUID
               ? crypto.randomUUID()
               : Date.now().toString()),
-          title: item.title || 'Bez názvu',
-          savedAt: item.savedAt || new Date().toISOString(),
-        }));
 
-      setProfiles(normalized);
-    } else {
+          title: row.title || full.title || 'Bez názvu',
+          type: row.type || full.type,
+          level: row.level || full.level,
+          topic: row.topic || full.topic,
+          field: row.field || full.field,
+          supervisor: row.supervisor || full.supervisor,
+          citation: row.citation || full.citation,
+          language: row.language || full.language,
+
+          workLanguage:
+            row.work_language || full.workLanguage || full.work_language,
+
+          annotation: row.annotation || full.annotation,
+          goal: row.goal || full.goal,
+          problem: row.problem || full.problem,
+          methodology: row.methodology || full.methodology,
+          hypotheses: row.hypotheses || full.hypotheses,
+
+          researchQuestions:
+            row.research_questions ||
+            full.researchQuestions ||
+            full.research_questions,
+
+          practicalPart:
+            row.practical_part || full.practicalPart || full.practical_part,
+
+          scientificContribution:
+            row.scientific_contribution ||
+            full.scientificContribution ||
+            full.scientific_contribution,
+
+          businessProblem:
+            row.business_problem ||
+            full.businessProblem ||
+            full.business_problem,
+
+          businessGoal:
+            row.business_goal || full.businessGoal || full.business_goal,
+
+          implementation: row.implementation || full.implementation,
+
+          caseStudy: row.case_study || full.caseStudy || full.case_study,
+
+          reflection: row.reflection || full.reflection,
+
+          sourcesRequirement:
+            row.sources_requirement ||
+            full.sourcesRequirement ||
+            full.sources_requirement,
+
+          keywordsList:
+            row.keywords_list || full.keywordsList || full.keywords || [],
+
+          keywords:
+            row.keywords_list || full.keywords || full.keywordsList || [],
+
+          schema: row.schema || full.schema,
+
+          savedAt:
+            row.updated_at ||
+            row.created_at ||
+            full.savedAt ||
+            new Date().toISOString(),
+
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          full_profile: row.full_profile,
+        };
+      });
+
+      setProfiles(supabaseProfiles);
+      localStorage.setItem('profiles_full', JSON.stringify(supabaseProfiles));
+
+      const activeRaw = localStorage.getItem('active_profile');
+      const active = activeRaw ? JSON.parse(activeRaw) : null;
+
+      if (active?.id) {
+        const found = supabaseProfiles.find(
+          (profile) => profile.id === active.id,
+        );
+
+        if (found) {
+          localStorage.setItem('active_profile', JSON.stringify(found));
+          localStorage.setItem('profile', JSON.stringify(found));
+        }
+      }
+    } catch (error) {
+      console.error('LOAD PROFILES ERROR:', error);
+      loadProfilesFromLocalStorage();
+    }
+  };
+
+  const loadProfilesFromLocalStorage = () => {
+    try {
+      const raw = localStorage.getItem('profiles_full');
+      const parsed = raw ? JSON.parse(raw) : [];
+
+      if (Array.isArray(parsed)) {
+        const normalized: SavedProfile[] = parsed
+          .filter((item) => item && typeof item === 'object')
+          .map((item) => ({
+            ...item,
+            id:
+              item.id ||
+              (typeof crypto !== 'undefined' && crypto.randomUUID
+                ? crypto.randomUUID()
+                : Date.now().toString()),
+            title: item.title || 'Bez názvu',
+            savedAt: item.savedAt || new Date().toISOString(),
+          }));
+
+        setProfiles(normalized);
+      } else {
+        setProfiles([]);
+      }
+    } catch {
       setProfiles([]);
     }
-  } catch {
-    setProfiles([]);
-  }
-};
+  };
 
   const filteredProfiles = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -303,60 +276,78 @@ const loadProfilesFromLocalStorage = () => {
 
   const openProfile = (profile: SavedProfile) => {
     setSelectedProfile(profile);
+
     localStorage.setItem('active_profile', JSON.stringify(profile));
+    localStorage.setItem('profile', JSON.stringify(profile));
   };
 
-const openEditProfile = (profile: SavedProfile) => {
-  setEditingProfile(profile);
-  setProfileFormOpen(true);
-};
+  const closeProfile = () => {
+    setSelectedProfile(null);
+  };
 
-const deleteProfile = async (id: string) => {
+  const openEditProfile = (profile: SavedProfile) => {
+    setEditingProfile(profile);
+    setProfileFormOpen(true);
+
+    localStorage.setItem('active_profile', JSON.stringify(profile));
+    localStorage.setItem('profile', JSON.stringify(profile));
+  };
+
+  const closeEditProfile = () => {
+    setProfileFormOpen(false);
+    setEditingProfile(null);
+  };
+
+  const handleProfileSaved = (updatedProfile: SavedProfile) => {
+    const nextProfiles = profiles.some(
+      (profile) => profile.id === updatedProfile.id,
+    )
+      ? profiles.map((profile) =>
+          profile.id === updatedProfile.id ? updatedProfile : profile,
+        )
+      : [updatedProfile, ...profiles];
+
+    setProfiles(nextProfiles);
+    setSelectedProfile(updatedProfile);
+    setEditingProfile(null);
+    setProfileFormOpen(false);
+
+    localStorage.setItem('profiles_full', JSON.stringify(nextProfiles));
+    localStorage.setItem('profile', JSON.stringify(updatedProfile));
+    localStorage.setItem('active_profile', JSON.stringify(updatedProfile));
+
+    void loadProfiles();
+  };
+
+  const deleteProfile = async (id: string) => {
     const confirmDelete = window.confirm(
-      'Naozaj chceš odstrániť túto prácu zo zoznamu?'
+      'Naozaj chceš odstrániť túto prácu zo zoznamu?',
     );
 
     if (!confirmDelete) return;
-
-const handleProfileSaved = (updatedProfile: SavedProfile) => {
-  const nextProfiles = profiles.some((profile) => profile.id === updatedProfile.id)
-    ? profiles.map((profile) =>
-        profile.id === updatedProfile.id ? updatedProfile : profile
-      )
-    : [updatedProfile, ...profiles];
-
-  setProfiles(nextProfiles);
-  setSelectedProfile(updatedProfile);
-  setEditingProfile(null);
-  setProfileFormOpen(false);
-
-  localStorage.setItem('profiles_full', JSON.stringify(nextProfiles));
-  localStorage.setItem('profile', JSON.stringify(updatedProfile));
-  localStorage.setItem('active_profile', JSON.stringify(updatedProfile));
-
-  void loadProfiles();
-};
 
     const next = profiles.filter((profile) => profile.id !== id);
 
     setProfiles(next);
     localStorage.setItem('profiles_full', JSON.stringify(next));
 
-try {
-  const supabase = createClient();
+    try {
+      const supabase = createClient();
 
-  const { error } = await supabase
-    .from('zedpera_profiles')
-    .delete()
-    .eq('id', id);
+      const { error } = await supabase
+        .from('zedpera_profiles')
+        .delete()
+        .eq('id', id);
 
-  if (error) {
-    console.error('SUPABASE DELETE PROFILE ERROR:', error);
-    alert(`Profil sa odstránil lokálne, ale nie zo Supabase: ${error.message}`);
-  }
-} catch (error) {
-  console.error('DELETE PROFILE ERROR:', error);
-}
+      if (error) {
+        console.error('SUPABASE DELETE PROFILE ERROR:', error);
+        alert(
+          `Profil sa odstránil lokálne, ale nie zo Supabase: ${error.message}`,
+        );
+      }
+    } catch (error) {
+      console.error('DELETE PROFILE ERROR:', error);
+    }
 
     const activeRaw = localStorage.getItem('active_profile');
 
@@ -366,47 +357,23 @@ try {
 
         if (active?.id === id) {
           localStorage.removeItem('active_profile');
+          localStorage.removeItem('profile');
         }
       } catch {
         localStorage.removeItem('active_profile');
+        localStorage.removeItem('profile');
       }
     }
-
-const editModal = profileFormOpen && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-    <div className="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-[32px] border border-white/10 bg-[#070a16] p-6 shadow-2xl">
-      <ProfileForm
-        initialProfile={editingProfile as any}
-        onSave={(updatedProfile) => handleProfileSaved(updatedProfile as any)}
-        onClose={() => {
-          setProfileFormOpen(false);
-          setEditingProfile(null);
-        }}
-      />
-    </div>
-  </div>
-);
-
 
     if (selectedProfile?.id === id) {
       setSelectedProfile(null);
     }
+
+    if (editingProfile?.id === id) {
+      setEditingProfile(null);
+      setProfileFormOpen(false);
+    }
   };
-
-if (selectedProfile) {
-  return (
-    <>
-      <ProjectDetail
-        profile={selectedProfile}
-        onBack={() => setSelectedProfile(null)}
-        onDelete={() => deleteProfile(selectedProfile.id)}
-        onEdit={() => openEditProfile(selectedProfile)}
-      />
-
-     
-    </>
-  );
-}
 
   return (
     <main className="min-h-screen bg-[#020617] text-white">
@@ -418,9 +385,7 @@ if (selectedProfile) {
               ZEDPERA
             </div>
 
-            <h1 className="text-4xl font-black tracking-tight">
-              Moje práce
-            </h1>
+            <h1 className="text-4xl font-black tracking-tight">Moje práce</h1>
 
             <p className="mt-2 text-slate-400">
               Tu sa automaticky ukladajú všetky profily prác podľa názvu a
@@ -503,37 +468,90 @@ if (selectedProfile) {
                 </button>
 
                 <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-  <button
-    type="button"
-    onClick={() => openProfile(profile)}
-    className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-violet-500"
-  >
-    Otvoriť profil
-  </button>
+                  <button
+                    type="button"
+                    onClick={() => openProfile(profile)}
+                    className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-violet-500"
+                  >
+                    Otvoriť profil
+                  </button>
 
-  <button
-    type="button"
-    onClick={() => openEditProfile(profile)}
-    className="rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm font-bold text-violet-100 transition hover:bg-violet-500/20"
-  >
-    Upraviť
-  </button>
+                  <button
+                    type="button"
+                    onClick={() => openEditProfile(profile)}
+                    className="rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm font-bold text-violet-100 transition hover:bg-violet-500/20"
+                  >
+                    Upraviť
+                  </button>
 
-  <button
-    type="button"
-    onClick={() => deleteProfile(profile.id)}
-    className="rounded-xl bg-red-500/10 p-2 text-red-300 transition hover:bg-red-500/20 hover:text-red-200"
-    aria-label="Odstrániť prácu"
-  >
-    <Trash2 className="h-5 w-5" />
-  </button>
-</div>
+                  <button
+                    type="button"
+                    onClick={() => deleteProfile(profile.id)}
+                    className="rounded-xl bg-red-500/10 p-2 text-red-300 transition hover:bg-red-500/20 hover:text-red-200"
+                    aria-label="Odstrániť prácu"
+                  >
+                    <Trash2 className="h-5 w-5" />
+                  </button>
+                </div>
               </article>
             ))}
           </div>
         )}
       </div>
 
+      {selectedProfile && (
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="max-h-[92vh] w-full max-w-7xl overflow-hidden rounded-[32px] border border-white/10 bg-[#020617] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.2em] text-violet-300">
+                  ZEDPERA profil práce
+                </div>
+
+                <h2 className="text-2xl font-black text-white">
+                  {selectedProfile.title || 'Bez názvu'}
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-400">
+                  Detail uloženého profilu práce.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeProfile}
+                className="rounded-2xl bg-red-500/90 p-3 text-white transition hover:bg-red-400"
+                aria-label="Zavrieť profil"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="max-h-[78vh] overflow-y-auto">
+              <ProjectDetail
+                profile={selectedProfile}
+                onBack={closeProfile}
+                onDelete={() => deleteProfile(selectedProfile.id)}
+                onEdit={() => openEditProfile(selectedProfile)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {profileFormOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
+            <ProfileForm
+              initialProfile={editingProfile as any}
+              onSave={(updatedProfile) =>
+                handleProfileSaved(updatedProfile as any)
+              }
+              onClose={closeEditProfile}
+            />
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -555,38 +573,38 @@ function ProjectDetail({
       : profile.keywords || [];
 
   return (
-    <main className="min-h-screen bg-[#020617] text-white">
-      <div className="mx-auto max-w-7xl px-4 py-8 md:px-8">
-  <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-  <button
-    type="button"
-    onClick={onBack}
-    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 font-bold text-slate-200 transition hover:bg-white/[0.1]"
-  >
-    <ArrowLeft className="h-5 w-5" />
-    Späť na moje práce
-  </button>
+    <div className="bg-[#020617] text-white">
+      <div className="px-6 py-6 md:px-8">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 font-bold text-slate-200 transition hover:bg-white/[0.1]"
+          >
+            <ArrowLeft className="h-5 w-5" />
+            Zavrieť detail
+          </button>
 
-  <div className="flex flex-wrap items-center gap-3">
-    <button
-      type="button"
-      onClick={onEdit}
-      className="inline-flex items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 font-bold text-violet-100 transition hover:bg-violet-500/20"
-    >
-      <FileText className="h-5 w-5" />
-      Upraviť profil
-    </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={onEdit}
+              className="inline-flex items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 font-bold text-violet-100 transition hover:bg-violet-500/20"
+            >
+              <FileText className="h-5 w-5" />
+              Upraviť profil
+            </button>
 
-    <button
-      type="button"
-      onClick={onDelete}
-      className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 font-bold text-red-200 transition hover:bg-red-500/20"
-    >
-      <Trash2 className="h-5 w-5" />
-      Odstrániť prácu
-    </button>
-  </div>
-</div>
+            <button
+              type="button"
+              onClick={onDelete}
+              className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 font-bold text-red-200 transition hover:bg-red-500/20"
+            >
+              <Trash2 className="h-5 w-5" />
+              Odstrániť prácu
+            </button>
+          </div>
+        </div>
 
         <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 md:p-8">
           <div className="mb-8 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
@@ -624,13 +642,19 @@ function ProjectDetail({
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <InfoCard label="Názov práce" value={profile.title} />
-            <InfoCard label="Typ práce" value={profile.schema?.label || profile.type} />
+            <InfoCard
+              label="Typ práce"
+              value={profile.schema?.label || profile.type}
+            />
             <InfoCard label="Odbornosť" value={profile.level} />
             <InfoCard label="Jazyk rozhrania" value={profile.language} />
             <InfoCard label="Jazyk práce" value={profile.workLanguage} />
             <InfoCard label="Citovanie" value={profile.citation} />
             <InfoCard label="Odbor / predmet / oblasť" value={profile.field} />
-            <InfoCard label="Vedúci práce / školiteľ" value={profile.supervisor} />
+            <InfoCard
+              label="Vedúci práce / školiteľ"
+              value={profile.supervisor}
+            />
             <InfoCard label="Téma" value={profile.topic} />
           </div>
 
@@ -640,7 +664,10 @@ function ProjectDetail({
             <LongCard label="Výskumný problém" value={profile.problem} />
             <LongCard label="Metodológia" value={profile.methodology} />
             <LongCard label="Hypotézy" value={profile.hypotheses} />
-            <LongCard label="Výskumné otázky" value={profile.researchQuestions} />
+            <LongCard
+              label="Výskumné otázky"
+              value={profile.researchQuestions}
+            />
             <LongCard label="Praktická časť" value={profile.practicalPart} />
             <LongCard
               label="Vedecký / odborný prínos"
@@ -717,7 +744,7 @@ function ProjectDetail({
             )}
         </section>
       </div>
-    </main>
+    </div>
   );
 }
 

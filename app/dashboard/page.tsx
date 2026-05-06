@@ -2747,30 +2747,296 @@ function PlanningModule() {
 }
 
 function EmailModule() {
+  const botId =
+    process.env.NEXT_PUBLIC_FASTBOTS_EMAIL_BOT_ID ||
+    process.env.NEXT_PUBLIC_FASTBOTS_BOT_ID ||
+    'cmonxnqsl0av1p81pwly2ti1x';
+
+  const fastbotUrl = `https://app.fastbots.ai/embed/${botId}`;
+
+  const [emailType, setEmailType] = useState('Email vedúcemu');
+  const [recipient, setRecipient] = useState('Vedúci práce');
+  const [request, setRequest] = useState('');
+  const [tone, setTone] = useState('Profesionálny a slušný');
+  const [language, setLanguage] = useState('Slovenčina');
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState('');
+
+  const buildFastbotPrompt = () => {
+    let activeProfile: SavedProfile | null = null;
+
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('active_profile');
+        activeProfile = raw ? JSON.parse(raw) : null;
+      } catch {
+        activeProfile = null;
+      }
+    }
+
+    return `
+Si AI asistent pre akademickú komunikáciu. Vytvor hotový email pre používateľa.
+
+JAZYK EMAILU:
+${language}
+
+TYP EMAILU:
+${emailType}
+
+KOMU:
+${recipient}
+
+TÓN EMAILU:
+${tone}
+
+AKTÍVNY PROFIL PRÁCE:
+- Názov práce: ${activeProfile?.title || 'nezadané'}
+- Téma: ${activeProfile?.topic || 'nezadané'}
+- Typ práce: ${activeProfile?.type || 'nezadané'}
+- Odbor: ${activeProfile?.field || 'nezadané'}
+- Vedúci práce: ${activeProfile?.supervisor || 'nezadané'}
+- Cieľ práce: ${activeProfile?.goal || 'nezadané'}
+- Metodológia: ${activeProfile?.methodology || 'nezadané'}
+
+POŽIADAVKA POUŽÍVATEĽA:
+${request || 'Používateľ neuviedol detailnú požiadavku.'}
+
+ÚLOHA:
+Vytvor finálny email, ktorý môže používateľ priamo skopírovať a odoslať.
+
+FORMÁT ODPOVEDE:
+Predmet:
+...
+
+Text emailu:
+...
+
+POKYNY:
+- email musí byť profesionálny,
+- nepíš príliš dlhý text,
+- používaj slušný akademický štýl,
+- ak ide o email vedúcemu práce, formuluj ho úctivo,
+- ak používateľ žiada kontrolu osnovy, kapitoly alebo termínu, napíš konkrétnu prosbu,
+- na konci doplň vhodné poďakovanie,
+- nepoužívaj zbytočné frázy.
+`.trim();
+  };
+
+  const copyPromptForFastbot = async () => {
+    setError('');
+    setCopied(false);
+
+    if (!request.trim() || request.trim().length < 10) {
+      setError('Napíš požiadavku pre email aspoň v rozsahu 10 znakov.');
+      return;
+    }
+
+    const prompt = buildFastbotPrompt();
+
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+
+      window.setTimeout(() => {
+        setCopied(false);
+      }, 2500);
+    } catch {
+      setError('Nepodarilo sa skopírovať zadanie pre Fastbota.');
+    }
+  };
+
   return (
     <ModuleLayout>
-      <Select
-        label="Typ emailu"
-        options={[
-          'Email vedúcemu',
-          'Žiadosť o konzultáciu',
-          'Odovzdanie kapitoly',
-          'Ospravedlnenie',
-          'Formálny email',
-        ]}
-      />
+      <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-300">
+              <Mail size={26} />
+            </div>
 
-      <Input
-        label="Komu"
-        placeholder="Napr. vedúci práce, školiteľ, konzultant"
-      />
+            <div>
+              <h3 className="text-2xl font-black text-white">
+                Emaily cez Fastbota
+              </h3>
 
-      <Textarea
-        label="Obsah / požiadavka"
-        placeholder="Napíš, čo má email obsahovať..."
-      />
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-300">
+                Vyplň zadanie emailu, skopíruj pripravený prompt a vlož ho do
+                Fastbota nižšie. Fastbot ti pripraví hotový predmet a text
+                emailu na odoslanie.
+              </p>
+            </div>
+          </div>
 
-      <ActionButton icon={Mail} label="Vygenerovať email" />
+          <a
+            href={fastbotUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/20"
+          >
+            Otvoriť Fastbota samostatne
+            <ExternalLink size={17} />
+          </a>
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-white/10 bg-[#050816] p-6">
+        <div className="mb-5">
+          <h4 className="text-xl font-black text-white">
+            Pripraviť zadanie pre Fastbota
+          </h4>
+
+          <p className="mt-2 text-sm text-gray-400">
+            Tento formulár vytvorí presné zadanie pre Fastbota, aby odpovedal
+            priamo vo forme hotového emailu.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Typ emailu
+            </div>
+
+            <select
+              value={emailType}
+              onChange={(event) => setEmailType(event.target.value)}
+              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+            >
+              <option>Email vedúcemu</option>
+              <option>Žiadosť o konzultáciu</option>
+              <option>Odovzdanie kapitoly</option>
+              <option>Žiadosť o kontrolu osnovy</option>
+              <option>Žiadosť o posúdenie témy</option>
+              <option>Ospravedlnenie</option>
+              <option>Pripomenutie termínu</option>
+              <option>Formálny email škole</option>
+              <option>Email školiteľovi</option>
+              <option>Email konzultantovi</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Komu
+            </div>
+
+            <input
+              value={recipient}
+              onChange={(event) => setRecipient(event.target.value)}
+              placeholder="Napr. vedúci práce, školiteľ, konzultant"
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Tón emailu
+            </div>
+
+            <select
+              value={tone}
+              onChange={(event) => setTone(event.target.value)}
+              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+            >
+              <option>Profesionálny a slušný</option>
+              <option>Veľmi formálny</option>
+              <option>Krátky a vecný</option>
+              <option>Úctivý akademický</option>
+              <option>Priateľský, ale stále formálny</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Jazyk emailu
+            </div>
+
+            <select
+              value={language}
+              onChange={(event) => setLanguage(event.target.value)}
+              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
+            >
+              <option>Slovenčina</option>
+              <option>Čeština</option>
+              <option>Angličtina</option>
+              <option>Nemčina</option>
+              <option>Poľština</option>
+              <option>Maďarčina</option>
+            </select>
+          </label>
+        </div>
+
+        <label className="mt-4 block">
+          <div className="mb-2 text-sm font-semibold text-gray-300">
+            Obsah / požiadavka
+          </div>
+
+          <textarea
+            value={request}
+            onChange={(event) => setRequest(event.target.value)}
+            rows={7}
+            placeholder="Napr. Pomôž mi sformulovať email pre vedúceho práce. Chcem sa opýtať, či mám dobre osnovu a či môžem poslať prvú kapitolu na kontrolu..."
+            className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+          />
+        </label>
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={copyPromptForFastbot}
+            className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90"
+          >
+            <Mail size={20} />
+            {copied ? 'Zadanie skopírované' : 'Skopírovať zadanie pre Fastbota'}
+          </button>
+
+          <a
+            href={fastbotUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 font-bold text-white transition hover:bg-white/15"
+          >
+            <ExternalLink size={20} />
+            Otvoriť Fastbota
+          </a>
+        </div>
+
+        {error && (
+          <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+            {error}
+          </div>
+        )}
+
+        {copied && (
+          <div className="mt-4 rounded-2xl border border-green-500/30 bg-green-500/10 p-4 text-sm font-semibold text-green-200">
+            Zadanie bolo skopírované. Teraz ho vlož do Fastbota nižšie.
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h4 className="text-xl font-black text-white">
+              Fastbot – generovanie emailu
+            </h4>
+
+            <p className="mt-1 text-sm text-gray-400">
+              Vlož skopírované zadanie do chatu a Fastbot ti pripraví hotový
+              email.
+            </p>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-3xl border border-purple-500/30 bg-white shadow-2xl">
+          <iframe
+            title="Fastbot emailový asistent"
+            src={fastbotUrl}
+            className="h-[720px] w-full border-0"
+            allow="microphone; clipboard-read; clipboard-write"
+          />
+        </div>
+      </div>
     </ModuleLayout>
   );
 }

@@ -113,8 +113,8 @@ const packagePlans: PackagePlan[] = [
   {
     id: 'three-months',
     name: '3 mesiace ŠTUDENT',
-    price: '79,90 €',
-    oldPrice: '70 €',
+    price: '70 €',
+    oldPrice: '79,90 €',
     period: '3 mesiace',
     pages: '350 strán',
     works: '10 prác',
@@ -135,8 +135,8 @@ const packagePlans: PackagePlan[] = [
   {
     id: 'year-pro',
     name: 'Ročný PRO',
-    price: '299 €',
-    oldPrice: '240 €',
+    price: '240 €',
+    oldPrice: '299 €',
     period: '12 mesiacov',
     pages: '1 500 strán',
     works: 'Neobmedzené projekty',
@@ -431,14 +431,14 @@ export default function PackagesPage() {
               </a>
 
               <a
-                href="https://www.zaverecneprace.cz"
+                href="https://www.zaverecne-prace.cz"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="rounded-2xl border border-white/10 bg-black/20 p-4 transition hover:border-blue-400/50 hover:bg-blue-500/10"
               >
                 <div className="text-sm text-gray-500">Česko</div>
                 <div className="mt-1 font-bold text-white">
-                  www.zaverecneprace.cz
+                  www.zaverecne-prace.cz
                 </div>
               </a>
             </div>
@@ -456,7 +456,7 @@ export default function PackagesPage() {
             </a>
 
             <a
-              href="https://www.zaverecneprace.cz"
+              href="https://www.zaverecne-prace.cz"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white transition hover:bg-blue-500"

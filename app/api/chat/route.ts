@@ -631,31 +631,78 @@ const attachmentTexts = [
   ...projectDocumentTexts,
 ];
 
-const systemPrompt = buildSystemPrompt(profile, attachmentTexts);
+const baseSystemPrompt = buildSystemPrompt(profile, attachmentTexts);
 
-    try {
-      const primary = getModelByAgent(agent);
+const sourceAndAuthorRules = `
+PRAVIDLÁ PRE ZDROJE, AUTOROV A CITÁCIE:
 
-      return await createStreamResponse({
-        model: primary.model,
-        systemPrompt,
-        normalizedMessages,
-      });
-    } catch (primaryError) {
-      console.error('PRIMARY MODEL ERROR:', primaryError);
+1. Pri každej akademickej odpovedi musíš na konci uviesť sekciu:
 
-      if (!isModelNotFoundError(primaryError)) {
-        throw primaryError;
-      }
+=== POUŽITÉ ZDROJE A AUTORI ===
 
-      const fallback = getFallbackModel();
+2. Ak sú dostupné zdroje z profilu práce, priložených súborov, textu používateľa alebo predchádzajúcej konverzácie, vypíš ich v tejto sekcii.
 
-      const fallbackSystemPrompt = `
+3. Pri každom zdroji uveď, ak je to dostupné:
+- autor / autori,
+- rok,
+- názov zdroja,
+- typ zdroja,
+- vydavateľ / časopis / web,
+- DOI alebo URL, ak je dostupné.
+
+4. Dodrž citačný štýl podľa profilu práce:
+${profile?.citation || 'ISO 690'}
+
+5. Nikdy si nevymýšľaj neexistujúcich autorov, názvy kníh, článkov, DOI, URL ani roky vydania.
+
+6. Ak zdroje nie sú v dostupných podkladoch uvedené, napíš presne:
+
+Zdroje neboli dodané. Odporúčam ich doplniť cez modul Zdroje alebo priložiť PDF/Word súbory.
+
+7. Ak používateľ požiada o odborný text, úvod, kapitolu, abstrakt, metodológiu, analýzu, obhajobu alebo akademické preformulovanie, sekcia "Použité zdroje a autori" musí byť vždy prítomná.
+
+8. Ak vieš odporučiť typy zdrojov, ale nemáš konkrétne overené zdroje, jasne to oddeľ od skutočných citácií. Použi nadpis:
+
+Odporúčané typy zdrojov na doplnenie:
+`;
+
+const systemPrompt = `
+${baseSystemPrompt}
+
+${sourceAndAuthorRules}
+`;
+
+try {
+  const primary = getModelByAgent(agent);
+
+  return await createStreamResponse({
+    model: primary.model,
+    systemPrompt,
+    normalizedMessages,
+  });
+} catch (primaryError) {
+  console.error('PRIMARY MODEL ERROR:', primaryError);
+
+  if (!isModelNotFoundError(primaryError)) {
+    throw primaryError;
+  }
+
+  const fallback = getFallbackModel();
+
+  const fallbackSystemPrompt = `
 ${systemPrompt}
 
 TECHNICKÁ POZNÁMKA:
 Vybraný model nebol dostupný alebo bol odmietnutý poskytovateľom.
 Odpovedáš cez náhradný model: ${fallback.providerLabel}.
+
+Aj pri náhradnom modeli musíš dodržať pravidlo:
+Na konci akademickej odpovede vždy uveď sekciu:
+
+=== POUŽITÉ ZDROJE A AUTORI ===
+
+Ak zdroje nie sú dostupné, nevymýšľaj ich a uveď:
+Zdroje neboli dodané. Odporúčam ich doplniť cez modul Zdroje alebo priložiť PDF/Word súbory.
 `;
 
       return await createStreamResponse({

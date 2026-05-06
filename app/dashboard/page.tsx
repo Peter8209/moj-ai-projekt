@@ -1625,52 +1625,210 @@ function safeFileName(value: string) {
 }
 
 function TranslateModule() {
+  const [sourceLanguage, setSourceLanguage] = useState('Angličtina');
+  const [targetLanguage, setTargetLanguage] = useState('Slovenčina');
+  const [style, setStyle] = useState('Akademický');
+
+  const [inputText, setInputText] = useState('');
+  const [translatedText, setTranslatedText] = useState('');
+
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const translateText = async () => {
+    const text = inputText.trim();
+
+    if (!text) {
+      setError('Najprv vlož text na preklad.');
+      return;
+    }
+
+    setIsTranslating(true);
+    setError('');
+    setCopied(false);
+
+    try {
+      const response = await fetch('/api/translate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sourceLanguage,
+          targetLanguage,
+          style,
+          text,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.error || 'Preklad sa nepodaril.');
+      }
+
+      const output = String(data.translatedText || '').trim();
+
+      if (!output) {
+        throw new Error('AI nevrátila žiadny preklad.');
+      }
+
+      setTranslatedText(output);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Neznáma chyba pri preklade.'
+      );
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  const copyResult = async () => {
+    const text = translatedText.trim();
+
+    if (!text) {
+      setError('Nie je čo kopírovať. Najprv vytvor preklad.');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setError('');
+
+      window.setTimeout(() => {
+        setCopied(false);
+      }, 2500);
+    } catch {
+      setError('Nepodarilo sa skopírovať preklad.');
+    }
+  };
+
   return (
     <ModuleLayout>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Select
-          label="Z jazyka"
-          options={[
-            'Automaticky',
-            'Slovenčina',
-            'Čeština',
-            'Angličtina',
-            'Nemčina',
-            'Poľština',
-            'Maďarčina',
-          ]}
-        />
+        <label className="block">
+          <div className="mb-2 text-sm font-semibold text-gray-300">
+            Z jazyka
+          </div>
 
-        <Select
-          label="Do jazyka"
-          options={[
-            'Slovenčina',
-            'Čeština',
-            'Angličtina',
-            'Nemčina',
-            'Poľština',
-            'Maďarčina',
-          ]}
-        />
+          <select
+            value={sourceLanguage}
+            onChange={(event) => setSourceLanguage(event.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+          >
+            <option>Automaticky</option>
+            <option>Slovenčina</option>
+            <option>Čeština</option>
+            <option>Angličtina</option>
+            <option>Nemčina</option>
+            <option>Poľština</option>
+            <option>Maďarčina</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="mb-2 text-sm font-semibold text-gray-300">
+            Do jazyka
+          </div>
+
+          <select
+            value={targetLanguage}
+            onChange={(event) => setTargetLanguage(event.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+          >
+            <option>Slovenčina</option>
+            <option>Čeština</option>
+            <option>Angličtina</option>
+            <option>Nemčina</option>
+            <option>Poľština</option>
+            <option>Maďarčina</option>
+          </select>
+        </label>
       </div>
 
-      <Select
-        label="Štýl prekladu"
-        options={[
-          'Akademický',
-          'Odborný',
-          'Jednoduchý',
-          'Formálny',
-          'Doslovný',
-        ]}
-      />
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Štýl prekladu
+        </div>
 
-      <Textarea
-        label="Text na preklad"
-        placeholder="Vlož text, ktorý chceš preložiť..."
-      />
+        <select
+          value={style}
+          onChange={(event) => setStyle(event.target.value)}
+          className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+        >
+          <option>Akademický</option>
+          <option>Odborný</option>
+          <option>Jednoduchý</option>
+          <option>Formálny</option>
+          <option>Doslovný</option>
+        </select>
+      </label>
 
-      <ActionButton icon={Languages} label="Preložiť text" />
+      <label className="block">
+        <div className="mb-2 text-sm font-semibold text-gray-300">
+          Text na preklad
+        </div>
+
+        <textarea
+          value={inputText}
+          onChange={(event) => setInputText(event.target.value)}
+          rows={9}
+          placeholder="Vlož text, ktorý chceš preložiť..."
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
+
+      <div className="flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={translateText}
+          disabled={isTranslating}
+          className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Languages size={20} />
+          {isTranslating ? 'Prekladám text...' : 'Preložiť text'}
+        </button>
+
+        <button
+          type="button"
+          onClick={copyResult}
+          className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 font-bold text-white transition hover:bg-white/15"
+        >
+          {copied ? 'Skopírované' : 'Skopírovať preklad'}
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+          {error}
+        </div>
+      )}
+
+      <label className="block">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold text-gray-300">
+            Výsledný preklad
+          </div>
+
+          {translatedText && (
+            <span className="rounded-full bg-green-500/10 px-3 py-1 text-xs font-semibold text-green-300">
+              Preklad pripravený
+            </span>
+          )}
+        </div>
+
+        <textarea
+          value={translatedText}
+          onChange={(event) => setTranslatedText(event.target.value)}
+          rows={10}
+          placeholder="Tu sa zobrazí preložený text..."
+          className="w-full rounded-2xl border border-purple-500/30 bg-[#0f1324] px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+        />
+      </label>
     </ModuleLayout>
   );
 }

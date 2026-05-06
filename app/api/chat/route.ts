@@ -4,7 +4,8 @@ import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
 import { mistral } from '@ai-sdk/mistral';
 import { xai } from '@ai-sdk/xai';
-
+import { createAdminClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/client';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
@@ -52,6 +53,39 @@ type SavedProfile = {
     aiInstruction?: string;
   };
 };
+
+type ProjectDocument = {
+  id: string;
+  project_id: string;
+  file_name: string;
+  file_path: string;
+  file_size?: number | null;
+  mime_type?: string | null;
+  extracted_text?: string | null;
+  created_at?: string;
+};
+
+async function loadProjectDocuments(projectId: string | null) {
+  if (!projectId) {
+    return [];
+  }
+
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from('zedpera_documents')
+    .select(
+      'id, project_id, file_name, file_path, file_size, mime_type, extracted_text, created_at'
+    )
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw new Error(`Nepodarilo sa načítať dokumenty projektu: ${error.message}`);
+  }
+
+  return (data || []) as ProjectDocument[];
+}
 
 type ModelResult = {
   model: ReturnType<typeof openai>;
@@ -395,26 +429,44 @@ export async function POST(req: Request) {
     let messages: ChatMessage[] = [];
     let profile: SavedProfile | null = null;
     let files: File[] = [];
+    let projectId: string | null = null;
+if (contentType.includes('multipart/form-data')) {
+  const formData = await req.formData();
 
-    if (contentType.includes('multipart/form-data')) {
-      const formData = await req.formData();
+  // AI agent: openai / claude / gemini / grok / mistral
+  rawAgent = formData.get('agent')?.toString() || 'gemini';
 
-      rawAgent = formData.get('agent') || 'gemini';
-      messages = parseJson<ChatMessage[]>(formData.get('messages'), []);
-      profile = parseJson<SavedProfile | null>(formData.get('profile'), null);
+  // Správy z chatu
+  messages = parseJson<ChatMessage[]>(formData.get('messages'), []);
 
-      files = formData
-        .getAll('files')
-        .filter((item): item is File => item instanceof File);
-    } else {
-      const body = await req.json().catch(() => null);
+  // Aktívny profil práce z frontendu
+  profile = parseJson<SavedProfile | null>(formData.get('profile'), null);
 
-      rawAgent = body?.agent || 'gemini';
-      messages = Array.isArray(body?.messages) ? body.messages : [];
-      profile = body?.profile || null;
-      files = [];
-    }
+  // ID projektu zo Supabase
+  projectId = formData.get('projectId')?.toString() || null;
 
+  // Priložené súbory z inputu, napr. PDF
+  files = formData
+    .getAll('files')
+    .filter((item): item is File => item instanceof File);
+} else {
+  const body = await req.json().catch(() => null);
+
+  // AI agent
+  rawAgent = body?.agent || 'gemini';
+
+  // Správy z chatu
+  messages = Array.isArray(body?.messages) ? body.messages : [];
+
+  // Aktívny profil práce
+  profile = body?.profile || null;
+
+  // ID projektu zo Supabase
+  projectId = body?.projectId || null;
+
+  // Pri JSON requeste nie sú súbory posielané cez FormData
+  files = [];
+}
     if (!isAllowedAgent(rawAgent)) {
       return new Response(`Neznámy AI agent: ${String(rawAgent)}`, {
         status: 400,
@@ -430,8 +482,22 @@ export async function POST(req: Request) {
       });
     }
 
-    const pdfTexts = await extractPdfTexts(files);
-    const systemPrompt = buildSystemPrompt(profile, pdfTexts);
+    const uploadedPdfTexts = await extractPdfTexts(files);
+
+const projectDocuments = await loadProjectDocuments(projectId);
+
+const projectDocumentTexts = projectDocuments.map((doc, index) => {
+  return `DOKUMENT ZO SUPABASE ${index + 1}
+Názov: ${doc.file_name}
+Typ: ${doc.mime_type || 'neuvedené'}
+Veľkosť: ${doc.file_size || 0} bajtov
+Text:
+${doc.extracted_text || '[Dokument nemá uložený extrahovaný text]'}`;
+});
+
+const pdfTexts = [...uploadedPdfTexts, ...projectDocumentTexts];
+
+const systemPrompt = buildSystemPrompt(profile, pdfTexts);
 
     try {
       const primary = getModelByAgent(agent);

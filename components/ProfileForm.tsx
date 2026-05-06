@@ -15,6 +15,7 @@ import {
   Target,
   Trash2,
 } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 
 // ================= TYPES =================
 
@@ -1615,6 +1616,7 @@ export default function ProfileForm({ onClose, onSave }: ProfileFormProps) {
   const router = useRouter();
 
   const [profile, setProfile] = useState<Profile>(initialProfile);
+  const [isSaving, setIsSaving] = useState(false);
 
   const labels = UI[profile.language];
 
@@ -1687,8 +1689,7 @@ export default function ProfileForm({ onClose, onSave }: ProfileFormProps) {
 
     localStorage.setItem('profiles_full', JSON.stringify(newProfiles));
   };
-
-const saveProfile = () => {
+const saveProfile = async () => {
   if (!profile.title.trim()) {
     alert(
       profile.language === 'SK'
@@ -1698,26 +1699,90 @@ const saveProfile = () => {
     return;
   }
 
-  const payload: SavedProfile = {
-    ...profile,
-    id:
+  setIsSaving(true);
+
+  try {
+    const profileId =
       typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
-        : Date.now().toString(),
-    schema,
-    interfaceLanguage: profile.language,
-    workLanguage: profile.workLanguage,
-    savedAt: new Date().toISOString(),
-  };
+        : Date.now().toString();
 
-  savePayloadToStorage(payload);
+    const payload: SavedProfile = {
+      ...profile,
+      id: profileId,
+      schema,
+      interfaceLanguage: profile.language,
+      workLanguage: profile.workLanguage,
+      savedAt: new Date().toISOString(),
+    };
 
-  onSave?.(payload);
-  onClose?.();
+    // 1. Uloženie lokálne do prehliadača
+    savePayloadToStorage(payload);
 
-  alert(profile.language === 'SK' ? 'Profil bol uložený.' : 'Profile saved.');
+const supabase = createClient();
 
-  router.push('/projects');
+    // 2. Uloženie do Supabase
+    const { error } = await supabase.from('zedpera_profiles').insert({
+      id: payload.id,
+      title: payload.title,
+      type: payload.type,
+      level: payload.level,
+      topic: payload.topic,
+      field: payload.field,
+      supervisor: payload.supervisor,
+      citation: payload.citation,
+      language: payload.language,
+      work_language: payload.workLanguage,
+      annotation: payload.annotation,
+      goal: payload.goal,
+      problem: payload.problem,
+      methodology: payload.methodology,
+      hypotheses: payload.hypotheses,
+      research_questions: payload.researchQuestions,
+      practical_part: payload.practicalPart,
+      scientific_contribution: payload.scientificContribution,
+      business_problem: payload.businessProblem,
+      business_goal: payload.businessGoal,
+      implementation: payload.implementation,
+      case_study: payload.caseStudy,
+      reflection: payload.reflection,
+      sources_requirement: payload.sourcesRequirement,
+      keywords_list: payload.keywordsList,
+      schema: payload.schema,
+      full_profile: payload,
+      created_at: payload.savedAt,
+      updated_at: payload.savedAt,
+    });
+
+    if (error) {
+      console.error('SUPABASE PROFILE SAVE ERROR:', error);
+
+      alert(
+        profile.language === 'SK'
+          ? `Profil sa uložil lokálne, ale nie do Supabase: ${error.message}`
+          : `Profile was saved locally, but not to Supabase: ${error.message}`
+      );
+
+      return;
+    }
+
+    onSave?.(payload);
+    onClose?.();
+
+    alert(profile.language === 'SK' ? 'Profil bol uložený.' : 'Profile saved.');
+
+    router.push('/projects');
+  } catch (error) {
+    console.error('PROFILE SAVE ERROR:', error);
+
+    alert(
+      profile.language === 'SK'
+        ? 'Nastala chyba pri ukladaní profilu.'
+        : 'An error occurred while saving the profile.'
+    );
+  } finally {
+    setIsSaving(false);
+  }
 };
 
   return (
@@ -1928,13 +1993,14 @@ const saveProfile = () => {
               {/* CTA */}
               <div className="flex flex-col gap-3 sm:flex-row">
                 <button
-                  onClick={saveProfile}
-                  type="button"
-                  className="inline-flex items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 text-base font-black text-white transition hover:bg-white/15"
-                >
-                  <Save className="h-5 w-5" />
-                  {labels.save}
-                </button>
+  onClick={saveProfile}
+  disabled={isSaving}
+  type="button"
+  className="inline-flex items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 text-base font-black text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
+>
+  <Save className="h-5 w-5" />
+  {isSaving ? 'Ukladám...' : labels.save}
+</button>
               </div>
             </div>
 

@@ -47,10 +47,12 @@ type ExtractedFileInfo = {
   name: string;
   type?: string;
   size?: number;
+  extension?: string;
+  label?: string;
   extractedChars?: number;
   extractedPreview?: string;
   status?: string;
-  error?: string;
+  error?: string | null;
 };
 
 type ParsedResult = {
@@ -130,12 +132,11 @@ const allowedFileExtensions = [
 
 const textExtractableExtensions = [
   '.pdf',
-  '.doc',
   '.docx',
   '.txt',
   '.rtf',
-  '.odt',
   '.md',
+  '.csv',
 ];
 
 const allowedFileAccept = allowedFileExtensions.join(',');
@@ -187,10 +188,10 @@ const suggestions: {
     icon: FileText,
   },
   {
-    title: 'Pomôž mi citovať tento zdroj',
-    actionTitle: 'Citovanie zdroja',
+    title: 'Pomôž mi spracovať zdroje a citácie',
+    actionTitle: 'Citácie a bibliografia',
     instruction:
-      'Na základe uloženého profilu práce a zvoleného citačného štýlu vysvetli, ako správne citovať zdroj v texte a v zozname literatúry. Najprv vyhľadaj bibliografické údaje v priložených dokumentoch. Vypíš autorov, názvy, roky, inštitúcie, URL a všetky rozpoznateľné citačné údaje. Ak údaje chýbajú, jasne napíš, čo treba doplniť.',
+      'Správaj sa ako citačná špecialistka. Analyzuj priložené dokumenty a uložený profil práce. Identifikuj všetky zdroje uvedené v dokumentoch, uprav ich podľa citačnej normy z profilu práce, priprav formátované bibliografické záznamy, varianty odkazov v texte, špeciálne prípady, validáciu a finálny zoznam literatúry. Ak chýbajú roky, vydania, autori, DOI alebo URL, označ ich ako údaj je potrebné overiť. Ak sú v dokumente výstupy zo štatistického softvéru JASP, SPSS, Jamovi, R alebo Excel, uveď aj softvér ako zdroj a priprav vetu do metodológie.',
     icon: Library,
   },
   {
@@ -246,7 +247,7 @@ function getFileKindLabel(fileName: string) {
 // ================= TEXT HELPERS =================
 
 function cleanAiOutput(text: string) {
-  return text
+  return String(text || '')
     .replace(/\uFEFF/g, '')
     .replace(/\u200B/g, '')
     .replace(/\u200C/g, '')
@@ -335,7 +336,7 @@ function sanitizeFileName(value: string) {
 }
 
 function htmlEscape(value: string) {
-  return value
+  return String(value || '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
@@ -412,8 +413,8 @@ function buildAttachmentPrompt(files: AttachedFile[]) {
 
   const lines = files.map((item, index) => {
     const extractable = isTextExtractableFile(item.name)
-      ? 'áno – text sa má extrahovať v API'
-      : 'nie – súbor je doplnkový, nemusí obsahovať extrahovateľný text';
+      ? 'áno – API má extrahovať text'
+      : 'nie – súbor je doplnkový alebo v tejto trase nie je textovo extrahovateľný';
 
     return `${index + 1}. ${item.name} (${getFileKindLabel(
       item.name
@@ -431,6 +432,7 @@ function buildExtractionSummary(files: ExtractedFileInfo[]) {
       const chars = Number(file.extractedChars || 0);
 
       return `${index + 1}. ${file.name}
+- typ: ${file.label || file.type || 'neuvedené'}
 - extrahované znaky: ${chars}
 - stav: ${
         chars > 0
@@ -552,9 +554,7 @@ export default function ChatPage() {
       });
     }
 
-    if (validFiles.length === 0) {
-      return;
-    }
+    if (validFiles.length === 0) return;
 
     setAttachedFiles((prev) => {
       const next = [...prev];
@@ -688,9 +688,7 @@ export default function ChatPage() {
       content: visibleUserText,
     };
 
-    const nextVisibleMessages = [...messages, visibleMessage];
-
-    setMessages(nextVisibleMessages);
+    setMessages((prev) => [...prev, visibleMessage]);
     setInput('');
     setIsLoading(true);
     setPopup(false);
@@ -711,9 +709,16 @@ POVINNÝ POSTUP:
 1. Najprv extrahuj text z priložených dokumentov v API.
 2. Ak sa text extrahoval, použi ho ako hlavný zdroj odpovede.
 3. Ak dokument obsahuje autorov, názvy diel, roky, inštitúcie, URL alebo bibliografické údaje, vypíš ich v časti „Použité zdroje a autori“.
-4. Nikdy nepíš, že obsah nebol extrahovaný, ak bol z dokumentov získaný text.
-5. Nevymýšľaj autorov, roky, zdroje ani citácie.
-6. Ak sa bibliografické údaje v dokumente nenachádzajú, napíš: „Text bol extrahovaný, ale neobsahuje úplné bibliografické údaje.“
+4. Ak používateľ žiada citácie alebo bibliografiu, priprav odpoveď ako citačná špecialistka v štruktúre A až F:
+A) Formátované bibliografické záznamy
+B) Varianty odkazov v texte
+C) Špeciálne prípady
+D) Validácia a korekcia
+E) Finálny zoznam literatúry
+F) Odporúčaná veta do metodológie
+5. Nikdy nepíš, že obsah nebol extrahovaný, ak bol z dokumentov získaný text.
+6. Nevymýšľaj autorov, roky, zdroje ani citácie.
+7. Ak sa bibliografické údaje v dokumente nenachádzajú, napíš: „Text bol extrahovaný, ale neobsahuje úplné bibliografické údaje.“
 `.trim();
 
       const apiMessages = [
@@ -774,6 +779,7 @@ POVINNÝ POSTUP:
       const contentType = res.headers.get('content-type') || '';
 
       let fullText = '';
+      let currentExtractionSummary = '';
 
       setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
 
@@ -785,8 +791,9 @@ POVINNÝ POSTUP:
           : [];
 
         if (apiExtractedFiles.length > 0) {
+          currentExtractionSummary = buildExtractionSummary(apiExtractedFiles);
           setExtractedFiles(apiExtractedFiles);
-          setLastExtractionSummary(buildExtractionSummary(apiExtractedFiles));
+          setLastExtractionSummary(currentExtractionSummary);
         }
 
         fullText =
@@ -843,8 +850,8 @@ POVINNÝ POSTUP:
       const cleanedFullText = cleanAiOutput(fullText);
       const parsed = parseSections(cleanedFullText);
 
-      const extractionText = lastExtractionSummary
-        ? `Spracovanie priložených dokumentov\n\n${lastExtractionSummary}\n\n`
+      const extractionText = currentExtractionSummary
+        ? `Spracovanie priložených dokumentov\n\n${currentExtractionSummary}\n\n`
         : '';
 
       const canvasParts = [
@@ -1128,34 +1135,42 @@ POVINNÝ POSTUP:
                 </div>
 
                 <div className="grid gap-2 md:grid-cols-2">
-                  {extractedFiles.map((file, index) => (
-                    <div
-                      key={`${file.name}-${index}`}
-                      className="rounded-2xl border border-emerald-400/20 bg-black/20 p-3 text-xs text-emerald-50/90"
-                    >
-                      <div className="font-black text-emerald-200">
-                        {file.name}
-                      </div>
+                  {extractedFiles.map((file, index) => {
+                    const chars = Number(file.extractedChars || 0);
 
-                      <div className="mt-1 text-emerald-50/70">
-                        Extrahované znaky: {file.extractedChars || 0}
-                      </div>
-
-                      {file.extractedPreview && (
-                        <div className="mt-2 line-clamp-3 whitespace-pre-wrap text-emerald-50/80">
-                          {file.extractedPreview}
+                    return (
+                      <div
+                        key={`${file.name}-${index}`}
+                        className="rounded-2xl border border-emerald-400/20 bg-black/20 p-3 text-xs text-emerald-50/90"
+                      >
+                        <div className="font-black text-emerald-200">
+                          {file.name}
                         </div>
-                      )}
 
-                      {!file.extractedPreview && (
-                        <div className="mt-2 text-orange-200">
-                          {file.error ||
-                            file.status ||
-                            'Z dokumentu sa nepodarilo zobraziť ukážku textu.'}
+                        <div className="mt-1 text-emerald-50/70">
+                          Extrahované znaky: {chars}
                         </div>
-                      )}
-                    </div>
-                  ))}
+
+                        <div className="mt-1 text-emerald-50/70">
+                          Stav: {file.status || 'neuvedené'}
+                        </div>
+
+                        {file.extractedPreview && (
+                          <div className="mt-2 max-h-[74px] overflow-hidden whitespace-pre-wrap text-emerald-50/80">
+                            {file.extractedPreview}
+                          </div>
+                        )}
+
+                        {!file.extractedPreview && (
+                          <div className="mt-2 text-orange-200">
+                            {file.error ||
+                              file.status ||
+                              'Z dokumentu sa nepodarilo zobraziť ukážku textu.'}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -1197,9 +1212,7 @@ POVINNÝ POSTUP:
                             : 'bg-orange-500/20 text-orange-200'
                         }`}
                       >
-                        {isTextExtractableFile(file.name)
-                          ? 'text'
-                          : 'doplnok'}
+                        {isTextExtractableFile(file.name) ? 'text' : 'doplnok'}
                       </span>
 
                       <button

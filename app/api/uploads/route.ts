@@ -63,9 +63,12 @@ type UploadedFileResponse = {
   content: string;
   extractedText: string;
   charCount: number;
+  textPreview: string;
 
   ok: boolean;
+  status: 'processed' | 'processed_without_text' | 'rejected' | 'failed';
   warning?: string;
+  error?: string;
 };
 
 function getFileExtension(fileName: string): string {
@@ -90,7 +93,7 @@ function isAllowedFile(file: File): boolean {
 
 function safeFileName(fileName: string): string {
   const cleaned =
-    fileName
+    String(fileName || 'uploaded_file')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -100,36 +103,110 @@ function safeFileName(fileName: string): string {
   return cleaned;
 }
 
-function buildUnsupportedResponse(file: File) {
+function cleanText(value: string): string {
+  return String(value || '')
+    .replace(/\u0000/g, '')
+    .replace(/\uFEFF/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
+function makeBaseFileResponse(
+  file: File,
+  bufferSize = 0,
+): Omit<
+  UploadedFileResponse,
+  | 'text'
+  | 'content'
+  | 'extractedText'
+  | 'charCount'
+  | 'textPreview'
+  | 'ok'
+  | 'status'
+> {
   return {
-    ok: false,
-    error: 'UNSUPPORTED_FILE_TYPE',
-    message: `Nepodporovaný formát súboru: ${file.name}`,
-    file_name: file.name,
-    file_type: file.type || 'application/octet-stream',
+    original_name: file.name,
+    name: file.name,
+    safe_name: safeFileName(file.name),
+    size: file.size,
+    type: file.type || 'application/octet-stream',
     extension: getFileExtension(file.name),
-    supported_formats: ALLOWED_EXTENSIONS,
+    buffer_size: bufferSize,
   };
 }
 
-function buildTooLargeResponse(file: File) {
-  return {
-    ok: false,
-    error: 'FILE_TOO_LARGE',
-    message: `Súbor ${file.name} je väčší ako ${MAX_FILE_SIZE_MB} MB.`,
-    file_name: file.name,
-    file_size: file.size,
-    max_size_mb: MAX_FILE_SIZE_MB,
+function getNoTextWarning(file: File): string {
+  const extension = getFileExtension(file.name);
+
+  if (extension === '.pdf') {
+    return 'PDF bol nahratý, ale nepodarilo sa z neho extrahovať text. Pravdepodobne ide o sken bez textovej vrstvy alebo chránený PDF súbor.';
+  }
+
+  if (extension === '.doc') {
+    return 'Starý formát .doc sa nedá spoľahlivo extrahovať. Súbor ulož ako .docx a nahraj znova.';
+  }
+
+  if (extension === '.docx') {
+    return 'DOCX bol nahratý, ale extrakcia textu vrátila prázdny obsah. Skontroluj, či dokument neobsahuje iba obrázky alebo sken.';
+  }
+
+  if (extension === '.odt') {
+    return 'ODT bol nahratý, ale extrakcia textu zatiaľ nie je dostupná. Odporúčané je nahrať DOCX alebo PDF s textovou vrstvou.';
+  }
+
+  if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
+    return 'Obrázok bol nahratý, ale OCR čítanie textu z obrázka zatiaľ nie je zapnuté.';
+  }
+
+  if (['.xls', '.xlsx'].includes(extension)) {
+    return 'Tabuľkový súbor bol nahratý, ale text sa z neho zatiaľ neextrahuje.';
+  }
+
+  if (['.ppt', '.pptx'].includes(extension)) {
+    return 'Prezentácia bola nahratá, ale text sa z nej zatiaľ neextrahuje.';
+  }
+
+  return 'Súbor bol nahratý, ale neobsahuje dostupný extrahovaný text.';
+}
+
+function collectFiles(formData: FormData): File[] {
+  const candidates = [
+    ...formData.getAll('files'),
+    ...formData.getAll('file'),
+    ...formData.getAll('reviews'),
+    ...formData.getAll('attachments'),
+  ];
+
+  return candidates.filter((item): item is File => item instanceof File);
+}
+
+function getExtractedTextSafe(extracted: unknown): string {
+  const item = extracted as {
+    text?: unknown;
+    content?: unknown;
+    extractedText?: unknown;
   };
+
+  return cleanText(
+    String(item.extractedText || item.content || item.text || ''),
+  );
+}
+
+function getExtractedWarningSafe(extracted: unknown): string {
+  const item = extracted as {
+    warning?: unknown;
+  };
+
+  return typeof item.warning === 'string' ? item.warning : '';
 }
 
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
-
-    const files = formData
-      .getAll('files')
-      .filter((item): item is File => item instanceof File);
+    const files = collectFiles(formData);
 
     if (!files.length) {
       return NextResponse.json(
@@ -137,6 +214,7 @@ export async function POST(req: NextRequest) {
           ok: false,
           error: 'NO_FILES',
           message: 'Neboli odoslané žiadne súbory.',
+          accepted_field_names: ['files', 'file', 'reviews', 'attachments'],
         },
         { status: 400 },
       );
@@ -145,70 +223,117 @@ export async function POST(req: NextRequest) {
     const uploadedFiles: UploadedFileResponse[] = [];
 
     for (const file of files) {
+      let bufferSize = 0;
+
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        bufferSize = arrayBuffer.byteLength;
+      } catch {
+        bufferSize = 0;
+      }
+
+      const base = makeBaseFileResponse(file, bufferSize);
+
       if (!isAllowedFile(file)) {
-        return NextResponse.json(buildUnsupportedResponse(file), {
-          status: 400,
+        uploadedFiles.push({
+          ...base,
+          text: '',
+          content: '',
+          extractedText: '',
+          charCount: 0,
+          textPreview: '',
+          ok: false,
+          status: 'rejected',
+          error: 'UNSUPPORTED_FILE_TYPE',
+          warning: `Nepodporovaný formát súboru: ${file.name}`,
         });
+
+        continue;
       }
 
       if (file.size > MAX_FILE_SIZE_BYTES) {
-        return NextResponse.json(buildTooLargeResponse(file), {
-          status: 400,
+        uploadedFiles.push({
+          ...base,
+          text: '',
+          content: '',
+          extractedText: '',
+          charCount: 0,
+          textPreview: '',
+          ok: false,
+          status: 'rejected',
+          error: 'FILE_TOO_LARGE',
+          warning: `Súbor ${file.name} je väčší ako ${MAX_FILE_SIZE_MB} MB.`,
         });
+
+        continue;
       }
-
-      const arrayBuffer = await file.arrayBuffer();
-      const bufferSize = arrayBuffer.byteLength;
-
-      let extractedText = '';
-      let warning = '';
-      let extractionOk = false;
 
       try {
         const extracted = await extractTextFromFile(file);
 
-        extractedText = extracted.text || '';
-        warning = extracted.warning || '';
-        extractionOk = extracted.ok || extractedText.trim().length > 0;
+        const extractedText = getExtractedTextSafe(extracted);
+        const extractedWarning = getExtractedWarningSafe(extracted);
+
+        const warning =
+          extractedWarning || (!extractedText ? getNoTextWarning(file) : '');
+
+        uploadedFiles.push({
+          ...base,
+
+          text: extractedText,
+          content: extractedText,
+          extractedText,
+          charCount: extractedText.length,
+          textPreview: extractedText.slice(0, 500),
+
+          ok: extractedText.length > 0,
+          status:
+            extractedText.length > 0
+              ? 'processed'
+              : 'processed_without_text',
+          warning,
+        });
+
+        console.log('UPLOAD FILE EXTRACTED:', {
+          name: file.name,
+          extension: base.extension,
+          type: base.type,
+          size: base.size,
+          charCount: extractedText.length,
+          preview: extractedText.slice(0, 160),
+          warning,
+        });
       } catch (error) {
-        console.error('UPLOAD EXTRACT TEXT ERROR:', error);
+        console.error('UPLOAD EXTRACT TEXT ERROR:', {
+          name: file.name,
+          error,
+        });
 
-        extractedText = '';
-        warning =
-          error instanceof Error
-            ? error.message
-            : 'Súbor bol nahratý, ale nepodarilo sa z neho extrahovať text.';
-        extractionOk = false;
+        uploadedFiles.push({
+          ...base,
+          text: '',
+          content: '',
+          extractedText: '',
+          charCount: 0,
+          textPreview: '',
+          ok: false,
+          status: 'failed',
+          error: 'EXTRACTION_FAILED',
+          warning:
+            error instanceof Error
+              ? error.message
+              : 'Súbor bol nahratý, ale nepodarilo sa z neho extrahovať text.',
+        });
       }
-
-      const cleanedText = String(extractedText || '').trim();
-
-      uploadedFiles.push({
-        original_name: file.name,
-        name: file.name,
-        safe_name: safeFileName(file.name),
-        size: file.size,
-        type: file.type || 'application/octet-stream',
-        extension: getFileExtension(file.name),
-        buffer_size: bufferSize,
-
-        text: cleanedText,
-        content: cleanedText,
-        extractedText: cleanedText,
-        charCount: cleanedText.length,
-
-        ok: extractionOk,
-        warning:
-          warning ||
-          (!cleanedText
-            ? 'Súbor bol nahratý, ale neobsahuje dostupný extrahovaný text. Ak ide o PDF, skontroluj, či nejde o sken bez textovej vrstvy.'
-            : ''),
-      });
     }
 
     const totalExtractedCharacters = uploadedFiles.reduce(
       (sum, file) => sum + file.charCount,
       0,
+    );
+
+    const processedFiles = uploadedFiles.filter(
+      (file) => file.status === 'processed',
     );
 
     const filesWithoutText = uploadedFiles.filter(
@@ -219,16 +344,21 @@ export async function POST(req: NextRequest) {
       ok: true,
       message: 'FILES_ACCEPTED_AND_PROCESSED',
       count: uploadedFiles.length,
+      processedCount: processedFiles.length,
       files: uploadedFiles,
       supported_formats: ALLOWED_EXTENSIONS,
+      max_file_size_mb: MAX_FILE_SIZE_MB,
       totalExtractedCharacters,
       hasExtractedText: totalExtractedCharacters > 0,
       warnings: filesWithoutText
         .map((file) => ({
           name: file.name,
+          extension: file.extension,
+          status: file.status,
           warning: file.warning,
+          error: file.error,
         }))
-        .filter((item) => item.warning),
+        .filter((item) => item.warning || item.error),
     });
   } catch (err: any) {
     console.error('UPLOAD ERROR:', err);

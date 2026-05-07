@@ -1,12 +1,15 @@
-import { streamText } from 'ai';
+import { generateText, streamText } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
 import { mistral } from '@ai-sdk/mistral';
 import { xai } from '@ai-sdk/xai';
+import { NextResponse } from 'next/server';
+import mammoth from 'mammoth';
 import { createAdminClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 export const maxDuration = 90;
 
 // ================= TYPES =================
@@ -80,6 +83,19 @@ type SourceSettings = {
   allowAiKnowledgeFallback: boolean;
 };
 
+type ExtractedAttachment = {
+  name: string;
+  type: string;
+  size: number;
+  extension: string;
+  label: string;
+  extractedText: string;
+  extractedChars: number;
+  extractedPreview: string;
+  status: string;
+  error?: string | null;
+};
+
 // ================= PROJECT DOCUMENTS =================
 
 async function loadProjectDocuments(projectId: string | null) {
@@ -98,7 +114,7 @@ async function loadProjectDocuments(projectId: string | null) {
     .order('created_at', { ascending: false });
 
   if (error) {
-    console.error('LOAD PROJECT DOCUMENTS ERROR:', error);
+    console.error('LOAD_PROJECT_DOCUMENTS_ERROR:', error);
     return [];
   }
 
@@ -121,6 +137,32 @@ function parseJson<T>(value: FormDataEntryValue | null, fallback: T): T {
 
 function toCleanString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeText(value: string): string {
+  return String(value || '')
+    .replace(/\u0000/g, '')
+    .replace(/\uFEFF/g, '')
+    .replace(/\u200B/g, '')
+    .replace(/\u200C/g, '')
+    .replace(/\u200D/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
+function limitText(value: string, maxLength: number): string {
+  const cleaned = normalizeText(value);
+
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
+
+  return `${cleaned.slice(0, maxLength)}
+
+[TEXT BOL SKRÁTENÝ PRE TECHNICKÝ LIMIT API.]`;
 }
 
 function isAllowedAgent(value: unknown): value is Agent {
@@ -185,6 +227,22 @@ function normalizeSourceMode(value: unknown): SourceMode {
   return 'uploaded_documents_first';
 }
 
+function asBoolean(value: FormDataEntryValue | null, fallback: boolean) {
+  if (value === null) return fallback;
+
+  const normalized = String(value).toLowerCase().trim();
+
+  if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+    return true;
+  }
+
+  if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+    return false;
+  }
+
+  return fallback;
+}
+
 // ================= ATTACHMENTS =================
 
 const allowedAttachmentExtensions = [
@@ -205,6 +263,15 @@ const allowedAttachmentExtensions = [
   '.csv',
   '.ppt',
   '.pptx',
+];
+
+const extractableAttachmentExtensions = [
+  '.pdf',
+  '.docx',
+  '.txt',
+  '.md',
+  '.csv',
+  '.rtf',
 ];
 
 function getFileExtension(fileName: string) {
@@ -244,92 +311,174 @@ function getAttachmentLabel(fileName: string) {
   return 'Súbor';
 }
 
+function stripRtf(value: string): string {
+  return value
+    .replace(/\\par[d]?/g, '\n')
+    .replace(/\\'[0-9a-fA-F]{2}/g, ' ')
+    .replace(/\\[a-zA-Z]+\d* ?/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  const pdfParseModule: any = await import('pdf-parse');
+  const pdfParse = pdfParseModule.default || pdfParseModule;
+
+  const result = await pdfParse(buffer);
+
+  return normalizeText(result?.text || '');
+}
+
+async function extractDocxText(buffer: Buffer): Promise<string> {
+  const result = await mammoth.extractRawText({ buffer });
+
+  return normalizeText(result.value || '');
+}
+
+async function extractTextFromSingleFile(file: File): Promise<ExtractedAttachment> {
+  const name = file.name || 'neznamy-subor';
+  const type = file.type || 'application/octet-stream';
+  const size = file.size || 0;
+  const extension = getFileExtension(name);
+  const label = getAttachmentLabel(name);
+
+  if (!isAllowedAttachment(file)) {
+    return {
+      name,
+      type,
+      size,
+      extension,
+      label,
+      extractedText: '',
+      extractedChars: 0,
+      extractedPreview: '',
+      status: 'Nepodporovaný formát súboru.',
+      error: 'Nepodporovaný formát súboru.',
+    };
+  }
+
+  if (!extractableAttachmentExtensions.includes(extension)) {
+    return {
+      name,
+      type,
+      size,
+      extension,
+      label,
+      extractedText: '',
+      extractedChars: 0,
+      extractedPreview: '',
+      status:
+        'Súbor bol priložený, ale z tohto typu sa v tejto API trase neextrahuje text. AI má dostupný iba názov, typ a veľkosť súboru.',
+      error: null,
+    };
+  }
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    let extractedText = '';
+
+    if (['.txt', '.md', '.csv'].includes(extension)) {
+      extractedText = normalizeText(buffer.toString('utf8'));
+    } else if (extension === '.rtf') {
+      extractedText = normalizeText(stripRtf(buffer.toString('utf8')));
+    } else if (extension === '.docx') {
+      extractedText = await extractDocxText(buffer);
+    } else if (extension === '.pdf') {
+      extractedText = await extractPdfText(buffer);
+    }
+
+    if (!extractedText.trim()) {
+      return {
+        name,
+        type,
+        size,
+        extension,
+        label,
+        extractedText: '',
+        extractedChars: 0,
+        extractedPreview: '',
+        status:
+          extension === '.pdf'
+            ? 'Text sa nepodarilo extrahovať. PDF môže byť skenované ako obrázok alebo môže obsahovať iba obrazové strany.'
+            : 'Text sa nepodarilo extrahovať alebo je súbor prázdny.',
+        error: null,
+      };
+    }
+
+    const limited = limitText(extractedText, 50000);
+
+    return {
+      name,
+      type,
+      size,
+      extension,
+      label,
+      extractedText: limited,
+      extractedChars: extractedText.length,
+      extractedPreview: extractedText.slice(0, 1200),
+      status: 'Text bol úspešne extrahovaný.',
+      error: null,
+    };
+  } catch (error) {
+    return {
+      name,
+      type,
+      size,
+      extension,
+      label,
+      extractedText: '',
+      extractedChars: 0,
+      extractedPreview: '',
+      status: 'Extrakcia zlyhala.',
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Nepodarilo sa extrahovať text zo súboru.',
+    };
+  }
+}
+
 async function extractAttachmentTexts(files: File[]) {
-  const results: string[] = [];
+  const extractedFiles: ExtractedAttachment[] = [];
 
   if (!files.length) {
-    return results;
+    return {
+      extractedFiles,
+      attachmentTexts: [] as string[],
+    };
   }
 
   for (const file of files) {
-    if (!isAllowedAttachment(file)) {
-      results.push(
-        `NEPODPOROVANÝ SÚBOR:
-Názov: ${file.name}
-Typ: ${file.type || 'application/octet-stream'}
-Veľkosť: ${file.size} bajtov
-Stav: Tento formát súboru nie je povolený.`
-      );
-      continue;
-    }
-
-    const extension = getFileExtension(file.name);
-    const label = getAttachmentLabel(file.name);
-
-    if (['.txt', '.md', '.csv'].includes(extension)) {
-      try {
-        const content = await file.text();
-
-        results.push(
-          `PRILOŽENÝ SÚBOR:
-Názov: ${file.name}
-Typ: ${label}
-MIME: ${file.type || 'text/plain'}
-Veľkosť: ${file.size} bajtov
-Stav extrakcie: Text bol extrahovaný.
-
-EXTRAHOVANÝ TEXT:
-${content.slice(0, 30000)}`
-        );
-
-        continue;
-      } catch {
-        results.push(
-          `PRILOŽENÝ SÚBOR:
-Názov: ${file.name}
-Typ: ${label}
-MIME: ${file.type || 'text/plain'}
-Veľkosť: ${file.size} bajtov
-Stav extrakcie: Textový obsah sa nepodarilo načítať.`
-        );
-
-        continue;
-      }
-    }
-
-    let note = '';
-
-    if (extension === '.pdf') {
-      note =
-        'PDF dokument bol priložený, ale táto API trasa zatiaľ neextrahuje plný text PDF. AI pozná iba názov, typ a veľkosť súboru, nie celý obsah.';
-    } else if (['.doc', '.docx', '.odt', '.rtf'].includes(extension)) {
-      note =
-        'Dokument bol priložený, ale táto API trasa zatiaľ neextrahuje plný text Word/ODT/RTF dokumentu. AI pozná iba názov, typ a veľkosť súboru, nie celý obsah.';
-    } else if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
-      note =
-        'Obrázok bol priložený, ale táto API trasa zatiaľ nerobí OCR ani vizuálnu analýzu obrázka. AI pozná iba názov, typ a veľkosť súboru.';
-    } else if (['.xls', '.xlsx'].includes(extension)) {
-      note =
-        'Tabuľkový súbor bol priložený, ale táto API trasa zatiaľ neextrahuje obsah buniek XLS/XLSX. AI pozná iba názov, typ a veľkosť súboru.';
-    } else if (['.ppt', '.pptx'].includes(extension)) {
-      note =
-        'Prezentácia bola priložená, ale táto API trasa zatiaľ neextrahuje text zo slidov. AI pozná iba názov, typ a veľkosť súboru.';
-    } else {
-      note =
-        'Súbor bol priložený, ale táto API trasa zatiaľ neextrahuje jeho plný obsah.';
-    }
-
-    results.push(
-      `PRILOŽENÝ SÚBOR:
-Názov: ${file.name}
-Typ: ${label}
-MIME: ${file.type || 'application/octet-stream'}
-Veľkosť: ${file.size} bajtov
-Stav extrakcie: ${note}`
-    );
+    const extracted = await extractTextFromSingleFile(file);
+    extractedFiles.push(extracted);
   }
 
-  return results;
+  const attachmentTexts = extractedFiles.map((file, index) => {
+    const textBlock =
+      file.extractedText && file.extractedText.trim().length > 0
+        ? file.extractedText
+        : '[Text nebol extrahovaný alebo nie je dostupný.]';
+
+    return `PRILOŽENÝ SÚBOR ${index + 1}
+Názov: ${file.name}
+Typ: ${file.label}
+MIME: ${file.type}
+Prípona: ${file.extension || 'neuvedené'}
+Veľkosť: ${file.size} bajtov
+Stav extrakcie: ${file.status}
+Počet extrahovaných znakov: ${file.extractedChars}
+
+EXTRAHOVANÝ TEXT:
+${textBlock}`;
+  });
+
+  return {
+    extractedFiles,
+    attachmentTexts,
+  };
 }
 
 // ================= SYSTEM PROMPT =================
@@ -342,12 +491,6 @@ function buildAttachmentBlock(attachmentTexts: string[]) {
   return `\nPRILOŽENÉ SÚBORY A PODKLADY:\n${attachmentTexts.join(
     '\n\n-----------------\n\n'
   )}\n`;
-}
-
-function buildProfileKeywords(profile: SavedProfile | null) {
-  const keywords = getKeywords(profile);
-
-  return keywords.length > 0 ? keywords.join(', ') : 'Neuvedené';
 }
 
 function buildSystemPrompt(
@@ -376,26 +519,34 @@ function buildSystemPrompt(
   const hasAttachments = attachmentTexts.length > 0;
 
   const documentSourceRules = `
-PRAVIDLÁ PRE PRILOŽENÉ DOKUMENTY, ZDROJE A RELEVANTNOSŤ:
+PRAVIDLÁ PRE PRILOŽENÉ DOKUMENTY, EXTRAHOVANÝ TEXT, ZDROJE A RELEVANTNOSŤ:
 
 1. Semantic Scholar je vypnutý. Nepoužívaj Semantic Scholar, neuvádzaj ho ako zdroj a nespomínaj, že z neho čerpáš.
 
 2. Primárny zdrojový základ tvoria:
-- priložené dokumenty používateľa,
+- extrahovaný text z priložených dokumentov používateľa,
 - dokumenty načítané zo Supabase,
 - text zadaný používateľom v konverzácii,
 - uložený Profil práce.
 
-3. Najprv posúď, či priložené dokumenty tematicky zodpovedajú Profilu práce.
+3. Ak sa z prílohy podarilo extrahovať text, musíš tento extrahovaný text použiť ako prvý zdrojový podklad pred všeobecnými znalosťami AI.
 
-4. Profil práce je rozhodujúci. Príloha je relevantná iba vtedy, ak súvisí s témou, cieľom, problémom, metodológiou, odborom alebo kľúčovými slovami profilu.
+4. Nikdy nepíš, že obsah nebol extrahovaný, ak je pri prílohe uvedené:
+Stav extrakcie: Text bol úspešne extrahovaný.
 
-5. Ak Profil práce hovorí napríklad o škole, pedagogike, divadle, politike, manažmente, IT alebo inom odbore a používateľ priloží dokument o nesúvisiacej téme, napríklad o jačmeni, poľnohospodárstve alebo úplne inom obsahu, musíš jasne uviesť:
-"Požadovaná príloha nezodpovedá profilu práce a nebude použitá ako odborný zdroj."
+5. Ak je pri prílohe extrahovaný text, ale neobsahuje úplné bibliografické údaje, napíš:
+Text bol extrahovaný, ale neobsahuje úplné bibliografické údaje.
 
-6. Ak je príloha nesúvisiaca s profilom práce, nepoužívaj ju ako odborný zdroj pre hlavný text.
+6. Najprv posúď, či priložené dokumenty tematicky zodpovedajú Profilu práce.
 
-7. Ak sú priložené dokumenty relevantné a ich text je dostupný, čerpaj z nich a v sekcii zdrojov vypíš:
+7. Profil práce je rozhodujúci. Príloha je relevantná iba vtedy, ak súvisí s témou, cieľom, problémom, metodológiou, odborom alebo kľúčovými slovami profilu.
+
+8. Ak Profil práce hovorí napríklad o škole, pedagogike, divadle, politike, manažmente, IT alebo inom odbore a používateľ priloží dokument o nesúvisiacej téme, musíš jasne uviesť:
+Požadovaná príloha nezodpovedá profilu práce a nebude použitá ako odborný zdroj.
+
+9. Ak je príloha nesúvisiaca s profilom práce, nepoužívaj ju ako odborný zdroj pre hlavný text.
+
+10. Ak sú priložené dokumenty relevantné a ich text je dostupný, čerpaj z nich a v sekcii zdrojov vypíš:
 - názov dokumentu,
 - typ dokumentu,
 - autorov, ak sú v dokumente uvedení,
@@ -404,71 +555,171 @@ PRAVIDLÁ PRE PRILOŽENÉ DOKUMENTY, ZDROJE A RELEVANTNOSŤ:
 - vydavateľa, časopis, inštitúciu alebo web, ak sú uvedené,
 - URL alebo DOI, ak sa v dokumente nachádzajú.
 
-8. Ak sú priložené dokumenty, ale neobsahujú žiadne identifikovateľné bibliografické zdroje, jasne napíš:
-"V priložených dokumentoch sa nenachádzajú žiadne identifikovateľné bibliografické zdroje."
+11. Ak sú priložené dokumenty, ale neobsahujú žiadne identifikovateľné bibliografické zdroje, jasne napíš:
+V priložených dokumentoch sa nenachádzajú žiadne identifikovateľné bibliografické zdroje.
 
-9. Ak sú priložené dokumenty, ale server neextrahoval ich obsah, jasne napíš, že nemôžeš overiť zdroje vo vnútri dokumentu, pretože máš dostupný iba názov, typ a veľkosť súboru.
+12. Ak sú priložené dokumenty, ale server neextrahoval ich obsah, jasne napíš, že nemôžeš overiť zdroje vo vnútri dokumentu, pretože máš dostupný iba názov, typ a veľkosť súboru.
 
-10. Ak nie sú priložené žiadne dokumenty a používateľ chce vytvoriť odborný text, môžeš použiť všeobecné znalosti AI modelu, ale musíš jasne uviesť:
-"Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI modelu. Neboli dodané overiteľné priložené zdroje."
+13. Ak nie sú priložené žiadne dokumenty a používateľ chce vytvoriť odborný text, môžeš použiť všeobecné znalosti AI modelu, ale musíš jasne uviesť:
+Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI modelu. Neboli dodané overiteľné priložené zdroje.
 
-11. Ak používaš všeobecné znalosti AI modelu, nesmieš predstierať, že si čerpal z konkrétneho priloženého dokumentu.
+14. Ak používaš všeobecné znalosti AI modelu, nesmieš predstierať, že si čerpal z konkrétneho priloženého dokumentu.
 
-12. Ak uvedieš vlastné odborné zdroje, označ ich presne ako:
-"AI odporúčané zdroje na overenie a doplnenie."
+15. Ak uvedieš vlastné odborné zdroje, označ ich presne ako:
+AI odporúčané zdroje na overenie a doplnenie.
 
-13. AI odporúčané zdroje nie sú to isté ako overené priložené zdroje. Musíš ich jasne oddeliť.
+16. AI odporúčané zdroje nie sú to isté ako overené priložené zdroje. Musíš ich jasne oddeliť.
 
-14. Ak odporúčaš všeobecne známe odborné publikácie, uvádzaj iba údaje, ktorými si si primerane istý. Nevymýšľaj DOI, URL, čísla strán, vydanie ani presný názov kapitoly.
+17. Ak odporúčaš všeobecne známe odborné publikácie, uvádzaj iba údaje, ktorými si si primerane istý. Nevymýšľaj DOI, URL, čísla strán, vydanie ani presný názov kapitoly.
 
-15. Ak si nie si istý bibliografickým údajom, napíš "údaj je potrebné overiť".
+18. Ak si nie si istý bibliografickým údajom, napíš:
+údaj je potrebné overiť.
 
-16. Vždy rozdeľ zdroje do týchto skupín:
+19. Vždy rozdeľ zdroje do týchto skupín:
 
 A. Zdroje nájdené v priložených dokumentoch
 B. Priložené dokumenty použité ako podklad
 C. Upozornenia k nerelevantným alebo neoveriteľným prílohám
 D. AI odporúčané zdroje na overenie a doplnenie
 
-17. Ak neexistujú prílohy, sekcia A a B musí jasne uviesť, že neboli dodané žiadne prílohy.
+20. Ak neexistujú prílohy, sekcia A a B musí jasne uviesť, že neboli dodané žiadne prílohy.
 
-18. Ak existujú prílohy, ale nesúvisia s profilom práce, sekcia C musí jasne pomenovať problém.
+21. Ak existujú prílohy, ale nesúvisia s profilom práce, sekcia C musí jasne pomenovať problém.
 
-19. Ak existujú prílohy, ale nie je extrahovaný ich text, sekcia C musí uviesť, že ich obsah nebol overený.
+22. Ak existujú prílohy, ale nie je extrahovaný ich text, sekcia C musí uviesť, že ich obsah nebol overený.
 
-20. Pri akademickom texte používaj citačný štýl podľa profilu práce: ${citationStyle}.
+23. Pri akademickom texte používaj citačný štýl podľa profilu práce: ${citationStyle}.
 
-21. Nevymýšľaj falošné bibliografické údaje. Ak údaj nie je dostupný, napíš "neuvedené".
+24. Nevymýšľaj falošné bibliografické údaje. Ak údaj nie je dostupný, napíš:
+neuvedené.
 
-22. Ak nie je možné overiť zdroje v prílohách, nesmieš tvrdiť, že zdroje boli v prílohách nájdené.
+25. Ak používateľ požiada o prácu, kapitolu, úvod, teóriu, abstrakt alebo metodológiu, sekcia POUŽITÉ ZDROJE A AUTORI musí byť vždy prítomná.
 
-23. Ak používateľ požiada o prácu, kapitolu, úvod, teóriu, abstrakt alebo metodológiu, sekcia "POUŽITÉ ZDROJE A AUTORI" musí byť vždy prítomná.
-
-24. Ak je zapnutá kontrola príloh podľa profilu práce: ${
+26. Ak je zapnutá kontrola príloh podľa profilu práce: ${
     settings.validateAttachmentsAgainstProfile ? 'áno' : 'nie'
   }.
 
-25. Povinný zoznam zdrojov: ${settings.requireSourceList ? 'áno' : 'nie'}.
+27. Povinný zoznam zdrojov: ${settings.requireSourceList ? 'áno' : 'nie'}.
 
-26. Povolené použiť všeobecné znalosti AI pri chýbajúcich prílohách: ${
+28. Povolené použiť všeobecné znalosti AI pri chýbajúcich prílohách: ${
     settings.allowAiKnowledgeFallback ? 'áno' : 'nie'
   }.
 
-27. Aktuálny zdrojový režim: ${settings.sourceMode}.
+29. Aktuálny zdrojový režim: ${settings.sourceMode}.
+`;
+
+  const citationSpecialistRules = `
+ŠPECIÁLNY REŽIM PRE CITÁCIE, BIBLIOGRAFIU A ZDROJE:
+
+Tento režim použi vždy, keď používateľ žiada:
+- spracovať zdroje,
+- pripraviť bibliografiu,
+- opraviť citácie,
+- citovať podľa APA 7 alebo ISO 690,
+- spracovať zoznam literatúry,
+- vytvoriť odkazy v texte,
+- analyzovať výstupy zo softvéru JASP, SPSS, Jamovi, R, Excel alebo iného štatistického softvéru,
+- alebo keď priložený dokument obsahuje zoznam literatúry, bibliografické záznamy, autorov, roky, názvy kníh, článkov, softvér alebo štatistické výstupy.
+
+POVINNÝ TÓN:
+Začni prirodzene, profesionálne a osobne, napríklad:
+Ahoj, ako tvoja citačná špecialistka som analyzovala tvoje vstupné údaje a priložené dokumenty.
+
+Ak poznáš meno používateľa alebo meno adresáta z kontextu, môžeš ho použiť. Ak meno nepoznáš, nepoužívaj vymyslené meno.
+
+POVINNÉ SPRACOVANIE ZDROJOV:
+1. Najprv identifikuj všetky zdroje uvedené v extrahovanom texte dokumentov.
+2. Ak dokument obsahuje neúplný zoznam literatúry, zachovaj všetky dostupné údaje.
+3. Chýbajúce roky, vydania, spoluautorov, vydavateľov, DOI, URL alebo verzie softvéru označ vetou:
+údaj je potrebné overiť.
+4. Ak použiješ pravdepodobné alebo najčastejšie citované vydanie, vždy upozorni:
+Rok alebo vydanie je potrebné overiť podľa konkrétneho výtlačku alebo knižničného záznamu.
+5. Nikdy nevymýšľaj DOI, URL, vydanie, čísla strán ani presné roky, ak nie sú dostupné.
+6. Ak sa v dokumente nachádza "a kol.", odporuč doplniť všetkých spoluautorov.
+7. Ak dokument obsahuje výstupy zo štatistického softvéru, uveď softvér ako samostatný zdroj.
+8. Ak sa v dokumente nachádza JASP, priprav citáciu softvéru JASP.
+9. Ak nie je známa verzia softvéru JASP, použi n.d. alebo upozorni, že verziu treba doplniť.
+10. Ak je známa verzia, priprav záznam v tvare:
+JASP Team. (rok). JASP (Version verzia) [Computer software]. https://jasp-stats.org/
+
+POVINNÁ ŠTRUKTÚRA ODPOVEDE PRI CITÁCIÁCH:
+
+A) Formátované bibliografické záznamy
+Rozdeľ podľa typu:
+- Knihy
+- Články
+- Webové zdroje
+- Softvér
+- Interné dokumenty / priložené výstupy
+
+Pri každom zázname uveď poznámku, ak je potrebné niečo overiť.
+
+B) Varianty odkazov v texte
+Pri každom zdroji priprav:
+- parentetický odkaz,
+- naratívny odkaz,
+- ukážku použitia vo vete.
+
+C) Špeciálne prípady
+Vysvetli:
+- viac autorov,
+- et al.,
+- a kol.,
+- chýbajúci rok,
+- chýbajúce miesto vydania,
+- softvér,
+- štatistické výstupy,
+- interné dokumenty,
+- rozdiel medzi overeným zdrojom z prílohy a AI odporúčaným zdrojom.
+
+D) Validácia a korekcia
+Uveď konkrétne:
+- ktoré údaje treba overiť,
+- ktoré roky chýbajú,
+- či je potrebné doplniť vydavateľa,
+- či je potrebné doplniť spoluautorov,
+- či je potrebné doplniť verziu softvéru,
+- či APA 7 uvádza alebo neuvádza miesto vydania,
+- či treba overiť fyzický výtlačok alebo knižničný záznam.
+
+E) Finálny zoznam literatúry
+Priprav čistý zoznam literatúry vhodný na vloženie do práce.
+
+F) Odporúčaná veta do metodológie
+Ak sú v dokumente štatistické výstupy, priprav odbornú vetu do metodologickej časti.
+
+PRAVIDLÁ APA 7:
+- Pri knihách sa v APA 7 neuvádza miesto vydania.
+- Pri troch a viacerých autoroch sa v texte používa "et al.".
+- V zozname literatúry sa uvádzajú dostupní autori podľa pravidiel APA 7.
+- Pri softvéri sa uvádza autor alebo tím, rok, názov, verzia, typ v hranatých zátvorkách a URL.
+- Ak rok nie je známy, použi (n.d.) a upozorni, že údaj treba overiť.
+
+PRAVIDLÁ ISO 690:
+- Ak profil práce vyžaduje ISO 690, priprav záznamy podľa ISO 690.
+- Ak používateľ výslovne žiada APA 7, použi APA 7 aj vtedy, keď profil obsahuje inú normu.
+
+DÔLEŽITÉ:
+- Primárne vychádzaj zo zdrojov v priložených dokumentoch.
+- Ak zdroj nie je v dokumente, jasne ho označ ako AI odporúčaný zdroj na overenie.
+- Neprezentuj odporúčaný zdroj ako overene nájdený v prílohe.
+- Výstup má byť profesionálny, štruktúrovaný a vhodný na vloženie do Word dokumentu.
 `;
 
   return `
-Si ZEDPERA, profesionálny akademický AI asistent a AI vedúci práce.
+Si ZEDPERA, profesionálny akademický AI asistent, AI vedúci práce a citačná špecialistka.
 
 HLAVNÝ PRACOVNÝ POSTUP:
 1. Najprv vychádzaj z uloženého Profilu práce.
-2. Následne zohľadni priložené súbory a dokumenty zo Supabase.
-3. Semantic Scholar je vypnutý a nesmie sa použiť.
-4. Ak existujú prílohy, najprv posúď ich tematickú relevantnosť voči Profilu práce.
-5. Ak sú prílohy relevantné a ich text je dostupný, použi ich ako primárny podklad.
-6. Ak prílohy chýbajú, môžeš vychádzať zo všeobecných znalostí AI modelu, ale musíš to transparentne uviesť.
-7. Ak prílohy neobsahujú zdroje, musíš to transparentne uviesť.
-8. Ak prílohy nesúvisia s profilom práce, musíš upozorniť, že nezodpovedajú profilu práce.
+2. Následne použi extrahovaný text z priložených dokumentov a dokumenty zo Supabase.
+3. Ak je pri prílohe extrahovaný text, musíš ho použiť pred všeobecnými znalosťami AI.
+4. Semantic Scholar je vypnutý a nesmie sa použiť.
+5. Ak existujú prílohy, najprv posúď ich tematickú relevantnosť voči Profilu práce.
+6. Ak sú prílohy relevantné a ich text je dostupný, použi ich ako primárny podklad.
+7. Ak prílohy chýbajú, môžeš vychádzať zo všeobecných znalostí AI modelu, ale musíš to transparentne uviesť.
+8. Ak prílohy neobsahujú zdroje, musíš to transparentne uviesť.
+9. Ak prílohy nesúvisia s profilom práce, musíš upozorniť, že nezodpovedajú profilu práce.
+10. Nikdy nepíš, že obsah nebol extrahovaný, ak je nižšie uvedený extrahovaný text.
 
 HLAVNÉ PRAVIDLÁ:
 - Odpovedaj v jazyku práce: ${workLanguage}.
@@ -480,7 +731,6 @@ HLAVNÉ PRAVIDLÁ:
 - Nepoužívaj Markdown formátovanie ako tučný text, mriežky, hviezdičky, oddeľovače ani kódové bloky.
 - Nadpisy píš obyčajným textom bez znakov #, *, _, \`.
 - Výstup musí byť čistý text vhodný na priame vloženie do Word dokumentu.
-- Ak sú priložené dokumenty, ale ich obsah nie je extrahovaný, nepredstieraj, že poznáš ich plný obsah.
 
 ULOŽENÝ PROFIL PRÁCE:
 Názov práce: ${profile?.title || 'Neuvedené'}
@@ -556,16 +806,27 @@ ${attachmentsBlock}
 
 ${documentSourceRules}
 
+${citationSpecialistRules}
+
 FORMÁT ODPOVEDE:
 Použi presne tieto sekcie. Nepoužívaj Markdown znaky, hviezdičky, mriežky ani kódové bloky.
 
 === VÝSTUP ===
-Sem napíš hlavný výstup ako čistý akademický text. Ak ide o akademický text, vkladaj citácie priamo do textu podľa normy ${citationStyle}. Ak neboli dostupné overiteľné zdroje, nepoužívaj falošné citácie.
+Sem napíš hlavný výstup ako čistý akademický text. Ak používateľ žiada citácie alebo zdroje, priprav odpoveď ako citačná špecialistka v štruktúre A až F:
+A) Formátované bibliografické záznamy
+B) Varianty odkazov v texte
+C) Špeciálne prípady
+D) Validácia a korekcia
+E) Finálny zoznam literatúry
+F) Odporúčaná veta do metodológie
+
+Ak ide o akademický text, vkladaj citácie priamo do textu podľa normy ${citationStyle}. Ak neboli dostupné overiteľné zdroje, nepoužívaj falošné citácie.
 
 === ANALÝZA ===
 Stručne vysvetli:
 - z ktorých údajov profilu si čerpal,
 - či boli priložené dokumenty,
+- či bol text príloh extrahovaný,
 - či priložené dokumenty tematicky zodpovedajú profilu práce,
 - či sa v priložených dokumentoch nachádzajú identifikovateľné bibliografické zdroje,
 - či bol text vytvorený aj zo všeobecných znalostí AI modelu.
@@ -583,14 +844,23 @@ Uveď konkrétne odporúčania v čistom texte bez Markdown symbolov. Odporúča
 
 === POUŽITÉ ZDROJE A AUTORI ===
 A. Zdroje nájdené v priložených dokumentoch
-Vypíš všetky identifikované zdroje z dokumentov. Ak sa nenašli, napíš:
+Vypíš všetky identifikované zdroje z extrahovaného textu dokumentov. Ak sa nenašli, napíš:
 V priložených dokumentoch sa nenachádzajú žiadne identifikovateľné bibliografické zdroje.
+Ak bol text extrahovaný, ale neobsahuje úplné bibliografické údaje, napíš:
+Text bol extrahovaný, ale neobsahuje úplné bibliografické údaje.
 
-B. Priložené dokumenty použité ako podklad
+B. Formátované bibliografické záznamy
+Uprav všetky dostupné zdroje podľa citačnej normy. Ak používateľ žiada APA 7, použi APA 7. Ak používateľ žiada ISO 690, použi ISO 690. Pri chýbajúcich údajoch napíš:
+údaj je potrebné overiť.
+
+C. Varianty odkazov v texte
+Pri každom zdroji priprav parentetický a naratívny odkaz.
+
+D. Priložené dokumenty použité ako podklad
 Vypíš názvy relevantných priložených dokumentov, z ktorých si čerpal. Ak neboli priložené žiadne dokumenty, napíš:
 Neboli priložené žiadne dokumenty.
 
-C. Upozornenia k nerelevantným alebo neoveriteľným prílohám
+E. Upozornenia k nerelevantným alebo neoveriteľným prílohám
 Ak niektorá príloha nesúvisí s profilom práce, vypíš:
 Požadovaná príloha nezodpovedá profilu práce: názov súboru.
 Ak príloha nebola obsahovo extrahovaná, vypíš:
@@ -598,7 +868,7 @@ Obsah prílohy nebol overený, pretože server má dostupný iba názov, typ a v
 Ak všetky dostupné prílohy súvisia a ich obsah je použiteľný, napíš:
 Neboli zistené nerelevantné prílohy.
 
-D. AI odporúčané zdroje na overenie a doplnenie
+F. AI odporúčané zdroje na overenie a doplnenie
 Ak neboli priložené zdroje alebo sú zdroje nedostatočné, vypíš relevantné odborné zdroje, ktoré odporúčaš overiť a doplniť. Označ ich ako odporúčané, nie ako overene použité z príloh. Nevymýšľaj DOI, URL ani presné strany.
 `;
 }
@@ -734,11 +1004,50 @@ async function createStreamResponse({
     model,
     system: systemPrompt,
     messages: normalizedMessages,
-    temperature: 0.45,
+    temperature: 0.35,
     maxOutputTokens: 4500,
   });
 
   return result.toTextStreamResponse();
+}
+
+async function createJsonResponse({
+  model,
+  systemPrompt,
+  normalizedMessages,
+  extractedFiles,
+  providerLabel,
+}: {
+  model: ModelResult['model'];
+  systemPrompt: string;
+  normalizedMessages: ReturnType<typeof normalizeMessages>;
+  extractedFiles: ExtractedAttachment[];
+  providerLabel: string;
+}) {
+  const result = await generateText({
+    model,
+    system: systemPrompt,
+    messages: normalizedMessages,
+    temperature: 0.35,
+    maxOutputTokens: 4500,
+  });
+
+  return NextResponse.json({
+    ok: true,
+    provider: providerLabel,
+    output: result.text || '',
+    extractedFiles: extractedFiles.map((file) => ({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      extension: file.extension,
+      label: file.label,
+      extractedChars: file.extractedChars,
+      extractedPreview: file.extractedPreview,
+      status: file.status,
+      error: file.error || null,
+    })),
+  });
 }
 
 // ================= API ROUTE =================
@@ -757,6 +1066,7 @@ export async function POST(req: Request) {
     let validateAttachmentsAgainstProfile = true;
     let requireSourceList = true;
     let allowAiKnowledgeFallback = true;
+    let returnExtractedFilesInfo = false;
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData();
@@ -768,15 +1078,22 @@ export async function POST(req: Request) {
 
       sourceMode = normalizeSourceMode(formData.get('sourceMode')?.toString());
 
-      validateAttachmentsAgainstProfile =
-        formData.get('validateAttachmentsAgainstProfile')?.toString() !==
-        'false';
+      validateAttachmentsAgainstProfile = asBoolean(
+        formData.get('validateAttachmentsAgainstProfile'),
+        true
+      );
 
-      requireSourceList =
-        formData.get('requireSourceList')?.toString() !== 'false';
+      requireSourceList = asBoolean(formData.get('requireSourceList'), true);
 
-      allowAiKnowledgeFallback =
-        formData.get('allowAiKnowledgeFallback')?.toString() !== 'false';
+      allowAiKnowledgeFallback = asBoolean(
+        formData.get('allowAiKnowledgeFallback'),
+        true
+      );
+
+      returnExtractedFilesInfo = asBoolean(
+        formData.get('returnExtractedFilesInfo'),
+        false
+      );
 
       files = formData
         .getAll('files')
@@ -798,6 +1115,8 @@ export async function POST(req: Request) {
 
       allowAiKnowledgeFallback = body?.allowAiKnowledgeFallback !== false;
 
+      returnExtractedFilesInfo = body?.returnExtractedFilesInfo === true;
+
       files = [];
     }
 
@@ -816,24 +1135,40 @@ export async function POST(req: Request) {
       });
     }
 
-    const uploadedAttachmentTexts = await extractAttachmentTexts(files);
+    const { extractedFiles, attachmentTexts: uploadedAttachmentTexts } =
+      await extractAttachmentTexts(files);
+
+    console.log(
+      'EXTRACTED_FILES_DEBUG:',
+      extractedFiles.map((file) => ({
+        name: file.name,
+        extension: file.extension,
+        chars: file.extractedChars,
+        status: file.status,
+        error: file.error,
+        preview: file.extractedPreview.slice(0, 200),
+      }))
+    );
+
     const projectDocuments = await loadProjectDocuments(projectId);
 
     const projectDocumentTexts = projectDocuments.map((doc, index) => {
       const documentType = doc.file_type || doc.type || 'neuvedené';
+      const extractedText = normalizeText(doc.extracted_text || '');
 
       return `DOKUMENT ZO SUPABASE ${index + 1}
 Názov: ${doc.file_name}
 Typ: ${documentType}
 Veľkosť: ${doc.file_size || 0} bajtov
 Stav extrakcie: ${
-        doc.extracted_text
+        extractedText
           ? 'Dokument má uložený extrahovaný text.'
           : 'Dokument nemá uložený extrahovaný text.'
       }
+Počet extrahovaných znakov: ${extractedText.length}
 
 EXTRAHOVANÝ TEXT:
-${doc.extracted_text || '[Dokument nemá uložený extrahovaný text]'}`;
+${extractedText ? limitText(extractedText, 50000) : '[Dokument nemá uložený extrahovaný text]'}`;
     });
 
     const attachmentTexts = [
@@ -853,13 +1188,23 @@ ${doc.extracted_text || '[Dokument nemá uložený extrahovaný text]'}`;
     try {
       const primary = getModelByAgent(agent);
 
+      if (returnExtractedFilesInfo) {
+        return await createJsonResponse({
+          model: primary.model,
+          systemPrompt,
+          normalizedMessages,
+          extractedFiles,
+          providerLabel: primary.providerLabel,
+        });
+      }
+
       return await createStreamResponse({
         model: primary.model,
         systemPrompt,
         normalizedMessages,
       });
     } catch (primaryError) {
-      console.error('PRIMARY MODEL ERROR:', primaryError);
+      console.error('PRIMARY_MODEL_ERROR:', primaryError);
 
       if (!isModelNotFoundError(primaryError)) {
         throw primaryError;
@@ -879,10 +1224,30 @@ Na konci akademickej odpovede vždy uveď sekciu:
 
 === POUŽITÉ ZDROJE A AUTORI ===
 
-Semantic Scholar je vypnutý. Používaj iba Profil práce, priložené dokumenty, dokumenty zo Supabase, text používateľa a všeobecné znalosti AI modelu.
+Ak bol text z príloh extrahovaný, musíš ho použiť ako prvý zdrojový podklad.
+Ak používateľ žiada spracovanie citácií, musíš odpovedať ako citačná špecialistka a použiť štruktúru:
+A) Formátované bibliografické záznamy
+B) Varianty odkazov v texte
+C) Špeciálne prípady
+D) Validácia a korekcia
+E) Finálny zoznam literatúry
+F) Odporúčaná veta do metodológie
+
+Semantic Scholar je vypnutý.
+Používaj iba Profil práce, extrahovaný text z priložených dokumentov, dokumenty zo Supabase, text používateľa a všeobecné znalosti AI modelu.
 Ak neboli dodané overiteľné zdroje, nevymýšľaj ich a jasne uveď:
 Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI modelu. Neboli dodané overiteľné priložené zdroje.
 `;
+
+      if (returnExtractedFilesInfo) {
+        return await createJsonResponse({
+          model: fallback.model,
+          systemPrompt: fallbackSystemPrompt,
+          normalizedMessages,
+          extractedFiles,
+          providerLabel: fallback.providerLabel,
+        });
+      }
 
       return await createStreamResponse({
         model: fallback.model,
@@ -891,7 +1256,7 @@ Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI
       });
     }
   } catch (error) {
-    console.error('CHAT API ERROR:', error);
+    console.error('CHAT_API_ERROR:', error);
 
     const message =
       error instanceof Error

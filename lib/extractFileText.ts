@@ -4,256 +4,249 @@ export type ExtractedFile = {
   name: string;
   type: string;
   size: number;
-  extension: string;
 
-  // hlavný text
-  text: string;
-
-  // aliasy pre ostatné API moduly
-  content: string;
+  // hlavný výstup
   extractedText: string;
+  extractedChars: number;
+  extractedPreview: string;
 
-  charCount: number;
+  // kompatibilita so staršími API súbormi
+  text?: string;
+  content?: string;
+
+  error?: string;
   warning?: string;
-  ok: boolean;
+  ok?: boolean;
 };
 
-function getFileExtension(fileName: string): string {
-  const index = fileName.lastIndexOf('.');
-
-  if (index === -1) {
-    return '';
-  }
-
-  return fileName.slice(index).toLowerCase();
-}
-
-function cleanExtractedText(value: string): string {
+function cleanText(value: string): string {
   return String(value || '')
     .replace(/\u0000/g, '')
     .replace(/\uFEFF/g, '')
+    .replace(/\u200B/g, '')
+    .replace(/\u200C/g, '')
+    .replace(/\u200D/g, '')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/[ \t]+/g, ' ')
-    .replace(/\n[ \t]+/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{4,}/g, '\n\n\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
-function normalizePdfText(value: string): string {
-  return cleanExtractedText(
-    String(value || '')
-      .replace(/([a-záäčďéíĺľňóôŕšťúýž])\n([a-záäčďéíĺľňóôŕšťúýž])/gi, '$1 $2')
-      .replace(/-\n/g, '')
+function getExtension(name: string): string {
+  const index = name.lastIndexOf('.');
+  if (index === -1) return '';
+  return name.slice(index).toLowerCase();
+}
+
+function isPdf(name: string, type: string) {
+  return getExtension(name) === '.pdf' || type.toLowerCase().includes('pdf');
+}
+
+function isDocx(name: string) {
+  return getExtension(name) === '.docx';
+}
+
+function isRtf(name: string, type: string) {
+  return getExtension(name) === '.rtf' || type.toLowerCase().includes('rtf');
+}
+
+function isTxt(name: string, type: string) {
+  const extension = getExtension(name);
+  const mime = type.toLowerCase();
+
+  return (
+    extension === '.txt' ||
+    extension === '.md' ||
+    extension === '.csv' ||
+    mime.includes('text/plain') ||
+    mime.includes('text/markdown') ||
+    mime.includes('text/csv')
   );
 }
 
-function extractPlainText(buffer: Buffer): string {
-  try {
-    return cleanExtractedText(buffer.toString('utf8'));
-  } catch (error) {
-    console.error('PLAIN TEXT EXTRACT ERROR:', error);
-    return '';
-  }
-}
-
-function extractRtfText(buffer: Buffer): string {
-  try {
-    const raw = buffer.toString('utf8');
-
-    const text = raw
-      .replace(/\\par[d]?/g, '\n')
-      .replace(/\\line/g, '\n')
-      .replace(/\\tab/g, ' ')
-      .replace(/\\'[0-9a-fA-F]{2}/g, ' ')
-      .replace(/\\u(-?\d+)\??/g, (_match, code) => {
-        const numericCode = Number(code);
-
-        if (!Number.isFinite(numericCode)) {
-          return ' ';
-        }
-
-        try {
-          return String.fromCharCode(numericCode < 0 ? numericCode + 65536 : numericCode);
-        } catch {
-          return ' ';
-        }
-      })
-      .replace(/\\[a-zA-Z]+\d* ?/g, ' ')
-      .replace(/[{}]/g, ' ');
-
-    return cleanExtractedText(text);
-  } catch (error) {
-    console.error('RTF EXTRACT ERROR:', error);
-    return '';
-  }
-}
-
-async function extractDocxText(buffer: Buffer): Promise<string> {
-  try {
-    const result = await mammoth.extractRawText({ buffer });
-    return cleanExtractedText(result.value || '');
-  } catch (error) {
-    console.error('DOCX EXTRACT ERROR:', error);
-    return '';
-  }
+function stripRtf(value: string): string {
+  return String(value || '')
+    .replace(/\\par[d]?/g, '\n')
+    .replace(/\\'[0-9a-fA-F]{2}/g, ' ')
+    .replace(/\\[a-zA-Z]+\d* ?/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  try {
-    const pdfParseModule = await import('pdf-parse');
+  const pdfParseModule: any = await import('pdf-parse');
 
-    // pdf-parse má podľa verzie rozdielne exporty:
-    // 1) staršie verzie: default funkcia
-    // 2) niektoré verzie: pdfParse funkcia
-    // 3) nové verzie: PDFParse class
-    const legacyParser =
-      (pdfParseModule as any).default ||
-      (pdfParseModule as any).pdfParse ||
-      (typeof (pdfParseModule as any) === 'function'
-        ? (pdfParseModule as any)
-        : null);
+  // Staršie verzie pdf-parse:
+  // const pdf = require('pdf-parse');
+  // await pdf(buffer)
+  const possibleDefaultParser = pdfParseModule?.default;
 
-    if (typeof legacyParser === 'function') {
-      const result = await legacyParser(buffer);
-      return normalizePdfText(result?.text || '');
-    }
+  if (typeof possibleDefaultParser === 'function') {
+    const result = await possibleDefaultParser(buffer);
+    return cleanText(result?.text || '');
+  }
 
-    const PDFParse = (pdfParseModule as any).PDFParse;
+  if (typeof pdfParseModule === 'function') {
+    const result = await pdfParseModule(buffer);
+    return cleanText(result?.text || '');
+  }
 
-    if (typeof PDFParse === 'function') {
-      const parser = new PDFParse({
-        data: buffer,
-      });
+  // Novšie ESM verzie pdf-parse môžu používať PDFParse triedu.
+  // import { PDFParse } from 'pdf-parse';
+  if (typeof pdfParseModule?.PDFParse === 'function') {
+    const parser = new pdfParseModule.PDFParse({ data: buffer });
 
-      try {
-        const result = await parser.getText();
+    try {
+      const result = await parser.getText();
 
-        const text =
-          result?.text ||
-          result?.pages
-            ?.map((page: any) => page?.text || '')
-            .join('\n\n') ||
-          '';
+      if (typeof result === 'string') {
+        return cleanText(result);
+      }
 
-        return normalizePdfText(text);
-      } finally {
-        if (typeof parser.destroy === 'function') {
-          await parser.destroy();
-        }
+      return cleanText(
+        result?.text ||
+          result?.content ||
+          result?.pages?.map((page: any) => page?.text || '').join('\n') ||
+          ''
+      );
+    } finally {
+      if (typeof parser.destroy === 'function') {
+        await parser.destroy();
       }
     }
-
-    console.error('PDF PARSE ERROR: Unsupported pdf-parse export format');
-    return '';
-  } catch (error) {
-    console.error('PDF PARSE ERROR:', error);
-    return '';
   }
+
+  // Niektoré buildy môžu exportovať parser pod iným názvom.
+  if (typeof pdfParseModule?.parse === 'function') {
+    const result = await pdfParseModule.parse(buffer);
+    return cleanText(result?.text || result?.content || '');
+  }
+
+  if (typeof pdfParseModule?.parsePDF === 'function') {
+    const result = await pdfParseModule.parsePDF(buffer);
+    return cleanText(result?.text || result?.content || '');
+  }
+
+  throw new Error(
+    'PDF parser sa nepodarilo inicializovať. Skontroluj verziu balíka pdf-parse.'
+  );
 }
 
-function getUnsupportedWarning(extension: string, name: string): string {
-  if (extension === '.doc') {
-    return 'Starý formát .doc sa nedá spoľahlivo čítať. Súbor ulož ako .docx a nahraj znova.';
-  }
+function createResult(params: {
+  name: string;
+  type: string;
+  size: number;
+  extractedText: string;
+  error?: string;
+  warning?: string;
+  ok?: boolean;
+}): ExtractedFile {
+  const cleaned = cleanText(params.extractedText);
 
-  if (extension === '.odt') {
-    return 'Formát ODT zatiaľ nie je podporovaný na extrakciu textu. Odporúčané je nahrať DOCX, PDF s textovou vrstvou alebo TXT.';
-  }
+  return {
+    name: params.name,
+    type: params.type,
+    size: params.size,
+    extractedText: cleaned,
+    extractedChars: cleaned.length,
+    extractedPreview: cleaned.slice(0, 1000),
 
-  if (['.xls', '.xlsx'].includes(extension)) {
-    return 'Tabuľkový súbor bol nahratý, ale text sa z neho zatiaľ neextrahuje. Pre audit vlož text ručne alebo nahraj DOCX/PDF.';
-  }
+    // kompatibilita so staršími route súbormi
+    text: cleaned,
+    content: cleaned,
 
-  if (['.ppt', '.pptx'].includes(extension)) {
-    return 'Prezentácia bola nahratá, ale text sa z nej zatiaľ neextrahuje. Pre audit vlož text ručne alebo nahraj DOCX/PDF.';
-  }
-
-  if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
-    return 'Obrázok bol nahratý, ale OCR čítanie textu z obrázka zatiaľ nie je zapnuté.';
-  }
-
-  return `Formát súboru ${extension || name} zatiaľ nie je podporovaný na extrakciu textu.`;
+    error: params.error,
+    warning: params.warning,
+    ok: params.ok ?? cleaned.length > 0,
+  };
 }
 
 export async function extractTextFromFile(file: File): Promise<ExtractedFile> {
-  const name = file.name || 'neznámy súbor';
+  const name = file.name || 'neznamy-subor';
   const type = file.type || '';
   const size = file.size || 0;
-  const extension = getFileExtension(name);
-
-  let text = '';
-  let warning = '';
 
   try {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const lowerType = type.toLowerCase();
+    let extractedText = '';
+    let warning = '';
 
-    if (
-      extension === '.txt' ||
-      extension === '.md' ||
-      extension === '.csv' ||
-      lowerType.includes('text/plain') ||
-      lowerType.includes('text/markdown') ||
-      lowerType.includes('text/csv')
-    ) {
-      text = extractPlainText(buffer);
-    } else if (extension === '.rtf' || lowerType.includes('rtf')) {
-      text = extractRtfText(buffer);
-    } else if (
-      extension === '.docx' ||
-      lowerType.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-    ) {
-      text = await extractDocxText(buffer);
-    } else if (extension === '.pdf' || lowerType.includes('pdf')) {
-      text = await extractPdfText(buffer);
+    if (isTxt(name, type)) {
+      extractedText = buffer.toString('utf8');
+    } else if (isDocx(name)) {
+      const result = await mammoth.extractRawText({ buffer });
+      extractedText = result.value || '';
+
+      if (result.messages?.length) {
+        warning = result.messages
+          .map((message) => message.message)
+          .filter(Boolean)
+          .join(' | ');
+      }
+    } else if (isPdf(name, type)) {
+      extractedText = await extractPdfText(buffer);
+    } else if (isRtf(name, type)) {
+      extractedText = stripRtf(buffer.toString('utf8'));
     } else {
-      warning = getUnsupportedWarning(extension, name);
-      text = '';
+      return createResult({
+        name,
+        type,
+        size,
+        extractedText: '',
+        warning:
+          'Tento typ súboru je povolený ako príloha, ale text sa z neho v tejto funkcii neextrahuje.',
+        ok: false,
+      });
     }
+
+    const cleaned = cleanText(extractedText);
+
+    if (!cleaned) {
+      return createResult({
+        name,
+        type,
+        size,
+        extractedText: '',
+        warning:
+          isPdf(name, type)
+            ? 'PDF neobsahuje čitateľný text alebo je skenované ako obrázok.'
+            : 'Súbor neobsahuje čitateľný text alebo sa text nepodarilo extrahovať.',
+        ok: false,
+      });
+    }
+
+    return createResult({
+      name,
+      type,
+      size,
+      extractedText: cleaned,
+      warning: warning || undefined,
+      ok: true,
+    });
   } catch (error) {
-    console.error('FILE EXTRACT ERROR:', error);
-
-    warning =
-      error instanceof Error
-        ? error.message
-        : 'Nepodarilo sa extrahovať text zo súboru.';
-
-    text = '';
+    return createResult({
+      name,
+      type,
+      size,
+      extractedText: '',
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Nepodarilo sa extrahovať text zo súboru.',
+      ok: false,
+    });
   }
-
-  const cleanedText = cleanExtractedText(text);
-
-  if (!cleanedText && !warning) {
-    warning =
-      'Súbor bol nahratý, ale nepodarilo sa z neho extrahovať čitateľný text. Pri PDF skontroluj, či nejde o sken bez textovej vrstvy.';
-  }
-
-  return {
-    name,
-    type,
-    size,
-    extension,
-    text: cleanedText,
-    content: cleanedText,
-    extractedText: cleanedText,
-    charCount: cleanedText.length,
-    warning,
-    ok: cleanedText.length > 0,
-  };
 }
 
-export async function extractTextFromFiles(
-  files: File[]
-): Promise<ExtractedFile[]> {
+export async function extractTextFromFiles(files: File[]) {
   const results: ExtractedFile[] = [];
 
   for (const file of files) {
-    const extracted = await extractTextFromFile(file);
-    results.push(extracted);
+    results.push(await extractTextFromFile(file));
   }
 
   return results;

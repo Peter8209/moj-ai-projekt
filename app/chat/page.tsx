@@ -141,46 +141,45 @@ const suggestions: {
     title: 'Navrhni mi úvod mojej práce',
     actionTitle: 'Úvod práce',
     instruction:
-      'Na základe uloženého profilu práce vytvor profesionálny akademický úvod práce. Najprv použi profil práce, následne akademické zdroje zo Semantic Scholar a na konci vypíš použité zdroje a autorov.',
+      'Na základe uloženého profilu práce vytvor profesionálny akademický úvod práce. Najprv použi profil práce, následne skontroluj priložené dokumenty. Ak prílohy súvisia s profilom práce, použi ich ako zdroj. Ak prílohy nesúvisia s profilom práce, jasne to uveď. Ak v dokumentoch nie sú uvedené zdroje, upozorni na to a vypíš odporúčané odborné zdroje na overenie.',
     icon: PenLine,
   },
   {
     title: 'Napíš mi abstrakt',
     actionTitle: 'Abstrakt',
     instruction:
-      'Na základe uloženého profilu práce vytvor akademický abstrakt. Má obsahovať tému, cieľ, problém, metodológiu, výsledky alebo očakávaný prínos práce. Ak sú dostupné zdroje zo Semantic Scholar, zohľadni ich a vypíš použitých autorov.',
+      'Na základe uloženého profilu práce vytvor akademický abstrakt. Má obsahovať tému, cieľ, problém, metodológiu, výsledky alebo očakávaný prínos práce. Použi priložené dokumenty iba vtedy, ak súvisia s profilom práce. Ak dokumenty neobsahujú zdroje, upozorni na to.',
     icon: BookOpen,
   },
   {
     title: 'Pomôž mi navrhnúť štruktúru kapitol a podkapitol',
     actionTitle: 'Štruktúra kapitol',
     instruction:
-      'Na základe uloženého profilu práce navrhni detailnú štruktúru kapitol a podkapitol. Rešpektuj typ práce, cieľ, metodológiu, praktickú časť a logické akademické členenie. Zohľadni aj akademické zdroje zo Semantic Scholar.',
+      'Na základe uloženého profilu práce navrhni detailnú štruktúru kapitol a podkapitol. Rešpektuj typ práce, cieľ, metodológiu, praktickú časť a logické akademické členenie. Ak sú priložené dokumenty, najprv posúď, či zodpovedajú profilu práce.',
     icon: GraduationCap,
   },
   {
     title: 'Pomôž mi napísať návrh kapitoly.',
     actionTitle: 'Návrh kapitoly',
     instruction:
-      'Na základe uloženého profilu práce priprav návrh kapitoly. Najprv navrhni osnovu kapitoly, potom podkapitoly a následne ukážkový odborný text. Použi akademické zdroje zo Semantic Scholar a na konci vypíš použité zdroje a autorov.',
+      'Na základe uloženého profilu práce priprav návrh kapitoly. Najprv navrhni osnovu kapitoly, potom podkapitoly a následne ukážkový odborný text. Použi iba relevantné priložené dokumenty. Ak príloha nesúvisí s profilom práce, upozorni na to.',
     icon: FileText,
   },
   {
     title: 'Pomôž mi citovať tento zdroj',
     actionTitle: 'Citovanie zdroja',
     instruction:
-      'Na základe uloženého profilu práce a zvoleného citačného štýlu vysvetli, ako správne citovať zdroj v texte a v zozname literatúry. Ak sú priložené súbory, napríklad PDF, Word dokumenty, texty, obrázky, tabuľky alebo prezentácie, zohľadni ich.',
+      'Na základe uloženého profilu práce a zvoleného citačného štýlu vysvetli, ako správne citovať zdroj v texte a v zozname literatúry. Ak sú priložené dokumenty, vyhľadaj v nich bibliografické údaje. Ak tam nie sú, upozorni, že zdrojové údaje chýbajú.',
     icon: Library,
   },
   {
     title: 'Pomôž mi prepísať môj text do akademického jazyka.',
     actionTitle: 'Akademický jazyk',
     instruction:
-      'Na základe uloženého profilu práce prepíš text do akademického jazyka. Ak text od používateľa chýba, vytvor ukážku odborného formulovania podľa témy práce. Ak sú dostupné zdroje zo Semantic Scholar, použi ich na odborné ukotvenie textu.',
+      'Na základe uloženého profilu práce prepíš text do akademického jazyka. Ak text od používateľa chýba, vytvor ukážku odborného formulovania podľa témy práce. Priložené dokumenty použi iba vtedy, ak tematicky súvisia s profilom práce.',
     icon: BookOpen,
   },
 ];
-
 // ================= FILE HELPERS =================
 
 function getFileExtension(fileName: string) {
@@ -401,10 +400,7 @@ export default function ChatPage() {
   const [popup, setPopup] = useState(false);
   const [popupData, setPopupData] = useState<ParsedResult | null>(null);
 
-  const [useSemanticScholar, setUseSemanticScholar] = useState(true);
-  const [semanticScholarLimit, setSemanticScholarLimit] = useState(10);
-  const [semanticScholarYearFrom, setSemanticScholarYearFrom] = useState(2000);
-  const [semanticScholarPdfOnly, setSemanticScholarPdfOnly] = useState(false);
+  const [validateAttachments, setValidateAttachments] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
@@ -648,10 +644,11 @@ export default function ChatPage() {
         formData.append('projectId', activeProfile.id);
       }
 
-      formData.append('useSemanticScholar', String(useSemanticScholar));
-      formData.append('semanticScholarLimit', String(semanticScholarLimit));
-      formData.append('semanticScholarYearFrom', String(semanticScholarYearFrom));
-      formData.append('semanticScholarPdfOnly', String(semanticScholarPdfOnly));
+      formData.append('useSemanticScholar', 'false');
+formData.append('sourceMode', 'uploaded_documents_first');
+formData.append('validateAttachmentsAgainstProfile', String(validateAttachments));
+formData.append('requireSourceList', 'true');
+formData.append('allowAiKnowledgeFallback', 'true');
 
       attachedFiles.forEach((item) => {
         formData.append('files', item.file, item.name);
@@ -861,35 +858,22 @@ export default function ChatPage() {
               <h2 className="text-4xl font-black tracking-tight">CHAT</h2>
 
               <p className="mt-2 text-sm text-slate-400">
-                Chat čerpá z uloženého profilu práce, vybraného AI agenta,
-                pripojených súborov a akademických zdrojov zo Semantic Scholar.
+                Chat čerpá z uloženého profilu práce, vybraného AI agenta a priložených dokumentov. Prílohy sa najprv kontrolujú, či súvisia s profilom práce.
               </p>
 
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span
-                  className={`rounded-full border px-3 py-1 text-xs font-black ${
-                    useSemanticScholar
-                      ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
-                      : 'border-slate-500/30 bg-slate-500/10 text-slate-300'
-                  }`}
-                >
-                  {useSemanticScholar
-                    ? 'Semantic Scholar aktívny'
-                    : 'Semantic Scholar vypnutý'}
-                </span>
+          <div className="mt-3 flex flex-wrap gap-2">
+  <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-200">
+    Zdroje z priložených dokumentov
+  </span>
 
-                <span className="rounded-full border border-violet-400/30 bg-violet-500/10 px-3 py-1 text-xs font-black text-violet-200">
-                  Zdroje sa načítajú podľa Profilu práce
-                </span>
+  <span className="rounded-full border border-violet-400/30 bg-violet-500/10 px-3 py-1 text-xs font-black text-violet-200">
+    Kontrola príloh podľa Profilu práce
+  </span>
 
-                <span className="rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-200">
-                  Limit zdrojov: {semanticScholarLimit}
-                </span>
-
-                <span className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-xs font-black text-cyan-200">
-                  Od roku: {semanticScholarYearFrom}
-                </span>
-              </div>
+  <span className="rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-200">
+    Ak prílohy chýbajú, AI uvedie vlastné odborné odporúčané zdroje na overenie
+  </span>
+</div>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
@@ -918,8 +902,7 @@ export default function ChatPage() {
                   <h3 className="text-3xl font-black">Začnite konverzáciu</h3>
 
                   <p className="mt-2 text-slate-400">
-                    Vyberte okno nižšie. AI použije uložený profil práce,
-                    pripojené podklady a zdroje zo Semantic Scholar.
+                    Vyberte okno nižšie. AI použije uložený profil práce a pripojené dokumenty. Ak dokumenty nesúvisia s profilom práce alebo neobsahujú zdroje, systém na to upozorní.
                   </p>
                 </div>
 
@@ -968,16 +951,13 @@ export default function ChatPage() {
                   </div>
                 ))}
 
-                {isLoading && (
-                  <div className="flex justify-start">
-                    <div className="rounded-3xl border border-white/10 bg-white/[0.065] px-5 py-4 text-sm font-bold text-violet-200">
-                      🤖 {activeAgentLabel} premýšľa...{' '}
-                      {useSemanticScholar
-                        ? 'Načítavam aj zdroje zo Semantic Scholar.'
-                        : ''}
-                    </div>
-                  </div>
-                )}
+               {isLoading && (
+  <div className="flex justify-start">
+    <div className="rounded-3xl border border-white/10 bg-white/[0.065] px-5 py-4 text-sm font-bold text-violet-200">
+      🤖 {activeAgentLabel} premýšľa... Kontrolujem profil práce, priložené dokumenty a zdroje.
+    </div>
+  </div>
+)}
 
                 <div ref={chatEndRef} />
               </div>
@@ -1053,69 +1033,35 @@ export default function ChatPage() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setUseSemanticScholar((prev) => !prev)}
-                    className={`rounded-xl px-3 py-1.5 text-xs font-black transition ${
-                      useSemanticScholar
-                        ? 'bg-emerald-600 text-white'
-                        : 'border border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'
-                    }`}
-                    title="Zapnúť alebo vypnúť automatické akademické zdroje zo Semantic Scholar"
-                  >
-                    {useSemanticScholar ? 'Semantic Scholar ON' : 'Semantic Scholar OFF'}
-                  </button>
+                 <button
+  type="button"
+  onClick={() => setValidateAttachments((prev) => !prev)}
+  className={`rounded-xl px-3 py-1.5 text-xs font-black transition ${
+    validateAttachments
+      ? 'bg-emerald-600 text-white'
+      : 'border border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'
+  }`}
+  title="Zapnúť alebo vypnúť kontrolu, či priložené dokumenty súvisia s profilom práce"
+>
+  {validateAttachments ? 'Kontrola príloh ON' : 'Kontrola príloh OFF'}
+</button>
 
-                  <select
-                    value={semanticScholarLimit}
-                    onChange={(event) =>
-                      setSemanticScholarLimit(Number(event.target.value))
-                    }
-                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-black text-slate-200 outline-none"
-                    title="Počet zdrojov zo Semantic Scholar"
-                  >
-                    <option value={5}>5 zdrojov</option>
-                    <option value={10}>10 zdrojov</option>
-                    <option value={15}>15 zdrojov</option>
-                    <option value={20}>20 zdrojov</option>
-                  </select>
+<span className="rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-1.5 text-xs font-black text-violet-200">
+  Zdroje z príloh
+</span>
 
-                  <select
-                    value={semanticScholarYearFrom}
-                    onChange={(event) =>
-                      setSemanticScholarYearFrom(Number(event.target.value))
-                    }
-                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-black text-slate-200 outline-none"
-                    title="Rok od ktorého sa majú hľadať zdroje"
-                  >
-                    <option value={1990}>od 1990</option>
-                    <option value={2000}>od 2000</option>
-                    <option value={2010}>od 2010</option>
-                    <option value={2015}>od 2015</option>
-                    <option value={2020}>od 2020</option>
-                  </select>
+<span className="rounded-xl border border-blue-400/20 bg-blue-500/10 px-3 py-1.5 text-xs font-black text-blue-200">
+  Bez Semantic Scholar
+</span>
 
-                  <button
-                    type="button"
-                    onClick={() => setSemanticScholarPdfOnly((prev) => !prev)}
-                    className={`rounded-xl px-3 py-1.5 text-xs font-black transition ${
-                      semanticScholarPdfOnly
-                        ? 'bg-blue-600 text-white'
-                        : 'border border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'
-                    }`}
-                    title="Ak je zapnuté, API použije iba zdroje s dostupným PDF"
-                  >
-                    {semanticScholarPdfOnly ? 'PDF only ON' : 'PDF only OFF'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setCanvasOpen(true)}
-                    className="inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-black text-slate-300 hover:bg-white/10 hover:text-white"
-                  >
-                    <Paintbrush className="h-4 w-4" />
-                    Canvas
-                  </button>
+<button
+  type="button"
+  onClick={() => setCanvasOpen(true)}
+  className="inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-black text-slate-300 hover:bg-white/10 hover:text-white"
+>
+  <Paintbrush className="h-4 w-4" />
+  Canvas
+</button>
                 </div>
               </div>
 

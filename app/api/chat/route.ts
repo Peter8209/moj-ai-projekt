@@ -1,4 +1,4 @@
-import { generateText, streamText } from 'ai';
+import { streamText } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
@@ -71,51 +71,13 @@ type ModelResult = {
   providerLabel: string;
 };
 
-type SemanticScholarAuthor = {
-  authorId?: string;
-  name?: string;
-};
+type SourceMode = 'uploaded_documents_first';
 
-type SemanticScholarPaper = {
-  paperId: string;
-  title?: string;
-  abstract?: string;
-  year?: number;
-  venue?: string;
-  url?: string;
-  citationCount?: number;
-  authors?: SemanticScholarAuthor[];
-  externalIds?: {
-    DOI?: string;
-    ArXiv?: string;
-    PubMed?: string;
-    CorpusId?: string;
-  };
-  openAccessPdf?: {
-    url?: string;
-    status?: string;
-  };
-};
-
-type SourceForAI = {
-  marker: string;
-  paperId: string;
-  title: string;
-  authors: string;
-  year: string;
-  venue: string;
-  abstract: string;
-  url: string;
-  doi: string;
-  pdfUrl: string;
-  citationCount: number;
-};
-
-type SemanticScholarResult = {
-  enabled: boolean;
-  query: string;
-  sources: SourceForAI[];
-  warning: string | null;
+type SourceSettings = {
+  sourceMode: SourceMode;
+  validateAttachmentsAgainstProfile: boolean;
+  requireSourceList: boolean;
+  allowAiKnowledgeFallback: boolean;
 };
 
 // ================= PROJECT DOCUMENTS =================
@@ -215,12 +177,12 @@ function getKeywords(profile: SavedProfile | null) {
     .filter(Boolean);
 }
 
-function getLastUserMessage(messages: ChatMessage[]) {
-  const lastUserMessage = [...messages]
-    .reverse()
-    .find((message) => message.role === 'user' && message.content.trim());
+function normalizeSourceMode(value: unknown): SourceMode {
+  if (value === 'uploaded_documents_first') {
+    return 'uploaded_documents_first';
+  }
 
-  return lastUserMessage?.content?.trim() || '';
+  return 'uploaded_documents_first';
 }
 
 // ================= ATTACHMENTS =================
@@ -292,10 +254,11 @@ async function extractAttachmentTexts(files: File[]) {
   for (const file of files) {
     if (!isAllowedAttachment(file)) {
       results.push(
-        `NEPODPOROVANÝ SÚBOR: ${file.name}
+        `NEPODPOROVANÝ SÚBOR:
+Názov: ${file.name}
 Typ: ${file.type || 'application/octet-stream'}
 Veľkosť: ${file.size} bajtov
-[Tento formát súboru nie je povolený.]`
+Stav: Tento formát súboru nie je povolený.`
       );
       continue;
     }
@@ -308,9 +271,12 @@ Veľkosť: ${file.size} bajtov
         const content = await file.text();
 
         results.push(
-          `${label}: ${file.name}
-Typ: ${file.type || 'text/plain'}
+          `PRILOŽENÝ SÚBOR:
+Názov: ${file.name}
+Typ: ${label}
+MIME: ${file.type || 'text/plain'}
 Veľkosť: ${file.size} bajtov
+Stav extrakcie: Text bol extrahovaný.
 
 EXTRAHOVANÝ TEXT:
 ${content.slice(0, 30000)}`
@@ -319,10 +285,12 @@ ${content.slice(0, 30000)}`
         continue;
       } catch {
         results.push(
-          `${label}: ${file.name}
-Typ: ${file.type || 'text/plain'}
+          `PRILOŽENÝ SÚBOR:
+Názov: ${file.name}
+Typ: ${label}
+MIME: ${file.type || 'text/plain'}
 Veľkosť: ${file.size} bajtov
-[Textový obsah sa nepodarilo načítať.]`
+Stav extrakcie: Textový obsah sa nepodarilo načítať.`
         );
 
         continue;
@@ -333,371 +301,59 @@ Veľkosť: ${file.size} bajtov
 
     if (extension === '.pdf') {
       note =
-        'PDF dokument bol priložený. Server v tejto trase zatiaľ neextrahuje plný text PDF.';
+        'PDF dokument bol priložený, ale táto API trasa zatiaľ neextrahuje plný text PDF. AI pozná iba názov, typ a veľkosť súboru, nie celý obsah.';
     } else if (['.doc', '.docx', '.odt', '.rtf'].includes(extension)) {
       note =
-        'Dokument bol priložený. Server v tejto trase zatiaľ neextrahuje plný text Word/ODT/RTF dokumentu.';
+        'Dokument bol priložený, ale táto API trasa zatiaľ neextrahuje plný text Word/ODT/RTF dokumentu. AI pozná iba názov, typ a veľkosť súboru, nie celý obsah.';
     } else if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
       note =
-        'Obrázok bol priložený. Server v tejto trase zatiaľ nerobí OCR ani vizuálnu analýzu obrázka.';
+        'Obrázok bol priložený, ale táto API trasa zatiaľ nerobí OCR ani vizuálnu analýzu obrázka. AI pozná iba názov, typ a veľkosť súboru.';
     } else if (['.xls', '.xlsx'].includes(extension)) {
       note =
-        'Tabuľkový súbor bol priložený. Server v tejto trase zatiaľ neextrahuje obsah buniek XLS/XLSX.';
+        'Tabuľkový súbor bol priložený, ale táto API trasa zatiaľ neextrahuje obsah buniek XLS/XLSX. AI pozná iba názov, typ a veľkosť súboru.';
     } else if (['.ppt', '.pptx'].includes(extension)) {
       note =
-        'Prezentácia bola priložená. Server v tejto trase zatiaľ neextrahuje text zo slidov.';
+        'Prezentácia bola priložená, ale táto API trasa zatiaľ neextrahuje text zo slidov. AI pozná iba názov, typ a veľkosť súboru.';
     } else {
       note =
-        'Súbor bol priložený. Server v tejto trase zatiaľ neextrahuje jeho plný obsah.';
+        'Súbor bol priložený, ale táto API trasa zatiaľ neextrahuje jeho plný obsah.';
     }
 
     results.push(
-      `${label}: ${file.name}
-Typ: ${file.type || 'application/octet-stream'}
+      `PRILOŽENÝ SÚBOR:
+Názov: ${file.name}
+Typ: ${label}
+MIME: ${file.type || 'application/octet-stream'}
 Veľkosť: ${file.size} bajtov
-[${note} AI vie, že súbor existuje, ale nemá overený celý obsah súboru.]`
+Stav extrakcie: ${note}`
     );
   }
 
   return results;
 }
 
-// ================= SEMANTIC SCHOLAR =================
+// ================= SYSTEM PROMPT =================
 
-function normalizeSemanticScholarPaper(
-  paper: SemanticScholarPaper,
-  index: number
-): SourceForAI | null {
-  const title = toCleanString(paper.title);
-
-  if (!paper.paperId || !title) {
-    return null;
+function buildAttachmentBlock(attachmentTexts: string[]) {
+  if (!attachmentTexts.length) {
+    return '\nPRILOŽENÉ SÚBORY A PODKLADY: Žiadne.\n';
   }
 
-  const authors =
-    paper.authors
-      ?.map((author) => toCleanString(author.name))
-      .filter(Boolean)
-      .slice(0, 10)
-      .join(', ') || 'Neznámy autor';
-
-  const doi = toCleanString(paper.externalIds?.DOI);
-  const pdfUrl = toCleanString(paper.openAccessPdf?.url);
-  const url =
-    pdfUrl ||
-    toCleanString(paper.url) ||
-    (doi ? `https://doi.org/${doi}` : '');
-
-  return {
-    marker: `S${index + 1}`,
-    paperId: paper.paperId,
-    title,
-    authors,
-    year: paper.year ? String(paper.year) : 'bez roku',
-    venue: toCleanString(paper.venue) || 'neuvedené',
-    abstract: toCleanString(paper.abstract) || 'Abstrakt nie je dostupný.',
-    url,
-    doi,
-    pdfUrl,
-    citationCount: Number(paper.citationCount || 0),
-  };
+  return `\nPRILOŽENÉ SÚBORY A PODKLADY:\n${attachmentTexts.join(
+    '\n\n-----------------\n\n'
+  )}\n`;
 }
 
-function buildFallbackResearchQuery(
-  profile: SavedProfile | null,
-  messages: ChatMessage[]
-) {
+function buildProfileKeywords(profile: SavedProfile | null) {
   const keywords = getKeywords(profile);
 
-  const values = [
-    profile?.title,
-    profile?.topic,
-    profile?.field,
-    profile?.problem,
-    profile?.goal,
-    profile?.methodology,
-    keywords.join(' '),
-    getLastUserMessage(messages),
-  ]
-    .map((value) => toCleanString(value))
-    .filter(Boolean);
-
-  return values.join(' ').slice(0, 250);
+  return keywords.length > 0 ? keywords.join(', ') : 'Neuvedené';
 }
-
-async function buildEnglishResearchQuery(
-  profile: SavedProfile | null,
-  messages: ChatMessage[],
-  agent: Agent
-) {
-  const fallbackQuery = buildFallbackResearchQuery(profile, messages);
-
-  if (!fallbackQuery) {
-    return '';
-  }
-
-  try {
-    const model = getModelByAgent(agent).model;
-
-    const keywords = getKeywords(profile).join(', ');
-
-    const profileText = `
-Názov práce: ${profile?.title || ''}
-Téma práce: ${profile?.topic || ''}
-Typ práce: ${profile?.type || profile?.schema?.label || ''}
-Odbor: ${profile?.field || ''}
-Cieľ práce: ${profile?.goal || ''}
-Výskumný problém: ${profile?.problem || ''}
-Metodológia: ${profile?.methodology || ''}
-Kľúčové slová: ${keywords}
-Posledná požiadavka používateľa: ${getLastUserMessage(messages)}
-`.trim();
-
-    const result = await generateText({
-      model,
-      system: `
-Si akademický rešeršný asistent.
-Z profilu práce vytvor jeden presný anglický vyhľadávací dopyt pre Semantic Scholar.
-
-Pravidlá:
-- odpovedz iba jedným anglickým vyhľadávacím dopytom,
-- nepíš vysvetlenie,
-- nepoužívaj odrážky,
-- nepoužívaj úvodzovky,
-- maximálne 18 slov,
-- zachovaj odborný význam práce,
-- ak je téma viazaná na Slovensko, ponechaj slová Slovak alebo Slovakia,
-- ak ide o divadlo, literatúru, politický režim, rod, manažment, techniku alebo IT, použi odborné anglické termíny.
-`,
-      prompt: profileText,
-      temperature: 0.2,
-      maxOutputTokens: 80,
-    });
-
-    const query = result.text.trim().replace(/^["']|["']$/g, '');
-
-    return query || fallbackQuery;
-  } catch (error) {
-    console.error('RESEARCH QUERY ERROR:', error);
-    return fallbackQuery;
-  }
-}
-
-async function searchSemanticScholarSources(params: {
-  query: string;
-  limit?: number;
-  yearFrom?: number;
-  yearTo?: number;
-  pdfOnly?: boolean;
-}) {
-  const query = params.query.trim();
-
-  if (!query) {
-    return [];
-  }
-
-  const limit = Math.min(Math.max(params.limit || 10, 1), 25);
-
-  const searchParams = new URLSearchParams({
-    query,
-    limit: String(limit),
-    fields:
-      'paperId,title,abstract,year,venue,url,citationCount,authors,externalIds,openAccessPdf',
-  });
-
-  if (params.yearFrom || params.yearTo) {
-    const from = params.yearFrom ? String(params.yearFrom) : '';
-    const to = params.yearTo ? String(params.yearTo) : '';
-    searchParams.set('year', `${from}-${to}`);
-  }
-
-  const headers: HeadersInit = {
-    Accept: 'application/json',
-  };
-
-  const apiKey = process.env.SEMANTIC_SCHOLAR_API_KEY;
-
-  if (apiKey) {
-    headers['x-api-key'] = apiKey;
-  }
-
-  const response = await fetch(
-    `https://api.semanticscholar.org/graph/v1/paper/search?${searchParams.toString()}`,
-    {
-      method: 'GET',
-      headers,
-      cache: 'no-store',
-    }
-  );
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-
-    throw new Error(
-      `Semantic Scholar API chyba ${response.status}: ${
-        errorText || response.statusText
-      }`
-    );
-  }
-
-  const json = (await response.json()) as {
-    data?: SemanticScholarPaper[];
-  };
-
-  let sources = (json.data || [])
-    .map((paper, index) => normalizeSemanticScholarPaper(paper, index))
-    .filter((source): source is SourceForAI => Boolean(source))
-    .filter((source) => source.title.length > 3);
-
-  if (params.pdfOnly) {
-    sources = sources.filter((source) => Boolean(source.pdfUrl));
-  }
-
-  sources = sources
-    .sort((a, b) => {
-      const citationDiff = b.citationCount - a.citationCount;
-
-      if (citationDiff !== 0) {
-        return citationDiff;
-      }
-
-      return Number(b.year || 0) - Number(a.year || 0);
-    })
-    .slice(0, limit)
-    .map((source, index) => ({
-      ...source,
-      marker: `S${index + 1}`,
-    }));
-
-  return sources;
-}
-
-function semanticSourcesToPromptBlock(result: SemanticScholarResult) {
-  if (!result.enabled) {
-    return `
-SEMANTIC SCHOLAR:
-Vyhľadávanie cez Semantic Scholar bolo vypnuté.
-`;
-  }
-
-  if (result.warning) {
-    return `
-SEMANTIC SCHOLAR:
-Vyhľadávanie bolo zapnuté, ale nastala chyba:
-${result.warning}
-
-Dôležité:
-Ak nie sú dostupné overené zdroje, nesmieš si vymýšľať autorov, názvy článkov, DOI ani roky.
-`;
-  }
-
-  if (!result.sources.length) {
-    return `
-SEMANTIC SCHOLAR:
-Vyhľadávací dopyt: ${result.query || 'nevytvorený'}
-
-Neboli nájdené žiadne relevantné zdroje.
-
-Dôležité:
-Ak nie sú dostupné overené zdroje, nesmieš si vymýšľať autorov, názvy článkov, DOI ani roky.
-`;
-  }
-
-  const sourcesText = result.sources
-    .map((source) => {
-      return `
-[${source.marker}]
-Názov: ${source.title}
-Autori: ${source.authors}
-Rok: ${source.year}
-Zdroj / časopis: ${source.venue}
-Počet citácií: ${source.citationCount}
-DOI: ${source.doi || 'neuvedené'}
-URL: ${source.url || 'neuvedené'}
-PDF: ${source.pdfUrl || 'neuvedené'}
-Abstrakt: ${source.abstract}
-`.trim();
-    })
-    .join('\n\n-----------------\n\n');
-
-  return `
-SEMANTIC SCHOLAR:
-Vyhľadávací dopyt použitý pre zdroje:
-${result.query || 'nevytvorený'}
-
-OVERENÉ AKADEMICKÉ ZDROJE NAČÍTANÉ ZO SEMANTIC SCHOLAR:
-${sourcesText}
-`;
-}
-
-async function loadSemanticScholarForChat(params: {
-  enabled: boolean;
-  profile: SavedProfile | null;
-  messages: ChatMessage[];
-  agent: Agent;
-  limit?: number;
-  yearFrom?: number;
-  yearTo?: number;
-  pdfOnly?: boolean;
-}): Promise<SemanticScholarResult> {
-  if (!params.enabled) {
-    return {
-      enabled: false,
-      query: '',
-      sources: [],
-      warning: null,
-    };
-  }
-
-  try {
-    const query = await buildEnglishResearchQuery(
-      params.profile,
-      params.messages,
-      params.agent
-    );
-
-    if (!query) {
-      return {
-        enabled: true,
-        query: '',
-        sources: [],
-        warning:
-          'Nepodarilo sa vytvoriť rešeršný dopyt, pretože profil práce alebo správa používateľa neobsahuje dostatok údajov.',
-      };
-    }
-
-    const sources = await searchSemanticScholarSources({
-      query,
-      limit: params.limit || 10,
-      yearFrom: params.yearFrom || 2000,
-      yearTo: params.yearTo,
-      pdfOnly: Boolean(params.pdfOnly),
-    });
-
-    return {
-      enabled: true,
-      query,
-      sources,
-      warning: null,
-    };
-  } catch (error) {
-    console.error('SEMANTIC SCHOLAR ERROR:', error);
-
-    return {
-      enabled: true,
-      query: '',
-      sources: [],
-      warning: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-// ================= SYSTEM PROMPT =================
 
 function buildSystemPrompt(
   profile: SavedProfile | null,
   attachmentTexts: string[],
-  semanticScholar: SemanticScholarResult
+  settings: SourceSettings
 ) {
   const keywords = getKeywords(profile);
 
@@ -714,16 +370,92 @@ function buildSystemPrompt(
       ? profile.schema.requiredSections.map((item) => `- ${item}`).join('\n')
       : 'Neuvedené';
 
-  const attachmentsBlock =
-    attachmentTexts.length > 0
-      ? `\nPRILOŽENÉ SÚBORY A PODKLADY:\n${attachmentTexts.join(
-          '\n\n-----------------\n\n'
-        )}\n`
-      : '\nPRILOŽENÉ SÚBORY A PODKLADY: Žiadne.\n';
-
-  const semanticScholarBlock = semanticSourcesToPromptBlock(semanticScholar);
+  const attachmentsBlock = buildAttachmentBlock(attachmentTexts);
   const workLanguage = getWorkLanguage(profile);
   const citationStyle = getCitationStyle(profile);
+  const hasAttachments = attachmentTexts.length > 0;
+
+  const documentSourceRules = `
+PRAVIDLÁ PRE PRILOŽENÉ DOKUMENTY, ZDROJE A RELEVANTNOSŤ:
+
+1. Semantic Scholar je vypnutý. Nepoužívaj Semantic Scholar, neuvádzaj ho ako zdroj a nespomínaj, že z neho čerpáš.
+
+2. Primárny zdrojový základ tvoria:
+- priložené dokumenty používateľa,
+- dokumenty načítané zo Supabase,
+- text zadaný používateľom v konverzácii,
+- uložený Profil práce.
+
+3. Najprv posúď, či priložené dokumenty tematicky zodpovedajú Profilu práce.
+
+4. Profil práce je rozhodujúci. Príloha je relevantná iba vtedy, ak súvisí s témou, cieľom, problémom, metodológiou, odborom alebo kľúčovými slovami profilu.
+
+5. Ak Profil práce hovorí napríklad o škole, pedagogike, divadle, politike, manažmente, IT alebo inom odbore a používateľ priloží dokument o nesúvisiacej téme, napríklad o jačmeni, poľnohospodárstve alebo úplne inom obsahu, musíš jasne uviesť:
+"Požadovaná príloha nezodpovedá profilu práce a nebude použitá ako odborný zdroj."
+
+6. Ak je príloha nesúvisiaca s profilom práce, nepoužívaj ju ako odborný zdroj pre hlavný text.
+
+7. Ak sú priložené dokumenty relevantné a ich text je dostupný, čerpaj z nich a v sekcii zdrojov vypíš:
+- názov dokumentu,
+- typ dokumentu,
+- autorov, ak sú v dokumente uvedení,
+- rok, ak je v dokumente uvedený,
+- názov publikácie alebo dokumentu,
+- vydavateľa, časopis, inštitúciu alebo web, ak sú uvedené,
+- URL alebo DOI, ak sa v dokumente nachádzajú.
+
+8. Ak sú priložené dokumenty, ale neobsahujú žiadne identifikovateľné bibliografické zdroje, jasne napíš:
+"V priložených dokumentoch sa nenachádzajú žiadne identifikovateľné bibliografické zdroje."
+
+9. Ak sú priložené dokumenty, ale server neextrahoval ich obsah, jasne napíš, že nemôžeš overiť zdroje vo vnútri dokumentu, pretože máš dostupný iba názov, typ a veľkosť súboru.
+
+10. Ak nie sú priložené žiadne dokumenty a používateľ chce vytvoriť odborný text, môžeš použiť všeobecné znalosti AI modelu, ale musíš jasne uviesť:
+"Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI modelu. Neboli dodané overiteľné priložené zdroje."
+
+11. Ak používaš všeobecné znalosti AI modelu, nesmieš predstierať, že si čerpal z konkrétneho priloženého dokumentu.
+
+12. Ak uvedieš vlastné odborné zdroje, označ ich presne ako:
+"AI odporúčané zdroje na overenie a doplnenie."
+
+13. AI odporúčané zdroje nie sú to isté ako overené priložené zdroje. Musíš ich jasne oddeliť.
+
+14. Ak odporúčaš všeobecne známe odborné publikácie, uvádzaj iba údaje, ktorými si si primerane istý. Nevymýšľaj DOI, URL, čísla strán, vydanie ani presný názov kapitoly.
+
+15. Ak si nie si istý bibliografickým údajom, napíš "údaj je potrebné overiť".
+
+16. Vždy rozdeľ zdroje do týchto skupín:
+
+A. Zdroje nájdené v priložených dokumentoch
+B. Priložené dokumenty použité ako podklad
+C. Upozornenia k nerelevantným alebo neoveriteľným prílohám
+D. AI odporúčané zdroje na overenie a doplnenie
+
+17. Ak neexistujú prílohy, sekcia A a B musí jasne uviesť, že neboli dodané žiadne prílohy.
+
+18. Ak existujú prílohy, ale nesúvisia s profilom práce, sekcia C musí jasne pomenovať problém.
+
+19. Ak existujú prílohy, ale nie je extrahovaný ich text, sekcia C musí uviesť, že ich obsah nebol overený.
+
+20. Pri akademickom texte používaj citačný štýl podľa profilu práce: ${citationStyle}.
+
+21. Nevymýšľaj falošné bibliografické údaje. Ak údaj nie je dostupný, napíš "neuvedené".
+
+22. Ak nie je možné overiť zdroje v prílohách, nesmieš tvrdiť, že zdroje boli v prílohách nájdené.
+
+23. Ak používateľ požiada o prácu, kapitolu, úvod, teóriu, abstrakt alebo metodológiu, sekcia "POUŽITÉ ZDROJE A AUTORI" musí byť vždy prítomná.
+
+24. Ak je zapnutá kontrola príloh podľa profilu práce: ${
+    settings.validateAttachmentsAgainstProfile ? 'áno' : 'nie'
+  }.
+
+25. Povinný zoznam zdrojov: ${settings.requireSourceList ? 'áno' : 'nie'}.
+
+26. Povolené použiť všeobecné znalosti AI pri chýbajúcich prílohách: ${
+    settings.allowAiKnowledgeFallback ? 'áno' : 'nie'
+  }.
+
+27. Aktuálny zdrojový režim: ${settings.sourceMode}.
+`;
 
   return `
 Si ZEDPERA, profesionálny akademický AI asistent a AI vedúci práce.
@@ -731,33 +463,24 @@ Si ZEDPERA, profesionálny akademický AI asistent a AI vedúci práce.
 HLAVNÝ PRACOVNÝ POSTUP:
 1. Najprv vychádzaj z uloženého Profilu práce.
 2. Následne zohľadni priložené súbory a dokumenty zo Supabase.
-3. Potom použi zdroje načítané zo Semantic Scholar.
-4. Až potom vytvor akademický text, kapitolu, úvod, abstrakt, metodológiu, analýzu alebo inú odpoveď.
-5. Ak sú dostupné zdroje zo Semantic Scholar, odborné tvrdenia opieraj najmä o ne.
-6. Ak sú zdroje slabé alebo tematicky vzdialené, jasne to napíš v analýze.
+3. Semantic Scholar je vypnutý a nesmie sa použiť.
+4. Ak existujú prílohy, najprv posúď ich tematickú relevantnosť voči Profilu práce.
+5. Ak sú prílohy relevantné a ich text je dostupný, použi ich ako primárny podklad.
+6. Ak prílohy chýbajú, môžeš vychádzať zo všeobecných znalostí AI modelu, ale musíš to transparentne uviesť.
+7. Ak prílohy neobsahujú zdroje, musíš to transparentne uviesť.
+8. Ak prílohy nesúvisia s profilom práce, musíš upozorniť, že nezodpovedajú profilu práce.
 
 HLAVNÉ PRAVIDLÁ:
 - Odpovedaj v jazyku práce: ${workLanguage}.
 - Vychádzaj prednostne z uloženého profilu práce.
-- Ak sú priložené súbory, zohľadni ich ako doplnkové podklady.
-- Ak pri niektorom súbore nie je dostupný extrahovaný obsah, jasne uveď, že server pozná iba názov, typ a veľkosť súboru, nie celý obsah.
 - Text má byť odborne napísaný, logický a vhodný pre akademické písanie.
+- Ak niečo v profile chýba, uveď, čo odporúčaš doplniť.
 - Nevymýšľaj konkrétne bibliografické údaje, ak nie sú priamo dostupné.
 - Nepoužívaj falošné citácie, autorov, DOI ani názvy článkov.
 - Nepoužívaj Markdown formátovanie ako tučný text, mriežky, hviezdičky, oddeľovače ani kódové bloky.
 - Nadpisy píš obyčajným textom bez znakov #, *, _, \`.
 - Výstup musí byť čistý text vhodný na priame vloženie do Word dokumentu.
-
-PRAVIDLÁ PRE ZDROJE, AUTOROV A CITÁCIE:
-- Na konci každej akademickej odpovede musí byť sekcia:
-=== POUŽITÉ ZDROJE A AUTORI ===
-- Vypíš iba zdroje, ktoré boli reálne dostupné v Semantic Scholar, priložených súboroch alebo texte používateľa.
-- Pri každom zdroji uveď autora, rok, názov, zdroj alebo časopis, DOI alebo URL, ak sú dostupné.
-- Ak používaš zdroj [S1], [S2] a podobne, musí sa objaviť aj v sekcii Použité zdroje a autori.
-- Dodrž citačnú normu: ${citationStyle}.
-- Nikdy si nevymýšľaj zdroje, autorov, DOI, URL ani roky.
-- Ak nebol použitý žiadny overený zdroj, napíš presne:
-Zdroje neboli dodané alebo sa ich nepodarilo overene načítať. Odporúčam ich doplniť cez modul Zdroje alebo priložiť PDF/Word súbory.
+- Ak sú priložené dokumenty, ale ich obsah nie je extrahovaný, nepredstieraj, že poznáš ich plný obsah.
 
 ULOŽENÝ PROFIL PRÁCE:
 Názov práce: ${profile?.title || 'Neuvedené'}
@@ -825,35 +548,58 @@ ${requiredSectionsText}
 Špecifická inštrukcia typu práce:
 ${profile?.schema?.aiInstruction || 'Neuvedené'}
 
+INFORMÁCIA O PRÍLOHÁCH:
+Počet dostupných prílohových blokov: ${attachmentTexts.length}
+Sú priložené dokumenty: ${hasAttachments ? 'Áno' : 'Nie'}
+
 ${attachmentsBlock}
 
-${semanticScholarBlock}
+${documentSourceRules}
 
 FORMÁT ODPOVEDE:
 Použi presne tieto sekcie. Nepoužívaj Markdown znaky, hviezdičky, mriežky ani kódové bloky.
 
 === VÝSTUP ===
-Sem napíš hlavný výstup ako čistý akademický text. Ak ide o akademický text, vkladaj citácie priamo do textu podľa normy ${citationStyle}.
+Sem napíš hlavný výstup ako čistý akademický text. Ak ide o akademický text, vkladaj citácie priamo do textu podľa normy ${citationStyle}. Ak neboli dostupné overiteľné zdroje, nepoužívaj falošné citácie.
 
 === ANALÝZA ===
-Stručne vysvetli, z ktorých údajov profilu, priložených súborov a Semantic Scholar zdrojov si čerpal.
+Stručne vysvetli:
+- z ktorých údajov profilu si čerpal,
+- či boli priložené dokumenty,
+- či priložené dokumenty tematicky zodpovedajú profilu práce,
+- či sa v priložených dokumentoch nachádzajú identifikovateľné bibliografické zdroje,
+- či bol text vytvorený aj zo všeobecných znalostí AI modelu.
 
 === SKÓRE ===
-Napíš iba číslo od 0 do 100 a krátke slovné hodnotenie.
+Napíš iba číslo od 0 do 100 a krátke slovné hodnotenie. Skóre zníž, ak chýbajú relevantné zdroje, chýba extrahovaný obsah príloh alebo prílohy nezodpovedajú profilu práce.
 
 === ODPORÚČANIA ===
-Uveď konkrétne odporúčania v čistom texte bez Markdown symbolov.
+Uveď konkrétne odporúčania v čistom texte bez Markdown symbolov. Odporúčaj najmä:
+- doplniť relevantné PDF/Word zdroje,
+- doplniť bibliografiu,
+- overiť AI odporúčané zdroje,
+- odstrániť nerelevantné prílohy,
+- doplniť metodológiu alebo výskumné otázky, ak chýbajú.
 
 === POUŽITÉ ZDROJE A AUTORI ===
-Vypíš iba zdroje, ktoré boli reálne použité v texte.
-Pri každom zdroji uveď:
-- autor / autori,
-- rok,
-- názov,
-- zdroj / časopis / vydavateľ,
-- DOI alebo URL, ak sú dostupné.
-Ak nebol použitý žiadny overený zdroj, napíš:
-Zdroje neboli dodané alebo sa ich nepodarilo overene načítať. Odporúčam ich doplniť cez modul Zdroje alebo priložiť PDF/Word súbory.
+A. Zdroje nájdené v priložených dokumentoch
+Vypíš všetky identifikované zdroje z dokumentov. Ak sa nenašli, napíš:
+V priložených dokumentoch sa nenachádzajú žiadne identifikovateľné bibliografické zdroje.
+
+B. Priložené dokumenty použité ako podklad
+Vypíš názvy relevantných priložených dokumentov, z ktorých si čerpal. Ak neboli priložené žiadne dokumenty, napíš:
+Neboli priložené žiadne dokumenty.
+
+C. Upozornenia k nerelevantným alebo neoveriteľným prílohám
+Ak niektorá príloha nesúvisí s profilom práce, vypíš:
+Požadovaná príloha nezodpovedá profilu práce: názov súboru.
+Ak príloha nebola obsahovo extrahovaná, vypíš:
+Obsah prílohy nebol overený, pretože server má dostupný iba názov, typ a veľkosť súboru: názov súboru.
+Ak všetky dostupné prílohy súvisia a ich obsah je použiteľný, napíš:
+Neboli zistené nerelevantné prílohy.
+
+D. AI odporúčané zdroje na overenie a doplnenie
+Ak neboli priložené zdroje alebo sú zdroje nedostatočné, vypíš relevantné odborné zdroje, ktoré odporúčaš overiť a doplniť. Označ ich ako odporúčané, nie ako overene použité z príloh. Nevymýšľaj DOI, URL ani presné strany.
 `;
 }
 
@@ -1007,11 +753,10 @@ export async function POST(req: Request) {
     let files: File[] = [];
     let projectId: string | null = null;
 
-    let useSemanticScholar = true;
-    let semanticScholarLimit = 10;
-    let semanticScholarYearFrom: number | undefined = 2000;
-    let semanticScholarYearTo: number | undefined = undefined;
-    let semanticScholarPdfOnly = false;
+    let sourceMode: SourceMode = 'uploaded_documents_first';
+    let validateAttachmentsAgainstProfile = true;
+    let requireSourceList = true;
+    let allowAiKnowledgeFallback = true;
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData();
@@ -1021,21 +766,17 @@ export async function POST(req: Request) {
       profile = parseJson<SavedProfile | null>(formData.get('profile'), null);
       projectId = formData.get('projectId')?.toString() || null;
 
-      useSemanticScholar =
-        formData.get('useSemanticScholar')?.toString() !== 'false';
+      sourceMode = normalizeSourceMode(formData.get('sourceMode')?.toString());
 
-      semanticScholarLimit = Number(
-        formData.get('semanticScholarLimit')?.toString() || 10
-      );
+      validateAttachmentsAgainstProfile =
+        formData.get('validateAttachmentsAgainstProfile')?.toString() !==
+        'false';
 
-      const yearFromValue = formData.get('semanticScholarYearFrom')?.toString();
-      const yearToValue = formData.get('semanticScholarYearTo')?.toString();
+      requireSourceList =
+        formData.get('requireSourceList')?.toString() !== 'false';
 
-      semanticScholarYearFrom = yearFromValue ? Number(yearFromValue) : 2000;
-      semanticScholarYearTo = yearToValue ? Number(yearToValue) : undefined;
-
-      semanticScholarPdfOnly =
-        formData.get('semanticScholarPdfOnly')?.toString() === 'true';
+      allowAiKnowledgeFallback =
+        formData.get('allowAiKnowledgeFallback')?.toString() !== 'false';
 
       files = formData
         .getAll('files')
@@ -1048,22 +789,14 @@ export async function POST(req: Request) {
       profile = body?.profile || body?.activeProfile || body?.savedProfile || null;
       projectId = body?.projectId || null;
 
-      useSemanticScholar = body?.useSemanticScholar !== false;
-      semanticScholarLimit = Number(body?.semanticScholarLimit || 10);
+      sourceMode = normalizeSourceMode(body?.sourceMode);
 
-      semanticScholarYearFrom =
-        body?.semanticScholarYearFrom === null ||
-        body?.semanticScholarYearFrom === undefined
-          ? 2000
-          : Number(body.semanticScholarYearFrom);
+      validateAttachmentsAgainstProfile =
+        body?.validateAttachmentsAgainstProfile !== false;
 
-      semanticScholarYearTo =
-        body?.semanticScholarYearTo === null ||
-        body?.semanticScholarYearTo === undefined
-          ? undefined
-          : Number(body.semanticScholarYearTo);
+      requireSourceList = body?.requireSourceList !== false;
 
-      semanticScholarPdfOnly = Boolean(body?.semanticScholarPdfOnly);
+      allowAiKnowledgeFallback = body?.allowAiKnowledgeFallback !== false;
 
       files = [];
     }
@@ -1093,7 +826,13 @@ export async function POST(req: Request) {
 Názov: ${doc.file_name}
 Typ: ${documentType}
 Veľkosť: ${doc.file_size || 0} bajtov
-Text:
+Stav extrakcie: ${
+        doc.extracted_text
+          ? 'Dokument má uložený extrahovaný text.'
+          : 'Dokument nemá uložený extrahovaný text.'
+      }
+
+EXTRAHOVANÝ TEXT:
 ${doc.extracted_text || '[Dokument nemá uložený extrahovaný text]'}`;
     });
 
@@ -1102,22 +841,14 @@ ${doc.extracted_text || '[Dokument nemá uložený extrahovaný text]'}`;
       ...projectDocumentTexts,
     ];
 
-    const semanticScholar = await loadSemanticScholarForChat({
-      enabled: useSemanticScholar,
-      profile,
-      messages,
-      agent,
-      limit: semanticScholarLimit,
-      yearFrom: semanticScholarYearFrom,
-      yearTo: semanticScholarYearTo,
-      pdfOnly: semanticScholarPdfOnly,
-    });
+    const settings: SourceSettings = {
+      sourceMode,
+      validateAttachmentsAgainstProfile,
+      requireSourceList,
+      allowAiKnowledgeFallback,
+    };
 
-    const systemPrompt = buildSystemPrompt(
-      profile,
-      attachmentTexts,
-      semanticScholar
-    );
+    const systemPrompt = buildSystemPrompt(profile, attachmentTexts, settings);
 
     try {
       const primary = getModelByAgent(agent);
@@ -1148,8 +879,9 @@ Na konci akademickej odpovede vždy uveď sekciu:
 
 === POUŽITÉ ZDROJE A AUTORI ===
 
-Ak zdroje nie sú dostupné, nevymýšľaj ich a uveď:
-Zdroje neboli dodané alebo sa ich nepodarilo overene načítať. Odporúčam ich doplniť cez modul Zdroje alebo priložiť PDF/Word súbory.
+Semantic Scholar je vypnutý. Používaj iba Profil práce, priložené dokumenty, dokumenty zo Supabase, text používateľa a všeobecné znalosti AI modelu.
+Ak neboli dodané overiteľné zdroje, nevymýšľaj ich a jasne uveď:
+Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI modelu. Neboli dodané overiteľné priložené zdroje.
 `;
 
       return await createStreamResponse({

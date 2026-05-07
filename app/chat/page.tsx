@@ -49,10 +49,20 @@ type ExtractedFileInfo = {
   size?: number;
   extension?: string;
   label?: string;
+
   extractedChars?: number;
+  charCount?: number;
+
   extractedPreview?: string;
+  preview?: string;
+
   status?: string;
   error?: string | null;
+  warning?: string | null;
+
+  text?: string;
+  content?: string;
+  extractedText?: string;
 };
 
 type ParsedResult = {
@@ -289,7 +299,10 @@ function formatBytes(bytes: number) {
   if (!bytes) return '0 B';
 
   const units = ['B', 'KB', 'MB', 'GB'];
-  const index = Math.floor(Math.log(bytes) / Math.log(1024));
+  const index = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1
+  );
 
   return `${(bytes / Math.pow(1024, index)).toFixed(1)} ${units[index]}`;
 }
@@ -406,6 +419,46 @@ function createDocHtml(title: string, text: string) {
 `;
 }
 
+async function readApiErrorResponse(res: Response) {
+  const contentType = res.headers.get('content-type') || '';
+
+  try {
+    if (contentType.includes('application/json')) {
+      const data = await res.json();
+
+      const message =
+        data?.message ||
+        data?.error ||
+        data?.detail ||
+        data?.details ||
+        data?.reason ||
+        `API error ${res.status}`;
+
+      return String(message);
+    }
+
+    const text = await res.text();
+    const cleaned = text.trim();
+
+    if (!cleaned) {
+      return `API error ${res.status}`;
+    }
+
+    if (
+      cleaned.startsWith('<!DOCTYPE') ||
+      cleaned.startsWith('<html') ||
+      cleaned.includes('<body') ||
+      cleaned.includes('__next_error__')
+    ) {
+      return `Server vrátil chybu ${res.status}. Detail pozri v termináli pri trase /api/chat.`;
+    }
+
+    return cleaned.length > 1200 ? `${cleaned.slice(0, 1200)}...` : cleaned;
+  } catch {
+    return `API error ${res.status}`;
+  }
+}
+
 function buildAttachmentPrompt(files: AttachedFile[]) {
   if (!files.length) {
     return 'Používateľ nepriložil žiadne dokumenty.';
@@ -414,7 +467,7 @@ function buildAttachmentPrompt(files: AttachedFile[]) {
   const lines = files.map((item, index) => {
     const extractable = isTextExtractableFile(item.name)
       ? 'áno – API má extrahovať text'
-      : 'nie – súbor je doplnkový alebo v tejto trase nie je textovo extrahovateľný';
+      : 'nie – súbor je doplnkový alebo v tejto trase nemusí byť textovo extrahovateľný';
 
     return `${index + 1}. ${item.name} (${getFileKindLabel(
       item.name
@@ -424,23 +477,94 @@ function buildAttachmentPrompt(files: AttachedFile[]) {
   return lines.join('\n');
 }
 
+function getExtractedCharCount(file: ExtractedFileInfo) {
+  return Number(file.extractedChars ?? file.charCount ?? 0);
+}
+
+function getExtractedPreview(file: ExtractedFileInfo) {
+  const preview =
+    file.extractedPreview ||
+    file.preview ||
+    file.extractedText ||
+    file.text ||
+    file.content ||
+    '';
+
+  return String(preview || '').slice(0, 900);
+}
+
 function buildExtractionSummary(files: ExtractedFileInfo[]) {
   if (!files.length) return '';
 
   return files
     .map((file, index) => {
-      const chars = Number(file.extractedChars || 0);
+      const chars = getExtractedCharCount(file);
+      const preview = getExtractedPreview(file);
 
       return `${index + 1}. ${file.name}
-- typ: ${file.label || file.type || 'neuvedené'}
+- typ: ${file.label || file.type || file.extension || 'neuvedené'}
 - extrahované znaky: ${chars}
 - stav: ${
         chars > 0
           ? 'text bol extrahovaný a má byť použitý ako hlavný zdroj'
-          : file.error || file.status || 'text sa nepodarilo extrahovať'
+          : file.error ||
+            file.warning ||
+            file.status ||
+            'text sa nepodarilo extrahovať'
+      }${
+        preview
+          ? `\n- ukážka textu: ${preview
+              .replace(/\n{2,}/g, '\n')
+              .slice(0, 500)}`
+          : ''
       }`;
     })
     .join('\n\n');
+}
+
+function normalizeExtractedFiles(value: any): ExtractedFileInfo[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter((item) => item && typeof item === 'object')
+    .map((item) => {
+      const name =
+        item.name ||
+        item.original_name ||
+        item.originalName ||
+        item.safe_name ||
+        'neznámy súbor';
+
+      const extractedText = String(
+        item.extractedText || item.text || item.content || ''
+      );
+
+      const charCount = Number(
+        item.extractedChars ?? item.charCount ?? extractedText.length ?? 0
+      );
+
+      return {
+        name,
+        type: item.type,
+        size: item.size,
+        extension: item.extension,
+        label: item.label || item.kind,
+        extractedChars: charCount,
+        charCount,
+        extractedPreview:
+          item.extractedPreview ||
+          item.preview ||
+          extractedText.slice(0, 600),
+        status:
+          item.status ||
+          (charCount > 0 ? 'TEXT_EXTRACTED' : 'NO_TEXT_EXTRACTED'),
+        error: item.error || null,
+        warning: item.warning || null,
+        text: extractedText,
+        content: extractedText,
+        extractedText,
+      };
+    });
 }
 
 // ================= PAGE =================
@@ -479,6 +603,8 @@ export default function ChatPage() {
     const base = activeProfile?.title || 'Zedpera výstup';
     return base.trim() || 'Zedpera výstup';
   }, [activeProfile]);
+
+  const canSubmit = input.trim().length > 0 || attachedFiles.length > 0;
 
   useEffect(() => {
     const activeRaw = localStorage.getItem('active_profile');
@@ -674,6 +800,16 @@ export default function ChatPage() {
     }, 400);
   };
 
+  const appendAssistantMessage = (content: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: 'assistant',
+        content,
+      },
+    ]);
+  };
+
   const sendPromptToApi = async ({
     visibleUserText,
     apiUserText,
@@ -683,9 +819,13 @@ export default function ChatPage() {
   }) => {
     if (isLoading) return;
 
+    const userVisibleContent =
+      visibleUserText.trim() ||
+      `Spracuj priložené dokumenty (${attachedFiles.length})`;
+
     const visibleMessage: ChatMessage = {
       role: 'user',
-      content: visibleUserText,
+      content: userVisibleContent,
     };
 
     setMessages((prev) => [...prev, visibleMessage]);
@@ -700,7 +840,7 @@ export default function ChatPage() {
       const attachmentPrompt = buildAttachmentPrompt(attachedFiles);
 
       const finalApiUserText = `
-${apiUserText}
+${apiUserText.trim() || 'Spracuj priložené dokumenty podľa aktívneho profilu práce.'}
 
 PRILOŽENÉ DOKUMENTY:
 ${attachmentPrompt}
@@ -772,8 +912,24 @@ F) Odporúčaná veta do metodológie
       });
 
       if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || `API error ${res.status}`);
+        const errorMessage = await readApiErrorResponse(res);
+
+        appendAssistantMessage(
+          `❌ API vrátilo chybu ${res.status}.
+
+Detail:
+${errorMessage}
+
+Najčastejšia príčina pri hláške "Forbidden":
+- nesprávny alebo neplatný API kľúč,
+- provider blokuje zvolený model,
+- chýba environment premenná vo Verceli alebo v .env.local,
+- /api/chat používa model, ku ktorému nemáš prístup.
+
+Skontroluj terminál pri trase /api/chat.`
+        );
+
+        return;
       }
 
       const contentType = res.headers.get('content-type') || '';
@@ -786,9 +942,9 @@ F) Odporúčaná veta do metodológie
       if (contentType.includes('application/json')) {
         const data = await res.json();
 
-        const apiExtractedFiles = Array.isArray(data.extractedFiles)
-          ? (data.extractedFiles as ExtractedFileInfo[])
-          : [];
+        const apiExtractedFiles = normalizeExtractedFiles(
+          data.extractedFiles || data.files || data.uploadedFiles || []
+        );
 
         if (apiExtractedFiles.length > 0) {
           currentExtractionSummary = buildExtractionSummary(apiExtractedFiles);
@@ -797,11 +953,27 @@ F) Odporúčaná veta do metodológie
         }
 
         fullText =
-          String(data.output || data.result || data.message || data.text || '')
-            .trim() || '';
+          String(
+            data.output ||
+              data.result ||
+              data.message ||
+              data.text ||
+              data.answer ||
+              ''
+          ).trim() || '';
 
         if (!fullText && data.ok === false) {
-          throw new Error(data.error || 'API nevrátilo výstup.');
+          appendAssistantMessage(
+            `❌ API nevrátilo výstup.
+
+${data.message || data.error || 'Neznáma chyba API.'}`
+          );
+          return;
+        }
+
+        if (!fullText) {
+          fullText =
+            'API odpovedalo úspešne, ale nevrátilo žiadny textový výstup.';
         }
 
         const visibleText = cleanAiOutput(fullText);
@@ -818,7 +990,8 @@ F) Odporúčaná veta do metodológie
         });
       } else {
         if (!res.body) {
-          throw new Error('API nevrátilo stream odpovede.');
+          appendAssistantMessage('❌ API nevrátilo stream odpovede.');
+          return;
         }
 
         const reader = res.body.getReader();
@@ -868,7 +1041,9 @@ F) Odporúčaná veta do metodológie
         parsed.output.includes('AI_APICallError') ||
         parsed.output.includes('API error') ||
         parsed.output.includes('model is not found') ||
-        parsed.output.includes('not found for API version');
+        parsed.output.includes('not found for API version') ||
+        parsed.output.includes('ORIGINALITY_CHECK_FAILED') ||
+        parsed.output.includes('UPLOAD_FAILED');
 
       if (
         !looksLikeError &&
@@ -882,18 +1057,20 @@ F) Odporúčaná veta do metodológie
         setPopup(true);
       }
     } catch (error) {
-      console.error(error);
+      console.error('CHAT SEND ERROR:', error);
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content:
-            error instanceof Error
-              ? `❌ ${error.message}`
-              : '❌ Nastala chyba pri komunikácii s API.',
-        },
-      ]);
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Nastala chyba pri komunikácii s API.';
+
+      appendAssistantMessage(
+        `❌ Nepodarilo sa spracovať požiadavku.
+
+${message}
+
+Skontroluj terminál, kde beží Next.js, hlavne výpis z /api/chat.`
+      );
     } finally {
       setIsLoading(false);
     }
@@ -902,7 +1079,7 @@ F) Odporúčaná veta do metodológie
   const sendMessage = async () => {
     const text = input.trim();
 
-    if (!text || isLoading) return;
+    if (!canSubmit || isLoading) return;
 
     await sendPromptToApi({
       visibleUserText: text,
@@ -934,7 +1111,6 @@ F) Odporúčaná veta do metodológie
   return (
     <div className="h-screen overflow-hidden bg-[#050711] text-white">
       <div className="mx-auto flex h-screen w-full max-w-[1400px] flex-col px-4 py-4 md:px-8">
-        {/* TOP NAV */}
         <header className="shrink-0 border-b border-white/10 pb-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <button
@@ -1008,7 +1184,6 @@ F) Odporúčaná veta do metodológie
           </div>
         </header>
 
-        {/* TITLE */}
         <section className="shrink-0 py-4">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
@@ -1043,9 +1218,7 @@ F) Odporúčaná veta do metodológie
           </div>
         </section>
 
-        {/* MAIN CHAT */}
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl shadow-black/30">
-          {/* SCROLLABLE AREA */}
           <div
             ref={scrollAreaRef}
             className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8"
@@ -1125,7 +1298,6 @@ F) Odporúčaná veta do metodológie
             )}
           </div>
 
-          {/* EXTRACTION RESULT */}
           {extractedFiles.length > 0 && (
             <div className="shrink-0 border-t border-emerald-400/20 bg-emerald-500/5 px-5 py-3 md:px-8">
               <div className="mx-auto max-w-5xl">
@@ -1136,7 +1308,8 @@ F) Odporúčaná veta do metodológie
 
                 <div className="grid gap-2 md:grid-cols-2">
                   {extractedFiles.map((file, index) => {
-                    const chars = Number(file.extractedChars || 0);
+                    const chars = getExtractedCharCount(file);
+                    const preview = getExtractedPreview(file);
 
                     return (
                       <div
@@ -1155,15 +1328,16 @@ F) Odporúčaná veta do metodológie
                           Stav: {file.status || 'neuvedené'}
                         </div>
 
-                        {file.extractedPreview && (
+                        {preview && (
                           <div className="mt-2 max-h-[74px] overflow-hidden whitespace-pre-wrap text-emerald-50/80">
-                            {file.extractedPreview}
+                            {preview}
                           </div>
                         )}
 
-                        {!file.extractedPreview && (
+                        {!preview && (
                           <div className="mt-2 text-orange-200">
                             {file.error ||
+                              file.warning ||
                               file.status ||
                               'Z dokumentu sa nepodarilo zobraziť ukážku textu.'}
                           </div>
@@ -1176,7 +1350,6 @@ F) Odporúčaná veta do metodológie
             </div>
           )}
 
-          {/* ATTACHED FILES */}
           {attachedFiles.length > 0 && (
             <div className="shrink-0 border-t border-white/10 px-5 py-3 md:px-8">
               <div className="mx-auto max-w-5xl">
@@ -1229,7 +1402,6 @@ F) Odporúčaná veta do metodológie
             </div>
           )}
 
-          {/* INPUT */}
           <div className="shrink-0 border-t border-white/10 bg-[#070a16] px-5 py-4 md:px-8">
             <div className="mx-auto max-w-5xl rounded-[28px] border border-violet-500/40 bg-violet-950/30 p-4 shadow-2xl shadow-violet-950/40">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
@@ -1301,7 +1473,11 @@ F) Odporúčaná veta do metodológie
                       sendMessage();
                     }
                   }}
-                  placeholder="Napíšte správu..."
+                  placeholder={
+                    attachedFiles.length > 0
+                      ? 'Napíšte správu alebo odošlite len priložené dokumenty...'
+                      : 'Napíšte správu...'
+                  }
                   className="min-h-[54px] flex-1 resize-none bg-transparent px-2 py-3 text-base leading-6 text-white outline-none placeholder:text-slate-500"
                 />
 
@@ -1320,7 +1496,7 @@ F) Odporúčaná veta do metodológie
 
                 <button
                   type="submit"
-                  disabled={isLoading || !input.trim()}
+                  disabled={isLoading || !canSubmit}
                   className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-600 text-white shadow-lg shadow-violet-700/40 transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
                   title="Odoslať"
                 >
@@ -1331,7 +1507,6 @@ F) Odporúčaná veta do metodológie
           </div>
         </div>
 
-        {/* CANVAS */}
         {canvasOpen && (
           <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">
             <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
@@ -1386,7 +1561,6 @@ F) Odporúčaná veta do metodológie
           </div>
         )}
 
-        {/* POPUP RESULT */}
         {popup && popupData && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
             <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">

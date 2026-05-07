@@ -400,7 +400,7 @@ export default function ChatPage() {
   const [popup, setPopup] = useState(false);
   const [popupData, setPopupData] = useState<ParsedResult | null>(null);
 
-  const [validateAttachments, setValidateAttachments] = useState(true);
+const validateAttachments = true;
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
@@ -644,9 +644,9 @@ export default function ChatPage() {
         formData.append('projectId', activeProfile.id);
       }
 
-      formData.append('useSemanticScholar', 'false');
+formData.append('useSemanticScholar', 'false');
 formData.append('sourceMode', 'uploaded_documents_first');
-formData.append('validateAttachmentsAgainstProfile', String(validateAttachments));
+formData.append('validateAttachmentsAgainstProfile', 'true');
 formData.append('requireSourceList', 'true');
 formData.append('allowAiKnowledgeFallback', 'true');
 
@@ -1032,37 +1032,16 @@ formData.append('allowAiKnowledgeFallback', 'true');
                   ))}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                 <button
-  type="button"
-  onClick={() => setValidateAttachments((prev) => !prev)}
-  className={`rounded-xl px-3 py-1.5 text-xs font-black transition ${
-    validateAttachments
-      ? 'bg-emerald-600 text-white'
-      : 'border border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'
-  }`}
-  title="Zapnúť alebo vypnúť kontrolu, či priložené dokumenty súvisia s profilom práce"
->
-  {validateAttachments ? 'Kontrola príloh ON' : 'Kontrola príloh OFF'}
-</button>
-
-<span className="rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-1.5 text-xs font-black text-violet-200">
-  Zdroje z príloh
-</span>
-
-<span className="rounded-xl border border-blue-400/20 bg-blue-500/10 px-3 py-1.5 text-xs font-black text-blue-200">
-  Bez Semantic Scholar
-</span>
-
-<button
-  type="button"
-  onClick={() => setCanvasOpen(true)}
-  className="inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-black text-slate-300 hover:bg-white/10 hover:text-white"
->
-  <Paintbrush className="h-4 w-4" />
-  Canvas
-</button>
-                </div>
+<div className="flex flex-wrap items-center gap-2">
+  <button
+    type="button"
+    onClick={() => setCanvasOpen(true)}
+    className="inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-black text-slate-300 hover:bg-white/10 hover:text-white"
+  >
+    <Paintbrush className="h-4 w-4" />
+    Canvas
+  </button>
+</div>
               </div>
 
               <form

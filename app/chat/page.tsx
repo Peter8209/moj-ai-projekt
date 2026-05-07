@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   BookOpen,
   Brain,
+  CheckCircle2,
   Download,
   FileDown,
   FileText,
@@ -40,6 +41,16 @@ type AttachedFile = {
   type: string;
   uploadedAt: string;
   file: File;
+};
+
+type ExtractedFileInfo = {
+  name: string;
+  type?: string;
+  size?: number;
+  extractedChars?: number;
+  extractedPreview?: string;
+  status?: string;
+  error?: string;
 };
 
 type ParsedResult = {
@@ -117,6 +128,16 @@ const allowedFileExtensions = [
   '.pptx',
 ];
 
+const textExtractableExtensions = [
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.txt',
+  '.rtf',
+  '.odt',
+  '.md',
+];
+
 const allowedFileAccept = allowedFileExtensions.join(',');
 
 const maxFilesCount = 10;
@@ -141,45 +162,46 @@ const suggestions: {
     title: 'Navrhni mi úvod mojej práce',
     actionTitle: 'Úvod práce',
     instruction:
-      'Na základe uloženého profilu práce vytvor profesionálny akademický úvod práce. Najprv použi profil práce, následne skontroluj priložené dokumenty. Ak prílohy súvisia s profilom práce, použi ich ako zdroj. Ak prílohy nesúvisia s profilom práce, jasne to uveď. Ak v dokumentoch nie sú uvedené zdroje, upozorni na to a vypíš odporúčané odborné zdroje na overenie.',
+      'Na základe uloženého profilu práce vytvor profesionálny akademický úvod práce. Najprv použi text extrahovaný z priložených dokumentov. Ak prílohy súvisia s profilom práce, použi ich ako hlavný zdroj. Ak prílohy nesúvisia s profilom práce, jasne to uveď. Na konci vypíš všetky identifikované zdroje, autorov, názvy diel, roky, URL a bibliografické údaje nájdené v priložených dokumentoch. Nevymýšľaj zdroje.',
     icon: PenLine,
   },
   {
     title: 'Napíš mi abstrakt',
     actionTitle: 'Abstrakt',
     instruction:
-      'Na základe uloženého profilu práce vytvor akademický abstrakt. Má obsahovať tému, cieľ, problém, metodológiu, výsledky alebo očakávaný prínos práce. Použi priložené dokumenty iba vtedy, ak súvisia s profilom práce. Ak dokumenty neobsahujú zdroje, upozorni na to.',
+      'Na základe uloženého profilu práce vytvor akademický abstrakt. Najprv použi text extrahovaný z priložených dokumentov. Má obsahovať tému, cieľ, problém, metodológiu, výsledky alebo očakávaný prínos práce. Na konci vypíš použité zdroje a autorov nájdených v dokumentoch.',
     icon: BookOpen,
   },
   {
     title: 'Pomôž mi navrhnúť štruktúru kapitol a podkapitol',
     actionTitle: 'Štruktúra kapitol',
     instruction:
-      'Na základe uloženého profilu práce navrhni detailnú štruktúru kapitol a podkapitol. Rešpektuj typ práce, cieľ, metodológiu, praktickú časť a logické akademické členenie. Ak sú priložené dokumenty, najprv posúď, či zodpovedajú profilu práce.',
+      'Na základe uloženého profilu práce navrhni detailnú štruktúru kapitol a podkapitol. Najprv spracuj priložené dokumenty a vychádzaj z extrahovaného textu. Rešpektuj typ práce, cieľ, metodológiu, praktickú časť a logické akademické členenie.',
     icon: GraduationCap,
   },
   {
     title: 'Pomôž mi napísať návrh kapitoly.',
     actionTitle: 'Návrh kapitoly',
     instruction:
-      'Na základe uloženého profilu práce priprav návrh kapitoly. Najprv navrhni osnovu kapitoly, potom podkapitoly a následne ukážkový odborný text. Použi iba relevantné priložené dokumenty. Ak príloha nesúvisí s profilom práce, upozorni na to.',
+      'Na základe uloženého profilu práce priprav návrh kapitoly. Najprv použi priložené dokumenty a extrahovaný text z nich. Potom navrhni osnovu kapitoly, podkapitoly a následne ukážkový odborný text. Na konci vypíš použité zdroje a autorov z dokumentov.',
     icon: FileText,
   },
   {
     title: 'Pomôž mi citovať tento zdroj',
     actionTitle: 'Citovanie zdroja',
     instruction:
-      'Na základe uloženého profilu práce a zvoleného citačného štýlu vysvetli, ako správne citovať zdroj v texte a v zozname literatúry. Ak sú priložené dokumenty, vyhľadaj v nich bibliografické údaje. Ak tam nie sú, upozorni, že zdrojové údaje chýbajú.',
+      'Na základe uloženého profilu práce a zvoleného citačného štýlu vysvetli, ako správne citovať zdroj v texte a v zozname literatúry. Najprv vyhľadaj bibliografické údaje v priložených dokumentoch. Vypíš autorov, názvy, roky, inštitúcie, URL a všetky rozpoznateľné citačné údaje. Ak údaje chýbajú, jasne napíš, čo treba doplniť.',
     icon: Library,
   },
   {
     title: 'Pomôž mi prepísať môj text do akademického jazyka.',
     actionTitle: 'Akademický jazyk',
     instruction:
-      'Na základe uloženého profilu práce prepíš text do akademického jazyka. Ak text od používateľa chýba, vytvor ukážku odborného formulovania podľa témy práce. Priložené dokumenty použi iba vtedy, ak tematicky súvisia s profilom práce.',
+      'Na základe uloženého profilu práce prepíš text do akademického jazyka. Ak sú priložené dokumenty, najprv použi ich extrahovaný text ako kontext. Ak text od používateľa chýba, vytvor ukážku odborného formulovania podľa témy práce.',
     icon: BookOpen,
   },
 ];
+
 // ================= FILE HELPERS =================
 
 function getFileExtension(fileName: string) {
@@ -191,6 +213,10 @@ function getFileExtension(fileName: string) {
 function isAllowedUploadFile(file: File) {
   const extension = getFileExtension(file.name);
   return allowedFileExtensions.includes(extension);
+}
+
+function isTextExtractableFile(fileName: string) {
+  return textExtractableExtensions.includes(getFileExtension(fileName));
 }
 
 function getFileKindLabel(fileName: string) {
@@ -379,6 +405,42 @@ function createDocHtml(title: string, text: string) {
 `;
 }
 
+function buildAttachmentPrompt(files: AttachedFile[]) {
+  if (!files.length) {
+    return 'Používateľ nepriložil žiadne dokumenty.';
+  }
+
+  const lines = files.map((item, index) => {
+    const extractable = isTextExtractableFile(item.name)
+      ? 'áno – text sa má extrahovať v API'
+      : 'nie – súbor je doplnkový, nemusí obsahovať extrahovateľný text';
+
+    return `${index + 1}. ${item.name} (${getFileKindLabel(
+      item.name
+    )}, ${formatBytes(item.size)}), extrakcia textu: ${extractable}`;
+  });
+
+  return lines.join('\n');
+}
+
+function buildExtractionSummary(files: ExtractedFileInfo[]) {
+  if (!files.length) return '';
+
+  return files
+    .map((file, index) => {
+      const chars = Number(file.extractedChars || 0);
+
+      return `${index + 1}. ${file.name}
+- extrahované znaky: ${chars}
+- stav: ${
+        chars > 0
+          ? 'text bol extrahovaný a má byť použitý ako hlavný zdroj'
+          : file.error || file.status || 'text sa nepodarilo extrahovať'
+      }`;
+    })
+    .join('\n\n');
+}
+
 // ================= PAGE =================
 
 export default function ChatPage() {
@@ -392,6 +454,9 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [extractedFiles, setExtractedFiles] = useState<ExtractedFileInfo[]>([]);
+  const [lastExtractionSummary, setLastExtractionSummary] = useState('');
+
   const [isListening, setIsListening] = useState(false);
 
   const [canvasOpen, setCanvasOpen] = useState(false);
@@ -399,8 +464,6 @@ export default function ChatPage() {
 
   const [popup, setPopup] = useState(false);
   const [popupData, setPopupData] = useState<ParsedResult | null>(null);
-
-const validateAttachments = true;
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
@@ -514,6 +577,9 @@ const validateAttachments = true;
       return next;
     });
 
+    setExtractedFiles([]);
+    setLastExtractionSummary('');
+
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -521,6 +587,8 @@ const validateAttachments = true;
 
   const removeFile = (id: string) => {
     setAttachedFiles((prev) => prev.filter((file) => file.id !== id));
+    setExtractedFiles([]);
+    setLastExtractionSummary('');
   };
 
   const startDictation = () => {
@@ -558,6 +626,9 @@ const validateAttachments = true;
 
   const getExportText = () => {
     const parts = [
+      lastExtractionSummary
+        ? `Spracovanie priložených dokumentov\n\n${lastExtractionSummary}\n\n`
+        : '',
       popupData?.output || canvasText || '',
       popupData?.sources
         ? `\n\nPoužité zdroje a autori\n\n${popupData.sources}`
@@ -624,13 +695,32 @@ const validateAttachments = true;
     setIsLoading(true);
     setPopup(false);
     setPopupData(null);
+    setExtractedFiles([]);
+    setLastExtractionSummary('');
 
     try {
+      const attachmentPrompt = buildAttachmentPrompt(attachedFiles);
+
+      const finalApiUserText = `
+${apiUserText}
+
+PRILOŽENÉ DOKUMENTY:
+${attachmentPrompt}
+
+POVINNÝ POSTUP:
+1. Najprv extrahuj text z priložených dokumentov v API.
+2. Ak sa text extrahoval, použi ho ako hlavný zdroj odpovede.
+3. Ak dokument obsahuje autorov, názvy diel, roky, inštitúcie, URL alebo bibliografické údaje, vypíš ich v časti „Použité zdroje a autori“.
+4. Nikdy nepíš, že obsah nebol extrahovaný, ak bol z dokumentov získaný text.
+5. Nevymýšľaj autorov, roky, zdroje ani citácie.
+6. Ak sa bibliografické údaje v dokumente nenachádzajú, napíš: „Text bol extrahovaný, ale neobsahuje úplné bibliografické údaje.“
+`.trim();
+
       const apiMessages = [
         ...messages,
         {
           role: 'user' as const,
-          content: apiUserText,
+          content: finalApiUserText,
         },
       ];
 
@@ -644,11 +734,28 @@ const validateAttachments = true;
         formData.append('projectId', activeProfile.id);
       }
 
-formData.append('useSemanticScholar', 'false');
-formData.append('sourceMode', 'uploaded_documents_first');
-formData.append('validateAttachmentsAgainstProfile', 'true');
-formData.append('requireSourceList', 'true');
-formData.append('allowAiKnowledgeFallback', 'true');
+      formData.append('useSemanticScholar', 'false');
+      formData.append('sourceMode', 'uploaded_documents_first');
+      formData.append('validateAttachmentsAgainstProfile', 'true');
+      formData.append('requireSourceList', 'true');
+      formData.append('allowAiKnowledgeFallback', 'true');
+      formData.append('extractUploadedText', 'true');
+      formData.append('useExtractedTextFirst', 'true');
+      formData.append('returnExtractedFilesInfo', 'true');
+
+      formData.append(
+        'filesMetadata',
+        JSON.stringify(
+          attachedFiles.map((item) => ({
+            name: item.name,
+            size: item.size,
+            type: item.type,
+            kind: getFileKindLabel(item.name),
+            extractable: isTextExtractableFile(item.name),
+            uploadedAt: item.uploadedAt,
+          }))
+        )
+      );
 
       attachedFiles.forEach((item) => {
         formData.append('files', item.file, item.name);
@@ -664,24 +771,31 @@ formData.append('allowAiKnowledgeFallback', 'true');
         throw new Error(errorText || `API error ${res.status}`);
       }
 
-      if (!res.body) {
-        throw new Error('API nevrátilo stream odpovede.');
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
+      const contentType = res.headers.get('content-type') || '';
 
       let fullText = '';
 
       setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
 
-      while (true) {
-        const { done, value } = await reader.read();
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
 
-        if (done) break;
+        const apiExtractedFiles = Array.isArray(data.extractedFiles)
+          ? (data.extractedFiles as ExtractedFileInfo[])
+          : [];
 
-        const chunk = decoder.decode(value, { stream: true });
-        fullText += chunk;
+        if (apiExtractedFiles.length > 0) {
+          setExtractedFiles(apiExtractedFiles);
+          setLastExtractionSummary(buildExtractionSummary(apiExtractedFiles));
+        }
+
+        fullText =
+          String(data.output || data.result || data.message || data.text || '')
+            .trim() || '';
+
+        if (!fullText && data.ok === false) {
+          throw new Error(data.error || 'API nevrátilo výstup.');
+        }
 
         const visibleText = cleanAiOutput(fullText);
 
@@ -695,12 +809,46 @@ formData.append('allowAiKnowledgeFallback', 'true');
 
           return updated;
         });
+      } else {
+        if (!res.body) {
+          throw new Error('API nevrátilo stream odpovede.');
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          fullText += chunk;
+
+          const visibleText = cleanAiOutput(fullText);
+
+          setMessages((prev) => {
+            const updated = [...prev];
+
+            updated[updated.length - 1] = {
+              role: 'assistant',
+              content: visibleText,
+            };
+
+            return updated;
+          });
+        }
       }
 
       const cleanedFullText = cleanAiOutput(fullText);
       const parsed = parseSections(cleanedFullText);
 
+      const extractionText = lastExtractionSummary
+        ? `Spracovanie priložených dokumentov\n\n${lastExtractionSummary}\n\n`
+        : '';
+
       const canvasParts = [
+        extractionText,
         parsed.output || cleanedFullText,
         parsed.sources
           ? `\n\nPoužité zdroje a autori\n\n${parsed.sources}`
@@ -768,6 +916,8 @@ formData.append('allowAiKnowledgeFallback', 'true');
     setCanvasText('');
     setPopup(false);
     setPopupData(null);
+    setExtractedFiles([]);
+    setLastExtractionSummary('');
 
     if (scrollAreaRef.current) {
       scrollAreaRef.current.scrollTop = 0;
@@ -858,22 +1008,23 @@ formData.append('allowAiKnowledgeFallback', 'true');
               <h2 className="text-4xl font-black tracking-tight">CHAT</h2>
 
               <p className="mt-2 text-sm text-slate-400">
-                Chat čerpá z uloženého profilu práce, vybraného AI agenta a priložených dokumentov. Prílohy sa najprv kontrolujú, či súvisia s profilom práce.
+                Chat najprv spracuje priložené dokumenty, extrahuje z nich text
+                a až potom generuje odpoveď podľa profilu práce.
               </p>
 
-          <div className="mt-3 flex flex-wrap gap-2">
-  <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-200">
-    Zdroje z priložených dokumentov
-  </span>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-200">
+                  Najprv extrakcia textu zo súborov
+                </span>
 
-  <span className="rounded-full border border-violet-400/30 bg-violet-500/10 px-3 py-1 text-xs font-black text-violet-200">
-    Kontrola príloh podľa Profilu práce
-  </span>
+                <span className="rounded-full border border-violet-400/30 bg-violet-500/10 px-3 py-1 text-xs font-black text-violet-200">
+                  Zdroje z priložených dokumentov
+                </span>
 
-  <span className="rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-200">
-    Ak prílohy chýbajú, AI uvedie vlastné odborné odporúčané zdroje na overenie
-  </span>
-</div>
+                <span className="rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-200">
+                  AI nesmie vymýšľať autorov ani citácie
+                </span>
+              </div>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
@@ -902,7 +1053,9 @@ formData.append('allowAiKnowledgeFallback', 'true');
                   <h3 className="text-3xl font-black">Začnite konverzáciu</h3>
 
                   <p className="mt-2 text-slate-400">
-                    Vyberte okno nižšie. AI použije uložený profil práce a pripojené dokumenty. Ak dokumenty nesúvisia s profilom práce alebo neobsahujú zdroje, systém na to upozorní.
+                    Nahraj dokumenty, zadaj požiadavku a AI najprv použije text
+                    extrahovaný z príloh. Zdroje a autori sa vypíšu zo
+                    spracovaných dokumentov.
                   </p>
                 </div>
 
@@ -951,18 +1104,62 @@ formData.append('allowAiKnowledgeFallback', 'true');
                   </div>
                 ))}
 
-               {isLoading && (
-  <div className="flex justify-start">
-    <div className="rounded-3xl border border-white/10 bg-white/[0.065] px-5 py-4 text-sm font-bold text-violet-200">
-      🤖 {activeAgentLabel} premýšľa... Kontrolujem profil práce, priložené dokumenty a zdroje.
-    </div>
-  </div>
-)}
+                {isLoading && (
+                  <div className="flex justify-start">
+                    <div className="rounded-3xl border border-white/10 bg-white/[0.065] px-5 py-4 text-sm font-bold text-violet-200">
+                      🤖 {activeAgentLabel} premýšľa... Najprv extrahujem text
+                      z príloh, potom kontrolujem profil práce a zdroje.
+                    </div>
+                  </div>
+                )}
 
                 <div ref={chatEndRef} />
               </div>
             )}
           </div>
+
+          {/* EXTRACTION RESULT */}
+          {extractedFiles.length > 0 && (
+            <div className="shrink-0 border-t border-emerald-400/20 bg-emerald-500/5 px-5 py-3 md:px-8">
+              <div className="mx-auto max-w-5xl">
+                <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.15em] text-emerald-200">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Spracované dokumenty
+                </div>
+
+                <div className="grid gap-2 md:grid-cols-2">
+                  {extractedFiles.map((file, index) => (
+                    <div
+                      key={`${file.name}-${index}`}
+                      className="rounded-2xl border border-emerald-400/20 bg-black/20 p-3 text-xs text-emerald-50/90"
+                    >
+                      <div className="font-black text-emerald-200">
+                        {file.name}
+                      </div>
+
+                      <div className="mt-1 text-emerald-50/70">
+                        Extrahované znaky: {file.extractedChars || 0}
+                      </div>
+
+                      {file.extractedPreview && (
+                        <div className="mt-2 line-clamp-3 whitespace-pre-wrap text-emerald-50/80">
+                          {file.extractedPreview}
+                        </div>
+                      )}
+
+                      {!file.extractedPreview && (
+                        <div className="mt-2 text-orange-200">
+                          {file.error ||
+                            file.status ||
+                            'Z dokumentu sa nepodarilo zobraziť ukážku textu.'}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ATTACHED FILES */}
           {attachedFiles.length > 0 && (
@@ -991,6 +1188,18 @@ formData.append('allowAiKnowledgeFallback', 'true');
 
                       <span className="text-xs text-violet-200/70">
                         {formatBytes(file.size)}
+                      </span>
+
+                      <span
+                        className={`rounded-lg px-2 py-1 text-[10px] font-black uppercase ${
+                          isTextExtractableFile(file.name)
+                            ? 'bg-emerald-500/20 text-emerald-200'
+                            : 'bg-orange-500/20 text-orange-200'
+                        }`}
+                      >
+                        {isTextExtractableFile(file.name)
+                          ? 'text'
+                          : 'doplnok'}
                       </span>
 
                       <button
@@ -1032,16 +1241,16 @@ formData.append('allowAiKnowledgeFallback', 'true');
                   ))}
                 </div>
 
-<div className="flex flex-wrap items-center gap-2">
-  <button
-    type="button"
-    onClick={() => setCanvasOpen(true)}
-    className="inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-black text-slate-300 hover:bg-white/10 hover:text-white"
-  >
-    <Paintbrush className="h-4 w-4" />
-    Canvas
-  </button>
-</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCanvasOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-black text-slate-300 hover:bg-white/10 hover:text-white"
+                  >
+                    <Paintbrush className="h-4 w-4" />
+                    Canvas
+                  </button>
+                </div>
               </div>
 
               <form
@@ -1064,7 +1273,7 @@ formData.append('allowAiKnowledgeFallback', 'true');
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-slate-300 transition hover:bg-white/10 hover:text-white"
-                  title="Priložiť súbory: PDF, Word, TXT, obrázky, Excel alebo PowerPoint"
+                  title="Priložiť súbory"
                 >
                   <Paperclip className="h-6 w-6" />
                 </button>
@@ -1168,7 +1377,6 @@ formData.append('allowAiKnowledgeFallback', 'true');
         {popup && popupData && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
             <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
-              {/* POPUP HEADER */}
               <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[#070a16] px-6 py-4">
                 <div>
                   <h2 className="text-2xl font-black">📄 Výstup</h2>
@@ -1201,6 +1409,9 @@ formData.append('allowAiKnowledgeFallback', 'true');
                     type="button"
                     onClick={() => {
                       const canvasParts = [
+                        lastExtractionSummary
+                          ? `Spracovanie priložených dokumentov\n\n${lastExtractionSummary}\n\n`
+                          : '',
                         popupData.output || '',
                         popupData.sources
                           ? `\n\nPoužité zdroje a autori\n\n${popupData.sources}`
@@ -1228,9 +1439,20 @@ formData.append('allowAiKnowledgeFallback', 'true');
                 </div>
               </div>
 
-              {/* POPUP BODY */}
               <div className="grid min-h-0 flex-1 gap-6 overflow-hidden p-6 md:grid-cols-[1fr_380px]">
                 <div className="min-h-0 overflow-y-auto rounded-3xl border border-white/10 bg-black/10 p-6 pr-4">
+                  {lastExtractionSummary && (
+                    <div className="mb-8 rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5">
+                      <h3 className="mb-3 font-black text-emerald-200">
+                        ✅ Spracovanie priložených dokumentov
+                      </h3>
+
+                      <div className="whitespace-pre-wrap text-sm leading-7 text-emerald-50/90">
+                        {lastExtractionSummary}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="whitespace-pre-wrap text-sm leading-8 text-slate-300">
                     {popupData.output}
                   </div>

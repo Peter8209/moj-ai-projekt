@@ -49,17 +49,13 @@ type ExtractedFileInfo = {
   size?: number;
   extension?: string;
   label?: string;
-
   extractedChars?: number;
   charCount?: number;
-
   extractedPreview?: string;
   preview?: string;
-
   status?: string;
   error?: string | null;
   warning?: string | null;
-
   text?: string;
   content?: string;
   extractedText?: string;
@@ -156,11 +152,11 @@ const maxFileSizeMb = 25;
 const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 
 const agents: { key: Agent; label: string }[] = [
-  { key: 'openai', label: 'GPT' },
+  { key: 'openai', label: 'OPEN AI' },
   { key: 'claude', label: 'Claude' },
   { key: 'gemini', label: 'Gemini' },
-  { key: 'grok', label: 'Grok' },
   { key: 'mistral', label: 'Mistral' },
+  { key: 'grok', label: 'Grok' },
 ];
 
 const suggestions: {
@@ -184,28 +180,28 @@ const suggestions: {
     icon: BookOpen,
   },
   {
-    title: 'Pomôž mi navrhnúť štruktúru kapitol a podkapitol',
+    title: 'Navrhni štruktúru kapitol',
     actionTitle: 'Štruktúra kapitol',
     instruction:
       'Na základe uloženého profilu práce navrhni detailnú štruktúru kapitol a podkapitol. Najprv spracuj priložené dokumenty a vychádzaj z extrahovaného textu. Rešpektuj typ práce, cieľ, metodológiu, praktickú časť a logické akademické členenie.',
     icon: GraduationCap,
   },
   {
-    title: 'Pomôž mi napísať návrh kapitoly.',
+    title: 'Napíš návrh kapitoly',
     actionTitle: 'Návrh kapitoly',
     instruction:
       'Na základe uloženého profilu práce priprav návrh kapitoly. Najprv použi priložené dokumenty a extrahovaný text z nich. Potom navrhni osnovu kapitoly, podkapitoly a následne ukážkový odborný text. Na konci vypíš použité zdroje a autorov z dokumentov.',
     icon: FileText,
   },
   {
-    title: 'Pomôž mi spracovať zdroje a citácie',
+    title: 'Spracuj zdroje a citácie',
     actionTitle: 'Citácie a bibliografia',
     instruction:
       'Správaj sa ako citačná špecialistka. Analyzuj priložené dokumenty a uložený profil práce. Identifikuj všetky zdroje uvedené v dokumentoch, uprav ich podľa citačnej normy z profilu práce, priprav formátované bibliografické záznamy, varianty odkazov v texte, špeciálne prípady, validáciu a finálny zoznam literatúry. Ak chýbajú roky, vydania, autori, DOI alebo URL, označ ich ako údaj je potrebné overiť. Ak sú v dokumente výstupy zo štatistického softvéru JASP, SPSS, Jamovi, R alebo Excel, uveď aj softvér ako zdroj a priprav vetu do metodológie.',
     icon: Library,
   },
   {
-    title: 'Pomôž mi prepísať môj text do akademického jazyka.',
+    title: 'Prepíš text akademicky',
     actionTitle: 'Akademický jazyk',
     instruction:
       'Na základe uloženého profilu práce prepíš text do akademického jazyka. Ak sú priložené dokumenty, najprv použi ich extrahovaný text ako kontext. Ak text od používateľa chýba, vytvor ukážku odborného formulovania podľa témy práce.',
@@ -213,7 +209,7 @@ const suggestions: {
   },
 ];
 
-// ================= FILE HELPERS =================
+// ================= HELPERS =================
 
 function getFileExtension(fileName: string) {
   const index = fileName.lastIndexOf('.');
@@ -222,8 +218,7 @@ function getFileExtension(fileName: string) {
 }
 
 function isAllowedUploadFile(file: File) {
-  const extension = getFileExtension(file.name);
-  return allowedFileExtensions.includes(extension);
+  return allowedFileExtensions.includes(getFileExtension(file.name));
 }
 
 function isTextExtractableFile(fileName: string) {
@@ -253,8 +248,6 @@ function getFileKindLabel(fileName: string) {
 
   return 'Súbor';
 }
-
-// ================= TEXT HELPERS =================
 
 function cleanAiOutput(text: string) {
   return String(text || '')
@@ -301,7 +294,7 @@ function formatBytes(bytes: number) {
   const units = ['B', 'KB', 'MB', 'GB'];
   const index = Math.min(
     Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1
+    units.length - 1,
   );
 
   return `${(bytes / Math.pow(1024, index)).toFixed(1)} ${units[index]}`;
@@ -432,6 +425,7 @@ async function readApiErrorResponse(res: Response) {
         data?.detail ||
         data?.details ||
         data?.reason ||
+        data?.code ||
         `API error ${res.status}`;
 
       return String(message);
@@ -440,9 +434,7 @@ async function readApiErrorResponse(res: Response) {
     const text = await res.text();
     const cleaned = text.trim();
 
-    if (!cleaned) {
-      return `API error ${res.status}`;
-    }
+    if (!cleaned) return `API error ${res.status}`;
 
     if (
       cleaned.startsWith('<!DOCTYPE') ||
@@ -450,10 +442,10 @@ async function readApiErrorResponse(res: Response) {
       cleaned.includes('<body') ||
       cleaned.includes('__next_error__')
     ) {
-      return `Server vrátil chybu ${res.status}. Detail pozri v termináli pri trase /api/chat.`;
+      return `Server vrátil chybu ${res.status}. Detail je v termináli pri trase /api/chat.`;
     }
 
-    return cleaned.length > 1200 ? `${cleaned.slice(0, 1200)}...` : cleaned;
+    return cleaned.length > 1000 ? `${cleaned.slice(0, 1000)}...` : cleaned;
   } catch {
     return `API error ${res.status}`;
   }
@@ -470,7 +462,7 @@ function buildAttachmentPrompt(files: AttachedFile[]) {
       : 'nie – súbor je doplnkový alebo v tejto trase nemusí byť textovo extrahovateľný';
 
     return `${index + 1}. ${item.name} (${getFileKindLabel(
-      item.name
+      item.name,
     )}, ${formatBytes(item.size)}), extrakcia textu: ${extractable}`;
   });
 
@@ -479,47 +471,6 @@ function buildAttachmentPrompt(files: AttachedFile[]) {
 
 function getExtractedCharCount(file: ExtractedFileInfo) {
   return Number(file.extractedChars ?? file.charCount ?? 0);
-}
-
-function getExtractedPreview(file: ExtractedFileInfo) {
-  const preview =
-    file.extractedPreview ||
-    file.preview ||
-    file.extractedText ||
-    file.text ||
-    file.content ||
-    '';
-
-  return String(preview || '').slice(0, 900);
-}
-
-function buildExtractionSummary(files: ExtractedFileInfo[]) {
-  if (!files.length) return '';
-
-  return files
-    .map((file, index) => {
-      const chars = getExtractedCharCount(file);
-      const preview = getExtractedPreview(file);
-
-      return `${index + 1}. ${file.name}
-- typ: ${file.label || file.type || file.extension || 'neuvedené'}
-- extrahované znaky: ${chars}
-- stav: ${
-        chars > 0
-          ? 'text bol extrahovaný a má byť použitý ako hlavný zdroj'
-          : file.error ||
-            file.warning ||
-            file.status ||
-            'text sa nepodarilo extrahovať'
-      }${
-        preview
-          ? `\n- ukážka textu: ${preview
-              .replace(/\n{2,}/g, '\n')
-              .slice(0, 500)}`
-          : ''
-      }`;
-    })
-    .join('\n\n');
 }
 
 function normalizeExtractedFiles(value: any): ExtractedFileInfo[] {
@@ -536,11 +487,11 @@ function normalizeExtractedFiles(value: any): ExtractedFileInfo[] {
         'neznámy súbor';
 
       const extractedText = String(
-        item.extractedText || item.text || item.content || ''
+        item.extractedText || item.text || item.content || '',
       );
 
       const charCount = Number(
-        item.extractedChars ?? item.charCount ?? extractedText.length ?? 0
+        item.extractedChars ?? item.charCount ?? extractedText.length ?? 0,
       );
 
       return {
@@ -584,6 +535,7 @@ export default function ChatPage() {
   const [lastExtractionSummary, setLastExtractionSummary] = useState('');
 
   const [isListening, setIsListening] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
 
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [canvasText, setCanvasText] = useState('');
@@ -594,6 +546,13 @@ export default function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const orderedAgents = useMemo(() => {
+    const selected = agents.find((item) => item.key === agent);
+    const rest = agents.filter((item) => item.key !== agent);
+    return selected ? [selected, ...rest] : agents;
+  }, [agent]);
 
   const activeAgentLabel = useMemo(() => {
     return agents.find((item) => item.key === agent)?.label || 'Gemini';
@@ -643,11 +602,23 @@ export default function ChatPage() {
     };
 
     window.addEventListener('keydown', onKeyDown);
-
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-    };
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  const selectAgent = (nextAgent: Agent) => {
+    setAgent(nextAgent);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const appendAssistantMessage = (content: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: 'assistant',
+        content,
+      },
+    ]);
+  };
 
   const handleFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -658,14 +629,14 @@ export default function ChatPage() {
     for (const file of incomingFiles) {
       if (!isAllowedUploadFile(file)) {
         alert(
-          `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, RTF, ODT, obrázky, Excel, CSV a PowerPoint.`
+          `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, RTF, ODT, obrázky, Excel, CSV a PowerPoint.`,
         );
         continue;
       }
 
       if (file.size > maxFileSizeBytes) {
         alert(
-          `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť jedného súboru je ${maxFileSizeMb} MB.`
+          `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť jedného súboru je ${maxFileSizeMb} MB.`,
         );
         continue;
       }
@@ -692,12 +663,10 @@ export default function ChatPage() {
         }
 
         const duplicate = next.some(
-          (item) => item.name === file.name && item.size === file.size
+          (item) => item.name === file.name && item.size === file.size,
         );
 
-        if (!duplicate) {
-          next.push(file);
-        }
+        if (!duplicate) next.push(file);
       }
 
       return next;
@@ -706,9 +675,7 @@ export default function ChatPage() {
     setExtractedFiles([]);
     setLastExtractionSummary('');
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const removeFile = (id: string) => {
@@ -723,7 +690,7 @@ export default function ChatPage() {
 
     if (!SpeechRecognition) {
       alert(
-        'Diktovanie nie je v tomto prehliadači podporované. Skús Google Chrome.'
+        'Diktovanie nie je v tomto prehliadači podporované. Skús Google Chrome.',
       );
       return;
     }
@@ -752,9 +719,6 @@ export default function ChatPage() {
 
   const getExportText = () => {
     const parts = [
-      lastExtractionSummary
-        ? `Spracovanie priložených dokumentov\n\n${lastExtractionSummary}\n\n`
-        : '',
       popupData?.output || canvasText || '',
       popupData?.sources
         ? `\n\nPoužité zdroje a autori\n\n${popupData.sources}`
@@ -792,7 +756,6 @@ export default function ChatPage() {
     printWindow.document.open();
     printWindow.document.write(createDocHtml(exportTitle, text));
     printWindow.document.close();
-
     printWindow.focus();
 
     setTimeout(() => {
@@ -800,14 +763,78 @@ export default function ChatPage() {
     }, 400);
   };
 
-  const appendAssistantMessage = (content: string) => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: 'assistant',
-        content,
-      },
-    ]);
+  const buildFinalUserPrompt = ({
+    apiUserText,
+    attachmentPrompt,
+  }: {
+    apiUserText: string;
+    attachmentPrompt: string;
+  }) => {
+    const citationStyle =
+      activeProfile?.citation ||
+      activeProfile?.schema?.aiInstruction ||
+      'APA 7';
+
+    return `
+${apiUserText.trim() || 'Spracuj priložené dokumenty podľa aktívneho profilu práce.'}
+
+AKTÍVNY PROFIL PRÁCE:
+- Názov práce: ${activeProfile?.title || 'nezadané'}
+- Téma: ${activeProfile?.topic || 'nezadané'}
+- Typ práce: ${activeProfile?.type || 'nezadané'}
+- Odbor: ${activeProfile?.field || 'nezadané'}
+- Vedúci práce: ${activeProfile?.supervisor || 'nezadané'}
+- Cieľ práce: ${activeProfile?.goal || 'nezadané'}
+- Výskumný problém: ${activeProfile?.problem || 'nezadané'}
+- Metodológia: ${activeProfile?.methodology || 'nezadané'}
+- Citačná norma: ${citationStyle}
+
+PRILOŽENÉ DOKUMENTY:
+${attachmentPrompt}
+
+DÔLEŽITÉ TECHNICKÉ PRAVIDLÁ:
+1. Najprv použi technicky extrahovaný text z priložených dokumentov.
+2. Ak bol text z PDF/DOCX/TXT/RTF/MD/CSV extrahovaný, odpoveď musí vychádzať primárne z neho.
+3. Ak sa extrakcia z PDF nepodarila, nepíš vymyslený obsah dokumentu.
+4. Nevymýšľaj autorov, názvy článkov, roky, DOI, URL, vydavateľov, časopisy ani rozsahy strán.
+5. Ak údaj v dokumente chýba, napíš: „údaj je potrebné overiť“.
+6. Ak dokument obsahuje bibliografické údaje, identifikuj ich a uprav podľa citačnej normy: ${citationStyle}.
+7. Ak používateľ žiada zdroje, citácie, literatúru alebo bibliografiu, výstup priprav v štýle Kontexta podľa častí A až D.
+
+POVINNÝ FORMÁT ODPOVEDE PRE ZDROJE, CITÁCIE A BIBLIOGRAFIU:
+
+=== VÝSTUP ===
+
+Na základe poskytnutých dokumentov som pripravil citácie podľa normy ${citationStyle}. Ak niektoré údaje v dokumentoch neboli dostupné, označujem ich ako údaj je potrebné overiť.
+
+### A) Formátované bibliografické záznamy
+
+Vypíš bibliografické záznamy podľa normy ${citationStyle}.
+
+### B) Varianty odkazov v texte
+
+Pre každý identifikovaný zdroj priprav parentetický odkaz, naratívny odkaz a odkaz s konkrétnou stranou.
+
+### C) Špeciálne prípady podľa citačnej normy
+
+Vysvetli špeciálne prípady citovania podľa zvolenej normy.
+
+### D) Validácia a korekcia
+
+Skontroluj chýbajúce DOI, URL, číslo časopisu, skratky časopisov, rozsahy strán, autorov, rok vydania a typ zdroja.
+
+=== ANALÝZA ===
+Stručne vysvetli, z ktorých dokumentov boli údaje získané a či bola extrakcia dostatočná.
+
+=== SKÓRE ===
+Uveď orientačné skóre kvality extrakcie a spoľahlivosti bibliografických údajov v percentách.
+
+=== ODPORÚČANIA ===
+Daj konkrétne odporúčania, ktoré údaje ešte overiť.
+
+=== POUŽITÉ ZDROJE A AUTORI ===
+Vypíš všetkých identifikovaných autorov, názvy dokumentov, roky, názvy časopisov, ročníky, čísla, strany, DOI alebo URL nájdené v priložených dokumentoch.
+`.trim();
   };
 
   const sendPromptToApi = async ({
@@ -823,12 +850,14 @@ export default function ChatPage() {
       visibleUserText.trim() ||
       `Spracuj priložené dokumenty (${attachedFiles.length})`;
 
-    const visibleMessage: ChatMessage = {
-      role: 'user',
-      content: userVisibleContent,
-    };
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: 'user',
+        content: userVisibleContent,
+      },
+    ]);
 
-    setMessages((prev) => [...prev, visibleMessage]);
     setInput('');
     setIsLoading(true);
     setPopup(false);
@@ -839,27 +868,10 @@ export default function ChatPage() {
     try {
       const attachmentPrompt = buildAttachmentPrompt(attachedFiles);
 
-      const finalApiUserText = `
-${apiUserText.trim() || 'Spracuj priložené dokumenty podľa aktívneho profilu práce.'}
-
-PRILOŽENÉ DOKUMENTY:
-${attachmentPrompt}
-
-POVINNÝ POSTUP:
-1. Najprv extrahuj text z priložených dokumentov v API.
-2. Ak sa text extrahoval, použi ho ako hlavný zdroj odpovede.
-3. Ak dokument obsahuje autorov, názvy diel, roky, inštitúcie, URL alebo bibliografické údaje, vypíš ich v časti „Použité zdroje a autori“.
-4. Ak používateľ žiada citácie alebo bibliografiu, priprav odpoveď ako citačná špecialistka v štruktúre A až F:
-A) Formátované bibliografické záznamy
-B) Varianty odkazov v texte
-C) Špeciálne prípady
-D) Validácia a korekcia
-E) Finálny zoznam literatúry
-F) Odporúčaná veta do metodológie
-5. Nikdy nepíš, že obsah nebol extrahovaný, ak bol z dokumentov získaný text.
-6. Nevymýšľaj autorov, roky, zdroje ani citácie.
-7. Ak sa bibliografické údaje v dokumente nenachádzajú, napíš: „Text bol extrahovaný, ale neobsahuje úplné bibliografické údaje.“
-`.trim();
+      const finalApiUserText = buildFinalUserPrompt({
+        apiUserText,
+        attachmentPrompt,
+      });
 
       const apiMessages = [
         ...messages,
@@ -887,6 +899,7 @@ F) Odporúčaná veta do metodológie
       formData.append('extractUploadedText', 'true');
       formData.append('useExtractedTextFirst', 'true');
       formData.append('returnExtractedFilesInfo', 'true');
+      formData.append('contextaCitationFormat', 'true');
 
       formData.append(
         'filesMetadata',
@@ -898,8 +911,8 @@ F) Odporúčaná veta do metodológie
             kind: getFileKindLabel(item.name),
             extractable: isTextExtractableFile(item.name),
             uploadedAt: item.uploadedAt,
-          }))
-        )
+          })),
+        ),
       );
 
       attachedFiles.forEach((item) => {
@@ -915,18 +928,11 @@ F) Odporúčaná veta do metodológie
         const errorMessage = await readApiErrorResponse(res);
 
         appendAssistantMessage(
-          `❌ API vrátilo chybu ${res.status}.
+          `❌ API chyba ${res.status}
 
-Detail:
 ${errorMessage}
 
-Najčastejšia príčina pri hláške "Forbidden":
-- nesprávny alebo neplatný API kľúč,
-- provider blokuje zvolený model,
-- chýba environment premenná vo Verceli alebo v .env.local,
-- /api/chat používa model, ku ktorému nemáš prístup.
-
-Skontroluj terminál pri trase /api/chat.`
+Skús prepnúť model na Gemini alebo OPEN AI. Ak chyba ostane, pozri terminál pri /api/chat.`,
         );
 
         return;
@@ -935,21 +941,33 @@ Skontroluj terminál pri trase /api/chat.`
       const contentType = res.headers.get('content-type') || '';
 
       let fullText = '';
-      let currentExtractionSummary = '';
 
-      setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: '',
+        },
+      ]);
 
       if (contentType.includes('application/json')) {
         const data = await res.json();
 
         const apiExtractedFiles = normalizeExtractedFiles(
-          data.extractedFiles || data.files || data.uploadedFiles || []
+          data.extractedFiles || data.files || data.uploadedFiles || [],
         );
 
         if (apiExtractedFiles.length > 0) {
-          currentExtractionSummary = buildExtractionSummary(apiExtractedFiles);
           setExtractedFiles(apiExtractedFiles);
-          setLastExtractionSummary(currentExtractionSummary);
+
+          const totalChars = apiExtractedFiles.reduce(
+            (sum, file) => sum + getExtractedCharCount(file),
+            0,
+          );
+
+          setLastExtractionSummary(
+            `Spracované dokumenty: ${apiExtractedFiles.length}, extrahované znaky spolu: ${totalChars}`,
+          );
         }
 
         fullText =
@@ -959,14 +977,14 @@ Skontroluj terminál pri trase /api/chat.`
               data.message ||
               data.text ||
               data.answer ||
-              ''
+              '',
           ).trim() || '';
 
         if (!fullText && data.ok === false) {
           appendAssistantMessage(
             `❌ API nevrátilo výstup.
 
-${data.message || data.error || 'Neznáma chyba API.'}`
+${data.message || data.error || 'Neznáma chyba API.'}`,
           );
           return;
         }
@@ -1023,12 +1041,7 @@ ${data.message || data.error || 'Neznáma chyba API.'}`
       const cleanedFullText = cleanAiOutput(fullText);
       const parsed = parseSections(cleanedFullText);
 
-      const extractionText = currentExtractionSummary
-        ? `Spracovanie priložených dokumentov\n\n${currentExtractionSummary}\n\n`
-        : '';
-
       const canvasParts = [
-        extractionText,
         parsed.output || cleanedFullText,
         parsed.sources
           ? `\n\nPoužité zdroje a autori\n\n${parsed.sources}`
@@ -1043,7 +1056,8 @@ ${data.message || data.error || 'Neznáma chyba API.'}`
         parsed.output.includes('model is not found') ||
         parsed.output.includes('not found for API version') ||
         parsed.output.includes('ORIGINALITY_CHECK_FAILED') ||
-        parsed.output.includes('UPLOAD_FAILED');
+        parsed.output.includes('UPLOAD_FAILED') ||
+        parsed.output.includes('Forbidden');
 
       if (
         !looksLikeError &&
@@ -1069,7 +1083,7 @@ ${data.message || data.error || 'Neznáma chyba API.'}`
 
 ${message}
 
-Skontroluj terminál, kde beží Next.js, hlavne výpis z /api/chat.`
+Skontroluj terminál pri /api/chat.`,
       );
     } finally {
       setIsLoading(false);
@@ -1109,603 +1123,587 @@ Skontroluj terminál, kde beží Next.js, hlavne výpis z /api/chat.`
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-[#050711] text-white">
-      <div className="mx-auto flex h-screen w-full max-w-[1400px] flex-col px-4 py-4 md:px-8">
-        <header className="shrink-0 border-b border-white/10 pb-4">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <button
-              type="button"
-              onClick={() => router.push('/dashboard')}
-              className="flex items-center gap-4"
+    <>
+      <style jsx global>{`
+        html,
+        body {
+          overflow: hidden;
+          background: #050711;
+        }
+
+        * {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+
+        *::-webkit-scrollbar {
+          width: 0 !important;
+          height: 0 !important;
+          display: none !important;
+        }
+
+        .no-scrollbar {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+
+        .no-scrollbar::-webkit-scrollbar {
+          width: 0 !important;
+          height: 0 !important;
+          display: none !important;
+        }
+      `}</style>
+
+      <div className="flex h-full min-h-0 w-full overflow-hidden bg-[#050711] text-white">
+        <div className="mx-auto flex h-full min-h-0 w-full max-w-[1500px] flex-col overflow-hidden px-4 py-2 md:px-8">
+          {/* HEADER */}
+          <header className="shrink-0 border-b border-white/10 pb-2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => router.push('/dashboard')}
+                className="group flex items-center gap-4 rounded-3xl transition hover:opacity-90"
+              >
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-blue-500 shadow-lg shadow-violet-700/30 transition group-hover:scale-105">
+                  <Sparkles className="h-6 w-6 text-white" />
+                </div>
+
+                <div className="text-left">
+                  <h1 className="text-2xl font-black tracking-tight">
+                    ZEDPERA
+                  </h1>
+                  <p className="text-sm text-slate-400">AI vedúci práce</p>
+                </div>
+              </button>
+
+              <nav className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={resetChat}
+                  className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-700/30 transition hover:-translate-y-0.5 hover:bg-violet-500"
+                >
+                  + Nový chat
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push('/chat')}
+                  className="rounded-2xl bg-white/10 px-5 py-3 text-sm font-bold text-white"
+                >
+                  Chat
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push('/history')}
+                  className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 transition hover:bg-white/10 hover:text-white"
+                >
+                  <History className="h-4 w-4" />
+                  História
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push('/sources')}
+                  className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 transition hover:bg-white/10 hover:text-white"
+                >
+                  <Library className="h-4 w-4" />
+                  Zdroje
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push('/profile')}
+                  className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 transition hover:bg-white/10 hover:text-white"
+                >
+                  <User className="h-4 w-4" />
+                  Profil
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push('/settings')}
+                  className="inline-flex items-center gap-1 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 transition hover:bg-white/10 hover:text-white"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                  Viac
+                </button>
+              </nav>
+            </div>
+          </header>
+
+          {/* TITLE */}
+          <section className="shrink-0 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-3xl font-black tracking-tight">CHAT</h2>
+                <p className="mt-1 text-sm text-slate-400">
+                  Prilož dokumenty, vyber model a napíš požiadavku.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
+                Aktívny profil:{' '}
+                <span className="font-black text-white">
+                  {activeProfile?.title || 'Nie je vybraný'}
+                </span>
+              </div>
+            </div>
+          </section>
+
+          {/* CHAT CARD */}
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[30px] border border-white/10 bg-[#070a16] shadow-2xl shadow-black/30">
+            {/* MESSAGES */}
+            <div
+              ref={scrollAreaRef}
+              className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-4 md:px-8"
             >
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-blue-500 shadow-lg shadow-violet-700/30">
-                <Sparkles className="h-6 w-6 text-white" />
-              </div>
+              {messages.length === 0 ? (
+                <div className="mx-auto flex min-h-full max-w-6xl flex-col justify-center py-2">
+                  <div className="mb-4 text-center">
+                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
+                      <Brain className="h-6 w-6" />
+                    </div>
 
-              <div className="text-left">
-                <h1 className="text-2xl font-black tracking-tight">ZEDPERA</h1>
-                <p className="text-sm text-slate-400">AI vedúci práce</p>
-              </div>
-            </button>
+                    <h3 className="text-3xl font-black">
+                      Začnite konverzáciu
+                    </h3>
 
-            <nav className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={resetChat}
-                className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-700/30"
-              >
-                + Nový chat
-              </button>
-
-              <button
-                type="button"
-                onClick={() => router.push('/chat')}
-                className="rounded-2xl bg-white/10 px-5 py-3 text-sm font-bold text-white"
-              >
-                Chat
-              </button>
-
-              <button
-                type="button"
-                onClick={() => router.push('/history')}
-                className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
-              >
-                <History className="h-4 w-4" />
-                História
-              </button>
-
-              <button
-                type="button"
-                onClick={() => router.push('/sources')}
-                className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
-              >
-                <Library className="h-4 w-4" />
-                Zdroje
-              </button>
-
-              <button
-                type="button"
-                onClick={() => router.push('/profile')}
-                className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
-              >
-                <User className="h-4 w-4" />
-                Profil
-              </button>
-
-              <button
-                type="button"
-                onClick={() => router.push('/settings')}
-                className="inline-flex items-center gap-1 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 hover:bg-white/10 hover:text-white"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-                Viac
-              </button>
-            </nav>
-          </div>
-        </header>
-
-        <section className="shrink-0 py-4">
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <h2 className="text-4xl font-black tracking-tight">CHAT</h2>
-
-              <p className="mt-2 text-sm text-slate-400">
-                Chat najprv spracuje priložené dokumenty, extrahuje z nich text
-                a až potom generuje odpoveď podľa profilu práce.
-              </p>
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-200">
-                  Najprv extrakcia textu zo súborov
-                </span>
-
-                <span className="rounded-full border border-violet-400/30 bg-violet-500/10 px-3 py-1 text-xs font-black text-violet-200">
-                  Zdroje z priložených dokumentov
-                </span>
-
-                <span className="rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-200">
-                  AI nesmie vymýšľať autorov ani citácie
-                </span>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
-              Aktívny profil:{' '}
-              <span className="font-black text-white">
-                {activeProfile?.title || 'Nie je vybraný'}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl shadow-black/30">
-          <div
-            ref={scrollAreaRef}
-            className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8"
-          >
-            {messages.length === 0 ? (
-              <div className="mx-auto flex min-h-full max-w-6xl flex-col items-center justify-center py-8">
-                <div className="mb-8 text-center">
-                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
-                    <Brain className="h-7 w-7" />
+                    <p className="mx-auto mt-2 max-w-2xl text-sm text-slate-400">
+                      Vyber model, nahraj dokumenty alebo klikni na rýchlu
+                      voľbu. Chat okno je pripravené už na úvodnej obrazovke.
+                    </p>
                   </div>
 
-                  <h3 className="text-3xl font-black">Začnite konverzáciu</h3>
+                  <div className="grid w-full gap-3 md:grid-cols-3">
+                    {suggestions.map((item) => {
+                      const Icon = item.icon;
 
-                  <p className="mt-2 text-slate-400">
-                    Nahraj dokumenty, zadaj požiadavku a AI najprv použije text
-                    extrahovaný z príloh. Zdroje a autori sa vypíšu zo
-                    spracovaných dokumentov.
-                  </p>
+                      return (
+                        <button
+                          key={item.title}
+                          type="button"
+                          onClick={() => runSuggestion(item)}
+                          disabled={isLoading}
+                          className="group flex min-h-[76px] items-center gap-4 rounded-3xl border border-white/10 bg-white/[0.055] p-4 text-left transition hover:-translate-y-0.5 hover:border-violet-400/50 hover:bg-white/[0.085] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200 transition group-hover:bg-violet-600 group-hover:text-white">
+                            <Icon className="h-5 w-5" />
+                          </span>
+
+                          <span>
+                            <span className="block text-sm font-black leading-5 text-slate-100">
+                              {item.title}
+                            </span>
+                            <span className="mt-1 block text-[10px] font-black uppercase tracking-[0.2em] text-violet-200/70">
+                              Spustiť
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-
-                <div className="grid w-full gap-4 md:grid-cols-2">
-                  {suggestions.map((item) => {
-                    const Icon = item.icon;
-
-                    return (
-                      <button
-                        key={item.title}
-                        type="button"
-                        onClick={() => runSuggestion(item)}
-                        disabled={isLoading}
-                        className="group flex min-h-[110px] items-center gap-5 rounded-3xl border border-white/10 bg-white/[0.055] p-6 text-left transition hover:border-violet-400/50 hover:bg-white/[0.085] disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200 transition group-hover:bg-violet-600 group-hover:text-white">
-                          <Icon className="h-6 w-6" />
-                        </span>
-
-                        <span className="text-lg font-black leading-7 text-slate-100">
-                          {item.title}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div className="mx-auto max-w-5xl space-y-5">
-                {messages.map((message, index) => (
-                  <div
-                    key={`${message.role}-${index}`}
-                    className={`flex ${
-                      message.role === 'user' ? 'justify-end' : 'justify-start'
-                    }`}
-                  >
+              ) : (
+                <div className="mx-auto max-w-5xl space-y-5 pb-2">
+                  {messages.map((message, index) => (
                     <div
-                      className={`max-w-[85%] whitespace-pre-wrap rounded-3xl px-5 py-4 text-sm leading-7 shadow-lg ${
+                      key={`${message.role}-${index}`}
+                      className={`flex ${
                         message.role === 'user'
-                          ? 'bg-violet-600 text-white shadow-violet-700/20'
-                          : 'border border-white/10 bg-white/[0.065] text-slate-200 shadow-black/20'
+                          ? 'justify-end'
+                          : 'justify-start'
                       }`}
                     >
-                      {message.content}
+                      <div
+                        className={`max-w-[85%] whitespace-pre-wrap rounded-3xl px-5 py-4 text-sm leading-7 shadow-lg ${
+                          message.role === 'user'
+                            ? 'bg-violet-600 text-white shadow-violet-700/20'
+                            : 'border border-white/10 bg-white/[0.065] text-slate-200 shadow-black/20'
+                        }`}
+                      >
+                        {message.content}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
 
-                {isLoading && (
-                  <div className="flex justify-start">
-                    <div className="rounded-3xl border border-white/10 bg-white/[0.065] px-5 py-4 text-sm font-bold text-violet-200">
-                      🤖 {activeAgentLabel} premýšľa... Najprv extrahujem text
-                      z príloh, potom kontrolujem profil práce a zdroje.
+                  {isLoading && (
+                    <div className="flex justify-start">
+                      <div className="rounded-3xl border border-white/10 bg-white/[0.065] px-5 py-4 text-sm font-bold text-violet-200">
+                        🤖 {activeAgentLabel} premýšľa... spracúvam požiadavku.
+                      </div>
+                    </div>
+                  )}
+
+                  <div ref={chatEndRef} />
+                </div>
+              )}
+            </div>
+
+            {/* COMPOSER */}
+            <div className="shrink-0 border-t border-white/10 bg-[#070a16]/95 px-4 py-3 backdrop-blur md:px-8">
+              <div
+                className={`mx-auto max-w-6xl rounded-[28px] border p-3 shadow-2xl transition-all duration-300 ${
+                  composerFocused
+                    ? 'border-violet-400/70 bg-violet-950/45 shadow-violet-800/40'
+                    : 'border-violet-500/40 bg-violet-950/30 shadow-violet-950/40'
+                }`}
+              >
+                {attachedFiles.length > 0 && (
+                  <div className="no-scrollbar mb-3 max-h-[64px] overflow-y-auto rounded-2xl border border-white/10 bg-black/20 p-2">
+                    <div className="mb-2 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.15em] text-slate-400">
+                      <UploadCloud className="h-4 w-4 text-violet-300" />
+                      Pripojené podklady ({attachedFiles.length})
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {attachedFiles.map((file) => (
+                        <div
+                          key={file.id}
+                          className="inline-flex max-w-full items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/15 px-3 py-2 text-xs text-violet-100"
+                        >
+                          <FileText className="h-4 w-4 shrink-0" />
+
+                          <span className="rounded-lg bg-violet-600/30 px-2 py-1 text-[10px] font-black uppercase text-violet-100">
+                            {getFileKindLabel(file.name)}
+                          </span>
+
+                          <span className="max-w-[210px] truncate font-bold">
+                            {file.name}
+                          </span>
+
+                          <span className="shrink-0 text-[11px] text-violet-200/70">
+                            {formatBytes(file.size)}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => removeFile(file.id)}
+                            className="shrink-0 rounded-full p-1 text-violet-100 transition hover:bg-white/10"
+                            title="Odstrániť súbor"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
 
-                <div ref={chatEndRef} />
-              </div>
-            )}
-          </div>
+                {extractedFiles.length > 0 && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-100">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span className="font-black">Spracované dokumenty:</span>
+                    <span>{lastExtractionSummary}</span>
+                  </div>
+                )}
 
-          {extractedFiles.length > 0 && (
-            <div className="shrink-0 border-t border-emerald-400/20 bg-emerald-500/5 px-5 py-3 md:px-8">
-              <div className="mx-auto max-w-5xl">
-                <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.15em] text-emerald-200">
-                  <CheckCircle2 className="h-4 w-4" />
-                  Spracované dokumenty
-                </div>
+                {/* MODEL ROW */}
+                <div
+                  className={`mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-3 py-2 transition-all duration-300 ${
+                    composerFocused
+                      ? 'border-violet-400/40 bg-black/25'
+                      : 'border-white/10 bg-black/10'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-xl bg-white/5 px-3 py-2 text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      Model
+                    </span>
 
-                <div className="grid gap-2 md:grid-cols-2">
-                  {extractedFiles.map((file, index) => {
-                    const chars = getExtractedCharCount(file);
-                    const preview = getExtractedPreview(file);
+                    {orderedAgents.map((item, index) => {
+                      const active = agent === item.key;
 
-                    return (
-                      <div
-                        key={`${file.name}-${index}`}
-                        className="rounded-2xl border border-emerald-400/20 bg-black/20 p-3 text-xs text-emerald-50/90"
-                      >
-                        <div className="font-black text-emerald-200">
-                          {file.name}
-                        </div>
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => selectAgent(item.key)}
+                          className={`rounded-2xl px-4 py-2 text-xs font-black transition-all duration-200 ${
+                            active
+                              ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-800/40'
+                              : 'border border-white/10 bg-white/[0.055] text-slate-300 hover:-translate-y-0.5 hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white'
+                          }`}
+                          title={
+                            index === 0 && active
+                              ? 'Aktívny model'
+                              : `Prepnúť na ${item.label}`
+                          }
+                        >
+                          {item.label}
+                        </button>
+                      );
+                    })}
+                  </div>
 
-                        <div className="mt-1 text-emerald-50/70">
-                          Extrahované znaky: {chars}
-                        </div>
-
-                        <div className="mt-1 text-emerald-50/70">
-                          Stav: {file.status || 'neuvedené'}
-                        </div>
-
-                        {preview && (
-                          <div className="mt-2 max-h-[74px] overflow-hidden whitespace-pre-wrap text-emerald-50/80">
-                            {preview}
-                          </div>
-                        )}
-
-                        {!preview && (
-                          <div className="mt-2 text-orange-200">
-                            {file.error ||
-                              file.warning ||
-                              file.status ||
-                              'Z dokumentu sa nepodarilo zobraziť ukážku textu.'}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {attachedFiles.length > 0 && (
-            <div className="shrink-0 border-t border-white/10 px-5 py-3 md:px-8">
-              <div className="mx-auto max-w-5xl">
-                <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.15em] text-slate-400">
-                  <UploadCloud className="h-4 w-4 text-violet-300" />
-                  Pripojené podklady ({attachedFiles.length})
-                </div>
-
-                <div className="flex max-h-[92px] flex-wrap gap-2 overflow-y-auto pr-1">
-                  {attachedFiles.map((file) => (
-                    <div
-                      key={file.id}
-                      className="inline-flex items-center gap-3 rounded-2xl border border-violet-400/30 bg-violet-500/15 px-4 py-3 text-sm text-violet-100"
-                    >
-                      <FileText className="h-4 w-4" />
-
-                      <span className="rounded-lg bg-violet-600/30 px-2 py-1 text-[10px] font-black uppercase text-violet-100">
-                        {getFileKindLabel(file.name)}
-                      </span>
-
-                      <span className="max-w-[220px] truncate font-bold">
-                        {file.name}
-                      </span>
-
-                      <span className="text-xs text-violet-200/70">
-                        {formatBytes(file.size)}
-                      </span>
-
-                      <span
-                        className={`rounded-lg px-2 py-1 text-[10px] font-black uppercase ${
-                          isTextExtractableFile(file.name)
-                            ? 'bg-emerald-500/20 text-emerald-200'
-                            : 'bg-orange-500/20 text-orange-200'
-                        }`}
-                      >
-                        {isTextExtractableFile(file.name) ? 'text' : 'doplnok'}
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={() => removeFile(file.id)}
-                        className="rounded-full p-1 text-violet-100 hover:bg-white/10"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="shrink-0 border-t border-white/10 bg-[#070a16] px-5 py-4 md:px-8">
-            <div className="mx-auto max-w-5xl rounded-[28px] border border-violet-500/40 bg-violet-950/30 p-4 shadow-2xl shadow-violet-950/40">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-black uppercase tracking-[0.2em] text-slate-500">
-                    Model
-                  </span>
-
-                  {agents.map((item) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={() => setAgent(item.key)}
-                      className={`rounded-xl px-3 py-1.5 text-xs font-black transition ${
-                        agent === item.key
-                          ? 'bg-violet-600 text-white'
-                          : 'border border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'
-                      }`}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setCanvasOpen(true)}
-                    className="inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-black text-slate-300 hover:bg-white/10 hover:text-white"
+                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.055] px-4 py-2 text-xs font-black text-slate-300 transition hover:-translate-y-0.5 hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white"
                   >
                     <Paintbrush className="h-4 w-4" />
                     Canvas
                   </button>
                 </div>
-              </div>
 
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  sendMessage();
-                }}
-                className="flex items-end gap-3"
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept={allowedFileAccept}
-                  multiple
-                  className="hidden"
-                  onChange={(event) => handleFiles(event.target.files)}
-                />
-
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-slate-300 transition hover:bg-white/10 hover:text-white"
-                  title="Priložiť súbory"
+                {/* INPUT */}
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    sendMessage();
+                  }}
+                  className="flex items-end gap-3"
                 >
-                  <Paperclip className="h-6 w-6" />
-                </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept={allowedFileAccept}
+                    multiple
+                    className="hidden"
+                    onChange={(event) => handleFiles(event.target.files)}
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.055] text-slate-300 transition hover:-translate-y-0.5 hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white"
+                    title="Priložiť súbory"
+                  >
+                    <Paperclip className="h-6 w-6" />
+                  </button>
+
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    rows={2}
+                    onFocus={() => setComposerFocused(true)}
+                    onBlur={() => setComposerFocused(false)}
+                    onChange={(event) => setInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        sendMessage();
+                      }
+                    }}
+                    placeholder={
+                      attachedFiles.length > 0
+                        ? 'Napíšte správu alebo odošlite len priložené dokumenty...'
+                        : 'Napíšte správu...'
+                    }
+                    className="no-scrollbar min-h-[48px] max-h-[110px] flex-1 resize-none rounded-2xl bg-white/[0.035] px-4 py-3 text-base leading-6 text-white outline-none transition placeholder:text-slate-500 focus:bg-white/[0.06]"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={startDictation}
+                    className={`mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border transition hover:-translate-y-0.5 ${
+                      isListening
+                        ? 'border-red-400/50 bg-red-500 text-white shadow-lg shadow-red-700/30'
+                        : 'border-white/10 bg-white/[0.055] text-slate-300 hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white'
+                    }`}
+                    title="Diktovať"
+                  >
+                    <Mic className="h-5 w-5" />
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={isLoading || !canSubmit}
+                    className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-700/40 transition hover:-translate-y-0.5 hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+                    title="Odoslať"
+                  >
+                    <Send className="h-5 w-5" />
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+
+          {/* CANVAS */}
+          {canvasOpen && (
+            <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">
+              <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
+                <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+                  <div>
+                    <h2 className="text-2xl font-black">Canvas</h2>
+                    <p className="text-sm text-slate-400">
+                      Tu si môžeš upravovať, kopírovať alebo pripravovať
+                      výsledný text.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={downloadDoc}
+                      disabled={!canvasText.trim()}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Download className="h-4 w-4" />
+                      DOC
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={downloadPdf}
+                      disabled={!canvasText.trim()}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <FileDown className="h-4 w-4" />
+                      PDF
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCanvasOpen(false)}
+                      className="rounded-2xl bg-red-500/90 p-3 text-white hover:bg-red-400"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                </div>
 
                 <textarea
-                  value={input}
-                  rows={2}
-                  onChange={(event) => setInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault();
-                      sendMessage();
-                    }
-                  }}
-                  placeholder={
-                    attachedFiles.length > 0
-                      ? 'Napíšte správu alebo odošlite len priložené dokumenty...'
-                      : 'Napíšte správu...'
-                  }
-                  className="min-h-[54px] flex-1 resize-none bg-transparent px-2 py-3 text-base leading-6 text-white outline-none placeholder:text-slate-500"
+                  value={canvasText}
+                  onChange={(event) => setCanvasText(event.target.value)}
+                  placeholder="Canvas je zatiaľ prázdny. Po odpovedi AI sa sem vloží posledný výstup."
+                  className="no-scrollbar flex-1 resize-none bg-[#050711] p-6 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-600"
                 />
-
-                <button
-                  type="button"
-                  onClick={startDictation}
-                  className={`mb-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl transition ${
-                    isListening
-                      ? 'bg-red-500 text-white'
-                      : 'text-slate-300 hover:bg-white/10 hover:text-white'
-                  }`}
-                  title="Diktovať"
-                >
-                  <Mic className="h-5 w-5" />
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={isLoading || !canSubmit}
-                  className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-600 text-white shadow-lg shadow-violet-700/40 transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
-                  title="Odoslať"
-                >
-                  <Send className="h-5 w-5" />
-                </button>
-              </form>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* POPUP RESULT */}
+          {popup && popupData && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+              <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[#070a16] px-6 py-4">
+                  <div>
+                    <h2 className="text-2xl font-black">📄 Výstup</h2>
+                    <p className="text-sm text-slate-400">
+                      Výsledok môžeš zavrieť, otvoriť v Canvase alebo stiahnuť.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={downloadDoc}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15"
+                    >
+                      <Download className="h-4 w-4" />
+                      Stiahnuť DOC
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={downloadPdf}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15"
+                    >
+                      <FileDown className="h-4 w-4" />
+                      Stiahnuť PDF
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const canvasParts = [
+                          popupData.output || '',
+                          popupData.sources
+                            ? `\n\nPoužité zdroje a autori\n\n${popupData.sources}`
+                            : '',
+                        ];
+
+                        setCanvasText(canvasParts.join('').trim());
+                        setCanvasOpen(true);
+                        setPopup(false);
+                      }}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-black text-white hover:bg-violet-500"
+                    >
+                      <Paintbrush className="h-4 w-4" />
+                      Canvas
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPopup(false)}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-black text-white hover:bg-red-400"
+                    >
+                      <X className="h-4 w-4" />
+                      Zavrieť
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid min-h-0 flex-1 gap-6 overflow-hidden p-6 md:grid-cols-[1fr_360px]">
+                  <div className="no-scrollbar min-h-0 overflow-y-auto rounded-3xl border border-white/10 bg-black/10 p-6 pr-4">
+                    <div className="whitespace-pre-wrap text-sm leading-8 text-slate-300">
+                      {popupData.output}
+                    </div>
+
+                    {popupData.sources && (
+                      <div className="mt-8 rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5">
+                        <h3 className="mb-3 font-black text-emerald-200">
+                          📚 Použité zdroje a autori
+                        </h3>
+
+                        <div className="whitespace-pre-wrap text-sm leading-7 text-emerald-50/90">
+                          {popupData.sources}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="no-scrollbar min-h-0 space-y-4 overflow-y-auto pr-1">
+                    <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
+                      <h3 className="mb-2 font-black">📊 Skóre</h3>
+
+                      <div className="text-3xl font-black text-emerald-400">
+                        {popupData.score || '—'}
+                      </div>
+                    </div>
+
+                    <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
+                      <h3 className="mb-2 font-black">⚠️ Analýza</h3>
+
+                      <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                        {popupData.analysis || 'Bez analýzy.'}
+                      </div>
+                    </div>
+
+                    <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
+                      <h3 className="mb-2 font-black">✏️ Odporúčania</h3>
+
+                      <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                        {popupData.tips || 'Bez odporúčaní.'}
+                      </div>
+                    </div>
+
+                    <div className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5">
+                      <h3 className="mb-2 font-black text-emerald-200">
+                        📚 Zdroje
+                      </h3>
+
+                      <div className="whitespace-pre-wrap text-sm leading-6 text-emerald-50/90">
+                        {popupData.sources ||
+                          'Zdroje neboli v odpovedi samostatne vypísané.'}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setPopup(false)}
+                      className="w-full rounded-2xl bg-red-500 py-3 font-black text-white hover:bg-red-400"
+                    >
+                      Zavrieť okno
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-
-        {canvasOpen && (
-          <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">
-            <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
-              <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
-                <div>
-                  <h2 className="text-2xl font-black">Canvas</h2>
-
-                  <p className="text-sm text-slate-400">
-                    Tu si môžeš upravovať, kopírovať alebo pripravovať výsledný
-                    text.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={downloadDoc}
-                    disabled={!canvasText.trim()}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <Download className="h-4 w-4" />
-                    DOC
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={downloadPdf}
-                    disabled={!canvasText.trim()}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <FileDown className="h-4 w-4" />
-                    PDF
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setCanvasOpen(false)}
-                    className="rounded-2xl bg-red-500/90 p-3 text-white hover:bg-red-400"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-
-              <textarea
-                value={canvasText}
-                onChange={(event) => setCanvasText(event.target.value)}
-                placeholder="Canvas je zatiaľ prázdny. Po odpovedi AI sa sem vloží posledný výstup."
-                className="flex-1 resize-none bg-[#050711] p-6 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-600"
-              />
-            </div>
-          </div>
-        )}
-
-        {popup && popupData && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-            <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
-              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[#070a16] px-6 py-4">
-                <div>
-                  <h2 className="text-2xl font-black">📄 Výstup</h2>
-
-                  <p className="text-sm text-slate-400">
-                    Výsledok môžeš zavrieť, otvoriť v Canvase alebo stiahnuť.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={downloadDoc}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15"
-                  >
-                    <Download className="h-4 w-4" />
-                    Stiahnuť DOC
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={downloadPdf}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15"
-                  >
-                    <FileDown className="h-4 w-4" />
-                    Stiahnuť PDF
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const canvasParts = [
-                        lastExtractionSummary
-                          ? `Spracovanie priložených dokumentov\n\n${lastExtractionSummary}\n\n`
-                          : '',
-                        popupData.output || '',
-                        popupData.sources
-                          ? `\n\nPoužité zdroje a autori\n\n${popupData.sources}`
-                          : '',
-                      ];
-
-                      setCanvasText(canvasParts.join('').trim());
-                      setCanvasOpen(true);
-                      setPopup(false);
-                    }}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-black text-white hover:bg-violet-500"
-                  >
-                    <Paintbrush className="h-4 w-4" />
-                    Canvas
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setPopup(false)}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-black text-white hover:bg-red-400"
-                  >
-                    <X className="h-4 w-4" />
-                    Zavrieť
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid min-h-0 flex-1 gap-6 overflow-hidden p-6 md:grid-cols-[1fr_380px]">
-                <div className="min-h-0 overflow-y-auto rounded-3xl border border-white/10 bg-black/10 p-6 pr-4">
-                  {lastExtractionSummary && (
-                    <div className="mb-8 rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5">
-                      <h3 className="mb-3 font-black text-emerald-200">
-                        ✅ Spracovanie priložených dokumentov
-                      </h3>
-
-                      <div className="whitespace-pre-wrap text-sm leading-7 text-emerald-50/90">
-                        {lastExtractionSummary}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="whitespace-pre-wrap text-sm leading-8 text-slate-300">
-                    {popupData.output}
-                  </div>
-
-                  {popupData.sources && (
-                    <div className="mt-8 rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5">
-                      <h3 className="mb-3 font-black text-emerald-200">
-                        📚 Použité zdroje a autori
-                      </h3>
-
-                      <div className="whitespace-pre-wrap text-sm leading-7 text-emerald-50/90">
-                        {popupData.sources}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
-                  <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
-                    <h3 className="mb-2 font-black">📊 Skóre</h3>
-
-                    <div className="text-4xl font-black text-emerald-400">
-                      {popupData.score || '—'}
-                    </div>
-                  </div>
-
-                  <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
-                    <h3 className="mb-2 font-black">⚠️ Analýza</h3>
-
-                    <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
-                      {popupData.analysis || 'Bez analýzy.'}
-                    </div>
-                  </div>
-
-                  <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
-                    <h3 className="mb-2 font-black">✏️ Odporúčania</h3>
-
-                    <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
-                      {popupData.tips || 'Bez odporúčaní.'}
-                    </div>
-                  </div>
-
-                  <div className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5">
-                    <h3 className="mb-2 font-black text-emerald-200">
-                      📚 Zdroje
-                    </h3>
-
-                    <div className="whitespace-pre-wrap text-sm leading-6 text-emerald-50/90">
-                      {popupData.sources ||
-                        'Zdroje neboli v odpovedi samostatne vypísané.'}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setPopup(false)}
-                    className="w-full rounded-2xl bg-red-500 py-3 font-black text-white hover:bg-red-400"
-                  >
-                    Zavrieť okno
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
-    </div>
+    </>
   );
 }

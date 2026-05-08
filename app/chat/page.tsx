@@ -294,7 +294,7 @@ function formatBytes(bytes: number) {
   const units = ['B', 'KB', 'MB', 'GB'];
   const index = Math.min(
     Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1,
+    units.length - 1
   );
 
   return `${(bytes / Math.pow(1024, index)).toFixed(1)} ${units[index]}`;
@@ -462,7 +462,7 @@ function buildAttachmentPrompt(files: AttachedFile[]) {
       : 'nie – súbor je doplnkový alebo v tejto trase nemusí byť textovo extrahovateľný';
 
     return `${index + 1}. ${item.name} (${getFileKindLabel(
-      item.name,
+      item.name
     )}, ${formatBytes(item.size)}), extrakcia textu: ${extractable}`;
   });
 
@@ -487,11 +487,11 @@ function normalizeExtractedFiles(value: any): ExtractedFileInfo[] {
         'neznámy súbor';
 
       const extractedText = String(
-        item.extractedText || item.text || item.content || '',
+        item.extractedText || item.text || item.content || ''
       );
 
       const charCount = Number(
-        item.extractedChars ?? item.charCount ?? extractedText.length ?? 0,
+        item.extractedChars ?? item.charCount ?? extractedText.length ?? 0
       );
 
       return {
@@ -522,6 +522,8 @@ function normalizeExtractedFiles(value: any): ExtractedFileInfo[] {
 
 export default function ChatPage() {
   const router = useRouter();
+
+  const [isMounted, setIsMounted] = useState(false);
 
   const [agent, setAgent] = useState<Agent>('gemini');
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
@@ -563,7 +565,12 @@ export default function ChatPage() {
     return base.trim() || 'Zedpera výstup';
   }, [activeProfile]);
 
-  const canSubmit = input.trim().length > 0 || attachedFiles.length > 0;
+  const canSubmit =
+    isMounted && (input.trim().length > 0 || attachedFiles.length > 0);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   useEffect(() => {
     const activeRaw = localStorage.getItem('active_profile');
@@ -629,14 +636,14 @@ export default function ChatPage() {
     for (const file of incomingFiles) {
       if (!isAllowedUploadFile(file)) {
         alert(
-          `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, RTF, ODT, obrázky, Excel, CSV a PowerPoint.`,
+          `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, RTF, ODT, obrázky, Excel, CSV a PowerPoint.`
         );
         continue;
       }
 
       if (file.size > maxFileSizeBytes) {
         alert(
-          `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť jedného súboru je ${maxFileSizeMb} MB.`,
+          `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť jedného súboru je ${maxFileSizeMb} MB.`
         );
         continue;
       }
@@ -651,7 +658,7 @@ export default function ChatPage() {
       });
     }
 
-    if (validFiles.length === 0) return;
+    if (validFiles.length === 0) next;
 
     setAttachedFiles((prev) => {
       const next = [...prev];
@@ -663,7 +670,7 @@ export default function ChatPage() {
         }
 
         const duplicate = next.some(
-          (item) => item.name === file.name && item.size === file.size,
+          (item) => item.name === file.name && item.size === file.size
         );
 
         if (!duplicate) next.push(file);
@@ -690,7 +697,7 @@ export default function ChatPage() {
 
     if (!SpeechRecognition) {
       alert(
-        'Diktovanie nie je v tomto prehliadači podporované. Skús Google Chrome.',
+        'Diktovanie nie je v tomto prehliadači podporované. Skús Google Chrome.'
       );
       return;
     }
@@ -844,7 +851,7 @@ Vypíš všetkých identifikovaných autorov, názvy dokumentov, roky, názvy č
     visibleUserText: string;
     apiUserText: string;
   }) => {
-    if (isLoading) return;
+    if (!isMounted || isLoading) return;
 
     const userVisibleContent =
       visibleUserText.trim() ||
@@ -911,8 +918,8 @@ Vypíš všetkých identifikovaných autorov, názvy dokumentov, roky, názvy č
             kind: getFileKindLabel(item.name),
             extractable: isTextExtractableFile(item.name),
             uploadedAt: item.uploadedAt,
-          })),
-        ),
+          }))
+        )
       );
 
       attachedFiles.forEach((item) => {
@@ -932,7 +939,7 @@ Vypíš všetkých identifikovaných autorov, názvy dokumentov, roky, názvy č
 
 ${errorMessage}
 
-Skús prepnúť model na Gemini alebo OPEN AI. Ak chyba ostane, pozri terminál pri /api/chat.`,
+Skús prepnúť model na Gemini alebo OPEN AI. Ak chyba ostane, pozri terminál pri /api/chat.`
         );
 
         return;
@@ -954,7 +961,7 @@ Skús prepnúť model na Gemini alebo OPEN AI. Ak chyba ostane, pozri terminál 
         const data = await res.json();
 
         const apiExtractedFiles = normalizeExtractedFiles(
-          data.extractedFiles || data.files || data.uploadedFiles || [],
+          data.extractedFiles || data.files || data.uploadedFiles || []
         );
 
         if (apiExtractedFiles.length > 0) {
@@ -962,11 +969,11 @@ Skús prepnúť model na Gemini alebo OPEN AI. Ak chyba ostane, pozri terminál 
 
           const totalChars = apiExtractedFiles.reduce(
             (sum, file) => sum + getExtractedCharCount(file),
-            0,
+            0
           );
 
           setLastExtractionSummary(
-            `Spracované dokumenty: ${apiExtractedFiles.length}, extrahované znaky spolu: ${totalChars}`,
+            `Spracované dokumenty: ${apiExtractedFiles.length}, extrahované znaky spolu: ${totalChars}`
           );
         }
 
@@ -977,14 +984,14 @@ Skús prepnúť model na Gemini alebo OPEN AI. Ak chyba ostane, pozri terminál 
               data.message ||
               data.text ||
               data.answer ||
-              '',
+              ''
           ).trim() || '';
 
         if (!fullText && data.ok === false) {
           appendAssistantMessage(
             `❌ API nevrátilo výstup.
 
-${data.message || data.error || 'Neznáma chyba API.'}`,
+${data.message || data.error || 'Neznáma chyba API.'}`
           );
           return;
         }
@@ -1083,7 +1090,7 @@ ${data.message || data.error || 'Neznáma chyba API.'}`,
 
 ${message}
 
-Skontroluj terminál pri /api/chat.`,
+Skontroluj terminál pri /api/chat.`
       );
     } finally {
       setIsLoading(false);
@@ -1093,7 +1100,7 @@ Skontroluj terminál pri /api/chat.`,
   const sendMessage = async () => {
     const text = input.trim();
 
-    if (!canSubmit || isLoading) return;
+    if (!isMounted || !canSubmit || isLoading) return;
 
     await sendPromptToApi({
       visibleUserText: text,
@@ -1284,7 +1291,7 @@ Skontroluj terminál pri /api/chat.`,
                           key={item.title}
                           type="button"
                           onClick={() => runSuggestion(item)}
-                          disabled={isLoading}
+                          disabled={!isMounted || isLoading}
                           className="group flex min-h-[76px] items-center gap-4 rounded-3xl border border-white/10 bg-white/[0.055] p-4 text-left transition hover:-translate-y-0.5 hover:border-violet-400/50 hover:bg-white/[0.085] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200 transition group-hover:bg-violet-600 group-hover:text-white">
@@ -1419,7 +1426,8 @@ Skontroluj terminál pri /api/chat.`,
                           key={item.key}
                           type="button"
                           onClick={() => selectAgent(item.key)}
-                          className={`rounded-2xl px-4 py-2 text-xs font-black transition-all duration-200 ${
+                          disabled={!isMounted || isLoading}
+                          className={`rounded-2xl px-4 py-2 text-xs font-black transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
                             active
                               ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-800/40'
                               : 'border border-white/10 bg-white/[0.055] text-slate-300 hover:-translate-y-0.5 hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white'
@@ -1466,7 +1474,8 @@ Skontroluj terminál pri /api/chat.`,
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.055] text-slate-300 transition hover:-translate-y-0.5 hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white"
+                    disabled={!isMounted || isLoading}
+                    className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.055] text-slate-300 transition hover:-translate-y-0.5 hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
                     title="Priložiť súbory"
                   >
                     <Paperclip className="h-6 w-6" />
@@ -1496,7 +1505,8 @@ Skontroluj terminál pri /api/chat.`,
                   <button
                     type="button"
                     onClick={startDictation}
-                    className={`mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border transition hover:-translate-y-0.5 ${
+                    disabled={!isMounted || isLoading}
+                    className={`mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 ${
                       isListening
                         ? 'border-red-400/50 bg-red-500 text-white shadow-lg shadow-red-700/30'
                         : 'border-white/10 bg-white/[0.055] text-slate-300 hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white'
@@ -1508,7 +1518,7 @@ Skontroluj terminál pri /api/chat.`,
 
                   <button
                     type="submit"
-                    disabled={isLoading || !canSubmit}
+                    disabled={!isMounted || isLoading || !canSubmit}
                     className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-700/40 transition hover:-translate-y-0.5 hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
                     title="Odoslať"
                   >

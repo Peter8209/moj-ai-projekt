@@ -67,7 +67,7 @@ const featureCards = [
   { mode: 'analysis', title: 'Analýza dát', icon: BarChart3 },
   { mode: 'planning', title: 'Plánovanie', icon: CalendarDays },
   { mode: 'email', title: 'Emaily', icon: Mail },
-{ mode: 'plagiarism', title: 'Originalita práce', icon: ShieldCheck },
+  { mode: 'plagiarism', title: 'Originalita práce', icon: ShieldCheck },
 ] as const;
 
 const SUPPORTED_FILE_EXTENSIONS = [
@@ -160,22 +160,25 @@ function getAverageAiScore(outputs: SavedTextOutput[]) {
 
 function getFileTypeLabel(extension: string) {
   if (extension === '.pdf') return 'PDF';
+
   if (['.doc', '.docx', '.odt', '.rtf', '.txt', '.md'].includes(extension)) {
     return 'Dokument';
   }
+
   if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
     return 'Obrázok';
   }
+
   if (['.xls', '.xlsx', '.csv'].includes(extension)) {
     return 'Tabuľka';
   }
+
   if (['.ppt', '.pptx'].includes(extension)) {
     return 'Prezentácia';
   }
 
   return 'Súbor';
 }
-
 
 type Mode = (typeof featureCards)[number]['mode'];
 
@@ -190,7 +193,6 @@ type SavedTextOutput = {
   createdAt?: string;
   savedAt?: string;
 };
-
 
 type SavedProfile = {
   id: string;
@@ -294,10 +296,12 @@ function DashboardPage() {
 
   const [subActive, setSubActive] = useState(false);
   const [showProfileForm, setShowProfileForm] = useState(false);
-const [editingProfile, setEditingProfile] = useState<SavedProfile | null>(null);
+  const [editingProfile, setEditingProfile] = useState<SavedProfile | null>(
+    null,
+  );
 
-const [profiles, setProfiles] = useState<SavedProfile[]>([]);
-const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
+  const [profiles, setProfiles] = useState<SavedProfile[]>([]);
+  const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   // =====================================================
   // LOAD SUBSCRIPTION STATUS
@@ -337,7 +341,16 @@ const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
       keywords:
         profile.keywords && profile.keywords.length > 0
           ? profile.keywords
-          : profile.keywordsList || [],
+          : profile.keywordsList || profile.keywords_list || [],
+      workLanguage:
+        profile.workLanguage || profile.work_language || profile.language,
+      researchQuestions:
+        profile.researchQuestions || profile.research_questions,
+      practicalPart: profile.practicalPart || profile.practical_part,
+      scientificContribution:
+        profile.scientificContribution || profile.scientific_contribution,
+      sourcesRequirement:
+        profile.sourcesRequirement || profile.sources_requirement,
     };
   };
 
@@ -353,14 +366,14 @@ const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
       if (Array.isArray(list)) {
         const normalizedList = list.map((item: SavedProfile) =>
-          normalizeProfile(item)
+          normalizeProfile(item),
         );
 
         setProfiles(normalizedList);
 
         if (active?.id) {
           const found = normalizedList.find(
-            (item: SavedProfile) => item.id === active.id
+            (item: SavedProfile) => item.id === active.id,
           );
 
           setActiveProfile(found || normalizeProfile(active));
@@ -381,81 +394,81 @@ const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
   // SAVE PROFILE FROM POPUP FORM
   // =====================================================
 
-const openNewProfileForm = () => {
-  setEditingProfile(null);
-  setShowProfileForm(true);
-};
+  const openNewProfileForm = () => {
+    setEditingProfile(null);
+    setShowProfileForm(true);
+  };
 
-const openEditProfileForm = (profile: SavedProfile) => {
-  setEditingProfile(profile);
-  setShowProfileForm(true);
-};
+  const openEditProfileForm = (profile: SavedProfile) => {
+    setEditingProfile(profile);
+    setShowProfileForm(true);
+  };
 
+  const handleProfileSave = (data: SavedProfile) => {
+    if (typeof window === 'undefined') return;
 
-const handleProfileSave = (data: SavedProfile) => {
-  if (typeof window === 'undefined') return;
+    const payload = normalizeProfile({
+      ...data,
+      id: data.id || editingProfile?.id || Date.now().toString(),
+      savedAt: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
 
-  const payload = normalizeProfile({
-    ...data,
-    id: data.id || editingProfile?.id || Date.now().toString(),
-    savedAt: new Date().toISOString(),
-  });
+    let oldList: SavedProfile[] = [];
 
-  let oldList: SavedProfile[] = [];
+    try {
+      const raw = localStorage.getItem('profiles_full');
+      const parsed = raw ? JSON.parse(raw) : [];
+      oldList = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      oldList = [];
+    }
 
-  try {
-    const raw = localStorage.getItem('profiles_full');
-    const parsed = raw ? JSON.parse(raw) : [];
-    oldList = Array.isArray(parsed) ? parsed : [];
-  } catch {
-    oldList = [];
-  }
+    const exists = oldList.some(
+      (item: SavedProfile) => item.id === payload.id,
+    );
 
-  const exists = oldList.some((item: SavedProfile) => item.id === payload.id);
+    const newList = exists
+      ? oldList.map((item: SavedProfile) =>
+          item.id === payload.id ? payload : item,
+        )
+      : [payload, ...oldList];
 
-  const newList = exists
-    ? oldList.map((item: SavedProfile) =>
-        item.id === payload.id ? payload : item
-      )
-    : [payload, ...oldList];
+    localStorage.setItem('profiles_full', JSON.stringify(newList));
+    localStorage.setItem('active_profile', JSON.stringify(payload));
+    localStorage.setItem('profile', JSON.stringify(payload));
 
-  localStorage.setItem('profiles_full', JSON.stringify(newList));
-  localStorage.setItem('active_profile', JSON.stringify(payload));
-  localStorage.setItem('profile', JSON.stringify(payload));
+    setProfiles(newList);
+    setActiveProfile(payload);
 
-  setProfiles(newList);
-  setActiveProfile(payload);
+    setEditingProfile(null);
+    setShowProfileForm(false);
+    setView('profile');
+  };
 
-  setEditingProfile(null);
-  setShowProfileForm(false);
-  setView('profile');
-};
+  const closeProfileFormAndRefresh = () => {
+    setShowProfileForm(false);
+    setEditingProfile(null);
+    loadProfiles();
+  };
 
- const closeProfileFormAndRefresh = () => {
-  setShowProfileForm(false);
-  setEditingProfile(null);
-  loadProfiles();
-};
-
-const showSidebar = view !== 'dashboard';
-
-return (
-  <div className="min-h-screen bg-[#020617] text-white">
-    <main className="flex min-w-0 flex-1 flex-col">
+  return (
+    <div className="min-h-screen bg-[#020617] text-white">
+      <main className="flex min-w-0 flex-1 flex-col">
         <Header
-  view={view}
-  mode={mode}
-  subActive={subActive}
-  setView={setView}
-/>
+          view={view}
+          mode={mode}
+          subActive={subActive}
+          setView={setView}
+        />
 
         <div className="flex-1 overflow-y-auto p-6 md:p-8">
           {view === 'dashboard' && (
-         <Dashboard
-  setView={setView}
-  setMode={setMode}
-  openForm={openNewProfileForm}
-/>
+            <Dashboard
+              setView={setView}
+              setMode={setMode}
+              openForm={openNewProfileForm}
+            />
           )}
 
           {view === 'chat' && (
@@ -466,27 +479,26 @@ return (
             />
           )}
 
-   {view === 'profile' && (
-  <ProfileView
-    profile={activeProfile}
-    profiles={profiles}
-    setActiveProfile={(profile) => {
-      setActiveProfile(profile);
+          {view === 'profile' && (
+            <ProfileView
+              profile={activeProfile}
+              profiles={profiles}
+              setActiveProfile={(profile) => {
+                setActiveProfile(profile);
 
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(
-          'active_profile',
-          JSON.stringify(profile)
-        );
-      }
-    }}
-    openForm={openNewProfileForm}
-    openEditForm={openEditProfileForm}
-  />
-)}
-          
+                if (typeof window !== 'undefined') {
+                  localStorage.setItem(
+                    'active_profile',
+                    JSON.stringify(profile),
+                  );
+                }
+              }}
+              openForm={openNewProfileForm}
+              openEditForm={openEditProfileForm}
+            />
+          )}
 
-         {view === 'packages' && <PackagesPage subActive={subActive} />}
+          {view === 'packages' && <PackagesPage subActive={subActive} />}
 
           {view === 'video' && (
             <SimplePage
@@ -527,18 +539,18 @@ return (
           <div className="absolute inset-0 flex items-center justify-center p-4">
             <div
               onClick={(event) => event.stopPropagation()}
-              className="relative max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-white/10 bg-[#020617] shadow-2xl"
+              className="relative max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-3xl border border-white/10 bg-[#020617] shadow-2xl"
             >
               <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/10 bg-[#020617]/95 px-6 py-5 backdrop-blur">
                 <div>
                   <h2 className="text-2xl font-black">
-  {editingProfile ? 'Upraviť profil práce' : 'Nová práca'}
-</h2>
+                    {editingProfile ? 'Upraviť profil práce' : 'Nová práca'}
+                  </h2>
                   <p className="text-sm text-gray-400">
-  {editingProfile
-    ? 'Uprav uložený profil práce. Po uložení sa zmeny prepíšu v aktívnom profile.'
-    : 'Vyplň profil práce. Po uložení sa údaje automaticky vložia do sekcie Profil práce.'}
-</p>
+                    {editingProfile
+                      ? 'Uprav uložený profil práce. Po uložení sa zmeny prepíšu v aktívnom profile.'
+                      : 'Vyplň základné údaje, akademický profil a kľúčové slová. Po uložení sa práca nastaví ako aktívna.'}
+                  </p>
                 </div>
 
                 <button
@@ -551,10 +563,10 @@ return (
               </div>
 
               <div className="p-6">
-                <ProfileForm
-  onSave={handleProfileSave}
-  initialProfile={editingProfile}
-/>
+                <NewWorkForm
+                  onSave={handleProfileSave}
+                  initialProfile={editingProfile}
+                />
               </div>
             </div>
           </div>
@@ -563,8 +575,6 @@ return (
     </div>
   );
 }
-
-
 
 // =====================================================
 // HEADER
@@ -582,7 +592,7 @@ function Header({
   setView: (v: View) => void;
 }) {
   const titleMap: Record<View, string> = {
-    dashboard: 'Dashboard',
+    dashboard: 'Menu',
     chat: getModeTitle(mode),
     profile: 'Profil práce',
     history: 'História',
@@ -598,32 +608,31 @@ function Header({
         <p className="text-gray-300">AI platforma pre akademické písanie</p>
       </div>
 
-     <div className="flex items-center gap-4">
-  {view !== 'dashboard' && (
-    <button
-      type="button"
-      onClick={() => setView('dashboard')}
-      className="rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20"
-    >
-      Dashboard
-    </button>
-  )}
+      <div className="flex items-center gap-4">
+        {view !== 'dashboard' && (
+          <button
+            type="button"
+            onClick={() => setView('dashboard')}
+            className="rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20"
+          >
+            Menu
+          </button>
+        )}
 
-  {subActive && (
-    <span className="rounded-full bg-purple-600/30 px-3 py-1 text-sm text-purple-200">
-      PRO aktívne
-    </span>
-  )}
+        {subActive && (
+          <span className="rounded-full bg-purple-600/30 px-3 py-1 text-sm text-purple-200">
+            PRO aktívne
+          </span>
+        )}
 
-  <Bell className="text-gray-300" size={22} />
-</div>
-     
+        <Bell className="text-gray-300" size={22} />
+      </div>
     </header>
   );
 }
 
 // =====================================================
-// DASHBOARD
+// DASHBOARD / MENU
 // =====================================================
 
 function Dashboard({
@@ -643,6 +652,9 @@ function Dashboard({
             <div className="mb-6 flex items-center gap-3">
               <Sparkles className="text-purple-400" />
               <span className="text-2xl font-black">ZEDPERA</span>
+              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-gray-300">
+                Menu
+              </span>
             </div>
 
             <h2 className="max-w-5xl text-4xl font-black leading-tight md:text-5xl">
@@ -666,8 +678,8 @@ function Dashboard({
         </div>
 
         <div className="mt-10">
-  <DashboardStats />
-</div>
+          <DashboardStats />
+        </div>
 
         <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {featureCards.map((feature) => {
@@ -713,11 +725,9 @@ function DashboardStats() {
     const profilesFull =
       safeParseLocalStorageArray<SavedProfile>('profiles_full');
 
-    const profiles =
-      safeParseLocalStorageArray<SavedProfile>('profiles');
+    const profiles = safeParseLocalStorageArray<SavedProfile>('profiles');
 
-    const profile =
-      safeParseLocalStorageObject<SavedProfile>('profile');
+    const profile = safeParseLocalStorageObject<SavedProfile>('profile');
 
     const activeProfile =
       safeParseLocalStorageObject<SavedProfile>('active_profile');
@@ -864,10 +874,10 @@ function DashboardStats() {
   );
 }
 
-
 // =====================================================
 // PROFILE VIEW
 // =====================================================
+
 function ProfileView({
   profile,
   profiles,
@@ -908,7 +918,7 @@ function ProfileView({
   const keywords =
     profile.keywords && profile.keywords.length > 0
       ? profile.keywords
-      : profile.keywordsList || [];
+      : profile.keywordsList || profile.keywords_list || [];
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -960,55 +970,49 @@ function ProfileView({
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <ProfileCard label="Názov práce" value={profile.title} />
-
         <ProfileCard label="Typ práce" value={profile.type} />
-
         <ProfileCard label="Úroveň práce" value={profile.level} />
 
         <ProfileCard
           label="Jazyk práce"
-          value={profile.workLanguage || profile.language}
+          value={profile.workLanguage || profile.work_language || profile.language}
         />
 
         <ProfileCard label="Citovanie" value={profile.citation} />
-
         <ProfileCard label="Vedúci práce" value={profile.supervisor} />
 
         <ProfileCard label="Téma" value={profile.topic} large />
-
         <ProfileCard label="Odbor" value={profile.field} />
-
         <ProfileCard label="Anotácia" value={profile.annotation} large />
-
         <ProfileCard label="Cieľ práce" value={profile.goal} large />
-
         <ProfileCard label="Výskumný problém" value={profile.problem} large />
-
         <ProfileCard label="Metodológia" value={profile.methodology} large />
-
         <ProfileCard label="Hypotézy" value={profile.hypotheses} large />
 
         <ProfileCard
           label="Výskumné otázky"
-          value={profile.researchQuestions}
+          value={profile.researchQuestions || profile.research_questions}
           large
         />
 
         <ProfileCard
           label="Praktická časť"
-          value={profile.practicalPart}
+          value={profile.practicalPart || profile.practical_part}
           large
         />
 
         <ProfileCard
           label="Vedecký / odborný prínos"
-          value={profile.scientificContribution}
+          value={
+            profile.scientificContribution ||
+            profile.scientific_contribution
+          }
           large
         />
 
         <ProfileCard
           label="Požiadavky na zdroje"
-          value={profile.sourcesRequirement}
+          value={profile.sourcesRequirement || profile.sources_requirement}
           large
         />
       </div>
@@ -1034,6 +1038,7 @@ function ProfileView({
     </div>
   );
 }
+
 function ProfileCard({
   label,
   value,
@@ -1052,6 +1057,498 @@ function ProfileCard({
       <div className="mb-2 text-sm text-gray-400">{label}</div>
       <div className="whitespace-pre-wrap text-lg font-semibold">
         {value || <span className="text-gray-600">Nevyplnené</span>}
+      </div>
+    </div>
+  );
+}
+
+// =====================================================
+// NEW WORK FORM
+// =====================================================
+
+function NewWorkForm({
+  onSave,
+  initialProfile,
+}: {
+  onSave: (data: SavedProfile) => void;
+  initialProfile?: SavedProfile | null;
+}) {
+  const [type, setType] = useState(initialProfile?.type || 'Bakalárska práca');
+  const [level, setLevel] = useState(
+    initialProfile?.level || 'Vysokoškolská práca',
+  );
+  const [title, setTitle] = useState(initialProfile?.title || '');
+  const [topic, setTopic] = useState(initialProfile?.topic || '');
+  const [field, setField] = useState(initialProfile?.field || '');
+  const [supervisor, setSupervisor] = useState(
+    initialProfile?.supervisor || '',
+  );
+  const [citation, setCitation] = useState(
+    initialProfile?.citation || 'ISO 690',
+  );
+  const [workLanguage, setWorkLanguage] = useState(
+    initialProfile?.workLanguage ||
+      initialProfile?.work_language ||
+      initialProfile?.language ||
+      'Slovenčina',
+  );
+
+  const [annotation, setAnnotation] = useState(
+    initialProfile?.annotation || '',
+  );
+  const [goal, setGoal] = useState(initialProfile?.goal || '');
+  const [problem, setProblem] = useState(initialProfile?.problem || '');
+  const [methodology, setMethodology] = useState(
+    initialProfile?.methodology || '',
+  );
+  const [hypotheses, setHypotheses] = useState(
+    initialProfile?.hypotheses || '',
+  );
+
+  const [researchQuestions, setResearchQuestions] = useState(
+    initialProfile?.researchQuestions ||
+      initialProfile?.research_questions ||
+      '',
+  );
+
+  const [practicalPart, setPracticalPart] = useState(
+    initialProfile?.practicalPart || initialProfile?.practical_part || '',
+  );
+
+  const [scientificContribution, setScientificContribution] = useState(
+    initialProfile?.scientificContribution ||
+      initialProfile?.scientific_contribution ||
+      '',
+  );
+
+  const [sourcesRequirement, setSourcesRequirement] = useState(
+    initialProfile?.sourcesRequirement ||
+      initialProfile?.sources_requirement ||
+      '',
+  );
+
+  const [keywordsText, setKeywordsText] = useState(
+    initialProfile?.keywords?.join(', ') ||
+      initialProfile?.keywordsList?.join(', ') ||
+      initialProfile?.keywords_list?.join(', ') ||
+      '',
+  );
+
+  const [error, setError] = useState('');
+
+  const parseKeywords = (value: string) => {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  };
+
+  const submitForm = () => {
+    setError('');
+
+    if (!title.trim()) {
+      setError('Vyplň názov práce.');
+      return;
+    }
+
+    if (!topic.trim()) {
+      setError('Vyplň tému práce.');
+      return;
+    }
+
+    if (!goal.trim()) {
+      setError('Vyplň cieľ práce.');
+      return;
+    }
+
+    const keywords = parseKeywords(keywordsText);
+
+    const payload: SavedProfile = {
+      id: initialProfile?.id || Date.now().toString(),
+
+      type,
+      level,
+      title: title.trim(),
+      topic: topic.trim(),
+      field: field.trim(),
+      supervisor: supervisor.trim(),
+      citation,
+      language: workLanguage,
+      workLanguage,
+
+      annotation: annotation.trim(),
+      goal: goal.trim(),
+      problem: problem.trim(),
+      methodology: methodology.trim(),
+      hypotheses: hypotheses.trim(),
+      researchQuestions: researchQuestions.trim(),
+      practicalPart: practicalPart.trim(),
+      scientificContribution: scientificContribution.trim(),
+      sourcesRequirement: sourcesRequirement.trim(),
+
+      keywords,
+      keywordsList: keywords,
+
+      work_language: workLanguage,
+      research_questions: researchQuestions.trim(),
+      practical_part: practicalPart.trim(),
+      scientific_contribution: scientificContribution.trim(),
+      sources_requirement: sourcesRequirement.trim(),
+      keywords_list: keywords,
+
+      savedAt: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    onSave(payload);
+  };
+
+  return (
+    <div className="space-y-8">
+      {error && (
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+          {error}
+        </div>
+      )}
+
+      {/* ZÁKLADNÉ ÚDAJE */}
+      <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+        <div className="mb-6">
+          <h3 className="text-2xl font-black text-white">
+            1. Základné údaje práce
+          </h3>
+          <p className="mt-2 text-sm text-gray-400">
+            Tieto údaje sa budú používať pri písaní, audite, obhajobe, zdrojoch
+            a AI vedúcom práce.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Typ práce
+            </div>
+            <select
+              value={type}
+              onChange={(event) => setType(event.target.value)}
+              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            >
+              <option>Seminárna práca</option>
+              <option>Ročníková práca</option>
+              <option>Bakalárska práca</option>
+              <option>Diplomová práca</option>
+              <option>Dizertačná práca</option>
+              <option>Rigorózna práca</option>
+              <option>Projektová práca</option>
+              <option>Esej</option>
+              <option>Odborný článok</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Úroveň práce
+            </div>
+            <select
+              value={level}
+              onChange={(event) => setLevel(event.target.value)}
+              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            >
+              <option>Stredoškolská práca</option>
+              <option>Vysokoškolská práca</option>
+              <option>Bakalársky stupeň</option>
+              <option>Magisterský / inžiniersky stupeň</option>
+              <option>Doktorandský stupeň</option>
+              <option>Odborná / firemná práca</option>
+            </select>
+          </label>
+
+          <label className="block md:col-span-2">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Názov práce
+            </div>
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Napr. Využitie umelej inteligencie vo vzdelávaní"
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+
+          <label className="block md:col-span-2">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Téma práce
+            </div>
+            <textarea
+              value={topic}
+              onChange={(event) => setTopic(event.target.value)}
+              rows={4}
+              placeholder="Stručne popíš tému práce..."
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Odbor / oblasť
+            </div>
+            <input
+              value={field}
+              onChange={(event) => setField(event.target.value)}
+              placeholder="Napr. manažment, pedagogika, IT, ekonomika..."
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Vedúci práce
+            </div>
+            <input
+              value={supervisor}
+              onChange={(event) => setSupervisor(event.target.value)}
+              placeholder="Meno vedúceho práce"
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Citačná norma
+            </div>
+            <select
+              value={citation}
+              onChange={(event) => setCitation(event.target.value)}
+              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            >
+              <option>ISO 690</option>
+              <option>APA</option>
+              <option>APA 7</option>
+              <option>Harvard</option>
+              <option>MLA</option>
+              <option>Chicago</option>
+              <option>Vancouver</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Jazyk práce
+            </div>
+            <select
+              value={workLanguage}
+              onChange={(event) => setWorkLanguage(event.target.value)}
+              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+            >
+              <option>Slovenčina</option>
+              <option>Čeština</option>
+              <option>Angličtina</option>
+              <option>Nemčina</option>
+              <option>Poľština</option>
+              <option>Maďarčina</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      {/* AKADEMICKÝ PROFIL */}
+      <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+        <div className="mb-6">
+          <h3 className="text-2xl font-black text-white">
+            2. Akademický profil práce
+          </h3>
+          <p className="mt-2 text-sm text-gray-400">
+            Čím presnejšie údaje vyplníš, tým lepšie bude AI písať,
+            kontrolovať a odporúčať zdroje.
+          </p>
+        </div>
+
+        <div className="space-y-5">
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Anotácia / stručný opis práce
+            </div>
+            <textarea
+              value={annotation}
+              onChange={(event) => setAnnotation(event.target.value)}
+              rows={5}
+              placeholder="Stručne vysvetli, čomu sa práca venuje..."
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Cieľ práce
+            </div>
+            <textarea
+              value={goal}
+              onChange={(event) => setGoal(event.target.value)}
+              rows={4}
+              placeholder="Napr. Cieľom práce je analyzovať..."
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Výskumný problém
+            </div>
+            <textarea
+              value={problem}
+              onChange={(event) => setProblem(event.target.value)}
+              rows={4}
+              placeholder="Aký problém práca rieši?"
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Metodológia
+            </div>
+            <textarea
+              value={methodology}
+              onChange={(event) => setMethodology(event.target.value)}
+              rows={5}
+              placeholder="Popíš metódy, výskumný súbor, dotazník, rozhovory, analýzu dát..."
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Hypotézy
+            </div>
+            <textarea
+              value={hypotheses}
+              onChange={(event) => setHypotheses(event.target.value)}
+              rows={4}
+              placeholder="Napr. H1: Existuje štatisticky významný vzťah..."
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Výskumné otázky
+            </div>
+            <textarea
+              value={researchQuestions}
+              onChange={(event) => setResearchQuestions(event.target.value)}
+              rows={4}
+              placeholder="Napr. VO1: Ako respondenti vnímajú..."
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+        </div>
+      </section>
+
+      {/* PRAKTICKÁ ČASŤ A ZDROJE */}
+      <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+        <div className="mb-6">
+          <h3 className="text-2xl font-black text-white">
+            3. Praktická časť, prínos a zdroje
+          </h3>
+        </div>
+
+        <div className="space-y-5">
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Praktická časť
+            </div>
+            <textarea
+              value={practicalPart}
+              onChange={(event) => setPracticalPart(event.target.value)}
+              rows={5}
+              placeholder="Popíš, čo bude obsahovať praktická časť práce..."
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Vedecký / odborný prínos
+            </div>
+            <textarea
+              value={scientificContribution}
+              onChange={(event) =>
+                setScientificContribution(event.target.value)
+              }
+              rows={4}
+              placeholder="Aký prínos má práca pre odbor, prax alebo organizáciu?"
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-2 text-sm font-semibold text-gray-300">
+              Požiadavky na zdroje
+            </div>
+            <textarea
+              value={sourcesRequirement}
+              onChange={(event) => setSourcesRequirement(event.target.value)}
+              rows={4}
+              placeholder="Napr. používať zdroje z posledných 5 rokov, zahraničné články, open-access PDF..."
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+            />
+          </label>
+        </div>
+      </section>
+
+      {/* KĽÚČOVÉ SLOVÁ */}
+      <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+        <div className="mb-6">
+          <h3 className="text-2xl font-black text-white">
+            4. Kľúčové slová
+          </h3>
+          <p className="mt-2 text-sm text-gray-400">
+            Slová oddeľ čiarkou. Použijú sa pri vyhľadávaní zdrojov a
+            generovaní textu.
+          </p>
+        </div>
+
+        <label className="block">
+          <div className="mb-2 text-sm font-semibold text-gray-300">
+            Kľúčové slová
+          </div>
+          <input
+            value={keywordsText}
+            onChange={(event) => setKeywordsText(event.target.value)}
+            placeholder="napr. umelá inteligencia, vzdelávanie, LLM, personalizované učenie"
+            className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+          />
+        </label>
+
+        {parseKeywords(keywordsText).length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {parseKeywords(keywordsText).map((keyword, index) => (
+              <span
+                key={`${keyword}-${index}`}
+                className="rounded-full bg-purple-600/30 px-3 py-1 text-sm text-purple-100"
+              >
+                {keyword}
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <div className="sticky bottom-0 z-10 rounded-3xl border border-white/10 bg-[#020617]/95 p-4 backdrop-blur">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-gray-400">
+            Po uložení sa profil nastaví ako aktívny a použije sa v AI písaní,
+            zdrojoch, audite aj obhajobe.
+          </div>
+
+          <button
+            type="button"
+            onClick={submitForm}
+            className="rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-8 py-4 font-black text-white transition hover:opacity-90"
+          >
+            Uložiť prácu
+          </button>
+        </div>
       </div>
     </div>
   );

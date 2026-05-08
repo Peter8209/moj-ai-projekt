@@ -7,6 +7,7 @@ import { mistral } from '@ai-sdk/mistral';
 import { createAdminClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 export const maxDuration = 90;
 
 // ================= TYPES =================
@@ -26,6 +27,11 @@ type OriginalityRequest = {
   activeProfile?: any;
   agent?: 'openai' | 'gemini' | 'claude' | 'mistral';
   checkAuthenticity?: boolean | string;
+};
+
+type ExtractedUploadResult = {
+  text: string;
+  warning?: string | null;
 };
 
 // ================= FILE CONFIG =================
@@ -69,24 +75,37 @@ function isAllowedFile(file: File) {
 }
 
 function cleanInputText(value: string) {
-  return value
+  return String(value || '')
+    .replace(/\u0000/g, '')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/\uFEFF/g, '')
     .replace(/\u200B/g, '')
     .replace(/\u200C/g, '')
     .replace(/\u200D/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{4,}/g, '\n\n\n')
     .trim();
 }
 
 function cleanAiText(value: string) {
-  return value
+  return String(value || '')
     .replace(/\uFEFF/g, '')
     .replace(/\u200B/g, '')
     .replace(/\u200C/g, '')
     .replace(/\u200D/g, '')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
+    .trim();
+}
+
+function stripRtf(value: string) {
+  return String(value || '')
+    .replace(/\\par[d]?/g, '\n')
+    .replace(/\\'[0-9a-fA-F]{2}/g, ' ')
+    .replace(/\\[a-zA-Z]+\d* ?/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
@@ -108,7 +127,19 @@ function numberFromSection(text: string, name: string) {
 
 function boolValue(value: boolean | string | undefined, fallback = true) {
   if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') return value !== 'false';
+
+  if (typeof value === 'string') {
+    const normalized = value.toLowerCase().trim();
+
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+      return true;
+    }
+
+    if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+      return false;
+    }
+  }
+
   return fallback;
 }
 
@@ -136,13 +167,43 @@ function getModel(agent?: string) {
   }
 
   throw new Error(
-    'Nie je nastavený žiadny AI provider. Doplň GOOGLE_GENERATIVE_AI_API_KEY alebo OPENAI_API_KEY.',
+    'Nie je nastavený žiadny AI provider. Doplň GOOGLE_GENERATIVE_AI_API_KEY alebo OPENAI_API_KEY.'
   );
 }
 
 // ================= FILE TEXT EXTRACTION =================
 
-async function extractTextFromFile(file: File) {
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  const pdfParseModule: any = await import('pdf-parse');
+
+  const possibleDefaultParser = pdfParseModule?.default;
+
+  if (typeof possibleDefaultParser === 'function') {
+    const result = await possibleDefaultParser(buffer);
+    return cleanInputText(result?.text || '');
+  }
+
+  if (typeof pdfParseModule === 'function') {
+    const result = await pdfParseModule(buffer);
+    return cleanInputText(result?.text || '');
+  }
+
+  if (typeof pdfParseModule?.parse === 'function') {
+    const result = await pdfParseModule.parse(buffer);
+    return cleanInputText(result?.text || result?.content || '');
+  }
+
+  if (typeof pdfParseModule?.parsePDF === 'function') {
+    const result = await pdfParseModule.parsePDF(buffer);
+    return cleanInputText(result?.text || result?.content || '');
+  }
+
+  throw new Error(
+    'PDF parser sa nepodarilo inicializovať. Skontroluj verziu balíka pdf-parse.'
+  );
+}
+
+async function extractTextFromFile(file: File): Promise<ExtractedUploadResult> {
   const extension = getExtension(file.name);
 
   if (!isAllowedFile(file)) {
@@ -151,7 +212,32 @@ async function extractTextFromFile(file: File) {
 
   if (['.txt', '.md', '.csv'].includes(extension)) {
     const content = await file.text();
-    return cleanInputText(content);
+
+    return {
+      text: cleanInputText(content),
+      warning: null,
+    };
+  }
+
+  if (extension === '.rtf') {
+    try {
+      const content = await file.text();
+
+      return {
+        text: cleanInputText(stripRtf(content)),
+        warning: null,
+      };
+    } catch (error) {
+      console.error('RTF EXTRACT ERROR:', error);
+
+      return {
+        text: `[RTF súbor bol priložený: ${file.name}. Text RTF sa nepodarilo automaticky extrahovať.]`,
+        warning:
+          error instanceof Error
+            ? `RTF extrakcia zlyhala: ${error.message}`
+            : 'RTF extrakcia zlyhala.',
+      };
+    }
   }
 
   if (extension === '.docx') {
@@ -163,11 +249,26 @@ async function extractTextFromFile(file: File) {
         buffer,
       } as any);
 
-      return cleanInputText(result.value || '');
+      return {
+        text: cleanInputText(result.value || ''),
+        warning:
+          result.messages && result.messages.length > 0
+            ? result.messages
+                .map((message: any) => message?.message)
+                .filter(Boolean)
+                .join(' | ')
+            : null,
+      };
     } catch (error) {
       console.error('DOCX EXTRACT ERROR:', error);
 
-      return `[DOCX súbor bol priložený: ${file.name}. Text DOCX sa nepodarilo automaticky extrahovať.]`;
+      return {
+        text: `[DOCX súbor bol priložený: ${file.name}. Text DOCX sa nepodarilo automaticky extrahovať.]`,
+        warning:
+          error instanceof Error
+            ? `DOCX extrakcia zlyhala: ${error.message}`
+            : 'DOCX extrakcia zlyhala.',
+      };
     }
   }
 
@@ -188,45 +289,73 @@ async function extractTextFromFile(file: File) {
         }
       }
 
-      return cleanInputText(texts.join('\n\n'));
+      return {
+        text: cleanInputText(texts.join('\n\n')),
+        warning: null,
+      };
     } catch (error) {
       console.error('XLSX EXTRACT ERROR:', error);
 
-      return `[Tabuľkový súbor bol priložený: ${file.name}. Text z tabuľky sa nepodarilo automaticky extrahovať.]`;
+      return {
+        text: `[Tabuľkový súbor bol priložený: ${file.name}. Text z tabuľky sa nepodarilo automaticky extrahovať.]`,
+        warning:
+          error instanceof Error
+            ? `Tabuľková extrakcia zlyhala: ${error.message}`
+            : 'Tabuľková extrakcia zlyhala.',
+      };
     }
   }
 
   if (extension === '.pdf') {
     try {
-      const { PDFParse } = await import('pdf-parse');
-
       const buffer = Buffer.from(await file.arrayBuffer());
+      const extractedText = await extractPdfText(buffer);
 
-      const parser = new PDFParse({
-        data: buffer,
-      });
+      if (!extractedText.trim()) {
+        return {
+          text: `[PDF súbor bol priložený: ${file.name}. PDF neobsahuje čitateľný text alebo je skenované ako obrázok.]`,
+          warning:
+            'PDF neobsahuje čitateľný text alebo je skenované ako obrázok.',
+        };
+      }
 
-      const result = await parser.getText();
-
-      await parser.destroy();
-
-      return cleanInputText(result.text || '');
+      return {
+        text: extractedText,
+        warning: null,
+      };
     } catch (error) {
       console.error('PDF EXTRACT ERROR:', error);
 
-      return `[PDF súbor bol priložený: ${file.name}. Text PDF sa nepodarilo automaticky extrahovať.]`;
+      return {
+        text: `[PDF súbor bol priložený: ${file.name}. Text PDF sa nepodarilo automaticky extrahovať.]`,
+        warning:
+          error instanceof Error
+            ? `PDF extrakcia zlyhala: ${error.message}`
+            : 'PDF extrakcia zlyhala.',
+      };
     }
   }
 
-  if (['.doc', '.rtf', '.odt', '.ppt', '.pptx'].includes(extension)) {
-    return `[Súbor bol priložený: ${file.name}. Tento formát je povolený, ale plná extrakcia textu pre tento typ zatiaľ nie je aktívna. Pre presnejšiu kontrolu vlož text práce aj ručne alebo nahraj DOCX/PDF/TXT.]`;
+  if (['.doc', '.odt', '.ppt', '.pptx'].includes(extension)) {
+    return {
+      text: `[Súbor bol priložený: ${file.name}. Tento formát je povolený, ale plná extrakcia textu pre tento typ zatiaľ nie je aktívna. Pre presnejšiu kontrolu vlož text práce aj ručne alebo nahraj DOCX/PDF/TXT.]`,
+      warning:
+        'Súbor je povolený, ale text sa z tohto typu v tejto trase plne neextrahuje.',
+    };
   }
 
   if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
-    return `[Obrázok bol priložený: ${file.name}. OCR alebo vizuálna analýza obrázkov zatiaľ nie je aktívna. Pre presnejšiu kontrolu vlož text z obrázka aj ručne.]`;
+    return {
+      text: `[Obrázok bol priložený: ${file.name}. OCR alebo vizuálna analýza obrázkov zatiaľ nie je aktívna. Pre presnejšiu kontrolu vlož text z obrázka aj ručne.]`,
+      warning:
+        'Obrázok bol priložený, ale OCR v tejto trase zatiaľ nie je aktívne.',
+    };
   }
 
-  return `[Súbor bol priložený: ${file.name}.]`;
+  return {
+    text: `[Súbor bol priložený: ${file.name}.]`,
+    warning: null,
+  };
 }
 
 // ================= PROMPT =================
@@ -342,6 +471,7 @@ export async function POST(req: NextRequest) {
 
     let body: OriginalityRequest = {};
     let uploadedFile: File | null = null;
+    let fileWarning: string | null = null;
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData();
@@ -383,11 +513,13 @@ export async function POST(req: NextRequest) {
     let extractedFromFile = '';
 
     if (uploadedFile) {
-      extractedFromFile = await extractTextFromFile(uploadedFile);
+      const extracted = await extractTextFromFile(uploadedFile);
+      extractedFromFile = extracted.text;
+      fileWarning = extracted.warning || null;
     }
 
     const text = cleanInputText(
-      `${body.text || ''}\n\n${extractedFromFile || ''}`,
+      `${body.text || ''}\n\n${extractedFromFile || ''}`
     );
 
     if (!text) {
@@ -397,7 +529,7 @@ export async function POST(req: NextRequest) {
           error: 'TEXT_REQUIRED',
           message: 'Chýba text práce alebo extrahovaný obsah súboru.',
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -409,7 +541,7 @@ export async function POST(req: NextRequest) {
           message:
             'Na kontrolu vlož aspoň 300 znakov alebo nahraj čitateľný súbor.',
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -538,6 +670,8 @@ export async function POST(req: NextRequest) {
       rewriteSample,
       report,
 
+      fileWarning,
+
       file: uploadedFile
         ? {
             name: uploadedFile.name,
@@ -559,7 +693,7 @@ export async function POST(req: NextRequest) {
             ? error.message
             : 'Neznáma chyba pri kontrole originality.',
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

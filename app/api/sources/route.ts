@@ -204,16 +204,16 @@ ${query}
         queries = [query];
       }
 
-      if (!queries.length) queries = [query];
+      if (!queries.length) {
+        queries = [query];
+      }
 
       // ================= MULTI DATABASE SEARCH =================
       const searchTasks: Promise<NormalizedSource[]>[] = [];
 
       for (const q of queries) {
         if (selectedSources.includes('openalex')) {
-          searchTasks.push(
-            searchOpenAlex(q, yearFromNumber, yearToNumber),
-          );
+          searchTasks.push(searchOpenAlex(q, yearFromNumber, yearToNumber));
         }
 
         if (selectedSources.includes('semanticScholar')) {
@@ -223,27 +223,20 @@ ${query}
         }
 
         if (selectedSources.includes('crossref')) {
-          searchTasks.push(
-            searchCrossref(q, yearFromNumber, yearToNumber),
-          );
+          searchTasks.push(searchCrossref(q, yearFromNumber, yearToNumber));
         }
 
         if (selectedSources.includes('core')) {
-          searchTasks.push(
-            searchCore(q, yearFromNumber, yearToNumber),
-          );
+          searchTasks.push(searchCore(q, yearFromNumber, yearToNumber));
         }
 
         if (selectedSources.includes('europePmc')) {
-          searchTasks.push(
-            searchEuropePmc(q, yearFromNumber, yearToNumber),
-          );
+          searchTasks.push(searchEuropePmc(q, yearFromNumber, yearToNumber));
         }
 
-        if (selectedSources.includes('arxiv')) {
-          searchTasks.push(
-            searchArxiv(q, yearFromNumber, yearToNumber),
-          );
+        // arXiv voláme iba pre prvý dotaz, aby nevznikal 429 Rate exceeded.
+        if (selectedSources.includes('arxiv') && q === queries[0]) {
+          searchTasks.push(searchArxiv(q, yearFromNumber, yearToNumber));
         }
       }
 
@@ -271,7 +264,9 @@ ${query}
 
       // ================= BACKEND PDF FILTER =================
       if (onlyPdf) {
-        results = results.filter((item) => item.isPdf === true || Boolean(item.pdfUrl));
+        results = results.filter(
+          (item) => item.isPdf === true || Boolean(item.pdfUrl),
+        );
       }
 
       // ================= CITATIONS =================
@@ -289,10 +284,16 @@ ${query}
 
       // ================= SORT =================
       results.sort((a, b) => {
-        const pdfScore = Number(Boolean(b.pdfUrl || b.isPdf)) - Number(Boolean(a.pdfUrl || a.isPdf));
+        const pdfScore =
+          Number(Boolean(b.pdfUrl || b.isPdf)) -
+          Number(Boolean(a.pdfUrl || a.isPdf));
+
         if (pdfScore !== 0) return pdfScore;
 
-        const openScore = Number(Boolean(b.isOpenAccess)) - Number(Boolean(a.isOpenAccess));
+        const openScore =
+          Number(Boolean(b.isOpenAccess)) -
+          Number(Boolean(a.isOpenAccess));
+
         if (openScore !== 0) return openScore;
 
         return (b.year || 0) - (a.year || 0);
@@ -385,7 +386,7 @@ ${text}
     }
 
     // =====================================================
-    // UNKNOWN
+    // UNKNOWN ACTION
     // =====================================================
     return Response.json(
       {
@@ -460,6 +461,7 @@ async function searchOpenAlex(
 
     return (data.results || []).map((p: any): NormalizedSource => {
       const doi = normalizeDoi(p.doi);
+
       const authors = Array.isArray(p.authorships)
         ? p.authorships
             .map((a: any) => a?.author?.display_name)
@@ -489,7 +491,9 @@ async function searchOpenAlex(
         authors,
         year: p.publication_year || null,
         publicationDate: p.publication_date || null,
-        abstract: reconstructOpenAlexAbstract(p.abstract_inverted_index) || 'Bez abstraktu',
+        abstract:
+          reconstructOpenAlexAbstract(p.abstract_inverted_index) ||
+          'Bez abstraktu',
         url,
         isPdf: Boolean(pdfUrl),
         pdfUrl,
@@ -657,8 +661,7 @@ async function searchCrossref(
         null;
 
       const publicationDate = buildDateFromParts(
-        p.published?.['date-parts']?.[0] ||
-          p.issued?.['date-parts']?.[0],
+        p.published?.['date-parts']?.[0] || p.issued?.['date-parts']?.[0],
       );
 
       const authors = Array.isArray(p.author)
@@ -685,7 +688,7 @@ async function searchCrossref(
         pdfUrl: null,
         openAccessPdf: null,
         isOpenAccess: Boolean(p.license?.length),
-        publicationTypes: Array.isArray(p.type) ? p.type : p.type ? [p.type] : [],
+        publicationTypes: p.type ? [String(p.type)] : [],
         externalIds: {
           DOI: doi,
           ISSN: p.ISSN,
@@ -748,15 +751,10 @@ async function searchCore(
               .slice(0, 8)
           : [];
 
-        const pdfUrl =
-          p.downloadUrl ||
-          p.sourceFulltextUrls?.[0] ||
-          null;
+        const pdfUrl = p.downloadUrl || p.sourceFulltextUrls?.[0] || null;
 
         const year =
-          p.yearPublished ||
-          extractYear(p.publishedDate) ||
-          null;
+          p.yearPublished || extractYear(p.publishedDate) || null;
 
         const doi = normalizeDoi(p.doi);
 
@@ -853,14 +851,13 @@ async function searchEuropePmc(
       const year = p.pubYear ? Number(p.pubYear) : null;
       const doi = normalizeDoi(p.doi);
 
-      const url =
-        doi
-          ? `https://doi.org/${doi}`
-          : p.pmid
-            ? `https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`
-            : p.pmcid
-              ? `https://europepmc.org/article/PMC/${p.pmcid}`
-              : null;
+      const url = doi
+        ? `https://doi.org/${doi}`
+        : p.pmid
+          ? `https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`
+          : p.pmcid
+            ? `https://europepmc.org/article/PMC/${p.pmcid}`
+            : null;
 
       return {
         id: `europepmc-${p.id || p.doi || p.pmid || p.title}`,
@@ -877,7 +874,9 @@ async function searchEuropePmc(
         pdfUrl: null,
         openAccessPdf: null,
         isOpenAccess: p.isOpenAccess === 'Y',
-        publicationTypes: p.pubTypeList?.pubType || [],
+        publicationTypes: Array.isArray(p.pubTypeList?.pubType)
+          ? p.pubTypeList.pubType
+          : [],
         externalIds: {
           DOI: doi,
           PMID: p.pmid,
@@ -919,10 +918,22 @@ async function searchArxiv(
     });
 
     if (!res.ok) {
+      const text = await safeText(res);
+
+      if (res.status === 429) {
+        console.warn('arXiv rate limit reached. Skipping arXiv for this search.', {
+          query,
+          status: res.status,
+          text,
+        });
+
+        return [];
+      }
+
       console.error('arXiv failed:', {
         query,
         status: res.status,
-        text: await safeText(res),
+        text,
       });
 
       return [];
@@ -939,13 +950,19 @@ async function searchArxiv(
         const year = published ? Number(published.slice(0, 4)) : null;
         const id = getXmlTag(entry, 'id');
 
-        const authorBlocks = [...entry.matchAll(/<author>([\s\S]*?)<\/author>/gi)];
+        const authorBlocks = [
+          ...entry.matchAll(/<author>([\s\S]*?)<\/author>/gi),
+        ];
+
         const authors = authorBlocks
           .map((block) => getXmlTag(block[1], 'name'))
           .filter(Boolean)
           .slice(0, 8);
 
-        const pdfMatch = entry.match(/<link[^>]+title="pdf"[^>]+href="([^"]+)"/i);
+        const pdfMatch = entry.match(
+          /<link[^>]+title="pdf"[^>]+href="([^"]+)"/i,
+        );
+
         const pdfUrl = pdfMatch?.[1] || (id ? id.replace('/abs/', '/pdf/') : null);
 
         return {
@@ -987,9 +1004,7 @@ async function searchArxiv(
 async function enrichWithUnpaywall(
   results: NormalizedSource[],
 ): Promise<NormalizedSource[]> {
-  const withDoi = results
-    .filter((item) => item.doi && !item.pdfUrl)
-    .slice(0, 20);
+  const withDoi = results.filter((item) => item.doi && !item.pdfUrl).slice(0, 20);
 
   await Promise.all(
     withDoi.map(async (item) => {
@@ -1018,9 +1033,7 @@ async function enrichWithUnpaywall(
           null;
 
         const landingUrl =
-          data.best_oa_location?.url ||
-          data.oa_locations?.[0]?.url ||
-          null;
+          data.best_oa_location?.url || data.oa_locations?.[0]?.url || null;
 
         if (pdfUrl) {
           item.pdfUrl = pdfUrl;
@@ -1145,7 +1158,10 @@ function reconstructOpenAlexAbstract(index: Record<string, number[]> | null) {
 }
 
 function getXmlTag(xml: string, tag: string): string {
-  const match = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+  const match = xml.match(
+    new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'),
+  );
+
   return cleanText(match?.[1] || '');
 }
 
@@ -1162,8 +1178,12 @@ function dedupeResults(results: NormalizedSource[]) {
 
   for (const item of results) {
     const doi = item.doi ? `doi:${item.doi.toLowerCase()}` : '';
+
     const title = item.title
-      ? `title:${item.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()}`
+      ? `title:${item.title
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N}]+/gu, ' ')
+          .trim()}`
       : '';
 
     const key = doi || title || item.id;
@@ -1183,13 +1203,14 @@ function dedupeResults(results: NormalizedSource[]) {
   return Array.from(map.values());
 }
 
-function mergeDuplicate(a: NormalizedSource, b: NormalizedSource): NormalizedSource {
+function mergeDuplicate(
+  a: NormalizedSource,
+  b: NormalizedSource,
+): NormalizedSource {
   return {
     ...a,
     abstract:
-      a.abstract && a.abstract !== 'Bez abstraktu'
-        ? a.abstract
-        : b.abstract,
+      a.abstract && a.abstract !== 'Bez abstraktu' ? a.abstract : b.abstract,
     authors: a.authors.length >= b.authors.length ? a.authors : b.authors,
     year: a.year || b.year,
     publicationDate: a.publicationDate || b.publicationDate,
@@ -1206,10 +1227,7 @@ function mergeDuplicate(a: NormalizedSource, b: NormalizedSource): NormalizedSou
       ...(a.externalIds || {}),
     },
     doi: a.doi || b.doi,
-    source:
-      a.source === b.source
-        ? a.source
-        : `${a.source}, ${b.source}`,
+    source: a.source === b.source ? a.source : `${a.source}, ${b.source}`,
   };
 }
 

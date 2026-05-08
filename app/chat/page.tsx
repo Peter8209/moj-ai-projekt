@@ -658,7 +658,9 @@ export default function ChatPage() {
       });
     }
 
-    if (validFiles.length === 0) next;
+        if (validFiles.length === 0) {
+      return;
+    }
 
     setAttachedFiles((prev) => {
       const next = [...prev];
@@ -673,7 +675,9 @@ export default function ChatPage() {
           (item) => item.name === file.name && item.size === file.size
         );
 
-        if (!duplicate) next.push(file);
+        if (!duplicate) {
+          next.push(file);
+        }
       }
 
       return next;

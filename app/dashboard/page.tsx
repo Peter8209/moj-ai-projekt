@@ -122,6 +122,42 @@ function formatFileSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function safeParseLocalStorageArray<T>(key: string): T[] {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : [];
+
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeParseLocalStorageObject<T>(key: string): T | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function getAverageAiScore(outputs: SavedTextOutput[]) {
+  const scores = outputs
+    .map((item) => Number(item.aiScore ?? item.score))
+    .filter((value) => Number.isFinite(value) && value >= 0);
+
+  if (scores.length === 0) return 0;
+
+  const average = scores.reduce((sum, value) => sum + value, 0) / scores.length;
+
+  return Math.round(Math.max(0, Math.min(100, average)));
+}
+
 function getFileTypeLabel(extension: string) {
   if (extension === '.pdf') return 'PDF';
   if (['.doc', '.docx', '.odt', '.rtf', '.txt', '.md'].includes(extension)) {
@@ -142,6 +178,19 @@ function getFileTypeLabel(extension: string) {
 
 
 type Mode = (typeof featureCards)[number]['mode'];
+
+type SavedTextOutput = {
+  id?: string;
+  title?: string;
+  text?: string;
+  content?: string;
+  output?: string;
+  score?: number;
+  aiScore?: number;
+  createdAt?: string;
+  savedAt?: string;
+};
+
 
 type SavedProfile = {
   id: string;
@@ -616,11 +665,9 @@ function Dashboard({
           </button>
         </div>
 
-        <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Stat title="Projekty" value="3" />
-          <Stat title="Texty" value="124" />
-          <Stat title="AI skóre" value="87%" />
-        </div>
+        <div className="mt-10">
+  <DashboardStats profilesCount={3} textsCount={0} aiScore={0} />
+</div>
 
         <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {featureCards.map((feature) => {
@@ -652,6 +699,171 @@ function Dashboard({
     </div>
   );
 }
+
+// =====================================================
+// DASHBOARD STATS
+// =====================================================
+
+function DashboardStats() {
+  const [projectsCount, setProjectsCount] = useState(0);
+  const [textsCount, setTextsCount] = useState(0);
+  const [aiScore, setAiScore] = useState(0);
+
+  const loadStats = () => {
+    const profilesFull =
+      safeParseLocalStorageArray<SavedProfile>('profiles_full');
+
+    const profiles =
+      safeParseLocalStorageArray<SavedProfile>('profiles');
+
+    const profile =
+      safeParseLocalStorageObject<SavedProfile>('profile');
+
+    const activeProfile =
+      safeParseLocalStorageObject<SavedProfile>('active_profile');
+
+    const allProfiles = [
+      ...profilesFull,
+      ...profiles,
+      ...(profile ? [profile] : []),
+      ...(activeProfile ? [activeProfile] : []),
+    ];
+
+    const uniqueProfiles = new Map<string, SavedProfile>();
+
+    allProfiles.forEach((item, index) => {
+      const key =
+        item.id ||
+        item.title ||
+        item.topic ||
+        item.savedAt ||
+        `profile-${index}`;
+
+      uniqueProfiles.set(key, item);
+    });
+
+    const generatedTexts =
+      safeParseLocalStorageArray<SavedTextOutput>('generated_texts');
+
+    const chatHistory =
+      safeParseLocalStorageArray<SavedTextOutput>('chat_history');
+
+    const savedOutputs =
+      safeParseLocalStorageArray<SavedTextOutput>('saved_outputs');
+
+    const latestGeneratedText =
+      typeof window !== 'undefined'
+        ? localStorage.getItem('latest_generated_work_text')
+        : null;
+
+    const textOutputs = [
+      ...generatedTexts,
+      ...chatHistory,
+      ...savedOutputs,
+      ...(latestGeneratedText?.trim()
+        ? [
+            {
+              id: 'latest_generated_work_text',
+              text: latestGeneratedText,
+            },
+          ]
+        : []),
+    ];
+
+    setProjectsCount(uniqueProfiles.size);
+    setTextsCount(textOutputs.length);
+    setAiScore(getAverageAiScore(textOutputs));
+  };
+
+  useEffect(() => {
+    loadStats();
+
+    const onStorage = () => {
+      loadStats();
+    };
+
+    const onFocus = () => {
+      loadStats();
+    };
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, []);
+
+  const stats = [
+    {
+      title: 'Moje práce',
+      value: projectsCount,
+      suffix: '',
+      description: 'Počet vytvorených alebo uložených profilov práce.',
+      icon: BookOpen,
+    },
+    {
+      title: 'Texty',
+      value: textsCount,
+      suffix: '',
+      description: 'Počet uložených alebo spracovaných textových výstupov.',
+      icon: FileText,
+    },
+    {
+      title: 'Celkové AI skóre',
+      value: aiScore,
+      suffix: '%',
+      description: 'Priemerné skóre z uložených AI hodnotení.',
+      icon: Sparkles,
+    },
+  ];
+
+  return (
+    <section className="mx-auto w-full max-w-6xl">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+        {stats.map((item) => {
+          const Icon = item.icon;
+
+          return (
+            <div
+              key={item.title}
+              className="group relative overflow-hidden rounded-[32px] border border-white/10 bg-gradient-to-b from-white/[0.075] to-white/[0.035] p-7 shadow-2xl shadow-black/20 transition duration-300 hover:-translate-y-1 hover:border-purple-400/50 hover:shadow-purple-950/30"
+            >
+              <div className="absolute right-0 top-0 h-32 w-32 rounded-full bg-purple-600/10 blur-3xl transition group-hover:bg-purple-500/20" />
+
+              <div className="relative flex items-start justify-between gap-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-200 ring-1 ring-purple-400/20 transition group-hover:bg-purple-600 group-hover:text-white">
+                  <Icon size={28} />
+                </div>
+
+                <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+                  Live
+                </span>
+              </div>
+
+              <div className="relative mt-7">
+                <h3 className="text-lg font-black text-slate-100">
+                  {item.title}
+                </h3>
+
+                <div className="mt-4 text-5xl font-black tracking-tight text-white">
+                  {item.value}
+                  {item.suffix}
+                </div>
+
+                <p className="mt-5 max-w-[260px] text-sm leading-7 text-slate-400">
+                  {item.description}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 
 // =====================================================
 // PROFILE VIEW

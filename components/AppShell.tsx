@@ -7,7 +7,6 @@ import {
   Home,
   Bot,
   BookOpen,
-  User,
   Library,
   CreditCard,
   Video,
@@ -15,7 +14,6 @@ import {
   Settings,
   Plus,
   Sparkles,
-  Bell,
   X,
 } from 'lucide-react';
 
@@ -39,25 +37,12 @@ const navItems: NavItem[] = [
   ['/dashboard', 'Menu', Home],
   ['/chat', 'AI Chat', Bot],
   ['/projects', 'Moje práce', BookOpen],
-  ['/profile', 'Profil práce', User],
   ['/sources', 'Zdroje', Library],
   ['/pricing', 'Balíčky', CreditCard],
   ['/video', 'Video návod', Video],
   ['/history', 'História', History],
   ['/settings', 'Nastavenia', Settings],
 ];
-
-const titleMap: Record<string, string> = {
-  '/dashboard': 'Menu',
-  '/chat': 'AI Chat',
-  '/projects': 'Moje práce',
-  '/profile': 'Profil práce',
-  '/sources': 'Zdroje',
-  '/pricing': 'Balíčky',
-  '/video': 'Video návod',
-  '/history': 'História',
-  '/settings': 'Nastavenia',
-};
 
 // ================= COMPONENT =================
 
@@ -67,8 +52,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   const [openProfile, setOpenProfile] = useState(false);
 
-  const isChatPage = pathname.startsWith('/chat');
-
   const isActive = (path: string) => {
     if (path === '/dashboard') {
       return pathname === '/dashboard' || pathname === '/';
@@ -76,10 +59,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
     return pathname.startsWith(path);
   };
-
-  const title =
-    Object.entries(titleMap).find(([key]) => pathname.startsWith(key))?.[1] ||
-    'Zedpera';
 
   const openNewProfile = () => {
     if (typeof window !== 'undefined') {
@@ -98,24 +77,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
     <div className="flex h-dvh w-full overflow-hidden bg-[#020617] text-white">
       {/* ================= SIDEBAR ================= */}
 
-      <aside className="hidden h-dvh w-[300px] shrink-0 flex-col overflow-hidden border-r border-white/10 bg-[#020617] p-5 lg:flex">
-        {/* LOGO */}
+      <aside className="hidden h-dvh w-[300px] shrink-0 flex-col border-r border-white/10 bg-[#020617] p-5 lg:flex">
+        {/* LOGO ONLY */}
 
         <button
           type="button"
           onClick={() => router.push('/dashboard')}
-          className="mb-6 flex items-center gap-3 rounded-2xl p-1 text-left transition hover:bg-white/[0.04]"
+          className="mb-6 flex w-fit items-center rounded-2xl p-1 transition hover:bg-white/[0.04]"
+          aria-label="Zedpera"
         >
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 shadow-lg shadow-violet-700/25">
-            <Sparkles className="text-white" size={21} />
-          </div>
-
-          <div>
-            <div className="text-lg font-black leading-tight text-white">
-              ZEDPERA
-            </div>
-
-            <div className="text-xs text-slate-400">AI vedúci práce</div>
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 shadow-lg shadow-violet-700/25">
+            <Sparkles className="text-white" size={22} />
           </div>
         </button>
 
@@ -124,7 +96,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <button
           type="button"
           onClick={openNewProfile}
-          className="mb-6 flex h-14 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 font-black text-white shadow-lg shadow-violet-700/25 transition hover:scale-[1.015] hover:from-violet-500 hover:to-purple-500"
+          className="mb-8 flex h-14 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 font-black text-white shadow-lg shadow-violet-700/25 transition hover:scale-[1.015] hover:from-violet-500 hover:to-purple-500"
         >
           <Plus size={18} />
           Nová práca
@@ -132,7 +104,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
         {/* NAVIGATION */}
 
-        <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+        <nav className="flex-1 space-y-2 overflow-hidden pr-0">
           {navItems.map(([path, label, Icon]) => {
             const active = isActive(path);
 
@@ -173,46 +145,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
       {/* ================= CONTENT ================= */}
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* HEADER - skrytý na /chat, aby chat okno nebolo nízko */}
+        {/* 
+          Horný header je odstránený.
+          Už sa tu nebude zobrazovať:
+          Menu / Dashboard / Moje práce / Profil práce / Zdroje / Balíčky / História / Nastavenia
+          ani text: AI platforma pre akademické písanie.
+        */}
 
-        {!isChatPage && (
-          <header className="flex h-[76px] shrink-0 items-center justify-between border-b border-white/10 bg-[#020617]/90 px-5 backdrop-blur md:px-6">
-            <div>
-              <h1 className="text-xl font-black leading-tight text-white">
-                {title}
-              </h1>
-
-              <p className="mt-1 text-xs text-slate-400">
-                AI platforma pre akademické písanie
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                className="rounded-2xl p-3 text-slate-400 transition hover:bg-white/10 hover:text-white"
-                aria-label="Notifikácie"
-              >
-                <Bell size={20} />
-              </button>
-            </div>
-          </header>
-        )}
-
-        {/* PAGE CONTENT */}
-
-        <main
-          className={
-            isChatPage
-              ? 'min-h-0 flex-1 overflow-hidden p-0'
-              : 'min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6'
-          }
-        >
+        <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6">
           {children}
         </main>
       </div>
 
-      {/* ================= MODAL ================= */}
+      {/* ================= MODAL - NOVÁ PRÁCA ================= */}
 
       {openProfile && (
         <div className="fixed inset-0 z-50 overflow-hidden bg-[#020617]">

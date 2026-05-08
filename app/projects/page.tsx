@@ -5,9 +5,11 @@ import {
   ArrowLeft,
   BookOpen,
   CalendarDays,
+  CheckCircle2,
   FileText,
   Library,
   Search,
+  Sparkles,
   Trash2,
   User,
   X,
@@ -94,11 +96,26 @@ export default function ProjectsPage() {
   );
   const [profileFormOpen, setProfileFormOpen] = useState(false);
 
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
+    loadActiveProfile();
     loadProfiles();
   }, []);
+
+  const loadActiveProfile = () => {
+    try {
+      const activeRaw = localStorage.getItem('active_profile');
+      const active = activeRaw ? JSON.parse(activeRaw) : null;
+
+      if (active?.id) {
+        setActiveProfileId(active.id);
+      }
+    } catch {
+      setActiveProfileId(null);
+    }
+  };
 
   const loadProfiles = async () => {
     try {
@@ -212,6 +229,9 @@ export default function ProjectsPage() {
         if (found) {
           localStorage.setItem('active_profile', JSON.stringify(found));
           localStorage.setItem('profile', JSON.stringify(found));
+          setActiveProfileId(found.id);
+        } else {
+          setActiveProfileId(null);
         }
       }
     } catch (error) {
@@ -240,6 +260,13 @@ export default function ProjectsPage() {
           }));
 
         setProfiles(normalized);
+
+        const activeRaw = localStorage.getItem('active_profile');
+        const active = activeRaw ? JSON.parse(activeRaw) : null;
+
+        if (active?.id) {
+          setActiveProfileId(active.id);
+        }
       } else {
         setProfiles([]);
       }
@@ -274,11 +301,14 @@ export default function ProjectsPage() {
       });
   }, [profiles, search]);
 
-  const openProfile = (profile: SavedProfile) => {
-    setSelectedProfile(profile);
-
+  const selectProfileForGeneration = (profile: SavedProfile) => {
     localStorage.setItem('active_profile', JSON.stringify(profile));
     localStorage.setItem('profile', JSON.stringify(profile));
+    setActiveProfileId(profile.id);
+  };
+
+  const openProfile = (profile: SavedProfile) => {
+    setSelectedProfile(profile);
   };
 
   const closeProfile = () => {
@@ -291,6 +321,7 @@ export default function ProjectsPage() {
 
     localStorage.setItem('active_profile', JSON.stringify(profile));
     localStorage.setItem('profile', JSON.stringify(profile));
+    setActiveProfileId(profile.id);
   };
 
   const closeEditProfile = () => {
@@ -311,6 +342,7 @@ export default function ProjectsPage() {
     setSelectedProfile(updatedProfile);
     setEditingProfile(null);
     setProfileFormOpen(false);
+    setActiveProfileId(updatedProfile.id);
 
     localStorage.setItem('profiles_full', JSON.stringify(nextProfiles));
     localStorage.setItem('profile', JSON.stringify(updatedProfile));
@@ -358,10 +390,12 @@ export default function ProjectsPage() {
         if (active?.id === id) {
           localStorage.removeItem('active_profile');
           localStorage.removeItem('profile');
+          setActiveProfileId(null);
         }
       } catch {
         localStorage.removeItem('active_profile');
         localStorage.removeItem('profile');
+        setActiveProfileId(null);
       }
     }
 
@@ -377,23 +411,18 @@ export default function ProjectsPage() {
 
   return (
     <main className="min-h-screen bg-[#020617] text-white">
-      <div className="mx-auto max-w-7xl px-4 py-8 md:px-8">
+      <div className="mx-auto max-w-7xl px-4 py-4 md:px-8 md:py-6">
         <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-3 py-1 text-sm font-semibold text-violet-200">
-              <BookOpen className="h-4 w-4" />
-              ZEDPERA
-            </div>
-
             <h1 className="text-4xl font-black tracking-tight">Moje práce</h1>
 
             <p className="mt-2 text-slate-400">
-              Tu sa automaticky ukladajú všetky profily prác podľa názvu a
-              dátumu uloženia.
+              Tu sa ukladajú všetky tvoje práce. Vyber jednu prácu, ktorá sa má
+              používať pri generovaní textu v AI chate.
             </p>
           </div>
 
-          <div className="relative w-full md:w-[380px]">
+          <div className="relative w-full md:w-[420px]">
             <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
 
             <input
@@ -412,89 +441,129 @@ export default function ProjectsPage() {
             <h2 className="text-2xl font-black">Zatiaľ nemáš uložené práce</h2>
 
             <p className="mx-auto mt-3 max-w-2xl text-slate-400">
-              Choď do sekcie Profil práce alebo klikni na Nová práca. Po
-              vyplnení a kliknutí na Uložiť profil sa práca automaticky zobrazí
-              v tomto zozname.
+              Klikni na tlačidlo Nová práca v ľavom menu. Po vyplnení a uložení
+              sa práca automaticky zobrazí v tomto zozname.
             </p>
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {filteredProfiles.map((profile) => (
-              <article
-                key={profile.id}
-                className="group rounded-3xl border border-white/10 bg-white/[0.045] p-5 transition hover:border-violet-400/50 hover:bg-white/[0.07]"
-              >
-                <button
-                  type="button"
-                  onClick={() => openProfile(profile)}
-                  className="block w-full text-left"
+            {filteredProfiles.map((profile) => {
+              const isActive = activeProfileId === profile.id;
+
+              return (
+                <article
+                  key={profile.id}
+                  className={`group rounded-3xl border p-5 transition ${
+                    isActive
+                      ? 'border-emerald-400/50 bg-emerald-500/[0.055]'
+                      : 'border-white/10 bg-white/[0.045] hover:border-violet-400/50 hover:bg-white/[0.07]'
+                  }`}
                 >
-                  <div className="mb-4 flex items-start justify-between gap-4">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
-                      <FileText className="h-5 w-5" />
-                    </div>
-
-                    <span className="rounded-full bg-violet-600/20 px-3 py-1 text-xs font-bold text-violet-200">
-                      {profile.schema?.label || formatWorkType(profile.type)}
-                    </span>
-                  </div>
-
-                  <h2 className="line-clamp-2 text-xl font-black text-white">
-                    {profile.title || 'Bez názvu'}
-                  </h2>
-
-                  <div className="mt-4 space-y-2 text-sm text-slate-400">
-                    <div className="flex items-center gap-2">
-                      <CalendarDays className="h-4 w-4 text-slate-500" />
-                      <span>{formatDate(profile.savedAt)}</span>
-                    </div>
-
-                    {profile.field && (
-                      <div className="flex items-center gap-2">
-                        <Library className="h-4 w-4 text-slate-500" />
-                        <span className="line-clamp-1">{profile.field}</span>
-                      </div>
-                    )}
-
-                    {profile.supervisor && (
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4 text-slate-500" />
-                        <span className="line-clamp-1">
-                          {profile.supervisor}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </button>
-
-                <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
                   <button
                     type="button"
                     onClick={() => openProfile(profile)}
-                    className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-violet-500"
+                    className="block w-full text-left"
                   >
-                    Otvoriť profil
+                    <div className="mb-4 flex items-start justify-between gap-4">
+                      <div
+                        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
+                          isActive
+                            ? 'bg-emerald-500/15 text-emerald-200'
+                            : 'bg-violet-500/15 text-violet-200'
+                        }`}
+                      >
+                        {isActive ? (
+                          <CheckCircle2 className="h-5 w-5" />
+                        ) : (
+                          <FileText className="h-5 w-5" />
+                        )}
+                      </div>
+
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          isActive
+                            ? 'bg-emerald-500/20 text-emerald-200'
+                            : 'bg-violet-600/20 text-violet-200'
+                        }`}
+                      >
+                        {isActive
+                          ? 'Vybratá práca'
+                          : profile.schema?.label ||
+                            formatWorkType(profile.type)}
+                      </span>
+                    </div>
+
+                    <h2 className="line-clamp-2 text-xl font-black text-white">
+                      {profile.title || 'Bez názvu'}
+                    </h2>
+
+                    <div className="mt-4 space-y-2 text-sm text-slate-400">
+                      <div className="flex items-center gap-2">
+                        <CalendarDays className="h-4 w-4 text-slate-500" />
+                        <span>{formatDate(profile.savedAt)}</span>
+                      </div>
+
+                      {profile.field && (
+                        <div className="flex items-center gap-2">
+                          <Library className="h-4 w-4 text-slate-500" />
+                          <span className="line-clamp-1">{profile.field}</span>
+                        </div>
+                      )}
+
+                      {profile.supervisor && (
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4 text-slate-500" />
+                          <span className="line-clamp-1">
+                            {profile.supervisor}
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => openEditProfile(profile)}
-                    className="rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm font-bold text-violet-100 transition hover:bg-violet-500/20"
-                  >
-                    Upraviť
-                  </button>
+                  <div className="mt-5 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => selectProfileForGeneration(profile)}
+                      className={`rounded-xl px-4 py-2 text-sm font-black text-white transition ${
+                        isActive
+                          ? 'bg-emerald-600 hover:bg-emerald-500'
+                          : 'bg-violet-600 hover:bg-violet-500'
+                      }`}
+                    >
+                      {isActive
+                        ? 'Táto práca je vybratá'
+                        : 'Vybrať na generovanie'}
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => deleteProfile(profile.id)}
-                    className="rounded-xl bg-red-500/10 p-2 text-red-300 transition hover:bg-red-500/20 hover:text-red-200"
-                    aria-label="Odstrániť prácu"
-                  >
-                    <Trash2 className="h-5 w-5" />
-                  </button>
-                </div>
-              </article>
-            ))}
+                    <button
+                      type="button"
+                      onClick={() => openProfile(profile)}
+                      className="rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-bold text-white transition hover:bg-white/[0.1]"
+                    >
+                      Otvoriť
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openEditProfile(profile)}
+                      className="rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm font-bold text-violet-100 transition hover:bg-violet-500/20"
+                    >
+                      Upraviť
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => deleteProfile(profile.id)}
+                      className="ml-auto rounded-xl bg-red-500/10 p-2 text-red-300 transition hover:bg-red-500/20 hover:text-red-200"
+                      aria-label="Odstrániť prácu"
+                    >
+                      <Trash2 className="h-5 w-5" />
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
       </div>
@@ -505,7 +574,7 @@ export default function ProjectsPage() {
             <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
               <div>
                 <div className="mb-1 text-xs font-black uppercase tracking-[0.2em] text-violet-300">
-                  ZEDPERA profil práce
+                  Detail práce
                 </div>
 
                 <h2 className="text-2xl font-black text-white">
@@ -513,7 +582,8 @@ export default function ProjectsPage() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-400">
-                  Detail uloženého profilu práce.
+                  Tu môžeš prácu otvoriť, upraviť alebo vybrať na generovanie
+                  textu.
                 </p>
               </div>
 
@@ -530,9 +600,11 @@ export default function ProjectsPage() {
             <div className="max-h-[78vh] overflow-y-auto">
               <ProjectDetail
                 profile={selectedProfile}
+                activeProfileId={activeProfileId}
                 onBack={closeProfile}
                 onDelete={() => deleteProfile(selectedProfile.id)}
                 onEdit={() => openEditProfile(selectedProfile)}
+                onSelect={() => selectProfileForGeneration(selectedProfile)}
               />
             </div>
           </div>
@@ -558,19 +630,25 @@ export default function ProjectsPage() {
 
 function ProjectDetail({
   profile,
+  activeProfileId,
   onBack,
   onDelete,
   onEdit,
+  onSelect,
 }: {
   profile: SavedProfile;
+  activeProfileId: string | null;
   onBack: () => void;
   onDelete: () => void;
   onEdit: () => void;
+  onSelect: () => void;
 }) {
   const keywords =
     profile.keywordsList && profile.keywordsList.length > 0
       ? profile.keywordsList
       : profile.keywords || [];
+
+  const isActive = activeProfileId === profile.id;
 
   return (
     <div className="bg-[#020617] text-white">
@@ -588,11 +666,28 @@ function ProjectDetail({
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
+              onClick={onSelect}
+              className={`inline-flex items-center gap-2 rounded-2xl px-4 py-3 font-black text-white transition ${
+                isActive
+                  ? 'bg-emerald-600 hover:bg-emerald-500'
+                  : 'bg-violet-600 hover:bg-violet-500'
+              }`}
+            >
+              {isActive ? (
+                <CheckCircle2 className="h-5 w-5" />
+              ) : (
+                <Sparkles className="h-5 w-5" />
+              )}
+              {isActive ? 'Táto práca je vybratá' : 'Vybrať na generovanie'}
+            </button>
+
+            <button
+              type="button"
               onClick={onEdit}
               className="inline-flex items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 font-bold text-violet-100 transition hover:bg-violet-500/20"
             >
               <FileText className="h-5 w-5" />
-              Upraviť profil
+              Upraviť
             </button>
 
             <button
@@ -601,7 +696,7 @@ function ProjectDetail({
               className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 font-bold text-red-200 transition hover:bg-red-500/20"
             >
               <Trash2 className="h-5 w-5" />
-              Odstrániť prácu
+              Odstrániť
             </button>
           </div>
         </div>
@@ -609,9 +704,24 @@ function ProjectDetail({
         <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 md:p-8">
           <div className="mb-8 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div>
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-3 py-1 text-sm font-semibold text-violet-200">
-                <FileText className="h-4 w-4" />
-                Detail profilu práce
+              <div
+                className={`mb-4 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold ${
+                  isActive
+                    ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
+                    : 'border-violet-400/30 bg-violet-500/10 text-violet-200'
+                }`}
+              >
+                {isActive ? (
+                  <>
+                    <CheckCircle2 className="h-4 w-4" />
+                    Práca vybratá na generovanie
+                  </>
+                ) : (
+                  <>
+                    <FileText className="h-4 w-4" />
+                    Detail práce
+                  </>
+                )}
               </div>
 
               <h1 className="max-w-4xl text-4xl font-black tracking-tight">

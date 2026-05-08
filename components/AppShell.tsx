@@ -36,7 +36,7 @@ const ProfileForm =
 // ================= NAVIGATION =================
 
 const navItems: NavItem[] = [
-  ['/dashboard', 'Dashboard', Home],
+  ['/dashboard', 'Menu', Home],
   ['/chat', 'AI Chat', Bot],
   ['/projects', 'Moje práce', BookOpen],
   ['/profile', 'Profil práce', User],
@@ -48,7 +48,7 @@ const navItems: NavItem[] = [
 ];
 
 const titleMap: Record<string, string> = {
-  '/dashboard': 'Dashboard',
+  '/dashboard': 'Menu',
   '/chat': 'AI Chat',
   '/projects': 'Moje práce',
   '/profile': 'Profil práce',

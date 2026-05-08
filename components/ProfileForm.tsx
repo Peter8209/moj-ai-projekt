@@ -155,6 +155,17 @@ const WORK_TYPES: WorkTypeKey[] = [
   'msc',
 ];
 
+const ALWAYS_VISIBLE_DYNAMIC_FIELDS: DynamicFieldKey[] = [
+  'annotation',
+  'problem',
+  'goal',
+  'methodology',
+  'researchQuestions',
+  'hypotheses',
+  'practicalPart',
+  'sourcesRequirement',
+];
+
 const emptyProfile: Profile = {
   type: 'bachelor',
   level: 'expert',
@@ -214,6 +225,8 @@ const UI: Record<
     keywordsHint: string;
     activeTemplate: string;
     aiProfile: string;
+    close: string;
+    requiredNote: string;
   }
 > = {
   SK: {
@@ -246,6 +259,8 @@ const UI: Record<
     keywordsHint: 'Odporúčané: 5 – 15 kľúčových slov.',
     activeTemplate: 'Aktívna šablóna',
     aiProfile: 'AI profil',
+    close: 'Zavrieť',
+    requiredNote: 'Povinné polia sú označené hviezdičkou.',
   },
   CZ: {
     pageTitle: 'Profil práce',
@@ -277,6 +292,8 @@ const UI: Record<
     keywordsHint: 'Doporučeno: 5 – 15 klíčových slov.',
     activeTemplate: 'Aktivní šablona',
     aiProfile: 'AI profil',
+    close: 'Zavřít',
+    requiredNote: 'Povinná pole jsou označena hvězdičkou.',
   },
   EN: {
     pageTitle: 'Work Profile',
@@ -308,6 +325,8 @@ const UI: Record<
     keywordsHint: 'Recommended: 5–15 keywords.',
     activeTemplate: 'Active template',
     aiProfile: 'AI profile',
+    close: 'Close',
+    requiredNote: 'Required fields are marked with an asterisk.',
   },
   DE: {
     pageTitle: 'Arbeitsprofil',
@@ -339,6 +358,8 @@ const UI: Record<
     keywordsHint: 'Empfohlen: 5–15 Schlüsselwörter.',
     activeTemplate: 'Aktive Vorlage',
     aiProfile: 'KI-Profil',
+    close: 'Schließen',
+    requiredNote: 'Pflichtfelder sind mit einem Stern markiert.',
   },
   PL: {
     pageTitle: 'Profil pracy',
@@ -370,6 +391,8 @@ const UI: Record<
     keywordsHint: 'Zalecane: 5–15 słów kluczowych.',
     activeTemplate: 'Aktywny szablon',
     aiProfile: 'Profil AI',
+    close: 'Zamknij',
+    requiredNote: 'Pola wymagane są oznaczone gwiazdką.',
   },
   HU: {
     pageTitle: 'Dolgozatprofil',
@@ -401,6 +424,8 @@ const UI: Record<
     keywordsHint: 'Ajánlott: 5–15 kulcsszó.',
     activeTemplate: 'Aktív sablon',
     aiProfile: 'AI profil',
+    close: 'Bezárás',
+    requiredNote: 'A kötelező mezők csillaggal vannak jelölve.',
   },
 };
 
@@ -638,6 +663,18 @@ function safeJsonParse<T>(value: string | null, fallback: T): T {
   }
 }
 
+function readString(source: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = source[key];
+
+    if (value !== undefined && value !== null) {
+      return String(value);
+    }
+  }
+
+  return '';
+}
+
 function fieldText(
   key: DynamicFieldKey,
   lang: Lang
@@ -662,11 +699,13 @@ function fieldText(
     },
     hypotheses: {
       label: 'Hypotézy',
-      placeholder: 'Uveďte hypotézy, ktoré má práca overovať.',
+      placeholder:
+        'Uveďte hypotézy, ktoré má práca overovať. Napr. H1: Predpokladáme, že...',
     },
     researchQuestions: {
       label: 'Výskumné otázky',
-      placeholder: 'Uveďte hlavné a čiastkové výskumné otázky.',
+      placeholder:
+        'Uveďte hlavné a čiastkové výskumné otázky. Napr. VO1: Aký je aktuálny stav...',
     },
     practicalPart: {
       label: 'Praktická časť',
@@ -811,6 +850,23 @@ function makeField(
   };
 }
 
+function addAlwaysVisibleFields(
+  fields: DynamicField[],
+  lang: Lang
+): DynamicField[] {
+  const used = new Set(fields.map((field) => field.key));
+  const result = [...fields];
+
+  for (const key of ALWAYS_VISIBLE_DYNAMIC_FIELDS) {
+    if (!used.has(key)) {
+      result.push(makeField(key, lang, false, key === 'methodology' ? 5 : 4));
+      used.add(key);
+    }
+  }
+
+  return result;
+}
+
 // ================= SCHEMA =================
 
 function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
@@ -832,7 +888,14 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
           : 'Essay is an argumentative or reflective text.',
       recommendedLength: '3 – 8 strán',
       citationOptions: ['APA7', 'MLA9', 'Chicago', 'Harvard'],
-      structure: ['Úvod', 'Hlavná téza', 'Argumentácia', 'Protiargumenty', 'Vlastný postoj', 'Záver'],
+      structure: [
+        'Úvod',
+        'Hlavná téza',
+        'Argumentácia',
+        'Protiargumenty',
+        'Vlastný postoj',
+        'Záver',
+      ],
       requiredSections: ['Téza', 'Argumenty', 'Vlastný postoj', 'Záver'],
       fields: [
         makeField('annotation', lang, false, 3),
@@ -840,8 +903,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('reflection', lang, true, 4),
         makeField('sourcesRequirement', lang, false, 3),
       ],
-      aiInstruction:
-        'Generate an essay only. Use argumentative structure.',
+      aiInstruction: 'Generate an essay only. Use argumentative structure.',
     };
   }
 
@@ -853,11 +915,27 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         'Seminárna práca má jednoduchšiu akademickú štruktúru so zameraním na tému, teóriu, analýzu a zdroje.',
       recommendedLength: '8 – 20 strán',
       citationOptions: commonCitation,
-      structure: ['Úvod', 'Teoretická časť', 'Analytická časť', 'Diskusia', 'Záver', 'Zoznam zdrojov'],
-      requiredSections: ['Úvod', 'Teoretická časť', 'Analýza', 'Záver', 'Zdroje'],
+      structure: [
+        'Úvod',
+        'Teoretická časť',
+        'Analytická časť',
+        'Diskusia',
+        'Záver',
+        'Zoznam zdrojov',
+      ],
+      requiredSections: [
+        'Úvod',
+        'Teoretická časť',
+        'Analýza',
+        'Záver',
+        'Zdroje',
+      ],
       fields: [
         makeField('annotation', lang, false, 3),
         makeField('goal', lang, true, 3),
+        makeField('methodology', lang, false, 4),
+        makeField('researchQuestions', lang, false, 4),
+        makeField('hypotheses', lang, false, 4),
         makeField('practicalPart', lang, false, 4),
         makeField('sourcesRequirement', lang, false, 3),
       ],
@@ -879,6 +957,8 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         'Úvod',
         'Teoretické východiská',
         'Cieľ práce',
+        'Výskumný problém',
+        'Výskumné otázky / hypotézy',
         'Metodika',
         'Praktická / analytická časť',
         'Diskusia',
@@ -890,6 +970,8 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         'Abstrakt',
         'Úvod',
         'Cieľ',
+        'Výskumný problém',
+        'Výskumné otázky / hypotézy',
         'Metodika',
         'Praktická časť',
         'Záver',
@@ -899,12 +981,14 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('annotation', lang, true, 3),
         makeField('problem', lang, true, 4),
         makeField('goal', lang, true, 3),
+        makeField('researchQuestions', lang, false, 4),
+        makeField('hypotheses', lang, false, 4),
         makeField('methodology', lang, true, 4),
         makeField('practicalPart', lang, true, 4),
         makeField('sourcesRequirement', lang, false, 3),
       ],
       aiInstruction:
-        'Generate a bachelor thesis with theory, objective, methodology and practical part.',
+        'Generate a bachelor thesis with theory, objective, research problem, research questions or hypotheses, methodology and practical part.',
     };
   }
 
@@ -981,6 +1065,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       ],
       requiredSections: [
         'Výskumný problém',
+        'Výskumné otázky',
         'Hypotézy',
         'Metodológia',
         'Výsledky',
@@ -1033,6 +1118,8 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('businessProblem', lang, true, 4),
         makeField('businessGoal', lang, true, 4),
         makeField('methodology', lang, false, 4),
+        makeField('researchQuestions', lang, false, 4),
+        makeField('hypotheses', lang, false, 4),
         makeField('implementation', lang, true, 5),
         makeField('sourcesRequirement', lang, false, 3),
       ],
@@ -1062,6 +1149,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       ],
       requiredSections: [
         'Výskumný problém',
+        'Výskumné otázky',
         'Aplikovaná metodológia',
         'Empirické výsledky',
         'Prínos pre prax',
@@ -1071,6 +1159,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('businessProblem', lang, true, 4),
         makeField('problem', lang, true, 4),
         makeField('researchQuestions', lang, true, 4),
+        makeField('hypotheses', lang, false, 4),
         makeField('methodology', lang, true, 6),
         makeField('scientificContribution', lang, true, 5),
         makeField('implementation', lang, true, 5),
@@ -1107,6 +1196,9 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       fields: [
         makeField('annotation', lang, true, 3),
         makeField('problem', lang, true, 4),
+        makeField('goal', lang, false, 3),
+        makeField('researchQuestions', lang, false, 4),
+        makeField('hypotheses', lang, false, 4),
         makeField('methodology', lang, true, 4),
         makeField('practicalPart', lang, true, 4),
         makeField('reflection', lang, true, 4),
@@ -1131,6 +1223,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         'Teoretický rámec',
         'Analýza súčasného stavu',
         'Výskumný problém',
+        'Výskumné otázky / hypotézy',
         'Metodológia',
         'Výsledky',
         'Diskusia',
@@ -1141,6 +1234,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       requiredSections: [
         'Teoretický rámec',
         'Výskumný problém',
+        'Výskumné otázky / hypotézy',
         'Metodológia',
         'Výsledky',
         'Prínos',
@@ -1149,6 +1243,8 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('annotation', lang, true, 3),
         makeField('problem', lang, true, 5),
         makeField('goal', lang, true, 4),
+        makeField('researchQuestions', lang, false, 4),
+        makeField('hypotheses', lang, false, 4),
         makeField('methodology', lang, true, 5),
         makeField('scientificContribution', lang, true, 5),
         makeField('sourcesRequirement', lang, false, 3),
@@ -1162,27 +1258,40 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
     typeKey: type,
     label,
     description:
-      'Tento typ práce má stredne náročnú odbornú štruktúru s dôrazom na tému, cieľ, praktickú časť a záver.',
+      'Tento typ práce má stredne náročnú odbornú štruktúru s dôrazom na tému, cieľ, výskumné otázky, metodiku, praktickú časť a záver.',
     recommendedLength: '15 – 35 strán',
     citationOptions: commonCitation,
     structure: [
       'Úvod',
       'Teoretická časť',
+      'Cieľ práce',
+      'Výskumné otázky / hypotézy',
+      'Metodika',
       'Praktická časť',
       'Vyhodnotenie',
       'Záver',
       'Zdroje',
     ],
-    requiredSections: ['Úvod', 'Teória', 'Praktická časť', 'Záver'],
+    requiredSections: [
+      'Úvod',
+      'Teória',
+      'Cieľ',
+      'Výskumné otázky / hypotézy',
+      'Metodika',
+      'Praktická časť',
+      'Záver',
+    ],
     fields: [
       makeField('annotation', lang, false, 3),
+      makeField('problem', lang, false, 4),
       makeField('goal', lang, true, 3),
+      makeField('researchQuestions', lang, false, 4),
+      makeField('hypotheses', lang, false, 4),
       makeField('methodology', lang, false, 4),
       makeField('practicalPart', lang, true, 4),
       makeField('sourcesRequirement', lang, false, 3),
     ],
-    aiInstruction:
-      'Generate a medium-level academic or professional work.',
+    aiInstruction: 'Generate a medium-level academic or professional work.',
   };
 }
 
@@ -1191,13 +1300,17 @@ function normalizeInitialProfile(
 ): Profile {
   if (!initialProfile) return emptyProfile;
 
+  const raw = initialProfile as Record<string, unknown>;
+
   const language = isLang(initialProfile.language)
     ? initialProfile.language
     : emptyProfile.language;
 
   const workLanguage = isLang(initialProfile.workLanguage)
     ? initialProfile.workLanguage
-    : language;
+    : isLang(raw.work_language)
+      ? raw.work_language
+      : language;
 
   const type = normalizeWorkType(initialProfile.type);
 
@@ -1209,27 +1322,36 @@ function normalizeInitialProfile(
     ...emptyProfile,
     type,
     level,
-    title: String(initialProfile.title || ''),
-    topic: String(initialProfile.topic || ''),
-    field: String(initialProfile.field || ''),
-    supervisor: String(initialProfile.supervisor || ''),
+    title: readString(raw, ['title']),
+    topic: readString(raw, ['topic']),
+    field: readString(raw, ['field']),
+    supervisor: readString(raw, ['supervisor']),
     citation: normalizeCitation(initialProfile.citation),
     language,
     workLanguage,
-    annotation: String(initialProfile.annotation || ''),
-    goal: String(initialProfile.goal || ''),
-    problem: String(initialProfile.problem || ''),
-    methodology: String(initialProfile.methodology || ''),
-    hypotheses: String(initialProfile.hypotheses || ''),
-    researchQuestions: String(initialProfile.researchQuestions || ''),
-    practicalPart: String(initialProfile.practicalPart || ''),
-    scientificContribution: String(initialProfile.scientificContribution || ''),
-    businessProblem: String(initialProfile.businessProblem || ''),
-    businessGoal: String(initialProfile.businessGoal || ''),
-    implementation: String(initialProfile.implementation || ''),
-    caseStudy: String(initialProfile.caseStudy || ''),
-    reflection: String(initialProfile.reflection || ''),
-    sourcesRequirement: String(initialProfile.sourcesRequirement || ''),
+    annotation: readString(raw, ['annotation']),
+    goal: readString(raw, ['goal']),
+    problem: readString(raw, ['problem']),
+    methodology: readString(raw, ['methodology']),
+    hypotheses: readString(raw, ['hypotheses']),
+    researchQuestions: readString(raw, [
+      'researchQuestions',
+      'research_questions',
+    ]),
+    practicalPart: readString(raw, ['practicalPart', 'practical_part']),
+    scientificContribution: readString(raw, [
+      'scientificContribution',
+      'scientific_contribution',
+    ]),
+    businessProblem: readString(raw, ['businessProblem', 'business_problem']),
+    businessGoal: readString(raw, ['businessGoal', 'business_goal']),
+    implementation: readString(raw, ['implementation']),
+    caseStudy: readString(raw, ['caseStudy', 'case_study']),
+    reflection: readString(raw, ['reflection']),
+    sourcesRequirement: readString(raw, [
+      'sourcesRequirement',
+      'sources_requirement',
+    ]),
     keywordsList: normalizeKeywords(
       initialProfile.keywordsList,
       initialProfile.keywords
@@ -1264,6 +1386,19 @@ export default function ProfileForm({
   const schema = useMemo(
     () => getSchema(profile.type, profile.language),
     [profile.type, profile.language]
+  );
+
+  const visibleFields = useMemo(
+    () => addAlwaysVisibleFields(schema.fields, profile.language),
+    [schema.fields, profile.language]
+  );
+
+  const schemaForSave = useMemo<WorkSchema>(
+    () => ({
+      ...schema,
+      fields: visibleFields,
+    }),
+    [schema, visibleFields]
   );
 
   const update = <K extends keyof Profile>(key: K, value: Profile[K]) => {
@@ -1315,7 +1450,7 @@ export default function ProfileForm({
     return {
       ...profile,
       id,
-      schema,
+      schema: schemaForSave,
       interfaceLanguage: profile.language,
       workLanguage: profile.workLanguage,
       keywords: profile.keywordsList,
@@ -1611,8 +1746,12 @@ export default function ProfileForm({
                   />
                 </div>
 
+                <p className="mt-5 rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-3 text-sm font-semibold text-violet-100">
+                  {labels.requiredNote}
+                </p>
+
                 <div className="mt-6 grid gap-5">
-                  {schema.fields.map((field) => (
+                  {visibleFields.map((field) => (
                     <Textarea
                       key={field.key}
                       label={field.label}
@@ -1661,7 +1800,7 @@ export default function ProfileForm({
                     onClick={onClose}
                     className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-4 text-base font-black text-white transition hover:bg-white/10"
                   >
-                    Zavrieť
+                    {labels.close}
                   </button>
                 )}
               </div>
@@ -1882,13 +2021,7 @@ function Chip({
   );
 }
 
-function InfoBox({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+function InfoBox({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-[#111525] p-4">
       <p className="text-xs text-slate-500">{label}</p>

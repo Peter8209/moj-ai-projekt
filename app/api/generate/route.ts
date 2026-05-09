@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { getZedperaErrorMessage } from '@/lib/api-error-messages';
+import { GLOBAL_ACADEMIC_SYSTEM_PROMPT } from '@/lib/ai-system-prompt';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

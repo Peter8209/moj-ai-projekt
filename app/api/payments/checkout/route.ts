@@ -1,117 +1,442 @@
-import Stripe from "stripe";
-import { NextResponse } from "next/server";
+import Stripe from 'stripe';
+import { NextResponse } from 'next/server';
 
-export const runtime = "nodejs";
+export const runtime = 'nodejs';
 
 // ================= TYPES =================
-type Plan = "monthly" | "quarterly" | "yearly";
-type Addon = "supervisor" | "audit" | "defense" | "plagiarism";
 
-// ================= PRICE IDS =================
-const PLAN_PRICE_IDS: Record<Plan, string> = {
-  monthly: "price_monthly_xxx",
-  quarterly: "price_quarterly_xxx",
-  yearly: "price_yearly_xxx",
+type Plan =
+  | 'week-mini'
+  | 'week-student'
+  | 'week-pro'
+  | 'monthly'
+  | 'three-months'
+  | 'year-pro'
+  | 'year-max';
+
+type Addon =
+  | 'ai-supervisor'
+  | 'quality-audit'
+  | 'defense'
+  | 'originality'
+  | 'extra-50'
+  | 'extra-100'
+  | 'premium-model'
+  | 'express';
+
+type CheckoutBody = {
+  plan?: unknown;
+  addons?: unknown;
+  email?: unknown;
+  userId?: unknown;
 };
 
-const ADDON_PRICE_IDS: Partial<Record<Addon, string>> = {
-  supervisor: "price_supervisor_xxx",
-  audit: "price_audit_xxx",
-  defense: "price_defense_xxx",
-  plagiarism: "price_plagiarism_xxx",
+// ================= PRODUCT IDS =================
+// Používame tvoje Stripe Product ID hodnoty: prod_...
+// Preto v line_items používame price_data, nie price.
+
+const PLAN_PRODUCTS: Record<
+  Plan,
+  {
+    productId: string;
+    name: string;
+    unitAmount: number; // suma v centoch
+    type: 'one_time' | 'recurring';
+    interval?: 'month' | 'year';
+    intervalCount?: number;
+  }
+> = {
+  'week-mini': {
+    productId: 'prod_UU2NhFU3C6vjiG',
+    name: 'Zedpera – Týždeň MINI',
+    unitAmount: 1320,
+    type: 'one_time',
+  },
+
+  'week-student': {
+    productId: 'prod_UU2OFSpyz8BwAN',
+    name: 'Zedpera – Týždeň ŠTUDENT',
+    unitAmount: 2650,
+    type: 'one_time',
+  },
+
+  'week-pro': {
+    productId: 'prod_UU2P3e4CZ75Ium',
+    name: 'Zedpera – Týždeň PRO',
+    unitAmount: 3990,
+    type: 'one_time',
+  },
+
+  monthly: {
+    productId: 'prod_UU2QjQWpoJD9F5',
+    name: 'Zedpera – Mesačný START',
+    unitAmount: 5320,
+    type: 'recurring',
+    interval: 'month',
+    intervalCount: 1,
+  },
+
+  'three-months': {
+    productId: 'prod_UU2RCroeVJaxdr',
+    name: 'Zedpera – 3 mesiace ŠTUDENT',
+    unitAmount: 9330,
+    type: 'one_time',
+  },
+
+  'year-pro': {
+    productId: 'prod_UU2ShggR0Rxi7B',
+    name: 'Zedpera – Ročný PRO',
+    unitAmount: 32000,
+    type: 'recurring',
+    interval: 'year',
+    intervalCount: 1,
+  },
+
+  'year-max': {
+    productId: 'prod_UU2TkpMburoaBr',
+    name: 'Zedpera – Ročný MAX',
+    unitAmount: 53200,
+    type: 'recurring',
+    interval: 'year',
+    intervalCount: 1,
+  },
 };
+
+const ADDON_PRODUCTS: Record<
+  Addon,
+  {
+    productId: string;
+    name: string;
+    unitAmount: number; // suma v centoch
+  }
+> = {
+  'ai-supervisor': {
+    productId: 'prod_UU2UFmP0ITPuCp',
+    name: 'Zedpera – AI vedúci práce',
+    unitAmount: 3990,
+  },
+
+  'quality-audit': {
+    productId: 'prod_UU2UDuYjyZWjY1',
+    name: 'Zedpera – Kontrola kvality práce',
+    unitAmount: 3990,
+  },
+
+  defense: {
+    productId: 'prod_UU2VySwbjJzt7b',
+    name: 'Zedpera – Obhajoba + prezentácia',
+    unitAmount: 5320,
+  },
+
+  originality: {
+    productId: 'prod_UU2Wlkmh3tG6dE',
+    name: 'Zedpera – Kontrola originality',
+    unitAmount: 1600,
+  },
+
+  'extra-50': {
+    productId: 'prod_UU2WLHgd5eDI6G',
+    name: 'Zedpera – Extra 50 strán',
+    unitAmount: 1320,
+  },
+
+  'extra-100': {
+    productId: 'prod_UU2XcozbWEOsOd',
+    name: 'Zedpera – Extra 100 strán',
+    unitAmount: 2650,
+  },
+
+  'premium-model': {
+    productId: 'prod_UU2XQFomb87mIO',
+    name: 'Zedpera – Prémiový model Claude/Grok',
+    unitAmount: 1320,
+  },
+
+  express: {
+    productId: 'prod_UU2Y0ocIPC7obx',
+    name: 'Zedpera – Expresné spracovanie',
+    unitAmount: 2650,
+  },
+};
+
+// ================= HELPERS =================
+
+function isPlan(value: unknown): value is Plan {
+  return typeof value === 'string' && value in PLAN_PRODUCTS;
+}
+
+function isAddon(value: unknown): value is Addon {
+  return typeof value === 'string' && value in ADDON_PRODUCTS;
+}
+
+function safeEmail(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.trim().toLowerCase();
+}
+
+function safeUserId(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.trim();
+}
+
+function getBaseUrl(): string {
+  const baseUrl =
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    'http://localhost:3000';
+
+  return baseUrl.replace(/\/$/, '');
+}
+
+function getStripe(): Stripe {
+  const stripeSecret = process.env.STRIPE_SECRET_KEY;
+
+  if (!stripeSecret) {
+    throw new Error('Missing STRIPE_SECRET_KEY');
+  }
+
+  return new Stripe(stripeSecret);
+}
+
+function createPlanLineItem(
+  plan: Plan
+): Stripe.Checkout.SessionCreateParams.LineItem {
+  const planData = PLAN_PRODUCTS[plan];
+
+  if (planData.type === 'recurring') {
+    return {
+      quantity: 1,
+      price_data: {
+        currency: 'eur',
+        product: planData.productId,
+        unit_amount: planData.unitAmount,
+        recurring: {
+          interval: planData.interval || 'month',
+          interval_count: planData.intervalCount || 1,
+        },
+      },
+    };
+  }
+
+  return {
+    quantity: 1,
+    price_data: {
+      currency: 'eur',
+      product: planData.productId,
+      unit_amount: planData.unitAmount,
+    },
+  };
+}
+
+function createAddonLineItem(
+  addon: Addon
+): Stripe.Checkout.SessionCreateParams.LineItem {
+  const addonData = ADDON_PRODUCTS[addon];
+
+  return {
+    quantity: 1,
+    price_data: {
+      currency: 'eur',
+      product: addonData.productId,
+      unit_amount: addonData.unitAmount,
+    },
+  };
+}
 
 // ================= ROUTE =================
+
 export async function POST(req: Request) {
   try {
-    const stripeSecret = process.env.STRIPE_SECRET_KEY;
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+    const stripe = getStripe();
+    const baseUrl = getBaseUrl();
 
-    // ✅ VALIDÁCIA AŽ TU
-    if (!stripeSecret || !baseUrl) {
+    const body = (await req.json()) as CheckoutBody;
+
+    const planInput = body.plan;
+    const addonsInput = Array.isArray(body.addons) ? body.addons : [];
+    const email = safeEmail(body.email);
+    const userId = safeUserId(body.userId);
+
+    // ================= VALIDATION: PLAN =================
+
+    if (!isPlan(planInput)) {
       return NextResponse.json(
-        { error: "SERVER_CONFIG_ERROR" },
-        { status: 500 }
+        {
+          ok: false,
+          error: 'INVALID_PLAN',
+          message: 'Neplatný balík. Skontroluj plan ID na frontende.',
+          received: planInput,
+          allowedPlans: Object.keys(PLAN_PRODUCTS),
+        },
+        { status: 400 }
       );
     }
 
-    // 🔥 Stripe init AŽ TU (kľúčový fix)
-    const stripe = new Stripe(stripeSecret);
+    const plan: Plan = planInput;
+    const selectedPlan = PLAN_PRODUCTS[plan];
 
-    const body = await req.json();
-
-    const plan = body.plan as Plan;
-    const addons = Array.isArray(body.addons) ? (body.addons as Addon[]) : [];
-    const email = body.email as string;
-
-    if (!plan || !(plan in PLAN_PRICE_IDS)) {
-      return NextResponse.json({ error: "INVALID_PLAN" }, { status: 400 });
-    }
+    // ================= VALIDATION: EMAIL =================
 
     if (!email) {
-      return NextResponse.json({ error: "MISSING_EMAIL" }, { status: 400 });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'MISSING_EMAIL',
+          message: 'Pre pokračovanie na platbu je potrebný e-mail.',
+        },
+        { status: 400 }
+      );
     }
 
-    // ================= CUSTOMER =================
-    let customerId: string;
+    // ================= VALIDATION: ADDONS =================
 
-    const existing = await stripe.customers.list({
+    const validAddons = addonsInput.filter(isAddon);
+    const invalidAddons = addonsInput.filter((addon) => !isAddon(addon));
+
+    if (invalidAddons.length > 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'INVALID_ADDON',
+          message: 'Niektorý doplnok nie je platný.',
+          invalidAddons,
+          allowedAddons: Object.keys(ADDON_PRODUCTS),
+        },
+        { status: 400 }
+      );
+    }
+
+    // ================= MODE =================
+    // Ak je hlavný plán recurring, Checkout bude subscription.
+    // Ak je hlavný plán one_time, Checkout bude jednorazová platba.
+
+    const mode: Stripe.Checkout.SessionCreateParams.Mode =
+      selectedPlan.type === 'recurring' ? 'subscription' : 'payment';
+
+    // ================= CUSTOMER =================
+
+    const existingCustomers = await stripe.customers.list({
       email,
       limit: 1,
     });
 
-    if (existing.data.length > 0) {
-      customerId = existing.data[0].id;
+    let customerId: string;
+
+    if (existingCustomers.data.length > 0) {
+      customerId = existingCustomers.data[0].id;
     } else {
-      const created = await stripe.customers.create({ email });
-      customerId = created.id;
+      const createdCustomer = await stripe.customers.create({
+        email,
+        metadata: {
+          userId,
+          source: 'zedpera',
+        },
+      });
+
+      customerId = createdCustomer.id;
     }
 
     // ================= LINE ITEMS =================
-    const line_items = [
-      {
-        price: PLAN_PRICE_IDS[plan],
-        quantity: 1,
-      },
-      ...addons
-        .map((addon) => ADDON_PRICE_IDS[addon])
-        .filter(Boolean)
-        .map((priceId) => ({
-          price: priceId as string,
-          quantity: 1,
-        })),
+    // Pri subscription mode:
+    // - hlavný plán je recurring
+    // - doplnky sú jednorazové a budú účtované len na prvej faktúre
+
+    const line_items: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+      createPlanLineItem(plan),
+      ...validAddons.map((addon) => createAddonLineItem(addon)),
     ];
 
-    // ================= SESSION =================
-    const session = await stripe.checkout.sessions.create(
-      {
-        mode: "subscription",
-        customer: customerId,
-        line_items,
-        success_url: `${baseUrl}/dashboard?success=1`,
-        cancel_url: `${baseUrl}/pricing?cancel=1`,
-        metadata: {
-          plan,
-          addons: JSON.stringify(addons),
-        },
+    // ================= METADATA =================
+
+    const addonNames = validAddons.map((addon) => ADDON_PRODUCTS[addon].name);
+
+    const metadata: Stripe.MetadataParam = {
+      userId,
+      email,
+      plan,
+      planName: selectedPlan.name,
+      addons: JSON.stringify(validAddons),
+      addonNames: JSON.stringify(addonNames),
+      source: 'zedpera',
+    };
+
+    const sessionParams: Stripe.Checkout.SessionCreateParams = {
+      mode,
+      customer: customerId,
+      line_items,
+
+      success_url: `${baseUrl}/dashboard?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${baseUrl}/pricing?payment=cancel`,
+
+      metadata,
+
+      allow_promotion_codes: true,
+
+      billing_address_collection: 'auto',
+
+      automatic_tax: {
+        enabled: false,
       },
-      {
-        idempotencyKey: `checkout_${email}_${Date.now()}`,
-      }
-    );
+    };
+
+    if (mode === 'subscription') {
+      sessionParams.subscription_data = {
+        metadata,
+      };
+    } else {
+      sessionParams.payment_intent_data = {
+        metadata,
+      };
+    }
+
+    const idempotencyKey = [
+      'zedpera_checkout',
+      email,
+      plan,
+      validAddons.join('_') || 'no_addons',
+      Math.floor(Date.now() / 30_000).toString(),
+    ]
+      .join('_')
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .slice(0, 255);
+
+    const session = await stripe.checkout.sessions.create(sessionParams, {
+      idempotencyKey,
+    });
+
+    if (!session.url) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'CHECKOUT_SESSION_URL_MISSING',
+          message: 'Stripe nevygeneroval checkout URL.',
+          sessionId: session.id,
+        },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       ok: true,
       url: session.url,
+      sessionId: session.id,
+      mode,
+      plan,
+      planName: selectedPlan.name,
+      addons: validAddons,
+      addonNames,
+      customerId,
     });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'unknown';
 
-  } catch (err: any) {
-    console.error("CHECKOUT ERROR:", err);
+    console.error('CHECKOUT ERROR:', err);
 
     return NextResponse.json(
       {
-        error: "CHECKOUT_FAILED",
-        detail: err?.message || "unknown",
+        ok: false,
+        error: 'CHECKOUT_FAILED',
+        detail: message,
       },
       { status: 500 }
     );

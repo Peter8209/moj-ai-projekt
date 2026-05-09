@@ -4,7 +4,14 @@ import { useMemo, useState } from 'react';
 import { ExternalLink, CheckCircle2, Crown, Sparkles } from 'lucide-react';
 
 type PackagePlan = {
-  id: string;
+  id:
+    | 'week-mini'
+    | 'week-student'
+    | 'week-pro'
+    | 'monthly'
+    | 'three-months'
+    | 'year-pro'
+    | 'year-max';
   name: string;
   price: string;
   oldPrice?: string;
@@ -20,7 +27,15 @@ type PackagePlan = {
 };
 
 type AddonService = {
-  id: string;
+  id:
+    | 'ai-supervisor'
+    | 'quality-audit'
+    | 'defense'
+    | 'originality'
+    | 'extra-50'
+    | 'extra-100'
+    | 'premium-model'
+    | 'express';
   name: string;
   price: string;
   oldPrice?: string;
@@ -239,14 +254,20 @@ const addonServices: AddonService[] = [
 ];
 
 export default function PackagesPage() {
-  const [selectedPlan, setSelectedPlan] = useState('monthly');
-  const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
+  const [selectedPlan, setSelectedPlan] = useState<PackagePlan['id']>('monthly');
+  const [selectedAddons, setSelectedAddons] = useState<AddonService['id'][]>([]);
+  const [loadingPayment, setLoadingPayment] = useState(false);
+  const [paymentError, setPaymentError] = useState('');
 
   const selectedPlanData = useMemo(() => {
     return packagePlans.find((plan) => plan.id === selectedPlan) || packagePlans[0];
   }, [selectedPlan]);
 
-  const toggleAddon = (addonId: string) => {
+  const selectedAddonData = useMemo(() => {
+    return addonServices.filter((addon) => selectedAddons.includes(addon.id));
+  }, [selectedAddons]);
+
+  const toggleAddon = (addonId: AddonService['id']) => {
     setSelectedAddons((current) =>
       current.includes(addonId)
         ? current.filter((id) => id !== addonId)
@@ -254,18 +275,68 @@ export default function PackagesPage() {
     );
   };
 
-  const createPaymentUrl = () => {
-    const params = new URLSearchParams();
+  const handleCheckout = async () => {
+    try {
+      setLoadingPayment(true);
+      setPaymentError('');
 
-    params.set('plan', selectedPlanData.id);
-    params.set('planName', selectedPlanData.name);
-    params.set('price', selectedPlanData.price);
+      let email = '';
 
-    if (selectedAddons.length > 0) {
-      params.set('addons', selectedAddons.join(','));
+      if (typeof window !== 'undefined') {
+        email =
+          window.localStorage.getItem('zedpera_email') ||
+          window.localStorage.getItem('user_email') ||
+          '';
+      }
+
+      if (!email && typeof window !== 'undefined') {
+        const enteredEmail = window.prompt(
+          'Zadajte e-mail, na ktorý bude naviazaná platba:',
+        );
+
+        email = enteredEmail?.trim() || '';
+      }
+
+      if (!email) {
+        setPaymentError('Pre pokračovanie na platbu je potrebný e-mail.');
+        return;
+      }
+
+      const response = await fetch('/api/payments/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          plan: selectedPlanData.id,
+          addons: selectedAddons,
+          email,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok || !data.url) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            data.error ||
+            'Platbu sa nepodarilo spustiť.',
+        );
+      }
+
+      window.location.href = data.url;
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Platbu sa nepodarilo spustiť.';
+
+      console.error('PAYMENT ERROR:', error);
+      setPaymentError(message);
+    } finally {
+      setLoadingPayment(false);
     }
-
-    return `/api/checkout?${params.toString()}`;
   };
 
   return (
@@ -289,7 +360,10 @@ export default function PackagesPage() {
               <button
                 key={plan.id}
                 type="button"
-                onClick={() => setSelectedPlan(plan.id)}
+                onClick={() => {
+                  setSelectedPlan(plan.id);
+                  setPaymentError('');
+                }}
                 className={`relative flex min-h-[360px] flex-col rounded-3xl border p-6 text-left transition ${
                   selected
                     ? 'border-purple-400 bg-purple-600/15 shadow-2xl shadow-purple-950/40'
@@ -380,7 +454,10 @@ export default function PackagesPage() {
               <button
                 key={addon.id}
                 type="button"
-                onClick={() => toggleAddon(addon.id)}
+                onClick={() => {
+                  toggleAddon(addon.id);
+                  setPaymentError('');
+                }}
                 className={`flex items-center justify-between gap-4 rounded-2xl border p-5 text-left transition ${
                   selected
                     ? 'border-purple-400 bg-purple-600/20'
@@ -411,12 +488,50 @@ export default function PackagesPage() {
           })}
         </div>
 
-        <a
-          href={createPaymentUrl()}
-          className="mt-6 flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 text-center text-lg font-black text-white transition hover:opacity-90"
+        <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="text-sm font-bold uppercase tracking-wide text-purple-300">
+                Vybraný balík
+              </div>
+
+              <div className="mt-1 text-2xl font-black text-white">
+                {selectedPlanData.name} – {selectedPlanData.price}
+              </div>
+
+              <div className="mt-1 text-sm text-gray-400">
+                {selectedPlanData.period} · {selectedPlanData.pages} ·{' '}
+                {selectedPlanData.works}
+              </div>
+            </div>
+
+            {selectedAddonData.length > 0 && (
+              <div className="max-w-xl text-sm text-gray-300">
+                <div className="font-bold text-white">Doplnky:</div>
+                <div className="mt-1">
+                  {selectedAddonData
+                    .map((addon) => `${addon.name} (${addon.price})`)
+                    .join(', ')}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {paymentError && (
+          <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold text-red-200">
+            {paymentError}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={handleCheckout}
+          disabled={loadingPayment}
+          className="mt-6 flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 text-center text-lg font-black text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Pokračovať na platbu
-        </a>
+          {loadingPayment ? 'Presmerovávam na Stripe...' : 'Pokračovať na platbu'}
+        </button>
       </section>
 
       <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
@@ -430,7 +545,8 @@ export default function PackagesPage() {
             </div>
 
             <p className="mt-2 text-gray-400">
-              Potrebuješ pomoc od reálneho experta? Klikni podľa krajiny a otvorí sa webová stránka.
+              Potrebuješ pomoc od reálneho experta? Klikni podľa krajiny a
+              otvorí sa webová stránka.
             </p>
 
             <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">

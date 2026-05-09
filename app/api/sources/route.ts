@@ -1,5 +1,6 @@
 import { openai } from '@ai-sdk/openai';
 import { generateText } from 'ai';
+import { getZedperaErrorMessage } from '@/lib/api-error-messages';
 
 // =====================================================
 // CONFIG

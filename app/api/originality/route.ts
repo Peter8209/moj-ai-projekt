@@ -5,6 +5,8 @@ import { google } from '@ai-sdk/google';
 import { anthropic } from '@ai-sdk/anthropic';
 import { mistral } from '@ai-sdk/mistral';
 import { createAdminClient } from '@/lib/supabase/server';
+import { GLOBAL_ACADEMIC_SYSTEM_PROMPT } from '@/lib/ai-system-prompt';
+import { getZedperaErrorMessage } from '@/lib/api-error-messages';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

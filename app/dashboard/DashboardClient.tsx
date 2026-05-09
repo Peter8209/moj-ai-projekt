@@ -464,44 +464,10 @@ function DashboardPage() {
     window.location.href = '/';
   };
 
-    return (
-    <div className="min-h-screen bg-[#020617] text-white">
-      <div className="flex min-h-screen">
-        <Sidebar
-          view={view}
-          setView={setView}
-          mode={mode}
-          setMode={setMode}
-          user={user}
-          subActive={subActive}
-          openForm={openNewProfileForm}
-          logout={logout}
-        />
-
-        {sidebarOpen && (
-          <MobileSidebar
-            view={view}
-            setView={(nextView) => {
-              setView(nextView);
-              setSidebarOpen(false);
-            }}
-            mode={mode}
-            setMode={(nextMode) => {
-              setMode(nextMode);
-              setSidebarOpen(false);
-            }}
-            user={user}
-            subActive={subActive}
-            openForm={() => {
-              openNewProfileForm();
-              setSidebarOpen(false);
-            }}
-            logout={logout}
-            close={() => setSidebarOpen(false)}
-          />
-        )}
-
-        <main className="flex min-w-0 flex-1 flex-col">
+return (
+  <div className="h-screen overflow-hidden bg-[#020617] text-white">
+    <div className="flex h-screen overflow-hidden">
+  <main className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
           <Header
             view={view}
             mode={mode}
@@ -511,7 +477,7 @@ function DashboardPage() {
             openMobileMenu={() => setSidebarOpen(true)}
           />
 
-          <div className="flex-1 overflow-y-auto p-5 md:p-8">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-5 md:p-8">
             {view === 'dashboard' && (
               <Dashboard
                 setView={setView}
@@ -757,8 +723,8 @@ function Sidebar({
   openForm: () => void;
   logout: () => void;
 }) {
-  return (
-    <aside className="hidden h-screen w-80 shrink-0 border-r border-white/10 bg-[#050816] lg:block">
+ return (
+  <aside className="hidden h-screen w-80 shrink-0 overflow-hidden border-r border-white/10 bg-[#050816] lg:block">
       <SidebarContent
         view={view}
         setView={setView}
@@ -931,8 +897,8 @@ function SidebarContent({
     { view: 'admin-plans', label: 'Správa balíčkov', icon: Crown },
   ];
 
-  return (
-    <div className="flex h-full flex-col p-5">
+ return (
+  <div className="flex h-full flex-col overflow-hidden p-5">
       <div className="mb-6 hidden items-center gap-3 lg:flex">
         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-600 to-fuchsia-600">
           <GraduationCap size={26} />
@@ -957,7 +923,7 @@ function SidebarContent({
         Nová práca
       </button>
 
-      <nav className="mt-6 space-y-2">
+     <nav className="mt-6 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {mainItems.map((item) => (
           <SidebarButton
             key={item.key}
@@ -989,7 +955,7 @@ function SidebarContent({
         </div>
       )}
 
-      <div className="mt-auto space-y-3 pt-6">
+      <div className="shrink-0 space-y-3 pt-4">
         <Link
           href="/"
           className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/20"
@@ -2061,11 +2027,9 @@ function Chat({
 
   const CurrentIcon = current.icon;
 
-  return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <ModuleTabs mode={mode} setMode={setMode} />
-
-      <div className="rounded-3xl border border-white/10 bg-[#050816] p-6">
+return (
+  <div className="mx-auto max-w-7xl space-y-6">
+    <div className="rounded-3xl border border-white/10 bg-[#050816] p-6">
         <div className="mb-6 flex items-center gap-3">
           <CurrentIcon className="text-purple-400" size={30} />
 

@@ -31,21 +31,39 @@ type CheckoutBody = {
   userId?: unknown;
 };
 
+type ProductPlanConfig = {
+  productId: string;
+  name: string;
+  unitAmount: number;
+  type: 'one_time' | 'recurring';
+  interval?: 'month' | 'year';
+  intervalCount?: number;
+};
+
+type ProductAddonConfig = {
+  productId: string;
+  name: string;
+  unitAmount: number;
+};
+
+type CheckoutLineItem = {
+  quantity: number;
+  price_data: {
+    currency: string;
+    product: string;
+    unit_amount: number;
+    recurring?: {
+      interval: 'month' | 'year';
+      interval_count: number;
+    };
+  };
+};
+
 // ================= PRODUCT IDS =================
 // Používame tvoje Stripe Product ID hodnoty: prod_...
 // Preto v line_items používame price_data, nie price.
 
-const PLAN_PRODUCTS: Record<
-  Plan,
-  {
-    productId: string;
-    name: string;
-    unitAmount: number; // suma v centoch
-    type: 'one_time' | 'recurring';
-    interval?: 'month' | 'year';
-    intervalCount?: number;
-  }
-> = {
+const PLAN_PRODUCTS: Record<Plan, ProductPlanConfig> = {
   'week-mini': {
     productId: 'prod_UU2NhFU3C6vjiG',
     name: 'Zedpera – Týždeň MINI',
@@ -102,14 +120,7 @@ const PLAN_PRODUCTS: Record<
   },
 };
 
-const ADDON_PRODUCTS: Record<
-  Addon,
-  {
-    productId: string;
-    name: string;
-    unitAmount: number; // suma v centoch
-  }
-> = {
+const ADDON_PRODUCTS: Record<Addon, ProductAddonConfig> = {
   'ai-supervisor': {
     productId: 'prod_UU2UFmP0ITPuCp',
     name: 'Zedpera – AI vedúci práce',
@@ -198,9 +209,7 @@ function getStripe(): Stripe {
   return new Stripe(stripeSecret);
 }
 
-function createPlanLineItem(
-  plan: Plan
-): Stripe.Checkout.SessionCreateParams.LineItem {
+function createPlanLineItem(plan: Plan): CheckoutLineItem {
   const planData = PLAN_PRODUCTS[plan];
 
   if (planData.type === 'recurring') {
@@ -228,9 +237,7 @@ function createPlanLineItem(
   };
 }
 
-function createAddonLineItem(
-  addon: Addon
-): Stripe.Checkout.SessionCreateParams.LineItem {
+function createAddonLineItem(addon: Addon): CheckoutLineItem {
   const addonData = ADDON_PRODUCTS[addon];
 
   return {
@@ -268,7 +275,7 @@ export async function POST(req: Request) {
           received: planInput,
           allowedPlans: Object.keys(PLAN_PRODUCTS),
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -284,7 +291,7 @@ export async function POST(req: Request) {
           error: 'MISSING_EMAIL',
           message: 'Pre pokračovanie na platbu je potrebný e-mail.',
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -302,15 +309,13 @@ export async function POST(req: Request) {
           invalidAddons,
           allowedAddons: Object.keys(ADDON_PRODUCTS),
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     // ================= MODE =================
-    // Ak je hlavný plán recurring, Checkout bude subscription.
-    // Ak je hlavný plán one_time, Checkout bude jednorazová platba.
 
-    const mode: Stripe.Checkout.SessionCreateParams.Mode =
+    const mode: 'payment' | 'subscription' =
       selectedPlan.type === 'recurring' ? 'subscription' : 'payment';
 
     // ================= CUSTOMER =================
@@ -337,11 +342,8 @@ export async function POST(req: Request) {
     }
 
     // ================= LINE ITEMS =================
-    // Pri subscription mode:
-    // - hlavný plán je recurring
-    // - doplnky sú jednorazové a budú účtované len na prvej faktúre
 
-    const line_items: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+    const lineItems: CheckoutLineItem[] = [
       createPlanLineItem(plan),
       ...validAddons.map((addon) => createAddonLineItem(addon)),
     ];
@@ -350,7 +352,7 @@ export async function POST(req: Request) {
 
     const addonNames = validAddons.map((addon) => ADDON_PRODUCTS[addon].name);
 
-    const metadata: Stripe.MetadataParam = {
+    const metadata: Record<string, string> = {
       userId,
       email,
       plan,
@@ -360,10 +362,12 @@ export async function POST(req: Request) {
       source: 'zedpera',
     };
 
-    const sessionParams: Stripe.Checkout.SessionCreateParams = {
+    // Používame jednoduchý objekt bez Stripe.Checkout.SessionCreateParams typu,
+    // lebo tvoja verzia stripe balíka tento typ neexportuje.
+    const sessionParams: any = {
       mode,
       customer: customerId,
-      line_items,
+      line_items: lineItems,
 
       success_url: `${baseUrl}/dashboard?payment=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/pricing?payment=cancel`,
@@ -412,7 +416,7 @@ export async function POST(req: Request) {
           message: 'Stripe nevygeneroval checkout URL.',
           sessionId: session.id,
         },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -438,7 +442,7 @@ export async function POST(req: Request) {
         error: 'CHECKOUT_FAILED',
         detail: message,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

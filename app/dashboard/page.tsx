@@ -4,12 +4,11 @@ import {
   Suspense,
   useEffect,
   useMemo,
-  useRef,
   useState,
-  type ComponentType,
   type ReactNode,
 } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import type { LucideIcon } from 'lucide-react';
 import {
   BarChart3,
@@ -25,24 +24,20 @@ import {
   Home,
   Languages,
   Library,
+  LogOut,
   Mail,
   Menu,
   MessageSquare,
-  Paperclip,
   Plus,
   Presentation,
   Search,
   Settings,
   ShieldCheck,
   Sparkles,
-  Trash2,
-  UploadCloud,
   User,
   Video,
   X,
 } from 'lucide-react';
-
-import ProfileFormOriginal from '@/components/ProfileForm';
 
 // =====================================================
 // TYPES
@@ -55,7 +50,20 @@ type View =
   | 'history'
   | 'settings'
   | 'packages'
-  | 'video';
+  | 'video'
+  | 'admin-users'
+  | 'admin-payments'
+  | 'admin-plans';
+
+type UserRole = 'admin' | 'user' | 'guest';
+
+type DashboardUser = {
+  name: string;
+  email: string;
+  role: UserRole;
+  plan: string;
+  isLoggedIn: boolean;
+};
 
 const featureCards = [
   { mode: 'write', title: 'AI písanie práce', icon: FileText },
@@ -70,57 +78,61 @@ const featureCards = [
   { mode: 'plagiarism', title: 'Originalita práce', icon: ShieldCheck },
 ] as const;
 
-const SUPPORTED_FILE_EXTENSIONS = [
-  '.pdf',
-  '.doc',
-  '.docx',
-  '.txt',
-  '.rtf',
-  '.odt',
-  '.md',
-  '.jpg',
-  '.jpeg',
-  '.png',
-  '.webp',
-  '.gif',
-  '.xls',
-  '.xlsx',
-  '.csv',
-  '.ppt',
-  '.pptx',
-];
+type Mode = (typeof featureCards)[number]['mode'];
 
-const FILE_INPUT_ACCEPT = SUPPORTED_FILE_EXTENSIONS.join(',');
-
-const MAX_UPLOAD_FILES = 10;
-const MAX_UPLOAD_FILE_SIZE_MB = 25;
-const MAX_UPLOAD_FILE_SIZE_BYTES = MAX_UPLOAD_FILE_SIZE_MB * 1024 * 1024;
-
-type AttachedFile = {
-  id: string;
-  file: File;
-  name: string;
-  size: number;
-  type: string;
-  extension: string;
+type SavedTextOutput = {
+  id?: string;
+  title?: string;
+  text?: string;
+  content?: string;
+  output?: string;
+  score?: number;
+  aiScore?: number;
+  createdAt?: string;
+  savedAt?: string;
 };
 
-function getFileExtension(fileName: string) {
-  const index = fileName.lastIndexOf('.');
-  if (index === -1) return '';
-  return fileName.slice(index).toLowerCase();
-}
+type SavedProfile = {
+  id: string;
 
-function isSupportedFile(file: File) {
-  const extension = getFileExtension(file.name);
-  return SUPPORTED_FILE_EXTENSIONS.includes(extension);
-}
+  type?: string;
+  level?: string;
+  title?: string;
+  topic?: string;
+  field?: string;
+  supervisor?: string;
+  citation?: string;
+  language?: string;
+  workLanguage?: string;
 
-function formatFileSize(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
+  annotation?: string;
+  goal?: string;
+  problem?: string;
+  methodology?: string;
+  hypotheses?: string;
+  researchQuestions?: string;
+  practicalPart?: string;
+  scientificContribution?: string;
+  sourcesRequirement?: string;
+
+  keywords?: string[];
+  keywordsList?: string[];
+
+  savedAt?: string;
+  created_at?: string;
+  updated_at?: string;
+
+  work_language?: string;
+  research_questions?: string;
+  practical_part?: string;
+  scientific_contribution?: string;
+  sources_requirement?: string;
+  keywords_list?: string[];
+};
+
+// =====================================================
+// LOCAL STORAGE HELPERS
+// =====================================================
 
 function safeParseLocalStorageArray<T>(key: string): T[] {
   if (typeof window === 'undefined') return [];
@@ -158,114 +170,6 @@ function getAverageAiScore(outputs: SavedTextOutput[]) {
   return Math.round(Math.max(0, Math.min(100, average)));
 }
 
-function getFileTypeLabel(extension: string) {
-  if (extension === '.pdf') return 'PDF';
-
-  if (['.doc', '.docx', '.odt', '.rtf', '.txt', '.md'].includes(extension)) {
-    return 'Dokument';
-  }
-
-  if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
-    return 'Obrázok';
-  }
-
-  if (['.xls', '.xlsx', '.csv'].includes(extension)) {
-    return 'Tabuľka';
-  }
-
-  if (['.ppt', '.pptx'].includes(extension)) {
-    return 'Prezentácia';
-  }
-
-  return 'Súbor';
-}
-
-type Mode = (typeof featureCards)[number]['mode'];
-
-type SavedTextOutput = {
-  id?: string;
-  title?: string;
-  text?: string;
-  content?: string;
-  output?: string;
-  score?: number;
-  aiScore?: number;
-  createdAt?: string;
-  savedAt?: string;
-};
-
-type SavedProfile = {
-  id: string;
-
-  type?: string;
-  level?: string;
-  title?: string;
-  topic?: string;
-  field?: string;
-  supervisor?: string;
-  citation?: string;
-  language?: string;
-  workLanguage?: string;
-
-  annotation?: string;
-  goal?: string;
-  problem?: string;
-  methodology?: string;
-  hypotheses?: string;
-  researchQuestions?: string;
-  practicalPart?: string;
-  scientificContribution?: string;
-
-  businessProblem?: string;
-  businessGoal?: string;
-  implementation?: string;
-  caseStudy?: string;
-  reflection?: string;
-  sourcesRequirement?: string;
-
-  keywords?: string[];
-  keywordsList?: string[];
-
-  savedAt?: string;
-  created_at?: string;
-  updated_at?: string;
-
-  schema?: {
-    typeKey?: string;
-    label?: string;
-    description?: string;
-    recommendedLength?: string;
-    citationOptions?: string[];
-    structure?: string[];
-    requiredSections?: string[];
-    fields?: {
-      key: string;
-      label: string;
-      placeholder?: string;
-      required?: boolean;
-      rows?: number;
-    }[];
-    aiInstruction?: string;
-  };
-
-  full_profile?: any;
-
-  work_language?: string;
-  research_questions?: string;
-  practical_part?: string;
-  scientific_contribution?: string;
-  business_problem?: string;
-  business_goal?: string;
-  case_study?: string;
-  sources_requirement?: string;
-  keywords_list?: string[];
-};
-
-const ProfileForm = ProfileFormOriginal as unknown as ComponentType<{
-  onSave?: (data: SavedProfile) => void;
-  initialProfile?: SavedProfile | null;
-}>;
-
 // =====================================================
 // PAGE WRAPPER
 // =====================================================
@@ -275,7 +179,7 @@ export default function Page() {
     <Suspense
       fallback={
         <div className="min-h-screen bg-[#020617] p-6 text-white">
-          Načítavam...
+          Načítavam dashboard...
         </div>
       }
     >
@@ -293,6 +197,15 @@ function DashboardPage() {
 
   const [view, setView] = useState<View>('dashboard');
   const [mode, setMode] = useState<Mode>('write');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const [user, setUser] = useState<DashboardUser>({
+    name: '',
+    email: '',
+    role: 'guest',
+    plan: '',
+    isLoggedIn: false,
+  });
 
   const [subActive, setSubActive] = useState(false);
   const [showProfileForm, setShowProfileForm] = useState(false);
@@ -304,22 +217,101 @@ function DashboardPage() {
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   // =====================================================
-  // LOAD SUBSCRIPTION STATUS
+  // AUTH CHECK
   // =====================================================
 
   useEffect(() => {
-    if (typeof document === 'undefined') return;
+    if (typeof window === 'undefined') return;
 
-    if (document.cookie.includes('sub_active=1')) {
+    const isLoggedIn = localStorage.getItem('zedpera_is_logged_in');
+    const email = localStorage.getItem('zedpera_user_email') || '';
+    const name = localStorage.getItem('zedpera_user_name') || '';
+    const role =
+      (localStorage.getItem('zedpera_user_role') as UserRole) || 'guest';
+
+    const plan =
+      localStorage.getItem('zedpera_user_plan') ||
+      localStorage.getItem('zedpera_selected_plan') ||
+      'free';
+
+    const adminFree = localStorage.getItem('zedpera_admin_free');
+
+    if (searchParams.get('mode') === 'admin-free') {
+      localStorage.setItem('zedpera_is_logged_in', 'true');
+      localStorage.setItem('zedpera_user_role', 'admin');
+      localStorage.setItem('zedpera_user_plan', 'admin-free');
+      localStorage.setItem('zedpera_admin_free', 'true');
+
+      setUser({
+        name: name || 'Admin',
+        email: email || 'admin@zedpera.com',
+        role: 'admin',
+        plan: 'admin-free',
+        isLoggedIn: true,
+      });
+
       setSubActive(true);
+      return;
     }
-  }, []);
+
+    if (isLoggedIn !== 'true') {
+      window.location.href = '/login';
+      return;
+    }
+
+    const finalRole: UserRole =
+      role === 'admin' || adminFree === 'true' ? 'admin' : 'user';
+
+    const finalPlan =
+      finalRole === 'admin'
+        ? 'admin-free'
+        : searchParams.get('plan') || plan || 'free';
+
+    setUser({
+      name: name || email || 'Používateľ',
+      email,
+      role: finalRole,
+      plan: finalPlan,
+      isLoggedIn: true,
+    });
+
+    setSubActive(finalRole === 'admin' || finalPlan !== 'free');
+  }, [searchParams]);
+
+  // =====================================================
+  // LOAD PAYMENT / SUBSCRIPTION STATUS
+  // =====================================================
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     if (typeof document === 'undefined') return;
 
-    if (searchParams.get('success')) {
+    const paymentSuccess =
+      searchParams.get('payment') === 'success' ||
+      searchParams.get('success') === 'true' ||
+      searchParams.get('success') === '1';
+
+    const paidPlan = searchParams.get('plan');
+
+    if (paymentSuccess) {
       document.cookie = 'sub_active=1; path=/';
+      localStorage.setItem('zedpera_is_logged_in', 'true');
+
+      if (paidPlan) {
+        localStorage.setItem('zedpera_user_plan', paidPlan);
+        localStorage.setItem('zedpera_selected_plan', paidPlan);
+      }
+
+      setSubActive(true);
+
+      setUser((current) => ({
+        ...current,
+        plan: paidPlan || current.plan || 'paid',
+        isLoggedIn: true,
+      }));
+    }
+
+    if (document.cookie.includes('sub_active=1')) {
       setSubActive(true);
     }
   }, [searchParams]);
@@ -391,7 +383,7 @@ function DashboardPage() {
   };
 
   // =====================================================
-  // SAVE PROFILE FROM POPUP FORM
+  // PROFILE FORM
   // =====================================================
 
   const openNewProfileForm = () => {
@@ -452,80 +444,144 @@ function DashboardPage() {
     loadProfiles();
   };
 
+  const logout = () => {
+    if (typeof window === 'undefined') return;
+
+    localStorage.removeItem('zedpera_is_logged_in');
+    localStorage.removeItem('zedpera_user_email');
+    localStorage.removeItem('zedpera_user_name');
+    localStorage.removeItem('zedpera_user_role');
+    localStorage.removeItem('zedpera_user_plan');
+    localStorage.removeItem('zedpera_selected_plan');
+    localStorage.removeItem('zedpera_admin_free');
+
+    document.cookie = 'sub_active=; Max-Age=0; path=/';
+
+    window.location.href = '/';
+  };
+
   return (
     <div className="min-h-screen bg-[#020617] text-white">
-      <main className="flex min-w-0 flex-1 flex-col">
-        <Header
+      <div className="flex min-h-screen">
+        <Sidebar
           view={view}
-          mode={mode}
-          subActive={subActive}
           setView={setView}
+          user={user}
+          subActive={subActive}
+          openForm={openNewProfileForm}
+          logout={logout}
         />
 
-        <div className="flex-1 overflow-y-auto p-6 md:p-8">
-          {view === 'dashboard' && (
-            <Dashboard
-              setView={setView}
-              setMode={setMode}
-              openForm={openNewProfileForm}
-            />
-          )}
+        {sidebarOpen && (
+          <MobileSidebar
+            view={view}
+            setView={(nextView) => {
+              setView(nextView);
+              setSidebarOpen(false);
+            }}
+            user={user}
+            subActive={subActive}
+            openForm={() => {
+              openNewProfileForm();
+              setSidebarOpen(false);
+            }}
+            logout={logout}
+            close={() => setSidebarOpen(false)}
+          />
+        )}
 
-          {view === 'chat' && (
-            <Chat
-              mode={mode}
-              setMode={setMode}
-              activeProfile={activeProfile}
-            />
-          )}
+        <main className="flex min-w-0 flex-1 flex-col lg:pl-80">
+          <Header
+            view={view}
+            mode={mode}
+            subActive={subActive}
+            user={user}
+            setView={setView}
+            openMobileMenu={() => setSidebarOpen(true)}
+          />
 
-          {view === 'profile' && (
-            <ProfileView
-              profile={activeProfile}
-              profiles={profiles}
-              setActiveProfile={(profile) => {
-                setActiveProfile(profile);
+          <div className="flex-1 overflow-y-auto p-5 md:p-8">
+            {view === 'dashboard' && (
+              <Dashboard
+                setView={setView}
+                setMode={setMode}
+                openForm={openNewProfileForm}
+                user={user}
+                subActive={subActive}
+                activeProfile={activeProfile}
+              />
+            )}
 
-                if (typeof window !== 'undefined') {
-                  localStorage.setItem(
-                    'active_profile',
-                    JSON.stringify(profile),
-                  );
-                }
-              }}
-              openForm={openNewProfileForm}
-              openEditForm={openEditProfileForm}
-            />
-          )}
+            {view === 'chat' && (
+              <Chat
+                mode={mode}
+                setMode={setMode}
+                activeProfile={activeProfile}
+              />
+            )}
 
-          {view === 'packages' && <PackagesPage subActive={subActive} />}
+            {view === 'profile' && (
+              <ProfileView
+                profile={activeProfile}
+                profiles={profiles}
+                setActiveProfile={(profile) => {
+                  setActiveProfile(profile);
 
-          {view === 'video' && (
-            <SimplePage
-              title="Video návod"
-              text="Tu bude video návod pre používateľa."
-            />
-          )}
+                  if (typeof window !== 'undefined') {
+                    localStorage.setItem(
+                      'active_profile',
+                      JSON.stringify(profile),
+                    );
+                  }
+                }}
+                openForm={openNewProfileForm}
+                openEditForm={openEditProfileForm}
+              />
+            )}
 
-          {view === 'history' && (
-            <SimplePage
-              title="História"
-              text="Tu bude história generovaní, auditov a uložených výstupov."
-            />
-          )}
+            {view === 'packages' && <PackagesPage subActive={subActive} />}
 
-          {view === 'settings' && (
-            <SimplePage
-              title="Nastavenia"
-              text="Tu budú nastavenia účtu, jazyka, fakturácie a aplikácie."
-            />
-          )}
-        </div>
-      </main>
+            {view === 'video' && (
+              <SimplePage
+                title="Video návod"
+                text="Tu bude video návod pre používateľa."
+              />
+            )}
 
-      {/* =====================================================
-          PROFILE POPUP MODAL
-      ===================================================== */}
+            {view === 'history' && (
+              <SimplePage
+                title="História"
+                text="Tu bude história generovaní, auditov a uložených výstupov."
+              />
+            )}
+
+            {view === 'settings' && (
+              <SettingsPage user={user} subActive={subActive} logout={logout} />
+            )}
+
+            {view === 'admin-users' && (
+              <AdminPlaceholder
+                title="Admin: Používatelia"
+                text="Tu neskôr doplníš správu používateľov, ich rolí, balíkov a prístupov."
+              />
+            )}
+
+            {view === 'admin-payments' && (
+              <AdminPlaceholder
+                title="Admin: Platby"
+                text="Tu neskôr doplníš prehľad platieb, objednávok, faktúr a Stripe transakcií."
+              />
+            )}
+
+            {view === 'admin-plans' && (
+              <AdminPlaceholder
+                title="Admin: Balíčky"
+                text="Tu neskôr doplníš správu cien, promo akcií, doplnkov a limitov."
+              />
+            )}
+          </div>
+        </main>
+      </div>
 
       {showProfileForm && (
         <div className="fixed inset-0 z-[9999]">
@@ -548,8 +604,8 @@ function DashboardPage() {
                   </h2>
                   <p className="text-sm text-gray-400">
                     {editingProfile
-                      ? 'Uprav uložený profil práce. Po uložení sa zmeny prepíšu v aktívnom profile.'
-                      : 'Vyplň základné údaje, akademický profil a kľúčové slová. Po uložení sa práca nastaví ako aktívna.'}
+                      ? 'Uprav uložený profil práce.'
+                      : 'Vyplň základné údaje, akademický profil a kľúčové slová.'}
                   </p>
                 </div>
 
@@ -584,104 +640,475 @@ function Header({
   view,
   mode,
   subActive,
+  user,
   setView,
+  openMobileMenu,
 }: {
   view: View;
   mode: Mode;
   subActive: boolean;
+  user: DashboardUser;
   setView: (v: View) => void;
+  openMobileMenu: () => void;
 }) {
   const titleMap: Record<View, string> = {
-    dashboard: 'Menu',
+    dashboard: 'Menu aplikácie',
     chat: getModeTitle(mode),
     profile: 'Profil práce',
     history: 'História',
     settings: 'Nastavenia',
     packages: 'Balíčky',
     video: 'Video návod',
+    'admin-users': 'Admin: Používatelia',
+    'admin-payments': 'Admin: Platby',
+    'admin-plans': 'Admin: Balíčky',
   };
 
   return (
-    <header className="flex h-20 items-center justify-between border-b border-white/10 bg-[#111827] px-8">
-      <div>
-        <h1 className="text-2xl font-black text-white">{titleMap[view]}</h1>
-        <p className="text-gray-300">AI platforma pre akademické písanie</p>
-      </div>
-
-      <div className="flex items-center gap-4">
-        {view !== 'dashboard' && (
+    <header className="sticky top-0 z-40 border-b border-white/10 bg-[#020617]/90 px-5 py-4 backdrop-blur-xl md:px-8">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-4">
           <button
             type="button"
-            onClick={() => setView('dashboard')}
-            className="rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20"
+            onClick={openMobileMenu}
+            className="rounded-2xl border border-white/10 bg-white/10 p-3 lg:hidden"
           >
-            Menu
+            <Menu size={22} />
           </button>
-        )}
 
-        {subActive && (
-          <span className="rounded-full bg-purple-600/30 px-3 py-1 text-sm text-purple-200">
-            PRO aktívne
-          </span>
-        )}
+          <div className="min-w-0">
+            <h1 className="truncate text-2xl font-black text-white">
+              {titleMap[view]}
+            </h1>
 
-        <Bell className="text-gray-300" size={22} />
+            <p className="truncate text-sm text-gray-400">
+              AI platforma pre akademické písanie
+            </p>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-3">
+          {view !== 'dashboard' && (
+            <button
+              type="button"
+              onClick={() => setView('dashboard')}
+              className="hidden rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20 sm:block"
+            >
+              Menu
+            </button>
+          )}
+
+          <div
+            className={`hidden rounded-full px-3 py-1 text-xs font-black sm:block ${
+              subActive
+                ? 'bg-purple-600/30 text-purple-200'
+                : 'bg-white/10 text-gray-300'
+            }`}
+          >
+            {subActive ? 'PRO aktívne' : 'FREE režim'}
+          </div>
+
+          {user.role === 'admin' && (
+            <div className="hidden rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-black text-emerald-300 sm:block">
+              ADMIN
+            </div>
+          )}
+
+          <Bell className="text-gray-300" size={22} />
+        </div>
       </div>
     </header>
   );
 }
 
 // =====================================================
-// DASHBOARD / MENU
+// SIDEBAR
+// =====================================================
+
+function Sidebar({
+  view,
+  setView,
+  user,
+  subActive,
+  openForm,
+  logout,
+}: {
+  view: View;
+  setView: (v: View) => void;
+  user: DashboardUser;
+  subActive: boolean;
+  openForm: () => void;
+  logout: () => void;
+}) {
+  return (
+    <aside className="fixed left-0 top-0 z-50 hidden h-screen w-80 border-r border-white/10 bg-[#050816] lg:block">
+      <SidebarContent
+        view={view}
+        setView={setView}
+        user={user}
+        subActive={subActive}
+        openForm={openForm}
+        logout={logout}
+      />
+    </aside>
+  );
+}
+
+function MobileSidebar({
+  view,
+  setView,
+  user,
+  subActive,
+  openForm,
+  logout,
+  close,
+}: {
+  view: View;
+  setView: (v: View) => void;
+  user: DashboardUser;
+  subActive: boolean;
+  openForm: () => void;
+  logout: () => void;
+  close: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[9998] lg:hidden">
+      <button
+        type="button"
+        aria-label="Zavrieť menu"
+        onClick={close}
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+      />
+
+      <aside className="absolute left-0 top-0 h-full w-[88%] max-w-sm border-r border-white/10 bg-[#050816]">
+        <div className="flex items-center justify-between border-b border-white/10 p-5">
+          <div className="text-xl font-black">ZEDPERA</div>
+
+          <button
+            type="button"
+            onClick={close}
+            className="rounded-xl bg-white/10 p-2"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <SidebarContent
+          view={view}
+          setView={setView}
+          user={user}
+          subActive={subActive}
+          openForm={openForm}
+          logout={logout}
+        />
+      </aside>
+    </div>
+  );
+}
+
+function SidebarContent({
+  view,
+  setView,
+  user,
+  subActive,
+  openForm,
+  logout,
+}: {
+  view: View;
+  setView: (v: View) => void;
+  user: DashboardUser;
+  subActive: boolean;
+  openForm: () => void;
+  logout: () => void;
+}) {
+  const mainItems: {
+    view: View;
+    label: string;
+    icon: LucideIcon;
+  }[] = [
+    { view: 'dashboard', label: 'Menu', icon: Home },
+    { view: 'profile', label: 'Profil práce', icon: User },
+    { view: 'packages', label: 'Balíčky', icon: Crown },
+    { view: 'history', label: 'História', icon: MessageSquare },
+    { view: 'video', label: 'Video návod', icon: Video },
+    { view: 'settings', label: 'Nastavenia', icon: Settings },
+  ];
+
+  const adminItems: {
+    view: View;
+    label: string;
+    icon: LucideIcon;
+  }[] = [
+    { view: 'admin-users', label: 'Používatelia', icon: User },
+    { view: 'admin-payments', label: 'Platby', icon: FileCheck2 },
+    { view: 'admin-plans', label: 'Správa balíčkov', icon: Crown },
+  ];
+
+  return (
+    <div className="flex h-full flex-col p-5">
+      <div className="mb-6 hidden items-center gap-3 lg:flex">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-600 to-fuchsia-600">
+          <GraduationCap size={26} />
+        </div>
+
+        <div>
+          <div className="text-xl font-black">ZEDPERA</div>
+          <div className="text-xs font-semibold text-gray-500">
+            AI akademický asistent
+          </div>
+        </div>
+      </div>
+
+      <UserStatusCard user={user} subActive={subActive} />
+
+      <button
+        type="button"
+        onClick={openForm}
+        className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-5 py-4 font-black text-white shadow-lg shadow-purple-950/30 transition hover:opacity-90"
+      >
+        <Plus size={20} />
+        Nová práca
+      </button>
+
+      <nav className="mt-6 space-y-2">
+        {mainItems.map((item) => (
+          <SidebarButton
+            key={item.view}
+            active={view === item.view}
+            icon={item.icon}
+            label={item.label}
+            onClick={() => setView(item.view)}
+          />
+        ))}
+      </nav>
+
+      {user.role === 'admin' && (
+        <div className="mt-7">
+          <div className="mb-3 px-3 text-xs font-black uppercase tracking-[0.18em] text-emerald-400">
+            Admin menu
+          </div>
+
+          <div className="space-y-2">
+            {adminItems.map((item) => (
+              <SidebarButton
+                key={item.view}
+                active={view === item.view}
+                icon={item.icon}
+                label={item.label}
+                onClick={() => setView(item.view)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-auto space-y-3 pt-6">
+        <Link
+          href="/"
+          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/20"
+        >
+          <ExternalLink size={17} />
+          Landing page
+        </Link>
+
+        <button
+          type="button"
+          onClick={logout}
+          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-200 transition hover:bg-red-500/20"
+        >
+          <LogOut size={17} />
+          Odhlásiť sa
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SidebarButton({
+  active,
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
+        active
+          ? 'bg-purple-600 text-white shadow-lg shadow-purple-950/30'
+          : 'text-gray-300 hover:bg-white/10 hover:text-white'
+      }`}
+    >
+      <Icon size={19} />
+      {label}
+    </button>
+  );
+}
+
+function UserStatusCard({
+  user,
+  subActive,
+}: {
+  user: DashboardUser;
+  subActive: boolean;
+}) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-purple-600/20 text-purple-200">
+          <User size={22} />
+        </div>
+
+        <div className="min-w-0">
+          <div className="truncate font-black text-white">
+            {user.name || 'Používateľ'}
+          </div>
+
+          <div className="truncate text-xs text-gray-500">
+            {user.email || 'bez emailu'}
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span
+              className={`rounded-full px-2.5 py-1 text-[11px] font-black uppercase ${
+                user.role === 'admin'
+                  ? 'bg-emerald-500/15 text-emerald-300'
+                  : 'bg-blue-500/15 text-blue-300'
+              }`}
+            >
+              {user.role === 'admin' ? 'Admin' : 'User'}
+            </span>
+
+            <span
+              className={`rounded-full px-2.5 py-1 text-[11px] font-black uppercase ${
+                subActive
+                  ? 'bg-purple-500/15 text-purple-300'
+                  : 'bg-white/10 text-gray-400'
+              }`}
+            >
+              {user.plan || 'free'}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================
+// DASHBOARD MENU
 // =====================================================
 
 function Dashboard({
   setView,
   setMode,
   openForm,
+  user,
+  subActive,
+  activeProfile,
 }: {
   setView: (v: View) => void;
   setMode: (m: Mode) => void;
   openForm: () => void;
+  user: DashboardUser;
+  subActive: boolean;
+  activeProfile: SavedProfile | null;
 }) {
   return (
-    <div className="mx-auto max-w-7xl space-y-10">
-      <section className="rounded-3xl border border-white/10 bg-[#050816] p-8">
-        <div className="flex items-start justify-between gap-6">
+    <div className="mx-auto max-w-7xl space-y-8">
+      <section className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[#050816] p-6 shadow-2xl shadow-black/30 md:p-8">
+        <div className="absolute right-0 top-0 h-72 w-72 rounded-full bg-purple-600/20 blur-3xl" />
+        <div className="absolute bottom-0 left-0 h-72 w-72 rounded-full bg-fuchsia-600/10 blur-3xl" />
+
+        <div className="relative flex flex-col justify-between gap-8 xl:flex-row xl:items-start">
           <div>
-            <div className="mb-6 flex items-center gap-3">
+            <div className="mb-6 flex flex-wrap items-center gap-3">
               <Sparkles className="text-purple-400" />
               <span className="text-2xl font-black">ZEDPERA</span>
+
               <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-gray-300">
-                Menu
+                Menu aplikácie
               </span>
+
+              {user.role === 'admin' && (
+                <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-black text-emerald-300">
+                  Admin free
+                </span>
+              )}
+
+              {subActive && user.role !== 'admin' && (
+                <span className="rounded-full bg-purple-500/15 px-3 py-1 text-xs font-black text-purple-300">
+                  Aktívny balík
+                </span>
+              )}
             </div>
 
             <h2 className="max-w-5xl text-4xl font-black leading-tight md:text-5xl">
-              Zisti čo je zlé na tvojej práci skôr než vedúci
+              Zisti, čo je slabé na tvojej práci skôr než vedúci práce.
             </h2>
 
-            <p className="mt-4 max-w-3xl text-gray-400">
-              Vytvor profil práce, vyhľadaj zdroje, skontroluj kvalitu textu,
-              priprav obhajobu a získaj spätnú väzbu ako od vedúceho práce.
+            <p className="mt-4 max-w-3xl text-base leading-7 text-gray-400 md:text-lg">
+              Vytvor profil práce, generuj odborný text, vyhľadaj zdroje,
+              skontroluj kvalitu, priprav obhajobu a získaj spätnú väzbu ako
+              od akademického konzultanta.
             </p>
+
+            <div className="mt-6 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-3">
+              <StatusPill
+                label="Rola"
+                value={user.role === 'admin' ? 'Admin' : 'Používateľ'}
+              />
+              <StatusPill label="Balík" value={user.plan || 'free'} />
+              <StatusPill
+                label="Profil"
+                value={activeProfile?.title || 'Bez profilu'}
+              />
+            </div>
           </div>
 
-          <button
-            type="button"
-            onClick={openForm}
-            className="flex shrink-0 items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold"
-          >
-            <Plus size={20} />
-            Nová práca
-          </button>
+          <div className="flex shrink-0 flex-col gap-3 sm:flex-row xl:flex-col">
+            <button
+              type="button"
+              onClick={openForm}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-black text-white shadow-lg shadow-purple-950/30 transition hover:opacity-90"
+            >
+              <Plus size={20} />
+              Nová práca
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setView('packages')}
+              className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 font-black text-white transition hover:bg-white/20"
+            >
+              <Crown size={20} />
+              Balíčky
+            </button>
+          </div>
         </div>
 
-        <div className="mt-10">
+        <div className="relative mt-10">
           <DashboardStats />
         </div>
+      </section>
 
-        <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section>
+        <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+          <div>
+            <h3 className="text-2xl font-black text-white">Moduly aplikácie</h3>
+            <p className="mt-1 text-sm text-gray-400">
+              Vyber modul, s ktorým chceš pracovať.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {featureCards.map((feature) => {
             const Icon = feature.icon;
 
@@ -693,14 +1120,15 @@ function Dashboard({
                   setMode(feature.mode);
                   setView('chat');
                 }}
-                className="group rounded-3xl border border-white/10 bg-white/5 p-6 text-left transition hover:bg-white/10"
+                className="group rounded-3xl border border-white/10 bg-white/5 p-6 text-left transition hover:-translate-y-1 hover:border-purple-400/50 hover:bg-white/10 hover:shadow-2xl hover:shadow-purple-950/20"
               >
-                <Icon
-                  className="mb-5 text-purple-400 transition group-hover:scale-110"
-                  size={30}
-                />
-                <div className="text-lg font-bold">{feature.title}</div>
-                <p className="mt-2 text-sm text-gray-400">
+                <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-300 transition group-hover:bg-purple-600 group-hover:text-white">
+                  <Icon size={28} />
+                </div>
+
+                <div className="text-lg font-black">{feature.title}</div>
+
+                <p className="mt-2 text-sm leading-6 text-gray-400">
                   {getModeDescription(feature.mode)}
                 </p>
               </button>
@@ -708,7 +1136,73 @@ function Dashboard({
           })}
         </div>
       </section>
+
+      {user.role === 'admin' && (
+        <section className="rounded-[2rem] border border-emerald-500/20 bg-emerald-500/10 p-6">
+          <div className="mb-5">
+            <h3 className="text-2xl font-black text-emerald-200">
+              Admin centrum
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-emerald-100/80">
+              Máš admin free prístup. Tu môžeš neskôr doplniť správu
+              používateľov, balíkov, platieb a obsahu.
+            </p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <AdminQuickCard
+              title="Používatelia"
+              text="Správa účtov, rolí a prístupov."
+              onClick={() => setView('admin-users')}
+            />
+
+            <AdminQuickCard
+              title="Platby"
+              text="Kontrola objednávok a Stripe transakcií."
+              onClick={() => setView('admin-payments')}
+            />
+
+            <AdminQuickCard
+              title="Balíčky"
+              text="Ceny, promo akcie a doplnkové služby."
+              onClick={() => setView('admin-plans')}
+            />
+          </div>
+        </section>
+      )}
     </div>
+  );
+}
+
+function StatusPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+      <div className="text-xs font-bold uppercase tracking-wide text-gray-500">
+        {label}
+      </div>
+      <div className="mt-1 truncate font-black text-white">{value}</div>
+    </div>
+  );
+}
+
+function AdminQuickCard({
+  title,
+  text,
+  onClick,
+}: {
+  title: string;
+  text: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-3xl border border-emerald-500/20 bg-black/20 p-5 text-left transition hover:bg-emerald-500/10"
+    >
+      <div className="text-lg font-black text-white">{title}</div>
+      <p className="mt-2 text-sm leading-6 text-emerald-100/70">{text}</p>
+    </button>
   );
 }
 
@@ -788,13 +1282,8 @@ function DashboardStats() {
   useEffect(() => {
     loadStats();
 
-    const onStorage = () => {
-      loadStats();
-    };
-
-    const onFocus = () => {
-      loadStats();
-    };
+    const onStorage = () => loadStats();
+    const onFocus = () => loadStats();
 
     window.addEventListener('storage', onStorage);
     window.addEventListener('focus', onFocus);
@@ -830,7 +1319,7 @@ function DashboardStats() {
   ];
 
   return (
-    <section className="mx-auto w-full max-w-6xl">
+    <section className="mx-auto w-full">
       <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
         {stats.map((item) => {
           const Icon = item.icon;
@@ -975,7 +1464,9 @@ function ProfileView({
 
         <ProfileCard
           label="Jazyk práce"
-          value={profile.workLanguage || profile.work_language || profile.language}
+          value={
+            profile.workLanguage || profile.work_language || profile.language
+          }
         />
 
         <ProfileCard label="Citovanie" value={profile.citation} />
@@ -1211,7 +1702,6 @@ function NewWorkForm({
         </div>
       )}
 
-      {/* ZÁKLADNÉ ÚDAJE */}
       <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
         <div className="mb-6">
           <h3 className="text-2xl font-black text-white">
@@ -1224,134 +1714,99 @@ function NewWorkForm({
         </div>
 
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Typ práce
-            </div>
-            <select
-              value={type}
-              onChange={(event) => setType(event.target.value)}
-              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            >
-              <option>Seminárna práca</option>
-              <option>Ročníková práca</option>
-              <option>Bakalárska práca</option>
-              <option>Diplomová práca</option>
-              <option>Dizertačná práca</option>
-              <option>Rigorózna práca</option>
-              <option>Projektová práca</option>
-              <option>Esej</option>
-              <option>Odborný článok</option>
-            </select>
-          </label>
+          <SelectField
+            label="Typ práce"
+            value={type}
+            onChange={setType}
+            options={[
+              'Seminárna práca',
+              'Ročníková práca',
+              'Bakalárska práca',
+              'Diplomová práca',
+              'Dizertačná práca',
+              'Rigorózna práca',
+              'Projektová práca',
+              'Esej',
+              'Odborný článok',
+            ]}
+          />
 
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Úroveň práce
-            </div>
-            <select
-              value={level}
-              onChange={(event) => setLevel(event.target.value)}
-              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            >
-              <option>Stredoškolská práca</option>
-              <option>Vysokoškolská práca</option>
-              <option>Bakalársky stupeň</option>
-              <option>Magisterský / inžiniersky stupeň</option>
-              <option>Doktorandský stupeň</option>
-              <option>Odborná / firemná práca</option>
-            </select>
-          </label>
+          <SelectField
+            label="Úroveň práce"
+            value={level}
+            onChange={setLevel}
+            options={[
+              'Stredoškolská práca',
+              'Vysokoškolská práca',
+              'Bakalársky stupeň',
+              'Magisterský / inžiniersky stupeň',
+              'Doktorandský stupeň',
+              'Odborná / firemná práca',
+            ]}
+          />
 
-          <label className="block md:col-span-2">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Názov práce
-            </div>
-            <input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="Napr. Využitie umelej inteligencie vo vzdelávaní"
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
+          <InputField
+            label="Názov práce"
+            value={title}
+            onChange={setTitle}
+            placeholder="Napr. Využitie umelej inteligencie vo vzdelávaní"
+            wide
+          />
 
-          <label className="block md:col-span-2">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Téma práce
-            </div>
-            <textarea
-              value={topic}
-              onChange={(event) => setTopic(event.target.value)}
-              rows={4}
-              placeholder="Stručne popíš tému práce..."
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
+          <TextareaField
+            label="Téma práce"
+            value={topic}
+            onChange={setTopic}
+            placeholder="Stručne popíš tému práce..."
+            rows={4}
+            wide
+          />
 
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Odbor / oblasť
-            </div>
-            <input
-              value={field}
-              onChange={(event) => setField(event.target.value)}
-              placeholder="Napr. manažment, pedagogika, IT, ekonomika..."
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
+          <InputField
+            label="Odbor / oblasť"
+            value={field}
+            onChange={setField}
+            placeholder="Napr. manažment, pedagogika, IT, ekonomika..."
+          />
 
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Vedúci práce
-            </div>
-            <input
-              value={supervisor}
-              onChange={(event) => setSupervisor(event.target.value)}
-              placeholder="Meno vedúceho práce"
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
+          <InputField
+            label="Vedúci práce"
+            value={supervisor}
+            onChange={setSupervisor}
+            placeholder="Meno vedúceho práce"
+          />
 
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Citačná norma
-            </div>
-            <select
-              value={citation}
-              onChange={(event) => setCitation(event.target.value)}
-              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            >
-              <option>ISO 690</option>
-              <option>APA</option>
-              <option>APA 7</option>
-              <option>Harvard</option>
-              <option>MLA</option>
-              <option>Chicago</option>
-              <option>Vancouver</option>
-            </select>
-          </label>
+          <SelectField
+            label="Citačná norma"
+            value={citation}
+            onChange={setCitation}
+            options={[
+              'ISO 690',
+              'APA',
+              'APA 7',
+              'Harvard',
+              'MLA',
+              'Chicago',
+              'Vancouver',
+            ]}
+          />
 
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Jazyk práce
-            </div>
-            <select
-              value={workLanguage}
-              onChange={(event) => setWorkLanguage(event.target.value)}
-              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            >
-              <option>Slovenčina</option>
-              <option>Čeština</option>
-              <option>Angličtina</option>
-              <option>Nemčina</option>
-              <option>Poľština</option>
-              <option>Maďarčina</option>
-            </select>
-          </label>
+          <SelectField
+            label="Jazyk práce"
+            value={workLanguage}
+            onChange={setWorkLanguage}
+            options={[
+              'Slovenčina',
+              'Čeština',
+              'Angličtina',
+              'Nemčina',
+              'Poľština',
+              'Maďarčina',
+            ]}
+          />
         </div>
       </section>
 
-      {/* AKADEMICKÝ PROFIL */}
       <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
         <div className="mb-6">
           <h3 className="text-2xl font-black text-white">
@@ -1364,87 +1819,56 @@ function NewWorkForm({
         </div>
 
         <div className="space-y-5">
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Anotácia / stručný opis práce
-            </div>
-            <textarea
-              value={annotation}
-              onChange={(event) => setAnnotation(event.target.value)}
-              rows={5}
-              placeholder="Stručne vysvetli, čomu sa práca venuje..."
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
+          <TextareaField
+            label="Anotácia / stručný opis práce"
+            value={annotation}
+            onChange={setAnnotation}
+            placeholder="Stručne vysvetli, čomu sa práca venuje..."
+            rows={5}
+          />
 
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Cieľ práce
-            </div>
-            <textarea
-              value={goal}
-              onChange={(event) => setGoal(event.target.value)}
-              rows={4}
-              placeholder="Napr. Cieľom práce je analyzovať..."
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
+          <TextareaField
+            label="Cieľ práce"
+            value={goal}
+            onChange={setGoal}
+            placeholder="Napr. Cieľom práce je analyzovať..."
+            rows={4}
+          />
 
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Výskumný problém
-            </div>
-            <textarea
-              value={problem}
-              onChange={(event) => setProblem(event.target.value)}
-              rows={4}
-              placeholder="Aký problém práca rieši?"
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
+          <TextareaField
+            label="Výskumný problém"
+            value={problem}
+            onChange={setProblem}
+            placeholder="Aký problém práca rieši?"
+            rows={4}
+          />
 
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Metodológia
-            </div>
-            <textarea
-              value={methodology}
-              onChange={(event) => setMethodology(event.target.value)}
-              rows={5}
-              placeholder="Popíš metódy, výskumný súbor, dotazník, rozhovory, analýzu dát..."
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
+          <TextareaField
+            label="Metodológia"
+            value={methodology}
+            onChange={setMethodology}
+            placeholder="Popíš metódy, výskumný súbor, dotazník, rozhovory, analýzu dát..."
+            rows={5}
+          />
 
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Hypotézy
-            </div>
-            <textarea
-              value={hypotheses}
-              onChange={(event) => setHypotheses(event.target.value)}
-              rows={4}
-              placeholder="Napr. H1: Existuje štatisticky významný vzťah..."
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
+          <TextareaField
+            label="Hypotézy"
+            value={hypotheses}
+            onChange={setHypotheses}
+            placeholder="Napr. H1: Existuje štatisticky významný vzťah..."
+            rows={4}
+          />
 
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Výskumné otázky
-            </div>
-            <textarea
-              value={researchQuestions}
-              onChange={(event) => setResearchQuestions(event.target.value)}
-              rows={4}
-              placeholder="Napr. VO1: Ako respondenti vnímajú..."
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
+          <TextareaField
+            label="Výskumné otázky"
+            value={researchQuestions}
+            onChange={setResearchQuestions}
+            placeholder="Napr. VO1: Ako respondenti vnímajú..."
+            rows={4}
+          />
         </div>
       </section>
 
-      {/* PRAKTICKÁ ČASŤ A ZDROJE */}
       <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
         <div className="mb-6">
           <h3 className="text-2xl font-black text-white">
@@ -1453,72 +1877,47 @@ function NewWorkForm({
         </div>
 
         <div className="space-y-5">
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Praktická časť
-            </div>
-            <textarea
-              value={practicalPart}
-              onChange={(event) => setPracticalPart(event.target.value)}
-              rows={5}
-              placeholder="Popíš, čo bude obsahovať praktická časť práce..."
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
+          <TextareaField
+            label="Praktická časť"
+            value={practicalPart}
+            onChange={setPracticalPart}
+            placeholder="Popíš, čo bude obsahovať praktická časť práce..."
+            rows={5}
+          />
 
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Vedecký / odborný prínos
-            </div>
-            <textarea
-              value={scientificContribution}
-              onChange={(event) =>
-                setScientificContribution(event.target.value)
-              }
-              rows={4}
-              placeholder="Aký prínos má práca pre odbor, prax alebo organizáciu?"
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
+          <TextareaField
+            label="Vedecký / odborný prínos"
+            value={scientificContribution}
+            onChange={setScientificContribution}
+            placeholder="Aký prínos má práca pre odbor, prax alebo organizáciu?"
+            rows={4}
+          />
 
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Požiadavky na zdroje
-            </div>
-            <textarea
-              value={sourcesRequirement}
-              onChange={(event) => setSourcesRequirement(event.target.value)}
-              rows={4}
-              placeholder="Napr. používať zdroje z posledných 5 rokov, zahraničné články, open-access PDF..."
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
+          <TextareaField
+            label="Požiadavky na zdroje"
+            value={sourcesRequirement}
+            onChange={setSourcesRequirement}
+            placeholder="Napr. používať zdroje z posledných 5 rokov, zahraničné články, open-access PDF..."
+            rows={4}
+          />
         </div>
       </section>
 
-      {/* KĽÚČOVÉ SLOVÁ */}
       <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
         <div className="mb-6">
-          <h3 className="text-2xl font-black text-white">
-            4. Kľúčové slová
-          </h3>
+          <h3 className="text-2xl font-black text-white">4. Kľúčové slová</h3>
           <p className="mt-2 text-sm text-gray-400">
             Slová oddeľ čiarkou. Použijú sa pri vyhľadávaní zdrojov a
             generovaní textu.
           </p>
         </div>
 
-        <label className="block">
-          <div className="mb-2 text-sm font-semibold text-gray-300">
-            Kľúčové slová
-          </div>
-          <input
-            value={keywordsText}
-            onChange={(event) => setKeywordsText(event.target.value)}
-            placeholder="napr. umelá inteligencia, vzdelávanie, LLM, personalizované učenie"
-            className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-          />
-        </label>
+        <InputField
+          label="Kľúčové slová"
+          value={keywordsText}
+          onChange={setKeywordsText}
+          placeholder="napr. umelá inteligencia, vzdelávanie, LLM, personalizované učenie"
+        />
 
         {parseKeywords(keywordsText).length > 0 && (
           <div className="mt-4 flex flex-wrap gap-2">
@@ -1596,13 +1995,15 @@ function Chat({
           </div>
         )}
 
-       {mode === 'write' && <WriteModule activeProfile={activeProfile} />}
+        {mode === 'write' && <WriteModule activeProfile={activeProfile} />}
         {mode === 'sources' && <SourcesModule />}
-        {mode === 'supervisor' && <SupervisorModule activeProfile={activeProfile} />}
-      {mode === 'audit' && <AuditModule activeProfile={activeProfile} />}
-       {mode === 'defense' && <DefenseModule activeProfile={activeProfile} />}
+        {mode === 'supervisor' && (
+          <SupervisorModule activeProfile={activeProfile} />
+        )}
+        {mode === 'audit' && <AuditModule activeProfile={activeProfile} />}
+        {mode === 'defense' && <DefenseModule activeProfile={activeProfile} />}
         {mode === 'translate' && <TranslateModule />}
-      {mode === 'analysis' && <AnalysisModule activeProfile={activeProfile} />}
+        {mode === 'analysis' && <AnalysisModule activeProfile={activeProfile} />}
         {mode === 'planning' && <PlanningModule />}
         {mode === 'email' && <EmailModule />}
         {mode === 'plagiarism' && <PlagiarismModule />}
@@ -1618,41 +2019,28 @@ function ModuleTabs({
   mode: Mode;
   setMode: (m: Mode) => void;
 }) {
-  const firstRow = featureCards.slice(0, 5);
-  const secondRow = featureCards.slice(5, 10);
-
-  const renderTab = (feature: (typeof featureCards)[number]) => {
-    const Icon = feature.icon;
-
-    return (
-      <button
-        type="button"
-        key={feature.mode}
-        onClick={() => setMode(feature.mode)}
-        className={`flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-4 text-sm font-semibold transition ${
-          mode === feature.mode
-            ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white shadow-lg'
-            : 'bg-white/10 text-gray-300 hover:bg-white/20 hover:text-white'
-        }`}
-      >
-        <Icon size={18} />
-        <span className="truncate">{feature.title}</span>
-      </button>
-    );
-  };
-
   return (
     <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-      <div className="flex flex-col gap-3">
-        {/* 1. riadok */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          {firstRow.map(renderTab)}
-        </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {featureCards.map((feature) => {
+          const Icon = feature.icon;
 
-        {/* 2. riadok */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          {secondRow.map(renderTab)}
-        </div>
+          return (
+            <button
+              type="button"
+              key={feature.mode}
+              onClick={() => setMode(feature.mode)}
+              className={`flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-4 text-sm font-semibold transition ${
+                mode === feature.mode
+                  ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white shadow-lg'
+                  : 'bg-white/10 text-gray-300 hover:bg-white/20 hover:text-white'
+              }`}
+            >
+              <Icon size={18} />
+              <span className="truncate">{feature.title}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -1661,13 +2049,12 @@ function ModuleTabs({
 // =====================================================
 // MODULE CONTENTS
 // =====================================================
+
 function WriteModule({
   activeProfile,
 }: {
   activeProfile: SavedProfile | null;
 }) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
   const [chapterTitle, setChapterTitle] = useState('');
   const [outputType, setOutputType] = useState('Kapitola');
   const [assignment, setAssignment] = useState('');
@@ -1676,112 +2063,69 @@ function WriteModule({
   const [savedForSupervisor, setSavedForSupervisor] = useState(false);
   const [error, setError] = useState('');
 
-  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-  const [fileError, setFileError] = useState('');
+  const minAssignmentLength = 100;
+  const assignmentLength = assignment.trim().length;
 
-const minAssignmentLength = 100;
-const assignmentLength = assignment.trim().length;
-const assignmentTooShort =
-  assignmentLength > 0 && assignmentLength < minAssignmentLength;
-const assignmentIsEmpty = assignment.trim().length === 0;
+  const generateText = async () => {
+    setError('');
+    setSavedForSupervisor(false);
 
+    if (assignment.trim().length < minAssignmentLength) {
+      setError(
+        `Zadanie pre AI je príliš krátke. Doplň aspoň ${minAssignmentLength} znakov.`,
+      );
+      return;
+    }
 
-  const addAttachedFiles = (files: FileList | File[]) => {
-    setFileError('');
+    setIsGenerating(true);
 
-    const incomingFiles = Array.from(files);
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chapterTitle,
+          outputType,
+          assignment,
+          activeProfile,
+        }),
+      });
 
-    if (!incomingFiles.length) return;
+      const data = await response.json();
 
-    setAttachedFiles((currentFiles) => {
-      const nextFiles = [...currentFiles];
-
-      for (const file of incomingFiles) {
-        const extension = getFileExtension(file.name);
-
-        if (!isSupportedFile(file)) {
-          setFileError(
-            `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, obrázky, Excel, CSV a PowerPoint.`,
-          );
-          continue;
-        }
-
-        if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
-          setFileError(
-            `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť je ${MAX_UPLOAD_FILE_SIZE_MB} MB.`,
-          );
-          continue;
-        }
-
-        if (nextFiles.length >= MAX_UPLOAD_FILES) {
-          setFileError(`Môžete priložiť maximálne ${MAX_UPLOAD_FILES} súborov.`);
-          break;
-        }
-
-        const duplicate = nextFiles.some(
-          (item) => item.name === file.name && item.size === file.size,
-        );
-
-        if (duplicate) {
-          continue;
-        }
-
-        nextFiles.push({
-          id:
-            typeof crypto !== 'undefined' && 'randomUUID' in crypto
-              ? crypto.randomUUID()
-              : `${Date.now()}-${Math.random()}`,
-          file,
-          name: file.name,
-          size: file.size,
-          type: file.type || 'application/octet-stream',
-          extension,
-        });
+      if (!response.ok) {
+        throw new Error(data?.error || 'Nepodarilo sa vygenerovať text.');
       }
 
-      return nextFiles;
-    });
+      const text = String(data?.text || data?.result || '').trim();
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
+      if (!text) {
+        throw new Error('AI nevrátila žiadny text.');
+      }
 
-  const removeAttachedFile = (id: string) => {
-    setAttachedFiles((currentFiles) =>
-      currentFiles.filter((file) => file.id !== id),
-    );
-  };
+      setGeneratedText(text);
+      localStorage.setItem('latest_generated_work_text', text);
 
-  const uploadAttachedFiles = async () => {
-    if (!attachedFiles.length) {
-      return [];
-    }
+      setSavedForSupervisor(true);
 
-    const formData = new FormData();
-
-    for (const item of attachedFiles) {
-      formData.append('files', item.file);
-    }
-
-    const response = await fetch('/api/uploads', {
-      method: 'POST',
-      body: formData,
-    });
-
-    const data = await response.json();
-
-    if (!response.ok || !data.ok) {
-      throw new Error(
-        data?.message || data?.error || 'Nepodarilo sa nahrať priložené súbory.',
+      window.setTimeout(() => {
+        setSavedForSupervisor(false);
+      }, 2500);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Neznáma chyba pri generovaní textu.',
       );
+    } finally {
+      setIsGenerating(false);
     }
-
-    return data.files || [];
   };
 
-  const saveForSupervisor = (text: string) => {
-    const cleanText = text.trim();
+  const saveForSupervisor = () => {
+    const cleanText = generatedText.trim();
 
     if (!cleanText) {
       setError('Najprv vygeneruj alebo vlož text.');
@@ -1798,332 +2142,102 @@ const assignmentIsEmpty = assignment.trim().length === 0;
     }, 2500);
   };
 
-const generateText = async () => {
-  setError('');
-  setFileError('');
-  setSavedForSupervisor(false);
-
-  if (assignment.trim().length < minAssignmentLength) {
-    setError(
-      `Zadanie pre AI je príliš krátke. Doplň aspoň ${minAssignmentLength} znakov. Aktuálne máš ${assignment.trim().length} znakov.`
-    );
-    return;
-  }
-
-  setIsGenerating(true);
-
-  try {
-
-      const uploadedFiles = await uploadAttachedFiles();
-
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          chapterTitle,
-          outputType,
-          assignment,
-          activeProfile,
-          attachments: uploadedFiles,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || 'Nepodarilo sa vygenerovať text.');
-      }
-
-      const text = String(data?.text || '').trim();
-
-      if (!text) {
-        throw new Error('AI nevrátila žiadny text.');
-      }
-
-      setGeneratedText(text);
-
-      localStorage.setItem('latest_generated_work_text', text);
-
-      setSavedForSupervisor(true);
-
-      window.setTimeout(() => {
-        setSavedForSupervisor(false);
-      }, 2500);
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Neznáma chyba pri generovaní textu.';
-
-      setError(message);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
   return (
     <ModuleLayout>
-      {activeProfile && (
-        <div className="rounded-2xl border border-purple-500/20 bg-purple-500/10 p-4 text-sm text-purple-100">
-          Text sa bude generovať podľa aktívneho profilu:{' '}
-          <strong>{activeProfile.title || 'Bez názvu'}</strong>
-          {activeProfile.topic ? ` — ${activeProfile.topic}` : ''}
-        </div>
-      )}
-
       {!activeProfile && (
-        <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
+        <Notice type="warning">
           Profil práce zatiaľ nie je vytvorený. Text sa dá generovať aj bez
           profilu, ale výsledok bude menej presný.
-        </div>
+        </Notice>
       )}
 
+      <InputField
+        label="Názov kapitoly"
+        value={chapterTitle}
+        onChange={setChapterTitle}
+        placeholder="Napr. Teoretické východiská práce"
+      />
+
+      <SelectField
+        label="Typ výstupu"
+        value={outputType}
+        onChange={setOutputType}
+        options={[
+          'Úvod',
+          'Kapitola',
+          'Podkapitola',
+          'Záver',
+          'Abstrakt',
+          'Anotácia',
+        ]}
+      />
+
       <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Názov kapitoly
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold text-gray-300">
+            Zadanie pre AI
+          </div>
+
+          <div
+            className={`rounded-full px-3 py-1 text-xs font-black ${
+              assignmentLength >= minAssignmentLength
+                ? 'bg-green-500/10 text-green-300'
+                : 'bg-yellow-500/10 text-yellow-300'
+            }`}
+          >
+            {assignmentLength}/{minAssignmentLength} znakov
+          </div>
         </div>
 
-        <input
-          value={chapterTitle}
-          onChange={(event) => setChapterTitle(event.target.value)}
-          placeholder="Napr. Teoretické východiská práce"
+        <textarea
+          value={assignment}
+          onChange={(event) => setAssignment(event.target.value)}
+          rows={8}
+          placeholder="Popíš, čo má AI napísať. Uveď rozsah, štýl, obsah a požiadavky..."
           className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
         />
       </label>
 
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Typ výstupu
-        </div>
-
-        <select
-          value={outputType}
-          onChange={(event) => setOutputType(event.target.value)}
-          className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-        >
-          <option>Úvod</option>
-          <option>Kapitola</option>
-          <option>Podkapitola</option>
-          <option>Záver</option>
-          <option>Abstrakt</option>
-          <option>Anotácia</option>
-        </select>
-      </label>
-
-      {/* =====================================================
-          PRÍLOHY / PODKLADY
-      ===================================================== */}
-
-      <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-lg font-bold text-white">
-              <Paperclip size={20} className="text-purple-400" />
-              Priložené podklady
-            </div>
-
-            <p className="mt-1 text-sm text-gray-400">
-              Klient môže nahrať viacero formátov, nielen PDF. Podporované sú
-              PDF, Word, TXT, obrázky, Excel, CSV a PowerPoint.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-purple-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-purple-500"
-          >
-            <UploadCloud size={18} />
-            Nahrať súbory
-          </button>
-        </div>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept={FILE_INPUT_ACCEPT}
-          className="hidden"
-          onChange={(event) => {
-            if (event.target.files) {
-              addAttachedFiles(event.target.files);
-            }
-          }}
-        />
-
-        <div
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-
-            if (event.dataTransfer.files) {
-              addAttachedFiles(event.dataTransfer.files);
-            }
-          }}
-          className="rounded-2xl border border-dashed border-white/15 bg-black/20 p-5 text-center text-sm text-gray-400"
-        >
-          Pretiahnite sem súbory alebo kliknite na tlačidlo „Nahrať súbory“.
-          <div className="mt-2 text-xs text-gray-500">
-            Maximálne {MAX_UPLOAD_FILES} súborov, každý do{' '}
-            {MAX_UPLOAD_FILE_SIZE_MB} MB.
-          </div>
-        </div>
-
-        {fileError && (
-          <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
-            {fileError}
-          </div>
-        )}
-
-        {attachedFiles.length > 0 && (
-          <div className="mt-4 space-y-2">
-            {attachedFiles.map((item) => (
-              <div
-                key={item.id}
-                className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0f1324] p-3 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="rounded-xl bg-purple-600/20 px-3 py-2 text-xs font-bold text-purple-200">
-                    {getFileTypeLabel(item.extension)}
-                  </div>
-
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-white">
-                      {item.name}
-                    </div>
-
-                    <div className="text-xs text-gray-500">
-                      {item.extension.toUpperCase()} · {formatFileSize(item.size)}
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => removeAttachedFile(item.id)}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/20"
-                >
-                  <Trash2 size={14} />
-                  Odstrániť
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-<label className="block">
-  <div className="mb-2 flex items-center justify-between gap-3">
-    <div className="text-sm font-semibold text-gray-300">
-      Zadanie pre AI
-    </div>
-
-    <div
-      className={`rounded-full px-3 py-1 text-xs font-black ${
-        assignmentLength >= minAssignmentLength
-          ? 'bg-green-500/10 text-green-300'
-          : 'bg-yellow-500/10 text-yellow-300'
-      }`}
-    >
-      {assignmentLength}/{minAssignmentLength} znakov
-    </div>
-  </div>
-
-  <textarea
-    value={assignment}
-    onChange={(event) => {
-      setAssignment(event.target.value);
-
-      if (
-        error &&
-        event.target.value.trim().length >= minAssignmentLength
-      ) {
-        setError('');
-      }
-    }}
-    rows={7}
-    placeholder="Popíš, čo má AI napísať. Napr. Napíš teoretickú kapitolu o inkluzívnom vzdelávaní v rozsahu cca 2 strany..."
-    className={`w-full rounded-2xl border px-4 py-4 outline-none placeholder:text-gray-600 ${
-      assignmentTooShort
-        ? 'border-yellow-400/60 bg-yellow-500/5 focus:border-yellow-400'
-        : 'border-white/10 bg-white/5 focus:border-purple-500'
-    }`}
-  />
-
-  {assignmentIsEmpty && (
-    <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-sm leading-6 text-gray-400">
-      Pre kvalitný výstup napíš zadanie aspoň v rozsahu{' '}
-      <strong className="text-white">{minAssignmentLength} znakov</strong>.
-      Uveď, čo má AI vytvoriť, aký má byť rozsah, štýl a čo má zohľadniť
-      z priložených podkladov.
-    </div>
-  )}
-
-  {assignmentTooShort && (
-    <div className="mt-3 rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-3 text-sm leading-6 text-yellow-100">
-      Zadanie je príliš krátke. Doplň ešte aspoň{' '}
-      <strong>{minAssignmentLength - assignmentLength}</strong> znakov.
-    </div>
-  )}
-</label>
-
       <div className="flex flex-wrap gap-3">
- <button
-  type="button"
-  onClick={generateText}
-  disabled={isGenerating || assignmentLength < minAssignmentLength}
-  className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
->
-  <FileText size={20} />
-  {isGenerating
-    ? 'Generujem text...'
-    : assignmentLength < minAssignmentLength
-      ? `Doplň zadanie (${assignmentLength}/${minAssignmentLength})`
-      : 'Generovať text'}
-</button>
+        <button
+          type="button"
+          onClick={generateText}
+          disabled={isGenerating || assignmentLength < minAssignmentLength}
+          className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <FileText size={20} />
+          {isGenerating
+            ? 'Generujem text...'
+            : assignmentLength < minAssignmentLength
+              ? `Doplň zadanie (${assignmentLength}/${minAssignmentLength})`
+              : 'Generovať text'}
+        </button>
 
         <button
           type="button"
-          onClick={() => saveForSupervisor(generatedText)}
+          onClick={saveForSupervisor}
           className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 font-bold transition hover:bg-white/15"
         >
           Uložiť pre AI vedúceho
         </button>
       </div>
 
-      {error && (
-        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
-          {error}
-        </div>
-      )}
+      {error && <Notice type="error">{error}</Notice>}
 
       {savedForSupervisor && (
-        <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-4 text-sm font-semibold text-green-200">
-          Text bol uložený pre AI vedúceho práce.
-        </div>
+        <Notice type="success">Text bol uložený pre AI vedúceho práce.</Notice>
       )}
 
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Vygenerovaný text
-        </div>
-
-        <textarea
-          value={generatedText}
-          onChange={(event) => {
-            setGeneratedText(event.target.value);
-            localStorage.setItem(
-              'latest_generated_work_text',
-              event.target.value,
-            );
-          }}
-          rows={16}
-          placeholder="Tu sa zobrazí vygenerovaný text z AI..."
-          className="w-full rounded-2xl border border-purple-500/30 bg-[#0f1324] px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-        />
-      </label>
+      <TextareaField
+        label="Vygenerovaný text"
+        value={generatedText}
+        onChange={(value) => {
+          setGeneratedText(value);
+          localStorage.setItem('latest_generated_work_text', value);
+        }}
+        rows={16}
+        placeholder="Tu sa zobrazí vygenerovaný text z AI..."
+      />
     </ModuleLayout>
   );
 }
@@ -2131,10 +2245,7 @@ const generateText = async () => {
 function SourcesModule() {
   return (
     <ModuleLayout>
-      <Input
-        label="Téma vyhľadávania"
-        placeholder="Napr. inkluzívne vzdelávanie v predprimárnom veku"
-      />
+      <Input label="Téma vyhľadávania" placeholder="Napr. inkluzívne vzdelávanie" />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Select
@@ -2150,13 +2261,7 @@ function SourcesModule() {
 
         <Select
           label="Typ zdroja"
-          options={[
-            'Všetko',
-            'Len PDF',
-            'Open Access',
-            'Články',
-            'Štúdie',
-          ]}
+          options={['Všetko', 'Len PDF', 'Open Access', 'Články', 'Štúdie']}
         />
 
         <Select label="Jazyk" options={['EN', 'SK', 'CZ', 'DE']} />
@@ -2166,10 +2271,6 @@ function SourcesModule() {
     </ModuleLayout>
   );
 }
-
-// =====================================================
-// FASTBOTS AI VEDÚCI PRÁCE
-// =====================================================
 
 function SupervisorModule({
   activeProfile,
@@ -2181,23 +2282,8 @@ function SupervisorModule({
 
   const fastbotUrl = `https://app.fastbots.ai/embed/${botId}`;
 
-  if (!botId) {
-    return (
-      <div className="rounded-3xl border border-red-500/40 bg-red-950/30 p-6 text-red-100">
-        <h3 className="text-xl font-black">Fastbots nie je nastavený</h3>
-        <p className="mt-2 text-sm text-red-200">
-          Do súboru .env.local pridaj premennú:
-        </p>
-
-        <pre className="mt-4 overflow-x-auto rounded-2xl bg-black/40 p-4 text-xs text-red-100">
-{`NEXT_PUBLIC_FASTBOTS_BOT_ID=cmonxnqsl0av1p81pwly2ti1x`}
-        </pre>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
+    <ModuleLayout>
       <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-6">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-4">
@@ -2211,9 +2297,8 @@ function SupervisorModule({
               </h3>
 
               <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-300">
-                Tento modul je napojený priamo na Fastbots AI. Používateľ vloží
-                text práce do chatbota a dostane odbornú spätnú väzbu ako od
-                vedúceho práce.
+                Používateľ vloží text práce do chatbota a dostane odbornú
+                spätnú väzbu ako od vedúceho práce.
               </p>
 
               {activeProfile && (
@@ -2227,20 +2312,6 @@ function SupervisorModule({
                     <div className="mt-1">
                       <span className="text-gray-400">Téma:</span>{' '}
                       {activeProfile.topic}
-                    </div>
-                  )}
-
-                  {activeProfile.type && (
-                    <div className="mt-1">
-                      <span className="text-gray-400">Typ práce:</span>{' '}
-                      {activeProfile.type}
-                    </div>
-                  )}
-
-                  {activeProfile.citation && (
-                    <div className="mt-1">
-                      <span className="text-gray-400">Citovanie:</span>{' '}
-                      {activeProfile.citation}
                     </div>
                   )}
                 </div>
@@ -2268,7 +2339,7 @@ function SupervisorModule({
           allow="microphone; clipboard-read; clipboard-write"
         />
       </div>
-    </div>
+    </ModuleLayout>
   );
 }
 
@@ -2277,150 +2348,37 @@ function AuditModule({
 }: {
   activeProfile: SavedProfile | null;
 }) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
   const [text, setText] = useState('');
   const [checkType, setCheckType] = useState('Všetko');
   const [outputType, setOutputType] = useState('Detailná správa');
   const [citationStyle, setCitationStyle] = useState(
-    activeProfile?.citation || 'ISO 690'
+    activeProfile?.citation || 'ISO 690',
   );
-
-  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-  const [fileError, setFileError] = useState('');
-
   const [result, setResult] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const addAttachedFiles = (files: FileList | File[]) => {
-    setFileError('');
-
-    const incomingFiles = Array.from(files);
-
-    if (!incomingFiles.length) return;
-
-    setAttachedFiles((currentFiles) => {
-      const nextFiles = [...currentFiles];
-
-      for (const file of incomingFiles) {
-        const extension = getFileExtension(file.name);
-
-        if (!isSupportedFile(file)) {
-          setFileError(
-            `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, RTF, ODT, MD, obrázky, Excel, CSV a PowerPoint.`,
-          );
-          continue;
-        }
-
-        if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
-          setFileError(
-            `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť je ${MAX_UPLOAD_FILE_SIZE_MB} MB.`,
-          );
-          continue;
-        }
-
-        if (nextFiles.length >= MAX_UPLOAD_FILES) {
-          setFileError(`Môžete priložiť maximálne ${MAX_UPLOAD_FILES} súborov.`);
-          break;
-        }
-
-        const duplicate = nextFiles.some(
-          (item) => item.name === file.name && item.size === file.size,
-        );
-
-        if (duplicate) {
-          continue;
-        }
-
-        nextFiles.push({
-          id:
-            typeof crypto !== 'undefined' && 'randomUUID' in crypto
-              ? crypto.randomUUID()
-              : `${Date.now()}-${Math.random()}`,
-          file,
-          name: file.name,
-          size: file.size,
-          type: file.type || 'application/octet-stream',
-          extension,
-        });
-      }
-
-      return nextFiles;
-    });
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
-  const removeAttachedFile = (id: string) => {
-    setAttachedFiles((currentFiles) =>
-      currentFiles.filter((file) => file.id !== id),
-    );
-  };
-
-  const uploadAttachedFiles = async () => {
-    if (!attachedFiles.length) {
-      return [];
-    }
-
-    const formData = new FormData();
-
-    for (const item of attachedFiles) {
-      formData.append('files', item.file, item.name);
-    }
-
-    const response = await fetch('/api/uploads', {
-      method: 'POST',
-      body: formData,
-    });
-
-    const data = await response.json();
-
-    if (!response.ok || !data.ok) {
-      throw new Error(
-        data?.message ||
-          data?.error ||
-          'Nepodarilo sa nahrať priložené súbory.',
-      );
-    }
-
-    return data.files || [];
-  };
-
   const runAudit = async () => {
     setError('');
-    setFileError('');
     setResult('');
 
-    const hasText = text.trim().length >= 300;
-    const hasFiles = attachedFiles.length > 0;
-
-    if (!hasText && !hasFiles) {
-      setError(
-        'Vlož aspoň 300 znakov textu alebo nahraj prílohu na audit kvality.',
-      );
+    if (text.trim().length < 300) {
+      setError('Vlož aspoň 300 znakov textu na audit kvality.');
       return;
     }
 
     setLoading(true);
 
     try {
-      const uploadedFiles = await uploadAttachedFiles();
-
       const response = await fetch('/api/audit', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text,
           checkType,
           outputType,
           citationStyle,
           activeProfile,
-          attachments: uploadedFiles,
         }),
       });
 
@@ -2432,12 +2390,11 @@ function AuditModule({
 
       setResult(data.result || '');
     } catch (err) {
-      const message =
+      setError(
         err instanceof Error
           ? err.message
-          : 'Neznáma chyba pri audite kvality.';
-
-      setError(message);
+          : 'Neznáma chyba pri audite kvality.',
+      );
     } finally {
       setLoading(false);
     }
@@ -2445,198 +2402,48 @@ function AuditModule({
 
   return (
     <ModuleLayout>
-      {activeProfile && (
-        <div className="rounded-2xl border border-purple-500/20 bg-purple-500/10 p-4 text-sm text-purple-100">
-          Audit sa vykoná podľa aktívneho profilu práce:{' '}
-          <strong>{activeProfile.title || 'Bez názvu'}</strong>
-          {activeProfile.topic ? ` — ${activeProfile.topic}` : ''}
-        </div>
-      )}
-
-      {!activeProfile && (
-        <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
-          Profil práce nie je vytvorený. Audit bude fungovať, ale bez kontextu
-          témy, metodológie a typu práce.
-        </div>
-      )}
-
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Text na audit kvality
-        </div>
-
-        <textarea
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          rows={12}
-          placeholder="Vlož sem kapitolu, úvod, záver alebo inú časť práce. Ak nechceš vkladať text ručne, nahraj súbor nižšie..."
-          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-        />
-      </label>
-
-      {/* =====================================================
-          PRÍLOHY NA AUDIT KVALITY
-      ===================================================== */}
-
-      <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-lg font-bold text-white">
-              <Paperclip size={20} className="text-purple-400" />
-              Prílohy na audit kvality
-            </div>
-
-            <p className="mt-1 text-sm text-gray-400">
-              Používateľ môže nahrať prácu alebo kapitolu priamo z počítača.
-              Zedpera prílohu spracuje a použije ju pri audite kvality.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-purple-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-purple-500"
-          >
-            <UploadCloud size={18} />
-            Nahrať prílohu
-          </button>
-        </div>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept={FILE_INPUT_ACCEPT}
-          className="hidden"
-          onChange={(event) => {
-            if (event.target.files) {
-              addAttachedFiles(event.target.files);
-            }
-          }}
-        />
-
-        <div
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-
-            if (event.dataTransfer.files) {
-              addAttachedFiles(event.dataTransfer.files);
-            }
-          }}
-          className="rounded-2xl border border-dashed border-white/15 bg-black/20 p-5 text-center text-sm text-gray-400"
-        >
-          Pretiahnite sem súbor alebo kliknite na tlačidlo „Nahrať prílohu“.
-          <div className="mt-2 text-xs text-gray-500">
-            Podporované formáty: PDF, Word, TXT, RTF, ODT, MD, obrázky, Excel,
-            CSV a PowerPoint. Maximálne {MAX_UPLOAD_FILES} súborov, každý do{' '}
-            {MAX_UPLOAD_FILE_SIZE_MB} MB.
-          </div>
-        </div>
-
-        {fileError && (
-          <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
-            {fileError}
-          </div>
-        )}
-
-        {attachedFiles.length > 0 && (
-          <div className="mt-4 space-y-2">
-            <div className="text-xs font-black uppercase tracking-[0.15em] text-gray-500">
-              Priložené súbory na audit ({attachedFiles.length})
-            </div>
-
-            {attachedFiles.map((item) => (
-              <div
-                key={item.id}
-                className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0f1324] p-3 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="rounded-xl bg-purple-600/20 px-3 py-2 text-xs font-bold text-purple-200">
-                    {getFileTypeLabel(item.extension)}
-                  </div>
-
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-white">
-                      {item.name}
-                    </div>
-
-                    <div className="text-xs text-gray-500">
-                      {item.extension.toUpperCase()} · {formatFileSize(item.size)}
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => removeAttachedFile(item.id)}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/20"
-                >
-                  <Trash2 size={14} />
-                  Odstrániť
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <TextareaField
+        label="Text na audit kvality"
+        value={text}
+        onChange={setText}
+        rows={12}
+        placeholder="Vlož sem kapitolu, úvod, záver alebo inú časť práce..."
+      />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <label className="block">
-          <div className="mb-2 text-sm font-semibold text-gray-300">
-            Kontrola
-          </div>
+        <SelectField
+          label="Kontrola"
+          value={checkType}
+          onChange={setCheckType}
+          options={[
+            'Všetko',
+            'Logika',
+            'Metodológia',
+            'Argumentácia',
+            'Štylistika',
+            'Citácie',
+            'Štruktúra práce',
+          ]}
+        />
 
-          <select
-            value={checkType}
-            onChange={(event) => setCheckType(event.target.value)}
-            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-          >
-            <option>Všetko</option>
-            <option>Logika</option>
-            <option>Metodológia</option>
-            <option>Argumentácia</option>
-            <option>Štylistika</option>
-            <option>Citácie</option>
-            <option>Štruktúra práce</option>
-          </select>
-        </label>
+        <SelectField
+          label="Výstup"
+          value={outputType}
+          onChange={setOutputType}
+          options={[
+            'Detailná správa',
+            'Bodové hodnotenie',
+            'Odporúčania',
+            'Prísna kritika',
+          ]}
+        />
 
-        <label className="block">
-          <div className="mb-2 text-sm font-semibold text-gray-300">
-            Výstup
-          </div>
-
-          <select
-            value={outputType}
-            onChange={(event) => setOutputType(event.target.value)}
-            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-          >
-            <option>Detailná správa</option>
-            <option>Bodové hodnotenie</option>
-            <option>Odporúčania</option>
-            <option>Prísna kritika</option>
-          </select>
-        </label>
-
-        <label className="block">
-          <div className="mb-2 text-sm font-semibold text-gray-300">
-            Citačná norma
-          </div>
-
-          <select
-            value={citationStyle}
-            onChange={(event) => setCitationStyle(event.target.value)}
-            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-          >
-            <option>ISO 690</option>
-            <option>APA</option>
-            <option>APA 7</option>
-            <option>Harvard</option>
-            <option>MLA</option>
-            <option>Chicago</option>
-          </select>
-        </label>
+        <SelectField
+          label="Citačná norma"
+          value={citationStyle}
+          onChange={setCitationStyle}
+          options={['ISO 690', 'APA', 'APA 7', 'Harvard', 'MLA', 'Chicago']}
+        />
       </div>
 
       <button
@@ -2649,55 +2456,29 @@ function AuditModule({
         {loading ? 'Prebieha audit...' : 'Spustiť audit kvality'}
       </button>
 
-      {error && (
-        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
-          {error}
-        </div>
-      )}
+      {error && <Notice type="error">{error}</Notice>}
 
-      {result && (
-        <div className="rounded-3xl border border-white/10 bg-[#0f1324] p-6">
-          <div className="mb-3 text-lg font-black text-white">
-            Výsledok auditu kvality
-          </div>
-
-          <div className="whitespace-pre-wrap text-sm leading-7 text-gray-200">
-            {result}
-          </div>
-        </div>
-      )}
+      {result && <ResultBox title="Výsledok auditu kvality" text={result} />}
     </ModuleLayout>
   );
 }
-
-type DefenseSlide = {
-  title: string;
-  bullets: string[];
-  speakerNotes?: string;
-};
 
 function DefenseModule({
   activeProfile,
 }: {
   activeProfile: SavedProfile | null;
 }) {
-  const reviewFileInputRef = useRef<HTMLInputElement | null>(null);
-
   const [title, setTitle] = useState(activeProfile?.title || '');
   const [summary, setSummary] = useState(
     activeProfile?.annotation ||
       activeProfile?.goal ||
       activeProfile?.topic ||
-      ''
+      '',
   );
   const [defenseType, setDefenseType] = useState('Bakalárska');
-  const [slides, setSlides] = useState<DefenseSlide[]>([]);
+  const [result, setResult] = useState('');
   const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
-
-  const [reviewFiles, setReviewFiles] = useState<AttachedFile[]>([]);
-  const [reviewFileError, setReviewFileError] = useState('');
 
   useEffect(() => {
     if (!activeProfile) return;
@@ -2707,7 +2488,7 @@ function DefenseModule({
       activeProfile.annotation ||
         activeProfile.goal ||
         activeProfile.topic ||
-        ''
+        '',
     );
 
     if (activeProfile.type) {
@@ -2715,80 +2496,9 @@ function DefenseModule({
     }
   }, [activeProfile]);
 
-  const addReviewFiles = (files: FileList | File[]) => {
-    setReviewFileError('');
-
-    const incomingFiles = Array.from(files);
-
-    if (!incomingFiles.length) return;
-
-    setReviewFiles((currentFiles) => {
-      const nextFiles = [...currentFiles];
-
-      for (const file of incomingFiles) {
-        const extension = getFileExtension(file.name);
-
-        if (!isSupportedFile(file)) {
-          setReviewFileError(
-            `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, RTF, ODT, obrázky, Excel, CSV a PowerPoint.`,
-          );
-          continue;
-        }
-
-        if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
-          setReviewFileError(
-            `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť je ${MAX_UPLOAD_FILE_SIZE_MB} MB.`,
-          );
-          continue;
-        }
-
-        if (nextFiles.length >= MAX_UPLOAD_FILES) {
-          setReviewFileError(
-            `Môžete priložiť maximálne ${MAX_UPLOAD_FILES} posudkov alebo podkladov.`,
-          );
-          break;
-        }
-
-        const duplicate = nextFiles.some(
-          (item) => item.name === file.name && item.size === file.size,
-        );
-
-        if (duplicate) {
-          continue;
-        }
-
-        nextFiles.push({
-          id:
-            typeof crypto !== 'undefined' && 'randomUUID' in crypto
-              ? crypto.randomUUID()
-              : `${Date.now()}-${Math.random()}`,
-          file,
-          name: file.name,
-          size: file.size,
-          type: file.type || 'application/octet-stream',
-          extension,
-        });
-      }
-
-      return nextFiles;
-    });
-
-    if (reviewFileInputRef.current) {
-      reviewFileInputRef.current.value = '';
-    }
-  };
-
-  const removeReviewFile = (id: string) => {
-    setReviewFiles((currentFiles) =>
-      currentFiles.filter((file) => file.id !== id),
-    );
-  };
-
-
-    const generateDefense = async () => {
+  const generateDefense = async () => {
     setError('');
-    setReviewFileError('');
-    setSlides([]);
+    setResult('');
 
     if (!title.trim()) {
       setError('Zadaj názov práce.');
@@ -2803,20 +2513,10 @@ function DefenseModule({
     setLoading(true);
 
     try {
-      const formData = new FormData();
-
-      formData.append('title', title);
-      formData.append('summary', summary);
-      formData.append('defenseType', defenseType);
-      formData.append('activeProfile', JSON.stringify(activeProfile || null));
-
-      reviewFiles.forEach((item) => {
-        formData.append('reviews', item.file, item.name);
-      });
-
       const response = await fetch('/api/defense', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, summary, defenseType, activeProfile }),
       });
 
       const data = await response.json();
@@ -2825,389 +2525,73 @@ function DefenseModule({
         throw new Error(data?.error || 'Nepodarilo sa pripraviť obhajobu.');
       }
 
-      setSlides(data.slides || []);
+      setResult(data.result || JSON.stringify(data.slides || [], null, 2));
     } catch (err) {
-      const message =
+      setError(
         err instanceof Error
           ? err.message
-          : 'Neznáma chyba pri príprave obhajoby.';
-
-      setError(message);
+          : 'Neznáma chyba pri príprave obhajoby.',
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  const exportPptx = async () => {
-    if (!slides.length) {
-      setError('Najprv vygeneruj prezentáciu.');
-      return;
-    }
-
-    setExporting(true);
-    setError('');
-
-    try {
-      const response = await fetch('/api/defense/pptx', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title,
-          defenseType,
-          slides,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Export do PowerPointu zlyhal.');
-      }
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${safeFileName(title || 'obhajoba')}.pptx`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Export do PowerPointu zlyhal.';
-
-      setError(message);
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const exportPdf = async () => {
-    if (!slides.length) {
-      setError('Najprv vygeneruj prezentáciu.');
-      return;
-    }
-
-    setExporting(true);
-    setError('');
-
-    try {
-      const element = document.getElementById('defense-pdf-export');
-
-      if (!element) {
-        throw new Error('PDF obsah sa nenašiel.');
-      }
-
-      const html2pdfModule = await import('html2pdf.js');
-      const html2pdf = html2pdfModule.default;
-
-      await html2pdf()
-        .set({
-          margin: 8,
-          filename: `${safeFileName(title || 'obhajoba')}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: '#ffffff',
-          },
-          jsPDF: {
-            unit: 'mm',
-            format: 'a4',
-            orientation: 'landscape',
-          },
-        })
-        .from(element)
-        .save();
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Export do PDF zlyhal.';
-
-      setError(message);
-    } finally {
-      setExporting(false);
-    }
-  };
-
   return (
     <ModuleLayout>
-      {activeProfile && (
-        <div className="rounded-2xl border border-purple-500/20 bg-purple-500/10 p-4 text-sm text-purple-100">
-          Prezentácia sa pripraví podľa aktívneho profilu práce:{' '}
-          <strong>{activeProfile.title || 'Bez názvu'}</strong>
-          {activeProfile.topic ? ` — ${activeProfile.topic}` : ''}
-        </div>
-      )}
+      <InputField
+        label="Názov práce"
+        value={title}
+        onChange={setTitle}
+        placeholder="Názov záverečnej práce"
+      />
 
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Názov práce
-        </div>
+      <TextareaField
+        label="Stručný obsah práce"
+        value={summary}
+        onChange={setSummary}
+        rows={8}
+        placeholder="Vlož abstrakt, cieľ práce, metodológiu alebo stručný opis práce..."
+      />
 
-        <input
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          placeholder="Názov záverečnej práce"
-          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-        />
-      </label>
+      <SelectField
+        label="Typ obhajoby"
+        value={defenseType}
+        onChange={setDefenseType}
+        options={[
+          'Bakalárska',
+          'Diplomová',
+          'Seminárna',
+          'Dizertačná',
+          'Projektová',
+        ]}
+      />
 
-      {/* =====================================================
-          POSUDKY / PODKLADY K OBHAJOBE
-      ===================================================== */}
+      <button
+        type="button"
+        onClick={generateDefense}
+        disabled={loading}
+        className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <Presentation size={20} />
+        {loading ? 'Vytváram obhajobu...' : 'Vytvoriť obhajobu'}
+      </button>
 
-      <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-lg font-bold text-white">
-              <Paperclip size={20} className="text-purple-400" />
-              Posudky k obhajobe
-            </div>
+      {error && <Notice type="error">{error}</Notice>}
 
-            <p className="mt-1 text-sm text-gray-400">
-              Nahraj posudok vedúceho, posudok oponenta alebo ďalšie podklady.
-              Zedpera ich zapracuje do prezentácie, otázok, odpovedí a časti
-              „reakcia na pripomienky“.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => reviewFileInputRef.current?.click()}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-purple-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-purple-500"
-          >
-            <UploadCloud size={18} />
-            Nahrať posudky
-          </button>
-        </div>
-
-        <input
-          ref={reviewFileInputRef}
-          type="file"
-          multiple
-          accept={FILE_INPUT_ACCEPT}
-          className="hidden"
-          onChange={(event) => {
-            if (event.target.files) {
-              addReviewFiles(event.target.files);
-            }
-          }}
-        />
-
-        <div
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-
-            if (event.dataTransfer.files) {
-              addReviewFiles(event.dataTransfer.files);
-            }
-          }}
-          className="rounded-2xl border border-dashed border-white/15 bg-black/20 p-5 text-center text-sm text-gray-400"
-        >
-          Pretiahnite sem posudky alebo kliknite na tlačidlo „Nahrať posudky“.
-          <div className="mt-2 text-xs text-gray-500">
-            Maximálne {MAX_UPLOAD_FILES} súborov, každý do{' '}
-            {MAX_UPLOAD_FILE_SIZE_MB} MB.
-          </div>
-        </div>
-
-        {reviewFileError && (
-          <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
-            {reviewFileError}
-          </div>
-        )}
-
-        {reviewFiles.length > 0 && (
-          <div className="mt-4 space-y-2">
-            <div className="text-xs font-black uppercase tracking-[0.15em] text-gray-500">
-              Priložené posudky ({reviewFiles.length})
-            </div>
-
-            {reviewFiles.map((item) => (
-              <div
-                key={item.id}
-                className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0f1324] p-3 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="rounded-xl bg-purple-600/20 px-3 py-2 text-xs font-bold text-purple-200">
-                    {getFileTypeLabel(item.extension)}
-                  </div>
-
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-white">
-                      {item.name}
-                    </div>
-
-                    <div className="text-xs text-gray-500">
-                      {item.extension.toUpperCase()} · {formatFileSize(item.size)}
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => removeReviewFile(item.id)}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/20"
-                >
-                  <Trash2 size={14} />
-                  Odstrániť
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Stručný obsah práce
-        </div>
-
-        <textarea
-          value={summary}
-          onChange={(event) => setSummary(event.target.value)}
-          rows={8}
-          placeholder="Vlož abstrakt, cieľ práce, metodológiu alebo stručný opis práce..."
-          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-        />
-      </label>
-
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Typ obhajoby
-        </div>
-
-        <select
-          value={defenseType}
-          onChange={(event) => setDefenseType(event.target.value)}
-          className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-        >
-          <option>Bakalárska</option>
-          <option>Diplomová</option>
-          <option>Seminárna</option>
-          <option>Dizertačná</option>
-          <option>Projektová</option>
-        </select>
-      </label>
-
-      <div className="flex flex-wrap gap-3">
-  <button
-    type="button"
-    onClick={generateDefense}
-    disabled={loading}
-    className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-  >
-    <Presentation size={20} />
-    {loading ? 'Vytváram prezentáciu...' : 'Vytvoriť prezentáciu'}
-  </button>
-
-  <button
-    type="button"
-    onClick={exportPptx}
-    disabled={!slides.length || exporting}
-    className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 font-bold transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
-  >
-    Export PowerPoint
-  </button>
-
-  <button
-    type="button"
-    onClick={exportPdf}
-    disabled={!slides.length || exporting}
-    className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 font-bold transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
-  >
-    Export PDF
-  </button>
-</div>
-
-      {error && (
-        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
-          {error}
-        </div>
-      )}
-
-      {slides.length > 0 && (
-        <div className="space-y-5">
-          <div className="rounded-3xl border border-white/10 bg-[#0f1324] p-6">
-            <h3 className="mb-2 text-2xl font-black">
-              Náhľad prezentácie
-            </h3>
-            <p className="text-sm text-gray-400">
-              Táto prezentácia sa exportuje do PowerPointu aj PDF.
-            </p>
-          </div>
-
-          <div id="defense-pdf-export" className="space-y-6 bg-white p-6 text-black">
-            <div className="rounded-2xl border border-gray-300 bg-white p-8">
-              <div className="text-sm uppercase tracking-wide text-purple-700">
-                {defenseType} obhajoba
-              </div>
-              <h1 className="mt-4 text-4xl font-black">{title}</h1>
-              <p className="mt-4 text-lg text-gray-700">
-                Prezentácia pripravená systémom ZEDPERA
-              </p>
-            </div>
-
-            {slides.map((slide, index) => (
-              <div
-                key={`${slide.title}-${index}`}
-                className="rounded-2xl border border-gray-300 bg-white p-8"
-              >
-                <div className="mb-3 text-sm font-bold text-purple-700">
-                  Slide {index + 1}
-                </div>
-
-                <h2 className="mb-5 text-3xl font-black">{slide.title}</h2>
-
-                <ul className="space-y-3 text-lg">
-                  {slide.bullets.map((bullet, bulletIndex) => (
-                    <li key={`${bullet}-${bulletIndex}`} className="flex gap-3">
-                      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-purple-600" />
-                      <span>{bullet}</span>
-                    </li>
-                  ))}
-                </ul>
-
-                {slide.speakerNotes && (
-                  <div className="mt-6 rounded-xl bg-gray-100 p-4 text-sm text-gray-700">
-                    <strong>Poznámky k prezentovaniu:</strong>{' '}
-                    {slide.speakerNotes}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {result && <ResultBox title="Výsledok obhajoby" text={result} />}
     </ModuleLayout>
   );
-}
-
-function safeFileName(value: string) {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9-_]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .toLowerCase();
 }
 
 function TranslateModule() {
   const [sourceLanguage, setSourceLanguage] = useState('Angličtina');
   const [targetLanguage, setTargetLanguage] = useState('Slovenčina');
   const [style, setStyle] = useState('Akademický');
-
   const [inputText, setInputText] = useState('');
   const [translatedText, setTranslatedText] = useState('');
-
   const [isTranslating, setIsTranslating] = useState(false);
   const [error, setError] = useState('');
-  const [copied, setCopied] = useState(false);
 
   const translateText = async () => {
     const text = inputText.trim();
@@ -3219,20 +2603,12 @@ function TranslateModule() {
 
     setIsTranslating(true);
     setError('');
-    setCopied(false);
 
     try {
       const response = await fetch('/api/translate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          sourceLanguage,
-          targetLanguage,
-          style,
-          text,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceLanguage, targetLanguage, style, text }),
       });
 
       const data = await response.json();
@@ -3241,167 +2617,83 @@ function TranslateModule() {
         throw new Error(data?.error || 'Preklad sa nepodaril.');
       }
 
-      const output = String(data.translatedText || '').trim();
-
-      if (!output) {
-        throw new Error('AI nevrátila žiadny preklad.');
-      }
-
-      setTranslatedText(output);
+      setTranslatedText(String(data.translatedText || '').trim());
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : 'Neznáma chyba pri preklade.'
+        err instanceof Error ? err.message : 'Neznáma chyba pri preklade.',
       );
     } finally {
       setIsTranslating(false);
     }
   };
 
-  const copyResult = async () => {
-    const text = translatedText.trim();
-
-    if (!text) {
-      setError('Nie je čo kopírovať. Najprv vytvor preklad.');
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setError('');
-
-      window.setTimeout(() => {
-        setCopied(false);
-      }, 2500);
-    } catch {
-      setError('Nepodarilo sa skopírovať preklad.');
-    }
-  };
-
   return (
     <ModuleLayout>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <label className="block">
-          <div className="mb-2 text-sm font-semibold text-gray-300">
-            Z jazyka
-          </div>
+        <SelectField
+          label="Z jazyka"
+          value={sourceLanguage}
+          onChange={setSourceLanguage}
+          options={[
+            'Automaticky',
+            'Slovenčina',
+            'Čeština',
+            'Angličtina',
+            'Nemčina',
+            'Poľština',
+            'Maďarčina',
+          ]}
+        />
 
-          <select
-            value={sourceLanguage}
-            onChange={(event) => setSourceLanguage(event.target.value)}
-            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-          >
-            <option>Automaticky</option>
-            <option>Slovenčina</option>
-            <option>Čeština</option>
-            <option>Angličtina</option>
-            <option>Nemčina</option>
-            <option>Poľština</option>
-            <option>Maďarčina</option>
-          </select>
-        </label>
-
-        <label className="block">
-          <div className="mb-2 text-sm font-semibold text-gray-300">
-            Do jazyka
-          </div>
-
-          <select
-            value={targetLanguage}
-            onChange={(event) => setTargetLanguage(event.target.value)}
-            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-          >
-            <option>Slovenčina</option>
-            <option>Čeština</option>
-            <option>Angličtina</option>
-            <option>Nemčina</option>
-            <option>Poľština</option>
-            <option>Maďarčina</option>
-          </select>
-        </label>
+        <SelectField
+          label="Do jazyka"
+          value={targetLanguage}
+          onChange={setTargetLanguage}
+          options={[
+            'Slovenčina',
+            'Čeština',
+            'Angličtina',
+            'Nemčina',
+            'Poľština',
+            'Maďarčina',
+          ]}
+        />
       </div>
 
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Štýl prekladu
-        </div>
+      <SelectField
+        label="Štýl prekladu"
+        value={style}
+        onChange={setStyle}
+        options={['Akademický', 'Odborný', 'Jednoduchý', 'Formálny', 'Doslovný']}
+      />
 
-        <select
-          value={style}
-          onChange={(event) => setStyle(event.target.value)}
-          className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-        >
-          <option>Akademický</option>
-          <option>Odborný</option>
-          <option>Jednoduchý</option>
-          <option>Formálny</option>
-          <option>Doslovný</option>
-        </select>
-      </label>
+      <TextareaField
+        label="Text na preklad"
+        value={inputText}
+        onChange={setInputText}
+        rows={9}
+        placeholder="Vlož text, ktorý chceš preložiť..."
+      />
 
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Text na preklad
-        </div>
+      <button
+        type="button"
+        onClick={translateText}
+        disabled={isTranslating}
+        className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <Languages size={20} />
+        {isTranslating ? 'Prekladám text...' : 'Preložiť text'}
+      </button>
 
-        <textarea
-          value={inputText}
-          onChange={(event) => setInputText(event.target.value)}
-          rows={9}
-          placeholder="Vlož text, ktorý chceš preložiť..."
-          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-        />
-      </label>
+      {error && <Notice type="error">{error}</Notice>}
 
-      <div className="flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={translateText}
-          disabled={isTranslating}
-          className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <Languages size={20} />
-          {isTranslating ? 'Prekladám text...' : 'Preložiť text'}
-        </button>
-
-        <button
-          type="button"
-          onClick={copyResult}
-          className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 font-bold text-white transition hover:bg-white/15"
-        >
-          {copied ? 'Skopírované' : 'Skopírovať preklad'}
-        </button>
-      </div>
-
-      {error && (
-        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
-          {error}
-        </div>
-      )}
-
-      <label className="block">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <div className="text-sm font-semibold text-gray-300">
-            Výsledný preklad
-          </div>
-
-          {translatedText && (
-            <span className="rounded-full bg-green-500/10 px-3 py-1 text-xs font-semibold text-green-300">
-              Preklad pripravený
-            </span>
-          )}
-        </div>
-
-        <textarea
-          value={translatedText}
-          onChange={(event) => setTranslatedText(event.target.value)}
-          rows={10}
-          placeholder="Tu sa zobrazí preložený text..."
-          className="w-full rounded-2xl border border-purple-500/30 bg-[#0f1324] px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
-        />
-      </label>
+      <TextareaField
+        label="Výsledný preklad"
+        value={translatedText}
+        onChange={setTranslatedText}
+        rows={10}
+        placeholder="Tu sa zobrazí preložený text..."
+      />
     </ModuleLayout>
   );
 }
@@ -3411,187 +2703,33 @@ function AnalysisModule({
 }: {
   activeProfile: SavedProfile | null;
 }) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  const [analysisGoal, setAnalysisGoal] = useState('');
-  const [hypotheses, setHypotheses] = useState('');
-  const [methodology, setMethodology] = useState(
-    activeProfile?.methodology || ''
-  );
+  const [analysisGoal, setAnalysisGoal] = useState(activeProfile?.goal || '');
   const [dataDescription, setDataDescription] = useState('');
-  const [analysisType, setAnalysisType] = useState(
-    'Výber výpočtov pre analytickú časť'
-  );
-  const [software, setSoftware] = useState('JASP');
-  const [outputStyle, setOutputStyle] = useState('Text do záverečnej práce');
-
-  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-  const [fileError, setFileError] = useState('');
-
   const [result, setResult] = useState('');
-  const [selectedCalculations, setSelectedCalculations] = useState('');
-  const [interpretation, setInterpretation] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (!activeProfile) return;
-
-    if (activeProfile.goal && !analysisGoal) {
-      setAnalysisGoal(activeProfile.goal);
-    }
-
-    if (activeProfile.hypotheses && !hypotheses) {
-      setHypotheses(activeProfile.hypotheses);
-    }
-
-    if (activeProfile.methodology && !methodology) {
-      setMethodology(activeProfile.methodology);
-    }
-  }, [activeProfile]);
-
-  const addAttachedFiles = (files: FileList | File[]) => {
-    setFileError('');
-
-    const incomingFiles = Array.from(files);
-
-    if (!incomingFiles.length) return;
-
-    setAttachedFiles((currentFiles) => {
-      const nextFiles = [...currentFiles];
-
-      for (const file of incomingFiles) {
-        const extension = getFileExtension(file.name);
-
-        if (!isSupportedFile(file)) {
-          setFileError(
-            `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, RTF, ODT, MD, obrázky, Excel, CSV a PowerPoint.`,
-          );
-          continue;
-        }
-
-        if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
-          setFileError(
-            `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť je ${MAX_UPLOAD_FILE_SIZE_MB} MB.`,
-          );
-          continue;
-        }
-
-        if (nextFiles.length >= MAX_UPLOAD_FILES) {
-          setFileError(`Môžete priložiť maximálne ${MAX_UPLOAD_FILES} súborov.`);
-          break;
-        }
-
-        const duplicate = nextFiles.some(
-          (item) => item.name === file.name && item.size === file.size,
-        );
-
-        if (duplicate) {
-          continue;
-        }
-
-        nextFiles.push({
-          id:
-            typeof crypto !== 'undefined' && 'randomUUID' in crypto
-              ? crypto.randomUUID()
-              : `${Date.now()}-${Math.random()}`,
-          file,
-          name: file.name,
-          size: file.size,
-          type: file.type || 'application/octet-stream',
-          extension,
-        });
-      }
-
-      return nextFiles;
-    });
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
-  const removeAttachedFile = (id: string) => {
-    setAttachedFiles((currentFiles) =>
-      currentFiles.filter((file) => file.id !== id),
-    );
-  };
-
-  const uploadAttachedFiles = async () => {
-    if (!attachedFiles.length) {
-      return [];
-    }
-
-    const formData = new FormData();
-
-    for (const item of attachedFiles) {
-      formData.append('files', item.file, item.name);
-    }
-
-    const response = await fetch('/api/uploads', {
-      method: 'POST',
-      body: formData,
-    });
-
-    const data = await response.json();
-
-    if (!response.ok || !data.ok) {
-      throw new Error(
-        data?.message ||
-          data?.error ||
-          'Nepodarilo sa nahrať priložené súbory.',
-      );
-    }
-
-    return data.files || [];
-  };
-
   const runAnalysis = async () => {
     setError('');
-    setFileError('');
     setResult('');
-    setSelectedCalculations('');
-    setInterpretation('');
 
-    const hasFiles = attachedFiles.length > 0;
-    const hasDataDescription = dataDescription.trim().length >= 30;
-    const hasGoal = analysisGoal.trim().length >= 10;
-
-    if (!hasFiles && !hasDataDescription) {
-      setError(
-        'Nahraj súbor s výsledkami z JASP/SPSS/Excelu alebo vlož opis dát aspoň v rozsahu 30 znakov.',
-      );
+    if (!analysisGoal.trim()) {
+      setError('Doplň cieľ práce alebo cieľ analytickej časti.');
       return;
     }
 
-    if (!hasGoal && !activeProfile?.goal) {
-      setError(
-        'Doplň cieľ práce. Bez cieľa práce nie je možné správne vybrať výpočty do analytickej časti.',
-      );
+    if (dataDescription.trim().length < 30) {
+      setError('Vlož opis dát aspoň v rozsahu 30 znakov.');
       return;
     }
 
     setLoading(true);
 
     try {
-      const uploadedFiles = await uploadAttachedFiles();
-
       const response = await fetch('/api/analysis', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          analysisGoal,
-          hypotheses,
-          methodology,
-          dataDescription,
-          analysisType,
-          software,
-          outputStyle,
-          activeProfile,
-          attachments: uploadedFiles,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ analysisGoal, dataDescription, activeProfile }),
       });
 
       const data = await response.json();
@@ -3601,8 +2739,6 @@ function AnalysisModule({
       }
 
       setResult(data.result || '');
-      setSelectedCalculations(data.selectedCalculations || '');
-      setInterpretation(data.interpretation || '');
     } catch (err) {
       setError(
         err instanceof Error
@@ -3616,263 +2752,25 @@ function AnalysisModule({
 
   return (
     <ModuleLayout>
-      <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-6">
-        <div className="flex items-start gap-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-300">
-            <BarChart3 size={26} />
-          </div>
+      <Notice type="info">
+        Modul je pripravený pre JASP, SPSS, Excel, CSV alebo ručný opis dát.
+      </Notice>
 
-          <div>
-            <h3 className="text-2xl font-black text-white">
-              Analýza dát z JASP / SPSS / Excelu
-            </h3>
+      <TextareaField
+        label="Cieľ práce / cieľ analytickej časti"
+        value={analysisGoal}
+        onChange={setAnalysisGoal}
+        rows={4}
+        placeholder="Napr. Cieľom práce je zistiť vzťah medzi..."
+      />
 
-            <p className="mt-2 text-sm leading-6 text-gray-300">
-              Nahraj výstupy z JASP, SPSS, Excelu alebo CSV. Zedpera pomôže
-              vybrať vhodné výpočty podľa cieľa práce, hypotéz a metodiky a
-              pripraví text do analytickej časti práce.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {activeProfile && (
-        <div className="rounded-2xl border border-purple-500/20 bg-purple-500/10 p-4 text-sm text-purple-100">
-          Analýza sa pripraví podľa aktívneho profilu práce:{' '}
-          <strong>{activeProfile.title || 'Bez názvu'}</strong>
-          {activeProfile.topic ? ` — ${activeProfile.topic}` : ''}
-        </div>
-      )}
-
-      {!activeProfile && (
-        <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
-          Profil práce nie je vytvorený. Analýza bude fungovať, ale odporúčam
-          doplniť cieľ práce, hypotézy a metodiku manuálne.
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <label className="block">
-          <div className="mb-2 text-sm font-semibold text-gray-300">
-            Softvér / zdroj výsledkov
-          </div>
-
-          <select
-            value={software}
-            onChange={(event) => setSoftware(event.target.value)}
-            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-          >
-            <option>JASP</option>
-            <option>SPSS</option>
-            <option>Excel</option>
-            <option>Jamovi</option>
-            <option>R</option>
-            <option>Python</option>
-            <option>Iné</option>
-          </select>
-        </label>
-
-        <label className="block">
-          <div className="mb-2 text-sm font-semibold text-gray-300">
-            Typ analýzy
-          </div>
-
-          <select
-            value={analysisType}
-            onChange={(event) => setAnalysisType(event.target.value)}
-            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-          >
-            <option>Výber výpočtov pre analytickú časť</option>
-            <option>Opis výskumného súboru</option>
-            <option>Frekvenčná analýza</option>
-            <option>Deskriptívna štatistika dotazníkov</option>
-            <option>Interpretácia JASP výstupov</option>
-            <option>Normalita a výber testov</option>
-            <option>Hypotézy a odporúčané testy</option>
-            <option>Text výsledkov do práce</option>
-            <option>Tabuľky do práce</option>
-            <option>Kompletná analytická časť</option>
-          </select>
-        </label>
-
-        <label className="block">
-          <div className="mb-2 text-sm font-semibold text-gray-300">
-            Typ výstupu
-          </div>
-
-          <select
-            value={outputStyle}
-            onChange={(event) => setOutputStyle(event.target.value)}
-            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-          >
-            <option>Text do záverečnej práce</option>
-            <option>Odborná interpretácia</option>
-            <option>Prehľad vhodných výpočtov</option>
-            <option>Tabuľka výsledkov</option>
-            <option>Odporúčania pre metodiku</option>
-            <option>Kontrola správnosti výberu testov</option>
-          </select>
-        </label>
-      </div>
-
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Cieľ práce / cieľ analytickej časti
-        </div>
-
-        <textarea
-          value={analysisGoal}
-          onChange={(event) => setAnalysisGoal(event.target.value)}
-          rows={4}
-          placeholder="Napr. Cieľom práce je zistiť vzťah medzi pracovnou spokojnosťou a psychickou pohodou zamestnancov..."
-          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-        />
-      </label>
-
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Hypotézy / výskumné otázky
-        </div>
-
-        <textarea
-          value={hypotheses}
-          onChange={(event) => setHypotheses(event.target.value)}
-          rows={5}
-          placeholder="Napr. H1: Existuje štatisticky významný vzťah medzi pracovnou spokojnosťou a psychickou pohodou. H2: Existujú rozdiely podľa typu podniku..."
-          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-        />
-      </label>
-
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Metodika práce / opis premenných
-        </div>
-
-        <textarea
-          value={methodology}
-          onChange={(event) => setMethodology(event.target.value)}
-          rows={5}
-          placeholder="Popíš výskumný súbor, použité dotazníky, premenné, škály, spôsob zberu dát a plánované štatistické testy..."
-          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-        />
-      </label>
-
-      <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-lg font-bold text-white">
-              <Paperclip size={20} className="text-purple-400" />
-              Prílohy s výsledkami
-            </div>
-
-            <p className="mt-1 text-sm text-gray-400">
-              Nahraj výstup z JASP/SPSS/Excelu. Podporované sú napríklad DOCX,
-              XLSX, CSV, PDF, TXT alebo obrázky s tabuľkami.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-purple-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-purple-500"
-          >
-            <UploadCloud size={18} />
-            Nahrať výsledky
-          </button>
-        </div>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept={FILE_INPUT_ACCEPT}
-          className="hidden"
-          onChange={(event) => {
-            if (event.target.files) {
-              addAttachedFiles(event.target.files);
-            }
-          }}
-        />
-
-        <div
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-
-            if (event.dataTransfer.files) {
-              addAttachedFiles(event.dataTransfer.files);
-            }
-          }}
-          className="rounded-2xl border border-dashed border-white/15 bg-black/20 p-5 text-center text-sm text-gray-400"
-        >
-          Pretiahnite sem výstupy z JASP/SPSS/Excelu alebo kliknite na tlačidlo
-          „Nahrať výsledky“.
-          <div className="mt-2 text-xs text-gray-500">
-            Maximálne {MAX_UPLOAD_FILES} súborov, každý do{' '}
-            {MAX_UPLOAD_FILE_SIZE_MB} MB.
-          </div>
-        </div>
-
-        {fileError && (
-          <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
-            {fileError}
-          </div>
-        )}
-
-        {attachedFiles.length > 0 && (
-          <div className="mt-4 space-y-2">
-            <div className="text-xs font-black uppercase tracking-[0.15em] text-gray-500">
-              Priložené výsledky ({attachedFiles.length})
-            </div>
-
-            {attachedFiles.map((item) => (
-              <div
-                key={item.id}
-                className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0f1324] p-3 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="rounded-xl bg-purple-600/20 px-3 py-2 text-xs font-bold text-purple-200">
-                    {getFileTypeLabel(item.extension)}
-                  </div>
-
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-white">
-                      {item.name}
-                    </div>
-
-                    <div className="text-xs text-gray-500">
-                      {item.extension.toUpperCase()} · {formatFileSize(item.size)}
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => removeAttachedFile(item.id)}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/20"
-                >
-                  <Trash2 size={14} />
-                  Odstrániť
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Doplnkový opis dát alebo poznámka
-        </div>
-
-        <textarea
-          value={dataDescription}
-          onChange={(event) => setDataDescription(event.target.value)}
-          rows={7}
-          placeholder="Sem môžeš doplniť, čo sa nachádza v súbore, čo chceš porovnať, ktoré premenné sú demografické, ktoré sú dotazníkové skóre a ktoré výpočty chceš použiť..."
-          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-        />
-      </label>
+      <TextareaField
+        label="Opis dát alebo výsledkov"
+        value={dataDescription}
+        onChange={setDataDescription}
+        rows={8}
+        placeholder="Popíš premenné, tabuľky, hypotézy, výpočty alebo sem vlož výstupy..."
+      />
 
       <button
         type="button"
@@ -3884,57 +2782,17 @@ function AnalysisModule({
         {loading ? 'Analyzujem výsledky...' : 'Analyzovať dáta'}
       </button>
 
-      {error && (
-        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
-          {error}
-        </div>
-      )}
+      {error && <Notice type="error">{error}</Notice>}
 
-      {selectedCalculations && (
-        <div className="rounded-3xl border border-purple-500/30 bg-purple-500/10 p-6">
-          <div className="mb-3 text-lg font-black text-white">
-            Odporúčaný výber výpočtov do práce
-          </div>
-
-          <div className="whitespace-pre-wrap text-sm leading-7 text-purple-100">
-            {selectedCalculations}
-          </div>
-        </div>
-      )}
-
-      {interpretation && (
-        <div className="rounded-3xl border border-blue-500/30 bg-blue-500/10 p-6">
-          <div className="mb-3 text-lg font-black text-white">
-            Interpretácia výsledkov
-          </div>
-
-          <div className="whitespace-pre-wrap text-sm leading-7 text-blue-100">
-            {interpretation}
-          </div>
-        </div>
-      )}
-
-      {result && (
-        <div className="rounded-3xl border border-white/10 bg-[#0f1324] p-6">
-          <div className="mb-3 text-lg font-black text-white">
-            Text do analytickej časti práce
-          </div>
-
-          <div className="whitespace-pre-wrap text-sm leading-7 text-gray-200">
-            {result}
-          </div>
-        </div>
-      )}
+      {result && <ResultBox title="Text do analytickej časti" text={result} />}
     </ModuleLayout>
   );
 }
 
 function PlanningModule() {
   const [deadline, setDeadline] = useState('');
-  const [planType, setPlanType] = useState('Týždenný plán');
   const [currentState, setCurrentState] = useState('');
-  const [availableTime, setAvailableTime] = useState('');
-  const [priority, setPriority] = useState('Dokončenie práce');
+  const [planType, setPlanType] = useState('Týždenný plán');
   const [result, setResult] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -3948,7 +2806,7 @@ function PlanningModule() {
       return;
     }
 
-    if (!currentState.trim() || currentState.trim().length < 20) {
+    if (currentState.trim().length < 20) {
       setError('Napíš aktuálny stav práce aspoň v rozsahu 20 znakov.');
       return;
     }
@@ -3956,31 +2814,10 @@ function PlanningModule() {
     setLoading(true);
 
     try {
-      let activeProfile = null;
-
-      if (typeof window !== 'undefined') {
-        const activeRaw = localStorage.getItem('active_profile');
-
-        try {
-          activeProfile = activeRaw ? JSON.parse(activeRaw) : null;
-        } catch {
-          activeProfile = null;
-        }
-      }
-
       const response = await fetch('/api/planning', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          deadline,
-          planType,
-          currentState,
-          availableTime,
-          priority,
-          activeProfile,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deadline, currentState, planType }),
       });
 
       const data = await response.json();
@@ -4003,114 +2840,34 @@ function PlanningModule() {
 
   return (
     <ModuleLayout>
-      <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-6">
-        <div className="flex items-start gap-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-300">
-            <CalendarDays size={26} />
-          </div>
+      <InputField
+        label="Termín odovzdania"
+        value={deadline}
+        onChange={setDeadline}
+        placeholder="Napr. 30. 6. 2026"
+      />
 
-          <div>
-            <h3 className="text-2xl font-black text-white">
-              Plánovanie práce
-            </h3>
+      <SelectField
+        label="Typ plánu"
+        value={planType}
+        onChange={setPlanType}
+        options={[
+          'Denný plán',
+          'Týždenný plán',
+          'Mesačný plán',
+          'Plán kapitol',
+          'Plán výskumu',
+          'Plán pred obhajobou',
+        ]}
+      />
 
-            <p className="mt-2 text-sm leading-6 text-gray-300">
-              Zedpera vytvorí konkrétny plán postupu podľa termínu odovzdania,
-              aktuálneho stavu práce a typu plánu. Výstup môžeš použiť ako
-              denný, týždenný alebo kapitolový harmonogram.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Termín odovzdania
-        </div>
-
-        <input
-          value={deadline}
-          onChange={(event) => setDeadline(event.target.value)}
-          placeholder="Napr. 30. 6. 2026 alebo 12.5.2027"
-          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-        />
-      </label>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <label className="block">
-          <div className="mb-2 text-sm font-semibold text-gray-300">
-            Typ plánu
-          </div>
-
-          <select
-            value={planType}
-            onChange={(event) => setPlanType(event.target.value)}
-            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-          >
-            <option>Denný plán</option>
-            <option>Týždenný plán</option>
-            <option>Mesačný plán</option>
-            <option>Plán kapitol</option>
-            <option>Plán výskumu</option>
-            <option>Plán pred odovzdaním</option>
-            <option>Plán pred obhajobou</option>
-          </select>
-        </label>
-
-        <label className="block">
-          <div className="mb-2 text-sm font-semibold text-gray-300">
-            Čas, ktorý máš k dispozícii
-          </div>
-
-          <select
-            value={availableTime}
-            onChange={(event) => setAvailableTime(event.target.value)}
-            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-          >
-            <option value="">Nešpecifikované</option>
-            <option>30 min denne</option>
-            <option>1 hodina denne</option>
-            <option>2 hodiny denne</option>
-            <option>3 až 4 hodiny denne</option>
-            <option>Iba víkendy</option>
-            <option>Intenzívne každý deň</option>
-          </select>
-        </label>
-
-        <label className="block">
-          <div className="mb-2 text-sm font-semibold text-gray-300">
-            Priorita
-          </div>
-
-          <select
-            value={priority}
-            onChange={(event) => setPriority(event.target.value)}
-            className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-          >
-            <option>Dokončenie práce</option>
-            <option>Doplnenie teórie</option>
-            <option>Výskumná časť</option>
-            <option>Metodológia</option>
-            <option>Citácie a zdroje</option>
-            <option>Formálna úprava</option>
-            <option>Príprava na obhajobu</option>
-          </select>
-        </label>
-      </div>
-
-      <label className="block">
-        <div className="mb-2 text-sm font-semibold text-gray-300">
-          Aktuálny stav práce
-        </div>
-
-        <textarea
-          value={currentState}
-          onChange={(event) => setCurrentState(event.target.value)}
-          rows={8}
-          placeholder="Napíš, čo už máš hotové a čo ešte chýba. Napr. Začínam, mám tému a cieľ, chýba mi teória, metodológia, výskum, záver..."
-          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-        />
-      </label>
+      <TextareaField
+        label="Aktuálny stav práce"
+        value={currentState}
+        onChange={setCurrentState}
+        rows={8}
+        placeholder="Napíš, čo už máš hotové a čo ešte chýba..."
+      />
 
       <button
         type="button"
@@ -4122,35 +2879,14 @@ function PlanningModule() {
         {loading ? 'Vytváram plán...' : 'Vytvoriť plán práce'}
       </button>
 
-      {error && (
-        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
-          {error}
-        </div>
-      )}
+      {error && <Notice type="error">{error}</Notice>}
 
-      {result && (
-        <div className="rounded-3xl border border-white/10 bg-[#0f1324] p-6">
-          <div className="mb-3 text-lg font-black text-white">
-            Výsledný plán práce
-          </div>
-
-          <div className="whitespace-pre-wrap text-sm leading-7 text-gray-200">
-            {result}
-          </div>
-        </div>
-      )}
+      {result && <ResultBox title="Výsledný plán práce" text={result} />}
     </ModuleLayout>
   );
 }
 
 function EmailModule() {
-  const botId =
-    process.env.NEXT_PUBLIC_FASTBOTS_EMAIL_BOT_ID ||
-    process.env.NEXT_PUBLIC_FASTBOTS_BOT_ID ||
-    'cmonxnqsl0av1p81pwly2ti1x';
-
-  const fastbotUrl = `https://app.fastbots.ai/embed/${botId}`;
-
   const [emailType, setEmailType] = useState('Email vedúcemu');
   const [recipient, setRecipient] = useState('Vedúci práce');
   const [request, setRequest] = useState('');
@@ -4159,498 +2895,157 @@ function EmailModule() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
 
-  const buildFastbotPrompt = () => {
-    let activeProfile: SavedProfile | null = null;
-
-    if (typeof window !== 'undefined') {
-      try {
-        const raw = localStorage.getItem('active_profile');
-        activeProfile = raw ? JSON.parse(raw) : null;
-      } catch {
-        activeProfile = null;
-      }
-    }
-
+  const buildPrompt = () => {
     return `
-Si AI asistent pre akademickú komunikáciu. Vytvor hotový email pre používateľa.
+Vytvor hotový email.
 
-JAZYK EMAILU:
-${language}
+Jazyk: ${language}
+Typ emailu: ${emailType}
+Komu: ${recipient}
+Tón: ${tone}
 
-TYP EMAILU:
-${emailType}
+Požiadavka používateľa:
+${request}
 
-KOMU:
-${recipient}
-
-TÓN EMAILU:
-${tone}
-
-AKTÍVNY PROFIL PRÁCE:
-- Názov práce: ${activeProfile?.title || 'nezadané'}
-- Téma: ${activeProfile?.topic || 'nezadané'}
-- Typ práce: ${activeProfile?.type || 'nezadané'}
-- Odbor: ${activeProfile?.field || 'nezadané'}
-- Vedúci práce: ${activeProfile?.supervisor || 'nezadané'}
-- Cieľ práce: ${activeProfile?.goal || 'nezadané'}
-- Metodológia: ${activeProfile?.methodology || 'nezadané'}
-
-POŽIADAVKA POUŽÍVATEĽA:
-${request || 'Používateľ neuviedol detailnú požiadavku.'}
-
-ÚLOHA:
-Vytvor finálny email, ktorý môže používateľ priamo skopírovať a odoslať.
-
-FORMÁT ODPOVEDE:
+Formát:
 Predmet:
 ...
 
 Text emailu:
 ...
-
-POKYNY:
-- email musí byť profesionálny,
-- nepíš príliš dlhý text,
-- používaj slušný akademický štýl,
-- ak ide o email vedúcemu práce, formuluj ho úctivo,
-- ak používateľ žiada kontrolu osnovy, kapitoly alebo termínu, napíš konkrétnu prosbu,
-- na konci doplň vhodné poďakovanie,
-- nepoužívaj zbytočné frázy.
 `.trim();
   };
 
-  const copyPromptForFastbot = async () => {
+  const copyPrompt = async () => {
     setError('');
     setCopied(false);
 
-    if (!request.trim() || request.trim().length < 10) {
+    if (request.trim().length < 10) {
       setError('Napíš požiadavku pre email aspoň v rozsahu 10 znakov.');
       return;
     }
 
-    const prompt = buildFastbotPrompt();
-
     try {
-      await navigator.clipboard.writeText(prompt);
+      await navigator.clipboard.writeText(buildPrompt());
       setCopied(true);
 
       window.setTimeout(() => {
         setCopied(false);
       }, 2500);
     } catch {
-      setError('Nepodarilo sa skopírovať zadanie pre Fastbota.');
+      setError('Nepodarilo sa skopírovať zadanie.');
     }
   };
 
   return (
     <ModuleLayout>
-      <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-300">
-              <Mail size={26} />
-            </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <SelectField
+          label="Typ emailu"
+          value={emailType}
+          onChange={setEmailType}
+          options={[
+            'Email vedúcemu',
+            'Žiadosť o konzultáciu',
+            'Odovzdanie kapitoly',
+            'Žiadosť o kontrolu osnovy',
+            'Žiadosť o posúdenie témy',
+            'Ospravedlnenie',
+            'Formálny email škole',
+          ]}
+        />
 
-            <div>
-              <h3 className="text-2xl font-black text-white">
-                Emaily cez Fastbota
-              </h3>
+        <InputField
+          label="Komu"
+          value={recipient}
+          onChange={setRecipient}
+          placeholder="Napr. vedúci práce, školiteľ, konzultant"
+        />
 
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-300">
-                Vyplň zadanie emailu, skopíruj pripravený prompt a vlož ho do
-                Fastbota nižšie. Fastbot ti pripraví hotový predmet a text
-                emailu na odoslanie.
-              </p>
-            </div>
-          </div>
+        <SelectField
+          label="Tón emailu"
+          value={tone}
+          onChange={setTone}
+          options={[
+            'Profesionálny a slušný',
+            'Veľmi formálny',
+            'Krátky a vecný',
+            'Úctivý akademický',
+          ]}
+        />
 
-          <a
-            href={fastbotUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/20"
-          >
-            Otvoriť Fastbota samostatne
-            <ExternalLink size={17} />
-          </a>
-        </div>
+        <SelectField
+          label="Jazyk emailu"
+          value={language}
+          onChange={setLanguage}
+          options={[
+            'Slovenčina',
+            'Čeština',
+            'Angličtina',
+            'Nemčina',
+            'Poľština',
+            'Maďarčina',
+          ]}
+        />
       </div>
 
-      <div className="rounded-3xl border border-white/10 bg-[#050816] p-6">
-        <div className="mb-5">
-          <h4 className="text-xl font-black text-white">
-            Pripraviť zadanie pre Fastbota
-          </h4>
+      <TextareaField
+        label="Obsah / požiadavka"
+        value={request}
+        onChange={setRequest}
+        rows={7}
+        placeholder="Napr. Chcem sa opýtať vedúceho, či môžem poslať prvú kapitolu..."
+      />
 
-          <p className="mt-2 text-sm text-gray-400">
-            Tento formulár vytvorí presné zadanie pre Fastbota, aby odpovedal
-            priamo vo forme hotového emailu.
-          </p>
-        </div>
+      <button
+        type="button"
+        onClick={copyPrompt}
+        className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90"
+      >
+        <Mail size={20} />
+        {copied ? 'Zadanie skopírované' : 'Skopírovať zadanie'}
+      </button>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Typ emailu
-            </div>
-
-            <select
-              value={emailType}
-              onChange={(event) => setEmailType(event.target.value)}
-              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-            >
-              <option>Email vedúcemu</option>
-              <option>Žiadosť o konzultáciu</option>
-              <option>Odovzdanie kapitoly</option>
-              <option>Žiadosť o kontrolu osnovy</option>
-              <option>Žiadosť o posúdenie témy</option>
-              <option>Ospravedlnenie</option>
-              <option>Pripomenutie termínu</option>
-              <option>Formálny email škole</option>
-              <option>Email školiteľovi</option>
-              <option>Email konzultantovi</option>
-            </select>
-          </label>
-
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Komu
-            </div>
-
-            <input
-              value={recipient}
-              onChange={(event) => setRecipient(event.target.value)}
-              placeholder="Napr. vedúci práce, školiteľ, konzultant"
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-            />
-          </label>
-
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Tón emailu
-            </div>
-
-            <select
-              value={tone}
-              onChange={(event) => setTone(event.target.value)}
-              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-            >
-              <option>Profesionálny a slušný</option>
-              <option>Veľmi formálny</option>
-              <option>Krátky a vecný</option>
-              <option>Úctivý akademický</option>
-              <option>Priateľský, ale stále formálny</option>
-            </select>
-          </label>
-
-          <label className="block">
-            <div className="mb-2 text-sm font-semibold text-gray-300">
-              Jazyk emailu
-            </div>
-
-            <select
-              value={language}
-              onChange={(event) => setLanguage(event.target.value)}
-              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500"
-            >
-              <option>Slovenčina</option>
-              <option>Čeština</option>
-              <option>Angličtina</option>
-              <option>Nemčina</option>
-              <option>Poľština</option>
-              <option>Maďarčina</option>
-            </select>
-          </label>
-        </div>
-
-        <label className="mt-4 block">
-          <div className="mb-2 text-sm font-semibold text-gray-300">
-            Obsah / požiadavka
-          </div>
-
-          <textarea
-            value={request}
-            onChange={(event) => setRequest(event.target.value)}
-            rows={7}
-            placeholder="Napr. Pomôž mi sformulovať email pre vedúceho práce. Chcem sa opýtať, či mám dobre osnovu a či môžem poslať prvú kapitolu na kontrolu..."
-            className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-          />
-        </label>
-
-        <div className="mt-5 flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={copyPromptForFastbot}
-            className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90"
-          >
-            <Mail size={20} />
-            {copied ? 'Zadanie skopírované' : 'Skopírovať zadanie pre Fastbota'}
-          </button>
-
-          <a
-            href={fastbotUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 font-bold text-white transition hover:bg-white/15"
-          >
-            <ExternalLink size={20} />
-            Otvoriť Fastbota
-          </a>
-        </div>
-
-        {error && (
-          <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
-            {error}
-          </div>
-        )}
-
-        {copied && (
-          <div className="mt-4 rounded-2xl border border-green-500/30 bg-green-500/10 p-4 text-sm font-semibold text-green-200">
-            Zadanie bolo skopírované. Teraz ho vlož do Fastbota nižšie.
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <h4 className="text-xl font-black text-white">
-              Fastbot – generovanie emailu
-            </h4>
-
-            <p className="mt-1 text-sm text-gray-400">
-              Vlož skopírované zadanie do chatu a Fastbot ti pripraví hotový
-              email.
-            </p>
-          </div>
-        </div>
-
-        <div className="overflow-hidden rounded-3xl border border-purple-500/30 bg-white shadow-2xl">
-          <iframe
-            title="Fastbot emailový asistent"
-            src={fastbotUrl}
-            className="h-[720px] w-full border-0"
-            allow="microphone; clipboard-read; clipboard-write"
-          />
-        </div>
-      </div>
+      {error && <Notice type="error">{error}</Notice>}
+      {copied && <Notice type="success">Zadanie bolo skopírované.</Notice>}
     </ModuleLayout>
   );
 }
 
-
-const ORIGINALITY_ALLOWED_EXTENSIONS = [
-  '.pdf',
-  '.doc',
-  '.docx',
-  '.txt',
-  '.rtf',
-  '.odt',
-  '.md',
-  '.jpg',
-  '.jpeg',
-  '.png',
-  '.webp',
-  '.gif',
-  '.xls',
-  '.xlsx',
-  '.csv',
-  '.ppt',
-  '.pptx',
-];
-
-const ORIGINALITY_FILE_ACCEPT = ORIGINALITY_ALLOWED_EXTENSIONS.join(',');
-
-const ORIGINALITY_MAX_FILE_SIZE_MB = 30;
-const ORIGINALITY_MAX_FILE_SIZE_BYTES =
-  ORIGINALITY_MAX_FILE_SIZE_MB * 1024 * 1024;
-
-type OriginalityUploadedFile = {
-  file: File;
-  name: string;
-  size: number;
-  type: string;
-  extension: string;
-};
-
-function getOriginalityFileExtension(fileName: string) {
-  const index = fileName.lastIndexOf('.');
-  if (index === -1) return '';
-  return fileName.slice(index).toLowerCase();
-}
-
-function isOriginalityAllowedFile(file: File) {
-  const extension = getOriginalityFileExtension(file.name);
-  return ORIGINALITY_ALLOWED_EXTENSIONS.includes(extension);
-}
-
-function formatOriginalityFileSize(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function getOriginalityFileKind(extension: string) {
-  if (extension === '.pdf') return 'PDF';
-  if (['.doc', '.docx', '.rtf', '.odt', '.txt', '.md'].includes(extension)) {
-    return 'Dokument';
-  }
-  if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
-    return 'Obrázok';
-  }
-  if (['.xls', '.xlsx', '.csv'].includes(extension)) {
-    return 'Tabuľka';
-  }
-  if (['.ppt', '.pptx'].includes(extension)) {
-    return 'Prezentácia';
-  }
-
-  return 'Súbor';
-}
-
 function PlagiarismModule() {
-  const [step, setStep] = useState(1);
-
-  const [title, setTitle] = useState('');
-  const [authorName, setAuthorName] = useState('');
-  const [school, setSchool] = useState('');
-  const [faculty, setFaculty] = useState('');
-  const [studyProgram, setStudyProgram] = useState('');
-  const [supervisor, setSupervisor] = useState('');
-
+  const [text, setText] = useState('');
   const [workType, setWorkType] = useState('Bakalárska práca');
   const [citationStyle, setCitationStyle] = useState('ISO 690');
   const [language, setLanguage] = useState('SK');
-
-  const [text, setText] = useState('');
-  const [agent, setAgent] = useState('gemini');
-
+  const [result, setResult] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<any | null>(null);
-
-  const originalityFileInputRef = useRef<HTMLInputElement | null>(null);
-
-  const [uploadedWorkFile, setUploadedWorkFile] =
-    useState<OriginalityUploadedFile | null>(null);
-
-  const [fileUploadError, setFileUploadError] = useState('');
-  const [checkAuthenticity, setCheckAuthenticity] = useState(true);
-
-  const handleOriginalityFile = async (fileList: FileList | null) => {
-    setFileUploadError('');
-    setError('');
-
-    const file = fileList?.[0];
-
-    if (!file) return;
-
-    if (!isOriginalityAllowedFile(file)) {
-      setFileUploadError(
-        `Nepodporovaný formát súboru: ${file.name}. Povolené sú PDF, Word, TXT, RTF, ODT, obrázky, Excel, CSV a PowerPoint.`,
-      );
-      return;
-    }
-
-    if (file.size > ORIGINALITY_MAX_FILE_SIZE_BYTES) {
-      setFileUploadError(
-        `Súbor je príliš veľký. Maximálna veľkosť je ${ORIGINALITY_MAX_FILE_SIZE_MB} MB.`,
-      );
-      return;
-    }
-
-    const extension = getOriginalityFileExtension(file.name);
-
-    setUploadedWorkFile({
-      file,
-      name: file.name,
-      size: file.size,
-      type: file.type || 'application/octet-stream',
-      extension,
-    });
-
-    // TXT, MD a CSV vieme načítať priamo do textového poľa.
-    if (['.txt', '.md', '.csv'].includes(extension)) {
-      try {
-        const content = await file.text();
-
-        if (content.trim()) {
-          setText(content.slice(0, 50000));
-        }
-      } catch {
-        setFileUploadError(
-          'Súbor bol pridaný, ale jeho text sa nepodarilo automaticky načítať.',
-        );
-      }
-    }
-
-    if (originalityFileInputRef.current) {
-      originalityFileInputRef.current.value = '';
-    }
-  };
 
   const runOriginalityCheck = async () => {
     setError('');
     setResult(null);
 
-    if (!uploadedWorkFile && text.trim().length < 300) {
-      setError('Nahraj súbor práce alebo vlož aspoň 300 znakov textu.');
+    if (text.trim().length < 300) {
+      setError('Vlož aspoň 300 znakov textu.');
       return;
     }
 
     setLoading(true);
 
     try {
-      const activeRaw =
-        typeof window !== 'undefined'
-          ? localStorage.getItem('active_profile')
-          : null;
-
-      let activeProfile: any = null;
-
-      try {
-        activeProfile = activeRaw ? JSON.parse(activeRaw) : null;
-      } catch {
-        activeProfile = null;
-      }
-
-      const formData = new FormData();
-
-      formData.append('title', title);
-      formData.append('authorName', authorName);
-      formData.append('school', school);
-      formData.append('faculty', faculty);
-      formData.append('studyProgram', studyProgram);
-      formData.append('supervisor', supervisor);
-      formData.append('workType', workType);
-      formData.append('citationStyle', citationStyle);
-      formData.append('language', language);
-      formData.append('agent', agent);
-      formData.append('text', text);
-      formData.append('checkAuthenticity', String(checkAuthenticity));
-
-      formData.append('activeProfile', JSON.stringify(activeProfile || null));
-      formData.append('profileId', activeProfile?.id || '');
-
-      if (uploadedWorkFile?.file) {
-        formData.append('file', uploadedWorkFile.file, uploadedWorkFile.name);
-      }
-
       const response = await fetch('/api/originality', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, workType, citationStyle, language }),
       });
 
       const data = await response.json();
 
       if (!response.ok || !data.ok) {
-        throw new Error(
-          data?.message || data?.error || 'Kontrola originality zlyhala.',
-        );
+        throw new Error(data?.message || data?.error || 'Kontrola zlyhala.');
       }
 
       setResult(data);
-      setStep(5);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Neznáma chyba pri kontrole.',
@@ -4662,538 +3057,92 @@ function PlagiarismModule() {
 
   return (
     <ModuleLayout>
-      <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-6">
-        <h3 className="text-2xl font-black text-white">Originalita práce</h3>
+      <Notice type="info">
+        Predbežná kontrola originality je orientačná a nenahrádza oficiálnu
+        školskú kontrolu originality.
+      </Notice>
 
-        <p className="mt-2 text-sm leading-6 text-gray-300">
-          Predbežná kontrola originality v štýle univerzitného krokového
-          postupu. Výsledok je orientačný a nenahrádza oficiálnu školskú
-          kontrolu originality.
-        </p>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <SelectField
+          label="Typ práce"
+          value={workType}
+          onChange={setWorkType}
+          options={[
+            'Bakalárska práca',
+            'Diplomová práca',
+            'Seminárna práca',
+            'Dizertačná práca',
+            'Rigorózna práca',
+          ]}
+        />
 
-        <p className="mt-3 text-xs leading-5 text-purple-100/80">
-          Súčasťou kontroly je aj posúdenie autentickosti a akademickej
-          prirodzenosti textu. Nástroj neslúži na obchádzanie AI detektorov,
-          ale na poctivé zlepšenie odbornosti, konkrétnosti, citovania a
-          vlastného autorského prínosu.
-        </p>
+        <SelectField
+          label="Citačná norma"
+          value={citationStyle}
+          onChange={setCitationStyle}
+          options={['ISO 690', 'APA 7', 'Harvard', 'MLA', 'Chicago']}
+        />
+
+        <SelectField
+          label="Jazyk"
+          value={language}
+          onChange={setLanguage}
+          options={['SK', 'CZ', 'EN', 'DE']}
+        />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-        {[
-          'Nahratie práce',
-          'Údaje o práci',
-          'Nastavenie kontroly',
-          'Spracovanie',
-          'Výsledok',
-        ].map((label, index) => {
-          const currentStep = index + 1;
+      <TextareaField
+        label="Text práce"
+        value={text}
+        onChange={setText}
+        rows={16}
+        placeholder="Vlož sem text práce, kapitolu alebo časť záverečnej práce..."
+      />
 
-          return (
-            <button
-              key={label}
-              type="button"
-              onClick={() => setStep(currentStep)}
-              className={`rounded-2xl px-3 py-3 text-sm font-bold transition ${
-                step === currentStep
-                  ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white'
-                  : 'bg-white/10 text-gray-300 hover:bg-white/15'
-              }`}
-            >
-              {currentStep}. {label}
-            </button>
-          );
-        })}
-      </div>
+      <button
+        type="button"
+        onClick={runOriginalityCheck}
+        disabled={loading}
+        className="rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {loading ? 'Kontrolujem originalitu...' : 'Spustiť kontrolu originality'}
+      </button>
 
-      {step === 1 && (
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-          <h4 className="mb-4 text-xl font-black">
-            1. Nahratie / vloženie práce
-          </h4>
+      {error && <Notice type="error">{error}</Notice>}
 
-          <div className="mb-5 rounded-3xl border border-purple-500/30 bg-purple-500/10 p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <div className="text-lg font-black text-white">
-                  Nahrať súbor práce
-                </div>
-
-                <p className="mt-2 text-sm leading-6 text-gray-300">
-                  Môžete nahrať celú prácu alebo časť práce. Podporované
-                  formáty: PDF, Word, TXT, RTF, ODT, obrázky, Excel, CSV a
-                  PowerPoint.
-                </p>
-
-                <p className="mt-1 text-xs text-gray-500">
-                  Maximálna veľkosť súboru: {ORIGINALITY_MAX_FILE_SIZE_MB} MB.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => originalityFileInputRef.current?.click()}
-                className="rounded-2xl bg-purple-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-purple-500"
-              >
-                Vybrať súbor
-              </button>
-            </div>
-
-            <input
-              ref={originalityFileInputRef}
-              type="file"
-              accept={ORIGINALITY_FILE_ACCEPT}
-              className="hidden"
-              onChange={(event) => handleOriginalityFile(event.target.files)}
-            />
-
-            {fileUploadError && (
-              <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
-                {fileUploadError}
-              </div>
-            )}
-
-            {uploadedWorkFile && (
-              <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0f1324] p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-bold text-white">
-                    {uploadedWorkFile.name}
-                  </div>
-
-                  <div className="mt-1 text-xs text-gray-500">
-                    {getOriginalityFileKind(uploadedWorkFile.extension)} ·{' '}
-                    {uploadedWorkFile.extension.toUpperCase()} ·{' '}
-                    {formatOriginalityFileSize(uploadedWorkFile.size)}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUploadedWorkFile(null);
-                    setFileUploadError('');
-                  }}
-                  className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200 transition hover:bg-red-500/20"
-                >
-                  Odstrániť
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="mb-3 text-sm font-semibold text-gray-300">
-            Alebo vlož text ručne
-          </div>
-
-          <textarea
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            rows={16}
-            placeholder="Vlož sem text práce, kapitolu alebo časť záverečnej práce..."
-            className="w-full rounded-2xl border border-purple-500/60 bg-[#0f1324] px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-400"
-          />
-
-          <div className="mt-3 text-xs text-gray-500">
-            Aktuálny rozsah textu: {text.trim().length} znakov.
-          </div>
-
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={() => {
-                if (!uploadedWorkFile && text.trim().length < 300) {
-                  setError(
-                    'Nahraj súbor práce alebo vlož aspoň 300 znakov textu.',
-                  );
-                  return;
-                }
-
-                setError('');
-                setStep(2);
-              }}
-              className="rounded-2xl bg-purple-600 px-6 py-3 font-bold text-white"
-            >
-              Pokračovať
-            </button>
-          </div>
-
-          {error && (
-            <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
-              {error}
-            </div>
-          )}
-        </div>
-      )}
-
-      {step === 2 && (
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-          <h4 className="mb-4 text-xl font-black">2. Údaje o práci</h4>
-
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Názov práce"
-              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            />
-
-            <input
-              value={authorName}
-              onChange={(e) => setAuthorName(e.target.value)}
-              placeholder="Autor"
-              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            />
-
-            <input
-              value={school}
-              onChange={(e) => setSchool(e.target.value)}
-              placeholder="Škola / univerzita"
-              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            />
-
-            <input
-              value={faculty}
-              onChange={(e) => setFaculty(e.target.value)}
-              placeholder="Fakulta"
-              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            />
-
-            <input
-              value={studyProgram}
-              onChange={(e) => setStudyProgram(e.target.value)}
-              placeholder="Študijný program"
-              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            />
-
-            <input
-              value={supervisor}
-              onChange={(e) => setSupervisor(e.target.value)}
-              placeholder="Vedúci práce"
-              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            />
-          </div>
-
-          <div className="mt-4 flex justify-between">
-            <button
-              type="button"
-              onClick={() => setStep(1)}
-              className="rounded-2xl bg-white/10 px-6 py-3 font-bold text-white"
-            >
-              Späť
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setStep(3)}
-              className="rounded-2xl bg-purple-600 px-6 py-3 font-bold text-white"
-            >
-              Pokračovať
-            </button>
-          </div>
-        </div>
-      )}
-
-      {step === 3 && (
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-          <h4 className="mb-4 text-xl font-black">3. Nastavenie kontroly</h4>
-
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <select
-              value={workType}
-              onChange={(e) => setWorkType(e.target.value)}
-              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            >
-              <option>Bakalárska práca</option>
-              <option>Diplomová práca</option>
-              <option>Seminárna práca</option>
-              <option>Dizertačná práca</option>
-              <option>Rigorózna práca</option>
-            </select>
-
-            <select
-              value={citationStyle}
-              onChange={(e) => setCitationStyle(e.target.value)}
-              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            >
-              <option>ISO 690</option>
-              <option>APA 7</option>
-              <option>Harvard</option>
-              <option>MLA</option>
-              <option>Chicago</option>
-            </select>
-
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            >
-              <option>SK</option>
-              <option>CZ</option>
-              <option>EN</option>
-              <option>DE</option>
-            </select>
-
-            <select
-              value={agent}
-              onChange={(e) => setAgent(e.target.value)}
-              className="rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
-            >
-              <option value="gemini">Gemini</option>
-              <option value="openai">GPT</option>
-              <option value="claude">Claude</option>
-              <option value="mistral">Mistral</option>
-            </select>
-          </div>
-
-          <label className="mt-5 flex items-start gap-3 rounded-2xl border border-white/10 bg-white/5 p-4">
-            <input
-              type="checkbox"
-              checked={checkAuthenticity}
-              onChange={(event) => setCheckAuthenticity(event.target.checked)}
-              className="mt-1"
-            />
-
-            <span>
-              <span className="block font-bold text-white">
-                Skontrolovať autentickosť a akademickú prirodzenosť textu
-              </span>
-
-              <span className="mt-1 block text-sm text-gray-400">
-                Systém označí príliš generické, šablónové alebo AI-pôsobiace
-                pasáže a navrhne poctivú akademickú úpravu. Neslúži na
-                obchádzanie AI detektorov.
-              </span>
-            </span>
-          </label>
-
-          <div className="mt-4 flex justify-between">
-            <button
-              type="button"
-              onClick={() => setStep(2)}
-              className="rounded-2xl bg-white/10 px-6 py-3 font-bold text-white"
-            >
-              Späť
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setStep(4)}
-              className="rounded-2xl bg-purple-600 px-6 py-3 font-bold text-white"
-            >
-              Pokračovať
-            </button>
-          </div>
-        </div>
-      )}
-
-      {step === 4 && (
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-          <h4 className="mb-4 text-xl font-black">
-            4. Spracovanie originality
-          </h4>
-
-          <p className="mb-4 text-sm leading-6 text-gray-300">
-            Systém vykoná predbežnú kontrolu originality, rizikových pasáží,
-            chýbajúcich citácií, podobnosti textu a akademickej prirodzenosti.
-          </p>
-
-          <button
-            type="button"
-            onClick={runOriginalityCheck}
-            disabled={loading}
-            className="rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading
-              ? 'Kontrolujem originalitu...'
-              : 'Spustiť kontrolu originality'}
-          </button>
-
-          {error && (
-            <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
-              {error}
-            </div>
-          )}
-        </div>
-      )}
-
-      {step === 5 && result && (
+      {result && (
         <div className="space-y-5">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div className="rounded-3xl border border-green-500/30 bg-green-500/10 p-6">
-              <div className="text-sm text-green-200">Skóre originality</div>
-
-              <div className="mt-2 text-4xl font-black text-green-300">
-                {result.originalityScore ?? '—'} %
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-yellow-500/30 bg-yellow-500/10 p-6">
-              <div className="text-sm text-yellow-200">Riziko podobnosti</div>
-
-              <div className="mt-2 text-4xl font-black text-yellow-300">
-                {result.similarityRiskScore ?? '—'} %
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-purple-500/30 bg-purple-500/10 p-6">
-              <div className="text-sm text-purple-200">
-                Autentickosť textu
-              </div>
-
-              <div className="mt-2 text-4xl font-black text-purple-300">
-                {result.authenticityScore ?? '—'} %
-              </div>
-
-              <p className="mt-2 text-xs text-purple-100/80">
-                Vyššie skóre znamená prirodzenejší, konkrétnejší a menej
-                šablónový akademický text.
-              </p>
-            </div>
+            <ScoreCard
+              label="Skóre originality"
+              value={result.originalityScore ?? '—'}
+              suffix="%"
+            />
+            <ScoreCard
+              label="Riziko podobnosti"
+              value={result.similarityRiskScore ?? '—'}
+              suffix="%"
+            />
+            <ScoreCard
+              label="Autentickosť textu"
+              value={result.authenticityScore ?? '—'}
+              suffix="%"
+            />
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-[#0f1324] p-6">
-            <h4 className="mb-3 text-xl font-black">
-              Protokol predbežnej kontroly originality
-            </h4>
-
-            <div className="whitespace-pre-wrap text-sm leading-7 text-gray-200">
-              {result.report}
-            </div>
-          </div>
-
-          {result.authenticRewrite && (
-            <div className="rounded-3xl border border-purple-500/30 bg-purple-500/10 p-6">
-              <h4 className="mb-3 text-xl font-black text-white">
-                Autentická akademická úprava textu
-              </h4>
-
-              <p className="mb-4 text-sm leading-6 text-purple-100/80">
-                Táto časť neupravuje text na obchádzanie AI detektorov. Slúži
-                na poctivé zlepšenie prirodzenosti, konkrétnosti, odbornosti a
-                vlastného autorského prínosu.
-              </p>
-
-              <div className="whitespace-pre-wrap text-sm leading-7 text-purple-50">
-                {result.authenticRewrite}
-              </div>
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() => setStep(1)}
-              className="rounded-2xl bg-white/10 px-6 py-3 font-bold text-white hover:bg-white/15"
-            >
-              Nová kontrola
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setStep(4)}
-              className="rounded-2xl bg-purple-600 px-6 py-3 font-bold text-white hover:bg-purple-500"
-            >
-              Spustiť znova
-            </button>
-          </div>
+          <ResultBox
+            title="Protokol predbežnej kontroly originality"
+            text={result.report || JSON.stringify(result, null, 2)}
+          />
         </div>
       )}
     </ModuleLayout>
   );
 }
+
 // =====================================================
-// UI HELPERS
+// PACKAGES
 // =====================================================
-
-function ModuleLayout({ children }: { children: ReactNode }) {
-  return <div className="space-y-5">{children}</div>;
-}
-
-function Input({
-  label,
-  placeholder,
-}: {
-  label: string;
-  placeholder?: string;
-}) {
-  return (
-    <label className="block">
-      <div className="mb-2 text-sm font-semibold text-gray-300">{label}</div>
-
-      <input
-        placeholder={placeholder}
-        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-      />
-    </label>
-  );
-}
-
-function Textarea({
-  label,
-  placeholder,
-}: {
-  label: string;
-  placeholder?: string;
-}) {
-  return (
-    <label className="block">
-      <div className="mb-2 text-sm font-semibold text-gray-300">{label}</div>
-
-      <textarea
-        placeholder={placeholder}
-        rows={7}
-        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
-      />
-    </label>
-  );
-}
-
-function Select({
-  label,
-  options,
-}: {
-  label: string;
-  options: string[];
-}) {
-  return (
-    <label className="block">
-      <div className="mb-2 text-sm font-semibold text-gray-300">{label}</div>
-
-      <select className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500">
-        {options.map((option) => (
-          <option key={option}>{option}</option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function ActionButton({
-  icon: Icon,
-  label,
-}: {
-  icon: LucideIcon;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90"
-    >
-      <Icon size={20} />
-      {label}
-    </button>
-  );
-}
-
-function Stat({ title, value }: { title: string; value: string }) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-      <div className="text-gray-400">{title}</div>
-      <div className="text-2xl font-black">{value}</div>
-    </div>
-  );
-}
 
 type PackagePlan = {
   id: string;
@@ -5221,71 +3170,28 @@ type AddonService = {
 
 const packagePlans: PackagePlan[] = [
   {
-    id: 'week-mini',
-    name: 'Týždeň MINI',
-    price: '9,90 €',
-    originalPrice: '14,90 €',
-    period: '7 dní',
-    pages: '25 strán',
+    id: 'free',
+    name: 'Free',
+    price: '0 €',
+    period: 'Limitovaný prístup',
+    pages: 'Ukážka',
     works: '1 práca',
-    supervisor: '2 kontroly',
-    audit: '1 audit',
-    defense: 'Bez obhajoby',
-    badge: 'Rýchly štart',
-    description: 'Vhodné na seminárnu prácu, kapitolu alebo rýchlu úpravu textu.',
+    supervisor: 'Ukážka',
+    audit: 'Ukážka',
+    defense: 'Nie',
+    badge: 'Štart',
+    description: 'Vhodné na základné vyskúšanie aplikácie.',
     features: [
-      'Základné AI písanie',
-      'Profil práce a zadania',
-      'Základná spätná väzba',
-      'Export textového výstupu',
+      'Základný vstup do aplikácie',
+      'Ukážka AI písania',
+      'Ukážka profilu práce',
     ],
   },
   {
-    id: 'week-student',
-    name: 'Týždeň ŠTUDENT',
-    price: '19,90 €',
-    originalPrice: '24,90 €',
-    period: '7 dní',
-    pages: '50 strán',
-    works: '2 práce',
-    supervisor: '5 kontrol',
-    audit: '2 audity',
-    defense: 'Bez obhajoby',
-    badge: 'Najlepšie na skúšku',
-    description: 'Vhodné na seminárku, ročníkovú prácu alebo väčšiu kapitolu.',
-    features: [
-      'AI písanie práce',
-      'AI vedúci práce',
-      'Audit kvality textu',
-      'Zdroje a citácie',
-    ],
-  },
-  {
-    id: 'week-pro',
-    name: 'Týždeň PRO',
-    price: '29,90 €',
-    originalPrice: '39,90 €',
-    period: '7 dní',
-    pages: '100 strán',
-    works: '3 práce',
-    supervisor: '10 kontrol',
-    audit: '4 audity',
-    defense: '1 obhajoba',
-    badge: 'Pred odovzdaním',
-    description: 'Pre študenta, ktorý potrebuje intenzívne pracovať pred odovzdaním.',
-    features: [
-      'AI písanie práce',
-      'AI vedúci práce',
-      'Audit kvality',
-      'Obhajoba + otázky',
-      'Prezentácia k obhajobe',
-    ],
-  },
-  {
-    id: 'month-start',
-    name: 'Mesačný START',
-    price: '39,90 €',
-    originalPrice: '40 €',
+    id: 'month',
+    name: 'Mesačný balík',
+    price: '40 €',
+    originalPrice: '49 €',
     period: '1 mesiac',
     pages: '150 strán',
     works: '5 prác',
@@ -5295,19 +3201,17 @@ const packagePlans: PackagePlan[] = [
     badge: 'Hlavný balík',
     description: 'Základný hlavný plán pre priebežnú prácu počas mesiaca.',
     features: [
-      '150 strán mesačne',
       'AI písanie práce',
       'AI vedúci práce',
       'Audit kvality',
       'Obhajoba a prezentácia',
-      'Plánovanie a emaily',
     ],
   },
   {
-    id: 'three-months',
-    name: '3 mesiace ŠTUDENT',
-    price: '79,90 €',
-    originalPrice: '70 €',
+    id: 'quarter',
+    name: '3 mesiace',
+    price: '70 €',
+    originalPrice: '120 €',
     period: '3 mesiace',
     pages: '350 strán',
     works: '10 prác',
@@ -5317,19 +3221,17 @@ const packagePlans: PackagePlan[] = [
     badge: 'Najvýhodnejší',
     description: 'Najlepší pomer ceny a výkonu pre bakalársku alebo diplomovú prácu.',
     features: [
-      '350 strán na 3 mesiace',
       'AI písanie a zdroje',
       'AI vedúci práce',
       'Audit kvality',
       '3 obhajoby',
-      'Dlhšie plánovanie práce',
     ],
   },
   {
-    id: 'year-pro',
+    id: 'year',
     name: 'Ročný PRO',
-    price: '299 €',
-    originalPrice: '240 €',
+    price: '240 €',
+    originalPrice: '480 €',
     period: '12 mesiacov',
     pages: '1 500 strán',
     works: 'Neobmedzené projekty',
@@ -5337,35 +3239,12 @@ const packagePlans: PackagePlan[] = [
     audit: '50 auditov',
     defense: '10 obhajôb',
     badge: 'Dlhodobé používanie',
-    description: 'Ročný balík pre študentov, konzultantov alebo intenzívne používanie.',
+    description: 'Ročný balík pre intenzívne používanie.',
     features: [
-      '1 500 strán ročne',
       'Všetky hlavné moduly',
       'AI vedúci práce',
       'Audit kvality',
       '10 obhajôb',
-      'Vhodné na celý akademický rok',
-    ],
-  },
-  {
-    id: 'year-max',
-    name: 'Ročný MAX',
-    price: '399 €',
-    period: '12 mesiacov',
-    pages: '2 000 strán',
-    works: 'Neobmedzené projekty',
-    supervisor: '250 kontrol',
-    audit: '80 auditov',
-    defense: '15 obhajôb',
-    badge: 'Prémiový plán',
-    description: 'Pre náročných používateľov, ktorí chcú vyššie limity a prémiové moduly.',
-    features: [
-      '2 000 strán ročne',
-      'Vyššie limity',
-      'Prémiové AI modely podľa dostupnosti',
-      '15 obhajôb',
-      'Rozšírený audit',
-      'Vhodné aj pre mentoring',
     ],
   },
 ];
@@ -5399,38 +3278,10 @@ const addonServices: AddonService[] = [
     description: 'Orientačný report originality a rizikových pasáží.',
     disabledBeforePlan: true,
   },
-  {
-    id: 'extra-50',
-    name: 'Extra 50 strán',
-    price: '9,90 €',
-    description: 'Doplnenie limitu o 50 strán.',
-    disabledBeforePlan: true,
-  },
-  {
-    id: 'extra-100',
-    name: 'Extra 100 strán',
-    price: '19,90 €',
-    description: 'Doplnenie limitu o 100 strán.',
-    disabledBeforePlan: true,
-  },
-  {
-    id: 'premium-model',
-    name: 'Prémiový model Claude/Grok',
-    price: '9,90 €',
-    description: 'Kvalitnejšia kritika, audit a odborné hodnotenie.',
-    disabledBeforePlan: true,
-  },
-  {
-    id: 'express',
-    name: 'Expresné spracovanie',
-    price: '19,90 €',
-    description: 'Prednostné spracovanie požiadaviek.',
-    disabledBeforePlan: true,
-  },
 ];
 
 function PackagesPage({ subActive }: { subActive: boolean }) {
-  const [selectedPlan, setSelectedPlan] = useState<string>('month-start');
+  const [selectedPlan, setSelectedPlan] = useState<string>('month');
   const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
 
   const selectedPlanData =
@@ -5464,60 +3315,18 @@ function PackagesPage({ subActive }: { subActive: boolean }) {
     selectedAddons.includes(addon.id),
   );
 
-  const slovakiaEmailSubject = encodeURIComponent(
-    'Zedpera – žiadosť o akademický mentoring Slovensko',
-  );
-
-  const slovakiaEmailBody = encodeURIComponent(
-    `Dobrý deň,
-
-mám záujem o pomoc od akademického pracovníka / reálneho experta cez Zedpera.
-
-Krajina: Slovensko
-Zvolený balík v Zedpera: ${selectedPlanData.name} (${selectedPlanData.price})
-Rozsah: ${selectedPlanData.pages}
-Typ práce:
-Názov práce:
-Termín:
-Požiadavka:
-
-Ďakujem.`,
-  );
-
-  const czechEmailSubject = encodeURIComponent(
-    'Zedpera – žiadosť o akademický mentoring Česko',
-  );
-
-  const czechEmailBody = encodeURIComponent(
-    `Dobrý deň,
-
-mám záujem o pomoc od akademického pracovníka / reálneho experta cez Zedpera.
-
-Krajina: Česko
-Zvolený balík v Zedpera: ${selectedPlanData.name} (${selectedPlanData.price})
-Rozsah: ${selectedPlanData.pages}
-Typ práce:
-Názov práce:
-Termín:
-Požiadavka:
-
-Ďakujem.`,
-  );
-
   return (
     <div className="mx-auto max-w-7xl space-y-10">
       <section>
         <div className="mb-8">
-          <h2 className="text-4xl font-black text-white">
-            Balíčky a doplnky
-          </h2>
+          <h2 className="text-4xl font-black text-white">Balíčky a doplnky</h2>
 
           <p className="mt-3 text-lg text-gray-400">
             Najprv si aktivuj plán, potom si môžeš dokúpiť doplnky.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-4">
           {packagePlans.map((plan) => {
             const isSelected = selectedPlan === plan.id;
 
@@ -5538,23 +3347,11 @@ Požiadavka:
                   </div>
                 )}
 
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-2xl font-black text-white">
-                      {plan.name}
-                    </h3>
+                <h3 className="text-2xl font-black text-white">{plan.name}</h3>
 
-                    <p className="mt-2 text-sm text-gray-400">
-                      {plan.description}
-                    </p>
-                  </div>
-
-                  {isSelected && (
-                    <div className="rounded-full bg-green-500/20 px-3 py-1 text-xs font-bold text-green-300">
-                      Vybrané
-                    </div>
-                  )}
-                </div>
+                <p className="mt-2 text-sm text-gray-400">
+                  {plan.description}
+                </p>
 
                 <div className="mt-6 flex items-end gap-3">
                   <div className="text-4xl font-black text-white">
@@ -5568,30 +3365,13 @@ Požiadavka:
                   )}
                 </div>
 
-                <div className="mt-1 text-sm text-gray-400">
-                  {plan.period}
-                </div>
+                <div className="mt-1 text-sm text-gray-400">{plan.period}</div>
 
                 <div className="mt-6 grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-2xl bg-black/20 p-3">
-                    <div className="text-gray-500">Limit</div>
-                    <div className="font-bold text-white">{plan.pages}</div>
-                  </div>
-
-                  <div className="rounded-2xl bg-black/20 p-3">
-                    <div className="text-gray-500">Práce</div>
-                    <div className="font-bold text-white">{plan.works}</div>
-                  </div>
-
-                  <div className="rounded-2xl bg-black/20 p-3">
-                    <div className="text-gray-500">AI vedúci</div>
-                    <div className="font-bold text-white">{plan.supervisor}</div>
-                  </div>
-
-                  <div className="rounded-2xl bg-black/20 p-3">
-                    <div className="text-gray-500">Audit</div>
-                    <div className="font-bold text-white">{plan.audit}</div>
-                  </div>
+                  <PackageStat label="Limit" value={plan.pages} />
+                  <PackageStat label="Práce" value={plan.works} />
+                  <PackageStat label="AI vedúci" value={plan.supervisor} />
+                  <PackageStat label="Audit" value={plan.audit} />
                 </div>
 
                 <div className="mt-5 rounded-2xl bg-black/20 p-3 text-sm">
@@ -5683,61 +3463,80 @@ Požiadavka:
           Pokračovať na platbu
         </a>
       </section>
+    </div>
+  );
+}
 
-      <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h3 className="text-2xl font-black text-white">
-              Akademický pracovník + mentoring
-            </h3>
+function PackageStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-black/20 p-3">
+      <div className="text-gray-500">{label}</div>
+      <div className="font-bold text-white">{value}</div>
+    </div>
+  );
+}
 
-            <p className="mt-2 text-gray-400">
-              Potrebuješ pomoc od reálneho experta? Pošli požiadavku podľa krajiny.
-            </p>
+// =====================================================
+// SETTINGS / ADMIN / SIMPLE PAGES
+// =====================================================
 
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                <div className="text-sm text-gray-500">Slovensko</div>
-                <div className="mt-1 font-bold text-white">
-                  info@zaverecneprace.sk
-                </div>
-              </div>
+function SettingsPage({
+  user,
+  subActive,
+  logout,
+}: {
+  user: DashboardUser;
+  subActive: boolean;
+  logout: () => void;
+}) {
+  return (
+    <div className="mx-auto max-w-5xl space-y-6">
+      <div className="rounded-3xl border border-white/10 bg-white/5 p-8">
+        <h2 className="text-3xl font-black">Nastavenia účtu</h2>
+        <p className="mt-2 text-gray-400">
+          Základné nastavenia používateľa, balíka a prístupu.
+        </p>
+      </div>
 
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                <div className="text-sm text-gray-500">Česko</div>
-                <div className="mt-1 font-bold text-white">
-                  info@zaverecneprace.cz
-                </div>
-              </div>
-            </div>
-          </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <InfoCard label="Meno" value={user.name || 'Nezadané'} />
+        <InfoCard label="E-mail" value={user.email || 'Nezadaný'} />
+        <InfoCard label="Rola" value={user.role} />
+        <InfoCard label="Balík" value={user.plan || 'free'} />
+        <InfoCard label="Stav predplatného" value={subActive ? 'Aktívne' : 'Free'} />
+      </div>
 
-          <div className="flex shrink-0 flex-col gap-3 sm:flex-row lg:flex-col">
-            <a
-              href={`mailto:info@zaverecneprace.sk?subject=${slovakiaEmailSubject}&body=${slovakiaEmailBody}`}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-green-600 px-5 py-3 font-bold text-white transition hover:bg-green-500"
-            >
-              <Mail size={18} />
-              Slovensko
-            </a>
+      <button
+        type="button"
+        onClick={logout}
+        className="rounded-2xl border border-red-500/30 bg-red-500/10 px-6 py-4 font-bold text-red-200 transition hover:bg-red-500/20"
+      >
+        Odhlásiť sa
+      </button>
+    </div>
+  );
+}
 
-            <a
-              href={`mailto:info@zaverecneprace.cz?subject=${czechEmailSubject}&body=${czechEmailBody}`}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white transition hover:bg-blue-500"
-            >
-              <Mail size={18} />
-              Česko
-            </a>
-          </div>
+function AdminPlaceholder({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="mx-auto max-w-6xl space-y-6">
+      <div className="rounded-[2rem] border border-emerald-500/20 bg-emerald-500/10 p-8">
+        <div className="mb-3 inline-flex rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-300">
+          Admin sekcia
         </div>
-      </section>
 
-      <section className="rounded-3xl border border-yellow-500/20 bg-yellow-500/10 p-5 text-sm leading-6 text-yellow-100">
-        <strong>Poznámka k limitom:</strong> Limity strán sú orientačné a
-        zahŕňajú AI písanie, audit, prácu s profilom, obhajobu, plánovanie,
-        emaily a pomocné výstupy. Pri náročných alebo opakovaných požiadavkách
-        môže byť spotreba vyššia.
-      </section>
+        <h2 className="text-4xl font-black text-white">{title}</h2>
+
+        <p className="mt-4 max-w-3xl text-sm leading-7 text-emerald-100/80">
+          {text}
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <InfoCard label="Stav" value="Pripravené" />
+        <InfoCard label="Napojenie" value="Supabase / Stripe" />
+        <InfoCard label="Režim" value="Admin free" />
+      </div>
     </div>
   );
 }
@@ -5751,6 +3550,223 @@ function SimplePage({ title, text }: { title: string; text: string }) {
   );
 }
 
+// =====================================================
+// UI HELPERS
+// =====================================================
+
+function ModuleLayout({ children }: { children: ReactNode }) {
+  return <div className="space-y-5">{children}</div>;
+}
+
+function Input({
+  label,
+  placeholder,
+}: {
+  label: string;
+  placeholder?: string;
+}) {
+  return (
+    <label className="block">
+      <div className="mb-2 text-sm font-semibold text-gray-300">{label}</div>
+
+      <input
+        placeholder={placeholder}
+        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+      />
+    </label>
+  );
+}
+
+function Select({
+  label,
+  options,
+}: {
+  label: string;
+  options: string[];
+}) {
+  return (
+    <label className="block">
+      <div className="mb-2 text-sm font-semibold text-gray-300">{label}</div>
+
+      <select className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500">
+        {options.map((option) => (
+          <option key={option}>{option}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function ActionButton({
+  icon: Icon,
+  label,
+}: {
+  icon: LucideIcon;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-bold transition hover:opacity-90"
+    >
+      <Icon size={20} />
+      {label}
+    </button>
+  );
+}
+
+function InputField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  wide,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  wide?: boolean;
+}) {
+  return (
+    <label className={`block ${wide ? 'md:col-span-2' : ''}`}>
+      <div className="mb-2 text-sm font-semibold text-gray-300">{label}</div>
+
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+      />
+    </label>
+  );
+}
+
+function TextareaField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  rows = 6,
+  wide,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  rows?: number;
+  wide?: boolean;
+}) {
+  return (
+    <label className={`block ${wide ? 'md:col-span-2' : ''}`}>
+      <div className="mb-2 text-sm font-semibold text-gray-300">{label}</div>
+
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        rows={rows}
+        placeholder={placeholder}
+        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
+      />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+}) {
+  return (
+    <label className="block">
+      <div className="mb-2 text-sm font-semibold text-gray-300">{label}</div>
+
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500"
+      >
+        {options.map((option) => (
+          <option key={option}>{option}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function Notice({
+  type,
+  children,
+}: {
+  type: 'info' | 'success' | 'warning' | 'error';
+  children: ReactNode;
+}) {
+  const styles: Record<typeof type, string> = {
+    info: 'border-blue-500/30 bg-blue-500/10 text-blue-100',
+    success: 'border-green-500/30 bg-green-500/10 text-green-100',
+    warning: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-100',
+    error: 'border-red-500/30 bg-red-500/10 text-red-100',
+  };
+
+  return (
+    <div className={`rounded-2xl border p-4 text-sm leading-6 ${styles[type]}`}>
+      {children}
+    </div>
+  );
+}
+
+function ResultBox({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-[#0f1324] p-6">
+      <div className="mb-3 text-lg font-black text-white">{title}</div>
+
+      <div className="whitespace-pre-wrap text-sm leading-7 text-gray-200">
+        {text}
+      </div>
+    </div>
+  );
+}
+
+function ScoreCard({
+  label,
+  value,
+  suffix,
+}: {
+  label: string;
+  value: string | number;
+  suffix?: string;
+}) {
+  return (
+    <div className="rounded-3xl border border-purple-500/30 bg-purple-500/10 p-6">
+      <div className="text-sm text-purple-200">{label}</div>
+
+      <div className="mt-2 text-4xl font-black text-purple-300">
+        {value}
+        {suffix}
+      </div>
+    </div>
+  );
+}
+
+function InfoCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
+      <div className="text-sm text-gray-500">{label}</div>
+      <div className="mt-2 text-2xl font-black text-white">{value}</div>
+    </div>
+  );
+}
+
+// =====================================================
+// TEXT HELPERS
+// =====================================================
+
 function getModeTitle(mode: Mode) {
   const titles: Record<Mode, string> = {
     write: 'AI Chat',
@@ -5762,7 +3778,7 @@ function getModeTitle(mode: Mode) {
     analysis: 'Analýza dát',
     planning: 'Plánovanie',
     email: 'Emaily',
-    plagiarism: 'Plagiátorstvo',
+    plagiarism: 'Originalita práce',
   };
 
   return titles[mode];

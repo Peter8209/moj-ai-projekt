@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
-import AppShell from '@/components/AppShell';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -28,11 +27,11 @@ export default function RootLayout({
   return (
     <html
       lang="sk"
-      className={`${geistSans.variable} ${geistMono.variable} h-dvh overflow-hidden bg-[#020617]`}
+      className={`${geistSans.variable} ${geistMono.variable}`}
       suppressHydrationWarning
     >
-      <body className="h-dvh overflow-hidden bg-[#020617] text-white antialiased">
-        <AppShell>{children}</AppShell>
+      <body className="min-h-screen bg-[#fbfaf7] text-slate-950 antialiased">
+        {children}
       </body>
     </html>
   );

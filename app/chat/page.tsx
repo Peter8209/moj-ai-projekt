@@ -10,17 +10,14 @@ import {
   FileDown,
   FileText,
   GraduationCap,
-  History,
+  Home,
   Library,
   Mic,
-  MoreHorizontal,
   Paintbrush,
   Paperclip,
   PenLine,
   Send,
-  Sparkles,
   UploadCloud,
-  User,
   X,
 } from 'lucide-react';
 
@@ -658,7 +655,7 @@ export default function ChatPage() {
       });
     }
 
-        if (validFiles.length === 0) {
+    if (validFiles.length === 0) {
       return;
     }
 
@@ -686,7 +683,9 @@ export default function ChatPage() {
     setExtractedFiles([]);
     setLastExtractionSummary('');
 
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const removeFile = (id: string) => {
@@ -1166,94 +1165,34 @@ Skontroluj terminál pri /api/chat.`
       `}</style>
 
       <div className="flex h-full min-h-0 w-full overflow-hidden bg-[#050711] text-white">
-        <div className="mx-auto flex h-full min-h-0 w-full max-w-[1500px] flex-col overflow-hidden px-4 py-2 md:px-8">
-          {/* HEADER */}
-          <header className="shrink-0 border-b border-white/10 pb-2">
+        <div className="mx-auto flex h-full min-h-0 w-full max-w-[1500px] flex-col overflow-hidden px-4 py-3 md:px-8">
+          {/* TOP ACTION BAR */}
+          <header className="shrink-0 border-b border-white/10 pb-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={() => router.push('/dashboard')}
-                className="group flex items-center gap-4 rounded-3xl transition hover:opacity-90"
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.055] px-5 py-3 text-sm font-black text-slate-200 transition hover:-translate-y-0.5 hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white"
+                title="Späť do menu"
               >
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-blue-500 shadow-lg shadow-violet-700/30 transition group-hover:scale-105">
-                  <Sparkles className="h-6 w-6 text-white" />
-                </div>
-
-                <div className="text-left">
-                  <h1 className="text-2xl font-black tracking-tight">
-                    ZEDPERA
-                  </h1>
-                  <p className="text-sm text-slate-400">AI vedúci práce</p>
-                </div>
+                <Home className="h-4 w-4" />
+                Menu
               </button>
 
-              <nav className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={resetChat}
-                  className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-700/30 transition hover:-translate-y-0.5 hover:bg-violet-500"
-                >
-                  + Nový chat
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => router.push('/chat')}
-                  className="rounded-2xl bg-white/10 px-5 py-3 text-sm font-bold text-white"
-                >
-                  Chat
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => router.push('/history')}
-                  className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 transition hover:bg-white/10 hover:text-white"
-                >
-                  <History className="h-4 w-4" />
-                  História
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => router.push('/sources')}
-                  className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 transition hover:bg-white/10 hover:text-white"
-                >
-                  <Library className="h-4 w-4" />
-                  Zdroje
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => router.push('/profile')}
-                  className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 transition hover:bg-white/10 hover:text-white"
-                >
-                  <User className="h-4 w-4" />
-                  Profil
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => router.push('/settings')}
-                  className="inline-flex items-center gap-1 rounded-2xl px-4 py-3 text-sm font-bold text-slate-400 transition hover:bg-white/10 hover:text-white"
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                  Viac
-                </button>
-              </nav>
+              <button
+                type="button"
+                onClick={resetChat}
+                className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-700/30 transition hover:-translate-y-0.5 hover:bg-violet-500"
+              >
+                + Nový chat
+              </button>
             </div>
           </header>
 
-          {/* TITLE */}
-          <section className="shrink-0 py-2">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-3xl font-black tracking-tight">CHAT</h2>
-                <p className="mt-1 text-sm text-slate-400">
-                  Prilož dokumenty, vyber model a napíš požiadavku.
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
+          {/* ACTIVE PROFILE BAR */}
+          <section className="shrink-0 py-3">
+            <div className="flex justify-end">
+              <div className="max-w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
                 Aktívny profil:{' '}
                 <span className="font-black text-white">
                   {activeProfile?.title || 'Nie je vybraný'}

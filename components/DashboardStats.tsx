@@ -9,6 +9,9 @@ type SavedProfile = {
   topic?: string;
   type?: string;
   savedAt?: string;
+  createdAt?: string;
+  created_at?: string;
+  updated_at?: string;
 };
 
 type SavedText = {
@@ -16,9 +19,14 @@ type SavedText = {
   title?: string;
   content?: string;
   text?: string;
+  output?: string;
+  result?: string;
   score?: number;
   aiScore?: number;
   createdAt?: string;
+  savedAt?: string;
+  created_at?: string;
+  updated_at?: string;
 };
 
 type DashboardStatsState = {
@@ -41,6 +49,16 @@ function normalizeArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
+function getLocalStorageValue(key: string): string | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
 function getNumber(value: unknown): number | null {
   const numberValue = Number(value);
 
@@ -51,10 +69,23 @@ function getNumber(value: unknown): number | null {
   return numberValue;
 }
 
+function hasTextContent(item: SavedText) {
+  const text =
+    item.text ||
+    item.content ||
+    item.output ||
+    item.result ||
+    item.title ||
+    '';
+
+  return String(text).trim().length > 0;
+}
+
 function calculateAiScore(texts: SavedText[]) {
   const scores = texts
     .map((item) => getNumber(item.aiScore ?? item.score))
-    .filter((item): item is number => item !== null);
+    .filter((item): item is number => item !== null)
+    .map((item) => Math.max(0, Math.min(100, item)));
 
   if (scores.length === 0) {
     return 0;
@@ -62,28 +93,24 @@ function calculateAiScore(texts: SavedText[]) {
 
   const average = scores.reduce((sum, item) => sum + item, 0) / scores.length;
 
-  return Math.round(Math.max(0, Math.min(100, average)));
+  return Math.round(average);
 }
 
-function loadDashboardStatsFromLocalStorage(): DashboardStatsState {
+function loadProfilesFromLocalStorage() {
   const profilesFull = normalizeArray<SavedProfile>(
-    safeJsonParse(
-      typeof window !== 'undefined' ? localStorage.getItem('profiles_full') : null,
-    ),
+    safeJsonParse(getLocalStorageValue('profiles_full')),
   );
 
   const profiles = normalizeArray<SavedProfile>(
-    safeJsonParse(
-      typeof window !== 'undefined' ? localStorage.getItem('profiles') : null,
-    ),
+    safeJsonParse(getLocalStorageValue('profiles')),
   );
 
   const singleProfile = safeJsonParse<SavedProfile>(
-    typeof window !== 'undefined' ? localStorage.getItem('profile') : null,
+    getLocalStorageValue('profile'),
   );
 
   const activeProfile = safeJsonParse<SavedProfile>(
-    typeof window !== 'undefined' ? localStorage.getItem('active_profile') : null,
+    getLocalStorageValue('active_profile'),
   );
 
   const allProfiles = [
@@ -96,34 +123,95 @@ function loadDashboardStatsFromLocalStorage(): DashboardStatsState {
   const uniqueProfiles = new Map<string, SavedProfile>();
 
   allProfiles.forEach((profile, index) => {
-    const key = profile.id || profile.title || profile.topic || `profile-${index}`;
-    uniqueProfiles.set(key, profile);
+    const key =
+      profile.id ||
+      profile.title ||
+      profile.topic ||
+      profile.savedAt ||
+      profile.createdAt ||
+      profile.created_at ||
+      profile.updated_at ||
+      `profile-${index}`;
+
+    uniqueProfiles.set(String(key), profile);
   });
 
-  const savedTexts = normalizeArray<SavedText>(
-    safeJsonParse(
-      typeof window !== 'undefined' ? localStorage.getItem('texts') : null,
-    ),
+  return Array.from(uniqueProfiles.values());
+}
+
+function loadTextsFromLocalStorage() {
+  const texts = normalizeArray<SavedText>(
+    safeJsonParse(getLocalStorageValue('texts')),
   );
 
-  const history = normalizeArray<SavedText>(
-    safeJsonParse(
-      typeof window !== 'undefined' ? localStorage.getItem('chat_history') : null,
-    ),
+  const generatedTexts = normalizeArray<SavedText>(
+    safeJsonParse(getLocalStorageValue('generated_texts')),
+  );
+
+  const chatHistory = normalizeArray<SavedText>(
+    safeJsonParse(getLocalStorageValue('chat_history')),
   );
 
   const outputs = normalizeArray<SavedText>(
-    safeJsonParse(
-      typeof window !== 'undefined' ? localStorage.getItem('outputs') : null,
-    ),
+    safeJsonParse(getLocalStorageValue('outputs')),
   );
 
-  const allTexts = [...savedTexts, ...history, ...outputs];
+  const savedOutputs = normalizeArray<SavedText>(
+    safeJsonParse(getLocalStorageValue('saved_outputs')),
+  );
+
+  const latestGeneratedText = getLocalStorageValue('latest_generated_work_text');
+
+  const latestTextItem: SavedText[] =
+    latestGeneratedText && latestGeneratedText.trim().length > 0
+      ? [
+          {
+            id: 'latest_generated_work_text',
+            title: 'Najnovší vygenerovaný text',
+            text: latestGeneratedText,
+          },
+        ]
+      : [];
+
+  const allTexts = [
+    ...texts,
+    ...generatedTexts,
+    ...chatHistory,
+    ...outputs,
+    ...savedOutputs,
+    ...latestTextItem,
+  ].filter(hasTextContent);
+
+  const uniqueTexts = new Map<string, SavedText>();
+
+  allTexts.forEach((text, index) => {
+    const key =
+      text.id ||
+      text.title ||
+      text.createdAt ||
+      text.savedAt ||
+      text.created_at ||
+      text.updated_at ||
+      `${text.text || text.content || text.output || text.result || ''}`.slice(
+        0,
+        80,
+      ) ||
+      `text-${index}`;
+
+    uniqueTexts.set(String(key), text);
+  });
+
+  return Array.from(uniqueTexts.values());
+}
+
+function loadDashboardStatsFromLocalStorage(): DashboardStatsState {
+  const profiles = loadProfilesFromLocalStorage();
+  const texts = loadTextsFromLocalStorage();
 
   return {
-    projectsCount: uniqueProfiles.size,
-    textsCount: allTexts.length,
-    aiScore: calculateAiScore(allTexts),
+    projectsCount: profiles.length,
+    textsCount: texts.length,
+    aiScore: calculateAiScore(texts),
   };
 }
 
@@ -144,9 +232,13 @@ export default function DashboardStats() {
     load();
 
     window.addEventListener('storage', load);
+    window.addEventListener('focus', load);
+    window.addEventListener('zedpera:stats-refresh', load);
 
     return () => {
       window.removeEventListener('storage', load);
+      window.removeEventListener('focus', load);
+      window.removeEventListener('zedpera:stats-refresh', load);
     };
   }, []);
 
@@ -178,28 +270,30 @@ export default function DashboardStats() {
   );
 
   return (
-    <section className="mx-auto w-full max-w-6xl px-2 md:px-0">
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+    <section className="w-full">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
         {cards.map((card) => {
           const Icon = card.icon;
 
           return (
             <div
               key={card.label}
-              className="group flex min-h-[250px] flex-col justify-between rounded-[30px] border border-white/10 bg-gradient-to-b from-white/[0.06] to-white/[0.03] p-7 shadow-[0_20px_60px_rgba(0,0,0,0.25)] transition duration-300 hover:-translate-y-1 hover:border-violet-400/40 hover:shadow-[0_25px_70px_rgba(124,58,237,0.18)]"
+              className="group relative flex min-h-[230px] flex-col justify-between overflow-hidden rounded-[32px] border border-white/10 bg-gradient-to-b from-white/[0.075] to-white/[0.035] p-7 shadow-2xl shadow-black/20 transition duration-300 hover:-translate-y-1 hover:border-purple-400/50 hover:shadow-purple-950/30"
             >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200 transition group-hover:bg-violet-600 group-hover:text-white">
+              <div className="absolute right-0 top-0 h-32 w-32 rounded-full bg-purple-600/10 blur-3xl transition group-hover:bg-purple-500/20" />
+
+              <div className="relative flex items-start justify-between gap-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-200 ring-1 ring-purple-400/20 transition group-hover:bg-purple-600 group-hover:text-white">
                   <Icon className="h-7 w-7" />
                 </div>
 
-                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">
+                <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
                   Live
                 </span>
               </div>
 
-              <div className="mt-6">
-                <h3 className="text-lg font-black leading-snug text-slate-100">
+              <div className="relative mt-7">
+                <h3 className="text-lg font-black text-slate-100">
                   {card.label}
                 </h3>
 
@@ -207,11 +301,11 @@ export default function DashboardStats() {
                   {card.value}
                   {card.suffix}
                 </div>
-              </div>
 
-              <p className="mt-6 text-sm leading-7 text-slate-400">
-                {card.description}
-              </p>
+                <p className="mt-5 max-w-[260px] text-sm leading-7 text-slate-400">
+                  {card.description}
+                </p>
+              </div>
             </div>
           );
         })}

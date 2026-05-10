@@ -1,569 +1,1070 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import {
+  ArrowLeft,
+  CalendarDays,
+  CheckCircle2,
+  FileText,
+  GripVertical,
+  Library,
+  Search,
+  Sparkles,
+  Trash2,
+  User,
+  X,
+} from 'lucide-react';
 
-// ================= TYPES =================
-type Source = {
-  id: number | string;
-  originalId?: string;
-  paperId?: string | null;
-  source?: string;
-  sourceKey?: string;
-  title: string;
-  abstract?: string;
-  year?: number | null;
-  publicationDate?: string | null;
-  authors?: string[];
-  url?: string | null;
-  doi?: string | null;
-  isPdf?: boolean;
-  pdfUrl?: string | null;
-  isOpenAccess?: boolean;
+import ProfileForm from '@/components/ProfileForm';
+import { createClient } from '@/lib/supabase/client';
+
+type SavedProfile = {
+  id: string;
+
+  type?: string;
+  level?: string;
+  title?: string;
+  topic?: string;
+  field?: string;
+  supervisor?: string;
   citation?: string;
-  publicationTypes?: string[];
-  externalIds?: Record<string, any>;
+  language?: string;
+  workLanguage?: string;
+
+  annotation?: string;
+  goal?: string;
+  problem?: string;
+  methodology?: string;
+  hypotheses?: string;
+  researchQuestions?: string;
+  practicalPart?: string;
+  scientificContribution?: string;
+
+  businessProblem?: string;
+  businessGoal?: string;
+  implementation?: string;
+  caseStudy?: string;
+  reflection?: string;
+  sourcesRequirement?: string;
+
+  keywordsList?: string[];
+  keywords?: string[];
+
+  savedAt?: string;
+  created_at?: string;
+  updated_at?: string;
+
+  schema?: {
+    typeKey?: string;
+    label?: string;
+    description?: string;
+    recommendedLength?: string;
+    citationOptions?: string[];
+    structure?: string[];
+    requiredSections?: string[];
+    fields?: {
+      key: string;
+      label: string;
+      placeholder?: string;
+      required?: boolean;
+      rows?: number;
+    }[];
+    aiInstruction?: string;
+  };
+
+  full_profile?: any;
+
+  work_language?: string;
+  research_questions?: string;
+  practical_part?: string;
+  scientific_contribution?: string;
+  business_problem?: string;
+  business_goal?: string;
+  case_study?: string;
+  sources_requirement?: string;
+  keywords_list?: string[];
 };
 
-type ActiveFilter =
-  | 'none'
-  | '2'
-  | '5'
-  | '2010-2015'
-  | '2015-2020'
-  | 'custom';
+const PROJECT_ORDER_KEY = 'zedpera_projects_order';
 
-type ApiResponse = {
-  ok?: boolean;
-  source?: string;
-  count?: number;
-  results?: Source[];
-  filters?: any;
-  databases?: Record<string, boolean>;
-  error?: string;
-  detail?: string;
-};
+export default function ProjectsPage() {
+  const [profiles, setProfiles] = useState<SavedProfile[]>([]);
+  const [selectedProfile, setSelectedProfile] = useState<SavedProfile | null>(
+    null,
+  );
 
-const SOURCE_LABELS: Record<string, string> = {
-  openalex: 'OpenAlex',
-  semanticScholar: 'Semantic Scholar',
-  crossref: 'Crossref',
-  core: 'CORE',
-  europePmc: 'Europe PMC',
-  arxiv: 'arXiv',
-};
+  const [editingProfile, setEditingProfile] = useState<SavedProfile | null>(
+    null,
+  );
+  const [profileFormOpen, setProfileFormOpen] = useState(false);
 
-export default function Page() {
-  const [results, setResults] = useState<Source[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [query, setQuery] = useState('');
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
-  const [yearFrom, setYearFrom] = useState('');
-  const [yearTo, setYearTo] = useState('');
-  const [onlyPdf, setOnlyPdf] = useState(false);
+  const [draggedProfileId, setDraggedProfileId] = useState<string | null>(null);
+  const [dragOverProfileId, setDragOverProfileId] = useState<string | null>(
+    null,
+  );
 
-  const [history, setHistory] = useState<string[]>([]);
-  const [customYear, setCustomYear] = useState('');
-
-  const [activeFilter, setActiveFilter] = useState<ActiveFilter>('none');
-
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [error, setError] = useState('');
-  const [lastSearchQuery, setLastSearchQuery] = useState('');
-  const [lastApiCount, setLastApiCount] = useState<number | null>(null);
-
-  // ================= LOAD HISTORY =================
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('search_history');
-      if (saved) setHistory(JSON.parse(saved));
-    } catch {
-      setHistory([]);
-    }
+    loadActiveProfile();
+    loadProfiles();
   }, []);
 
-  // ================= RESULT STATS =================
-  const resultCount = results.length;
-
-  const sourceStats = useMemo(() => {
-    const map = new Map<string, number>();
-
-    for (const item of results) {
-      const source = item.source || 'Neznámy zdroj';
-
-      const splitSources = source
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      if (splitSources.length === 0) {
-        map.set('Neznámy zdroj', (map.get('Neznámy zdroj') || 0) + 1);
-        continue;
-      }
-
-      for (const s of splitSources) {
-        map.set(s, (map.get(s) || 0) + 1);
-      }
-    }
-
-    return Array.from(map.entries())
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count);
-  }, [results]);
-
-  const pdfCount = useMemo(() => {
-    return results.filter((item) => item.isPdf || item.pdfUrl).length;
-  }, [results]);
-
-  const openAccessCount = useMemo(() => {
-    return results.filter((item) => item.isOpenAccess).length;
-  }, [results]);
-
-  // ================= SAVE HISTORY =================
-  const saveHistory = (q: string) => {
-    const updated = [q, ...history.filter((h) => h !== q)].slice(0, 5);
-    setHistory(updated);
-    localStorage.setItem('search_history', JSON.stringify(updated));
-  };
-
-  // ================= AI SUGGESTIONS =================
-  const generateSuggestions = async (text: string) => {
-    if (text.length < 5) {
-      setSuggestions([]);
-      return;
-    }
-
+  const loadActiveProfile = () => {
     try {
-      const res = await fetch('/api/sources', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'suggest', query: text }),
-      });
+      const activeRaw = localStorage.getItem('active_profile');
+      const active = activeRaw ? JSON.parse(activeRaw) : null;
 
-      const data = await res.json();
-      setSuggestions(data.suggestions || []);
+      if (active?.id) {
+        setActiveProfileId(active.id);
+      }
     } catch {
-      setSuggestions([]);
+      setActiveProfileId(null);
     }
   };
 
-  // ================= SEARCH =================
-  const searchSources = async (customQuery?: string) => {
-    const q = customQuery || query;
-    if (!q.trim()) return;
-
-    setQuery(q);
-    setLastSearchQuery(q);
-    saveHistory(q);
-    setLoading(true);
-    setSuggestions([]);
-    setError('');
-    setLastApiCount(null);
-
+  const getSavedOrder = () => {
     try {
-      const res = await fetch('/api/sources', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'search',
-          query: q,
-          yearFrom,
-          yearTo,
-          onlyPdf,
-        }),
+      const raw = localStorage.getItem(PROJECT_ORDER_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+
+      return Array.isArray(parsed) ? (parsed as string[]) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const applySavedOrder = (items: SavedProfile[]) => {
+    const savedOrder = getSavedOrder();
+
+    if (savedOrder.length === 0) {
+      return [...items].sort((a, b) => {
+        const dateA = a.savedAt ? new Date(a.savedAt).getTime() : 0;
+        const dateB = b.savedAt ? new Date(b.savedAt).getTime() : 0;
+
+        return dateB - dateA;
       });
+    }
 
-      const data = (await res.json()) as ApiResponse;
+    const orderIndex = new Map<string, number>();
 
-      if (!res.ok || data.ok === false) {
-        throw new Error(data.error || data.detail || 'Vyhľadávanie zlyhalo.');
+    savedOrder.forEach((id, index) => {
+      orderIndex.set(id, index);
+    });
+
+    return [...items].sort((a, b) => {
+      const indexA = orderIndex.has(a.id)
+        ? Number(orderIndex.get(a.id))
+        : Number.MAX_SAFE_INTEGER;
+
+      const indexB = orderIndex.has(b.id)
+        ? Number(orderIndex.get(b.id))
+        : Number.MAX_SAFE_INTEGER;
+
+      if (indexA !== indexB) {
+        return indexA - indexB;
       }
 
-      const foundResults = data.results || [];
+      const dateA = a.savedAt ? new Date(a.savedAt).getTime() : 0;
+      const dateB = b.savedAt ? new Date(b.savedAt).getTime() : 0;
 
-      setResults(foundResults);
-      setLastApiCount(typeof data.count === 'number' ? data.count : foundResults.length);
-    } catch (err) {
-      setResults([]);
-      setLastApiCount(0);
-      setError(err instanceof Error ? err.message : 'Vyhľadávanie zlyhalo.');
-    } finally {
-      setLoading(false);
+      return dateB - dateA;
+    });
+  };
+
+  const saveProfilesLocally = (items: SavedProfile[]) => {
+    localStorage.setItem('profiles_full', JSON.stringify(items));
+    localStorage.setItem(
+      PROJECT_ORDER_KEY,
+      JSON.stringify(items.map((item) => item.id)),
+    );
+  };
+
+  const loadProfiles = async () => {
+    try {
+      const supabase = createClient();
+
+      const { data, error } = await supabase
+        .from('zedpera_profiles')
+        .select('*')
+        .order('updated_at', { ascending: false });
+
+      if (error) {
+        console.error('SUPABASE LOAD PROFILES ERROR:', error);
+        loadProfilesFromLocalStorage();
+        return;
+      }
+
+      const supabaseProfiles: SavedProfile[] = (data || []).map((row: any) => {
+        const full = row.full_profile || {};
+
+        return {
+          ...full,
+
+          id:
+            row.id ||
+            full.id ||
+            (typeof crypto !== 'undefined' && crypto.randomUUID
+              ? crypto.randomUUID()
+              : Date.now().toString()),
+
+          title: row.title || full.title || 'Bez názvu',
+          type: row.type || full.type,
+          level: row.level || full.level,
+          topic: row.topic || full.topic,
+          field: row.field || full.field,
+          supervisor: row.supervisor || full.supervisor,
+          citation: row.citation || full.citation,
+          language: row.language || full.language,
+
+          workLanguage:
+            row.work_language || full.workLanguage || full.work_language,
+
+          annotation: row.annotation || full.annotation,
+          goal: row.goal || full.goal,
+          problem: row.problem || full.problem,
+          methodology: row.methodology || full.methodology,
+          hypotheses: row.hypotheses || full.hypotheses,
+
+          researchQuestions:
+            row.research_questions ||
+            full.researchQuestions ||
+            full.research_questions,
+
+          practicalPart:
+            row.practical_part || full.practicalPart || full.practical_part,
+
+          scientificContribution:
+            row.scientific_contribution ||
+            full.scientificContribution ||
+            full.scientific_contribution,
+
+          businessProblem:
+            row.business_problem ||
+            full.businessProblem ||
+            full.business_problem,
+
+          businessGoal:
+            row.business_goal || full.businessGoal || full.business_goal,
+
+          implementation: row.implementation || full.implementation,
+
+          caseStudy: row.case_study || full.caseStudy || full.case_study,
+
+          reflection: row.reflection || full.reflection,
+
+          sourcesRequirement:
+            row.sources_requirement ||
+            full.sourcesRequirement ||
+            full.sources_requirement,
+
+          keywordsList:
+            row.keywords_list || full.keywordsList || full.keywords || [],
+
+          keywords:
+            row.keywords_list || full.keywords || full.keywordsList || [],
+
+          schema: row.schema || full.schema,
+
+          savedAt:
+            row.updated_at ||
+            row.created_at ||
+            full.savedAt ||
+            new Date().toISOString(),
+
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          full_profile: row.full_profile,
+        };
+      });
+
+      const orderedProfiles = applySavedOrder(supabaseProfiles);
+
+      setProfiles(orderedProfiles);
+      saveProfilesLocally(orderedProfiles);
+
+      const activeRaw = localStorage.getItem('active_profile');
+      const active = activeRaw ? JSON.parse(activeRaw) : null;
+
+      if (active?.id) {
+        const found = orderedProfiles.find((profile) => profile.id === active.id);
+
+        if (found) {
+          localStorage.setItem('active_profile', JSON.stringify(found));
+          localStorage.setItem('profile', JSON.stringify(found));
+          setActiveProfileId(found.id);
+        } else {
+          setActiveProfileId(null);
+        }
+      }
+    } catch (error) {
+      console.error('LOAD PROFILES ERROR:', error);
+      loadProfilesFromLocalStorage();
     }
   };
 
-  // ================= FILTERS =================
-  const setLast2Years = () => {
-    const now = new Date().getFullYear();
-    setYearFrom(`${now - 2}-01-01`);
-    setYearTo(`${now}-12-31`);
-    setCustomYear('');
-    setActiveFilter('2');
-  };
+  const loadProfilesFromLocalStorage = () => {
+    try {
+      const raw = localStorage.getItem('profiles_full');
+      const parsed = raw ? JSON.parse(raw) : [];
 
-  const setLast5Years = () => {
-    const now = new Date().getFullYear();
-    setYearFrom(`${now - 5}-01-01`);
-    setYearTo(`${now}-12-31`);
-    setCustomYear('');
-    setActiveFilter('5');
-  };
+      if (Array.isArray(parsed)) {
+        const normalized: SavedProfile[] = parsed
+          .filter((item) => item && typeof item === 'object')
+          .map((item) => ({
+            ...item,
+            id:
+              item.id ||
+              (typeof crypto !== 'undefined' && crypto.randomUUID
+                ? crypto.randomUUID()
+                : Date.now().toString()),
+            title: item.title || 'Bez názvu',
+            savedAt: item.savedAt || new Date().toISOString(),
+          }));
 
-  const setRange2010_2015 = () => {
-    setYearFrom('2010-01-01');
-    setYearTo('2015-12-31');
-    setCustomYear('');
-    setActiveFilter('2010-2015');
-  };
+        const orderedProfiles = applySavedOrder(normalized);
 
-  const setRange2015_2020 = () => {
-    setYearFrom('2015-01-01');
-    setYearTo('2020-12-31');
-    setCustomYear('');
-    setActiveFilter('2015-2020');
-  };
+        setProfiles(orderedProfiles);
+        saveProfilesLocally(orderedProfiles);
 
-  const handleCustomYear = (value: string) => {
-    setCustomYear(value);
+        const activeRaw = localStorage.getItem('active_profile');
+        const active = activeRaw ? JSON.parse(activeRaw) : null;
 
-    if (value.length === 4) {
-      setYearFrom(`${value}-01-01`);
-      setYearTo(`${value}-12-31`);
-      setActiveFilter('custom');
-    } else {
-      setYearFrom('');
-      setYearTo('');
-      setActiveFilter('none');
+        if (active?.id) {
+          setActiveProfileId(active.id);
+        }
+      } else {
+        setProfiles([]);
+      }
+    } catch {
+      setProfiles([]);
     }
   };
 
-  // ================= RESET =================
-  const resetAll = () => {
-    setQuery('');
-    setResults([]);
-    setYearFrom('');
-    setYearTo('');
-    setOnlyPdf(false);
-    setCustomYear('');
-    setActiveFilter('none');
-    setSuggestions([]);
-    setError('');
-    setLastSearchQuery('');
-    setLastApiCount(null);
+  const filteredProfiles = useMemo(() => {
+    const q = search.trim().toLowerCase();
+
+    return profiles.filter((profile) => {
+      if (!q) return true;
+
+      return [
+        profile.title,
+        profile.topic,
+        profile.field,
+        profile.supervisor,
+        profile.schema?.label,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [profiles, search]);
+
+  const selectProfileForGeneration = (profile: SavedProfile) => {
+    localStorage.setItem('active_profile', JSON.stringify(profile));
+    localStorage.setItem('profile', JSON.stringify(profile));
+    setActiveProfileId(profile.id);
   };
 
-  // ================= UI =================
+  const openProfile = (profile: SavedProfile) => {
+    setSelectedProfile(profile);
+  };
+
+  const closeProfile = () => {
+    setSelectedProfile(null);
+  };
+
+  const openEditProfile = (profile: SavedProfile) => {
+    setEditingProfile(profile);
+    setProfileFormOpen(true);
+
+    localStorage.setItem('active_profile', JSON.stringify(profile));
+    localStorage.setItem('profile', JSON.stringify(profile));
+    setActiveProfileId(profile.id);
+  };
+
+  const closeEditProfile = () => {
+    setProfileFormOpen(false);
+    setEditingProfile(null);
+  };
+
+  const handleProfileSaved = (updatedProfile: SavedProfile) => {
+    const nextProfiles = profiles.some(
+      (profile) => profile.id === updatedProfile.id,
+    )
+      ? profiles.map((profile) =>
+          profile.id === updatedProfile.id ? updatedProfile : profile,
+        )
+      : [updatedProfile, ...profiles];
+
+    setProfiles(nextProfiles);
+    setSelectedProfile(updatedProfile);
+    setEditingProfile(null);
+    setProfileFormOpen(false);
+    setActiveProfileId(updatedProfile.id);
+
+    saveProfilesLocally(nextProfiles);
+    localStorage.setItem('profile', JSON.stringify(updatedProfile));
+    localStorage.setItem('active_profile', JSON.stringify(updatedProfile));
+
+    void loadProfiles();
+  };
+
+  const deleteProfile = async (id: string) => {
+    const confirmDelete = window.confirm(
+      'Naozaj chceš odstrániť túto prácu zo zoznamu?',
+    );
+
+    if (!confirmDelete) return;
+
+    const next = profiles.filter((profile) => profile.id !== id);
+
+    setProfiles(next);
+    saveProfilesLocally(next);
+
+    try {
+      const supabase = createClient();
+
+      const { error } = await supabase
+        .from('zedpera_profiles')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        console.error('SUPABASE DELETE PROFILE ERROR:', error);
+        alert(
+          `Profil sa odstránil lokálne, ale nie zo Supabase: ${error.message}`,
+        );
+      }
+    } catch (error) {
+      console.error('DELETE PROFILE ERROR:', error);
+    }
+
+    const activeRaw = localStorage.getItem('active_profile');
+
+    if (activeRaw) {
+      try {
+        const active = JSON.parse(activeRaw);
+
+        if (active?.id === id) {
+          localStorage.removeItem('active_profile');
+          localStorage.removeItem('profile');
+          setActiveProfileId(null);
+        }
+      } catch {
+        localStorage.removeItem('active_profile');
+        localStorage.removeItem('profile');
+        setActiveProfileId(null);
+      }
+    }
+
+    if (selectedProfile?.id === id) {
+      setSelectedProfile(null);
+    }
+
+    if (editingProfile?.id === id) {
+      setEditingProfile(null);
+      setProfileFormOpen(false);
+    }
+  };
+
+  const moveProfile = (dragId: string, targetId: string) => {
+    if (dragId === targetId) return;
+
+    setProfiles((current) => {
+      const oldIndex = current.findIndex((item) => item.id === dragId);
+      const newIndex = current.findIndex((item) => item.id === targetId);
+
+      if (oldIndex === -1 || newIndex === -1) {
+        return current;
+      }
+
+      const next = [...current];
+      const [moved] = next.splice(oldIndex, 1);
+      next.splice(newIndex, 0, moved);
+
+      saveProfilesLocally(next);
+
+      return next;
+    });
+  };
+
+  const handleDragStart = (
+    event: React.DragEvent<HTMLElement>,
+    profileId: string,
+  ) => {
+    setDraggedProfileId(profileId);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', profileId);
+  };
+
+  const handleDragOver = (
+    event: React.DragEvent<HTMLElement>,
+    profileId: string,
+  ) => {
+    event.preventDefault();
+
+    if (draggedProfileId && draggedProfileId !== profileId) {
+      setDragOverProfileId(profileId);
+    }
+  };
+
+  const handleDrop = (
+    event: React.DragEvent<HTMLElement>,
+    targetProfileId: string,
+  ) => {
+    event.preventDefault();
+
+    const dragId =
+      draggedProfileId || event.dataTransfer.getData('text/plain') || '';
+
+    if (dragId) {
+      moveProfile(dragId, targetProfileId);
+    }
+
+    setDraggedProfileId(null);
+    setDragOverProfileId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedProfileId(null);
+    setDragOverProfileId(null);
+  };
+
   return (
-    <div className="min-h-screen bg-[#020617] text-white p-6">
-      {/* HEADER */}
-      <div className="text-center mb-10">
-        <div className="inline-flex items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-sm text-purple-200 mb-4">
-          OpenAlex • Semantic Scholar • Crossref • CORE • Europe PMC • arXiv • Unpaywall
+    <main className="min-h-screen bg-[#020617] text-white">
+      <div className="mx-auto max-w-7xl px-4 py-4 md:px-8 md:py-6">
+        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-end">
+          <div className="relative w-full md:w-[420px]">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
+
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Hľadať podľa názvu, odboru, vedúceho..."
+              className="w-full rounded-2xl border border-white/10 bg-white/[0.06] py-4 pl-12 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-violet-500"
+            />
+          </div>
         </div>
 
-        <h1 className="text-5xl font-black mb-2">
-          Vyhľadávanie zdrojov
-        </h1>
+        {filteredProfiles.length === 0 ? (
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-10 text-center">
+            <FileText className="mx-auto mb-4 h-12 w-12 text-violet-300" />
 
-        <p className="text-gray-400 max-w-5xl mx-auto">
-          Nájdite akademické články, štúdie, publikácie, DOI a open-access PDF zdroje
-          z viacerých svetových databáz. Zadajte otázku alebo kľúčové slová – AI váš
-          dopyt automaticky optimalizuje.
-        </p>
-      </div>
+            <h2 className="text-2xl font-black">Zatiaľ nemáš uložené práce</h2>
 
-      {/* SEARCH */}
-      <div className="max-w-4xl mx-auto mb-6">
-        <div className="flex gap-2 bg-white/5 border border-white/10 p-2 rounded-2xl">
-          <input
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              generateSuggestions(e.target.value);
-            }}
-            onKeyDown={(e) => e.key === 'Enter' && searchSources()}
-            placeholder="Zadaj tému práce..."
-            className="flex-1 bg-transparent px-4 py-3 outline-none text-white placeholder:text-gray-500"
-          />
-
-          <button
-            onClick={() => searchSources()}
-            disabled={loading}
-            className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 px-6 rounded-xl font-semibold"
-          >
-            {loading ? 'Hľadám...' : 'Hľadať'}
-          </button>
-        </div>
-
-        {/* SUGGESTIONS */}
-        {suggestions.length > 0 && (
-          <div className="bg-white/5 border border-white/10 mt-2 p-3 rounded-xl space-y-1">
-            {suggestions.map((s, i) => (
-              <button
-                key={i}
-                onClick={() => searchSources(s)}
-                className="block w-full text-left cursor-pointer hover:text-purple-400 text-sm py-1"
-              >
-                🔎 {s}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* HISTORY */}
-        {history.length > 0 && (
-          <div className="flex gap-2 mt-3 flex-wrap">
-            {history.map((h, i) => (
-              <button
-                key={i}
-                onClick={() => searchSources(h)}
-                className="px-3 py-1 bg-white/10 rounded hover:bg-purple-600/30 text-sm"
-              >
-                {h}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* FILTER BAR */}
-      <div className="max-w-5xl mx-auto bg-white/5 border border-white/10 p-4 rounded-2xl mb-6">
-        <div className="flex flex-wrap gap-3 items-center">
-          {/* PDF */}
-          <button
-            onClick={() => setOnlyPdf(!onlyPdf)}
-            className={`px-4 py-2 rounded-xl ${
-              onlyPdf ? 'bg-green-600' : 'bg-white/10 hover:bg-white/20'
-            }`}
-          >
-            📄 Len PDF
-          </button>
-
-          {/* YEAR FILTERS */}
-          <button onClick={setLast2Years} className={btn(activeFilter === '2')}>
-            Posledné 2 roky
-          </button>
-
-          <button onClick={setLast5Years} className={btn(activeFilter === '5')}>
-            Posledné 5 rokov
-          </button>
-
-          <button onClick={setRange2010_2015} className={btn(activeFilter === '2010-2015')}>
-            2010–2015
-          </button>
-
-          <button onClick={setRange2015_2020} className={btn(activeFilter === '2015-2020')}>
-            2015–2020
-          </button>
-
-          {/* CUSTOM YEAR */}
-          <input
-            type="number"
-            placeholder="Rok (napr. 2022)"
-            value={customYear}
-            onChange={(e) => handleCustomYear(e.target.value)}
-            className="w-40 px-3 py-2 bg-white/10 rounded-xl outline-none text-white placeholder:text-gray-500"
-          />
-
-          {/* RESET */}
-          <button
-            onClick={resetAll}
-            className="ml-auto bg-red-600 hover:bg-red-700 px-4 py-2 rounded-xl"
-          >
-            Reset
-          </button>
-        </div>
-      </div>
-
-      {/* RESULT SUMMARY BAR */}
-      {(loading || lastSearchQuery || results.length > 0 || error) && (
-        <div className="max-w-5xl mx-auto mb-8 rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="rounded-xl bg-purple-600/20 border border-purple-400/30 px-4 py-2">
-              <span className="text-gray-400 text-sm">Nájdené články:</span>{' '}
-              <span className="font-bold text-white">
-                {loading ? 'hľadám...' : lastApiCount ?? resultCount}
-              </span>
-            </div>
-
-            {lastSearchQuery && (
-              <div className="rounded-xl bg-white/10 px-4 py-2">
-                <span className="text-gray-400 text-sm">Dopyt:</span>{' '}
-                <span className="font-semibold">{lastSearchQuery}</span>
-              </div>
-            )}
-
-            <div className="rounded-xl bg-green-600/20 border border-green-400/30 px-4 py-2">
-              <span className="text-gray-400 text-sm">Open Access:</span>{' '}
-              <span className="font-bold">{openAccessCount}</span>
-            </div>
-
-            <div className="rounded-xl bg-blue-600/20 border border-blue-400/30 px-4 py-2">
-              <span className="text-gray-400 text-sm">PDF:</span>{' '}
-              <span className="font-bold">{pdfCount}</span>
-            </div>
-          </div>
-
-          {/* SOURCES USED */}
-          <div className="mt-4">
-            <p className="text-gray-400 text-sm mb-2">
-              Zdroje výsledkov:
+            <p className="mx-auto mt-3 max-w-2xl text-slate-400">
+              Klikni na tlačidlo Nová práca. Po vyplnení a uložení sa práca
+              automaticky zobrazí v tomto zozname.
             </p>
+          </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {filteredProfiles.map((profile) => {
+              const isActive = activeProfileId === profile.id;
+              const isDragging = draggedProfileId === profile.id;
+              const isDragOver = dragOverProfileId === profile.id;
 
-            {sourceStats.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {sourceStats.map((source) => (
-                  <span
-                    key={source.name}
-                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-sm"
+              return (
+                <article
+                  key={profile.id}
+                  draggable
+                  onDragStart={(event) => handleDragStart(event, profile.id)}
+                  onDragOver={(event) => handleDragOver(event, profile.id)}
+                  onDrop={(event) => handleDrop(event, profile.id)}
+                  onDragEnd={handleDragEnd}
+                  className={`group rounded-3xl border p-5 transition ${
+                    isActive
+                      ? 'border-emerald-400/50 bg-emerald-500/[0.055]'
+                      : 'border-white/10 bg-white/[0.045] hover:border-violet-400/50 hover:bg-white/[0.07]'
+                  } ${
+                    isDragging
+                      ? 'scale-[0.98] cursor-grabbing opacity-50'
+                      : 'cursor-grab'
+                  } ${
+                    isDragOver
+                      ? 'border-violet-400 bg-violet-500/[0.09] ring-2 ring-violet-400/40'
+                      : ''
+                  }`}
+                >
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs font-bold text-slate-300">
+                      <GripVertical className="h-4 w-4 text-slate-500" />
+                      Presuň kartu
+                    </div>
+
+                    {isActive && (
+                      <div className="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-black text-emerald-200">
+                        Aktívna
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => openProfile(profile)}
+                    className="block w-full text-left"
                   >
-                    <span>{source.name}</span>
-                    <span className="rounded-full bg-purple-600 px-2 py-0.5 text-xs font-bold">
-                      {source.count}
-                    </span>
-                  </span>
-                ))}
+                    <div className="mb-4 flex items-start justify-between gap-4">
+                      <div
+                        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
+                          isActive
+                            ? 'bg-emerald-500/15 text-emerald-200'
+                            : 'bg-violet-500/15 text-violet-200'
+                        }`}
+                      >
+                        {isActive ? (
+                          <CheckCircle2 className="h-5 w-5" />
+                        ) : (
+                          <FileText className="h-5 w-5" />
+                        )}
+                      </div>
+
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          isActive
+                            ? 'bg-emerald-500/20 text-emerald-200'
+                            : 'bg-violet-600/20 text-violet-200'
+                        }`}
+                      >
+                        {isActive
+                          ? 'Vybratá práca'
+                          : profile.schema?.label ||
+                            formatWorkType(profile.type)}
+                      </span>
+                    </div>
+
+                    <h2 className="line-clamp-2 text-xl font-black text-white">
+                      {profile.title || 'Bez názvu'}
+                    </h2>
+
+                    <div className="mt-4 space-y-2 text-sm text-slate-400">
+                      <div className="flex items-center gap-2">
+                        <CalendarDays className="h-4 w-4 text-slate-500" />
+                        <span>{formatDate(profile.savedAt)}</span>
+                      </div>
+
+                      {profile.field && (
+                        <div className="flex items-center gap-2">
+                          <Library className="h-4 w-4 text-slate-500" />
+                          <span className="line-clamp-1">{profile.field}</span>
+                        </div>
+                      )}
+
+                      {profile.supervisor && (
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4 text-slate-500" />
+                          <span className="line-clamp-1">
+                            {profile.supervisor}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </button>
+
+                  <div className="mt-5 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => selectProfileForGeneration(profile)}
+                      className={`rounded-xl px-4 py-2 text-sm font-black text-white transition ${
+                        isActive
+                          ? 'bg-emerald-600 hover:bg-emerald-500'
+                          : 'bg-violet-600 hover:bg-violet-500'
+                      }`}
+                    >
+                      {isActive
+                        ? 'Táto práca je vybratá'
+                        : 'Vybrať na generovanie'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openProfile(profile)}
+                      className="rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-bold text-white transition hover:bg-white/[0.1]"
+                    >
+                      Otvoriť
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openEditProfile(profile)}
+                      className="rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm font-bold text-violet-100 transition hover:bg-violet-500/20"
+                    >
+                      Upraviť
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => deleteProfile(profile.id)}
+                      className="ml-auto rounded-xl bg-red-500/10 p-2 text-red-300 transition hover:bg-red-500/20 hover:text-red-200"
+                      aria-label="Odstrániť prácu"
+                    >
+                      <Trash2 className="h-5 w-5" />
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {selectedProfile && (
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="max-h-[92vh] w-full max-w-7xl overflow-hidden rounded-[32px] border border-white/10 bg-[#020617] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.2em] text-violet-300">
+                  Detail práce
+                </div>
+
+                <h2 className="text-2xl font-black text-white">
+                  {selectedProfile.title || 'Bez názvu'}
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-400">
+                  Tu môžeš prácu otvoriť, upraviť alebo vybrať na generovanie
+                  textu.
+                </p>
               </div>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(SOURCE_LABELS).map(([key, label]) => (
-                  <span
-                    key={key}
-                    className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm text-gray-400"
-                  >
-                    {label}
-                  </span>
-                ))}
+
+              <button
+                type="button"
+                onClick={closeProfile}
+                className="rounded-2xl bg-red-500/90 p-3 text-white transition hover:bg-red-400"
+                aria-label="Zavrieť profil"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="max-h-[78vh] overflow-y-auto">
+              <ProjectDetail
+                profile={selectedProfile}
+                activeProfileId={activeProfileId}
+                onBack={closeProfile}
+                onDelete={() => deleteProfile(selectedProfile.id)}
+                onEdit={() => openEditProfile(selectedProfile)}
+                onSelect={() => selectProfileForGeneration(selectedProfile)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {profileFormOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
+            <ProfileForm
+              initialProfile={editingProfile as any}
+              onSave={(updatedProfile) =>
+                handleProfileSaved(updatedProfile as any)
+              }
+              onClose={closeEditProfile}
+            />
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
+
+function ProjectDetail({
+  profile,
+  activeProfileId,
+  onBack,
+  onDelete,
+  onEdit,
+  onSelect,
+}: {
+  profile: SavedProfile;
+  activeProfileId: string | null;
+  onBack: () => void;
+  onDelete: () => void;
+  onEdit: () => void;
+  onSelect: () => void;
+}) {
+  const keywords =
+    profile.keywordsList && profile.keywordsList.length > 0
+      ? profile.keywordsList
+      : profile.keywords || [];
+
+  const isActive = activeProfileId === profile.id;
+
+  return (
+    <div className="bg-[#020617] text-white">
+      <div className="px-6 py-6 md:px-8">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 font-bold text-slate-200 transition hover:bg-white/[0.1]"
+          >
+            <ArrowLeft className="h-5 w-5" />
+            Zavrieť detail
+          </button>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={onSelect}
+              className={`inline-flex items-center gap-2 rounded-2xl px-4 py-3 font-black text-white transition ${
+                isActive
+                  ? 'bg-emerald-600 hover:bg-emerald-500'
+                  : 'bg-violet-600 hover:bg-violet-500'
+              }`}
+            >
+              {isActive ? (
+                <CheckCircle2 className="h-5 w-5" />
+              ) : (
+                <Sparkles className="h-5 w-5" />
+              )}
+              {isActive ? 'Táto práca je vybratá' : 'Vybrať na generovanie'}
+            </button>
+
+            <button
+              type="button"
+              onClick={onEdit}
+              className="inline-flex items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 font-bold text-violet-100 transition hover:bg-violet-500/20"
+            >
+              <FileText className="h-5 w-5" />
+              Upraviť
+            </button>
+
+            <button
+              type="button"
+              onClick={onDelete}
+              className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 font-bold text-red-200 transition hover:bg-red-500/20"
+            >
+              <Trash2 className="h-5 w-5" />
+              Odstrániť
+            </button>
+          </div>
+        </div>
+
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 md:p-8">
+          <div className="mb-8 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+            <div>
+              <div
+                className={`mb-4 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold ${
+                  isActive
+                    ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
+                    : 'border-violet-400/30 bg-violet-500/10 text-violet-200'
+                }`}
+              >
+                {isActive ? (
+                  <>
+                    <CheckCircle2 className="h-4 w-4" />
+                    Práca vybratá na generovanie
+                  </>
+                ) : (
+                  <>
+                    <FileText className="h-4 w-4" />
+                    Detail práce
+                  </>
+                )}
               </div>
-            )}
+
+              <h1 className="max-w-4xl text-4xl font-black tracking-tight">
+                {profile.title || 'Bez názvu'}
+              </h1>
+
+              <p className="mt-3 text-slate-400">
+                Uložené: {formatDate(profile.savedAt)}
+              </p>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-[#111525] p-5">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                Typ práce
+              </p>
+
+              <p className="mt-2 text-xl font-black">
+                {profile.schema?.label || formatWorkType(profile.type)}
+              </p>
+
+              {profile.schema?.recommendedLength && (
+                <p className="mt-1 text-sm text-slate-400">
+                  {profile.schema.recommendedLength}
+                </p>
+              )}
+            </div>
           </div>
 
-          {(yearFrom || yearTo || onlyPdf) && (
-            <div className="mt-4 text-sm text-gray-400">
-              Aktívny filter:{' '}
-              {yearFrom && yearTo ? `${yearFrom} až ${yearTo}` : 'bez časového filtra'}
-              {onlyPdf ? ' • iba PDF' : ''}
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <InfoCard label="Názov práce" value={profile.title} />
+            <InfoCard
+              label="Typ práce"
+              value={profile.schema?.label || profile.type}
+            />
+            <InfoCard label="Odbornosť" value={profile.level} />
+            <InfoCard label="Jazyk rozhrania" value={profile.language} />
+            <InfoCard label="Jazyk práce" value={profile.workLanguage} />
+            <InfoCard label="Citovanie" value={profile.citation} />
+            <InfoCard label="Odbor / predmet / oblasť" value={profile.field} />
+            <InfoCard
+              label="Vedúci práce / školiteľ"
+              value={profile.supervisor}
+            />
+            <InfoCard label="Téma" value={profile.topic} />
+          </div>
+
+          <div className="mt-8 grid gap-5 xl:grid-cols-2">
+            <LongCard label="Anotácia" value={profile.annotation} />
+            <LongCard label="Cieľ práce" value={profile.goal} />
+            <LongCard label="Výskumný problém" value={profile.problem} />
+            <LongCard label="Metodológia" value={profile.methodology} />
+            <LongCard label="Hypotézy" value={profile.hypotheses} />
+            <LongCard
+              label="Výskumné otázky"
+              value={profile.researchQuestions}
+            />
+            <LongCard label="Praktická časť" value={profile.practicalPart} />
+            <LongCard
+              label="Vedecký / odborný prínos"
+              value={profile.scientificContribution}
+            />
+            <LongCard
+              label="Firemný / manažérsky problém"
+              value={profile.businessProblem}
+            />
+            <LongCard label="Manažérsky cieľ" value={profile.businessGoal} />
+            <LongCard label="Implementácia" value={profile.implementation} />
+            <LongCard label="Prípadová štúdia" value={profile.caseStudy} />
+            <LongCard label="Reflexia" value={profile.reflection} />
+            <LongCard
+              label="Požiadavky na zdroje"
+              value={profile.sourcesRequirement}
+            />
+          </div>
+
+          {keywords.length > 0 && (
+            <div className="mt-8 rounded-3xl border border-white/10 bg-[#111525] p-5">
+              <h2 className="mb-4 text-xl font-black">Kľúčové slová</h2>
+
+              <div className="flex flex-wrap gap-2">
+                {keywords.map((keyword, index) => (
+                  <span
+                    key={`${keyword}-${index}`}
+                    className="rounded-full bg-violet-600 px-3 py-1 text-xs font-bold text-white"
+                  >
+                    {keyword}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
-        </div>
-      )}
 
-      {/* LOADING */}
-      {loading && (
-        <p className="text-center text-purple-400 mb-6">
-          🔍 AI analyzuje tému a hľadá zdroje vo svetových akademických databázach...
-        </p>
-      )}
+          {profile.schema?.structure && profile.schema.structure.length > 0 && (
+            <div className="mt-8 rounded-3xl border border-white/10 bg-[#111525] p-5">
+              <h2 className="mb-4 text-xl font-black">Štruktúra práce</h2>
 
-      {/* ERROR */}
-      {error && (
-        <div className="max-w-5xl mx-auto mb-6 bg-red-500/10 border border-red-500/30 text-red-200 p-4 rounded-2xl">
-          Chyba: {error}
-        </div>
-      )}
+              <ol className="space-y-3">
+                {profile.schema.structure.map((item, index) => (
+                  <li
+                    key={`${item}-${index}`}
+                    className="flex gap-3 text-sm text-slate-300"
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-xs font-black text-violet-200">
+                      {index + 1}
+                    </span>
 
-      {/* EMPTY */}
-      {!loading && lastSearchQuery && results.length === 0 && !error && (
-        <div className="max-w-5xl mx-auto mb-6 text-center text-gray-400 bg-white/5 border border-white/10 p-8 rounded-2xl">
-          Nenašli sa žiadne výsledky. Skúste širší výraz alebo vypnite filter „Len PDF“.
-        </div>
-      )}
-
-      {/* RESULTS */}
-      <div className="max-w-5xl mx-auto space-y-6">
-        {results.map((r) => (
-          <div
-            key={String(r.id)}
-            className="bg-white/5 border border-white/10 p-6 rounded-2xl hover:border-purple-400/40 transition"
-          >
-            <div className="flex flex-wrap items-center gap-2 mb-3">
-              {r.source && (
-                <span className="text-xs bg-purple-600/30 border border-purple-400/30 px-3 py-1 rounded-full">
-                  {r.source}
-                </span>
-              )}
-
-              {r.isOpenAccess && (
-                <span className="text-xs bg-green-600/30 border border-green-400/30 px-3 py-1 rounded-full">
-                  Open Access
-                </span>
-              )}
-
-              {(r.isPdf || r.pdfUrl) && (
-                <span className="text-xs bg-blue-600/30 border border-blue-400/30 px-3 py-1 rounded-full">
-                  PDF
-                </span>
-              )}
-
-              {r.year && (
-                <span className="text-xs bg-white/10 px-3 py-1 rounded-full">
-                  {r.year}
-                </span>
-              )}
+                    <span className="pt-1">{item}</span>
+                  </li>
+                ))}
+              </ol>
             </div>
+          )}
 
-            <h3 className="font-bold text-xl mb-2">
-              {r.title}
-            </h3>
+          {profile.schema?.requiredSections &&
+            profile.schema.requiredSections.length > 0 && (
+              <div className="mt-8 rounded-3xl border border-white/10 bg-[#111525] p-5">
+                <h2 className="mb-4 text-xl font-black">Povinné časti</h2>
 
-            <p className="text-gray-400 text-sm mb-3">
-              {r.authors && r.authors.length > 0
-                ? r.authors.join(', ')
-                : 'Autori neuvedení'}
-              {r.year ? ` • ${r.year}` : ''}
-            </p>
-
-            {r.abstract && (
-              <p className="text-gray-300 text-sm leading-relaxed">
-                {r.abstract}
-              </p>
-            )}
-
-            {r.doi && (
-              <p className="text-gray-500 text-xs mt-3">
-                DOI: {r.doi}
-              </p>
-            )}
-
-            {r.citation && (
-              <div className="mt-4 rounded-xl bg-black/20 border border-white/10 p-3">
-                <p className="text-xs text-gray-400 mb-1">Citácia:</p>
-                <p className="text-sm text-gray-300">{r.citation}</p>
+                <div className="flex flex-wrap gap-2">
+                  {profile.schema.requiredSections.map((item, index) => (
+                    <span
+                      key={`${item}-${index}`}
+                      className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-200"
+                    >
+                      {item}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
-
-            <div className="flex flex-wrap gap-3 mt-4">
-              {r.url && (
-                <a
-                  href={r.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-block text-blue-400 hover:text-blue-300"
-                >
-                  Zobraziť článok
-                </a>
-              )}
-
-              {r.pdfUrl && (
-                <a
-                  href={r.pdfUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-block text-green-400 hover:text-green-300"
-                >
-                  Otvoriť PDF
-                </a>
-              )}
-            </div>
-          </div>
-        ))}
+        </section>
       </div>
     </div>
   );
 }
 
-// ================= BUTTON STYLE =================
-function btn(active: boolean) {
-  return `px-3 py-2 rounded-xl ${
-    active ? 'bg-purple-600' : 'bg-white/10 hover:bg-white/20'
-  }`;
+function InfoCard({ label, value }: { label: string; value?: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#111525] p-4">
+      <p className="text-xs uppercase tracking-[0.15em] text-slate-500">
+        {label}
+      </p>
+
+      <p className="mt-2 text-sm font-bold text-white">
+        {value || 'Nevyplnené'}
+      </p>
+    </div>
+  );
+}
+
+function LongCard({ label, value }: { label: string; value?: string }) {
+  if (!value || !value.trim()) return null;
+
+  return (
+    <div className="rounded-3xl border border-white/10 bg-[#111525] p-5">
+      <p className="mb-3 text-xs uppercase tracking-[0.15em] text-slate-500">
+        {label}
+      </p>
+
+      <p className="whitespace-pre-wrap text-sm leading-7 text-slate-200">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function formatDate(value?: string) {
+  if (!value) return 'Bez dátumu';
+
+  try {
+    return new Intl.DateTimeFormat('sk-SK', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+function formatWorkType(type?: string) {
+  if (!type) return 'Neurčený typ';
+
+  const map: Record<string, string> = {
+    seminar: 'Seminárna práca',
+    essay: 'Esej',
+    maturita: 'Maturitná práca',
+    bachelor: 'Bakalárska práca',
+    master: 'Diplomová práca',
+    graduate: 'Absolventská práca',
+    rigorous: 'Rigorózna práca',
+    dissertation: 'Dizertačná práca',
+    habilitation: 'Habilitačná práca',
+    mba: 'MBA práca',
+    dba: 'DBA práca',
+    attestation: 'Atestačná práca',
+    msc: 'MSc. práca',
+  };
+
+  return map[type] || type;
 }

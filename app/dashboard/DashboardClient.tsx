@@ -1,18 +1,15 @@
 'use client';
 
 import {
-  Suspense,
   useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react';
 
-import Link from 'next/link';
 import type { LucideIcon } from 'lucide-react';
 import {
   BarChart3,
-  Bell,
   BookOpen,
   Bot,
   CalendarDays,
@@ -21,12 +18,9 @@ import {
   FileCheck2,
   FileText,
   GraduationCap,
-  Home,
   Languages,
   Library,
-  LogOut,
   Mail,
-  Menu,
   MessageSquare,
   Plus,
   Presentation,
@@ -66,7 +60,7 @@ type DashboardUser = {
 };
 
 const featureCards = [
-  { mode: 'write', title: 'AI písanie práce', icon: FileText },
+  { mode: 'write', title: 'AI Chat', icon: Bot },
   { mode: 'sources', title: 'Zdroje', icon: Library },
   { mode: 'supervisor', title: 'AI vedúci', icon: GraduationCap },
   { mode: 'audit', title: 'Audit kvality', icon: FileCheck2 },
@@ -129,6 +123,147 @@ type SavedProfile = {
   sources_requirement?: string;
   keywords_list?: string[];
 };
+
+type PackagePlan = {
+  id: string;
+  name: string;
+  price: string;
+  originalPrice?: string;
+  period: string;
+  pages: string;
+  works: string;
+  supervisor: string;
+  audit: string;
+  defense: string;
+  badge?: string;
+  description: string;
+  features: string[];
+};
+
+type AddonService = {
+  id: string;
+  name: string;
+  price: string;
+  description: string;
+  disabledBeforePlan?: boolean;
+};
+
+// =====================================================
+// PACKAGES DATA
+// =====================================================
+
+const packagePlans: PackagePlan[] = [
+  {
+    id: 'free',
+    name: 'Free',
+    price: '0 €',
+    period: 'Limitovaný prístup',
+    pages: 'Ukážka',
+    works: '1 práca',
+    supervisor: 'Ukážka',
+    audit: 'Ukážka',
+    defense: 'Nie',
+    badge: 'Štart',
+    description: 'Vhodné na základné vyskúšanie aplikácie.',
+    features: [
+      'Základný vstup do aplikácie',
+      'Ukážka AI písania',
+      'Ukážka profilu práce',
+    ],
+  },
+  {
+    id: 'month',
+    name: 'Mesačný balík',
+    price: '40 €',
+    originalPrice: '49 €',
+    period: '1 mesiac',
+    pages: '150 strán',
+    works: '5 prác',
+    supervisor: '15 kontrol',
+    audit: '5 auditov',
+    defense: '1 obhajoba',
+    badge: 'Hlavný balík',
+    description: 'Základný hlavný plán pre priebežnú prácu počas mesiaca.',
+    features: [
+      'AI písanie práce',
+      'AI vedúci práce',
+      'Audit kvality',
+      'Obhajoba a prezentácia',
+    ],
+  },
+  {
+    id: 'quarter',
+    name: '3 mesiace',
+    price: '70 €',
+    originalPrice: '120 €',
+    period: '3 mesiace',
+    pages: '350 strán',
+    works: '10 prác',
+    supervisor: '35 kontrol',
+    audit: '12 auditov',
+    defense: '3 obhajoby',
+    badge: 'Najvýhodnejší',
+    description:
+      'Najlepší pomer ceny a výkonu pre bakalársku alebo diplomovú prácu.',
+    features: [
+      'AI písanie a zdroje',
+      'AI vedúci práce',
+      'Audit kvality',
+      '3 obhajoby',
+    ],
+  },
+  {
+    id: 'year',
+    name: 'Ročný PRO',
+    price: '240 €',
+    originalPrice: '480 €',
+    period: '12 mesiacov',
+    pages: '1 500 strán',
+    works: 'Neobmedzené projekty',
+    supervisor: '150 kontrol',
+    audit: '50 auditov',
+    defense: '10 obhajôb',
+    badge: 'Dlhodobé používanie',
+    description: 'Ročný balík pre intenzívne používanie.',
+    features: [
+      'Všetky hlavné moduly',
+      'AI vedúci práce',
+      'Audit kvality',
+      '10 obhajôb',
+    ],
+  },
+];
+
+const addonServices: AddonService[] = [
+  {
+    id: 'ai-supervisor',
+    name: 'AI vedúci práce',
+    price: '29,90 €',
+    description: 'Detailná spätná väzba do 100 strán.',
+    disabledBeforePlan: true,
+  },
+  {
+    id: 'quality-audit',
+    name: 'Kontrola kvality práce',
+    price: '29,90 €',
+    description: 'Audit logiky, metodológie, argumentácie a štruktúry.',
+    disabledBeforePlan: true,
+  },
+  {
+    id: 'defense-presentation',
+    name: 'Obhajoba + prezentácia',
+    price: '39,90 €',
+    description: 'Prezentácia, otázky komisie a návrhy odpovedí.',
+    disabledBeforePlan: true,
+  },
+  {
+    id: 'plagiarism',
+    name: 'Kontrola originality',
+    price: '12 €',
+    description: 'Orientačný report originality a rizikových pasáží.',
+    disabledBeforePlan: true,
+  },
+];
 
 // =====================================================
 // LOCAL STORAGE HELPERS
@@ -199,7 +334,6 @@ function DashboardPage() {
 
   const [view, setView] = useState<View>('dashboard');
   const [mode, setMode] = useState<Mode>('write');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [user, setUser] = useState<DashboardUser>({
     name: '',
@@ -218,15 +352,11 @@ function DashboardPage() {
   const [profiles, setProfiles] = useState<SavedProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
-  // =====================================================
-  // AUTH CHECK
-  // =====================================================
-
   useEffect(() => {
-  if (typeof window === 'undefined') return;
-  if (!searchParams) return;
+    if (typeof window === 'undefined') return;
+    if (!searchParams) return;
 
-  const isLoggedIn = localStorage.getItem('zedpera_is_logged_in');
+    const isLoggedIn = localStorage.getItem('zedpera_is_logged_in');
     const email = localStorage.getItem('zedpera_user_email') || '';
     const name = localStorage.getItem('zedpera_user_name') || '';
     const role =
@@ -281,16 +411,12 @@ function DashboardPage() {
     setSubActive(finalRole === 'admin' || finalPlan !== 'free');
   }, [searchParams]);
 
-  // =====================================================
-  // LOAD PAYMENT / SUBSCRIPTION STATUS
-  // =====================================================
-
   useEffect(() => {
-  if (typeof window === 'undefined') return;
-  if (typeof document === 'undefined') return;
-  if (!searchParams) return;
+    if (typeof window === 'undefined') return;
+    if (typeof document === 'undefined') return;
+    if (!searchParams) return;
 
-  const paymentSuccess =
+    const paymentSuccess =
       searchParams.get('payment') === 'success' ||
       searchParams.get('success') === 'true' ||
       searchParams.get('success') === '1';
@@ -319,10 +445,6 @@ function DashboardPage() {
       setSubActive(true);
     }
   }, [searchParams]);
-
-  // =====================================================
-  // LOAD PROFILES
-  // =====================================================
 
   useEffect(() => {
     loadProfiles();
@@ -385,10 +507,6 @@ function DashboardPage() {
       setActiveProfile(null);
     }
   };
-
-  // =====================================================
-  // PROFILE FORM
-  // =====================================================
 
   const openNewProfileForm = () => {
     setEditingProfile(null);
@@ -464,100 +582,92 @@ function DashboardPage() {
     window.location.href = '/';
   };
 
-return (
-  <div className="h-screen overflow-hidden bg-[#020617] text-white">
-    <div className="flex h-screen overflow-hidden">
-  <main className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
-          <Header
-            view={view}
-            mode={mode}
-            subActive={subActive}
-            user={user}
-            setView={setView}
-            openMobileMenu={() => setSidebarOpen(true)}
-          />
-
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-5 md:p-8">
-            {view === 'dashboard' && (
-              <Dashboard
-                setView={setView}
-                setMode={setMode}
-                openForm={openNewProfileForm}
-                user={user}
-                subActive={subActive}
-                activeProfile={activeProfile}
-              />
-            )}
-
-            {view === 'chat' && (
-              <Chat
-                mode={mode}
-                setMode={setMode}
-                activeProfile={activeProfile}
-              />
-            )}
-
-            {view === 'profile' && (
-              <ProfileView
-                profile={activeProfile}
-                profiles={profiles}
-                setActiveProfile={(profile) => {
-                  setActiveProfile(profile);
-
-                  if (typeof window !== 'undefined') {
-                    localStorage.setItem(
-                      'active_profile',
-                      JSON.stringify(profile),
-                    );
-                  }
-                }}
-                openForm={openNewProfileForm}
-                openEditForm={openEditProfileForm}
-              />
-            )}
-
-            {view === 'packages' && <PackagesPage subActive={subActive} />}
-
-            {view === 'video' && (
-              <SimplePage
-                title="Video návod"
-                text="Tu bude video návod pre používateľa."
-              />
-            )}
-
-            {view === 'history' && (
-              <SimplePage
-                title="História"
-                text="Tu bude história generovaní, auditov a uložených výstupov."
-              />
-            )}
-
-            {view === 'settings' && (
-              <SettingsPage user={user} subActive={subActive} logout={logout} />
-            )}
-
-            {view === 'admin-users' && (
-              <AdminPlaceholder
-                title="Admin: Používatelia"
-                text="Tu neskôr doplníš správu používateľov, ich rolí, balíkov a prístupov."
-              />
-            )}
-
-            {view === 'admin-payments' && (
-              <AdminPlaceholder
-                title="Admin: Platby"
-                text="Tu neskôr doplníš prehľad platieb, objednávok, faktúr a Stripe transakcií."
-              />
-            )}
-
-            {view === 'admin-plans' && (
-              <AdminPlaceholder
-                title="Admin: Balíčky"
-                text="Tu neskôr doplníš správu cien, promo akcií, doplnkov a limitov."
-              />
-            )}
+  return (
+    <div className="min-h-screen bg-[#020617] text-white">
+      <div className="mx-auto w-full max-w-[1600px] px-4 py-6 md:px-6 lg:px-8">
+        {view !== 'dashboard' && (
+          <div className="mb-6 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setView('dashboard')}
+              className="rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20"
+            >
+              ← Návrat do menu
+            </button>
           </div>
-        </main>
+        )}
+
+        {view === 'dashboard' && (
+          <Dashboard
+            setView={setView}
+            setMode={setMode}
+            openForm={openNewProfileForm}
+            user={user}
+            subActive={subActive}
+            activeProfile={activeProfile}
+          />
+        )}
+
+        {view === 'chat' && (
+          <Chat mode={mode} setMode={setMode} activeProfile={activeProfile} />
+        )}
+
+        {view === 'profile' && (
+          <ProfileView
+            profile={activeProfile}
+            profiles={profiles}
+            setActiveProfile={(profile) => {
+              setActiveProfile(profile);
+
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('active_profile', JSON.stringify(profile));
+              }
+            }}
+            openForm={openNewProfileForm}
+            openEditForm={openEditProfileForm}
+          />
+        )}
+
+        {view === 'packages' && <PackagesPage subActive={subActive} />}
+
+        {view === 'video' && (
+          <SimplePage
+            title="Video návod"
+            text="Tu bude video návod pre používateľa."
+          />
+        )}
+
+        {view === 'history' && (
+          <SimplePage
+            title="História"
+            text="Tu bude história generovaní, auditov a uložených výstupov."
+          />
+        )}
+
+        {view === 'settings' && (
+          <SettingsPage user={user} subActive={subActive} logout={logout} />
+        )}
+
+        {view === 'admin-users' && (
+          <AdminPlaceholder
+            title="Admin: Používatelia"
+            text="Tu neskôr doplníš správu používateľov, ich rolí, balíkov a prístupov."
+          />
+        )}
+
+        {view === 'admin-payments' && (
+          <AdminPlaceholder
+            title="Admin: Platby"
+            text="Tu neskôr doplníš prehľad platieb, objednávok, faktúr a Stripe transakcií."
+          />
+        )}
+
+        {view === 'admin-plans' && (
+          <AdminPlaceholder
+            title="Admin: Balíčky"
+            text="Tu neskôr doplníš správu cien, promo akcií, doplnkov a limitov."
+          />
+        )}
       </div>
 
       {showProfileForm && (
@@ -579,6 +689,7 @@ return (
                   <h2 className="text-2xl font-black">
                     {editingProfile ? 'Upraviť profil práce' : 'Nová práca'}
                   </h2>
+
                   <p className="text-sm text-gray-400">
                     {editingProfile
                       ? 'Uprav uložený profil práce.'
@@ -590,6 +701,7 @@ return (
                   type="button"
                   onClick={closeProfileFormAndRefresh}
                   className="rounded-xl bg-white/10 p-2 text-gray-300 transition hover:bg-white/20 hover:text-white"
+                  aria-label="Zavrieť"
                 >
                   <X size={22} />
                 </button>
@@ -606,451 +718,6 @@ return (
         </div>
       )}
     </div>
- 
-  );
-}
-
-
-// =====================================================
-// HEADER
-// =====================================================
-
-function Header({
-  view,
-  mode,
-  subActive,
-  user,
-  setView,
-  openMobileMenu,
-}: {
-  view: View;
-  mode: Mode;
-  subActive: boolean;
-  user: DashboardUser;
-  setView: (v: View) => void;
-  openMobileMenu: () => void;
-}) {
-  const titleMap: Record<View, string> = {
-    dashboard: 'Menu aplikácie',
-    chat: getModeTitle(mode),
-    profile: 'Profil práce',
-    history: 'História',
-    settings: 'Nastavenia',
-    packages: 'Balíčky',
-    video: 'Video návod',
-    'admin-users': 'Admin: Používatelia',
-    'admin-payments': 'Admin: Platby',
-    'admin-plans': 'Admin: Balíčky',
-  };
-
-  return (
-    <header className="sticky top-0 z-40 border-b border-white/10 bg-[#020617]/90 px-5 py-4 backdrop-blur-xl md:px-8">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-4">
-          <button
-            type="button"
-            onClick={openMobileMenu}
-            className="rounded-2xl border border-white/10 bg-white/10 p-3 lg:hidden"
-          >
-            <Menu size={22} />
-          </button>
-
-          <div className="min-w-0">
-            <h1 className="truncate text-2xl font-black text-white">
-              {titleMap[view]}
-            </h1>
-
-            <p className="truncate text-sm text-gray-400">
-              AI platforma pre akademické písanie
-            </p>
-          </div>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-3">
-          {view !== 'dashboard' && (
-            <button
-              type="button"
-              onClick={() => setView('dashboard')}
-              className="hidden rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20 sm:block"
-            >
-              Menu
-            </button>
-          )}
-
-          <div
-            className={`hidden rounded-full px-3 py-1 text-xs font-black sm:block ${
-              subActive
-                ? 'bg-purple-600/30 text-purple-200'
-                : 'bg-white/10 text-gray-300'
-            }`}
-          >
-            {subActive ? 'PRO aktívne' : 'FREE režim'}
-          </div>
-
-          {user.role === 'admin' && (
-            <div className="hidden rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-black text-emerald-300 sm:block">
-              ADMIN
-            </div>
-          )}
-
-          <Bell className="text-gray-300" size={22} />
-        </div>
-      </div>
-    </header>
-  );
-}
-
-// =====================================================
-// SIDEBAR
-// =====================================================
-
-function Sidebar({
-  view,
-  setView,
-  mode,
-  setMode,
-  user,
-  subActive,
-  openForm,
-  logout,
-}: {
-  view: View;
-  setView: (v: View) => void;
-  mode: Mode;
-  setMode: (m: Mode) => void;
-  user: DashboardUser;
-  subActive: boolean;
-  openForm: () => void;
-  logout: () => void;
-}) {
- return (
-  <aside className="hidden h-screen w-80 shrink-0 overflow-hidden border-r border-white/10 bg-[#050816] lg:block">
-      <SidebarContent
-        view={view}
-        setView={setView}
-        mode={mode}
-        setMode={setMode}
-        user={user}
-        subActive={subActive}
-        openForm={openForm}
-        logout={logout}
-      />
-    </aside>
-  );
-}
-
-function MobileSidebar({
-  view,
-  setView,
-  mode,
-  setMode,
-  user,
-  subActive,
-  openForm,
-  logout,
-  close,
-}: {
-  view: View;
-  setView: (v: View) => void;
-  mode: Mode;
-  setMode: (m: Mode) => void;
-  user: DashboardUser;
-  subActive: boolean;
-  openForm: () => void;
-  logout: () => void;
-  close: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-[9998] lg:hidden">
-      <button
-        type="button"
-        aria-label="Zavrieť menu"
-        onClick={close}
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-      />
-
-      <aside className="absolute left-0 top-0 h-full w-[88%] max-w-sm border-r border-white/10 bg-[#050816]">
-        <div className="flex items-center justify-between border-b border-white/10 p-5">
-          <div className="text-xl font-black">ZEDPERA</div>
-
-          <button
-            type="button"
-            onClick={close}
-            className="rounded-xl bg-white/10 p-2"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        <SidebarContent
-          view={view}
-          setView={setView}
-          mode={mode}
-          setMode={setMode}
-          user={user}
-          subActive={subActive}
-          openForm={openForm}
-          logout={logout}
-        />
-      </aside>
-    </div>
-  );
-}
-
-function SidebarContent({
-  view,
-  setView,
-  mode,
-  setMode,
-  user,
-  subActive,
-  openForm,
-  logout,
-}: {
-  view: View;
-  setView: (v: View) => void;
-  mode: Mode;
-  setMode: (m: Mode) => void;
-  user: DashboardUser;
-  subActive: boolean;
-  openForm: () => void;
-  logout: () => void;
-}) {
-  const mainItems: {
-    key: string;
-    label: string;
-    icon: LucideIcon;
-    active: boolean;
-    onClick: () => void;
-  }[] = [
-    {
-      key: 'dashboard',
-      label: 'Menu',
-      icon: Home,
-      active: view === 'dashboard',
-      onClick: () => setView('dashboard'),
-    },
-    {
-      key: 'chat',
-      label: 'AI Chat',
-      icon: Bot,
-      active: view === 'chat' && mode === 'write',
-      onClick: () => {
-        setMode('write');
-        setView('chat');
-      },
-    },
-    {
-      key: 'profile',
-      label: 'Profil práce',
-      icon: User,
-      active: view === 'profile',
-      onClick: () => setView('profile'),
-    },
-    {
-      key: 'sources',
-      label: 'Zdroje',
-      icon: Library,
-      active: view === 'chat' && mode === 'sources',
-      onClick: () => {
-        setMode('sources');
-        setView('chat');
-      },
-    },
-    {
-      key: 'packages',
-      label: 'Balíčky',
-      icon: Crown,
-      active: view === 'packages',
-      onClick: () => setView('packages'),
-    },
-    {
-      key: 'history',
-      label: 'História',
-      icon: MessageSquare,
-      active: view === 'history',
-      onClick: () => setView('history'),
-    },
-    {
-      key: 'video',
-      label: 'Video návod',
-      icon: Video,
-      active: view === 'video',
-      onClick: () => setView('video'),
-    },
-    {
-      key: 'settings',
-      label: 'Nastavenia',
-      icon: Settings,
-      active: view === 'settings',
-      onClick: () => setView('settings'),
-    },
-  ];
-
-  const adminItems: {
-    view: View;
-    label: string;
-    icon: LucideIcon;
-  }[] = [
-    { view: 'admin-users', label: 'Používatelia', icon: User },
-    { view: 'admin-payments', label: 'Platby', icon: FileCheck2 },
-    { view: 'admin-plans', label: 'Správa balíčkov', icon: Crown },
-  ];
-
- return (
-  <div className="flex h-full flex-col overflow-hidden p-5">
-      <div className="mb-6 hidden items-center gap-3 lg:flex">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-600 to-fuchsia-600">
-          <GraduationCap size={26} />
-        </div>
-
-        <div>
-          <div className="text-xl font-black">ZEDPERA</div>
-          <div className="text-xs font-semibold text-gray-500">
-            AI akademický asistent
-          </div>
-        </div>
-      </div>
-
-      <UserStatusCard user={user} subActive={subActive} />
-
-      <button
-        type="button"
-        onClick={openForm}
-        className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-5 py-4 font-black text-white shadow-lg shadow-purple-950/30 transition hover:opacity-90"
-      >
-        <Plus size={20} />
-        Nová práca
-      </button>
-
-     <nav className="mt-6 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-        {mainItems.map((item) => (
-          <SidebarButton
-            key={item.key}
-            active={item.active}
-            icon={item.icon}
-            label={item.label}
-            onClick={item.onClick}
-          />
-        ))}
-      </nav>
-
-      {user.role === 'admin' && (
-        <div className="mt-7">
-          <div className="mb-3 px-3 text-xs font-black uppercase tracking-[0.18em] text-emerald-400">
-            Admin menu
-          </div>
-
-          <div className="space-y-2">
-            {adminItems.map((item) => (
-              <SidebarButton
-                key={item.view}
-                active={view === item.view}
-                icon={item.icon}
-                label={item.label}
-                onClick={() => setView(item.view)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="shrink-0 space-y-3 pt-4">
-        <Link
-          href="/"
-          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/20"
-        >
-          <ExternalLink size={17} />
-          Landing page
-        </Link>
-
-        <button
-          type="button"
-          onClick={logout}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-200 transition hover:bg-red-500/20"
-        >
-          <LogOut size={17} />
-          Odhlásiť sa
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function SidebarButton({
-  active,
-  icon: Icon,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  icon: LucideIcon;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
-        active
-          ? 'bg-purple-600 text-white shadow-lg shadow-purple-950/30'
-          : 'text-gray-300 hover:bg-white/10 hover:text-white'
-      }`}
-    >
-      <Icon size={19} />
-      {label}
-    </button>
-  );
-}
-
-function UserStatusCard({
-  user,
-  subActive,
-}: {
-  user: DashboardUser;
-  subActive: boolean;
-}) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-      <div className="flex items-start gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-purple-600/20 text-purple-200">
-          <User size={22} />
-        </div>
-
-        <div className="min-w-0">
-          <div className="truncate font-black text-white">
-            {user.name || 'Používateľ'}
-          </div>
-
-          <div className="truncate text-xs text-gray-500">
-            {user.email || 'bez emailu'}
-          </div>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            <span
-              className={`rounded-full px-2.5 py-1 text-[11px] font-black uppercase ${
-                user.role === 'admin'
-                  ? 'bg-emerald-500/15 text-emerald-300'
-                  : 'bg-blue-500/15 text-blue-300'
-              }`}
-            >
-              {user.role === 'admin' ? 'Admin' : 'User'}
-            </span>
-
-            <span
-              className={`rounded-full px-2.5 py-1 text-[11px] font-black uppercase ${
-                subActive
-                  ? 'bg-purple-500/15 text-purple-300'
-                  : 'bg-white/10 text-gray-400'
-              }`}
-            >
-              {user.plan || 'free'}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -1061,10 +728,10 @@ function UserStatusCard({
 function Dashboard({
   setView,
   setMode,
-  openForm,
   user,
-  subActive,
-  activeProfile,
+  openForm: _openForm,
+  subActive: _subActive,
+  activeProfile: _activeProfile,
 }: {
   setView: (v: View) => void;
   setMode: (m: Mode) => void;
@@ -1075,81 +742,7 @@ function Dashboard({
 }) {
   return (
     <div className="mx-auto max-w-7xl space-y-8">
-      <section className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[#050816] p-6 shadow-2xl shadow-black/30 md:p-8">
-        <div className="absolute right-0 top-0 h-72 w-72 rounded-full bg-purple-600/20 blur-3xl" />
-        <div className="absolute bottom-0 left-0 h-72 w-72 rounded-full bg-fuchsia-600/10 blur-3xl" />
-
-        <div className="relative flex flex-col justify-between gap-8 xl:flex-row xl:items-start">
-          <div>
-            <div className="mb-6 flex flex-wrap items-center gap-3">
-              <Sparkles className="text-purple-400" />
-              <span className="text-2xl font-black">ZEDPERA</span>
-
-              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-gray-300">
-                Menu aplikácie
-              </span>
-
-              {user.role === 'admin' && (
-                <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-black text-emerald-300">
-                  Admin free
-                </span>
-              )}
-
-              {subActive && user.role !== 'admin' && (
-                <span className="rounded-full bg-purple-500/15 px-3 py-1 text-xs font-black text-purple-300">
-                  Aktívny balík
-                </span>
-              )}
-            </div>
-
-            <h2 className="max-w-5xl text-4xl font-black leading-tight md:text-5xl">
-              Zisti, čo je slabé na tvojej práci skôr než vedúci práce.
-            </h2>
-
-            <p className="mt-4 max-w-3xl text-base leading-7 text-gray-400 md:text-lg">
-              Vytvor profil práce, generuj odborný text, vyhľadaj zdroje,
-              skontroluj kvalitu, priprav obhajobu a získaj spätnú väzbu ako
-              od akademického konzultanta.
-            </p>
-
-            <div className="mt-6 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-3">
-              <StatusPill
-                label="Rola"
-                value={user.role === 'admin' ? 'Admin' : 'Používateľ'}
-              />
-              <StatusPill label="Balík" value={user.plan || 'free'} />
-              <StatusPill
-                label="Profil"
-                value={activeProfile?.title || 'Bez profilu'}
-              />
-            </div>
-          </div>
-
-          <div className="flex shrink-0 flex-col gap-3 sm:flex-row xl:flex-col">
-            <button
-              type="button"
-              onClick={openForm}
-              className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-black text-white shadow-lg shadow-purple-950/30 transition hover:opacity-90"
-            >
-              <Plus size={20} />
-              Nová práca
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setView('packages')}
-              className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-6 py-4 font-black text-white transition hover:bg-white/20"
-            >
-              <Crown size={20} />
-              Balíčky
-            </button>
-          </div>
-        </div>
-
-        <div className="relative mt-10">
-          <DashboardStats />
-        </div>
-      </section>
+      <DashboardStats />
 
       <section>
         <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
@@ -1273,9 +866,7 @@ function DashboardStats() {
       safeParseLocalStorageArray<SavedProfile>('profiles_full');
 
     const profiles = safeParseLocalStorageArray<SavedProfile>('profiles');
-
     const profile = safeParseLocalStorageObject<SavedProfile>('profile');
-
     const activeProfile =
       safeParseLocalStorageObject<SavedProfile>('active_profile');
 
@@ -1308,6 +899,9 @@ function DashboardStats() {
     const savedOutputs =
       safeParseLocalStorageArray<SavedTextOutput>('saved_outputs');
 
+    const texts = safeParseLocalStorageArray<SavedTextOutput>('texts');
+    const outputs = safeParseLocalStorageArray<SavedTextOutput>('outputs');
+
     const latestGeneratedText =
       typeof window !== 'undefined'
         ? localStorage.getItem('latest_generated_work_text')
@@ -1317,6 +911,8 @@ function DashboardStats() {
       ...generatedTexts,
       ...chatHistory,
       ...savedOutputs,
+      ...texts,
+      ...outputs,
       ...(latestGeneratedText?.trim()
         ? [
             {
@@ -2027,9 +1623,11 @@ function Chat({
 
   const CurrentIcon = current.icon;
 
-return (
-  <div className="mx-auto max-w-7xl space-y-6">
-    <div className="rounded-3xl border border-white/10 bg-[#050816] p-6">
+  return (
+    <div className="mx-auto max-w-7xl space-y-6">
+      <ModuleTabs mode={mode} setMode={setMode} />
+
+      <div className="rounded-3xl border border-white/10 bg-[#050816] p-6">
         <div className="mb-6 flex items-center gap-3">
           <CurrentIcon className="text-purple-400" size={30} />
 
@@ -2133,9 +1731,7 @@ function WriteModule({
     try {
       const response = await fetch('/api/generate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chapterTitle,
           outputType,
@@ -2245,7 +1841,7 @@ function WriteModule({
           onChange={(event) => setAssignment(event.target.value)}
           rows={8}
           placeholder="Popíš, čo má AI napísať. Uveď rozsah, štýl, obsah a požiadavky..."
-          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
         />
       </label>
 
@@ -2296,7 +1892,10 @@ function WriteModule({
 function SourcesModule() {
   return (
     <ModuleLayout>
-      <Input label="Téma vyhľadávania" placeholder="Napr. inkluzívne vzdelávanie" />
+      <Input
+        label="Téma vyhľadávania"
+        placeholder="Napr. inkluzívne vzdelávanie"
+      />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Select
@@ -3068,7 +2667,7 @@ function PlagiarismModule() {
   const [workType, setWorkType] = useState('Bakalárska práca');
   const [citationStyle, setCitationStyle] = useState('ISO 690');
   const [language, setLanguage] = useState('SK');
-  const [result, setResult] = useState<any | null>(null);
+  const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -3166,24 +2765,28 @@ function PlagiarismModule() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <ScoreCard
               label="Skóre originality"
-              value={result.originalityScore ?? '—'}
+              value={String(result.originalityScore ?? '—')}
               suffix="%"
             />
             <ScoreCard
               label="Riziko podobnosti"
-              value={result.similarityRiskScore ?? '—'}
+              value={String(result.similarityRiskScore ?? '—')}
               suffix="%"
             />
             <ScoreCard
               label="Autentickosť textu"
-              value={result.authenticityScore ?? '—'}
+              value={String(result.authenticityScore ?? '—')}
               suffix="%"
             />
           </div>
 
           <ResultBox
             title="Protokol predbežnej kontroly originality"
-            text={result.report || JSON.stringify(result, null, 2)}
+            text={
+              typeof result.report === 'string'
+                ? result.report
+                : JSON.stringify(result, null, 2)
+            }
           />
         </div>
       )}
@@ -3194,142 +2797,6 @@ function PlagiarismModule() {
 // =====================================================
 // PACKAGES
 // =====================================================
-
-type PackagePlan = {
-  id: string;
-  name: string;
-  price: string;
-  originalPrice?: string;
-  period: string;
-  pages: string;
-  works: string;
-  supervisor: string;
-  audit: string;
-  defense: string;
-  badge?: string;
-  description: string;
-  features: string[];
-};
-
-type AddonService = {
-  id: string;
-  name: string;
-  price: string;
-  description: string;
-  disabledBeforePlan?: boolean;
-};
-
-const packagePlans: PackagePlan[] = [
-  {
-    id: 'free',
-    name: 'Free',
-    price: '0 €',
-    period: 'Limitovaný prístup',
-    pages: 'Ukážka',
-    works: '1 práca',
-    supervisor: 'Ukážka',
-    audit: 'Ukážka',
-    defense: 'Nie',
-    badge: 'Štart',
-    description: 'Vhodné na základné vyskúšanie aplikácie.',
-    features: [
-      'Základný vstup do aplikácie',
-      'Ukážka AI písania',
-      'Ukážka profilu práce',
-    ],
-  },
-  {
-    id: 'month',
-    name: 'Mesačný balík',
-    price: '40 €',
-    originalPrice: '49 €',
-    period: '1 mesiac',
-    pages: '150 strán',
-    works: '5 prác',
-    supervisor: '15 kontrol',
-    audit: '5 auditov',
-    defense: '1 obhajoba',
-    badge: 'Hlavný balík',
-    description: 'Základný hlavný plán pre priebežnú prácu počas mesiaca.',
-    features: [
-      'AI písanie práce',
-      'AI vedúci práce',
-      'Audit kvality',
-      'Obhajoba a prezentácia',
-    ],
-  },
-  {
-    id: 'quarter',
-    name: '3 mesiace',
-    price: '70 €',
-    originalPrice: '120 €',
-    period: '3 mesiace',
-    pages: '350 strán',
-    works: '10 prác',
-    supervisor: '35 kontrol',
-    audit: '12 auditov',
-    defense: '3 obhajoby',
-    badge: 'Najvýhodnejší',
-    description: 'Najlepší pomer ceny a výkonu pre bakalársku alebo diplomovú prácu.',
-    features: [
-      'AI písanie a zdroje',
-      'AI vedúci práce',
-      'Audit kvality',
-      '3 obhajoby',
-    ],
-  },
-  {
-    id: 'year',
-    name: 'Ročný PRO',
-    price: '240 €',
-    originalPrice: '480 €',
-    period: '12 mesiacov',
-    pages: '1 500 strán',
-    works: 'Neobmedzené projekty',
-    supervisor: '150 kontrol',
-    audit: '50 auditov',
-    defense: '10 obhajôb',
-    badge: 'Dlhodobé používanie',
-    description: 'Ročný balík pre intenzívne používanie.',
-    features: [
-      'Všetky hlavné moduly',
-      'AI vedúci práce',
-      'Audit kvality',
-      '10 obhajôb',
-    ],
-  },
-];
-
-const addonServices: AddonService[] = [
-  {
-    id: 'ai-supervisor',
-    name: 'AI vedúci práce',
-    price: '29,90 €',
-    description: 'Detailná spätná väzba do 100 strán.',
-    disabledBeforePlan: true,
-  },
-  {
-    id: 'quality-audit',
-    name: 'Kontrola kvality práce',
-    price: '29,90 €',
-    description: 'Audit logiky, metodológie, argumentácie a štruktúry.',
-    disabledBeforePlan: true,
-  },
-  {
-    id: 'defense-presentation',
-    name: 'Obhajoba + prezentácia',
-    price: '39,90 €',
-    description: 'Prezentácia, otázky komisie a návrhy odpovedí.',
-    disabledBeforePlan: true,
-  },
-  {
-    id: 'plagiarism',
-    name: 'Kontrola originality',
-    price: '12 €',
-    description: 'Orientačný report originality a rizikových pasáží.',
-    disabledBeforePlan: true,
-  },
-];
 
 function PackagesPage({ subActive }: { subActive: boolean }) {
   const [selectedPlan, setSelectedPlan] = useState<string>('month');
@@ -3446,9 +2913,7 @@ function PackagesPage({ subActive }: { subActive: boolean }) {
 
       <section className="rounded-3xl border border-white/10 bg-[#050816] p-6">
         <div className="mb-5">
-          <h3 className="text-2xl font-black text-white">
-            Doplnkové služby
-          </h3>
+          <h3 className="text-2xl font-black text-white">Doplnkové služby</h3>
 
           {!subActive ? (
             <p className="mt-2 text-sm font-semibold text-red-300">
@@ -3554,7 +3019,10 @@ function SettingsPage({
         <InfoCard label="E-mail" value={user.email || 'Nezadaný'} />
         <InfoCard label="Rola" value={user.role} />
         <InfoCard label="Balík" value={user.plan || 'free'} />
-        <InfoCard label="Stav predplatného" value={subActive ? 'Aktívne' : 'Free'} />
+        <InfoCard
+          label="Stav predplatného"
+          value={subActive ? 'Aktívne' : 'Free'}
+        />
       </div>
 
       <button
@@ -3622,7 +3090,7 @@ function Input({
 
       <input
         placeholder={placeholder}
-        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 outline-none placeholder:text-gray-600 focus:border-purple-500"
+        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-white outline-none placeholder:text-gray-600 focus:border-purple-500"
       />
     </label>
   );
@@ -3639,7 +3107,7 @@ function Select({
     <label className="block">
       <div className="mb-2 text-sm font-semibold text-gray-300">{label}</div>
 
-      <select className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 outline-none focus:border-purple-500">
+      <select className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-white outline-none focus:border-purple-500">
         {options.map((option) => (
           <option key={option}>{option}</option>
         ))}
@@ -3758,7 +3226,7 @@ function Notice({
   type: 'info' | 'success' | 'warning' | 'error';
   children: ReactNode;
 }) {
-  const styles: Record<typeof type, string> = {
+  const styles: Record<'info' | 'success' | 'warning' | 'error', string> = {
     info: 'border-blue-500/30 bg-blue-500/10 text-blue-100',
     success: 'border-green-500/30 bg-green-500/10 text-green-100',
     warning: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-100',
@@ -3817,23 +3285,6 @@ function InfoCard({ label, value }: { label: string; value: string }) {
 // =====================================================
 // TEXT HELPERS
 // =====================================================
-
-function getModeTitle(mode: Mode) {
-  const titles: Record<Mode, string> = {
-    write: 'AI Chat',
-    sources: 'Zdroje',
-    supervisor: 'AI vedúci',
-    audit: 'Audit kvality',
-    defense: 'Obhajoba',
-    translate: 'Preklad',
-    analysis: 'Analýza dát',
-    planning: 'Plánovanie',
-    email: 'Emaily',
-    plagiarism: 'Originalita práce',
-  };
-
-  return titles[mode];
-}
 
 function getModeDescription(mode: Mode) {
   const descriptions: Record<Mode, string> = {

@@ -27,10 +27,10 @@ export default function RootLayout({
   return (
     <html
       lang="sk"
-      className={`${geistSans.variable} ${geistMono.variable}`}
+      className={`${geistSans.variable} ${geistMono.variable} h-dvh overflow-hidden bg-[#020617]`}
       suppressHydrationWarning
     >
-      <body className="min-h-screen bg-[#fbfaf7] text-slate-950 antialiased">
+      <body className="h-dvh overflow-hidden bg-[#020617] text-white antialiased">
         {children}
       </body>
     </html>

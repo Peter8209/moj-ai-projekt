@@ -2,6 +2,7 @@
 
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import {
+  Suspense,
   useEffect,
   useMemo,
   useState,
@@ -21,10 +22,11 @@ import {
   Plus,
   Sparkles,
   X,
-  ShieldCheck,
   User,
   LogOut,
   Menu,
+  ArrowLeft,
+  Crown,
 } from 'lucide-react';
 
 import ProfileFormOriginal from '@/components/ProfileForm';
@@ -106,10 +108,32 @@ const navItems: NavItem[] = [
 const mobileNavItems = navItems.slice(0, 5);
 
 // =====================================================
-// COMPONENT
+// EXPORT WRAPPER
 // =====================================================
 
 export default function AppShell({ children }: { children: ReactNode }) {
+  return (
+    <Suspense fallback={<AppShellFallback />}>
+      <AppShellContent>{children}</AppShellContent>
+    </Suspense>
+  );
+}
+
+function AppShellFallback() {
+  return (
+    <div className="flex h-dvh w-full items-center justify-center bg-[#020617] text-white">
+      <div className="rounded-3xl border border-white/10 bg-white/5 px-6 py-5 text-sm font-bold text-slate-300">
+        Načítavam aplikáciu...
+      </div>
+    </div>
+  );
+}
+
+// =====================================================
+// COMPONENT
+// =====================================================
+
+function AppShellContent({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname() || '';
   const searchParams = useSearchParams();
@@ -127,11 +151,31 @@ export default function AppShell({ children }: { children: ReactNode }) {
     if (mode === 'admin-free') {
       localStorage.setItem('zedpera_admin_free', 'true');
       localStorage.setItem('zedpera_selected_plan', 'admin-free');
+      localStorage.setItem('zedpera_user_plan', 'admin-free');
+      localStorage.setItem('zedpera_user_role', 'admin');
+      localStorage.setItem('zedpera_is_logged_in', 'true');
+
+      if (!localStorage.getItem('zedpera_user_name')) {
+        localStorage.setItem('zedpera_user_name', 'Admin');
+      }
+
+      if (!localStorage.getItem('zedpera_user_email')) {
+        localStorage.setItem('zedpera_user_email', 'admin@zedpera.com');
+      }
+
       setIsAdminFree(true);
       return;
     }
 
-    setIsAdminFree(storedAdminMode === 'true');
+    if (storedAdminMode === 'true') {
+      localStorage.setItem('zedpera_user_role', 'admin');
+      localStorage.setItem('zedpera_user_plan', 'admin-free');
+      localStorage.setItem('zedpera_selected_plan', 'admin-free');
+      setIsAdminFree(true);
+      return;
+    }
+
+    setIsAdminFree(false);
   }, [searchParams]);
 
   const activeTitle = useMemo(() => {
@@ -143,6 +187,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
     const active = navItems.find((item) => isPathActive(pathname, item.href));
     return active?.description || 'AI akademická platforma';
   }, [pathname]);
+
+  const isDashboard = pathname === '/dashboard';
 
   const goTo = (href: string) => {
     setMobileMenuOpen(false);
@@ -167,11 +213,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('zedpera_admin_free');
       localStorage.removeItem('zedpera_selected_plan');
+      localStorage.removeItem('zedpera_user_plan');
+      localStorage.removeItem('zedpera_user_role');
     }
 
     setIsAdminFree(false);
     router.push('/');
   };
+
+  const accountLabel = isAdminFree ? 'Admin účet' : 'Môj účet';
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-[#020617] text-white">
@@ -179,59 +229,21 @@ export default function AppShell({ children }: { children: ReactNode }) {
           DESKTOP SIDEBAR
       ===================================================== */}
 
-      <aside className="hidden h-dvh w-[306px] shrink-0 flex-col border-r border-white/10 bg-[#020617] p-5 lg:flex">
-        {/* LOGO */}
-
-        <button
-          type="button"
-          onClick={() => goTo('/dashboard')}
-          className="mb-6 flex w-full items-center gap-3 rounded-2xl p-2 text-left transition hover:bg-white/[0.04]"
-          aria-label="Zedpera dashboard"
-        >
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 shadow-lg shadow-violet-700/25">
-            <Sparkles className="text-white" size={22} />
-          </div>
-
-          <div className="min-w-0">
-            <div className="truncate text-lg font-black tracking-tight">
-              ZEDPERA
-            </div>
-            <div className="truncate text-xs font-semibold text-slate-400">
-              AI akademický asistent
-            </div>
-          </div>
-        </button>
-
-        {/* ADMIN BADGE */}
-
-        {isAdminFree && (
-          <div className="mb-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-            <div className="flex items-center gap-2 text-sm font-black text-emerald-300">
-              <ShieldCheck size={17} />
-              Admin Free režim
-            </div>
-
-            <p className="mt-2 text-xs leading-5 text-emerald-100/70">
-              Máš zapnutý administrátorský vstup bez platby. Tento režim
-              používaj iba pre vlastný účet.
-            </p>
-          </div>
-        )}
-
+      <aside className="hidden h-dvh w-[306px] shrink-0 flex-col overflow-hidden border-r border-white/10 bg-[#020617] p-5 lg:flex">
         {/* NEW PROJECT */}
 
         <button
           type="button"
           onClick={openNewProfile}
-          className="mb-7 flex h-14 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 font-black text-white shadow-lg shadow-violet-700/25 transition hover:scale-[1.015] hover:from-violet-500 hover:to-purple-500"
+          className="mb-7 mt-2 flex h-14 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 font-black text-white shadow-lg shadow-violet-700/25 transition hover:scale-[1.015] hover:from-violet-500 hover:to-purple-500"
         >
           <Plus size={18} />
           Nová práca
         </button>
 
-        {/* NAVIGATION */}
+        {/* NAVIGATION - bez vnútornej rolovacej lišty */}
 
-        <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+        <nav className="flex-1 space-y-2 overflow-visible pr-0">
           {navItems.map((item) => {
             const active = isPathActive(pathname, item.href);
             const Icon = item.icon;
@@ -280,12 +292,30 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <button
             type="button"
             onClick={() => goTo('/settings')}
-            className="mb-3 flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold text-slate-400 transition hover:bg-white/[0.06] hover:text-white"
+            className={`mb-3 flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
+              isPathActive(pathname, '/settings')
+                ? 'bg-white/12 text-white'
+                : 'text-slate-400 hover:bg-white/[0.06] hover:text-white'
+            }`}
           >
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/5">
-              <User size={17} />
+            <span
+              className={`flex h-9 w-9 items-center justify-center rounded-xl ${
+                isAdminFree
+                  ? 'bg-emerald-500/15 text-emerald-300'
+                  : 'bg-white/5'
+              }`}
+            >
+              {isAdminFree ? <Crown size={17} /> : <User size={17} />}
             </span>
-            Môj účet
+
+            <span className="min-w-0">
+              <span className="block truncate">{accountLabel}</span>
+              {isAdminFree && (
+                <span className="mt-0.5 block truncate text-[11px] font-semibold text-emerald-300/80">
+                  Administrátorský prístup
+                </span>
+              )}
+            </span>
           </button>
 
           {isAdminFree && (
@@ -344,6 +374,35 @@ export default function AppShell({ children }: { children: ReactNode }) {
         {/* MAIN CONTENT */}
 
         <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#020617] p-4 pb-24 md:p-6 lg:pb-6">
+          {!isDashboard && (
+            <div className="sticky top-0 z-30 mb-5 rounded-3xl border border-white/10 bg-[#020617]/95 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-black uppercase tracking-[0.18em] text-violet-300">
+                    Aktuálna sekcia
+                  </div>
+
+                  <div className="mt-1 text-xl font-black text-white">
+                    {activeTitle}
+                  </div>
+
+                  <div className="mt-0.5 text-sm text-slate-400">
+                    {activeDescription}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => goTo('/dashboard')}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/20"
+                >
+                  <ArrowLeft size={18} />
+                  Návrat do menu
+                </button>
+              </div>
+            </div>
+          )}
+
           {children}
         </main>
 
@@ -408,19 +467,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
               </button>
             </div>
 
-            {isAdminFree && (
-              <div className="mb-5 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-                <div className="flex items-center gap-2 text-sm font-black text-emerald-300">
-                  <ShieldCheck size={17} />
-                  Admin Free režim
-                </div>
-
-                <p className="mt-2 text-xs leading-5 text-emerald-100/70">
-                  Administrátorský vstup je aktívny.
-                </p>
-              </div>
-            )}
-
             <button
               type="button"
               onClick={openNewProfile}
@@ -430,7 +476,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               Nová práca
             </button>
 
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+            <div className="flex-1 space-y-2 overflow-visible">
               {navItems.map((item) => {
                 const active = isPathActive(pathname, item.href);
                 const Icon = item.icon;
@@ -463,11 +509,24 @@ export default function AppShell({ children }: { children: ReactNode }) {
               })}
             </div>
 
+            <button
+              type="button"
+              onClick={() => goTo('/settings')}
+              className={`mt-5 flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-4 text-sm font-black ${
+                isAdminFree
+                  ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+                  : 'border-white/10 bg-white/10 text-white'
+              }`}
+            >
+              {isAdminFree ? <Crown size={18} /> : <User size={18} />}
+              {accountLabel}
+            </button>
+
             {isAdminFree && (
               <button
                 type="button"
                 onClick={logoutAdminMode}
-                className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-4 text-sm font-black text-rose-200"
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-4 text-sm font-black text-rose-200"
               >
                 <LogOut size={18} />
                 Ukončiť admin režim

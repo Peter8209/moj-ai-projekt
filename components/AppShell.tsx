@@ -17,12 +17,9 @@ import {
   Library,
   CreditCard,
   Video,
-  History,
-  Settings,
   Plus,
   Sparkles,
   X,
-  User,
   LogOut,
   Menu,
   ArrowLeft,
@@ -90,18 +87,6 @@ const navItems: NavItem[] = [
     label: 'Video návod',
     icon: Video,
     description: 'Postup používania',
-  },
-  {
-    href: '/history',
-    label: 'História',
-    icon: History,
-    description: 'Uložené výstupy',
-  },
-  {
-    href: '/settings',
-    label: 'Nastavenia',
-    icon: Settings,
-    description: 'Účet a systém',
   },
 ];
 
@@ -221,8 +206,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
     router.push('/');
   };
 
-  const accountLabel = isAdminFree ? 'Admin účet' : 'Môj účet';
-
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-[#020617] text-white">
       {/* =====================================================
@@ -230,8 +213,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
       ===================================================== */}
 
       <aside className="hidden h-dvh w-[306px] shrink-0 flex-col overflow-hidden border-r border-white/10 bg-[#020617] p-5 lg:flex">
-        {/* NEW PROJECT */}
-
         <button
           type="button"
           onClick={openNewProfile}
@@ -240,8 +221,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <Plus size={18} />
           Nová práca
         </button>
-
-        {/* NAVIGATION - bez vnútornej rolovacej lišty */}
 
         <nav className="flex-1 space-y-2 overflow-visible pr-0">
           {navItems.map((item) => {
@@ -271,6 +250,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
                 <span className="min-w-0">
                   <span className="block truncate">{item.label}</span>
+
                   {item.description && (
                     <span
                       className={`mt-0.5 block truncate text-[11px] font-semibold ${
@@ -286,37 +266,23 @@ function AppShellContent({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        {/* SIDEBAR FOOTER */}
-
         <div className="shrink-0 border-t border-white/10 pt-4">
-          <button
-            type="button"
-            onClick={() => goTo('/settings')}
-            className={`mb-3 flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
-              isPathActive(pathname, '/settings')
-                ? 'bg-white/12 text-white'
-                : 'text-slate-400 hover:bg-white/[0.06] hover:text-white'
-            }`}
-          >
-            <span
-              className={`flex h-9 w-9 items-center justify-center rounded-xl ${
-                isAdminFree
-                  ? 'bg-emerald-500/15 text-emerald-300'
-                  : 'bg-white/5'
-              }`}
-            >
-              {isAdminFree ? <Crown size={17} /> : <User size={17} />}
-            </span>
-
-            <span className="min-w-0">
-              <span className="block truncate">{accountLabel}</span>
-              {isAdminFree && (
-                <span className="mt-0.5 block truncate text-[11px] font-semibold text-emerald-300/80">
-                  Administrátorský prístup
+          {isAdminFree && (
+            <div className="mb-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3">
+              <div className="flex items-center gap-3 text-sm font-black text-emerald-200">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
+                  <Crown size={17} />
                 </span>
-              )}
-            </span>
-          </button>
+
+                <span>
+                  <span className="block">Admin účet</span>
+                  <span className="mt-0.5 block text-[11px] font-semibold text-emerald-300/80">
+                    Administrátorský prístup
+                  </span>
+                </span>
+              </div>
+            </div>
+          )}
 
           {isAdminFree && (
             <button
@@ -498,6 +464,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
                     <span>
                       <span className="block">{item.label}</span>
+
                       {item.description && (
                         <span className="mt-0.5 block text-[11px] font-semibold text-slate-500">
                           {item.description}
@@ -509,18 +476,14 @@ function AppShellContent({ children }: { children: ReactNode }) {
               })}
             </div>
 
-            <button
-              type="button"
-              onClick={() => goTo('/settings')}
-              className={`mt-5 flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-4 text-sm font-black ${
-                isAdminFree
-                  ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
-                  : 'border-white/10 bg-white/10 text-white'
-              }`}
-            >
-              {isAdminFree ? <Crown size={18} /> : <User size={18} />}
-              {accountLabel}
-            </button>
+            {isAdminFree && (
+              <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-4 text-sm font-black text-emerald-200">
+                <div className="flex items-center justify-center gap-2">
+                  <Crown size={18} />
+                  Admin účet
+                </div>
+              </div>
+            )}
 
             {isAdminFree && (
               <button

@@ -1,7 +1,7 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
   BookOpen,
@@ -254,38 +254,12 @@ function getCheckoutError(data: CheckoutResponse | null) {
 }
 
 export default function LandingPage() {
-  const router = useRouter();
-
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [paymentError, setPaymentError] = useState('');
 
-  const navigateTo = (path: string) => {
+  const closeMobileMenu = () => {
     setMobileMenuOpen(false);
-
-    try {
-      router.push(path);
-    } catch {
-      if (typeof window !== 'undefined') {
-        window.location.href = path;
-      }
-    }
-  };
-
-  const goToHome = () => {
-    navigateTo('/');
-  };
-
-  const goToLogin = () => {
-    navigateTo('/login');
-  };
-
-  const goToDashboard = () => {
-    navigateTo('/dashboard');
-  };
-
-  const goToPricingPage = () => {
-    navigateTo('/pricing');
   };
 
   const getEmailForCheckout = async () => {
@@ -389,11 +363,7 @@ export default function LandingPage() {
     <main className="min-h-screen overflow-x-hidden bg-[#f8fafc] text-slate-950">
       <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 lg:px-8">
-          <button
-            type="button"
-            onClick={goToHome}
-            className="flex items-center gap-3"
-          >
+          <Link href="/" className="flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 text-white shadow-lg">
               <GraduationCap size={26} />
             </div>
@@ -404,20 +374,16 @@ export default function LandingPage() {
                 AI akademický asistent
               </div>
             </div>
-          </button>
+          </Link>
 
           <nav className="hidden items-center gap-8 text-sm font-bold text-slate-700 lg:flex">
             <a href="#features" className="transition hover:text-violet-700">
               Funkcie
             </a>
 
-            <button
-              type="button"
-              onClick={goToPricingPage}
-              className="transition hover:text-violet-700"
-            >
+            <Link href="/pricing" className="transition hover:text-violet-700">
               Balíčky
-            </button>
+            </Link>
 
             <a href="#how-it-works" className="transition hover:text-violet-700">
               Ako to funguje
@@ -425,21 +391,19 @@ export default function LandingPage() {
           </nav>
 
           <div className="hidden items-center gap-3 lg:flex">
-            <button
-              type="button"
-              onClick={goToLogin}
+            <Link
+              href="/login"
               className="relative z-50 rounded-2xl px-5 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-100"
             >
               Prihlásiť sa
-            </button>
+            </Link>
 
-            <button
-              type="button"
-              onClick={goToDashboard}
+            <Link
+              href="/dashboard"
               className="relative z-50 rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-6 py-3 text-sm font-black text-white shadow-xl shadow-violet-900/20 transition hover:opacity-90"
             >
               Vyskúšať Zedperu
-            </button>
+            </Link>
           </div>
 
           <button
@@ -461,7 +425,7 @@ export default function LandingPage() {
 
               <button
                 type="button"
-                onClick={() => setMobileMenuOpen(false)}
+                onClick={closeMobileMenu}
                 className="rounded-xl bg-slate-100 p-2"
                 aria-label="Zavrieť menu"
               >
@@ -472,35 +436,43 @@ export default function LandingPage() {
             <div className="space-y-3">
               <a
                 href="#features"
-                onClick={() => setMobileMenuOpen(false)}
+                onClick={closeMobileMenu}
                 className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
               >
                 Funkcie
               </a>
 
-              <button
-                type="button"
-                onClick={goToPricingPage}
-                className="block w-full rounded-2xl bg-slate-100 px-4 py-3 text-left font-bold"
+              <Link
+                href="/pricing"
+                onClick={closeMobileMenu}
+                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
               >
                 Balíčky
-              </button>
+              </Link>
 
-              <button
-                type="button"
-                onClick={goToLogin}
+              <a
+                href="#how-it-works"
+                onClick={closeMobileMenu}
+                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
+              >
+                Ako to funguje
+              </a>
+
+              <Link
+                href="/login"
+                onClick={closeMobileMenu}
                 className="block w-full rounded-2xl bg-slate-100 px-4 py-3 text-left font-bold"
               >
                 Prihlásiť sa
-              </button>
+              </Link>
 
-              <button
-                type="button"
-                onClick={goToDashboard}
+              <Link
+                href="/dashboard"
+                onClick={closeMobileMenu}
                 className="block w-full rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-4 py-3 text-left font-black text-white"
               >
                 Vyskúšať Zedperu
-              </button>
+              </Link>
             </div>
           </div>
         </div>
@@ -527,22 +499,20 @@ export default function LandingPage() {
             </p>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <button
-                type="button"
-                onClick={goToDashboard}
+              <Link
+                href="/dashboard"
                 className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-7 py-4 text-base font-black text-white shadow-2xl shadow-violet-900/25 transition hover:opacity-90"
               >
                 Začať používať
                 <ArrowRight size={20} />
-              </button>
+              </Link>
 
-              <button
-                type="button"
-                onClick={goToPricingPage}
+              <Link
+                href="/pricing"
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-7 py-4 text-base font-black text-slate-900 transition hover:bg-slate-50"
               >
                 Pozrieť balíčky
-              </button>
+              </Link>
             </div>
           </div>
 

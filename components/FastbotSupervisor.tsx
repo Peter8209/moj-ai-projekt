@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   Bot,
   CheckCircle2,
   Clipboard,
@@ -9,6 +10,8 @@ import {
   GraduationCap,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
+  Wand2,
 } from 'lucide-react';
 
 type FastbotSupervisorProps = {
@@ -29,21 +32,287 @@ type SavedProfile = {
   workLanguage?: string;
   annotation?: string;
   goal?: string;
+  problem?: string;
   methodology?: string;
+  hypotheses?: string;
+  researchQuestions?: string;
+  practicalPart?: string;
+  scientificContribution?: string;
+  businessProblem?: string;
+  businessGoal?: string;
+  implementation?: string;
+  caseStudy?: string;
+  reflection?: string;
+  sourcesRequirement?: string;
   keywords?: string[];
   keywordsList?: string[];
   savedAt?: string;
+  schema?: {
+    label?: string;
+    description?: string;
+    recommendedLength?: string;
+    structure?: string[];
+    requiredSections?: string[];
+    aiInstruction?: string;
+  };
 };
 
 const DEFAULT_BOT_ID = 'cmonxnqsl0av1p81pwly2ti1x';
 
 const STORAGE_KEYS = {
   activeProfile: 'active_profile',
+  profile: 'profile',
   profiles: 'profiles_full',
   latestGeneratedText: 'latest_generated_work_text',
   generatedWorkText: 'generated_work_text',
   lastAiOutput: 'last_ai_output',
+  lastChatOutput: 'zedpera_last_chat_output',
+  canvasText: 'zedpera_canvas_text',
 };
+
+function safeJsonParse<T>(value: string | null): T | null {
+  if (!value) return null;
+
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeProfile(raw: any): SavedProfile | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  if (raw.profile && typeof raw.profile === 'object') {
+    return {
+      ...raw.profile,
+      schema: raw.schema || raw.profile.schema,
+      workLanguage: raw.workLanguage || raw.profile.workLanguage,
+      savedAt: raw.savedAt || raw.generatedAt || raw.profile.savedAt,
+    };
+  }
+
+  return raw as SavedProfile;
+}
+
+function cleanBrokenEncoding(value: string) {
+  return String(value || '')
+    // odstránenie BOM a neviditeľných znakov
+    .replace(/\uFEFF/g, '')
+    .replace(/\u200B/g, '')
+    .replace(/\u200C/g, '')
+    .replace(/\u200D/g, '')
+
+    // odstránenie náhradného znaku
+    .replace(/\uFFFD/g, '')
+
+    // časté mojibake znaky pri zlom UTF-8/Windows kódovaní
+    .replace(/Â+/g, '')
+    .replace(/Ã¡/g, 'á')
+    .replace(/Ã¤/g, 'ä')
+    .replace(/Ãč/g, 'č')
+    .replace(/Ä/g, 'č')
+    .replace(/Ä/g, 'ď')
+    .replace(/Ã©/g, 'é')
+    .replace(/Ä›/g, 'ě')
+    .replace(/Ã­/g, 'í')
+    .replace(/Äľ/g, 'ľ')
+    .replace(/Ä¾/g, 'ľ')
+    .replace(/Åˆ/g, 'ň')
+    .replace(/Ã³/g, 'ó')
+    .replace(/Ã´/g, 'ô')
+    .replace(/Å•/g, 'ŕ')
+    .replace(/Å¡/g, 'š')
+    .replace(/Å¥/g, 'ť')
+    .replace(/Ãº/g, 'ú')
+    .replace(/Ã½/g, 'ý')
+    .replace(/Å¾/g, 'ž')
+    .replace(/ÄŚ/g, 'Č')
+    .replace(/ÄŽ/g, 'Ď')
+    .replace(/Ã‰/g, 'É')
+    .replace(/Ä˝/g, 'Ľ')
+    .replace(/Å‡/g, 'Ň')
+    .replace(/Ã“/g, 'Ó')
+    .replace(/Å Š/g, 'Š')
+    .replace(/Å½/g, 'Ž')
+
+    // typografické znaky
+    .replace(/â€™/g, "'")
+    .replace(/â€˜/g, "'")
+    .replace(/â€œ/g, '"')
+    .replace(/â€/g, '"')
+    .replace(/â€“/g, '–')
+    .replace(/â€”/g, '—')
+    .replace(/â€¦/g, '…')
+
+    // odstránenie zvláštnych znakov na začiatku riadkov
+    .replace(/^[^\p{L}\p{N}\s"'„“‚‘\-–—()[\]]{1,20}\s*/gmu, '')
+    .replace(/^\s*[|/\\_~^`´¨]+/gm, '')
+
+    // odstránenie markdown nadpisov, ak ich nechceme posielať do Wordu
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/```[a-zA-Z]*\n?/g, '')
+    .replace(/```/g, '')
+
+    // normalizácia riadkov
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
+function removeBadAiHeadings(value: string) {
+  return cleanBrokenEncoding(value)
+    .replace(/^AI\s+vedúci\s*:?\s*/i, '')
+    .replace(/^AI\s+veduci\s*:?\s*/i, '')
+    .replace(/^Ako\s+AI\s+vedúci\s+práce\s*,?\s*/i, '')
+    .replace(/^Ako\s+vedúci\s+práce\s*,?\s*/i, '')
+    .replace(/^Dobrý\s+deň\s*,?\s*/i, '')
+    .replace(/^Vážený\s+študent\s*,?\s*/i, '')
+    .replace(/^Predmet\s*:.*$/gim, '')
+    .replace(/^Email\s*:.*$/gim, '')
+    .trim();
+}
+
+function buildProfileText(profile: SavedProfile | null, keywords: string[]) {
+  if (!profile) {
+    return `
+PROFIL PRÁCE:
+Profil práce nie je vyplnený.
+
+Dôležité:
+- Upozorni používateľa, že hodnotenie bude menej presné.
+- Nepýtaj sa všeobecne na všetko znova.
+- Hodnoť iba text, ktorý je vložený nižšie.
+`.trim();
+  }
+
+  return `
+PROFIL PRÁCE:
+Názov práce: ${profile.title || 'Nevyplnené'}
+Typ práce: ${profile.schema?.label || profile.type || 'Nevyplnené'}
+Úroveň práce: ${profile.level || 'Nevyplnené'}
+Téma / zameranie: ${profile.topic || profile.title || 'Nevyplnené'}
+Odbor / predmet / oblasť: ${profile.field || 'Nevyplnené'}
+Vedúci práce / školiteľ: ${profile.supervisor || 'Nevyplnené'}
+Citačná norma: ${profile.citation || 'Nevyplnené'}
+Jazyk práce: ${profile.workLanguage || profile.language || 'Slovenčina'}
+Anotácia: ${profile.annotation || 'Nevyplnené'}
+Cieľ práce: ${profile.goal || 'Nevyplnené'}
+Výskumný problém: ${profile.problem || 'Nevyplnené'}
+Výskumné otázky: ${profile.researchQuestions || 'Nevyplnené'}
+Hypotézy: ${profile.hypotheses || 'Nevyplnené'}
+Metodológia: ${profile.methodology || 'Nevyplnené'}
+Praktická časť: ${profile.practicalPart || 'Nevyplnené'}
+Požiadavky na zdroje: ${profile.sourcesRequirement || 'Nevyplnené'}
+Kľúčové slová: ${keywords.length ? keywords.join(', ') : 'Nevyplnené'}
+`.trim();
+}
+
+function buildSupervisorPrompt({
+  activeProfile,
+  generatedText,
+  keywords,
+  strictness,
+}: {
+  activeProfile: SavedProfile | null;
+  generatedText: string;
+  keywords: string[];
+  strictness: string;
+}) {
+  const cleanedText = removeBadAiHeadings(generatedText);
+
+  return `
+TVOJA ROLA:
+Si odborný AI vedúci akademickej práce. Hodnotíš text ako vedúci práce, školiteľ alebo oponent.
+
+ZÁKAZ:
+- Nepíš email.
+- Nepíš predmet emailu.
+- Nepíš oslovenie typu „Dobrý deň“.
+- Nepíš všeobecné marketingové frázy.
+- Nepíš nadpis „AI vedúci“.
+- Nepíš úvod typu „Ako AI vedúci práce...“.
+- Nepíš text práce nanovo celý.
+- Nevymýšľaj zdroje, autorov, roky, DOI ani URL.
+- Neopravuj len gramatiku. Hodnoť odbornú kvalitu.
+- Ak sú v texte poškodené znaky alebo zvláštne symboly, upozorni na to ako technický problém a potom hodnotiť zrozumiteľný obsah.
+
+POVINNÝ ŠTÝL:
+- Odpovedaj po slovensky.
+- Buď konkrétny, odborný a priamy.
+- Výstup musí byť spätná väzba k práci, nie email.
+- Každú výčitku vysvetli a pridaj návrh opravy.
+- Výstup píš čistým textom vhodným do Wordu.
+- Nepoužívaj markdown znaky #, ##, **, --- ani kódové bloky.
+
+PRÍSNOSŤ HODNOTENIA:
+${strictness}
+
+${buildProfileText(activeProfile, keywords)}
+
+TEXT / KAPITOLA NA HODNOTENIE:
+"""
+${cleanedText || 'Text práce zatiaľ nebol vložený.'}
+"""
+
+VÝSTUP MUSÍ MAŤ PRESNE TÚTO ŠTRUKTÚRU:
+
+1. CELKOVÉ HODNOTENIE
+Zhodnoť, či text zodpovedá profilu práce, názvu práce, cieľu, metodológii a akademickej úrovni.
+
+2. SILNÉ STRÁNKY
+Uveď iba reálne silné stránky textu. Nechváľ všeobecne.
+
+3. SLABÉ STRÁNKY
+Uveď konkrétne slabiny textu. Pri každej slabine vysvetli, prečo je problémová.
+
+4. ČO V TEXTE CHÝBA
+Uveď chýbajúce argumenty, zdroje, metodické prvky, prepojenia na cieľ práce alebo výskumný problém.
+
+5. ČO BY VYTKOL VEDÚCI PRÁCE
+Napíš presné pripomienky, ktoré by mohol povedať reálny vedúci práce.
+
+6. METODOLÓGIA
+Zhodnoť, či je metodológia jasná, vhodná a prepojená s cieľom práce.
+
+7. AKADEMICKÝ ŠTÝL
+Zhodnoť odbornosť, plynulosť, terminológiu, logiku viet a vhodnosť pre akademický text.
+
+8. CITÁCIE A ZDROJE
+Zhodnoť, či text potrebuje doplniť citácie, odborné zdroje, normy, zákony, články alebo dáta.
+
+9. KONKRÉTNE NÁVRHY NA ZLEPŠENIE
+Napíš konkrétne kroky, čo má používateľ upraviť.
+
+10. PREPÍSANÉ UKÁŽKY
+Vyber 2 až 4 slabé vety alebo pasáže a ukáž lepšiu akademickú formuláciu.
+
+11. OTÁZKY AKO OD VEDÚCEHO PRÁCE
+Napíš otázky, ktoré by vedúci práce položil pri konzultácii.
+
+12. SKÓRE KVALITY 0–100
+Vyhodnoť:
+Logika textu:
+Metodológia:
+Argumentácia:
+Akademický štýl:
+Práca so zdrojmi:
+Celkové skóre:
+
+13. PRIORITA OPRÁV
+Rozdeľ opravy na:
+Urgentné:
+Dôležité:
+Odporúčané:
+
+14. TECHNICKÉ UPOZORNENIA
+Ak text obsahuje poškodené znaky, chybné kódovanie, nezmyselné symboly alebo nečitateľné časti, uveď to presne tu.
+`.trim();
+}
 
 export default function FastbotSupervisor({
   title = 'AI vedúci práce',
@@ -57,6 +326,7 @@ export default function FastbotSupervisor({
   const [strictness, setStrictness] = useState('Prísna ako vedúci práce');
   const [copied, setCopied] = useState(false);
   const [loadedInfo, setLoadedInfo] = useState('');
+  const [textWasCleaned, setTextWasCleaned] = useState(false);
 
   useEffect(() => {
     loadDataFromLocalStorage();
@@ -65,52 +335,53 @@ export default function FastbotSupervisor({
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    localStorage.setItem(STORAGE_KEYS.latestGeneratedText, generatedText);
+    localStorage.setItem(
+      STORAGE_KEYS.latestGeneratedText,
+      cleanBrokenEncoding(generatedText),
+    );
   }, [generatedText]);
 
   const loadDataFromLocalStorage = () => {
     if (typeof window === 'undefined') return;
 
     let profile: SavedProfile | null = null;
-    let text = '';
 
-    try {
-      const rawActiveProfile = localStorage.getItem(STORAGE_KEYS.activeProfile);
+    const rawActiveProfile = localStorage.getItem(STORAGE_KEYS.activeProfile);
+    const rawProfile = localStorage.getItem(STORAGE_KEYS.profile);
+    const rawProfiles = localStorage.getItem(STORAGE_KEYS.profiles);
 
-      if (rawActiveProfile) {
-        profile = JSON.parse(rawActiveProfile) as SavedProfile;
+    profile =
+      normalizeProfile(safeJsonParse<any>(rawActiveProfile)) ||
+      normalizeProfile(safeJsonParse<any>(rawProfile));
+
+    if (!profile && rawProfiles) {
+      const parsedProfiles = safeJsonParse<any[]>(rawProfiles);
+
+      if (Array.isArray(parsedProfiles) && parsedProfiles.length > 0) {
+        profile = normalizeProfile(parsedProfiles[0]);
       }
-
-      if (!profile) {
-        const rawProfiles = localStorage.getItem(STORAGE_KEYS.profiles);
-
-        if (rawProfiles) {
-          const parsedProfiles = JSON.parse(rawProfiles);
-
-          if (Array.isArray(parsedProfiles) && parsedProfiles.length > 0) {
-            profile = parsedProfiles[0] as SavedProfile;
-          }
-        }
-      }
-    } catch {
-      profile = null;
     }
 
-    text =
+    const storedText =
       localStorage.getItem(STORAGE_KEYS.latestGeneratedText) ||
       localStorage.getItem(STORAGE_KEYS.generatedWorkText) ||
       localStorage.getItem(STORAGE_KEYS.lastAiOutput) ||
+      localStorage.getItem(STORAGE_KEYS.lastChatOutput) ||
+      localStorage.getItem(STORAGE_KEYS.canvasText) ||
       '';
 
+    const cleanedText = removeBadAiHeadings(storedText);
+
     setActiveProfile(profile);
-    setGeneratedText(text);
+    setGeneratedText(cleanedText);
+    setTextWasCleaned(cleanedText !== storedText);
 
     const profileText = profile?.title
       ? `Načítaný profil: ${profile.title}`
       : 'Profil práce sa nenašiel.';
 
-    const generatedTextInfo = text
-      ? `Načítaný text: ${text.length} znakov`
+    const generatedTextInfo = cleanedText
+      ? `Načítaný text: ${cleanedText.length} znakov`
       : 'Vygenerovaný AI text sa nenašiel.';
 
     setLoadedInfo(`${profileText} ${generatedTextInfo}`);
@@ -121,10 +392,7 @@ export default function FastbotSupervisor({
       return activeProfile.keywords;
     }
 
-    if (
-      activeProfile?.keywordsList &&
-      activeProfile.keywordsList.length > 0
-    ) {
+    if (activeProfile?.keywordsList && activeProfile.keywordsList.length > 0) {
       return activeProfile.keywordsList;
     }
 
@@ -132,106 +400,29 @@ export default function FastbotSupervisor({
   }, [activeProfile]);
 
   const supervisorPrompt = useMemo(() => {
-    const profileBlock = activeProfile
-      ? `
-PROFIL PRÁCE:
-- Názov práce: ${activeProfile.title || 'Nevyplnené'}
-- Typ práce: ${activeProfile.type || 'Nevyplnené'}
-- Úroveň práce: ${activeProfile.level || 'Nevyplnené'}
-- Téma: ${activeProfile.topic || 'Nevyplnené'}
-- Odbor: ${activeProfile.field || 'Nevyplnené'}
-- Vedúci práce: ${activeProfile.supervisor || 'Nevyplnené'}
-- Citačná norma: ${activeProfile.citation || 'Nevyplnené'}
-- Jazyk práce: ${
-          activeProfile.workLanguage || activeProfile.language || 'Nevyplnené'
-        }
-- Anotácia: ${activeProfile.annotation || 'Nevyplnené'}
-- Cieľ práce: ${activeProfile.goal || 'Nevyplnené'}
-- Metodológia: ${activeProfile.methodology || 'Nevyplnené'}
-- Kľúčové slová: ${keywords.length ? keywords.join(', ') : 'Nevyplnené'}
-`
-      : `
-PROFIL PRÁCE:
-Profil práce nie je vyplnený. Upozorni používateľa, že hodnotenie bude menej presné, pretože chýba názov, téma, cieľ, metodológia, odbor a citačná norma.
-`;
-
-    return `
-Vystupuj ako AI vedúci akademickej práce.
-
-Tvoja úloha:
-Skritizuj nižšie uvedený text práce podľa profilu práce. Buď konkrétny, odborný a priamy. Nechcem všeobecné frázy. Chcem spätnú väzbu ako od reálneho vedúceho práce alebo oponenta.
-
-PRÍSNOSŤ HODNOTENIA:
-${strictness}
-
-${profileBlock}
-
-TEXT / KAPITOLA NA HODNOTENIE:
-${generatedText || 'Text práce zatiaľ nebol vložený.'}
-
-VÝSTUP VYPRACUJ V TEJTO ŠTRUKTÚRE:
-
-1. CELKOVÉ HODNOTENIE
-Stručne zhodnoť, či text zodpovedá zadaniu, téme a akademickej úrovni.
-
-2. SILNÉ STRÁNKY
-Napíš, čo je v texte dobré.
-
-3. SLABÉ STRÁNKY
-Napíš konkrétne, čo je zlé, slabé, nejasné alebo nedostatočné.
-
-4. ČO V TEXTE CHÝBA
-Uveď chýbajúce časti, argumenty, zdroje, vysvetlenia alebo metodické prvky.
-
-5. ČO BY VYTKOL VEDÚCI PRÁCE
-Napíš presne, aké pripomienky by mohol dať vedúci práce.
-
-6. METODOLÓGIA
-Zhodnoť, či je cieľ, metodológia, výskumný problém alebo argumentácia dostatočne spracovaná.
-
-7. AKADEMICKÝ ŠTÝL
-Zhodnoť jazyk, odbornosť, plynulosť, štylistiku a vhodnosť pre akademickú prácu.
-
-8. CITÁCIE A ZDROJE
-Zhodnoť, či text potrebuje viac citácií, lepšiu prácu so zdrojmi alebo odbornú oporu.
-
-9. KONKRÉTNE NÁVRHY NA ZLEPŠENIE
-Daj konkrétne odporúčania, čo má študent upraviť.
-
-10. PREPÍSANÉ UKÁŽKY
-Navrhni lepšie formulácie slabých viet alebo odsekov.
-
-11. OTÁZKY AKO OD VEDÚCEHO PRÁCE
-Napíš otázky, ktoré by položil vedúci práce pri konzultácii.
-
-12. SKÓRE KVALITY 0–100
-Vyhodnoť:
-- Logika textu:
-- Metodológia:
-- Argumentácia:
-- Akademický štýl:
-- Práca so zdrojmi:
-- Celkové skóre:
-
-13. PRIORITA OPRÁV
-Rozdeľ opravy na:
-- urgentné,
-- dôležité,
-- odporúčané.
-
-Dôležité pravidlá:
-- Odpovedaj po slovensky.
-- Buď konkrétny.
-- Pri každej výčitke vysvetli, ako ju opraviť.
-- Ak je text krátky, upozorni, že hodnotenie je len orientačné.
-- Ak chýba metodológia, cieľ alebo zdroje, výslovne to napíš.
-- Nechváľ text zbytočne, ak má zásadné nedostatky.
-`.trim();
+    return buildSupervisorPrompt({
+      activeProfile,
+      generatedText,
+      keywords,
+      strictness,
+    });
   }, [activeProfile, generatedText, keywords, strictness]);
 
-  const copyPrompt = async () => {
+  const cleanCurrentText = () => {
+    const cleaned = removeBadAiHeadings(generatedText);
+    setGeneratedText(cleaned);
+    setTextWasCleaned(true);
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEYS.latestGeneratedText, cleaned);
+      localStorage.setItem(STORAGE_KEYS.generatedWorkText, cleaned);
+      localStorage.setItem(STORAGE_KEYS.lastAiOutput, cleaned);
+    }
+  };
+
+  const copyToClipboard = async (value: string) => {
     try {
-      await navigator.clipboard.writeText(supervisorPrompt);
+      await navigator.clipboard.writeText(value);
       setCopied(true);
 
       window.setTimeout(() => {
@@ -242,33 +433,30 @@ Dôležité pravidlá:
     }
   };
 
+  const copyPrompt = async () => {
+    await copyToClipboard(supervisorPrompt);
+  };
+
   const copyProfileAndTextOnly = async () => {
-    const profileTitle = activeProfile?.title || 'Bez názvu';
-    const profileTopic = activeProfile?.topic || 'Nevyplnené';
+    const cleanedText = removeBadAiHeadings(generatedText);
 
     const text = `
 Profil práce:
-Názov: ${profileTitle}
-Téma: ${profileTopic}
-Typ práce: ${activeProfile?.type || 'Nevyplnené'}
+Názov: ${activeProfile?.title || 'Bez názvu'}
+Typ práce: ${activeProfile?.schema?.label || activeProfile?.type || 'Nevyplnené'}
+Téma / zameranie: ${activeProfile?.topic || activeProfile?.title || 'Nevyplnené'}
+Odbor: ${activeProfile?.field || 'Nevyplnené'}
 Cieľ práce: ${activeProfile?.goal || 'Nevyplnené'}
+Výskumný problém: ${activeProfile?.problem || 'Nevyplnené'}
 Metodológia: ${activeProfile?.methodology || 'Nevyplnené'}
 Citovanie: ${activeProfile?.citation || 'Nevyplnené'}
+Jazyk práce: ${activeProfile?.workLanguage || activeProfile?.language || 'Nevyplnené'}
 
 Text na hodnotenie:
-${generatedText || 'Text práce zatiaľ nebol vložený.'}
+${cleanedText || 'Text práce zatiaľ nebol vložený.'}
 `.trim();
 
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-
-      window.setTimeout(() => {
-        setCopied(false);
-      }, 2500);
-    } catch {
-      setCopied(false);
-    }
+    await copyToClipboard(text);
   };
 
   return (
@@ -288,14 +476,25 @@ ${generatedText || 'Text práce zatiaľ nebol vložený.'}
               </p>
 
               <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-300">
-                Modul automaticky spojí profil práce, vygenerovaný AI text a
-                hodnotiace pravidlá. Výsledkom je zadanie pre Fastbota, ktorý
-                má prácu skritizovať ako vedúci práce, oponent alebo školiteľ.
+                Modul načíta profil práce a text práce. Následne pripraví čisté
+                zadanie pre Fastbota bez chybných úvodných znakov, bez emailov
+                a bez všeobecných odpovedí. Výstup má byť výhradne odborná
+                spätná väzba vedúceho práce.
               </p>
 
               {loadedInfo && (
                 <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
                   {loadedInfo}
+                </div>
+              )}
+
+              {textWasCleaned && (
+                <div className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <p>
+                    Text bol automaticky očistený od poškodených znakov,
+                    neviditeľných znakov alebo chybných úvodných nadpisov.
+                  </p>
                 </div>
               )}
             </div>
@@ -320,6 +519,15 @@ ${generatedText || 'Text práce zatiaľ nebol vložený.'}
               <RefreshCw className="h-4 w-4" />
               Znova načítať údaje
             </button>
+
+            <button
+              type="button"
+              onClick={cleanCurrentText}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-purple-400/30 bg-purple-500/10 px-4 py-3 text-sm font-bold text-purple-100 transition hover:bg-purple-500/20"
+            >
+              <Wand2 className="h-4 w-4" />
+              Vyčistiť poškodené znaky
+            </button>
           </div>
         </div>
 
@@ -327,19 +535,19 @@ ${generatedText || 'Text práce zatiaľ nebol vložený.'}
           <InfoBox
             icon={GraduationCap}
             title="1. Profil práce"
-            text="AI vedúci hodnotí podľa názvu, témy, cieľa, metodológie, citovania a jazyka práce."
+            text="Hodnotenie vychádza z názvu, typu práce, cieľa, metodológie, odboru, jazyka a citačnej normy."
           />
 
           <InfoBox
             icon={FileIcon}
             title="2. Text práce"
-            text="Do hodnotenia vstupuje vygenerovaná kapitola alebo ručne vložený text."
+            text="Do hodnotenia vstupuje kapitola, časť práce alebo posledný vygenerovaný akademický text."
           />
 
           <InfoBox
             icon={ShieldCheck}
-            title="3. Kritika + skóre"
-            text="Výstup má obsahovať slabiny, otázky vedúceho, návrhy úprav a skóre kvality."
+            title="3. Odborná kritika"
+            text="Výstup musí obsahovať konkrétne slabiny, návrhy opráv, otázky vedúceho a skóre kvality."
           />
         </div>
       </div>
@@ -347,6 +555,7 @@ ${generatedText || 'Text práce zatiaľ nebol vložený.'}
       {!activeProfile && (
         <div className="rounded-3xl border border-yellow-500/30 bg-yellow-500/10 p-5 text-yellow-100">
           <h3 className="text-lg font-black">Profil práce nie je vyplnený</h3>
+
           <p className="mt-2 text-sm leading-6 text-yellow-50/90">
             AI vedúci bude fungovať aj bez profilu, ale kritika bude menej
             presná. Najprv odporúčam vytvoriť profil práce cez tlačidlo
@@ -363,8 +572,8 @@ ${generatedText || 'Text práce zatiaľ nebol vložený.'}
             </h3>
 
             <p className="mt-1 text-sm leading-6 text-slate-400">
-              Sem sa načíta posledný vygenerovaný AI text. Ak zatiaľ nie je
-              uložený, vlož sem kapitolu ručne.
+              Sem sa načíta posledný vygenerovaný AI text. Ak sa zobrazujú
+              poškodené znaky, klikni na „Vyčistiť poškodené znaky“.
             </p>
           </div>
 
@@ -375,10 +584,12 @@ ${generatedText || 'Text práce zatiaľ nebol vložený.'}
 
             <textarea
               value={generatedText}
-              onChange={(event) => setGeneratedText(event.target.value)}
+              onChange={(event) =>
+                setGeneratedText(removeBadAiHeadings(event.target.value))
+              }
               rows={14}
               placeholder="Tu vlož text práce, kapitolu alebo výstup z AI, ktorý má Fastbot skritizovať..."
-              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-sm text-white outline-none placeholder:text-slate-600 focus:border-purple-500"
+              className="w-full rounded-2xl border border-white/10 bg-[#0f1324] px-4 py-4 text-sm leading-6 text-white outline-none placeholder:text-slate-600 focus:border-purple-500"
             />
           </label>
 
@@ -432,8 +643,8 @@ ${generatedText || 'Text práce zatiaľ nebol vložený.'}
             </h3>
 
             <p className="mt-1 text-sm leading-6 text-slate-400">
-              Toto zadanie obsahuje celý proces spätnej väzby. Skopíruj ho a
-              vlož do Fastbots chatu.
+              Toto zadanie obsahuje pevné pravidlá, aby Fastbot negeneroval
+              emaily, hlúposti ani poškodené úvodné znaky.
             </p>
           </div>
 
@@ -454,8 +665,8 @@ ${generatedText || 'Text práce zatiaľ nebol vložený.'}
             </h3>
 
             <p className="mt-1 text-sm leading-6 text-slate-400">
-              Do chatu vlož skopírované zadanie. Fastbot následne vráti
-              kritiku, otázky, hodnotenie a návrhy zlepšení.
+              Do chatu vlož skopírované zadanie. Fastbot musí vrátiť odbornú
+              kritiku práce, nie email.
             </p>
           </div>
 
@@ -506,6 +717,7 @@ function InfoBox({
       </div>
 
       <h3 className="text-base font-black text-white">{title}</h3>
+
       <p className="mt-2 text-sm leading-6 text-slate-400">{text}</p>
     </div>
   );
@@ -525,12 +737,14 @@ function FileIcon({ className }: { className?: string }) {
         strokeWidth="1.8"
         strokeLinejoin="round"
       />
+
       <path
         d="M13 4v5h5"
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinejoin="round"
       />
+
       <path
         d="M9.5 13h5M9.5 16h5"
         stroke="currentColor"

@@ -26,9 +26,21 @@ type Addon =
 
 type CheckoutBody = {
   plan?: unknown;
+  planId?: unknown;
+  selectedPlan?: unknown;
+
   addons?: unknown;
+  addOns?: unknown;
+  selectedAddons?: unknown;
+
   email?: unknown;
+  customerEmail?: unknown;
+  userEmail?: unknown;
+
   userId?: unknown;
+
+  successUrl?: unknown;
+  cancelUrl?: unknown;
 };
 
 type ProductPlanConfig = {
@@ -60,7 +72,7 @@ type CheckoutLineItem = {
 };
 
 // ================= PRODUCT IDS =================
-// Používame tvoje Stripe Product ID hodnoty: prod_...
+// Používame Stripe Product ID hodnoty: prod_...
 // Preto v line_items používame price_data, nie price.
 
 const PLAN_PRODUCTS: Record<Plan, ProductPlanConfig> = {
@@ -190,13 +202,23 @@ function safeUserId(value: unknown): string {
   return value.trim();
 }
 
+function safeUrl(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.trim();
+}
+
 function getBaseUrl(): string {
   const baseUrl =
     process.env.NEXT_PUBLIC_BASE_URL ||
     process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.VERCEL_URL ||
     'http://localhost:3000';
 
-  return baseUrl.replace(/\/$/, '');
+  if (baseUrl.startsWith('http://') || baseUrl.startsWith('https://')) {
+    return baseUrl.replace(/\/$/, '');
+  }
+
+  return `https://${baseUrl}`.replace(/\/$/, '');
 }
 
 function getStripe(): Stripe {
@@ -207,6 +229,48 @@ function getStripe(): Stripe {
   }
 
   return new Stripe(stripeSecret);
+}
+
+function getPlanFromBody(body: CheckoutBody): unknown {
+  return body.plan || body.planId || body.selectedPlan;
+}
+
+function getAddonsFromBody(body: CheckoutBody): unknown[] {
+  const possibleAddons = body.addons || body.addOns || body.selectedAddons;
+
+  if (!Array.isArray(possibleAddons)) {
+    return [];
+  }
+
+  return possibleAddons;
+}
+
+function getEmailFromBody(body: CheckoutBody): string {
+  return (
+    safeEmail(body.email) ||
+    safeEmail(body.customerEmail) ||
+    safeEmail(body.userEmail)
+  );
+}
+
+function getSuccessUrl(body: CheckoutBody, baseUrl: string): string {
+  const customSuccessUrl = safeUrl(body.successUrl);
+
+  if (customSuccessUrl) {
+    return customSuccessUrl;
+  }
+
+  return `${baseUrl}/dashboard?payment=success&session_id={CHECKOUT_SESSION_ID}`;
+}
+
+function getCancelUrl(body: CheckoutBody, baseUrl: string): string {
+  const customCancelUrl = safeUrl(body.cancelUrl);
+
+  if (customCancelUrl) {
+    return customCancelUrl;
+  }
+
+  return `${baseUrl}/pricing?payment=cancel`;
 }
 
 function createPlanLineItem(plan: Plan): CheckoutLineItem {
@@ -250,18 +314,48 @@ function createAddonLineItem(addon: Addon): CheckoutLineItem {
   };
 }
 
-// ================= ROUTE =================
+function createIdempotencyKey({
+  email,
+  plan,
+  addons,
+}: {
+  email: string;
+  plan: Plan;
+  addons: Addon[];
+}) {
+  return [
+    'zedpera_checkout',
+    email,
+    plan,
+    addons.join('_') || 'no_addons',
+    Math.floor(Date.now() / 30_000).toString(),
+  ]
+    .join('_')
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 255);
+}
+
+// ================= ROUTES =================
+
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    route: '/api/payments/checkout',
+    allowedPlans: Object.keys(PLAN_PRODUCTS),
+    allowedAddons: Object.keys(ADDON_PRODUCTS),
+  });
+}
 
 export async function POST(req: Request) {
   try {
     const stripe = getStripe();
     const baseUrl = getBaseUrl();
 
-    const body = (await req.json()) as CheckoutBody;
+    const body = (await req.json().catch(() => ({}))) as CheckoutBody;
 
-    const planInput = body.plan;
-    const addonsInput = Array.isArray(body.addons) ? body.addons : [];
-    const email = safeEmail(body.email);
+    const planInput = getPlanFromBody(body);
+    const addonsInput = getAddonsFromBody(body);
+    const email = getEmailFromBody(body);
     const userId = safeUserId(body.userId);
 
     // ================= VALIDATION: PLAN =================
@@ -273,7 +367,17 @@ export async function POST(req: Request) {
           error: 'INVALID_PLAN',
           message: 'Neplatný balík. Skontroluj plan ID na frontende.',
           received: planInput,
+          receivedPlan: planInput,
           allowedPlans: Object.keys(PLAN_PRODUCTS),
+          expectedFrontendValues: [
+            'week-mini',
+            'week-student',
+            'week-pro',
+            'monthly',
+            'three-months',
+            'year-pro',
+            'year-max',
+          ],
         },
         { status: 400 },
       );
@@ -362,20 +466,19 @@ export async function POST(req: Request) {
       source: 'zedpera',
     };
 
-    // Používame jednoduchý objekt bez Stripe.Checkout.SessionCreateParams typu,
-    // lebo tvoja verzia stripe balíka tento typ neexportuje.
+    // Nepoužívame Stripe.Checkout.SessionCreateParams,
+    // lebo niektoré verzie stripe balíka tento typ neexportujú správne.
     const sessionParams: any = {
       mode,
       customer: customerId,
       line_items: lineItems,
 
-      success_url: `${baseUrl}/dashboard?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${baseUrl}/pricing?payment=cancel`,
+      success_url: getSuccessUrl(body, baseUrl),
+      cancel_url: getCancelUrl(body, baseUrl),
 
       metadata,
 
       allow_promotion_codes: true,
-
       billing_address_collection: 'auto',
 
       automatic_tax: {
@@ -393,16 +496,11 @@ export async function POST(req: Request) {
       };
     }
 
-    const idempotencyKey = [
-      'zedpera_checkout',
+    const idempotencyKey = createIdempotencyKey({
       email,
       plan,
-      validAddons.join('_') || 'no_addons',
-      Math.floor(Date.now() / 30_000).toString(),
-    ]
-      .join('_')
-      .replace(/[^a-zA-Z0-9_-]/g, '_')
-      .slice(0, 255);
+      addons: validAddons,
+    });
 
     const session = await stripe.checkout.sessions.create(sessionParams, {
       idempotencyKey,

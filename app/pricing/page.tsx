@@ -63,7 +63,18 @@ type CheckoutResponse = {
   solution?: string;
   technicalCode?: string;
   displayMessage?: string;
+  receivedPlan?: string;
 };
+
+const VALID_PLAN_IDS: PackagePlan['id'][] = [
+  'week-mini',
+  'week-student',
+  'week-pro',
+  'monthly',
+  'three-months',
+  'year-pro',
+  'year-max',
+];
 
 const packagePlans: PackagePlan[] = [
   {
@@ -78,7 +89,8 @@ const packagePlans: PackagePlan[] = [
     audit: '1 audit',
     defense: 'Bez obhajoby',
     badge: 'Rýchly štart',
-    description: 'Vhodné na seminárnu prácu, kapitolu alebo rýchlu úpravu textu.',
+    description:
+      'Vhodné na seminárnu prácu, kapitolu alebo rýchlu úpravu textu.',
     features: [
       'Základné AI písanie',
       'Profil práce a zadania',
@@ -161,7 +173,8 @@ const packagePlans: PackagePlan[] = [
     audit: '12 auditov',
     defense: '3 obhajoby',
     badge: 'Najvýhodnejší',
-    description: 'Najlepší pomer ceny a výkonu pre bakalársku alebo diplomovú prácu.',
+    description:
+      'Najlepší pomer ceny a výkonu pre bakalársku alebo diplomovú prácu.',
     features: [
       '350 strán na 3 mesiace',
       'AI písanie a zdroje',
@@ -183,7 +196,8 @@ const packagePlans: PackagePlan[] = [
     audit: '50 auditov',
     defense: '10 obhajôb',
     badge: 'Dlhodobé používanie',
-    description: 'Ročný balík pre študentov, konzultantov alebo intenzívne používanie.',
+    description:
+      'Ročný balík pre študentov, konzultantov alebo intenzívne používanie.',
     features: [
       '1 500 strán ročne',
       'Všetky hlavné moduly',
@@ -205,7 +219,8 @@ const packagePlans: PackagePlan[] = [
     audit: '80 auditov',
     defense: '15 obhajôb',
     badge: 'Prémiový plán',
-    description: 'Pre náročných používateľov, ktorí chcú vyššie limity a prémiové moduly.',
+    description:
+      'Pre náročných používateľov, ktorí chcú vyššie limity a prémiové moduly.',
     features: [
       '2 000 strán ročne',
       'Vyššie limity',
@@ -276,8 +291,23 @@ const addonServices: AddonService[] = [
   },
 ];
 
+function isValidPlanId(value: string): value is PackagePlan['id'] {
+  return VALID_PLAN_IDS.includes(value as PackagePlan['id']);
+}
+
 function getFriendlyCheckoutError(data: CheckoutResponse, fallback: string) {
   if (data?.displayMessage) return data.displayMessage;
+
+  if (data?.error === 'INVALID_PLAN') {
+    return [
+      'Backend odmietol balík ako INVALID_PLAN.',
+      '',
+      `Odoslaný plán: ${data.receivedPlan || 'nezistené'}`,
+      '',
+      'Skontroluj, či má backend v app/api/payments/checkout/route.ts rovnaké ID balíkov:',
+      VALID_PLAN_IDS.join(', '),
+    ].join('\n');
+  }
 
   const message = [
     data?.error,
@@ -356,6 +386,7 @@ export default function PackagesPage() {
 
     if (typeof window !== 'undefined') {
       email =
+        window.localStorage.getItem('zedpera_user_email') ||
         window.localStorage.getItem('zedpera_email') ||
         window.localStorage.getItem('user_email') ||
         window.localStorage.getItem('email') ||
@@ -379,6 +410,14 @@ export default function PackagesPage() {
 
   const handleCheckout = async (planId?: PackagePlan['id']) => {
     const checkoutPlanId = planId || selectedPlan;
+
+    if (!isValidPlanId(checkoutPlanId)) {
+      setPaymentError(
+        `Neplatný balík: ${checkoutPlanId}. Skontroluj ID balíka vo frontende.`,
+      );
+      return;
+    }
+
     const checkoutPlan =
       packagePlans.find((plan) => plan.id === checkoutPlanId) ||
       selectedPlanData;
@@ -398,20 +437,30 @@ export default function PackagesPage() {
       const origin =
         typeof window !== 'undefined' ? window.location.origin : '';
 
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('zedpera_selected_plan', checkoutPlan.id);
+        window.localStorage.setItem('zedpera_user_plan', checkoutPlan.id);
+      }
+
       const payload = {
         plan: checkoutPlan.id,
         planId: checkoutPlan.id,
+        selectedPlan: checkoutPlan.id,
         planName: checkoutPlan.name,
+        price: checkoutPlan.price,
+        period: checkoutPlan.period,
+
         addons: selectedAddons,
+        addOns: selectedAddons,
+        selectedAddons,
+
         email,
-        successUrl: `${origin}/dashboard?success=1&plan=${checkoutPlan.id}`,
-        cancelUrl: `${origin}/packages?canceled=1&plan=${checkoutPlan.id}`,
+        customerEmail: email,
+
+        successUrl: `${origin}/dashboard?success=1&payment=success&plan=${checkoutPlan.id}`,
+        cancelUrl: `${origin}/pricing?canceled=1&plan=${checkoutPlan.id}`,
       };
 
-      /*
-        Hlavná cesta:
-        app/api/payments/checkout/route.ts
-      */
       const firstTry = await postCheckout('/api/payments/checkout', payload);
 
       if (firstTry.response.ok && firstTry.data?.ok && firstTry.data?.url) {
@@ -419,11 +468,6 @@ export default function PackagesPage() {
         return;
       }
 
-      /*
-        Fallback cesta:
-        app/api/checkout/route.ts
-        Používame ju pre prípad, že staršia platobná route v projekte ešte používa /api/checkout.
-      */
       const secondTry = await postCheckout('/api/checkout', payload);
 
       if (secondTry.response.ok && secondTry.data?.ok && secondTry.data?.url) {
@@ -445,13 +489,16 @@ export default function PackagesPage() {
         [
           'Stripe platbu sa nepodarilo spustiť.',
           '',
+          'Odoslaný balík:',
+          checkoutPlan.id,
+          '',
           'Prvý pokus:',
           firstError,
           '',
           'Druhý pokus:',
           secondError,
           '',
-          'Skontrolujte, či existuje API route app/api/payments/checkout/route.ts alebo app/api/checkout/route.ts a či má nastavený STRIPE_SECRET_KEY.',
+          'Dôležité: backend musí mať rovnaké ID balíkov ako frontend.',
         ].join('\n'),
       );
     } catch (error: unknown) {
@@ -473,7 +520,6 @@ export default function PackagesPage() {
       ref={pageRef}
       className="fixed inset-0 h-[100dvh] w-full overflow-y-auto overflow-x-hidden bg-[#020617] text-white"
     >
-      {/* TOP MENU */}
       <div className="sticky top-0 z-50 border-b border-white/10 bg-[#020617]/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-8">
           <button
@@ -495,7 +541,7 @@ export default function PackagesPage() {
             className="inline-flex items-center gap-2 rounded-2xl border border-purple-400/30 bg-purple-600/20 px-4 py-2 text-sm font-bold text-purple-100 transition hover:bg-purple-600/30"
           >
             <ArrowLeft size={18} />
-            Menu
+            Späť do menu
           </button>
         </div>
       </div>
@@ -740,6 +786,7 @@ export default function PackagesPage() {
             <div>
               <div className="flex items-center gap-2">
                 <Sparkles className="text-purple-400" size={24} />
+
                 <h2 className="text-2xl font-black text-white">
                   Akademický pracovník + mentoring
                 </h2>
@@ -758,6 +805,7 @@ export default function PackagesPage() {
                   className="rounded-2xl border border-white/10 bg-black/30 p-4 transition hover:border-green-400/50 hover:bg-green-500/10"
                 >
                   <div className="text-sm text-gray-400">Slovensko</div>
+
                   <div className="mt-1 font-bold text-white">
                     www.zaverecneprace.sk
                   </div>
@@ -770,6 +818,7 @@ export default function PackagesPage() {
                   className="rounded-2xl border border-white/10 bg-black/30 p-4 transition hover:border-blue-400/50 hover:bg-blue-500/10"
                 >
                   <div className="text-sm text-gray-400">Česko</div>
+
                   <div className="mt-1 font-bold text-white">
                     www.zaverecne-prace.cz
                   </div>

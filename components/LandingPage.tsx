@@ -7,14 +7,17 @@ import {
   BookOpen,
   Bot,
   CheckCircle2,
+  ChevronDown,
   Crown,
   CreditCard,
   FileCheck2,
   GraduationCap,
   Loader2,
   Menu,
+  Quote,
   ShieldCheck,
   Sparkles,
+  Star,
   X,
 } from 'lucide-react';
 
@@ -48,6 +51,11 @@ type CheckoutResponse = {
   message?: string;
   detail?: string;
   displayMessage?: string;
+};
+
+type FaqItem = {
+  question: string;
+  answer: string;
 };
 
 const plans: Plan[] = [
@@ -233,6 +241,180 @@ const features = [
   },
 ];
 
+const fiveBlocks = [
+  {
+    title: 'Rýchle vytvorenie práce',
+    text: 'Zadaj tému, vyplň profil a získaj kvalitný odborný text prispôsobený tvojim požiadavkám a zdrojom. Systém vychádza z tvojich podkladov, profilu práce a zadaných požiadaviek. Využíva viacero moderných AI modelov a pomáha pri akademickom písaní, zdrojoch, citáciách aj praktickej časti.',
+  },
+  {
+    title: 'AI kritik',
+    text: 'Asistent zanalyzuje tvoju prácu, upozorní ťa na nedostatky a zároveň navrhne konkrétne úpravy. Získaš okamžitú spätnú väzbu a presne uvidíš, ktoré časti práce treba dopracovať, rozšíriť alebo preformulovať.',
+  },
+  {
+    title: 'AI vedúci práce dostupný 24/7',
+    text: 'Sprevádza ťa celým procesom písania, kontroluje tvoj text, navrhuje vylepšenia a ukazuje ti, ako ho posunúť na vyššiu úroveň. Keď dostaneš pripomienky od školiteľa, pomôže ti ich jednoducho zapracovať.',
+  },
+  {
+    title: 'Kontrola originality',
+    text: 'Získaj orientačný prehľad o originalite práce a minimalizuj riziko problémových pasáží. Zedpera upozorní na miesta, kde je vhodné doplniť citáciu, upraviť formuláciu alebo text prepracovať vlastnými slovami.',
+  },
+  {
+    title: 'Príprava na obhajobu',
+    text: 'Po dokončení práce systém pomôže pripraviť obhajobu, otázky, odpovede, reakcie na posudky a prezentáciu. Vďaka tomu vieš, čo môžeš očakávať a ako obhájiť svoju prácu pokojne a vecne.',
+  },
+];
+
+const badAiItems = [
+  'Píše všeobecné texty a omáčky. Obsah môže byť síce dlhý, ale nemusí mať vypovednú hodnotu.',
+  'Nepamätá si všetky informácie o práci a musíš jej ich opakovane zadávať.',
+  'Text je potrebné zdĺhavo upravovať.',
+  'Môže si vymýšľať zdroje alebo uvádzať nepresné údaje.',
+  'Nepracuje s profilom tvojej práce.',
+  'Nedokáže systematicky upozorniť na chyby v logike práce.',
+  'Nerozumie pripomienkam od školiteľa v kontexte celej práce.',
+  'Nepomôže ti spoľahlivo s praktickou časťou, výpočtami a obhajobou.',
+];
+
+const zedperaItems = [
+  'Pozná Vašu prácu. Pamätá si tému, anotáciu, cieľ, metódy, hypotézy, spôsob citovania, praktickú časť a kľúčové slová.',
+  'Pozná celú históriu projektu a nemusíte jej všetko opakovať.',
+  'Cituje podľa Vami zvolenej normy.',
+  'Vychádza z Vašich zdrojov a profilu práce.',
+  'Pomáha pracovať systematicky a bezpečnejšie.',
+  'Analyzuje prácu a upozorní na problémové časti.',
+  'Sprevádza ťa celým procesom písania a ukazuje, ako text posunúť vyššie.',
+  'Pomáha s praktickou časťou, analýzami, výpočtami a obhajobou.',
+  'Pomáha pripraviť reakcie na posudky.',
+];
+
+const faqItems: FaqItem[] = [
+  {
+    question: 'Môžem službu používať počas celého štúdia na viacero prác?',
+    answer:
+      'Áno. Službu môžete využívať opakovane počas štúdia na rôzne typy akademických prác od seminárnych až po bakalárske, diplomové, dizertačné či rigorózne práce. Pre každé nové zadanie si jednoducho nastavíte nový projekt vo svojom profile.',
+  },
+  {
+    question: 'Zvládne Zedpera každý odbor?',
+    answer:
+      'Áno. Zedpera dokáže pracovať s rôznymi typmi materiálov a zadaní. Môžete využiť vlastné poznámky, dokumenty, odborné zdroje alebo zdroje vyhľadané v systéme. Je vhodná pre humanitné, ekonomické, technické aj prakticky orientované práce.',
+  },
+  {
+    question: 'Aký je rozdiel medzi ChatGPT, Gemini a Zedperou?',
+    answer:
+      'Všeobecné nástroje často generujú univerzálne texty bez znalosti celého kontextu práce. Zedpera je navrhnutá priamo pre akademické písanie. Pracuje s profilom práce, témou, cieľom, metodológiou, zdrojmi, citačnou normou, spätnou väzbou a obhajobou.',
+  },
+  {
+    question: 'Čo je AI vedúci práce a AI kritik?',
+    answer:
+      'AI vedúci práce pomáha pri písaní akademickej práce od prvotných návrhov až po finálnu verziu. AI kritik identifikuje chyby, upozorní na nedostatky v texte a navrhne konkrétne opravy.',
+  },
+  {
+    question: 'Čo je AI obhajoba?',
+    answer:
+      'AI obhajoba pomáha pripraviť prezentáciu, otázky, odpovede a reakcie na pripomienky vedúceho alebo oponenta. Slúži ako praktická príprava pred obhajobou.',
+  },
+  {
+    question: 'Ako funguje overenie zhody?',
+    answer:
+      'Overenie zhody poskytuje orientačný prehľad o miere originality a rizikových častiach textu. Výsledok nenahrádza oficiálnu kontrolu školy, ale pomáha odhaliť problémové pasáže ešte pred odovzdaním.',
+  },
+  {
+    question: 'Môžem použiť Zedperu len na vyhľadávanie zdrojov?',
+    answer:
+      'Áno. Zedperu môžete používať aj na prácu so zdrojmi, vyhľadávanie relevantných publikácií, vytváranie citácií a spracovanie bibliografie.',
+  },
+  {
+    question: 'V akých jazykoch môžem vytvoriť prácu?',
+    answer:
+      'Služba podporuje viacero jazykov a umožňuje prispôsobiť štýl, odbornú úroveň aj jazyk výstupu podľa nastavenia profilu práce.',
+  },
+  {
+    question: 'Je používanie služby legálne?',
+    answer:
+      'Používanie umelej inteligencie pri akademickej práci nie je vo všeobecnosti zakázané, no vždy je potrebné rešpektovať pravidlá konkrétnej školy. Odporúča sa transparentne uviesť použitie AI v metodológii alebo čestnom vyhlásení, ak to škola vyžaduje.',
+  },
+  {
+    question: 'Môžem predplatné kedykoľvek zrušiť?',
+    answer:
+      'Áno. Predplatné môžete kedykoľvek zrušiť. Ak ho nezrušíte, automaticky sa obnoví podľa aktuálne zvoleného programu.',
+  },
+];
+
+const reviews = [
+  {
+    name: 'Študentka diplomovej práce',
+    text: 'Zedperu používam niekoľko týždňov a fakt ma to s ňou baví. Školiteľka nechápe, ako je možné, že každý týždeň prídem na konzultáciu s novou kapitolou. Keď dá pripomienky, použijem AI vedúceho a obratom ich viem zapracovať. Sme iba v polovici, ale už z toho nemám strach.',
+  },
+  {
+    name: 'Používateľ seminárnych prác',
+    text: 'Chcem Vám poďakovať. Predplatil som si Zedperu a teraz viem pripraviť seminárku výrazne rýchlejšie. Nemusím strácať hodiny hľadaním zdrojov a parafrázovaním textov. Výstup si ešte upravím podľa seba, ale základ mám hotový veľmi rýchlo.',
+  },
+  {
+    name: 'Študentka po skúsenosti s bežnou AI',
+    text: 'Niekoľko týždňov som sa trápila s písaním práce pomocou bežných AI nástrojov. Zdroje boli nedohľadateľné, stále len všeobecné texty a nič konkrétne. Po vyplnení profilu v Zedpere som konečne videla relevantné zdroje a prvá kapitola vrátane úvodu bola hotová za pár minút.',
+  },
+  {
+    name: 'Študent bakalárskej práce',
+    text: 'Chcel som to len vyskúšať, lebo som nemal čas na písanie práce. Veľmi mi to uľahčilo život. Zdroje som našiel priamo v systéme a nemusel som behať po školskej knižnici. Práca bola hotová za pár dní a orientačná kontrola originality ukázala veľmi nízku zhodu.',
+  },
+  {
+    name: 'Používateľ AI vedúceho',
+    text: 'Veľkou výhodou je, že Zedpera si pamätá všetky informácie o mojej práci. Vedúci mi viackrát menil cieľ, ale stačilo ho zmeniť v profile a kapitoly som mal upravené v priebehu niekoľkých minút. Najviac mi pomohla funkcia AI vedúceho.',
+  },
+  {
+    name: 'Externá študentka',
+    text: 'Študujem externe druhú vysokú školu a popri práci a rodine je veľmi ťažké všetko stíhať. Zedperu mi odporučila spolužiačka. Konečne som mala seminárku hotovú za pár minút a nemusela som nad ňou stráviť celý víkend.',
+  },
+  {
+    name: 'Používateľka pri záverečnej práci',
+    text: 'Zedperu používam niekoľko mesiacov a som veľmi spokojná. Je jednoduchá, nevymýšľa si a pri zdrojoch mám prehľad, odkiaľ informácie pochádzajú. Prácu som mala hotovú s prestávkami za niekoľko dní a plánujem ju využiť aj pri príprave obhajoby.',
+  },
+  {
+    name: 'Študent po obhajobe',
+    text: 'S týmto nástrojom mám veľmi dobrú skúsenosť. Zdroje boli reálne a dali sa overiť. Najviac som využíval AI vedúceho, pretože môj školiteľ so mnou takmer nekomunikoval. Vďaka Zedpere som mal spätnú väzbu vždy, keď som ju potreboval.',
+  },
+  {
+    name: 'Študentka po prepracovaní práce',
+    text: 'Prácu mi školiteľka vrátila na prepracovanie a nevedela som, ako pokračovať. Do Zedpery som nahrala zadanie a podklady a išla som krok za krokom. Veľké plus bolo kvalitné parafrázovanie, plynulý text a spätná väzba AI vedúceho.',
+  },
+  {
+    name: 'Študent diplomovej práce',
+    text: 'Po zmene práce bolo náročné stíhať školu aj učenie. Zedperu som začal používať najskôr na seminárky a výsledky ma prekvapili. Všetko malo hlavu aj pätu a zdroje sedeli. Teraz ju používam aj pri diplomovej práci.',
+  },
+  {
+    name: 'Študentka 2. ročníka',
+    text: 'Používam Zedperu už niekoľko mesiacov. Konečne si viem lepšie rozložiť čas a nemusím tráviť hodiny v knižnici. Výstupy dávajú zmysel, zdroje sedia a pri odovzdávaní prác mám oveľa menší stres.',
+  },
+  {
+    name: 'Používateľ diplomovej práce',
+    text: 'Zedperu mám predplatenú niekoľko dní a píšem pomocou nej diplomovku. Teoretickú časť som spracoval rýchlejšie, než som čakal. AI vedúci mi pomáha nielen kritizovať slabé miesta, ale hlavne navrhovať riešenia.',
+  },
+  {
+    name: 'Používateľka náročného zadania',
+    text: 'Mala som náročné zadanie k zápočtu. Do systému som nahrala celé zadanie a vznikol základ práce, ktorý som následne upravila podľa seba. Zdroje boli reálne a text mal akademickú úroveň.',
+  },
+  {
+    name: 'Začiatočníčka s AI',
+    text: 'Som úplný začiatočník a predtým som žiadnu AI nepoužívala. Kamarátka mi poslala odkaz na Zedperu. Systém som rýchlo pochopila, vyplnila profil, vyhľadala zdroje a postupne písala. Prvá práca trvala dlhšie, ale teraz sa v tom už viem orientovať.',
+  },
+  {
+    name: 'Používateľ s vlastnými zdrojmi',
+    text: 'Oceňujem, že Zedpera pracuje so zdrojmi, ktoré do nej nahrám alebo vyhľadám v knižnici. Nemusím zadávať zložité prompty a výstupy sú prispôsobené môjmu zadaniu.',
+  },
+  {
+    name: 'Študent bakalárskej práce',
+    text: 'Skúšal som viacero nástrojov na písanie prác, ale často boli texty príliš všeobecné. Zedpera ma prekvapila tým, že text bol jasný, bez zbytočných omáčok a vychádzal zo zadania. Školiteľka ocenila, že práca mala lepšiu úroveň.',
+  },
+  {
+    name: 'Používateľ AI vedúceho',
+    text: 'Vyskúšal som hlavne AI vedúceho, pretože školiteľ mi takmer neodpovedal. Naviedol ma správnym smerom, upozornil na nelogickú štruktúru, opakujúce sa výrazy a kapitoly, ktoré bolo potrebné prepracovať.',
+  },
+  {
+    name: 'Používateľka pri obhajobe',
+    text: 'Po negatívnych posudkoch som nevedela, ako sa pripraviť na obhajobu. Posudky som nahrala do Zedpery a systém mi pomohol pripraviť podklady, vysvetlenia aj reakcie na výhrady. Veľmi mi to pomohlo pochopiť, kde bol problém.',
+  },
+];
+
 const allowedPlans: PlanId[] = [
   'week-mini',
   'week-student',
@@ -257,6 +439,7 @@ export default function LandingPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [paymentError, setPaymentError] = useState('');
+  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
 
   const closeMobileMenu = () => {
     setMobileMenuOpen(false);
@@ -376,22 +559,37 @@ export default function LandingPage() {
             </div>
           </Link>
 
-          <nav className="hidden items-center gap-8 text-sm font-bold text-slate-700 lg:flex">
-            <a href="#about" className="transition hover:text-violet-700">
-              O nás
+          <nav className="hidden items-center gap-6 text-sm font-bold text-slate-700 lg:flex">
+            <a href="#intro" className="transition hover:text-violet-700">
+              Úvod
             </a>
 
             <a href="#features" className="transition hover:text-violet-700">
               Funkcie
             </a>
 
+            <a href="#reviews" className="transition hover:text-violet-700">
+              Recenzie
+            </a>
+
             <a href="#pricing" className="transition hover:text-violet-700">
               Balíčky
             </a>
 
-            <a href="#how-it-works" className="transition hover:text-violet-700">
-              Ako to funguje
+            <a href="#faq" className="transition hover:text-violet-700">
+              Otázky
             </a>
+
+            <Link
+              href="/obchodne-podmienky"
+              className="transition hover:text-violet-700"
+            >
+              Obchodné podmienky
+            </Link>
+
+            <Link href="/gdpr" className="transition hover:text-violet-700">
+              GDPR
+            </Link>
           </nav>
 
           <div className="hidden items-center gap-3 lg:flex">
@@ -402,12 +600,12 @@ export default function LandingPage() {
               Prihlásiť sa
             </Link>
 
-            <Link
-              href="/dashboard"
+            <a
+              href="#pricing"
               className="relative z-50 rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-6 py-3 text-sm font-black text-white shadow-xl shadow-violet-900/20 transition hover:opacity-90"
             >
-              Vyskúšať Zedperu
-            </Link>
+              Vybrať program
+            </a>
           </div>
 
           <button
@@ -439,11 +637,11 @@ export default function LandingPage() {
 
             <div className="space-y-3">
               <a
-                href="#about"
+                href="#intro"
                 onClick={closeMobileMenu}
                 className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
               >
-                O nás
+                Úvod
               </a>
 
               <a
@@ -455,6 +653,14 @@ export default function LandingPage() {
               </a>
 
               <a
+                href="#reviews"
+                onClick={closeMobileMenu}
+                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
+              >
+                Recenzie
+              </a>
+
+              <a
                 href="#pricing"
                 onClick={closeMobileMenu}
                 className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
@@ -463,12 +669,28 @@ export default function LandingPage() {
               </a>
 
               <a
-                href="#how-it-works"
+                href="#faq"
                 onClick={closeMobileMenu}
                 className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
               >
-                Ako to funguje
+                Otázky
               </a>
+
+              <Link
+                href="/obchodne-podmienky"
+                onClick={closeMobileMenu}
+                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
+              >
+                Obchodné podmienky
+              </Link>
+
+              <Link
+                href="/gdpr"
+                onClick={closeMobileMenu}
+                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
+              >
+                GDPR
+              </Link>
 
               <Link
                 href="/login"
@@ -478,186 +700,192 @@ export default function LandingPage() {
                 Prihlásiť sa
               </Link>
 
-              <Link
-                href="/dashboard"
+              <a
+                href="#pricing"
                 onClick={closeMobileMenu}
                 className="block w-full rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-4 py-3 text-left font-black text-white"
               >
-                Vyskúšať Zedperu
-              </Link>
+                Vybrať program
+              </a>
             </div>
           </div>
         </div>
       )}
 
-      <section className="relative overflow-hidden bg-white">
-        <div className="absolute left-1/2 top-0 h-[500px] w-[900px] -translate-x-1/2 rounded-full bg-violet-200/40 blur-3xl" />
+      <section id="intro" className="relative overflow-hidden bg-white">
+        <div className="absolute left-1/2 top-0 h-[520px] w-[920px] -translate-x-1/2 rounded-full bg-violet-200/40 blur-3xl" />
 
-        <div className="relative mx-auto grid max-w-7xl gap-10 px-5 py-20 lg:grid-cols-[1.1fr_0.9fr] lg:px-8 lg:py-28">
-          <div>
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-black text-violet-800">
-              <Sparkles size={17} />
-              AI asistent pre akademické písanie
-            </div>
-
-            <h1 className="max-w-4xl text-5xl font-black leading-[1.05] tracking-tight text-slate-950 md:text-7xl">
-              Akademická práca bez chaosu, stresu a nejasností.
-            </h1>
-
-            <p className="mt-6 max-w-3xl text-lg leading-8 text-slate-600 md:text-xl">
-              Zedpera spája viac ako 20 rokov skúseností s akademickým
-              písaním a modernú umelú inteligenciu do jedného systému, ktorý
-              pomáha študentom písať, kontrolovať, upravovať a obhajovať prácu
-              krok za krokom.
-            </p>
-
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <Link
-                href="/dashboard"
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-7 py-4 text-base font-black text-white shadow-2xl shadow-violet-900/25 transition hover:opacity-90"
-              >
-                Začať používať
-                <ArrowRight size={20} />
-              </Link>
-
-              <a
-                href="#about"
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-7 py-4 text-base font-black text-slate-900 transition hover:bg-slate-50"
-              >
-                Prečítať náš príbeh
-              </a>
-            </div>
+        <div className="relative mx-auto max-w-7xl px-5 py-20 text-center lg:px-8 lg:py-28">
+          <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-black text-violet-800">
+            <Sparkles size={17} />
+            Prvý akademický nástroj s AI vedúcim práce
           </div>
 
-          <div className="rounded-[2rem] border border-slate-200 bg-slate-950 p-6 text-white shadow-2xl">
-            <div className="mb-5 flex items-center justify-between">
-              <div className="font-black">AI kontrola práce</div>
-              <div className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-black text-emerald-300">
-                DEMO
-              </div>
+          <h1 className="mx-auto max-w-5xl text-4xl font-black leading-[1.08] tracking-tight text-slate-950 md:text-6xl">
+            Prvý akademický nástroj na písanie prác, ktorý zvládne náročné
+            praktické časti s AI vedúcim bez stresu a chaosu.
+          </h1>
+
+          <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-slate-600 md:text-xl">
+            Vyskúšaj Zedperu, nástroj, ktorý ťa prevedie celým procesom od
+            prvého nápadu až po úspešnú obhajobu. AI vedúci práce ťa upozorní
+            na chyby skôr, než ich uvidí školiteľ, je k dispozícii 24/7 a
+            navrhne ti konkrétne opravy, ktoré posunú tvoju prácu na vyššiu
+            úroveň.
+          </p>
+
+          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+            <a
+              href="#pricing"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-7 py-4 text-base font-black text-white shadow-2xl shadow-violet-900/25 transition hover:opacity-90"
+            >
+              Začni písať bez stresu už dnes
+              <ArrowRight size={20} />
+            </a>
+
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-7 py-4 text-base font-black text-slate-900 transition hover:bg-slate-50"
+            >
+              Otvoriť aplikáciu
+            </Link>
+          </div>
+
+          <div className="mx-auto mt-14 max-w-5xl">
+            <div className="mb-4 text-sm font-black uppercase tracking-[0.25em] text-slate-500">
+              Video
             </div>
 
-            <div className="space-y-4">
-              <DemoScore label="Logika" value="82%" />
-              <DemoScore label="Metodológia" value="74%" />
-              <DemoScore label="Argumentácia" value="69%" />
-              <DemoScore label="Akademický štýl" value="88%" />
-            </div>
-
-            <div className="mt-6 rounded-3xl border border-white/10 bg-white/5 p-5">
-              <div className="text-sm font-black text-violet-200">
-                Kritická spätná väzba
-              </div>
-
-              <p className="mt-2 text-sm leading-7 text-slate-300">
-                Text má dobrý základ, ale chýba jasnejšie prepojenie cieľa,
-                metodológie a výsledkov. Odporúčam doplniť presnú interpretáciu
-                hlavnej hypotézy a zjednotiť terminológiu v celej práci.
-              </p>
+            <div className="overflow-hidden rounded-[2rem] border border-slate-200 bg-slate-950 shadow-2xl shadow-slate-300/60">
+              <iframe
+                className="h-[260px] w-full md:h-[460px]"
+                src="https://www.youtube.com/embed/dQw4w9WgXcQ"
+                title="Zedpera video"
+                allowFullScreen
+              />
             </div>
           </div>
         </div>
       </section>
 
-      <section id="about" className="bg-slate-950 py-20 text-white">
+      <section className="bg-[#f8fafc] py-20">
         <div className="mx-auto max-w-7xl px-5 lg:px-8">
-          <div className="mb-12 max-w-4xl">
-            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm font-black text-violet-200">
-              <Sparkles size={17} />
-              O nás
+          <div className="mx-auto mb-12 max-w-4xl text-center">
+            <div className="mb-4 text-sm font-black uppercase tracking-[0.25em] text-violet-700">
+              Úvodný text
             </div>
 
-            <h2 className="text-4xl font-black tracking-tight md:text-5xl">
-              Zedpera vznikla z reálnej skúsenosti so študentmi.
+            <h2 className="text-3xl font-black tracking-tight text-slate-950 md:text-5xl">
+              Inteligentný nástroj novej generácie pre akademické písanie.
             </h2>
 
-            <p className="mt-5 text-lg leading-8 text-slate-300">
-              Pred mnohými rokmi sa stretli dvaja študenti, ktorí sedeli v
-              laviciach tej istej univerzity. Prechádzali skúškami, seminármi,
-              zápočtami, konzultáciami a postupne zisťovali, že akademický
-              systém vie byť pre študenta často zbytočne zložitý, neprehľadný
-              a stresujúci.
+            <p className="mt-5 text-lg leading-8 text-slate-600">
+              Predstavujeme vám inteligentný nástroj novej generácie, ktorý
+              zásadne mení spôsob písania akademických prác. Zedpera ti pomáha
+              premýšľať a zlepšovať tvoju prácu krok za krokom. Vďaka nej
+              presne vieš, čo máš robiť ďalej, bez zbytočného stresu alebo
+              neistoty.
             </p>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-3">
-            <AboutCard
-              title="20 rokov skúseností"
-              text="Po ukončení štúdia vznikol jednoduchý nápad: vytvoriť službu, ktorá študentom pomôže lepšie zvládnuť proces prípravy vysokoškolských prác. Dnes za sebou máme viac ako 20 rokov skúseností v oblasti akademickej podpory, konzultácií, metodológie, štruktúry záverečných prác a prípravy na obhajobu."
-            />
-
-            <AboutCard
-              title="Poznáme skutočné problémy"
-              text="Za roky praxe sme spoznali tisíce študentov denného aj externého štúdia. Zistili sme, že problém študenta nie je iba samotné písanie práce. Často ide o nejasné zadanie, nedostatok času, slabú spätnú väzbu, problém so školiteľom, metodológiou, zdrojmi alebo obhajobou."
-            />
-
-            <AboutCard
-              title="Komplexný systém"
-              text="Preto vznikla Zedpera. Nie ako ďalší nástroj na generovanie textu, ale ako komplexná akademická AI platforma, ktorá pomáha študentovi postupovať krok za krokom – od profilu práce, cez tvorbu obsahu, kontrolu kvality, originalitu až po prípravu na obhajobu."
-            />
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-5">
+            {fiveBlocks.map((item) => (
+              <InfoPanel key={item.title} title={item.title} text={item.text} />
+            ))}
           </div>
 
-          <div className="mt-12 grid gap-8 lg:grid-cols-[0.9fr_1.1fr]">
-            <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-7">
-              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
-                <GraduationCap size={28} />
-              </div>
+          <div className="mt-10 text-center">
+            <a
+              href="#pricing"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-violet-300 bg-white px-7 py-4 text-sm font-black text-violet-800 shadow-xl shadow-slate-200/70 transition hover:bg-violet-50"
+            >
+              Chcem vyskúšať Zedperu
+              <ArrowRight size={18} />
+            </a>
+          </div>
+        </div>
+      </section>
 
-              <h3 className="text-2xl font-black">
-                Zakladateľka Martina
-              </h3>
+      <section className="bg-white py-20">
+        <div className="mx-auto max-w-7xl px-5 lg:px-8">
+          <div className="mx-auto mb-10 max-w-4xl text-center">
+            <h2 className="text-3xl font-black tracking-tight text-slate-950 md:text-5xl">
+              Prečo nestačí bežná AI alebo LLM nástroj?
+            </h2>
 
-              <p className="mt-4 text-sm leading-7 text-slate-300">
-                Martina po ukončení vysokej školy založila spoločnosť, ktorá
-                už viac ako 20 rokov pomáha študentom lepšie zvládnuť proces
-                prípravy vysokoškolských a odborných prác.
-              </p>
+            <p className="mt-5 text-lg leading-8 text-slate-600">
+              Bežné AI nástroje často generujú všeobecné texty, môžu uvádzať
+              nepresné zdroje a nepoznajú celý kontext práce. Zedpera funguje
+              inak. Namiesto univerzálnych odpovedí dostaneš výstup, ktorý
+              súvisí s tvojou prácou, zdrojmi a celým procesom písania.
+            </p>
+          </div>
 
-              <p className="mt-4 text-sm leading-7 text-slate-300">
-                Počas svojej praxe sa venovala akademickému mentoringu,
-                konzultáciám, práci so študentmi, metodickému vedeniu a podpore
-                v oblasti vzdelávania. Medzičasom pokračovala v ďalšom štúdiu,
-                rozširovaní odborných vedomostí a niekoľko rokov pôsobila aj v
-                akademickom prostredí.
-              </p>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <ComparisonBox title="Bežná AI" items={badAiItems} negative />
+            <ComparisonBox title="Zedpera" items={zedperaItems} />
+          </div>
 
-              <p className="mt-4 text-sm leading-7 text-slate-300">
-                Aktuálne sa venuje vývoju nových riešení umelej inteligencie,
-                ktoré môžu študentom pomôcť pracovať efektívnejšie,
-                samostatnejšie a s väčšou istotou.
-              </p>
+          <div className="mt-10 text-center">
+            <a
+              href="#pricing"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-7 py-4 text-sm font-black text-white shadow-2xl shadow-violet-900/25 transition hover:opacity-90"
+            >
+              Chcem vyskúšať Zedperu
+              <ArrowRight size={18} />
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section id="reviews" className="bg-slate-950 py-20 text-white">
+        <div className="mx-auto max-w-7xl px-5 lg:px-8">
+          <div className="mb-12 max-w-4xl">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm font-black text-violet-200">
+              <Star size={17} />
+              Recenzie
             </div>
 
-            <div className="rounded-[2rem] border border-violet-400/20 bg-gradient-to-br from-violet-600/20 via-fuchsia-600/10 to-indigo-600/20 p-7">
-              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-violet-100">
-                <Crown size={28} />
-              </div>
+            <h2 className="text-4xl font-black tracking-tight md:text-5xl">
+              Skúsenosti študentov so Zedperou
+            </h2>
 
-              <h3 className="text-2xl font-black">
-                Neustále posúvame hranice
-              </h3>
+            <p className="mt-5 text-lg leading-8 text-slate-300">
+              Skúsenosti používateľov, ktorí využili Zedperu pri seminárnych,
+              bakalárskych, diplomových, rigoróznych a ďalších akademických
+              prácach.
+            </p>
+          </div>
 
-              <p className="mt-4 text-sm leading-7 text-slate-200">
-                Zedpera nevznikla ako reakcia na trend. Vznikla ako odpoveď na
-                realitu, ktorú poznáme z praxe. Vieme, že akademická práca je
-                pre mnohých študentov spojená so stresom, časovým tlakom,
-                nejasnými požiadavkami a pocitom, že namiesto učenia často
-                bojujú so systémom.
-              </p>
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {reviews.map((review, index) => (
+              <ReviewCard
+                key={`${review.name}-${index}`}
+                name={review.name}
+                text={review.text}
+              />
+            ))}
+          </div>
 
-              <p className="mt-4 text-sm leading-7 text-slate-200">
-                Preto sme nechceli vytvoriť iba ďalší nástroj, ktorý vygeneruje
-                text. Chceli sme vytvoriť systém, ktorý rozumie celému procesu:
-                téme, cieľu, metodológii, štruktúre, zdrojom, spätnej väzbe aj
-                obhajobe.
-              </p>
+          <div className="mt-12 rounded-[2rem] border border-violet-400/20 bg-gradient-to-r from-violet-600/20 via-fuchsia-600/10 to-indigo-600/20 p-7 text-center">
+            <h3 className="text-2xl font-black">
+              Chceš si Zedperu vyskúšať aj ty?
+            </h3>
 
-              <p className="mt-4 text-sm leading-7 text-slate-200">
-                Neučíme Zedperu iba písať texty. Učíme ju rozumieť súvislostiam,
-                akademickej logike, spätnej väzbe a procesu tvorby práce.
-                Preto ju neustále posúvame ďalej – ako nový spôsob, akým môže
-                študent pristupovať k učeniu, písaniu a premýšľaniu.
-              </p>
+            <p className="mx-auto mt-3 max-w-3xl text-sm leading-7 text-slate-300">
+              Vyber si program podľa rozsahu práce a začni pracovať s AI
+              vedúcim, zdrojmi, citáciami, kontrolou kvality a prípravou na
+              obhajobu.
+            </p>
+
+            <div className="mt-6">
+              <a
+                href="#pricing"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-7 py-4 text-sm font-black text-slate-950 shadow-xl transition hover:bg-violet-50"
+              >
+                Vybrať program
+                <ArrowRight size={18} />
+              </a>
             </div>
           </div>
         </div>
@@ -706,17 +934,16 @@ export default function LandingPage() {
           <div className="mb-10">
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white px-4 py-2 text-sm font-black text-violet-800">
               <Crown size={17} />
-              Balíčky
+              Balíčky a platobná brána
             </div>
 
             <h2 className="text-4xl font-black tracking-tight text-slate-950 md:text-5xl">
-              Vyber si plán podľa rozsahu práce
+              Vyber si program a prejdi na platbu
             </h2>
 
             <p className="mt-3 max-w-3xl text-lg leading-8 text-slate-600">
-              Vyber si balík podľa toho, či potrebuješ rýchlu úpravu, intenzívnu
-              prácu pred odovzdaním alebo dlhodobý prístup počas akademického
-              roka.
+              Tu si klient vyberie program podľa rozsahu práce. Po kliknutí na
+              tlačidlo bude presmerovaný na platobnú bránu.
             </p>
           </div>
 
@@ -826,92 +1053,237 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section id="how-it-works" className="mx-auto max-w-7xl px-5 py-20 lg:px-8">
-        <div className="rounded-[2rem] bg-slate-950 p-8 text-white md:p-12">
-          <h2 className="text-4xl font-black">Ako to funguje</h2>
+      <section id="faq" className="bg-white py-20">
+        <div className="mx-auto max-w-5xl px-5 lg:px-8">
+          <div className="mb-10 text-center">
+            <h2 className="text-4xl font-black tracking-tight text-slate-950">
+              Často kladené otázky
+            </h2>
 
-          <div className="mt-8 grid gap-5 md:grid-cols-3">
-            <Step
-              number="1"
-              title="Vytvoríš profil práce"
-              text="Zadáš názov, cieľ, metodológiu, jazyk, typ práce, odbor a citačnú normu."
-            />
+            <p className="mt-3 text-lg leading-8 text-slate-600">
+              Najčastejšie otázky k používaniu Zedpery, AI vedúcemu,
+              obhajobe, zdrojom a predplatnému.
+            </p>
+          </div>
 
-            <Step
-              number="2"
-              title="Pracuješ s AI modulmi"
-              text="Generuješ text, kontroluješ kvalitu, pripravuješ obhajobu, hodnotíš argumentáciu a pracuješ so zdrojmi."
-            />
+          <div className="space-y-4">
+            {faqItems.map((item, index) => (
+              <FaqRow
+                key={item.question}
+                item={item}
+                open={openFaqIndex === index}
+                onClick={() =>
+                  setOpenFaqIndex(openFaqIndex === index ? null : index)
+                }
+              />
+            ))}
+          </div>
+        </div>
+      </section>
 
-            <Step
-              number="3"
-              title="Dostaneš spätnú väzbu"
-              text="AI vedúci práce upozorní na slabé miesta, rozpory, chýbajúce časti a odporúčané opravy."
-            />
+      <section className="bg-[#f8fafc] py-20">
+        <div className="mx-auto max-w-5xl px-5 text-center lg:px-8">
+          <h2 className="text-3xl font-black tracking-tight text-slate-950 md:text-4xl">
+            Prečo písať prácu so Zedperou
+          </h2>
+
+          <ul className="mx-auto mt-8 max-w-3xl space-y-3 text-left text-base leading-7 text-slate-700">
+            <li>
+              Ušetrí ti veľa času pri hľadaní zdrojov, tvorbe osnovy a
+              spracovaní textu.
+            </li>
+            <li>
+              Pozná tvoju tému, profil práce, citácie, metodológiu aj zdroje.
+            </li>
+            <li>
+              K dispozícii máš AI vedúceho a kritika zároveň, ktorí ťa prevedú
+              celým procesom.
+            </li>
+            <li>
+              Pomáha aj s praktickou časťou, analýzami, výpočtami a
+              interpretáciou výsledkov.
+            </li>
+            <li>
+              Pomáha s prípravou na obhajobu a reakciami na posudky.
+            </li>
+          </ul>
+
+          <div className="mt-8">
+            <a
+              href="#pricing"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-violet-300 bg-white px-7 py-4 text-sm font-black text-violet-800 shadow-xl shadow-slate-200/70 transition hover:bg-violet-50"
+            >
+              Chcem vyskúšať Zedperu
+              <ArrowRight size={18} />
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white py-20">
+        <div className="mx-auto max-w-4xl px-5 text-center lg:px-8">
+          <h2 className="text-3xl font-black tracking-tight text-slate-950 md:text-4xl">
+            Je používanie Zedpery legálne?
+          </h2>
+
+          <p className="mt-6 text-lg leading-8 text-slate-600">
+            Áno, používanie Zedpery je legálne, ak sa používa transparentne a v
+            súlade s pravidlami konkrétnej školy. Zedpera slúži ako nástroj na
+            podporu písania, kontrolu textu, prácu so zdrojmi, citáciami a
+            spätnou väzbou. Odporúčame uviesť použitie AI podľa interných
+            pravidiel školy, napríklad v metodológii alebo čestnom vyhlásení.
+          </p>
+
+          <div className="mt-8">
+            <a
+              href="#pricing"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-7 py-4 text-base font-black text-white shadow-2xl shadow-violet-900/25 transition hover:opacity-90"
+            >
+              Začni písať bez stresu už dnes
+              <ArrowRight size={20} />
+            </a>
           </div>
         </div>
       </section>
 
       <footer className="border-t border-slate-200 bg-white px-5 py-10">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 text-sm text-slate-500 md:flex-row md:items-center md:justify-between">
-          <div>© 2026 Zedpera</div>
-          <div>AI akademický asistent</div>
+        <div className="mx-auto flex max-w-7xl flex-col gap-5 text-sm text-slate-500 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div>© 2026 Zedpera</div>
+            <div className="mt-1">AI akademický asistent</div>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/obchodne-podmienky"
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 font-bold text-slate-700 transition hover:bg-slate-50"
+            >
+              Obchodné podmienky
+            </Link>
+
+            <Link
+              href="/gdpr"
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 font-bold text-slate-700 transition hover:bg-slate-50"
+            >
+              GDPR
+            </Link>
+          </div>
         </div>
       </footer>
     </main>
   );
 }
 
-function DemoScore({ label, value }: { label: string; value: string }) {
+function InfoPanel({ title, text }: { title: string; text: string }) {
   return (
-    <div>
-      <div className="mb-2 flex items-center justify-between text-sm">
-        <span className="font-bold text-slate-300">{label}</span>
-        <span className="font-black text-white">{value}</span>
-      </div>
-
-      <div className="h-3 overflow-hidden rounded-full bg-white/10">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500"
-          style={{ width: value }}
-        />
-      </div>
+    <div className="rounded-[1.5rem] border border-emerald-300 bg-white p-5 shadow-xl shadow-slate-200/70">
+      <h3 className="text-base font-black text-slate-950">{title}</h3>
+      <p className="mt-3 text-sm leading-7 text-slate-700">{text}</p>
     </div>
   );
 }
 
-function AboutCard({ title, text }: { title: string; text: string }) {
-  return (
-    <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-2xl shadow-black/20">
-      <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
-        <CheckCircle2 size={24} />
-      </div>
-
-      <h3 className="text-xl font-black text-white">{title}</h3>
-
-      <p className="mt-3 text-sm leading-7 text-slate-300">{text}</p>
-    </div>
-  );
-}
-
-function Step({
-  number,
+function ComparisonBox({
   title,
-  text,
+  items,
+  negative = false,
 }: {
-  number: string;
   title: string;
-  text: string;
+  items: string[];
+  negative?: boolean;
 }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-      <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-600 text-xl font-black">
-        {number}
+    <div
+      className={`rounded-[2rem] border p-6 shadow-xl ${
+        negative
+          ? 'border-slate-200 bg-white shadow-slate-200/60'
+          : 'border-emerald-300 bg-emerald-50 shadow-emerald-100'
+      }`}
+    >
+      <h3 className="mb-5 text-center text-2xl font-black text-slate-950">
+        {title}
+      </h3>
+
+      <ul className="space-y-3">
+        {items.map((item) => (
+          <li key={item} className="flex gap-3 text-sm leading-7 text-slate-700">
+            <span
+              className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-xs font-black ${
+                negative
+                  ? 'bg-slate-100 text-slate-500'
+                  : 'bg-emerald-600 text-white'
+              }`}
+            >
+              {negative ? '!' : '✓'}
+            </span>
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ReviewCard({ name, text }: { name: string; text: string }) {
+  return (
+    <article className="flex h-full flex-col rounded-[2rem] border border-white/10 bg-white/[0.05] p-6 shadow-2xl shadow-black/20">
+      <div className="mb-5 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
+            <Quote size={22} />
+          </div>
+
+          <div>
+            <h3 className="text-sm font-black text-white">{name}</h3>
+
+            <div className="mt-1 flex items-center gap-1 text-amber-300">
+              <Star size={14} fill="currentColor" />
+              <Star size={14} fill="currentColor" />
+              <Star size={14} fill="currentColor" />
+              <Star size={14} fill="currentColor" />
+              <Star size={14} fill="currentColor" />
+            </div>
+          </div>
+        </div>
       </div>
 
-      <h3 className="text-xl font-black">{title}</h3>
+      <p className="text-sm leading-7 text-slate-300">{text}</p>
+    </article>
+  );
+}
 
-      <p className="mt-2 text-sm leading-7 text-slate-300">{text}</p>
+function FaqRow({
+  item,
+  open,
+  onClick,
+}: {
+  item: FaqItem;
+  open: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left"
+      >
+        <span className="text-base font-black text-slate-950 md:text-lg">
+          {item.question}
+        </span>
+
+        <ChevronDown
+          className={`h-5 w-5 shrink-0 text-violet-700 transition ${
+            open ? 'rotate-180' : ''
+          }`}
+        />
+      </button>
+
+      {open && (
+        <div className="border-t border-slate-100 px-6 pb-6 pt-1">
+          <p className="text-sm leading-7 text-slate-600">{item.answer}</p>
+        </div>
+      )}
     </div>
   );
 }

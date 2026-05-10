@@ -1,18 +1,5 @@
 import type { Metadata } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
-
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-  display: 'swap',
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-  display: 'swap',
-});
 
 export const metadata: Metadata = {
   title: 'Zedpera',
@@ -27,10 +14,10 @@ export default function RootLayout({
   return (
     <html
       lang="sk"
-      className={`${geistSans.variable} ${geistMono.variable} h-dvh overflow-hidden bg-[#020617]`}
+      className="min-h-screen bg-[#020617]"
       suppressHydrationWarning
     >
-      <body className="h-dvh overflow-hidden bg-[#020617] text-white antialiased">
+      <body className="min-h-screen overflow-x-hidden bg-[#020617] text-white antialiased">
         {children}
       </body>
     </html>

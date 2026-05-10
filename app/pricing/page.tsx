@@ -1,7 +1,16 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { ExternalLink, CheckCircle2, Crown, Sparkles } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  ExternalLink,
+  CheckCircle2,
+  Crown,
+  Sparkles,
+  Menu,
+  ArrowLeft,
+  ArrowUp,
+} from 'lucide-react';
 
 type PackagePlan = {
   id:
@@ -254,6 +263,9 @@ const addonServices: AddonService[] = [
 ];
 
 export default function PackagesPage() {
+  const router = useRouter();
+  const pageRef = useRef<HTMLDivElement | null>(null);
+
   const [selectedPlan, setSelectedPlan] = useState<PackagePlan['id']>('monthly');
   const [selectedAddons, setSelectedAddons] = useState<AddonService['id'][]>([]);
   const [loadingPayment, setLoadingPayment] = useState(false);
@@ -266,6 +278,17 @@ export default function PackagesPage() {
   const selectedAddonData = useMemo(() => {
     return addonServices.filter((addon) => selectedAddons.includes(addon.id));
   }, [selectedAddons]);
+
+  const goToMenu = () => {
+    router.push('/dashboard');
+  };
+
+  const scrollToTop = () => {
+    pageRef.current?.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    });
+  };
 
   const toggleAddon = (addonId: AddonService['id']) => {
     setSelectedAddons((current) =>
@@ -340,280 +363,328 @@ export default function PackagesPage() {
   };
 
   return (
-    <div className="mx-auto max-w-7xl space-y-10">
-      <section>
-        <div className="mb-8">
-          <h1 className="text-4xl font-black text-white">
+    <div
+      ref={pageRef}
+      className="fixed inset-0 h-[100dvh] w-full overflow-y-auto overflow-x-hidden bg-[#020617] text-white"
+    >
+      {/* TOP MENU */}
+      <div className="sticky top-0 z-50 border-b border-white/10 bg-[#020617]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-8">
+          <button
+            type="button"
+            onClick={goToMenu}
+            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20"
+          >
+            <Menu size={18} />
+            Menu
+          </button>
+
+          <div className="hidden text-sm font-semibold text-gray-400 sm:block">
             Balíčky a doplnky
-          </h1>
+          </div>
 
-          <p className="mt-3 text-lg text-gray-400">
-            Vyber si plán podľa rozsahu práce. Doplnky môžeš pridať pred platbou.
-          </p>
+          <button
+            type="button"
+            onClick={goToMenu}
+            className="inline-flex items-center gap-2 rounded-2xl border border-purple-400/30 bg-purple-600/20 px-4 py-2 text-sm font-bold text-purple-100 transition hover:bg-purple-600/30"
+          >
+            <ArrowLeft size={18} />
+            Dashboard
+          </button>
         </div>
+      </div>
 
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-          {packagePlans.map((plan) => {
-            const selected = selectedPlan === plan.id;
-
-            return (
-              <button
-                key={plan.id}
-                type="button"
-                onClick={() => {
-                  setSelectedPlan(plan.id);
-                  setPaymentError('');
-                }}
-                className={`relative flex min-h-[360px] flex-col rounded-3xl border p-6 text-left transition ${
-                  selected
-                    ? 'border-purple-400 bg-purple-600/15 shadow-2xl shadow-purple-950/40'
-                    : 'border-white/10 bg-white/5 hover:border-purple-400/50 hover:bg-white/10'
-                }`}
-              >
-                {plan.badge && (
-                  <div className="mb-4 flex w-fit items-center gap-2 rounded-full bg-purple-600/30 px-3 py-1 text-xs font-black uppercase tracking-wide text-purple-100">
-                    <Crown size={14} />
-                    {plan.badge}
-                  </div>
-                )}
-
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-2xl font-black text-white">
-                      {plan.name}
-                    </h2>
-
-                    <p className="mt-2 text-sm leading-6 text-gray-400">
-                      {plan.description}
-                    </p>
-                  </div>
-
-                  {selected && (
-                    <div className="rounded-full bg-green-500/20 px-3 py-1 text-xs font-bold text-green-300">
-                      Vybrané
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-6 flex items-end gap-3">
-                  <div className="text-4xl font-black text-white">
-                    {plan.price}
-                  </div>
-
-                  {plan.oldPrice && (
-                    <div className="pb-1 text-sm text-gray-500 line-through">
-                      {plan.oldPrice}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-1 text-sm text-gray-400">{plan.period}</div>
-
-                <div className="mt-6 grid grid-cols-2 gap-3 text-sm">
-                  <PackageInfo label="Limit" value={plan.pages} />
-                  <PackageInfo label="Práce" value={plan.works} />
-                  <PackageInfo label="AI vedúci" value={plan.supervisor} />
-                  <PackageInfo label="Audit" value={plan.audit} />
-                </div>
-
-                <div className="mt-5 rounded-2xl bg-black/20 p-3 text-sm">
-                  <div className="text-gray-500">Obhajoba</div>
-                  <div className="font-bold text-white">{plan.defense}</div>
-                </div>
-
-                <ul className="mt-5 space-y-2 text-sm text-gray-300">
-                  {plan.features.map((feature) => (
-                    <li key={feature} className="flex gap-2">
-                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-purple-400" />
-                      <span>{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="rounded-3xl border border-white/10 bg-[#050816] p-6">
-        <div className="mb-5">
-          <h2 className="text-2xl font-black text-white">
-            Doplnkové služby
-          </h2>
-
-          <p className="mt-2 text-sm text-gray-400">
-            Doplnky môžeš pridať k vybranému balíku pred platbou.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {addonServices.map((addon) => {
-            const selected = selectedAddons.includes(addon.id);
-
-            return (
-              <button
-                key={addon.id}
-                type="button"
-                onClick={() => {
-                  toggleAddon(addon.id);
-                  setPaymentError('');
-                }}
-                className={`flex items-center justify-between gap-4 rounded-2xl border p-5 text-left transition ${
-                  selected
-                    ? 'border-purple-400 bg-purple-600/20'
-                    : 'border-white/10 bg-white/5 hover:bg-white/10'
-                }`}
-              >
-                <div>
-                  <div className="text-lg font-bold text-white">
-                    {addon.name}
-                  </div>
-
-                  <div className="mt-1 text-sm text-gray-400">
-                    {addon.description}
-                  </div>
-                </div>
-
-                <div className="shrink-0 text-xl font-black text-white">
-                  <div>{addon.price}</div>
-
-                  {addon.oldPrice && (
-                    <div className="text-right text-xs font-semibold text-gray-500 line-through">
-                      {addon.oldPrice}
-                    </div>
-                  )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="text-sm font-bold uppercase tracking-wide text-purple-300">
-                Vybraný balík
-              </div>
-
-              <div className="mt-1 text-2xl font-black text-white">
-                {selectedPlanData.name} – {selectedPlanData.price}
-              </div>
-
-              <div className="mt-1 text-sm text-gray-400">
-                {selectedPlanData.period} · {selectedPlanData.pages} ·{' '}
-                {selectedPlanData.works}
-              </div>
+      <main className="mx-auto max-w-7xl space-y-10 px-4 py-10 pb-32 sm:px-6 lg:px-8">
+        <section>
+          <div className="mb-8">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-sm font-semibold text-purple-200">
+              <Crown size={16} />
+              Predplatné a doplnkové služby
             </div>
 
-            {selectedAddonData.length > 0 && (
-              <div className="max-w-xl text-sm text-gray-300">
-                <div className="font-bold text-white">Doplnky:</div>
-                <div className="mt-1">
-                  {selectedAddonData
-                    .map((addon) => `${addon.name} (${addon.price})`)
-                    .join(', ')}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+            <h1 className="text-4xl font-black text-white sm:text-5xl lg:text-6xl">
+              Balíčky a doplnky
+            </h1>
 
-        {paymentError && (
-          <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold text-red-200">
-            {paymentError}
-          </div>
-        )}
-
-        <button
-          type="button"
-          onClick={handleCheckout}
-          disabled={loadingPayment}
-          className="mt-6 flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 text-center text-lg font-black text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {loadingPayment ? 'Presmerovávam na Stripe...' : 'Pokračovať na platbu'}
-        </button>
-      </section>
-
-      <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <Sparkles className="text-purple-400" size={24} />
-              <h2 className="text-2xl font-black text-white">
-                Akademický pracovník + mentoring
-              </h2>
-            </div>
-
-            <p className="mt-2 text-gray-400">
-              Potrebuješ pomoc od reálneho experta? Klikni podľa krajiny a
-              otvorí sa webová stránka.
+            <p className="mt-3 max-w-3xl text-lg text-gray-300 sm:text-xl">
+              Vyber si plán podľa rozsahu práce. Doplnky môžeš pridať pred platbou.
             </p>
+          </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            {packagePlans.map((plan) => {
+              const selected = selectedPlan === plan.id;
+
+              return (
+                <button
+                  key={plan.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedPlan(plan.id);
+                    setPaymentError('');
+                  }}
+                  className={`relative flex min-h-[520px] flex-col rounded-3xl border p-6 text-left shadow-xl transition ${
+                    selected
+                      ? 'border-purple-400 bg-purple-600/20 shadow-purple-950/40'
+                      : 'border-white/10 bg-[#0f172a] hover:border-purple-400/50 hover:bg-[#111c33]'
+                  }`}
+                >
+                  {plan.badge && (
+                    <div className="mb-4 flex w-fit items-center gap-2 rounded-full bg-purple-600/40 px-3 py-1 text-xs font-black uppercase tracking-wide text-purple-100">
+                      <Crown size={14} />
+                      {plan.badge}
+                    </div>
+                  )}
+
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-2xl font-black text-white">
+                        {plan.name}
+                      </h2>
+
+                      <p className="mt-2 text-sm leading-6 text-gray-300">
+                        {plan.description}
+                      </p>
+                    </div>
+
+                    {selected && (
+                      <div className="rounded-full bg-green-500/20 px-3 py-1 text-xs font-bold text-green-300">
+                        Vybrané
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-6 flex flex-wrap items-end gap-3">
+                    <div className="text-4xl font-black text-white">
+                      {plan.price}
+                    </div>
+
+                    {plan.oldPrice && (
+                      <div className="pb-1 text-sm text-gray-400 line-through">
+                        {plan.oldPrice}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-1 text-sm text-gray-300">
+                    {plan.period}
+                  </div>
+
+                  <div className="mt-6 grid grid-cols-2 gap-3 text-sm">
+                    <PackageInfo label="Limit" value={plan.pages} />
+                    <PackageInfo label="Práce" value={plan.works} />
+                    <PackageInfo label="AI vedúci" value={plan.supervisor} />
+                    <PackageInfo label="Audit" value={plan.audit} />
+                  </div>
+
+                  <div className="mt-5 rounded-2xl border border-white/10 bg-black/30 p-3 text-sm">
+                    <div className="text-gray-400">Obhajoba</div>
+                    <div className="font-bold text-white">{plan.defense}</div>
+                  </div>
+
+                  <ul className="mt-5 space-y-2 text-sm text-gray-200">
+                    {plan.features.map((feature) => (
+                      <li key={feature} className="flex gap-2">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-purple-400" />
+                        <span>{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-white/10 bg-[#050816] p-6 shadow-xl">
+          <div className="mb-5">
+            <h2 className="text-2xl font-black text-white">
+              Doplnkové služby
+            </h2>
+
+            <p className="mt-2 text-sm text-gray-300">
+              Doplnky môžeš pridať k vybranému balíku pred platbou.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {addonServices.map((addon) => {
+              const selected = selectedAddons.includes(addon.id);
+
+              return (
+                <button
+                  key={addon.id}
+                  type="button"
+                  onClick={() => {
+                    toggleAddon(addon.id);
+                    setPaymentError('');
+                  }}
+                  className={`flex items-center justify-between gap-4 rounded-2xl border p-5 text-left transition ${
+                    selected
+                      ? 'border-purple-400 bg-purple-600/20'
+                      : 'border-white/10 bg-[#0f172a] hover:bg-[#111c33]'
+                  }`}
+                >
+                  <div>
+                    <div className="text-lg font-bold text-white">
+                      {addon.name}
+                    </div>
+
+                    <div className="mt-1 text-sm text-gray-300">
+                      {addon.description}
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 text-xl font-black text-white">
+                    <div>{addon.price}</div>
+
+                    {addon.oldPrice && (
+                      <div className="text-right text-xs font-semibold text-gray-400 line-through">
+                        {addon.oldPrice}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-white/10 bg-black/30 p-5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="text-sm font-bold uppercase tracking-wide text-purple-300">
+                  Vybraný balík
+                </div>
+
+                <div className="mt-1 text-2xl font-black text-white">
+                  {selectedPlanData.name} – {selectedPlanData.price}
+                </div>
+
+                <div className="mt-1 text-sm text-gray-300">
+                  {selectedPlanData.period} · {selectedPlanData.pages} ·{' '}
+                  {selectedPlanData.works}
+                </div>
+              </div>
+
+              {selectedAddonData.length > 0 && (
+                <div className="max-w-xl text-sm text-gray-200">
+                  <div className="font-bold text-white">Doplnky:</div>
+                  <div className="mt-1">
+                    {selectedAddonData
+                      .map((addon) => `${addon.name} (${addon.price})`)
+                      .join(', ')}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {paymentError && (
+            <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold text-red-200">
+              {paymentError}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={handleCheckout}
+            disabled={loadingPayment}
+            className="mt-6 flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 text-center text-lg font-black text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loadingPayment ? 'Presmerovávam na Stripe...' : 'Pokračovať na platbu'}
+          </button>
+        </section>
+
+        <section className="rounded-3xl border border-white/10 bg-[#0f172a] p-6 shadow-xl">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <Sparkles className="text-purple-400" size={24} />
+                <h2 className="text-2xl font-black text-white">
+                  Akademický pracovník + mentoring
+                </h2>
+              </div>
+
+              <p className="mt-2 text-gray-300">
+                Potrebuješ pomoc od reálneho experta? Klikni podľa krajiny a
+                otvorí sa webová stránka.
+              </p>
+
+              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <a
+                  href="https://www.zaverecneprace.sk"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-2xl border border-white/10 bg-black/30 p-4 transition hover:border-green-400/50 hover:bg-green-500/10"
+                >
+                  <div className="text-sm text-gray-400">Slovensko</div>
+                  <div className="mt-1 font-bold text-white">
+                    www.zaverecneprace.sk
+                  </div>
+                </a>
+
+                <a
+                  href="https://www.zaverecne-prace.cz"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-2xl border border-white/10 bg-black/30 p-4 transition hover:border-blue-400/50 hover:bg-blue-500/10"
+                >
+                  <div className="text-sm text-gray-400">Česko</div>
+                  <div className="mt-1 font-bold text-white">
+                    www.zaverecne-prace.cz
+                  </div>
+                </a>
+              </div>
+            </div>
+
+            <div className="flex shrink-0 flex-col gap-3 sm:flex-row lg:flex-col">
               <a
                 href="https://www.zaverecneprace.sk"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="rounded-2xl border border-white/10 bg-black/20 p-4 transition hover:border-green-400/50 hover:bg-green-500/10"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-green-600 px-5 py-3 font-bold text-white transition hover:bg-green-500"
               >
-                <div className="text-sm text-gray-500">Slovensko</div>
-                <div className="mt-1 font-bold text-white">
-                  www.zaverecneprace.sk
-                </div>
+                <ExternalLink size={18} />
+                Slovensko
               </a>
 
               <a
                 href="https://www.zaverecne-prace.cz"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="rounded-2xl border border-white/10 bg-black/20 p-4 transition hover:border-blue-400/50 hover:bg-blue-500/10"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white transition hover:bg-blue-500"
               >
-                <div className="text-sm text-gray-500">Česko</div>
-                <div className="mt-1 font-bold text-white">
-                  www.zaverecne-prace.cz
-                </div>
+                <ExternalLink size={18} />
+                Česko
               </a>
             </div>
           </div>
+        </section>
 
-          <div className="flex shrink-0 flex-col gap-3 sm:flex-row lg:flex-col">
-            <a
-              href="https://www.zaverecneprace.sk"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-green-600 px-5 py-3 font-bold text-white transition hover:bg-green-500"
-            >
-              <ExternalLink size={18} />
-              Slovensko
-            </a>
+        <section className="rounded-3xl border border-yellow-500/20 bg-yellow-500/10 p-5 text-sm leading-6 text-yellow-100">
+          <strong>Poznámka k limitom:</strong> Limity strán sú orientačné a
+          zahŕňajú AI písanie, audit, prácu s profilom, obhajobu, plánovanie,
+          emaily a pomocné výstupy. Pri náročných alebo opakovaných požiadavkách
+          môže byť spotreba vyššia.
+        </section>
+      </main>
 
-            <a
-              href="https://www.zaverecne-prace.cz"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white transition hover:bg-blue-500"
-            >
-              <ExternalLink size={18} />
-              Česko
-            </a>
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-3xl border border-yellow-500/20 bg-yellow-500/10 p-5 text-sm leading-6 text-yellow-100">
-        <strong>Poznámka k limitom:</strong> Limity strán sú orientačné a
-        zahŕňajú AI písanie, audit, prácu s profilom, obhajobu, plánovanie,
-        emaily a pomocné výstupy. Pri náročných alebo opakovaných požiadavkách
-        môže byť spotreba vyššia.
-      </section>
+      <button
+        type="button"
+        onClick={scrollToTop}
+        className="fixed bottom-6 right-6 z-50 inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-purple-600 text-white shadow-2xl shadow-purple-950/50 transition hover:bg-purple-500"
+        aria-label="Späť hore"
+      >
+        <ArrowUp size={20} />
+      </button>
     </div>
   );
 }
 
 function PackageInfo({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl bg-black/20 p-3">
-      <div className="text-gray-500">{label}</div>
+    <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
+      <div className="text-gray-400">{label}</div>
       <div className="font-bold text-white">{value}</div>
     </div>
   );

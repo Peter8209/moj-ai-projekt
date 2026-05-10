@@ -260,12 +260,32 @@ export default function LandingPage() {
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [paymentError, setPaymentError] = useState('');
 
+  const navigateTo = (path: string) => {
+    setMobileMenuOpen(false);
+
+    try {
+      router.push(path);
+    } catch {
+      if (typeof window !== 'undefined') {
+        window.location.href = path;
+      }
+    }
+  };
+
+  const goToHome = () => {
+    navigateTo('/');
+  };
+
   const goToLogin = () => {
-    router.push('/login');
+    navigateTo('/login');
   };
 
   const goToDashboard = () => {
-    router.push('/dashboard');
+    navigateTo('/dashboard');
+  };
+
+  const goToPricingPage = () => {
+    navigateTo('/pricing');
   };
 
   const getEmailForCheckout = async () => {
@@ -366,12 +386,12 @@ export default function LandingPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f8fafc] text-slate-950">
-      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-xl">
+    <main className="min-h-screen overflow-x-hidden bg-[#f8fafc] text-slate-950">
+      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 lg:px-8">
           <button
             type="button"
-            onClick={() => router.push('/')}
+            onClick={goToHome}
             className="flex items-center gap-3"
           >
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 text-white shadow-lg">
@@ -390,9 +410,15 @@ export default function LandingPage() {
             <a href="#features" className="transition hover:text-violet-700">
               Funkcie
             </a>
-            <a href="#pricing" className="transition hover:text-violet-700">
+
+            <button
+              type="button"
+              onClick={goToPricingPage}
+              className="transition hover:text-violet-700"
+            >
               Balíčky
-            </a>
+            </button>
+
             <a href="#how-it-works" className="transition hover:text-violet-700">
               Ako to funguje
             </a>
@@ -402,7 +428,7 @@ export default function LandingPage() {
             <button
               type="button"
               onClick={goToLogin}
-              className="rounded-2xl px-5 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-100"
+              className="relative z-50 rounded-2xl px-5 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-100"
             >
               Prihlásiť sa
             </button>
@@ -410,7 +436,7 @@ export default function LandingPage() {
             <button
               type="button"
               onClick={goToDashboard}
-              className="rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-6 py-3 text-sm font-black text-white shadow-xl shadow-violet-900/20 transition hover:opacity-90"
+              className="relative z-50 rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-6 py-3 text-sm font-black text-white shadow-xl shadow-violet-900/20 transition hover:opacity-90"
             >
               Vyskúšať Zedperu
             </button>
@@ -452,13 +478,13 @@ export default function LandingPage() {
                 Funkcie
               </a>
 
-              <a
-                href="#pricing"
-                onClick={() => setMobileMenuOpen(false)}
-                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
+              <button
+                type="button"
+                onClick={goToPricingPage}
+                className="block w-full rounded-2xl bg-slate-100 px-4 py-3 text-left font-bold"
               >
                 Balíčky
-              </a>
+              </button>
 
               <button
                 type="button"
@@ -510,12 +536,13 @@ export default function LandingPage() {
                 <ArrowRight size={20} />
               </button>
 
-              <a
-                href="#pricing"
+              <button
+                type="button"
+                onClick={goToPricingPage}
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-7 py-4 text-base font-black text-slate-900 transition hover:bg-slate-50"
               >
                 Pozrieť balíčky
-              </a>
+              </button>
             </div>
           </div>
 
@@ -538,6 +565,7 @@ export default function LandingPage() {
               <div className="text-sm font-black text-violet-200">
                 Kritická spätná väzba
               </div>
+
               <p className="mt-2 text-sm leading-7 text-slate-300">
                 Text má dobrý základ, ale chýba jasnejšie prepojenie cieľa,
                 metodológie a výsledkov. Odporúčam doplniť presnú interpretáciu
@@ -553,6 +581,7 @@ export default function LandingPage() {
           <h2 className="text-4xl font-black tracking-tight text-slate-950">
             Funkcie aplikácie
           </h2>
+
           <p className="mt-3 max-w-3xl text-lg leading-8 text-slate-600">
             Zedpera spája písanie, kontrolu kvality, citácie, obhajobu a
             odbornú spätnú väzbu v jednom rozhraní.

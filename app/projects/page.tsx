@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
@@ -92,6 +92,197 @@ type DropPosition = 'before' | 'after';
 
 const PROJECT_ORDER_KEY = 'zedpera_projects_order';
 
+function createProfileId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function normalizeProfileForApp(row: any): SavedProfile {
+  const full = row?.full_profile || row || {};
+  const id = row?.id || full.id || createProfileId();
+
+  return {
+    ...full,
+
+    id,
+
+    title: row?.title || full.title || 'Bez názvu',
+    type: row?.type || full.type,
+    level: row?.level || full.level,
+    topic: row?.topic || full.topic,
+    field: row?.field || full.field,
+    supervisor: row?.supervisor || full.supervisor,
+    citation: row?.citation || full.citation,
+    language: row?.language || full.language,
+
+    workLanguage: row?.work_language || full.workLanguage || full.work_language,
+
+    annotation: row?.annotation || full.annotation,
+    goal: row?.goal || full.goal,
+    problem: row?.problem || full.problem,
+    methodology: row?.methodology || full.methodology,
+    hypotheses: row?.hypotheses || full.hypotheses,
+
+    researchQuestions:
+      row?.research_questions ||
+      full.researchQuestions ||
+      full.research_questions,
+
+    practicalPart:
+      row?.practical_part || full.practicalPart || full.practical_part,
+
+    scientificContribution:
+      row?.scientific_contribution ||
+      full.scientificContribution ||
+      full.scientific_contribution,
+
+    businessProblem:
+      row?.business_problem || full.businessProblem || full.business_problem,
+
+    businessGoal: row?.business_goal || full.businessGoal || full.business_goal,
+
+    implementation: row?.implementation || full.implementation,
+
+    caseStudy: row?.case_study || full.caseStudy || full.case_study,
+
+    reflection: row?.reflection || full.reflection,
+
+    sourcesRequirement:
+      row?.sources_requirement ||
+      full.sourcesRequirement ||
+      full.sources_requirement,
+
+    keywordsList:
+      row?.keywords_list || full.keywordsList || full.keywords || [],
+
+    keywords: row?.keywords_list || full.keywords || full.keywordsList || [],
+
+    schema: row?.schema || full.schema,
+
+    savedAt:
+      row?.updated_at ||
+      row?.created_at ||
+      full.savedAt ||
+      new Date().toISOString(),
+
+    created_at: row?.created_at,
+    updated_at: row?.updated_at,
+    full_profile: row?.full_profile || full,
+  };
+}
+
+function normalizeProfileBeforeSave(
+  profile: SavedProfile,
+  fallbackId?: string,
+): SavedProfile {
+  const now = new Date().toISOString();
+
+  const normalized: SavedProfile = {
+    ...profile,
+
+    id: profile.id || fallbackId || createProfileId(),
+    title: profile.title || 'Bez názvu',
+
+    workLanguage:
+      profile.workLanguage || profile.work_language || profile.language || '',
+
+    researchQuestions:
+      profile.researchQuestions || profile.research_questions || '',
+
+    practicalPart: profile.practicalPart || profile.practical_part || '',
+
+    scientificContribution:
+      profile.scientificContribution || profile.scientific_contribution || '',
+
+    businessProblem: profile.businessProblem || profile.business_problem || '',
+
+    businessGoal: profile.businessGoal || profile.business_goal || '',
+
+    caseStudy: profile.caseStudy || profile.case_study || '',
+
+    sourcesRequirement:
+      profile.sourcesRequirement || profile.sources_requirement || '',
+
+    keywordsList:
+      profile.keywordsList || profile.keywords_list || profile.keywords || [],
+
+    keywords: profile.keywords || profile.keywordsList || profile.keywords_list || [],
+
+    savedAt: now,
+    updated_at: now,
+  };
+
+  return {
+    ...normalized,
+    full_profile: {
+      ...normalized,
+      full_profile: undefined,
+    },
+  };
+}
+
+function buildSupabaseProfilePayload(profile: SavedProfile) {
+  const fullProfile = {
+    ...profile,
+    full_profile: undefined,
+  };
+
+  return {
+    id: profile.id,
+
+    title: profile.title || 'Bez názvu',
+    type: profile.type || null,
+    level: profile.level || null,
+    topic: profile.topic || null,
+    field: profile.field || null,
+    supervisor: profile.supervisor || null,
+    citation: profile.citation || null,
+    language: profile.language || null,
+
+    work_language: profile.workLanguage || profile.work_language || null,
+
+    annotation: profile.annotation || null,
+    goal: profile.goal || null,
+    problem: profile.problem || null,
+    methodology: profile.methodology || null,
+    hypotheses: profile.hypotheses || null,
+
+    research_questions:
+      profile.researchQuestions || profile.research_questions || null,
+
+    practical_part: profile.practicalPart || profile.practical_part || null,
+
+    scientific_contribution:
+      profile.scientificContribution || profile.scientific_contribution || null,
+
+    business_problem:
+      profile.businessProblem || profile.business_problem || null,
+
+    business_goal: profile.businessGoal || profile.business_goal || null,
+
+    implementation: profile.implementation || null,
+
+    case_study: profile.caseStudy || profile.case_study || null,
+
+    reflection: profile.reflection || null,
+
+    sources_requirement:
+      profile.sourcesRequirement || profile.sources_requirement || null,
+
+    keywords_list:
+      profile.keywordsList || profile.keywords_list || profile.keywords || [],
+
+    schema: profile.schema || null,
+
+    full_profile: fullProfile,
+
+    updated_at: new Date().toISOString(),
+  };
+}
+
 export default function ProjectsPage() {
   const router = useRouter();
 
@@ -108,6 +299,8 @@ export default function ProjectsPage() {
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
   const [draggedProfileId, setDraggedProfileId] = useState<string | null>(null);
   const [dragOverProfileId, setDragOverProfileId] = useState<string | null>(
     null,
@@ -121,6 +314,11 @@ export default function ProjectsPage() {
 
   const goToMenu = () => {
     router.push('/dashboard');
+  };
+
+  const goToChatWithProfile = (profile: SavedProfile) => {
+    selectProfileForGeneration(profile);
+    router.push('/chat');
   };
 
   const openNewProfile = () => {
@@ -214,88 +412,9 @@ export default function ProjectsPage() {
         return;
       }
 
-      const supabaseProfiles: SavedProfile[] = (data || []).map((row: any) => {
-        const full = row.full_profile || {};
-
-        return {
-          ...full,
-
-          id:
-            row.id ||
-            full.id ||
-            (typeof crypto !== 'undefined' && crypto.randomUUID
-              ? crypto.randomUUID()
-              : Date.now().toString()),
-
-          title: row.title || full.title || 'Bez názvu',
-          type: row.type || full.type,
-          level: row.level || full.level,
-          topic: row.topic || full.topic,
-          field: row.field || full.field,
-          supervisor: row.supervisor || full.supervisor,
-          citation: row.citation || full.citation,
-          language: row.language || full.language,
-
-          workLanguage:
-            row.work_language || full.workLanguage || full.work_language,
-
-          annotation: row.annotation || full.annotation,
-          goal: row.goal || full.goal,
-          problem: row.problem || full.problem,
-          methodology: row.methodology || full.methodology,
-          hypotheses: row.hypotheses || full.hypotheses,
-
-          researchQuestions:
-            row.research_questions ||
-            full.researchQuestions ||
-            full.research_questions,
-
-          practicalPart:
-            row.practical_part || full.practicalPart || full.practical_part,
-
-          scientificContribution:
-            row.scientific_contribution ||
-            full.scientificContribution ||
-            full.scientific_contribution,
-
-          businessProblem:
-            row.business_problem ||
-            full.businessProblem ||
-            full.business_problem,
-
-          businessGoal:
-            row.business_goal || full.businessGoal || full.business_goal,
-
-          implementation: row.implementation || full.implementation,
-
-          caseStudy: row.case_study || full.caseStudy || full.case_study,
-
-          reflection: row.reflection || full.reflection,
-
-          sourcesRequirement:
-            row.sources_requirement ||
-            full.sourcesRequirement ||
-            full.sources_requirement,
-
-          keywordsList:
-            row.keywords_list || full.keywordsList || full.keywords || [],
-
-          keywords:
-            row.keywords_list || full.keywords || full.keywordsList || [],
-
-          schema: row.schema || full.schema,
-
-          savedAt:
-            row.updated_at ||
-            row.created_at ||
-            full.savedAt ||
-            new Date().toISOString(),
-
-          created_at: row.created_at,
-          updated_at: row.updated_at,
-          full_profile: row.full_profile,
-        };
-      });
+      const supabaseProfiles: SavedProfile[] = (data || []).map((row: any) =>
+        normalizeProfileForApp(row),
+      );
 
       const orderedProfiles = applySavedOrder(supabaseProfiles);
 
@@ -332,16 +451,14 @@ export default function ProjectsPage() {
       if (Array.isArray(parsed)) {
         const normalized: SavedProfile[] = parsed
           .filter((item) => item && typeof item === 'object')
-          .map((item) => ({
-            ...item,
-            id:
-              item.id ||
-              (typeof crypto !== 'undefined' && crypto.randomUUID
-                ? crypto.randomUUID()
-                : Date.now().toString()),
-            title: item.title || 'Bez názvu',
-            savedAt: item.savedAt || new Date().toISOString(),
-          }));
+          .map((item) =>
+            normalizeProfileForApp({
+              ...item,
+              id: item.id || createProfileId(),
+              title: item.title || 'Bez názvu',
+              savedAt: item.savedAt || new Date().toISOString(),
+            }),
+          );
 
         const orderedProfiles = applySavedOrder(normalized);
 
@@ -410,21 +527,15 @@ export default function ProjectsPage() {
     setEditingProfile(null);
   };
 
-  const handleProfileSaved = (updatedProfile: SavedProfile) => {
-    const normalizedProfile: SavedProfile = {
-      ...updatedProfile,
-      id:
-        updatedProfile.id ||
-        editingProfile?.id ||
-        (typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : Date.now().toString()),
-      title: updatedProfile.title || 'Bez názvu',
-      savedAt:
-        updatedProfile.savedAt ||
-        updatedProfile.updated_at ||
-        new Date().toISOString(),
-    };
+  const handleProfileSaved = async (updatedProfile: SavedProfile) => {
+    if (isSavingProfile) return;
+
+    setIsSavingProfile(true);
+
+    const normalizedProfile = normalizeProfileBeforeSave(
+      updatedProfile,
+      editingProfile?.id,
+    );
 
     const nextProfiles = profiles.some(
       (profile) => profile.id === normalizedProfile.id,
@@ -444,7 +555,54 @@ export default function ProjectsPage() {
     localStorage.setItem('profile', JSON.stringify(normalizedProfile));
     localStorage.setItem('active_profile', JSON.stringify(normalizedProfile));
 
-    void loadProfiles();
+    try {
+      const supabase = createClient();
+
+      const payload = buildSupabaseProfilePayload(normalizedProfile);
+
+      const { data, error } = await supabase
+        .from('zedpera_profiles')
+        .upsert(payload, { onConflict: 'id' })
+        .select('*')
+        .single();
+
+      if (error) {
+        console.error('SUPABASE SAVE PROFILE ERROR:', error);
+        alert(
+          `Profil sa uložil lokálne, ale nepodarilo sa ho uložiť do Supabase: ${error.message}`,
+        );
+        return;
+      }
+
+      if (data) {
+        const savedProfile = normalizeProfileForApp(data);
+
+        const syncedProfiles = nextProfiles.some(
+          (profile) => profile.id === savedProfile.id,
+        )
+          ? nextProfiles.map((profile) =>
+              profile.id === savedProfile.id ? savedProfile : profile,
+            )
+          : [savedProfile, ...nextProfiles];
+
+        setProfiles(syncedProfiles);
+        setSelectedProfile(savedProfile);
+        setActiveProfileId(savedProfile.id);
+
+        saveProfilesLocally(syncedProfiles);
+        localStorage.setItem('profile', JSON.stringify(savedProfile));
+        localStorage.setItem('active_profile', JSON.stringify(savedProfile));
+      }
+
+      await loadProfiles();
+    } catch (error) {
+      console.error('PROFILE SAVE ERROR:', error);
+      alert(
+        'Profil sa uložil lokálne, ale nastala chyba pri ukladaní do Supabase.',
+      );
+    } finally {
+      setIsSavingProfile(false);
+    }
   };
 
   const deleteProfile = async (id: string) => {
@@ -541,7 +699,7 @@ export default function ProjectsPage() {
   };
 
   const handleDragStart = (
-    event: React.DragEvent<HTMLElement>,
+    event: DragEvent<HTMLElement>,
     profileId: string,
   ) => {
     setDraggedProfileId(profileId);
@@ -553,7 +711,7 @@ export default function ProjectsPage() {
   };
 
   const handleDragOver = (
-    event: React.DragEvent<HTMLElement>,
+    event: DragEvent<HTMLElement>,
     profileId: string,
   ) => {
     event.preventDefault();
@@ -569,7 +727,7 @@ export default function ProjectsPage() {
   };
 
   const handleDrop = (
-    event: React.DragEvent<HTMLElement>,
+    event: DragEvent<HTMLElement>,
     targetProfileId: string,
   ) => {
     event.preventDefault();
@@ -796,6 +954,14 @@ export default function ProjectsPage() {
 
                       <button
                         type="button"
+                        onClick={() => goToChatWithProfile(profile)}
+                        className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white transition hover:bg-blue-500"
+                      >
+                        Pokračovať v práci
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => openProfile(profile)}
                         className="rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-bold text-white transition hover:bg-white/[0.1]"
                       >
@@ -868,6 +1034,7 @@ export default function ProjectsPage() {
                 onDelete={() => deleteProfile(selectedProfile.id)}
                 onEdit={() => openEditProfile(selectedProfile)}
                 onSelect={() => selectProfileForGeneration(selectedProfile)}
+                onContinue={() => goToChatWithProfile(selectedProfile)}
               />
             </div>
           </div>
@@ -877,10 +1044,16 @@ export default function ProjectsPage() {
       {profileFormOpen && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
           <div className="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
+            {isSavingProfile && (
+              <div className="sticky top-0 z-50 border-b border-emerald-400/20 bg-emerald-500/10 px-5 py-3 text-sm font-black text-emerald-100 backdrop-blur">
+                Ukladám profil...
+              </div>
+            )}
+
             <ProfileForm
               initialProfile={editingProfile as any}
               onSave={(updatedProfile) =>
-                handleProfileSaved(updatedProfile as any)
+                void handleProfileSaved(updatedProfile as any)
               }
               onClose={closeEditProfile}
             />
@@ -910,6 +1083,7 @@ function ProjectDetail({
   onDelete,
   onEdit,
   onSelect,
+  onContinue,
 }: {
   profile: SavedProfile;
   activeProfileId: string | null;
@@ -917,6 +1091,7 @@ function ProjectDetail({
   onDelete: () => void;
   onEdit: () => void;
   onSelect: () => void;
+  onContinue: () => void;
 }) {
   const keywords =
     profile.keywordsList && profile.keywordsList.length > 0
@@ -954,6 +1129,15 @@ function ProjectDetail({
                 <Sparkles className="h-5 w-5" />
               )}
               {isActive ? 'Táto práca je vybratá' : 'Vybrať na generovanie'}
+            </button>
+
+            <button
+              type="button"
+              onClick={onContinue}
+              className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-black text-white transition hover:bg-blue-500"
+            >
+              <Sparkles className="h-5 w-5" />
+              Pokračovať v práci
             </button>
 
             <button

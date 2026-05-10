@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   BookOpen,
   ClipboardCheck,
@@ -11,7 +10,6 @@ import {
   GraduationCap,
   Languages,
   Mail,
-  Menu,
   Mic,
   Paintbrush,
   Paperclip,
@@ -20,7 +18,6 @@ import {
   Search,
   Send,
   ShieldCheck,
-  Sparkles,
   Trash2,
   UploadCloud,
   X,
@@ -95,6 +92,8 @@ declare global {
 
 // ================= CONFIG =================
 
+const defaultAgent: Agent = 'gemini';
+
 const allowedFileExtensions = [
   '.pdf',
   '.doc',
@@ -120,14 +119,6 @@ const allowedFileAccept = allowedFileExtensions.join(',');
 const maxFilesCount = 12;
 const maxFileSizeMb = 30;
 const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
-
-const agents: { key: Agent; label: string }[] = [
-  { key: 'gemini', label: 'Gemini' },
-  { key: 'openai', label: 'OPEN AI' },
-  { key: 'claude', label: 'Claude' },
-  { key: 'mistral', label: 'Mistral' },
-  { key: 'grok', label: 'Grok' },
-];
 
 const modules: {
   key: ModuleKey;
@@ -244,7 +235,6 @@ function fixEncodingArtifacts(text: string) {
     .replace(/Â/g, '')
     .replace(/Ã¡/g, 'á')
     .replace(/Ã¤/g, 'ä')
-    .replace(/Ã¤/g, 'ä')
     .replace(/Ã©/g, 'é')
     .replace(/Ã­/g, 'í')
     .replace(/Ã³/g, 'ó')
@@ -291,7 +281,10 @@ function removeBadGeneratedPrefix(text: string) {
     .replace(/^\s*AI\s+veduci\s+prace\s*[-–—:]*\s*/i, '')
     .replace(/^\s*Audit\s+kvality\s*[-–—:]*\s*/i, '')
     .replace(/^\s*Obhajoba\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Prezentácia\s*[-–—:]*\s*(?=Názov práce|Cieľ práce|Úvod|Slide|Snímka)/i, '');
+    .replace(
+      /^\s*Prezentácia\s*[-–—:]*\s*(?=Názov práce|Cieľ práce|Úvod|Slide|Snímka)/i,
+      '',
+    );
 }
 
 function cleanAiOutput(text: string) {
@@ -496,10 +489,9 @@ async function readApiErrorResponse(res: Response) {
 // ================= PAGE =================
 
 export default function DashboardPage() {
-  const router = useRouter();
+  const agent = defaultAgent;
 
   const [activeModule, setActiveModule] = useState<ModuleKey>('supervisor');
-  const [agent, setAgent] = useState<Agent>('gemini');
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   const [input, setInput] = useState('');
@@ -707,12 +699,6 @@ ZAČIATOK ODPOVEDE:
 Začni priamo nadpisom:
 Hodnotenie práce: ${activeProfile?.title || 'bez názvu'}
 
-NEPÍŠ na začiatok:
-AI vedúci
-AI vedúci práce
-Výstup
-Odpoveď
-
 POVINNÁ ŠTRUKTÚRA:
 1. Celkové hodnotenie práce
 2. Silné stránky
@@ -724,8 +710,6 @@ POVINNÁ ŠTRUKTÚRA:
 8. Odporúčané opravy
 9. Otázky na konzultáciu
 10. Skóre kvality 0–100
-
-Zameraj sa na akademickú kvalitu práce. Nehodnoť pravopis ako hlavnú vec.
 `.trim();
     }
 
@@ -758,12 +742,6 @@ ZAČIATOK ODPOVEDE:
 Začni priamo nadpisom:
 ${activeProfile?.title || 'Audit kontrolovaného textu'}
 
-NEPÍŠ na začiatok:
-Audit kvality
-AI audit
-Výstup
-Odpoveď
-
 POVINNÁ ŠTRUKTÚRA:
 1. Stručné hodnotenie
 2. Nájdené problémy
@@ -771,9 +749,6 @@ POVINNÁ ŠTRUKTÚRA:
 4. Ukážky upravených viet
 5. Skóre kvality od 0 do 100
 6. Odporúčané ďalšie kroky
-
-Ak je režim štylistika, nehodnoť obsah.
-Ak je režim citácie, nehodnoť všeobecne celú prácu.
 `.trim();
     }
 
@@ -787,104 +762,17 @@ Priprav kompletnú obhajobu práce. Musí vzniknúť aj prezentácia, aj sprievo
 TEXT / PODKLAD:
 ${input || 'Použi aktívny profil práce a priložené dokumenty.'}
 
-KONTROLA PRÍLOH:
-- Najprv skontroluj, či priložené dokumenty súvisia s názvom práce, cieľom, odborom, metodológiou a kľúčovými slovami.
-- Ak dokument nesúvisí, napíš: Upozornenie: priložený dokument pravdepodobne nesúvisí s aktívnym profilom práce.
-- Nesúvisiaci dokument nepoužívaj ako hlavný podklad prezentácie.
-- Ak príloha súvisí, využi ju pri tvorbe prezentácie.
-
 ZAČIATOK ODPOVEDE:
 Začni priamo názvom práce:
 ${activeProfile?.title || 'Prezentácia k obhajobe práce'}
 
-NEPÍŠ na začiatok:
-Obhajoba
-Prezentácia
-Výstup
-AI odpoveď
-
 POVINNÁ ŠTRUKTÚRA VÝSTUPU:
-
 ČASŤ A: PREZENTÁCIA – OBSAH SNÍMOK
-
-Snímka 1: Názov práce
-- názov práce
-- autor
-- typ práce
-- odbor
-- vedúci práce
-
-Snímka 2: Východiská a význam témy
-- prečo je téma dôležitá
-- odborný alebo praktický kontext
-- problém, ktorý práca rieši
-
-Snímka 3: Cieľ práce
-- hlavný cieľ
-- čiastkové ciele
-- očakávaný prínos
-
-Snímka 4: Výskumný problém a otázky
-- výskumný problém
-- výskumné otázky alebo hypotézy
-- čo sa malo overiť alebo analyzovať
-
-Snímka 5: Metodológia
-- použité metódy
-- postup práce
-- dáta, vzorka alebo analyzované zdroje
-- prečo boli tieto metódy vhodné
-
-Snímka 6: Teoretické východiská
-- hlavné odborné pojmy
-- najdôležitejšie teoretické východiská
-- odborné zdroje, ak boli dostupné
-
-Snímka 7: Praktická alebo analytická časť
-- čo bolo analyzované
-- aký bol postup
-- hlavné zistenia
-
-Snímka 8: Výsledky práce
-- najdôležitejšie výsledky
-- interpretácia výsledkov
-- súvis s cieľom práce
-
-Snímka 9: Prínos práce
-- odborný prínos
-- praktický prínos
-- odporúčania pre prax alebo ďalší výskum
-
-Snímka 10: Záver
-- splnenie cieľa
-- hlavné zistenia
-- limity práce
-- záverečné vyjadrenie
-
-Snímka 11: Ďakujem za pozornosť
-- krátka veta na ukončenie
-- priestor na otázky
-
 ČASŤ B: SPRIEVODNÝ TEXT K PREZENTÁCII
-Ku každej snímke napíš, čo má študent povedať ústne počas obhajoby.
-Text musí byť prirodzený, hovorený, odborný a vhodný na obhajobu.
-
 ČASŤ C: OTÁZKY KOMISIE A VZOROVÉ ODPOVEDE
-Priprav minimálne 12 otázok komisie.
-Ku každej otázke priprav odbornú vzorovú odpoveď.
-
 ČASŤ D: SLABÉ MIESTA PRÁCE
-Uveď, na čo si má študent dať pozor pri obhajobe.
-
 ČASŤ E: KRÁTKA VERZIA OBHAJOBY NA 3–5 MINÚT
-Napíš súvislý hovorený text, ktorý môže študent povedať na obhajobe.
-
 ČASŤ F: KONTROLA PRÍLOH
-Uveď:
-- ktoré prílohy boli použité,
-- ktoré prílohy súviseli s profilom práce,
-- ktoré prílohy nesúviseli alebo boli nejasné,
-- aké údaje treba ešte overiť.
 `.trim();
     }
 
@@ -902,10 +790,7 @@ TEXT NA PREKLAD:
 ${input}
 
 ZAČIATOK ODPOVEDE:
-Začni priamo preloženým textom. Nepíš nadpis „Preložený text“, ak to nie je potrebné.
-
-VÝSTUP:
-Uveď čistý preklad bez technických poznámok, ak používateľ nežiadal vysvetlenie.
+Začni priamo preloženým textom.
 `.trim();
     }
 
@@ -914,7 +799,7 @@ Uveď čistý preklad bez technických poznámok, ak používateľ nežiadal vys
 ${baseRules}
 
 ÚLOHA:
-Analyzuj dáta a štatistické výstupy. Môžu byť priložené súbory JASP, SPSS, Excel, CSV alebo textové výstupy.
+Analyzuj dáta a štatistické výstupy.
 
 DÁTA / VÝSTUPY:
 ${input || 'Použi priložené dátové súbory, ak sú dostupné.'}
@@ -951,7 +836,7 @@ VÝSTUP:
 ${baseRules}
 
 ÚLOHA:
-Vytvor profesionálny email. Nekopíruj iba zadanie používateľa.
+Vytvor profesionálny email.
 
 Typ emailu: ${emailType}
 Tón: ${emailTone}
@@ -959,16 +844,9 @@ Tón: ${emailTone}
 ČO MÁ EMAIL RIEŠIŤ:
 ${input}
 
-ZAČIATOK ODPOVEDE:
-Začni priamo:
-Predmet:
-
 VÝSTUP:
 Predmet:
 Text emailu:
-
-Email musí byť plynulý, formálny a použiteľný na odoslanie.
-Po hlavnej časti nepridávaj nezmyselné všeobecné odseky ani text mimo emailu.
 `.trim();
     }
 
@@ -977,7 +855,7 @@ Po hlavnej časti nepridávaj nezmyselné všeobecné odseky ani text mimo email
 ${baseRules}
 
 ÚLOHA:
-Urob predbežnú orientačnú kontrolu originality práce. Nejde o oficiálny CRZP ani Turnitin.
+Urob predbežnú orientačnú kontrolu originality práce.
 
 TEXT / PODKLAD:
 ${input || 'Použi priložený súbor práce.'}
@@ -988,8 +866,6 @@ VÝSTUP:
 3. Chýbajúce citácie
 4. Odporúčania na poctivé dopracovanie
 5. Upozornenie, že výsledok nenahrádza oficiálnu kontrolu
-
-Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovanie a vlastnú analýzu.
 `.trim();
     }
 
@@ -1078,7 +954,10 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
       formData.append('extractUploadedText', 'true');
       formData.append('useExtractedTextFirst', 'true');
       formData.append('returnExtractedFilesInfo', 'true');
-      formData.append('contextaCitationFormat', activeModule === 'defense' ? 'true' : 'false');
+      formData.append(
+        'contextaCitationFormat',
+        activeModule === 'defense' ? 'true' : 'false',
+      );
 
       formData.append(
         'filesMetadata',
@@ -1218,19 +1097,35 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
       <style jsx global>{`
         html,
         body {
-          overflow: hidden;
+          min-height: 100%;
           background: #050711;
+          overflow-x: hidden;
+          overflow-y: auto;
         }
 
         * {
-          scrollbar-width: none;
-          -ms-overflow-style: none;
+          scrollbar-width: thin;
+          scrollbar-color: rgba(139, 92, 246, 0.7)
+            rgba(255, 255, 255, 0.06);
         }
 
         *::-webkit-scrollbar {
-          width: 0 !important;
-          height: 0 !important;
-          display: none !important;
+          width: 10px;
+          height: 8px;
+        }
+
+        *::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.06);
+          border-radius: 999px;
+        }
+
+        *::-webkit-scrollbar-thumb {
+          background: rgba(139, 92, 246, 0.75);
+          border-radius: 999px;
+        }
+
+        *::-webkit-scrollbar-thumb:hover {
+          background: rgba(168, 85, 247, 0.95);
         }
 
         .no-scrollbar {
@@ -1245,39 +1140,10 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
         }
       `}</style>
 
-      <main className="flex h-screen min-h-0 w-full overflow-hidden bg-[#050711] text-white">
-        <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="shrink-0 border-b border-white/10 bg-[#050711] px-4 py-4 md:px-8">
+      <main className="flex min-h-screen w-full bg-[#050711] text-white">
+        <section className="flex min-h-screen min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-40 shrink-0 border-b border-white/10 bg-[#050711]/95 px-4 py-4 backdrop-blur-xl md:px-8">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => router.push('/dashboard')}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3 text-sm font-black text-white transition hover:bg-white/[0.14]"
-                >
-                  <Menu className="h-5 w-5" />
-                  Menu
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => router.push('/projects')}
-                  className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-violet-950/40 transition hover:opacity-90"
-                >
-                  <Sparkles className="h-4 w-4" />
-                  Nová práca
-                </button>
-
-                <button
-                  type="button"
-                  onClick={resetCurrentModule}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3 text-sm font-black text-white transition hover:bg-white/[0.14]"
-                >
-                  <RefreshCcw className="h-4 w-4" />
-                  Nové spracovanie
-                </button>
-              </div>
-
               <div className="hidden flex-wrap items-center gap-2 xl:flex">
                 {modules.map((item) => {
                   const Icon = item.icon;
@@ -1333,9 +1199,9 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
             </div>
           </header>
 
-          <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-8">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 pb-40 md:px-8">
             <div className="mx-auto max-w-6xl">
-              <section className="mb-5 rounded-[28px] border border-white/10 bg-[#070a16] p-5 shadow-2xl shadow-black/30">
+              <section className="mb-10 rounded-[28px] border border-white/10 bg-[#070a16] p-5 shadow-2xl shadow-black/30">
                 <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
                   <div className="flex items-start gap-4">
                     <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
@@ -1351,23 +1217,6 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
                         {activeModuleInfo.subtitle}
                       </p>
                     </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    {agents.map((item) => (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onClick={() => setAgent(item.key)}
-                        className={`rounded-xl px-3 py-2 text-xs font-black transition ${
-                          agent === item.key
-                            ? 'bg-violet-600 text-white'
-                            : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1]'
-                        }`}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
                   </div>
                 </div>
 
@@ -1542,7 +1391,7 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
                   </div>
                 )}
 
-                <div className="mt-5 flex flex-wrap items-center gap-3">
+                <div className="mt-6 flex flex-wrap items-center gap-3 pb-6">
                   <button
                     type="button"
                     onClick={runModule}
@@ -1598,7 +1447,7 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
               {result && (
                 <section
                   ref={resultRef}
-                  className="rounded-[28px] border border-white/10 bg-[#070a16] p-5 shadow-2xl shadow-black/30"
+                  className="mb-40 rounded-[28px] border border-white/10 bg-[#070a16] p-5 shadow-2xl shadow-black/30"
                 >
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                     <div>

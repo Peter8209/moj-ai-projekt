@@ -204,32 +204,32 @@ const features = [
   {
     icon: Bot,
     title: 'AI písanie',
-    text: 'Generovanie odborných kapitol, úvodov, záverov a akademických textov.',
+    text: 'Generovanie odborných kapitol, úvodov, záverov a akademických textov podľa profilu práce.',
   },
   {
     icon: GraduationCap,
     title: 'AI vedúci práce',
-    text: 'Kritická spätná väzba k logike, metodológii, argumentácii a štruktúre.',
+    text: 'Kritická spätná väzba k logike, metodológii, argumentácii, štruktúre a celkovej kvalite práce.',
   },
   {
     icon: BookOpen,
     title: 'Zdroje a citácie',
-    text: 'Pomoc pri práci so zdrojmi, rešeršou, citáciami a odborným aparátom.',
+    text: 'Pomoc pri práci so zdrojmi, rešeršou, citáciami, bibliografiou a odborným aparátom.',
   },
   {
     icon: FileCheck2,
     title: 'Audit kvality',
-    text: 'Kontrola slabých miest textu, rozporov, štylistiky a akademickej presnosti.',
+    text: 'Kontrola slabých miest textu, rozporov, štylistiky, metodológie a akademickej presnosti.',
   },
   {
     icon: ShieldCheck,
     title: 'Originalita',
-    text: 'Predbežná orientačná kontrola originality a rizikových pasáží.',
+    text: 'Predbežná orientačná kontrola originality, rizikových pasáží a miest, kde treba doplniť citácie.',
   },
   {
     icon: Crown,
     title: 'Obhajoba',
-    text: 'Príprava otázok, odpovedí a argumentácie pred obhajobou.',
+    text: 'Príprava otázok, odpovedí, argumentácie, reakcií na posudok a prezentácie pred obhajobou.',
   },
 ];
 
@@ -377,13 +377,17 @@ export default function LandingPage() {
           </Link>
 
           <nav className="hidden items-center gap-8 text-sm font-bold text-slate-700 lg:flex">
+            <a href="#about" className="transition hover:text-violet-700">
+              O nás
+            </a>
+
             <a href="#features" className="transition hover:text-violet-700">
               Funkcie
             </a>
 
-            <Link href="/pricing" className="transition hover:text-violet-700">
+            <a href="#pricing" className="transition hover:text-violet-700">
               Balíčky
-            </Link>
+            </a>
 
             <a href="#how-it-works" className="transition hover:text-violet-700">
               Ako to funguje
@@ -435,6 +439,14 @@ export default function LandingPage() {
 
             <div className="space-y-3">
               <a
+                href="#about"
+                onClick={closeMobileMenu}
+                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
+              >
+                O nás
+              </a>
+
+              <a
                 href="#features"
                 onClick={closeMobileMenu}
                 className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
@@ -442,13 +454,13 @@ export default function LandingPage() {
                 Funkcie
               </a>
 
-              <Link
-                href="/pricing"
+              <a
+                href="#pricing"
                 onClick={closeMobileMenu}
                 className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
               >
                 Balíčky
-              </Link>
+              </a>
 
               <a
                 href="#how-it-works"
@@ -489,13 +501,14 @@ export default function LandingPage() {
             </div>
 
             <h1 className="max-w-4xl text-5xl font-black leading-[1.05] tracking-tight text-slate-950 md:text-7xl">
-              Zisti, čo je slabé na tvojej práci skôr než vedúci práce.
+              Akademická práca bez chaosu, stresu a nejasností.
             </h1>
 
             <p className="mt-6 max-w-3xl text-lg leading-8 text-slate-600 md:text-xl">
-              Vytvor profil práce, generuj odborný text, vyhľadaj zdroje,
-              skontroluj kvalitu, priprav obhajobu a získaj kritickú spätnú
-              väzbu k práci.
+              Zedpera spája viac ako 20 rokov skúseností s akademickým
+              písaním a modernú umelú inteligenciu do jedného systému, ktorý
+              pomáha študentom písať, kontrolovať, upravovať a obhajovať prácu
+              krok za krokom.
             </p>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -507,12 +520,12 @@ export default function LandingPage() {
                 <ArrowRight size={20} />
               </Link>
 
-              <Link
-                href="/pricing"
+              <a
+                href="#about"
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-7 py-4 text-base font-black text-slate-900 transition hover:bg-slate-50"
               >
-                Pozrieť balíčky
-              </Link>
+                Prečítať náš príbeh
+              </a>
             </div>
           </div>
 
@@ -540,6 +553,110 @@ export default function LandingPage() {
                 Text má dobrý základ, ale chýba jasnejšie prepojenie cieľa,
                 metodológie a výsledkov. Odporúčam doplniť presnú interpretáciu
                 hlavnej hypotézy a zjednotiť terminológiu v celej práci.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="about" className="bg-slate-950 py-20 text-white">
+        <div className="mx-auto max-w-7xl px-5 lg:px-8">
+          <div className="mb-12 max-w-4xl">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm font-black text-violet-200">
+              <Sparkles size={17} />
+              O nás
+            </div>
+
+            <h2 className="text-4xl font-black tracking-tight md:text-5xl">
+              Zedpera vznikla z reálnej skúsenosti so študentmi.
+            </h2>
+
+            <p className="mt-5 text-lg leading-8 text-slate-300">
+              Pred mnohými rokmi sa stretli dvaja študenti, ktorí sedeli v
+              laviciach tej istej univerzity. Prechádzali skúškami, seminármi,
+              zápočtami, konzultáciami a postupne zisťovali, že akademický
+              systém vie byť pre študenta často zbytočne zložitý, neprehľadný
+              a stresujúci.
+            </p>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-3">
+            <AboutCard
+              title="20 rokov skúseností"
+              text="Po ukončení štúdia vznikol jednoduchý nápad: vytvoriť službu, ktorá študentom pomôže lepšie zvládnuť proces prípravy vysokoškolských prác. Dnes za sebou máme viac ako 20 rokov skúseností v oblasti akademickej podpory, konzultácií, metodológie, štruktúry záverečných prác a prípravy na obhajobu."
+            />
+
+            <AboutCard
+              title="Poznáme skutočné problémy"
+              text="Za roky praxe sme spoznali tisíce študentov denného aj externého štúdia. Zistili sme, že problém študenta nie je iba samotné písanie práce. Často ide o nejasné zadanie, nedostatok času, slabú spätnú väzbu, problém so školiteľom, metodológiou, zdrojmi alebo obhajobou."
+            />
+
+            <AboutCard
+              title="Komplexný systém"
+              text="Preto vznikla Zedpera. Nie ako ďalší nástroj na generovanie textu, ale ako komplexná akademická AI platforma, ktorá pomáha študentovi postupovať krok za krokom – od profilu práce, cez tvorbu obsahu, kontrolu kvality, originalitu až po prípravu na obhajobu."
+            />
+          </div>
+
+          <div className="mt-12 grid gap-8 lg:grid-cols-[0.9fr_1.1fr]">
+            <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-7">
+              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
+                <GraduationCap size={28} />
+              </div>
+
+              <h3 className="text-2xl font-black">
+                Zakladateľka Martina
+              </h3>
+
+              <p className="mt-4 text-sm leading-7 text-slate-300">
+                Martina po ukončení vysokej školy založila spoločnosť, ktorá
+                už viac ako 20 rokov pomáha študentom lepšie zvládnuť proces
+                prípravy vysokoškolských a odborných prác.
+              </p>
+
+              <p className="mt-4 text-sm leading-7 text-slate-300">
+                Počas svojej praxe sa venovala akademickému mentoringu,
+                konzultáciám, práci so študentmi, metodickému vedeniu a podpore
+                v oblasti vzdelávania. Medzičasom pokračovala v ďalšom štúdiu,
+                rozširovaní odborných vedomostí a niekoľko rokov pôsobila aj v
+                akademickom prostredí.
+              </p>
+
+              <p className="mt-4 text-sm leading-7 text-slate-300">
+                Aktuálne sa venuje vývoju nových riešení umelej inteligencie,
+                ktoré môžu študentom pomôcť pracovať efektívnejšie,
+                samostatnejšie a s väčšou istotou.
+              </p>
+            </div>
+
+            <div className="rounded-[2rem] border border-violet-400/20 bg-gradient-to-br from-violet-600/20 via-fuchsia-600/10 to-indigo-600/20 p-7">
+              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-violet-100">
+                <Crown size={28} />
+              </div>
+
+              <h3 className="text-2xl font-black">
+                Neustále posúvame hranice
+              </h3>
+
+              <p className="mt-4 text-sm leading-7 text-slate-200">
+                Zedpera nevznikla ako reakcia na trend. Vznikla ako odpoveď na
+                realitu, ktorú poznáme z praxe. Vieme, že akademická práca je
+                pre mnohých študentov spojená so stresom, časovým tlakom,
+                nejasnými požiadavkami a pocitom, že namiesto učenia často
+                bojujú so systémom.
+              </p>
+
+              <p className="mt-4 text-sm leading-7 text-slate-200">
+                Preto sme nechceli vytvoriť iba ďalší nástroj, ktorý vygeneruje
+                text. Chceli sme vytvoriť systém, ktorý rozumie celému procesu:
+                téme, cieľu, metodológii, štruktúre, zdrojom, spätnej väzbe aj
+                obhajobe.
+              </p>
+
+              <p className="mt-4 text-sm leading-7 text-slate-200">
+                Neučíme Zedperu iba písať texty. Učíme ju rozumieť súvislostiam,
+                akademickej logike, spätnej väzbe a procesu tvorby práce.
+                Preto ju neustále posúvame ďalej – ako nový spôsob, akým môže
+                študent pristupovať k učeniu, písaniu a premýšľaniu.
               </p>
             </div>
           </div>
@@ -597,8 +714,9 @@ export default function LandingPage() {
             </h2>
 
             <p className="mt-3 max-w-3xl text-lg leading-8 text-slate-600">
-              Kliknutím na tlačidlo sa vytvorí Stripe Checkout session cez
-              `/api/payments/checkout`.
+              Vyber si balík podľa toho, či potrebuješ rýchlu úpravu, intenzívnu
+              prácu pred odovzdaním alebo dlhodobý prístup počas akademického
+              roka.
             </p>
           </div>
 
@@ -716,19 +834,19 @@ export default function LandingPage() {
             <Step
               number="1"
               title="Vytvoríš profil práce"
-              text="Zadáš tému, cieľ, metodológiu, jazyk, typ práce a citačnú normu."
+              text="Zadáš názov, cieľ, metodológiu, jazyk, typ práce, odbor a citačnú normu."
             />
 
             <Step
               number="2"
               title="Pracuješ s AI modulmi"
-              text="Generuješ text, kontroluješ kvalitu, pripravuješ obhajobu a pracuješ so zdrojmi."
+              text="Generuješ text, kontroluješ kvalitu, pripravuješ obhajobu, hodnotíš argumentáciu a pracuješ so zdrojmi."
             />
 
             <Step
               number="3"
               title="Dostaneš spätnú väzbu"
-              text="AI vedúci práce upozorní na slabé miesta, rozpory, chýbajúce časti a riziká."
+              text="AI vedúci práce upozorní na slabé miesta, rozpory, chýbajúce časti a odporúčané opravy."
             />
           </div>
         </div>
@@ -758,6 +876,20 @@ function DemoScore({ label, value }: { label: string; value: string }) {
           style={{ width: value }}
         />
       </div>
+    </div>
+  );
+}
+
+function AboutCard({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-2xl shadow-black/20">
+      <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
+        <CheckCircle2 size={24} />
+      </div>
+
+      <h3 className="text-xl font-black text-white">{title}</h3>
+
+      <p className="mt-3 text-sm leading-7 text-slate-300">{text}</p>
     </div>
   );
 }

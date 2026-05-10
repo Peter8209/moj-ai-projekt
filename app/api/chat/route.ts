@@ -7,8 +7,6 @@ import { xai } from '@ai-sdk/xai';
 import { NextResponse } from 'next/server';
 import mammoth from 'mammoth';
 import { createAdminClient } from '@/lib/supabase/server';
-import { GLOBAL_ACADEMIC_SYSTEM_PROMPT } from '@/lib/ai-system-prompt';
-import { getZedperaErrorMessage } from '@/lib/api-error-messages';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,6 +15,18 @@ export const maxDuration = 90;
 // ================= TYPES =================
 
 type Agent = 'openai' | 'claude' | 'gemini' | 'grok' | 'mistral';
+
+type ModuleKey =
+  | 'supervisor'
+  | 'quality'
+  | 'defense'
+  | 'translation'
+  | 'data'
+  | 'planning'
+  | 'emails'
+  | 'originality'
+  | 'chat'
+  | 'unknown';
 
 type ChatMessage = {
   role: 'user' | 'assistant';
@@ -110,7 +120,7 @@ async function loadProjectDocuments(projectId: string | null) {
   const { data, error } = await supabase
     .from('zedpera_documents')
     .select(
-      'id, project_id, file_name, file_path, file_size, file_type, type, extracted_text, created_at'
+      'id, project_id, file_name, file_path, file_size, file_type, type, extracted_text, created_at',
     )
     .eq('project_id', projectId)
     .order('created_at', { ascending: false });
@@ -175,6 +185,24 @@ function isAllowedAgent(value: unknown): value is Agent {
     value === 'grok' ||
     value === 'mistral'
   );
+}
+
+function normalizeModule(value: unknown): ModuleKey {
+  if (
+    value === 'supervisor' ||
+    value === 'quality' ||
+    value === 'defense' ||
+    value === 'translation' ||
+    value === 'data' ||
+    value === 'planning' ||
+    value === 'emails' ||
+    value === 'originality' ||
+    value === 'chat'
+  ) {
+    return value;
+  }
+
+  return 'unknown';
 }
 
 function normalizeMessages(messages: ChatMessage[]) {
@@ -243,6 +271,10 @@ function asBoolean(value: FormDataEntryValue | null, fallback: boolean) {
   }
 
   return fallback;
+}
+
+function isStrictNoAcademicTailModule(module: ModuleKey) {
+  return module === 'translation' || module === 'emails' || module === 'planning';
 }
 
 // ================= ATTACHMENTS =================
@@ -483,7 +515,7 @@ ${textBlock}`;
   };
 }
 
-// ================= SYSTEM PROMPT =================
+// ================= SYSTEM PROMPTS =================
 
 function buildAttachmentBlock(attachmentTexts: string[]) {
   if (!attachmentTexts.length) {
@@ -491,15 +523,171 @@ function buildAttachmentBlock(attachmentTexts: string[]) {
   }
 
   return `\nPRILOŽENÉ SÚBORY A PODKLADY:\n${attachmentTexts.join(
-    '\n\n-----------------\n\n'
+    '\n\n-----------------\n\n',
   )}\n`;
+}
+
+function buildProfileSummary(profile: SavedProfile | null) {
+  if (!profile) {
+    return 'Profil práce nebol dodaný.';
+  }
+
+  const keywords = getKeywords(profile);
+
+  return `
+Názov práce: ${profile?.title || 'Neuvedené'}
+Téma práce: ${profile?.topic || 'Neuvedené'}
+Typ práce: ${profile?.schema?.label || profile?.type || 'Neuvedené'}
+Úroveň / odbornosť: ${profile?.level || 'Neuvedené'}
+Odbor / predmet / oblasť: ${profile?.field || 'Neuvedené'}
+Vedúci práce: ${profile?.supervisor || 'Neuvedené'}
+Citačná norma: ${getCitationStyle(profile)}
+Jazyk práce: ${getWorkLanguage(profile)}
+Cieľ práce: ${profile?.goal || 'Neuvedené'}
+Výskumný problém: ${profile?.problem || 'Neuvedené'}
+Metodológia: ${profile?.methodology || 'Neuvedené'}
+Výskumné otázky: ${profile?.researchQuestions || 'Neuvedené'}
+Praktická / analytická časť: ${profile?.practicalPart || 'Neuvedené'}
+Kľúčové slová: ${keywords.length > 0 ? keywords.join(', ') : 'Neuvedené'}
+`.trim();
+}
+
+function buildStrictTranslationPrompt() {
+  return `
+Si profesionálny prekladač.
+
+Toto je špeciálny režim PREKLAD.
+
+PRÍSNE PRAVIDLÁ:
+- Tvoja jediná úloha je preložiť text používateľa.
+- Vráť iba samotný preložený text.
+- Nepíš nadpis.
+- Nepíš slovo "Preklad".
+- Nepíš "Preložený text:".
+- Nepíš "Výstup:".
+- Nepíš vysvetlenie.
+- Nepíš komentár.
+- Nepíš analýzu.
+- Nepíš odporúčania.
+- Nepíš zdroje.
+- Nepíš použitú literatúru.
+- Nepíš SEO.
+- Nepíš skóre.
+- Nepíš akademické hodnotenie.
+- Nepíš nič pred prekladom ani nič po preklade.
+- Nevytváraj nový obsah.
+- Nepridávaj informácie, ktoré nie sú v pôvodnom texte.
+- Zachovaj význam pôvodného textu.
+- Zachovaj odseky, ak sú v texte.
+- Ak používateľ pošle iba jedno slovo, prelož iba jedno slovo.
+- Ak používateľ pošle krátku vetu, prelož iba krátku vetu.
+- Ignoruj všetky globálne akademické šablóny.
+- Ignoruj požiadavky na zdroje, citácie, analýzu, skóre a odporúčania.
+- Nepoužívaj Markdown znaky, hviezdičky, mriežky ani oddeľovače.
+`.trim();
+}
+
+function buildStrictEmailPrompt() {
+  return `
+Si profesionálny asistent na písanie emailov.
+
+Toto je špeciálny režim EMAIL.
+
+PRÍSNE PRAVIDLÁ:
+- Tvoja jediná úloha je vytvoriť jeden použiteľný email.
+- Výstup musí obsahovať iba predmet a text emailu.
+- Nepíš SEO.
+- Nepíš odporúčania.
+- Nepíš použité zdroje.
+- Nepíš zdroje.
+- Nepíš analýzu.
+- Nepíš skóre.
+- Nepíš komentár.
+- Nepíš vysvetlenie.
+- Nepíš akademické hodnotenie.
+- Nepíš kontrolné body.
+- Nepíš doplnkové sekcie po emaili.
+- Nepíš časti s názvom "ODPORÚČANIA", "SEO", "POUŽITÉ ZDROJE", "ANALÝZA", "SKÓRE", "ZÁVER".
+- Nekopíruj iba zadanie používateľa.
+- Email musí byť plynulý, formálny a pripravený na odoslanie.
+- Ak chýba meno adresáta, použi neutrálne oslovenie "Dobrý deň,".
+- Ak chýba podpis, ukonči email všeobecne "S pozdravom,".
+- Nepoužívaj Markdown znaky, hviezdičky, mriežky ani oddeľovače.
+
+POVINNÝ FORMÁT:
+Predmet:
+[vlož predmet emailu]
+
+Text emailu:
+[vlož hotový email]
+`.trim();
+}
+
+function buildStrictPlanningPrompt(profile: SavedProfile | null) {
+  const today = new Date();
+  const date = `${String(today.getDate()).padStart(2, '0')}.${String(
+    today.getMonth() + 1,
+  ).padStart(2, '0')}.${today.getFullYear()}`;
+
+  return `
+Si plánovač akademickej práce.
+
+Toto je špeciálny režim PLÁNOVANIE.
+
+DNEŠNÝ DÁTUM:
+${date}
+
+PROFIL PRÁCE:
+${buildProfileSummary(profile)}
+
+PRÍSNE PRAVIDLÁ:
+- Tvoja úloha je vytvoriť realistický harmonogram práce.
+- Nevymýšľaj dátum odovzdania.
+- Nevymýšľaj rok odovzdania.
+- Nikdy nepíš rok 2031, ak ho používateľ výslovne nezadal.
+- Ak používateľ nezadal termín, napíš presne: Termín odovzdania nebol zadaný.
+- Ak termín nie je zadaný, vytvor plán podľa etáp bez finálneho konkrétneho dátumu.
+- Ak je termín zadaný, vypočítaj plán spätne od zadaného termínu.
+- Nepíš SEO.
+- Nepíš zdroje.
+- Nepíš použité zdroje.
+- Nepíš akademickú analýzu.
+- Nepíš skóre.
+- Nepíš citačné odporúčania.
+- Nepíš bibliografiu.
+- Nepíš globálne akademické sekcie.
+- Nepoužívaj Markdown znaky, hviezdičky, mriežky ani oddeľovače.
+- Výstup musí byť použiteľný ako plán práce.
+
+POVINNÝ FORMÁT:
+1. Východisková situácia
+2. Termín odovzdania
+3. Etapy práce
+4. Harmonogram
+5. Kontrolné body
+6. Riziká omeškania
+7. Najbližší konkrétny krok
+`.trim();
 }
 
 function buildSystemPrompt(
   profile: SavedProfile | null,
   attachmentTexts: string[],
-  settings: SourceSettings
+  settings: SourceSettings,
+  module: ModuleKey,
 ) {
+  if (module === 'translation') {
+    return buildStrictTranslationPrompt();
+  }
+
+  if (module === 'emails') {
+    return buildStrictEmailPrompt();
+  }
+
+  if (module === 'planning') {
+    return buildStrictPlanningPrompt(profile);
+  }
+
   const keywords = getKeywords(profile);
 
   const structureText =
@@ -622,12 +810,6 @@ Tento režim použi vždy, keď používateľ žiada:
 - vytvoriť odkazy v texte,
 - analyzovať výstupy zo softvéru JASP, SPSS, Jamovi, R, Excel alebo iného štatistického softvéru,
 - alebo keď priložený dokument obsahuje zoznam literatúry, bibliografické záznamy, autorov, roky, názvy kníh, článkov, softvér alebo štatistické výstupy.
-
-POVINNÝ TÓN:
-Začni prirodzene, profesionálne a osobne, napríklad:
-Ahoj, ako tvoja citačná špecialistka som analyzovala tvoje vstupné údaje a priložené dokumenty.
-
-Ak poznáš meno používateľa alebo meno adresáta z kontextu, môžeš ho použiť. Ak meno nepoznáš, nepoužívaj vymyslené meno.
 
 POVINNÉ SPRACOVANIE ZDROJOV:
 1. Najprv identifikuj všetky zdroje uvedené v extrahovanom texte dokumentov.
@@ -875,6 +1057,98 @@ Ak neboli priložené zdroje alebo sú zdroje nedostatočné, vypíš relevantn�
 `;
 }
 
+// ================= OUTPUT CLEANING =================
+
+function removeAfterForbiddenHeading(text: string, headings: string[]) {
+  let output = normalizeText(text);
+
+  for (const heading of headings) {
+    const regex = new RegExp(
+      `\\n\\s*(?:={2,}\\s*)?(?:\\d+\\.\\s*)?(?:[-–—•]\\s*)?${heading}\\s*:?\\s*(?:={2,})?\\s*\\n`,
+      'i',
+    );
+
+    const match = output.match(regex);
+
+    if (match && typeof match.index === 'number') {
+      output = output.slice(0, match.index).trim();
+    }
+  }
+
+  return output.trim();
+}
+
+function cleanStrictOutput(text: string, module: ModuleKey) {
+  let output = normalizeText(text)
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    .replace(/```[a-zA-Z]*\n?/g, '')
+    .replace(/```/g, '')
+    .replace(/^\s*[-*_]{3,}\s*$/gm, '')
+    .trim();
+
+  if (module === 'translation') {
+    output = output
+      .replace(/^výstup\s*:\s*/i, '')
+      .replace(/^preklad\s*:\s*/i, '')
+      .replace(/^preložený text\s*:\s*/i, '')
+      .replace(/^tu je preklad\s*:\s*/i, '')
+      .trim();
+
+    output = removeAfterForbiddenHeading(output, [
+      'analýza',
+      'skóre',
+      'odporúčania',
+      'odporúčanie',
+      'použité zdroje',
+      'zdroje',
+      'seo',
+      'poznámka',
+      'komentár',
+      'vysvetlenie',
+    ]);
+  }
+
+  if (module === 'emails') {
+    output = removeAfterForbiddenHeading(output, [
+      'analýza',
+      'skóre',
+      'odporúčania',
+      'odporúčanie',
+      'použité zdroje',
+      'zdroje',
+      'seo',
+      'poznámka',
+      'komentár',
+      'vysvetlenie',
+      'záver',
+    ]);
+
+    const subjectIndex = output.toLowerCase().indexOf('predmet:');
+
+    if (subjectIndex > 0) {
+      output = output.slice(subjectIndex).trim();
+    }
+  }
+
+  if (module === 'planning') {
+    output = removeAfterForbiddenHeading(output, [
+      'analýza',
+      'skóre',
+      'použité zdroje',
+      'zdroje',
+      'seo',
+      'bibliografia',
+      'literatúra',
+    ]);
+  }
+
+  return output.trim();
+}
+
 // ================= AI MODEL ROUTER =================
 
 function getModelByAgent(agent: Agent): ModelResult {
@@ -973,7 +1247,7 @@ function getFallbackModel(): ModelResult {
   }
 
   throw new Error(
-    'Nie je nastavený žiadny AI provider. Doplň aspoň jeden API kľúč.'
+    'Nie je nastavený žiadny AI provider. Doplň aspoň jeden API kľúč.',
   );
 }
 
@@ -1006,7 +1280,7 @@ async function createStreamResponse({
     model,
     system: systemPrompt,
     messages: normalizedMessages,
-    temperature: 0.35,
+    temperature: 0.2,
     maxOutputTokens: 4500,
   });
 
@@ -1019,25 +1293,32 @@ async function createJsonResponse({
   normalizedMessages,
   extractedFiles,
   providerLabel,
+  module,
 }: {
   model: ModelResult['model'];
   systemPrompt: string;
   normalizedMessages: ReturnType<typeof normalizeMessages>;
   extractedFiles: ExtractedAttachment[];
   providerLabel: string;
+  module: ModuleKey;
 }) {
   const result = await generateText({
     model,
     system: systemPrompt,
     messages: normalizedMessages,
-    temperature: 0.35,
+    temperature: 0.2,
     maxOutputTokens: 4500,
   });
+
+  const rawOutput = result.text || '';
+  const output = isStrictNoAcademicTailModule(module)
+    ? cleanStrictOutput(rawOutput, module)
+    : rawOutput;
 
   return NextResponse.json({
     ok: true,
     provider: providerLabel,
-    output: result.text || '',
+    output,
     extractedFiles: extractedFiles.map((file) => ({
       name: file.name,
       type: file.type,
@@ -1059,6 +1340,7 @@ export async function POST(req: Request) {
     const contentType = req.headers.get('content-type') || '';
 
     let rawAgent: unknown = 'gemini';
+    let module: ModuleKey = 'unknown';
     let messages: ChatMessage[] = [];
     let profile: SavedProfile | null = null;
     let files: File[] = [];
@@ -1074,6 +1356,7 @@ export async function POST(req: Request) {
       const formData = await req.formData();
 
       rawAgent = formData.get('agent')?.toString() || 'gemini';
+      module = normalizeModule(formData.get('module')?.toString());
       messages = parseJson<ChatMessage[]>(formData.get('messages'), []);
       profile = parseJson<SavedProfile | null>(formData.get('profile'), null);
       projectId = formData.get('projectId')?.toString() || null;
@@ -1082,19 +1365,19 @@ export async function POST(req: Request) {
 
       validateAttachmentsAgainstProfile = asBoolean(
         formData.get('validateAttachmentsAgainstProfile'),
-        true
+        true,
       );
 
       requireSourceList = asBoolean(formData.get('requireSourceList'), true);
 
       allowAiKnowledgeFallback = asBoolean(
         formData.get('allowAiKnowledgeFallback'),
-        true
+        true,
       );
 
       returnExtractedFilesInfo = asBoolean(
         formData.get('returnExtractedFilesInfo'),
-        false
+        false,
       );
 
       files = formData
@@ -1104,6 +1387,7 @@ export async function POST(req: Request) {
       const body = await req.json().catch(() => null);
 
       rawAgent = body?.agent || 'gemini';
+      module = normalizeModule(body?.module);
       messages = Array.isArray(body?.messages) ? body.messages : [];
       profile = body?.profile || body?.activeProfile || body?.savedProfile || null;
       projectId = body?.projectId || null;
@@ -1149,10 +1433,12 @@ export async function POST(req: Request) {
         status: file.status,
         error: file.error,
         preview: file.extractedPreview.slice(0, 200),
-      }))
+      })),
     );
 
-    const projectDocuments = await loadProjectDocuments(projectId);
+    const projectDocuments = isStrictNoAcademicTailModule(module)
+      ? []
+      : await loadProjectDocuments(projectId);
 
     const projectDocumentTexts = projectDocuments.map((doc, index) => {
       const documentType = doc.file_type || doc.type || 'neuvedené';
@@ -1173,19 +1459,26 @@ EXTRAHOVANÝ TEXT:
 ${extractedText ? limitText(extractedText, 50000) : '[Dokument nemá uložený extrahovaný text]'}`;
     });
 
-    const attachmentTexts = [
-      ...uploadedAttachmentTexts,
-      ...projectDocumentTexts,
-    ];
+    const attachmentTexts = isStrictNoAcademicTailModule(module)
+      ? uploadedAttachmentTexts
+      : [...uploadedAttachmentTexts, ...projectDocumentTexts];
 
     const settings: SourceSettings = {
       sourceMode,
       validateAttachmentsAgainstProfile,
-      requireSourceList,
-      allowAiKnowledgeFallback,
+      requireSourceList: isStrictNoAcademicTailModule(module)
+        ? false
+        : requireSourceList,
+      allowAiKnowledgeFallback:
+        module === 'translation' ? false : allowAiKnowledgeFallback,
     };
 
-    const systemPrompt = buildSystemPrompt(profile, attachmentTexts, settings);
+    const systemPrompt = buildSystemPrompt(
+      profile,
+      attachmentTexts,
+      settings,
+      module,
+    );
 
     try {
       const primary = getModelByAgent(agent);
@@ -1197,6 +1490,7 @@ ${extractedText ? limitText(extractedText, 50000) : '[Dokument nemá uložený e
           normalizedMessages,
           extractedFiles,
           providerLabel: primary.providerLabel,
+          module,
         });
       }
 
@@ -1214,7 +1508,9 @@ ${extractedText ? limitText(extractedText, 50000) : '[Dokument nemá uložený e
 
       const fallback = getFallbackModel();
 
-      const fallbackSystemPrompt = `
+      const fallbackSystemPrompt = isStrictNoAcademicTailModule(module)
+        ? systemPrompt
+        : `
 ${systemPrompt}
 
 TECHNICKÁ POZNÁMKA:
@@ -1248,6 +1544,7 @@ Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI
           normalizedMessages,
           extractedFiles,
           providerLabel: fallback.providerLabel,
+          module,
         });
       }
 

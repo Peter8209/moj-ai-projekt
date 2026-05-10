@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   BookOpen,
   CheckCircle2,
@@ -13,6 +14,8 @@ import {
   Sparkles,
   Target,
   Trash2,
+  MessageSquare,
+  AlertCircle,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -216,6 +219,10 @@ const UI: Record<
     save: string;
     saveChanges: string;
     saving: string;
+    titleLabel: string;
+    topicLabel: string;
+    fieldLabel: string;
+    supervisorLabel: string;
     titlePlaceholder: string;
     topicPlaceholder: string;
     fieldPlaceholder: string;
@@ -227,13 +234,16 @@ const UI: Record<
     aiProfile: string;
     close: string;
     requiredNote: string;
+    workflowTitle: string;
+    workflowText: string;
+    continueToChat: string;
   }
 > = {
   SK: {
     pageTitle: 'Nová práca',
     editTitle: 'Upraviť profil práce',
     subtitle:
-      'AI z tohto profilu vytvorí akademickú prácu podľa typu, jazyka práce a citačnej normy.',
+      'Najprv vyplň profil práce. AI Chat bude následne vychádzať z týchto údajov, z jazyka práce, citačnej normy a akademického typu práce.',
     workType: 'Typ práce',
     level: 'Odbornosť',
     language: 'Jazyk rozhrania',
@@ -250,10 +260,14 @@ const UI: Record<
     save: 'Uložiť profil',
     saveChanges: 'Uložiť zmeny profilu',
     saving: 'Ukladám...',
-    titlePlaceholder: 'Názov práce',
-    topicPlaceholder: 'Téma práce',
-    fieldPlaceholder: 'Odbor / predmet / oblasť',
-    supervisorPlaceholder: 'Vedúci práce / školiteľ',
+    titleLabel: 'Názov práce',
+    topicLabel: 'Téma / zameranie práce',
+    fieldLabel: 'Odbor / predmet / oblasť',
+    supervisorLabel: 'Vedúci práce / školiteľ',
+    titlePlaceholder: 'Napr. Ruže v urbanizovanom prostredí',
+    topicPlaceholder: 'Napr. Pestovanie ruží v mestskom prostredí',
+    fieldPlaceholder: 'Napr. záhradná architektúra, pedagogika, manažment...',
+    supervisorPlaceholder: 'Meno vedúceho práce alebo školiteľa',
     keywords: 'Kľúčové slová',
     keywordPlaceholder: 'Pridať kľúčové slovo',
     keywordsHint: 'Odporúčané: 5 – 15 kľúčových slov.',
@@ -261,12 +275,16 @@ const UI: Record<
     aiProfile: 'AI profil',
     close: 'Zavrieť',
     requiredNote: 'Povinné polia sú označené hviezdičkou.',
+    workflowTitle: 'Odporúčaný postup',
+    workflowText:
+      'Najprv vyplň a ulož profil práce. Až potom pokračuj do AI Chatu, kde bude AI pracovať podľa názvu práce, cieľa, metodológie, citačnej normy a jazyka práce.',
+    continueToChat: 'Pokračovať do AI Chatu',
   },
   CZ: {
-    pageTitle: 'Profil práce',
+    pageTitle: 'Nová práce',
     editTitle: 'Upravit profil práce',
     subtitle:
-      'AI z tohoto profilu vytvoří akademickou práci podle typu, jazyka práce a citační normy.',
+      'Nejprve vyplň profil práce. AI Chat bude následně vycházet z těchto údajů.',
     workType: 'Typ práce',
     level: 'Odbornost',
     language: 'Jazyk rozhraní',
@@ -283,8 +301,12 @@ const UI: Record<
     save: 'Uložit profil',
     saveChanges: 'Uložit změny profilu',
     saving: 'Ukládám...',
-    titlePlaceholder: 'Název práce',
-    topicPlaceholder: 'Téma práce',
+    titleLabel: 'Název práce',
+    topicLabel: 'Téma / zaměření práce',
+    fieldLabel: 'Obor / předmět / oblast',
+    supervisorLabel: 'Vedoucí práce / školitel',
+    titlePlaceholder: 'Název závěrečné práce',
+    topicPlaceholder: 'Téma nebo zaměření práce',
     fieldPlaceholder: 'Obor / předmět / oblast',
     supervisorPlaceholder: 'Vedoucí práce / školitel',
     keywords: 'Klíčová slova',
@@ -294,12 +316,16 @@ const UI: Record<
     aiProfile: 'AI profil',
     close: 'Zavřít',
     requiredNote: 'Povinná pole jsou označena hvězdičkou.',
+    workflowTitle: 'Doporučený postup',
+    workflowText:
+      'Nejprve vyplň a ulož profil práce. Potom pokračuj do AI Chatu.',
+    continueToChat: 'Pokračovat do AI Chatu',
   },
   EN: {
-    pageTitle: 'Work Profile',
+    pageTitle: 'New Work',
     editTitle: 'Edit Work Profile',
     subtitle:
-      'AI will generate academic work according to the selected type, language and citation standard.',
+      'First complete the work profile. The AI Chat will then use these data as context.',
     workType: 'Work type',
     level: 'Expertise level',
     language: 'Interface language',
@@ -316,10 +342,14 @@ const UI: Record<
     save: 'Save profile',
     saveChanges: 'Save profile changes',
     saving: 'Saving...',
-    titlePlaceholder: 'Title of the work',
-    topicPlaceholder: 'Topic',
+    titleLabel: 'Title of the work',
+    topicLabel: 'Topic / focus of the work',
+    fieldLabel: 'Field / subject / area',
+    supervisorLabel: 'Supervisor',
+    titlePlaceholder: 'Title of the thesis or paper',
+    topicPlaceholder: 'Topic or focus of the work',
     fieldPlaceholder: 'Field / subject / area',
-    supervisorPlaceholder: 'Supervisor',
+    supervisorPlaceholder: 'Supervisor name',
     keywords: 'Keywords',
     keywordPlaceholder: 'Add keyword',
     keywordsHint: 'Recommended: 5–15 keywords.',
@@ -327,12 +357,16 @@ const UI: Record<
     aiProfile: 'AI profile',
     close: 'Close',
     requiredNote: 'Required fields are marked with an asterisk.',
+    workflowTitle: 'Recommended workflow',
+    workflowText:
+      'First complete and save the work profile. Then continue to AI Chat.',
+    continueToChat: 'Continue to AI Chat',
   },
   DE: {
-    pageTitle: 'Arbeitsprofil',
+    pageTitle: 'Neue Arbeit',
     editTitle: 'Arbeitsprofil bearbeiten',
     subtitle:
-      'Die KI erstellt die akademische Arbeit nach Typ, Sprache und Zitiernorm.',
+      'Füllen Sie zuerst das Arbeitsprofil aus. Danach arbeitet der AI Chat mit diesen Angaben.',
     workType: 'Art der Arbeit',
     level: 'Fachniveau',
     language: 'Sprache der Oberfläche',
@@ -349,10 +383,14 @@ const UI: Record<
     save: 'Profil speichern',
     saveChanges: 'Änderungen speichern',
     saving: 'Speichern...',
+    titleLabel: 'Titel der Arbeit',
+    topicLabel: 'Thema / Ausrichtung',
+    fieldLabel: 'Fachgebiet / Bereich',
+    supervisorLabel: 'Betreuer',
     titlePlaceholder: 'Titel der Arbeit',
-    topicPlaceholder: 'Thema',
+    topicPlaceholder: 'Thema oder Ausrichtung',
     fieldPlaceholder: 'Fachgebiet / Bereich',
-    supervisorPlaceholder: 'Betreuer',
+    supervisorPlaceholder: 'Name des Betreuers',
     keywords: 'Schlüsselwörter',
     keywordPlaceholder: 'Schlüsselwort hinzufügen',
     keywordsHint: 'Empfohlen: 5–15 Schlüsselwörter.',
@@ -360,12 +398,16 @@ const UI: Record<
     aiProfile: 'KI-Profil',
     close: 'Schließen',
     requiredNote: 'Pflichtfelder sind mit einem Stern markiert.',
+    workflowTitle: 'Empfohlener Ablauf',
+    workflowText:
+      'Füllen Sie zuerst das Profil aus und speichern Sie es. Danach wechseln Sie zum AI Chat.',
+    continueToChat: 'Zum AI Chat wechseln',
   },
   PL: {
-    pageTitle: 'Profil pracy',
+    pageTitle: 'Nowa praca',
     editTitle: 'Edytuj profil pracy',
     subtitle:
-      'AI utworzy pracę akademicką zgodnie z typem, językiem i normą cytowania.',
+      'Najpierw uzupełnij profil pracy. AI Chat będzie następnie korzystać z tych danych.',
     workType: 'Typ pracy',
     level: 'Poziom specjalizacji',
     language: 'Język interfejsu',
@@ -382,8 +424,12 @@ const UI: Record<
     save: 'Zapisz profil',
     saveChanges: 'Zapisz zmiany profilu',
     saving: 'Zapisuję...',
+    titleLabel: 'Tytuł pracy',
+    topicLabel: 'Temat / zakres pracy',
+    fieldLabel: 'Kierunek / przedmiot / obszar',
+    supervisorLabel: 'Promotor',
     titlePlaceholder: 'Tytuł pracy',
-    topicPlaceholder: 'Temat pracy',
+    topicPlaceholder: 'Temat lub zakres pracy',
     fieldPlaceholder: 'Kierunek / przedmiot / obszar',
     supervisorPlaceholder: 'Promotor',
     keywords: 'Słowa kluczowe',
@@ -393,12 +439,16 @@ const UI: Record<
     aiProfile: 'Profil AI',
     close: 'Zamknij',
     requiredNote: 'Pola wymagane są oznaczone gwiazdką.',
+    workflowTitle: 'Zalecany postup',
+    workflowText:
+      'Najpierw uzupełnij i zapisz profil pracy. Następnie przejdź do AI Chat.',
+    continueToChat: 'Przejdź do AI Chat',
   },
   HU: {
-    pageTitle: 'Dolgozatprofil',
+    pageTitle: 'Új dolgozat',
     editTitle: 'Dolgozatprofil szerkesztése',
     subtitle:
-      'Az AI a kiválasztott típus, nyelv és hivatkozási szabvány szerint készíti el a munkát.',
+      'Először töltse ki a dolgozatprofilt. Ezután az AI Chat ezek alapján dolgozik.',
     workType: 'Munka típusa',
     level: 'Szakmai szint',
     language: 'Felület nyelve',
@@ -415,10 +465,14 @@ const UI: Record<
     save: 'Profil mentése',
     saveChanges: 'Módosítások mentése',
     saving: 'Mentés...',
+    titleLabel: 'A munka címe',
+    topicLabel: 'Téma / fókusz',
+    fieldLabel: 'Szak / tantárgy / terület',
+    supervisorLabel: 'Témavezető',
     titlePlaceholder: 'A munka címe',
-    topicPlaceholder: 'Téma',
+    topicPlaceholder: 'Téma vagy fókusz',
     fieldPlaceholder: 'Szak / tantárgy / terület',
-    supervisorPlaceholder: 'Témavezető',
+    supervisorPlaceholder: 'Témavezető neve',
     keywords: 'Kulcsszavak',
     keywordPlaceholder: 'Kulcsszó hozzáadása',
     keywordsHint: 'Ajánlott: 5–15 kulcsszó.',
@@ -426,6 +480,10 @@ const UI: Record<
     aiProfile: 'AI profil',
     close: 'Bezárás',
     requiredNote: 'A kötelező mezők csillaggal vannak jelölve.',
+    workflowTitle: 'Ajánlott folyamat',
+    workflowText:
+      'Először töltse ki és mentse el a profilt. Ezután folytassa az AI Chattel.',
+    continueToChat: 'Folytatás az AI Chatben',
   },
 };
 
@@ -603,9 +661,7 @@ function isCitation(value: unknown): value is CitationKey {
 function normalizeWorkType(value: unknown): WorkTypeKey {
   const raw = String(value || '').toLowerCase().trim();
 
-  if (WORK_TYPES.includes(raw as WorkTypeKey)) {
-    return raw as WorkTypeKey;
-  }
+  if (WORK_TYPES.includes(raw as WorkTypeKey)) return raw as WorkTypeKey;
 
   if (raw.includes('semin')) return 'seminar';
   if (raw.includes('esej') || raw.includes('essay')) return 'essay';
@@ -871,6 +927,7 @@ function addAlwaysVisibleFields(
 
 function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
   const label = WORK_LABELS[type][lang];
+
   const commonCitation: CitationKey[] = [
     'APA7',
     'ISO690',
@@ -878,14 +935,23 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
     'Harvard',
   ];
 
+  const baseFields: DynamicField[] = [
+    makeField('annotation', lang, false, 3),
+    makeField('problem', lang, false, 4),
+    makeField('goal', lang, true, 3),
+    makeField('researchQuestions', lang, false, 4),
+    makeField('hypotheses', lang, false, 4),
+    makeField('methodology', lang, false, 4),
+    makeField('practicalPart', lang, false, 4),
+    makeField('sourcesRequirement', lang, false, 3),
+  ];
+
   if (type === 'essay') {
     return {
       typeKey: type,
       label,
       description:
-        lang === 'SK'
-          ? 'Esej je argumentačný alebo reflexívny text. Nepoužíva sa rovnaká štruktúra ako pri bakalárskej práci.'
-          : 'Essay is an argumentative or reflective text.',
+        'Esej je argumentačný alebo reflexívny text. Nepoužíva rovnakú štruktúru ako bakalárska alebo diplomová práca.',
       recommendedLength: '3 – 8 strán',
       citationOptions: ['APA7', 'MLA9', 'Chicago', 'Harvard'],
       structure: [
@@ -903,44 +969,8 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('reflection', lang, true, 4),
         makeField('sourcesRequirement', lang, false, 3),
       ],
-      aiInstruction: 'Generate an essay only. Use argumentative structure.',
-    };
-  }
-
-  if (type === 'seminar') {
-    return {
-      typeKey: type,
-      label,
-      description:
-        'Seminárna práca má jednoduchšiu akademickú štruktúru so zameraním na tému, teóriu, analýzu a zdroje.',
-      recommendedLength: '8 – 20 strán',
-      citationOptions: commonCitation,
-      structure: [
-        'Úvod',
-        'Teoretická časť',
-        'Analytická časť',
-        'Diskusia',
-        'Záver',
-        'Zoznam zdrojov',
-      ],
-      requiredSections: [
-        'Úvod',
-        'Teoretická časť',
-        'Analýza',
-        'Záver',
-        'Zdroje',
-      ],
-      fields: [
-        makeField('annotation', lang, false, 3),
-        makeField('goal', lang, true, 3),
-        makeField('methodology', lang, false, 4),
-        makeField('researchQuestions', lang, false, 4),
-        makeField('hypotheses', lang, false, 4),
-        makeField('practicalPart', lang, false, 4),
-        makeField('sourcesRequirement', lang, false, 3),
-      ],
       aiInstruction:
-        'Generate a seminar paper with theory, basic analysis and conclusion.',
+        'Generate an essay only. Use argumentative or reflective structure.',
     };
   }
 
@@ -988,7 +1018,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('sourcesRequirement', lang, false, 3),
       ],
       aiInstruction:
-        'Generate a bachelor thesis with theory, objective, research problem, research questions or hypotheses, methodology and practical part.',
+        'Generate a bachelor thesis with theory, objective, research problem, methodology and practical part.',
     };
   }
 
@@ -1035,7 +1065,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('sourcesRequirement', lang, false, 3),
       ],
       aiInstruction:
-        'Generate a master thesis with deeper analysis, methodology, research questions, results and discussion.',
+        'Generate a master thesis with deeper analysis, methodology, results and discussion.',
     };
   }
 
@@ -1087,23 +1117,23 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
     };
   }
 
-  if (type === 'mba') {
+  if (type === 'mba' || type === 'dba') {
     return {
       typeKey: type,
       label,
       description:
-        'MBA práca má praktický manažérsky charakter. Rieši problém firmy, procesov, stratégie alebo riadenia.',
-      recommendedLength: '35 – 60 strán',
+        'Manažérska práca rieši konkrétny problém organizácie, procesov, stratégie alebo riadenia.',
+      recommendedLength: type === 'dba' ? '80 – 150 strán' : '35 – 60 strán',
       citationOptions: ['APA7', 'Harvard', 'Chicago'],
       structure: [
         'Manažérske zhrnutie',
         'Opis organizácie',
-        'Definícia firemného problému',
+        'Definícia problému',
         'Analýza súčasného stavu',
         'Strategické možnosti',
         'Návrh riešenia',
         'Implementačný plán',
-        'Finančné a rizikové vyhodnotenie',
+        'Rizikové vyhodnotenie',
         'Záver',
       ],
       requiredSections: [
@@ -1124,133 +1154,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
         makeField('sourcesRequirement', lang, false, 3),
       ],
       aiInstruction:
-        'Generate an MBA thesis focused on business problem, strategy and implementation.',
-    };
-  }
-
-  if (type === 'dba') {
-    return {
-      typeKey: type,
-      label,
-      description:
-        'DBA práca kombinuje aplikovaný výskum, strategický manažment a originálny prínos pre prax.',
-      recommendedLength: '80 – 150 strán',
-      citationOptions: ['APA7', 'Harvard', 'Chicago'],
-      structure: [
-        'Executive summary',
-        'Výskumný a manažérsky problém',
-        'Teoretický rámec',
-        'Aplikovaná metodológia',
-        'Empirická časť',
-        'Strategické vyhodnotenie',
-        'Originálny prínos pre prax',
-        'Implementácia',
-        'Záver',
-      ],
-      requiredSections: [
-        'Výskumný problém',
-        'Výskumné otázky',
-        'Aplikovaná metodológia',
-        'Empirické výsledky',
-        'Prínos pre prax',
-      ],
-      fields: [
-        makeField('caseStudy', lang, true, 3),
-        makeField('businessProblem', lang, true, 4),
-        makeField('problem', lang, true, 4),
-        makeField('researchQuestions', lang, true, 4),
-        makeField('hypotheses', lang, false, 4),
-        makeField('methodology', lang, true, 6),
-        makeField('scientificContribution', lang, true, 5),
-        makeField('implementation', lang, true, 5),
-      ],
-      aiInstruction:
-        'Generate a DBA thesis combining applied research, business strategy and empirical analysis.',
-    };
-  }
-
-  if (type === 'attestation') {
-    return {
-      typeKey: type,
-      label,
-      description:
-        'Atestačná práca sa zameriava na odbornú prax, profesijné kompetencie, metodické riešenie a reflexiu.',
-      recommendedLength: '25 – 50 strán',
-      citationOptions: commonCitation,
-      structure: [
-        'Úvod',
-        'Profesijný kontext',
-        'Teoretické východiská',
-        'Opis problému z praxe',
-        'Metodické riešenie',
-        'Realizácia',
-        'Reflexia a hodnotenie',
-        'Záver',
-      ],
-      requiredSections: [
-        'Profesijný problém',
-        'Metodické riešenie',
-        'Realizácia',
-        'Reflexia',
-      ],
-      fields: [
-        makeField('annotation', lang, true, 3),
-        makeField('problem', lang, true, 4),
-        makeField('goal', lang, false, 3),
-        makeField('researchQuestions', lang, false, 4),
-        makeField('hypotheses', lang, false, 4),
-        makeField('methodology', lang, true, 4),
-        makeField('practicalPart', lang, true, 4),
-        makeField('reflection', lang, true, 4),
-      ],
-      aiInstruction:
-        'Generate an attestation thesis focused on professional practice and reflection.',
-    };
-  }
-
-  if (type === 'rigorous' || type === 'habilitation') {
-    return {
-      typeKey: type,
-      label,
-      description:
-        'Rigorózna alebo habilitačná práca musí preukázať vysokú odbornú úroveň, samostatný vedecký prístup a jasný prínos.',
-      recommendedLength:
-        type === 'habilitation' ? '120 – 250 strán' : '70 – 120 strán',
-      citationOptions: ['APA7', 'ISO690', 'STN_ISO_690', 'Chicago'],
-      structure: [
-        'Abstrakt',
-        'Úvod',
-        'Teoretický rámec',
-        'Analýza súčasného stavu',
-        'Výskumný problém',
-        'Výskumné otázky / hypotézy',
-        'Metodológia',
-        'Výsledky',
-        'Diskusia',
-        'Odborný / vedecký prínos',
-        'Záver',
-        'Literatúra',
-      ],
-      requiredSections: [
-        'Teoretický rámec',
-        'Výskumný problém',
-        'Výskumné otázky / hypotézy',
-        'Metodológia',
-        'Výsledky',
-        'Prínos',
-      ],
-      fields: [
-        makeField('annotation', lang, true, 3),
-        makeField('problem', lang, true, 5),
-        makeField('goal', lang, true, 4),
-        makeField('researchQuestions', lang, false, 4),
-        makeField('hypotheses', lang, false, 4),
-        makeField('methodology', lang, true, 5),
-        makeField('scientificContribution', lang, true, 5),
-        makeField('sourcesRequirement', lang, false, 3),
-      ],
-      aiInstruction:
-        'Generate an advanced academic thesis emphasizing theory, methodology, results and contribution.',
+        'Generate a management thesis focused on business problem, strategy and implementation.',
     };
   }
 
@@ -1258,7 +1162,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
     typeKey: type,
     label,
     description:
-      'Tento typ práce má stredne náročnú odbornú štruktúru s dôrazom na tému, cieľ, výskumné otázky, metodiku, praktickú časť a záver.',
+      'Tento typ práce má akademickú štruktúru s dôrazom na tému, cieľ, výskumné otázky, metodiku, praktickú časť a záver.',
     recommendedLength: '15 – 35 strán',
     citationOptions: commonCitation,
     structure: [
@@ -1281,16 +1185,7 @@ function getSchema(type: WorkTypeKey, lang: Lang): WorkSchema {
       'Praktická časť',
       'Záver',
     ],
-    fields: [
-      makeField('annotation', lang, false, 3),
-      makeField('problem', lang, false, 4),
-      makeField('goal', lang, true, 3),
-      makeField('researchQuestions', lang, false, 4),
-      makeField('hypotheses', lang, false, 4),
-      makeField('methodology', lang, false, 4),
-      makeField('practicalPart', lang, true, 4),
-      makeField('sourcesRequirement', lang, false, 3),
-    ],
+    fields: baseFields,
     aiInstruction: 'Generate a medium-level academic or professional work.',
   };
 }
@@ -1366,6 +1261,8 @@ export default function ProfileForm({
   onClose,
   initialProfile,
 }: ProfileFormProps) {
+  const router = useRouter();
+
   const [profile, setProfile] = useState<Profile>(() =>
     normalizeInitialProfile(initialProfile)
   );
@@ -1375,6 +1272,9 @@ export default function ProfileForm({
   );
 
   const [isSaving, setIsSaving] = useState(false);
+  const [lastSavedProfile, setLastSavedProfile] = useState<SavedProfile | null>(
+    null
+  );
 
   useEffect(() => {
     setProfile(normalizeInitialProfile(initialProfile));
@@ -1449,6 +1349,7 @@ export default function ProfileForm({
 
     return {
       ...profile,
+      topic: profile.title,
       id,
       schema: schemaForSave,
       interfaceLanguage: profile.language,
@@ -1495,6 +1396,7 @@ export default function ProfileForm({
       const payload = createPayload();
 
       savePayloadToStorage(payload);
+      setLastSavedProfile(payload);
 
       const supabase = createClient();
 
@@ -1544,12 +1446,10 @@ export default function ProfileForm({
         );
 
         onSave?.(payload);
-        onClose?.();
         return;
       }
 
       onSave?.(payload);
-      onClose?.();
 
       alert(
         profile.language === 'SK'
@@ -1571,6 +1471,13 @@ export default function ProfileForm({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const continueToChat = () => {
+    const payload = lastSavedProfile || createPayload();
+    savePayloadToStorage(payload);
+    onClose?.();
+    router.push('/chat');
   };
 
   return (
@@ -1612,6 +1519,17 @@ export default function ProfileForm({
 
           <div className="grid gap-8 p-6 md:p-10 xl:grid-cols-[1fr_420px]">
             <div className="space-y-9">
+              <Section
+                title={labels.workflowTitle}
+                icon={<AlertCircle className="h-5 w-5" />}
+              >
+                <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 p-5">
+                  <p className="text-sm leading-7 text-amber-100">
+                    {labels.workflowText}
+                  </p>
+                </div>
+              </Section>
+
               <Section
                 title={labels.workType}
                 icon={<BookOpen className="h-5 w-5" />}
@@ -1688,26 +1606,24 @@ export default function ProfileForm({
                 title={labels.basic}
                 icon={<FileText className="h-5 w-5" />}
               >
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-5 md:grid-cols-2">
                   <Input
+                    label={labels.titleLabel}
+                    required
                     value={profile.title}
                     placeholder={labels.titlePlaceholder}
                     onChange={(value) => update('title', value)}
                   />
 
                   <Input
-                    value={profile.topic}
-                    placeholder={labels.topicPlaceholder}
-                    onChange={(value) => update('topic', value)}
-                  />
-
-                  <Input
+                    label={labels.fieldLabel}
                     value={profile.field}
                     placeholder={labels.fieldPlaceholder}
                     onChange={(value) => update('field', value)}
                   />
 
                   <Input
+                    label={labels.supervisorLabel}
                     value={profile.supervisor}
                     placeholder={labels.supervisorPlaceholder}
                     onChange={(value) => update('supervisor', value)}
@@ -1792,6 +1708,15 @@ export default function ProfileForm({
                     : editingId
                       ? labels.saveChanges
                       : labels.save}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={continueToChat}
+                  className="inline-flex items-center justify-center gap-3 rounded-2xl bg-violet-600 px-6 py-4 text-base font-black text-white transition hover:bg-violet-500"
+                >
+                  <MessageSquare className="h-5 w-5" />
+                  {labels.continueToChat}
                 </button>
 
                 {onClose && (
@@ -1945,21 +1870,32 @@ function Panel({
 }
 
 function Input({
+  label,
   placeholder,
   value,
+  required,
   onChange,
 }: {
+  label: string;
   placeholder: string;
   value: string;
+  required?: boolean;
   onChange: (value: string) => void;
 }) {
   return (
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      className="w-full rounded-2xl border border-white/10 bg-[#111525] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10"
-    />
+    <div>
+      <label className="mb-2 block text-sm font-bold text-white">
+        {label}
+        {required && <span className="ml-1 text-violet-300">*</span>}
+      </label>
+
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-2xl border border-white/10 bg-[#111525] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10"
+      />
+    </div>
   );
 }
 

@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Copy,
   RotateCcw,
+  Wand2,
 } from 'lucide-react';
 
 type AuditPayload = {
@@ -50,6 +51,190 @@ const CITATION_STYLES = ['ISO 690', 'APA 7', 'Harvard', 'Chicago', 'MLA'];
 
 const MIN_TEXT_LENGTH = 300;
 
+// ================= CLEAN HELPERS =================
+
+function cleanBrokenEncoding(value: string) {
+  return String(value || '')
+    .replace(/\uFEFF/g, '')
+    .replace(/\u200B/g, '')
+    .replace(/\u200C/g, '')
+    .replace(/\u200D/g, '')
+    .replace(/\uFFFD/g, '')
+
+    .replace(/Â+/g, '')
+    .replace(/Ã¡/g, 'á')
+    .replace(/Ã¤/g, 'ä')
+    .replace(/Ãč/g, 'č')
+    .replace(/Ä/g, 'č')
+    .replace(/Ä/g, 'ď')
+    .replace(/Ã©/g, 'é')
+    .replace(/Ä›/g, 'ě')
+    .replace(/Ã­/g, 'í')
+    .replace(/Äľ/g, 'ľ')
+    .replace(/Ä¾/g, 'ľ')
+    .replace(/Åˆ/g, 'ň')
+    .replace(/Ã³/g, 'ó')
+    .replace(/Ã´/g, 'ô')
+    .replace(/Å•/g, 'ŕ')
+    .replace(/Å¡/g, 'š')
+    .replace(/Å¥/g, 'ť')
+    .replace(/Ãº/g, 'ú')
+    .replace(/Ã½/g, 'ý')
+    .replace(/Å¾/g, 'ž')
+
+    .replace(/ÄŚ/g, 'Č')
+    .replace(/ÄŽ/g, 'Ď')
+    .replace(/Ã‰/g, 'É')
+    .replace(/Ä˝/g, 'Ľ')
+    .replace(/Å‡/g, 'Ň')
+    .replace(/Ã“/g, 'Ó')
+    .replace(/Å Š/g, 'Š')
+    .replace(/Å½/g, 'Ž')
+
+    .replace(/â€™/g, "'")
+    .replace(/â€˜/g, "'")
+    .replace(/â€œ/g, '"')
+    .replace(/â€/g, '"')
+    .replace(/â€“/g, '–')
+    .replace(/â€”/g, '—')
+    .replace(/â€¦/g, '…')
+
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
+function removeBadAuditStart(value: string) {
+  return cleanBrokenEncoding(value)
+    .replace(/^Audit\s+kvality\s*[-–—:]?.*$/im, '')
+    .replace(/^AI\s+audit\s+kvality\s*[-–—:]?.*$/im, '')
+    .replace(/^Ako\s+audit\s+kvality\s*,?\s*/i, '')
+    .replace(/^Ako\s+AI\s+audítor\s*,?\s*/i, '')
+    .replace(/^Dobrý\s+deň\s*,?\s*/i, '')
+    .replace(/^Vážený\s+študent\s*,?\s*/i, '')
+    .replace(/^Predmet\s*:.*$/gim, '')
+    .replace(/^Email\s*:.*$/gim, '')
+    .replace(/^\s*[^\p{L}\p{N}\s"'„“‚‘\-–—()[\]]{1,20}\s*/gmu, '')
+    .replace(/^\s*[|/\\_~^`´¨]+/gm, '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/```[a-zA-Z]*\n?/g, '')
+    .replace(/```/g, '')
+    .replace(/^\s*[-*_]{3,}\s*$/gm, '')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
+function buildCleanAuditResult({
+  title,
+  workType,
+  language,
+  citationStyle,
+  rawResult,
+}: {
+  title: string;
+  workType: string;
+  language: string;
+  citationStyle: string;
+  rawResult: string;
+}) {
+  const cleaned = removeBadAuditStart(rawResult);
+
+  const safeTitle = title.trim() || 'Kontrolovaná akademická práca';
+
+  return `
+Audit kvality práce: ${safeTitle}
+
+Typ práce: ${workType}
+Jazyk práce: ${language}
+Citačný štýl: ${citationStyle}
+
+${cleaned}
+`.trim();
+}
+
+function buildAuditInstruction(payload: AuditPayload) {
+  return `
+Vykonaj odborný audit kvality akademickej práce.
+
+DÔLEŽITÉ PRAVIDLÁ:
+- Výstup musí začať normálnym nadpisom práce, nie textom "Audit kvality - ..." s poškodenými znakmi.
+- Nepíš email.
+- Nepíš oslovenie.
+- Nepíš predmet emailu.
+- Nepíš úvod typu "Ako AI audítor...".
+- Nepoužívaj poškodené znaky, cudzie symboly ani nečitateľné znaky.
+- Ak vstup obsahuje poškodené znaky, ignoruj ich a pracuj so zrozumiteľným obsahom.
+- Výstup píš čistým slovenským textom vhodným do Wordu.
+- Nepoužívaj markdown znaky #, ##, **, --- ani kódové bloky.
+- Nevymýšľaj zdroje, autorov, DOI ani URL.
+- Hodnoť odborne, konkrétne a priamo.
+
+ÚDAJE O PRÁCI:
+Názov práce: ${payload.title || 'Neuvedené'}
+Typ práce: ${payload.workType}
+Jazyk práce: ${payload.language}
+Citačný štýl: ${payload.citationStyle}
+
+TEXT NA AUDIT:
+"""
+${payload.text}
+"""
+
+VÝSTUP MUSÍ MAŤ TÚTO ŠTRUKTÚRU:
+
+1. Stručné hodnotenie
+Zhodnoť celkovú kvalitu textu, akademickú úroveň a použiteľnosť do práce.
+
+2. Silné stránky
+Uveď konkrétne silné stránky textu.
+
+3. Slabé stránky
+Uveď konkrétne slabiny textu.
+
+4. Logika a štruktúra
+Zhodnoť nadväznosť, členenie, argumentáciu a vnútornú súdržnosť.
+
+5. Metodológia
+Zhodnoť, či je metodologická časť dostatočná alebo čo chýba.
+
+6. Citácie a zdroje
+Zhodnoť, kde treba doplniť citácie, odborné zdroje alebo presnejšie odkazy.
+
+7. Akademický štýl
+Zhodnoť jazyk, odbornosť, štylistiku, terminológiu a zrozumiteľnosť.
+
+8. Konkrétne opravy
+Uveď konkrétne návrhy úprav a lepšie formulácie vybraných viet.
+
+9. Odporúčané doplnenia
+Napíš, čo má autor doplniť do práce.
+
+10. Skóre kvality od 0 do 100
+Uveď:
+Logika:
+Metodológia:
+Citácie:
+Akademický štýl:
+Celkové skóre:
+
+11. Priorita opráv
+Rozdeľ opravy na:
+Urgentné:
+Dôležité:
+Odporúčané:
+
+12. Technické upozornenie
+Ak text obsahoval poškodené znaky alebo nečitateľné časti, uveď to tu.
+`.trim();
+}
+
 export default function AuditClient() {
   const [title, setTitle] = useState('');
   const [workType, setWorkType] = useState('Bakalárska práca');
@@ -59,8 +244,9 @@ export default function AuditClient() {
   const [result, setResult] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [cleanedInfo, setCleanedInfo] = useState('');
 
-  const trimmedText = text.trim();
+  const trimmedText = cleanBrokenEncoding(text).trim();
 
   const characterCount = text.length;
 
@@ -90,21 +276,45 @@ export default function AuditClient() {
     };
   }
 
+  function cleanCurrentText() {
+    const cleaned = cleanBrokenEncoding(text);
+    const oldLength = text.length;
+
+    setText(cleaned);
+    setCleanedInfo(
+      oldLength !== cleaned.length
+        ? 'Text bol vyčistený od poškodených znakov a neviditeľných symbolov.'
+        : 'Text bol skontrolovaný. Nenašli sa výrazné poškodené znaky.'
+    );
+  }
+
   async function runAudit() {
     setError('');
     setResult('');
+    setCleanedInfo('');
 
-    if (trimmedText.length < MIN_TEXT_LENGTH) {
+    const cleanedInputText = cleanBrokenEncoding(trimmedText);
+
+    if (cleanedInputText.length < MIN_TEXT_LENGTH) {
       setError(`Vlož aspoň ${MIN_TEXT_LENGTH} znakov textu.`);
       return;
     }
 
     const payload: AuditPayload = {
-      title: title.trim(),
+      title: cleanBrokenEncoding(title.trim()),
       workType,
       language,
       citationStyle,
-      text: trimmedText,
+      text: cleanedInputText,
+    };
+
+    const enhancedPayload = {
+      ...payload,
+      prompt: buildAuditInstruction(payload),
+      instruction: buildAuditInstruction(payload),
+      cleanOutput: true,
+      removeBrokenEncoding: true,
+      outputFormat: 'clean_word_text',
     };
 
     setLoading(true);
@@ -113,10 +323,10 @@ export default function AuditClient() {
       const res = await fetch('/api/audit', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json; charset=utf-8',
           Accept: 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(enhancedPayload),
       });
 
       const data = await parseAuditResponse(res);
@@ -129,13 +339,21 @@ export default function AuditClient() {
         );
       }
 
-      const auditResult = data.result?.trim();
+      const rawAuditResult = data.result?.trim();
 
-      if (!auditResult) {
+      if (!rawAuditResult) {
         throw new Error('API nevrátilo žiadny výsledok auditu.');
       }
 
-      setResult(auditResult);
+      const cleanedResult = buildCleanAuditResult({
+        title: payload.title,
+        workType: payload.workType,
+        language: payload.language,
+        citationStyle: payload.citationStyle,
+        rawResult: rawAuditResult,
+      });
+
+      setResult(cleanedResult);
     } catch (err) {
       const message =
         err instanceof Error
@@ -152,7 +370,7 @@ export default function AuditClient() {
     if (!result) return;
 
     try {
-      await navigator.clipboard.writeText(result);
+      await navigator.clipboard.writeText(removeBadAuditStart(result));
     } catch {
       setError('Výsledok sa nepodarilo skopírovať do schránky.');
     }
@@ -167,6 +385,7 @@ export default function AuditClient() {
     setResult('');
     setError('');
     setLoading(false);
+    setCleanedInfo('');
   }
 
   return (
@@ -191,15 +410,27 @@ export default function AuditClient() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={resetAudit}
-              disabled={loading}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <RotateCcw className="h-4 w-4" />
-              Vyčistiť
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={cleanCurrentText}
+                disabled={loading || !text.trim()}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Wand2 className="h-4 w-4" />
+                Vyčistiť znaky
+              </button>
+
+              <button
+                type="button"
+                onClick={resetAudit}
+                disabled={loading}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Vyčistiť
+              </button>
+            </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-4">
@@ -210,7 +441,7 @@ export default function AuditClient() {
 
               <input
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(e) => setTitle(cleanBrokenEncoding(e.target.value))}
                 placeholder="Napr. Vplyv umelej inteligencie na vzdelávanie"
                 className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-400"
               />
@@ -293,6 +524,13 @@ export default function AuditClient() {
               </p>
             </div>
           </div>
+
+          {cleanedInfo && (
+            <div className="mt-4 flex items-start gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm leading-6 text-emerald-100">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{cleanedInfo}</span>
+            </div>
+          )}
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
@@ -311,6 +549,7 @@ export default function AuditClient() {
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
+              onBlur={() => setText(cleanBrokenEncoding(text))}
               placeholder="Sem vlož kapitolu, úvod, záver alebo celú časť práce..."
               className="h-[520px] w-full resize-none rounded-2xl border border-white/10 bg-slate-900 p-4 text-sm leading-6 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-400"
             />

@@ -9,7 +9,6 @@ import {
   FileDown,
   FileText,
   GraduationCap,
-  Home,
   Languages,
   Mail,
   Menu,
@@ -151,7 +150,7 @@ const modules: {
   {
     key: 'defense',
     label: 'Obhajoba',
-    subtitle: 'Otázky a odpovede',
+    subtitle: 'Prezentácia, sprievodný text, otázky a odpovede',
     icon: Presentation,
   },
   {
@@ -239,8 +238,64 @@ function normalizeProfile(raw: any): SavedProfile | null {
   return raw as SavedProfile;
 }
 
-function cleanAiOutput(text: string) {
+function fixEncodingArtifacts(text: string) {
   return String(text || '')
+    .replace(/\uFFFD/g, '')
+    .replace(/Â/g, '')
+    .replace(/Ã¡/g, 'á')
+    .replace(/Ã¤/g, 'ä')
+    .replace(/Ã¤/g, 'ä')
+    .replace(/Ã©/g, 'é')
+    .replace(/Ã­/g, 'í')
+    .replace(/Ã³/g, 'ó')
+    .replace(/Ãº/g, 'ú')
+    .replace(/Ã½/g, 'ý')
+    .replace(/Ã´/g, 'ô')
+    .replace(/Ã„/g, 'Ä')
+    .replace(/Ã‰/g, 'É')
+    .replace(/Ã/g, 'Á')
+    .replace(/Ä/g, 'č')
+    .replace(/Ä/g, 'ď')
+    .replace(/Ä¾/g, 'ľ')
+    .replace(/Ä˝/g, 'Ľ')
+    .replace(/Äº/g, 'ĺ')
+    .replace(/Å¡/g, 'š')
+    .replace(/Å /g, 'Š')
+    .replace(/Å¾/g, 'ž')
+    .replace(/Å½/g, 'Ž')
+    .replace(/Å¥/g, 'ť')
+    .replace(/Å¤/g, 'Ť')
+    .replace(/Åˆ/g, 'ň')
+    .replace(/Å‡/g, 'Ň')
+    .replace(/Å•/g, 'ŕ')
+    .replace(/Å”/g, 'Ŕ')
+    .replace(/Å/g, '')
+    .replace(/â€™/g, "'")
+    .replace(/â€˜/g, "'")
+    .replace(/â€œ/g, '"')
+    .replace(/â€/g, '"')
+    .replace(/â€“/g, '–')
+    .replace(/â€”/g, '—')
+    .replace(/â€¦/g, '...')
+    .replace(/â€˘/g, '•')
+    .replace(/ðŸ“„/g, '')
+    .replace(/ðŸ“Š/g, '')
+    .replace(/ðŸ“š/g, '')
+    .replace(/ðŸ¤–/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+}
+
+function removeBadGeneratedPrefix(text: string) {
+  return String(text || '')
+    .replace(/^\s*AI\s+vedúci\s+práce\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*AI\s+veduci\s+prace\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Audit\s+kvality\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Obhajoba\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Prezentácia\s*[-–—:]*\s*(?=Názov práce|Cieľ práce|Úvod|Slide|Snímka)/i, '');
+}
+
+function cleanAiOutput(text: string) {
+  return fixEncodingArtifacts(String(text || ''))
     .replace(/\uFEFF/g, '')
     .replace(/\u200B/g, '')
     .replace(/\u200C/g, '')
@@ -258,6 +313,12 @@ function cleanAiOutput(text: string) {
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
     .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
+function cleanFinalOutput(text: string) {
+  return removeBadGeneratedPrefix(cleanAiOutput(text))
+    .replace(/\n\s*\n\s*\n/g, '\n\n')
     .trim();
 }
 
@@ -283,7 +344,7 @@ function htmlEscape(value: string) {
 }
 
 function createDocHtml(title: string, text: string) {
-  const paragraphs = cleanAiOutput(text)
+  const paragraphs = cleanFinalOutput(text)
     .split('\n')
     .map((line) => {
       if (!line.trim()) return '<p>&nbsp;</p>';
@@ -368,7 +429,6 @@ function buildProfileBlock(profile: SavedProfile | null) {
 
   return `
 Názov práce: ${profile.title || 'Neuvedené'}
-Téma: ${profile.topic || 'Neuvedené'}
 Typ práce: ${getWorkType(profile)}
 Odbor: ${profile.field || 'Neuvedené'}
 Vedúci práce: ${profile.supervisor || 'Neuvedené'}
@@ -378,9 +438,24 @@ Cieľ práce: ${profile.goal || 'Neuvedené'}
 Výskumný problém: ${profile.problem || 'Neuvedené'}
 Metodológia: ${profile.methodology || 'Neuvedené'}
 Výskumné otázky: ${profile.researchQuestions || 'Neuvedené'}
+Hypotézy: ${profile.hypotheses || 'Neuvedené'}
 Praktická časť: ${profile.practicalPart || 'Neuvedené'}
 Kľúčové slová: ${keywords.length ? keywords.join(', ') : 'Neuvedené'}
 `.trim();
+}
+
+function buildAttachmentBlock(files: AttachedFile[]) {
+  if (!files.length) {
+    return 'Používateľ nepriložil žiadne súbory.';
+  }
+
+  return files
+    .map((file, index) => {
+      return `${index + 1}. ${file.name} (${file.type || 'neznámy typ'}, ${formatBytes(
+        file.size,
+      )})`;
+    })
+    .join('\n');
 }
 
 async function readApiErrorResponse(res: Response) {
@@ -487,6 +562,7 @@ export default function DashboardPage() {
     setSecondaryInput('');
     setResult('');
     setAttachedFiles([]);
+    setCanvasText('');
   }, [activeModule]);
 
   const handleFiles = (files: FileList | null) => {
@@ -592,20 +668,29 @@ export default function DashboardPage() {
     const profileBlock = buildProfileBlock(activeProfile);
     const citationStyle = getCitationStyle(activeProfile);
     const workLanguage = getWorkLanguage(activeProfile);
+    const attachmentBlock = buildAttachmentBlock(attachedFiles);
 
     const baseRules = `
 PROFIL PRÁCE:
 ${profileBlock}
 
-DÔLEŽITÉ PRAVIDLÁ:
-- Nepíš Markdown znaky ako #, ##, ###, **, *, --- ani kódové bloky.
+PRILOŽENÉ SÚBORY:
+${attachmentBlock}
+
+DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
+- Výstup musí byť v jazyku práce: ${workLanguage}.
 - Výstup píš ako čistý text vhodný do Wordu.
+- Nepíš Markdown znaky ako #, ##, ###, **, *, --- ani kódové bloky.
+- Nevkladaj na úplný začiatok technické nadpisy typu „AI vedúci“, „Audit kvality“, „Obhajoba“, „Výstup“ ani názov modulu.
+- Začni priamo vecným nadpisom podľa obsahu práce, napríklad názvom práce alebo názvom časti.
+- Nepoužívaj poškodené znaky, kódovanie ani nečitateľné symboly.
 - Nevymýšľaj zdroje, autorov, DOI, URL, roky ani vydavateľov.
 - Ak údaj chýba, napíš: údaj je potrebné overiť.
-- Ak sú priložené súbory, najprv použi ich extrahovaný text.
+- Ak sú priložené súbory, najprv over, či súvisia s aktívnym profilom práce.
+- Ak priložený dokument pravdepodobne nesúvisí s profilom práce, jasne uveď upozornenie a nepouži ho ako hlavný zdroj.
+- Ak príloha súvisí s profilom práce, použi jej extrahovaný text ako hlavný podklad.
 - Ak sú priložené súbory, v závere uveď, z ktorých príloh sa čerpalo.
 - Citačná norma: ${citationStyle}.
-- Jazyk výstupu: ${workLanguage}.
 `.trim();
 
     if (activeModule === 'supervisor') {
@@ -613,12 +698,34 @@ DÔLEŽITÉ PRAVIDLÁ:
 ${baseRules}
 
 ÚLOHA:
-Správaj sa ako AI vedúci práce. Skontroluj logiku, cieľ, výskumný problém, metodológiu, štruktúru a nadväznosť práce.
+Správaj sa ako odborný vedúci akademickej práce. Skontroluj logiku, cieľ, výskumný problém, metodológiu, štruktúru, argumentáciu a nadväznosť práce.
 
 TEXT NA KONTROLU:
-${input}
+${input || 'Použi text z priložených dokumentov, ak je dostupný.'}
 
-Nehodnoť pravopis ako hlavnú vec. Zameraj sa na akademickú kvalitu práce.
+ZAČIATOK ODPOVEDE:
+Začni priamo nadpisom:
+Hodnotenie práce: ${activeProfile?.title || 'bez názvu'}
+
+NEPÍŠ na začiatok:
+AI vedúci
+AI vedúci práce
+Výstup
+Odpoveď
+
+POVINNÁ ŠTRUKTÚRA:
+1. Celkové hodnotenie práce
+2. Silné stránky
+3. Slabé stránky
+4. Logika a nadväznosť textu
+5. Cieľ, výskumný problém a metodológia
+6. Chýbajúce časti alebo nedostatočne rozpracované miesta
+7. Konkrétne pripomienky vedúceho práce
+8. Odporúčané opravy
+9. Otázky na konzultáciu
+10. Skóre kvality 0–100
+
+Zameraj sa na akademickú kvalitu práce. Nehodnoť pravopis ako hlavnú vec.
 `.trim();
     }
 
@@ -636,7 +743,7 @@ Nehodnoť pravopis ako hlavnú vec. Zameraj sa na akademickú kvalitu práce.
 ${baseRules}
 
 ÚLOHA:
-Audit kvality.
+Urob audit kvality akademickej práce.
 
 REŽIM KONTROLY:
 ${qualityMode}
@@ -645,14 +752,25 @@ PRESNÁ INŠTRUKCIA:
 ${modeInstruction}
 
 TEXT NA KONTROLU:
-${input}
+${input || 'Použi text z priložených dokumentov, ak je dostupný.'}
 
-VÝSTUP:
+ZAČIATOK ODPOVEDE:
+Začni priamo nadpisom:
+${activeProfile?.title || 'Audit kontrolovaného textu'}
+
+NEPÍŠ na začiatok:
+Audit kvality
+AI audit
+Výstup
+Odpoveď
+
+POVINNÁ ŠTRUKTÚRA:
 1. Stručné hodnotenie
 2. Nájdené problémy
 3. Konkrétne opravy
-4. Odporúčaná upravená verzia vybraných viet
+4. Ukážky upravených viet
 5. Skóre kvality od 0 do 100
+6. Odporúčané ďalšie kroky
 
 Ak je režim štylistika, nehodnoť obsah.
 Ak je režim citácie, nehodnoť všeobecne celú prácu.
@@ -664,19 +782,109 @@ Ak je režim citácie, nehodnoť všeobecne celú prácu.
 ${baseRules}
 
 ÚLOHA:
-Priprav obhajobu práce. Typ práce ber výhradne z profilu, nepýtaj sa ho znova.
+Priprav kompletnú obhajobu práce. Musí vzniknúť aj prezentácia, aj sprievodný text, aj otázky a odpovede.
 
-STRUČNÝ OBSAH / TEXT PRÁCE:
-${input}
+TEXT / PODKLAD:
+${input || 'Použi aktívny profil práce a priložené dokumenty.'}
 
-VÝSTUP:
-1. Krátke predstavenie práce
-2. Otázky komisie
-3. Vzorové odpovede
-4. Slabé miesta, na ktoré sa môže komisia pýtať
-5. Odporúčanie, ako odpovedať odborne a pokojne
+KONTROLA PRÍLOH:
+- Najprv skontroluj, či priložené dokumenty súvisia s názvom práce, cieľom, odborom, metodológiou a kľúčovými slovami.
+- Ak dokument nesúvisí, napíš: Upozornenie: priložený dokument pravdepodobne nesúvisí s aktívnym profilom práce.
+- Nesúvisiaci dokument nepoužívaj ako hlavný podklad prezentácie.
+- Ak príloha súvisí, využi ju pri tvorbe prezentácie.
 
-Použi priložené súbory, ak sú nahrané.
+ZAČIATOK ODPOVEDE:
+Začni priamo názvom práce:
+${activeProfile?.title || 'Prezentácia k obhajobe práce'}
+
+NEPÍŠ na začiatok:
+Obhajoba
+Prezentácia
+Výstup
+AI odpoveď
+
+POVINNÁ ŠTRUKTÚRA VÝSTUPU:
+
+ČASŤ A: PREZENTÁCIA – OBSAH SNÍMOK
+
+Snímka 1: Názov práce
+- názov práce
+- autor
+- typ práce
+- odbor
+- vedúci práce
+
+Snímka 2: Východiská a význam témy
+- prečo je téma dôležitá
+- odborný alebo praktický kontext
+- problém, ktorý práca rieši
+
+Snímka 3: Cieľ práce
+- hlavný cieľ
+- čiastkové ciele
+- očakávaný prínos
+
+Snímka 4: Výskumný problém a otázky
+- výskumný problém
+- výskumné otázky alebo hypotézy
+- čo sa malo overiť alebo analyzovať
+
+Snímka 5: Metodológia
+- použité metódy
+- postup práce
+- dáta, vzorka alebo analyzované zdroje
+- prečo boli tieto metódy vhodné
+
+Snímka 6: Teoretické východiská
+- hlavné odborné pojmy
+- najdôležitejšie teoretické východiská
+- odborné zdroje, ak boli dostupné
+
+Snímka 7: Praktická alebo analytická časť
+- čo bolo analyzované
+- aký bol postup
+- hlavné zistenia
+
+Snímka 8: Výsledky práce
+- najdôležitejšie výsledky
+- interpretácia výsledkov
+- súvis s cieľom práce
+
+Snímka 9: Prínos práce
+- odborný prínos
+- praktický prínos
+- odporúčania pre prax alebo ďalší výskum
+
+Snímka 10: Záver
+- splnenie cieľa
+- hlavné zistenia
+- limity práce
+- záverečné vyjadrenie
+
+Snímka 11: Ďakujem za pozornosť
+- krátka veta na ukončenie
+- priestor na otázky
+
+ČASŤ B: SPRIEVODNÝ TEXT K PREZENTÁCII
+Ku každej snímke napíš, čo má študent povedať ústne počas obhajoby.
+Text musí byť prirodzený, hovorený, odborný a vhodný na obhajobu.
+
+ČASŤ C: OTÁZKY KOMISIE A VZOROVÉ ODPOVEDE
+Priprav minimálne 12 otázok komisie.
+Ku každej otázke priprav odbornú vzorovú odpoveď.
+
+ČASŤ D: SLABÉ MIESTA PRÁCE
+Uveď, na čo si má študent dať pozor pri obhajobe.
+
+ČASŤ E: KRÁTKA VERZIA OBHAJOBY NA 3–5 MINÚT
+Napíš súvislý hovorený text, ktorý môže študent povedať na obhajobe.
+
+ČASŤ F: KONTROLA PRÍLOH
+Uveď:
+- ktoré prílohy boli použité,
+- ktoré prílohy súviseli s profilom práce,
+- ktoré prílohy nesúviseli alebo boli nejasné,
+- aké údaje treba ešte overiť.
 `.trim();
     }
 
@@ -693,9 +901,11 @@ Do jazyka: ${translationTo}
 TEXT NA PREKLAD:
 ${input}
 
+ZAČIATOK ODPOVEDE:
+Začni priamo preloženým textom. Nepíš nadpis „Preložený text“, ak to nie je potrebné.
+
 VÝSTUP:
-Preložený text:
-Uveď iba čistý preklad bez slova „Výstup“ ako nadpisu, ak je cieľový jazyk maďarčina alebo iný jazyk.
+Uveď čistý preklad bez technických poznámok, ak používateľ nežiadal vysvetlenie.
 `.trim();
     }
 
@@ -707,7 +917,7 @@ ${baseRules}
 Analyzuj dáta a štatistické výstupy. Môžu byť priložené súbory JASP, SPSS, Excel, CSV alebo textové výstupy.
 
 DÁTA / VÝSTUPY:
-${input}
+${input || 'Použi priložené dátové súbory, ak sú dostupné.'}
 
 OTÁZKA ALEBO CIEĽ ANALÝZY:
 ${secondaryInput || 'Vysvetli výsledky a priprav akademickú interpretáciu.'}
@@ -732,7 +942,7 @@ ZADANIE:
 ${input}
 
 VÝSTUP:
-Štruktúrovaný harmonogram, etapy, termíny, úlohy a kontrolné body. Nepoužívaj znaky #, **, ---.
+Štruktúrovaný harmonogram, etapy, termíny, úlohy a kontrolné body.
 `.trim();
     }
 
@@ -741,7 +951,7 @@ VÝSTUP:
 ${baseRules}
 
 ÚLOHA:
-Vytvor nový profesionálny email. Nekopíruj iba zadanie používateľa.
+Vytvor profesionálny email. Nekopíruj iba zadanie používateľa.
 
 Typ emailu: ${emailType}
 Tón: ${emailTone}
@@ -749,11 +959,16 @@ Tón: ${emailTone}
 ČO MÁ EMAIL RIEŠIŤ:
 ${input}
 
+ZAČIATOK ODPOVEDE:
+Začni priamo:
+Predmet:
+
 VÝSTUP:
 Predmet:
 Text emailu:
 
 Email musí byť plynulý, formálny a použiteľný na odoslanie.
+Po hlavnej časti nepridávaj nezmyselné všeobecné odseky ani text mimo emailu.
 `.trim();
     }
 
@@ -803,9 +1018,9 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
         formData.append('citationStyle', getCitationStyle(activeProfile));
         formData.append('language', getWorkLanguage(activeProfile));
 
-        if (attachedFiles[0]) {
-          formData.append('file', attachedFiles[0].file, attachedFiles[0].name);
-        }
+        attachedFiles.forEach((item) => {
+          formData.append('file', item.file, item.name);
+        });
 
         const res = await fetch('/api/originality', {
           method: 'POST',
@@ -818,7 +1033,7 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
 
         const data = await res.json();
 
-        const output = cleanAiOutput(
+        const output = cleanFinalOutput(
           data.report ||
             data.output ||
             [
@@ -862,7 +1077,20 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
       formData.append('allowAiKnowledgeFallback', 'true');
       formData.append('extractUploadedText', 'true');
       formData.append('useExtractedTextFirst', 'true');
-      formData.append('contextaCitationFormat', 'false');
+      formData.append('returnExtractedFilesInfo', 'true');
+      formData.append('contextaCitationFormat', activeModule === 'defense' ? 'true' : 'false');
+
+      formData.append(
+        'filesMetadata',
+        JSON.stringify(
+          attachedFiles.map((item) => ({
+            name: item.name,
+            size: item.size,
+            type: item.type,
+            extension: getFileExtension(item.name),
+          })),
+        ),
+      );
 
       if (activeProfile?.id) {
         formData.append('projectId', activeProfile.id);
@@ -887,6 +1115,7 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
 
       if (contentType.includes('application/json')) {
         const data = await res.json();
+
         fullText =
           data.output ||
           data.result ||
@@ -894,6 +1123,10 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
           data.text ||
           data.answer ||
           '';
+
+        if (!fullText && data.ok === false) {
+          throw new Error(data.message || data.error || 'API nevrátilo výstup.');
+        }
       } else {
         if (!res.body) {
           throw new Error('API nevrátilo odpoveď.');
@@ -910,14 +1143,21 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
           const chunk = decoder.decode(value, { stream: true });
           fullText += chunk;
 
-          setResult(cleanAiOutput(fullText));
+          setResult(cleanFinalOutput(fullText));
         }
       }
 
-      const cleaned = cleanAiOutput(fullText);
+      const cleaned = cleanFinalOutput(fullText);
 
       setResult(cleaned);
       setCanvasText(cleaned);
+
+      try {
+        localStorage.setItem('latest_generated_work_text', cleaned);
+        localStorage.setItem('last_ai_output', cleaned);
+      } catch {
+        // localStorage nemusí byť dostupný v niektorých režimoch prehliadača
+      }
 
       setTimeout(() => {
         resultRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -928,14 +1168,14 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
           ? error.message
           : 'Nastala chyba pri spracovaní požiadavky.';
 
-      setResult(`Chyba:\n${message}`);
+      setResult(`Chyba:\n${cleanFinalOutput(message)}`);
     } finally {
       setIsLoading(false);
     }
   };
 
   const downloadDoc = () => {
-    const text = canvasText || result;
+    const text = cleanFinalOutput(canvasText || result);
 
     if (!text.trim()) return;
 
@@ -950,7 +1190,7 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
   };
 
   const downloadPdf = () => {
-    const text = canvasText || result;
+    const text = cleanFinalOutput(canvasText || result);
 
     if (!text.trim()) return;
 
@@ -1271,7 +1511,7 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
                         : activeModule === 'emails'
                           ? 'Obsah / zámer emailu'
                           : activeModule === 'defense'
-                            ? 'Stručný obsah práce'
+                            ? 'Stručný obsah práce alebo podklady k prezentácii'
                             : activeModule === 'originality'
                               ? 'Text práce alebo nahraj súbor'
                               : 'Zadanie alebo text'}
@@ -1367,7 +1607,7 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
                       </h2>
 
                       <p className="mt-1 text-sm text-slate-400">
-                        Výstup je očistený od markdown znakov a pripravený na
+                        Výstup je očistený od poškodených znakov a pripravený na
                         kopírovanie alebo export.
                       </p>
                     </div>
@@ -1419,7 +1659,7 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
                   <button
                     type="button"
                     onClick={downloadDoc}
-                    disabled={!(canvasText || result).trim()}
+                    disabled={!cleanFinalOutput(canvasText || result).trim()}
                     className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <Download className="h-4 w-4" />
@@ -1429,7 +1669,7 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
                   <button
                     type="button"
                     onClick={downloadPdf}
-                    disabled={!(canvasText || result).trim()}
+                    disabled={!cleanFinalOutput(canvasText || result).trim()}
                     className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <FileDown className="h-4 w-4" />
@@ -1448,7 +1688,9 @@ Neuč používateľa obchádzať detektory. Odporúčaj citovanie, parafrázovan
 
               <textarea
                 value={canvasText || result}
-                onChange={(event) => setCanvasText(event.target.value)}
+                onChange={(event) =>
+                  setCanvasText(cleanFinalOutput(event.target.value))
+                }
                 placeholder="Canvas je zatiaľ prázdny."
                 className="no-scrollbar flex-1 resize-none bg-[#050711] p-6 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-600"
               />
@@ -1524,8 +1766,8 @@ function FileUploadBox({
           </div>
 
           <p className="mt-1 text-xs text-slate-500">
-            Nahraj PDF, DOCX, TXT, Excel, CSV, PPT alebo obrázky podľa potreby
-            modulu.
+            Nahraj PDF, DOCX, TXT, Excel, CSV, PPT alebo obrázky. Systém má
+            overiť, či príloha súvisí s aktívnym profilom práce.
           </p>
         </div>
 
@@ -1576,44 +1818,44 @@ function FileUploadBox({
 
 function getPlaceholder(module: ModuleKey) {
   if (module === 'supervisor') {
-    return 'Vlož kapitolu, osnovu alebo problém, ktorý má AI vedúci posúdiť...';
+    return 'Vlož kapitolu, osnovu alebo problém, ktorý má AI vedúci posúdiť. Výstup nebude začínať textom „AI vedúci“.';
   }
 
   if (module === 'quality') {
-    return 'Vlož text na kontrolu. Pri štylistike sa bude kontrolovať iba štýl, nie obsah...';
+    return 'Vlož text na kontrolu. Výstup bude očistený od poškodených znakov a nebude začínať nadpisom „Audit kvality“.';
   }
 
   if (module === 'defense') {
-    return 'Vlož stručný obsah práce alebo nahraj dokument, z ktorého sa má pripraviť obhajoba...';
+    return 'Vlož stručný obsah práce alebo nahraj dokument. Systém pripraví prezentáciu, sprievodný text, otázky komisie a odpovede.';
   }
 
   if (module === 'translation') {
-    return 'Vlož text, ktorý chceš preložiť...';
+    return 'Vlož text, ktorý chceš preložiť.';
   }
 
   if (module === 'data') {
-    return 'Vlož tabuľku, výstup z JASP/SPSS/Excel alebo nahraj dátový súbor...';
+    return 'Vlož tabuľku, výstup z JASP/SPSS/Excel alebo nahraj dátový súbor.';
   }
 
   if (module === 'planning') {
-    return 'Napíš termín odovzdania, stav práce a požadovaný plán...';
+    return 'Napíš termín odovzdania, stav práce a požadovaný plán.';
   }
 
   if (module === 'emails') {
-    return 'Napíš, čo má email riešiť. Systém vytvorí nový profesionálny email...';
+    return 'Napíš, čo má email riešiť. Systém vytvorí nový profesionálny email bez zbytočných nezmyslov po hlavnej časti.';
   }
 
   if (module === 'originality') {
-    return 'Vlož text práce alebo nahraj celý dokument práce ako prílohu...';
+    return 'Vlož text práce alebo nahraj celý dokument práce ako prílohu.';
   }
 
-  return 'Napíš zadanie...';
+  return 'Napíš zadanie.';
 }
 
 function getButtonLabel(module: ModuleKey) {
   if (module === 'supervisor') return 'Spustiť AI vedúceho';
   if (module === 'quality') return 'Spustiť audit kvality';
-  if (module === 'defense') return 'Vytvoriť obhajobu';
+  if (module === 'defense') return 'Vytvoriť prezentáciu a obhajobu';
   if (module === 'translation') return 'Preložiť text';
   if (module === 'data') return 'Analyzovať dáta';
   if (module === 'planning') return 'Vytvoriť plán práce';
@@ -1623,9 +1865,9 @@ function getButtonLabel(module: ModuleKey) {
 }
 
 function getResultTitle(module: ModuleKey) {
-  if (module === 'supervisor') return 'Hodnotenie AI vedúceho';
-  if (module === 'quality') return 'Výsledok auditu kvality';
-  if (module === 'defense') return 'Pripravená obhajoba';
+  if (module === 'supervisor') return 'Hodnotenie práce';
+  if (module === 'quality') return 'Výsledok kontroly kvality';
+  if (module === 'defense') return 'Prezentácia, sprievodný text a obhajoba';
   if (module === 'translation') return 'Preložený text';
   if (module === 'data') return 'Výsledok analýzy dát';
   if (module === 'planning') return 'Výsledný plán práce';

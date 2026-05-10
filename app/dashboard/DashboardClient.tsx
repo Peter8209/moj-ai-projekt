@@ -13,23 +13,19 @@ import {
   BookOpen,
   Bot,
   CalendarDays,
-  Crown,
-  ExternalLink,
+  CheckCircle2,
   FileCheck2,
   FileText,
   GraduationCap,
   Languages,
   Library,
   Mail,
-  MessageSquare,
   Plus,
   Presentation,
   Search,
-  Settings,
   ShieldCheck,
   Sparkles,
   User,
-  Video,
   X,
 } from 'lucide-react';
 
@@ -601,10 +597,7 @@ function DashboardPage() {
           <Dashboard
             setView={setView}
             setMode={setMode}
-            openForm={openNewProfileForm}
             user={user}
-            subActive={subActive}
-            activeProfile={activeProfile}
           />
         )}
 
@@ -729,16 +722,10 @@ function Dashboard({
   setView,
   setMode,
   user,
-  openForm: _openForm,
-  subActive: _subActive,
-  activeProfile: _activeProfile,
 }: {
   setView: (v: View) => void;
   setMode: (m: Mode) => void;
-  openForm: () => void;
   user: DashboardUser;
-  subActive: boolean;
-  activeProfile: SavedProfile | null;
 }) {
   return (
     <div className="mx-auto max-w-7xl space-y-8">
@@ -816,17 +803,6 @@ function Dashboard({
           </div>
         </section>
       )}
-    </div>
-  );
-}
-
-function StatusPill({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-      <div className="text-xs font-bold uppercase tracking-wide text-gray-500">
-        {label}
-      </div>
-      <div className="mt-1 truncate font-black text-white">{value}</div>
     </div>
   );
 }
@@ -1927,68 +1903,342 @@ function SupervisorModule({
 }: {
   activeProfile: SavedProfile | null;
 }) {
-  const botId =
-    process.env.NEXT_PUBLIC_FASTBOTS_BOT_ID || 'cmonxnqsl0av1p81pwly2ti1x';
+  const currentYear = new Date().getFullYear();
 
-  const fastbotUrl = `https://app.fastbots.ai/embed/${botId}`;
+  const [text, setText] = useState(() => {
+    if (typeof window === 'undefined') return '';
+
+    return localStorage.getItem('latest_generated_work_text') || '';
+  });
+
+  const [reviewType, setReviewType] = useState('Komplexná kontrola');
+  const [strictness, setStrictness] = useState('Prísny, ale vecný vedúci');
+  const [result, setResult] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const minLength = 300;
+  const textLength = text.trim().length;
+
+  const supervisorRules = [
+    `Aktuálny rok je ${currentYear}.`,
+    `Rok 2025 ani ${currentYear} sa nesmie označiť ako budúcnosť.`,
+    `Ako „zdroj z budúcnosti“ označ iba rok vyšší ako ${currentYear}.`,
+    'Kontroluj rozpory medzi anotáciou, abstraktom, výsledkami a záverom.',
+    'Hodnoť metodológiu, hypotézy, tabuľky, interpretáciu a citácie.',
+    'Buď kritický, ale profesionálny a nepíš nepravdivé upozornenia.',
+  ];
+
+  const runSupervisorReview = async () => {
+    setError('');
+    setResult('');
+
+    if (text.trim().length < minLength) {
+      setError(`Vlož aspoň ${minLength} znakov textu na kontrolu.`);
+      return;
+    }
+
+    setLoading(true);
+
+    const systemInstruction = `
+Si AI vedúci záverečnej práce.
+
+Aktuálny rok je ${currentYear}.
+
+DÔLEŽITÉ PRAVIDLO PRE CITÁCIE A ROKY:
+- Nikdy neoznačuj rok 2025 ako budúcnosť.
+- Nikdy neoznačuj rok ${currentYear} ako budúcnosť.
+- Za zdroj z budúcnosti označ iba rok vyšší ako ${currentYear}.
+- Ak zdroj obsahuje rok 2025 alebo ${currentYear}, môže byť platný.
+- Pri zdrojoch z rokov 2025 a ${currentYear} môžeš odporučiť overenie iba vtedy, ak sú neúplné, chýbajú v literatúre alebo pôsobia vymyslene.
+- Nepíš vetu typu „keďže je rok ${currentYear}, rok 2025 je nemožný“.
+
+ÚLOHA:
+Poskytni odbornú spätnú väzbu ako vedúci práce.
+Buď kritický, ale vecný.
+Hľadaj rozpory v texte, metodológii, výsledkoch, citáciách, tabuľkách a interpretácii.
+Ak nájdeš problém, vysvetli ho presne a navrhni opravu.
+
+Výstup štruktúruj:
+1. Celkové hodnotenie
+2. Silné stránky
+3. Slabé miesta
+4. Rozpory v texte
+5. Metodológia a výsledky
+6. Citácie a zdroje
+7. Konkrétne odporúčania
+8. Otázky vedúceho práce
+9. Skóre kvality
+10. Priorita opráv
+`.trim();
+
+    try {
+      const response = await fetch('/api/supervisor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          reviewType,
+          strictness,
+          activeProfile,
+          currentYear,
+          systemInstruction,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data?.ok) {
+        throw new Error(
+          data?.error ||
+            data?.message ||
+            'AI vedúci momentálne nevrátil hodnotenie.',
+        );
+      }
+
+      const output = String(data.result || data.text || data.output || '').trim();
+
+      if (!output) {
+        throw new Error('AI vedúci nevrátil žiadny text.');
+      }
+
+      setResult(output);
+      localStorage.setItem('latest_supervisor_review', output);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Neznáma chyba pri kontrole AI vedúcim.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadLatestText = () => {
+    if (typeof window === 'undefined') return;
+
+    const latest = localStorage.getItem('latest_generated_work_text') || '';
+
+    if (!latest.trim()) {
+      setError('Nenašiel som uložený text z AI chatu.');
+      return;
+    }
+
+    setText(latest);
+    setError('');
+  };
 
   return (
     <ModuleLayout>
-      <div className="rounded-3xl border border-purple-500/30 bg-purple-950/20 p-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-300 ring-1 ring-purple-400/30">
-              <Bot size={28} />
+      <section className="overflow-hidden rounded-[32px] border border-purple-500/25 bg-[#050816] shadow-2xl shadow-black/30">
+        <div className="relative border-b border-white/10 bg-gradient-to-br from-[#12071f] via-[#070a16] to-[#020617] p-6 md:p-8">
+          <div className="absolute right-0 top-0 h-56 w-56 rounded-full bg-purple-600/20 blur-3xl" />
+          <div className="absolute bottom-0 left-0 h-48 w-48 rounded-full bg-fuchsia-600/10 blur-3xl" />
+
+          <div className="relative flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-3xl bg-purple-500/15 text-purple-200 ring-1 ring-purple-400/30">
+                <GraduationCap size={32} />
+              </div>
+
+              <div>
+                <div className="mb-3 inline-flex rounded-full border border-purple-400/30 bg-purple-500/10 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-purple-200">
+                  Akademický konzultant
+                </div>
+
+                <h3 className="text-3xl font-black tracking-tight text-white">
+                  AI vedúci práce
+                </h3>
+
+                <p className="mt-3 max-w-4xl text-sm leading-7 text-slate-300 md:text-base">
+                  Vlož text práce a získaj odbornú spätnú väzbu k logike,
+                  metodológii, argumentácii, citáciám, výsledkom a celkovej
+                  pripravenosti práce na odovzdanie.
+                </p>
+
+                {activeProfile && (
+                  <div className="mt-5 rounded-3xl border border-white/10 bg-black/25 p-5">
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div>
+                        <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                          Aktívna práca
+                        </div>
+                        <div className="mt-1 line-clamp-2 font-black text-white">
+                          {activeProfile.title || 'Bez názvu'}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                          Typ práce
+                        </div>
+                        <div className="mt-1 font-black text-white">
+                          {activeProfile.type || 'Neurčené'}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                          Citovanie
+                        </div>
+                        <div className="mt-1 font-black text-white">
+                          {activeProfile.citation || 'Neurčené'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {activeProfile.topic && (
+                      <div className="mt-4 border-t border-white/10 pt-4 text-sm leading-6 text-slate-300">
+                        <span className="font-bold text-purple-200">
+                          Téma:
+                        </span>{' '}
+                        {activeProfile.topic}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div>
-              <h3 className="text-2xl font-black text-white">
-                Fastbots AI vedúci práce
-              </h3>
+            <div className="w-full shrink-0 rounded-3xl border border-white/10 bg-white/[0.04] p-5 xl:w-[390px]">
+              <div className="mb-4 flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-emerald-300" />
+                <div className="font-black text-white">Kontrolné pravidlá</div>
+              </div>
 
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-300">
-                Používateľ vloží text práce do chatbota a dostane odbornú
-                spätnú väzbu ako od vedúceho práce.
-              </p>
-
-              {activeProfile && (
-                <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-purple-100">
-                  <div>
-                    <span className="text-gray-400">Aktívna práca:</span>{' '}
-                    <strong>{activeProfile.title || 'Bez názvu'}</strong>
+              <div className="space-y-3">
+                {supervisorRules.map((rule) => (
+                  <div
+                    key={rule}
+                    className="flex gap-3 rounded-2xl border border-white/10 bg-black/20 p-3 text-sm leading-6 text-slate-300"
+                  >
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                    <span>{rule}</span>
                   </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
 
-                  {activeProfile.topic && (
-                    <div className="mt-1">
-                      <span className="text-gray-400">Téma:</span>{' '}
-                      {activeProfile.topic}
-                    </div>
-                  )}
-                </div>
-              )}
+        <div className="bg-[#020617] p-5 md:p-6">
+          <div className="grid gap-5 lg:grid-cols-3">
+            <SelectField
+              label="Typ kontroly"
+              value={reviewType}
+              onChange={setReviewType}
+              options={[
+                'Komplexná kontrola',
+                'Kontrola metodológie',
+                'Kontrola výsledkov',
+                'Kontrola citácií',
+                'Kontrola logiky a argumentácie',
+                'Príprava na konzultáciu',
+              ]}
+            />
+
+            <SelectField
+              label="Štýl spätnej väzby"
+              value={strictness}
+              onChange={setStrictness}
+              options={[
+                'Prísny, ale vecný vedúci',
+                'Konštruktívny konzultant',
+                'Veľmi detailná odborná kontrola',
+                'Krátke prioritné odporúčania',
+              ]}
+            />
+
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={loadLatestText}
+                className="w-full rounded-2xl border border-white/10 bg-white/10 px-5 py-4 text-sm font-black text-white transition hover:bg-white/15"
+              >
+                Načítať posledný text z AI chatu
+              </button>
             </div>
           </div>
 
-          <a
-            href={fastbotUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/20"
-          >
-            Otvoriť samostatne
-            <ExternalLink size={17} />
-          </a>
-        </div>
-      </div>
+          <div className="mt-5">
+            <label className="block">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-gray-300">
+                  Text práce na kontrolu
+                </div>
 
-      <div className="overflow-hidden rounded-3xl border border-purple-500/30 bg-white shadow-2xl">
-        <iframe
-          title="Fastbots AI vedúci práce"
-          src={fastbotUrl}
-          className="h-[720px] w-full border-0"
-          allow="microphone; clipboard-read; clipboard-write"
-        />
-      </div>
+                <div
+                  className={`rounded-full px-3 py-1 text-xs font-black ${
+                    textLength >= minLength
+                      ? 'bg-emerald-500/10 text-emerald-300'
+                      : 'bg-yellow-500/10 text-yellow-300'
+                  }`}
+                >
+                  {textLength}/{minLength} znakov
+                </div>
+              </div>
+
+              <textarea
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                rows={18}
+                placeholder="Vlož sem kapitolu, abstrakt, výsledky alebo celú časť práce..."
+                className="w-full rounded-3xl border border-white/10 bg-[#0b1020] px-5 py-5 text-sm leading-7 text-white outline-none placeholder:text-slate-600 focus:border-purple-500"
+              />
+            </label>
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={runSupervisorReview}
+              disabled={loading || textLength < minLength}
+              className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 font-black text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <GraduationCap size={20} />
+              {loading
+                ? 'AI vedúci kontroluje text...'
+                : textLength < minLength
+                  ? `Doplň text (${textLength}/${minLength})`
+                  : 'Spustiť kontrolu AI vedúcim'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setText('');
+                setResult('');
+                setError('');
+              }}
+              className="rounded-2xl border border-white/10 bg-white/10 px-6 py-4 font-bold text-white transition hover:bg-white/15"
+            >
+              Vyčistiť
+            </button>
+          </div>
+
+          {error && (
+            <div className="mt-5">
+              <Notice type="error">{error}</Notice>
+            </div>
+          )}
+
+          {result && (
+            <div className="mt-6 rounded-[28px] border border-purple-500/25 bg-[#080d1d] p-6 shadow-2xl shadow-purple-950/20">
+              <div className="mb-4 flex items-center gap-3">
+                <GraduationCap className="h-6 w-6 text-purple-300" />
+                <h4 className="text-xl font-black text-white">
+                  Hodnotenie AI vedúceho práce
+                </h4>
+              </div>
+
+              <div className="whitespace-pre-wrap rounded-3xl border border-white/10 bg-black/25 p-5 text-sm leading-7 text-slate-200">
+                {result}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
     </ModuleLayout>
   );
 }

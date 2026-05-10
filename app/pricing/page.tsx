@@ -10,6 +10,8 @@ import {
   Menu,
   ArrowLeft,
   ArrowUp,
+  CreditCard,
+  Loader2,
 } from 'lucide-react';
 
 type PackagePlan = {
@@ -49,6 +51,18 @@ type AddonService = {
   price: string;
   oldPrice?: string;
   description: string;
+};
+
+type CheckoutResponse = {
+  ok?: boolean;
+  url?: string;
+  error?: string;
+  message?: string;
+  detail?: string;
+  reason?: string;
+  solution?: string;
+  technicalCode?: string;
+  displayMessage?: string;
 };
 
 const packagePlans: PackagePlan[] = [
@@ -262,6 +276,40 @@ const addonServices: AddonService[] = [
   },
 ];
 
+function getFriendlyCheckoutError(data: CheckoutResponse, fallback: string) {
+  if (data?.displayMessage) return data.displayMessage;
+
+  const message = [
+    data?.error,
+    data?.message,
+    data?.detail,
+    data?.reason ? `Dôvod: ${data.reason}` : '',
+    data?.solution ? `Riešenie: ${data.solution}` : '',
+    data?.technicalCode ? `Technický kód: ${data.technicalCode}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  return message || fallback;
+}
+
+async function postCheckout(endpoint: string, payload: unknown) {
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = (await response.json().catch(() => ({}))) as CheckoutResponse;
+
+  return {
+    response,
+    data,
+  };
+}
+
 export default function PackagesPage() {
   const router = useRouter();
   const pageRef = useRef<HTMLDivElement | null>(null);
@@ -269,10 +317,15 @@ export default function PackagesPage() {
   const [selectedPlan, setSelectedPlan] = useState<PackagePlan['id']>('monthly');
   const [selectedAddons, setSelectedAddons] = useState<AddonService['id'][]>([]);
   const [loadingPayment, setLoadingPayment] = useState(false);
+  const [loadingPlanId, setLoadingPlanId] = useState<PackagePlan['id'] | null>(
+    null,
+  );
   const [paymentError, setPaymentError] = useState('');
 
   const selectedPlanData = useMemo(() => {
-    return packagePlans.find((plan) => plan.id === selectedPlan) || packagePlans[0];
+    return (
+      packagePlans.find((plan) => plan.id === selectedPlan) || packagePlans[0]
+    );
   }, [selectedPlan]);
 
   const selectedAddonData = useMemo(() => {
@@ -298,57 +351,109 @@ export default function PackagesPage() {
     );
   };
 
-  const handleCheckout = async () => {
+  const getEmailForCheckout = async () => {
+    let email = '';
+
+    if (typeof window !== 'undefined') {
+      email =
+        window.localStorage.getItem('zedpera_email') ||
+        window.localStorage.getItem('user_email') ||
+        window.localStorage.getItem('email') ||
+        '';
+    }
+
+    if (!email && typeof window !== 'undefined') {
+      const enteredEmail = window.prompt(
+        'Zadajte e-mail, na ktorý bude naviazaná platba:',
+      );
+
+      email = enteredEmail?.trim() || '';
+
+      if (email) {
+        window.localStorage.setItem('zedpera_email', email);
+      }
+    }
+
+    return email.trim();
+  };
+
+  const handleCheckout = async (planId?: PackagePlan['id']) => {
+    const checkoutPlanId = planId || selectedPlan;
+    const checkoutPlan =
+      packagePlans.find((plan) => plan.id === checkoutPlanId) ||
+      selectedPlanData;
+
     try {
       setLoadingPayment(true);
+      setLoadingPlanId(checkoutPlanId);
       setPaymentError('');
 
-      let email = '';
-
-      if (typeof window !== 'undefined') {
-        email =
-          window.localStorage.getItem('zedpera_email') ||
-          window.localStorage.getItem('user_email') ||
-          '';
-      }
-
-      if (!email && typeof window !== 'undefined') {
-        const enteredEmail = window.prompt(
-          'Zadajte e-mail, na ktorý bude naviazaná platba:',
-        );
-
-        email = enteredEmail?.trim() || '';
-      }
+      const email = await getEmailForCheckout();
 
       if (!email) {
         setPaymentError('Pre pokračovanie na platbu je potrebný e-mail.');
         return;
       }
 
-      const response = await fetch('/api/payments/checkout', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          plan: selectedPlanData.id,
-          addons: selectedAddons,
-          email,
-        }),
-      });
+      const origin =
+        typeof window !== 'undefined' ? window.location.origin : '';
 
-      const data = await response.json();
+      const payload = {
+        plan: checkoutPlan.id,
+        planId: checkoutPlan.id,
+        planName: checkoutPlan.name,
+        addons: selectedAddons,
+        email,
+        successUrl: `${origin}/dashboard?success=1&plan=${checkoutPlan.id}`,
+        cancelUrl: `${origin}/packages?canceled=1&plan=${checkoutPlan.id}`,
+      };
 
-      if (!response.ok || !data.ok || !data.url) {
-        throw new Error(
-          data.detail ||
-            data.message ||
-            data.error ||
-            'Platbu sa nepodarilo spustiť.',
-        );
+      /*
+        Hlavná cesta:
+        app/api/payments/checkout/route.ts
+      */
+      const firstTry = await postCheckout('/api/payments/checkout', payload);
+
+      if (firstTry.response.ok && firstTry.data?.ok && firstTry.data?.url) {
+        window.location.assign(firstTry.data.url);
+        return;
       }
 
-      window.location.href = data.url;
+      /*
+        Fallback cesta:
+        app/api/checkout/route.ts
+        Používame ju pre prípad, že staršia platobná route v projekte ešte používa /api/checkout.
+      */
+      const secondTry = await postCheckout('/api/checkout', payload);
+
+      if (secondTry.response.ok && secondTry.data?.ok && secondTry.data?.url) {
+        window.location.assign(secondTry.data.url);
+        return;
+      }
+
+      const firstError = getFriendlyCheckoutError(
+        firstTry.data,
+        'Platobnú bránu sa nepodarilo spustiť cez /api/payments/checkout.',
+      );
+
+      const secondError = getFriendlyCheckoutError(
+        secondTry.data,
+        'Platobnú bránu sa nepodarilo spustiť ani cez /api/checkout.',
+      );
+
+      throw new Error(
+        [
+          'Stripe platbu sa nepodarilo spustiť.',
+          '',
+          'Prvý pokus:',
+          firstError,
+          '',
+          'Druhý pokus:',
+          secondError,
+          '',
+          'Skontrolujte, či existuje API route app/api/payments/checkout/route.ts alebo app/api/checkout/route.ts a či má nastavený STRIPE_SECRET_KEY.',
+        ].join('\n'),
+      );
     } catch (error: unknown) {
       const message =
         error instanceof Error
@@ -359,6 +464,7 @@ export default function PackagesPage() {
       setPaymentError(message);
     } finally {
       setLoadingPayment(false);
+      setLoadingPlanId(null);
     }
   };
 
@@ -389,7 +495,7 @@ export default function PackagesPage() {
             className="inline-flex items-center gap-2 rounded-2xl border border-purple-400/30 bg-purple-600/20 px-4 py-2 text-sm font-bold text-purple-100 transition hover:bg-purple-600/30"
           >
             <ArrowLeft size={18} />
-            Dashboard
+            Menu
           </button>
         </div>
       </div>
@@ -407,23 +513,24 @@ export default function PackagesPage() {
             </h1>
 
             <p className="mt-3 max-w-3xl text-lg text-gray-300 sm:text-xl">
-              Vyber si plán podľa rozsahu práce. Doplnky môžeš pridať pred platbou.
+              Vyber si plán podľa rozsahu práce. Po kliknutí na tlačidlo
+              „Vybrať a zaplatiť“ ťa systém presmeruje na Stripe platobnú bránu.
             </p>
           </div>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             {packagePlans.map((plan) => {
               const selected = selectedPlan === plan.id;
+              const isLoadingThisPlan = loadingPlanId === plan.id;
 
               return (
-                <button
+                <article
                   key={plan.id}
-                  type="button"
                   onClick={() => {
                     setSelectedPlan(plan.id);
                     setPaymentError('');
                   }}
-                  className={`relative flex min-h-[520px] flex-col rounded-3xl border p-6 text-left shadow-xl transition ${
+                  className={`relative flex min-h-[560px] cursor-pointer flex-col rounded-3xl border p-6 text-left shadow-xl transition ${
                     selected
                       ? 'border-purple-400 bg-purple-600/20 shadow-purple-950/40'
                       : 'border-white/10 bg-[#0f172a] hover:border-purple-400/50 hover:bg-[#111c33]'
@@ -482,7 +589,7 @@ export default function PackagesPage() {
                     <div className="font-bold text-white">{plan.defense}</div>
                   </div>
 
-                  <ul className="mt-5 space-y-2 text-sm text-gray-200">
+                  <ul className="mt-5 flex-1 space-y-2 text-sm text-gray-200">
                     {plan.features.map((feature) => (
                       <li key={feature} className="flex gap-2">
                         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-purple-400" />
@@ -490,7 +597,30 @@ export default function PackagesPage() {
                       </li>
                     ))}
                   </ul>
-                </button>
+
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedPlan(plan.id);
+                      void handleCheckout(plan.id);
+                    }}
+                    disabled={loadingPayment}
+                    className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-5 py-4 text-sm font-black text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isLoadingThisPlan ? (
+                      <>
+                        <Loader2 className="animate-spin" size={18} />
+                        Presmerovávam...
+                      </>
+                    ) : (
+                      <>
+                        <CreditCard size={18} />
+                        Vybrať a zaplatiť
+                      </>
+                    )}
+                  </button>
+                </article>
               );
             })}
           </div>
@@ -580,18 +710,28 @@ export default function PackagesPage() {
           </div>
 
           {paymentError && (
-            <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold text-red-200">
+            <div className="mt-6 whitespace-pre-wrap rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold leading-6 text-red-200">
               {paymentError}
             </div>
           )}
 
           <button
             type="button"
-            onClick={handleCheckout}
+            onClick={() => void handleCheckout()}
             disabled={loadingPayment}
-            className="mt-6 flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 text-center text-lg font-black text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 text-center text-lg font-black text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loadingPayment ? 'Presmerovávam na Stripe...' : 'Pokračovať na platbu'}
+            {loadingPayment ? (
+              <>
+                <Loader2 className="animate-spin" size={20} />
+                Presmerovávam na Stripe...
+              </>
+            ) : (
+              <>
+                <CreditCard size={20} />
+                Pokračovať na platbu
+              </>
+            )}
           </button>
         </section>
 

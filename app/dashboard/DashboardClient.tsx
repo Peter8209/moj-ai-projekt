@@ -1779,8 +1779,7 @@ pptx.theme = {
 
                 {activeModule === 'planning' && (
                   <div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                    Plánovanie je len predbežné a orientačné. Systém nepovolí
-                    termíny v minulosti. Dnešný dátum: {getTodaySkDate()}.
+                    Dnešný dátum: {getTodaySkDate()}.
                   </div>
                 )}
 

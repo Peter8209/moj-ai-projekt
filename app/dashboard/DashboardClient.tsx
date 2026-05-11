@@ -1509,18 +1509,16 @@ VÝSTUP:
       const PptxGenJS = pptxgenModule.default;
       const pptx = new PptxGenJS();
 
-      pptx.layout = 'LAYOUT_WIDE';
-      pptx.author = 'Zedpera';
-      pptx.company = 'Zedpera';
-      pptx.subject = exportTitle;
-      pptx.title = exportTitle;
-      pptx.lang = 'sk-SK';
+    pptx.layout = 'LAYOUT_WIDE';
+pptx.author = 'Zedpera';
+pptx.company = 'Zedpera';
+pptx.subject = exportTitle;
+pptx.title = exportTitle;
 
-      pptx.theme = {
-        headFontFace: 'Arial',
-        bodyFontFace: 'Arial',
-        lang: 'sk-SK',
-      };
+pptx.theme = {
+  headFontFace: 'Arial',
+  bodyFontFace: 'Arial',
+};
 
       const fileBase = sanitizeFileName(exportTitle);
       const slides = splitTextToSlides(text);

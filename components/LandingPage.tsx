@@ -467,7 +467,9 @@ export default function LandingPage() {
         body: JSON.stringify(payload),
       });
 
-      const data = (await res.json().catch(() => null)) as CheckoutResponse | null;
+      const data = (await res.json().catch(() => null)) as
+        | CheckoutResponse
+        | null;
 
       if (!res.ok) {
         console.error('CHECKOUT ERROR:', data);
@@ -517,6 +519,10 @@ export default function LandingPage() {
           <nav className="hidden items-center gap-6 text-sm font-bold text-slate-700 lg:flex">
             <a href="#intro" className="transition hover:text-violet-700">
               Úvod
+            </a>
+
+            <a href="#about" className="transition hover:text-violet-700">
+              O nás
             </a>
 
             <a href="#features" className="transition hover:text-violet-700">
@@ -586,6 +592,14 @@ export default function LandingPage() {
                 className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
               >
                 Úvod
+              </a>
+
+              <a
+                href="#about"
+                onClick={closeMobileMenu}
+                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
+              >
+                O nás
               </a>
 
               <a
@@ -670,13 +684,6 @@ export default function LandingPage() {
               Začni písať bez stresu už dnes
               <ArrowRight size={20} />
             </a>
-
-            <Link
-              href="/dashboard"
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-7 py-4 text-base font-black text-slate-900 transition hover:bg-slate-50"
-            >
-              Otvoriť aplikáciu
-            </Link>
           </div>
 
           <div className="mx-auto mt-14 max-w-5xl">
@@ -696,6 +703,213 @@ export default function LandingPage() {
         </div>
       </section>
 
+      <section id="about" className="bg-slate-950 py-20 text-white">
+        <div className="mx-auto max-w-7xl px-5 lg:px-8">
+          <div className="mx-auto mb-14 max-w-4xl text-center">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm font-black text-violet-200">
+              <Sparkles size={17} />
+              O nás
+            </div>
+
+            <h2 className="text-4xl font-black tracking-tight md:text-5xl">
+              Zedpera vznikla z reálnych skúseností so študentmi
+            </h2>
+
+            <p className="mt-6 text-lg leading-8 text-slate-300">
+              Za Zedperou stoja skúsenosti, ktoré nevznikli za pár mesiacov.
+              Vznikali roky pri reálnych študentoch, ich problémoch, termínoch,
+              pochybnostiach, školiteľoch, posudkoch, obhajobách a akademických
+              prácach rôzneho typu.
+            </p>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
+            <div className="rounded-[2rem] border border-white/10 bg-white/[0.05] p-7 shadow-2xl shadow-black/20">
+              <h3 className="text-2xl font-black text-white">
+                Príbeh, ktorý začal ešte počas štúdia
+              </h3>
+
+              <div className="mt-5 space-y-5 text-base leading-8 text-slate-300">
+                <p>
+                  Pred mnohými rokmi sa stretli dvaja študenti, ktorí brázdili
+                  lavice na rovnakej univerzite. Prechádzali skúškami a hľadali
+                  cestu, ako celý systém zjednodušiť. Po ukončení štúdia
+                  vymysleli jednoduchý projekt a vôbec netušili, do čoho idú.
+                </p>
+
+                <p>
+                  Vytvorili sme službu, ktorá pomáha študentom pri písaní
+                  vysokoškolských prác a úspešne funguje 20 rokov. Za toto
+                  obdobie sme nazbierali množstvo reálnych skúseností a zistili,
+                  čo študentov najviac trápi.
+                </p>
+
+                <p>
+                  Vypočuli sme si veľa životných osudov a príbehov. Naši
+                  klienti sa pre nás stali viac než len zákazníkmi. S mnohými
+                  sme spolupracovali roky počas celého štúdia. Dennodenne sme
+                  riešili telefonáty, konzultácie, pripomienky, termíny, stres
+                  aj neistotu.
+                </p>
+
+                <p>
+                  Rukami nám prešli tisíce študentov denného aj externého
+                  štúdia. Práve preto sme hľadali cestu, ako celý proces
+                  zjednodušiť. Rozhodli sme sa využiť všetky skúsenosti, ktoré
+                  sme získali, a premeniť ich na systém, ktorý tento problém
+                  rieši komplexne, nie iba čiastočne.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-[2rem] border border-violet-400/20 bg-gradient-to-br from-violet-600/20 via-fuchsia-600/10 to-indigo-600/20 p-7 shadow-2xl shadow-black/20">
+              <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500/20 text-violet-100">
+                <GraduationCap size={30} />
+              </div>
+
+              <h3 className="text-2xl font-black text-white">
+                20 rokov skúseností v jednom systéme
+              </h3>
+
+              <p className="mt-5 text-base leading-8 text-slate-300">
+                Problém každého študenta nie je len zdĺhavé písanie práce. Často
+                je to aj nefungujúci systém v školách, nedostatok času,
+                ignorácia zo strany školiteľa alebo chýbajúca spätná väzba.
+              </p>
+
+              <p className="mt-5 text-base leading-8 text-slate-300">
+                Preto sme vytvorili službu, ktorá pokrýva všetko, čo bežný
+                študent potrebuje: písanie práce, praktickú časť, zdroje,
+                citácie, orientačnú kontrolu originality, spätnú väzbu, opravy,
+                návrhy riešení aj prípravu na obhajobu.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-3">
+            <div className="rounded-[2rem] border border-white/10 bg-white/[0.05] p-6 shadow-2xl shadow-black/20">
+              <h3 className="text-xl font-black text-white">
+                Komplexná pomoc študentovi
+              </h3>
+
+              <p className="mt-4 text-sm leading-7 text-slate-300">
+                Zedpera Vám pomôže s napísaním práce, praktickou časťou,
+                vyhľadá zdroje, pomôže s citáciami, overí riziko zhody, bude
+                Vašim školiteľom aj oponentom, opraví chyby, navrhne riešenia a
+                pripraví Vás na obhajobu na základe posudkov.
+              </p>
+            </div>
+
+            <div className="rounded-[2rem] border border-white/10 bg-white/[0.05] p-6 shadow-2xl shadow-black/20">
+              <h3 className="text-xl font-black text-white">
+                Testované akademickou praxou
+              </h3>
+
+              <p className="mt-4 text-sm leading-7 text-slate-300">
+                Zhrnuli sme do jedného projektu naše 20-ročné skúsenosti. Celý
+                systém testovali stovky reálnych autorov, ktorí pôsobia priamo
+                na akademickej pôde. Zedpera je trénovaná na rôzne typy prác od
+                humanitných až po technické odbory.
+              </p>
+            </div>
+
+            <div className="rounded-[2rem] border border-white/10 bg-white/[0.05] p-6 shadow-2xl shadow-black/20">
+              <h3 className="text-xl font-black text-white">
+                Viac než generovanie textu
+              </h3>
+
+              <p className="mt-4 text-sm leading-7 text-slate-300">
+                Nechceli sme vytvoriť iba ďalší nástroj na generovanie textov.
+                Cieľom bolo vytvoriť systém, ktorý rozumie procesu písania, vie
+                upozorniť na slabé miesta a pomáha študentovi premýšľať nad
+                vlastnou prácou.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-10 rounded-[2rem] border border-emerald-400/20 bg-emerald-500/10 p-7">
+            <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
+              <div>
+                <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-emerald-300/30 bg-emerald-500/10 px-4 py-2 text-sm font-black text-emerald-200">
+                  <Crown size={17} />
+                  Zakladateľka Martina
+                </div>
+
+                <h3 className="text-3xl font-black text-white">
+                  Skúsenosti zo štúdia, mentoringu aj akademického prostredia
+                </h3>
+              </div>
+
+              <div className="space-y-5 text-base leading-8 text-slate-300">
+                <p>
+                  Po ukončení vysokej školy založila spoločnosť, ktorá už 20
+                  rokov pomáha študentom s písaním vysokoškolských prác. Zároveň
+                  sa venovala mentoringu v oblasti vzdelávania.
+                </p>
+
+                <p>
+                  Medzičasom pokračovala v rozširovaní vedomostí na ďalších
+                  univerzitách a sama pôsobila niekoľko rokov na akademickej
+                  pôde.
+                </p>
+
+                <p>
+                  Aktuálne sa venuje vývoju nových typov umelej inteligencie,
+                  ktoré sa dajú využiť v akademickom prostredí a pri podpore
+                  študentov počas celého procesu tvorby práce.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-10 rounded-[2rem] border border-violet-400/20 bg-white/[0.04] p-7">
+            <div className="mx-auto max-w-5xl text-center">
+              <h3 className="text-3xl font-black text-white">
+                Neustále posúvame hranice
+              </h3>
+
+              <div className="mt-6 space-y-5 text-base leading-8 text-slate-300">
+                <p>
+                  Zedpera nevznikla ako odpoveď na trend, ale ako reakcia na
+                  realitu, stres, časový tlak a pocit, že akademická práca je
+                  často skôr boj so systémom než proces učenia.
+                </p>
+
+                <p>
+                  Od začiatku sme vedeli, že nebudeme vyvíjať len ďalší nástroj
+                  na generovanie textu. Chceli sme vytvoriť systém, ktorý
+                  rozumie tomu, čo sa deje medzi riadkami, keď študent hľadá
+                  správny smer, zasekne sa a potrebuje spätnú väzbu, nie iba
+                  výsledok.
+                </p>
+
+                <p>
+                  Preto Zedpera nerastie len vo funkciách, ale hlavne v spôsobe,
+                  akým premýšľa. Neučíme ju len písať texty. Učíme ju rozumieť
+                  procesu.
+                </p>
+
+                <p className="font-semibold text-white">
+                  A práve preto ju neustále posúvame ďalej. Nie iba ako produkt,
+                  ale ako nový spôsob, akým sa dá pristupovať k učeniu, písaniu
+                  a premýšľaniu.
+                </p>
+              </div>
+
+              <div className="mt-8">
+                <a
+                  href="#pricing"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-7 py-4 text-sm font-black text-slate-950 shadow-xl transition hover:bg-violet-50"
+                >
+                  Chcem začať so Zedperou
+                  <ArrowRight size={18} />
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section className="bg-[#f8fafc] py-20">
         <div className="mx-auto max-w-7xl px-5 lg:px-8">
           <div className="mx-auto mb-12 max-w-4xl text-center">
@@ -704,7 +918,7 @@ export default function LandingPage() {
             </div>
 
             <h2 className="text-3xl font-black tracking-tight text-slate-950 md:text-5xl">
-              Inteligentný nástroj novej generácie pre akademické písanie.
+              Inteligentný nástroj novej generácie pre akademické písanie
             </h2>
 
             <p className="mt-5 text-lg leading-8 text-slate-600">
@@ -1051,11 +1265,11 @@ export default function LandingPage() {
           </h2>
 
           <p className="mt-6 text-lg leading-8 text-slate-600">
-            Áno, používanie Zedpery je úplne legálne a etické. Nekopíruješ
-            texty umelej inteligencie, ale ty sám ich tvoríš. Prechádzaš
-            jednotlivými kapitolami a Zedpera ti pomáha napísať celú prácu za
-            minimum času. Stačí keď doplníš do čestného prehlásenia svojej
-            práce, že pri niektorých častiach bola použitá umelá inteligencia.
+            Áno, používanie Zedpery je úplne legálne a etické. Nekopíruješ texty
+            umelej inteligencie, ale ty sám ich tvoríš. Prechádzaš jednotlivými
+            kapitolami a Zedpera ti pomáha napísať celú prácu za minimum času.
+            Stačí keď doplníš do čestného prehlásenia svojej práce, že pri
+            niektorých častiach bola použitá umelá inteligencia.
           </p>
 
           <div className="mt-8">

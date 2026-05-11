@@ -89,6 +89,11 @@ type SavedProfile = {
   };
 };
 
+type SlideContent = {
+  title: string;
+  body: string[];
+};
+
 declare global {
   interface Window {
     webkitSpeechRecognition?: any;
@@ -168,7 +173,7 @@ const modules: {
   {
     key: 'planning',
     label: 'Plánovanie',
-    subtitle: 'Harmonogram práce',
+    subtitle: 'Predbežný harmonogram práce',
     icon: BookOpen,
   },
   {
@@ -324,6 +329,56 @@ function cleanFinalOutput(text: string) {
     .trim();
 }
 
+function stripModuleExtraSections(text: string, module: ModuleKey) {
+  let cleaned = cleanFinalOutput(text);
+
+  if (module === 'translation') {
+    cleaned = cleaned
+      .replace(/\n*\s*={2,}\s*ANAL[ÝY]ZA\s*={2,}[\s\S]*$/i, '')
+      .replace(/\n*\s*={2,}\s*SK[ÓO]RE\s*={2,}[\s\S]*$/i, '')
+      .replace(/\n*\s*={2,}\s*ODPOR[ÚU]ČANIE\s*={2,}[\s\S]*$/i, '')
+      .replace(/\n*\s*ANAL[ÝY]ZA\s*:?[\s\S]*$/i, '')
+      .replace(/\n*\s*SK[ÓO]RE\s*:?[\s\S]*$/i, '')
+      .replace(/\n*\s*ODPOR[ÚU]ČANIE\s*:?[\s\S]*$/i, '')
+      .replace(/\n*\s*Koment[áa]r\s*:?[\s\S]*$/i, '')
+      .replace(/\n*\s*Vysvetlenie\s*:?[\s\S]*$/i, '')
+      .replace(/^\s*Preložený text\s*[:\-–—]*\s*/i, '')
+      .replace(/^\s*Preklad\s*[:\-–—]*\s*/i, '')
+      .replace(/^\s*Tu je preklad\s*[:\-–—]*\s*/i, '')
+      .replace(/^\s*Výsledok prekladu\s*[:\-–—]*\s*/i, '')
+      .trim();
+
+    return cleaned;
+  }
+
+  if (module === 'emails') {
+    cleaned = cleaned
+      .replace(/\n*\s*={2,}\s*ANAL[ÝY]ZA\s*={2,}[\s\S]*$/i, '')
+      .replace(/\n*\s*={2,}\s*SK[ÓO]RE\s*={2,}[\s\S]*$/i, '')
+      .replace(/\n*\s*={2,}\s*ODPOR[ÚU]ČANIE\s*={2,}[\s\S]*$/i, '')
+      .replace(/\n*\s*ANAL[ÝY]ZA\s*:?[\s\S]*$/i, '')
+      .replace(/\n*\s*SK[ÓO]RE\s*:?[\s\S]*$/i, '')
+      .replace(/\n*\s*ODPOR[ÚU]ČANIE\s*:?[\s\S]*$/i, '')
+      .replace(/\n*\s*Koment[áa]r\s*:?[\s\S]*$/i, '')
+      .replace(/\n*\s*Vysvetlenie\s*:?[\s\S]*$/i, '')
+      .replace(/^\s*Vytvorený email\s*[:\-–—]*\s*/i, '')
+      .replace(/^\s*Email\s*[:\-–—]*\s*/i, '')
+      .replace(/^\s*Tu je profesionálny email\s*[:\-–—]*\s*/i, '')
+      .replace(/^\s*Tu je návrh emailu\s*[:\-–—]*\s*/i, '')
+      .trim();
+
+    const subjectIndex = cleaned.search(/(^|\n)\s*Predmet\s*:/i);
+
+    if (subjectIndex > 0) {
+      cleaned = cleaned.slice(subjectIndex).trim();
+    }
+
+    return cleaned;
+  }
+
+  return cleaned;
+}
+
 function sanitizeFileName(value: string) {
   return (
     value
@@ -383,6 +438,110 @@ function createDocHtml(title: string, text: string) {
 </body>
 </html>
 `;
+}
+
+function splitTextToSlides(text: string): SlideContent[] {
+  const cleaned = cleanFinalOutput(text);
+
+  if (!cleaned.trim()) return [];
+
+  const lines = cleaned
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const slides: SlideContent[] = [];
+  let currentTitle = '';
+  let currentBody: string[] = [];
+
+  for (const line of lines) {
+    const isSlideTitle =
+      /^snímka\s*\d+/i.test(line) ||
+      /^slide\s*\d+/i.test(line) ||
+      /^časť\s+[a-z]/i.test(line) ||
+      /^[0-9]+\.\s+/.test(line);
+
+    if (isSlideTitle) {
+      if (currentTitle || currentBody.length) {
+        slides.push({
+          title: currentTitle || 'Snímka',
+          body: currentBody,
+        });
+      }
+
+      currentTitle = line;
+      currentBody = [];
+    } else {
+      currentBody.push(line);
+    }
+  }
+
+  if (currentTitle || currentBody.length) {
+    slides.push({
+      title: currentTitle || 'Prezentácia',
+      body: currentBody,
+    });
+  }
+
+  if (slides.length === 0) {
+    return [
+      {
+        title: 'Prezentácia',
+        body: lines,
+      },
+    ];
+  }
+
+  return slides;
+}
+
+function splitLongTextLine(line: string, maxLength = 180) {
+  const value = String(line || '').trim();
+
+  if (value.length <= maxLength) return [value];
+
+  const parts: string[] = [];
+  let rest = value;
+
+  while (rest.length > maxLength) {
+    let cutIndex = rest.lastIndexOf(' ', maxLength);
+
+    if (cutIndex < 80) {
+      cutIndex = maxLength;
+    }
+
+    parts.push(rest.slice(0, cutIndex).trim());
+    rest = rest.slice(cutIndex).trim();
+  }
+
+  if (rest) {
+    parts.push(rest);
+  }
+
+  return parts;
+}
+
+function expandSlideBody(body: string[]) {
+  const expanded: string[] = [];
+
+  body.forEach((line) => {
+    splitLongTextLine(line, 180).forEach((part) => {
+      if (part.trim()) expanded.push(part.trim());
+    });
+  });
+
+  return expanded;
+}
+
+function paginateSlideBody(body: string[], maxItemsPerSlide = 6) {
+  const expanded = expandSlideBody(body);
+  const pages: string[][] = [];
+
+  for (let index = 0; index < expanded.length; index += maxItemsPerSlide) {
+    pages.push(expanded.slice(index, index + maxItemsPerSlide));
+  }
+
+  return pages.length ? pages : [[]];
 }
 
 function downloadBlob({
@@ -493,6 +652,109 @@ async function readApiErrorResponse(res: Response) {
   } catch {
     return `API error ${res.status}`;
   }
+}
+
+function getTodayStart() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+}
+
+function getTodaySkDate() {
+  const today = new Date();
+  return today.toLocaleDateString('sk-SK', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
+function normalizeYear(year: string) {
+  if (year.length === 2) {
+    const numeric = Number(year);
+    return numeric >= 70 ? 1900 + numeric : 2000 + numeric;
+  }
+
+  return Number(year);
+}
+
+function extractDatesFromText(text: string) {
+  const value = String(text || '');
+  const dates: Date[] = [];
+
+  const dotRegex = /\b(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{2,4})\b/g;
+  const isoRegex = /\b(\d{4})\s*-\s*(\d{1,2})\s*-\s*(\d{1,2})\b/g;
+
+  let match: RegExpExecArray | null;
+
+  while ((match = dotRegex.exec(value)) !== null) {
+    const day = Number(match[1]);
+    const month = Number(match[2]);
+    const year = normalizeYear(match[3]);
+
+    const date = new Date(year, month - 1, day);
+    date.setHours(0, 0, 0, 0);
+
+    if (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    ) {
+      dates.push(date);
+    }
+  }
+
+  while ((match = isoRegex.exec(value)) !== null) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+
+    const date = new Date(year, month - 1, day);
+    date.setHours(0, 0, 0, 0);
+
+    if (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    ) {
+      dates.push(date);
+    }
+  }
+
+  return dates;
+}
+
+function validatePlanningDatesNoPast(text: string) {
+  const dates = extractDatesFromText(text);
+  const today = getTodayStart();
+
+  const pastDates = dates.filter((date) => date.getTime() < today.getTime());
+
+  if (pastDates.length === 0) {
+    return {
+      ok: true,
+      message: '',
+    };
+  }
+
+  const uniquePastDates = Array.from(
+    new Set(
+      pastDates.map((date) =>
+        date.toLocaleDateString('sk-SK', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+        }),
+      ),
+    ),
+  );
+
+  return {
+    ok: false,
+    message: `Plánovanie nemôže obsahovať dátum v minulosti. Dnes je ${getTodaySkDate()}. Uprav tieto dátumy: ${uniquePastDates.join(
+      ', ',
+    )}.`,
+  };
 }
 
 // ================= PAGE =================
@@ -683,7 +945,6 @@ DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
 - Výstup píš ako čistý text vhodný do Wordu.
 - Nepíš Markdown znaky ako #, ##, ###, **, *, --- ani kódové bloky.
 - Nevkladaj na úplný začiatok technické nadpisy typu „AI vedúci“, „Audit kvality“, „Obhajoba“, „Výstup“ ani názov modulu.
-- Začni priamo vecným nadpisom podľa obsahu práce, napríklad názvom práce alebo názvom časti.
 - Nepoužívaj poškodené znaky, kódovanie ani nečitateľné symboly.
 - Nevymýšľaj zdroje, autorov, DOI, URL, roky ani vydavateľov.
 - Ak údaj chýba, napíš: údaj je potrebné overiť.
@@ -782,6 +1043,12 @@ POVINNÁ ŠTRUKTÚRA VÝSTUPU:
 ČASŤ D: SLABÉ MIESTA PRÁCE
 ČASŤ E: KRÁTKA VERZIA OBHAJOBY NA 3–5 MINÚT
 ČASŤ F: KONTROLA PRÍLOH
+
+DÔLEŽITÉ:
+- Prezentáciu priprav tak, aby sa dala exportovať do PPTX.
+- Každú snímku označ ako „Snímka 1“, „Snímka 2“, „Snímka 3“.
+- Pri každej snímke uveď krátke body vhodné do prezentácie.
+- Vypíš celý obsah, neskracuj odpoveď.
 `.trim();
     }
 
@@ -790,7 +1057,7 @@ POVINNÁ ŠTRUKTÚRA VÝSTUPU:
 ${baseRules}
 
 ÚLOHA:
-Prelož text akademicky a prirodzene.
+Prelož text akademicky, prirodzene a presne.
 
 Zo jazyka: ${translationFrom}
 Do jazyka: ${translationTo}
@@ -798,8 +1065,19 @@ Do jazyka: ${translationTo}
 TEXT NA PREKLAD:
 ${input}
 
-ZAČIATOK ODPOVEDE:
-Začni priamo preloženým textom.
+PRÍSNE PRAVIDLÁ PRE VÝSTUP:
+- Vráť iba samotný preložený text.
+- Nepíš nadpis „Preklad“.
+- Nepíš „Preložený text“.
+- Nepíš analýzu.
+- Nepíš skóre.
+- Nepíš komentár k prekladu.
+- Nepíš vysvetlenie.
+- Nepíš hodnotenie.
+- Nepíš odporúčania.
+- Nepíš časti ako „ANALÝZA“, „SKÓRE“, „ODPORÚČANIE“.
+- Neuvádzaj, že text bol preložený.
+- Začni priamo prvým slovom preloženého textu.
 `.trim();
     }
 
@@ -830,13 +1108,30 @@ VÝSTUP:
 ${baseRules}
 
 ÚLOHA:
-Vytvor plán práce bez markdown znakov.
+Vytvor iba predbežný a orientačný plán práce bez markdown znakov.
+
+DNEŠNÝ DÁTUM:
+${getTodaySkDate()}
 
 ZADANIE:
 ${input}
 
+PRAVIDLÁ PRE PLÁNOVANIE:
+- Plánovanie nesmie obsahovať termíny v minulosti.
+- Všetky dátumy musia byť od dnešného dátumu alebo v budúcnosti.
+- Harmonogram musí byť označený ako predbežný / orientačný.
+- Ak používateľ zadal termín odovzdania, rozvrhni etapy spätne iba v rozsahu, ktorý nezasahuje do minulosti.
+- Ak je termín príliš blízko, upozorni, že plán je rizikový.
+- Nepíš, že ide o záväzný termínový plán.
+- Použi formulácie: predbežne, orientačne, odporúčané, navrhovaný harmonogram.
+
 VÝSTUP:
-Štruktúrovaný harmonogram, etapy, termíny, úlohy a kontrolné body.
+1. Predbežné upozornenie
+2. Orientačný harmonogram
+3. Etapy práce
+4. Kontrolné body
+5. Riziká pri nedodržaní termínov
+6. Odporúčanie na ďalší postup
 `.trim();
     }
 
@@ -853,9 +1148,26 @@ Tón: ${emailTone}
 ČO MÁ EMAIL RIEŠIŤ:
 ${input}
 
-VÝSTUP:
+PRÍSNE PRAVIDLÁ PRE VÝSTUP:
+- Vráť iba hotový email.
+- Nepíš analýzu.
+- Nepíš skóre.
+- Nepíš komentár.
+- Nepíš odporúčania.
+- Nepíš vysvetlenie.
+- Nepíš časti ako „ANALÝZA“, „SKÓRE“, „ODPORÚČANIE“.
+- Nepíš text typu „Tu je návrh emailu“.
+- Nepíš žiadny text pred predmetom.
+- Nepíš žiadny text po emaile.
+- Výstup musí obsahovať iba:
 Predmet:
 Text emailu:
+
+POVINNÝ FORMÁT:
+Predmet: ...
+
+Text emailu:
+...
 `.trim();
     }
 
@@ -889,15 +1201,20 @@ VÝSTUP:
       return;
     }
 
+    if (activeModule === 'planning') {
+      const validation = validatePlanningDatesNoPast(input);
+
+      if (!validation.ok) {
+        alert(validation.message);
+        return;
+      }
+    }
+
     setIsLoading(true);
     setResult('');
 
     try {
       if (activeModule === 'originality') {
-        /**
-         * Nové okno otvoríme okamžite po kliknutí.
-         * Ak by sme ho otvárali až po AI odpovedi, prehliadač ho môže zablokovať.
-         */
         let protocolWindow: Window | null = null;
 
         try {
@@ -960,17 +1277,6 @@ VÝSTUP:
           );
         }
 
-        /**
-         * Dôležité:
-         * Ukladáme CELÝ JSON, nie iba textový report.
-         * Nová podstránka potom vie vykresliť grafy:
-         * - corpuses
-         * - dictionaryStats
-         * - histogram
-         * - documents
-         * - passages
-         * - plaintext
-         */
         localStorage.setItem(
           ORIGINALITY_PROTOCOL_STORAGE_KEY,
           JSON.stringify(data),
@@ -1111,11 +1417,25 @@ VÝSTUP:
           const chunk = decoder.decode(value, { stream: true });
           fullText += chunk;
 
-          setResult(cleanFinalOutput(fullText));
+          setResult(stripModuleExtraSections(fullText, activeModule));
         }
       }
 
-      const cleaned = cleanFinalOutput(fullText);
+      let cleaned = stripModuleExtraSections(fullText, activeModule);
+
+      if (activeModule === 'planning') {
+        cleaned = cleanFinalOutput(
+          [
+            'Predbežný orientačný harmonogram',
+            '',
+            'Upozornenie: Tento plán je len predbežný a orientačný. Nejde o záväzný termínový plán. Termíny je potrebné priebežne upravovať podľa reálneho stavu práce.',
+            '',
+            cleaned,
+          ].join('\n'),
+        );
+      }
+
+      cleaned = stripModuleExtraSections(cleaned, activeModule);
 
       setResult(cleaned);
       setCanvasText(cleaned);
@@ -1143,7 +1463,7 @@ VÝSTUP:
   };
 
   const downloadDoc = () => {
-    const text = cleanFinalOutput(canvasText || result);
+    const text = stripModuleExtraSections(canvasText || result, activeModule);
 
     if (!text.trim()) return;
 
@@ -1158,7 +1478,7 @@ VÝSTUP:
   };
 
   const downloadPdf = () => {
-    const text = cleanFinalOutput(canvasText || result);
+    const text = stripModuleExtraSections(canvasText || result, activeModule);
 
     if (!text.trim()) return;
 
@@ -1177,6 +1497,156 @@ VÝSTUP:
     setTimeout(() => {
       printWindow.print();
     }, 400);
+  };
+
+  const downloadPpt = async () => {
+    const text = stripModuleExtraSections(canvasText || result, activeModule);
+
+    if (!text.trim()) return;
+
+    try {
+      const pptxgenModule = await import('pptxgenjs');
+      const PptxGenJS = pptxgenModule.default;
+      const pptx = new PptxGenJS();
+
+      pptx.layout = 'LAYOUT_WIDE';
+      pptx.author = 'Zedpera';
+      pptx.company = 'Zedpera';
+      pptx.subject = exportTitle;
+      pptx.title = exportTitle;
+      pptx.lang = 'sk-SK';
+
+      pptx.theme = {
+        headFontFace: 'Arial',
+        bodyFontFace: 'Arial',
+        lang: 'sk-SK',
+      };
+
+      const fileBase = sanitizeFileName(exportTitle);
+      const slides = splitTextToSlides(text);
+
+      const titleSlide = pptx.addSlide();
+      titleSlide.background = { color: '0F172A' };
+
+      titleSlide.addText(exportTitle, {
+        x: 0.7,
+        y: 1.3,
+        w: 12,
+        h: 1,
+        fontFace: 'Arial',
+        fontSize: 32,
+        bold: true,
+        color: 'FFFFFF',
+        fit: 'shrink',
+      });
+
+      titleSlide.addText(activeProfile?.title || 'Prezentácia k obhajobe', {
+        x: 0.7,
+        y: 2.35,
+        w: 12,
+        h: 0.6,
+        fontFace: 'Arial',
+        fontSize: 18,
+        color: 'CBD5E1',
+        fit: 'shrink',
+      });
+
+      titleSlide.addText('Vygenerované v systéme Zedpera', {
+        x: 0.7,
+        y: 6.5,
+        w: 12,
+        h: 0.3,
+        fontFace: 'Arial',
+        fontSize: 10,
+        color: '94A3B8',
+      });
+
+      let slideNumber = 1;
+
+      slides.forEach((slideData) => {
+        const pages = paginateSlideBody(slideData.body, 6);
+
+        pages.forEach((pageBody, pageIndex) => {
+          const slide = pptx.addSlide();
+          slide.background = { color: 'FFFFFF' };
+
+          const title =
+            pageIndex === 0
+              ? slideData.title || `Snímka ${slideNumber}`
+              : `${slideData.title || `Snímka ${slideNumber}`} – pokračovanie ${
+                  pageIndex + 1
+                }`;
+
+          slide.addText(title, {
+            x: 0.55,
+            y: 0.35,
+            w: 12.1,
+            h: 0.7,
+            fontFace: 'Arial',
+            fontSize: 22,
+            bold: true,
+            color: '111827',
+            fit: 'shrink',
+          });
+
+          if (pageBody.length > 0) {
+            const bulletItems = pageBody.map((item) => ({
+              text: item,
+              options: {
+                bullet: { type: 'bullet' },
+                hanging: 4,
+              },
+            }));
+
+            slide.addText(bulletItems as any, {
+              x: 0.75,
+              y: 1.25,
+              w: 11.8,
+              h: 5.25,
+              fontFace: 'Arial',
+              fontSize: 15,
+              color: '1F2937',
+              valign: 'top',
+              fit: 'shrink',
+              breakLine: false,
+            });
+          } else {
+            slide.addText('Údaj je potrebné doplniť.', {
+              x: 0.75,
+              y: 1.25,
+              w: 11.8,
+              h: 1,
+              fontFace: 'Arial',
+              fontSize: 18,
+              color: '374151',
+            });
+          }
+
+          slide.addText(`${slideNumber}`, {
+            x: 12.2,
+            y: 6.85,
+            w: 0.5,
+            h: 0.25,
+            fontFace: 'Arial',
+            fontSize: 9,
+            color: '9CA3AF',
+            align: 'right',
+          });
+
+          slideNumber += 1;
+        });
+      });
+
+      await pptx.writeFile({
+        fileName: `${fileBase}.pptx`,
+      });
+    } catch (error) {
+      console.error(error);
+
+      alert(
+        'PPTX sa nepodarilo vytvoriť. Skontroluj, či máš nainštalovaný balík: npm install pptxgenjs',
+      );
+    }
   };
 
   const ModuleIcon = activeModuleInfo.icon;
@@ -1308,6 +1778,13 @@ VÝSTUP:
                     </div>
                   </div>
                 </div>
+
+                {activeModule === 'planning' && (
+                  <div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                    Plánovanie je len predbežné a orientačné. Systém nepovolí
+                    termíny v minulosti. Dnešný dátum: {getTodaySkDate()}.
+                  </div>
+                )}
 
                 {activeModule === 'quality' && (
                   <div className="mb-4 grid gap-3 md:grid-cols-3">
@@ -1551,6 +2028,17 @@ VÝSTUP:
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+                      {activeModule === 'defense' && (
+                        <button
+                          type="button"
+                          onClick={downloadPpt}
+                          className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-black text-white hover:bg-violet-500"
+                        >
+                          <Presentation className="h-4 w-4" />
+                          PPTX
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={downloadDoc}
@@ -1588,16 +2076,38 @@ VÝSTUP:
                   <h2 className="text-2xl font-black">Canvas</h2>
 
                   <p className="text-sm text-slate-400">
-                    Tu môžeš upravovať výsledný text a stiahnuť ho ako DOC
-                    alebo PDF.
+                    Tu môžeš upravovať výsledný text a stiahnuť ho ako PPTX,
+                    DOC alebo PDF.
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  {activeModule === 'defense' && (
+                    <button
+                      type="button"
+                      onClick={downloadPpt}
+                      disabled={
+                        !stripModuleExtraSections(
+                          canvasText || result,
+                          activeModule,
+                        ).trim()
+                      }
+                      className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-black text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Presentation className="h-4 w-4" />
+                      PPTX
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={downloadDoc}
-                    disabled={!cleanFinalOutput(canvasText || result).trim()}
+                    disabled={
+                      !stripModuleExtraSections(
+                        canvasText || result,
+                        activeModule,
+                      ).trim()
+                    }
                     className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <Download className="h-4 w-4" />
@@ -1607,7 +2117,12 @@ VÝSTUP:
                   <button
                     type="button"
                     onClick={downloadPdf}
-                    disabled={!cleanFinalOutput(canvasText || result).trim()}
+                    disabled={
+                      !stripModuleExtraSections(
+                        canvasText || result,
+                        activeModule,
+                      ).trim()
+                    }
                     className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <FileDown className="h-4 w-4" />
@@ -1627,7 +2142,9 @@ VÝSTUP:
               <textarea
                 value={canvasText || result}
                 onChange={(event) =>
-                  setCanvasText(cleanFinalOutput(event.target.value))
+                  setCanvasText(
+                    stripModuleExtraSections(event.target.value, activeModule),
+                  )
                 }
                 placeholder="Canvas je zatiaľ prázdny."
                 className="no-scrollbar flex-1 resize-none bg-[#050711] p-6 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-600"
@@ -1764,11 +2281,11 @@ function getPlaceholder(module: ModuleKey) {
   }
 
   if (module === 'defense') {
-    return 'Vlož stručný obsah práce alebo nahraj dokument. Systém pripraví prezentáciu, sprievodný text, otázky komisie a odpovede.';
+    return 'Vlož stručný obsah práce alebo nahraj dokument. Systém pripraví prezentáciu, sprievodný text, otázky komisie a odpovede. Po vytvorení sa zobrazí aj tlačidlo PPTX.';
   }
 
   if (module === 'translation') {
-    return 'Vlož text, ktorý chceš preložiť.';
+    return 'Vlož text, ktorý chceš preložiť. Výstup bude obsahovať iba samotný preložený text bez analýzy a skóre.';
   }
 
   if (module === 'data') {
@@ -1776,11 +2293,11 @@ function getPlaceholder(module: ModuleKey) {
   }
 
   if (module === 'planning') {
-    return 'Napíš termín odovzdania, stav práce a požadovaný plán.';
+    return `Napíš termín odovzdania, stav práce a požadovaný plán. Termín nesmie byť v minulosti. Dnes je ${getTodaySkDate()}. Výstup bude iba predbežný a orientačný.`;
   }
 
   if (module === 'emails') {
-    return 'Napíš, čo má email riešiť. Systém vytvorí nový profesionálny email bez zbytočných nezmyslov po hlavnej časti.';
+    return 'Napíš, čo má email riešiť. Výstup bude iba hotový email vo formáte Predmet a Text emailu.';
   }
 
   if (module === 'originality') {
@@ -1796,7 +2313,7 @@ function getButtonLabel(module: ModuleKey) {
   if (module === 'defense') return 'Vytvoriť prezentáciu a obhajobu';
   if (module === 'translation') return 'Preložiť text';
   if (module === 'data') return 'Analyzovať dáta';
-  if (module === 'planning') return 'Vytvoriť plán práce';
+  if (module === 'planning') return 'Vytvoriť predbežný plán';
   if (module === 'emails') return 'Vytvoriť email';
   if (module === 'originality') return 'Skontrolovať originalitu';
   return 'Spustiť';
@@ -1808,8 +2325,8 @@ function getResultTitle(module: ModuleKey) {
   if (module === 'defense') return 'Prezentácia, sprievodný text a obhajoba';
   if (module === 'translation') return 'Preložený text';
   if (module === 'data') return 'Výsledok analýzy dát';
-  if (module === 'planning') return 'Výsledný plán práce';
-  if (module === 'emails') return 'Vytvorený email';
+  if (module === 'planning') return 'Predbežný plán práce';
+  if (module === 'emails') return 'Email';
   if (module === 'originality') return 'Výsledok kontroly originality';
   return 'Výstup';
 }

@@ -1,12 +1,6 @@
 'use client';
 
-import {
-  BarChart3,
-  FileText,
-  Info,
-  Printer,
-  ShieldAlert,
-} from 'lucide-react';
+import { FileText, Info, Printer } from 'lucide-react';
 
 type CorpusMatch = {
   name: string;
@@ -58,6 +52,19 @@ type ProtocolResult = {
   protocolText?: string;
 
   score?: number;
+  originality?: number;
+  ai_risk?: number;
+  aiRisk?: number;
+  similarity?: number;
+  similarityScore?: number;
+  similarityPercent?: number;
+  plagiarism?: number;
+  plagiarismScore?: number;
+  plagiarismPercent?: number;
+  overlap?: number;
+  overlapPercent?: number;
+  percent?: number;
+
   title?: string;
   author?: string;
   school?: string;
@@ -109,41 +116,13 @@ type RequiredProtocolResult = {
 };
 
 const DEFAULT_CORPUSES: CorpusMatch[] = [
-  { name: 'Korpus CRZP', percent: 55.52, count: 632 },
-  { name: 'Internet', percent: 27.58, count: 81 },
-  { name: 'Wiki', percent: 6.31, count: 26 },
+  { name: 'Korpus CRZP', percent: 0, count: 0 },
+  { name: 'Internet', percent: 0, count: 0 },
+  { name: 'Wiki', percent: 0, count: 0 },
   { name: 'Slov-Lex', percent: 0, count: 0 },
 ];
 
-const DEFAULT_DOCUMENTS: SimilarDocument[] = [
-  {
-    order: 1,
-    citation:
-      'Inovatívne koncepty predajní v maloobchode / autor Cetner Marko, Bc. - školiteľ Matušovičová Monika, Ing., doc., PhD. - oponent Orgonáš Jozef, Ing., doc., PhD., MBA - OF/ KMr OF. - Bratislava, 2023. - 65',
-    plagId: '1769983',
-    workType: 'magisterská_inžinierska',
-    source: 'EU.Bratislava',
-    percent: 30.61,
-  },
-  {
-    order: 2,
-    citation:
-      'http://crzp.uniag.sk/Prace/2011/K/571B424287A642F4AB6EDACAD59F0C76.pdf / Stiahnuté: 19.12.2014; Veľkosť: 74,41kB.',
-    plagId: '13687890',
-    workType: '',
-    source: 'internet/intranet',
-    percent: 24.32,
-  },
-  {
-    order: 3,
-    citation:
-      'Vývoj a možnosti rozvoja maloobchodných firiem v konkurenčnom prostredí / autor Kreitšová Aneta - školiteľ Rovný Patrik, Ing., PhD. - 101000 / 101110. - Nitra, 2011. - 52 s.',
-    plagId: '1128361',
-    workType: 'bakalárska',
-    source: 'SPU.Nitra',
-    percent: 23.68,
-  },
-];
+const DEFAULT_DOCUMENTS: SimilarDocument[] = [];
 
 export default function OriginalityProtocolView({
   result,
@@ -161,6 +140,7 @@ export default function OriginalityProtocolView({
           <div className="text-lg font-black text-slate-900">
             Náhľad protokolu originality
           </div>
+
           <div className="text-sm text-slate-500">
             Vizuálny výstup pripravený na tlač alebo export do PDF.
           </div>
@@ -178,25 +158,15 @@ export default function OriginalityProtocolView({
 
       <section className="protocol-page crzp-page">
         <ProtocolHeader result={normalized} />
-
         <ControlledWork result={normalized} />
-
         <VisualGraphs result={normalized} />
-
         <ExtractedTextInfo result={normalized} />
-
         <DictionaryGraphs result={normalized} />
-
         <InfluenceTable />
-
         <WordHistogram result={normalized} />
-
         <DocumentsSection result={normalized} />
-
         <SimilarityDetails result={normalized} />
-
         <PlaintextSection result={normalized} />
-
         <ProtocolFooter result={normalized} />
       </section>
     </div>
@@ -211,7 +181,7 @@ function ProtocolHeader({ result }: { result: RequiredProtocolResult }) {
         <span>www.crzp.sk/vysvetlivky30.pdf</span>
       </div>
 
-      <h1>Protokolokontroleoriginality</h1>
+      <h1>Protokol o kontrole originality</h1>
 
       <div className="crzp-meta-row">
         <div>metadata</div>
@@ -224,7 +194,7 @@ function ProtocolHeader({ result }: { result: RequiredProtocolResult }) {
 function ControlledWork({ result }: { result: RequiredProtocolResult }) {
   return (
     <section className="crzp-section">
-      <h2 className="crzp-section-title">Kontrolovanápráca</h2>
+      <h2 className="crzp-section-title">Kontrolovaná práca</h2>
 
       <table className="crzp-work-table">
         <thead>
@@ -243,10 +213,10 @@ function ControlledWork({ result }: { result: RequiredProtocolResult }) {
 
               <div className="crzp-citation-detail">
                 {result.author && <>autor {result.author}, </>}
-                {result.faculty || 'FM/ UDM(FM)'}.-{' '}
-                {result.school || 'Bratislava'}, {getYear(result.createdAt)}.-{' '}
-                typ práce: {result.workType || 'bakalárska'} zdroj:{' '}
-                {result.school || '.Bratislava'}
+                {result.faculty || 'Neuvedená fakulta'}.-{' '}
+                {result.school || 'Neuvedená škola'}, {getYear(result.createdAt)}
+                .- typ práce: {result.workType || 'neurčené'} zdroj:{' '}
+                {result.school || 'ZEDPERA'}
               </div>
             </td>
 
@@ -254,6 +224,7 @@ function ControlledWork({ result }: { result: RequiredProtocolResult }) {
               <div className="crzp-big-percent">
                 {formatPercent(result.score, 2)}
               </div>
+
               <MiniBlocks value={result.score} />
             </td>
           </tr>
@@ -262,8 +233,9 @@ function ControlledWork({ result }: { result: RequiredProtocolResult }) {
 
       <p className="crzp-note">
         *Číslo vyjadruje percentuálny podiel textu, ktorý má prekryv s indexom
-        prác korpusu CRZP. Intervaly grafického zvýraznenia prekryvu sú
-        nastavené na [0-20, 21-40, 41-60, 61-80, 81-100].
+        prác korpusu CRZP, internetových zdrojov alebo iných porovnávaných
+        dokumentov. Intervaly grafického zvýraznenia prekryvu sú nastavené na
+        [0-20, 21-40, 41-60, 61-80, 81-100].
       </p>
 
       <p className="crzp-corpuses-line">
@@ -271,7 +243,7 @@ function ControlledWork({ result }: { result: RequiredProtocolResult }) {
         {result.corpuses
           .map(
             (item) =>
-              `${item.name}:${formatPercent(item.percent, 2)}${
+              `${item.name}: ${formatPercent(item.percent, 2)}${
                 typeof item.count === 'number' ? ` (${item.count})` : ''
               }`,
           )
@@ -290,9 +262,7 @@ function VisualGraphs({ result }: { result: RequiredProtocolResult }) {
 
       <div className="crzp-visual-grid">
         <SimilarityDonut value={result.score} />
-
         <CorpusBars corpuses={result.corpuses} />
-
         <RiskScale value={result.score} />
       </div>
     </section>
@@ -354,6 +324,7 @@ function CorpusBars({ corpuses }: { corpuses: CorpusMatch[] }) {
             <div key={`${item.name}-${index}`} className="crzp-corpus-row">
               <div className="crzp-corpus-label">
                 <strong>{item.name}</strong>
+
                 <span>
                   {formatPercent(percent, 2)}
                   {typeof item.count === 'number' ? ` (${item.count})` : ''}
@@ -391,12 +362,7 @@ function RiskScale({ value }: { value: number }) {
         <div className="crzp-risk-segment risk-4">61-80</div>
         <div className="crzp-risk-segment risk-5">81-100</div>
 
-        <div
-          className="crzp-risk-pointer"
-          style={{
-            left: `${percent}%`,
-          }}
-        >
+        <div className="crzp-risk-pointer" style={{ left: `${percent}%` }}>
           <span>{formatPercent(percent, 2)}</span>
         </div>
       </div>
@@ -414,7 +380,7 @@ function ExtractedTextInfo({ result }: { result: RequiredProtocolResult }) {
   return (
     <section className="crzp-section">
       <h2 className="crzp-section-title">
-        Informácieoextrahovanomtextedodanomnakontrolu
+        Informácie o extrahovanom texte dodanom na kontrolu
       </h2>
 
       <div className="crzp-info-grid">
@@ -472,9 +438,11 @@ function DictionaryGraphs({ result }: { result: RequiredProtocolResult }) {
 
         <div className="crzp-stat-card">
           <div className="crzp-stat-card-title">Celkový počet slov</div>
+
           <div className="crzp-stat-card-number">
             {formatNumber(stats.totalWords)}
           </div>
+
           <div className="crzp-stat-card-text">
             Slovníkové slová: {formatNumber(stats.dictionaryWords)}
           </div>
@@ -482,9 +450,11 @@ function DictionaryGraphs({ result }: { result: RequiredProtocolResult }) {
 
         <div className="crzp-stat-card">
           <div className="crzp-stat-card-title">Dĺžka extrahovaného textu</div>
+
           <div className="crzp-stat-card-number">
             {formatNumber(stats.extractedChars)}
           </div>
+
           <div className="crzp-stat-card-text">znakov</div>
         </div>
       </div>
@@ -501,12 +471,7 @@ function MetricGauge({ label, value }: { label: string; value: number }) {
 
       <div className="crzp-gauge">
         <div className="crzp-gauge-track">
-          <div
-            className="crzp-gauge-fill"
-            style={{
-              width: `${percent}%`,
-            }}
-          />
+          <div className="crzp-gauge-fill" style={{ width: `${percent}%` }} />
         </div>
 
         <div className="crzp-gauge-value">{formatPercent(percent, 1)}</div>
@@ -547,7 +512,7 @@ function InfluenceTable() {
       </table>
 
       <p className="crzp-note">
-        *Kontrola originality je výrazne oplyvnená kvalitou dodaného textu.
+        *Kontrola originality je výrazne ovplyvnená kvalitou dodaného textu.
         Slovníkový test vyjadruje mieru zhody slov kontrolovanej práce so
         slovníkom referenčných slov podporovaných jazykov. Nízka zhoda môže byť
         spôsobená: nepodporovaný jazyk, chyba prevodu PDF alebo úmyselná
@@ -564,19 +529,21 @@ function WordHistogram({ result }: { result: RequiredProtocolResult }) {
 
   return (
     <section className="crzp-section crzp-histogram-section">
-      <h2 className="crzp-section-title">Početnosť slov-histogram</h2>
+      <h2 className="crzp-section-title">Početnosť slov - histogram</h2>
 
       <table className="crzp-histogram-table">
         <tbody>
           <tr>
             <th>Dĺžka slova</th>
+
             {histogram.map((item) => (
               <td key={`length-${item.length}`}>{item.length}</td>
             ))}
           </tr>
 
           <tr>
-            <th>Indik. odchylka</th>
+            <th>Indik. odchýlka</th>
+
             {histogram.map((item) => (
               <td
                 key={`deviation-${item.length}`}
@@ -625,7 +592,7 @@ function WordHistogram({ result }: { result: RequiredProtocolResult }) {
         je počítaný pre korpus slovenských prác. Značka &quot;&gt;&gt;&quot;
         indikuje výrazne viac slov danej dĺžky ako priemer a značka
         &quot;&lt;&lt;&quot; výrazne menej slov danej dĺžky ako priemer.
-        Výrazné odchylky môžu indikovať manipuláciu textu. Je potrebné
+        Výrazné odchýlky môžu indikovať manipuláciu textu. Je potrebné
         skontrolovať &quot;plaintext&quot;!
       </p>
     </section>
@@ -633,58 +600,68 @@ function WordHistogram({ result }: { result: RequiredProtocolResult }) {
 }
 
 function DocumentsSection({ result }: { result: RequiredProtocolResult }) {
-  const documents = result.documents.length > 0 ? result.documents : DEFAULT_DOCUMENTS;
+  const documents =
+    result.documents.length > 0 ? result.documents : DEFAULT_DOCUMENTS;
 
   return (
     <section className="crzp-section">
       <h2 className="crzp-section-title">
-        Prácesnadprahovouhodnotoupodobnosti
+        Práce s nadprahovou hodnotou podobnosti
       </h2>
 
-      <table className="crzp-documents-table">
-        <thead>
-          <tr>
-            <th>Dok.</th>
-            <th>Citácia</th>
-            <th>Percento*</th>
-          </tr>
-        </thead>
+      {documents.length === 0 ? (
+        <div className="crzp-empty-passages">
+          Neboli zistené dokumenty s nadprahovou hodnotou podobnosti.
+        </div>
+      ) : (
+        <>
+          <table className="crzp-documents-table">
+            <thead>
+              <tr>
+                <th>Dok.</th>
+                <th>Citácia</th>
+                <th>Percento*</th>
+              </tr>
+            </thead>
 
-        <tbody>
-          {documents.map((doc, index) => (
-            <tr key={`${doc.citation}-${index}`}>
-              <td className="crzp-doc-number">{doc.order || index + 1}</td>
+            <tbody>
+              {documents.map((doc, index) => (
+                <tr key={`${doc.citation}-${index}`}>
+                  <td className="crzp-doc-number">{doc.order || index + 1}</td>
 
-              <td>
-                <div className="crzp-doc-title">{doc.citation}</div>
+                  <td>
+                    <div className="crzp-doc-title">{doc.citation}</div>
 
-                <div className="crzp-doc-meta">
-                  plagID: {doc.plagId || 'ORIENTACNE'} typ práce:{' '}
-                  {doc.workType || 'neurčené'} zdroj:{' '}
-                  {doc.source || 'ZEDPERA'}
-                </div>
-              </td>
+                    <div className="crzp-doc-meta">
+                      plagID: {doc.plagId || 'ORIENTAČNE'} typ práce:{' '}
+                      {doc.workType || 'neurčené'} zdroj:{' '}
+                      {doc.source || 'ZEDPERA'}
+                    </div>
+                  </td>
 
-              <td className="crzp-doc-percent">
-                <MiniBlocks value={doc.percent} />
-                <div>{formatPercent(doc.percent, 2)}</div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                  <td className="crzp-doc-percent">
+                    <MiniBlocks value={doc.percent} />
 
-      <p className="crzp-note">
-        *Číslo vyjadruje percentuálny prekryv testovaného dokumentu len s
-        dokumentom uvedeným v príslušnom riadku.
-      </p>
+                    <div>{formatPercent(doc.percent, 2)}</div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-      <p className="crzp-note">
-        :Dokument má prekryv s veľkým počtom dokumentov. Zoznam dokumentov je
-        krátený a usporiadaný podľa percenta zostupne. Celkový počet dokumentov
-        je [{documents.length}]. V prípade veľkého počtu je často príčinou zhoda
-        v texte, ktorý je predpísaný pre daný typ práce.
-      </p>
+          <p className="crzp-note">
+            *Číslo vyjadruje percentuálny prekryv testovaného dokumentu len s
+            dokumentom uvedeným v príslušnom riadku.
+          </p>
+
+          <p className="crzp-note">
+            Dokument má prekryv s viacerými dokumentmi. Zoznam dokumentov je
+            usporiadaný podľa percenta zostupne. Celkový počet dokumentov je [
+            {documents.length}]. V prípade veľkého počtu je často príčinou zhoda
+            v texte, ktorý je predpísaný pre daný typ práce.
+          </p>
+        </>
+      )}
     </section>
   );
 }
@@ -692,7 +669,7 @@ function DocumentsSection({ result }: { result: RequiredProtocolResult }) {
 function SimilarityDetails({ result }: { result: RequiredProtocolResult }) {
   return (
     <section className="crzp-section">
-      <h2 className="crzp-section-title">Detaily-zistenépodobnosti</h2>
+      <h2 className="crzp-section-title">Detaily - zistené podobnosti</h2>
 
       {result.passages.length === 0 ? (
         <div className="crzp-empty-passages">
@@ -701,9 +678,13 @@ function SimilarityDetails({ result }: { result: RequiredProtocolResult }) {
       ) : (
         <div className="crzp-passages">
           {result.passages.map((passage, index) => (
-            <article key={`${passage.paragraph}-${index}`} className="crzp-passage">
+            <article
+              key={`${passage.paragraph}-${index}`}
+              className="crzp-passage"
+            >
               <div className="crzp-passage-head">
-                <strong>{index + 1}. odsek :</strong>
+                <strong>{index + 1}. odsek:</strong>
+
                 <span>
                   spoľahlivosť [
                   {passage.reliability ||
@@ -721,6 +702,7 @@ function SimilarityDetails({ result }: { result: RequiredProtocolResult }) {
               {passage.matchedText && (
                 <div className="crzp-source-box">
                   <strong>Zdrojový / zhodný text:</strong>
+
                   <HighlightedText text={passage.matchedText} />
                 </div>
               )}
@@ -734,11 +716,7 @@ function SimilarityDetails({ result }: { result: RequiredProtocolResult }) {
                     </>
                   )}
 
-                  {passage.reason && (
-                    <>
-                      Dôvod: {passage.reason}
-                    </>
-                  )}
+                  {passage.reason && <>Dôvod: {passage.reason}</>}
                 </div>
               )}
             </article>
@@ -756,12 +734,12 @@ function PlaintextSection({ result }: { result: RequiredProtocolResult }) {
     <section className="crzp-section crzp-plaintext-section">
       <h2 className="crzp-section-title">
         <FileText size={20} />
-        Plaintext dokumentunakontrolu
+        Plaintext dokumentu na kontrolu
       </h2>
 
       <p className="crzp-note">
-        Skontroluje extrahovaný text práce na konci protokolu! Plaintext čistý
-        text - extrahovaný text dokumentuje základom pre textový analyzátor.
+        Skontrolujte extrahovaný text práce na konci protokolu. Plaintext je
+        čistý extrahovaný text dokumentu a tvorí základ pre textový analyzátor.
         Tento text môže byť poškodený úmyselne vkladaním znakov, používaním
         neštandardných znakových sád alebo neúmyselne pri konverzii na PDF.
       </p>
@@ -781,12 +759,13 @@ function ProtocolFooter({ result }: { result: RequiredProtocolResult }) {
       <div>www.crzp.sk/vysvetlivky30.pdf</div>
 
       <div className="crzp-footer-links">
-        <div>metadata:{result.metadataUrl}</div>
-        <div>webprotokol:{result.webProtocolUrl}</div>
+        <div>metadata: {result.metadataUrl}</div>
+        <div>webprotokol: {result.webProtocolUrl}</div>
       </div>
 
       <div className="crzp-warning-box no-print">
         <Info size={18} />
+
         <span>
           Tento protokol je orientačný výstup systému ZEDPERA Originalita.
           Nenahrádza oficiálnu kontrolu originality školy, CRZP, Turnitin ani
@@ -799,7 +778,8 @@ function ProtocolFooter({ result }: { result: RequiredProtocolResult }) {
 
 function MiniBlocks({ value }: { value: number }) {
   const percent = safePercent(value);
-  const filled = Math.max(1, Math.min(5, Math.ceil(percent / 20)));
+  const filled =
+    percent <= 0 ? 0 : Math.max(1, Math.min(5, Math.ceil(percent / 20)));
 
   return (
     <div className="crzp-mini-blocks">
@@ -832,54 +812,566 @@ function HighlightedText({ text }: { text: string }) {
   );
 }
 
-function normalizeResult(result: ProtocolResult): RequiredProtocolResult {
-  const score = safePercent(result.score ?? 57.52);
+/* =====================================================
+   NORMALIZÁCIA A VÝPOČET PERCENT
+   ===================================================== */
 
-  const dictionaryStats = result.dictionaryStats || {
-    extractedChars: 67867,
-    totalWords: 9055,
-    dictionaryWords: 5788,
-    dictionaryWordsRatio: 63.9,
-    dictionaryLengthSum: 44238,
-    dictionaryLengthRatio: 65.2,
-  };
+function normalizeResult(result: ProtocolResult): RequiredProtocolResult {
+  const plaintext = result.plaintext || result.extractedText || '';
+
+  const documents = normalizeDocuments(result.documents || []);
+  const passages = normalizePassages(result.passages || []);
+
+  const dictionaryStats = normalizeDictionaryStats(
+    result.dictionaryStats,
+    plaintext,
+  );
+
+  const corpusesBeforeScore = normalizeCorpuses(
+    result.corpuses || [],
+    documents,
+    passages,
+    plaintext,
+  );
+
+  const score = calculateOverallScore({
+    result,
+    corpuses: corpusesBeforeScore,
+    documents,
+    passages,
+    plaintext,
+  });
+
+  const corpuses = applyScoreBackToCorpuses({
+    corpuses: corpusesBeforeScore,
+    score,
+    documents,
+    passages,
+  });
 
   return {
     score,
-    title: result.title || 'Korporátny dizajnmalej prevádzky',
+    title: result.title || 'Názov práce nebol uvedený',
     author: result.author || '',
-    school: result.school || 'Bratislava',
-    faculty: result.faculty || 'FM/ UDM(FM)',
+    school: result.school || 'Neuvedená škola',
+    faculty: result.faculty || 'Neuvedená fakulta',
     studyProgram: result.studyProgram || '',
-    supervisor: result.supervisor || 'doc., Mgr.',
-    workType: result.workType || 'bakalárska',
+    supervisor: result.supervisor || 'Neuvedené',
+    workType: result.workType || 'neurčené',
     citationStyle: result.citationStyle || 'ISO 690',
     language: result.language || 'SK',
     createdAt: result.createdAt || new Date().toISOString(),
-    metadataUrl:
-      result.metadataUrl ||
-      'https://opac.crzp.sk/?fn=detailBiblioForm&sid=880D977B60C8641DDAEC219C4FC3',
+    metadataUrl: result.metadataUrl || 'https://zedpera.com/originalita/metadata',
     webProtocolUrl:
-      result.webProtocolUrl ||
-      'https://www.crzp.sk/eprotokol?pid=E24761C75ECF4DD3889FEDE99A2C1A05',
-    corpuses:
-      result.corpuses && result.corpuses.length > 0
-        ? result.corpuses
-        : DEFAULT_CORPUSES,
+      result.webProtocolUrl || 'https://zedpera.com/originalita/protokol',
+    corpuses,
     dictionaryStats,
-    histogram: normalizeHistogram(result.histogram || []),
-    documents:
-      result.documents && result.documents.length > 0
-        ? result.documents
-        : DEFAULT_DOCUMENTS,
-    passages: result.passages || [],
-    plaintext: result.plaintext || result.extractedText || '',
+    histogram: normalizeHistogram(result.histogram || [], plaintext),
+    documents,
+    passages,
+    plaintext,
     summary: result.summary || '',
     recommendation: result.recommendation || '',
   };
 }
 
-function normalizeHistogram(value: HistogramItem[]): HistogramItem[] {
+function normalizeDocuments(documents: SimilarDocument[]): SimilarDocument[] {
+  return documents
+    .map((doc, index) => ({
+      ...doc,
+      order: Number.isFinite(Number(doc.order)) ? Number(doc.order) : index + 1,
+      citation: String(doc.citation || `Zdroj ${index + 1}`),
+      percent: safePercent(readPercentValue(doc.percent)),
+    }))
+    .filter((doc) => doc.percent > 0 || doc.citation.trim().length > 0)
+    .sort((a, b) => safePercent(b.percent) - safePercent(a.percent));
+}
+
+function normalizePassages(passages: SimilarityPassage[]): SimilarityPassage[] {
+  return passages
+    .map((passage) => ({
+      ...passage,
+      controlledText: String(passage.controlledText || ''),
+      matchedText: passage.matchedText ? String(passage.matchedText) : undefined,
+      percent:
+        typeof passage.percent === 'number' || typeof passage.percent === 'string'
+          ? safePercent(readPercentValue(passage.percent))
+          : undefined,
+    }))
+    .filter((passage) => passage.controlledText.trim().length > 0);
+}
+
+function normalizeCorpuses(
+  corpuses: CorpusMatch[],
+  documents: SimilarDocument[],
+  passages: SimilarityPassage[],
+  plaintext: string,
+): CorpusMatch[] {
+  const cleanCorpuses = corpuses
+    .map((item) => ({
+      name: String(item.name || 'Neurčený korpus'),
+      percent: safePercent(readPercentValue(item.percent)),
+      count: Number.isFinite(Number(item.count)) ? Number(item.count) : 0,
+    }))
+    .filter((item) => item.name.trim().length > 0);
+
+  const hasUsefulCorpusPercent = cleanCorpuses.some((item) => item.percent > 0);
+
+  if (cleanCorpuses.length > 0 && hasUsefulCorpusPercent) {
+    return ensureDefaultCorpusOrder(cleanCorpuses);
+  }
+
+  const fromDocuments = calculateCorpusesFromDocuments(documents);
+
+  if (fromDocuments.some((item) => item.percent > 0)) {
+    return ensureDefaultCorpusOrder(fromDocuments);
+  }
+
+  const passageScore = calculatePassageCoveragePercent(passages, plaintext);
+
+  if (passageScore > 0) {
+    return ensureDefaultCorpusOrder([
+      {
+        name: 'Textové podobnosti',
+        percent: passageScore,
+        count: passages.length,
+      },
+    ]);
+  }
+
+  if (cleanCorpuses.length > 0) {
+    return ensureDefaultCorpusOrder(cleanCorpuses);
+  }
+
+  return DEFAULT_CORPUSES;
+}
+
+function calculateCorpusesFromDocuments(
+  documents: SimilarDocument[],
+): CorpusMatch[] {
+  if (documents.length === 0) return [];
+
+  const groups = new Map<string, { total: number; max: number; count: number }>();
+
+  documents.forEach((doc) => {
+    const name = normalizeCorpusName(doc.source || doc.citation || 'ZEDPERA');
+    const percent = safePercent(doc.percent);
+
+    const existing = groups.get(name) || {
+      total: 0,
+      max: 0,
+      count: 0,
+    };
+
+    existing.total += percent;
+    existing.max = Math.max(existing.max, percent);
+    existing.count += 1;
+
+    groups.set(name, existing);
+  });
+
+  return Array.from(groups.entries()).map(([name, value]) => {
+    const average = value.count > 0 ? value.total / value.count : 0;
+
+    return {
+      name,
+      percent: safePercent(Math.max(value.max, average)),
+      count: value.count,
+    };
+  });
+}
+
+function normalizeCorpusName(value: string): string {
+  const source = String(value || '').toLowerCase();
+
+  if (
+    source.includes('crzp') ||
+    source.includes('univerz') ||
+    source.includes('eu.') ||
+    source.includes('spu.') ||
+    source.includes('uk.') ||
+    source.includes('tu.') ||
+    source.includes('vš') ||
+    source.includes('vysok') ||
+    source.includes('fakulta') ||
+    source.includes('škola') ||
+    source.includes('skola')
+  ) {
+    return 'Korpus CRZP';
+  }
+
+  if (
+    source.includes('internet') ||
+    source.includes('http') ||
+    source.includes('www') ||
+    source.includes('.sk') ||
+    source.includes('.cz') ||
+    source.includes('.com') ||
+    source.includes('.eu') ||
+    source.includes('.org') ||
+    source.includes('.net')
+  ) {
+    return 'Internet';
+  }
+
+  if (source.includes('wiki')) return 'Wiki';
+
+  if (
+    source.includes('slov-lex') ||
+    source.includes('zakon') ||
+    source.includes('zákon')
+  ) {
+    return 'Slov-Lex';
+  }
+
+  return 'Iné zdroje';
+}
+
+function ensureDefaultCorpusOrder(corpuses: CorpusMatch[]): CorpusMatch[] {
+  const wantedNames = ['Korpus CRZP', 'Internet', 'Wiki', 'Slov-Lex'];
+  const map = new Map<string, CorpusMatch>();
+
+  corpuses.forEach((item) => {
+    const existing = map.get(item.name);
+
+    if (!existing) {
+      map.set(item.name, {
+        name: item.name,
+        percent: safePercent(item.percent),
+        count: Number.isFinite(Number(item.count)) ? Number(item.count) : 0,
+      });
+
+      return;
+    }
+
+    map.set(item.name, {
+      name: item.name,
+      percent: Math.max(existing.percent, safePercent(item.percent)),
+      count: Number(existing.count || 0) + Number(item.count || 0),
+    });
+  });
+
+  wantedNames.forEach((name) => {
+    if (!map.has(name)) {
+      map.set(name, { name, percent: 0, count: 0 });
+    }
+  });
+
+  return Array.from(map.values()).sort((a, b) => {
+    const ai = wantedNames.indexOf(a.name);
+    const bi = wantedNames.indexOf(b.name);
+
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+
+    return safePercent(b.percent) - safePercent(a.percent);
+  });
+}
+
+function applyScoreBackToCorpuses({
+  corpuses,
+  score,
+  documents,
+  passages,
+}: {
+  corpuses: CorpusMatch[];
+  score: number;
+  documents: SimilarDocument[];
+  passages: SimilarityPassage[];
+}): CorpusMatch[] {
+  const hasPositiveCorpus = corpuses.some((item) => safePercent(item.percent) > 0);
+
+  if (hasPositiveCorpus || score <= 0) {
+    return corpuses;
+  }
+
+  const sourceName =
+    documents.length > 0
+      ? normalizeCorpusName(documents[0].source || documents[0].citation)
+      : passages.length > 0
+        ? 'Textové podobnosti'
+        : 'Korpus CRZP';
+
+  const updated = corpuses.map((item) => {
+    if (item.name === sourceName) {
+      return {
+        ...item,
+        percent: score,
+        count: Math.max(Number(item.count || 0), documents.length || passages.length || 1),
+      };
+    }
+
+    return item;
+  });
+
+  const exists = updated.some((item) => item.name === sourceName);
+
+  if (!exists) {
+    updated.push({
+      name: sourceName,
+      percent: score,
+      count: documents.length || passages.length || 1,
+    });
+  }
+
+  return ensureDefaultCorpusOrder(updated);
+}
+
+function normalizeDictionaryStats(
+  stats: DictionaryStats | undefined,
+  plaintext: string,
+): DictionaryStats {
+  if (stats) {
+    const totalWords = Number(stats.totalWords || 0);
+    const dictionaryWords = Number(stats.dictionaryWords || 0);
+    const dictionaryLengthSum = Number(stats.dictionaryLengthSum || 0);
+    const extractedChars = Number(stats.extractedChars || plaintext.length || 0);
+
+    const dictionaryWordsRatio =
+      Number.isFinite(Number(stats.dictionaryWordsRatio)) &&
+      Number(stats.dictionaryWordsRatio) > 0
+        ? safePercent(stats.dictionaryWordsRatio)
+        : totalWords > 0
+          ? safePercent((dictionaryWords / totalWords) * 100)
+          : 0;
+
+    const dictionaryLengthRatio =
+      Number.isFinite(Number(stats.dictionaryLengthRatio)) &&
+      Number(stats.dictionaryLengthRatio) > 0
+        ? safePercent(stats.dictionaryLengthRatio)
+        : extractedChars > 0
+          ? safePercent((dictionaryLengthSum / extractedChars) * 100)
+          : 0;
+
+    return {
+      extractedChars,
+      totalWords,
+      dictionaryWords,
+      dictionaryWordsRatio,
+      dictionaryLengthSum,
+      dictionaryLengthRatio,
+    };
+  }
+
+  const words = extractWords(plaintext);
+  const totalWords = words.length;
+  const dictionaryWords = words.filter((word) => word.length >= 2).length;
+  const dictionaryLengthSum = words.reduce((sum, word) => sum + word.length, 0);
+  const extractedChars = plaintext.length;
+
+  return {
+    extractedChars,
+    totalWords,
+    dictionaryWords,
+    dictionaryWordsRatio:
+      totalWords > 0 ? safePercent((dictionaryWords / totalWords) * 100) : 0,
+    dictionaryLengthSum,
+    dictionaryLengthRatio:
+      extractedChars > 0
+        ? safePercent((dictionaryLengthSum / extractedChars) * 100)
+        : 0,
+  };
+}
+
+function calculateOverallScore({
+  result,
+  corpuses,
+  documents,
+  passages,
+  plaintext,
+}: {
+  result: ProtocolResult;
+  corpuses: CorpusMatch[];
+  documents: SimilarDocument[];
+  passages: SimilarityPassage[];
+  plaintext: string;
+}): number {
+  const directSimilarity = firstPositivePercent([
+    result.score,
+    result.similarity,
+    result.similarityScore,
+    result.similarityPercent,
+    result.plagiarism,
+    result.plagiarismScore,
+    result.plagiarismPercent,
+    result.overlap,
+    result.overlapPercent,
+    result.percent,
+    result.ai_risk,
+    result.aiRisk,
+  ]);
+
+  if (directSimilarity > 0) {
+    return directSimilarity;
+  }
+
+  const originalityValue = readPercentValue(result.originality);
+
+  if (originalityValue > 0 && originalityValue <= 100) {
+    return safePercent(100 - originalityValue);
+  }
+
+  const corpusPercents = corpuses
+    .map((item) => safePercent(item.percent))
+    .filter((value) => value > 0);
+
+  if (corpusPercents.length > 0) {
+    return safePercent(Math.max(...corpusPercents));
+  }
+
+  const documentPercents = documents
+    .map((item) => safePercent(item.percent))
+    .filter((value) => value > 0);
+
+  if (documentPercents.length > 0) {
+    const maxDocument = Math.max(...documentPercents);
+    const averageTopDocuments = averagePercent(documentPercents.slice(0, 5));
+
+    return safePercent(Math.max(maxDocument, averageTopDocuments));
+  }
+
+  const passagePercents = passages
+    .map((item) => item.percent)
+    .filter((value): value is number => typeof value === 'number')
+    .map((value) => safePercent(value))
+    .filter((value) => value > 0);
+
+  if (passagePercents.length > 0) {
+    return safePercent(averagePercent(passagePercents));
+  }
+
+  const passageCoverage = calculatePassageCoveragePercent(passages, plaintext);
+
+  if (passageCoverage > 0) {
+    return passageCoverage;
+  }
+
+  const percentFromText = extractPercentFromText(
+    [
+      result.protocolText,
+      result.summary,
+      result.recommendation,
+      result.protocolTitle,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  );
+
+  if (percentFromText > 0) {
+    return percentFromText;
+  }
+
+  return 0;
+}
+
+function calculatePassageCoveragePercent(
+  passages: SimilarityPassage[],
+  plaintext: string,
+): number {
+  const totalText = String(plaintext || '').trim();
+
+  if (!totalText || passages.length === 0) {
+    return 0;
+  }
+
+  const totalLength = Math.max(1, totalText.length);
+
+  const matchedLength = passages.reduce((sum, passage) => {
+    const controlled = String(passage.controlledText || '').trim();
+    const matched = String(passage.matchedText || '').trim();
+
+    const controlledLength = controlled.length;
+    const matchedLength = matched.length;
+
+    return sum + Math.max(controlledLength, matchedLength);
+  }, 0);
+
+  return safePercent((matchedLength / totalLength) * 100);
+}
+
+function firstPositivePercent(values: unknown[]): number {
+  for (const value of values) {
+    const percent = readPercentValue(value);
+
+    if (percent > 0) {
+      return safePercent(percent);
+    }
+  }
+
+  return 0;
+}
+
+function readPercentValue(value: unknown): number {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return 0;
+    return safePercent(value);
+  }
+
+  if (typeof value === 'string') {
+    const cleaned = value
+      .replace(/\s+/g, '')
+      .replace('%', '')
+      .replace(',', '.');
+
+    const number = Number(cleaned);
+
+    if (!Number.isFinite(number)) {
+      return 0;
+    }
+
+    return safePercent(number);
+  }
+
+  return 0;
+}
+
+function extractPercentFromText(text: string): number {
+  const source = String(text || '');
+
+  if (!source.trim()) {
+    return 0;
+  }
+
+  const matches = source.match(/(\d{1,3}(?:[,.]\d{1,2})?)\s*%/g);
+
+  if (!matches || matches.length === 0) {
+    return 0;
+  }
+
+  const values = matches
+    .map((match) => readPercentValue(match))
+    .filter((value) => value > 0 && value <= 100);
+
+  if (values.length === 0) {
+    return 0;
+  }
+
+  return safePercent(Math.max(...values));
+}
+
+function averagePercent(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  const total = values.reduce((sum, item) => sum + safePercent(item), 0);
+
+  return safePercent(total / values.length);
+}
+
+function extractWords(text: string): string[] {
+  return String(text || '')
+    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+}
+
+function normalizeHistogram(
+  value: HistogramItem[],
+  plaintext = '',
+): HistogramItem[] {
   const map = new Map<number, HistogramItem>();
 
   value.forEach((item) => {
@@ -894,6 +1386,21 @@ function normalizeHistogram(value: HistogramItem[]): HistogramItem[] {
     }
   });
 
+  if (map.size === 0 && plaintext.trim()) {
+    const words = extractWords(plaintext);
+
+    words.forEach((word) => {
+      const length = Math.max(3, Math.min(25, word.length));
+      const existing = map.get(length);
+
+      map.set(length, {
+        length,
+        count: Number(existing?.count || 0) + 1,
+        deviation: '=',
+      });
+    });
+  }
+
   const completed: HistogramItem[] = [];
 
   for (let length = 3; length <= 25; length += 1) {
@@ -902,8 +1409,8 @@ function normalizeHistogram(value: HistogramItem[]): HistogramItem[] {
     completed.push(
       existing || {
         length,
-        count: length === 8 ? 80 : Math.max(4, Math.round(65 - Math.abs(10 - length) * 4)),
-        deviation: length === 8 ? '>>' : '=',
+        count: 0,
+        deviation: '=',
       },
     );
   }
@@ -1082,7 +1589,7 @@ function ProtocolStyles() {
         width: 15px;
         height: 15px;
         border: 1.4px solid #000000;
-        background: #fecaca;
+        background: #ffffff;
       }
 
       .crzp-mini-blocks span.is-filled {

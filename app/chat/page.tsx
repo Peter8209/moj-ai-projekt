@@ -42,6 +42,11 @@ type AttachedFile = {
   type: string;
   uploadedAt: string;
   file: File;
+
+  apiFile?: File;
+  apiSize?: number;
+  compressed?: boolean;
+  compressionNote?: string;
 };
 
 type SavedProfile = {
@@ -140,6 +145,10 @@ const allowedFileAccept = allowedFileExtensions.join(',');
 const maxFilesCount = 20;
 const maxFileSizeMb = 50;
 const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
+
+const maxApiFileSizeMb = 1;
+const maxApiFileSizeBytes = maxApiFileSizeMb * 1024 * 1024;
+const maxCompressedTextChars = 750_000;
 
 const agents: { key: Agent; label: string }[] = [
   { key: 'gemini', label: 'Gemini' },
@@ -275,7 +284,7 @@ function formatBytes(bytes: number) {
   const units = ['B', 'KB', 'MB', 'GB'];
   const index = Math.min(
     Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1
+    units.length - 1,
   );
 
   return `${(bytes / Math.pow(1024, index)).toFixed(1)} ${units[index]}`;
@@ -407,7 +416,7 @@ async function readApiErrorResponse(res: Response) {
           data?.details ||
           data?.reason ||
           data?.code ||
-          `API error ${res.status}`
+          `API error ${res.status}`,
       );
     }
 
@@ -439,9 +448,14 @@ function buildAttachmentPrompt(files: AttachedFile[]) {
         ? 'áno'
         : 'nie alebo iba čiastočne';
 
+      const compression =
+        item.size > maxApiFileSizeBytes
+          ? `, pred odoslaním do API bude komprimované na max. ${maxApiFileSizeMb} MB`
+          : '';
+
       return `${index + 1}. ${item.name} – ${getFileKindLabel(
-        item.name
-      )}, ${formatBytes(item.size)}, textová extrakcia: ${extractable}`;
+        item.name,
+      )}, ${formatBytes(item.size)}, textová extrakcia: ${extractable}${compression}`;
     })
     .join('\n');
 }
@@ -461,6 +475,227 @@ function ensureSourcesSection(text: string) {
 
 === POUŽITÉ ZDROJE A AUTORI ===
 Zdroje neboli v odpovedi samostatne uvedené. Over, či boli v priložených dokumentoch dostupné bibliografické údaje. Ak áno, spusti modul „Spracuj zdroje a citácie“.`;
+}
+
+// ================= FILE COMPRESSION =================
+
+function createTextFileFromString({
+  text,
+  fileName,
+}: {
+  text: string;
+  fileName: string;
+}) {
+  return new File([text], fileName, {
+    type: 'text/plain;charset=utf-8',
+  });
+}
+
+async function readTextFileSafely(file: File) {
+  try {
+    return await file.text();
+  } catch {
+    return '';
+  }
+}
+
+function limitTextToOneMb(text: string) {
+  const cleaned = String(text || '')
+    .replace(/\u0000/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .trim();
+
+  if (cleaned.length <= maxCompressedTextChars) {
+    return cleaned;
+  }
+
+  const head = cleaned.slice(0, Math.floor(maxCompressedTextChars * 0.65));
+  const tail = cleaned.slice(-Math.floor(maxCompressedTextChars * 0.25));
+
+  return `${head}
+
+[... TEXT BOL SKRÁTENÝ, ABY SA ZMESTIL DO LIMITU 1 MB ...]
+
+${tail}`;
+}
+
+async function compressImageToOneMb(file: File): Promise<File> {
+  const imageUrl = URL.createObjectURL(file);
+
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Obrázok sa nepodarilo načítať.'));
+      img.src = imageUrl;
+    });
+
+    let width = image.width;
+    let height = image.height;
+
+    const maxSide = 1600;
+
+    if (width > maxSide || height > maxSide) {
+      const ratio = Math.min(maxSide / width, maxSide / height);
+      width = Math.round(width * ratio);
+      height = Math.round(height * ratio);
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) {
+      throw new Error('Canvas nie je dostupný.');
+    }
+
+    ctx.drawImage(image, 0, 0, width, height);
+
+    let quality = 0.82;
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, 'image/jpeg', quality);
+      });
+
+      if (!blob) {
+        throw new Error('Kompresia obrázka zlyhala.');
+      }
+
+      if (blob.size <= maxApiFileSizeBytes || quality <= 0.35) {
+        return new File(
+          [blob],
+          `${sanitizeFileName(file.name.replace(/\.[^.]+$/, ''))}-compressed.jpg`,
+          {
+            type: 'image/jpeg',
+          },
+        );
+      }
+
+      quality -= 0.1;
+    }
+
+    throw new Error('Obrázok sa nepodarilo zmenšiť pod 1 MB.');
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
+
+async function compressFileForApi(file: File): Promise<{
+  apiFile: File;
+  compressed: boolean;
+  note: string;
+}> {
+  const extension = getFileExtension(file.name);
+
+  if (file.size <= maxApiFileSizeBytes) {
+    return {
+      apiFile: file,
+      compressed: false,
+      note: 'Súbor je menší ako 1 MB, odosiela sa bez kompresie.',
+    };
+  }
+
+  if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
+    try {
+      const compressedImage = await compressImageToOneMb(file);
+
+      return {
+        apiFile: compressedImage,
+        compressed: true,
+        note: `Obrázok bol zmenšený z ${formatBytes(file.size)} na ${formatBytes(
+          compressedImage.size,
+        )}.`,
+      };
+    } catch {
+      const fallbackText = `Obrázok "${file.name}" bol väčší ako 1 MB a nepodarilo sa ho bezpečne komprimovať.
+Pôvodná veľkosť: ${formatBytes(file.size)}.
+Používateľ musí nahrať menší obrázok alebo vložiť textový popis obrázka.`;
+
+      const fallbackFile = createTextFileFromString({
+        text: fallbackText,
+        fileName: `${sanitizeFileName(file.name)}-compressed-note.txt`,
+      });
+
+      return {
+        apiFile: fallbackFile,
+        compressed: true,
+        note: 'Obrázok sa nepodarilo komprimovať, do API sa posiela iba poznámka.',
+      };
+    }
+  }
+
+  if (['.txt', '.md', '.csv', '.rtf'].includes(extension)) {
+    const rawText = await readTextFileSafely(file);
+    const limitedText = limitTextToOneMb(rawText);
+
+    const compressedTextFile = createTextFileFromString({
+      text: limitedText,
+      fileName: `${sanitizeFileName(file.name)}-compressed.txt`,
+    });
+
+    return {
+      apiFile: compressedTextFile,
+      compressed: true,
+      note: `Textový súbor bol skrátený z ${formatBytes(file.size)} na ${formatBytes(
+        compressedTextFile.size,
+      )}.`,
+    };
+  }
+
+  const fallbackText = `PRÍLOHA BOLA AUTOMATICKY KOMPRESOVANÁ PRE API LIMIT 1 MB.
+
+Názov pôvodného súboru: ${file.name}
+Typ súboru: ${file.type || 'neznámy typ'}
+Prípona: ${extension || 'nezistená'}
+Pôvodná veľkosť: ${formatBytes(file.size)}
+Limit pre odoslanie do agenta: ${maxApiFileSizeMb} MB
+
+DÔLEŽITÉ:
+Tento súbor bol príliš veľký na priame odoslanie do agenta.
+Aby nevznikla chyba 413 FUNCTION_PAYLOAD_TOO_LARGE, do API sa neposiela celý binárny dokument.
+
+Pre presné spracovanie PDF/DOCX odporúčanie:
+1. vlož text z dokumentu priamo do chatu,
+2. alebo uprav backend /api/chat tak, aby súbor najprv uložil do storage a následne extrahoval text serverovo,
+3. alebo vytvor samostatnú API route na extrakciu textu zo súboru a do agenta posielaj iba extrahovaný text.
+
+Používateľova požiadavka má byť spracovaná podľa aktívneho profilu práce a podľa názvu priloženého dokumentu.`;
+
+  const fallbackFile = createTextFileFromString({
+    text: fallbackText,
+    fileName: `${sanitizeFileName(file.name)}-compressed-info.txt`,
+  });
+
+  return {
+    apiFile: fallbackFile,
+    compressed: true,
+    note: `Súbor ${file.name} mal ${formatBytes(
+      file.size,
+    )}. Do API sa posiela bezpečný textový zástupca do 1 MB.`,
+  };
+}
+
+async function prepareFilesForApi(files: AttachedFile[]) {
+  const prepared: AttachedFile[] = [];
+
+  for (const item of files) {
+    const compressed = await compressFileForApi(item.file);
+
+    prepared.push({
+      ...item,
+      apiFile: compressed.apiFile,
+      apiSize: compressed.apiFile.size,
+      compressed: compressed.compressed,
+      compressionNote: compressed.note,
+    });
+  }
+
+  return prepared;
 }
 
 // ================= PAGE =================
@@ -506,7 +741,9 @@ export default function ChatPage() {
   }, [activeProfile]);
 
   const canSubmit =
-    isMounted && !isLoading && (input.trim().length > 0 || attachedFiles.length > 0);
+    isMounted &&
+    !isLoading &&
+    (input.trim().length > 0 || attachedFiles.length > 0);
 
   useEffect(() => {
     setIsMounted(true);
@@ -566,7 +803,7 @@ export default function ChatPage() {
           `Súbor "${file.name}" má nepodporovaný formát.
 
 Povolené formáty:
-PDF, DOC, DOCX, TXT, RTF, ODT, MD, JPG, PNG, WEBP, GIF, XLS, XLSX, CSV, PPT, PPTX.`
+PDF, DOC, DOCX, TXT, RTF, ODT, MD, JPG, PNG, WEBP, GIF, XLS, XLSX, CSV, PPT, PPTX.`,
         );
         continue;
       }
@@ -576,7 +813,7 @@ PDF, DOC, DOCX, TXT, RTF, ODT, MD, JPG, PNG, WEBP, GIF, XLS, XLSX, CSV, PPT, PPT
           `Súbor "${file.name}" je príliš veľký.
 
 Maximálna veľkosť jedného súboru je ${maxFileSizeMb} MB.
-Tento súbor má ${formatBytes(file.size)}.`
+Tento súbor má ${formatBytes(file.size)}.`,
         );
         continue;
       }
@@ -588,6 +825,13 @@ Tento súbor má ${formatBytes(file.size)}.`
         type: file.type || 'application/octet-stream',
         uploadedAt: new Date().toISOString(),
         file,
+        apiFile: undefined,
+        apiSize: undefined,
+        compressed: file.size > maxApiFileSizeBytes,
+        compressionNote:
+          file.size > maxApiFileSizeBytes
+            ? `Súbor bude pred odoslaním do agenta automaticky zmenšený na max. ${maxApiFileSizeMb} MB.`
+            : 'Súbor je menší ako limit pre API.',
       });
     }
 
@@ -601,13 +845,13 @@ Tento súbor má ${formatBytes(file.size)}.`
           alert(
             `Dosiahnutý limit príloh.
 
-Maximálny počet súborov je ${maxFilesCount}.`
+Maximálny počet súborov je ${maxFilesCount}.`,
           );
           break;
         }
 
         const duplicate = next.some(
-          (item) => item.name === file.name && item.size === file.size
+          (item) => item.name === file.name && item.size === file.size,
         );
 
         if (!duplicate) next.push(file);
@@ -631,7 +875,7 @@ Maximálny počet súborov je ${maxFilesCount}.`
 
     if (!SpeechRecognition) {
       alert(
-        'Diktovanie nie je v tomto prehliadači podporované. Skús Google Chrome.'
+        'Diktovanie nie je v tomto prehliadači podporované. Skús Google Chrome.',
       );
       return;
     }
@@ -734,6 +978,7 @@ POVINNÉ PRAVIDLÁ:
 5. Ak používateľ žiada citácie, zdroje alebo bibliografiu, výstup priprav podľa citačnej normy: ${citationStyle}.
 6. Pri Mistral, Claude, Gemini, OpenAI aj Grok vždy vypíš aj sekciu POUŽITÉ ZDROJE A AUTORI.
 7. Výstup píš bez markdown znakov #, ##, ###, **, ---.
+8. Ak bol veľký súbor nahradený komprimovaným textovým zástupcom, jasne uveď, že celý obsah súboru nemusí byť dostupný.
 
 VÝSTUP VRÁŤ PRESNE V TOMTO FORMÁTE:
 
@@ -776,7 +1021,7 @@ Zdroje neboli dodané alebo sa ich nepodarilo overene načítať.
 
     if (!activeProfile) {
       appendAssistantMessage(
-        '⚠️ Najprv si vytvor a ulož profil práce. Potom môžeš pokračovať v AI Chate, aby systém vedel pracovať podľa názvu práce, typu práce, cieľa, metodológie a citačnej normy.'
+        '⚠️ Najprv si vytvor a ulož profil práce. Potom môžeš pokračovať v AI Chate, aby systém vedel pracovať podľa názvu práce, typu práce, cieľa, metodológie a citačnej normy.',
       );
       return;
     }
@@ -807,6 +1052,8 @@ Zdroje neboli dodané alebo sa ich nepodarilo overene načítať.
         },
       ];
 
+      const apiReadyFiles = await prepareFilesForApi(attachedFiles);
+
       const formData = new FormData();
 
       formData.append('agent', agent);
@@ -829,19 +1076,25 @@ Zdroje neboli dodané alebo sa ich nepodarilo overene načítať.
       formData.append(
         'filesMetadata',
         JSON.stringify(
-          attachedFiles.map((item) => ({
+          apiReadyFiles.map((item) => ({
             name: item.name,
-            size: item.size,
+            originalSize: item.size,
+            apiSize: item.apiSize || item.apiFile?.size || item.size,
             type: item.type,
             kind: getFileKindLabel(item.name),
             extractable: isTextExtractableFile(item.name),
             uploadedAt: item.uploadedAt,
-          }))
-        )
+            compressed: Boolean(item.compressed),
+            compressionNote: item.compressionNote || '',
+            apiFileName: item.apiFile?.name || item.name,
+          })),
+        ),
       );
 
-      attachedFiles.forEach((item) => {
-        formData.append('files', item.file, item.name);
+      apiReadyFiles.forEach((item) => {
+        const fileForApi = item.apiFile || item.file;
+
+        formData.append('files', fileForApi, fileForApi.name);
       });
 
       const res = await fetch('/api/chat', {
@@ -866,7 +1119,7 @@ Zdroje neboli dodané alebo sa ich nepodarilo overene načítať.
 
 ${errorMessage}${modelHelp}
 
-Skús dočasne prepnúť model na Gemini alebo OPEN AI a pozri terminál pri /api/chat.`
+Skús dočasne prepnúť model na Gemini alebo OPEN AI a pozri terminál pri /api/chat.`,
         );
 
         return;
@@ -894,14 +1147,14 @@ Skús dočasne prepnúť model na Gemini alebo OPEN AI a pozri terminál pri /ap
               data.message ||
               data.text ||
               data.answer ||
-              ''
+              '',
           ).trim() || '';
 
         if (!fullText && data.ok === false) {
           appendAssistantMessage(
             `❌ API nevrátilo výstup.
 
-${data.message || data.error || 'Neznáma chyba API.'}`
+${data.message || data.error || 'Neznáma chyba API.'}`,
           );
           return;
         }
@@ -1006,7 +1259,7 @@ ${data.message || data.error || 'Neznáma chyba API.'}`
 
 ${message}
 
-Skontroluj terminál pri /api/chat.`
+Skontroluj terminál pri /api/chat.`,
       );
     } finally {
       setIsLoading(false);
@@ -1105,7 +1358,7 @@ Skontroluj terminál pri /api/chat.`
   };
 
   const editSelectedText = async (
-    mode: 'academic' | 'shorten' | 'expand' | 'grammar'
+    mode: 'academic' | 'shorten' | 'expand' | 'grammar',
   ) => {
     if (!selectedTextState || isLoading) return;
 
@@ -1144,7 +1397,7 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
             role: 'user',
             content: prompt,
           },
-        ])
+        ]),
       );
       formData.append('profile', JSON.stringify(activeProfile || null));
       formData.append('editSelectedTextOnly', 'true');
@@ -1170,7 +1423,7 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
             data.message ||
             data.text ||
             data.answer ||
-            ''
+            '',
         );
       } else {
         if (!res.body) {
@@ -1279,7 +1532,7 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
 
               <div className="rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-3 text-xs font-bold text-violet-100">
                 Prílohy: max. {maxFilesCount} súborov, max. {maxFileSizeMb} MB
-                na súbor
+                na súbor · do agenta sa odosiela max. {maxApiFileSizeMb} MB
               </div>
             </div>
           </section>
@@ -1398,6 +1651,12 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                           <span className="shrink-0 text-[11px] text-violet-200/70">
                             {formatBytes(file.size)}
                           </span>
+
+                          {file.size > maxApiFileSizeBytes && (
+                            <span className="shrink-0 rounded-lg border border-amber-400/30 bg-amber-500/15 px-2 py-1 text-[10px] font-black text-amber-100">
+                              API kompresia na 1 MB
+                            </span>
+                          )}
 
                           <button
                             type="button"

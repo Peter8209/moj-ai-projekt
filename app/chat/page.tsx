@@ -6,7 +6,6 @@ import {
   AlertCircle,
   BookOpen,
   Brain,
-  CheckCircle2,
   Download,
   FileDown,
   FileText,
@@ -19,7 +18,6 @@ import {
   PenLine,
   RefreshCcw,
   Send,
-  Sparkles,
   UploadCloud,
   X,
 } from 'lucide-react';
@@ -102,6 +100,17 @@ type SelectedTextState = {
   text: string;
 };
 
+type ExtractedApiResponse = {
+  ok?: boolean;
+  text?: string;
+  extractedText?: string;
+  content?: string;
+  markdown?: string;
+  error?: string;
+  message?: string;
+  meta?: Record<string, unknown>;
+};
+
 declare global {
   interface Window {
     webkitSpeechRecognition?: any;
@@ -133,11 +142,17 @@ const allowedFileExtensions = [
 
 const textExtractableExtensions = [
   '.pdf',
+  '.doc',
   '.docx',
   '.txt',
   '.rtf',
+  '.odt',
   '.md',
   '.csv',
+  '.xls',
+  '.xlsx',
+  '.ppt',
+  '.pptx',
 ];
 
 const allowedFileAccept = allowedFileExtensions.join(',');
@@ -149,6 +164,8 @@ const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 const maxApiFileSizeMb = 1;
 const maxApiFileSizeBytes = maxApiFileSizeMb * 1024 * 1024;
 const maxCompressedTextChars = 750_000;
+
+const extractTextApiUrl = '/api/extract-text';
 
 const agents: { key: Agent; label: string }[] = [
   { key: 'gemini', label: 'Gemini' },
@@ -430,7 +447,7 @@ async function readApiErrorResponse(res: Response) {
       cleaned.startsWith('<html') ||
       cleaned.includes('__next_error__')
     ) {
-      return `Server vrátil chybu ${res.status}. Detail pozri v termináli pri /api/chat.`;
+      return `Server vrátil chybu ${res.status}. Detail pozri v termináli pri /api/chat alebo /api/extract-text.`;
     }
 
     return cleaned.length > 1200 ? `${cleaned.slice(0, 1200)}...` : cleaned;
@@ -450,7 +467,7 @@ function buildAttachmentPrompt(files: AttachedFile[]) {
 
       const compression =
         item.size > maxApiFileSizeBytes
-          ? `, pred odoslaním do API bude komprimované na max. ${maxApiFileSizeMb} MB`
+          ? `, pred odoslaním do AI bude najprv extrahovaný text a až ten bude skomprimovaný do bezpečného textového balíka`
           : '';
 
       return `${index + 1}. ${item.name} – ${getFileKindLabel(
@@ -477,7 +494,7 @@ function ensureSourcesSection(text: string) {
 Zdroje neboli v odpovedi samostatne uvedené. Over, či boli v priložených dokumentoch dostupné bibliografické údaje. Ak áno, spusti modul „Spracuj zdroje a citácie“.`;
 }
 
-// ================= FILE COMPRESSION =================
+// ================= FILE EXTRACTION + SAFE COMPRESSION =================
 
 function createTextFileFromString({
   text,
@@ -499,25 +516,186 @@ async function readTextFileSafely(file: File) {
   }
 }
 
-function limitTextToOneMb(text: string) {
-  const cleaned = String(text || '')
+function normalizeExtractedText(text: string) {
+  return String(text || '')
+    .replace(/\uFEFF/g, '')
+    .replace(/\u200B/g, '')
+    .replace(/\u200C/g, '')
+    .replace(/\u200D/g, '')
     .replace(/\u0000/g, '')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{4,}/g, '\n\n\n')
     .trim();
+}
+
+function compactExtractedText(text: string) {
+  const cleaned = normalizeExtractedText(text);
+
+  return cleaned
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function limitTextToOneMb(text: string) {
+  const cleaned = compactExtractedText(text);
 
   if (cleaned.length <= maxCompressedTextChars) {
     return cleaned;
   }
 
-  const head = cleaned.slice(0, Math.floor(maxCompressedTextChars * 0.65));
-  const tail = cleaned.slice(-Math.floor(maxCompressedTextChars * 0.25));
+  const headSize = Math.floor(maxCompressedTextChars * 0.72);
+  const middleSize = Math.floor(maxCompressedTextChars * 0.12);
+  const tailSize = Math.floor(maxCompressedTextChars * 0.12);
+
+  const head = cleaned.slice(0, headSize);
+  const middleStart = Math.max(
+    0,
+    Math.floor(cleaned.length / 2 - middleSize / 2),
+  );
+  const middle = cleaned.slice(middleStart, middleStart + middleSize);
+  const tail = cleaned.slice(-tailSize);
 
   return `${head}
 
-[... TEXT BOL SKRÁTENÝ, ABY SA ZMESTIL DO LIMITU 1 MB ...]
+[... STRED DOKUMENTU BOL SKOMPRIMOVANÝ PRE LIMIT API. NASLEDUJE VÝBER ZO STREDU DOKUMENTU ...]
+
+${middle}
+
+[... KONIEC KOMPRESIE. NASLEDUJE ZÁVER DOKUMENTU ...]
 
 ${tail}`;
+}
+
+function buildExtractedTextPackage({
+  originalFile,
+  extractedText,
+  note,
+}: {
+  originalFile: File;
+  extractedText: string;
+  note: string;
+}) {
+  const extension = getFileExtension(originalFile.name);
+
+  const fullText = normalizeExtractedText(extractedText);
+  const compressedText = limitTextToOneMb(fullText);
+
+  return `EXTRAHOVANÝ TEXT Z PRÍLOHY
+
+Názov pôvodného súboru: ${originalFile.name}
+Typ súboru: ${originalFile.type || 'neznámy typ'}
+Prípona: ${extension || 'nezistená'}
+Pôvodná veľkosť: ${formatBytes(originalFile.size)}
+Počet znakov po extrakcii: ${fullText.length}
+Počet znakov odoslaných do AI: ${compressedText.length}
+
+STAV EXTRAKCIE:
+${note}
+
+DÔLEŽITÉ PRE AI:
+- Toto je extrahovaný text z priloženého dokumentu.
+- Pri odpovedi vychádzaj najprv z tohto textu.
+- Ak sú v texte uvedení autori, názvy diel, roky, URL alebo DOI, vypíš ich v časti POUŽITÉ ZDROJE A AUTORI.
+- Nevymýšľaj zdroje, ktoré v texte nie sú.
+- Ak niektorý údaj nie je v texte jasný, napíš: údaj je potrebné overiť.
+
+ZAČIATOK EXTRAHOVANÉHO TEXTU:
+"""
+${compressedText}
+"""
+KONIEC EXTRAHOVANÉHO TEXTU`;
+}
+
+async function extractTextViaServer(file: File): Promise<{
+  ok: boolean;
+  text: string;
+  note: string;
+}> {
+  try {
+    const formData = new FormData();
+
+    formData.append('file', file, file.name);
+    formData.append('fileName', file.name);
+    formData.append('mimeType', file.type || 'application/octet-stream');
+    formData.append('fullExtraction', 'true');
+
+    const res = await fetch(extractTextApiUrl, {
+      method: 'POST',
+      body: formData,
+    });
+
+    const contentType = res.headers.get('content-type') || '';
+
+    if (!res.ok) {
+      const errorMessage = await readApiErrorResponse(res);
+
+      return {
+        ok: false,
+        text: '',
+        note: `Serverová extrakcia zlyhala: ${errorMessage}`,
+      };
+    }
+
+    if (contentType.includes('application/json')) {
+      const data = (await res.json().catch(() => null)) as
+        | ExtractedApiResponse
+        | null;
+
+      const extractedText = normalizeExtractedText(
+        data?.text ||
+          data?.extractedText ||
+          data?.content ||
+          data?.markdown ||
+          '',
+      );
+
+      if (!extractedText) {
+        return {
+          ok: false,
+          text: '',
+          note:
+            data?.message ||
+            data?.error ||
+            'Serverová extrakcia prebehla, ale nevrátila text.',
+        };
+      }
+
+      return {
+        ok: true,
+        text: extractedText,
+        note: `Server extrahoval text z dokumentu. Extrahovaných znakov: ${extractedText.length}.`,
+      };
+    }
+
+    const plainText = normalizeExtractedText(await res.text());
+
+    if (!plainText) {
+      return {
+        ok: false,
+        text: '',
+        note: 'Serverová extrakcia nevrátila text.',
+      };
+    }
+
+    return {
+      ok: true,
+      text: plainText,
+      note: `Server extrahoval text z dokumentu. Extrahovaných znakov: ${plainText.length}.`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      text: '',
+      note:
+        error instanceof Error
+          ? `Serverová extrakcia zlyhala: ${error.message}`
+          : 'Serverová extrakcia zlyhala.',
+    };
+  }
 }
 
 async function compressImageToOneMb(file: File): Promise<File> {
@@ -591,12 +769,93 @@ async function compressFileForApi(file: File): Promise<{
   note: string;
 }> {
   const extension = getFileExtension(file.name);
+  const sanitizedBaseName = sanitizeFileName(file.name.replace(/\.[^.]+$/, ''));
 
-  if (file.size <= maxApiFileSizeBytes) {
+  if (['.txt', '.md', '.csv', '.rtf'].includes(extension)) {
+    const rawText = await readTextFileSafely(file);
+
+    if (rawText.trim()) {
+      const packageText = buildExtractedTextPackage({
+        originalFile: file,
+        extractedText: rawText,
+        note: 'Text bol načítaný priamo v prehliadači z textového súboru.',
+      });
+
+      const textFile = createTextFileFromString({
+        text: packageText,
+        fileName: `${sanitizedBaseName}-extracted.txt`,
+      });
+
+      return {
+        apiFile: textFile,
+        compressed: file.size > maxApiFileSizeBytes,
+        note: `Text bol extrahovaný a pripravený pre AI. API veľkosť: ${formatBytes(
+          textFile.size,
+        )}.`,
+      };
+    }
+  }
+
+  if (
+    [
+      '.pdf',
+      '.doc',
+      '.docx',
+      '.odt',
+      '.xls',
+      '.xlsx',
+      '.ppt',
+      '.pptx',
+    ].includes(extension)
+  ) {
+    const extracted = await extractTextViaServer(file);
+
+    if (extracted.ok && extracted.text.trim()) {
+      const packageText = buildExtractedTextPackage({
+        originalFile: file,
+        extractedText: extracted.text,
+        note: extracted.note,
+      });
+
+      const textFile = createTextFileFromString({
+        text: packageText,
+        fileName: `${sanitizedBaseName}-extracted.txt`,
+      });
+
+      return {
+        apiFile: textFile,
+        compressed: true,
+        note: `Dokument bol serverovo extrahovaný a text bol odoslaný do AI. Pôvodná veľkosť: ${formatBytes(
+          file.size,
+        )}, API veľkosť: ${formatBytes(textFile.size)}.`,
+      };
+    }
+
+    const fallbackText = `EXTRAKCIA TEXTU ZLYHALA
+
+Názov pôvodného súboru: ${file.name}
+Typ súboru: ${file.type || 'neznámy typ'}
+Prípona: ${extension || 'nezistená'}
+Pôvodná veľkosť: ${formatBytes(file.size)}
+
+Dôvod:
+${extracted.note}
+
+DÔLEŽITÉ:
+Toto nie je obsah dokumentu. Server nedokázal extrahovať text.
+Je potrebné opraviť server endpoint ${extractTextApiUrl}, aby pri PDF/DOCX/XLSX/PPTX vrátil plný text v poli text alebo extractedText.
+
+AI NESMIE predstierať, že obsah dokumentu čítala.`;
+
+    const fallbackFile = createTextFileFromString({
+      text: fallbackText,
+      fileName: `${sanitizedBaseName}-extraction-failed.txt`,
+    });
+
     return {
-      apiFile: file,
-      compressed: false,
-      note: 'Súbor je menší ako 1 MB, odosiela sa bez kompresie.',
+      apiFile: fallbackFile,
+      compressed: true,
+      note: `Extrakcia dokumentu zlyhala. Do API sa posiela diagnostická správa: ${extracted.note}`,
     };
   }
 
@@ -618,65 +877,45 @@ Používateľ musí nahrať menší obrázok alebo vložiť textový popis obrá
 
       const fallbackFile = createTextFileFromString({
         text: fallbackText,
-        fileName: `${sanitizeFileName(file.name)}-compressed-note.txt`,
+        fileName: `${sanitizedBaseName}-image-note.txt`,
       });
 
       return {
         apiFile: fallbackFile,
         compressed: true,
-        note: 'Obrázok sa nepodarilo komprimovať, do API sa posiela iba poznámka.',
+        note:
+          'Obrázok sa nepodarilo komprimovať, do API sa posiela iba poznámka.',
       };
     }
   }
 
-  if (['.txt', '.md', '.csv', '.rtf'].includes(extension)) {
-    const rawText = await readTextFileSafely(file);
-    const limitedText = limitTextToOneMb(rawText);
-
-    const compressedTextFile = createTextFileFromString({
-      text: limitedText,
-      fileName: `${sanitizeFileName(file.name)}-compressed.txt`,
-    });
-
+  if (file.size <= maxApiFileSizeBytes) {
     return {
-      apiFile: compressedTextFile,
-      compressed: true,
-      note: `Textový súbor bol skrátený z ${formatBytes(file.size)} na ${formatBytes(
-        compressedTextFile.size,
-      )}.`,
+      apiFile: file,
+      compressed: false,
+      note: 'Súbor je menší ako 1 MB, odosiela sa bez kompresie.',
     };
   }
 
-  const fallbackText = `PRÍLOHA BOLA AUTOMATICKY KOMPRESOVANÁ PRE API LIMIT 1 MB.
+  const fallbackText = `NEPODPOROVANÝ VEĽKÝ SÚBOR
 
 Názov pôvodného súboru: ${file.name}
 Typ súboru: ${file.type || 'neznámy typ'}
 Prípona: ${extension || 'nezistená'}
 Pôvodná veľkosť: ${formatBytes(file.size)}
-Limit pre odoslanie do agenta: ${maxApiFileSizeMb} MB
 
-DÔLEŽITÉ:
-Tento súbor bol príliš veľký na priame odoslanie do agenta.
-Aby nevznikla chyba 413 FUNCTION_PAYLOAD_TOO_LARGE, do API sa neposiela celý binárny dokument.
-
-Pre presné spracovanie PDF/DOCX odporúčanie:
-1. vlož text z dokumentu priamo do chatu,
-2. alebo uprav backend /api/chat tak, aby súbor najprv uložil do storage a následne extrahoval text serverovo,
-3. alebo vytvor samostatnú API route na extrakciu textu zo súboru a do agenta posielaj iba extrahovaný text.
-
-Používateľova požiadavka má byť spracovaná podľa aktívneho profilu práce a podľa názvu priloženého dokumentu.`;
+Súbor je väčší ako limit API a tento typ nemá nastavenú extrakciu textu.
+Doplň serverovú extrakciu alebo vlož obsah ručne.`;
 
   const fallbackFile = createTextFileFromString({
     text: fallbackText,
-    fileName: `${sanitizeFileName(file.name)}-compressed-info.txt`,
+    fileName: `${sanitizedBaseName}-unsupported.txt`,
   });
 
   return {
     apiFile: fallbackFile,
     compressed: true,
-    note: `Súbor ${file.name} mal ${formatBytes(
-      file.size,
-    )}. Do API sa posiela bezpečný textový zástupca do 1 MB.`,
+    note: `Nepodporovaný veľký súbor. Do API sa posiela diagnostická správa.`,
   };
 }
 
@@ -830,7 +1069,7 @@ Tento súbor má ${formatBytes(file.size)}.`,
         compressed: file.size > maxApiFileSizeBytes,
         compressionNote:
           file.size > maxApiFileSizeBytes
-            ? `Súbor bude pred odoslaním do agenta automaticky zmenšený na max. ${maxApiFileSizeMb} MB.`
+            ? `Súbor bude pred odoslaním do agenta serverovo extrahovaný a text bude zmenšený na bezpečný balík do približne ${maxApiFileSizeMb} MB.`
             : 'Súbor je menší ako limit pre API.',
       });
     }
@@ -978,7 +1217,9 @@ POVINNÉ PRAVIDLÁ:
 5. Ak používateľ žiada citácie, zdroje alebo bibliografiu, výstup priprav podľa citačnej normy: ${citationStyle}.
 6. Pri Mistral, Claude, Gemini, OpenAI aj Grok vždy vypíš aj sekciu POUŽITÉ ZDROJE A AUTORI.
 7. Výstup píš bez markdown znakov #, ##, ###, **, ---.
-8. Ak bol veľký súbor nahradený komprimovaným textovým zástupcom, jasne uveď, že celý obsah súboru nemusí byť dostupný.
+8. Ak je priložený súbor odoslaný ako extrahovaný textový balík, považuj ho za obsah dokumentu a pracuj s ním ako s hlavným zdrojom.
+9. Ak extrakcia zlyhala a v prílohe je iba diagnostická správa, jasne uveď, že obsah dokumentu nebol dostupný.
+10. Nikdy nevymýšľaj obsah priloženého dokumentu. Použi iba text, ktorý je reálne extrahovaný v prílohe.
 
 VÝSTUP VRÁŤ PRESNE V TOMTO FORMÁTE:
 
@@ -1259,7 +1500,7 @@ ${data.message || data.error || 'Neznáma chyba API.'}`,
 
 ${message}
 
-Skontroluj terminál pri /api/chat.`,
+Skontroluj terminál pri /api/chat alebo /api/extract-text.`,
       );
     } finally {
       setIsLoading(false);
@@ -1482,7 +1723,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
 
       <div className="flex h-screen min-h-0 w-full overflow-hidden bg-[#050711] text-white">
         <div className="mx-auto flex h-screen min-h-0 w-full max-w-[1500px] flex-col overflow-hidden px-4 py-3 md:px-8">
-          {/* TOP BAR */}
           <header className="shrink-0 border-b border-white/10 pb-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <button
@@ -1505,7 +1745,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
             </div>
           </header>
 
-          {/* PROFILE WARNING */}
           {!activeProfile && (
             <div className="mt-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
               <div className="flex items-start gap-2">
@@ -1520,7 +1759,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
             </div>
           )}
 
-          {/* ACTIVE PROFILE */}
           <section className="shrink-0 py-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
@@ -1532,12 +1770,11 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
 
               <div className="rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-3 text-xs font-bold text-violet-100">
                 Prílohy: max. {maxFilesCount} súborov, max. {maxFileSizeMb} MB
-                na súbor · do agenta sa odosiela max. {maxApiFileSizeMb} MB
+                na súbor · veľké dokumenty sa extrahujú cez /api/extract-text
               </div>
             </div>
           </section>
 
-          {/* CHAT */}
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[30px] border border-white/10 bg-[#070a16] shadow-2xl shadow-black/30">
             <div
               ref={scrollAreaRef}
@@ -1621,7 +1858,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
               )}
             </div>
 
-            {/* COMPOSER */}
             <div className="shrink-0 border-t border-white/10 bg-[#070a16]/95 px-4 py-3 backdrop-blur md:px-8">
               <div className="mx-auto max-w-6xl rounded-[28px] border border-violet-500/40 bg-violet-950/30 p-3 shadow-2xl shadow-violet-950/40">
                 {attachedFiles.length > 0 && (
@@ -1654,7 +1890,7 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
 
                           {file.size > maxApiFileSizeBytes && (
                             <span className="shrink-0 rounded-lg border border-amber-400/30 bg-amber-500/15 px-2 py-1 text-[10px] font-black text-amber-100">
-                              API kompresia na 1 MB
+                              extrakcia + kompresia textu
                             </span>
                           )}
 
@@ -1780,7 +2016,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
             </div>
           </div>
 
-          {/* SELECTED TEXT TOOLBAR */}
           {selectedTextState && (
             <div className="fixed bottom-6 left-1/2 z-[80] w-[calc(100%-32px)] max-w-4xl -translate-x-1/2 rounded-3xl border border-violet-400/30 bg-[#0b1020] p-4 shadow-2xl shadow-black/40">
               <div className="mb-3 flex items-start justify-between gap-3">
@@ -1842,7 +2077,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
             </div>
           )}
 
-          {/* RESULT EDITOR */}
           {result && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
               <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
@@ -1950,7 +2184,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
             </div>
           )}
 
-          {/* CANVAS */}
           {canvasOpen && (
             <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">
               <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
@@ -2001,6 +2234,34 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                   placeholder="Canvas je zatiaľ prázdny."
                   className="flex-1 resize-none bg-[#050711] p-6 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-600"
                 />
+              </div>
+            </div>
+          )}
+
+          {popup && popupData && (
+            <div className="fixed bottom-6 right-6 z-[70] max-w-md rounded-3xl border border-white/10 bg-[#0b1020] p-5 shadow-2xl shadow-black/40">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="font-black text-white">Výstup pripravený</div>
+
+                <button
+                  type="button"
+                  onClick={() => setPopup(false)}
+                  className="rounded-xl bg-white/10 p-2 text-white hover:bg-white/20"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="space-y-2 text-sm text-slate-300">
+                <div>
+                  <span className="font-black text-emerald-300">Skóre:</span>{' '}
+                  {popupData.score || '—'}
+                </div>
+
+                <div className="line-clamp-3">
+                  <span className="font-black text-violet-300">Analýza:</span>{' '}
+                  {popupData.analysis || 'Bez analýzy.'}
+                </div>
               </div>
             </div>
           )}

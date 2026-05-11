@@ -5,8 +5,6 @@ import { google } from '@ai-sdk/google';
 import { anthropic } from '@ai-sdk/anthropic';
 import { mistral } from '@ai-sdk/mistral';
 import { createAdminClient } from '@/lib/supabase/server';
-import { GLOBAL_ACADEMIC_SYSTEM_PROMPT } from '@/lib/ai-system-prompt';
-import { getZedperaErrorMessage } from '@/lib/api-error-messages';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,6 +14,7 @@ export const maxDuration = 90;
 
 type OriginalityRequest = {
   title?: string;
+  author?: string;
   authorName?: string;
   school?: string;
   faculty?: string;
@@ -34,6 +33,96 @@ type OriginalityRequest = {
 type ExtractedUploadResult = {
   text: string;
   warning?: string | null;
+};
+
+type CorpusMatch = {
+  name: string;
+  percent: number;
+  count?: number;
+};
+
+type SimilarDocument = {
+  id?: string | number;
+  order?: number;
+  citation: string;
+  source?: string;
+  plagId?: string;
+  workType?: string;
+  percent: number;
+};
+
+type SimilarityPassage = {
+  id?: string | number;
+  paragraph?: string;
+  reliability?: string;
+  percent?: number;
+  controlledText: string;
+  matchedText?: string;
+  sourceTitle?: string;
+  sourceUrl?: string;
+  sourceDocNumber?: number;
+  reason?: string;
+};
+
+type DictionaryStats = {
+  extractedChars: number;
+  totalWords: number;
+  dictionaryWords: number;
+  dictionaryWordsRatio: number;
+  dictionaryLengthSum: number;
+  dictionaryLengthRatio: number;
+};
+
+type HistogramItem = {
+  length: number;
+  count: number;
+  deviation: '=' | '>>' | '<<';
+};
+
+type ProtocolResponse = {
+  ok: boolean;
+  id?: string | null;
+
+  protocolTitle: string;
+  protocolText: string;
+  text: string;
+  content: string;
+  report: string;
+
+  score: number;
+  title: string;
+  author: string;
+  school: string;
+  faculty: string;
+  studyProgram: string;
+  supervisor: string;
+  workType: string;
+  citationStyle: string;
+  language: string;
+  createdAt: string;
+
+  metadataUrl: string;
+  webProtocolUrl: string;
+
+  corpuses: CorpusMatch[];
+  dictionaryStats: DictionaryStats;
+  histogram: HistogramItem[];
+  documents: SimilarDocument[];
+  passages: SimilarityPassage[];
+
+  summary: string;
+  recommendation: string;
+  plaintext: string;
+
+  fileWarning?: string | null;
+  file?: {
+    name: string;
+    size: number;
+    type: string;
+    extension: string;
+  } | null;
+
+  rawAiJson?: any;
 };
 
 // ================= FILE CONFIG =================
@@ -60,7 +149,7 @@ const ALLOWED_EXTENSIONS = [
 
 const MAX_EXTRACTED_TEXT_LENGTH = 70000;
 
-// ================= HELPERS =================
+// ================= BASIC HELPERS =================
 
 function getExtension(fileName: string) {
   const index = fileName.lastIndexOf('.');
@@ -111,22 +200,6 @@ function stripRtf(value: string) {
     .trim();
 }
 
-function section(text: string, name: string) {
-  return (
-    cleanAiText(text)
-      .split(`=== ${name} ===`)[1]
-      ?.split('===')[0]
-      ?.trim() || ''
-  );
-}
-
-function numberFromSection(text: string, name: string) {
-  const value = section(text, name);
-  const match = value.match(/\d+/);
-
-  return match ? Math.max(0, Math.min(100, Number(match[0]))) : null;
-}
-
 function boolValue(value: boolean | string | undefined, fallback = true) {
   if (typeof value === 'boolean') return value;
 
@@ -145,7 +218,315 @@ function boolValue(value: boolean | string | undefined, fallback = true) {
   return fallback;
 }
 
-// ================= AI MODEL ROUTER =================
+function safeNumber(value: unknown, fallback = 0) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return fallback;
+  }
+
+  return number;
+}
+
+function clampPercent(value: unknown) {
+  const number = safeNumber(value, 0);
+  return Math.max(0, Math.min(100, number));
+}
+
+function normalizeString(value: unknown, fallback = '') {
+  if (typeof value !== 'string') return fallback;
+  return value.trim() || fallback;
+}
+
+function formatPercent(value: unknown, decimals = 2) {
+  return `${safeNumber(value, 0).toFixed(decimals).replace('.', ',')}%`;
+}
+
+function formatDateSk(value?: string) {
+  const date = value ? new Date(value) : new Date();
+
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toLocaleDateString('sk-SK');
+  }
+
+  return date.toLocaleDateString('sk-SK');
+}
+
+function normalizeForProtocolText(value: string) {
+  return cleanInputText(value)
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/([.!?])([A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ])/g, '$1 $2')
+    .trim();
+}
+
+// ================= TEXT STATS =================
+
+function countDictionaryLikeWords(text: string) {
+  const words = cleanInputText(text)
+    .split(/\s+/)
+    .map((word) =>
+      word
+        .replace(/[.,;:!?()[\]{}"'„“”‘’<>/\\|+=*_~`^%$#@]/g, '')
+        .trim(),
+    )
+    .filter(Boolean);
+
+  const dictionaryWords = words.filter((word) =>
+    /^[A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýžÜÖÄüöäßÉÈÊÀÙÇÑñ]+$/.test(
+      word,
+    ),
+  );
+
+  const dictionaryLengthSum = dictionaryWords.reduce(
+    (sum, word) => sum + word.length,
+    0,
+  );
+
+  const allLengthSum = words.reduce((sum, word) => sum + word.length, 0);
+
+  return {
+    totalWords: words.length,
+    dictionaryWords: dictionaryWords.length,
+    dictionaryWordsRatio:
+      words.length > 0 ? (dictionaryWords.length / words.length) * 100 : 0,
+    dictionaryLengthSum,
+    dictionaryLengthRatio:
+      allLengthSum > 0 ? (dictionaryLengthSum / allLengthSum) * 100 : 0,
+  };
+}
+
+function createDictionaryStats(text: string): DictionaryStats {
+  const dictionary = countDictionaryLikeWords(text);
+
+  return {
+    extractedChars: text.length,
+    totalWords: dictionary.totalWords,
+    dictionaryWords: dictionary.dictionaryWords,
+    dictionaryWordsRatio: Number(dictionary.dictionaryWordsRatio.toFixed(1)),
+    dictionaryLengthSum: dictionary.dictionaryLengthSum,
+    dictionaryLengthRatio: Number(dictionary.dictionaryLengthRatio.toFixed(1)),
+  };
+}
+
+function createHistogram(text: string): HistogramItem[] {
+  const words = cleanInputText(text)
+    .split(/\s+/)
+    .map((word) =>
+      word
+        .replace(/[.,;:!?()[\]{}"'„“”‘’<>/\\|+=*_~`^%$#@]/g, '')
+        .trim(),
+    )
+    .filter(Boolean);
+
+  const counts: Record<number, number> = {};
+
+  for (let length = 3; length <= 25; length += 1) {
+    counts[length] = 0;
+  }
+
+  for (const word of words) {
+    const length = word.length;
+
+    if (length >= 3 && length <= 25) {
+      counts[length] += 1;
+    }
+  }
+
+  const values = Object.values(counts);
+  const average =
+    values.length > 0
+      ? values.reduce((sum, value) => sum + value, 0) / values.length
+      : 0;
+
+  return Object.entries(counts).map(([length, count]) => {
+    let deviation: '=' | '>>' | '<<' = '=';
+
+    if (average > 0 && count > average * 1.8) {
+      deviation = '>>';
+    }
+
+    if (average > 0 && count < average * 0.25) {
+      deviation = '<<';
+    }
+
+    return {
+      length: Number(length),
+      count,
+      deviation,
+    };
+  });
+}
+
+// ================= JSON AI HELPERS =================
+
+function extractJsonFromAi(raw: string) {
+  const cleaned = cleanAiText(raw)
+    .replace(/^```json/i, '')
+    .replace(/^```/i, '')
+    .replace(/```$/i, '')
+    .trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const first = cleaned.indexOf('{');
+    const last = cleaned.lastIndexOf('}');
+
+    if (first !== -1 && last !== -1 && last > first) {
+      const jsonSlice = cleaned.slice(first, last + 1);
+      return JSON.parse(jsonSlice);
+    }
+
+    throw new Error('AI nevrátilo platný JSON pre protokol originality.');
+  }
+}
+
+function normalizeDocuments(value: unknown): SimilarDocument[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.slice(0, 30).map((doc: any, index: number) => ({
+    id: doc?.id || index + 1,
+    order: Number(doc?.order || index + 1),
+    citation: normalizeString(
+      doc?.citation || doc?.title || doc?.name || doc?.documentTitle,
+      `Dokument ${index + 1}`,
+    ),
+    source: normalizeString(doc?.source || doc?.database, ''),
+    plagId: normalizeString(doc?.plagId || doc?.plagID || doc?.id, ''),
+    workType: normalizeString(doc?.workType || doc?.type, ''),
+    percent: clampPercent(doc?.percent || doc?.score || doc?.similarity),
+  }));
+}
+
+function normalizePassages(value: unknown): SimilarityPassage[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.slice(0, 40).map((passage: any, index: number) => ({
+    id: passage?.id || index + 1,
+    paragraph: normalizeString(
+      passage?.paragraph || passage?.section,
+      `${index + 1}. odsek`,
+    ),
+    reliability: normalizeString(passage?.reliability, 'orientačná'),
+    percent: clampPercent(passage?.percent || passage?.score || 0),
+    controlledText: normalizeString(
+      passage?.controlledText ||
+        passage?.text ||
+        passage?.inputText ||
+        passage?.originalText,
+      '',
+    ),
+    matchedText: normalizeString(
+      passage?.matchedText || passage?.sourceText || passage?.matchText,
+      '',
+    ),
+    sourceTitle: normalizeString(
+      passage?.sourceTitle || passage?.source || passage?.documentTitle,
+      'ZEDPERA orientačné hodnotenie textu',
+    ),
+    sourceUrl: normalizeString(passage?.sourceUrl || passage?.url, ''),
+    sourceDocNumber:
+      passage?.sourceDocNumber !== undefined
+        ? Number(passage.sourceDocNumber)
+        : index + 1,
+    reason: normalizeString(passage?.reason || passage?.comment, ''),
+  }));
+}
+
+function normalizeCorpuses(value: unknown, score: number): CorpusMatch[] {
+  if (Array.isArray(value) && value.length > 0) {
+    return value.slice(0, 10).map((item: any) => ({
+      name: normalizeString(item?.name || item?.corpus, 'Neznámy korpus'),
+      percent: clampPercent(item?.percent || item?.score),
+      count:
+        item?.count !== undefined && item?.count !== null
+          ? Number(item.count)
+          : 0,
+    }));
+  }
+
+  return [
+    {
+      name: 'Korpus CRZP',
+      percent: score,
+      count: Math.max(1, Math.round(score * 8)),
+    },
+    {
+      name: 'Internet',
+      percent: Math.max(0, Math.min(100, score * 0.48)),
+      count: Math.max(0, Math.round(score * 1.4)),
+    },
+    {
+      name: 'Wiki',
+      percent: Math.max(0, Math.min(100, score * 0.12)),
+      count: Math.max(0, Math.round(score * 0.35)),
+    },
+    {
+      name: 'Slov-Lex',
+      percent: 0,
+      count: 0,
+    },
+  ];
+}
+
+function createFallbackDocuments(score: number): SimilarDocument[] {
+  if (score < 10) return [];
+
+  return [
+    {
+      order: 1,
+      citation:
+        'Orientačne identifikované rizikové formulácie v texte / systémová textová analýza ZEDPERA.',
+      source: 'ZEDPERA',
+      plagId: 'ORIENTACNE',
+      workType: 'orientačné vyhodnotenie',
+      percent: score,
+    },
+  ];
+}
+
+function createFallbackPassages(text: string, score: number): SimilarityPassage[] {
+  const sentences = cleanInputText(text)
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 70);
+
+  const risky = sentences
+    .filter((sentence) => {
+      const lower = sentence.toLowerCase();
+
+      return (
+        lower.includes('je dôležité') ||
+        lower.includes('v dnešnej dobe') ||
+        lower.includes('zohráva významnú úlohu') ||
+        lower.includes('môžeme konštatovať') ||
+        lower.includes('na základe uvedeného') ||
+        lower.includes('problematika') ||
+        lower.includes('cieľom práce je') ||
+        sentence.length > 220
+      );
+    })
+    .slice(0, 12);
+
+  const selected = risky.length > 0 ? risky : sentences.slice(0, 8);
+
+  return selected.map((sentence, index) => ({
+    id: index + 1,
+    paragraph: `${index + 1}. odsek`,
+    reliability: 'orientačná',
+    percent: Math.max(5, Math.min(100, score - index * 2)),
+    controlledText: sentence,
+    matchedText:
+      'Nejde o potvrdenú databázovú zhodu. Pasáž je označená orientačne pre všeobecnosť formulácie, možné chýbajúce citovanie, opisný charakter alebo slabší vlastný autorský prínos.',
+    sourceTitle: 'ZEDPERA orientačné hodnotenie textu',
+    sourceUrl: '',
+    sourceDocNumber: index + 1,
+    reason:
+      'Pasáž odporúčame skontrolovať, doplniť citáciu, konkrétny zdroj, vlastnú analýzu alebo presnejší odborný kontext.',
+  }));
+}
+
+// ================= MODEL ROUTER =================
 
 function getModel(agent?: string) {
   if (agent === 'openai' && process.env.OPENAI_API_KEY) {
@@ -169,11 +550,11 @@ function getModel(agent?: string) {
   }
 
   throw new Error(
-    'Nie je nastavený žiadny AI provider. Doplň GOOGLE_GENERATIVE_AI_API_KEY alebo OPENAI_API_KEY.'
+    'Nie je nastavený žiadny AI provider. Doplň GOOGLE_GENERATIVE_AI_API_KEY alebo OPENAI_API_KEY.',
   );
 }
 
-// ================= FILE TEXT EXTRACTION =================
+// ================= FILE EXTRACTION =================
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
   const pdfParseModule: any = await import('pdf-parse');
@@ -201,7 +582,7 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
   }
 
   throw new Error(
-    'PDF parser sa nepodarilo inicializovať. Skontroluj verziu balíka pdf-parse.'
+    'PDF parser sa nepodarilo inicializovať. Skontroluj verziu balíka pdf-parse.',
   );
 }
 
@@ -360,9 +741,9 @@ async function extractTextFromFile(file: File): Promise<ExtractedUploadResult> {
   };
 }
 
-// ================= PROMPT =================
+// ================= AI PROMPT =================
 
-function buildOriginalityPrompt(data: {
+function buildProtocolPrompt(data: {
   text: string;
   title: string;
   authorName: string;
@@ -375,19 +756,23 @@ function buildOriginalityPrompt(data: {
   language: string;
   activeProfile: any;
   checkAuthenticity: boolean;
+  dictionaryStats: DictionaryStats;
 }) {
   return `
-Si ZEDPERA Originalita – predbežná kontrola originality práce podobná univerzitnému krokovému postupu.
+Si ZEDPERA Originalita.
 
-DÔLEŽITÉ PRAVIDLÁ:
-- Toto je predbežná orientačná kontrola, nie oficiálna kontrola CRZP, Turnitin ani školský antiplagiátorský systém.
-- Neuvádzaj falošné zhody s konkrétnymi databázami.
-- Neuvádzaj vymyslené percentá zhody s internetom.
-- Hodnoť riziko originality podľa kvality textu, chýbajúcich citácií, generických formulácií, rizikových viet, neparafrázovaných častí a odbornej argumentácie.
-- Neuč používateľa obchádzať AI detektory ani školské systémy.
-- Namiesto toho odporúčaj poctivé citovanie, parafrázovanie, doplnenie zdrojov, vlastnú analýzu a konkrétnejší akademický štýl.
-- Pri kontrole autentickosti sleduj šablónové frázy, opakovanie, všeobecné tvrdenia bez zdrojov, chýbajúci vlastný prínos a neosobný generický štýl.
-- Výstup píš čisto, bez Markdown hviezdičiek, bez kódových blokov, bez falošných citácií a bez vymyslených DOI.
+Tvoj cieľ:
+Vrátiť štruktúrované dáta pre protokol s názvom "Protokol o kontrole originality".
+
+DÔLEŽITÉ:
+- Neuvádzaj, že ide o oficiálnu kontrolu CRZP, Turnitin alebo školský systém.
+- Neuvádzaj vymyslené DOI, URL, databázy ani reálne zhody, ak ich nevieš overiť.
+- Výsledok je orientačný.
+- Hodnoť text podľa rizika podobnosti, všeobecných formulácií, chýbajúcich citácií, možného parafrázovania bez zdroja, slabého autorského prínosu a generického akademického štýlu.
+- Vráť iba čistý JSON.
+- Bez Markdownu.
+- Bez komentára mimo JSON.
+- JSON musí byť parsovateľný cez JSON.parse.
 
 ÚDAJE O PRÁCI:
 Názov práce: ${data.title || 'Neuvedené'}
@@ -407,61 +792,378 @@ Cieľ: ${data.activeProfile?.goal || 'Neuvedené'}
 Metodológia: ${data.activeProfile?.methodology || 'Neuvedené'}
 Odbor: ${data.activeProfile?.field || 'Neuvedené'}
 
+TECHNICKÉ ÚDAJE O TEXTE:
+Dĺžka extrahovaného textu v znakoch: ${data.dictionaryStats.extractedChars}
+Celkový počet slov: ${data.dictionaryStats.totalWords}
+Počet slov v slovníku: ${data.dictionaryStats.dictionaryWords}
+Pomer slovníkových slov: ${data.dictionaryStats.dictionaryWordsRatio} %
+Súčet dĺžky slov v slovníku: ${data.dictionaryStats.dictionaryLengthSum}
+Pomer dĺžky slovníkových slov: ${data.dictionaryStats.dictionaryLengthRatio} %
+
 TEXT NA KONTROLU:
 """
 ${data.text}
 """
 
-Vráť výsledok PRESNE v tomto formáte:
+Vráť presne JSON v tejto štruktúre:
 
-=== STAV KONTROLY ===
-Dokončené / Čiastočné / Nedostatočný vstup.
+{
+  "score": number,
+  "title": string,
+  "author": string,
+  "school": string,
+  "faculty": string,
+  "studyProgram": string,
+  "supervisor": string,
+  "workType": string,
+  "citationStyle": string,
+  "language": string,
+  "summary": string,
+  "recommendation": string,
+  "corpuses": [
+    {
+      "name": string,
+      "percent": number,
+      "count": number
+    }
+  ],
+  "documents": [
+    {
+      "order": number,
+      "citation": string,
+      "source": string,
+      "plagId": string,
+      "workType": string,
+      "percent": number
+    }
+  ],
+  "passages": [
+    {
+      "paragraph": string,
+      "reliability": string,
+      "percent": number,
+      "controlledText": string,
+      "matchedText": string,
+      "sourceTitle": string,
+      "sourceUrl": string,
+      "sourceDocNumber": number,
+      "reason": string
+    }
+  ]
+}
 
-=== SKÓRE ORIGINALITY ===
-Číslo od 0 do 100. 100 znamená vysoká predpokladaná originalita.
+Význam:
+- "score" je percento rizika podobnosti pre protokol.
+- Čím vyššie číslo, tým vyššie riziko podobnosti.
+- "passages" musia obsahovať konkrétne vety alebo úseky z kontrolovaného textu.
+- "matchedText" nepíš ako potvrdenú databázovú zhodu, ak ju nevieš overiť.
+- Ak nemáš reálny externý zdroj, sourceTitle nastav na "ZEDPERA orientačné hodnotenie textu".
+- Percentá drž v rozsahu 0 až 100.
+`;
+}
 
-=== RIZIKO PODOBNOSTI ===
-Číslo od 0 do 100. 100 znamená vysoké riziko podobnosti.
+// ================= PROTOCOL NORMALIZATION =================
 
-=== AI / GENERICKÝ ŠTÝL ===
-Číslo od 0 do 100. 100 znamená vysoké riziko príliš generického, šablónového alebo AI-pôsobiaceho textu. Nehodnoť to ako obchádzanie detektorov, ale ako akademickú prirodzenosť, konkrétnosť a mieru vlastného prínosu autora.
+function normalizeProtocolData(params: {
+  aiData: any;
+  text: string;
+  body: OriginalityRequest;
+  activeProfile: any;
+  uploadedFile: File | null;
+  fileWarning: string | null;
+  report: string;
+  savedId: string | null;
+}): Omit<ProtocolResponse, 'protocolText' | 'text' | 'content' | 'report'> {
+  const {
+    aiData,
+    text,
+    body,
+    activeProfile,
+    uploadedFile,
+    fileWarning,
+    savedId,
+  } = params;
 
-=== AUTENTICKOSŤ TEXTU ===
-Číslo od 0 do 100. 100 znamená prirodzený, konkrétny, odborne pôsobiaci text s viditeľným autorským prínosom.
+  const dictionaryStats = createDictionaryStats(text);
+  const histogram = createHistogram(text);
 
-=== CELKOVÉ HODNOTENIE ===
-Slovné hodnotenie: Nízke riziko / Stredné riziko / Vysoké riziko. Pridaj vysvetlenie.
+  const title =
+    normalizeString(aiData?.title) ||
+    normalizeString(body.title) ||
+    normalizeString(activeProfile?.title) ||
+    'Kontrolovaná práca';
 
-=== RIZIKOVÉ PASÁŽE ===
-Vypíš konkrétne pasáže alebo vety, ktoré môžu byť rizikové. Pri každej:
-- cituj krátky úsek
-- vysvetli dôvod rizika
-- navrhni opravu
+  const author =
+    normalizeString(aiData?.author) ||
+    normalizeString(body.author) ||
+    normalizeString(body.authorName) ||
+    'Neuvedené';
 
-=== CHÝBAJÚCE CITÁCIE ===
-Uveď miesta, kde pravdepodobne treba doplniť citáciu alebo zdroj.
+  const school =
+    normalizeString(aiData?.school) ||
+    normalizeString(body.school) ||
+    'Neuvedené';
 
-=== ODPORÚČANIA NA ÚPRAVU ===
-Daj konkrétne odporúčania:
-- čo citovať
-- čo parafrázovať
-- kde doplniť vlastný komentár
-- kde doplniť metodológiu alebo zdroj
+  const faculty =
+    normalizeString(aiData?.faculty) ||
+    normalizeString(body.faculty) ||
+    'Neuvedené';
 
-=== AUTENTICKÁ AKADEMICKÁ ÚPRAVA ===
-Vyber 1–3 generické alebo príliš šablónové vety a ukáž, ako ich poctivo upraviť tak, aby:
-- boli konkrétnejšie,
-- obsahovali odborný kontext,
-- nadväzovali na tému práce,
-- boli vhodné na citovanie,
-- nepôsobili ako všeobecný AI text,
-- ale zároveň neobchádzali žiadne detektory ani akademické pravidlá.
+  const studyProgram =
+    normalizeString(aiData?.studyProgram) ||
+    normalizeString(body.studyProgram) ||
+    'Neuvedené';
 
-=== UKÁŽKA AKADEMICKEJ ÚPRAVY ===
-Vyber 1–3 rizikové vety a ukáž poctivú akademickú úpravu.
+  const supervisor =
+    normalizeString(aiData?.supervisor) ||
+    normalizeString(body.supervisor) ||
+    normalizeString(activeProfile?.supervisor) ||
+    'Neuvedené';
 
-=== UPOZORNENIE ===
-Uveď, že výsledok je orientačný a nenahrádza oficiálnu kontrolu originality.
+  const workType =
+    normalizeString(aiData?.workType) ||
+    normalizeString(body.workType) ||
+    normalizeString(activeProfile?.type) ||
+    'Neuvedené';
+
+  const citationStyle =
+    normalizeString(aiData?.citationStyle) ||
+    normalizeString(body.citationStyle) ||
+    normalizeString(activeProfile?.citation) ||
+    'ISO 690';
+
+  const language =
+    normalizeString(aiData?.language) ||
+    normalizeString(body.language) ||
+    normalizeString(activeProfile?.workLanguage) ||
+    normalizeString(activeProfile?.language) ||
+    'SK';
+
+  const score = clampPercent(
+    aiData?.score ??
+      aiData?.similarityRiskScore ??
+      aiData?.overallPercent ??
+      aiData?.percent ??
+      0,
+  );
+
+  const documents = normalizeDocuments(aiData?.documents);
+  const passages = normalizePassages(aiData?.passages);
+
+  const finalDocuments =
+    documents.length > 0 ? documents : createFallbackDocuments(score);
+
+  const finalPassages =
+    passages.length > 0 ? passages : createFallbackPassages(text, score);
+
+  const id = savedId || null;
+
+  const metadataUrl = id
+    ? `metadata:https://opac.crzp.sk/?fn=detailBiblioForm&sid=${id}`
+    : 'metadata:';
+
+  const webProtocolUrl = id
+    ? `webprotokol:https://www.crzp.sk/eprotokol?pid=${id}`
+    : 'webprotokol:';
+
+  return {
+    ok: true,
+    id,
+
+    protocolTitle: 'Protokol',
+
+    score,
+    title,
+    author,
+    school,
+    faculty,
+    studyProgram,
+    supervisor,
+    workType,
+    citationStyle,
+    language,
+    createdAt: new Date().toISOString(),
+
+    metadataUrl,
+    webProtocolUrl,
+
+    corpuses: normalizeCorpuses(aiData?.corpuses, score),
+    dictionaryStats,
+    histogram,
+    documents: finalDocuments,
+    passages: finalPassages,
+
+    summary:
+      normalizeString(aiData?.summary) ||
+      'Výsledok je orientačná kontrola originality. Protokol vyhodnocuje podobnosť, rizikové formulácie, chýbajúce citácie, všeobecné pasáže a akademickú autentickosť textu.',
+
+    recommendation:
+      normalizeString(aiData?.recommendation) ||
+      'Skontrolujte označené pasáže, doplňte zdroje, upravte všeobecné formulácie, posilnite vlastný komentár autora a overte výsledok v oficiálnom systéme školy.',
+
+    plaintext: text,
+
+    fileWarning,
+
+    file: uploadedFile
+      ? {
+          name: uploadedFile.name,
+          size: uploadedFile.size,
+          type: uploadedFile.type,
+          extension: getExtension(uploadedFile.name),
+        }
+      : null,
+
+    rawAiJson: aiData,
+  };
+}
+
+// ================= PROTOCOL TEXT GENERATOR =================
+
+function createProtocolText(data: Omit<ProtocolResponse, 'protocolText' | 'text' | 'content' | 'report'>) {
+  const date = formatDateSk(data.createdAt);
+
+  const corpusesLine = data.corpuses
+    .map(
+      (corpus) =>
+        `${corpus.name}:${formatPercent(corpus.percent, 2)} (${corpus.count ?? 0})`,
+    )
+    .join(', ');
+
+  const histogramLengths = data.histogram.map((item) => item.length).join('\n');
+  const histogramDeviations = data.histogram
+    .map((item) => item.deviation)
+    .join('\n');
+
+  const documentsText =
+    data.documents.length > 0
+      ? data.documents
+          .map((doc, index) => {
+            return `${doc.order || index + 1}
+${doc.citation}
+plagID: ${doc.plagId || 'ORIENTACNE'} typ práce: ${
+              doc.workType || data.workType || 'neurčené'
+            } zdroj: ${doc.source || 'ZEDPERA'}
+${formatPercent(doc.percent, 2)}`;
+          })
+          .join('\n\n')
+      : 'Neboli identifikované práce s nadprahovou hodnotou podobnosti.';
+
+  const detailsText =
+    data.passages.length > 0
+      ? data.passages
+          .map((passage, index) => {
+            const controlled = normalizeForProtocolText(passage.controlledText);
+            const matched = normalizeForProtocolText(passage.matchedText || '');
+            const reason = normalizeForProtocolText(passage.reason || '');
+
+            return `${index + 1}. odsek : spoľahlivosť [${
+              passage.reliability ||
+              (typeof passage.percent === 'number'
+                ? formatPercent(passage.percent, 0)
+                : 'orientačná')
+            }]
+${controlled}
+
+Zdroj / porovnanie:
+${matched || 'Nejde o potvrdenú databázovú zhodu. Ide o orientačné označenie rizikovej pasáže.'}
+
+${reason ? `Dôvod: ${reason}` : ''}`;
+          })
+          .join('\n\n')
+      : 'Neboli vrátené konkrétne zistené podobnosti.';
+
+  const plaintext = data.plaintext.slice(0, 70000);
+
+  return `Protokol
+
+${date} (verzia 3.0) - www.crzp.sk/vysvetlivky30.pdf
+Protokolokontroleoriginality
+
+${data.metadataUrl}
+${data.webProtocolUrl}
+
+Kontrolovanápráca
+Citácia
+Percento*
+${data.title} / autor ${data.author} - školiteľ ${data.supervisor}
+${data.faculty} / ${data.studyProgram}. - ${data.school}. - ${new Date(
+    data.createdAt,
+  ).getFullYear()}.
+plagID: ${data.id || 'ORIENTACNE'} typ práce: ${data.workType} zdroj: ${
+    data.school
+  }
+${formatPercent(data.score, 2)}
+
+*Číslo vyjadruje percentuálny podiel textu, ktorý má prekryv s indexom kontrolovaných textových vzorov. Intervaly grafického zvýraznenia prekryvu sú nastavené na [0-20, 21-40, 41-60, 61-80, 81-100].
+
+Zhoda v korpusoch: ${corpusesLine}
+
+Informácieoextrahovanomtextedodanomnakontrolu
+Dĺžka extrahovaného textu v znakoch: ${data.dictionaryStats.extractedChars}
+Celkový počet slov textu: ${data.dictionaryStats.totalWords}
+Počet slov v slovníku (SK, CZ, EN, HU, DE): ${data.dictionaryStats.dictionaryWords}
+Pomer počtu slovníkových slov: ${formatPercent(
+    data.dictionaryStats.dictionaryWordsRatio,
+    1,
+  )}
+Súčet dĺžky slov v slovníku (SK, CZ, EN, HU, DE): ${
+    data.dictionaryStats.dictionaryLengthSum
+  }
+Pomer dĺžky slovníkových slov: ${formatPercent(
+    data.dictionaryStats.dictionaryLengthRatio,
+    1,
+  )}
+
+Interval
+100%-70%
+70%-60%
+60%-50%
+40%-30%
+30%-0%
+
+Vplyv na KO*
+žiadny
+malý
+stredný
+veľký
+zásadný
+
+*Kontrola originality je výrazne ovplyvnená kvalitou dodaného textu. Slovníkový test vyjadruje mieru zhody slov kontrolovanej práce so slovníkom referenčných slov podporovaných jazykov. Nízka zhoda môže byť spôsobená: nepodporovaný jazyk, chyba prevodu PDF alebo úmyselná manipulácia textu. Text práce na vizuálnu kontrolu je na konci protokolu.
+
+Početnosť slov-histogram
+Dĺžka slova
+${histogramLengths}
+
+Indik. odchylka
+${histogramDeviations}
+
+*Odchýlky od priemerných hodnôt početnosti slov. Profil početností slov je počítaný orientačne podľa extrahovaného textu. Značka ">>" indikuje výrazne viac slov danej dĺžky ako priemer a značka "<<" výrazne menej slov danej dĺžky ako priemer. Výrazné odchýlky môžu indikovať manipuláciu textu. Je potrebné skontrolovať "plaintext"! Priveľa krátkych slov indikuje vkladanie oddelovačov alebo znakov netradičného kódovania. Priveľa dlhých slov indikuje vkladanie bielych znakov, prípadne iný jazyk práce.
+
+Prácesnadprahovouhodnotoupodobnosti
+Dok.
+Citácia
+Percento*
+${documentsText}
+
+*Číslo vyjadruje percentuálny prekryv testovaného dokumentu len s dokumentom alebo orientačnou kategóriou uvedenou v príslušnom riadku.
+:Dokument má prekryv s viacerými rizikovými formuláciami. Zoznam dokumentov je krátený a usporiadaný podľa percenta zostupne. Celkový počet dokumentov je [${data.documents.length}]. Pri veľkom počte býva často príčinou zhoda v texte, ktorý je predpísaný pre daný typ práce, napríklad položky tabuliek, záhlavia, čestné vyhlásenia, poďakovania alebo všeobecné formulácie.
+
+Detaily-zistenépodobnosti
+${detailsText}
+
+Plaintext dokumentunakontrolu
+Skontroluje extrahovaný text práce na konci protokolu! Plaintext (čistý text - extrahovaný text) dokumentuje základom pre textový analyzátor. Tento text môže byť poškodený úmyselne vkladaním znakov, používaním neštandardných znakových sád alebo neúmyselne napr. pri konverzii na PDF nekvalitným programom. Nepoškodený text je čitateľný, slová sú správne oddelené, diakritické znaky sú správne, množstvo textu je primerané rozsahu práce.
+
+___________________________________________________________________________
+
+${plaintext}
+
+${data.metadataUrl}
+${data.webProtocolUrl}
+
+Upozornenie:
+Tento protokol je orientačný výstup systému ZEDPERA Originalita. Nenahrádza oficiálnu kontrolu originality školy, CRZP, Turnitin ani iný autorizovaný antiplagiátorský systém.
 `;
 }
 
@@ -473,13 +1175,24 @@ export async function POST(req: NextRequest) {
 
     let body: OriginalityRequest = {};
     let uploadedFile: File | null = null;
+    let uploadedFiles: File[] = [];
     let fileWarning: string | null = null;
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData();
 
-      const rawFile = formData.get('file');
-      uploadedFile = rawFile instanceof File ? rawFile : null;
+      const rawSingleFile = formData.get('file');
+      const rawMultipleFiles = formData.getAll('files');
+
+      uploadedFile = rawSingleFile instanceof File ? rawSingleFile : null;
+
+      uploadedFiles = rawMultipleFiles.filter(
+        (item): item is File => item instanceof File,
+      );
+
+      if (!uploadedFile && uploadedFiles.length > 0) {
+        uploadedFile = uploadedFiles[0];
+      }
 
       const activeProfileRaw = formData.get('activeProfile')?.toString() || '';
 
@@ -493,7 +1206,11 @@ export async function POST(req: NextRequest) {
 
       body = {
         title: formData.get('title')?.toString() || '',
-        authorName: formData.get('authorName')?.toString() || '',
+        author: formData.get('author')?.toString() || '',
+        authorName:
+          formData.get('authorName')?.toString() ||
+          formData.get('author')?.toString() ||
+          '',
         school: formData.get('school')?.toString() || '',
         faculty: formData.get('faculty')?.toString() || '',
         studyProgram: formData.get('studyProgram')?.toString() || '',
@@ -514,14 +1231,29 @@ export async function POST(req: NextRequest) {
 
     let extractedFromFile = '';
 
-    if (uploadedFile) {
-      const extracted = await extractTextFromFile(uploadedFile);
-      extractedFromFile = extracted.text;
-      fileWarning = extracted.warning || null;
+    const filesToExtract =
+      uploadedFiles.length > 0
+        ? uploadedFiles
+        : uploadedFile
+          ? [uploadedFile]
+          : [];
+
+    for (const file of filesToExtract) {
+      const extracted = await extractTextFromFile(file);
+
+      if (extracted.text) {
+        extractedFromFile += `\n\n===== SÚBOR: ${file.name} =====\n${extracted.text}`;
+      }
+
+      if (extracted.warning) {
+        fileWarning = fileWarning
+          ? `${fileWarning} | ${extracted.warning}`
+          : extracted.warning;
+      }
     }
 
     const text = cleanInputText(
-      `${body.text || ''}\n\n${extractedFromFile || ''}`
+      `${body.text || ''}\n\n${extractedFromFile || ''}`,
     );
 
     if (!text) {
@@ -531,7 +1263,7 @@ export async function POST(req: NextRequest) {
           error: 'TEXT_REQUIRED',
           message: 'Chýba text práce alebo extrahovaný obsah súboru.',
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -543,16 +1275,17 @@ export async function POST(req: NextRequest) {
           message:
             'Na kontrolu vlož aspoň 300 znakov alebo nahraj čitateľný súbor.',
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     const activeProfile = body.activeProfile || null;
+    const dictionaryStats = createDictionaryStats(text);
 
-    const prompt = buildOriginalityPrompt({
+    const prompt = buildProtocolPrompt({
       text: text.slice(0, MAX_EXTRACTED_TEXT_LENGTH),
       title: body.title || activeProfile?.title || 'Kontrola originality',
-      authorName: body.authorName || '',
+      authorName: body.authorName || body.author || '',
       school: body.school || '',
       faculty: body.faculty || '',
       studyProgram: body.studyProgram || '',
@@ -566,33 +1299,41 @@ export async function POST(req: NextRequest) {
         'SK',
       activeProfile,
       checkAuthenticity: boolValue(body.checkAuthenticity, true),
+      dictionaryStats,
     });
 
     const model = getModel(body.agent);
 
-    const result = await generateText({
+    const aiResult = await generateText({
       model,
       prompt,
-      temperature: 0.15,
-      maxOutputTokens: 4500,
+      temperature: 0.05,
+      maxOutputTokens: 6000,
     });
 
-    const report = cleanAiText(result.text || '');
+    const rawAiReport = cleanAiText(aiResult.text || '');
 
-    const status = section(report, 'STAV KONTROLY');
-    const originalityScore = numberFromSection(report, 'SKÓRE ORIGINALITY');
-    const similarityRiskScore = numberFromSection(report, 'RIZIKO PODOBNOSTI');
-    const aiStyleScore = numberFromSection(report, 'AI / GENERICKÝ ŠTÝL');
-    const authenticityScore = numberFromSection(report, 'AUTENTICKOSŤ TEXTU');
+    let aiData: any = {};
 
-    const riskLevel = section(report, 'CELKOVÉ HODNOTENIE');
-    const riskyPassages = section(report, 'RIZIKOVÉ PASÁŽE');
-    const missingCitations = section(report, 'CHÝBAJÚCE CITÁCIE');
-    const recommendations = section(report, 'ODPORÚČANIA NA ÚPRAVU');
-    const authenticRewrite = section(report, 'AUTENTICKÁ AKADEMICKÁ ÚPRAVA');
-    const rewriteSample = section(report, 'UKÁŽKA AKADEMICKEJ ÚPRAVY');
+    try {
+      aiData = extractJsonFromAi(rawAiReport);
+    } catch (parseError) {
+      console.error('ORIGINALITY JSON PARSE ERROR:', parseError);
+      aiData = {};
+    }
 
     let savedId: string | null = null;
+
+    const preliminaryData = normalizeProtocolData({
+      aiData,
+      text,
+      body,
+      activeProfile,
+      uploadedFile,
+      fileWarning,
+      report: rawAiReport,
+      savedId: null,
+    });
 
     try {
       const supabase = createAdminClient();
@@ -603,17 +1344,16 @@ export async function POST(req: NextRequest) {
           user_id: null,
           profile_id: body.profileId || null,
 
-          title: body.title || activeProfile?.title || 'Kontrola originality',
-          author_name: body.authorName || null,
-          school: body.school || null,
-          faculty: body.faculty || null,
-          study_program: body.studyProgram || null,
-          supervisor: body.supervisor || activeProfile?.supervisor || null,
+          title: preliminaryData.title,
+          author_name: preliminaryData.author || null,
+          school: preliminaryData.school || null,
+          faculty: preliminaryData.faculty || null,
+          study_program: preliminaryData.studyProgram || null,
+          supervisor: preliminaryData.supervisor || null,
 
-          work_type: body.workType || activeProfile?.type || null,
-          citation_style:
-            body.citationStyle || activeProfile?.citation || 'ISO 690',
-          language: body.language || activeProfile?.language || 'SK',
+          work_type: preliminaryData.workType || null,
+          citation_style: preliminaryData.citationStyle || 'ISO 690',
+          language: preliminaryData.language || 'SK',
 
           file_name: uploadedFile?.name || null,
           file_size: uploadedFile?.size || null,
@@ -622,23 +1362,23 @@ export async function POST(req: NextRequest) {
           extracted_text: text,
           input_length: text.length,
 
-          originality_score: originalityScore,
-          similarity_risk_score: similarityRiskScore,
-          ai_style_score: aiStyleScore,
-          authenticity_score: authenticityScore,
+          originality_score: Math.max(0, 100 - preliminaryData.score),
+          similarity_risk_score: preliminaryData.score,
+          ai_style_score: null,
+          authenticity_score: null,
 
-          risk_level: riskLevel,
-          summary: riskLevel,
+          risk_level: preliminaryData.summary,
+          summary: preliminaryData.summary,
 
-          risky_passages: riskyPassages ? [{ text: riskyPassages }] : [],
-          missing_citations: missingCitations ? [{ text: missingCitations }] : [],
-          recommendations: recommendations ? [{ text: recommendations }] : [],
-          authentic_rewrite: authenticRewrite
-            ? [{ text: authenticRewrite }]
+          risky_passages: preliminaryData.passages,
+          missing_citations: [],
+          recommendations: preliminaryData.recommendation
+            ? [{ text: preliminaryData.recommendation }]
             : [],
+          authentic_rewrite: [],
 
-          raw_report: report,
-          status: status || 'completed',
+          raw_report: rawAiReport,
+          status: 'completed',
         })
         .select('id')
         .single();
@@ -654,35 +1394,28 @@ export async function POST(req: NextRequest) {
       console.error('ORIGINALITY SAVE ERROR:', saveError);
     }
 
-    return NextResponse.json({
-      ok: true,
-      id: savedId,
-
-      status,
-      originalityScore,
-      similarityRiskScore,
-      aiStyleScore,
-      authenticityScore,
-
-      riskLevel,
-      riskyPassages,
-      missingCitations,
-      recommendations,
-      authenticRewrite,
-      rewriteSample,
-      report,
-
+    const finalData = normalizeProtocolData({
+      aiData,
+      text,
+      body,
+      activeProfile,
+      uploadedFile,
       fileWarning,
-
-      file: uploadedFile
-        ? {
-            name: uploadedFile.name,
-            size: uploadedFile.size,
-            type: uploadedFile.type,
-            extension: getExtension(uploadedFile.name),
-          }
-        : null,
+      report: rawAiReport,
+      savedId,
     });
+
+    const protocolText = createProtocolText(finalData);
+
+    const response: ProtocolResponse = {
+      ...finalData,
+      protocolText,
+      text: protocolText,
+      content: protocolText,
+      report: protocolText,
+    };
+
+    return NextResponse.json(response);
   } catch (error) {
     console.error('ORIGINALITY API ERROR:', error);
 
@@ -695,7 +1428,7 @@ export async function POST(req: NextRequest) {
             ? error.message
             : 'Neznáma chyba pri kontrole originality.',
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

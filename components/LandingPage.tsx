@@ -68,7 +68,7 @@ const plans: Plan[] = [
     oldPrice: '15,84 €',
     period: '7 dní',
     description:
-      'Vhodné na seminárnu prácu, jednu kapitolu alebo rýchlu úpravu textu.',
+      'Vhodné na seminárnu prácu, jednu kapitolu alebo rýchlu úpravu textu',
     button: 'Kúpiť Týždeň MINI',
     features: [
       '25 strán',
@@ -244,47 +244,50 @@ const features = [
 const fiveBlocks = [
   {
     title: 'Rýchle vytvorenie práce',
-    text: 'Zadaj tému, vyplň profil a získaj kvalitný odborný text prispôsobený tvojim požiadavkám a zdrojom. Systém vychádza z tvojich podkladov, profilu práce a zadaných požiadaviek. Využíva viacero moderných AI modelov a pomáha pri akademickom písaní, zdrojoch, citáciách aj praktickej časti.',
+    text: `Zadaj tému, vyplň profil a získaj kvalitný odborný text prispôsobený tvojim požiadavkám a zdrojom. Systém nehalucinuje ako bežné AI nástroje, ale vychádza výhradne z tvojich zdrojov. Využíva pritom viacero najnovších AI modelov. Cituje presne podľa noriem, takže sa nemusíš báť plagiátorstva. Dokonca zvládne aj výpočty pri praktickej časti. Už nemusíš hľadať žiadneho štatistu alebo pracovať v programoch, ktorým nerozumieš.`,
   },
   {
     title: 'AI kritik',
-    text: 'Asistent zanalyzuje tvoju prácu, upozorní ťa na nedostatky a zároveň navrhne konkrétne úpravy. Získaš okamžitú spätnú väzbu a presne uvidíš, ktoré časti práce treba dopracovať, rozšíriť alebo preformulovať.',
+    text: `Asistent zanalyzuje tvoju prácu, upozorní ťa na nedostatky a zároveň navrhne konkrétne úpravy. Získaj okamžitú spätnú väzbu. Zároveň zobrazí skóre kvality napísanej práce.`,
   },
   {
     title: 'AI vedúci práce dostupný 24/7',
-    text: 'Sprevádza ťa celým procesom písania, kontroluje tvoj text, navrhuje vylepšenia a ukazuje ti, ako ho posunúť na vyššiu úroveň. Keď dostaneš pripomienky od školiteľa, pomôže ti ich jednoducho zapracovať.',
+    text: `Sprevádza ťa celým procesom písania, kontroluje tvoj text, navrhuje vylepšenia a ukazuje ti, ako ho posunúť na vyššiu úroveň. Keď dostaneš pripomienky od školiteľa, pomôže ti ich jednoducho zapracovať. Je ti k dispozícii nonstop a vždy sa sústredí len na tvoju prácu.`,
   },
   {
     title: 'Kontrola originality',
-    text: 'Získaj orientačný prehľad o originalite práce a minimalizuj riziko problémových pasáží. Zedpera upozorní na miesta, kde je vhodné doplniť citáciu, upraviť formuláciu alebo text prepracovať vlastnými slovami.',
+    text: `Získaj prehľad o originalite práce a minimalizuj riziko problémov s plagiátorstvom. Zedpera celý text skontroluje a vyhodnotí percento zhody. Overenie prebieha bezpečne a bez ukladania obsahu do verejných databáz, takže sa nemusíš obávať nežiaducich zhôd pri následnom odovzdaní práce do školského systému. Výsledok ti poskytne orientačný prehľad o miere originality a pomôže identifikovať časti, ktoré je vhodné upraviť.`,
   },
   {
     title: 'Príprava na obhajobu',
-    text: 'Po dokončení práce systém pomôže pripraviť obhajobu, otázky, odpovede, reakcie na posudky a prezentáciu. Vďaka tomu vieš, čo môžeš očakávať a ako obhájiť svoju prácu pokojne a vecne.',
+    text: `Po dokončení práce systém vygeneruje obhajobu, pripraví ti prezentáciu, odpovede na otázky vedúceho aj oponenta na základe posudkov spolu so sprievodným textom.`,
   },
 ];
 
 const badAiItems = [
-  'Píše všeobecné texty a omáčky. Obsah môže byť síce dlhý, ale nemusí mať vypovednú hodnotu.',
-  'Nepamätá si všetky informácie o práci a musíš jej ich opakovane zadávať.',
+  `Píše všeobecné texty a omáčky. Obsah môže byť síce dlhý, ale nemá žiadnu výpovednú hodnotu. Robí faktické chyby.`,
+  `Bežná AI si nepamätá Vašu tému, preto jej musíte neustále opakovať všetky informácie a zadávať dlhé prompty.`,
   'Text je potrebné zdĺhavo upravovať.',
-  'Môže si vymýšľať zdroje alebo uvádzať nepresné údaje.',
-  'Nepracuje s profilom tvojej práce.',
-  'Nedokáže systematicky upozorniť na chyby v logike práce.',
-  'Nerozumie pripomienkam od školiteľa v kontexte celej práce.',
-  'Nepomôže ti spoľahlivo s praktickou časťou, výpočtami a obhajobou.',
+  'Vymýšľa si zdroje.',
+  'Nechráni Vaše súkromie.',
+  'Nedokáže upozorniť na chyby.',
+  'Nerozumie pripomienkam od školiteľa.',
+  'Nepomôže ti s výpočtami a praktickou časťou.',
+  'Neoverí zhodu.',
+  'Nedokáže reagovať na posudky.',
 ];
 
 const zedperaItems = [
-  'Pozná Vašu prácu. Pamätá si tému, anotáciu, cieľ, metódy, hypotézy, spôsob citovania, praktickú časť a kľúčové slová.',
-  'Pozná celú históriu projektu a nemusíte jej všetko opakovať.',
-  'Cituje podľa Vami zvolenej normy.',
-  'Vychádza z Vašich zdrojov a profilu práce.',
-  'Pomáha pracovať systematicky a bezpečnejšie.',
-  'Analyzuje prácu a upozorní na problémové časti.',
-  'Sprevádza ťa celým procesom písania a ukazuje, ako text posunúť vyššie.',
-  'Pomáha s praktickou časťou, analýzami, výpočtami a obhajobou.',
-  'Pomáha pripraviť reakcie na posudky.',
+  `Pozná Vašu prácu. Dokonale si pamätá celú tému vrátane anotácie, cieľa, metodiky, hypotéz, spôsobu citovania, praktickej časti a kľúčových slov.`,
+  `Pozná celú históriu, dokonca aj komunikáciu. Nemusíte jej nič opakovať.`,
+  'Cituje presne podľa Vami zvolenej normy.',
+  'Vychádza z Vašich zdrojov.',
+  'Údaje sú chránené.',
+  'Zanalyzuje prácu a upozorní na problémové časti.',
+  `Sprevádza ťa celým procesom písania, kontroluje tvoj text, navrhuje vylepšenia a ukazuje ti, ako ho posunúť na vyššiu úroveň. Zároveň dokáže pomôcť s pripomienkami od vedúceho.`,
+  'Dokáže ti pripraviť praktickú časť vrátane analýz a výpočtov.',
+  'Overí zhodu.',
+  'Pomôže s obhajobou na základe posudkov.',
 ];
 
 const faqItems: FaqItem[] = [
@@ -294,14 +297,14 @@ const faqItems: FaqItem[] = [
       'Áno. Službu môžete využívať opakovane počas štúdia na rôzne typy akademických prác od seminárnych až po bakalárske, diplomové, dizertačné či rigorózne práce. Pre každé nové zadanie si jednoducho nastavíte nový projekt vo svojom profile.',
   },
   {
-    question: 'Zvládne Zedpera každý odbor?',
+    question: 'Zvládne ZEDPERA každý odbor?',
     answer:
-      'Áno. Zedpera dokáže pracovať s rôznymi typmi materiálov a zadaní. Môžete využiť vlastné poznámky, dokumenty, odborné zdroje alebo zdroje vyhľadané v systéme. Je vhodná pre humanitné, ekonomické, technické aj prakticky orientované práce.',
+      'Áno. ZEDPERA dokáže pracovať s akýmikoľvek materiálmi. Ak si chcete zjednodušiť prácu, môžete si stiahnuť zdroje z našej vedeckej databázy, alebo nahrať vlastné poznámky, súbory prípadne požiadavky školiteľa.',
   },
   {
-    question: 'Aký je rozdiel medzi ChatGPT, Gemini a Zedperou?',
+    question: 'Aký je rozdiel medzi ChatGPT, Gemini a ZEDPEROU?',
     answer:
-      'Všeobecné nástroje často generujú univerzálne texty bez znalosti celého kontextu práce. Zedpera je navrhnutá priamo pre akademické písanie. Pracuje s profilom práce, témou, cieľom, metodológiou, zdrojmi, citačnou normou, spätnou väzbou a obhajobou.',
+      'ZEDPERA je vytvorená priamo pre akademické písanie. Na rozdiel od všeobecných nástrojov, ako ChatGPT alebo Gemini, pracuje s vaším konkrétnym zadaním. Nevymýšľa si. Celý systém sme navrhli tak, aby minimalizoval nepresnosti a uvádzal len relevantné zdroje. Využíva viacero špecializovaných modulov pre rôzne časti práce, ktoré boli vyvíjané tímom odborníkov s cieľom zjednodušiť a zrýchliť proces písania.',
   },
   {
     question: 'Čo je AI vedúci práce a AI kritik?',
@@ -311,32 +314,32 @@ const faqItems: FaqItem[] = [
   {
     question: 'Čo je AI obhajoba?',
     answer:
-      'AI obhajoba pomáha pripraviť prezentáciu, otázky, odpovede a reakcie na pripomienky vedúceho alebo oponenta. Slúži ako praktická príprava pred obhajobou.',
+      'AI obhajoba je nástroj, ktorý vám pomôže profesionálne pripraviť obhajobu. Na základe hotovej práce a posudkov vám spracuje prezentáciu, návrh obhajoby a poskytne odporúčania, ako všetko odprezentovať jasne a sebavedomo.',
   },
   {
     question: 'Ako funguje overenie zhody?',
     answer:
-      'Overenie zhody poskytuje orientačný prehľad o miere originality a rizikových častiach textu. Výsledok nenahrádza oficiálnu kontrolu školy, ale pomáha odhaliť problémové pasáže ešte pred odovzdaním.',
+      'Po dokončení práce si môžete jednoducho overiť jej originalitu priamo v systéme. Stačí vložiť celý text a ZEDPERA analyzuje jeho zhodu. Overenie prebieha bezpečne a bez ukladania obsahu do verejných databáz.',
   },
   {
     question: 'Môžem použiť Zedperu len na vyhľadávanie zdrojov?',
     answer:
-      'Áno. Zedperu môžete používať aj na prácu so zdrojmi, vyhľadávanie relevantných publikácií, vytváranie citácií a spracovanie bibliografie.',
+      'Áno, ak sa Vám nechce hľadať zdroje a čerpať z knižníc. V našej databáze nájdete množstvo najnovších článkov, kníh a publikácií.',
   },
   {
     question: 'V akých jazykoch môžem vytvoriť prácu?',
     answer:
-      'Služba podporuje viacero jazykov a umožňuje prispôsobiť štýl, odbornú úroveň aj jazyk výstupu podľa nastavenia profilu práce.',
+      'Služba je trénovaná na viacero jazykov, takže môžete písať akademické práce v rôznych jazykových variantoch a prispôsobiť štýl aj odbornú úroveň podľa zvoleného jazyka.',
   },
   {
     question: 'Je používanie služby legálne?',
     answer:
-      'Používanie umelej inteligencie pri akademickej práci nie je vo všeobecnosti zakázané, no vždy je potrebné rešpektovať pravidlá konkrétnej školy. Odporúča sa transparentne uviesť použitie AI v metodológii alebo čestnom vyhlásení, ak to škola vyžaduje.',
+      'Používanie umelej inteligencie pri písaní akademických prác nie je vo všeobecnosti zakázané, no školy kladú dôraz na transparentnosť. Odporúča sa preto uviesť využitie AI napríklad v metodológii alebo v prehlásení o použitých nástrojoch.',
   },
   {
     question: 'Môžem predplatné kedykoľvek zrušiť?',
     answer:
-      'Áno. Predplatné môžete kedykoľvek zrušiť. Ak ho nezrušíte, automaticky sa obnoví podľa aktuálne zvoleného programu.',
+      'Áno. Predplatné nie je viazané a môžete ho kedykoľvek zrušiť. Ak ho nezrušíte, automaticky sa obnoví a platba bude účtovaná aj počas ďalšieho obdobia podľa aktuálne zvoleného programu.',
   },
 ];
 
@@ -364,54 +367,6 @@ const reviews = [
   {
     name: 'Externá študentka',
     text: 'Študujem externe druhú vysokú školu a popri práci a rodine je veľmi ťažké všetko stíhať. Zedperu mi odporučila spolužiačka. Konečne som mala seminárku hotovú za pár minút a nemusela som nad ňou stráviť celý víkend.',
-  },
-  {
-    name: 'Používateľka pri záverečnej práci',
-    text: 'Zedperu používam niekoľko mesiacov a som veľmi spokojná. Je jednoduchá, nevymýšľa si a pri zdrojoch mám prehľad, odkiaľ informácie pochádzajú. Prácu som mala hotovú s prestávkami za niekoľko dní a plánujem ju využiť aj pri príprave obhajoby.',
-  },
-  {
-    name: 'Študent po obhajobe',
-    text: 'S týmto nástrojom mám veľmi dobrú skúsenosť. Zdroje boli reálne a dali sa overiť. Najviac som využíval AI vedúceho, pretože môj školiteľ so mnou takmer nekomunikoval. Vďaka Zedpere som mal spätnú väzbu vždy, keď som ju potreboval.',
-  },
-  {
-    name: 'Študentka po prepracovaní práce',
-    text: 'Prácu mi školiteľka vrátila na prepracovanie a nevedela som, ako pokračovať. Do Zedpery som nahrala zadanie a podklady a išla som krok za krokom. Veľké plus bolo kvalitné parafrázovanie, plynulý text a spätná väzba AI vedúceho.',
-  },
-  {
-    name: 'Študent diplomovej práce',
-    text: 'Po zmene práce bolo náročné stíhať školu aj učenie. Zedperu som začal používať najskôr na seminárky a výsledky ma prekvapili. Všetko malo hlavu aj pätu a zdroje sedeli. Teraz ju používam aj pri diplomovej práci.',
-  },
-  {
-    name: 'Študentka 2. ročníka',
-    text: 'Používam Zedperu už niekoľko mesiacov. Konečne si viem lepšie rozložiť čas a nemusím tráviť hodiny v knižnici. Výstupy dávajú zmysel, zdroje sedia a pri odovzdávaní prác mám oveľa menší stres.',
-  },
-  {
-    name: 'Používateľ diplomovej práce',
-    text: 'Zedperu mám predplatenú niekoľko dní a píšem pomocou nej diplomovku. Teoretickú časť som spracoval rýchlejšie, než som čakal. AI vedúci mi pomáha nielen kritizovať slabé miesta, ale hlavne navrhovať riešenia.',
-  },
-  {
-    name: 'Používateľka náročného zadania',
-    text: 'Mala som náročné zadanie k zápočtu. Do systému som nahrala celé zadanie a vznikol základ práce, ktorý som následne upravila podľa seba. Zdroje boli reálne a text mal akademickú úroveň.',
-  },
-  {
-    name: 'Začiatočníčka s AI',
-    text: 'Som úplný začiatočník a predtým som žiadnu AI nepoužívala. Kamarátka mi poslala odkaz na Zedperu. Systém som rýchlo pochopila, vyplnila profil, vyhľadala zdroje a postupne písala. Prvá práca trvala dlhšie, ale teraz sa v tom už viem orientovať.',
-  },
-  {
-    name: 'Používateľ s vlastnými zdrojmi',
-    text: 'Oceňujem, že Zedpera pracuje so zdrojmi, ktoré do nej nahrám alebo vyhľadám v knižnici. Nemusím zadávať zložité prompty a výstupy sú prispôsobené môjmu zadaniu.',
-  },
-  {
-    name: 'Študent bakalárskej práce',
-    text: 'Skúšal som viacero nástrojov na písanie prác, ale často boli texty príliš všeobecné. Zedpera ma prekvapila tým, že text bol jasný, bez zbytočných omáčok a vychádzal zo zadania. Školiteľka ocenila, že práca mala lepšiu úroveň.',
-  },
-  {
-    name: 'Používateľ AI vedúceho',
-    text: 'Vyskúšal som hlavne AI vedúceho, pretože školiteľ mi takmer neodpovedal. Naviedol ma správnym smerom, upozornil na nelogickú štruktúru, opakujúce sa výrazy a kapitoly, ktoré bolo potrebné prepracovať.',
-  },
-  {
-    name: 'Používateľka pri obhajobe',
-    text: 'Po negatívnych posudkoch som nevedela, ako sa pripraviť na obhajobu. Posudky som nahrala do Zedpery a systém mi pomohol pripraviť podklady, vysvetlenia aj reakcie na výhrady. Veľmi mi to pomohlo pochopiť, kde bol problém.',
   },
 ];
 
@@ -579,17 +534,6 @@ export default function LandingPage() {
             <a href="#faq" className="transition hover:text-violet-700">
               Otázky
             </a>
-
-            <Link
-              href="/obchodne-podmienky"
-              className="transition hover:text-violet-700"
-            >
-              Obchodné podmienky
-            </Link>
-
-            <Link href="/gdpr" className="transition hover:text-violet-700">
-              GDPR
-            </Link>
           </nav>
 
           <div className="hidden items-center gap-3 lg:flex">
@@ -677,22 +621,6 @@ export default function LandingPage() {
               </a>
 
               <Link
-                href="/obchodne-podmienky"
-                onClick={closeMobileMenu}
-                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
-              >
-                Obchodné podmienky
-              </Link>
-
-              <Link
-                href="/gdpr"
-                onClick={closeMobileMenu}
-                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
-              >
-                GDPR
-              </Link>
-
-              <Link
                 href="/login"
                 onClick={closeMobileMenu}
                 className="block w-full rounded-2xl bg-slate-100 px-4 py-3 text-left font-bold"
@@ -723,15 +651,15 @@ export default function LandingPage() {
 
           <h1 className="mx-auto max-w-5xl text-4xl font-black leading-[1.08] tracking-tight text-slate-950 md:text-6xl">
             Prvý akademický nástroj na písanie prác, ktorý zvládne náročné
-            praktické časti s AI vedúcim bez stresu a chaosu.
+            praktické časti s AI vedúcim bez stresu a chaosu
           </h1>
 
           <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-slate-600 md:text-xl">
-            Vyskúšaj Zedperu, nástroj, ktorý ťa prevedie celým procesom od
+            Vyskúšaj Zedperu, nástroj ktorý ťa prevedie celým procesom od
             prvého nápadu až po úspešnú obhajobu. AI vedúci práce ťa upozorní
             na chyby skôr, než ich uvidí školiteľ, je k dispozícii 24/7 a
-            navrhne ti konkrétne opravy, ktoré posunú tvoju prácu na vyššiu
-            úroveň.
+            navrhne ti konkrétne opravy, ktoré posunú tvoju prácu na vyšší
+            level.
           </p>
 
           <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
@@ -783,7 +711,7 @@ export default function LandingPage() {
               Predstavujeme vám inteligentný nástroj novej generácie, ktorý
               zásadne mení spôsob písania akademických prác. Zedpera ti pomáha
               premýšľať a zlepšovať tvoju prácu krok za krokom. Vďaka nej
-              presne vieš, čo máš robiť ďalej, bez zbytočného stresu alebo
+              presne vieš, čo máš robiť ďalej bez zbytočného stresu alebo
               neistoty.
             </p>
           </div>
@@ -1061,15 +989,15 @@ export default function LandingPage() {
             </h2>
 
             <p className="mt-3 text-lg leading-8 text-slate-600">
-              Najčastejšie otázky k používaniu Zedpery, AI vedúcemu,
-              obhajobe, zdrojom a predplatnému.
+              Najčastejšie otázky k používaniu Zedpery, AI vedúcemu, obhajobe,
+              zdrojom a predplatnému.
             </p>
           </div>
 
           <div className="space-y-4">
             {faqItems.map((item, index) => (
               <FaqRow
-                key={item.question}
+                key={`${item.question}-${index}`}
                 item={item}
                 open={openFaqIndex === index}
                 onClick={() =>
@@ -1089,23 +1017,19 @@ export default function LandingPage() {
 
           <ul className="mx-auto mt-8 max-w-3xl space-y-3 text-left text-base leading-7 text-slate-700">
             <li>
-              Ušetrí ti veľa času pri hľadaní zdrojov, tvorbe osnovy a
-              spracovaní textu.
+              Ušetrí ti mnoho času, nemusíš hľadať najnovšie zdroje v
+              knižniciach, v našej databáze nájdeš všetko, čo potrebuješ.
             </li>
             <li>
-              Pozná tvoju tému, profil práce, citácie, metodológiu aj zdroje.
+              Pozná tvoju tému, uvádza relevantné zdroje a vychádza z tvojich
+              zdrojov.
             </li>
             <li>
-              K dispozícii máš AI vedúceho a kritika zároveň, ktorí ťa prevedú
-              celým procesom.
+              K dispozícií máš AI vedúceho a kritika zároveň, prevedú ťa celým
+              procesom a sú k dispozícií 24/7.
             </li>
-            <li>
-              Pomáha aj s praktickou časťou, analýzami, výpočtami a
-              interpretáciou výsledkov.
-            </li>
-            <li>
-              Pomáha s prípravou na obhajobu a reakciami na posudky.
-            </li>
+            <li>Zvládne aj praktickú časť vrátane výpočtov.</li>
+            <li>Overí originalitu a zároveň ťa pripraví k obhajobe.</li>
           </ul>
 
           <div className="mt-8">
@@ -1127,11 +1051,11 @@ export default function LandingPage() {
           </h2>
 
           <p className="mt-6 text-lg leading-8 text-slate-600">
-            Áno, používanie Zedpery je legálne, ak sa používa transparentne a v
-            súlade s pravidlami konkrétnej školy. Zedpera slúži ako nástroj na
-            podporu písania, kontrolu textu, prácu so zdrojmi, citáciami a
-            spätnou väzbou. Odporúčame uviesť použitie AI podľa interných
-            pravidiel školy, napríklad v metodológii alebo čestnom vyhlásení.
+            Áno, používanie Zedpery je úplne legálne a etické. Nekopíruješ
+            texty umelej inteligencie, ale ty sám ich tvoríš. Prechádzaš
+            jednotlivými kapitolami a Zedpera ti pomáha napísať celú prácu za
+            minimum času. Stačí keď doplníš do čestného prehlásenia svojej
+            práce, že pri niektorých častiach bola použitá umelá inteligencia.
           </p>
 
           <div className="mt-8">
@@ -1216,6 +1140,7 @@ function ComparisonBox({
             >
               {negative ? '!' : '✓'}
             </span>
+
             <span>{item}</span>
           </li>
         ))}

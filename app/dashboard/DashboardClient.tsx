@@ -1,6 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 import {
   BookOpen,
   ClipboardCheck,
@@ -93,6 +99,9 @@ declare global {
 // ================= CONFIG =================
 
 const defaultAgent: Agent = 'gemini';
+
+const ORIGINALITY_PROTOCOL_STORAGE_KEY =
+  'zedpera_originality_protocol_result';
 
 const allowedFileExtensions = [
   '.pdf',
@@ -885,17 +894,51 @@ VÝSTUP:
 
     try {
       if (activeModule === 'originality') {
+        /**
+         * Nové okno otvoríme okamžite po kliknutí.
+         * Ak by sme ho otvárali až po AI odpovedi, prehliadač ho môže zablokovať.
+         */
+        let protocolWindow: Window | null = null;
+
+        try {
+          localStorage.removeItem(ORIGINALITY_PROTOCOL_STORAGE_KEY);
+
+          protocolWindow = window.open(
+            '/originality/protocol?loading=1',
+            '_blank',
+            'width=1300,height=900',
+          );
+        } catch {
+          protocolWindow = null;
+        }
+
         const formData = new FormData();
 
         formData.append('agent', agent);
         formData.append('text', input);
         formData.append('activeProfile', JSON.stringify(activeProfile || null));
-        formData.append('title', activeProfile?.title || 'Kontrola originality');
+
+        formData.append(
+          'title',
+          activeProfile?.title || 'Kontrola originality',
+        );
+        formData.append('author', '');
+        formData.append('authorName', '');
+        formData.append('school', '');
+        formData.append('faculty', '');
+        formData.append('studyProgram', '');
+        formData.append('supervisor', activeProfile?.supervisor || '');
+        formData.append('workType', getWorkType(activeProfile));
         formData.append('citationStyle', getCitationStyle(activeProfile));
         formData.append('language', getWorkLanguage(activeProfile));
+        formData.append('checkAuthenticity', 'true');
+
+        if (activeProfile?.id) {
+          formData.append('profileId', activeProfile.id);
+        }
 
         attachedFiles.forEach((item) => {
-          formData.append('file', item.file, item.name);
+          formData.append('files', item.file, item.name);
         });
 
         const res = await fetch('/api/originality', {
@@ -909,26 +952,72 @@ VÝSTUP:
 
         const data = await res.json();
 
+        if (!data || data.ok === false) {
+          throw new Error(
+            data?.message ||
+              data?.error ||
+              'Kontrola originality nevrátila platný výsledok.',
+          );
+        }
+
+        /**
+         * Dôležité:
+         * Ukladáme CELÝ JSON, nie iba textový report.
+         * Nová podstránka potom vie vykresliť grafy:
+         * - corpuses
+         * - dictionaryStats
+         * - histogram
+         * - documents
+         * - passages
+         * - plaintext
+         */
+        localStorage.setItem(
+          ORIGINALITY_PROTOCOL_STORAGE_KEY,
+          JSON.stringify(data),
+        );
+
+        const similarityScore =
+          data?.score ??
+          data?.similarityRiskScore ??
+          data?.similarityScore ??
+          data?.percent ??
+          data?.overallPercent ??
+          'neuvedené';
+
         const output = cleanFinalOutput(
-          data.report ||
-            data.output ||
-            [
-              `Stav kontroly: ${data.status || 'Dokončené'}`,
-              `Skóre originality: ${data.originalityScore ?? 'neuvedené'}`,
-              `Riziko podobnosti: ${data.similarityRiskScore ?? 'neuvedené'}`,
-              '',
-              data.riskLevel || '',
-              '',
-              data.riskyPassages || '',
-              '',
-              data.missingCitations || '',
-              '',
-              data.recommendations || '',
-            ].join('\n'),
+          [
+            'Kontrola originality bola dokončená.',
+            '',
+            `Percento podobnosti: ${
+              typeof similarityScore === 'number'
+                ? `${similarityScore.toFixed(2).replace('.', ',')}%`
+                : similarityScore
+            }`,
+            '',
+            data?.summary || '',
+            '',
+            data?.recommendation || '',
+            '',
+            'Kompletný vizuálny protokol s grafmi, histogramom, tabuľkami a pasážami bol otvorený na novej podstránke.',
+          ].join('\n'),
         );
 
         setResult(output);
         setCanvasText(output);
+
+        const protocolUrl = `/originality/protocol?ts=${Date.now()}`;
+
+        if (protocolWindow && !protocolWindow.closed) {
+          protocolWindow.location.href = protocolUrl;
+          protocolWindow.focus();
+        } else {
+          window.open(protocolUrl, '_blank', 'width=1300,height=900');
+        }
+
+        setTimeout(() => {
+          resultRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 150);
+
         return;
       }
 
@@ -1592,7 +1681,7 @@ function FileUploadBox({
   onRemove,
 }: {
   files: AttachedFile[];
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  fileInputRef: RefObject<HTMLInputElement | null>;
   onFiles: (files: FileList | null) => void;
   onRemove: (id: string) => void;
 }) {

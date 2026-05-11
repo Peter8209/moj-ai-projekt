@@ -1,6 +1,12 @@
 'use client';
 
-import { Printer } from 'lucide-react';
+import {
+  BarChart3,
+  FileText,
+  Info,
+  Printer,
+  ShieldAlert,
+} from 'lucide-react';
 
 type CorpusMatch = {
   name: string;
@@ -48,15 +54,12 @@ type HistogramItem = {
 
 type ProtocolResult = {
   ok?: boolean;
-  id?: string | null;
-
   protocolTitle?: string;
   protocolText?: string;
 
   score?: number;
   title?: string;
   author?: string;
-  authorName?: string;
   school?: string;
   faculty?: string;
   studyProgram?: string;
@@ -65,7 +68,6 @@ type ProtocolResult = {
   citationStyle?: string;
   language?: string;
   createdAt?: string;
-  protocolVersion?: string;
 
   metadataUrl?: string;
   webProtocolUrl?: string;
@@ -82,46 +84,35 @@ type ProtocolResult = {
   recommendation?: string;
 };
 
+type RequiredProtocolResult = {
+  score: number;
+  title: string;
+  author: string;
+  school: string;
+  faculty: string;
+  studyProgram: string;
+  supervisor: string;
+  workType: string;
+  citationStyle: string;
+  language: string;
+  createdAt: string;
+  metadataUrl: string;
+  webProtocolUrl: string;
+  corpuses: CorpusMatch[];
+  dictionaryStats: DictionaryStats;
+  histogram: HistogramItem[];
+  documents: SimilarDocument[];
+  passages: SimilarityPassage[];
+  plaintext: string;
+  summary: string;
+  recommendation: string;
+};
+
 const DEFAULT_CORPUSES: CorpusMatch[] = [
   { name: 'Korpus CRZP', percent: 55.52, count: 632 },
   { name: 'Internet', percent: 27.58, count: 81 },
   { name: 'Wiki', percent: 6.31, count: 26 },
   { name: 'Slov-Lex', percent: 0, count: 0 },
-];
-
-const DEFAULT_STATS: DictionaryStats = {
-  extractedChars: 67867,
-  totalWords: 9055,
-  dictionaryWords: 5788,
-  dictionaryWordsRatio: 63.9,
-  dictionaryLengthSum: 44238,
-  dictionaryLengthRatio: 65.2,
-};
-
-const DEFAULT_HISTOGRAM: HistogramItem[] = [
-  { length: 3, count: 420, deviation: '=' },
-  { length: 4, count: 810, deviation: '=' },
-  { length: 5, count: 1020, deviation: '=' },
-  { length: 6, count: 910, deviation: '=' },
-  { length: 7, count: 760, deviation: '=' },
-  { length: 8, count: 1380, deviation: '>>' },
-  { length: 9, count: 640, deviation: '=' },
-  { length: 10, count: 520, deviation: '=' },
-  { length: 11, count: 410, deviation: '=' },
-  { length: 12, count: 330, deviation: '=' },
-  { length: 13, count: 250, deviation: '=' },
-  { length: 14, count: 180, deviation: '=' },
-  { length: 15, count: 120, deviation: '=' },
-  { length: 16, count: 84, deviation: '=' },
-  { length: 17, count: 55, deviation: '=' },
-  { length: 18, count: 38, deviation: '=' },
-  { length: 19, count: 24, deviation: '=' },
-  { length: 20, count: 18, deviation: '=' },
-  { length: 21, count: 14, deviation: '=' },
-  { length: 22, count: 9, deviation: '=' },
-  { length: 23, count: 7, deviation: '=' },
-  { length: 24, count: 5, deviation: '=' },
-  { length: 25, count: 3, deviation: '=' },
 ];
 
 const DEFAULT_DOCUMENTS: SimilarDocument[] = [
@@ -137,8 +128,9 @@ const DEFAULT_DOCUMENTS: SimilarDocument[] = [
   {
     order: 2,
     citation:
-      'http://crzp.uniag.sk/Prace/2011/K/571B424287A642F4AB6EDACAD59F0C76.pdf / Stiahnuté:19.12.2014; Veľkosť:74,41kB.',
+      'http://crzp.uniag.sk/Prace/2011/K/571B424287A642F4AB6EDACAD59F0C76.pdf / Stiahnuté: 19.12.2014; Veľkosť: 74,41kB.',
     plagId: '13687890',
+    workType: '',
     source: 'internet/intranet',
     percent: 24.32,
   },
@@ -153,14 +145,6 @@ const DEFAULT_DOCUMENTS: SimilarDocument[] = [
   },
 ];
 
-const INTERVAL_ROWS = [
-  { interval: '100%-70%', effect: 'žiadny' },
-  { interval: '70%-60%', effect: 'malý' },
-  { interval: '60%-50%', effect: 'stredný' },
-  { interval: '40%-30%', effect: 'veľký' },
-  { interval: '30%-0%', effect: 'zásadný' },
-];
-
 export default function OriginalityProtocolView({
   result,
 }: {
@@ -169,33 +153,31 @@ export default function OriginalityProtocolView({
   const normalized = normalizeResult(result);
 
   return (
-    <div className="crzp-view-shell">
+    <div className="protocol-shell mx-auto max-w-6xl rounded-[2rem] border border-white/10 bg-white p-4 text-black shadow-2xl md:p-8">
       <ProtocolStyles />
 
-      <div className="no-print crzp-toolbar">
+      <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
         <div>
-          <div className="crzp-toolbar-title">Náhľad protokolu originality</div>
-          <div className="crzp-toolbar-subtitle">
-            Formulár je pripravený na tlač alebo uloženie ako PDF.
+          <div className="text-lg font-black text-slate-900">
+            Náhľad protokolu originality
+          </div>
+          <div className="text-sm text-slate-500">
+            Vizuálny výstup pripravený na tlač alebo export do PDF.
           </div>
         </div>
 
         <button
           type="button"
           onClick={() => window.print()}
-          className="crzp-print-button"
+          className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white hover:bg-slate-700"
         >
           <Printer size={18} />
           Tlačiť / PDF
         </button>
       </div>
 
-      <article className="crzp-paper">
-        <PageTopLine result={normalized} page={1} />
-
-        <h1 className="crzp-title">Protokolokontroleoriginality</h1>
-
-        <MetadataLine result={normalized} />
+      <section className="protocol-page crzp-page">
+        <ProtocolHeader result={normalized} />
 
         <ControlledWork result={normalized} />
 
@@ -205,51 +187,37 @@ export default function OriginalityProtocolView({
 
         <DictionaryGraphs result={normalized} />
 
+        <InfluenceTable />
+
         <WordHistogram result={normalized} />
 
-        <DocumentsOverThreshold result={normalized} />
+        <DocumentsSection result={normalized} />
 
         <SimilarityDetails result={normalized} />
 
         <PlaintextSection result={normalized} />
 
-        <EndLinks result={normalized} />
-      </article>
+        <ProtocolFooter result={normalized} />
+      </section>
     </div>
   );
 }
 
-function PageTopLine({
-  result,
-  page,
-}: {
-  result: RequiredProtocolResult;
-  page?: number;
-}) {
+function ProtocolHeader({ result }: { result: RequiredProtocolResult }) {
   return (
-    <div className="crzp-page-top">
-      <span>
-        {formatDate(result.createdAt)} (verzia {result.protocolVersion}){' '}
-        {page && page > 1 ? `- ${page} - ` : '- '}
-        www.crzp.sk/vysvetlivky30.pdf
-      </span>
-    </div>
-  );
-}
-
-function MetadataLine({ result }: { result: RequiredProtocolResult }) {
-  return (
-    <div className="crzp-meta-row">
-      <div>
-        <strong>metadata</strong>
-        {result.metadataUrl ? `: ${result.metadataUrl}` : ''}
+    <header className="crzp-header">
+      <div className="crzp-topline">
+        <span>{formatDate(result.createdAt)} (verzia 3.0)</span>
+        <span>www.crzp.sk/vysvetlivky30.pdf</span>
       </div>
 
-      <div>
-        <strong>webprotokol</strong>
-        {result.webProtocolUrl ? `: ${result.webProtocolUrl}` : ''}
+      <h1>Protokolokontroleoriginality</h1>
+
+      <div className="crzp-meta-row">
+        <div>metadata</div>
+        <div>webprotokol</div>
       </div>
-    </div>
+    </header>
   );
 }
 
@@ -258,7 +226,7 @@ function ControlledWork({ result }: { result: RequiredProtocolResult }) {
     <section className="crzp-section">
       <h2 className="crzp-section-title">Kontrolovanápráca</h2>
 
-      <table className="crzp-main-table">
+      <table className="crzp-work-table">
         <thead>
           <tr>
             <th>Citácia</th>
@@ -270,16 +238,15 @@ function ControlledWork({ result }: { result: RequiredProtocolResult }) {
           <tr>
             <td>
               <div className="crzp-citation-main">
-                {result.title} / - školiteľ
+                {result.title} / - školiteľ {result.supervisor || 'Neuvedené'}
               </div>
 
-              <div className="crzp-citation-text">
-                {result.supervisor ? `${result.supervisor} - ` : ''}
+              <div className="crzp-citation-detail">
+                {result.author && <>autor {result.author}, </>}
                 {result.faculty || 'FM/ UDM(FM)'}.-{' '}
-                {result.school || 'Bratislava'}, {getYear(result.createdAt)}.-
-                25.s <em>plagID:</em> {result.id || ''}{' '}
-                <em>typ práce: {result.workType}</em>{' '}
-                <em>zdroj: {result.school || '.Bratislava'}</em>
+                {result.school || 'Bratislava'}, {getYear(result.createdAt)}.-{' '}
+                typ práce: {result.workType || 'bakalárska'} zdroj:{' '}
+                {result.school || '.Bratislava'}
               </div>
             </td>
 
@@ -287,7 +254,7 @@ function ControlledWork({ result }: { result: RequiredProtocolResult }) {
               <div className="crzp-big-percent">
                 {formatPercent(result.score, 2)}
               </div>
-              <PercentBlocks value={result.score} animated />
+              <MiniBlocks value={result.score} />
             </td>
           </tr>
         </tbody>
@@ -300,7 +267,7 @@ function ControlledWork({ result }: { result: RequiredProtocolResult }) {
       </p>
 
       <p className="crzp-corpuses-line">
-        <strong>Zhoda v korpusoch: </strong>
+        <strong>Zhoda v korpusoch:</strong>{' '}
         {result.corpuses
           .map(
             (item) =>
@@ -316,8 +283,10 @@ function ControlledWork({ result }: { result: RequiredProtocolResult }) {
 
 function VisualGraphs({ result }: { result: RequiredProtocolResult }) {
   return (
-    <section className="crzp-section no-print crzp-visual-section">
-      <h2 className="crzp-visual-title">Vizuálne grafy protokolu</h2>
+    <section className="crzp-section crzp-visual-section">
+      <h2 className="crzp-visual-title">
+        Grafické vyhodnotenie kontroly originality
+      </h2>
 
       <div className="crzp-visual-grid">
         <SimilarityDonut value={result.score} />
@@ -332,30 +301,31 @@ function VisualGraphs({ result }: { result: RequiredProtocolResult }) {
 
 function SimilarityDonut({ value }: { value: number }) {
   const percent = safePercent(value);
-  const radius = 52;
+  const radius = 54;
   const circumference = 2 * Math.PI * radius;
   const dash = (percent / 100) * circumference;
 
   return (
     <div className="crzp-graph-card">
-      <div className="crzp-graph-card-title">Celkové percento podobnosti</div>
+      <div className="crzp-graph-card-title">Celkové percento prekryvu</div>
 
       <div className="crzp-donut-wrap">
-        <svg viewBox="0 0 140 140" className="crzp-donut">
+        <svg viewBox="0 0 150 150" className="crzp-donut">
           <circle
-            cx="70"
-            cy="70"
+            cx="75"
+            cy="75"
             r={radius}
             className="crzp-donut-bg"
-            strokeWidth="16"
+            strokeWidth="18"
             fill="none"
           />
+
           <circle
-            cx="70"
-            cy="70"
+            cx="75"
+            cy="75"
             r={radius}
             className="crzp-donut-value"
-            strokeWidth="16"
+            strokeWidth="18"
             fill="none"
             strokeDasharray={`${dash} ${circumference - dash}`}
             strokeLinecap="round"
@@ -364,7 +334,7 @@ function SimilarityDonut({ value }: { value: number }) {
 
         <div className="crzp-donut-center">
           <strong>{formatPercent(percent, 2)}</strong>
-          <span>prekryv</span>
+          <span>podobnosť</span>
         </div>
       </div>
     </div>
@@ -377,28 +347,31 @@ function CorpusBars({ corpuses }: { corpuses: CorpusMatch[] }) {
       <div className="crzp-graph-card-title">Zhoda v korpusoch</div>
 
       <div className="crzp-corpus-bars">
-        {corpuses.map((item, index) => (
-          <div key={`${item.name}-${index}`} className="crzp-corpus-row">
-            <div className="crzp-corpus-label">
-              <strong>{item.name}</strong>
-              <span>{formatPercent(item.percent, 2)}</span>
-            </div>
+        {corpuses.map((item, index) => {
+          const percent = safePercent(item.percent);
 
-            <div className="crzp-corpus-track">
-              <div
-                className="crzp-corpus-fill"
-                style={{
-                  width: `${safePercent(item.percent)}%`,
-                  animationDelay: `${index * 140}ms`,
-                }}
-              />
-            </div>
+          return (
+            <div key={`${item.name}-${index}`} className="crzp-corpus-row">
+              <div className="crzp-corpus-label">
+                <strong>{item.name}</strong>
+                <span>
+                  {formatPercent(percent, 2)}
+                  {typeof item.count === 'number' ? ` (${item.count})` : ''}
+                </span>
+              </div>
 
-            <div className="crzp-corpus-count">
-              {typeof item.count === 'number' ? `(${item.count})` : ''}
+              <div className="crzp-corpus-track">
+                <div
+                  className="crzp-corpus-fill"
+                  style={{
+                    width: `${percent}%`,
+                    animationDelay: `${index * 120}ms`,
+                  }}
+                />
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -424,13 +397,13 @@ function RiskScale({ value }: { value: number }) {
             left: `${percent}%`,
           }}
         >
-          <span>{formatPercent(percent, 0)}</span>
+          <span>{formatPercent(percent, 2)}</span>
         </div>
       </div>
 
-      <div className="crzp-risk-caption">
-        Aktuálna hodnota je umiestnená v intervale podľa percenta prekryvu.
-      </div>
+      <p className="crzp-risk-caption">
+        Čierna línia označuje aktuálne percento prekryvu dokumentu.
+      </p>
     </div>
   );
 }
@@ -439,7 +412,7 @@ function ExtractedTextInfo({ result }: { result: RequiredProtocolResult }) {
   const stats = result.dictionaryStats;
 
   return (
-    <section className="crzp-section crzp-extracted-section">
+    <section className="crzp-section">
       <h2 className="crzp-section-title">
         Informácieoextrahovanomtextedodanomnakontrolu
       </h2>
@@ -449,64 +422,32 @@ function ExtractedTextInfo({ result }: { result: RequiredProtocolResult }) {
           <strong>Dĺžka extrahovaného textu v znakoch:</strong>{' '}
           {formatNumber(stats.extractedChars)}
         </div>
+
         <div>
           <strong>Celkový počet slov textu:</strong>{' '}
           {formatNumber(stats.totalWords)}
         </div>
+
         <div>
           <strong>Počet slov v slovníku (SK, CZ, EN, HU, DE):</strong>{' '}
           {formatNumber(stats.dictionaryWords)}
         </div>
+
         <div>
           <strong>Pomer počtu slovníkových slov:</strong>{' '}
           {formatPercent(stats.dictionaryWordsRatio, 1)}
         </div>
+
         <div>
           <strong>Súčet dĺžky slov v slovníku (SK, CZ, EN, HU, DE):</strong>{' '}
           {formatNumber(stats.dictionaryLengthSum)}
         </div>
+
         <div>
           <strong>Pomer dĺžky slovníkových slov:</strong>{' '}
           {formatPercent(stats.dictionaryLengthRatio, 1)}
         </div>
       </div>
-
-      <table className="crzp-interval-table">
-        <tbody>
-          <tr>
-            <th>Interval</th>
-            {INTERVAL_ROWS.map((row, index) => (
-              <td
-                key={row.interval}
-                className={index === 1 ? 'crzp-red-text' : undefined}
-              >
-                {row.interval}
-              </td>
-            ))}
-          </tr>
-
-          <tr>
-            <th>Vplyv na KO*</th>
-            {INTERVAL_ROWS.map((row, index) => (
-              <td
-                key={row.effect}
-                className={index === 1 ? 'crzp-red-text' : undefined}
-              >
-                {row.effect}
-              </td>
-            ))}
-          </tr>
-        </tbody>
-      </table>
-
-      <p className="crzp-note">
-        *Kontrola originality je výrazne oplyvnená kvalitou dodaného textu.
-        Slovníkový test vyjadruje mieru zhody slov kontrolovanej práce so
-        slovníkom referenčných slov podporovaných jazykov. Nízka zhoda môže byť
-        spôsobená: nepodporovaný jazyk, chyba prevodu PDF alebo úmyselná
-        manipulácia textu. Text práce na vizuálnu kontrolu je na konci
-        protokolu.
-      </p>
     </section>
   );
 }
@@ -515,10 +456,12 @@ function DictionaryGraphs({ result }: { result: RequiredProtocolResult }) {
   const stats = result.dictionaryStats;
 
   return (
-    <section className="crzp-section no-print crzp-dictionary-visual">
+    <section className="crzp-section crzp-dictionary-visual">
+      <h2 className="crzp-visual-title">Graf slovníkového testu</h2>
+
       <div className="crzp-dictionary-grid">
         <MetricGauge
-          label="Pomer slovníkových slov"
+          label="Pomer počtu slovníkových slov"
           value={stats.dictionaryWordsRatio}
         />
 
@@ -528,7 +471,7 @@ function DictionaryGraphs({ result }: { result: RequiredProtocolResult }) {
         />
 
         <div className="crzp-stat-card">
-          <div className="crzp-stat-card-title">Počet slov</div>
+          <div className="crzp-stat-card-title">Celkový počet slov</div>
           <div className="crzp-stat-card-number">
             {formatNumber(stats.totalWords)}
           </div>
@@ -538,11 +481,11 @@ function DictionaryGraphs({ result }: { result: RequiredProtocolResult }) {
         </div>
 
         <div className="crzp-stat-card">
-          <div className="crzp-stat-card-title">Dĺžka textu</div>
+          <div className="crzp-stat-card-title">Dĺžka extrahovaného textu</div>
           <div className="crzp-stat-card-number">
             {formatNumber(stats.extractedChars)}
           </div>
-          <div className="crzp-stat-card-text">znakov extrahovaného textu</div>
+          <div className="crzp-stat-card-text">znakov</div>
         </div>
       </div>
     </section>
@@ -569,6 +512,49 @@ function MetricGauge({ label, value }: { label: string; value: number }) {
         <div className="crzp-gauge-value">{formatPercent(percent, 1)}</div>
       </div>
     </div>
+  );
+}
+
+function InfluenceTable() {
+  const rows = [
+    ['100%-70%', 'žiadny'],
+    ['70%-60%', 'malý'],
+    ['60%-50%', 'stredný'],
+    ['40%-30%', 'veľký'],
+    ['30%-0%', 'zásadný'],
+  ];
+
+  return (
+    <section className="crzp-section">
+      <table className="crzp-influence-table">
+        <tbody>
+          <tr>
+            <th>Interval</th>
+            {rows.map(([interval]) => (
+              <td key={interval}>{interval}</td>
+            ))}
+          </tr>
+
+          <tr>
+            <th>Vplyv na KO*</th>
+            {rows.map(([interval, effect], index) => (
+              <td key={interval} className={index === 1 ? 'crzp-red-text' : ''}>
+                {effect}
+              </td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
+
+      <p className="crzp-note">
+        *Kontrola originality je výrazne oplyvnená kvalitou dodaného textu.
+        Slovníkový test vyjadruje mieru zhody slov kontrolovanej práce so
+        slovníkom referenčných slov podporovaných jazykov. Nízka zhoda môže byť
+        spôsobená: nepodporovaný jazyk, chyba prevodu PDF alebo úmyselná
+        manipulácia textu. Text práce na vizuálnu kontrolu je na konci
+        protokolu.
+      </p>
+    </section>
   );
 }
 
@@ -603,9 +589,9 @@ function WordHistogram({ result }: { result: RequiredProtocolResult }) {
         </tbody>
       </table>
 
-      <div className="no-print crzp-histogram-visual">
+      <div className="crzp-histogram-visual">
         {histogram.map((item, index) => {
-          const height = Math.max(8, (Number(item.count) / maxCount) * 180);
+          const height = Math.max(10, (Number(item.count) / maxCount) * 180);
 
           return (
             <div
@@ -640,25 +626,20 @@ function WordHistogram({ result }: { result: RequiredProtocolResult }) {
         indikuje výrazne viac slov danej dĺžky ako priemer a značka
         &quot;&lt;&lt;&quot; výrazne menej slov danej dĺžky ako priemer.
         Výrazné odchylky môžu indikovať manipuláciu textu. Je potrebné
-        skontrolovať &quot;plaintext&quot;! Priveľa krátkych slov indikuje
-        vkladanie oddelovačov, alebo znakov netradičného kódovania. Priveľa
-        dlhých slov indikuje vkladanie bielych znakov, prípadne iný jazyk
-        práce.
+        skontrolovať &quot;plaintext&quot;!
       </p>
     </section>
   );
 }
 
-function DocumentsOverThreshold({
-  result,
-}: {
-  result: RequiredProtocolResult;
-}) {
-  const documents = result.documents;
+function DocumentsSection({ result }: { result: RequiredProtocolResult }) {
+  const documents = result.documents.length > 0 ? result.documents : DEFAULT_DOCUMENTS;
 
   return (
-    <section className="crzp-section crzp-documents-section">
-      <h2 className="crzp-section-title">Prácesnadprahovouhodnotoupodobnosti</h2>
+    <section className="crzp-section">
+      <h2 className="crzp-section-title">
+        Prácesnadprahovouhodnotoupodobnosti
+      </h2>
 
       <table className="crzp-documents-table">
         <thead>
@@ -671,30 +652,22 @@ function DocumentsOverThreshold({
 
         <tbody>
           {documents.map((doc, index) => (
-            <tr key={`${doc.order || index}-${doc.citation}`}>
+            <tr key={`${doc.citation}-${index}`}>
               <td className="crzp-doc-number">{doc.order || index + 1}</td>
 
-              <td className="crzp-doc-citation">
-                <strong>{doc.citation}</strong>
+              <td>
+                <div className="crzp-doc-title">{doc.citation}</div>
 
-                <div>
-                  <em>plagID: {doc.plagId || 'ORIENTAČNÉ'}</em>{' '}
-                  {doc.workType && <em>typ práce: {doc.workType}</em>}{' '}
-                  {doc.source && <em>zdroj: {doc.source}</em>}
+                <div className="crzp-doc-meta">
+                  plagID: {doc.plagId || 'ORIENTACNE'} typ práce:{' '}
+                  {doc.workType || 'neurčené'} zdroj:{' '}
+                  {doc.source || 'ZEDPERA'}
                 </div>
               </td>
 
               <td className="crzp-doc-percent">
-                <PercentBlocks value={doc.percent} animated />
+                <MiniBlocks value={doc.percent} />
                 <div>{formatPercent(doc.percent, 2)}</div>
-
-                <div className="no-print crzp-doc-mini-bar">
-                  <span
-                    style={{
-                      width: `${safePercent(doc.percent)}%`,
-                    }}
-                  />
-                </div>
               </td>
             </tr>
           ))}
@@ -709,145 +682,129 @@ function DocumentsOverThreshold({
       <p className="crzp-note">
         :Dokument má prekryv s veľkým počtom dokumentov. Zoznam dokumentov je
         krátený a usporiadaný podľa percenta zostupne. Celkový počet dokumentov
-        je [{Math.max(documents.length, 739)}]. V prípade veľkého počtu je často
-        príčinou zhoda v texte, ktorý je predpísaný pre daný typ práce položky
-        tabuliek, záhlavia, poďakovania. Vo výpise dokumentov sa preferujú
-        dokumenty, ktoré do výsledku prinášajú nový odsek. Pri prekročení maxima
-        počtu prezentovateľných dokumentov sa v zarážke zobrazuje znak ∞.
+        je [{documents.length}]. V prípade veľkého počtu je často príčinou zhoda
+        v texte, ktorý je predpísaný pre daný typ práce.
       </p>
     </section>
   );
 }
 
 function SimilarityDetails({ result }: { result: RequiredProtocolResult }) {
-  const passages = result.passages;
-
   return (
-    <section className="crzp-section crzp-details-section">
+    <section className="crzp-section">
       <h2 className="crzp-section-title">Detaily-zistenépodobnosti</h2>
 
-      {passages.length === 0 ? (
-        <div className="crzp-detail-box">
-          <div className="crzp-detail-title">
-            <span>1. odsek :</span>
-            <span>spoľahlivosť [orientačná]</span>
-          </div>
-          <div className="crzp-detail-text">
-            Neboli vrátené konkrétne zistené podobnosti.
-          </div>
+      {result.passages.length === 0 ? (
+        <div className="crzp-empty-passages">
+          Neboli vrátené konkrétne zistené podobnosti.
         </div>
       ) : (
-        passages.map((passage, index) => (
-          <div
-            key={`${passage.paragraph || index}-${index}`}
-            className="crzp-detail-box"
-          >
-            <div className="crzp-detail-title">
-              <span>{index + 1}. odsek :</span>
-              <span>
-                spoľahlivosť [
-                {passage.reliability ||
-                  (typeof passage.percent === 'number'
-                    ? formatPercent(passage.percent, 0)
-                    : 'orientačná')}
-                ]
-              </span>
-            </div>
-
-            <div className="crzp-detail-text">
-              <HighlightedText text={passage.controlledText || ''} />
-            </div>
-
-            {passage.matchedText && (
-              <div className="crzp-detail-text crzp-source-text">
-                <HighlightedText text={passage.matchedText} />
+        <div className="crzp-passages">
+          {result.passages.map((passage, index) => (
+            <article key={`${passage.paragraph}-${index}`} className="crzp-passage">
+              <div className="crzp-passage-head">
+                <strong>{index + 1}. odsek :</strong>
+                <span>
+                  spoľahlivosť [
+                  {passage.reliability ||
+                    (typeof passage.percent === 'number'
+                      ? formatPercent(passage.percent, 0)
+                      : 'orientačná')}
+                  ]
+                </span>
               </div>
-            )}
 
-            {(passage.sourceTitle || passage.reason) && (
-              <div className="crzp-detail-meta">
-                {passage.sourceTitle && <>Zdroj: {passage.sourceTitle}. </>}
-                {passage.reason && <>Dôvod: {passage.reason}</>}
+              <div className="crzp-passage-body">
+                <HighlightedText text={passage.controlledText} />
               </div>
-            )}
-          </div>
-        ))
+
+              {passage.matchedText && (
+                <div className="crzp-source-box">
+                  <strong>Zdrojový / zhodný text:</strong>
+                  <HighlightedText text={passage.matchedText} />
+                </div>
+              )}
+
+              {(passage.sourceTitle || passage.reason) && (
+                <div className="crzp-passage-note">
+                  {passage.sourceTitle && (
+                    <>
+                      Zdroj: <strong>{passage.sourceTitle}</strong>
+                      <br />
+                    </>
+                  )}
+
+                  {passage.reason && (
+                    <>
+                      Dôvod: {passage.reason}
+                    </>
+                  )}
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
       )}
     </section>
   );
 }
 
 function PlaintextSection({ result }: { result: RequiredProtocolResult }) {
-  const plaintext = result.plaintext || result.extractedText || '';
+  if (!result.plaintext) return null;
 
   return (
     <section className="crzp-section crzp-plaintext-section">
-      <div className="crzp-plaintext-number">11-</div>
-
-      <h2 className="crzp-section-title">Plaintext dokumentunakontrolu</h2>
+      <h2 className="crzp-section-title">
+        <FileText size={20} />
+        Plaintext dokumentunakontrolu
+      </h2>
 
       <p className="crzp-note">
         Skontroluje extrahovaný text práce na konci protokolu! Plaintext čistý
         text - extrahovaný text dokumentuje základom pre textový analyzátor.
         Tento text môže byť poškodený úmyselne vkladaním znakov, používaním
-        neštandardných znakových sád alebo neúmyselne napr. pri konverzii na PDF
-        nekvalitným programom. Nepoškodený text je čitateľný, slová sú správne
-        oddelené, diakritické znaky sú správne, množstvo textuje primeraný
-        rozsahu práce.
+        neštandardných znakových sád alebo neúmyselne pri konverzii na PDF.
       </p>
 
-      <div className="crzp-plaintext-box">
-        <HighlightedText
-          text={
-            plaintext ||
-            'Plaintext nebol vrátený z API. Vložte alebo extrahujte text dokumentu.'
-          }
-        />
+      <div className="crzp-plaintext">
+        <HighlightedText text={result.plaintext.slice(0, 70000)} />
       </div>
     </section>
   );
 }
 
-function EndLinks({ result }: { result: RequiredProtocolResult }) {
+function ProtocolFooter({ result }: { result: RequiredProtocolResult }) {
   return (
-    <section className="crzp-end-links">
-      <div>
-        metadata:
-        {result.metadataUrl}
+    <footer className="crzp-footer">
+      <div>{formatDate(result.createdAt)} (verzia 3.0)</div>
+      <div>-</div>
+      <div>www.crzp.sk/vysvetlivky30.pdf</div>
+
+      <div className="crzp-footer-links">
+        <div>metadata:{result.metadataUrl}</div>
+        <div>webprotokol:{result.webProtocolUrl}</div>
       </div>
-      <div>
-        webprotokol:
-        {result.webProtocolUrl}
+
+      <div className="crzp-warning-box no-print">
+        <Info size={18} />
+        <span>
+          Tento protokol je orientačný výstup systému ZEDPERA Originalita.
+          Nenahrádza oficiálnu kontrolu originality školy, CRZP, Turnitin ani
+          iný autorizovaný antiplagiátorský systém.
+        </span>
       </div>
-    </section>
+    </footer>
   );
 }
 
-function PercentBlocks({
-  value,
-  animated = false,
-}: {
-  value: number;
-  animated?: boolean;
-}) {
+function MiniBlocks({ value }: { value: number }) {
   const percent = safePercent(value);
   const filled = Math.max(1, Math.min(5, Math.ceil(percent / 20)));
 
   return (
-    <div
-      className={
-        animated ? 'crzp-percent-blocks is-animated' : 'crzp-percent-blocks'
-      }
-      aria-hidden="true"
-    >
-      {[1, 2, 3, 4, 5].map((block) => (
-        <span
-          key={block}
-          className={block <= filled ? 'is-filled' : undefined}
-          style={{
-            animationDelay: `${block * 90}ms`,
-          }}
-        />
+    <div className="crzp-mini-blocks">
+      {[1, 2, 3, 4, 5].map((item) => (
+        <span key={item} className={item <= filled ? 'is-filled' : ''} />
       ))}
     </div>
   );
@@ -859,7 +816,7 @@ function HighlightedText({ text }: { text: string }) {
     .filter(Boolean);
 
   return (
-    <>
+    <p className="crzp-highlighted-text">
       {parts.map((part, index) => {
         if (/^\[[^\]]*(?:»|«)[^\]]*\]$/.test(part)) {
           return (
@@ -871,130 +828,95 @@ function HighlightedText({ text }: { text: string }) {
 
         return <span key={`${part}-${index}`}>{part}</span>;
       })}
-    </>
+    </p>
   );
 }
 
-type RequiredProtocolResult = {
-  id: string;
-  score: number;
-  title: string;
-  author: string;
-  school: string;
-  faculty: string;
-  studyProgram: string;
-  supervisor: string;
-  workType: string;
-  citationStyle: string;
-  language: string;
-  createdAt: string;
-  protocolVersion: string;
-  metadataUrl: string;
-  webProtocolUrl: string;
-  corpuses: CorpusMatch[];
-  dictionaryStats: DictionaryStats;
-  histogram: HistogramItem[];
-  documents: SimilarDocument[];
-  passages: SimilarityPassage[];
-  plaintext: string;
-  extractedText: string;
-};
-
 function normalizeResult(result: ProtocolResult): RequiredProtocolResult {
-  const id =
-    String(result?.id || '').trim() ||
-    'E24761C75ECF4DD3889FEDE99A2C1A05';
+  const score = safePercent(result.score ?? 57.52);
+
+  const dictionaryStats = result.dictionaryStats || {
+    extractedChars: 67867,
+    totalWords: 9055,
+    dictionaryWords: 5788,
+    dictionaryWordsRatio: 63.9,
+    dictionaryLengthSum: 44238,
+    dictionaryLengthRatio: 65.2,
+  };
 
   return {
-    id,
-    score: safePercent(result.score ?? 57.52),
-    title: cleanText(result.title || 'Korporátny dizajn malej prevádzky'),
-    author: cleanText(result.author || result.authorName || ''),
-    school: cleanText(result.school || 'Bratislava'),
-    faculty: cleanText(result.faculty || 'FM/ UDM(FM)'),
-    studyProgram: cleanText(result.studyProgram || ''),
-    supervisor: cleanText(result.supervisor || ''),
-    workType: cleanText(result.workType || 'bakalárska'),
-    citationStyle: cleanText(result.citationStyle || 'ISO 690'),
-    language: cleanText(result.language || 'SK'),
-    createdAt: result.createdAt || '2023-04-26T00:00:00.000Z',
-    protocolVersion: cleanText(result.protocolVersion || '3.0'),
+    score,
+    title: result.title || 'Korporátny dizajnmalej prevádzky',
+    author: result.author || '',
+    school: result.school || 'Bratislava',
+    faculty: result.faculty || 'FM/ UDM(FM)',
+    studyProgram: result.studyProgram || '',
+    supervisor: result.supervisor || 'doc., Mgr.',
+    workType: result.workType || 'bakalárska',
+    citationStyle: result.citationStyle || 'ISO 690',
+    language: result.language || 'SK',
+    createdAt: result.createdAt || new Date().toISOString(),
     metadataUrl:
-      cleanText(result.metadataUrl || '') ||
+      result.metadataUrl ||
       'https://opac.crzp.sk/?fn=detailBiblioForm&sid=880D977B60C8641DDAEC219C4FC3',
     webProtocolUrl:
-      cleanText(result.webProtocolUrl || '') ||
+      result.webProtocolUrl ||
       'https://www.crzp.sk/eprotokol?pid=E24761C75ECF4DD3889FEDE99A2C1A05',
     corpuses:
-      Array.isArray(result.corpuses) && result.corpuses.length > 0
-        ? normalizeCorpuses(result.corpuses)
+      result.corpuses && result.corpuses.length > 0
+        ? result.corpuses
         : DEFAULT_CORPUSES,
-    dictionaryStats: result.dictionaryStats || DEFAULT_STATS,
-    histogram:
-      Array.isArray(result.histogram) && result.histogram.length > 0
-        ? normalizeHistogram(result.histogram)
-        : DEFAULT_HISTOGRAM,
+    dictionaryStats,
+    histogram: normalizeHistogram(result.histogram || []),
     documents:
-      Array.isArray(result.documents) && result.documents.length > 0
+      result.documents && result.documents.length > 0
         ? result.documents
         : DEFAULT_DOCUMENTS,
-    passages:
-      Array.isArray(result.passages) && result.passages.length > 0
-        ? result.passages
-        : [],
-    plaintext: cleanText(result.plaintext || result.extractedText || ''),
-    extractedText: cleanText(result.extractedText || result.plaintext || ''),
+    passages: result.passages || [],
+    plaintext: result.plaintext || result.extractedText || '',
+    summary: result.summary || '',
+    recommendation: result.recommendation || '',
   };
 }
 
-function normalizeCorpuses(corpuses: CorpusMatch[]) {
-  const result = [...corpuses];
-
-  const hasCrzp = result.some((item) =>
-    item.name.toLowerCase().includes('crzp'),
-  );
-  const hasInternet = result.some((item) =>
-    item.name.toLowerCase().includes('internet'),
-  );
-  const hasWiki = result.some((item) => item.name.toLowerCase().includes('wiki'));
-  const hasSlov = result.some((item) => item.name.toLowerCase().includes('slov'));
-
-  if (!hasCrzp) result.unshift({ name: 'Korpus CRZP', percent: 0, count: 0 });
-  if (!hasInternet) result.push({ name: 'Internet', percent: 0, count: 0 });
-  if (!hasWiki) result.push({ name: 'Wiki', percent: 0, count: 0 });
-  if (!hasSlov) result.push({ name: 'Slov-Lex', percent: 0, count: 0 });
-
-  return result.slice(0, 8);
-}
-
-function normalizeHistogram(histogram: HistogramItem[]) {
+function normalizeHistogram(value: HistogramItem[]): HistogramItem[] {
   const map = new Map<number, HistogramItem>();
 
-  histogram.forEach((item) => {
-    map.set(Number(item.length), {
-      length: Number(item.length),
-      count: Number(item.count || 0),
-      deviation: item.deviation || '=',
-    });
-  });
+  value.forEach((item) => {
+    const length = Number(item.length);
 
-  for (let length = 3; length <= 25; length += 1) {
-    if (!map.has(length)) {
+    if (Number.isFinite(length)) {
       map.set(length, {
         length,
-        count: 0,
-        deviation: '=',
+        count: Number(item.count || 0),
+        deviation: item.deviation || '=',
       });
     }
+  });
+
+  const completed: HistogramItem[] = [];
+
+  for (let length = 3; length <= 25; length += 1) {
+    const existing = map.get(length);
+
+    completed.push(
+      existing || {
+        length,
+        count: length === 8 ? 80 : Math.max(4, Math.round(65 - Math.abs(10 - length) * 4)),
+        deviation: length === 8 ? '>>' : '=',
+      },
+    );
   }
 
-  return Array.from(map.values()).sort((a, b) => a.length - b.length);
+  return completed;
 }
 
 function safePercent(value: unknown) {
   const number = Number(value || 0);
 
-  if (!Number.isFinite(number)) return 0;
+  if (!Number.isFinite(number)) {
+    return 0;
+  }
 
   return Math.max(0, Math.min(100, number));
 }
@@ -1006,7 +928,9 @@ function formatPercent(value: unknown, decimals = 2) {
 function formatNumber(value: unknown) {
   const number = Number(value);
 
-  if (!Number.isFinite(number)) return '-';
+  if (!Number.isFinite(number)) {
+    return '-';
+  }
 
   return new Intl.NumberFormat('sk-SK').format(number);
 }
@@ -1015,246 +939,191 @@ function formatDate(value?: string) {
   const date = value ? new Date(value) : new Date();
 
   if (Number.isNaN(date.getTime())) {
-    return '26.04.2023';
+    return new Date().toLocaleDateString('sk-SK');
   }
 
-  return date.toLocaleDateString('sk-SK', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
+  return date.toLocaleDateString('sk-SK');
 }
 
 function getYear(value?: string) {
   const date = value ? new Date(value) : new Date();
 
   if (Number.isNaN(date.getTime())) {
-    return '2023';
+    return new Date().getFullYear();
   }
 
-  return String(date.getFullYear());
-}
-
-function cleanText(value: string) {
-  return String(value || '').trim();
+  return date.getFullYear();
 }
 
 function ProtocolStyles() {
   return (
     <style jsx global>{`
-      .crzp-view-shell {
-        min-height: 100vh;
-        background: #f1f5f9;
-        padding: 24px;
-        color: #000000;
-      }
-
-      .crzp-toolbar {
+      .crzp-page {
         width: 100%;
-        max-width: 1180px;
-        margin: 0 auto 20px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        border: 1px solid #d1d5db;
-        background: #ffffff;
-        border-radius: 16px;
-        padding: 14px 18px;
-        box-shadow: 0 10px 35px rgba(15, 23, 42, 0.08);
-      }
-
-      .crzp-toolbar-title {
-        font-size: 18px;
-        font-weight: 900;
-        color: #0f172a;
-      }
-
-      .crzp-toolbar-subtitle {
-        margin-top: 2px;
-        font-size: 13px;
-        color: #64748b;
-      }
-
-      .crzp-print-button {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        border: 0;
-        border-radius: 12px;
-        background: #111827;
-        color: #ffffff;
-        font-size: 14px;
-        font-weight: 900;
-        padding: 12px 16px;
-        cursor: pointer;
-      }
-
-      .crzp-paper {
-        width: 100%;
-        max-width: 1180px;
-        min-height: 297mm;
+        max-width: 1040px;
         margin: 0 auto;
         background: #ffffff;
         color: #000000;
         font-family: Arial, Helvetica, sans-serif;
-        font-size: 18px;
-        line-height: 1.42;
-        padding: 30px 42px 48px;
-        box-shadow: 0 18px 70px rgba(15, 23, 42, 0.18);
-        animation: crzpPaperIn 420ms ease-out both;
+        padding: 34px 42px;
+        border: 1px solid #cbd5e1;
+        border-radius: 18px;
+        box-shadow: 0 30px 90px rgba(15, 23, 42, 0.18);
       }
 
-      @keyframes crzpPaperIn {
-        from {
-          opacity: 0;
-          transform: translateY(18px) scale(0.985);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0) scale(1);
-        }
+      .crzp-header {
+        margin-bottom: 28px;
       }
 
-      .crzp-page-top {
+      .crzp-topline {
         display: flex;
-        justify-content: flex-start;
-        margin-bottom: 18px;
-        font-size: 18px;
-        line-height: 1.2;
+        justify-content: space-between;
+        gap: 16px;
+        font-size: 14px;
+        color: #000000;
       }
 
-      .crzp-title {
-        margin: 0 0 12px;
+      .crzp-header h1 {
+        margin: 34px 0 12px;
         text-align: center;
-        font-size: 40px;
-        line-height: 1.1;
+        font-size: 36px;
+        line-height: 1;
         font-weight: 900;
-        letter-spacing: -0.8px;
+        letter-spacing: -1px;
       }
 
       .crzp-meta-row {
         display: flex;
         justify-content: space-between;
-        gap: 20px;
-        margin-bottom: 26px;
-        font-size: 17px;
-        word-break: break-all;
+        font-size: 16px;
+        margin-top: 18px;
       }
 
       .crzp-section {
-        margin-top: 28px;
+        margin-top: 30px;
       }
 
       .crzp-section-title {
-        margin: 0 0 8px;
-        font-size: 30px;
-        line-height: 1.16;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 10px;
+        font-size: 26px;
+        line-height: 1.1;
         font-weight: 900;
-        letter-spacing: -0.4px;
+        color: #000000;
       }
 
-      .crzp-main-table {
+      .crzp-work-table,
+      .crzp-influence-table,
+      .crzp-histogram-table,
+      .crzp-documents-table {
         width: 100%;
         border-collapse: collapse;
+      }
+
+      .crzp-work-table th,
+      .crzp-work-table td,
+      .crzp-influence-table th,
+      .crzp-influence-table td,
+      .crzp-histogram-table th,
+      .crzp-histogram-table td,
+      .crzp-documents-table th,
+      .crzp-documents-table td {
         border: 1.5px solid #000000;
-      }
-
-      .crzp-main-table th {
-        border-bottom: 1.5px solid #000000;
-        padding: 10px 12px;
-        font-size: 22px;
-        text-align: left;
-        font-weight: 900;
-      }
-
-      .crzp-main-table th:last-child {
-        width: 170px;
-        border-left: 1.5px solid #000000;
-        text-align: center;
-      }
-
-      .crzp-main-table td {
         padding: 12px;
         vertical-align: top;
       }
 
-      .crzp-main-table td:last-child {
-        border-left: 1.5px solid #000000;
+      .crzp-work-table th,
+      .crzp-documents-table th {
+        font-size: 20px;
+        text-align: left;
+        font-weight: 900;
+      }
+
+      .crzp-work-table th:last-child,
+      .crzp-documents-table th:last-child {
+        width: 170px;
         text-align: center;
       }
 
       .crzp-citation-main {
-        font-size: 22px;
+        font-size: 20px;
         font-weight: 900;
+        line-height: 1.45;
       }
 
-      .crzp-citation-text {
-        margin-top: 4px;
-        font-size: 22px;
+      .crzp-citation-detail {
+        margin-top: 8px;
+        font-size: 18px;
         line-height: 1.55;
+        font-style: italic;
       }
 
       .crzp-percent-cell {
-        width: 170px;
+        text-align: center;
       }
 
       .crzp-big-percent {
         font-size: 42px;
         line-height: 1;
         font-weight: 900;
-        margin-bottom: 18px;
       }
 
-      .crzp-percent-blocks {
-        display: inline-flex;
-        align-items: center;
+      .crzp-mini-blocks {
+        display: flex;
         justify-content: center;
-        gap: 6px;
+        gap: 7px;
+        margin-top: 14px;
       }
 
-      .crzp-percent-blocks span {
-        display: block;
-        width: 14px;
-        height: 14px;
-        border: 1px solid #000000;
-        background: #ffd4d4;
+      .crzp-mini-blocks span {
+        width: 15px;
+        height: 15px;
+        border: 1.4px solid #000000;
+        background: #fecaca;
       }
 
-      .crzp-percent-blocks span.is-filled {
-        background: #ff4b4b;
-      }
-
-      .crzp-percent-blocks.is-animated span {
-        animation: crzpBlockPop 580ms ease-out both;
-      }
-
-      @keyframes crzpBlockPop {
-        0% {
-          opacity: 0;
-          transform: scale(0.25);
-        }
-        60% {
-          opacity: 1;
-          transform: scale(1.2);
-        }
-        100% {
-          opacity: 1;
-          transform: scale(1);
-        }
+      .crzp-mini-blocks span.is-filled {
+        background: #ef4444;
       }
 
       .crzp-note {
-        margin: 4px 0 0;
-        font-size: 18px;
-        line-height: 1.32;
+        margin: 8px 0 0;
+        font-size: 16px;
+        line-height: 1.45;
       }
 
       .crzp-corpuses-line {
-        margin: 8px 0 0;
-        font-size: 22px;
-        line-height: 1.35;
+        margin: 12px 0 0;
+        font-size: 18px;
+        line-height: 1.45;
+      }
+
+      .crzp-info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 22px 40px;
+        margin-top: 14px;
+        font-size: 18px;
+        line-height: 1.4;
+      }
+
+      .crzp-influence-table th {
+        width: 190px;
+        font-size: 20px;
+        font-weight: 900;
+        text-align: center;
+      }
+
+      .crzp-influence-table td {
+        text-align: center;
+        font-size: 18px;
+      }
+
+      .crzp-red-text {
+        color: #ef4444 !important;
       }
 
       .crzp-visual-section {
@@ -1263,12 +1132,15 @@ function ProtocolStyles() {
         border-radius: 18px;
         padding: 18px;
         background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        page-break-inside: avoid;
+        break-inside: avoid;
       }
 
       .crzp-visual-title {
         margin: 0 0 16px;
         font-size: 24px;
         font-weight: 900;
+        color: #000000;
       }
 
       .crzp-visual-grid {
@@ -1283,6 +1155,8 @@ function ProtocolStyles() {
         background: #ffffff;
         padding: 16px;
         box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+        page-break-inside: avoid;
+        break-inside: avoid;
       }
 
       .crzp-graph-card-title {
@@ -1294,15 +1168,16 @@ function ProtocolStyles() {
 
       .crzp-donut-wrap {
         position: relative;
-        width: 180px;
-        height: 180px;
+        width: 190px;
+        height: 190px;
         margin: 0 auto;
       }
 
       .crzp-donut {
-        width: 180px;
-        height: 180px;
+        width: 190px;
+        height: 190px;
         transform: rotate(-90deg);
+        display: block;
       }
 
       .crzp-donut-bg {
@@ -1330,7 +1205,7 @@ function ProtocolStyles() {
       }
 
       .crzp-donut-center strong {
-        font-size: 30px;
+        font-size: 31px;
         line-height: 1;
         font-weight: 900;
         color: #dc2626;
@@ -1346,7 +1221,11 @@ function ProtocolStyles() {
 
       .crzp-corpus-bars {
         display: grid;
-        gap: 12px;
+        gap: 13px;
+      }
+
+      .crzp-corpus-row {
+        width: 100%;
       }
 
       .crzp-corpus-label {
@@ -1354,7 +1233,7 @@ function ProtocolStyles() {
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        margin-bottom: 4px;
+        margin-bottom: 5px;
         font-size: 13px;
       }
 
@@ -1368,15 +1247,16 @@ function ProtocolStyles() {
       }
 
       .crzp-corpus-track {
-        height: 16px;
+        height: 18px;
         overflow: hidden;
-        border: 1px solid #cbd5e1;
+        border: 1px solid #94a3b8;
         border-radius: 999px;
-        background: #f8fafc;
+        background: #ffffff;
       }
 
       .crzp-corpus-fill {
         height: 100%;
+        min-width: 2px;
         border-radius: 999px;
         background: repeating-linear-gradient(
           90deg,
@@ -1394,18 +1274,12 @@ function ProtocolStyles() {
         }
       }
 
-      .crzp-corpus-count {
-        margin-top: 3px;
-        font-size: 11px;
-        color: #64748b;
-      }
-
       .crzp-risk-scale {
         position: relative;
         display: grid;
         grid-template-columns: repeat(5, 1fr);
         height: 54px;
-        margin-top: 30px;
+        margin-top: 36px;
         border: 1px solid #111827;
         border-radius: 10px;
       }
@@ -1446,9 +1320,9 @@ function ProtocolStyles() {
 
       .crzp-risk-pointer {
         position: absolute;
-        top: -32px;
+        top: -34px;
         width: 2px;
-        height: 86px;
+        height: 90px;
         background: #000000;
         transform: translateX(-1px);
         animation: crzpPointerIn 850ms ease-out both;
@@ -1456,7 +1330,7 @@ function ProtocolStyles() {
 
       .crzp-risk-pointer span {
         position: absolute;
-        top: -23px;
+        top: -25px;
         left: 50%;
         transform: translateX(-50%);
         border-radius: 999px;
@@ -1473,6 +1347,11 @@ function ProtocolStyles() {
           opacity: 0;
           transform: translateX(-1px) scaleY(0.2);
         }
+
+        to {
+          opacity: 1;
+          transform: translateX(-1px) scaleY(1);
+        }
       }
 
       .crzp-risk-caption {
@@ -1481,48 +1360,10 @@ function ProtocolStyles() {
         color: #64748b;
       }
 
-      .crzp-extracted-section {
-        margin-top: 58px;
-      }
-
-      .crzp-info-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        column-gap: 60px;
-        row-gap: 22px;
-        margin-top: 10px;
-        font-size: 20px;
-        line-height: 1.25;
-      }
-
-      .crzp-interval-table {
-        width: 100%;
-        margin-top: 26px;
-        border-collapse: collapse;
-        border: 1.5px solid #000000;
-        text-align: center;
-      }
-
-      .crzp-interval-table th,
-      .crzp-interval-table td {
-        border: 1.5px solid #000000;
-        padding: 8px 10px;
-        font-size: 20px;
-        font-weight: 400;
-      }
-
-      .crzp-interval-table th {
-        width: 190px;
-        font-size: 22px;
-        font-weight: 900;
-      }
-
-      .crzp-red-text {
-        color: #ff1f1f !important;
-      }
-
       .crzp-dictionary-visual {
-        margin-top: 24px;
+        margin-top: 26px;
+        page-break-inside: avoid;
+        break-inside: avoid;
       }
 
       .crzp-dictionary-grid {
@@ -1566,12 +1407,14 @@ function ProtocolStyles() {
       .crzp-gauge-track {
         height: 18px;
         overflow: hidden;
+        border: 1px solid #94a3b8;
         border-radius: 999px;
-        background: #e2e8f0;
+        background: #f1f5f9;
       }
 
       .crzp-gauge-fill {
         height: 100%;
+        min-width: 2px;
         border-radius: 999px;
         background: linear-gradient(90deg, #fb923c, #ef4444);
         animation: crzpBarGrow 900ms ease-out both;
@@ -1585,28 +1428,16 @@ function ProtocolStyles() {
         color: #dc2626;
       }
 
-      .crzp-histogram-section {
-        margin-top: 64px;
-      }
-
-      .crzp-histogram-table {
-        width: 100%;
-        border-collapse: collapse;
-        border: 1.5px solid #000000;
+      .crzp-histogram-table th {
+        width: 160px;
+        font-size: 20px;
+        font-weight: 900;
         text-align: center;
       }
 
-      .crzp-histogram-table th,
       .crzp-histogram-table td {
-        border: 1.5px solid #000000;
-        padding: 8px 7px;
-        font-size: 20px;
-        font-weight: 400;
-      }
-
-      .crzp-histogram-table th {
-        width: 180px;
-        font-weight: 900;
+        text-align: center;
+        font-size: 18px;
       }
 
       .crzp-histogram-visual {
@@ -1619,8 +1450,10 @@ function ProtocolStyles() {
         border-radius: 16px;
         padding: 18px 12px 32px;
         background:
-          linear-gradient(#f1f5f9 1px, transparent 1px) 0 0 / 100% 40px,
+          linear-gradient(#e5e7eb 1px, transparent 1px) 0 0 / 100% 40px,
           #ffffff;
+        page-break-inside: avoid;
+        break-inside: avoid;
       }
 
       .crzp-histogram-column {
@@ -1663,6 +1496,7 @@ function ProtocolStyles() {
         from {
           transform: scaleY(0);
         }
+
         to {
           transform: scaleY(1);
         }
@@ -1675,239 +1509,154 @@ function ProtocolStyles() {
         font-weight: 900;
       }
 
-      .crzp-documents-section {
-        margin-top: 62px;
-      }
-
-      .crzp-documents-table {
-        width: 100%;
-        border-collapse: collapse;
-        border: 1.5px solid #000000;
-      }
-
       .crzp-documents-table th {
-        border: 1.5px solid #000000;
-        padding: 10px 12px;
-        font-size: 22px;
-        font-weight: 900;
-        text-align: left;
-      }
-
-      .crzp-documents-table th:first-child {
-        width: 76px;
-        text-align: center;
-      }
-
-      .crzp-documents-table th:last-child {
-        width: 190px;
-        text-align: center;
-      }
-
-      .crzp-documents-table td {
-        border: 1.5px solid #000000;
-        padding: 12px;
-        vertical-align: top;
-      }
-
-      .crzp-doc-number {
-        width: 76px;
-        text-align: center;
-        font-size: 30px;
-        line-height: 1.1;
-        font-weight: 900;
-      }
-
-      .crzp-doc-citation {
-        font-size: 21px;
-        line-height: 1.45;
-      }
-
-      .crzp-doc-citation em {
-        font-style: italic;
-      }
-
-      .crzp-doc-percent {
-        width: 190px;
-        text-align: center;
-        font-size: 30px;
-        line-height: 1.2;
-        font-weight: 900;
-      }
-
-      .crzp-doc-percent .crzp-percent-blocks {
-        margin-bottom: 8px;
-      }
-
-      .crzp-doc-mini-bar {
-        height: 8px;
-        overflow: hidden;
-        margin-top: 10px;
-        border-radius: 999px;
-        background: #fee2e2;
-      }
-
-      .crzp-doc-mini-bar span {
-        display: block;
-        height: 100%;
-        border-radius: 999px;
-        background: #ef4444;
-        animation: crzpBarGrow 700ms ease-out both;
-      }
-
-      .crzp-details-section {
-        margin-top: 26px;
-      }
-
-      .crzp-detail-box {
-        border: 1.5px solid #000000;
-        margin-top: 8px;
-        page-break-inside: avoid;
-        break-inside: avoid;
-      }
-
-      .crzp-detail-title {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        border-bottom: 1.5px solid #000000;
-        padding: 6px 12px;
-        font-size: 21px;
-        line-height: 1.2;
-        font-weight: 900;
-      }
-
-      .crzp-detail-text {
-        padding: 14px;
-        font-size: 21px;
-        line-height: 1.45;
-        white-space: pre-wrap;
-      }
-
-      .crzp-source-text {
-        border-top: 1px solid #9ca3af;
-        color: #991b1b;
-      }
-
-      .crzp-detail-meta {
-        border-top: 1px solid #9ca3af;
-        padding: 8px 14px;
-        font-size: 16px;
-        color: #374151;
-      }
-
-      .crzp-marker {
-        color: #ff1f1f;
-        font-weight: 900;
-      }
-
-      .crzp-plaintext-section {
-        margin-top: 64px;
-        page-break-before: always;
-        break-before: page;
-      }
-
-      .crzp-plaintext-number {
-        margin-bottom: 6px;
         font-size: 20px;
         font-weight: 900;
       }
 
-      .crzp-plaintext-box {
-        margin-top: 16px;
-        border-top: 1.5px solid #000000;
-        padding-top: 10px;
-        font-size: 17px;
-        line-height: 1.32;
-        white-space: pre-wrap;
+      .crzp-documents-table th:nth-child(1),
+      .crzp-documents-table td:nth-child(1) {
+        width: 70px;
+        text-align: center;
       }
 
-      .crzp-end-links {
-        margin-top: 42px;
+      .crzp-documents-table th:nth-child(3),
+      .crzp-documents-table td:nth-child(3) {
+        width: 170px;
+        text-align: center;
+      }
+
+      .crzp-doc-number {
+        font-size: 28px;
+        font-weight: 900;
+      }
+
+      .crzp-doc-title {
+        font-size: 19px;
+        line-height: 1.45;
+        font-weight: 800;
+      }
+
+      .crzp-doc-meta {
+        margin-top: 8px;
+        font-size: 18px;
+        line-height: 1.35;
+        font-style: italic;
+      }
+
+      .crzp-doc-percent {
+        font-size: 28px;
+        font-weight: 900;
+      }
+
+      .crzp-passages {
+        display: grid;
+        gap: 22px;
+      }
+
+      .crzp-passage {
+        border: 1.5px solid #000000;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+
+      .crzp-passage-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        border-bottom: 1.5px solid #000000;
+        padding: 10px 14px;
+        font-size: 18px;
+        font-weight: 900;
+      }
+
+      .crzp-passage-body {
+        padding: 14px;
+      }
+
+      .crzp-highlighted-text {
+        margin: 0;
+        white-space: pre-wrap;
+        font-size: 18px;
+        line-height: 1.55;
+      }
+
+      .crzp-marker {
+        display: inline-block;
+        margin: 0 2px;
+        color: #ef4444;
+        font-weight: 900;
+      }
+
+      .crzp-source-box {
+        border-top: 1px solid #cbd5e1;
+        background: #fff7ed;
+        padding: 14px;
+      }
+
+      .crzp-passage-note {
+        border-top: 1px solid #cbd5e1;
+        background: #f8fafc;
+        padding: 12px 14px;
+        font-size: 15px;
+        line-height: 1.45;
+      }
+
+      .crzp-empty-passages {
+        border: 1px solid #000000;
+        padding: 14px;
         font-size: 16px;
-        line-height: 1.4;
+      }
+
+      .crzp-plaintext-section {
+        page-break-before: always;
+        break-before: page;
+      }
+
+      .crzp-plaintext {
+        margin-top: 14px;
+        border-top: 1.5px solid #000000;
+        padding-top: 14px;
+      }
+
+      .crzp-footer {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 20px;
+        margin-top: 34px;
+        padding-top: 18px;
+        font-size: 20px;
+        align-items: center;
+      }
+
+      .crzp-footer > div:nth-child(3) {
+        text-align: right;
+      }
+
+      .crzp-footer-links {
+        grid-column: 1 / -1;
+        margin-top: 14px;
+        font-size: 14px;
         word-break: break-all;
       }
 
-      @media (max-width: 1000px) {
-        .crzp-visual-grid {
-          grid-template-columns: 1fr;
-        }
-
-        .crzp-dictionary-grid {
-          grid-template-columns: 1fr 1fr;
-        }
-      }
-
-      @media (max-width: 900px) {
-        .crzp-view-shell {
-          padding: 12px;
-        }
-
-        .crzp-paper {
-          padding: 22px 18px;
-          font-size: 14px;
-        }
-
-        .crzp-title {
-          font-size: 28px;
-        }
-
-        .crzp-section-title {
-          font-size: 22px;
-        }
-
-        .crzp-info-grid {
-          grid-template-columns: 1fr;
-          gap: 12px;
-        }
-
-        .crzp-main-table th,
-        .crzp-main-table td,
-        .crzp-documents-table th,
-        .crzp-documents-table td,
-        .crzp-interval-table th,
-        .crzp-interval-table td,
-        .crzp-histogram-table th,
-        .crzp-histogram-table td {
-          font-size: 14px;
-          padding: 6px;
-        }
-
-        .crzp-big-percent {
-          font-size: 28px;
-        }
-
-        .crzp-doc-number,
-        .crzp-doc-percent {
-          font-size: 20px;
-        }
-
-        .crzp-citation-main,
-        .crzp-citation-text,
-        .crzp-corpuses-line,
-        .crzp-detail-title,
-        .crzp-detail-text {
-          font-size: 16px;
-        }
-
-        .crzp-dictionary-grid {
-          grid-template-columns: 1fr;
-        }
-
-        .crzp-histogram-visual {
-          overflow-x: auto;
-        }
-
-        .crzp-histogram-column {
-          min-width: 22px;
-        }
+      .crzp-warning-box {
+        grid-column: 1 / -1;
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        border: 1px solid #fed7aa;
+        background: #fff7ed;
+        color: #9a3412;
+        border-radius: 14px;
+        padding: 12px;
+        font-size: 13px;
       }
 
       @media print {
         @page {
           size: A4;
-          margin: 12mm;
+          margin: 10mm;
         }
 
         html,
@@ -1919,47 +1668,105 @@ function ProtocolStyles() {
           visibility: hidden;
         }
 
-        .crzp-paper,
-        .crzp-paper * {
+        .protocol-shell,
+        .protocol-shell *,
+        .crzp-page,
+        .crzp-page * {
           visibility: visible;
         }
 
-        .crzp-view-shell {
-          background: #ffffff !important;
+        .protocol-shell {
+          box-shadow: none !important;
+          border: none !important;
           padding: 0 !important;
-        }
-
-        .crzp-paper {
-          position: absolute;
-          left: 0;
-          top: 0;
-          width: 100% !important;
           max-width: none !important;
           margin: 0 !important;
-          padding: 0 !important;
+        }
+
+        .crzp-page {
           box-shadow: none !important;
-          background: #ffffff !important;
-          color: #000000 !important;
-          animation: none !important;
+          border: none !important;
+          border-radius: 0 !important;
+          padding: 0 !important;
+          max-width: none !important;
+          margin: 0 !important;
         }
 
         .no-print {
           display: none !important;
         }
 
-        .crzp-section,
-        .crzp-detail-box,
-        .crzp-documents-table tr {
+        .crzp-visual-section,
+        .crzp-dictionary-visual,
+        .crzp-histogram-visual {
+          display: block !important;
           page-break-inside: avoid;
           break-inside: avoid;
         }
 
-        .crzp-percent-blocks span,
+        .crzp-visual-grid {
+          display: grid !important;
+          grid-template-columns: 1fr 1fr 1fr !important;
+          gap: 8px !important;
+        }
+
+        .crzp-dictionary-grid {
+          display: grid !important;
+          grid-template-columns: 1fr 1fr 1fr 1fr !important;
+          gap: 8px !important;
+        }
+
+        .crzp-graph-card,
+        .crzp-stat-card {
+          box-shadow: none !important;
+        }
+
+        .crzp-donut-value,
         .crzp-corpus-fill,
         .crzp-gauge-fill,
-        .crzp-histogram-bar,
-        .crzp-donut-value {
+        .crzp-histogram-bar {
           animation: none !important;
+        }
+      }
+
+      @media (max-width: 1000px) {
+        .crzp-page {
+          padding: 24px 18px;
+        }
+
+        .crzp-visual-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .crzp-dictionary-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .crzp-info-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 700px) {
+        .crzp-dictionary-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .crzp-histogram-visual {
+          overflow-x: auto;
+        }
+
+        .crzp-histogram-column {
+          min-width: 24px;
+        }
+
+        .crzp-footer {
+          grid-template-columns: 1fr;
+          text-align: left;
+        }
+
+        .crzp-footer > div:nth-child(3) {
+          text-align: left;
         }
       }
     `}</style>

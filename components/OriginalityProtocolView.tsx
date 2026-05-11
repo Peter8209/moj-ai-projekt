@@ -1,6 +1,15 @@
 'use client';
 
-import { FileText, Info, Printer } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  AlertTriangle,
+  FileText,
+  Info,
+  Loader2,
+  Printer,
+  RefreshCcw,
+  X,
+} from 'lucide-react';
 
 type CorpusMatch = {
   name: string;
@@ -58,15 +67,18 @@ type ProtocolResult = {
   similarity?: number;
   similarityScore?: number;
   similarityPercent?: number;
+  similarityRiskScore?: number;
   plagiarism?: number;
   plagiarismScore?: number;
   plagiarismPercent?: number;
   overlap?: number;
   overlapPercent?: number;
   percent?: number;
+  overallPercent?: number;
 
   title?: string;
   author?: string;
+  authorName?: string;
   school?: string;
   faculty?: string;
   studyProgram?: string;
@@ -75,6 +87,7 @@ type ProtocolResult = {
   citationStyle?: string;
   language?: string;
   createdAt?: string;
+  generatedAt?: string;
 
   metadataUrl?: string;
   webProtocolUrl?: string;
@@ -86,9 +99,14 @@ type ProtocolResult = {
   passages?: SimilarityPassage[];
   plaintext?: string;
   extractedText?: string;
+  text?: string;
 
   summary?: string;
   recommendation?: string;
+
+  activeProfile?: any;
+  profile?: any;
+  result?: any;
 };
 
 type RequiredProtocolResult = {
@@ -115,6 +133,14 @@ type RequiredProtocolResult = {
   recommendation: string;
 };
 
+const ORIGINALITY_PROTOCOL_STORAGE_KEYS = [
+  'zedpera_originality_protocol_result',
+  'originality_protocol_result',
+  'originality_result',
+  'latest_originality_result',
+  'zedpera_originality_result',
+];
+
 const DEFAULT_CORPUSES: CorpusMatch[] = [
   { name: 'Korpus CRZP', percent: 0, count: 0 },
   { name: 'Internet', percent: 0, count: 0 },
@@ -127,9 +153,176 @@ const DEFAULT_DOCUMENTS: SimilarDocument[] = [];
 export default function OriginalityProtocolView({
   result,
 }: {
-  result: ProtocolResult;
+  result?: ProtocolResult | null;
 }) {
-  const normalized = normalizeResult(result);
+  const [localResult, setLocalResult] = useState<ProtocolResult | null>(
+    result || null,
+  );
+  const [isLoadingProtocol, setIsLoadingProtocol] = useState(!result);
+  const [attempts, setAttempts] = useState(0);
+
+  const loadedResult = result || localResult;
+
+  useEffect(() => {
+    if (result) {
+      setLocalResult(result);
+      setIsLoadingProtocol(false);
+      return;
+    }
+
+    let cancelled = false;
+    let counter = 0;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const tryLoadProtocol = () => {
+      if (cancelled) return;
+
+      counter += 1;
+      setAttempts(counter);
+
+      const found = readProtocolFromBrowserStorage();
+
+      if (found) {
+        setLocalResult(found);
+        setIsLoadingProtocol(false);
+
+        if (interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+
+        return;
+      }
+
+      if (counter >= 80) {
+        setIsLoadingProtocol(false);
+
+        if (interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+      }
+    };
+
+    tryLoadProtocol();
+
+    interval = setInterval(tryLoadProtocol, 250);
+
+    const onStorageOrFocus = () => {
+      const found = readProtocolFromBrowserStorage();
+
+      if (found) {
+        setLocalResult(found);
+        setIsLoadingProtocol(false);
+
+        if (interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+      }
+    };
+
+    window.addEventListener('storage', onStorageOrFocus);
+    window.addEventListener('focus', onStorageOrFocus);
+
+    return () => {
+      cancelled = true;
+
+      if (interval) {
+        clearInterval(interval);
+      }
+
+      window.removeEventListener('storage', onStorageOrFocus);
+      window.removeEventListener('focus', onStorageOrFocus);
+    };
+  }, [result]);
+
+  const normalized = useMemo(() => {
+    if (!loadedResult) return null;
+    return normalizeResult(loadedResult);
+  }, [loadedResult]);
+
+  if (isLoadingProtocol && !normalized) {
+    return (
+      <ProtocolStatusShell>
+        <div className="rounded-[2rem] border border-violet-500/30 bg-violet-500/10 p-8 text-white shadow-2xl">
+          <div className="flex items-start gap-4">
+            <Loader2 className="mt-1 h-8 w-8 animate-spin text-violet-300" />
+
+            <div>
+              <h1 className="text-3xl font-black">Načítavam protokol</h1>
+
+              <p className="mt-4 text-lg leading-8 text-violet-100">
+                Kontrola originality ešte dokončuje zápis výsledku. Stránka
+                protokolu sa pokúša výsledok automaticky načítať.
+              </p>
+
+              <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-violet-100">
+                Pokus načítania: {attempts}
+              </div>
+            </div>
+          </div>
+        </div>
+      </ProtocolStatusShell>
+    );
+  }
+
+  if (!normalized) {
+    return (
+      <ProtocolStatusShell>
+        <div className="rounded-[2rem] border border-red-500/40 bg-red-950/40 p-8 text-white shadow-2xl">
+          <div className="flex items-start gap-4">
+            <AlertTriangle className="mt-1 h-9 w-9 text-red-200" />
+
+            <div className="w-full">
+              <h1 className="text-3xl font-black">Protokol sa nezobrazil</h1>
+
+              <p className="mt-4 text-lg leading-8">
+                Protokol sa nenašiel ani po automatickom opakovanom načítaní.
+              </p>
+
+              <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-5 text-base leading-8">
+                Riešenie: vráť sa na stránku kontroly originality, klikni znova
+                na „Skontrolovať originalitu“ a povoľ nové okná v prehliadači.
+              </div>
+
+              <div className="mt-7 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsLoadingProtocol(true);
+                    setAttempts(0);
+
+                    const found = readProtocolFromBrowserStorage();
+
+                    if (found) {
+                      setLocalResult(found);
+                      setIsLoadingProtocol(false);
+                    } else {
+                      window.location.reload();
+                    }
+                  }}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-black text-black hover:bg-slate-100"
+                >
+                  <RefreshCcw className="h-5 w-5" />
+                  Skúsiť znova načítať
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => window.close()}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-5 py-3 text-sm font-black text-white hover:bg-white/15"
+                >
+                  <X className="h-5 w-5" />
+                  Zavrieť okno
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </ProtocolStatusShell>
+    );
+  }
 
   return (
     <div className="protocol-shell mx-auto max-w-6xl rounded-[2rem] border border-white/10 bg-white p-4 text-black shadow-2xl md:p-8">
@@ -171,6 +364,164 @@ export default function OriginalityProtocolView({
       </section>
     </div>
   );
+}
+
+function ProtocolStatusShell({ children }: { children: ReactNode }) {
+  return (
+    <main className="min-h-screen bg-[#050711] px-4 py-10 text-white md:px-10">
+      <div className="mx-auto max-w-6xl">{children}</div>
+    </main>
+  );
+}
+
+function readProtocolFromBrowserStorage(): ProtocolResult | null {
+  if (typeof window === 'undefined') return null;
+
+  for (const key of ORIGINALITY_PROTOCOL_STORAGE_KEYS) {
+    const parsed = readJsonFromStorageKey(key);
+
+    if (isUsableProtocolResult(parsed)) {
+      return normalizeStoredProtocolShape(parsed);
+    }
+  }
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const directData = urlParams.get('data');
+
+  if (directData) {
+    try {
+      const decoded = decodeURIComponent(directData);
+      const parsed = JSON.parse(decoded);
+
+      if (isUsableProtocolResult(parsed)) {
+        return normalizeStoredProtocolShape(parsed);
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function readJsonFromStorageKey(key: string): any | null {
+  try {
+    const raw =
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+
+    if (typeof parsed === 'string') {
+      try {
+        return JSON.parse(parsed);
+      } catch {
+        return {
+          plaintext: parsed,
+          protocolText: parsed,
+          createdAt: new Date().toISOString(),
+        };
+      }
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function isUsableProtocolResult(value: any): value is ProtocolResult {
+  if (!value || typeof value !== 'object') return false;
+
+  const source =
+    value?.result && typeof value.result === 'object' ? value.result : value;
+
+  if (source.ok === false && !source.summary && !source.protocolText) {
+    return false;
+  }
+
+  return Boolean(
+    source.score !== undefined ||
+      source.percent !== undefined ||
+      source.overallPercent !== undefined ||
+      source.similarityRiskScore !== undefined ||
+      source.protocolText ||
+      source.summary ||
+      source.recommendation ||
+      source.plaintext ||
+      source.extractedText ||
+      source.text ||
+      Array.isArray(source.documents) ||
+      Array.isArray(source.passages) ||
+      Array.isArray(source.corpuses),
+  );
+}
+
+function normalizeStoredProtocolShape(value: any): ProtocolResult {
+  const source =
+    value?.result && typeof value.result === 'object' ? value.result : value;
+
+  const plaintext =
+    source.plaintext ||
+    source.extractedText ||
+    source.text ||
+    source.protocolText ||
+    source.summary ||
+    '';
+
+  return {
+    ...source,
+    score:
+      source.score ??
+      source.similarityRiskScore ??
+      source.similarityScore ??
+      source.similarityPercent ??
+      source.percent ??
+      source.overallPercent ??
+      source.plagiarismPercent ??
+      source.overlapPercent,
+    title:
+      source.title ||
+      source.protocolTitle ||
+      source.activeProfile?.title ||
+      source.profile?.title ||
+      'Kontrola originality',
+    author: source.author || source.authorName || '',
+    supervisor:
+      source.supervisor ||
+      source.activeProfile?.supervisor ||
+      source.profile?.supervisor ||
+      '',
+    workType:
+      source.workType ||
+      source.activeProfile?.type ||
+      source.activeProfile?.schema?.label ||
+      source.profile?.type ||
+      'neurčené',
+    citationStyle:
+      source.citationStyle ||
+      source.activeProfile?.citation ||
+      source.profile?.citation ||
+      'ISO 690',
+    language:
+      source.language ||
+      source.activeProfile?.workLanguage ||
+      source.activeProfile?.language ||
+      source.profile?.workLanguage ||
+      source.profile?.language ||
+      'SK',
+    createdAt: source.createdAt || source.generatedAt || new Date().toISOString(),
+    plaintext,
+    extractedText: source.extractedText || plaintext,
+    summary: source.summary || source.protocolText || '',
+    recommendation: source.recommendation || '',
+    corpuses: Array.isArray(source.corpuses) ? source.corpuses : [],
+    documents: Array.isArray(source.documents) ? source.documents : [],
+    passages: Array.isArray(source.passages) ? source.passages : [],
+    histogram: Array.isArray(source.histogram) ? source.histogram : [],
+    dictionaryStats: source.dictionaryStats,
+  };
 }
 
 function ProtocolHeader({ result }: { result: RequiredProtocolResult }) {
@@ -817,7 +1168,8 @@ function HighlightedText({ text }: { text: string }) {
    ===================================================== */
 
 function normalizeResult(result: ProtocolResult): RequiredProtocolResult {
-  const plaintext = result.plaintext || result.extractedText || '';
+  const plaintext =
+    result.plaintext || result.extractedText || result.text || result.protocolText || '';
 
   const documents = normalizeDocuments(result.documents || []);
   const passages = normalizePassages(result.passages || []);
@@ -851,8 +1203,8 @@ function normalizeResult(result: ProtocolResult): RequiredProtocolResult {
 
   return {
     score,
-    title: result.title || 'Názov práce nebol uvedený',
-    author: result.author || '',
+    title: result.title || result.protocolTitle || 'Názov práce nebol uvedený',
+    author: result.author || result.authorName || '',
     school: result.school || 'Neuvedená škola',
     faculty: result.faculty || 'Neuvedená fakulta',
     studyProgram: result.studyProgram || '',
@@ -860,7 +1212,7 @@ function normalizeResult(result: ProtocolResult): RequiredProtocolResult {
     workType: result.workType || 'neurčené',
     citationStyle: result.citationStyle || 'ISO 690',
     language: result.language || 'SK',
-    createdAt: result.createdAt || new Date().toISOString(),
+    createdAt: result.createdAt || result.generatedAt || new Date().toISOString(),
     metadataUrl: result.metadataUrl || 'https://zedpera.com/originalita/metadata',
     webProtocolUrl:
       result.webProtocolUrl || 'https://zedpera.com/originalita/protokol',
@@ -870,7 +1222,7 @@ function normalizeResult(result: ProtocolResult): RequiredProtocolResult {
     documents,
     passages,
     plaintext,
-    summary: result.summary || '',
+    summary: result.summary || result.protocolText || '',
     recommendation: result.recommendation || '',
   };
 }
@@ -1098,7 +1450,10 @@ function applyScoreBackToCorpuses({
       return {
         ...item,
         percent: score,
-        count: Math.max(Number(item.count || 0), documents.length || passages.length || 1),
+        count: Math.max(
+          Number(item.count || 0),
+          documents.length || passages.length || 1,
+        ),
       };
     }
 
@@ -1192,12 +1547,14 @@ function calculateOverallScore({
     result.similarity,
     result.similarityScore,
     result.similarityPercent,
+    result.similarityRiskScore,
     result.plagiarism,
     result.plagiarismScore,
     result.plagiarismPercent,
     result.overlap,
     result.overlapPercent,
     result.percent,
+    result.overallPercent,
     result.ai_risk,
     result.aiRisk,
   ]);

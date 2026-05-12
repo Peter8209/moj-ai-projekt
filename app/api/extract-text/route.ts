@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { gunzipSync, gzipSync } from 'zlib';
+import { gunzipSync } from 'zlib';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,10 +9,7 @@ export const maxDuration = 90;
 
 const MAX_FILE_SIZE_MB = 50;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-const MAX_COMPRESSED_SIZE_BYTES = 1 * 1024 * 1024;
-const MAX_RETURNED_TEXT_CHARS = 350_000;
-
-// ================= TYPES =================
+const MAX_RETURN_TEXT_CHARS = 500_000;
 
 type SourceType = 'book' | 'article' | 'web' | 'software' | 'unknown';
 
@@ -34,23 +31,7 @@ type ExtractResult = {
   meta?: Record<string, unknown>;
 };
 
-type FileProcessingInfo = {
-  originalFileName: string;
-  effectiveFileName: string;
-  originalExtension: string;
-  effectiveExtension: string;
-  originalType: string | null;
-  receivedSize: number;
-  compressedSize: number;
-  decompressedSize: number;
-  isGzip: boolean;
-  wasDecompressed: boolean;
-  compressionWithinLimit: boolean;
-  compressionLimitBytes: number;
-  compressionStatus: string;
-};
-
-// ================= BASIC HELPERS =================
+// ================= TEXT HELPERS =================
 
 function cleanText(value: unknown) {
   return String(value || '')
@@ -66,16 +47,21 @@ function cleanText(value: unknown) {
     .trim();
 }
 
-function limitText(value: string, maxChars: number) {
+function limitText(value: string, maxChars = MAX_RETURN_TEXT_CHARS) {
   const cleaned = cleanText(value);
 
   if (cleaned.length <= maxChars) {
     return cleaned;
   }
 
-  return `${cleaned.slice(0, maxChars)}
+  return `${cleaned.slice(
+    0,
+    maxChars,
+  )}\n\n[Text bol skrátený pre technický limit odpovede API.]`;
+}
 
-[TEXT BOL SKRÁTENÝ PRE TECHNICKÝ LIMIT.]`;
+function normalizeFileName(value: unknown) {
+  return String(value || 'uploaded-file').trim() || 'uploaded-file';
 }
 
 function getFileExtension(fileName: string) {
@@ -86,30 +72,26 @@ function getFileExtension(fileName: string) {
   return fileName.slice(index).toLowerCase();
 }
 
-function normalizeFileName(value: unknown) {
-  return String(value || 'uploaded-file').trim() || 'uploaded-file';
-}
-
 function removeGzipSuffix(fileName: string) {
   return fileName.toLowerCase().endsWith('.gz')
     ? fileName.slice(0, -3)
     : fileName;
 }
 
-function getEffectiveFileName(fileName: string) {
+function getEffectiveFileName({
+  fileName,
+  originalName,
+  isCompressed,
+}: {
+  fileName: string;
+  originalName: string;
+  isCompressed: boolean;
+}) {
+  if (isCompressed && originalName && originalName !== 'uploaded-file') {
+    return originalName;
+  }
+
   return removeGzipSuffix(fileName);
-}
-
-function getEffectiveExtension(fileName: string) {
-  return getFileExtension(getEffectiveFileName(fileName));
-}
-
-function isGzipFile(fileName: string, mimeType?: string | null) {
-  return (
-    fileName.toLowerCase().endsWith('.gz') ||
-    mimeType === 'application/gzip' ||
-    mimeType === 'application/x-gzip'
-  );
 }
 
 function getErrorMessage(error: unknown) {
@@ -122,6 +104,34 @@ async function fileToBuffer(file: File) {
   const arrayBuffer = await file.arrayBuffer();
 
   return Buffer.from(arrayBuffer);
+}
+
+function isGzipUpload({
+  file,
+  fileName,
+  isCompressedFromForm,
+}: {
+  file: File;
+  fileName: string;
+  isCompressedFromForm: boolean;
+}) {
+  const lowerName = fileName.toLowerCase();
+  const type = file.type || '';
+
+  return (
+    isCompressedFromForm ||
+    lowerName.endsWith('.gz') ||
+    type === 'application/gzip' ||
+    type === 'application/x-gzip'
+  );
+}
+
+function safeGunzip(buffer: Buffer) {
+  try {
+    return gunzipSync(buffer);
+  } catch (error) {
+    throw new Error(`GZIP_DECOMPRESSION_FAILED: ${getErrorMessage(error)}`);
+  }
 }
 
 function decodeXmlEntities(value: string) {
@@ -140,91 +150,19 @@ function decodeXmlEntities(value: string) {
     });
 }
 
-function uniqueArray(values: string[]) {
-  return Array.from(
-    new Set(
-      values
-        .map((value) => String(value || '').trim())
-        .filter(Boolean),
+function stripXmlTags(value: string) {
+  return cleanText(
+    decodeXmlEntities(
+      String(value || '')
+        .replace(/<text:line-break\s*\/>/gi, '\n')
+        .replace(/<text:p[^>]*>/gi, '\n')
+        .replace(/<text:h[^>]*>/gi, '\n')
+        .replace(/<[^>]+>/g, ' '),
     ),
   );
 }
 
-// ================= COMPRESSION =================
-
-function prepareBufferForExtraction({
-  buffer,
-  fileName,
-  mimeType,
-}: {
-  buffer: Buffer;
-  fileName: string;
-  mimeType?: string | null;
-}): {
-  usableBuffer: Buffer;
-  info: FileProcessingInfo;
-} {
-  const originalExtension = getFileExtension(fileName);
-  const effectiveFileName = getEffectiveFileName(fileName);
-  const effectiveExtension = getEffectiveExtension(fileName);
-  const gzip = isGzipFile(fileName, mimeType);
-
-  if (gzip) {
-    const decompressed = gunzipSync(buffer);
-
-    const info: FileProcessingInfo = {
-      originalFileName: fileName,
-      effectiveFileName,
-      originalExtension,
-      effectiveExtension,
-      originalType: mimeType || null,
-      receivedSize: buffer.length,
-      compressedSize: buffer.length,
-      decompressedSize: decompressed.length,
-      isGzip: true,
-      wasDecompressed: true,
-      compressionWithinLimit: buffer.length <= MAX_COMPRESSED_SIZE_BYTES,
-      compressionLimitBytes: MAX_COMPRESSED_SIZE_BYTES,
-      compressionStatus:
-        buffer.length <= MAX_COMPRESSED_SIZE_BYTES
-          ? 'Prijatý gzip súbor je do 1 MB a bol úspešne rozbalený.'
-          : 'Prijatý gzip súbor je väčší ako 1 MB, ale bol úspešne rozbalený a text sa extrahoval zo súboru po rozbalení.',
-    };
-
-    return {
-      usableBuffer: decompressed,
-      info,
-    };
-  }
-
-  const compressed = gzipSync(buffer);
-
-  const info: FileProcessingInfo = {
-    originalFileName: fileName,
-    effectiveFileName,
-    originalExtension,
-    effectiveExtension,
-    originalType: mimeType || null,
-    receivedSize: buffer.length,
-    compressedSize: compressed.length,
-    decompressedSize: buffer.length,
-    isGzip: false,
-    wasDecompressed: false,
-    compressionWithinLimit: compressed.length <= MAX_COMPRESSED_SIZE_BYTES,
-    compressionLimitBytes: MAX_COMPRESSED_SIZE_BYTES,
-    compressionStatus:
-      compressed.length <= MAX_COMPRESSED_SIZE_BYTES
-        ? 'Súbor bol kontrolne skomprimovaný a po kompresii je do 1 MB.'
-        : 'Súbor bol kontrolne skomprimovaný, ale po kompresii je väčší ako 1 MB. Text sa napriek tomu extrahoval na serveri z pôvodného súboru.',
-  };
-
-  return {
-    usableBuffer: buffer,
-    info,
-  };
-}
-
-// ================= TEXT EXTRACTION =================
+// ================= PLAIN TEXT =================
 
 async function extractPlainTextFromBuffer(buffer: Buffer): Promise<ExtractResult> {
   const text = cleanText(buffer.toString('utf8'));
@@ -242,36 +180,134 @@ async function extractPlainTextFromBuffer(buffer: Buffer): Promise<ExtractResult
   };
 }
 
-async function extractPdfText(buffer: Buffer): Promise<ExtractResult> {
+async function extractRtfTextFromBuffer(buffer: Buffer): Promise<ExtractResult> {
   try {
-    const pdfParseModule: any = await import('pdf-parse');
-    const pdfParse = pdfParseModule.default || pdfParseModule;
+    const raw = buffer.toString('utf8');
 
-    const data = await pdfParse(buffer);
-    const text = cleanText(data?.text || '');
+    const text = cleanText(
+      raw
+        .replace(/\\par[d]?/g, '\n')
+        .replace(/\\'[0-9a-fA-F]{2}/g, ' ')
+        .replace(/\\[a-zA-Z]+\d* ?/g, ' ')
+        .replace(/[{}]/g, ' ')
+        .replace(/\s+/g, ' '),
+    );
 
     return {
       ok: Boolean(text),
       text,
-      method: 'pdf-parse',
+      method: 'basic-rtf-cleaner',
       message: text
-        ? 'PDF text bol extrahovaný pomocou pdf-parse.'
-        : 'PDF bolo spracované, ale neobsahuje čitateľný text. Môže ísť o skenovaný PDF obrázok.',
+        ? 'RTF bol orientačne vyčistený na text.'
+        : 'RTF súbor bol spracovaný, ale text nebol nájdený.',
       meta: {
-        pages: data?.numpages || null,
         chars: text.length,
-        info: data?.info || null,
       },
     };
   } catch (error) {
     return {
       ok: false,
       text: '',
-      method: 'pdf-parse',
+      method: 'basic-rtf-cleaner',
+      message: `RTF extrakcia zlyhala: ${getErrorMessage(error)}`,
+    };
+  }
+}
+
+// ================= PDF =================
+
+async function extractPdfText(buffer: Buffer): Promise<ExtractResult> {
+  let pdfjs: any;
+
+  try {
+    pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  } catch (error) {
+    return {
+      ok: false,
+      text: '',
+      method: 'pdfjs-dist-server',
+      message:
+        `PDF extrakcia zlyhala: nepodarilo sa načítať pdfjs-dist. ` +
+        `Nainštaluj balík: npm install pdfjs-dist. Detail: ${getErrorMessage(
+          error,
+        )}`,
+    };
+  }
+
+  try {
+    if (pdfjs.GlobalWorkerOptions) {
+      pdfjs.GlobalWorkerOptions.workerSrc = '';
+    }
+
+    const loadingTask = pdfjs.getDocument({
+      data: new Uint8Array(buffer),
+      disableWorker: true,
+      useWorkerFetch: false,
+      isEvalSupported: false,
+      stopAtErrors: false,
+      verbosity: 0,
+    });
+
+    const pdf = await loadingTask.promise;
+
+    const pages: string[] = [];
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+
+      const pageText = content.items
+        .map((item: any) => {
+          if (typeof item?.str === 'string') return item.str;
+          return '';
+        })
+        .filter(Boolean)
+        .join(' ');
+
+      const cleanedPageText = cleanText(pageText);
+
+      if (cleanedPageText) {
+        pages.push(`STRANA ${pageNumber}\n${cleanedPageText}`);
+      }
+
+      try {
+        page.cleanup?.();
+      } catch {
+        // ignore cleanup error
+      }
+    }
+
+    try {
+      await pdf.destroy?.();
+    } catch {
+      // ignore destroy error
+    }
+
+    const text = cleanText(pages.join('\n\n------------------------------\n\n'));
+
+    return {
+      ok: Boolean(text),
+      text,
+      method: 'pdfjs-dist-server-disable-worker',
+      message: text
+        ? 'PDF text bol extrahovaný na serveri cez pdfjs-dist bez CDN workeru.'
+        : 'PDF bolo spracované, ale neobsahuje čitateľný text. Môže ísť o skenovaný PDF obrázok.',
+      meta: {
+        pages: pdf.numPages || null,
+        chars: text.length,
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      text: '',
+      method: 'pdfjs-dist-server-disable-worker',
       message: `PDF extrakcia zlyhala: ${getErrorMessage(error)}`,
     };
   }
 }
+
+// ================= DOCX =================
 
 async function extractDocxText(buffer: Buffer): Promise<ExtractResult> {
   try {
@@ -304,6 +340,8 @@ async function extractDocxText(buffer: Buffer): Promise<ExtractResult> {
     };
   }
 }
+
+// ================= XLS / XLSX =================
 
 async function extractXlsxText(buffer: Buffer): Promise<ExtractResult> {
   try {
@@ -359,6 +397,8 @@ async function extractXlsxText(buffer: Buffer): Promise<ExtractResult> {
     };
   }
 }
+
+// ================= PPTX =================
 
 async function extractPptxText(buffer: Buffer): Promise<ExtractResult> {
   try {
@@ -423,26 +463,35 @@ async function extractPptxText(buffer: Buffer): Promise<ExtractResult> {
   }
 }
 
-async function extractRtfTextFromBuffer(buffer: Buffer): Promise<ExtractResult> {
-  try {
-    const raw = buffer.toString('utf8');
+// ================= ODT =================
 
-    const text = cleanText(
-      raw
-        .replace(/\\par[d]?/g, '\n')
-        .replace(/\\'[0-9a-fA-F]{2}/g, ' ')
-        .replace(/\\[a-zA-Z]+\d* ?/g, ' ')
-        .replace(/[{}]/g, ' ')
-        .replace(/\s+/g, ' '),
-    );
+async function extractOdtText(buffer: Buffer): Promise<ExtractResult> {
+  try {
+    const JSZipModule = await import('jszip');
+    const JSZip = JSZipModule.default;
+
+    const zip = await JSZip.loadAsync(buffer);
+    const contentFile = zip.files['content.xml'];
+
+    if (!contentFile) {
+      return {
+        ok: false,
+        text: '',
+        method: 'odt-jszip-content-xml',
+        message: 'ODT súbor neobsahuje content.xml.',
+      };
+    }
+
+    const xml = await contentFile.async('text');
+    const text = stripXmlTags(xml);
 
     return {
       ok: Boolean(text),
       text,
-      method: 'basic-rtf-cleaner',
+      method: 'odt-jszip-content-xml',
       message: text
-        ? 'RTF bol orientačne vyčistený na text.'
-        : 'RTF súbor bol spracovaný, ale text nebol nájdený.',
+        ? 'ODT text bol extrahovaný z content.xml.'
+        : 'ODT bolo spracované, ale text nebol nájdený.',
       meta: {
         chars: text.length,
       },
@@ -451,11 +500,13 @@ async function extractRtfTextFromBuffer(buffer: Buffer): Promise<ExtractResult> 
     return {
       ok: false,
       text: '',
-      method: 'basic-rtf-cleaner',
-      message: `RTF extrakcia zlyhala: ${getErrorMessage(error)}`,
+      method: 'odt-jszip-content-xml',
+      message: `ODT extrakcia zlyhala: ${getErrorMessage(error)}`,
     };
   }
 }
+
+// ================= UNSUPPORTED =================
 
 async function extractUnsupportedBinary({
   fileName,
@@ -474,6 +525,8 @@ async function extractUnsupportedBinary({
   };
 }
 
+// ================= ROUTING BY TYPE =================
+
 async function extractByType({
   buffer,
   fileName,
@@ -481,7 +534,7 @@ async function extractByType({
   buffer: Buffer;
   fileName: string;
 }): Promise<ExtractResult> {
-  const extension = getEffectiveExtension(fileName);
+  const extension = getFileExtension(fileName);
 
   if (['.txt', '.md', '.csv'].includes(extension)) {
     return extractPlainTextFromBuffer(buffer);
@@ -507,6 +560,10 @@ async function extractByType({
     return extractPptxText(buffer);
   }
 
+  if (extension === '.odt') {
+    return extractOdtText(buffer);
+  }
+
   if (extension === '.doc') {
     return {
       ok: false,
@@ -517,13 +574,13 @@ async function extractByType({
     };
   }
 
-  if (extension === '.odt') {
+  if (extension === '.ppt') {
     return {
       ok: false,
       text: '',
-      method: 'odt-unsupported',
+      method: 'ppt-unsupported',
       message:
-        'ODT zatiaľ nie je podporované v tomto extrakčnom endpointe. Exportuj súbor ako DOCX alebo PDF.',
+        'Starý formát .ppt nie je spoľahlivo podporovaný. Preveď súbor do .pptx alebo PDF a nahraj ho znova.',
     };
   }
 
@@ -534,6 +591,16 @@ async function extractByType({
 }
 
 // ================= BIBLIOGRAPHY DETECTION =================
+
+function uniqueArray(values: string[]) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value || '').trim())
+        .filter(Boolean),
+    ),
+  );
+}
 
 function detectSourceType(line: string): SourceType {
   const lower = line.toLowerCase();
@@ -566,8 +633,9 @@ function detectSourceType(line: string): SourceType {
     lower.includes('časopis') ||
     lower.includes('štúdia') ||
     lower.includes('article') ||
-    lower.includes('abstract') ||
-    lower.includes('proceedings')
+    lower.includes('nutrition') ||
+    lower.includes('food') ||
+    lower.includes('science')
   ) {
     return 'article';
   }
@@ -588,11 +656,13 @@ function detectSourceType(line: string): SourceType {
 
 function extractDoi(line: string) {
   const match = line.match(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i);
+
   return match?.[0] || null;
 }
 
 function extractUrl(line: string) {
   const match = line.match(/https?:\/\/[^\s)]+|www\.[^\s)]+/i);
+
   return match?.[0] || null;
 }
 
@@ -606,8 +676,7 @@ function extractYear(line: string) {
 }
 
 function extractAuthors(line: string) {
-  const beforeYear =
-    line.split(/\((19|20)\d{2}\)|\b(19|20)\d{2}\b/)[0] || '';
+  const beforeYear = line.split(/\((19|20)\d{2}\)|\b(19|20)\d{2}\b/)[0] || '';
 
   const cleaned = beforeYear
     .replace(/\bet al\./gi, '')
@@ -621,9 +690,8 @@ function extractAuthors(line: string) {
     .filter((part) => {
       if (part.length < 3) return false;
       if (!/[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]/.test(part)) return false;
-
       if (
-        /^(in|from|retrieved|dostupné|available|vol|no|pp|pages|journal|abstract|chapter|publisher|press)$/i.test(
+        /^(in|from|retrieved|dostupné|available|vol|no|pp|str|s|page|pages|journal|doi|isbn)$/i.test(
           part,
         )
       ) {
@@ -651,9 +719,9 @@ function extractTitle(line: string) {
   working = working.replace(/https?:\/\/[^\s)]+|www\.[^\s)]+/gi, '');
 
   const quoted =
-    working.match(/"([^"]{5,260})"/) ||
-    working.match(/„([^“”]{5,260})“/) ||
-    working.match(/'([^']{5,260})'/);
+    working.match(/"([^"]{5,220})"/) ||
+    working.match(/„([^“”]{5,220})“/) ||
+    working.match(/'([^']{5,220})'/);
 
   if (quoted?.[1]) {
     return quoted[1].trim();
@@ -681,14 +749,14 @@ function extractTitle(line: string) {
 function looksLikeBibliographicLine(line: string) {
   const trimmed = line.trim();
 
-  if (trimmed.length < 20) return false;
+  if (trimmed.length < 18) return false;
 
   const hasYear = /\b(19|20)\d{2}\b|\bn\.d\.\b/i.test(trimmed);
   const hasDoi = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i.test(trimmed);
   const hasUrl = /https?:\/\/|www\./i.test(trimmed);
 
   const hasCitationWords =
-    /publisher|journal|doi|isbn|vydavateľ|časopis|university|press|jasp|spss|software|available|dostupné|retrieved|vol\.|volume|issue|pages|pp\.|literatúra|references|bibliografia|abstract|proceedings|chapter/i.test(
+    /publisher|journal|doi|isbn|vydavateľ|časopis|university|press|jasp|spss|software|available|dostupné|retrieved|vol\.|volume|issue|pages|pp\.|nutrition|science|food|protein|proteins|cereal|cereals|wheat|bread|amino/i.test(
       trimmed,
     );
 
@@ -698,40 +766,76 @@ function looksLikeBibliographicLine(line: string) {
     ) ||
     /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+\s+\([12]\d{3}\)/.test(
       trimmed,
-    );
+    ) ||
+    /^[A-Z][A-Za-z.' -]+,\s*[A-Z]\./.test(trimmed);
 
-  return hasDoi || hasUrl || (hasYear && (hasCitationWords || hasAuthorPattern));
+  return (
+    hasDoi ||
+    hasUrl ||
+    (hasYear && (hasCitationWords || hasAuthorPattern)) ||
+    (hasAuthorPattern && hasCitationWords)
+  );
+}
+
+function extractLiteratureLikeBlocks(text: string) {
+  const cleaned = cleanText(text);
+  const lines = cleaned.split('\n');
+
+  const startIndexes: number[] = [];
+
+  lines.forEach((line, index) => {
+    if (
+      /literatúra|literatura|references|bibliografia|bibliography|použitá literatúra|zoznam literatúry|zdroje/i.test(
+        line,
+      )
+    ) {
+      startIndexes.push(index);
+    }
+  });
+
+  const blocks: string[] = [];
+
+  for (const startIndex of startIndexes) {
+    const endIndex = Math.min(lines.length, startIndex + 180);
+    blocks.push(lines.slice(startIndex, endIndex).join('\n'));
+  }
+
+  return blocks.join('\n\n');
 }
 
 function extractBibliographicCandidates(text: string) {
   const cleaned = cleanText(text);
+  const literatureBlock = extractLiteratureLikeBlocks(cleaned);
+  const sourceText = literatureBlock
+    ? `${literatureBlock}\n\n${cleaned}`
+    : cleaned;
 
-  const lines = cleaned
+  const lines = sourceText
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
 
-  const joinedLines: string[] = [];
+  const joinedMultilineCandidates: string[] = [];
 
   for (let i = 0; i < lines.length; i += 1) {
     const current = lines[i];
     const next = lines[i + 1] || '';
     const next2 = lines[i + 2] || '';
 
-    joinedLines.push(current);
+    joinedMultilineCandidates.push(current);
 
-    if (current.length < 180 && next) {
-      joinedLines.push(`${current} ${next}`.trim());
+    if (current.length < 220 && next) {
+      joinedMultilineCandidates.push(`${current} ${next}`.trim());
     }
 
-    if (current.length < 140 && next && next2) {
-      joinedLines.push(`${current} ${next} ${next2}`.trim());
+    if (current.length < 160 && next && next2) {
+      joinedMultilineCandidates.push(`${current} ${next} ${next2}`.trim());
     }
   }
 
   const candidates: BibliographicCandidate[] = [];
 
-  for (const line of joinedLines) {
+  for (const line of joinedMultilineCandidates) {
     if (!looksLikeBibliographicLine(line)) continue;
 
     candidates.push({
@@ -748,29 +852,31 @@ function extractBibliographicCandidates(text: string) {
   const unique = new Map<string, BibliographicCandidate>();
 
   for (const item of candidates) {
-    const key = `${item.raw.slice(0, 220)}-${item.doi || ''}-${item.url || ''}`;
+    const key = [
+      item.raw.slice(0, 220),
+      item.doi || '',
+      item.url || '',
+      item.title || '',
+      item.year || '',
+    ]
+      .join('|')
+      .toLowerCase();
 
     if (!unique.has(key)) {
       unique.set(key, item);
     }
   }
 
-  return Array.from(unique.values()).slice(0, 150);
+  return Array.from(unique.values()).slice(0, 250);
 }
 
-function formatAuthorsFromCandidates(candidates: BibliographicCandidate[]) {
-  const authors = uniqueArray(candidates.flatMap((item) => item.authors || []));
-
-  if (!authors.length) {
-    return 'Autori neboli automaticky identifikovaní.';
-  }
-
-  return authors.join(', ');
+function extractAllAuthorsFromSources(sources: BibliographicCandidate[]) {
+  return uniqueArray(sources.flatMap((source) => source.authors || []));
 }
 
-function formatCandidates(candidates: BibliographicCandidate[]) {
+function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
   if (!candidates.length) {
-    return 'Neboli automaticky detegované žiadne bibliografické záznamy.';
+    return 'Neboli automaticky detegované žiadne bibliografické záznamy. Ak sú zdroje v texte, treba ich manuálne overiť alebo doplniť čitateľnejší zoznam literatúry.';
   }
 
   return candidates
@@ -778,9 +884,9 @@ function formatCandidates(candidates: BibliographicCandidate[]) {
       return `${index + 1}. Pôvodný záznam:
 ${item.raw}
 
-Autori: ${item.authors.length ? item.authors.join(', ') : 'údaj je potrebné overiť'}
+Autori: ${item.authors.length ? item.authors.join(', ') : 'neuvedené alebo potrebné overiť'}
 Rok: ${item.year || 'údaj je potrebné overiť'}
-Názov publikácie / diela: ${item.title || 'údaj je potrebné overiť'}
+Názov publikácie / zdroja: ${item.title || 'údaj je potrebné overiť'}
 Typ zdroja: ${item.sourceType}
 DOI: ${item.doi || 'neuvedené'}
 URL: ${item.url || 'neuvedené'}`;
@@ -788,11 +894,12 @@ URL: ${item.url || 'neuvedené'}`;
     .join('\n\n');
 }
 
-// ================= MAIN ROUTE =================
+// ================= POST =================
 
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
+
     const file = formData.get('file');
 
     if (!(file instanceof File)) {
@@ -831,20 +938,36 @@ export async function POST(req: NextRequest) {
     }
 
     const fileNameFromForm = normalizeFileName(formData.get('fileName'));
-    const fileName = normalizeFileName(file.name || fileNameFromForm);
-    const mimeType = file.type || null;
+    const originalNameFromForm = normalizeFileName(formData.get('originalName'));
 
-    const receivedBuffer = await fileToBuffer(file);
+    const isCompressedFromForm =
+      String(formData.get('isCompressed') || '').toLowerCase() === 'true' ||
+      String(formData.get('mustDecompressBeforeExtraction') || '').toLowerCase() ===
+        'true';
 
-    const { usableBuffer, info } = prepareBufferForExtraction({
-      buffer: receivedBuffer,
-      fileName,
-      mimeType,
+    const receivedFileName = normalizeFileName(file.name || fileNameFromForm);
+
+    const isCompressed = isGzipUpload({
+      file,
+      fileName: receivedFileName,
+      isCompressedFromForm,
     });
+
+    const effectiveFileName = getEffectiveFileName({
+      fileName: receivedFileName,
+      originalName: originalNameFromForm,
+      isCompressed,
+    });
+
+    const extension = getFileExtension(effectiveFileName);
+
+    const originalBuffer = await fileToBuffer(file);
+
+    const usableBuffer = isCompressed ? safeGunzip(originalBuffer) : originalBuffer;
 
     const result = await extractByType({
       buffer: usableBuffer,
-      fileName: info.effectiveFileName,
+      fileName: effectiveFileName,
     });
 
     if (!result.ok || !result.text.trim()) {
@@ -856,20 +979,22 @@ export async function POST(req: NextRequest) {
             'Text sa nepodarilo extrahovať alebo bol výsledok prázdny.',
           text: '',
           extractedText: '',
-          content: '',
           method: result.method,
-          file: info,
           bibliography: {
-            detectedSourcesCount: 0,
+            authors: [],
             detectedSources: [],
-            authors: 'Autori neboli automaticky identifikovaní.',
-            formatted: 'Neboli automaticky detegované žiadne bibliografické záznamy.',
+            detectedSourcesCount: 0,
+            formatted: '',
           },
           meta: {
-            fileName,
-            extension: info.effectiveExtension,
+            receivedFileName,
+            effectiveFileName,
+            originalName: originalNameFromForm,
+            extension,
             size: file.size,
-            type: mimeType,
+            decompressedSize: usableBuffer.length,
+            type: file.type || null,
+            isCompressed,
             ...result.meta,
           },
         },
@@ -877,57 +1002,45 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const fullText = cleanText(result.text);
-    const limitedText = limitText(fullText, MAX_RETURNED_TEXT_CHARS);
-
-    const detectedSources = extractBibliographicCandidates(fullText);
-    const authors = formatAuthorsFromCandidates(detectedSources);
-    const formattedSources = formatCandidates(detectedSources);
+    const text = limitText(result.text);
+    const detectedSources = extractBibliographicCandidates(text);
+    const authors = extractAllAuthorsFromSources(detectedSources);
+    const formatted = formatBibliographicCandidates(detectedSources);
 
     return NextResponse.json({
       ok: true,
-
-      text: limitedText,
-      extractedText: limitedText,
-      content: limitedText,
-
+      text,
+      extractedText: text,
+      content: text,
       method: result.method,
-      message: result.message || 'Text bol úspešne extrahovaný.',
-
-      file: info,
-
-      extraction: {
-        ok: true,
-        extractedChars: fullText.length,
-        returnedChars: limitedText.length,
-        status: result.message || 'Text bol úspešne extrahovaný.',
-        preview: fullText.slice(0, 2500),
-      },
-
+      message:
+        result.message ||
+        'Text bol úspešne extrahovaný a bibliografické zdroje boli analyzované.',
+      detectedSources,
+      authors,
+      formattedSources: formatted,
+      sources: formatted,
       bibliography: {
-        detectedSourcesCount: detectedSources.length,
-        detectedSources,
         authors,
-        formatted: formattedSources,
-      },
-
-      sources: {
-        detectedSourcesCount: detectedSources.length,
         detectedSources,
-        authors,
-        formatted: formattedSources,
+        detectedSourcesCount: detectedSources.length,
+        formatted,
+        formattedSources: formatted,
+        sources: formatted,
       },
-
       meta: {
-        fileName,
-        effectiveFileName: info.effectiveFileName,
-        extension: info.effectiveExtension,
+        receivedFileName,
+        effectiveFileName,
+        originalName: originalNameFromForm,
+        extension,
         size: file.size,
-        type: mimeType,
-        chars: fullText.length,
-        compressionWithinLimit: info.compressionWithinLimit,
-        compressedSize: info.compressedSize,
-        decompressedSize: info.decompressedSize,
+        compressedSize: isCompressed ? originalBuffer.length : null,
+        decompressedSize: usableBuffer.length,
+        type: file.type || null,
+        isCompressed,
+        chars: text.length,
+        detectedSourcesCount: detectedSources.length,
+        authorsCount: authors.length,
         ...result.meta,
       },
     });

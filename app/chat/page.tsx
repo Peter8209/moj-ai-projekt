@@ -311,9 +311,10 @@ const suggestions: {
 async function extractPdfTextInBrowser(file: File): Promise<string> {
   const pdfjsLib: any = await import('pdfjs-dist/legacy/build/pdf.mjs');
 
-  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-  }
+  // DÔLEŽITÉ:
+  // Worker musí ísť z /public/pdfjs/pdf.worker.min.mjs,
+  // nie z CDN, pretože CDN ti padá na "Failed to fetch dynamically imported module".
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs';
 
   const arrayBuffer = await file.arrayBuffer();
 

@@ -29,6 +29,9 @@ import {
   X,
 } from 'lucide-react';
 
+import AnalysisResultsModal from '@/components/analysis/AnalysisResultsModal';
+import type { AnalysisResult } from '@/components/analysis/analysisTypes';
+
 // ================= TYPES =================
 
 type ModuleKey =
@@ -776,6 +779,10 @@ export default function DashboardPage() {
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [canvasText, setCanvasText] = useState('');
 
+  const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
+  const [analysisResult, setAnalysisResult] =
+    useState<AnalysisResult | null>(null);
+
   const [qualityMode, setQualityMode] = useState('style');
   const [outputMode, setOutputMode] = useState('detailed');
   const [translationFrom, setTranslationFrom] = useState('Slovenčina');
@@ -826,6 +833,8 @@ export default function DashboardPage() {
     setResult('');
     setAttachedFiles([]);
     setCanvasText('');
+    setAnalysisResult(null);
+    setAnalysisModalOpen(false);
   }, [activeModule]);
 
   const handleFiles = (files: FileList | null) => {
@@ -894,6 +903,8 @@ export default function DashboardPage() {
     setResult('');
     setCanvasText('');
     setAttachedFiles([]);
+    setAnalysisResult(null);
+    setAnalysisModalOpen(false);
   };
 
   const startDictation = () => {
@@ -1212,8 +1223,76 @@ VÝSTUP:
 
     setIsLoading(true);
     setResult('');
+    setAnalysisResult(null);
+    setAnalysisModalOpen(false);
 
     try {
+      if (activeModule === 'data') {
+        const formData = new FormData();
+
+        formData.append('analysisGoal', secondaryInput || '');
+        formData.append('dataDescription', input || '');
+        formData.append('activeProfile', JSON.stringify(activeProfile || null));
+
+        if (activeProfile?.id) {
+          formData.append('projectId', activeProfile.id);
+        }
+
+        attachedFiles.forEach((item) => {
+          formData.append('files', item.file, item.name);
+        });
+
+        const res = await fetch('/api/analyze-data', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!res.ok) {
+          throw new Error(await readApiErrorResponse(res));
+        }
+
+        const data = (await res.json()) as AnalysisResult & {
+          error?: string;
+          message?: string;
+        };
+
+        if (!data?.ok) {
+          throw new Error(
+            data?.error || data?.message || 'Analýza dát zlyhala.',
+          );
+        }
+
+        setAnalysisResult(data);
+        setAnalysisModalOpen(true);
+
+        const output = cleanFinalOutput(
+          [
+            data.title || 'Výsledky analýzy',
+            '',
+            data.summary || '',
+            '',
+            data.warnings && data.warnings.length > 0
+              ? `Upozornenia:\n${data.warnings.map((item) => `- ${item}`).join('\n')}`
+              : '',
+            '',
+            data.practicalText || '',
+            '',
+            data.fullText || '',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        );
+
+        setResult(output);
+        setCanvasText(output);
+
+        setTimeout(() => {
+          resultRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 150);
+
+        return;
+      }
+
       if (activeModule === 'originality') {
         let protocolWindow: Window | null = null;
 
@@ -1509,16 +1588,16 @@ VÝSTUP:
       const PptxGenJS = pptxgenModule.default;
       const pptx = new PptxGenJS();
 
-    pptx.layout = 'LAYOUT_WIDE';
-pptx.author = 'Zedpera';
-pptx.company = 'Zedpera';
-pptx.subject = exportTitle;
-pptx.title = exportTitle;
+      pptx.layout = 'LAYOUT_WIDE';
+      pptx.author = 'Zedpera';
+      pptx.company = 'Zedpera';
+      pptx.subject = exportTitle;
+      pptx.title = exportTitle;
 
-pptx.theme = {
-  headFontFace: 'Arial',
-  bodyFontFace: 'Arial',
-};
+      pptx.theme = {
+        headFontFace: 'Arial',
+        bodyFontFace: 'Arial',
+      };
 
       const fileBase = sanitizeFileName(exportTitle);
       const slides = splitTextToSlides(text);
@@ -1897,7 +1976,8 @@ pptx.theme = {
                 {activeModule === 'data' && (
                   <div className="mb-4 rounded-2xl border border-blue-400/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-100">
                     Môžeš priložiť dáta alebo výstupy z JASP, SPSS, Excel, CSV
-                    alebo vložiť text výsledkov.
+                    alebo vložiť text výsledkov. Po spracovaní sa otvorí
+                    samostatné modálne okno „Výsledky analýzy“.
                   </div>
                 )}
 
@@ -1948,7 +2028,7 @@ pptx.theme = {
                       onChange={(event) =>
                         setSecondaryInput(event.target.value)
                       }
-                      placeholder="Napríklad: Interpretuj výsledky deskriptívnej štatistiky a korelácií pre praktickú časť práce."
+                      placeholder="Napríklad: Interpretuj výsledky deskriptívnej štatistiky, korelácií, ANOVA, regresie, normality a navrhni grafy do praktickej časti práce."
                       className="min-h-[110px] w-full resize-y rounded-2xl border border-white/10 bg-white/[0.055] px-4 py-4 text-sm leading-7 text-white outline-none placeholder:text-slate-500 focus:border-violet-500"
                     />
                   </div>
@@ -2004,6 +2084,17 @@ pptx.theme = {
                     <Trash2 className="h-4 w-4" />
                     Vyčistiť
                   </button>
+
+                  {activeModule === 'data' && analysisResult && (
+                    <button
+                      type="button"
+                      onClick={() => setAnalysisModalOpen(true)}
+                      className="inline-flex items-center gap-2 rounded-2xl border border-blue-400/30 bg-blue-500/10 px-4 py-3 text-sm font-black text-blue-100 hover:bg-blue-500/20"
+                    >
+                      <Search className="h-4 w-4" />
+                      Otvoriť výsledky analýzy
+                    </button>
+                  )}
                 </div>
               </section>
 
@@ -2025,6 +2116,17 @@ pptx.theme = {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+                      {activeModule === 'data' && analysisResult && (
+                        <button
+                          type="button"
+                          onClick={() => setAnalysisModalOpen(true)}
+                          className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white hover:bg-blue-500"
+                        >
+                          <Search className="h-4 w-4" />
+                          Výsledky analýzy
+                        </button>
+                      )}
+
                       {activeModule === 'defense' && (
                         <button
                           type="button"
@@ -2079,6 +2181,17 @@ pptx.theme = {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  {activeModule === 'data' && analysisResult && (
+                    <button
+                      type="button"
+                      onClick={() => setAnalysisModalOpen(true)}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white hover:bg-blue-500"
+                    >
+                      <Search className="h-4 w-4" />
+                      Výsledky analýzy
+                    </button>
+                  )}
+
                   {activeModule === 'defense' && (
                     <button
                       type="button"
@@ -2149,6 +2262,12 @@ pptx.theme = {
             </div>
           </div>
         )}
+
+        <AnalysisResultsModal
+          open={analysisModalOpen}
+          result={analysisResult}
+          onClose={() => setAnalysisModalOpen(false)}
+        />
       </main>
     </>
   );

@@ -97,6 +97,13 @@ type SlideContent = {
   body: string[];
 };
 
+type ApiAnalysisResponse = {
+  ok?: boolean;
+  error?: string;
+  message?: string;
+  [key: string]: any;
+};
+
 declare global {
   interface Window {
     webkitSpeechRecognition?: any;
@@ -170,7 +177,7 @@ const modules: {
   {
     key: 'data',
     label: 'Analýza dát',
-    subtitle: 'JASP, SPSS, Excel, CSV',
+    subtitle: 'JASP, SPSS, Excel, CSV, PDF, Word',
     icon: Search,
   },
   {
@@ -760,6 +767,232 @@ function validatePlanningDatesNoPast(text: string) {
   };
 }
 
+function createTextFileFromInput(text: string) {
+  const cleaned = cleanFinalOutput(text);
+
+  return new File([cleaned], 'vlozene-data-alebo-vysledky.txt', {
+    type: 'text/plain;charset=utf-8',
+  });
+}
+
+function createAnalysisSummary({
+  variablesCount,
+  frequenciesCount,
+  filesCount,
+  warningsCount,
+}: {
+  variablesCount: number;
+  frequenciesCount: number;
+  filesCount: number;
+  warningsCount: number;
+}) {
+  return [
+    `Spracovaných súborov: ${filesCount}.`,
+    `Identifikovaných premenných: ${variablesCount}.`,
+    `Vytvorených frekvenčných tabuliek: ${frequenciesCount}.`,
+    warningsCount > 0
+      ? `Počas spracovania vzniklo ${warningsCount} upozornení.`
+      : 'Spracovanie prebehlo bez zásadných upozornení.',
+  ].join('\n');
+}
+
+function normalizeAnalysisResult(data: ApiAnalysisResponse): AnalysisResult {
+  const raw = data as any;
+
+  const frequencies = Array.isArray(raw.frequencies)
+    ? raw.frequencies
+    : Array.isArray(raw.frequencyTables)
+      ? raw.frequencyTables
+      : Array.isArray(raw.frequency_tables)
+        ? raw.frequency_tables
+        : [];
+
+  const extractedFiles = Array.isArray(raw.files)
+    ? raw.files
+    : Array.isArray(raw.extractedFiles)
+      ? raw.extractedFiles
+      : Array.isArray(raw.attachments)
+        ? raw.attachments
+        : [];
+
+  const variables = Array.isArray(raw.variables) ? raw.variables : [];
+
+  const warnings = Array.isArray(raw.warnings) ? raw.warnings : [];
+
+  const recommendedTests = Array.isArray(raw.recommendedTests)
+    ? raw.recommendedTests
+    : Array.isArray(raw.hypothesisTests)
+      ? raw.hypothesisTests
+      : [];
+
+  const recommendedCharts = Array.isArray(raw.recommendedCharts)
+    ? raw.recommendedCharts
+    : [];
+
+  const excelTables = Array.isArray(raw.excelTables) ? raw.excelTables : [];
+
+  const descriptiveStatistics = Array.isArray(raw.descriptiveStatistics)
+    ? raw.descriptiveStatistics
+    : variables;
+
+  const hypothesisTests = Array.isArray(raw.hypothesisTests)
+    ? raw.hypothesisTests
+    : recommendedTests;
+
+  const selectedAnalyses = Array.isArray(raw.selectedAnalyses)
+    ? raw.selectedAnalyses
+    : [
+        'descriptiveStatistics',
+        'frequencyTables',
+        'recommendedCharts',
+        'hypothesisTests',
+        'interpretation',
+      ];
+
+  const practicalText =
+    raw.practicalText ||
+    raw.interpretation ||
+    'Do praktickej časti je vhodné zaradiť deskriptívnu štatistiku, frekvenčné tabuľky, grafy a následne testovanie hypotéz podľa typu premenných.';
+
+  const interpretation =
+    raw.interpretation ||
+    practicalText ||
+    'Výsledky je potrebné interpretovať podľa typu premenných, výskumných otázok a hypotéz.';
+
+  const summary =
+    raw.summary ||
+    createAnalysisSummary({
+      variablesCount: variables.length,
+      frequenciesCount: frequencies.length,
+      filesCount: extractedFiles.length,
+      warningsCount: warnings.length,
+    });
+
+  const fullText =
+    raw.fullText ||
+    raw.fullResult ||
+    raw.text ||
+    [
+      raw.title || 'Výsledky analýzy',
+      '',
+      summary,
+      '',
+      interpretation,
+    ].join('\n');
+
+  return {
+    ok: Boolean(data.ok),
+    title: raw.title || 'Výsledky analýzy',
+
+    dataDescription:
+      raw.dataDescription ||
+      raw.description ||
+      raw.analysisGoal ||
+      'Automatická analýza dát zo zadaných alebo priložených súborov.',
+
+    selectedAnalyses,
+
+    summary,
+    warnings,
+
+    variables,
+    frequencies,
+
+    recommendedTests,
+    recommendedCharts,
+    excelTables,
+
+    descriptiveStatistics,
+    hypothesisTests,
+
+    practicalText,
+    interpretation,
+    fullText,
+  } as unknown as AnalysisResult;
+}
+
+function createAnalysisOutputText(data: AnalysisResult) {
+  const anyData = data as any;
+
+  const warningsBlock =
+    Array.isArray(anyData.warnings) && anyData.warnings.length > 0
+      ? `Upozornenia:\n${anyData.warnings
+          .map((item: string) => `- ${item}`)
+          .join('\n')}`
+      : '';
+
+  const variablesBlock =
+    Array.isArray(anyData.variables) && anyData.variables.length > 0
+      ? `Identifikované premenné:\n${anyData.variables
+          .map((item: any) => {
+            const name = item.name || item.variable || 'Premenná';
+            const valid = item.valid ?? 'neuvedené';
+            const mean = item.mean ?? 'neuvedené';
+            const sd = item.stdDeviation ?? item.std ?? 'neuvedené';
+
+            return `- ${name}: validné hodnoty ${valid}, priemer ${mean}, SD ${sd}`;
+          })
+          .join('\n')}`
+      : '';
+
+  const chartsBlock =
+    Array.isArray(anyData.recommendedCharts) &&
+    anyData.recommendedCharts.length > 0
+      ? `Odporúčané grafy:\n${anyData.recommendedCharts
+          .map(
+            (item: any) =>
+              `- ${item.title || 'Graf'} (${item.type || 'typ neuvedený'}): ${
+                item.reason || 'vhodné na vizualizáciu výsledkov'
+              }`,
+          )
+          .join('\n')}`
+      : '';
+
+  const testsBlock =
+    Array.isArray(anyData.recommendedTests) &&
+    anyData.recommendedTests.length > 0
+      ? `Odporúčané štatistické testy:\n${anyData.recommendedTests
+          .map(
+            (item: any) =>
+              `- ${item.test || 'Test'}: ${
+                item.hypothesis || item.reason || 'overenie hypotézy'
+              }`,
+          )
+          .join('\n')}`
+      : '';
+
+  const tablesBlock =
+    Array.isArray(anyData.excelTables) && anyData.excelTables.length > 0
+      ? `Odporúčané tabuľky do práce:\n${anyData.excelTables
+          .map((item: string) => `- ${item}`)
+          .join('\n')}`
+      : '';
+
+  return cleanFinalOutput(
+    [
+      anyData.title || 'Výsledky analýzy',
+      '',
+      anyData.summary || '',
+      '',
+      warningsBlock,
+      '',
+      variablesBlock,
+      '',
+      chartsBlock,
+      '',
+      testsBlock,
+      '',
+      tablesBlock,
+      '',
+      anyData.practicalText || '',
+      '',
+      anyData.fullText || '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  );
+}
+
 // ================= PAGE =================
 
 export default function DashboardPage() {
@@ -1233,6 +1466,7 @@ VÝSTUP:
         formData.append('analysisGoal', secondaryInput || '');
         formData.append('dataDescription', input || '');
         formData.append('activeProfile', JSON.stringify(activeProfile || null));
+        formData.append('profile', JSON.stringify(activeProfile || null));
 
         if (activeProfile?.id) {
           formData.append('projectId', activeProfile.id);
@@ -1242,7 +1476,12 @@ VÝSTUP:
           formData.append('files', item.file, item.name);
         });
 
-        const res = await fetch('/api/analyze-data', {
+        if (input.trim()) {
+          const textFile = createTextFileFromInput(input);
+          formData.append('files', textFile, textFile.name);
+        }
+
+        const res = await fetch('/api/analysis/files', {
           method: 'POST',
           body: formData,
         });
@@ -1251,37 +1490,20 @@ VÝSTUP:
           throw new Error(await readApiErrorResponse(res));
         }
 
-        const data = (await res.json()) as AnalysisResult & {
-          error?: string;
-          message?: string;
-        };
+        const rawData = (await res.json()) as ApiAnalysisResponse;
 
-        if (!data?.ok) {
+        if (!rawData?.ok) {
           throw new Error(
-            data?.error || data?.message || 'Analýza dát zlyhala.',
+            rawData?.error || rawData?.message || 'Analýza dát zlyhala.',
           );
         }
 
-        setAnalysisResult(data);
+        const normalizedData = normalizeAnalysisResult(rawData);
+
+        setAnalysisResult(normalizedData);
         setAnalysisModalOpen(true);
 
-        const output = cleanFinalOutput(
-          [
-            data.title || 'Výsledky analýzy',
-            '',
-            data.summary || '',
-            '',
-            data.warnings && data.warnings.length > 0
-              ? `Upozornenia:\n${data.warnings.map((item) => `- ${item}`).join('\n')}`
-              : '',
-            '',
-            data.practicalText || '',
-            '',
-            data.fullText || '',
-          ]
-            .filter(Boolean)
-            .join('\n'),
-        );
+        const output = createAnalysisOutputText(normalizedData);
 
         setResult(output);
         setCanvasText(output);
@@ -1975,9 +2197,10 @@ VÝSTUP:
 
                 {activeModule === 'data' && (
                   <div className="mb-4 rounded-2xl border border-blue-400/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-100">
-                    Môžeš priložiť dáta alebo výstupy z JASP, SPSS, Excel, CSV
-                    alebo vložiť text výsledkov. Po spracovaní sa otvorí
-                    samostatné modálne okno „Výsledky analýzy“.
+                    Môžeš priložiť Excel, CSV, PDF, Word, TXT alebo výstupy z
+                    JASP/SPSS. Po spracovaní sa otvorí samostatné modálne okno
+                    „Výsledky analýzy“ s tabuľkami, premennými, odporúčanými
+                    grafmi a testami.
                   </div>
                 )}
 
@@ -2337,8 +2560,8 @@ function FileUploadBox({
           </div>
 
           <p className="mt-1 text-xs text-slate-500">
-            Nahraj PDF, DOCX, TXT, Excel, CSV, PPT alebo obrázky. Systém má
-            overiť, či príloha súvisí s aktívnym profilom práce.
+            Nahraj PDF, DOCX, TXT, Excel, CSV, PPT alebo obrázky. Pri analýze
+            dát systém otvorí výsledky v samostatnom modálnom okne.
           </p>
         </div>
 
@@ -2405,7 +2628,7 @@ function getPlaceholder(module: ModuleKey) {
   }
 
   if (module === 'data') {
-    return 'Vlož tabuľku, výstup z JASP/SPSS/Excel alebo nahraj dátový súbor.';
+    return 'Vlož dáta, tabuľku, CSV obsah, text z JASP/SPSS alebo nahraj Excel, CSV, PDF, Word či TXT súbor.';
   }
 
   if (module === 'planning') {

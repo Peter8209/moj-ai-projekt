@@ -6,7 +6,6 @@ import {
   AlertCircle,
   BookOpen,
   Brain,
-  CheckCircle2,
   Download,
   FileDown,
   FileText,
@@ -19,7 +18,6 @@ import {
   PenLine,
   RefreshCcw,
   Send,
-  Sparkles,
   UploadCloud,
   X,
 } from 'lucide-react';
@@ -35,6 +33,59 @@ type ChatMessage = {
   content: string;
 };
 
+type FileProcessingStatus =
+  | 'waiting'
+  | 'compressing'
+  | 'compressed'
+  | 'extracting'
+  | 'extracted'
+  | 'metadata_only'
+  | 'ready'
+  | 'error';
+
+type BibliographicCandidate = {
+  raw: string;
+  authors: string[];
+  year: string | null;
+  title: string | null;
+  doi: string | null;
+  url: string | null;
+  sourceType: 'book' | 'article' | 'web' | 'software' | 'unknown';
+};
+
+type ExtractTextApiResponse = {
+  ok?: boolean;
+  text?: string;
+  extractedText?: string;
+  content?: string;
+  method?: string;
+  message?: string;
+  error?: string;
+  meta?: {
+    fileName?: string;
+    extension?: string;
+    size?: number;
+    type?: string | null;
+    chars?: number;
+    pages?: number | null;
+    [key: string]: unknown;
+  };
+  bibliography?: {
+    authors?: string[] | string;
+    detectedSources?: BibliographicCandidate[];
+    detectedSourcesCount?: number;
+    formatted?: string;
+    formattedSources?: string;
+    sources?: string;
+    raw?: string;
+    [key: string]: unknown;
+  };
+  detectedSources?: BibliographicCandidate[];
+  authors?: string[] | string;
+  formattedSources?: string;
+  sources?: string;
+};
+
 type AttachedFile = {
   id: string;
   name: string;
@@ -42,11 +93,48 @@ type AttachedFile = {
   type: string;
   uploadedAt: string;
   file: File;
+};
 
-  apiFile?: File;
-  apiSize?: number;
-  compressed?: boolean;
-  compressionNote?: string;
+type PreparedFile = {
+  originalId: string;
+  originalName: string;
+  originalSize: number;
+  originalType: string;
+  preparedName: string;
+  preparedSize: number;
+  preparedType: string;
+  compressionMode:
+    | 'gzip_original'
+    | 'gzip_extracted_text'
+    | 'gzip_metadata_only'
+    | 'raw_small_text';
+  file: File;
+  extractedText: string;
+  extractionMethod?: string;
+  extractionMessage?: string;
+  detectedSources: BibliographicCandidate[];
+  detectedAuthors: string[];
+  formattedSources: string;
+  extractionStatus:
+    | 'client_extracted'
+    | 'backend_required'
+    | 'metadata_only'
+    | 'not_extractable'
+    | 'failed';
+  warning?: string;
+};
+
+type ProcessingLogItem = {
+  id: string;
+  name: string;
+  status: FileProcessingStatus;
+  message: string;
+  originalSize?: number;
+  preparedSize?: number;
+  extractedChars?: number;
+  detectedSourcesCount?: number;
+  detectedAuthorsCount?: number;
+  warning?: string;
 };
 
 type SavedProfile = {
@@ -106,6 +194,7 @@ declare global {
   interface Window {
     webkitSpeechRecognition?: any;
     SpeechRecognition?: any;
+    CompressionStream?: any;
   }
 }
 
@@ -131,9 +220,15 @@ const allowedFileExtensions = [
   '.pptx',
 ];
 
-const textExtractableExtensions = [
+const backendExtractableExtensions = [
   '.pdf',
   '.docx',
+  '.doc',
+  '.odt',
+  '.xls',
+  '.xlsx',
+  '.ppt',
+  '.pptx',
   '.txt',
   '.rtf',
   '.md',
@@ -146,9 +241,14 @@ const maxFilesCount = 20;
 const maxFileSizeMb = 50;
 const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 
-const maxApiFileSizeMb = 1;
-const maxApiFileSizeBytes = maxApiFileSizeMb * 1024 * 1024;
-const maxCompressedTextChars = 750_000;
+const maxCompressedFileSizeBytes = 1 * 1024 * 1024;
+const safeCompressedTargetBytes = 950 * 1024;
+
+// Dôležité: nízke limity, aby /api/chat nespadol na context window
+const maxClientExtractedCharsPerFile = 25_000;
+const maxTotalExtractedContextChars = 60_000;
+const maxDetectedSourcesForChat = 80;
+const maxDetectedAuthorsForChat = 80;
 
 const agents: { key: Agent; label: string }[] = [
   { key: 'gemini', label: 'Gemini' },
@@ -201,7 +301,7 @@ const suggestions: {
   },
 ];
 
-// ================= HELPERS =================
+// ================= BASIC HELPERS =================
 
 function getFileExtension(fileName: string) {
   const index = fileName.lastIndexOf('.');
@@ -214,7 +314,7 @@ function isAllowedUploadFile(file: File) {
 }
 
 function isTextExtractableFile(fileName: string) {
-  return textExtractableExtensions.includes(getFileExtension(fileName));
+  return backendExtractableExtensions.includes(getFileExtension(fileName));
 }
 
 function getFileKindLabel(fileName: string) {
@@ -247,6 +347,7 @@ function cleanAiOutput(text: string) {
     .replace(/\u200B/g, '')
     .replace(/\u200C/g, '')
     .replace(/\u200D/g, '')
+    .replace(/\u0000/g, '')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/^#{1,6}\s+/gm, '')
@@ -263,19 +364,140 @@ function cleanAiOutput(text: string) {
     .trim();
 }
 
+function normalizeSectionHeading(value: string) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/^=+/g, '')
+    .replace(/=+$/g, '')
+    .replace(/^#+/g, '')
+    .replace(/:$/g, '')
+    .replace(/^[\d.)\s-]+/g, '')
+    .replace(/[^A-Z0-9 ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function parseSections(text: string): ParsedResult {
   const cleanedText = cleanAiOutput(text);
+  const lines = cleanedText.split('\n');
 
-  const get = (name: string) =>
-    cleanedText.split(`=== ${name} ===`)[1]?.split('===')[0]?.trim() || '';
+  const mainSectionNames = [
+    'VÝSTUP',
+    'ANALÝZA',
+    'SKÓRE',
+    'ODPORÚČANIA',
+    'POUŽITÉ ZDROJE A AUTORI',
+    'POUŽITÉ ZDROJE',
+    'ZDROJE A AUTORI',
+    'ZDROJE',
+  ];
+
+  const sourceSectionNames = [
+    'POUŽITÉ ZDROJE A AUTORI',
+    'POUŽITÉ ZDROJE',
+    'ZDROJE A AUTORI',
+    'ZDROJE',
+  ];
+
+  const normalizedMainSectionNames = mainSectionNames.map(
+    normalizeSectionHeading,
+  );
+
+  const findLineIndexByHeading = (wantedNames: string[]) => {
+    const wanted = wantedNames.map(normalizeSectionHeading);
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const normalizedLine = normalizeSectionHeading(lines[i]);
+
+      if (wanted.includes(normalizedLine)) {
+        return i;
+      }
+    }
+
+    return -1;
+  };
+
+  const findSection = (wantedNames: string[]) => {
+    const startLine = findLineIndexByHeading(wantedNames);
+
+    if (startLine === -1) return '';
+
+    let endLine = lines.length;
+
+    for (let i = startLine + 1; i < lines.length; i += 1) {
+      const normalizedLine = normalizeSectionHeading(lines[i]);
+
+      if (normalizedMainSectionNames.includes(normalizedLine)) {
+        endLine = i;
+        break;
+      }
+    }
+
+    return cleanAiOutput(lines.slice(startLine + 1, endLine).join('\n'));
+  };
+
+  let output = findSection(['VÝSTUP']);
+  const analysis = findSection(['ANALÝZA']);
+  const score = findSection(['SKÓRE']);
+  const tips = findSection(['ODPORÚČANIA']);
+
+  let sources =
+    findSection(['POUŽITÉ ZDROJE A AUTORI']) ||
+    findSection(['POUŽITÉ ZDROJE']) ||
+    findSection(['ZDROJE A AUTORI']) ||
+    findSection(['ZDROJE']);
+
+  if (!sources) {
+    const sourceRegexes = [
+      /(?:^|\n)\s*={0,3}\s*použité\s+zdroje\s+a\s+autori\s*={0,3}\s*:?\s*(?:\n|$)/i,
+      /(?:^|\n)\s*={0,3}\s*použité\s+zdroje\s*={0,3}\s*:?\s*(?:\n|$)/i,
+      /(?:^|\n)\s*={0,3}\s*zdroje\s+a\s+autori\s*={0,3}\s*:?\s*(?:\n|$)/i,
+      /(?:^|\n)\s*={0,3}\s*zdroje\s*={0,3}\s*:?\s*(?:\n|$)/i,
+    ];
+
+    for (const regex of sourceRegexes) {
+      const match = cleanedText.match(regex);
+
+      if (match && typeof match.index === 'number') {
+        sources = cleanAiOutput(cleanedText.slice(match.index + match[0].length));
+        break;
+      }
+    }
+  }
+
+  if (!output) {
+    const sourceLine = findLineIndexByHeading(sourceSectionNames);
+
+    if (sourceLine >= 0) {
+      output = cleanAiOutput(lines.slice(0, sourceLine).join('\n'));
+    } else {
+      output = cleanedText;
+    }
+  }
+
+  if (sources && output.includes(sources)) {
+    output = cleanAiOutput(output.replace(sources, ''));
+  }
 
   return {
-    output: cleanAiOutput(get('VÝSTUP') || cleanedText),
-    analysis: cleanAiOutput(get('ANALÝZA')),
-    score: cleanAiOutput(get('SKÓRE')),
-    tips: cleanAiOutput(get('ODPORÚČANIA')),
-    sources: cleanAiOutput(get('POUŽITÉ ZDROJE A AUTORI')),
+    output: cleanAiOutput(output),
+    analysis: cleanAiOutput(analysis),
+    score: cleanAiOutput(score),
+    tips: cleanAiOutput(tips),
+    sources: cleanAiOutput(sources),
   };
+}
+
+function uniqueArray(values: string[]) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value || '').trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function formatBytes(bytes: number) {
@@ -430,7 +652,7 @@ async function readApiErrorResponse(res: Response) {
       cleaned.startsWith('<html') ||
       cleaned.includes('__next_error__')
     ) {
-      return `Server vrátil chybu ${res.status}. Detail pozri v termináli pri /api/chat.`;
+      return `Server vrátil chybu ${res.status}. Detail pozri v termináli.`;
     }
 
     return cleaned.length > 1200 ? `${cleaned.slice(0, 1200)}...` : cleaned;
@@ -448,14 +670,9 @@ function buildAttachmentPrompt(files: AttachedFile[]) {
         ? 'áno'
         : 'nie alebo iba čiastočne';
 
-      const compression =
-        item.size > maxApiFileSizeBytes
-          ? `, pred odoslaním do API bude komprimované na max. ${maxApiFileSizeMb} MB`
-          : '';
-
       return `${index + 1}. ${item.name} – ${getFileKindLabel(
         item.name,
-      )}, ${formatBytes(item.size)}, textová extrakcia: ${extractable}${compression}`;
+      )}, ${formatBytes(item.size)}, textová extrakcia: ${extractable}`;
     })
     .join('\n');
 }
@@ -463,239 +680,624 @@ function buildAttachmentPrompt(files: AttachedFile[]) {
 function ensureSourcesSection(text: string) {
   const cleaned = cleanAiOutput(text);
 
-  if (
-    cleaned.includes('POUŽITÉ ZDROJE A AUTORI') ||
-    cleaned.toLowerCase().includes('použité zdroje') ||
-    cleaned.toLowerCase().includes('zdroje a autori')
-  ) {
+  const hasSourcesHeading =
+    /(?:^|\n)\s*={0,3}\s*použité\s+zdroje\s+a\s+autori\s*={0,3}\s*:?\s*(?:\n|$)/i.test(
+      cleaned,
+    ) ||
+    /(?:^|\n)\s*={0,3}\s*použité\s+zdroje\s*={0,3}\s*:?\s*(?:\n|$)/i.test(
+      cleaned,
+    ) ||
+    /(?:^|\n)\s*={0,3}\s*zdroje\s+a\s+autori\s*={0,3}\s*:?\s*(?:\n|$)/i.test(
+      cleaned,
+    ) ||
+    /(?:^|\n)\s*={0,3}\s*zdroje\s*={0,3}\s*:?\s*(?:\n|$)/i.test(cleaned);
+
+  if (hasSourcesHeading) {
     return cleaned;
   }
 
   return `${cleaned}
 
 === POUŽITÉ ZDROJE A AUTORI ===
-Zdroje neboli v odpovedi samostatne uvedené. Over, či boli v priložených dokumentoch dostupné bibliografické údaje. Ak áno, spusti modul „Spracuj zdroje a citácie“.`;
+Zdroje neboli dodané alebo sa ich nepodarilo overene načítať.`;
 }
 
-// ================= FILE COMPRESSION =================
+async function gzipBlob(blob: Blob): Promise<Blob> {
+  const CompressionStreamConstructor = window.CompressionStream;
 
-function createTextFileFromString({
+  if (!CompressionStreamConstructor) {
+    return blob;
+  }
+
+  const stream = blob.stream().pipeThrough(
+    new CompressionStreamConstructor('gzip'),
+  );
+
+  return await new Response(stream).blob();
+}
+
+function truncateByChars(text: string, maxChars: number) {
+  if (text.length <= maxChars) return text;
+
+  return `${text.slice(
+    0,
+    maxChars,
+  )}\n\n[Text bol skrátený, aby sa vošiel do technického limitu pred odoslaním do AI.]`;
+}
+
+async function createGzipTextFile({
   text,
   fileName,
+  targetBytes = safeCompressedTargetBytes,
 }: {
   text: string;
   fileName: string;
+  targetBytes?: number;
 }) {
-  return new File([text], fileName, {
+  let workingText = text;
+
+  for (let i = 0; i < 8; i += 1) {
+    const blob = new Blob([workingText], {
+      type: 'text/plain;charset=utf-8',
+    });
+
+    const gz = await gzipBlob(blob);
+
+    if (gz.size <= targetBytes) {
+      return new File([gz], fileName, {
+        type: window.CompressionStream
+          ? 'application/gzip'
+          : 'text/plain;charset=utf-8',
+      });
+    }
+
+    const ratio = Math.max(0.45, targetBytes / Math.max(gz.size, 1));
+    const nextLength = Math.max(2000, Math.floor(workingText.length * ratio));
+    workingText = truncateByChars(workingText, nextLength);
+  }
+
+  const finalText = truncateByChars(workingText, 30_000);
+  const finalBlob = new Blob([finalText], {
     type: 'text/plain;charset=utf-8',
   });
+  const finalGz = await gzipBlob(finalBlob);
+
+  return new File([finalGz], fileName, {
+    type: window.CompressionStream
+      ? 'application/gzip'
+      : 'text/plain;charset=utf-8',
+  });
 }
 
-async function readTextFileSafely(file: File) {
-  try {
-    return await file.text();
-  } catch {
-    return '';
+// ================= SOURCE DETECTION =================
+
+function detectSourceType(line: string): BibliographicCandidate['sourceType'] {
+  const lower = line.toLowerCase();
+
+  if (
+    lower.includes('[computer software]') ||
+    lower.includes('software') ||
+    lower.includes('jasp') ||
+    lower.includes('spss') ||
+    lower.includes('jamovi') ||
+    lower.includes('r foundation')
+  ) {
+    return 'software';
   }
+
+  if (
+    lower.includes('http://') ||
+    lower.includes('https://') ||
+    lower.includes('www.')
+  ) {
+    return 'web';
+  }
+
+  if (
+    lower.includes('doi') ||
+    lower.includes('journal') ||
+    lower.includes('vol.') ||
+    lower.includes('volume') ||
+    lower.includes('issue') ||
+    lower.includes('časopis') ||
+    lower.includes('štúdia') ||
+    lower.includes('article')
+  ) {
+    return 'article';
+  }
+
+  if (
+    lower.includes('vydavateľ') ||
+    lower.includes('publisher') ||
+    lower.includes('isbn') ||
+    lower.includes('monografia') ||
+    lower.includes('book')
+  ) {
+    return 'book';
+  }
+
+  return 'unknown';
 }
 
-function limitTextToOneMb(text: string) {
-  const cleaned = String(text || '')
-    .replace(/\u0000/g, '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
+function extractDoi(line: string) {
+  const match = line.match(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i);
+  return match?.[0] || null;
+}
+
+function extractUrl(line: string) {
+  const match = line.match(/https?:\/\/[^\s)]+|www\.[^\s)]+/i);
+  return match?.[0] || null;
+}
+
+function extractYear(line: string) {
+  const match =
+    line.match(/\((19|20)\d{2}\)/) ||
+    line.match(/\b(19|20)\d{2}\b/) ||
+    line.match(/\bn\.d\.\b/i);
+
+  return match?.[0]?.replace(/[()]/g, '') || null;
+}
+
+function extractAuthors(line: string) {
+  const beforeYear = line.split(/\((19|20)\d{2}\)|\b(19|20)\d{2}\b/)[0] || '';
+
+  const cleaned = beforeYear
+    .replace(/\bet al\./gi, '')
+    .replace(/\ba kol\./gi, '')
+    .replace(/\s+/g, ' ')
     .trim();
 
-  if (cleaned.length <= maxCompressedTextChars) {
-    return cleaned;
-  }
-
-  const head = cleaned.slice(0, Math.floor(maxCompressedTextChars * 0.65));
-  const tail = cleaned.slice(-Math.floor(maxCompressedTextChars * 0.25));
-
-  return `${head}
-
-[... TEXT BOL SKRÁTENÝ, ABY SA ZMESTIL DO LIMITU 1 MB ...]
-
-${tail}`;
-}
-
-async function compressImageToOneMb(file: File): Promise<File> {
-  const imageUrl = URL.createObjectURL(file);
-
-  try {
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const img = new Image();
-
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error('Obrázok sa nepodarilo načítať.'));
-      img.src = imageUrl;
-    });
-
-    let width = image.width;
-    let height = image.height;
-
-    const maxSide = 1600;
-
-    if (width > maxSide || height > maxSide) {
-      const ratio = Math.min(maxSide / width, maxSide / height);
-      width = Math.round(width * ratio);
-      height = Math.round(height * ratio);
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-
-    const ctx = canvas.getContext('2d');
-
-    if (!ctx) {
-      throw new Error('Canvas nie je dostupný.');
-    }
-
-    ctx.drawImage(image, 0, 0, width, height);
-
-    let quality = 0.82;
-
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      const blob = await new Promise<Blob | null>((resolve) => {
-        canvas.toBlob(resolve, 'image/jpeg', quality);
-      });
-
-      if (!blob) {
-        throw new Error('Kompresia obrázka zlyhala.');
+  const candidates = cleaned
+    .split(/\s*(?:,|;|&|\ba\b|\band\b)\s*/i)
+    .map((part) => part.trim())
+    .filter((part) => {
+      if (part.length < 3) return false;
+      if (!/[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]/.test(part)) return false;
+      if (/^(in|from|retrieved|dostupné|available|vol|no|pp)$/i.test(part)) {
+        return false;
       }
 
-      if (blob.size <= maxApiFileSizeBytes || quality <= 0.35) {
-        return new File(
-          [blob],
-          `${sanitizeFileName(file.name.replace(/\.[^.]+$/, ''))}-compressed.jpg`,
-          {
-            type: 'image/jpeg',
-          },
-        );
-      }
-
-      quality -= 0.1;
-    }
-
-    throw new Error('Obrázok sa nepodarilo zmenšiť pod 1 MB.');
-  } finally {
-    URL.revokeObjectURL(imageUrl);
-  }
-}
-
-async function compressFileForApi(file: File): Promise<{
-  apiFile: File;
-  compressed: boolean;
-  note: string;
-}> {
-  const extension = getFileExtension(file.name);
-
-  if (file.size <= maxApiFileSizeBytes) {
-    return {
-      apiFile: file,
-      compressed: false,
-      note: 'Súbor je menší ako 1 MB, odosiela sa bez kompresie.',
-    };
-  }
-
-  if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) {
-    try {
-      const compressedImage = await compressImageToOneMb(file);
-
-      return {
-        apiFile: compressedImage,
-        compressed: true,
-        note: `Obrázok bol zmenšený z ${formatBytes(file.size)} na ${formatBytes(
-          compressedImage.size,
-        )}.`,
-      };
-    } catch {
-      const fallbackText = `Obrázok "${file.name}" bol väčší ako 1 MB a nepodarilo sa ho bezpečne komprimovať.
-Pôvodná veľkosť: ${formatBytes(file.size)}.
-Používateľ musí nahrať menší obrázok alebo vložiť textový popis obrázka.`;
-
-      const fallbackFile = createTextFileFromString({
-        text: fallbackText,
-        fileName: `${sanitizeFileName(file.name)}-compressed-note.txt`,
-      });
-
-      return {
-        apiFile: fallbackFile,
-        compressed: true,
-        note: 'Obrázok sa nepodarilo komprimovať, do API sa posiela iba poznámka.',
-      };
-    }
-  }
-
-  if (['.txt', '.md', '.csv', '.rtf'].includes(extension)) {
-    const rawText = await readTextFileSafely(file);
-    const limitedText = limitTextToOneMb(rawText);
-
-    const compressedTextFile = createTextFileFromString({
-      text: limitedText,
-      fileName: `${sanitizeFileName(file.name)}-compressed.txt`,
+      return (
+        /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+$/.test(
+          part,
+        ) || /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záäčďéíĺľňóôŕšťúýž]+,\s*[A-Z]/.test(part)
+      );
     });
 
-    return {
-      apiFile: compressedTextFile,
-      compressed: true,
-      note: `Textový súbor bol skrátený z ${formatBytes(file.size)} na ${formatBytes(
-        compressedTextFile.size,
-      )}.`,
-    };
+  return uniqueArray(candidates).slice(0, 12);
+}
+
+function extractTitle(line: string) {
+  let working = line.trim();
+
+  working = working.replace(/^[-•\d.)\s]+/, '');
+  working = working.replace(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi, '');
+  working = working.replace(/https?:\/\/[^\s)]+|www\.[^\s)]+/gi, '');
+
+  const quoted =
+    working.match(/"([^"]{5,180})"/) ||
+    working.match(/„([^“”]{5,180})“/) ||
+    working.match(/'([^']{5,180})'/);
+
+  if (quoted?.[1]) {
+    return quoted[1].trim();
   }
 
-  const fallbackText = `PRÍLOHA BOLA AUTOMATICKY KOMPRESOVANÁ PRE API LIMIT 1 MB.
+  const afterYear = working.split(/\((19|20)\d{2}\)|\b(19|20)\d{2}\b/).pop();
 
-Názov pôvodného súboru: ${file.name}
-Typ súboru: ${file.type || 'neznámy typ'}
-Prípona: ${extension || 'nezistená'}
-Pôvodná veľkosť: ${formatBytes(file.size)}
-Limit pre odoslanie do agenta: ${maxApiFileSizeMb} MB
+  if (afterYear && afterYear.trim().length > 8) {
+    return afterYear
+      .replace(/^[).,\s:-]+/, '')
+      .split(/\.\s+/)[0]
+      .trim()
+      .slice(0, 220);
+  }
 
-DÔLEŽITÉ:
-Tento súbor bol príliš veľký na priame odoslanie do agenta.
-Aby nevznikla chyba 413 FUNCTION_PAYLOAD_TOO_LARGE, do API sa neposiela celý binárny dokument.
+  const parts = working.split('.').map((part) => part.trim()).filter(Boolean);
 
-Pre presné spracovanie PDF/DOCX odporúčanie:
-1. vlož text z dokumentu priamo do chatu,
-2. alebo uprav backend /api/chat tak, aby súbor najprv uložil do storage a následne extrahoval text serverovo,
-3. alebo vytvor samostatnú API route na extrakciu textu zo súboru a do agenta posielaj iba extrahovaný text.
+  if (parts.length >= 2) {
+    return parts[1].slice(0, 220);
+  }
 
-Používateľova požiadavka má byť spracovaná podľa aktívneho profilu práce a podľa názvu priloženého dokumentu.`;
+  return null;
+}
 
-  const fallbackFile = createTextFileFromString({
-    text: fallbackText,
-    fileName: `${sanitizeFileName(file.name)}-compressed-info.txt`,
+function looksLikeBibliographicLine(line: string) {
+  const trimmed = line.trim();
+
+  if (trimmed.length < 20) return false;
+
+  const hasYear = /\b(19|20)\d{2}\b|\bn\.d\.\b/i.test(trimmed);
+  const hasDoi = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i.test(trimmed);
+  const hasUrl = /https?:\/\/|www\./i.test(trimmed);
+  const hasCitationWords =
+    /publisher|journal|doi|isbn|vydavateľ|časopis|university|press|jasp|spss|software|available|dostupné|retrieved|vol\.|volume|issue|pages|pp\./i.test(
+      trimmed,
+    );
+  const hasAuthorPattern =
+    /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+,\s*[A-Z]/.test(
+      trimmed,
+    ) ||
+    /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+\s+\([12]\d{3}\)/.test(
+      trimmed,
+    );
+
+  return hasDoi || hasUrl || (hasYear && (hasCitationWords || hasAuthorPattern));
+}
+
+function extractBibliographicCandidates(text: string) {
+  const cleaned = cleanAiOutput(text);
+
+  const lines = cleaned
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const joinedMultilineCandidates: string[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const current = lines[i];
+    const next = lines[i + 1] || '';
+    const next2 = lines[i + 2] || '';
+
+    joinedMultilineCandidates.push(current);
+
+    if (current.length < 180 && next) {
+      joinedMultilineCandidates.push(`${current} ${next}`.trim());
+    }
+
+    if (current.length < 140 && next && next2) {
+      joinedMultilineCandidates.push(`${current} ${next} ${next2}`.trim());
+    }
+  }
+
+  const candidates: BibliographicCandidate[] = [];
+
+  for (const line of joinedMultilineCandidates) {
+    if (!looksLikeBibliographicLine(line)) continue;
+
+    candidates.push({
+      raw: line.slice(0, 1000),
+      authors: extractAuthors(line),
+      year: extractYear(line),
+      title: extractTitle(line),
+      doi: extractDoi(line),
+      url: extractUrl(line),
+      sourceType: detectSourceType(line),
+    });
+  }
+
+  const unique = new Map<string, BibliographicCandidate>();
+
+  for (const item of candidates) {
+    const key = `${item.raw.slice(0, 180)}-${item.doi || ''}-${item.url || ''}`;
+
+    if (!unique.has(key)) {
+      unique.set(key, item);
+    }
+  }
+
+  return Array.from(unique.values()).slice(0, 250);
+}
+
+function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
+  if (!candidates.length) {
+    return 'Neboli automaticky detegované žiadne bibliografické záznamy. Ak sú zdroje v texte, treba ich manuálne overiť alebo doplniť čitateľnejší zoznam literatúry.';
+  }
+
+  return candidates
+    .map((item, index) => {
+      return `${index + 1}. Pôvodný záznam:
+${item.raw}
+
+Autori: ${item.authors.length ? item.authors.join(', ') : 'neuvedené alebo potrebné overiť'}
+Rok: ${item.year || 'údaj je potrebné overiť'}
+Názov publikácie / zdroja: ${item.title || 'údaj je potrebné overiť'}
+Typ zdroja: ${item.sourceType}
+DOI: ${item.doi || 'neuvedené'}
+URL: ${item.url || 'neuvedené'}`;
+    })
+    .join('\n\n');
+}
+
+function normalizeAuthors(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return uniqueArray(value.map((item) => String(item || '')));
+  }
+
+  if (typeof value === 'string') {
+    return uniqueArray(
+      value
+        .split(/\n|,|;|\band\b|\ba\b/gi)
+        .map((item) => item.trim()),
+    );
+  }
+
+  return [];
+}
+
+function normalizeDetectedSources(value: unknown): BibliographicCandidate[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item: any) => ({
+      raw: String(item?.raw || item?.citation || item?.text || '').trim(),
+      authors: normalizeAuthors(item?.authors),
+      year: item?.year ? String(item.year) : null,
+      title: item?.title ? String(item.title) : null,
+      doi: item?.doi ? String(item.doi) : null,
+      url: item?.url ? String(item.url) : null,
+      sourceType:
+        item?.sourceType === 'book' ||
+        item?.sourceType === 'article' ||
+        item?.sourceType === 'web' ||
+        item?.sourceType === 'software' ||
+        item?.sourceType === 'unknown'
+          ? item.sourceType
+          : 'unknown',
+    }))
+    .filter((item) => item.raw || item.authors.length || item.title || item.doi || item.url);
+}
+
+function extractTextFromExtractApi(data: ExtractTextApiResponse) {
+  return cleanAiOutput(
+    String(data.extractedText || data.text || data.content || '').trim(),
+  );
+}
+
+function extractSourcesFromExtractApi(data: ExtractTextApiResponse) {
+  const fromBibliography = normalizeDetectedSources(
+    data.bibliography?.detectedSources,
+  );
+  const fromRoot = normalizeDetectedSources(data.detectedSources);
+
+  return [...fromBibliography, ...fromRoot];
+}
+
+function extractAuthorsFromExtractApi(data: ExtractTextApiResponse) {
+  const bibliographyAuthors = normalizeAuthors(data.bibliography?.authors);
+  const rootAuthors = normalizeAuthors(data.authors);
+
+  return uniqueArray([...bibliographyAuthors, ...rootAuthors]);
+}
+
+function extractFormattedSourcesFromExtractApi(data: ExtractTextApiResponse) {
+  return cleanAiOutput(
+    String(
+      data.bibliography?.formatted ||
+        data.bibliography?.formattedSources ||
+        data.bibliography?.sources ||
+        data.bibliography?.raw ||
+        data.formattedSources ||
+        data.sources ||
+        '',
+    ),
+  );
+}
+
+function mergeSources(sources: BibliographicCandidate[]) {
+  const map = new Map<string, BibliographicCandidate>();
+
+  for (const source of sources) {
+    const key = [
+      source.raw?.slice(0, 180),
+      source.doi || '',
+      source.url || '',
+      source.title || '',
+      source.year || '',
+    ]
+      .join('|')
+      .toLowerCase();
+
+    if (!map.has(key)) {
+      map.set(key, source);
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+function flattenDetectedSources(preparedFiles: PreparedFile[]) {
+  return mergeSources(preparedFiles.flatMap((file) => file.detectedSources || []));
+}
+
+function flattenDetectedAuthors(preparedFiles: PreparedFile[]) {
+  return uniqueArray(preparedFiles.flatMap((file) => file.detectedAuthors || []));
+}
+
+function buildDetectedSourcesSummary(preparedFiles: PreparedFile[]) {
+  if (!preparedFiles.length) {
+    return 'Žiadne prílohy neboli pripravené, preto neboli detegované žiadne zdroje.';
+  }
+
+  const blocks = preparedFiles.map((file, index) => {
+    return `PRÍLOHA ${index + 1}: ${file.originalName}
+Stav extrakcie: ${file.extractionStatus}
+Metóda extrakcie: ${file.extractionMethod || 'neuvedené'}
+Správa extrakcie: ${file.extractionMessage || 'neuvedené'}
+Počet detegovaných bibliografických kandidátov: ${file.detectedSources?.length || 0}
+Autori nájdení v dokumente: ${
+      file.detectedAuthors?.length
+        ? file.detectedAuthors.join(', ')
+        : 'neuvedené alebo potrebné overiť'
+    }
+
+FORMÁTOVANÉ ZDROJE Z EXTRAKČNÉHO ENDPOINTU:
+${file.formattedSources || 'neuvedené'}
+
+AUTOMATICKY DETEGOVANÉ BIBLIOGRAFICKÉ KANDIDÁTY:
+${formatBibliographicCandidates(file.detectedSources || [])}`;
   });
 
+  return blocks.join('\n\n--------------------\n\n');
+}
+
+function buildFallbackSourcesSection(preparedFiles: PreparedFile[]) {
+  const allSources = flattenDetectedSources(preparedFiles);
+  const allAuthors = flattenDetectedAuthors(preparedFiles);
+
+  return `A. Detegované zdroje z extrahovaného textu
+${formatBibliographicCandidates(allSources)}
+
+B. Autori nájdení v dokumentoch
+${allAuthors.length ? allAuthors.join(', ') : 'Autori neboli automaticky identifikovaní alebo ich treba overiť.'}
+
+C. Formátované bibliografické záznamy
+${formatBibliographicCandidates(allSources)}
+
+D. Priložené dokumenty použité ako podklad
+${
+  preparedFiles.length
+    ? preparedFiles.map((file, index) => `${index + 1}. ${file.originalName}`).join('\n')
+    : 'Neboli priložené žiadne dokumenty.'
+}
+
+E. Neúplné alebo neoveriteľné zdroje
+Pri záznamoch, kde chýba autor, rok, názov, DOI alebo URL, je potrebné údaj overiť podľa pôvodného dokumentu.
+
+F. AI odporúčané zdroje na doplnenie
+Ak sú uvedené zdroje nedostatočné, odporúča sa doplniť odborné databázy, knižničné katalógy, vedecké články a overené publikácie podľa témy práce.`;
+}
+
+// ================= API CALLS =================
+
+async function callExtractTextApi({
+  file,
+  fileName,
+  originalName,
+  compressed,
+}: {
+  file: File;
+  fileName: string;
+  originalName: string;
+  compressed: boolean;
+}) {
+  const formData = new FormData();
+
+  formData.append('file', file, fileName);
+  formData.append('fileName', fileName);
+  formData.append('originalName', originalName);
+  formData.append('isCompressed', compressed ? 'true' : 'false');
+  formData.append('mustDecompressBeforeExtraction', compressed ? 'true' : 'false');
+  formData.append('detectBibliographicSources', 'true');
+  formData.append('requireAuthorsAndPublications', 'true');
+
+  const res = await fetch('/api/extract-text', {
+    method: 'POST',
+    body: formData,
+  });
+
+  const contentType = res.headers.get('content-type') || '';
+
+  let data: ExtractTextApiResponse;
+
+  if (contentType.includes('application/json')) {
+    data = await res.json();
+  } else {
+    const errorText = await res.text();
+    throw new Error(
+      errorText || `Extrakčný endpoint vrátil neplatnú odpoveď ${res.status}.`,
+    );
+  }
+
+  if (!res.ok || data.ok === false) {
+    throw new Error(
+      data.error ||
+        data.message ||
+        `Extrakcia zlyhala pre súbor ${originalName}.`,
+    );
+  }
+
+  const extractedText = extractTextFromExtractApi(data);
+
+  if (!extractedText.trim()) {
+    throw new Error(
+      data.message ||
+        `Extrakcia prebehla, ale text zo súboru ${originalName} je prázdny.`,
+    );
+  }
+
+  const apiDetectedSources = extractSourcesFromExtractApi(data);
+  const apiAuthors = extractAuthorsFromExtractApi(data);
+  const apiFormattedSources = extractFormattedSourcesFromExtractApi(data);
+  const localDetectedSources = extractBibliographicCandidates(extractedText);
+
+  const mergedSources = mergeSources([...apiDetectedSources, ...localDetectedSources]);
+  const mergedAuthors = uniqueArray([
+    ...apiAuthors,
+    ...mergedSources.flatMap((source) => source.authors || []),
+  ]);
+
   return {
-    apiFile: fallbackFile,
-    compressed: true,
-    note: `Súbor ${file.name} mal ${formatBytes(
-      file.size,
-    )}. Do API sa posiela bezpečný textový zástupca do 1 MB.`,
+    extractedText,
+    method: data.method || 'extract-text',
+    message: data.message || 'Text bol úspešne extrahovaný.',
+    detectedSources: mergedSources,
+    detectedAuthors: mergedAuthors,
+    formattedSources: apiFormattedSources,
+    meta: data.meta || {},
   };
 }
 
-async function prepareFilesForApi(files: AttachedFile[]) {
-  const prepared: AttachedFile[] = [];
+// ================= CONTEXT BUILDERS =================
 
-  for (const item of files) {
-    const compressed = await compressFileForApi(item.file);
+function buildExtractedContext(preparedFiles: PreparedFile[]) {
+  const blocks: string[] = [];
 
-    prepared.push({
-      ...item,
-      apiFile: compressed.apiFile,
-      apiSize: compressed.apiFile.size,
-      compressed: compressed.compressed,
-      compressionNote: compressed.note,
-    });
+  for (const item of preparedFiles) {
+    if (!item.extractedText?.trim()) continue;
+
+    blocks.push(`
+=== EXTRAHOVANÝ TEXT Z PRÍLOHY ===
+Súbor: ${item.originalName}
+Pôvodná veľkosť: ${formatBytes(item.originalSize)}
+Komprimovaná veľkosť: ${formatBytes(item.preparedSize)}
+Stav extrakcie: ${item.extractionStatus}
+Metóda extrakcie: ${item.extractionMethod || 'neuvedené'}
+Správa extrakcie: ${item.extractionMessage || 'neuvedené'}
+Počet detegovaných zdrojov: ${item.detectedSources?.length || 0}
+Autori nájdení v dokumente: ${
+      item.detectedAuthors.length
+        ? item.detectedAuthors.join(', ')
+        : 'neuvedené alebo potrebné overiť'
+    }
+
+FORMÁTOVANÉ ZDROJE Z EXTRAKČNÉHO ENDPOINTU:
+${item.formattedSources || 'neuvedené'}
+
+DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE:
+${formatBibliographicCandidates(item.detectedSources || [])}
+
+TEXT PRÍLOHY:
+${truncateByChars(item.extractedText, maxClientExtractedCharsPerFile)}
+`.trim());
   }
 
-  return prepared;
+  const full = blocks.join('\n\n');
+
+  return truncateByChars(full, maxTotalExtractedContextChars);
+}
+
+function buildPreparedFilesSummary(preparedFiles: PreparedFile[]) {
+  if (!preparedFiles.length) {
+    return 'Žiadne prílohy neboli pripravené na odoslanie.';
+  }
+
+  return preparedFiles
+    .map((item, index) => {
+      return `${index + 1}. ${item.originalName}
+- Pôvodná veľkosť: ${formatBytes(item.originalSize)}
+- Po kompresii / príprave: ${formatBytes(item.preparedSize)}
+- Režim kompresie: ${item.compressionMode}
+- Stav extrakcie: ${item.extractionStatus}
+- Metóda extrakcie: ${item.extractionMethod || 'neuvedené'}
+- Detegované zdroje: ${item.detectedSources?.length || 0}
+- Detegovaní autori: ${
+        item.detectedAuthors?.length ? item.detectedAuthors.join(', ') : 'neuvedené'
+      }
+- Upozornenie: ${item.warning || 'bez upozornenia'}`;
+    })
+    .join('\n\n');
 }
 
 // ================= PAGE =================
@@ -713,6 +1315,7 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [processingLog, setProcessingLog] = useState<ProcessingLogItem[]>([]);
   const [isListening, setIsListening] = useState(false);
 
   const [canvasOpen, setCanvasOpen] = useState(false);
@@ -727,7 +1330,6 @@ export default function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const resultTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const canvasTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -775,7 +1377,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, processingLog]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -791,6 +1393,191 @@ export default function ChatPage() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  const updateProcessingLog = (
+    id: string,
+    patch: Partial<ProcessingLogItem>,
+  ) => {
+    setProcessingLog((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+    );
+  };
+
+  const prepareFilesBeforeSend = async (files: AttachedFile[]) => {
+    if (!files.length) return [];
+
+    setProcessingLog(
+      files.map((file) => ({
+        id: file.id,
+        name: file.name,
+        status: 'waiting',
+        message: 'Čaká na kompresiu a extrakciu cez /api/extract-text.',
+        originalSize: file.size,
+      })),
+    );
+
+    const preparedFiles: PreparedFile[] = [];
+
+    for (const item of files) {
+      try {
+        updateProcessingLog(item.id, {
+          status: 'compressing',
+          message: 'Komprimujem súbor na pozadí pred extrakciou.',
+        });
+
+        const gzipBlobResult = await gzipBlob(item.file);
+
+        const preparedName = `${item.name}.gz`;
+        const preparedFile = new File([gzipBlobResult], preparedName, {
+          type: window.CompressionStream
+            ? 'application/gzip'
+            : item.type || 'application/octet-stream',
+        });
+
+        updateProcessingLog(item.id, {
+          status: 'compressed',
+          message: `Súbor bol komprimovaný na ${formatBytes(
+            preparedFile.size,
+          )}. Spúšťam extrakciu cez /api/extract-text.`,
+          preparedSize: preparedFile.size,
+          warning:
+            preparedFile.size > maxCompressedFileSizeBytes
+              ? `Kompresia má ${formatBytes(
+                  preparedFile.size,
+                )}, čo je viac ako 1 MB. Napriek tomu sa súbor posiela na /api/extract-text, aby server skúsil rozbalenie a extrakciu.`
+              : undefined,
+        });
+
+        updateProcessingLog(item.id, {
+          status: 'extracting',
+          message:
+            'Volám /api/extract-text. Endpoint má rozbaliť komprimovaný súbor, extrahovať text a vrátiť autorov a publikácie.',
+          preparedSize: preparedFile.size,
+        });
+
+        let extraction;
+        let usedCompressed = false;
+
+        try {
+          extraction = await callExtractTextApi({
+            file: preparedFile,
+            fileName: preparedName,
+            originalName: item.name,
+            compressed: true,
+          });
+          usedCompressed = true;
+        } catch (compressedError) {
+          updateProcessingLog(item.id, {
+            status: 'extracting',
+            message:
+              'Extrakcia z komprimovaného súboru zlyhala. Skúšam fallback: odoslať pôvodný súbor do /api/extract-text.',
+            warning:
+              compressedError instanceof Error
+                ? compressedError.message
+                : 'Extrakcia z komprimovaného súboru zlyhala.',
+          });
+
+          extraction = await callExtractTextApi({
+            file: item.file,
+            fileName: item.name,
+            originalName: item.name,
+            compressed: false,
+          });
+          usedCompressed = false;
+        }
+
+        const extractedText = truncateByChars(
+          extraction.extractedText,
+          maxClientExtractedCharsPerFile,
+        );
+
+        updateProcessingLog(item.id, {
+          status: 'extracted',
+          message: `Text bol extrahovaný cez /api/extract-text. Znaky: ${extractedText.length}. Detegované zdroje: ${extraction.detectedSources.length}. Autori: ${extraction.detectedAuthors.length}.`,
+          preparedSize: usedCompressed ? preparedFile.size : item.size,
+          extractedChars: extractedText.length,
+          detectedSourcesCount: extraction.detectedSources.length,
+          detectedAuthorsCount: extraction.detectedAuthors.length,
+        });
+
+        preparedFiles.push({
+          originalId: item.id,
+          originalName: item.name,
+          originalSize: item.size,
+          originalType: item.type,
+          preparedName: usedCompressed ? preparedName : item.name,
+          preparedSize: usedCompressed ? preparedFile.size : item.size,
+          preparedType: usedCompressed
+            ? preparedFile.type
+            : item.type || 'application/octet-stream',
+          compressionMode: usedCompressed ? 'gzip_original' : 'raw_small_text',
+          file: usedCompressed ? preparedFile : item.file,
+          extractedText,
+          extractionMethod: extraction.method,
+          extractionMessage: extraction.message,
+          detectedSources: extraction.detectedSources,
+          detectedAuthors: extraction.detectedAuthors,
+          formattedSources: extraction.formattedSources,
+          extractionStatus: 'client_extracted',
+          warning:
+            usedCompressed && preparedFile.size > maxCompressedFileSizeBytes
+              ? 'Súbor bol komprimovaný, ale po kompresii má viac ako 1 MB. Extrakcia sa napriek tomu podarila cez /api/extract-text.'
+              : undefined,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Nepodarilo sa pripraviť alebo extrahovať súbor.';
+
+        updateProcessingLog(item.id, {
+          status: 'error',
+          message,
+          warning: message,
+        });
+
+        const metadataText = `
+NÁZOV SÚBORU: ${item.name}
+TYP: ${item.type || 'nezistený'}
+DRUH: ${getFileKindLabel(item.name)}
+PÔVODNÁ VEĽKOSŤ: ${formatBytes(item.size)}
+STAV EXTRAKCIE: Extrakcia cez /api/extract-text zlyhala.
+CHYBA: ${message}
+
+POKYNY PRE AI:
+- Nevymýšľaj obsah, autorov, publikácie, citácie ani zdroje.
+- Jasne uveď, že obsah prílohy sa nepodarilo overene načítať.
+`.trim();
+
+        const fallbackFile = await createGzipTextFile({
+          text: metadataText,
+          fileName: `${item.name}.failed-metadata.txt.gz`,
+        });
+
+        preparedFiles.push({
+          originalId: item.id,
+          originalName: item.name,
+          originalSize: item.size,
+          originalType: item.type,
+          preparedName: fallbackFile.name,
+          preparedSize: fallbackFile.size,
+          preparedType: fallbackFile.type,
+          compressionMode: 'gzip_metadata_only',
+          file: fallbackFile,
+          extractedText: metadataText,
+          extractionMethod: 'failed',
+          extractionMessage: message,
+          detectedSources: [],
+          detectedAuthors: [],
+          formattedSources: '',
+          extractionStatus: 'failed',
+          warning: message,
+        });
+      }
+    }
+
+    return preparedFiles;
+  };
+
   const handleFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
@@ -800,20 +1587,14 @@ export default function ChatPage() {
     for (const file of incomingFiles) {
       if (!isAllowedUploadFile(file)) {
         alert(
-          `Súbor "${file.name}" má nepodporovaný formát.
-
-Povolené formáty:
-PDF, DOC, DOCX, TXT, RTF, ODT, MD, JPG, PNG, WEBP, GIF, XLS, XLSX, CSV, PPT, PPTX.`,
+          `Súbor "${file.name}" má nepodporovaný formát.\n\nPovolené formáty:\nPDF, DOC, DOCX, TXT, RTF, ODT, MD, JPG, PNG, WEBP, GIF, XLS, XLSX, CSV, PPT, PPTX.`,
         );
         continue;
       }
 
       if (file.size > maxFileSizeBytes) {
         alert(
-          `Súbor "${file.name}" je príliš veľký.
-
-Maximálna veľkosť jedného súboru je ${maxFileSizeMb} MB.
-Tento súbor má ${formatBytes(file.size)}.`,
+          `Súbor "${file.name}" je príliš veľký.\n\nMaximálna veľkosť jedného súboru je ${maxFileSizeMb} MB.\nTento súbor má ${formatBytes(file.size)}.`,
         );
         continue;
       }
@@ -825,13 +1606,6 @@ Tento súbor má ${formatBytes(file.size)}.`,
         type: file.type || 'application/octet-stream',
         uploadedAt: new Date().toISOString(),
         file,
-        apiFile: undefined,
-        apiSize: undefined,
-        compressed: file.size > maxApiFileSizeBytes,
-        compressionNote:
-          file.size > maxApiFileSizeBytes
-            ? `Súbor bude pred odoslaním do agenta automaticky zmenšený na max. ${maxApiFileSizeMb} MB.`
-            : 'Súbor je menší ako limit pre API.',
       });
     }
 
@@ -843,9 +1617,7 @@ Tento súbor má ${formatBytes(file.size)}.`,
       for (const file of validFiles) {
         if (next.length >= maxFilesCount) {
           alert(
-            `Dosiahnutý limit príloh.
-
-Maximálny počet súborov je ${maxFilesCount}.`,
+            `Dosiahnutý limit príloh.\n\nMaximálny počet súborov je ${maxFilesCount}.`,
           );
           break;
         }
@@ -860,6 +1632,8 @@ Maximálny počet súborov je ${maxFilesCount}.`,
       return next;
     });
 
+    setProcessingLog([]);
+
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -867,6 +1641,7 @@ Maximálny počet súborov je ${maxFilesCount}.`,
 
   const removeFile = (id: string) => {
     setAttachedFiles((prev) => prev.filter((file) => file.id !== id));
+    setProcessingLog((prev) => prev.filter((item) => item.id !== id));
   };
 
   const startDictation = () => {
@@ -949,8 +1724,18 @@ Maximálny počet súborov je ${maxFilesCount}.`,
     }, 400);
   };
 
-  const buildFinalUserPrompt = (apiUserText: string) => {
+  const buildFinalUserPrompt = ({
+    apiUserText,
+    preparedFiles,
+    extractedContext,
+  }: {
+    apiUserText: string;
+    preparedFiles: PreparedFile[];
+    extractedContext: string;
+  }) => {
     const citationStyle = activeProfile?.citation || 'ISO 690';
+    const detectedSourcesSummary = buildDetectedSourcesSummary(preparedFiles);
+    const allAuthors = flattenDetectedAuthors(preparedFiles);
 
     return `
 ${apiUserText.trim() || 'Spracuj priložené dokumenty podľa aktívneho profilu práce.'}
@@ -970,15 +1755,33 @@ AKTÍVNY PROFIL PRÁCE:
 PRILOŽENÉ DOKUMENTY:
 ${buildAttachmentPrompt(attachedFiles)}
 
-POVINNÉ PRAVIDLÁ:
-1. Najprv použi extrahovaný text z priložených dokumentov.
-2. Nevymýšľaj zdroje, autorov, roky, DOI, URL, názvy článkov ani vydavateľov.
-3. Ak údaj chýba, napíš: údaj je potrebné overiť.
-4. Ak sú priložené dokumenty, na konci vždy uveď, z ktorých príloh si čerpal.
-5. Ak používateľ žiada citácie, zdroje alebo bibliografiu, výstup priprav podľa citačnej normy: ${citationStyle}.
-6. Pri Mistral, Claude, Gemini, OpenAI aj Grok vždy vypíš aj sekciu POUŽITÉ ZDROJE A AUTORI.
-7. Výstup píš bez markdown znakov #, ##, ###, **, ---.
-8. Ak bol veľký súbor nahradený komprimovaným textovým zástupcom, jasne uveď, že celý obsah súboru nemusí byť dostupný.
+STAV KOMPRESIE A EXTRAKCIE CEZ /api/extract-text:
+${buildPreparedFilesSummary(preparedFiles)}
+
+VŠETCI AUTOMATICKY NÁJDENÍ AUTORI:
+${allAuthors.length ? allAuthors.join(', ') : 'Autori neboli automaticky identifikovaní alebo ich treba overiť.'}
+
+DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE:
+${truncateByChars(detectedSourcesSummary, 25_000)}
+
+EXTRAHOVANÝ TEXT Z PRÍLOH:
+${extractedContext.trim() || 'Text z príloh nebol dostupný. Ak extrakcia zlyhala, nevymýšľaj obsah, autorov ani zdroje.'}
+
+POVINNÉ PRAVIDLÁ SPRACOVANIA:
+1. Najprv pracuj s extrahovaným textom z /api/extract-text.
+2. /api/extract-text je technický zdroj pravdy pre text príloh.
+3. Ak sú v extrahovanom texte detegované zdroje, autori, DOI, URL alebo publikácie, musíš ich vypísať.
+4. Ak sú uvedení autori v časti VŠETCI AUTOMATICKY NÁJDENÍ AUTORI, musíš ich uviesť v časti POUŽITÉ ZDROJE A AUTORI.
+5. Ak bibliografické údaje nie sú úplné, vypíš dostupné údaje a pri chýbajúcich napíš: údaj je potrebné overiť.
+6. Nevymýšľaj zdroje, autorov, roky, DOI, URL, názvy článkov ani vydavateľov.
+7. Ak príloha súvisí s témou práce, použi ju ako hlavný zdroj.
+8. Ak príloha nesúvisí s témou práce, napíš to jasne do časti ANALÝZA a prílohu nepoužívaj ako odborný zdroj.
+9. Ak používateľ žiada citácie, zdroje alebo bibliografiu, výstup priprav podľa citačnej normy: ${citationStyle}.
+10. Vždy vypíš sekciu POUŽITÉ ZDROJE A AUTORI.
+11. Výstup píš bez markdown znakov #, ##, ###, **, ---.
+12. Ak sa extrakcia nepodarila, nevymýšľaj obsah súboru. Uveď, že obsah prílohy sa nepodarilo overene načítať.
+13. Ak sú zdroje v texte, nesmieš napísať „Zdroje neboli dodané“.
+14. Sekciu zdrojov vždy začni presne nadpisom: === POUŽITÉ ZDROJE A AUTORI ===
 
 VÝSTUP VRÁŤ PRESNE V TOMTO FORMÁTE:
 
@@ -986,7 +1789,13 @@ VÝSTUP VRÁŤ PRESNE V TOMTO FORMÁTE:
 Sem napíš hlavný výstup.
 
 === ANALÝZA ===
-Stručne vysvetli, ako si postupoval a z čoho si vychádzal.
+Stručne vysvetli:
+- či sa príloha podarila komprimovať,
+- či sa podarila extrakcia textu cez /api/extract-text,
+- či boli automaticky detegované zdroje, autori a publikácie,
+- či príloha súvisí s profilom práce,
+- z čoho si vychádzal,
+- ktoré prílohy boli použité a ktoré neboli použité.
 
 === SKÓRE ===
 Uveď orientačné skóre kvality odpovede alebo extrakcie v percentách.
@@ -995,8 +1804,14 @@ Uveď orientačné skóre kvality odpovede alebo extrakcie v percentách.
 Uveď konkrétne odporúčania, čo má používateľ doplniť alebo overiť.
 
 === POUŽITÉ ZDROJE A AUTORI ===
-Vypíš všetky identifikované zdroje, autorov, názvy dokumentov, roky, DOI, URL alebo napíš:
-Zdroje neboli dodané alebo sa ich nepodarilo overene načítať.
+A. Detegované zdroje z extrahovaného textu
+B. Autori nájdení v dokumentoch
+C. Formátované bibliografické záznamy
+D. Priložené dokumenty použité ako podklad
+E. Neúplné alebo neoveriteľné zdroje
+F. AI odporúčané zdroje na doplnenie
+
+Ak boli v texte nájdené zdroje, autori, DOI alebo URL, vypíš ich. Ak údaje chýbajú, napíš: údaj je potrebné overiť. Zdroje nevymýšľaj.
 `.trim();
   };
 
@@ -1033,30 +1848,43 @@ Zdroje neboli dodané alebo sa ich nepodarilo overene načítať.
         `Spracuj priložené dokumenty (${attachedFiles.length})`,
     };
 
-    const nextVisibleMessages = [...messages, visibleMessage];
-
-    setMessages(nextVisibleMessages);
+    setMessages((prev) => [...prev, visibleMessage]);
     setInput('');
     setIsLoading(true);
     setPopup(false);
     setPopupData(null);
 
     try {
-      const finalPrompt = buildFinalUserPrompt(apiUserText);
+      const preparedFiles = await prepareFilesBeforeSend(attachedFiles);
+      const extractedContext = buildExtractedContext(preparedFiles);
+      const detectedSourcesSummary = buildDetectedSourcesSummary(preparedFiles);
+      const detectedSources = flattenDetectedSources(preparedFiles).slice(
+        0,
+        maxDetectedSourcesForChat,
+      );
+      const detectedAuthors = flattenDetectedAuthors(preparedFiles).slice(
+        0,
+        maxDetectedAuthorsForChat,
+      );
 
+      const finalPrompt = buildFinalUserPrompt({
+        apiUserText,
+        preparedFiles,
+        extractedContext,
+      });
+
+      // Dôležité: neposielať starú históriu správ, aby nespadol context window
       const apiMessages = [
-        ...messages,
         {
           role: 'user' as const,
           content: finalPrompt,
         },
       ];
 
-      const apiReadyFiles = await prepareFilesForApi(attachedFiles);
-
       const formData = new FormData();
 
       formData.append('agent', agent);
+      formData.append('module', 'chat');
       formData.append('messages', JSON.stringify(apiMessages));
       formData.append('profile', JSON.stringify(activeProfile || null));
 
@@ -1068,34 +1896,79 @@ Zdroje neboli dodané alebo sa ich nepodarilo overene načítať.
       formData.append('validateAttachmentsAgainstProfile', 'true');
       formData.append('requireSourceList', 'true');
       formData.append('allowAiKnowledgeFallback', 'true');
-      formData.append('extractUploadedText', 'true');
+
+      // Dôležité: extrakcia už prebehla cez /api/extract-text, /api/chat už nemá extrahovať znova
+      formData.append('extractUploadedText', 'false');
       formData.append('useExtractedTextFirst', 'true');
       formData.append('returnExtractedFilesInfo', 'true');
       formData.append('contextaCitationFormat', 'true');
+      formData.append('fallbackWhenAttachmentNotRelated', 'true');
+      formData.append('detectBibliographicSources', 'true');
+      formData.append('requireAllDetectedAuthorsAndPublications', 'true');
+
+      // Dôležité: neposielať celý extractedContext duplicitne mimo finalPrompt
+      formData.append('clientExtractedText', '');
+      formData.append('clientDetectedSourcesSummary', detectedSourcesSummary);
+      formData.append('clientDetectedSources', JSON.stringify(detectedSources));
+      formData.append('clientDetectedAuthors', JSON.stringify(detectedAuthors));
+      formData.append(
+        'preparedFilesSummary',
+        buildPreparedFilesSummary(preparedFiles),
+      );
 
       formData.append(
         'filesMetadata',
         JSON.stringify(
-          apiReadyFiles.map((item) => ({
+          attachedFiles.map((item) => ({
+            id: item.id,
             name: item.name,
-            originalSize: item.size,
-            apiSize: item.apiSize || item.apiFile?.size || item.size,
+            size: item.size,
             type: item.type,
             kind: getFileKindLabel(item.name),
             extractable: isTextExtractableFile(item.name),
             uploadedAt: item.uploadedAt,
-            compressed: Boolean(item.compressed),
-            compressionNote: item.compressionNote || '',
-            apiFileName: item.apiFile?.name || item.name,
           })),
         ),
       );
 
-      apiReadyFiles.forEach((item) => {
-        const fileForApi = item.apiFile || item.file;
+      formData.append(
+        'preparedFilesMetadata',
+        JSON.stringify(
+          preparedFiles.map((item) => ({
+            originalId: item.originalId,
+            originalName: item.originalName,
+            originalSize: item.originalSize,
+            originalType: item.originalType,
+            preparedName: item.preparedName,
+            preparedSize: item.preparedSize,
+            preparedType: item.preparedType,
+            compressionMode: item.compressionMode,
+            extractionStatus: item.extractionStatus,
+            extractionMethod: item.extractionMethod,
+            extractionMessage: item.extractionMessage,
+            detectedSourcesCount: item.detectedSources?.length || 0,
+            detectedSources: item.detectedSources || [],
+            detectedAuthors: item.detectedAuthors || [],
+            formattedSources: item.formattedSources || '',
+            warning: item.warning || '',
+          })),
+        ),
+      );
 
-        formData.append('files', fileForApi, fileForApi.name);
-      });
+      setProcessingLog((prev) =>
+        prev.map((item) =>
+          item.status === 'ready' ||
+          item.status === 'extracted' ||
+          item.status === 'metadata_only'
+            ? {
+                ...item,
+                status: 'ready',
+                message:
+                  item.message + ' Hotový extrahovaný text odosielam do /api/chat.',
+              }
+            : item,
+        ),
+      );
 
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -1107,7 +1980,7 @@ Zdroje neboli dodané alebo sa ich nepodarilo overene načítať.
 
         const modelHelp =
           agent === 'claude'
-            ? '\n\nClaude API chyba znamená najčastejšie zlý ANTHROPIC_API_KEY, zlý názov modelu alebo nenastavený billing v Anthropic konzole.'
+            ? '\n\nClaude API chyba znamená najčastejšie zlý ANTHROPIC_API_KEY, zlý názov modelu, context window limit alebo nenastavený billing v Anthropic konzole.'
             : agent === 'grok'
               ? '\n\nGrok API chyba znamená najčastejšie, že xAI účet nemá kredity alebo licenciu.'
               : agent === 'mistral'
@@ -1215,35 +2088,46 @@ ${data.message || data.error || 'Neznáma chyba API.'}`,
       const cleanedFullText = cleanAiOutput(fullText);
       const parsed = parseSections(cleanedFullText);
 
+      const fallbackSources = buildFallbackSourcesSection(preparedFiles);
+
+      const finalSources =
+        parsed.sources &&
+        !parsed.sources.toLowerCase().includes('zdroje neboli dodané')
+          ? parsed.sources
+          : fallbackSources;
+
       const finalTextForCanvas = [
         parsed.output || cleanedFullText,
-        parsed.sources
-          ? `\n\nPoužité zdroje a autori\n\n${parsed.sources}`
-          : '',
+        `\n\nPoužité zdroje a autori\n\n${finalSources}`,
       ]
         .join('')
         .trim();
+
+      const finalParsed: ParsedResult = {
+        ...parsed,
+        sources: finalSources,
+      };
 
       setResult(finalTextForCanvas);
       setCanvasText(finalTextForCanvas);
 
       const looksLikeError =
-        parsed.output.includes('AI_APICallError') ||
-        parsed.output.includes('API error') ||
-        parsed.output.includes('model is not found') ||
-        parsed.output.includes('not found for API version') ||
-        parsed.output.includes('Forbidden') ||
-        parsed.output.includes('Unauthorized');
+        finalParsed.output.includes('AI_APICallError') ||
+        finalParsed.output.includes('API error') ||
+        finalParsed.output.includes('model is not found') ||
+        finalParsed.output.includes('not found for API version') ||
+        finalParsed.output.includes('Forbidden') ||
+        finalParsed.output.includes('Unauthorized');
 
       if (
         !looksLikeError &&
-        (parsed.output ||
-          parsed.analysis ||
-          parsed.score ||
-          parsed.tips ||
-          parsed.sources)
+        (finalParsed.output ||
+          finalParsed.analysis ||
+          finalParsed.score ||
+          finalParsed.tips ||
+          finalParsed.sources)
       ) {
-        setPopupData(parsed);
+        setPopupData(finalParsed);
         setPopup(true);
       }
     } catch (error) {
@@ -1259,7 +2143,7 @@ ${data.message || data.error || 'Neznáma chyba API.'}`,
 
 ${message}
 
-Skontroluj terminál pri /api/chat.`,
+Skontroluj terminál pri /api/extract-text a /api/chat.`,
       );
     } finally {
       setIsLoading(false);
@@ -1292,6 +2176,7 @@ Skontroluj terminál pri /api/chat.`,
     setPopup(false);
     setPopupData(null);
     setSelectedTextState(null);
+    setProcessingLog([]);
 
     if (scrollAreaRef.current) {
       scrollAreaRef.current.scrollTop = 0;
@@ -1482,7 +2367,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
 
       <div className="flex h-screen min-h-0 w-full overflow-hidden bg-[#050711] text-white">
         <div className="mx-auto flex h-screen min-h-0 w-full max-w-[1500px] flex-col overflow-hidden px-4 py-3 md:px-8">
-          {/* TOP BAR */}
           <header className="shrink-0 border-b border-white/10 pb-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <button
@@ -1505,7 +2389,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
             </div>
           </header>
 
-          {/* PROFILE WARNING */}
           {!activeProfile && (
             <div className="mt-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
               <div className="flex items-start gap-2">
@@ -1520,7 +2403,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
             </div>
           )}
 
-          {/* ACTIVE PROFILE */}
           <section className="shrink-0 py-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
@@ -1532,12 +2414,11 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
 
               <div className="rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-3 text-xs font-bold text-violet-100">
                 Prílohy: max. {maxFilesCount} súborov, max. {maxFileSizeMb} MB
-                na súbor · do agenta sa odosiela max. {maxApiFileSizeMb} MB
+                na súbor, najprv extrakcia cez /api/extract-text
               </div>
             </div>
           </section>
 
-          {/* CHAT */}
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[30px] border border-white/10 bg-[#070a16] shadow-2xl shadow-black/30">
             <div
               ref={scrollAreaRef}
@@ -1608,6 +2489,88 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                     </div>
                   ))}
 
+                  {processingLog.length > 0 && isLoading && (
+                    <div className="rounded-3xl border border-violet-400/20 bg-violet-500/10 p-4">
+                      <div className="mb-3 flex items-center gap-2 text-sm font-black text-violet-100">
+                        <UploadCloud className="h-4 w-4" />
+                        Kompresia, extrakcia cez /api/extract-text a detekcia
+                        zdrojov
+                      </div>
+
+                      <div className="space-y-2">
+                        {processingLog.map((item) => (
+                          <div
+                            key={item.id}
+                            className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-slate-300"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="font-black text-white">
+                                {item.name}
+                              </div>
+
+                              <div
+                                className={`rounded-xl px-3 py-1 text-[10px] font-black uppercase ${
+                                  item.status === 'error'
+                                    ? 'bg-red-500/20 text-red-100'
+                                    : item.status === 'extracted' ||
+                                        item.status === 'ready'
+                                      ? 'bg-emerald-500/20 text-emerald-100'
+                                      : item.status === 'metadata_only'
+                                        ? 'bg-amber-500/20 text-amber-100'
+                                        : 'bg-violet-500/20 text-violet-100'
+                                }`}
+                              >
+                                {item.status}
+                              </div>
+                            </div>
+
+                            <div className="mt-1 leading-5 text-slate-400">
+                              {item.message}
+                            </div>
+
+                            <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                              {item.originalSize ? (
+                                <span>
+                                  pôvodne: {formatBytes(item.originalSize)}
+                                </span>
+                              ) : null}
+
+                              {item.preparedSize ? (
+                                <span>
+                                  po príprave: {formatBytes(item.preparedSize)}
+                                </span>
+                              ) : null}
+
+                              {typeof item.extractedChars === 'number' ? (
+                                <span>
+                                  extrahované znaky: {item.extractedChars}
+                                </span>
+                              ) : null}
+
+                              {typeof item.detectedSourcesCount === 'number' ? (
+                                <span>
+                                  detegované zdroje: {item.detectedSourcesCount}
+                                </span>
+                              ) : null}
+
+                              {typeof item.detectedAuthorsCount === 'number' ? (
+                                <span>
+                                  autori: {item.detectedAuthorsCount}
+                                </span>
+                              ) : null}
+                            </div>
+
+                            {item.warning ? (
+                              <div className="mt-2 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
+                                {item.warning}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {isLoading && (
                     <div className="flex justify-start">
                       <div className="rounded-3xl border border-white/10 bg-white/[0.065] px-5 py-4 text-sm font-bold text-violet-200">
@@ -1621,15 +2584,15 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
               )}
             </div>
 
-            {/* COMPOSER */}
             <div className="shrink-0 border-t border-white/10 bg-[#070a16]/95 px-4 py-3 backdrop-blur md:px-8">
               <div className="mx-auto max-w-6xl rounded-[28px] border border-violet-500/40 bg-violet-950/30 p-3 shadow-2xl shadow-violet-950/40">
                 {attachedFiles.length > 0 && (
-                  <div className="mb-3 max-h-[80px] overflow-y-auto rounded-2xl border border-white/10 bg-black/20 p-2">
+                  <div className="mb-3 max-h-[110px] overflow-y-auto rounded-2xl border border-white/10 bg-black/20 p-2">
                     <div className="mb-2 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.15em] text-slate-400">
                       <UploadCloud className="h-4 w-4 text-violet-300" />
                       Pripojené podklady ({attachedFiles.length}/
-                      {maxFilesCount})
+                      {maxFilesCount}) – najprv sa spracujú cez
+                      /api/extract-text
                     </div>
 
                     <div className="flex flex-wrap gap-2">
@@ -1651,12 +2614,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                           <span className="shrink-0 text-[11px] text-violet-200/70">
                             {formatBytes(file.size)}
                           </span>
-
-                          {file.size > maxApiFileSizeBytes && (
-                            <span className="shrink-0 rounded-lg border border-amber-400/30 bg-amber-500/15 px-2 py-1 text-[10px] font-black text-amber-100">
-                              API kompresia na 1 MB
-                            </span>
-                          )}
 
                           <button
                             type="button"
@@ -1735,7 +2692,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                   </button>
 
                   <textarea
-                    ref={textareaRef}
                     value={input}
                     rows={2}
                     onChange={(event) => setInput(event.target.value)}
@@ -1780,7 +2736,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
             </div>
           </div>
 
-          {/* SELECTED TEXT TOOLBAR */}
           {selectedTextState && (
             <div className="fixed bottom-6 left-1/2 z-[80] w-[calc(100%-32px)] max-w-4xl -translate-x-1/2 rounded-3xl border border-violet-400/30 bg-[#0b1020] p-4 shadow-2xl shadow-black/40">
               <div className="mb-3 flex items-start justify-between gap-3">
@@ -1842,7 +2797,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
             </div>
           )}
 
-          {/* RESULT EDITOR */}
           {result && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
               <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
@@ -1941,7 +2895,7 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                       </h3>
                       <div className="whitespace-pre-wrap text-sm leading-6 text-emerald-50/90">
                         {popupData?.sources ||
-                          'Zdroje neboli v odpovedi samostatne vypísané.'}
+                          'Zdroje neboli dodané alebo sa ich nepodarilo overene načítať.'}
                       </div>
                     </div>
                   </div>
@@ -1950,7 +2904,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
             </div>
           )}
 
-          {/* CANVAS */}
           {canvasOpen && (
             <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">
               <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">

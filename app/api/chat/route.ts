@@ -427,6 +427,39 @@ function getEffectiveExtension(fileName: string) {
   return getFileExtension(getEffectiveFileName(fileName));
 }
 
+function isLikelyChapterRequestText(text: string) {
+  const normalized = normalizeText(text).toLowerCase();
+
+  return (
+    /\bkapitola\s+\d+(?:\.\d+)*\b/i.test(normalized) ||
+    /^\s*\d+(?:\.\d+)+\s*[:.-]?\s*/i.test(normalized) ||
+    normalized.includes('šablóna vyššie') ||
+    normalized.includes('identická štruktúra') ||
+    normalized.includes('text zo zedpery') ||
+    normalized.includes('kapitolu')
+  );
+}
+
+function detectChapterNumberFromText(text: string) {
+  const normalized = normalizeText(text);
+  const match =
+    normalized.match(/\bkapitola\s+(\d+(?:\.\d+)*)\b/i) ||
+    normalized.match(/^\s*(\d+(?:\.\d+)+)\b/i) ||
+    normalized.match(/\b(\d+(?:\.\d+)+)\b/i);
+
+  return match?.[1] || null;
+}
+
+function getLastUserMessage(messages: ChatMessage[]) {
+  const last = [...messages].reverse().find((message) => message.role === 'user');
+  return last?.content || '';
+}
+
+function isAcademicChapterRequest(messages: ChatMessage[]) {
+  const lastUserMessage = getLastUserMessage(messages);
+  return isLikelyChapterRequestText(lastUserMessage);
+}
+
 // ================= BIBLIOGRAPHIC DETECTION =================
 
 function detectSourceType(line: string): BibliographicCandidate['sourceType'] {
@@ -1337,16 +1370,112 @@ POVINNÝ FORMÁT:
 `.trim();
 }
 
+function buildAcademicChapterRules() {
+  return `
+ŠPECIÁLNY REŽIM PRE AKADEMICKÉ KAPITOLY:
+
+Tieto pravidlá majú najvyššiu prioritu vždy, keď používateľ zadá napríklad:
+- Kapitola 1.1
+- kapitola 1.1
+- 1.1
+- uprav kapitolu
+- vytvor kapitolu
+- zachovaj identickú štruktúru šablóny
+- text zo Zedpery nižšie
+- šablóna vyššie
+
+POVINNÝ VÝSTUP PRE KAPITOLU:
+
+1. Výstup NESMIE začínať slovom Abstrakt, ak používateľ výslovne nežiadal abstrakt.
+2. Nikdy nepíš nadpis typu:
+KAPITOLA 1.1: Abstrakt
+KAPITOLA 1.1 - Abstrakt
+1.1 Abstrakt
+
+3. Nadpis kapitoly musí byť vo forme:
+1.1 Odborný názov kapitoly
+
+4. Ak používateľ poskytol šablónu, musíš zachovať jej logiku:
+- najprv odborný nadpis kapitoly,
+- potom súvislý akademický text v odsekoch,
+- priebežné citácie v texte,
+- na konci samostatná sekcia Použitý zdroj pre kapitolu X.X,
+- pod ňou riadny bibliografický záznam.
+
+5. Hlavný akademický text nesmie obsahovať surové OCR fragmenty, napríklad:
+STRANA 1
+STRANA 2
+Nova Biotechnologica (2004) 245
+neúplné OCR vety
+rozbité medzery v slovách
+duplicitné pasáže z PDF
+technické bloky z extrakcie
+zoznam samostatných autorov bez bibliografického záznamu
+
+6. Text zo Zedpery, OCR alebo PDF používaj iba ako podklad. Musíš ho preformulovať do čistej akademickej kapitoly.
+
+7. Ak je v podklade jasne identifikovaný hlavný zdroj, uveď na konci iba relevantný zdroj pre danú kapitolu vo forme:
+Použitý zdroj pre kapitolu 1.1
+
+Ondrík, P., Mikulíková, D., & Kraic, J. (2004). Závislosť medzi dĺžkovou variabilitou génu B-amy1 a aktivitou β-amylázy jačmeňa. Nova Biotechnologica, 245–253.
+
+8. Ak je k dispozícii viac overiteľných zdrojov, uveď ich až v bibliograficky čistej podobe. Nevypisuj neúplné OCR fragmenty ako samostatné zdroje.
+
+9. Nepoužívaj všeobecné frázy:
+Abstrakt dizertačnej práce sa zameriava...
+Táto práca sa zaoberá...
+V tejto práci sa analyzujú...
+ak používateľ žiada konkrétnu kapitolu.
+
+10. Používaj vecný akademický výklad:
+- definícia témy,
+- odborný kontext,
+- mechanizmus,
+- význam pre oblasť,
+- empirické zistenia zo zdroja,
+- metodické súvislosti,
+- napojenie na tému práce,
+- syntetický záver odseku.
+
+11. Citácie v texte píš priebežne, napríklad:
+(Ondrík, Mikulíková, & Kraic, 2004)
+alebo
+(Ondrík et al., 2004)
+
+12. Ak používateľ chce štruktúru ako vzor hore a text zo Zedpery nižšie, hlavný výstup musí vyzerať ako vzor hore, nie ako surový výstup zo Zedpery.
+
+13. Ak je požiadavka kapitola, v sekcii === VÝSTUP === uveď iba čistú kapitolu v tomto formáte:
+
+1.1 Názov kapitoly
+
+Prvý odborný odsek.
+
+Druhý odborný odsek.
+
+Ďalšie odborné odseky.
+
+Použitý zdroj pre kapitolu 1.1
+
+Bibliografický záznam.
+
+14. V kapitole nepoužívaj Markdown znaky, hviezdičky, mriežky ani kódové bloky.
+`.trim();
+}
+
 function buildSystemPrompt({
   profile,
   attachmentTexts,
   settings,
   module,
+  isChapterRequest,
+  requestedChapterNumber,
 }: {
   profile: SavedProfile | null;
   attachmentTexts: string[];
   settings: SourceSettings;
   module: ModuleKey;
+  isChapterRequest: boolean;
+  requestedChapterNumber: string | null;
 }) {
   if (module === 'translation') return buildStrictTranslationPrompt();
   if (module === 'emails') return buildStrictEmailPrompt();
@@ -1369,14 +1498,22 @@ function buildSystemPrompt({
   const citationStyle = getCitationStyle(profile);
   const hasAttachments = attachmentTexts.length > 0;
 
+  const chapterRules = buildAcademicChapterRules();
+
   const prompt = `
 Si ZEDPERA, profesionálny akademický AI asistent, AI vedúci práce a citačná špecialistka.
+
+AKTÍVNY ŠPECIÁLNY REŽIM KAPITOLY:
+${isChapterRequest ? 'Áno' : 'Nie'}
+${requestedChapterNumber ? `Požadované číslo kapitoly: ${requestedChapterNumber}` : 'Požadované číslo kapitoly: neurčené'}
+
+${chapterRules}
 
 HLAVNÝ POSTUP:
 1. Najprv vychádzaj z uloženého profilu práce.
 2. Potom použi extrahovaný text z príloh a dokumentov.
 3. Ak existuje extrahovaný text, použi ho pred všeobecnými znalosťami AI.
-4. Ak existujú detegované zdroje, autorov a publikácie musíš vypísať v sekcii POUŽITÉ ZDROJE A AUTORI.
+4. Ak existujú detegované zdroje, autorov a publikácie musíš vypísať v sekcii POUŽITÉ ZDROJE A AUTORI, ale pri kapitole nesmieš miešať surové OCR fragmenty do hlavného textu.
 5. Nevymýšľaj zdroje, autorov, DOI, URL, roky, vydavateľov ani čísla strán.
 6. Ak údaj chýba, napíš: údaj je potrebné overiť.
 7. Semantic Scholar je vypnutý.
@@ -1462,17 +1599,18 @@ ${attachmentsBlock}
 
 PRAVIDLÁ PRE ZDROJE:
 1. Ak boli v extrahovanom texte nájdené zdroje, nesmieš napísať, že zdroje neboli dodané.
-2. V sekcii POUŽITÉ ZDROJE A AUTORI vypíš:
+2. Pri bežnej odpovedi v sekcii POUŽITÉ ZDROJE A AUTORI vypíš:
 A. Detegované zdroje z extrahovaného textu
 B. Autori nájdení v dokumentoch
 C. Formátované bibliografické záznamy
 D. Priložené dokumenty použité ako podklad
 E. Upozornenia k nerelevantným alebo neoveriteľným prílohám
-F. AI odporúčané zdroje na overenie a doplnenie
-3. Ak boli nájdené iba mená autorov bez úplných publikácií, vypíš ich a uveď, že bibliografický záznam treba doplniť.
-4. Ak boli nájdené DOI alebo URL, vypíš ich presne.
-5. Ak je príloha nesúvisiaca s profilom práce, nepoužívaj ju ako odborný zdroj.
-6. Ak neboli dodané overiteľné zdroje, uveď: Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI modelu. Neboli dodané overiteľné priložené zdroje.
+F. Zdroje, ktoré treba overiť alebo doplniť
+3. Pri kapitole v hlavnom výstupe uveď iba čistú sekciu Použitý zdroj pre kapitolu ${requestedChapterNumber || 'X.X'} a bibliografický záznam relevantného zdroja.
+4. Ak boli nájdené iba mená autorov bez úplných publikácií, vypíš ich mimo hlavnej kapitoly a uveď, že bibliografický záznam treba doplniť.
+5. Ak boli nájdené DOI alebo URL, vypíš ich presne.
+6. Ak je príloha nesúvisiaca s profilom práce, nepoužívaj ju ako odborný zdroj.
+7. Ak neboli dodané overiteľné zdroje, uveď: Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI modelu. Neboli dodané overiteľné priložené zdroje.
 
 NASTAVENIA:
 Kontrola príloh podľa profilu práce: ${settings.validateAttachmentsAgainstProfile ? 'áno' : 'nie'}
@@ -1482,6 +1620,8 @@ Zdrojový režim: ${settings.sourceMode}
 
 FORMÁT ODPOVEDE:
 Použi presne tieto sekcie. Nepoužívaj Markdown znaky.
+
+Ak je aktívny špeciálny režim kapitoly, potom v sekcii === VÝSTUP === musí byť čistá akademická kapitola podľa šablóny. Nesmie začínať slovom Abstrakt a nesmie obsahovať surový OCR text.
 
 === VÝSTUP ===
 Sem napíš hlavný výstup ako čistý akademický text.
@@ -1509,7 +1649,7 @@ B. Autori nájdení v dokumentoch
 C. Formátované bibliografické záznamy
 D. Priložené dokumenty použité ako podklad
 E. Upozornenia k nerelevantným alebo neoveriteľným prílohám
-F. AI odporúčané zdroje na overenie a doplnenie
+F. Zdroje, ktoré treba overiť alebo doplniť
 `;
 
   return limitText(prompt, maxSystemPromptChars);
@@ -1534,6 +1674,30 @@ function removeAfterForbiddenHeading(text: string, headings: string[]) {
   }
 
   return output.trim();
+}
+
+function cleanAcademicChapterOutput(text: string) {
+  let output = normalizeText(text);
+
+  output = output.replace(
+    /^KAPITOLA\s+(\d+(?:\.\d+)*)\s*[:\-–—]\s*Abstrakt\s*/i,
+    '$1 Odborná kapitola\n\n',
+  );
+
+  output = output.replace(
+    /^(\d+(?:\.\d+)*)\s*[:\-–—]\s*Abstrakt\s*/i,
+    '$1 Odborná kapitola\n\n',
+  );
+
+  output = output.replace(
+    /^Abstrakt\s+dizertačnej\s+práce\s+sa\s+zameriava/gi,
+    'Táto kapitola sa zameriava',
+  );
+
+  output = output.replace(/\n\s*STRANA\s+\d+\s+/gi, '\n');
+  output = output.replace(/\n\s*PAGE\s+\d+\s+/gi, '\n');
+
+  return normalizeText(output);
 }
 
 function cleanStrictOutput(text: string, module: ModuleKey) {
@@ -1763,6 +1927,7 @@ async function createJsonResponse({
   extractedFiles,
   providerLabel,
   module,
+  isChapterRequest,
 }: {
   model: ModelResult['model'];
   systemPrompt: string;
@@ -1770,6 +1935,7 @@ async function createJsonResponse({
   extractedFiles: ExtractedAttachment[];
   providerLabel: string;
   module: ModuleKey;
+  isChapterRequest: boolean;
 }) {
   const result = await generateText({
     model,
@@ -1780,9 +1946,13 @@ async function createJsonResponse({
   });
 
   const rawOutput = result.text || '';
-  const output = isStrictNoAcademicTailModule(module)
+  let output = isStrictNoAcademicTailModule(module)
     ? cleanStrictOutput(rawOutput, module)
     : rawOutput;
+
+  if (isChapterRequest) {
+    output = cleanAcademicChapterOutput(output);
+  }
 
   return NextResponse.json({
     ok: true,
@@ -1935,6 +2105,10 @@ export async function POST(req: Request) {
       });
     }
 
+    const lastUserMessage = getLastUserMessage(normalizedMessages);
+    const isChapterRequest = isAcademicChapterRequest(normalizedMessages);
+    const requestedChapterNumber = detectChapterNumberFromText(lastUserMessage);
+
     const {
       extractedFiles,
       attachmentTexts: uploadedAttachmentTexts,
@@ -2018,6 +2192,8 @@ ${extractedText ? limitMiddle(extractedText, maxProjectDocumentChars) : '[Dokume
       attachmentTexts,
       settings,
       module,
+      isChapterRequest,
+      requestedChapterNumber,
     });
 
     try {
@@ -2031,6 +2207,7 @@ ${extractedText ? limitMiddle(extractedText, maxProjectDocumentChars) : '[Dokume
           extractedFiles,
           providerLabel: primary.providerLabel,
           module,
+          isChapterRequest,
         });
       }
 
@@ -2070,6 +2247,13 @@ Aj pri náhradnom modeli musíš dodržať sekciu:
 Ak bol text z príloh extrahovaný, použi ho ako prvý zdrojový podklad.
 Ak je dostupný blok DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE, vypíš autorov, publikácie, roky, DOI a URL.
 Semantic Scholar je vypnutý.
+
+Ak používateľ žiada kapitolu, dodrž špeciálny režim kapitoly:
+- nezačni slovom Abstrakt,
+- nepíš KAPITOLA X.X: Abstrakt,
+- v sekcii === VÝSTUP === vytvor čistú akademickú kapitolu,
+- OCR text použi iba ako podklad,
+- na konci hlavnej kapitoly uveď Použitý zdroj pre kapitolu ${requestedChapterNumber || 'X.X'}.
 `,
             maxSystemPromptChars,
           );
@@ -2082,6 +2266,7 @@ Semantic Scholar je vypnutý.
           extractedFiles,
           providerLabel: fallback.providerLabel,
           module,
+          isChapterRequest,
         });
       }
 

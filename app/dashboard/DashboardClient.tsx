@@ -97,11 +97,13 @@ type SlideContent = {
   body: string[];
 };
 
-type ApiAnalysisResponse = {
+type ApiAnalysisResponse = Partial<AnalysisResult> & {
   ok?: boolean;
   error?: string;
   message?: string;
-  [key: string]: any;
+  frequencyTables?: unknown[];
+  files?: unknown[];
+  extractedFiles?: unknown[];
 };
 
 declare global {
@@ -775,6 +777,130 @@ function createTextFileFromInput(text: string) {
   });
 }
 
+function normalizeAnalysisResult(data: ApiAnalysisResponse): AnalysisResult {
+  const anyData = data as any;
+
+  const frequencies = Array.isArray(anyData.frequencies)
+    ? anyData.frequencies
+    : Array.isArray(anyData.frequencyTables)
+      ? anyData.frequencyTables
+      : Array.isArray(anyData.frequency_tables)
+        ? anyData.frequency_tables
+        : [];
+
+  const extractedFiles = Array.isArray(anyData.files)
+    ? anyData.files
+    : Array.isArray(anyData.extractedFiles)
+      ? anyData.extractedFiles
+      : Array.isArray(anyData.attachments)
+        ? anyData.attachments
+        : [];
+
+  const variables = Array.isArray(anyData.variables)
+    ? anyData.variables
+    : Array.isArray(anyData.detectedVariables)
+      ? anyData.detectedVariables
+      : Array.isArray(anyData.columns)
+        ? anyData.columns
+        : [];
+
+  const warnings = Array.isArray(anyData.warnings)
+    ? anyData.warnings
+    : Array.isArray(anyData.alerts)
+      ? anyData.alerts
+      : [];
+
+  const recommendedTests = Array.isArray(anyData.recommendedTests)
+    ? anyData.recommendedTests
+    : Array.isArray(anyData.tests)
+      ? anyData.tests
+      : Array.isArray(anyData.recommended_tests)
+        ? anyData.recommended_tests
+        : [];
+
+  const recommendedCharts = Array.isArray(anyData.recommendedCharts)
+    ? anyData.recommendedCharts
+    : Array.isArray(anyData.charts)
+      ? anyData.charts
+      : Array.isArray(anyData.recommended_charts)
+        ? anyData.recommended_charts
+        : [];
+
+  const excelTables = Array.isArray(anyData.excelTables)
+    ? anyData.excelTables
+    : Array.isArray(anyData.tables)
+      ? anyData.tables
+      : Array.isArray(anyData.excel_tables)
+        ? anyData.excel_tables
+        : [];
+
+  const descriptiveStatistics = Array.isArray(anyData.descriptiveStatistics)
+    ? anyData.descriptiveStatistics
+    : Array.isArray(anyData.descriptive_statistics)
+      ? anyData.descriptive_statistics
+      : Array.isArray(anyData.statistics)
+        ? anyData.statistics
+        : [];
+
+  const hypothesisTests = Array.isArray(anyData.hypothesisTests)
+    ? anyData.hypothesisTests
+    : Array.isArray(anyData.hypothesis_tests)
+      ? anyData.hypothesis_tests
+      : Array.isArray(anyData.testResults)
+        ? anyData.testResults
+        : [];
+
+  const selectedAnalyses = Array.isArray(anyData.selectedAnalyses)
+    ? anyData.selectedAnalyses
+    : Array.isArray(anyData.selected_analyses)
+      ? anyData.selected_analyses
+      : [];
+
+  const summary =
+    anyData.summary ||
+    createAnalysisSummary({
+      variablesCount: variables.length,
+      frequenciesCount: frequencies.length,
+      filesCount: extractedFiles.length,
+      warningsCount: warnings.length,
+    });
+
+  const fullText =
+    anyData.fullText ||
+    anyData.fullResult ||
+    anyData.text ||
+    anyData.output ||
+    anyData.result ||
+    anyData.interpretation ||
+    '';
+
+  const practicalText =
+    anyData.practicalText ||
+    anyData.practical_text ||
+    anyData.interpretation ||
+    'Do praktickej časti je vhodné zaradiť deskriptívnu štatistiku, frekvenčné tabuľky, grafy a následne testovanie hypotéz podľa typu premenných.';
+
+  return {
+    ok: Boolean(data.ok),
+    title: anyData.title || 'Výsledky analýzy dát',
+    summary,
+    warnings,
+    variables,
+    frequencies,
+    recommendedTests,
+    recommendedCharts,
+    excelTables,
+    practicalText,
+    fullText,
+
+    dataDescription: anyData.dataDescription || anyData.data_description || '',
+    selectedAnalyses,
+    descriptiveStatistics,
+    hypothesisTests,
+    interpretation: anyData.interpretation || practicalText || fullText || '',
+  } as AnalysisResult;
+}
+
 function createAnalysisSummary({
   variablesCount,
   frequenciesCount,
@@ -796,134 +922,15 @@ function createAnalysisSummary({
   ].join('\n');
 }
 
-function normalizeAnalysisResult(data: ApiAnalysisResponse): AnalysisResult {
-  const raw = data as any;
-
-  const frequencies = Array.isArray(raw.frequencies)
-    ? raw.frequencies
-    : Array.isArray(raw.frequencyTables)
-      ? raw.frequencyTables
-      : Array.isArray(raw.frequency_tables)
-        ? raw.frequency_tables
-        : [];
-
-  const extractedFiles = Array.isArray(raw.files)
-    ? raw.files
-    : Array.isArray(raw.extractedFiles)
-      ? raw.extractedFiles
-      : Array.isArray(raw.attachments)
-        ? raw.attachments
-        : [];
-
-  const variables = Array.isArray(raw.variables) ? raw.variables : [];
-
-  const warnings = Array.isArray(raw.warnings) ? raw.warnings : [];
-
-  const recommendedTests = Array.isArray(raw.recommendedTests)
-    ? raw.recommendedTests
-    : Array.isArray(raw.hypothesisTests)
-      ? raw.hypothesisTests
-      : [];
-
-  const recommendedCharts = Array.isArray(raw.recommendedCharts)
-    ? raw.recommendedCharts
-    : [];
-
-  const excelTables = Array.isArray(raw.excelTables) ? raw.excelTables : [];
-
-  const descriptiveStatistics = Array.isArray(raw.descriptiveStatistics)
-    ? raw.descriptiveStatistics
-    : variables;
-
-  const hypothesisTests = Array.isArray(raw.hypothesisTests)
-    ? raw.hypothesisTests
-    : recommendedTests;
-
-  const selectedAnalyses = Array.isArray(raw.selectedAnalyses)
-    ? raw.selectedAnalyses
-    : [
-        'descriptiveStatistics',
-        'frequencyTables',
-        'recommendedCharts',
-        'hypothesisTests',
-        'interpretation',
-      ];
-
-  const practicalText =
-    raw.practicalText ||
-    raw.interpretation ||
-    'Do praktickej časti je vhodné zaradiť deskriptívnu štatistiku, frekvenčné tabuľky, grafy a následne testovanie hypotéz podľa typu premenných.';
-
-  const interpretation =
-    raw.interpretation ||
-    practicalText ||
-    'Výsledky je potrebné interpretovať podľa typu premenných, výskumných otázok a hypotéz.';
-
-  const summary =
-    raw.summary ||
-    createAnalysisSummary({
-      variablesCount: variables.length,
-      frequenciesCount: frequencies.length,
-      filesCount: extractedFiles.length,
-      warningsCount: warnings.length,
-    });
-
-  const fullText =
-    raw.fullText ||
-    raw.fullResult ||
-    raw.text ||
-    [
-      raw.title || 'Výsledky analýzy',
-      '',
-      summary,
-      '',
-      interpretation,
-    ].join('\n');
-
-  return {
-    ok: Boolean(data.ok),
-    title: raw.title || 'Výsledky analýzy',
-
-    dataDescription:
-      raw.dataDescription ||
-      raw.description ||
-      raw.analysisGoal ||
-      'Automatická analýza dát zo zadaných alebo priložených súborov.',
-
-    selectedAnalyses,
-
-    summary,
-    warnings,
-
-    variables,
-    frequencies,
-
-    recommendedTests,
-    recommendedCharts,
-    excelTables,
-
-    descriptiveStatistics,
-    hypothesisTests,
-
-    practicalText,
-    interpretation,
-    fullText,
-  } as unknown as AnalysisResult;
-}
-
 function createAnalysisOutputText(data: AnalysisResult) {
-  const anyData = data as any;
-
   const warningsBlock =
-    Array.isArray(anyData.warnings) && anyData.warnings.length > 0
-      ? `Upozornenia:\n${anyData.warnings
-          .map((item: string) => `- ${item}`)
-          .join('\n')}`
+    data.warnings && data.warnings.length > 0
+      ? `Upozornenia:\n${data.warnings.map((item) => `- ${item}`).join('\n')}`
       : '';
 
   const variablesBlock =
-    Array.isArray(anyData.variables) && anyData.variables.length > 0
-      ? `Identifikované premenné:\n${anyData.variables
+    data.variables && data.variables.length > 0
+      ? `Identifikované premenné:\n${data.variables
           .map((item: any) => {
             const name = item.name || item.variable || 'Premenná';
             const valid = item.valid ?? 'neuvedené';
@@ -936,9 +943,8 @@ function createAnalysisOutputText(data: AnalysisResult) {
       : '';
 
   const chartsBlock =
-    Array.isArray(anyData.recommendedCharts) &&
-    anyData.recommendedCharts.length > 0
-      ? `Odporúčané grafy:\n${anyData.recommendedCharts
+    data.recommendedCharts && data.recommendedCharts.length > 0
+      ? `Odporúčané grafy:\n${data.recommendedCharts
           .map(
             (item: any) =>
               `- ${item.title || 'Graf'} (${item.type || 'typ neuvedený'}): ${
@@ -949,9 +955,8 @@ function createAnalysisOutputText(data: AnalysisResult) {
       : '';
 
   const testsBlock =
-    Array.isArray(anyData.recommendedTests) &&
-    anyData.recommendedTests.length > 0
-      ? `Odporúčané štatistické testy:\n${anyData.recommendedTests
+    data.recommendedTests && data.recommendedTests.length > 0
+      ? `Odporúčané štatistické testy:\n${data.recommendedTests
           .map(
             (item: any) =>
               `- ${item.test || 'Test'}: ${
@@ -962,17 +967,17 @@ function createAnalysisOutputText(data: AnalysisResult) {
       : '';
 
   const tablesBlock =
-    Array.isArray(anyData.excelTables) && anyData.excelTables.length > 0
-      ? `Odporúčané tabuľky do práce:\n${anyData.excelTables
-          .map((item: string) => `- ${item}`)
+    data.excelTables && data.excelTables.length > 0
+      ? `Odporúčané tabuľky do práce:\n${data.excelTables
+          .map((item) => `- ${item}`)
           .join('\n')}`
       : '';
 
   return cleanFinalOutput(
     [
-      anyData.title || 'Výsledky analýzy',
+      data.title || 'Výsledky analýzy',
       '',
-      anyData.summary || '',
+      data.summary || '',
       '',
       warningsBlock,
       '',
@@ -984,9 +989,9 @@ function createAnalysisOutputText(data: AnalysisResult) {
       '',
       tablesBlock,
       '',
-      anyData.practicalText || '',
+      data.practicalText || '',
       '',
-      anyData.fullText || '',
+      data.fullText || '',
     ]
       .filter(Boolean)
       .join('\n'),

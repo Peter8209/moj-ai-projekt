@@ -1,63 +1,122 @@
-export type AnalysisTableColumn = {
-  key: string;
-  label: string;
-};
-
-export type AnalysisTableRow = Record<string, string | number | null>;
-
-export type AnalysisTable = {
-  title: string;
+export type AnalysisVariable = {
+  name?: string;
+  variable?: string;
+  label?: string;
+  type?: string;
+  measurementLevel?: string;
+  role?: string;
   description?: string;
-  columns: AnalysisTableColumn[];
-  rows: AnalysisTableRow[];
+  missingValues?: number;
+  validValues?: number;
+  [key: string]: unknown;
 };
 
-export type RecommendedChart = {
-  title: string;
-  type:
-    | 'bar'
-    | 'line'
-    | 'pie'
-    | 'histogram'
-    | 'boxplot'
-    | 'scatter'
-    | 'heatmap'
-    | 'other';
-  description: string;
+export type DescriptiveStatistic = {
+  variable?: string;
+  name?: string;
+  count?: number;
+  mean?: number;
+  median?: number;
+  mode?: number | string;
+  min?: number;
+  max?: number;
+  range?: number;
+  variance?: number;
+  standardDeviation?: number;
+  stdDev?: number;
+  skewness?: number;
+  kurtosis?: number;
+  interpretation?: string;
+  [key: string]: unknown;
+};
+
+export type FrequencyItem = {
+  variable?: string;
+  name?: string;
+  value?: string | number;
+  category?: string | number;
+  count?: number;
+  frequency?: number;
+  percent?: number;
+  percentage?: number;
+  validPercent?: number;
+  cumulativePercent?: number;
+  [key: string]: unknown;
+};
+
+export type HypothesisTest = {
+  name?: string;
+  test?: string;
+  variable?: string;
   variables?: string[];
+  statistic?: number;
+  pValue?: number;
+  p?: number;
+  df?: number;
+  result?: string;
+  interpretation?: string;
+  significant?: boolean;
+  [key: string]: unknown;
 };
 
 export type RecommendedTest = {
-  title: string;
-  description: string;
+  name?: string;
+  test?: string;
+  reason?: string;
+  variables?: string[];
+  assumptions?: string[];
+  interpretation?: string;
+  [key: string]: unknown;
 };
 
-export type AnalysisRecommendation = {
-  title: string;
-  description: string;
+export type RecommendedChart = {
+  name?: string;
+  chart?: string;
+  type?: string;
+  reason?: string;
+  variables?: string[];
+  description?: string;
+  [key: string]: unknown;
+};
+
+export type ExcelTable = {
+  title?: string;
+  name?: string;
+  headers?: string[];
+  rows?: unknown[][];
+  data?: unknown;
+  description?: string;
+  [key: string]: unknown;
 };
 
 export type AnalysisResult = {
-  ok: boolean;
-  title: string;
-  summary: string;
-  dataDescription: string;
+  ok?: boolean;
 
-  selectedAnalyses: AnalysisRecommendation[];
-  descriptiveStatistics: AnalysisTable[];
-  recommendedCharts: RecommendedChart[];
-  excelTables: AnalysisTable[];
-  hypothesisTests: RecommendedTest[];
+  title?: string;
+  summary?: string;
+  warnings?: string[] | string;
 
-  practicalText: string;
-  interpretation: string;
-  warnings: string[];
-  fullText: string;
+  dataDescription?: string;
+  selectedAnalyses?: string[] | string;
 
-  meta?: {
-    filesCount?: number;
-    extractedChars?: number;
-    generatedAt?: string;
-    profileTitle?: string;
-  };
+  variables?: AnalysisVariable[];
+  frequencies?: FrequencyItem[];
+  recommendedTests?: RecommendedTest[];
+  recommendedCharts?: RecommendedChart[];
+  excelTables?: ExcelTable[];
+
+  descriptiveStatistics?: DescriptiveStatistic[] | Record<string, unknown>;
+  hypothesisTests?: HypothesisTest[] | Record<string, unknown>;
+
+  practicalText?: string;
+  fullText?: string;
+  interpretation?: string;
+
+  output?: string;
+  result?: string;
+  message?: string;
+  text?: string;
+  answer?: string;
+
+  [key: string]: unknown;
 };

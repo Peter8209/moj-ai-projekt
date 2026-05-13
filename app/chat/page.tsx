@@ -1751,6 +1751,14 @@ function buildFallbackSourcesSection({
 }) {
   const allSources = flattenDetectedSources(preparedFiles);
 
+  if (!allSources.length) {
+    return 'Úplný bibliografický záznam je potrebné overiť.';
+  }
+
+  if (preparedFiles.length > 0 || forceAll) {
+    return formatSimpleBibliographicSources(allSources);
+  }
+
   const usedSources = filterSourcesByUsedCitations(
     allSources,
     usedText,
@@ -1759,8 +1767,6 @@ function buildFallbackSourcesSection({
 
   return formatSimpleBibliographicSources(usedSources);
 }
-
-
 
 // ================= API CALLS =================
 
@@ -2504,7 +2510,8 @@ const buildFinalUserPrompt = ({
     maxDetectedAuthorsForChat,
   );
 
-  const forceAllSources = userAskedForAllSources(apiUserText);
+  const forceAllSources =
+  attachedFiles.length > 0 || userAskedForAllSources(apiUserText);
 
   return `
 
@@ -2555,6 +2562,9 @@ Nepíš tieto technické nadpisy:
 - ODPORÚČANIA
 - DETEGOVANÉ ZDROJE
 - TECHNICKÁ ANALÝZA
+- FORMÁTOVANÉ ZDROJE
+- AUTORI NÁJDENÍ V DOKUMENTE
+- ZDROJE, AUTORI A PUBLIKÁCIE
 
 Výstup musí mať túto štruktúru:
 
@@ -2563,57 +2573,78 @@ Názov práce alebo názov spracovanej témy
 
 Súvislý odborný text v odsekoch.
 
-V hlavnom texte používaj citácie priamo v texte podľa citačnej normy klienta: ${citationStyle}.
+Použité zdroje
 
-Ak je citačná norma APA, používaj napríklad:
-(Ondrík et al., 2004)
+HLAVNÉ PRAVIDLO PRE PRÍLOHY:
 
-Ak je citačná norma ISO 690 alebo iná norma, prispôsob odkazy presne tejto norme.
+Ak používateľ priložil dokument, PDF, článok, štúdiu, kapitolu knihy, metodický dokument, správu, tabuľku alebo inú prílohu, musíš pracovať primárne s obsahom tejto prílohy.
+
+Najprv posúď, či obsah prílohy súvisí s témou profilu práce:
+- Téma profilu práce: ${activeProfile?.topic || activeProfile?.title || 'nezadané'}
+- Názov práce: ${activeProfile?.title || 'nezadané'}
+- Odbor: ${activeProfile?.field || 'nezadané'}
+- Cieľ práce: ${activeProfile?.goal || 'nezadané'}
+
+Ak príloha s témou profilu práce súvisí:
+1. Použi obsah prílohy ako hlavný odborný podklad.
+2. Z priloženej prílohy použi všetky detegované relevantné zdroje, autorov, roky a bibliografické záznamy.
+3. Všetky zdroje, ktoré boli detegované v prílohe, zakomponuj do hlavného textu ako citácie podľa citačnej normy klienta: ${citationStyle}.
+4. Hlavný text musí obsahovať citácie priamo v texte.
+5. Každá citácia v hlavnom texte musí mať zodpovedajúci bibliografický záznam v časti „Použité zdroje“.
+6. Na konci v časti „Použité zdroje“ vypíš iba čisté bibliografické záznamy použitých zdrojov.
+7. Nevypisuj technické poznámky, zoznam autorov, varianty odkazov ani názvy príloh.
+
+Ak príloha s témou profilu práce nesúvisí:
+1. Nevymýšľaj prepojenie.
+2. Jasne napíš, že priložená príloha obsahovo nesúvisí s témou profilu práce.
+3. Uveď stručné odôvodnenie, prečo príloha nesúvisí.
+4. Aj v tomto prípade vypíš v časti „Použité zdroje“ iba bibliografické záznamy, ktoré sa v prílohe reálne nachádzajú alebo boli automaticky detegované.
+5. Nevymýšľaj žiadne nové zdroje.
+
+PRAVIDLÁ PRE CITÁCIE V TEXTE:
+
+1. V hlavnom texte používaj citácie podľa citačnej normy klienta: ${citationStyle}.
+2. Ak je citačná norma APA, používaj autor-rok systém.
+3. Ak je citačná norma ISO 690 alebo iná norma, prispôsob citácie tejto norme.
+4. Nepoužívaj zdroj v závere, ak sa vôbec nedá odvodiť z prílohy alebo z extrahovaného textu.
+5. Nevymýšľaj autorov, roky, názvy diel, DOI, URL, vydavateľov, časopisy ani strany.
+6. Ak je záznam neúplný, napíš len dostupné údaje. Ak chýba podstatná časť, napíš: Úplný bibliografický záznam je potrebné overiť.
+
+PRAVIDLÁ PRE SEKCIU „Použité zdroje“:
+
+Na konci výstupu musí byť nadpis:
 
 Použité zdroje
 
-Na konci výstupu musí byť iba jednoduchá sekcia:
+Pod tento nadpis vypíš iba bibliografické záznamy.
 
-Použité zdroje
-
-Pod tento nadpis vypíš iba čisté bibliografické záznamy zdrojov, ktoré boli reálne použité a citované v hlavnom texte.
-
-Nepíš technické podsekcie:
-A. Zdroje nájdené v priložených dokumentoch
-B. Formátované bibliografické záznamy
-C. Varianty odkazov v texte
-D. Priložené dokumenty použité ako podklad
-E. Autori nájdení v dokumentoch
-F. Neúplné alebo neoveriteľné zdroje
-
-Nepíš samostatne:
-- zoznam autorov
-- varianty parentetických odkazov
-- varianty naratívnych odkazov
-- názvy príloh
-- technické poznámky
+Nepíš:
+- A. Zdroje nájdené v priložených dokumentoch
+- B. Formátované bibliografické záznamy
+- C. Varianty odkazov v texte
+- D. Priložené dokumenty použité ako podklad
+- E. Autori nájdení v dokumentoch
+- F. Neúplné alebo neoveriteľné zdroje
+- Parentetický odkaz
+- Naratívny odkaz
+- Autori v texte
+- Rok
+- Typ zdroja
+- DOI ako samostatný riadok
+- URL ako samostatný riadok
 - informácie o extrakcii
-- text „zdroje neboli dodané“, ak bol v dokumente nájdený autor, rok alebo bibliografický záznam
+- názvy súborov
+- technické komentáre
 
-Každý zdroj uveď ako samostatný bibliografický záznam podľa citačnej normy klienta: ${citationStyle}.
+Každý zdroj uveď ako samostatný čistý bibliografický záznam podľa citačnej normy klienta: ${citationStyle}.
 
-Príklad správneho výstupu zdroja pri APA:
+DÔLEŽITÉ:
+Ak boli v priloženom dokumente nájdené bibliografické záznamy, autori, roky alebo citácie, nikdy nepíš „Zdroje neboli dodané“.
 
-Ondrík, P., Mikulíková, D., & Kraic, J. (2004). Závislosť medzi dĺžkovou variabilitou génu β-amy1 a aktivitou β-amylázy jačmeňa. Nova Biotechnologica, 4(2), 245-253.
+Ak boli nájdené viaceré zdroje v prílohe, použi ich v texte a potom ich všetky vypíš v časti „Použité zdroje“.
 
-VŠEOBECNÉ PRAVIDLO PRE VŠETKY PRÍLOHY:
-
-1. Pri každej priloženej prílohe najprv identifikuj skutočných autorov dokumentu, rok, názov článku, názov časopisu/knihy/dokumentu, ročník, číslo a strany, ak sú dostupné.
-2. Ako primárny zdroj použi autora alebo autorov dokumentu, ktorý bol vložený ako príloha.
-3. V hlavnom texte používaj meno autora a rok podľa citačného štýlu klienta.
-4. Na konci v časti „Použité zdroje“ vypíš iba bibliografické záznamy zdrojov, ktoré boli reálne citované v hlavnom texte.
-5. Ak používateľ výslovne žiada všetky zdroje, všetkých autorov, bibliografiu alebo zoznam literatúry, vypíš všetky detegované bibliografické záznamy, ale stále bez technických podsekcií A, B, C, D, E, F.
-6. Každá citácia použitá v hlavnom texte musí mať zodpovedajúci bibliografický záznam na konci.
-7. Ak sa v hlavnom texte objaví citácia napríklad (Ondrík et al., 2004), na konci musí byť bibliografický záznam k tomuto autorovi alebo autorom, ak je dostupný v podkladoch.
-8. Nikdy nepíš „Zdroje neboli dodané“, ak boli v texte alebo extrahovanom dokumente nájdené citácie, autori, roky alebo bibliografické záznamy.
-9. Nevymýšľaj chýbajúce údaje. Pri neúplnom zdroji napíš iba: Úplný bibliografický záznam je potrebné overiť.
-10. Výstup musí byť bez markdown znakov #, ##, **, --- a bez tabuľkových značiek.
-11. Výstup musí vyzerať ako hotový text do Word dokumentu.
+Výstup musí byť bez markdown znakov #, ##, **, --- a bez tabuľkových značiek.
+Výstup musí vyzerať ako hotový text do Word dokumentu.
 `.trim();
 };
 
@@ -2929,28 +2960,27 @@ const cleanedMainOutput = cleanAiOutput(
     .replace(/===\s*POUŽITÉ ZDROJE\s*===/gi, 'Použité zdroje'),
 );
 
-const outputAlreadyHasSources =
-  /použité\s+zdroje/i.test(cleanedMainOutput) ||
-  /pouzite\s+zdroje/i.test(normalizeForMatch(cleanedMainOutput));
 
-const finalSourcesClean = cleanAiOutput(finalSources)
-  .replace(/^Použité zdroje a autori\s*/i, '')
-  .replace(/^Použité zdroje\s*/i, '')
-  .replace(/^A\.\s*Zdroje nájdené v priložených dokumentoch\s*/gim, '')
-  .replace(/^B\.\s*Formátované bibliografické záznamy\s*/gim, '')
-  .replace(/^C\.\s*Varianty odkazov v texte\s*/gim, '')
-  .replace(/^D\.\s*Priložené dokumenty použité ako podklad\s*/gim, '')
-  .replace(/^E\.\s*Autori nájdení v dokumentoch\s*/gim, '')
-  .replace(/^F\.\s*Neúplné alebo neoveriteľné zdroje\s*/gim, '')
-  .trim();
+const mainTextWithoutSources = cleanAiOutput(
+  cleanedMainOutput
+    .replace(/použité\s+zdroje\s+a\s+autori[\s\S]*$/i, '')
+    .replace(/pouzite\s+zdroje\s+a\s+autori[\s\S]*$/i, '')
+    .replace(/použité\s+zdroje[\s\S]*$/i, '')
+    .replace(/pouzite\s+zdroje[\s\S]*$/i, '')
+    .replace(/zdroje\s+a\s+autori[\s\S]*$/i, '')
+    .replace(/zdroje[\s\S]*$/i, ''),
+);
 
-const finalTextForCanvas = outputAlreadyHasSources
-  ? cleanedMainOutput
-  : `${cleanedMainOutput}
+const safeFinalSources =
+  finalSources && finalSources.trim()
+    ? finalSources.trim()
+    : 'Úplný bibliografický záznam je potrebné overiť.';
+
+const finalTextForCanvas = `${mainTextWithoutSources}
 
 Použité zdroje
 
-${finalSourcesClean}`.trim();
+${safeFinalSources}`.trim();
 
       const finalParsed: ParsedResult = {
         ...parsed,

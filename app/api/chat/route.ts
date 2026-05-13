@@ -151,11 +151,17 @@ type ExtractedAttachment = {
   formattedSources: string;
 };
 
+type SlovakApiError = {
+  code: string;
+  message: string;
+  detail: string;
+  rawMessage?: string;
+};
+
 // ================= LIMITS =================
 
 const maxCompressedFileSizeBytes = 1 * 1024 * 1024;
 
-// Dôležité: toto rieši chybu context window.
 const maxExtractedCharsPerAttachment = 18_000;
 const maxClientExtractedChars = 45_000;
 const maxProjectDocumentChars = 18_000;
@@ -315,7 +321,8 @@ function stripDuplicatedLargePromptSections(content: string) {
   }
 
   if (!output) {
-    output = 'Spracuj požiadavku používateľa podľa profilu práce a extrahovaných podkladov.';
+    output =
+      'Spracuj požiadavku používateľa podľa profilu práce a extrahovaných podkladov.';
   }
 
   return limitText(output, maxSingleMessageChars);
@@ -432,11 +439,23 @@ function isLikelyChapterRequestText(text: string) {
 
   return (
     /\bkapitola\s+\d+(?:\.\d+)*\b/i.test(normalized) ||
-    /^\s*\d+(?:\.\d+)+\s*[:.-]?\s*/i.test(normalized) ||
-    normalized.includes('šablóna vyššie') ||
+    /^\s*\d+(?:\.\d+)*\s*[\.:]\s*[a-záäčďéíĺľňóôŕšťúýž]/i.test(normalized) ||
+    /^\s*\d+(?:\.\d+)+\s*$/i.test(normalized) ||
+    normalized.includes('šablóna') ||
+    normalized.includes('šablona') ||
+    normalized.includes('rovnaký zdroj') ||
+    normalized.includes('rovnaky zdroj') ||
+    normalized.includes('musí to byť v takomto tvare') ||
+    normalized.includes('musi to byt v takomto tvare') ||
     normalized.includes('identická štruktúra') ||
+    normalized.includes('identicka struktura') ||
     normalized.includes('text zo zedpery') ||
-    normalized.includes('kapitolu')
+    normalized.includes('uprav kapitolu') ||
+    normalized.includes('vytvor kapitolu') ||
+    normalized.includes('kapitolu') ||
+    normalized.includes('kapitola') ||
+    normalized.includes('úvod') ||
+    normalized.includes('uvod')
   );
 }
 
@@ -444,6 +463,9 @@ function detectChapterNumberFromText(text: string) {
   const normalized = normalizeText(text);
   const match =
     normalized.match(/\bkapitola\s+(\d+(?:\.\d+)*)\b/i) ||
+    normalized.match(
+      /^\s*(\d+(?:\.\d+)*)\s*[\.:]\s*[a-záäčďéíĺľňóôŕšťúýž]/i,
+    ) ||
     normalized.match(/^\s*(\d+(?:\.\d+)+)\b/i) ||
     normalized.match(/\b(\d+(?:\.\d+)+)\b/i);
 
@@ -452,11 +474,13 @@ function detectChapterNumberFromText(text: string) {
 
 function getLastUserMessage(messages: ChatMessage[]) {
   const last = [...messages].reverse().find((message) => message.role === 'user');
+
   return last?.content || '';
 }
 
 function isAcademicChapterRequest(messages: ChatMessage[]) {
   const lastUserMessage = getLastUserMessage(messages);
+
   return isLikelyChapterRequestText(lastUserMessage);
 }
 
@@ -692,9 +716,14 @@ function normalizeBibliographicCandidates(value: unknown): BibliographicCandidat
     .map((item: any) => ({
       raw: String(item?.raw || item?.citation || item?.text || '').trim(),
       authors: Array.isArray(item?.authors)
-        ? item.authors.map((author: unknown) => String(author || '').trim()).filter(Boolean)
+        ? item.authors
+            .map((author: unknown) => String(author || '').trim())
+            .filter(Boolean)
         : typeof item?.authors === 'string'
-          ? item.authors.split(/,|;|\n/).map((author: string) => author.trim()).filter(Boolean)
+          ? item.authors
+              .split(/,|;|\n/)
+              .map((author: string) => author.trim())
+              .filter(Boolean)
           : [],
       year: item?.year ? String(item.year) : null,
       title: item?.title ? String(item.title) : null,
@@ -709,7 +738,9 @@ function normalizeBibliographicCandidates(value: unknown): BibliographicCandidat
           ? item.sourceType
           : 'unknown',
     }))
-    .filter((item) => item.raw || item.authors.length || item.title || item.doi || item.url);
+    .filter(
+      (item) => item.raw || item.authors.length || item.title || item.doi || item.url,
+    );
 }
 
 function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
@@ -723,7 +754,11 @@ function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
       return `${index + 1}. Pôvodný záznam:
 ${item.raw || 'neuvedené'}
 
-Autori: ${item.authors.length ? item.authors.join(', ') : 'neuvedené alebo potrebné overiť'}
+Autori: ${
+        item.authors.length
+          ? item.authors.join(', ')
+          : 'neuvedené alebo potrebné overiť'
+      }
 Rok: ${item.year || 'údaj je potrebné overiť'}
 Názov publikácie / zdroja: ${item.title || 'údaj je potrebné overiť'}
 Typ zdroja: ${item.sourceType}
@@ -750,7 +785,9 @@ function mergeBibliographicCandidates(
         sourceType: item.sourceType || 'unknown',
       };
 
-      const key = `${normalizedItem.raw.slice(0, 180)}-${normalizedItem.doi || ''}-${normalizedItem.url || ''}`;
+      const key = `${normalizedItem.raw.slice(0, 180)}-${
+        normalizedItem.doi || ''
+      }-${normalizedItem.url || ''}`;
 
       if (!unique.has(key)) unique.set(key, normalizedItem);
     }
@@ -786,7 +823,14 @@ const allowedAttachmentExtensions = [
   '.gz',
 ];
 
-const extractableAttachmentExtensions = ['.pdf', '.docx', '.txt', '.md', '.csv', '.rtf'];
+const extractableAttachmentExtensions = [
+  '.pdf',
+  '.docx',
+  '.txt',
+  '.md',
+  '.csv',
+  '.rtf',
+];
 
 function isGzipFile(file: File) {
   const fileName = file.name || '';
@@ -1090,7 +1134,9 @@ async function extractTextFromSingleFile(
     };
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : 'Nepodarilo sa extrahovať text zo súboru.';
+      error instanceof Error
+        ? error.message
+        : 'Nepodarilo sa extrahovať text zo súboru.';
 
     return {
       name: originalName,
@@ -1131,7 +1177,9 @@ function buildCompactSourceSummary({
   clientDetectedSources: BibliographicCandidate[];
   extractedFiles: ExtractedAttachment[];
 }) {
-  const fileSources = extractedFiles.flatMap((file) => file.bibliographicCandidates || []);
+  const fileSources = extractedFiles.flatMap(
+    (file) => file.bibliographicCandidates || [],
+  );
   const mergedSources = mergeBibliographicCandidates(clientDetectedSources, fileSources);
 
   const authors = uniqueArray([
@@ -1372,93 +1420,167 @@ POVINNÝ FORMÁT:
 
 function buildAcademicChapterRules() {
   return `
-ŠPECIÁLNY REŽIM PRE AKADEMICKÉ KAPITOLY:
+ŠPECIÁLNY REŽIM PRE AKADEMICKÉ KAPITOLY MÁ NAJVYŠŠIU PRIORITU.
 
-Tieto pravidlá majú najvyššiu prioritu vždy, keď používateľ zadá napríklad:
+Aktivuje sa vždy, keď používateľ žiada kapitolu, napríklad:
+- Kapitola 1
 - Kapitola 1.1
-- kapitola 1.1
+- 1. Úvod
 - 1.1
 - uprav kapitolu
-- vytvor kapitolu
-- zachovaj identickú štruktúru šablóny
-- text zo Zedpery nižšie
-- šablóna vyššie
+- text musí byť ako šablóna
+- použil som rovnaký zdroj
+- šablóna vyššie a text zo Zedpery nižšie
 
-POVINNÝ VÝSTUP PRE KAPITOLU:
+ABSOLÚTNE PRAVIDLÁ PRE KAPITOLU:
 
-1. Výstup NESMIE začínať slovom Abstrakt, ak používateľ výslovne nežiadal abstrakt.
-2. Nikdy nepíš nadpis typu:
-KAPITOLA 1.1: Abstrakt
-KAPITOLA 1.1 - Abstrakt
-1.1 Abstrakt
+1. Ak používateľ žiada kapitolu, výstup musí byť iba samotná kapitola.
 
-3. Nadpis kapitoly musí byť vo forme:
+2. Nepíš technické sekcie:
+=== VÝSTUP ===
+=== ANALÝZA ===
+=== SKÓRE ===
+=== ODPORÚČANIA ===
+=== POUŽITÉ ZDROJE A AUTORI ===
+Použité zdroje
+A. Detegované zdroje z extrahovaného textu
+B. Autori nájdení v dokumentoch
+C. Formátované bibliografické záznamy
+D. Priložené dokumenty použité ako podklad
+E. Upozornenia
+F. Zdroje, ktoré treba overiť
+
+3. Nepíš krátky všeobecný text. Kapitola musí byť rozsiahla, odborná, analytická a štylisticky podobná dodanej šablóne používateľa.
+
+4. Nadpis musí byť konkrétny, nie všeobecný.
+
+Zakázané nadpisy:
 1.1 Odborný názov kapitoly
+KAPITOLA 1.1: Abstrakt
+1.1 Abstrakt
+Abstrakt
 
-4. Ak používateľ poskytol šablónu, musíš zachovať jej logiku:
-- najprv odborný nadpis kapitoly,
-- potom súvislý akademický text v odsekoch,
+5. Ak používateľ žiada kapitolu 1, použi formát:
+1. Úvod
+
+6. Ak používateľ žiada kapitolu 1.1, použi formát:
+1.1 Konkrétny odborný názov kapitoly podľa témy
+
+7. Text musí mať rovnaký štýl ako vzor používateľa:
+- dlhšie odborné odseky,
+- vecný akademický jazyk,
+- syntéza zdrojov,
+- metodické smerovanie,
+- výskumné otázky, ak sú súčasťou šablóny,
+- praktický prínos, ak je súčasťou šablóny,
+- prepojenie na štruktúru práce, ak ide o úvod,
 - priebežné citácie v texte,
-- na konci samostatná sekcia Použitý zdroj pre kapitolu X.X,
-- pod ňou riadny bibliografický záznam.
+- na konci iba čistá literatúra pre kapitolu.
 
-5. Hlavný akademický text nesmie obsahovať surové OCR fragmenty, napríklad:
+8. Ak používateľ poskytne šablónu, napodobni jej štruktúru:
+- zachovaj dĺžku približne ako šablóna,
+- zachovaj typ odsekov,
+- zachovaj spôsob citovania,
+- zachovaj sekciu s literatúrou,
+- nepíš krátky všeobecný súhrn.
+
+9. Ak používateľ použil rovnaký zdroj Ondrík et al. (2004), pracuj s ním odborne. Nevyťahuj z neho iba všeobecné tvrdenia. Musíš zapracovať konkrétne odborné údaje:
+- amylolytické enzýmy,
+- β-amyláza,
+- diastatická mohutnosť,
+- aktivita enzýmu,
+- termostabilita,
+- gén β-amy1 alebo B-amy1,
+- intrón III,
+- dĺžkové varianty 515 bp a 641 bp,
+- varianty Haruna Nijo, Adorra, Hordeum spontaneum,
+- markerové a funkčné testy,
+- vzťah enzymatickej výbavy zrna k technologickej kvalite.
+
+10. Ak je kapitola širšia, napríklad Úvod, zdroj Ondrík et al. (2004) použi ako podporný zdroj pre analytický rámec, ale text musí byť vystavaný podľa témy práce používateľa:
+- obilniny,
+- pseudoobilniny,
+- bielkoviny,
+- celiakálne aktívne epitopy,
+- analytika,
+- reológia,
+- pečenie,
+- technologická kvalita,
+- zdravotná bezpečnosť.
+
+11. Surový OCR text nikdy nevkladaj do kapitoly.
+
+Zakázané v hlavnej kapitole:
 STRANA 1
 STRANA 2
 Nova Biotechnologica (2004) 245
-neúplné OCR vety
-rozbité medzery v slovách
-duplicitné pasáže z PDF
-technické bloky z extrakcie
-zoznam samostatných autorov bez bibliografického záznamu
+rozbité OCR vety
+duplicitné úryvky
+technické bloky extrakcie
+zoznam autorov bez bibliografického záznamu
 
-6. Text zo Zedpery, OCR alebo PDF používaj iba ako podklad. Musíš ho preformulovať do čistej akademickej kapitoly.
+12. Na konci kapitoly použi iba jednu z týchto sekcií:
 
-7. Ak je v podklade jasne identifikovaný hlavný zdroj, uveď na konci iba relevantný zdroj pre danú kapitolu vo forme:
+Ak ide o kapitolu 1:
+Použitá literatúra pre kapitolu 1
+
+Ak ide o kapitolu 1.1:
 Použitý zdroj pre kapitolu 1.1
 
-Ondrík, P., Mikulíková, D., & Kraic, J. (2004). Závislosť medzi dĺžkovou variabilitou génu B-amy1 a aktivitou β-amylázy jačmeňa. Nova Biotechnologica, 245–253.
+13. Pod sekciou literatúry uveď iba riadne bibliografické záznamy. Nevypisuj technický zoznam A-F.
 
-8. Ak je k dispozícii viac overiteľných zdrojov, uveď ich až v bibliograficky čistej podobe. Nevypisuj neúplné OCR fragmenty ako samostatné zdroje.
+14. Ak sú zdroje citované podľa hlavného zdroja, napíš ich takto:
 
-9. Nepoužívaj všeobecné frázy:
-Abstrakt dizertačnej práce sa zameriava...
-Táto práca sa zaoberá...
-V tejto práci sa analyzujú...
-ak používateľ žiada konkrétnu kapitolu.
+Erkkilä, M. J. (1999). Intron III–specific markers for screening of β-amylase alleles in barley cultivars. Plant Molecular Biology Reporter, 17, 139–147. (citované podľa Ondrík et al., 2004)
 
-10. Používaj vecný akademický výklad:
-- definícia témy,
-- odborný kontext,
-- mechanizmus,
-- význam pre oblasť,
-- empirické zistenia zo zdroja,
-- metodické súvislosti,
-- napojenie na tému práce,
-- syntetický záver odseku.
+Kaneko, T., Kihara, M., & Ito, K. (2000). Genetic analysis of beta-amylase thermostability to develop a DNA marker for malt fermentability improvement in barley, Hordeum vulgare. Plant Breeding, 119, 197–201. (citované podľa Ondrík et al., 2004)
 
-11. Citácie v texte píš priebežne, napríklad:
-(Ondrík, Mikulíková, & Kraic, 2004)
-alebo
-(Ondrík et al., 2004)
+Ondrík, P., Mikulíková, D., & Kraic, J. (2004). Závislosť medzi dĺžkovou variabilitou génu β-amy1 a aktivitou β-amylázy jačmeňa. Nova Biotechnologica, 245–253.
 
-12. Ak používateľ chce štruktúru ako vzor hore a text zo Zedpery nižšie, hlavný výstup musí vyzerať ako vzor hore, nie ako surový výstup zo Zedpery.
+15. Výstup kapitoly nesmie byť krátky. Ak používateľ poskytne dlhú šablónu, výstup musí byť podobne rozsiahly.
 
-13. Ak je požiadavka kapitola, v sekcii === VÝSTUP === uveď iba čistú kapitolu v tomto formáte:
+POVINNÝ TVAR PRE KAPITOLU 1:
 
-1.1 Názov kapitoly
+1. Úvod
 
-Prvý odborný odsek.
+[dlhý odborný odsek]
 
-Druhý odborný odsek.
+[dlhý odborný odsek s citáciou]
 
-Ďalšie odborné odseky.
+[ďalšie odborné odseky]
+
+Cieľom kapitoly je tiež zarámcovať metodické a obsahové smerovanie dizertačnej práce. V jadre budú sledované tieto výskumné otázky:
+1) ...
+2) ...
+3) ...
+4) ...
+
+Metodologické východiská budú vychádzať z normovaných postupov a validácie. Dôraz bude kladený na:
+- ...
+- ...
+- ...
+
+Praktický prínos sa očakáva v troch rovinách. ...
+
+Štruktúra práce na uvedené ciele nadviaže takto: ...
+
+Použitá literatúra pre kapitolu 1
+
+[bibliografické záznamy]
+
+POVINNÝ TVAR PRE KAPITOLU 1.1:
+
+1.1 Konkrétny odborný názov kapitoly
+
+[dlhý odborný odsek]
+
+[dlhý odborný odsek s citáciou]
+
+[ďalšie odborné odseky]
 
 Použitý zdroj pre kapitolu 1.1
 
-Bibliografický záznam.
-
-14. V kapitole nepoužívaj Markdown znaky, hviezdičky, mriežky ani kódové bloky.
+[bibliografický záznam]
 `.trim();
 }
 
@@ -1497,7 +1619,6 @@ function buildSystemPrompt({
   const workLanguage = getWorkLanguage(profile);
   const citationStyle = getCitationStyle(profile);
   const hasAttachments = attachmentTexts.length > 0;
-
   const chapterRules = buildAcademicChapterRules();
 
   const prompt = `
@@ -1513,7 +1634,7 @@ HLAVNÝ POSTUP:
 1. Najprv vychádzaj z uloženého profilu práce.
 2. Potom použi extrahovaný text z príloh a dokumentov.
 3. Ak existuje extrahovaný text, použi ho pred všeobecnými znalosťami AI.
-4. Ak existujú detegované zdroje, autorov a publikácie musíš vypísať v sekcii POUŽITÉ ZDROJE A AUTORI, ale pri kapitole nesmieš miešať surové OCR fragmenty do hlavného textu.
+4. Ak ide o kapitolu, nepíš technické sekcie, ale iba čistý akademický text kapitoly.
 5. Nevymýšľaj zdroje, autorov, DOI, URL, roky, vydavateľov ani čísla strán.
 6. Ak údaj chýba, napíš: údaj je potrebné overiť.
 7. Semantic Scholar je vypnutý.
@@ -1606,11 +1727,11 @@ C. Formátované bibliografické záznamy
 D. Priložené dokumenty použité ako podklad
 E. Upozornenia k nerelevantným alebo neoveriteľným prílohám
 F. Zdroje, ktoré treba overiť alebo doplniť
-3. Pri kapitole v hlavnom výstupe uveď iba čistú sekciu Použitý zdroj pre kapitolu ${requestedChapterNumber || 'X.X'} a bibliografický záznam relevantného zdroja.
-4. Ak boli nájdené iba mená autorov bez úplných publikácií, vypíš ich mimo hlavnej kapitoly a uveď, že bibliografický záznam treba doplniť.
-5. Ak boli nájdené DOI alebo URL, vypíš ich presne.
+3. Pri kapitole v hlavnom výstupe uveď iba čistú bibliografickú sekciu podľa čísla kapitoly.
+4. Ak boli nájdené iba mená autorov bez úplných publikácií, nevkladaj ich do hlavnej kapitoly ako samostatné zdroje.
+5. Ak boli nájdené DOI alebo URL, vypíš ich presne iba vtedy, ak patria do riadneho bibliografického záznamu.
 6. Ak je príloha nesúvisiaca s profilom práce, nepoužívaj ju ako odborný zdroj.
-7. Ak neboli dodané overiteľné zdroje, uveď: Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI modelu. Neboli dodané overiteľné priložené zdroje.
+7. Ak neboli dodané overiteľné zdroje, uveď pri bežnej odpovedi: Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI modelu. Neboli dodané overiteľné priložené zdroje.
 
 NASTAVENIA:
 Kontrola príloh podľa profilu práce: ${settings.validateAttachmentsAgainstProfile ? 'áno' : 'nie'}
@@ -1619,9 +1740,26 @@ Povolené všeobecné znalosti AI: ${settings.allowAiKnowledgeFallback ? 'áno' 
 Zdrojový režim: ${settings.sourceMode}
 
 FORMÁT ODPOVEDE:
-Použi presne tieto sekcie. Nepoužívaj Markdown znaky.
 
-Ak je aktívny špeciálny režim kapitoly, potom v sekcii === VÝSTUP === musí byť čistá akademická kapitola podľa šablóny. Nesmie začínať slovom Abstrakt a nesmie obsahovať surový OCR text.
+Ak je AKTÍVNY ŠPECIÁLNY REŽIM KAPITOLY = Áno, NEPOUŽÍVAJ žiadne technické sekcie.
+
+V takom prípade vráť iba samotnú kapitolu v akademickom tvare podľa šablóny používateľa.
+
+Pri kapitole nesmieš písať:
+=== VÝSTUP ===
+=== ANALÝZA ===
+=== SKÓRE ===
+=== ODPORÚČANIA ===
+=== POUŽITÉ ZDROJE A AUTORI ===
+Použité zdroje
+A. Detegované zdroje z extrahovaného textu
+B. Autori nájdení v dokumentoch
+C. Formátované bibliografické záznamy
+D. Priložené dokumenty použité ako podklad
+E. Upozornenia k nerelevantným alebo neoveriteľným prílohám
+F. Zdroje, ktoré treba overiť alebo doplniť
+
+Ak je AKTÍVNY ŠPECIÁLNY REŽIM KAPITOLY = Nie, použi tento bežný formát:
 
 === VÝSTUP ===
 Sem napíš hlavný výstup ako čistý akademický text.
@@ -1679,23 +1817,57 @@ function removeAfterForbiddenHeading(text: string, headings: string[]) {
 function cleanAcademicChapterOutput(text: string) {
   let output = normalizeText(text);
 
+  output = output
+    .replace(/^===\s*VÝSTUP\s*===\s*/i, '')
+    .replace(/^VÝSTUP\s*:\s*/i, '')
+    .trim();
+
   output = output.replace(
     /^KAPITOLA\s+(\d+(?:\.\d+)*)\s*[:\-–—]\s*Abstrakt\s*/i,
-    '$1 Odborná kapitola\n\n',
+    '$1 Úvod\n\n',
   );
 
   output = output.replace(
     /^(\d+(?:\.\d+)*)\s*[:\-–—]\s*Abstrakt\s*/i,
-    '$1 Odborná kapitola\n\n',
+    '$1 Úvod\n\n',
+  );
+
+  output = output.replace(
+    /^(\d+(?:\.\d+)*)\s+Odborný\s+názov\s+kapitoly\s*/i,
+    '$1 Úvod\n\n',
   );
 
   output = output.replace(
     /^Abstrakt\s+dizertačnej\s+práce\s+sa\s+zameriava/gi,
-    'Táto kapitola sa zameriava',
+    'V obilninách a pseudoobilninách sa sústreďuje',
   );
+
+  const forbiddenSections = [
+    '=== ANALÝZA ===',
+    '=== SKÓRE ===',
+    '=== ODPORÚČANIA ===',
+    '=== POUŽITÉ ZDROJE A AUTORI ===',
+    'Použité zdroje',
+    'A. Detegované zdroje z extrahovaného textu',
+    'A Detegované zdroje z extrahovaného textu',
+    'B. Autori nájdení v dokumentoch',
+    'C. Formátované bibliografické záznamy',
+    'D. Priložené dokumenty použité ako podklad',
+    'E. Upozornenia',
+    'F. Zdroje, ktoré treba overiť',
+  ];
+
+  for (const section of forbiddenSections) {
+    const index = output.toLowerCase().indexOf(section.toLowerCase());
+
+    if (index > 0) {
+      output = output.slice(0, index).trim();
+    }
+  }
 
   output = output.replace(/\n\s*STRANA\s+\d+\s+/gi, '\n');
   output = output.replace(/\n\s*PAGE\s+\d+\s+/gi, '\n');
+  output = output.replace(/\n{4,}/g, '\n\n\n');
 
   return normalizeText(output);
 }
@@ -1871,24 +2043,32 @@ function getFallbackModel(): ModelResult {
   throw new Error('Nie je nastavený žiadny AI provider. Doplň aspoň jeden API kľúč.');
 }
 
-function isModelNotFoundError(error: unknown) {
-  if (!(error instanceof Error)) return false;
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
 
-  const message = error.message.toLowerCase();
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'Neznáma chyba.';
+  }
+}
+
+function isModelNotFoundError(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase();
 
   return (
     message.includes('model') &&
     (message.includes('not found') ||
       message.includes('404') ||
       message.includes('not supported') ||
-      message.includes('invalid model'))
+      message.includes('invalid model') ||
+      message.includes('not found for api version'))
   );
 }
 
 function isContextWindowError(error: unknown) {
-  if (!(error instanceof Error)) return false;
-
-  const message = error.message.toLowerCase();
+  const message = getErrorMessage(error).toLowerCase();
 
   return (
     message.includes('context window') ||
@@ -1896,9 +2076,206 @@ function isContextWindowError(error: unknown) {
     message.includes('input exceeds') ||
     message.includes('too many tokens') ||
     message.includes('token limit') ||
-    message.includes('prompt is too long')
+    message.includes('prompt is too long') ||
+    message.includes('input is too long') ||
+    message.includes('maximum number of tokens')
   );
 }
+
+// ================= SLOVAK ERROR RESPONSES =================
+
+function translateApiErrorToSlovak(error: unknown): SlovakApiError {
+  const rawMessage =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : 'Neznáma chyba servera.';
+
+  const message = rawMessage.toLowerCase();
+
+  if (
+    message.includes('model is not found') ||
+    message.includes('model not found') ||
+    message.includes('not found for api version') ||
+    message.includes('invalid model') ||
+    message.includes('not supported') ||
+    (message.includes('model') && message.includes('404'))
+  ) {
+    return {
+      code: 'MODEL_NOT_FOUND',
+      message:
+        'Zvolený AI model sa nepodarilo nájsť alebo nie je dostupný pre aktuálnu verziu API.',
+      detail:
+        'Skontroluj názov modelu v .env súbore alebo dočasne prepni model na Gemini alebo OpenAI.',
+      rawMessage,
+    };
+  }
+
+  if (
+    message.includes('unauthorized') ||
+    message.includes('invalid api key') ||
+    message.includes('incorrect api key') ||
+    message.includes('authentication') ||
+    message.includes('401')
+  ) {
+    return {
+      code: 'INVALID_API_KEY',
+      message:
+        'API kľúč je neplatný, chýba alebo nemá oprávnenie na použitie zvoleného AI modelu.',
+      detail:
+        'Skontroluj API kľúč v nastaveniach prostredia, napríklad OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, MISTRAL_API_KEY alebo XAI_API_KEY.',
+      rawMessage,
+    };
+  }
+
+  if (
+    message.includes('forbidden') ||
+    message.includes('permission') ||
+    message.includes('access denied') ||
+    message.includes('403')
+  ) {
+    return {
+      code: 'ACCESS_DENIED',
+      message: 'Prístup k zvolenému AI modelu alebo službe bol zamietnutý.',
+      detail:
+        'Skontroluj oprávnenia účtu, dostupnosť modelu a billing u poskytovateľa AI služby.',
+      rawMessage,
+    };
+  }
+
+  if (
+    message.includes('rate limit') ||
+    message.includes('too many requests') ||
+    message.includes('quota') ||
+    message.includes('429')
+  ) {
+    return {
+      code: 'RATE_LIMIT',
+      message: 'Bol prekročený limit požiadaviek alebo kreditov pre AI službu.',
+      detail:
+        'Skús požiadavku zopakovať neskôr alebo skontroluj limity a kredity u poskytovateľa AI služby.',
+      rawMessage,
+    };
+  }
+
+  if (isContextWindowError(error)) {
+    return {
+      code: 'CONTEXT_TOO_LARGE',
+      message: 'Vstup je príliš veľký pre kontextové okno AI modelu.',
+      detail:
+        'Skráť text, zmenši počet príloh alebo neposielaj extrahovaný text duplicitne v správe aj v samostatnom poli.',
+      rawMessage,
+    };
+  }
+
+  if (
+    message.includes('fetch failed') ||
+    message.includes('failed to fetch') ||
+    message.includes('network') ||
+    message.includes('timeout') ||
+    message.includes('etimedout') ||
+    message.includes('econnreset')
+  ) {
+    return {
+      code: 'NETWORK_ERROR',
+      message:
+        'Nepodarilo sa spojiť s AI službou alebo server prekročil časový limit.',
+      detail:
+        'Skús požiadavku zopakovať. Ak chyba pretrváva, skontroluj internetové pripojenie, Vercel logy alebo dostupnosť poskytovateľa AI.',
+      rawMessage,
+    };
+  }
+
+  if (
+    message.includes('billing') ||
+    message.includes('insufficient_quota') ||
+    message.includes('insufficient quota') ||
+    message.includes('credits')
+  ) {
+    return {
+      code: 'BILLING_ERROR',
+      message: 'AI účet nemá aktívny billing alebo dostatočný kredit.',
+      detail: 'Skontroluj fakturáciu, kredit alebo plán u poskytovateľa AI služby.',
+      rawMessage,
+    };
+  }
+
+  if (
+    message.includes('chýba openai_api_key') ||
+    message.includes('chýba anthropic_api_key') ||
+    message.includes('chýba google_generative_ai_api_key') ||
+    message.includes('chýba mistral_api_key') ||
+    message.includes('chýba xai_api_key') ||
+    message.includes('nie je nastavený žiadny ai provider')
+  ) {
+    return {
+      code: 'MISSING_API_KEY',
+      message: 'Chýba API kľúč pre zvoleného AI poskytovateľa.',
+      detail:
+        'Doplň potrebný API kľúč do .env alebo do nastavení vo Verceli a potom redeployni projekt.',
+      rawMessage,
+    };
+  }
+
+  if (
+    message.includes('gzip_decompression_failed') ||
+    message.includes('gunzip') ||
+    message.includes('incorrect header check')
+  ) {
+    return {
+      code: 'GZIP_DECOMPRESSION_FAILED',
+      message: 'Komprimovaný súbor sa nepodarilo rozbaliť.',
+      detail:
+        'Skontroluj, či je súbor skutočne vo formáte gzip alebo ho odošli ako pôvodný dokument bez kompresie.',
+      rawMessage,
+    };
+  }
+
+  return {
+    code: 'AI_API_ERROR',
+    message: 'AI služba vrátila chybu pri spracovaní požiadavky.',
+    detail: 'Detail technickej chyby je dostupný v serverových logoch.',
+    rawMessage,
+  };
+}
+
+function jsonErrorResponse(error: SlovakApiError, status: number) {
+  return NextResponse.json(
+    {
+      ok: false,
+      code: error.code,
+      message: error.message,
+      detail: error.detail,
+      rawMessage: error.rawMessage,
+    },
+    { status },
+  );
+}
+
+function jsonSimpleErrorResponse({
+  code,
+  message,
+  detail,
+  status,
+}: {
+  code: string;
+  message: string;
+  detail: string;
+  status: number;
+}) {
+  return NextResponse.json(
+    {
+      ok: false,
+      code,
+      message,
+      detail,
+    },
+    { status },
+  );
+}
+
+// ================= AI RESPONSE HELPERS =================
 
 async function createStreamResponse({
   model,
@@ -2091,7 +2468,11 @@ export async function POST(req: Request) {
     }
 
     if (!isAllowedAgent(rawAgent)) {
-      return new Response(`Neznámy AI agent: ${String(rawAgent)}`, {
+      return jsonSimpleErrorResponse({
+        code: 'UNKNOWN_AGENT',
+        message: `Neznámy AI agent: ${String(rawAgent)}.`,
+        detail:
+          'Použi jeden z podporovaných agentov: openai, claude, gemini, grok alebo mistral.',
         status: 400,
       });
     }
@@ -2100,7 +2481,11 @@ export async function POST(req: Request) {
     const normalizedMessages = normalizeMessages(messages);
 
     if (normalizedMessages.length === 0) {
-      return new Response('Chýbajú správy pre AI.', {
+      return jsonSimpleErrorResponse({
+        code: 'MISSING_MESSAGES',
+        message: 'Chýbajú správy pre AI.',
+        detail:
+          'Frontend musí odoslať aspoň jednu používateľskú správu v poli messages.',
         status: 400,
       });
     }
@@ -2109,17 +2494,15 @@ export async function POST(req: Request) {
     const isChapterRequest = isAcademicChapterRequest(normalizedMessages);
     const requestedChapterNumber = detectChapterNumberFromText(lastUserMessage);
 
-    const {
-      extractedFiles,
-      attachmentTexts: uploadedAttachmentTexts,
-    } = await extractAttachmentTexts({
-      files,
-      preparedFilesMetadata,
-      clientExtractedText,
-      preparedFilesSummary,
-      clientDetectedSourcesSummary,
-      clientDetectedSources,
-    });
+    const { extractedFiles, attachmentTexts: uploadedAttachmentTexts } =
+      await extractAttachmentTexts({
+        files,
+        preparedFilesMetadata,
+        clientExtractedText,
+        preparedFilesSummary,
+        clientDetectedSourcesSummary,
+        clientDetectedSources,
+      });
 
     console.log(
       'EXTRACTED_FILES_DEBUG:',
@@ -2180,9 +2563,7 @@ ${extractedText ? limitMiddle(extractedText, maxProjectDocumentChars) : '[Dokume
     const settings: SourceSettings = {
       sourceMode,
       validateAttachmentsAgainstProfile,
-      requireSourceList: isStrictNoAcademicTailModule(module)
-        ? false
-        : requireSourceList,
+      requireSourceList: isStrictNoAcademicTailModule(module) ? false : requireSourceList,
       allowAiKnowledgeFallback:
         module === 'translation' ? false : allowAiKnowledgeFallback,
     };
@@ -2199,7 +2580,7 @@ ${extractedText ? limitMiddle(extractedText, maxProjectDocumentChars) : '[Dokume
     try {
       const primary = getModelByAgent(agent);
 
-      if (returnExtractedFilesInfo) {
+      if (returnExtractedFilesInfo || isChapterRequest) {
         return await createJsonResponse({
           model: primary.model,
           systemPrompt,
@@ -2220,10 +2601,7 @@ ${extractedText ? limitMiddle(extractedText, maxProjectDocumentChars) : '[Dokume
       console.error('PRIMARY_MODEL_ERROR:', primaryError);
 
       if (isContextWindowError(primaryError)) {
-        return new Response(
-          `API error 413: Vstup je stále príliš veľký pre kontextové okno modelu. Skrátil som text v /api/chat, ale treba ešte zmenšiť vstup vo frontende: neposielaj EXTRAHOVANÝ TEXT Z PRÍLOH aj v messages aj v clientExtractedText. Stačí posielať clientExtractedText a v messages iba krátku požiadavku používateľa.`,
-          { status: 413 },
-        );
+        return jsonErrorResponse(translateApiErrorToSlovak(primaryError), 413);
       }
 
       if (!isModelNotFoundError(primaryError)) {
@@ -2241,24 +2619,20 @@ TECHNICKÁ POZNÁMKA:
 Vybraný model nebol dostupný alebo bol odmietnutý poskytovateľom.
 Odpovedáš cez náhradný model: ${fallback.providerLabel}.
 
-Aj pri náhradnom modeli musíš dodržať sekciu:
-=== POUŽITÉ ZDROJE A AUTORI ===
-
-Ak bol text z príloh extrahovaný, použi ho ako prvý zdrojový podklad.
-Ak je dostupný blok DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE, vypíš autorov, publikácie, roky, DOI a URL.
-Semantic Scholar je vypnutý.
-
 Ak používateľ žiada kapitolu, dodrž špeciálny režim kapitoly:
+- vráť iba samotnú kapitolu,
 - nezačni slovom Abstrakt,
 - nepíš KAPITOLA X.X: Abstrakt,
-- v sekcii === VÝSTUP === vytvor čistú akademickú kapitolu,
+- nepíš technické sekcie ANALÝZA, SKÓRE, ODPORÚČANIA ani POUŽITÉ ZDROJE A AUTORI,
 - OCR text použi iba ako podklad,
-- na konci hlavnej kapitoly uveď Použitý zdroj pre kapitolu ${requestedChapterNumber || 'X.X'}.
+- na konci hlavnej kapitoly uveď iba čistú bibliografickú sekciu podľa čísla kapitoly.
+
+Ak používateľ nežiadal kapitolu, dodrž bežný formát odpovede vrátane sekcie POUŽITÉ ZDROJE A AUTORI.
 `,
             maxSystemPromptChars,
           );
 
-      if (returnExtractedFilesInfo) {
+      if (returnExtractedFilesInfo || isChapterRequest) {
         return await createJsonResponse({
           model: fallback.model,
           systemPrompt: fallbackSystemPrompt,
@@ -2279,11 +2653,6 @@ Ak používateľ žiada kapitolu, dodrž špeciálny režim kapitoly:
   } catch (error) {
     console.error('CHAT_API_ERROR:', error);
 
-    const message =
-      error instanceof Error ? error.message : 'Neznáma chyba servera v /api/chat';
-
-    return new Response(`API error 500: ${message}`, {
-      status: 500,
-    });
+    return jsonErrorResponse(translateApiErrorToSlovak(error), 500);
   }
 }

@@ -43,6 +43,15 @@ type FileProcessingStatus =
   | 'ready'
   | 'error';
 
+type InTextCitation = {
+  raw: string;
+  authorText: string;
+  authors: string[];
+  year: string;
+  key: string;
+  count: number;
+};
+
 type BibliographicCandidate = {
   raw: string;
   authors: string[];
@@ -51,6 +60,10 @@ type BibliographicCandidate = {
   doi: string | null;
   url: string | null;
   sourceType: 'book' | 'article' | 'web' | 'software' | 'unknown';
+  citationKey?: string;
+  inTextCitations?: InTextCitation[];
+  occurrenceCount?: number;
+  matchedFromText?: boolean;
 };
 
 type ExtractTextApiResponse = {
@@ -113,6 +126,7 @@ type PreparedFile = {
   extractionMethod?: string;
   extractionMessage?: string;
   detectedSources: BibliographicCandidate[];
+  inTextCitations: InTextCitation[];
   detectedAuthors: string[];
   formattedSources: string;
   extractionStatus:
@@ -134,6 +148,7 @@ type ProcessingLogItem = {
   extractedChars?: number;
   detectedSourcesCount?: number;
   detectedAuthorsCount?: number;
+  detectedInTextCitationsCount?: number;
   warning?: string;
 };
 
@@ -243,11 +258,15 @@ const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 const maxCompressedFileSizeBytes = 1 * 1024 * 1024;
 const safeCompressedTargetBytes = 950 * 1024;
 
+// Dôležité: nech neposielame celý 90-stranový dokument do AI.
+// Zdroje a citácie pošleme celé v štruktúrovanej forme, text len skrátene.
 const maxClientExtractedCharsPerFile = 25_000;
 const maxTotalExtractedContextChars = 60_000;
-const maxDetectedSourcesForChat = 80;
-const maxDetectedAuthorsForChat = 80;
+const maxDetectedSourcesForChat = 120;
+const maxDetectedAuthorsForChat = 120;
+const maxInTextCitationsForChat = 200;
 
+// Musíš mať lokálne vo verejnom priečinku: public/pdfjs/pdf.worker.min.mjs
 const pdfWorkerSrc = '/pdfjs/pdf.worker.min.mjs';
 
 const agents: { key: Agent; label: string }[] = [
@@ -290,7 +309,7 @@ const suggestions: {
   {
     title: 'Spracuj zdroje a citácie',
     instruction:
-      'Správaj sa ako citačná špecialistka. Analyzuj priložené dokumenty a profil práce. Identifikuj zdroje, autorov, roky, názvy diel, DOI, URL a priprav ich podľa citačnej normy z profilu. Nevymýšľaj zdroje.',
+      'Správaj sa ako citačná špecialistka. Analyzuj priložené dokumenty a profil práce. Identifikuj všetky citácie priamo v texte, autorov, roky, názvy diel, DOI, URL a priprav ich podľa citačnej normy z profilu. Nevymýšľaj zdroje.',
     icon: Library,
   },
   {
@@ -353,6 +372,8 @@ function cleanAiOutput(text: string) {
     .replace(/\u200C/g, '')
     .replace(/\u200D/g, '')
     .replace(/\u0000/g, '')
+    .replace(/[ŢȚ]/g, 'Ž')
+    .replace(/[ţț]/g, 'ž')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/^#{1,6}\s+/gm, '')
@@ -812,6 +833,200 @@ async function extractPdfTextInBrowser(file: File) {
 
 // ================= SOURCE DETECTION =================
 
+function normalizeSlovakCitationText(value: string) {
+  return String(value || '')
+    .replace(/[ŢȚ]/g, 'Ž')
+    .replace(/[ţț]/g, 'ž')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeCitationKeyPart(value: string) {
+  return normalizeSlovakCitationText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\bET\s+AL\.?/g, '')
+    .replace(/\bA\s+KOL\.?/g, '')
+    .replace(/\bAND\b/g, ' ')
+    .replace(/\bA\b/g, ' ')
+    .replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeAuthorDisplay(value: string) {
+  const cleaned = normalizeSlovakCitationText(value)
+    .replace(/\bet al\.?/gi, 'et al.')
+    .replace(/\ba kol\.?/gi, 'a kol.')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) return '';
+
+  if (cleaned.includes(',')) {
+    return cleaned
+      .split(',')
+      .map((part) => part.trim())
+      .map((part, index) => {
+        if (index === 0 && part === part.toUpperCase() && part.length > 2) {
+          return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+        }
+        return part;
+      })
+      .join(', ');
+  }
+
+  return cleaned
+    .split(/\s+/)
+    .map((part) => {
+      if (part === part.toUpperCase() && part.length > 2) {
+        return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+      }
+
+      return part;
+    })
+    .join(' ');
+}
+
+function extractAuthorsFromCitationAuthorText(authorText: string) {
+  const cleaned = normalizeSlovakCitationText(authorText)
+    .replace(/\bet al\.?/gi, '')
+    .replace(/\ba kol\.?/gi, '')
+    .trim();
+
+  return uniqueArray(
+    cleaned
+      .split(/\s*(?:,|;|&|\ba\b|\band\b)\s*/i)
+      .map((part) => normalizeAuthorDisplay(part))
+      .filter((part) => {
+        if (part.length < 2) return false;
+        if (/^(et|al|kol)$/i.test(part)) return false;
+        if (!/[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]/.test(part)) return false;
+
+        return true;
+      }),
+  );
+}
+
+function buildCitationKey(authors: string[], year: string) {
+  const authorKey = authors
+    .map((author) => normalizeCitationKeyPart(author))
+    .filter(Boolean)
+    .join(' ');
+
+  return `${authorKey}|${year}`;
+}
+
+function extractInTextCitations(text: string): InTextCitation[] {
+  const cleaned = normalizeSlovakCitationText(cleanAiOutput(text));
+
+  const found = new Map<string, InTextCitation>();
+
+  const addCitation = (rawValue: string) => {
+    const raw = normalizeSlovakCitationText(rawValue)
+      .replace(/^\(/, '')
+      .replace(/\)$/, '')
+      .trim();
+
+    if (!raw) return;
+
+    const chunks = raw
+      .split(/\s*;\s*/)
+      .map((chunk) => chunk.trim())
+      .filter(Boolean);
+
+    for (const chunk of chunks) {
+      const match =
+        chunk.match(/^(.{2,160}?)[,\s]+((?:18|19|20)\d{2}[a-z]?)$/i) ||
+        chunk.match(
+          /^(.{2,160}?)[,\s]+((?:18|19|20)\d{2}[a-z]?)(?:\s*[,.:].*)?$/i,
+        );
+
+      if (!match) continue;
+
+      const authorText = normalizeSlovakCitationText(match[1] || '')
+        .replace(/^\s*(pozri|viď|cf\.|see)\s+/i, '')
+        .trim();
+
+      const year = String(match[2] || '').trim();
+
+      if (!authorText || !year) continue;
+
+      if (
+        /^(vol|no|p|s|str|tab|obr|ročník|číslo)$/i.test(authorText) ||
+        authorText.length > 140
+      ) {
+        continue;
+      }
+
+      const authors = extractAuthorsFromCitationAuthorText(authorText);
+
+      if (!authors.length) continue;
+
+      const key = buildCitationKey(authors, year);
+      const existing = found.get(key);
+
+      if (existing) {
+        existing.count += 1;
+        continue;
+      }
+
+      found.set(key, {
+        raw: `(${authorText}, ${year})`,
+        authorText,
+        authors,
+        year,
+        key,
+        count: 1,
+      });
+    }
+  };
+
+  const parentheticalRegex =
+    /\(([^()]{2,280}?\b(?:18|19|20)\d{2}[a-z]?(?:[^()]*)?)\)/gi;
+
+  for (const match of cleaned.matchAll(parentheticalRegex)) {
+    addCitation(match[1] || '');
+  }
+
+  const narrativeRegex =
+    /\b([A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'-]+(?:\s+(?:a|and)\s+[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'-]+|\s+et\s+al\.?|\s+a\s+kol\.?)?)\s*\(((?:18|19|20)\d{2}[a-z]?)\)/gi;
+
+  for (const match of cleaned.matchAll(narrativeRegex)) {
+    const authorText = normalizeSlovakCitationText(match[1] || '');
+    const year = String(match[2] || '').trim();
+    const authors = extractAuthorsFromCitationAuthorText(authorText);
+
+    if (!authors.length || !year) continue;
+
+    const key = buildCitationKey(authors, year);
+    const existing = found.get(key);
+
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+
+    found.set(key, {
+      raw: `${authorText} (${year})`,
+      authorText,
+      authors,
+      year,
+      key,
+      count: 1,
+    });
+  }
+
+  return Array.from(found.values()).sort((a, b) => {
+    const byAuthor = a.authorText.localeCompare(b.authorText, 'sk');
+
+    if (byAuthor !== 0) return byAuthor;
+
+    return a.year.localeCompare(b.year);
+  });
+}
+
 function detectSourceType(line: string): BibliographicCandidate['sourceType'] {
   const lower = line.toLowerCase();
 
@@ -872,25 +1087,46 @@ function extractUrl(line: string) {
 
 function extractYear(line: string) {
   const match =
-    line.match(/\((19|20)\d{2}\)/) ||
-    line.match(/\b(19|20)\d{2}\b/) ||
+    line.match(/\((18|19|20)\d{2}[a-z]?\)/i) ||
+    line.match(/\b(18|19|20)\d{2}[a-z]?\b/i) ||
     line.match(/\bn\.d\.\b/i);
 
   return match?.[0]?.replace(/[()]/g, '') || null;
 }
 
 function extractAuthors(line: string) {
-  const beforeYear = line.split(/\((19|20)\d{2}\)|\b(19|20)\d{2}\b/)[0] || '';
+  const normalizedLine = normalizeSlovakCitationText(line);
+
+  const beforeYear =
+    normalizedLine.split(/\b(18|19|20)\d{2}[a-z]?\b/i)[0] || '';
 
   const cleaned = beforeYear
-    .replace(/\bet al\./gi, '')
-    .replace(/\ba kol\./gi, '')
+    .replace(/\bet al\.?/gi, '')
+    .replace(/\ba kol\.?/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 
+  const authors: string[] = [];
+
+  const surnameInitialRegex =
+    /([A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽA-Za-záäčďéíĺľňóôŕšťúýž.' -]{1,60}),\s*((?:[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]\.\s*){1,5})/g;
+
+  for (const match of cleaned.matchAll(surnameInitialRegex)) {
+    const surname = normalizeAuthorDisplay(match[1] || '');
+    const initials = String(match[2] || '').replace(/\s+/g, ' ').trim();
+
+    if (surname) {
+      authors.push(`${surname}, ${initials}`.trim());
+    }
+  }
+
+  if (authors.length > 0) {
+    return uniqueArray(authors).slice(0, 20);
+  }
+
   const candidates = cleaned
-    .split(/\s*(?:,|;|&|\ba\b|\band\b)\s*/i)
-    .map((part) => part.trim())
+    .split(/\s*(?:;|&|\ba\b|\band\b)\s*/i)
+    .map((part) => normalizeAuthorDisplay(part))
     .filter((part) => {
       if (part.length < 3) return false;
       if (!/[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]/.test(part)) return false;
@@ -898,18 +1134,14 @@ function extractAuthors(line: string) {
         return false;
       }
 
-      return (
-        /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+$/.test(
-          part,
-        ) || /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záäčďéíĺľňóôŕšťúýž]+,\s*[A-Z]/.test(part)
-      );
+      return true;
     });
 
-  return uniqueArray(candidates).slice(0, 12);
+  return uniqueArray(candidates).slice(0, 20);
 }
 
 function extractTitle(line: string) {
-  let working = line.trim();
+  let working = normalizeSlovakCitationText(line.trim());
 
   working = working.replace(/^[-•\d.)\s]+/, '');
   working = working.replace(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi, '');
@@ -924,7 +1156,7 @@ function extractTitle(line: string) {
     return quoted[1].trim();
   }
 
-  const afterYear = working.split(/\((19|20)\d{2}\)|\b(19|20)\d{2}\b/).pop();
+  const afterYear = working.split(/\((18|19|20)\d{2}[a-z]?\)|\b(18|19|20)\d{2}[a-z]?\b/i).pop();
 
   if (afterYear && afterYear.trim().length > 8) {
     return afterYear
@@ -944,19 +1176,19 @@ function extractTitle(line: string) {
 }
 
 function looksLikeBibliographicLine(line: string) {
-  const trimmed = line.trim();
+  const trimmed = normalizeSlovakCitationText(line.trim());
 
   if (trimmed.length < 20) return false;
 
-  const hasYear = /\b(19|20)\d{2}\b|\bn\.d\.\b/i.test(trimmed);
+  const hasYear = /\b(18|19|20)\d{2}[a-z]?\b|\bn\.d\.\b/i.test(trimmed);
   const hasDoi = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i.test(trimmed);
   const hasUrl = /https?:\/\/|www\./i.test(trimmed);
   const hasCitationWords =
-    /publisher|journal|doi|isbn|vydavateľ|časopis|university|press|jasp|spss|software|available|dostupné|retrieved|vol\.|volume|issue|pages|pp\./i.test(
+    /publisher|journal|doi|isbn|vydavateľ|časopis|university|press|jasp|spss|software|available|dostupné|retrieved|vol\.|volume|issue|pages|pp\.|p\.|s\.|in\s/i.test(
       trimmed,
     );
   const hasAuthorPattern =
-    /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+,\s*[A-Z]/.test(
+    /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽA-Za-záäčďéíĺľňóôŕšťúýž.' -]+,\s*[A-Z]/.test(
       trimmed,
     ) ||
     /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+\s+\([12]\d{3}\)/.test(
@@ -983,11 +1215,11 @@ function extractBibliographicCandidates(text: string) {
 
     joinedMultilineCandidates.push(current);
 
-    if (current.length < 180 && next) {
+    if (current.length < 220 && next) {
       joinedMultilineCandidates.push(`${current} ${next}`.trim());
     }
 
-    if (current.length < 140 && next && next2) {
+    if (current.length < 180 && next && next2) {
       joinedMultilineCandidates.push(`${current} ${next} ${next2}`.trim());
     }
   }
@@ -997,28 +1229,157 @@ function extractBibliographicCandidates(text: string) {
   for (const line of joinedMultilineCandidates) {
     if (!looksLikeBibliographicLine(line)) continue;
 
+    const authors = extractAuthors(line);
+    const year = extractYear(line);
+
     candidates.push({
-      raw: line.slice(0, 1000),
-      authors: extractAuthors(line),
-      year: extractYear(line),
+      raw: normalizeSlovakCitationText(line).slice(0, 1000),
+      authors,
+      year,
       title: extractTitle(line),
       doi: extractDoi(line),
       url: extractUrl(line),
       sourceType: detectSourceType(line),
+      citationKey: authors.length && year ? buildCitationKey(authors, year) : undefined,
     });
   }
 
-  const unique = new Map<string, BibliographicCandidate>();
+  return mergeSources(candidates).slice(0, 300);
+}
 
-  for (const item of candidates) {
-    const key = `${item.raw.slice(0, 180)}-${item.doi || ''}-${item.url || ''}`;
+function getSourceCitationKey(source: BibliographicCandidate) {
+  if (source.citationKey) return source.citationKey;
 
-    if (!unique.has(key)) {
-      unique.set(key, item);
+  if (!source.authors.length || !source.year) return '';
+
+  return buildCitationKey(source.authors, source.year);
+}
+
+function mergeSources(sources: BibliographicCandidate[]) {
+  const map = new Map<string, BibliographicCandidate>();
+
+  for (const source of sources) {
+    const key =
+      getSourceCitationKey(source) ||
+      [
+        source.raw?.slice(0, 180),
+        source.doi || '',
+        source.url || '',
+        source.title || '',
+        source.year || '',
+      ]
+        .join('|')
+        .toLowerCase();
+
+    const existing = map.get(key);
+
+    if (!existing) {
+      map.set(key, source);
+      continue;
+    }
+
+    map.set(key, {
+      ...existing,
+      raw: existing.raw.length >= source.raw.length ? existing.raw : source.raw,
+      authors: uniqueArray([...existing.authors, ...source.authors]),
+      year: existing.year || source.year,
+      title:
+        existing.title && existing.title !== 'údaj je potrebné overiť'
+          ? existing.title
+          : source.title,
+      doi: existing.doi || source.doi,
+      url: existing.url || source.url,
+      sourceType:
+        existing.sourceType !== 'unknown' ? existing.sourceType : source.sourceType,
+      inTextCitations: [
+        ...(existing.inTextCitations || []),
+        ...(source.inTextCitations || []),
+      ],
+      occurrenceCount:
+        (existing.occurrenceCount || 0) + (source.occurrenceCount || 0),
+      matchedFromText: existing.matchedFromText || source.matchedFromText,
+    });
+  }
+
+  return Array.from(map.values());
+}
+
+function pairInTextCitationsWithBibliography({
+  citations,
+  bibliography,
+}: {
+  citations: InTextCitation[];
+  bibliography: BibliographicCandidate[];
+}) {
+  const bibliographyByKey = new Map<string, BibliographicCandidate>();
+
+  for (const item of bibliography) {
+    const key = getSourceCitationKey(item);
+
+    if (key && !bibliographyByKey.has(key)) {
+      bibliographyByKey.set(key, item);
     }
   }
 
-  return Array.from(unique.values()).slice(0, 250);
+  const result: BibliographicCandidate[] = [];
+
+  for (const citation of citations) {
+    const matched = bibliographyByKey.get(citation.key);
+
+    if (matched) {
+      result.push({
+        ...matched,
+        citationKey: citation.key,
+        inTextCitations: [...(matched.inTextCitations || []), citation],
+        occurrenceCount: (matched.occurrenceCount || 0) + citation.count,
+        matchedFromText: true,
+      });
+
+      continue;
+    }
+
+    result.push({
+      raw: citation.raw,
+      authors: citation.authors,
+      year: citation.year,
+      title: 'údaj je potrebné overiť',
+      doi: null,
+      url: null,
+      sourceType: 'unknown',
+      citationKey: citation.key,
+      inTextCitations: [citation],
+      occurrenceCount: citation.count,
+      matchedFromText: true,
+    });
+  }
+
+  for (const item of bibliography) {
+    const key = getSourceCitationKey(item);
+    const alreadyIncluded = result.some(
+      (source) => getSourceCitationKey(source) === key && key,
+    );
+
+    if (!alreadyIncluded) {
+      result.push(item);
+    }
+  }
+
+  return mergeSources(result);
+}
+
+function formatInTextCitations(citations: InTextCitation[]) {
+  if (!citations.length) {
+    return 'Neboli automaticky nájdené žiadne citácie v texte.';
+  }
+
+  return citations
+    .map((citation, index) => {
+      return `${index + 1}. ${citation.raw}
+Autori v texte: ${citation.authors.join(', ')}
+Rok: ${citation.year}
+Počet výskytov: ${citation.count}`;
+    })
+    .join('\n\n');
 }
 
 function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
@@ -1028,6 +1389,12 @@ function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
 
   return candidates
     .map((item, index) => {
+      const citationInfo = item.inTextCitations?.length
+        ? `\nCitácie v texte: ${item.inTextCitations
+            .map((citation) => citation.raw)
+            .join('; ')}\nPočet výskytov v texte: ${item.occurrenceCount || item.inTextCitations.length}`
+        : '';
+
       return `${index + 1}. Pôvodný záznam:
 ${item.raw}
 
@@ -1036,7 +1403,7 @@ Rok: ${item.year || 'údaj je potrebné overiť'}
 Názov publikácie / zdroja: ${item.title || 'údaj je potrebné overiť'}
 Typ zdroja: ${item.sourceType}
 DOI: ${item.doi || 'neuvedené'}
-URL: ${item.url || 'neuvedené'}`;
+URL: ${item.url || 'neuvedené'}${citationInfo}`;
     })
     .join('\n\n');
 }
@@ -1050,7 +1417,7 @@ function normalizeAuthors(value: unknown): string[] {
     return uniqueArray(
       value
         .split(/\n|,|;|\band\b|\ba\b/gi)
-        .map((item) => item.trim()),
+        .map((item) => normalizeAuthorDisplay(item.trim())),
     );
   }
 
@@ -1061,23 +1428,33 @@ function normalizeDetectedSources(value: unknown): BibliographicCandidate[] {
   if (!Array.isArray(value)) return [];
 
   return value
-    .map((item: any) => ({
-      raw: String(item?.raw || item?.citation || item?.text || '').trim(),
-      authors: normalizeAuthors(item?.authors),
-      year: item?.year ? String(item.year) : null,
-      title: item?.title ? String(item.title) : null,
-      doi: item?.doi ? String(item.doi) : null,
-      url: item?.url ? String(item.url) : null,
-      sourceType:
-        item?.sourceType === 'book' ||
-        item?.sourceType === 'article' ||
-        item?.sourceType === 'web' ||
-        item?.sourceType === 'software' ||
-        item?.sourceType === 'unknown'
-          ? item.sourceType
-          : 'unknown',
-    }))
-    .filter((item) => item.raw || item.authors.length || item.title || item.doi || item.url);
+    .map((item: any) => {
+      const authors = normalizeAuthors(item?.authors);
+      const year = item?.year ? String(item.year) : null;
+
+      return {
+        raw: normalizeSlovakCitationText(
+          String(item?.raw || item?.citation || item?.text || ''),
+        ).trim(),
+        authors,
+        year,
+        title: item?.title ? String(item.title) : null,
+        doi: item?.doi ? String(item.doi) : null,
+        url: item?.url ? String(item.url) : null,
+        sourceType:
+          item?.sourceType === 'book' ||
+          item?.sourceType === 'article' ||
+          item?.sourceType === 'web' ||
+          item?.sourceType === 'software' ||
+          item?.sourceType === 'unknown'
+            ? item.sourceType
+            : 'unknown',
+        citationKey: authors.length && year ? buildCitationKey(authors, year) : undefined,
+      } satisfies BibliographicCandidate;
+    })
+    .filter(
+      (item) => item.raw || item.authors.length || item.title || item.doi || item.url,
+    );
 }
 
 function extractTextFromExtractApi(data: ExtractTextApiResponse) {
@@ -1116,34 +1493,45 @@ function extractFormattedSourcesFromExtractApi(data: ExtractTextApiResponse) {
   );
 }
 
-function mergeSources(sources: BibliographicCandidate[]) {
-  const map = new Map<string, BibliographicCandidate>();
-
-  for (const source of sources) {
-    const key = [
-      source.raw?.slice(0, 180),
-      source.doi || '',
-      source.url || '',
-      source.title || '',
-      source.year || '',
-    ]
-      .join('|')
-      .toLowerCase();
-
-    if (!map.has(key)) {
-      map.set(key, source);
-    }
-  }
-
-  return Array.from(map.values());
-}
-
 function flattenDetectedSources(preparedFiles: PreparedFile[]) {
   return mergeSources(preparedFiles.flatMap((file) => file.detectedSources || []));
 }
 
+function flattenInTextCitations(preparedFiles: PreparedFile[]) {
+  const map = new Map<string, InTextCitation>();
+
+  for (const citation of preparedFiles.flatMap(
+    (file) => file.inTextCitations || [],
+  )) {
+    const existing = map.get(citation.key);
+
+    if (existing) {
+      existing.count += citation.count;
+      continue;
+    }
+
+    map.set(citation.key, { ...citation });
+  }
+
+  return Array.from(map.values()).sort((a, b) => {
+    const byAuthor = a.authorText.localeCompare(b.authorText, 'sk');
+
+    if (byAuthor !== 0) return byAuthor;
+
+    return a.year.localeCompare(b.year);
+  });
+}
+
 function flattenDetectedAuthors(preparedFiles: PreparedFile[]) {
-  return uniqueArray(preparedFiles.flatMap((file) => file.detectedAuthors || []));
+  return uniqueArray([
+    ...preparedFiles.flatMap((file) => file.detectedAuthors || []),
+    ...preparedFiles.flatMap((file) =>
+      (file.inTextCitations || []).flatMap((citation) => citation.authors),
+    ),
+    ...preparedFiles.flatMap((file) =>
+      (file.detectedSources || []).flatMap((source) => source.authors),
+    ),
+  ]);
 }
 
 function buildDetectedSourcesSummary(preparedFiles: PreparedFile[]) {
@@ -1156,12 +1544,16 @@ function buildDetectedSourcesSummary(preparedFiles: PreparedFile[]) {
 Stav extrakcie: ${file.extractionStatus}
 Metóda extrakcie: ${file.extractionMethod || 'neuvedené'}
 Správa extrakcie: ${file.extractionMessage || 'neuvedené'}
+Počet citácií nájdených priamo v texte: ${file.inTextCitations?.length || 0}
 Počet detegovaných bibliografických kandidátov: ${file.detectedSources?.length || 0}
 Autori nájdení v dokumente: ${
       file.detectedAuthors?.length
         ? file.detectedAuthors.join(', ')
         : 'neuvedené alebo potrebné overiť'
     }
+
+CITÁCIE NÁJDENÉ PRIAMO V TEXTE:
+${formatInTextCitations(file.inTextCitations || [])}
 
 FORMÁTOVANÉ ZDROJE:
 ${file.formattedSources || 'neuvedené'}
@@ -1173,31 +1565,52 @@ ${formatBibliographicCandidates(file.detectedSources || [])}`;
   return blocks.join('\n\n--------------------\n\n');
 }
 
-function buildFallbackSourcesSection(preparedFiles: PreparedFile[]) {
-  const allSources = flattenDetectedSources(preparedFiles);
-  const allAuthors = flattenDetectedAuthors(preparedFiles);
+function formatAllDetectedSources({
+  citations,
+  sources,
+  files,
+}: {
+  citations: InTextCitation[];
+  sources: BibliographicCandidate[];
+  files: PreparedFile[];
+}) {
+  const allAuthors = uniqueArray([
+    ...citations.flatMap((item) => item.authors),
+    ...sources.flatMap((item) => item.authors),
+  ]);
 
-  return `A. Použité zdroje
-${formatBibliographicCandidates(allSources)}
+  return `A. Citácie nájdené priamo v texte práce
+${formatInTextCitations(citations)}
 
 B. Autori nájdení v dokumentoch
 ${allAuthors.length ? allAuthors.join(', ') : 'Autori neboli automaticky identifikovaní alebo ich treba overiť.'}
 
-C. Formátované bibliografické záznamy
-${formatBibliographicCandidates(allSources)}
+C. Formátované bibliografické záznamy a zdroje z literatúry
+${formatBibliographicCandidates(sources)}
 
 D. Priložené dokumenty použité ako podklad
 ${
-  preparedFiles.length
-    ? preparedFiles.map((file, index) => `${index + 1}. ${file.originalName}`).join('\n')
+  files.length
+    ? files.map((file, index) => `${index + 1}. ${file.originalName}`).join('\n')
     : 'Neboli priložené žiadne dokumenty.'
 }
 
 E. Neúplné alebo neoveriteľné zdroje
-Pri záznamoch, kde chýba autor, rok, názov, DOI alebo URL, je potrebné údaj overiť podľa pôvodného dokumentu.
+Ak je pri zdroji uvedené „údaj je potrebné overiť“, znamená to, že citácia bola nájdená v texte, ale celý bibliografický záznam sa nepodarilo automaticky jednoznačne spárovať.
 
 F. AI odporúčané zdroje na doplnenie
-Ak sú uvedené zdroje nedostatočné, odporúča sa doplniť odborné databázy, knižničné katalógy, vedecké články a overené publikácie podľa témy práce.`;
+Nevymýšľaj nové zdroje. Najprv doplň alebo skontroluj zdroje z časti Literatúra v pôvodnom dokumente.`;
+}
+
+function buildFallbackSourcesSection(preparedFiles: PreparedFile[]) {
+  const allSources = flattenDetectedSources(preparedFiles);
+  const allCitations = flattenInTextCitations(preparedFiles);
+
+  return formatAllDetectedSources({
+    citations: allCitations,
+    sources: allSources,
+    files: preparedFiles,
+  });
 }
 
 // ================= API CALLS =================
@@ -1261,11 +1674,19 @@ async function callExtractTextApi({
   const apiDetectedSources = extractSourcesFromExtractApi(data);
   const apiAuthors = extractAuthorsFromExtractApi(data);
   const apiFormattedSources = extractFormattedSourcesFromExtractApi(data);
+  const inTextCitations = extractInTextCitations(extractedText);
   const localDetectedSources = extractBibliographicCandidates(extractedText);
 
-  const mergedSources = mergeSources([...apiDetectedSources, ...localDetectedSources]);
+  const pairedSources = pairInTextCitationsWithBibliography({
+    citations: inTextCitations,
+    bibliography: mergeSources([...apiDetectedSources, ...localDetectedSources]),
+  });
+
+  const mergedSources = mergeSources(pairedSources);
+
   const mergedAuthors = uniqueArray([
     ...apiAuthors,
+    ...inTextCitations.flatMap((citation) => citation.authors),
     ...mergedSources.flatMap((source) => source.authors || []),
   ]);
 
@@ -1274,6 +1695,7 @@ async function callExtractTextApi({
     method: data.method || 'extract-text',
     message: data.message || 'Text bol úspešne extrahovaný.',
     detectedSources: mergedSources,
+    inTextCitations,
     detectedAuthors: mergedAuthors,
     formattedSources: apiFormattedSources,
     meta: data.meta || {},
@@ -1296,12 +1718,16 @@ Komprimovaná veľkosť: ${formatBytes(item.preparedSize)}
 Stav extrakcie: ${item.extractionStatus}
 Metóda extrakcie: ${item.extractionMethod || 'neuvedené'}
 Správa extrakcie: ${item.extractionMessage || 'neuvedené'}
+Počet citácií nájdených priamo v texte: ${item.inTextCitations?.length || 0}
 Počet detegovaných zdrojov: ${item.detectedSources?.length || 0}
 Autori nájdení v dokumente: ${
       item.detectedAuthors.length
         ? item.detectedAuthors.join(', ')
         : 'neuvedené alebo potrebné overiť'
     }
+
+CITÁCIE NÁJDENÉ PRIAMO V TEXTE:
+${formatInTextCitations(item.inTextCitations || [])}
 
 FORMÁTOVANÉ ZDROJE:
 ${item.formattedSources || 'neuvedené'}
@@ -1332,6 +1758,7 @@ function buildPreparedFilesSummary(preparedFiles: PreparedFile[]) {
 - Režim kompresie: ${item.compressionMode}
 - Stav extrakcie: ${item.extractionStatus}
 - Metóda extrakcie: ${item.extractionMethod || 'neuvedené'}
+- Citácie v texte: ${item.inTextCitations?.length || 0}
 - Detegované zdroje: ${item.detectedSources?.length || 0}
 - Detegovaní autori: ${
         item.detectedAuthors?.length ? item.detectedAuthors.join(', ') : 'neuvedené'
@@ -1447,7 +1874,7 @@ export default function ChatPage() {
     updateProcessingLog(item.id, {
       status: 'extracting',
       message:
-        'PDF extrahujem priamo v prehliadači cez pdfjs-dist. Súbor sa neposiela do /api/extract-text.',
+        'PDF extrahujem priamo v prehliadači cez pdfjs-dist. Následne detegujem citácie v texte a literatúru.',
       originalSize: item.size,
     });
 
@@ -1459,10 +1886,18 @@ export default function ChatPage() {
       );
     }
 
-    const detectedSources = extractBibliographicCandidates(rawText);
-    const detectedAuthors = uniqueArray(
-      detectedSources.flatMap((source) => source.authors || []),
-    );
+    const inTextCitations = extractInTextCitations(rawText);
+    const bibliographySources = extractBibliographicCandidates(rawText);
+
+    const detectedSources = pairInTextCitationsWithBibliography({
+      citations: inTextCitations,
+      bibliography: bibliographySources,
+    });
+
+    const detectedAuthors = uniqueArray([
+      ...inTextCitations.flatMap((citation) => citation.authors),
+      ...detectedSources.flatMap((source) => source.authors || []),
+    ]);
 
     const extractedText = truncateByChars(
       rawText,
@@ -1472,7 +1907,10 @@ export default function ChatPage() {
     const textPackage = `
 NÁZOV SÚBORU: ${item.name}
 PÔVODNÁ VEĽKOSŤ: ${formatBytes(item.size)}
-REŽIM: PDF bolo extrahované priamo v prehliadači cez pdfjs-dist. /api/extract-text nebol použitý pre PDF.
+REŽIM: PDF bolo extrahované priamo v prehliadači cez pdfjs-dist.
+
+CITÁCIE NÁJDENÉ PRIAMO V TEXTE:
+${formatInTextCitations(inTextCitations)}
 
 AUTORI NÁJDENÍ V DOKUMENTE:
 ${detectedAuthors.length ? detectedAuthors.join(', ') : 'neuvedené alebo potrebné overiť'}
@@ -1491,12 +1929,13 @@ ${extractedText}
 
     updateProcessingLog(item.id, {
       status: 'extracted',
-      message: `PDF bol extrahovaný priamo v prehliadači. Znaky: ${extractedText.length}. Detegované zdroje: ${detectedSources.length}. Autori: ${detectedAuthors.length}.`,
+      message: `PDF bol extrahovaný. Znaky: ${extractedText.length}. Citácie v texte: ${inTextCitations.length}. Detegované zdroje: ${detectedSources.length}. Autori: ${detectedAuthors.length}.`,
       originalSize: item.size,
       preparedSize: textGzipFile.size,
       extractedChars: extractedText.length,
       detectedSourcesCount: detectedSources.length,
       detectedAuthorsCount: detectedAuthors.length,
+      detectedInTextCitationsCount: inTextCitations.length,
     });
 
     return {
@@ -1512,10 +1951,15 @@ ${extractedText}
       extractedText,
       extractionMethod: 'pdfjs-browser',
       extractionMessage:
-        'PDF bolo extrahované priamo v prehliadači cez pdfjs-dist. /api/extract-text nebol použitý pre PDF.',
+        'PDF bolo extrahované priamo v prehliadači cez pdfjs-dist.',
       detectedSources,
+      inTextCitations,
       detectedAuthors,
-      formattedSources: formatBibliographicCandidates(detectedSources),
+      formattedSources: formatAllDetectedSources({
+        citations: inTextCitations,
+        sources: detectedSources,
+        files: [],
+      }),
       extractionStatus: 'client_extracted',
       warning: undefined,
     };
@@ -1595,11 +2039,12 @@ ${extractedText}
 
     updateProcessingLog(item.id, {
       status: 'extracted',
-      message: `Text bol extrahovaný cez /api/extract-text. Znaky: ${extractedText.length}. Detegované zdroje: ${extraction.detectedSources.length}. Autori: ${extraction.detectedAuthors.length}.`,
+      message: `Text bol extrahovaný cez /api/extract-text. Znaky: ${extractedText.length}. Citácie v texte: ${extraction.inTextCitations.length}. Detegované zdroje: ${extraction.detectedSources.length}. Autori: ${extraction.detectedAuthors.length}.`,
       preparedSize: usedCompressed ? preparedFile.size : item.size,
       extractedChars: extractedText.length,
       detectedSourcesCount: extraction.detectedSources.length,
       detectedAuthorsCount: extraction.detectedAuthors.length,
+      detectedInTextCitationsCount: extraction.inTextCitations.length,
     });
 
     return {
@@ -1618,8 +2063,15 @@ ${extractedText}
       extractionMethod: extraction.method,
       extractionMessage: extraction.message,
       detectedSources: extraction.detectedSources,
+      inTextCitations: extraction.inTextCitations,
       detectedAuthors: extraction.detectedAuthors,
-      formattedSources: extraction.formattedSources,
+      formattedSources:
+        extraction.formattedSources ||
+        formatAllDetectedSources({
+          citations: extraction.inTextCitations,
+          sources: extraction.detectedSources,
+          files: [],
+        }),
       extractionStatus: 'client_extracted',
       warning:
         usedCompressed && preparedFile.size > maxCompressedFileSizeBytes
@@ -1636,10 +2088,9 @@ ${extractedText}
         id: file.id,
         name: file.name,
         status: 'waiting',
-        message:
-          isPdfFile(file.name)
-            ? 'PDF čaká na extrakciu priamo v prehliadači cez pdfjs-dist.'
-            : 'Čaká na kompresiu a extrakciu cez /api/extract-text.',
+        message: isPdfFile(file.name)
+          ? 'PDF čaká na extrakciu priamo v prehliadači cez pdfjs-dist.'
+          : 'Čaká na kompresiu a extrakciu cez /api/extract-text.',
         originalSize: file.size,
       })),
     );
@@ -1654,8 +2105,8 @@ ${extractedText}
           continue;
         }
 
-        const preparedBackendFile = await prepareBackendFile(item);
-        preparedFiles.push(preparedBackendFile);
+        const backendPreparedFile = await prepareBackendFile(item);
+        preparedFiles.push(backendPreparedFile);
       } catch (error) {
         const message =
           error instanceof Error
@@ -1700,6 +2151,7 @@ POKYNY PRE AI:
           extractionMethod: 'failed',
           extractionMessage: message,
           detectedSources: [],
+          inTextCitations: [],
           detectedAuthors: [],
           formattedSources: '',
           extractionStatus: 'failed',
@@ -1869,6 +2321,7 @@ POKYNY PRE AI:
     const citationStyle = activeProfile?.citation || 'ISO 690';
     const detectedSourcesSummary = buildDetectedSourcesSummary(preparedFiles);
     const allAuthors = flattenDetectedAuthors(preparedFiles);
+    const allInTextCitations = flattenInTextCitations(preparedFiles);
 
     return `
 ${apiUserText.trim() || 'Spracuj priložené dokumenty podľa aktívneho profilu práce.'}
@@ -1894,6 +2347,13 @@ ${buildPreparedFilesSummary(preparedFiles)}
 VŠETCI AUTOMATICKY NÁJDENÍ AUTORI:
 ${allAuthors.length ? allAuthors.join(', ') : 'Autori neboli automaticky identifikovaní alebo ich treba overiť.'}
 
+VŠETKY CITÁCIE NÁJDENÉ PRIAMO V TEXTE:
+${
+  allInTextCitations.length
+    ? formatInTextCitations(allInTextCitations.slice(0, maxInTextCitationsForChat))
+    : 'Citácie v texte neboli automaticky identifikované.'
+}
+
 DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE:
 ${truncateByChars(detectedSourcesSummary, 25_000)}
 
@@ -1904,9 +2364,9 @@ POVINNÉ PRAVIDLÁ SPRACOVANIA:
 1. Najprv pracuj s extrahovaným textom z príloh.
 2. Pri PDF bol text extrahovaný priamo v prehliadači cez pdfjs-dist.
 3. Pri ostatných dokumentoch bol text extrahovaný cez /api/extract-text.
-4. Ak sú v extrahovanom texte detegované zdroje, autori, DOI, URL alebo publikácie, musíš ich vypísať.
-5. Ak sú uvedení autori v časti VŠETCI AUTOMATICKY NÁJDENÍ AUTORI, musíš ich uviesť v časti POUŽITÉ ZDROJE A AUTORI.
-6. Ak bibliografické údaje nie sú úplné, vypíš dostupné údaje a pri chýbajúcich napíš: údaj je potrebné overiť.
+4. Všetky citácie z časti VŠETKY CITÁCIE NÁJDENÉ PRIAMO V TEXTE musíš vypísať v časti POUŽITÉ ZDROJE A AUTORI.
+5. Ak je v texte citácia typu (Autor, rok), napríklad (Žajová a Porubská, 1997), nesmie sa stratiť ani vtedy, keď nie je spárovaný celý bibliografický záznam.
+6. Pri neúplnej citácii vypíš dostupné údaje a doplň text: úplný bibliografický záznam je potrebné overiť v časti Literatúra.
 7. Nevymýšľaj zdroje, autorov, roky, DOI, URL, názvy článkov ani vydavateľov.
 8. Ak príloha súvisí s témou práce, použi ju ako hlavný zdroj.
 9. Ak príloha nesúvisí s témou práce, napíš to jasne do časti ANALÝZA a prílohu nepoužívaj ako odborný zdroj.
@@ -1926,7 +2386,7 @@ Sem napíš hlavný výstup.
 Stručne vysvetli:
 - či sa príloha podarila spracovať,
 - či bolo PDF spracované cez pdfjs-dist alebo dokument cez /api/extract-text,
-- či boli automaticky detegované zdroje, autori a publikácie,
+- či boli automaticky detegované zdroje, citácie v texte, autori a publikácie,
 - či príloha súvisí s profilom práce,
 - z čoho si vychádzal,
 - ktoré prílohy boli použité a ktoré neboli použité.
@@ -1938,9 +2398,9 @@ Uveď orientačné skóre kvality odpovede alebo extrakcie v percentách.
 Uveď konkrétne odporúčania, čo má používateľ doplniť alebo overiť.
 
 === POUŽITÉ ZDROJE A AUTORI ===
-A. Zdroje nájdené v priložených dokumentoch
+A. Citácie nájdené priamo v texte práce
 B. Autori nájdení v dokumentoch
-C. Formátované bibliografické záznamy
+C. Formátované bibliografické záznamy a zdroje z literatúry
 D. Priložené dokumenty použité ako podklad
 E. Neúplné alebo neoveriteľné zdroje
 F. AI odporúčané zdroje na doplnenie
@@ -2000,6 +2460,10 @@ Ak boli v texte nájdené zdroje, autori, DOI alebo URL, vypíš ich. Ak údaje 
         0,
         maxDetectedAuthorsForChat,
       );
+      const inTextCitations = flattenInTextCitations(preparedFiles).slice(
+        0,
+        maxInTextCitationsForChat,
+      );
 
       const finalPrompt = buildFinalUserPrompt({
         apiUserText,
@@ -2007,6 +2471,7 @@ Ak boli v texte nájdené zdroje, autori, DOI alebo URL, vypíš ich. Ak údaje 
         extractedContext,
       });
 
+      // Dôležité: neposielame celú históriu chatu, lebo to vyhadzovalo context-window error.
       const apiMessages = [
         {
           role: 'user' as const,
@@ -2038,10 +2503,12 @@ Ak boli v texte nájdené zdroje, autori, DOI alebo URL, vypíš ich. Ak údaje 
       formData.append('detectBibliographicSources', 'true');
       formData.append('requireAllDetectedAuthorsAndPublications', 'true');
 
+      // Úmyselne neposielame celý extractedContext duplicitne ešte aj v samostatnom poli.
       formData.append('clientExtractedText', '');
       formData.append('clientDetectedSourcesSummary', detectedSourcesSummary);
       formData.append('clientDetectedSources', JSON.stringify(detectedSources));
       formData.append('clientDetectedAuthors', JSON.stringify(detectedAuthors));
+      formData.append('clientInTextCitations', JSON.stringify(inTextCitations));
       formData.append(
         'preparedFilesSummary',
         buildPreparedFilesSummary(preparedFiles),
@@ -2080,6 +2547,8 @@ Ak boli v texte nájdené zdroje, autori, DOI alebo URL, vypíš ich. Ak údaje 
             extractionMessage: item.extractionMessage,
             detectedSourcesCount: item.detectedSources?.length || 0,
             detectedSources: item.detectedSources || [],
+            inTextCitations: item.inTextCitations || [],
+            inTextCitationsCount: item.inTextCitations?.length || 0,
             detectedAuthors: item.detectedAuthors || [],
             formattedSources: item.formattedSources || '',
             warning: item.warning || '',
@@ -2096,7 +2565,7 @@ Ak boli v texte nájdené zdroje, autori, DOI alebo URL, vypíš ich. Ak údaje 
                 ...item,
                 status: 'ready',
                 message:
-                  item.message + ' Hotový extrahovaný text odosielam do /api/chat.',
+                  item.message + ' Hotový extrahovaný text a zdroje odosielam do /api/chat.',
               }
             : item,
         ),
@@ -2545,7 +3014,8 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
               </div>
 
               <div className="rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-3 text-xs font-bold text-violet-100">
-                PDF: frontend pdfjs-dist, ostatné dokumenty: /api/extract-text
+                PDF: frontend pdfjs-dist, ostatné dokumenty: /api/extract-text,
+                detekcia všetkých citácií v texte
               </div>
             </div>
           </section>
@@ -2624,7 +3094,7 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                     <div className="rounded-3xl border border-violet-400/20 bg-violet-500/10 p-4">
                       <div className="mb-3 flex items-center gap-2 text-sm font-black text-violet-100">
                         <UploadCloud className="h-4 w-4" />
-                        Spracovanie príloh a detekcia zdrojov
+                        Spracovanie príloh, citácií v texte a zdrojov
                       </div>
 
                       <div className="space-y-2">
@@ -2677,6 +3147,14 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                                 </span>
                               ) : null}
 
+                              {typeof item.detectedInTextCitationsCount ===
+                              'number' ? (
+                                <span>
+                                  citácie v texte:{' '}
+                                  {item.detectedInTextCitationsCount}
+                                </span>
+                              ) : null}
+
                               {typeof item.detectedSourcesCount === 'number' ? (
                                 <span>
                                   detegované zdroje: {item.detectedSourcesCount}
@@ -2684,9 +3162,7 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                               ) : null}
 
                               {typeof item.detectedAuthorsCount === 'number' ? (
-                                <span>
-                                  autori: {item.detectedAuthorsCount}
-                                </span>
+                                <span>autori: {item.detectedAuthorsCount}</span>
                               ) : null}
                             </div>
 

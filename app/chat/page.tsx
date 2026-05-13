@@ -725,8 +725,8 @@ function ensureSourcesSection(text: string) {
 
   return `${cleaned}
 
-=== POUŽITÉ ZDROJE A AUTORI ===
-Zdroje neboli dodané alebo sa ich nepodarilo overene načítať.`;
+=== POUŽITÉ ZDROJE ===
+Úplný bibliografický záznam je potrebné overiť.`;
 }
 
 async function gzipBlob(blob: Blob): Promise<Blob> {
@@ -1760,6 +1760,8 @@ function buildFallbackSourcesSection({
   return formatSimpleBibliographicSources(usedSources);
 }
 
+
+
 // ================= API CALLS =================
 
 async function callExtractTextApi({
@@ -2568,9 +2570,13 @@ Ak je citačná norma APA, používaj napríklad:
 
 Ak je citačná norma ISO 690 alebo iná norma, prispôsob odkazy presne tejto norme.
 
-Použité zdroje a autori
+Použité zdroje
 
-Na konci výstupu vypíš iba samotné bibliografické záznamy použitých zdrojov.
+Na konci výstupu musí byť iba jednoduchá sekcia:
+
+Použité zdroje
+
+Pod tento nadpis vypíš iba čisté bibliografické záznamy zdrojov, ktoré boli reálne použité a citované v hlavnom texte.
 
 Nepíš technické podsekcie:
 A. Zdroje nájdené v priložených dokumentoch
@@ -2579,6 +2585,15 @@ C. Varianty odkazov v texte
 D. Priložené dokumenty použité ako podklad
 E. Autori nájdení v dokumentoch
 F. Neúplné alebo neoveriteľné zdroje
+
+Nepíš samostatne:
+- zoznam autorov
+- varianty parentetických odkazov
+- varianty naratívnych odkazov
+- názvy príloh
+- technické poznámky
+- informácie o extrakcii
+- text „zdroje neboli dodané“, ak bol v dokumente nájdený autor, rok alebo bibliografický záznam
 
 Každý zdroj uveď ako samostatný bibliografický záznam podľa citačnej normy klienta: ${citationStyle}.
 
@@ -2591,12 +2606,12 @@ VŠEOBECNÉ PRAVIDLO PRE VŠETKY PRÍLOHY:
 1. Pri každej priloženej prílohe najprv identifikuj skutočných autorov dokumentu, rok, názov článku, názov časopisu/knihy/dokumentu, ročník, číslo a strany, ak sú dostupné.
 2. Ako primárny zdroj použi autora alebo autorov dokumentu, ktorý bol vložený ako príloha.
 3. V hlavnom texte používaj meno autora a rok podľa citačného štýlu klienta.
-4. Na konci v časti „Použité zdroje a autori“ vypíš iba bibliografické záznamy zdrojov, ktoré boli reálne citované v hlavnom texte.
-5. Ak používateľ výslovne žiada všetky zdroje, všetkých autorov, bibliografiu alebo zoznam literatúry, vypíš všetky detegované bibliografické záznamy, ale stále bez technických podsekcií A, B, C, D.
+4. Na konci v časti „Použité zdroje“ vypíš iba bibliografické záznamy zdrojov, ktoré boli reálne citované v hlavnom texte.
+5. Ak používateľ výslovne žiada všetky zdroje, všetkých autorov, bibliografiu alebo zoznam literatúry, vypíš všetky detegované bibliografické záznamy, ale stále bez technických podsekcií A, B, C, D, E, F.
 6. Každá citácia použitá v hlavnom texte musí mať zodpovedajúci bibliografický záznam na konci.
 7. Ak sa v hlavnom texte objaví citácia napríklad (Ondrík et al., 2004), na konci musí byť bibliografický záznam k tomuto autorovi alebo autorom, ak je dostupný v podkladoch.
 8. Nikdy nepíš „Zdroje neboli dodané“, ak boli v texte alebo extrahovanom dokumente nájdené citácie, autori, roky alebo bibliografické záznamy.
-9. Nevymýšľaj chýbajúce údaje. Pri neúplnom zdroji napíš: úplný bibliografický záznam je potrebné overiť.
+9. Nevymýšľaj chýbajúce údaje. Pri neúplnom zdroji napíš iba: Úplný bibliografický záznam je potrebné overiť.
 10. Výstup musí byť bez markdown znakov #, ##, **, --- a bez tabuľkových značiek.
 11. Výstup musí vyzerať ako hotový text do Word dokumentu.
 `.trim();
@@ -2910,20 +2925,32 @@ const cleanedMainOutput = cleanAiOutput(
     .replace(/===\s*ANALÝZA\s*===/gi, '')
     .replace(/===\s*SKÓRE\s*===/gi, '')
     .replace(/===\s*ODPORÚČANIA\s*===/gi, '')
-    .replace(/===\s*POUŽITÉ ZDROJE A AUTORI\s*===/gi, 'Použité zdroje a autori'),
+    .replace(/===\s*POUŽITÉ ZDROJE A AUTORI\s*===/gi, 'Použité zdroje')
+    .replace(/===\s*POUŽITÉ ZDROJE\s*===/gi, 'Použité zdroje'),
 );
 
 const outputAlreadyHasSources =
-  /použité\s+zdroje\s+a\s+autori/i.test(cleanedMainOutput) ||
-  /pouzite\s+zdroje\s+a\s+autori/i.test(normalizeForMatch(cleanedMainOutput));
+  /použité\s+zdroje/i.test(cleanedMainOutput) ||
+  /pouzite\s+zdroje/i.test(normalizeForMatch(cleanedMainOutput));
+
+const finalSourcesClean = cleanAiOutput(finalSources)
+  .replace(/^Použité zdroje a autori\s*/i, '')
+  .replace(/^Použité zdroje\s*/i, '')
+  .replace(/^A\.\s*Zdroje nájdené v priložených dokumentoch\s*/gim, '')
+  .replace(/^B\.\s*Formátované bibliografické záznamy\s*/gim, '')
+  .replace(/^C\.\s*Varianty odkazov v texte\s*/gim, '')
+  .replace(/^D\.\s*Priložené dokumenty použité ako podklad\s*/gim, '')
+  .replace(/^E\.\s*Autori nájdení v dokumentoch\s*/gim, '')
+  .replace(/^F\.\s*Neúplné alebo neoveriteľné zdroje\s*/gim, '')
+  .trim();
 
 const finalTextForCanvas = outputAlreadyHasSources
   ? cleanedMainOutput
   : `${cleanedMainOutput}
 
-Použité zdroje a autori
+Použité zdroje
 
-${finalSources}`.trim();
+${finalSourcesClean}`.trim();
 
       const finalParsed: ParsedResult = {
         ...parsed,

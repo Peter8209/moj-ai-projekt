@@ -1650,22 +1650,60 @@ Nevymýšľaj nové zdroje. Najprv doplň alebo skontroluj zdroje z časti Liter
 function extractUsedTextCitations(text: string) {
   const citations: { raw: string; authorPart: string; year: string }[] = [];
 
-  const regex = /\(([^()]{2,120}?),\s*((?:19|20)\d{2}|n\.d\.)\)/gi;
+  const cleanedText = cleanAiOutput(text);
 
-  let match: RegExpExecArray | null;
+  const parentheticalBlocks =
+    cleanedText.match(/\(([^()]*?(?:18|19|20)\d{2}[^()]*)\)/g) || [];
 
-  while ((match = regex.exec(text)) !== null) {
-    const raw = match[0];
-    const authorPart = cleanAiOutput(match[1] || '');
-    const year = cleanAiOutput(match[2] || '');
+  for (const block of parentheticalBlocks) {
+    const inside = block.replace(/^\(/, '').replace(/\)$/, '').trim();
+
+    if (!inside) continue;
+
+    const citationRegex =
+      /([A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'\- ]{1,120}?(?:\s+et\s+al\.?|\s+a\s+kol\.?)?(?:\s+a\s+[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'\- ]{1,80})?)\s*,?\s*((?:18|19|20)\d{2}|n\.d\.)/gi;
+
+    let match: RegExpExecArray | null;
+
+    while ((match = citationRegex.exec(inside)) !== null) {
+      const authorPart = cleanAiOutput(match[1] || '')
+        .replace(/^[,;\s]+/, '')
+        .replace(/[,;\s]+$/, '')
+        .trim();
+
+      const year = cleanAiOutput(match[2] || '').trim();
+
+      if (!authorPart || !year) continue;
+
+      if (/napr|obr|tab|kap|str|s\.|vol|no|číslo|ročník/i.test(authorPart)) {
+        continue;
+      }
+
+      citations.push({
+        raw: `(${authorPart}, ${year})`,
+        authorPart,
+        year,
+      });
+    }
+  }
+
+  const narrativeRegex =
+    /\b([A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'\- ]{1,120}?(?:\s+et\s+al\.?|\s+a\s+kol\.?)?(?:\s+a\s+[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'\- ]{1,80})?)\s*\(((?:18|19|20)\d{2}|n\.d\.)\)/gi;
+
+  let narrativeMatch: RegExpExecArray | null;
+
+  while ((narrativeMatch = narrativeRegex.exec(cleanedText)) !== null) {
+    const authorPart = cleanAiOutput(narrativeMatch[1] || '')
+      .replace(/^[,;\s]+/, '')
+      .replace(/[,;\s]+$/, '')
+      .trim();
+
+    const year = cleanAiOutput(narrativeMatch[2] || '').trim();
 
     if (!authorPart || !year) continue;
 
-    // odstráni technické odkazy, ktoré nie sú citácie
-    if (/napr|obr|tab|kap|str|s\./i.test(authorPart)) continue;
-
     citations.push({
-      raw,
+      raw: `${authorPart} (${year})`,
       authorPart,
       year,
     });
@@ -1677,7 +1715,7 @@ function extractUsedTextCitations(text: string) {
   >();
 
   for (const item of citations) {
-    const key = `${item.authorPart}-${item.year}`.toLowerCase();
+    const key = `${normalizeForMatch(item.authorPart)}-${item.year}`.toLowerCase();
 
     if (!map.has(key)) {
       map.set(key, item);
@@ -1687,18 +1725,12 @@ function extractUsedTextCitations(text: string) {
   return Array.from(map.values());
 }
 
-
 function sourceMatchesCitation(
   source: BibliographicCandidate,
   citation: { authorPart: string; year: string },
 ) {
-  const yearMatches =
-    !citation.year ||
-    source.year === citation.year ||
-    source.raw.includes(citation.year);
-
   const normalizedRaw = normalizeForMatch(
-    `${source.raw} ${source.authors.join(' ')}`,
+    `${source.raw} ${source.authors.join(' ')} ${source.title || ''}`,
   );
 
   const normalizedAuthorPart = normalizeForMatch(
@@ -1712,6 +1744,12 @@ function sourceMatchesCitation(
   const authorTokens = normalizedAuthorPart
     .split(' ')
     .filter((token) => token.length >= 3);
+
+  const yearMatches =
+    !citation.year ||
+    source.year === citation.year ||
+    source.raw.includes(citation.year) ||
+    normalizedRaw.includes(citation.year);
 
   const authorMatches = authorTokens.some((token) =>
     normalizedRaw.includes(token),
@@ -1727,17 +1765,21 @@ function filterSourcesByUsedCitations(
 ) {
   if (forceAll) return sources;
 
- const citations = extractUsedTextCitations(usedText);
+  const citations = extractUsedTextCitations(usedText);
 
   if (!citations.length) {
-    return sources.slice(0, 20);
+    return sources;
   }
 
   const usedSources = sources.filter((source) =>
     citations.some((citation) => sourceMatchesCitation(source, citation)),
   );
 
-  return usedSources.length ? usedSources : sources.slice(0, 20);
+  // Dôležité:
+  // Ak AI použila citácie v texte, ale nepodarilo sa ich 1:1 spárovať,
+  // nesmieme vrátiť len 20 náhodných zdrojov ani prázdno.
+  // Radšej vrátime všetky detegované zdroje z príloh, aby na konci nič nechýbalo.
+  return usedSources.length ? usedSources : sources;
 }
 
 function buildFallbackSourcesSection({
@@ -1753,10 +1795,6 @@ function buildFallbackSourcesSection({
 
   if (!allSources.length) {
     return 'Úplný bibliografický záznam je potrebné overiť.';
-  }
-
-  if (preparedFiles.length > 0 || forceAll) {
-    return formatSimpleBibliographicSources(allSources);
   }
 
   const usedSources = filterSourcesByUsedCitations(

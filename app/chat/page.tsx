@@ -3292,10 +3292,7 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                 </span>
               </div>
 
-              <div className="rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-3 text-xs font-bold text-violet-100">
-                PDF: frontend pdfjs-dist, ostatné dokumenty: /api/extract-text,
-                detekcia všetkých citácií v texte
-              </div>
+             
             </div>
           </section>
 

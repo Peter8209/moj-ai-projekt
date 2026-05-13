@@ -221,7 +221,6 @@ const allowedFileExtensions = [
 ];
 
 const backendExtractableExtensions = [
-  '.pdf',
   '.docx',
   '.doc',
   '.odt',
@@ -244,11 +243,12 @@ const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 const maxCompressedFileSizeBytes = 1 * 1024 * 1024;
 const safeCompressedTargetBytes = 950 * 1024;
 
-// Dôležité: nízke limity, aby /api/chat nespadol na context window
 const maxClientExtractedCharsPerFile = 25_000;
 const maxTotalExtractedContextChars = 60_000;
 const maxDetectedSourcesForChat = 80;
 const maxDetectedAuthorsForChat = 80;
+
+const pdfWorkerSrc = '/pdfjs/pdf.worker.min.mjs';
 
 const agents: { key: Agent; label: string }[] = [
   { key: 'gemini', label: 'Gemini' },
@@ -313,7 +313,12 @@ function isAllowedUploadFile(file: File) {
   return allowedFileExtensions.includes(getFileExtension(file.name));
 }
 
+function isPdfFile(fileName: string) {
+  return getFileExtension(fileName) === '.pdf';
+}
+
 function isTextExtractableFile(fileName: string) {
+  if (isPdfFile(fileName)) return true;
   return backendExtractableExtensions.includes(getFileExtension(fileName));
 }
 
@@ -769,6 +774,42 @@ async function createGzipTextFile({
   });
 }
 
+// ================= PDF FRONTEND EXTRACTION =================
+
+async function extractPdfTextInBrowser(file: File) {
+  const pdfjsLib: any = await import('pdfjs-dist/legacy/build/pdf.mjs');
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
+
+  const arrayBuffer = await file.arrayBuffer();
+
+  const loadingTask = pdfjsLib.getDocument({
+    data: arrayBuffer,
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    disableFontFace: true,
+  });
+
+  const pdf = await loadingTask.promise;
+  const pages: string[] = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const textContent = await page.getTextContent();
+
+    const pageText = textContent.items
+      .map((item: any) => String(item?.str || '').trim())
+      .filter(Boolean)
+      .join(' ');
+
+    if (pageText.trim()) {
+      pages.push(`STRANA ${pageNumber}\n${pageText}`);
+    }
+  }
+
+  return cleanAiOutput(pages.join('\n\n------------------------------\n\n'));
+}
+
 // ================= SOURCE DETECTION =================
 
 function detectSourceType(line: string): BibliographicCandidate['sourceType'] {
@@ -1122,7 +1163,7 @@ Autori nájdení v dokumente: ${
         : 'neuvedené alebo potrebné overiť'
     }
 
-FORMÁTOVANÉ ZDROJE Z EXTRAKČNÉHO ENDPOINTU:
+FORMÁTOVANÉ ZDROJE:
 ${file.formattedSources || 'neuvedené'}
 
 AUTOMATICKY DETEGOVANÉ BIBLIOGRAFICKÉ KANDIDÁTY:
@@ -1136,7 +1177,7 @@ function buildFallbackSourcesSection(preparedFiles: PreparedFile[]) {
   const allSources = flattenDetectedSources(preparedFiles);
   const allAuthors = flattenDetectedAuthors(preparedFiles);
 
-  return `A. Detegované zdroje z extrahovaného textu
+  return `A. Použité zdroje
 ${formatBibliographicCandidates(allSources)}
 
 B. Autori nájdení v dokumentoch
@@ -1262,7 +1303,7 @@ Autori nájdení v dokumente: ${
         : 'neuvedené alebo potrebné overiť'
     }
 
-FORMÁTOVANÉ ZDROJE Z EXTRAKČNÉHO ENDPOINTU:
+FORMÁTOVANÉ ZDROJE:
 ${item.formattedSources || 'neuvedené'}
 
 DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE:
@@ -1402,6 +1443,191 @@ export default function ChatPage() {
     );
   };
 
+  const preparePdfInBrowser = async (item: AttachedFile): Promise<PreparedFile> => {
+    updateProcessingLog(item.id, {
+      status: 'extracting',
+      message:
+        'PDF extrahujem priamo v prehliadači cez pdfjs-dist. Súbor sa neposiela do /api/extract-text.',
+      originalSize: item.size,
+    });
+
+    const rawText = await extractPdfTextInBrowser(item.file);
+
+    if (!rawText.trim()) {
+      throw new Error(
+        'PDF neobsahuje čitateľný text alebo ide o skenované PDF. Na skenované PDF treba OCR.',
+      );
+    }
+
+    const detectedSources = extractBibliographicCandidates(rawText);
+    const detectedAuthors = uniqueArray(
+      detectedSources.flatMap((source) => source.authors || []),
+    );
+
+    const extractedText = truncateByChars(
+      rawText,
+      maxClientExtractedCharsPerFile,
+    );
+
+    const textPackage = `
+NÁZOV SÚBORU: ${item.name}
+PÔVODNÁ VEĽKOSŤ: ${formatBytes(item.size)}
+REŽIM: PDF bolo extrahované priamo v prehliadači cez pdfjs-dist. /api/extract-text nebol použitý pre PDF.
+
+AUTORI NÁJDENÍ V DOKUMENTE:
+${detectedAuthors.length ? detectedAuthors.join(', ') : 'neuvedené alebo potrebné overiť'}
+
+DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE:
+${formatBibliographicCandidates(detectedSources)}
+
+TEXT:
+${extractedText}
+`.trim();
+
+    const textGzipFile = await createGzipTextFile({
+      text: textPackage,
+      fileName: `${item.name}.extracted.txt.gz`,
+    });
+
+    updateProcessingLog(item.id, {
+      status: 'extracted',
+      message: `PDF bol extrahovaný priamo v prehliadači. Znaky: ${extractedText.length}. Detegované zdroje: ${detectedSources.length}. Autori: ${detectedAuthors.length}.`,
+      originalSize: item.size,
+      preparedSize: textGzipFile.size,
+      extractedChars: extractedText.length,
+      detectedSourcesCount: detectedSources.length,
+      detectedAuthorsCount: detectedAuthors.length,
+    });
+
+    return {
+      originalId: item.id,
+      originalName: item.name,
+      originalSize: item.size,
+      originalType: item.type,
+      preparedName: textGzipFile.name,
+      preparedSize: textGzipFile.size,
+      preparedType: textGzipFile.type,
+      compressionMode: 'gzip_extracted_text',
+      file: textGzipFile,
+      extractedText,
+      extractionMethod: 'pdfjs-browser',
+      extractionMessage:
+        'PDF bolo extrahované priamo v prehliadači cez pdfjs-dist. /api/extract-text nebol použitý pre PDF.',
+      detectedSources,
+      detectedAuthors,
+      formattedSources: formatBibliographicCandidates(detectedSources),
+      extractionStatus: 'client_extracted',
+      warning: undefined,
+    };
+  };
+
+  const prepareBackendFile = async (item: AttachedFile): Promise<PreparedFile> => {
+    updateProcessingLog(item.id, {
+      status: 'compressing',
+      message: 'Komprimujem súbor na pozadí pred extrakciou.',
+    });
+
+    const gzipBlobResult = await gzipBlob(item.file);
+
+    const preparedName = `${item.name}.gz`;
+    const preparedFile = new File([gzipBlobResult], preparedName, {
+      type: window.CompressionStream
+        ? 'application/gzip'
+        : item.type || 'application/octet-stream',
+    });
+
+    updateProcessingLog(item.id, {
+      status: 'compressed',
+      message: `Súbor bol komprimovaný na ${formatBytes(
+        preparedFile.size,
+      )}. Spúšťam extrakciu cez /api/extract-text.`,
+      preparedSize: preparedFile.size,
+      warning:
+        preparedFile.size > maxCompressedFileSizeBytes
+          ? `Kompresia má ${formatBytes(
+              preparedFile.size,
+            )}, čo je viac ako 1 MB. Napriek tomu sa súbor posiela na /api/extract-text, aby server skúsil rozbalenie a extrakciu.`
+          : undefined,
+    });
+
+    updateProcessingLog(item.id, {
+      status: 'extracting',
+      message:
+        'Volám /api/extract-text. Endpoint má rozbaliť komprimovaný súbor, extrahovať text a vrátiť autorov a publikácie.',
+      preparedSize: preparedFile.size,
+    });
+
+    let extraction;
+    let usedCompressed = false;
+
+    try {
+      extraction = await callExtractTextApi({
+        file: preparedFile,
+        fileName: preparedName,
+        originalName: item.name,
+        compressed: true,
+      });
+      usedCompressed = true;
+    } catch (compressedError) {
+      updateProcessingLog(item.id, {
+        status: 'extracting',
+        message:
+          'Extrakcia z komprimovaného súboru zlyhala. Skúšam fallback: odoslať pôvodný súbor do /api/extract-text.',
+        warning:
+          compressedError instanceof Error
+            ? compressedError.message
+            : 'Extrakcia z komprimovaného súboru zlyhala.',
+      });
+
+      extraction = await callExtractTextApi({
+        file: item.file,
+        fileName: item.name,
+        originalName: item.name,
+        compressed: false,
+      });
+      usedCompressed = false;
+    }
+
+    const extractedText = truncateByChars(
+      extraction.extractedText,
+      maxClientExtractedCharsPerFile,
+    );
+
+    updateProcessingLog(item.id, {
+      status: 'extracted',
+      message: `Text bol extrahovaný cez /api/extract-text. Znaky: ${extractedText.length}. Detegované zdroje: ${extraction.detectedSources.length}. Autori: ${extraction.detectedAuthors.length}.`,
+      preparedSize: usedCompressed ? preparedFile.size : item.size,
+      extractedChars: extractedText.length,
+      detectedSourcesCount: extraction.detectedSources.length,
+      detectedAuthorsCount: extraction.detectedAuthors.length,
+    });
+
+    return {
+      originalId: item.id,
+      originalName: item.name,
+      originalSize: item.size,
+      originalType: item.type,
+      preparedName: usedCompressed ? preparedName : item.name,
+      preparedSize: usedCompressed ? preparedFile.size : item.size,
+      preparedType: usedCompressed
+        ? preparedFile.type
+        : item.type || 'application/octet-stream',
+      compressionMode: usedCompressed ? 'gzip_original' : 'raw_small_text',
+      file: usedCompressed ? preparedFile : item.file,
+      extractedText,
+      extractionMethod: extraction.method,
+      extractionMessage: extraction.message,
+      detectedSources: extraction.detectedSources,
+      detectedAuthors: extraction.detectedAuthors,
+      formattedSources: extraction.formattedSources,
+      extractionStatus: 'client_extracted',
+      warning:
+        usedCompressed && preparedFile.size > maxCompressedFileSizeBytes
+          ? 'Súbor bol komprimovaný, ale po kompresii má viac ako 1 MB. Extrakcia sa napriek tomu podarila cez /api/extract-text.'
+          : undefined,
+    };
+  };
+
   const prepareFilesBeforeSend = async (files: AttachedFile[]) => {
     if (!files.length) return [];
 
@@ -1410,7 +1636,10 @@ export default function ChatPage() {
         id: file.id,
         name: file.name,
         status: 'waiting',
-        message: 'Čaká na kompresiu a extrakciu cez /api/extract-text.',
+        message:
+          isPdfFile(file.name)
+            ? 'PDF čaká na extrakciu priamo v prehliadači cez pdfjs-dist.'
+            : 'Čaká na kompresiu a extrakciu cez /api/extract-text.',
         originalSize: file.size,
       })),
     );
@@ -1419,110 +1648,14 @@ export default function ChatPage() {
 
     for (const item of files) {
       try {
-        updateProcessingLog(item.id, {
-          status: 'compressing',
-          message: 'Komprimujem súbor na pozadí pred extrakciou.',
-        });
-
-        const gzipBlobResult = await gzipBlob(item.file);
-
-        const preparedName = `${item.name}.gz`;
-        const preparedFile = new File([gzipBlobResult], preparedName, {
-          type: window.CompressionStream
-            ? 'application/gzip'
-            : item.type || 'application/octet-stream',
-        });
-
-        updateProcessingLog(item.id, {
-          status: 'compressed',
-          message: `Súbor bol komprimovaný na ${formatBytes(
-            preparedFile.size,
-          )}. Spúšťam extrakciu cez /api/extract-text.`,
-          preparedSize: preparedFile.size,
-          warning:
-            preparedFile.size > maxCompressedFileSizeBytes
-              ? `Kompresia má ${formatBytes(
-                  preparedFile.size,
-                )}, čo je viac ako 1 MB. Napriek tomu sa súbor posiela na /api/extract-text, aby server skúsil rozbalenie a extrakciu.`
-              : undefined,
-        });
-
-        updateProcessingLog(item.id, {
-          status: 'extracting',
-          message:
-            'Volám /api/extract-text. Endpoint má rozbaliť komprimovaný súbor, extrahovať text a vrátiť autorov a publikácie.',
-          preparedSize: preparedFile.size,
-        });
-
-        let extraction;
-        let usedCompressed = false;
-
-        try {
-          extraction = await callExtractTextApi({
-            file: preparedFile,
-            fileName: preparedName,
-            originalName: item.name,
-            compressed: true,
-          });
-          usedCompressed = true;
-        } catch (compressedError) {
-          updateProcessingLog(item.id, {
-            status: 'extracting',
-            message:
-              'Extrakcia z komprimovaného súboru zlyhala. Skúšam fallback: odoslať pôvodný súbor do /api/extract-text.',
-            warning:
-              compressedError instanceof Error
-                ? compressedError.message
-                : 'Extrakcia z komprimovaného súboru zlyhala.',
-          });
-
-          extraction = await callExtractTextApi({
-            file: item.file,
-            fileName: item.name,
-            originalName: item.name,
-            compressed: false,
-          });
-          usedCompressed = false;
+        if (isPdfFile(item.name)) {
+          const preparedPdf = await preparePdfInBrowser(item);
+          preparedFiles.push(preparedPdf);
+          continue;
         }
 
-        const extractedText = truncateByChars(
-          extraction.extractedText,
-          maxClientExtractedCharsPerFile,
-        );
-
-        updateProcessingLog(item.id, {
-          status: 'extracted',
-          message: `Text bol extrahovaný cez /api/extract-text. Znaky: ${extractedText.length}. Detegované zdroje: ${extraction.detectedSources.length}. Autori: ${extraction.detectedAuthors.length}.`,
-          preparedSize: usedCompressed ? preparedFile.size : item.size,
-          extractedChars: extractedText.length,
-          detectedSourcesCount: extraction.detectedSources.length,
-          detectedAuthorsCount: extraction.detectedAuthors.length,
-        });
-
-        preparedFiles.push({
-          originalId: item.id,
-          originalName: item.name,
-          originalSize: item.size,
-          originalType: item.type,
-          preparedName: usedCompressed ? preparedName : item.name,
-          preparedSize: usedCompressed ? preparedFile.size : item.size,
-          preparedType: usedCompressed
-            ? preparedFile.type
-            : item.type || 'application/octet-stream',
-          compressionMode: usedCompressed ? 'gzip_original' : 'raw_small_text',
-          file: usedCompressed ? preparedFile : item.file,
-          extractedText,
-          extractionMethod: extraction.method,
-          extractionMessage: extraction.message,
-          detectedSources: extraction.detectedSources,
-          detectedAuthors: extraction.detectedAuthors,
-          formattedSources: extraction.formattedSources,
-          extractionStatus: 'client_extracted',
-          warning:
-            usedCompressed && preparedFile.size > maxCompressedFileSizeBytes
-              ? 'Súbor bol komprimovaný, ale po kompresii má viac ako 1 MB. Extrakcia sa napriek tomu podarila cez /api/extract-text.'
-              : undefined,
-        });
+        const preparedBackendFile = await prepareBackendFile(item);
+        preparedFiles.push(preparedBackendFile);
       } catch (error) {
         const message =
           error instanceof Error
@@ -1540,7 +1673,7 @@ NÁZOV SÚBORU: ${item.name}
 TYP: ${item.type || 'nezistený'}
 DRUH: ${getFileKindLabel(item.name)}
 PÔVODNÁ VEĽKOSŤ: ${formatBytes(item.size)}
-STAV EXTRAKCIE: Extrakcia cez /api/extract-text zlyhala.
+STAV EXTRAKCIE: Extrakcia zlyhala.
 CHYBA: ${message}
 
 POKYNY PRE AI:
@@ -1755,7 +1888,7 @@ AKTÍVNY PROFIL PRÁCE:
 PRILOŽENÉ DOKUMENTY:
 ${buildAttachmentPrompt(attachedFiles)}
 
-STAV KOMPRESIE A EXTRAKCIE CEZ /api/extract-text:
+STAV SPRACOVANIA PRÍLOH:
 ${buildPreparedFilesSummary(preparedFiles)}
 
 VŠETCI AUTOMATICKY NÁJDENÍ AUTORI:
@@ -1768,20 +1901,21 @@ EXTRAHOVANÝ TEXT Z PRÍLOH:
 ${extractedContext.trim() || 'Text z príloh nebol dostupný. Ak extrakcia zlyhala, nevymýšľaj obsah, autorov ani zdroje.'}
 
 POVINNÉ PRAVIDLÁ SPRACOVANIA:
-1. Najprv pracuj s extrahovaným textom z /api/extract-text.
-2. /api/extract-text je technický zdroj pravdy pre text príloh.
-3. Ak sú v extrahovanom texte detegované zdroje, autori, DOI, URL alebo publikácie, musíš ich vypísať.
-4. Ak sú uvedení autori v časti VŠETCI AUTOMATICKY NÁJDENÍ AUTORI, musíš ich uviesť v časti POUŽITÉ ZDROJE A AUTORI.
-5. Ak bibliografické údaje nie sú úplné, vypíš dostupné údaje a pri chýbajúcich napíš: údaj je potrebné overiť.
-6. Nevymýšľaj zdroje, autorov, roky, DOI, URL, názvy článkov ani vydavateľov.
-7. Ak príloha súvisí s témou práce, použi ju ako hlavný zdroj.
-8. Ak príloha nesúvisí s témou práce, napíš to jasne do časti ANALÝZA a prílohu nepoužívaj ako odborný zdroj.
-9. Ak používateľ žiada citácie, zdroje alebo bibliografiu, výstup priprav podľa citačnej normy: ${citationStyle}.
-10. Vždy vypíš sekciu POUŽITÉ ZDROJE A AUTORI.
-11. Výstup píš bez markdown znakov #, ##, ###, **, ---.
-12. Ak sa extrakcia nepodarila, nevymýšľaj obsah súboru. Uveď, že obsah prílohy sa nepodarilo overene načítať.
-13. Ak sú zdroje v texte, nesmieš napísať „Zdroje neboli dodané“.
-14. Sekciu zdrojov vždy začni presne nadpisom: === POUŽITÉ ZDROJE A AUTORI ===
+1. Najprv pracuj s extrahovaným textom z príloh.
+2. Pri PDF bol text extrahovaný priamo v prehliadači cez pdfjs-dist.
+3. Pri ostatných dokumentoch bol text extrahovaný cez /api/extract-text.
+4. Ak sú v extrahovanom texte detegované zdroje, autori, DOI, URL alebo publikácie, musíš ich vypísať.
+5. Ak sú uvedení autori v časti VŠETCI AUTOMATICKY NÁJDENÍ AUTORI, musíš ich uviesť v časti POUŽITÉ ZDROJE A AUTORI.
+6. Ak bibliografické údaje nie sú úplné, vypíš dostupné údaje a pri chýbajúcich napíš: údaj je potrebné overiť.
+7. Nevymýšľaj zdroje, autorov, roky, DOI, URL, názvy článkov ani vydavateľov.
+8. Ak príloha súvisí s témou práce, použi ju ako hlavný zdroj.
+9. Ak príloha nesúvisí s témou práce, napíš to jasne do časti ANALÝZA a prílohu nepoužívaj ako odborný zdroj.
+10. Ak používateľ žiada citácie, zdroje alebo bibliografiu, výstup priprav podľa citačnej normy: ${citationStyle}.
+11. Vždy vypíš sekciu POUŽITÉ ZDROJE A AUTORI.
+12. Výstup píš bez markdown znakov #, ##, ###, **, ---.
+13. Ak sa extrakcia nepodarila, nevymýšľaj obsah súboru. Uveď, že obsah prílohy sa nepodarilo overene načítať.
+14. Ak sú zdroje v texte, nesmieš napísať „Zdroje neboli dodané“.
+15. Sekciu zdrojov vždy začni presne nadpisom: === POUŽITÉ ZDROJE A AUTORI ===
 
 VÝSTUP VRÁŤ PRESNE V TOMTO FORMÁTE:
 
@@ -1790,8 +1924,8 @@ Sem napíš hlavný výstup.
 
 === ANALÝZA ===
 Stručne vysvetli:
-- či sa príloha podarila komprimovať,
-- či sa podarila extrakcia textu cez /api/extract-text,
+- či sa príloha podarila spracovať,
+- či bolo PDF spracované cez pdfjs-dist alebo dokument cez /api/extract-text,
 - či boli automaticky detegované zdroje, autori a publikácie,
 - či príloha súvisí s profilom práce,
 - z čoho si vychádzal,
@@ -1804,7 +1938,7 @@ Uveď orientačné skóre kvality odpovede alebo extrakcie v percentách.
 Uveď konkrétne odporúčania, čo má používateľ doplniť alebo overiť.
 
 === POUŽITÉ ZDROJE A AUTORI ===
-A. Detegované zdroje z extrahovaného textu
+A. Zdroje nájdené v priložených dokumentoch
 B. Autori nájdení v dokumentoch
 C. Formátované bibliografické záznamy
 D. Priložené dokumenty použité ako podklad
@@ -1873,7 +2007,6 @@ Ak boli v texte nájdené zdroje, autori, DOI alebo URL, vypíš ich. Ak údaje 
         extractedContext,
       });
 
-      // Dôležité: neposielať starú históriu správ, aby nespadol context window
       const apiMessages = [
         {
           role: 'user' as const,
@@ -1897,7 +2030,6 @@ Ak boli v texte nájdené zdroje, autori, DOI alebo URL, vypíš ich. Ak údaje 
       formData.append('requireSourceList', 'true');
       formData.append('allowAiKnowledgeFallback', 'true');
 
-      // Dôležité: extrakcia už prebehla cez /api/extract-text, /api/chat už nemá extrahovať znova
       formData.append('extractUploadedText', 'false');
       formData.append('useExtractedTextFirst', 'true');
       formData.append('returnExtractedFilesInfo', 'true');
@@ -1906,7 +2038,6 @@ Ak boli v texte nájdené zdroje, autori, DOI alebo URL, vypíš ich. Ak údaje 
       formData.append('detectBibliographicSources', 'true');
       formData.append('requireAllDetectedAuthorsAndPublications', 'true');
 
-      // Dôležité: neposielať celý extractedContext duplicitne mimo finalPrompt
       formData.append('clientExtractedText', '');
       formData.append('clientDetectedSourcesSummary', detectedSourcesSummary);
       formData.append('clientDetectedSources', JSON.stringify(detectedSources));
@@ -1926,6 +2057,7 @@ Ak boli v texte nájdené zdroje, autori, DOI alebo URL, vypíš ich. Ak údaje 
             type: item.type,
             kind: getFileKindLabel(item.name),
             extractable: isTextExtractableFile(item.name),
+            pdfExtractedInBrowser: isPdfFile(item.name),
             uploadedAt: item.uploadedAt,
           })),
         ),
@@ -2413,8 +2545,7 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
               </div>
 
               <div className="rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-3 text-xs font-bold text-violet-100">
-                Prílohy: max. {maxFilesCount} súborov, max. {maxFileSizeMb} MB
-                na súbor, najprv extrakcia cez /api/extract-text
+                PDF: frontend pdfjs-dist, ostatné dokumenty: /api/extract-text
               </div>
             </div>
           </section>
@@ -2493,8 +2624,7 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                     <div className="rounded-3xl border border-violet-400/20 bg-violet-500/10 p-4">
                       <div className="mb-3 flex items-center gap-2 text-sm font-black text-violet-100">
                         <UploadCloud className="h-4 w-4" />
-                        Kompresia, extrakcia cez /api/extract-text a detekcia
-                        zdrojov
+                        Spracovanie príloh a detekcia zdrojov
                       </div>
 
                       <div className="space-y-2">
@@ -2591,8 +2721,7 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                     <div className="mb-2 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.15em] text-slate-400">
                       <UploadCloud className="h-4 w-4 text-violet-300" />
                       Pripojené podklady ({attachedFiles.length}/
-                      {maxFilesCount}) – najprv sa spracujú cez
-                      /api/extract-text
+                      {maxFilesCount})
                     </div>
 
                     <div className="flex flex-wrap gap-2">

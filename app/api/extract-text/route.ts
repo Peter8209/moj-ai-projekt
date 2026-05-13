@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { gunzipSync } from 'zlib';
-import { existsSync } from 'fs';
-import { join } from 'path';
-import { pathToFileURL } from 'url';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -214,67 +211,6 @@ function stripXmlTags(value: string) {
   );
 }
 
-// ================= PDF WORKER + NODE POLYFILLS =================
-
-function findPdfWorkerSrc() {
-  const candidates = [
-    join(
-      process.cwd(),
-      'node_modules',
-      'pdfjs-dist',
-      'legacy',
-      'build',
-      'pdf.worker.mjs',
-    ),
-    join(
-      process.cwd(),
-      'node_modules',
-      'pdfjs-dist',
-      'legacy',
-      'build',
-      'pdf.worker.min.mjs',
-    ),
-    join(process.cwd(), 'node_modules', 'pdfjs-dist', 'build', 'pdf.worker.mjs'),
-    join(
-      process.cwd(),
-      'node_modules',
-      'pdfjs-dist',
-      'build',
-      'pdf.worker.min.mjs',
-    ),
-  ];
-
-  const found = candidates.find((path) => existsSync(path));
-
-  if (!found) return '';
-
-  return pathToFileURL(found).href;
-}
-
-async function ensurePdfNodePolyfills() {
-  try {
-    const canvas = await import('@napi-rs/canvas');
-    const globalScope = globalThis as any;
-
-    if (!globalScope.DOMMatrix && (canvas as any).DOMMatrix) {
-      globalScope.DOMMatrix = (canvas as any).DOMMatrix;
-    }
-
-    if (!globalScope.ImageData && (canvas as any).ImageData) {
-      globalScope.ImageData = (canvas as any).ImageData;
-    }
-
-    if (!globalScope.Path2D && (canvas as any).Path2D) {
-      globalScope.Path2D = (canvas as any).Path2D;
-    }
-  } catch (error) {
-    console.warn(
-      'PDF_NODE_POLYFILLS_WARNING:',
-      error instanceof Error ? error.message : error,
-    );
-  }
-}
-
 function getPageNumberFromPageHeader(line: string) {
   const match = line.match(/^STRANA\s+(\d+)/i);
 
@@ -338,147 +274,21 @@ async function extractRtfTextFromBuffer(buffer: Buffer): Promise<ExtractResult> 
 }
 
 // ================= PDF =================
+// DÔLEŽITÉ:
+// PDF sa v tomto route.ts už nespracúva cez pdfjs-dist ani @napi-rs/canvas.
+// Tým sa odstráni Turbopack build chyba:
+// @napi-rs/canvas/js-binding.js non-ecmascript placeable asset.
+// PDF má byť extrahované vo frontende v ChatPage cez pdfjs-dist a lokálny worker v /public/pdfjs/.
 
-function extractPdfItemY(item: any) {
-  const transform = item?.transform;
-
-  if (Array.isArray(transform) && transform.length >= 6) {
-    const y = Number(transform[5]);
-
-    return Number.isFinite(y) ? Math.round(y) : 0;
-  }
-
-  return 0;
-}
-
-function extractPdfItemX(item: any) {
-  const transform = item?.transform;
-
-  if (Array.isArray(transform) && transform.length >= 6) {
-    const x = Number(transform[4]);
-
-    return Number.isFinite(x) ? x : 0;
-  }
-
-  return 0;
-}
-
-function buildPageTextFromPdfItems(items: any[]) {
-  const rows = new Map<number, { x: number; text: string }[]>();
-
-  for (const item of items) {
-    const text = String(item?.str || '').trim();
-
-    if (!text) continue;
-
-    const y = extractPdfItemY(item);
-    const x = extractPdfItemX(item);
-
-    const existing = rows.get(y) || [];
-    existing.push({ x, text });
-    rows.set(y, existing);
-  }
-
-  return Array.from(rows.entries())
-    .sort((a, b) => b[0] - a[0])
-    .map(([, rowItems]) =>
-      rowItems
-        .sort((a, b) => a.x - b.x)
-        .map((item) => item.text)
-        .join(' '),
-    )
-    .map((line) => cleanText(line))
-    .filter(Boolean)
-    .join('\n');
-}
-
-async function extractPdfText(buffer: Buffer): Promise<ExtractResult> {
-  let pdfjs: any;
-
-  try {
-    await ensurePdfNodePolyfills();
-    pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  } catch (error) {
-    return {
-      ok: false,
-      text: '',
-      method: 'pdfjs-dist-server',
-      message:
-        `PDF extrakcia zlyhala: nepodarilo sa načítať pdfjs-dist. ` +
-        `Spusti: npm install pdfjs-dist @napi-rs/canvas. Detail: ${getErrorMessage(
-          error,
-        )}`,
-    };
-  }
-
-  try {
-    const workerSrc = findPdfWorkerSrc();
-
-    if (pdfjs.GlobalWorkerOptions && workerSrc) {
-      pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
-    }
-
-    const loadingTask = pdfjs.getDocument({
-      data: new Uint8Array(buffer),
-      disableWorker: true,
-      useWorkerFetch: false,
-      isEvalSupported: false,
-      stopAtErrors: false,
-      verbosity: 0,
-    });
-
-    const pdf = await loadingTask.promise;
-    const pages: string[] = [];
-
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      const page = await pdf.getPage(pageNumber);
-      const content = await page.getTextContent();
-
-      const pageText = buildPageTextFromPdfItems(content.items || []);
-      const cleanedPageText = cleanText(pageText);
-
-      if (cleanedPageText) {
-        pages.push(`STRANA ${pageNumber}\n${cleanedPageText}`);
-      }
-
-      try {
-        page.cleanup?.();
-      } catch {
-        // ignore cleanup error
-      }
-    }
-
-    const pagesCount = pdf.numPages || null;
-
-    try {
-      await pdf.destroy?.();
-    } catch {
-      // ignore destroy error
-    }
-
-    const text = cleanText(pages.join('\n\n------------------------------\n\n'));
-
-    return {
-      ok: Boolean(text),
-      text,
-      method: 'pdfjs-dist-server-node-polyfill-line-layout',
-      message: text
-        ? 'PDF text bol extrahovaný na serveri cez pdfjs-dist so zachovaním riadkov.'
-        : 'PDF bolo spracované, ale neobsahuje čitateľný text. Môže ísť o skenovaný PDF obrázok.',
-      meta: {
-        pages: pagesCount,
-        chars: text.length,
-        workerSrc: workerSrc || 'disabled-node-runtime',
-      },
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      text: '',
-      method: 'pdfjs-dist-server',
-      message: `PDF extrakcia zlyhala: ${getErrorMessage(error)}`,
-    };
-  }
+async function extractPdfTextDisabled(fileName: string): Promise<ExtractResult> {
+  return {
+    ok: false,
+    text: '',
+    method: 'pdf-disabled-in-extract-text-route',
+    message:
+      `PDF súbor ${fileName} sa v /api/extract-text už nespracúva. ` +
+      'PDF extrakcia má prebehnúť vo frontende cez pdfjs-dist, aby build neťahal @napi-rs/canvas.',
+  };
 }
 
 // ================= DOCX =================
@@ -719,7 +529,7 @@ async function extractByType({
   }
 
   if (extension === '.pdf') {
-    return extractPdfText(buffer);
+    return extractPdfTextDisabled(fileName);
   }
 
   if (extension === '.docx') {
@@ -1100,7 +910,7 @@ function extractAuthors(line: string) {
     .replace(/\ba kol\.?/gi, '');
 
   const parts = possibleAuthorPart
-    .split(/\s*(?:;|&|\band\b|\ba\b|\bet\b|\und\b|\s+\|\s+)\s*/i)
+    .split(/\s*(?:;|&|\band\b|\ba\b|\bet\b|\bund\b|\s+\|\s+)\s*/i)
     .map(normalizeAuthorCandidate)
     .filter(isValidAuthorCandidate);
 
@@ -1713,6 +1523,99 @@ F. Neúplné alebo neoveriteľné zdroje
 Údaje je potrebné overiť podľa pôvodného dokumentu alebo knižničného záznamu.`;
 }
 
+function buildNoTextJsonResponse({
+  result,
+  receivedFileName,
+  effectiveFileName,
+  originalNameFromForm,
+  extension,
+  file,
+  originalBufferLength,
+  usableBufferLength,
+  isCompressed,
+  status = 422,
+}: {
+  result: ExtractResult;
+  receivedFileName: string;
+  effectiveFileName: string;
+  originalNameFromForm: string;
+  extension: string;
+  file: File;
+  originalBufferLength: number | null;
+  usableBufferLength: number | null;
+  isCompressed: boolean;
+  status?: number;
+}) {
+  const emptySourceOutputSection = buildEmptySourceOutputSection(effectiveFileName);
+
+  return NextResponse.json(
+    {
+      ok: false,
+      error:
+        result.message ||
+        'Text sa nepodarilo extrahovať alebo bol výsledok prázdny.',
+      text: '',
+      extractedText: '',
+      content: '',
+      method: result.method,
+      detectedSources: [],
+      authors: [],
+      formattedSources:
+        'Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.',
+      sources:
+        'Neboli nájdené jednoznačné bibliografické záznamy v priložených dokumentoch.',
+      citationVariants:
+        'Parentetický odkaz: (autor je potrebné overiť, rok je potrebné overiť)\nNaratívny odkaz: Autor je potrebné overiť (rok je potrebné overiť) uvádza...',
+      sourceOutputSection: emptySourceOutputSection,
+      bibliography: {
+        title: 'Použité zdroje a autori',
+        authors: [],
+        detectedSources: [],
+        detectedSourcesCount: 0,
+        formatted:
+          'Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.',
+        formattedSources:
+          'Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.',
+        sources:
+          'Neboli nájdené jednoznačné bibliografické záznamy v priložených dokumentoch.',
+        citationVariants:
+          'Parentetický odkaz: (autor je potrebné overiť, rok je potrebné overiť)\nNaratívny odkaz: Autor je potrebné overiť (rok je potrebné overiť) uvádza...',
+        sourceOutputSection: emptySourceOutputSection,
+        sections: {
+          title: 'Použité zdroje a autori',
+          a_sourcesFoundInAttachedDocuments:
+            'Neboli nájdené jednoznačné bibliografické záznamy v priložených dokumentoch.',
+          b_authorsFoundInDocuments:
+            'Autori neboli automaticky identifikovaní alebo ich treba overiť.',
+          c_formattedBibliographicRecords:
+            'Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.',
+          d_inTextCitationVariants:
+            'Parentetický odkaz: (autor je potrebné overiť, rok je potrebné overiť)\nNaratívny odkaz: Autor je potrebné overiť (rok je potrebné overiť) uvádza...',
+          e_attachedDocumentsUsedAsSource: effectiveFileName.replace(
+            /\.[a-z0-9]+$/i,
+            '',
+          ),
+          f_incompleteOrUnverifiableSources:
+            'Údaje je potrebné overiť podľa pôvodného dokumentu alebo knižničného záznamu.',
+        },
+      },
+      meta: {
+        receivedFileName,
+        effectiveFileName,
+        originalName: originalNameFromForm,
+        extension,
+        size: file.size,
+        compressedSize: isCompressed ? originalBufferLength : null,
+        decompressedSize: usableBufferLength,
+        type: file.type || null,
+        isCompressed,
+        ...result.meta,
+      },
+    },
+    { status },
+  );
+}
+
 // ================= POST =================
 
 export async function POST(req: NextRequest) {
@@ -1780,6 +1683,23 @@ export async function POST(req: NextRequest) {
 
     const extension = getFileExtension(effectiveFileName);
 
+    if (extension === '.pdf') {
+      const result = await extractPdfTextDisabled(effectiveFileName);
+
+      return buildNoTextJsonResponse({
+        result,
+        receivedFileName,
+        effectiveFileName,
+        originalNameFromForm,
+        extension,
+        file,
+        originalBufferLength: null,
+        usableBufferLength: null,
+        isCompressed,
+        status: 400,
+      });
+    }
+
     const originalBuffer = await fileToBuffer(file);
     const usableBuffer = isCompressed ? safeGunzip(originalBuffer) : originalBuffer;
 
@@ -1789,75 +1709,18 @@ export async function POST(req: NextRequest) {
     });
 
     if (!result.ok || !result.text.trim()) {
-      const emptySourceOutputSection =
-        buildEmptySourceOutputSection(effectiveFileName);
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            result.message ||
-            'Text sa nepodarilo extrahovať alebo bol výsledok prázdny.',
-          text: '',
-          extractedText: '',
-          content: '',
-          method: result.method,
-          detectedSources: [],
-          authors: [],
-          formattedSources:
-            'Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.',
-          sources:
-            'Neboli nájdené jednoznačné bibliografické záznamy v priložených dokumentoch.',
-          citationVariants:
-            'Parentetický odkaz: (autor je potrebné overiť, rok je potrebné overiť)\nNaratívny odkaz: Autor je potrebné overiť (rok je potrebné overiť) uvádza...',
-          sourceOutputSection: emptySourceOutputSection,
-          bibliography: {
-            title: 'Použité zdroje a autori',
-            authors: [],
-            detectedSources: [],
-            detectedSourcesCount: 0,
-            formatted:
-              'Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.',
-            formattedSources:
-              'Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.',
-            sources:
-              'Neboli nájdené jednoznačné bibliografické záznamy v priložených dokumentoch.',
-            citationVariants:
-              'Parentetický odkaz: (autor je potrebné overiť, rok je potrebné overiť)\nNaratívny odkaz: Autor je potrebné overiť (rok je potrebné overiť) uvádza...',
-            sourceOutputSection: emptySourceOutputSection,
-            sections: {
-              title: 'Použité zdroje a autori',
-              a_sourcesFoundInAttachedDocuments:
-                'Neboli nájdené jednoznačné bibliografické záznamy v priložených dokumentoch.',
-              b_authorsFoundInDocuments:
-                'Autori neboli automaticky identifikovaní alebo ich treba overiť.',
-              c_formattedBibliographicRecords:
-                'Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.',
-              d_inTextCitationVariants:
-                'Parentetický odkaz: (autor je potrebné overiť, rok je potrebné overiť)\nNaratívny odkaz: Autor je potrebné overiť (rok je potrebné overiť) uvádza...',
-              e_attachedDocumentsUsedAsSource: effectiveFileName.replace(
-                /\.[a-z0-9]+$/i,
-                '',
-              ),
-              f_incompleteOrUnverifiableSources:
-                'Údaje je potrebné overiť podľa pôvodného dokumentu alebo knižničného záznamu.',
-            },
-          },
-          meta: {
-            receivedFileName,
-            effectiveFileName,
-            originalName: originalNameFromForm,
-            extension,
-            size: file.size,
-            compressedSize: isCompressed ? originalBuffer.length : null,
-            decompressedSize: usableBuffer.length,
-            type: file.type || null,
-            isCompressed,
-            ...result.meta,
-          },
-        },
-        { status: 422 },
-      );
+      return buildNoTextJsonResponse({
+        result,
+        receivedFileName,
+        effectiveFileName,
+        originalNameFromForm,
+        extension,
+        file,
+        originalBufferLength: originalBuffer.length,
+        usableBufferLength: usableBuffer.length,
+        isCompressed,
+        status: 422,
+      });
     }
 
     const text = limitText(result.text);

@@ -1411,27 +1411,28 @@ URL: ${item.url || 'neuvedené'}${citationInfo}`;
 
 function formatSimpleBibliographicSources(candidates: BibliographicCandidate[]) {
   if (!candidates.length) {
-    return 'Úplný bibliografický záznam je potrebné overiť.';
+    return 'Rok chýba alebo zdroj sa nepodarilo jednoznačne overiť v priloženom texte.';
   }
 
   return candidates
     .map((item) => {
-      if (item.raw?.trim()) {
-        return item.raw.trim();
+      const raw = cleanAiOutput(item.raw || '');
+
+      if (raw && raw.length > 10) {
+        return raw;
       }
 
       const authorText = item.authors.length
         ? item.authors.join(', ')
         : 'Autor je potrebné overiť';
 
-      const yearText = item.year || 'rok je potrebné overiť';
-      const titleText = item.title || 'názov je potrebné overiť';
-      const doiOrUrl = item.doi || item.url || '';
+      if (item.year) {
+        return `${authorText} (${item.year}).`;
+      }
 
-      return `${authorText} (${yearText}). ${titleText}.${
-        doiOrUrl ? ` ${doiOrUrl}` : ''
-      }`.trim();
+      return `${authorText}. Rok chýba.`;
     })
+    .filter(Boolean)
     .join('\n');
 }
 
@@ -1652,14 +1653,16 @@ function extractUsedTextCitations(text: string) {
 
   const cleanedText = cleanAiOutput(text);
 
-  const parentheticalBlocks =
-    cleanedText.match(/\(([^()]*?(?:18|19|20)\d{2}[^()]*)\)/g) || [];
+  // Zachytí celé zátvorkové bloky, napr.:
+  // (Baldshiev et al. 1997, Sapirstein a Fu, 1998, Hubík 2000, Bojňanská 2004)
+  const parentheticalBlocks = cleanedText.match(/\(([^()]*?(?:18|19|20)\d{2}[^()]*)\)/g) || [];
 
   for (const block of parentheticalBlocks) {
     const inside = block.replace(/^\(/, '').replace(/\)$/, '').trim();
 
     if (!inside) continue;
 
+    // Nájde každú dvojicu autor + rok aj vtedy, keď medzi autorom a rokom nie je čiarka.
     const citationRegex =
       /([A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'\- ]{1,120}?(?:\s+et\s+al\.?|\s+a\s+kol\.?)?(?:\s+a\s+[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'\- ]{1,80})?)\s*,?\s*((?:18|19|20)\d{2}|n\.d\.)/gi;
 
@@ -1687,6 +1690,8 @@ function extractUsedTextCitations(text: string) {
     }
   }
 
+  // Zachytí aj naratívne citácie mimo zátvoriek:
+  // Ondrík et al. (2004)
   const narrativeRegex =
     /\b([A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'\- ]{1,120}?(?:\s+et\s+al\.?|\s+a\s+kol\.?)?(?:\s+a\s+[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'\- ]{1,80})?)\s*\(((?:18|19|20)\d{2}|n\.d\.)\)/gi;
 
@@ -1724,6 +1729,9 @@ function extractUsedTextCitations(text: string) {
 
   return Array.from(map.values());
 }
+
+
+
 
 function sourceMatchesCitation(
   source: BibliographicCandidate,
@@ -1782,6 +1790,31 @@ function filterSourcesByUsedCitations(
   return usedSources.length ? usedSources : sources;
 }
 
+function uniqueBibliographicSources(
+  sources: BibliographicCandidate[],
+): BibliographicCandidate[] {
+  const map = new Map<string, BibliographicCandidate>();
+
+  for (const source of sources) {
+    const key =
+      getSourceCitationKey(source) ||
+      [
+        source.raw || '',
+        source.authors.join(', '),
+        source.year || '',
+        source.title || '',
+      ]
+        .join('|')
+        .toLowerCase();
+
+    if (!map.has(key)) {
+      map.set(key, source);
+    }
+  }
+
+  return Array.from(map.values());
+}
+
 function buildFallbackSourcesSection({
   preparedFiles,
   usedText,
@@ -1791,10 +1824,60 @@ function buildFallbackSourcesSection({
   usedText: string;
   forceAll: boolean;
 }) {
-  const allSources = flattenDetectedSources(preparedFiles);
+  const detectedSources = uniqueBibliographicSources(
+    flattenDetectedSources(preparedFiles),
+  );
+
+  const fileFallbackSources: BibliographicCandidate[] = preparedFiles.map((file) => {
+    const detectedAuthors = uniqueArray([
+      ...(file.detectedAuthors || []),
+      ...(file.inTextCitations || []).flatMap((citation) => citation.authors || []),
+      ...(file.detectedSources || []).flatMap((source) => source.authors || []),
+    ]);
+
+    const detectedYear =
+      file.detectedSources.find((source) => source.year)?.year ||
+      file.inTextCitations.find((citation) => citation.year)?.year ||
+      null;
+
+    const bestRawSource =
+      file.detectedSources.find((source) => {
+        const raw = cleanAiOutput(source.raw || '');
+
+        return (
+          raw.length > 20 &&
+          !raw.toLowerCase().includes('úplný bibliografický záznam je potrebné overiť') &&
+          !raw.toLowerCase().includes('neboli automaticky detegované')
+        );
+      })?.raw || '';
+
+    return {
+      raw:
+        bestRawSource ||
+        `${file.originalName}. ${detectedYear ? `(${detectedYear}).` : 'Rok chýba.'}`,
+      authors: detectedAuthors.length ? detectedAuthors : [file.originalName],
+      year: detectedYear,
+      title: file.originalName,
+      doi: null,
+      url: null,
+      sourceType: 'unknown',
+      citationKey:
+        detectedAuthors.length && detectedYear
+          ? buildCitationKey(detectedAuthors, detectedYear)
+          : undefined,
+      inTextCitations: file.inTextCitations || [],
+      occurrenceCount: file.inTextCitations?.length || 1,
+      matchedFromText: true,
+    };
+  });
+
+  const allSources = uniqueBibliographicSources([
+    ...detectedSources,
+    ...fileFallbackSources,
+  ]);
 
   if (!allSources.length) {
-    return 'Úplný bibliografický záznam je potrebné overiť.';
+    return 'Príloha bola použitá ako zdroj. Autor a rok chýbajú.';
   }
 
   const usedSources = filterSourcesByUsedCitations(
@@ -1803,10 +1886,14 @@ function buildFallbackSourcesSection({
     forceAll,
   );
 
-  return formatSimpleBibliographicSources(usedSources);
-}
+  const finalSources = usedSources.length ? usedSources : allSources;
 
-// ================= API CALLS =================
+  const formatted = formatSimpleBibliographicSources(finalSources);
+
+  return formatted.trim()
+    ? formatted
+    : 'Príloha bola použitá ako zdroj. Autor a rok chýbajú.';
+}
 
 async function callExtractTextApi({
   file,
@@ -2593,16 +2680,25 @@ POVINNÝ FORMÁT VÝSTUPU:
 
 Výstup musí byť čistý akademický text vo Word štýle.
 
-Nepíš tieto technické nadpisy:
-- VÝSTUP
-- ANALÝZA
-- SKÓRE
-- ODPORÚČANIA
-- DETEGOVANÉ ZDROJE
-- TECHNICKÁ ANALÝZA
-- FORMÁTOVANÉ ZDROJE
-- AUTORI NÁJDENÍ V DOKUMENTE
-- ZDROJE, AUTORI A PUBLIKÁCIE
+Najprv posúď, či priložený dokument obsahovo súvisí s aktívnym profilom práce:
+- téma profilu: ${activeProfile?.topic || activeProfile?.title || 'nezadané'}
+- názov práce: ${activeProfile?.title || 'nezadané'}
+- odbor: ${activeProfile?.field || 'nezadané'}
+- cieľ práce: ${activeProfile?.goal || 'nezadané'}
+
+Ak priložený dokument zjavne nesúvisí s profilom práce, nevytváraj kapitolu ani odborný text. Vypíš iba:
+Príloha obsahovo nesúvisí s profilom práce, preto ju nie je možné odborne zapracovať do tejto kapitoly bez rizika vecne nesprávneho obsahu.
+
+Ak príloha súvisí s profilom práce, spracuj ju do textu takto:
+
+1. Použi obsah priloženej prílohy ako hlavný odborný podklad.
+2. Všetky zdroje, ktoré sú nájdené v texte alebo bibliografii prílohy a sú relevantné k téme profilu práce, musia byť zapracované do hlavného textu.
+3. V hlavnom texte používaj citácie podľa citačnej normy klienta: ${citationStyle}.
+4. Ak je citačný štýl APA, používaj tvar napríklad: (Autor, rok) alebo (Autor et al., rok).
+5. Ak je citačný štýl ISO 690 alebo iný, prispôsob odkazy tejto norme.
+6. Nevymýšľaj autorov, roky, názvy článkov, časopisov, kníh, DOI ani URL.
+7. Ak rok nie je dostupný, v zdroji na konci uveď poznámku: Rok chýba.
+8. Ak úplný bibliografický záznam nie je dostupný, uveď aspoň meno autora a rok. Ak rok nie je dostupný, uveď meno autora a text „Rok chýba.“
 
 Výstup musí mať túto štruktúru:
 
@@ -2613,73 +2709,40 @@ Súvislý odborný text v odsekoch.
 
 Použité zdroje
 
-HLAVNÉ PRAVIDLO PRE PRÍLOHY:
+Pod nadpisom „Použité zdroje“ vypíš iba čisté zdroje, ktoré boli použité v hlavnom texte a pochádzajú z priloženého textu alebo prílohy.
 
-Ak používateľ priložil dokument, PDF, článok, štúdiu, kapitolu knihy, metodický dokument, správu, tabuľku alebo inú prílohu, musíš pracovať primárne s obsahom tejto prílohy.
+Na konci sa nesmie zobraziť nič iné okrem samotných zdrojov.
 
-Najprv posúď, či obsah prílohy súvisí s témou profilu práce:
-- Téma profilu práce: ${activeProfile?.topic || activeProfile?.title || 'nezadané'}
-- Názov práce: ${activeProfile?.title || 'nezadané'}
-- Odbor: ${activeProfile?.field || 'nezadané'}
-- Cieľ práce: ${activeProfile?.goal || 'nezadané'}
+Zakázané je vypisovať:
+- technické podsekcie A, B, C, D, E, F
+- „Zdroje nájdené v priložených dokumentoch“
+- „Formátované bibliografické záznamy“
+- „Varianty odkazov v texte“
+- „Priložené dokumenty použité ako podklad“
+- „Autori nájdení v dokumentoch“
+- „Neúplné alebo neoveriteľné zdroje“
+- názvy príloh
+- technické informácie o extrakcii
+- DOI/URL ako samostatné technické polia
+- zoznam autorov mimo bibliografických záznamov
+- poznámky typu „zdroje neboli dodané“, ak bol v prílohe nájdený aspoň autor, rok alebo bibliografický záznam
 
-Ak príloha s témou profilu práce súvisí:
-1. Použi obsah prílohy ako hlavný odborný podklad.
-2. Z priloženej prílohy použi všetky detegované relevantné zdroje, autorov, roky a bibliografické záznamy.
-3. Všetky zdroje, ktoré boli detegované v prílohe, zakomponuj do hlavného textu ako citácie podľa citačnej normy klienta: ${citationStyle}.
-4. Hlavný text musí obsahovať citácie priamo v texte.
-5. Každá citácia v hlavnom texte musí mať zodpovedajúci bibliografický záznam v časti „Použité zdroje“.
-6. Na konci v časti „Použité zdroje“ vypíš iba čisté bibliografické záznamy použitých zdrojov.
-7. Nevypisuj technické poznámky, zoznam autorov, varianty odkazov ani názvy príloh.
-
-Ak príloha s témou profilu práce nesúvisí:
-1. Nevymýšľaj prepojenie.
-2. Jasne napíš, že priložená príloha obsahovo nesúvisí s témou profilu práce.
-3. Uveď stručné odôvodnenie, prečo príloha nesúvisí.
-4. Aj v tomto prípade vypíš v časti „Použité zdroje“ iba bibliografické záznamy, ktoré sa v prílohe reálne nachádzajú alebo boli automaticky detegované.
-5. Nevymýšľaj žiadne nové zdroje.
-
-PRAVIDLÁ PRE CITÁCIE V TEXTE:
-
-1. V hlavnom texte používaj citácie podľa citačnej normy klienta: ${citationStyle}.
-2. Ak je citačná norma APA, používaj autor-rok systém.
-3. Ak je citačná norma ISO 690 alebo iná norma, prispôsob citácie tejto norme.
-4. Nepoužívaj zdroj v závere, ak sa vôbec nedá odvodiť z prílohy alebo z extrahovaného textu.
-5. Nevymýšľaj autorov, roky, názvy diel, DOI, URL, vydavateľov, časopisy ani strany.
-6. Ak je záznam neúplný, napíš len dostupné údaje. Ak chýba podstatná časť, napíš: Úplný bibliografický záznam je potrebné overiť.
-
-PRAVIDLÁ PRE SEKCIU „Použité zdroje“:
-
-Na konci výstupu musí byť nadpis:
+Správny koniec výstupu musí obsahovať iba:
 
 Použité zdroje
 
-Pod tento nadpis vypíš iba bibliografické záznamy.
+Následne vypíš iba bibliografické záznamy zdrojov, ktoré boli skutočne nájdené v priloženom texte alebo prílohe a zároveň boli použité v hlavnom texte.
 
-Nepíš:
-- A. Zdroje nájdené v priložených dokumentoch
-- B. Formátované bibliografické záznamy
-- C. Varianty odkazov v texte
-- D. Priložené dokumenty použité ako podklad
-- E. Autori nájdení v dokumentoch
-- F. Neúplné alebo neoveriteľné zdroje
-- Parentetický odkaz
-- Naratívny odkaz
-- Autori v texte
-- Rok
-- Typ zdroja
-- DOI ako samostatný riadok
-- URL ako samostatný riadok
-- informácie o extrakcii
-- názvy súborov
-- technické komentáre
+Nepoužívaj ukážkové zdroje.
+Nepoužívaj fiktívne zdroje.
+Nepoužívaj žiadny vzorový príklad.
+Ak je dostupný celý bibliografický záznam, vypíš celý záznam.
+Ak je dostupný iba autor a rok, vypíš iba autora a rok.
+Ak rok chýba, vypíš autora a text: Rok chýba.
 
-Každý zdroj uveď ako samostatný čistý bibliografický záznam podľa citačnej normy klienta: ${citationStyle}.
-
-DÔLEŽITÉ:
-Ak boli v priloženom dokumente nájdené bibliografické záznamy, autori, roky alebo citácie, nikdy nepíš „Zdroje neboli dodané“.
-
-Ak boli nájdené viaceré zdroje v prílohe, použi ich v texte a potom ich všetky vypíš v časti „Použité zdroje“.
+Ak je v prílohe dostupný celý bibliografický záznam, použi celý bibliografický záznam.
+Ak je dostupný iba autor a rok, uveď iba autora a rok.
+Ak rok chýba, uveď autora a poznámku: Rok chýba.
 
 Výstup musí byť bez markdown znakov #, ##, **, --- a bez tabuľkových značiek.
 Výstup musí vyzerať ako hotový text do Word dokumentu.
@@ -2743,7 +2806,8 @@ Výstup musí vyzerať ako hotový text do Word dokumentu.
       );
 
 
-const forceAllSources = userAskedForAllSources(apiUserText);
+const forceAllSources =
+  preparedFiles.length > 0 || userAskedForAllSources(apiUserText);
 
 
       const finalPrompt = buildFinalUserPrompt({
@@ -3009,44 +3073,58 @@ const mainTextWithoutSources = cleanAiOutput(
     .replace(/zdroje[\s\S]*$/i, ''),
 );
 
-const safeFinalSources =
-  finalSources && finalSources.trim()
-    ? finalSources.trim()
-    : 'Úplný bibliografický záznam je potrebné overiť.';
+const fallbackAllSources = buildFallbackSourcesSection({
+  preparedFiles,
+  usedText: mainOutputText,
+  forceAll: true,
+});
 
-const finalTextForCanvas = `${mainTextWithoutSources}
+const safeFinalSources =
+  finalSources &&
+  finalSources.trim() &&
+  !finalSources
+    .toLowerCase()
+    .includes('úplný bibliografický záznam je potrebné overiť') &&
+  !finalSources.toLowerCase().includes('zdroje neboli dodané') &&
+  !finalSources.toLowerCase().includes('nepodarilo overene načítať')
+    ? finalSources.trim()
+    : fallbackAllSources;
+
+      const finalTextForCanvas = `${mainTextWithoutSources}
 
 Použité zdroje
 
 ${safeFinalSources}`.trim();
 
-      const finalParsed: ParsedResult = {
-        ...parsed,
-        sources: finalSources,
-      };
+setResult(finalTextForCanvas);
+setCanvasText(finalTextForCanvas);
 
-      setResult(finalTextForCanvas);
-      setCanvasText(finalTextForCanvas);
+const finalParsed: ParsedResult = {
+  ...parsed,
+  output: mainTextWithoutSources,
+  sources: safeFinalSources,
+};
 
-      const looksLikeError =
-        finalParsed.output.includes('AI_APICallError') ||
-        finalParsed.output.includes('API error') ||
-        finalParsed.output.includes('model is not found') ||
-        finalParsed.output.includes('not found for API version') ||
-        finalParsed.output.includes('Forbidden') ||
-        finalParsed.output.includes('Unauthorized');
+const looksLikeError =
+  finalParsed.output.includes('AI_APICallError') ||
+  finalParsed.output.includes('API error') ||
+  finalParsed.output.includes('model is not found') ||
+  finalParsed.output.includes('not found for API version') ||
+  finalParsed.output.includes('Forbidden') ||
+  finalParsed.output.includes('Unauthorized');
 
-      if (
-        !looksLikeError &&
-        (finalParsed.output ||
-          finalParsed.analysis ||
-          finalParsed.score ||
-          finalParsed.tips ||
-          finalParsed.sources)
-      ) {
-        setPopupData(finalParsed);
-        setPopup(true);
-      }
+if (
+  !looksLikeError &&
+  (finalParsed.output ||
+    finalParsed.analysis ||
+    finalParsed.score ||
+    finalParsed.tips ||
+    finalParsed.sources)
+) {
+  setPopupData(finalParsed);
+  setPopup(true);
+}
+
     } catch (error) {
       console.error('CHAT SEND ERROR:', error);
 

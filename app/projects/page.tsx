@@ -309,7 +309,7 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     loadActiveProfile();
-    loadProfiles();
+    void loadProfiles();
   }, []);
 
   const goToMenu = () => {
@@ -751,8 +751,8 @@ export default function ProjectsPage() {
   };
 
   return (
-    <main className="h-full min-h-0 overflow-y-auto overflow-x-hidden bg-[#020617] text-white">
-      <div className="mx-auto min-h-full max-w-7xl px-4 pb-32 pt-4 md:px-8 md:pb-40 md:pt-6">
+    <main className="min-h-dvh overflow-x-hidden bg-[#020617] text-white">
+      <div className="mx-auto min-h-dvh max-w-7xl px-4 pb-32 pt-4 md:px-8 md:pb-40 md:pt-6">
         <div className="mb-8 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <button
@@ -1026,12 +1026,12 @@ export default function ProjectsPage() {
               </button>
             </div>
 
-            <div className="max-h-[78vh] overflow-y-auto">
+            <div className="max-h-[78vh] overflow-y-auto bg-[#020617]">
               <ProjectDetail
                 profile={selectedProfile}
                 activeProfileId={activeProfileId}
                 onBack={closeProfile}
-                onDelete={() => deleteProfile(selectedProfile.id)}
+                onDelete={() => void deleteProfile(selectedProfile.id)}
                 onEdit={() => openEditProfile(selectedProfile)}
                 onSelect={() => selectProfileForGeneration(selectedProfile)}
                 onContinue={() => goToChatWithProfile(selectedProfile)}
@@ -1101,7 +1101,7 @@ function ProjectDetail({
   const isActive = activeProfileId === profile.id;
 
   return (
-    <div className="bg-[#020617] text-white">
+    <div className="min-h-full bg-[#020617] text-white">
       <div className="px-6 py-6 md:px-8">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <button

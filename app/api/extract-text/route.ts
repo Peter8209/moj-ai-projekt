@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { gunzipSync } from 'zlib';
+import { existsSync } from 'fs';
+import { join } from 'path';
+import { pathToFileURL } from 'url';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,9 +12,24 @@ export const maxDuration = 90;
 
 const MAX_FILE_SIZE_MB = 50;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-const MAX_RETURN_TEXT_CHARS = 500_000;
 
-type SourceType = 'book' | 'article' | 'web' | 'software' | 'unknown';
+// Nevracaj extrémne veľký text, aby sa následne nezasekol /api/chat.
+const MAX_RETURN_TEXT_CHARS = 180_000;
+const MAX_DETECTED_SOURCES = 500;
+
+type SourceType =
+  | 'book'
+  | 'article'
+  | 'web'
+  | 'software'
+  | 'standard'
+  | 'law'
+  | 'thesis'
+  | 'conference'
+  | 'report'
+  | 'chapter'
+  | 'dataset'
+  | 'unknown';
 
 type BibliographicCandidate = {
   raw: string;
@@ -20,7 +38,18 @@ type BibliographicCandidate = {
   title: string | null;
   doi: string | null;
   url: string | null;
+  isbn: string | null;
+  issn: string | null;
+  publisher: string | null;
+  journal: string | null;
+  volume: string | null;
+  issue: string | null;
+  pages: string | null;
   sourceType: SourceType;
+  sourceFileName?: string;
+  sourcePage?: number | null;
+  confidence: number;
+  detectedFormat: string;
 };
 
 type ExtractResult = {
@@ -43,8 +72,31 @@ function cleanText(value: unknown) {
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{4,}/g, '\n\n\n')
     .trim();
+}
+
+function normalizeSpaces(value: unknown) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeDash(value: string) {
+  return String(value || '')
+    .replace(/[‐-‒–—―]/g, '-')
+    .replace(/\s*-\s*/g, '-')
+    .trim();
+}
+
+function uniqueArray(values: string[]) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value || '').trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function limitText(value: string, maxChars = MAX_RETURN_TEXT_CHARS) {
@@ -162,6 +214,77 @@ function stripXmlTags(value: string) {
   );
 }
 
+// ================= PDF WORKER + NODE POLYFILLS =================
+
+function findPdfWorkerSrc() {
+  const candidates = [
+    join(
+      process.cwd(),
+      'node_modules',
+      'pdfjs-dist',
+      'legacy',
+      'build',
+      'pdf.worker.mjs',
+    ),
+    join(
+      process.cwd(),
+      'node_modules',
+      'pdfjs-dist',
+      'legacy',
+      'build',
+      'pdf.worker.min.mjs',
+    ),
+    join(process.cwd(), 'node_modules', 'pdfjs-dist', 'build', 'pdf.worker.mjs'),
+    join(
+      process.cwd(),
+      'node_modules',
+      'pdfjs-dist',
+      'build',
+      'pdf.worker.min.mjs',
+    ),
+  ];
+
+  const found = candidates.find((path) => existsSync(path));
+
+  if (!found) return '';
+
+  return pathToFileURL(found).href;
+}
+
+async function ensurePdfNodePolyfills() {
+  try {
+    const canvas = await import('@napi-rs/canvas');
+    const globalScope = globalThis as any;
+
+    if (!globalScope.DOMMatrix && (canvas as any).DOMMatrix) {
+      globalScope.DOMMatrix = (canvas as any).DOMMatrix;
+    }
+
+    if (!globalScope.ImageData && (canvas as any).ImageData) {
+      globalScope.ImageData = (canvas as any).ImageData;
+    }
+
+    if (!globalScope.Path2D && (canvas as any).Path2D) {
+      globalScope.Path2D = (canvas as any).Path2D;
+    }
+  } catch (error) {
+    console.warn(
+      'PDF_NODE_POLYFILLS_WARNING:',
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
+function getPageNumberFromPageHeader(line: string) {
+  const match = line.match(/^STRANA\s+(\d+)/i);
+
+  if (!match?.[1]) return null;
+
+  const number = Number(match[1]);
+
+  return Number.isFinite(number) ? number : null;
+}
+
 // ================= PLAIN TEXT =================
 
 async function extractPlainTextFromBuffer(buffer: Buffer): Promise<ExtractResult> {
@@ -216,10 +339,64 @@ async function extractRtfTextFromBuffer(buffer: Buffer): Promise<ExtractResult> 
 
 // ================= PDF =================
 
+function extractPdfItemY(item: any) {
+  const transform = item?.transform;
+
+  if (Array.isArray(transform) && transform.length >= 6) {
+    const y = Number(transform[5]);
+
+    return Number.isFinite(y) ? Math.round(y) : 0;
+  }
+
+  return 0;
+}
+
+function extractPdfItemX(item: any) {
+  const transform = item?.transform;
+
+  if (Array.isArray(transform) && transform.length >= 6) {
+    const x = Number(transform[4]);
+
+    return Number.isFinite(x) ? x : 0;
+  }
+
+  return 0;
+}
+
+function buildPageTextFromPdfItems(items: any[]) {
+  const rows = new Map<number, { x: number; text: string }[]>();
+
+  for (const item of items) {
+    const text = String(item?.str || '').trim();
+
+    if (!text) continue;
+
+    const y = extractPdfItemY(item);
+    const x = extractPdfItemX(item);
+
+    const existing = rows.get(y) || [];
+    existing.push({ x, text });
+    rows.set(y, existing);
+  }
+
+  return Array.from(rows.entries())
+    .sort((a, b) => b[0] - a[0])
+    .map(([, rowItems]) =>
+      rowItems
+        .sort((a, b) => a.x - b.x)
+        .map((item) => item.text)
+        .join(' '),
+    )
+    .map((line) => cleanText(line))
+    .filter(Boolean)
+    .join('\n');
+}
+
 async function extractPdfText(buffer: Buffer): Promise<ExtractResult> {
   let pdfjs: any;
 
   try {
+    await ensurePdfNodePolyfills();
     pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   } catch (error) {
     return {
@@ -228,15 +405,17 @@ async function extractPdfText(buffer: Buffer): Promise<ExtractResult> {
       method: 'pdfjs-dist-server',
       message:
         `PDF extrakcia zlyhala: nepodarilo sa načítať pdfjs-dist. ` +
-        `Nainštaluj balík: npm install pdfjs-dist. Detail: ${getErrorMessage(
+        `Spusti: npm install pdfjs-dist @napi-rs/canvas. Detail: ${getErrorMessage(
           error,
         )}`,
     };
   }
 
   try {
-    if (pdfjs.GlobalWorkerOptions) {
-      pdfjs.GlobalWorkerOptions.workerSrc = '';
+    const workerSrc = findPdfWorkerSrc();
+
+    if (pdfjs.GlobalWorkerOptions && workerSrc) {
+      pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
     }
 
     const loadingTask = pdfjs.getDocument({
@@ -249,21 +428,13 @@ async function extractPdfText(buffer: Buffer): Promise<ExtractResult> {
     });
 
     const pdf = await loadingTask.promise;
-
     const pages: string[] = [];
 
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber);
       const content = await page.getTextContent();
 
-      const pageText = content.items
-        .map((item: any) => {
-          if (typeof item?.str === 'string') return item.str;
-          return '';
-        })
-        .filter(Boolean)
-        .join(' ');
-
+      const pageText = buildPageTextFromPdfItems(content.items || []);
       const cleanedPageText = cleanText(pageText);
 
       if (cleanedPageText) {
@@ -277,6 +448,8 @@ async function extractPdfText(buffer: Buffer): Promise<ExtractResult> {
       }
     }
 
+    const pagesCount = pdf.numPages || null;
+
     try {
       await pdf.destroy?.();
     } catch {
@@ -288,20 +461,21 @@ async function extractPdfText(buffer: Buffer): Promise<ExtractResult> {
     return {
       ok: Boolean(text),
       text,
-      method: 'pdfjs-dist-server-disable-worker',
+      method: 'pdfjs-dist-server-node-polyfill-line-layout',
       message: text
-        ? 'PDF text bol extrahovaný na serveri cez pdfjs-dist bez CDN workeru.'
+        ? 'PDF text bol extrahovaný na serveri cez pdfjs-dist so zachovaním riadkov.'
         : 'PDF bolo spracované, ale neobsahuje čitateľný text. Môže ísť o skenovaný PDF obrázok.',
       meta: {
-        pages: pdf.numPages || null,
+        pages: pagesCount,
         chars: text.length,
+        workerSrc: workerSrc || 'disabled-node-runtime',
       },
     };
   } catch (error) {
     return {
       ok: false,
       text: '',
-      method: 'pdfjs-dist-server-disable-worker',
+      method: 'pdfjs-dist-server',
       message: `PDF extrakcia zlyhala: ${getErrorMessage(error)}`,
     };
   }
@@ -592,61 +766,124 @@ async function extractByType({
 
 // ================= BIBLIOGRAPHY DETECTION =================
 
-function uniqueArray(values: string[]) {
-  return Array.from(
-    new Set(
-      values
-        .map((value) => String(value || '').trim())
-        .filter(Boolean),
-    ),
+function removeLeadingReferenceMarker(value: string) {
+  return String(value || '')
+    .replace(/^\s*\[\d+\]\s*/, '')
+    .replace(/^\s*\(\d+\)\s*/, '')
+    .replace(/^\s*\d+\.\s*/, '')
+    .replace(/^\s*\d+\)\s*/, '')
+    .replace(/^\s*[•\-–—]\s*/, '')
+    .trim();
+}
+
+function cleanReference(value: string) {
+  return normalizeSpaces(
+    removeLeadingReferenceMarker(value)
+      .replace(/\s+([,.;:])/g, '$1')
+      .replace(/([,.;:])([^\s])/g, '$1 $2')
+      .replace(/\.{2,}/g, '.'),
   );
 }
 
+function uniqueByCleanedText(values: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const cleaned = cleanReference(value);
+
+    if (!cleaned) continue;
+
+    const key = cleaned.toLowerCase();
+
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    result.push(cleaned);
+  }
+
+  return result;
+}
+
 function detectSourceType(line: string): SourceType {
-  const lower = line.toLowerCase();
+  if (
+    /\biso\s*\d+|\bstn\s+|en\s+iso|astm\s+|din\s+|iec\s+|technical standard|norma\b/i.test(
+      line,
+    )
+  ) {
+    return 'standard';
+  }
 
   if (
-    lower.includes('[computer software]') ||
-    lower.includes('software') ||
-    lower.includes('jasp') ||
-    lower.includes('spss') ||
-    lower.includes('jamovi') ||
-    lower.includes('r foundation')
+    /zákon|vyhláška|nariadenie|smernica|act no\.|regulation|directive|legal|eur-lex/i.test(
+      line,
+    )
+  ) {
+    return 'law';
+  }
+
+  if (
+    /dizertačná práca|diplomová práca|bakalárska práca|thesis|dissertation|doctoral dissertation|master.?s thesis|bachelor.?s thesis/i.test(
+      line,
+    )
+  ) {
+    return 'thesis';
+  }
+
+  if (
+    /conference|proceedings|symposium|kongres|konferencia|zborník|in proceedings/i.test(
+      line,
+    )
+  ) {
+    return 'conference';
+  }
+
+  if (
+    /report|správa|technical report|annual report|working paper|white paper|research report/i.test(
+      line,
+    )
+  ) {
+    return 'report';
+  }
+
+  if (
+    /\bin:\s+.+(ed\.|eds\.|editor|editors|zost\.|editori)|chapter|kapitola/i.test(
+      line,
+    )
+  ) {
+    return 'chapter';
+  }
+
+  if (
+    /\bdataset\b|data set|zenodo|figshare|dryad|osf\.io|dataverse/i.test(line)
+  ) {
+    return 'dataset';
+  }
+
+  if (
+    /\[computer software\]|software|program|jasp|spss|jamovi|r foundation|python|matlab|stata|sas|microsoft excel/i.test(
+      line,
+    )
   ) {
     return 'software';
   }
 
-  if (
-    lower.includes('http://') ||
-    lower.includes('https://') ||
-    lower.includes('www.')
-  ) {
+  if (/https?:\/\/|www\.|retrieved|available online|dostupné online/i.test(line)) {
     return 'web';
   }
 
   if (
-    lower.includes('doi') ||
-    lower.includes('journal') ||
-    lower.includes('vol.') ||
-    lower.includes('volume') ||
-    lower.includes('issue') ||
-    lower.includes('časopis') ||
-    lower.includes('štúdia') ||
-    lower.includes('article') ||
-    lower.includes('nutrition') ||
-    lower.includes('food') ||
-    lower.includes('science')
+    /doi|journal|vol\.|volume|issue|časopis|štúdia|article|nutrition|food|science|plant physiol|plant breed|j\. cereal sci|j\. inst\. brew|euphytica|nova biotechnologica|plant mol\.? biol|periodikum|revue|bulletin/i.test(
+      line,
+    )
   ) {
     return 'article';
   }
 
   if (
-    lower.includes('vydavateľ') ||
-    lower.includes('publisher') ||
-    lower.includes('isbn') ||
-    lower.includes('monografia') ||
-    lower.includes('book') ||
-    lower.includes('press')
+    /publisher|vydavateľ|vydavatel|isbn|monografia|book|press|nakladatelství|vydanie|edition|cambridge|springer|elsevier|wiley|routledge|oxford|crc press/i.test(
+      line,
+    )
   ) {
     return 'book';
   }
@@ -657,124 +894,323 @@ function detectSourceType(line: string): SourceType {
 function extractDoi(line: string) {
   const match = line.match(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i);
 
-  return match?.[0] || null;
+  return match?.[0]?.replace(/[.,;)]$/, '') || null;
 }
 
 function extractUrl(line: string) {
-  const match = line.match(/https?:\/\/[^\s)]+|www\.[^\s)]+/i);
+  const match = line.match(/https?:\/\/[^\s<>)]+|www\.[^\s<>)]+/i);
 
-  return match?.[0] || null;
+  return match?.[0]?.replace(/[.,;)]$/, '') || null;
+}
+
+function extractIsbn(line: string) {
+  const match =
+    line.match(
+      /\bISBN(?:-1[03])?:?\s*((?:97[89][-\s]?)?(?:\d[-\s]?){9}[\dXx])\b/i,
+    ) || line.match(/\b(?:97[89][-\s]?)?(?:\d[-\s]?){9}[\dXx]\b/);
+
+  return match?.[1]?.trim() || match?.[0]?.trim() || null;
+}
+
+function extractIssn(line: string) {
+  const match = line.match(/\bISSN:?\s*(\d{4}[-\s]?\d{3}[\dXx])\b/i);
+
+  return match?.[1]?.trim() || null;
 }
 
 function extractYear(line: string) {
-  const match =
-    line.match(/\((19|20)\d{2}\)/) ||
-    line.match(/\b(19|20)\d{2}\b/) ||
-    line.match(/\bn\.d\.\b/i);
+  const matches = Array.from(
+    line.matchAll(/\b(18|19|20|21)\d{2}[a-z]?\b|\bn\.d\.\b|\bbez dátumu\b/gi),
+  ).map((match) => match[0]);
 
-  return match?.[0]?.replace(/[()]/g, '') || null;
+  if (!matches.length) return null;
+
+  return matches[0].replace(/[()]/g, '');
 }
 
-function extractAuthors(line: string) {
-  const beforeYear = line.split(/\((19|20)\d{2}\)|\b(19|20)\d{2}\b/)[0] || '';
+function extractPages(line: string) {
+  const patterns = [
+    /\bs\.\s*(\d+\s*[-–—]\s*\d+|\d+)/i,
+    /\bpp\.\s*(\d+\s*[-–—]\s*\d+|\d+)/i,
+    /\bp\.\s*(\d+\s*[-–—]\s*\d+|\d+)/i,
+    /\bpages?\s*(\d+\s*[-–—]\s*\d+|\d+)/i,
+    /:\s*(\d+\s*[-–—]\s*\d+)\b/,
+  ];
 
-  const cleaned = beforeYear
-    .replace(/\bet al\./gi, '')
-    .replace(/\ba kol\./gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  for (const pattern of patterns) {
+    const match = line.match(pattern);
 
-  const candidates = cleaned
-    .split(/\s*(?:,|;|&|\ba\b|\band\b)\s*/i)
-    .map((part) => part.trim())
-    .filter((part) => {
-      if (part.length < 3) return false;
-      if (!/[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]/.test(part)) return false;
-      if (
-        /^(in|from|retrieved|dostupné|available|vol|no|pp|str|s|page|pages|journal|doi|isbn)$/i.test(
-          part,
-        )
-      ) {
-        return false;
-      }
-
-      return (
-        /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+$/.test(
-          part,
-        ) ||
-        /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záäčďéíĺľňóôŕšťúýž]+,\s*[A-Z]/.test(
-          part,
-        )
-      );
-    });
-
-  return uniqueArray(candidates).slice(0, 20);
-}
-
-function extractTitle(line: string) {
-  let working = line.trim();
-
-  working = working.replace(/^[-•\d.)\s]+/, '');
-  working = working.replace(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi, '');
-  working = working.replace(/https?:\/\/[^\s)]+|www\.[^\s)]+/gi, '');
-
-  const quoted =
-    working.match(/"([^"]{5,220})"/) ||
-    working.match(/„([^“”]{5,220})“/) ||
-    working.match(/'([^']{5,220})'/);
-
-  if (quoted?.[1]) {
-    return quoted[1].trim();
-  }
-
-  const afterYear = working.split(/\((19|20)\d{2}\)|\b(19|20)\d{2}\b/).pop();
-
-  if (afterYear && afterYear.trim().length > 8) {
-    return afterYear
-      .replace(/^[).,\s:-]+/, '')
-      .split(/\.\s+/)[0]
-      .trim()
-      .slice(0, 260);
-  }
-
-  const parts = working.split('.').map((part) => part.trim()).filter(Boolean);
-
-  if (parts.length >= 2) {
-    return parts[1].slice(0, 260);
+    if (match?.[1]) return normalizeDash(match[1]);
   }
 
   return null;
 }
 
-function looksLikeBibliographicLine(line: string) {
-  const trimmed = line.trim();
+function extractVolume(line: string) {
+  const patterns = [
+    /\bvol\.\s*(\d+[A-Za-z]?)/i,
+    /\bvolume\s*(\d+[A-Za-z]?)/i,
+    /\broč\.\s*(\d+[A-Za-z]?)/i,
+    /\b(?:journal|časopis)[^,]*,\s*(\d+)\s*(?:\(|,)/i,
+    /,\s*(\d+)\s*\(\d+\)\s*,/,
+    /\b([A-Z][A-Za-z. ]+),\s*(\d+)\s*,\s*(18|19|20|21)\d{2}/,
+  ];
 
-  if (trimmed.length < 18) return false;
+  for (const pattern of patterns) {
+    const match = line.match(pattern);
 
-  const hasYear = /\b(19|20)\d{2}\b|\bn\.d\.\b/i.test(trimmed);
-  const hasDoi = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i.test(trimmed);
-  const hasUrl = /https?:\/\/|www\./i.test(trimmed);
+    if (match?.[1]) return match[1].trim();
+  }
 
-  const hasCitationWords =
-    /publisher|journal|doi|isbn|vydavateľ|časopis|university|press|jasp|spss|software|available|dostupné|retrieved|vol\.|volume|issue|pages|pp\.|nutrition|science|food|protein|proteins|cereal|cereals|wheat|bread|amino/i.test(
-      trimmed,
-    );
+  return null;
+}
 
-  const hasAuthorPattern =
-    /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+,\s*[A-Z]/.test(
-      trimmed,
-    ) ||
-    /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+\s+\([12]\d{3}\)/.test(
-      trimmed,
-    ) ||
-    /^[A-Z][A-Za-z.' -]+,\s*[A-Z]\./.test(trimmed);
+function extractIssue(line: string) {
+  const patterns = [
+    /\bno\.\s*(\d+[A-Za-z]?)/i,
+    /\bissue\s*(\d+[A-Za-z]?)/i,
+    /\bč\.\s*(\d+[A-Za-z]?)/i,
+    /\(\s*(\d+[A-Za-z]?)\s*\)/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = line.match(pattern);
+
+    if (match?.[1]) return match[1].trim();
+  }
+
+  return null;
+}
+
+function extractPublisher(line: string) {
+  const patterns = [
+    /(?:publisher|vydavateľ|vydavatel|nakladatelství)\s*[:.-]\s*([^.;\n]+)/i,
+    /\b(?:New York|London|Praha|Bratislava|Brno|Oxford|Cambridge|Berlin|Amsterdam|Paris|Wien|Vienna)\s*:\s*([^.;\n]+)/i,
+    /\b(Springer|Elsevier|Wiley|Routledge|Oxford University Press|Cambridge University Press|CRC Press|Taylor\s*&\s*Francis|SAGE|Pearson|McGraw-Hill|Academic Press)\b/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = line.match(pattern);
+
+    if (match?.[1]) return cleanText(match[1]).slice(0, 160);
+  }
+
+  return null;
+}
+
+function extractJournal(line: string) {
+  const cleaned = removeLeadingReferenceMarker(line);
+
+  const knownJournalMatch = cleaned.match(
+    /\b(Plant Physiol\.? Biochem\.?|Plant Molecular Biology Reporter|Plant Mol\.? Biol\.? Rep\.?|Journal of Cereal Science|J\. Cereal Sci\.?|Journal of the Institute of Brewing|J\. Inst\. Brew\.?|Euphytica|Plant Breeding|Plant Breed\.?|Nova Biotechnologica|Farmář|Food Chemistry|Food Science and Technology|Nature|Science|PLOS ONE|Nutrients|Cereal Chemistry|Potravinarstvo|Potravinárstvo)\b/i,
+  );
+
+  if (knownJournalMatch?.[1]) return knownJournalMatch[1].trim();
+
+  const isoLike =
+    cleaned.match(/:\s*.+?\.\s*([^.,]+),\s*\d+\s*,\s*(18|19|20|21)\d{2}/) ||
+    cleaned.match(/\.\s*([^.,]+),\s*\d+\s*,\s*(18|19|20|21)\d{2}/);
+
+  if (isoLike?.[1]) return cleanText(isoLike[1]).slice(0, 160);
+
+  const apaLike =
+    cleaned.match(/\)\.\s*[^.]+?\.\s*([^.,]+),\s*\d+/) ||
+    cleaned.match(/\d{4}\.\s*[^.]+?\.\s*([^.,]+),\s*\d+/);
+
+  if (apaLike?.[1]) return cleanText(apaLike[1]).slice(0, 160);
+
+  return null;
+}
+
+function normalizeAuthorCandidate(value: string) {
+  return cleanText(value)
+    .replace(/\bet al\.?/gi, '')
+    .replace(/\ba kol\.?/gi, '')
+    .replace(/\s+\(.*?\)\s*$/g, '')
+    .replace(/^[,.\s]+|[,.\s]+$/g, '')
+    .trim();
+}
+
+function isValidAuthorCandidate(value: string) {
+  const part = normalizeAuthorCandidate(value);
+
+  if (part.length < 2) return false;
+  if (part.length > 120) return false;
+
+  if (
+    /^(in|from|retrieved|dostupné|available|vol|volume|no|issue|pp|str|s|page|pages|journal|doi|isbn|issn|publisher|vydavateľ|university|press|editor|eds?|accessed|online)$/i.test(
+      part,
+    )
+  ) {
+    return false;
+  }
+
+  if (/\d{4}/.test(part)) return false;
+  if (/https?:\/\/|www\.|doi|isbn|issn/i.test(part)) return false;
+
+  const surnameInitials =
+    /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽa-záäčďéíĺľňóôŕšťúýž.' -]+,\s*(?:[A-Z]\.?\s*){1,8}$/;
+
+  const nameSurname =
+    /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'-]+(?:\s+[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'-]+){0,4}$/;
+
+  const corporate =
+    /^(WHO|FAO|OECD|UNESCO|UNICEF|European Commission|World Health Organization|Food and Agriculture Organization|Ministerstvo|Úrad|Štatistický úrad|European Union|ISO|STN|ASTM|DIN|IEC)\b/i;
 
   return (
-    hasDoi ||
-    hasUrl ||
-    (hasYear && (hasCitationWords || hasAuthorPattern)) ||
-    (hasAuthorPattern && hasCitationWords)
+    surnameInitials.test(part) ||
+    nameSurname.test(part) ||
+    corporate.test(part)
   );
+}
+
+function extractIsoAuthors(line: string) {
+  const cleaned = removeLeadingReferenceMarker(line);
+
+  const beforeTitle =
+    cleaned.split(/\s*:\s+/)[0] ||
+    cleaned.split(/\.\s+(?=[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ0-9])/)[0] ||
+    '';
+
+  const matches = Array.from(
+    beforeTitle.matchAll(
+      /[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽa-záäčďéíĺľňóôŕšťúýž.'-]+,\s*(?:[A-Z]\.?\s*){1,8}/g,
+    ),
+  ).map((match) => normalizeAuthorCandidate(match[0]));
+
+  return uniqueArray(matches.filter(isValidAuthorCandidate)).slice(0, 30);
+}
+
+function extractAuthors(line: string) {
+  const isoAuthors = extractIsoAuthors(line);
+
+  if (isoAuthors.length) return isoAuthors;
+
+  const cleaned = removeLeadingReferenceMarker(line);
+
+  const beforeYear =
+    cleaned.split(/\((18|19|20|21)\d{2}[a-z]?\)|\b(18|19|20|21)\d{2}[a-z]?\b/)[0] ||
+    '';
+
+  const beforeTitle =
+    beforeYear.split(/\.\s+(?=[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ0-9])/)[0] || beforeYear;
+
+  const possibleAuthorPart = cleanText(beforeTitle)
+    .replace(/\bet al\.?/gi, '')
+    .replace(/\ba kol\.?/gi, '');
+
+  const parts = possibleAuthorPart
+    .split(/\s*(?:;|&|\band\b|\ba\b|\bet\b|\und\b|\s+\|\s+)\s*/i)
+    .map(normalizeAuthorCandidate)
+    .filter(isValidAuthorCandidate);
+
+  return uniqueArray(parts).slice(0, 30);
+}
+
+function extractTitle(line: string) {
+  let working = removeLeadingReferenceMarker(line);
+
+  working = working.replace(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi, '');
+  working = working.replace(/https?:\/\/[^\s<>)]+|www\.[^\s<>)]+/gi, '');
+
+  const quoted =
+    working.match(/"([^"]{5,260})"/) ||
+    working.match(/„([^“”]{5,260})“/) ||
+    working.match(/'([^']{5,260})'/);
+
+  if (quoted?.[1]) {
+    return cleanText(quoted[1]).slice(0, 300);
+  }
+
+  const colonTitle = working.match(/:\s*([^.;]{8,350})[.;]/);
+
+  if (colonTitle?.[1]) {
+    return cleanText(colonTitle[1]).slice(0, 300);
+  }
+
+  const afterYear = working
+    .split(/\((18|19|20|21)\d{2}[a-z]?\)|\b(18|19|20|21)\d{2}[a-z]?\b/)
+    .pop();
+
+  if (afterYear && afterYear.trim().length > 8) {
+    const possible = afterYear
+      .replace(/^[).,\s:-]+/, '')
+      .split(/\.\s+/)[0]
+      .trim();
+
+    if (possible.length >= 5 && !/^s\.|^pp\.|^vol\.|^doi/i.test(possible)) {
+      return possible.slice(0, 300);
+    }
+  }
+
+  const parts = working.split('.').map((part) => part.trim()).filter(Boolean);
+
+  if (parts.length >= 2) {
+    const possible = parts[1];
+
+    if (possible.length >= 5) return possible.slice(0, 300);
+  }
+
+  return null;
+}
+
+function detectCitationFormat(line: string) {
+  const cleaned = removeLeadingReferenceMarker(line);
+
+  if (/^\[\d+\]/.test(line.trim())) return 'numbered-bracket';
+  if (/^\d+\./.test(line.trim()) || /^\d+\)/.test(line.trim())) {
+    return 'numbered-list';
+  }
+
+  if (/:\s+.+\.\s+.+,\s*\d+,\s*(18|19|20|21)\d{2}/.test(cleaned)) {
+    return 'iso-690';
+  }
+
+  if (/\([12]\d{3}[a-z]?\)\./.test(cleaned)) return 'apa-harvard';
+  if (/doi|https?:\/\/|www\./i.test(cleaned)) return 'doi-url';
+  if (/isbn/i.test(cleaned)) return 'book-isbn';
+  if (/in:\s/i.test(cleaned)) return 'chapter-or-proceedings';
+
+  return 'unknown-format';
+}
+
+function scoreBibliographicLine(line: string) {
+  let score = 0;
+
+  if (/\b(18|19|20|21)\d{2}[a-z]?\b|\bn\.d\.\b/i.test(line)) score += 18;
+  if (/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i.test(line)) score += 30;
+  if (/https?:\/\/|www\./i.test(line)) score += 22;
+  if (/\bISBN(?:-1[03])?:?/i.test(line)) score += 24;
+  if (/\bISSN:?/i.test(line)) score += 18;
+  if (extractAuthors(line).length > 0) score += 28;
+  if (extractTitle(line)) score += 16;
+  if (extractPages(line)) score += 8;
+  if (extractVolume(line)) score += 6;
+  if (extractIssue(line)) score += 4;
+  if (detectSourceType(line) !== 'unknown') score += 10;
+  if (/:\s+.+\.\s+.+,\s*\d+,\s*(18|19|20|21)\d{2}/.test(line)) score += 22;
+
+  if (
+    /journal|vol\.|issue|publisher|press|conference|thesis|report|norma|standard|zákon|doi|isbn|issn|j\.|plant|cereal|euphytica|biotechnologica|farmář|potravin/i.test(
+      line,
+    )
+  ) {
+    score += 10;
+  }
+
+  if (line.length >= 35) score += 8;
+  if (line.length >= 80) score += 6;
+
+  return Math.min(score, 100);
+}
+
+function looksLikeBibliographicLine(line: string) {
+  const trimmed = cleanText(line);
+
+  if (trimmed.length < 18) return false;
+  if (trimmed.length > 2200) return false;
+
+  return scoreBibliographicLine(trimmed) >= 34;
 }
 
 function extractLiteratureLikeBlocks(text: string) {
@@ -785,7 +1221,7 @@ function extractLiteratureLikeBlocks(text: string) {
 
   lines.forEach((line, index) => {
     if (
-      /literatúra|literatura|references|bibliografia|bibliography|použitá literatúra|zoznam literatúry|zdroje/i.test(
+      /literatúra|literatura|references|bibliografia|bibliography|použitá literatúra|zoznam literatúry|zdroje|works cited|literature cited|referencie|citácie|citations|sources/i.test(
         line,
       )
     ) {
@@ -796,102 +1232,485 @@ function extractLiteratureLikeBlocks(text: string) {
   const blocks: string[] = [];
 
   for (const startIndex of startIndexes) {
-    const endIndex = Math.min(lines.length, startIndex + 180);
+    const endIndex = Math.min(lines.length, startIndex + 700);
     blocks.push(lines.slice(startIndex, endIndex).join('\n'));
   }
 
   return blocks.join('\n\n');
 }
 
-function extractBibliographicCandidates(text: string) {
+function splitPotentialReferenceEntries(text: string) {
+  const cleaned = cleanText(text);
+  const lines = cleaned
+    .split('\n')
+    .map((line) => cleanText(line))
+    .filter(Boolean);
+
+  const entries: string[] = [];
+  let current = '';
+
+  const startsNewEntry = (line: string) => {
+    return (
+      /^\s*(\[\d+\]|\d+\.|\d+\)|[•\-–—])\s+/.test(line) ||
+      /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+,\s*[A-Z]/.test(
+        line,
+      ) ||
+      /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+\s+\((18|19|20|21)\d{2}[a-z]?\)/.test(
+        line,
+      )
+    );
+  };
+
+  for (const line of lines) {
+    if (startsNewEntry(line) && current) {
+      entries.push(current.trim());
+      current = line;
+    } else {
+      current = current ? `${current} ${line}` : line;
+    }
+
+    if (current.length > 1800) {
+      entries.push(current.trim());
+      current = '';
+    }
+  }
+
+  if (current.trim()) entries.push(current.trim());
+
+  return entries;
+}
+
+function extractInlineIsoReferences(text: string) {
+  const oneLine = normalizeSpaces(text);
+
+  const pattern =
+    /(?:^|[\n ]|(?<=\. ))([A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽa-záäčďéíĺľňóôŕšťúýž.'-]+,\s*(?:[A-Z]\.?\s*){1,8}(?:,\s*[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽa-záäčďéíĺľňóôŕšťúýž.'-]+,\s*(?:[A-Z]\.?\s*){1,8}){0,12}\s*:\s*.{10,420}?\b(?:18|19|20|21)\d{2}.{0,80}?(?:s\.|pp\.|p\.|pages?|DOI|https?:\/\/|www\.|$).{0,80}?)(?=(?:\s+[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽa-záäčďéíĺľňóôŕšťúýž.'-]+,\s*(?:[A-Z]\.?\s*){1,8}(?:,\s*[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽa-záäčďéíĺľňóôŕšťúýž.'-]+,\s*(?:[A-Z]\.?\s*){1,8}){0,12}\s*:)|$)/g;
+
+  return Array.from(oneLine.matchAll(pattern))
+    .map((match) => cleanReference(match[1] || ''))
+    .filter((item) => item.length >= 35)
+    .slice(0, 1000);
+}
+
+function buildCandidateItems(text: string) {
   const cleaned = cleanText(text);
   const literatureBlock = extractLiteratureLikeBlocks(cleaned);
+
   const sourceText = literatureBlock
     ? `${literatureBlock}\n\n${cleaned}`
     : cleaned;
 
   const lines = sourceText
     .split('\n')
-    .map((line) => line.trim())
+    .map((line) => cleanText(line))
     .filter(Boolean);
 
-  const joinedMultilineCandidates: string[] = [];
+  const candidates: {
+    raw: string;
+    sourcePage: number | null;
+  }[] = [];
+
+  let currentPage: number | null = null;
 
   for (let i = 0; i < lines.length; i += 1) {
     const current = lines[i];
+    const pageFromHeader = getPageNumberFromPageHeader(current);
+
+    if (pageFromHeader) currentPage = pageFromHeader;
+
     const next = lines[i + 1] || '';
     const next2 = lines[i + 2] || '';
+    const next3 = lines[i + 3] || '';
+    const next4 = lines[i + 4] || '';
 
-    joinedMultilineCandidates.push(current);
+    candidates.push({ raw: current, sourcePage: currentPage });
 
-    if (current.length < 220 && next) {
-      joinedMultilineCandidates.push(`${current} ${next}`.trim());
+    if (current.length < 320 && next) {
+      candidates.push({
+        raw: `${current} ${next}`,
+        sourcePage: currentPage,
+      });
     }
 
-    if (current.length < 160 && next && next2) {
-      joinedMultilineCandidates.push(`${current} ${next} ${next2}`.trim());
+    if (current.length < 260 && next && next2) {
+      candidates.push({
+        raw: `${current} ${next} ${next2}`,
+        sourcePage: currentPage,
+      });
+    }
+
+    if (current.length < 210 && next && next2 && next3) {
+      candidates.push({
+        raw: `${current} ${next} ${next2} ${next3}`,
+        sourcePage: currentPage,
+      });
+    }
+
+    if (current.length < 160 && next && next2 && next3 && next4) {
+      candidates.push({
+        raw: `${current} ${next} ${next2} ${next3} ${next4}`,
+        sourcePage: currentPage,
+      });
     }
   }
 
+  const structuredEntries = splitPotentialReferenceEntries(
+    literatureBlock || cleaned,
+  ).map((raw) => ({
+    raw,
+    sourcePage: null as number | null,
+  }));
+
+  const inlineEntries = extractInlineIsoReferences(literatureBlock || cleaned).map(
+    (raw) => ({
+      raw,
+      sourcePage: null as number | null,
+    }),
+  );
+
+  return [...structuredEntries, ...inlineEntries, ...candidates];
+}
+
+function extractBibliographicCandidates(text: string, sourceFileName: string) {
+  const allPotential = buildCandidateItems(text);
   const candidates: BibliographicCandidate[] = [];
 
-  for (const line of joinedMultilineCandidates) {
-    if (!looksLikeBibliographicLine(line)) continue;
+  for (const item of allPotential) {
+    const raw = cleanReference(item.raw);
+
+    if (!looksLikeBibliographicLine(raw)) continue;
 
     candidates.push({
-      raw: line.slice(0, 1200),
-      authors: extractAuthors(line),
-      year: extractYear(line),
-      title: extractTitle(line),
-      doi: extractDoi(line),
-      url: extractUrl(line),
-      sourceType: detectSourceType(line),
+      raw: raw.slice(0, 1800),
+      authors: extractAuthors(raw),
+      year: extractYear(raw),
+      title: extractTitle(raw),
+      doi: extractDoi(raw),
+      url: extractUrl(raw),
+      isbn: extractIsbn(raw),
+      issn: extractIssn(raw),
+      publisher: extractPublisher(raw),
+      journal: extractJournal(raw),
+      volume: extractVolume(raw),
+      issue: extractIssue(raw),
+      pages: extractPages(raw),
+      sourceType: detectSourceType(raw),
+      sourceFileName,
+      sourcePage: item.sourcePage,
+      confidence: scoreBibliographicLine(raw),
+      detectedFormat: detectCitationFormat(raw),
     });
   }
 
   const unique = new Map<string, BibliographicCandidate>();
 
   for (const item of candidates) {
-    const key = [
-      item.raw.slice(0, 220),
+    const strongKey = [
       item.doi || '',
+      item.isbn || '',
+      item.issn || '',
       item.url || '',
       item.title || '',
       item.year || '',
+      item.authors.join(',') || '',
+      item.sourceFileName || '',
     ]
       .join('|')
       .toLowerCase();
 
-    if (!unique.has(key)) {
+    const fallbackKey = [
+      item.raw.slice(0, 300),
+      item.year || '',
+      item.sourceFileName || '',
+    ]
+      .join('|')
+      .toLowerCase();
+
+    const key = strongKey.replace(/\|/g, '').trim() ? strongKey : fallbackKey;
+    const existing = unique.get(key);
+
+    if (!existing || item.confidence > existing.confidence) {
       unique.set(key, item);
     }
   }
 
-  return Array.from(unique.values()).slice(0, 250);
+  return Array.from(unique.values())
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, MAX_DETECTED_SOURCES);
 }
 
 function extractAllAuthorsFromSources(sources: BibliographicCandidate[]) {
   return uniqueArray(sources.flatMap((source) => source.authors || []));
 }
 
-function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
-  if (!candidates.length) {
-    return 'Neboli automaticky detegované žiadne bibliografické záznamy. Ak sú zdroje v texte, treba ich manuálne overiť alebo doplniť čitateľnejší zoznam literatúry.';
+// ================= FINAL SOURCE OUTPUT FORMAT =================
+
+function titleCaseName(value: string) {
+  return String(value || '')
+    .toLowerCase()
+    .split(/(\s|-)/)
+    .map((part) => {
+      if (part === ' ' || part === '-') return part;
+
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join('');
+}
+
+function normalizeAuthorNameForClassic(author: string) {
+  const cleaned = normalizeAuthorCandidate(author);
+
+  if (!cleaned) return '';
+
+  if (cleaned.includes(',')) {
+    const [surnameRaw, initialsRaw] = cleaned.split(',', 2);
+    const surname = surnameRaw.trim().toUpperCase();
+    const initials = normalizeSpaces(initialsRaw || '')
+      .split(/\s+|\./)
+      .filter(Boolean)
+      .map((part) => `${part.charAt(0).toUpperCase()}.`)
+      .join('');
+
+    return initials ? `${surname}, ${initials}` : surname;
   }
 
-  return candidates
-    .map((item, index) => {
-      return `${index + 1}. Pôvodný záznam:
-${item.raw}
+  const parts = cleaned.split(/\s+/).filter(Boolean);
 
-Autori: ${item.authors.length ? item.authors.join(', ') : 'neuvedené alebo potrebné overiť'}
-Rok: ${item.year || 'údaj je potrebné overiť'}
-Názov publikácie / zdroja: ${item.title || 'údaj je potrebné overiť'}
-Typ zdroja: ${item.sourceType}
-DOI: ${item.doi || 'neuvedené'}
-URL: ${item.url || 'neuvedené'}`;
-    })
-    .join('\n\n');
+  if (parts.length === 1) return parts[0].toUpperCase();
+
+  const surname = parts[parts.length - 1].toUpperCase();
+  const initials = parts
+    .slice(0, -1)
+    .map((part) => `${part.charAt(0).toUpperCase()}.`)
+    .join('');
+
+  return initials ? `${surname}, ${initials}` : surname;
+}
+
+function normalizeAuthorNameForApa(author: string) {
+  const cleaned = normalizeAuthorCandidate(author);
+
+  if (!cleaned) return '';
+
+  if (cleaned.includes(',')) {
+    const [surnameRaw, initialsRaw] = cleaned.split(',', 2);
+    const surname = titleCaseName(surnameRaw.trim());
+    const initials = normalizeSpaces(initialsRaw || '')
+      .split(/\s+|\./)
+      .filter(Boolean)
+      .map((part) => `${part.charAt(0).toUpperCase()}.`)
+      .join(' ');
+
+    return initials ? `${surname}, ${initials}` : surname;
+  }
+
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+
+  if (parts.length === 1) return titleCaseName(parts[0]);
+
+  const surname = titleCaseName(parts[parts.length - 1]);
+  const initials = parts
+    .slice(0, -1)
+    .map((part) => `${part.charAt(0).toUpperCase()}.`)
+    .join(' ');
+
+  return initials ? `${surname}, ${initials}` : surname;
+}
+
+function formatClassicAuthors(authors: string[]) {
+  const formatted = authors.map(normalizeAuthorNameForClassic).filter(Boolean);
+
+  return formatted.length ? formatted.join(', ') : 'NEUVEDENÝ AUTOR';
+}
+
+function formatApaAuthors(authors: string[]) {
+  const formatted = authors.map(normalizeAuthorNameForApa).filter(Boolean);
+
+  if (!formatted.length) return 'Neuvedený autor';
+  if (formatted.length === 1) return formatted[0];
+  if (formatted.length === 2) return `${formatted[0]} & ${formatted[1]}`;
+
+  return `${formatted.slice(0, -1).join(', ')} & ${
+    formatted[formatted.length - 1]
+  }`;
+}
+
+function formatSourceAsOriginalLikeRecord(source: BibliographicCandidate) {
+  const raw = cleanReference(source.raw);
+
+  if (raw && source.confidence >= 50) {
+    return raw.endsWith('.') ? raw : `${raw}.`;
+  }
+
+  const authors = formatClassicAuthors(source.authors);
+  const title = source.title || 'Názov je potrebné overiť';
+  const journal = source.journal ? ` ${source.journal},` : '';
+  const volume = source.volume ? ` ${source.volume}` : '';
+  const issue = source.issue ? ` (${source.issue})` : '';
+  const year = source.year ? ` ${source.year}` : '';
+  const pages = source.pages ? `, s. ${source.pages}` : '';
+  const doi = source.doi ? ` DOI: ${source.doi}` : '';
+  const url = source.url ? ` Dostupné na: ${source.url}` : '';
+
+  return cleanReference(
+    `${authors}: ${title}.${journal}${volume}${issue}${year}${pages}.${doi}${url}`,
+  );
+}
+
+function formatSourceAsApaRecord(source: BibliographicCandidate) {
+  const authors = formatApaAuthors(source.authors);
+  const year = source.year || 'n.d.';
+  const title = source.title || source.raw || 'Názov je potrebné overiť';
+  const journal = source.journal ? ` ${source.journal}` : '';
+  const volume = source.volume ? `, ${source.volume}` : '';
+  const issue = source.issue ? `(${source.issue})` : '';
+  const pages = source.pages ? `, ${source.pages}` : '';
+  const doi = source.doi ? ` https://doi.org/${source.doi}` : '';
+  const url = source.url ? ` ${source.url}` : '';
+
+  return cleanReference(
+    `${authors} (${year}). ${title}.${journal}${volume}${issue}${pages}.${doi || url}`,
+  );
+}
+
+function getCitationSurname(source: BibliographicCandidate) {
+  const firstAuthor = source.authors?.[0];
+
+  if (!firstAuthor) return 'Autor';
+
+  const cleaned = normalizeAuthorCandidate(firstAuthor);
+
+  if (cleaned.includes(',')) {
+    return titleCaseName(cleaned.split(',')[0].trim());
+  }
+
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  const surname = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+
+  return titleCaseName(surname || 'Autor');
+}
+
+function buildCitationVariantsForSources(sources: BibliographicCandidate[]) {
+  if (!sources.length) {
+    return `Parentetický odkaz: (autor je potrebné overiť, rok je potrebné overiť)
+Naratívny odkaz: Autor je potrebné overiť (rok je potrebné overiť) uvádza...`;
+  }
+
+  const variants: string[] = [];
+
+  for (const source of sources.slice(0, 50)) {
+    const surname = getCitationSurname(source);
+    const year = source.year || 'rok je potrebné overiť';
+
+    if (source.authors.length === 1) {
+      variants.push(`Parentetický odkaz: (${surname}, ${year})`);
+      variants.push(`Naratívny odkaz: ${surname} (${year}) uvádza...`);
+      continue;
+    }
+
+    if (source.authors.length === 2) {
+      const secondAuthor = source.authors[1];
+      const secondCleaned = normalizeAuthorCandidate(secondAuthor);
+      const secondSurname = secondCleaned.includes(',')
+        ? titleCaseName(secondCleaned.split(',')[0].trim())
+        : titleCaseName(
+            secondCleaned.split(/\s+/).filter(Boolean).slice(-1)[0] ||
+              'spoluautor',
+          );
+
+      variants.push(`Parentetický odkaz: (${surname} & ${secondSurname}, ${year})`);
+      variants.push(
+        `Naratívny odkaz: ${surname} a ${secondSurname} (${year}) uvádzajú...`,
+      );
+      continue;
+    }
+
+    variants.push(`Parentetický odkaz: (${surname} et al., ${year})`);
+    variants.push(`Naratívny odkaz: ${surname} et al. (${year}) uvádzajú...`);
+  }
+
+  return uniqueByCleanedText(variants).join('\n');
+}
+
+function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
+  if (!candidates.length) {
+    return 'Neboli nájdené jednoznačné bibliografické záznamy v priložených dokumentoch.';
+  }
+
+  return uniqueByCleanedText(
+    candidates.map((source) => formatSourceAsOriginalLikeRecord(source)),
+  ).join('\n');
+}
+
+function formatApaBibliographicCandidates(candidates: BibliographicCandidate[]) {
+  if (!candidates.length) {
+    return 'Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.';
+  }
+
+  return uniqueByCleanedText(
+    candidates.map((source) => formatSourceAsApaRecord(source)),
+  ).join('\n');
+}
+
+function buildAuthorsList(authors: string[]) {
+  if (!authors.length) {
+    return 'Autori neboli automaticky identifikovaní alebo ich treba overiť.';
+  }
+
+  return authors.join('\n');
+}
+
+function buildSourceOutputSection({
+  sources,
+  authors,
+  effectiveFileName,
+}: {
+  sources: BibliographicCandidate[];
+  authors: string[];
+  effectiveFileName: string;
+}) {
+  return `Použité zdroje a autori
+
+A. Zdroje nájdené v priložených dokumentoch
+${formatBibliographicCandidates(sources)}
+
+B. Autori nájdení v dokumentoch
+${buildAuthorsList(authors)}
+
+C. Formátované bibliografické záznamy
+${formatApaBibliographicCandidates(sources)}
+
+D. Varianty odkazov v texte
+${buildCitationVariantsForSources(sources)}
+
+E. Priložené dokumenty použité ako podklad
+${effectiveFileName.replace(/\.[a-z0-9]+$/i, '')}
+
+F. Neúplné alebo neoveriteľné zdroje
+Pri každom zázname, kde chýba autor, rok, názov, vydavateľ, DOI, URL, ročník, číslo alebo strany, je potrebné údaj overiť podľa pôvodného dokumentu alebo knižničného záznamu.`;
+}
+
+function buildEmptySourceOutputSection(effectiveFileName: string) {
+  return `Použité zdroje a autori
+
+A. Zdroje nájdené v priložených dokumentoch
+Neboli nájdené jednoznačné bibliografické záznamy v priložených dokumentoch.
+
+B. Autori nájdení v dokumentoch
+Autori neboli automaticky identifikovaní alebo ich treba overiť.
+
+C. Formátované bibliografické záznamy
+Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.
+
+D. Varianty odkazov v texte
+Parentetický odkaz: (autor je potrebné overiť, rok je potrebné overiť)
+Naratívny odkaz: Autor je potrebné overiť (rok je potrebné overiť) uvádza...
+
+E. Priložené dokumenty použité ako podklad
+${effectiveFileName.replace(/\.[a-z0-9]+$/i, '')}
+
+F. Neúplné alebo neoveriteľné zdroje
+Údaje je potrebné overiť podľa pôvodného dokumentu alebo knižničného záznamu.`;
 }
 
 // ================= POST =================
@@ -962,7 +1781,6 @@ export async function POST(req: NextRequest) {
     const extension = getFileExtension(effectiveFileName);
 
     const originalBuffer = await fileToBuffer(file);
-
     const usableBuffer = isCompressed ? safeGunzip(originalBuffer) : originalBuffer;
 
     const result = await extractByType({
@@ -971,6 +1789,9 @@ export async function POST(req: NextRequest) {
     });
 
     if (!result.ok || !result.text.trim()) {
+      const emptySourceOutputSection =
+        buildEmptySourceOutputSection(effectiveFileName);
+
       return NextResponse.json(
         {
           ok: false,
@@ -979,12 +1800,48 @@ export async function POST(req: NextRequest) {
             'Text sa nepodarilo extrahovať alebo bol výsledok prázdny.',
           text: '',
           extractedText: '',
+          content: '',
           method: result.method,
+          detectedSources: [],
+          authors: [],
+          formattedSources:
+            'Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.',
+          sources:
+            'Neboli nájdené jednoznačné bibliografické záznamy v priložených dokumentoch.',
+          citationVariants:
+            'Parentetický odkaz: (autor je potrebné overiť, rok je potrebné overiť)\nNaratívny odkaz: Autor je potrebné overiť (rok je potrebné overiť) uvádza...',
+          sourceOutputSection: emptySourceOutputSection,
           bibliography: {
+            title: 'Použité zdroje a autori',
             authors: [],
             detectedSources: [],
             detectedSourcesCount: 0,
-            formatted: '',
+            formatted:
+              'Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.',
+            formattedSources:
+              'Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.',
+            sources:
+              'Neboli nájdené jednoznačné bibliografické záznamy v priložených dokumentoch.',
+            citationVariants:
+              'Parentetický odkaz: (autor je potrebné overiť, rok je potrebné overiť)\nNaratívny odkaz: Autor je potrebné overiť (rok je potrebné overiť) uvádza...',
+            sourceOutputSection: emptySourceOutputSection,
+            sections: {
+              title: 'Použité zdroje a autori',
+              a_sourcesFoundInAttachedDocuments:
+                'Neboli nájdené jednoznačné bibliografické záznamy v priložených dokumentoch.',
+              b_authorsFoundInDocuments:
+                'Autori neboli automaticky identifikovaní alebo ich treba overiť.',
+              c_formattedBibliographicRecords:
+                'Neboli vytvorené formátované bibliografické záznamy, pretože v dokumentoch neboli nájdené dostatočné bibliografické údaje.',
+              d_inTextCitationVariants:
+                'Parentetický odkaz: (autor je potrebné overiť, rok je potrebné overiť)\nNaratívny odkaz: Autor je potrebné overiť (rok je potrebné overiť) uvádza...',
+              e_attachedDocumentsUsedAsSource: effectiveFileName.replace(
+                /\.[a-z0-9]+$/i,
+                '',
+              ),
+              f_incompleteOrUnverifiableSources:
+                'Údaje je potrebné overiť podľa pôvodného dokumentu alebo knižničného záznamu.',
+            },
           },
           meta: {
             receivedFileName,
@@ -992,6 +1849,7 @@ export async function POST(req: NextRequest) {
             originalName: originalNameFromForm,
             extension,
             size: file.size,
+            compressedSize: isCompressed ? originalBuffer.length : null,
             decompressedSize: usableBuffer.length,
             type: file.type || null,
             isCompressed,
@@ -1003,31 +1861,71 @@ export async function POST(req: NextRequest) {
     }
 
     const text = limitText(result.text);
-    const detectedSources = extractBibliographicCandidates(text);
+
+    const detectedSources = extractBibliographicCandidates(
+      text,
+      effectiveFileName,
+    );
+
     const authors = extractAllAuthorsFromSources(detectedSources);
-    const formatted = formatBibliographicCandidates(detectedSources);
+
+    const sourcesFoundInDocuments = formatBibliographicCandidates(detectedSources);
+    const apaFormattedSources = formatApaBibliographicCandidates(detectedSources);
+    const citationVariants = buildCitationVariantsForSources(detectedSources);
+
+    const sourceOutputSection = buildSourceOutputSection({
+      sources: detectedSources,
+      authors,
+      effectiveFileName,
+    });
 
     return NextResponse.json({
       ok: true,
+
       text,
       extractedText: text,
       content: text,
+
       method: result.method,
       message:
         result.message ||
         'Text bol úspešne extrahovaný a bibliografické zdroje boli analyzované.',
+
       detectedSources,
       authors,
-      formattedSources: formatted,
-      sources: formatted,
+
+      formattedSources: apaFormattedSources,
+      sources: sourcesFoundInDocuments,
+      citationVariants,
+      sourceOutputSection,
+
       bibliography: {
+        title: 'Použité zdroje a autori',
         authors,
         detectedSources,
         detectedSourcesCount: detectedSources.length,
-        formatted,
-        formattedSources: formatted,
-        sources: formatted,
+
+        formatted: apaFormattedSources,
+        formattedSources: apaFormattedSources,
+        sources: sourcesFoundInDocuments,
+        citationVariants,
+        sourceOutputSection,
+
+        sections: {
+          title: 'Použité zdroje a autori',
+          a_sourcesFoundInAttachedDocuments: sourcesFoundInDocuments,
+          b_authorsFoundInDocuments: buildAuthorsList(authors),
+          c_formattedBibliographicRecords: apaFormattedSources,
+          d_inTextCitationVariants: citationVariants,
+          e_attachedDocumentsUsedAsSource: effectiveFileName.replace(
+            /\.[a-z0-9]+$/i,
+            '',
+          ),
+          f_incompleteOrUnverifiableSources:
+            'Pri každom zázname, kde chýba autor, rok, názov, vydavateľ, DOI, URL, ročník, číslo alebo strany, je potrebné údaj overiť podľa pôvodného dokumentu alebo knižničného záznamu.',
+        },
       },
+
       meta: {
         receivedFileName,
         effectiveFileName,
@@ -1041,6 +1939,20 @@ export async function POST(req: NextRequest) {
         chars: text.length,
         detectedSourcesCount: detectedSources.length,
         authorsCount: authors.length,
+        sourceTypesCount: detectedSources.reduce<Record<string, number>>(
+          (acc, source) => {
+            acc[source.sourceType] = (acc[source.sourceType] || 0) + 1;
+            return acc;
+          },
+          {},
+        ),
+        detectedFormatsCount: detectedSources.reduce<Record<string, number>>(
+          (acc, source) => {
+            acc[source.detectedFormat] = (acc[source.detectedFormat] || 0) + 1;
+            return acc;
+          },
+          {},
+        ),
         ...result.meta,
       },
     });

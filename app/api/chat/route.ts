@@ -106,8 +106,12 @@ type PreparedFileMetadata = {
   preparedType?: string;
   compressionMode?: string;
   extractionStatus?: string;
+  extractionMethod?: string;
+  extractionMessage?: string;
   detectedSourcesCount?: number;
   detectedSources?: BibliographicCandidate[];
+  detectedAuthors?: string[];
+  formattedSources?: string;
   warning?: string;
 };
 
@@ -143,46 +147,57 @@ type ExtractedAttachment = {
   error?: string | null;
   warning?: string | null;
   bibliographicCandidates: BibliographicCandidate[];
+  detectedAuthors: string[];
+  formattedSources: string;
 };
 
 // ================= LIMITS =================
 
 const maxCompressedFileSizeBytes = 1 * 1024 * 1024;
-const maxExtractedCharsPerAttachment = 50000;
-const maxClientExtractedChars = 180000;
-const maxDetectedSourcesPerAttachment = 120;
+
+// Dôležité: toto rieši chybu context window.
+const maxExtractedCharsPerAttachment = 18_000;
+const maxClientExtractedChars = 45_000;
+const maxProjectDocumentChars = 18_000;
+const maxAttachmentContextChars = 80_000;
+const maxSystemPromptChars = 110_000;
+const maxSingleMessageChars = 10_000;
+const maxTotalMessagesChars = 30_000;
+const maxDetectedSourcesPerAttachment = 80;
 
 // ================= PROJECT DOCUMENTS =================
 
 async function loadProjectDocuments(projectId: string | null) {
-  if (!projectId) {
+  if (!projectId) return [];
+
+  try {
+    const supabase = createAdminClient();
+
+    const { data, error } = await supabase
+      .from('zedpera_documents')
+      .select(
+        'id, project_id, file_name, file_path, file_size, file_type, type, extracted_text, created_at',
+      )
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false })
+      .limit(8);
+
+    if (error) {
+      console.error('LOAD_PROJECT_DOCUMENTS_ERROR:', error);
+      return [];
+    }
+
+    return (data || []) as ProjectDocument[];
+  } catch (error) {
+    console.error('LOAD_PROJECT_DOCUMENTS_FATAL_ERROR:', error);
     return [];
   }
-
-  const supabase = createAdminClient();
-
-  const { data, error } = await supabase
-    .from('zedpera_documents')
-    .select(
-      'id, project_id, file_name, file_path, file_size, file_type, type, extracted_text, created_at',
-    )
-    .eq('project_id', projectId)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error('LOAD_PROJECT_DOCUMENTS_ERROR:', error);
-    return [];
-  }
-
-  return (data || []) as ProjectDocument[];
 }
 
 // ================= GENERAL HELPERS =================
 
 function parseJson<T>(value: FormDataEntryValue | null, fallback: T): T {
-  if (!value || typeof value !== 'string') {
-    return fallback;
-  }
+  if (!value || typeof value !== 'string') return fallback;
 
   try {
     return JSON.parse(value) as T;
@@ -212,13 +227,35 @@ function normalizeText(value: string): string {
 function limitText(value: string, maxLength: number): string {
   const cleaned = normalizeText(value);
 
-  if (cleaned.length <= maxLength) {
-    return cleaned;
-  }
+  if (cleaned.length <= maxLength) return cleaned;
 
   return `${cleaned.slice(0, maxLength)}
 
 [TEXT BOL SKRÁTENÝ PRE TECHNICKÝ LIMIT API.]`;
+}
+
+function limitMiddle(value: string, maxLength: number): string {
+  const cleaned = normalizeText(value);
+
+  if (cleaned.length <= maxLength) return cleaned;
+
+  const half = Math.floor(maxLength / 2);
+
+  return `${cleaned.slice(0, half)}
+
+[STRED TEXTU BOL SKRÁTENÝ PRE TECHNICKÝ LIMIT API.]
+
+${cleaned.slice(-half)}`;
+}
+
+function uniqueArray(values: string[]) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value || '').trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function isAllowedAgent(value: unknown): value is Agent {
@@ -249,8 +286,43 @@ function normalizeModule(value: unknown): ModuleKey {
   return 'unknown';
 }
 
+function stripDuplicatedLargePromptSections(content: string) {
+  let output = normalizeText(content);
+
+  const cutMarkers = [
+    'AKTÍVNY PROFIL PRÁCE:',
+    'PRILOŽENÉ DOKUMENTY:',
+    'STAV KOMPRESIE A EXTRAKCIE:',
+    'STAV KOMPRESIE A EXTRAKCIE CEZ /api/extract-text:',
+    'DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE:',
+    'EXTRAHOVANÝ TEXT Z PRÍLOH:',
+    'POVINNÉ PRAVIDLÁ SPRACOVANIA:',
+    'VÝSTUP VRÁŤ PRESNE V TOMTO FORMÁTE:',
+  ];
+
+  let firstCutIndex = -1;
+
+  for (const marker of cutMarkers) {
+    const index = output.indexOf(marker);
+
+    if (index >= 0 && (firstCutIndex === -1 || index < firstCutIndex)) {
+      firstCutIndex = index;
+    }
+  }
+
+  if (firstCutIndex > 0) {
+    output = output.slice(0, firstCutIndex).trim();
+  }
+
+  if (!output) {
+    output = 'Spracuj požiadavku používateľa podľa profilu práce a extrahovaných podkladov.';
+  }
+
+  return limitText(output, maxSingleMessageChars);
+}
+
 function normalizeMessages(messages: ChatMessage[]) {
-  return messages
+  const cleaned = messages
     .filter((message) => {
       return (
         message &&
@@ -261,8 +333,24 @@ function normalizeMessages(messages: ChatMessage[]) {
     })
     .map((message) => ({
       role: message.role,
-      content: message.content.trim(),
+      content: stripDuplicatedLargePromptSections(message.content),
     }));
+
+  const lastMessages = cleaned.slice(-8);
+  let total = 0;
+  const result: ChatMessage[] = [];
+
+  for (let i = lastMessages.length - 1; i >= 0; i -= 1) {
+    const message = lastMessages[i];
+    const nextTotal = total + message.content.length;
+
+    if (nextTotal > maxTotalMessagesChars && result.length > 0) break;
+
+    result.unshift(message);
+    total = nextTotal;
+  }
+
+  return result;
 }
 
 function getWorkLanguage(profile: SavedProfile | null) {
@@ -278,9 +366,7 @@ function getCitationStyle(profile: SavedProfile | null) {
 }
 
 function getKeywords(profile: SavedProfile | null) {
-  if (!profile) {
-    return [];
-  }
+  if (!profile) return [];
 
   const fromKeywordsList = Array.isArray(profile.keywordsList)
     ? profile.keywordsList
@@ -294,9 +380,7 @@ function getKeywords(profile: SavedProfile | null) {
 }
 
 function normalizeSourceMode(value: unknown): SourceMode {
-  if (value === 'uploaded_documents_first') {
-    return 'uploaded_documents_first';
-  }
+  if (value === 'uploaded_documents_first') return 'uploaded_documents_first';
 
   return 'uploaded_documents_first';
 }
@@ -321,17 +405,29 @@ function isStrictNoAcademicTailModule(module: ModuleKey) {
   return module === 'translation' || module === 'emails' || module === 'planning';
 }
 
-// ================= BIBLIOGRAPHIC DETECTION =================
+function getFileExtension(fileName: string) {
+  const index = fileName.lastIndexOf('.');
 
-function uniqueArray(values: string[]) {
-  return Array.from(
-    new Set(
-      values
-        .map((value) => value.trim())
-        .filter(Boolean),
-    ),
-  );
+  if (index === -1) return '';
+
+  return fileName.slice(index).toLowerCase();
 }
+
+function removeGzipSuffix(fileName: string) {
+  return fileName.toLowerCase().endsWith('.gz')
+    ? fileName.slice(0, -3)
+    : fileName;
+}
+
+function getEffectiveFileName(fileName: string) {
+  return removeGzipSuffix(fileName);
+}
+
+function getEffectiveExtension(fileName: string) {
+  return getFileExtension(getEffectiveFileName(fileName));
+}
+
+// ================= BIBLIOGRAPHIC DETECTION =================
 
 function detectSourceType(line: string): BibliographicCandidate['sourceType'] {
   const lower = line.toLowerCase();
@@ -386,12 +482,14 @@ function detectSourceType(line: string): BibliographicCandidate['sourceType'] {
 
 function extractDoi(line: string) {
   const match = line.match(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i);
-  return match?.[0] || null;
+
+  return match?.[0]?.replace(/[.,;)]$/, '') || null;
 }
 
 function extractUrl(line: string) {
   const match = line.match(/https?:\/\/[^\s)]+|www\.[^\s)]+/i);
-  return match?.[0] || null;
+
+  return match?.[0]?.replace(/[.,;)]$/, '') || null;
 }
 
 function extractYear(line: string) {
@@ -426,12 +524,20 @@ function extractAuthors(line: string) {
       if (part.length < 3) return false;
       if (part.length > 120) return false;
       if (!/[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]/.test(part)) return false;
-      if (/^(in|from|retrieved|dostupné|available|vol|no|pp|pages|journal)$/i.test(part)) return false;
+
+      if (
+        /^(in|from|retrieved|dostupné|available|vol|no|pp|pages|journal|university|press|publisher)$/i.test(
+          part,
+        )
+      ) {
+        return false;
+      }
 
       return (
         /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+$/.test(
           part,
-        ) || /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záäčďéíĺľňóôŕšťúýž]+,\s*[A-Z]/.test(part)
+        ) ||
+        /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záäčďéíĺľňóôŕšťúýž]+,\s*[A-Z]/.test(part)
       );
     });
 
@@ -450,9 +556,7 @@ function extractTitle(line: string) {
     working.match(/„([^“”]{5,180})“/) ||
     working.match(/'([^']{5,180})'/);
 
-  if (quoted?.[1]) {
-    return quoted[1].trim();
-  }
+  if (quoted?.[1]) return quoted[1].trim();
 
   const afterYear = working.split(/\((19|20)\d{2}\)|\b(19|20)\d{2}\b/).pop();
 
@@ -466,9 +570,7 @@ function extractTitle(line: string) {
 
   const parts = working.split('.').map((part) => part.trim()).filter(Boolean);
 
-  if (parts.length >= 2) {
-    return parts[1].slice(0, 220);
-  }
+  if (parts.length >= 2) return parts[1].slice(0, 220);
 
   return null;
 }
@@ -477,6 +579,7 @@ function looksLikeBibliographicLine(line: string) {
   const trimmed = line.trim();
 
   if (trimmed.length < 20) return false;
+  if (trimmed.length > 1600) return false;
 
   const hasYear = /\b(19|20)\d{2}\b|\bn\.d\.\b/i.test(trimmed);
   const hasDoi = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i.test(trimmed);
@@ -543,12 +646,37 @@ function extractBibliographicCandidates(text: string) {
   for (const item of candidates) {
     const key = `${item.raw.slice(0, 180)}-${item.doi || ''}-${item.url || ''}`;
 
-    if (!unique.has(key)) {
-      unique.set(key, item);
-    }
+    if (!unique.has(key)) unique.set(key, item);
   }
 
   return Array.from(unique.values()).slice(0, maxDetectedSourcesPerAttachment);
+}
+
+function normalizeBibliographicCandidates(value: unknown): BibliographicCandidate[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item: any) => ({
+      raw: String(item?.raw || item?.citation || item?.text || '').trim(),
+      authors: Array.isArray(item?.authors)
+        ? item.authors.map((author: unknown) => String(author || '').trim()).filter(Boolean)
+        : typeof item?.authors === 'string'
+          ? item.authors.split(/,|;|\n/).map((author: string) => author.trim()).filter(Boolean)
+          : [],
+      year: item?.year ? String(item.year) : null,
+      title: item?.title ? String(item.title) : null,
+      doi: item?.doi ? String(item.doi) : null,
+      url: item?.url ? String(item.url) : null,
+      sourceType:
+        item?.sourceType === 'book' ||
+        item?.sourceType === 'article' ||
+        item?.sourceType === 'web' ||
+        item?.sourceType === 'software' ||
+        item?.sourceType === 'unknown'
+          ? item.sourceType
+          : 'unknown',
+    }))
+    .filter((item) => item.raw || item.authors.length || item.title || item.doi || item.url);
 }
 
 function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
@@ -557,9 +685,10 @@ function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
   }
 
   return candidates
+    .slice(0, maxDetectedSourcesPerAttachment)
     .map((item, index) => {
       return `${index + 1}. Pôvodný záznam:
-${item.raw}
+${item.raw || 'neuvedené'}
 
 Autori: ${item.authors.length ? item.authors.join(', ') : 'neuvedené alebo potrebné overiť'}
 Rok: ${item.year || 'údaj je potrebné overiť'}
@@ -578,15 +707,27 @@ function mergeBibliographicCandidates(
 
   for (const group of groups) {
     for (const item of group || []) {
-      const key = `${item.raw?.slice(0, 180) || ''}-${item.doi || ''}-${item.url || ''}`;
+      const normalizedItem: BibliographicCandidate = {
+        raw: String(item.raw || '').trim(),
+        authors: Array.isArray(item.authors) ? item.authors : [],
+        year: item.year || null,
+        title: item.title || null,
+        doi: item.doi || null,
+        url: item.url || null,
+        sourceType: item.sourceType || 'unknown',
+      };
 
-      if (!unique.has(key)) {
-        unique.set(key, item);
-      }
+      const key = `${normalizedItem.raw.slice(0, 180)}-${normalizedItem.doi || ''}-${normalizedItem.url || ''}`;
+
+      if (!unique.has(key)) unique.set(key, normalizedItem);
     }
   }
 
-  return Array.from(unique.values());
+  return Array.from(unique.values()).slice(0, maxDetectedSourcesPerAttachment);
+}
+
+function extractAuthorsFromCandidates(candidates: BibliographicCandidate[]) {
+  return uniqueArray(candidates.flatMap((item) => item.authors || []));
 }
 
 // ================= ATTACHMENTS =================
@@ -612,39 +753,7 @@ const allowedAttachmentExtensions = [
   '.gz',
 ];
 
-const extractableAttachmentExtensions = [
-  '.pdf',
-  '.docx',
-  '.txt',
-  '.md',
-  '.csv',
-  '.rtf',
-];
-
-function getFileExtension(fileName: string) {
-  const index = fileName.lastIndexOf('.');
-
-  if (index === -1) {
-    return '';
-  }
-
-  return fileName.slice(index).toLowerCase();
-}
-
-function removeGzipSuffix(fileName: string) {
-  return fileName.toLowerCase().endsWith('.gz')
-    ? fileName.slice(0, -3)
-    : fileName;
-}
-
-function getEffectiveFileName(fileName: string) {
-  return removeGzipSuffix(fileName);
-}
-
-function getEffectiveExtension(fileName: string) {
-  const effectiveName = getEffectiveFileName(fileName);
-  return getFileExtension(effectiveName);
-}
+const extractableAttachmentExtensions = ['.pdf', '.docx', '.txt', '.md', '.csv', '.rtf'];
 
 function isGzipFile(file: File) {
   const fileName = file.name || '';
@@ -671,7 +780,6 @@ function getAttachmentLabel(fileName: string) {
   const extension = getEffectiveExtension(fileName);
 
   if (extension === '.pdf') return 'PDF dokument';
-
   if (['.doc', '.docx'].includes(extension)) return 'Word dokument';
 
   if (['.txt', '.rtf', '.odt', '.md'].includes(extension)) {
@@ -683,9 +791,7 @@ function getAttachmentLabel(fileName: string) {
   }
 
   if (['.xls', '.xlsx', '.csv'].includes(extension)) return 'Tabuľka';
-
   if (['.ppt', '.pptx'].includes(extension)) return 'Prezentácia';
-
   if (extension === '.gz') return 'Komprimovaný súbor';
 
   return 'Súbor';
@@ -706,9 +812,7 @@ function safeGunzip(buffer: Buffer) {
     return gunzipSync(buffer);
   } catch (error) {
     const message =
-      error instanceof Error
-        ? error.message
-        : 'Nepodarilo sa rozbaliť gzip súbor.';
+      error instanceof Error ? error.message : 'Nepodarilo sa rozbaliť gzip súbor.';
 
     throw new Error(`GZIP_DECOMPRESSION_FAILED: ${message}`);
   }
@@ -753,7 +857,6 @@ async function getUsableFileBuffer(file: File) {
 async function extractPdfText(buffer: Buffer): Promise<string> {
   const pdfParseModule: any = await import('pdf-parse');
   const pdfParse = pdfParseModule.default || pdfParseModule;
-
   const result = await pdfParse(buffer);
 
   return normalizeText(result?.text || '');
@@ -782,16 +885,11 @@ async function extractTextFromSingleFile(
   file: File,
   preparedFilesMetadata: PreparedFileMetadata[],
 ): Promise<ExtractedAttachment> {
-  const preparedMetadata = getPreparedMetadataForFile(
-    file,
-    preparedFilesMetadata,
-  );
+  const preparedMetadata = getPreparedMetadataForFile(file, preparedFilesMetadata);
 
   const preparedName = file.name || 'neznamy-subor';
   const originalName =
-    preparedMetadata?.originalName ||
-    removeGzipSuffix(preparedName) ||
-    preparedName;
+    preparedMetadata?.originalName || removeGzipSuffix(preparedName) || preparedName;
 
   const type = file.type || 'application/octet-stream';
   const size = file.size || 0;
@@ -799,7 +897,13 @@ async function extractTextFromSingleFile(
   const effectiveExtension = getEffectiveExtension(preparedName);
   const label = getAttachmentLabel(preparedName);
   const gzip = isGzipFile(file);
-  const metadataCandidates = preparedMetadata?.detectedSources || [];
+  const metadataCandidates = normalizeBibliographicCandidates(
+    preparedMetadata?.detectedSources || [],
+  );
+  const metadataAuthors = Array.isArray(preparedMetadata?.detectedAuthors)
+    ? preparedMetadata.detectedAuthors
+    : [];
+  const metadataFormattedSources = preparedMetadata?.formattedSources || '';
 
   if (!isAllowedAttachment(file)) {
     return {
@@ -824,6 +928,8 @@ async function extractTextFromSingleFile(
       error: 'Nepodporovaný formát súboru.',
       warning: preparedMetadata?.warning || null,
       bibliographicCandidates: metadataCandidates,
+      detectedAuthors: metadataAuthors,
+      formattedSources: metadataFormattedSources,
     };
   }
 
@@ -861,6 +967,8 @@ async function extractTextFromSingleFile(
         error: null,
         warning: preparedMetadata?.warning || null,
         bibliographicCandidates: metadataCandidates,
+        detectedAuthors: metadataAuthors,
+        formattedSources: metadataFormattedSources,
       };
     }
 
@@ -902,15 +1010,23 @@ async function extractTextFromSingleFile(
         error: null,
         warning: preparedMetadata?.warning || null,
         bibliographicCandidates: metadataCandidates,
+        detectedAuthors: metadataAuthors,
+        formattedSources: metadataFormattedSources,
       };
     }
 
-    const limited = limitText(extractedText, maxExtractedCharsPerAttachment);
     const detectedCandidates = extractBibliographicCandidates(extractedText);
     const bibliographicCandidates = mergeBibliographicCandidates(
       metadataCandidates,
       detectedCandidates,
     );
+
+    const detectedAuthors = uniqueArray([
+      ...metadataAuthors,
+      ...extractAuthorsFromCandidates(bibliographicCandidates),
+    ]);
+
+    const limited = limitText(extractedText, maxExtractedCharsPerAttachment);
 
     return {
       name: originalName,
@@ -936,12 +1052,12 @@ async function extractTextFromSingleFile(
       error: null,
       warning: preparedMetadata?.warning || null,
       bibliographicCandidates,
+      detectedAuthors,
+      formattedSources: metadataFormattedSources,
     };
   } catch (error) {
     const message =
-      error instanceof Error
-        ? error.message
-        : 'Nepodarilo sa extrahovať text zo súboru.';
+      error instanceof Error ? error.message : 'Nepodarilo sa extrahovať text zo súboru.';
 
     return {
       name: originalName,
@@ -967,41 +1083,88 @@ async function extractTextFromSingleFile(
       error: message,
       warning: preparedMetadata?.warning || null,
       bibliographicCandidates: metadataCandidates,
+      detectedAuthors: metadataAuthors,
+      formattedSources: metadataFormattedSources,
     };
   }
 }
 
-async function extractAttachmentTexts(
-  files: File[],
-  preparedFilesMetadata: PreparedFileMetadata[],
-  clientExtractedText: string,
-  preparedFilesSummary: string,
-  clientDetectedSourcesSummary: string,
-  clientDetectedSources: BibliographicCandidate[],
-) {
+function buildCompactSourceSummary({
+  clientDetectedSourcesSummary,
+  clientDetectedSources,
+  extractedFiles,
+}: {
+  clientDetectedSourcesSummary: string;
+  clientDetectedSources: BibliographicCandidate[];
+  extractedFiles: ExtractedAttachment[];
+}) {
+  const fileSources = extractedFiles.flatMap((file) => file.bibliographicCandidates || []);
+  const mergedSources = mergeBibliographicCandidates(clientDetectedSources, fileSources);
+
+  const authors = uniqueArray([
+    ...extractAuthorsFromCandidates(mergedSources),
+    ...extractedFiles.flatMap((file) => file.detectedAuthors || []),
+  ]);
+
+  const formatted = formatBibliographicCandidates(mergedSources);
+
+  return {
+    sources: mergedSources,
+    authors,
+    text: limitText(
+      `SÚHRN DETEGOVANÝCH ZDROJOV A AUTOROV
+
+Autori:
+${authors.length ? authors.join(', ') : 'Autori neboli automaticky identifikovaní alebo ich treba overiť.'}
+
+Detegované bibliografické záznamy:
+${formatted}
+
+Doplňujúci súhrn z frontendu:
+${clientDetectedSourcesSummary || 'neuvedené'}`,
+      24_000,
+    ),
+  };
+}
+
+async function extractAttachmentTexts({
+  files,
+  preparedFilesMetadata,
+  clientExtractedText,
+  preparedFilesSummary,
+  clientDetectedSourcesSummary,
+  clientDetectedSources,
+}: {
+  files: File[];
+  preparedFilesMetadata: PreparedFileMetadata[];
+  clientExtractedText: string;
+  preparedFilesSummary: string;
+  clientDetectedSourcesSummary: string;
+  clientDetectedSources: BibliographicCandidate[];
+}) {
   const extractedFiles: ExtractedAttachment[] = [];
 
   if (files.length) {
-    for (const file of files) {
-      const extracted = await extractTextFromSingleFile(
-        file,
-        preparedFilesMetadata,
-      );
+    for (const file of files.slice(0, 8)) {
+      const extracted = await extractTextFromSingleFile(file, preparedFilesMetadata);
       extractedFiles.push(extracted);
     }
   }
 
+  const compactSources = buildCompactSourceSummary({
+    clientDetectedSourcesSummary,
+    clientDetectedSources,
+    extractedFiles,
+  });
+
   const attachmentTexts: string[] = [];
 
   if (preparedFilesSummary.trim()) {
-    attachmentTexts.push(`TECHNICKÝ PREHĽAD KOMPRESIE A PRÍPRAVY PRÍLOH
-${preparedFilesSummary.trim()}`);
+    attachmentTexts.push(`TECHNICKÝ PREHĽAD PRÍLOH
+${limitText(preparedFilesSummary, 12_000)}`);
   }
 
-  if (clientDetectedSourcesSummary.trim() || clientDetectedSources.length > 0) {
-    attachmentTexts.push(`DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE POSLANÉ Z FRONTENDU
-${clientDetectedSourcesSummary.trim() || formatBibliographicCandidates(clientDetectedSources)}`);
-  }
+  attachmentTexts.push(compactSources.text);
 
   if (clientExtractedText.trim()) {
     const frontendCandidates = mergeBibliographicCandidates(
@@ -1009,14 +1172,16 @@ ${clientDetectedSourcesSummary.trim() || formatBibliographicCandidates(clientDet
       extractBibliographicCandidates(clientExtractedText),
     );
 
-    attachmentTexts.push(`EXTRAHOVANÝ TEXT POSLANÝ Z FRONTENDU
-Stav: Frontend najprv pripravil prílohy, komprimoval ich do 1 MB a extrahoval dostupný text.
-Poznámka: Tento text použi ako prvý zdrojový podklad pred všeobecnými znalosťami AI.
+    attachmentTexts.push(`EXTRAHOVANÝ TEXT Z /api/extract-text ALEBO FRONTENDU
+Stav: Text bol extrahovaný pred volaním /api/chat.
+Použi tento text ako hlavný podklad, ale pracuj iba s dostupnými údajmi.
+Počet detegovaných zdrojov: ${frontendCandidates.length}
 
-DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE:
+DETEGOVANÉ ZDROJE:
 ${formatBibliographicCandidates(frontendCandidates)}
 
-${limitText(clientExtractedText, maxClientExtractedChars)}`);
+TEXT:
+${limitMiddle(clientExtractedText, maxClientExtractedChars)}`);
   }
 
   for (const file of extractedFiles) {
@@ -1042,19 +1207,23 @@ Stav kompresie: ${file.compressionStatus}
 Stav extrakcie: ${file.status}
 Počet extrahovaných znakov: ${file.extractedChars}
 Počet detegovaných bibliografických kandidátov: ${file.bibliographicCandidates.length}
+Autori: ${file.detectedAuthors.length ? file.detectedAuthors.join(', ') : 'neuvedené alebo potrebné overiť'}
 Upozornenie: ${file.warning || 'bez upozornenia'}
 Chyba: ${file.error || 'bez chyby'}
 
-DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE:
+DETEGOVANÉ ZDROJE:
 ${formatBibliographicCandidates(file.bibliographicCandidates)}
 
 EXTRAHOVANÝ TEXT:
 ${textBlock}`);
   }
 
+  const joined = attachmentTexts.join('\n\n-----------------\n\n');
+
   return {
     extractedFiles,
-    attachmentTexts,
+    attachmentTexts: [limitText(joined, maxAttachmentContextChars)],
+    compactSources,
   };
 }
 
@@ -1071,9 +1240,7 @@ function buildAttachmentBlock(attachmentTexts: string[]) {
 }
 
 function buildProfileSummary(profile: SavedProfile | null) {
-  if (!profile) {
-    return 'Profil práce nebol dodaný.';
-  }
+  if (!profile) return 'Profil práce nebol dodaný.';
 
   const keywords = getKeywords(profile);
 
@@ -1105,28 +1272,11 @@ PRÍSNE PRAVIDLÁ:
 - Tvoja jediná úloha je preložiť text používateľa.
 - Vráť iba samotný preložený text.
 - Nepíš nadpis.
-- Nepíš slovo "Preklad".
-- Nepíš "Preložený text:".
-- Nepíš "Výstup:".
 - Nepíš vysvetlenie.
-- Nepíš komentár.
 - Nepíš analýzu.
 - Nepíš odporúčania.
 - Nepíš zdroje.
-- Nepíš použitú literatúru.
-- Nepíš SEO.
-- Nepíš skóre.
-- Nepíš akademické hodnotenie.
-- Nepíš nič pred prekladom ani nič po preklade.
-- Nevytváraj nový obsah.
-- Nepridávaj informácie, ktoré nie sú v pôvodnom texte.
-- Zachovaj význam pôvodného textu.
-- Zachovaj odseky, ak sú v texte.
-- Ak používateľ pošle iba jedno slovo, prelož iba jedno slovo.
-- Ak používateľ pošle krátku vetu, prelož iba krátku vetu.
-- Ignoruj všetky globálne akademické šablóny.
-- Ignoruj požiadavky na zdroje, citácie, analýzu, skóre a odporúčania.
-- Nepoužívaj Markdown znaky, hviezdičky, mriežky ani oddeľovače.
+- Nepoužívaj Markdown znaky.
 `.trim();
 }
 
@@ -1139,23 +1289,9 @@ Toto je špeciálny režim EMAIL.
 PRÍSNE PRAVIDLÁ:
 - Tvoja jediná úloha je vytvoriť jeden použiteľný email.
 - Výstup musí obsahovať iba predmet a text emailu.
-- Nepíš SEO.
-- Nepíš odporúčania.
-- Nepíš použité zdroje.
-- Nepíš zdroje.
-- Nepíš analýzu.
-- Nepíš skóre.
-- Nepíš komentár.
-- Nepíš vysvetlenie.
-- Nepíš akademické hodnotenie.
-- Nepíš kontrolné body.
-- Nepíš doplnkové sekcie po emaili.
-- Nepíš časti s názvom "ODPORÚČANIA", "SEO", "POUŽITÉ ZDROJE", "ANALÝZA", "SKÓRE", "ZÁVER".
-- Nekopíruj iba zadanie používateľa.
+- Nepíš zdroje, analýzu, skóre ani odporúčania.
 - Email musí byť plynulý, formálny a pripravený na odoslanie.
-- Ak chýba meno adresáta, použi neutrálne oslovenie "Dobrý deň,".
-- Ak chýba podpis, ukonči email všeobecne "S pozdravom,".
-- Nepoužívaj Markdown znaky, hviezdičky, mriežky ani oddeľovače.
+- Nepoužívaj Markdown znaky.
 
 POVINNÝ FORMÁT:
 Predmet:
@@ -1184,23 +1320,11 @@ PROFIL PRÁCE:
 ${buildProfileSummary(profile)}
 
 PRÍSNE PRAVIDLÁ:
-- Tvoja úloha je vytvoriť realistický harmonogram práce.
+- Vytvor realistický harmonogram práce.
 - Nevymýšľaj dátum odovzdania.
-- Nevymýšľaj rok odovzdania.
-- Nikdy nepíš rok 2031, ak ho používateľ výslovne nezadal.
 - Ak používateľ nezadal termín, napíš presne: Termín odovzdania nebol zadaný.
-- Ak termín nie je zadaný, vytvor plán podľa etáp bez finálneho konkrétneho dátumu.
-- Ak je termín zadaný, vypočítaj plán spätne od zadaného termínu.
-- Nepíš SEO.
-- Nepíš zdroje.
-- Nepíš použité zdroje.
-- Nepíš akademickú analýzu.
-- Nepíš skóre.
-- Nepíš citačné odporúčania.
-- Nepíš bibliografiu.
-- Nepíš globálne akademické sekcie.
-- Nepoužívaj Markdown znaky, hviezdičky, mriežky ani oddeľovače.
-- Výstup musí byť použiteľný ako plán práce.
+- Nepíš zdroje, analýzu ani skóre.
+- Nepoužívaj Markdown znaky.
 
 POVINNÝ FORMÁT:
 1. Východisková situácia
@@ -1213,36 +1337,30 @@ POVINNÝ FORMÁT:
 `.trim();
 }
 
-function buildSystemPrompt(
-  profile: SavedProfile | null,
-  attachmentTexts: string[],
-  settings: SourceSettings,
-  module: ModuleKey,
-) {
-  if (module === 'translation') {
-    return buildStrictTranslationPrompt();
-  }
-
-  if (module === 'emails') {
-    return buildStrictEmailPrompt();
-  }
-
-  if (module === 'planning') {
-    return buildStrictPlanningPrompt(profile);
-  }
+function buildSystemPrompt({
+  profile,
+  attachmentTexts,
+  settings,
+  module,
+}: {
+  profile: SavedProfile | null;
+  attachmentTexts: string[];
+  settings: SourceSettings;
+  module: ModuleKey;
+}) {
+  if (module === 'translation') return buildStrictTranslationPrompt();
+  if (module === 'emails') return buildStrictEmailPrompt();
+  if (module === 'planning') return buildStrictPlanningPrompt(profile);
 
   const keywords = getKeywords(profile);
 
   const structureText =
     profile?.schema?.structure && profile.schema.structure.length > 0
-      ? profile.schema.structure
-          .map((item, index) => `${index + 1}. ${item}`)
-          .join('\n')
+      ? profile.schema.structure.map((item, index) => `${index + 1}. ${item}`).join('\n')
       : 'Neuvedené';
 
   const requiredSectionsText =
-    profile?.schema?.requiredSections &&
-    profile.schema.requiredSections.length > 0
+    profile?.schema?.requiredSections && profile.schema.requiredSections.length > 0
       ? profile.schema.requiredSections.map((item) => `- ${item}`).join('\n')
       : 'Neuvedené';
 
@@ -1251,122 +1369,24 @@ function buildSystemPrompt(
   const citationStyle = getCitationStyle(profile);
   const hasAttachments = attachmentTexts.length > 0;
 
-  const documentSourceRules = `
-PRAVIDLÁ PRE KOMPRESIU, EXTRAKCIU, PRILOŽENÉ DOKUMENTY, ZDROJE A RELEVANTNOSŤ:
-
-1. Prílohy môžu byť doručené ako gzip súbory s príponou .gz.
-2. Ak je súbor gzip, musí byť najprv rozbalený a až potom sa z neho hodnotí alebo extrahuje text.
-3. Kompresný limit jednej prílohy je 1 MB. Ak je uvedené, že kompresia do 1 MB bola splnená, považuj súbor za technicky pripravený.
-4. Ak je uvedené, že kompresia do 1 MB nebola splnená, uveď to v časti ANALÝZA a odporúč zmenšiť alebo rozdeliť dokument.
-5. Ak je v podkladoch uvedený EXTRAHOVANÝ TEXT POSLANÝ Z FRONTENDU, použi ho ako primárny zdrojový podklad.
-6. Ak server po rozbalení gzip úspešne extrahoval text, použi extrahovaný text ako primárny zdrojový podklad.
-7. Ak je v podkladoch uvedený blok DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE, musíš ho použiť pri tvorbe sekcie POUŽITÉ ZDROJE A AUTORI.
-8. V sekcii POUŽITÉ ZDROJE A AUTORI vypíš všetkých autorov, roky, názvy publikácií, DOI a URL, ktoré boli detegované z extrahovaného textu.
-9. Ak je autor alebo rok neúplný, nepokúšaj sa ho vymyslieť. Napíš: údaj je potrebné overiť.
-10. Ak je názov publikácie neúplný alebo nejasný, napíš: názov je potrebné overiť podľa pôvodného dokumentu.
-11. Použité publikácie rozdeľ do skupín: A. Detegované zdroje z extrahovaného textu, B. Autori nájdení v dokumentoch, C. Publikácie a dokumenty použité ako podklad, D. Neúplné zdroje, ktoré treba overiť, E. AI odporúčané zdroje na doplnenie.
-12. Ak boli v texte nájdené bibliografické záznamy, nesmieš napísať, že zdroje neboli dodané.
-13. Ak boli nájdené iba mená autorov bez úplných publikácií, vypíš ich v časti Autori nájdení v dokumentoch a uveď, že bibliografický záznam je potrebné doplniť.
-14. Ak boli nájdené DOI alebo URL, vypíš ich presne tak, ako boli v extrahovanom texte.
-15. Semantic Scholar je vypnutý. Nepoužívaj Semantic Scholar, neuvádzaj ho ako zdroj a nespomínaj, že z neho čerpáš.
-16. Primárny zdrojový základ tvoria: extrahovaný text z priložených dokumentov používateľa, dokumenty načítané zo Supabase, text zadaný používateľom v konverzácii a uložený Profil práce.
-17. Ak sa z prílohy podarilo extrahovať text, musíš tento extrahovaný text použiť ako prvý zdrojový podklad pred všeobecnými znalosťami AI.
-18. Nikdy nepíš, že obsah nebol extrahovaný, ak je pri prílohe uvedené: Stav extrakcie: Text bol úspešne extrahovaný. alebo Súbor bol najprv rozbalený z gzip a text bol úspešne extrahovaný.
-19. Ak je pri prílohe extrahovaný text, ale neobsahuje úplné bibliografické údaje, napíš: Text bol extrahovaný, ale neobsahuje úplné bibliografické údaje.
-20. Najprv posúď, či priložené dokumenty tematicky zodpovedajú Profilu práce.
-21. Profil práce je rozhodujúci. Príloha je relevantná iba vtedy, ak súvisí s témou, cieľom, problémom, metodológiou, odborom alebo kľúčovými slovami profilu.
-22. Ak je príloha nesúvisiaca s profilom práce, nepoužívaj ju ako odborný zdroj pre hlavný text.
-23. Ak príloha nesúvisí s prácou, pokračuj pôvodným spôsobom: vychádzaj z profilu práce, odpovedz na požiadavku používateľa, transparentne uveď, že príloha nebola použitá a nevymýšľaj, že si z nej čerpal.
-24. Ak sú priložené dokumenty relevantné a ich text je dostupný, čerpaj z nich a v sekcii zdrojov vypíš názov dokumentu, typ dokumentu, autorov, rok, názov publikácie alebo dokumentu, vydavateľa, časopis, inštitúciu alebo web, URL alebo DOI.
-25. Ak sú priložené dokumenty, ale neobsahujú žiadne identifikovateľné bibliografické zdroje, jasne napíš: V priložených dokumentoch sa nenachádzajú žiadne identifikovateľné bibliografické zdroje.
-26. Ak sú priložené dokumenty, ale server neextrahoval ich obsah, jasne napíš, že nemôžeš overiť zdroje vo vnútri dokumentu, pretože máš dostupný iba názov, typ a veľkosť súboru.
-27. Ak nie sú priložené žiadne dokumenty a používateľ chce vytvoriť odborný text, môžeš použiť všeobecné znalosti AI modelu, ale musíš jasne uviesť: Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI modelu. Neboli dodané overiteľné priložené zdroje.
-28. Ak používaš všeobecné znalosti AI modelu, nesmieš predstierať, že si čerpal z konkrétneho priloženého dokumentu.
-29. Ak uvedieš vlastné odborné zdroje, označ ich presne ako: AI odporúčané zdroje na overenie a doplnenie.
-30. Ak odporúčaš všeobecne známe odborné publikácie, uvádzaj iba údaje, ktorými si si primerane istý. Nevymýšľaj DOI, URL, čísla strán, vydanie ani presný názov kapitoly.
-31. Ak si nie si istý bibliografickým údajom, napíš: údaj je potrebné overiť.
-32. Pri akademickom texte používaj citačný štýl podľa profilu práce: ${citationStyle}.
-33. Nevymýšľaj falošné bibliografické údaje. Ak údaj nie je dostupný, napíš: neuvedené.
-34. Ak používateľ požiada o prácu, kapitolu, úvod, teóriu, abstrakt alebo metodológiu, sekcia POUŽITÉ ZDROJE A AUTORI musí byť vždy prítomná.
-35. Ak je zapnutá kontrola príloh podľa profilu práce: ${
-    settings.validateAttachmentsAgainstProfile ? 'áno' : 'nie'
-  }.
-36. Povinný zoznam zdrojov: ${settings.requireSourceList ? 'áno' : 'nie'}.
-37. Povolené použiť všeobecné znalosti AI pri chýbajúcich prílohách: ${
-    settings.allowAiKnowledgeFallback ? 'áno' : 'nie'
-  }.
-38. Aktuálny zdrojový režim: ${settings.sourceMode}.
-`;
-
-  const citationSpecialistRules = `
-ŠPECIÁLNY REŽIM PRE CITÁCIE, BIBLIOGRAFIU A ZDROJE:
-
-Tento režim použi vždy, keď používateľ žiada spracovať zdroje, pripraviť bibliografiu, opraviť citácie, citovať podľa APA 7 alebo ISO 690, spracovať zoznam literatúry, vytvoriť odkazy v texte, analyzovať výstupy zo softvéru JASP, SPSS, Jamovi, R, Excel alebo keď priložený dokument obsahuje zoznam literatúry, bibliografické záznamy, autorov, roky, názvy kníh, článkov, softvér alebo štatistické výstupy.
-
-POVINNÉ SPRACOVANIE ZDROJOV:
-1. Najprv identifikuj všetky zdroje uvedené v extrahovanom texte dokumentov.
-2. Ak existuje blok DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE, považuj ho za predbežnú extrakciu a vypíš všetky jeho záznamy.
-3. Ak dokument obsahuje neúplný zoznam literatúry, zachovaj všetky dostupné údaje.
-4. Chýbajúce roky, vydania, spoluautorov, vydavateľov, DOI, URL alebo verzie softvéru označ vetou: údaj je potrebné overiť.
-5. Nikdy nevymýšľaj DOI, URL, vydanie, čísla strán ani presné roky, ak nie sú dostupné.
-6. Ak sa v dokumente nachádza "a kol.", odporuč doplniť všetkých spoluautorov.
-7. Ak dokument obsahuje výstupy zo štatistického softvéru, uveď softvér ako samostatný zdroj.
-8. Ak sa v dokumente nachádza JASP, priprav citáciu softvéru JASP.
-9. Ak nie je známa verzia softvéru JASP, použi n.d. alebo upozorni, že verziu treba doplniť.
-
-POVINNÁ ŠTRUKTÚRA ODPOVEDE PRI CITÁCIÁCH:
-A) Formátované bibliografické záznamy
-B) Varianty odkazov v texte
-C) Špeciálne prípady
-D) Validácia a korekcia
-E) Finálny zoznam literatúry
-F) Odporúčaná veta do metodológie
-
-PRAVIDLÁ APA 7:
-- Pri knihách sa v APA 7 neuvádza miesto vydania.
-- Pri troch a viacerých autoroch sa v texte používa "et al.".
-- Pri softvéri sa uvádza autor alebo tím, rok, názov, verzia, typ v hranatých zátvorkách a URL.
-- Ak rok nie je známy, použi (n.d.) a upozorni, že údaj treba overiť.
-
-PRAVIDLÁ ISO 690:
-- Ak profil práce vyžaduje ISO 690, priprav záznamy podľa ISO 690.
-- Ak používateľ výslovne žiada APA 7, použi APA 7 aj vtedy, keď profil obsahuje inú normu.
-
-DÔLEŽITÉ:
-- Primárne vychádzaj zo zdrojov v priložených dokumentoch.
-- Ak zdroj nie je v dokumente, jasne ho označ ako AI odporúčaný zdroj na overenie.
-- Neprezentuj odporúčaný zdroj ako overene nájdený v prílohe.
-- Výstup má byť profesionálny, štruktúrovaný a vhodný na vloženie do Word dokumentu.
-`;
-
-  return `
+  const prompt = `
 Si ZEDPERA, profesionálny akademický AI asistent, AI vedúci práce a citačná špecialistka.
 
-HLAVNÝ PRACOVNÝ POSTUP:
-1. Najprv vychádzaj z uloženého Profilu práce.
-2. Následne použi extrahovaný text z priložených dokumentov a dokumenty zo Supabase.
-3. Ak je súbor komprimovaný ako .gz, najprv musí byť rozbalený a až potom použitý.
-4. Ak je pri prílohe extrahovaný text, musíš ho použiť pred všeobecnými znalosťami AI.
-5. Ak je dostupný blok DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE, použi ho pri tvorbe zdrojov.
-6. Semantic Scholar je vypnutý a nesmie sa použiť.
-7. Ak existujú prílohy, najprv posúď ich tematickú relevantnosť voči Profilu práce.
-8. Ak sú prílohy relevantné a ich text je dostupný, použi ich ako primárny podklad.
-9. Ak prílohy chýbajú, môžeš vychádzať zo všeobecných znalostí AI modelu, ale musíš to transparentne uviesť.
-10. Ak prílohy neobsahujú zdroje, musíš to transparentne uviesť.
-11. Ak prílohy nesúvisia s profilom práce, musíš upozorniť, že nezodpovedajú profilu práce.
-12. Nikdy nepíš, že obsah nebol extrahovaný, ak je nižšie uvedený extrahovaný text.
-13. Ak príloha nesúvisí s profilom práce, pokračuj pôvodným spôsobom podľa profilu a požiadavky používateľa.
+HLAVNÝ POSTUP:
+1. Najprv vychádzaj z uloženého profilu práce.
+2. Potom použi extrahovaný text z príloh a dokumentov.
+3. Ak existuje extrahovaný text, použi ho pred všeobecnými znalosťami AI.
+4. Ak existujú detegované zdroje, autorov a publikácie musíš vypísať v sekcii POUŽITÉ ZDROJE A AUTORI.
+5. Nevymýšľaj zdroje, autorov, DOI, URL, roky, vydavateľov ani čísla strán.
+6. Ak údaj chýba, napíš: údaj je potrebné overiť.
+7. Semantic Scholar je vypnutý.
+8. Nepoužívaj Markdown znaky, hviezdičky, mriežky ani kódové bloky.
 
-HLAVNÉ PRAVIDLÁ:
-- Odpovedaj v jazyku práce: ${workLanguage}.
-- Vychádzaj prednostne z uloženého profilu práce.
-- Text má byť odborne napísaný, logický a vhodný pre akademické písanie.
-- Ak niečo v profile chýba, uveď, čo odporúčaš doplniť.
-- Nevymýšľaj konkrétne bibliografické údaje, ak nie sú priamo dostupné.
-- Nepoužívaj falošné citácie, autorov, DOI ani názvy článkov.
-- Nepoužívaj Markdown formátovanie ako tučný text, mriežky, hviezdičky, oddeľovače ani kódové bloky.
-- Nadpisy píš obyčajným textom bez znakov #, *, _, \`.
-- Výstup musí byť čistý text vhodný na priame vloženie do Word dokumentu.
+JAZYK ODPOVEDE:
+${workLanguage}
+
+CITAČNÁ NORMA:
+${citationStyle}
 
 ULOŽENÝ PROFIL PRÁCE:
 Názov práce: ${profile?.title || 'Neuvedené'}
@@ -1440,53 +1460,59 @@ Sú priložené dokumenty: ${hasAttachments ? 'Áno' : 'Nie'}
 
 ${attachmentsBlock}
 
-${documentSourceRules}
+PRAVIDLÁ PRE ZDROJE:
+1. Ak boli v extrahovanom texte nájdené zdroje, nesmieš napísať, že zdroje neboli dodané.
+2. V sekcii POUŽITÉ ZDROJE A AUTORI vypíš:
+A. Detegované zdroje z extrahovaného textu
+B. Autori nájdení v dokumentoch
+C. Formátované bibliografické záznamy
+D. Priložené dokumenty použité ako podklad
+E. Upozornenia k nerelevantným alebo neoveriteľným prílohám
+F. AI odporúčané zdroje na overenie a doplnenie
+3. Ak boli nájdené iba mená autorov bez úplných publikácií, vypíš ich a uveď, že bibliografický záznam treba doplniť.
+4. Ak boli nájdené DOI alebo URL, vypíš ich presne.
+5. Ak je príloha nesúvisiaca s profilom práce, nepoužívaj ju ako odborný zdroj.
+6. Ak neboli dodané overiteľné zdroje, uveď: Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI modelu. Neboli dodané overiteľné priložené zdroje.
 
-${citationSpecialistRules}
+NASTAVENIA:
+Kontrola príloh podľa profilu práce: ${settings.validateAttachmentsAgainstProfile ? 'áno' : 'nie'}
+Povinný zoznam zdrojov: ${settings.requireSourceList ? 'áno' : 'nie'}
+Povolené všeobecné znalosti AI: ${settings.allowAiKnowledgeFallback ? 'áno' : 'nie'}
+Zdrojový režim: ${settings.sourceMode}
 
 FORMÁT ODPOVEDE:
-Použi presne tieto sekcie. Nepoužívaj Markdown znaky, hviezdičky, mriežky ani kódové bloky.
+Použi presne tieto sekcie. Nepoužívaj Markdown znaky.
 
 === VÝSTUP ===
-Sem napíš hlavný výstup ako čistý akademický text. Ak používateľ žiada citácie alebo zdroje, priprav odpoveď ako citačná špecialistka v štruktúre A až F.
+Sem napíš hlavný výstup ako čistý akademický text.
 
 === ANALÝZA ===
 Stručne vysvetli:
 - z ktorých údajov profilu si čerpal,
 - či boli priložené dokumenty,
-- či boli prílohy komprimované do 1 MB,
+- či boli prílohy komprimované,
 - či boli gzip prílohy rozbalené,
 - či bol text príloh extrahovaný,
 - či boli automaticky detegované zdroje, autori a publikácie,
 - či priložené dokumenty tematicky zodpovedajú profilu práce,
-- či sa v priložených dokumentoch nachádzajú identifikovateľné bibliografické zdroje,
 - či bol text vytvorený aj zo všeobecných znalostí AI modelu.
 
 === SKÓRE ===
-Napíš iba číslo od 0 do 100 a krátke slovné hodnotenie. Skóre zníž, ak chýbajú relevantné zdroje, chýba extrahovaný obsah príloh, kompresia prekročila 1 MB alebo prílohy nezodpovedajú profilu práce.
+Napíš iba číslo od 0 do 100 a krátke slovné hodnotenie.
 
 === ODPORÚČANIA ===
 Uveď konkrétne odporúčania v čistom texte bez Markdown symbolov.
 
 === POUŽITÉ ZDROJE A AUTORI ===
 A. Detegované zdroje z extrahovaného textu
-Vypíš všetky zdroje, ktoré boli nájdené v bloku DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE. Pri každom zdroji uveď pôvodný záznam, autorov, rok, názov publikácie, typ zdroja, DOI, URL a čo treba overiť.
-
 B. Autori nájdení v dokumentoch
-Vypíš všetkých autorov identifikovaných z extrahovaného textu. Ak sú mená neúplné, napíš: údaj je potrebné overiť.
-
 C. Formátované bibliografické záznamy
-Uprav dostupné zdroje podľa citačnej normy z profilu práce. Ak chýbajú údaje, nevymýšľaj ich a napíš: údaj je potrebné overiť.
-
 D. Priložené dokumenty použité ako podklad
-Vypíš názvy relevantných príloh, z ktorých si čerpal.
-
 E. Upozornenia k nerelevantným alebo neoveriteľným prílohám
-Vypíš prílohy, ktoré nesúvisia s profilom práce alebo ktorých obsah nebolo možné overiť.
-
 F. AI odporúčané zdroje na overenie a doplnenie
-Ak sú zdroje neúplné, odporuč odborné zdroje na doplnenie, ale jasne ich označ ako odporúčané, nie ako overene použité.
 `;
+
+  return limitText(prompt, maxSystemPromptChars);
 }
 
 // ================= OUTPUT CLEANING =================
@@ -1678,15 +1704,11 @@ function getFallbackModel(): ModelResult {
     };
   }
 
-  throw new Error(
-    'Nie je nastavený žiadny AI provider. Doplň aspoň jeden API kľúč.',
-  );
+  throw new Error('Nie je nastavený žiadny AI provider. Doplň aspoň jeden API kľúč.');
 }
 
 function isModelNotFoundError(error: unknown) {
-  if (!(error instanceof Error)) {
-    return false;
-  }
+  if (!(error instanceof Error)) return false;
 
   const message = error.message.toLowerCase();
 
@@ -1696,6 +1718,21 @@ function isModelNotFoundError(error: unknown) {
       message.includes('404') ||
       message.includes('not supported') ||
       message.includes('invalid model'))
+  );
+}
+
+function isContextWindowError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+
+  const message = error.message.toLowerCase();
+
+  return (
+    message.includes('context window') ||
+    message.includes('maximum context') ||
+    message.includes('input exceeds') ||
+    message.includes('too many tokens') ||
+    message.includes('token limit') ||
+    message.includes('prompt is too long')
   );
 }
 
@@ -1713,7 +1750,7 @@ async function createStreamResponse({
     system: systemPrompt,
     messages: normalizedMessages,
     temperature: 0.2,
-    maxOutputTokens: 4500,
+    maxOutputTokens: 3500,
   });
 
   return result.toTextStreamResponse();
@@ -1739,7 +1776,7 @@ async function createJsonResponse({
     system: systemPrompt,
     messages: normalizedMessages,
     temperature: 0.2,
-    maxOutputTokens: 4500,
+    maxOutputTokens: 3500,
   });
 
   const rawOutput = result.text || '';
@@ -1772,6 +1809,8 @@ async function createJsonResponse({
       error: file.error || null,
       warning: file.warning || null,
       bibliographicCandidates: file.bibliographicCandidates,
+      detectedAuthors: file.detectedAuthors,
+      formattedSources: file.formattedSources,
     })),
   });
 }
@@ -1831,12 +1870,13 @@ export async function POST(req: Request) {
 
       clientExtractedText = toCleanString(formData.get('clientExtractedText'));
       preparedFilesSummary = toCleanString(formData.get('preparedFilesSummary'));
+
       clientDetectedSourcesSummary = toCleanString(
         formData.get('clientDetectedSourcesSummary'),
       );
-      clientDetectedSources = parseJson<BibliographicCandidate[]>(
-        formData.get('clientDetectedSources'),
-        [],
+
+      clientDetectedSources = normalizeBibliographicCandidates(
+        parseJson<BibliographicCandidate[]>(formData.get('clientDetectedSources'), []),
       );
 
       preparedFilesMetadata = parseJson<PreparedFileMetadata[]>(
@@ -1862,17 +1902,16 @@ export async function POST(req: Request) {
         body?.validateAttachmentsAgainstProfile !== false;
 
       requireSourceList = body?.requireSourceList !== false;
-
       allowAiKnowledgeFallback = body?.allowAiKnowledgeFallback !== false;
-
       returnExtractedFilesInfo = body?.returnExtractedFilesInfo === true;
 
       clientExtractedText = toCleanString(body?.clientExtractedText);
       preparedFilesSummary = toCleanString(body?.preparedFilesSummary);
       clientDetectedSourcesSummary = toCleanString(body?.clientDetectedSourcesSummary);
-      clientDetectedSources = Array.isArray(body?.clientDetectedSources)
-        ? body.clientDetectedSources
-        : [];
+
+      clientDetectedSources = normalizeBibliographicCandidates(
+        Array.isArray(body?.clientDetectedSources) ? body.clientDetectedSources : [],
+      );
 
       preparedFilesMetadata = Array.isArray(body?.preparedFilesMetadata)
         ? body.preparedFilesMetadata
@@ -1896,15 +1935,17 @@ export async function POST(req: Request) {
       });
     }
 
-    const { extractedFiles, attachmentTexts: uploadedAttachmentTexts } =
-      await extractAttachmentTexts(
-        files,
-        preparedFilesMetadata,
-        clientExtractedText,
-        preparedFilesSummary,
-        clientDetectedSourcesSummary,
-        clientDetectedSources,
-      );
+    const {
+      extractedFiles,
+      attachmentTexts: uploadedAttachmentTexts,
+    } = await extractAttachmentTexts({
+      files,
+      preparedFilesMetadata,
+      clientExtractedText,
+      preparedFilesSummary,
+      clientDetectedSourcesSummary,
+      clientDetectedSources,
+    });
 
     console.log(
       'EXTRACTED_FILES_DEBUG:',
@@ -1922,6 +1963,7 @@ export async function POST(req: Request) {
         compressionStatus: file.compressionStatus,
         chars: file.extractedChars,
         bibliographicCandidates: file.bibliographicCandidates.length,
+        authors: file.detectedAuthors.length,
         status: file.status,
         error: file.error,
         warning: file.warning,
@@ -1954,7 +1996,7 @@ DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE:
 ${formatBibliographicCandidates(bibliographicCandidates)}
 
 EXTRAHOVANÝ TEXT:
-${extractedText ? limitText(extractedText, 50000) : '[Dokument nemá uložený extrahovaný text]'}`;
+${extractedText ? limitMiddle(extractedText, maxProjectDocumentChars) : '[Dokument nemá uložený extrahovaný text]'}`;
     });
 
     const attachmentTexts = isStrictNoAcademicTailModule(module)
@@ -1971,12 +2013,12 @@ ${extractedText ? limitText(extractedText, 50000) : '[Dokument nemá uložený e
         module === 'translation' ? false : allowAiKnowledgeFallback,
     };
 
-    const systemPrompt = buildSystemPrompt(
+    const systemPrompt = buildSystemPrompt({
       profile,
       attachmentTexts,
       settings,
       module,
-    );
+    });
 
     try {
       const primary = getModelByAgent(agent);
@@ -2000,6 +2042,13 @@ ${extractedText ? limitText(extractedText, 50000) : '[Dokument nemá uložený e
     } catch (primaryError) {
       console.error('PRIMARY_MODEL_ERROR:', primaryError);
 
+      if (isContextWindowError(primaryError)) {
+        return new Response(
+          `API error 413: Vstup je stále príliš veľký pre kontextové okno modelu. Skrátil som text v /api/chat, ale treba ešte zmenšiť vstup vo frontende: neposielaj EXTRAHOVANÝ TEXT Z PRÍLOH aj v messages aj v clientExtractedText. Stačí posielať clientExtractedText a v messages iba krátku požiadavku používateľa.`,
+          { status: 413 },
+        );
+      }
+
       if (!isModelNotFoundError(primaryError)) {
         throw primaryError;
       }
@@ -2008,35 +2057,22 @@ ${extractedText ? limitText(extractedText, 50000) : '[Dokument nemá uložený e
 
       const fallbackSystemPrompt = isStrictNoAcademicTailModule(module)
         ? systemPrompt
-        : `
-${systemPrompt}
+        : limitText(
+            `${systemPrompt}
 
 TECHNICKÁ POZNÁMKA:
 Vybraný model nebol dostupný alebo bol odmietnutý poskytovateľom.
 Odpovedáš cez náhradný model: ${fallback.providerLabel}.
 
-Aj pri náhradnom modeli musíš dodržať pravidlo:
-Na konci akademickej odpovede vždy uveď sekciu:
-
+Aj pri náhradnom modeli musíš dodržať sekciu:
 === POUŽITÉ ZDROJE A AUTORI ===
 
-Ak bol text z príloh extrahovaný, musíš ho použiť ako prvý zdrojový podklad.
-Ak bol súbor doručený ako gzip, musí byť posudzovaný až po rozbalení.
-Ak je dostupný blok DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE, musíš vypísať všetkých autorov, publikácie, roky, DOI a URL.
-Ak používateľ žiada spracovanie citácií, musíš odpovedať ako citačná špecialistka a použiť štruktúru:
-A) Formátované bibliografické záznamy
-B) Varianty odkazov v texte
-C) Špeciálne prípady
-D) Validácia a korekcia
-E) Finálny zoznam literatúry
-F) Odporúčaná veta do metodológie
-
+Ak bol text z príloh extrahovaný, použi ho ako prvý zdrojový podklad.
+Ak je dostupný blok DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE, vypíš autorov, publikácie, roky, DOI a URL.
 Semantic Scholar je vypnutý.
-Používaj iba Profil práce, extrahovaný text z priložených dokumentov, dokumenty zo Supabase, text používateľa a všeobecné znalosti AI modelu.
-Ak príloha nesúvisí s profilom práce, nepoužívaj ju ako odborný zdroj a pokračuj pôvodným spôsobom podľa profilu práce.
-Ak neboli dodané overiteľné zdroje, nevymýšľaj ich a jasne uveď:
-Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI modelu. Neboli dodané overiteľné priložené zdroje.
-`;
+`,
+            maxSystemPromptChars,
+          );
 
       if (returnExtractedFilesInfo) {
         return await createJsonResponse({
@@ -2059,9 +2095,7 @@ Text bol vytvorený z uloženého profilu práce a zo všeobecných znalostí AI
     console.error('CHAT_API_ERROR:', error);
 
     const message =
-      error instanceof Error
-        ? error.message
-        : 'Neznáma chyba servera v /api/chat';
+      error instanceof Error ? error.message : 'Neznáma chyba servera v /api/chat';
 
     return new Response(`API error 500: ${message}`, {
       status: 500,

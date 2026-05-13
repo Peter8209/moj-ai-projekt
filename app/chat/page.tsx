@@ -244,11 +244,6 @@ const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 const maxCompressedFileSizeBytes = 1 * 1024 * 1024;
 const safeCompressedTargetBytes = 950 * 1024;
 
-// Vercel serverless payload limit je nižší než veľké PDF.
-// Ak má súbor po kompresii viac ako toto, neposielame ho do /api/extract-text.
-const maxFunctionPayloadBytes = 4 * 1024 * 1024;
-
-
 // Dôležité: nízke limity, aby /api/chat nespadol na context window
 const maxClientExtractedCharsPerFile = 25_000;
 const maxTotalExtractedContextChars = 60_000;
@@ -307,43 +302,6 @@ const suggestions: {
 ];
 
 // ================= BASIC HELPERS =================
-
-async function extractPdfTextInBrowser(file: File): Promise<string> {
-  const pdfjsLib: any = await import('pdfjs-dist/legacy/build/pdf.mjs');
-
-  // DÔLEŽITÉ:
-  // Worker musí ísť z /public/pdfjs/pdf.worker.min.mjs,
-  // nie z CDN, pretože CDN ti padá na "Failed to fetch dynamically imported module".
-  pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs';
-
-  const arrayBuffer = await file.arrayBuffer();
-
-  const loadingTask = pdfjsLib.getDocument({
-    data: arrayBuffer,
-    useWorkerFetch: false,
-    isEvalSupported: false,
-    disableFontFace: true,
-  });
-
-  const pdf = await loadingTask.promise;
-  const pages: string[] = [];
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const textContent = await page.getTextContent();
-
-    const pageText = textContent.items
-      .map((item: any) => String(item?.str || '').trim())
-      .filter(Boolean)
-      .join(' ');
-
-    if (pageText.trim()) {
-      pages.push(`STRANA ${pageNumber}\n${pageText}`);
-    }
-  }
-
-  return cleanAiOutput(pages.join('\n\n------------------------------\n\n'));
-}
 
 function getFileExtension(fileName: string) {
   const index = fileName.lastIndexOf('.');
@@ -1474,97 +1432,6 @@ export default function ChatPage() {
             ? 'application/gzip'
             : item.type || 'application/octet-stream',
         });
-
-const extension = getFileExtension(item.name);
-
-// Ak je PDF po kompresii príliš veľké pre /api/extract-text,
-// extrahujeme ho priamo v prehliadači a do AI posielame iba text.
-if (
-  extension === '.pdf' &&
-  preparedFile.size > maxFunctionPayloadBytes
-) {
-  updateProcessingLog(item.id, {
-    status: 'extracting',
-    message:
-      'PDF je príliš veľké pre /api/extract-text. Extrahujem text priamo v prehliadači cez pdfjs-dist.',
-    preparedSize: preparedFile.size,
-    warning: `Súbor má po kompresii ${formatBytes(
-      preparedFile.size,
-    )}, čo prekračuje limit serverless funkcie. Preto sa neposiela celý PDF súbor do API.`,
-  });
-
-  const rawText = await extractPdfTextInBrowser(item.file);
-
-  if (!rawText.trim()) {
-    throw new Error(
-      'PDF sa podarilo načítať v prehliadači, ale neobsahuje čitateľný text. Pravdepodobne ide o skenované PDF.',
-    );
-  }
-
-  const detectedSources = extractBibliographicCandidates(rawText);
-  const detectedAuthors = uniqueArray(
-    detectedSources.flatMap((source) => source.authors || []),
-  );
-
-  const extractedText = truncateByChars(
-    rawText,
-    maxClientExtractedCharsPerFile,
-  );
-
-  const textPackage = `
-NÁZOV SÚBORU: ${item.name}
-PÔVODNÁ VEĽKOSŤ: ${formatBytes(item.size)}
-PÔVODNÁ KOMPRESIA PDF: ${formatBytes(preparedFile.size)}
-REŽIM: PDF bolo príliš veľké pre /api/extract-text, preto bol text extrahovaný priamo v prehliadači cez pdfjs-dist.
-
-AUTORI NÁJDENÍ V DOKUMENTE:
-${detectedAuthors.length ? detectedAuthors.join(', ') : 'neuvedené alebo potrebné overiť'}
-
-DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE:
-${formatBibliographicCandidates(detectedSources)}
-
-TEXT:
-${extractedText}
-`.trim();
-
-  const textGzipFile = await createGzipTextFile({
-    text: textPackage,
-    fileName: `${item.name}.extracted.txt.gz`,
-  });
-
-  updateProcessingLog(item.id, {
-    status: 'extracted',
-    message: `Text bol extrahovaný v prehliadači. Znaky: ${extractedText.length}. Detegované zdroje: ${detectedSources.length}. Autori: ${detectedAuthors.length}.`,
-    preparedSize: textGzipFile.size,
-    extractedChars: extractedText.length,
-    detectedSourcesCount: detectedSources.length,
-    detectedAuthorsCount: detectedAuthors.length,
-  });
-
-  preparedFiles.push({
-    originalId: item.id,
-    originalName: item.name,
-    originalSize: item.size,
-    originalType: item.type,
-    preparedName: textGzipFile.name,
-    preparedSize: textGzipFile.size,
-    preparedType: textGzipFile.type,
-    compressionMode: 'gzip_extracted_text',
-    file: textGzipFile,
-    extractedText,
-    extractionMethod: 'pdfjs-browser',
-    extractionMessage:
-      'PDF bolo príliš veľké pre /api/extract-text, text bol extrahovaný priamo v prehliadači.',
-    detectedSources,
-    detectedAuthors,
-    formattedSources: formatBibliographicCandidates(detectedSources),
-    extractionStatus: 'client_extracted',
-    warning:
-      'PDF nebolo odoslané celé do /api/extract-text, pretože by vznikla chyba FUNCTION_PAYLOAD_TOO_LARGE.',
-  });
-
-  continue;
-}
 
         updateProcessingLog(item.id, {
           status: 'compressed',

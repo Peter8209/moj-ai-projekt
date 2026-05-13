@@ -1377,21 +1377,6 @@ function pairInTextCitationsWithBibliography({
   return mergeSources(result);
 }
 
-function formatInTextCitations(citations: InTextCitation[]) {
-  if (!citations.length) {
-    return 'Neboli automaticky nájdené žiadne citácie v texte.';
-  }
-
-  return citations
-    .map((citation, index) => {
-      return `${index + 1}. ${citation.raw}
-Autori v texte: ${citation.authors.join(', ')}
-Rok: ${citation.year}
-Počet výskytov: ${citation.count}`;
-    })
-    .join('\n\n');
-}
-
 function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
   if (!candidates.length) {
     return 'Neboli automaticky detegované žiadne bibliografické záznamy. Ak sú zdroje v texte, treba ich manuálne overiť alebo doplniť čitateľnejší zoznam literatúry.';
@@ -1402,13 +1387,19 @@ function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
       const citationInfo = item.inTextCitations?.length
         ? `\nCitácie v texte: ${item.inTextCitations
             .map((citation) => citation.raw)
-            .join('; ')}\nPočet výskytov v texte: ${item.occurrenceCount || item.inTextCitations.length}`
+            .join('; ')}\nPočet výskytov v texte: ${
+            item.occurrenceCount || item.inTextCitations.length
+          }`
         : '';
 
       return `${index + 1}. Pôvodný záznam:
 ${item.raw}
 
-Autori: ${item.authors.length ? item.authors.join(', ') : 'neuvedené alebo potrebné overiť'}
+Autori: ${
+        item.authors.length
+          ? item.authors.join(', ')
+          : 'neuvedené alebo potrebné overiť'
+      }
 Rok: ${item.year || 'údaj je potrebné overiť'}
 Názov publikácie / zdroja: ${item.title || 'údaj je potrebné overiť'}
 Typ zdroja: ${item.sourceType}
@@ -1417,6 +1408,34 @@ URL: ${item.url || 'neuvedené'}${citationInfo}`;
     })
     .join('\n\n');
 }
+
+function formatSimpleBibliographicSources(candidates: BibliographicCandidate[]) {
+  if (!candidates.length) {
+    return 'Úplný bibliografický záznam je potrebné overiť.';
+  }
+
+  return candidates
+    .map((item) => {
+      if (item.raw?.trim()) {
+        return item.raw.trim();
+      }
+
+      const authorText = item.authors.length
+        ? item.authors.join(', ')
+        : 'Autor je potrebné overiť';
+
+      const yearText = item.year || 'rok je potrebné overiť';
+      const titleText = item.title || 'názov je potrebné overiť';
+      const doiOrUrl = item.doi || item.url || '';
+
+      return `${authorText} (${yearText}). ${titleText}.${
+        doiOrUrl ? ` ${doiOrUrl}` : ''
+      }`.trim();
+    })
+    .join('\n');
+}
+
+
 
 function normalizeAuthors(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -1543,6 +1562,22 @@ function flattenDetectedAuthors(preparedFiles: PreparedFile[]) {
     ),
   ]);
 }
+
+function formatInTextCitations(citations: InTextCitation[]) {
+  if (!citations.length) {
+    return 'Neboli automaticky nájdené žiadne citácie v texte.';
+  }
+
+  return citations
+    .map((citation, index) => {
+      return `${index + 1}. ${citation.raw}
+Autori v texte: ${citation.authors.length ? citation.authors.join(', ') : 'neuvedené alebo potrebné overiť'}
+Rok: ${citation.year || 'údaj je potrebné overiť'}
+Počet výskytov: ${citation.count || 1}`;
+    })
+    .join('\n\n');
+}
+
 
 function buildDetectedSourcesSummary(preparedFiles: PreparedFile[]) {
   if (!preparedFiles.length) {
@@ -1715,70 +1750,14 @@ function buildFallbackSourcesSection({
   forceAll: boolean;
 }) {
   const allSources = flattenDetectedSources(preparedFiles);
+
   const usedSources = filterSourcesByUsedCitations(
     allSources,
     usedText,
     forceAll,
   );
 
-  const allAuthors = forceAll
-    ? flattenDetectedAuthors(preparedFiles)
-    : uniqueArray(usedSources.flatMap((source) => source.authors || []));
-
- const usedCitations = extractUsedTextCitations(usedText);
-
-  const citationsText = usedCitations.length
-    ? usedCitations
-        .map((citation, index) => {
-          const firstAuthor = citation.authorPart
-            .replace(/\s+et\s+al\.?/i, '')
-            .trim();
-
-          return `${index + 1}. Parentetický odkaz: ${citation.raw}
-Naratívny odkaz: ${firstAuthor} (${citation.year}) uvádzajú...`;
-        })
-        .join('\n\n')
-    : 'V hlavnom texte neboli spoľahlivo rozpoznané citácie vo formáte (Autor, rok).';
-
-  return `A. Zdroje nájdené v priložených dokumentoch
-${formatBibliographicCandidates(usedSources)}
-
-B. Formátované bibliografické záznamy
-Vypíš bibliografické záznamy podľa citačnej normy: 
-
-Ak používateľ vloží odborný článok, štúdiu, kapitolu knihy, metodický dokument, správu, PDF, DOCX alebo inú odbornú prílohu a požiada o vytvorenie kapitoly, podkapitoly, úvodu, abstraktu, teoretickej časti alebo odborného textu, považuj samotnú vloženú prílohu za primárny zdroj.
-
-Primárny zdroj urč z obsahu priloženého dokumentu, najmä z titulnej strany, hlavičky článku, názvu dokumentu, autorov, roku vydania, názvu časopisu, knihy, zborníka, inštitúcie, vydavateľa, ročníka, čísla, strán, DOI alebo URL.
-
-Ak bol hlavný text vytvorený z priloženej prílohy, bibliografický záznam musí patriť tejto priloženej prílohe, nie automaticky zdrojom uvedeným v jej zozname literatúry.
-
-Ak používateľ výslovne žiada všetky zdroje, vypíš všetky dostupné bibliografické záznamy vrátane literatúry nájdenej v prílohách.
-
-Ak úplný záznam nie je dostupný, napíš:
-úplný bibliografický záznam je potrebné overiť.
-${formatBibliographicCandidates(usedSources)}
-
-C. Varianty odkazov v texte
-${citationsText}
-
-D. Priložené dokumenty použité ako podklad
-${
-  preparedFiles.length
-    ? preparedFiles
-        .map((file, index) => `${index + 1}. ${file.originalName}`)
-        .join('\n')
-    : 'Neboli priložené žiadne dokumenty.'
-}
-
-E. Autori nájdení v dokumentoch
-${
-  allAuthors.length
-    ? allAuthors.join(', ')
-    : 'Autori neboli automaticky identifikovaní alebo ich treba overiť.'
-}
-
-F. Neúplné alebo neoveriteľné zdroje
-Pri záznamoch, kde chýba autor, rok, názov, DOI alebo URL, je potrebné údaj overiť podľa pôvodného dokumentu.`;
+  return formatSimpleBibliographicSources(usedSources);
 }
 
 // ================= API CALLS =================
@@ -1900,7 +1879,7 @@ ${formatInTextCitations(item.inTextCitations || [])}
 FORMÁTOVANÉ ZDROJE:
 ${item.formattedSources || 'neuvedené'}
 
-DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE:
+ZDROJE, AUTORI A PUBLIKÁCIE:
 ${formatBibliographicCandidates(item.detectedSources || [])}
 
 TEXT PRÍLOHY:
@@ -2099,7 +2078,7 @@ ${extractedText}
 
     updateProcessingLog(item.id, {
       status: 'extracted',
-      message: `PDF bol extrahovaný. Znaky: ${extractedText.length}. Citácie v texte: ${inTextCitations.length}. Detegované zdroje: ${detectedSources.length}. Autori: ${detectedAuthors.length}.`,
+      message: `Znaky: ${extractedText.length}. Citácie v texte: ${inTextCitations.length}. Zdroje: ${detectedSources.length}. Autori: ${detectedAuthors.length}.`,
       originalSize: item.size,
       preparedSize: textGzipFile.size,
       extractedChars: extractedText.length,
@@ -2209,7 +2188,7 @@ ${extractedText}
 
     updateProcessingLog(item.id, {
       status: 'extracted',
-      message: `Text bol extrahovaný cez /api/extract-text. Znaky: ${extractedText.length}. Citácie v texte: ${extraction.inTextCitations.length}. Detegované zdroje: ${extraction.detectedSources.length}. Autori: ${extraction.detectedAuthors.length}.`,
+      message: `Znaky: ${extractedText.length}. Citácie v texte: ${extraction.inTextCitations.length}. Zdroje: ${extraction.detectedSources.length}. Autori: ${extraction.detectedAuthors.length}.`,
       preparedSize: usedCompressed ? preparedFile.size : item.size,
       extractedChars: extractedText.length,
       detectedSourcesCount: extraction.detectedSources.length,
@@ -2575,88 +2554,51 @@ Nepíš tieto technické nadpisy:
 - DETEGOVANÉ ZDROJE
 - TECHNICKÁ ANALÝZA
 
-Výstup musí mať presne túto štruktúru:
+Výstup musí mať túto štruktúru:
 
 Názov práce alebo názov spracovanej témy
 Číslo a názov kapitoly alebo podkapitoly
 
 Súvislý odborný text v odsekoch.
 
-V hlavnom texte používaj citácie priamo v texte.
-Príklady:
+V hlavnom texte používaj citácie priamo v texte podľa citačnej normy klienta: ${citationStyle}.
+
+Ak je citačná norma APA, používaj napríklad:
 (Ondrík et al., 2004)
-(Žajová a Porubská, 1997)
-(Dodok, 1998)
-(Duchoňová a Šturdík, 2010)
-(Bojňanská, 2010)
+
+Ak je citačná norma ISO 690 alebo iná norma, prispôsob odkazy presne tejto norme.
 
 Použité zdroje a autori
 
+Na konci výstupu vypíš iba samotné bibliografické záznamy použitých zdrojov.
+
+Nepíš technické podsekcie:
 A. Zdroje nájdené v priložených dokumentoch
-Sem vypíš zdroje nájdené v priložených dokumentoch.
-Ak používateľ žiada odborný text, úvod, abstrakt alebo kapitolu, vypíš iba tie zdroje, ktoré boli skutočne použité v hlavnom texte ako citácie.
-Ak používateľ výslovne žiada všetky zdroje, všetkých autorov, bibliografiu, zoznam literatúry alebo spracovanie zdrojov, vypíš všetky detegované zdroje.
-
 B. Formátované bibliografické záznamy
-Sem vypíš formátované bibliografické záznamy podľa citačnej normy: ${citationStyle}.
-Pri odbornom texte vypíš iba záznamy k citáciám použitým v hlavnom texte.
-Ak používateľ žiada všetky zdroje, vypíš všetky dostupné záznamy.
-Ak úplný záznam nie je dostupný, napíš: úplný bibliografický záznam je potrebné overiť.
-
 C. Varianty odkazov v texte
-Ku každému použitému zdroju uveď:
-Parentetický odkaz: (Autor, rok)
-Naratívny odkaz: Autor (rok) uvádza...
-
-Pri viacerých autoroch použi:
-Parentetický odkaz: (Autor et al., rok)
-Naratívny odkaz: Autor et al. (rok) uvádzajú...
-
 D. Priložené dokumenty použité ako podklad
-Vypíš názvy priložených dokumentov, ktoré boli použité ako podklad.
+E. Autori nájdení v dokumentoch
+F. Neúplné alebo neoveriteľné zdroje
 
-PRAVIDLÁ PRE ZDROJE:
+Každý zdroj uveď ako samostatný bibliografický záznam podľa citačnej normy klienta: ${citationStyle}.
 
-1. Každá citácia použitá v hlavnom texte musí byť uvedená v časti Použité zdroje a autori.
+Príklad správneho výstupu zdroja pri APA:
 
-2. Ak používateľ vloží prílohu a požiada o spracovanie kapitoly, podkapitoly, úvodu, abstraktu, teoretickej časti alebo odborného textu, primárnym zdrojom je samotná vložená príloha.
+Ondrík, P., Mikulíková, D., & Kraic, J. (2004). Závislosť medzi dĺžkovou variabilitou génu β-amy1 a aktivitou β-amylázy jačmeňa. Nova Biotechnologica, 4(2), 245-253.
 
-3. Pri každej použitej prílohe sa pokús určiť:
-- autora alebo autorov,
-- rok,
-- názov článku alebo dokumentu,
-- názov časopisu, knihy, zborníka, inštitúcie alebo vydavateľa,
-- ročník, číslo, strany,
-- DOI alebo URL, ak sú dostupné.
+VŠEOBECNÉ PRAVIDLO PRE VŠETKY PRÍLOHY:
 
-4. Ak je z prílohy zrejmý autor a rok, použi ich v hlavnom texte ako citáciu.
-
-5. Formát citácie v texte:
-- jeden autor: (Autor, rok)
-- dvaja autori: (Autor a Autor, rok)
-- traja a viac autorov: (Autor et al., rok)
-
-6. Ak je odborný text vytvorený primárne z jednej prílohy, v texte cituj autora alebo autorov tejto prílohy a na konci uveď bibliografický záznam tejto prílohy.
-
-7. Nepovažuj automaticky zoznam literatúry na konci prílohy za hlavný zdroj. Zoznam literatúry v prílohe sú sekundárne zdroje. Vypíš ich iba vtedy, ak boli reálne použité alebo ak používateľ výslovne žiada všetky zdroje.
-
-8. Ak používateľ vloží viac príloh, vyber ako primárne zdroje tie prílohy, ktorých obsah bol skutočne použitý pri tvorbe hlavného textu. Každá použitá príloha musí mať citáciu v texte a bibliografický záznam na konci.
-
-9. Ak používateľ výslovne žiada všetky zdroje, všetkých autorov, zoznam literatúry, bibliografiu alebo spracovanie zdrojov, vypíš všetky dostupné zdroje z príloh.
-
-10. Ak používateľ žiada kapitolu, úvod, abstrakt alebo odborný text, vypíš iba použité zdroje, nie automaticky všetky zdroje z literatúry priloženého dokumentu.
-
-11. Nevymýšľaj chýbajúce údaje. Ak nevieš úplne určiť autora, rok, názov alebo vydavateľské údaje, napíš: úplný bibliografický záznam je potrebné overiť.
-
-12. Ak nie je jasný autor, použi názov dokumentu alebo inštitúciu.
-
-13. Ak nie je jasný rok, použi „n. d.“.
-
-14. Nikdy nepíš „Zdroje neboli dodané“, ak bol vložený dokument alebo boli v extrahovanom texte nájdené citácie, autori, roky alebo bibliografické údaje.
-
-15. Výstup musí byť bez markdown znakov #, ##, **, ---, tabuľkových značiek a technických komentárov.
-
-16. Výstup musí vyzerať ako hotový text do Word dokumentu.
+1. Pri každej priloženej prílohe najprv identifikuj skutočných autorov dokumentu, rok, názov článku, názov časopisu/knihy/dokumentu, ročník, číslo a strany, ak sú dostupné.
+2. Ako primárny zdroj použi autora alebo autorov dokumentu, ktorý bol vložený ako príloha.
+3. V hlavnom texte používaj meno autora a rok podľa citačného štýlu klienta.
+4. Na konci v časti „Použité zdroje a autori“ vypíš iba bibliografické záznamy zdrojov, ktoré boli reálne citované v hlavnom texte.
+5. Ak používateľ výslovne žiada všetky zdroje, všetkých autorov, bibliografiu alebo zoznam literatúry, vypíš všetky detegované bibliografické záznamy, ale stále bez technických podsekcií A, B, C, D.
+6. Každá citácia použitá v hlavnom texte musí mať zodpovedajúci bibliografický záznam na konci.
+7. Ak sa v hlavnom texte objaví citácia napríklad (Ondrík et al., 2004), na konci musí byť bibliografický záznam k tomuto autorovi alebo autorom, ak je dostupný v podkladoch.
+8. Nikdy nepíš „Zdroje neboli dodané“, ak boli v texte alebo extrahovanom dokumente nájdené citácie, autori, roky alebo bibliografické záznamy.
+9. Nevymýšľaj chýbajúce údaje. Pri neúplnom zdroji napíš: úplný bibliografický záznam je potrebné overiť.
+10. Výstup musí byť bez markdown znakov #, ##, **, --- a bez tabuľkových značiek.
+11. Výstup musí vyzerať ako hotový text do Word dokumentu.
 `.trim();
 };
 

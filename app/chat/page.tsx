@@ -258,8 +258,6 @@ const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 const maxCompressedFileSizeBytes = 1 * 1024 * 1024;
 const safeCompressedTargetBytes = 950 * 1024;
 
-// Dôležité: nech neposielame celý 90-stranový dokument do AI.
-// Zdroje a citácie pošleme celé v štruktúrovanej forme, text len skrátene.
 const maxClientExtractedCharsPerFile = 25_000;
 const maxTotalExtractedContextChars = 60_000;
 const maxDetectedSourcesForChat = 120;
@@ -267,7 +265,6 @@ const maxDetectedAuthorsForChat = 120;
 const maxInTextCitationsForChat = 200;
 const maxDetectedSourcesSummaryChars = 28_000;
 
-// Musíš mať lokálne vo verejnom priečinku: public/pdfjs/pdf.worker.min.mjs
 const pdfWorkerSrc = '/pdfjs/pdf.worker.min.mjs';
 
 const agents: { key: Agent; label: string }[] = [
@@ -286,13 +283,13 @@ const suggestions: {
   {
     title: 'Navrhni mi úvod mojej práce',
     instruction:
-      'Na základe uloženého profilu práce vytvor profesionálny akademický úvod práce. Použi profil práce a priložené dokumenty. Na konci vždy vypíš použité zdroje a autorov.',
+      'Na základe uloženého profilu práce vytvor profesionálny akademický úvod práce. Použi profil práce a priložené dokumenty. Finálny výstup priprav kompletne v /api/chat.',
     icon: PenLine,
   },
   {
     title: 'Napíš mi abstrakt',
     instruction:
-      'Na základe uloženého profilu práce vytvor akademický abstrakt. Má obsahovať tému, cieľ, problém, metodológiu, výsledky alebo očakávaný prínos. Na konci vždy vypíš použité zdroje a autorov.',
+      'Na základe uloženého profilu práce vytvor akademický abstrakt. Má obsahovať tému, cieľ, problém, metodológiu, výsledky alebo očakávaný prínos. Finálny výstup priprav kompletne v /api/chat.',
     icon: BookOpen,
   },
   {
@@ -304,13 +301,13 @@ const suggestions: {
   {
     title: 'Napíš návrh kapitoly',
     instruction:
-      'Na základe uloženého profilu práce priprav návrh kapitoly. Najprv navrhni osnovu kapitoly, potom podkapitoly a následne ukážkový odborný text. Na konci vždy vypíš použité zdroje a autorov.',
+      'Na základe uloženého profilu práce priprav návrh kapitoly. Zachovaj akademický štýl, plynulé odseky a zdroje rieš iba v /api/chat.',
     icon: FileText,
   },
   {
     title: 'Spracuj zdroje a citácie',
     instruction:
-      'Správaj sa ako citačná špecialistka. Analyzuj priložené dokumenty a profil práce. Identifikuj všetky citácie priamo v texte, autorov, roky, názvy diel, DOI, URL a priprav ich podľa citačnej normy z profilu. Nevymýšľaj zdroje.',
+      'Správaj sa ako citačná špecialistka. Analyzuj priložené dokumenty a profil práce. Identifikuj citácie, autorov, roky, názvy diel, DOI, URL a priprav ich podľa citačnej normy z profilu. Nevymýšľaj zdroje.',
     icon: Library,
   },
   {
@@ -389,6 +386,36 @@ function cleanAiOutput(text: string) {
     .replace(/[‘’]/g, "'")
     .replace(/\n{4,}/g, '\n\n\n')
     .trim();
+}
+
+function normalizeForMatch(value: string) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isChapterLikeRequest(value: string) {
+  const normalized = normalizeForMatch(value);
+
+  return (
+    /\bkapitola\s+\d+(?:\.\d+)*\b/i.test(normalized) ||
+    /^\s*\d+(?:\.\d+)*\s*[\.:]\s*[a-z]/i.test(normalized) ||
+    normalized.includes('uvod') ||
+    normalized.includes('sablona') ||
+    normalized.includes('sablona vyssie') ||
+    normalized.includes('rovnaky zdroj') ||
+    normalized.includes('musi to byt v takomto tvare') ||
+    normalized.includes('identicka struktura') ||
+    normalized.includes('text zo zedpery') ||
+    normalized.includes('uprav kapitolu') ||
+    normalized.includes('vytvor kapitolu') ||
+    normalized.includes('pouzity zdroj pre kapitolu') ||
+    normalized.includes('pouzita literatura pre kapitolu')
+  );
 }
 
 function normalizeSectionHeading(value: string) {
@@ -704,31 +731,6 @@ function buildAttachmentPrompt(files: AttachedFile[]) {
     .join('\n');
 }
 
-function ensureSourcesSection(text: string) {
-  const cleaned = cleanAiOutput(text);
-
-  const hasSourcesHeading =
-    /(?:^|\n)\s*={0,3}\s*použité\s+zdroje\s+a\s+autori\s*={0,3}\s*:?\s*(?:\n|$)/i.test(
-      cleaned,
-    ) ||
-    /(?:^|\n)\s*={0,3}\s*použité\s+zdroje\s*={0,3}\s*:?\s*(?:\n|$)/i.test(
-      cleaned,
-    ) ||
-    /(?:^|\n)\s*={0,3}\s*zdroje\s+a\s+autori\s*={0,3}\s*:?\s*(?:\n|$)/i.test(
-      cleaned,
-    ) ||
-    /(?:^|\n)\s*={0,3}\s*zdroje\s*={0,3}\s*:?\s*(?:\n|$)/i.test(cleaned);
-
-  if (hasSourcesHeading) {
-    return cleaned;
-  }
-
-  return `${cleaned}
-
-=== POUŽITÉ ZDROJE ===
-Úplný bibliografický záznam je potrebné overiť.`;
-}
-
 async function gzipBlob(blob: Blob): Promise<Blob> {
   const CompressionStreamConstructor = window.CompressionStream;
 
@@ -873,6 +875,7 @@ function normalizeAuthorDisplay(value: string) {
         if (index === 0 && part === part.toUpperCase() && part.length > 2) {
           return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
         }
+
         return part;
       })
       .join(', ');
@@ -921,7 +924,6 @@ function buildCitationKey(authors: string[], year: string) {
 
 function extractInTextCitations(text: string): InTextCitation[] {
   const cleaned = normalizeSlovakCitationText(cleanAiOutput(text));
-
   const found = new Map<string, InTextCitation>();
 
   const addCitation = (rawValue: string) => {
@@ -1026,15 +1028,6 @@ function extractInTextCitations(text: string): InTextCitation[] {
 
     return a.year.localeCompare(b.year);
   });
-}
-function normalizeForMatch(value: string) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function detectSourceType(line: string): BibliographicCandidate['sourceType'] {
@@ -1166,7 +1159,9 @@ function extractTitle(line: string) {
     return quoted[1].trim();
   }
 
-  const afterYear = working.split(/\((18|19|20)\d{2}[a-z]?\)|\b(18|19|20)\d{2}[a-z]?\b/i).pop();
+  const afterYear = working
+    .split(/\((18|19|20)\d{2}[a-z]?\)|\b(18|19|20)\d{2}[a-z]?\b/i)
+    .pop();
 
   if (afterYear && afterYear.trim().length > 8) {
     return afterYear
@@ -1409,35 +1404,6 @@ URL: ${item.url || 'neuvedené'}${citationInfo}`;
     .join('\n\n');
 }
 
-function formatSimpleBibliographicSources(candidates: BibliographicCandidate[]) {
-  if (!candidates.length) {
-    return 'Rok chýba alebo zdroj sa nepodarilo jednoznačne overiť v priloženom texte.';
-  }
-
-  return candidates
-    .map((item) => {
-      const raw = cleanAiOutput(item.raw || '');
-
-      if (raw && raw.length > 10) {
-        return raw;
-      }
-
-      const authorText = item.authors.length
-        ? item.authors.join(', ')
-        : 'Autor je potrebné overiť';
-
-      if (item.year) {
-        return `${authorText} (${item.year}).`;
-      }
-
-      return `${authorText}. Rok chýba.`;
-    })
-    .filter(Boolean)
-    .join('\n');
-}
-
-
-
 function normalizeAuthors(value: unknown): string[] {
   if (Array.isArray(value)) {
     return uniqueArray(value.map((item) => String(item || '')));
@@ -1479,7 +1445,8 @@ function normalizeDetectedSources(value: unknown): BibliographicCandidate[] {
           item?.sourceType === 'unknown'
             ? item.sourceType
             : 'unknown',
-        citationKey: authors.length && year ? buildCitationKey(authors, year) : undefined,
+        citationKey:
+          authors.length && year ? buildCitationKey(authors, year) : undefined,
       } satisfies BibliographicCandidate;
     })
     .filter(
@@ -1579,7 +1546,6 @@ Počet výskytov: ${citation.count || 1}`;
     .join('\n\n');
 }
 
-
 function buildDetectedSourcesSummary(preparedFiles: PreparedFile[]) {
   if (!preparedFiles.length) {
     return 'Žiadne prílohy neboli pripravené, preto neboli detegované žiadne zdroje.';
@@ -1646,253 +1612,6 @@ Ak je pri zdroji uvedené „údaj je potrebné overiť“, znamená to, že cit
 
 F. AI odporúčané zdroje na doplnenie
 Nevymýšľaj nové zdroje. Najprv doplň alebo skontroluj zdroje z časti Literatúra v pôvodnom dokumente.`;
-}
-
-function extractUsedTextCitations(text: string) {
-  const citations: { raw: string; authorPart: string; year: string }[] = [];
-
-  const cleanedText = cleanAiOutput(text);
-
-  // Zachytí celé zátvorkové bloky, napr.:
-  // (Baldshiev et al. 1997, Sapirstein a Fu, 1998, Hubík 2000, Bojňanská 2004)
-  const parentheticalBlocks = cleanedText.match(/\(([^()]*?(?:18|19|20)\d{2}[^()]*)\)/g) || [];
-
-  for (const block of parentheticalBlocks) {
-    const inside = block.replace(/^\(/, '').replace(/\)$/, '').trim();
-
-    if (!inside) continue;
-
-    // Nájde každú dvojicu autor + rok aj vtedy, keď medzi autorom a rokom nie je čiarka.
-    const citationRegex =
-      /([A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'\- ]{1,120}?(?:\s+et\s+al\.?|\s+a\s+kol\.?)?(?:\s+a\s+[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'\- ]{1,80})?)\s*,?\s*((?:18|19|20)\d{2}|n\.d\.)/gi;
-
-    let match: RegExpExecArray | null;
-
-    while ((match = citationRegex.exec(inside)) !== null) {
-      const authorPart = cleanAiOutput(match[1] || '')
-        .replace(/^[,;\s]+/, '')
-        .replace(/[,;\s]+$/, '')
-        .trim();
-
-      const year = cleanAiOutput(match[2] || '').trim();
-
-      if (!authorPart || !year) continue;
-
-      if (/napr|obr|tab|kap|str|s\.|vol|no|číslo|ročník/i.test(authorPart)) {
-        continue;
-      }
-
-      citations.push({
-        raw: `(${authorPart}, ${year})`,
-        authorPart,
-        year,
-      });
-    }
-  }
-
-  // Zachytí aj naratívne citácie mimo zátvoriek:
-  // Ondrík et al. (2004)
-  const narrativeRegex =
-    /\b([A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'\- ]{1,120}?(?:\s+et\s+al\.?|\s+a\s+kol\.?)?(?:\s+a\s+[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'\- ]{1,80})?)\s*\(((?:18|19|20)\d{2}|n\.d\.)\)/gi;
-
-  let narrativeMatch: RegExpExecArray | null;
-
-  while ((narrativeMatch = narrativeRegex.exec(cleanedText)) !== null) {
-    const authorPart = cleanAiOutput(narrativeMatch[1] || '')
-      .replace(/^[,;\s]+/, '')
-      .replace(/[,;\s]+$/, '')
-      .trim();
-
-    const year = cleanAiOutput(narrativeMatch[2] || '').trim();
-
-    if (!authorPart || !year) continue;
-
-    citations.push({
-      raw: `${authorPart} (${year})`,
-      authorPart,
-      year,
-    });
-  }
-
-  const map = new Map<
-    string,
-    { raw: string; authorPart: string; year: string }
-  >();
-
-  for (const item of citations) {
-    const key = `${normalizeForMatch(item.authorPart)}-${item.year}`.toLowerCase();
-
-    if (!map.has(key)) {
-      map.set(key, item);
-    }
-  }
-
-  return Array.from(map.values());
-}
-
-
-
-
-function sourceMatchesCitation(
-  source: BibliographicCandidate,
-  citation: { authorPart: string; year: string },
-) {
-  const normalizedRaw = normalizeForMatch(
-    `${source.raw} ${source.authors.join(' ')} ${source.title || ''}`,
-  );
-
-  const normalizedAuthorPart = normalizeForMatch(
-    citation.authorPart
-      .replace(/et\s+al\.?/gi, '')
-      .replace(/a\s+kol\.?/gi, '')
-      .replace(/&/g, ' ')
-      .replace(/\ba\b/gi, ' '),
-  );
-
-  const authorTokens = normalizedAuthorPart
-    .split(' ')
-    .filter((token) => token.length >= 3);
-
-  const yearMatches =
-    !citation.year ||
-    source.year === citation.year ||
-    source.raw.includes(citation.year) ||
-    normalizedRaw.includes(citation.year);
-
-  const authorMatches = authorTokens.some((token) =>
-    normalizedRaw.includes(token),
-  );
-
-  return yearMatches && authorMatches;
-}
-
-function filterSourcesByUsedCitations(
-  sources: BibliographicCandidate[],
-  usedText: string,
-  forceAll: boolean,
-) {
-  if (forceAll) return sources;
-
-  const citations = extractUsedTextCitations(usedText);
-
-  if (!citations.length) {
-    return sources;
-  }
-
-  const usedSources = sources.filter((source) =>
-    citations.some((citation) => sourceMatchesCitation(source, citation)),
-  );
-
-  // Dôležité:
-  // Ak AI použila citácie v texte, ale nepodarilo sa ich 1:1 spárovať,
-  // nesmieme vrátiť len 20 náhodných zdrojov ani prázdno.
-  // Radšej vrátime všetky detegované zdroje z príloh, aby na konci nič nechýbalo.
-  return usedSources.length ? usedSources : sources;
-}
-
-function uniqueBibliographicSources(
-  sources: BibliographicCandidate[],
-): BibliographicCandidate[] {
-  const map = new Map<string, BibliographicCandidate>();
-
-  for (const source of sources) {
-    const key =
-      getSourceCitationKey(source) ||
-      [
-        source.raw || '',
-        source.authors.join(', '),
-        source.year || '',
-        source.title || '',
-      ]
-        .join('|')
-        .toLowerCase();
-
-    if (!map.has(key)) {
-      map.set(key, source);
-    }
-  }
-
-  return Array.from(map.values());
-}
-
-function buildFallbackSourcesSection({
-  preparedFiles,
-  usedText,
-  forceAll,
-}: {
-  preparedFiles: PreparedFile[];
-  usedText: string;
-  forceAll: boolean;
-}) {
-  const detectedSources = uniqueBibliographicSources(
-    flattenDetectedSources(preparedFiles),
-  );
-
-  const fileFallbackSources: BibliographicCandidate[] = preparedFiles.map((file) => {
-    const detectedAuthors = uniqueArray([
-      ...(file.detectedAuthors || []),
-      ...(file.inTextCitations || []).flatMap((citation) => citation.authors || []),
-      ...(file.detectedSources || []).flatMap((source) => source.authors || []),
-    ]);
-
-    const detectedYear =
-      file.detectedSources.find((source) => source.year)?.year ||
-      file.inTextCitations.find((citation) => citation.year)?.year ||
-      null;
-
-    const bestRawSource =
-      file.detectedSources.find((source) => {
-        const raw = cleanAiOutput(source.raw || '');
-
-        return (
-          raw.length > 20 &&
-          !raw.toLowerCase().includes('úplný bibliografický záznam je potrebné overiť') &&
-          !raw.toLowerCase().includes('neboli automaticky detegované')
-        );
-      })?.raw || '';
-
-    return {
-      raw:
-        bestRawSource ||
-        `${file.originalName}. ${detectedYear ? `(${detectedYear}).` : 'Rok chýba.'}`,
-      authors: detectedAuthors.length ? detectedAuthors : [file.originalName],
-      year: detectedYear,
-      title: file.originalName,
-      doi: null,
-      url: null,
-      sourceType: 'unknown',
-      citationKey:
-        detectedAuthors.length && detectedYear
-          ? buildCitationKey(detectedAuthors, detectedYear)
-          : undefined,
-      inTextCitations: file.inTextCitations || [],
-      occurrenceCount: file.inTextCitations?.length || 1,
-      matchedFromText: true,
-    };
-  });
-
-  const allSources = uniqueBibliographicSources([
-    ...detectedSources,
-    ...fileFallbackSources,
-  ]);
-
-  if (!allSources.length) {
-    return 'Príloha bola použitá ako zdroj. Autor a rok chýbajú.';
-  }
-
-  const usedSources = filterSourcesByUsedCitations(
-    allSources,
-    usedText,
-    forceAll,
-  );
-
-  const finalSources = usedSources.length ? usedSources : allSources;
-
-  const formatted = formatSimpleBibliographicSources(finalSources);
-
-  return formatted.trim()
-    ? formatted
-    : 'Príloha bola použitá ako zdroj. Autor a rok chýbajú.';
 }
 
 async function callExtractTextApi({
@@ -2072,7 +1791,6 @@ export default function ChatPage() {
   const [selectedTextState, setSelectedTextState] =
     useState<SelectedTextState | null>(null);
 
-  const [popup, setPopup] = useState(false);
   const [popupData, setPopupData] = useState<ParsedResult | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -2130,7 +1848,6 @@ export default function ChatPage() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setPopup(false);
         setCanvasOpen(false);
         setSelectedTextState(null);
       }
@@ -2183,8 +1900,6 @@ export default function ChatPage() {
       rawText,
       maxClientExtractedCharsPerFile,
     );
-
-
 
     const textPackage = `
 NÁZOV SÚBORU: ${item.name}
@@ -2591,55 +2306,46 @@ POKYNY PRE AI:
     }, 400);
   };
 
-function normalizeForMatch(value: string) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+  function userAskedForAllSources(value: string) {
+    const normalized = normalizeForMatch(value);
 
-function userAskedForAllSources(value: string) {
-  const normalized = normalizeForMatch(value);
+    return (
+      normalized.includes('vsetky zdroje') ||
+      normalized.includes('vsetkych zdrojov') ||
+      normalized.includes('vsetci autori') ||
+      normalized.includes('vsetkych autorov') ||
+      normalized.includes('vsetky mena') ||
+      normalized.includes('vsetky mena autorov') ||
+      normalized.includes('zoznam literatury') ||
+      normalized.includes('bibliografia') ||
+      normalized.includes('spracuj zdroje') ||
+      normalized.includes('spracuj citacie') ||
+      normalized.includes('vypis vsetko') ||
+      normalized.includes('vypis vsetky')
+    );
+  }
 
-  return (
-    normalized.includes('vsetky zdroje') ||
-    normalized.includes('vsetkych zdrojov') ||
-    normalized.includes('vsetci autori') ||
-    normalized.includes('vsetkych autorov') ||
-    normalized.includes('vsetky mena') ||
-    normalized.includes('vsetky mena autorov') ||
-    normalized.includes('zoznam literatury') ||
-    normalized.includes('bibliografia') ||
-    normalized.includes('spracuj zdroje') ||
-    normalized.includes('spracuj citacie') ||
-    normalized.includes('vypis vsetko') ||
-    normalized.includes('vypis vsetky')
-  );
-}
-const buildFinalUserPrompt = ({
-  apiUserText,
-  preparedFiles,
-  extractedContext,
-}: {
-  apiUserText: string;
-  preparedFiles: PreparedFile[];
-  extractedContext: string;
-}) => {
-  const citationStyle = activeProfile?.citation || 'ISO 690';
-  const detectedSourcesSummary = buildDetectedSourcesSummary(preparedFiles);
-  const allAuthors = flattenDetectedAuthors(preparedFiles).slice(
-    0,
-    maxDetectedAuthorsForChat,
-  );
+  const buildFinalUserPrompt = ({
+    apiUserText,
+    preparedFiles,
+    extractedContext,
+  }: {
+    apiUserText: string;
+    preparedFiles: PreparedFile[];
+    extractedContext: string;
+  }) => {
+    const citationStyle = activeProfile?.citation || 'ISO 690';
+    const detectedSourcesSummary = buildDetectedSourcesSummary(preparedFiles);
+    const allAuthors = flattenDetectedAuthors(preparedFiles).slice(
+      0,
+      maxDetectedAuthorsForChat,
+    );
 
-  const forceAllSources =
-  attachedFiles.length > 0 || userAskedForAllSources(apiUserText);
+    const wantsChapter = isChapterLikeRequest(apiUserText);
+    const wantsAllSources = userAskedForAllSources(apiUserText);
 
-  return `
-
+    return `
+POŽIADAVKA POUŽÍVATEĽA:
 ${apiUserText.trim() || 'Spracuj priložené dokumenty podľa aktívneho profilu práce.'}
 
 AKTÍVNY PROFIL PRÁCE:
@@ -2660,12 +2366,9 @@ ${buildAttachmentPrompt(attachedFiles)}
 STAV SPRACOVANIA PRÍLOH:
 ${buildPreparedFilesSummary(preparedFiles)}
 
-REŽIM ZDROJOV:
-${
-  forceAllSources
-    ? 'Používateľ žiada všetky zdroje, všetkých autorov alebo bibliografiu. Vypíš všetky detegované zdroje.'
-    : 'Používateľ žiada odborný text. V závere vypíš iba tie zdroje, ktoré boli reálne použité ako citácie v hlavnom texte.'
-}
+REŽIM POŽIADAVKY:
+- Ide o kapitolu / úvod / text podľa šablóny: ${wantsChapter ? 'áno' : 'nie'}
+- Používateľ žiada všetky zdroje alebo bibliografiu: ${wantsAllSources ? 'áno' : 'nie'}
 
 VŠETCI AUTOMATICKY NÁJDENÍ AUTORI:
 ${allAuthors.length ? allAuthors.join(', ') : 'Autori neboli automaticky identifikovaní alebo ich treba overiť.'}
@@ -2676,78 +2379,17 @@ ${truncateByChars(detectedSourcesSummary, maxDetectedSourcesSummaryChars)}
 EXTRAHOVANÝ TEXT Z PRÍLOH:
 ${extractedContext.trim() || 'Text z príloh nebol dostupný. Ak extrakcia zlyhala, nevymýšľaj obsah, autorov ani zdroje.'}
 
-POVINNÝ FORMÁT VÝSTUPU:
-
-Výstup musí byť čistý akademický text vo Word štýle.
-
-Najprv posúď, či priložený dokument obsahovo súvisí s aktívnym profilom práce:
-- téma profilu: ${activeProfile?.topic || activeProfile?.title || 'nezadané'}
-- názov práce: ${activeProfile?.title || 'nezadané'}
-- odbor: ${activeProfile?.field || 'nezadané'}
-- cieľ práce: ${activeProfile?.goal || 'nezadané'}
-
-Ak priložený dokument zjavne nesúvisí s profilom práce, nevytváraj kapitolu ani odborný text. Vypíš iba:
-Príloha obsahovo nesúvisí s profilom práce, preto ju nie je možné odborne zapracovať do tejto kapitoly bez rizika vecne nesprávneho obsahu.
-
-Ak príloha súvisí s profilom práce, spracuj ju do textu takto:
-
-1. Použi obsah priloženej prílohy ako hlavný odborný podklad.
-2. Všetky zdroje, ktoré sú nájdené v texte alebo bibliografii prílohy a sú relevantné k téme profilu práce, musia byť zapracované do hlavného textu.
-3. V hlavnom texte používaj citácie podľa citačnej normy klienta: ${citationStyle}.
-4. Ak je citačný štýl APA, používaj tvar napríklad: (Autor, rok) alebo (Autor et al., rok).
-5. Ak je citačný štýl ISO 690 alebo iný, prispôsob odkazy tejto norme.
-6. Nevymýšľaj autorov, roky, názvy článkov, časopisov, kníh, DOI ani URL.
-7. Ak rok nie je dostupný, v zdroji na konci uveď poznámku: Rok chýba.
-8. Ak úplný bibliografický záznam nie je dostupný, uveď aspoň meno autora a rok. Ak rok nie je dostupný, uveď meno autora a text „Rok chýba.“
-
-Výstup musí mať túto štruktúru:
-
-Názov práce alebo názov spracovanej témy
-Číslo a názov kapitoly alebo podkapitoly
-
-Súvislý odborný text v odsekoch.
-
-Použité zdroje
-
-Pod nadpisom „Použité zdroje“ vypíš iba čisté zdroje, ktoré boli použité v hlavnom texte a pochádzajú z priloženého textu alebo prílohy.
-
-Na konci sa nesmie zobraziť nič iné okrem samotných zdrojov.
-
-Zakázané je vypisovať:
-- technické podsekcie A, B, C, D, E, F
-- „Zdroje nájdené v priložených dokumentoch“
-- „Formátované bibliografické záznamy“
-- „Varianty odkazov v texte“
-- „Priložené dokumenty použité ako podklad“
-- „Autori nájdení v dokumentoch“
-- „Neúplné alebo neoveriteľné zdroje“
-- názvy príloh
-- technické informácie o extrakcii
-- DOI/URL ako samostatné technické polia
-- zoznam autorov mimo bibliografických záznamov
-- poznámky typu „zdroje neboli dodané“, ak bol v prílohe nájdený aspoň autor, rok alebo bibliografický záznam
-
-Správny koniec výstupu musí obsahovať iba:
-
-Použité zdroje
-
-Následne vypíš iba bibliografické záznamy zdrojov, ktoré boli skutočne nájdené v priloženom texte alebo prílohe a zároveň boli použité v hlavnom texte.
-
-Nepoužívaj ukážkové zdroje.
-Nepoužívaj fiktívne zdroje.
-Nepoužívaj žiadny vzorový príklad.
-Ak je dostupný celý bibliografický záznam, vypíš celý záznam.
-Ak je dostupný iba autor a rok, vypíš iba autora a rok.
-Ak rok chýba, vypíš autora a text: Rok chýba.
-
-Ak je v prílohe dostupný celý bibliografický záznam, použi celý bibliografický záznam.
-Ak je dostupný iba autor a rok, uveď iba autora a rok.
-Ak rok chýba, uveď autora a poznámku: Rok chýba.
-
-Výstup musí byť bez markdown znakov #, ##, **, --- a bez tabuľkových značiek.
-Výstup musí vyzerať ako hotový text do Word dokumentu.
+DÔLEŽITÉ PRAVIDLÁ:
+1. Finálny výstup kompletne skladá /api/chat.
+2. Frontend app/chat/page.tsx už nepridáva žiadne vlastné „Použité zdroje“.
+3. Ak používateľ žiada kapitolu, úvod alebo text podľa šablóny, vráť čistý akademický text podľa požadovaného tvaru.
+4. Pri kapitole nepíš technické sekcie A, B, C, D, E, F.
+5. Pri kapitole nepíš surové OCR fragmenty typu STRANA 1, STRANA 2, Nova Biotechnologica (2004) ani dlhé extrahované bloky.
+6. Pri kapitole na konci použi iba bibliografickú sekciu podľa vzoru používateľa, napríklad „Použitý zdroj pre kapitolu 1.1“ alebo „Použitá literatúra pre kapitolu 1“.
+7. Nevymýšľaj autorov, roky, názvy článkov, časopisov, DOI ani URL.
+8. Výstup musí byť bez markdown znakov #, ##, **, --- a bez kódových blokov.
 `.trim();
-};
+  };
 
   const appendAssistantMessage = (content: string) => {
     setMessages((prev) => [
@@ -2785,30 +2427,31 @@ Výstup musí vyzerať ako hotový text do Word dokumentu.
     setMessages((prev) => [...prev, visibleMessage]);
     setInput('');
     setIsLoading(true);
-    setPopup(false);
     setPopupData(null);
 
     try {
       const preparedFiles = await prepareFilesBeforeSend(attachedFiles);
       const extractedContext = buildExtractedContext(preparedFiles);
       const detectedSourcesSummary = buildDetectedSourcesSummary(preparedFiles);
+
       const detectedSources = flattenDetectedSources(preparedFiles).slice(
         0,
         maxDetectedSourcesForChat,
       );
+
       const detectedAuthors = flattenDetectedAuthors(preparedFiles).slice(
         0,
         maxDetectedAuthorsForChat,
       );
+
       const inTextCitations = flattenInTextCitations(preparedFiles).slice(
         0,
         maxInTextCitationsForChat,
       );
 
-
-const forceAllSources =
-  preparedFiles.length > 0 || userAskedForAllSources(apiUserText);
-
+      const isChapterRequest = isChapterLikeRequest(
+        apiUserText || visibleUserText || input,
+      );
 
       const finalPrompt = buildFinalUserPrompt({
         apiUserText,
@@ -2816,7 +2459,6 @@ const forceAllSources =
         extractedContext,
       });
 
-      // Dôležité: neposielame celú históriu chatu, lebo to vyhadzovalo context-window error.
       const apiMessages = [
         {
           role: 'user' as const,
@@ -2847,8 +2489,8 @@ const forceAllSources =
       formData.append('fallbackWhenAttachmentNotRelated', 'true');
       formData.append('detectBibliographicSources', 'true');
       formData.append('requireAllDetectedAuthorsAndPublications', 'true');
+      formData.append('isChapterRequest', isChapterRequest ? 'true' : 'false');
 
-      // Úmyselne neposielame celý extractedContext duplicitne ešte aj v samostatnom poli.
       formData.append('clientExtractedText', '');
       formData.append('clientDetectedSourcesSummary', detectedSourcesSummary);
       formData.append('clientDetectedSources', JSON.stringify(detectedSources));
@@ -2909,8 +2551,7 @@ const forceAllSources =
             ? {
                 ...item,
                 status: 'ready',
-                message:
-                  item.message + ' Text sa spracováva...',
+                message: item.message + ' Text sa spracováva...',
               }
             : item,
         ),
@@ -2982,21 +2623,6 @@ ${data.message || data.error || 'Neznáma chyba API.'}`,
           fullText =
             'API odpovedalo úspešne, ale nevrátilo žiadny textový výstup.';
         }
-
-        fullText = ensureSourcesSection(fullText);
-
-        const visibleText = cleanAiOutput(fullText);
-
-        setMessages((prev) => {
-          const updated = [...prev];
-
-          updated[updated.length - 1] = {
-            role: 'assistant',
-            content: visibleText,
-          };
-
-          return updated;
-        });
       } else {
         if (!res.body) {
           appendAssistantMessage('❌ API nevrátilo stream odpovede.');
@@ -3027,104 +2653,49 @@ ${data.message || data.error || 'Neznáma chyba API.'}`,
             return updated;
           });
         }
-
-        fullText = ensureSourcesSection(fullText);
       }
 
-      const cleanedFullText = cleanAiOutput(fullText);
-      const parsed = parseSections(cleanedFullText);
+      const finalTextFromApi = cleanAiOutput(fullText);
+      const parsed = parseSections(finalTextFromApi);
 
-   const mainOutputText = parsed.output || cleanedFullText;
+      setMessages((prev) => {
+        const updated = [...prev];
 
-const fallbackSourcesForUsedText = buildFallbackSourcesSection({
-  preparedFiles,
-  usedText: mainOutputText,
-  forceAll: forceAllSources,
-});
+        updated[updated.length - 1] = {
+          role: 'assistant',
+          content: finalTextFromApi,
+        };
 
-const parsedSourcesAreValid =
-  parsed.sources &&
-  !parsed.sources.toLowerCase().includes('zdroje neboli dodané') &&
-  !parsed.sources.toLowerCase().includes('neboli dodané') &&
-  !parsed.sources.toLowerCase().includes('nepodarilo overene načítať');
+        return updated;
+      });
 
-const finalSources = parsedSourcesAreValid
-  ? parsed.sources
-  : fallbackSourcesForUsedText;
+      setResult(finalTextFromApi);
+      setCanvasText(finalTextFromApi);
 
-const cleanedMainOutput = cleanAiOutput(
-  mainOutputText
-    .replace(/===\s*VÝSTUP\s*===/gi, '')
-    .replace(/===\s*ANALÝZA\s*===/gi, '')
-    .replace(/===\s*SKÓRE\s*===/gi, '')
-    .replace(/===\s*ODPORÚČANIA\s*===/gi, '')
-    .replace(/===\s*POUŽITÉ ZDROJE A AUTORI\s*===/gi, 'Použité zdroje')
-    .replace(/===\s*POUŽITÉ ZDROJE\s*===/gi, 'Použité zdroje'),
-);
+      const finalParsed: ParsedResult = {
+        ...parsed,
+        output: parsed.output || finalTextFromApi,
+        sources: parsed.sources || '',
+      };
 
+      const looksLikeError =
+        finalParsed.output.includes('AI_APICallError') ||
+        finalParsed.output.includes('API error') ||
+        finalParsed.output.includes('model is not found') ||
+        finalParsed.output.includes('not found for API version') ||
+        finalParsed.output.includes('Forbidden') ||
+        finalParsed.output.includes('Unauthorized');
 
-const mainTextWithoutSources = cleanAiOutput(
-  cleanedMainOutput
-    .replace(/použité\s+zdroje\s+a\s+autori[\s\S]*$/i, '')
-    .replace(/pouzite\s+zdroje\s+a\s+autori[\s\S]*$/i, '')
-    .replace(/použité\s+zdroje[\s\S]*$/i, '')
-    .replace(/pouzite\s+zdroje[\s\S]*$/i, '')
-    .replace(/zdroje\s+a\s+autori[\s\S]*$/i, '')
-    .replace(/zdroje[\s\S]*$/i, ''),
-);
-
-const fallbackAllSources = buildFallbackSourcesSection({
-  preparedFiles,
-  usedText: mainOutputText,
-  forceAll: true,
-});
-
-const safeFinalSources =
-  finalSources &&
-  finalSources.trim() &&
-  !finalSources
-    .toLowerCase()
-    .includes('úplný bibliografický záznam je potrebné overiť') &&
-  !finalSources.toLowerCase().includes('zdroje neboli dodané') &&
-  !finalSources.toLowerCase().includes('nepodarilo overene načítať')
-    ? finalSources.trim()
-    : fallbackAllSources;
-
-      const finalTextForCanvas = `${mainTextWithoutSources}
-
-Použité zdroje
-
-${safeFinalSources}`.trim();
-
-setResult(finalTextForCanvas);
-setCanvasText(finalTextForCanvas);
-
-const finalParsed: ParsedResult = {
-  ...parsed,
-  output: mainTextWithoutSources,
-  sources: safeFinalSources,
-};
-
-const looksLikeError =
-  finalParsed.output.includes('AI_APICallError') ||
-  finalParsed.output.includes('API error') ||
-  finalParsed.output.includes('model is not found') ||
-  finalParsed.output.includes('not found for API version') ||
-  finalParsed.output.includes('Forbidden') ||
-  finalParsed.output.includes('Unauthorized');
-
-if (
-  !looksLikeError &&
-  (finalParsed.output ||
-    finalParsed.analysis ||
-    finalParsed.score ||
-    finalParsed.tips ||
-    finalParsed.sources)
-) {
-  setPopupData(finalParsed);
-  setPopup(true);
-}
-
+      if (
+        !looksLikeError &&
+        (finalParsed.output ||
+          finalParsed.analysis ||
+          finalParsed.score ||
+          finalParsed.tips ||
+          finalParsed.sources)
+      ) {
+        setPopupData(finalParsed);
+      }
     } catch (error) {
       console.error('CHAT SEND ERROR:', error);
 
@@ -3168,7 +2739,6 @@ Skontroluj terminál pri /api/extract-text a /api/chat.`,
     setInput('');
     setResult('');
     setCanvasText('');
-    setPopup(false);
     setPopupData(null);
     setSelectedTextState(null);
     setProcessingLog([]);
@@ -3378,8 +2948,7 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                 onClick={resetChat}
                 className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-700/30 transition hover:bg-violet-500"
               >
-                <RefreshCcw className="h-4 w-4" />
-                + Nový chat
+                <RefreshCcw className="h-4 w-4" />+ Nový chat
               </button>
             </div>
           </header>
@@ -3406,8 +2975,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                   {activeProfile?.title || 'Nie je vybraný'}
                 </span>
               </div>
-
-             
             </div>
           </section>
 
@@ -3839,7 +3406,6 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                       type="button"
                       onClick={() => {
                         setResult('');
-                        setPopup(false);
                         setPopupData(null);
                         setSelectedTextState(null);
                       }}
@@ -3891,7 +3457,7 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
                       </h3>
                       <div className="whitespace-pre-wrap text-sm leading-6 text-emerald-50/90">
                         {popupData?.sources ||
-                          'Zdroje neboli dodané alebo sa ich nepodarilo overene načítať.'}
+                          'Zdroje sú súčasťou hlavného výstupu alebo neboli v samostatnej sekcii rozpoznané.'}
                       </div>
                     </div>
                   </div>

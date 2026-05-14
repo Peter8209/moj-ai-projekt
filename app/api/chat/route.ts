@@ -119,6 +119,7 @@ type BibliographicCandidate = {
   inTextCitations?: InTextCitation[];
   occurrenceCount?: number;
   matchedFromText?: boolean;
+  origin?: 'attachment' | 'citation' | 'project' | 'ai' | 'unknown';
 };
 
 type PreparedFileMetadata = {
@@ -196,12 +197,13 @@ const maxSystemPromptChars = 110_000;
 const maxSingleMessageChars = 10_000;
 const maxTotalMessagesChars = 30_000;
 const maxDetectedSourcesPerAttachment = 80;
+
 const defaultOutputTokens = 5000;
 const streamOutputTokens = 7000;
 const chapterOutputTokens = 9000;
 
 const unrelatedProfileMessage =
-  'Príloha obsahovo nesúvisí s profilom práce, preto ju nie je možné odborne zapracovať do tejto kapitoly bez rizika vecne nesprávneho obsahu.';
+  'Priložená príloha obsahovo nesúvisí s aktívnym profilom práce, preto nebola použitá ako odborný zdroj pre túto kapitolu. Text bol vytvorený podľa aktívneho profilu práce s využitím odborných znalostí AI a s uvedením samostatných zdrojov.';
 
 // ================= PROJECT DOCUMENTS =================
 
@@ -281,7 +283,7 @@ function limitText(value: string, maxLength: number): string {
 
   return `${cleaned.slice(0, maxLength)}
 
-[TEXT BOL SKRÁTENÝ PRE TECHNICKÝ LIMIT API. Ak odpoveď nebude úplná, použi väčší model s väčším kontextovým oknom, napríklad GPT-4.1, Gemini 2.5 Pro alebo Claude Sonnet s väčším limitom.]`;
+[TEXT BOL SKRÁTENÝ PRE TECHNICKÝ LIMIT API. Ak odpoveď nebude úplná, použi väčší model s väčším kontextovým oknom alebo rozdeľ prílohu na menšie časti.]`;
 }
 
 function limitMiddle(value: string, maxLength: number): string {
@@ -293,7 +295,7 @@ function limitMiddle(value: string, maxLength: number): string {
 
   return `${cleaned.slice(0, half)}
 
-[STRED TEXTU BOL SKRÁTENÝ PRE TECHNICKÝ LIMIT API. Ak treba spracovať celý dokument bez skrátenia, použi model s väčším kontextovým oknom alebo rozdeľ dokument na menšie časti.]
+[STRED TEXTU BOL SKRÁTENÝ PRE TECHNICKÝ LIMIT API.]
 
 ${cleaned.slice(-half)}`;
 }
@@ -395,11 +397,13 @@ function extractInTextCitations(text: string): InTextCitation[] {
         .trim();
 
       const year = String(match[2] || '').trim();
+
       if (!authorText || !year) continue;
       if (/^(vol|no|p|s|str|tab|obr|ročník|číslo)$/i.test(authorText)) continue;
       if (authorText.length > 140) continue;
 
       const authors = extractAuthorsFromCitationAuthorText(authorText);
+
       if (!authors.length) continue;
 
       const key = buildCitationKey(authors, year);
@@ -435,6 +439,7 @@ function extractInTextCitations(text: string): InTextCitation[] {
     const authorText = normalizeText(match[1] || '');
     const year = String(match[2] || '').trim();
     const authors = extractAuthorsFromCitationAuthorText(authorText);
+
     if (!authors.length || !year) continue;
 
     const key = buildCitationKey(authors, year);
@@ -520,7 +525,7 @@ function stripDuplicatedLargePromptSections(content: string) {
 
   if (!output) {
     output =
-      'Spracuj požiadavku používateľa podľa kompletného profilu práce a extrahovaných podkladov.';
+      'Spracuj požiadavku používateľa podľa kompletného profilu práce a dostupných podkladov.';
   }
 
   return limitText(output, maxSingleMessageChars);
@@ -646,6 +651,7 @@ function isLikelyChapterRequestText(text: string) {
 
 function detectChapterNumberFromText(text: string) {
   const normalized = normalizeText(text);
+
   const match =
     normalized.match(/\bkapitola\s+(\d+(?:\.\d+)*)\b/i) ||
     normalized.match(/^\s*(\d+(?:\.\d+)*)\s*[\.:]\s*[a-záäčďéíĺľňóôŕšťúýž]/i) ||
@@ -1085,7 +1091,8 @@ function extractAuthors(line: string) {
       return (
         /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+$/.test(
           part,
-        ) || /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záäčďéíĺľňóôŕšťúýž]+,\s*[A-Z]/.test(part)
+        ) ||
+        /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záäčďéíĺľňóôŕšťúýž]+,\s*[A-Z]/.test(part)
       );
     });
 
@@ -1148,7 +1155,7 @@ function looksLikeBibliographicLine(line: string) {
   return hasDoi || hasUrl || (hasYear && (hasCitationWords || hasAuthorPattern));
 }
 
-function extractBibliographicCandidates(text: string) {
+function extractBibliographicCandidates(text: string, origin: BibliographicCandidate['origin'] = 'attachment') {
   const cleaned = normalizeText(text);
 
   const lines = cleaned
@@ -1191,6 +1198,7 @@ function extractBibliographicCandidates(text: string) {
       url: extractUrl(line),
       sourceType: detectSourceType(line),
       citationKey: authors.length && year ? buildCitationKey(authors, year) : undefined,
+      origin,
     });
   }
 
@@ -1241,10 +1249,15 @@ function normalizeBibliographicCandidates(value: unknown): BibliographicCandidat
             ? item.sourceType
             : 'unknown',
         citationKey:
-          item?.citationKey || (authors.length && year ? buildCitationKey(authors, year) : undefined),
-        inTextCitations: Array.isArray(item?.inTextCitations) ? item.inTextCitations : [],
-        occurrenceCount: typeof item?.occurrenceCount === 'number' ? item.occurrenceCount : 0,
+          item?.citationKey ||
+          (authors.length && year ? buildCitationKey(authors, year) : undefined),
+        inTextCitations: Array.isArray(item?.inTextCitations)
+          ? item.inTextCitations
+          : [],
+        occurrenceCount:
+          typeof item?.occurrenceCount === 'number' ? item.occurrenceCount : 0,
         matchedFromText: Boolean(item?.matchedFromText),
+        origin: item?.origin || 'attachment',
       } satisfies BibliographicCandidate;
     })
     .filter(
@@ -1303,10 +1316,12 @@ function mergeBibliographicCandidates(
         doi: item.doi || null,
         url: item.url || null,
         sourceType: item.sourceType || 'unknown',
-        citationKey: item.citationKey || (authors.length && year ? buildCitationKey(authors, year) : undefined),
+        citationKey:
+          item.citationKey || (authors.length && year ? buildCitationKey(authors, year) : undefined),
         inTextCitations: Array.isArray(item.inTextCitations) ? item.inTextCitations : [],
         occurrenceCount: item.occurrenceCount || 0,
         matchedFromText: Boolean(item.matchedFromText),
+        origin: item.origin || 'unknown',
       };
 
       const key =
@@ -1339,14 +1354,18 @@ function mergeBibliographicCandidates(
         doi: existing.doi || normalizedItem.doi,
         url: existing.url || normalizedItem.url,
         sourceType:
-          existing.sourceType !== 'unknown' ? existing.sourceType : normalizedItem.sourceType,
+          existing.sourceType !== 'unknown'
+            ? existing.sourceType
+            : normalizedItem.sourceType,
         citationKey: existing.citationKey || normalizedItem.citationKey,
         inTextCitations: [
           ...(existing.inTextCitations || []),
           ...(normalizedItem.inTextCitations || []),
         ],
-        occurrenceCount: (existing.occurrenceCount || 0) + (normalizedItem.occurrenceCount || 0),
+        occurrenceCount:
+          (existing.occurrenceCount || 0) + (normalizedItem.occurrenceCount || 0),
         matchedFromText: existing.matchedFromText || normalizedItem.matchedFromText,
+        origin: existing.origin || normalizedItem.origin,
       });
     }
   }
@@ -1358,7 +1377,10 @@ function extractAuthorsFromCandidates(candidates: BibliographicCandidate[]) {
   return uniqueArray(candidates.flatMap((item) => item.authors || []));
 }
 
-function buildLiteratureFromInTextCitations(citations: InTextCitation[]) {
+function buildLiteratureFromInTextCitations(
+  citations: InTextCitation[],
+  origin: BibliographicCandidate['origin'] = 'citation',
+) {
   return citations.map((citation) => {
     return {
       raw: citation.raw,
@@ -1372,6 +1394,7 @@ function buildLiteratureFromInTextCitations(citations: InTextCitation[]) {
       inTextCitations: [citation],
       occurrenceCount: citation.count,
       matchedFromText: true,
+      origin,
     } satisfies BibliographicCandidate;
   });
 }
@@ -1432,18 +1455,20 @@ function ensureChapterHasInTextCitations({
   sources: BibliographicCandidate[];
 }) {
   const output = normalizeText(text);
+
   if (textAlreadyHasCitation(output)) return output;
 
-  const usableSource = sources.find(
-    (source) =>
-      candidateHasUsableData(source) &&
-      !looksLikeRawOcrPage(source.raw || '') &&
-      source.authors?.length &&
-      source.year,
-  );
+  const usableSources = sources
+    .filter(
+      (source) =>
+        candidateHasUsableData(source) &&
+        !looksLikeRawOcrPage(source.raw || '') &&
+        source.authors?.length &&
+        source.year,
+    )
+    .slice(0, 5);
 
-  const citation = usableSource ? buildInTextCitationFromSource(usableSource) : '';
-  if (!citation) return output;
+  if (!usableSources.length) return output;
 
   const literatureStart = output.search(
     /\n\s*(Primárne zdroje|Primarne zdroje|Použitá literatúra|Použité zdroje|Zdroje)\s*\n/i,
@@ -1459,9 +1484,12 @@ function ensureChapterHasInTextCitations({
     const trimmed = paragraph.trim();
 
     if (index === 0) return paragraph;
-    if (inserted >= 4) return paragraph;
-    if (trimmed.length < 180) return paragraph;
+    if (inserted >= usableSources.length) return paragraph;
+    if (trimmed.length < 160) return paragraph;
     if (textAlreadyHasCitation(trimmed)) return paragraph;
+
+    const citation = buildInTextCitationFromSource(usableSources[inserted]);
+    if (!citation) return paragraph;
 
     inserted += 1;
     return `${trimmed.replace(/[.!?]?\s*$/, '')} ${citation}.`;
@@ -1488,10 +1516,12 @@ function formatCandidateForFinalLiterature(source: BibliographicCandidate) {
     : 'Autor je potrebné overiť';
 
   const year = source.year || 'Rok chýba';
+
   const title =
     source.title && source.title !== 'údaj je potrebné overiť'
       ? source.title
       : 'údaj je potrebné overiť';
+
   const doi = source.doi ? ` DOI: ${source.doi}.` : '';
   const url = source.url ? ` Dostupné z: ${source.url}.` : '';
 
@@ -1508,7 +1538,10 @@ function buildPrimarySecondaryLiterature({
   extractedFiles: ExtractedAttachment[];
 }) {
   const citationsFromGeneratedText = extractInTextCitations(generatedText);
-  const citationSources = buildLiteratureFromInTextCitations(citationsFromGeneratedText);
+  const citationSources = buildLiteratureFromInTextCitations(
+    citationsFromGeneratedText,
+    'citation',
+  );
 
   const detectedSources = mergeBibliographicCandidates(
     detectedSourcesForOutput,
@@ -1520,7 +1553,10 @@ function buildPrimarySecondaryLiterature({
     detectedSources.filter((source) => {
       const key = getSourceCitationKey(source);
       if (!key) return false;
-      return citationSources.some((citationSource) => getSourceCitationKey(citationSource) === key);
+
+      return citationSources.some(
+        (citationSource) => getSourceCitationKey(citationSource) === key,
+      );
     }),
   )
     .filter(candidateHasUsableData)
@@ -1533,20 +1569,30 @@ function buildPrimarySecondaryLiterature({
   const secondarySources = mergeBibliographicCandidates(
     extractedFiles.flatMap((file) => {
       const good = (file.bibliographicCandidates || []).find(
-        (source) => candidateHasUsableData(source) && !looksLikeRawOcrPage(source.raw || ''),
+        (source) =>
+          candidateHasUsableData(source) &&
+          !looksLikeRawOcrPage(source.raw || '') &&
+          (source.authors?.length || source.title || source.raw),
       );
-      return good ? [good] : [];
+
+      return good ? [{ ...good, origin: 'attachment' as const }] : [];
     }),
   )
     .filter(candidateHasUsableData)
     .filter((source) => !looksLikeRawOcrPage(source.raw || ''));
 
   const primary = uniqueArray(
-    fallbackPrimary.map(formatCandidateForFinalLiterature).map((item) => item.trim()).filter(Boolean),
+    fallbackPrimary
+      .map(formatCandidateForFinalLiterature)
+      .map((item) => item.trim())
+      .filter(Boolean),
   );
 
   const secondary = uniqueArray(
-    secondarySources.map(formatCandidateForFinalLiterature).map((item) => item.trim()).filter(Boolean),
+    secondarySources
+      .map(formatCandidateForFinalLiterature)
+      .map((item) => item.trim())
+      .filter(Boolean),
   );
 
   return { primary, secondary };
@@ -1577,9 +1623,15 @@ function ensureOutputHasPrimarySecondarySources({
 
   const secondaryBlock = literature.secondary.length
     ? literature.secondary.map((item, index) => `${index + 1}. ${item}`).join('\n')
-    : 'Neuvedené. Zdroj prílohy sa nepodarilo jednoznačne určiť.';
+    : 'Neuvedené. Zdroj prílohy sa nepodarilo jednoznačne určiť alebo príloha nebola použitá.';
 
-  const finalBlock = `Primárne zdroje\n\n${primaryBlock}\n\nSekundárne zdroje\n\n${secondaryBlock}`;
+  const finalBlock = `Primárne zdroje
+
+${primaryBlock}
+
+Sekundárne zdroje
+
+${secondaryBlock}`;
 
   const sourceSectionRegex =
     /\n\s*(Primárne zdroje|Primarne zdroje|Použitá literatúra(?:\s+pre\s+kapitolu\s+\d+(?:\.\d+)*)?|Použitý zdroj\s+pre\s+kapitolu\s+\d+(?:\.\d+)*|Použité zdroje(?:\s+a\s+autori)?|Zdroje(?:\s+a\s+autori)?)\s*\n[\s\S]*$/i;
@@ -1599,15 +1651,22 @@ function formatPrimaryAndSecondarySourcesOnly(candidates: BibliographicCandidate
     (source) => candidateHasUsableData(source) && !looksLikeRawOcrPage(source.raw || ''),
   );
 
-  const primary = unique.filter((item) => item.matchedFromText || item.inTextCitations?.length);
+  const primary = unique.filter(
+    (item) => item.matchedFromText || item.inTextCitations?.length,
+  );
+
   const secondary = unique.filter((item) => !primary.includes(item));
 
   const primaryText = primary.length
-    ? primary.map((item, index) => `${index + 1}. ${formatCandidateForFinalLiterature(item)}`).join('\n')
+    ? primary
+        .map((item, index) => `${index + 1}. ${formatCandidateForFinalLiterature(item)}`)
+        .join('\n')
     : 'Neuvedené.';
 
   const secondaryText = secondary.length
-    ? secondary.map((item, index) => `${index + 1}. ${formatCandidateForFinalLiterature(item)}`).join('\n')
+    ? secondary
+        .map((item, index) => `${index + 1}. ${formatCandidateForFinalLiterature(item)}`)
+        .join('\n')
     : 'Neuvedené.';
 
   return `Primárne zdroje
@@ -1693,7 +1752,9 @@ function safeGunzip(buffer: Buffer) {
   try {
     return gunzipSync(buffer);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nepodarilo sa rozbaliť gzip súbor.';
+    const message =
+      error instanceof Error ? error.message : 'Nepodarilo sa rozbaliť gzip súbor.';
+
     throw new Error(`GZIP_DECOMPRESSION_FAILED: ${message}`);
   }
 }
@@ -1773,14 +1834,24 @@ async function extractTextFromSingleFile(
   const effectiveExtension = getEffectiveExtension(preparedName);
   const label = getAttachmentLabel(preparedName);
   const gzip = isGzipFile(file);
-  const metadataCandidates = normalizeBibliographicCandidates(preparedMetadata?.detectedSources || []);
+
+  const metadataCandidates = normalizeBibliographicCandidates(
+    preparedMetadata?.detectedSources || [],
+  );
+
   const metadataInTextCitations = Array.isArray(preparedMetadata?.inTextCitations)
     ? preparedMetadata.inTextCitations
     : [];
-  const metadataCitationSources = buildLiteratureFromInTextCitations(metadataInTextCitations);
+
+  const metadataCitationSources = buildLiteratureFromInTextCitations(
+    metadataInTextCitations,
+    'citation',
+  );
+
   const metadataAuthors = Array.isArray(preparedMetadata?.detectedAuthors)
     ? preparedMetadata.detectedAuthors
     : [];
+
   const metadataFormattedSources = preparedMetadata?.formattedSources || '';
 
   if (!isAllowedAttachment(file)) {
@@ -1805,7 +1876,10 @@ async function extractTextFromSingleFile(
       status: 'Nepodporovaný formát súboru.',
       error: 'Nepodporovaný formát súboru.',
       warning: preparedMetadata?.warning || null,
-      bibliographicCandidates: mergeBibliographicCandidates(metadataCandidates, metadataCitationSources),
+      bibliographicCandidates: mergeBibliographicCandidates(
+        metadataCandidates,
+        metadataCitationSources,
+      ),
       inTextCitations: metadataInTextCitations,
       detectedAuthors: metadataAuthors,
       formattedSources: metadataFormattedSources,
@@ -1845,7 +1919,10 @@ async function extractTextFromSingleFile(
           'Súbor bol priložený, ale z tohto typu sa v tejto API trase neextrahuje text. AI má dostupný iba názov, typ, veľkosť a stav kompresie.',
         error: null,
         warning: preparedMetadata?.warning || null,
-        bibliographicCandidates: mergeBibliographicCandidates(metadataCandidates, metadataCitationSources),
+        bibliographicCandidates: mergeBibliographicCandidates(
+          metadataCandidates,
+          metadataCitationSources,
+        ),
         inTextCitations: metadataInTextCitations,
         detectedAuthors: metadataAuthors,
         formattedSources: metadataFormattedSources,
@@ -1889,7 +1966,10 @@ async function extractTextFromSingleFile(
             : 'Text sa nepodarilo extrahovať alebo je súbor prázdny.',
         error: null,
         warning: preparedMetadata?.warning || null,
-        bibliographicCandidates: mergeBibliographicCandidates(metadataCandidates, metadataCitationSources),
+        bibliographicCandidates: mergeBibliographicCandidates(
+          metadataCandidates,
+          metadataCitationSources,
+        ),
         inTextCitations: metadataInTextCitations,
         detectedAuthors: metadataAuthors,
         formattedSources: metadataFormattedSources,
@@ -1897,8 +1977,13 @@ async function extractTextFromSingleFile(
     }
 
     const detectedInTextCitations = extractInTextCitations(extractedText);
-    const detectedCitationSources = buildLiteratureFromInTextCitations(detectedInTextCitations);
-    const detectedCandidates = extractBibliographicCandidates(extractedText);
+    const detectedCitationSources = buildLiteratureFromInTextCitations(
+      detectedInTextCitations,
+      'citation',
+    );
+
+    const detectedCandidates = extractBibliographicCandidates(extractedText, 'attachment');
+
     const bibliographicCandidates = mergeBibliographicCandidates(
       metadataCandidates,
       metadataCitationSources,
@@ -1907,7 +1992,9 @@ async function extractTextFromSingleFile(
     );
 
     const inTextCitations = uniqueArray(
-      [...metadataInTextCitations, ...detectedInTextCitations].map((item) => JSON.stringify(item)),
+      [...metadataInTextCitations, ...detectedInTextCitations].map((item) =>
+        JSON.stringify(item),
+      ),
     ).map((item) => JSON.parse(item) as InTextCitation);
 
     const detectedAuthors = uniqueArray([
@@ -1947,7 +2034,8 @@ async function extractTextFromSingleFile(
       formattedSources: metadataFormattedSources,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nepodarilo sa extrahovať text zo súboru.';
+    const message =
+      error instanceof Error ? error.message : 'Nepodarilo sa extrahovať text zo súboru.';
 
     return {
       name: originalName,
@@ -1972,7 +2060,10 @@ async function extractTextFromSingleFile(
       status: 'Extrakcia zlyhala.',
       error: message,
       warning: preparedMetadata?.warning || null,
-      bibliographicCandidates: mergeBibliographicCandidates(metadataCandidates, metadataCitationSources),
+      bibliographicCandidates: mergeBibliographicCandidates(
+        metadataCandidates,
+        metadataCitationSources,
+      ),
       inTextCitations: metadataInTextCitations,
       detectedAuthors: metadataAuthors,
       formattedSources: metadataFormattedSources,
@@ -1990,10 +2081,16 @@ function buildCompactSourceSummary({
   extractedFiles: ExtractedAttachment[];
 }) {
   const fileSources = extractedFiles.flatMap((file) => file.bibliographicCandidates || []);
+
   const fileCitationSources = extractedFiles.flatMap((file) =>
-    buildLiteratureFromInTextCitations(file.inTextCitations || []),
+    buildLiteratureFromInTextCitations(file.inTextCitations || [], 'citation'),
   );
-  const mergedSources = mergeBibliographicCandidates(clientDetectedSources, fileSources, fileCitationSources);
+
+  const mergedSources = mergeBibliographicCandidates(
+    clientDetectedSources,
+    fileSources,
+    fileCitationSources,
+  );
 
   const authors = uniqueArray([
     ...extractAuthorsFromCandidates(mergedSources),
@@ -2062,16 +2159,21 @@ ${limitText(preparedFilesSummary, 12_000)}`);
 
   if (clientExtractedText.trim()) {
     const frontendCitations = extractInTextCitations(clientExtractedText);
-    const frontendCitationSources = buildLiteratureFromInTextCitations(frontendCitations);
+
+    const frontendCitationSources = buildLiteratureFromInTextCitations(
+      frontendCitations,
+      'citation',
+    );
+
     const frontendCandidates = mergeBibliographicCandidates(
       clientDetectedSources,
-      extractBibliographicCandidates(clientExtractedText),
+      extractBibliographicCandidates(clientExtractedText, 'attachment'),
       frontendCitationSources,
     );
 
     attachmentTexts.push(`EXTRAHOVANÝ TEXT Z /api/extract-text ALEBO FRONTENDU
 Stav: Text bol extrahovaný pred volaním /api/chat.
-Použi tento text ako hlavný podklad, ale pracuj iba s dostupnými údajmi.
+Použi tento text ako hlavný podklad iba vtedy, ak tematicky súvisí s aktívnym profilom práce.
 Počet citácií priamo v texte: ${frontendCitations.length}
 Počet detegovaných zdrojov: ${frontendCandidates.length}
 
@@ -2219,6 +2321,7 @@ Text emailu:
 
 function buildStrictPlanningPrompt(profile: SavedProfile | null) {
   const today = new Date();
+
   const date = `${String(today.getDate()).padStart(2, '0')}.${String(
     today.getMonth() + 1,
   ).padStart(2, '0')}.${today.getFullYear()}`;
@@ -2256,65 +2359,35 @@ function buildAcademicChapterRules() {
   return `
 ŠPECIÁLNY REŽIM PRE AKADEMICKÉ KAPITOLY MÁ NAJVYŠŠIU PRIORITU.
 
-Aktivuje sa vždy, keď používateľ žiada kapitolu, napríklad:
-- Kapitola 1
-- Kapitola 1.1
-- 1. Úvod
-- 1.1
-- uprav kapitolu
-- vytvor kapitolu
-- napíš kapitolu
-- text musí byť ako šablóna
-- použi rovnakú štruktúru ako vzor
-- spracuj text podľa profilu práce
-
 ABSOLÚTNE PRAVIDLÁ PRE KAPITOLU:
 
-1. Ak používateľ žiada kapitolu, výstup musí byť iba samotná kapitola.
+1. Ak používateľ žiada kapitolu, úvod, abstrakt alebo odborný akademický text, výstup musí byť samotný akademický text.
 
-2. Kapitola musí kompletne vychádzať z profilu práce. Povinne zohľadni názov práce, tému, typ práce, odbor, cieľ, výskumný problém, metodológiu, hypotézy, výskumné otázky, praktickú časť, vedecký prínos, kľúčové slová, citačnú normu, jazyk práce, štruktúru práce a povinné časti.
+2. Kapitola musí vychádzať z aktívneho profilu práce.
 
-3. Príloha alebo zdroj sa smie použiť iba vtedy, ak obsahovo súvisí s profilom práce.
+3. Ak je dostupná relevantná príloha, použi najprv prílohu.
 
-4. Ak priložený dokument obsahovo nesúvisí s profilom práce, nevytváraj kapitolu. Vráť presne túto vetu:
+4. Ak príloha nie je relevantná k aktívnemu profilu práce, nepouži ju ako odborný zdroj, ale prácu vytvor podľa profilu zo všeobecných odborných znalostí AI.
+
+5. Ak príloha nie je relevantná, na začiatku krátko uveď:
 ${unrelatedProfileMessage}
 
-5. Nepíš technické sekcie:
-=== VÝSTUP ===
-=== ANALÝZA ===
-=== SKÓRE ===
-=== ODPORÚČANIA ===
-=== POUŽITÉ ZDROJE A AUTORI ===
-A. Detegované zdroje z extrahovaného textu
-B. Autori nájdení v dokumentoch
-C. Formátované bibliografické záznamy
-D. Priložené dokumenty použité ako podklad
-E. Upozornenia
-F. Zdroje, ktoré treba overiť
+6. Ak nie je žiadna príloha, vytvor prácu podľa profilu a použi relevantné odborné zdroje z vlastných znalostí AI.
 
-6. Nepíš krátky všeobecný text. Kapitola musí byť odborná, vecná, súvislá a prispôsobená konkrétnemu profilu práce.
+7. Citácie musia byť priamo v texte. Nepíš text bez citácií, ak je požadovaný odborný akademický text.
 
-7. Nadpis kapitoly musí vychádzať z požiadavky používateľa a profilu práce.
+8. Pri každom odbornom odseku vlož aspoň jednu citáciu v texte vo formáte podľa profilu, napríklad (Autor, rok) alebo (Autor et al., rok).
 
-Zakázané všeobecné nadpisy:
-1.1 Odborný názov kapitoly
-KAPITOLA 1.1: Abstrakt
-1.1 Abstrakt
-Abstrakt
-Názov kapitoly
-Konkrétny odborný názov kapitoly
+9. Ak čerpáš z prílohy, používaj citácie z prílohy.
 
-8. Ak používateľ žiada kapitolu 1 a neuvedie iný názov, použi formát:
-1. Úvod
+10. Ak čerpáš zo všeobecných odborných znalostí AI, uveď aj vlastné odborné zdroje AI a cituj ich priamo v texte.
 
-9. Ak používateľ žiada kapitolu 1.1, použi formát:
-1.1 [odborný názov podľa témy práce a obsahu profilu]
+11. Nevymýšľaj neexistujúce DOI, URL, čísla strán ani presné vydavateľské údaje.
 
-10. Ak používateľ poskytne šablónu, napodobni jej štruktúru, dĺžku, akademický štýl, spôsob citovania a logiku členenia.
+12. Ak si nie si istý DOI alebo URL, nechaj ich neuvedené.
 
-11. Ak používateľ neposkytne šablónu, vytvor kapitolu podľa akademických pravidiel: odborný nadpis, súvislé odseky, vymedzenie problému, prepojenie na cieľ práce, metodológiu, výskumné otázky alebo hypotézy, praktickú alebo analytickú časť a citácie iba z dostupných zdrojov.
+13. Surový OCR text nikdy nevkladaj do kapitoly.
 
-12. Surový OCR text nikdy nevkladaj do kapitoly.
 Zakázané v hlavnej kapitole:
 STRANA 1
 STRANA 2
@@ -2327,23 +2400,32 @@ názvy súborov ako odborný text
 informácie o kompresii
 informácie o extrakcii
 
-13. Pri akademickej kapitole povinne používaj citácie priamo v texte. Každý odborný odsek, ktorý vychádza z príloh, detegovaných zdrojov alebo bibliografických záznamov, musí obsahovať relevantnú citáciu v texte, napríklad (Ondrík et al., 2004), (Clark et al., 2003), (Dellaporta et al., 1983).
+14. Na konci kapitoly vždy vytvor presne tieto dve sekcie:
 
-14. Nepíš kapitolu bez citácií, ak sú dostupní autori, roky alebo citácie z príloh.
-
-15. Na konci kapitoly vždy vytvor presne tieto dve sekcie:
 Primárne zdroje
+
 Sekundárne zdroje
 
-16. Primárne zdroje sú iba tie zdroje, ktoré boli priamo citované v texte kapitoly.
+15. Primárne zdroje sú iba tie zdroje, ktoré boli priamo citované v texte kapitoly.
 
-17. Sekundárne zdroje sú hlavné priložené dokumenty alebo zdroje príloh, z ktorých bol obsah spracovaný.
+16. Sekundárne zdroje sú priložené dokumenty alebo zdroje príloh, z ktorých bol obsah spracovaný.
+
+17. Ak príloha nebola relevantná, sekcia Sekundárne zdroje môže uviesť, že príloha nebola použitá, pretože nesúvisela s aktívnym profilom práce.
 
 18. Do literatúry nikdy nevkladaj surový OCR text, označenia STRANA, PAGE, technické bloky, súhrny strán ani celé úryvky článku.
 
-19. Ak je dostupná iba citácia v texte, uveď ju ako neúplný zdroj na overenie.
-
-20. Nevymýšľaj zdroje, autorov, roky, názvy článkov, časopisov, DOI ani URL.
+19. Nepíš technické sekcie:
+=== VÝSTUP ===
+=== ANALÝZA ===
+=== SKÓRE ===
+=== ODPORÚČANIA ===
+=== POUŽITÉ ZDROJE A AUTORI ===
+A. Detegované zdroje z extrahovaného textu
+B. Autori nájdení v dokumentoch
+C. Formátované bibliografické záznamy
+D. Priložené dokumenty použité ako podklad
+E. Upozornenia
+F. Zdroje, ktoré treba overiť
 `.trim();
 }
 
@@ -2392,7 +2474,7 @@ function buildSystemPrompt({
 Si ZEDPERA, profesionálny akademický AI asistent, AI vedúci práce a citačná špecialistka.
 
 KOMPLETNÝ PROFIL PRÁCE JE HLAVNÝ ZDROJ KONTEXTU.
-Každá odpoveď musí vychádzať z profilu práce. Nepíš všeobecný text mimo profilu.
+Každá odpoveď musí vychádzať z profilu práce.
 
 AKTÍVNY ŠPECIÁLNY REŽIM KAPITOLY:
 ${isChapterRequest ? 'Áno' : 'Nie'}
@@ -2408,21 +2490,20 @@ Počet zhodných odborných výrazov: ${relevance.matchedTokens.length}
 Zhodné výrazy:
 ${relevance.matchedTokens.slice(0, 80).join(', ') || 'žiadne'}
 
-Ak príloha nesúvisí s profilom práce, vráť presne:
-${unrelatedProfileMessage}
+DÔLEŽITÉ:
+Ak príloha nesúvisí s aktívnym profilom práce, nezastavuj odpoveď. Prílohu nepouži ako zdroj, ale vytvor požadovaný akademický text podľa profilu práce zo svojich odborných znalostí AI a uveď relevantné zdroje.
 
 ${chapterRules}
 
 HLAVNÝ POSTUP:
 1. Najprv vychádzaj z uloženého profilu práce.
-2. Použi všetky vyplnené informácie z profilu práce.
-3. Potom použi extrahovaný text z príloh a dokumentov iba vtedy, ak obsahovo súvisia s profilom.
-4. Ak existuje extrahovaný text a súvisí s profilom, použi ho pred všeobecnými znalosťami AI.
-5. Ak ide o kapitolu, nepíš technické sekcie, ale iba čistý akademický text kapitoly.
-6. Nevymýšľaj zdroje, autorov, DOI, URL, roky, vydavateľov ani čísla strán.
-7. Ak údaj chýba, napíš: údaj je potrebné overiť.
-8. Semantic Scholar je vypnutý.
-9. Nepoužívaj Markdown znaky, hviezdičky, mriežky ani kódové bloky.
+2. Ak existuje relevantná príloha, použi ju pred všeobecnými znalosťami AI.
+3. Ak príloha neexistuje alebo nesúvisí s profilom, použi všeobecné odborné znalosti AI a uveď použité zdroje.
+4. Pri akademickom texte vždy používaj citácie priamo v texte.
+5. Na konci akademického textu vždy uveď Primárne zdroje a Sekundárne zdroje.
+6. Nevymýšľaj neexistujúce zdroje, DOI, URL, roky ani vydavateľov.
+7. Semantic Scholar je vypnutý.
+8. Nepoužívaj Markdown znaky, hviezdičky, mriežky ani kódové bloky.
 
 JAZYK ODPOVEDE:
 ${workLanguage}
@@ -2503,16 +2584,13 @@ Sú priložené dokumenty: ${hasAttachments ? 'Áno' : 'Nie'}
 ${attachmentsBlock}
 
 PRAVIDLÁ PRE ZDROJE:
-1. Ak používateľ žiada zdroje, bibliografiu, literatúru, autorov alebo citácie, výstup musí obsahovať iba:
+1. Primárne zdroje = zdroje priamo citované v texte.
+2. Sekundárne zdroje = priložené dokumenty alebo zdroje príloh.
+3. Ak neexistuje relevantná príloha, sekundárne zdroje môžu byť prázdne alebo vysvetlené.
+4. Ak používateľ žiada iba zdroje, odpoveď musí obsahovať iba sekcie:
 Primárne zdroje
-
 Sekundárne zdroje
-
-2. Pri výstupe iba zdroje nepíš úvod, vysvetlenie, analýzu, skóre, odporúčania ani technické poznámky.
-3. Pri výstupe iba zdroje nesmie byť žiadny text okolo dvoch sekcií Primárne zdroje a Sekundárne zdroje.
-4. Ak sú zdroje v extrahovanom texte, nesmieš napísať, že zdroje neboli dodané.
-5. Ak príloha nesúvisí s profilom práce, nepoužívaj ju ako odborný zdroj.
-6. Ak používateľ žiada kapitolu, úvod, abstrakt, osnovu, analýzu alebo odborný text, nevypisuj iba zdroje. Vtedy vytvor požadovaný akademický text podľa kompletného profilu práce.
+5. Ak používateľ žiada akademický text, nevypisuj iba zdroje. Vytvor text a vlož citácie priamo do odsekov.
 
 NASTAVENIA:
 Kontrola príloh podľa profilu práce: ${settings.validateAttachmentsAgainstProfile ? 'áno' : 'nie'}
@@ -2534,7 +2612,7 @@ Sekundárne zdroje
 [zoznam]
 
 Ak je AKTÍVNY ŠPECIÁLNY REŽIM KAPITOLY = Áno:
-Vráť iba samotnú kapitolu v akademickom tvare podľa profilu práce a prípadnej šablóny používateľa.
+Vráť iba samotnú kapitolu v akademickom tvare podľa profilu práce.
 
 V hlavnom texte kapitoly musia byť pri odborných tvrdeniach citácie v texte.
 Nepíš len literatúru na konci bez citácií v odsekoch.
@@ -2543,16 +2621,10 @@ Na konci kapitoly musia byť vždy dve sekcie:
 Primárne zdroje
 Sekundárne zdroje
 
-Primárne zdroje = iba zdroje, ktoré sú priamo citované v texte kapitoly.
-Sekundárne zdroje = priložené dokumenty alebo zdroje príloh, z ktorých bol obsah spracovaný.
-
-Do týchto sekcií uveď iba reálne dostupné zdroje z príloh, extrahovaného textu, citácií alebo profilu.
-Nevymýšľaj zdroje.
-
 Ak je AKTÍVNY ŠPECIÁLNY REŽIM KAPITOLY = Nie a REŽIM IBA ZDROJE = Nie, použi tento bežný formát:
 
 === VÝSTUP ===
-Sem napíš hlavný výstup ako čistý akademický text podľa kompletného profilu práce.
+Sem napíš hlavný výstup ako čistý akademický text podľa kompletného profilu práce. Pri odborných tvrdeniach používaj citácie priamo v texte.
 
 === ANALÝZA ===
 Stručne vysvetli:
@@ -2604,9 +2676,21 @@ function cleanAcademicChapterOutput(text: string) {
     .replace(/^VÝSTUP\s*:\s*/i, '')
     .trim();
 
-  output = output.replace(/^KAPITOLA\s+(\d+(?:\.\d+)*)\s*[:\-–—]\s*Abstrakt\s*/i, '$1 Úvod\n\n');
-  output = output.replace(/^(\d+(?:\.\d+)*)\s*[:\-–—]\s*Abstrakt\s*/i, '$1 Úvod\n\n');
-  output = output.replace(/^(\d+(?:\.\d+)*)\s+Odborný\s+názov\s+kapitoly\s*/i, '$1\n\n');
+  output = output.replace(
+    /^KAPITOLA\s+(\d+(?:\.\d+)*)\s*[:\-–—]\s*Abstrakt\s*/i,
+    '$1 Úvod\n\n',
+  );
+
+  output = output.replace(
+    /^(\d+(?:\.\d+)*)\s*[:\-–—]\s*Abstrakt\s*/i,
+    '$1 Úvod\n\n',
+  );
+
+  output = output.replace(
+    /^(\d+(?:\.\d+)*)\s+Odborný\s+názov\s+kapitoly\s*/i,
+    '$1\n\n',
+  );
+
   output = output.replace(/^Konkrétny\s+odborný\s+názov\s+kapitoly\s*/i, '');
 
   const forbiddenSections = [
@@ -2719,7 +2803,9 @@ function getModelByAgent(agent: Agent): ModelResult {
   }
 
   if (agent === 'claude') {
-    if (!process.env.ANTHROPIC_API_KEY) throw new Error('Chýba ANTHROPIC_API_KEY pre Claude.');
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error('Chýba ANTHROPIC_API_KEY pre Claude.');
+    }
 
     return {
       model: anthropic(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6') as any,
@@ -2748,7 +2834,9 @@ function getModelByAgent(agent: Agent): ModelResult {
   }
 
   if (agent === 'mistral') {
-    if (!process.env.MISTRAL_API_KEY) throw new Error('Chýba MISTRAL_API_KEY pre Mistral.');
+    if (!process.env.MISTRAL_API_KEY) {
+      throw new Error('Chýba MISTRAL_API_KEY pre Mistral.');
+    }
 
     return {
       model: mistral(process.env.MISTRAL_MODEL || 'mistral-small-latest') as any,
@@ -2859,9 +2947,10 @@ function translateApiErrorToSlovak(error: unknown): SlovakApiError {
   ) {
     return {
       code: 'MODEL_NOT_FOUND',
-      message: 'Zvolený AI model sa nepodarilo nájsť alebo nie je dostupný pre aktuálnu verziu API.',
+      message:
+        'Zvolený AI model sa nepodarilo nájsť alebo nie je dostupný pre aktuálnu verziu API.',
       detail:
-        'Skontroluj názov modelu v .env súbore. Dočasne prepni model na Gemini alebo OpenAI, prípadne použi dostupný model s väčším kontextovým oknom.',
+        'Skontroluj názov modelu v .env súbore. Dočasne prepni model na Gemini alebo OpenAI.',
       rawMessage,
     };
   }
@@ -2875,7 +2964,8 @@ function translateApiErrorToSlovak(error: unknown): SlovakApiError {
   ) {
     return {
       code: 'INVALID_API_KEY',
-      message: 'API kľúč je neplatný, chýba alebo nemá oprávnenie na použitie zvoleného AI modelu.',
+      message:
+        'API kľúč je neplatný, chýba alebo nemá oprávnenie na použitie zvoleného AI modelu.',
       detail:
         'Skontroluj API kľúč v nastaveniach prostredia: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, MISTRAL_API_KEY alebo XAI_API_KEY.',
       rawMessage,
@@ -2891,7 +2981,8 @@ function translateApiErrorToSlovak(error: unknown): SlovakApiError {
     return {
       code: 'ACCESS_DENIED',
       message: 'Prístup k zvolenému AI modelu alebo službe bol zamietnutý.',
-      detail: 'Skontroluj oprávnenia účtu, dostupnosť modelu a billing u poskytovateľa AI služby.',
+      detail:
+        'Skontroluj oprávnenia účtu, dostupnosť modelu a billing u poskytovateľa AI služby.',
       rawMessage,
     };
   }
@@ -2905,7 +2996,8 @@ function translateApiErrorToSlovak(error: unknown): SlovakApiError {
     return {
       code: 'RATE_LIMIT',
       message: 'Bol prekročený limit požiadaviek alebo kreditov pre AI službu.',
-      detail: 'Skús požiadavku zopakovať neskôr alebo skontroluj limity, kredity a billing u poskytovateľa AI služby.',
+      detail:
+        'Skús požiadavku zopakovať neskôr alebo skontroluj limity, kredity a billing u poskytovateľa AI služby.',
       rawMessage,
     };
   }
@@ -2915,7 +3007,7 @@ function translateApiErrorToSlovak(error: unknown): SlovakApiError {
       code: 'CONTEXT_TOO_LARGE',
       message: 'Vstup je príliš veľký pre kontextové okno AI modelu.',
       detail:
-        'Text bol skrátený, ale stále je príliš veľký. Použi iný model s väčším kontextovým oknom, napríklad GPT-4.1, Gemini 2.5 Pro alebo Claude Sonnet s vyšším limitom. Prípadne zmenši počet príloh alebo rozdeľ dokument na menšie časti.',
+        'Text bol skrátený, ale stále je príliš veľký. Použi iný model s väčším kontextovým oknom alebo zmenši počet príloh.',
       rawMessage,
     };
   }
@@ -2930,8 +3022,10 @@ function translateApiErrorToSlovak(error: unknown): SlovakApiError {
   ) {
     return {
       code: 'NETWORK_ERROR',
-      message: 'Nepodarilo sa spojiť s AI službou alebo server prekročil časový limit.',
-      detail: 'Skús požiadavku zopakovať. Ak chyba pretrváva, skontroluj internetové pripojenie, Vercel logy alebo dostupnosť poskytovateľa AI.',
+      message:
+        'Nepodarilo sa spojiť s AI službou alebo server prekročil časový limit.',
+      detail:
+        'Skús požiadavku zopakovať. Ak chyba pretrváva, skontroluj Vercel logy alebo dostupnosť poskytovateľa AI.',
       rawMessage,
     };
   }
@@ -2961,7 +3055,8 @@ function translateApiErrorToSlovak(error: unknown): SlovakApiError {
     return {
       code: 'MISSING_API_KEY',
       message: 'Chýba API kľúč pre zvoleného AI poskytovateľa.',
-      detail: 'Doplň potrebný API kľúč do .env alebo do nastavení vo Verceli a potom redeployni projekt.',
+      detail:
+        'Doplň potrebný API kľúč do .env alebo do nastavení vo Verceli a potom redeployni projekt.',
       rawMessage,
     };
   }
@@ -2974,7 +3069,8 @@ function translateApiErrorToSlovak(error: unknown): SlovakApiError {
     return {
       code: 'GZIP_DECOMPRESSION_FAILED',
       message: 'Komprimovaný súbor sa nepodarilo rozbaliť.',
-      detail: 'Skontroluj, či je súbor skutočne vo formáte gzip alebo ho odošli ako pôvodný dokument bez kompresie.',
+      detail:
+        'Skontroluj, či je súbor skutočne vo formáte gzip alebo ho odošli ako pôvodný dokument bez kompresie.',
       rawMessage,
     };
   }
@@ -2982,7 +3078,8 @@ function translateApiErrorToSlovak(error: unknown): SlovakApiError {
   return {
     code: 'AI_API_ERROR',
     message: 'AI služba vrátila chybu pri spracovaní požiadavky.',
-    detail: 'Detail technickej chyby je dostupný v serverových logoch. Skontroluj /api/chat vo Verceli alebo lokálny terminál.',
+    detail:
+      'Detail technickej chyby je dostupný v serverových logoch. Skontroluj /api/chat vo Verceli alebo lokálny terminál.',
     rawMessage,
   };
 }
@@ -3095,26 +3192,10 @@ async function createJsonResponse({
     formattedSources: file.formattedSources,
   }));
 
-  if (
-    settings.validateAttachmentsAgainstProfile &&
-    relevance.hasAttachmentContent &&
-    !relevance.isRelevant
-  ) {
-    return NextResponse.json({
-      ok: true,
-      provider: providerLabel,
-      output: unrelatedProfileMessage,
-      profileRelevance: relevance,
-      extractedFiles: extractedFilesPayload,
-    });
-  }
-
   if (module === 'chat' && sourcesOnly) {
-    const output = ensureOutputHasPrimarySecondarySources({
-      text: '',
-      detectedSourcesForOutput,
-      extractedFiles,
-    }).trim() || formatPrimaryAndSecondarySourcesOnly(detectedSourcesForOutput);
+    const output =
+      formatPrimaryAndSecondarySourcesOnly(detectedSourcesForOutput) ||
+      'Primárne zdroje\n\nNeuvedené.\n\nSekundárne zdroje\n\nNeuvedené.';
 
     return NextResponse.json({
       ok: true,
@@ -3134,18 +3215,23 @@ async function createJsonResponse({
   });
 
   const rawOutput = result.text || '';
-  let output = isStrictNoAcademicTailModule(module) ? cleanStrictOutput(rawOutput, module) : rawOutput;
+
+  let output = isStrictNoAcademicTailModule(module)
+    ? cleanStrictOutput(rawOutput, module)
+    : rawOutput;
 
   if (isChapterRequest) {
     output = cleanAcademicChapterOutput(output);
+
     output = ensureChapterHasInTextCitations({
       text: output,
       sources: detectedSourcesForOutput,
     });
+
     output = ensureOutputHasPrimarySecondarySources({
       text: output,
       detectedSourcesForOutput,
-      extractedFiles,
+      extractedFiles: relevance.isRelevant ? extractedFiles : [],
     });
   }
 
@@ -3155,6 +3241,13 @@ async function createJsonResponse({
     output,
     profileRelevance: relevance,
     extractedFiles: extractedFilesPayload,
+    sourcePolicy: {
+      attachmentWasRelevant: relevance.isRelevant,
+      usedAttachmentAsSource: relevance.hasAttachmentContent && relevance.isRelevant,
+      usedAiKnowledgeFallback:
+        settings.allowAiKnowledgeFallback &&
+        (!relevance.hasAttachmentContent || !relevance.isRelevant),
+    },
   });
 }
 
@@ -3201,13 +3294,21 @@ export async function POST(req: Request) {
 
       requireSourceList = asBoolean(formData.get('requireSourceList'), true);
 
-      allowAiKnowledgeFallback = asBoolean(formData.get('allowAiKnowledgeFallback'), true);
+      allowAiKnowledgeFallback = asBoolean(
+        formData.get('allowAiKnowledgeFallback'),
+        true,
+      );
 
-      returnExtractedFilesInfo = asBoolean(formData.get('returnExtractedFilesInfo'), false);
+      returnExtractedFilesInfo = asBoolean(
+        formData.get('returnExtractedFilesInfo'),
+        false,
+      );
 
       clientExtractedText = toCleanString(formData.get('clientExtractedText'));
       preparedFilesSummary = toCleanString(formData.get('preparedFilesSummary'));
-      clientDetectedSourcesSummary = toCleanString(formData.get('clientDetectedSourcesSummary'));
+      clientDetectedSourcesSummary = toCleanString(
+        formData.get('clientDetectedSourcesSummary'),
+      );
 
       clientDetectedSources = normalizeBibliographicCandidates(
         parseJson<BibliographicCandidate[]>(formData.get('clientDetectedSources'), []),
@@ -3218,7 +3319,9 @@ export async function POST(req: Request) {
         [],
       );
 
-      files = formData.getAll('files').filter((item): item is File => item instanceof File);
+      files = formData
+        .getAll('files')
+        .filter((item): item is File => item instanceof File);
     } else {
       const body = await req.json().catch(() => null);
 
@@ -3253,7 +3356,8 @@ export async function POST(req: Request) {
       return jsonSimpleErrorResponse({
         code: 'UNKNOWN_AGENT',
         message: `Neznámy AI agent: ${String(rawAgent)}.`,
-        detail: 'Použi jeden z podporovaných agentov: openai, claude, gemini, grok alebo mistral.',
+        detail:
+          'Použi jeden z podporovaných agentov: openai, claude, gemini, grok alebo mistral.',
         status: 400,
       });
     }
@@ -3265,7 +3369,8 @@ export async function POST(req: Request) {
       return jsonSimpleErrorResponse({
         code: 'MISSING_MESSAGES',
         message: 'Chýbajú správy pre AI.',
-        detail: 'Frontend musí odoslať aspoň jednu používateľskú správu v poli messages.',
+        detail:
+          'Frontend musí odoslať aspoň jednu používateľskú správu v poli messages.',
         status: 400,
       });
     }
@@ -3305,9 +3410,10 @@ export async function POST(req: Request) {
     const projectDocumentTexts = projectDocuments.map((doc, index) => {
       const documentType = doc.file_type || doc.type || 'neuvedené';
       const extractedText = normalizeText(doc.extracted_text || '');
+
       const bibliographicCandidates = mergeBibliographicCandidates(
-        extractBibliographicCandidates(extractedText),
-        buildLiteratureFromInTextCitations(extractInTextCitations(extractedText)),
+        extractBibliographicCandidates(extractedText, 'project'),
+        buildLiteratureFromInTextCitations(extractInTextCitations(extractedText), 'project'),
       );
 
       projectDocumentSources.push(...bibliographicCandidates);
@@ -3339,7 +3445,9 @@ ${extractedText ? limitMiddle(extractedText, maxProjectDocumentChars) : '[Dokume
       clientDetectedSources,
       compactSources.sources,
       extractedFiles.flatMap((file) => file.bibliographicCandidates),
-      extractedFiles.flatMap((file) => buildLiteratureFromInTextCitations(file.inTextCitations || [])),
+      extractedFiles.flatMap((file) =>
+        buildLiteratureFromInTextCitations(file.inTextCitations || [], 'citation'),
+      ),
       projectDocumentSources,
     );
 
@@ -3389,7 +3497,8 @@ ${extractedText ? limitMiddle(extractedText, maxProjectDocumentChars) : '[Dokume
       sourceMode,
       validateAttachmentsAgainstProfile,
       requireSourceList: isStrictNoAcademicTailModule(module) ? false : requireSourceList,
-      allowAiKnowledgeFallback: module === 'translation' ? false : allowAiKnowledgeFallback,
+      allowAiKnowledgeFallback:
+        module === 'translation' ? false : allowAiKnowledgeFallback,
     };
 
     const systemPrompt = buildSystemPrompt({
@@ -3449,22 +3558,13 @@ TECHNICKÁ POZNÁMKA:
 Vybraný model nebol dostupný alebo bol odmietnutý poskytovateľom.
 Odpovedáš cez náhradný model: ${fallback.providerLabel}.
 
-Ak sa text skracuje alebo výstup nie je úplný, je potrebné použiť model s väčším kontextovým oknom.
-
-Ak používateľ žiada kapitolu, dodrž špeciálny režim kapitoly:
-- čerpaj z kompletného profilu práce,
-- vráť iba samotnú kapitolu,
-- nevytváraj kapitolu z prílohy, ktorá nesúvisí s profilom,
-- nepíš technické sekcie ANALÝZA, SKÓRE, ODPORÚČANIA ani POUŽITÉ ZDROJE A AUTORI,
-- OCR text použi iba ako podklad,
-- v texte kapitoly používaj citácie priamo v odsekoch,
-- na konci uveď iba Primárne zdroje a Sekundárne zdroje,
+Dodrž:
+- ak je príloha relevantná, použi ju ako hlavný zdroj,
+- ak príloha nie je relevantná, nepouži ju ako zdroj, ale text vytvor podľa profilu práce,
+- ak príloha neexistuje, použi odborné znalosti AI,
+- citácie musia byť priamo v texte,
+- na konci uveď Primárne zdroje a Sekundárne zdroje,
 - nevkladaj STRANA, PAGE ani technické OCR bloky do literatúry.
-
-Ak používateľ žiada iba zdroje, vráť iba:
-Primárne zdroje
-
-Sekundárne zdroje
 `,
             maxSystemPromptChars,
           );

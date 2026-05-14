@@ -1701,6 +1701,267 @@ async function callExtractTextApi({
   };
 }
 
+
+
+function detectRequestedChapterNumber(value: string) {
+  const normalized = cleanAiOutput(value);
+
+  const match =
+    normalized.match(/\bkapitola\s+(\d+(?:\.\d+)*)\b/i) ||
+    normalized.match(/^\s*(\d+(?:\.\d+)*)\s*[\.:]\s*/i) ||
+    normalized.match(/\b(\d+(?:\.\d+)*)\b/);
+
+  return match?.[1] || '';
+}
+
+function getLiteratureHeading(_apiUserText: string) {
+  return 'Primárne zdroje';
+}
+
+function candidateHasUsableData(source: BibliographicCandidate) {
+  return Boolean(
+    source.raw?.trim() ||
+      source.authors?.length ||
+      source.year ||
+      source.title ||
+      source.doi ||
+      source.url,
+  );
+}
+
+function looksLikeRawOcrPage(value: string) {
+  const normalized = normalizeForMatch(value);
+
+  return (
+    normalized.includes('strana 1') ||
+    normalized.includes('strana 2') ||
+    normalized.includes('strana 3') ||
+    normalized.includes('strana 4') ||
+    normalized.includes('strana 5') ||
+    normalized.includes('text prilohy') ||
+    normalized.includes('extrahovany text') ||
+    normalized.includes('suhrn zistili sme') ||
+    normalized.length > 900
+  );
+}
+
+function formatCandidateForFinalLiterature(source: BibliographicCandidate) {
+  const raw = cleanAiOutput(source.raw || '');
+
+const rawLooksUsable =
+  raw.length >= 20 &&
+  raw.length <= 500 &&
+  !looksLikeRawOcrPage(raw) &&
+  !raw.toLowerCase().includes('údaj je potrebné overiť') &&
+  !raw.toLowerCase().includes('neuvedené');
+
+  if (rawLooksUsable) {
+    return raw.replace(/\s+/g, ' ').trim();
+  }
+
+  const authors = source.authors?.length
+    ? source.authors.join(', ')
+    : 'Autor je potrebné overiť';
+
+  const year = source.year || 'Rok chýba';
+
+  const title =
+    source.title && source.title !== 'údaj je potrebné overiť'
+      ? source.title
+      : 'údaj je potrebné overiť';
+
+  const doi = source.doi ? ` DOI: ${source.doi}.` : '';
+  const url = source.url ? ` Dostupné z: ${source.url}.` : '';
+
+  return `${authors} (${year}). ${title}.${doi}${url}`.trim();
+}
+
+function buildLiteratureFromInTextCitations(citations: InTextCitation[]) {
+  return citations.map((citation) => {
+    return {
+      raw: citation.raw,
+      authors: citation.authors,
+      year: citation.year,
+      title: 'údaj je potrebné overiť',
+      doi: null,
+      url: null,
+      sourceType: 'unknown',
+      citationKey: citation.key,
+      inTextCitations: [citation],
+      occurrenceCount: citation.count,
+      matchedFromText: true,
+    } satisfies BibliographicCandidate;
+  });
+}
+
+function buildClientLiteratureFallback({
+  preparedFiles,
+  finalText,
+}: {
+  preparedFiles: PreparedFile[];
+  finalText: string;
+}) {
+  const sourcesFromFiles = flattenDetectedSources(preparedFiles);
+  const citationsFromFiles = flattenInTextCitations(preparedFiles);
+  const citationsFromGeneratedText = extractInTextCitations(finalText);
+
+  const citationSources = buildLiteratureFromInTextCitations([
+    ...citationsFromFiles,
+    ...citationsFromGeneratedText,
+  ]);
+
+  const mergedSources = mergeSources([...sourcesFromFiles, ...citationSources])
+    .filter(candidateHasUsableData)
+    .slice(0, maxDetectedSourcesForChat);
+
+  return uniqueArray(
+    mergedSources
+      .map(formatCandidateForFinalLiterature)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+}
+
+function buildPrimarySecondaryLiterature({
+  preparedFiles,
+  finalText,
+}: {
+  preparedFiles: PreparedFile[];
+  finalText: string;
+}) {
+  const citationsFromGeneratedText = extractInTextCitations(finalText);
+
+  const allDetectedSources = flattenDetectedSources(preparedFiles);
+  const allFileCitations = flattenInTextCitations(preparedFiles);
+
+  const primaryCitationSources = buildLiteratureFromInTextCitations(
+    citationsFromGeneratedText.length > 0
+      ? citationsFromGeneratedText
+      : allFileCitations,
+  );
+
+  const primarySources = mergeSources([
+    ...primaryCitationSources,
+    ...allDetectedSources.filter((source) => {
+      const key = getSourceCitationKey(source);
+      return primaryCitationSources.some(
+        (primary) => getSourceCitationKey(primary) === key && key,
+      );
+    }),
+  ])
+    .filter(candidateHasUsableData)
+    .filter((source) => !looksLikeRawOcrPage(source.raw || ''))
+    .slice(0, maxDetectedSourcesForChat);
+
+  const secondarySources = mergeSources(
+    preparedFiles
+      .filter((file) => file.detectedSources.length > 0)
+      .flatMap((file) => {
+        const firstGoodSource = file.detectedSources.find(
+          (source) =>
+            candidateHasUsableData(source) &&
+            !looksLikeRawOcrPage(source.raw || ''),
+        );
+
+        return firstGoodSource ? [firstGoodSource] : [];
+      }),
+  )
+    .filter(candidateHasUsableData)
+    .filter((source) => !looksLikeRawOcrPage(source.raw || ''))
+    .slice(0, maxDetectedSourcesForChat);
+
+  const primaryText = uniqueArray(
+    primarySources
+      .map(formatCandidateForFinalLiterature)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+
+  const secondaryText = uniqueArray(
+    secondarySources
+      .map(formatCandidateForFinalLiterature)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+
+  return {
+    primary: primaryText,
+    secondary: secondaryText,
+  };
+}
+
+function literatureSectionIsEmptyOrBad(sectionText: string) {
+  const normalized = normalizeForMatch(sectionText);
+
+  if (!normalized.trim()) return true;
+
+  return (
+    normalized.length < 25 ||
+    normalized.includes('zdroje neboli') ||
+    normalized.includes('neboli v prilozenych dokumentoch') ||
+    normalized.includes('neboli jednoznacne identifikovane') ||
+    normalized.includes('neboli automaticky detegovane') ||
+    normalized.includes('literatura nebola') ||
+    normalized.includes('bez zdrojov')
+  );
+}
+
+function ensureOutputHasLiterature({
+  text,
+  apiUserText,
+  preparedFiles,
+}: {
+  text: string;
+  apiUserText: string;
+  preparedFiles: PreparedFile[];
+}) {
+  const cleanedText = cleanAiOutput(text);
+
+  const literature = buildPrimarySecondaryLiterature({
+    preparedFiles,
+    finalText: cleanedText,
+  });
+
+  if (!literature.primary.length && !literature.secondary.length) {
+    return cleanedText;
+  }
+
+  const primaryBlock = literature.primary.length
+    ? literature.primary.map((item, index) => `${index + 1}. ${item}`).join('\n')
+    : 'Neuvedené. V texte neboli rozpoznané priame citácie.';
+
+  const secondaryBlock = literature.secondary.length
+    ? literature.secondary
+        .map((item, index) => `${index + 1}. ${item}`)
+        .join('\n')
+    : 'Neuvedené. Zdroj prílohy sa nepodarilo jednoznačne určiť.';
+
+  const finalLiteratureBlock = `Primárne zdroje
+
+${primaryBlock}
+
+Sekundárne zdroje
+
+${secondaryBlock}`;
+
+  const literatureRegex =
+    /(Primárne zdroje|Primarne zdroje|Použitá literatúra(?:\s+pre\s+kapitolu\s+\d+(?:\.\d+)*)?|Použitý zdroj\s+pre\s+kapitolu\s+\d+(?:\.\d+)*|Použité zdroje(?:\s+a\s+autori)?|Zdroje(?:\s+a\s+autori)?)([\s\S]*)$/i;
+
+  const match = cleanedText.match(literatureRegex);
+
+  if (match && typeof match.index === 'number') {
+    const beforeLiterature = cleanedText.slice(0, match.index).trim();
+
+    return `${beforeLiterature}
+
+${finalLiteratureBlock}`.trim();
+  }
+
+  return `${cleanedText}
+
+${finalLiteratureBlock}`.trim();
+}
+
 // ================= CONTEXT BUILDERS =================
 
 function buildExtractedContext(preparedFiles: PreparedFile[]) {
@@ -2160,66 +2421,75 @@ POKYNY PRE AI:
     return preparedFiles;
   };
 
-  const handleFiles = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
+const handleFiles = (files: FileList | null) => {
+  if (!files || files.length === 0) return;
 
-    const incomingFiles = Array.from(files);
-    const validFiles: AttachedFile[] = [];
+  const incomingFiles = Array.from(files);
+  const validFiles: AttachedFile[] = [];
 
-    for (const file of incomingFiles) {
-      if (!isAllowedUploadFile(file)) {
-        alert(
-          `Súbor "${file.name}" má nepodporovaný formát.\n\nPovolené formáty:\nPDF, DOC, DOCX, TXT, RTF, ODT, MD, JPG, PNG, WEBP, GIF, XLS, XLSX, CSV, PPT, PPTX.`,
-        );
-        continue;
-      }
-
-      if (file.size > maxFileSizeBytes) {
-        alert(
-          `Súbor "${file.name}" je príliš veľký.\n\nMaximálna veľkosť jedného súboru je ${maxFileSizeMb} MB.\nTento súbor má ${formatBytes(file.size)}.`,
-        );
-        continue;
-      }
-
-      validFiles.push({
-        id: createFileId(),
-        name: file.name,
-        size: file.size,
-        type: file.type || 'application/octet-stream',
-        uploadedAt: new Date().toISOString(),
-        file,
-      });
+  for (const file of incomingFiles) {
+    if (!isAllowedUploadFile(file)) {
+      alert(
+        `Súbor "${file.name}" má nepodporovaný formát.\n\nPovolené formáty:\nPDF, DOC, DOCX, TXT, RTF, ODT, MD, JPG, PNG, WEBP, GIF, XLS, XLSX, CSV, PPT, PPTX.`,
+      );
+      continue;
     }
 
-    if (validFiles.length === 0) return;
+    if (file.size > maxFileSizeBytes) {
+      alert(
+        `Súbor "${file.name}" je príliš veľký.\n\nMaximálna veľkosť jedného súboru je ${maxFileSizeMb} MB.\nTento súbor má ${formatBytes(file.size)}.`,
+      );
+      continue;
+    }
 
-    setAttachedFiles((prev) => {
-      const next = [...prev];
-
-      for (const file of validFiles) {
-        if (next.length >= maxFilesCount) {
-          alert(
-            `Dosiahnutý limit príloh.\n\nMaximálny počet súborov je ${maxFilesCount}.`,
-          );
-          break;
-        }
-
-        const duplicate = next.some(
-          (item) => item.name === file.name && item.size === file.size,
-        );
-
-        if (!duplicate) next.push(file);
-      }
-
-      return next;
+    validFiles.push({
+      id: createFileId(),
+      name: file.name,
+      size: file.size,
+      type: file.type || 'application/octet-stream',
+      uploadedAt: new Date().toISOString(),
+      file,
     });
+  }
 
-    setProcessingLog([]);
+  if (validFiles.length === 0) return;
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+  setAttachedFiles((prev) => {
+    const next = [...prev];
+
+    for (const file of validFiles) {
+      const alreadyExists = next.some(
+        (item) =>
+          item.name === file.name &&
+          item.size === file.size &&
+          item.type === file.type,
+      );
+
+      if (alreadyExists) continue;
+
+      if (next.length >= maxFilesCount) {
+        alert(
+          `Dosiahnutý limit príloh.\n\nMaximálny počet súborov je ${maxFilesCount}.`,
+        );
+        break;
+      }
+
+      next.push(file);
     }
-  };
+
+    return next;
+  });
+
+  setProcessingLog([]);
+  setResult('');
+  setCanvasText('');
+  setPopupData(null);
+  setSelectedTextState(null);
+
+  if (fileInputRef.current) {
+    fileInputRef.current.value = '';
+  }
+};
 
   const removeFile = (id: string) => {
     setAttachedFiles((prev) => prev.filter((file) => file.id !== id));
@@ -2385,9 +2655,17 @@ DÔLEŽITÉ PRAVIDLÁ:
 3. Ak používateľ žiada kapitolu, úvod alebo text podľa šablóny, vráť čistý akademický text podľa požadovaného tvaru.
 4. Pri kapitole nepíš technické sekcie A, B, C, D, E, F.
 5. Pri kapitole nepíš surové OCR fragmenty typu STRANA 1, STRANA 2, Nova Biotechnologica (2004) ani dlhé extrahované bloky.
-6. Pri kapitole na konci použi iba bibliografickú sekciu podľa vzoru používateľa, napríklad „Použitý zdroj pre kapitolu 1.1“ alebo „Použitá literatúra pre kapitolu 1“.
-7. Nevymýšľaj autorov, roky, názvy článkov, časopisov, DOI ani URL.
-8. Výstup musí byť bez markdown znakov #, ##, **, --- a bez kódových blokov.
+6. Pri kapitole musíš uvádzať citácie priamo v texte. Každý odborný odsek, ktorý vychádza z prílohy alebo z detegovaných zdrojov, musí obsahovať citáciu v tvare podľa normy používateľa, napríklad (Ondrík et al., 2004), (Clark et al., 2003), (Dellaporta et al., 1983).
+7. Nepíš kapitolu bez citácií, ak sú dostupní autori, roky alebo citácie z príloh.
+8. Na konci kapitoly vždy vytvor dve sekcie:
+Primárne zdroje
+Sekundárne zdroje
+9. Do sekcie Primárne zdroje uveď iba tie zdroje, ktoré boli priamo citované v texte kapitoly.
+10. Do sekcie Sekundárne zdroje uveď zdroj prílohy alebo hlavný dokument, z ktorého bol text spracovaný.
+11. Nikdy nevkladaj do literatúry surový OCR text typu STRANA 1, STRANA 2, dlhé úryvky strán, súhrny, metodiku ani celé časti článku.
+12. Ak je dostupná iba citácia v texte, uveď ju ako neúplný zdroj na overenie.
+13. Nevymýšľaj autorov, roky, názvy článkov, časopisov, DOI ani URL.
+14. Výstup musí byť bez markdown znakov #, ##, **, --- a bez kódových blokov.
 `.trim();
   };
 
@@ -2491,15 +2769,31 @@ DÔLEŽITÉ PRAVIDLÁ:
       formData.append('requireAllDetectedAuthorsAndPublications', 'true');
       formData.append('isChapterRequest', isChapterRequest ? 'true' : 'false');
 
-      formData.append('clientExtractedText', '');
-      formData.append('clientDetectedSourcesSummary', detectedSourcesSummary);
-      formData.append('clientDetectedSources', JSON.stringify(detectedSources));
-      formData.append('clientDetectedAuthors', JSON.stringify(detectedAuthors));
-      formData.append('clientInTextCitations', JSON.stringify(inTextCitations));
-      formData.append(
-        'preparedFilesSummary',
-        buildPreparedFilesSummary(preparedFiles),
-      );
+      formData.append('clientExtractedText', extractedContext);
+
+formData.append(
+  'clientDetectedSourcesSummary',
+  detectedSourcesSummary || '',
+);
+
+formData.append(
+  'clientDetectedSources',
+  JSON.stringify(detectedSources || []),
+);
+
+formData.append(
+  'clientDetectedAuthors',
+  JSON.stringify(detectedAuthors || []),
+);
+
+formData.append(
+  'clientInTextCitations',
+  JSON.stringify(inTextCitations || []),
+);
+
+      for (const preparedFile of preparedFiles) {
+        formData.append('files', preparedFile.file, preparedFile.preparedName);
+      }
 
       formData.append(
         'filesMetadata',
@@ -2655,8 +2949,15 @@ ${data.message || data.error || 'Neznáma chyba API.'}`,
         }
       }
 
-      const finalTextFromApi = cleanAiOutput(fullText);
-      const parsed = parseSections(finalTextFromApi);
+      const rawFinalTextFromApi = cleanAiOutput(fullText);
+
+const finalTextFromApi = ensureOutputHasLiterature({
+  text: rawFinalTextFromApi,
+  apiUserText,
+  preparedFiles,
+});
+
+const parsed = parseSections(finalTextFromApi);
 
       setMessages((prev) => {
         const updated = [...prev];
@@ -2711,12 +3012,38 @@ ${message}
 
 Skontroluj terminál pri /api/extract-text a /api/chat.`,
       );
-    } finally {
+      } finally {
       setIsLoading(false);
+      setAttachedFiles([]);
+      setProcessingLog([]);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
-  const sendMessage = async () => {
+  
+     const resetChat = () => {
+    setMessages([]);
+    setInput('');
+    setResult('');
+    setCanvasText('');
+    setPopupData(null);
+    setSelectedTextState(null);
+    setProcessingLog([]);
+    setAttachedFiles([]);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+
+    if (scrollAreaRef.current) {
+      scrollAreaRef.current.scrollTop = 0;
+    }
+  };
+
+    const sendMessage = async () => {
     const text = input.trim();
 
     if (!canSubmit) return;
@@ -2727,26 +3054,16 @@ Skontroluj terminál pri /api/extract-text a /api/chat.`,
     });
   };
 
-  const runSuggestion = async (item: (typeof suggestions)[number]) => {
+    const runSuggestion = async (item: (typeof suggestions)[number]) => {
     await sendPromptToApi({
       visibleUserText: item.title,
       apiUserText: item.instruction,
     });
   };
 
-  const resetChat = () => {
-    setMessages([]);
-    setInput('');
-    setResult('');
-    setCanvasText('');
-    setPopupData(null);
-    setSelectedTextState(null);
-    setProcessingLog([]);
 
-    if (scrollAreaRef.current) {
-      scrollAreaRef.current.scrollTop = 0;
-    }
-  };
+
+  
 
   const handleTextSelection = (target: 'result' | 'canvas') => {
     const element =
@@ -2907,8 +3224,8 @@ Vráť iba upravený text bez nadpisov, bez markdown znakov a bez komentára.
     } finally {
       setIsLoading(false);
     }
+  
   };
-
   return (
     <>
       <style jsx global>{`

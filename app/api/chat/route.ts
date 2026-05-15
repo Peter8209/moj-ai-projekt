@@ -1747,12 +1747,58 @@ function formatCitationAsSecondaryFallback({
   }
 
   const authors = cleanValidAuthors(citation.authors || []);
-  const authorText = authors.length ? authors.join(', ') : normalizeText(citation.authorText || 'Autor neuvedený');
-  const usedAs = citation.raw || `(${citation.authorText}, ${citation.year})`;
-  const accordingTo = matched?.citedAccordingTo || matched?.sourceDocumentName || '';
+  const authorText = authors.length
+    ? authors.join(', ')
+    : normalizeText(citation.authorText || 'Autor neuvedený');
 
-  const base = `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Záznam bol rozpoznaný z použitej prílohy, ale úplný bibliografický riadok sa z extrahovaného textu nepodarilo bezpečne zostaviť.`;
-  return accordingTo ? `${base} Cit. podľa ${accordingTo}.` : base;
+  const usedAs = citation.raw || `(${citation.authorText}, ${citation.year})`;
+
+  const hasAttachmentSource = detectedSourcesForOutput.some(
+    (source) =>
+      source.origin === 'attachment' ||
+      Boolean(source.sourceDocumentName) ||
+      Boolean(source.citedAccordingTo),
+  );
+
+  const hasProjectSource = detectedSourcesForOutput.some((source) => source.origin === 'project');
+
+  const hasExternalSource = detectedSourcesForOutput.some(
+    (source) => source.origin === 'semantic_scholar' || source.origin === 'crossref',
+  );
+
+  if (matched?.sourceDocumentName || matched?.citedAccordingTo || matched?.origin === 'attachment') {
+    const accordingTo = matched.citedAccordingTo || matched.sourceDocumentName || '';
+
+    const base = `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Záznam bol rozpoznaný z použitej prílohy, ale úplný bibliografický riadok sa z extrahovaného textu nepodarilo bezpečne zostaviť.`;
+
+    return accordingTo ? `${base} Cit. podľa ${accordingTo}.` : base;
+  }
+
+  if (matched?.origin === 'project') {
+    const accordingTo = matched.citedAccordingTo || matched.sourceDocumentName || '';
+
+    const base = `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Záznam bol rozpoznaný z projektového dokumentu, ale úplný bibliografický riadok sa z uloženého textu nepodarilo bezpečne zostaviť.`;
+
+    return accordingTo ? `${base} Cit. podľa ${accordingTo}.` : base;
+  }
+
+  if (matched?.origin === 'semantic_scholar' || matched?.origin === 'crossref') {
+    return `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Záznam bol rozpoznaný z overených externých akademických zdrojov, ale úplný bibliografický riadok sa nepodarilo bezpečne zostaviť.`;
+  }
+
+  if (hasAttachmentSource) {
+    return `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Záznam bol rozpoznaný zo zdrojov súvisiacich s prílohou, ale úplný bibliografický riadok sa z extrahovaného textu nepodarilo bezpečne zostaviť.`;
+  }
+
+  if (hasProjectSource) {
+    return `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Záznam bol rozpoznaný z projektových dokumentov, ale úplný bibliografický riadok sa nepodarilo bezpečne zostaviť.`;
+  }
+
+  if (hasExternalSource) {
+    return `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Záznam bol rozpoznaný z overených externých akademických zdrojov, ale úplný bibliografický riadok sa nepodarilo bezpečne zostaviť.`;
+  }
+
+  return `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Úplný bibliografický riadok sa nepodarilo bezpečne zostaviť z dostupných údajov.`;
 }
 
 function completeSecondarySourcesWithEveryInTextCitation({
@@ -2667,7 +2713,7 @@ Osman, A. A., et al. (2001). A monoclonal antibody that recognizes a potential c
 12. Ak je sekundárny zdroj citovaný sprostredkovane cez priložený dokument alebo článok, dopíš na koniec záznamu: Cit. podľa Autor et al. (rok). Ak autor článku nie je spoľahlivo zistený, až potom použi názov dokumentu.
 13. Ak priložený dokument obsahovo nesúvisí s aktívnym profilom práce, nevkladaj ho ako odborný použitý zdroj do tela kapitoly. Do finálneho výstupu však vlož stručnú profesionálnu poznámku pred sekciu Primárne zdroje: „Poznámka k použitým zdrojom: Priložený dokument bol analyzovaný, ale obsahovo nesúvisel s aktívnym profilom práce, preto nebol použitý ako odborný obsahový podklad kapitoly. Výstup bol zostavený z profilu práce a z overených akademických zdrojov použitých pri generovaní textu.“
 14. Do literatúry nikdy nevkladaj surový OCR text, STRANA, PAGE, technické bloky, názvy extrakčných sekcií, B. (2019), H. (2020), R. (2017), „údaj je potrebné overiť“, „Autor je potrebné overiť“ alebo „Rok chýba“.
-15. Na konci kapitoly musí byť iba jedna dvojica sekcií: Primárne zdroje a Sekundárne zdroje. Ak bola použitá relevantná príloha, uveď ju v primárnych zdrojoch a jej použité citované zdroje v sekundárnych zdrojoch. Ak príloha relevantná nebola, primárne zdroje môžu byť „Neuvedené“, ale sekundárne zdroje musia obsahovať všetky overené zdroje použité pri generovaní textu. Duplicitné spodné sekcie sa nesmú vytvárať.`;
+15. Na konci kapitoly musí byť iba jedna dvojica sekcií: Primárne zdroje a Sekundárne zdroje. Ak bola použitá relevantná príloha, uveď ju v primárnych zdrojoch a jej použité citované zdroje v sekundárnych zdrojoch. Ak príloha relevantná nebola alebo nebola nahraná, nesmie sa v sekundárnych zdrojoch uvádzať formulácia, že záznam bol rozpoznaný z prílohy. V takom prípade uveď, že zdroj pochádza z overených externých akademických zdrojov, projektových dokumentov alebo z dostupných údajov podľa skutočného pôvodu zdroja. Duplicitné spodné sekcie sa nesmú vytvárať.`;
 }
 
 function buildAttachmentBlock(attachmentTexts: string[]) {

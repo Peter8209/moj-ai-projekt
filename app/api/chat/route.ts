@@ -1306,10 +1306,34 @@ function removeIncompleteSourceLines(text: string) {
 function removeExistingSourceTail(text: string) {
   const cleaned = normalizeText(text);
 
-  const sourceTailRegex =
-    /(?:^|\n)\s*(?:#{1,6}\s*)?(?:[*_\-–—]+\s*)?(?:\d+\.\s*)?(?:\*\*)?\s*(Primárne zdroje|Primarne zdroje|Sekundárne zdroje|Sekundarne zdroje|Použitá literatúra(?:\s+pre\s+kapitolu\s+\d+(?:\.\d+)*)?|Použitý zdroj\s+pre\s+kapitolu\s+\d+(?:\.\d+)*|Použité zdroje(?:\s+a\s+autori)?|Zdroje(?:\s+a\s+autori)?)\s*(?:\*\*)?\s*:?\s*\n[\s\S]*$/i;
+  const headings = [
+    'Primárne zdroje',
+    'Primarne zdroje',
+    'Sekundárne zdroje',
+    'Sekundarne zdroje',
+    'Použitá literatúra',
+    'Pouzita literatura',
+    'Použité zdroje',
+    'Pouzite zdroje',
+    'Zdroje a autori',
+    'Použité zdroje a autori',
+    'Pouzite zdroje a autori',
+    'Literatúra',
+    'Literatura',
+    'Bibliografia',
+    'References',
+  ];
 
-  const match = cleaned.match(sourceTailRegex);
+  const escaped = headings
+    .map((heading) => heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+
+  const regex = new RegExp(
+    `(?:^|\\n)\\s*(?:#{1,6}\\s*)?(?:[*_\\-–—]+\\s*)?(?:\\d+\\.\\s*)?(?:\\*\\*)?\\s*(?:${escaped})\\s*(?:\\*\\*)?\\s*:?\\s*\\n[\\s\\S]*$`,
+    'i',
+  );
+
+  const match = cleaned.match(regex);
 
   if (match && typeof match.index === 'number') {
     return cleaned.slice(0, match.index).trim();
@@ -1652,16 +1676,21 @@ function normalizeCitationIdentityForOutput(value: string) {
 function secondaryLineAlreadyRepresentsCitation(line: string, citation: InTextCitation) {
   const normalizedLine = normalizeCitationIdentityForOutput(line);
   const citationAuthors = cleanValidAuthors(citation.authors || []);
+
+  if (!citation.year || !normalizedLine.includes(String(citation.year).toLowerCase())) {
+    return false;
+  }
+
   const authorNeedles = uniqueArray([
     citation.authorText,
     ...citationAuthors,
     ...citationAuthors.map((author) => author.replace(/,.*/, '').trim()),
+    ...citationAuthors.map((author) => author.split(',')[0]?.trim() || ''),
   ])
     .map(normalizeCitationIdentityForOutput)
-    .filter(Boolean);
+    .filter((value) => value.length >= 3);
 
-  if (!citation.year || !normalizedLine.includes(String(citation.year).toLowerCase())) return false;
-  return authorNeedles.some((needle) => needle.length >= 3 && normalizedLine.includes(needle));
+  return authorNeedles.some((needle) => normalizedLine.includes(needle));
 }
 
 function sourceHasCompleteBibliographicForm(source: BibliographicCandidate) {
@@ -2703,17 +2732,22 @@ ABSOLÚTNE PRAVIDLÁ:
 5. Citácie v texte musia byť podľa citačnej normy uvedenej v aktívnom profile práce. Ak profil uvádza APA, používaj tvar (Autor, rok). Ak profil uvádza ISO 690, používaj tvar prijateľný pre ISO 690 podľa nastavenia profilu. Vždy rešpektuj profil.
 6. Pri každom odbornom odseku musí byť citácia priamo v texte. Odborné tvrdenia bez citácie nie sú povolené.
 7. Nevymýšľaj autorov, roky, DOI, URL, čísla strán ani vydavateľské údaje.
-8. Primárne zdroje = priložený alebo projektový dokument použitý ako obsahový podklad + autor/autori samotnej prílohy, ak sa dajú zistiť z titulnej/úvodnej časti.
-9. Primárne zdroje nesmú obsahovať autorov zo zoznamu literatúry článku, DOI ani URL citovaných sekundárnych zdrojov. Formát: [Názov prílohy]. Autor prílohy / zistení autori prílohy: [autori alebo nezistené].
-10. Sekundárne zdroje = úplné odborné bibliografické zdroje, ktoré sú citované alebo uvedené priamo v texte vygenerovaného výstupu.
-11. Sekundárne zdroje musia byť vypísané iba v úplnej bibliografickej forme. Neúplný záznam sa nesmie vypísať. Správny tvar je napríklad:
+8. Zdroje musíš vytvoriť priamo ty ako model na základe dostupného kontextu, príloh, projektových dokumentov a overených externých zdrojov. Backend zdroje automaticky nedopĺňa.
+9. Primárne zdroje = priložený alebo projektový dokument použitý ako obsahový podklad + autor/autori samotnej prílohy, ak sa dajú zistiť z titulnej/úvodnej časti.
+10. Primárne zdroje nesmú obsahovať autorov zo zoznamu literatúry článku, DOI ani URL citovaných sekundárnych zdrojov. Formát: [Názov prílohy]. Autor prílohy / zistení autori prílohy: [autori alebo nezistené].
+11. Sekundárne zdroje = úplné odborné bibliografické zdroje, ktoré sú citované alebo uvedené priamo v texte vygenerovaného výstupu.
+12. Sekundárne zdroje musia byť vypísané iba v úplnej bibliografickej forme. Neúplný záznam sa nesmie vypísať. Správny tvar je napríklad:
 Sathe, S. K., Kshirsagar, H. H., & Roux, K. H. (2005). Advances in seed protein research: A perspective on seed allergens. Journal of Food Science, 70(6), R93–R120.
 Kiening, M., et al. (2005). Sandwich immunoassays for the determination of peanut and hazelnut traces in foods. Journal of Agricultural and Food Chemistry, 53(9), 3321–3327. Cit. podľa Sathe et al. (2005).
 Osman, A. A., et al. (2001). A monoclonal antibody that recognizes a potential coeliac-toxic repetitive epitope in gliadins. European Journal of Gastroenterology & Hepatology, 13(10), 1189–1193. Cit. podľa Sathe et al. (2005).
-12. Ak je sekundárny zdroj citovaný sprostredkovane cez priložený dokument alebo článok, dopíš na koniec záznamu: Cit. podľa Autor et al. (rok). Ak autor článku nie je spoľahlivo zistený, až potom použi názov dokumentu.
-13. Ak priložený dokument obsahovo nesúvisí s aktívnym profilom práce, nevkladaj ho ako odborný použitý zdroj do tela kapitoly. Do finálneho výstupu však vlož stručnú profesionálnu poznámku pred sekciu Primárne zdroje: „Poznámka k použitým zdrojom: Priložený dokument bol analyzovaný, ale obsahovo nesúvisel s aktívnym profilom práce, preto nebol použitý ako odborný obsahový podklad kapitoly. Výstup bol zostavený z profilu práce a z overených akademických zdrojov použitých pri generovaní textu.“
-14. Do literatúry nikdy nevkladaj surový OCR text, STRANA, PAGE, technické bloky, názvy extrakčných sekcií, B. (2019), H. (2020), R. (2017), „údaj je potrebné overiť“, „Autor je potrebné overiť“ alebo „Rok chýba“.
-15. Na konci kapitoly musí byť iba jedna dvojica sekcií: Primárne zdroje a Sekundárne zdroje. Ak bola použitá relevantná príloha, uveď ju v primárnych zdrojoch a jej použité citované zdroje v sekundárnych zdrojoch. Ak príloha relevantná nebola alebo nebola nahraná, nesmie sa v sekundárnych zdrojoch uvádzať formulácia, že záznam bol rozpoznaný z prílohy. V takom prípade uveď, že zdroj pochádza z overených externých akademických zdrojov, projektových dokumentov alebo z dostupných údajov podľa skutočného pôvodu zdroja. Duplicitné spodné sekcie sa nesmú vytvárať.`;
+13. Ak je sekundárny zdroj citovaný sprostredkovane cez priložený dokument alebo článok, dopíš na koniec záznamu: Cit. podľa Autor et al. (rok). Ak autor článku nie je spoľahlivo zistený, až potom použi názov dokumentu.
+14. Ak priložený dokument obsahovo nesúvisí s aktívnym profilom práce, nevkladaj ho ako odborný použitý zdroj do tela kapitoly. Do finálneho výstupu však vlož stručnú profesionálnu poznámku pred sekciu Primárne zdroje: „Poznámka k použitým zdrojom: Priložený dokument bol analyzovaný, ale obsahovo nesúvisel s aktívnym profilom práce, preto nebol použitý ako odborný obsahový podklad kapitoly. Výstup bol zostavený z profilu práce a z overených akademických zdrojov použitých pri generovaní textu.“
+15. Do literatúry nikdy nevkladaj surový OCR text, STRANA, PAGE, technické bloky, názvy extrakčných sekcií, B. (2019), H. (2020), R. (2017), „údaj je potrebné overiť“, „Autor je potrebné overiť“ alebo „Rok chýba“.
+16. Na konci kapitoly musí byť iba jedna dvojica sekcií: Primárne zdroje a Sekundárne zdroje.
+17. Ak príloha nebola dodaná alebo nebola použitá, nikdy nepíš, že zdroj bol rozpoznaný z prílohy.
+18. Ak sú použité externé zdroje zo Semantic Scholar alebo Crossref, označ ich ako overené externé akademické zdroje.
+19. Ak sú použité projektové dokumenty zo Supabase, označ ich ako projektové dokumenty.
+20. Backend po tebe zdroje neopraví a nedoplní. Preto musíš finálne sekcie Primárne zdroje a Sekundárne zdroje vytvoriť správne priamo vo výstupe.`;
 }
 
 function buildAttachmentBlock(attachmentTexts: string[]) {
@@ -3105,118 +3139,49 @@ async function createJsonResponse({
     formattedSources: file.formattedSources,
   }));
 
-    if (module === 'chat' && sourcesOnly) {
-    const attachmentWasRelevant = relevance.hasAttachmentContent && relevance.isRelevant;
-
-    const primaryDocuments = attachmentWasRelevant
-      ? buildPrimaryDocumentSources({
-          detectedSourcesForOutput,
-          extractedFiles,
-          attachmentWasRelevant,
-        })
-      : [];
-
-    const secondarySources = buildSecondaryLiteratureFromUsedCitations({
-      detectedSourcesForOutput,
-      generatedText: getLastUserMessage(normalizedMessages),
-      externalSources: externalResearch.sources,
-    });
-
-    const primaryBlock = primaryDocuments.length
-      ? primaryDocuments.map((item, index) => `${index + 1}. ${item}`).join('\n')
-      : attachmentWasRelevant
-        ? 'Neuvedené. Relevantný primárny dokument nebol jednoznačne identifikovaný.'
-        : 'Neuvedené. Priložený dokument nebol použitý ako odborný zdroj, pretože obsahovo nesúvisel s aktívnym profilom práce.';
-
-    const secondaryBlock = secondarySources.length
-      ? secondarySources.map((item, index) => `${index + 1}. ${item}`).join('\n')
-      : 'Neuvedené. V texte nebola nájdená žiadna citácia vo forme autor – rok.';
-
-    const output = `Primárne zdroje
-
-${primaryBlock}
-
-Sekundárne zdroje
-
-${secondaryBlock}`;
-
-    return NextResponse.json({
-      ok: true,
-      provider: providerLabel,
-      output: finalizeSourceSections(output),
-      profileRelevance: relevance,
-      externalResearch,
-      extractedFiles: extractedFilesPayload,
-    });
-  }
-
   const result = await generateText({
     model,
     system: systemPrompt,
     messages: normalizedMessages,
     temperature: 0.2,
-    maxOutputTokens: isChapterRequest ? chapterOutputTokens : defaultOutputTokens,
+    maxOutputTokens: isChapterRequest || sourcesOnly ? chapterOutputTokens : defaultOutputTokens,
   });
 
   let output = isStrictNoAcademicTailModule(module)
     ? cleanStrictOutput(result.text || '', module)
     : result.text || '';
 
-if (isChapterRequest) {
-  const lastUserMessage = getLastUserMessage(normalizedMessages);
+  if (isChapterRequest || sourcesOnly || module === 'chat') {
+    const lastUserMessage = getLastUserMessage(normalizedMessages);
 
-  const finalSources = mergeBibliographicCandidates(
-    detectedSourcesForOutput,
-    externalResearch.sources.map(verifiedSourceToBibliographicCandidate),
-  );
+    output = cleanAcademicChapterOutput(output, lastUserMessage);
 
-  output = cleanAcademicChapterOutput(output, lastUserMessage);
-
-  if (externalResearch.sources.length > 0 && (!relevance.hasAttachmentContent || !relevance.isRelevant)) {
-    output = ensureParagraphCitationsFromVerifiedSources(output, externalResearch.sources);
-    output = removeUnknownCitations(output, externalResearch.sources);
-
-    output = appendVerifiedBibliography({
-      text: output,
-      sourcePack: externalResearch.sources,
-      extractedFiles,
-      attachmentWasRelevant: relevance.hasAttachmentContent && relevance.isRelevant,
-      detectedSourcesForOutput: finalSources,
-    });
-  } else {
-    output = ensureChapterHasInTextCitations({
-      text: output,
-      sources: finalSources,
-    });
-
-    output = ensureOutputHasPrimarySecondarySources({
-      text: output,
-      detectedSourcesForOutput: finalSources,
-      extractedFiles,
-      externalSources: externalResearch.sources,
-      attachmentWasRelevant: relevance.hasAttachmentContent && relevance.isRelevant,
-    });
+    // DÔLEŽITÉ:
+    // Backend už NESKLADÁ Primárne/Sekundárne zdroje.
+    // Model ich musí vytvoriť sám podľa systemPromptu.
+    // Backend iba čistí duplicity, technické bloky a poškodené riadky.
+    output = finalizeSourceSections(output);
   }
 
-  output = finalizeSourceSections(output);
-}
-
-return NextResponse.json({
-  ok: true,
-  provider: providerLabel,
-  output,
-  profileRelevance: relevance,
-  externalResearch,
-  extractedFiles: extractedFilesPayload,
-  sourcePolicy: {
-    attachmentWasRelevant: relevance.hasAttachmentContent && relevance.isRelevant,
-    usedAttachmentAsSource: relevance.hasAttachmentContent && relevance.isRelevant,
-    usedAiKnowledgeFallback:
-      settings.allowAiKnowledgeFallback && (!relevance.hasAttachmentContent || !relevance.isRelevant),
-    usedSemanticScholarOrCrossref: externalResearch.sources.length > 0,
-  },
-});
-
+  return NextResponse.json({
+    ok: true,
+    provider: providerLabel,
+    output,
+    profileRelevance: relevance,
+    externalResearch,
+    extractedFiles: extractedFilesPayload,
+    sourcePolicy: {
+      sourceConstruction: 'model_generated',
+      backendDidNotAppendSources: true,
+      backendOnlyCleanedOutput: true,
+      attachmentWasRelevant: relevance.hasAttachmentContent && relevance.isRelevant,
+      usedAttachmentAsSource: relevance.hasAttachmentContent && relevance.isRelevant,
+      usedAiKnowledgeFallback:
+        settings.allowAiKnowledgeFallback && (!relevance.hasAttachmentContent || !relevance.isRelevant),
+      usedSemanticScholarOrCrossref: externalResearch.sources.length > 0,
+      detectedSourcesCount: detectedSourcesForOutput.length,
+    },
+  });
 }
 
 // =====================================================
@@ -3392,9 +3357,23 @@ const shouldSearchExternalSources =
 
       const fallback = getFallbackModel();
       const fallbackSystemPrompt = isStrictNoAcademicTailModule(module)
-        ? systemPrompt
-        : limitText(`${systemPrompt}\n\nTECHNICKÁ POZNÁMKA:\nVybraný model nebol dostupný alebo bol odmietnutý poskytovateľom. Odpovedáš cez náhradný model: ${fallback.providerLabel}.\n\nDodrž:\n- pri kapitolách používaj zdroje z článku alebo overené zdroje zo Semantic Scholar/Crossref,\n- nepoužívaj fiktívne citácie,\n- citácie musia byť priamo v texte,\n- na konci uveď Primárne zdroje a Sekundárne zdroje,\n- primárne zdroje musia byť názvy dokumentov, z ktorých text čerpá, a autor/autori samotnej prílohy, ak sa dajú zistiť,
-- sekundárne zdroje musia obsahovať všetky citácie autor–rok použité priamo v texte; ak úplný záznam nie je rozpoznaný, uveď aspoň citáciu použitú v texte a upozorni, že úplný záznam treba doplniť podľa literatúry prílohy,\n- nepoužívaj iniciály typu H., R., S. ako mená autorov.`, maxSystemPromptChars);
+  ? systemPrompt
+  : limitText(`${systemPrompt}
+
+TECHNICKÁ POZNÁMKA:
+Vybraný model nebol dostupný alebo bol odmietnutý poskytovateľom. Odpovedáš cez náhradný model: ${fallback.providerLabel}.
+
+Dodrž:
+- zdroje musíš vytvoriť ty ako model priamo vo výstupe,
+- backend zdroje automaticky nedopĺňa,
+- pri kapitolách používaj zdroje z relevantných príloh, projektových dokumentov alebo overené zdroje zo Semantic Scholar/Crossref,
+- nepoužívaj fiktívne citácie,
+- citácie musia byť priamo v texte,
+- na konci uveď iba jednu dvojicu sekcií: Primárne zdroje a Sekundárne zdroje,
+- primárne zdroje musia byť názvy dokumentov, z ktorých text čerpá, a autor/autori samotnej prílohy, ak sa dajú zistiť,
+- sekundárne zdroje musia obsahovať úplné bibliografické záznamy všetkých citácií autor–rok použitých priamo v texte,
+- ak príloha nebola použitá alebo nebola relevantná, nikdy nepíš, že zdroj bol rozpoznaný z prílohy,
+- nepoužívaj iniciály typu H., R., S. ako mená autorov.`, maxSystemPromptChars);
 
       if (returnExtractedFilesInfo || isChapterRequest || sourcesOnly || module === 'chat') {
         return await createJsonResponse({ model: fallback.model, systemPrompt: fallbackSystemPrompt, normalizedMessages, extractedFiles, providerLabel: fallback.providerLabel, module, isChapterRequest, sourcesOnly, settings, relevance, detectedSourcesForOutput: finalDetectedSourcesForOutput, externalResearch });

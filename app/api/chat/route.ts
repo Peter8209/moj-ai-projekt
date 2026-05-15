@@ -1303,6 +1303,22 @@ function removeIncompleteSourceLines(text: string) {
     .trim();
 }
 
+function removeExistingSourceTail(text: string) {
+  const cleaned = normalizeText(text);
+
+  const sourceTailRegex =
+    /(?:^|\n)\s*(?:#{1,6}\s*)?(?:[*_\-–—]+\s*)?(?:\d+\.\s*)?(?:\*\*)?\s*(Primárne zdroje|Primarne zdroje|Sekundárne zdroje|Sekundarne zdroje|Použitá literatúra(?:\s+pre\s+kapitolu\s+\d+(?:\.\d+)*)?|Použitý zdroj\s+pre\s+kapitolu\s+\d+(?:\.\d+)*|Použité zdroje(?:\s+a\s+autori)?|Zdroje(?:\s+a\s+autori)?)\s*(?:\*\*)?\s*:?\s*\n[\s\S]*$/i;
+
+  const match = cleaned.match(sourceTailRegex);
+
+  if (match && typeof match.index === 'number') {
+    return cleaned.slice(0, match.index).trim();
+  }
+
+  return cleaned;
+}
+
+
 function getPrimarySecondaryHeadingPositions(text: string) {
   const output = normalizeText(text);
   const positions: Array<{
@@ -1311,15 +1327,15 @@ function getPrimarySecondaryHeadingPositions(text: string) {
     lineStart: number;
   }> = [];
 
-  // Zachytáva aj chybný prípad, keď model napojí ďalší nadpis do posledného riadku:
-  // "... Cit. podľa dokumentu.pdf. Primárne zdroje".
-  const headingRegex = /(^|\n|[.!?]\s+)(Primárne zdroje|Primarne zdroje|Sekundárne zdroje|Sekundarne zdroje)\s*(?=\n|$)/gi;
+  const headingRegex =
+    /(^|\n|[.!?]\s+)(Primárne zdroje|Primarne zdroje|Sekundárne zdroje|Sekundarne zdroje)\s*(?=\n|$)/gi;
+
   let match: RegExpExecArray | null;
 
   while ((match = headingRegex.exec(output)) !== null) {
     const prefix = match[1] || '';
     const rawHeading = normalizeForSemanticMatch(match[2] || '');
-    const headingIndex = (match.index || 0) + prefix.length;
+    const headingIndex = match.index + prefix.length;
     const lineStart = output.lastIndexOf('\n', headingIndex) + 1;
 
     positions.push({
@@ -1347,43 +1363,37 @@ function cutEverythingAfterSecondSourceBlock(text: string) {
   const firstSecondary = positions.find(
     (item) => item.heading === 'secondary' && item.index > firstPrimary.index,
   );
+
   if (!firstSecondary) return output;
 
-  const duplicateHeading = positions.find(
+  const nextDuplicateHeading = positions.find(
     (item) => item.index > firstSecondary.index && (item.heading === 'primary' || item.heading === 'secondary'),
   );
 
-  if (!duplicateHeading) return output;
+  if (!nextDuplicateHeading) return output;
 
-  // Ak je duplicitný nadpis nalepený za bodkou v tom istom riadku, režeme presne od nadpisu.
-  // Ak je na samostatnom riadku, režeme od začiatku riadka, aby nezostal prázdny alebo poškodený riadok.
-  const cutIndex = duplicateHeading.lineStart < duplicateHeading.index
-    ? duplicateHeading.index
-    : duplicateHeading.lineStart;
-
-  return output.slice(0, cutIndex).trim();
+  return output.slice(0, nextDuplicateHeading.lineStart).trim();
 }
 
 function removeDuplicatePrimarySecondarySourceBlocks(text: string) {
   let output = normalizeText(text);
 
-  // Najprv odstráni opakované celé bloky Primárne/Sekundárne zdroje.
   output = cutEverythingAfterSecondSourceBlock(output);
 
-  // Potom odstráni prípadné zvyškové duplicitné nadpisy, ak ich model vložil bez správnych odriadkovaní.
   const positions = getPrimarySecondaryHeadingPositions(output);
-  const primaryPositions = positions.filter((item) => item.heading === 'primary');
-  const secondaryPositions = positions.filter((item) => item.heading === 'secondary');
-
-  const duplicatePrimary = primaryPositions[1]?.index;
-  const duplicateSecondary = secondaryPositions[1]?.index;
-  const cutIndex = Math.min(
-    duplicatePrimary ?? Number.POSITIVE_INFINITY,
-    duplicateSecondary ?? Number.POSITIVE_INFINITY,
+  const firstPrimary = positions.find((item) => item.heading === 'primary');
+  const firstSecondary = positions.find(
+    (item) => item.heading === 'secondary' && (!firstPrimary || item.index > firstPrimary.index),
   );
 
-  if (Number.isFinite(cutIndex) && cutIndex > 0) {
-    output = output.slice(0, cutIndex).trim();
+  if (!firstPrimary || !firstSecondary) return output;
+
+  const duplicateAfterSecondary = positions.find(
+    (item) => item.index > firstSecondary.index && (item.heading === 'primary' || item.heading === 'secondary'),
+  );
+
+  if (duplicateAfterSecondary) {
+    output = output.slice(0, duplicateAfterSecondary.lineStart).trim();
   }
 
   return output;
@@ -1396,7 +1406,6 @@ function removeBrokenSourceGarbageLines(text: string) {
       const current = line.trim();
       if (!current) return true;
 
-      // Odstraňuje OCR/parsovacie nezmysly, ktoré sa objavovali ako duplicitné zdroje.
       if (/Autor prílohy\s*\/\s*zistení autori:\s*(DOI:|URL:|Citácie v texte:|DETEGOVANÉ ZDROJE|Strana\s+\d+|PAGE\s+\d+|roku\.?$)/i.test(current)) return false;
       if (/^\d+\.\s*\([^)]*\bS\.\s*\d+\.?\s*N\.\s*B\./i.test(current)) return false;
       if (/^\d+\.\s*\([^)]*D\.\s*N\.\s*U\.\s*N\.\s*C\.\s*V\.\s*T\./i.test(current)) return false;
@@ -1410,6 +1419,8 @@ function removeBrokenSourceGarbageLines(text: string) {
     .replace(/\n{4,}/g, '\n\n\n')
     .trim();
 }
+
+
 
 function finalizeSourceSections(text: string) {
   return removeBrokenSourceGarbageLines(
@@ -1839,12 +1850,7 @@ function buildSecondaryLiteratureFromUsedCitations({
   ).slice(0, maxFinalSourcesInOutput);
 }
 
-function removeExistingSourceTail(text: string) {
-  const cleaned = normalizeText(text);
-  const match = cleaned.match(/\n\s*(Primárne zdroje|Primarne zdroje|Sekundárne zdroje|Sekundarne zdroje|Použitá literatúra(?:\s+pre\s+kapitolu\s+\d+(?:\.\d+)*)?|Použitý zdroj\s+pre\s+kapitolu\s+\d+(?:\.\d+)*|Použité zdroje(?:\s+a\s+autori)?|Zdroje(?:\s+a\s+autori)?)\s*\n[\s\S]*$/i);
-  if (match && typeof match.index === 'number') return cleaned.slice(0, match.index).trim();
-  return cleaned;
-}
+
 
 
 function ensureOutputHasPrimarySecondarySources({
@@ -2659,9 +2665,9 @@ Sathe, S. K., Kshirsagar, H. H., & Roux, K. H. (2005). Advances in seed protein 
 Kiening, M., et al. (2005). Sandwich immunoassays for the determination of peanut and hazelnut traces in foods. Journal of Agricultural and Food Chemistry, 53(9), 3321–3327. Cit. podľa Sathe et al. (2005).
 Osman, A. A., et al. (2001). A monoclonal antibody that recognizes a potential coeliac-toxic repetitive epitope in gliadins. European Journal of Gastroenterology & Hepatology, 13(10), 1189–1193. Cit. podľa Sathe et al. (2005).
 12. Ak je sekundárny zdroj citovaný sprostredkovane cez priložený dokument alebo článok, dopíš na koniec záznamu: Cit. podľa Autor et al. (rok). Ak autor článku nie je spoľahlivo zistený, až potom použi názov dokumentu.
-13. Do výstupu nikdy nevkladaj hlášku, že príloha obsahovo nesúvisí s aktívnym profilom práce. Ak príloha nesúvisí, jednoducho ju nepouži ako odborný zdroj a pokračuj podľa profilu a overených zdrojov.
+13. Ak priložený dokument obsahovo nesúvisí s aktívnym profilom práce, nevkladaj ho ako odborný použitý zdroj do tela kapitoly. Do finálneho výstupu však vlož stručnú profesionálnu poznámku pred sekciu Primárne zdroje: „Poznámka k použitým zdrojom: Priložený dokument bol analyzovaný, ale obsahovo nesúvisel s aktívnym profilom práce, preto nebol použitý ako odborný obsahový podklad kapitoly. Výstup bol zostavený z profilu práce a z overených akademických zdrojov použitých pri generovaní textu.“
 14. Do literatúry nikdy nevkladaj surový OCR text, STRANA, PAGE, technické bloky, názvy extrakčných sekcií, B. (2019), H. (2020), R. (2017), „údaj je potrebné overiť“, „Autor je potrebné overiť“ alebo „Rok chýba“.
-15. Na konci kapitoly musí byť iba jedna dvojica sekcií: Primárne zdroje a Sekundárne zdroje. Duplicitné spodné sekcie sa nesmú vytvárať.`;
+15. Na konci kapitoly musí byť iba jedna dvojica sekcií: Primárne zdroje a Sekundárne zdroje. Ak bola použitá relevantná príloha, uveď ju v primárnych zdrojoch a jej použité citované zdroje v sekundárnych zdrojoch. Ak príloha relevantná nebola, primárne zdroje môžu byť „Neuvedené“, ale sekundárne zdroje musia obsahovať všetky overené zdroje použité pri generovaní textu. Duplicitné spodné sekcie sa nesmú vytvárať.`;
 }
 
 function buildAttachmentBlock(attachmentTexts: string[]) {
@@ -2873,11 +2879,13 @@ function appendVerifiedBibliography({
   const cleaned = normalizeText(text);
   const bodyWithoutSources = removeExistingSourceTail(cleaned);
 
-  const primaryDocuments = buildPrimaryDocumentSources({
-    detectedSourcesForOutput,
-    extractedFiles,
-    attachmentWasRelevant,
-  });
+ const primaryDocuments = attachmentWasRelevant
+  ? buildPrimaryDocumentSources({
+      detectedSourcesForOutput,
+      extractedFiles,
+      attachmentWasRelevant,
+    })
+  : [];
 
   const usedVerifiedSources = sourcePack.filter((source) => cleaned.includes(source.citationText));
   const secondarySources = uniqueArray([
@@ -2889,9 +2897,11 @@ function appendVerifiedBibliography({
     }),
   ]).slice(0, maxFinalSourcesInOutput);
 
-  const primaryBlock = primaryDocuments.length
-    ? primaryDocuments.map((item, index) => `${index + 1}. ${item}`).join('\n')
-    : 'Neuvedené. Text nečerpal z konkrétneho priloženého dokumentu alebo názov dokumentu nebol dostupný.';
+ const primaryBlock = primaryDocuments.length
+  ? primaryDocuments.map((item, index) => `${index + 1}. ${item}`).join('\n')
+  : attachmentWasRelevant
+    ? 'Neuvedené. Relevantný primárny dokument nebol jednoznačne identifikovaný.'
+    : 'Neuvedené. Priložený dokument nebol použitý ako odborný zdroj, pretože obsahovo nesúvisel s aktívnym profilom práce.';
 
   const secondaryBlock = secondarySources.length
     ? secondarySources.map((source, index) => `${index + 1}. ${source}`).join('\n')
@@ -3049,12 +3059,16 @@ async function createJsonResponse({
     formattedSources: file.formattedSources,
   }));
 
-  if (module === 'chat' && sourcesOnly) {
-    const primaryDocuments = buildPrimaryDocumentSources({
-      detectedSourcesForOutput,
-      extractedFiles,
-      attachmentWasRelevant: relevance.hasAttachmentContent,
-    });
+    if (module === 'chat' && sourcesOnly) {
+    const attachmentWasRelevant = relevance.hasAttachmentContent && relevance.isRelevant;
+
+    const primaryDocuments = attachmentWasRelevant
+      ? buildPrimaryDocumentSources({
+          detectedSourcesForOutput,
+          extractedFiles,
+          attachmentWasRelevant,
+        })
+      : [];
 
     const secondarySources = buildSecondaryLiteratureFromUsedCitations({
       detectedSourcesForOutput,
@@ -3062,60 +3076,101 @@ async function createJsonResponse({
       externalSources: externalResearch.sources,
     });
 
+    const primaryBlock = primaryDocuments.length
+      ? primaryDocuments.map((item, index) => `${index + 1}. ${item}`).join('\n')
+      : attachmentWasRelevant
+        ? 'Neuvedené. Relevantný primárny dokument nebol jednoznačne identifikovaný.'
+        : 'Neuvedené. Priložený dokument nebol použitý ako odborný zdroj, pretože obsahovo nesúvisel s aktívnym profilom práce.';
+
+    const secondaryBlock = secondarySources.length
+      ? secondarySources.map((item, index) => `${index + 1}. ${item}`).join('\n')
+      : 'Neuvedené. V texte nebola nájdená žiadna citácia vo forme autor – rok.';
+
     const output = `Primárne zdroje
 
-${
-      primaryDocuments.length
-        ? primaryDocuments.map((item, index) => `${index + 1}. ${item}`).join('\n')
-        : 'Neuvedené.'
-    }
+${primaryBlock}
 
 Sekundárne zdroje
 
-${
-      secondarySources.length
-        ? secondarySources.map((item, index) => `${index + 1}. ${item}`).join('\n')
-        : 'Neuvedené.'
-    }`;
+${secondaryBlock}`;
 
-    return NextResponse.json({ ok: true, provider: providerLabel, output: finalizeSourceSections(output), profileRelevance: relevance, externalResearch, extractedFiles: extractedFilesPayload });
+    return NextResponse.json({
+      ok: true,
+      provider: providerLabel,
+      output: finalizeSourceSections(output),
+      profileRelevance: relevance,
+      externalResearch,
+      extractedFiles: extractedFilesPayload,
+    });
   }
 
-  const result = await generateText({ model, system: systemPrompt, messages: normalizedMessages, temperature: 0.2, maxOutputTokens: isChapterRequest ? chapterOutputTokens : defaultOutputTokens });
-  let output = isStrictNoAcademicTailModule(module) ? cleanStrictOutput(result.text || '', module) : result.text || '';
-
-  if (isChapterRequest) {
-    const lastUserMessage = getLastUserMessage(normalizedMessages);
-    const finalSources = mergeBibliographicCandidates(detectedSourcesForOutput, externalResearch.sources.map(verifiedSourceToBibliographicCandidate));
-
-    output = cleanAcademicChapterOutput(output, lastUserMessage);
-
-    if (externalResearch.sources.length > 0 && (!relevance.hasAttachmentContent || !relevance.isRelevant)) {
-      output = ensureParagraphCitationsFromVerifiedSources(output, externalResearch.sources);
-      output = removeUnknownCitations(output, externalResearch.sources);
-      output = appendVerifiedBibliography({ text: output, sourcePack: externalResearch.sources, extractedFiles, attachmentWasRelevant: relevance.hasAttachmentContent, detectedSourcesForOutput: finalSources });
-    } else {
-      output = ensureChapterHasInTextCitations({ text: output, sources: finalSources });
-      output = ensureOutputHasPrimarySecondarySources({ text: output, detectedSourcesForOutput: finalSources, extractedFiles, externalSources: externalResearch.sources, attachmentWasRelevant: relevance.hasAttachmentContent });
-    }
-
-    output = finalizeSourceSections(output);
-  }
-
-  return NextResponse.json({
-    ok: true,
-    provider: providerLabel,
-    output,
-    profileRelevance: relevance,
-    externalResearch,
-    extractedFiles: extractedFilesPayload,
-    sourcePolicy: {
-      attachmentWasRelevant: relevance.isRelevant,
-      usedAttachmentAsSource: relevance.hasAttachmentContent && relevance.isRelevant,
-      usedAiKnowledgeFallback: settings.allowAiKnowledgeFallback && (!relevance.hasAttachmentContent || !relevance.isRelevant),
-      usedSemanticScholarOrCrossref: externalResearch.sources.length > 0,
-    },
+  const result = await generateText({
+    model,
+    system: systemPrompt,
+    messages: normalizedMessages,
+    temperature: 0.2,
+    maxOutputTokens: isChapterRequest ? chapterOutputTokens : defaultOutputTokens,
   });
+
+  let output = isStrictNoAcademicTailModule(module)
+    ? cleanStrictOutput(result.text || '', module)
+    : result.text || '';
+
+if (isChapterRequest) {
+  const lastUserMessage = getLastUserMessage(normalizedMessages);
+
+  const finalSources = mergeBibliographicCandidates(
+    detectedSourcesForOutput,
+    externalResearch.sources.map(verifiedSourceToBibliographicCandidate),
+  );
+
+  output = cleanAcademicChapterOutput(output, lastUserMessage);
+
+  if (externalResearch.sources.length > 0 && (!relevance.hasAttachmentContent || !relevance.isRelevant)) {
+    output = ensureParagraphCitationsFromVerifiedSources(output, externalResearch.sources);
+    output = removeUnknownCitations(output, externalResearch.sources);
+
+    output = appendVerifiedBibliography({
+      text: output,
+      sourcePack: externalResearch.sources,
+      extractedFiles,
+      attachmentWasRelevant: relevance.hasAttachmentContent && relevance.isRelevant,
+      detectedSourcesForOutput: finalSources,
+    });
+  } else {
+    output = ensureChapterHasInTextCitations({
+      text: output,
+      sources: finalSources,
+    });
+
+    output = ensureOutputHasPrimarySecondarySources({
+      text: output,
+      detectedSourcesForOutput: finalSources,
+      extractedFiles,
+      externalSources: externalResearch.sources,
+      attachmentWasRelevant: relevance.hasAttachmentContent && relevance.isRelevant,
+    });
+  }
+
+  output = finalizeSourceSections(output);
+}
+
+return NextResponse.json({
+  ok: true,
+  provider: providerLabel,
+  output,
+  profileRelevance: relevance,
+  externalResearch,
+  extractedFiles: extractedFilesPayload,
+  sourcePolicy: {
+    attachmentWasRelevant: relevance.hasAttachmentContent && relevance.isRelevant,
+    usedAttachmentAsSource: relevance.hasAttachmentContent && relevance.isRelevant,
+    usedAiKnowledgeFallback:
+      settings.allowAiKnowledgeFallback && (!relevance.hasAttachmentContent || !relevance.isRelevant),
+    usedSemanticScholarOrCrossref: externalResearch.sources.length > 0,
+  },
+});
+
 }
 
 // =====================================================
@@ -3207,8 +3262,11 @@ export async function POST(req: Request) {
 
     const { extractedFiles, attachmentTexts: uploadedAttachmentTexts, compactSources } = await extractAttachmentTexts({ files, preparedFilesMetadata, clientExtractedText, preparedFilesSummary, clientDetectedSourcesSummary, clientDetectedSources });
 
-    const hasCurrentUpload = files.length > 0 || clientExtractedText.trim().length > 0 || preparedFilesSummary.trim().length > 0 || clientDetectedSources.length > 0 || preparedFilesMetadata.length > 0;
-    const projectDocuments = isStrictNoAcademicTailModule(module) || hasCurrentUpload ? [] : await loadProjectDocuments(projectId);
+
+
+const projectDocuments = isStrictNoAcademicTailModule(module)
+  ? []
+  : await loadProjectDocuments(projectId);
 
     const projectDocumentSources: BibliographicCandidate[] = [];
     const projectDocumentTexts = projectDocuments.map((doc, index) => {
@@ -3256,11 +3314,15 @@ export async function POST(req: Request) {
       useExternalAcademicSources: !isStrictNoAcademicTailModule(module) && useExternalAcademicSources,
     };
 
-    const shouldSearchExternalSources =
-      settings.useExternalAcademicSources &&
-      settings.allowAiKnowledgeFallback &&
-      (isChapterRequest || sourcesOnly || module === 'chat') &&
-      (!relevance.hasAttachmentContent || !relevance.isRelevant || detectedSourcesForOutput.length < 3);
+const shouldSearchExternalSources =
+  settings.useExternalAcademicSources &&
+  settings.allowAiKnowledgeFallback &&
+  (isChapterRequest || sourcesOnly || module === 'chat') &&
+  (
+    !relevance.hasAttachmentContent ||
+    !relevance.isRelevant ||
+    detectedSourcesForOutput.length < 3
+  );
 
     const externalResearch = await buildVerifiedSourcePack({ profile, userMessage: lastUserMessage, shouldSearch: shouldSearchExternalSources });
 

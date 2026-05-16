@@ -287,7 +287,7 @@ const maxInTextCitationsForChat = 200;
 
 const pdfWorkerSrc = '/pdfjs/pdf.worker.min.mjs';
 
-const agents: { key: Agent; label: string }[] = [
+const defaultAgents: { key: Agent; label: string }[] = [
   { key: 'gemini', label: 'Gemini' },
   { key: 'openai', label: 'OPEN AI' },
   { key: 'claude', label: 'Claude' },
@@ -1663,6 +1663,7 @@ export default function ChatPage() {
 
   const [isMounted, setIsMounted] = useState(false);
   const [agent, setAgent] = useState<Agent>('gemini');
+const [agentsOrder, setAgentsOrder] = useState(defaultAgents);
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -1688,8 +1689,8 @@ export default function ChatPage() {
   const canvasTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const activeAgentLabel = useMemo(() => {
-    return agents.find((item) => item.key === agent)?.label || 'Gemini';
-  }, [agent]);
+  return agentsOrder.find((item) => item.key === agent)?.label || 'Gemini';
+}, [agent, agentsOrder]);
 
   const exportTitle = useMemo(() => {
     const base = activeProfile?.title || 'Zedpera výstup';
@@ -1697,6 +1698,20 @@ export default function ChatPage() {
   }, [activeProfile]);
 
   const canSubmit = isMounted && !isLoading && (input.trim().length > 0 || attachedFiles.length > 0);
+
+const handleSelectAgent = (nextAgent: Agent) => {
+  setAgent(nextAgent);
+
+  setAgentsOrder((current) => {
+    const selected = current.find((item) => item.key === nextAgent);
+    const others = current.filter((item) => item.key !== nextAgent);
+
+    if (!selected) return current;
+
+    return [selected, ...others];
+  });
+};
+
 
   useEffect(() => {
     setIsMounted(true);
@@ -2817,25 +2832,26 @@ CHYBA: ${message}
                       Model
                     </span>
 
-                    {agents.map((item) => {
-                      const active = agent === item.key;
+                    {agentsOrder.map((item) => {
+  const active = agent === item.key;
 
-                      return (
-                        <button
-                          key={item.key}
-                          type="button"
-                          onClick={() => setAgent(item.key)}
-                          disabled={!isMounted || isLoading}
-                          className={`rounded-2xl px-4 py-2 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                            active
-                              ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-800/40'
-                              : 'border border-white/10 bg-white/[0.055] text-slate-300 hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white'
-                          }`}
-                        >
-                          {item.label}
-                        </button>
-                      );
-                    })}
+  return (
+    <button
+      key={item.key}
+      type="button"
+      onClick={() => handleSelectAgent(item.key)}
+      disabled={!isMounted || isLoading}
+      className={`rounded-2xl px-4 py-2 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
+        active
+          ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-800/40'
+          : 'border border-white/10 bg-white/[0.055] text-slate-300 hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white'
+      }`}
+    >
+      {item.label}
+    </button>
+  );
+})}
+
                   </div>
 
                   <button

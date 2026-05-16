@@ -1688,7 +1688,7 @@ const [agentsOrder, setAgentsOrder] = useState(defaultAgents);
   const resultTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const canvasTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const activeAgentLabel = useMemo(() => {
+const activeAgentLabel = useMemo(() => {
   return agentsOrder.find((item) => item.key === agent)?.label || 'Gemini';
 }, [agent, agentsOrder]);
 
@@ -1711,7 +1711,6 @@ const handleSelectAgent = (nextAgent: Agent) => {
     return [selected, ...others];
   });
 };
-
 
   useEffect(() => {
     setIsMounted(true);
@@ -2696,29 +2695,46 @@ CHYBA: ${message}
                     </p>
                   </div>
 
-                  <div className="grid w-full gap-3 md:grid-cols-3">
-                    {suggestions.map((item) => {
-                      const Icon = item.icon;
+            <div className="grid w-full gap-3 md:grid-cols-3">
+  {suggestions.map((item) => {
+    const Icon = item.icon;
+    const disabled = !isMounted || isLoading || !activeProfile;
 
-                      return (
-                        <button
-                          key={item.title}
-                          type="button"
-                          onClick={() => runSuggestion(item)}
-                          disabled={!isMounted || isLoading || !activeProfile}
-                          className="group flex min-h-[76px] items-center gap-4 rounded-3xl border border-white/10 bg-white/[0.055] p-4 text-left transition hover:border-violet-400/50 hover:bg-white/[0.085] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200 transition group-hover:bg-violet-600 group-hover:text-white">
-                            <Icon className="h-5 w-5" />
-                          </span>
+    return (
+      <div
+        key={item.title}
+        role="button"
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled}
+        onClick={() => {
+          if (disabled) return;
+          runSuggestion(item);
+        }}
+        onKeyDown={(event) => {
+          if (disabled) return;
 
-                          <span className="text-sm font-black leading-5 text-slate-100">
-                            {item.title}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            runSuggestion(item);
+          }
+        }}
+        className={`group flex min-h-[76px] items-center gap-4 rounded-3xl border border-white/10 bg-white/[0.055] p-4 text-left transition ${
+          disabled
+            ? 'cursor-not-allowed opacity-50'
+            : 'cursor-pointer hover:border-violet-400/50 hover:bg-white/[0.085]'
+        }`}
+      >
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200 transition group-hover:bg-violet-600 group-hover:text-white">
+          <Icon className="h-5 w-5" />
+        </span>
+
+        <span className="text-sm font-black leading-5 text-slate-100">
+          {item.title}
+        </span>
+      </div>
+    );
+  })}
+</div>
                 </div>
               ) : (
                 <div className="mx-auto max-w-5xl space-y-5 pb-2">
@@ -2789,7 +2805,7 @@ CHYBA: ${message}
                   {isLoading && (
                     <div className="flex justify-start">
                       <div className="rounded-3xl border border-white/10 bg-white/[0.065] px-5 py-4 text-sm font-bold text-violet-200">
-                        🤖 {activeAgentLabel} spracúva požiadavku...
+                        🤖 {activeAgentLabel} analyzujem...
                       </div>
                     </div>
                   )}
@@ -2832,7 +2848,7 @@ CHYBA: ${message}
                       Model
                     </span>
 
-                    {agentsOrder.map((item) => {
+                {agentsOrder.map((item) => {
   const active = agent === item.key;
 
   return (
@@ -2851,7 +2867,6 @@ CHYBA: ${message}
     </button>
   );
 })}
-
                   </div>
 
                   <button

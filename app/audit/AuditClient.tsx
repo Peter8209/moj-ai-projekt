@@ -50,6 +50,8 @@ const LANGUAGES = [
 const CITATION_STYLES = ['ISO 690', 'APA 7', 'Harvard', 'Chicago', 'MLA'];
 
 const MIN_TEXT_LENGTH = 300;
+const MAX_TEXT_LENGTH = 25000;
+const AUDIT_END_MARKER = 'KONIEC AUDITU';
 
 // ================= CLEAN HELPERS =================
 
@@ -131,6 +133,24 @@ function removeBadAuditStart(value: string) {
     .trim();
 }
 
+function removeEndMarker(value: string) {
+  return cleanBrokenEncoding(value).replace(new RegExp(`\\s*${AUDIT_END_MARKER}\\s*$`, 'i'), '').trim();
+}
+
+function hasAuditEndMarker(value: string) {
+  return cleanBrokenEncoding(value).toUpperCase().includes(AUDIT_END_MARKER);
+}
+
+function normalizeTextForAudit(value: string) {
+  const cleaned = cleanBrokenEncoding(value);
+
+  if (cleaned.length <= MAX_TEXT_LENGTH) {
+    return cleaned;
+  }
+
+  return cleaned.slice(0, MAX_TEXT_LENGTH).trim();
+}
+
 function buildCleanAuditResult({
   title,
   workType,
@@ -144,7 +164,7 @@ function buildCleanAuditResult({
   citationStyle: string;
   rawResult: string;
 }) {
-  const cleaned = removeBadAuditStart(rawResult);
+  const cleaned = removeEndMarker(removeBadAuditStart(rawResult));
 
   const safeTitle = title.trim() || 'Kontrolovaná akademická práca';
 
@@ -163,18 +183,15 @@ function buildAuditInstruction(payload: AuditPayload) {
   return `
 Vykonaj odborný audit kvality akademickej práce.
 
-DÔLEŽITÉ PRAVIDLÁ:
-- Výstup musí začať normálnym nadpisom práce, nie textom "Audit kvality - ..." s poškodenými znakmi.
-- Nepíš email.
-- Nepíš oslovenie.
-- Nepíš predmet emailu.
-- Nepíš úvod typu "Ako AI audítor...".
-- Nepoužívaj poškodené znaky, cudzie symboly ani nečitateľné znaky.
-- Ak vstup obsahuje poškodené znaky, ignoruj ich a pracuj so zrozumiteľným obsahom.
-- Výstup píš čistým slovenským textom vhodným do Wordu.
-- Nepoužívaj markdown znaky #, ##, **, --- ani kódové bloky.
-- Nevymýšľaj zdroje, autorov, DOI ani URL.
-- Hodnoť odborne, konkrétne a priamo.
+KRITICKÉ PRAVIDLÁ:
+1. Výstup musí byť kompletný a ukončený presnou vetou: ${AUDIT_END_MARKER}
+2. Nepíš email, oslovenie, predmet, úvod typu "Ako AI audítor".
+3. Nepoužívaj markdown: žiadne #, **, ---, tabuľky ani kódové bloky.
+4. Nevymýšľaj konkrétne zdroje, autorov, DOI ani URL.
+5. Ak treba citácie, napíš iba typ zdroja, ktorý má autor doplniť, napríklad ISO norma, AOAC metóda, odborný článok alebo metodická príručka.
+6. Píš čisto, formálne a odborne po slovensky.
+7. Výstup nesmie byť príliš dlhý. Každý bod píš stručne, ale konkrétne.
+8. Pri časti "Ukážky upravených viet" uveď maximálne 5 upravených viet, aby sa výstup neodsekol.
 
 ÚDAJE O PRÁCI:
 Názov práce: ${payload.title || 'Neuvedené'}
@@ -187,51 +204,60 @@ TEXT NA AUDIT:
 ${payload.text}
 """
 
-VÝSTUP MUSÍ MAŤ TÚTO ŠTRUKTÚRU:
+POVINNÁ ŠTRUKTÚRA VÝSTUPU:
 
 1. Stručné hodnotenie
-Zhodnoť celkovú kvalitu textu, akademickú úroveň a použiteľnosť do práce.
+Uveď celkové hodnotenie kvality textu v 5 až 8 vetách.
 
 2. Silné stránky
-Uveď konkrétne silné stránky textu.
+Uveď 3 až 6 konkrétnych silných stránok.
 
 3. Slabé stránky
-Uveď konkrétne slabiny textu.
+Uveď 3 až 8 konkrétnych slabín.
 
-4. Logika a štruktúra
+4. Konkrétne odborné opravy
+Uveď odborné chyby alebo nepresnosti. Pri každej napíš:
+- čo je problém,
+- ako to opraviť,
+- prečo je oprava dôležitá.
+
+5. Logika a štruktúra
 Zhodnoť nadväznosť, členenie, argumentáciu a vnútornú súdržnosť.
 
-5. Metodológia
-Zhodnoť, či je metodologická časť dostatočná alebo čo chýba.
+6. Metodológia
+Zhodnoť metodickú časť. Uveď, či chýba princíp metódy, postup, prístroje, činidlá, koncentrácie, vzorkovanie alebo výpočty.
 
-6. Citácie a zdroje
-Zhodnoť, kde treba doplniť citácie, odborné zdroje alebo presnejšie odkazy.
+7. Citácie a zdroje
+Uveď, kde treba doplniť citácie. Nevymýšľaj konkrétne bibliografické záznamy.
 
-7. Akademický štýl
+8. Akademický štýl
 Zhodnoť jazyk, odbornosť, štylistiku, terminológiu a zrozumiteľnosť.
 
-8. Konkrétne opravy
-Uveď konkrétne návrhy úprav a lepšie formulácie vybraných viet.
+9. Ukážky upravených viet
+Uveď maximálne 5 vzorových preformulovaných viet.
 
-9. Odporúčané doplnenia
-Napíš, čo má autor doplniť do práce.
+10. Odporúčané doplnenia
+Uveď, čo má autor doplniť do práce.
 
-10. Skóre kvality od 0 do 100
-Uveď:
+11. Skóre kvality od 0 do 100
+Uveď presne tieto riadky:
 Logika:
 Metodológia:
 Citácie:
 Akademický štýl:
 Celkové skóre:
 
-11. Priorita opráv
+12. Priorita opráv
 Rozdeľ opravy na:
 Urgentné:
 Dôležité:
 Odporúčané:
 
-12. Technické upozornenie
-Ak text obsahoval poškodené znaky alebo nečitateľné časti, uveď to tu.
+13. Technické upozornenie
+Ak text obsahoval poškodené znaky alebo nečitateľné časti, uveď to tu. Ak nie, napíš, že technické problémy neboli zistené.
+
+Na úplný koniec napíš presne:
+${AUDIT_END_MARKER}
 `.trim();
 }
 
@@ -244,6 +270,7 @@ export default function AuditClient() {
   const [result, setResult] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
   const [cleanedInfo, setCleanedInfo] = useState('');
 
   const trimmedText = cleanBrokenEncoding(text).trim();
@@ -259,6 +286,8 @@ export default function AuditClient() {
   const progressPercent = useMemo(() => {
     return Math.min(100, Math.round((trimmedText.length / MIN_TEXT_LENGTH) * 100));
   }, [trimmedText.length]);
+
+  const isTextTooLong = trimmedText.length > MAX_TEXT_LENGTH;
 
   async function parseAuditResponse(res: Response): Promise<AuditApiResponse> {
     const contentType = res.headers.get('content-type') || '';
@@ -290,14 +319,21 @@ export default function AuditClient() {
 
   async function runAudit() {
     setError('');
+    setWarning('');
     setResult('');
     setCleanedInfo('');
 
-    const cleanedInputText = cleanBrokenEncoding(trimmedText);
+    const cleanedInputText = normalizeTextForAudit(trimmedText);
 
     if (cleanedInputText.length < MIN_TEXT_LENGTH) {
       setError(`Vlož aspoň ${MIN_TEXT_LENGTH} znakov textu.`);
       return;
+    }
+
+    if (trimmedText.length > MAX_TEXT_LENGTH) {
+      setWarning(
+        `Text je veľmi dlhý. Do auditu sa odoslalo prvých ${MAX_TEXT_LENGTH} znakov, aby sa výstup neodsekol. Pre kompletný audit odporúčam kontrolovať text po kapitolách.`
+      );
     }
 
     const payload: AuditPayload = {
@@ -308,14 +344,23 @@ export default function AuditClient() {
       text: cleanedInputText,
     };
 
+    const instruction = buildAuditInstruction(payload);
+
     const enhancedPayload = {
       ...payload,
-      prompt: buildAuditInstruction(payload),
-      instruction: buildAuditInstruction(payload),
+      prompt: instruction,
+      instruction,
       cleanOutput: true,
       removeBrokenEncoding: true,
-      outputFormat: 'clean_word_text',
+      outputFormat: 'complete_clean_word_text',
+      requireEndMarker: AUDIT_END_MARKER,
+      maxOutputTokens: 3500,
     };
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      controller.abort();
+    }, 120000);
 
     setLoading(true);
 
@@ -327,6 +372,7 @@ export default function AuditClient() {
           Accept: 'application/json',
         },
         body: JSON.stringify(enhancedPayload),
+        signal: controller.signal,
       });
 
       const data = await parseAuditResponse(res);
@@ -345,6 +391,12 @@ export default function AuditClient() {
         throw new Error('API nevrátilo žiadny výsledok auditu.');
       }
 
+      if (!hasAuditEndMarker(rawAuditResult)) {
+        setWarning(
+          'Audit sa pravdepodobne neukončil úplne. Zvýš maxTokens v /api/audit alebo skontroluj, či server neukončuje odpoveď predčasne.'
+        );
+      }
+
       const cleanedResult = buildCleanAuditResult({
         title: payload.title,
         workType: payload.workType,
@@ -356,12 +408,15 @@ export default function AuditClient() {
       setResult(cleanedResult);
     } catch (err) {
       const message =
-        err instanceof Error
-          ? err.message
-          : 'Nepodarilo sa vykonať audit. Skontroluj API /api/audit.';
+        err instanceof Error && err.name === 'AbortError'
+          ? 'Audit trval príliš dlho a bol prerušený. Skús kratší text alebo zvýš timeout v API.'
+          : err instanceof Error
+            ? err.message
+            : 'Nepodarilo sa vykonať audit. Skontroluj API /api/audit.';
 
       setError(message);
     } finally {
+      window.clearTimeout(timeoutId);
       setLoading(false);
     }
   }
@@ -384,6 +439,7 @@ export default function AuditClient() {
     setText('');
     setResult('');
     setError('');
+    setWarning('');
     setLoading(false);
     setCleanedInfo('');
   }
@@ -442,7 +498,7 @@ export default function AuditClient() {
               <input
                 value={title}
                 onChange={(e) => setTitle(cleanBrokenEncoding(e.target.value))}
-                placeholder="Napr. Vplyv umelej inteligencie na vzdelávanie"
+                placeholder="Napr. Stanovenie obsahu bielkovín podľa Kjeldahla"
                 className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-400"
               />
             </label>
@@ -520,15 +576,33 @@ export default function AuditClient() {
 
               <p className="mt-2 text-xs text-slate-500">
                 Odporúčanie: pre presnejší audit vlož celú kapitolu alebo viac
-                odsekov, nie iba krátku vetu.
+                odsekov. Pri veľmi dlhých dokumentoch kontroluj text po kapitolách,
+                aby sa výstup neodsekol.
               </p>
             </div>
           </div>
+
+          {isTextTooLong && (
+            <div className="mt-4 flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Text má viac ako {MAX_TEXT_LENGTH} znakov. Pri audite sa odošle
+                iba prvých {MAX_TEXT_LENGTH} znakov, aby sa výsledok neodsekol.
+              </span>
+            </div>
+          )}
 
           {cleanedInfo && (
             <div className="mt-4 flex items-start gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm leading-6 text-emerald-100">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
               <span>{cleanedInfo}</span>
+            </div>
+          )}
+
+          {warning && (
+            <div className="mt-4 flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{warning}</span>
             </div>
           )}
         </div>
@@ -639,6 +713,13 @@ export default function AuditClient() {
                     Audit bol úspešne dokončený.
                   </span>
                 </div>
+
+                {warning && (
+                  <div className="mb-4 flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{warning}</span>
+                  </div>
+                )}
 
                 {result}
               </div>

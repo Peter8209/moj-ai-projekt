@@ -1,6 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  languages,
+  type AppLanguage,
+} from '@/lib/i18n';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
@@ -1661,9 +1665,40 @@ ${truncateByChars(item.extractedText, maxClientExtractedCharsPerFile)}
 export default function ChatPage() {
   const router = useRouter();
 
-  const [isMounted, setIsMounted] = useState(false);
+  // ================= THEME / LIGHT-DARK MODE =================
+
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('zedpera-theme');
+
+    if (savedTheme === 'light' || savedTheme === 'dark') {
+      setTheme(savedTheme);
+      document.documentElement.classList.toggle('dark', savedTheme === 'dark');
+      return;
+    }
+
+    // Predvolený režim bude tmavý
+    localStorage.setItem('zedpera-theme', 'dark');
+    document.documentElement.classList.add('dark');
+  }, []);
+
+  const toggleTheme = () => {
+    setTheme((currentTheme) => {
+      const nextTheme = currentTheme === 'dark' ? 'light' : 'dark';
+
+      localStorage.setItem('zedpera-theme', nextTheme);
+      document.documentElement.classList.toggle('dark', nextTheme === 'dark');
+
+      return nextTheme;
+    });
+  };
+
+  // ================= BASIC STATE =================
+
+  const [language, setLanguage] = useState<AppLanguage>('sk');
   const [agent, setAgent] = useState<Agent>('gemini');
-const [agentsOrder, setAgentsOrder] = useState(defaultAgents);
+  const [agentsOrder, setAgentsOrder] = useState(defaultAgents);
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -1671,16 +1706,27 @@ const [agentsOrder, setAgentsOrder] = useState(defaultAgents);
   const [result, setResult] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
+  // ================= FILES / PROCESSING =================
+
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [processingLog, setProcessingLog] = useState<ProcessingLogItem[]>([]);
   const [isListening, setIsListening] = useState(false);
 
+  // ================= CANVAS =================
+
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [canvasText, setCanvasText] = useState('');
 
+  // ================= SELECTION / POPUP =================
+
   const [selectedTextState, setSelectedTextState] = useState<SelectedTextState | null>(null);
+  const selectedTextStateRef = useRef<SelectedTextState | null>(null);
+
   const [popupData, setPopupData] = useState<ParsedResult | null>(null);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [isEditingSelection, setIsEditingSelection] = useState(false);
+
+  // ================= REFS =================
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
@@ -1688,16 +1734,21 @@ const [agentsOrder, setAgentsOrder] = useState(defaultAgents);
   const resultTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const canvasTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-const activeAgentLabel = useMemo(() => {
-  return agentsOrder.find((item) => item.key === agent)?.label || 'Gemini';
-}, [agent, agentsOrder]);
+  // ================= MEMO =================
+
+  const activeAgentLabel = useMemo(() => {
+    return agentsOrder.find((item) => item.key === agent)?.label || 'Gemini';
+  }, [agent, agentsOrder]);
+
 
   const exportTitle = useMemo(() => {
     const base = activeProfile?.title || 'Zedpera výstup';
     return base.trim() || 'Zedpera výstup';
   }, [activeProfile]);
 
-  const canSubmit = isMounted && !isLoading && (input.trim().length > 0 || attachedFiles.length > 0);
+  const canSubmit =
+  !isLoading &&
+  (input.trim().length > 0 || attachedFiles.length > 0);
 
 const handleSelectAgent = (nextAgent: Agent) => {
   setAgent(nextAgent);
@@ -1712,9 +1763,22 @@ const handleSelectAgent = (nextAgent: Agent) => {
   });
 };
 
+
+
   useEffect(() => {
-    setIsMounted(true);
-  }, []);
+  const savedLanguage = localStorage.getItem('zedpera_language') as AppLanguage | null;
+
+  if (
+    savedLanguage === 'sk' ||
+    savedLanguage === 'cs' ||
+    savedLanguage === 'en' ||
+    savedLanguage === 'de' ||
+    savedLanguage === 'pl' ||
+    savedLanguage === 'hu'
+  ) {
+    setLanguage(savedLanguage);
+  }
+}, []);
 
   useEffect(() => {
     const activeRaw = localStorage.getItem('active_profile');
@@ -1755,6 +1819,119 @@ const handleSelectAgent = (nextAgent: Agent) => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+
+const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
+  setLanguage(nextLanguage);
+  localStorage.setItem('zedpera_language', nextLanguage);
+
+  const textToTranslate = result.trim() || canvasText.trim();
+
+  if (!textToTranslate || isLoading || isEditingSelection) {
+    return;
+  }
+
+  try {
+    setIsLoading(true);
+
+    const formData = new FormData();
+
+    formData.append('agent', agent);
+    formData.append('module', 'translation');
+    formData.append('language', nextLanguage);
+    formData.append('outputLanguage', nextLanguage);
+    formData.append('profile', JSON.stringify(activeProfile || null));
+
+    formData.append(
+      'messages',
+      JSON.stringify([
+        {
+          role: 'user',
+          content: `Prelož celý nasledujúci text do jazyka: ${nextLanguage}.
+
+Dôležité:
+- Prelož celý hlavný text.
+- Zachovaj odborný význam.
+- Zachovaj štruktúru odsekov a nadpisov.
+- Neprekladaj mená autorov.
+- Neprekladaj DOI, URL a bibliografické identifikátory.
+- Citácie v texte ponechaj v rovnakom tvare, napr. (Autor, rok).
+- Vráť iba preložený text.
+
+TEXT:
+${textToTranslate}`,
+        },
+      ]),
+    );
+
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const errorMessage = await readApiErrorResponse(res);
+      throw new Error(errorMessage);
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+    let translatedText = '';
+
+    if (contentType.includes('application/json')) {
+      const data = await res.json();
+
+      translatedText = String(
+        data.output ||
+          data.result ||
+          data.message ||
+          data.text ||
+          data.answer ||
+          '',
+      ).trim();
+    } else {
+      if (!res.body) {
+        throw new Error('API nevrátilo odpoveď.');
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        translatedText += decoder.decode(value, { stream: true });
+      }
+    }
+
+    const cleanedTranslatedText = cleanAiOutput(translatedText);
+
+    if (!cleanedTranslatedText) {
+      throw new Error('Preklad nevrátil žiadny text.');
+    }
+
+    setResult(cleanedTranslatedText);
+    setCanvasText(cleanedTranslatedText);
+
+    if (popupData) {
+      setPopupData(parseSections(cleanedTranslatedText));
+    }
+  } catch (error) {
+    console.error('LANGUAGE_TRANSLATION_ERROR:', error);
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Nepodarilo sa preložiť aktuálny výstup.';
+
+    alert(`Jazyk bol prepnutý, ale aktuálny výstup sa nepodarilo preložiť.
+
+${message}`);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const updateProcessingLog = (id: string, patch: Partial<ProcessingLogItem>) => {
     setProcessingLog((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
@@ -2210,7 +2387,7 @@ CHYBA: ${message}
     visibleUserText: string;
     apiUserText: string;
   }) => {
-    if (!isMounted || isLoading) return;
+   if (isLoading) return;;
 
     if (!activeProfile) {
       appendAssistantMessage(
@@ -2252,10 +2429,12 @@ CHYBA: ${message}
 
       const formData = new FormData();
 
-      formData.append('agent', agent);
-      formData.append('module', 'chat');
-      formData.append('messages', JSON.stringify(apiMessages));
-      formData.append('profile', JSON.stringify(activeProfile || null));
+formData.append('agent', agent);
+formData.append('module', 'chat');
+formData.append('language', language);
+formData.append('outputLanguage', language);
+formData.append('messages', JSON.stringify(apiMessages));
+formData.append('profile', JSON.stringify(activeProfile || null));
 
       if (activeProfile?.id) formData.append('projectId', activeProfile.id);
 
@@ -2471,18 +2650,19 @@ CHYBA: ${message}
   };
 
   const resetChat = () => {
-    setMessages([]);
-    setInput('');
-    setResult('');
-    setCanvasText('');
-    setPopupData(null);
-    setSelectedTextState(null);
-    setProcessingLog([]);
-    setAttachedFiles([]);
+  setMessages([]);
+  setInput('');
+  setResult('');
+  setCanvasText('');
+  setPopupData(null);
+  setSelectedTextState(null);
+  selectedTextStateRef.current = null;
+  setProcessingLog([]);
+  setAttachedFiles([]);
 
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (scrollAreaRef.current) scrollAreaRef.current.scrollTop = 0;
-  };
+  if (fileInputRef.current) fileInputRef.current.value = '';
+  if (scrollAreaRef.current) scrollAreaRef.current.scrollTop = 0;
+};
 
   const sendMessage = async () => {
     const text = input.trim();
@@ -2501,112 +2681,210 @@ CHYBA: ${message}
     });
   };
 
-  const handleTextSelection = (target: 'result' | 'canvas') => {
-    const element = target === 'result' ? resultTextareaRef.current : canvasTextareaRef.current;
-    if (!element) return;
+const handleTextSelection = (target: 'result' | 'canvas') => {
+  const element =
+    target === 'result' ? resultTextareaRef.current : canvasTextareaRef.current;
 
-    const start = element.selectionStart;
-    const end = element.selectionEnd;
+  if (!element) return;
 
-    if (start === end) {
-      setSelectedTextState(null);
-      return;
-    }
+  const start = element.selectionStart;
+  const end = element.selectionEnd;
 
-    const selected = element.value.slice(start, end);
+  if (start === end) {
+    return;
+  }
 
-    if (!selected.trim()) {
-      setSelectedTextState(null);
-      return;
-    }
+  const selected = element.value.slice(start, end);
 
-    setSelectedTextState({
-      target,
-      start,
-      end,
-      text: selected,
-    });
-  };
-
-  const replaceSelectedText = (replacement: string) => {
-    if (!selectedTextState) return;
-
-    const cleaned = cleanAiOutput(replacement);
-
-    if (selectedTextState.target === 'result') {
-      setResult((prev) => {
-        const next = prev.slice(0, selectedTextState.start) + cleaned + prev.slice(selectedTextState.end);
-        setCanvasText(next);
-        return next;
-      });
-    } else {
-      setCanvasText((prev) => prev.slice(0, selectedTextState.start) + cleaned + prev.slice(selectedTextState.end));
-    }
-
+  if (!selected.trim()) {
+    selectedTextStateRef.current = null;
     setSelectedTextState(null);
+    return;
+  }
+
+  const nextSelection: SelectedTextState = {
+    target,
+    start,
+    end,
+    text: selected,
   };
 
-  const editSelectedText = async (mode: 'academic' | 'shorten' | 'expand' | 'grammar') => {
-    if (!selectedTextState || isLoading) return;
+  selectedTextStateRef.current = nextSelection;
+  setSelectedTextState(nextSelection);
+};
 
-    setIsLoading(true);
+const replaceSelectedText = (
+  replacement: string,
+  selectionOverride?: SelectedTextState | null,
+) => {
+  const selection =
+    selectionOverride || selectedTextStateRef.current || selectedTextState;
 
-    try {
-      const formData = new FormData();
+  if (!selection) return;
 
-      formData.append('agent', agent);
-      formData.append('module', 'chat');
-      formData.append(
-        'messages',
-        JSON.stringify([
-          {
-            role: 'user',
-            content: selectedTextState.text,
-          },
-        ]),
-      );
+  const cleaned = cleanAiOutput(replacement);
 
-      formData.append('profile', JSON.stringify(activeProfile || null));
-      formData.append('editSelectedTextOnly', 'true');
-      formData.append('editMode', mode);
-      formData.append('selectedText', selectedTextState.text);
+  if (!cleaned) return;
 
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        body: formData,
-      });
+  if (selection.target === 'result') {
+    setResult((prev) => {
+      const next =
+        prev.slice(0, selection.start) +
+        cleaned +
+        prev.slice(selection.end);
 
-      if (!res.ok) throw new Error(await readApiErrorResponse(res));
+      setCanvasText(next);
+      return next;
+    });
+  } else {
+    setCanvasText((prev) => {
+      const next =
+        prev.slice(0, selection.start) +
+        cleaned +
+        prev.slice(selection.end);
 
-      const contentType = res.headers.get('content-type') || '';
-      let editedText = '';
+      return next;
+    });
+  }
 
-      if (contentType.includes('application/json')) {
-        const data = await res.json();
-        editedText = String(data.output || data.result || data.message || data.text || data.answer || '');
-      } else {
-        if (!res.body) throw new Error('API nevrátilo stream odpovede.');
+  selectedTextStateRef.current = null;
+  setSelectedTextState(null);
+};
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
+const getEditInstruction = (
+  mode: 'academic' | 'shorten' | 'expand' | 'grammar',
+) => {
+  if (mode === 'academic') {
+    return 'Uprav označený text akademicky, odborne, plynulo a štylisticky vhodne. Zachovaj pôvodný význam. Nevkladaj nové zdroje, nové citácie ani nové fakty.';
+  }
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          editedText += decoder.decode(value, { stream: true });
-        }
+  if (mode === 'shorten') {
+    return 'Skráť označený text. Zachovaj hlavný význam, odborný tón a logiku textu. Nevkladaj nové zdroje ani nové citácie.';
+  }
+
+  if (mode === 'expand') {
+    return 'Rozšír označený text odborne a akademicky. Zachovaj pôvodný význam a kontext. Nevymýšľaj nové fakty, zdroje ani citácie.';
+  }
+
+  return 'Oprav gramatiku, štylistiku, interpunkciu a plynulosť označeného textu. Zachovaj pôvodný význam. Nevkladaj nové zdroje ani nové citácie.';
+};
+
+const editSelectedText = async (
+  mode: 'academic' | 'shorten' | 'expand' | 'grammar',
+) => {
+  const selection = selectedTextStateRef.current || selectedTextState;
+
+  if (!selection || isEditingSelection) return;
+
+  const selectedText = selection.text.trim();
+
+  if (!selectedText) {
+    alert('Nie je označený žiadny text na úpravu.');
+    return;
+  }
+
+  setIsEditingSelection(true);
+
+  try {
+    const instruction = getEditInstruction(mode);
+
+    const formData = new FormData();
+
+    formData.append('agent', agent);
+    formData.append('module', 'chat');
+    formData.append('profile', JSON.stringify(activeProfile || null));
+
+    formData.append('editSelectedTextOnly', 'true');
+    formData.append('editMode', mode);
+    formData.append('selectedText', selectedText);
+
+    formData.append('requireSourceList', 'false');
+    formData.append('allowAiKnowledgeFallback', 'true');
+    formData.append('validateAttachmentsAgainstProfile', 'false');
+    formData.append('returnExtractedFilesInfo', 'false');
+
+    formData.append(
+      'messages',
+      JSON.stringify([
+        {
+          role: 'user',
+          content: `${instruction}
+
+OZNAČENÝ TEXT:
+${selectedText}
+
+Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odporúčania ani zdroje.`,
+        },
+      ]),
+    );
+
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const errorMessage = await readApiErrorResponse(res);
+      throw new Error(errorMessage);
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+    let editedText = '';
+
+    if (contentType.includes('application/json')) {
+      const data = await res.json();
+
+      editedText = String(
+        data.output ||
+          data.result ||
+          data.message ||
+          data.text ||
+          data.answer ||
+          '',
+      ).trim();
+    } else {
+      if (!res.body) {
+        throw new Error('API nevrátilo odpoveď.');
       }
 
-      if (!editedText.trim()) throw new Error('AI nevrátila upravený text.');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
 
-      replaceSelectedText(editedText);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Nepodarilo sa upraviť označený text.';
-      alert(message);
-    } finally {
-      setIsLoading(false);
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        editedText += decoder.decode(value, { stream: true });
+      }
     }
-  };
+
+    const cleanedEditedText = cleanAiOutput(editedText);
+
+    if (!cleanedEditedText) {
+      throw new Error('AI nevrátila upravený text.');
+    }
+
+    replaceSelectedText(cleanedEditedText, selection);
+  } catch (error) {
+    console.error('EDIT_SELECTED_TEXT_ERROR:', error);
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Označený text sa nepodarilo upraviť.';
+
+    alert(
+      `Označený text sa nepodarilo upraviť.
+
+${message}
+
+Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
+    );
+  } finally {
+    setIsEditingSelection(false);
+  }
+};
 
   return (
     <>
@@ -2641,6 +2919,28 @@ CHYBA: ${message}
                 <Home className="h-4 w-4" />
                 Menu
               </button>
+
+
+<div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2">
+  {languages.map((item) => {
+    const active = language === item.code;
+
+    return (
+      <button
+        key={item.code}
+        type="button"
+        onClick={() => handleSelectLanguage(item.code)}
+        className={`rounded-xl px-3 py-2 text-xs font-black transition ${
+          active
+            ? 'bg-violet-600 text-white shadow-lg shadow-violet-800/30'
+            : 'bg-white/[0.055] text-slate-300 hover:bg-violet-500/15 hover:text-white'
+        }`}
+      >
+        {item.label}
+      </button>
+    );
+  })}
+</div>
 
               <button
                 type="button"
@@ -2698,7 +2998,7 @@ CHYBA: ${message}
             <div className="grid w-full gap-3 md:grid-cols-3">
   {suggestions.map((item) => {
     const Icon = item.icon;
-    const disabled = !isMounted || isLoading || !activeProfile;
+   const disabled = isLoading || !activeProfile;
 
     return (
       <div
@@ -2805,7 +3105,7 @@ CHYBA: ${message}
                   {isLoading && (
                     <div className="flex justify-start">
                       <div className="rounded-3xl border border-white/10 bg-white/[0.065] px-5 py-4 text-sm font-bold text-violet-200">
-                        🤖 {activeAgentLabel} analyzujem...
+                        🤖  Analyzujem...
                       </div>
                     </div>
                   )}
@@ -2856,7 +3156,7 @@ CHYBA: ${message}
       key={item.key}
       type="button"
       onClick={() => handleSelectAgent(item.key)}
-      disabled={!isMounted || isLoading}
+     disabled={isLoading}
       className={`rounded-2xl px-4 py-2 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
         active
           ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-800/40'
@@ -2891,7 +3191,7 @@ CHYBA: ${message}
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={!isMounted || isLoading}
+                   disabled={isLoading}
                     className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.055] text-slate-300 transition hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                     title={`Priložiť súbory, max. ${maxFilesCount} súborov, max. ${maxFileSizeMb} MB na súbor`}
                   >
@@ -2915,7 +3215,7 @@ CHYBA: ${message}
                   <button
                     type="button"
                     onClick={startDictation}
-                    disabled={!isMounted || isLoading}
+                    disabled={isLoading}
                     className={`mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border transition disabled:cursor-not-allowed disabled:opacity-50 ${
                       isListening
                         ? 'border-red-400/50 bg-red-500 text-white shadow-lg shadow-red-700/30'
@@ -2949,28 +3249,61 @@ CHYBA: ${message}
                   </div>
                 </div>
 
-                <button type="button" onClick={() => setSelectedTextState(null)} className="rounded-2xl bg-white/10 p-2 text-white hover:bg-white/20">
-                  <X className="h-4 w-4" />
-                </button>
+                <button
+  type="button"
+  onClick={() => {
+    selectedTextStateRef.current = null;
+    setSelectedTextState(null);
+  }}
+  className="rounded-2xl bg-white/10 p-2 text-white hover:bg-white/20"
+>
+  <X className="h-4 w-4" />
+</button>
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => editSelectedText('academic')} disabled={isLoading} className="rounded-2xl bg-violet-600 px-4 py-2 text-xs font-black text-white disabled:opacity-50">
-                  Akademicky upraviť
-                </button>
+  <button
+    type="button"
+    onMouseDown={(event) => event.preventDefault()}
+    onClick={() => editSelectedText('academic')}
+    disabled={isEditingSelection}
+    className="rounded-2xl bg-violet-600 px-4 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+  >
+    {isEditingSelection ? 'Upravujem...' : 'Akademicky upraviť'}
+  </button>
 
-                <button type="button" onClick={() => editSelectedText('shorten')} disabled={isLoading} className="rounded-2xl bg-white/10 px-4 py-2 text-xs font-black text-white disabled:opacity-50">
-                  Skrátiť
-                </button>
+  <button
+    type="button"
+    onMouseDown={(event) => event.preventDefault()}
+    onClick={() => editSelectedText('shorten')}
+    disabled={isEditingSelection}
+    className="rounded-2xl bg-white/10 px-4 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+  >
+    Skrátiť
+  </button>
 
-                <button type="button" onClick={() => editSelectedText('expand')} disabled={isLoading} className="rounded-2xl bg-white/10 px-4 py-2 text-xs font-black text-white disabled:opacity-50">
-                  Rozšíriť
-                </button>
+  <button
+    type="button"
+    onMouseDown={(event) => event.preventDefault()}
+    onClick={() => editSelectedText('expand')}
+    disabled={isEditingSelection}
+    className="rounded-2xl bg-white/10 px-4 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+  >
+    Rozšíriť
+  </button>
 
-                <button type="button" onClick={() => editSelectedText('grammar')} disabled={isLoading} className="rounded-2xl bg-white/10 px-4 py-2 text-xs font-black text-white disabled:opacity-50">
-                  Opraviť gramatiku
-                </button>
-              </div>
+  <button
+    type="button"
+    onMouseDown={(event) => event.preventDefault()}
+    onClick={() => editSelectedText('grammar')}
+    disabled={isEditingSelection}
+    className="rounded-2xl bg-white/10 px-4 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+  >
+    Opraviť gramatiku
+  </button>
+</div>
+
+             
             </div>
           )}
 

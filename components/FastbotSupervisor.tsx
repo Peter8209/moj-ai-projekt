@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import {
   AlertTriangle,
   Bot,
@@ -10,7 +10,6 @@ import {
   GraduationCap,
   RefreshCw,
   ShieldCheck,
-  Sparkles,
   Wand2,
 } from 'lucide-react';
 
@@ -80,15 +79,23 @@ function safeJsonParse<T>(value: string | null): T | null {
   }
 }
 
-function normalizeProfile(raw: any): SavedProfile | null {
+function normalizeProfile(raw: unknown): SavedProfile | null {
   if (!raw || typeof raw !== 'object') return null;
 
-  if (raw.profile && typeof raw.profile === 'object') {
+  const value = raw as {
+    profile?: SavedProfile;
+    schema?: SavedProfile['schema'];
+    workLanguage?: string;
+    savedAt?: string;
+    generatedAt?: string;
+  };
+
+  if (value.profile && typeof value.profile === 'object') {
     return {
-      ...raw.profile,
-      schema: raw.schema || raw.profile.schema,
-      workLanguage: raw.workLanguage || raw.profile.workLanguage,
-      savedAt: raw.savedAt || raw.generatedAt || raw.profile.savedAt,
+      ...value.profile,
+      schema: value.schema || value.profile.schema,
+      workLanguage: value.workLanguage || value.profile.workLanguage,
+      savedAt: value.savedAt || value.generatedAt || value.profile.savedAt,
     };
   }
 
@@ -149,7 +156,7 @@ function cleanBrokenEncoding(value: string) {
     .replace(/^[^\p{L}\p{N}\s"'„“‚‘\-–—()[\]]{1,20}\s*/gmu, '')
     .replace(/^\s*[|/\\_~^`´¨]+/gm, '')
 
-    // odstránenie markdown nadpisov, ak ich nechceme posielať do Wordu
+    // odstránenie markdown formátovania
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/__(.*?)__/g, '$1')
@@ -165,16 +172,47 @@ function cleanBrokenEncoding(value: string) {
 }
 
 function removeBadAiHeadings(value: string) {
-  return cleanBrokenEncoding(value)
-    .replace(/^AI\s+vedúci\s*:?\s*/i, '')
-    .replace(/^AI\s+veduci\s*:?\s*/i, '')
-    .replace(/^Ako\s+AI\s+vedúci\s+práce\s*,?\s*/i, '')
-    .replace(/^Ako\s+vedúci\s+práce\s*,?\s*/i, '')
-    .replace(/^Dobrý\s+deň\s*,?\s*/i, '')
-    .replace(/^Vážený\s+študent\s*,?\s*/i, '')
+  let cleaned = cleanBrokenEncoding(value);
+
+  const forbiddenStartPatterns: RegExp[] = [
+    /^AI\s+vedúci\s+práce\s*[:\-–—]?\s*/i,
+    /^AI\s+veduci\s+prace\s*[:\-–—]?\s*/i,
+    /^AI\s+vedúci\s*[:\-–—]?\s*/i,
+    /^AI\s+veduci\s*[:\-–—]?\s*/i,
+    /^Výstup\s+AI\s+vedúci\s*[:\-–—]?\s*/i,
+    /^Vystup\s+AI\s+veduci\s*[:\-–—]?\s*/i,
+    /^Výstup\s+modulu\s+AI\s+vedúci\s*[:\-–—]?\s*/i,
+    /^Vystup\s+modulu\s+AI\s+veduci\s*[:\-–—]?\s*/i,
+    /^Ako\s+AI\s+vedúci\s+práce\s*,?\s*/i,
+    /^Ako\s+AI\s+veduci\s+prace\s*,?\s*/i,
+    /^Ako\s+vedúci\s+práce\s*,?\s*/i,
+    /^Ako\s+veduci\s+prace\s*,?\s*/i,
+    /^Dobrý\s+deň\s*,?\s*/i,
+    /^Dobry\s+den\s*,?\s*/i,
+    /^Vážený\s+študent\s*,?\s*/i,
+    /^Vazeny\s+student\s*,?\s*/i,
+  ];
+
+  for (const pattern of forbiddenStartPatterns) {
+    cleaned = cleaned.replace(pattern, '');
+  }
+
+  cleaned = cleaned
     .replace(/^Predmet\s*:.*$/gim, '')
     .replace(/^Email\s*:.*$/gim, '')
+    .replace(/^Názov\s+modulu\s*:.*$/gim, '')
+    .replace(/^Nazov\s+modulu\s*:.*$/gim, '')
+    .replace(/^Modul\s*:.*$/gim, '')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
+
+  // poistka: ak AI opakovane vráti nadpis na prvom riadku
+  cleaned = cleaned.replace(
+    /^(AI\s+vedúci|AI\s+veduci|AI\s+vedúci\s+práce|AI\s+veduci\s+prace)\s*$/im,
+    '',
+  );
+
+  return cleaned.trim();
 }
 
 function buildProfileText(profile: SavedProfile | null, keywords: string[]) {
@@ -227,7 +265,15 @@ function buildSupervisorPrompt({
 
   return `
 TVOJA ROLA:
-Si odborný AI vedúci akademickej práce. Hodnotíš text ako vedúci práce, školiteľ alebo oponent.
+Si odborný akademický konzultant, ktorý hodnotí text ako vedúci práce, školiteľ alebo oponent.
+
+ABSOLÚTNY ZÁKAZ PRE ZAČIATOK ODPOVEDE:
+- Výstup nikdy nezačínaj textom „AI Vedúci“.
+- Výstup nikdy nezačínaj textom „AI vedúci práce“.
+- Výstup nikdy nezačínaj textom „Ako AI vedúci práce...“.
+- Výstup nikdy nezačínaj názvom modulu.
+- Názov modulu je iba interná systémová informácia.
+- Prvá veta odpovede musí začínať priamo odborným hodnotením textu.
 
 ZÁKAZ:
 - Nepíš email.
@@ -235,11 +281,13 @@ ZÁKAZ:
 - Nepíš oslovenie typu „Dobrý deň“.
 - Nepíš všeobecné marketingové frázy.
 - Nepíš nadpis „AI vedúci“.
+- Nepíš nadpis „AI Vedúci práce“.
+- Nepíš text „Výstup AI Vedúci“.
 - Nepíš úvod typu „Ako AI vedúci práce...“.
 - Nepíš text práce nanovo celý.
 - Nevymýšľaj zdroje, autorov, roky, DOI ani URL.
 - Neopravuj len gramatiku. Hodnoť odbornú kvalitu.
-- Ak sú v texte poškodené znaky alebo zvláštne symboly, upozorni na to ako technický problém a potom hodnotiť zrozumiteľný obsah.
+- Ak sú v texte poškodené znaky alebo zvláštne symboly, upozorni na to ako technický problém a potom hodnoť zrozumiteľný obsah.
 
 POVINNÝ ŠTÝL:
 - Odpovedaj po slovensky.
@@ -248,6 +296,7 @@ POVINNÝ ŠTÝL:
 - Každú výčitku vysvetli a pridaj návrh opravy.
 - Výstup píš čistým textom vhodným do Wordu.
 - Nepoužívaj markdown znaky #, ##, **, --- ani kódové bloky.
+- Odpoveď začni rovno bodom „1. CELKOVÉ HODNOTENIE“.
 
 PRÍSNOSŤ HODNOTENIA:
 ${strictness}
@@ -259,7 +308,8 @@ TEXT / KAPITOLA NA HODNOTENIE:
 ${cleanedText || 'Text práce zatiaľ nebol vložený.'}
 """
 
-VÝSTUP MUSÍ MAŤ PRESNE TÚTO ŠTRUKTÚRU:
+VÝSTUP MUSÍ MAŤ PRESNE TÚTO ŠTRUKTÚRU.
+NEPREDCHÁDZAJ JU ŽIADNYM NADPISOM, ŽIADNYM OSLOVENÍM ANI TEXTOM „AI VEDÚCI“.
 
 1. CELKOVÉ HODNOTENIE
 Zhodnoť, či text zodpovedá profilu práce, názvu práce, cieľu, metodológii a akademickej úrovni.
@@ -328,19 +378,6 @@ export default function FastbotSupervisor({
   const [loadedInfo, setLoadedInfo] = useState('');
   const [textWasCleaned, setTextWasCleaned] = useState(false);
 
-  useEffect(() => {
-    loadDataFromLocalStorage();
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    localStorage.setItem(
-      STORAGE_KEYS.latestGeneratedText,
-      cleanBrokenEncoding(generatedText),
-    );
-  }, [generatedText]);
-
   const loadDataFromLocalStorage = () => {
     if (typeof window === 'undefined') return;
 
@@ -351,11 +388,11 @@ export default function FastbotSupervisor({
     const rawProfiles = localStorage.getItem(STORAGE_KEYS.profiles);
 
     profile =
-      normalizeProfile(safeJsonParse<any>(rawActiveProfile)) ||
-      normalizeProfile(safeJsonParse<any>(rawProfile));
+      normalizeProfile(safeJsonParse<unknown>(rawActiveProfile)) ||
+      normalizeProfile(safeJsonParse<unknown>(rawProfile));
 
     if (!profile && rawProfiles) {
-      const parsedProfiles = safeJsonParse<any[]>(rawProfiles);
+      const parsedProfiles = safeJsonParse<unknown[]>(rawProfiles);
 
       if (Array.isArray(parsedProfiles) && parsedProfiles.length > 0) {
         profile = normalizeProfile(parsedProfiles[0]);
@@ -386,6 +423,19 @@ export default function FastbotSupervisor({
 
     setLoadedInfo(`${profileText} ${generatedTextInfo}`);
   };
+
+  useEffect(() => {
+    loadDataFromLocalStorage();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    localStorage.setItem(
+      STORAGE_KEYS.latestGeneratedText,
+      removeBadAiHeadings(generatedText),
+    );
+  }, [generatedText]);
 
   const keywords = useMemo(() => {
     if (activeProfile?.keywords && activeProfile.keywords.length > 0) {
@@ -422,7 +472,7 @@ export default function FastbotSupervisor({
 
   const copyToClipboard = async (value: string) => {
     try {
-      await navigator.clipboard.writeText(value);
+      await navigator.clipboard.writeText(removeBadAiHeadings(value));
       setCopied(true);
 
       window.setTimeout(() => {
@@ -477,9 +527,9 @@ ${cleanedText || 'Text práce zatiaľ nebol vložený.'}
 
               <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-300">
                 Modul načíta profil práce a text práce. Následne pripraví čisté
-                zadanie pre Fastbota bez chybných úvodných znakov, bez emailov
-                a bez všeobecných odpovedí. Výstup má byť výhradne odborná
-                spätná väzba vedúceho práce.
+                zadanie pre Fastbota bez chybných úvodných znakov, bez emailov,
+                bez všeobecných odpovedí a bez toho, aby samotný výstup začínal
+                názvom modulu.
               </p>
 
               {loadedInfo && (
@@ -573,7 +623,8 @@ ${cleanedText || 'Text práce zatiaľ nebol vložený.'}
 
             <p className="mt-1 text-sm leading-6 text-slate-400">
               Sem sa načíta posledný vygenerovaný AI text. Ak sa zobrazujú
-              poškodené znaky, klikni na „Vyčistiť poškodené znaky“.
+              poškodené znaky alebo nechcený úvodný nadpis, klikni na
+              „Vyčistiť poškodené znaky“.
             </p>
           </div>
 
@@ -644,7 +695,8 @@ ${cleanedText || 'Text práce zatiaľ nebol vložený.'}
 
             <p className="mt-1 text-sm leading-6 text-slate-400">
               Toto zadanie obsahuje pevné pravidlá, aby Fastbot negeneroval
-              emaily, hlúposti ani poškodené úvodné znaky.
+              emaily, poškodené úvodné znaky ani výstup začínajúci názvom
+              modulu.
             </p>
           </div>
 
@@ -666,7 +718,8 @@ ${cleanedText || 'Text práce zatiaľ nebol vložený.'}
 
             <p className="mt-1 text-sm leading-6 text-slate-400">
               Do chatu vlož skopírované zadanie. Fastbot musí vrátiť odbornú
-              kritiku práce, nie email.
+              kritiku práce, nie email a nie výstup začínajúci textom
+              „AI Vedúci“.
             </p>
           </div>
 
@@ -697,7 +750,7 @@ ${cleanedText || 'Text práce zatiaľ nebol vložený.'}
   );
 }
 
-type InfoBoxIcon = React.ComponentType<{
+type InfoBoxIcon = ComponentType<{
   className?: string;
 }>;
 

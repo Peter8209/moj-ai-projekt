@@ -7,7 +7,7 @@ import { xai } from '@ai-sdk/xai';
 import { NextResponse } from 'next/server';
 import mammoth from 'mammoth';
 import { gunzipSync } from 'zlib';
-import { createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,6 +18,7 @@ export const maxDuration = 90;
 // =====================================================
 
 type Agent = 'openai' | 'claude' | 'gemini' | 'grok' | 'mistral';
+type AppLanguage = 'sk' | 'cs' | 'cz' | 'en' | 'de' | 'pl' | 'hu';
 
 type ModuleKey =
   | 'supervisor'
@@ -249,6 +250,56 @@ const chapterOutputTokens = 9000;
 // =====================================================
 // BASIC HELPERS
 // =====================================================
+
+function normalizeAppLanguage(value: unknown, fallback: AppLanguage = 'sk'): AppLanguage {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (normalized === 'sk' || normalized === 'slovak' || normalized === 'slovenčina' || normalized === 'slovencina') {
+    return 'sk';
+  }
+
+  if (
+    normalized === 'cs' ||
+    normalized === 'cz' ||
+    normalized === 'czech' ||
+    normalized === 'čeština' ||
+    normalized === 'cestina'
+  ) {
+    return 'cs';
+  }
+
+  if (normalized === 'en' || normalized === 'english' || normalized === 'angličtina' || normalized === 'anglictina') {
+    return 'en';
+  }
+
+  if (normalized === 'de' || normalized === 'german' || normalized === 'nemčina' || normalized === 'nemcina') {
+    return 'de';
+  }
+
+  if (normalized === 'pl' || normalized === 'polish' || normalized === 'poľština' || normalized === 'polstina') {
+    return 'pl';
+  }
+
+  if (normalized === 'hu' || normalized === 'hungarian' || normalized === 'maďarčina' || normalized === 'madarcina') {
+    return 'hu';
+  }
+
+  return fallback;
+}
+
+function getLanguageName(language: AppLanguage): string {
+  const names: Record<AppLanguage, string> = {
+    sk: 'slovenčina',
+    cs: 'čeština',
+    cz: 'čeština',
+    en: 'angličtina',
+    de: 'nemčina',
+    pl: 'poľština',
+    hu: 'maďarčina',
+  };
+
+  return names[language] || 'slovenčina';
+}
 
 function parseJson<T>(value: FormDataEntryValue | null, fallback: T): T {
   if (!value || typeof value !== 'string') return fallback;
@@ -1603,32 +1654,43 @@ function buildPrimaryDocumentSources({
   extractedFiles: ExtractedAttachment[];
   attachmentWasRelevant?: boolean;
 }) {
-  // PRIMÁRNY ZDROJ = dokument/príloha ako celok + autor/autori samotnej prílohy, ak sa dajú
-  // bezpečne zistiť z titulnej/úvodnej časti. Nie je to zoznam autorov citovaných v literatúre.
-  // Funkcia zámerne nevracia [] iba preto, že automatická relevancia vyšla slabo; ak systém
-  // z prílohy vyťažil citácie alebo názov dokumentu, primárny zdroj sa musí ukázať.
+  /**
+   * PRIMÁRNE ZDROJE = iba názvy reálne použitých príloh/projektových dokumentov.
+   *
+   * Dôležité:
+   * - Nikdy sem nepatria články z bibliografie typu Kiening, Osman, Sathe...
+   * - Nikdy sem nepatria DOI, URL, časopis, volume, issue, pages.
+   * - Sekundárne zdroje sa riešia samostatne cez buildSecondaryLiteratureFromUsedCitations().
+   */
+
+  if (!attachmentWasRelevant) return [];
+
   const byDocument = new Map<string, { documentName: string; authors: string[] }>();
 
+  // 1. Najspoľahlivejší zdroj názvu prílohy sú reálne nahraté/extrahované súbory.
   for (const file of extractedFiles) {
     const documentName = normalizeAttachmentDocumentName(
       file.originalName || file.name || file.preparedName || '',
     );
+
     if (!documentName || looksLikeRawOcrPage(documentName)) continue;
 
     const key = normalizeForSemanticMatch(documentName);
     if (!key) continue;
 
     const headerAuthors = extractAttachmentAuthorsFromFirstPages(file);
-    const existing = byDocument.get(key);
 
     byDocument.set(key, {
       documentName,
-      authors: cleanValidAuthors([...(existing?.authors || []), ...headerAuthors]),
+      authors: cleanValidAuthors(headerAuthors),
     });
   }
 
+  // 2. Projektové dokumenty alebo zdroje zo Supabase môžu doplniť iba názov dokumentu.
+  //    Nesmú sa z nich robiť primárne zdroje podľa raw/title bibliografie.
   for (const source of detectedSourcesForOutput) {
     const documentName = normalizeAttachmentDocumentName(source.sourceDocumentName || '');
+
     if (!documentName || looksLikeRawOcrPage(documentName)) continue;
 
     const key = normalizeForSemanticMatch(documentName);
@@ -1636,33 +1698,37 @@ function buildPrimaryDocumentSources({
 
     const existing = byDocument.get(key);
 
-    // Authors from BibliographicCandidate are usually secondary/reference authors, so use them
-    // only when we do not have extractedFiles for this document and the source looks like the
-    // article itself. This prevents Clark, Dellaporta, etc. from being repeated as attachment authors.
-    const mayUseSourceAuthors =
-      !existing?.authors?.length &&
-      source.origin !== 'citation' &&
-      source.matchedFromText !== true &&
-      Boolean(source.title) &&
-      normalizeForSemanticMatch(documentName).includes(
-        normalizeForSemanticMatch(String(source.title || '')).slice(0, 24),
-      );
-
     byDocument.set(key, {
       documentName: existing?.documentName || documentName,
-      authors: cleanValidAuthors([
-        ...(existing?.authors || []),
-        ...(mayUseSourceAuthors ? source.authors || [] : []),
-      ]),
+      authors: cleanValidAuthors(existing?.authors || []),
     });
   }
-
-  if (!attachmentWasRelevant && byDocument.size === 0) return [];
 
   return Array.from(byDocument.values())
     .map(formatPrimaryDocumentSourceLine)
     .filter(Boolean)
     .slice(0, maxFinalSourcesInOutput);
+}
+
+
+function removePrimarySourcePlaceholder(text: string, extractedFiles: ExtractedAttachment[]) {
+  const firstFileName =
+    extractedFiles[0]?.originalName ||
+    extractedFiles[0]?.name ||
+    extractedFiles[0]?.preparedName ||
+    '';
+
+  if (!firstFileName) {
+    return normalizeText(text).replace(
+      /\[N[aá]zov\s+pr[ií]lohy\]\.\s*Autor\s+pr[ií]lohy\s*\/\s*zisten[ií]\s+autori\s+pr[ií]lohy:\s*\[autori\s+alebo\s+nezisten[eé]\]\.?/gi,
+      'Primárny dokument nebol jednoznačne identifikovaný z priložených súborov.',
+    );
+  }
+
+  return normalizeText(text).replace(
+    /\[N[aá]zov\s+pr[ií]lohy\]\.\s*Autor\s+pr[ií]lohy\s*\/\s*zisten[ií]\s+autori\s+pr[ií]lohy:\s*\[autori\s+alebo\s+nezisten[eé]\]\.?/gi,
+    `${firstFileName}. Autor prílohy / zistení autori prílohy: nezistené z extrahovaného textu.`,
+  );
 }
 
 function normalizeCitationIdentityForOutput(value: string) {
@@ -1956,9 +2022,11 @@ function ensureOutputHasPrimarySecondarySources({
     externalSources,
   });
 
-  const primaryBlock = primaryDocuments.length
-    ? primaryDocuments.map((item, index) => `${index + 1}. ${item}`).join('\n')
-   : 'Vlastné odborné zdroje AI modelu použité pri generovaní textu podľa aktívneho profilu práce.';
+ const primaryBlock = primaryDocuments.length
+  ? primaryDocuments.map((item, index) => `${index + 1}. ${item}`).join('\n')
+  : attachmentWasRelevant
+    ? 'Neuvedené. Relevantný primárny dokument nebol jednoznačne identifikovaný.'
+    : 'Žiadne prílohy neboli dodané, preto neboli použité žiadne primárne zdroje.';
 
   const secondaryBlock = secondarySources.length
     ? secondarySources.map((item, index) => `${index + 1}. ${item}`).join('\n')
@@ -2525,9 +2593,16 @@ function buildCompactSourceSummary({
     sources: mergedSources,
     authors,
     text: limitText(
-      `SÚHRN DETEGOVANÝCH ZDROJOV A AUTOROV\n\nAutori:\n${authors.length ? authors.join(', ') : 'Autori neboli automaticky identifikovaní alebo ich treba overiť.'}\n\nDetegované bibliografické záznamy:\n${formatBibliographicCandidates(mergedSources)}\n\nDoplňujúci súhrn z frontendu:\n${clientDetectedSourcesSummary || 'neuvedené'}`,
-      24_000,
-    ),
+  `Autori:
+${authors.length ? authors.join(', ') : 'Autori neboli automaticky identifikovaní alebo ich treba overiť.'}
+
+Detegované bibliografické záznamy:
+${formatBibliographicCandidates(mergedSources)}
+
+Doplňujúci súhrn z frontendu:
+${clientDetectedSourcesSummary || 'neuvedené'}`,
+  24_000,
+),
   };
 }
 
@@ -2733,7 +2808,7 @@ ABSOLÚTNE PRAVIDLÁ:
 6. Pri každom odbornom odseku musí byť citácia priamo v texte. Odborné tvrdenia bez citácie nie sú povolené.
 7. Nevymýšľaj autorov, roky, DOI, URL, čísla strán ani vydavateľské údaje.
 8. Zdroje musíš vytvoriť priamo ty ako model na základe dostupného kontextu, príloh, projektových dokumentov a overených externých zdrojov. Backend zdroje automaticky nedopĺňa.
-9. Primárne zdroje = priložený alebo projektový dokument použitý ako obsahový podklad + autor/autori samotnej prílohy, ak sa dajú zistiť z titulnej/úvodnej časti.
+9. Primárne zdroje nesmú obsahovať autorov zo zoznamu literatúry článku, DOI ani URL citovaných sekundárnych zdrojov. Nikdy nevypisuj šablónu typu [Názov prílohy] alebo [autori alebo nezistené]. Do primárnych zdrojov vždy uveď reálny názov priloženého alebo projektového dokumentu. Formát: Názov súboru. Autor prílohy / zistení autori prílohy: nezistené z extrahovaného textu.
 10. Primárne zdroje nesmú obsahovať autorov zo zoznamu literatúry článku, DOI ani URL citovaných sekundárnych zdrojov. Formát: [Názov prílohy]. Autor prílohy / zistení autori prílohy: [autori alebo nezistené].
 11. Sekundárne zdroje = úplné odborné bibliografické zdroje, ktoré sú citované alebo uvedené priamo v texte vygenerovaného výstupu.
 12. Sekundárne zdroje musia byť vypísané iba v úplnej bibliografickej forme. Neúplný záznam sa nesmie vypísať. Správny tvar je napríklad:
@@ -2764,6 +2839,7 @@ function buildSystemPrompt({
   relevance,
   sourcesOnly,
   externalResearch,
+  outputLanguage,
 }: {
   profile: SavedProfile | null;
   attachmentTexts: string[];
@@ -2774,12 +2850,36 @@ function buildSystemPrompt({
   relevance: ProfileRelevanceResult;
   sourcesOnly: boolean;
   externalResearch: ExternalResearchResult;
+  outputLanguage: AppLanguage;
 }) {
-  if (module === 'translation') return buildStrictTranslationPrompt();
-  if (module === 'emails') return buildStrictEmailPrompt();
-  if (module === 'planning') return buildStrictPlanningPrompt(profile);
+    const languageInstruction = `JAZYKOVÉ NASTAVENIE:
+Zvolený jazyk odpovede z používateľského rozhrania je: ${outputLanguage} = ${getLanguageName(outputLanguage)}.
 
-  const prompt = `Si ZEDPERA, profesionálny akademický AI asistent, AI vedúci práce a citačná špecialistka.\n\nKOMPLETNÝ PROFIL PRÁCE JE HLAVNÝ ZDROJ KONTEXTU. Každá odpoveď musí vychádzať z profilu práce.\n\nAKTÍVNY ŠPECIÁLNY REŽIM KAPITOLY: ${isChapterRequest ? 'Áno' : 'Nie'}\nPožadované číslo kapitoly: ${requestedChapterNumber || 'neurčené'}\nREŽIM IBA ZDROJE: ${sourcesOnly ? 'Áno' : 'Nie'}\nPrílohy podľa automatickej kontroly súvisia s profilom: ${relevance.isRelevant ? 'Áno' : 'Nie'}\nZhodné odborné výrazy: ${relevance.matchedTokens.slice(0, 80).join(', ') || 'žiadne'}\n\n${buildAcademicChapterRules()}\n\n${buildVerifiedSourcePackPrompt(externalResearch)}\n\nHLAVNÝ POSTUP:
+POVINNÉ PRAVIDLO:
+Odpovedaj v jazyku: ${getLanguageName(outputLanguage)}.
+Toto nastavenie má prednosť pred jazykom profilu práce, pokiaľ používateľ výslovne nepožiada o iný jazyk.`;
+
+  if (module === 'translation') {
+    return `${buildStrictTranslationPrompt()}
+
+${languageInstruction}`;
+  }
+
+  if (module === 'emails') {
+    return `${buildStrictEmailPrompt()}
+
+${languageInstruction}`;
+  }
+
+  if (module === 'planning') {
+    return `${buildStrictPlanningPrompt(profile)}
+
+${languageInstruction}`;
+  }
+
+  const prompt = `Si ZEDPERA, profesionálny akademický AI asistent, AI vedúci práce a citačná špecialistka.
+
+${languageInstruction}\n\nKOMPLETNÝ PROFIL PRÁCE JE HLAVNÝ ZDROJ KONTEXTU. Každá odpoveď musí vychádzať z profilu práce.\n\nAKTÍVNY ŠPECIÁLNY REŽIM KAPITOLY: ${isChapterRequest ? 'Áno' : 'Nie'}\nPožadované číslo kapitoly: ${requestedChapterNumber || 'neurčené'}\nREŽIM IBA ZDROJE: ${sourcesOnly ? 'Áno' : 'Nie'}\nPrílohy podľa automatickej kontroly súvisia s profilom: ${relevance.isRelevant ? 'Áno' : 'Nie'}\nZhodné odborné výrazy: ${relevance.matchedTokens.slice(0, 80).join(', ') || 'žiadne'}\n\n${buildAcademicChapterRules()}\n\n${buildVerifiedSourcePackPrompt(externalResearch)}\n\nHLAVNÝ POSTUP:
 1. Najvyššiu prioritu má konkrétna požiadavka používateľa. Nerob inú úlohu, než o ktorú používateľ žiada. Ak používateľ žiada 1. kapitolu, píš 1. kapitolu; ak žiada úvod, píš úvod; ak žiada zdroje, rieš zdroje.
 2. Hneď potom rešpektuj aktívny profil práce: názov, tému, cieľ, problém, metodológiu, odbor, jazyk a citačnú normu.
 3. Ako odborný obsahový základ použi najprv relevantnú prílohu alebo projektový dokument. Z prílohy vytiahni odborný obsah, citácie v texte a bibliografiu.
@@ -2788,7 +2888,50 @@ function buildSystemPrompt({
 6. Na konci uveď Primárne zdroje a Sekundárne zdroje.
 7. Ak sú k dispozícii zdroje z článku, príloh, projektových dokumentov, Semantic Scholar alebo Crossref, musia byť použité a vypísané úplne.
 8. Kapitola nesmie byť krátka. Pri žiadosti o kapitolu vytvor rozsiahly akademický text minimálne približne 1 200 slov, ak používateľ neurčil inak.
-9. Pri žiadosti o 1. kapitolu nesmieš vytvoriť abstrakt; vytvor úvodnú kapitolu podľa profilu práce.\n\nJAZYK ODPOVEDE: ${getWorkLanguage(profile)}\nCITAČNÁ NORMA: ${getCitationStyle(profile)}\n\nKOMPLETNÝ ULOŽENÝ PROFIL PRÁCE:\n${buildProfileSummary(profile)}\n\n${buildAttachmentBlock(attachmentTexts)}\n\nPRAVIDLÁ PRE ZDROJE:\n1. Primárne zdroje = názov dokumentu alebo názvy dokumentov, z ktorých výstup čerpá, vrátane autora/autorov samotnej prílohy, ak sa dajú bezpečne zistiť z titulnej/úvodnej časti.\n2. Sekundárne zdroje = úplné bibliografické zdroje, ktoré sú citované alebo uvedené priamo v texte výstupu. Každý sekundárny zdroj musí mať aspoň autora, rok, názov, zdroj/časopis alebo strany/DOI/URL.\n3. Ak článok obsahuje zoznam literatúry, nikdy ho nepremiestňuj do primárnych zdrojov; do sekundárnych zdrojov uveď iba tie záznamy, ktoré sú v texte výstupu skutočne citované alebo použité.\n4. Do výstupu nevkladaj neúplné zdroje typu B. (2019), H. (2020), R. (2017), „údaj je potrebné overiť“, „Autor je potrebné overiť“ alebo „Rok chýba“.\n\nNASTAVENIA:\nKontrola príloh podľa profilu práce: ${settings.validateAttachmentsAgainstProfile ? 'áno' : 'nie'}\nPovinný zoznam zdrojov: ${settings.requireSourceList ? 'áno' : 'nie'}\nPovolené všeobecné znalosti AI: ${settings.allowAiKnowledgeFallback ? 'áno' : 'nie'}\nExterné akademické zdroje Semantic Scholar/Crossref: ${settings.useExternalAcademicSources ? 'áno' : 'nie'}\n\nFORMÁT:\nAk je kapitola: akademický text s citáciami v odsekoch, potom Primárne zdroje a Sekundárne zdroje.\nAk je iba zdroje: vráť iba Primárne zdroje a Sekundárne zdroje.\nAk nejde o kapitolu, použi sekcie === VÝSTUP ===, === ANALÝZA ===, === SKÓRE ===, === ODPORÚČANIA ===, === POUŽITÉ ZDROJE A AUTORI ===.`;
+9. Pri žiadosti o 1. kapitolu nesmieš vytvoriť abstrakt; vytvor úvodnú kapitolu podľa profilu práce.
+
+JAZYKOVÉ NASTAVENIE:
+Zvolený jazyk z používateľského rozhrania: ${outputLanguage} = ${getLanguageName(outputLanguage)}.
+Jazyk práce uložený v profile: ${getWorkLanguage(profile)}.
+
+POVINNÉ PRAVIDLO PRE JAZYK:
+Odpovedaj výhradne v jazyku: ${getLanguageName(outputLanguage)}.
+Toto nastavenie má prednosť pred jazykom profilu práce, pokiaľ používateľ v aktuálnej správe výslovne nepožiada o iný jazyk.
+
+DÔLEŽITÉ:
+- Neprekladaj automaticky názov práce, ak je uložený v profile v inom jazyku.
+- Neprepisuj citácie, mená autorov, názvy dokumentov, DOI, URL ani bibliografické údaje do iného jazyka.
+- Jazykové prepnutie sa týka hlavne odpovede, vysvetlenia, akademického textu, analýzy, odporúčaní a UI výstupu.
+- Citačná norma zostáva podľa profilu práce.
+
+JAZYK ODPOVEDE: ${getLanguageName(outputLanguage)}
+JAZYK PRÁCE Z PROFILU: ${getWorkLanguage(profile)}
+CITAČNÁ NORMA: ${getCitationStyle(profile)}
+
+KOMPLETNÝ ULOŽENÝ PROFIL PRÁCE:
+${buildProfileSummary(profile)}
+
+${buildAttachmentBlock(attachmentTexts)}
+
+PRAVIDLÁ PRE ZDROJE:
+1. Primárne zdroje = názov dokumentu alebo názvy dokumentov, z ktorých výstup čerpá, vrátane autora/autorov samotnej prílohy, ak sa dajú bezpečne zistiť z titulnej/úvodnej časti.
+2. Sekundárne zdroje = úplné bibliografické zdroje, ktoré sú citované alebo uvedené priamo v texte výstupu. Každý sekundárny zdroj musí mať aspoň autora, rok, názov, zdroj/časopis alebo strany/DOI/URL.
+3. Ak článok obsahuje zoznam literatúry, nikdy ho nepremiestňuj do primárnych zdrojov; do sekundárnych zdrojov uveď iba tie záznamy, ktoré sú v texte výstupu skutočne citované alebo použité.
+4. Do výstupu nevkladaj neúplné zdroje typu B. (2019), H. (2020), R. (2017), „údaj je potrebné overiť“, „Autor je potrebné overiť“ alebo „Rok chýba“.
+5. Názvy zdrojov, mená autorov, DOI, URL, názvy časopisov a bibliografické údaje ponechaj v pôvodnom tvare. Neprekladaj ich len preto, že používateľ prepne jazyk aplikácie.
+6. Ak je odpoveď v inom jazyku ako jazyk zdroja, prelož iba vysvetľujúci text, nie samotný bibliografický záznam.
+7. Sekcie „Primárne zdroje“ a „Sekundárne zdroje“ prelož do zvoleného jazyka odpovede iba vtedy, ak nejde o požiadavku na presný slovenský formát. Ak používateľ pracuje so slovenským profilom alebo citačným výstupom, ponechaj tieto názvy v slovenčine.
+
+NASTAVENIA:
+Kontrola príloh podľa profilu práce: ${settings.validateAttachmentsAgainstProfile ? 'áno' : 'nie'}
+Povinný zoznam zdrojov: ${settings.requireSourceList ? 'áno' : 'nie'}
+Povolené všeobecné znalosti AI: ${settings.allowAiKnowledgeFallback ? 'áno' : 'nie'}
+Externé akademické zdroje Semantic Scholar/Crossref: ${settings.useExternalAcademicSources ? 'áno' : 'nie'}
+
+FORMÁT:
+Ak je kapitola: akademický text s citáciami v odsekoch, potom Primárne zdroje a Sekundárne zdroje.
+Ak je iba zdroje: vráť iba Primárne zdroje a Sekundárne zdroje.
+Ak nejde o kapitolu, použi sekcie === VÝSTUP ===, === ANALÝZA ===, === SKÓRE ===, === ODPORÚČANIA ===, === POUŽITÉ ZDROJE A AUTORI ===.`;
 
   return limitText(prompt, maxSystemPromptChars);
 }
@@ -3085,7 +3228,6 @@ async function createStreamResponse({ model, systemPrompt, normalizedMessages }:
   const result = streamText({ model, system: systemPrompt, messages: normalizedMessages, temperature: 0.2, maxOutputTokens: streamOutputTokens });
   return result.toTextStreamResponse();
 }
-
 async function createJsonResponse({
   model,
   systemPrompt,
@@ -3095,19 +3237,23 @@ async function createJsonResponse({
   module,
   isChapterRequest,
   sourcesOnly,
+  profile,
+  projectId,
   settings,
   relevance,
   detectedSourcesForOutput,
   externalResearch,
 }: {
-  model: ModelResult['model'];
+  model: any;
   systemPrompt: string;
-  normalizedMessages: ReturnType<typeof normalizeMessages>;
+  normalizedMessages: ChatMessage[];
   extractedFiles: ExtractedAttachment[];
   providerLabel: string;
   module: ModuleKey;
   isChapterRequest: boolean;
   sourcesOnly: boolean;
+  profile: SavedProfile | null;
+  projectId: string | null;
   settings: SourceSettings;
   relevance: ProfileRelevanceResult;
   detectedSourcesForOutput: BibliographicCandidate[];
@@ -3151,6 +3297,10 @@ async function createJsonResponse({
     ? cleanStrictOutput(result.text || '', module)
     : result.text || '';
 
+if (!isStrictNoAcademicTailModule(module)) {
+  output = removePrimarySourcePlaceholder(output, extractedFiles);
+}
+
   if (isChapterRequest || sourcesOnly || module === 'chat') {
     const lastUserMessage = getLastUserMessage(normalizedMessages);
 
@@ -3162,6 +3312,22 @@ async function createJsonResponse({
     // Backend iba čistí duplicity, technické bloky a poškodené riadky.
     output = finalizeSourceSections(output);
   }
+
+await saveGeneratedHistory({
+  module,
+  profile,
+  projectId,
+  input: getLastUserMessage(normalizedMessages),
+  output,
+  provider: providerLabel,
+  files: extractedFilesPayload.map((file) => ({
+    name: file.name,
+    originalName: file.originalName,
+    type: file.type,
+    size: file.size,
+    status: file.status,
+  })),
+});
 
   return NextResponse.json({
     ok: true,
@@ -3184,6 +3350,113 @@ async function createJsonResponse({
   });
 }
 
+function getHistoryType(module: ModuleKey) {
+  if (module === 'supervisor') return 'supervisor';
+  if (module === 'quality') return 'quality';
+  if (module === 'defense') return 'defense';
+  if (module === 'translation') return 'translation';
+  if (module === 'data') return 'data';
+  if (module === 'planning') return 'planning';
+  if (module === 'emails') return 'emails';
+  if (module === 'originality') return 'originality';
+  if (module === 'chat') return 'chat';
+
+  return 'chat';
+}
+
+function getHistoryTitle({
+  module,
+  profile,
+  input,
+}: {
+  module: ModuleKey;
+  profile: SavedProfile | null;
+  input: string;
+}) {
+  if (profile?.title?.trim()) {
+    return profile.title.trim();
+  }
+
+  const cleanedInput = normalizeText(input || '');
+
+  if (cleanedInput.length > 8) {
+    return cleanedInput.slice(0, 90);
+  }
+
+  if (module === 'supervisor') return 'AI vedúci';
+  if (module === 'quality') return 'Audit kvality';
+  if (module === 'defense') return 'Obhajoba práce';
+  if (module === 'translation') return 'Preklad';
+  if (module === 'data') return 'Analýza dát';
+  if (module === 'planning') return 'Plánovanie';
+  if (module === 'emails') return 'Email';
+  if (module === 'originality') return 'Originalita práce';
+
+  return 'AI výstup';
+}
+
+function getHistoryPreview(output: string) {
+  return normalizeText(output || '')
+    .replace(/\s+/g, ' ')
+    .slice(0, 350);
+}
+
+async function saveGeneratedHistory({
+  module,
+  profile,
+  projectId,
+  input,
+  output,
+  provider,
+  files,
+}: {
+  module: ModuleKey;
+  profile: SavedProfile | null;
+  projectId: string | null;
+  input: string;
+  output: string;
+  provider: string;
+  files: {
+    name: string;
+    originalName: string;
+    type: string;
+    size: number;
+    status: string;
+  }[];
+}) {
+  const cleanedOutput = normalizeText(output || '');
+
+  if (!cleanedOutput) return;
+
+  try {
+    const supabase = createAdminClient();
+
+    const { error } = await supabase.from('zedpera_history').insert({
+      project_id: projectId || null,
+      profile_id: profile?.id || null,
+      profile_title: profile?.title || null,
+      type: getHistoryType(module),
+      title: getHistoryTitle({
+        module,
+        profile,
+        input,
+      }),
+      input: limitText(input || '', 8000),
+      output: limitText(cleanedOutput, 120000),
+      preview: getHistoryPreview(cleanedOutput),
+      files,
+      provider,
+    });
+
+    if (error) {
+      console.error('SAVE_HISTORY_ERROR:', error);
+    }
+  } catch (error) {
+    console.error('SAVE_HISTORY_FATAL_ERROR:', error);
+  }
+}
+
+
 // =====================================================
 // API ROUTE
 // =====================================================
@@ -3193,11 +3466,12 @@ export async function POST(req: Request) {
     const contentType = req.headers.get('content-type') || '';
 
     let rawAgent: unknown = 'gemini';
-    let module: ModuleKey = 'unknown';
-    let messages: ChatMessage[] = [];
-    let profile: SavedProfile | null = null;
-    let files: File[] = [];
-    let projectId: string | null = null;
+let module: ModuleKey = 'unknown';
+let messages: ChatMessage[] = [];
+let profile: SavedProfile | null = null;
+let files: File[] = [];
+let projectId: string | null = null;
+let outputLanguage: AppLanguage = 'sk';
 
     let validateAttachmentsAgainstProfile = true;
     let requireSourceList = true;
@@ -3212,7 +3486,9 @@ export async function POST(req: Request) {
     let preparedFilesMetadata: PreparedFileMetadata[] = [];
 
     if (contentType.includes('multipart/form-data')) {
-      const formData = await req.formData();
+  const formData = await req.formData();
+
+  outputLanguage = normalizeAppLanguage(formData.get('language') || formData.get('outputLanguage'), 'sk');
 
       rawAgent = formData.get('agent')?.toString() || 'gemini';
       module = normalizeModule(formData.get('module')?.toString());
@@ -3232,14 +3508,15 @@ export async function POST(req: Request) {
       clientDetectedSources = normalizeBibliographicCandidates(parseJson<BibliographicCandidate[]>(formData.get('clientDetectedSources'), []));
       preparedFilesMetadata = parseJson<PreparedFileMetadata[]>(formData.get('preparedFilesMetadata'), []);
       files = formData.getAll('files').filter((item): item is File => item instanceof File);
-    } else {
-      const body = await req.json().catch(() => null);
+   } else {
+  const body = await req.json().catch(() => null);
 
-      rawAgent = body?.agent || 'gemini';
-      module = normalizeModule(body?.module);
-      messages = Array.isArray(body?.messages) ? body.messages : [];
-      profile = body?.profile || body?.activeProfile || body?.savedProfile || null;
-      projectId = body?.projectId || null;
+  rawAgent = body?.agent || 'gemini';
+  module = normalizeModule(body?.module);
+  messages = Array.isArray(body?.messages) ? body.messages : [];
+  profile = body?.profile || body?.activeProfile || body?.savedProfile || null;
+  projectId = body?.projectId || null;
+  outputLanguage = normalizeAppLanguage(body?.language || body?.outputLanguage, 'sk');
 
       validateAttachmentsAgainstProfile = body?.validateAttachmentsAgainstProfile !== false;
       requireSourceList = body?.requireSourceList !== false;
@@ -3339,26 +3616,63 @@ const shouldSearchExternalSources =
 
     const finalDetectedSourcesForOutput = mergeBibliographicCandidates(detectedSourcesForOutput, externalResearch.sources.map(verifiedSourceToBibliographicCandidate));
 
-    const systemPrompt = buildSystemPrompt({ profile, attachmentTexts, settings, module, isChapterRequest, requestedChapterNumber, relevance, sourcesOnly, externalResearch });
+    const systemPrompt = buildSystemPrompt({
+  profile,
+  attachmentTexts,
+  settings,
+  module,
+  isChapterRequest,
+  requestedChapterNumber,
+  relevance,
+  sourcesOnly,
+  externalResearch,
+  outputLanguage,
+});
 
     try {
-      const primary = getModelByAgent(agent);
+  const primary = getModelByAgent(agent);
 
-      if (returnExtractedFilesInfo || isChapterRequest || sourcesOnly || module === 'chat') {
-        return await createJsonResponse({ model: primary.model, systemPrompt, normalizedMessages, extractedFiles, providerLabel: primary.providerLabel, module, isChapterRequest, sourcesOnly, settings, relevance, detectedSourcesForOutput: finalDetectedSourcesForOutput, externalResearch });
-      }
+  if (returnExtractedFilesInfo || isChapterRequest || sourcesOnly || module === 'chat') {
+    return await createJsonResponse({
+      model: primary.model,
+      systemPrompt,
+      normalizedMessages,
+      extractedFiles,
+      providerLabel: primary.providerLabel,
+      module,
+      profile,
+      projectId,
+      isChapterRequest,
+      sourcesOnly,
+      settings,
+      relevance,
+      detectedSourcesForOutput: finalDetectedSourcesForOutput,
+      externalResearch,
+    });
+  }
 
-      return await createStreamResponse({ model: primary.model, systemPrompt, normalizedMessages });
-    } catch (primaryError) {
-      console.error('PRIMARY_MODEL_ERROR:', primaryError);
+  return await createStreamResponse({
+    model: primary.model,
+    systemPrompt,
+    normalizedMessages,
+  });
+} catch (primaryError) {
+  console.error('PRIMARY_MODEL_ERROR:', primaryError);
 
-      if (isContextWindowError(primaryError)) return jsonErrorResponse(translateApiErrorToSlovak(primaryError), 413);
-      if (!isModelNotFoundError(primaryError)) throw primaryError;
+  if (isContextWindowError(primaryError)) {
+    return jsonErrorResponse(translateApiErrorToSlovak(primaryError), 413);
+  }
 
-      const fallback = getFallbackModel();
-      const fallbackSystemPrompt = isStrictNoAcademicTailModule(module)
-  ? systemPrompt
-  : limitText(`${systemPrompt}
+  if (!isModelNotFoundError(primaryError)) {
+    throw primaryError;
+  }
+
+  const fallback = getFallbackModel();
+
+  const fallbackSystemPrompt = isStrictNoAcademicTailModule(module)
+    ? systemPrompt
+    : limitText(
+        `${systemPrompt}
 
 TECHNICKÁ POZNÁMKA:
 Vybraný model nebol dostupný alebo bol odmietnutý poskytovateľom. Odpovedáš cez náhradný model: ${fallback.providerLabel}.
@@ -3373,13 +3687,35 @@ Dodrž:
 - primárne zdroje musia byť názvy dokumentov, z ktorých text čerpá, a autor/autori samotnej prílohy, ak sa dajú zistiť,
 - sekundárne zdroje musia obsahovať úplné bibliografické záznamy všetkých citácií autor–rok použitých priamo v texte,
 - ak príloha nebola použitá alebo nebola relevantná, nikdy nepíš, že zdroj bol rozpoznaný z prílohy,
-- nepoužívaj iniciály typu H., R., S. ako mená autorov.`, maxSystemPromptChars);
+- nepoužívaj iniciály typu H., R., S. ako mená autorov.`,
+        maxSystemPromptChars,
+      );
 
-      if (returnExtractedFilesInfo || isChapterRequest || sourcesOnly || module === 'chat') {
-        return await createJsonResponse({ model: fallback.model, systemPrompt: fallbackSystemPrompt, normalizedMessages, extractedFiles, providerLabel: fallback.providerLabel, module, isChapterRequest, sourcesOnly, settings, relevance, detectedSourcesForOutput: finalDetectedSourcesForOutput, externalResearch });
-      }
+  if (returnExtractedFilesInfo || isChapterRequest || sourcesOnly || module === 'chat') {
+    return await createJsonResponse({
+      model: fallback.model,
+      systemPrompt: fallbackSystemPrompt,
+      normalizedMessages,
+      extractedFiles,
+      providerLabel: fallback.providerLabel,
+      module,
+      profile,
+      projectId,
+      isChapterRequest,
+      sourcesOnly,
+      settings,
+      relevance,
+      detectedSourcesForOutput: finalDetectedSourcesForOutput,
+      externalResearch,
+    });
+  }
 
-      return await createStreamResponse({ model: fallback.model, systemPrompt: fallbackSystemPrompt, normalizedMessages });
+  return await createStreamResponse({
+    model: fallback.model,
+    systemPrompt: fallbackSystemPrompt,
+    normalizedMessages,
+  });
+
     }
   } catch (error) {
     console.error('CHAT_API_ERROR:', error);

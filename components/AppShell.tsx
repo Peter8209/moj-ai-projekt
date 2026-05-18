@@ -1,6 +1,5 @@
 'use client';
 
-import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import {
   Suspense,
   useEffect,
@@ -9,24 +8,27 @@ import {
   type ComponentType,
   type ReactNode,
 } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { LucideIcon } from 'lucide-react';
 import {
-  Home,
-  Bot,
+  ArrowLeft,
   BookOpen,
-  Library,
+  Bot,
   CreditCard,
-  Video,
-  Plus,
-  Sparkles,
-  X,
+  Crown,
+  History,
+  Home,
+  Library,
   LogOut,
   Menu,
-  ArrowLeft,
-  Crown,
+  Plus,
+  Sparkles,
+  Video,
+  X,
 } from 'lucide-react';
-
 import ProfileFormOriginal from '@/components/ProfileForm';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
+import { useLanguage } from '@/components/LanguageProvider';
 
 // =====================================================
 // TYPES
@@ -44,56 +46,106 @@ type ProfileFormProps = {
   onSave?: (data: unknown) => void;
 };
 
+type TranslationRecord = Record<string, unknown>;
+
 const ProfileForm =
   ProfileFormOriginal as unknown as ComponentType<ProfileFormProps>;
 
 // =====================================================
-// NAVIGATION
+// TRANSLATION HELPERS
 // =====================================================
 
-const navItems: NavItem[] = [
-  {
-    href: '/dashboard',
-    label: 'Menu',
-    icon: Home,
-    description: 'Hlavný prehľad aplikácie',
-  },
-  {
-    href: '/chat',
-    label: 'AI Chat',
-    icon: Bot,
-    description: 'Písanie a úprava textu',
-  },
-  {
-    href: '/projects',
-    label: 'Moje práce',
-    icon: BookOpen,
-    description: 'Rozpracované projekty',
-  },
-  {
-    href: '/sources',
-    label: 'Zdroje',
-    icon: Library,
-    description: 'Literatúra a citácie',
-  },
-  {
-    href: '/pricing',
-    label: 'Balíčky',
-    icon: CreditCard,
-    description: 'Predplatné a doplnky',
-  },
-  {
-    href: '/video',
-    label: 'Video návod',
-    icon: Video,
-    description: 'Postup používania',
-  },
-];
+function text(
+  dictionary: TranslationRecord,
+  key: string,
+  fallback: string,
+): string {
+  const value = dictionary[key];
 
-const mobileNavItems = navItems.slice(0, 5);
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value;
+  }
+
+  return fallback;
+}
+
+function createNavItems(dictionary: TranslationRecord): NavItem[] {
+  return [
+    {
+      href: '/dashboard',
+      label: text(dictionary, 'dashboardMenu', 'Menu'),
+      icon: Home,
+      description: text(
+        dictionary,
+        'dashboardMenuDescription',
+        'Hlavný prehľad aplikácie',
+      ),
+    },
+    {
+      href: '/chat',
+      label: text(dictionary, 'aiChat', 'AI Chat'),
+      icon: Bot,
+      description: text(
+        dictionary,
+        'dashboardChatDescription',
+        'Písanie a úprava textu',
+      ),
+    },
+    {
+      href: '/projects',
+      label: text(dictionary, 'dashboardProjects', 'Moje práce'),
+      icon: BookOpen,
+      description: text(
+        dictionary,
+        'dashboardProjectsDescription',
+        'Rozpracované projekty',
+      ),
+    },
+    {
+      href: '/sources',
+      label: text(dictionary, 'sources', 'Zdroje'),
+      icon: Library,
+      description: text(
+        dictionary,
+        'dashboardSourcesDescription',
+        'Literatúra a citácie',
+      ),
+    },
+    {
+      href: '/pricing',
+      label: text(dictionary, 'pricing', 'Balíčky'),
+      icon: CreditCard,
+      description: text(
+        dictionary,
+        'dashboardPricingDescription',
+        'Predplatné a doplnky',
+      ),
+    },
+{
+  href: '/history',
+  label: text(dictionary, 'chatHistory', 'História chatu'),
+  icon: History,
+  description: text(
+    dictionary,
+    'dashboardHistoryDescription',
+    'Uložené konverzácie a výstupy',
+  ),
+},
+    {
+      href: '/video',
+      label: text(dictionary, 'dashboardVideo', 'Video návod'),
+      icon: Video,
+      description: text(
+        dictionary,
+        'dashboardVideoDescription',
+        'Postup používania',
+      ),
+    },
+  ];
+}
 
 // =====================================================
-// EXPORT WRAPPER
+// DEFAULT EXPORT
 // =====================================================
 
 export default function AppShell({ children }: { children: ReactNode }) {
@@ -103,6 +155,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
     </Suspense>
   );
 }
+
+// =====================================================
+// FALLBACK
+// =====================================================
 
 function AppShellFallback() {
   return (
@@ -115,13 +171,24 @@ function AppShellFallback() {
 }
 
 // =====================================================
-// COMPONENT
+// COMPONENT CONTENT
 // =====================================================
 
 function AppShellContent({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname() || '';
   const searchParams = useSearchParams();
+
+  const { t } = useLanguage();
+  const dictionary = t as TranslationRecord;
+
+  const navItems = useMemo(() => {
+    return createNavItems(dictionary);
+  }, [dictionary]);
+
+  const mobileNavItems = useMemo(() => {
+    return navItems.slice(0, 5);
+  }, [navItems]);
 
   const [openProfile, setOpenProfile] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -166,12 +233,15 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const activeTitle = useMemo(() => {
     const active = navItems.find((item) => isPathActive(pathname, item.href));
     return active?.label || 'Zedpera';
-  }, [pathname]);
+  }, [navItems, pathname]);
 
   const activeDescription = useMemo(() => {
     const active = navItems.find((item) => isPathActive(pathname, item.href));
-    return active?.description || 'AI akademická platforma';
-  }, [pathname]);
+    return (
+      active?.description ||
+      text(dictionary, 'publicHeroTitle', 'AI akademická platforma')
+    );
+  }, [dictionary, navItems, pathname]);
 
   const isDashboard = pathname === '/dashboard';
 
@@ -219,7 +289,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           className="mb-7 mt-2 flex h-14 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 font-black text-white shadow-lg shadow-violet-700/25 transition hover:scale-[1.015] hover:from-violet-500 hover:to-purple-500"
         >
           <Plus size={18} />
-          Nová práca
+          {text(dictionary, 'newWork', 'Nová práca')}
         </button>
 
         <nav className="flex-1 space-y-2 overflow-visible pr-0">
@@ -275,9 +345,15 @@ function AppShellContent({ children }: { children: ReactNode }) {
                 </span>
 
                 <span>
-                  <span className="block">Admin účet</span>
+                  <span className="block">
+                    {text(dictionary, 'adminAccount', 'Admin účet')}
+                  </span>
                   <span className="mt-0.5 block text-[11px] font-semibold text-emerald-300/80">
-                    Administrátorský prístup
+                    {text(
+                      dictionary,
+                      'adminAccess',
+                      'Administrátorský prístup',
+                    )}
                   </span>
                 </span>
               </div>
@@ -293,9 +369,17 @@ function AppShellContent({ children }: { children: ReactNode }) {
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-500/10">
                 <LogOut size={17} />
               </span>
-              Ukončiť admin režim
+              {text(dictionary, 'exitAdminMode', 'Ukončiť admin režim')}
             </button>
           )}
+
+          <div className="mb-4">
+            <div className="mb-2 px-1 text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">
+              {text(dictionary, 'language', 'Jazyk')}
+            </div>
+
+            <LanguageSwitcher />
+          </div>
 
           <div className="px-4 text-xs text-slate-500">
             © {new Date().getFullYear()} Zedpera
@@ -315,14 +399,14 @@ function AppShellContent({ children }: { children: ReactNode }) {
             type="button"
             onClick={() => setMobileMenuOpen(true)}
             className="rounded-2xl bg-white/10 p-3 text-white transition hover:bg-white/15"
-            aria-label="Otvoriť menu"
+            aria-label={text(dictionary, 'openMenu', 'Otvoriť menu')}
           >
             <Menu size={20} />
           </button>
 
-          <div className="text-center">
-            <div className="text-sm font-black">{activeTitle}</div>
-            <div className="text-[11px] font-semibold text-slate-400">
+          <div className="min-w-0 px-3 text-center">
+            <div className="truncate text-sm font-black">{activeTitle}</div>
+            <div className="truncate text-[11px] font-semibold text-slate-400">
               {activeDescription}
             </div>
           </div>
@@ -331,7 +415,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
             type="button"
             onClick={openNewProfile}
             className="rounded-2xl bg-violet-600 p-3 text-white shadow-lg shadow-violet-700/25 transition hover:bg-violet-500"
-            aria-label="Nová práca"
+            aria-label={text(dictionary, 'newWork', 'Nová práca')}
           >
             <Plus size={20} />
           </button>
@@ -343,12 +427,12 @@ function AppShellContent({ children }: { children: ReactNode }) {
           {!isDashboard && (
             <div className="sticky top-0 z-30 mb-5 rounded-3xl border border-white/10 bg-[#020617]/95 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
+                <div className="min-w-0">
                   <div className="text-xs font-black uppercase tracking-[0.18em] text-violet-300">
-                    Aktuálna sekcia
+                    {text(dictionary, 'currentSection', 'Aktuálna sekcia')}
                   </div>
 
-                  <div className="mt-1 text-xl font-black text-white">
+                  <div className="mt-1 truncate text-xl font-black text-white">
                     {activeTitle}
                   </div>
 
@@ -363,7 +447,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
                   className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/20"
                 >
                   <ArrowLeft size={18} />
-                  Návrat do menu
+                  {text(dictionary, 'backToMenu', 'Návrat do menu')}
                 </button>
               </div>
             </div>
@@ -418,7 +502,11 @@ function AppShellContent({ children }: { children: ReactNode }) {
                 <div>
                   <div className="font-black">ZEDPERA</div>
                   <div className="text-xs font-semibold text-slate-400">
-                    AI akademický asistent
+                    {text(
+                      dictionary,
+                      'academicAssistant',
+                      'AI akademický asistent',
+                    )}
                   </div>
                 </div>
               </div>
@@ -427,7 +515,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
                 type="button"
                 onClick={() => setMobileMenuOpen(false)}
                 className="rounded-2xl bg-white/10 p-3 text-slate-300 transition hover:bg-white/20 hover:text-white"
-                aria-label="Zavrieť menu"
+                aria-label={text(dictionary, 'closeMenu', 'Zavrieť menu')}
               >
                 <X size={20} />
               </button>
@@ -439,7 +527,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
               className="mb-5 flex h-14 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 font-black text-white shadow-lg shadow-violet-700/25"
             >
               <Plus size={18} />
-              Nová práca
+              {text(dictionary, 'newWork', 'Nová práca')}
             </button>
 
             <div className="flex-1 space-y-2 overflow-visible">
@@ -462,11 +550,11 @@ function AppShellContent({ children }: { children: ReactNode }) {
                       <Icon size={18} />
                     </span>
 
-                    <span>
-                      <span className="block">{item.label}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate">{item.label}</span>
 
                       {item.description && (
-                        <span className="mt-0.5 block text-[11px] font-semibold text-slate-500">
+                        <span className="mt-0.5 block truncate text-[11px] font-semibold text-slate-500">
                           {item.description}
                         </span>
                       )}
@@ -476,11 +564,19 @@ function AppShellContent({ children }: { children: ReactNode }) {
               })}
             </div>
 
+            <div className="mt-5">
+              <div className="mb-2 text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">
+                {text(dictionary, 'language', 'Jazyk')}
+              </div>
+
+              <LanguageSwitcher />
+            </div>
+
             {isAdminFree && (
               <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-4 text-sm font-black text-emerald-200">
                 <div className="flex items-center justify-center gap-2">
                   <Crown size={18} />
-                  Admin účet
+                  {text(dictionary, 'adminAccount', 'Admin účet')}
                 </div>
               </div>
             )}
@@ -492,7 +588,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
                 className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-4 text-sm font-black text-rose-200"
               >
                 <LogOut size={18} />
-                Ukončiť admin režim
+                {text(dictionary, 'exitAdminMode', 'Ukončiť admin režim')}
               </button>
             )}
           </div>
@@ -510,7 +606,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
               type="button"
               onClick={closeProfile}
               className="fixed right-5 top-5 z-50 rounded-2xl bg-white/10 p-3 text-slate-300 shadow-lg shadow-black/30 transition hover:bg-white/20 hover:text-white"
-              aria-label="Zavrieť formulár"
+              aria-label={text(dictionary, 'close', 'Zavrieť')}
             >
               <X size={22} />
             </button>

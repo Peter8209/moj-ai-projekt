@@ -12,6 +12,7 @@ import {
   ClipboardCheck,
   Download,
   FileDown,
+  FileSpreadsheet,
   FileText,
   GraduationCap,
   Languages,
@@ -26,11 +27,14 @@ import {
   ShieldCheck,
   Trash2,
   UploadCloud,
+  User,
   X,
 } from 'lucide-react';
 
 import AnalysisResultsModal from '@/components/analysis/AnalysisResultsModal';
 import type { AnalysisResult } from '@/components/analysis/analysisTypes';
+import ThemeToggleButton from '@/components/ThemeToggleButton';
+import ImprovementBox from '@/components/ImprovementBox';
 
 // ================= TYPES =================
 
@@ -1233,20 +1237,38 @@ POVINNÁ ŠTRUKTÚRA:
     }
 
     if (activeModule === 'quality') {
-      const modeInstruction =
-        qualityMode === 'style'
-          ? 'Kontroluj výhradne štylistiku, jazyk, akademickosť, plynulosť viet, nevhodné formulácie a zrozumiteľnosť. Nehodnoť obsah práce.'
-          : qualityMode === 'citations'
-            ? 'Kontroluj výhradne citácie, odkazy v texte, zoznam literatúry, úplnosť bibliografických údajov a citačnú normu. Nehodnoť celú prácu obsahovo.'
-            : qualityMode === 'logic'
-              ? 'Kontroluj logiku, nadväznosť, argumentáciu, duplicity a vnútornú súdržnosť textu.'
-              : 'Urob celkový audit kvality, ale jasne oddeľ štylistiku, logiku, citácie a metodológiu.';
+  const modeInstruction =
+    qualityMode === 'style'
+      ? `
+Kontroluj výhradne štylistiku, jazyk, akademickosť, plynulosť viet, nevhodné formulácie, zrozumiteľnosť a formálnosť textu.
+Nehodnoť obsah práce ako celok.
+Pri každej slabej alebo neakademickej formulácii uveď aj konkrétnu prepísanú verziu.
+`.trim()
+      : qualityMode === 'citations'
+        ? `
+Kontroluj výhradne citácie, odkazy v texte, zoznam literatúry, úplnosť bibliografických údajov a súlad s citačnou normou.
+Nehodnoť celú prácu obsahovo.
+Ak zistíš problém s citáciou, uveď aj návrh, ako má byť citácia alebo odkaz opravený.
+Nevymýšľaj neexistujúce zdroje, autorov, DOI, URL ani vydavateľov.
+`.trim()
+        : qualityMode === 'logic'
+          ? `
+Kontroluj logiku, nadväznosť, argumentáciu, duplicity, vnútornú súdržnosť textu a prepojenie cieľa, problému, metodológie a záverov.
+Pri každom logickom probléme uveď aj návrh opravy alebo odporúčanú preformulovanú verziu.
+`.trim()
+          : `
+Urob celkový audit kvality akademickej práce.
+Jasne oddeľ štylistiku, logiku, citácie, metodológiu, odbornú presnosť a praktické odporúčania.
+Výstup nesmie byť iba kritika. Musí obsahovať aj konkrétne prepísané vety a zapracovanú upravenú verziu textu.
+`.trim();
 
-      return `
+  return `
 ${baseRules}
 
 ÚLOHA:
 Urob audit kvality akademickej práce.
+
+Cieľom nie je iba kritizovať text. Cieľom je používateľovi prakticky pomôcť text zlepšiť.
 
 REŽIM KONTROLY:
 ${qualityMode}
@@ -1262,14 +1284,70 @@ Začni priamo nadpisom:
 ${activeProfile?.title || 'Audit kontrolovaného textu'}
 
 POVINNÁ ŠTRUKTÚRA:
-1. Stručné hodnotenie
+
+1. Stručné hodnotenie kvality textu
+Uveď 3 až 5 viet. Zhodnoť odbornú úroveň, akademickosť, zrozumiteľnosť a celkovú použiteľnosť textu.
+
 2. Nájdené problémy
-3. Konkrétne opravy
-4. Ukážky upravených viet
-5. Skóre kvality od 0 do 100
-6. Odporúčané ďalšie kroky
+Vypíš konkrétne problémy v texte.
+Nepíš všeobecné frázy.
+Pri každom probléme uveď, prečo je problém dôležitý.
+
+3. Konkrétne pripomienky
+Uveď praktické pripomienky k textu.
+Zameraj sa na:
+- nepresné formulácie,
+- slabé alebo neakademické vety,
+- nelogické nadväznosti,
+- chýbajúce vysvetlenia,
+- duplicity,
+- odborné nepresnosti,
+- problémy s citáciami, ak sa v texte nachádzajú.
+
+4. Prepísané vety
+Táto časť je povinná.
+
+Pri každej úprave použi presný formát:
+
+Pôvodná veta:
+Problém:
+Opravená veta:
+
+Ak text obsahuje viac slabých viet, vyber minimálne 5 najdôležitejších viet a prepíš ich.
+Ak text obsahuje menej viet, prepíš všetky problematické vety.
+
+5. Zapracovaná upravená verzia textu
+Táto časť je povinná.
+
+Prepíš celý kontrolovaný text do lepšej akademickej podoby.
+Zachovaj pôvodný význam.
+Zlepši:
+- štylistiku,
+- odborný jazyk,
+- logickú nadväznosť,
+- plynulosť,
+- formálnosť,
+- presnosť formulácií.
+
+Ak niektoré údaje chýbajú, nevymýšľaj ich. Napíš: údaj je potrebné doplniť.
+
+6. Skóre kvality od 0 do 100
+Uveď číselné skóre a krátke vysvetlenie, prečo bolo pridelené.
+
+7. Odporúčané ďalšie kroky
+Uveď konkrétne kroky, ktoré má používateľ urobiť ďalej.
+
+DÔLEŽITÉ PRAVIDLÁ:
+- Nepíš iba kritiku.
+- Každý zásadný problém musí mať aj návrh opravy.
+- Ak označíš vetu ako slabú, musíš ju aj prepísať.
+- Výstup musí byť prakticky použiteľný pre študenta.
+- Nevymýšľaj zdroje, autorov, DOI, URL, roky ani vydavateľov.
+- Nepoužívaj markdown znaky ako #, ##, **, --- ani kódové bloky.
+- Nepíš technický úvod.
+- Nezačínaj odpoveď slovami „Audit kvality“ ani „Tu je audit“.
 `.trim();
-    }
+}
 
     if (activeModule === 'defense') {
       return `
@@ -1644,9 +1722,10 @@ VÝSTUP:
 
       const formData = new FormData();
 
-      formData.append('agent', agent);
-      formData.append('messages', JSON.stringify(apiMessages));
-      formData.append('profile', JSON.stringify(activeProfile || null));
+     formData.append('agent', agent);
+formData.append('module', activeModule);
+formData.append('messages', JSON.stringify(apiMessages));
+formData.append('profile', JSON.stringify(activeProfile || null));
       formData.append('useSemanticScholar', 'false');
       formData.append('sourceMode', 'uploaded_documents_first');
       formData.append('validateAttachmentsAgainstProfile', 'true');
@@ -1782,6 +1861,105 @@ VÝSTUP:
       mimeType: 'application/msword;charset=utf-8',
     });
   };
+
+const downloadAnalysisExport = async (format: 'word' | 'pdf' | 'xlsx') => {
+  if (!analysisResult) {
+    alert('Najskôr musí byť vytvorený výsledok analýzy.');
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/analyze-data/export', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        format,
+        title: analysisResult.title || 'Výsledky analýzy dát',
+        result: analysisResult,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Export analýzy sa nepodarilo vytvoriť.');
+    }
+
+    const blob = await response.blob();
+
+    const extension =
+      format === 'word' ? 'doc' : format === 'pdf' ? 'pdf' : 'xlsx';
+
+    const fileName = `vysledky-analyzy-dat.${extension}`;
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = fileName;
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error('EXPORT_ANALYSIS_ERROR:', error);
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : 'Nepodarilo sa exportovať výsledky analýzy.',
+    );
+  }
+};
+
+const downloadExcel = () => {
+  const text = stripModuleExtraSections(canvasText || result || '', activeModule);
+
+  if (!text.trim()) {
+    alert('Nie je čo exportovať do Excelu.');
+    return;
+  }
+
+  const rows = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => ({
+      poradie: index + 1,
+      text: line,
+    }));
+
+  const escapeCell = (value: string | number) => {
+    const stringValue = String(value ?? '');
+    return `"${stringValue.replace(/"/g, '""')}"`;
+  };
+
+  const csv = [
+    ['Poradie', 'Text'].map(escapeCell).join(';'),
+    ...rows.map((row) =>
+      [row.poradie, row.text].map(escapeCell).join(';'),
+    ),
+  ].join('\n');
+
+  const blob = new Blob([`\uFEFF${csv}`], {
+    type: 'text/csv;charset=utf-8;',
+  });
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+
+  link.href = url;
+  link.download = `${activeModule || 'zedpera'}-vystup.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  URL.revokeObjectURL(url);
+};
+
 
   const downloadPdf = () => {
     const text = stripModuleExtraSections(canvasText || result, activeModule);
@@ -1957,128 +2135,176 @@ VÝSTUP:
 
   return (
     <>
-      <style jsx global>{`
-        html,
-        body {
-          min-height: 100%;
-          background: #050711;
-          overflow-x: hidden;
-          overflow-y: auto;
-        }
+    <style jsx global>{`
+  html,
+  body {
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
 
-        * {
-          scrollbar-width: thin;
-          scrollbar-color: rgba(139, 92, 246, 0.7)
-            rgba(255, 255, 255, 0.06);
-        }
+  html {
+    background: #f8fafc;
+  }
 
-        *::-webkit-scrollbar {
-          width: 10px;
-          height: 8px;
-        }
+  html.dark {
+    background: #050711;
+  }
 
-        *::-webkit-scrollbar-track {
-          background: rgba(255, 255, 255, 0.06);
-          border-radius: 999px;
-        }
+  body {
+    background: #f8fafc;
+  }
 
-        *::-webkit-scrollbar-thumb {
-          background: rgba(139, 92, 246, 0.75);
-          border-radius: 999px;
-        }
+  html.dark body {
+    background: #050711;
+  }
 
-        *::-webkit-scrollbar-thumb:hover {
-          background: rgba(168, 85, 247, 0.95);
-        }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(139, 92, 246, 0.7)
+      rgba(15, 23, 42, 0.12);
+  }
 
-        .no-scrollbar {
-          scrollbar-width: none;
-          -ms-overflow-style: none;
-        }
+  html.dark * {
+    scrollbar-color: rgba(139, 92, 246, 0.7)
+      rgba(255, 255, 255, 0.06);
+  }
 
-        .no-scrollbar::-webkit-scrollbar {
-          width: 0 !important;
-          height: 0 !important;
-          display: none !important;
-        }
-      `}</style>
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 8px;
+  }
 
-      <main className="flex min-h-screen w-full bg-[#050711] text-white">
+  *::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.08);
+    border-radius: 999px;
+  }
+
+  html.dark *::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: rgba(139, 92, 246, 0.75);
+    border-radius: 999px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(168, 85, 247, 0.95);
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    width: 0 !important;
+    height: 0 !important;
+    display: none !important;
+  }
+`}</style>
+
+    <main className="flex min-h-screen w-full bg-slate-50 text-slate-950 transition-colors duration-300 dark:bg-[#050711] dark:text-white">
         <section className="flex min-h-screen min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-40 shrink-0 border-b border-white/10 bg-[#050711]/95 px-4 py-4 backdrop-blur-xl md:px-8">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="hidden flex-wrap items-center gap-2 xl:flex">
-                {modules.map((item) => {
-                  const Icon = item.icon;
-                  const active = activeModule === item.key;
+         <header className="sticky top-0 z-40 shrink-0 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur-xl transition-colors duration-300 dark:border-white/10 dark:bg-[#050711]/95 md:px-8">
+   <div className="flex flex-wrap items-center justify-between gap-3">
+  <div className="hidden flex-wrap items-center gap-2 xl:flex">
+    {modules.map((item) => {
+      const Icon = item.icon;
+      const active = activeModule === item.key;
 
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={() => setActiveModule(item.key)}
-                      className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-xs font-black transition ${
-                        active
-                          ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/30'
-                          : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {item.label}
-                    </button>
-                  );
-                })}
-              </div>
+      return (
+        <button
+          key={item.key}
+          type="button"
+          onClick={() => setActiveModule(item.key)}
+         className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-xs font-black transition ${
+  active
+    ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/30'
+    : 'border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-100 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300 dark:hover:bg-white/[0.1] dark:hover:text-white'
+}`}
+        >
+          <Icon className="h-4 w-4" />
+          {item.label}
+        </button>
+      );
+    })}
 
-              <div className="rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm text-slate-300">
-                Aktívny profil:{' '}
-                <span className="font-black text-white">
-                  {activeProfile?.title || 'Nie je vybraný'}
-                </span>
-              </div>
-            </div>
 
-            <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto xl:hidden">
-              {modules.map((item) => {
-                const Icon = item.icon;
-                const active = activeModule === item.key;
+<a
+  href="/profile"
+  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-100 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300 dark:hover:bg-white/[0.1] dark:hover:text-white"
+>
+  <User className="h-4 w-4" />
+  Profil
+</a>
 
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => setActiveModule(item.key)}
-                    className={`inline-flex shrink-0 items-center gap-2 rounded-2xl px-4 py-2 text-xs font-black ${
-                      active
-                        ? 'bg-violet-600 text-white'
-                        : 'border border-white/10 bg-white/[0.06] text-slate-300'
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
+    <ThemeToggleButton />
+  </div>
+
+  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
+  Aktívny profil:{' '}
+  <span className="font-black text-slate-950 dark:text-white">
+    {activeProfile?.title || 'Nie je vybraný'}
+  </span>
+</div>
+</div>
+
+           <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto xl:hidden">
+  {modules.map((item) => {
+    const Icon = item.icon;
+    const active = activeModule === item.key;
+
+    return (
+      <button
+        key={item.key}
+        type="button"
+        onClick={() => setActiveModule(item.key)}
+        className={`inline-flex shrink-0 items-center gap-2 rounded-2xl px-4 py-2 text-xs font-black ${
+  active
+    ? 'bg-violet-600 text-white'
+    : 'border border-slate-200 bg-white text-slate-700 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300'
+}`}
+      >
+        <Icon className="h-4 w-4" />
+        {item.label}
+      </button>
+    );
+  })}
+
+<a
+  href="/profile"
+  className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300"
+>
+  <User className="h-4 w-4" />
+  Profil
+</a>
+
+
+  <div className="shrink-0">
+    <ThemeToggleButton />
+  </div>
+</div>
           </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 pb-40 md:px-8">
             <div className="mx-auto max-w-6xl">
-              <section className="mb-10 rounded-[28px] border border-white/10 bg-[#070a16] p-5 shadow-2xl shadow-black/30">
+             <section className="mb-10 rounded-[28px] border border-slate-200 bg-white p-5 shadow-2xl shadow-slate-200/70 transition-colors duration-300 dark:border-white/10 dark:bg-[#070a16] dark:shadow-black/30">
                 <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
                   <div className="flex items-start gap-4">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
                       <ModuleIcon className="h-6 w-6" />
                     </div>
 
                     <div>
-                      <h1 className="text-2xl font-black">
-                        {activeModuleInfo.label}
-                      </h1>
+                      <h1 className="text-2xl font-black text-slate-950 dark:text-white">
+  {activeModuleInfo.label}
+</h1>
 
-                      <p className="mt-1 text-sm text-slate-400">
-                        {activeModuleInfo.subtitle}
-                      </p>
+<p className="mt-1 text-sm border-slate-300 bg-white text-slate-800 hover:bg-slate-100 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/20">
+  {activeModuleInfo.subtitle}
+</p>
                     </div>
                   </div>
                 </div>
@@ -2223,7 +2449,7 @@ VÝSTUP:
                 )}
 
                 <div className="mt-4">
-                  <label className="mb-2 block text-sm font-black text-slate-300">
+                 <label className="mb-2 block text-sm font-black text-slate-800 dark:text-slate-300">
                     {activeModule === 'translation'
                       ? 'Text na preklad'
                       : activeModule === 'data'
@@ -2241,7 +2467,7 @@ VÝSTUP:
                     value={input}
                     onChange={(event) => setInput(event.target.value)}
                     placeholder={getPlaceholder(activeModule)}
-                    className="min-h-[170px] w-full resize-y rounded-2xl border border-white/10 bg-white/[0.055] px-4 py-4 text-sm leading-7 text-white outline-none placeholder:text-slate-500 focus:border-violet-500"
+                    className="min-h-[170px] w-full resize-y rounded-2xl border border-slate-300 bg-white px-4 py-4 text-sm leading-7 text-slate-950 outline-none placeholder:text-slate-400 transition-colors duration-300 focus:border-violet-500 dark:border-white/10 dark:bg-white/[0.055] dark:text-white dark:placeholder:text-slate-500"
                   />
                 </div>
 
@@ -2344,46 +2570,44 @@ VÝSTUP:
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                      {activeModule === 'data' && analysisResult && (
-                        <button
-                          type="button"
-                          onClick={() => setAnalysisModalOpen(true)}
-                          className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white hover:bg-blue-500"
-                        >
-                          <Search className="h-4 w-4" />
-                          Výsledky analýzy
-                        </button>
-                      )}
+  {activeModule === 'defense' ? (
+    <button
+      type="button"
+      onClick={downloadPpt}
+      className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-violet-500"
+    >
+      <Presentation className="h-4 w-4" />
+      PPTX
+    </button>
+  ) : null}
 
-                      {activeModule === 'defense' && (
-                        <button
-                          type="button"
-                          onClick={downloadPpt}
-                          className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-black text-white hover:bg-violet-500"
-                        >
-                          <Presentation className="h-4 w-4" />
-                          PPTX
-                        </button>
-                      )}
+  <button
+    type="button"
+    onClick={downloadDoc}
+    className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 shadow-sm transition hover:bg-slate-100 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.08] dark:text-white dark:hover:bg-white/[0.13]"
+  >
+    <FileText className="h-4 w-4" />
+    Word
+  </button>
 
-                      <button
-                        type="button"
-                        onClick={downloadDoc}
-                        className="inline-flex items-center gap-2 rounded-2xl bg-white/[0.08] px-4 py-3 text-sm font-black text-white hover:bg-white/[0.13]"
-                      >
-                        <Download className="h-4 w-4" />
-                        DOC
-                      </button>
+  <button
+    type="button"
+    onClick={downloadExcel}
+    className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 shadow-sm transition hover:bg-emerald-100 dark:border-emerald-400/20 dark:bg-emerald-500/15 dark:text-emerald-100 dark:hover:bg-emerald-500/25"
+  >
+    <FileSpreadsheet className="h-4 w-4" />
+    Excel
+  </button>
 
-                      <button
-                        type="button"
-                        onClick={downloadPdf}
-                        className="inline-flex items-center gap-2 rounded-2xl bg-white/[0.08] px-4 py-3 text-sm font-black text-white hover:bg-white/[0.13]"
-                      >
-                        <FileDown className="h-4 w-4" />
-                        PDF
-                      </button>
-                    </div>
+  <button
+    type="button"
+    onClick={downloadPdf}
+    className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 shadow-sm transition hover:bg-slate-100 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.08] dark:text-white dark:hover:bg-white/[0.13]"
+  >
+    <FileDown className="h-4 w-4" />
+    PDF
+  </button>
+</div>
                   </div>
 
                   <div className="whitespace-pre-wrap rounded-2xl border border-white/10 bg-black/20 p-5 text-sm leading-8 text-slate-200">

@@ -161,6 +161,7 @@ function loadTextsFromLocalStorage() {
   );
 
   const latestGeneratedText = getLocalStorageValue('latest_generated_work_text');
+  const lastAiOutput = getLocalStorageValue('last_ai_output');
 
   const latestTextItem: SavedText[] =
     latestGeneratedText && latestGeneratedText.trim().length > 0
@@ -173,6 +174,17 @@ function loadTextsFromLocalStorage() {
         ]
       : [];
 
+  const lastAiOutputItem: SavedText[] =
+    lastAiOutput && lastAiOutput.trim().length > 0
+      ? [
+          {
+            id: 'last_ai_output',
+            title: 'Posledný AI výstup',
+            text: lastAiOutput,
+          },
+        ]
+      : [];
+
   const allTexts = [
     ...texts,
     ...generatedTexts,
@@ -180,6 +192,7 @@ function loadTextsFromLocalStorage() {
     ...outputs,
     ...savedOutputs,
     ...latestTextItem,
+    ...lastAiOutputItem,
   ].filter(hasTextContent);
 
   const uniqueTexts = new Map<string, SavedText>();
@@ -234,11 +247,13 @@ export default function DashboardStats() {
     window.addEventListener('storage', load);
     window.addEventListener('focus', load);
     window.addEventListener('zedpera:stats-refresh', load);
+    window.addEventListener('zedpera-language-change', load);
 
     return () => {
       window.removeEventListener('storage', load);
       window.removeEventListener('focus', load);
       window.removeEventListener('zedpera:stats-refresh', load);
+      window.removeEventListener('zedpera-language-change', load);
     };
   }, []);
 

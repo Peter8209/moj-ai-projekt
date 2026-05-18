@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import ThemeToggleButton from '@/components/ThemeToggleButton';
 import { useState } from 'react';
 import {
   ArrowLeft,
@@ -124,33 +125,33 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#020617] text-white">
+    <main className="min-h-screen bg-slate-50 text-slate-950 transition-colors duration-300 dark:bg-[#020617] dark:text-white">
       {/* TOP BAR */}
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#020617]/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <button
-            type="button"
-            onClick={goToMenu}
-            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20"
-          >
-            <Menu size={18} />
-            Menu
-          </button>
+      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-xl transition-colors duration-300 dark:border-white/10 dark:bg-[#020617]/90">
+  <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
+    <button
+      type="button"
+      className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-900 shadow-sm transition hover:bg-slate-100 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
+    >
+      Menu
+    </button>
 
-          <div className="hidden text-sm font-semibold text-slate-400 sm:block">
-            Prihlásenie do ZEDPERA
-          </div>
+    <div className="text-sm font-black text-slate-500 dark:text-slate-400">
+      Prihlásenie do ZEDPERA
+    </div>
 
-          <button
-            type="button"
-            onClick={goToDashboard}
-            className="inline-flex items-center gap-2 rounded-2xl border border-purple-400/30 bg-purple-600/20 px-4 py-2 text-sm font-bold text-purple-100 transition hover:bg-purple-600/30"
-          >
-            <ArrowLeft size={18} />
-            Dashboard
-          </button>
-        </div>
-      </header>
+    <div className="flex items-center gap-3">
+      <ThemeToggleButton />
+
+      <Link
+        href="/dashboard"
+        className="inline-flex items-center gap-2 rounded-2xl border border-violet-300 bg-violet-50 px-5 py-3 text-sm font-black text-violet-800 transition hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-900/40 dark:text-white dark:hover:bg-violet-800/50"
+      >
+        Dashboard
+      </Link>
+    </div>
+  </div>
+</header>
 
       <section className="relative flex min-h-[calc(100vh-73px)] items-center justify-center px-4 py-10 sm:px-6 lg:px-8">
         <div className="pointer-events-none absolute left-1/2 top-10 h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-purple-600/20 blur-3xl" />

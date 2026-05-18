@@ -204,11 +204,7 @@ export default function LoginPage() {
               Prihlás sa do používateľského alebo admin menu ZEDPERA.
             </p>
 
-            <div className="mt-6 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200">
-              <div className="font-black">Test admin údaje:</div>
-              <div className="mt-1">E-mail: admin@zedpera.com</div>
-              <div>Heslo: admin123</div>
-            </div>
+           
 
             {error && (
               <div className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold text-red-200">

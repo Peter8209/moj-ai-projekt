@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import ThemeToggleButton from '@/components/ThemeToggleButton';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+
+import { useLanguage } from '@/components/LanguageProvider';
+
 import {
-  ArrowLeft,
   Eye,
   EyeOff,
   GraduationCap,
@@ -13,15 +14,41 @@ import {
   Lock,
   LogIn,
   Mail,
-  Menu,
-  Sparkles,
 } from 'lucide-react';
 
 const ADMIN_EMAIL = 'admin@zedpera.com';
 const ADMIN_PASSWORD = 'admin123';
 
+type AppLanguage = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
+
+const LANGUAGE_STORAGE_KEY = 'zedpera_language';
+
+function isValidLanguage(value: unknown): value is AppLanguage {
+  return (
+    value === 'sk' ||
+    value === 'cs' ||
+    value === 'en' ||
+    value === 'de' ||
+    value === 'pl' ||
+    value === 'hu'
+  );
+}
+
+function getSavedLanguage(): AppLanguage {
+  if (typeof window === 'undefined') return 'sk';
+
+  const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+
+  if (isValidLanguage(savedLanguage)) {
+    return savedLanguage;
+  }
+
+  return 'sk';
+}
+
 export default function LoginPage() {
   const router = useRouter();
+  const { setLanguage } = useLanguage();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -30,13 +57,36 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const goToMenu = () => {
-    router.push('/');
-  };
+  const triggerAutoTranslate = useCallback(() => {
+    if (typeof window === 'undefined') return;
 
-  const goToDashboard = () => {
-    router.push('/dashboard');
-  };
+    const language = getSavedLanguage();
+
+    setLanguage(language);
+
+    document.documentElement.lang = language;
+    document.documentElement.setAttribute('data-language', language);
+
+    window.dispatchEvent(
+      new CustomEvent<AppLanguage>('zedpera-language-change', {
+        detail: language,
+      }),
+    );
+  }, [setLanguage]);
+
+  useEffect(() => {
+    triggerAutoTranslate();
+
+    const timers = [
+      window.setTimeout(triggerAutoTranslate, 250),
+      window.setTimeout(triggerAutoTranslate, 750),
+      window.setTimeout(triggerAutoTranslate, 1500),
+    ];
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [triggerAutoTranslate]);
 
   const saveLoginData = ({
     userEmail,
@@ -77,11 +127,17 @@ export default function LoginPage() {
 
     if (!cleanEmail || !cleanPassword) {
       setError('Vyplň e-mail a heslo.');
+
+      window.setTimeout(triggerAutoTranslate, 50);
+      window.setTimeout(triggerAutoTranslate, 300);
+
       return;
     }
 
     try {
       setLoading(true);
+
+      window.setTimeout(triggerAutoTranslate, 50);
 
       if (cleanEmail === ADMIN_EMAIL && cleanPassword === ADMIN_PASSWORD) {
         saveLoginData({
@@ -91,6 +147,8 @@ export default function LoginPage() {
           plan: 'admin-free',
           adminFree: true,
         });
+
+        triggerAutoTranslate();
 
         router.push('/dashboard?mode=admin-free');
         return;
@@ -103,11 +161,18 @@ export default function LoginPage() {
         plan: 'free',
       });
 
+      triggerAutoTranslate();
+
       router.push('/dashboard?login=success');
     } catch {
       setError('Prihlásenie zlyhalo. Skús to znova.');
+
+      window.setTimeout(triggerAutoTranslate, 50);
+      window.setTimeout(triggerAutoTranslate, 300);
     } finally {
       setLoading(false);
+
+      window.setTimeout(triggerAutoTranslate, 100);
     }
   };
 
@@ -121,212 +186,150 @@ export default function LoginPage() {
       plan: 'free',
     });
 
+    triggerAutoTranslate();
+
     router.push('/dashboard?demo=true');
   };
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950 transition-colors duration-300 dark:bg-[#020617] dark:text-white">
-      {/* TOP BAR */}
-      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-xl transition-colors duration-300 dark:border-white/10 dark:bg-[#020617]/90">
-  <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-    <button
-      type="button"
-      className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-900 shadow-sm transition hover:bg-slate-100 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
-    >
-      Menu
-    </button>
-
-    <div className="text-sm font-black text-slate-500 dark:text-slate-400">
-      Prihlásenie do ZEDPERA
-    </div>
-
-    <div className="flex items-center gap-3">
-      <ThemeToggleButton />
-
-      <Link
-        href="/dashboard"
-        className="inline-flex items-center gap-2 rounded-2xl border border-violet-300 bg-violet-50 px-5 py-3 text-sm font-black text-violet-800 transition hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-900/40 dark:text-white dark:hover:bg-violet-800/50"
-      >
-        Dashboard
-      </Link>
-    </div>
-  </div>
-</header>
-
-      <section className="relative flex min-h-[calc(100vh-73px)] items-center justify-center px-4 py-10 sm:px-6 lg:px-8">
+      <section className="relative flex min-h-screen items-center justify-center px-4 py-10 sm:px-6 lg:px-8">
         <div className="pointer-events-none absolute left-1/2 top-10 h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-purple-600/20 blur-3xl" />
         <div className="pointer-events-none absolute bottom-10 right-10 h-[320px] w-[320px] rounded-full bg-indigo-600/20 blur-3xl" />
 
-        <div className="relative grid w-full max-w-6xl gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
-          {/* LEFT INFO */}
-          <div className="hidden lg:block">
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-sm font-bold text-purple-200">
-              <Sparkles size={17} />
-              AI akademický asistent
+        <div className="relative mx-auto w-full max-w-md rounded-[2rem] border border-slate-200 bg-white/85 p-6 shadow-2xl shadow-slate-900/10 backdrop-blur sm:p-8 dark:border-white/10 dark:bg-white/[0.06] dark:shadow-black/40">
+          <div className="mb-7 flex items-center gap-3">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-700 text-white shadow-lg">
+              <GraduationCap size={28} />
             </div>
 
-            <h1 className="text-5xl font-black leading-tight">
-              Prihlás sa a pokračuj v práci.
-            </h1>
+            <div>
+              <h1 className="text-3xl font-black text-slate-950 dark:text-white">
+                Prihlásenie
+              </h1>
 
-            <p className="mt-5 max-w-xl text-lg leading-8 text-slate-300">
-              ZEDPERA ti pomôže s písaním, kontrolou kvality, citáciami,
-              obhajobou a spätnou väzbou k akademickej práci.
-            </p>
-
-            <div className="mt-8 grid max-w-xl grid-cols-2 gap-4">
-              <InfoCard title="AI písanie" text="Generovanie kapitol a textov." />
-              <InfoCard title="AI vedúci" text="Kritická spätná väzba." />
-              <InfoCard title="Citácie" text="Zdroje a odborný aparát." />
-              <InfoCard title="Obhajoba" text="Otázky a prezentácia." />
+              <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">
+                ZEDPERA účet
+              </p>
             </div>
           </div>
 
-          {/* LOGIN CARD */}
-          <div className="mx-auto w-full max-w-md rounded-[2rem] border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-black/40 backdrop-blur sm:p-8">
-            <div className="mb-7 flex items-center gap-3">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-700 text-white shadow-lg">
-                <GraduationCap size={28} />
+          <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">
+            Prihlás sa do používateľského alebo admin menu ZEDPERA.
+          </p>
+
+          {error && (
+            <div className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold text-red-700 dark:text-red-200">
+              {error}
+            </div>
+          )}
+
+          <div className="mt-7 space-y-4">
+            <label className="block">
+              <span className="mb-2 block text-sm font-bold text-slate-700 dark:text-slate-300">
+                E-mail
+              </span>
+
+              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 focus-within:border-purple-400 dark:border-white/10 dark:bg-slate-950">
+                <Mail size={18} className="text-slate-500" />
+
+                <input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      void loginUser();
+                    }
+                  }}
+                  placeholder="napr. peter@email.com"
+                  type="email"
+                  autoComplete="email"
+                  className="w-full bg-transparent text-slate-950 outline-none placeholder:text-slate-400 dark:text-white dark:placeholder:text-slate-600"
+                />
               </div>
+            </label>
 
-              <div>
-                <h1 className="text-3xl font-black">
-                  Prihlásenie
-                </h1>
+            <label className="block">
+              <span className="mb-2 block text-sm font-bold text-slate-700 dark:text-slate-300">
+                Heslo
+              </span>
 
-                <p className="text-sm font-semibold text-slate-400">
-                  ZEDPERA účet
-                </p>
+              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 focus-within:border-purple-400 dark:border-white/10 dark:bg-slate-950">
+                <Lock size={18} className="text-slate-500" />
+
+                <input
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      void loginUser();
+                    }
+                  }}
+                  placeholder="Zadaj heslo"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  className="w-full bg-transparent text-slate-950 outline-none placeholder:text-slate-400 dark:text-white dark:placeholder:text-slate-600"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((value) => !value)}
+                  className="text-slate-500 transition hover:text-slate-900 dark:hover:text-white"
+                  aria-label={showPassword ? 'Skryť heslo' : 'Zobraziť heslo'}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
-            </div>
+            </label>
 
-            <p className="text-sm leading-6 text-slate-400">
-              Prihlás sa do používateľského alebo admin menu ZEDPERA.
-            </p>
+            <button
+              type="button"
+              onClick={() => void loginUser()}
+              disabled={loading}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-700 px-5 py-4 font-black text-white shadow-xl shadow-purple-950/30 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="animate-spin" size={20} />
+                  Prihlasujem...
+                </>
+              ) : (
+                <>
+                  <LogIn size={20} />
+                  Prihlásiť sa do aplikácie
+                </>
+              )}
+            </button>
 
-           
+            <button
+              type="button"
+              onClick={loginAsDemoUser}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-5 py-4 font-black text-slate-900 transition hover:bg-slate-200 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/20"
+            >
+              Vyskúšať Zedperu bez prihlásenia
+            </button>
+          </div>
 
-            {error && (
-              <div className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold text-red-200">
-                {error}
-              </div>
-            )}
+          <div className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
+            Nemáš účet?{' '}
+            <Link
+              href="/register"
+              className="font-bold text-purple-600 hover:text-purple-500 dark:text-purple-300 dark:hover:text-purple-200"
+            >
+              Registrovať sa
+            </Link>
+          </div>
 
-            <div className="mt-7 space-y-4">
-              <label className="block">
-                <span className="mb-2 block text-sm font-bold text-slate-300">
-                  E-mail
-                </span>
-
-                <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 focus-within:border-purple-400">
-                  <Mail size={18} className="text-slate-500" />
-
-                  <input
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        void loginUser();
-                      }
-                    }}
-                    placeholder="napr. peter@email.com"
-                    type="email"
-                    autoComplete="email"
-                    className="w-full bg-transparent text-white outline-none placeholder:text-slate-600"
-                  />
-                </div>
-              </label>
-
-              <label className="block">
-                <span className="mb-2 block text-sm font-bold text-slate-300">
-                  Heslo
-                </span>
-
-                <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 focus-within:border-purple-400">
-                  <Lock size={18} className="text-slate-500" />
-
-                  <input
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        void loginUser();
-                      }
-                    }}
-                    placeholder="Zadaj heslo"
-                    type={showPassword ? 'text' : 'password'}
-                    autoComplete="current-password"
-                    className="w-full bg-transparent text-white outline-none placeholder:text-slate-600"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((value) => !value)}
-                    className="text-slate-500 transition hover:text-white"
-                    aria-label={showPassword ? 'Skryť heslo' : 'Zobraziť heslo'}
-                  >
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </label>
-
-              <button
-                type="button"
-                onClick={() => void loginUser()}
-                disabled={loading}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-700 px-5 py-4 font-black text-white shadow-xl shadow-purple-950/30 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="animate-spin" size={20} />
-                    Prihlasujem...
-                  </>
-                ) : (
-                  <>
-                    <LogIn size={20} />
-                    Prihlásiť sa do aplikácie
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={loginAsDemoUser}
-                className="w-full rounded-2xl border border-white/10 bg-white/10 px-5 py-4 font-black text-white transition hover:bg-white/20"
-              >
-                Vyskúšať Zedperu bez prihlásenia
-              </button>
-            </div>
-
-            <div className="mt-6 text-center text-sm text-slate-400">
-              Nemáš účet?{' '}
-              <Link href="/register" className="font-bold text-purple-300 hover:text-purple-200">
-                Registrovať sa
-              </Link>
-            </div>
-
-            <div className="mt-6 text-center">
-              <Link href="/" className="text-sm text-slate-500 hover:text-white">
-                Späť na úvodnú stránku
-              </Link>
-            </div>
+          <div className="mt-6 text-center">
+            <Link
+              href="/"
+              className="text-sm text-slate-500 hover:text-slate-900 dark:hover:text-white"
+            >
+              Späť na úvodnú stránku
+            </Link>
           </div>
         </div>
       </section>
     </main>
-  );
-}
-
-function InfoCard({ title, text }: { title: string; text: string }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-4">
-      <div className="font-black text-white">
-        {title}
-      </div>
-
-      <div className="mt-1 text-sm text-slate-400">
-        {text}
-      </div>
-    </div>
   );
 }

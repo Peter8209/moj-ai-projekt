@@ -1,69 +1,65 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { normalizeLanguage, type AppLanguage } from '@/lib/i18n';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useLanguage } from '@/components/LanguageProvider';
 
-const LANGUAGE_STORAGE_KEY = 'zedpera_language';
+const STORAGE_PREFIX = 'zedpera_ai_ui_translation_';
 
-const SKIP_TAGS = new Set([
+const ignoredTags = new Set([
   'SCRIPT',
   'STYLE',
   'NOSCRIPT',
-  'IFRAME',
-  'SVG',
-  'PATH',
-  'CODE',
-  'PRE',
   'TEXTAREA',
-  'INPUT',
   'SELECT',
   'OPTION',
+  'CODE',
+  'PRE',
+  'SVG',
+  'PATH',
 ]);
 
-function isValidLanguage(value: unknown): value is AppLanguage {
-  return (
-    value === 'sk' ||
-    value === 'cs' ||
-    value === 'en' ||
-    value === 'de' ||
-    value === 'pl' ||
-    value === 'hu'
-  );
+const translatableAttributes = ['placeholder', 'aria-label', 'title'];
+
+function cleanText(value: string) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
-function cleanText(value: unknown) {
-  return String(value || '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function shouldSkipText(value: string) {
+function shouldTranslateText(value: string) {
   const text = cleanText(value);
 
-  if (!text) return true;
-  if (text.length < 2) return true;
-  if (/^[\d\s.,€%+\-/:()]+$/.test(text)) return true;
-  if (/^https?:\/\//i.test(text)) return true;
-  if (/^[A-Z0-9_-]{2,20}$/.test(text)) return true;
+  if (!text) return false;
+  if (text.length < 2) return false;
+  if (text.length > 450) return false;
 
-  return false;
+  if (/^[\d\s.,€%+\-/:()]+$/.test(text)) return false;
+  if (/^https?:\/\//i.test(text)) return false;
+  if (/^[A-Z0-9_-]{2,20}$/.test(text)) return false;
+  if (text.includes('@')) return false;
+
+  if (text === 'Zedpera') return false;
+  if (text === 'ZEDPERA') return false;
+
+  return true;
 }
 
-function isInsideSkippedElement(node: Node) {
+function isInsideIgnoredElement(node: Node) {
   let current: Node | null = node.parentNode;
 
   while (current) {
-    if (
-      current.nodeType === Node.ELEMENT_NODE &&
-      SKIP_TAGS.has((current as HTMLElement).tagName)
-    ) {
-      return true;
-    }
+    if (current.nodeType === Node.ELEMENT_NODE) {
+      const element = current as HTMLElement;
 
-    const element = current as HTMLElement;
+      if (ignoredTags.has(element.tagName)) {
+        return true;
+      }
 
-    if (element?.dataset?.noTranslate === 'true') {
-      return true;
+      if (element.dataset.noTranslate === 'true') {
+        return true;
+      }
+
+      if (element.closest('[data-no-translate="true"]')) {
+        return true;
+      }
     }
 
     current = current.parentNode;
@@ -72,234 +68,344 @@ function isInsideSkippedElement(node: Node) {
   return false;
 }
 
-function collectTextNodes(root: ParentNode) {
+function collectTextNodes(root: HTMLElement) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const nodes: Text[] = [];
 
-  const walker = document.createTreeWalker(
-    root,
-    NodeFilter.SHOW_TEXT,
-    {
-      acceptNode(node) {
-        if (isInsideSkippedElement(node)) {
-          return NodeFilter.FILTER_REJECT;
-        }
+  let node = walker.nextNode();
 
-        const text = cleanText(node.textContent);
+  while (node) {
+    const textNode = node as Text;
+    const text = cleanText(textNode.nodeValue || '');
 
-        if (shouldSkipText(text)) {
-          return NodeFilter.FILTER_REJECT;
-        }
+    if (shouldTranslateText(text) && !isInsideIgnoredElement(textNode)) {
+      nodes.push(textNode);
+    }
 
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    },
-  );
-
-  let current = walker.nextNode();
-
-  while (current) {
-    nodes.push(current as Text);
-    current = walker.nextNode();
+    node = walker.nextNode();
   }
 
   return nodes;
 }
 
-function collectTranslatableAttributes(root: ParentNode) {
-  const elements = Array.from(
-    root.querySelectorAll<HTMLElement>(
-      '[placeholder], [title], [aria-label], [alt]',
-    ),
-  );
+function collectAttributeElements(root: HTMLElement) {
+  const elements = Array.from(root.querySelectorAll<HTMLElement>('*'));
 
-  const items: {
-    element: HTMLElement;
-    attribute: string;
-    value: string;
-  }[] = [];
+  return elements.filter((element) => {
+    if (ignoredTags.has(element.tagName)) return false;
+    if (element.dataset.noTranslate === 'true') return false;
+    if (element.closest('[data-no-translate="true"]')) return false;
 
-  elements.forEach((element) => {
-    if (SKIP_TAGS.has(element.tagName)) return;
-    if (element.dataset.noTranslate === 'true') return;
-
-    ['placeholder', 'title', 'aria-label', 'alt'].forEach((attribute) => {
-      const value = element.getAttribute(attribute);
-
-      if (!value || shouldSkipText(value)) return;
-
-      items.push({
-        element,
-        attribute,
-        value: cleanText(value),
-      });
+    return translatableAttributes.some((attr) => {
+      const value = element.getAttribute(attr);
+      return value && shouldTranslateText(value);
     });
   });
-
-  return items;
 }
 
-async function requestTranslations(language: AppLanguage, texts: string[]) {
-  const uniqueTexts = Array.from(new Set(texts)).filter(
-    (item) => !shouldSkipText(item),
+function getCacheKey(language: string) {
+  return `${STORAGE_PREFIX}${language}`;
+}
+
+function loadCachedTranslations(language: string) {
+  try {
+    const raw = localStorage.getItem(getCacheKey(language));
+    const parsed = raw ? JSON.parse(raw) : null;
+
+    if (parsed && typeof parsed === 'object') {
+      return parsed as Record<string, string>;
+    }
+
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+function saveCachedTranslations(
+  language: string,
+  translations: Record<string, string>,
+) {
+  try {
+    localStorage.setItem(getCacheKey(language), JSON.stringify(translations));
+  } catch {
+    // localStorage môže byť plný alebo blokovaný
+  }
+}
+
+async function translateTextsWithAi(language: string, texts: string[]) {
+  const uniqueTexts = Array.from(
+    new Set(texts.map(cleanText).filter(Boolean)),
   );
 
   if (uniqueTexts.length === 0) {
     return {};
   }
 
-  const cacheKey = `zedpera_ui_translation_cache_${language}`;
-  const cachedRaw = localStorage.getItem(cacheKey);
-  const cached = cachedRaw ? JSON.parse(cachedRaw) : {};
-
-  const missing = uniqueTexts.filter((text) => !cached[text]);
-
-  if (missing.length === 0) {
-    return cached as Record<string, string>;
-  }
-
-  const response = await fetch('/api/translate-ui', {
+  const res = await fetch('/api/translate-ui', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       language,
-      texts: missing,
+      texts: uniqueTexts,
     }),
   });
 
-  if (!response.ok) {
-    throw new Error('TRANSLATE_UI_REQUEST_FAILED');
+  if (!res.ok) {
+    throw new Error(`Translate UI failed: ${res.status}`);
   }
 
-  const data = await response.json();
+  const data = await res.json();
 
-  const translations = {
-    ...cached,
-    ...(data.translations || {}),
-  };
+  if (!data?.ok || !data?.translations) {
+    return {};
+  }
 
-  localStorage.setItem(cacheKey, JSON.stringify(translations));
-
-  return translations as Record<string, string>;
+  return data.translations as Record<string, string>;
 }
 
-export default function AutoTranslateProvider() {
-  const observerRef = useRef<MutationObserver | null>(null);
-  const translatingRef = useRef(false);
-  const timerRef = useRef<number | null>(null);
+export default function AutoTranslateProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const { language } = useLanguage();
+
+  const [isUiTranslating, setIsUiTranslating] = useState(false);
+
+  const originalTextMapRef = useRef<WeakMap<Text, string>>(new WeakMap());
+  const originalAttributeMapRef = useRef<
+    WeakMap<HTMLElement, Record<string, string>>
+  >(new WeakMap());
+
+  const isTranslatingRef = useRef(false);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    let cancelled = false;
+    let observer: MutationObserver | null = null;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-    async function translatePage() {
-      if (translatingRef.current) return;
+    const restoreOriginalTexts = () => {
+      const root = document.body;
+      if (!root) return;
 
-      const selectedLanguage = normalizeLanguage(
-        localStorage.getItem(LANGUAGE_STORAGE_KEY),
-      );
+      const nodes = collectTextNodes(root);
 
-      if (!isValidLanguage(selectedLanguage)) return;
+      for (const node of nodes) {
+        const original = originalTextMapRef.current.get(node);
 
-      document.documentElement.lang = selectedLanguage;
-
-      if (selectedLanguage === 'sk') {
-        window.location.reload();
-        return;
+        if (original) {
+          node.nodeValue = original;
+        }
       }
 
-      translatingRef.current = true;
+      const attributeElements = collectAttributeElements(root);
 
-      try {
-        const textNodes = collectTextNodes(document.body);
-        const attributeItems = collectTranslatableAttributes(document.body);
+      for (const element of attributeElements) {
+        const attributes = originalAttributeMapRef.current.get(element);
 
-        const originalTexts = [
-          ...textNodes.map((node) => cleanText(node.textContent)),
-          ...attributeItems.map((item) => item.value),
-        ];
+        if (!attributes) continue;
 
-        const translations = await requestTranslations(
-          selectedLanguage,
-          originalTexts,
-        );
+        for (const attr of translatableAttributes) {
+          const original = attributes[attr];
 
-        textNodes.forEach((node) => {
-          const original = cleanText(node.textContent);
-          const translated = translations[original];
-
-          if (translated && translated !== original) {
-            node.textContent = String(node.textContent || '').replace(
-              original,
-              translated,
-            );
+          if (original) {
+            element.setAttribute(attr, original);
           }
-        });
-
-        attributeItems.forEach((item) => {
-          const translated = translations[item.value];
-
-          if (translated && translated !== item.value) {
-            item.element.setAttribute(item.attribute, translated);
-          }
-        });
-      } catch (error) {
-        console.error('AUTO_TRANSLATE_PAGE_ERROR:', error);
-      } finally {
-        translatingRef.current = false;
+        }
       }
-    }
-
-    function scheduleTranslate() {
-      if (timerRef.current) {
-        window.clearTimeout(timerRef.current);
-      }
-
-      timerRef.current = window.setTimeout(() => {
-        void translatePage();
-      }, 500);
-    }
-
-    const handleLanguageChange = (event: Event) => {
-      const customEvent = event as CustomEvent<AppLanguage>;
-      const nextLanguage = customEvent.detail;
-
-      if (isValidLanguage(nextLanguage)) {
-        localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
-      }
-
-      scheduleTranslate();
     };
 
-    window.addEventListener('zedpera-language-change', handleLanguageChange);
-    window.addEventListener('focus', scheduleTranslate);
+    const applyTranslationsToPage = (
+      nodes: Text[],
+      attributeElements: HTMLElement[],
+      translations: Record<string, string>,
+    ) => {
+      for (const node of nodes) {
+        const original = originalTextMapRef.current.get(node);
+        if (!original) continue;
 
-    observerRef.current = new MutationObserver(() => {
-      scheduleTranslate();
+        const translated = translations[original];
+
+        if (translated && translated.trim()) {
+          node.nodeValue = translated;
+        }
+      }
+
+      for (const element of attributeElements) {
+        const attributes = originalAttributeMapRef.current.get(element);
+
+        if (!attributes) continue;
+
+        for (const attr of translatableAttributes) {
+          const original = attributes[attr];
+          const translated = translations[original];
+
+          if (translated && translated.trim()) {
+            element.setAttribute(attr, translated);
+          }
+        }
+      }
+    };
+
+    const runTranslation = async () => {
+      if (cancelled) return;
+      if (typeof window === 'undefined') return;
+      if (!document.body) return;
+      if (isTranslatingRef.current) return;
+
+      isTranslatingRef.current = true;
+
+      try {
+        const root = document.body;
+
+        const nodes = collectTextNodes(root);
+        const attributeElements = collectAttributeElements(root);
+
+        for (const node of nodes) {
+          if (!originalTextMapRef.current.has(node)) {
+            originalTextMapRef.current.set(
+              node,
+              cleanText(node.nodeValue || ''),
+            );
+          }
+        }
+
+        for (const element of attributeElements) {
+          if (!originalAttributeMapRef.current.has(element)) {
+            const attributes: Record<string, string> = {};
+
+            for (const attr of translatableAttributes) {
+              const value = cleanText(element.getAttribute(attr) || '');
+
+              if (shouldTranslateText(value)) {
+                attributes[attr] = value;
+              }
+            }
+
+            originalAttributeMapRef.current.set(element, attributes);
+          }
+        }
+
+        if (language === 'sk') {
+          restoreOriginalTexts();
+          setIsUiTranslating(false);
+          return;
+        }
+
+        const cachedTranslations = loadCachedTranslations(language);
+
+        const sourceTextNodes = nodes
+          .map((node) => originalTextMapRef.current.get(node) || '')
+          .map(cleanText)
+          .filter(shouldTranslateText);
+
+        const sourceAttributeTexts = attributeElements.flatMap((element) => {
+          const attributes = originalAttributeMapRef.current.get(element);
+
+          if (!attributes) return [];
+
+          return translatableAttributes
+            .map((attr) => attributes[attr])
+            .map((value) => cleanText(value || ''))
+            .filter(shouldTranslateText);
+        });
+
+        const sourceTexts = Array.from(
+          new Set([...sourceTextNodes, ...sourceAttributeTexts]),
+        );
+
+        const missingTexts = sourceTexts.filter(
+          (text) => !cachedTranslations[text],
+        );
+
+        if (Object.keys(cachedTranslations).length > 0) {
+          applyTranslationsToPage(nodes, attributeElements, cachedTranslations);
+        }
+
+        let newTranslations: Record<string, string> = {};
+
+        if (missingTexts.length > 0) {
+          setIsUiTranslating(true);
+          newTranslations = await translateTextsWithAi(language, missingTexts);
+        }
+
+        if (cancelled) return;
+
+        const mergedTranslations = {
+          ...cachedTranslations,
+          ...newTranslations,
+        };
+
+        saveCachedTranslations(language, mergedTranslations);
+        applyTranslationsToPage(nodes, attributeElements, mergedTranslations);
+      } catch (error) {
+        console.error('AUTO_TRANSLATE_PROVIDER_ERROR:', error);
+      } finally {
+        isTranslatingRef.current = false;
+
+        if (!cancelled) {
+          setIsUiTranslating(false);
+        }
+      }
+    };
+
+    const scheduleTranslation = () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+
+      debounceTimer = setTimeout(() => {
+        void runTranslation();
+      }, 250);
+    };
+
+    restoreOriginalTexts();
+    scheduleTranslation();
+
+    observer = new MutationObserver(() => {
+      scheduleTranslation();
     });
 
-    observerRef.current.observe(document.body, {
+    observer.observe(document.body, {
       childList: true,
       subtree: true,
       characterData: true,
+      attributes: true,
+      attributeFilter: translatableAttributes,
     });
 
-    scheduleTranslate();
+    window.addEventListener('zedpera-language-change', scheduleTranslation);
 
     return () => {
-      window.removeEventListener(
-        'zedpera-language-change',
-        handleLanguageChange,
-      );
-      window.removeEventListener('focus', scheduleTranslate);
+      cancelled = true;
 
-      if (timerRef.current) {
-        window.clearTimeout(timerRef.current);
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
       }
 
-      observerRef.current?.disconnect();
-    };
-  }, []);
+      if (observer) {
+        observer.disconnect();
+      }
 
-  return null;
+      window.removeEventListener('zedpera-language-change', scheduleTranslation);
+    };
+  }, [language]);
+
+  return (
+    <>
+      {children}
+
+      {isUiTranslating && language !== 'sk' ? (
+        <div
+          data-no-translate="true"
+          className="fixed bottom-4 right-4 z-[9999] rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 text-sm font-bold text-slate-800 shadow-2xl shadow-slate-900/20 backdrop-blur dark:border-white/10 dark:bg-[#020617]/95 dark:text-white"
+        >
+          Prekladám rozhranie…
+        </div>
+      ) : null}
+    </>
+  );
 }

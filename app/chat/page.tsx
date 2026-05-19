@@ -186,8 +186,16 @@ type SavedProfile = {
   field?: string;
   supervisor?: string;
   citation?: string;
+
+  // hlavný jazyk celého systému
   language?: string;
+
+  // jazyk rozhrania
+  interfaceLanguage?: string;
+
+  // jazyk práce, AI chatu a modulov
   workLanguage?: string;
+
   annotation?: string;
   goal?: string;
   problem?: string;
@@ -606,17 +614,61 @@ function safeJsonParse<T>(value: string | null): T | null {
     return null;
   }
 }
+function isValidAppLanguage(value: unknown): value is AppLanguage {
+  return (
+    value === 'sk' ||
+    value === 'cs' ||
+    value === 'en' ||
+    value === 'de' ||
+    value === 'pl' ||
+    value === 'hu'
+  );
+}
+
+function getStoredSystemLanguage(): AppLanguage {
+  if (typeof window === 'undefined') return 'sk';
+
+  const stored =
+    localStorage.getItem('zedpera_language') ||
+    localStorage.getItem('zedpera_system_language') ||
+    localStorage.getItem('zedpera_work_language') ||
+    'sk';
+
+  return isValidAppLanguage(stored) ? stored : 'sk';
+}
+
+function withSystemLanguageProfile(
+  profile: SavedProfile | null,
+  systemLanguage: AppLanguage,
+): SavedProfile | null {
+  if (!profile) {
+    return {
+      language: systemLanguage,
+      interfaceLanguage: systemLanguage,
+      workLanguage: systemLanguage,
+    };
+  }
+
+  return {
+    ...profile,
+    language: systemLanguage,
+    interfaceLanguage: systemLanguage,
+    workLanguage: systemLanguage,
+  };
+}
 
 function normalizeProfile(raw: any): SavedProfile | null {
   if (!raw || typeof raw !== 'object') return null;
 
   if (raw.profile && typeof raw.profile === 'object') {
     return {
-      ...raw.profile,
-      schema: raw.schema || raw.profile.schema,
-      workLanguage: raw.workLanguage || raw.profile.workLanguage,
-      savedAt: raw.savedAt || raw.generatedAt || raw.profile.savedAt,
-    };
+  ...raw.profile,
+  schema: raw.schema || raw.profile.schema,
+  language: raw.language || raw.profile.language,
+  interfaceLanguage: raw.interfaceLanguage || raw.profile.interfaceLanguage,
+  workLanguage: raw.workLanguage || raw.profile.workLanguage,
+  savedAt: raw.savedAt || raw.generatedAt || raw.profile.savedAt,
+};
   }
 
   return raw as SavedProfile;
@@ -1750,6 +1802,48 @@ export default function ChatPage() {
   !isLoading &&
   (input.trim().length > 0 || attachedFiles.length > 0);
 
+
+const saveChatToHistory = async ({
+  userMessage,
+  assistantMessage,
+}: {
+  userMessage: string;
+  assistantMessage: string;
+}) => {
+  try {
+    const cleanUserMessage = cleanAiOutput(userMessage);
+    const cleanAssistantMessage = cleanAiOutput(assistantMessage);
+
+    if (!cleanUserMessage && !cleanAssistantMessage) return;
+
+    const title =
+      cleanUserMessage.length > 90
+        ? `${cleanUserMessage.slice(0, 90)}...`
+        : cleanUserMessage || 'Nový chat';
+
+    const content = `POUŽÍVATEĽ:
+${cleanUserMessage}
+
+AI ODPOVEĎ:
+${cleanAssistantMessage}`;
+
+    await fetch('/api/history', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: 'chat',
+        title,
+        preview: cleanAssistantMessage.slice(0, 250) || cleanUserMessage.slice(0, 250),
+        content,
+      }),
+    });
+  } catch (error) {
+    console.error('SAVE_CHAT_HISTORY_ERROR:', error);
+  }
+};
+
 const handleSelectAgent = (nextAgent: Agent) => {
   setAgent(nextAgent);
 
@@ -1765,44 +1859,51 @@ const handleSelectAgent = (nextAgent: Agent) => {
 
 
 
-  useEffect(() => {
-  const savedLanguage = localStorage.getItem('zedpera_language') as AppLanguage | null;
+useEffect(() => {
+  const systemLanguage = getStoredSystemLanguage();
 
-  if (
-    savedLanguage === 'sk' ||
-    savedLanguage === 'cs' ||
-    savedLanguage === 'en' ||
-    savedLanguage === 'de' ||
-    savedLanguage === 'pl' ||
-    savedLanguage === 'hu'
-  ) {
-    setLanguage(savedLanguage);
-  }
+  setLanguage(systemLanguage);
+
+  localStorage.setItem('zedpera_language', systemLanguage);
+  localStorage.setItem('zedpera_system_language', systemLanguage);
+  localStorage.setItem('zedpera_work_language', systemLanguage);
+
+  document.documentElement.lang = systemLanguage;
+  document.documentElement.setAttribute('data-language', systemLanguage);
+  document.documentElement.setAttribute('data-system-language', systemLanguage);
+  document.documentElement.setAttribute('data-work-language', systemLanguage);
 }, []);
 
   useEffect(() => {
-    const activeRaw = localStorage.getItem('active_profile');
-    const profileRaw = localStorage.getItem('profile');
-    const profilesRaw = localStorage.getItem('profiles_full');
+  const systemLanguage = getStoredSystemLanguage();
 
-    const active = normalizeProfile(safeJsonParse<any>(activeRaw));
-    const profile = normalizeProfile(safeJsonParse<any>(profileRaw));
-    const profiles = safeJsonParse<any[]>(profilesRaw);
+  const activeRaw = localStorage.getItem('active_profile');
+  const profileRaw = localStorage.getItem('profile');
+  const profilesRaw = localStorage.getItem('profiles_full');
 
-    if (active) {
-      setActiveProfile(active);
-      return;
-    }
+  const active = normalizeProfile(safeJsonParse<any>(activeRaw));
+  const profile = normalizeProfile(safeJsonParse<any>(profileRaw));
+  const profiles = safeJsonParse<any[]>(profilesRaw);
 
-    if (profile) {
-      setActiveProfile(profile);
-      return;
-    }
+  const selectedProfile =
+    active ||
+    profile ||
+    (Array.isArray(profiles) && profiles.length > 0
+      ? normalizeProfile(profiles[0])
+      : null);
 
-    if (Array.isArray(profiles) && profiles.length > 0) {
-      setActiveProfile(normalizeProfile(profiles[0]));
-    }
-  }, []);
+  const profileWithLanguage = withSystemLanguageProfile(
+    selectedProfile,
+    systemLanguage,
+  );
+
+  setActiveProfile(profileWithLanguage);
+
+  if (profileWithLanguage) {
+    localStorage.setItem('active_profile', JSON.stringify(profileWithLanguage));
+    localStorage.setItem('profile', JSON.stringify(profileWithLanguage));
+  }
+}, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1821,9 +1922,50 @@ const handleSelectAgent = (nextAgent: Agent) => {
   }, []);
 
 
+
+
+
+
+
 const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
   setLanguage(nextLanguage);
-  localStorage.setItem('zedpera_language', nextLanguage);
+
+localStorage.setItem('zedpera_language', nextLanguage);
+localStorage.setItem('zedpera_system_language', nextLanguage);
+localStorage.setItem('zedpera_work_language', nextLanguage);
+
+document.documentElement.lang = nextLanguage;
+document.documentElement.setAttribute('data-language', nextLanguage);
+document.documentElement.setAttribute('data-system-language', nextLanguage);
+document.documentElement.setAttribute('data-work-language', nextLanguage);
+
+const updatedProfile = withSystemLanguageProfile(activeProfile, nextLanguage);
+setActiveProfile(updatedProfile);
+
+if (updatedProfile) {
+  localStorage.setItem('active_profile', JSON.stringify(updatedProfile));
+  localStorage.setItem('profile', JSON.stringify(updatedProfile));
+}
+
+window.dispatchEvent(
+  new CustomEvent<AppLanguage>('zedpera-language-change', {
+    detail: nextLanguage,
+  }),
+);
+
+window.dispatchEvent(
+  new CustomEvent<AppLanguage>('zedpera-system-language-change', {
+    detail: nextLanguage,
+  }),
+);
+
+window.dispatchEvent(
+  new CustomEvent<AppLanguage>('zedpera-work-language-change', {
+    detail: nextLanguage,
+  }),
+);
+
+window.dispatchEvent(new CustomEvent('zedpera-profile-change'));
 
   const textToTranslate = result.trim() || canvasText.trim();
 
@@ -1839,8 +1981,10 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
     formData.append('agent', agent);
     formData.append('module', 'translation');
     formData.append('language', nextLanguage);
-    formData.append('outputLanguage', nextLanguage);
-    formData.append('profile', JSON.stringify(activeProfile || null));
+formData.append('outputLanguage', nextLanguage);
+formData.append('systemLanguage', nextLanguage);
+formData.append('workLanguage', nextLanguage);
+formData.append('profile', JSON.stringify(updatedProfile || null));
 
     formData.append(
       'messages',
@@ -2429,14 +2573,33 @@ CHYBA: ${message}
 
       const formData = new FormData();
 
+const systemLanguage = getStoredSystemLanguage();
+
+const profileForApi = withSystemLanguageProfile(
+  activeProfile,
+  systemLanguage,
+);
+
+setLanguage(systemLanguage);
+setActiveProfile(profileForApi);
+
+if (profileForApi) {
+  localStorage.setItem('active_profile', JSON.stringify(profileForApi));
+  localStorage.setItem('profile', JSON.stringify(profileForApi));
+}
+
 formData.append('agent', agent);
 formData.append('module', 'chat');
-formData.append('language', language);
-formData.append('outputLanguage', language);
-formData.append('messages', JSON.stringify(apiMessages));
-formData.append('profile', JSON.stringify(activeProfile || null));
 
-      if (activeProfile?.id) formData.append('projectId', activeProfile.id);
+formData.append('language', systemLanguage);
+formData.append('outputLanguage', systemLanguage);
+formData.append('systemLanguage', systemLanguage);
+formData.append('workLanguage', systemLanguage);
+
+formData.append('messages', JSON.stringify(apiMessages));
+formData.append('profile', JSON.stringify(profileForApi || null));
+
+    if (profileForApi?.id) formData.append('projectId', profileForApi.id);
 
       formData.append('sourceMode', 'uploaded_documents_first');
       formData.append('validateAttachmentsAgainstProfile', 'true');
@@ -2612,6 +2775,15 @@ formData.append('profile', JSON.stringify(activeProfile || null));
       setResult(finalTextFromApi);
       setCanvasText(finalTextFromApi);
 
+const currentUserMessage =
+  input.trim() ||
+  attachedFiles.map((file) => file.name).join(', ') ||
+  'Používateľ odoslal prílohu.';
+
+await saveChatToHistory({
+  userMessage: currentUserMessage,
+  assistantMessage: finalTextFromApi,
+});
       const finalParsed: ParsedResult = {
         ...parsed,
         output: parsed.output || finalTextFromApi,

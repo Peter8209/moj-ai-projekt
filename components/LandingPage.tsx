@@ -185,7 +185,7 @@ type LandingContent = {
 };
 
 const LANGUAGE_STORAGE_KEY = 'zedpera_language';
-const LANDING_TRANSLATION_VERSION = 'v1';
+const LANDING_TRANSLATION_VERSION = 'v2';
 
 const allowedPlans: PlanId[] = [
   'week-mini',
@@ -657,74 +657,86 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
-function extractJsonObject(value: string) {
-  const cleaned = String(value || '')
-    .trim()
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/```$/i, '')
+function cleanUiString(value: string) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
     .trim();
+}
 
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    // pokračujeme bezpečným vyhľadaním prvého kompletného JSON objektu
+function shouldSkipLandingText(value: string, key = '') {
+  const text = cleanUiString(value);
+  const normalizedKey = key.toLowerCase();
+
+  if (!text) return true;
+  if (text.length < 2) return true;
+
+  if (
+    normalizedKey === 'id' ||
+    normalizedKey === 'icon' ||
+    normalizedKey === 'price' ||
+    normalizedKey === 'oldprice' ||
+    normalizedKey === 'highlighted'
+  ) {
+    return true;
   }
 
-  const firstBrace = cleaned.indexOf('{');
+  if (/^https?:\/\//i.test(text)) return true;
+  if (/^[\d\s.,€%+\-/:()]+$/.test(text)) return true;
+  if (/^[A-Z0-9_-]{2,20}$/.test(text) && text !== 'GDPR') return true;
 
-  if (firstBrace === -1) {
-    throw new Error('Preklad nevrátil JSON objekt.');
+  return false;
+}
+
+function collectTranslatableTexts(value: unknown, key = ''): string[] {
+  if (typeof value === 'string') {
+    const cleaned = cleanUiString(value);
+    return shouldSkipLandingText(cleaned, key) ? [] : [cleaned];
   }
 
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  let endIndex = -1;
-
-  for (let index = firstBrace; index < cleaned.length; index += 1) {
-    const char = cleaned[index];
-
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-
-    if (char === '\\') {
-      escaped = true;
-      continue;
-    }
-
-    if (char === '"') {
-      inString = !inString;
-      continue;
-    }
-
-    if (inString) {
-      continue;
-    }
-
-    if (char === '{') {
-      depth += 1;
-    }
-
-    if (char === '}') {
-      depth -= 1;
-
-      if (depth === 0) {
-        endIndex = index;
-        break;
-      }
-    }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectTranslatableTexts(item, key));
   }
 
-  if (endIndex === -1) {
-    throw new Error('Preklad vrátil neúplný JSON. Skúste jazyk prepnúť ešte raz.');
+  if (isRecord(value)) {
+    return Object.entries(value).flatMap(([entryKey, entryValue]) =>
+      collectTranslatableTexts(entryValue, entryKey),
+    );
   }
 
-  const jsonOnly = cleaned.slice(firstBrace, endIndex + 1);
+  return [];
+}
 
-  return JSON.parse(jsonOnly);
+function uniqueTranslatableTexts(value: unknown) {
+  return Array.from(new Set(collectTranslatableTexts(value)));
+}
+
+function applyAiTranslations<T>(value: T, translations: Record<string, string>, key = ''): T {
+  if (typeof value === 'string') {
+    const cleaned = cleanUiString(value);
+    const translated = translations[cleaned];
+
+    if (!translated || shouldSkipLandingText(cleaned, key)) {
+      return value;
+    }
+
+    return translated as T;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => applyAiTranslations(item, translations, key)) as T;
+  }
+
+  if (isRecord(value)) {
+    const nextObject: Record<string, unknown> = {};
+
+    Object.entries(value).forEach(([entryKey, entryValue]) => {
+      nextObject[entryKey] = applyAiTranslations(entryValue, translations, entryKey);
+    });
+
+    return nextObject as T;
+  }
+
+  return value;
 }
 
 function mergeContent(base: LandingContent, translated: unknown): LandingContent {
@@ -786,15 +798,73 @@ function mergeContent(base: LandingContent, translated: unknown): LandingContent
   };
 }
 
-async function translateLandingContent(language: AppLanguage) {
-  /*
-    Neprekladáme celý LandingPage JSON naraz.
-    Je príliš veľký a AI môže vrátiť neúplný JSON.
-    Preklad celej stránky teraz zabezpečuje globálny AutoTranslateProvider
-    cez /api/translate-ui.
-  */
+async function translateTextChunk(language: AppLanguage, texts: string[]) {
+  if (!texts.length) return {} as Record<string, string>;
 
-  return baseContent;
+  const res = await fetch('/api/translate-ui', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      language,
+      texts,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Preklad stránky sa nepodarilo načítať.');
+  }
+
+  const data = await res.json();
+
+  if (!data?.ok || !isRecord(data.translations)) {
+    throw new Error('Preklad stránky nevrátil platnú mapu prekladov.');
+  }
+
+  return data.translations as Record<string, string>;
+}
+
+async function translateLandingContent(language: AppLanguage) {
+  if (language === 'sk') {
+    return baseContent;
+  }
+
+  const cacheKey = `zedpera_landing_${LANDING_TRANSLATION_VERSION}_${language}`;
+
+  if (typeof window !== 'undefined') {
+    const cached = localStorage.getItem(cacheKey);
+
+    if (cached) {
+      try {
+        return mergeContent(baseContent, JSON.parse(cached));
+      } catch {
+        localStorage.removeItem(cacheKey);
+      }
+    }
+  }
+
+  const uniqueTexts = uniqueTranslatableTexts(baseContent);
+  const chunks: string[][] = [];
+  const chunkSize = 80;
+
+  for (let index = 0; index < uniqueTexts.length; index += chunkSize) {
+    chunks.push(uniqueTexts.slice(index, index + chunkSize));
+  }
+
+  const translationEntries = await Promise.all(
+    chunks.map((chunk) => translateTextChunk(language, chunk)),
+  );
+
+  const translations = Object.assign({}, ...translationEntries) as Record<string, string>;
+  const translatedObject = applyAiTranslations(baseContent, translations);
+  const merged = mergeContent(baseContent, translatedObject);
+
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(cacheKey, JSON.stringify(merged));
+  }
+
+  return merged;
 }
   
 
@@ -828,12 +898,12 @@ export default function LandingPage() {
     setMobileMenuOpen(false);
   };
 
-const handleLanguageChange = async (
+  const handleLanguageChange = async (
   nextLanguage: AppLanguage,
   persist = true,
-) => {
-  try {
-    setLanguage(nextLanguage);
+  ) => {
+    try {
+      setLanguage(nextLanguage);
     setIsTranslatingPage(true);
 
     if (persist) {
@@ -848,7 +918,13 @@ const handleLanguageChange = async (
       }),
     );
 
-    setContent(baseContent);
+    if (nextLanguage === 'sk') {
+      setContent(baseContent);
+      return;
+    }
+
+    const translatedContent = await translateLandingContent(nextLanguage);
+    setContent(translatedContent);
   } catch (error) {
     console.error('LANDING_TRANSLATION_ERROR:', error);
     setContent(baseContent);

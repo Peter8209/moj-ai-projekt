@@ -51,9 +51,7 @@ function getEmailFromRequest(request: Request, fallback?: string | null): string
   return email.toLowerCase();
 }
 
-// =====================================================
-// GET - NAČÍTANIE HISTÓRIE
-// =====================================================
+// ================= GET - NAČÍTANIE HISTÓRIE =================
 
 export async function GET(request: Request) {
   try {
@@ -68,7 +66,7 @@ export async function GET(request: Request) {
 
     let query = supabase
       .from('history_items')
-      .select('*')
+      .select('id, user_email, type, title, preview, content, metadata, created_at')
       .eq('user_email', email)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -115,9 +113,7 @@ export async function GET(request: Request) {
   }
 }
 
-// =====================================================
-// POST - ULOŽENIE DO HISTÓRIE
-// =====================================================
+// ================= POST - ULOŽENIE DO HISTÓRIE =================
 
 export async function POST(request: Request) {
   try {
@@ -177,7 +173,7 @@ export async function POST(request: Request) {
           ...(body.metadata || {}),
         },
       })
-      .select('*')
+      .select('id, user_email, type, title, preview, content, metadata, created_at')
       .single();
 
     if (error) {
@@ -210,9 +206,7 @@ export async function POST(request: Request) {
   }
 }
 
-// =====================================================
-// DELETE - VYMAZANIE ZÁZNAMU
-// =====================================================
+// ================= DELETE - VYMAZANIE ZÁZNAMU =================
 
 export async function DELETE(request: Request) {
   try {

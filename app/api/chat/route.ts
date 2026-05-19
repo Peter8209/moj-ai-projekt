@@ -47,6 +47,7 @@ type SavedProfile = {
   supervisor?: string;
   citation?: string;
   language?: string;
+interfaceLanguage?: string;
   workLanguage?: string;
   annotation?: string;
   goal?: string;
@@ -453,6 +454,16 @@ function getEffectiveExtension(fileName: string) {
 
 function getWorkLanguage(profile: SavedProfile | null) {
   return toCleanString(profile?.workLanguage) || toCleanString(profile?.language) || 'slovenčina';
+}
+
+function getSystemLanguageFromProfile(profile: SavedProfile | null): AppLanguage {
+  return normalizeAppLanguage(
+    profile?.workLanguage ||
+      profile?.interfaceLanguage ||
+      profile?.language ||
+      'sk',
+    'sk',
+  );
 }
 
 function getCitationStyle(profile: SavedProfile | null) {
@@ -3488,12 +3499,35 @@ let outputLanguage: AppLanguage = 'sk';
     if (contentType.includes('multipart/form-data')) {
   const formData = await req.formData();
 
-  outputLanguage = normalizeAppLanguage(formData.get('language') || formData.get('outputLanguage'), 'sk');
+  rawAgent = formData.get('agent')?.toString() || 'gemini';
+  module = normalizeModule(formData.get('module')?.toString());
+  messages = parseJson<ChatMessage[]>(formData.get('messages'), []);
+  profile = parseJson<SavedProfile | null>(formData.get('profile'), null);
+  projectId = formData.get('projectId')?.toString() || null;
 
-      rawAgent = formData.get('agent')?.toString() || 'gemini';
-      module = normalizeModule(formData.get('module')?.toString());
-      messages = parseJson<ChatMessage[]>(formData.get('messages'), []);
-      profile = parseJson<SavedProfile | null>(formData.get('profile'), null);
+  const requestedLanguage =
+    formData.get('language') ||
+    formData.get('outputLanguage') ||
+    formData.get('systemLanguage') ||
+    formData.get('workLanguage');
+
+  outputLanguage = normalizeAppLanguage(
+    requestedLanguage ||
+      profile?.workLanguage ||
+      profile?.interfaceLanguage ||
+      profile?.language ||
+      'sk',
+    'sk',
+  );
+
+  if (profile) {
+    profile = {
+      ...profile,
+      language: outputLanguage,
+      interfaceLanguage: outputLanguage,
+      workLanguage: outputLanguage,
+    };
+  }
       projectId = formData.get('projectId')?.toString() || null;
 
       validateAttachmentsAgainstProfile = asBoolean(formData.get('validateAttachmentsAgainstProfile'), true);
@@ -3516,7 +3550,30 @@ let outputLanguage: AppLanguage = 'sk';
   messages = Array.isArray(body?.messages) ? body.messages : [];
   profile = body?.profile || body?.activeProfile || body?.savedProfile || null;
   projectId = body?.projectId || null;
-  outputLanguage = normalizeAppLanguage(body?.language || body?.outputLanguage, 'sk');
+
+  const requestedLanguage =
+    body?.language ||
+    body?.outputLanguage ||
+    body?.systemLanguage ||
+    body?.workLanguage;
+
+  outputLanguage = normalizeAppLanguage(
+    requestedLanguage ||
+      profile?.workLanguage ||
+      profile?.interfaceLanguage ||
+      profile?.language ||
+      'sk',
+    'sk',
+  );
+
+  if (profile) {
+    profile = {
+      ...profile,
+      language: outputLanguage,
+      interfaceLanguage: outputLanguage,
+      workLanguage: outputLanguage,
+    };
+  }
 
       validateAttachmentsAgainstProfile = body?.validateAttachmentsAgainstProfile !== false;
       requireSourceList = body?.requireSourceList !== false;

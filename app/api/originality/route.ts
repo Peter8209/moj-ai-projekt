@@ -1020,7 +1020,9 @@ function normalizeProtocolData(params: {
 
 // ================= PROTOCOL TEXT GENERATOR =================
 
-function createProtocolText(data: Omit<ProtocolResponse, 'protocolText' | 'text' | 'content' | 'report'>) {
+function createProtocolText(
+  data: Omit<ProtocolResponse, 'protocolText' | 'text' | 'content' | 'report'>,
+) {
   const date = formatDateSk(data.createdAt);
 
   const corpusesLine = data.corpuses
@@ -1031,6 +1033,7 @@ function createProtocolText(data: Omit<ProtocolResponse, 'protocolText' | 'text'
     .join(', ');
 
   const histogramLengths = data.histogram.map((item) => item.length).join('\n');
+
   const histogramDeviations = data.histogram
     .map((item) => item.deviation)
     .join('\n');

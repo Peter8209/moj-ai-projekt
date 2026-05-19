@@ -391,39 +391,56 @@ function AppShellContent({ children }: { children: ReactNode }) {
           CONTENT AREA
       ===================================================== */}
 
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+<div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
         {/* MOBILE TOP BAR */}
 
-        <header className="flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-[#020617]/95 px-4 backdrop-blur lg:hidden">
-          <button
-            type="button"
-            onClick={() => setMobileMenuOpen(true)}
-            className="rounded-2xl bg-white/10 p-3 text-white transition hover:bg-white/15"
-            aria-label={text(dictionary, 'openMenu', 'Otvoriť menu')}
-          >
-            <Menu size={20} />
-          </button>
+     <header className="flex shrink-0 flex-col gap-3 border-b border-white/10 bg-[#020617]/95 px-4 py-4 backdrop-blur lg:hidden">
+  <div className="flex items-center justify-between gap-3">
+    <div className="min-w-0">
+      <div className="truncate text-sm font-black">{activeTitle}</div>
+      <div className="truncate text-[11px] font-semibold text-slate-400">
+        {activeDescription}
+      </div>
+    </div>
 
-          <div className="min-w-0 px-3 text-center">
-            <div className="truncate text-sm font-black">{activeTitle}</div>
-            <div className="truncate text-[11px] font-semibold text-slate-400">
-              {activeDescription}
-            </div>
-          </div>
+    <button
+      type="button"
+      onClick={openNewProfile}
+      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-xs font-black text-white shadow-lg shadow-violet-700/25 transition hover:bg-violet-500"
+      aria-label={text(dictionary, 'newWork', 'Nová práca')}
+    >
+      <Plus size={18} />
+      {text(dictionary, 'newWork', 'Nová práca')}
+    </button>
+  </div>
 
-          <button
-            type="button"
-            onClick={openNewProfile}
-            className="rounded-2xl bg-violet-600 p-3 text-white shadow-lg shadow-violet-700/25 transition hover:bg-violet-500"
-            aria-label={text(dictionary, 'newWork', 'Nová práca')}
-          >
-            <Plus size={20} />
-          </button>
-        </header>
+  <div className="flex flex-wrap gap-2">
+    {navItems.map((item) => {
+      const active = isPathActive(pathname, item.href);
+      const Icon = item.icon;
+
+      return (
+        <button
+          type="button"
+          key={item.href}
+          onClick={() => goTo(item.href)}
+          className={`inline-flex min-h-[40px] items-center gap-2 rounded-2xl px-3 py-2 text-[11px] font-black transition ${
+            active
+              ? 'bg-violet-600 text-white shadow-lg shadow-violet-700/25'
+              : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.12] hover:text-white'
+          }`}
+        >
+          <Icon size={15} />
+          {item.label}
+        </button>
+      );
+    })}
+  </div>
+</header>
 
         {/* MAIN CONTENT */}
 
-        <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#020617] p-4 pb-24 md:p-6 lg:pb-6">
+       <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#020617] p-3 pb-28 sm:p-4 md:p-6 lg:pb-6">
           {!isDashboard && (
             <div className="sticky top-0 z-30 mb-5 rounded-3xl border border-white/10 bg-[#020617]/95 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -491,8 +508,8 @@ function AppShellContent({ children }: { children: ReactNode }) {
       ===================================================== */}
 
       {mobileMenuOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 lg:hidden">
-          <div className="flex h-full w-full flex-col bg-[#020617] p-5">
+  <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 lg:hidden">
+    <div className="min-h-dvh w-full bg-[#020617] p-4">
             <div className="mb-6 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 shadow-lg shadow-violet-700/25">
@@ -530,7 +547,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
               {text(dictionary, 'newWork', 'Nová práca')}
             </button>
 
-            <div className="flex-1 space-y-2 overflow-visible">
+           <div className="grid grid-cols-1 gap-2 pb-6">
               {navItems.map((item) => {
                 const active = isPathActive(pathname, item.href);
                 const Icon = item.icon;
@@ -540,7 +557,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
                     type="button"
                     key={item.href}
                     onClick={() => goTo(item.href)}
-                    className={`flex w-full items-center gap-3 rounded-2xl px-4 py-4 text-left text-sm font-bold transition ${
+                    className={`flex min-h-[54px] w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
                       active
                         ? 'bg-white/12 text-white'
                         : 'text-slate-400 hover:bg-white/[0.06] hover:text-white'
@@ -600,8 +617,8 @@ function AppShellContent({ children }: { children: ReactNode }) {
       ===================================================== */}
 
       {openProfile && (
-        <div className="fixed inset-0 z-[70] overflow-hidden bg-[#020617]">
-          <div className="relative mx-auto flex h-dvh w-full max-w-[1500px] flex-col overflow-hidden p-4 md:p-6">
+  <div className="fixed inset-0 z-[70] overflow-y-auto bg-[#020617]">
+    <div className="relative mx-auto flex min-h-dvh w-full max-w-[1500px] flex-col p-3 sm:p-4 md:p-6">
             <button
               type="button"
               onClick={closeProfile}
@@ -611,7 +628,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
               <X size={22} />
             </button>
 
-            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            <div className="min-h-0 flex-1 overflow-y-auto pb-8 pr-1">
               <ProfileForm onClose={closeProfile} />
             </div>
           </div>

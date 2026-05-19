@@ -35,6 +35,9 @@ import AnalysisResultsModal from '@/components/analysis/AnalysisResultsModal';
 import type { AnalysisResult } from '@/components/analysis/analysisTypes';
 import ThemeToggleButton from '@/components/ThemeToggleButton';
 import ImprovementBox from '@/components/ImprovementBox';
+import {
+  Sparkles,
+} from 'lucide-react';
 
 // ================= TYPES =================
 
@@ -46,7 +49,8 @@ type ModuleKey =
   | 'data'
   | 'planning'
   | 'emails'
-  | 'originality';
+  | 'originality'
+  | 'humanizer';
 
 type Agent = 'openai' | 'claude' | 'gemini' | 'grok' | 'mistral';
 
@@ -55,7 +59,10 @@ type AttachedFile = {
   name: string;
   size: number;
   type: string;
-  file: File;
+  uploadedAt?: string;
+  text?: string;
+  content?: string;
+  file?: File;
 };
 
 type SavedProfile = {
@@ -68,6 +75,11 @@ type SavedProfile = {
   supervisor?: string;
   citation?: string;
   language?: string;
+
+
+  // jazyk rozhrania
+  interfaceLanguage?: string;
+
   workLanguage?: string;
   annotation?: string;
   goal?: string;
@@ -204,6 +216,12 @@ const modules: {
     subtitle: 'Predbežná kontrola',
     icon: ShieldCheck,
   },
+{
+  key: 'humanizer',
+  label: 'Humanizácia textu',
+  subtitle: 'Štylistická a akademická úprava textu do prirodzenejšej podoby.',
+  icon: Sparkles,
+},
 ];
 
 // ================= HELPERS =================
@@ -244,16 +262,76 @@ function safeJsonParse<T>(value: string | null): T | null {
   }
 }
 
+type SystemLanguage = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
+
+function isValidSystemLanguage(value: unknown): value is SystemLanguage {
+  return (
+    value === 'sk' ||
+    value === 'cs' ||
+    value === 'en' ||
+    value === 'de' ||
+    value === 'pl' ||
+    value === 'hu'
+  );
+}
+
+function getStoredSystemLanguage(): SystemLanguage {
+  if (typeof window === 'undefined') return 'sk';
+
+  const stored =
+    localStorage.getItem('zedpera_language') ||
+    localStorage.getItem('zedpera_system_language') ||
+    localStorage.getItem('zedpera_work_language') ||
+    'sk';
+
+  return isValidSystemLanguage(stored) ? stored : 'sk';
+}
+
+function withSystemLanguageProfile(
+  profile: SavedProfile | null,
+  systemLanguage: SystemLanguage,
+): SavedProfile | null {
+  if (!profile) {
+    return {
+      language: systemLanguage,
+      interfaceLanguage: systemLanguage,
+      workLanguage: systemLanguage,
+    };
+  }
+
+  return {
+    ...profile,
+    language: systemLanguage,
+    interfaceLanguage: systemLanguage,
+    workLanguage: systemLanguage,
+  };
+}
+
+function persistSystemLanguage(systemLanguage: SystemLanguage) {
+  if (typeof window === 'undefined') return;
+
+  localStorage.setItem('zedpera_language', systemLanguage);
+  localStorage.setItem('zedpera_system_language', systemLanguage);
+  localStorage.setItem('zedpera_work_language', systemLanguage);
+
+  document.documentElement.lang = systemLanguage;
+  document.documentElement.setAttribute('data-language', systemLanguage);
+  document.documentElement.setAttribute('data-system-language', systemLanguage);
+  document.documentElement.setAttribute('data-work-language', systemLanguage);
+}
+
 function normalizeProfile(raw: any): SavedProfile | null {
   if (!raw || typeof raw !== 'object') return null;
 
   if (raw.profile && typeof raw.profile === 'object') {
     return {
-      ...raw.profile,
-      schema: raw.schema || raw.profile.schema,
-      workLanguage: raw.workLanguage || raw.profile.workLanguage,
-      savedAt: raw.savedAt || raw.generatedAt || raw.profile.savedAt,
-    };
+  ...raw.profile,
+  schema: raw.schema || raw.profile.schema,
+  language: raw.language || raw.profile.language,
+  interfaceLanguage: raw.interfaceLanguage || raw.profile.interfaceLanguage,
+  workLanguage: raw.workLanguage || raw.profile.workLanguage,
+  savedAt: raw.savedAt || raw.generatedAt || raw.profile.savedAt,
+};
   }
 
   return raw as SavedProfile;
@@ -591,7 +669,12 @@ function getCitationStyle(profile: SavedProfile | null) {
 }
 
 function getWorkLanguage(profile: SavedProfile | null) {
-  return profile?.workLanguage || profile?.language || 'slovenčina';
+  return (
+    profile?.workLanguage ||
+    profile?.interfaceLanguage ||
+    profile?.language ||
+    getStoredSystemLanguage()
+  );
 }
 
 function buildProfileBlock(profile: SavedProfile | null) {
@@ -1014,9 +1097,8 @@ export default function DashboardPage() {
   const [secondaryInput, setSecondaryInput] = useState('');
   const [result, setResult] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
-  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-
+const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+const [activeAttachmentText, setActiveAttachmentText] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [canvasText, setCanvasText] = useState('');
@@ -1046,28 +1128,36 @@ export default function DashboardPage() {
   }, [activeModuleInfo.label, activeProfile]);
 
   useEffect(() => {
-    const activeRaw = localStorage.getItem('active_profile');
-    const profileRaw = localStorage.getItem('profile');
-    const profilesRaw = localStorage.getItem('profiles_full');
+  const systemLanguage = getStoredSystemLanguage();
+  persistSystemLanguage(systemLanguage);
 
-    const active = normalizeProfile(safeJsonParse<any>(activeRaw));
-    const profile = normalizeProfile(safeJsonParse<any>(profileRaw));
-    const profiles = safeJsonParse<any[]>(profilesRaw);
+  const activeRaw = localStorage.getItem('active_profile');
+  const profileRaw = localStorage.getItem('profile');
+  const profilesRaw = localStorage.getItem('profiles_full');
 
-    if (active) {
-      setActiveProfile(active);
-      return;
-    }
+  const active = normalizeProfile(safeJsonParse<any>(activeRaw));
+  const profile = normalizeProfile(safeJsonParse<any>(profileRaw));
+  const profiles = safeJsonParse<any[]>(profilesRaw);
 
-    if (profile) {
-      setActiveProfile(profile);
-      return;
-    }
+  const selectedProfile =
+    active ||
+    profile ||
+    (Array.isArray(profiles) && profiles.length > 0
+      ? normalizeProfile(profiles[0])
+      : null);
 
-    if (Array.isArray(profiles) && profiles.length > 0) {
-      setActiveProfile(normalizeProfile(profiles[0]));
-    }
-  }, []);
+  const profileWithLanguage = withSystemLanguageProfile(
+    selectedProfile,
+    systemLanguage,
+  );
+
+  setActiveProfile(profileWithLanguage);
+
+  if (profileWithLanguage) {
+    localStorage.setItem('active_profile', JSON.stringify(profileWithLanguage));
+    localStorage.setItem('profile', JSON.stringify(profileWithLanguage));
+  }
+}, []);
 
   useEffect(() => {
     setInput('');
@@ -1100,13 +1190,13 @@ export default function DashboardPage() {
         continue;
       }
 
-      validFiles.push({
-        id: createFileId(),
-        name: file.name,
-        size: file.size,
-        type: file.type || 'application/octet-stream',
-        file,
-      });
+    validFiles.push({
+  id: createFileId(),
+  name: file.name,
+  size: file.size,
+  type: file.type || 'application/octet-stream',
+  file,
+});
     }
 
     if (validFiles.length === 0) return;
@@ -1160,7 +1250,18 @@ export default function DashboardPage() {
 
     const recognition = new SpeechRecognition();
 
-    recognition.lang = 'sk-SK';
+   const systemLanguage = getStoredSystemLanguage();
+
+const speechLanguageMap: Record<SystemLanguage, string> = {
+  sk: 'sk-SK',
+  cs: 'cs-CZ',
+  en: 'en-US',
+  de: 'de-DE',
+  pl: 'pl-PL',
+  hu: 'hu-HU',
+};
+
+recognition.lang = speechLanguageMap[systemLanguage] || 'sk-SK';
     recognition.interimResults = false;
     recognition.continuous = false;
 
@@ -1181,10 +1282,16 @@ export default function DashboardPage() {
   };
 
   const buildModulePrompt = () => {
-    const profileBlock = buildProfileBlock(activeProfile);
-    const citationStyle = getCitationStyle(activeProfile);
-    const workLanguage = getWorkLanguage(activeProfile);
-    const attachmentBlock = buildAttachmentBlock(attachedFiles);
+  const systemLanguage = getStoredSystemLanguage();
+  const profileForPrompt = withSystemLanguageProfile(
+    activeProfile,
+    systemLanguage,
+  );
+
+  const profileBlock = buildProfileBlock(profileForPrompt);
+  const citationStyle = getCitationStyle(profileForPrompt);
+  const workLanguage = getWorkLanguage(profileForPrompt);
+  const attachmentBlock = buildAttachmentBlock(attachedFiles);
 
     const baseRules = `
 PROFIL PRÁCE:
@@ -1194,7 +1301,9 @@ PRILOŽENÉ SÚBORY:
 ${attachmentBlock}
 
 DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
+- Hlavný jazyk celého systému je: ${workLanguage}.
 - Výstup musí byť v jazyku práce: ${workLanguage}.
+- Všetky odpovede, nadpisy, vysvetlenia, tabuľky, odporúčania a texty musia byť v tomto jazyku.
 - Výstup píš ako čistý text vhodný do Wordu.
 - Nepíš Markdown znaky ako #, ##, ###, **, *, --- ani kódové bloky.
 - Nevkladaj na úplný začiatok technické nadpisy typu „AI vedúci“, „Audit kvality“, „Obhajoba“, „Výstup“ ani názov modulu.
@@ -1543,21 +1652,43 @@ VÝSTUP:
     setAnalysisModalOpen(false);
 
     try {
-      if (activeModule === 'data') {
-        const formData = new FormData();
+    if (activeModule === 'data') {
+  const formData = new FormData();
 
-        formData.append('analysisGoal', secondaryInput || '');
-        formData.append('dataDescription', input || '');
-        formData.append('activeProfile', JSON.stringify(activeProfile || null));
-        formData.append('profile', JSON.stringify(activeProfile || null));
+  const systemLanguage = getStoredSystemLanguage();
+  persistSystemLanguage(systemLanguage);
 
-        if (activeProfile?.id) {
-          formData.append('projectId', activeProfile.id);
-        }
+  const profileForApi = withSystemLanguageProfile(
+    activeProfile,
+    systemLanguage,
+  );
+
+  setActiveProfile(profileForApi);
+
+  if (profileForApi) {
+    localStorage.setItem('active_profile', JSON.stringify(profileForApi));
+    localStorage.setItem('profile', JSON.stringify(profileForApi));
+  }
+
+  formData.append('language', systemLanguage);
+  formData.append('outputLanguage', systemLanguage);
+  formData.append('systemLanguage', systemLanguage);
+  formData.append('workLanguage', systemLanguage);
+
+  formData.append('analysisGoal', secondaryInput || '');
+  formData.append('dataDescription', input || '');
+  formData.append('activeProfile', JSON.stringify(profileForApi || null));
+  formData.append('profile', JSON.stringify(profileForApi || null));
+
+  if (profileForApi?.id) {
+    formData.append('projectId', profileForApi.id);
+  }
 
         attachedFiles.forEach((item) => {
-          formData.append('files', item.file, item.name);
-        });
+  if (item.file instanceof File) {
+    formData.append('files', item.file, item.name);
+  }
+});
 
         if (input.trim()) {
           const textFile = createTextFileFromInput(input);
@@ -1617,35 +1748,53 @@ VÝSTUP:
 
         formData.append('agent', agent);
         formData.append('text', input);
-        formData.append('activeProfile', JSON.stringify(activeProfile || null));
+const systemLanguage = getStoredSystemLanguage();
+const profileForApi = withSystemLanguageProfile(activeProfile, systemLanguage);
+        persistSystemLanguage(systemLanguage);
 
-        formData.append(
-          'title',
-          activeProfile?.title || 'Kontrola originality',
-        );
-        formData.append('author', '');
-        formData.append('authorName', '');
-        formData.append('school', '');
-        formData.append('faculty', '');
-        formData.append('studyProgram', '');
-        formData.append('supervisor', activeProfile?.supervisor || '');
-        formData.append('workType', getWorkType(activeProfile));
-        formData.append('citationStyle', getCitationStyle(activeProfile));
-        formData.append('language', getWorkLanguage(activeProfile));
-        formData.append('checkAuthenticity', 'true');
+setActiveProfile(profileForApi);
 
-        if (activeProfile?.id) {
-          formData.append('profileId', activeProfile.id);
-        }
+if (profileForApi) {
+  localStorage.setItem('active_profile', JSON.stringify(profileForApi));
+  localStorage.setItem('profile', JSON.stringify(profileForApi));
+}
 
-        attachedFiles.forEach((item) => {
-          formData.append('files', item.file, item.name);
-        });
+formData.append('activeProfile', JSON.stringify(profileForApi || null));
+formData.append('profile', JSON.stringify(profileForApi || null));
+
+formData.append('language', systemLanguage);
+formData.append('outputLanguage', systemLanguage);
+formData.append('systemLanguage', systemLanguage);
+formData.append('workLanguage', systemLanguage);
+
+formData.append(
+  'title',
+  profileForApi?.title || 'Kontrola originality',
+);
+formData.append('author', '');
+formData.append('authorName', '');
+formData.append('school', '');
+formData.append('faculty', '');
+formData.append('studyProgram', '');
+formData.append('supervisor', profileForApi?.supervisor || '');
+formData.append('workType', getWorkType(profileForApi));
+formData.append('citationStyle', getCitationStyle(profileForApi));
+formData.append('checkAuthenticity', 'true');
+
+if (profileForApi?.id) {
+  formData.append('profileId', profileForApi.id);
+}
+
+       attachedFiles.forEach((item) => {
+  if (!item.file) return;
+
+  formData.append('files', item.file, item.name || item.file.name);
+});
 
         const res = await fetch('/api/originality', {
-          method: 'POST',
-          body: formData,
-        });
+  method: 'POST',
+  body: formData,
+});
 
         if (!res.ok) {
           throw new Error(await readApiErrorResponse(res));
@@ -1722,10 +1871,31 @@ VÝSTUP:
 
       const formData = new FormData();
 
-     formData.append('agent', agent);
+const systemLanguage = getStoredSystemLanguage();
+persistSystemLanguage(systemLanguage);
+
+const profileForApi = withSystemLanguageProfile(
+  activeProfile,
+  systemLanguage,
+);
+
+setActiveProfile(profileForApi);
+
+if (profileForApi) {
+  localStorage.setItem('active_profile', JSON.stringify(profileForApi));
+  localStorage.setItem('profile', JSON.stringify(profileForApi));
+}
+
+formData.append('agent', agent);
 formData.append('module', activeModule);
+
+formData.append('language', systemLanguage);
+formData.append('outputLanguage', systemLanguage);
+formData.append('systemLanguage', systemLanguage);
+formData.append('workLanguage', systemLanguage);
+
 formData.append('messages', JSON.stringify(apiMessages));
-formData.append('profile', JSON.stringify(activeProfile || null));
+formData.append('profile', JSON.stringify(profileForApi || null));
       formData.append('useSemanticScholar', 'false');
       formData.append('sourceMode', 'uploaded_documents_first');
       formData.append('validateAttachmentsAgainstProfile', 'true');
@@ -1751,18 +1921,21 @@ formData.append('profile', JSON.stringify(activeProfile || null));
         ),
       );
 
-      if (activeProfile?.id) {
-        formData.append('projectId', activeProfile.id);
-      }
+      if (profileForApi?.id) {
+  formData.append('projectId', profileForApi.id);
+}
 
       attachedFiles.forEach((item) => {
-        formData.append('files', item.file, item.name);
-      });
+  if (item.file instanceof File) {
+    formData.append('files', item.file, item.name);
+  }
+});
 
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        body: formData,
-      });
+const res = await fetch('/api/originality', {
+  method: 'POST',
+  body: formData,
+});
+
 
       if (!res.ok) {
         throw new Error(await readApiErrorResponse(res));
@@ -2590,14 +2763,16 @@ const downloadExcel = () => {
     Word
   </button>
 
+ {activeModule === 'data' && analysisResult && (
   <button
     type="button"
-    onClick={downloadExcel}
-    className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 shadow-sm transition hover:bg-emerald-100 dark:border-emerald-400/20 dark:bg-emerald-500/15 dark:text-emerald-100 dark:hover:bg-emerald-500/25"
+    onClick={() => downloadAnalysisExport('xlsx')}
+    className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-black text-white hover:bg-emerald-500 sm:w-auto"
   >
-    <FileSpreadsheet className="h-4 w-4" />
+    <Download className="h-4 w-4" />
     Excel
   </button>
+)}
 
   <button
     type="button"

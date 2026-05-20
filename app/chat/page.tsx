@@ -186,6 +186,8 @@ type SavedProfile = {
   field?: string;
   supervisor?: string;
   citation?: string;
+citationStyle?: string;
+
 
   // hlavný jazyk celého systému
   language?: string;
@@ -247,6 +249,9 @@ declare global {
 }
 
 // ================= CONFIG =================
+
+
+
 
 const allowedFileExtensions = [
   '.pdf',
@@ -646,32 +651,178 @@ function withSystemLanguageProfile(
       language: systemLanguage,
       interfaceLanguage: systemLanguage,
       workLanguage: systemLanguage,
+      citation: 'STN ISO 690',
+      citationStyle: 'STN ISO 690',
     };
   }
 
+  const normalized = normalizeProfile(profile);
+
+  if (!normalized) return null;
+
   return {
-    ...profile,
+    ...normalized,
+
+    // jazyk aplikácie / rozhrania
     language: systemLanguage,
     interfaceLanguage: systemLanguage,
-    workLanguage: systemLanguage,
+
+    // jazyk práce ponechaj z profilu
+    workLanguage:
+      normalized.workLanguage ||
+      normalized.language ||
+      systemLanguage,
+
+    citationStyle: normalizeCitationStyle(
+      normalized.citationStyle || normalized.citation,
+    ),
+    citation: normalizeCitationStyle(
+      normalized.citationStyle || normalized.citation,
+    ),
   };
 }
+
+function normalizeCitationStyle(value?: string | null): string {
+  const raw = String(value || '').trim().toLowerCase();
+
+  if (!raw) return 'STN ISO 690';
+
+  if (raw.includes('apa')) return 'APA 7';
+  if (raw.includes('chicago')) return 'Chicago';
+  if (raw.includes('stn') && raw.includes('iso')) return 'STN ISO 690';
+  if (raw.includes('iso')) return 'ISO 690';
+
+  if (raw === 'stn_iso690' || raw === 'stn_iso_690' || raw === 'stn-iso-690') {
+    return 'STN ISO 690';
+  }
+
+  if (raw === 'iso690' || raw === 'iso_690' || raw === 'iso-690') {
+    return 'ISO 690';
+  }
+
+  if (raw === 'apa7' || raw === 'apa_7' || raw === 'apa-7') {
+    return 'APA 7';
+  }
+
+  return 'STN ISO 690';
+}
+
 
 function normalizeProfile(raw: any): SavedProfile | null {
   if (!raw || typeof raw !== 'object') return null;
 
-  if (raw.profile && typeof raw.profile === 'object') {
-    return {
-  ...raw.profile,
-  schema: raw.schema || raw.profile.schema,
-  language: raw.language || raw.profile.language,
-  interfaceLanguage: raw.interfaceLanguage || raw.profile.interfaceLanguage,
-  workLanguage: raw.workLanguage || raw.profile.workLanguage,
-  savedAt: raw.savedAt || raw.generatedAt || raw.profile.savedAt,
-};
-  }
+  const source =
+    raw.profile && typeof raw.profile === 'object'
+      ? {
+          ...raw.profile,
+          ...raw,
+          schema: raw.schema || raw.profile.schema,
+        }
+      : raw;
 
-  return raw as SavedProfile;
+  const citationStyle = normalizeCitationStyle(
+    source.citationStyle ||
+      source.citation ||
+      source.citation_style ||
+      'STN ISO 690',
+  );
+
+  return {
+    id: source.id || source.profile_id,
+
+    type: source.type || 'bachelor',
+    level: source.level || '',
+    title: source.title || '',
+    topic: source.topic || '',
+    field: source.field || '',
+    supervisor: source.supervisor || '',
+
+    citation: citationStyle,
+    citationStyle,
+
+    language:
+      source.language ||
+      source.interfaceLanguage ||
+      source.interface_language ||
+      'sk',
+
+    interfaceLanguage:
+      source.interfaceLanguage ||
+      source.interface_language ||
+      source.language ||
+      'sk',
+
+    workLanguage:
+      source.workLanguage ||
+      source.work_language ||
+      source.language ||
+      'sk',
+
+    annotation: source.annotation || '',
+    goal: source.goal || '',
+    problem:
+      source.problem ||
+      source.researchProblem ||
+      source.research_problem ||
+      '',
+
+    methodology: source.methodology || '',
+    hypotheses: source.hypotheses || '',
+    researchQuestions:
+      source.researchQuestions ||
+      source.research_questions ||
+      '',
+
+    practicalPart:
+      source.practicalPart ||
+      source.practical_part ||
+      '',
+
+    scientificContribution:
+      source.scientificContribution ||
+      source.scientific_contribution ||
+      '',
+
+    businessProblem: source.businessProblem || '',
+    businessGoal: source.businessGoal || '',
+    implementation: source.implementation || '',
+    caseStudy: source.caseStudy || '',
+    reflection: source.reflection || '',
+    sourcesRequirement:
+      source.sourcesRequirement ||
+      source.sources_requirement ||
+      '',
+
+    keywordsList: source.keywordsList || [],
+    keywords: source.keywords || [],
+
+    savedAt:
+      source.savedAt ||
+      source.saved_at ||
+      source.updatedAt ||
+      source.updated_at ||
+      source.createdAt ||
+      source.created_at ||
+      new Date().toISOString(),
+
+    schema: source.schema || {
+      recommendedLength:
+        source.recommendedLength ||
+        source.recommended_length ||
+        '',
+      structure:
+        source.structure ||
+        [],
+      requiredSections:
+        source.requiredSections ||
+        source.required_sections ||
+        [],
+      aiInstruction:
+        source.aiInstruction ||
+        source.ai_instruction ||
+        '',
+    },
+  };
 }
 
 function sanitizeFileName(value: string) {
@@ -1860,66 +2011,100 @@ const handleSelectAgent = (nextAgent: Agent) => {
 
 
 useEffect(() => {
-  const systemLanguage = getStoredSystemLanguage();
+  const loadProfile = async () => {
+    const systemLanguage = getStoredSystemLanguage();
 
-  setLanguage(systemLanguage);
+    setLanguage(systemLanguage);
 
-  localStorage.setItem('zedpera_language', systemLanguage);
-  localStorage.setItem('zedpera_system_language', systemLanguage);
-  localStorage.setItem('zedpera_work_language', systemLanguage);
+    localStorage.setItem('zedpera_language', systemLanguage);
+    localStorage.setItem('zedpera_system_language', systemLanguage);
 
-  document.documentElement.lang = systemLanguage;
-  document.documentElement.setAttribute('data-language', systemLanguage);
-  document.documentElement.setAttribute('data-system-language', systemLanguage);
-  document.documentElement.setAttribute('data-work-language', systemLanguage);
-}, []);
+    document.documentElement.lang = systemLanguage;
+    document.documentElement.setAttribute('data-language', systemLanguage);
+    document.documentElement.setAttribute('data-system-language', systemLanguage);
 
-  useEffect(() => {
-  const systemLanguage = getStoredSystemLanguage();
+    const activeRaw = localStorage.getItem('active_profile');
+    const profileRaw = localStorage.getItem('profile');
+    const profilesRaw = localStorage.getItem('profiles_full');
 
-  const activeRaw = localStorage.getItem('active_profile');
-  const profileRaw = localStorage.getItem('profile');
-  const profilesRaw = localStorage.getItem('profiles_full');
+    const active = normalizeProfile(safeJsonParse<any>(activeRaw));
+    const profile = normalizeProfile(safeJsonParse<any>(profileRaw));
+    const profiles = safeJsonParse<any[]>(profilesRaw);
 
-  const active = normalizeProfile(safeJsonParse<any>(activeRaw));
-  const profile = normalizeProfile(safeJsonParse<any>(profileRaw));
-  const profiles = safeJsonParse<any[]>(profilesRaw);
+    const localSelectedProfile =
+      active ||
+      profile ||
+      (Array.isArray(profiles) && profiles.length > 0
+        ? normalizeProfile(profiles[0])
+        : null);
 
-  const selectedProfile =
-    active ||
-    profile ||
-    (Array.isArray(profiles) && profiles.length > 0
-      ? normalizeProfile(profiles[0])
-      : null);
+    if (localSelectedProfile) {
+      const profileWithLanguage = withSystemLanguageProfile(
+        localSelectedProfile,
+        systemLanguage,
+      );
 
-  const profileWithLanguage = withSystemLanguageProfile(
-    selectedProfile,
-    systemLanguage,
-  );
+      setActiveProfile(profileWithLanguage);
 
-  setActiveProfile(profileWithLanguage);
-
-  if (profileWithLanguage) {
-    localStorage.setItem('active_profile', JSON.stringify(profileWithLanguage));
-    localStorage.setItem('profile', JSON.stringify(profileWithLanguage));
-  }
-}, []);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading, processingLog]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setCanvasOpen(false);
-        setSelectedTextState(null);
+      if (profileWithLanguage) {
+        localStorage.setItem('active_profile', JSON.stringify(profileWithLanguage));
+        localStorage.setItem('profile', JSON.stringify(profileWithLanguage));
       }
-    };
+    }
 
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+    try {
+      const res = await fetch('/api/profile/get', {
+        method: 'GET',
+        cache: 'no-store',
+      });
+
+      const data = await res.json();
+
+      if (data?.ok && data?.profile) {
+        const dbProfile = normalizeProfile(data.profile);
+
+        const finalProfile = withSystemLanguageProfile(
+          dbProfile,
+          systemLanguage,
+        );
+
+        setActiveProfile(finalProfile);
+
+        if (finalProfile) {
+          localStorage.setItem('active_profile', JSON.stringify(finalProfile));
+          localStorage.setItem('profile', JSON.stringify(finalProfile));
+        }
+      }
+    } catch (error) {
+      console.error('LOAD_PROFILE_FROM_DB_ERROR:', error);
+    }
+  };
+
+  loadProfile();
+
+  const onProfileUpdated = (event: Event) => {
+    const custom = event as CustomEvent;
+
+    if (custom.detail) {
+      const systemLanguage = getStoredSystemLanguage();
+      const normalized = normalizeProfile(custom.detail);
+      const finalProfile = withSystemLanguageProfile(normalized, systemLanguage);
+
+      setActiveProfile(finalProfile);
+
+      if (finalProfile) {
+        localStorage.setItem('active_profile', JSON.stringify(finalProfile));
+        localStorage.setItem('profile', JSON.stringify(finalProfile));
+      }
+    }
+  };
+
+  window.addEventListener('zedpera-profile-updated', onProfileUpdated);
+
+  return () => {
+    window.removeEventListener('zedpera-profile-updated', onProfileUpdated);
+  };
+}, []);
 
 
 
@@ -1932,12 +2117,14 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
 
 localStorage.setItem('zedpera_language', nextLanguage);
 localStorage.setItem('zedpera_system_language', nextLanguage);
-localStorage.setItem('zedpera_work_language', nextLanguage);
 
 document.documentElement.lang = nextLanguage;
 document.documentElement.setAttribute('data-language', nextLanguage);
 document.documentElement.setAttribute('data-system-language', nextLanguage);
-document.documentElement.setAttribute('data-work-language', nextLanguage);
+document.documentElement.setAttribute(
+  'data-work-language',
+  activeProfile?.workLanguage || nextLanguage,
+);
 
 const updatedProfile = withSystemLanguageProfile(activeProfile, nextLanguage);
 setActiveProfile(updatedProfile);
@@ -2580,6 +2767,11 @@ const profileForApi = withSystemLanguageProfile(
   systemLanguage,
 );
 
+const outputLanguage =
+  profileForApi?.workLanguage ||
+  profileForApi?.language ||
+  systemLanguage;
+
 setLanguage(systemLanguage);
 setActiveProfile(profileForApi);
 
@@ -2592,9 +2784,14 @@ formData.append('agent', agent);
 formData.append('module', 'chat');
 
 formData.append('language', systemLanguage);
-formData.append('outputLanguage', systemLanguage);
+formData.append('interfaceLanguage', systemLanguage);
 formData.append('systemLanguage', systemLanguage);
-formData.append('workLanguage', systemLanguage);
+
+formData.append('outputLanguage', outputLanguage);
+formData.append('workLanguage', outputLanguage);
+
+formData.append('citationStyle', profileForApi?.citationStyle || profileForApi?.citation || 'STN ISO 690');
+formData.append('citation', profileForApi?.citationStyle || profileForApi?.citation || 'STN ISO 690');
 
 formData.append('messages', JSON.stringify(apiMessages));
 formData.append('profile', JSON.stringify(profileForApi || null));
@@ -2776,7 +2973,8 @@ formData.append('profile', JSON.stringify(profileForApi || null));
       setCanvasText(finalTextFromApi);
 
 const currentUserMessage =
-  input.trim() ||
+  visibleUserText.trim() ||
+  apiUserText.trim() ||
   attachedFiles.map((file) => file.name).join(', ') ||
   'Používateľ odoslal prílohu.';
 

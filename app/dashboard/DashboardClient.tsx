@@ -42,10 +42,8 @@ import {
 // ================= TYPES =================
 
 type ModuleKey =
-  | 'supervisor'
   | 'quality'
   | 'defense'
-  | 'translation'
   | 'data'
   | 'planning'
   | 'emails'
@@ -165,63 +163,35 @@ const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 const modules: {
   key: ModuleKey;
   label: string;
-  subtitle: string;
-  icon: any;
 }[] = [
-  {
-    key: 'supervisor',
-    label: 'AI vedúci',
-    subtitle: 'Kontrola logiky práce',
-    icon: GraduationCap,
-  },
   {
     key: 'quality',
     label: 'Audit kvality',
-    subtitle: 'Štylistika, logika, citácie',
-    icon: ClipboardCheck,
   },
   {
     key: 'defense',
     label: 'Obhajoba',
-    subtitle: 'Prezentácia, sprievodný text, otázky a odpovede',
-    icon: Presentation,
-  },
-  {
-    key: 'translation',
-    label: 'Preklad',
-    subtitle: 'Akademický preklad',
-    icon: Languages,
   },
   {
     key: 'data',
     label: 'Analýza dát',
-    subtitle: 'JASP, SPSS, Excel, CSV, PDF, Word',
-    icon: Search,
   },
   {
     key: 'planning',
     label: 'Plánovanie',
-    subtitle: 'Predbežný harmonogram práce',
-    icon: BookOpen,
   },
   {
     key: 'emails',
     label: 'Emaily',
-    subtitle: 'Formálne správy',
-    icon: Mail,
   },
   {
     key: 'originality',
     label: 'Originalita práce',
-    subtitle: 'Predbežná kontrola',
-    icon: ShieldCheck,
   },
-{
-  key: 'humanizer',
-  label: 'Humanizácia textu',
-  subtitle: 'Štylistická a akademická úprava textu do prirodzenejšej podoby.',
-  icon: Sparkles,
-},
+  {
+    key: 'humanizer',
+    label: 'Humanizácia textu',
+  },
 ];
 
 // ================= HELPERS =================
@@ -386,13 +356,23 @@ function fixEncodingArtifacts(text: string) {
 function removeBadGeneratedPrefix(text: string) {
   return String(text || '')
     .replace(/^\s*AI\s+vedúci\s+práce\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*AI\s+vedúci\s*[-–—:]*\s*/i, '')
     .replace(/^\s*AI\s+veduci\s+prace\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*AI\s+veduci\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Ako\s+AI\s+vedúci\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Ako\s+AI\s+veduci\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Výstup\s+nebude\s+začínať\s+textom\s+AI\s*Vedúci\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Toto\s+je\s+systémová\s+informácia\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Systémová\s+inštrukcia\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Interná\s+poznámka\s*[-–—:]*\s*/i, '')
     .replace(/^\s*Audit\s+kvality\s*[-–—:]*\s*/i, '')
     .replace(/^\s*Obhajoba\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Výstup\s*[-–—:]*\s*/i, '')
     .replace(
       /^\s*Prezentácia\s*[-–—:]*\s*(?=Názov práce|Cieľ práce|Úvod|Slide|Snímka)/i,
       '',
     );
+
 }
 
 function cleanAiOutput(text: string) {
@@ -425,6 +405,24 @@ function cleanFinalOutput(text: string) {
 
 function stripModuleExtraSections(text: string, module: ModuleKey) {
   let cleaned = cleanFinalOutput(text);
+
+if (['supervisor', 'quality', 'defense', 'planning'].includes(module)) {
+  cleaned = cleaned
+    .replace(/^\s*AI\s+vedúci\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*AI\s+veduci\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Ako\s+AI\s+vedúci\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Ako\s+AI\s+veduci\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Audit\s+kvality\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Obhajoba\s*[-–—:]*\s*/i, '')
+    .replace(/^\s*Výstup\s*[-–—:]*\s*/i, '')
+    .replace(/\n*\s*Interná poznámka\s*:?[\s\S]*$/i, '')
+    .replace(/\n*\s*Systémová inštrukcia\s*:?[\s\S]*$/i, '')
+    .replace(/\n*\s*Toto je systémová informácia\s*:?[\s\S]*$/i, '')
+    .trim();
+
+  return cleaned;
+}
+
 
   if (module === 'translation') {
     cleaned = cleaned
@@ -1090,7 +1088,7 @@ function createAnalysisOutputText(data: AnalysisResult) {
 export default function DashboardPage() {
   const agent = defaultAgent;
 
-  const [activeModule, setActiveModule] = useState<ModuleKey>('supervisor');
+const [activeModule, setActiveModule] = useState<ModuleKey>('quality');
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   const [input, setInput] = useState('');
@@ -1862,14 +1860,14 @@ if (profileForApi?.id) {
 
       const prompt = buildModulePrompt();
 
-      const apiMessages = [
-        {
-          role: 'user' as const,
-          content: prompt,
-        },
-      ];
+const apiMessages = [
+  {
+    role: 'user' as const,
+    content: prompt,
+  },
+];
 
-      const formData = new FormData();
+const formData = new FormData();
 
 const systemLanguage = getStoredSystemLanguage();
 persistSystemLanguage(systemLanguage);
@@ -1896,38 +1894,40 @@ formData.append('workLanguage', systemLanguage);
 
 formData.append('messages', JSON.stringify(apiMessages));
 formData.append('profile', JSON.stringify(profileForApi || null));
-      formData.append('useSemanticScholar', 'false');
-      formData.append('sourceMode', 'uploaded_documents_first');
-      formData.append('validateAttachmentsAgainstProfile', 'true');
-      formData.append('requireSourceList', 'true');
-      formData.append('allowAiKnowledgeFallback', 'true');
-      formData.append('extractUploadedText', 'true');
-      formData.append('useExtractedTextFirst', 'true');
-      formData.append('returnExtractedFilesInfo', 'true');
-      formData.append(
-        'contextaCitationFormat',
-        activeModule === 'defense' ? 'true' : 'false',
-      );
 
-      formData.append(
-        'filesMetadata',
-        JSON.stringify(
-          attachedFiles.map((item) => ({
-            name: item.name,
-            size: item.size,
-            type: item.type,
-            extension: getFileExtension(item.name),
-          })),
-        ),
-      );
+formData.append('useSemanticScholar', 'false');
+formData.append('sourceMode', 'uploaded_documents_first');
+formData.append('validateAttachmentsAgainstProfile', 'true');
+formData.append('requireSourceList', 'true');
+formData.append('allowAiKnowledgeFallback', 'true');
+formData.append('extractUploadedText', 'true');
+formData.append('useExtractedTextFirst', 'true');
+formData.append('returnExtractedFilesInfo', 'true');
 
-      if (profileForApi?.id) {
+formData.append(
+  'contextaCitationFormat',
+  activeModule === 'defense' ? 'true' : 'false',
+);
+
+formData.append(
+  'filesMetadata',
+  JSON.stringify(
+    attachedFiles.map((item) => ({
+      name: item.name,
+      size: item.size,
+      type: item.type,
+      extension: getFileExtension(item.name),
+    })),
+  ),
+);
+
+if (profileForApi?.id) {
   formData.append('projectId', profileForApi.id);
 }
 
-      attachedFiles.forEach((item) => {
+attachedFiles.forEach((item) => {
   if (item.file instanceof File) {
-    formData.append('files', item.file, item.name);
+    formData.append('files', item.file, item.name || item.file.name);
   }
 });
 
@@ -1936,77 +1936,77 @@ const res = await fetch('/api/chat', {
   body: formData,
 });
 
-      if (!res.ok) {
-        throw new Error(await readApiErrorResponse(res));
-      }
+if (!res.ok) {
+  throw new Error(await readApiErrorResponse(res));
+}
 
-      const contentType = res.headers.get('content-type') || '';
+const contentType = res.headers.get('content-type') || '';
 
-      let fullText = '';
+let fullText = '';
 
-      if (contentType.includes('application/json')) {
-        const data = await res.json();
+if (contentType.includes('application/json')) {
+  const data = await res.json();
 
-        fullText =
-          data.output ||
-          data.result ||
-          data.message ||
-          data.text ||
-          data.answer ||
-          '';
+  fullText =
+    data.output ||
+    data.result ||
+    data.message ||
+    data.text ||
+    data.answer ||
+    '';
 
-        if (!fullText && data.ok === false) {
-          throw new Error(data.message || data.error || 'API nevrátilo výstup.');
-        }
-      } else {
-        if (!res.body) {
-          throw new Error('API nevrátilo odpoveď.');
-        }
+  if (!fullText && data.ok === false) {
+    throw new Error(data.message || data.error || 'API nevrátilo výstup.');
+  }
+} else {
+  if (!res.body) {
+    throw new Error('API nevrátilo odpoveď.');
+  }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
 
-        while (true) {
-          const { done, value } = await reader.read();
+  while (true) {
+    const { done, value } = await reader.read();
 
-          if (done) break;
+    if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          fullText += chunk;
+    const chunk = decoder.decode(value, { stream: true });
+    fullText += chunk;
 
-          setResult(stripModuleExtraSections(fullText, activeModule));
-        }
-      }
+    setResult(stripModuleExtraSections(fullText, activeModule));
+  }
+}
 
-      let cleaned = stripModuleExtraSections(fullText, activeModule);
+let cleaned = stripModuleExtraSections(fullText, activeModule);
 
-      if (activeModule === 'planning') {
-        cleaned = cleanFinalOutput(
-          [
-            'Predbežný orientačný harmonogram',
-            '',
-            'Upozornenie: Tento plán je len predbežný a orientačný. Nejde o záväzný termínový plán. Termíny je potrebné priebežne upravovať podľa reálneho stavu práce.',
-            '',
-            cleaned,
-          ].join('\n'),
-        );
-      }
+if (activeModule === 'planning') {
+  cleaned = cleanFinalOutput(
+    [
+      'Predbežný orientačný harmonogram',
+      '',
+      'Upozornenie: Tento plán je len predbežný a orientačný. Nejde o záväzný termínový plán. Termíny je potrebné priebežne upravovať podľa reálneho stavu práce.',
+      '',
+      cleaned,
+    ].join('\n'),
+  );
+}
 
-      cleaned = stripModuleExtraSections(cleaned, activeModule);
+cleaned = stripModuleExtraSections(cleaned, activeModule);
 
-      setResult(cleaned);
-      setCanvasText(cleaned);
+setResult(cleaned);
+setCanvasText(cleaned);
 
-      try {
-        localStorage.setItem('latest_generated_work_text', cleaned);
-        localStorage.setItem('last_ai_output', cleaned);
-      } catch {
-        // localStorage nemusí byť dostupný v niektorých režimoch prehliadača
-      }
+try {
+  localStorage.setItem('latest_generated_work_text', cleaned);
+  localStorage.setItem('last_ai_output', cleaned);
+} catch {
+  // localStorage nemusí byť dostupný v niektorých režimoch prehliadača
+}
 
-      setTimeout(() => {
-        resultRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 150);
+setTimeout(() => {
+  resultRef.current?.scrollIntoView({ behavior: 'smooth' });
+}, 150);
     } catch (error) {
       const message =
         error instanceof Error
@@ -2303,7 +2303,7 @@ const downloadExcel = () => {
     }
   };
 
-  const ModuleIcon = activeModuleInfo.icon;
+
 
   return (
     <>
@@ -2382,26 +2382,24 @@ const downloadExcel = () => {
          <header className="sticky top-0 z-40 shrink-0 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur-xl transition-colors duration-300 dark:border-white/10 dark:bg-[#050711]/95 md:px-8">
    <div className="flex flex-wrap items-center justify-between gap-3">
   <div className="hidden flex-wrap items-center gap-2 xl:flex">
-    {modules.map((item) => {
-      const Icon = item.icon;
-      const active = activeModule === item.key;
+    {modules.map((module) => {
+  const active = activeModule === module.key;
 
-      return (
-        <button
-          key={item.key}
-          type="button"
-          onClick={() => setActiveModule(item.key)}
-         className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-xs font-black transition ${
-  active
-    ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/30'
-    : 'border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-100 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300 dark:hover:bg-white/[0.1] dark:hover:text-white'
-}`}
-        >
-          <Icon className="h-4 w-4" />
-          {item.label}
-        </button>
-      );
-    })}
+  return (
+    <button
+      key={module.key}
+      type="button"
+      onClick={() => setActiveModule(module.key)}
+      className={`rounded-2xl border px-5 py-3 text-sm font-black transition ${
+        active
+          ? 'border-violet-400/40 bg-violet-600 text-white'
+          : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+      }`}
+    >
+      {module.label}
+    </button>
+  );
+})}
 
 
 <a
@@ -2424,26 +2422,24 @@ const downloadExcel = () => {
 </div>
 
            <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto xl:hidden">
-  {modules.map((item) => {
-    const Icon = item.icon;
-    const active = activeModule === item.key;
+{modules.map((item) => {
+  const active = activeModule === item.key;
 
-    return (
-      <button
-        key={item.key}
-        type="button"
-        onClick={() => setActiveModule(item.key)}
-        className={`inline-flex shrink-0 items-center gap-2 rounded-2xl px-4 py-2 text-xs font-black ${
-  active
-    ? 'bg-violet-600 text-white'
-    : 'border border-slate-200 bg-white text-slate-700 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300'
-}`}
-      >
-        <Icon className="h-4 w-4" />
-        {item.label}
-      </button>
-    );
-  })}
+  return (
+    <button
+      key={item.key}
+      type="button"
+      onClick={() => setActiveModule(item.key)}
+      className={`inline-flex items-center justify-center rounded-2xl border px-5 py-3 text-sm font-black transition ${
+        active
+          ? 'border-violet-400/40 bg-violet-600 text-white shadow-lg shadow-violet-950/30'
+          : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+      }`}
+    >
+      {item.label}
+    </button>
+  );
+})}
 
 <a
   href="/profile"
@@ -2458,27 +2454,17 @@ const downloadExcel = () => {
     <ThemeToggleButton />
   </div>
 </div>
-          </header>
+ </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 pb-40 md:px-8">
-            <div className="mx-auto max-w-6xl">
+ <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 pb-40 md:px-8">
+     <div className="mx-auto max-w-6xl">
              <section className="mb-10 rounded-[28px] border border-slate-200 bg-white p-5 shadow-2xl shadow-slate-200/70 transition-colors duration-300 dark:border-white/10 dark:bg-[#070a16] dark:shadow-black/30">
                 <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-                  <div className="flex items-start gap-4">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
-                      <ModuleIcon className="h-6 w-6" />
-                    </div>
-
-                    <div>
-                      <h1 className="text-2xl font-black text-slate-950 dark:text-white">
-  {activeModuleInfo.label}
-</h1>
-
-<p className="mt-1 text-sm border-slate-300 bg-white text-slate-800 hover:bg-slate-100 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/20">
-  {activeModuleInfo.subtitle}
-</p>
-                    </div>
-                  </div>
+           <div className="flex items-start gap-4">
+  <div>
+  
+</div>
+</div>
                 </div>
 
                 {activeModule === 'planning' && (
@@ -3015,12 +3001,12 @@ function FileUploadBox({
 
 function getPlaceholder(module: ModuleKey) {
   if (module === 'supervisor') {
-    return 'Vlož kapitolu, osnovu alebo problém, ktorý má AI vedúci posúdiť. Výstup nebude začínať textom „AI vedúci“.';
-  }
+  return 'Vlož kapitolu, osnovu, cieľ práce, metodológiu alebo problém, ktorý chceš odborne posúdiť.';
+}
 
   if (module === 'quality') {
-    return 'Vlož text na kontrolu. Výstup bude očistený od poškodených znakov a nebude začínať nadpisom „Audit kvality“.';
-  }
+  return 'Vlož text na kontrolu kvality. Systém posúdi štylistiku, logiku, akademickosť, citácie a navrhne konkrétne opravy.';
+}
 
   if (module === 'defense') {
     return 'Vlož stručný obsah práce alebo nahraj dokument. Systém pripraví prezentáciu, sprievodný text, otázky komisie a odpovede. Po vytvorení sa zobrazí aj tlačidlo PPTX.';

@@ -2,17 +2,10 @@ import { cookies } from 'next/headers';
 import { createServerClient as createSupabaseServerClientBase } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
-// ================= TYPES =================
-
-type CookieToSet = {
-  name: string;
-  value: string;
-  options?: Record<string, unknown>;
-};
-
 // ================= SERVER CLIENT - USER SESSION =================
-// Používa sa tam, kde potrebuješ pracovať s prihláseným používateľom.
-// Tento klient používa ANON key a cookies z Next.js.
+// Používa sa v API routách a serverových častiach, kde potrebuješ pracovať
+// s aktuálne prihláseným používateľom.
+// Tento klient používa ANON key a session cookies z Next.js.
 
 export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
@@ -34,7 +27,7 @@ export async function createSupabaseServerClient() {
         return cookieStore.getAll();
       },
 
-      setAll(cookiesToSet: CookieToSet[]) {
+      setAll(cookiesToSet) {
         try {
           cookiesToSet.forEach(({ name, value, options }) => {
             cookieStore.set(name, value, options);
@@ -50,9 +43,10 @@ export async function createSupabaseServerClient() {
 
 // ================= ADMIN CLIENT - SERVICE ROLE =================
 // Používa sa iba na serveri v API routách.
-// Tento klient obchádza RLS, preto nikdy nepoužívaj service role key na klientovi.
+// Tento klient používa SERVICE ROLE KEY a obchádza RLS.
+// Nikdy ho nepoužívaj v klientskom komponente.
 
-export async function createAdminClient() {
+export function createAdminClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -74,6 +68,9 @@ export async function createAdminClient() {
 
 // ================= ALIASES =================
 // Tieto aliasy nechávame kvôli kompatibilite so staršími importami v projekte.
+// Dôležité:
+// - createSupabaseServerClient() je async, preto všade používaj await.
+// - createAdminClient() nie je async, preto await nepotrebuje.
 
 export async function createClient() {
   return createSupabaseServerClient();
@@ -83,6 +80,6 @@ export async function createServerSupabaseClient() {
   return createSupabaseServerClient();
 }
 
-export async function createSupabaseAdminClient() {
+export function createSupabaseAdminClient() {
   return createAdminClient();
 }

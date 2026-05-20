@@ -1,296 +1,310 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
-  ArrowLeft,
-  Bot,
-  Calendar,
-  FileText,
-  History,
-  MessageCircle,
-  Search,
-  Trash2,
+  BarChart3,
+  ClipboardCheck,
+  FileSearch,
+  GraduationCap,
+  Mail,
+  MessageSquare,
+  Presentation,
+  ShieldCheck,
+  Sparkles,
 } from 'lucide-react';
 
 type HistoryItem = {
   id: string;
-  user_email: string;
-  type: string;
-  title: string;
-  preview: string | null;
-  content: string | null;
-  metadata?: Record<string, any>;
+  module: string;
+  title: string | null;
+  user_message: string | null;
+  assistant_message: string | null;
+  result?: Record<string, unknown>;
   created_at: string;
 };
 
 const filters = [
-  { id: 'all', label: 'Všetko' },
-  { id: 'chat', label: 'Chat' },
-  { id: 'write', label: 'Písanie' },
-  { id: 'supervisor', label: 'AI Vedúci' },
-  { id: 'audit', label: 'Audit' },
-  { id: 'defense', label: 'Obhajoba' },
-  { id: 'sources', label: 'Zdroje' },
-  { id: 'data', label: 'Dáta' },
+  { key: 'all', label: 'Všetko' },
+  { key: 'chat', label: 'AI chat' },
+  { key: 'supervisor', label: 'AI vedúci' },
+  { key: 'quality', label: 'Audit kvality' },
+  { key: 'defense', label: 'Obhajoba' },
+  { key: 'translation', label: 'Preklad' },
+  { key: 'data', label: 'Analýza dát' },
+  { key: 'planning', label: 'Plánovanie' },
+  { key: 'emails', label: 'Emaily' },
+  { key: 'originality', label: 'Originalita' },
+  { key: 'humanizer', label: 'Humanizácia' },
 ];
 
-function formatDate(value: string) {
-  try {
-    return new Intl.DateTimeFormat('sk-SK', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
+function getModuleLabel(module: string) {
+  if (module === 'supervisor') return 'AI vedúci';
+  if (module === 'quality') return 'Audit kvality';
+  if (module === 'defense') return 'Obhajoba';
+  if (module === 'translation') return 'Preklad';
+  if (module === 'data') return 'Analýza dát';
+  if (module === 'planning') return 'Plánovanie';
+  if (module === 'emails') return 'Emaily';
+  if (module === 'originality') return 'Originalita';
+  if (module === 'humanizer') return 'Humanizácia';
+  return 'AI chat';
 }
 
-function getIcon(type: string) {
-  if (type === 'chat') return <MessageCircle className="h-5 w-5" />;
-  if (type === 'supervisor') return <Bot className="h-5 w-5" />;
-  return <FileText className="h-5 w-5" />;
+function getModuleIcon(module: string) {
+  if (module === 'supervisor') return <GraduationCap className="h-5 w-5" />;
+  if (module === 'quality') return <ClipboardCheck className="h-5 w-5" />;
+  if (module === 'defense') return <Presentation className="h-5 w-5" />;
+  if (module === 'translation') return <MessageSquare className="h-5 w-5" />;
+  if (module === 'data') return <BarChart3 className="h-5 w-5" />;
+  if (module === 'emails') return <Mail className="h-5 w-5" />;
+  if (module === 'originality') return <ShieldCheck className="h-5 w-5" />;
+  if (module === 'humanizer') return <Sparkles className="h-5 w-5" />;
+  if (module === 'sources') return <FileSearch className="h-5 w-5" />;
+  return <MessageSquare className="h-5 w-5" />;
 }
 
 export default function HistoryPage() {
-  const router = useRouter();
-
   const [items, setItems] = useState<HistoryItem[]>([]);
-  const [selected, setSelected] = useState<HistoryItem | null>(null);
-  const [filter, setFilter] = useState('all');
-  const [query, setQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState('all');
+  const [activeItem, setActiveItem] = useState<HistoryItem | null>(null);
   const [loading, setLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [error, setError] = useState('');
 
   async function loadHistory() {
-    setLoading(true);
+  setLoading(true);
+  setError('');
 
-    try {
-      const params = new URLSearchParams();
-      params.set('limit', '100');
+  try {
+    const url =
+      activeFilter === 'all'
+        ? '/api/history'
+        : `/api/history?module=${encodeURIComponent(activeFilter)}`;
 
-      if (filter !== 'all') params.set('type', filter);
-      if (query.trim()) params.set('q', query.trim());
+    const res = await fetch(url, {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'include',
+    });
 
-      const res = await fetch(`/api/history?${params.toString()}`, {
-        cache: 'no-store',
-      });
+    const data = await res.json().catch(() => null);
 
-      const data = await res.json();
+    if (res.ok && data?.ok) {
+      const loadedItems = Array.isArray(data.items) ? data.items : [];
 
-      if (data.ok) {
-        setItems(data.items || []);
-      } else {
-        setItems([]);
-      }
-    } catch (error) {
-      console.error('History load error:', error);
-      setItems([]);
-    } finally {
-      setLoading(false);
+      setItems(loadedItems);
+      setActiveItem(loadedItems[0] || null);
+      return;
     }
+
+    const rawLocal = localStorage.getItem('chat_history');
+    const localItems = rawLocal ? JSON.parse(rawLocal) : [];
+    const safeLocalItems = Array.isArray(localItems) ? localItems : [];
+
+    const filteredLocalItems =
+      activeFilter === 'all'
+        ? safeLocalItems
+        : safeLocalItems.filter((item) => item.module === activeFilter);
+
+    setItems(filteredLocalItems);
+    setActiveItem(filteredLocalItems[0] || null);
+
+    if (filteredLocalItems.length === 0) {
+      setError(data?.error || 'Používateľ nie je prihlásený.');
+    } else {
+      setError('');
+    }
+  } catch (err) {
+    const rawLocal = localStorage.getItem('chat_history');
+    const localItems = rawLocal ? JSON.parse(rawLocal) : [];
+    const safeLocalItems = Array.isArray(localItems) ? localItems : [];
+
+    const filteredLocalItems =
+      activeFilter === 'all'
+        ? safeLocalItems
+        : safeLocalItems.filter((item) => item.module === activeFilter);
+
+    setItems(filteredLocalItems);
+    setActiveItem(filteredLocalItems[0] || null);
+
+    if (filteredLocalItems.length === 0) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Históriu sa nepodarilo načítať.',
+      );
+    }
+  } finally {
+    setLoading(false);
   }
+}
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadHistory();
-    }, 250);
+    loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFilter]);
 
-    return () => clearTimeout(timer);
-  }, [filter, query]);
-
-  async function deleteItem(id: string) {
-    if (!confirm('Naozaj chcete vymazať tento záznam z histórie?')) return;
-
-    setDeletingId(id);
-
-    try {
-      const res = await fetch(`/api/history?id=${id}`, {
-        method: 'DELETE',
-      });
-
-      const data = await res.json();
-
-      if (data.ok) {
-        setItems(prev => prev.filter(item => item.id !== id));
-        if (selected?.id === id) setSelected(null);
-      }
-    } catch (error) {
-      console.error('History delete error:', error);
-    } finally {
-      setDeletingId(null);
-    }
-  }
-
-  const emptyText = useMemo(() => {
-    if (query.trim()) return 'Nenašli sa žiadne záznamy pre zadané hľadanie.';
-    if (filter !== 'all') return 'Pre tento modul zatiaľ nie je uložená história.';
-    return 'Zatiaľ nemáte uloženú žiadnu históriu.';
-  }, [filter, query]);
+  const groupedItems = useMemo(() => {
+    return items.reduce<Record<string, HistoryItem[]>>((acc, item) => {
+      const key = item.module || 'chat';
+      acc[key] ||= [];
+      acc[key].push(item);
+      return acc;
+    }, {});
+  }, [items]);
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-950 transition-colors duration-300 dark:bg-[#020617] dark:text-white">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur-xl dark:border-white/10 dark:bg-[#020617]/90">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4">
-          <button
-            type="button"
-            onClick={() => router.push('/dashboard')}
-            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.1]"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Späť do dashboardu
-          </button>
-
-          <div className="flex items-center gap-2 rounded-2xl bg-violet-100 px-4 py-2 text-sm font-black text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
-            <History className="h-4 w-4" />
-            História chatu
-          </div>
-        </div>
-      </header>
-
-      <section className="mx-auto grid max-w-7xl gap-6 px-4 py-8 lg:grid-cols-[420px_1fr]">
-        <aside className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
-          <div className="mb-5">
-            <h1 className="text-3xl font-black tracking-tight">
-              História chatu
-            </h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Zoznam vašich uložených konverzácií a výstupov zo Zedpera.
+    <main className="min-h-screen bg-slate-50 p-4 text-slate-950 dark:bg-[#020617] dark:text-white md:p-8">
+      <div className="mx-auto max-w-7xl">
+        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h1 className="text-3xl font-black">História chatu</h1>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+              Tu sa zobrazujú uložené výstupy z AI chatu, AI vedúceho, auditu,
+              obhajoby, originality a ďalších modulov.
             </p>
           </div>
 
-          <div className="mb-4 flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-white/10 dark:bg-black/20">
-            <Search className="h-4 w-4 text-slate-400" />
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Hľadať..."
-              className="w-full bg-transparent text-sm font-semibold outline-none placeholder:text-slate-400"
-            />
-          </div>
+          <a
+            href="/dashboard"
+            className="inline-flex min-h-[44px] items-center justify-center rounded-2xl bg-slate-950 px-5 text-sm font-black text-white dark:bg-white dark:text-slate-950"
+          >
+            Späť do menu
+          </a>
+        </div>
 
-          <div className="mb-5 flex flex-wrap gap-2">
-            {filters.map(item => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setFilter(item.id)}
-                className={
-                  filter === item.id
-                    ? 'rounded-2xl bg-violet-600 px-3 py-2 text-xs font-black text-white shadow-sm'
-                    : 'rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.1]'
-                }
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
+        <div className="mb-6 flex gap-2 overflow-x-auto pb-2">
+          {filters.map((filter) => (
+            <button
+              key={filter.key}
+              type="button"
+              onClick={() => {
+                setActiveFilter(filter.key);
+                setActiveItem(null);
+              }}
+              className={`shrink-0 rounded-2xl px-4 py-2 text-sm font-black transition ${
+                activeFilter === filter.key
+                  ? 'bg-violet-600 text-white'
+                  : 'bg-white text-slate-700 shadow-sm hover:bg-slate-100 dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/15'
+              }`}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
 
-          <div className="space-y-3">
-            {loading ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm font-bold text-slate-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400">
-                Načítavam históriu...
-              </div>
-            ) : items.length === 0 ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm font-bold text-slate-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400">
-                {emptyText}
-              </div>
-            ) : (
-              items.map(item => (
-                <article
-                  key={item.id}
-                  className={
-                    selected?.id === item.id
-                      ? 'group cursor-pointer rounded-3xl border border-violet-300 bg-violet-50 p-4 shadow-sm dark:border-violet-400/40 dark:bg-violet-500/15'
-                      : 'group cursor-pointer rounded-3xl border border-slate-200 bg-white p-4 shadow-sm hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]'
-                  }
-                  onClick={() => setSelected(item)}
+        {loading ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-white/5">
+            Načítavam históriu...
+          </div>
+        ) : null}
+
+        {error ? (
+          <div className="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm font-bold text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+            {error}
+          </div>
+        ) : null}
+
+        {!loading && !error && items.length === 0 ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 text-slate-600 shadow-sm dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
+            História je zatiaľ prázdna. Spusti niektorý modul v dashboarde a
+            výstup sa sem uloží.
+          </div>
+        ) : null}
+
+        {!loading && !error && items.length > 0 ? (
+          <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
+            <div className="space-y-5">
+              {Object.entries(groupedItems).map(([module, records]) => (
+                <section
+                  key={module}
+                  className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5"
                 >
-                  <div className="flex items-start gap-3">
-                    <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
-                      {getIcon(item.type)}
+                  <div className="mb-3 flex items-center gap-2 text-sm font-black text-slate-500 dark:text-slate-300">
+                    {getModuleIcon(module)}
+                    {getModuleLabel(module)}
+                  </div>
+
+                  <div className="space-y-3">
+                    {records.map((item) => {
+                      const active = activeItem?.id === item.id;
+
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setActiveItem(item)}
+                          className={`w-full rounded-2xl border p-4 text-left transition ${
+                            active
+                              ? 'border-violet-400 bg-violet-50 dark:bg-violet-500/10'
+                              : 'border-slate-100 bg-slate-50 hover:border-violet-300 hover:bg-violet-50 dark:border-white/10 dark:bg-black/20 dark:hover:bg-violet-500/10'
+                          }`}
+                        >
+                          <div className="font-black">
+                            {item.title || getModuleLabel(item.module)}
+                          </div>
+
+                          <div className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                            {new Date(item.created_at).toLocaleString('sk-SK')}
+                          </div>
+
+                          <div className="mt-2 line-clamp-2 text-sm text-slate-600 dark:text-slate-300">
+                            {item.assistant_message || 'Bez výstupu'}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
+
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-white/5">
+              {activeItem ? (
+                <>
+                  <div className="mb-5 flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-200">
+                      {getModuleIcon(activeItem.module)}
                     </div>
 
-                    <div className="min-w-0 flex-1">
-                      <h2 className="line-clamp-1 text-sm font-black">
-                        {item.title}
+                    <div>
+                      <h2 className="text-xl font-black">
+                        {activeItem.title || getModuleLabel(activeItem.module)}
                       </h2>
-
-                      <p className="mt-1 line-clamp-2 text-xs font-medium leading-5 text-slate-500 dark:text-slate-400">
-                        {item.preview || item.content || 'Bez náhľadu'}
-                      </p>
-
-                      <div className="mt-3 flex items-center justify-between gap-3">
-                        <div className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-400">
-                          <Calendar className="h-3.5 w-3.5" />
-                          {formatDate(item.created_at)}
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={event => {
-                            event.stopPropagation();
-                            deleteItem(item.id);
-                          }}
-                          disabled={deletingId === item.id}
-                          className="rounded-xl p-2 text-slate-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-500/10 dark:hover:text-red-300"
-                          title="Vymazať"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                      <div className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        {new Date(activeItem.created_at).toLocaleString(
+                          'sk-SK',
+                        )}
                       </div>
                     </div>
                   </div>
-                </article>
-              ))
-            )}
+
+                  <div className="mb-4 rounded-2xl bg-slate-50 p-4 dark:bg-black/20">
+                    <div className="mb-2 text-xs font-black uppercase text-slate-500 dark:text-slate-400">
+                      Zadanie
+                    </div>
+                    <div className="whitespace-pre-wrap text-sm leading-6">
+                      {activeItem.user_message || 'Bez zadania'}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-slate-50 p-4 dark:bg-black/20">
+                    <div className="mb-2 text-xs font-black uppercase text-slate-500 dark:text-slate-400">
+                      Výstup
+                    </div>
+                    <div className="whitespace-pre-wrap text-sm leading-7">
+                      {activeItem.assistant_message || 'Bez výstupu'}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-slate-600 dark:text-slate-300">
+                  Vyber záznam z histórie.
+                </div>
+              )}
+            </section>
           </div>
-        </aside>
-
-        <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
-          {!selected ? (
-            <div className="flex min-h-[520px] flex-col items-center justify-center text-center">
-              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-3xl bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
-                <History className="h-8 w-8" />
-              </div>
-
-              <h2 className="text-2xl font-black">
-                Vyberte záznam z histórie
-              </h2>
-
-              <p className="mt-2 max-w-md text-sm font-medium leading-6 text-slate-500 dark:text-slate-400">
-                Po kliknutí na uloženú konverzáciu sa tu zobrazí kompletný
-                obsah výstupu.
-              </p>
-            </div>
-          ) : (
-            <div>
-              <div className="mb-6 border-b border-slate-200 pb-5 dark:border-white/10">
-                <div className="mb-3 inline-flex items-center gap-2 rounded-2xl bg-violet-100 px-3 py-2 text-xs font-black uppercase tracking-wide text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
-                  {getIcon(selected.type)}
-                  {selected.type}
-                </div>
-
-                <h2 className="text-3xl font-black tracking-tight">
-                  {selected.title}
-                </h2>
-
-                <div className="mt-3 flex items-center gap-2 text-sm font-bold text-slate-500 dark:text-slate-400">
-                  <Calendar className="h-4 w-4" />
-                  {formatDate(selected.created_at)}
-                </div>
-              </div>
-
-              <div className="prose prose-slate max-w-none whitespace-pre-wrap text-sm font-medium leading-7 dark:prose-invert">
-                {selected.content || selected.preview || 'Bez obsahu'}
-              </div>
-            </div>
-          )}
-        </section>
-      </section>
+        ) : null}
+      </div>
     </main>
   );
 }

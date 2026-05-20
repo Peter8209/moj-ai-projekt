@@ -3352,18 +3352,8 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
               {messages.length === 0 ? (
                 <div className="mx-auto flex min-h-full max-w-6xl flex-col justify-center py-4">
                   <div className="mb-5 text-center">
-                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
-                      <Brain className="h-6 w-6" />
-                    </div>
-
-                    <h3 className="text-3xl font-black">Začnite konverzáciu</h3>
-
-                    <p className="mx-auto mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-                      Najprv má byť vyplnený profil práce. Potom môžeš písať,
-                      kontrolovať text, nahrávať podklady a upravovať označené
-                      časti výstupu.
-                    </p>
-                  </div>
+  
+</div>
 
             <div className="grid w-full gap-3 md:grid-cols-3">
   {suggestions.map((item) => {

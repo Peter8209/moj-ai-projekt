@@ -96,10 +96,14 @@ const TEXTS: Record<
     email: string;
     myWorksTitle: string;
     myWorksDescription: string;
+    createEmptyProfile: string;
+    createEmptyProfileConfirm: string;
+    emptyProfileCreated: string;
     saveWorkProfile: string;
     saving: string;
     saveChanges: string;
     savedSuccess: string;
+    savedLocalOnly: string;
     title: string;
     titlePlaceholder: string;
     topic: string;
@@ -192,11 +196,18 @@ const TEXTS: Record<
     myWorksTitle: 'Moje práce',
     myWorksDescription:
       'Toto je základný profil práce. Každá zmena sa ukladá do pamäte prehliadača a po kliknutí na uloženie aj do databázy. AI chat a moduly musia pracovať s aktuálnym názvom práce, typom práce, jazykom práce, citačnou normou, cieľom, metodológiou, hypotézami a požiadavkami na zdroje.',
+    createEmptyProfile: 'Vytvoriť prázdny profil',
+    createEmptyProfileConfirm:
+      'Naozaj chcete vytvoriť nový prázdny profil práce? Aktuálne rozpísané údaje sa prepíšu.',
+    emptyProfileCreated:
+      'Bol vytvorený nový prázdny profil práce. Vyplňte údaje a kliknite na uloženie.',
     saveWorkProfile: 'Uložiť profil práce',
     saving: 'Ukladám...',
     saveChanges: 'Uložiť zmeny',
     savedSuccess:
       'Profil práce bol uložený. AI chat a moduly budú používať aktuálne údaje.',
+    savedLocalOnly:
+      'Profil práce bol uložený lokálne v prehliadači. Do databázy sa uloží po prihlásení používateľa.',
     title: 'Názov práce',
     titlePlaceholder: 'Napr. Vplyv umelej inteligencie na akademické písanie',
     topic: 'Téma práce',
@@ -295,11 +306,18 @@ const TEXTS: Record<
     myWorksTitle: 'Moje práce',
     myWorksDescription:
       'Toto je základní profil práce. Každá změna se ukládá do paměti prohlížeče a po kliknutí na uložení také do databáze. AI chat a moduly musí pracovat s aktuálním názvem práce, typem práce, jazykem práce, citační normou, cílem, metodologií, hypotézami a požadavky na zdroje.',
+    createEmptyProfile: 'Vytvořit prázdný profil',
+    createEmptyProfileConfirm:
+      'Opravdu chcete vytvořit nový prázdný profil práce? Aktuálně rozepsané údaje se přepíší.',
+    emptyProfileCreated:
+      'Byl vytvořen nový prázdný profil práce. Vyplňte údaje a klikněte na uložení.',
     saveWorkProfile: 'Uložit profil práce',
     saving: 'Ukládám...',
     saveChanges: 'Uložit změny',
     savedSuccess:
       'Profil práce byl uložen. AI chat a moduly budou používat aktuální údaje.',
+    savedLocalOnly:
+      'Profil práce byl uložen lokálně v prohlížeči. Do databáze se uloží po přihlášení uživatele.',
     title: 'Název práce',
     titlePlaceholder: 'Např. Vliv umělé inteligence na akademické psaní',
     topic: 'Téma práce',
@@ -398,11 +416,18 @@ const TEXTS: Record<
     myWorksTitle: 'My works',
     myWorksDescription:
       'This is the basic work profile. Every change is saved to browser memory and, after clicking save, also to the database. The AI chat and modules must use the current work title, work type, work language, citation style, objective, methodology, hypotheses and source requirements.',
+    createEmptyProfile: 'Create empty profile',
+    createEmptyProfileConfirm:
+      'Do you really want to create a new empty work profile? Current unsaved data will be overwritten.',
+    emptyProfileCreated:
+      'A new empty work profile has been created. Fill in the data and click save.',
     saveWorkProfile: 'Save work profile',
     saving: 'Saving...',
     saveChanges: 'Save changes',
     savedSuccess:
       'The work profile has been saved. The AI chat and modules will use the current data.',
+    savedLocalOnly:
+      'The work profile was saved locally in the browser. It will be saved to the database after the user signs in.',
     title: 'Work title',
     titlePlaceholder: 'For example: The impact of AI on academic writing',
     topic: 'Work topic',
@@ -488,7 +513,9 @@ function uiText(language: AppLanguage) {
   return TEXTS[language] || TEXTS.sk;
 }
 
-function createEmptyWorkProfile(interfaceLanguage: AppLanguage = 'sk'): WorkProfile {
+function createEmptyWorkProfile(
+  interfaceLanguage: AppLanguage = 'sk',
+): WorkProfile {
   const now = new Date().toISOString();
 
   return {
@@ -572,13 +599,17 @@ function saveWorkProfileLocal(profile: WorkProfile) {
   dispatchProfileEvents(profile);
 }
 
-function loadWorkProfileLocal(interfaceLanguage: AppLanguage): WorkProfile | null {
+function loadWorkProfileLocal(
+  interfaceLanguage: AppLanguage,
+): WorkProfile | null {
   if (typeof window === 'undefined') return null;
 
   const keys = ['active_profile', 'profile'];
 
   for (const key of keys) {
-    const parsed = safeJsonParse<Partial<WorkProfile>>(localStorage.getItem(key));
+    const parsed = safeJsonParse<Partial<WorkProfile>>(
+      localStorage.getItem(key),
+    );
 
     if (parsed?.id) {
       return {
@@ -696,6 +727,7 @@ export default function ProfileClient() {
 
       setData(json);
     } catch (err: unknown) {
+      setData(null);
       setError(err instanceof Error ? err.message : u.userLoadError);
     } finally {
       setLoading(false);
@@ -709,6 +741,10 @@ export default function ProfileClient() {
 
     if (localProfile) {
       setWorkProfile(localProfile);
+    } else {
+      const emptyProfile = createEmptyWorkProfile(language);
+      setWorkProfile(emptyProfile);
+      saveWorkProfileLocal(emptyProfile);
     }
 
     try {
@@ -725,10 +761,24 @@ export default function ProfileClient() {
         saveWorkProfileLocal(normalized);
       }
     } catch {
-      // If the server endpoint is not ready yet, local storage remains the fallback.
+      // Ak serverový endpoint ešte nie je pripravený alebo používateľ nie je prihlásený,
+      // používa sa lokálne uložený profil.
     } finally {
       setWorkProfileLoading(false);
     }
+  }
+
+  function createNewEmptyWorkProfile() {
+    const confirmed = window.confirm(u.createEmptyProfileConfirm);
+
+    if (!confirmed) return;
+
+    const emptyProfile = createEmptyWorkProfile(language);
+
+    setError('');
+    setSuccess(u.emptyProfileCreated);
+    setWorkProfile(emptyProfile);
+    saveWorkProfileLocal(emptyProfile);
   }
 
   function updateWorkProfileField<K extends keyof WorkProfile>(
@@ -773,15 +823,30 @@ export default function ProfileClient() {
         body: JSON.stringify(updatedProfile),
       });
 
-      const json = await res.json();
+      let json: any = null;
 
-      if (!res.ok || !json.ok) {
-        throw new Error(json.error || u.workSaveError);
+      try {
+        json = await res.json();
+      } catch {
+        json = null;
+      }
+
+      if (!res.ok || !json?.ok) {
+        if (!data?.user?.id) {
+          setSuccess(u.savedLocalOnly);
+          return;
+        }
+
+        throw new Error(json?.error || u.workSaveError);
       }
 
       setSuccess(u.savedSuccess);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : u.workSaveError);
+      if (!data?.user?.id) {
+        setSuccess(u.savedLocalOnly);
+      } else {
+        setError(err instanceof Error ? err.message : u.workSaveError);
+      }
     } finally {
       setSavingWorkProfile(false);
     }
@@ -889,7 +954,7 @@ export default function ProfileClient() {
                 {u.user}
               </div>
               <div className="break-all text-sm font-bold">
-                {data?.user.email}
+                {data?.user?.email || 'Neprihlásený používateľ'}
               </div>
             </div>
           </div>
@@ -908,6 +973,14 @@ export default function ProfileClient() {
             >
               {u.profile}
             </a>
+
+            <button
+              type="button"
+              onClick={createNewEmptyWorkProfile}
+              className="block w-full rounded-2xl px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-white/10"
+            >
+              {u.createEmptyProfile}
+            </button>
 
             <a
               href="/chat"
@@ -981,7 +1054,7 @@ export default function ProfileClient() {
             <InfoCard
               icon={<CheckCircle2 className="h-5 w-5" />}
               title={u.accountStateTitle}
-              text={`${u.email}: ${data?.user.email || ''}`}
+              text={`${u.email}: ${data?.user?.email || ''}`}
             />
           </div>
 
@@ -998,15 +1071,27 @@ export default function ProfileClient() {
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={saveWorkProfile}
-                disabled={savingWorkProfile}
-                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <Save className="h-4 w-4" />
-                {savingWorkProfile ? u.saving : u.saveWorkProfile}
-              </button>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={createNewEmptyWorkProfile}
+                  disabled={savingWorkProfile}
+                  className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-white px-5 text-sm font-black text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-white/10 dark:text-blue-200 dark:hover:bg-white/15"
+                >
+                  <BookOpen className="h-4 w-4" />
+                  {u.createEmptyProfile}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={saveWorkProfile}
+                  disabled={savingWorkProfile}
+                  className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Save className="h-4 w-4" />
+                  {savingWorkProfile ? u.saving : u.saveWorkProfile}
+                </button>
+              </div>
             </div>
 
             {workProfileLoading ? (
@@ -1331,15 +1416,27 @@ export default function ProfileClient() {
                     </strong>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={saveWorkProfile}
-                    disabled={savingWorkProfile}
-                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <Save className="h-4 w-4" />
-                    {savingWorkProfile ? u.saving : u.saveChanges}
-                  </button>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={createNewEmptyWorkProfile}
+                      disabled={savingWorkProfile}
+                      className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-white px-5 text-sm font-black text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-white/10 dark:text-blue-200 dark:hover:bg-white/15"
+                    >
+                      <BookOpen className="h-4 w-4" />
+                      {u.createEmptyProfile}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={saveWorkProfile}
+                      disabled={savingWorkProfile}
+                      className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Save className="h-4 w-4" />
+                      {savingWorkProfile ? u.saving : u.saveChanges}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1382,7 +1479,7 @@ export default function ProfileClient() {
             <div className="mt-5 flex flex-col gap-3 sm:flex-row">
               <input
                 value={deleteConfirm}
-                onChange={(e) => setDeleteConfirm(e.target.value)}
+                onChange={(event) => setDeleteConfirm(event.target.value)}
                 placeholder={u.deletePlaceholder}
                 className="min-h-[48px] flex-1 rounded-2xl border border-red-200 bg-white px-4 text-sm font-semibold outline-none focus:ring-2 focus:ring-red-400 dark:border-red-500/30 dark:bg-black/30 dark:text-white"
               />

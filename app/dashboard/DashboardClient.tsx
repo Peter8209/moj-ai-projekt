@@ -42,8 +42,10 @@ import {
 // ================= TYPES =================
 
 type ModuleKey =
+  | 'supervisor'
   | 'quality'
   | 'defense'
+  | 'translation'
   | 'data'
   | 'planning'
   | 'emails'
@@ -163,34 +165,52 @@ const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 const modules: {
   key: ModuleKey;
   label: string;
+  buttonLabel: string;
 }[] = [
+  {
+    key: 'supervisor',
+    label: 'AI vedúci',
+    buttonLabel: 'Spustiť AI vedúceho',
+  },
   {
     key: 'quality',
     label: 'Audit kvality',
+    buttonLabel: 'Spustiť audit kvality',
   },
   {
     key: 'defense',
     label: 'Obhajoba',
+    buttonLabel: 'Vytvoriť obhajobu',
+  },
+  {
+    key: 'translation',
+    label: 'Preklad',
+    buttonLabel: 'Preložiť text',
   },
   {
     key: 'data',
     label: 'Analýza dát',
+    buttonLabel: 'Analyzovať dáta',
   },
   {
     key: 'planning',
     label: 'Plánovanie',
+    buttonLabel: 'Vytvoriť plán',
   },
   {
     key: 'emails',
     label: 'Emaily',
+    buttonLabel: 'Vytvoriť email',
   },
   {
     key: 'originality',
     label: 'Originalita práce',
+    buttonLabel: 'Skontrolovať originalitu',
   },
   {
     key: 'humanizer',
     label: 'Humanizácia textu',
+    buttonLabel: 'Humanizovať text',
   },
 ];
 
@@ -403,28 +423,52 @@ function cleanFinalOutput(text: string) {
     .trim();
 }
 
-function stripModuleExtraSections(text: string, module: ModuleKey) {
+function stripModuleExtraSections(text: string, moduleKey: ModuleKey) {
   let cleaned = cleanFinalOutput(text);
 
-if (['supervisor', 'quality', 'defense', 'planning'].includes(module)) {
+  const moduleName = String(moduleKey);
+
+  // Spoločné čistenie pre všetky moduly
   cleaned = cleaned
-    .replace(/^\s*AI\s+vedúci\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*AI\s+veduci\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Ako\s+AI\s+vedúci\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Ako\s+AI\s+veduci\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Audit\s+kvality\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Obhajoba\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Výstup\s*[-–—:]*\s*/i, '')
     .replace(/\n*\s*Interná poznámka\s*:?[\s\S]*$/i, '')
     .replace(/\n*\s*Systémová inštrukcia\s*:?[\s\S]*$/i, '')
     .replace(/\n*\s*Toto je systémová informácia\s*:?[\s\S]*$/i, '')
+    .replace(/\bprimárny zdroj\b/gi, '')
+    .replace(/\bsekundárny zdroj\b/gi, '')
+    .replace(/\binterný zdroj\b/gi, '')
+    .replace(/\banalyzovaný zdroj\b/gi, '')
+    .replace(/\bpodľa nahratého súboru\b/gi, '')
+    .replace(/\bpodľa prílohy\b/gi, '')
+    .replace(/\bpoužívateľ nahral súbor\b/gi, '')
+    .replace(/\bdokument obsahuje\b/gi, '')
+    .replace(/\bprompt\b/gi, '')
+    .replace(/\bmodel\b/gi, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-  return cleaned;
-}
+  // AI vedúci, Audit kvality, Obhajoba
+  if (['supervisor', 'quality', 'audit', 'defense'].includes(moduleName)) {
+    cleaned = cleaned
+      .replace(/^\s*AI\s+vedúci\s*[-–—:]*\s*/i, '')
+      .replace(/^\s*AI\s+veduci\s*[-–—:]*\s*/i, '')
+      .replace(/^\s*Ako\s+AI\s+vedúci\s*[-–—:]*\s*/i, '')
+      .replace(/^\s*Ako\s+AI\s+veduci\s*[-–—:]*\s*/i, '')
+      .replace(/^\s*Audit\s+kvality\s*[-–—:]*\s*/i, '')
+      .replace(/^\s*Obhajoba\s*[-–—:]*\s*/i, '')
+      .replace(/^\s*Výstup\s*[-–—:]*\s*/i, '')
+      .replace(/^\s*Výsledok\s*[-–—:]*\s*/i, '')
+      .replace(/^\s*Tu je výstup\s*[-–—:]*\s*/i, '')
+      .replace(/^\s*Tu je výsledok\s*[-–—:]*\s*/i, '')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
 
+    return cleaned;
+  }
 
-  if (module === 'translation') {
+  // Preklad
+  if (moduleName === 'translation') {
     cleaned = cleaned
       .replace(/\n*\s*={2,}\s*ANAL[ÝY]ZA\s*={2,}[\s\S]*$/i, '')
       .replace(/\n*\s*={2,}\s*SK[ÓO]RE\s*={2,}[\s\S]*$/i, '')
@@ -438,12 +482,15 @@ if (['supervisor', 'quality', 'defense', 'planning'].includes(module)) {
       .replace(/^\s*Preklad\s*[:\-–—]*\s*/i, '')
       .replace(/^\s*Tu je preklad\s*[:\-–—]*\s*/i, '')
       .replace(/^\s*Výsledok prekladu\s*[:\-–—]*\s*/i, '')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
       .trim();
 
     return cleaned;
   }
 
-  if (module === 'emails') {
+  // Emailový modul
+  if (moduleName === 'emails') {
     cleaned = cleaned
       .replace(/\n*\s*={2,}\s*ANAL[ÝY]ZA\s*={2,}[\s\S]*$/i, '')
       .replace(/\n*\s*={2,}\s*SK[ÓO]RE\s*={2,}[\s\S]*$/i, '')
@@ -457,6 +504,8 @@ if (['supervisor', 'quality', 'defense', 'planning'].includes(module)) {
       .replace(/^\s*Email\s*[:\-–—]*\s*/i, '')
       .replace(/^\s*Tu je profesionálny email\s*[:\-–—]*\s*/i, '')
       .replace(/^\s*Tu je návrh emailu\s*[:\-–—]*\s*/i, '')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
       .trim();
 
     const subjectIndex = cleaned.search(/(^|\n)\s*Predmet\s*:/i);
@@ -1088,7 +1137,7 @@ function createAnalysisOutputText(data: AnalysisResult) {
 export default function DashboardPage() {
   const agent = defaultAgent;
 
-const [activeModule, setActiveModule] = useState<ModuleKey>('quality');
+  const [activeModule, setActiveModule] = useState<ModuleKey>('supervisor');
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   const [input, setInput] = useState('');
@@ -1237,6 +1286,74 @@ const [activeAttachmentText, setActiveAttachmentText] = useState('');
     setAnalysisModalOpen(false);
   };
 
+
+
+async function saveHistoryItem(inputData: {
+  module: ModuleKey;
+  title: string;
+  userMessage: string;
+  assistantMessage: string;
+  result?: Record<string, unknown>;
+}) {
+  if (!inputData.assistantMessage.trim()) return;
+
+  const localItem = {
+    id:
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `history_${Date.now()}`,
+    profile_id: activeProfile?.id || null,
+    module: inputData.module,
+    title: inputData.title,
+    user_message: inputData.userMessage,
+    assistant_message: inputData.assistantMessage,
+    result: inputData.result || {},
+    created_at: new Date().toISOString(),
+  };
+
+  try {
+    const raw = localStorage.getItem('chat_history');
+    const existing = raw ? JSON.parse(raw) : [];
+    const list = Array.isArray(existing) ? existing : [];
+
+    localStorage.setItem(
+      'chat_history',
+      JSON.stringify([localItem, ...list].slice(0, 300)),
+    );
+  } catch (error) {
+    console.warn('Lokálna história sa neuložila:', error);
+  }
+
+  try {
+    const res = await fetch('/api/history', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        profileId: activeProfile?.id || null,
+        module: inputData.module,
+        title: inputData.title,
+        userMessage: inputData.userMessage,
+        assistantMessage: inputData.assistantMessage,
+        result: inputData.result || {},
+      }),
+    });
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok || !data?.ok) {
+      console.warn(
+        'História sa neuložila do databázy:',
+        data?.error || `HTTP ${res.status}`,
+      );
+    }
+  } catch (error) {
+    console.warn('História sa neuložila do databázy:', error);
+  }
+}
+
   const startDictation = () => {
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1280,6 +1397,7 @@ recognition.lang = speechLanguageMap[systemLanguage] || 'sk-SK';
   };
 
   const buildModulePrompt = () => {
+const moduleKey  = String(activeModule);
   const systemLanguage = getStoredSystemLanguage();
   const profileForPrompt = withSystemLanguageProfile(
     activeProfile,
@@ -1315,7 +1433,7 @@ DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
 - Citačná norma: ${citationStyle}.
 `.trim();
 
-    if (activeModule === 'supervisor') {
+    if (moduleKey  === 'supervisor') {
       return `
 ${baseRules}
 
@@ -1343,7 +1461,7 @@ POVINNÁ ŠTRUKTÚRA:
 `.trim();
     }
 
-    if (activeModule === 'quality') {
+    if (moduleKey  === 'quality') {
   const modeInstruction =
     qualityMode === 'style'
       ? `
@@ -1456,7 +1574,7 @@ DÔLEŽITÉ PRAVIDLÁ:
 `.trim();
 }
 
-    if (activeModule === 'defense') {
+    if (moduleKey  === 'defense') {
       return `
 ${baseRules}
 
@@ -1486,7 +1604,7 @@ DÔLEŽITÉ:
 `.trim();
     }
 
-    if (activeModule === 'translation') {
+    if (moduleKey  === 'translation') {
       return `
 ${baseRules}
 
@@ -1515,7 +1633,7 @@ PRÍSNE PRAVIDLÁ PRE VÝSTUP:
 `.trim();
     }
 
-    if (activeModule === 'data') {
+    if (moduleKey  === 'data') {
       return `
 ${baseRules}
 
@@ -1537,7 +1655,7 @@ VÝSTUP:
 `.trim();
     }
 
-    if (activeModule === 'planning') {
+    if (moduleKey  === 'planning') {
       return `
 ${baseRules}
 
@@ -1569,7 +1687,7 @@ VÝSTUP:
 `.trim();
     }
 
-    if (activeModule === 'emails') {
+    if (moduleKey  === 'emails') {
       return `
 ${baseRules}
 
@@ -1605,7 +1723,7 @@ Text emailu:
 `.trim();
     }
 
-    if (activeModule === 'originality') {
+    if (moduleKey  === 'originality') {
       return `
 ${baseRules}
 
@@ -1627,397 +1745,594 @@ VÝSTUP:
     return input;
   };
 
-  const runModule = async () => {
-    if (isLoading) return;
+async function runModule() {
+  if (isLoading) return;
 
-    if (!input.trim() && attachedFiles.length === 0) {
-      alert('Najprv napíš text alebo nahraj prílohu.');
+  if (!input.trim() && attachedFiles.length === 0) {
+    alert('Najprv napíš text alebo nahraj prílohu.');
+    return;
+  }
+
+  if (activeModule === 'planning') {
+    const validation = validatePlanningDatesNoPast(input);
+
+    if (!validation.ok) {
+      alert(validation.message);
+      return;
+    }
+  }
+
+  setIsLoading(true);
+  setResult('');
+  setAnalysisResult(null);
+  setAnalysisModalOpen(false);
+
+  try {
+    // ================= ANALÝZA DÁT =================
+    if (activeModule === 'data') {
+      const formData = new FormData();
+
+      const systemLanguage = getStoredSystemLanguage();
+      persistSystemLanguage(systemLanguage);
+
+      const profileForApi = withSystemLanguageProfile(
+        activeProfile,
+        systemLanguage,
+      );
+
+      setActiveProfile(profileForApi);
+
+      if (profileForApi) {
+        localStorage.setItem('active_profile', JSON.stringify(profileForApi));
+        localStorage.setItem('profile', JSON.stringify(profileForApi));
+      }
+
+      formData.append('language', systemLanguage);
+      formData.append('outputLanguage', systemLanguage);
+      formData.append('systemLanguage', systemLanguage);
+      formData.append('workLanguage', systemLanguage);
+
+      formData.append('analysisGoal', secondaryInput || '');
+      formData.append('dataDescription', input || '');
+      formData.append('activeProfile', JSON.stringify(profileForApi || null));
+      formData.append('profile', JSON.stringify(profileForApi || null));
+
+      if (profileForApi?.id) {
+        formData.append('projectId', profileForApi.id);
+      }
+
+      attachedFiles.forEach((item) => {
+        if (item.file instanceof File) {
+          formData.append('files', item.file, item.name);
+        }
+      });
+
+      if (input.trim()) {
+        const textFile = createTextFileFromInput(input);
+        formData.append('files', textFile, textFile.name);
+      }
+
+      const res = await fetch('/api/analysis/files', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error(await readApiErrorResponse(res));
+      }
+
+      const rawData = (await res.json()) as ApiAnalysisResponse;
+
+      if (!rawData?.ok) {
+        throw new Error(
+          rawData?.error || rawData?.message || 'Analýza dát zlyhala.',
+        );
+      }
+
+      const normalizedData = normalizeAnalysisResult(rawData);
+
+      setAnalysisResult(normalizedData);
+      setAnalysisModalOpen(true);
+
+      const output = createAnalysisOutputText(normalizedData);
+
+      setResult(output);
+      setCanvasText(output);
+
+      await saveHistoryItem({
+        module: 'data',
+        title: 'Analýza dát',
+        userMessage: input || secondaryInput || 'Analýza dát zo súborov.',
+        assistantMessage: output,
+        result: {
+          analysis: normalizedData,
+          profileTitle: activeProfile?.title || '',
+          profileId: activeProfile?.id || null,
+          attachedFiles: attachedFiles.map((file) => ({
+            name: file.name,
+            size: file.size,
+            type: file.type,
+          })),
+        },
+      });
+
+      setTimeout(() => {
+        resultRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 150);
+
       return;
     }
 
-    if (activeModule === 'planning') {
-      const validation = validatePlanningDatesNoPast(input);
+    // ================= ORIGINALITA =================
+    if (activeModule === 'originality') {
+      let protocolWindow: Window | null = null;
 
-      if (!validation.ok) {
-        alert(validation.message);
-        return;
+      try {
+        localStorage.removeItem(ORIGINALITY_PROTOCOL_STORAGE_KEY);
+
+        protocolWindow = window.open(
+          '/originality/protocol?loading=1',
+          '_blank',
+          'width=1300,height=900',
+        );
+      } catch {
+        protocolWindow = null;
+      }
+
+      const formData = new FormData();
+
+      const systemLanguage = getStoredSystemLanguage();
+      persistSystemLanguage(systemLanguage);
+
+      const profileForApi = withSystemLanguageProfile(
+        activeProfile,
+        systemLanguage,
+      );
+
+      setActiveProfile(profileForApi);
+
+      if (profileForApi) {
+        localStorage.setItem('active_profile', JSON.stringify(profileForApi));
+        localStorage.setItem('profile', JSON.stringify(profileForApi));
+      }
+
+      formData.append('agent', agent);
+      formData.append('text', input);
+      formData.append('activeProfile', JSON.stringify(profileForApi || null));
+      formData.append('profile', JSON.stringify(profileForApi || null));
+
+      formData.append('language', systemLanguage);
+      formData.append('outputLanguage', systemLanguage);
+      formData.append('systemLanguage', systemLanguage);
+      formData.append('workLanguage', systemLanguage);
+
+      formData.append('title', profileForApi?.title || 'Kontrola originality');
+      formData.append('author', '');
+      formData.append('authorName', '');
+      formData.append('school', '');
+      formData.append('faculty', '');
+      formData.append('studyProgram', '');
+      formData.append('supervisor', profileForApi?.supervisor || '');
+      formData.append('workType', getWorkType(profileForApi));
+      formData.append('citationStyle', getCitationStyle(profileForApi));
+      formData.append('checkAuthenticity', 'true');
+
+      if (profileForApi?.id) {
+        formData.append('profileId', profileForApi.id);
+      }
+
+      attachedFiles.forEach((item) => {
+        if (!item.file) return;
+        formData.append('files', item.file, item.name || item.file.name);
+      });
+
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error(await readApiErrorResponse(res));
+      }
+
+      const data = await res.json();
+
+      if (!data || data.ok === false) {
+        throw new Error(
+          data?.message ||
+            data?.error ||
+            'Kontrola originality nevrátila platný výsledok.',
+        );
+      }
+
+      localStorage.setItem(
+        ORIGINALITY_PROTOCOL_STORAGE_KEY,
+        JSON.stringify(data),
+      );
+
+      const similarityScore =
+        data?.score ??
+        data?.similarityRiskScore ??
+        data?.similarityScore ??
+        data?.percent ??
+        data?.overallPercent ??
+        'neuvedené';
+
+      const output = cleanFinalOutput(
+        [
+          'Kontrola originality bola dokončená.',
+          '',
+          `Percento podobnosti: ${
+            typeof similarityScore === 'number'
+              ? `${similarityScore.toFixed(2).replace('.', ',')}%`
+              : similarityScore
+          }`,
+          '',
+          data?.summary || '',
+          '',
+          data?.recommendation || '',
+          '',
+          'Kompletný vizuálny protokol s grafmi, histogramom, tabuľkami a pasážami bol otvorený na novej podstránke.',
+        ].join('\n'),
+      );
+
+      setResult(output);
+      setCanvasText(output);
+
+      await saveHistoryItem({
+        module: 'originality',
+        title: 'Kontrola originality',
+        userMessage: input || 'Kontrola originality z nahraného dokumentu.',
+        assistantMessage: output,
+        result: {
+          originality: data,
+          profileTitle: activeProfile?.title || '',
+          profileId: activeProfile?.id || null,
+          attachedFiles: attachedFiles.map((file) => ({
+            name: file.name,
+            size: file.size,
+            type: file.type,
+          })),
+        },
+      });
+
+      const protocolUrl = `/originality/protocol?ts=${Date.now()}`;
+
+      if (protocolWindow && !protocolWindow.closed) {
+        protocolWindow.location.href = protocolUrl;
+        protocolWindow.focus();
+      } else {
+        window.open(protocolUrl, '_blank', 'width=1300,height=900');
+      }
+
+      setTimeout(() => {
+        resultRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 150);
+
+      return;
+    }
+
+    const prompt = buildModulePrompt();
+
+    // ================= OBHAJOBA =================
+    if (activeModule === 'defense') {
+      const formData = new FormData();
+
+      const systemLanguage = getStoredSystemLanguage();
+      persistSystemLanguage(systemLanguage);
+
+      const profileForApi = withSystemLanguageProfile(
+        activeProfile,
+        systemLanguage,
+      );
+
+      setActiveProfile(profileForApi);
+
+      if (profileForApi) {
+        localStorage.setItem('active_profile', JSON.stringify(profileForApi));
+        localStorage.setItem('profile', JSON.stringify(profileForApi));
+      }
+
+      const fallbackSummary = [
+        profileForApi?.annotation,
+        profileForApi?.goal,
+        profileForApi?.problem,
+        profileForApi?.methodology,
+        profileForApi?.hypotheses,
+        profileForApi?.researchQuestions,
+        profileForApi?.practicalPart,
+        profileForApi?.scientificContribution,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+
+      formData.append(
+        'title',
+        profileForApi?.title ||
+          activeProfile?.title ||
+          'Obhajoba záverečnej práce',
+      );
+
+      formData.append('summary', input.trim() || fallbackSummary);
+
+      formData.append(
+        'defenseType',
+        profileForApi?.type ||
+          profileForApi?.schema?.label ||
+          'Záverečná práca',
+      );
+
+      formData.append('activeProfile', JSON.stringify(profileForApi || null));
+      formData.append('profile', JSON.stringify(profileForApi || null));
+
+      formData.append('language', systemLanguage);
+      formData.append('outputLanguage', systemLanguage);
+      formData.append('systemLanguage', systemLanguage);
+      formData.append('workLanguage', systemLanguage);
+
+      if (profileForApi?.id) {
+        formData.append('projectId', profileForApi.id);
+      }
+
+      attachedFiles.forEach((item) => {
+        if (!(item.file instanceof File)) return;
+
+        formData.append('reviews', item.file, item.name || item.file.name);
+        formData.append('files', item.file, item.name || item.file.name);
+      });
+
+      const res = await fetch('/api/defense', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error(await readApiErrorResponse(res));
+      }
+
+      const data = await res.json();
+
+      if (!data || data.ok === false) {
+        throw new Error(
+          data?.message ||
+            data?.error ||
+            'Obhajoba nevrátila platný výsledok.',
+        );
+      }
+
+      const output =
+        data.textOutput ||
+        (Array.isArray(data.slides)
+          ? data.slides
+              .map((slide: any, index: number) => {
+                const bullets = Array.isArray(slide.bullets)
+                  ? slide.bullets.map((item: string) => `- ${item}`).join('\n')
+                  : '';
+
+                return [
+                  `Snímka ${index + 1}: ${slide.title || 'Bez názvu'}`,
+                  bullets,
+                  slide.speakerNotes
+                    ? `Poznámky k vystúpeniu: ${slide.speakerNotes}`
+                    : '',
+                ]
+                  .filter(Boolean)
+                  .join('\n');
+              })
+              .join('\n\n')
+          : '');
+
+      const cleaned = stripModuleExtraSections(
+        output || 'Obhajoba bola vytvorená, ale neobsahuje textový výstup.',
+        'defense',
+      );
+
+      setResult(cleaned);
+      setCanvasText(cleaned);
+
+      try {
+        localStorage.setItem('latest_generated_work_text', cleaned);
+        localStorage.setItem('last_ai_output', cleaned);
+      } catch {
+        // localStorage nemusí byť dostupný
+      }
+
+      await saveHistoryItem({
+        module: 'defense',
+        title: 'Obhajoba práce',
+        userMessage: input || 'Obhajoba vytvorená podľa profilu práce.',
+        assistantMessage: cleaned,
+        result: {
+          profileTitle: activeProfile?.title || '',
+          profileId: activeProfile?.id || null,
+          attachedFiles: attachedFiles.map((file) => ({
+            name: file.name,
+            size: file.size,
+            type: file.type,
+          })),
+        },
+      });
+
+      setTimeout(() => {
+        resultRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 150);
+
+      return;
+    }
+
+    // ================= BEŽNÉ MODULY =================
+    const apiMessages = [
+      {
+        role: 'user' as const,
+        content: prompt,
+      },
+    ];
+
+    const formData = new FormData();
+
+    const systemLanguage = getStoredSystemLanguage();
+    persistSystemLanguage(systemLanguage);
+
+    const profileForApi = withSystemLanguageProfile(
+      activeProfile,
+      systemLanguage,
+    );
+
+    setActiveProfile(profileForApi);
+
+    if (profileForApi) {
+      localStorage.setItem('active_profile', JSON.stringify(profileForApi));
+      localStorage.setItem('profile', JSON.stringify(profileForApi));
+    }
+
+    formData.append('agent', agent);
+    formData.append('module', activeModule);
+
+    formData.append('language', systemLanguage);
+    formData.append('outputLanguage', systemLanguage);
+    formData.append('systemLanguage', systemLanguage);
+    formData.append('workLanguage', systemLanguage);
+
+    formData.append('messages', JSON.stringify(apiMessages));
+    formData.append('profile', JSON.stringify(profileForApi || null));
+
+    formData.append('useSemanticScholar', 'false');
+    formData.append('sourceMode', 'uploaded_documents_first');
+    formData.append('validateAttachmentsAgainstProfile', 'true');
+    formData.append('requireSourceList', 'true');
+
+    formData.append('allowAiKnowledgeFallback', 'true');
+    formData.append('extractUploadedText', 'true');
+    formData.append('useExtractedTextFirst', 'true');
+    formData.append('returnExtractedFilesInfo', 'true');
+
+    formData.append('contextaCitationFormat', 'false');
+    formData.append(
+      'filesMetadata',
+      JSON.stringify(
+        attachedFiles.map((item) => ({
+          name: item.name,
+          size: item.size,
+          type: item.type,
+          extension: getFileExtension(item.name),
+        })),
+      ),
+    );
+
+    if (profileForApi?.id) {
+      formData.append('projectId', profileForApi.id);
+    }
+
+    attachedFiles.forEach((item) => {
+      if (item.file instanceof File) {
+        formData.append('files', item.file, item.name || item.file.name);
+      }
+    });
+
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      throw new Error(await readApiErrorResponse(res));
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+
+    let fullText = '';
+
+    if (contentType.includes('application/json')) {
+      const data = await res.json();
+
+      fullText =
+        data.output ||
+        data.result ||
+        data.message ||
+        data.text ||
+        data.answer ||
+        '';
+
+      if (!fullText && data.ok === false) {
+        throw new Error(data.message || data.error || 'API nevrátilo výstup.');
+      }
+    } else {
+      if (!res.body) {
+        throw new Error('API nevrátilo odpoveď.');
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        fullText += chunk;
+
+        setResult(stripModuleExtraSections(fullText, activeModule));
       }
     }
 
-    setIsLoading(true);
-    setResult('');
-    setAnalysisResult(null);
-    setAnalysisModalOpen(false);
+    let cleaned = stripModuleExtraSections(fullText, activeModule);
+
+    if (activeModule === 'planning') {
+      cleaned = cleanFinalOutput(
+        [
+          'Predbežný orientačný harmonogram',
+          '',
+          'Upozornenie: Tento plán je len predbežný a orientačný. Nejde o záväzný termínový plán. Termíny je potrebné priebežne upravovať podľa reálneho stavu práce.',
+          '',
+          cleaned,
+        ].join('\n'),
+      );
+    }
+
+    cleaned = stripModuleExtraSections(cleaned, activeModule);
+
+    setResult(cleaned);
+    setCanvasText(cleaned);
 
     try {
-    if (activeModule === 'data') {
-  const formData = new FormData();
-
-  const systemLanguage = getStoredSystemLanguage();
-  persistSystemLanguage(systemLanguage);
-
-  const profileForApi = withSystemLanguageProfile(
-    activeProfile,
-    systemLanguage,
-  );
-
-  setActiveProfile(profileForApi);
-
-  if (profileForApi) {
-    localStorage.setItem('active_profile', JSON.stringify(profileForApi));
-    localStorage.setItem('profile', JSON.stringify(profileForApi));
-  }
-
-  formData.append('language', systemLanguage);
-  formData.append('outputLanguage', systemLanguage);
-  formData.append('systemLanguage', systemLanguage);
-  formData.append('workLanguage', systemLanguage);
-
-  formData.append('analysisGoal', secondaryInput || '');
-  formData.append('dataDescription', input || '');
-  formData.append('activeProfile', JSON.stringify(profileForApi || null));
-  formData.append('profile', JSON.stringify(profileForApi || null));
-
-  if (profileForApi?.id) {
-    formData.append('projectId', profileForApi.id);
-  }
-
-        attachedFiles.forEach((item) => {
-  if (item.file instanceof File) {
-    formData.append('files', item.file, item.name);
-  }
-});
-
-        if (input.trim()) {
-          const textFile = createTextFileFromInput(input);
-          formData.append('files', textFile, textFile.name);
-        }
-
-        const res = await fetch('/api/analysis/files', {
-          method: 'POST',
-          body: formData,
-        });
-
-        if (!res.ok) {
-          throw new Error(await readApiErrorResponse(res));
-        }
-
-        const rawData = (await res.json()) as ApiAnalysisResponse;
-
-        if (!rawData?.ok) {
-          throw new Error(
-            rawData?.error || rawData?.message || 'Analýza dát zlyhala.',
-          );
-        }
-
-        const normalizedData = normalizeAnalysisResult(rawData);
-
-        setAnalysisResult(normalizedData);
-        setAnalysisModalOpen(true);
-
-        const output = createAnalysisOutputText(normalizedData);
-
-        setResult(output);
-        setCanvasText(output);
-
-        setTimeout(() => {
-          resultRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }, 150);
-
-        return;
-      }
-
-      if (activeModule === 'originality') {
-        let protocolWindow: Window | null = null;
-
-        try {
-          localStorage.removeItem(ORIGINALITY_PROTOCOL_STORAGE_KEY);
-
-          protocolWindow = window.open(
-            '/originality/protocol?loading=1',
-            '_blank',
-            'width=1300,height=900',
-          );
-        } catch {
-          protocolWindow = null;
-        }
-
-        const formData = new FormData();
-
-        formData.append('agent', agent);
-        formData.append('text', input);
-const systemLanguage = getStoredSystemLanguage();
-const profileForApi = withSystemLanguageProfile(activeProfile, systemLanguage);
-        persistSystemLanguage(systemLanguage);
-
-setActiveProfile(profileForApi);
-
-if (profileForApi) {
-  localStorage.setItem('active_profile', JSON.stringify(profileForApi));
-  localStorage.setItem('profile', JSON.stringify(profileForApi));
-}
-
-formData.append('activeProfile', JSON.stringify(profileForApi || null));
-formData.append('profile', JSON.stringify(profileForApi || null));
-
-formData.append('language', systemLanguage);
-formData.append('outputLanguage', systemLanguage);
-formData.append('systemLanguage', systemLanguage);
-formData.append('workLanguage', systemLanguage);
-
-formData.append(
-  'title',
-  profileForApi?.title || 'Kontrola originality',
-);
-formData.append('author', '');
-formData.append('authorName', '');
-formData.append('school', '');
-formData.append('faculty', '');
-formData.append('studyProgram', '');
-formData.append('supervisor', profileForApi?.supervisor || '');
-formData.append('workType', getWorkType(profileForApi));
-formData.append('citationStyle', getCitationStyle(profileForApi));
-formData.append('checkAuthenticity', 'true');
-
-if (profileForApi?.id) {
-  formData.append('profileId', profileForApi.id);
-}
-
-       attachedFiles.forEach((item) => {
-  if (!item.file) return;
-
-  formData.append('files', item.file, item.name || item.file.name);
-});
-
-        const res = await fetch('/api/chat', {
-  method: 'POST',
-  body: formData,
-});
-
-        if (!res.ok) {
-          throw new Error(await readApiErrorResponse(res));
-        }
-
-        const data = await res.json();
-
-        if (!data || data.ok === false) {
-          throw new Error(
-            data?.message ||
-              data?.error ||
-              'Kontrola originality nevrátila platný výsledok.',
-          );
-        }
-
-        localStorage.setItem(
-          ORIGINALITY_PROTOCOL_STORAGE_KEY,
-          JSON.stringify(data),
-        );
-
-        const similarityScore =
-          data?.score ??
-          data?.similarityRiskScore ??
-          data?.similarityScore ??
-          data?.percent ??
-          data?.overallPercent ??
-          'neuvedené';
-
-        const output = cleanFinalOutput(
-          [
-            'Kontrola originality bola dokončená.',
-            '',
-            `Percento podobnosti: ${
-              typeof similarityScore === 'number'
-                ? `${similarityScore.toFixed(2).replace('.', ',')}%`
-                : similarityScore
-            }`,
-            '',
-            data?.summary || '',
-            '',
-            data?.recommendation || '',
-            '',
-            'Kompletný vizuálny protokol s grafmi, histogramom, tabuľkami a pasážami bol otvorený na novej podstránke.',
-          ].join('\n'),
-        );
-
-        setResult(output);
-        setCanvasText(output);
-
-        const protocolUrl = `/originality/protocol?ts=${Date.now()}`;
-
-        if (protocolWindow && !protocolWindow.closed) {
-          protocolWindow.location.href = protocolUrl;
-          protocolWindow.focus();
-        } else {
-          window.open(protocolUrl, '_blank', 'width=1300,height=900');
-        }
-
-        setTimeout(() => {
-          resultRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }, 150);
-
-        return;
-      }
-
-      const prompt = buildModulePrompt();
-
-const apiMessages = [
-  {
-    role: 'user' as const,
-    content: prompt,
-  },
-];
-
-const formData = new FormData();
-
-const systemLanguage = getStoredSystemLanguage();
-persistSystemLanguage(systemLanguage);
-
-const profileForApi = withSystemLanguageProfile(
-  activeProfile,
-  systemLanguage,
-);
-
-setActiveProfile(profileForApi);
-
-if (profileForApi) {
-  localStorage.setItem('active_profile', JSON.stringify(profileForApi));
-  localStorage.setItem('profile', JSON.stringify(profileForApi));
-}
-
-formData.append('agent', agent);
-formData.append('module', activeModule);
-
-formData.append('language', systemLanguage);
-formData.append('outputLanguage', systemLanguage);
-formData.append('systemLanguage', systemLanguage);
-formData.append('workLanguage', systemLanguage);
-
-formData.append('messages', JSON.stringify(apiMessages));
-formData.append('profile', JSON.stringify(profileForApi || null));
-
-formData.append('useSemanticScholar', 'false');
-formData.append('sourceMode', 'uploaded_documents_first');
-formData.append('validateAttachmentsAgainstProfile', 'true');
-formData.append('requireSourceList', 'true');
-formData.append('allowAiKnowledgeFallback', 'true');
-formData.append('extractUploadedText', 'true');
-formData.append('useExtractedTextFirst', 'true');
-formData.append('returnExtractedFilesInfo', 'true');
-
-formData.append(
-  'contextaCitationFormat',
-  activeModule === 'defense' ? 'true' : 'false',
-);
-
-formData.append(
-  'filesMetadata',
-  JSON.stringify(
-    attachedFiles.map((item) => ({
-      name: item.name,
-      size: item.size,
-      type: item.type,
-      extension: getFileExtension(item.name),
-    })),
-  ),
-);
-
-if (profileForApi?.id) {
-  formData.append('projectId', profileForApi.id);
-}
-
-attachedFiles.forEach((item) => {
-  if (item.file instanceof File) {
-    formData.append('files', item.file, item.name || item.file.name);
-  }
-});
-
-const res = await fetch('/api/chat', {
-  method: 'POST',
-  body: formData,
-});
-
-if (!res.ok) {
-  throw new Error(await readApiErrorResponse(res));
-}
-
-const contentType = res.headers.get('content-type') || '';
-
-let fullText = '';
-
-if (contentType.includes('application/json')) {
-  const data = await res.json();
-
-  fullText =
-    data.output ||
-    data.result ||
-    data.message ||
-    data.text ||
-    data.answer ||
-    '';
-
-  if (!fullText && data.ok === false) {
-    throw new Error(data.message || data.error || 'API nevrátilo výstup.');
-  }
-} else {
-  if (!res.body) {
-    throw new Error('API nevrátilo odpoveď.');
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-
-  while (true) {
-    const { done, value } = await reader.read();
-
-    if (done) break;
-
-    const chunk = decoder.decode(value, { stream: true });
-    fullText += chunk;
-
-    setResult(stripModuleExtraSections(fullText, activeModule));
-  }
-}
-
-let cleaned = stripModuleExtraSections(fullText, activeModule);
-
-if (activeModule === 'planning') {
-  cleaned = cleanFinalOutput(
-    [
-      'Predbežný orientačný harmonogram',
-      '',
-      'Upozornenie: Tento plán je len predbežný a orientačný. Nejde o záväzný termínový plán. Termíny je potrebné priebežne upravovať podľa reálneho stavu práce.',
-      '',
-      cleaned,
-    ].join('\n'),
-  );
-}
-
-cleaned = stripModuleExtraSections(cleaned, activeModule);
-
-setResult(cleaned);
-setCanvasText(cleaned);
-
-try {
-  localStorage.setItem('latest_generated_work_text', cleaned);
-  localStorage.setItem('last_ai_output', cleaned);
-} catch {
-  // localStorage nemusí byť dostupný v niektorých režimoch prehliadača
-}
-
-setTimeout(() => {
-  resultRef.current?.scrollIntoView({ behavior: 'smooth' });
-}, 150);
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Nastala chyba pri spracovaní požiadavky.';
-
-      setResult(`Chyba:\n${cleanFinalOutput(message)}`);
-    } finally {
-      setIsLoading(false);
+      localStorage.setItem('latest_generated_work_text', cleaned);
+      localStorage.setItem('last_ai_output', cleaned);
+    } catch {
+      // localStorage nemusí byť dostupný v niektorých režimoch prehliadača
     }
-  };
+
+    await saveHistoryItem({
+      module: activeModule,
+      title: getResultTitle(activeModule),
+      userMessage: input || secondaryInput || 'Bez textového zadania.',
+      assistantMessage: cleaned,
+      result: {
+        profileTitle: activeProfile?.title || '',
+        profileId: activeProfile?.id || null,
+        attachedFiles: attachedFiles.map((file) => ({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+        })),
+      },
+    });
+
+    setTimeout(() => {
+      resultRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 150);
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Nastala chyba pri spracovaní požiadavky.';
+
+    setResult(`Chyba:\n${cleanFinalOutput(message)}`);
+  } finally {
+    setIsLoading(false);
+  }
+}
+  
 
   const downloadDoc = () => {
     const text = stripModuleExtraSections(canvasText || result, activeModule);
@@ -2382,36 +2697,37 @@ const downloadExcel = () => {
          <header className="sticky top-0 z-40 shrink-0 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur-xl transition-colors duration-300 dark:border-white/10 dark:bg-[#050711]/95 md:px-8">
    <div className="flex flex-wrap items-center justify-between gap-3">
   <div className="hidden flex-wrap items-center gap-2 xl:flex">
-    {modules.map((module) => {
-  const active = activeModule === module.key;
+  {modules.map((item) => {
+    const active = activeModule === item.key;
 
-  return (
-    <button
-      key={module.key}
-      type="button"
-      onClick={() => setActiveModule(module.key)}
-      className={`rounded-2xl border px-5 py-3 text-sm font-black transition ${
-        active
-          ? 'border-violet-400/40 bg-violet-600 text-white'
-          : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
-      }`}
-    >
-      {module.label}
-    </button>
-  );
-})}
+    return (
+      <button
+        key={item.key}
+        type="button"
+        onClick={() => {
+          setActiveModule(item.key);
+        }}
+        className={`rounded-2xl border px-5 py-3 text-sm font-black transition ${
+          active
+            ? 'border-violet-400/40 bg-violet-600 text-white'
+            : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+        }`}
+      >
+        {item.label}
+      </button>
+    );
+  })}
 
+  <a
+    href="/profile"
+    className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-100 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300 dark:hover:bg-white/[0.1] dark:hover:text-white"
+  >
+    <User className="h-4 w-4" />
+    Profil
+  </a>
 
-<a
-  href="/profile"
-  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-100 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300 dark:hover:bg-white/[0.1] dark:hover:text-white"
->
-  <User className="h-4 w-4" />
-  Profil
-</a>
-
-    <ThemeToggleButton />
-  </div>
+  <ThemeToggleButton />
+</div>
 
   <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
   Aktívny profil:{' '}
@@ -2423,7 +2739,7 @@ const downloadExcel = () => {
 
            <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto xl:hidden">
 {modules.map((item) => {
-  const active = activeModule === item.key;
+const active = activeModule === item.key;
 
   return (
     <button
@@ -2467,7 +2783,7 @@ const downloadExcel = () => {
 </div>
                 </div>
 
-                {activeModule === 'planning' && (
+          {activeModule === 'planning' && (
                   <div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
                     Dnešný dátum: {getTodaySkDate()}.
                   </div>
@@ -2654,16 +2970,16 @@ const downloadExcel = () => {
                     className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-950/40 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isLoading ? (
-                      <>
-                        <RefreshCcw className="h-4 w-4 animate-spin" />
-                        Spracúvam...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="h-4 w-4" />
-                        {getButtonLabel(activeModule)}
-                      </>
-                    )}
+  <>
+    <RefreshCcw className="h-4 w-4 animate-spin" />
+    Spracúvam...
+  </>
+) : (
+  <>
+    <Send className="h-4 w-4" />
+    {activeModuleInfo.buttonLabel}
+  </>
+)}
                   </button>
 
                   <button
@@ -2997,6 +3313,7 @@ function FileUploadBox({
   );
 }
 
+
 // ================= TEXTS =================
 
 function getPlaceholder(module: ModuleKey) {
@@ -3038,15 +3355,16 @@ function getPlaceholder(module: ModuleKey) {
 function getButtonLabel(module: ModuleKey) {
   if (module === 'supervisor') return 'Spustiť AI vedúceho';
   if (module === 'quality') return 'Spustiť audit kvality';
-  if (module === 'defense') return 'Vytvoriť prezentáciu a obhajobu';
+  if (module === 'defense') return 'Vytvoriť obhajobu';
   if (module === 'translation') return 'Preložiť text';
   if (module === 'data') return 'Analyzovať dáta';
-  if (module === 'planning') return 'Vytvoriť predbežný plán';
+  if (module === 'planning') return 'Vytvoriť plán';
   if (module === 'emails') return 'Vytvoriť email';
   if (module === 'originality') return 'Skontrolovať originalitu';
+  if (module === 'humanizer') return 'Humanizovať text';
+
   return 'Spustiť';
 }
-
 function getResultTitle(module: ModuleKey) {
   if (module === 'supervisor') return 'Hodnotenie práce';
   if (module === 'quality') return 'Výsledok kontroly kvality';

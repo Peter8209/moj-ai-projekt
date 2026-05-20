@@ -1791,7 +1791,7 @@ if (profileForApi?.id) {
   formData.append('files', item.file, item.name || item.file.name);
 });
 
-        const res = await fetch('/api/originality', {
+        const res = await fetch('/api/chat', {
   method: 'POST',
   body: formData,
 });
@@ -1931,11 +1931,10 @@ formData.append('profile', JSON.stringify(profileForApi || null));
   }
 });
 
-const res = await fetch('/api/originality', {
+const res = await fetch('/api/chat', {
   method: 'POST',
   body: formData,
 });
-
 
       if (!res.ok) {
         throw new Error(await readApiErrorResponse(res));

@@ -162,55 +162,122 @@ const maxFilesCount = 12;
 const maxFileSizeMb = 30;
 const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 
-const modules: {
+const moduleInfos: {
   key: ModuleKey;
   label: string;
   buttonLabel: string;
+  inputLabel: string;
+  inputPlaceholder: string;
+  infoText: string;
+  infoClassName: string;
 }[] = [
   {
     key: 'supervisor',
     label: 'AI vedúci',
     buttonLabel: 'Spustiť AI vedúceho',
+    inputLabel: 'Zadanie alebo text',
+    inputPlaceholder:
+      'Vlož text práce, otázku alebo časť, ktorú chceš skontrolovať.',
+    infoText:
+      'Vlož text práce alebo otázku. Systém pripraví odborné odporúčania, pripomienky a návrhy na zlepšenie.',
+    infoClassName:
+      'mb-4 rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-3 text-sm text-violet-100',
   },
   {
     key: 'quality',
     label: 'Audit kvality',
     buttonLabel: 'Spustiť audit kvality',
+    inputLabel: 'Text na audit kvality',
+    inputPlaceholder:
+      'Vlož text práce, kapitolu, úvod, záver alebo časť, ktorú chceš odborne skontrolovať.',
+    infoText:
+      'Vlož text práce. Systém skontroluje štylistiku, logiku, štruktúru, citácie a kvalitu akademického spracovania.',
+    infoClassName:
+      'mb-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100',
   },
   {
     key: 'defense',
     label: 'Obhajoba',
-    buttonLabel: 'Vytvoriť obhajobu',
+    buttonLabel: 'Spustiť obhajobu',
+    inputLabel: 'Podklady k obhajobe',
+    inputPlaceholder:
+      'Vlož stručný obsah práce alebo nahraj dokument. Systém pripraví prezentáciu, sprievodný text, otázky komisie a odpovede.',
+    infoText:
+      'Vlož stručný obsah práce alebo nahraj dokument. Systém pripraví prezentáciu, sprievodný text, otázky komisie a odpovede.',
+    infoClassName:
+      'mb-4 rounded-2xl border border-purple-400/20 bg-purple-500/10 px-4 py-3 text-sm text-purple-100',
   },
   {
     key: 'translation',
     label: 'Preklad',
-    buttonLabel: 'Preložiť text',
+    buttonLabel: 'Spustiť preklad',
+    inputLabel: 'Text na preklad',
+    inputPlaceholder:
+      'Vlož text, ktorý chceš preložiť. Vyber zdrojový a cieľový jazyk.',
+    infoText:
+      'Vlož text na preklad. Vyber zdrojový a cieľový jazyk a systém pripraví odborný preklad.',
+    infoClassName:
+      'mb-4 rounded-2xl border border-sky-400/20 bg-sky-500/10 px-4 py-3 text-sm text-sky-100',
   },
   {
     key: 'data',
     label: 'Analýza dát',
-    buttonLabel: 'Analyzovať dáta',
+    buttonLabel: 'Spustiť analýzu dát',
+    inputLabel: 'Zadanie analýzy dát',
+    inputPlaceholder:
+      'Popíš dáta, výskumnú otázku, hypotézy alebo nahraj Excel, CSV, PDF, Word, TXT či výstupy z JASP/SPSS.',
+    infoText:
+      'Môžeš priložiť Excel, CSV, PDF, Word, TXT alebo výstupy z JASP/SPSS. Po spracovaní sa otvorí samostatné modálne okno „Výsledky analýzy“ s tabuľkami, premennými, odporúčanými grafmi a testami.',
+    infoClassName:
+      'mb-4 rounded-2xl border border-blue-400/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-100',
   },
   {
     key: 'planning',
     label: 'Plánovanie',
-    buttonLabel: 'Vytvoriť plán',
+    buttonLabel: 'Spustiť plánovanie',
+    inputLabel: 'Zadanie plánu',
+    inputPlaceholder:
+      'Napíš termín odovzdania, aktuálny stav práce a požadovaný plán. Termín nesmie byť v minulosti.',
+    infoText:
+      'Napíš termín odovzdania, stav práce a požadovaný plán. Termín nesmie byť v minulosti.',
+    infoClassName:
+      'mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100',
   },
   {
     key: 'emails',
     label: 'Emaily',
-    buttonLabel: 'Vytvoriť email',
+    buttonLabel: 'Vygenerovať email',
+    inputLabel: 'Zadanie emailu',
+    inputPlaceholder:
+      'Napíš komu je email určený, čo chceš oznámiť, aký má byť tón a či má byť formálny alebo stručný.',
+    infoText:
+      'Napíš komu chceš email poslať, účel správy a tón komunikácie. Systém pripraví formálny email.',
+    infoClassName:
+      'mb-4 rounded-2xl border border-pink-400/20 bg-pink-500/10 px-4 py-3 text-sm text-pink-100',
   },
   {
     key: 'originality',
     label: 'Originalita práce',
-    buttonLabel: 'Skontrolovať originalitu',
+    buttonLabel: 'Spustiť kontrolu originality',
+    inputLabel: 'Text na kontrolu originality',
+    inputPlaceholder:
+      'Nahraj alebo vlož text práce. Systém pripraví orientačný protokol kontroly originality.',
+    infoText:
+      'Nahraj alebo vlož text práce. Systém pripraví orientačný protokol kontroly originality.',
+    infoClassName:
+      'mb-4 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-100',
   },
   {
     key: 'humanizer',
     label: 'Humanizácia textu',
     buttonLabel: 'Humanizovať text',
+    inputLabel: 'Text na humanizáciu',
+    inputPlaceholder:
+      'Vlož text, ktorý chceš upraviť do prirodzenejšej, plynulejšej a menej strojovej podoby.',
+    infoText:
+      'Vlož text, ktorý chceš upraviť do prirodzenejšej, plynulejšej a menej strojovej podoby.',
+    infoClassName:
+      'mb-4 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-4 py-3 text-sm text-fuchsia-100',
   },
 ];
 
@@ -1165,14 +1232,16 @@ const [activeAttachmentText, setActiveAttachmentText] = useState('');
   const resultRef = useRef<HTMLDivElement | null>(null);
 
   const activeModuleInfo = useMemo(() => {
-    return modules.find((item) => item.key === activeModule) || modules[0];
-  }, [activeModule]);
+  return (
+    moduleInfos.find((item) => item.key === activeModule) || moduleInfos[0]
+  );
+}, [activeModule]);
 
-  const exportTitle = useMemo(() => {
-    return `${activeModuleInfo.label} - ${
-      activeProfile?.title || 'výstup'
-    }`.trim();
-  }, [activeModuleInfo.label, activeProfile]);
+const exportTitle = useMemo(() => {
+  return `${activeModuleInfo.label} - ${
+    activeProfile?.title || 'výstup'
+  }`.trim();
+}, [activeModuleInfo.label, activeProfile]);
 
   useEffect(() => {
   const systemLanguage = getStoredSystemLanguage();
@@ -2014,6 +2083,87 @@ async function runModule() {
 
     const prompt = buildModulePrompt();
 
+// ================= HUMANIZÁCIA TEXTU =================
+if (activeModule === 'humanizer') {
+  const textToHumanize = input.trim();
+
+  if (!textToHumanize) {
+    alert('Najprv vlož text, ktorý chceš humanizovať.');
+    return;
+  }
+
+  if (textToHumanize.length < 20) {
+    alert('Text na humanizáciu musí mať aspoň 20 znakov.');
+    return;
+  }
+
+  const systemLanguage = getStoredSystemLanguage();
+  persistSystemLanguage(systemLanguage);
+
+  const res = await fetch('/api/humanizer', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    credentials: 'include',
+    cache: 'no-store',
+    body: JSON.stringify({
+      text: textToHumanize,
+      language: systemLanguage,
+      outputLanguage: systemLanguage,
+      profile: activeProfile || null,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(await readApiErrorResponse(res));
+  }
+
+  const data = await res.json();
+
+  if (!data?.ok) {
+    throw new Error(
+      data?.message || data?.error || 'Humanizácia textu zlyhala.',
+    );
+  }
+
+  const output = cleanFinalOutput(
+    data.humanizedText || data.output || data.text || '',
+  );
+
+  if (!output) {
+    throw new Error('Humanizátor nevrátil žiadny text.');
+  }
+
+  setResult(output);
+  setCanvasText(output);
+
+  try {
+    localStorage.setItem('latest_generated_work_text', output);
+    localStorage.setItem('last_ai_output', output);
+  } catch {
+    // localStorage nemusí byť dostupný
+  }
+
+  await saveHistoryItem({
+    module: 'humanizer',
+    title: 'Humanizácia textu',
+    userMessage: textToHumanize,
+    assistantMessage: output,
+    result: {
+      profileTitle: activeProfile?.title || '',
+      profileId: activeProfile?.id || null,
+    },
+  });
+
+  setTimeout(() => {
+    resultRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, 150);
+
+  return;
+}
+
     // ================= OBHAJOBA =================
     if (activeModule === 'defense') {
       const formData = new FormData();
@@ -2697,7 +2847,7 @@ const downloadExcel = () => {
          <header className="sticky top-0 z-40 shrink-0 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur-xl transition-colors duration-300 dark:border-white/10 dark:bg-[#050711]/95 md:px-8">
    <div className="flex flex-wrap items-center justify-between gap-3">
   <div className="hidden flex-wrap items-center gap-2 xl:flex">
-  {modules.map((item) => {
+  {moduleInfos.map((item) => {
     const active = activeModule === item.key;
 
     return (
@@ -2738,7 +2888,7 @@ const downloadExcel = () => {
 </div>
 
            <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto xl:hidden">
-{modules.map((item) => {
+{moduleInfos.map((item) => {
 const active = activeModule === item.key;
 
   return (
@@ -2900,14 +3050,11 @@ const active = activeModule === item.key;
                   </div>
                 )}
 
-                {activeModule === 'data' && (
-                  <div className="mb-4 rounded-2xl border border-blue-400/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-100">
-                    Môžeš priložiť Excel, CSV, PDF, Word, TXT alebo výstupy z
-                    JASP/SPSS. Po spracovaní sa otvorí samostatné modálne okno
-                    „Výsledky analýzy“ s tabuľkami, premennými, odporúčanými
-                    grafmi a testami.
-                  </div>
-                )}
+                {'infoText' in activeModuleInfo && 'infoClassName' in activeModuleInfo ? (
+  <div className={String(activeModuleInfo.infoClassName)}>
+    {String(activeModuleInfo.infoText)}
+  </div>
+) : null}
 
                 {(activeModule === 'supervisor' ||
                   activeModule === 'quality' ||
@@ -2947,40 +3094,209 @@ const active = activeModule === item.key;
 
                 {activeModule === 'data' && (
                   <div className="mt-4">
-                    <label className="mb-2 block text-sm font-black text-slate-300">
-                      Otázka alebo cieľ analýzy
-                    </label>
+             <label className="mb-2 block text-sm font-black text-slate-300">
+  {activeModuleInfo.inputLabel}
+</label>
 
-                    <textarea
-                      value={secondaryInput}
-                      onChange={(event) =>
-                        setSecondaryInput(event.target.value)
-                      }
-                      placeholder="Napríklad: Interpretuj výsledky deskriptívnej štatistiky, korelácií, ANOVA, regresie, normality a navrhni grafy do praktickej časti práce."
-                      className="min-h-[110px] w-full resize-y rounded-2xl border border-white/10 bg-white/[0.055] px-4 py-4 text-sm leading-7 text-white outline-none placeholder:text-slate-500 focus:border-violet-500"
-                    />
+<textarea
+  value={input}
+  onChange={(event) => setInput(event.target.value)}
+  placeholder={activeModuleInfo.inputPlaceholder}
+  className="min-h-[170px] w-full resize-y rounded-2xl border border-slate-300 bg-white px-4 py-4 text-sm leading-7 text-slate-950 outline-none placeholder:text-slate-400 transition-colors duration-300 focus:border-violet-500 dark:border-white/10 dark:bg-white/[0.055] dark:text-white dark:placeholder:text-slate-500"
+/>
+
                   </div>
                 )}
 
                 <div className="mt-6 flex flex-wrap items-center gap-3 pb-6">
-                  <button
-                    type="button"
-                    onClick={runModule}
-                    disabled={isLoading}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-950/40 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isLoading ? (
-  <>
-    <RefreshCcw className="h-4 w-4 animate-spin" />
-    Spracúvam...
-  </>
-) : (
-  <>
-    <Send className="h-4 w-4" />
-    {activeModuleInfo.buttonLabel}
-  </>
+                  {activeModule === 'supervisor' && (
+  <button
+    type="button"
+    onClick={runModule}
+    disabled={isLoading}
+    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+  >
+    {isLoading ? (
+      <>
+        <RefreshCcw className="h-4 w-4 animate-spin" />
+        Spracúvam...
+      </>
+    ) : (
+      <>
+        <Send className="h-4 w-4" />
+        Spustiť AI vedúceho
+      </>
+    )}
+  </button>
 )}
-                  </button>
+
+{activeModule === 'quality' && (
+  <button
+    type="button"
+    onClick={runModule}
+    disabled={isLoading}
+    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+  >
+    {isLoading ? (
+      <>
+        <RefreshCcw className="h-4 w-4 animate-spin" />
+        Spracúvam...
+      </>
+    ) : (
+      <>
+        <Send className="h-4 w-4" />
+        Spustiť audit kvality
+      </>
+    )}
+  </button>
+)}
+
+{activeModule === 'defense' && (
+  <button
+    type="button"
+    onClick={runModule}
+    disabled={isLoading}
+    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+  >
+    {isLoading ? (
+      <>
+        <RefreshCcw className="h-4 w-4 animate-spin" />
+        Spracúvam...
+      </>
+    ) : (
+      <>
+        <Send className="h-4 w-4" />
+        Spustiť obhajobu
+      </>
+    )}
+  </button>
+)}
+
+{activeModule === 'translation' && (
+  <button
+    type="button"
+    onClick={runModule}
+    disabled={isLoading}
+    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+  >
+    {isLoading ? (
+      <>
+        <RefreshCcw className="h-4 w-4 animate-spin" />
+        Spracúvam...
+      </>
+    ) : (
+      <>
+        <Send className="h-4 w-4" />
+        Spustiť preklad
+      </>
+    )}
+  </button>
+)}
+
+{activeModule === 'data' && (
+  <button
+    type="button"
+    onClick={runModule}
+    disabled={isLoading}
+    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+  >
+    {isLoading ? (
+      <>
+        <RefreshCcw className="h-4 w-4 animate-spin" />
+        Spracúvam...
+      </>
+    ) : (
+      <>
+        <Send className="h-4 w-4" />
+        Spustiť analýzu dát
+      </>
+    )}
+  </button>
+)}
+
+{activeModule === 'planning' && (
+  <button
+    type="button"
+    onClick={runModule}
+    disabled={isLoading}
+    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+  >
+    {isLoading ? (
+      <>
+        <RefreshCcw className="h-4 w-4 animate-spin" />
+        Spracúvam...
+      </>
+    ) : (
+      <>
+        <Send className="h-4 w-4" />
+        Spustiť plánovanie
+      </>
+    )}
+  </button>
+)}
+
+{activeModule === 'emails' && (
+  <button
+    type="button"
+    onClick={runModule}
+    disabled={isLoading}
+    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+  >
+    {isLoading ? (
+      <>
+        <RefreshCcw className="h-4 w-4 animate-spin" />
+        Spracúvam...
+      </>
+    ) : (
+      <>
+        <Send className="h-4 w-4" />
+        Spustiť email
+      </>
+    )}
+  </button>
+)}
+
+{activeModule === 'originality' && (
+  <button
+    type="button"
+    onClick={runModule}
+    disabled={isLoading}
+    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+  >
+    {isLoading ? (
+      <>
+        <RefreshCcw className="h-4 w-4 animate-spin" />
+        Spracúvam...
+      </>
+    ) : (
+      <>
+        <Send className="h-4 w-4" />
+        Spustiť kontrolu originality
+      </>
+    )}
+  </button>
+)}
+
+{activeModule === 'humanizer' && (
+  <button
+    type="button"
+    onClick={runModule}
+    disabled={isLoading}
+    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+  >
+    {isLoading ? (
+      <>
+        <RefreshCcw className="h-4 w-4 animate-spin" />
+        Spracúvam...
+      </>
+    ) : (
+      <>
+        <Send className="h-4 w-4" />
+        Spustiť humanizáciu textu
+      </>
+    )}
+  </button>
+)}
 
                   <button
                     type="button"
@@ -3310,7 +3626,7 @@ function FileUploadBox({
         </div>
       )}
     </div>
-  );
+  )
 }
 
 
@@ -3349,22 +3665,27 @@ function getPlaceholder(module: ModuleKey) {
     return 'Vlož text práce alebo nahraj celý dokument práce ako prílohu.';
   }
 
+if (module === 'humanizer') {
+  return 'Vlož text, ktorý chceš preformulovať prirodzenejšie a ľudskejšie.';
+}
+
   return 'Napíš zadanie.';
 }
 
 function getButtonLabel(module: ModuleKey) {
   if (module === 'supervisor') return 'Spustiť AI vedúceho';
   if (module === 'quality') return 'Spustiť audit kvality';
-  if (module === 'defense') return 'Vytvoriť obhajobu';
-  if (module === 'translation') return 'Preložiť text';
-  if (module === 'data') return 'Analyzovať dáta';
-  if (module === 'planning') return 'Vytvoriť plán';
-  if (module === 'emails') return 'Vytvoriť email';
-  if (module === 'originality') return 'Skontrolovať originalitu';
-  if (module === 'humanizer') return 'Humanizovať text';
+  if (module === 'defense') return 'Spustiť obhajobu';
+  if (module === 'translation') return 'Spustiť preklad';
+  if (module === 'data') return 'Spustiť analýzu dát';
+  if (module === 'planning') return 'Spustiť plánovanie';
+  if (module === 'emails') return 'Spustiť email';
+  if (module === 'originality') return 'Spustiť kontrolu originality';
+  if (module === 'humanizer') return 'Spustiť humanizáciu textu';
 
   return 'Spustiť';
 }
+
 function getResultTitle(module: ModuleKey) {
   if (module === 'supervisor') return 'Hodnotenie práce';
   if (module === 'quality') return 'Výsledok kontroly kvality';
@@ -3374,5 +3695,6 @@ function getResultTitle(module: ModuleKey) {
   if (module === 'planning') return 'Predbežný plán práce';
   if (module === 'emails') return 'Email';
   if (module === 'originality') return 'Výsledok kontroly originality';
+if (module === 'humanizer') return 'Humanizovaný text';
   return 'Výstup';
 }

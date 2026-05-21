@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
 import { useLanguage } from '@/components/LanguageProvider';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 import {
   Eye,
@@ -37,13 +38,37 @@ function isValidLanguage(value: unknown): value is AppLanguage {
 function getSavedLanguage(): AppLanguage {
   if (typeof window === 'undefined') return 'sk';
 
-  const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+  const savedLanguage =
+    window.localStorage.getItem(LANGUAGE_STORAGE_KEY) ||
+    window.localStorage.getItem('zedpera_system_language') ||
+    window.localStorage.getItem('zedpera_work_language');
 
   if (isValidLanguage(savedLanguage)) {
     return savedLanguage;
   }
 
   return 'sk';
+}
+
+function persistLanguage(language: AppLanguage) {
+  if (typeof window === 'undefined') return;
+
+  window.localStorage.setItem('zedpera_language', language);
+  window.localStorage.setItem('zedpera_system_language', language);
+  window.localStorage.setItem('zedpera_work_language', language);
+
+  document.documentElement.lang = language;
+  document.documentElement.setAttribute('data-language', language);
+  document.documentElement.setAttribute('data-system-language', language);
+  document.documentElement.setAttribute('data-work-language', language);
+}
+
+function normalizeEmail(value: string) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizePassword(value: string) {
+  return String(value || '').trim();
 }
 
 export default function LoginPage() {
@@ -55,6 +80,7 @@ export default function LoginPage() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
   const [error, setError] = useState('');
 
   const triggerAutoTranslate = useCallback(() => {
@@ -62,10 +88,8 @@ export default function LoginPage() {
 
     const language = getSavedLanguage();
 
+    persistLanguage(language);
     setLanguage(language);
-
-    document.documentElement.lang = language;
-    document.documentElement.setAttribute('data-language', language);
 
     window.dispatchEvent(
       new CustomEvent<AppLanguage>('zedpera-language-change', {
@@ -78,9 +102,10 @@ export default function LoginPage() {
     triggerAutoTranslate();
 
     const timers = [
-      window.setTimeout(triggerAutoTranslate, 250),
-      window.setTimeout(triggerAutoTranslate, 750),
-      window.setTimeout(triggerAutoTranslate, 1500),
+      window.setTimeout(triggerAutoTranslate, 150),
+      window.setTimeout(triggerAutoTranslate, 500),
+      window.setTimeout(triggerAutoTranslate, 1000),
+      window.setTimeout(triggerAutoTranslate, 1800),
     ];
 
     return () => {
@@ -114,14 +139,37 @@ export default function LoginPage() {
 
     if (adminFree) {
       localStorage.setItem('zedpera_admin_free', 'true');
+      document.cookie = 'sub_active=1; path=/; max-age=2592000; SameSite=Lax';
     } else {
       localStorage.removeItem('zedpera_admin_free');
     }
   };
 
+  const clearLoginData = () => {
+    if (typeof window === 'undefined') return;
+
+    localStorage.removeItem('zedpera_user_email');
+    localStorage.removeItem('zedpera_email');
+    localStorage.removeItem('user_email');
+    localStorage.removeItem('zedpera_user_name');
+    localStorage.removeItem('zedpera_user_role');
+    localStorage.removeItem('zedpera_user_plan');
+    localStorage.removeItem('zedpera_is_logged_in');
+    localStorage.removeItem('zedpera_admin_free');
+
+    document.cookie = 'sub_active=; path=/; max-age=0; SameSite=Lax';
+  };
+
+  const redirectToDashboard = (query: string) => {
+    triggerAutoTranslate();
+
+    router.refresh();
+    router.push(`/dashboard${query}`);
+  };
+
   const loginUser = async () => {
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanPassword = password.trim();
+    const cleanEmail = normalizeEmail(email);
+    const cleanPassword = normalizePassword(password);
 
     setError('');
 
@@ -139,33 +187,62 @@ export default function LoginPage() {
 
       window.setTimeout(triggerAutoTranslate, 50);
 
-      if (cleanEmail === ADMIN_EMAIL && cleanPassword === ADMIN_PASSWORD) {
-        saveLoginData({
-          userEmail: cleanEmail,
-          userName: 'Admin',
-          role: 'admin',
-          plan: 'admin-free',
-          adminFree: true,
+      const supabase = createSupabaseBrowserClient();
+
+      const { data, error: loginError } =
+        await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: cleanPassword,
         });
 
-        triggerAutoTranslate();
+      if (loginError) {
+        if (cleanEmail === ADMIN_EMAIL && cleanPassword === ADMIN_PASSWORD) {
+          saveLoginData({
+            userEmail: cleanEmail,
+            userName: 'Admin',
+            role: 'admin',
+            plan: 'admin-free',
+            adminFree: true,
+          });
 
-        router.push('/dashboard?mode=admin-free');
+          redirectToDashboard('?mode=admin-free');
+          return;
+        }
+
+        clearLoginData();
+
+        setError(
+          loginError.message ||
+            'Prihlásenie zlyhalo. Skontroluj e-mail a heslo.',
+        );
+
+        window.setTimeout(triggerAutoTranslate, 50);
+        window.setTimeout(triggerAutoTranslate, 300);
+
         return;
       }
 
+      const userEmail = data.user?.email || cleanEmail;
+
       saveLoginData({
-        userEmail: cleanEmail,
-        userName: cleanEmail,
+        userEmail,
+        userName:
+          data.user?.user_metadata?.full_name ||
+          data.user?.user_metadata?.name ||
+          userEmail,
         role: 'user',
         plan: 'free',
       });
 
-      triggerAutoTranslate();
+      redirectToDashboard('?login=success');
+    } catch (err) {
+      clearLoginData();
 
-      router.push('/dashboard?login=success');
-    } catch {
-      setError('Prihlásenie zlyhalo. Skús to znova.');
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Prihlásenie zlyhalo. Skús to znova.',
+      );
 
       window.setTimeout(triggerAutoTranslate, 50);
       window.setTimeout(triggerAutoTranslate, 300);
@@ -176,19 +253,37 @@ export default function LoginPage() {
     }
   };
 
-  const loginAsDemoUser = () => {
+  const loginAsDemoUser = async () => {
     const demoEmail = 'demo@zedpera.com';
 
-    saveLoginData({
-      userEmail: demoEmail,
-      userName: 'Demo používateľ',
-      role: 'user',
-      plan: 'free',
-    });
+    try {
+      setDemoLoading(true);
+      setError('');
 
-    triggerAutoTranslate();
+      const supabase = createSupabaseBrowserClient();
 
-    router.push('/dashboard?demo=true');
+      await supabase.auth.signOut();
+
+      saveLoginData({
+        userEmail: demoEmail,
+        userName: 'Demo používateľ',
+        role: 'user',
+        plan: 'free',
+      });
+
+      redirectToDashboard('?demo=true');
+    } catch {
+      saveLoginData({
+        userEmail: demoEmail,
+        userName: 'Demo používateľ',
+        role: 'user',
+        plan: 'free',
+      });
+
+      redirectToDashboard('?demo=true');
+    } finally {
+      setDemoLoading(false);
+    }
   };
 
   return (
@@ -218,11 +313,11 @@ export default function LoginPage() {
             Prihlás sa do používateľského alebo admin menu ZEDPERA.
           </p>
 
-          {error && (
+          {error ? (
             <div className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold text-red-700 dark:text-red-200">
               {error}
             </div>
-          )}
+          ) : null}
 
           <div className="mt-7 space-y-4">
             <label className="block">
@@ -235,9 +330,9 @@ export default function LoginPage() {
 
                 <input
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
+                  onChange={(event) => setEmail(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
                       void loginUser();
                     }
                   }}
@@ -259,9 +354,9 @@ export default function LoginPage() {
 
                 <input
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
+                  onChange={(event) => setPassword(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
                       void loginUser();
                     }
                   }}
@@ -285,7 +380,7 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => void loginUser()}
-              disabled={loading}
+              disabled={loading || demoLoading}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-700 px-5 py-4 font-black text-white shadow-xl shadow-purple-950/30 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? (
@@ -301,14 +396,7 @@ export default function LoginPage() {
               )}
             </button>
 
-            <button
-              type="button"
-              onClick={loginAsDemoUser}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-5 py-4 font-black text-slate-900 transition hover:bg-slate-200 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/20"
-            >
-              Vyskúšať Zedperu bez prihlásenia
-            </button>
-          </div>
+                      </div>
 
           <div className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
             Nemáš účet?{' '}

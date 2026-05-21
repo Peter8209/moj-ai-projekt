@@ -14,8 +14,59 @@ import {
 import OriginalityProtocolView from '@/components/OriginalityProtocolView';
 
 const STORAGE_KEY = 'zedpera_originality_protocol_result';
+const SIMILARITY_DEVIATION_PERCENT = 5;
 
 type LoadingState = 'waiting' | 'loaded' | 'error';
+
+function toNumber(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.replace(',', '.').replace('%', '').trim();
+    const parsed = Number(normalized);
+
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function getSimilarityScore(result: any) {
+  if (!result) return null;
+
+  return (
+    toNumber(result?.score) ??
+    toNumber(result?.similarityRiskScore) ??
+    toNumber(result?.similarityScore) ??
+    toNumber(result?.percent) ??
+    toNumber(result?.overallPercent) ??
+    toNumber(result?.overall_percent) ??
+    null
+  );
+}
+
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function formatPercent(value: number) {
+  return `${value.toFixed(2).replace('.', ',')}%`;
+}
+
+function getDeviationInterval(score: number) {
+  const min = clampPercent(score - SIMILARITY_DEVIATION_PERCENT);
+  const max = clampPercent(score + SIMILARITY_DEVIATION_PERCENT);
+
+  return {
+    min,
+    max,
+    label: `${formatPercent(min)} – ${formatPercent(max)}`,
+  };
+}
 
 export default function OriginalityProtocolPage() {
   const [result, setResult] = useState<any | null>(null);
@@ -33,6 +84,16 @@ export default function OriginalityProtocolPage() {
       'Protokol originality'
     );
   }, [result]);
+
+  const similarityScore = useMemo(() => {
+    return getSimilarityScore(result);
+  }, [result]);
+
+  const deviationInterval = useMemo(() => {
+    if (similarityScore === null) return null;
+
+    return getDeviationInterval(similarityScore);
+  }, [similarityScore]);
 
   function readStoredProtocol() {
     const stored = window.localStorage.getItem(STORAGE_KEY);
@@ -187,7 +248,8 @@ export default function OriginalityProtocolPage() {
           <p className="mt-3 text-sm leading-7 text-slate-400">
             Kontrola originality ešte môže bežať. Táto podstránka čaká na
             výsledok z API a po dokončení automaticky vykreslí protokol,
-            tabuľky, grafy, histogram a detailné podobnosti.
+            tabuľky, grafy, histogram, detailné podobnosti a orientačný
+            interval s odchýlkou ±{SIMILARITY_DEVIATION_PERCENT} %.
           </p>
 
           <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs font-bold text-slate-400">
@@ -286,12 +348,36 @@ export default function OriginalityProtocolPage() {
                 Grafy, histogram, tabuľky, pasáže
               </span>
 
-              {typeof result?.score === 'number' && (
+              {similarityScore !== null ? (
                 <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 font-black text-red-200">
-                  Podobnosť: {result.score.toFixed(2).replace('.', ',')}%
+                  Podobnosť: {formatPercent(similarityScore)}
+                </span>
+              ) : (
+                <span className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-3 py-1 font-black text-yellow-100">
+                  Podobnosť: údaj je potrebné vypočítať
+                </span>
+              )}
+
+              {deviationInterval ? (
+                <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 font-black text-violet-100">
+                  Odchýlka ±{SIMILARITY_DEVIATION_PERCENT} %: {deviationInterval.label}
+                </span>
+              ) : (
+                <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 font-black text-violet-100">
+                  Odchýlka ±{SIMILARITY_DEVIATION_PERCENT} %: čaká sa na výsledok
                 </span>
               )}
             </div>
+
+            {deviationInterval ? (
+              <div className="mt-3 rounded-2xl border border-violet-500/20 bg-violet-500/10 p-3 text-xs leading-6 text-violet-50">
+                Orientačný interval výsledku pri odchýlke ±
+                {SIMILARITY_DEVIATION_PERCENT} % je {deviationInterval.label}.
+                Výpočet sa má používať ako kontrolný údaj k protokolu. Ak API
+                nevráti reálne skóre podobnosti, systém musí zobraziť, že údaj
+                je potrebné vypočítať alebo overiť.
+              </div>
+            ) : null}
           </div>
         </div>
 

@@ -2008,7 +2008,38 @@ const handleSelectAgent = (nextAgent: Agent) => {
   });
 };
 
+useEffect(() => {
+  if (typeof window === 'undefined') return;
 
+  const raw = localStorage.getItem('zedpera_continue_chat_context');
+
+  if (!raw) return;
+
+  try {
+    const context = JSON.parse(raw);
+
+    const historyPrompt = `
+Pokračujeme v predchádzajúcej konverzácii z histórie.
+
+Názov:
+${context.title || ''}
+
+Pôvodné zadanie používateľa:
+${context.user_message || ''}
+
+Predchádzajúca odpoveď AI:
+${context.assistant_message || ''}
+
+Pokračuj na základe tejto histórie. Zachovaj kontext a nadviaž na predchádzajúci výstup.
+`.trim();
+
+    setInput(historyPrompt);
+
+    localStorage.removeItem('zedpera_continue_chat_context');
+  } catch {
+    localStorage.removeItem('zedpera_continue_chat_context');
+  }
+}, []);
 
 useEffect(() => {
   const loadProfile = async () => {

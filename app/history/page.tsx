@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   BarChart3,
   ClipboardCheck,
@@ -13,6 +14,19 @@ import {
   Sparkles,
 } from 'lucide-react';
 
+type RawHistoryItem = {
+  id?: string;
+  module?: string;
+  type?: string;
+  title?: string | null;
+  user_message?: string | null;
+  assistant_message?: string | null;
+  preview?: string | null;
+  content?: string | null;
+  result?: Record<string, unknown>;
+  created_at?: string;
+};
+
 type HistoryItem = {
   id: string;
   module: string;
@@ -22,6 +36,18 @@ type HistoryItem = {
   result?: Record<string, unknown>;
   created_at: string;
 };
+
+type ContinueChatContext = {
+  id: string;
+  module: string;
+  title: string;
+  user_message: string;
+  assistant_message: string;
+  created_at: string;
+  source: 'history';
+};
+
+const CONTINUE_CHAT_STORAGE_KEY = 'zedpera_continue_chat_context';
 
 const filters = [
   { key: 'all', label: 'Všetko' },
@@ -37,6 +63,30 @@ const filters = [
   { key: 'humanizer', label: 'Humanizácia' },
 ];
 
+function normalizeModule(value: unknown) {
+  const module = String(value || 'chat').trim();
+
+  if (module === 'ai-chat') return 'chat';
+  if (module === 'ai') return 'chat';
+  if (module === 'audit') return 'quality';
+
+  const allowed = [
+    'chat',
+    'supervisor',
+    'quality',
+    'defense',
+    'translation',
+    'data',
+    'planning',
+    'emails',
+    'originality',
+    'humanizer',
+    'sources',
+  ];
+
+  return allowed.includes(module) ? module : 'chat';
+}
+
 function getModuleLabel(module: string) {
   if (module === 'supervisor') return 'AI vedúci';
   if (module === 'quality') return 'Audit kvality';
@@ -47,6 +97,8 @@ function getModuleLabel(module: string) {
   if (module === 'emails') return 'Emaily';
   if (module === 'originality') return 'Originalita';
   if (module === 'humanizer') return 'Humanizácia';
+  if (module === 'sources') return 'Zdroje';
+
   return 'AI chat';
 }
 
@@ -60,83 +112,224 @@ function getModuleIcon(module: string) {
   if (module === 'originality') return <ShieldCheck className="h-5 w-5" />;
   if (module === 'humanizer') return <Sparkles className="h-5 w-5" />;
   if (module === 'sources') return <FileSearch className="h-5 w-5" />;
+
   return <MessageSquare className="h-5 w-5" />;
 }
 
+function normalizeHistoryItem(item: RawHistoryItem, index: number): HistoryItem {
+  const module = normalizeModule(item.module || item.type);
+
+  const assistantMessage =
+    item.assistant_message ||
+    item.content ||
+    item.preview ||
+    '';
+
+  const userMessage =
+    item.user_message ||
+    item.preview ||
+    '';
+
+  return {
+    id: String(item.id || `local-${index}-${Date.now()}`),
+    module,
+    title: item.title || getModuleLabel(module),
+    user_message: userMessage,
+    assistant_message: assistantMessage,
+    result: item.result,
+    created_at: item.created_at || new Date().toISOString(),
+  };
+}
+
+function safelyParseLocalHistory(): RawHistoryItem[] {
+  if (typeof window === 'undefined') return [];
+
+  const possibleKeys = [
+    'chat_history',
+    'saved_outputs',
+    'generated_texts',
+    'zedpera_chat_history',
+  ];
+
+  for (const key of possibleKeys) {
+    try {
+      const raw = localStorage.getItem(key);
+
+      if (!raw) continue;
+
+      const parsed = JSON.parse(raw);
+
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+
+      if (parsed && Array.isArray(parsed.items)) {
+        return parsed.items;
+      }
+
+      if (parsed && Array.isArray(parsed.history)) {
+        return parsed.history;
+      }
+    } catch {
+      // Pokračujeme ďalším lokálnym kľúčom.
+    }
+  }
+
+  return [];
+}
+
+function filterItems(items: HistoryItem[], activeFilter: string) {
+  if (activeFilter === 'all') return items;
+
+  return items.filter((item) => item.module === activeFilter);
+}
+
+function createContinueChatContext(item: HistoryItem): ContinueChatContext {
+  return {
+    id: item.id,
+    module: item.module,
+    title: item.title || getModuleLabel(item.module),
+    user_message: item.user_message || '',
+    assistant_message: item.assistant_message || '',
+    created_at: item.created_at,
+    source: 'history',
+  };
+}
+
+function createCardPreview(item: HistoryItem) {
+  const userText = item.user_message?.trim();
+  const assistantText = item.assistant_message?.trim();
+
+  if (userText && assistantText) {
+    return `POUŽÍVATEĽ: ${userText}\nODPOVEĎ: ${assistantText}`;
+  }
+
+  if (assistantText) return assistantText;
+  if (userText) return userText;
+
+  return 'Bez výstupu';
+}
+
 export default function HistoryPage() {
+  const router = useRouter();
+
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [activeFilter, setActiveFilter] = useState('all');
-  const [activeItem, setActiveItem] = useState<HistoryItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  function continueInAiChat(item: HistoryItem) {
+    if (typeof window === 'undefined') return;
+
+    const context = createContinueChatContext(item);
+
+    localStorage.setItem(
+      CONTINUE_CHAT_STORAGE_KEY,
+      JSON.stringify(context),
+    );
+
+    router.push('/chat?continue=history');
+  }
+
   async function loadHistory() {
-  setLoading(true);
-  setError('');
+    setLoading(true);
+    setError('');
 
-  try {
-    const url =
-      activeFilter === 'all'
-        ? '/api/history'
-        : `/api/history?module=${encodeURIComponent(activeFilter)}`;
+    function loadLocalHistory() {
+      const localItems = safelyParseLocalHistory()
+        .map((item, index) => normalizeHistoryItem(item, index))
+        .sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() -
+            new Date(a.created_at).getTime(),
+        );
 
-    const res = await fetch(url, {
-      method: 'GET',
-      cache: 'no-store',
-      credentials: 'include',
-    });
+      const filteredLocalItems = filterItems(localItems, activeFilter);
 
-    const data = await res.json().catch(() => null);
+      setItems(filteredLocalItems);
 
-    if (res.ok && data?.ok) {
-      const loadedItems = Array.isArray(data.items) ? data.items : [];
-
-      setItems(loadedItems);
-      setActiveItem(loadedItems[0] || null);
-      return;
+      return filteredLocalItems;
     }
 
-    const rawLocal = localStorage.getItem('chat_history');
-    const localItems = rawLocal ? JSON.parse(rawLocal) : [];
-    const safeLocalItems = Array.isArray(localItems) ? localItems : [];
+    try {
+      const url =
+        activeFilter === 'all'
+          ? '/api/history'
+          : `/api/history?module=${encodeURIComponent(activeFilter)}`;
 
-    const filteredLocalItems =
-      activeFilter === 'all'
-        ? safeLocalItems
-        : safeLocalItems.filter((item) => item.module === activeFilter);
+      const res = await fetch(url, {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
 
-    setItems(filteredLocalItems);
-    setActiveItem(filteredLocalItems[0] || null);
+      const data = await res.json().catch(() => null);
 
-    if (filteredLocalItems.length === 0) {
-      setError(data?.error || 'Používateľ nie je prihlásený.');
-    } else {
-      setError('');
-    }
-  } catch (err) {
-    const rawLocal = localStorage.getItem('chat_history');
-    const localItems = rawLocal ? JSON.parse(rawLocal) : [];
-    const safeLocalItems = Array.isArray(localItems) ? localItems : [];
+      if (res.ok && data?.ok) {
+        const rawItems = Array.isArray(data.items) ? data.items : [];
 
-    const filteredLocalItems =
-      activeFilter === 'all'
-        ? safeLocalItems
-        : safeLocalItems.filter((item) => item.module === activeFilter);
+        const loadedItems = rawItems
+          .map((item: RawHistoryItem, index: number) =>
+            normalizeHistoryItem(item, index),
+          )
+          .sort(
+            (a: HistoryItem, b: HistoryItem) =>
+              new Date(b.created_at).getTime() -
+              new Date(a.created_at).getTime(),
+          );
 
-    setItems(filteredLocalItems);
-    setActiveItem(filteredLocalItems[0] || null);
+        setItems(loadedItems);
+        setError('');
+        return;
+      }
 
-    if (filteredLocalItems.length === 0) {
+      const localItems = loadLocalHistory();
+
+      if (localItems.length > 0) {
+        setError('');
+        return;
+      }
+
+      if (res.status === 401 || data?.reason === 'NOT_AUTHENTICATED') {
+        setError(
+          'Server nevie načítať prihlásenie používateľa. Si prihlásený v aplikácii, ale /api/history nevidí Supabase session cookies. Skontroluj app/api/history/route.ts a lib/supabase/server.ts.',
+        );
+        return;
+      }
+
+      if (data?.reason === 'DATABASE_ERROR') {
+        setError(
+          data?.message ||
+            'Históriu sa nepodarilo načítať z databázy. Skontroluj tabuľku history a RLS pravidlá.',
+        );
+        return;
+      }
+
+      setError(
+        data?.message ||
+          data?.error ||
+          'Históriu sa nepodarilo načítať z databázy.',
+      );
+    } catch (err) {
+      const localItems = loadLocalHistory();
+
+      if (localItems.length > 0) {
+        setError('');
+        return;
+      }
+
       setError(
         err instanceof Error
           ? err.message
-          : 'Históriu sa nepodarilo načítať.',
+          : 'Históriu sa nepodarilo načítať. Skontroluj /api/history.',
       );
+    } finally {
+      setLoading(false);
     }
-  } finally {
-    setLoading(false);
   }
-}
 
   useEffect(() => {
     loadHistory();
@@ -155,22 +348,7 @@ export default function HistoryPage() {
   return (
     <main className="min-h-screen bg-slate-50 p-4 text-slate-950 dark:bg-[#020617] dark:text-white md:p-8">
       <div className="mx-auto max-w-7xl">
-        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h1 className="text-3xl font-black">História chatu</h1>
-            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-              Tu sa zobrazujú uložené výstupy z AI chatu, AI vedúceho, auditu,
-              obhajoby, originality a ďalších modulov.
-            </p>
-          </div>
-
-          <a
-            href="/dashboard"
-            className="inline-flex min-h-[44px] items-center justify-center rounded-2xl bg-slate-950 px-5 text-sm font-black text-white dark:bg-white dark:text-slate-950"
-          >
-            Späť do menu
-          </a>
-        </div>
+        
 
         <div className="mb-6 flex gap-2 overflow-x-auto pb-2">
           {filters.map((filter) => (
@@ -179,7 +357,6 @@ export default function HistoryPage() {
               type="button"
               onClick={() => {
                 setActiveFilter(filter.key);
-                setActiveItem(null);
               }}
               className={`shrink-0 rounded-2xl px-4 py-2 text-sm font-black transition ${
                 activeFilter === filter.key
@@ -212,7 +389,7 @@ export default function HistoryPage() {
         ) : null}
 
         {!loading && !error && items.length > 0 ? (
-          <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
+          <div className="max-w-xl">
             <div className="space-y-5">
               {Object.entries(groupedItems).map(([module, records]) => (
                 <section
@@ -225,83 +402,36 @@ export default function HistoryPage() {
                   </div>
 
                   <div className="space-y-3">
-                    {records.map((item) => {
-                      const active = activeItem?.id === item.id;
+                    {records.map((item) => (
+                      <article
+                        key={item.id}
+                        className="rounded-2xl border border-violet-300 bg-violet-50 p-4 transition hover:border-violet-400 dark:border-violet-400/70 dark:bg-violet-500/10"
+                      >
+                        <div className="font-black">
+                          {item.title || getModuleLabel(item.module)}
+                        </div>
 
-                      return (
+                        <div className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                          {new Date(item.created_at).toLocaleString('sk-SK')}
+                        </div>
+
+                        <div className="mt-3 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-slate-200">
+                          {createCardPreview(item)}
+                        </div>
+
                         <button
-                          key={item.id}
                           type="button"
-                          onClick={() => setActiveItem(item)}
-                          className={`w-full rounded-2xl border p-4 text-left transition ${
-                            active
-                              ? 'border-violet-400 bg-violet-50 dark:bg-violet-500/10'
-                              : 'border-slate-100 bg-slate-50 hover:border-violet-300 hover:bg-violet-50 dark:border-white/10 dark:bg-black/20 dark:hover:bg-violet-500/10'
-                          }`}
+                          onClick={() => continueInAiChat(item)}
+                          className="mt-4 inline-flex min-h-[44px] items-center justify-center rounded-2xl bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-950/20 transition hover:bg-violet-500"
                         >
-                          <div className="font-black">
-                            {item.title || getModuleLabel(item.module)}
-                          </div>
-
-                          <div className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                            {new Date(item.created_at).toLocaleString('sk-SK')}
-                          </div>
-
-                          <div className="mt-2 line-clamp-2 text-sm text-slate-600 dark:text-slate-300">
-                            {item.assistant_message || 'Bez výstupu'}
-                          </div>
+                          Pokračovať v AI chate
                         </button>
-                      );
-                    })}
+                      </article>
+                    ))}
                   </div>
                 </section>
               ))}
             </div>
-
-            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-white/5">
-              {activeItem ? (
-                <>
-                  <div className="mb-5 flex items-center gap-3">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-200">
-                      {getModuleIcon(activeItem.module)}
-                    </div>
-
-                    <div>
-                      <h2 className="text-xl font-black">
-                        {activeItem.title || getModuleLabel(activeItem.module)}
-                      </h2>
-                      <div className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                        {new Date(activeItem.created_at).toLocaleString(
-                          'sk-SK',
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mb-4 rounded-2xl bg-slate-50 p-4 dark:bg-black/20">
-                    <div className="mb-2 text-xs font-black uppercase text-slate-500 dark:text-slate-400">
-                      Zadanie
-                    </div>
-                    <div className="whitespace-pre-wrap text-sm leading-6">
-                      {activeItem.user_message || 'Bez zadania'}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl bg-slate-50 p-4 dark:bg-black/20">
-                    <div className="mb-2 text-xs font-black uppercase text-slate-500 dark:text-slate-400">
-                      Výstup
-                    </div>
-                    <div className="whitespace-pre-wrap text-sm leading-7">
-                      {activeItem.assistant_message || 'Bez výstupu'}
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="text-slate-600 dark:text-slate-300">
-                  Vyber záznam z histórie.
-                </div>
-              )}
-            </section>
           </div>
         ) : null}
       </div>

@@ -375,22 +375,7 @@ export default function Page() {
           </div>
         </div>
 
-        {/* HEADER */}
-        <div className="mb-10 text-center">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-sm text-purple-200">
-            OpenAlex • Semantic Scholar • Crossref • CORE • Europe PMC • arXiv • Unpaywall
-          </div>
-
-          <h1 className="mb-2 text-4xl font-black sm:text-5xl">
-            Vyhľadávanie zdrojov
-          </h1>
-
-          <p className="mx-auto max-w-5xl text-gray-400">
-            Nájdite akademické články, štúdie, publikácie, DOI a open-access PDF zdroje
-            z viacerých svetových databáz. Zadajte otázku alebo kľúčové slová – AI váš
-            dopyt automaticky optimalizuje.
-          </p>
-        </div>
+    
 
         {/* SEARCH */}
         <div className="mx-auto mb-6 max-w-4xl">

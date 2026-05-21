@@ -877,7 +877,6 @@ export default function LandingPage() {
 
   const [language, setLanguage] = useState<AppLanguage>('sk');
   const [content, setContent] = useState<LandingContent>(baseContent);
-  const [isTranslatingPage, setIsTranslatingPage] = useState(false);
 
   useEffect(() => {
     const savedLanguage =
@@ -899,39 +898,45 @@ export default function LandingPage() {
   };
 
   const handleLanguageChange = async (
-  nextLanguage: AppLanguage,
-  persist = true,
+    nextLanguage: AppLanguage,
+    persist = true,
   ) => {
     try {
       setLanguage(nextLanguage);
-    setIsTranslatingPage(true);
 
-    if (persist) {
-      localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
-    }
+      if (persist && typeof window !== 'undefined') {
+        localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
+        localStorage.setItem('zedpera_system_language', nextLanguage);
+        localStorage.setItem('zedpera_work_language', nextLanguage);
+      }
 
-    document.documentElement.lang = nextLanguage;
+      if (typeof document !== 'undefined') {
+        document.documentElement.lang = nextLanguage;
+        document.documentElement.setAttribute('data-language', nextLanguage);
+        document.documentElement.setAttribute('data-system-language', nextLanguage);
+        document.documentElement.setAttribute('data-work-language', nextLanguage);
+      }
 
-    window.dispatchEvent(
-      new CustomEvent('zedpera-language-change', {
-        detail: nextLanguage,
-      }),
-    );
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('zedpera-language-change', {
+            detail: nextLanguage,
+          }),
+        );
+      }
 
-    if (nextLanguage === 'sk') {
+      if (nextLanguage === 'sk') {
+        setContent(baseContent);
+        return;
+      }
+
+      const translatedContent = await translateLandingContent(nextLanguage);
+      setContent(translatedContent);
+    } catch (error) {
+      console.warn('LANDING_TRANSLATION_WARNING:', error);
       setContent(baseContent);
-      return;
     }
-
-    const translatedContent = await translateLandingContent(nextLanguage);
-    setContent(translatedContent);
-  } catch (error) {
-    console.error('LANDING_TRANSLATION_ERROR:', error);
-    setContent(baseContent);
-  } finally {
-    setIsTranslatingPage(false);
-  }
-};
+  };
 
   const getEmailForCheckout = async () => {
     let email = '';
@@ -1092,10 +1097,6 @@ export default function LandingPage() {
                     </option>
                   ))}
                 </select>
-
-                {isTranslatingPage && (
-                  <Loader2 size={15} className="animate-spin text-violet-700" />
-                )}
               </div>
             </div>
 
@@ -1163,13 +1164,6 @@ export default function LandingPage() {
                       </option>
                     ))}
                   </select>
-
-                  {isTranslatingPage && (
-                    <Loader2
-                      size={15}
-                      className="animate-spin text-violet-700"
-                    />
-                  )}
                 </div>
 
                 <ThemeToggleButton />

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { useLanguage } from '@/components/LanguageProvider';
 
 const STORAGE_PREFIX = 'zedpera_ai_ui_translation_';
@@ -49,17 +49,9 @@ function isInsideIgnoredElement(node: Node) {
     if (current.nodeType === Node.ELEMENT_NODE) {
       const element = current as HTMLElement;
 
-      if (ignoredTags.has(element.tagName)) {
-        return true;
-      }
-
-      if (element.dataset.noTranslate === 'true') {
-        return true;
-      }
-
-      if (element.closest('[data-no-translate="true"]')) {
-        return true;
-      }
+      if (ignoredTags.has(element.tagName)) return true;
+      if (element.dataset.noTranslate === 'true') return true;
+      if (element.closest('[data-no-translate="true"]')) return true;
     }
 
     current = current.parentNode;
@@ -129,41 +121,127 @@ function saveCachedTranslations(
   try {
     localStorage.setItem(getCacheKey(language), JSON.stringify(translations));
   } catch {
-    // localStorage môže byť plný alebo blokovaný
+    // localStorage môže byť plný alebo blokovaný.
+  }
+}
+
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+
+  return chunks;
+}
+
+function isAbortError(error: unknown) {
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return true;
+  }
+
+  if (error instanceof Error) {
+    const message = String(error.message || '').toLowerCase();
+
+    return (
+      error.name === 'AbortError' ||
+      message.includes('abort') ||
+      message.includes('aborted')
+    );
+  }
+
+  return false;
+}
+
+async function fetchTranslationBatch(language: string, texts: string[]) {
+  if (!texts.length) return {};
+
+  const controller = new AbortController();
+
+  const timeout = window.setTimeout(() => {
+    controller.abort('TRANSLATE_UI_TIMEOUT');
+  }, 45000);
+
+  try {
+    const res = await fetch('/api/translate-ui', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      cache: 'no-store',
+      signal: controller.signal,
+      body: JSON.stringify({
+        language,
+        targetLanguage: language,
+        texts,
+      }),
+    });
+
+    const contentType = res.headers.get('content-type') || '';
+
+    if (!contentType.includes('application/json')) {
+      const text = await res.text().catch(() => '');
+
+      console.warn('TRANSLATE_UI_NON_JSON_RESPONSE:', {
+        status: res.status,
+        text: text.slice(0, 500),
+      });
+
+      return {};
+    }
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      console.warn('TRANSLATE_UI_RESPONSE_NOT_OK:', {
+        status: res.status,
+        data,
+      });
+
+      return {};
+    }
+
+    if (!data?.ok || !data?.translations) {
+      console.warn('TRANSLATE_UI_INVALID_RESPONSE:', data);
+      return {};
+    }
+
+    return data.translations as Record<string, string>;
+  } catch (error) {
+    if (isAbortError(error)) {
+      console.warn('TRANSLATE_UI_BATCH_TIMEOUT_OR_ABORTED');
+      return {};
+    }
+
+    console.warn('TRANSLATE_UI_BATCH_WARNING:', error);
+    return {};
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
 async function translateTextsWithAi(language: string, texts: string[]) {
   const uniqueTexts = Array.from(
     new Set(texts.map(cleanText).filter(Boolean)),
-  );
+  ).slice(0, 220);
 
   if (uniqueTexts.length === 0) {
     return {};
   }
 
-  const res = await fetch('/api/translate-ui', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      language,
-      texts: uniqueTexts,
-    }),
-  });
+  const chunks = chunkArray(uniqueTexts, 35);
+  const mergedTranslations: Record<string, string> = {};
 
-  if (!res.ok) {
-    throw new Error(`Translate UI failed: ${res.status}`);
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index];
+
+    const batchTranslations = await fetchTranslationBatch(language, chunk);
+
+    Object.assign(mergedTranslations, batchTranslations);
   }
 
-  const data = await res.json();
-
-  if (!data?.ok || !data?.translations) {
-    return {};
-  }
-
-  return data.translations as Record<string, string>;
+  return mergedTranslations;
 }
 
 export default function AutoTranslateProvider({
@@ -172,8 +250,6 @@ export default function AutoTranslateProvider({
   children: ReactNode;
 }) {
   const { language } = useLanguage();
-
-  const [isUiTranslating, setIsUiTranslating] = useState(false);
 
   const originalTextMapRef = useRef<WeakMap<Text, string>>(new WeakMap());
   const originalAttributeMapRef = useRef<
@@ -250,6 +326,56 @@ export default function AutoTranslateProvider({
       }
     };
 
+    const prepareOriginalMaps = (
+      nodes: Text[],
+      attributeElements: HTMLElement[],
+    ) => {
+      for (const node of nodes) {
+        if (!originalTextMapRef.current.has(node)) {
+          originalTextMapRef.current.set(node, cleanText(node.nodeValue || ''));
+        }
+      }
+
+      for (const element of attributeElements) {
+        if (!originalAttributeMapRef.current.has(element)) {
+          const attributes: Record<string, string> = {};
+
+          for (const attr of translatableAttributes) {
+            const value = cleanText(element.getAttribute(attr) || '');
+
+            if (shouldTranslateText(value)) {
+              attributes[attr] = value;
+            }
+          }
+
+          originalAttributeMapRef.current.set(element, attributes);
+        }
+      }
+    };
+
+    const collectSourceTexts = (
+      nodes: Text[],
+      attributeElements: HTMLElement[],
+    ) => {
+      const sourceTextNodes = nodes
+        .map((node) => originalTextMapRef.current.get(node) || '')
+        .map(cleanText)
+        .filter(shouldTranslateText);
+
+      const sourceAttributeTexts = attributeElements.flatMap((element) => {
+        const attributes = originalAttributeMapRef.current.get(element);
+
+        if (!attributes) return [];
+
+        return translatableAttributes
+          .map((attr) => attributes[attr])
+          .map((value) => cleanText(value || ''))
+          .filter(shouldTranslateText);
+      });
+
+      return Array.from(new Set([...sourceTextNodes, ...sourceAttributeTexts]));
+    };
+
     const runTranslation = async () => {
       if (cancelled) return;
       if (typeof window === 'undefined') return;
@@ -264,73 +390,32 @@ export default function AutoTranslateProvider({
         const nodes = collectTextNodes(root);
         const attributeElements = collectAttributeElements(root);
 
-        for (const node of nodes) {
-          if (!originalTextMapRef.current.has(node)) {
-            originalTextMapRef.current.set(
-              node,
-              cleanText(node.nodeValue || ''),
-            );
-          }
-        }
-
-        for (const element of attributeElements) {
-          if (!originalAttributeMapRef.current.has(element)) {
-            const attributes: Record<string, string> = {};
-
-            for (const attr of translatableAttributes) {
-              const value = cleanText(element.getAttribute(attr) || '');
-
-              if (shouldTranslateText(value)) {
-                attributes[attr] = value;
-              }
-            }
-
-            originalAttributeMapRef.current.set(element, attributes);
-          }
-        }
+        prepareOriginalMaps(nodes, attributeElements);
 
         if (language === 'sk') {
           restoreOriginalTexts();
-          setIsUiTranslating(false);
           return;
         }
 
         const cachedTranslations = loadCachedTranslations(language);
-
-        const sourceTextNodes = nodes
-          .map((node) => originalTextMapRef.current.get(node) || '')
-          .map(cleanText)
-          .filter(shouldTranslateText);
-
-        const sourceAttributeTexts = attributeElements.flatMap((element) => {
-          const attributes = originalAttributeMapRef.current.get(element);
-
-          if (!attributes) return [];
-
-          return translatableAttributes
-            .map((attr) => attributes[attr])
-            .map((value) => cleanText(value || ''))
-            .filter(shouldTranslateText);
-        });
-
-        const sourceTexts = Array.from(
-          new Set([...sourceTextNodes, ...sourceAttributeTexts]),
-        );
-
-        const missingTexts = sourceTexts.filter(
-          (text) => !cachedTranslations[text],
-        );
+        const sourceTexts = collectSourceTexts(nodes, attributeElements);
 
         if (Object.keys(cachedTranslations).length > 0) {
           applyTranslationsToPage(nodes, attributeElements, cachedTranslations);
         }
 
-        let newTranslations: Record<string, string> = {};
+        const missingTexts = sourceTexts.filter(
+          (text) => !cachedTranslations[text],
+        );
 
-        if (missingTexts.length > 0) {
-          setIsUiTranslating(true);
-          newTranslations = await translateTextsWithAi(language, missingTexts);
+        if (missingTexts.length === 0) {
+          return;
         }
+
+        const newTranslations = await translateTextsWithAi(
+          language,
+          missingTexts,
+        );
 
         if (cancelled) return;
 
@@ -342,13 +427,9 @@ export default function AutoTranslateProvider({
         saveCachedTranslations(language, mergedTranslations);
         applyTranslationsToPage(nodes, attributeElements, mergedTranslations);
       } catch (error) {
-        console.error('AUTO_TRANSLATE_PROVIDER_ERROR:', error);
+        console.warn('AUTO_TRANSLATE_PROVIDER_WARNING:', error);
       } finally {
         isTranslatingRef.current = false;
-
-        if (!cancelled) {
-          setIsUiTranslating(false);
-        }
       }
     };
 
@@ -359,7 +440,7 @@ export default function AutoTranslateProvider({
 
       debounceTimer = setTimeout(() => {
         void runTranslation();
-      }, 250);
+      }, 120);
     };
 
     restoreOriginalTexts();
@@ -394,18 +475,5 @@ export default function AutoTranslateProvider({
     };
   }, [language]);
 
-  return (
-    <>
-      {children}
-
-      {isUiTranslating && language !== 'sk' ? (
-        <div
-          data-no-translate="true"
-          className="fixed bottom-4 right-4 z-[9999] rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 text-sm font-bold text-slate-800 shadow-2xl shadow-slate-900/20 backdrop-blur dark:border-white/10 dark:bg-[#020617]/95 dark:text-white"
-        >
-          Prekladám rozhranie…
-        </div>
-      ) : null}
-    </>
-  );
+  return <>{children}</>;
 }

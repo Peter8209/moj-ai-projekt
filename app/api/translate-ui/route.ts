@@ -9,6 +9,8 @@ export const dynamic = 'force-dynamic';
 
 type TranslateUiBody = {
   language?: string;
+  targetLanguage?: string;
+  text?: string;
   texts?: string[];
 };
 
@@ -16,9 +18,9 @@ type UiLanguage = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
 
 const allowedLanguages: UiLanguage[] = ['sk', 'cs', 'en', 'de', 'pl', 'hu'];
 
-const maxTextsPerRequest = 120;
-const maxTextLength = 600;
-const maxBatchSize = 35;
+const maxTextsPerRequest = 160;
+const maxTextLength = 700;
+const maxBatchSize = 25;
 
 function normalizeLanguage(value: unknown): UiLanguage {
   const lang = String(value || '').toLowerCase().trim();
@@ -67,15 +69,32 @@ function shouldSkipText(value: string) {
 
   if (/^[A-Z0-9_-]{2,25}$/.test(text)) return true;
 
-  if (text === 'Zedpera') return true;
-  if (text === 'ZEDPERA') return true;
-  if (text === 'AI') return true;
-  if (text === 'OPEN AI') return true;
-  if (text === 'GPT') return true;
-  if (text === 'PDF') return true;
-  if (text === 'DOC') return true;
-  if (text === 'PPTX') return true;
-  if (text === 'XLSX') return true;
+  const protectedTexts = [
+    'Zedpera',
+    'ZEDPERA',
+    'AI',
+    'OPEN AI',
+    'OpenAI',
+    'GPT',
+    'PDF',
+    'DOC',
+    'DOCX',
+    'PPT',
+    'PPTX',
+    'XLS',
+    'XLSX',
+    'CSV',
+    'JASP',
+    'SPSS',
+    'Supabase',
+    'Stripe',
+    'Gemini',
+    'Claude',
+    'Mistral',
+    'Grok',
+  ];
+
+  if (protectedTexts.includes(text)) return true;
 
   return false;
 }
@@ -136,13 +155,14 @@ function normalizeParsedTranslations(value: unknown): string[] | null {
 
 function findBalancedJsonArray(value: string) {
   const text = String(value || '');
+
   let start = -1;
   let depth = 0;
   let inString = false;
   let escaped = false;
 
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text[i];
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
 
     if (escaped) {
       escaped = false;
@@ -163,7 +183,7 @@ function findBalancedJsonArray(value: string) {
 
     if (char === '[') {
       if (depth === 0) {
-        start = i;
+        start = index;
       }
 
       depth += 1;
@@ -173,7 +193,7 @@ function findBalancedJsonArray(value: string) {
       depth -= 1;
 
       if (depth === 0 && start >= 0) {
-        return text.slice(start, i + 1);
+        return text.slice(start, index + 1);
       }
     }
   }
@@ -211,7 +231,7 @@ function extractJsonArray(value: string, expectedLength: number): string[] {
       return normalized;
     }
   } catch {
-    // Pokračujeme robustným parsovaním nižšie.
+    // pokračujeme nižšie
   }
 
   const jsonArray = findBalancedJsonArray(cleaned);
@@ -225,7 +245,7 @@ function extractJsonArray(value: string, expectedLength: number): string[] {
         return normalized;
       }
     } catch {
-      // Pokračujeme fallbackom nižšie.
+      // pokračujeme nižšie
     }
   }
 
@@ -236,6 +256,20 @@ function extractJsonArray(value: string, expectedLength: number): string[] {
   }
 
   throw new Error('TRANSLATION_JSON_PARSE_FAILED');
+}
+
+function fixTranslationsLength({
+  sourceTexts,
+  translatedTexts,
+}: {
+  sourceTexts: string[];
+  translatedTexts: string[];
+}) {
+  return sourceTexts.map((source, index) => {
+    const translated = cleanText(translatedTexts[index] || '');
+
+    return translated || source;
+  });
 }
 
 function buildPrompt({
@@ -265,8 +299,10 @@ Rules:
 - Keep the same order as input.
 - Do not translate the brand name Zedpera or ZEDPERA.
 - Do not translate prices, currencies, numbers, URLs, model names and technical identifiers.
-- Translate naturally for a SaaS web application.
+- Translate naturally for a SaaS academic web application.
 - Keep button texts short.
+- Keep menu labels clear and concise.
+- Preserve punctuation when it is important.
 - If a text is already suitable in the target language, keep it natural.
 
 Input texts:
@@ -281,6 +317,10 @@ async function translateWithGemini({
   language: UiLanguage;
   texts: string[];
 }) {
+  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY && !process.env.GOOGLE_API_KEY) {
+    throw new Error('Missing Google API key');
+  }
+
   const prompt = buildPrompt({ language, texts });
 
   const result = await generateText({
@@ -289,7 +329,12 @@ async function translateWithGemini({
     temperature: 0,
   });
 
-  return extractJsonArray(result.text || '', texts.length);
+  const translatedTexts = extractJsonArray(result.text || '', texts.length);
+
+  return fixTranslationsLength({
+    sourceTexts: texts,
+    translatedTexts,
+  });
 }
 
 async function translateWithOpenAi({
@@ -299,6 +344,10 @@ async function translateWithOpenAi({
   language: UiLanguage;
   texts: string[];
 }) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('Missing OPENAI_API_KEY');
+  }
+
   const prompt = buildPrompt({ language, texts });
 
   const result = await generateText({
@@ -307,7 +356,12 @@ async function translateWithOpenAi({
     temperature: 0,
   });
 
-  return extractJsonArray(result.text || '', texts.length);
+  const translatedTexts = extractJsonArray(result.text || '', texts.length);
+
+  return fixTranslationsLength({
+    sourceTexts: texts,
+    translatedTexts,
+  });
 }
 
 async function translateWithClaude({
@@ -317,15 +371,26 @@ async function translateWithClaude({
   language: UiLanguage;
   texts: string[];
 }) {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error('Missing ANTHROPIC_API_KEY');
+  }
+
   const prompt = buildPrompt({ language, texts });
 
   const result = await generateText({
-    model: anthropic(process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-20241022') as any,
+    model: anthropic(
+      process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-20241022',
+    ) as any,
     prompt,
     temperature: 0,
   });
 
-  return extractJsonArray(result.text || '', texts.length);
+  const translatedTexts = extractJsonArray(result.text || '', texts.length);
+
+  return fixTranslationsLength({
+    sourceTexts: texts,
+    translatedTexts,
+  });
 }
 
 async function translateBatch({
@@ -335,22 +400,24 @@ async function translateBatch({
   language: UiLanguage;
   texts: string[];
 }) {
+  if (texts.length === 0) return [];
+
   try {
     return await translateWithGemini({ language, texts });
   } catch (geminiError) {
-    console.error('TRANSLATE_UI_GEMINI_ERROR:', geminiError);
+    console.warn('TRANSLATE_UI_GEMINI_WARNING:', geminiError);
   }
 
   try {
     return await translateWithOpenAi({ language, texts });
   } catch (openaiError) {
-    console.error('TRANSLATE_UI_OPENAI_ERROR:', openaiError);
+    console.warn('TRANSLATE_UI_OPENAI_WARNING:', openaiError);
   }
 
   try {
     return await translateWithClaude({ language, texts });
   } catch (claudeError) {
-    console.error('TRANSLATE_UI_CLAUDE_ERROR:', claudeError);
+    console.warn('TRANSLATE_UI_CLAUDE_WARNING:', claudeError);
   }
 
   return texts;
@@ -359,46 +426,115 @@ async function translateBatch({
 function chunkArray<T>(items: T[], size: number) {
   const chunks: T[][] = [];
 
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
   }
 
   return chunks;
 }
 
+function createFallbackTranslations(texts: string[]) {
+  return Object.fromEntries(texts.map((text) => [text, text]));
+}
+
+function createProgress({
+  total,
+  translated,
+}: {
+  total: number;
+  translated: number;
+}) {
+  if (total <= 0) {
+    return {
+      total: 0,
+      translated: 0,
+      percent: 100,
+    };
+  }
+
+  return {
+    total,
+    translated,
+    percent: Math.min(100, Math.round((translated / total) * 100)),
+  };
+}
+
+export async function OPTIONS() {
+  return NextResponse.json({
+    ok: true,
+    service: 'translate-ui',
+  });
+}
+
 export async function POST(req: NextRequest) {
+  let uniqueTexts: string[] = [];
+  let language: UiLanguage = 'sk';
+
   try {
     const body = (await req.json()) as TranslateUiBody;
 
-    const language = normalizeLanguage(body.language);
+    language = normalizeLanguage(body.language || body.targetLanguage);
 
-    const inputTexts = Array.isArray(body.texts)
-      ? body.texts.map(cleanText).filter((item) => !shouldSkipText(item))
-      : [];
+    const rawTexts = Array.isArray(body.texts)
+      ? body.texts
+      : typeof body.text === 'string'
+        ? [body.text]
+        : [];
 
-    const uniqueTexts = Array.from(new Set(inputTexts)).slice(
-      0,
-      maxTextsPerRequest,
-    );
+    const inputTexts = rawTexts
+      .map(cleanText)
+      .filter((item) => !shouldSkipText(item));
 
-    if (uniqueTexts.length === 0) {
+    uniqueTexts = Array.from(new Set(inputTexts)).slice(0, maxTextsPerRequest);
+
+    const total = uniqueTexts.length;
+
+    if (total === 0) {
       return NextResponse.json({
         ok: true,
         language,
         translations: {},
+        translatedText: '',
+        progress: createProgress({
+          total: 0,
+          translated: 0,
+        }),
+        meta: {
+          totalInputTexts: rawTexts.length,
+          totalTranslatableTexts: 0,
+          batches: 0,
+          maxTextsPerRequest,
+          maxBatchSize,
+        },
       });
     }
 
     if (language === 'sk') {
+      const translations = createFallbackTranslations(uniqueTexts);
+
       return NextResponse.json({
         ok: true,
         language,
-        translations: Object.fromEntries(uniqueTexts.map((text) => [text, text])),
+        translations,
+        translatedText: uniqueTexts[0] || '',
+        progress: createProgress({
+          total,
+          translated: total,
+        }),
+        meta: {
+          totalInputTexts: rawTexts.length,
+          totalTranslatableTexts: total,
+          batches: 0,
+          maxTextsPerRequest,
+          maxBatchSize,
+        },
       });
     }
 
     const translations: Record<string, string> = {};
     const batches = chunkArray(uniqueTexts, maxBatchSize);
+
+    let translatedCount = 0;
 
     for (const batch of batches) {
       const translatedBatch = await translateBatch({
@@ -410,23 +546,53 @@ export async function POST(req: NextRequest) {
         const translated = cleanText(translatedBatch[index] || source);
         translations[source] = translated || source;
       });
+
+      translatedCount += batch.length;
     }
 
     return NextResponse.json({
       ok: true,
       language,
       translations,
+      translatedText: translations[uniqueTexts[0]] || uniqueTexts[0] || '',
+      progress: createProgress({
+        total,
+        translated: translatedCount,
+      }),
+      meta: {
+        totalInputTexts: rawTexts.length,
+        totalTranslatableTexts: total,
+        batches: batches.length,
+        maxTextsPerRequest,
+        maxBatchSize,
+      },
     });
   } catch (error) {
-    console.error('TRANSLATE_UI_API_ERROR:', error);
+    console.warn('TRANSLATE_UI_API_WARNING:', error);
 
     return NextResponse.json(
       {
         ok: false,
+        language,
         error: 'TRANSLATE_UI_FAILED',
         message: 'Preklad rozhrania zlyhal.',
+        translations: createFallbackTranslations(uniqueTexts),
+        translatedText: uniqueTexts[0] || '',
+        progress: createProgress({
+          total: uniqueTexts.length,
+          translated: 0,
+        }),
+        meta: {
+          totalInputTexts: 0,
+          totalTranslatableTexts: uniqueTexts.length,
+          batches: 0,
+          maxTextsPerRequest,
+          maxBatchSize,
+        },
       },
-      { status: 500 },
+      {
+        status: 200,
+      },
     );
   }
 }

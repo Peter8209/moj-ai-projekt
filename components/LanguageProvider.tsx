@@ -22,6 +22,8 @@ type LanguageContextValue = {
   setLanguage: (language: AppLanguage) => void;
   t: ReturnType<typeof getTranslation>;
   appLanguages: typeof languages;
+  isTranslatingInterface: boolean;
+  translationProgress: number;
 };
 
 type StoredProfile = {
@@ -33,6 +35,9 @@ type StoredProfile = {
 };
 
 const LANGUAGE_STORAGE_KEY = 'zedpera_language';
+const SYSTEM_LANGUAGE_STORAGE_KEY = 'zedpera_system_language';
+const WORK_LANGUAGE_STORAGE_KEY = 'zedpera_work_language';
+
 const ACTIVE_PROFILE_KEY = 'active_profile';
 const LEGACY_PROFILE_KEY = 'profile';
 const PROFILES_FULL_KEY = 'profiles_full';
@@ -107,7 +112,10 @@ function getInitialLanguage(): AppLanguage {
     return languageFromPath;
   }
 
-  const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+  const savedLanguage =
+    window.localStorage.getItem(LANGUAGE_STORAGE_KEY) ||
+    window.localStorage.getItem(SYSTEM_LANGUAGE_STORAGE_KEY) ||
+    window.localStorage.getItem(WORK_LANGUAGE_STORAGE_KEY);
 
   if (isValidLanguage(savedLanguage)) {
     return savedLanguage;
@@ -139,6 +147,7 @@ function updateProfileInterfaceLanguage(nextLanguage: AppLanguage) {
     const updatedProfile: StoredProfile = {
       ...activeProfile,
       interfaceLanguage: nextLanguage,
+      workLanguage: nextLanguage,
       updatedAt: now,
     };
 
@@ -162,6 +171,7 @@ function updateProfileInterfaceLanguage(nextLanguage: AppLanguage) {
           return {
             ...profile,
             interfaceLanguage: nextLanguage,
+            workLanguage: nextLanguage,
             updatedAt: now,
           };
         }
@@ -186,6 +196,7 @@ function updateProfileInterfaceLanguage(nextLanguage: AppLanguage) {
     const updatedProfile: StoredProfile = {
       ...legacyProfile,
       interfaceLanguage: nextLanguage,
+      workLanguage: nextLanguage,
       updatedAt: now,
     };
 
@@ -206,12 +217,17 @@ function applyLanguageToDocument(nextLanguage: AppLanguage) {
 
   document.documentElement.lang = nextLanguage;
   document.documentElement.setAttribute('data-language', nextLanguage);
+  document.documentElement.setAttribute('data-system-language', nextLanguage);
+  document.documentElement.setAttribute('data-work-language', nextLanguage);
 }
 
 function persistLanguage(nextLanguage: AppLanguage) {
   if (typeof window === 'undefined') return;
 
   window.localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
+  window.localStorage.setItem(SYSTEM_LANGUAGE_STORAGE_KEY, nextLanguage);
+  window.localStorage.setItem(WORK_LANGUAGE_STORAGE_KEY, nextLanguage);
+
   updateProfileInterfaceLanguage(nextLanguage);
   applyLanguageToDocument(nextLanguage);
 }
@@ -256,7 +272,13 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.key !== LANGUAGE_STORAGE_KEY) return;
+      if (
+        event.key !== LANGUAGE_STORAGE_KEY &&
+        event.key !== SYSTEM_LANGUAGE_STORAGE_KEY &&
+        event.key !== WORK_LANGUAGE_STORAGE_KEY
+      ) {
+        return;
+      }
 
       const nextLanguage = event.newValue;
 
@@ -301,6 +323,8 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   const setLanguage = useCallback(
     (nextLanguage: AppLanguage) => {
+      if (!isValidLanguage(nextLanguage)) return;
+
       applyLanguage(nextLanguage, true);
     },
     [applyLanguage],
@@ -312,6 +336,10 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       setLanguage,
       t: getTranslation(language),
       appLanguages: languages,
+
+      // Loader je vypnutý natrvalo, aby neblokoval dashboard.
+      isTranslatingInterface: false,
+      translationProgress: 100,
     };
   }, [language, setLanguage]);
 

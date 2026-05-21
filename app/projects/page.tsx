@@ -166,10 +166,12 @@ function normalizeProfileForApp(row: any): SavedProfile {
       row?.updated_at ||
       row?.created_at ||
       full.savedAt ||
+      full.updated_at ||
+      full.created_at ||
       new Date().toISOString(),
 
-    created_at: row?.created_at,
-    updated_at: row?.updated_at,
+    created_at: row?.created_at || full.created_at,
+    updated_at: row?.updated_at || full.updated_at,
     full_profile: row?.full_profile || full,
   };
 }
@@ -283,6 +285,68 @@ function buildSupabaseProfilePayload(profile: SavedProfile) {
   };
 }
 
+function readProfilesFromLocalStorage(): SavedProfile[] {
+  try {
+    const raw = localStorage.getItem('profiles_full');
+    const parsed = raw ? JSON.parse(raw) : [];
+
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .filter((item) => item && typeof item === 'object')
+      .map((item) =>
+        normalizeProfileForApp({
+          ...item,
+          id: item.id || createProfileId(),
+          title: item.title || 'Bez názvu',
+          savedAt:
+            item.savedAt ||
+            item.updated_at ||
+            item.created_at ||
+            new Date().toISOString(),
+        }),
+      );
+  } catch {
+    return [];
+  }
+}
+
+function mergeProfiles(
+  localProfiles: SavedProfile[],
+  supabaseProfiles: SavedProfile[],
+) {
+  const map = new Map<string, SavedProfile>();
+
+  for (const profile of localProfiles) {
+    if (profile?.id) {
+      map.set(profile.id, profile);
+    }
+  }
+
+  for (const profile of supabaseProfiles) {
+    if (!profile?.id) continue;
+
+    const existing = map.get(profile.id);
+
+    if (!existing) {
+      map.set(profile.id, profile);
+      continue;
+    }
+
+    const existingTime = existing.savedAt
+      ? new Date(existing.savedAt).getTime()
+      : 0;
+
+    const incomingTime = profile.savedAt
+      ? new Date(profile.savedAt).getTime()
+      : 0;
+
+    map.set(profile.id, incomingTime >= existingTime ? profile : existing);
+  }
+
+  return Array.from(map.values());
+}
+
 export default function ProjectsPage() {
   const router = useRouter();
 
@@ -309,7 +373,15 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     loadActiveProfile();
+
+    const localProfiles = applySavedOrder(readProfilesFromLocalStorage());
+
+    if (localProfiles.length > 0) {
+      setProfiles(localProfiles);
+    }
+
     void loadProfiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const goToMenu = () => {
@@ -397,7 +469,30 @@ export default function ProjectsPage() {
     );
   };
 
+  const syncActiveProfileWithList = (items: SavedProfile[]) => {
+    try {
+      const activeRaw = localStorage.getItem('active_profile');
+      const active = activeRaw ? JSON.parse(activeRaw) : null;
+
+      if (!active?.id) return;
+
+      const found = items.find((profile) => profile.id === active.id);
+
+      if (found) {
+        localStorage.setItem('active_profile', JSON.stringify(found));
+        localStorage.setItem('profile', JSON.stringify(found));
+        setActiveProfileId(found.id);
+      } else {
+        setActiveProfileId(null);
+      }
+    } catch {
+      setActiveProfileId(null);
+    }
+  };
+
   const loadProfiles = async () => {
+    const localProfiles = readProfilesFromLocalStorage();
+
     try {
       const supabase = createClient();
 
@@ -407,8 +502,14 @@ export default function ProjectsPage() {
         .order('updated_at', { ascending: false });
 
       if (error) {
-        console.error('SUPABASE LOAD PROFILES ERROR:', error);
-        loadProfilesFromLocalStorage();
+        console.warn('SUPABASE LOAD PROFILES WARNING:', error);
+
+        const orderedLocalProfiles = applySavedOrder(localProfiles);
+
+        setProfiles(orderedLocalProfiles);
+        saveProfilesLocally(orderedLocalProfiles);
+        syncActiveProfileWithList(orderedLocalProfiles);
+
         return;
       }
 
@@ -416,66 +517,20 @@ export default function ProjectsPage() {
         normalizeProfileForApp(row),
       );
 
-      const orderedProfiles = applySavedOrder(supabaseProfiles);
+      const mergedProfiles = mergeProfiles(localProfiles, supabaseProfiles);
+      const orderedProfiles = applySavedOrder(mergedProfiles);
 
       setProfiles(orderedProfiles);
       saveProfilesLocally(orderedProfiles);
-
-      const activeRaw = localStorage.getItem('active_profile');
-      const active = activeRaw ? JSON.parse(activeRaw) : null;
-
-      if (active?.id) {
-        const found = orderedProfiles.find(
-          (profile) => profile.id === active.id,
-        );
-
-        if (found) {
-          localStorage.setItem('active_profile', JSON.stringify(found));
-          localStorage.setItem('profile', JSON.stringify(found));
-          setActiveProfileId(found.id);
-        } else {
-          setActiveProfileId(null);
-        }
-      }
+      syncActiveProfileWithList(orderedProfiles);
     } catch (error) {
-      console.error('LOAD PROFILES ERROR:', error);
-      loadProfilesFromLocalStorage();
-    }
-  };
+      console.warn('LOAD PROFILES WARNING:', error);
 
-  const loadProfilesFromLocalStorage = () => {
-    try {
-      const raw = localStorage.getItem('profiles_full');
-      const parsed = raw ? JSON.parse(raw) : [];
+      const orderedLocalProfiles = applySavedOrder(localProfiles);
 
-      if (Array.isArray(parsed)) {
-        const normalized: SavedProfile[] = parsed
-          .filter((item) => item && typeof item === 'object')
-          .map((item) =>
-            normalizeProfileForApp({
-              ...item,
-              id: item.id || createProfileId(),
-              title: item.title || 'Bez názvu',
-              savedAt: item.savedAt || new Date().toISOString(),
-            }),
-          );
-
-        const orderedProfiles = applySavedOrder(normalized);
-
-        setProfiles(orderedProfiles);
-        saveProfilesLocally(orderedProfiles);
-
-        const activeRaw = localStorage.getItem('active_profile');
-        const active = activeRaw ? JSON.parse(activeRaw) : null;
-
-        if (active?.id) {
-          setActiveProfileId(active.id);
-        }
-      } else {
-        setProfiles([]);
-      }
-    } catch {
-      setProfiles([]);
+      setProfiles(orderedLocalProfiles);
+      saveProfilesLocally(orderedLocalProfiles);
+      syncActiveProfileWithList(orderedLocalProfiles);
     }
   };
 
@@ -567,7 +622,7 @@ export default function ProjectsPage() {
         .single();
 
       if (error) {
-        console.error('SUPABASE SAVE PROFILE ERROR:', error);
+        console.warn('SUPABASE SAVE PROFILE WARNING:', error);
         alert(
           `Profil sa uložil lokálne, ale nepodarilo sa ho uložiť do Supabase: ${error.message}`,
         );
@@ -596,7 +651,7 @@ export default function ProjectsPage() {
 
       await loadProfiles();
     } catch (error) {
-      console.error('PROFILE SAVE ERROR:', error);
+      console.warn('PROFILE SAVE WARNING:', error);
       alert(
         'Profil sa uložil lokálne, ale nastala chyba pri ukladaní do Supabase.',
       );
@@ -626,13 +681,13 @@ export default function ProjectsPage() {
         .eq('id', id);
 
       if (error) {
-        console.error('SUPABASE DELETE PROFILE ERROR:', error);
+        console.warn('SUPABASE DELETE PROFILE WARNING:', error);
         alert(
           `Profil sa odstránil lokálne, ale nie zo Supabase: ${error.message}`,
         );
       }
     } catch (error) {
-      console.error('DELETE PROFILE ERROR:', error);
+      console.warn('DELETE PROFILE WARNING:', error);
     }
 
     const activeRaw = localStorage.getItem('active_profile');
@@ -794,19 +849,10 @@ export default function ProjectsPage() {
 
         {filteredProfiles.length === 0 ? (
           <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-10 text-center">
-            <FileText className="mx-auto mb-4 h-12 w-12 text-violet-300" />
-
-            <h2 className="text-2xl font-black">Zatiaľ nemáš uložené práce</h2>
-
-            <p className="mx-auto mt-3 max-w-2xl text-slate-400">
-              Klikni na tlačidlo Nová práca. Po vyplnení a uložení sa práca
-              automaticky zobrazí v tomto zozname.
-            </p>
-
             <button
               type="button"
               onClick={openNewProfile}
-              className="mt-6 inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 font-black text-white transition hover:opacity-90"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 font-black text-white transition hover:opacity-90"
             >
               <Plus className="h-5 w-5" />
               Nová práca

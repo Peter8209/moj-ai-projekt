@@ -1437,17 +1437,25 @@ export default function ProfileForm({
       );
 
       if (error) {
-        console.error('SUPABASE PROFILE SAVE ERROR:', error);
+  console.error('SUPABASE PROFILE SAVE ERROR RAW:', error);
+  console.error('SUPABASE PROFILE SAVE ERROR JSON:', JSON.stringify(error, null, 2));
+  console.error('SUPABASE PROFILE SAVE ERROR MESSAGE:', error.message);
+  console.error('SUPABASE PROFILE SAVE ERROR DETAILS:', error.details);
+  console.error('SUPABASE PROFILE SAVE ERROR HINT:', error.hint);
+  console.error('SUPABASE PROFILE SAVE ERROR CODE:', error.code);
 
-        alert(
-          profile.language === 'SK'
-            ? `Profil sa uložil lokálne, ale nie do Supabase: ${error.message}`
-            : `Profile was saved locally, but not to Supabase: ${error.message}`
-        );
+  alert(
+    profile.language === 'SK'
+      ? `Profil sa nepodarilo uložiť do databázy.\n\nChyba: ${
+          error.message || error.details || error.hint || error.code || 'Neznáma chyba Supabase'
+        }`
+      : `The profile could not be saved to the database.\n\nError: ${
+          error.message || error.details || error.hint || error.code || 'Unknown Supabase error'
+        }`,
+  );
 
-        onSave?.(payload);
-        return;
-      }
+  return;
+}
 
       onSave?.(payload);
 

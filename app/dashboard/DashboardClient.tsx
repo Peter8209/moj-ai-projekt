@@ -72,14 +72,20 @@ type SavedProfile = {
   title?: string;
   topic?: string;
   field?: string;
+
+  // odbornosť výstupu: akademická, vysoko odborná, štandardná...
+  expertise?: string;
+  workExpertise?: string;
+  specializationLevel?: string;
+
   supervisor?: string;
   citation?: string;
   language?: string;
 
-
   // jazyk rozhrania
   interfaceLanguage?: string;
 
+  // jazyk práce / jazyk výstupu
   workLanguage?: string;
   annotation?: string;
   goal?: string;
@@ -338,7 +344,6 @@ function getStoredSystemLanguage(): SystemLanguage {
   const stored =
     localStorage.getItem('zedpera_language') ||
     localStorage.getItem('zedpera_system_language') ||
-    localStorage.getItem('zedpera_work_language') ||
     'sk';
 
   return isValidSystemLanguage(stored) ? stored : 'sk';
@@ -358,9 +363,35 @@ function withSystemLanguageProfile(
 
   return {
     ...profile,
-    language: systemLanguage,
+
+    // language necháme podľa profilu, ak existuje
+    language: profile.language || systemLanguage,
+
+    // interfaceLanguage je jazyk rozhrania
     interfaceLanguage: systemLanguage,
-    workLanguage: systemLanguage,
+
+    // workLanguage NESMIE prepísať jazyk rozhrania
+    workLanguage:
+      profile.workLanguage ||
+      profile.language ||
+      systemLanguage,
+  };
+}
+
+function prepareProfileForApi(
+  profile: SavedProfile | null,
+  systemLanguage: SystemLanguage,
+): SavedProfile | null {
+  if (!profile) return null;
+
+  return {
+    ...profile,
+    language: profile.language || systemLanguage,
+    interfaceLanguage: systemLanguage,
+    workLanguage:
+      profile.workLanguage ||
+      profile.language ||
+      systemLanguage,
   };
 }
 
@@ -369,7 +400,7 @@ function persistSystemLanguage(systemLanguage: SystemLanguage) {
 
   localStorage.setItem('zedpera_language', systemLanguage);
   localStorage.setItem('zedpera_system_language', systemLanguage);
-  localStorage.setItem('zedpera_work_language', systemLanguage);
+  
 
   document.documentElement.lang = systemLanguage;
   document.documentElement.setAttribute('data-language', systemLanguage);
@@ -775,9 +806,18 @@ function downloadBlob({
 }
 
 function getWorkType(profile: SavedProfile | null) {
-  return profile?.schema?.label || profile?.type || 'Neuvedené';
+  return profile?.type || profile?.schema?.label || 'Neuvedené';
 }
 
+
+function getExpertise(profile: SavedProfile | null) {
+  return (
+    profile?.expertise ||
+    profile?.workExpertise ||
+    profile?.specializationLevel ||
+    'Neuvedené'
+  );
+}
 function getCitationStyle(profile: SavedProfile | null) {
   return profile?.citation || 'ISO 690';
 }
@@ -785,7 +825,6 @@ function getCitationStyle(profile: SavedProfile | null) {
 function getWorkLanguage(profile: SavedProfile | null) {
   return (
     profile?.workLanguage ||
-    profile?.interfaceLanguage ||
     profile?.language ||
     getStoredSystemLanguage()
   );
@@ -803,7 +842,9 @@ function buildProfileBlock(profile: SavedProfile | null) {
 
   return `
 Názov práce: ${profile.title || 'Neuvedené'}
+Téma práce: ${profile.topic || 'Neuvedené'}
 Typ práce: ${getWorkType(profile)}
+Odbornosť výstupu: ${getExpertise(profile)}
 Odbor: ${profile.field || 'Neuvedené'}
 Vedúci práce: ${profile.supervisor || 'Neuvedené'}
 Citačná norma: ${getCitationStyle(profile)}
@@ -814,6 +855,8 @@ Metodológia: ${profile.methodology || 'Neuvedené'}
 Výskumné otázky: ${profile.researchQuestions || 'Neuvedené'}
 Hypotézy: ${profile.hypotheses || 'Neuvedené'}
 Praktická časť: ${profile.practicalPart || 'Neuvedené'}
+Vedecký prínos: ${profile.scientificContribution || 'Neuvedené'}
+Požiadavky na zdroje: ${profile.sourcesRequirement || 'Neuvedené'}
 Kľúčové slová: ${keywords.length ? keywords.join(', ') : 'Neuvedené'}
 `.trim();
 }
@@ -1243,7 +1286,84 @@ const exportTitle = useMemo(() => {
   }`.trim();
 }, [activeModuleInfo.label, activeProfile]);
 
-  useEffect(() => {
+function persistActiveProfileEverywhere(profile: SavedProfile | null) {
+  if (!profile) return;
+
+  const systemLanguage = getStoredSystemLanguage();
+  const normalizedProfile = prepareProfileForApi(profile, systemLanguage);
+
+  if (!normalizedProfile) return;
+
+  setActiveProfile(normalizedProfile);
+
+  try {
+    localStorage.setItem('active_profile', JSON.stringify(normalizedProfile));
+    localStorage.setItem('profile', JSON.stringify(normalizedProfile));
+
+    const rawProfiles = localStorage.getItem('profiles_full');
+    const storedProfiles = safeJsonParse<SavedProfile[]>(rawProfiles) || [];
+
+    const withoutCurrent = storedProfiles.filter((item) => {
+      if (!item?.id || !normalizedProfile.id) return true;
+      return item.id !== normalizedProfile.id;
+    });
+
+    localStorage.setItem(
+      'profiles_full',
+      JSON.stringify([normalizedProfile, ...withoutCurrent]),
+    );
+
+    window.dispatchEvent(
+      new CustomEvent('zedpera:active-profile-changed', {
+        detail: normalizedProfile,
+      }),
+    );
+  } catch (error) {
+    console.warn('Aktívny profil sa nepodarilo uložiť:', error);
+  }
+}
+
+useEffect(() => {
+  function handleActiveProfileChanged(event: Event) {
+    const customEvent = event as CustomEvent<SavedProfile>;
+
+    if (!customEvent.detail) return;
+
+    const systemLanguage = getStoredSystemLanguage();
+
+    const normalizedProfile = prepareProfileForApi(
+      customEvent.detail,
+      systemLanguage,
+    );
+
+    if (!normalizedProfile) return;
+
+    setActiveProfile(normalizedProfile);
+
+    try {
+      localStorage.setItem('active_profile', JSON.stringify(normalizedProfile));
+      localStorage.setItem('profile', JSON.stringify(normalizedProfile));
+    } catch {
+      // localStorage nemusí byť dostupný
+    }
+  }
+
+  window.addEventListener(
+    'zedpera:active-profile-changed',
+    handleActiveProfileChanged,
+  );
+
+  return () => {
+    window.removeEventListener(
+      'zedpera:active-profile-changed',
+      handleActiveProfileChanged,
+    );
+  };
+}, []);
+
+
+
+ useEffect(() => {
   const systemLanguage = getStoredSystemLanguage();
   persistSystemLanguage(systemLanguage);
 
@@ -1262,7 +1382,7 @@ const exportTitle = useMemo(() => {
       ? normalizeProfile(profiles[0])
       : null);
 
-  const profileWithLanguage = withSystemLanguageProfile(
+  const profileWithLanguage = prepareProfileForApi(
     selectedProfile,
     systemLanguage,
   );
@@ -1468,11 +1588,10 @@ recognition.lang = speechLanguageMap[systemLanguage] || 'sk-SK';
   const buildModulePrompt = () => {
 const moduleKey  = String(activeModule);
   const systemLanguage = getStoredSystemLanguage();
-  const profileForPrompt = withSystemLanguageProfile(
-    activeProfile,
-    systemLanguage,
-  );
-
+const profileForPrompt = prepareProfileForApi(
+  activeProfile,
+  systemLanguage,
+);
   const profileBlock = buildProfileBlock(profileForPrompt);
   const citationStyle = getCitationStyle(profileForPrompt);
   const workLanguage = getWorkLanguage(profileForPrompt);
@@ -1817,19 +1936,22 @@ VÝSTUP:
 async function runModule() {
   if (isLoading) return;
 
-  if (!input.trim() && attachedFiles.length === 0) {
-    alert('Najprv napíš text alebo nahraj prílohu.');
-    return;
-  }
+ if (!activeProfile?.id) {
+  alert(
+    'Najprv vyberte alebo vytvorte profil práce. Systém nevie, ku ktorej práci má výstup priradiť.',
+  );
+  return;
+}
 
-  if (activeModule === 'planning') {
-    const validation = validatePlanningDatesNoPast(input);
+if (!activeProfile?.type && !activeProfile?.schema?.label) {
+  alert('V aktívnom profile chýba typ práce. Skontrolujte profil práce.');
+  return;
+}
 
-    if (!validation.ok) {
-      alert(validation.message);
-      return;
-    }
-  }
+if (!activeProfile?.workLanguage && !activeProfile?.language) {
+  alert('V aktívnom profile chýba jazyk práce. Skontrolujte profil práce.');
+  return;
+}
 
   setIsLoading(true);
   setResult('');
@@ -1844,22 +1966,22 @@ async function runModule() {
       const systemLanguage = getStoredSystemLanguage();
       persistSystemLanguage(systemLanguage);
 
-      const profileForApi = withSystemLanguageProfile(
-        activeProfile,
-        systemLanguage,
-      );
+      const profileForApi = prepareProfileForApi(
+  activeProfile,
+  systemLanguage,
+);
 
-      setActiveProfile(profileForApi);
+if (profileForApi) {
+  persistActiveProfileEverywhere(profileForApi);
+}
 
-      if (profileForApi) {
-        localStorage.setItem('active_profile', JSON.stringify(profileForApi));
-        localStorage.setItem('profile', JSON.stringify(profileForApi));
-      }
+const finalWorkLanguage = getWorkLanguage(profileForApi);
 
-      formData.append('language', systemLanguage);
-      formData.append('outputLanguage', systemLanguage);
-      formData.append('systemLanguage', systemLanguage);
-      formData.append('workLanguage', systemLanguage);
+formData.append('language', finalWorkLanguage);
+formData.append('outputLanguage', finalWorkLanguage);
+formData.append('systemLanguage', systemLanguage);
+formData.append('interfaceLanguage', systemLanguage);
+formData.append('workLanguage', finalWorkLanguage);
 
       formData.append('analysisGoal', secondaryInput || '');
       formData.append('dataDescription', input || '');
@@ -1915,8 +2037,8 @@ async function runModule() {
         assistantMessage: output,
         result: {
           analysis: normalizedData,
-          profileTitle: activeProfile?.title || '',
-          profileId: activeProfile?.id || null,
+          profileTitle: profileForApi?.title || '',
+profileId: profileForApi?.id || null,
           attachedFiles: attachedFiles.map((file) => ({
             name: file.name,
             size: file.size,
@@ -1953,27 +2075,41 @@ async function runModule() {
       const systemLanguage = getStoredSystemLanguage();
       persistSystemLanguage(systemLanguage);
 
-      const profileForApi = withSystemLanguageProfile(
-        activeProfile,
-        systemLanguage,
-      );
+      const profileForApi = prepareProfileForApi(
+  activeProfile,
+  systemLanguage,
+);
 
-      setActiveProfile(profileForApi);
+if (profileForApi) {
+  persistActiveProfileEverywhere(profileForApi);
+}
 
-      if (profileForApi) {
-        localStorage.setItem('active_profile', JSON.stringify(profileForApi));
-        localStorage.setItem('profile', JSON.stringify(profileForApi));
-      }
+const finalWorkLanguage = getWorkLanguage(profileForApi);
 
       formData.append('agent', agent);
       formData.append('text', input);
       formData.append('activeProfile', JSON.stringify(profileForApi || null));
       formData.append('profile', JSON.stringify(profileForApi || null));
 
-      formData.append('language', systemLanguage);
-      formData.append('outputLanguage', systemLanguage);
-      formData.append('systemLanguage', systemLanguage);
-      formData.append('workLanguage', systemLanguage);
+formData.append(
+  'profileSnapshot',
+  JSON.stringify({
+    id: profileForApi?.id || null,
+    title: profileForApi?.title || '',
+    topic: profileForApi?.topic || '',
+    type: getWorkType(profileForApi),
+    expertise: getExpertise(profileForApi),
+    workLanguage: getWorkLanguage(profileForApi),
+    citation: getCitationStyle(profileForApi),
+  }),
+);
+
+
+      formData.append('language', finalWorkLanguage);
+formData.append('outputLanguage', finalWorkLanguage);
+formData.append('systemLanguage', systemLanguage);
+formData.append('interfaceLanguage', systemLanguage);
+formData.append('workLanguage', finalWorkLanguage);
 
       formData.append('title', profileForApi?.title || 'Kontrola originality');
       formData.append('author', '');
@@ -2171,17 +2307,16 @@ if (activeModule === 'humanizer') {
       const systemLanguage = getStoredSystemLanguage();
       persistSystemLanguage(systemLanguage);
 
-      const profileForApi = withSystemLanguageProfile(
-        activeProfile,
-        systemLanguage,
-      );
+      const profileForApi = prepareProfileForApi(
+  activeProfile,
+  systemLanguage,
+);
 
-      setActiveProfile(profileForApi);
+if (profileForApi) {
+  persistActiveProfileEverywhere(profileForApi);
+}
 
-      if (profileForApi) {
-        localStorage.setItem('active_profile', JSON.stringify(profileForApi));
-        localStorage.setItem('profile', JSON.stringify(profileForApi));
-      }
+const finalWorkLanguage = getWorkLanguage(profileForApi);
 
       const fallbackSummary = [
         profileForApi?.annotation,
@@ -2215,10 +2350,26 @@ if (activeModule === 'humanizer') {
       formData.append('activeProfile', JSON.stringify(profileForApi || null));
       formData.append('profile', JSON.stringify(profileForApi || null));
 
-      formData.append('language', systemLanguage);
-      formData.append('outputLanguage', systemLanguage);
-      formData.append('systemLanguage', systemLanguage);
-      formData.append('workLanguage', systemLanguage);
+formData.append(
+  'profileSnapshot',
+  JSON.stringify({
+    id: profileForApi?.id || null,
+    title: profileForApi?.title || '',
+    topic: profileForApi?.topic || '',
+    type: getWorkType(profileForApi),
+    expertise: getExpertise(profileForApi),
+    workLanguage: getWorkLanguage(profileForApi),
+    citation: getCitationStyle(profileForApi),
+  }),
+);
+
+
+
+      formData.append('language', finalWorkLanguage);
+formData.append('outputLanguage', finalWorkLanguage);
+formData.append('systemLanguage', systemLanguage);
+formData.append('interfaceLanguage', systemLanguage);
+formData.append('workLanguage', finalWorkLanguage);
 
       if (profileForApi?.id) {
         formData.append('projectId', profileForApi.id);
@@ -2323,28 +2474,42 @@ if (activeModule === 'humanizer') {
     const systemLanguage = getStoredSystemLanguage();
     persistSystemLanguage(systemLanguage);
 
-    const profileForApi = withSystemLanguageProfile(
-      activeProfile,
-      systemLanguage,
-    );
+    const profileForApi = prepareProfileForApi(
+  activeProfile,
+  systemLanguage,
+);
 
-    setActiveProfile(profileForApi);
+if (profileForApi) {
+  persistActiveProfileEverywhere(profileForApi);
+}
 
-    if (profileForApi) {
-      localStorage.setItem('active_profile', JSON.stringify(profileForApi));
-      localStorage.setItem('profile', JSON.stringify(profileForApi));
-    }
+const finalWorkLanguage = getWorkLanguage(profileForApi);
 
     formData.append('agent', agent);
     formData.append('module', activeModule);
 
-    formData.append('language', systemLanguage);
-    formData.append('outputLanguage', systemLanguage);
-    formData.append('systemLanguage', systemLanguage);
-    formData.append('workLanguage', systemLanguage);
+    formData.append('language', finalWorkLanguage);
+formData.append('outputLanguage', finalWorkLanguage);
+formData.append('systemLanguage', systemLanguage);
+formData.append('interfaceLanguage', systemLanguage);
+formData.append('workLanguage', finalWorkLanguage);
 
     formData.append('messages', JSON.stringify(apiMessages));
     formData.append('profile', JSON.stringify(profileForApi || null));
+
+formData.append(
+  'profileSnapshot',
+  JSON.stringify({
+    id: profileForApi?.id || null,
+    title: profileForApi?.title || '',
+    topic: profileForApi?.topic || '',
+    type: getWorkType(profileForApi),
+    expertise: getExpertise(profileForApi),
+    workLanguage: getWorkLanguage(profileForApi),
+    citation: getCitationStyle(profileForApi),
+  }),
+);
+
 
     formData.append('useSemanticScholar', 'false');
     formData.append('sourceMode', 'uploaded_documents_first');

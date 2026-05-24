@@ -3063,9 +3063,59 @@ ${languageInstruction}`;
 ${languageInstruction}`;
   }
 
+
+const lockedProfileTitle =
+  profile?.title?.trim() ||
+  profile?.topic?.trim() ||
+  'nezadaná hlavná téma';
+
+const strictProfileLock = `
+UZAMKNUTÝ AKTÍVNY PROFIL PRÁCE:
+ID profilu / projektu: ${profile?.id || 'neuvedené'}
+Hlavná téma / názov práce: ${lockedProfileTitle}
+Typ práce: ${profile?.type || 'neuvedené'}
+Stupeň / úroveň: ${profile?.level || 'neuvedené'}
+Odbor: ${profile?.field || 'neuvedené'}
+Vedúci práce: ${profile?.supervisor || 'neuvedené'}
+Cieľ práce: ${profile?.goal || 'neuvedené'}
+Výskumný problém: ${profile?.problem || 'neuvedené'}
+Metodológia: ${profile?.methodology || 'neuvedené'}
+Výskumné otázky: ${profile?.researchQuestions || 'neuvedené'}
+Kľúčové slová: ${getKeywords(profile).join(', ') || 'neuvedené'}
+Citačná norma: ${getCitationStyle(profile)}
+Jazyk práce: ${getWorkLanguage(profile)}
+
+TVRDÉ PRAVIDLÁ UZAMKNUTIA PROFILU:
+1. Každá odpoveď musí vychádzať výlučne z tohto aktívneho profilu práce.
+2. Nesmieš zmeniť tému práce na inú tému.
+3. Nesmieš použiť predchádzajúcu tému z histórie chatu.
+4. Nesmieš použiť najnovší profil používateľa, ak sa líši od tohto aktívneho profilu.
+5. Ak je hlavná téma alebo názov práce „Immanuel Kant“, celý výstup musí byť o Immanuelovi Kantovi.
+6. Ak používateľ napíše všeobecne „napíš úvod“, „napíš abstrakt“, „navrhni kapitolu“, „spracuj zdroje“ alebo „pokračuj“, vždy to znamená: spracuj to pre tento aktívny profil práce.
+7. Ak používateľ výslovne žiada inú tému, upozorni ho, že aktuálne je aktívny profil inej práce, a najprv sa riaď aktívnym profilom.
+8. Ak je konflikt medzi históriou chatu a aktívnym profilom, aktívny profil má absolútnu prioritu.
+`;
+
+
   const prompt = `Si ZEDPERA, profesionálny akademický asistent pre písanie, kontrolu a odborné vedenie akademických prác.
 
-${languageInstruction}\n\nKOMPLETNÝ PROFIL PRÁCE JE HLAVNÝ ZDROJ KONTEXTU. Každá odpoveď musí vychádzať z profilu práce.\n\nAKTÍVNY ŠPECIÁLNY REŽIM KAPITOLY: ${isChapterRequest ? 'Áno' : 'Nie'}\nPožadované číslo kapitoly: ${requestedChapterNumber || 'neurčené'}\nREŽIM IBA ZDROJE: ${sourcesOnly ? 'Áno' : 'Nie'}\nPrílohy podľa automatickej kontroly súvisia s profilom: ${relevance.isRelevant ? 'Áno' : 'Nie'}\nZhodné odborné výrazy: ${relevance.matchedTokens.slice(0, 80).join(', ') || 'žiadne'}\n\n${buildAcademicChapterRules()}\n\n${buildVerifiedSourcePackPrompt(externalResearch)}\n\nHLAVNÝ POSTUP:
+${languageInstruction}
+
+KOMPLETNÝ PROFIL PRÁCE JE HLAVNÝ ZDROJ KONTEXTU. Každá odpoveď musí vychádzať z profilu práce.
+
+${strictProfileLock}
+
+AKTÍVNY ŠPECIÁLNY REŽIM KAPITOLY: ${isChapterRequest ? 'Áno' : 'Nie'}
+Požadované číslo kapitoly: ${requestedChapterNumber || 'neurčené'}
+REŽIM IBA ZDROJE: ${sourcesOnly ? 'Áno' : 'Nie'}
+Prílohy podľa automatickej kontroly súvisia s profilom: ${relevance.isRelevant ? 'Áno' : 'Nie'}
+Zhodné odborné výrazy: ${relevance.matchedTokens.slice(0, 80).join(', ') || 'žiadne'}
+
+${buildAcademicChapterRules()}
+
+${buildVerifiedSourcePackPrompt(externalResearch)}
+
+HLAVNÝ POSTUP:
 1. Najvyššiu prioritu má konkrétna požiadavka používateľa. Nerob inú úlohu, než o ktorú používateľ žiada. Ak používateľ žiada 1. kapitolu, píš 1. kapitolu; ak žiada úvod, píš úvod; ak žiada zdroje, rieš zdroje.
 2. Hneď potom rešpektuj aktívny profil práce: názov, tému, cieľ, problém, metodológiu, odbor, jazyk a citačnú normu.
 3. Ako odborný obsahový základ použi najprv relevantnú prílohu alebo projektový dokument. Z prílohy vytiahni odborný obsah, citácie v texte a bibliografiu.
@@ -3075,6 +3125,8 @@ ${languageInstruction}\n\nKOMPLETNÝ PROFIL PRÁCE JE HLAVNÝ ZDROJ KONTEXTU. Ka
 7. Ak sú k dispozícii zdroje z článku, príloh, projektových dokumentov, Semantic Scholar alebo Crossref, musia byť použité a vypísané úplne.
 8. Kapitola nesmie byť krátka. Pri žiadosti o kapitolu vytvor rozsiahly akademický text minimálne približne 1 200 slov, ak používateľ neurčil inak.
 9. Pri žiadosti o 1. kapitolu nesmieš vytvoriť abstrakt; vytvor úvodnú kapitolu podľa profilu práce.
+10. Ak je požiadavka všeobecná, napríklad „napíš abstrakt“, „navrhni úvod“, „spracuj kapitolu“, vždy ju aplikuj iba na uzamknutý aktívny profil uvedený vyššie.
+11. Nikdy nepreberaj názov, tému alebo cieľ z iného profilu, z histórie chatu alebo z najnovšieho záznamu v databáze.
 
 JAZYKOVÉ NASTAVENIE:
 Zvolený jazyk z používateľského rozhrania: ${outputLanguage} = ${getLanguageName(outputLanguage)}.
@@ -3779,7 +3831,12 @@ export async function POST(req: Request) {
       rawAgent = formData.get('agent')?.toString() || 'gemini';
       module = normalizeModule(formData.get('module')?.toString());
       messages = parseJson<ChatMessage[]>(formData.get('messages'), []);
-      profile = parseJson<SavedProfile | null>(formData.get('profile'), null);
+      const rawProfileFromForm = parseJson<SavedProfile | null>(
+  formData.get('profile'),
+  null,
+);
+
+profile = normalizeProfileForChat(rawProfileFromForm);
       projectId = formData.get('projectId')?.toString() || null;
 
       const requestedLanguage =
@@ -4013,132 +4070,72 @@ export async function POST(req: Request) {
     }
 
     // =====================================================
-    // NAČÍTANIE NAJNOVŠIEHO PROFILU Z DATABÁZY
-    // =====================================================
-    try {
-      const supabase = await createSupabaseServerClient();
+// NAČÍTANIE KONKRÉTNE VYBRANÉHO PROFILU PODĽA projectId
+// =====================================================
+try {
+  const supabase = await createSupabaseServerClient();
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-      if (user) {
-        const { data: databaseProfile } = await supabase
-          .from('user_profiles')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('updated_at', { ascending: false, nullsFirst: false })
-          .order('created_at', { ascending: false, nullsFirst: false })
-          .limit(1)
-          .maybeSingle();
+  if (user?.id && projectId) {
+    const { data: selectedProfileFromDb, error } = await supabase
+      .from('zedpera_profiles')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('id', projectId)
+      .maybeSingle();
 
-        if (databaseProfile) {
-          const databaseWorkLanguage = normalizeAppLanguage(
-            databaseProfile.work_language ||
-              profile?.workLanguage ||
-              outputLanguage ||
-              'sk',
-            'sk',
-          );
+    if (!error && selectedProfileFromDb) {
+      const normalizedDbProfile = normalizeProfileForChat(
+        selectedProfileFromDb.full_profile || selectedProfileFromDb,
+      );
 
-          const databaseInterfaceLanguage = normalizeAppLanguage(
-            databaseProfile.interface_language ||
-              profile?.interfaceLanguage ||
-              profile?.language ||
-              'sk',
-            'sk',
-          );
+      if (normalizedDbProfile) {
+        profile = {
+          ...normalizedDbProfile,
 
-          const databaseCitationStyle =
-            databaseProfile.citation_style ||
+          workLanguage:
+            profile?.workLanguage ||
+            normalizedDbProfile.workLanguage ||
+            normalizedDbProfile.language ||
+            outputLanguage,
+
+          language:
+            profile?.language ||
+            normalizedDbProfile.language ||
+            outputLanguage,
+
+          interfaceLanguage:
+            profile?.interfaceLanguage ||
+            normalizedDbProfile.interfaceLanguage ||
+            normalizedDbProfile.language ||
+            outputLanguage,
+
+          citationStyle:
             profile?.citationStyle ||
+            normalizedDbProfile.citationStyle ||
+            normalizedDbProfile.citation ||
+            'STN ISO 690',
+
+          citation:
             profile?.citation ||
-            'STN ISO 690';
+            normalizedDbProfile.citation ||
+            normalizedDbProfile.citationStyle ||
+            'STN ISO 690',
+        };
 
-          profile = {
-            ...profile,
-
-            id: databaseProfile.id || profile?.id,
-
-            title: databaseProfile.title || profile?.title || '',
-            topic: databaseProfile.topic || profile?.topic || '',
-            type: databaseProfile.type || profile?.type || '',
-            level: databaseProfile.level || profile?.level || '',
-            field: databaseProfile.field || profile?.field || '',
-            supervisor:
-              databaseProfile.supervisor || profile?.supervisor || '',
-
-            language: databaseInterfaceLanguage,
-            interfaceLanguage: databaseInterfaceLanguage,
-            workLanguage: databaseWorkLanguage,
-
-            citationStyle: databaseCitationStyle,
-            citation: databaseCitationStyle,
-
-            annotation:
-              databaseProfile.annotation || profile?.annotation || '',
-
-            goal:
-              databaseProfile.goal || profile?.goal || '',
-
-            problem:
-              databaseProfile.research_problem || profile?.problem || '',
-
-            methodology:
-              databaseProfile.methodology || profile?.methodology || '',
-
-            hypotheses:
-              databaseProfile.hypotheses || profile?.hypotheses || '',
-
-            researchQuestions:
-              databaseProfile.research_questions ||
-              profile?.researchQuestions ||
-              '',
-
-            practicalPart:
-              databaseProfile.practical_part ||
-              profile?.practicalPart ||
-              '',
-
-            scientificContribution:
-              databaseProfile.scientific_contribution ||
-              profile?.scientificContribution ||
-              '',
-
-            sourcesRequirement:
-              databaseProfile.sources_requirement ||
-              profile?.sourcesRequirement ||
-              '',
-
-            schema: {
-              ...(profile?.schema || {}),
-
-              structure: databaseProfile.structure
-                ? [databaseProfile.structure]
-                : profile?.schema?.structure || [],
-
-              requiredSections: databaseProfile.required_sections
-                ? [databaseProfile.required_sections]
-                : profile?.schema?.requiredSections || [],
-
-              recommendedLength:
-                databaseProfile.recommended_length ||
-                profile?.schema?.recommendedLength ||
-                '',
-
-              aiInstruction:
-                databaseProfile.ai_instruction ||
-                profile?.schema?.aiInstruction ||
-                '',
-            },
-          };
-
-          outputLanguage = databaseWorkLanguage;
-        }
+        outputLanguage = normalizeAppLanguage(
+          profile.workLanguage || profile.language || outputLanguage,
+          'sk',
+        );
       }
-    } catch (error) {
-      console.error('LOAD_DB_PROFILE_IN_CHAT_ROUTE_ERROR:', error);
     }
+  }
+} catch (error) {
+  console.error('LOAD_SELECTED_PROJECT_PROFILE_IN_CHAT_ROUTE_ERROR:', error);
+}
 
     // =====================================================
     // AGENT

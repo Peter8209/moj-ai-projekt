@@ -732,8 +732,20 @@ function normalizeProfile(raw: any): SavedProfile | null {
 
     type: source.type || 'bachelor',
     level: source.level || '',
-    title: source.title || '',
-    topic: source.topic || '',
+    title:
+  source.title ||
+  source.profileTitle ||
+  source.workTitle ||
+  source.name ||
+  '',
+
+topic:
+  source.topic ||
+  source.title ||
+  source.profileTitle ||
+  source.workTitle ||
+  source.name ||
+  '',
     field: source.field || '',
     supervisor: source.supervisor || '',
 
@@ -2078,9 +2090,17 @@ useEffect(() => {
       setActiveProfile(profileWithLanguage);
 
       if (profileWithLanguage) {
-        localStorage.setItem('active_profile', JSON.stringify(profileWithLanguage));
+        localStorage.setItem(
+          'active_profile',
+          JSON.stringify(profileWithLanguage),
+        );
         localStorage.setItem('profile', JSON.stringify(profileWithLanguage));
       }
+
+      // DÔLEŽITÉ:
+      // Ak už existuje aktívny profil z Moje práce,
+      // nesmie ho prepísať /api/profile/get.
+      return;
     }
 
     try {
@@ -2102,7 +2122,10 @@ useEffect(() => {
         setActiveProfile(finalProfile);
 
         if (finalProfile) {
-          localStorage.setItem('active_profile', JSON.stringify(finalProfile));
+          localStorage.setItem(
+            'active_profile',
+            JSON.stringify(finalProfile),
+          );
           localStorage.setItem('profile', JSON.stringify(finalProfile));
         }
       }
@@ -2111,7 +2134,7 @@ useEffect(() => {
     }
   };
 
-  loadProfile();
+  void loadProfile();
 
   const onProfileUpdated = (event: Event) => {
     const custom = event as CustomEvent;
@@ -2119,7 +2142,10 @@ useEffect(() => {
     if (custom.detail) {
       const systemLanguage = getStoredSystemLanguage();
       const normalized = normalizeProfile(custom.detail);
-      const finalProfile = withSystemLanguageProfile(normalized, systemLanguage);
+      const finalProfile = withSystemLanguageProfile(
+        normalized,
+        systemLanguage,
+      );
 
       setActiveProfile(finalProfile);
 
@@ -2136,7 +2162,6 @@ useEffect(() => {
     window.removeEventListener('zedpera-profile-updated', onProfileUpdated);
   };
 }, []);
-
 
 
 
@@ -2734,12 +2759,12 @@ CHYBA: ${message}
 
   const appendAssistantMessage = (content: string) => {
     setMessages((prev) => [
-      ...prev,
-      {
-        role: 'assistant',
-        content,
-      },
-    ]);
+  ...prev,
+  {
+    role: 'assistant',
+    content: '',
+  },
+]);
   };
 
   const sendPromptToApi = async ({
@@ -3014,11 +3039,10 @@ await saveChatToHistory({
   assistantMessage: finalTextFromApi,
 });
       const finalParsed: ParsedResult = {
-        ...parsed,
-        output: parsed.output || finalTextFromApi,
-        sources: parsed.sources || '',
-      };
-
+  ...parsed,
+  output: parsed.output || finalTextFromApi,
+  sources: parsed.sources || '',
+};
       const looksLikeError =
         finalParsed.output.includes('AI_APICallError') ||
         finalParsed.output.includes('API error') ||
@@ -3322,26 +3346,6 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
               </button>
 
 
-<div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2">
-  {languages.map((item) => {
-    const active = language === item.code;
-
-    return (
-      <button
-        key={item.code}
-        type="button"
-        onClick={() => handleSelectLanguage(item.code)}
-        className={`rounded-xl px-3 py-2 text-xs font-black transition ${
-          active
-            ? 'bg-violet-600 text-white shadow-lg shadow-violet-800/30'
-            : 'bg-white/[0.055] text-slate-300 hover:bg-violet-500/15 hover:text-white'
-        }`}
-      >
-        {item.label}
-      </button>
-    );
-  })}
-</div>
 
               <button
                 type="button"

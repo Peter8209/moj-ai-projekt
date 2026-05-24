@@ -197,6 +197,32 @@ const allowedPlans: PlanId[] = [
   'year-max',
 ];
 
+const languageLabels: Record<AppLanguage, string> = {
+  sk: 'Slovenčina',
+  cs: 'Čeština',
+  en: 'English',
+  de: 'Deutsch',
+  pl: 'Polski',
+  hu: 'Magyar',
+};
+
+const languageShortLabels: Record<AppLanguage, string> = {
+  sk: 'SK',
+  cs: 'CZ',
+  en: 'EN',
+  de: 'DE',
+  pl: 'PL',
+  hu: 'HU',
+};
+
+function getLanguageLabel(code: AppLanguage) {
+  return languageLabels[code] || code.toUpperCase();
+}
+
+function getLanguageShortLabel(code: AppLanguage) {
+  return languageShortLabels[code] || code.toUpperCase();
+}
+
 const featureIconMap = {
   Bot,
   GraduationCap,
@@ -869,6 +895,62 @@ async function translateLandingContent(language: AppLanguage) {
   
 
 
+function ClickableLanguageMenu({
+  language,
+  onChange,
+  compact = false,
+}: {
+  language: AppLanguage;
+  onChange: (language: AppLanguage) => void;
+  compact?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-2xl border border-slate-200 bg-white p-1 shadow-sm transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.06] ${
+        compact ? 'w-full' : ''
+      }`}
+      aria-label="Výber jazyka"
+    >
+      <div
+        className={
+          compact
+            ? 'grid grid-cols-3 gap-1 sm:grid-cols-6'
+            : 'flex items-center gap-1'
+        }
+      >
+        {!compact && (
+          <div className="mr-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-200">
+            <Globe2 size={17} />
+          </div>
+        )}
+
+        {languages.map((item) => {
+          const code = item.code as AppLanguage;
+          const active = language === code;
+
+          return (
+            <button
+              key={code}
+              type="button"
+              onClick={() => onChange(code)}
+              title={getLanguageLabel(code)}
+              aria-label={`Zmeniť jazyk na ${getLanguageLabel(code)}`}
+              aria-pressed={active}
+              className={`min-h-[38px] rounded-xl px-3 text-xs font-black tracking-wide transition ${
+                active
+                  ? 'bg-gradient-to-r from-violet-700 to-indigo-700 text-white shadow-lg shadow-violet-900/20'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white'
+              } ${compact ? 'w-full' : ''}`}
+            >
+              {getLanguageShortLabel(code)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function LandingPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
@@ -1034,97 +1116,102 @@ export default function LandingPage() {
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f8fafc] text-slate-950 transition-colors duration-300 dark:bg-[#050711] dark:text-white">
       <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur-xl transition-colors duration-300 dark:border-white/10 dark:bg-[#050711]/95">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 lg:px-8">
-          <Link href="/" className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 text-white shadow-lg">
-              <GraduationCap size={26} />
+        <div className="mx-auto max-w-7xl px-5 py-3 lg:px-8">
+          {/* PRVÝ RIADOK: logo + jazyková lišta + prepínač témy + akčné tlačidlá */}
+          <div className="flex items-center justify-between gap-4">
+            <Link href="/" className="flex min-w-0 items-center gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 text-white shadow-lg">
+                <GraduationCap size={26} />
+              </div>
+
+              <div className="min-w-0 text-left">
+                <div className="truncate text-2xl font-black tracking-tight text-slate-950 dark:text-white">
+                  ZEDPERA
+                </div>
+                <div className="-mt-1 truncate text-sm font-semibold text-slate-500 dark:text-slate-300">
+                  {content.brandSubtitle}
+                </div>
+              </div>
+            </Link>
+
+            <div className="hidden items-center gap-3 lg:flex">
+              <ClickableLanguageMenu
+                language={language}
+                onChange={(nextLanguage) => {
+                  void handleLanguageChange(nextLanguage);
+                }}
+              />
+
+              <ThemeToggleButton />
+
+              <Link
+                href="/login"
+                className="relative z-50 rounded-2xl px-5 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-white/10"
+              >
+                {content.login}
+              </Link>
+
+              <a
+                href="#pricing"
+                className="relative z-50 rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-6 py-3 text-sm font-black text-white shadow-xl shadow-violet-900/20 transition hover:opacity-90"
+              >
+                {content.chooseProgram}
+              </a>
             </div>
 
-            <div className="text-left">
-              <div className="text-2xl font-black tracking-tight text-slate-950 dark:text-white">
-  ZEDPERA
-</div>
-              <div className="-mt-1 text-sm font-semibold text-slate-500 dark:text-slate-300">
-                {content.brandSubtitle}
-              </div>
-            </div>
-          </Link>
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-950 transition-colors dark:border-white/10 dark:bg-white/[0.06] dark:text-white lg:hidden"
+              aria-label={content.mobileOpenMenu}
+            >
+              <Menu size={22} />
+            </button>
+          </div>
 
-          <nav className="hidden items-center gap-6 text-sm font-bold text-slate-700 dark:text-slate-200 lg:flex">
-            <a href="#intro" className="transition hover:text-violet-700 dark:hover:text-violet-300">
-              {content.navIntro}
-            </a>
-
-            <a href="#about" className="transition hover:text-violet-700">
-              {content.navAbout}
-            </a>
-
-            <a href="#features" className="transition hover:text-violet-700">
-              {content.navFeatures}
-            </a>
-
-            <a href="#reviews" className="transition hover:text-violet-700">
-              {content.navReviews}
-            </a>
-
-            <a href="#pricing" className="transition hover:text-violet-700">
-              {content.navPricing}
-            </a>
-
-            <a href="#faq" className="transition hover:text-violet-700">
-              {content.navFaq}
-            </a>
-          </nav>
-
-          <div className="hidden items-center gap-3 lg:flex">
-            <div className="relative">
-              <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-700 shadow-sm transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.06] dark:text-white">
-                <Globe2 size={17} className="text-violet-700" />
-
-                <select
-                  value={language}
-                  onChange={(event) =>
-                    void handleLanguageChange(
-                      event.target.value as AppLanguage,
-                    )
-                  }
-                  className="bg-transparent outline-none dark:text-white"
-                  aria-label="Language"
-                >
-                  {languages.map((item) => (
-                    <option key={item.code} value={item.code}>
-                      {item.shortLabel}
-                    </option>
-                  ))}
-                </select>
-              </div>
+          {/* Mobil: jazyková lišta je hneď pod logom, ale stále v hornej časti hlavičky */}
+          <div className="mt-3 flex items-center gap-2 lg:hidden">
+            <div className="min-w-0 flex-1">
+              <ClickableLanguageMenu
+                language={language}
+                compact
+                onChange={(nextLanguage) => {
+                  void handleLanguageChange(nextLanguage);
+                }}
+              />
             </div>
 
             <ThemeToggleButton />
-
-            <Link
-              href="/login"
-              className="relative z-50 rounded-2xl px-5 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-white/10"
-            >
-              {content.login}
-            </Link>
-
-            <a
-              href="#pricing"
-              className="relative z-50 rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-6 py-3 text-sm font-black text-white shadow-xl shadow-violet-900/20 transition hover:opacity-90"
-            >
-              {content.chooseProgram}
-            </a>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setMobileMenuOpen(true)}
-            className="rounded-2xl border border-slate-200 bg-white p-3 lg:hidden"
-            aria-label={content.mobileOpenMenu}
-          >
-            <Menu size={22} />
-          </button>
+          {/* DRUHÝ RIADOK: hlavná menu lišta */}
+          <div className="mt-3 hidden border-t border-slate-200 pt-3 dark:border-white/10 lg:block">
+            <nav className="flex items-center justify-center gap-8 text-sm font-bold text-slate-700 dark:text-slate-200">
+              <a href="#intro" className="transition hover:text-violet-700 dark:hover:text-violet-300">
+                {content.navIntro}
+              </a>
+
+              <a href="#about" className="transition hover:text-violet-700 dark:hover:text-violet-300">
+                {content.navAbout}
+              </a>
+
+              <a href="#features" className="transition hover:text-violet-700 dark:hover:text-violet-300">
+                {content.navFeatures}
+              </a>
+
+              <a href="#reviews" className="transition hover:text-violet-700 dark:hover:text-violet-300">
+                {content.navReviews}
+              </a>
+
+              <a href="#pricing" className="transition hover:text-violet-700 dark:hover:text-violet-300">
+                {content.navPricing}
+              </a>
+
+              <a href="#faq" className="transition hover:text-violet-700 dark:hover:text-violet-300">
+                {content.navFaq}
+              </a>
+            </nav>
+          </div>
         </div>
       </header>
 
@@ -1146,24 +1233,19 @@ export default function LandingPage() {
 
             <div className="space-y-3">
               <div className="rounded-2xl bg-slate-100 p-3 dark:bg-white/10">
-                <div className="mb-3 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-black text-slate-700">
-                  <Globe2 size={17} className="text-violet-700" />
+                <div className="mb-3">
+                  <div className="mb-2 flex items-center gap-2 px-1 text-xs font-black uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
+                    <Globe2 size={15} className="text-violet-700 dark:text-violet-300" />
+                    Jazyk
+                  </div>
 
-                  <select
-                    value={language}
-                    onChange={(event) =>
-                      void handleLanguageChange(
-                        event.target.value as AppLanguage,
-                      )
-                    }
-                    className="w-full bg-transparent outline-none"
-                  >
-                    {languages.map((item) => (
-                      <option key={item.code} value={item.code}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
+                  <ClickableLanguageMenu
+                    language={language}
+                    compact
+                    onChange={(nextLanguage) => {
+                      void handleLanguageChange(nextLanguage);
+                    }}
+                  />
                 </div>
 
                 <ThemeToggleButton />

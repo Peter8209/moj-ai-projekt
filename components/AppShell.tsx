@@ -27,7 +27,6 @@ import {
   X,
 } from 'lucide-react';
 import ProfileFormOriginal from '@/components/ProfileForm';
-import LanguageSwitcher from '@/components/LanguageSwitcher';
 import { useLanguage } from '@/components/LanguageProvider';
 
 // =====================================================
@@ -373,13 +372,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
             </button>
           )}
 
-          <div className="mb-4">
-            <div className="mb-2 px-1 text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">
-              {text(dictionary, 'language', 'Jazyk')}
-            </div>
-
-            <LanguageSwitcher />
-          </div>
+         
 
           <div className="px-4 text-xs text-slate-500">
             © {new Date().getFullYear()} Zedpera
@@ -581,14 +574,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
               })}
             </div>
 
-            <div className="mt-5">
-              <div className="mb-2 text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">
-                {text(dictionary, 'language', 'Jazyk')}
-              </div>
-
-              <LanguageSwitcher />
-            </div>
-
+            
             {isAdminFree && (
               <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-4 text-sm font-black text-emerald-200">
                 <div className="flex items-center justify-center gap-2">

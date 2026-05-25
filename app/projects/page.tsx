@@ -194,18 +194,23 @@ type DropPosition = 'before' | 'after';
 type AppDialogVariant = 'info' | 'success' | 'warning' | 'danger' | 'error';
 
 type AppNoticeState = {
+  label?: string;
   title: string;
   message: string;
   detail?: string;
+  detailLabel?: string;
+  closeLabel?: string;
   variant?: AppDialogVariant;
 } | null;
 
 type AppConfirmState = {
+  label?: string;
   title: string;
   message: string;
   detail?: string;
   confirmLabel: string;
   cancelLabel: string;
+  processingLabel?: string;
   variant?: AppDialogVariant;
   onConfirm: () => void | Promise<void>;
 } | null;
@@ -560,12 +565,195 @@ function formatLanguageBadge(value?: string | null) {
 
 function getStoredLanguage() {
   if (typeof window === 'undefined') return 'sk';
-  return localStorage.getItem('zedpera_language') || localStorage.getItem('zedpera_system_language') || 'sk';
+
+  const stored =
+    localStorage.getItem('zedpera_language') ||
+    localStorage.getItem('zedpera_system_language') ||
+    localStorage.getItem('zedpera_work_language') ||
+    'sk';
+
+  const normalized = String(stored || 'sk').trim().toLowerCase();
+
+  if (['sk', 'cs', 'cz', 'en', 'de', 'pl', 'hu'].includes(normalized)) {
+    return normalized === 'cz' ? 'cs' : normalized;
+  }
+
+  return 'sk';
+}
+
+function getLanguageNameForAi(language: string) {
+  const normalized = String(language || 'sk').trim().toLowerCase();
+  const names: Record<string, string> = {
+    sk: 'Slovak',
+    cs: 'Czech',
+    en: 'English',
+    de: 'German',
+    pl: 'Polish',
+    hu: 'Hungarian',
+  };
+
+  return names[normalized] || 'Slovak';
+}
+
+function stripJsonCodeFence(value: string) {
+  return String(value || '')
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/```$/i, '')
+    .trim();
+}
+
+function safeParseTranslatedJson(value: string) {
+  const cleaned = stripJsonCodeFence(value);
+
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+
+    if (!match) return null;
+
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function translateUiDialogByAi<T extends Record<string, any>>(payload: {
+  targetLanguage: string;
+  fallback: T;
+  kind: 'notice' | 'confirm';
+}) {
+  const language = String(payload.targetLanguage || 'sk').trim().toLowerCase();
+
+  if (language === 'sk') {
+    return payload.fallback;
+  }
+
+  try {
+    const formData = new FormData();
+
+    formData.append('agent', 'gemini');
+    formData.append('module', 'translation');
+    formData.append('language', language);
+    formData.append('interfaceLanguage', language);
+    formData.append('systemLanguage', language);
+    formData.append('outputLanguage', language);
+    formData.append('workLanguage', language);
+
+    formData.append(
+      'messages',
+      JSON.stringify([
+        {
+          role: 'user',
+          content: `Translate the following UI system dialog to ${getLanguageNameForAi(language)}.
+
+Return only valid JSON. Do not use markdown. Do not add explanations.
+Preserve the exact same JSON keys. Translate only user-visible string values.
+Keep technical detail factual and concise.
+
+JSON:
+${JSON.stringify(payload.fallback, null, 2)}`,
+        },
+      ]),
+    );
+
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      throw new Error(`AI translation failed with status ${res.status}.`);
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+    let raw = '';
+
+    if (contentType.includes('application/json')) {
+      const data = await res.json();
+      raw = String(data.output || data.result || data.message || data.text || data.answer || '');
+    } else {
+      raw = await res.text();
+    }
+
+    const parsed = safeParseTranslatedJson(raw);
+
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('AI translation returned invalid JSON.');
+    }
+
+    return {
+      ...payload.fallback,
+      ...parsed,
+    } as T;
+  } catch (error) {
+    console.warn('AI_UI_DIALOG_TRANSLATION_WARNING:', error);
+    return payload.fallback;
+  }
+}
+
+async function translateNoticeByAi(notice: NonNullable<AppNoticeState>) {
+  const fallback = {
+    label: notice.label || 'Systémová správa',
+    title: notice.title,
+    message: notice.message,
+    detail: notice.detail || '',
+    detailLabel: notice.detailLabel || 'Technický detail',
+    closeLabel: notice.closeLabel || 'Rozumiem',
+  };
+
+  const translated = await translateUiDialogByAi({
+    targetLanguage: getStoredLanguage(),
+    fallback,
+    kind: 'notice',
+  });
+
+  return {
+    ...notice,
+    label: translated.label || fallback.label,
+    title: translated.title || fallback.title,
+    message: translated.message || fallback.message,
+    detail: notice.detail ? translated.detail || notice.detail : notice.detail,
+    detailLabel: translated.detailLabel || fallback.detailLabel,
+    closeLabel: translated.closeLabel || fallback.closeLabel,
+  };
+}
+
+async function translateConfirmByAi(dialog: NonNullable<AppConfirmState>) {
+  const fallback = {
+    label: dialog.label || 'Potvrdenie akcie',
+    title: dialog.title,
+    message: dialog.message,
+    detail: dialog.detail || '',
+    confirmLabel: dialog.confirmLabel,
+    cancelLabel: dialog.cancelLabel,
+    processingLabel: dialog.processingLabel || 'Spracúvam...',
+  };
+
+  const translated = await translateUiDialogByAi({
+    targetLanguage: getStoredLanguage(),
+    fallback,
+    kind: 'confirm',
+  });
+
+  return {
+    ...dialog,
+    label: translated.label || fallback.label,
+    title: translated.title || fallback.title,
+    message: translated.message || fallback.message,
+    detail: dialog.detail ? translated.detail || dialog.detail : dialog.detail,
+    confirmLabel: translated.confirmLabel || fallback.confirmLabel,
+    cancelLabel: translated.cancelLabel || fallback.cancelLabel,
+    processingLabel: translated.processingLabel || fallback.processingLabel,
+  };
 }
 
 function createWizardProfileFromTemplate(template: WorkTemplate, existing?: Partial<SavedProfile> | null): ProfileWizardState {
-  const language = existing?.language || getStoredLanguage();
-  const workLanguage = existing?.workLanguage || existing?.work_language || existing?.language || language;
+  const language = getStoredLanguage();
+  const workLanguage = language;
   const citation = normalizeCitationToKey(existing?.citation || existing?.citationStyle || template.defaultCitationStyle);
   const keywords = existing?.keywordsList || existing?.keywords_list || existing?.keywords || [];
 
@@ -627,9 +815,9 @@ function normalizeProfileForApp(row: any): SavedProfile {
     supervisor: row?.supervisor || full.supervisor || '',
     citation,
     citationStyle: full.citationStyle || citation,
-    language: row?.language || full.language || getStoredLanguage(),
-    interfaceLanguage: full.interfaceLanguage || row?.language || full.language || getStoredLanguage(),
-    workLanguage: row?.work_language || full.workLanguage || full.work_language || full.language || getStoredLanguage(),
+    language: getStoredLanguage(),
+    interfaceLanguage: getStoredLanguage(),
+    workLanguage: getStoredLanguage(),
     annotation: row?.annotation || full.annotation || '',
     goal: row?.goal || full.goal || '',
     problem: row?.problem || full.problem || '',
@@ -676,9 +864,9 @@ function normalizeProfileBeforeSave(profile: SavedProfile, fallbackId?: string):
     level: template.level,
     citation: citationLabel(citationKey),
     citationStyle: citationLabel(citationKey),
-    language: profile.language || getStoredLanguage(),
-    interfaceLanguage: profile.interfaceLanguage || profile.language || getStoredLanguage(),
-    workLanguage: profile.workLanguage || profile.work_language || profile.language || getStoredLanguage(),
+    language: getStoredLanguage(),
+    interfaceLanguage: getStoredLanguage(),
+    workLanguage: getStoredLanguage(),
     researchQuestions: profile.researchQuestions || profile.research_questions || '',
     practicalPart: profile.practicalPart || profile.practical_part || '',
     scientificContribution: profile.scientificContribution || profile.scientific_contribution || '',
@@ -716,8 +904,8 @@ function buildSupabaseProfilePayload(profile: SavedProfile, userId?: string) {
     field: profile.field || null,
     supervisor: profile.supervisor || null,
     citation: profile.citation || null,
-    language: profile.language || null,
-    work_language: profile.workLanguage || profile.work_language || null,
+    language: getStoredLanguage(),
+    work_language: getStoredLanguage(),
     annotation: profile.annotation || null,
     goal: profile.goal || null,
     problem: profile.problem || null,
@@ -782,8 +970,14 @@ export default function ProjectsPage() {
   const [notice, setNotice] = useState<AppNoticeState>(null);
   const [confirmDialog, setConfirmDialog] = useState<AppConfirmState>(null);
 
-  const showNotice = (nextNotice: NonNullable<AppNoticeState>) => {
-    setNotice(nextNotice);
+  const showNotice = async (nextNotice: NonNullable<AppNoticeState>) => {
+    const translatedNotice = await translateNoticeByAi(nextNotice);
+    setNotice(translatedNotice);
+  };
+
+  const showConfirmDialog = async (nextDialog: NonNullable<AppConfirmState>) => {
+    const translatedDialog = await translateConfirmByAi(nextDialog);
+    setConfirmDialog(translatedDialog);
   };
 
   const closeNotice = () => {
@@ -934,9 +1128,13 @@ export default function ProjectsPage() {
   }, [profiles, search]);
 
   const selectProfileForGeneration = (profile: SavedProfile) => {
+    const interfaceLanguage = getStoredLanguage();
     const safeProfile = {
       ...profile,
       id: createSafeProfileId(profile.id),
+      language: interfaceLanguage,
+      interfaceLanguage,
+      workLanguage: interfaceLanguage,
     };
 
     localStorage.setItem('active_profile', JSON.stringify(safeProfile));
@@ -948,9 +1146,13 @@ export default function ProjectsPage() {
   const closeProfile = () => setSelectedProfile(null);
 
   const openEditProfile = (profile: SavedProfile) => {
+    const interfaceLanguage = getStoredLanguage();
     const safeProfile = {
       ...profile,
       id: createSafeProfileId(profile.id),
+      language: interfaceLanguage,
+      interfaceLanguage,
+      workLanguage: interfaceLanguage,
     };
 
     setEditingProfile(safeProfile);
@@ -990,7 +1192,7 @@ export default function ProjectsPage() {
       } = await supabase.auth.getUser();
 
       if (!user?.id) {
-        showNotice({
+        await showNotice({
           title: 'Profil práce je uložený lokálne',
           message:
             'Profil práce bol uložený v tomto prehliadači. Po prihlásení používateľa sa bude môcť synchronizovať aj so serverovou databázou.',
@@ -1008,7 +1210,7 @@ export default function ProjectsPage() {
 
       if (error) {
         console.warn('SUPABASE SAVE PROFILE WARNING:', error);
-        showNotice({
+        await showNotice({
           title: 'Profil práce je uložený lokálne',
           message:
             'Profil práce je bezpečne uložený v tomto zariadení. Serverová synchronizácia sa nepodarila dokončiť, preto skontrolujte prihlásenie a oprávnenia v Supabase.',
@@ -1033,7 +1235,7 @@ export default function ProjectsPage() {
 
       await loadProfiles();
 
-      showNotice({
+      await showNotice({
         title: 'Profil práce je uložený',
         message:
           'Profil práce bol úspešne uložený. AI chat a všetky moduly budú odteraz používať aktuálne nastavenia tejto práce.',
@@ -1041,7 +1243,7 @@ export default function ProjectsPage() {
       });
     } catch (error) {
       console.warn('PROFILE SAVE WARNING:', error);
-      showNotice({
+      await showNotice({
         title: 'Profil práce je uložený lokálne',
         message:
           'Profil práce je uložený v tomto zariadení. Serverová synchronizácia sa momentálne nepodarila pre technický problém alebo prerušené pripojenie.',
@@ -1076,7 +1278,7 @@ export default function ProjectsPage() {
     if (editingProfile?.id === id) closeProfileWizard();
 
     if (!isValidUuid(id)) {
-      showNotice({
+      await showNotice({
         title: 'Práca bola odstránená',
         message:
           'Práca bola odstránená z lokálneho zoznamu. Tento záznam nebol synchronizovaný so serverom, preto nebolo potrebné odstraňovať ho zo Supabase.',
@@ -1092,7 +1294,7 @@ export default function ProjectsPage() {
       } = await supabase.auth.getUser();
 
       if (!user?.id) {
-        showNotice({
+        await showNotice({
           title: 'Práca bola odstránená lokálne',
           message:
             'Práca bola odstránená z tohto zariadenia. Serverové odstránenie sa nevykonalo, pretože používateľ nie je prihlásený.',
@@ -1109,7 +1311,7 @@ export default function ProjectsPage() {
 
       if (error) {
         console.warn('DELETE PROFILE WARNING:', error);
-        showNotice({
+        await showNotice({
           title: 'Práca bola odstránená lokálne',
           message:
             'Práca bola odstránená z tohto zariadenia. Serverová synchronizácia sa momentálne nepodarila dokončiť.',
@@ -1119,7 +1321,7 @@ export default function ProjectsPage() {
         return;
       }
 
-      showNotice({
+      await showNotice({
         title: 'Práca bola odstránená',
         message:
           'Práca bola úspešne odstránená zo zoznamu aj zo serverovej databázy.',
@@ -1127,7 +1329,7 @@ export default function ProjectsPage() {
       });
     } catch (error) {
       console.warn('DELETE PROFILE WARNING:', error);
-      showNotice({
+      await showNotice({
         title: 'Práca bola odstránená lokálne',
         message:
           'Práca bola odstránená z tohto zariadenia. Serverová synchronizácia sa nepodarila pre technický problém alebo prerušené pripojenie.',
@@ -1140,7 +1342,7 @@ export default function ProjectsPage() {
   const requestDeleteProfile = (profile: SavedProfile) => {
     const profileTitle = profile.title?.trim() || 'Bez názvu';
 
-    setConfirmDialog({
+    void showConfirmDialog({
       title: 'Odstrániť prácu zo zoznamu?',
       message:
         `Chystáte sa odstrániť prácu „${profileTitle}“. Táto akcia odstráni prácu z aktuálneho zoznamu a zároveň sa pokúsi odstrániť jej záznam zo servera.`,
@@ -1361,7 +1563,7 @@ function ProfessionalNoticeDialog({
 
             <div className="min-w-0 flex-1">
               <div className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
-                Systémová správa
+                {notice.label || 'Systémová správa'}
               </div>
               <h2 className="mt-1 text-2xl font-black text-white">
                 {notice.title}
@@ -1373,7 +1575,7 @@ function ProfessionalNoticeDialog({
               {notice.detail && (
                 <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.05] p-4 text-xs leading-6 text-slate-400">
                   <div className="mb-1 font-black uppercase tracking-[0.16em] text-slate-500">
-                    Technický detail
+                    {notice.detailLabel || 'Technický detail'}
                   </div>
                   {notice.detail}
                 </div>
@@ -1387,7 +1589,7 @@ function ProfessionalNoticeDialog({
               onClick={onClose}
               className="inline-flex min-h-[46px] items-center justify-center rounded-2xl bg-white px-6 text-sm font-black text-slate-950 transition hover:bg-slate-200"
             >
-              Rozumiem
+              {notice.closeLabel || 'Rozumiem'}
             </button>
           </div>
         </div>
@@ -1436,7 +1638,7 @@ function ProfessionalConfirmDialog({
 
             <div className="min-w-0 flex-1">
               <div className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
-                Potvrdenie akcie
+                {dialog.label || 'Potvrdenie akcie'}
               </div>
               <h2 className="mt-1 text-2xl font-black text-white">
                 {dialog.title}
@@ -1469,7 +1671,7 @@ function ProfessionalConfirmDialog({
               disabled={isProcessing}
               className={`inline-flex min-h-[46px] items-center justify-center rounded-2xl px-6 text-sm font-black text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${styles.button}`}
             >
-              {isProcessing ? 'Spracúvam...' : dialog.confirmLabel}
+              {isProcessing ? dialog.processingLabel || 'Spracúvam...' : dialog.confirmLabel}
             </button>
           </div>
         </div>

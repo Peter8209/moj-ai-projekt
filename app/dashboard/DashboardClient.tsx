@@ -35,6 +35,7 @@ import AnalysisResultsModal from '@/components/analysis/AnalysisResultsModal';
 import type { AnalysisResult } from '@/components/analysis/analysisTypes';
 import ThemeToggleButton from '@/components/ThemeToggleButton';
 import ImprovementBox from '@/components/ImprovementBox';
+import { useRouter } from 'next/navigation';
 import {
   Sparkles,
 } from 'lucide-react';
@@ -1245,6 +1246,7 @@ function createAnalysisOutputText(data: AnalysisResult) {
 // ================= PAGE =================
 
 export default function DashboardPage() {
+  const router = useRouter();
   const agent = defaultAgent;
 
   const [activeModule, setActiveModule] = useState<ModuleKey>('supervisor');
@@ -1285,43 +1287,6 @@ const exportTitle = useMemo(() => {
     activeProfile?.title || 'výstup'
   }`.trim();
 }, [activeModuleInfo.label, activeProfile]);
-
-function persistActiveProfileEverywhere(profile: SavedProfile | null) {
-  if (!profile) return;
-
-  const systemLanguage = getStoredSystemLanguage();
-  const normalizedProfile = prepareProfileForApi(profile, systemLanguage);
-
-  if (!normalizedProfile) return;
-
-  setActiveProfile(normalizedProfile);
-
-  try {
-    localStorage.setItem('active_profile', JSON.stringify(normalizedProfile));
-    localStorage.setItem('profile', JSON.stringify(normalizedProfile));
-
-    const rawProfiles = localStorage.getItem('profiles_full');
-    const storedProfiles = safeJsonParse<SavedProfile[]>(rawProfiles) || [];
-
-    const withoutCurrent = storedProfiles.filter((item) => {
-      if (!item?.id || !normalizedProfile.id) return true;
-      return item.id !== normalizedProfile.id;
-    });
-
-    localStorage.setItem(
-      'profiles_full',
-      JSON.stringify([normalizedProfile, ...withoutCurrent]),
-    );
-
-    window.dispatchEvent(
-      new CustomEvent('zedpera:active-profile-changed', {
-        detail: normalizedProfile,
-      }),
-    );
-  } catch (error) {
-    console.warn('Aktívny profil sa nepodarilo uložiť:', error);
-  }
-}
 
 useEffect(() => {
   function handleActiveProfileChanged(event: Event) {
@@ -1369,18 +1334,10 @@ useEffect(() => {
 
   const activeRaw = localStorage.getItem('active_profile');
   const profileRaw = localStorage.getItem('profile');
-  const profilesRaw = localStorage.getItem('profiles_full');
-
   const active = normalizeProfile(safeJsonParse<any>(activeRaw));
   const profile = normalizeProfile(safeJsonParse<any>(profileRaw));
-  const profiles = safeJsonParse<any[]>(profilesRaw);
 
-  const selectedProfile =
-    active ||
-    profile ||
-    (Array.isArray(profiles) && profiles.length > 0
-      ? normalizeProfile(profiles[0])
-      : null);
+  const selectedProfile = active || profile || null;
 
   const profileWithLanguage = prepareProfileForApi(
     selectedProfile,
@@ -1971,10 +1928,6 @@ if (!activeProfile?.workLanguage && !activeProfile?.language) {
   systemLanguage,
 );
 
-if (profileForApi) {
-  persistActiveProfileEverywhere(profileForApi);
-}
-
 const finalWorkLanguage = getWorkLanguage(profileForApi);
 
 formData.append('language', finalWorkLanguage);
@@ -2079,10 +2032,6 @@ profileId: profileForApi?.id || null,
   activeProfile,
   systemLanguage,
 );
-
-if (profileForApi) {
-  persistActiveProfileEverywhere(profileForApi);
-}
 
 const finalWorkLanguage = getWorkLanguage(profileForApi);
 
@@ -2312,10 +2261,6 @@ if (activeModule === 'humanizer') {
   systemLanguage,
 );
 
-if (profileForApi) {
-  persistActiveProfileEverywhere(profileForApi);
-}
-
 const finalWorkLanguage = getWorkLanguage(profileForApi);
 
       const fallbackSummary = [
@@ -2478,10 +2423,6 @@ formData.append('workLanguage', finalWorkLanguage);
   activeProfile,
   systemLanguage,
 );
-
-if (profileForApi) {
-  persistActiveProfileEverywhere(profileForApi);
-}
 
 const finalWorkLanguage = getWorkLanguage(profileForApi);
 
@@ -3033,23 +2974,35 @@ const downloadExcel = () => {
     );
   })}
 
-  <a
-    href="/profile"
+  <button
+    type="button"
+    onClick={() => router.push('/projects?new=1')}
+    className="inline-flex items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-600 px-4 py-2 text-xs font-black text-white shadow-sm transition hover:bg-violet-500 dark:border-violet-400/30 dark:bg-violet-600 dark:text-white dark:hover:bg-violet-500"
+  >
+    <FileText className="h-4 w-4" />
+    Nová práca
+  </button>
+
+  <button
+    type="button"
+    onClick={() => router.push('/projects')}
     className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-100 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300 dark:hover:bg-white/[0.1] dark:hover:text-white"
   >
-    <User className="h-4 w-4" />
-    Profil
-  </a>
+    <BookOpen className="h-4 w-4" />
+    Moje práce
+  </button>
 
   <ThemeToggleButton />
 </div>
 
   <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
-  Aktívny profil:{' '}
-  <span className="font-black text-slate-950 dark:text-white">
-    {activeProfile?.title || 'Nie je vybraný'}
-  </span>
-</div>
+    <span className="font-black text-slate-950 dark:text-white">
+      {activeProfile?.title || 'Nie je vybraná žiadna práca'}
+    </span>
+    <span className="ml-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
+      {activeProfile?.type || activeProfile?.schema?.label || ''}
+    </span>
+  </div>
 </div>
 
            <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto xl:hidden">
@@ -3072,13 +3025,23 @@ const active = activeModule === item.key;
   );
 })}
 
-<a
-  href="/profile"
+<button
+  type="button"
+  onClick={() => router.push('/projects?new=1')}
+  className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-600 px-4 py-2 text-xs font-black text-white dark:border-violet-400/30 dark:bg-violet-600"
+>
+  <FileText className="h-4 w-4" />
+  Nová práca
+</button>
+
+<button
+  type="button"
+  onClick={() => router.push('/projects')}
   className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300"
 >
-  <User className="h-4 w-4" />
-  Profil
-</a>
+  <BookOpen className="h-4 w-4" />
+  Moje práce
+</button>
 
 
   <div className="shrink-0">

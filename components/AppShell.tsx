@@ -5,7 +5,6 @@ import {
   useEffect,
   useMemo,
   useState,
-  type ComponentType,
   type ReactNode,
 } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -20,13 +19,10 @@ import {
   Home,
   Library,
   LogOut,
-  Menu,
-  Plus,
   Sparkles,
   Video,
   X,
 } from 'lucide-react';
-import ProfileFormOriginal from '@/components/ProfileForm';
 import { useLanguage } from '@/components/LanguageProvider';
 
 // =====================================================
@@ -40,15 +36,7 @@ type NavItem = {
   description?: string;
 };
 
-type ProfileFormProps = {
-  onClose?: () => void;
-  onSave?: (data: unknown) => void;
-};
-
 type TranslationRecord = Record<string, unknown>;
-
-const ProfileForm =
-  ProfileFormOriginal as unknown as ComponentType<ProfileFormProps>;
 
 // =====================================================
 // TRANSLATION HELPERS
@@ -189,7 +177,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
     return navItems.slice(0, 5);
   }, [navItems]);
 
-  const [openProfile, setOpenProfile] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isAdminFree, setIsAdminFree] = useState(false);
 
@@ -249,19 +236,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
     router.push(href);
   };
 
-  const openNewProfile = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('profile');
-      localStorage.removeItem('active_profile');
-    }
-
-    setMobileMenuOpen(false);
-    setOpenProfile(true);
-  };
-
-  const closeProfile = () => {
-    setOpenProfile(false);
-  };
 
   const logoutAdminMode = () => {
     if (typeof window !== 'undefined') {
@@ -282,15 +256,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
       ===================================================== */}
 
       <aside className="hidden h-dvh w-[306px] shrink-0 flex-col overflow-hidden border-r border-white/10 bg-[#020617] p-5 lg:flex">
-        <button
-          type="button"
-          onClick={openNewProfile}
-          className="mb-7 mt-2 flex h-14 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 font-black text-white shadow-lg shadow-violet-700/25 transition hover:scale-[1.015] hover:from-violet-500 hover:to-purple-500"
-        >
-          <Plus size={18} />
-          {text(dictionary, 'newWork', 'Nová práca')}
-        </button>
-
         <nav className="flex-1 space-y-2 overflow-visible pr-0">
           {navItems.map((item) => {
             const active = isPathActive(pathname, item.href);
@@ -388,23 +353,13 @@ function AppShellContent({ children }: { children: ReactNode }) {
         {/* MOBILE TOP BAR */}
 
      <header className="flex shrink-0 flex-col gap-3 border-b border-white/10 bg-[#020617]/95 px-4 py-4 backdrop-blur lg:hidden">
-  <div className="flex items-center justify-between gap-3">
+  <div className="flex items-center gap-3">
     <div className="min-w-0">
       <div className="truncate text-sm font-black">{activeTitle}</div>
       <div className="truncate text-[11px] font-semibold text-slate-400">
         {activeDescription}
       </div>
     </div>
-
-    <button
-      type="button"
-      onClick={openNewProfile}
-      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-xs font-black text-white shadow-lg shadow-violet-700/25 transition hover:bg-violet-500"
-      aria-label={text(dictionary, 'newWork', 'Nová práca')}
-    >
-      <Plus size={18} />
-      {text(dictionary, 'newWork', 'Nová práca')}
-    </button>
   </div>
 
   <div className="flex flex-wrap gap-2">
@@ -531,15 +486,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={openNewProfile}
-              className="mb-5 flex h-14 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 font-black text-white shadow-lg shadow-violet-700/25"
-            >
-              <Plus size={18} />
-              {text(dictionary, 'newWork', 'Nová práca')}
-            </button>
-
            <div className="grid grid-cols-1 gap-2 pb-6">
               {navItems.map((item) => {
                 const active = isPathActive(pathname, item.href);
@@ -594,29 +540,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
                 {text(dictionary, 'exitAdminMode', 'Ukončiť admin režim')}
               </button>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* =====================================================
-          MODAL - NOVÁ PRÁCA
-      ===================================================== */}
-
-      {openProfile && (
-  <div className="fixed inset-0 z-[70] overflow-y-auto bg-[#020617]">
-    <div className="relative mx-auto flex min-h-dvh w-full max-w-[1500px] flex-col p-3 sm:p-4 md:p-6">
-            <button
-              type="button"
-              onClick={closeProfile}
-              className="fixed right-5 top-5 z-50 rounded-2xl bg-white/10 p-3 text-slate-300 shadow-lg shadow-black/30 transition hover:bg-white/20 hover:text-white"
-              aria-label={text(dictionary, 'close', 'Zavrieť')}
-            >
-              <X size={22} />
-            </button>
-
-            <div className="min-h-0 flex-1 overflow-y-auto pb-8 pr-1">
-              <ProfileForm onClose={closeProfile} />
-            </div>
           </div>
         </div>
       )}

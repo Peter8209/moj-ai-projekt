@@ -1009,6 +1009,12 @@ export default function ProjectsPage() {
     setProfileWizardOpen(true);
   };
 
+  const openBlankProfile = () => {
+    setSelectedProfile(null);
+    setEditingProfile(null);
+    setProfileWizardOpen(true);
+  };
+
   const loadActiveProfile = () => {
     try {
       const activeRaw = localStorage.getItem('active_profile');
@@ -1413,6 +1419,10 @@ export default function ProjectsPage() {
             <button type="button" onClick={goToMenu} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.08] px-5 py-4 text-sm font-black text-white transition hover:border-violet-400/50 hover:bg-white/[0.14]">
               <Home className="h-5 w-5" />
               Menu
+            </button>
+            <button type="button" onClick={openBlankProfile} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.08] px-5 py-4 text-sm font-black text-white transition hover:border-violet-400/50 hover:bg-white/[0.14]">
+              <User className="h-5 w-5" />
+              Vytvoriť prázdny profil
             </button>
             <button type="button" onClick={openNewProfile} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 py-4 text-sm font-black text-white shadow-2xl shadow-violet-950/30 transition hover:opacity-90">
               <Plus className="h-5 w-5" />

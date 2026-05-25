@@ -646,7 +646,20 @@ function withSystemLanguageProfile(
   profile: SavedProfile | null,
   systemLanguage: AppLanguage,
 ): SavedProfile | null {
-  if (!profile) {
+  const baseProfile: SavedProfile =
+    profile && typeof profile === 'object'
+      ? profile
+      : {
+          language: systemLanguage,
+          interfaceLanguage: systemLanguage,
+          workLanguage: systemLanguage,
+          citation: 'STN ISO 690',
+          citationStyle: 'STN ISO 690',
+        };
+
+  const normalized = normalizeProfile(baseProfile);
+
+  if (!normalized) {
     return {
       language: systemLanguage,
       interfaceLanguage: systemLanguage,
@@ -656,22 +669,17 @@ function withSystemLanguageProfile(
     };
   }
 
-  const normalized = normalizeProfile(profile);
-
-  if (!normalized) return null;
-
   return {
     ...normalized,
 
-    // jazyk aplikácie / rozhrania
+    // Jazyk aplikácie / rozhrania.
     language: systemLanguage,
     interfaceLanguage: systemLanguage,
 
-    // jazyk práce ponechaj z profilu
-    workLanguage:
-      normalized.workLanguage ||
-      normalized.language ||
-      systemLanguage,
+    // DÔLEŽITÉ:
+    // AI chat a generovanie majú ísť podľa aktuálneho jazyka rozhrania,
+    // nie podľa starého uloženého jazyka profilu.
+    workLanguage: systemLanguage,
 
     citationStyle: normalizeCitationStyle(
       normalized.citationStyle || normalized.citation,
@@ -681,6 +689,8 @@ function withSystemLanguageProfile(
     ),
   };
 }
+
+  
 
 function normalizeCitationStyle(value?: string | null): string {
   const raw = String(value || '').trim().toLowerCase();

@@ -3837,54 +3837,55 @@ export async function POST(req: Request) {
 );
 
 profile = normalizeProfileForChat(rawProfileFromForm);
-      projectId = formData.get('projectId')?.toString() || null;
+projectId = formData.get('projectId')?.toString() || profile?.id || null;
 
-      const requestedLanguage =
-        formData.get('workLanguage') ||
-        formData.get('outputLanguage') ||
-        profile?.workLanguage ||
-        profile?.language ||
-        formData.get('language') ||
-        formData.get('systemLanguage') ||
-        'sk';
+// =====================================================
+// JAZYK VÝSTUPU = JAZYK ROZHRANIA
+// =====================================================
+// Priorita:
+// 1. interfaceLanguage z frontendu
+// 2. systemLanguage z frontendu
+// 3. language z frontendu
+// 4. outputLanguage z frontendu
+// 5. až potom profil
+// 6. až úplne nakoniec fallback sk
+//
+// Dôležité:
+// profile.workLanguage nesmie mať prednosť,
+// lebo starý profil môže mať uložené sk.
+const interfaceLanguageFromRequest =
+  formData.get('interfaceLanguage') ||
+  formData.get('systemLanguage') ||
+  formData.get('language') ||
+  formData.get('outputLanguage') ||
+  profile?.interfaceLanguage ||
+  profile?.language ||
+  profile?.workLanguage ||
+  'sk';
 
-      outputLanguage = normalizeAppLanguage(requestedLanguage, 'sk');
+outputLanguage = normalizeAppLanguage(interfaceLanguageFromRequest, 'sk');
 
-      const requestedCitationStyle =
-        formData.get('citationStyle')?.toString() ||
-        formData.get('citation')?.toString() ||
-        profile?.citationStyle ||
-        profile?.citation ||
-        'STN ISO 690';
+const requestedCitationStyle =
+  formData.get('citationStyle')?.toString() ||
+  formData.get('citation')?.toString() ||
+  profile?.citationStyle ||
+  profile?.citation ||
+  'STN ISO 690';
 
-      if (profile) {
-        profile = {
-          ...profile,
+if (profile) {
+  profile = {
+    ...profile,
 
-          language: normalizeAppLanguage(
-            formData.get('language') ||
-              formData.get('systemLanguage') ||
-              profile.interfaceLanguage ||
-              profile.language ||
-              'sk',
-            'sk',
-          ),
+    // Všetky jazykové polia zjednotíme podľa jazyka rozhrania.
+    // AI potom nemá dôvod padnúť späť do slovenčiny.
+    language: outputLanguage,
+    interfaceLanguage: outputLanguage,
+    workLanguage: outputLanguage,
 
-          interfaceLanguage: normalizeAppLanguage(
-            formData.get('interfaceLanguage') ||
-              formData.get('systemLanguage') ||
-              profile.interfaceLanguage ||
-              profile.language ||
-              'sk',
-            'sk',
-          ),
-
-          workLanguage: outputLanguage,
-
-          citationStyle: requestedCitationStyle,
-          citation: requestedCitationStyle,
-        };
-      }
+    citationStyle: requestedCitationStyle,
+    citation: requestedCitationStyle,
+  };
+}
 
       validateAttachmentsAgainstProfile = asBoolean(
         formData.get('validateAttachmentsAgainstProfile'),
@@ -3971,16 +3972,17 @@ profile = normalizeProfileForChat(rawProfileFromForm);
 
       projectId = body?.projectId || profile?.id || null;
 
-      const requestedLanguage =
-        body?.workLanguage ||
-        body?.outputLanguage ||
-        profile?.workLanguage ||
-        profile?.language ||
-        body?.language ||
-        body?.systemLanguage ||
-        'sk';
+      const interfaceLanguageFromRequest =
+  body?.interfaceLanguage ||
+  body?.systemLanguage ||
+  body?.language ||
+  body?.outputLanguage ||
+  profile?.interfaceLanguage ||
+  profile?.language ||
+  profile?.workLanguage ||
+  'sk';
 
-      outputLanguage = normalizeAppLanguage(requestedLanguage, 'sk');
+outputLanguage = normalizeAppLanguage(interfaceLanguageFromRequest, 'sk');
 
       const requestedCitationStyle =
         body?.citationStyle ||
@@ -3990,33 +3992,17 @@ profile = normalizeProfileForChat(rawProfileFromForm);
         'STN ISO 690';
 
       if (profile) {
-        profile = {
-          ...profile,
+  profile = {
+    ...profile,
 
-          language: normalizeAppLanguage(
-            body?.language ||
-              body?.systemLanguage ||
-              profile.interfaceLanguage ||
-              profile.language ||
-              'sk',
-            'sk',
-          ),
+    language: outputLanguage,
+    interfaceLanguage: outputLanguage,
+    workLanguage: outputLanguage,
 
-          interfaceLanguage: normalizeAppLanguage(
-            body?.interfaceLanguage ||
-              body?.systemLanguage ||
-              profile.interfaceLanguage ||
-              profile.language ||
-              'sk',
-            'sk',
-          ),
-
-          workLanguage: outputLanguage,
-
-          citationStyle: requestedCitationStyle,
-          citation: requestedCitationStyle,
-        };
-      }
+    citationStyle: requestedCitationStyle,
+    citation: requestedCitationStyle,
+  };
+}
 
       clientExtractedText =
         toCleanString(body?.clientExtractedText) ||

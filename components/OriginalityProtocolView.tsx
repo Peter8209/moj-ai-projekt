@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
+  ArrowLeft,
   FileText,
   Info,
   Loader2,
   Printer,
   RefreshCcw,
+  ShieldCheck,
   X,
 } from 'lucide-react';
 
@@ -133,8 +135,10 @@ type RequiredProtocolResult = {
   recommendation: string;
 };
 
+const ORIGINALITY_PROTOCOL_STORAGE_KEY = 'zedpera_originality_protocol_result';
+
 const ORIGINALITY_PROTOCOL_STORAGE_KEYS = [
-  'zedpera_originality_protocol_result',
+  ORIGINALITY_PROTOCOL_STORAGE_KEY,
   'originality_protocol_result',
   'originality_result',
   'latest_originality_result',
@@ -245,23 +249,28 @@ export default function OriginalityProtocolView({
   if (isLoadingProtocol && !normalized) {
     return (
       <ProtocolStatusShell>
-        <div className="rounded-[2rem] border border-violet-500/30 bg-violet-500/10 p-8 text-white shadow-2xl">
-          <div className="flex items-start gap-4">
-            <Loader2 className="mt-1 h-8 w-8 animate-spin text-violet-300" />
+        <div className="overflow-hidden rounded-[2rem] border border-violet-400/25 bg-slate-950 text-white shadow-2xl ring-1 ring-white/10">
+          <div className="relative p-8">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.35),transparent_35%)]" />
+          <div className="relative flex items-start gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-400/15 ring-1 ring-violet-300/20">
+              <Loader2 className="h-7 w-7 animate-spin text-violet-200" />
+            </div>
 
             <div>
-              <h1 className="text-3xl font-black">Načítavam protokol</h1>
+              <h1 className="text-3xl font-black tracking-tight">Načítavam protokol</h1>
 
               <p className="mt-4 text-lg leading-8 text-violet-100">
                 Kontrola originality ešte dokončuje zápis výsledku. Stránka
                 protokolu sa pokúša výsledok automaticky načítať.
               </p>
 
-              <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-violet-100">
+              <div className="mt-5 inline-flex rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-bold text-violet-100">
                 Pokus načítania: {attempts}
               </div>
             </div>
           </div>
+        </div>
         </div>
       </ProtocolStatusShell>
     );
@@ -270,20 +279,23 @@ export default function OriginalityProtocolView({
   if (!normalized) {
     return (
       <ProtocolStatusShell>
-        <div className="rounded-[2rem] border border-red-500/40 bg-red-950/40 p-8 text-white shadow-2xl">
-          <div className="flex items-start gap-4">
-            <AlertTriangle className="mt-1 h-9 w-9 text-red-200" />
+        <div className="overflow-hidden rounded-[2rem] border border-red-400/30 bg-slate-950 text-white shadow-2xl ring-1 ring-white/10">
+          <div className="relative p-8">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,63,94,0.32),transparent_34%)]" />
+          <div className="relative flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-400/15 ring-1 ring-red-200/20">
+              <AlertTriangle className="h-7 w-7 text-red-200" />
+            </div>
 
             <div className="w-full">
-              <h1 className="text-3xl font-black">Protokol sa nezobrazil</h1>
+              <h1 className="text-3xl font-black tracking-tight">Protokol sa nepodarilo načítať</h1>
 
               <p className="mt-4 text-lg leading-8">
-                Protokol sa nenašiel ani po automatickom opakovanom načítaní.
+                Výsledok kontroly originality zatiaľ nie je dostupný alebo sa neuložil do úložiska prehliadača.
               </p>
 
               <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-5 text-base leading-8">
-                Riešenie: vráť sa na stránku kontroly originality, klikni znova
-                na „Skontrolovať originalitu“ a povoľ nové okná v prehliadači.
+                Riešenie: vráť sa do modulu Originalita, spusti kontrolu znova a nechaj systém automaticky otvoriť protokol až po dokončení výpočtu. Ak prehliadač blokuje nové okná, povoľ ich pre túto stránku.
               </div>
 
               <div className="mt-7 flex flex-wrap gap-3">
@@ -310,8 +322,19 @@ export default function OriginalityProtocolView({
 
                 <button
                   type="button"
+                  onClick={() => {
+                    window.location.href = '/dashboard?module=originality';
+                  }}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-5 py-3 text-sm font-black text-white ring-1 ring-white/10 transition hover:bg-white/15"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                  Späť do originality
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => window.close()}
-                  className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-5 py-3 text-sm font-black text-white hover:bg-white/15"
+                  className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-5 py-3 text-sm font-black text-white ring-1 ring-white/10 transition hover:bg-white/15"
                 >
                   <X className="h-5 w-5" />
                   Zavrieť okno
@@ -319,6 +342,7 @@ export default function OriginalityProtocolView({
               </div>
             </div>
           </div>
+        </div>
         </div>
       </ProtocolStatusShell>
     );
@@ -328,25 +352,51 @@ export default function OriginalityProtocolView({
     <div className="protocol-shell mx-auto max-w-6xl rounded-[2rem] border border-white/10 bg-white p-4 text-black shadow-2xl md:p-8">
       <ProtocolStyles />
 
-      <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-        <div>
-          <div className="text-lg font-black text-slate-900">
-            Náhľad protokolu originality
-          </div>
+      <div className="no-print mb-6 overflow-hidden rounded-[1.75rem] border border-white/10 bg-slate-950 text-white shadow-2xl">
+        <div className="relative p-5 md:p-6">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.35),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(14,165,233,0.22),transparent_30%)]" />
 
-          <div className="text-sm text-slate-500">
-            Vizuálny výstup pripravený na tlač alebo export do PDF.
+          <div className="relative flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/15">
+                <ShieldCheck className="h-6 w-6 text-cyan-200" />
+              </div>
+
+              <div>
+                <div className="text-xl font-black tracking-tight">
+                  Náhľad protokolu originality
+                </div>
+
+                <div className="mt-1 max-w-2xl text-sm leading-6 text-slate-300">
+                  Moderný vizuálny výstup pripravený na tlač, uloženie do PDF
+                  alebo kontrolu pred odovzdaním.
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = '/dashboard?module=originality';
+                }}
+                className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/15 transition hover:bg-white/15"
+              >
+                <ArrowLeft size={18} />
+                Späť do originality
+              </button>
+
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-50"
+              >
+                <Printer size={18} />
+                Tlačiť / PDF
+              </button>
+            </div>
           </div>
         </div>
-
-        <button
-          type="button"
-          onClick={() => window.print()}
-          className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white hover:bg-slate-700"
-        >
-          <Printer size={18} />
-          Tlačiť / PDF
-        </button>
       </div>
 
       <section className="protocol-page crzp-page">
@@ -567,7 +617,7 @@ function ControlledWork({ result }: { result: RequiredProtocolResult }) {
                 {result.faculty || 'Neuvedená fakulta'}.-{' '}
                 {result.school || 'Neuvedená škola'}, {getYear(result.createdAt)}
                 .- typ práce: {result.workType || 'neurčené'} zdroj:{' '}
-                {result.school || 'ZEDPERA'}
+                {result.school || 'Interný porovnávací index'}
               </div>
             </td>
 
@@ -986,7 +1036,7 @@ function DocumentsSection({ result }: { result: RequiredProtocolResult }) {
                     <div className="crzp-doc-meta">
                       plagID: {doc.plagId || 'ORIENTAČNE'} typ práce:{' '}
                       {doc.workType || 'neurčené'} zdroj:{' '}
-                      {doc.source || 'ZEDPERA'}
+                      {doc.source || 'Interný porovnávací index'}
                     </div>
                   </td>
 
@@ -1118,7 +1168,7 @@ function ProtocolFooter({ result }: { result: RequiredProtocolResult }) {
         <Info size={18} />
 
         <span>
-          Tento protokol je orientačný výstup systému ZEDPERA Originalita.
+          Tento protokol je orientačný interný výstup modulu Originalita.
           Nenahrádza oficiálnu kontrolu originality školy, CRZP, Turnitin ani
           iný autorizovaný antiplagiátorský systém.
         </span>
@@ -1213,9 +1263,9 @@ function normalizeResult(result: ProtocolResult): RequiredProtocolResult {
     citationStyle: result.citationStyle || 'ISO 690',
     language: result.language || 'SK',
     createdAt: result.createdAt || result.generatedAt || new Date().toISOString(),
-    metadataUrl: result.metadataUrl || 'https://zedpera.com/originalita/metadata',
+    metadataUrl: result.metadataUrl || 'interné metadata protokolu',
     webProtocolUrl:
-      result.webProtocolUrl || 'https://zedpera.com/originalita/protokol',
+      result.webProtocolUrl || 'interný webový protokol',
     corpuses,
     dictionaryStats,
     histogram: normalizeHistogram(result.histogram || [], plaintext),
@@ -1306,7 +1356,7 @@ function calculateCorpusesFromDocuments(
   const groups = new Map<string, { total: number; max: number; count: number }>();
 
   documents.forEach((doc) => {
-    const name = normalizeCorpusName(doc.source || doc.citation || 'ZEDPERA');
+    const name = normalizeCorpusName(doc.source || doc.citation || 'Iné zdroje');
     const percent = safePercent(doc.percent);
 
     const existing = groups.get(name) || {

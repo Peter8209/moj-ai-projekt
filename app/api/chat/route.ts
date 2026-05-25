@@ -254,6 +254,28 @@ const streamOutputTokens = 7000;
 const chapterOutputTokens = 9000;
 
 // =====================================================
+// SOURCE SAFETY
+// =====================================================
+
+const forbiddenInternalSourcePatterns = [
+  /\bZEDPERA\b/gi,
+  /\bZedpera\b/gi,
+  /\bZedpera\s*AI\b/gi,
+  /\bnáš\s+systém\b/gi,
+  /\bnas\s+system\b/gi,
+  /\binterný\s+nástroj\b/gi,
+  /\binterny\s+nastroj\b/gi,
+  /\btáto\s+aplikácia\b/gi,
+  /\btato\s+aplikacia\b/gi,
+];
+
+function containsForbiddenInternalSource(value: string) {
+  const text = String(value || '');
+  return forbiddenInternalSourcePatterns.some((pattern) => pattern.test(text));
+}
+
+
+// =====================================================
 // BASIC HELPERS
 // =====================================================
 
@@ -1377,8 +1399,9 @@ function looksLikeCompleteApaBibliography(value: string) {
 }
 
 function formatCandidateForFinalLiterature(source: BibliographicCandidate) {
-  const raw = normalizeText(source.raw || '').replace(/\s+/g, ' ').trim();
-  const authors = cleanValidAuthors(source.authors || []);
+
+const raw = normalizeText(source.raw || '').replace(/\s+/g, ' ').trim();
+const authors = cleanValidAuthors(source.authors || []);
 
   if (looksLikeRawOcrPage(raw)) return '';
   if (looksLikeIncompleteInitialCitation(raw)) return '';
@@ -1413,8 +1436,12 @@ function removeIncompleteSourceLines(text: string) {
     .filter((line) => {
       const current = line.trim();
       if (!current) return true;
+
+      if (containsForbiddenInternalSource(current)) return false;
+
       if (/^\d+\.\s*[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]\.?\s*\((18|19|20)\d{2}/i.test(current)) return false;
       if (/údaj je potrebné overiť|Autor je potrebné overiť|Rok chýba|Neúplná citácia/i.test(current)) return false;
+
       return true;
     })
     .join('\n')
@@ -1563,11 +1590,20 @@ function removeBrokenSourceGarbageLines(text: string) {
     .trim();
 }
 
-
+function removeForbiddenInternalSourcesFromOutput(text: string) {
+  return normalizeText(text)
+    .split('\n')
+    .filter((line) => !containsForbiddenInternalSource(line))
+    .join('\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
 
 function finalizeSourceSections(text: string) {
-  return removeBrokenSourceGarbageLines(
-    removeDuplicatePrimarySecondarySourceBlocks(removeIncompleteSourceLines(text)),
+  return removeForbiddenInternalSourcesFromOutput(
+    removeBrokenSourceGarbageLines(
+      removeDuplicatePrimarySecondarySourceBlocks(removeIncompleteSourceLines(text)),
+    ),
   );
 }
 
@@ -3166,6 +3202,14 @@ Povinný zoznam zdrojov: ${settings.requireSourceList ? 'áno' : 'nie'}
 Povolené všeobecné znalosti AI: ${settings.allowAiKnowledgeFallback ? 'áno' : 'nie'}
 Externé akademické zdroje Semantic Scholar/Crossref: ${settings.useExternalAcademicSources ? 'áno' : 'nie'}
 
+
+PRAVIDLO PRE ZDROJE:
+Nikdy neuvádzaj Zedpera, ZEDPERA, Zedpera AI, náš systém, túto aplikáciu ani interný nástroj ako autora, zdroj, publikáciu, databázu, URL, DOI alebo položku v literatúre.
+Zedpera je iba pracovný nástroj používateľa, nie akademický zdroj.
+Ak zdroj nie je overiteľný, nepíš ho ako bibliografický záznam.
+Použi iba reálne externé zdroje, prílohy používateľa alebo overené zdroje zo Semantic Scholar/Crossref.
+
+
 FORMÁT:
 Ak je kapitola: akademický text s citáciami v odsekoch, potom Primárne zdroje a Sekundárne zdroje.
 Ak je iba zdroje: vráť iba Primárne zdroje a Sekundárne zdroje.
@@ -3536,22 +3580,19 @@ async function createJsonResponse({
   : result.text || '';
 
 output = cleanClientVisibleOutput(output, module);
+output = removeForbiddenInternalSourcesFromOutput(output);
 
 if (!isStrictNoAcademicTailModule(module)) {
   output = removePrimarySourcePlaceholder(output, extractedFiles);
 }
 
-  if (isChapterRequest || sourcesOnly || module === 'chat') {
-    const lastUserMessage = getLastUserMessage(normalizedMessages);
+if (isChapterRequest || sourcesOnly || module === 'chat') {
+  const lastUserMessage = getLastUserMessage(normalizedMessages);
 
-    output = cleanAcademicChapterOutput(output, lastUserMessage);
-
-    // DÔLEŽITÉ:
-    // Backend už NESKLADÁ Primárne/Sekundárne zdroje.
-    // Model ich musí vytvoriť sám podľa systemPromptu.
-    // Backend iba čistí duplicity, technické bloky a poškodené riadky.
-    output = finalizeSourceSections(output);
-  }
+  output = cleanAcademicChapterOutput(output, lastUserMessage);
+  output = finalizeSourceSections(output);
+  output = removeForbiddenInternalSourcesFromOutput(output);
+}
 
 await saveGeneratedHistory({
   module,

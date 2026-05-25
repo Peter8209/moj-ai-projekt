@@ -2008,163 +2008,232 @@ profileId: profileForApi?.id || null,
     }
 
     // ================= ORIGINALITA =================
-    if (activeModule === 'originality') {
-      let protocolWindow: Window | null = null;
+    // ================= ORIGINALITA =================
+if (activeModule === 'originality') {
+  const formData = new FormData();
 
-      try {
-        localStorage.removeItem(ORIGINALITY_PROTOCOL_STORAGE_KEY);
+  const systemLanguage = getStoredSystemLanguage();
+  persistSystemLanguage(systemLanguage);
 
-        protocolWindow = window.open(
-          '/originality/protocol?loading=1',
-          '_blank',
-          'width=1300,height=900',
-        );
-      } catch {
-        protocolWindow = null;
-      }
+  const profileForApi = prepareProfileForApi(
+    activeProfile,
+    systemLanguage,
+  );
 
-      const formData = new FormData();
+  const finalWorkLanguage = getWorkLanguage(profileForApi);
 
-      const systemLanguage = getStoredSystemLanguage();
-      persistSystemLanguage(systemLanguage);
+  formData.append('agent', agent);
+  formData.append('text', input);
+  formData.append('activeProfile', JSON.stringify(profileForApi || null));
+  formData.append('profile', JSON.stringify(profileForApi || null));
 
-      const profileForApi = prepareProfileForApi(
-  activeProfile,
-  systemLanguage,
-);
+  formData.append(
+    'profileSnapshot',
+    JSON.stringify({
+      id: profileForApi?.id || null,
+      title: profileForApi?.title || '',
+      topic: profileForApi?.topic || '',
+      type: getWorkType(profileForApi),
+      expertise: getExpertise(profileForApi),
+      workLanguage: getWorkLanguage(profileForApi),
+      citation: getCitationStyle(profileForApi),
+    }),
+  );
 
-const finalWorkLanguage = getWorkLanguage(profileForApi);
+  formData.append('language', finalWorkLanguage);
+  formData.append('outputLanguage', finalWorkLanguage);
+  formData.append('systemLanguage', systemLanguage);
+  formData.append('interfaceLanguage', systemLanguage);
+  formData.append('workLanguage', finalWorkLanguage);
 
-      formData.append('agent', agent);
-      formData.append('text', input);
-      formData.append('activeProfile', JSON.stringify(profileForApi || null));
-      formData.append('profile', JSON.stringify(profileForApi || null));
+  formData.append(
+    'title',
+    profileForApi?.title ||
+      activeProfile?.title ||
+      'Kontrola originality',
+  );
 
-formData.append(
-  'profileSnapshot',
-  JSON.stringify({
-    id: profileForApi?.id || null,
-    title: profileForApi?.title || '',
-    topic: profileForApi?.topic || '',
-    type: getWorkType(profileForApi),
-    expertise: getExpertise(profileForApi),
-    workLanguage: getWorkLanguage(profileForApi),
-    citation: getCitationStyle(profileForApi),
-  }),
-);
+  formData.append(
+    'author',
+    (profileForApi as any)?.author ||
+      (activeProfile as any)?.author ||
+      '',
+  );
 
+  formData.append(
+    'authorName',
+    (profileForApi as any)?.authorName ||
+      (profileForApi as any)?.author ||
+      (activeProfile as any)?.authorName ||
+      (activeProfile as any)?.author ||
+      '',
+  );
 
-      formData.append('language', finalWorkLanguage);
-formData.append('outputLanguage', finalWorkLanguage);
-formData.append('systemLanguage', systemLanguage);
-formData.append('interfaceLanguage', systemLanguage);
-formData.append('workLanguage', finalWorkLanguage);
+  formData.append(
+    'school',
+    (profileForApi as any)?.school ||
+      (activeProfile as any)?.school ||
+      '',
+  );
 
-      formData.append('title', profileForApi?.title || 'Kontrola originality');
-      formData.append('author', '');
-      formData.append('authorName', '');
-      formData.append('school', '');
-      formData.append('faculty', '');
-      formData.append('studyProgram', '');
-      formData.append('supervisor', profileForApi?.supervisor || '');
-      formData.append('workType', getWorkType(profileForApi));
-      formData.append('citationStyle', getCitationStyle(profileForApi));
-      formData.append('checkAuthenticity', 'true');
+  formData.append(
+    'faculty',
+    (profileForApi as any)?.faculty ||
+      (activeProfile as any)?.faculty ||
+      '',
+  );
 
-      if (profileForApi?.id) {
-        formData.append('profileId', profileForApi.id);
-      }
+  formData.append(
+    'studyProgram',
+    (profileForApi as any)?.studyProgram ||
+      (activeProfile as any)?.studyProgram ||
+      '',
+  );
 
-      attachedFiles.forEach((item) => {
-        if (!item.file) return;
-        formData.append('files', item.file, item.name || item.file.name);
-      });
+  formData.append(
+    'supervisor',
+    profileForApi?.supervisor ||
+      activeProfile?.supervisor ||
+      '',
+  );
 
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        body: formData,
-      });
+  formData.append(
+    'workType',
+    getWorkType(profileForApi),
+  );
 
-      if (!res.ok) {
-        throw new Error(await readApiErrorResponse(res));
-      }
+  formData.append(
+    'citationStyle',
+    getCitationStyle(profileForApi),
+  );
 
-      const data = await res.json();
+  formData.append('checkAuthenticity', 'true');
 
-      if (!data || data.ok === false) {
-        throw new Error(
-          data?.message ||
-            data?.error ||
-            'Kontrola originality nevrátila platný výsledok.',
-        );
-      }
+  if (profileForApi?.id) {
+    formData.append('profileId', profileForApi.id);
+    formData.append('projectId', profileForApi.id);
+  }
 
-      localStorage.setItem(
-        ORIGINALITY_PROTOCOL_STORAGE_KEY,
-        JSON.stringify(data),
-      );
+  attachedFiles.forEach((item) => {
+    if (!item.file) return;
+    formData.append('files', item.file, item.name || item.file.name);
+  });
 
-      const similarityScore =
-        data?.score ??
-        data?.similarityRiskScore ??
-        data?.similarityScore ??
-        data?.percent ??
-        data?.overallPercent ??
-        'neuvedené';
+  let protocolWindow: Window | null = null;
 
-      const output = cleanFinalOutput(
-        [
-          'Kontrola originality bola dokončená.',
-          '',
-          `Percento podobnosti: ${
-            typeof similarityScore === 'number'
-              ? `${similarityScore.toFixed(2).replace('.', ',')}%`
-              : similarityScore
-          }`,
-          '',
-          data?.summary || '',
-          '',
-          data?.recommendation || '',
-          '',
-          'Kompletný vizuálny protokol s grafmi, histogramom, tabuľkami a pasážami bol otvorený na novej podstránke.',
-        ].join('\n'),
-      );
+  try {
+    localStorage.removeItem(ORIGINALITY_PROTOCOL_STORAGE_KEY);
+    sessionStorage.removeItem(ORIGINALITY_PROTOCOL_STORAGE_KEY);
 
-      setResult(output);
-      setCanvasText(output);
+    protocolWindow = window.open(
+      '/originality/protocol?loading=1',
+      '_blank',
+      'width=1300,height=900,noopener,noreferrer',
+    );
+  } catch {
+    protocolWindow = null;
+  }
 
-      await saveHistoryItem({
-        module: 'originality',
-        title: 'Kontrola originality',
-        userMessage: input || 'Kontrola originality z nahraného dokumentu.',
-        assistantMessage: output,
-        result: {
-          originality: data,
-          profileTitle: activeProfile?.title || '',
-          profileId: activeProfile?.id || null,
-          attachedFiles: attachedFiles.map((file) => ({
-            name: file.name,
-            size: file.size,
-            type: file.type,
-          })),
-        },
-      });
+  const res = await fetch('/api/originality', {
+    method: 'POST',
+    body: formData,
+  });
 
-      const protocolUrl = `/originality/protocol?ts=${Date.now()}`;
+  if (!res.ok) {
+    throw new Error(await readApiErrorResponse(res));
+  }
 
-      if (protocolWindow && !protocolWindow.closed) {
-        protocolWindow.location.href = protocolUrl;
-        protocolWindow.focus();
-      } else {
-        window.open(protocolUrl, '_blank', 'width=1300,height=900');
-      }
+  const data = await res.json();
 
-      setTimeout(() => {
-        resultRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 150);
+  if (!data || data.ok === false) {
+    throw new Error(
+      data?.message ||
+        data?.error ||
+        'Kontrola originality nevrátila platný výsledok.',
+    );
+  }
 
-      return;
-    }
+  const protocolPayload = {
+    ...data,
+    result: data,
+    createdAt: data.createdAt || new Date().toISOString(),
+  };
+
+  localStorage.setItem(
+    ORIGINALITY_PROTOCOL_STORAGE_KEY,
+    JSON.stringify(protocolPayload),
+  );
+
+  sessionStorage.setItem(
+    ORIGINALITY_PROTOCOL_STORAGE_KEY,
+    JSON.stringify(protocolPayload),
+  );
+
+  const similarityScore =
+    data?.score ??
+    data?.similarityRiskScore ??
+    data?.similarityScore ??
+    data?.percent ??
+    data?.overallPercent ??
+    'neuvedené';
+
+  const output = cleanFinalOutput(
+    [
+      'Kontrola originality bola dokončená.',
+      '',
+      `Percento podobnosti: ${
+        typeof similarityScore === 'number'
+          ? `${similarityScore.toFixed(2).replace('.', ',')}%`
+          : similarityScore
+      }`,
+      '',
+      data?.summary || '',
+      '',
+      data?.recommendation || '',
+      '',
+      'Kompletný vizuálny protokol s grafmi, histogramom, tabuľkami a pasážami bol otvorený na samostatnej podstránke.',
+    ].join('\n'),
+  );
+
+  setResult(output);
+  setCanvasText(output);
+
+  await saveHistoryItem({
+    module: 'originality',
+    title: 'Kontrola originality',
+    userMessage: input || 'Kontrola originality z nahraného dokumentu.',
+    assistantMessage: output,
+    result: {
+      originality: data,
+      profileTitle: activeProfile?.title || '',
+      profileId: activeProfile?.id || null,
+      attachedFiles: attachedFiles.map((file) => ({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      })),
+    },
+  });
+
+  const protocolUrl = `/originality/protocol?ts=${Date.now()}`;
+
+  if (protocolWindow && !protocolWindow.closed) {
+    protocolWindow.location.href = protocolUrl;
+    protocolWindow.focus();
+  } else {
+    window.open(
+      protocolUrl,
+      '_blank',
+      'width=1300,height=900,noopener,noreferrer',
+    );
+  }
+
+  setTimeout(() => {
+    resultRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, 150);
+
+  return;
+}
 
     const prompt = buildModulePrompt();
 

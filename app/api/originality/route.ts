@@ -10,6 +10,14 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 90;
 
+// ================= CONSTANTS =================
+
+const ORIGINALITY_PROTOCOL_STORAGE_KEY = 'zedpera_originality_protocol_result';
+const ORIGINALITY_PROTOCOL_URL = '/originality/protocol';
+
+const INTERNAL_COMPARISON_SOURCE = 'Interný porovnávací index';
+const INTERNAL_TEXT_REVIEW_SOURCE = 'Orientačné hodnotenie textu';
+
 // ================= TYPES =================
 
 type OriginalityRequest = {
@@ -113,6 +121,9 @@ type ProtocolResponse = {
   summary: string;
   recommendation: string;
   plaintext: string;
+
+  protocolUrl: string;
+  protocolStorageKey: string;
 
   fileWarning?: string | null;
   file?: {
@@ -259,6 +270,15 @@ function normalizeForProtocolText(value: string) {
     .trim();
 }
 
+function sanitizeInternalSourceText(value: string) {
+  return String(value || '')
+    .replace(/\bZEDPERA\s+orientačné\s+hodnotenie\s+textu\b/gi, INTERNAL_TEXT_REVIEW_SOURCE)
+    .replace(/\bZEDPERA\b/gi, INTERNAL_COMPARISON_SOURCE)
+    .replace(/\bZedpera\b/gi, INTERNAL_COMPARISON_SOURCE)
+    .replace(/\bZedpera\s*AI\b/gi, INTERNAL_COMPARISON_SOURCE)
+    .trim();
+}
+
 // ================= TEXT STATS =================
 
 function countDictionaryLikeWords(text: string) {
@@ -387,13 +407,17 @@ function normalizeDocuments(value: unknown): SimilarDocument[] {
   return value.slice(0, 30).map((doc: any, index: number) => ({
     id: doc?.id || index + 1,
     order: Number(doc?.order || index + 1),
-    citation: normalizeString(
-      doc?.citation || doc?.title || doc?.name || doc?.documentTitle,
-      `Dokument ${index + 1}`,
+    citation: sanitizeInternalSourceText(
+      normalizeString(
+        doc?.citation || doc?.title || doc?.name || doc?.documentTitle,
+        `Dokument ${index + 1}`,
+      ),
     ),
-    source: normalizeString(doc?.source || doc?.database, ''),
-    plagId: normalizeString(doc?.plagId || doc?.plagID || doc?.id, ''),
-    workType: normalizeString(doc?.workType || doc?.type, ''),
+    source: sanitizeInternalSourceText(
+      normalizeString(doc?.source || doc?.database, INTERNAL_COMPARISON_SOURCE),
+    ),
+    plagId: normalizeString(doc?.plagId || doc?.plagID || doc?.id, 'ORIENTACNE'),
+    workType: normalizeString(doc?.workType || doc?.type, 'orientačné vyhodnotenie'),
     percent: clampPercent(doc?.percent || doc?.score || doc?.similarity),
   }));
 }
@@ -409,34 +433,44 @@ function normalizePassages(value: unknown): SimilarityPassage[] {
     ),
     reliability: normalizeString(passage?.reliability, 'orientačná'),
     percent: clampPercent(passage?.percent || passage?.score || 0),
-    controlledText: normalizeString(
-      passage?.controlledText ||
-        passage?.text ||
-        passage?.inputText ||
-        passage?.originalText,
-      '',
+    controlledText: sanitizeInternalSourceText(
+      normalizeString(
+        passage?.controlledText ||
+          passage?.text ||
+          passage?.inputText ||
+          passage?.originalText,
+        '',
+      ),
     ),
-    matchedText: normalizeString(
-      passage?.matchedText || passage?.sourceText || passage?.matchText,
-      '',
+    matchedText: sanitizeInternalSourceText(
+      normalizeString(
+        passage?.matchedText || passage?.sourceText || passage?.matchText,
+        '',
+      ),
     ),
-    sourceTitle: normalizeString(
-      passage?.sourceTitle || passage?.source || passage?.documentTitle,
-      'ZEDPERA orientačné hodnotenie textu',
+    sourceTitle: sanitizeInternalSourceText(
+      normalizeString(
+        passage?.sourceTitle || passage?.source || passage?.documentTitle,
+        INTERNAL_TEXT_REVIEW_SOURCE,
+      ),
     ),
     sourceUrl: normalizeString(passage?.sourceUrl || passage?.url, ''),
     sourceDocNumber:
       passage?.sourceDocNumber !== undefined
         ? Number(passage.sourceDocNumber)
         : index + 1,
-    reason: normalizeString(passage?.reason || passage?.comment, ''),
+    reason: sanitizeInternalSourceText(
+      normalizeString(passage?.reason || passage?.comment, ''),
+    ),
   }));
 }
 
 function normalizeCorpuses(value: unknown, score: number): CorpusMatch[] {
   if (Array.isArray(value) && value.length > 0) {
     return value.slice(0, 10).map((item: any) => ({
-      name: normalizeString(item?.name || item?.corpus, 'Neznámy korpus'),
+      name: sanitizeInternalSourceText(
+        normalizeString(item?.name || item?.corpus, 'Neznámy korpus'),
+      ),
       percent: clampPercent(item?.percent || item?.score),
       count:
         item?.count !== undefined && item?.count !== null
@@ -476,8 +510,8 @@ function createFallbackDocuments(score: number): SimilarDocument[] {
     {
       order: 1,
       citation:
-        'Orientačne identifikované rizikové formulácie v texte / systémová textová analýza ZEDPERA.',
-      source: 'ZEDPERA',
+        'Orientačne identifikované rizikové formulácie v texte / systémová textová analýza.',
+      source: INTERNAL_COMPARISON_SOURCE,
       plagId: 'ORIENTACNE',
       workType: 'orientačné vyhodnotenie',
       percent: score,
@@ -518,7 +552,7 @@ function createFallbackPassages(text: string, score: number): SimilarityPassage[
     controlledText: sentence,
     matchedText:
       'Nejde o potvrdenú databázovú zhodu. Pasáž je označená orientačne pre všeobecnosť formulácie, možné chýbajúce citovanie, opisný charakter alebo slabší vlastný autorský prínos.',
-    sourceTitle: 'ZEDPERA orientačné hodnotenie textu',
+    sourceTitle: INTERNAL_TEXT_REVIEW_SOURCE,
     sourceUrl: '',
     sourceDocNumber: index + 1,
     reason:
@@ -759,7 +793,7 @@ function buildProtocolPrompt(data: {
   dictionaryStats: DictionaryStats;
 }) {
   return `
-Si ZEDPERA Originalita.
+Si odborný modul orientačnej kontroly originality.
 
 Tvoj cieľ:
 Vrátiť štruktúrované dáta pre protokol s názvom "Protokol o kontrole originality".
@@ -767,6 +801,7 @@ Vrátiť štruktúrované dáta pre protokol s názvom "Protokol o kontrole orig
 DÔLEŽITÉ:
 - Neuvádzaj, že ide o oficiálnu kontrolu CRZP, Turnitin alebo školský systém.
 - Neuvádzaj vymyslené DOI, URL, databázy ani reálne zhody, ak ich nevieš overiť.
+- Neuvádzaj názov systému Zedpera, ZEDPERA ani Zedpera AI ako zdroj, databázu, autora, publikáciu ani položku v protokole zdrojov.
 - Výsledok je orientačný.
 - Hodnoť text podľa rizika podobnosti, všeobecných formulácií, chýbajúcich citácií, možného parafrázovania bez zdroja, slabého autorského prínosu a generického akademického štýlu.
 - Vráť iba čistý JSON.
@@ -857,7 +892,8 @@ Význam:
 - Čím vyššie číslo, tým vyššie riziko podobnosti.
 - "passages" musia obsahovať konkrétne vety alebo úseky z kontrolovaného textu.
 - "matchedText" nepíš ako potvrdenú databázovú zhodu, ak ju nevieš overiť.
-- Ak nemáš reálny externý zdroj, sourceTitle nastav na "ZEDPERA orientačné hodnotenie textu".
+- Ak nemáš reálny externý zdroj, sourceTitle nastav na "${INTERNAL_TEXT_REVIEW_SOURCE}".
+- Ak nemáš reálnu databázu, source nastav na "${INTERNAL_COMPARISON_SOURCE}".
 - Percentá drž v rozsahu 0 až 100.
 `;
 }
@@ -888,7 +924,7 @@ function normalizeProtocolData(params: {
   const histogram = createHistogram(text);
 
   const title =
-    normalizeString(aiData?.title) ||
+    sanitizeInternalSourceText(normalizeString(aiData?.title)) ||
     normalizeString(body.title) ||
     normalizeString(activeProfile?.title) ||
     'Kontrolovaná práca';
@@ -994,14 +1030,17 @@ function normalizeProtocolData(params: {
     passages: finalPassages,
 
     summary:
-      normalizeString(aiData?.summary) ||
+      sanitizeInternalSourceText(normalizeString(aiData?.summary)) ||
       'Výsledok je orientačná kontrola originality. Protokol vyhodnocuje podobnosť, rizikové formulácie, chýbajúce citácie, všeobecné pasáže a akademickú autentickosť textu.',
 
     recommendation:
-      normalizeString(aiData?.recommendation) ||
+      sanitizeInternalSourceText(normalizeString(aiData?.recommendation)) ||
       'Skontrolujte označené pasáže, doplňte zdroje, upravte všeobecné formulácie, posilnite vlastný komentár autora a overte výsledok v oficiálnom systéme školy.',
 
     plaintext: text,
+
+    protocolUrl: ORIGINALITY_PROTOCOL_URL,
+    protocolStorageKey: ORIGINALITY_PROTOCOL_STORAGE_KEY,
 
     fileWarning,
 
@@ -1028,7 +1067,7 @@ function createProtocolText(
   const corpusesLine = data.corpuses
     .map(
       (corpus) =>
-        `${corpus.name}:${formatPercent(corpus.percent, 2)} (${corpus.count ?? 0})`,
+        `${sanitizeInternalSourceText(corpus.name)}:${formatPercent(corpus.percent, 2)} (${corpus.count ?? 0})`,
     )
     .join(', ');
 
@@ -1043,10 +1082,10 @@ function createProtocolText(
       ? data.documents
           .map((doc, index) => {
             return `${doc.order || index + 1}
-${doc.citation}
+${sanitizeInternalSourceText(doc.citation)}
 plagID: ${doc.plagId || 'ORIENTACNE'} typ práce: ${
               doc.workType || data.workType || 'neurčené'
-            } zdroj: ${doc.source || 'ZEDPERA'}
+            } zdroj: ${sanitizeInternalSourceText(doc.source || INTERNAL_COMPARISON_SOURCE)}
 ${formatPercent(doc.percent, 2)}`;
           })
           .join('\n\n')
@@ -1056,16 +1095,22 @@ ${formatPercent(doc.percent, 2)}`;
     data.passages.length > 0
       ? data.passages
           .map((passage, index) => {
-            const controlled = normalizeForProtocolText(passage.controlledText);
-            const matched = normalizeForProtocolText(passage.matchedText || '');
-            const reason = normalizeForProtocolText(passage.reason || '');
+            const controlled = normalizeForProtocolText(
+              sanitizeInternalSourceText(passage.controlledText),
+            );
+            const matched = normalizeForProtocolText(
+              sanitizeInternalSourceText(passage.matchedText || ''),
+            );
+            const reason = normalizeForProtocolText(
+              sanitizeInternalSourceText(passage.reason || ''),
+            );
 
-            return `${index + 1}. odsek : spoľahlivosť [${
+            return `${index + 1}. odsek : spoľahlivosť ${
               passage.reliability ||
               (typeof passage.percent === 'number'
                 ? formatPercent(passage.percent, 0)
                 : 'orientačná')
-            }]
+            }
 ${controlled}
 
 Zdroj / porovnanie:
@@ -1141,7 +1186,7 @@ ${histogramLengths}
 Indik. odchylka
 ${histogramDeviations}
 
-*Odchýlky od priemerných hodnôt početnosti slov. Profil početností slov je počítaný orientačne podľa extrahovaného textu. Značka ">>" indikuje výrazne viac slov danej dĺžky ako priemer a značka "<<" výrazne menej slov danej dĺžky ako priemer. Výrazné odchýlky môžu indikovať manipuláciu textu. Je potrebné skontrolovať "plaintext"! Priveľa krátkych slov indikuje vkladanie oddelovačov alebo znakov netradičného kódovania. Priveľa dlhých slov indikuje vkladanie bielych znakov, prípadne iný jazyk práce.
+*Odchýlky od priemerných hodnôt početnosti slov. Profil početností slov je počítaný orientačne podľa extrahovaného textu. Značka ">>" indikuje výrazne viac slov danej dĺžky ako priemer a značka "<<" výrazne menej slov danej dĺžky ako priemer. Výrazné odchýlky môžu indikovať manipuláciu textu. Je potrebné skontrolovať "plaintext"!
 
 Prácesnadprahovouhodnotoupodobnosti
 Dok.
@@ -1150,13 +1195,13 @@ Percento*
 ${documentsText}
 
 *Číslo vyjadruje percentuálny prekryv testovaného dokumentu len s dokumentom alebo orientačnou kategóriou uvedenou v príslušnom riadku.
-:Dokument má prekryv s viacerými rizikovými formuláciami. Zoznam dokumentov je krátený a usporiadaný podľa percenta zostupne. Celkový počet dokumentov je [${data.documents.length}]. Pri veľkom počte býva často príčinou zhoda v texte, ktorý je predpísaný pre daný typ práce, napríklad položky tabuliek, záhlavia, čestné vyhlásenia, poďakovania alebo všeobecné formulácie.
+Dokument má prekryv s viacerými rizikovými formuláciami. Zoznam dokumentov je krátený a usporiadaný podľa percenta zostupne. Celkový počet dokumentov je [${data.documents.length}].
 
 Detaily-zistenépodobnosti
 ${detailsText}
 
 Plaintext dokumentunakontrolu
-Skontroluje extrahovaný text práce na konci protokolu! Plaintext (čistý text - extrahovaný text) dokumentuje základom pre textový analyzátor. Tento text môže byť poškodený úmyselne vkladaním znakov, používaním neštandardných znakových sád alebo neúmyselne napr. pri konverzii na PDF nekvalitným programom. Nepoškodený text je čitateľný, slová sú správne oddelené, diakritické znaky sú správne, množstvo textu je primerané rozsahu práce.
+Skontrolujte extrahovaný text práce na konci protokolu. Plaintext dokumentu je základom pre textový analyzátor.
 
 ___________________________________________________________________________
 
@@ -1166,7 +1211,7 @@ ${data.metadataUrl}
 ${data.webProtocolUrl}
 
 Upozornenie:
-Tento protokol je orientačný výstup systému ZEDPERA Originalita. Nenahrádza oficiálnu kontrolu originality školy, CRZP, Turnitin ani iný autorizovaný antiplagiátorský systém.
+Tento protokol je orientačný výstup modulu kontroly originality. Nenahrádza oficiálnu kontrolu originality školy, CRZP, Turnitin ani iný autorizovaný antiplagiátorský systém.
 `;
 }
 
@@ -1416,6 +1461,8 @@ export async function POST(req: NextRequest) {
       text: protocolText,
       content: protocolText,
       report: protocolText,
+      protocolUrl: ORIGINALITY_PROTOCOL_URL,
+      protocolStorageKey: ORIGINALITY_PROTOCOL_STORAGE_KEY,
     };
 
     return NextResponse.json(response);

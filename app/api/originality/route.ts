@@ -379,26 +379,131 @@ function createHistogram(text: string): HistogramItem[] {
 
 // ================= JSON AI HELPERS =================
 
-function extractJsonFromAi(raw: string) {
-  const cleaned = cleanAiText(raw)
-    .replace(/^```json/i, '')
-    .replace(/^```/i, '')
+function stripJsonFence(value: string) {
+  return cleanAiText(value)
+    .replace(/^\uFEFF/, '')
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
     .replace(/```$/i, '')
     .trim();
+}
 
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const first = cleaned.indexOf('{');
-    const last = cleaned.lastIndexOf('}');
+function repairCommonJsonIssues(value: string) {
+  return String(value || '')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/,\s*}/g, '}')
+    .replace(/,\s*]/g, ']')
+    .trim();
+}
 
-    if (first !== -1 && last !== -1 && last > first) {
-      const jsonSlice = cleaned.slice(first, last + 1);
-      return JSON.parse(jsonSlice);
+function findFirstJsonObject(value: string) {
+  const text = stripJsonFence(value);
+  const firstBrace = text.indexOf('{');
+
+  if (firstBrace === -1) {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = firstBrace; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
     }
 
-    throw new Error('AI nevrátilo platný JSON pre protokol originality.');
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (char === '{') {
+      depth += 1;
+    }
+
+    if (char === '}') {
+      depth -= 1;
+
+      if (depth === 0) {
+        return text.slice(firstBrace, index + 1);
+      }
+    }
   }
+
+  return null;
+}
+
+function createFallbackAiData(text: string, rawReport = '') {
+  const dictionaryStats = createDictionaryStats(text);
+  const heuristicScore = clampPercent(
+    dictionaryStats.totalWords < 120
+      ? 8
+      : dictionaryStats.dictionaryWordsRatio < 70
+        ? 18
+        : 12,
+  );
+
+  return {
+    score: heuristicScore,
+    title: 'Kontrolovaná práca',
+    author: 'Neuvedené',
+    school: 'Neuvedené',
+    faculty: 'Neuvedené',
+    studyProgram: 'Neuvedené',
+    supervisor: 'Neuvedené',
+    workType: 'Neuvedené',
+    citationStyle: 'ISO 690',
+    language: 'SK',
+    summary:
+      'AI výstup nebolo možné bezpečne spracovať ako platný JSON. Systém preto vytvoril náhradný orientačný protokol z textových štatistík a lokálnej analýzy pasáží.',
+    recommendation:
+      'Zopakujte kontrolu originality. Ak sa problém opakuje, skontrolujte prompt a model tak, aby vracal výhradne čistý JSON bez markdownu a vysvetľujúceho textu.',
+    corpuses: [],
+    documents: [],
+    passages: createFallbackPassages(text, heuristicScore),
+    rawReport: String(rawReport || '').slice(0, 8000),
+    fallback: true,
+  };
+}
+
+function extractJsonFromAi(raw: string, fallbackText = '') {
+  const cleaned = stripJsonFence(raw);
+
+  const candidates = [
+    cleaned,
+    findFirstJsonObject(cleaned),
+  ].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      try {
+        return JSON.parse(repairCommonJsonIssues(candidate));
+      } catch {
+        // Pokračujeme ďalším kandidátom.
+      }
+    }
+  }
+
+  console.error(
+    'ORIGINALITY JSON PARSE RAW OUTPUT:',
+    String(raw || '').slice(0, 4000),
+  );
+
+  return createFallbackAiData(fallbackText, raw);
 }
 
 function normalizeDocuments(value: unknown): SimilarDocument[] {
@@ -1364,7 +1469,7 @@ export async function POST(req: NextRequest) {
     let aiData: any = {};
 
     try {
-      aiData = extractJsonFromAi(rawAiReport);
+      aiData = extractJsonFromAi(rawAiReport, text);
     } catch (parseError) {
       console.error('ORIGINALITY JSON PARSE ERROR:', parseError);
       aiData = {};
@@ -1423,10 +1528,9 @@ export async function POST(req: NextRequest) {
           recommendations: preliminaryData.recommendation
             ? [{ text: preliminaryData.recommendation }]
             : [],
-          authentic_rewrite: [],
 
           raw_report: rawAiReport,
-          status: 'completed',
+          status: aiData?.fallback ? 'fallback' : 'completed',
         })
         .select('id')
         .single();

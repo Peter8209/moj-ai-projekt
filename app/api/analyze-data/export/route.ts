@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import PDFDocument from 'pdfkit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 90;
 
-// ================= TYPES =================
-
-type ExportFormat = 'doc' | 'word' | 'pdf' | 'xlsx' | 'excel';
+type ExportFormat = 'word' | 'doc' | 'xlsx' | 'xls' | 'excel' | 'pdf';
 
 type ExportBody = {
   format?: ExportFormat;
@@ -15,21 +12,127 @@ type ExportBody = {
   result?: any;
 };
 
-type TableColumn = {
-  key: string;
-  label?: string;
-};
-
-type TableLike = {
-  title?: string;
+type ExportTable = {
+  title: string;
   description?: string;
-  columns?: TableColumn[];
-  rows?: Record<string, any>[];
+  rows: Record<string, any>[];
 };
 
-// ================= HELPERS =================
+type SummaryMetric = {
+  label: string;
+  value: string | number;
+};
 
-function cleanText(value: unknown) {
+const COLUMN_LABELS: Record<string, string> = {
+  name: 'Premenná',
+  variable: 'Premenná',
+  label: 'Názov',
+  title: 'Názov',
+  type: 'Typ',
+  variableType: 'Typ premennej',
+  measurementLevel: 'Úroveň merania',
+
+  valid: 'N platných',
+  validValues: 'N platných',
+  validCount: 'N platných',
+  n: 'N',
+  count: 'Počet',
+  frequency: 'Počet',
+
+  missing: 'Chýbajúce',
+  missingValues: 'Chýbajúce',
+  missingCount: 'Chýbajúce',
+
+  mean: 'M',
+  M: 'M',
+  average: 'Priemer',
+
+  median: 'Medián',
+  Md: 'Medián',
+
+  stdDeviation: 'SD',
+  standardDeviation: 'SD',
+  stdDev: 'SD',
+  SD: 'SD',
+  sd: 'SD',
+
+  min: 'Min',
+  minimum: 'Min',
+  max: 'Max',
+  maximum: 'Max',
+
+  sum: 'Súčet',
+  range: 'Rozpätie',
+  variance: 'Rozptyl',
+  skewness: 'Šikmosť',
+  kurtosis: 'Špicatosť',
+  distinctValues: 'Počet hodnôt',
+
+  value: 'Hodnota',
+  category: 'Kategória',
+  percent: 'Percento',
+  percentage: 'Percento',
+  validPercent: 'Validné percento',
+  cumulativePercent: 'Kumulatívne percento',
+
+  test: 'Test',
+  hypothesis: 'Hypotéza',
+  variables: 'Premenné',
+  reason: 'Odôvodnenie',
+  assumptions: 'Predpoklady',
+  interpretation: 'Interpretácia',
+  description: 'Popis',
+  conclusion: 'Záver',
+  result: 'Výsledok',
+
+  variable1: 'Premenná 1',
+  variable2: 'Premenná 2',
+  coefficient: 'Koeficient',
+  r: 'r',
+  rho: 'ρ',
+  pValue: 'p',
+  p: 'p',
+  df: 'df',
+  strength: 'Sila vzťahu',
+  direction: 'Smer vzťahu',
+  significant: 'Signifikantné',
+
+  dependentVariable: 'Závislá premenná',
+  independentVariable: 'Nezávislá premenná',
+  groupVariable: 'Skupinová premenná',
+  group1: 'Skupina 1',
+  group2: 'Skupina 2',
+  mean1: 'M1',
+  mean2: 'M2',
+  sd1: 'SD1',
+  sd2: 'SD2',
+  n1: 'n1',
+  n2: 'n2',
+  statistic: 'Štatistika',
+  t: 't',
+  meanDifference: 'Rozdiel priemerov',
+
+  fileName: 'Súbor',
+  filename: 'Súbor',
+  extension: 'Prípona',
+  size: 'Veľkosť',
+  method: 'Metóda',
+  status: 'Stav',
+  warnings: 'Upozornenia',
+};
+
+const SECTION_COLORS = [
+  '#2563eb',
+  '#059669',
+  '#7c3aed',
+  '#0891b2',
+  '#ea580c',
+  '#dc2626',
+  '#4f46e5',
+  '#0f766e',
+];
+
+function cleanText(value: unknown): string {
   return String(value || '')
     .replace(/\uFEFF/g, '')
     .replace(/\u200B/g, '')
@@ -38,15 +141,6 @@ function cleanText(value: unknown) {
     .replace(/\u0000/g, '')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/\*(.*?)\*/g, '$1')
-    .replace(/__(.*?)__/g, '$1')
-    .replace(/_(.*?)_/g, '$1')
-    .replace(/```[a-zA-Z]*\n?/g, '')
-    .replace(/```/g, '')
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
     .replace(/\n{4,}/g, '\n\n\n')
     .trim();
 }
@@ -55,20 +149,24 @@ function safeArray<T = any>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
-function sanitizeFileName(value: string) {
+function isRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function sanitizeFileName(value: string): string {
   return (
-    String(value || 'vysledky-analyzy')
+    cleanText(value || 'vysledky-analyzy-dat')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-zA-Z0-9-_]+/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '')
-      .toLowerCase() || 'vysledky-analyzy'
+      .toLowerCase() || 'vysledky-analyzy-dat'
   );
 }
 
-function htmlEscape(value: string) {
-  return String(value || '')
+function htmlEscape(value: unknown): string {
+  return String(value ?? '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
@@ -76,10 +174,135 @@ function htmlEscape(value: string) {
     .replaceAll("'", '&#039;');
 }
 
-function formatCellValue(value: unknown) {
+function getFieldLabel(key: string): string {
+  return (
+    COLUMN_LABELS[key] ||
+    key
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/_/g, ' ')
+      .replace(/-/g, ' ')
+      .replace(/^\w/, (char) => char.toUpperCase())
+  );
+}
+
+function normalizeRows(value: unknown): Record<string, any>[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.map((row, index) => {
+    if (isRecord(row)) return row;
+
+    if (Array.isArray(row)) {
+      const output: Record<string, any> = {};
+
+      row.forEach((cell, cellIndex) => {
+        output[`col_${cellIndex + 1}`] = cell;
+      });
+
+      return output;
+    }
+
+    return {
+      poradie: index + 1,
+      hodnota: row,
+    };
+  });
+}
+
+function getColumns(rows: Record<string, any>[]): string[] {
+  const priority = [
+    'name',
+    'variable',
+    'label',
+    'title',
+    'type',
+    'variableType',
+    'measurementLevel',
+    'valid',
+    'validValues',
+    'n',
+    'missing',
+    'missingValues',
+    'mean',
+    'M',
+    'median',
+    'Md',
+    'stdDeviation',
+    'standardDeviation',
+    'SD',
+    'min',
+    'minimum',
+    'max',
+    'maximum',
+    'sum',
+    'skewness',
+    'kurtosis',
+    'value',
+    'category',
+    'frequency',
+    'count',
+    'percent',
+    'validPercent',
+    'cumulativePercent',
+    'test',
+    'hypothesis',
+    'variables',
+    'variable1',
+    'variable2',
+    'coefficient',
+    'r',
+    'rho',
+    'pValue',
+    'p',
+    'df',
+    'strength',
+    'direction',
+    'dependentVariable',
+    'independentVariable',
+    'group1',
+    'group2',
+    'mean1',
+    'mean2',
+    'sd1',
+    'sd2',
+    'n1',
+    'n2',
+    't',
+    'reason',
+    'description',
+    'interpretation',
+  ];
+
+  const allColumns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  const priorityColumns = priority.filter((column) => allColumns.includes(column));
+
+  const restColumns = allColumns
+    .filter((column) => !priorityColumns.includes(column))
+    .sort((a, b) => a.localeCompare(b, 'sk'));
+
+  return [...priorityColumns, ...restColumns];
+}
+
+function getCellValue(value: unknown): string | number {
   if (value === null || value === undefined) return '';
 
-  if (typeof value === 'object') {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : '';
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'Áno' : 'Nie';
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (isRecord(item)) return JSON.stringify(item);
+        return String(item ?? '');
+      })
+      .join(', ');
+  }
+
+  if (isRecord(value)) {
     try {
       return JSON.stringify(value);
     } catch {
@@ -87,314 +310,428 @@ function formatCellValue(value: unknown) {
     }
   }
 
-  return String(value);
+  const text = String(value);
+  const normalized = text.trim().replace(/\s/g, '').replace(',', '.');
+
+  if (/^-?\d+(\.\d+)?$/.test(normalized)) {
+    const numeric = Number(normalized);
+
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+
+  return text;
 }
 
-function getTitleFromResult(result: any, fallback?: string) {
-  return cleanText(fallback || result?.title || 'Výsledky analýzy dát');
-}
+function getFrequencyRows(table: any): Record<string, any>[] {
+  if (!isRecord(table)) return [];
 
-function getSummary(result: any) {
-  return cleanText(
-    result?.summary ||
-      result?.dataDescription ||
-      result?.description ||
-      '',
+  return normalizeRows(
+    safeArray(table.rows).length > 0
+      ? table.rows
+      : safeArray(table.data).length > 0
+        ? table.data
+        : table.items,
   );
 }
 
-function getInterpretation(result: any) {
-  return cleanText(result?.interpretation || '');
+function makeTable(title: string, rows: unknown, description = ''): ExportTable {
+  return {
+    title,
+    description,
+    rows: normalizeRows(rows),
+  };
 }
 
-function getPracticalText(result: any) {
-  return cleanText(result?.practicalText || '');
-}
+function getAllTables(result: any): ExportTable[] {
+  const tables: ExportTable[] = [];
 
-function getFullText(result: any) {
-  return cleanText(
-    result?.fullText ||
-      result?.fullResult ||
-      result?.text ||
-      result?.output ||
-      result?.result ||
-      '',
+  const files = safeArray(result?.files || result?.extractedFiles || result?.attachments);
+
+  if (files.length) {
+    tables.push(
+      makeTable(
+        'Spracované súbory',
+        files,
+        'Prehľad súborov použitých pri analýze.',
+      ),
+    );
+  }
+
+  const variables = safeArray(
+    result?.variables || result?.detectedVariables || result?.columns,
   );
-}
 
-function getDescriptiveStatistics(result: any): TableLike[] {
-  return safeArray<TableLike>(
+  if (variables.length) {
+    tables.push(
+      makeTable(
+        'Identifikované premenné',
+        variables,
+        'Prehľad premenných rozpoznaných v dátach.',
+      ),
+    );
+  }
+
+  const descriptive = safeArray(
     result?.descriptiveStatistics ||
       result?.descriptive_statistics ||
       result?.statistics,
   );
-}
 
-function getFrequencies(result: any): TableLike[] {
-  return safeArray<TableLike>(
+  if (descriptive.length) {
+    tables.push(
+      makeTable(
+        'Deskriptívna štatistika',
+        descriptive,
+        'N, M, medián, SD, minimum, maximum, šikmosť a špicatosť.',
+      ),
+    );
+  }
+
+  const frequencies = safeArray(
     result?.frequencies ||
       result?.frequencyTables ||
       result?.frequency_tables,
   );
-}
 
-function getExcelTables(result: any): TableLike[] {
-  return safeArray<TableLike>(
-    result?.excelTables ||
-      result?.tables ||
-      result?.excel_tables,
-  );
-}
+  frequencies.forEach((table: any, index) => {
+    const rows = getFrequencyRows(table);
 
-function getRecommendedCharts(result: any) {
-  return safeArray<any>(
-    result?.recommendedCharts ||
-      result?.charts ||
-      result?.recommended_charts,
-  );
-}
+    if (!rows.length) return;
 
-function getRecommendedTests(result: any) {
-  return safeArray<any>(
-    result?.recommendedTests ||
-      result?.tests ||
-      result?.recommended_tests,
-  );
-}
+    tables.push({
+      title:
+        cleanText(table?.title) ||
+        `Frekvenčná tabuľka – ${table?.variable || table?.name || index + 1}`,
+      description:
+        cleanText(table?.description || table?.interpretation) ||
+        'Frekvenčné rozdelenie hodnôt.',
+      rows,
+    });
+  });
 
-function getHypothesisTests(result: any) {
-  return safeArray<any>(
+  const pearson = safeArray(result?.pearsonCorrelations || result?.pearson);
+
+  if (pearson.length) {
+    tables.push(
+      makeTable(
+        'Pearsonove korelácie',
+        pearson,
+        'Lineárne vzťahy medzi numerickými premennými.',
+      ),
+    );
+  }
+
+  const spearman = safeArray(result?.spearmanCorrelations || result?.spearman);
+
+  if (spearman.length) {
+    tables.push(
+      makeTable(
+        'Spearmanove korelácie',
+        spearman,
+        'Poradové alebo monotónne vzťahy medzi premennými.',
+      ),
+    );
+  }
+
+  const correlations = safeArray(result?.correlations || result?.correlationResults);
+
+  if (correlations.length && !pearson.length && !spearman.length) {
+    tables.push(
+      makeTable(
+        'Korelácie',
+        correlations,
+        'Korelačné výsledky medzi premennými.',
+      ),
+    );
+  }
+
+  const tTests = safeArray(result?.tTests || result?.t_tests);
+
+  if (tTests.length) {
+    tables.push(
+      makeTable(
+        'T-testy',
+        tTests,
+        'Porovnanie dvoch skupín pri numerických premenných.',
+      ),
+    );
+  }
+
+  const hypothesisTests = safeArray(
     result?.hypothesisTests ||
       result?.hypothesis_tests ||
       result?.testResults,
   );
-}
 
-function getWarnings(result: any) {
-  return safeArray<string>(result?.warnings);
-}
-
-function getObjectTitle(value: any, fallback: string) {
-  if (typeof value === 'string') return value;
-
-  return cleanText(
-    value?.title ||
-      value?.name ||
-      value?.test ||
-      value?.analysis ||
-      value?.variable ||
-      fallback,
-  );
-}
-
-function getObjectDescription(value: any) {
-  if (typeof value === 'string') return value;
-
-  return cleanText(
-    value?.description ||
-      value?.interpretation ||
-      value?.reason ||
-      value?.hypothesis ||
-      value?.result ||
-      value?.summary ||
-      '',
-  );
-}
-
-function getTableColumns(table: TableLike) {
-  if (Array.isArray(table.columns) && table.columns.length > 0) {
-    return table.columns.map((column) => ({
-      key: column.key,
-      label: column.label || column.key,
-    }));
-  }
-
-  const firstRow = table.rows?.[0];
-
-  if (!firstRow) return [];
-
-  return Object.keys(firstRow).map((key) => ({
-    key,
-    label: key,
-  }));
-}
-
-function deduplicateTables(tables: TableLike[]) {
-  const seen = new Set<string>();
-  const result: TableLike[] = [];
-
-  for (const table of tables) {
-    const title = cleanText(table.title || '');
-    const key = title || JSON.stringify(table.columns || []);
-
-    if (seen.has(key)) continue;
-
-    seen.add(key);
-    result.push(table);
-  }
-
-  return result;
-}
-
-function getAllTables(result: any) {
-  return deduplicateTables([
-    ...getDescriptiveStatistics(result),
-    ...getFrequencies(result),
-    ...getExcelTables(result),
-  ]);
-}
-
-// ================= TEXT EXPORT =================
-
-function tableToPlainText(table: TableLike, fallbackTitle: string) {
-  const title = cleanText(table.title || fallbackTitle);
-  const description = cleanText(table.description || '');
-  const rows = safeArray<Record<string, any>>(table.rows);
-  const columns = getTableColumns(table);
-
-  const blocks: string[] = [];
-
-  blocks.push(title);
-
-  if (description) {
-    blocks.push(description);
-  }
-
-  if (rows.length === 0 || columns.length === 0) {
-    blocks.push('Tabuľka neobsahuje riadky.');
-    return cleanText(blocks.join('\n'));
-  }
-
-  blocks.push(columns.map((column) => column.label).join('\t'));
-
-  rows.forEach((row) => {
-    blocks.push(
-      columns
-        .map((column) => formatCellValue(row[column.key]).replace(/\s+/g, ' '))
-        .join('\t'),
+  if (hypothesisTests.length) {
+    tables.push(
+      makeTable(
+        'Výsledky testovania hypotéz',
+        hypothesisTests,
+        'Výsledky štatistického testovania.',
+      ),
     );
+  }
+
+  const recommendedTests = safeArray(
+    result?.recommendedTests ||
+      result?.recommended_tests ||
+      result?.tests,
+  );
+
+  if (recommendedTests.length) {
+    tables.push(
+      makeTable(
+        'Odporúčané štatistické testy',
+        recommendedTests,
+        'Testy odporúčané podľa typu premenných.',
+      ),
+    );
+  }
+
+  const recommendedCharts = safeArray(
+    result?.recommendedCharts ||
+      result?.recommended_charts ||
+      result?.charts,
+  );
+
+  if (recommendedCharts.length) {
+    tables.push(
+      makeTable(
+        'Odporúčané grafy',
+        recommendedCharts,
+        'Grafy vhodné pre praktickú časť práce.',
+      ),
+    );
+  }
+
+  const excelTables = safeArray(
+    result?.excelTables ||
+      result?.excel_tables ||
+      result?.tables,
+  );
+
+  excelTables.forEach((table: any, index) => {
+    if (!isRecord(table)) return;
+
+    const rows = normalizeRows(table.rows || table.data);
+
+    if (!rows.length) return;
+
+    tables.push({
+      title: cleanText(table.title || table.name || `Tabuľka ${index + 1}`),
+      description: cleanText(table.description || ''),
+      rows,
+    });
   });
 
-  return cleanText(blocks.join('\n'));
+  const seen = new Set<string>();
+
+  return tables.filter((table) => {
+    if (!table.rows.length) return false;
+
+    const key = `${table.title}-${table.rows.length}`;
+
+    if (seen.has(key)) return false;
+
+    seen.add(key);
+
+    return true;
+  });
 }
 
-function buildExportText(result: any, title: string) {
-  const summary = getSummary(result);
-  const interpretation = getInterpretation(result);
-  const practicalText = getPracticalText(result);
-  const fullText = getFullText(result);
-  const warnings = getWarnings(result);
-  const tables = getAllTables(result);
-  const charts = getRecommendedCharts(result);
-  const recommendedTests = getRecommendedTests(result);
-  const hypothesisTests = getHypothesisTests(result);
+function buildChartDataTables(result: any): ExportTable[] {
+  const output: ExportTable[] = [];
 
-  const blocks: string[] = [];
+  const frequencies = safeArray(
+    result?.frequencies ||
+      result?.frequencyTables ||
+      result?.frequency_tables,
+  );
 
-  blocks.push(title);
+  frequencies.slice(0, 10).forEach((table: any, index) => {
+    const rows = getFrequencyRows(table)
+      .map((row) => ({
+        Kategória: row.value ?? row.category ?? row.name ?? '',
+        Počet: row.frequency ?? row.count ?? row.n ?? 0,
+        Percento: row.percent ?? row.percentage ?? '',
+        ValidnéPercento: row.validPercent ?? '',
+        KumulatívnePercento: row.cumulativePercent ?? '',
+      }))
+      .filter((row) => row.Kategória !== '');
 
-  if (summary) {
-    blocks.push(`Súhrn\n${summary}`);
-  }
+    if (!rows.length) return;
 
-  if (warnings.length > 0) {
-    blocks.push(
-      `Upozornenia\n${warnings.map((item) => `- ${item}`).join('\n')}`,
-    );
-  }
+    output.push({
+      title: `Grafové dáta – frekvencia ${table?.variable || table?.name || index + 1}`,
+      description:
+        'Dáta pripravené na vytvorenie stĺpcového alebo koláčového grafu v Exceli.',
+      rows,
+    });
+  });
 
-  if (interpretation) {
-    blocks.push(`Interpretácia výsledkov\n${interpretation}`);
-  }
+  const descriptive = safeArray(
+    result?.descriptiveStatistics ||
+      result?.descriptive_statistics ||
+      result?.statistics,
+  )
+    .map((row: any) => ({
+      Premenná: row.variable || row.name || row.label || '',
+      M: row.M ?? row.mean ?? '',
+      Medián: row.Md ?? row.median ?? '',
+      SD: row.SD ?? row.stdDeviation ?? row.standardDeviation ?? '',
+      Min: row.min ?? row.minimum ?? '',
+      Max: row.max ?? row.maximum ?? '',
+      Šikmosť: row.skewness ?? '',
+      Špicatosť: row.kurtosis ?? '',
+    }))
+    .filter((row: any) => row.Premenná);
 
-  if (practicalText) {
-    blocks.push(`Text do praktickej časti práce\n${practicalText}`);
-  }
-
-  if (!interpretation && !practicalText && fullText) {
-    blocks.push(`Textový výstup\n${fullText}`);
-  }
-
-  if (tables.length > 0) {
-    blocks.push('Tabuľky');
-
-    tables.forEach((table, index) => {
-      blocks.push(tableToPlainText(table, table.title || `Tabuľka ${index + 1}`));
+  if (descriptive.length) {
+    output.push({
+      title: 'Grafové dáta – deskriptívna štatistika',
+      description:
+        'Dáta pripravené na vizualizáciu priemerov, mediánov a variability.',
+      rows: descriptive,
     });
   }
 
-  if (charts.length > 0) {
-    blocks.push('Odporúčané grafy');
+  const correlations = [
+    ...safeArray(result?.pearsonCorrelations || result?.pearson),
+    ...safeArray(result?.spearmanCorrelations || result?.spearman),
+    ...safeArray(result?.correlations || result?.correlationResults),
+  ]
+    .map((row: any) => ({
+      Test: row.test || '',
+      Premenná1: row.variable1 || '',
+      Premenná2: row.variable2 || '',
+      Koeficient: row.coefficient ?? row.r ?? row.rho ?? '',
+      AbsolútnaHodnota: Math.abs(
+        Number(row.coefficient ?? row.r ?? row.rho ?? 0),
+      ),
+      Sila: row.strength || '',
+      Smer: row.direction || '',
+    }))
+    .filter((row: any) => row.Premenná1 && row.Premenná2);
 
-    charts.forEach((chart: any, index) => {
-      const chartTitle = getObjectTitle(chart, `Graf ${index + 1}`);
-      const chartType = chart?.type ? `Typ grafu: ${chart.type}` : '';
-      const sourceTable = chart?.sourceTable
-        ? `Zdrojová tabuľka: ${chart.sourceTable}`
-        : '';
-      const variables = Array.isArray(chart?.variables)
-        ? `Premenné: ${chart.variables.join(', ')}`
-        : '';
-      const description = getObjectDescription(chart);
-
-      blocks.push(
-        cleanText(
-          [chartTitle, chartType, sourceTable, variables, description]
-            .filter(Boolean)
-            .join('\n'),
-        ),
-      );
+  if (correlations.length) {
+    output.push({
+      title: 'Grafové dáta – korelácie',
+      description:
+        'Dáta pripravené na vizualizáciu sily korelačných vzťahov.',
+      rows: correlations,
     });
   }
 
-  const allTests = [...recommendedTests, ...hypothesisTests];
-
-  if (allTests.length > 0) {
-    blocks.push('Odporúčané testy hypotéz');
-
-    allTests.forEach((test: any, index) => {
-      const testTitle = getObjectTitle(test, `Test ${index + 1}`);
-      const testName = test?.test ? `Test: ${test.test}` : '';
-      const variables = Array.isArray(test?.variables)
-        ? `Premenné: ${test.variables.join(', ')}`
-        : '';
-      const description = getObjectDescription(test);
-      const reason = test?.reason ? `Odôvodnenie: ${test.reason}` : '';
-
-      blocks.push(
-        cleanText(
-          [testTitle, testName, variables, description, reason]
-            .filter(Boolean)
-            .join('\n'),
-        ),
-      );
-    });
-  }
-
-  return cleanText(blocks.join('\n\n'));
+  return output;
 }
 
-// ================= WORD EXPORT =================
+function getSummaryMetrics(result: any, tables: ExportTable[]): SummaryMetric[] {
+  const variables = safeArray(result?.variables || result?.detectedVariables || result?.columns);
 
-function createHtmlTable(table: TableLike, fallbackTitle: string) {
-  const title = cleanText(table.title || fallbackTitle);
-  const description = cleanText(table.description || '');
-  const rows = safeArray<Record<string, any>>(table.rows);
-  const columns = getTableColumns(table);
+  const descriptive = safeArray(
+    result?.descriptiveStatistics ||
+      result?.descriptive_statistics ||
+      result?.statistics,
+  );
 
-  if (rows.length === 0 || columns.length === 0) return '';
+  const frequencies = safeArray(
+    result?.frequencies ||
+      result?.frequencyTables ||
+      result?.frequency_tables,
+  );
 
-  const headerHtml = columns
-    .map((column) => `<th>${htmlEscape(column.label)}</th>`)
+  const pearson = safeArray(result?.pearsonCorrelations || result?.pearson);
+  const spearman = safeArray(result?.spearmanCorrelations || result?.spearman);
+  const tTests = safeArray(result?.tTests || result?.t_tests);
+
+  const recommendedTests = safeArray(
+    result?.recommendedTests ||
+      result?.recommended_tests ||
+      result?.tests,
+  );
+
+  const recommendedCharts = safeArray(
+    result?.recommendedCharts ||
+      result?.recommended_charts ||
+      result?.charts,
+  );
+
+  return [
+    {
+      label: 'Premenné',
+      value: variables.length,
+    },
+    {
+      label: 'Deskriptívne výpočty',
+      value: descriptive.length,
+    },
+    {
+      label: 'Frekvenčné tabuľky',
+      value: frequencies.length,
+    },
+    {
+      label: 'Pearsonove korelácie',
+      value: pearson.length,
+    },
+    {
+      label: 'Spearmanove korelácie',
+      value: spearman.length,
+    },
+    {
+      label: 'T-testy',
+      value: tTests.length,
+    },
+    {
+      label: 'Odporúčané testy',
+      value: recommendedTests.length,
+    },
+    {
+      label: 'Odporúčané grafy',
+      value: recommendedCharts.length,
+    },
+    {
+      label: 'Sekcie v exporte',
+      value: tables.length,
+    },
+  ];
+}
+
+function buildSummaryMetricsHtml(metrics: SummaryMetric[]): string {
+  if (!metrics.length) return '';
+
+  const cells = metrics
+    .map(
+      (metric) => `
+        <td class="metric-card">
+          <div class="metric-label">${htmlEscape(metric.label)}</div>
+          <div class="metric-value">${htmlEscape(metric.value)}</div>
+        </td>
+      `,
+    )
     .join('');
 
-  const rowsHtml = rows
+  return `
+    <table class="metrics-table">
+      <tr>${cells}</tr>
+    </table>
+  `;
+}
+
+function buildSectionTable(table: ExportTable, index: number): string {
+  const columns = getColumns(table.rows);
+  const color = SECTION_COLORS[index % SECTION_COLORS.length];
+
+  const headerHtml = columns
+    .map((column) => `<th>${htmlEscape(getFieldLabel(column))}</th>`)
+    .join('');
+
+  const bodyHtml = table.rows
     .map((row) => {
       const cells = columns
-        .map(
-          (column) =>
-            `<td>${htmlEscape(formatCellValue(row[column.key]))}</td>`,
-        )
+        .map((column) => `<td>${htmlEscape(getCellValue(row[column]))}</td>`)
         .join('');
 
       return `<tr>${cells}</tr>`;
@@ -402,507 +739,394 @@ function createHtmlTable(table: TableLike, fallbackTitle: string) {
     .join('');
 
   return `
-    <h3>${htmlEscape(title)}</h3>
-    ${description ? `<p class="table-description">${htmlEscape(description)}</p>` : ''}
-    <table>
-      <thead>
-        <tr>${headerHtml}</tr>
-      </thead>
-      <tbody>
-        ${rowsHtml}
-      </tbody>
-    </table>
+    <tr>
+      <td colspan="12" class="section-spacer">&nbsp;</td>
+    </tr>
+
+    <tr>
+      <td colspan="12" class="section-title" style="background:${color};">
+        ${htmlEscape(index + 1)}. ${htmlEscape(table.title)}
+      </td>
+    </tr>
+
+    ${
+      table.description
+        ? `
+          <tr>
+            <td colspan="12" class="section-description">
+              ${htmlEscape(table.description)}
+            </td>
+          </tr>
+        `
+        : ''
+    }
+
+    <tr>
+      <td colspan="12" class="embedded-table-cell">
+        <table class="data-table">
+          <thead>
+            <tr>${headerHtml}</tr>
+          </thead>
+          <tbody>
+            ${bodyHtml}
+          </tbody>
+        </table>
+      </td>
+    </tr>
   `;
 }
 
-function createWordHtml(title: string, result: any) {
-  const exportText = buildExportText(result, title);
-  const tables = getAllTables(result);
+function createOneSheetExcelHtml(title: string, result: any): string {
+  const summary = cleanText(result?.summary || '');
 
-  const paragraphs = exportText
-    .split('\n')
-    .map((line) => {
-      const trimmed = line.trim();
+  const interpretation = cleanText(
+    result?.interpretation ||
+      result?.practicalText ||
+      result?.fullText ||
+      result?.output ||
+      '',
+  );
 
-      if (!trimmed) return '<p>&nbsp;</p>';
+  const warnings = safeArray<string>(result?.warnings);
 
-      const isHeading =
-        /^(Súhrn|Upozornenia|Interpretácia výsledkov|Text do praktickej časti práce|Textový výstup|Tabuľky|Odporúčané grafy|Odporúčané testy hypotéz|Deskriptívna štatistika|Frekvenčná analýza|Excel tabuľky)$/i.test(
-          trimmed,
-        );
+  const tables = [...getAllTables(result), ...buildChartDataTables(result)];
 
-      if (isHeading) {
-        return `<h2>${htmlEscape(trimmed)}</h2>`;
-      }
-
-      return `<p>${htmlEscape(trimmed)}</p>`;
-    })
-    .join('');
+  const metrics = getSummaryMetrics(result, tables);
 
   const tablesHtml = tables
-    .map((table, index) =>
-      createHtmlTable(table, table.title || `Tabuľka ${index + 1}`),
-    )
-    .join('');
+    .map((table, index) => buildSectionTable(table, index))
+    .join('\n');
 
   return `
-<!doctype html>
-<html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:x="urn:schemas-microsoft-com:office:excel"
+      xmlns="http://www.w3.org/TR/REC-html40">
 <head>
-  <meta charset="utf-8" />
-  <title>${htmlEscape(title)}</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      font-size: 12pt;
-      line-height: 1.55;
-      color: #111827;
-      padding: 40px;
-    }
+<meta charset="utf-8" />
+<meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8" />
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    color: #111827;
+    background: #ffffff;
+  }
 
-    h1 {
-      font-size: 22pt;
-      margin-bottom: 24px;
-    }
+  .main-sheet {
+    width: 100%;
+    border-collapse: collapse;
+  }
 
-    h2 {
-      font-size: 16pt;
-      margin: 26px 0 12px;
-      page-break-after: avoid;
-    }
+  .title-cell {
+    background: #0f172a;
+    color: #ffffff;
+    font-size: 24px;
+    font-weight: 800;
+    padding: 18px 20px;
+    border: 1px solid #0f172a;
+  }
 
-    h3 {
-      font-size: 13pt;
-      margin: 20px 0 8px;
-      page-break-after: avoid;
-    }
+  .subtitle-cell {
+    background: #e0f2fe;
+    color: #0f172a;
+    font-size: 12px;
+    padding: 10px 20px;
+    border: 1px solid #bae6fd;
+  }
 
-    p {
-      margin: 0 0 10px;
-    }
+  .meta-cell {
+    background: #f8fafc;
+    color: #475569;
+    font-size: 11px;
+    padding: 8px 20px;
+    border: 1px solid #e2e8f0;
+  }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 12px 0 26px;
-      font-size: 10pt;
-      page-break-inside: avoid;
-    }
+  .block-title {
+    background: #1d4ed8;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 10px 14px;
+    border: 1px solid #1d4ed8;
+  }
 
-    th,
-    td {
-      border: 1px solid #d1d5db;
-      padding: 7px 8px;
-      vertical-align: top;
-      text-align: left;
-    }
+  .block-content {
+    background: #ffffff;
+    color: #111827;
+    font-size: 12px;
+    padding: 12px 14px;
+    border: 1px solid #dbeafe;
+    line-height: 1.5;
+  }
 
-    th {
-      background: #f3f4f6;
-      font-weight: bold;
-    }
+  .warning-title {
+    background: #d97706;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 10px 14px;
+    border: 1px solid #d97706;
+  }
 
-    .table-description {
-      color: #4b5563;
-      margin-bottom: 8px;
-    }
-  </style>
+  .warning-content {
+    background: #fffbeb;
+    color: #78350f;
+    font-size: 12px;
+    padding: 12px 14px;
+    border: 1px solid #fcd34d;
+  }
+
+  .metrics-table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 10px 0;
+  }
+
+  .metric-card {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    padding: 10px;
+    min-width: 115px;
+  }
+
+  .metric-label {
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .metric-value {
+    color: #0f172a;
+    font-size: 20px;
+    font-weight: 800;
+    margin-top: 4px;
+  }
+
+  .section-spacer {
+    height: 16px;
+    background: #ffffff;
+    border: none;
+  }
+
+  .section-title {
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 800;
+    padding: 10px 14px;
+    border: 1px solid #cbd5e1;
+  }
+
+  .section-description {
+    background: #f8fafc;
+    color: #475569;
+    font-size: 11px;
+    font-style: italic;
+    padding: 8px 14px;
+    border: 1px solid #e2e8f0;
+  }
+
+  .embedded-table-cell {
+    padding: 0;
+    border: 1px solid #cbd5e1;
+  }
+
+  .data-table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0;
+  }
+
+  .data-table th {
+    background: #111827;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid #cbd5e1;
+    padding: 7px 8px;
+    text-align: center;
+    vertical-align: middle;
+  }
+
+  .data-table td {
+    color: #111827;
+    font-size: 11px;
+    border: 1px solid #dbe3ef;
+    padding: 6px 8px;
+    vertical-align: top;
+  }
+
+  .data-table tr:nth-child(even) td {
+    background: #f8fafc;
+  }
+
+  .data-table tr:nth-child(odd) td {
+    background: #ffffff;
+  }
+
+  .footer-cell {
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 11px;
+    padding: 10px 14px;
+    border: 1px solid #cbd5e1;
+  }
+</style>
 </head>
+
 <body>
-  <h1>${htmlEscape(title)}</h1>
-  ${paragraphs}
-  ${tablesHtml ? `<h2>Tabuľky v štruktúrovanom formáte</h2>${tablesHtml}` : ''}
+  <table class="main-sheet">
+    <tr>
+      <td colspan="12" class="title-cell">${htmlEscape(title)}</td>
+    </tr>
+
+    <tr>
+      <td colspan="12" class="subtitle-cell">
+        Profesionálne usporiadaný export výsledkov analýzy dát v jednom liste.
+      </td>
+    </tr>
+
+    <tr>
+      <td colspan="12" class="meta-cell">
+        Vygenerované: ${htmlEscape(new Date().toLocaleString('sk-SK'))}
+      </td>
+    </tr>
+
+    <tr>
+      <td colspan="12" class="block-title">Prehľad výsledkov</td>
+    </tr>
+
+    <tr>
+      <td colspan="12" class="block-content">
+        ${buildSummaryMetricsHtml(metrics)}
+      </td>
+    </tr>
+
+    ${
+      summary
+        ? `
+          <tr>
+            <td colspan="12" class="block-title">Súhrn</td>
+          </tr>
+          <tr>
+            <td colspan="12" class="block-content">
+              ${htmlEscape(summary).replace(/\n/g, '<br />')}
+            </td>
+          </tr>
+        `
+        : ''
+    }
+
+    ${
+      warnings.length
+        ? `
+          <tr>
+            <td colspan="12" class="warning-title">Upozornenia</td>
+          </tr>
+          <tr>
+            <td colspan="12" class="warning-content">
+              ${warnings.map((warning) => `• ${htmlEscape(warning)}`).join('<br />')}
+            </td>
+          </tr>
+        `
+        : ''
+    }
+
+    ${
+      interpretation
+        ? `
+          <tr>
+            <td colspan="12" class="block-title">Interpretácia / text do praktickej časti</td>
+          </tr>
+          <tr>
+            <td colspan="12" class="block-content">
+              ${htmlEscape(interpretation).replace(/\n/g, '<br />')}
+            </td>
+          </tr>
+        `
+        : ''
+    }
+
+    ${tablesHtml}
+
+    <tr>
+      <td colspan="12" class="section-spacer">&nbsp;</td>
+    </tr>
+
+    <tr>
+      <td colspan="12" class="footer-cell">
+        Poznámka: Všetky výsledky sú uložené v jednom liste. Jednotlivé sekcie sú oddelené farebnými nadpismi a tabuľkami.
+      </td>
+    </tr>
+  </table>
 </body>
 </html>
 `;
 }
 
-// ================= EXCEL EXPORT =================
-
-function safeSheetName(value: string, fallback: string) {
-  const name = cleanText(value || fallback)
-    .replace(/[:\\/?*\[\]]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 31);
-
-  return name || fallback.slice(0, 31);
+function createWordHtml(title: string, result: any): string {
+  return createOneSheetExcelHtml(title, result);
 }
 
-function tableToSheetRows(table: TableLike) {
-  const rows = safeArray<Record<string, any>>(table.rows);
-  const columns = getTableColumns(table);
+function createPlainPdfFallback(title: string, result: any): string {
+  const tables = getAllTables(result);
 
-  if (columns.length === 0) {
-    return [['Tabuľka neobsahuje stĺpce']];
-  }
-
-  const output: any[][] = [];
-
-  output.push(columns.map((column) => column.label));
-
-  rows.forEach((row) => {
-    output.push(columns.map((column) => row[column.key] ?? ''));
-  });
-
-  return output;
-}
-
-async function createExcelBuffer(title: string, result: any) {
-  const XLSX = await import('xlsx');
-
-  const workbook = XLSX.utils.book_new();
-
-  const summaryRows: any[][] = [
-    ['Názov', title],
-    ['Súhrn', getSummary(result)],
-    ['Interpretácia', getInterpretation(result)],
-    ['Text do praktickej časti', getPracticalText(result)],
-    ['Vygenerované', new Date().toLocaleString('sk-SK')],
+  const blocks: string[] = [
+    title,
+    '',
+    'SÚHRN',
+    cleanText(result?.summary || ''),
+    '',
+    'INTERPRETÁCIA',
+    cleanText(
+      result?.interpretation ||
+        result?.practicalText ||
+        result?.fullText ||
+        result?.output ||
+        '',
+    ),
   ];
 
-  const warnings = getWarnings(result);
+  tables.forEach((table) => {
+    blocks.push('', table.title);
 
-  if (warnings.length > 0) {
-    summaryRows.push([]);
-    summaryRows.push(['Upozornenia']);
-    warnings.forEach((warning) => summaryRows.push([warning]));
-  }
-
-  const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
-  XLSX.utils.book_append_sheet(workbook, summarySheet, 'Súhrn');
-
-  const descriptiveStatistics = getDescriptiveStatistics(result);
-  const frequencies = getFrequencies(result);
-  const excelTables = getExcelTables(result);
-
-  const addTablesToWorkbook = (tables: TableLike[], prefix: string) => {
-    tables.forEach((table, index) => {
-      const rows = tableToSheetRows(table);
-
-      const titleRow = [[cleanText(table.title || `${prefix} ${index + 1}`)]];
-      const description = cleanText(table.description || '');
-      const descriptionRows = description ? [[description], []] : [[]];
-
-      const sheet = XLSX.utils.aoa_to_sheet([
-        ...titleRow,
-        ...descriptionRows,
-        ...rows,
-      ]);
-
-      const sheetName = safeSheetName(
-        table.title || `${prefix} ${index + 1}`,
-        `${prefix} ${index + 1}`,
-      );
-
-      let finalSheetName = sheetName;
-      let counter = 2;
-
-      while (workbook.SheetNames.includes(finalSheetName)) {
-        finalSheetName = safeSheetName(
-          `${sheetName} ${counter}`,
-          `${prefix} ${counter}`,
-        );
-        counter += 1;
-      }
-
-      XLSX.utils.book_append_sheet(workbook, sheet, finalSheetName);
-    });
-  };
-
-  addTablesToWorkbook(descriptiveStatistics, 'Deskriptívna');
-  addTablesToWorkbook(frequencies, 'Frekvencia');
-
-  const remainingExcelTables = excelTables.filter((table) => {
-    const tableTitle = cleanText(table.title);
-
-    const duplicateInDescriptive = descriptiveStatistics.some(
-      (item) => cleanText(item.title) === tableTitle,
-    );
-
-    const duplicateInFrequencies = frequencies.some(
-      (item) => cleanText(item.title) === tableTitle,
-    );
-
-    return !duplicateInDescriptive && !duplicateInFrequencies;
-  });
-
-  addTablesToWorkbook(remainingExcelTables, 'Tabuľka');
-
-  const charts = getRecommendedCharts(result);
-
-  if (charts.length > 0) {
-    const chartRows = [
-      ['Názov grafu', 'Typ', 'Zdrojová tabuľka', 'Premenné', 'Popis'],
-      ...charts.map((chart: any, index) => [
-        getObjectTitle(chart, `Graf ${index + 1}`),
-        chart?.type || '',
-        chart?.sourceTable || '',
-        Array.isArray(chart?.variables) ? chart.variables.join(', ') : '',
-        getObjectDescription(chart),
-      ]),
-    ];
-
-    const chartSheet = XLSX.utils.aoa_to_sheet(chartRows);
-    XLSX.utils.book_append_sheet(workbook, chartSheet, 'Grafy');
-  }
-
-  const allTests = [
-    ...getRecommendedTests(result),
-    ...getHypothesisTests(result),
-  ];
-
-  if (allTests.length > 0) {
-    const testRows = [
-      ['Názov', 'Test', 'Premenné', 'Popis', 'Odôvodnenie'],
-      ...allTests.map((test: any, index) => [
-        getObjectTitle(test, `Test ${index + 1}`),
-        test?.test || '',
-        Array.isArray(test?.variables) ? test.variables.join(', ') : '',
-        getObjectDescription(test),
-        test?.reason || '',
-      ]),
-    ];
-
-    const testSheet = XLSX.utils.aoa_to_sheet(testRows);
-    XLSX.utils.book_append_sheet(workbook, testSheet, 'Testy');
-  }
-
-  const output = XLSX.write(workbook, {
-    type: 'buffer',
-    bookType: 'xlsx',
-  });
-
-  return Buffer.from(output);
-}
-
-// ================= PDF EXPORT =================
-
-function addPdfParagraph(
-  doc: PDFKit.PDFDocument,
-  text: string,
-  options: PDFKit.Mixins.TextOptions = {},
-) {
-  const cleaned = cleanText(text);
-
-  if (!cleaned) {
-    doc.moveDown(0.5);
-    return;
-  }
-
-  doc.font('Helvetica').fontSize(10).fillColor('#111827');
-  doc.text(cleaned, {
-    align: 'left',
-    lineGap: 3,
-    ...options,
-  });
-
-  doc.moveDown(0.8);
-}
-
-function addPdfHeading(
-  doc: PDFKit.PDFDocument,
-  text: string,
-  level: 1 | 2 | 3 = 2,
-) {
-  const size = level === 1 ? 20 : level === 2 ? 15 : 12;
-
-  doc.moveDown(level === 1 ? 0.4 : 0.8);
-  doc.font('Helvetica-Bold').fontSize(size).fillColor('#111827');
-  doc.text(cleanText(text), {
-    align: 'left',
-  });
-  doc.moveDown(0.5);
-}
-
-function addPdfTable(
-  doc: PDFKit.PDFDocument,
-  table: TableLike,
-  fallbackTitle: string,
-) {
-  const title = cleanText(table.title || fallbackTitle);
-  const description = cleanText(table.description || '');
-  const rows = safeArray<Record<string, any>>(table.rows);
-  const columns = getTableColumns(table).slice(0, 6);
-
-  addPdfHeading(doc, title, 3);
-
-  if (description) {
-    addPdfParagraph(doc, description);
-  }
-
-  if (rows.length === 0 || columns.length === 0) {
-    addPdfParagraph(doc, 'Tabuľka neobsahuje riadky.');
-    return;
-  }
-
-  const header = columns.map((column) => column.label).join(' | ');
-  addPdfParagraph(doc, header);
-
-  rows.slice(0, 80).forEach((row) => {
-    const line = columns
-      .map((column) => formatCellValue(row[column.key]).replace(/\s+/g, ' '))
-      .join(' | ');
-
-    addPdfParagraph(doc, line);
-  });
-
-  if (rows.length > 80) {
-    addPdfParagraph(
-      doc,
-      `Poznámka: Tabuľka obsahuje ${rows.length} riadkov, v PDF náhľade je zobrazených prvých 80 riadkov. Kompletné tabuľky sú v Excel exporte.`,
-    );
-  }
-}
-
-async function createPdfBuffer(title: string, result: any) {
-  return new Promise<Buffer>((resolve, reject) => {
-    try {
-      const doc = new PDFDocument({
-        size: 'A4',
-        margin: 50,
-        bufferPages: true,
-      });
-
-      const chunks: Buffer[] = [];
-
-      doc.on('data', (chunk) => {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      });
-
-      doc.on('end', () => {
-        resolve(Buffer.concat(chunks));
-      });
-
-      doc.on('error', (error) => {
-        reject(error);
-      });
-
-      addPdfHeading(doc, title, 1);
-
-      const summary = getSummary(result);
-      const interpretation = getInterpretation(result);
-      const practicalText = getPracticalText(result);
-      const warnings = getWarnings(result);
-
-      if (summary) {
-        addPdfHeading(doc, 'Súhrn', 2);
-        addPdfParagraph(doc, summary);
-      }
-
-      if (warnings.length > 0) {
-        addPdfHeading(doc, 'Upozornenia', 2);
-        warnings.forEach((warning) => addPdfParagraph(doc, `• ${warning}`));
-      }
-
-      if (interpretation) {
-        addPdfHeading(doc, 'Interpretácia výsledkov', 2);
-        addPdfParagraph(doc, interpretation);
-      }
-
-      if (practicalText) {
-        addPdfHeading(doc, 'Text do praktickej časti práce', 2);
-        addPdfParagraph(doc, practicalText);
-      }
-
-      const tables = getAllTables(result);
-
-      if (tables.length > 0) {
-        addPdfHeading(doc, 'Tabuľky', 2);
-
-        tables.forEach((table, index) => {
-          addPdfTable(doc, table, table.title || `Tabuľka ${index + 1}`);
-        });
-      }
-
-      const charts = getRecommendedCharts(result);
-
-      if (charts.length > 0) {
-        addPdfHeading(doc, 'Odporúčané grafy', 2);
-
-        charts.forEach((chart: any, index) => {
-          addPdfHeading(doc, getObjectTitle(chart, `Graf ${index + 1}`), 3);
-          addPdfParagraph(
-            doc,
-            [
-              chart?.type ? `Typ grafu: ${chart.type}` : '',
-              chart?.sourceTable ? `Zdrojová tabuľka: ${chart.sourceTable}` : '',
-              Array.isArray(chart?.variables)
-                ? `Premenné: ${chart.variables.join(', ')}`
-                : '',
-              getObjectDescription(chart),
-            ]
-              .filter(Boolean)
-              .join('\n'),
-          );
-        });
-      }
-
-      const allTests = [
-        ...getRecommendedTests(result),
-        ...getHypothesisTests(result),
-      ];
-
-      if (allTests.length > 0) {
-        addPdfHeading(doc, 'Odporúčané testy hypotéz', 2);
-
-        allTests.forEach((test: any, index) => {
-          addPdfHeading(doc, getObjectTitle(test, `Test ${index + 1}`), 3);
-          addPdfParagraph(
-            doc,
-            [
-              test?.test ? `Test: ${test.test}` : '',
-              Array.isArray(test?.variables)
-                ? `Premenné: ${test.variables.join(', ')}`
-                : '',
-              getObjectDescription(test),
-              test?.reason ? `Odôvodnenie: ${test.reason}` : '',
-            ]
-              .filter(Boolean)
-              .join('\n'),
-          );
-        });
-      }
-
-      doc.end();
-    } catch (error) {
-      reject(error);
+    if (table.description) {
+      blocks.push(table.description);
     }
+
+    const columns = getColumns(table.rows);
+
+    blocks.push(columns.map((column) => getFieldLabel(column)).join(' | '));
+
+    table.rows.slice(0, 120).forEach((row) => {
+      blocks.push(
+        columns.map((column) => String(getCellValue(row[column]))).join(' | '),
+      );
+    });
   });
+
+  return blocks.join('\n');
 }
 
-// ================= RESPONSE HELPERS =================
-
-function bufferToArrayBuffer(buffer: Buffer): ArrayBuffer {
-  const copied = new Uint8Array(buffer.byteLength);
-  copied.set(buffer);
-
-  return copied.buffer;
-}
-
-function fileResponse({
-  buffer,
-  fileName,
-  contentType,
-}: {
+function fileResponse(params: {
   buffer: Buffer | string;
   fileName: string;
   contentType: string;
 }) {
-  const body: BodyInit =
-    typeof buffer === 'string' ? buffer : bufferToArrayBuffer(buffer);
+  const body =
+    typeof params.buffer === 'string'
+      ? params.buffer
+      : new Uint8Array(params.buffer);
 
   return new NextResponse(body, {
     status: 200,
     headers: {
-      'Content-Type': contentType,
-      'Content-Disposition': `attachment; filename="${fileName}"`,
+      'Content-Type': params.contentType,
+      'Content-Disposition': `attachment; filename="${params.fileName}"`,
       'Cache-Control': 'no-store',
     },
   });
 }
-
-// ================= ROUTE =================
 
 export async function POST(req: NextRequest) {
   try {
@@ -923,16 +1147,17 @@ export async function POST(req: NextRequest) {
 
     const requestedFormat = cleanText(body.format || 'xlsx').toLowerCase();
 
-    const format: ExportFormat =
+    const format =
       requestedFormat === 'word' || requestedFormat === 'doc'
         ? 'doc'
         : requestedFormat === 'pdf'
           ? 'pdf'
-          : requestedFormat === 'excel' || requestedFormat === 'xlsx'
-            ? 'xlsx'
-            : 'xlsx';
+          : 'xls';
 
-    const title = getTitleFromResult(result, body.title);
+    const title = cleanText(
+      body.title || result.title || 'Výsledky analýzy dát',
+    );
+
     const baseFileName = sanitizeFileName(title);
 
     if (format === 'doc') {
@@ -946,22 +1171,21 @@ export async function POST(req: NextRequest) {
     }
 
     if (format === 'pdf') {
-      const buffer = await createPdfBuffer(title, result);
+      const text = createPlainPdfFallback(title, result);
 
       return fileResponse({
-        buffer,
-        fileName: `${baseFileName}.pdf`,
-        contentType: 'application/pdf',
+        buffer: text,
+        fileName: `${baseFileName}.txt`,
+        contentType: 'text/plain; charset=utf-8',
       });
     }
 
-    const buffer = await createExcelBuffer(title, result);
+    const html = createOneSheetExcelHtml(title, result);
 
     return fileResponse({
-      buffer,
-      fileName: `${baseFileName}.xlsx`,
-      contentType:
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer: html,
+      fileName: `${baseFileName}.xls`,
+      contentType: 'application/vnd.ms-excel; charset=utf-8',
     });
   } catch (error) {
     console.error('ANALYZE_DATA_EXPORT_ERROR:', error);
@@ -985,21 +1209,8 @@ export async function GET() {
     ok: true,
     route: '/api/analyze-data/export',
     methods: ['POST'],
-    formats: ['word', 'doc', 'pdf', 'excel', 'xlsx'],
-    bodyExample: {
-      format: 'xlsx',
-      title: 'Výsledky analýzy dát',
-      result: {
-        title: 'Výsledky analýzy dát',
-        summary: 'Súhrn výsledkov',
-        descriptiveStatistics: [],
-        frequencies: [],
-        recommendedCharts: [],
-        recommendedTests: [],
-        hypothesisTests: [],
-        interpretation: '',
-        practicalText: '',
-      },
-    },
+    formats: ['word', 'doc', 'excel', 'xls', 'xlsx', 'pdf'],
+    note:
+      'Excel export je generovaný ako profesionálne usporiadaný jeden HTML Excel list .xls bez potreby balíka exceljs.',
   });
 }

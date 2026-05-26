@@ -54,6 +54,115 @@ const SOURCE_LABELS: Record<string, string> = {
   arxiv: 'arXiv',
 };
 
+const WORD_EXPORT_MIME = 'application/msword;charset=utf-8';
+
+function normalizeFileName(value: string) {
+  return String(value || 'zdroje-citacie')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9-_]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase()
+    .slice(0, 80) || 'zdroje-citacie';
+}
+
+function escapeHtml(value: string) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function normalizeAuthors(authors?: string[]) {
+  if (!Array.isArray(authors) || authors.length === 0) return '';
+
+  return authors
+    .map((author) => String(author || '').trim())
+    .filter(Boolean)
+    .join(', ');
+}
+
+function normalizeCitationText(item: Source, index: number) {
+  const existingCitation = String(item.citation || '').trim();
+
+  if (existingCitation) {
+    return existingCitation.replace(/\s+/g, ' ').trim();
+  }
+
+  const authors = normalizeAuthors(item.authors);
+  const year = item.year || item.publicationDate?.slice(0, 4) || 'bez roku';
+  const title = String(item.title || `Zdroj ${index + 1}`).trim();
+  const source = String(item.source || '').trim();
+  const doi = String(item.doi || item.externalIds?.DOI || '').trim();
+
+  const parts = [
+    authors ? `${authors}.` : '',
+    `(${year}).`,
+    title ? `${title}.` : '',
+    source ? `${source}.` : '',
+    doi ? `DOI: ${doi}.` : '',
+  ];
+
+  return parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function buildCitationsList(items: Source[]) {
+  const seen = new Set<string>();
+
+  return items
+    .map((item, index) => normalizeCitationText(item, index))
+    .filter((citation) => {
+      const key = citation.toLowerCase();
+
+      if (!citation || seen.has(key)) return false;
+
+      seen.add(key);
+      return true;
+    });
+}
+
+function buildWordHtml(params: {
+  query: string;
+  citations: string[];
+  createdAt: Date;
+}) {
+  const title = 'Zdroje a citácie';
+  const date = params.createdAt.toLocaleDateString('sk-SK');
+  const query = params.query.trim() || 'neuvedený dopyt';
+
+  const citationsHtml = params.citations
+    .map((citation, index) => {
+      return `<p style="margin:0 0 10pt 0; line-height:1.45;"><span style="font-weight:bold;">${index + 1}.</span> ${escapeHtml(citation)}</p>`;
+    })
+    .join('\n');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    @page WordSection1 { size: 21cm 29.7cm; margin: 2cm; }
+    body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; color: #111827; }
+    h1 { font-size: 18pt; margin: 0 0 8pt 0; }
+    .meta { color: #4b5563; margin: 0 0 18pt 0; font-size: 10pt; }
+    .note { color: #4b5563; margin: 18pt 0 0 0; font-size: 10pt; }
+  </style>
+</head>
+<body>
+  <div class="WordSection1">
+    <h1>${escapeHtml(title)}</h1>
+    <p class="meta">Dopyt: ${escapeHtml(query)}<br />Dátum exportu: ${escapeHtml(date)}<br />Počet citácií: ${params.citations.length}</p>
+    ${citationsHtml || '<p>Neboli nájdené žiadne citácie.</p>'}
+    <p class="note">Poznámka: Export obsahuje iba citácie. Odkazy na články a PDF sú dostupné priamo v aplikácii cez tlačidlá „Zobraziť článok“ a „Otvoriť PDF“.</p>
+  </div>
+</body>
+</html>`;
+}
+
 export default function Page() {
   const router = useRouter();
 
@@ -77,6 +186,7 @@ export default function Page() {
   const [error, setError] = useState('');
   const [lastSearchQuery, setLastSearchQuery] = useState('');
   const [lastApiCount, setLastApiCount] = useState<number | null>(null);
+  const [copyMessage, setCopyMessage] = useState('');
 
   // ================= LOAD HISTORY =================
 
@@ -133,6 +243,8 @@ export default function Page() {
   const openAccessCount = useMemo(() => {
     return results.filter((item) => item.isOpenAccess).length;
   }, [results]);
+
+  const citations = useMemo(() => buildCitationsList(results), [results]);
 
   // ================= MENU / DASHBOARD =================
 
@@ -215,6 +327,7 @@ export default function Page() {
     setSuggestions([]);
     setError('');
     setLastApiCount(null);
+    setCopyMessage('');
 
     try {
       const res = await fetch('/api/sources', {
@@ -310,6 +423,50 @@ export default function Page() {
     }
   };
 
+  // ================= EXPORT / COPY =================
+
+  const exportCitationsToWord = () => {
+    if (citations.length === 0) {
+      setCopyMessage('Nie sú dostupné žiadne citácie na export.');
+      return;
+    }
+
+    const html = buildWordHtml({
+      query: lastSearchQuery || query,
+      citations,
+      createdAt: new Date(),
+    });
+
+    const blob = new Blob(['\ufeff', html], { type: WORD_EXPORT_MIME });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const filenameQuery = normalizeFileName(lastSearchQuery || query || 'zdroje');
+
+    anchor.href = url;
+    anchor.download = `${filenameQuery}-citacie.doc`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    setCopyMessage('Citácie boli exportované do Word dokumentu.');
+  };
+
+  const copyCitationsToClipboard = async () => {
+    if (citations.length === 0) {
+      setCopyMessage('Nie sú dostupné žiadne citácie na kopírovanie.');
+      return;
+    }
+
+    const text = citations.map((citation, index) => `${index + 1}. ${citation}`).join('\n\n');
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyMessage('Citácie boli skopírované do schránky.');
+    } catch {
+      setCopyMessage('Citácie sa nepodarilo skopírovať. Použite export do Wordu.');
+    }
+  };
+
   // ================= RESET =================
 
   const resetAll = () => {
@@ -324,6 +481,7 @@ export default function Page() {
     setError('');
     setLastSearchQuery('');
     setLastApiCount(null);
+    setCopyMessage('');
 
     setTimeout(() => {
       scrollToTop();
@@ -374,8 +532,6 @@ export default function Page() {
             </div>
           </div>
         </div>
-
-    
 
         {/* SEARCH */}
         <div className="mx-auto mb-6 max-w-4xl">
@@ -603,17 +759,46 @@ export default function Page() {
         >
           {results.length > 0 && (
             <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-2xl font-black">
-                Výsledky vyhľadávania
-              </h2>
+              <div>
+                <h2 className="text-2xl font-black">
+                  Výsledky vyhľadávania
+                </h2>
+                <p className="mt-1 text-sm text-gray-400">
+                  Export do Wordu obsahuje iba citácie. Linky na články a PDF zostávajú dostupné cez tlačidlá pri jednotlivých zdrojoch.
+                </p>
+              </div>
 
-              <button
-                type="button"
-                onClick={scrollToTop}
-                className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20"
-              >
-                Späť hore
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={exportCitationsToWord}
+                  className="rounded-xl border border-emerald-400/30 bg-emerald-600/20 px-4 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-600/30"
+                >
+                  Export citácií do Wordu
+                </button>
+
+                <button
+                  type="button"
+                  onClick={copyCitationsToClipboard}
+                  className="rounded-xl border border-purple-400/30 bg-purple-600/20 px-4 py-2 text-sm font-semibold text-purple-200 hover:bg-purple-600/30"
+                >
+                  Kopírovať citácie
+                </button>
+
+                <button
+                  type="button"
+                  onClick={scrollToTop}
+                  className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20"
+                >
+                  Späť hore
+                </button>
+              </div>
+            </div>
+          )}
+
+          {copyMessage && (
+            <div className="rounded-2xl border border-emerald-400/30 bg-emerald-600/10 p-4 text-sm font-semibold text-emerald-200">
+              {copyMessage}
             </div>
           )}
 
@@ -671,17 +856,15 @@ export default function Page() {
                 </p>
               )}
 
-              {r.citation && (
-                <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
-                  <p className="mb-1 text-xs text-gray-400">
-                    Citácia:
-                  </p>
+              <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+                <p className="mb-1 text-xs text-gray-400">
+                  Citácia:
+                </p>
 
-                  <p className="text-sm text-gray-300">
-                    {r.citation}
-                  </p>
-                </div>
-              )}
+                <p className="text-sm text-gray-300">
+                  {normalizeCitationText(r, index)}
+                </p>
+              </div>
 
               <div className="mt-4 flex flex-wrap gap-3">
                 {r.url && (

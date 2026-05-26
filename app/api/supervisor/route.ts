@@ -53,6 +53,7 @@ type UploadedFileInfo = {
   text?: string;
   content?: string;
   extractedText?: string;
+  extractionWarning?: string;
 };
 
 type SupervisorRequestBody = {
@@ -69,11 +70,38 @@ type SupervisorRequestBody = {
   filesMetadata?: UploadedFileInfo[];
 };
 
-const OPENAI_MODEL = 'gpt-4o-mini';
+type ExtractedFileResult = {
+  text: string;
+  warning?: string;
+};
+
+type ParsedRequest = {
+  text: string;
+  question: string;
+  activeProfile: SavedProfile | null;
+  attachmentText: string;
+  files: UploadedFileInfo[];
+  fileWarnings: string[];
+  extractedFilesCount: number;
+};
+
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
 const MAX_INPUT_TEXT_CHARS = 60_000;
-const MAX_ATTACHMENT_TEXT_CHARS = 70_000;
-const MAX_SINGLE_FILE_TEXT_CHARS = 20_000;
+const MAX_ATTACHMENT_TEXT_CHARS = 90_000;
+const MAX_SINGLE_FILE_TEXT_CHARS = 30_000;
+const MAX_SERVER_EXTRACTED_FILE_SIZE_MB = 25;
+
+const ALLOWED_FILE_EXTENSIONS = [
+  '.pdf',
+  '.docx',
+  '.txt',
+  '.rtf',
+  '.md',
+  '.csv',
+  '.xlsx',
+  '.xls',
+];
 
 function safeString(value: unknown): string {
   if (typeof value !== 'string') return '';
@@ -108,6 +136,16 @@ function normalizeText(value: string): string {
     .trim();
 }
 
+function stripRtf(value: string): string {
+  return String(value || '')
+    .replace(/\\par[d]?/g, '\n')
+    .replace(/\\'[0-9a-fA-F]{2}/g, ' ')
+    .replace(/\\[a-zA-Z]+\d* ?/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function formatFileSize(size?: number): string {
   if (!size || Number.isNaN(size)) return 'neznáma veľkosť';
 
@@ -124,6 +162,19 @@ function formatFileSize(size?: number): string {
   }
 
   return `${size} B`;
+}
+
+function getExtension(fileName?: string): string {
+  const safeName = String(fileName || '');
+  const index = safeName.lastIndexOf('.');
+
+  if (index === -1) return '';
+
+  return safeName.slice(index).toLowerCase();
+}
+
+function isSupportedForServerExtraction(fileName?: string): boolean {
+  return ALLOWED_FILE_EXTENSIONS.includes(getExtension(fileName));
 }
 
 function compactTextForAI(text: string, maxChars = 60_000): string {
@@ -187,6 +238,37 @@ function getProfileTitle(profile?: SavedProfile | null): string {
     safeString(profile?.topic) ||
     'bez názvu'
   );
+}
+
+function isLikelyUserInstruction(value: string): boolean {
+  const text = normalizeText(value).toLowerCase();
+
+  if (!text) return false;
+
+  if (text.length > 700) return false;
+
+  const instructionPatterns = [
+    'zhodnoť',
+    'zhodnot',
+    'posúď',
+    'posud',
+    'skontroluj',
+    'prečítaj',
+    'precitaj',
+    'daj spätnú väzbu',
+    'daj spatnu vazbu',
+    'ako profesor',
+    'ako vedúci',
+    'ako veduci',
+    'navrhni',
+    'oprav',
+    'vypíš chyby',
+    'vypis chyby',
+    'dobrá spätná väzba',
+    'dobra spatna vazba',
+  ];
+
+  return instructionPatterns.some((pattern) => text.includes(pattern));
 }
 
 function buildProfileContext(profile?: SavedProfile | null): string {
@@ -305,16 +387,16 @@ function buildFilesContext(files?: UploadedFileInfo[]): string {
 
   return safeFiles
     .map((file, index) => {
-      const name =
-        file.name ||
-        file.originalName ||
-        `Príloha ${index + 1}`;
+      const name = file.name || file.originalName || `Príloha ${index + 1}`;
+      const extractedText = safeString(file.extractedText);
 
       return `
 Príloha ${index + 1}:
 Názov: ${name}
 Typ: ${file.type || 'neuvedené'}
 Veľkosť: ${formatFileSize(file.size)}
+Serverová extrakcia textu: ${extractedText ? `áno (${extractedText.length} znakov)` : 'nie'}
+${file.extractionWarning ? `Upozornenie extrakcie: ${file.extractionWarning}` : ''}
 `.trim();
     })
     .join('\n\n');
@@ -332,10 +414,7 @@ function buildAttachmentTextFromFiles(files?: UploadedFileInfo[]): string {
 
       if (!text) return '';
 
-      const name =
-        file.name ||
-        file.originalName ||
-        `Príloha ${index + 1}`;
+      const name = file.name || file.originalName || `Príloha ${index + 1}`;
 
       return `
 === TEXT PRÍLOHY: ${name} ===
@@ -426,6 +505,205 @@ function cleanAssistantOutput(text: string): string {
   return cleaned;
 }
 
+async function extractPdfText(file: File): Promise<ExtractedFileResult> {
+  try {
+    const pdfParseModule: any = await import('pdf-parse');
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    const parser =
+      typeof pdfParseModule?.default === 'function'
+        ? pdfParseModule.default
+        : typeof pdfParseModule === 'function'
+          ? pdfParseModule
+          : typeof pdfParseModule?.parse === 'function'
+            ? pdfParseModule.parse
+            : null;
+
+    if (!parser) {
+      return {
+        text: '',
+        warning:
+          'PDF parser sa nepodarilo inicializovať. Skontrolujte balík pdf-parse.',
+      };
+    }
+
+    const result = await parser(buffer);
+    const text = normalizeText(result?.text || result?.content || '');
+
+    return {
+      text,
+      warning: text
+        ? undefined
+        : 'PDF neobsahuje čitateľný text alebo ide o skenovaný dokument.',
+    };
+  } catch (error) {
+    return {
+      text: '',
+      warning:
+        error instanceof Error
+          ? `PDF extrakcia zlyhala: ${error.message}`
+          : 'PDF extrakcia zlyhala.',
+    };
+  }
+}
+
+async function extractDocxText(file: File): Promise<ExtractedFileResult> {
+  try {
+    const mammoth = await import('mammoth');
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    const result = await mammoth.extractRawText({ buffer } as any);
+    const text = normalizeText(result.value || '');
+
+    const warning =
+      result.messages && result.messages.length > 0
+        ? result.messages
+            .map((message: any) => message?.message)
+            .filter(Boolean)
+            .join(' | ')
+        : undefined;
+
+    return {
+      text,
+      warning,
+    };
+  } catch (error) {
+    return {
+      text: '',
+      warning:
+        error instanceof Error
+          ? `DOCX extrakcia zlyhala: ${error.message}`
+          : 'DOCX extrakcia zlyhala.',
+    };
+  }
+}
+
+async function extractSpreadsheetText(file: File): Promise<ExtractedFileResult> {
+  try {
+    const xlsx = await import('xlsx');
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const workbook = xlsx.read(buffer, { type: 'buffer' });
+
+    const parts: string[] = [];
+
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      const csv = xlsx.utils.sheet_to_csv(sheet);
+
+      if (csv.trim()) {
+        parts.push(`Hárok: ${sheetName}\n${csv}`);
+      }
+    }
+
+    return {
+      text: normalizeText(parts.join('\n\n')),
+    };
+  } catch (error) {
+    return {
+      text: '',
+      warning:
+        error instanceof Error
+          ? `Tabuľková extrakcia zlyhala: ${error.message}`
+          : 'Tabuľková extrakcia zlyhala.',
+    };
+  }
+}
+
+async function extractTextFromUploadedFile(file: File): Promise<ExtractedFileResult> {
+  const extension = getExtension(file.name);
+
+  if (!isSupportedForServerExtraction(file.name)) {
+    return {
+      text: '',
+      warning: `Formát ${extension || 'bez prípony'} nie je v tejto API trase podporovaný na serverovú extrakciu.`,
+    };
+  }
+
+  const sizeMb = file.size / 1024 / 1024;
+
+  if (sizeMb > MAX_SERVER_EXTRACTED_FILE_SIZE_MB) {
+    return {
+      text: '',
+      warning: `Súbor je príliš veľký na serverovú extrakciu (${sizeMb.toFixed(2)} MB). Limit je ${MAX_SERVER_EXTRACTED_FILE_SIZE_MB} MB.`,
+    };
+  }
+
+  if (['.txt', '.md', '.csv'].includes(extension)) {
+    return {
+      text: normalizeText(await file.text()),
+    };
+  }
+
+  if (extension === '.rtf') {
+    return {
+      text: normalizeText(stripRtf(await file.text())),
+    };
+  }
+
+  if (extension === '.docx') {
+    return extractDocxText(file);
+  }
+
+  if (extension === '.pdf') {
+    return extractPdfText(file);
+  }
+
+  if (['.xlsx', '.xls'].includes(extension)) {
+    return extractSpreadsheetText(file);
+  }
+
+  return {
+    text: '',
+    warning: `Formát ${extension} je povolený len ako metadáta, text sa neextrahoval.`,
+  };
+}
+
+async function enrichUploadedFilesWithText(files: File[]): Promise<{
+  files: UploadedFileInfo[];
+  attachmentText: string;
+  warnings: string[];
+  extractedFilesCount: number;
+}> {
+  const enrichedFiles: UploadedFileInfo[] = [];
+  const attachmentParts: string[] = [];
+  const warnings: string[] = [];
+  let extractedFilesCount = 0;
+
+  for (const [index, file] of files.entries()) {
+    const extracted = await extractTextFromUploadedFile(file);
+    const cleanedText = normalizeText(extracted.text || '');
+
+    if (cleanedText) {
+      extractedFilesCount += 1;
+
+      attachmentParts.push(`
+=== TEXT PRÍLOHY: ${file.name || `Príloha ${index + 1}`} ===
+
+${compactTextForAI(cleanedText, MAX_SINGLE_FILE_TEXT_CHARS)}
+`.trim());
+    }
+
+    if (extracted.warning) {
+      warnings.push(`${file.name}: ${extracted.warning}`);
+    }
+
+    enrichedFiles.push({
+      name: file.name,
+      type: file.type || 'application/octet-stream',
+      size: file.size,
+      extractedText: cleanedText,
+      extractionWarning: extracted.warning,
+    });
+  }
+
+  return {
+    files: enrichedFiles,
+    attachmentText: attachmentParts.join('\n\n'),
+    warnings,
+    extractedFilesCount,
+  };
+}
+
 function buildSupervisorPrompt({
   profileContext,
   filesContext,
@@ -434,6 +712,7 @@ function buildSupervisorPrompt({
   attachmentText,
   question,
   profile,
+  fileWarnings,
 }: {
   profileContext: string;
   filesContext: string;
@@ -442,8 +721,10 @@ function buildSupervisorPrompt({
   attachmentText: string;
   question: string;
   profile: SavedProfile | null;
+  fileWarnings: string[];
 }): string {
   const hasQuestion = question.trim().length > 0;
+  const hasAttachmentText = attachmentText.trim().length > 0;
   const workLanguage = getWorkLanguage(profile);
   const citationStyle = getCitationStyle(profile);
   const title = getProfileTitle(profile);
@@ -471,8 +752,14 @@ ${citationStyle}
 Názov práce:
 ${title}
 
+Najdôležitejšie pravidlo pre prílohy:
+Ak je dostupný TEXT EXTRAHOVANÝ Z PRÍLOH, považuj ho za hlavný hodnotený dokument práce.
+Nepredpokladaj, že "výsledky práce" už existujú len preto, že používateľ položil krátku otázku.
+Najprv si prečítaj extrahovaný text prílohy a spätnú väzbu postav na jeho obsahu.
+Ak text prílohy nie je dostupný, jasne napíš, že dokument sa nepodarilo prečítať a že hodnotenie je možné len podľa dostupného textu/metadát.
+
 Tvoja úloha:
-- hodnotiť text podľa aktuálneho profilu práce,
+- hodnotiť priloženú prácu alebo vložený text podľa aktuálneho profilu práce,
 - rešpektovať najnovšiu verziu profilu práce,
 - kontrolovať cieľ práce, výskumný problém, metodológiu, hypotézy, výskumné otázky, štruktúru a argumentáciu,
 - upozorniť na odborné, metodologické, štylistické a formálne chyby,
@@ -486,7 +773,7 @@ Tvoja úloha:
 POVINNÁ ŠTRUKTÚRA ODPOVEDE
 
 1. Celkové hodnotenie práce
-Zhodnoť odbornú úroveň, zrozumiteľnosť, štruktúru a použiteľnosť textu.
+Zhodnoť odbornú úroveň, zrozumiteľnosť, štruktúru a použiteľnosť textu. Ak bol priložený dokument, vychádzaj z jeho extrahovaného textu.
 
 2. Silné stránky
 Uveď konkrétne silné stránky textu alebo práce.
@@ -520,20 +807,21 @@ Uveď skóre a stručné zdôvodnenie.
 `.trim();
 
   const requiredOutputWithQuestion = `
-Používateľ položil konkrétnu otázku.
+Používateľ položil konkrétnu otázku alebo pokyn.
 
 Odpovedz:
-- priamo na otázku,
+- priamo na otázku/pokyn,
 - odborne,
 - kriticky,
 - konkrétne,
-- podľa textu,
+- podľa priloženého textu, ak je dostupný,
 - podľa aktuálneho profilu práce,
 - bez názvu interného modulu,
 - bez technických poznámok,
 - bez nadpisu "AI Vedúci".
 
-Ak otázka súvisí s prílohou, použi extrahovaný text príloh.
+Ak používateľ žiada "zhodnoť prácu", "ako profesor", "dobrá spätná väzba" alebo podobný pokyn, vytvor hodnotenie práce podľa extrahovaného textu príloh.
+Ak otázka súvisí s prílohou, použi extrahovaný text príloh ako hlavný zdroj hodnotenia.
 Ak otázka nesúvisí s profilom práce alebo prílohami, jasne to uveď.
 `.trim();
 
@@ -545,18 +833,21 @@ ${profileContext}
 PRILOŽENÉ SÚBORY
 ${filesContext}
 
+UPOZORNENIA EXTRAKCIE SÚBOROV
+${fileWarnings.length ? fileWarnings.join('\n') : 'Bez upozornení.'}
+
 ${relevanceInstruction}
 
 TEXT ZADANÝ POUŽÍVATEĽOM
-${text || 'Používateľ neposlal hlavný text. Použi profil práce a prílohy, ak sú dostupné.'}
+${text || 'Používateľ neposlal samostatný hlavný text. Použi profil práce a prílohy, ak sú dostupné.'}
 
 TEXT EXTRAHOVANÝ Z PRÍLOH
 ${attachmentText || 'Text z príloh nie je dostupný alebo nebol extrahovaný.'}
 
-OTÁZKA POUŽÍVATEĽA
+OTÁZKA ALEBO POKYN POUŽÍVATEĽA
 ${question || 'Používateľ nepoložil samostatnú otázku.'}
 
-${hasQuestion ? requiredOutputWithQuestion : requiredOutputWithoutQuestion}
+${hasQuestion || hasAttachmentText ? requiredOutputWithQuestion : requiredOutputWithoutQuestion}
 `.trim();
 }
 
@@ -573,7 +864,7 @@ async function callOpenAI(prompt: string): Promise<string> {
     },
     body: JSON.stringify({
       model: OPENAI_MODEL,
-      temperature: 0.25,
+      temperature: 0.2,
       messages: [
         {
           role: 'system',
@@ -585,6 +876,8 @@ Nikdy nezačínaj odpoveď textom "AI Vedúci".
 Nikdy nezačínaj odpoveď textom "Ako AI vedúci".
 Nikdy nevkladaj informácie o tom, ako bol prompt nastavený.
 Nikdy nepíš technické poznámky o kompresii, API alebo modeli.
+Ak je k dispozícii extrahovaný text prílohy, musíš ho reálne použiť pri hodnotení.
+Nepredpokladaj obsah dokumentu bez prečítania dostupného extrahovaného textu.
 Výstup musí byť čistý text pre klienta.
 `.trim(),
         },
@@ -609,23 +902,31 @@ Výstup musí byť čistý text pre klienta.
   return data?.choices?.[0]?.message?.content || '';
 }
 
-async function parseRequest(req: Request): Promise<{
-  text: string;
-  question: string;
-  activeProfile: SavedProfile | null;
-  attachmentText: string;
-  files: UploadedFileInfo[];
-}> {
+function dedupeFiles(files: File[]): File[] {
+  const map = new Map<string, File>();
+
+  for (const file of files) {
+    const key = `${file.name}_${file.size}_${file.type}`;
+
+    if (!map.has(key)) {
+      map.set(key, file);
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+async function parseRequest(req: Request): Promise<ParsedRequest> {
   const contentType = req.headers.get('content-type') || '';
 
   if (contentType.includes('multipart/form-data')) {
     const formData = await req.formData();
 
-    const text =
+    let text =
       safeString(formData.get('text')) ||
       safeString(formData.get('message'));
 
-    const question = safeString(formData.get('question'));
+    let question = safeString(formData.get('question'));
 
     const activeProfile =
       parseJson<SavedProfile | null>(
@@ -641,22 +942,40 @@ async function parseRequest(req: Request): Promise<{
         [],
       ) || [];
 
-    const uploadedFiles = formData
-      .getAll('files')
-      .filter((item): item is File => item instanceof File)
-      .map((file) => ({
-        name: file.name,
-        type: file.type || 'application/octet-stream',
-        size: file.size,
-      }));
+    const rawUploadedFiles = dedupeFiles([
+      ...formData
+        .getAll('file')
+        .filter((item): item is File => item instanceof File),
+      ...formData
+        .getAll('files')
+        .filter((item): item is File => item instanceof File),
+    ]);
 
-    const files = [...filesMetadata, ...uploadedFiles];
+    const extracted = await enrichUploadedFilesWithText(rawUploadedFiles);
 
-    const attachmentText =
+    const clientAttachmentText =
       safeString(formData.get('clientExtractedText')) ||
       safeString(formData.get('attachmentText')) ||
       safeString(formData.get('attachmentTexts')) ||
       buildAttachmentTextFromFiles(filesMetadata);
+
+    const serverAttachmentText = extracted.attachmentText;
+
+    const attachmentText = normalizeText(
+      [clientAttachmentText, serverAttachmentText]
+        .filter(Boolean)
+        .join('\n\n'),
+    );
+
+    if (!question && attachmentText && isLikelyUserInstruction(text)) {
+      question = text;
+      text = '';
+    }
+
+    const files = [
+      ...filesMetadata,
+      ...extracted.files,
+    ];
 
     return {
       text,
@@ -664,16 +983,18 @@ async function parseRequest(req: Request): Promise<{
       activeProfile,
       attachmentText,
       files,
+      fileWarnings: extracted.warnings,
+      extractedFilesCount: extracted.extractedFilesCount,
     };
   }
 
   const body = (await req.json()) as SupervisorRequestBody;
 
-  const text =
+  let text =
     safeString(body.text) ||
     safeString(body.message);
 
-  const question = safeString(body.question);
+  let question = safeString(body.question);
 
   const activeProfile = body.activeProfile || body.profile || null;
 
@@ -689,12 +1010,23 @@ async function parseRequest(req: Request): Promise<{
     safeString(body.attachmentTexts) ||
     buildAttachmentTextFromFiles(files);
 
+  if (!question && attachmentText && isLikelyUserInstruction(text)) {
+    question = text;
+    text = '';
+  }
+
   return {
     text,
     question,
     activeProfile,
     attachmentText,
     files,
+    fileWarnings: files
+      .map((file) => file.extractionWarning)
+      .filter(Boolean) as string[],
+    extractedFilesCount: files.filter((file) =>
+      Boolean(file.extractedText || file.text || file.content),
+    ).length,
   };
 }
 
@@ -706,6 +1038,8 @@ export async function POST(req: Request) {
       activeProfile,
       attachmentText,
       files,
+      fileWarnings,
+      extractedFilesCount,
     } = await parseRequest(req);
 
     const compactedMainText = compactTextForAI(text, MAX_INPUT_TEXT_CHARS);
@@ -727,6 +1061,7 @@ export async function POST(req: Request) {
       attachmentText: compactedAttachmentText,
       question,
       profile: activeProfile,
+      fileWarnings,
     });
 
     const generatedText = await callOpenAI(prompt);
@@ -753,6 +1088,8 @@ export async function POST(req: Request) {
         hasText: Boolean(text),
         hasAttachmentText: Boolean(attachmentText),
         filesCount: files.length,
+        extractedFilesCount,
+        fileWarnings,
         textWasCompacted: text.length > MAX_INPUT_TEXT_CHARS,
         attachmentWasCompacted:
           attachmentText.length > MAX_ATTACHMENT_TEXT_CHARS,

@@ -1187,6 +1187,44 @@ function createAnalysisOutputText(data: AnalysisResult) {
           .join('\n')}`
       : '';
 
+
+const descriptiveBlock =
+  data.descriptiveStatistics && data.descriptiveStatistics.length > 0
+    ? `Deskriptívna štatistika:\n${data.descriptiveStatistics
+        .map((item: any) => {
+          const name = item.name || item.variable || item.premenna || 'Premenná';
+          const valid = item.valid ?? item.n ?? item.count ?? 'neuvedené';
+          const missing = item.missing ?? 'neuvedené';
+          const mean = item.mean ?? item.M ?? 'neuvedené';
+          const median = item.median ?? item.Md ?? 'neuvedené';
+          const sd = item.stdDeviation ?? item.sd ?? item.SD ?? 'neuvedené';
+          const min = item.minimum ?? item.min ?? 'neuvedené';
+          const max = item.maximum ?? item.max ?? 'neuvedené';
+          const skewness = item.skewness ?? 'neuvedené';
+          const kurtosis = item.kurtosis ?? 'neuvedené';
+
+          return `- ${name}: N = ${valid}, chýbajúce = ${missing}, M = ${mean}, Md = ${median}, SD = ${sd}, Min = ${min}, Max = ${max}, šikmosť = ${skewness}, špicatosť = ${kurtosis}`;
+        })
+        .join('\n')}`
+    : '';
+
+const hypothesisTestsBlock =
+  data.hypothesisTests && data.hypothesisTests.length > 0
+    ? `Výsledky štatistických testov:\n${data.hypothesisTests
+        .map((item: any) => {
+          const test = item.test || item.name || 'Štatistický test';
+          const variable = item.variable || item.variables || item.dependentVariable || '';
+          const statistic = item.statistic ?? item.value ?? item.t ?? item.r ?? 'neuvedené';
+          const pValue = item.pValue ?? item.p ?? 'neuvedené';
+          const interpretation =
+            item.interpretation || item.result || item.conclusion || 'Interpretáciu je potrebné doplniť podľa výsledku.';
+
+          return `- ${test}${variable ? ` (${variable})` : ''}: štatistika = ${statistic}, p = ${pValue}. ${interpretation}`;
+        })
+        .join('\n')}`
+    : '';
+
+
   const chartsBlock =
     data.recommendedCharts && data.recommendedCharts.length > 0
       ? `Odporúčané grafy:\n${data.recommendedCharts
@@ -1219,28 +1257,32 @@ function createAnalysisOutputText(data: AnalysisResult) {
       : '';
 
   return cleanFinalOutput(
-    [
-      data.title || 'Výsledky analýzy',
-      '',
-      data.summary || '',
-      '',
-      warningsBlock,
-      '',
-      variablesBlock,
-      '',
-      chartsBlock,
-      '',
-      testsBlock,
-      '',
-      tablesBlock,
-      '',
-      data.practicalText || '',
-      '',
-      data.fullText || '',
-    ]
-      .filter(Boolean)
-      .join('\n'),
-  );
+  [
+    data.title || 'Výsledky analýzy',
+    '',
+    data.summary || '',
+    '',
+    warningsBlock,
+    '',
+    variablesBlock,
+    '',
+    descriptiveBlock,
+    '',
+    chartsBlock,
+    '',
+    testsBlock,
+    '',
+    hypothesisTestsBlock,
+    '',
+    tablesBlock,
+    '',
+    data.practicalText || '',
+    '',
+    data.fullText || '',
+  ]
+    .filter(Boolean)
+    .join('\n'),
+);
 }
 
 // ================= PAGE =================
@@ -1778,27 +1820,36 @@ PRÍSNE PRAVIDLÁ PRE VÝSTUP:
 `.trim();
     }
 
-    if (moduleKey  === 'data') {
-      return `
+    if (moduleKey === 'data') {
+  return `
 ${baseRules}
 
 ÚLOHA:
-Analyzuj dáta a štatistické výstupy.
+Analyzuj priložené dáta, tabuľky alebo štatistické výstupy.
 
-DÁTA / VÝSTUPY:
+ZADANIE ANALÝZY:
 ${input || 'Použi priložené dátové súbory, ak sú dostupné.'}
 
-OTÁZKA ALEBO CIEĽ ANALÝZY:
-${secondaryInput || 'Vysvetli výsledky a priprav akademickú interpretáciu.'}
-
-VÝSTUP:
+POVINNÝ VÝSTUP:
 1. Popis dát
-2. Použitá metóda
-3. Interpretácia výsledkov
-4. Ako to zapísať do práce
-5. Upozornenia na chýbajúce údaje
+2. Identifikované premenné
+3. Frekvenčná analýza
+4. Deskriptívna štatistika
+5. Korelačná analýza Pearson/Spearman, ak je vhodná podľa typu premenných
+6. T-testy alebo iné testy rozdielov, ak sú vhodné podľa typu premenných
+7. Odporúčané grafy
+8. Interpretácia výsledkov do praktickej časti práce
+9. Upozornenia na chýbajúce alebo nevhodné údaje
+
+PRAVIDLÁ:
+- Používaj slovenské názvy stĺpcov a štatistík.
+- Premenné uvádzaj podľa názvov zo súboru.
+- Pri deskriptívnej štatistike uvádzaj: N, chýbajúce hodnoty, M, medián, SD, minimum, maximum, suma, šikmosť a špicatosť.
+- Pri frekvenciách uvádzaj hodnotu, počet, percento, validné percento a kumulatívne percento.
+- Pri grafoch navrhni vhodný typ: stĺpcový graf, koláčový graf, histogram alebo boxplot.
+- Nevymýšľaj výsledky, ktoré nie sú v dátach dostupné.
 `.trim();
-    }
+}
 
     if (moduleKey  === 'planning') {
       return `
@@ -1936,10 +1987,10 @@ formData.append('systemLanguage', systemLanguage);
 formData.append('interfaceLanguage', systemLanguage);
 formData.append('workLanguage', finalWorkLanguage);
 
-      formData.append('analysisGoal', secondaryInput || '');
-      formData.append('dataDescription', input || '');
-      formData.append('activeProfile', JSON.stringify(profileForApi || null));
-      formData.append('profile', JSON.stringify(profileForApi || null));
+      formData.append('analysisGoal', input || '');
+formData.append('dataDescription', input || '');
+formData.append('activeProfile', JSON.stringify(profileForApi || null));
+formData.append('profile', JSON.stringify(profileForApi || null));
 
       if (profileForApi?.id) {
         formData.append('projectId', profileForApi.id);
@@ -1986,7 +2037,7 @@ formData.append('workLanguage', finalWorkLanguage);
       await saveHistoryItem({
         module: 'data',
         title: 'Analýza dát',
-        userMessage: input || secondaryInput || 'Analýza dát zo súborov.',
+        userMessage: input || 'Analýza dát zo súborov.',
         assistantMessage: output,
         result: {
           analysis: normalizedData,
@@ -3266,44 +3317,41 @@ const active = activeModule === item.key;
                   />
                 )}
 
-                <div className="mt-4">
-                 <label className="mb-2 block text-sm font-black text-slate-800 dark:text-slate-300">
-                    {activeModule === 'translation'
-                      ? 'Text na preklad'
-                      : activeModule === 'data'
-                        ? 'Dáta alebo výsledky'
-                        : activeModule === 'emails'
-                          ? 'Obsah / zámer emailu'
-                          : activeModule === 'defense'
-                            ? 'Stručný obsah práce alebo podklady k prezentácii'
-                            : activeModule === 'originality'
-                              ? 'Text práce alebo nahraj súbor'
-                              : 'Zadanie alebo text'}
-                  </label>
+<div className="mt-4">
+  <label className="mb-2 block text-sm font-black text-slate-800 dark:text-slate-300">
+    {activeModule === 'translation'
+      ? 'Text na preklad'
+      : activeModule === 'data'
+        ? 'Zadanie analýzy dát'
+        : activeModule === 'emails'
+          ? 'Obsah / zámer emailu'
+          : activeModule === 'defense'
+            ? 'Stručný obsah práce alebo podklady k prezentácii'
+            : activeModule === 'originality'
+              ? 'Text práce alebo nahraj súbor'
+              : activeModule === 'humanizer'
+                ? 'Text na humanizáciu'
+                : activeModuleInfo.inputLabel || 'Zadanie alebo text'}
+  </label>
 
-                  <textarea
-                    value={input}
-                    onChange={(event) => setInput(event.target.value)}
-                    placeholder={getPlaceholder(activeModule)}
-                    className="min-h-[170px] w-full resize-y rounded-2xl border border-slate-300 bg-white px-4 py-4 text-sm leading-7 text-slate-950 outline-none placeholder:text-slate-400 transition-colors duration-300 focus:border-violet-500 dark:border-white/10 dark:bg-white/[0.055] dark:text-white dark:placeholder:text-slate-500"
-                  />
-                </div>
+  <textarea
+    value={input}
+    onChange={(event) => setInput(event.target.value)}
+    placeholder={
+      activeModule === 'data'
+        ? 'Napíš, čo má systém s dátami urobiť. Napríklad: priprav frekvenčnú analýzu, deskriptívnu štatistiku, grafy, korelácie Pearson/Spearman, t-testy a interpretáciu výsledkov do práce.'
+        : activeModuleInfo.inputPlaceholder || getPlaceholder(activeModule)
+    }
+    className="min-h-[190px] w-full resize-y rounded-2xl border border-slate-300 bg-white px-4 py-4 text-sm leading-7 text-slate-950 outline-none placeholder:text-slate-400 transition-colors duration-300 focus:border-violet-500 dark:border-white/10 dark:bg-white/[0.055] dark:text-white dark:placeholder:text-slate-500"
+  />
 
-                {activeModule === 'data' && (
-                  <div className="mt-4">
-             <label className="mb-2 block text-sm font-black text-slate-300">
-  {activeModuleInfo.inputLabel}
-</label>
-
-<textarea
-  value={input}
-  onChange={(event) => setInput(event.target.value)}
-  placeholder={activeModuleInfo.inputPlaceholder}
-  className="min-h-[170px] w-full resize-y rounded-2xl border border-slate-300 bg-white px-4 py-4 text-sm leading-7 text-slate-950 outline-none placeholder:text-slate-400 transition-colors duration-300 focus:border-violet-500 dark:border-white/10 dark:bg-white/[0.055] dark:text-white dark:placeholder:text-slate-500"
-/>
-
-                  </div>
-                )}
+  {activeModule === 'data' && (
+    <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+      Nahraj Excel, CSV alebo výstup z JASP/SPSS a do poľa napíš iba požiadavku na analýzu. 
+      Napríklad: „Vypočítaj frekvencie, M, SD, medián, minimum, maximum, šikmosť, špicatosť, Pearson/Spearman korelácie, t-testy a priprav grafy.“
+    </p>
+  )}
+</div>
 
                 <div className="mt-6 flex flex-wrap items-center gap-3 pb-6">
                   {activeModule === 'supervisor' && (

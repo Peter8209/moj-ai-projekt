@@ -48,33 +48,10 @@ type WorkTypeKey =
   | 'thesisProposal';
 
 type CitationStyleKey =
-  | 'iso690'
-  | 'iso690_numeric'
   | 'apa7'
-  | 'mla9'
-  | 'chicago_notes'
-  | 'chicago_author_date'
   | 'harvard'
-  | 'vancouver'
-  | 'ieee'
-  | 'acs'
-  | 'ama'
-  | 'oscola'
-  | 'bluebook'
-  | 'turabian'
-  | 'mhra'
-  | 'asa'
-  | 'apsa'
-  | 'aaa'
-  | 'cse_name_year'
-  | 'cse_citation_sequence'
-  | 'nature'
-  | 'elsevier_harvard'
-  | 'springer_basic'
-  | 'gost'
-  | 'din1505'
-  | 'abnt'
-  | 'custom';
+  | 'iso690'
+  | 'footnotes';
 
 type WorkTemplate = {
   key: WorkTypeKey;
@@ -404,7 +381,7 @@ const WORK_TEMPLATES: Record<WorkTypeKey, WorkTemplate> = {
     description: 'Technický opis, výpočty, normy a postup.',
     level: 'Technické / inžinierske štúdium',
     recommendedLength: '10 – 50 strán',
-    defaultCitationStyle: 'ieee',
+    defaultCitationStyle: 'iso690',
     structure: ['Titulná strana', 'Zadanie', 'Technický opis', 'Vstupné podmienky', 'Návrh riešenia', 'Výpočty', 'Materiály', 'Technologický postup', 'Bezpečnostné požiadavky', 'Záver', 'Prílohy'],
     requiredSections: ['Technický opis', 'Návrh riešenia', 'Výpočty', 'Záver'],
     methodologyHint: 'Technická správa musí byť presná, kontrolovateľná a musí obsahovať technické parametre, normy a výpočty.',
@@ -437,33 +414,34 @@ const WORK_TEMPLATES: Record<WorkTypeKey, WorkTemplate> = {
 };
 
 const CITATION_STYLES: CitationStyle[] = [
-  { key: 'iso690', label: 'ISO 690 – autor, rok', description: 'Najčastejšia norma v SR a ČR pre školské práce.', disciplines: ['SR/ČR', 'školské práce', 'humanitné vedy'] },
-  { key: 'iso690_numeric', label: 'ISO 690 – číselný systém', description: 'Citovanie pomocou číselných odkazov.', disciplines: ['technika', 'prírodné vedy'] },
-  { key: 'apa7', label: 'APA 7', description: 'Štýl pre psychológiu, pedagogiku a sociálne vedy.', disciplines: ['psychológia', 'pedagogika', 'sociológia'] },
-  { key: 'mla9', label: 'MLA 9', description: 'Štýl pre literárnu vedu, jazykovedu a humanitné odbory.', disciplines: ['literatúra', 'jazykoveda'] },
-  { key: 'chicago_notes', label: 'Chicago – poznámky a bibliografia', description: 'Vhodné pre históriu, filozofiu a teológiu.', disciplines: ['história', 'filozofia'] },
-  { key: 'chicago_author_date', label: 'Chicago – autor, dátum', description: 'Alternatíva Chicago štýlu pre spoločenské vedy.', disciplines: ['spoločenské vedy'] },
-  { key: 'harvard', label: 'Harvard', description: 'Autor-dátum systém pre ekonomiku a manažment.', disciplines: ['ekonómia', 'manažment'] },
-  { key: 'vancouver', label: 'Vancouver', description: 'Číselný citačný štýl pre medicínu.', disciplines: ['medicína'] },
-  { key: 'ieee', label: 'IEEE', description: 'Technický citačný štýl.', disciplines: ['informatika', 'elektrotechnika'] },
-  { key: 'acs', label: 'ACS', description: 'Štýl Americkej chemickej spoločnosti.', disciplines: ['chémia'] },
-  { key: 'ama', label: 'AMA', description: 'Štýl Americkej lekárskej asociácie.', disciplines: ['medicína'] },
-  { key: 'oscola', label: 'OSCOLA', description: 'Právnický citačný štýl UK.', disciplines: ['právo'] },
-  { key: 'bluebook', label: 'Bluebook', description: 'Americký právnický citačný štýl.', disciplines: ['právo USA'] },
-  { key: 'turabian', label: 'Turabian', description: 'Zjednodušená akademická verzia Chicago štýlu.', disciplines: ['humanitné vedy'] },
-  { key: 'mhra', label: 'MHRA', description: 'Štýl pre moderné humanitné odbory.', disciplines: ['literatúra'] },
-  { key: 'asa', label: 'ASA', description: 'Štýl Americkej sociologickej asociácie.', disciplines: ['sociológia'] },
-  { key: 'apsa', label: 'APSA', description: 'Citačný štýl pre politológiu.', disciplines: ['politológia'] },
-  { key: 'aaa', label: 'AAA', description: 'Štýl Americkej antropologickej asociácie.', disciplines: ['antropológia'] },
-  { key: 'cse_name_year', label: 'CSE – meno, rok', description: 'Štýl pre biologické vedy.', disciplines: ['biológia'] },
-  { key: 'cse_citation_sequence', label: 'CSE – číselná sekvencia', description: 'Číselná verzia CSE.', disciplines: ['biológia'] },
-  { key: 'nature', label: 'Nature', description: 'Štýl používaný v časopisoch Nature.', disciplines: ['výskum'] },
-  { key: 'elsevier_harvard', label: 'Elsevier Harvard', description: 'Varianta Harvard štýlu Elsevier.', disciplines: ['vedecké články'] },
-  { key: 'springer_basic', label: 'Springer Basic', description: 'Základný citačný štýl Springer.', disciplines: ['vedecké publikácie'] },
-  { key: 'gost', label: 'GOST', description: 'Východoeurópska citačná norma.', disciplines: ['technické odbory'] },
-  { key: 'din1505', label: 'DIN 1505', description: 'Nemecká citačná norma.', disciplines: ['Nemecko'] },
-  { key: 'abnt', label: 'ABNT', description: 'Brazílska akademická norma.', disciplines: ['Brazília'] },
-  { key: 'custom', label: 'Vlastná školská norma', description: 'Použite pri vlastnej smernici školy.', disciplines: ['interné smernice'] },
+  {
+    key: 'apa7',
+    label: 'APA',
+    description:
+      'Autor-dátum systém. V texte sa používa tvar (Priezvisko, rok). Zoznam zdrojov sa na konci delí na primárne a sekundárne zdroje bez referenčných čísel.',
+    disciplines: ['autor-dátum', 'Priezvisko, rok', 'bez čísiel v texte'],
+  },
+  {
+    key: 'harvard',
+    label: 'Harvard',
+    description:
+      'Autor-dátum systém. V texte sa používa tvar (Priezvisko, rok). Zoznam zdrojov sa na konci delí na primárne a sekundárne zdroje bez referenčných čísel.',
+    disciplines: ['autor-dátum', 'Priezvisko, rok', 'bez čísiel v texte'],
+  },
+  {
+    key: 'iso690',
+    label: 'ISO',
+    description:
+      'Autor-dátum citačný režim podľa ISO. V texte ostáva odkaz v tvare (Priezvisko, rok) a na konci sa vypíšu primárne a sekundárne zdroje bez referenčných čísel.',
+    disciplines: ['ISO', 'autor-dátum', 'bez čísiel v texte'],
+  },
+  {
+    key: 'footnotes',
+    label: 'Referencie pod čiarou',
+    description:
+      'Číselný režim. V texte sa ponechajú malé odkazy v hranatých zátvorkách, napríklad [1]. Použité čísla v texte sa musia zhodovať s číslami v zozname zdrojov.',
+    disciplines: ['číselné odkazy', '[1]', 'zhoda čísiel so zdrojmi'],
+  },
 ];
 
 const STEPS = [
@@ -532,15 +510,36 @@ function normalizeWorkType(value?: string | null): WorkTypeKey {
 
 function normalizeCitationToKey(value?: string | null): CitationStyleKey {
   const raw = String(value || '').trim().toLowerCase();
+
   if (raw.includes('apa')) return 'apa7';
-  if (raw.includes('ieee')) return 'ieee';
   if (raw.includes('harvard')) return 'harvard';
-  if (raw.includes('vancouver')) return 'vancouver';
-  if (raw.includes('chicago') && raw.includes('author')) return 'chicago_author_date';
-  if (raw.includes('chicago')) return 'chicago_notes';
-  if (raw.includes('iso') && raw.includes('čísel')) return 'iso690_numeric';
+
+  if (
+    raw.includes('referencie pod čiarou') ||
+    raw.includes('referencie pod ciarou') ||
+    raw.includes('pod čiarou') ||
+    raw.includes('pod ciarou') ||
+    raw.includes('footnote') ||
+    raw.includes('poznámk') ||
+    raw.includes('poznamk') ||
+    raw.includes('čísel') ||
+    raw.includes('cisel') ||
+    raw.includes('numeric') ||
+    raw.includes('number') ||
+    raw.includes('iso690_numeric') ||
+    raw.includes('chicago') ||
+    raw.includes('vancouver') ||
+    raw.includes('ieee')
+  ) {
+    return 'footnotes';
+  }
+
   if (raw.includes('iso')) return 'iso690';
-  if (CITATION_STYLES.some((item) => item.key === raw)) return raw as CitationStyleKey;
+
+  if (CITATION_STYLES.some((item) => item.key === raw)) {
+    return raw as CitationStyleKey;
+  }
+
   return 'iso690';
 }
 
@@ -2301,7 +2300,7 @@ function ProfileWizardModal({
               >
                 <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.1fr_0.9fr]">
                   <div className="grid grid-cols-2 gap-2 xl:grid-cols-3">
-                    {CITATION_STYLES.slice(0, 18).map((style) => {
+                    {CITATION_STYLES.map((style) => {
                       const active = profile.citation === style.key;
 
                       return (

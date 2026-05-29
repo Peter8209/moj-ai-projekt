@@ -8,11 +8,14 @@ import {
   ChevronRight,
   ClipboardCheck,
   Clock3,
+  Copy,
+  Download,
   FileSearch,
   GraduationCap,
   Inbox,
   LayoutDashboard,
   Mail,
+  Maximize2,
   MessageSquare,
   Presentation,
   RefreshCcw,
@@ -20,6 +23,7 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
+  X,
 } from 'lucide-react';
 
 type RawHistoryItem = {
@@ -131,12 +135,59 @@ function getModuleIcon(module: string) {
   return <MessageSquare className="h-5 w-5" />;
 }
 
+function stringifyResultValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+
+  if (typeof value === 'string') return value;
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function extractResultText(result?: Record<string, unknown>) {
+  if (!result) return '';
+
+  const priorityKeys = [
+    'output',
+    'text',
+    'content',
+    'answer',
+    'message',
+    'response',
+    'result',
+    'analysis',
+    'protocol',
+    'html',
+    'markdown',
+  ];
+
+  for (const key of priorityKeys) {
+    const value = result[key];
+
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+  }
+
+  return stringifyResultValue(result);
+}
+
 function normalizeHistoryItem(item: RawHistoryItem, index: number): HistoryItem {
   const module = normalizeModule(item.module || item.type);
+
+  const resultText = extractResultText(item.result);
 
   const assistantMessage =
     item.assistant_message ||
     item.content ||
+    resultText ||
     item.preview ||
     '';
 
@@ -275,11 +326,23 @@ function createContinueChatContext(item: HistoryItem): ContinueChatContext {
   };
 }
 
-function createCardPreview(item: HistoryItem) {
-  const userText = item.user_message?.trim();
+function getFullAssistantText(item: HistoryItem) {
   const assistantText = item.assistant_message?.trim();
 
-  if (userText && assistantText) {
+  if (assistantText) return assistantText;
+
+  const resultText = extractResultText(item.result).trim();
+
+  if (resultText) return resultText;
+
+  return 'Bez uloženého výstupu.';
+}
+
+function createCardPreview(item: HistoryItem) {
+  const userText = item.user_message?.trim();
+  const assistantText = getFullAssistantText(item);
+
+  if (userText && assistantText && assistantText !== 'Bez uloženého výstupu.') {
     return `POUŽÍVATEĽ: ${userText}\n\nODPOVEĎ: ${assistantText}`;
   }
 
@@ -287,6 +350,29 @@ function createCardPreview(item: HistoryItem) {
   if (userText) return userText;
 
   return 'Bez uloženého výstupu.';
+}
+
+function createFullReadableText(item: HistoryItem) {
+  const title = item.title || getModuleLabel(item.module);
+  const moduleLabel = getModuleLabel(item.module);
+  const date = formatDate(item.created_at);
+  const userText = item.user_message?.trim();
+  const assistantText = getFullAssistantText(item);
+
+  return [
+    title,
+    '',
+    `Modul: ${moduleLabel}`,
+    `Dátum: ${date}`,
+    '',
+    userText ? '=== ZADANIE ===' : '',
+    userText || '',
+    userText ? '' : '',
+    '=== VÝSTUP ===',
+    assistantText,
+  ]
+    .filter((part) => part !== '')
+    .join('\n');
 }
 
 function formatDate(value: string) {
@@ -306,7 +392,19 @@ function formatDate(value: string) {
 function getResultText(count: number) {
   if (count === 1) return '1 záznam';
   if (count >= 2 && count <= 4) return `${count} záznamy`;
-  return `${count} záznamů`;
+  return `${count} záznamov`;
+}
+
+function createSafeFileName(value: string) {
+  const cleaned = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9-_]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
+
+  return cleaned || 'historia-vystup';
 }
 
 export default function HistoryPage() {
@@ -318,9 +416,21 @@ export default function HistoryPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedItem, setSelectedItem] = useState<HistoryItem | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   function goToMainMenu() {
     router.push('/dashboard');
+  }
+
+  function openHistoryDetail(item: HistoryItem) {
+    setSelectedItem(item);
+    setCopiedId(null);
+  }
+
+  function closeHistoryDetail() {
+    setSelectedItem(null);
+    setCopiedId(null);
   }
 
   function continueInAiChat(item: HistoryItem) {
@@ -334,6 +444,37 @@ export default function HistoryPage() {
     );
 
     router.push('/chat?continue=history');
+  }
+
+  async function copyHistoryItem(item: HistoryItem) {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) return;
+
+    await navigator.clipboard.writeText(createFullReadableText(item));
+    setCopiedId(item.id);
+
+    window.setTimeout(() => {
+      setCopiedId((currentId) => (currentId === item.id ? null : currentId));
+    }, 1800);
+  }
+
+  function downloadHistoryItem(item: HistoryItem) {
+    if (typeof window === 'undefined') return;
+
+    const blob = new Blob([createFullReadableText(item)], {
+      type: 'text/plain;charset=utf-8',
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const title = item.title || getModuleLabel(item.module);
+
+    link.href = url;
+    link.download = `${createSafeFileName(title)}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    URL.revokeObjectURL(url);
   }
 
   async function deleteHistoryItem(item: HistoryItem) {
@@ -351,6 +492,10 @@ export default function HistoryPage() {
     setItems((currentItems) =>
       currentItems.filter((historyItem) => historyItem.id !== item.id),
     );
+
+    if (selectedItem?.id === item.id) {
+      closeHistoryDetail();
+    }
 
     removeItemFromLocalStorage(item);
 
@@ -493,6 +638,24 @@ export default function HistoryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFilter]);
 
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        closeHistoryDetail();
+      }
+    }
+
+    if (!selectedItem) return;
+
+    document.addEventListener('keydown', handleEscape);
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      document.body.style.overflow = '';
+    };
+  }, [selectedItem]);
+
   const searchedItems = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
 
@@ -503,7 +666,7 @@ export default function HistoryPage() {
         item.title,
         getModuleLabel(item.module),
         item.user_message,
-        item.assistant_message,
+        getFullAssistantText(item),
       ]
         .filter(Boolean)
         .join(' ')
@@ -535,18 +698,30 @@ export default function HistoryPage() {
       <div className="relative mx-auto w-full max-w-[1500px] px-4 py-5 sm:px-6 lg:px-8">
         <section className="mb-5 rounded-[2rem] border border-slate-200/80 bg-white/90 p-4 shadow-xl shadow-slate-200/70 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06] dark:shadow-black/30">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm dark:border-white/10 dark:bg-white/10 dark:text-white">
-              <LayoutDashboard className="h-6 w-6" />
+            <div className="flex items-center gap-3">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm dark:border-white/10 dark:bg-white/10 dark:text-white">
+                <LayoutDashboard className="h-6 w-6" />
+              </div>
+
+              <div>
+                <h1 className="text-xl font-black text-slate-950 dark:text-white">
+                  História výstupov
+                </h1>
+
+                <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
+                  Po rozkliknutí sa otvorí celý uložený výstup v plnom detaile.
+                </p>
+              </div>
             </div>
 
-            <div className="flex flex-1 flex-col gap-3 xl:flex-row xl:items-center xl:justify-end">
+            <div className="flex flex-1 flex-col gap-3 sm:flex-row xl:flex-none xl:items-center xl:justify-end">
               <button
                 type="button"
                 onClick={goToMainMenu}
                 className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-white px-6 text-sm font-black text-slate-950 shadow-lg shadow-slate-950/10 transition hover:-translate-y-0.5 hover:bg-slate-100 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
               >
                 <ArrowLeft className="h-4 w-4" />
-                Hlavní menu
+                Hlavné menu
               </button>
 
               <button
@@ -555,7 +730,7 @@ export default function HistoryPage() {
                 className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-6 text-sm font-black text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
               >
                 <RefreshCcw className="h-4 w-4" />
-                Obnovit
+                Obnoviť
               </button>
             </div>
           </div>
@@ -567,7 +742,7 @@ export default function HistoryPage() {
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Vyhledat v historii podle názvu, modulu nebo obsahu..."
+                placeholder="Vyhľadať v histórii podľa názvu, modulu alebo obsahu..."
                 className="min-h-[52px] w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-4 text-sm font-semibold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder:text-slate-500"
               />
             </div>
@@ -586,6 +761,7 @@ export default function HistoryPage() {
                 type="button"
                 onClick={() => {
                   setActiveFilter(filter.key);
+                  closeHistoryDetail();
                 }}
                 className={`shrink-0 rounded-2xl px-4 py-2.5 text-sm font-black transition ${
                   activeFilter === filter.key
@@ -612,7 +788,7 @@ export default function HistoryPage() {
                 </div>
 
                 <div className="mt-1 text-sm font-medium text-slate-500 dark:text-slate-400">
-                  Prosím počkajte, pripravujem uložené výstupy.
+                  Pripravujem uložené výstupy z databázy alebo lokálnej histórie.
                 </div>
               </div>
             </div>
@@ -681,7 +857,16 @@ export default function HistoryPage() {
                   {records.map((item) => (
                     <article
                       key={item.id}
-                      className="group relative overflow-hidden rounded-[1.75rem] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-xl hover:shadow-violet-950/10 dark:border-white/10 dark:from-white/[0.08] dark:to-white/[0.03] dark:hover:border-violet-400/60"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openHistoryDetail(item)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          openHistoryDetail(item);
+                        }
+                      }}
+                      className="group relative cursor-pointer overflow-hidden rounded-[1.75rem] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5 text-left shadow-sm outline-none transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-xl hover:shadow-violet-950/10 focus:border-violet-400 focus:ring-4 focus:ring-violet-500/15 dark:border-white/10 dark:from-white/[0.08] dark:to-white/[0.03] dark:hover:border-violet-400/60"
                     >
                       <div className="absolute inset-y-0 left-0 w-1.5 bg-violet-600" />
 
@@ -706,30 +891,44 @@ export default function HistoryPage() {
                           <div className="mt-3 line-clamp-4 min-h-[92px] whitespace-pre-wrap text-sm font-medium leading-6 text-slate-700 dark:text-slate-200">
                             {createCardPreview(item)}
                           </div>
+
+                          <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black text-slate-600 transition group-hover:bg-violet-50 group-hover:text-violet-700 dark:bg-white/10 dark:text-slate-300 dark:group-hover:bg-violet-500/15 dark:group-hover:text-violet-200">
+                            <Maximize2 className="h-3.5 w-3.5" />
+                            Rozkliknúť celý výstup
+                          </div>
                         </div>
 
                         <div className="flex flex-col gap-3 xl:items-end">
                           <button
                             type="button"
-                            onClick={() => continueInAiChat(item)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openHistoryDetail(item);
+                            }}
+                            className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-black text-white shadow-lg shadow-slate-950/20 transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200 xl:w-[260px]"
+                          >
+                            Otvoriť celý výstup
+                            <Maximize2 className="h-4 w-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              continueInAiChat(item);
+                            }}
                             className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-950/20 transition hover:bg-violet-500 xl:w-[260px]"
                           >
-                            Pokračovat v AI chatu
+                            Pokračovať v AI chate
                             <ChevronRight className="h-4 w-4" />
                           </button>
 
                           <button
                             type="button"
-                            onClick={goToMainMenu}
-                            className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15 xl:w-[260px]"
-                          >
-                            <LayoutDashboard className="h-4 w-4" />
-                            Hlavní menu
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => deleteHistoryItem(item)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              deleteHistoryItem(item);
+                            }}
                             disabled={deletingId === item.id}
                             className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-5 text-sm font-black text-red-700 transition hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20 xl:w-[260px]"
                           >
@@ -748,6 +947,173 @@ export default function HistoryPage() {
           </div>
         ) : null}
       </div>
+
+      {selectedItem ? (
+        <div
+          className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 p-3 backdrop-blur-md sm:p-5"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Detail uloženého výstupu"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeHistoryDetail();
+            }
+          }}
+        >
+          <section className="mx-auto flex min-h-[calc(100vh-1.5rem)] w-full max-w-[1400px] flex-col overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-2xl shadow-slate-950/40 dark:border-white/10 dark:bg-[#020617] sm:min-h-[calc(100vh-2.5rem)]">
+            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 p-4 backdrop-blur-xl dark:border-white/10 dark:bg-[#020617]/95 sm:p-5">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div className="flex min-w-0 gap-3">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
+                    {getModuleIcon(selectedItem.module)}
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-2 rounded-full bg-violet-50 px-3 py-1 text-xs font-black text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
+                        {getModuleLabel(selectedItem.module)}
+                      </span>
+
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500 dark:bg-white/10 dark:text-slate-300">
+                        <Clock3 className="h-3.5 w-3.5" />
+                        {formatDate(selectedItem.created_at)}
+                      </span>
+                    </div>
+
+                    <h2 className="mt-3 text-2xl font-black leading-tight text-slate-950 dark:text-white">
+                      {selectedItem.title || getModuleLabel(selectedItem.module)}
+                    </h2>
+
+                    <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">
+                      Toto je plný detail uloženého výstupu. Obsah sa už nezobrazuje ako malé textové okno, ale ako samostatné rozkliknuté zobrazenie.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2 xl:flex xl:shrink-0 xl:flex-wrap xl:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => copyHistoryItem(selectedItem)}
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
+                  >
+                    <Copy className="h-4 w-4" />
+                    {copiedId === selectedItem.id ? 'Skopírované' : 'Kopírovať'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => downloadHistoryItem(selectedItem)}
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
+                  >
+                    <Download className="h-4 w-4" />
+                    Stiahnuť TXT
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => continueInAiChat(selectedItem)}
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 text-sm font-black text-white shadow-lg shadow-violet-950/20 transition hover:bg-violet-500"
+                  >
+                    Pokračovať v AI chate
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={closeHistoryDetail}
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+                    aria-label="Zatvoriť detail"
+                  >
+                    <X className="h-4 w-4" />
+                    Zavrieť
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid flex-1 gap-5 p-4 lg:grid-cols-[360px_minmax(0,1fr)] sm:p-5">
+              <aside className="space-y-4">
+                <div className="rounded-[1.75rem] border border-slate-200 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+                  <h3 className="text-sm font-black uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                    Informácie
+                  </h3>
+
+                  <div className="mt-4 space-y-3 text-sm">
+                    <div className="rounded-2xl bg-white p-4 dark:bg-white/10">
+                      <div className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+                        Modul
+                      </div>
+                      <div className="mt-1 font-black text-slate-950 dark:text-white">
+                        {getModuleLabel(selectedItem.module)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl bg-white p-4 dark:bg-white/10">
+                      <div className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+                        Vytvorené
+                      </div>
+                      <div className="mt-1 font-black text-slate-950 dark:text-white">
+                        {formatDate(selectedItem.created_at)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl bg-white p-4 dark:bg-white/10">
+                      <div className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+                        ID záznamu
+                      </div>
+                      <div className="mt-1 break-all font-mono text-xs font-bold text-slate-700 dark:text-slate-200">
+                        {selectedItem.id}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedItem.user_message?.trim() ? (
+                  <div className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+                    <h3 className="text-sm font-black uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                      Zadanie používateľa
+                    </h3>
+
+                    <div className="mt-4 max-h-[360px] overflow-y-auto rounded-2xl bg-slate-50 p-4 text-sm font-medium leading-6 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+                      <div className="whitespace-pre-wrap">
+                        {selectedItem.user_message}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </aside>
+
+              <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.04] sm:p-6">
+                <div className="mb-5 flex flex-col gap-3 border-b border-slate-200 pb-5 dark:border-white/10 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-950 dark:text-white">
+                      Celý výstup
+                    </h3>
+
+                    <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
+                      Zobrazuje sa kompletný obsah z histórie vrátane dlhých výstupov z modulov.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => deleteHistoryItem(selectedItem)}
+                    disabled={deletingId === selectedItem.id}
+                    className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 text-sm font-black text-red-700 transition hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {deletingId === selectedItem.id ? 'Vymazávam...' : 'Vymazať'}
+                  </button>
+                </div>
+
+                <div className="min-h-[520px] whitespace-pre-wrap rounded-[1.5rem] border border-slate-200 bg-slate-50 p-5 text-[15px] font-medium leading-8 text-slate-800 dark:border-white/10 dark:bg-black/20 dark:text-slate-100 sm:p-7">
+                  {getFullAssistantText(selectedItem)}
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

@@ -9,6 +9,24 @@ type Props = {
 
 type RowValue = string | number | boolean | null | undefined;
 
+type NormalizedColumn = {
+  key: string;
+  label: string;
+  sourceKeys?: string[];
+};
+
+type TableRow = Record<string, RowValue>;
+
+function normalizeKey(key: string) {
+  return String(key || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '_')
+    .replace(/-/g, '_');
+}
+
 function formatCellValue(value: RowValue) {
   if (value === null || value === undefined || value === '') {
     return '—';
@@ -30,58 +48,266 @@ function formatCellValue(value: RowValue) {
 }
 
 function getColumnLabel(key: string) {
+  const normalized = normalizeKey(key);
+
   const labels: Record<string, string> = {
     variable: 'Premenná',
+    premenna: 'Premenná',
+    column: 'Premenná',
+    stlpec: 'Premenná',
+    field: 'Premenná',
     name: 'Premenná',
-    label: 'Názov',
-    type: 'Typ',
+    nazov: 'Premenná',
+    label: 'Premenná',
+
+    title: 'Názov',
+    description: 'Popis',
+
+    type: 'Typ premennej',
+    variabletype: 'Typ premennej',
+    variable_type: 'Typ premennej',
+    typ: 'Typ premennej',
+    typ_premennej: 'Typ premennej',
+
+    measurementlevel: 'Úroveň merania',
+    measurement_level: 'Úroveň merania',
+    level: 'Úroveň merania',
+    uroven: 'Úroveň merania',
+    uroven_merania: 'Úroveň merania',
+
     count: 'Počet',
     n: 'N',
-    valid: 'Platné hodnoty',
-    missing: 'Chýbajúce hodnoty',
+    total: 'Spolu',
+    valid: 'N platných',
+    validn: 'N platných',
+    valid_n: 'N platných',
+    valid_count: 'N platných',
+    n_valid: 'N platných',
+    platne: 'N platných',
+    platne_hodnoty: 'N platných',
+
+    missing: 'N chýbajúcich',
+    missingn: 'N chýbajúcich',
+    missing_n: 'N chýbajúcich',
+    missing_count: 'N chýbajúcich',
+    n_missing: 'N chýbajúcich',
+    chybajuce: 'N chýbajúcich',
+    chybajuce_hodnoty: 'N chýbajúcich',
+
     mean: 'Priemer',
+    avg: 'Priemer',
+    average: 'Priemer',
+    m: 'Priemer',
+    priemer: 'Priemer',
+
     median: 'Medián',
+    median_value: 'Medián',
+
     mode: 'Modus',
+    modus: 'Modus',
+
     min: 'Minimum',
+    minimum: 'Minimum',
     max: 'Maximum',
+    maximum: 'Maximum',
     range: 'Rozpätie',
     variance: 'Rozptyl',
+
     std: 'Smerodajná odchýlka',
-    stdDeviation: 'Smerodajná odchýlka',
-    standardDeviation: 'Smerodajná odchýlka',
+    sd: 'Smerodajná odchýlka',
+    stddeviation: 'Smerodajná odchýlka',
+    std_deviation: 'Smerodajná odchýlka',
+    standarddeviation: 'Smerodajná odchýlka',
+    standard_deviation: 'Smerodajná odchýlka',
+
+    skewness: 'Šikmosť',
+    kurtosis: 'Špicatosť',
+
     percent: 'Percento',
     percentage: 'Percento',
+    validpercent: 'Validné percento',
+    valid_percent: 'Validné percento',
+    cumulativepercent: 'Kumulatívne percento',
+    cumulative_percent: 'Kumulatívne percento',
+
     frequency: 'Frekvencia',
-    cumulativePercent: 'Kumulatívne percento',
+    freq: 'Frekvencia',
     value: 'Hodnota',
     category: 'Kategória',
+    kategoria: 'Kategória',
+
+    group: 'Skupina',
+    group1: 'Skupina 1',
+    group2: 'Skupina 2',
+
+    test: 'Test',
+    statistic: 'Štatistika',
+    statistic_value: 'Štatistika',
+    p: 'p-hodnota',
+    pvalue: 'p-hodnota',
+    p_value: 'p-hodnota',
+    df: 'Stupne voľnosti',
+    effectsize: 'Veľkosť efektu',
+    effect_size: 'Veľkosť efektu',
+
+    correlation: 'Korelácia',
+    r: 'r',
+    r2: 'R²',
+    r_squared: 'R²',
+    beta: 'Beta',
+    intercept: 'Konštanta',
+    slope: 'Smernica',
+
+    alpha: 'Cronbach alfa',
+    cronbachalpha: 'Cronbach alfa',
+    cronbach_alpha: 'Cronbach alfa',
+
     interpretation: 'Interpretácia',
+    recommendation: 'Odporúčanie',
+    rows: 'Riadky',
   };
 
-  return labels[key] || key;
+  return labels[normalized] || key;
 }
 
-function normalizeColumns(table: AnalysisTableType) {
+function isVariableLikeColumn(key: string) {
+  const normalized = normalizeKey(key);
+
+  return [
+    'variable',
+    'premenna',
+    'column',
+    'stlpec',
+    'field',
+    'name',
+    'nazov',
+    'label',
+  ].includes(normalized);
+}
+
+function getBestVariableValue(row: TableRow) {
+  const priorityKeys = [
+    'variable',
+    'premenná',
+    'premenna',
+    'column',
+    'stĺpec',
+    'stlpec',
+    'field',
+    'name',
+    'názov',
+    'nazov',
+    'label',
+  ];
+
+  for (const key of priorityKeys) {
+    const value = row[key];
+
+    if (value !== null && value !== undefined && value !== '') {
+      return value;
+    }
+  }
+
+  const dynamicKey = Object.keys(row).find((key) => isVariableLikeColumn(key));
+
+  if (dynamicKey) {
+    const value = row[dynamicKey];
+
+    if (value !== null && value !== undefined && value !== '') {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function getCellValue(row: TableRow, column: NormalizedColumn): RowValue {
+  if (column.key === '__variable__') {
+    return getBestVariableValue(row);
+  }
+
+  if (Array.isArray(column.sourceKeys) && column.sourceKeys.length > 0) {
+    for (const sourceKey of column.sourceKeys) {
+      const value = row[sourceKey];
+
+      if (value !== null && value !== undefined && value !== '') {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
+  return row[column.key];
+}
+
+function hasAnyVisibleValue(rows: TableRow[], column: NormalizedColumn) {
+  return rows.some((row) => {
+    const value = getCellValue(row, column);
+
+    return value !== null && value !== undefined && value !== '';
+  });
+}
+
+function dedupeColumns(columns: NormalizedColumn[]) {
+  const result: NormalizedColumn[] = [];
+  const usedLabels = new Set<string>();
+  const variableSourceKeys: string[] = [];
+
+  for (const column of columns) {
+    if (isVariableLikeColumn(column.key)) {
+      variableSourceKeys.push(column.key);
+      continue;
+    }
+
+    const normalizedLabel = normalizeKey(column.label);
+
+    if (usedLabels.has(normalizedLabel)) {
+      continue;
+    }
+
+    usedLabels.add(normalizedLabel);
+    result.push(column);
+  }
+
+  if (variableSourceKeys.length > 0) {
+    result.unshift({
+      key: '__variable__',
+      label: 'Premenná',
+      sourceKeys: variableSourceKeys,
+    });
+  }
+
+  return result;
+}
+
+function normalizeColumns(table: AnalysisTableType, rows: TableRow[]) {
+  let columns: NormalizedColumn[] = [];
+
   if (table.columns && table.columns.length > 0) {
-    return table.columns.map((column) => ({
+    columns = table.columns.map((column) => ({
       key: column.key,
       label: column.label || getColumnLabel(column.key),
     }));
+  } else {
+    const firstRow = rows[0];
+
+    if (!firstRow) return [];
+
+    columns = Object.keys(firstRow).map((key) => ({
+      key,
+      label: getColumnLabel(key),
+    }));
   }
 
-  const firstRow = table.rows?.[0];
+  const dedupedColumns = dedupeColumns(columns);
 
-  if (!firstRow) return [];
-
-  return Object.keys(firstRow).map((key) => ({
-    key,
-    label: getColumnLabel(key),
-  }));
+  return dedupedColumns.filter((column) => hasAnyVisibleValue(rows, column));
 }
 
 export default function AnalysisTable({ table }: Props) {
-  const columns = normalizeColumns(table);
-  const rows = Array.isArray(table.rows) ? table.rows : [];
+  const rows = Array.isArray(table.rows) ? (table.rows as TableRow[]) : [];
+  const columns = normalizeColumns(table, rows);
 
   return (
     <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/20">
@@ -132,7 +358,7 @@ export default function AnalysisTable({ table }: Props) {
                       key={`${rowIndex}-${column.key}`}
                       className="whitespace-nowrap px-4 py-3 text-slate-200"
                     >
-                      {formatCellValue(row[column.key] as RowValue)}
+                      {formatCellValue(getCellValue(row, column))}
                     </td>
                   ))}
                 </tr>

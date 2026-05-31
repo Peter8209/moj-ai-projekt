@@ -2042,170 +2042,55 @@ useEffect(() => {
 
     localStorage.removeItem('zedpera_continue_chat_context');
 
-    const title = String(context?.title || '').trim();
     const userMessage = String(context?.user_message || '').trim();
     const assistantMessage = String(context?.assistant_message || '').trim();
     const createdAt = String(context?.created_at || new Date().toISOString());
 
-    const historyMessages: any[] = [];
+    const historyMessages: ChatMessage[] = [];
 
     if (userMessage) {
       historyMessages.push({
-        id: `history-user-${context?.id || Date.now()}`,
         role: 'user',
         content: userMessage,
-        createdAt,
       });
     }
 
     if (assistantMessage) {
       historyMessages.push({
-        id: `history-assistant-${context?.id || Date.now()}`,
         role: 'assistant',
         content: assistantMessage,
-        createdAt,
       });
     }
 
-    const autoPrompt = `
-Pokračujeme v predchádzajúcej konverzácii z histórie.
-
-Názov:
-${title}
-
-Pôvodné zadanie používateľa:
-${userMessage}
-
-Predchádzajúca odpoveď AI:
-${assistantMessage}
-
-Pokračuj na základe tejto histórie. Zachovaj kontext a nadviaž na predchádzajúci výstup.
-`.trim();
-
-    if (!autoPrompt) return;
-
-    const autoUserMessage = {
-      id: `history-auto-user-${context?.id || Date.now()}`,
-      role: 'user' as const,
-      content: autoPrompt,
-      createdAt: new Date().toISOString(),
-    };
-
-    setMessages((currentMessages: any[]) => {
-      const existingIds = new Set(
-        currentMessages.map((message) => String(message.id || '')),
+    setMessages((currentMessages) => {
+      const alreadyHasSameHistory = currentMessages.some(
+        (message) =>
+          message.content === userMessage ||
+          message.content === assistantMessage,
       );
 
-      const messagesToInsert = [...historyMessages, autoUserMessage].filter(
-        (message) => !existingIds.has(String(message.id || '')),
-      );
+      if (alreadyHasSameHistory) return currentMessages;
 
-      return [...currentMessages, ...messagesToInsert];
+      return [...currentMessages, ...historyMessages];
     });
 
     // DÔLEŽITÉ:
-    // História sa už nezobrazuje v písacej lište.
+    // Pri návrate z histórie sa nesmie automaticky spustiť AI.
+    // Používateľ musí najprv napísať nový príkaz.
     setInput('');
+    setIsLoading(false);
+  } catch (error) {
+    console.error('LOAD_CHAT_HISTORY_CONTEXT_ERROR:', error);
 
-    // Automatické odoslanie bez kliknutia na tlačidlo poslať.
-    window.setTimeout(() => {
-      handleSubmitFromHistory(autoPrompt);
-    }, 150);
-  } catch {
     localStorage.removeItem('zedpera_continue_chat_context');
     setInput('');
+    setIsLoading(false);
   }
 }, []);
 
-async function handleSubmitFromHistory(text: string) {
-  const cleanText = text.trim();
 
-  if (!cleanText) return;
+    
 
-  try {
-    setIsLoading(true);
-
-    const assistantMessageId = `assistant-history-${Date.now()}`;
-
-    setMessages((currentMessages: any[]) => [
-      ...currentMessages,
-      {
-        id: assistantMessageId,
-        role: 'assistant',
-        content: 'Analyzujem...',
-        createdAt: new Date().toISOString(),
-      },
-    ]);
-
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      credentials: 'include',
-      cache: 'no-store',
-      body: JSON.stringify({
-        message: cleanText,
-        prompt: cleanText,
-        text: cleanText,
-        source: 'history',
-        mode: 'continue-history',
-      }),
-    });
-
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      throw new Error(
-        data?.message ||
-          data?.error ||
-          'Nepodarilo sa pokračovať v konverzácii z histórie.',
-      );
-    }
-
-    const assistantText =
-      data?.text ||
-      data?.answer ||
-      data?.content ||
-      data?.message ||
-      data?.output ||
-      data?.result ||
-      '';
-
-    setMessages((currentMessages: any[]) =>
-      currentMessages.map((message) =>
-        message.id === assistantMessageId
-          ? {
-              ...message,
-              content:
-                typeof assistantText === 'string' && assistantText.trim()
-                  ? assistantText.trim()
-                  : 'Výstup sa podarilo vygenerovať, ale odpoveď bola prázdna.',
-            }
-          : message,
-      ),
-    );
-  } catch (error) {
-    const errorText =
-      error instanceof Error
-        ? error.message
-        : 'Nepodarilo sa pokračovať v konverzácii z histórie.';
-
-    setMessages((currentMessages: any[]) => [
-      ...currentMessages,
-      {
-        id: `assistant-history-error-${Date.now()}`,
-        role: 'assistant',
-        content: errorText,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
-  } finally {
-    setIsLoading(false);
-    setInput('');
-  }
-}
 
 useEffect(() => {
   const loadProfile = async () => {

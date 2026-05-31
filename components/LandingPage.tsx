@@ -1,6 +1,5 @@
 'use client';
 
-import ThemeToggleButton from '@/components/ThemeToggleButton';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
@@ -906,7 +905,7 @@ function ClickableLanguageMenu({
 }) {
   return (
     <div
-      className={`rounded-2xl border border-slate-200 bg-white p-1 shadow-sm transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.06] ${
+      className={`rounded-2xl border border-slate-200 bg-white p-1 shadow-sm ${
         compact ? 'w-full' : ''
       }`}
       aria-label="Výber jazyka"
@@ -919,7 +918,7 @@ function ClickableLanguageMenu({
         }
       >
         {!compact && (
-          <div className="mr-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-200">
+          <div className="mr-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-700">
             <Globe2 size={17} />
           </div>
         )}
@@ -939,7 +938,7 @@ function ClickableLanguageMenu({
               className={`min-h-[38px] rounded-xl px-3 text-xs font-black tracking-wide transition ${
                 active
                   ? 'bg-gradient-to-r from-violet-700 to-indigo-700 text-white shadow-lg shadow-violet-900/20'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
               } ${compact ? 'w-full' : ''}`}
             >
               {getLanguageShortLabel(code)}
@@ -1114,10 +1113,10 @@ export default function LandingPage() {
   };
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#f8fafc] text-slate-950 transition-colors duration-300 dark:bg-[#050711] dark:text-white">
-      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur-xl transition-colors duration-300 dark:border-white/10 dark:bg-[#050711]/95">
+    <main className="min-h-screen overflow-x-hidden bg-[#f8fafc] text-slate-950">
+      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur-xl">
         <div className="mx-auto max-w-7xl px-5 py-3 lg:px-8">
-          {/* PRVÝ RIADOK: logo + jazyková lišta + prepínač témy + akčné tlačidlá */}
+          {/* PRVÝ RIADOK: logo + jazyková lišta + akčné tlačidlá */}
           <div className="flex items-center justify-between gap-4">
             <Link href="/" className="flex min-w-0 items-center gap-3">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 text-white shadow-lg">
@@ -1125,10 +1124,10 @@ export default function LandingPage() {
               </div>
 
               <div className="min-w-0 text-left">
-                <div className="truncate text-2xl font-black tracking-tight text-slate-950 dark:text-white">
+                <div className="truncate text-2xl font-black tracking-tight text-slate-950">
                   ZEDPERA
                 </div>
-                <div className="-mt-1 truncate text-sm font-semibold text-slate-500 dark:text-slate-300">
+                <div className="-mt-1 truncate text-sm font-semibold text-slate-500">
                   {content.brandSubtitle}
                 </div>
               </div>
@@ -1142,11 +1141,10 @@ export default function LandingPage() {
                 }}
               />
 
-              <ThemeToggleButton />
 
               <Link
                 href="/login"
-                className="relative z-50 rounded-2xl px-5 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-white/10"
+                className="relative z-50 rounded-2xl px-5 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-100"
               >
                 {content.login}
               </Link>
@@ -1162,7 +1160,7 @@ export default function LandingPage() {
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-950 transition-colors dark:border-white/10 dark:bg-white/[0.06] dark:text-white lg:hidden"
+              className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-950 lg:hidden"
               aria-label={content.mobileOpenMenu}
             >
               <Menu size={22} />
@@ -1181,33 +1179,33 @@ export default function LandingPage() {
               />
             </div>
 
-            <ThemeToggleButton />
+
           </div>
 
           {/* DRUHÝ RIADOK: hlavná menu lišta */}
-          <div className="mt-3 hidden border-t border-slate-200 pt-3 dark:border-white/10 lg:block">
-            <nav className="flex items-center justify-center gap-8 text-sm font-bold text-slate-700 dark:text-slate-200">
-              <a href="#intro" className="transition hover:text-violet-700 dark:hover:text-violet-300">
+          <div className="mt-3 hidden border-t border-slate-200 pt-3 lg:block">
+            <nav className="flex items-center justify-center gap-8 text-sm font-bold text-slate-700">
+              <a href="#intro" className="transition hover:text-violet-700">
                 {content.navIntro}
               </a>
 
-              <a href="#about" className="transition hover:text-violet-700 dark:hover:text-violet-300">
+              <a href="#about" className="transition hover:text-violet-700">
                 {content.navAbout}
               </a>
 
-              <a href="#features" className="transition hover:text-violet-700 dark:hover:text-violet-300">
+              <a href="#features" className="transition hover:text-violet-700">
                 {content.navFeatures}
               </a>
 
-              <a href="#reviews" className="transition hover:text-violet-700 dark:hover:text-violet-300">
+              <a href="#reviews" className="transition hover:text-violet-700">
                 {content.navReviews}
               </a>
 
-              <a href="#pricing" className="transition hover:text-violet-700 dark:hover:text-violet-300">
+              <a href="#pricing" className="transition hover:text-violet-700">
                 {content.navPricing}
               </a>
 
-              <a href="#faq" className="transition hover:text-violet-700 dark:hover:text-violet-300">
+              <a href="#faq" className="transition hover:text-violet-700">
                 {content.navFaq}
               </a>
             </nav>
@@ -1217,7 +1215,7 @@ export default function LandingPage() {
 
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-sm lg:hidden">
-          <div className="absolute right-0 top-0 h-full w-[86%] max-w-sm overflow-y-auto bg-white p-5 text-slate-950 shadow-2xl transition-colors duration-300 dark:bg-[#070a16] dark:text-white">
+          <div className="absolute right-0 top-0 h-full w-[86%] max-w-sm overflow-y-auto bg-white p-5 text-slate-950 shadow-2xl">
             <div className="mb-6 flex items-center justify-between">
               <div className="text-xl font-black">ZEDPERA</div>
 
@@ -1232,10 +1230,10 @@ export default function LandingPage() {
             </div>
 
             <div className="space-y-3">
-              <div className="rounded-2xl bg-slate-100 p-3 dark:bg-white/10">
+              <div className="rounded-2xl bg-slate-100 p-3">
                 <div className="mb-3">
-                  <div className="mb-2 flex items-center gap-2 px-1 text-xs font-black uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
-                    <Globe2 size={15} className="text-violet-700 dark:text-violet-300" />
+                  <div className="mb-2 flex items-center gap-2 px-1 text-xs font-black uppercase tracking-[0.2em] text-slate-500">
+                    <Globe2 size={15} className="text-violet-700" />
                     Jazyk
                   </div>
 
@@ -1248,13 +1246,13 @@ export default function LandingPage() {
                   />
                 </div>
 
-                <ThemeToggleButton />
+
               </div>
 
               <a
                 href="#intro"
                 onClick={closeMobileMenu}
-                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold text-slate-800 transition-colors dark:bg-white/10 dark:text-white"
+                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold text-slate-800"
               >
                 {content.navIntro}
               </a>
@@ -1262,7 +1260,7 @@ export default function LandingPage() {
               <a
                 href="#about"
                 onClick={closeMobileMenu}
-                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold text-slate-800 transition-colors dark:bg-white/10 dark:text-white"
+                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold text-slate-800"
               >
                 {content.navAbout}
               </a>
@@ -1319,8 +1317,8 @@ export default function LandingPage() {
         </div>
       )}
 
-      <section id="intro" className="relative overflow-hidden bg-white transition-colors duration-300 dark:bg-[#050711]">
-       <div className="absolute left-1/2 top-0 h-[520px] w-[920px] -translate-x-1/2 rounded-full bg-violet-200/40 blur-3xl dark:bg-violet-700/20" />
+      <section id="intro" className="relative overflow-hidden bg-white">
+       <div className="absolute left-1/2 top-0 h-[520px] w-[920px] -translate-x-1/2 rounded-full bg-violet-200/40 blur-3xl" />
 
         <div className="relative mx-auto max-w-7xl px-5 py-20 text-center lg:px-8 lg:py-28">
           <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-black text-violet-800">
@@ -1328,11 +1326,11 @@ export default function LandingPage() {
             {content.heroBadge}
           </div>
 
-          <h1 className="mx-auto max-w-5xl text-4xl font-black leading-[1.08] tracking-tight text-slate-950 dark:text-white md:text-6xl">
+          <h1 className="mx-auto max-w-5xl text-4xl font-black leading-[1.08] tracking-tight text-slate-950 md:text-6xl">
             {content.heroTitle}
           </h1>
 
-          <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-slate-600 dark:text-slate-300 md:text-xl">
+          <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-slate-600 md:text-xl">
             {content.heroText}
           </p>
 
@@ -1484,7 +1482,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-     <section className="bg-[#f8fafc] py-20 transition-colors duration-300 dark:bg-[#070a16]">
+     <section className="bg-[#f8fafc] py-20">
         <div className="mx-auto max-w-7xl px-5 lg:px-8">
           <div className="mx-auto mb-12 max-w-4xl text-center">
             <div className="mb-4 text-sm font-black uppercase tracking-[0.25em] text-violet-700">
@@ -1620,17 +1618,17 @@ export default function LandingPage() {
             return (
               <div
                 key={item.title}
-                className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/60 transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.06] dark:shadow-black/30"
+                className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/60"
               >
                 <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-100 text-violet-700">
                   <Icon size={28} />
                 </div>
 
-                <h3 className="text-xl font-black text-slate-950 dark:text-white">
+                <h3 className="text-xl font-black text-slate-950">
                   {item.title}
                 </h3>
 
-                <p className="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-300">
+                <p className="mt-2 text-sm leading-7 text-slate-600">
                   {item.text}
                 </p>
               </div>
@@ -1639,7 +1637,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-    <section id="pricing" className="bg-slate-100 py-20 transition-colors duration-300 dark:bg-[#070a16]">
+    <section id="pricing" className="bg-slate-100 py-20">
         <div className="mx-auto max-w-7xl px-5 lg:px-8">
           <div className="mb-10">
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white px-4 py-2 text-sm font-black text-violet-800">
@@ -1671,8 +1669,8 @@ export default function LandingPage() {
                   key={plan.id}
                   className={`flex min-h-[620px] flex-col rounded-[2rem] border p-6 shadow-xl transition ${
                     plan.highlighted
-                     ? 'border-violet-300 bg-white shadow-violet-200/70 dark:border-violet-500/40 dark:bg-white/[0.08] dark:shadow-black/30'
-: 'border-slate-200 bg-white shadow-slate-200/70 dark:border-white/10 dark:bg-white/[0.06] dark:shadow-black/30'
+                     ? 'border-violet-300 bg-white shadow-violet-200/70'
+: 'border-slate-200 bg-white shadow-slate-200/70'
                   }`}
                 >
                   {plan.badge && (
@@ -1680,7 +1678,7 @@ export default function LandingPage() {
                       className={`mb-4 w-fit rounded-full px-3 py-1 text-xs font-black uppercase tracking-wide ${
                         plan.highlighted
                           ? 'bg-violet-100 text-violet-800'
-                          : 'bg-slate-100 text-slate-700 dark:text-slate-200'
+                          : 'bg-slate-100 text-slate-700'
                       }`}
                     >
                       {plan.badge}

@@ -74,7 +74,6 @@ export type Translation = {
     download: string;
     upload: string;
     language: string;
-    theme: string;
     profile: string;
     settings: string;
     logout: string;
@@ -163,7 +162,6 @@ const sk: Translation = {
     download: 'Stiahnuť',
     upload: 'Nahrať',
     language: 'Jazyk',
-    theme: 'Režim',
     profile: 'Profil',
     settings: 'Nastavenia',
     logout: 'Odhlásiť sa',
@@ -336,7 +334,6 @@ const en: Translation = {
     download: 'Download',
     upload: 'Upload',
     language: 'Language',
-    theme: 'Theme',
     profile: 'Profile',
     settings: 'Settings',
     logout: 'Log out',
@@ -427,7 +424,6 @@ const de: Translation = {
     download: 'Herunterladen',
     upload: 'Hochladen',
     language: 'Sprache',
-    theme: 'Design',
     profile: 'Profil',
     settings: 'Einstellungen',
     logout: 'Abmelden',
@@ -506,7 +502,6 @@ const pl: Translation = {
     download: 'Pobierz',
     upload: 'Prześlij',
     language: 'Język',
-    theme: 'Motyw',
     profile: 'Profil',
     settings: 'Ustawienia',
     logout: 'Wyloguj',
@@ -586,7 +581,6 @@ const hu: Translation = {
     download: 'Letöltés',
     upload: 'Feltöltés',
     language: 'Nyelv',
-    theme: 'Téma',
     profile: 'Profil',
     settings: 'Beállítások',
     logout: 'Kijelentkezés',

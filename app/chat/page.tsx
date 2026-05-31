@@ -3352,29 +3352,32 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
 
   return (
     <>
-      <style jsx global>{`
-        html,
-        body {
-          overflow: hidden;
-          background: #050711;
-        }
+<style jsx global>{`
+  html,
+  body {
+    width: 100%;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    background: #050711;
+  }
 
-        * {
-          scrollbar-width: none;
-          -ms-overflow-style: none;
-        }
+  * {
+    box-sizing: border-box;
+  }
 
-        *::-webkit-scrollbar {
-          width: 0 !important;
-          height: 0 !important;
-          display: none !important;
-        }
-      `}</style>
+  textarea,
+  input,
+  button,
+  select {
+    font-size: 16px;
+  }
+`}</style>
 
-      <div className="flex h-screen min-h-0 w-full overflow-hidden bg-[#050711] text-white">
-        <div className="mx-auto flex h-screen min-h-0 w-full max-w-[1500px] flex-col overflow-hidden px-4 py-3 md:px-8">
-          <header className="shrink-0 border-b border-white/10 pb-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex min-h-screen w-full overflow-x-hidden bg-[#050711] text-white">
+        <div className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col overflow-visible px-3 py-3 md:h-screen md:min-h-0 md:overflow-hidden md:px-8">
+          <header className="sticky top-0 z-30 shrink-0 border-b border-white/10 bg-[#050711]/95 pb-3 backdrop-blur">
+           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <button
                 type="button"
                 onClick={() => router.push('/dashboard')}
@@ -3421,8 +3424,8 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
             </div>
           </section>
 
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[30px] border border-white/10 bg-[#070a16] shadow-2xl shadow-black/30">
-            <div ref={scrollAreaRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4 md:px-8">
+          <div className="relative flex min-h-[calc(100vh-230px)] flex-1 flex-col overflow-hidden rounded-[24px] border border-white/10 bg-[#070a16] shadow-2xl shadow-black/30 md:min-h-0 md:rounded-[30px]">
+           <div ref={scrollAreaRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-4 pb-28 md:px-8 md:pb-4">
               {messages.length === 0 ? (
                 <div className="mx-auto flex min-h-full max-w-6xl flex-col justify-center py-4">
                   <div className="mb-5 text-center">
@@ -3471,11 +3474,11 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
 </div>
                 </div>
               ) : (
-                <div className="mx-auto max-w-5xl space-y-5 pb-2">
+                <div className="mx-auto w-full max-w-5xl space-y-4 pb-2">
                   {messages.map((message, index) => (
                     <div key={`${message.role}-${index}`} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                       <div
-                        className={`max-w-[85%] whitespace-pre-wrap rounded-3xl px-5 py-4 text-sm leading-7 shadow-lg ${
+                        className={`max-w-[92%] break-words whitespace-pre-wrap rounded-3xl px-4 py-3 text-sm leading-7 shadow-lg md:max-w-[85%] md:px-5 md:py-4 ${
                           message.role === 'user'
                             ? 'bg-violet-600 text-white shadow-violet-700/20'
                             : 'border border-white/10 bg-white/[0.065] text-slate-200 shadow-black/20'
@@ -3613,13 +3616,14 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
                   </button>
                 </div>
 
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    sendMessage();
-                  }}
-                  className="flex items-end gap-3"
-                >
+               <form
+  onSubmit={(event) => {
+    event.preventDefault();
+    sendMessage();
+  }}
+  className="flex items-end gap-2 md:gap-3"
+>
+                
                   <input ref={fileInputRef} type="file" accept={allowedFileAccept} multiple className="hidden" onChange={(event) => handleFiles(event.target.files)} />
 
                   <button
@@ -3643,7 +3647,7 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
                       }
                     }}
                     placeholder={attachedFiles.length > 0 ? 'Napíšte správu alebo odošlite len priložené dokumenty...' : 'Napíšte správu...'}
-                    className="min-h-[48px] max-h-[120px] flex-1 resize-none rounded-2xl bg-white/[0.035] px-4 py-3 text-base leading-6 text-white outline-none transition placeholder:text-slate-500 focus:bg-white/[0.06]"
+                    className="min-h-[52px] max-h-[150px] min-w-0 flex-1 resize-none rounded-2xl bg-white/[0.055] px-4 py-3 text-base font-semibold leading-6 text-white outline-none transition placeholder:text-slate-500 focus:bg-white/[0.08]"
                   />
 
                   <button
@@ -3793,7 +3797,7 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
                   </div>
                 </div>
 
-                <div className="grid min-h-0 flex-1 gap-5 overflow-hidden p-6 md:grid-cols-[1fr_330px]">
+               <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 md:grid-cols-[1fr_330px] md:gap-5 md:overflow-hidden md:p-6">
                   <textarea
                     ref={resultTextareaRef}
                     value={result}
@@ -3802,7 +3806,7 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
                       setCanvasText(event.target.value);
                     }}
                     onSelect={() => handleTextSelection('result')}
-                    className="min-h-[60vh] resize-none rounded-3xl border border-white/10 bg-black/20 p-6 text-sm leading-8 text-slate-100 outline-none focus:border-violet-400/60"
+                    className="min-h-[45vh] resize-none rounded-3xl border border-white/10 bg-black/20 p-4 text-sm leading-7 text-slate-100 outline-none focus:border-violet-400/60 md:min-h-[60vh] md:p-6 md:leading-8"
                   />
 
                   <div className="space-y-4 overflow-y-auto">

@@ -23,7 +23,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 const THEME_STORAGE_KEY = 'zedpera_theme';
 const LEGACY_THEME_STORAGE_KEY = 'zedpera-theme';
-const THEME_STYLE_ID = 'zedpera-global-force-light-dark-style';
+const THEME_STYLE_ID = 'zedpera-global-force-light-ui-style';
 
 function isTheme(value: unknown): value is Theme {
   return value === 'light' || value === 'dark';
@@ -73,31 +73,36 @@ function injectThemeStyle() {
 
   style.innerHTML = `
     /* =========================================================
-       ZEDPERA - FORCE GLOBAL THEME
+       ZEDPERA - FORCE GLOBAL LIGHT UI
        Cieľ:
-       - light režim = svetlé pozadie
-       - všetok text tmavý a kontrastný
-       - dark režim = tmavé pozadie a svetlý text
-       - prepísanie starých tmavých bg tried a bledých textov
+       - light režim = všetko svetlé
+       - text musí byť tmavý a kontrastný
+       - žiadne tmavé karty, modaly, boxy v light režime
+       - bočná lišta, dashboard, wizard, detail práce, história, všetko
     ========================================================= */
 
     html[data-theme='light'] {
       color-scheme: light;
 
       --zed-bg: #f4f7fb;
-      --zed-bg-2: #edf2f8;
+      --zed-bg-2: #eef3f8;
+      --zed-bg-3: #f8fafc;
+
       --zed-surface: #ffffff;
-      --zed-surface-2: #f8fafc;
-      --zed-surface-3: #eef2f7;
+      --zed-surface-2: #f8fbff;
+      --zed-surface-3: #eef4fb;
+      --zed-surface-4: #e9f0f8;
+
       --zed-sidebar: #f7f9fc;
       --zed-sidebar-active: #ffffff;
 
       --zed-border: #cbd5e1;
       --zed-border-strong: #94a3b8;
+      --zed-ring: rgba(124, 58, 237, 0.16);
 
       --zed-text: #020617;
       --zed-text-2: #0f172a;
-      --zed-muted: #1e293b;
+      --zed-text-3: #1e293b;
       --zed-soft: #334155;
       --zed-placeholder: #64748b;
 
@@ -109,7 +114,8 @@ function injectThemeStyle() {
       --zed-danger: #dc2626;
       --zed-info: #2563eb;
 
-      --zed-shadow: 0 10px 35px rgba(15, 23, 42, 0.10);
+      --zed-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      --zed-shadow-strong: 0 14px 38px rgba(15, 23, 42, 0.12);
     }
 
     html[data-theme='dark'] {
@@ -117,18 +123,23 @@ function injectThemeStyle() {
 
       --zed-bg: #050711;
       --zed-bg-2: #070a16;
+      --zed-bg-3: #0b1020;
+
       --zed-surface: #0b1020;
       --zed-surface-2: #10172a;
       --zed-surface-3: #151d33;
+      --zed-surface-4: #172038;
+
       --zed-sidebar: #050711;
       --zed-sidebar-active: #111827;
 
       --zed-border: rgba(255,255,255,0.12);
-      --zed-border-strong: rgba(255,255,255,0.22);
+      --zed-border-strong: rgba(255,255,255,0.20);
+      --zed-ring: rgba(139, 92, 246, 0.18);
 
       --zed-text: #ffffff;
       --zed-text-2: #f8fafc;
-      --zed-muted: #e2e8f0;
+      --zed-text-3: #e2e8f0;
       --zed-soft: #cbd5e1;
       --zed-placeholder: #94a3b8;
 
@@ -141,6 +152,7 @@ function injectThemeStyle() {
       --zed-info: #60a5fa;
 
       --zed-shadow: 0 14px 40px rgba(0, 0, 0, 0.42);
+      --zed-shadow-strong: 0 18px 48px rgba(0, 0, 0, 0.52);
     }
 
     html,
@@ -183,7 +195,7 @@ function injectThemeStyle() {
     }
 
     /* =========================================================
-       1. TEXTY - VŠETKO KONTRASTNÉ
+       1. GLOBÁLNY TMAVÝ A ZVÝRAZNENÝ TEXT
     ========================================================= */
 
     .theme-root :where(
@@ -216,6 +228,7 @@ function injectThemeStyle() {
       a
     ) {
       color: var(--zed-text-2) !important;
+      opacity: 1 !important;
     }
 
     html[data-theme='dark'] .theme-root :where(
@@ -230,16 +243,18 @@ function injectThemeStyle() {
       a
     ) {
       color: var(--zed-text-2) !important;
+      opacity: 1 !important;
     }
 
     .theme-root :where(h1, h2, h3, h4, h5, h6, strong, b) {
       color: var(--zed-text) !important;
       font-weight: 900 !important;
       letter-spacing: -0.01em;
+      opacity: 1 !important;
     }
 
     /* =========================================================
-       2. TAILWIND TEXT FARBY - PREPÍSAŤ
+       2. PREPÍSANIE BLEDÝCH TEXTOV
     ========================================================= */
 
     html[data-theme='light'] .theme-root [class*="text-slate-"],
@@ -247,9 +262,9 @@ function injectThemeStyle() {
     html[data-theme='light'] .theme-root [class*="text-zinc-"],
     html[data-theme='light'] .theme-root [class*="text-neutral-"],
     html[data-theme='light'] .theme-root [class*="text-stone-"] {
-      color: var(--zed-muted) !important;
+      color: var(--zed-text-3) !important;
       opacity: 1 !important;
-      font-weight: 700 !important;
+      font-weight: 750 !important;
     }
 
     html[data-theme='dark'] .theme-root [class*="text-slate-"],
@@ -259,23 +274,23 @@ function injectThemeStyle() {
     html[data-theme='dark'] .theme-root [class*="text-stone-"] {
       color: var(--zed-soft) !important;
       opacity: 1 !important;
-      font-weight: 700 !important;
+      font-weight: 750 !important;
     }
 
     html[data-theme='light'] .theme-root [class*="text-violet-"],
     html[data-theme='light'] .theme-root [class*="text-purple-"],
     html[data-theme='light'] .theme-root [class*="text-fuchsia-"] {
-      color: #5b21b6 !important;
-      font-weight: 800 !important;
+      color: #6d28d9 !important;
       opacity: 1 !important;
+      font-weight: 800 !important;
     }
 
     html[data-theme='dark'] .theme-root [class*="text-violet-"],
     html[data-theme='dark'] .theme-root [class*="text-purple-"],
     html[data-theme='dark'] .theme-root [class*="text-fuchsia-"] {
       color: #e9d5ff !important;
-      font-weight: 800 !important;
       opacity: 1 !important;
+      font-weight: 800 !important;
     }
 
     /* =========================================================
@@ -303,25 +318,27 @@ function injectThemeStyle() {
       select:disabled,
       [aria-disabled='true']
     ) {
-      opacity: 0.86 !important;
+      opacity: 0.92 !important;
       color: var(--zed-soft) !important;
       cursor: not-allowed !important;
       font-weight: 700 !important;
     }
 
     /* =========================================================
-       4. SVETLÉ POZADIA V LIGHT REŽIME
-       prepísanie starých tmavých backgroundov
+       4. LIGHT MODE - úplne všetko svetlé
     ========================================================= */
 
     html[data-theme='light'] .theme-root,
-    html[data-theme='light'] .dashboard-shell,
-    html[data-theme='light'] .dashboard-page,
     html[data-theme='light'] .theme-root main,
     html[data-theme='light'] .theme-root section,
-    html[data-theme='light'] .theme-root article {
-      background: transparent;
-      color: var(--zed-text);
+    html[data-theme='light'] .theme-root article,
+    html[data-theme='light'] .theme-root aside,
+    html[data-theme='light'] .theme-root nav,
+    html[data-theme='light'] .theme-root header,
+    html[data-theme='light'] .theme-root footer,
+    html[data-theme='light'] .theme-root form,
+    html[data-theme='light'] .theme-root dialog {
+      color: var(--zed-text) !important;
     }
 
     html[data-theme='light'] .theme-root [class*="bg-[#050711]"],
@@ -330,17 +347,24 @@ function injectThemeStyle() {
     html[data-theme='light'] .theme-root [class*="bg-[#020617]"],
     html[data-theme='light'] .theme-root [class*="bg-slate-950"],
     html[data-theme='light'] .theme-root [class*="bg-slate-900"],
+    html[data-theme='light'] .theme-root [class*="bg-slate-800"],
     html[data-theme='light'] .theme-root [class*="bg-gray-950"],
     html[data-theme='light'] .theme-root [class*="bg-gray-900"],
+    html[data-theme='light'] .theme-root [class*="bg-gray-800"],
     html[data-theme='light'] .theme-root [class*="bg-zinc-950"],
     html[data-theme='light'] .theme-root [class*="bg-zinc-900"],
+    html[data-theme='light'] .theme-root [class*="bg-zinc-800"],
+    html[data-theme='light'] .theme-root [class*="bg-neutral-950"],
+    html[data-theme='light'] .theme-root [class*="bg-neutral-900"],
     html[data-theme='light'] .theme-root [class*="bg-black"],
     html[data-theme='light'] .theme-root [class*="bg-black/"],
     html[data-theme='light'] .theme-root [class*="bg-violet-950"],
-    html[data-theme='light'] .theme-root [class*="bg-purple-950"] {
+    html[data-theme='light'] .theme-root [class*="bg-purple-950"],
+    html[data-theme='light'] .theme-root [class*="bg-indigo-950"] {
       background: var(--zed-surface) !important;
       color: var(--zed-text) !important;
-      box-shadow: var(--zed-shadow);
+      border-color: var(--zed-border) !important;
+      box-shadow: var(--zed-shadow) !important;
     }
 
     html[data-theme='light'] .theme-root [class*="bg-white/"],
@@ -356,9 +380,45 @@ function injectThemeStyle() {
     html[data-theme='light'] .theme-root [class*="bg-zinc-200"],
     html[data-theme='light'] .theme-root [class*="bg-neutral-50"],
     html[data-theme='light'] .theme-root [class*="bg-neutral-100"],
-    html[data-theme='light'] .theme-root [class*="bg-neutral-200"] {
+    html[data-theme='light'] .theme-root [class*="bg-neutral-200"],
+    html[data-theme='light'] .theme-root [class*="bg-violet-50"],
+    html[data-theme='light'] .theme-root [class*="bg-purple-50"],
+    html[data-theme='light'] .theme-root [class*="bg-indigo-50"] {
       background: var(--zed-surface-2) !important;
       color: var(--zed-text) !important;
+      border-color: var(--zed-border) !important;
+    }
+
+    /* Tmavé karty a detail boxy - ich obsah tiež tmavý */
+    html[data-theme='light'] .theme-root [class*="bg-[#050711]"] *,
+    html[data-theme='light'] .theme-root [class*="bg-[#070a16]"] *,
+    html[data-theme='light'] .theme-root [class*="bg-[#0b1020]"] *,
+    html[data-theme='light'] .theme-root [class*="bg-[#020617]"] *,
+    html[data-theme='light'] .theme-root [class*="bg-slate-950"] *,
+    html[data-theme='light'] .theme-root [class*="bg-slate-900"] *,
+    html[data-theme='light'] .theme-root [class*="bg-slate-800"] *,
+    html[data-theme='light'] .theme-root [class*="bg-gray-950"] *,
+    html[data-theme='light'] .theme-root [class*="bg-gray-900"] *,
+    html[data-theme='light'] .theme-root [class*="bg-gray-800"] *,
+    html[data-theme='light'] .theme-root [class*="bg-zinc-950"] *,
+    html[data-theme='light'] .theme-root [class*="bg-zinc-900"] *,
+    html[data-theme='light'] .theme-root [class*="bg-zinc-800"] *,
+    html[data-theme='light'] .theme-root [class*="bg-neutral-950"] *,
+    html[data-theme='light'] .theme-root [class*="bg-neutral-900"] * {
+      color: var(--zed-text-2) !important;
+      opacity: 1 !important;
+    }
+
+    /* Gradienty a jemné highlight bloky */
+    html[data-theme='light'] .theme-root [class*="from-violet-"],
+    html[data-theme='light'] .theme-root [class*="from-purple-"],
+    html[data-theme='light'] .theme-root [class*="from-fuchsia-"],
+    html[data-theme='light'] .theme-root [class*="from-indigo-"],
+    html[data-theme='light'] .theme-root [class*="to-violet-"],
+    html[data-theme='light'] .theme-root [class*="to-purple-"],
+    html[data-theme='light'] .theme-root [class*="to-fuchsia-"],
+    html[data-theme='light'] .theme-root [class*="to-indigo-"] {
+      border-color: #d8b4fe !important;
     }
 
     /* =========================================================
@@ -394,27 +454,55 @@ function injectThemeStyle() {
       background: var(--zed-sidebar-active) !important;
       color: var(--zed-text) !important;
       border-color: var(--zed-border) !important;
-      box-shadow: var(--zed-shadow);
+      box-shadow: var(--zed-shadow) !important;
     }
 
     /* =========================================================
-       6. KARTY, SURFACES, BOXES
+       6. KARTY, BOXES, SURFACES, WIZARD BLOKY
     ========================================================= */
 
     .theme-root .dashboard-surface,
     .theme-root .card,
-    .theme-root [data-card='true'] {
+    .theme-root [data-card='true'],
+    .theme-root [class*="rounded-"][class*="border"],
+    .theme-root [class*="shadow"] {
+      border-color: var(--zed-border) !important;
+    }
+
+    html[data-theme='light'] .theme-root .dashboard-surface,
+    html[data-theme='light'] .theme-root .card,
+    html[data-theme='light'] .theme-root [data-card='true'] {
       background: var(--zed-surface) !important;
       color: var(--zed-text) !important;
       border-color: var(--zed-border) !important;
-      box-shadow: var(--zed-shadow);
+      box-shadow: var(--zed-shadow) !important;
     }
 
-    .theme-root .dashboard-surface-soft,
-    .theme-root [data-surface='soft'] {
+    html[data-theme='light'] .theme-root .dashboard-surface-soft,
+    html[data-theme='light'] .theme-root [data-surface='soft'] {
       background: var(--zed-surface-2) !important;
       color: var(--zed-text) !important;
       border-color: var(--zed-border) !important;
+      box-shadow: none !important;
+    }
+
+    /* Pomoc pre modaly a detail práce */
+    html[data-theme='light'] .theme-root [role='dialog'],
+    html[data-theme='light'] .theme-root dialog,
+    html[data-theme='light'] .theme-root [class*="modal"],
+    html[data-theme='light'] .theme-root [class*="Dialog"] {
+      background: var(--zed-surface) !important;
+      color: var(--zed-text) !important;
+      border-color: var(--zed-border) !important;
+      box-shadow: var(--zed-shadow-strong) !important;
+    }
+
+    html[data-theme='light'] .theme-root [role='dialog'] *,
+    html[data-theme='light'] .theme-root dialog *,
+    html[data-theme='light'] .theme-root [class*="modal"] *,
+    html[data-theme='light'] .theme-root [class*="Dialog"] * {
+      color: var(--zed-text-2) !important;
+      opacity: 1 !important;
     }
 
     /* =========================================================
@@ -430,12 +518,14 @@ function injectThemeStyle() {
     .theme-root [class*="border-slate-"],
     .theme-root [class*="border-gray-"],
     .theme-root [class*="border-zinc-"],
-    .theme-root [class*="border-neutral-"] {
+    .theme-root [class*="border-neutral-"],
+    .theme-root [class*="border-violet-"],
+    .theme-root [class*="border-purple-"] {
       border-color: var(--zed-border) !important;
     }
 
     /* =========================================================
-       8. INPUTS / PLACEHOLDERS
+       8. INPUTY / PLACEHOLDERY / TEXTAREA
     ========================================================= */
 
     .theme-root input,
@@ -460,11 +550,11 @@ function injectThemeStyle() {
     .theme-root select:focus {
       outline: none !important;
       border-color: var(--zed-primary) !important;
-      box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.16) !important;
+      box-shadow: 0 0 0 4px var(--zed-ring) !important;
     }
 
     /* =========================================================
-       9. BUTTONS
+       9. BUTTONY
     ========================================================= */
 
     .theme-root button,
@@ -480,7 +570,7 @@ function injectThemeStyle() {
       color: var(--zed-text) !important;
     }
 
-    /* Farebné CTA nech ostanú výrazné */
+    /* Farebné CTA tlačidlá ostávajú biele */
     .theme-root [class*="bg-violet-"],
     .theme-root [class*="bg-purple-"],
     .theme-root [class*="bg-fuchsia-"],
@@ -491,7 +581,6 @@ function injectThemeStyle() {
     .theme-root [class*="from-purple-"],
     .theme-root [class*="to-fuchsia-"],
     .theme-root [class*="to-violet-"] {
-      color: #ffffff !important;
       font-weight: 900 !important;
     }
 
@@ -509,8 +598,15 @@ function injectThemeStyle() {
       font-weight: 900 !important;
     }
 
+    /* Bledé tlačidlá v light mode nech sú svetlé a čitateľné */
+    html[data-theme='light'] .theme-root button:not([class*="bg-violet"]):not([class*="bg-purple"]):not([class*="bg-fuchsia"]):not([class*="bg-blue"]):not([class*="bg-red"]):not([class*="bg-emerald"]) {
+      background: var(--zed-surface) !important;
+      color: var(--zed-text) !important;
+      border-color: var(--zed-border) !important;
+    }
+
     /* =========================================================
-       10. TABLES / MODALS / POPUPS
+       10. TABUĽKY / MODALY / POPUPY
     ========================================================= */
 
     .theme-root table {
@@ -532,12 +628,13 @@ function injectThemeStyle() {
     html[data-theme='light'] .theme-root [class*="fixed inset-0"][class*="bg-black"],
     html[data-theme='light'] .theme-root [class*="bg-black/80"],
     html[data-theme='light'] .theme-root [class*="bg-black/70"],
-    html[data-theme='light'] .theme-root [class*="bg-black/60"] {
-      background: rgba(15, 23, 42, 0.20) !important;
+    html[data-theme='light'] .theme-root [class*="bg-black/60"],
+    html[data-theme='light'] .theme-root [class*="bg-black/50"] {
+      background: rgba(148, 163, 184, 0.18) !important;
     }
 
     /* =========================================================
-       11. SVG ICONS
+       11. SVG IKONY
     ========================================================= */
 
     .theme-root svg {
@@ -548,7 +645,7 @@ function injectThemeStyle() {
     }
 
     html[data-theme='light'] .theme-root svg {
-      color: var(--zed-muted) !important;
+      color: var(--zed-text-3) !important;
     }
 
     html[data-theme='dark'] .theme-root svg {
@@ -593,7 +690,7 @@ function injectThemeStyle() {
     }
 
     /* =========================================================
-       13. TEXT SELECTION
+       13. SELECTION
     ========================================================= */
 
     html[data-theme='light'] ::selection {
@@ -607,7 +704,7 @@ function injectThemeStyle() {
     }
 
     /* =========================================================
-       14. POMOCNÉ TRIEDY
+       14. HELPER TRIEDY
     ========================================================= */
 
     .force-readable,
@@ -616,9 +713,28 @@ function injectThemeStyle() {
     }
 
     .dashboard-muted {
-      color: var(--zed-muted) !important;
+      color: var(--zed-text-3) !important;
       font-weight: 750 !important;
       opacity: 1 !important;
+    }
+
+    .dashboard-surface {
+      background: var(--zed-surface) !important;
+      color: var(--zed-text) !important;
+      border-color: var(--zed-border) !important;
+      box-shadow: var(--zed-shadow) !important;
+    }
+
+    .dashboard-surface-soft {
+      background: var(--zed-surface-2) !important;
+      color: var(--zed-text) !important;
+      border-color: var(--zed-border) !important;
+    }
+
+    .dashboard-sidebar {
+      background: var(--zed-sidebar) !important;
+      color: var(--zed-text) !important;
+      border-color: var(--zed-border) !important;
     }
   `;
 

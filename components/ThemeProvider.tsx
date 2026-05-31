@@ -23,7 +23,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 const THEME_STORAGE_KEY = 'zedpera_theme';
 const LEGACY_THEME_STORAGE_KEY = 'zedpera-theme';
-const THEME_STYLE_ID = 'zedpera-global-force-light-ui-style';
+const THEME_STYLE_ID = 'zedpera-global-force-light-ui-style-v3';
 
 function isTheme(value: unknown): value is Theme {
   return value === 'light' || value === 'dark';
@@ -687,6 +687,237 @@ function injectThemeStyle() {
     html[data-theme='dark'] .theme-root ::-webkit-scrollbar-thumb {
       background: #8b5cf6;
       border-radius: 999px;
+    }
+
+
+
+    /* =========================================================
+       12B. DETAIL PRÁCE / MODAL / PORTAL / BODY - FORCE LIGHT
+       Toto rieši tmavé boxy v detaile práce, ktoré sú často mimo .theme-root.
+    ========================================================= */
+
+    html[data-theme='light'] body {
+      background: #f4f7fb !important;
+      color: #020617 !important;
+    }
+
+    html[data-theme='light'] body :where(
+      [role='dialog'],
+      dialog,
+      [data-modal='true'],
+      [data-dialog='true'],
+      [data-radix-dialog-content],
+      [data-headlessui-state],
+      .modal,
+      .dialog,
+      .Dialog,
+      .ReactModal__Content
+    ) {
+      background: #ffffff !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 18px 50px rgba(15, 23, 42, 0.16) !important;
+    }
+
+    html[data-theme='light'] body :where(
+      [role='dialog'],
+      dialog,
+      [data-modal='true'],
+      [data-dialog='true'],
+      [data-radix-dialog-content],
+      .modal,
+      .dialog,
+      .Dialog,
+      .ReactModal__Content
+    ) :where(
+      div,
+      section,
+      article,
+      header,
+      footer,
+      form,
+      p,
+      span,
+      small,
+      label,
+      strong,
+      b,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6
+    ) {
+      color: #020617 !important;
+      opacity: 1 !important;
+    }
+
+    html[data-theme='light'] body [class*="bg-[#050711]"],
+    html[data-theme='light'] body [class*="bg-[#070a16]"],
+    html[data-theme='light'] body [class*="bg-[#0b1020]"],
+    html[data-theme='light'] body [class*="bg-[#020617]"],
+    html[data-theme='light'] body [class*="bg-[#111827]"],
+    html[data-theme='light'] body [class*="bg-slate-950"],
+    html[data-theme='light'] body [class*="bg-slate-900"],
+    html[data-theme='light'] body [class*="bg-slate-800"],
+    html[data-theme='light'] body [class*="bg-gray-950"],
+    html[data-theme='light'] body [class*="bg-gray-900"],
+    html[data-theme='light'] body [class*="bg-gray-800"],
+    html[data-theme='light'] body [class*="bg-zinc-950"],
+    html[data-theme='light'] body [class*="bg-zinc-900"],
+    html[data-theme='light'] body [class*="bg-zinc-800"],
+    html[data-theme='light'] body [class*="bg-neutral-950"],
+    html[data-theme='light'] body [class*="bg-neutral-900"],
+    html[data-theme='light'] body [class*="bg-neutral-800"],
+    html[data-theme='light'] body [class*="bg-black"],
+    html[data-theme='light'] body [class*="bg-black/"],
+    html[data-theme='light'] body [class*="bg-violet-950"],
+    html[data-theme='light'] body [class*="bg-purple-950"],
+    html[data-theme='light'] body [class*="bg-indigo-950"] {
+      background: #ffffff !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08) !important;
+    }
+
+    html[data-theme='light'] body [class*="bg-[#050711]"] *,
+    html[data-theme='light'] body [class*="bg-[#070a16]"] *,
+    html[data-theme='light'] body [class*="bg-[#0b1020]"] *,
+    html[data-theme='light'] body [class*="bg-[#020617]"] *,
+    html[data-theme='light'] body [class*="bg-[#111827]"] *,
+    html[data-theme='light'] body [class*="bg-slate-950"] *,
+    html[data-theme='light'] body [class*="bg-slate-900"] *,
+    html[data-theme='light'] body [class*="bg-slate-800"] *,
+    html[data-theme='light'] body [class*="bg-gray-950"] *,
+    html[data-theme='light'] body [class*="bg-gray-900"] *,
+    html[data-theme='light'] body [class*="bg-gray-800"] *,
+    html[data-theme='light'] body [class*="bg-zinc-950"] *,
+    html[data-theme='light'] body [class*="bg-zinc-900"] *,
+    html[data-theme='light'] body [class*="bg-zinc-800"] *,
+    html[data-theme='light'] body [class*="bg-neutral-950"] *,
+    html[data-theme='light'] body [class*="bg-neutral-900"] *,
+    html[data-theme='light'] body [class*="bg-neutral-800"] *,
+    html[data-theme='light'] body [class*="bg-black"] *,
+    html[data-theme='light'] body [class*="bg-black/"] * {
+      color: #020617 !important;
+      opacity: 1 !important;
+      font-weight: 800 !important;
+    }
+
+    html[data-theme='light'] body :where(
+      [class*="tracking"],
+      [class*="uppercase"],
+      label,
+      small
+    ) {
+      color: #1e293b !important;
+      opacity: 1 !important;
+      font-weight: 900 !important;
+    }
+
+    html[data-theme='light'] body :where(
+      p,
+      span,
+      div,
+      li,
+      td,
+      th,
+      a,
+      button
+    ) {
+      color: #0f172a !important;
+      opacity: 1 !important;
+    }
+
+    html[data-theme='light'] body :where(
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6,
+      strong,
+      b
+    ) {
+      color: #020617 !important;
+      opacity: 1 !important;
+      font-weight: 900 !important;
+    }
+
+    html[data-theme='light'] body [class*="rounded-"][class*="border"] {
+      border-color: #cbd5e1 !important;
+    }
+
+    html[data-theme='light'] body [class*="text-slate-"],
+    html[data-theme='light'] body [class*="text-gray-"],
+    html[data-theme='light'] body [class*="text-zinc-"],
+    html[data-theme='light'] body [class*="text-neutral-"],
+    html[data-theme='light'] body [class*="text-stone-"] {
+      color: #1e293b !important;
+      opacity: 1 !important;
+      font-weight: 800 !important;
+    }
+
+    html[data-theme='light'] body [class*="opacity-0"],
+    html[data-theme='light'] body [class*="opacity-5"],
+    html[data-theme='light'] body [class*="opacity-10"],
+    html[data-theme='light'] body [class*="opacity-20"],
+    html[data-theme='light'] body [class*="opacity-25"],
+    html[data-theme='light'] body [class*="opacity-30"],
+    html[data-theme='light'] body [class*="opacity-40"],
+    html[data-theme='light'] body [class*="opacity-50"],
+    html[data-theme='light'] body [class*="opacity-60"],
+    html[data-theme='light'] body [class*="opacity-70"],
+    html[data-theme='light'] body [class*="opacity-75"] {
+      opacity: 1 !important;
+    }
+
+    html[data-theme='light'] body input,
+    html[data-theme='light'] body textarea,
+    html[data-theme='light'] body select {
+      background: #ffffff !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      font-weight: 800 !important;
+    }
+
+    html[data-theme='light'] body input::placeholder,
+    html[data-theme='light'] body textarea::placeholder {
+      color: #475569 !important;
+      opacity: 1 !important;
+      font-weight: 750 !important;
+    }
+
+    html[data-theme='light'] body [class*="bg-red-"],
+    html[data-theme='light'] body [class*="bg-red-"] * {
+      color: #ffffff !important;
+      background-color: #ef4444 !important;
+      font-weight: 900 !important;
+    }
+
+    html[data-theme='light'] body [class*="bg-violet-"],
+    html[data-theme='light'] body [class*="bg-purple-"],
+    html[data-theme='light'] body [class*="bg-fuchsia-"],
+    html[data-theme='light'] body [class*="bg-blue-"],
+    html[data-theme='light'] body [class*="from-violet-"],
+    html[data-theme='light'] body [class*="from-purple-"],
+    html[data-theme='light'] body [class*="to-fuchsia-"],
+    html[data-theme='light'] body [class*="to-violet-"] {
+      color: #ffffff !important;
+      font-weight: 900 !important;
+    }
+
+    html[data-theme='light'] body [class*="bg-violet-"] *,
+    html[data-theme='light'] body [class*="bg-purple-"] *,
+    html[data-theme='light'] body [class*="bg-fuchsia-"] *,
+    html[data-theme='light'] body [class*="bg-blue-"] *,
+    html[data-theme='light'] body [class*="from-violet-"] *,
+    html[data-theme='light'] body [class*="from-purple-"] *,
+    html[data-theme='light'] body [class*="to-fuchsia-"] *,
+    html[data-theme='light'] body [class*="to-violet-"] * {
+      color: #ffffff !important;
+      font-weight: 900 !important;
     }
 
     /* =========================================================

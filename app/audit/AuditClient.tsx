@@ -19,6 +19,8 @@ type AuditPayload = {
   language: string;
   citationStyle: string;
   text: string;
+  auditDate: string;
+  currentYear: number;
 };
 
 type AuditApiResponse = {
@@ -52,6 +54,24 @@ const CITATION_STYLES = ['ISO 690', 'APA 7', 'Harvard', 'Chicago', 'MLA'];
 const MIN_TEXT_LENGTH = 300;
 const MAX_TEXT_LENGTH = 25000;
 const AUDIT_END_MARKER = 'KONIEC AUDITU';
+
+// ================= DATE HELPERS =================
+
+function getCurrentAuditDateInfo() {
+  const now = new Date();
+
+  const auditDate = new Intl.DateTimeFormat('sk-SK', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(now);
+
+  return {
+    auditDate,
+    currentYear: now.getFullYear(),
+    isoDate: now.toISOString(),
+  };
+}
 
 // ================= CLEAN HELPERS =================
 
@@ -134,7 +154,9 @@ function removeBadAuditStart(value: string) {
 }
 
 function removeEndMarker(value: string) {
-  return cleanBrokenEncoding(value).replace(new RegExp(`\\s*${AUDIT_END_MARKER}\\s*$`, 'i'), '').trim();
+  return cleanBrokenEncoding(value)
+    .replace(new RegExp(`\\s*${AUDIT_END_MARKER}\\s*$`, 'i'), '')
+    .trim();
 }
 
 function hasAuditEndMarker(value: string) {
@@ -157,12 +179,16 @@ function buildCleanAuditResult({
   language,
   citationStyle,
   rawResult,
+  auditDate,
+  currentYear,
 }: {
   title: string;
   workType: string;
   language: string;
   citationStyle: string;
   rawResult: string;
+  auditDate: string;
+  currentYear: number;
 }) {
   const cleaned = removeEndMarker(removeBadAuditStart(rawResult));
 
@@ -174,6 +200,8 @@ Audit kvality práce: ${safeTitle}
 Typ práce: ${workType}
 Jazyk práce: ${language}
 Citačný štýl: ${citationStyle}
+Dátum auditu: ${auditDate}
+Referenčný aktuálny rok: ${currentYear}
 
 ${cleaned}
 `.trim();
@@ -192,6 +220,17 @@ KRITICKÉ PRAVIDLÁ:
 6. Píš čisto, formálne a odborne po slovensky.
 7. Výstup nesmie byť príliš dlhý. Každý bod píš stručne, ale konkrétne.
 8. Pri časti "Ukážky upravených viet" uveď maximálne 5 upravených viet, aby sa výstup neodsekol.
+9. Pri kontrole rokov a časových údajov používaj výhradne reálny dátum auditu uvedený nižšie.
+10. Aktuálny rok je ${payload.currentYear}. Roky menšie alebo rovné ${payload.currentYear} nikdy neoznačuj ako budúcnosť.
+11. Rok ${payload.currentYear} je aktuálny rok, nie budúcnosť.
+12. Roky 2025 a 2026 neoznačuj automaticky ako budúce roky. Posudzuj ich podľa aktuálneho roka ${payload.currentYear}.
+13. Ako budúce označ iba roky väčšie ako ${payload.currentYear}.
+14. Ak sa v práci nachádzajú roky 2025 alebo 2026, nepíš, že ide o budúcnosť, ak aktuálny rok je ${payload.currentYear} alebo vyšší.
+15. Neupozorňuj na rok ako chybný len preto, že je vyšší než tvoj interný tréningový dátum.
+
+REFERENČNÝ DÁTUM AUDITU:
+Dátum auditu: ${payload.auditDate}
+Aktuálny rok: ${payload.currentYear}
 
 ÚDAJE O PRÁCI:
 Názov práce: ${payload.title || 'Neuvedené'}
@@ -256,6 +295,12 @@ Odporúčané:
 13. Technické upozornenie
 Ak text obsahoval poškodené znaky alebo nečitateľné časti, uveď to tu. Ak nie, napíš, že technické problémy neboli zistené.
 
+14. Kontrola časových údajov
+Skontroluj roky, dátumy a časové formulácie v texte. Použi dátum auditu ${payload.auditDate} a aktuálny rok ${payload.currentYear}.
+Roky menšie alebo rovné ${payload.currentYear} nepovažuj za budúcnosť.
+Ako budúcnosť označ iba roky väčšie ako ${payload.currentYear}.
+Ak nie sú zistené problémy s časovými údajmi, napíš: Časové údaje sú posúdené podľa aktuálneho dátumu auditu a nebol zistený problém s budúcimi rokmi.
+
 Na úplný koniec napíš presne:
 ${AUDIT_END_MARKER}
 `.trim();
@@ -272,6 +317,8 @@ export default function AuditClient() {
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
   const [cleanedInfo, setCleanedInfo] = useState('');
+
+  const auditReferenceDate = useMemo(() => getCurrentAuditDateInfo(), []);
 
   const trimmedText = cleanBrokenEncoding(text).trim();
 
@@ -313,7 +360,7 @@ export default function AuditClient() {
     setCleanedInfo(
       oldLength !== cleaned.length
         ? 'Text bol vyčistený od poškodených znakov a neviditeľných symbolov.'
-        : 'Text bol skontrolovaný. Nenašli sa výrazné poškodené znaky.'
+        : 'Text bol skontrolovaný. Nenašli sa výrazné poškodené znaky.',
     );
   }
 
@@ -332,9 +379,11 @@ export default function AuditClient() {
 
     if (trimmedText.length > MAX_TEXT_LENGTH) {
       setWarning(
-        `Text je veľmi dlhý. Do auditu sa odoslalo prvých ${MAX_TEXT_LENGTH} znakov, aby sa výstup neodsekol. Pre kompletný audit odporúčam kontrolovať text po kapitolách.`
+        `Text je veľmi dlhý. Do auditu sa odoslalo prvých ${MAX_TEXT_LENGTH} znakov, aby sa výstup neodsekol. Pre kompletný audit odporúčam kontrolovať text po kapitolách.`,
       );
     }
+
+    const freshAuditDate = getCurrentAuditDateInfo();
 
     const payload: AuditPayload = {
       title: cleanBrokenEncoding(title.trim()),
@@ -342,6 +391,8 @@ export default function AuditClient() {
       language,
       citationStyle,
       text: cleanedInputText,
+      auditDate: freshAuditDate.auditDate,
+      currentYear: freshAuditDate.currentYear,
     };
 
     const instruction = buildAuditInstruction(payload);
@@ -355,6 +406,17 @@ export default function AuditClient() {
       outputFormat: 'complete_clean_word_text',
       requireEndMarker: AUDIT_END_MARKER,
       maxOutputTokens: 3500,
+
+      // DÔLEŽITÉ PRE API:
+      // Server môže tieto hodnoty použiť aj vo vlastnom systémovom prompte.
+      auditReferenceDate: freshAuditDate.auditDate,
+      auditReferenceIsoDate: freshAuditDate.isoDate,
+      auditCurrentYear: freshAuditDate.currentYear,
+      temporalValidation: {
+        currentYear: freshAuditDate.currentYear,
+        auditDate: freshAuditDate.auditDate,
+        futureYearRule: `Ako budúcnosť označ iba roky väčšie ako ${freshAuditDate.currentYear}. Roky menšie alebo rovné ${freshAuditDate.currentYear} nie sú budúcnosť.`,
+      },
     };
 
     const controller = new AbortController();
@@ -381,7 +443,7 @@ export default function AuditClient() {
         throw new Error(
           data.error ||
             data.message ||
-            `Audit zlyhal. Server vrátil chybu ${res.status}.`
+            `Audit zlyhal. Server vrátil chybu ${res.status}.`,
         );
       }
 
@@ -393,7 +455,7 @@ export default function AuditClient() {
 
       if (!hasAuditEndMarker(rawAuditResult)) {
         setWarning(
-          'Audit sa pravdepodobne neukončil úplne. Zvýš maxTokens v /api/audit alebo skontroluj, či server neukončuje odpoveď predčasne.'
+          'Audit sa pravdepodobne neukončil úplne. Zvýš maxTokens v /api/audit alebo skontroluj, či server neukončuje odpoveď predčasne.',
         );
       }
 
@@ -403,6 +465,8 @@ export default function AuditClient() {
         language: payload.language,
         citationStyle: payload.citationStyle,
         rawResult: rawAuditResult,
+        auditDate: payload.auditDate,
+        currentYear: payload.currentYear,
       });
 
       setResult(cleanedResult);
@@ -462,6 +526,11 @@ export default function AuditClient() {
                 <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-300">
                   Odborné hodnotenie akademickej práce, logiky, štruktúry,
                   metodológie, citácií, argumentácie a jazykového štýlu.
+                </p>
+
+                <p className="mt-2 text-xs font-semibold text-emerald-200">
+                  Dátum auditu: {auditReferenceDate.auditDate} · Aktuálny rok:{' '}
+                  {auditReferenceDate.currentYear}
                 </p>
               </div>
             </div>

@@ -89,6 +89,17 @@ type AuditRequest = {
   outputFormat?: string;
   requireEndMarker?: string;
   maxOutputTokens?: number;
+
+  auditDate?: string;
+  auditReferenceDate?: string;
+  auditReferenceIsoDate?: string;
+  auditCurrentYear?: number;
+  currentYear?: number;
+  temporalValidation?: {
+    currentYear?: number;
+    auditDate?: string;
+    futureYearRule?: string;
+  };
 };
 
 type CitationAuditResult = {
@@ -105,6 +116,67 @@ type AttachmentRelevanceResult = {
   matchedKeywords: string[];
   warning?: string;
 };
+
+type AuditDateInfo = {
+  auditDate: string;
+  auditIsoDate: string;
+  currentYear: number;
+};
+
+function getAuditDateInfo(body?: AuditRequest): AuditDateInfo {
+  const now = new Date();
+
+  const serverCurrentYear = now.getFullYear();
+
+  const requestedYear =
+    Number(body?.auditCurrentYear) ||
+    Number(body?.currentYear) ||
+    Number(body?.temporalValidation?.currentYear);
+
+  const currentYear =
+    Number.isFinite(requestedYear) && requestedYear >= 2020
+      ? Math.max(serverCurrentYear, Math.round(requestedYear))
+      : serverCurrentYear;
+
+  const auditDate =
+    cleanText(body?.auditReferenceDate) ||
+    cleanText(body?.auditDate) ||
+    cleanText(body?.temporalValidation?.auditDate) ||
+    new Intl.DateTimeFormat('sk-SK', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(now);
+
+  const auditIsoDate = body?.auditReferenceIsoDate || now.toISOString();
+
+  return {
+    auditDate,
+    auditIsoDate,
+    currentYear,
+  };
+}
+
+function buildDateRules(dateInfo: AuditDateInfo): string {
+  return `
+REFERENČNÝ DÁTUM AUDITU:
+- Dátum auditu: ${dateInfo.auditDate}
+- ISO dátum auditu: ${dateInfo.auditIsoDate}
+- Aktuálny rok: ${dateInfo.currentYear}
+
+PRAVIDLÁ PRE KONTROLU ROKOV A ČASOVÝCH ÚDAJOV:
+1. Pri hodnotení rokov, dátumov a časových formulácií používaj výhradne referenčný dátum auditu uvedený vyššie.
+2. Aktuálny rok je ${dateInfo.currentYear}.
+3. Roky menšie alebo rovné ${dateInfo.currentYear} nikdy neoznačuj ako budúcnosť.
+4. Ako budúce označ iba roky väčšie ako ${dateInfo.currentYear}.
+5. Rok ${dateInfo.currentYear} je aktuálny rok, nie budúcnosť.
+6. Roky 2025 a 2026 neoznačuj automaticky ako budúcnosť. Posudzuj ich podľa aktuálneho roka ${dateInfo.currentYear}.
+7. Ak je aktuálny rok ${dateInfo.currentYear}, potom každý rok menší alebo rovný ${dateInfo.currentYear} považuj za minulý alebo aktuálny, nie budúci.
+8. Neupozorňuj na rok ako chybný iba preto, že je vyšší než interný tréningový dátum modelu.
+9. Ak text obsahuje roky 2025 alebo 2026 a aktuálny rok je ${dateInfo.currentYear} alebo vyšší, nepíš, že ide o budúce roky.
+10. Ak nie je zistený skutočný problém s časovými údajmi, napíš, že časové údaje boli posúdené podľa aktuálneho dátumu auditu a nebol zistený problém s budúcimi rokmi.
+`.trim();
+}
 
 function cleanText(value: unknown): string {
   return String(value || '')
@@ -671,7 +743,13 @@ ${allWarnings.map((warning, index) => `${index + 1}. ${warning}`).join('\n')}
 `.trim();
 }
 
-function buildProfileBlock(profile: SavedProfile | null, title: string, workType: string, language: string, citationStyle: string): string {
+function buildProfileBlock(
+  profile: SavedProfile | null,
+  title: string,
+  workType: string,
+  language: string,
+  citationStyle: string,
+): string {
   return `
 - ID profilu: ${profile?.id || 'nezadané'}
 - Názov práce: ${title}
@@ -709,6 +787,7 @@ function buildAuditPrompt({
   manualTextWasTruncated,
   citationAudit,
   attachmentRelevanceResults,
+  dateInfo,
 }: {
   text: string;
   attachmentsBlock: string;
@@ -723,10 +802,13 @@ function buildAuditPrompt({
   manualTextWasTruncated: boolean;
   citationAudit: CitationAuditResult;
   attachmentRelevanceResults: AttachmentRelevanceResult[];
+  dateInfo: AuditDateInfo;
 }): string {
   const profileBlock = buildProfileBlock(profile || null, title, workType, language, citationStyle);
 
   const automaticWarnings = buildVisibleWarnings(citationAudit, attachmentRelevanceResults);
+
+  const dateRules = buildDateRules(dateInfo);
 
   return `
 Si odborný akademický hodnotiteľ, metodológ, školiteľ a odborný korektor.
@@ -752,6 +834,10 @@ KRITICKÉ PRAVIDLÁ:
 16. Ak profil vyžaduje Chicago a text obsahuje APA citácie typu autor – rok, musíš na to jasne upozorniť.
 17. Ak príloha nesúvisí s profilom práce, musíš na to jasne upozorniť.
 18. Výstup musí byť klientsky čistý. Nepíš interné systémové poznámky.
+19. Pri kontrole rokov, dátumov a časových údajov musíš použiť reálny dátum auditu uvedený v časti "REFERENČNÝ DÁTUM AUDITU".
+20. Roky 2025 a 2026 neoznačuj automaticky ako budúcnosť. Ako budúcnosť označ iba roky väčšie ako aktuálny rok ${dateInfo.currentYear}.
+
+${dateRules}
 
 PROFIL PRÁCE:
 ${profileBlock}
@@ -854,6 +940,17 @@ Nevymýšľaj konkrétne bibliografické záznamy.
 === AKADEMICKÝ ŠTÝL ===
 Zhodnoť jazyk, formálnosť, odbornosť, terminológiu, štylistiku a zrozumiteľnosť.
 
+=== KONTROLA ČASOVÝCH ÚDAJOV ===
+Skontroluj roky, dátumy a časové formulácie v texte.
+Použi výhradne tieto hodnoty:
+- Dátum auditu: ${dateInfo.auditDate}
+- Aktuálny rok: ${dateInfo.currentYear}
+
+Roky menšie alebo rovné ${dateInfo.currentYear} nepovažuj za budúcnosť.
+Ako budúcnosť označ iba roky väčšie ako ${dateInfo.currentYear}.
+Roky 2025 a 2026 neoznačuj automaticky ako budúcnosť.
+Ak nie sú zistené problémy s časovými údajmi, napíš: Časové údaje sú posúdené podľa aktuálneho dátumu auditu a nebol zistený problém s budúcimi rokmi.
+
 === UKÁŽKY UPRAVENÝCH VIET ===
 Uveď maximálne 5 vzorových viet. Každú vetu uveď vo forme:
 Pôvodný problém:
@@ -870,6 +967,7 @@ Citácie:
 Akademický štýl:
 Odborná presnosť:
 Súlad s profilom:
+Časové údaje:
 Celkové skóre:
 
 === PRIORITA OPRÁV ===
@@ -887,7 +985,7 @@ ${AUDIT_END_MARKER}
 `.trim();
 }
 
-function buildSystemMessage(): string {
+function buildSystemMessage(dateInfo: AuditDateInfo): string {
   return `
 ${GLOBAL_ACADEMIC_SYSTEM_PROMPT || ''}
 
@@ -898,6 +996,14 @@ Nepíš email, oslovenie ani marketingový text.
 Nepíš interné technické inštrukcie.
 Nevymýšľaj zdroje.
 Vždy dokonči odpoveď koncovou značkou ${AUDIT_END_MARKER}.
+
+${buildDateRules(dateInfo)}
+
+Dôležité:
+Pri kontrole rokov nepoužívaj interný tréningový dátum modelu.
+Používaj iba reálny serverový dátum auditu.
+Roky 2025 a 2026 neoznačuj automaticky ako budúcnosť.
+Ako budúcnosť označ iba roky väčšie ako ${dateInfo.currentYear}.
 `.trim();
 }
 
@@ -921,6 +1027,8 @@ export async function POST(req: NextRequest) {
     }
 
     const body = (await req.json()) as AuditRequest;
+
+    const dateInfo = getAuditDateInfo(body);
 
     const profile = body.activeProfile || body.profile || null;
 
@@ -1003,6 +1111,7 @@ export async function POST(req: NextRequest) {
       manualTextWasTruncated: limitedManualText.truncated,
       citationAudit,
       attachmentRelevanceResults,
+      dateInfo,
     });
 
     const maxCompletionTokens = resolveMaxOutputTokens(body);
@@ -1016,7 +1125,7 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: 'system',
-          content: buildSystemMessage(),
+          content: buildSystemMessage(dateInfo),
         },
         {
           role: 'user',
@@ -1063,6 +1172,12 @@ export async function POST(req: NextRequest) {
       exportTypes: ['docx', 'pdf'],
       citationAudit,
       attachmentRelevanceResults,
+      dateAudit: {
+        auditDate: dateInfo.auditDate,
+        auditIsoDate: dateInfo.auditIsoDate,
+        currentYear: dateInfo.currentYear,
+        futureYearRule: `Ako budúcnosť sa označia iba roky väčšie ako ${dateInfo.currentYear}.`,
+      },
       meta: {
         checkType,
         outputType,
@@ -1070,6 +1185,9 @@ export async function POST(req: NextRequest) {
         title,
         workType,
         language,
+        auditDate: dateInfo.auditDate,
+        auditIsoDate: dateInfo.auditIsoDate,
+        currentYear: dateInfo.currentYear,
         textLength: rawText.length,
         usedTextLength: text.length,
         manualTextWasTruncated: limitedManualText.truncated,

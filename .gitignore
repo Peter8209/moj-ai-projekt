@@ -1,8 +1,10 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
-/node_modules
-/.pnp
+# =========================
+# Dependencies
+# =========================
+node_modules/
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -10,32 +12,131 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
+# =========================
+# Next.js / React build outputs
+# =========================
+.next/
+out/
+build/
+dist/
+.turbo/
+.vercel/
+.swc/
+.cache/
 
-# next.js
-/.next/
-/out/
+# =========================
+# Turbopack / Next cache
+# =========================
+.next/cache/
+.next/dev/
+.next/server/
+.next/static/
+.next/types/
 
-# production
-/build
+# =========================
+# Testing / coverage
+# =========================
+coverage/
+.nyc_output/
 
-# misc
-.DS_Store
-*.pem
+# =========================
+# TypeScript
+# =========================
+*.tsbuildinfo
+next-env.d.ts
 
-# debug
+# =========================
+# Environment files
+# IMPORTANT: do not commit secrets
+# =========================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+
+# =========================
+# Logs
+# =========================
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 .pnpm-debug.log*
+debug.log
 
-# env files (can opt-in for committing if needed)
-.env*
+# =========================
+# OS / editor files
+# =========================
+.DS_Store
+Thumbs.db
+Desktop.ini
 
-# vercel
-.vercel
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+.idea/
+*.swp
+*.swo
+
+# =========================
+# Certificates / keys
+# =========================
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# =========================
+# Local generated exports / documents
+# =========================
+exports/
+generated/
+downloads/
+tmp/
+temp/
+uploads/
+public/uploads/
+public/exports/
+
+*.pptx
+*.docx
+*.xlsx
+*.pdf
+*.zip
+*.rar
+*.7z
+
+# Ak chceš niektoré šablóny PDF/DOCX/PPTX commitovať, daj ich do špeciálneho priečinka:
+!templates/
+!templates/**/*.pptx
+!templates/**/*.docx
+!templates/**/*.xlsx
+!templates/**/*.pdf
+
+# =========================
+# Large media files
+# =========================
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.mp3
+*.wav
+
+# =========================
+# Supabase / local tools
+# =========================
+.supabase/
+supabase/.branches/
+supabase/.temp/
+
+# =========================
+# Package manager stores
+# =========================
+.pnpm-store/

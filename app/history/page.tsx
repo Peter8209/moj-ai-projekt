@@ -27,16 +27,21 @@ import {
 } from 'lucide-react';
 
 type RawHistoryItem = {
-  id?: string;
-  module?: string;
-  type?: string;
-  title?: string | null;
-  user_message?: string | null;
-  assistant_message?: string | null;
-  preview?: string | null;
-  content?: string | null;
-  result?: Record<string, unknown>;
-  created_at?: string;
+  id?: string | number;
+  module?: string | null;
+  type?: string | null;
+  title?: unknown;
+  user_message?: unknown;
+  assistant_message?: unknown;
+  preview?: unknown;
+  content?: unknown;
+  result?: unknown;
+  created_at?: string | null;
+  createdAt?: string | null;
+  updated_at?: string | null;
+  messages?: unknown;
+  role?: string | null;
+  [key: string]: unknown;
 };
 
 type HistoryItem = {
@@ -45,8 +50,15 @@ type HistoryItem = {
   title: string | null;
   user_message: string | null;
   assistant_message: string | null;
-  result?: Record<string, unknown>;
+  result?: unknown;
   created_at: string;
+};
+
+type ContinueChatMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
 };
 
 type ContinueChatContext = {
@@ -57,6 +69,10 @@ type ContinueChatContext = {
   assistant_message: string;
   created_at: string;
   source: 'history';
+  mode: 'auto-submit-history';
+  autoSubmit: true;
+  autoSubmitText: string;
+  messages: ContinueChatMessage[];
 };
 
 const CONTINUE_CHAT_STORAGE_KEY = 'zedpera_continue_chat_context';
@@ -135,6 +151,24 @@ function getModuleIcon(module: string) {
   return <MessageSquare className="h-5 w-5" />;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function cleanText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  return '';
+}
+
 function stringifyResultValue(value: unknown): string {
   if (value === null || value === undefined) return '';
 
@@ -151,10 +185,64 @@ function stringifyResultValue(value: unknown): string {
   }
 }
 
-function extractResultText(result?: Record<string, unknown>) {
-  if (!result) return '';
+function extractMessageText(messages: unknown, role?: 'user' | 'assistant') {
+  if (!Array.isArray(messages)) return '';
+
+  const normalizedRole = role ? role.toLowerCase() : '';
+
+  const matchingMessages = messages.filter((message) => {
+    if (!isRecord(message)) return !normalizedRole;
+
+    const messageRole = String(message.role || message.type || '').toLowerCase();
+
+    return normalizedRole ? messageRole === normalizedRole : true;
+  });
+
+  const sourceMessages = matchingMessages.length > 0 ? matchingMessages : messages;
+
+  return sourceMessages
+    .map((message) => {
+      if (typeof message === 'string') return message.trim();
+
+      if (!isRecord(message)) return '';
+
+      return (
+        cleanText(message.content) ||
+        cleanText(message.text) ||
+        cleanText(message.message) ||
+        cleanText(message.answer) ||
+        cleanText(message.output) ||
+        ''
+      );
+    })
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+}
+
+function extractTextFromUnknown(value: unknown, depth = 0): string {
+  if (value === null || value === undefined || depth > 6) return '';
+
+  const directText = cleanText(value);
+
+  if (directText) return directText;
+
+  if (Array.isArray(value)) {
+    const messagesText = extractMessageText(value);
+
+    if (messagesText) return messagesText;
+
+    return value
+      .map((item) => extractTextFromUnknown(item, depth + 1))
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
+  }
+
+  if (!isRecord(value)) return '';
 
   const priorityKeys = [
+    'assistant_message',
     'output',
     'text',
     'content',
@@ -166,49 +254,122 @@ function extractResultText(result?: Record<string, unknown>) {
     'protocol',
     'html',
     'markdown',
+    'body',
+    'value',
+    'data',
+    'items',
+    'history',
   ];
 
   for (const key of priorityKeys) {
-    const value = result[key];
+    const nestedText = extractTextFromUnknown(value[key], depth + 1);
 
-    if (typeof value === 'string' && value.trim()) {
-      return value;
-    }
+    if (nestedText) return nestedText;
   }
 
-  return stringifyResultValue(result);
+  const usefulValues = Object.entries(value)
+    .filter(([key]) => {
+      const normalizedKey = key.toLowerCase();
+
+      return ![
+        'id',
+        'uuid',
+        'user_id',
+        'created_at',
+        'createdat',
+        'updated_at',
+        'updatedat',
+        'module',
+        'type',
+        'title',
+      ].includes(normalizedKey);
+    })
+    .map(([, nestedValue]) => extractTextFromUnknown(nestedValue, depth + 1))
+    .filter(Boolean);
+
+  if (usefulValues.length > 0) {
+    return usefulValues.join('\n\n').trim();
+  }
+
+  return depth === 0 ? stringifyResultValue(value) : '';
+}
+
+function extractResultText(result?: unknown) {
+  return extractTextFromUnknown(result);
+}
+
+function extractUserText(item: RawHistoryItem) {
+  const messagesUserText = extractMessageText(item.messages, 'user');
+
+  return (
+    cleanText(item.user_message) ||
+    cleanText(item.prompt) ||
+    cleanText(item.input) ||
+    cleanText(item.question) ||
+    cleanText(item.query) ||
+    cleanText(item.request) ||
+    messagesUserText ||
+    ''
+  );
+}
+
+function extractAssistantText(item: RawHistoryItem) {
+  const messagesAssistantText = extractMessageText(item.messages, 'assistant');
+
+  return (
+    cleanText(item.assistant_message) ||
+    extractTextFromUnknown(item.content) ||
+    extractTextFromUnknown(item.result) ||
+    cleanText(item.output) ||
+    cleanText(item.answer) ||
+    cleanText(item.response) ||
+    cleanText(item.text) ||
+    messagesAssistantText ||
+    cleanText(item.preview) ||
+    ''
+  );
 }
 
 function normalizeHistoryItem(item: RawHistoryItem, index: number): HistoryItem {
   const module = normalizeModule(item.module || item.type);
-
-  const resultText = extractResultText(item.result);
-
-  const assistantMessage =
-    item.assistant_message ||
-    item.content ||
-    resultText ||
-    item.preview ||
-    '';
-
-  const userMessage =
-    item.user_message ||
-    item.preview ||
-    '';
+  const titleText = cleanText(item.title);
+  const userMessage = extractUserText(item);
+  const assistantMessage = extractAssistantText(item);
+  const createdAt =
+    cleanText(item.created_at) ||
+    cleanText(item.createdAt) ||
+    cleanText(item.updated_at) ||
+    new Date().toISOString();
 
   return {
-    id: String(item.id || `local-${index}-${Date.now()}`),
+    id: String(item.id || `local-${index}-${createdAt}`),
     module,
-    title: item.title || getModuleLabel(module),
+    title: titleText || getModuleLabel(module),
     user_message: userMessage,
     assistant_message: assistantMessage,
     result: item.result,
-    created_at: item.created_at || new Date().toISOString(),
+    created_at: createdAt,
   };
+}
+
+function extractRawHistoryItems(parsed: unknown): RawHistoryItem[] {
+  if (Array.isArray(parsed)) return parsed as RawHistoryItem[];
+
+  if (!isRecord(parsed)) return [];
+
+  if (Array.isArray(parsed.items)) return parsed.items as RawHistoryItem[];
+  if (Array.isArray(parsed.history)) return parsed.history as RawHistoryItem[];
+  if (Array.isArray(parsed.messages)) return parsed.messages as RawHistoryItem[];
+  if (Array.isArray(parsed.outputs)) return parsed.outputs as RawHistoryItem[];
+  if (Array.isArray(parsed.records)) return parsed.records as RawHistoryItem[];
+
+  return [parsed as RawHistoryItem];
 }
 
 function safelyParseLocalHistory(): RawHistoryItem[] {
   if (typeof window === 'undefined') return [];
+
+  const allItems: RawHistoryItem[] = [];
 
   for (const key of LOCAL_HISTORY_KEYS) {
     try {
@@ -217,24 +378,37 @@ function safelyParseLocalHistory(): RawHistoryItem[] {
       if (!raw) continue;
 
       const parsed = JSON.parse(raw);
+      const parsedItems = extractRawHistoryItems(parsed);
 
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
-
-      if (parsed && Array.isArray(parsed.items)) {
-        return parsed.items;
-      }
-
-      if (parsed && Array.isArray(parsed.history)) {
-        return parsed.history;
-      }
+      allItems.push(...parsedItems);
     } catch {
       // Pokračujeme ďalším lokálnym kľúčom.
     }
   }
 
-  return [];
+  const seen = new Set<string>();
+
+  return allItems.filter((item, index) => {
+    const createdAt =
+      cleanText(item.created_at) ||
+      cleanText(item.createdAt) ||
+      cleanText(item.updated_at) ||
+      '';
+
+    const key = [
+      cleanText(item.id) || `bez-id-${index}`,
+      normalizeModule(item.module || item.type),
+      cleanText(item.title),
+      createdAt,
+      extractUserText(item).slice(0, 120),
+      extractAssistantText(item).slice(0, 120),
+    ].join('|');
+
+    if (seen.has(key)) return false;
+
+    seen.add(key);
+    return true;
+  });
 }
 
 function removeItemFromLocalStorage(item: HistoryItem) {
@@ -254,8 +428,12 @@ function removeItemFromLocalStorage(item: HistoryItem) {
         if (rawId && rawId === item.id) return true;
 
         const rawModule = normalizeModule(rawItem.module || rawItem.type);
-        const rawTitle = rawItem.title || getModuleLabel(rawModule);
-        const rawCreatedAt = rawItem.created_at || '';
+        const rawTitle = cleanText(rawItem.title) || getModuleLabel(rawModule);
+        const rawCreatedAt =
+          cleanText(rawItem.created_at) ||
+          cleanText(rawItem.createdAt) ||
+          cleanText(rawItem.updated_at) ||
+          '';
 
         return (
           rawModule === item.module &&
@@ -273,7 +451,7 @@ function removeItemFromLocalStorage(item: HistoryItem) {
         continue;
       }
 
-      if (parsed && Array.isArray(parsed.items)) {
+      if (isRecord(parsed) && Array.isArray(parsed.items)) {
         const nextItems = parsed.items.filter((rawItem: RawHistoryItem) => {
           return !isSameItem(rawItem);
         });
@@ -289,7 +467,7 @@ function removeItemFromLocalStorage(item: HistoryItem) {
         continue;
       }
 
-      if (parsed && Array.isArray(parsed.history)) {
+      if (isRecord(parsed) && Array.isArray(parsed.history)) {
         const nextHistory = parsed.history.filter((rawItem: RawHistoryItem) => {
           return !isSameItem(rawItem);
         });
@@ -314,16 +492,18 @@ function filterItems(items: HistoryItem[], activeFilter: string) {
   return items.filter((item) => item.module === activeFilter);
 }
 
-function createContinueChatContext(item: HistoryItem): ContinueChatContext {
-  return {
-    id: item.id,
-    module: item.module,
-    title: item.title || getModuleLabel(item.module),
-    user_message: item.user_message || '',
-    assistant_message: item.assistant_message || '',
-    created_at: item.created_at,
-    source: 'history',
-  };
+function formatDate(value: string) {
+  try {
+    return new Date(value).toLocaleString('sk-SK', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return 'Neznámy dátum';
+  }
 }
 
 function getFullAssistantText(item: HistoryItem) {
@@ -335,7 +515,80 @@ function getFullAssistantText(item: HistoryItem) {
 
   if (resultText) return resultText;
 
+  const userText = item.user_message?.trim();
+
+  if (userText) return userText;
+
   return 'Bez uloženého výstupu.';
+}
+
+function createAutoSubmitHistoryPrompt(item: HistoryItem) {
+  const title = item.title || getModuleLabel(item.module);
+  const moduleLabel = getModuleLabel(item.module);
+  const userText = item.user_message?.trim();
+  const assistantText = getFullAssistantText(item).trim();
+
+  return [
+    'Pokračujeme v predchádzajúcej konverzácii z histórie.',
+    '',
+    `Názov: ${title}`,
+    `Modul: ${moduleLabel}`,
+    `Dátum: ${formatDate(item.created_at)}`,
+    '',
+    userText ? '=== PÔVODNÉ ZADANIE POUŽÍVATEĽA ===' : '',
+    userText || '',
+    userText ? '' : '',
+    '=== DOTERAJŠÍ VÝSTUP / KONTEXT ===',
+    assistantText && assistantText !== 'Bez uloženého výstupu.'
+      ? assistantText
+      : 'Výstup v histórii nebol uložený, pokračuj podľa dostupného zadania.',
+    '',
+    '=== NOVÁ INŠTRUKCIA ===',
+    'Pokračuj priamo na základe tejto histórie. Zachovaj kontext, nenúť používateľa znova klikať na odoslanie a nadviaž na predchádzajúci výstup.',
+  ]
+    .filter((part) => part !== '')
+    .join('\n');
+}
+
+function createContinueChatContext(item: HistoryItem): ContinueChatContext {
+  const userText = item.user_message?.trim() || '';
+  const assistantText = getFullAssistantText(item).trim();
+  const createdAt = item.created_at || new Date().toISOString();
+  const autoSubmitText = createAutoSubmitHistoryPrompt(item);
+
+  const messages: ContinueChatMessage[] = [];
+
+  if (userText) {
+    messages.push({
+      id: `${item.id}-history-user`,
+      role: 'user',
+      content: userText,
+      createdAt,
+    });
+  }
+
+  if (assistantText && assistantText !== 'Bez uloženého výstupu.') {
+    messages.push({
+      id: `${item.id}-history-assistant`,
+      role: 'assistant',
+      content: assistantText,
+      createdAt,
+    });
+  }
+
+  return {
+    id: item.id,
+    module: item.module,
+    title: item.title || getModuleLabel(item.module),
+    user_message: userText,
+    assistant_message: assistantText,
+    created_at: createdAt,
+    source: 'history',
+    mode: 'auto-submit-history',
+    autoSubmit: true,
+    autoSubmitText,
+    messages,
+  };
 }
 
 function createCardPreview(item: HistoryItem) {
@@ -373,20 +626,6 @@ function createFullReadableText(item: HistoryItem) {
   ]
     .filter((part) => part !== '')
     .join('\n');
-}
-
-function formatDate(value: string) {
-  try {
-    return new Date(value).toLocaleString('sk-SK', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return 'Neznámy dátum';
-  }
 }
 
 function getResultText(count: number) {
@@ -438,12 +677,9 @@ export default function HistoryPage() {
 
     const context = createContinueChatContext(item);
 
-    localStorage.setItem(
-      CONTINUE_CHAT_STORAGE_KEY,
-      JSON.stringify(context),
-    );
+    localStorage.setItem(CONTINUE_CHAT_STORAGE_KEY, JSON.stringify(context));
 
-    router.push('/chat?continue=history');
+    router.push('/chat?continue=history&autosend=1');
   }
 
   async function copyHistoryItem(item: HistoryItem) {
@@ -527,7 +763,9 @@ export default function HistoryPage() {
       }
     } catch {
       setItems(previousItems);
-      setError('Záznam sa nepodarilo vymazať. Skontrolujte pripojenie alebo API /api/history.');
+      setError(
+        'Záznam sa nepodarilo vymazať. Skontrolujte pripojenie alebo API /api/history.',
+      );
     } finally {
       setDeletingId(null);
     }
@@ -577,13 +815,33 @@ export default function HistoryPage() {
           .map((item: RawHistoryItem, index: number) =>
             normalizeHistoryItem(item, index),
           )
+          .filter((item: HistoryItem) => {
+            return (
+              item.user_message?.trim() ||
+              item.assistant_message?.trim() ||
+              extractResultText(item.result).trim()
+            );
+          })
           .sort(
             (a: HistoryItem, b: HistoryItem) =>
               new Date(b.created_at).getTime() -
               new Date(a.created_at).getTime(),
           );
 
-        setItems(loadedItems);
+        if (loadedItems.length > 0) {
+          setItems(loadedItems);
+          setError('');
+          return;
+        }
+
+        const localItems = loadLocalHistory();
+
+        if (localItems.length > 0) {
+          setError('');
+          return;
+        }
+
+        setItems([]);
         setError('');
         return;
       }
@@ -1031,7 +1289,7 @@ export default function HistoryPage() {
               </div>
             </div>
 
-            <div className="grid flex-1 gap-5 p-4 lg:grid-cols-[360px_minmax(0,1fr)] sm:p-5">
+            <div className="grid flex-1 gap-5 p-4 sm:p-5 lg:grid-cols-[360px_minmax(0,1fr)]">
               <aside className="space-y-4">
                 <div className="rounded-[1.75rem] border border-slate-200 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/[0.04]">
                   <h3 className="text-sm font-black uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
@@ -1043,6 +1301,7 @@ export default function HistoryPage() {
                       <div className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
                         Modul
                       </div>
+
                       <div className="mt-1 font-black text-slate-950 dark:text-white">
                         {getModuleLabel(selectedItem.module)}
                       </div>
@@ -1052,6 +1311,7 @@ export default function HistoryPage() {
                       <div className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
                         Vytvorené
                       </div>
+
                       <div className="mt-1 font-black text-slate-950 dark:text-white">
                         {formatDate(selectedItem.created_at)}
                       </div>
@@ -1061,6 +1321,7 @@ export default function HistoryPage() {
                       <div className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
                         ID záznamu
                       </div>
+
                       <div className="mt-1 break-all font-mono text-xs font-bold text-slate-700 dark:text-slate-200">
                         {selectedItem.id}
                       </div>
@@ -1107,7 +1368,7 @@ export default function HistoryPage() {
                 </div>
 
                 <div className="min-h-[520px] whitespace-pre-wrap rounded-[1.5rem] border border-slate-200 bg-slate-50 p-5 text-[15px] font-medium leading-8 text-slate-800 dark:border-white/10 dark:bg-black/20 dark:text-slate-100 sm:p-7">
-                  {getFullAssistantText(selectedItem)}
+                  {createFullReadableText(selectedItem)}
                 </div>
               </section>
             </div>

@@ -23,7 +23,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 const THEME_STORAGE_KEY = 'zedpera_theme';
 const LEGACY_THEME_STORAGE_KEY = 'zedpera-theme';
-const THEME_STYLE_ID = 'zedpera-global-force-light-ui-style-v3';
+const THEME_STYLE_ID = 'zedpera-global-force-light-ui-style-v4';
 
 function isTheme(value: unknown): value is Theme {
   return value === 'light' || value === 'dark';
@@ -919,6 +919,315 @@ function injectThemeStyle() {
       color: #ffffff !important;
       font-weight: 900 !important;
     }
+
+
+    /* =========================================================
+       12C. PROJECTS / DETAIL PRÁCE - FORCE LIGHT V4
+       Opravuje tmavé karty v "Moje práce" / "Projects" detaile.
+       Dôvod: tieto boxy môžu mať vlastné className alebo inline background.
+    ========================================================= */
+
+    html[data-theme='light'] body,
+    html[data-theme='light'] #__next,
+    html[data-theme='light'] main,
+    html[data-theme='light'] [data-theme-ready],
+    html[data-theme='light'] .theme-root,
+    html[data-theme='light'] .dashboard-shell,
+    html[data-theme='light'] .dashboard-page {
+      background: #f4f7fb !important;
+      color: #020617 !important;
+    }
+
+    /* Hlavné veľké okno detailu práce */
+    html[data-theme='light'] body :where(
+      [role='dialog'],
+      dialog,
+      [data-modal='true'],
+      [data-dialog='true'],
+      [data-radix-dialog-content],
+      [data-headlessui-state],
+      [aria-modal='true'],
+      .modal,
+      .dialog,
+      .Dialog,
+      .ReactModal__Content
+    ) {
+      background: #ffffff !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 18px 55px rgba(15, 23, 42, 0.16) !important;
+    }
+
+    /* Všetky bežné texty v projekte a detaile práce */
+    html[data-theme='light'] body :where(
+      [role='dialog'],
+      dialog,
+      [data-modal='true'],
+      [data-dialog='true'],
+      [data-radix-dialog-content],
+      [aria-modal='true'],
+      .modal,
+      .dialog,
+      .Dialog,
+      .ReactModal__Content
+    ) :where(
+      div,
+      section,
+      article,
+      header,
+      footer,
+      form,
+      p,
+      span,
+      small,
+      label,
+      strong,
+      b,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6,
+      li,
+      td,
+      th
+    ) {
+      color: #020617 !important;
+      opacity: 1 !important;
+      text-shadow: none !important;
+    }
+
+    /* Najagresívnejšie prepísanie tmavých kariet v detaili práce */
+    html[data-theme='light'] body [class*="bg-[#"],
+    html[data-theme='light'] body [class*="bg-["],
+    html[data-theme='light'] body [class*="bg-slate-950"],
+    html[data-theme='light'] body [class*="bg-slate-900"],
+    html[data-theme='light'] body [class*="bg-slate-800"],
+    html[data-theme='light'] body [class*="bg-slate-700"],
+    html[data-theme='light'] body [class*="bg-gray-950"],
+    html[data-theme='light'] body [class*="bg-gray-900"],
+    html[data-theme='light'] body [class*="bg-gray-800"],
+    html[data-theme='light'] body [class*="bg-gray-700"],
+    html[data-theme='light'] body [class*="bg-zinc-950"],
+    html[data-theme='light'] body [class*="bg-zinc-900"],
+    html[data-theme='light'] body [class*="bg-zinc-800"],
+    html[data-theme='light'] body [class*="bg-zinc-700"],
+    html[data-theme='light'] body [class*="bg-neutral-950"],
+    html[data-theme='light'] body [class*="bg-neutral-900"],
+    html[data-theme='light'] body [class*="bg-neutral-800"],
+    html[data-theme='light'] body [class*="bg-neutral-700"],
+    html[data-theme='light'] body [class*="bg-stone-950"],
+    html[data-theme='light'] body [class*="bg-stone-900"],
+    html[data-theme='light'] body [class*="bg-black"],
+    html[data-theme='light'] body [class*="bg-black/"] {
+      background: #ffffff !important;
+      background-color: #ffffff !important;
+      background-image: none !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08) !important;
+    }
+
+    /* Obsah vo vnútri tmavých kariet */
+    html[data-theme='light'] body [class*="bg-[#"] *,
+    html[data-theme='light'] body [class*="bg-["] *,
+    html[data-theme='light'] body [class*="bg-slate-950"] *,
+    html[data-theme='light'] body [class*="bg-slate-900"] *,
+    html[data-theme='light'] body [class*="bg-slate-800"] *,
+    html[data-theme='light'] body [class*="bg-slate-700"] *,
+    html[data-theme='light'] body [class*="bg-gray-950"] *,
+    html[data-theme='light'] body [class*="bg-gray-900"] *,
+    html[data-theme='light'] body [class*="bg-gray-800"] *,
+    html[data-theme='light'] body [class*="bg-gray-700"] *,
+    html[data-theme='light'] body [class*="bg-zinc-950"] *,
+    html[data-theme='light'] body [class*="bg-zinc-900"] *,
+    html[data-theme='light'] body [class*="bg-zinc-800"] *,
+    html[data-theme='light'] body [class*="bg-zinc-700"] *,
+    html[data-theme='light'] body [class*="bg-neutral-950"] *,
+    html[data-theme='light'] body [class*="bg-neutral-900"] *,
+    html[data-theme='light'] body [class*="bg-neutral-800"] *,
+    html[data-theme='light'] body [class*="bg-neutral-700"] *,
+    html[data-theme='light'] body [class*="bg-stone-950"] *,
+    html[data-theme='light'] body [class*="bg-stone-900"] *,
+    html[data-theme='light'] body [class*="bg-black"] *,
+    html[data-theme='light'] body [class*="bg-black/"] * {
+      color: #020617 !important;
+      opacity: 1 !important;
+      font-weight: 800 !important;
+      text-shadow: none !important;
+    }
+
+    /* Inline style background - často používané v kartách detailu práce */
+    html[data-theme='light'] body :where(
+      div,
+      section,
+      article,
+      aside,
+      header,
+      footer,
+      form
+    )[style*="background"] {
+      background: #ffffff !important;
+      background-color: #ffffff !important;
+      background-image: none !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+    }
+
+    html[data-theme='light'] body :where(
+      div,
+      section,
+      article,
+      aside,
+      header,
+      footer,
+      form
+    )[style*="background"] * {
+      color: #020617 !important;
+      opacity: 1 !important;
+      font-weight: 800 !important;
+    }
+
+    /* Karty v detaile práce - typické rounded + border bloky */
+    html[data-theme='light'] body :where(
+      div,
+      section,
+      article
+    )[class*="rounded"][class*="border"] {
+      background: #ffffff !important;
+      background-color: #ffffff !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08) !important;
+    }
+
+    html[data-theme='light'] body :where(
+      div,
+      section,
+      article
+    )[class*="rounded"][class*="border"] * {
+      color: #020617 !important;
+      opacity: 1 !important;
+    }
+
+    /* Labely v detaili práce: NÁZOV PRÁCE, CIEĽ PRÁCE, METODOLÓGIA... */
+    html[data-theme='light'] body :where(
+      [class*="uppercase"],
+      [class*="tracking"],
+      label,
+      small
+    ) {
+      color: #1e293b !important;
+      opacity: 1 !important;
+      font-weight: 900 !important;
+      letter-spacing: 0.08em;
+    }
+
+    /* Textové hodnoty v detaili práce */
+    html[data-theme='light'] body :where(
+      p,
+      span,
+      div,
+      li,
+      td,
+      th
+    ) {
+      color: #0f172a !important;
+      opacity: 1 !important;
+    }
+
+    /* Nadpisy */
+    html[data-theme='light'] body :where(
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6,
+      strong,
+      b
+    ) {
+      color: #020617 !important;
+      opacity: 1 !important;
+      font-weight: 900 !important;
+    }
+
+    /* Tailwind text farby mimo theme-root */
+    html[data-theme='light'] body [class*="text-slate-"],
+    html[data-theme='light'] body [class*="text-gray-"],
+    html[data-theme='light'] body [class*="text-zinc-"],
+    html[data-theme='light'] body [class*="text-neutral-"],
+    html[data-theme='light'] body [class*="text-stone-"] {
+      color: #1e293b !important;
+      opacity: 1 !important;
+      font-weight: 800 !important;
+    }
+
+    /* Opacity mimo theme-root */
+    html[data-theme='light'] body [class*="opacity-0"],
+    html[data-theme='light'] body [class*="opacity-5"],
+    html[data-theme='light'] body [class*="opacity-10"],
+    html[data-theme='light'] body [class*="opacity-20"],
+    html[data-theme='light'] body [class*="opacity-25"],
+    html[data-theme='light'] body [class*="opacity-30"],
+    html[data-theme='light'] body [class*="opacity-40"],
+    html[data-theme='light'] body [class*="opacity-50"],
+    html[data-theme='light'] body [class*="opacity-60"],
+    html[data-theme='light'] body [class*="opacity-70"],
+    html[data-theme='light'] body [class*="opacity-75"] {
+      opacity: 1 !important;
+    }
+
+    /* Inputy v projects detaile */
+    html[data-theme='light'] body input,
+    html[data-theme='light'] body textarea,
+    html[data-theme='light'] body select {
+      background: #ffffff !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      font-weight: 800 !important;
+    }
+
+    html[data-theme='light'] body input::placeholder,
+    html[data-theme='light'] body textarea::placeholder {
+      color: #475569 !important;
+      opacity: 1 !important;
+      font-weight: 750 !important;
+    }
+
+    /* Zachovať farebné CTA tlačidlá */
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-red-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-red-"] * {
+      color: #ffffff !important;
+      background-color: #ef4444 !important;
+      font-weight: 900 !important;
+    }
+
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-violet-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-purple-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-fuchsia-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-blue-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="from-violet-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="from-purple-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="to-fuchsia-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="to-violet-"] {
+      color: #ffffff !important;
+      font-weight: 900 !important;
+    }
+
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-violet-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-purple-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-fuchsia-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-blue-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="from-violet-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="from-purple-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="to-fuchsia-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="to-violet-"] * {
+      color: #ffffff !important;
+      font-weight: 900 !important;
+    }
+
 
     /* =========================================================
        13. SELECTION

@@ -2846,10 +2846,73 @@ const downloadExcel = () => {
     }, 400);
   };
 
-  const downloadPpt = async () => {
+ const downloadPpt = async () => {
   const text = stripModuleExtraSections(canvasText || result, activeModule);
 
-  if (!text.trim()) return;
+  if (!text.trim()) {
+    alert('Najprv vygenerujte výstup, až potom je možné vytvoriť PPT prezentáciu.');
+    return;
+  }
+
+  const moduleTitle =
+    activeModule === 'quality'
+      ? 'Audit kvality práce'
+      : activeModule === 'defense'
+        ? 'Obhajoba práce'
+        : activeModule === 'supervisor'
+          ? 'Hodnotenie práce'
+          : activeModuleInfo.label || 'Prezentácia';
+
+  const pptTitle =
+    activeProfile?.title ||
+    activeProfile?.topic ||
+    exportTitle ||
+    moduleTitle;
+
+  const sourceText = [
+    `Modul: ${moduleTitle}`,
+    '',
+    activeProfile
+      ? buildProfileBlock(activeProfile)
+      : 'Profil práce nebol dostupný. Prezentácia bola vytvorená z aktuálneho výstupu.',
+    '',
+    'VÝSTUP:',
+    text,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const fallbackSlides = [
+    {
+      title: moduleTitle,
+      layout: 'section',
+      bullets: [
+        `Prezentácia bola vytvorená z modulu: ${moduleTitle}.`,
+        activeProfile?.title
+          ? `Názov práce: ${activeProfile.title}`
+          : 'Aktívny profil práce nebol dostupný.',
+        'Obsah vychádza z aktuálne vygenerovaného výstupu v aplikácii.',
+      ],
+    },
+    {
+      title: 'Hlavné body výstupu',
+      layout: 'bullets',
+      bullets: text
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(0, 5),
+    },
+    {
+      title: 'Odporúčania',
+      layout: 'bullets',
+      bullets: [
+        'Skontrolovať úplnosť profilu práce.',
+        'Overiť názov práce, odbor, cieľ, metodológiu a kľúčové slová.',
+        'Doplniť chýbajúce údaje pred finálnym exportom.',
+      ],
+    },
+  ];
 
   try {
     const response = await fetch('/api/defense/pptx', {
@@ -2858,9 +2921,14 @@ const downloadExcel = () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        title: exportTitle,
-        workTitle: activeProfile?.title || 'Prezentácia k obhajobe',
+        title: pptTitle,
+        workTitle: pptTitle,
+        defenseType: moduleTitle,
+        theme: 'academic',
+        sourceText,
+        extractedWorkText: text,
         text,
+        slides: fallbackSlides,
       }),
     });
 
@@ -2870,11 +2938,16 @@ const downloadExcel = () => {
     }
 
     const blob = await response.blob();
+
+    if (!blob || blob.size === 0) {
+      throw new Error('Server vrátil prázdny PPTX súbor.');
+    }
+
     const url = URL.createObjectURL(blob);
 
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${sanitizeFileName(exportTitle)}.pptx`;
+    link.download = `${sanitizeFileName(pptTitle || moduleTitle)}.pptx`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -2890,7 +2963,6 @@ const downloadExcel = () => {
     );
   }
 };
-
 
 
   return (

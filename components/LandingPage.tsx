@@ -1113,8 +1113,193 @@ export default function LandingPage() {
   };
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#f8fafc] text-slate-950">
-      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur-xl">
+    <main
+      className="zedpera-public-page min-h-screen overflow-x-hidden bg-[#f8fafc] text-slate-950"
+      style={{ backgroundColor: '#f8fafc', color: '#0f172a', opacity: 1 }}
+    >
+      <style jsx global>{`
+        html,
+        body {
+          background: #f8fafc !important;
+        }
+
+        .zedpera-public-page,
+        .zedpera-public-page section,
+        .zedpera-public-page div,
+        .zedpera-public-page article,
+        .zedpera-public-page header,
+        .zedpera-public-page footer {
+          opacity: 1 !important;
+        }
+
+        .zedpera-public-page {
+          background: #f8fafc !important;
+          color: #0f172a !important;
+          -webkit-font-smoothing: antialiased;
+          text-rendering: optimizeLegibility;
+        }
+
+        .zedpera-public-page header {
+          background: rgba(2, 6, 23, 0.98) !important;
+          color: #ffffff !important;
+          border-color: rgba(255, 255, 255, 0.12) !important;
+          box-shadow: 0 18px 55px rgba(15, 23, 42, 0.2);
+        }
+
+        .zedpera-public-page header .text-slate-950,
+        .zedpera-public-page header .text-slate-800,
+        .zedpera-public-page header .text-slate-700 {
+          color: #ffffff !important;
+        }
+
+        .zedpera-public-page header .text-slate-600,
+        .zedpera-public-page header .text-slate-500 {
+          color: #cbd5e1 !important;
+        }
+
+        .zedpera-public-page header nav a {
+          color: #ede9fe !important;
+        }
+
+        .zedpera-public-page header nav a:hover {
+          color: #c4b5fd !important;
+        }
+
+
+        .zedpera-public-page header [aria-label="Výber jazyka"] {
+          background: #ffffff !important;
+          color: #0f172a !important;
+        }
+
+        .zedpera-public-page header [aria-label="Výber jazyka"] .text-slate-600 {
+          color: #475569 !important;
+        }
+
+        .zedpera-public-page header [aria-label="Výber jazyka"] .text-slate-950 {
+          color: #0f172a !important;
+        }
+
+        .zedpera-public-page #intro {
+          background: linear-gradient(180deg, #ffffff 0%, #f5f3ff 52%, #ffffff 100%) !important;
+        }
+
+        .zedpera-public-page #intro,
+        .zedpera-public-page .zedpera-visible-hero {
+          position: relative !important;
+          isolation: isolate !important;
+          background: #ffffff !important;
+          background-image: linear-gradient(180deg, #ffffff 0%, #f8f7ff 45%, #ffffff 100%) !important;
+          color: #020617 !important;
+          opacity: 1 !important;
+          filter: none !important;
+          mix-blend-mode: normal !important;
+        }
+
+        .zedpera-public-page .zedpera-hero-content {
+          position: relative !important;
+          z-index: 20 !important;
+          opacity: 1 !important;
+          filter: none !important;
+          mix-blend-mode: normal !important;
+        }
+
+        .zedpera-public-page .zedpera-hero-title,
+        .zedpera-public-page .zedpera-hero-title * {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          opacity: 1 !important;
+          filter: none !important;
+          mix-blend-mode: normal !important;
+          text-shadow: 0 1px 0 rgba(255, 255, 255, 0.95) !important;
+        }
+
+        .zedpera-public-page .zedpera-hero-text,
+        .zedpera-public-page .zedpera-hero-text * {
+          color: #1e293b !important;
+          -webkit-text-fill-color: #1e293b !important;
+          opacity: 1 !important;
+          filter: none !important;
+          mix-blend-mode: normal !important;
+        }
+
+        .zedpera-public-page .zedpera-hero-cta {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          opacity: 1 !important;
+        }
+
+        .zedpera-public-page .zedpera-hero-bg {
+          opacity: 0.22 !important;
+          z-index: 0 !important;
+          pointer-events: none !important;
+        }
+
+
+        .zedpera-public-page #intro h1 {
+          color: #0f172a !important;
+          opacity: 1 !important;
+          text-shadow: none !important;
+        }
+
+        .zedpera-public-page #intro p {
+          color: #334155 !important;
+          opacity: 1 !important;
+          font-weight: 650;
+        }
+
+        .zedpera-public-page #intro .hero-visible-badge {
+          color: #5b21b6 !important;
+          background: #ffffff !important;
+          border-color: #c4b5fd !important;
+          box-shadow: 0 12px 35px rgba(124, 58, 237, 0.16);
+        }
+
+        .zedpera-public-page h1,
+        .zedpera-public-page h2,
+        .zedpera-public-page h3 {
+          letter-spacing: -0.03em;
+        }
+
+        .zedpera-public-page section:not(.bg-slate-950) h2,
+        .zedpera-public-page section:not(.bg-slate-950) h3 {
+          color: #0f172a;
+        }
+
+        .zedpera-public-page section:not(.bg-slate-950) p,
+        .zedpera-public-page section:not(.bg-slate-950) li {
+          color: #334155;
+        }
+
+        .zedpera-public-page .bg-slate-950 h2,
+        .zedpera-public-page .bg-slate-950 h3,
+        .zedpera-public-page .bg-slate-950 .text-white {
+          color: #ffffff !important;
+        }
+
+        .zedpera-public-page .bg-slate-950 p,
+        .zedpera-public-page .bg-slate-950 li,
+        .zedpera-public-page .bg-slate-950 .text-slate-300 {
+          color: #cbd5e1 !important;
+        }
+
+        .zedpera-public-page a,
+        .zedpera-public-page button {
+          opacity: 1 !important;
+        }
+
+        @media (max-width: 768px) {
+          .zedpera-public-page #intro h1 {
+            font-size: 2.25rem !important;
+            line-height: 1.12 !important;
+          }
+
+          .zedpera-public-page #intro p {
+            font-size: 1rem !important;
+            line-height: 1.7 !important;
+          }
+        }
+      `}</style>
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/95 text-white backdrop-blur-xl">
         <div className="mx-auto max-w-7xl px-5 py-3 lg:px-8">
           {/* PRVÝ RIADOK: logo + jazyková lišta + akčné tlačidlá */}
           <div className="flex items-center justify-between gap-4">
@@ -1124,10 +1309,10 @@ export default function LandingPage() {
               </div>
 
               <div className="min-w-0 text-left">
-                <div className="truncate text-2xl font-black tracking-tight text-slate-950">
+                <div className="truncate text-2xl font-black tracking-tight text-white">
                   ZEDPERA
                 </div>
-                <div className="-mt-1 truncate text-sm font-semibold text-slate-500">
+                <div className="-mt-1 truncate text-sm font-semibold text-slate-300">
                   {content.brandSubtitle}
                 </div>
               </div>
@@ -1144,7 +1329,7 @@ export default function LandingPage() {
 
               <Link
                 href="/login"
-                className="relative z-50 rounded-2xl px-5 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-100"
+                className="relative z-50 rounded-2xl px-5 py-3 text-sm font-black text-white transition hover:bg-white/10"
               >
                 {content.login}
               </Link>
@@ -1160,7 +1345,7 @@ export default function LandingPage() {
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-950 lg:hidden"
+              className="rounded-2xl border border-white/10 bg-white/10 p-3 text-white lg:hidden"
               aria-label={content.mobileOpenMenu}
             >
               <Menu size={22} />
@@ -1183,8 +1368,8 @@ export default function LandingPage() {
           </div>
 
           {/* DRUHÝ RIADOK: hlavná menu lišta */}
-          <div className="mt-3 hidden border-t border-slate-200 pt-3 lg:block">
-            <nav className="flex items-center justify-center gap-8 text-sm font-bold text-slate-700">
+          <div className="mt-3 hidden border-t border-white/10 pt-3 lg:block">
+            <nav className="flex items-center justify-center gap-8 text-sm font-bold text-violet-100">
               <a href="#intro" className="transition hover:text-violet-700">
                 {content.navIntro}
               </a>
@@ -1317,27 +1502,33 @@ export default function LandingPage() {
         </div>
       )}
 
-      <section id="intro" className="relative overflow-hidden bg-white">
-       <div className="absolute left-1/2 top-0 h-[520px] w-[920px] -translate-x-1/2 rounded-full bg-violet-200/40 blur-3xl" />
+      <section id="intro" className="zedpera-visible-hero relative isolate overflow-hidden bg-white">
+       <div className="zedpera-hero-bg pointer-events-none absolute left-1/2 top-0 h-[520px] w-[920px] -translate-x-1/2 rounded-full bg-violet-100/30 blur-2xl" />
 
-        <div className="relative mx-auto max-w-7xl px-5 py-20 text-center lg:px-8 lg:py-28">
-          <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-black text-violet-800">
+        <div className="zedpera-hero-content relative z-20 mx-auto max-w-7xl px-5 py-20 text-center lg:px-8 lg:py-28">
+          <div className="hero-visible-badge mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-black text-violet-800">
             <Sparkles size={17} />
             {content.heroBadge}
           </div>
 
-          <h1 className="mx-auto max-w-5xl text-4xl font-black leading-[1.08] tracking-tight text-slate-950 md:text-6xl">
+          <h1
+            className="zedpera-hero-title mx-auto max-w-5xl text-4xl font-black leading-[1.08] tracking-tight md:text-6xl"
+            style={{ color: "#020617", WebkitTextFillColor: "#020617", opacity: 1, filter: "none" }}
+          >
             {content.heroTitle}
           </h1>
 
-          <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-slate-600 md:text-xl">
+          <p
+            className="zedpera-hero-text mx-auto mt-6 max-w-3xl text-lg font-semibold leading-8 md:text-xl"
+            style={{ color: "#1e293b", WebkitTextFillColor: "#1e293b", opacity: 1, filter: "none" }}
+          >
             {content.heroText}
           </p>
 
           <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
             <a
               href="#pricing"
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-7 py-4 text-base font-black text-white shadow-2xl shadow-violet-900/25 transition hover:opacity-90"
+              className="zedpera-hero-cta inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-7 py-4 text-base font-black text-white shadow-2xl shadow-violet-900/25 transition hover:opacity-90"
             >
               {content.heroCta}
               <ArrowRight size={20} />

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pptxgen from 'pptxgenjs';
 
+// DÔLEŽITÉ: pptxgenjs musí zostať iba v API route/serverovom súbore.
+// Nesmie byť importovaný v DashboardClient.tsx ani inom 'use client' komponente.
 const pptx = pptxgen;
 
 export const runtime = 'nodejs';
@@ -56,6 +58,8 @@ type DefensePptxRequestBody = {
   sourceText?: unknown;
   extractedWorkText?: unknown;
   attachmentText?: unknown;
+  text?: unknown;
+  workTitle?: unknown;
   theme?: unknown;
 };
 
@@ -1698,6 +1702,8 @@ export async function POST(req: NextRequest) {
         body.sourceText ||
           body.extractedWorkText ||
           body.attachmentText ||
+          body.text ||
+          body.workTitle ||
           '',
       ),
     );

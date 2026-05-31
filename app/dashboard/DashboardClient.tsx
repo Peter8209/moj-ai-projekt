@@ -2847,152 +2847,49 @@ const downloadExcel = () => {
   };
 
   const downloadPpt = async () => {
-    const text = stripModuleExtraSections(canvasText || result, activeModule);
+  const text = stripModuleExtraSections(canvasText || result, activeModule);
 
-    if (!text.trim()) return;
+  if (!text.trim()) return;
 
-    try {
-      const pptxgenModule = await import('pptxgenjs');
-      const PptxGenJS = pptxgenModule.default;
-      const pptx = new PptxGenJS();
+  try {
+    const response = await fetch('/api/defense/pptx', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: exportTitle,
+        workTitle: activeProfile?.title || 'Prezentácia k obhajobe',
+        text,
+      }),
+    });
 
-      pptx.layout = 'LAYOUT_WIDE';
-      pptx.author = 'Zedpera';
-      pptx.company = 'Zedpera';
-      pptx.subject = exportTitle;
-      pptx.title = exportTitle;
-
-      pptx.theme = {
-        headFontFace: 'Arial',
-        bodyFontFace: 'Arial',
-      };
-
-      const fileBase = sanitizeFileName(exportTitle);
-      const slides = splitTextToSlides(text);
-
-      const titleSlide = pptx.addSlide();
-      titleSlide.background = { color: '0F172A' };
-
-      titleSlide.addText(exportTitle, {
-        x: 0.7,
-        y: 1.3,
-        w: 12,
-        h: 1,
-        fontFace: 'Arial',
-        fontSize: 32,
-        bold: true,
-        color: 'FFFFFF',
-        fit: 'shrink',
-      });
-
-      titleSlide.addText(activeProfile?.title || 'Prezentácia k obhajobe', {
-        x: 0.7,
-        y: 2.35,
-        w: 12,
-        h: 0.6,
-        fontFace: 'Arial',
-        fontSize: 18,
-        color: 'CBD5E1',
-        fit: 'shrink',
-      });
-
-      titleSlide.addText('Vygenerované v systéme Zedpera', {
-        x: 0.7,
-        y: 6.5,
-        w: 12,
-        h: 0.3,
-        fontFace: 'Arial',
-        fontSize: 10,
-        color: '94A3B8',
-      });
-
-      let slideNumber = 1;
-
-      slides.forEach((slideData) => {
-        const pages = paginateSlideBody(slideData.body, 6);
-
-        pages.forEach((pageBody, pageIndex) => {
-          const slide = pptx.addSlide();
-          slide.background = { color: 'FFFFFF' };
-
-          const title =
-            pageIndex === 0
-              ? slideData.title || `Snímka ${slideNumber}`
-              : `${slideData.title || `Snímka ${slideNumber}`} – pokračovanie ${
-                  pageIndex + 1
-                }`;
-
-          slide.addText(title, {
-            x: 0.55,
-            y: 0.35,
-            w: 12.1,
-            h: 0.7,
-            fontFace: 'Arial',
-            fontSize: 22,
-            bold: true,
-            color: '111827',
-            fit: 'shrink',
-          });
-
-          if (pageBody.length > 0) {
-            const bulletItems = pageBody.map((item) => ({
-              text: item,
-              options: {
-                bullet: { type: 'bullet' },
-                hanging: 4,
-              },
-            }));
-
-            slide.addText(bulletItems as any, {
-              x: 0.75,
-              y: 1.25,
-              w: 11.8,
-              h: 5.25,
-              fontFace: 'Arial',
-              fontSize: 15,
-              color: '1F2937',
-              valign: 'top',
-              fit: 'shrink',
-              breakLine: false,
-            });
-          } else {
-            slide.addText('Údaj je potrebné doplniť.', {
-              x: 0.75,
-              y: 1.25,
-              w: 11.8,
-              h: 1,
-              fontFace: 'Arial',
-              fontSize: 18,
-              color: '374151',
-            });
-          }
-
-          slide.addText(`${slideNumber}`, {
-            x: 12.2,
-            y: 6.85,
-            w: 0.5,
-            h: 0.25,
-            fontFace: 'Arial',
-            fontSize: 9,
-            color: '9CA3AF',
-            align: 'right',
-          });
-
-          slideNumber += 1;
-        });
-      });
-
-      await pptx.writeFile({
-        fileName: `${fileBase}.pptx`,
-      });
-    } catch (error) {
-      console.error(error);
-
-      alert(
-        'PPTX sa nepodarilo vytvoriť. Skontroluj, či máš nainštalovaný balík: npm install pptxgenjs',
-      );
+    if (!response.ok) {
+      const errorText = await readApiErrorResponse(response);
+      throw new Error(errorText || 'Prezentáciu sa nepodarilo vytvoriť.');
     }
-  };
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${sanitizeFileName(exportTitle)}.pptx`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error('PPTX_EXPORT_ERROR:', error);
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : 'Prezentáciu sa nepodarilo vytvoriť.',
+    );
+  }
+};
 
 
 

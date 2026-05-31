@@ -16,6 +16,8 @@ node_modules/
 # Next.js / React build outputs
 # =========================
 .next/
+.next_old_broken/
+.next*/
 out/
 build/
 dist/
@@ -32,6 +34,9 @@ dist/
 .next/server/
 .next/static/
 .next/types/
+.next_old_broken/dev/
+.next_old_broken/dev/cache/
+.next_old_broken/dev/cache/turbopack/
 
 # =========================
 # Testing / coverage
@@ -140,3 +145,10 @@ supabase/.temp/
 # Package manager stores
 # =========================
 .pnpm-store/
+
+# =========================
+# Local broken / backup folders
+# =========================
+*_old_broken/
+*_backup/
+*.bak

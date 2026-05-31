@@ -193,6 +193,7 @@ type AppConfirmState = {
 } | null;
 
 const PROJECT_ORDER_KEY = 'zedpera_projects_order';
+const WIZARD_DRAFT_KEY = 'zedpera_profile_wizard_draft';
 
 const WORK_TEMPLATES: Record<WorkTypeKey, WorkTemplate> = {
   essay: {
@@ -750,11 +751,91 @@ async function translateConfirmByAi(dialog: NonNullable<AppConfirmState>) {
   };
 }
 
+
+function normalizeTextValue(value: unknown) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeKeywordsInput(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((item) => String(item ?? '').split(','))
+      .map((item) => normalizeTextValue(item))
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+
+    if (!trimmed) return [];
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return normalizeKeywordsInput(parsed);
+    } catch {
+      // bežný text oddelený čiarkami / bodkočiarkami
+    }
+
+    return trimmed
+      .split(/[,;\n]+/)
+      .map((item) => normalizeTextValue(item))
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function keywordsToText(value: unknown) {
+  return normalizeKeywordsInput(value).join(', ');
+}
+
+function buildSavedProfileFromWizard(profile: ProfileWizardState): SavedProfile {
+  const keywordsList = normalizeKeywordsInput(profile.keywordsText);
+
+  return normalizeProfileBeforeSave({
+    id: profile.id,
+    typeKey: profile.typeKey,
+    type: profile.type,
+    title: profile.title,
+    topic: profile.topic || '',
+    field: profile.field,
+    supervisor: profile.supervisor,
+    level: profile.level,
+    language: profile.language,
+    interfaceLanguage: profile.interfaceLanguage,
+    workLanguage: profile.workLanguage,
+    citation: citationLabel(profile.citation),
+    citationStyle: citationLabel(profile.citation),
+    annotation: profile.annotation,
+    goal: profile.goal,
+    problem: profile.problem,
+    methodology: profile.methodology,
+    hypotheses: profile.hypotheses,
+    researchQuestions: profile.researchQuestions,
+    practicalPart: profile.practicalPart,
+    scientificContribution: profile.scientificContribution,
+    businessProblem: profile.businessProblem,
+    businessGoal: profile.businessGoal,
+    implementation: profile.implementation,
+    caseStudy: profile.caseStudy,
+    reflection: profile.reflection,
+    sourcesRequirement: profile.sourcesRequirement,
+    keywordsList,
+    keywords: keywordsList,
+    savedAt: profile.savedAt,
+    updated_at: new Date().toISOString(),
+  });
+}
+
 function createWizardProfileFromTemplate(template: WorkTemplate, existing?: Partial<SavedProfile> | null): ProfileWizardState {
   const language = getStoredLanguage();
   const workLanguage = language;
   const citation = normalizeCitationToKey(existing?.citation || existing?.citationStyle || template.defaultCitationStyle);
-  const keywords = existing?.keywordsList || existing?.keywords_list || existing?.keywords || [];
+  const keywordsText =
+    keywordsToText((existing as any)?.keywordsText) ||
+    keywordsToText(existing?.keywordsList) ||
+    keywordsToText(existing?.keywords_list) ||
+    keywordsToText(existing?.keywords);
 
   return {
     id: createSafeProfileId(existing?.id),
@@ -784,7 +865,7 @@ function createWizardProfileFromTemplate(template: WorkTemplate, existing?: Part
     caseStudy: existing?.caseStudy || existing?.case_study || '',
     reflection: existing?.reflection || '',
     sourcesRequirement: existing?.sourcesRequirement || existing?.sources_requirement || '',
-    keywordsText: Array.isArray(keywords) ? keywords.join(', ') : '',
+    keywordsText,
     recommendedLength: template.recommendedLength,
     structure: template.structure,
     requiredSections: template.requiredSections,
@@ -809,7 +890,7 @@ function normalizeProfileForApp(row: any): SavedProfile {
     type: row?.type || full.type || template.label,
     title: row?.title || full.title || 'Bez názvu',
     level: row?.level || full.level || template.level,
-    topic: '',
+    topic: row?.topic || full.topic || '',
     field: row?.field || full.field || '',
     supervisor: row?.supervisor || full.supervisor || '',
     citation,
@@ -831,8 +912,8 @@ function normalizeProfileForApp(row: any): SavedProfile {
     caseStudy: row?.case_study || full.caseStudy || full.case_study || '',
     reflection: row?.reflection || full.reflection || '',
     sourcesRequirement: row?.sources_requirement || full.sourcesRequirement || full.sources_requirement || '',
-    keywordsList: row?.keywords_list || full.keywordsList || full.keywords || [],
-    keywords: row?.keywords_list || full.keywords || full.keywordsList || [],
+    keywordsList: normalizeKeywordsInput(row?.keywords_list || full.keywordsList || full.keywords || (full as any).keywordsText),
+    keywords: normalizeKeywordsInput(row?.keywords_list || full.keywords || full.keywordsList || (full as any).keywordsText),
     schema: row?.schema || full.schema || {
       typeKey: template.key,
       label: template.label,
@@ -873,8 +954,8 @@ function normalizeProfileBeforeSave(profile: SavedProfile, fallbackId?: string):
     businessGoal: profile.businessGoal || profile.business_goal || '',
     caseStudy: profile.caseStudy || profile.case_study || '',
     sourcesRequirement: profile.sourcesRequirement || profile.sources_requirement || '',
-    keywordsList: profile.keywordsList || profile.keywords_list || profile.keywords || [],
-    keywords: profile.keywords || profile.keywordsList || profile.keywords_list || [],
+    keywordsList: normalizeKeywordsInput(profile.keywordsList || profile.keywords_list || profile.keywords),
+    keywords: normalizeKeywordsInput(profile.keywords || profile.keywordsList || profile.keywords_list),
     schema: {
       typeKey: template.key,
       label: template.label,
@@ -899,7 +980,7 @@ function buildSupabaseProfilePayload(profile: SavedProfile, userId?: string) {
     title: profile.title || 'Bez názvu',
     type: profile.type || null,
     level: profile.level || null,
-    topic: null,
+    topic: profile.topic || null,
     field: profile.field || null,
     supervisor: profile.supervisor || null,
     citation: profile.citation || null,
@@ -919,7 +1000,7 @@ function buildSupabaseProfilePayload(profile: SavedProfile, userId?: string) {
     case_study: profile.caseStudy || profile.case_study || null,
     reflection: profile.reflection || null,
     sources_requirement: profile.sourcesRequirement || profile.sources_requirement || null,
-    keywords_list: profile.keywordsList || profile.keywords_list || profile.keywords || [],
+    keywords_list: normalizeKeywordsInput(profile.keywordsList || profile.keywords_list || profile.keywords),
     schema: profile.schema || null,
     full_profile: fullProfile,
     updated_at: new Date().toISOString(),
@@ -1725,6 +1806,85 @@ function getDialogVariantStyles(variant: AppDialogVariant) {
   };
 }
 
+
+
+function upsertProfileIntoLocalStorage(profile: SavedProfile) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const current = readProfilesFromLocalStorage();
+    const exists = current.some((item) => item.id === profile.id);
+    const next = exists
+      ? current.map((item) => (item.id === profile.id ? profile : item))
+      : [profile, ...current];
+
+    localStorage.setItem('profiles_full', JSON.stringify(next));
+    localStorage.setItem(PROJECT_ORDER_KEY, JSON.stringify(next.map((item) => item.id)));
+  } catch (error) {
+    console.warn('PROFILE WIZARD LOCAL UPSERT WARNING:', error);
+  }
+}
+
+function isWizardFieldFilled(key: keyof ProfileWizardState, value: unknown) {
+  if (key === 'keywordsText') {
+    return normalizeKeywordsInput(value).length > 0;
+  }
+
+  return normalizeTextValue(value).length > 0;
+}
+
+function getWizardFieldDisplayValue(label: string, value: unknown) {
+  if (label === 'Kľúčové slová') {
+    return keywordsToText(value);
+  }
+
+  return normalizeTextValue(value);
+}
+
+function getWizardFieldStatusLabel(label: string, filled: boolean, required: boolean) {
+  if (filled) {
+    return 'Vyplnené';
+  }
+
+  return required ? 'Chýba' : 'Voliteľné';
+}
+
+function readWizardDraft(initialProfile: SavedProfile | null, initialTypeKey: WorkTypeKey): ProfileWizardState | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = localStorage.getItem(WIZARD_DRAFT_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    if (initialProfile?.id && parsed.id && parsed.id !== initialProfile.id) {
+      return null;
+    }
+
+    const typeKey = normalizeWorkType(parsed.typeKey || parsed.type || initialTypeKey);
+    const template = WORK_TEMPLATES[typeKey];
+    const restored = createWizardProfileFromTemplate(template, parsed as any);
+
+    return {
+      ...restored,
+      ...parsed,
+      id: createSafeProfileId(parsed.id || initialProfile?.id),
+      typeKey,
+      type: template.label,
+      level: template.level,
+      citation: normalizeCitationToKey(parsed.citation || parsed.citationStyle || template.defaultCitationStyle),
+      citationStyle: citationLabel(normalizeCitationToKey(parsed.citation || parsed.citationStyle || template.defaultCitationStyle)),
+      keywordsText:
+        normalizeTextValue(parsed.keywordsText) ||
+        keywordsToText(parsed.keywordsList || parsed.keywords_list || parsed.keywords),
+      updated_at: parsed.updated_at || new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function ProfileWizardModal({
   initialProfile,
   onSave,
@@ -1745,6 +1905,7 @@ function ProfileWizardModal({
   const [activeStep, setActiveStep] = useState(1);
 
   const [profile, setProfile] = useState<ProfileWizardState>(() =>
+    readWizardDraft(initialProfile, initialTypeKey) ||
     createWizardProfileFromTemplate(
       WORK_TEMPLATES[initialTypeKey],
       initialProfile,
@@ -1756,13 +1917,6 @@ function ProfileWizardModal({
   const currentLanguageLabel = formatLanguageBadge(
     profile.workLanguage || profile.language || getStoredLanguage(),
   );
-
-  const [editingField, setEditingField] = useState<{
-    key: keyof ProfileWizardState;
-    label: string;
-    placeholder?: string;
-    rows?: number;
-  } | null>(null);
 
   const requiredProfileFields = useMemo(
     () => [
@@ -1783,27 +1937,81 @@ function ProfileWizardModal({
     () =>
       requiredProfileFields.filter((item) => {
         const value = profile[item.key];
-        return !String(value || '').trim();
+        return !isWizardFieldFilled(item.key, value);
       }),
     [profile, requiredProfileFields],
   );
 
-  const openFieldEditor = (
-    key: keyof ProfileWizardState,
-    label: string,
-    placeholder?: string,
-    rows = 1,
+  const persistWizardDraftImmediately = (nextProfile: ProfileWizardState) => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const normalizedWizardProfile: ProfileWizardState = {
+        ...nextProfile,
+        keywordsText: keywordsToText(nextProfile.keywordsText),
+        updated_at: nextProfile.updated_at || new Date().toISOString(),
+      };
+
+      const draftProfile = buildSavedProfileFromWizard(normalizedWizardProfile);
+
+      localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(normalizedWizardProfile));
+      localStorage.setItem('profile', JSON.stringify(draftProfile));
+      localStorage.setItem('active_profile', JSON.stringify(draftProfile));
+      localStorage.setItem(
+        'zedpera_work_language',
+        draftProfile.workLanguage || draftProfile.language || 'sk',
+      );
+
+      upsertProfileIntoLocalStorage(draftProfile);
+
+      window.dispatchEvent(
+        new CustomEvent('zedpera-profile-updated', {
+          detail: draftProfile,
+        }),
+      );
+      window.dispatchEvent(new CustomEvent('zedpera-profile-change'));
+      window.dispatchEvent(
+        new CustomEvent('zedpera:active-profile-changed', {
+          detail: draftProfile,
+        }),
+      );
+    } catch (error) {
+      console.warn('PROFILE WIZARD IMMEDIATE SAVE WARNING:', error);
+    }
+  };
+
+  const commitWizardProfile = (
+    updater:
+      | ProfileWizardState
+      | ((previousProfile: ProfileWizardState) => ProfileWizardState),
   ) => {
-    setEditingField({ key, label, placeholder, rows });
+    setProfile((previousProfile) => {
+      const nextProfile =
+        typeof updater === 'function' ? updater(previousProfile) : updater;
+
+      persistWizardDraftImmediately(nextProfile);
+
+      return nextProfile;
+    });
   };
 
   const updateProfile = <K extends keyof ProfileWizardState>(
     key: K,
     value: ProfileWizardState[K],
   ) => {
-    setProfile((prev) => ({
+    commitWizardProfile((prev) => ({
       ...prev,
       [key]: value,
+      updated_at: new Date().toISOString(),
+    }));
+  };
+
+  const updateInlineField = (key: keyof ProfileWizardState, value: string) => {
+    const nextValue = key === 'keywordsText' ? value : String(value || '');
+
+    commitWizardProfile((prev) => ({
+      ...prev,
+      [key]: nextValue,
       updated_at: new Date().toISOString(),
     }));
   };
@@ -1811,7 +2019,7 @@ function ProfileWizardModal({
   const handleSelectWorkType = (typeKey: WorkTypeKey) => {
     const template = WORK_TEMPLATES[typeKey];
 
-    setProfile((prev) => ({
+    commitWizardProfile((prev) => ({
       ...prev,
       typeKey: template.key,
       type: template.label,
@@ -1829,7 +2037,7 @@ function ProfileWizardModal({
   };
 
   const handleSelectCitation = (citation: CitationStyleKey) => {
-    setProfile((prev) => ({
+    commitWizardProfile((prev) => ({
       ...prev,
       citation,
       citationStyle: citationLabel(citation),
@@ -1839,52 +2047,15 @@ function ProfileWizardModal({
 
   const createEmptyProfile = () => {
     const empty = createWizardProfileFromTemplate(WORK_TEMPLATES.essay, null);
-    setProfile(empty);
+    commitWizardProfile(empty);
     setActiveStep(1);
   };
 
-  const buildFinalProfile = (): SavedProfile => {
-    const keywordsList = profile.keywordsText
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    return normalizeProfileBeforeSave({
-      id: profile.id,
-      typeKey: profile.typeKey,
-      type: profile.type,
-      title: profile.title,
-      topic: '',
-      field: profile.field,
-      supervisor: profile.supervisor,
-      level: profile.level,
-      language: profile.language,
-      interfaceLanguage: profile.interfaceLanguage,
-      workLanguage: profile.workLanguage,
-      citation: citationLabel(profile.citation),
-      citationStyle: citationLabel(profile.citation),
-      annotation: profile.annotation,
-      goal: profile.goal,
-      problem: profile.problem,
-      methodology: profile.methodology,
-      hypotheses: profile.hypotheses,
-      researchQuestions: profile.researchQuestions,
-      practicalPart: profile.practicalPart,
-      scientificContribution: profile.scientificContribution,
-      businessProblem: profile.businessProblem,
-      businessGoal: profile.businessGoal,
-      implementation: profile.implementation,
-      caseStudy: profile.caseStudy,
-      reflection: profile.reflection,
-      sourcesRequirement: profile.sourcesRequirement,
-      keywordsList,
-      keywords: keywordsList,
-      savedAt: profile.savedAt,
-      updated_at: new Date().toISOString(),
-    });
-  };
+  const buildFinalProfile = (): SavedProfile => buildSavedProfileFromWizard(profile);
 
   const saveWizardProfile = () => {
+    persistWizardDraftImmediately(profile);
+
     const finalProfile = buildFinalProfile();
 
     localStorage.setItem('active_profile', JSON.stringify(finalProfile));
@@ -1904,6 +2075,30 @@ function ProfileWizardModal({
 
     onSave(finalProfile);
   };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(profile));
+
+      const draftProfile = buildSavedProfileFromWizard(profile);
+      localStorage.setItem('profile', JSON.stringify(draftProfile));
+      localStorage.setItem('active_profile', JSON.stringify(draftProfile));
+      localStorage.setItem(
+        'zedpera_work_language',
+        draftProfile.workLanguage || draftProfile.language || 'sk',
+      );
+      upsertProfileIntoLocalStorage(draftProfile);
+
+      window.dispatchEvent(
+        new CustomEvent('zedpera-profile-updated', {
+          detail: draftProfile,
+        }),
+      );
+      window.dispatchEvent(new CustomEvent('zedpera-profile-change'));
+    } catch (error) {
+      console.warn('PROFILE WIZARD AUTOSAVE WARNING:', error);
+    }
+  }, [profile]);
 
   const canGoBack = activeStep > 1;
   const canGoNext = activeStep < 5;
@@ -2099,7 +2294,7 @@ function ProfileWizardModal({
             {activeStep === 2 && (
               <WizardPanel
                 title="Identita práce"
-                subtitle="Téma práce je odstránená. Každé pole sa otvorí po kliknutí ako samostatné okno na vyplnenie."
+                subtitle="Tému, odbor, jazyk, kľúčové slová a anotáciu vyplň priamo v poliach. Zmeny sa priebežne zapisujú do profilu."
               >
                 <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                   <ClickEditField
@@ -2107,13 +2302,7 @@ function ProfileWizardModal({
                     value={profile.title}
                     placeholder="Napr. Vplyv umelej inteligencie na akademické písanie"
                     required
-                    onClick={() =>
-                      openFieldEditor(
-                        'title',
-                        'Názov práce',
-                        'Napr. Vplyv umelej inteligencie na akademické písanie',
-                      )
-                    }
+                    onChange={(value) => updateInlineField('title', value)}
                   />
 
                   <ClickEditField
@@ -2121,26 +2310,14 @@ function ProfileWizardModal({
                     value={profile.field}
                     placeholder="Napr. pedagogika, manažment, informatika"
                     required
-                    onClick={() =>
-                      openFieldEditor(
-                        'field',
-                        'Odbor / predmet / oblasť',
-                        'Napr. pedagogika, manažment, informatika',
-                      )
-                    }
+                    onChange={(value) => updateInlineField('field', value)}
                   />
 
                   <ClickEditField
                     label="Vedúci práce / školiteľ"
                     value={profile.supervisor}
                     placeholder="Meno vedúceho práce"
-                    onClick={() =>
-                      openFieldEditor(
-                        'supervisor',
-                        'Vedúci práce / školiteľ',
-                        'Meno vedúceho práce',
-                      )
-                    }
+                    onChange={(value) => updateInlineField('supervisor', value)}
                   />
 
                   <ClickEditField
@@ -2148,13 +2325,7 @@ function ProfileWizardModal({
                     value={profile.workLanguage}
                     placeholder="sk, cs, en, de, pl, hu"
                     required
-                    onClick={() =>
-                      openFieldEditor(
-                        'workLanguage',
-                        'Jazyk práce',
-                        'sk, cs, en, de, pl, hu',
-                      )
-                    }
+                    onChange={(value) => updateInlineField('workLanguage', value)}
                   />
 
                   <ClickEditField
@@ -2162,13 +2333,7 @@ function ProfileWizardModal({
                     value={profile.keywordsText}
                     placeholder="AI, akademické písanie, metodológia"
                     required
-                    onClick={() =>
-                      openFieldEditor(
-                        'keywordsText',
-                        'Kľúčové slová',
-                        'AI, akademické písanie, metodológia',
-                      )
-                    }
+                    onChange={(value) => updateInlineField('keywordsText', value)}
                   />
 
                   <ClickEditField
@@ -2177,14 +2342,7 @@ function ProfileWizardModal({
                     placeholder="Stručne popíš, o čom práca je."
                     required
                     multiline
-                    onClick={() =>
-                      openFieldEditor(
-                        'annotation',
-                        'Anotácia',
-                        'Stručne popíš, o čom práca je.',
-                        5,
-                      )
-                    }
+                    onChange={(value) => updateInlineField('annotation', value)}
                   />
                 </div>
 
@@ -2198,7 +2356,7 @@ function ProfileWizardModal({
             {activeStep === 3 && (
               <WizardPanel
                 title="Výskumné nastavenie"
-                subtitle="Klikni na kartu poľa, vyplň text v samostatnom okne a ulož hodnotu."
+                subtitle="Text vypĺňaj priamo v poliach. Zmeny sa priebežne zapisujú do profilu a ostanú zachované pri ďalšom kroku."
               >
                 <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                   <ClickEditField
@@ -2207,9 +2365,7 @@ function ProfileWizardModal({
                     placeholder="Čo je cieľom práce?"
                     required
                     multiline
-                    onClick={() =>
-                      openFieldEditor('goal', 'Cieľ práce', 'Čo je cieľom práce?', 5)
-                    }
+                    onChange={(value) => updateInlineField('goal', value)}
                   />
 
                   <ClickEditField
@@ -2218,14 +2374,7 @@ function ProfileWizardModal({
                     placeholder="Aký problém práca rieši?"
                     required
                     multiline
-                    onClick={() =>
-                      openFieldEditor(
-                        'problem',
-                        'Výskumný problém',
-                        'Aký problém práca rieši?',
-                        5,
-                      )
-                    }
+                    onChange={(value) => updateInlineField('problem', value)}
                   />
 
                   <ClickEditField
@@ -2234,14 +2383,7 @@ function ProfileWizardModal({
                     placeholder={activeTemplate.methodologyHint}
                     required
                     multiline
-                    onClick={() =>
-                      openFieldEditor(
-                        'methodology',
-                        'Metodológia',
-                        activeTemplate.methodologyHint,
-                        5,
-                      )
-                    }
+                    onChange={(value) => updateInlineField('methodology', value)}
                   />
 
                   <ClickEditField
@@ -2250,14 +2392,7 @@ function ProfileWizardModal({
                     placeholder="Výskumné otázky"
                     required
                     multiline
-                    onClick={() =>
-                      openFieldEditor(
-                        'researchQuestions',
-                        'Výskumné otázky',
-                        'Výskumné otázky',
-                        5,
-                      )
-                    }
+                    onChange={(value) => updateInlineField('researchQuestions', value)}
                   />
 
                   <ClickEditField
@@ -2265,9 +2400,7 @@ function ProfileWizardModal({
                     value={profile.hypotheses}
                     placeholder="Hypotézy práce"
                     multiline
-                    onClick={() =>
-                      openFieldEditor('hypotheses', 'Hypotézy', 'Hypotézy práce', 5)
-                    }
+                    onChange={(value) => updateInlineField('hypotheses', value)}
                   />
 
                   <ClickEditField
@@ -2275,14 +2408,7 @@ function ProfileWizardModal({
                     value={profile.practicalPart}
                     placeholder="Popíš praktickú alebo analytickú časť."
                     multiline
-                    onClick={() =>
-                      openFieldEditor(
-                        'practicalPart',
-                        'Praktická / analytická časť',
-                        'Popíš praktickú alebo analytickú časť.',
-                        5,
-                      )
-                    }
+                    onChange={(value) => updateInlineField('practicalPart', value)}
                   />
                 </div>
 
@@ -2334,14 +2460,8 @@ function ProfileWizardModal({
                       label="Odporúčaný rozsah"
                       value={profile.recommendedLength}
                       placeholder="Napr. 30 – 50 strán"
-                      onClick={() =>
-                        openFieldEditor(
-                          'recommendedLength',
-                          'Odporúčaný rozsah',
-                          'Napr. 30 – 50 strán',
-                        )
-                      }
-                    />
+                    onChange={(value) => updateInlineField('recommendedLength', value)}
+                  />
 
                     <CompactList
                       title="Štruktúra práce"
@@ -2410,27 +2530,6 @@ function ProfileWizardModal({
           </div>
         </main>
       </div>
-
-      {editingField && (
-        <FieldEditorModal
-          label={editingField.label}
-          value={String(profile[editingField.key] || '')}
-          placeholder={editingField.placeholder}
-          rows={editingField.rows || 1}
-          onClose={() => setEditingField(null)}
-          onSave={(value) => {
-            const key = editingField.key;
-
-            setProfile((prev) => ({
-              ...prev,
-              [key]: value,
-              updated_at: new Date().toISOString(),
-            }));
-
-            setEditingField(null);
-          }}
-        />
-      )}
 
       <footer className="shrink-0 border-t border-white/10 bg-[#070a16] px-4 py-3 xl:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2559,22 +2658,33 @@ function ClickEditField({
   placeholder,
   required = false,
   multiline = false,
-  onClick,
+  onChange,
 }: {
   label: string;
   value: string;
   placeholder?: string;
   required?: boolean;
   multiline?: boolean;
-  onClick: () => void;
+  onChange: (value: string) => void;
 }) {
-  const filled = Boolean(String(value || '').trim());
+  const displayValue = getWizardFieldDisplayValue(label, value);
+  const filled =
+    label === 'Kľúčové slová'
+      ? normalizeKeywordsInput(value).length > 0
+      : Boolean(displayValue);
+  const statusLabel = getWizardFieldStatusLabel(label, filled, required);
+
+  const inputClass = `mt-3 w-full rounded-2xl border px-4 py-3 text-sm font-semibold leading-6 text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:bg-white/[0.08] ${
+    filled
+      ? 'border-emerald-400/25 bg-emerald-500/[0.06]'
+      : required
+        ? 'border-amber-400/35 bg-amber-500/[0.07]'
+        : 'border-white/10 bg-white/[0.05]'
+  }`;
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`group min-h-[92px] rounded-3xl border p-4 text-left transition hover:-translate-y-0.5 hover:bg-white/[0.08] ${
+    <label
+      className={`block rounded-3xl border p-4 text-left transition ${
         filled
           ? 'border-emerald-400/25 bg-emerald-500/[0.06]'
           : required
@@ -2595,107 +2705,31 @@ function ClickEditField({
                 : 'bg-white/10 text-slate-400'
           }`}
         >
-          {filled ? 'Vyplnené' : required ? 'Chýba' : 'Voliteľné'}
+          {statusLabel}
         </span>
       </div>
 
-      <div
-        className={`mt-3 text-sm font-semibold leading-6 ${
-          filled ? 'line-clamp-2 text-white' : 'text-slate-500'
-        }`}
-      >
-        {filled ? value : placeholder || 'Kliknite a vyplňte hodnotu'}
+      {multiline ? (
+        <textarea
+          value={value || ''}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder || 'Vyplňte hodnotu'}
+          rows={5}
+          className={`${inputClass} min-h-[132px] resize-none`}
+        />
+      ) : (
+        <input
+          value={value || ''}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder || 'Vyplňte hodnotu'}
+          className={inputClass}
+        />
+      )}
+
+      <div className="mt-2 text-[11px] font-semibold text-slate-500">
+        Hodnota sa zapisuje priamo do profilu. Pred odchodom pokračuj cez Ďalší krok alebo Uložiť profil práce.
       </div>
-
-      <div className="mt-3 text-xs font-black text-violet-300 opacity-80 transition group-hover:opacity-100">
-        Kliknúť a upraviť{multiline ? ' text' : ''}
-      </div>
-    </button>
-  );
-}
-
-function FieldEditorModal({
-  label,
-  value,
-  placeholder,
-  rows = 1,
-  onSave,
-  onClose,
-}: {
-  label: string;
-  value: string;
-  placeholder?: string;
-  rows?: number;
-  onSave: (value: string) => void;
-  onClose: () => void;
-}) {
-  const [draft, setDraft] = useState(value || '');
-  const sharedClass =
-    'w-full rounded-3xl border border-white/10 bg-[#111827] px-5 py-4 text-base font-semibold leading-7 text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:bg-[#151b2c]';
-
-  return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-3xl rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl shadow-black/50">
-        <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5">
-          <div>
-            <div className="text-xs font-black uppercase tracking-[0.22em] text-violet-300">
-              Vyplnenie poľa
-            </div>
-            <h3 className="mt-2 text-2xl font-black text-white">{label}</h3>
-            <p className="mt-1 text-sm font-semibold text-slate-400">
-              Hodnota sa uloží do profilu práce po kliknutí na tlačidlo Uložiť pole.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-500/90 text-white transition hover:bg-red-400"
-            aria-label="Zavrieť pole"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        <div className="p-5">
-          {rows > 1 ? (
-            <textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder={placeholder}
-              rows={Math.max(rows, 5)}
-              className={`${sharedClass} min-h-[220px] resize-none`}
-              autoFocus
-            />
-          ) : (
-            <input
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder={placeholder}
-              className={sharedClass}
-              autoFocus
-            />
-          )}
-        </div>
-
-        <div className="flex flex-wrap justify-end gap-3 border-t border-white/10 p-5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
-          >
-            Zrušiť
-          </button>
-          <button
-            type="button"
-            onClick={() => onSave(draft)}
-            className="rounded-2xl bg-blue-600 px-6 py-3 text-sm font-black text-white transition hover:bg-blue-500"
-          >
-            Uložiť pole
-          </button>
-        </div>
-      </div>
-    </div>
+    </label>
   );
 }
 

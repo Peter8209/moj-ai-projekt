@@ -926,6 +926,80 @@ function getErrorMessage(error: unknown) {
   return 'Nepodarilo sa vygenerovať prezentáciu na obhajobu.';
 }
 
+
+function isOpenAiRateLimitError(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase();
+
+  return (
+    message.includes('429') ||
+    message.includes('rate_limit') ||
+    message.includes('rate limit') ||
+    message.includes('tokens per min') ||
+    message.includes('tpm')
+  );
+}
+
+function buildFallbackDefenseResponse({
+  finalTitle,
+  defenseType,
+  profile,
+  reviewFiles,
+  hasWorkText,
+  warning,
+  model = MODEL,
+  shortInstructionDetected = false,
+}: {
+  finalTitle: string;
+  defenseType: string;
+  profile: SavedProfile | null;
+  reviewFiles: ReviewFileInfo[];
+  hasWorkText: boolean;
+  warning: string;
+  model?: string;
+  shortInstructionDetected?: boolean;
+}): DefenseResponse {
+  const slides = buildFallbackSlides({
+    title: finalTitle,
+    defenseType,
+    profile,
+    reviewFilesCount: reviewFiles.length,
+    hasWorkText,
+  });
+
+  const textOutput = buildPlainTextOutput(slides);
+  const extractedFilesCount = reviewFiles.filter((file) => file.extractionAvailable).length;
+  const imageFilesCount = reviewFiles.filter((file) => file.detectedKind === 'image').length;
+
+  return {
+    ok: true,
+    slides,
+    textOutput,
+    reviewsCount: reviewFiles.length,
+    reviews: reviewFiles.map((file) => ({
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      compressed: file.compressed,
+      extractionAvailable: file.extractionAvailable,
+      warning: file.warning,
+      detectedKind: file.detectedKind,
+    })),
+    allowedExports: ['docx', 'pptx', 'pdf'],
+    disallowedExports: ['xlsx'],
+    warning,
+    meta: {
+      model,
+      finalTitle,
+      workTextChars: 0,
+      extractedFilesCount,
+      imageFilesCount,
+      generatedSlidesCount: slides.length,
+      fallbackUsed: true,
+      shortInstructionDetected,
+    },
+  };
+}
+
 function buildCombinedWorkText({
   summary,
   clientExtractedText,
@@ -985,21 +1059,32 @@ export async function POST(req: NextRequest) {
       ...formData.getAll('attachments'),
     ].filter((item): item is File => item instanceof File);
 
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json<DefenseResponse>(
-        {
-          ok: false,
-          error: 'Chýba OPENAI_API_KEY v .env.local.',
-        },
-        { status: 500 },
-      );
-    }
-
     const finalTitle =
       title ||
       cleanClientVisibleText(profile?.title || '') ||
       cleanClientVisibleText(profile?.topic || '') ||
       'Obhajoba záverečnej práce';
+
+    if (!process.env.OPENAI_API_KEY) {
+      const fallback = buildFallbackDefenseResponse({
+        finalTitle,
+        defenseType,
+        profile,
+        reviewFiles: [],
+        hasWorkText: Boolean(
+          summary ||
+            formData.get('clientExtractedText') ||
+            formData.get('attachmentText') ||
+            formData.get('attachmentTexts'),
+        ),
+        warning:
+          'Chýba OPENAI_API_KEY v .env.local. Bol použitý náhradný základ prezentácie bez volania AI.',
+        model: 'fallback-no-openai-key',
+        shortInstructionDetected,
+      });
+
+      return NextResponse.json<DefenseResponse>(fallback);
+    }
 
     const reviewFiles: ReviewFileInfo[] = [];
 
@@ -1055,43 +1140,54 @@ export async function POST(req: NextRequest) {
 
     const reviewsBlock = buildReviewsPromptBlock(reviewFiles);
 
-    const completion = await openai.chat.completions.create({
-      model: MODEL,
-      temperature: 0.22,
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content: buildSystemPrompt(),
-        },
-        {
-          role: 'user',
-          content: buildUserPrompt({
-            title: finalTitle,
-            instruction,
-            workText,
-            defenseType,
-            profile,
-            reviewsBlock,
-            hasWorkText,
-          }),
-        },
-      ],
-    });
-
-    const raw = extractJsonObject(completion.choices[0]?.message?.content || '{}');
-
-    let parsed: unknown = {};
-
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = {};
-    }
-
-    let slides = normalizeSlides(parsed);
+    let slides: DefenseSlide[] = [];
     let warning: string | undefined;
     let fallbackUsed = false;
+
+    try {
+      const completion = await openai.chat.completions.create({
+        model: MODEL,
+        temperature: 0.22,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: buildSystemPrompt(),
+          },
+          {
+            role: 'user',
+            content: buildUserPrompt({
+              title: finalTitle,
+              instruction,
+              workText,
+              defenseType,
+              profile,
+              reviewsBlock,
+              hasWorkText,
+            }),
+          },
+        ],
+      });
+
+      const raw = extractJsonObject(completion.choices[0]?.message?.content || '{}');
+
+      let parsed: unknown = {};
+
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = {};
+      }
+
+      slides = normalizeSlides(parsed);
+    } catch (aiError) {
+      console.error('DEFENSE_OPENAI_ERROR:', aiError);
+
+      fallbackUsed = true;
+      warning = isOpenAiRateLimitError(aiError)
+        ? 'OpenAI dočasne vrátil limit 429/rate limit. Bol použitý náhradný základ prezentácie bez ďalšieho volania AI.'
+        : `AI generovanie prezentácie zlyhalo: ${getErrorMessage(aiError)} Bol použitý náhradný základ prezentácie.`;
+    }
 
     if (hasWorkText && slides.length < MIN_SLIDES_WITH_WORK_TEXT) {
       warning = `AI vrátila iba ${slides.length} slidov, hoci bol dostupný text práce. Bol použitý rozšírený základ prezentácie.`;

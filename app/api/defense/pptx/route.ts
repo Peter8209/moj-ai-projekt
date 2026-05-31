@@ -1,1218 +1,1820 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
-import { GLOBAL_ACADEMIC_SYSTEM_PROMPT } from '@/lib/ai-system-prompt';
-import { getZedperaErrorMessage } from '@/lib/api-error-messages';
+import pptxgen from 'pptxgenjs';
+
+// DÔLEŽITÉ: pptxgenjs musí zostať iba v API route/serverovom súbore.
+// Nesmie byť importovaný v DashboardClient.tsx ani inom 'use client' komponente.
+const pptx = pptxgen;
+
+// pptxgenjs v niektorých Next.js runtime buildoch neposkytuje ShapeType cez default import
+// (pptx.ShapeType môže byť undefined). Používame preto stabilné string hodnoty
+// podporované funkciou slide.addShape().
+const ShapeType = {
+  rect: 'rect',
+  roundRect: 'roundRect',
+  ellipse: 'ellipse',
+  line: 'line',
+} as const;
+
+type PptxGen = InstanceType<typeof pptxgen>;
+type PptxSlide = ReturnType<PptxGen['addSlide']>;
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 90;
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const AUDIT_END_MARKER = 'KONIEC AUDITU';
-
-const MIN_TEXT_LENGTH = 300;
-const MAX_MANUAL_TEXT_LENGTH = 30000;
-const MAX_ATTACHMENT_TEXT_LENGTH = 30000;
-const MAX_TOTAL_SOURCE_LENGTH = 50000;
-
-type SavedProfile = {
-  id?: string;
-  type?: string;
-  level?: string;
+type DefenseTable = {
   title?: string;
-  topic?: string;
-  field?: string;
-  supervisor?: string;
-  citation?: string;
-  language?: string;
-  workLanguage?: string;
-
-  annotation?: string;
-  goal?: string;
-  problem?: string;
-  researchProblem?: string;
-  methodology?: string;
-  hypotheses?: string;
-  researchQuestions?: string;
-  practicalPart?: string;
-  scientificContribution?: string;
-  sourcesRequirement?: string;
-
-  keywords?: string[];
-  keywordsList?: string[];
+  headers?: string[];
+  rows?: Array<Array<string | number>>;
 };
 
-type UploadedAttachment = {
-  id?: string;
-  name?: string;
-  filename?: string;
-  originalName?: string;
-  type?: string;
-  mimeType?: string;
-  size?: number;
-  extension?: string;
-  url?: string;
+type DefenseChart = {
+  title?: string;
+  type?: 'bar' | 'column' | 'progress';
+  labels?: string[];
+  values?: number[];
+  unit?: string;
+};
+
+type DefenseImage = {
+  title?: string;
+  data?: string;
   path?: string;
-
-  text?: string;
-  content?: string;
-  extractedText?: string;
-  markdown?: string;
-  rawText?: string;
-
-  wasCompressed?: boolean;
-  originalSize?: number;
-  finalSize?: number;
+  alt?: string;
 };
 
-type AuditRequest = {
-  text?: string;
-  checkType?: string;
-  outputType?: string;
-  citationStyle?: string;
-
-  activeProfile?: SavedProfile | null;
-  profile?: SavedProfile | null;
-
-  attachments?: UploadedAttachment[];
-
-  title?: string;
-  workType?: string;
-  language?: string;
-
-  prompt?: string;
-  instruction?: string;
-  cleanOutput?: boolean;
-  removeBrokenEncoding?: boolean;
-  outputFormat?: string;
-  requireEndMarker?: string;
-  maxOutputTokens?: number;
-
-  auditDate?: string;
-  auditReferenceDate?: string;
-  auditReferenceIsoDate?: string;
-  auditCurrentYear?: number;
-  currentYear?: number;
-  temporalValidation?: {
-    currentYear?: number;
-    auditDate?: string;
-    futureYearRule?: string;
-  };
+type DefenseSlide = {
+  title: string;
+  bullets: string[];
+  speakerNotes?: string;
+  layout?:
+    | 'cover'
+    | 'agenda'
+    | 'section'
+    | 'bullets'
+    | 'split'
+    | 'table'
+    | 'chart'
+    | 'quote'
+    | 'image'
+    | 'closing';
+  visualSuggestion?: string;
+  table?: DefenseTable;
+  chart?: DefenseChart;
+  images?: DefenseImage[];
 };
 
-type CitationAuditResult = {
-  expectedStyle: string;
-  detectedStyles: string[];
-  hasMismatch: boolean;
-  warnings: string[];
+type DefensePptxRequestBody = {
+  title?: unknown;
+  defenseType?: unknown;
+  slides?: unknown;
+  sourceText?: unknown;
+  extractedWorkText?: unknown;
+  attachmentText?: unknown;
+  text?: unknown;
+  workTitle?: unknown;
+  theme?: unknown;
 };
 
-type AttachmentRelevanceResult = {
-  name: string;
-  score: number;
-  related: boolean;
-  matchedKeywords: string[];
-  warning?: string;
+type ThemeName = 'dark' | 'light' | 'academic';
+
+type PptTheme = {
+  name: ThemeName;
+  bg: string;
+  bg2: string;
+  card: string;
+  card2: string;
+  text: string;
+  muted: string;
+  accent: string;
+  accent2: string;
+  border: string;
+  danger: string;
+  soft: string;
 };
 
-type AuditDateInfo = {
-  auditDate: string;
-  auditIsoDate: string;
-  currentYear: number;
+const SLIDE_W = 13.333;
+const SLIDE_H = 7.5;
+
+const MAX_BULLETS_PER_SLIDE = 5;
+const MAX_TABLE_ROWS = 8;
+const MAX_TABLE_COLS = 6;
+const MAX_CHART_ITEMS = 7;
+const MAX_SOURCE_TEXT_CHARS = 220_000;
+const MAX_EXPORTED_SLIDES = 18;
+
+const THEMES: Record<ThemeName, PptTheme> = {
+  dark: {
+    name: 'dark',
+    bg: '070B1A',
+    bg2: '111827',
+    card: '151B2E',
+    card2: '1E293B',
+    text: 'FFFFFF',
+    muted: 'CBD5E1',
+    accent: '7C3AED',
+    accent2: '22C55E',
+    border: '334155',
+    danger: 'EF4444',
+    soft: '10182C',
+  },
+  light: {
+    name: 'light',
+    bg: 'F8FAFC',
+    bg2: 'EEF2FF',
+    card: 'FFFFFF',
+    card2: 'F1F5F9',
+    text: '0F172A',
+    muted: '475569',
+    accent: '7C3AED',
+    accent2: '0284C7',
+    border: 'CBD5E1',
+    danger: 'DC2626',
+    soft: 'EDE9FE',
+  },
+  academic: {
+    name: 'academic',
+    bg: 'F8FAFC',
+    bg2: 'EEF2FF',
+    card: 'FFFFFF',
+    card2: 'F1F5F9',
+    text: '111827',
+    muted: '4B5563',
+    accent: '4F46E5',
+    accent2: '0F766E',
+    border: 'D1D5DB',
+    danger: 'B91C1C',
+    soft: 'EEF2FF',
+  },
 };
-
-function getAuditDateInfo(body?: AuditRequest): AuditDateInfo {
-  const now = new Date();
-
-  const serverCurrentYear = now.getFullYear();
-
-  const requestedYear =
-    Number(body?.auditCurrentYear) ||
-    Number(body?.currentYear) ||
-    Number(body?.temporalValidation?.currentYear);
-
-  const currentYear =
-    Number.isFinite(requestedYear) && requestedYear >= 2020
-      ? Math.max(serverCurrentYear, Math.round(requestedYear))
-      : serverCurrentYear;
-
-  const auditDate =
-    cleanText(body?.auditReferenceDate) ||
-    cleanText(body?.auditDate) ||
-    cleanText(body?.temporalValidation?.auditDate) ||
-    new Intl.DateTimeFormat('sk-SK', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-    }).format(now);
-
-  const auditIsoDate = body?.auditReferenceIsoDate || now.toISOString();
-
-  return {
-    auditDate,
-    auditIsoDate,
-    currentYear,
-  };
-}
-
-function buildDateRules(dateInfo: AuditDateInfo): string {
-  return `
-REFERENČNÝ DÁTUM AUDITU:
-- Dátum auditu: ${dateInfo.auditDate}
-- ISO dátum auditu: ${dateInfo.auditIsoDate}
-- Aktuálny rok: ${dateInfo.currentYear}
-
-PRAVIDLÁ PRE KONTROLU ROKOV A ČASOVÝCH ÚDAJOV:
-1. Pri hodnotení rokov, dátumov a časových formulácií používaj výhradne referenčný dátum auditu uvedený vyššie.
-2. Aktuálny rok je ${dateInfo.currentYear}.
-3. Roky menšie alebo rovné ${dateInfo.currentYear} nikdy neoznačuj ako budúcnosť.
-4. Ako budúce označ iba roky väčšie ako ${dateInfo.currentYear}.
-5. Rok ${dateInfo.currentYear} je aktuálny rok, nie budúcnosť.
-6. Roky 2025 a 2026 neoznačuj automaticky ako budúcnosť. Posudzuj ich podľa aktuálneho roka ${dateInfo.currentYear}.
-7. Ak je aktuálny rok ${dateInfo.currentYear}, potom každý rok menší alebo rovný ${dateInfo.currentYear} považuj za minulý alebo aktuálny, nie budúci.
-8. Neupozorňuj na rok ako chybný iba preto, že je vyšší než interný tréningový dátum modelu.
-9. Ak text obsahuje roky 2025 alebo 2026 a aktuálny rok je ${dateInfo.currentYear} alebo vyšší, nepíš, že ide o budúce roky.
-10. Ak nie je zistený skutočný problém s časovými údajmi, napíš, že časové údaje boli posúdené podľa aktuálneho dátumu auditu a nebol zistený problém s budúcimi rokmi.
-`.trim();
-}
 
 function cleanText(value: unknown): string {
   return String(value || '')
+    .replace(/\u0000/g, '')
     .replace(/\uFEFF/g, '')
     .replace(/\u200B/g, '')
     .replace(/\u200C/g, '')
     .replace(/\u200D/g, '')
-    .replace(/\uFFFD/g, '')
-    .replace(/Â+/g, '')
-    .replace(/Ã¡/g, 'á')
-    .replace(/Ã¤/g, 'ä')
-    .replace(/Ãč/g, 'č')
-    .replace(/Ä/g, 'č')
-    .replace(/Ä/g, 'ď')
-    .replace(/Ã©/g, 'é')
-    .replace(/Ä›/g, 'ě')
-    .replace(/Ã­/g, 'í')
-    .replace(/Äľ/g, 'ľ')
-    .replace(/Ä¾/g, 'ľ')
-    .replace(/Åˆ/g, 'ň')
-    .replace(/Ã³/g, 'ó')
-    .replace(/Ã´/g, 'ô')
-    .replace(/Å•/g, 'ŕ')
-    .replace(/Å¡/g, 'š')
-    .replace(/Å¥/g, 'ť')
-    .replace(/Ãº/g, 'ú')
-    .replace(/Ã½/g, 'ý')
-    .replace(/Å¾/g, 'ž')
-    .replace(/ÄŚ/g, 'Č')
-    .replace(/ÄŽ/g, 'Ď')
-    .replace(/Ã‰/g, 'É')
-    .replace(/Ä˝/g, 'Ľ')
-    .replace(/Å‡/g, 'Ň')
-    .replace(/Ã“/g, 'Ó')
-    .replace(/Å Š/g, 'Š')
-    .replace(/Å½/g, 'Ž')
-    .replace(/â€™/g, "'")
-    .replace(/â€˜/g, "'")
-    .replace(/â€œ/g, '"')
-    .replace(/â€/g, '"')
-    .replace(/â€“/g, '–')
-    .replace(/â€”/g, '—')
-    .replace(/â€¦/g, '…')
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{4,}/g, '\n\n\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
-function normalizePlainText(value: unknown): string {
-  return cleanText(value)
-    .toLowerCase()
+function cleanInlineText(value: unknown): string {
+  return cleanText(value).replace(/\s+/g, ' ').trim();
+}
+
+function truncate(value: string, max = MAX_SOURCE_TEXT_CHARS): string {
+  const text = cleanText(value);
+
+  if (text.length <= max) return text;
+
+  const start = text.slice(0, Math.floor(max * 0.48));
+  const middleStart = Math.max(
+    0,
+    Math.floor(text.length / 2) - Math.floor(max * 0.12),
+  );
+  const middle = text.slice(middleStart, middleStart + Math.floor(max * 0.24));
+  const end = text.slice(text.length - Math.floor(max * 0.28));
+
+  return `${start}\n\n${middle}\n\n${end}`.trim();
+}
+
+function safeFileName(value: string): string {
+  const safe = value
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/[^a-zA-Z0-9-_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
+
+  return safe || 'obhajoba';
 }
 
-function limitText(value: string, maxLength: number) {
-  const cleaned = cleanText(value);
+function asThemeName(value: unknown): ThemeName {
+  const theme = String(value || '').toLowerCase().trim();
 
-  if (cleaned.length <= maxLength) {
-    return {
-      text: cleaned,
-      truncated: false,
-      originalLength: cleaned.length,
-      usedLength: cleaned.length,
-    };
-  }
+  if (theme === 'light') return 'light';
+  if (theme === 'academic') return 'academic';
+
+  return 'dark';
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function parseNumber(value: unknown): number | null {
+  const normalized = String(value || '')
+    .replace(/\s+/g, '')
+    .replace(',', '.')
+    .replace(/[^0-9.-]/g, '');
+
+  if (!normalized || normalized === '-' || normalized === '.') return null;
+
+  const parsed = Number(normalized);
+
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeTable(value: unknown): DefenseTable | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+
+  const raw = value as Record<string, unknown>;
+
+  const headers = Array.isArray(raw.headers)
+    ? raw.headers
+        .map((item) => cleanInlineText(item))
+        .filter(Boolean)
+        .slice(0, MAX_TABLE_COLS)
+    : [];
+
+  const rows = Array.isArray(raw.rows)
+    ? raw.rows
+        .filter((row): row is unknown[] => Array.isArray(row))
+        .map((row) =>
+          row
+            .map((cell) => cleanInlineText(cell))
+            .slice(0, MAX_TABLE_COLS),
+        )
+        .filter((row) => row.some(Boolean))
+        .slice(0, MAX_TABLE_ROWS)
+    : [];
+
+  if (!headers.length && !rows.length) return undefined;
 
   return {
-    text: cleaned.slice(0, maxLength).trim(),
-    truncated: true,
-    originalLength: cleaned.length,
-    usedLength: maxLength,
+    title: cleanInlineText(raw.title),
+    headers,
+    rows,
   };
 }
 
-function removeBadAuditStart(value: string): string {
-  return cleanText(value)
-    .replace(/^Audit\s+kvality\s*[-–—:]?.*$/im, '')
-    .replace(/^AI\s+audit\s+kvality\s*[-–—:]?.*$/im, '')
-    .replace(/^Ako\s+audit\s+kvality\s*,?\s*/i, '')
-    .replace(/^Ako\s+AI\s+audítor\s*,?\s*/i, '')
-    .replace(/^Ako\s+AI\s+model\s*,?\s*/i, '')
-    .replace(/^Dobrý\s+deň\s*,?\s*/i, '')
-    .replace(/^Vážený\s+študent\s*,?\s*/i, '')
-    .replace(/^Predmet\s*:.*$/gim, '')
-    .replace(/^Email\s*:.*$/gim, '')
-    .replace(/^Interná\s+inštrukcia\s*:.*$/gim, '')
-    .replace(/^Systémová\s+inštrukcia\s*:.*$/gim, '')
-    .replace(/^Technická\s+poznámka\s+pre\s+systém\s*:.*$/gim, '')
-    .replace(/^Výstup\s+nebude\s+začínať.*$/gim, '')
-    .replace(/^Klient\s+nemá\s+vidieť.*$/gim, '')
-    .replace(/^Model\s+má.*$/gim, '')
-    .replace(/^Použi\s+aktuálny\s+profil.*$/gim, '')
-    .replace(/^Tento\s+výstup\s+bol\s+vygenerovaný.*$/gim, '')
-    .replace(/klient nemá vidieť/gi, '')
-    .replace(/kozmetické úpravy/gi, '')
-    .replace(/interné pravidlá/gi, '')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/__(.*?)__/g, '$1')
-    .replace(/```[a-zA-Z]*\n?/g, '')
-    .replace(/```/g, '')
-    .replace(/^\s*[-*_]{3,}\s*$/gm, '')
-    .replace(/\n{4,}/g, '\n\n\n')
-    .trim();
+function normalizeChart(value: unknown): DefenseChart | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+
+  const raw = value as Record<string, unknown>;
+
+  const labels = Array.isArray(raw.labels)
+    ? raw.labels
+        .map((item) => cleanInlineText(item))
+        .filter(Boolean)
+        .slice(0, MAX_CHART_ITEMS)
+    : [];
+
+  const values = Array.isArray(raw.values)
+    ? raw.values
+        .map((item) => parseNumber(item))
+        .filter((item): item is number => item !== null)
+        .slice(0, labels.length || MAX_CHART_ITEMS)
+    : [];
+
+  if (!labels.length || !values.length) return undefined;
+
+  const count = Math.min(labels.length, values.length, MAX_CHART_ITEMS);
+
+  return {
+    title: cleanInlineText(raw.title),
+    type:
+      raw.type === 'progress' || raw.type === 'column' || raw.type === 'bar'
+        ? raw.type
+        : 'bar',
+    labels: labels.slice(0, count),
+    values: values.slice(0, count),
+    unit: cleanInlineText(raw.unit),
+  };
 }
 
-function removeEndMarker(value: string): string {
-  return cleanText(value)
-    .replace(new RegExp(`\\s*${AUDIT_END_MARKER}\\s*$`, 'i'), '')
-    .trim();
-}
-
-function hasEndMarker(value: string): boolean {
-  return cleanText(value).toUpperCase().includes(AUDIT_END_MARKER);
-}
-
-function getProfileKeywords(profile?: SavedProfile | null): string {
-  if (!profile) return 'nezadané';
-
-  if (Array.isArray(profile.keywords) && profile.keywords.length > 0) {
-    return profile.keywords.map(cleanText).filter(Boolean).join(', ');
-  }
-
-  if (Array.isArray(profile.keywordsList) && profile.keywordsList.length > 0) {
-    return profile.keywordsList.map(cleanText).filter(Boolean).join(', ');
-  }
-
-  return 'nezadané';
-}
-
-function formatFileSize(bytes?: number): string {
-  if (!bytes || Number.isNaN(bytes)) return 'nezadané';
-
-  if (bytes < 1024) return `${bytes} B`;
-
-  if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)} KB`;
-  }
-
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function getAttachmentName(file: UploadedAttachment, index: number): string {
-  return cleanText(
-    file.name ||
-      file.filename ||
-      file.originalName ||
-      `priloha-${index + 1}`,
-  );
-}
-
-function getAttachmentType(file: UploadedAttachment): string {
-  return cleanText(file.type || file.mimeType || file.extension || 'nezadané');
-}
-
-function getAttachmentText(file: UploadedAttachment): string {
-  return cleanText(
-    file.text ||
-      file.content ||
-      file.extractedText ||
-      file.markdown ||
-      file.rawText ||
-      '',
-  );
-}
-
-function normalizeAttachments(value: unknown): UploadedAttachment[] {
+function normalizeImages(value: unknown): DefenseImage[] {
   if (!Array.isArray(value)) return [];
 
-  return value.filter((item) => item && typeof item === 'object') as UploadedAttachment[];
-}
+  return value
+    .map((item): DefenseImage | null => {
+      if (!item || typeof item !== 'object') return null;
 
-function getTotalAttachmentTextLength(attachments: UploadedAttachment[]): number {
-  return attachments.reduce((total, file) => {
-    return total + getAttachmentText(file).length;
-  }, 0);
-}
+      const raw = item as Record<string, unknown>;
 
-function resolveTitle(body: AuditRequest, profile?: SavedProfile | null): string {
-  return (
-    cleanText(body.title) ||
-    cleanText(profile?.title) ||
-    cleanText(profile?.topic) ||
-    'Kontrolovaná akademická práca'
-  );
-}
+      const title = cleanInlineText(raw.title);
+      const data = cleanInlineText(raw.data);
+      const path = cleanInlineText(raw.path);
+      const alt = cleanInlineText(raw.alt || title || 'Obrázok');
 
-function resolveWorkType(body: AuditRequest, profile?: SavedProfile | null): string {
-  return (
-    cleanText(body.workType) ||
-    cleanText(profile?.type) ||
-    'akademická práca'
-  );
-}
+      if (!data && !path) return null;
 
-function resolveLanguage(body: AuditRequest, profile?: SavedProfile | null): string {
-  return (
-    cleanText(body.language) ||
-    cleanText(profile?.workLanguage) ||
-    cleanText(profile?.language) ||
-    'slovenčina'
-  );
-}
-
-function resolveResearchProblem(profile?: SavedProfile | null): string {
-  return cleanText(profile?.problem) || cleanText(profile?.researchProblem) || 'nezadané';
-}
-
-function resolveCitationStyle(body: AuditRequest, profile?: SavedProfile | null): string {
-  return (
-    cleanText(body.citationStyle) ||
-    cleanText(profile?.citation) ||
-    'ISO 690'
-  );
-}
-
-function resolveMaxOutputTokens(body: AuditRequest): number {
-  const requested = Number(body.maxOutputTokens);
-
-  if (Number.isFinite(requested) && requested >= 2000) {
-    return Math.min(Math.round(requested), 6000);
-  }
-
-  return 4500;
-}
-
-function normalizeCitationStyle(style: string | undefined | null): string {
-  const value = cleanText(style).toLowerCase();
-
-  if (!value) return 'neuvedená';
-  if (value.includes('apa')) return 'APA';
-  if (value.includes('chicago')) return 'Chicago';
-  if (value.includes('iso')) return 'ISO 690';
-  if (value.includes('mla')) return 'MLA';
-  if (value.includes('harvard')) return 'Harvard';
-  if (value.includes('vancouver')) return 'Vancouver';
-
-  return cleanText(style);
-}
-
-function hasApaPattern(text: string): boolean {
-  const source = cleanText(text);
-
-  const patterns = [
-    /\(([A-ZÁČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záčďéíĺľňóôŕšťúýž]+,\s?\d{4}[a-z]?)\)/,
-    /\(([A-ZÁČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záčďéíĺľňóôŕšťúýž]+ et al\.,\s?\d{4}[a-z]?)\)/i,
-    /[A-ZÁČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záčďéíĺľňóôŕšťúýž]+\s?\(\d{4}[a-z]?\)/,
-    /\([A-ZÁČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záčďéíĺľňóôŕšťúýž]+ & [A-ZÁČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záčďéíĺľňóôŕšťúýž]+,\s?\d{4}[a-z]?\)/,
-  ];
-
-  return patterns.some((pattern) => pattern.test(source));
-}
-
-function hasChicagoPattern(text: string): boolean {
-  const source = cleanText(text);
-
-  const patterns = [
-    /\bIbid\.|\bibid\./,
-    /\bpoznámka pod čiarou\b/i,
-    /\bfootnote\b/i,
-    /\bnotes and bibliography\b/i,
-    /\bBibliography\b/i,
-    /\bBibliografia\b/i,
-    /(?:^|\n)\s*\d+\.\s+[A-ZÁČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][^.\n]+,\s[^.\n]+/,
-  ];
-
-  return patterns.some((pattern) => pattern.test(source));
-}
-
-function hasIso690Pattern(text: string): boolean {
-  const source = cleanText(text);
-
-  const patterns = [
-    /[A-ZÁČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]{2,},\s+[A-ZÁČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]/,
-    /\bDostupné na internete\b/i,
-    /\bAvailable from\b/i,
-    /\bISBN\b/i,
-    /\bISSN\b/i,
-    /\bDOI\b/i,
-  ];
-
-  return patterns.some((pattern) => pattern.test(source));
-}
-
-function auditCitationStyle(
-  text: string,
-  expectedStyleRaw: string | undefined | null,
-): CitationAuditResult {
-  const expectedStyle = normalizeCitationStyle(expectedStyleRaw);
-  const detectedStyles: string[] = [];
-  const warnings: string[] = [];
-
-  const source = cleanText(text);
-
-  if (!source.trim()) {
-    return {
-      expectedStyle,
-      detectedStyles,
-      hasMismatch: false,
-      warnings: [
-        'Text neobsahuje dostatok údajov na spoľahlivú kontrolu citačnej normy.',
-      ],
-    };
-  }
-
-  if (hasApaPattern(source)) detectedStyles.push('APA');
-  if (hasChicagoPattern(source)) detectedStyles.push('Chicago');
-  if (hasIso690Pattern(source)) detectedStyles.push('ISO 690');
-
-  const uniqueDetected = Array.from(new Set(detectedStyles));
-
-  const hasMismatch =
-    expectedStyle !== 'neuvedená' &&
-    uniqueDetected.length > 0 &&
-    !uniqueDetected.includes(expectedStyle);
-
-  if (hasMismatch) {
-    warnings.push(
-      `V profile práce je nastavená citačná norma ${expectedStyle}, ale v texte boli rozpoznané znaky citačného štýlu ${uniqueDetected.join(
-        ', ',
-      )}.`,
-    );
-  }
-
-  if (expectedStyle === 'Chicago' && uniqueDetected.includes('APA')) {
-    warnings.push(
-      'Text pravdepodobne používa APA citácie typu autor – rok v zátvorke, čo nie je v súlade s nastavenou citačnou normou Chicago.',
-    );
-  }
-
-  if (expectedStyle === 'APA' && uniqueDetected.includes('Chicago')) {
-    warnings.push(
-      'Text pravdepodobne používa poznámkový alebo bibliografický štýl typický pre Chicago, hoci v profile je nastavená norma APA.',
-    );
-  }
-
-  if (expectedStyle === 'ISO 690' && uniqueDetected.includes('APA')) {
-    warnings.push(
-      'Text pravdepodobne používa APA citácie typu autor – rok. Pri nastavenej norme ISO 690 treba upraviť citácie a bibliografické záznamy podľa ISO 690.',
-    );
-  }
-
-  if (uniqueDetected.length === 0) {
-    warnings.push(
-      'V texte sa nepodarilo spoľahlivo rozpoznať citačný štýl. Odporúča sa manuálna kontrola citácií a zoznamu literatúry.',
-    );
-  }
-
-  return {
-    expectedStyle,
-    detectedStyles: uniqueDetected,
-    hasMismatch,
-    warnings,
-  };
-}
-
-function extractKeywords(value: string): string[] {
-  const stopwords = new Set([
-    'a',
-    'aj',
-    'ale',
-    'alebo',
-    'ako',
-    'bez',
-    'bol',
-    'bola',
-    'boli',
-    'bude',
-    'budú',
-    'cez',
-    'čo',
-    'do',
-    'je',
-    'jeho',
-    'jej',
-    'ich',
-    'ktorý',
-    'ktorá',
-    'ktoré',
-    'na',
-    'nad',
-    'nie',
-    'od',
-    'pod',
-    'pre',
-    'pri',
-    'sa',
-    'si',
-    'sme',
-    'sú',
-    'táto',
-    'tento',
-    'tieto',
-    'to',
-    'vo',
-    'v',
-    'z',
-    'za',
-    'zo',
-    'the',
-    'and',
-    'or',
-    'of',
-    'to',
-    'in',
-    'for',
-    'with',
-  ]);
-
-  return normalizePlainText(value)
-    .split(' ')
-    .filter((word) => word.length >= 4 && !stopwords.has(word));
-}
-
-function checkAttachmentProfileRelevance(
-  attachment: UploadedAttachment,
-  index: number,
-  profile?: SavedProfile | null,
-): AttachmentRelevanceResult {
-  const name = getAttachmentName(attachment, index);
-
-  const profileText = [
-    profile?.title,
-    profile?.topic,
-    profile?.field,
-    profile?.annotation,
-    profile?.goal,
-    resolveResearchProblem(profile),
-    profile?.methodology,
-    profile?.hypotheses,
-    profile?.researchQuestions,
-    profile?.practicalPart,
-    profile?.scientificContribution,
-    profile?.sourcesRequirement,
-    getProfileKeywords(profile),
-  ]
-    .filter(Boolean)
-    .join(' ');
-
-  const attachmentText = [
-    name,
-    getAttachmentText(attachment),
-  ]
-    .filter(Boolean)
-    .join(' ');
-
-  if (!cleanText(profileText) || !cleanText(attachmentText)) {
-    return {
-      name,
-      score: 0,
-      related: true,
-      matchedKeywords: [],
-      warning:
-        'Súlad prílohy s profilom práce nebolo možné úplne vyhodnotiť, pretože chýba profil alebo extrahovaný text prílohy.',
-    };
-  }
-
-  const profileKeywords = Array.from(new Set(extractKeywords(profileText)));
-  const normalizedAttachment = normalizePlainText(attachmentText);
-
-  const matchedKeywords = profileKeywords.filter((keyword) =>
-    normalizedAttachment.includes(keyword),
-  );
-
-  const score =
-    profileKeywords.length === 0
-      ? 0
-      : Math.round((matchedKeywords.length / profileKeywords.length) * 100);
-
-  const related = score >= 15 || matchedKeywords.length >= 3;
-
-  return {
-    name,
-    score,
-    related,
-    matchedKeywords,
-    warning: related
-      ? undefined
-      : `Príloha "${name}" pravdepodobne nesúvisí s aktívnym profilom práce. Zhoda s profilom je iba ${score} %.`,
-  };
-}
-
-function buildAttachmentsBlock(attachments: UploadedAttachment[]): string {
-  if (!attachments.length) {
-    return 'Neboli priložené žiadne prílohy.';
-  }
-
-  let totalUsedLength = 0;
-
-  return attachments
-    .map((file, index) => {
-      const name = getAttachmentName(file, index);
-      const type = getAttachmentType(file);
-      const size = formatFileSize(file.size);
-      const originalFileText = getAttachmentText(file);
-
-      const remainingLimit = Math.max(0, MAX_TOTAL_SOURCE_LENGTH - totalUsedLength);
-      const fileLimit = Math.min(MAX_ATTACHMENT_TEXT_LENGTH, remainingLimit);
-
-      const limitedFileText = limitText(originalFileText, fileLimit);
-      totalUsedLength += limitedFileText.usedLength;
-
-      const truncationInfo = limitedFileText.truncated
-        ? `Text prílohy bol skrátený z ${limitedFileText.originalLength} na ${limitedFileText.usedLength} znakov, aby sa audit neodsekol.`
-        : 'Text prílohy nebol skrátený.';
-
-      const compressionInfo =
-        file.wasCompressed || file.originalSize || file.finalSize
-          ? `Kompresia: ${
-              file.wasCompressed
-                ? `súbor bol komprimovaný z ${formatFileSize(file.originalSize)} na ${formatFileSize(file.finalSize || file.size)}`
-                : 'súbor nebol komprimovaný'
-            }.`
-          : 'Kompresia: nezadané.';
-
-      return `
-PRÍLOHA ${index + 1}
-Názov súboru: ${name}
-Typ súboru: ${type}
-Veľkosť: ${size}
-URL / cesta: ${file.url || file.path || 'nezadané'}
-Stav textu: ${truncationInfo}
-${compressionInfo}
-
-OBSAH PRÍLOHY:
-"""
-${
-  limitedFileText.text ||
-  'Text z prílohy nebol dostupný. Ak ide o PDF/DOCX, skontroluj, či /api/uploads extrahuje text zo súboru a vracia ho v poli text, content alebo extractedText.'
-}
-"""
-`;
+      return {
+        title,
+        data,
+        path,
+        alt,
+      };
     })
-    .join('\n\n----------------------------------------\n\n');
+    .filter((item): item is DefenseImage => item !== null)
+    .slice(0, 3);
 }
 
-function buildVisibleWarnings(
-  citationAudit: CitationAuditResult,
-  attachmentRelevanceResults: AttachmentRelevanceResult[],
-): string {
-  const attachmentWarnings = attachmentRelevanceResults
-    .filter((item) => !item.related && item.warning)
-    .map((item) => item.warning as string);
+function normalizeLayout(value: unknown, index: number): DefenseSlide['layout'] {
+  const layout = String(value || '').toLowerCase().trim();
 
-  const allWarnings = [
-    ...citationAudit.warnings,
-    ...attachmentWarnings,
-  ].filter(Boolean);
-
-  if (!allWarnings.length) return '';
-
-  return `
-=== UPOZORNENIA ===
-
-${allWarnings.map((warning, index) => `${index + 1}. ${warning}`).join('\n')}
-`.trim();
-}
-
-function buildProfileBlock(
-  profile: SavedProfile | null,
-  title: string,
-  workType: string,
-  language: string,
-  citationStyle: string,
-): string {
-  return `
-- ID profilu: ${profile?.id || 'nezadané'}
-- Názov práce: ${title}
-- Téma: ${profile?.topic || 'nezadané'}
-- Typ práce: ${workType}
-- Úroveň: ${profile?.level || 'nezadané'}
-- Odbor: ${profile?.field || 'nezadané'}
-- Vedúci práce: ${profile?.supervisor || 'nezadané'}
-- Jazyk práce: ${language}
-- Citačný štýl: ${citationStyle}
-- Anotácia: ${profile?.annotation || 'nezadané'}
-- Cieľ práce: ${profile?.goal || 'nezadané'}
-- Výskumný problém: ${resolveResearchProblem(profile)}
-- Metodológia: ${profile?.methodology || 'nezadané'}
-- Hypotézy: ${profile?.hypotheses || 'nezadané'}
-- Výskumné otázky: ${profile?.researchQuestions || 'nezadané'}
-- Praktická časť: ${profile?.practicalPart || 'nezadané'}
-- Odborný prínos: ${profile?.scientificContribution || 'nezadané'}
-- Požiadavky na zdroje: ${profile?.sourcesRequirement || 'nezadané'}
-- Kľúčové slová: ${getProfileKeywords(profile)}
-`.trim();
-}
-
-function buildAuditPrompt({
-  text,
-  attachmentsBlock,
-  checkType,
-  outputType,
-  citationStyle,
-  profile,
-  hasAttachments,
-  title,
-  workType,
-  language,
-  manualTextWasTruncated,
-  citationAudit,
-  attachmentRelevanceResults,
-  dateInfo,
-}: {
-  text: string;
-  attachmentsBlock: string;
-  checkType: string;
-  outputType: string;
-  citationStyle: string;
-  profile?: SavedProfile | null;
-  hasAttachments: boolean;
-  title: string;
-  workType: string;
-  language: string;
-  manualTextWasTruncated: boolean;
-  citationAudit: CitationAuditResult;
-  attachmentRelevanceResults: AttachmentRelevanceResult[];
-  dateInfo: AuditDateInfo;
-}): string {
-  const profileBlock = buildProfileBlock(profile || null, title, workType, language, citationStyle);
-
-  const automaticWarnings = buildVisibleWarnings(citationAudit, attachmentRelevanceResults);
-
-  const dateRules = buildDateRules(dateInfo);
-
-  return `
-Si odborný akademický hodnotiteľ, metodológ, školiteľ a odborný korektor.
-
-Tvojou úlohou je vykonať KOMPLETNÝ AUDIT KVALITY AKADEMICKEJ PRÁCE podľa aktuálneho profilu práce.
-
-KRITICKÉ PRAVIDLÁ:
-1. Výstup musí byť dokončený a musí sa skončiť presnou vetou: ${AUDIT_END_MARKER}
-2. Nepíš email.
-3. Nepíš oslovenie.
-4. Nepíš predmet emailu.
-5. Nepíš úvod typu "Ako AI audítor".
-6. Nepoužívaj markdown značky #, ##, **, --- ani kódové bloky.
-7. Nepoužívaj nečitateľné alebo poškodené znaky.
-8. Nevymýšľaj konkrétne bibliografické záznamy, autorov, DOI ani URL.
-9. Ak treba citácie, odporuč iba typ zdroja: ISO norma, AOAC metóda, odborný článok, učebnica, metodická príručka alebo štandardizovaný laboratórny postup.
-10. Buď konkrétny. Nepíš všeobecné frázy.
-11. Pri ukážkach prepísaných viet uveď maximálne 5 viet, aby sa výstup neodsekol.
-12. Ak ide o chemickú, biologickú, potravinársku alebo laboratórnu metodiku, skontroluj aj odbornú správnosť činidiel, indikátorov, koncentrácií, výpočtov, jednotiek a postupu.
-13. Ak text obsahuje odbornú chybu, pomenuj ju priamo a navrhni správne znenie.
-14. Vždy posúď súlad textu s profilom práce.
-15. Vždy posúď, či citačný štýl v texte zodpovedá citačnej norme v profile.
-16. Ak profil vyžaduje Chicago a text obsahuje APA citácie typu autor – rok, musíš na to jasne upozorniť.
-17. Ak príloha nesúvisí s profilom práce, musíš na to jasne upozorniť.
-18. Výstup musí byť klientsky čistý. Nepíš interné systémové poznámky.
-19. Pri kontrole rokov, dátumov a časových údajov musíš použiť reálny dátum auditu uvedený v časti "REFERENČNÝ DÁTUM AUDITU".
-20. Roky 2025 a 2026 neoznačuj automaticky ako budúcnosť. Ako budúcnosť označ iba roky väčšie ako aktuálny rok ${dateInfo.currentYear}.
-
-${dateRules}
-
-PROFIL PRÁCE:
-${profileBlock}
-
-NASTAVENIE AUDITU:
-- Typ kontroly: ${checkType}
-- Typ výstupu: ${outputType}
-
-ZDROJ TEXTU:
-${
-  hasAttachments
-    ? 'Používateľ vložil text a/alebo nahral prílohy. Pri audite zohľadni ručne vložený text aj obsah príloh.'
-    : 'Používateľ vložil text ručne.'
-}
-
-TECHNICKÁ INFORMÁCIA:
-${
-  manualTextWasTruncated
-    ? 'Ručne vložený text bol technicky skrátený, aby sa výstup neodsekol. V audite to uveď ako obmedzenie.'
-    : 'Ručne vložený text nebol technicky skrátený.'
-}
-
-AUTOMATICKÉ KONTROLY:
-- Očakávaná citačná norma: ${citationAudit.expectedStyle}
-- Rozpoznané citačné štýly: ${
-    citationAudit.detectedStyles.length
-      ? citationAudit.detectedStyles.join(', ')
-      : 'nerozpoznané'
+  if (
+    layout === 'section' ||
+    layout === 'table' ||
+    layout === 'chart' ||
+    layout === 'quote' ||
+    layout === 'split' ||
+    layout === 'closing' ||
+    layout === 'image'
+  ) {
+    return layout;
   }
-- Nesúlad citačnej normy: ${citationAudit.hasMismatch ? 'áno' : 'nie'}
-- Kontrola príloh voči profilu:
-${
-  attachmentRelevanceResults.length
-    ? attachmentRelevanceResults
-        .map(
-          (item) =>
-            `  - ${item.name}: zhoda ${item.score} %, ${
-              item.related ? 'pravdepodobne súvisí s profilom' : 'pravdepodobne nesúvisí s profilom'
-            }`,
+
+  if (index === 0) return 'section';
+  if ((index + 1) % 5 === 0) return 'split';
+
+  return 'bullets';
+}
+
+function normalizeSlide(value: unknown, index: number): DefenseSlide {
+  const item =
+    value && typeof value === 'object'
+      ? (value as Record<string, unknown>)
+      : {};
+
+  const title = cleanInlineText(item.title || `Snímka ${index + 1}`);
+
+  const bullets = Array.isArray(item.bullets)
+    ? item.bullets
+        .map((bullet: unknown) => cleanInlineText(bullet))
+        .filter(Boolean)
+        .slice(0, MAX_BULLETS_PER_SLIDE)
+    : [];
+
+  const table = normalizeTable(item.table);
+  const chart = normalizeChart(item.chart);
+  const images = normalizeImages(item.images);
+
+  let layout = normalizeLayout(item.layout, index);
+
+  if (table) layout = 'table';
+  if (chart) layout = 'chart';
+  if (images.length > 0) layout = 'image';
+
+  return {
+    title,
+    bullets,
+    speakerNotes: item.speakerNotes ? cleanText(item.speakerNotes) : undefined,
+    layout,
+    visualSuggestion: cleanInlineText(item.visualSuggestion),
+    table,
+    chart,
+    images,
+  };
+}
+
+function splitIntoSentences(text: string): string[] {
+  return cleanText(text)
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => cleanInlineText(sentence))
+    .filter((sentence) => sentence.length >= 35)
+    .slice(0, 80);
+}
+
+function extractSection(
+  text: string,
+  patterns: RegExp[],
+  maxSentences = 4,
+): string[] {
+  const sentences = splitIntoSentences(text);
+  const selected: string[] = [];
+
+  for (const sentence of sentences) {
+    if (patterns.some((pattern) => pattern.test(sentence))) {
+      selected.push(sentence);
+    }
+
+    if (selected.length >= maxSentences) break;
+  }
+
+  return selected;
+}
+
+function toBullets(sentences: string[], fallback: string[]): string[] {
+  const bullets = sentences
+    .map((sentence) => sentence.replace(/^[-•–—]\s*/, ''))
+    .map((sentence) =>
+      sentence.length > 170 ? `${sentence.slice(0, 167)}…` : sentence,
+    )
+    .filter(Boolean)
+    .slice(0, MAX_BULLETS_PER_SLIDE);
+
+  return bullets.length ? bullets : fallback.slice(0, MAX_BULLETS_PER_SLIDE);
+}
+
+function generateSlidesFromSource(
+  sourceText: string,
+  title: string,
+): DefenseSlide[] {
+  const text = truncate(sourceText);
+
+  if (!cleanText(text)) {
+    return [
+      {
+        title: 'Cieľ a zameranie práce',
+        layout: 'section',
+        bullets: [
+          'Predstaviť hlavný cieľ záverečnej práce.',
+          'Vysvetliť riešený problém a dôvod výberu témy.',
+          'Stručne uviesť metodický postup práce.',
+        ],
+        speakerNotes:
+          'Na úvod predstavte tému, hlavný problém a dôvod, prečo je práca dôležitá.',
+      },
+      {
+        title: 'Metodika práce',
+        layout: 'bullets',
+        bullets: [
+          'Opísať použité metódy a postup spracovania.',
+          'Vysvetliť výber dát, zdrojov alebo výskumnej vzorky.',
+          'Uviesť, ako boli výsledky vyhodnocované.',
+        ],
+      },
+      {
+        title: 'Hlavné výsledky',
+        layout: 'bullets',
+        bullets: [
+          'Zhrnúť najdôležitejšie zistenia práce.',
+          'Zdôrazniť výsledky priamo súvisiace s cieľom práce.',
+          'Prepojiť výsledky s odporúčaniami alebo prínosom.',
+        ],
+      },
+      {
+        title: 'Prínos práce',
+        layout: 'quote',
+        bullets: [
+          'Najväčším prínosom práce je prepojenie teoretických poznatkov s praktickým riešením problému.',
+        ],
+      },
+    ];
+  }
+
+  const objective = toBullets(
+    extractSection(text, [/cieľ/i, /zameran/i, /predmetom práce/i, /účel/i], 4),
+    [
+      `Práca sa zameriava na tému: ${title}.`,
+      'Hlavným cieľom je odborne spracovať riešený problém.',
+      'Výstupom je syntéza teoretických poznatkov a praktických zistení.',
+    ],
+  );
+
+  const theory = toBullets(
+    extractSection(text, [/teoret/i, /východisk/i, /literat/i, /autor/i], 4),
+    [
+      'Teoretická časť vytvára odborný rámec riešenej problematiky.',
+      'V práci sú vysvetlené základné pojmy a súvislosti.',
+      'Literárne zdroje slúžia ako podklad pre vlastné spracovanie témy.',
+    ],
+  );
+
+  const methodology = toBullets(
+    extractSection(
+      text,
+      [/metod/i, /výskum/i, /vzorka/i, /dotazník/i, /analýz/i],
+      5,
+    ),
+    [
+      'Praktická časť vychádza z metodického postupu zvoleného podľa charakteru témy.',
+      'Dáta alebo podklady boli spracované systematicky a vyhodnotené vo vzťahu k cieľom práce.',
+      'Metodika umožnila formulovať závery a odporúčania.',
+    ],
+  );
+
+  const results = toBullets(
+    extractSection(text, [/výsled/i, /zisten/i, /potvrd/i, /preukáz/i, /ukáz/i], 5),
+    [
+      'Výsledky ukazujú hlavné zistenia súvisiace s cieľom práce.',
+      'Najdôležitejšie zistenia sú interpretované vo vzťahu k skúmanému problému.',
+      'Výsledky vytvárajú podklad pre odporúčania a záver práce.',
+    ],
+  );
+
+  const recommendations = toBullets(
+    extractSection(
+      text,
+      [/odporúč/i, /navrh/i, /riešen/i, /prínos/i, /záver/i],
+      5,
+    ),
+    [
+      'Na základe výsledkov je možné formulovať praktické odporúčania.',
+      'Práca prináša odborný pohľad na riešenú problematiku.',
+      'Závery možno využiť pri ďalšom výskume alebo praktickej aplikácii.',
+    ],
+  );
+
+  return [
+    {
+      title: 'Cieľ a zameranie práce',
+      layout: 'section',
+      bullets: objective,
+      speakerNotes:
+        'Predstavte tému, hlavný cieľ práce a stručne vysvetlite, čo bolo predmetom skúmania.',
+    },
+    {
+      title: 'Teoretické východiská',
+      layout: 'bullets',
+      bullets: theory,
+      visualSuggestion: 'Vhodné doplniť schému hlavných pojmov alebo konceptov.',
+    },
+    {
+      title: 'Metodika a postup spracovania',
+      layout: 'split',
+      bullets: methodology,
+      visualSuggestion: 'Vhodné doplniť postupový diagram metodiky.',
+    },
+    {
+      title: 'Hlavné výsledky práce',
+      layout: 'bullets',
+      bullets: results,
+      visualSuggestion:
+        'Vhodné doplniť graf alebo tabuľku s hlavnými výsledkami.',
+    },
+    {
+      title: 'Prínos a odporúčania',
+      layout: 'quote',
+      bullets: recommendations,
+      speakerNotes:
+        'V závere zdôraznite, čo práca priniesla a ako možno výsledky využiť.',
+    },
+  ];
+}
+
+function extractMarkdownTables(text: string): DefenseTable[] {
+  const lines = cleanText(text).split('\n');
+  const tables: DefenseTable[] = [];
+  let block: string[] = [];
+
+  function flush() {
+    if (block.length < 2) {
+      block = [];
+      return;
+    }
+
+    const rows = block
+      .map((line) =>
+        line
+          .split('|')
+          .map((cell) => cleanInlineText(cell))
+          .filter(Boolean),
+      )
+      .filter((row) => row.length >= 2);
+
+    const filteredRows = rows.filter(
+      (row) => !row.every((cell) => /^:?-{2,}:?$/.test(cell)),
+    );
+
+    if (filteredRows.length >= 2) {
+      const headers = filteredRows[0].slice(0, MAX_TABLE_COLS);
+      const dataRows = filteredRows
+        .slice(1, MAX_TABLE_ROWS + 1)
+        .map((row) => row.slice(0, MAX_TABLE_COLS));
+
+      tables.push({
+        title: 'Tabuľkové výsledky',
+        headers,
+        rows: dataRows,
+      });
+    }
+
+    block = [];
+  }
+
+  for (const line of lines) {
+    if (line.includes('|')) {
+      block.push(line);
+    } else {
+      flush();
+    }
+  }
+
+  flush();
+
+  return tables.slice(0, 4);
+}
+
+function extractLooseTables(text: string): DefenseTable[] {
+  const source = cleanText(text);
+  const tables: DefenseTable[] = [];
+
+  const candidateLines = source
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      if (line.includes('|')) return false;
+
+      const parts = line
+        .split(/\t|;| {2,}/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+
+      return parts.length >= 2 && parts.length <= MAX_TABLE_COLS;
+    });
+
+  if (candidateLines.length < 3) return [];
+
+  let block: string[][] = [];
+
+  function flushBlock() {
+    if (block.length < 3) {
+      block = [];
+      return;
+    }
+
+    const headers = block[0].slice(0, MAX_TABLE_COLS);
+    const rows = block
+      .slice(1, MAX_TABLE_ROWS + 1)
+      .map((row) => row.slice(0, MAX_TABLE_COLS));
+
+    tables.push({
+      title: 'Prehľad údajov z práce',
+      headers,
+      rows,
+    });
+
+    block = [];
+  }
+
+  for (const line of candidateLines) {
+    const parts = line
+      .split(/\t|;| {2,}/)
+      .map((part) => cleanInlineText(part))
+      .filter(Boolean);
+
+    if (block.length === 0 || Math.abs(parts.length - block[0].length) <= 1) {
+      block.push(parts);
+    } else {
+      flushBlock();
+      block.push(parts);
+    }
+  }
+
+  flushBlock();
+
+  return tables.slice(0, 2);
+}
+
+function extractNumericChart(text: string): DefenseChart | undefined {
+  const source = cleanText(text);
+  const pairs: Array<{ label: string; value: number; hasPercent: boolean }> = [];
+
+  const patterns = [
+    /([A-Za-zÀ-ž0-9][A-Za-zÀ-ž0-9 .,/()_-]{2,48})\s*[:=–-]\s*(\d{1,4}(?:[,.]\d{1,2})?)\s*(%|percent|percentá|percento)?/giu,
+    /([A-Za-zÀ-ž0-9][A-Za-zÀ-ž0-9 .,/()_-]{2,48})\s+(\d{1,4}(?:[,.]\d{1,2})?)\s*(%|percent|percentá|percento)/giu,
+  ];
+
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(source)) && pairs.length < MAX_CHART_ITEMS) {
+      const label = cleanInlineText(match[1])
+        .replace(/^[-•–—]\s*/, '')
+        .slice(0, 40);
+
+      const value = parseNumber(match[2]);
+      const hasPercent = Boolean(match[3]);
+
+      if (!label || value === null) continue;
+      if (value < 0 || value > 100000) continue;
+      if (/^(strana|kapitola|tabuľka|obrázok|graf|rok)$/i.test(label)) {
+        continue;
+      }
+
+      if (
+        pairs.some(
+          (item) => item.label.toLowerCase() === label.toLowerCase(),
         )
-        .join('\n')
-    : '  - prílohy neboli nahraté'
+      ) {
+        continue;
+      }
+
+      pairs.push({ label, value, hasPercent });
+    }
+  }
+
+  if (pairs.length < 2) return undefined;
+
+  const percentCount = pairs.filter(
+    (item) => item.hasPercent || item.value <= 100,
+  ).length;
+
+  return {
+    title: 'Kľúčové číselné výsledky',
+    type: percentCount >= Math.ceil(pairs.length / 2) ? 'bar' : 'column',
+    labels: pairs.map((item) => item.label),
+    values: pairs.map((item) => item.value),
+    unit: percentCount >= Math.ceil(pairs.length / 2) ? '%' : '',
+  };
 }
 
-${automaticWarnings || 'Automatické upozornenia: bez zásadných upozornení.'}
-
-TEXT VLOŽENÝ RUČNE:
-"""
-${text || 'Text nebol vložený ručne. Audit vykonaj z priložených súborov, ak je ich obsah dostupný.'}
-"""
-
-PRÍLOHY NA AUDIT:
-${attachmentsBlock}
-
-POVINNÁ ŠTRUKTÚRA VÝSTUPU:
-
-=== UPOZORNENIA ===
-Ak existuje nesúlad citačnej normy, nesúlad prílohy s profilom, chýbajúci extrahovaný text alebo technický problém, uveď to tu.
-Ak nie je žiadne upozornenie, napíš: Neboli zistené zásadné technické upozornenia.
-
-=== STRUČNÉ HODNOTENIE ===
-Zhodnoť celkovú kvalitu textu, akademickú úroveň, odbornú presnosť a použiteľnosť do práce. Uveď 5 až 8 viet.
-
-=== SÚLAD S PROFILOM PRÁCE ===
-Posúď súlad s názvom, témou, cieľom práce, výskumným problémom, metodológiou, hypotézami, výskumnými otázkami, jazykom práce a požiadavkami na zdroje.
-
-=== SILNÉ STRÁNKY ===
-Uveď konkrétne silné stránky textu.
-
-=== SLABÉ STRÁNKY ===
-Uveď konkrétne slabiny textu.
-
-=== KONKRÉTNE ODBORNÉ CHYBY A OPRAVY ===
-Pri každej chybe uveď:
-- čo je problém,
-- ako to opraviť,
-- prečo je oprava dôležitá.
-
-Ak sa v texte nachádza laboratórna metóda, posúď najmä:
-- správnosť použitého titrantu,
-- indikátor a jeho farebnú zmenu,
-- princíp metódy,
-- činidlá a koncentrácie,
-- prístroje,
-- výpočet výsledku,
-- prepočet na obsah bielkovín alebo inú sledovanú veličinu,
-- potrebu citovať normu alebo štandardizovanú metódu.
-
-=== LOGIKA A ŠTRUKTÚRA ===
-Zhodnoť členenie, nadväznosť odsekov, argumentáciu a vnútornú súdržnosť.
-
-=== METODOLÓGIA ===
-Zhodnoť, či metodická časť obsahuje dostatočný opis postupu, vzoriek, prístrojov, činidiel, podmienok merania, výpočtov a kontroly kvality.
-
-=== CITAČNÁ NORMA A ZDROJE ===
-Zhodnoť, či text rešpektuje citačný štýl nastavený v profile.
-Ak je v profile Chicago, ale text používa APA, jasne to napíš.
-Nevymýšľaj konkrétne bibliografické záznamy.
-
-=== AKADEMICKÝ ŠTÝL ===
-Zhodnoť jazyk, formálnosť, odbornosť, terminológiu, štylistiku a zrozumiteľnosť.
-
-=== KONTROLA ČASOVÝCH ÚDAJOV ===
-Skontroluj roky, dátumy a časové formulácie v texte.
-Použi výhradne tieto hodnoty:
-- Dátum auditu: ${dateInfo.auditDate}
-- Aktuálny rok: ${dateInfo.currentYear}
-
-Roky menšie alebo rovné ${dateInfo.currentYear} nepovažuj za budúcnosť.
-Ako budúcnosť označ iba roky väčšie ako ${dateInfo.currentYear}.
-Roky 2025 a 2026 neoznačuj automaticky ako budúcnosť.
-Ak nie sú zistené problémy s časovými údajmi, napíš: Časové údaje sú posúdené podľa aktuálneho dátumu auditu a nebol zistený problém s budúcimi rokmi.
-
-=== UKÁŽKY UPRAVENÝCH VIET ===
-Uveď maximálne 5 vzorových viet. Každú vetu uveď vo forme:
-Pôvodný problém:
-Lepšia formulácia:
-
-=== ODPORÚČANÉ DOPLNENIA ===
-Napíš, čo má autor doplniť do práce.
-
-=== SKÓRE KVALITY OD 0 DO 100 ===
-Uveď presne tieto riadky:
-Logika:
-Metodológia:
-Citácie:
-Akademický štýl:
-Odborná presnosť:
-Súlad s profilom:
-Časové údaje:
-Celkové skóre:
-
-=== PRIORITA OPRÁV ===
-Rozdeľ opravy na:
-Urgentné:
-Dôležité:
-Odporúčané:
-
-=== TECHNICKÉ UPOZORNENIE ===
-Ak text obsahoval poškodené znaky, nečitateľné časti, chýbajúci extrahovaný text alebo bol skrátený, uveď to tu.
-Ak nie, napíš, že technické problémy neboli zistené.
-
-Na úplný koniec napíš presne:
-${AUDIT_END_MARKER}
-`.trim();
+function buildAgenda(slides: DefenseSlide[]): string[] {
+  return slides
+    .map((slide) => slide.title)
+    .filter(Boolean)
+    .slice(0, 9);
 }
 
-function buildSystemMessage(dateInfo: AuditDateInfo): string {
-  return `
-${GLOBAL_ACADEMIC_SYSTEM_PROMPT || ''}
+function addBackground(slide: PptxSlide, theme: PptTheme) {
+  slide.background = { color: theme.bg };
 
-Si prísny, ale konštruktívny akademický školiteľ, metodológ a odborný korektor.
-Hodnotíš kvalitu textu, logiku, štruktúru, metodológiu, citácie, odbornú presnosť, súlad s profilom práce a akademický štýl.
-Výstup musí byť praktický, konkrétny, formálny a použiteľný pre študenta alebo autora práce.
-Nepíš email, oslovenie ani marketingový text.
-Nepíš interné technické inštrukcie.
-Nevymýšľaj zdroje.
-Vždy dokonči odpoveď koncovou značkou ${AUDIT_END_MARKER}.
+  slide.addShape(ShapeType.rect, {
+    x: 0,
+    y: 0,
+    w: SLIDE_W,
+    h: SLIDE_H,
+    fill: { color: theme.bg },
+    line: { color: theme.bg },
+  });
 
-${buildDateRules(dateInfo)}
+  slide.addShape(ShapeType.rect, {
+    x: 0,
+    y: 0,
+    w: SLIDE_W,
+    h: 0.16,
+    fill: { color: theme.accent },
+    line: { color: theme.accent },
+  });
 
-Dôležité:
-Pri kontrole rokov nepoužívaj interný tréningový dátum modelu.
-Používaj iba reálny serverový dátum auditu.
-Roky 2025 a 2026 neoznačuj automaticky ako budúcnosť.
-Ako budúcnosť označ iba roky väčšie ako ${dateInfo.currentYear}.
-`.trim();
+  slide.addShape(ShapeType.ellipse, {
+    x: 9.25,
+    y: -1.4,
+    w: 5.3,
+    h: 5.3,
+    fill: { color: theme.accent, transparency: 88 },
+    line: { color: theme.accent, transparency: 72, width: 1.4 },
+  });
+
+  slide.addShape(ShapeType.ellipse, {
+    x: -1.9,
+    y: 4.75,
+    w: 4.9,
+    h: 4.9,
+    fill: { color: theme.accent2, transparency: 91 },
+    line: { color: theme.accent2, transparency: 82, width: 1.2 },
+  });
 }
 
-function buildClientCleanResult(value: string): string {
-  return removeEndMarker(removeBadAuditStart(value))
-    .replace(/\n{4,}/g, '\n\n\n')
-    .trim();
+function addHeader(
+  slide: PptxSlide,
+  theme: PptTheme,
+  eyebrow: string,
+  title: string,
+) {
+  slide.addText(eyebrow.toUpperCase(), {
+    x: 0.65,
+    y: 0.38,
+    w: 5.8,
+    h: 0.25,
+    fontFace: 'Aptos',
+    fontSize: 8,
+    bold: true,
+    color: theme.accent,
+    margin: 0,
+  });
+
+  slide.addText(title, {
+    x: 0.65,
+    y: 0.75,
+    w: 11.95,
+    h: 0.78,
+    fontFace: 'Aptos Display',
+    fontSize: title.length > 70 ? 22 : 27,
+    bold: true,
+    color: theme.text,
+    fit: 'shrink',
+    margin: 0,
+    breakLine: false,
+  });
+}
+
+function addFooter(slide: PptxSlide, theme: PptTheme, slideNumber: number) {
+  slide.addShape(ShapeType.line, {
+    x: 0.65,
+    y: 6.92,
+    w: 12.0,
+    h: 0,
+    line: { color: theme.border, transparency: 50, width: 1 },
+  });
+
+  slide.addText(String(slideNumber).padStart(2, '0'), {
+    x: 0.65,
+    y: 7.04,
+    w: 0.8,
+    h: 0.22,
+    fontFace: 'Aptos',
+    fontSize: 8,
+    color: theme.muted,
+    margin: 0,
+  });
+
+  slide.addText('ZEDPERA', {
+    x: 11.45,
+    y: 7.03,
+    w: 1.2,
+    h: 0.25,
+    fontFace: 'Aptos',
+    fontSize: 8,
+    bold: true,
+    color: theme.accent,
+    margin: 0,
+    align: 'right',
+  });
+}
+
+function addSpeakerNotes(slide: PptxSlide, notes?: string) {
+  const clean = cleanText(notes);
+
+  if (!clean) return;
+
+  try {
+    slide.addNotes(clean);
+  } catch {
+    // Poznámky rečníka sú voliteľné.
+  }
+}
+
+function addBulletCards(
+  slide: PptxSlide,
+  theme: PptTheme,
+  bullets: string[],
+  startY = 1.82,
+) {
+  const safeBullets = bullets.slice(0, MAX_BULLETS_PER_SLIDE);
+  const cardHeight = safeBullets.length <= 3 ? 0.86 : 0.68;
+
+  safeBullets.forEach((bullet, index) => {
+    const y = startY + index * (cardHeight + 0.16);
+
+    slide.addShape(ShapeType.roundRect, {
+      x: 0.85,
+      y,
+      w: 11.75,
+      h: cardHeight,
+      rectRadius: 0.08,
+      fill: { color: theme.card, transparency: theme.name === 'dark' ? 4 : 0 },
+      line: { color: theme.border, transparency: 30, width: 1 },
+    } as any);
+
+    slide.addShape(ShapeType.roundRect, {
+      x: 1.05,
+      y: y + 0.22,
+      w: 0.32,
+      h: 0.32,
+      rectRadius: 0.04,
+      fill: { color: index % 2 === 0 ? theme.accent : theme.accent2 },
+      line: { color: index % 2 === 0 ? theme.accent : theme.accent2 },
+    } as any);
+
+    slide.addText(cleanInlineText(bullet), {
+      x: 1.55,
+      y: y + 0.13,
+      w: 10.55,
+      h: cardHeight - 0.2,
+      fontFace: 'Aptos',
+      fontSize: safeBullets.length <= 3 ? 17 : 15,
+      color: theme.text,
+      fit: 'shrink',
+      valign: 'middle',
+      margin: 0,
+      breakLine: false,
+    });
+  });
+}
+
+function addSplitSlide(
+  slide: PptxSlide,
+  theme: PptTheme,
+  item: DefenseSlide,
+) {
+  const bullets = item.bullets.slice(0, MAX_BULLETS_PER_SLIDE);
+  const left = bullets.slice(0, Math.ceil(bullets.length / 2));
+  const right = bullets.slice(Math.ceil(bullets.length / 2));
+
+  slide.addShape(ShapeType.roundRect, {
+    x: 0.8,
+    y: 1.78,
+    w: 5.75,
+    h: 4.65,
+    rectRadius: 0.08,
+    fill: { color: theme.card },
+    line: { color: theme.border, transparency: 25 },
+  } as any);
+
+  slide.addShape(ShapeType.roundRect, {
+    x: 6.78,
+    y: 1.78,
+    w: 5.75,
+    h: 4.65,
+    rectRadius: 0.08,
+    fill: { color: theme.card2 },
+    line: { color: theme.border, transparency: 25 },
+  } as any);
+
+  slide.addText('Kľúčové body', {
+    x: 1.08,
+    y: 2.08,
+    w: 5.15,
+    h: 0.32,
+    fontFace: 'Aptos',
+    fontSize: 13,
+    bold: true,
+    color: theme.accent,
+    margin: 0,
+  });
+
+  slide.addText(left.map((bullet) => `• ${bullet}`).join('\n'), {
+    x: 1.08,
+    y: 2.58,
+    w: 5.05,
+    h: 3.35,
+    fontFace: 'Aptos',
+    fontSize: 15,
+    color: theme.text,
+    fit: 'shrink',
+    margin: 0.04,
+    breakLine: false,
+    paraSpaceAfter: 8,
+  });
+
+  slide.addText('Dôraz pri obhajobe', {
+    x: 7.08,
+    y: 2.08,
+    w: 5.15,
+    h: 0.32,
+    fontFace: 'Aptos',
+    fontSize: 13,
+    bold: true,
+    color: theme.accent2,
+    margin: 0,
+  });
+
+  slide.addText(
+    (right.length ? right : left).map((bullet) => `• ${bullet}`).join('\n'),
+    {
+      x: 7.08,
+      y: 2.58,
+      w: 5.05,
+      h: 3.35,
+      fontFace: 'Aptos',
+      fontSize: 15,
+      color: theme.text,
+      fit: 'shrink',
+      margin: 0.04,
+      breakLine: false,
+      paraSpaceAfter: 8,
+    },
+  );
+}
+
+function addTable(slide: PptxSlide, theme: PptTheme, table: DefenseTable) {
+  const headers = table.headers?.length
+    ? table.headers.slice(0, MAX_TABLE_COLS)
+    : ['Ukazovateľ', 'Hodnota'];
+
+  const rows = table.rows?.length ? table.rows : [];
+
+  const normalizedRows = rows.slice(0, MAX_TABLE_ROWS).map((row) => {
+    const next = [...row.map((cell) => cleanInlineText(cell))];
+
+    while (next.length < headers.length) next.push('');
+
+    return next.slice(0, headers.length);
+  });
+
+  const data = [headers, ...normalizedRows];
+
+  const tableData = data.map((row, rowIndex) =>
+    row.map((cell) => ({
+      text: cleanInlineText(cell),
+      options: {
+        bold: rowIndex === 0,
+        color: rowIndex === 0 ? 'FFFFFF' : theme.text,
+        fill: {
+          color:
+            rowIndex === 0
+              ? theme.accent
+              : rowIndex % 2 === 0
+                ? theme.card2
+                : theme.card,
+        },
+        margin: 0.06,
+        fontFace: 'Aptos',
+        fontSize: rowIndex === 0 ? 10 : 9,
+        valign: 'middle',
+      },
+    })),
+  );
+
+  slide.addText(table.title || 'Prehľad výsledkov', {
+    x: 0.85,
+    y: 1.72,
+    w: 11.7,
+    h: 0.32,
+    fontFace: 'Aptos',
+    fontSize: 13,
+    bold: true,
+    color: theme.accent2,
+    margin: 0,
+  });
+
+  try {
+    slide.addTable(tableData as any, {
+      x: 0.85,
+      y: 2.18,
+      w: 11.75,
+      h: 4.05,
+      border: { type: 'solid', color: theme.border, pt: 0.5 },
+      margin: 0.05,
+      fit: 'shrink',
+    } as any);
+  } catch {
+    const fallback = [
+      headers.join(' | '),
+      ...normalizedRows.map((row) => row.join(' | ')),
+    ].join('\n');
+
+    slide.addText(fallback, {
+      x: 0.9,
+      y: 2.2,
+      w: 11.6,
+      h: 4.0,
+      fontFace: 'Aptos',
+      fontSize: 12,
+      color: theme.text,
+      fit: 'shrink',
+      margin: 0.05,
+      breakLine: false,
+    });
+  }
+}
+
+function addBarChart(
+  slide: PptxSlide,
+  theme: PptTheme,
+  chart: DefenseChart,
+) {
+  const labels = chart.labels || [];
+  const values = chart.values || [];
+  const unit = chart.unit || '';
+  const count = Math.min(labels.length, values.length, MAX_CHART_ITEMS);
+  const maxValue = Math.max(...values.slice(0, count), 1);
+
+  slide.addText(chart.title || 'Grafické zobrazenie výsledkov', {
+    x: 0.85,
+    y: 1.72,
+    w: 11.7,
+    h: 0.32,
+    fontFace: 'Aptos',
+    fontSize: 13,
+    bold: true,
+    color: theme.accent2,
+    margin: 0,
+  });
+
+  if (chart.type === 'column') {
+    const chartX = 1.0;
+    const chartY = 2.15;
+    const chartW = 11.1;
+    const chartH = 3.65;
+    const gap = 0.18;
+    const barW = (chartW - gap * (count - 1)) / Math.max(count, 1);
+
+    for (let i = 0; i < count; i += 1) {
+      const value = values[i];
+      const ratio = clamp(value / maxValue, 0, 1);
+      const h = Math.max(0.18, chartH * ratio);
+      const x = chartX + i * (barW + gap);
+      const y = chartY + chartH - h;
+
+      slide.addShape(ShapeType.roundRect, {
+        x,
+        y,
+        w: barW,
+        h,
+        rectRadius: 0.04,
+        fill: { color: i % 2 === 0 ? theme.accent : theme.accent2 },
+        line: { color: i % 2 === 0 ? theme.accent : theme.accent2 },
+      } as any);
+
+      slide.addText(`${value}${unit}`, {
+        x,
+        y: y - 0.28,
+        w: barW,
+        h: 0.18,
+        fontFace: 'Aptos',
+        fontSize: 8,
+        bold: true,
+        color: theme.text,
+        align: 'center',
+        margin: 0,
+      });
+
+      slide.addText(labels[i], {
+        x,
+        y: chartY + chartH + 0.18,
+        w: barW,
+        h: 0.45,
+        fontFace: 'Aptos',
+        fontSize: 7.5,
+        color: theme.muted,
+        fit: 'shrink',
+        align: 'center',
+        margin: 0,
+      });
+    }
+
+    return;
+  }
+
+  const chartX = 1.05;
+  const chartY = 2.22;
+  const chartW = 10.95;
+  const rowH = Math.min(0.58, 3.9 / Math.max(count, 1));
+
+  for (let i = 0; i < count; i += 1) {
+    const label = labels[i];
+    const value = values[i];
+    const y = chartY + i * (rowH + 0.18);
+    const ratio = clamp(value / maxValue, 0, 1);
+    const barW = Math.max(0.25, (chartW - 3.35) * ratio);
+
+    slide.addText(label, {
+      x: chartX,
+      y,
+      w: 2.85,
+      h: rowH,
+      fontFace: 'Aptos',
+      fontSize: 10,
+      color: theme.text,
+      fit: 'shrink',
+      margin: 0,
+      valign: 'middle',
+    });
+
+    slide.addShape(ShapeType.roundRect, {
+      x: chartX + 3.05,
+      y: y + 0.07,
+      w: chartW - 3.35,
+      h: rowH - 0.14,
+      rectRadius: 0.04,
+      fill: { color: theme.card2 },
+      line: { color: theme.border, transparency: 40 },
+    } as any);
+
+    slide.addShape(ShapeType.roundRect, {
+      x: chartX + 3.05,
+      y: y + 0.07,
+      w: barW,
+      h: rowH - 0.14,
+      rectRadius: 0.04,
+      fill: { color: i % 2 === 0 ? theme.accent : theme.accent2 },
+      line: { color: i % 2 === 0 ? theme.accent : theme.accent2 },
+    } as any);
+
+    slide.addText(`${value}${unit}`, {
+      x: Math.min(chartX + 3.18 + barW, 11.15),
+      y,
+      w: 1.05,
+      h: rowH,
+      fontFace: 'Aptos',
+      fontSize: 10,
+      bold: true,
+      color: theme.text,
+      fit: 'shrink',
+      margin: 0,
+      valign: 'middle',
+    });
+  }
+}
+
+function addImageSlide(
+  slide: PptxSlide,
+  theme: PptTheme,
+  item: DefenseSlide,
+) {
+  const image = item.images?.[0];
+
+  if (!image) {
+    addBulletCards(
+      slide,
+      theme,
+      item.bullets.length
+        ? item.bullets
+        : ['Vizuálnu prílohu je možné doplniť manuálne.'],
+    );
+    return;
+  }
+
+  slide.addShape(ShapeType.roundRect, {
+    x: 0.85,
+    y: 1.75,
+    w: 11.75,
+    h: 4.75,
+    rectRadius: 0.08,
+    fill: { color: theme.card },
+    line: { color: theme.border, transparency: 25 },
+  } as any);
+
+  try {
+    slide.addImage({
+      ...(image.data ? { data: image.data } : { path: image.path }),
+      x: 1.08,
+      y: 1.98,
+      w: 6.1,
+      h: 4.25,
+      sizing: {
+        type: 'contain',
+        x: 1.08,
+        y: 1.98,
+        w: 6.1,
+        h: 4.25,
+      },
+    } as any);
+  } catch {
+    slide.addText('Obrázok sa nepodarilo vložiť automaticky.', {
+      x: 1.08,
+      y: 3.55,
+      w: 6.1,
+      h: 0.35,
+      fontFace: 'Aptos',
+      fontSize: 13,
+      color: theme.muted,
+      align: 'center',
+      margin: 0,
+    });
+  }
+
+  const bullets = item.bullets.slice(0, 4);
+
+  slide.addText(image.title || 'Vizuálny podklad', {
+    x: 7.45,
+    y: 2.05,
+    w: 4.7,
+    h: 0.32,
+    fontFace: 'Aptos',
+    fontSize: 13,
+    bold: true,
+    color: theme.accent2,
+    margin: 0,
+  });
+
+  slide.addText(
+    (bullets.length
+      ? bullets
+      : ['Vizuál podporuje vysvetlenie výsledkov alebo metodiky.']
+    )
+      .map((bullet) => `• ${bullet}`)
+      .join('\n'),
+    {
+      x: 7.45,
+      y: 2.58,
+      w: 4.7,
+      h: 3.2,
+      fontFace: 'Aptos',
+      fontSize: 13,
+      color: theme.text,
+      fit: 'shrink',
+      margin: 0.04,
+      breakLine: false,
+      paraSpaceAfter: 7,
+    },
+  );
+}
+
+function addQuoteSlide(
+  slide: PptxSlide,
+  theme: PptTheme,
+  item: DefenseSlide,
+) {
+  const quote =
+    item.bullets[0] || item.visualSuggestion || 'Kľúčové zistenie práce';
+
+  slide.addShape(ShapeType.roundRect, {
+    x: 1.15,
+    y: 2.05,
+    w: 11.0,
+    h: 3.05,
+    rectRadius: 0.08,
+    fill: { color: theme.card },
+    line: { color: theme.border, transparency: 25 },
+  } as any);
+
+  slide.addText('„', {
+    x: 1.45,
+    y: 1.8,
+    w: 0.8,
+    h: 0.7,
+    fontFace: 'Georgia',
+    fontSize: 54,
+    color: theme.accent,
+    margin: 0,
+  });
+
+  slide.addText(quote, {
+    x: 2.1,
+    y: 2.45,
+    w: 9.35,
+    h: 1.65,
+    fontFace: 'Aptos Display',
+    fontSize: quote.length > 120 ? 22 : 27,
+    bold: true,
+    color: theme.text,
+    fit: 'shrink',
+    margin: 0,
+    breakLine: false,
+    valign: 'middle',
+  });
+
+  if (item.bullets.length > 1) {
+    slide.addText(
+      item.bullets
+        .slice(1, 4)
+        .map((bullet) => `• ${bullet}`)
+        .join('\n'),
+      {
+        x: 2.1,
+        y: 4.55,
+        w: 9.35,
+        h: 1.05,
+        fontFace: 'Aptos',
+        fontSize: 13,
+        color: theme.muted,
+        fit: 'shrink',
+        margin: 0,
+        breakLine: false,
+      },
+    );
+  }
+}
+
+function addVisualSuggestion(
+  slide: PptxSlide,
+  theme: PptTheme,
+  suggestion?: string,
+) {
+  const clean = cleanInlineText(suggestion);
+
+  if (!clean) return;
+
+  slide.addShape(ShapeType.roundRect, {
+    x: 0.85,
+    y: 6.22,
+    w: 11.75,
+    h: 0.42,
+    rectRadius: 0.05,
+    fill: { color: theme.card2, transparency: theme.name === 'dark' ? 0 : 15 },
+    line: { color: theme.border, transparency: 55 },
+  } as any);
+
+  slide.addText(`Vizuál: ${clean}`, {
+    x: 1.05,
+    y: 6.31,
+    w: 11.35,
+    h: 0.2,
+    fontFace: 'Aptos',
+    fontSize: 8,
+    italic: true,
+    color: theme.muted,
+    fit: 'shrink',
+    margin: 0,
+  });
+}
+
+function addCoverSlide(
+  pptxDoc: PptxGen,
+  theme: PptTheme,
+  title: string,
+  defenseType: string,
+) {
+  const slide = pptxDoc.addSlide();
+
+  addBackground(slide, theme);
+
+  slide.addShape(ShapeType.roundRect, {
+    x: 0.72,
+    y: 0.55,
+    w: 1.55,
+    h: 0.42,
+    rectRadius: 0.05,
+    fill: { color: theme.accent },
+    line: { color: theme.accent },
+  } as any);
+
+  slide.addText('ZEDPERA', {
+    x: 0.88,
+    y: 0.67,
+    w: 1.25,
+    h: 0.16,
+    fontFace: 'Aptos',
+    fontSize: 8,
+    bold: true,
+    color: 'FFFFFF',
+    margin: 0,
+    align: 'center',
+  });
+
+  slide.addText(defenseType.toUpperCase(), {
+    x: 0.8,
+    y: 1.52,
+    w: 9.8,
+    h: 0.32,
+    fontFace: 'Aptos',
+    fontSize: 11,
+    bold: true,
+    color: theme.accent2,
+    margin: 0,
+  });
+
+  slide.addText(title, {
+    x: 0.78,
+    y: 2.05,
+    w: 11.8,
+    h: 1.75,
+    fontFace: 'Aptos Display',
+    fontSize: title.length > 90 ? 28 : 36,
+    bold: true,
+    color: theme.text,
+    fit: 'shrink',
+    margin: 0,
+    breakLine: false,
+  });
+
+  slide.addText('Prezentácia na obhajobu záverečnej práce', {
+    x: 0.82,
+    y: 4.38,
+    w: 10.5,
+    h: 0.32,
+    fontFace: 'Aptos',
+    fontSize: 15,
+    color: theme.muted,
+    margin: 0,
+  });
+
+  slide.addShape(ShapeType.line, {
+    x: 0.82,
+    y: 5.05,
+    w: 4.25,
+    h: 0,
+    line: { color: theme.accent, width: 2 },
+  });
+
+  slide.addText('Moderná akademická šablóna · pripravené pre komisiu', {
+    x: 0.82,
+    y: 6.78,
+    w: 10.5,
+    h: 0.25,
+    fontFace: 'Aptos',
+    fontSize: 9,
+    color: theme.muted,
+    margin: 0,
+  });
+}
+
+function addAgendaSlide(pptxDoc: PptxGen, theme: PptTheme, agenda: string[]) {
+  const slide = pptxDoc.addSlide();
+
+  addBackground(slide, theme);
+  addHeader(slide, theme, 'Obsah prezentácie', 'Agenda obhajoby');
+
+  const left = agenda.slice(0, 5);
+  const right = agenda.slice(5, 10);
+
+  [left, right].forEach((items, columnIndex) => {
+    const x = columnIndex === 0 ? 0.9 : 6.85;
+
+    items.forEach((item, index) => {
+      const globalIndex = columnIndex === 0 ? index + 1 : index + 6;
+      const y = 1.95 + index * 0.76;
+
+      slide.addShape(ShapeType.roundRect, {
+        x,
+        y,
+        w: 0.5,
+        h: 0.5,
+        rectRadius: 0.05,
+        fill: { color: globalIndex % 2 === 0 ? theme.accent2 : theme.accent },
+        line: { color: globalIndex % 2 === 0 ? theme.accent2 : theme.accent },
+      } as any);
+
+      slide.addText(String(globalIndex), {
+        x,
+        y: y + 0.13,
+        w: 0.5,
+        h: 0.15,
+        fontFace: 'Aptos',
+        fontSize: 8,
+        bold: true,
+        color: 'FFFFFF',
+        align: 'center',
+        margin: 0,
+      });
+
+      slide.addText(item, {
+        x: x + 0.72,
+        y: y + 0.08,
+        w: 4.85,
+        h: 0.34,
+        fontFace: 'Aptos',
+        fontSize: 13,
+        bold: true,
+        color: theme.text,
+        fit: 'shrink',
+        margin: 0,
+      });
+    });
+  });
+
+  addFooter(slide, theme, 1);
+}
+
+function addContentSlide(
+  pptxDoc: PptxGen,
+  theme: PptTheme,
+  item: DefenseSlide,
+  slideNumber: number,
+) {
+  const slide = pptxDoc.addSlide();
+
+  addBackground(slide, theme);
+  addHeader(
+    slide,
+    theme,
+    `Snímka ${slideNumber}`,
+    item.title || `Snímka ${slideNumber}`,
+  );
+
+  if (item.layout === 'table' && item.table) {
+    addTable(slide, theme, item.table);
+  } else if (item.layout === 'chart' && item.chart) {
+    addBarChart(slide, theme, item.chart);
+  } else if (item.layout === 'image') {
+    addImageSlide(slide, theme, item);
+  } else if (item.layout === 'quote') {
+    addQuoteSlide(slide, theme, item);
+  } else if (item.layout === 'split') {
+    addSplitSlide(slide, theme, item);
+  } else if (item.layout === 'section') {
+    addQuoteSlide(slide, theme, item);
+  } else {
+    addBulletCards(
+      slide,
+      theme,
+      item.bullets.length
+        ? item.bullets
+        : ['Obsah snímky je potrebné doplniť podľa finálnej verzie práce.'],
+    );
+  }
+
+  addVisualSuggestion(slide, theme, item.visualSuggestion);
+  addSpeakerNotes(slide, item.speakerNotes);
+  addFooter(slide, theme, slideNumber);
+}
+
+function addClosingSlide(pptxDoc: PptxGen, theme: PptTheme) {
+  const slide = pptxDoc.addSlide();
+
+  addBackground(slide, theme);
+
+  slide.addText('Ďakujem za pozornosť', {
+    x: 1.0,
+    y: 2.25,
+    w: 11.3,
+    h: 0.8,
+    fontFace: 'Aptos Display',
+    fontSize: 40,
+    bold: true,
+    color: theme.text,
+    align: 'center',
+    margin: 0,
+  });
+
+  slide.addText('Priestor na otázky komisie', {
+    x: 1.0,
+    y: 3.25,
+    w: 11.3,
+    h: 0.35,
+    fontFace: 'Aptos',
+    fontSize: 16,
+    color: theme.muted,
+    align: 'center',
+    margin: 0,
+  });
+
+  slide.addShape(ShapeType.line, {
+    x: 4.55,
+    y: 4.15,
+    w: 4.2,
+    h: 0,
+    line: { color: theme.accent, width: 2 },
+  });
+
+  slide.addText('ZEDPERA', {
+    x: 5.7,
+    y: 6.78,
+    w: 2.0,
+    h: 0.25,
+    fontFace: 'Aptos',
+    fontSize: 10,
+    bold: true,
+    color: theme.accent,
+    align: 'center',
+    margin: 0,
+  });
+}
+
+function enrichSlidesWithDetectedVisuals(
+  slides: DefenseSlide[],
+  sourceText: string,
+): DefenseSlide[] {
+  const text = truncate(sourceText);
+  const markdownTables = extractMarkdownTables(text);
+  const looseTables = extractLooseTables(text);
+  const allTables = [...markdownTables, ...looseTables];
+  const extractedChart = extractNumericChart(text);
+
+  const hasTable = slides.some((slide) => slide.table || slide.layout === 'table');
+  const hasChart = slides.some((slide) => slide.chart || slide.layout === 'chart');
+
+  const enriched = slides.map((slide) => ({
+    ...slide,
+    bullets: slide.bullets.slice(0, MAX_BULLETS_PER_SLIDE),
+  }));
+
+  if (!hasChart && extractedChart && enriched.length > 0) {
+    const targetIndex = enriched.findIndex((slide) =>
+      /výsled|analýz|zisten|respond|dát|graf|štat|hypot/i.test(slide.title),
+    );
+
+    const index = targetIndex >= 0 ? targetIndex : Math.min(6, enriched.length - 1);
+
+    enriched[index] = {
+      ...enriched[index],
+      layout: 'chart',
+      chart: extractedChart,
+      visualSuggestion:
+        enriched[index].visualSuggestion ||
+        'Doplniť jednoduchý graf k hlavným číselným výsledkom práce.',
+    };
+  }
+
+  if (!hasTable && allTables.length > 0 && enriched.length > 0) {
+    const targetIndex = enriched.findIndex((slide) =>
+      /výsled|tabuľ|analýz|zisten|dát|prehľad|výskum/i.test(slide.title),
+    );
+
+    const index = targetIndex >= 0 ? targetIndex : Math.min(7, enriched.length - 1);
+
+    if (enriched[index].layout !== 'chart') {
+      enriched[index] = {
+        ...enriched[index],
+        layout: 'table',
+        table: allTables[0],
+        visualSuggestion:
+          enriched[index].visualSuggestion ||
+          'Zobraziť kľúčové výsledky formou prehľadnej tabuľky.',
+      };
+    } else if (enriched.length > index + 1) {
+      enriched.splice(index + 1, 0, {
+        title: allTables[0].title || 'Prehľad výsledkov',
+        bullets: [
+          'Tabuľka sumarizuje najdôležitejšie údaje využiteľné pri obhajobe.',
+        ],
+        layout: 'table',
+        table: allTables[0],
+        speakerNotes:
+          'Tabuľku vysvetlite stručne a zdôraznite iba hlavný trend alebo rozdiel.',
+      });
+    }
+  }
+
+  return enriched.slice(0, MAX_EXPORTED_SLIDES);
 }
 
 export async function POST(req: NextRequest) {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'Chýba OPENAI_API_KEY v prostredí aplikácie. Nastav ju vo Verceli alebo v .env.local.',
-        },
-        { status: 500 },
-      );
-    }
+    const body = (await req.json()) as DefensePptxRequestBody;
 
-    const body = (await req.json()) as AuditRequest;
+    const title = cleanInlineText(body.title || 'Obhajoba práce');
+    const defenseType = cleanInlineText(body.defenseType || 'Obhajoba');
+    const themeName = asThemeName(body.theme);
+    const theme = THEMES[themeName];
 
-    const dateInfo = getAuditDateInfo(body);
-
-    const profile = body.activeProfile || body.profile || null;
-
-    const rawText = cleanText(body.text);
-    const limitedManualText = limitText(rawText, MAX_MANUAL_TEXT_LENGTH);
-
-    const text = limitedManualText.text;
-    const checkType = cleanText(body.checkType) || 'Všetko';
-    const outputType = cleanText(body.outputType) || 'Detailná správa';
-
-    const title = resolveTitle(body, profile);
-    const workType = resolveWorkType(body, profile);
-    const language = resolveLanguage(body, profile);
-    const citationStyle = resolveCitationStyle(body, profile);
-
-    const attachments = normalizeAttachments(body.attachments);
-    const attachmentsBlock = buildAttachmentsBlock(attachments);
-
-    const hasText = text.length >= MIN_TEXT_LENGTH;
-    const hasAttachments = attachments.length > 0;
-    const extractedAttachmentTextLength = getTotalAttachmentTextLength(attachments);
-
-    if (!profile || (!cleanText(profile.title) && !cleanText(profile.topic))) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'Audit kvality vyžaduje aktívny profil práce. Najskôr vyberte alebo doplňte profil práce.',
-        },
-        { status: 400 },
-      );
-    }
-
-    if (!hasText && !hasAttachments) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'Vlož aspoň 300 znakov textu alebo nahraj prílohu na audit kvality.',
-        },
-        { status: 400 },
-      );
-    }
-
-    if (!hasText && hasAttachments && extractedAttachmentTextLength < 50) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'Príloha bola nahratá, ale neobsahuje dostupný extrahovaný text. Skontroluj /api/uploads, aby pri PDF/DOCX vracalo text v poli text, content alebo extractedText.',
-        },
-        { status: 400 },
-      );
-    }
-
-    const combinedTextForChecks = [
-      text,
-      ...attachments.map((item) => getAttachmentText(item)),
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-
-    const citationAudit = auditCitationStyle(combinedTextForChecks, citationStyle);
-
-    const attachmentRelevanceResults = attachments.map((attachment, index) =>
-      checkAttachmentProfileRelevance(attachment, index, profile),
+    const sourceText = truncate(
+      cleanText(
+        body.sourceText ||
+          body.extractedWorkText ||
+          body.attachmentText ||
+          body.text ||
+          body.workTitle ||
+          '',
+      ),
     );
 
-    const prompt = buildAuditPrompt({
-      text,
-      attachmentsBlock,
-      checkType,
-      outputType,
-      citationStyle,
-      profile,
-      hasAttachments,
-      title,
-      workType,
-      language,
-      manualTextWasTruncated: limitedManualText.truncated,
-      citationAudit,
-      attachmentRelevanceResults,
-      dateInfo,
-    });
+    const rawSlides = Array.isArray(body.slides) ? body.slides : [];
 
-    const maxCompletionTokens = resolveMaxOutputTokens(body);
+    let slides: DefenseSlide[] = rawSlides
+      .map((slide: unknown, index: number): DefenseSlide =>
+        normalizeSlide(slide, index),
+      )
+      .filter(
+        (slide: DefenseSlide): boolean =>
+          slide.title.length > 0 || slide.bullets.length > 0,
+      )
+      .slice(0, 16);
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4.1-mini',
-      temperature: 0.2,
-      max_tokens: maxCompletionTokens,
-      presence_penalty: 0,
-      frequency_penalty: 0.1,
-      messages: [
-        {
-          role: 'system',
-          content: buildSystemMessage(dateInfo),
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    });
+    if (!slides.length && sourceText) {
+      slides = generateSlidesFromSource(sourceText, title);
+    }
 
-    const rawResult = completion.choices[0]?.message?.content || '';
-    const cleanedResult = buildClientCleanResult(rawResult);
+    if (!slides.length) {
+      slides = generateSlidesFromSource('', title);
+    }
 
-    if (!cleanedResult.trim()) {
+    slides = enrichSlidesWithDetectedVisuals(slides, sourceText);
+
+    if (!slides.length) {
       return NextResponse.json(
         {
           ok: false,
-          error: 'AI nevrátila výsledok auditu.',
+          error: 'Chýbajú snímky na export.',
         },
-        { status: 500 },
+        { status: 400 },
       );
     }
 
-    const completed = hasEndMarker(rawResult);
+    const pptxDoc = new pptxgen();
 
-    const visibleWarnings = buildVisibleWarnings(
-      citationAudit,
-      attachmentRelevanceResults,
-    );
+    pptxDoc.layout = 'LAYOUT_WIDE';
+    pptxDoc.author = 'ZEDPERA';
+    pptxDoc.company = 'ZEDPERA';
+    pptxDoc.subject = defenseType;
+    pptxDoc.title = title;
 
-    const finalResult = [
-      visibleWarnings,
-      cleanedResult,
-    ]
-      .filter(Boolean)
-      .join('\n\n')
-      .trim();
+    (pptxDoc as any).lang = 'sk-SK';
 
-    return NextResponse.json({
-      ok: true,
-      result: finalResult,
-      completed,
-      warning: completed
-        ? ''
-        : 'Audit sa pravdepodobne neukončil úplne. Zvýš maxOutputTokens alebo audituj kratší text po kapitolách.',
-      exportTypes: ['docx', 'pdf'],
-      citationAudit,
-      attachmentRelevanceResults,
-      dateAudit: {
-        auditDate: dateInfo.auditDate,
-        auditIsoDate: dateInfo.auditIsoDate,
-        currentYear: dateInfo.currentYear,
-        futureYearRule: `Ako budúcnosť sa označia iba roky väčšie ako ${dateInfo.currentYear}.`,
-      },
-      meta: {
-        checkType,
-        outputType,
-        citationStyle,
-        title,
-        workType,
-        language,
-        auditDate: dateInfo.auditDate,
-        auditIsoDate: dateInfo.auditIsoDate,
-        currentYear: dateInfo.currentYear,
-        textLength: rawText.length,
-        usedTextLength: text.length,
-        manualTextWasTruncated: limitedManualText.truncated,
-        attachmentsCount: attachments.length,
-        extractedAttachmentTextLength,
-        maxCompletionTokens,
-        finishReason: completion.choices[0]?.finish_reason || null,
-        completed,
+    pptxDoc.theme = {
+      headFontFace: 'Aptos Display',
+      bodyFontFace: 'Aptos',
+      lang: 'sk-SK',
+    } as any;
+
+    addCoverSlide(pptxDoc, theme, title, defenseType);
+    addAgendaSlide(pptxDoc, theme, buildAgenda(slides));
+
+    slides.forEach((item: DefenseSlide, index: number) => {
+      addContentSlide(pptxDoc, theme, item, index + 2);
+    });
+
+    addClosingSlide(pptxDoc, theme);
+
+    const output = await (pptxDoc as any).write({
+      outputType: 'nodebuffer',
+    });
+
+    const buffer = Buffer.isBuffer(output)
+      ? output
+      : output instanceof ArrayBuffer
+        ? Buffer.from(output)
+        : ArrayBuffer.isView(output)
+          ? Buffer.from(output.buffer, output.byteOffset, output.byteLength)
+          : Buffer.from(String(output || ''), 'binary');
+
+    if (!buffer.length) {
+      throw new Error('PPTX export vrátil prázdny súbor.');
+    }
+
+    const fileName = `${safeFileName(title)}.pptx`;
+
+    return new NextResponse(new Uint8Array(buffer), {
+      status: 200,
+      headers: {
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'Content-Disposition': `attachment; filename="${fileName}"`,
+        'Cache-Control': 'no-store, max-age=0',
       },
     });
   } catch (error) {
-    console.error('AUDIT_ERROR:', error);
-
-    const fallbackMessage =
-      error instanceof Error
-        ? error.message
-        : 'Nepodarilo sa vykonať audit kvality práce.';
+    console.error('PPTX_EXPORT_ERROR:', error);
 
     return NextResponse.json(
       {
         ok: false,
         error:
-          getZedperaErrorMessage?.(fallbackMessage) ||
-          fallbackMessage ||
-          'Nepodarilo sa vykonať audit kvality práce.',
+          error instanceof Error
+            ? error.message
+            : 'Nepodarilo sa exportovať PowerPoint.',
       },
       { status: 500 },
     );

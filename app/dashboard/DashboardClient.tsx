@@ -1944,22 +1944,42 @@ VÝSTUP:
 async function runModule() {
   if (isLoading) return;
 
- if (!activeProfile?.id) {
-  alert(
-    'Najprv vyberte alebo vytvorte profil práce. Systém nevie, ku ktorej práci má výstup priradiť.',
+  const hasUsableProfile = Boolean(
+    activeProfile &&
+      (
+        activeProfile.id ||
+        activeProfile.title ||
+        activeProfile.topic ||
+        activeProfile.type ||
+        activeProfile.schema?.label
+      ),
   );
-  return;
-}
 
-if (!activeProfile?.type && !activeProfile?.schema?.label) {
-  alert('V aktívnom profile chýba typ práce. Skontrolujte profil práce.');
-  return;
-}
+  const hasDefenseInput = Boolean(input.trim() || attachedFiles.length > 0 || hasUsableProfile);
 
-if (!activeProfile?.workLanguage && !activeProfile?.language) {
-  alert('V aktívnom profile chýba jazyk práce. Skontrolujte profil práce.');
-  return;
-}
+  if (!hasUsableProfile && activeModule !== 'defense') {
+    alert(
+      'Najprv vyberte alebo vytvorte profil práce. Systém nevie, ku ktorej práci má výstup priradiť.',
+    );
+    return;
+  }
+
+  if (activeModule === 'defense' && !hasDefenseInput) {
+    alert(
+      'Na vytvorenie prezentácie nahrajte prácu, vložte text alebo vyberte profil práce.',
+    );
+    return;
+  }
+
+  if (activeModule !== 'defense' && !activeProfile?.type && !activeProfile?.schema?.label) {
+    alert('V aktívnom profile chýba typ práce. Skontrolujte profil práce.');
+    return;
+  }
+
+  if (activeModule !== 'defense' && !activeProfile?.workLanguage && !activeProfile?.language) {
+    alert('V aktívnom profile chýba jazyk práce. Skontrolujte profil práce.');
+    return;
+  }
 
   setIsLoading(true);
   setResult('');
@@ -2709,6 +2729,38 @@ formData.append(
   }
 }
   
+const downloadPdf = () => {
+  const text = stripModuleExtraSections(canvasText || result, activeModule);
+
+  if (!text.trim()) {
+    alert('Najprv vygenerujte výstup, až potom je možné vytvoriť PDF.');
+    return;
+  }
+
+  const title =
+    activeModule === 'defense'
+      ? 'Prezentácia, sprievodný text a obhajoba'
+      : exportTitle || 'ZEDPERA výstup';
+
+  const html = createDocHtml(title, text);
+
+  const printWindow = window.open('', '_blank');
+
+  if (!printWindow) {
+    alert('Prehliadač zablokoval otvorenie PDF okna. Povoľte vyskakovacie okná.');
+    return;
+  }
+
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+
+  printWindow.onload = () => {
+    printWindow.focus();
+    printWindow.print();
+  };
+};
+
 
   const downloadDoc = () => {
     const text = stripModuleExtraSections(canvasText || result, activeModule);
@@ -2824,93 +2876,189 @@ const downloadExcel = () => {
 };
 
 
-  const downloadPdf = () => {
-    const text = stripModuleExtraSections(canvasText || result, activeModule);
-
-    if (!text.trim()) return;
-
-    const printWindow = window.open('', '_blank', 'width=900,height=700');
-
-    if (!printWindow) {
-      alert('Prehliadač zablokoval otvorenie PDF okna. Povoľ pop-up okná.');
-      return;
-    }
-
-    printWindow.document.open();
-    printWindow.document.write(createDocHtml(exportTitle, text));
-    printWindow.document.close();
-    printWindow.focus();
-
-    setTimeout(() => {
-      printWindow.print();
-    }, 400);
-  };
-
  const downloadPpt = async () => {
   const text = stripModuleExtraSections(canvasText || result, activeModule);
 
   if (!text.trim()) {
-    alert('Najprv vygenerujte výstup, až potom je možné vytvoriť PPT prezentáciu.');
+    alert('Najprv vygenerujte obhajobu alebo výstup, až potom je možné stiahnuť PPTX.');
     return;
   }
-
-  const moduleTitle =
-    activeModule === 'quality'
-      ? 'Audit kvality práce'
-      : activeModule === 'defense'
-        ? 'Obhajoba práce'
-        : activeModule === 'supervisor'
-          ? 'Hodnotenie práce'
-          : activeModuleInfo.label || 'Prezentácia';
 
   const pptTitle =
     activeProfile?.title ||
     activeProfile?.topic ||
-    exportTitle ||
-    moduleTitle;
+    'Obhajoba záverečnej práce';
 
-  const sourceText = [
-    `Modul: ${moduleTitle}`,
-    '',
-    activeProfile
-      ? buildProfileBlock(activeProfile)
-      : 'Profil práce nebol dostupný. Prezentácia bola vytvorená z aktuálneho výstupu.',
-    '',
-    'VÝSTUP:',
-    text,
-  ]
-    .filter(Boolean)
-    .join('\n');
+  const defenseType =
+    activeProfile?.type ||
+    activeProfile?.schema?.label ||
+    'Obhajoba záverečnej práce';
 
-  const fallbackSlides = [
+  const slides = [
     {
-      title: moduleTitle,
+      title: pptTitle,
       layout: 'section',
       bullets: [
-        `Prezentácia bola vytvorená z modulu: ${moduleTitle}.`,
-        activeProfile?.title
-          ? `Názov práce: ${activeProfile.title}`
-          : 'Aktívny profil práce nebol dostupný.',
-        'Obsah vychádza z aktuálne vygenerovaného výstupu v aplikácii.',
+        defenseType,
+        activeProfile?.field || 'Odbor je potrebné doplniť',
+        activeProfile?.topic || 'Téma práce je potrebné doplniť',
       ],
+      speakerNotes:
+        'Na úvod stručne predstavte názov práce, odbor, typ práce a dôvod výberu témy.',
+      visualSuggestion:
+        'Titulný slide s názvom práce a moderným akademickým pozadím.',
     },
     {
-      title: 'Hlavné body výstupu',
-      layout: 'bullets',
-      bullets: text
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .slice(0, 5),
-    },
-    {
-      title: 'Odporúčania',
+      title: 'Význam a aktuálnosť témy',
       layout: 'bullets',
       bullets: [
-        'Skontrolovať úplnosť profilu práce.',
-        'Overiť názov práce, odbor, cieľ, metodológiu a kľúčové slová.',
-        'Doplniť chýbajúce údaje pred finálnym exportom.',
+        activeProfile?.annotation ||
+          'Téma je významná z odborného alebo praktického hľadiska.',
+        'Práca reaguje na konkrétny problém v danej oblasti.',
+        'Zvolená téma má priamu väzbu na odbor a prax.',
       ],
+      speakerNotes:
+        'Vysvetlite, prečo je téma dôležitá a aký problém práca rieši.',
+      visualSuggestion: 'Schéma kontextu témy alebo karta s problémom.',
+    },
+    {
+      title: 'Cieľ práce',
+      layout: 'quote',
+      bullets: [
+        activeProfile?.goal ||
+          'Cieľ práce je potrebné doplniť podľa finálneho zadania.',
+      ],
+      speakerNotes:
+        'Cieľ povedzte jasne, jednou až dvomi vetami.',
+      visualSuggestion: 'Veľká karta s hlavným cieľom práce.',
+    },
+    {
+      title: 'Výskumný problém, otázky a hypotézy',
+      layout: 'split',
+      bullets: [
+        activeProfile?.problem ||
+          activeProfile?.researchQuestions ||
+          'Výskumný problém alebo výskumné otázky je potrebné doplniť.',
+        activeProfile?.hypotheses ||
+          'Hypotézy je potrebné doplniť, ak boli súčasťou práce.',
+        'Otázky a hypotézy majú byť prepojené s cieľom práce.',
+      ],
+      speakerNotes:
+        'Ukážte, čo práca skúmala, overovala alebo analyzovala.',
+      visualSuggestion: 'Dvojstĺpcové rozloženie: otázky a hypotézy.',
+    },
+    {
+      title: 'Teoretické východiská',
+      layout: 'bullets',
+      bullets: [
+        'Teoretická časť vysvetľuje hlavné pojmy a odborné súvislosti.',
+        'Použité zdroje vytvárajú základ pre praktickú alebo analytickú časť.',
+        'Teória je prepojená s cieľom a riešeným problémom práce.',
+      ],
+      speakerNotes:
+        'Nevymenúvajte celú teóriu. Vyberte iba pojmy dôležité pre cieľ práce.',
+      visualSuggestion: 'Schéma hlavných pojmov alebo konceptov.',
+    },
+    {
+      title: 'Metodológia práce',
+      layout: 'bullets',
+      bullets: [
+        activeProfile?.methodology ||
+          'Metodologický postup je potrebné doplniť podľa finálnej práce.',
+        'Metódy boli zvolené podľa cieľa a charakteru skúmanej témy.',
+        'Postup spracovania má umožniť zodpovedať výskumné otázky alebo overiť hypotézy.',
+      ],
+      speakerNotes:
+        'Vysvetlite, ako bola práca spracovaná a prečo boli zvolené dané metódy.',
+      visualSuggestion: 'Procesná schéma krokov metodiky.',
+    },
+    {
+      title: 'Praktická časť práce',
+      layout: 'bullets',
+      bullets: [
+        activeProfile?.practicalPart ||
+          'Praktická časť je potrebné doplniť podľa obsahu práce.',
+        'Táto časť prepája teoretické poznatky s vlastným spracovaním témy.',
+        'Dôležité je vysvetliť zdroj dát, postup a spôsob vyhodnotenia.',
+      ],
+      speakerNotes:
+        'Stručne predstavte, čo tvorilo praktickú časť práce.',
+      visualSuggestion: 'Karta s dátami, vzorkou alebo postupom.',
+    },
+    {
+      title: 'Hlavné výsledky práce',
+      layout: 'chart',
+      bullets: [
+        'Výsledky je potrebné predstaviť vecne a priamo vo vzťahu k cieľu práce.',
+        'Najdôležitejšie zistenia majú byť podložené údajmi alebo argumentáciou.',
+        'Výsledky tvoria základ pre diskusiu a odporúčania.',
+      ],
+      speakerNotes:
+        'Pri výsledkoch hovorte konkrétne. Vyberte iba najdôležitejšie zistenia.',
+      visualSuggestion: 'Graf alebo tabuľka s najdôležitejšími výsledkami.',
+    },
+    {
+      title: 'Interpretácia výsledkov',
+      layout: 'split',
+      bullets: [
+        'Výsledky je potrebné interpretovať vo vzťahu k cieľu práce.',
+        'Diskusia ukazuje, čo zistenia znamenajú pre riešený problém.',
+        'Interpretácia prepája výsledky s teoretickými východiskami.',
+      ],
+      speakerNotes:
+        'Neopakujte iba výsledky. Vysvetlite ich význam a dopad.',
+      visualSuggestion: 'Porovnanie: výsledok a význam pre prácu.',
+    },
+    {
+      title: 'Prínos práce',
+      layout: 'quote',
+      bullets: [
+        activeProfile?.scientificContribution ||
+          'Prínos práce je potrebné pomenovať podľa výsledkov a cieľa práce.',
+        'Práca môže byť využiteľná v odbornej praxi alebo ďalšom výskume.',
+        'Vlastný prínos autora spočíva v spracovaní, analýze a vyhodnotení témy.',
+      ],
+      speakerNotes:
+        'Zdôraznite, čo práca prináša a komu môžu byť výsledky užitočné.',
+      visualSuggestion: 'Dve karty: prínos pre prax a prínos pre odbor.',
+    },
+    {
+      title: 'Limity práce',
+      layout: 'bullets',
+      bullets: [
+        'Každá práca má obmedzenia, ktoré je vhodné pomenovať vecne a odborne.',
+        'Limity môžu súvisieť s rozsahom, dátami, vzorkou, metódou alebo dostupnosťou zdrojov.',
+        'Ich pomenovanie ukazuje odbornú zrelosť autora.',
+      ],
+      speakerNotes:
+        'Limity nepôsobia negatívne, ak ich vysvetlíte pokojne a odborne.',
+      visualSuggestion: 'Tri krátke karty s limitmi práce.',
+    },
+    {
+      title: 'Otázky komisie a pripravené odpovede',
+      layout: 'bullets',
+      bullets: [
+        'Prečo ste si vybrali túto tému?',
+        'Ako cieľ práce súvisí s použitou metodológiou?',
+        'Aký je hlavný prínos práce?',
+        'Aké boli najväčšie limity spracovania?',
+        'Ako by bolo možné vo výskume pokračovať?',
+      ],
+      speakerNotes:
+        'Na otázky odpovedajte stručne, priamo a odborne.',
+      visualSuggestion: 'Slide s ikonou otázok a odpovedí.',
+    },
+    {
+      title: 'Záver obhajoby',
+      layout: 'closing',
+      bullets: [
+        'Práca sa zamerala na riešenie stanovenej témy a cieľa.',
+        'Výsledky poskytujú podklad pre odborné zhodnotenie a odporúčania.',
+        'Ďakujem za pozornosť a som pripravený/pripravená odpovedať na otázky.',
+      ],
+      speakerNotes:
+        'Záver má byť krátky, sebavedomý a vecný.',
+      visualSuggestion: 'Čistý záverečný slide s poďakovaním.',
     },
   ];
 
@@ -2923,18 +3071,25 @@ const downloadExcel = () => {
       body: JSON.stringify({
         title: pptTitle,
         workTitle: pptTitle,
-        defenseType: moduleTitle,
+        defenseType,
         theme: 'academic',
-        sourceText,
+        slides,
+        sourceText: [
+          activeProfile ? buildProfileBlock(activeProfile) : '',
+          '',
+          text,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
         extractedWorkText: text,
+        attachmentText: activeAttachmentText || '',
         text,
-        slides: fallbackSlides,
       }),
     });
 
     if (!response.ok) {
       const errorText = await readApiErrorResponse(response);
-      throw new Error(errorText || 'Prezentáciu sa nepodarilo vytvoriť.');
+      throw new Error(errorText || 'PPTX prezentáciu sa nepodarilo vytvoriť.');
     }
 
     const blob = await response.blob();
@@ -2944,10 +3099,11 @@ const downloadExcel = () => {
     }
 
     const url = URL.createObjectURL(blob);
-
     const link = document.createElement('a');
+
     link.href = url;
-    link.download = `${sanitizeFileName(pptTitle || moduleTitle)}.pptx`;
+    link.download = `${sanitizeFileName(pptTitle)}.pptx`;
+
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -2963,6 +3119,7 @@ const downloadExcel = () => {
     );
   }
 };
+
 
 
   return (
@@ -3380,7 +3537,7 @@ const active = activeModule === item.key;
     ) : (
       <>
         <Send className="h-4 w-4" />
-        Spustiť obhajobu
+        Vytvoriť prezentáciu k obhajobe
       </>
     )}
   </button>
@@ -3576,13 +3733,14 @@ const active = activeModule === item.key;
                     <div className="flex flex-wrap items-center gap-2">
   {activeModule === 'defense' ? (
     <button
-      type="button"
-      onClick={downloadPpt}
-      className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-violet-500"
-    >
-      <Presentation className="h-4 w-4" />
-      PPTX
-    </button>
+  type="button"
+  onClick={downloadPpt}
+  disabled={isLoading}
+  className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-900 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+>
+  <Presentation className="h-4 w-4" />
+  Stiahnuť PPTX
+</button>
   ) : null}
 
   <button

@@ -3195,7 +3195,11 @@ PRAVIDLÁ PRE ZDROJE:
 5. Názvy zdrojov, mená autorov, DOI, URL, názvy časopisov a bibliografické údaje ponechaj v pôvodnom tvare. Neprekladaj ich len preto, že používateľ prepne jazyk aplikácie.
 6. Ak je odpoveď v inom jazyku ako jazyk zdroja, prelož iba vysvetľujúci text, nie samotný bibliografický záznam.
 7. Sekcie „Primárne zdroje“ a „Sekundárne zdroje“ prelož do zvoleného jazyka odpovede iba vtedy, ak nejde o požiadavku na presný slovenský formát. Ak používateľ pracuje so slovenským profilom alebo citačným výstupom, ponechaj tieto názvy v slovenčine.
-
+8. Ak sa v texte použije číselná citácia vo forme [1], [2], [3] alebo [4], rovnaké číslo musí existovať aj v sekcii Sekundárne zdroje.
+9. Nikdy nesmie vzniknúť situácia, že text obsahuje citáciu [4], ale v Sekundárnych zdrojoch sú iba položky [1], [2], [3].
+10. Pred finálnym výstupom skontroluj všetky číselné citácie v texte a porovnaj ich so zoznamom literatúry.
+11. Ak nevieš bezpečne určiť bibliografický záznam pre číselnú citáciu, nepouži túto číselnú citáciu v texte.
+12. Pri číselných citáciách používaj iba také čísla, ku ktorým vieš na konci uviesť zodpovedajúci zdroj.
 NASTAVENIA:
 Kontrola príloh podľa profilu práce: ${settings.validateAttachmentsAgainstProfile ? 'áno' : 'nie'}
 Povinný zoznam zdrojov: ${settings.requireSourceList ? 'áno' : 'nie'}
@@ -3229,6 +3233,90 @@ function buildInTextCitationFromSource(source: BibliographicCandidate) {
   if (!firstAuthor || isInvalidAuthorFragment(firstAuthor)) return '';
   return authors.length > 1 ? `(${firstAuthor} et al., ${source.year})` : `(${firstAuthor}, ${source.year})`;
 }
+
+function extractNumericCitationsFromText(text: string) {
+  const cleaned = normalizeText(text || '');
+  const sourceSectionStart = cleaned.search(
+    /\n\s*(Primárne zdroje|Primarne zdroje|Sekundárne zdroje|Sekundarne zdroje|Použitá literatúra|Použité zdroje|Literatúra|Bibliografia|References)\s*\n/i,
+  );
+
+  const body =
+    sourceSectionStart >= 0 ? cleaned.slice(0, sourceSectionStart) : cleaned;
+
+  const found = new Set<number>();
+
+  for (const match of body.matchAll(/\[(\d{1,3})\]/g)) {
+    const number = Number(match[1]);
+
+    if (Number.isFinite(number) && number > 0) {
+      found.add(number);
+    }
+  }
+
+  return Array.from(found).sort((a, b) => a - b);
+}
+
+function extractNumberedBibliographyItems(text: string) {
+  const cleaned = normalizeText(text || '');
+  const found = new Set<number>();
+
+  for (const match of cleaned.matchAll(/(?:^|\n)\s*\[?(\d{1,3})\]?[.)]?\s+/g)) {
+    const number = Number(match[1]);
+
+    if (Number.isFinite(number) && number > 0) {
+      found.add(number);
+    }
+  }
+
+  return Array.from(found).sort((a, b) => a - b);
+}
+
+function removeUnmatchedNumericCitations(text: string) {
+  const cleaned = normalizeText(text || '');
+  const usedNumbers = extractNumericCitationsFromText(cleaned);
+
+  if (!usedNumbers.length) return cleaned;
+
+  const bibliographyNumbers = extractNumberedBibliographyItems(cleaned);
+
+  if (!bibliographyNumbers.length) {
+    return cleaned.replace(/\s*\[\d{1,3}\]/g, '').replace(/\s{2,}/g, ' ').trim();
+  }
+
+  const allowed = new Set(bibliographyNumbers);
+
+  return cleaned
+    .replace(/\[(\d{1,3})\]/g, (match, value) => {
+      const number = Number(value);
+      return allowed.has(number) ? match : '';
+    })
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
+function warnAboutCitationMismatch(text: string) {
+  const cleaned = normalizeText(text || '');
+  const usedNumbers = extractNumericCitationsFromText(cleaned);
+
+  if (!usedNumbers.length) return cleaned;
+
+  const bibliographyNumbers = extractNumberedBibliographyItems(cleaned);
+  const bibliographySet = new Set(bibliographyNumbers);
+
+  const missing = usedNumbers.filter((number) => !bibliographySet.has(number));
+
+  if (!missing.length) return cleaned;
+
+  return `${cleaned}
+
+Poznámka ku kontrole zdrojov:
+Vo výstupe boli odstránené alebo skontrolované číselné citácie, ktoré nemali zodpovedajúcu položku v zozname literatúry: ${missing
+    .map((number) => `[${number}]`)
+    .join(', ')}.`;
+}
+
 
 function textAlreadyHasCitation(text: string) {
   return /\([^()]{2,160}\b(?:18|19|20)\d{2}[a-z]?[^()]*\)/i.test(text);
@@ -3591,9 +3679,14 @@ if (isChapterRequest || sourcesOnly || module === 'chat') {
 
   output = cleanAcademicChapterOutput(output, lastUserMessage);
   output = finalizeSourceSections(output);
+
+  // Kontrola číselných citácií typu [1], [2], [3], [4].
+  // Ak sa v texte objaví napríklad [4], ale v literatúre neexistuje položka 4,
+  // citácia sa odstráni, aby nevznikla akademická chyba.
+  output = removeUnmatchedNumericCitations(output);
+
   output = removeForbiddenInternalSourcesFromOutput(output);
 }
-
 await saveGeneratedHistory({
   module,
   profile,

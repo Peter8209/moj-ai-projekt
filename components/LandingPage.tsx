@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 
 import {
   ArrowRight,
+  ArrowUp,
   BookOpen,
   Bot,
   CheckCircle2,
@@ -894,7 +895,10 @@ async function translateLandingContent(language: AppLanguage) {
   
 
 
-function ClickableLanguageMenu({
+
+
+
+function DropdownLanguageMenu({
   language,
   onChange,
   compact = false,
@@ -903,76 +907,174 @@ function ClickableLanguageMenu({
   onChange: (language: AppLanguage) => void;
   compact?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
+
+  const handleSelect = (nextLanguage: AppLanguage) => {
+    setOpen(false);
+    onChange(nextLanguage);
+  };
+
   return (
     <div
-      className={`rounded-2xl border border-slate-200 bg-white p-1 shadow-sm ${
-        compact ? 'w-full' : ''
-      }`}
+      className={`zedpera-language-menu relative ${compact ? 'w-full' : 'min-w-[280px]'}`}
       aria-label="Výber jazyka"
     >
-      <div
-        className={
-          compact
-            ? 'grid grid-cols-3 gap-1 sm:grid-cols-6'
-            : 'flex items-center gap-1'
-        }
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className={`zedpera-language-trigger flex min-h-[58px] w-full items-center justify-between gap-3 rounded-2xl border-2 border-violet-300 bg-white px-5 py-3 text-left text-slate-950 shadow-xl shadow-violet-200/60 transition hover:border-violet-700 hover:bg-violet-50 ${
+          compact ? 'w-full' : ''
+        }`}
+        aria-expanded={open}
+        aria-haspopup="listbox"
       >
-        {!compact && (
-          <div className="mr-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-700">
-            <Globe2 size={17} />
-          </div>
-        )}
+        <span className="flex min-w-0 items-center gap-3">
+          <span className="zedpera-language-code flex h-9 min-w-12 shrink-0 items-center justify-center rounded-xl bg-violet-700 px-3 text-sm font-black text-white shadow-md shadow-violet-900/20">
+            {getLanguageShortLabel(language)}
+          </span>
 
-        {languages.map((item) => {
-          const code = item.code as AppLanguage;
-          const active = language === code;
+          <span className="truncate text-base font-black text-slate-950">
+            {getLanguageLabel(language)}
+          </span>
+        </span>
 
-          return (
-            <button
-              key={code}
-              type="button"
-              onClick={() => onChange(code)}
-              title={getLanguageLabel(code)}
-              aria-label={`Zmeniť jazyk na ${getLanguageLabel(code)}`}
-              aria-pressed={active}
-              className={`min-h-[38px] rounded-xl px-3 text-xs font-black tracking-wide transition ${
-                active
-                  ? 'bg-gradient-to-r from-violet-700 to-indigo-700 text-white shadow-lg shadow-violet-900/20'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
-              } ${compact ? 'w-full' : ''}`}
-            >
-              {getLanguageShortLabel(code)}
-            </button>
-          );
-        })}
-      </div>
+        <ChevronDown
+          size={20}
+          className={`shrink-0 text-violet-800 transition ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {open && (
+        <div
+          className="zedpera-language-dropdown absolute right-0 top-[calc(100%+0.65rem)] z-[99999] max-h-[390px] w-full min-w-[330px] overflow-y-auto rounded-2xl border-2 border-violet-300 bg-white p-2 text-slate-950 shadow-2xl shadow-violet-300/70"
+          role="listbox"
+        >
+          {languages.map((item) => {
+            const code = item.code as AppLanguage;
+            const active = language === code;
+
+            return (
+              <button
+                key={code}
+                type="button"
+                onClick={() => handleSelect(code)}
+                className={`zedpera-language-option flex min-h-[54px] w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left transition ${
+                  active
+                    ? 'bg-violet-700 text-white shadow-lg shadow-violet-900/20'
+                    : 'bg-white text-slate-950 hover:bg-violet-50'
+                }`}
+                role="option"
+                aria-selected={active}
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <span
+                    className={`flex h-9 w-12 shrink-0 items-center justify-center rounded-lg text-sm font-black ${
+                      active ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-950'
+                    }`}
+                  >
+                    {getLanguageShortLabel(code)}
+                  </span>
+
+                  <span className="truncate text-base font-black">
+                    {getLanguageLabel(code)}
+                  </span>
+                </span>
+
+                {active && <CheckCircle2 size={20} className="shrink-0 text-white" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
+
 
 export default function LandingPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [paymentError, setPaymentError] = useState('');
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+  const [showBackToTop, setShowBackToTop] = useState(false);
 
   const [language, setLanguage] = useState<AppLanguage>('sk');
   const [content, setContent] = useState<LandingContent>(baseContent);
 
   useEffect(() => {
-    const savedLanguage =
-      typeof window !== 'undefined'
-        ? normalizeLanguage(localStorage.getItem(LANGUAGE_STORAGE_KEY))
-        : 'sk';
+    const resolveStoredLanguage = () => {
+      if (typeof window === 'undefined') {
+        return 'sk' as AppLanguage;
+      }
 
-    setLanguage(savedLanguage);
-    document.documentElement.lang = savedLanguage;
+      return normalizeLanguage(
+        localStorage.getItem(LANGUAGE_STORAGE_KEY) ||
+          localStorage.getItem('zedpera_system_language') ||
+          localStorage.getItem('zedpera_work_language') ||
+          localStorage.getItem('app_language') ||
+          'sk',
+      );
+    };
 
-    if (savedLanguage !== 'sk') {
-      void handleLanguageChange(savedLanguage, false);
-    }
+    const syncLanguage = (nextLanguage: AppLanguage, persist = false) => {
+      void handleLanguageChange(nextLanguage, persist);
+    };
+
+    syncLanguage(resolveStoredLanguage(), false);
+
+    const handleStorageLanguageChange = () => {
+      syncLanguage(resolveStoredLanguage(), false);
+    };
+
+    const handleCustomLanguageChange = (event: Event) => {
+      const customEvent = event as CustomEvent<AppLanguage | { language?: AppLanguage }>;
+      const detail = customEvent.detail;
+      const nextLanguage =
+        typeof detail === 'string'
+          ? normalizeLanguage(detail)
+          : normalizeLanguage(detail?.language || resolveStoredLanguage());
+
+      syncLanguage(nextLanguage, false);
+    };
+
+    window.addEventListener('storage', handleStorageLanguageChange);
+    window.addEventListener('zedpera-language-change', handleCustomLanguageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageLanguageChange);
+      window.removeEventListener('zedpera-language-change', handleCustomLanguageChange);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const handleScroll = () => {
+      setShowBackToTop(window.scrollY > 520);
+    };
+
+    handleScroll();
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
+
+  const scrollToTop = () => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    });
+  };
 
   const closeMobileMenu = () => {
     setMobileMenuOpen(false);
@@ -1139,30 +1241,208 @@ export default function LandingPage() {
           text-rendering: optimizeLegibility;
         }
 
-        .zedpera-public-page header {
-          background: rgba(2, 6, 23, 0.98) !important;
-          color: #ffffff !important;
-          border-color: rgba(255, 255, 255, 0.12) !important;
-          box-shadow: 0 18px 55px rgba(15, 23, 42, 0.2);
+
+        /* PROFESIONÁLNE ZVÝRAZNENIE TEXTU NA CELEJ VEREJNEJ STRÁNKE */
+        .zedpera-public-page,
+        .zedpera-public-page * {
+          opacity: 1 !important;
+          text-rendering: geometricPrecision !important;
+          -webkit-font-smoothing: antialiased !important;
+          text-shadow: none !important;
+          filter: none !important;
+          mix-blend-mode: normal !important;
         }
 
+        .zedpera-public-page :where(
+          h1,
+          h2,
+          h3,
+          h4,
+          h5,
+          h6,
+          strong,
+          b
+        ) {
+          color: #020617 !important;
+          font-weight: 950 !important;
+          letter-spacing: -0.025em;
+        }
+
+        .zedpera-public-page :where(
+          p,
+          li,
+          span,
+          div,
+          label,
+          small,
+          a,
+          button
+        ) {
+          color: #0f172a !important;
+          font-weight: 750 !important;
+        }
+
+        .zedpera-public-page :where(
+          .text-slate-300,
+          .text-slate-400,
+          .text-slate-500,
+          .text-slate-600,
+          .text-gray-300,
+          .text-gray-400,
+          .text-gray-500,
+          .text-gray-600,
+          .text-zinc-300,
+          .text-zinc-400,
+          .text-zinc-500,
+          .text-zinc-600
+        ) {
+          color: #1e293b !important;
+          font-weight: 800 !important;
+        }
+
+        .zedpera-public-page :where(
+          .opacity-10,
+          .opacity-20,
+          .opacity-30,
+          .opacity-40,
+          .opacity-50,
+          .opacity-60,
+          .opacity-70,
+          .opacity-75
+        ) {
+          opacity: 1 !important;
+        }
+
+        .zedpera-public-page :where(
+          section,
+          article,
+          div,
+          footer
+        )[class*="bg-slate-950"],
+        .zedpera-public-page :where(
+          section,
+          article,
+          div,
+          footer
+        )[class*="bg-[#"],
+        .zedpera-public-page :where(
+          section,
+          article,
+          div,
+          footer
+        )[class*="bg-black"] {
+          background: #ffffff !important;
+          background-color: #ffffff !important;
+          background-image: none !important;
+          color: #020617 !important;
+          border-color: #cbd5e1 !important;
+        }
+
+        .zedpera-public-page :where(
+          section,
+          article,
+          div,
+          footer
+        )[class*="bg-slate-950"] *,
+        .zedpera-public-page :where(
+          section,
+          article,
+          div,
+          footer
+        )[class*="bg-[#"] *,
+        .zedpera-public-page :where(
+          section,
+          article,
+          div,
+          footer
+        )[class*="bg-black"] * {
+          color: #020617 !important;
+          opacity: 1 !important;
+          font-weight: 800 !important;
+        }
+
+        .zedpera-public-page :where(
+          input,
+          textarea,
+          select
+        ) {
+          background: #ffffff !important;
+          color: #020617 !important;
+          border-color: #cbd5e1 !important;
+          font-weight: 800 !important;
+        }
+
+        .zedpera-public-page :where(
+          input,
+          textarea
+        )::placeholder {
+          color: #475569 !important;
+          opacity: 1 !important;
+          font-weight: 750 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-status,
+        .zedpera-public-page .zedpera-language-status * {
+          color: #0f172a !important;
+          opacity: 1 !important;
+          font-weight: 900 !important;
+        }
+
+        .zedpera-public-page .bg-gradient-to-r,
+        .zedpera-public-page .bg-gradient-to-br,
+        .zedpera-public-page [class*="bg-violet-"],
+        .zedpera-public-page [class*="bg-purple-"],
+        .zedpera-public-page [class*="bg-indigo-"],
+        .zedpera-public-page [class*="bg-blue-"],
+        .zedpera-public-page [class*="bg-red-"] {
+          color: #ffffff !important;
+        }
+
+        .zedpera-public-page .bg-gradient-to-r *,
+        .zedpera-public-page .bg-gradient-to-br *,
+        .zedpera-public-page [class*="bg-violet-"] *,
+        .zedpera-public-page [class*="bg-purple-"] *,
+        .zedpera-public-page [class*="bg-indigo-"] *,
+        .zedpera-public-page [class*="bg-blue-"] *,
+        .zedpera-public-page [class*="bg-red-"] * {
+          color: #ffffff !important;
+          font-weight: 900 !important;
+        }
+
+        .zedpera-public-page header,
+        .zedpera-public-page header *,
+        .zedpera-public-page .mobile-menu-panel,
+        .zedpera-public-page .mobile-menu-panel * {
+          color: inherit;
+        }
+
+        .zedpera-public-page header {
+          background: rgba(255, 255, 255, 0.97) !important;
+          color: #020617 !important;
+          border-color: #cbd5e1 !important;
+          box-shadow: 0 18px 55px rgba(15, 23, 42, 0.10);
+        }
+
+        .zedpera-public-page header .text-white,
         .zedpera-public-page header .text-slate-950,
         .zedpera-public-page header .text-slate-800,
         .zedpera-public-page header .text-slate-700 {
-          color: #ffffff !important;
+          color: #020617 !important;
         }
 
         .zedpera-public-page header .text-slate-600,
-        .zedpera-public-page header .text-slate-500 {
-          color: #cbd5e1 !important;
+        .zedpera-public-page header .text-slate-500,
+        .zedpera-public-page header .text-slate-300 {
+          color: #1e293b !important;
         }
 
         .zedpera-public-page header nav a {
-          color: #ede9fe !important;
+          color: #111827 !important;
+          font-weight: 900 !important;
         }
 
         .zedpera-public-page header nav a:hover {
-          color: #c4b5fd !important;
+          color: #6d28d9 !important;
         }
 
 
@@ -1287,6 +1567,1507 @@ export default function LandingPage() {
           opacity: 1 !important;
         }
 
+
+        /* FINÁLNE PROFESIONÁLNE ZVÝRAZNENIE - VIDITEĽNÉ VŠADE */
+        .zedpera-public-page {
+          background: #f8fafc !important;
+          color: #020617 !important;
+        }
+
+        .zedpera-public-page section,
+        .zedpera-public-page article,
+        .zedpera-public-page footer,
+        .zedpera-public-page .rounded-2xl,
+        .zedpera-public-page .rounded-\\[2rem\\] {
+          color: #020617 !important;
+        }
+
+        .zedpera-public-page section :where(h1, h2, h3, h4, h5, h6, strong, b),
+        .zedpera-public-page article :where(h1, h2, h3, h4, h5, h6, strong, b),
+        .zedpera-public-page footer :where(h1, h2, h3, h4, h5, h6, strong, b) {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          opacity: 1 !important;
+          font-weight: 950 !important;
+          text-shadow: none !important;
+        }
+
+        .zedpera-public-page section :where(p, li, span, div, label, small),
+        .zedpera-public-page article :where(p, li, span, div, label, small),
+        .zedpera-public-page footer :where(p, li, span, div, label, small) {
+          color: #1e293b !important;
+          -webkit-text-fill-color: #1e293b !important;
+          opacity: 1 !important;
+          font-weight: 800 !important;
+          text-shadow: none !important;
+        }
+
+        .zedpera-public-page section :where(.text-white, .text-slate-100, .text-slate-200, .text-slate-300, .text-slate-400, .text-slate-500, .text-slate-600),
+        .zedpera-public-page article :where(.text-white, .text-slate-100, .text-slate-200, .text-slate-300, .text-slate-400, .text-slate-500, .text-slate-600),
+        .zedpera-public-page footer :where(.text-white, .text-slate-100, .text-slate-200, .text-slate-300, .text-slate-400, .text-slate-500, .text-slate-600) {
+          color: #1e293b !important;
+          -webkit-text-fill-color: #1e293b !important;
+          opacity: 1 !important;
+          font-weight: 850 !important;
+        }
+
+        .zedpera-public-page section[class*="bg-slate-950"],
+        .zedpera-public-page div[class*="bg-white/"],
+        .zedpera-public-page div[class*="bg-emerald-"],
+        .zedpera-public-page div[class*="bg-violet-500/"],
+        .zedpera-public-page div[class*="bg-gradient-to-br"] {
+          background-color: #ffffff !important;
+          background-image: none !important;
+          color: #020617 !important;
+          border-color: #cbd5e1 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-menu,
+        .zedpera-public-page .zedpera-language-menu *,
+        .zedpera-public-page .zedpera-language-dropdown,
+        .zedpera-public-page .zedpera-language-dropdown * {
+          opacity: 1 !important;
+          text-shadow: none !important;
+          filter: none !important;
+        }
+
+        .zedpera-public-page .zedpera-language-trigger,
+        .zedpera-public-page .zedpera-language-trigger * {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          font-weight: 900 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown {
+          background: #ffffff !important;
+          color: #020617 !important;
+          border-color: #cbd5e1 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown button:not([aria-selected='true']),
+        .zedpera-public-page .zedpera-language-dropdown button:not([aria-selected='true']) * {
+          background: #ffffff !important;
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          font-weight: 900 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown button[aria-selected='true'],
+        .zedpera-public-page .zedpera-language-dropdown button[aria-selected='true'] * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page :where(a, button)[class*="bg-gradient"],
+        .zedpera-public-page :where(a, button)[class*="bg-violet-"],
+        .zedpera-public-page :where(a, button)[class*="bg-purple-"],
+        .zedpera-public-page :where(a, button)[class*="bg-indigo-"],
+        .zedpera-public-page :where(a, button)[class*="bg-blue-"],
+        .zedpera-public-page :where(a, button)[class*="bg-red-"] {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page :where(a, button)[class*="bg-gradient"] *,
+        .zedpera-public-page :where(a, button)[class*="bg-violet-"] *,
+        .zedpera-public-page :where(a, button)[class*="bg-purple-"] *,
+        .zedpera-public-page :where(a, button)[class*="bg-indigo-"] *,
+        .zedpera-public-page :where(a, button)[class*="bg-blue-"] *,
+        .zedpera-public-page :where(a, button)[class*="bg-red-"] * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page header,
+        .zedpera-public-page header * {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+        }
+
+        .zedpera-public-page header a[class*="bg-gradient"],
+        .zedpera-public-page header a[class*="bg-gradient"] *,
+        .zedpera-public-page header div[class*="bg-gradient"],
+        .zedpera-public-page header div[class*="bg-gradient"] * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+        }
+
+
+        /* FINAL V3: BEZ LOGO IKONY, BEZ TEXTU "JAZYK STRÁNKY", MAXIMÁLNA VIDITEĽNOSŤ */
+        .zedpera-public-page header,
+        .zedpera-public-page header > div,
+        .zedpera-public-page header .mx-auto,
+        .zedpera-public-page header .flex {
+          overflow: visible !important;
+        }
+
+        .zedpera-public-page .zedpera-wordmark,
+        .zedpera-public-page .zedpera-wordmark * {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          opacity: 1 !important;
+          filter: none !important;
+          text-shadow: none !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-wordmark div:last-child {
+          color: #1e293b !important;
+          -webkit-text-fill-color: #1e293b !important;
+          font-weight: 900 !important;
+        }
+
+        .zedpera-public-page .zedpera-brand-icon {
+          display: none !important;
+        }
+
+        .zedpera-public-page .zedpera-language-menu {
+          position: relative !important;
+          z-index: 100000 !important;
+          overflow: visible !important;
+          min-width: 260px !important;
+        }
+
+        .zedpera-public-page .zedpera-language-trigger {
+          background: #ffffff !important;
+          background-color: #ffffff !important;
+          background-image: none !important;
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          border: 2px solid #c4b5fd !important;
+          box-shadow: 0 14px 32px rgba(15, 23, 42, 0.12) !important;
+          opacity: 1 !important;
+          min-height: 54px !important;
+        }
+
+        .zedpera-public-page .zedpera-language-trigger,
+        .zedpera-public-page .zedpera-language-trigger * {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          opacity: 1 !important;
+          font-weight: 950 !important;
+          filter: none !important;
+          text-shadow: none !important;
+        }
+
+        .zedpera-public-page .zedpera-language-trigger:hover {
+          background: #f5f3ff !important;
+          border-color: #7c3aed !important;
+        }
+
+        .zedpera-public-page .zedpera-language-code {
+          background: #6d28d9 !important;
+          background-color: #6d28d9 !important;
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-trigger svg {
+          color: #6d28d9 !important;
+          stroke: #6d28d9 !important;
+          opacity: 1 !important;
+          stroke-width: 2.7 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown {
+          display: block !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          z-index: 1000000 !important;
+          background: #ffffff !important;
+          background-color: #ffffff !important;
+          background-image: none !important;
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          border: 2px solid #cbd5e1 !important;
+          box-shadow: 0 28px 80px rgba(15, 23, 42, 0.24) !important;
+          max-height: 360px !important;
+          overflow-y: auto !important;
+          overflow-x: hidden !important;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown::-webkit-scrollbar {
+          width: 10px;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown::-webkit-scrollbar-track {
+          background: #eef2ff;
+          border-radius: 999px;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown::-webkit-scrollbar-thumb {
+          background: #8b5cf6;
+          border-radius: 999px;
+        }
+
+        .zedpera-public-page .zedpera-language-option {
+          background: #ffffff !important;
+          background-color: #ffffff !important;
+          background-image: none !important;
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          border: 1px solid transparent !important;
+          opacity: 1 !important;
+          font-weight: 950 !important;
+          min-height: 54px !important;
+        }
+
+        .zedpera-public-page .zedpera-language-option:hover {
+          background: #f5f3ff !important;
+          border-color: #ddd6fe !important;
+        }
+
+        .zedpera-public-page .zedpera-language-option,
+        .zedpera-public-page .zedpera-language-option * {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          opacity: 1 !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-option[aria-selected='true'] {
+          background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%) !important;
+          background-color: #6d28d9 !important;
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          border-color: #6d28d9 !important;
+          box-shadow: 0 12px 26px rgba(109, 40, 217, 0.28) !important;
+        }
+
+        .zedpera-public-page .zedpera-language-option[aria-selected='true'],
+        .zedpera-public-page .zedpera-language-option[aria-selected='true'] * {
+          color: #ffffff !important;
+          stroke: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          opacity: 1 !important;
+          font-weight: 950 !important;
+        }
+
+        /* Farebné ikony v kartách - nech nezaniknú */
+        .zedpera-public-page article svg,
+        .zedpera-public-page section svg {
+          opacity: 1 !important;
+          filter: none !important;
+          visibility: visible !important;
+          stroke-width: 2.6 !important;
+        }
+
+        .zedpera-public-page article [class*="bg-violet-50"],
+        .zedpera-public-page article [class*="bg-purple-50"],
+        .zedpera-public-page article [class*="bg-indigo-50"],
+        .zedpera-public-page article [class*="bg-slate-100"] {
+          background: #ede9fe !important;
+          background-color: #ede9fe !important;
+          color: #6d28d9 !important;
+          border: 1px solid #ddd6fe !important;
+        }
+
+        .zedpera-public-page article [class*="bg-violet-50"] svg,
+        .zedpera-public-page article [class*="bg-purple-50"] svg,
+        .zedpera-public-page article [class*="bg-indigo-50"] svg,
+        .zedpera-public-page article [class*="bg-slate-100"] svg {
+          color: #6d28d9 !important;
+          stroke: #6d28d9 !important;
+        }
+
+        /* Balíčky musia byť farebné, čitateľné a výrazné */
+        .zedpera-public-page #pricing article,
+        .zedpera-public-page #pricing .rounded-\\[2rem\\] {
+          background: linear-gradient(180deg, #ffffff 0%, #f5f3ff 100%) !important;
+          border: 2px solid #ddd6fe !important;
+          box-shadow: 0 18px 45px rgba(109, 40, 217, 0.12) !important;
+          color: #020617 !important;
+        }
+
+        .zedpera-public-page #pricing article:nth-of-type(2n),
+        .zedpera-public-page #pricing .grid > div:nth-child(2n) {
+          background: linear-gradient(180deg, #ffffff 0%, #eef2ff 100%) !important;
+          border-color: #bfdbfe !important;
+          box-shadow: 0 18px 45px rgba(37, 99, 235, 0.10) !important;
+        }
+
+        .zedpera-public-page #pricing article:nth-of-type(3n),
+        .zedpera-public-page #pricing .grid > div:nth-child(3n) {
+          background: linear-gradient(180deg, #ffffff 0%, #ecfdf5 100%) !important;
+          border-color: #a7f3d0 !important;
+          box-shadow: 0 18px 45px rgba(5, 150, 105, 0.10) !important;
+        }
+
+        .zedpera-public-page #pricing article *,
+        .zedpera-public-page #pricing .rounded-\\[2rem\\] * {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          opacity: 1 !important;
+          font-weight: 850 !important;
+        }
+
+        .zedpera-public-page #pricing article h3,
+        .zedpera-public-page #pricing article .text-4xl,
+        .zedpera-public-page #pricing article .text-5xl {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page #pricing article button,
+        .zedpera-public-page #pricing article a,
+        .zedpera-public-page #pricing .rounded-\\[2rem\\] button,
+        .zedpera-public-page #pricing .rounded-\\[2rem\\] a {
+          background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%) !important;
+          background-color: #7c3aed !important;
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          border: 0 !important;
+          box-shadow: 0 14px 30px rgba(79, 70, 229, 0.24) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page #pricing article button *,
+        .zedpera-public-page #pricing article a *,
+        .zedpera-public-page #pricing .rounded-\\[2rem\\] button *,
+        .zedpera-public-page #pricing .rounded-\\[2rem\\] a * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          stroke: #ffffff !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page #pricing article [class*="badge"],
+        .zedpera-public-page #pricing article [class*="rounded-full"],
+        .zedpera-public-page #pricing .rounded-\\[2rem\\] [class*="rounded-full"] {
+          background: #ede9fe !important;
+          color: #5b21b6 !important;
+          -webkit-text-fill-color: #5b21b6 !important;
+          border-color: #c4b5fd !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page #features article,
+        .zedpera-public-page #features .rounded-\\[2rem\\] {
+          background: #ffffff !important;
+          border: 2px solid #e2e8f0 !important;
+          box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08) !important;
+        }
+
+        .zedpera-public-page img,
+        .zedpera-public-page picture,
+        .zedpera-public-page video,
+        .zedpera-public-page iframe,
+        .zedpera-public-page svg {
+          opacity: 1 !important;
+          filter: none !important;
+          mix-blend-mode: normal !important;
+          visibility: visible !important;
+        }
+
+
+        /* =========================================================
+           ZEDPERA FINAL PREMIUM DESIGN SYSTEM
+           - všetky tlačidlá majú čierny text
+           - biely/svetlý moderný podklad
+           - farebné balíčky, ikony, znaky a dropdown
+           - maximálna čitateľnosť a kontrast
+        ========================================================= */
+
+        :root {
+          --zed-ink: #020617;
+          --zed-ink-soft: #0f172a;
+          --zed-muted: #334155;
+          --zed-line: #dbe3ef;
+          --zed-line-strong: #b8c4d6;
+          --zed-card: rgba(255, 255, 255, 0.92);
+          --zed-violet: #7c3aed;
+          --zed-indigo: #4f46e5;
+          --zed-blue: #2563eb;
+          --zed-cyan: #0891b2;
+          --zed-emerald: #059669;
+          --zed-amber: #d97706;
+          --zed-rose: #e11d48;
+        }
+
+        html,
+        body {
+          background: #f8fafc !important;
+          color: var(--zed-ink) !important;
+        }
+
+        .zedpera-public-page,
+        .zedpera-public-page * {
+          opacity: 1 !important;
+          visibility: visible !important;
+          filter: none !important;
+          mix-blend-mode: normal !important;
+          text-shadow: none !important;
+          -webkit-font-smoothing: antialiased !important;
+          text-rendering: geometricPrecision !important;
+        }
+
+        .zedpera-public-page {
+          background:
+            radial-gradient(circle at 12% 0%, rgba(124, 58, 237, 0.12), transparent 28%),
+            radial-gradient(circle at 88% 8%, rgba(37, 99, 235, 0.10), transparent 30%),
+            radial-gradient(circle at 50% 48%, rgba(16, 185, 129, 0.07), transparent 34%),
+            linear-gradient(180deg, #ffffff 0%, #f8fafc 42%, #eef4ff 100%) !important;
+          color: var(--zed-ink) !important;
+        }
+
+        .zedpera-public-page :where(h1, h2, h3, h4, h5, h6, strong, b) {
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          font-weight: 950 !important;
+          letter-spacing: -0.035em !important;
+        }
+
+        .zedpera-public-page :where(p, li, span, div, label, small) {
+          color: var(--zed-ink-soft) !important;
+          -webkit-text-fill-color: var(--zed-ink-soft) !important;
+          font-weight: 850 !important;
+        }
+
+        .zedpera-public-page :where(
+          .text-white,
+          .text-slate-100,
+          .text-slate-200,
+          .text-slate-300,
+          .text-slate-400,
+          .text-slate-500,
+          .text-slate-600,
+          .text-gray-300,
+          .text-gray-400,
+          .text-gray-500,
+          .text-zinc-400,
+          .text-zinc-500
+        ) {
+          color: #1e293b !important;
+          -webkit-text-fill-color: #1e293b !important;
+          font-weight: 900 !important;
+        }
+
+        /* HEADER */
+        .zedpera-public-page header {
+          position: sticky !important;
+          z-index: 99990 !important;
+          overflow: visible !important;
+          background: rgba(255, 255, 255, 0.94) !important;
+          backdrop-filter: blur(20px) saturate(180%) !important;
+          border-bottom: 1px solid rgba(148, 163, 184, 0.35) !important;
+          box-shadow: 0 16px 48px rgba(15, 23, 42, 0.10) !important;
+        }
+
+        .zedpera-public-page header > div,
+        .zedpera-public-page header .mx-auto,
+        .zedpera-public-page header .flex {
+          overflow: visible !important;
+        }
+
+        .zedpera-public-page .zedpera-wordmark,
+        .zedpera-public-page .zedpera-wordmark * {
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          opacity: 1 !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-wordmark div:first-child {
+          font-size: 2rem !important;
+          line-height: 1 !important;
+          letter-spacing: -0.04em !important;
+        }
+
+        .zedpera-public-page .zedpera-wordmark div:last-child {
+          color: #1e293b !important;
+          -webkit-text-fill-color: #1e293b !important;
+          font-size: 1rem !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-brand-icon {
+          display: none !important;
+        }
+
+        /* VŠETKY TLAČIDLÁ: ČIERNY TEXT, MODERNÝ SVETLÝ PODKLAD */
+        .zedpera-public-page button,
+        .zedpera-public-page a[role='button'],
+        .zedpera-public-page a[class*="rounded"],
+        .zedpera-public-page .zedpera-plan-button,
+        .zedpera-public-page .zedpera-hero-cta {
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(241,245,249,0.96) 100%) !important;
+          border: 1px solid rgba(148, 163, 184, 0.45) !important;
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.95) inset,
+            0 16px 34px rgba(15, 23, 42, 0.10) !important;
+          font-weight: 950 !important;
+          opacity: 1 !important;
+        }
+
+        .zedpera-public-page button *,
+        .zedpera-public-page a[role='button'] *,
+        .zedpera-public-page a[class*="rounded"] *,
+        .zedpera-public-page .zedpera-plan-button *,
+        .zedpera-public-page .zedpera-hero-cta * {
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          stroke: var(--zed-ink) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page button:hover,
+        .zedpera-public-page a[role='button']:hover,
+        .zedpera-public-page a[class*="rounded"]:hover,
+        .zedpera-public-page .zedpera-plan-button:hover,
+        .zedpera-public-page .zedpera-hero-cta:hover {
+          transform: translateY(-1px);
+          background:
+            linear-gradient(135deg, rgba(237, 233, 254, 0.98) 0%, rgba(219, 234, 254, 0.98) 100%) !important;
+          border-color: rgba(124, 58, 237, 0.42) !important;
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.95) inset,
+            0 20px 44px rgba(79, 70, 229, 0.16) !important;
+        }
+
+        .zedpera-public-page button:disabled,
+        .zedpera-public-page button:disabled * {
+          color: #475569 !important;
+          -webkit-text-fill-color: #475569 !important;
+          stroke: #475569 !important;
+          opacity: 0.9 !important;
+        }
+
+        /* JAZYKOVÉ MENU */
+        .zedpera-public-page .zedpera-language-menu {
+          position: relative !important;
+          z-index: 100000 !important;
+          overflow: visible !important;
+          min-width: 280px !important;
+        }
+
+        .zedpera-public-page .zedpera-language-trigger {
+          min-height: 58px !important;
+          background:
+            linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(245,243,255,0.98) 100%) !important;
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          border: 2px solid #a78bfa !important;
+          box-shadow: 0 18px 42px rgba(124, 58, 237, 0.18) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-trigger,
+        .zedpera-public-page .zedpera-language-trigger * {
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-code {
+          background:
+            linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          border: 1px solid #c4b5fd !important;
+          box-shadow: 0 10px 24px rgba(79, 70, 229, 0.14) !important;
+        }
+
+        .zedpera-public-page .zedpera-language-trigger svg {
+          color: var(--zed-ink) !important;
+          stroke: var(--zed-ink) !important;
+          stroke-width: 3 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown {
+          display: block !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          z-index: 1000000 !important;
+          max-height: 390px !important;
+          overflow-y: auto !important;
+          overflow-x: hidden !important;
+          background: rgba(255,255,255,0.98) !important;
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          border: 2px solid #a78bfa !important;
+          box-shadow: 0 32px 90px rgba(15, 23, 42, 0.28) !important;
+          backdrop-filter: blur(18px) saturate(170%) !important;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown::-webkit-scrollbar {
+          width: 11px;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown::-webkit-scrollbar-track {
+          background: #eef2ff;
+          border-radius: 999px;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown::-webkit-scrollbar-thumb {
+          background: linear-gradient(180deg, #7c3aed, #2563eb);
+          border-radius: 999px;
+        }
+
+        .zedpera-public-page .zedpera-language-option {
+          min-height: 56px !important;
+          background: #ffffff !important;
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          border: 1px solid transparent !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-option:hover {
+          background: #f5f3ff !important;
+          border-color: #c4b5fd !important;
+        }
+
+        .zedpera-public-page .zedpera-language-option,
+        .zedpera-public-page .zedpera-language-option * {
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-option[aria-selected='true'] {
+          background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          border-color: #8b5cf6 !important;
+          box-shadow: 0 12px 28px rgba(109, 40, 217, 0.16) !important;
+        }
+
+        .zedpera-public-page .zedpera-language-option[aria-selected='true'],
+        .zedpera-public-page .zedpera-language-option[aria-selected='true'] * {
+          color: var(--zed-ink) !important;
+          stroke: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          font-weight: 950 !important;
+        }
+
+        /* KARTY A FUNKCIE */
+        .zedpera-public-page #features article,
+        .zedpera-public-page article {
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.96) 100%) !important;
+          border: 1px solid rgba(148, 163, 184, 0.28) !important;
+          box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08) !important;
+        }
+
+        .zedpera-public-page .zedpera-feature-icon {
+          color: var(--zed-ink) !important;
+          background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          border: 1px solid #c4b5fd !important;
+          box-shadow: 0 16px 34px rgba(124, 58, 237, 0.16) !important;
+        }
+
+        .zedpera-public-page .zedpera-feature-icon svg {
+          color: var(--zed-ink) !important;
+          stroke: var(--zed-ink) !important;
+          stroke-width: 2.8 !important;
+        }
+
+        .zedpera-public-page #features .grid > div:nth-child(2) .zedpera-feature-icon,
+        .zedpera-public-page #features article:nth-child(2) .zedpera-feature-icon {
+          background: linear-gradient(135deg, #dbeafe 0%, #cffafe 100%) !important;
+          border-color: #93c5fd !important;
+        }
+
+        .zedpera-public-page #features .grid > div:nth-child(3) .zedpera-feature-icon,
+        .zedpera-public-page #features article:nth-child(3) .zedpera-feature-icon {
+          background: linear-gradient(135deg, #d1fae5 0%, #ccfbf1 100%) !important;
+          border-color: #6ee7b7 !important;
+        }
+
+        .zedpera-public-page #features .grid > div:nth-child(4) .zedpera-feature-icon,
+        .zedpera-public-page #features article:nth-child(4) .zedpera-feature-icon {
+          background: linear-gradient(135deg, #ffedd5 0%, #fee2e2 100%) !important;
+          border-color: #fdba74 !important;
+        }
+
+        .zedpera-public-page #features .grid > div:nth-child(5) .zedpera-feature-icon,
+        .zedpera-public-page #features article:nth-child(5) .zedpera-feature-icon {
+          background: linear-gradient(135deg, #fce7f3 0%, #ede9fe 100%) !important;
+          border-color: #f0abfc !important;
+        }
+
+        .zedpera-public-page #features .grid > div:nth-child(6) .zedpera-feature-icon,
+        .zedpera-public-page #features article:nth-child(6) .zedpera-feature-icon {
+          background: linear-gradient(135deg, #fef3c7 0%, #ffedd5 100%) !important;
+          border-color: #fcd34d !important;
+        }
+
+        /* BALÍČKY - FAREBNÉ, ALE TLAČIDLÁ S ČIERNYM TEXTOM */
+        .zedpera-public-page #pricing {
+          background:
+            radial-gradient(circle at 12% 0%, rgba(124, 58, 237, 0.16), transparent 32%),
+            radial-gradient(circle at 88% 12%, rgba(37, 99, 235, 0.14), transparent 30%),
+            linear-gradient(180deg, #f8fafc 0%, #eef4ff 100%) !important;
+        }
+
+        .zedpera-public-page .zedpera-plan-card {
+          background: linear-gradient(180deg, #ffffff 0%, #f5f3ff 100%) !important;
+          border: 2px solid #ddd6fe !important;
+          box-shadow: 0 26px 65px rgba(124, 58, 237, 0.15) !important;
+          color: var(--zed-ink) !important;
+        }
+
+        .zedpera-public-page #pricing .grid > article:nth-child(2n) {
+          background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%) !important;
+          border-color: #bfdbfe !important;
+          box-shadow: 0 26px 65px rgba(37, 99, 235, 0.14) !important;
+        }
+
+        .zedpera-public-page #pricing .grid > article:nth-child(3n) {
+          background: linear-gradient(180deg, #ffffff 0%, #ecfdf5 100%) !important;
+          border-color: #a7f3d0 !important;
+          box-shadow: 0 26px 65px rgba(5, 150, 105, 0.14) !important;
+        }
+
+        .zedpera-public-page .zedpera-plan-card,
+        .zedpera-public-page .zedpera-plan-card * {
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          opacity: 1 !important;
+          font-weight: 900 !important;
+        }
+
+        .zedpera-public-page .zedpera-plan-card h3,
+        .zedpera-public-page .zedpera-plan-card .text-5xl,
+        .zedpera-public-page .zedpera-plan-card .text-4xl {
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-plan-badge {
+          background: #ede9fe !important;
+          color: #5b21b6 !important;
+          -webkit-text-fill-color: #5b21b6 !important;
+          border: 1px solid #c4b5fd !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page #pricing .grid > article:nth-child(2n) .zedpera-plan-badge {
+          background: #dbeafe !important;
+          color: #1d4ed8 !important;
+          -webkit-text-fill-color: #1d4ed8 !important;
+          border-color: #93c5fd !important;
+        }
+
+        .zedpera-public-page #pricing .grid > article:nth-child(3n) .zedpera-plan-badge {
+          background: #d1fae5 !important;
+          color: #047857 !important;
+          -webkit-text-fill-color: #047857 !important;
+          border-color: #6ee7b7 !important;
+        }
+
+        .zedpera-public-page .zedpera-plan-button {
+          background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          color: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          border: 1px solid #a78bfa !important;
+          box-shadow: 0 18px 40px rgba(79, 70, 229, 0.20) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page #pricing .grid > article:nth-child(2n) .zedpera-plan-button {
+          background: linear-gradient(135deg, #dbeafe 0%, #cffafe 100%) !important;
+          border-color: #93c5fd !important;
+          box-shadow: 0 18px 40px rgba(37, 99, 235, 0.18) !important;
+        }
+
+        .zedpera-public-page #pricing .grid > article:nth-child(3n) .zedpera-plan-button {
+          background: linear-gradient(135deg, #d1fae5 0%, #ccfbf1 100%) !important;
+          border-color: #6ee7b7 !important;
+          box-shadow: 0 18px 40px rgba(5, 150, 105, 0.18) !important;
+        }
+
+        .zedpera-public-page .zedpera-plan-button,
+        .zedpera-public-page .zedpera-plan-button *,
+        .zedpera-public-page .zedpera-plan-button svg {
+          color: var(--zed-ink) !important;
+          stroke: var(--zed-ink) !important;
+          -webkit-text-fill-color: var(--zed-ink) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page img,
+        .zedpera-public-page picture,
+        .zedpera-public-page video,
+        .zedpera-public-page iframe,
+        .zedpera-public-page svg {
+          opacity: 1 !important;
+          filter: none !important;
+          mix-blend-mode: normal !important;
+          visibility: visible !important;
+        }
+
+        .zedpera-public-page svg {
+          stroke-width: 2.45 !important;
+        }
+
+
+        /* =========================================================
+           FINAL HEADER + MENU FIX
+           - hlavné menu je celé viditeľné
+           - všetky tlačidlá majú čierny text
+           - CTA aj balíčky sú svetlé, moderné, výrazné
+        ========================================================= */
+
+        .zedpera-public-page header {
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.98) 100%) !important;
+          border-bottom: 1px solid rgba(203, 213, 225, 0.95) !important;
+          box-shadow: 0 18px 55px rgba(15, 23, 42, 0.10) !important;
+          overflow: visible !important;
+        }
+
+        .zedpera-public-page header,
+        .zedpera-public-page header *,
+        .zedpera-public-page .zedpera-menu-row,
+        .zedpera-public-page .zedpera-main-nav,
+        .zedpera-public-page .zedpera-main-nav * {
+          opacity: 1 !important;
+          visibility: visible !important;
+          filter: none !important;
+          mix-blend-mode: normal !important;
+          text-shadow: none !important;
+        }
+
+        .zedpera-public-page .zedpera-menu-row {
+          background: transparent !important;
+          border-color: #dbe3ef !important;
+        }
+
+        .zedpera-public-page .zedpera-main-nav {
+          background: transparent !important;
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+        }
+
+        .zedpera-public-page .zedpera-menu-link {
+          display: inline-flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          min-height: 44px !important;
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(241,245,249,0.98) 100%) !important;
+          border: 1px solid #dbe3ef !important;
+          box-shadow:
+            0 1px 0 rgba(255,255,255,0.95) inset,
+            0 10px 24px rgba(15, 23, 42, 0.07) !important;
+          font-weight: 950 !important;
+          letter-spacing: -0.01em !important;
+        }
+
+        .zedpera-public-page .zedpera-menu-link:hover {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          border-color: #a78bfa !important;
+          box-shadow: 0 16px 34px rgba(124, 58, 237, 0.14) !important;
+          transform: translateY(-1px);
+        }
+
+        .zedpera-public-page .zedpera-header-login,
+        .zedpera-public-page .zedpera-header-cta {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%) !important;
+          border: 1px solid #dbe3ef !important;
+          box-shadow:
+            0 1px 0 rgba(255,255,255,0.95) inset,
+            0 14px 32px rgba(15, 23, 42, 0.10) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-header-cta {
+          border-color: #a78bfa !important;
+          background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          box-shadow: 0 16px 38px rgba(124, 58, 237, 0.18) !important;
+        }
+
+        .zedpera-public-page .zedpera-header-login:hover,
+        .zedpera-public-page .zedpera-header-cta:hover {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          background: linear-gradient(135deg, #f5f3ff 0%, #eff6ff 100%) !important;
+          border-color: #7c3aed !important;
+          transform: translateY(-1px);
+        }
+
+        .zedpera-public-page .zedpera-header-login *,
+        .zedpera-public-page .zedpera-header-cta *,
+        .zedpera-public-page .zedpera-menu-link * {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          stroke: #020617 !important;
+          font-weight: 950 !important;
+        }
+
+        /* Absolútne všetky tlačidlá/link-tlačidlá vo verejnej stránke majú čierny text. */
+        .zedpera-public-page button,
+        .zedpera-public-page a[class*="rounded"],
+        .zedpera-public-page a[role="button"],
+        .zedpera-public-page .zedpera-plan-button {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page button *,
+        .zedpera-public-page a[class*="rounded"] *,
+        .zedpera-public-page a[role="button"] *,
+        .zedpera-public-page .zedpera-plan-button * {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          stroke: #020617 !important;
+          font-weight: 950 !important;
+        }
+
+        /* Výnimka: iba aktívny riadok v rozbaľovacom jazykovom menu môže byť fialový, ale text stále ostáva čierny. */
+        .zedpera-public-page .zedpera-language-option[aria-selected="true"],
+        .zedpera-public-page .zedpera-language-option[aria-selected="true"] * {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          stroke: #020617 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-option[aria-selected="true"] {
+          background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          border-color: #8b5cf6 !important;
+        }
+
+
+        /* =========================================================
+           ZEDPERA x THESIS.AI PREMIUM VISUAL SYSTEM
+           Finálny dizajn:
+           - farebne rozlíšené menu ako moderné akademické SaaS
+           - všetky tlačidlá majú čierny text
+           - biely / jemne krémový akademický podklad
+           - farebné karty, balíčky, ikony a znaky
+           - maximálna čitateľnosť
+        ========================================================= */
+
+        :root {
+          --zdp-ink: #020617;
+          --zdp-ink-2: #0f172a;
+          --zdp-muted: #334155;
+          --zdp-border: #d9e2ef;
+          --zdp-border-strong: #aebbd0;
+          --zdp-paper: #fffdf8;
+          --zdp-paper-2: #f8fafc;
+          --zdp-violet: #7c3aed;
+          --zdp-blue: #2563eb;
+          --zdp-cyan: #0891b2;
+          --zdp-emerald: #059669;
+          --zdp-amber: #d97706;
+          --zdp-rose: #e11d48;
+        }
+
+        html,
+        body {
+          background: #fffdf8 !important;
+          color: var(--zdp-ink) !important;
+        }
+
+        .zedpera-public-page {
+          position: relative;
+          background:
+            radial-gradient(circle at 18% 4%, rgba(124, 58, 237, 0.10), transparent 30%),
+            radial-gradient(circle at 82% 8%, rgba(37, 99, 235, 0.09), transparent 32%),
+            radial-gradient(circle at 50% 52%, rgba(5, 150, 105, 0.06), transparent 34%),
+            linear-gradient(180deg, #fffdf8 0%, #ffffff 40%, #f3f7ff 100%) !important;
+          color: var(--zdp-ink) !important;
+        }
+
+        .zedpera-public-page::before {
+          content: "";
+          position: fixed;
+          inset: 0;
+          pointer-events: none;
+          z-index: 0;
+          opacity: 0.34;
+          background-image:
+            radial-gradient(circle, rgba(15, 23, 42, 0.14) 1px, transparent 1px);
+          background-size: 22px 22px;
+          mask-image: linear-gradient(180deg, black 0%, transparent 72%);
+        }
+
+        .zedpera-public-page > * {
+          position: relative;
+          z-index: 1;
+        }
+
+        .zedpera-public-page,
+        .zedpera-public-page * {
+          opacity: 1 !important;
+          visibility: visible !important;
+          filter: none !important;
+          mix-blend-mode: normal !important;
+          text-shadow: none !important;
+          -webkit-font-smoothing: antialiased !important;
+          text-rendering: geometricPrecision !important;
+        }
+
+        .zedpera-public-page :where(h1, h2, h3, h4, h5, h6, strong, b) {
+          color: var(--zdp-ink) !important;
+          -webkit-text-fill-color: var(--zdp-ink) !important;
+          font-weight: 950 !important;
+          letter-spacing: -0.04em !important;
+        }
+
+        .zedpera-public-page :where(p, li, span, div, label, small) {
+          color: var(--zdp-ink-2) !important;
+          -webkit-text-fill-color: var(--zdp-ink-2) !important;
+          font-weight: 850 !important;
+        }
+
+        .zedpera-public-page :where(
+          .text-white,
+          .text-slate-100,
+          .text-slate-200,
+          .text-slate-300,
+          .text-slate-400,
+          .text-slate-500,
+          .text-slate-600,
+          .text-gray-300,
+          .text-gray-400,
+          .text-gray-500,
+          .text-zinc-400,
+          .text-zinc-500
+        ) {
+          color: #1e293b !important;
+          -webkit-text-fill-color: #1e293b !important;
+          font-weight: 900 !important;
+        }
+
+        /* HEADER */
+        .zedpera-public-page header {
+          z-index: 99990 !important;
+          overflow: visible !important;
+          background: rgba(255, 253, 248, 0.92) !important;
+          backdrop-filter: blur(24px) saturate(180%) !important;
+          border-bottom: 1px solid rgba(148, 163, 184, 0.34) !important;
+          box-shadow: 0 18px 55px rgba(15, 23, 42, 0.10) !important;
+        }
+
+        .zedpera-public-page header > div,
+        .zedpera-public-page header .mx-auto,
+        .zedpera-public-page header .flex {
+          overflow: visible !important;
+        }
+
+        .zedpera-public-page .zedpera-wordmark,
+        .zedpera-public-page .zedpera-wordmark * {
+          color: var(--zdp-ink) !important;
+          -webkit-text-fill-color: var(--zdp-ink) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-wordmark div:first-child {
+          font-size: 2.15rem !important;
+          line-height: 1 !important;
+          letter-spacing: -0.045em !important;
+        }
+
+        .zedpera-public-page .zedpera-wordmark div:last-child {
+          color: #1e293b !important;
+          -webkit-text-fill-color: #1e293b !important;
+          font-size: 1rem !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-brand-icon {
+          display: none !important;
+        }
+
+        /* LANGUAGE MENU */
+        .zedpera-public-page .zedpera-language-menu {
+          position: relative !important;
+          z-index: 100000 !important;
+          min-width: 280px !important;
+          overflow: visible !important;
+        }
+
+        .zedpera-public-page .zedpera-language-trigger {
+          min-height: 58px !important;
+          background:
+            linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(245,243,255,0.98) 100%) !important;
+          border: 2px solid #c4b5fd !important;
+          border-radius: 1.25rem !important;
+          box-shadow:
+            0 1px 0 rgba(255,255,255,0.95) inset,
+            0 20px 48px rgba(124, 58, 237, 0.16) !important;
+        }
+
+        .zedpera-public-page .zedpera-language-trigger,
+        .zedpera-public-page .zedpera-language-trigger * {
+          color: var(--zdp-ink) !important;
+          -webkit-text-fill-color: var(--zdp-ink) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-code {
+          background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          color: var(--zdp-ink) !important;
+          -webkit-text-fill-color: var(--zdp-ink) !important;
+          border: 1px solid #a78bfa !important;
+          box-shadow: 0 10px 24px rgba(79, 70, 229, 0.16) !important;
+        }
+
+        .zedpera-public-page .zedpera-language-trigger svg {
+          color: var(--zdp-ink) !important;
+          stroke: var(--zdp-ink) !important;
+          stroke-width: 3 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown {
+          display: block !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          z-index: 1000000 !important;
+          max-height: 390px !important;
+          overflow-y: auto !important;
+          overflow-x: hidden !important;
+          background: rgba(255, 255, 255, 0.98) !important;
+          color: var(--zdp-ink) !important;
+          -webkit-text-fill-color: var(--zdp-ink) !important;
+          border: 2px solid #c4b5fd !important;
+          box-shadow: 0 32px 90px rgba(15, 23, 42, 0.28) !important;
+          backdrop-filter: blur(18px) saturate(170%) !important;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown::-webkit-scrollbar {
+          width: 11px;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown::-webkit-scrollbar-track {
+          background: #eef2ff;
+          border-radius: 999px;
+        }
+
+        .zedpera-public-page .zedpera-language-dropdown::-webkit-scrollbar-thumb {
+          background: linear-gradient(180deg, #7c3aed, #2563eb);
+          border-radius: 999px;
+        }
+
+        .zedpera-public-page .zedpera-language-option {
+          min-height: 56px !important;
+          background: #ffffff !important;
+          color: var(--zdp-ink) !important;
+          -webkit-text-fill-color: var(--zdp-ink) !important;
+          border: 1px solid transparent !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-option:hover,
+        .zedpera-public-page .zedpera-language-option[aria-selected="true"] {
+          background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          border-color: #8b5cf6 !important;
+        }
+
+        .zedpera-public-page .zedpera-language-option,
+        .zedpera-public-page .zedpera-language-option * {
+          color: var(--zdp-ink) !important;
+          stroke: var(--zdp-ink) !important;
+          -webkit-text-fill-color: var(--zdp-ink) !important;
+          font-weight: 950 !important;
+        }
+
+        /* MENU LINKS - farebne odlíšené thesis.ai štýl */
+        .zedpera-public-page .zedpera-menu-row {
+          background: transparent !important;
+          border-color: #dbe3ef !important;
+        }
+
+        .zedpera-public-page .zedpera-main-nav {
+          background: transparent !important;
+          color: var(--zdp-ink) !important;
+          -webkit-text-fill-color: var(--zdp-ink) !important;
+        }
+
+        .zedpera-public-page .zedpera-menu-link {
+          display: inline-flex !important;
+          min-height: 46px !important;
+          align-items: center !important;
+          justify-content: center !important;
+          border-radius: 1.25rem !important;
+          color: var(--zdp-ink) !important;
+          -webkit-text-fill-color: var(--zdp-ink) !important;
+          border: 1px solid rgba(148, 163, 184, 0.38) !important;
+          box-shadow:
+            0 1px 0 rgba(255,255,255,0.95) inset,
+            0 12px 28px rgba(15, 23, 42, 0.08) !important;
+          font-weight: 950 !important;
+          letter-spacing: -0.012em !important;
+        }
+
+        .zedpera-public-page .zedpera-main-nav .zedpera-menu-link:nth-child(1) {
+          background: linear-gradient(135deg, #ede9fe 0%, #ffffff 100%) !important;
+          border-color: #c4b5fd !important;
+        }
+
+        .zedpera-public-page .zedpera-main-nav .zedpera-menu-link:nth-child(2) {
+          background: linear-gradient(135deg, #dbeafe 0%, #ffffff 100%) !important;
+          border-color: #93c5fd !important;
+        }
+
+        .zedpera-public-page .zedpera-main-nav .zedpera-menu-link:nth-child(3) {
+          background: linear-gradient(135deg, #d1fae5 0%, #ffffff 100%) !important;
+          border-color: #6ee7b7 !important;
+        }
+
+        .zedpera-public-page .zedpera-main-nav .zedpera-menu-link:nth-child(4) {
+          background: linear-gradient(135deg, #ffedd5 0%, #ffffff 100%) !important;
+          border-color: #fdba74 !important;
+        }
+
+        .zedpera-public-page .zedpera-main-nav .zedpera-menu-link:nth-child(5) {
+          background: linear-gradient(135deg, #fce7f3 0%, #ffffff 100%) !important;
+          border-color: #f0abfc !important;
+        }
+
+        .zedpera-public-page .zedpera-main-nav .zedpera-menu-link:nth-child(6) {
+          background: linear-gradient(135deg, #fef3c7 0%, #ffffff 100%) !important;
+          border-color: #fcd34d !important;
+        }
+
+        .zedpera-public-page .zedpera-menu-link:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 20px 44px rgba(79, 70, 229, 0.14) !important;
+        }
+
+        /* ALL BUTTONS BLACK TEXT */
+        .zedpera-public-page button,
+        .zedpera-public-page a[class*="rounded"],
+        .zedpera-public-page a[role="button"],
+        .zedpera-public-page .zedpera-header-login,
+        .zedpera-public-page .zedpera-header-cta,
+        .zedpera-public-page .zedpera-plan-button {
+          color: var(--zdp-ink) !important;
+          -webkit-text-fill-color: var(--zdp-ink) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page button *,
+        .zedpera-public-page a[class*="rounded"] *,
+        .zedpera-public-page a[role="button"] *,
+        .zedpera-public-page .zedpera-header-login *,
+        .zedpera-public-page .zedpera-header-cta *,
+        .zedpera-public-page .zedpera-plan-button * {
+          color: var(--zdp-ink) !important;
+          -webkit-text-fill-color: var(--zdp-ink) !important;
+          stroke: var(--zdp-ink) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-header-login,
+        .zedpera-public-page .zedpera-header-cta {
+          background: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%) !important;
+          border: 1px solid #dbe3ef !important;
+          box-shadow:
+            0 1px 0 rgba(255,255,255,0.95) inset,
+            0 14px 32px rgba(15, 23, 42, 0.10) !important;
+        }
+
+        .zedpera-public-page .zedpera-header-cta {
+          background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          border-color: #a78bfa !important;
+          box-shadow: 0 18px 40px rgba(124, 58, 237, 0.18) !important;
+        }
+
+        /* CARDS + ICONS */
+        .zedpera-public-page article,
+        .zedpera-public-page #features article {
+          background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.96) 100%) !important;
+          border: 1px solid rgba(148, 163, 184, 0.28) !important;
+          box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08) !important;
+        }
+
+        .zedpera-public-page .zedpera-feature-icon {
+          color: var(--zdp-ink) !important;
+          background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          border: 1px solid #c4b5fd !important;
+          box-shadow: 0 16px 34px rgba(124, 58, 237, 0.16) !important;
+        }
+
+        .zedpera-public-page .zedpera-feature-icon svg {
+          color: var(--zdp-ink) !important;
+          stroke: var(--zdp-ink) !important;
+          stroke-width: 2.8 !important;
+        }
+
+        .zedpera-public-page #features .grid > div:nth-child(2) .zedpera-feature-icon,
+        .zedpera-public-page #features article:nth-child(2) .zedpera-feature-icon {
+          background: linear-gradient(135deg, #dbeafe 0%, #cffafe 100%) !important;
+          border-color: #93c5fd !important;
+        }
+
+        .zedpera-public-page #features .grid > div:nth-child(3) .zedpera-feature-icon,
+        .zedpera-public-page #features article:nth-child(3) .zedpera-feature-icon {
+          background: linear-gradient(135deg, #d1fae5 0%, #ccfbf1 100%) !important;
+          border-color: #6ee7b7 !important;
+        }
+
+        .zedpera-public-page #features .grid > div:nth-child(4) .zedpera-feature-icon,
+        .zedpera-public-page #features article:nth-child(4) .zedpera-feature-icon {
+          background: linear-gradient(135deg, #ffedd5 0%, #fee2e2 100%) !important;
+          border-color: #fdba74 !important;
+        }
+
+        .zedpera-public-page #features .grid > div:nth-child(5) .zedpera-feature-icon,
+        .zedpera-public-page #features article:nth-child(5) .zedpera-feature-icon {
+          background: linear-gradient(135deg, #fce7f3 0%, #ede9fe 100%) !important;
+          border-color: #f0abfc !important;
+        }
+
+        .zedpera-public-page #features .grid > div:nth-child(6) .zedpera-feature-icon,
+        .zedpera-public-page #features article:nth-child(6) .zedpera-feature-icon {
+          background: linear-gradient(135deg, #fef3c7 0%, #ffedd5 100%) !important;
+          border-color: #fcd34d !important;
+        }
+
+        /* PRICING */
+        .zedpera-public-page #pricing {
+          background:
+            radial-gradient(circle at 12% 0%, rgba(124, 58, 237, 0.16), transparent 32%),
+            radial-gradient(circle at 88% 12%, rgba(37, 99, 235, 0.14), transparent 30%),
+            linear-gradient(180deg, #f8fafc 0%, #eef4ff 100%) !important;
+        }
+
+        .zedpera-public-page .zedpera-plan-card {
+          background: linear-gradient(180deg, #ffffff 0%, #f5f3ff 100%) !important;
+          border: 2px solid #ddd6fe !important;
+          box-shadow: 0 26px 65px rgba(124, 58, 237, 0.15) !important;
+          color: var(--zdp-ink) !important;
+        }
+
+        .zedpera-public-page #pricing .grid > article:nth-child(2n) {
+          background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%) !important;
+          border-color: #bfdbfe !important;
+          box-shadow: 0 26px 65px rgba(37, 99, 235, 0.14) !important;
+        }
+
+        .zedpera-public-page #pricing .grid > article:nth-child(3n) {
+          background: linear-gradient(180deg, #ffffff 0%, #ecfdf5 100%) !important;
+          border-color: #a7f3d0 !important;
+          box-shadow: 0 26px 65px rgba(5, 150, 105, 0.14) !important;
+        }
+
+        .zedpera-public-page .zedpera-plan-card,
+        .zedpera-public-page .zedpera-plan-card * {
+          color: var(--zdp-ink) !important;
+          -webkit-text-fill-color: var(--zdp-ink) !important;
+          font-weight: 900 !important;
+        }
+
+        .zedpera-public-page .zedpera-plan-badge {
+          background: #ede9fe !important;
+          color: #5b21b6 !important;
+          -webkit-text-fill-color: #5b21b6 !important;
+          border: 1px solid #c4b5fd !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page #pricing .grid > article:nth-child(2n) .zedpera-plan-badge {
+          background: #dbeafe !important;
+          color: #1d4ed8 !important;
+          -webkit-text-fill-color: #1d4ed8 !important;
+          border-color: #93c5fd !important;
+        }
+
+        .zedpera-public-page #pricing .grid > article:nth-child(3n) .zedpera-plan-badge {
+          background: #d1fae5 !important;
+          color: #047857 !important;
+          -webkit-text-fill-color: #047857 !important;
+          border-color: #6ee7b7 !important;
+        }
+
+        .zedpera-public-page .zedpera-plan-button {
+          background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          border: 1px solid #a78bfa !important;
+          box-shadow: 0 18px 40px rgba(79, 70, 229, 0.20) !important;
+        }
+
+        .zedpera-public-page #pricing .grid > article:nth-child(2n) .zedpera-plan-button {
+          background: linear-gradient(135deg, #dbeafe 0%, #cffafe 100%) !important;
+          border-color: #93c5fd !important;
+        }
+
+        .zedpera-public-page #pricing .grid > article:nth-child(3n) .zedpera-plan-button {
+          background: linear-gradient(135deg, #d1fae5 0%, #ccfbf1 100%) !important;
+          border-color: #6ee7b7 !important;
+        }
+
+        .zedpera-public-page img,
+        .zedpera-public-page picture,
+        .zedpera-public-page video,
+        .zedpera-public-page iframe,
+        .zedpera-public-page svg {
+          opacity: 1 !important;
+          filter: none !important;
+          mix-blend-mode: normal !important;
+          visibility: visible !important;
+        }
+
+
+        /* =========================================================
+           BACK TO TOP - NÁVRAT HORE VŠADE
+           Viditeľné, profesionálne a s čiernym textom/ikonou.
+        ========================================================= */
+
+        .zedpera-public-page .zedpera-back-to-top {
+          background:
+            linear-gradient(135deg, #ffffff 0%, #f5f3ff 54%, #dbeafe 100%) !important;
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          border: 2px solid #a78bfa !important;
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.95) inset,
+            0 22px 55px rgba(124, 58, 237, 0.28) !important;
+          opacity: 1;
+          backdrop-filter: blur(18px) saturate(170%) !important;
+        }
+
+        .zedpera-public-page .zedpera-back-to-top svg {
+          color: #020617 !important;
+          stroke: #020617 !important;
+          stroke-width: 3 !important;
+          opacity: 1 !important;
+        }
+
+        .zedpera-public-page .zedpera-back-to-top:hover {
+          background:
+            linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          border-color: #7c3aed !important;
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.95) inset,
+            0 28px 70px rgba(79, 70, 229, 0.34) !important;
+        }
+
+        .zedpera-public-page .zedpera-back-to-top:focus-visible {
+          outline: 4px solid rgba(124, 58, 237, 0.28) !important;
+          outline-offset: 4px !important;
+        }
+
+        @media (max-width: 768px) {
+          .zedpera-public-page .zedpera-back-to-top {
+            right: 1rem !important;
+            bottom: 1rem !important;
+            height: 3.5rem !important;
+            width: 3.5rem !important;
+            border-radius: 1.1rem !important;
+          }
+        }
+
         @media (max-width: 768px) {
           .zedpera-public-page #intro h1 {
             font-size: 2.25rem !important;
@@ -1298,28 +3079,118 @@ export default function LandingPage() {
             line-height: 1.7 !important;
           }
         }
+
+        /* =========================================================
+           NÁVRAT HORE - VÝRAZNÝ A STÁLE VIDITEĽNÝ
+           Tlačidlo je vložené priamo do landing stránky a je nad všetkým.
+        ========================================================= */
+
+        .zedpera-public-page .zedpera-back-to-top {
+          position: fixed !important;
+          right: 1.5rem !important;
+          bottom: 1.5rem !important;
+          z-index: 999999 !important;
+          display: inline-flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          gap: 0.75rem !important;
+          min-width: 132px !important;
+          min-height: 68px !important;
+          opacity: 1 !important;
+          visibility: visible !important;
+          pointer-events: auto !important;
+          transform: translateY(0) !important;
+          background:
+            linear-gradient(135deg, #ffffff 0%, #f5f3ff 45%, #dbeafe 100%) !important;
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          border: 2px solid #a78bfa !important;
+          border-radius: 1.25rem !important;
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.95) inset,
+            0 24px 70px rgba(79, 70, 229, 0.35),
+            0 0 0 7px rgba(124, 58, 237, 0.10) !important;
+          backdrop-filter: blur(18px) saturate(170%) !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-back-to-top,
+        .zedpera-public-page .zedpera-back-to-top * {
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          opacity: 1 !important;
+          visibility: visible !important;
+          font-weight: 950 !important;
+          text-shadow: none !important;
+          filter: none !important;
+        }
+
+        .zedpera-public-page .zedpera-back-to-top-icon {
+          background: linear-gradient(135deg, #ede9fe 0%, #bfdbfe 100%) !important;
+          border: 1px solid #c4b5fd !important;
+          color: #020617 !important;
+          -webkit-text-fill-color: #020617 !important;
+          box-shadow: 0 12px 26px rgba(124, 58, 237, 0.18) !important;
+        }
+
+        .zedpera-public-page .zedpera-back-to-top svg {
+          color: #020617 !important;
+          stroke: #020617 !important;
+          stroke-width: 3.25 !important;
+          opacity: 1 !important;
+          visibility: visible !important;
+        }
+
+        .zedpera-public-page .zedpera-back-to-top:hover {
+          transform: translateY(-4px) !important;
+          background:
+            linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+          border-color: #7c3aed !important;
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.95) inset,
+            0 30px 85px rgba(79, 70, 229, 0.42),
+            0 0 0 9px rgba(124, 58, 237, 0.14) !important;
+        }
+
+        .zedpera-public-page .zedpera-back-to-top:focus-visible {
+          outline: 4px solid rgba(124, 58, 237, 0.30) !important;
+          outline-offset: 4px !important;
+        }
+
+        @media (max-width: 768px) {
+          .zedpera-public-page .zedpera-back-to-top {
+            right: 1rem !important;
+            bottom: 1rem !important;
+            min-width: 64px !important;
+            min-height: 64px !important;
+            padding: 0.65rem !important;
+            border-radius: 1.1rem !important;
+          }
+
+          .zedpera-public-page .zedpera-back-to-top-icon {
+            height: 2.75rem !important;
+            width: 2.75rem !important;
+          }
+        }
+
       `}</style>
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/95 text-white backdrop-blur-xl">
+      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 text-slate-950 backdrop-blur-xl">
         <div className="mx-auto max-w-7xl px-5 py-3 lg:px-8">
           {/* PRVÝ RIADOK: logo + jazyková lišta + akčné tlačidlá */}
           <div className="flex items-center justify-between gap-4">
-            <Link href="/" className="flex min-w-0 items-center gap-3">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 text-white shadow-lg">
-                <GraduationCap size={26} />
-              </div>
-
+            <Link href="/" className="zedpera-wordmark flex min-w-0 items-center">
               <div className="min-w-0 text-left">
-                <div className="truncate text-2xl font-black tracking-tight text-white">
+                <div className="truncate text-3xl font-black tracking-tight text-slate-950">
                   ZEDPERA
                 </div>
-                <div className="-mt-1 truncate text-sm font-semibold text-slate-300">
+                <div className="-mt-1 truncate text-base font-black text-slate-800">
                   {content.brandSubtitle}
                 </div>
               </div>
             </Link>
 
             <div className="hidden items-center gap-3 lg:flex">
-              <ClickableLanguageMenu
+              <DropdownLanguageMenu
                 language={language}
                 onChange={(nextLanguage) => {
                   void handleLanguageChange(nextLanguage);
@@ -1329,14 +3200,14 @@ export default function LandingPage() {
 
               <Link
                 href="/login"
-                className="relative z-50 rounded-2xl px-5 py-3 text-sm font-black text-white transition hover:bg-white/10"
+                className="zedpera-header-login relative z-50 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-950 shadow-sm transition hover:border-violet-300 hover:bg-violet-50"
               >
                 {content.login}
               </Link>
 
               <a
                 href="#pricing"
-                className="relative z-50 rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-6 py-3 text-sm font-black text-white shadow-xl shadow-violet-900/20 transition hover:opacity-90"
+                className="zedpera-header-cta relative z-50 rounded-2xl border border-violet-200 bg-white px-6 py-3 text-sm font-black text-slate-950 shadow-xl shadow-violet-200/70 transition hover:border-violet-400 hover:bg-violet-50"
               >
                 {content.chooseProgram}
               </a>
@@ -1345,7 +3216,7 @@ export default function LandingPage() {
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              className="rounded-2xl border border-white/10 bg-white/10 p-3 text-white lg:hidden"
+              className="rounded-2xl border border-slate-300 bg-white p-3 text-slate-950 shadow-sm lg:hidden"
               aria-label={content.mobileOpenMenu}
             >
               <Menu size={22} />
@@ -1355,7 +3226,7 @@ export default function LandingPage() {
           {/* Mobil: jazyková lišta je hneď pod logom, ale stále v hornej časti hlavičky */}
           <div className="mt-3 flex items-center gap-2 lg:hidden">
             <div className="min-w-0 flex-1">
-              <ClickableLanguageMenu
+              <DropdownLanguageMenu
                 language={language}
                 compact
                 onChange={(nextLanguage) => {
@@ -1368,29 +3239,29 @@ export default function LandingPage() {
           </div>
 
           {/* DRUHÝ RIADOK: hlavná menu lišta */}
-          <div className="mt-3 hidden border-t border-white/10 pt-3 lg:block">
-            <nav className="flex items-center justify-center gap-8 text-sm font-bold text-violet-100">
-              <a href="#intro" className="transition hover:text-violet-700">
+          <div className="zedpera-menu-row mt-4 hidden border-t border-slate-200 pt-4 lg:block">
+            <nav className="zedpera-main-nav flex items-center justify-center gap-3 text-sm font-black text-slate-950">
+              <a href="#intro" className="zedpera-menu-link rounded-2xl border border-slate-200 bg-white px-5 py-3 text-slate-950 shadow-sm transition hover:border-violet-300 hover:bg-violet-50">
                 {content.navIntro}
               </a>
 
-              <a href="#about" className="transition hover:text-violet-700">
+              <a href="#about" className="zedpera-menu-link rounded-2xl border border-slate-200 bg-white px-5 py-3 text-slate-950 shadow-sm transition hover:border-violet-300 hover:bg-violet-50">
                 {content.navAbout}
               </a>
 
-              <a href="#features" className="transition hover:text-violet-700">
+              <a href="#features" className="zedpera-menu-link rounded-2xl border border-slate-200 bg-white px-5 py-3 text-slate-950 shadow-sm transition hover:border-violet-300 hover:bg-violet-50">
                 {content.navFeatures}
               </a>
 
-              <a href="#reviews" className="transition hover:text-violet-700">
+              <a href="#reviews" className="zedpera-menu-link rounded-2xl border border-slate-200 bg-white px-5 py-3 text-slate-950 shadow-sm transition hover:border-violet-300 hover:bg-violet-50">
                 {content.navReviews}
               </a>
 
-              <a href="#pricing" className="transition hover:text-violet-700">
+              <a href="#pricing" className="zedpera-menu-link rounded-2xl border border-slate-200 bg-white px-5 py-3 text-slate-950 shadow-sm transition hover:border-violet-300 hover:bg-violet-50">
                 {content.navPricing}
               </a>
 
-              <a href="#faq" className="transition hover:text-violet-700">
+              <a href="#faq" className="zedpera-menu-link rounded-2xl border border-slate-200 bg-white px-5 py-3 text-slate-950 shadow-sm transition hover:border-violet-300 hover:bg-violet-50">
                 {content.navFaq}
               </a>
             </nav>
@@ -1400,7 +3271,7 @@ export default function LandingPage() {
 
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-sm lg:hidden">
-          <div className="absolute right-0 top-0 h-full w-[86%] max-w-sm overflow-y-auto bg-white p-5 text-slate-950 shadow-2xl">
+          <div className="mobile-menu-panel absolute right-0 top-0 h-full w-[86%] max-w-sm overflow-y-auto bg-white p-5 text-slate-950 shadow-2xl">
             <div className="mb-6 flex items-center justify-between">
               <div className="text-xl font-black">ZEDPERA</div>
 
@@ -1422,13 +3293,13 @@ export default function LandingPage() {
                     Jazyk
                   </div>
 
-                  <ClickableLanguageMenu
-                    language={language}
-                    compact
-                    onChange={(nextLanguage) => {
-                      void handleLanguageChange(nextLanguage);
-                    }}
-                  />
+                  <DropdownLanguageMenu
+                language={language}
+                compact
+                onChange={(nextLanguage) => {
+                  void handleLanguageChange(nextLanguage);
+                }}
+              />
                 </div>
 
 
@@ -1811,7 +3682,7 @@ export default function LandingPage() {
                 key={item.title}
                 className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/60"
               >
-                <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-100 text-violet-700">
+                <div className="zedpera-feature-icon mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-100 text-violet-700">
                   <Icon size={28} />
                 </div>
 
@@ -1858,7 +3729,7 @@ export default function LandingPage() {
               return (
                 <article
                   key={plan.id}
-                  className={`flex min-h-[620px] flex-col rounded-[2rem] border p-6 shadow-xl transition ${
+                  className={`zedpera-plan-card flex min-h-[620px] flex-col rounded-[2rem] border p-6 shadow-xl transition ${
                     plan.highlighted
                      ? 'border-violet-300 bg-white shadow-violet-200/70'
 : 'border-slate-200 bg-white shadow-slate-200/70'
@@ -1866,7 +3737,7 @@ export default function LandingPage() {
                 >
                   {plan.badge && (
                     <div
-                      className={`mb-4 w-fit rounded-full px-3 py-1 text-xs font-black uppercase tracking-wide ${
+                      className={`zedpera-plan-badge mb-4 w-fit rounded-full px-3 py-1 text-xs font-black uppercase tracking-wide ${
                         plan.highlighted
                           ? 'bg-violet-100 text-violet-800'
                           : 'bg-slate-100 text-slate-700'
@@ -1908,10 +3779,10 @@ export default function LandingPage() {
                     type="button"
                     onClick={() => void buy(plan.id)}
                     disabled={loadingPlan !== null}
-                    className={`mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 text-sm font-black text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                    className={`zedpera-plan-button mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 text-sm font-black text-slate-950 transition disabled:cursor-not-allowed disabled:opacity-60 ${
                       plan.highlighted
                         ? 'bg-gradient-to-r from-violet-700 to-indigo-700 shadow-xl shadow-violet-900/20 hover:opacity-90'
-                        : 'bg-slate-950 hover:bg-slate-800'
+                        : 'bg-gradient-to-r from-violet-100 to-blue-100 hover:from-violet-200 hover:to-blue-200'
                     }`}
                   >
                     {isLoading ? (
@@ -2048,6 +3919,18 @@ export default function LandingPage() {
           </div>
         </div>
       </footer>
+      <button
+        type="button"
+        onClick={scrollToTop}
+        className="zedpera-back-to-top fixed bottom-6 right-6 z-[999999] inline-flex items-center justify-center gap-3 rounded-2xl border-2 border-violet-300 bg-white px-5 py-4 text-base font-black text-slate-950 shadow-2xl shadow-violet-400/60 transition-all duration-300 hover:-translate-y-1 hover:border-violet-700 hover:bg-violet-50"
+        aria-label="Návrat hore"
+        title="Návrat hore"
+      >
+        <span className="zedpera-back-to-top-icon flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-slate-950">
+          <ArrowUp size={28} />
+        </span>
+        <span className="hidden text-slate-950 sm:inline">Hore</span>
+      </button>
     </main>
   );
 }

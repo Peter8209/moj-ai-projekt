@@ -4,24 +4,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
-  BarChart3,
   ChevronRight,
-  ClipboardCheck,
   Clock3,
   Copy,
   Download,
-  FileSearch,
-  GraduationCap,
   Inbox,
   LayoutDashboard,
-  Mail,
   Maximize2,
   MessageSquare,
-  Presentation,
   RefreshCcw,
   Search,
-  ShieldCheck,
-  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -85,69 +77,30 @@ const LOCAL_HISTORY_KEYS = [
 ];
 
 const filters = [
-  { key: 'all', label: 'Vše' },
   { key: 'chat', label: 'AI chat' },
-  { key: 'supervisor', label: 'AI vedoucí' },
-  { key: 'quality', label: 'Audit kvality' },
-  { key: 'defense', label: 'Obhajoba' },
-  { key: 'translation', label: 'Překlad' },
-  { key: 'data', label: 'Analýza dat' },
-  { key: 'planning', label: 'Plánování' },
-  { key: 'emails', label: 'E-maily' },
-  { key: 'originality', label: 'Originalita' },
-  { key: 'humanizer', label: 'Humanizace' },
 ];
 
-function normalizeModule(value: unknown) {
-  const module = String(value || 'chat').trim();
+function isAiChatModuleValue(value: unknown) {
+  const module = String(value || 'chat').trim().toLowerCase();
 
-  if (module === 'ai-chat') return 'chat';
-  if (module === 'ai') return 'chat';
-  if (module === 'audit') return 'quality';
-
-  const allowed = [
-    'chat',
-    'supervisor',
-    'quality',
-    'defense',
-    'translation',
-    'data',
-    'planning',
-    'emails',
-    'originality',
-    'humanizer',
-    'sources',
-  ];
-
-  return allowed.includes(module) ? module : 'chat';
+  return (
+    !module ||
+    module === 'chat' ||
+    module === 'ai-chat' ||
+    module === 'ai' ||
+    module === 'ai_chat'
+  );
 }
 
-function getModuleLabel(module: string) {
-  if (module === 'supervisor') return 'AI vedoucí';
-  if (module === 'quality') return 'Audit kvality';
-  if (module === 'defense') return 'Obhajoba';
-  if (module === 'translation') return 'Překlad';
-  if (module === 'data') return 'Analýza dat';
-  if (module === 'planning') return 'Plánování';
-  if (module === 'emails') return 'E-maily';
-  if (module === 'originality') return 'Originalita';
-  if (module === 'humanizer') return 'Humanizace';
-  if (module === 'sources') return 'Zdroje';
+function normalizeModule(value: unknown) {
+  return isAiChatModuleValue(value) ? 'chat' : 'chat';
+}
 
+function getModuleLabel(_module: string) {
   return 'AI chat';
 }
 
-function getModuleIcon(module: string) {
-  if (module === 'supervisor') return <GraduationCap className="h-5 w-5" />;
-  if (module === 'quality') return <ClipboardCheck className="h-5 w-5" />;
-  if (module === 'defense') return <Presentation className="h-5 w-5" />;
-  if (module === 'translation') return <MessageSquare className="h-5 w-5" />;
-  if (module === 'data') return <BarChart3 className="h-5 w-5" />;
-  if (module === 'emails') return <Mail className="h-5 w-5" />;
-  if (module === 'originality') return <ShieldCheck className="h-5 w-5" />;
-  if (module === 'humanizer') return <Sparkles className="h-5 w-5" />;
-  if (module === 'sources') return <FileSearch className="h-5 w-5" />;
-
+function getModuleIcon(_module: string) {
   return <MessageSquare className="h-5 w-5" />;
 }
 
@@ -388,7 +341,9 @@ function safelyParseLocalHistory(): RawHistoryItem[] {
 
   const seen = new Set<string>();
 
-  return allItems.filter((item, index) => {
+  return allItems
+    .filter((item) => isAiChatModuleValue(item.module || item.type))
+    .filter((item, index) => {
     const createdAt =
       cleanText(item.created_at) ||
       cleanText(item.createdAt) ||
@@ -423,6 +378,8 @@ function removeItemFromLocalStorage(item: HistoryItem) {
       const parsed = JSON.parse(raw);
 
       const isSameItem = (rawItem: RawHistoryItem) => {
+        if (!isAiChatModuleValue(rawItem.module || rawItem.type)) return false;
+
         const rawId = String(rawItem.id || '');
 
         if (rawId && rawId === item.id) return true;
@@ -486,10 +443,8 @@ function removeItemFromLocalStorage(item: HistoryItem) {
   }
 }
 
-function filterItems(items: HistoryItem[], activeFilter: string) {
-  if (activeFilter === 'all') return items;
-
-  return items.filter((item) => item.module === activeFilter);
+function filterItems(items: HistoryItem[], _activeFilter: string) {
+  return items.filter((item) => item.module === 'chat');
 }
 
 function formatDate(value: string) {
@@ -532,7 +487,7 @@ function createAutoSubmitHistoryPrompt(item: HistoryItem) {
     'Pokračujeme v predchádzajúcej konverzácii z histórie.',
     '',
     `Názov: ${title}`,
-    `Modul: ${moduleLabel}`,
+    `Modul: AI chat`,
     `Dátum: ${formatDate(item.created_at)}`,
     '',
     userText ? '=== PÔVODNÉ ZADANIE POUŽÍVATEĽA ===' : '',
@@ -615,7 +570,7 @@ function createFullReadableText(item: HistoryItem) {
   return [
     title,
     '',
-    `Modul: ${moduleLabel}`,
+    `Modul: AI chat`,
     `Dátum: ${date}`,
     '',
     userText ? '=== ZADANIE ===' : '',
@@ -650,7 +605,7 @@ export default function HistoryPage() {
   const router = useRouter();
 
   const [items, setItems] = useState<HistoryItem[]>([]);
-  const [activeFilter, setActiveFilter] = useState('all');
+  const [activeFilter, setActiveFilter] = useState('chat');
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -659,7 +614,7 @@ export default function HistoryPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   function goToMainMenu() {
-    router.push('/dashboard');
+    router.push('/chat');
   }
 
   function openHistoryDetail(item: HistoryItem) {
@@ -792,10 +747,7 @@ export default function HistoryPage() {
     }
 
     try {
-      const url =
-        activeFilter === 'all'
-          ? '/api/history'
-          : `/api/history?module=${encodeURIComponent(activeFilter)}`;
+      const url = '/api/history?module=chat';
 
       const res = await fetch(url, {
         method: 'GET',
@@ -958,16 +910,16 @@ export default function HistoryPage() {
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm dark:border-white/10 dark:bg-white/10 dark:text-white">
-                <LayoutDashboard className="h-6 w-6" />
+                <MessageSquare className="h-6 w-6" />
               </div>
 
               <div>
                 <h1 className="text-xl font-black text-slate-950 dark:text-white">
-                  História výstupov
+                  História AI chatu
                 </h1>
 
                 <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
-                  Po rozkliknutí sa otvorí celý uložený výstup v plnom detaile.
+                  Po rozkliknutí sa otvorí celá uložená konverzácia z AI chatu.
                 </p>
               </div>
             </div>
@@ -979,7 +931,7 @@ export default function HistoryPage() {
                 className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-white px-6 text-sm font-black text-slate-950 shadow-lg shadow-slate-950/10 transition hover:-translate-y-0.5 hover:bg-slate-100 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
               >
                 <ArrowLeft className="h-4 w-4" />
-                Hlavné menu
+                AI chat
               </button>
 
               <button
@@ -1000,7 +952,7 @@ export default function HistoryPage() {
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Vyhľadať v histórii podľa názvu, modulu alebo obsahu..."
+                placeholder="Vyhľadať v histórii AI chatu podľa názvu alebo obsahu..."
                 className="min-h-[52px] w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-4 text-sm font-semibold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder:text-slate-500"
               />
             </div>
@@ -1070,9 +1022,7 @@ export default function HistoryPage() {
             </h2>
 
             <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6 text-slate-600 dark:text-slate-300">
-              Spustite niektorý modul v hlavnom menu a výstup sa sem automaticky
-              uloží. Ak používate vyhľadávanie, skúste zadať iný výraz alebo
-              zmeniť filter.
+              Spustite AI chat a konverzácia sa sem automaticky uloží. Ak používate vyhľadávanie, skúste zadať iný výraz.
             </p>
 
             <button
@@ -1080,8 +1030,8 @@ export default function HistoryPage() {
               onClick={goToMainMenu}
               className="mt-6 inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-6 text-sm font-black text-white shadow-lg shadow-violet-950/20 transition hover:-translate-y-0.5 hover:bg-violet-500"
             >
-              <LayoutDashboard className="h-4 w-4" />
-              Prejsť do hlavného menu
+              <MessageSquare className="h-4 w-4" />
+              Prejsť do AI chatu
             </button>
           </div>
         ) : null}
@@ -1243,7 +1193,7 @@ export default function HistoryPage() {
                     </h2>
 
                     <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">
-                      Toto je plný detail uloženého výstupu. Obsah sa už nezobrazuje ako malé textové okno, ale ako samostatné rozkliknuté zobrazenie.
+                      Toto je plný detail uloženej konverzácie z AI chatu.
                     </p>
                   </div>
                 </div>
@@ -1352,7 +1302,7 @@ export default function HistoryPage() {
                     </h3>
 
                     <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
-                      Zobrazuje sa kompletný obsah z histórie vrátane dlhých výstupov z modulov.
+                      Zobrazuje sa kompletný obsah uloženej konverzácie z AI chatu.
                     </p>
                   </div>
 

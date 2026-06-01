@@ -42,6 +42,13 @@ const ACTIVE_PROFILE_KEY = 'active_profile';
 const LEGACY_PROFILE_KEY = 'profile';
 const PROFILES_FULL_KEY = 'profiles_full';
 
+/**
+ * Kľúč, ktorý hovorí, že používateľ jazyk vybral vedome.
+ * Vďaka tomu sa jazyk aplikácie nebude náhodne preberať z prehliadača,
+ * starého profilu alebo automatického prekladača.
+ */
+const LANGUAGE_USER_SELECTED_KEY = 'zedpera_language_user_selected';
+
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
 function isValidLanguage(value: unknown): value is AppLanguage {
@@ -65,6 +72,20 @@ function safeJsonParse<T>(value: string | null): T | null {
   }
 }
 
+function normalizeStoredLanguage(value: unknown): AppLanguage | null {
+  if (isValidLanguage(value)) {
+    return value;
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = normalizeLanguage(value);
+
+  return isValidLanguage(normalized) ? normalized : null;
+}
+
 function getLanguageFromPath(): AppLanguage | null {
   if (typeof window === 'undefined') return null;
 
@@ -79,26 +100,15 @@ function getLanguageFromPath(): AppLanguage | null {
   return null;
 }
 
-function getLanguageFromProfile(): AppLanguage | null {
+function getStoredLanguage(): AppLanguage | null {
   if (typeof window === 'undefined') return null;
 
-  const activeProfile = safeJsonParse<StoredProfile>(
-    window.localStorage.getItem(ACTIVE_PROFILE_KEY),
-  );
+  const savedLanguage =
+    window.localStorage.getItem(LANGUAGE_STORAGE_KEY) ||
+    window.localStorage.getItem(SYSTEM_LANGUAGE_STORAGE_KEY) ||
+    window.localStorage.getItem(WORK_LANGUAGE_STORAGE_KEY);
 
-  if (isValidLanguage(activeProfile?.interfaceLanguage)) {
-    return activeProfile.interfaceLanguage;
-  }
-
-  const legacyProfile = safeJsonParse<StoredProfile>(
-    window.localStorage.getItem(LEGACY_PROFILE_KEY),
-  );
-
-  if (isValidLanguage(legacyProfile?.interfaceLanguage)) {
-    return legacyProfile.interfaceLanguage;
-  }
-
-  return null;
+  return normalizeStoredLanguage(savedLanguage);
 }
 
 function getInitialLanguage(): AppLanguage {
@@ -112,29 +122,26 @@ function getInitialLanguage(): AppLanguage {
     return languageFromPath;
   }
 
-  const savedLanguage =
-    window.localStorage.getItem(LANGUAGE_STORAGE_KEY) ||
-    window.localStorage.getItem(SYSTEM_LANGUAGE_STORAGE_KEY) ||
-    window.localStorage.getItem(WORK_LANGUAGE_STORAGE_KEY);
+  const userSelectedLanguage =
+    window.localStorage.getItem(LANGUAGE_USER_SELECTED_KEY) === 'true';
 
-  if (isValidLanguage(savedLanguage)) {
-    return savedLanguage;
+  const storedLanguage = getStoredLanguage();
+
+  if (userSelectedLanguage && storedLanguage) {
+    return storedLanguage;
   }
 
-  const languageFromProfile = getLanguageFromProfile();
-
-  if (languageFromProfile) {
-    return languageFromProfile;
+  if (storedLanguage) {
+    return storedLanguage;
   }
 
-  const browserLanguage = normalizeLanguage(
-    window.navigator.languages?.[0] || window.navigator.language || 'sk',
-  );
-
-  return isValidLanguage(browserLanguage) ? browserLanguage : 'sk';
+  return 'sk';
 }
 
-function updateProfileInterfaceLanguage(nextLanguage: AppLanguage) {
+function updateProfileInterfaceLanguage(
+  nextLanguage: AppLanguage,
+  updateWorkLanguage = false,
+) {
   if (typeof window === 'undefined') return;
 
   const now = new Date().toISOString();
@@ -147,9 +154,12 @@ function updateProfileInterfaceLanguage(nextLanguage: AppLanguage) {
     const updatedProfile: StoredProfile = {
       ...activeProfile,
       interfaceLanguage: nextLanguage,
-      workLanguage: nextLanguage,
       updatedAt: now,
     };
+
+    if (updateWorkLanguage) {
+      updatedProfile.workLanguage = nextLanguage;
+    }
 
     window.localStorage.setItem(
       ACTIVE_PROFILE_KEY,
@@ -171,7 +181,7 @@ function updateProfileInterfaceLanguage(nextLanguage: AppLanguage) {
           return {
             ...profile,
             interfaceLanguage: nextLanguage,
-            workLanguage: nextLanguage,
+            ...(updateWorkLanguage ? { workLanguage: nextLanguage } : {}),
             updatedAt: now,
           };
         }
@@ -196,9 +206,12 @@ function updateProfileInterfaceLanguage(nextLanguage: AppLanguage) {
     const updatedProfile: StoredProfile = {
       ...legacyProfile,
       interfaceLanguage: nextLanguage,
-      workLanguage: nextLanguage,
       updatedAt: now,
     };
+
+    if (updateWorkLanguage) {
+      updatedProfile.workLanguage = nextLanguage;
+    }
 
     window.localStorage.setItem(
       LEGACY_PROFILE_KEY,
@@ -212,6 +225,21 @@ function updateProfileInterfaceLanguage(nextLanguage: AppLanguage) {
   }
 }
 
+function ensureNoTranslateMetaTag() {
+  if (typeof document === 'undefined') return;
+
+  let meta = document.querySelector<HTMLMetaElement>(
+    'meta[name="google"][content="notranslate"]',
+  );
+
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.name = 'google';
+    meta.content = 'notranslate';
+    document.head.appendChild(meta);
+  }
+}
+
 function applyLanguageToDocument(nextLanguage: AppLanguage) {
   if (typeof document === 'undefined') return;
 
@@ -219,16 +247,42 @@ function applyLanguageToDocument(nextLanguage: AppLanguage) {
   document.documentElement.setAttribute('data-language', nextLanguage);
   document.documentElement.setAttribute('data-system-language', nextLanguage);
   document.documentElement.setAttribute('data-work-language', nextLanguage);
+
+  document.documentElement.setAttribute('translate', 'no');
+  document.documentElement.classList.add('notranslate');
+
+  ensureNoTranslateMetaTag();
 }
 
-function persistLanguage(nextLanguage: AppLanguage) {
+function persistLanguage(
+  nextLanguage: AppLanguage,
+  options?: {
+    markAsUserSelected?: boolean;
+    updateProfile?: boolean;
+    updateWorkLanguage?: boolean;
+  },
+) {
   if (typeof window === 'undefined') return;
+
+  const markAsUserSelected = options?.markAsUserSelected ?? false;
+  const updateProfile = options?.updateProfile ?? true;
+  const updateWorkLanguage = options?.updateWorkLanguage ?? false;
 
   window.localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
   window.localStorage.setItem(SYSTEM_LANGUAGE_STORAGE_KEY, nextLanguage);
-  window.localStorage.setItem(WORK_LANGUAGE_STORAGE_KEY, nextLanguage);
 
-  updateProfileInterfaceLanguage(nextLanguage);
+  if (markAsUserSelected || updateWorkLanguage) {
+    window.localStorage.setItem(WORK_LANGUAGE_STORAGE_KEY, nextLanguage);
+  }
+
+  if (markAsUserSelected) {
+    window.localStorage.setItem(LANGUAGE_USER_SELECTED_KEY, 'true');
+  }
+
+  if (updateProfile) {
+    updateProfileInterfaceLanguage(nextLanguage, updateWorkLanguage);
+  }
+
   applyLanguageToDocument(nextLanguage);
 }
 
@@ -240,6 +294,28 @@ function dispatchLanguageChange(nextLanguage: AppLanguage) {
       detail: nextLanguage,
     }),
   );
+
+  window.dispatchEvent(
+    new CustomEvent<{ language: AppLanguage }>('zedpera-language-updated', {
+      detail: {
+        language: nextLanguage,
+      },
+    }),
+  );
+}
+
+function readLanguageFromCustomEvent(event: Event): AppLanguage | null {
+  const customEvent = event as CustomEvent<
+    AppLanguage | { language?: AppLanguage; nextLanguage?: AppLanguage }
+  >;
+
+  const detail = customEvent.detail;
+
+  if (typeof detail === 'string') {
+    return normalizeStoredLanguage(detail);
+  }
+
+  return normalizeStoredLanguage(detail?.language || detail?.nextLanguage);
 }
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
@@ -247,11 +323,29 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   const [isReady, setIsReady] = useState(false);
 
   const applyLanguage = useCallback(
-    (nextLanguage: AppLanguage, shouldDispatch = true) => {
+    (
+      nextLanguage: AppLanguage,
+      options?: {
+        shouldDispatch?: boolean;
+        markAsUserSelected?: boolean;
+        updateProfile?: boolean;
+        updateWorkLanguage?: boolean;
+      },
+    ) => {
       if (!isValidLanguage(nextLanguage)) return;
 
+      const shouldDispatch = options?.shouldDispatch ?? true;
+      const markAsUserSelected = options?.markAsUserSelected ?? false;
+      const updateProfile = options?.updateProfile ?? true;
+      const updateWorkLanguage = options?.updateWorkLanguage ?? false;
+
       setLanguageState(nextLanguage);
-      persistLanguage(nextLanguage);
+
+      persistLanguage(nextLanguage, {
+        markAsUserSelected,
+        updateProfile,
+        updateWorkLanguage,
+      });
 
       if (shouldDispatch) {
         dispatchLanguageChange(nextLanguage);
@@ -264,7 +358,13 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     const initialLanguage = getInitialLanguage();
 
     setLanguageState(initialLanguage);
-    persistLanguage(initialLanguage);
+
+    persistLanguage(initialLanguage, {
+      markAsUserSelected: false,
+      updateProfile: false,
+      updateWorkLanguage: false,
+    });
+
     setIsReady(true);
 
     dispatchLanguageChange(initialLanguage);
@@ -280,33 +380,60 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const nextLanguage = event.newValue;
+      const nextLanguage = normalizeStoredLanguage(event.newValue);
 
-      if (!isValidLanguage(nextLanguage)) return;
+      if (!nextLanguage) return;
 
-      applyLanguage(nextLanguage, false);
+      applyLanguage(nextLanguage, {
+        shouldDispatch: false,
+        markAsUserSelected: false,
+        updateProfile: false,
+        updateWorkLanguage: false,
+      });
     };
 
     const handleCustomLanguageChange = (event: Event) => {
-      const customEvent = event as CustomEvent<AppLanguage>;
-      const nextLanguage = customEvent.detail;
+      const nextLanguage = readLanguageFromCustomEvent(event);
 
-      if (!isValidLanguage(nextLanguage)) return;
+      if (!nextLanguage) return;
 
-      applyLanguage(nextLanguage, false);
+      applyLanguage(nextLanguage, {
+        shouldDispatch: false,
+        markAsUserSelected: true,
+        updateProfile: true,
+        updateWorkLanguage: true,
+      });
     };
 
     const handleProfileChange = () => {
-      const profileLanguage = getLanguageFromProfile();
+      const storedLanguage = getStoredLanguage();
 
-      if (!profileLanguage) return;
+      if (!storedLanguage) {
+        applyLanguage('sk', {
+          shouldDispatch: true,
+          markAsUserSelected: false,
+          updateProfile: false,
+          updateWorkLanguage: false,
+        });
 
-      applyLanguage(profileLanguage, true);
+        return;
+      }
+
+      applyLanguage(storedLanguage, {
+        shouldDispatch: true,
+        markAsUserSelected: false,
+        updateProfile: false,
+        updateWorkLanguage: false,
+      });
     };
 
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener(
       'zedpera-language-change',
+      handleCustomLanguageChange,
+    );
+    window.addEventListener(
+      'zedpera-language-updated',
       handleCustomLanguageChange,
     );
     window.addEventListener('zedpera-profile-change', handleProfileChange);
@@ -317,6 +444,10 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
         'zedpera-language-change',
         handleCustomLanguageChange,
       );
+      window.removeEventListener(
+        'zedpera-language-updated',
+        handleCustomLanguageChange,
+      );
       window.removeEventListener('zedpera-profile-change', handleProfileChange);
     };
   }, [applyLanguage]);
@@ -325,7 +456,12 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     (nextLanguage: AppLanguage) => {
       if (!isValidLanguage(nextLanguage)) return;
 
-      applyLanguage(nextLanguage, true);
+      applyLanguage(nextLanguage, {
+        shouldDispatch: true,
+        markAsUserSelected: true,
+        updateProfile: true,
+        updateWorkLanguage: true,
+      });
     },
     [applyLanguage],
   );
@@ -336,8 +472,6 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       setLanguage,
       t: getTranslation(language),
       appLanguages: languages,
-
-      // Loader je vypnutý natrvalo, aby neblokoval dashboard.
       isTranslatingInterface: false,
       translationProgress: 100,
     };

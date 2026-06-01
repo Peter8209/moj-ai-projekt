@@ -14,9 +14,11 @@ import {
   CreditCard,
   FileCheck2,
   Globe2,
+  HelpCircle,
   GraduationCap,
   Loader2,
   Menu,
+  MessageCircle,
   Quote,
   ShieldCheck,
   Sparkles,
@@ -3173,11 +3175,261 @@ export default function LandingPage() {
           }
         }
 
+
+
+        /* =========================================================
+           MOBILE KONTEXTA STYLE - PRESNÁ MOBILNÁ ÚPRAVA
+           Cieľ podľa videa: kompaktná horná lišta, ikony vpravo,
+           čistý drawer, žiadne presahy a čitateľný obsah.
+        ========================================================= */
+
+        @media (max-width: 1023px) {
+          html,
+          body {
+            overflow-x: hidden !important;
+            background: #ffffff !important;
+          }
+
+          .zedpera-public-page {
+            overflow-x: hidden !important;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 45%, #eef4ff 100%) !important;
+          }
+
+          .zedpera-public-page .zedpera-header {
+            position: sticky !important;
+            top: 0 !important;
+            z-index: 99990 !important;
+            background: rgba(255, 255, 255, 0.98) !important;
+            border-bottom: 1px solid #dbe3ef !important;
+            box-shadow: 0 12px 34px rgba(15, 23, 42, 0.10) !important;
+            backdrop-filter: blur(18px) saturate(180%) !important;
+          }
+
+          .zedpera-public-page .zedpera-header .mx-auto {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            padding-top: 0.75rem !important;
+            padding-bottom: 0.75rem !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-topbar {
+            min-height: 48px !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-brand,
+          .zedpera-public-page .zedpera-mobile-brand * {
+            color: #020617 !important;
+            -webkit-text-fill-color: #020617 !important;
+            opacity: 1 !important;
+            font-weight: 950 !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-actions {
+            gap: 0.45rem !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-icon-button,
+          .zedpera-public-page .zedpera-mobile-close-button {
+            display: inline-flex !important;
+            height: 44px !important;
+            width: 44px !important;
+            align-items: center !important;
+            justify-content: center !important;
+            border-radius: 1rem !important;
+            border: 1px solid #dbe3ef !important;
+            background: #ffffff !important;
+            color: #020617 !important;
+            -webkit-text-fill-color: #020617 !important;
+            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08) !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-icon-button svg,
+          .zedpera-public-page .zedpera-mobile-close-button svg {
+            color: #020617 !important;
+            stroke: #020617 !important;
+            opacity: 1 !important;
+            stroke-width: 2.8 !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-chat-button {
+            background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+            border-color: #c4b5fd !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-quickbar {
+            align-items: stretch !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-quickbar .zedpera-language-menu {
+            min-width: 0 !important;
+            width: 100% !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-quickbar .zedpera-language-trigger {
+            min-height: 46px !important;
+            border-radius: 1rem !important;
+            padding: 0.55rem 0.75rem !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-quickbar .zedpera-language-trigger .zedpera-language-code {
+            height: 32px !important;
+            min-width: 42px !important;
+            font-size: 0.78rem !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-quickbar .zedpera-language-trigger span.truncate {
+            max-width: 112px !important;
+            font-size: 0.9rem !important;
+          }
+
+          .zedpera-public-page .zedpera-language-dropdown {
+            left: 0 !important;
+            right: auto !important;
+            width: min(330px, calc(100vw - 2rem)) !important;
+            min-width: min(330px, calc(100vw - 2rem)) !important;
+            max-height: min(390px, calc(100vh - 140px)) !important;
+            z-index: 1000000 !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-program-button {
+            min-height: 46px !important;
+            color: #020617 !important;
+            -webkit-text-fill-color: #020617 !important;
+            background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+            border-color: #c4b5fd !important;
+            box-shadow: 0 10px 26px rgba(124, 58, 237, 0.14) !important;
+            font-weight: 950 !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-overlay {
+            z-index: 999998 !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-drawer {
+            background: #ffffff !important;
+            color: #020617 !important;
+            border-left: 1px solid #dbe3ef !important;
+            box-shadow: -24px 0 70px rgba(15, 23, 42, 0.20) !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-drawer,
+          .zedpera-public-page .zedpera-mobile-drawer * {
+            color: #020617 !important;
+            -webkit-text-fill-color: #020617 !important;
+            opacity: 1 !important;
+            font-weight: 850 !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-nav-item {
+            display: flex !important;
+            align-items: center !important;
+            gap: 0.8rem !important;
+            min-height: 52px !important;
+            border-radius: 1.15rem !important;
+            border: 1px solid #e2e8f0 !important;
+            background: #f8fafc !important;
+            padding: 0.85rem 1rem !important;
+            color: #020617 !important;
+            -webkit-text-fill-color: #020617 !important;
+            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05) !important;
+            font-weight: 950 !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-nav-item:nth-child(1) { background: #f5f3ff !important; border-color: #ddd6fe !important; }
+          .zedpera-public-page .zedpera-mobile-nav-item:nth-child(2) { background: #eff6ff !important; border-color: #bfdbfe !important; }
+          .zedpera-public-page .zedpera-mobile-nav-item:nth-child(3) { background: #ecfdf5 !important; border-color: #a7f3d0 !important; }
+          .zedpera-public-page .zedpera-mobile-nav-item:nth-child(4) { background: #fff7ed !important; border-color: #fed7aa !important; }
+          .zedpera-public-page .zedpera-mobile-nav-item:nth-child(5) { background: #fdf2f8 !important; border-color: #fbcfe8 !important; }
+          .zedpera-public-page .zedpera-mobile-nav-item:nth-child(6) { background: #fefce8 !important; border-color: #fde68a !important; }
+
+          .zedpera-public-page .zedpera-mobile-nav-item svg {
+            color: #020617 !important;
+            stroke: #020617 !important;
+            stroke-width: 2.7 !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-drawer-button {
+            display: flex !important;
+            min-height: 52px !important;
+            align-items: center !important;
+            justify-content: center !important;
+            border-radius: 1.15rem !important;
+            border: 1px solid #dbe3ef !important;
+            background: #ffffff !important;
+            color: #020617 !important;
+            -webkit-text-fill-color: #020617 !important;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08) !important;
+            font-weight: 950 !important;
+          }
+
+          .zedpera-public-page .zedpera-mobile-drawer-button-primary {
+            background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%) !important;
+            border-color: #c4b5fd !important;
+          }
+
+          .zedpera-public-page #intro {
+            padding-top: 0 !important;
+          }
+
+          .zedpera-public-page .zedpera-hero-content {
+            padding-top: 3.25rem !important;
+            padding-bottom: 3.5rem !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+          }
+
+          .zedpera-public-page .zedpera-hero-content h1 {
+            font-size: clamp(2.45rem, 12vw, 4.2rem) !important;
+            line-height: 0.98 !important;
+            letter-spacing: -0.055em !important;
+            max-width: 100% !important;
+            overflow-wrap: break-word !important;
+          }
+
+          .zedpera-public-page .zedpera-hero-content p {
+            font-size: 1.02rem !important;
+            line-height: 1.75 !important;
+            max-width: 100% !important;
+          }
+
+          .zedpera-public-page .hero-visible-badge {
+            max-width: 100% !important;
+            white-space: normal !important;
+            text-align: center !important;
+          }
+
+          .zedpera-public-page section {
+            overflow-x: hidden !important;
+          }
+
+          .zedpera-public-page .grid {
+            max-width: 100% !important;
+          }
+
+          .zedpera-public-page #features article,
+          .zedpera-public-page #pricing article,
+          .zedpera-public-page article {
+            border-radius: 1.45rem !important;
+            padding: 1.25rem !important;
+          }
+
+          .zedpera-public-page #pricing .zedpera-plan-card {
+            min-height: auto !important;
+          }
+
+          .zedpera-public-page .zedpera-back-to-top {
+            right: 1rem !important;
+            bottom: 1rem !important;
+            min-width: 64px !important;
+            min-height: 64px !important;
+          }
+        }
+
       `}</style>
-      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 text-slate-950 backdrop-blur-xl">
-        <div className="mx-auto max-w-7xl px-5 py-3 lg:px-8">
-          {/* PRVÝ RIADOK: logo + jazyková lišta + akčné tlačidlá */}
-          <div className="flex items-center justify-between gap-4">
+      <header className="zedpera-header sticky top-0 z-50 border-b border-slate-200 bg-white/95 text-slate-950 backdrop-blur-xl">
+        <div className="mx-auto max-w-7xl px-4 py-3 lg:px-8">
+          {/* DESKTOP HLAVIČKA */}
+          <div className="hidden items-center justify-between gap-4 lg:flex">
             <Link href="/" className="zedpera-wordmark flex min-w-0 items-center">
               <div className="min-w-0 text-left">
                 <div className="truncate text-3xl font-black tracking-tight text-slate-950">
@@ -3189,14 +3441,13 @@ export default function LandingPage() {
               </div>
             </Link>
 
-            <div className="hidden items-center gap-3 lg:flex">
+            <div className="flex items-center gap-3">
               <DropdownLanguageMenu
                 language={language}
                 onChange={(nextLanguage) => {
                   void handleLanguageChange(nextLanguage);
                 }}
               />
-
 
               <Link
                 href="/login"
@@ -3212,33 +3463,66 @@ export default function LandingPage() {
                 {content.chooseProgram}
               </a>
             </div>
-
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(true)}
-              className="rounded-2xl border border-slate-300 bg-white p-3 text-slate-950 shadow-sm lg:hidden"
-              aria-label={content.mobileOpenMenu}
-            >
-              <Menu size={22} />
-            </button>
           </div>
 
-          {/* Mobil: jazyková lišta je hneď pod logom, ale stále v hornej časti hlavičky */}
-          <div className="mt-3 flex items-center gap-2 lg:hidden">
-            <div className="min-w-0 flex-1">
-              <DropdownLanguageMenu
-                language={language}
-                compact
-                onChange={(nextLanguage) => {
-                  void handleLanguageChange(nextLanguage);
-                }}
-              />
+          {/* MOBILNÁ HLAVIČKA PODĽA ŠTÝLU KONTEXTA */}
+          <div className="zedpera-mobile-topbar flex items-center justify-between gap-3 lg:hidden">
+            <Link href="/" className="zedpera-mobile-brand min-w-0">
+              <div className="truncate text-[22px] font-black leading-none tracking-tight text-slate-950">
+                ZEDPERA
+              </div>
+              <div className="mt-0.5 truncate text-[12px] font-black leading-none text-slate-700">
+                {content.brandSubtitle}
+              </div>
+            </Link>
+
+            <div className="zedpera-mobile-actions flex shrink-0 items-center gap-2">
+              <a
+                href="#faq"
+                className="zedpera-mobile-icon-button"
+                aria-label={content.navFaq}
+              >
+                <HelpCircle size={20} />
+              </a>
+
+              <a
+                href="/login"
+                className="zedpera-mobile-icon-button zedpera-mobile-chat-button"
+                aria-label={content.login}
+              >
+                <MessageCircle size={20} />
+              </a>
+
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(true)}
+                className="zedpera-mobile-icon-button"
+                aria-label={content.mobileOpenMenu}
+              >
+                <Menu size={22} />
+              </button>
             </div>
-
-
           </div>
 
-          {/* DRUHÝ RIADOK: hlavná menu lišta */}
+          {/* MOBIL: KOMPAKTNÝ JAZYK A PROGRAM */}
+          <div className="zedpera-mobile-quickbar mt-3 grid grid-cols-[1fr_auto] gap-2 lg:hidden">
+            <DropdownLanguageMenu
+              language={language}
+              compact
+              onChange={(nextLanguage) => {
+                void handleLanguageChange(nextLanguage);
+              }}
+            />
+
+            <a
+              href="#pricing"
+              className="zedpera-mobile-program-button inline-flex items-center justify-center rounded-2xl border border-violet-200 bg-white px-4 py-3 text-sm font-black text-slate-950 shadow-sm"
+            >
+              Program
+            </a>
+          </div>
+
+          {/* DESKTOP MENU */}
           <div className="zedpera-menu-row mt-4 hidden border-t border-slate-200 pt-4 lg:block">
             <nav className="zedpera-main-nav flex items-center justify-center gap-3 text-sm font-black text-slate-950">
               <a href="#intro" className="zedpera-menu-link rounded-2xl border border-slate-200 bg-white px-5 py-3 text-slate-950 shadow-sm transition hover:border-violet-300 hover:bg-violet-50">
@@ -3270,102 +3554,76 @@ export default function LandingPage() {
       </header>
 
       {mobileMenuOpen && (
-        <div className="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-sm lg:hidden">
-          <div className="mobile-menu-panel absolute right-0 top-0 h-full w-[86%] max-w-sm overflow-y-auto bg-white p-5 text-slate-950 shadow-2xl">
-            <div className="mb-6 flex items-center justify-between">
-              <div className="text-xl font-black">ZEDPERA</div>
+        <div className="zedpera-mobile-overlay fixed inset-0 z-[999998] bg-slate-950/45 backdrop-blur-sm lg:hidden">
+          <div className="zedpera-mobile-drawer absolute right-0 top-0 h-full w-[88%] max-w-[360px] overflow-y-auto bg-white p-4 text-slate-950 shadow-2xl">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-2xl font-black leading-none tracking-tight text-slate-950">
+                  ZEDPERA
+                </div>
+                <div className="mt-1 text-xs font-black text-slate-600">
+                  {content.brandSubtitle}
+                </div>
+              </div>
 
               <button
                 type="button"
                 onClick={closeMobileMenu}
-                className="rounded-xl bg-slate-100 p-2"
+                className="zedpera-mobile-close-button"
                 aria-label={content.mobileCloseMenu}
               >
-                <X size={20} />
+                <X size={22} />
               </button>
             </div>
 
-            <div className="space-y-3">
-              <div className="rounded-2xl bg-slate-100 p-3">
-                <div className="mb-3">
-                  <div className="mb-2 flex items-center gap-2 px-1 text-xs font-black uppercase tracking-[0.2em] text-slate-500">
-                    <Globe2 size={15} className="text-violet-700" />
-                    Jazyk
-                  </div>
-
-                  <DropdownLanguageMenu
+            <div className="mb-4 rounded-3xl border border-violet-100 bg-violet-50/70 p-3">
+              <DropdownLanguageMenu
                 language={language}
                 compact
                 onChange={(nextLanguage) => {
                   void handleLanguageChange(nextLanguage);
                 }}
               />
-                </div>
+            </div>
 
-
-              </div>
-
-              <a
-                href="#intro"
-                onClick={closeMobileMenu}
-                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold text-slate-800"
-              >
-                {content.navIntro}
+            <div className="space-y-2">
+              <a href="#intro" onClick={closeMobileMenu} className="zedpera-mobile-nav-item">
+                <Sparkles size={19} />
+                <span>{content.navIntro}</span>
               </a>
 
-              <a
-                href="#about"
-                onClick={closeMobileMenu}
-                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold text-slate-800"
-              >
-                {content.navAbout}
+              <a href="#about" onClick={closeMobileMenu} className="zedpera-mobile-nav-item">
+                <BookOpen size={19} />
+                <span>{content.navAbout}</span>
               </a>
 
-              <a
-                href="#features"
-                onClick={closeMobileMenu}
-                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
-              >
-                {content.navFeatures}
+              <a href="#features" onClick={closeMobileMenu} className="zedpera-mobile-nav-item">
+                <Bot size={19} />
+                <span>{content.navFeatures}</span>
               </a>
 
-              <a
-                href="#reviews"
-                onClick={closeMobileMenu}
-                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
-              >
-                {content.navReviews}
+              <a href="#reviews" onClick={closeMobileMenu} className="zedpera-mobile-nav-item">
+                <Star size={19} />
+                <span>{content.navReviews}</span>
               </a>
 
-              <a
-                href="#pricing"
-                onClick={closeMobileMenu}
-                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
-              >
-                {content.navPricing}
+              <a href="#pricing" onClick={closeMobileMenu} className="zedpera-mobile-nav-item">
+                <CreditCard size={19} />
+                <span>{content.navPricing}</span>
               </a>
 
-              <a
-                href="#faq"
-                onClick={closeMobileMenu}
-                className="block rounded-2xl bg-slate-100 px-4 py-3 font-bold"
-              >
-                {content.navFaq}
+              <a href="#faq" onClick={closeMobileMenu} className="zedpera-mobile-nav-item">
+                <HelpCircle size={19} />
+                <span>{content.navFaq}</span>
               </a>
+            </div>
 
-              <Link
-                href="/login"
-                onClick={closeMobileMenu}
-                className="block w-full rounded-2xl bg-slate-100 px-4 py-3 text-left font-bold"
-              >
+            <div className="mt-5 grid gap-2">
+              <Link href="/login" onClick={closeMobileMenu} className="zedpera-mobile-drawer-button">
                 {content.login}
               </Link>
 
-              <a
-                href="#pricing"
-                onClick={closeMobileMenu}
-                className="block w-full rounded-2xl bg-gradient-to-r from-violet-700 to-indigo-700 px-4 py-3 text-left font-black text-white"
-              >
+              <a href="#pricing" onClick={closeMobileMenu} className="zedpera-mobile-drawer-button zedpera-mobile-drawer-button-primary">
                 {content.chooseProgram}
               </a>
             </div>

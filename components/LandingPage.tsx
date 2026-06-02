@@ -918,29 +918,27 @@ function DropdownLanguageMenu({
 
   return (
     <div
-      className={`zedpera-language-menu relative ${compact ? 'w-full' : 'min-w-[320px]'}`}
+      className={`zedpera-language-menu relative ${compact ? 'w-full' : 'w-full xl:w-[330px]'}`}
       aria-label="Výber jazyka"
     >
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className={`zedpera-language-trigger group flex min-h-[64px] w-full items-center justify-between gap-4 rounded-[1.35rem] border-2 px-4 py-3 text-left transition ${
-          compact ? 'w-full' : ''
-        }`}
+        className="zedpera-language-trigger group flex min-h-[62px] w-full items-center justify-between gap-3 rounded-[1.25rem] border-2 px-3.5 py-3 text-left transition"
         aria-expanded={open}
         aria-haspopup="listbox"
       >
         <span className="flex min-w-0 items-center gap-3">
           <span className="zedpera-language-globe flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl">
-            <Globe2 size={25} strokeWidth={3} />
+            <Globe2 size={25} strokeWidth={3.2} />
           </span>
 
-          <span className="zedpera-language-code flex h-10 min-w-14 shrink-0 items-center justify-center rounded-xl px-3 text-sm font-black">
+          <span className="zedpera-language-code flex h-11 min-w-14 shrink-0 items-center justify-center rounded-xl px-3 text-sm font-black">
             {getLanguageShortLabel(language)}
           </span>
 
-          <span className="min-w-0">
-            <span className="zedpera-language-label block truncate text-[11px] font-black uppercase tracking-[0.18em]">
+          <span className="min-w-0 leading-tight">
+            <span className="zedpera-language-label block truncate text-[10px] font-black uppercase tracking-[0.2em]">
               Jazyk stránky
             </span>
             <span className="zedpera-language-name block truncate text-base font-black">
@@ -952,7 +950,7 @@ function DropdownLanguageMenu({
         <span className="zedpera-language-chevron flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
           <ChevronDown
             size={22}
-            strokeWidth={3}
+            strokeWidth={3.2}
             className={`transition ${open ? 'rotate-180' : ''}`}
           />
         </span>
@@ -960,7 +958,7 @@ function DropdownLanguageMenu({
 
       {open && (
         <div
-          className="zedpera-language-dropdown absolute right-0 top-[calc(100%+0.7rem)] z-[99999] max-h-[430px] w-full min-w-[360px] overflow-y-auto rounded-[1.35rem] border-2 p-2"
+          className="zedpera-language-dropdown absolute right-0 top-[calc(100%+0.7rem)] z-[99999] max-h-[460px] w-full min-w-[330px] overflow-y-auto rounded-[1.35rem] border-2 p-2"
           role="listbox"
         >
           {languages.map((item) => {
@@ -972,7 +970,7 @@ function DropdownLanguageMenu({
                 key={code}
                 type="button"
                 onClick={() => handleSelect(code)}
-                className={`zedpera-language-option flex min-h-[62px] w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left transition ${
+                className={`zedpera-language-option flex min-h-[64px] w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left transition ${
                   active ? 'zedpera-language-option-active' : 'zedpera-language-option-inactive'
                 }`}
                 role="option"
@@ -980,7 +978,7 @@ function DropdownLanguageMenu({
               >
                 <span className="flex min-w-0 items-center gap-3">
                   <span
-                    className={`zedpera-language-option-code flex h-10 w-14 shrink-0 items-center justify-center rounded-xl text-sm font-black ${
+                    className={`zedpera-language-option-code flex h-11 w-14 shrink-0 items-center justify-center rounded-xl text-sm font-black ${
                       active ? 'is-active' : ''
                     }`}
                   >
@@ -997,11 +995,13 @@ function DropdownLanguageMenu({
                   </span>
                 </span>
 
-                {active ? (
-                  <CheckCircle2 size={23} className="shrink-0" />
-                ) : (
-                  <ArrowRight size={20} className="shrink-0" />
-                )}
+                <span className="zedpera-language-option-status flex h-9 w-9 shrink-0 items-center justify-center rounded-xl">
+                  {active ? (
+                    <CheckCircle2 size={22} strokeWidth={3.2} />
+                  ) : (
+                    <ArrowRight size={19} strokeWidth={3.2} />
+                  )}
+                </span>
               </button>
             );
           })}
@@ -1635,6 +1635,817 @@ export default function LandingPage() {
           -webkit-text-fill-color: #4c1d95 !important;
         }
 
+
+        /* =====================================================
+           FINAL VISIBILITY + TEMPLATE ALIGNMENT OVERRIDES
+           - opravuje biele/neviditeľné znaky
+           - zvýrazňuje jazykové menu
+           - zobrazuje logo ikonu
+           - robí všetky karty a ikonky čitateľné podľa tmavej šablóny
+        ===================================================== */
+
+        .zedpera-public-page {
+          --zedpera-bg: #05040a;
+          --zedpera-panel: rgba(15, 14, 34, 0.96);
+          --zedpera-panel-strong: rgba(18, 17, 43, 0.98);
+          --zedpera-border: rgba(196, 181, 253, 0.24);
+          --zedpera-text: #ffffff;
+          --zedpera-muted: #dbeafe;
+          --zedpera-soft: #c4b5fd;
+          --zedpera-violet: #8b5cf6;
+          --zedpera-blue: #3b82f6;
+          --zedpera-green: #34d399;
+        }
+
+        .zedpera-public-page .mx-auto.max-w-7xl {
+          max-width: 1180px !important;
+        }
+
+        .zedpera-public-page section {
+          scroll-margin-top: 110px;
+        }
+
+        .zedpera-public-page .zedpera-brand-icon {
+          display: flex !important;
+          background: linear-gradient(135deg, #ffffff 0%, #ddd6fe 48%, #8b5cf6 100%) !important;
+          color: #111827 !important;
+          -webkit-text-fill-color: #111827 !important;
+          border: 2px solid rgba(255, 255, 255, 0.92) !important;
+          box-shadow:
+            0 0 0 5px rgba(139, 92, 246, 0.18),
+            0 18px 42px rgba(124, 58, 237, 0.36) !important;
+        }
+
+        .zedpera-public-page .zedpera-brand-icon svg {
+          stroke: #111827 !important;
+          color: #111827 !important;
+          opacity: 1 !important;
+          visibility: visible !important;
+          stroke-width: 3 !important;
+        }
+
+        .zedpera-public-page svg {
+          opacity: 1 !important;
+          visibility: visible !important;
+          stroke-width: 2.8 !important;
+          filter: none !important;
+        }
+
+        .zedpera-public-page :where(.zedpera-card, .zedpera-glass, .zedpera-plan-card, .zedpera-feature-card, .zedpera-about-card, .zedpera-review-card, .zedpera-comparison-card, .zedpera-founder-visual, .zedpera-founder-card) {
+          background:
+            linear-gradient(180deg, rgba(18, 17, 43, 0.98), rgba(8, 7, 21, 0.98)) !important;
+          border: 1px solid rgba(196, 181, 253, 0.22) !important;
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.08) inset,
+            0 28px 90px rgba(0, 0, 0, 0.46) !important;
+        }
+
+        .zedpera-public-page :where(.zedpera-card, .zedpera-glass, .zedpera-plan-card, .zedpera-feature-card, .zedpera-about-card, .zedpera-review-card, .zedpera-comparison-card, .zedpera-founder-visual, .zedpera-founder-card) :where(h1, h2, h3, h4, h5, h6, strong, b) {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page :where(.zedpera-card, .zedpera-glass, .zedpera-plan-card, .zedpera-feature-card, .zedpera-about-card, .zedpera-review-card, .zedpera-comparison-card, .zedpera-founder-visual, .zedpera-founder-card) :where(p, li, span, div, small) {
+          color: #eaf2ff !important;
+          -webkit-text-fill-color: #eaf2ff !important;
+          font-weight: 850 !important;
+        }
+
+        .zedpera-public-page :where(.zedpera-card, .zedpera-feature-card, .zedpera-about-card, .zedpera-review-card, .zedpera-comparison-card, .zedpera-mini-dashboard-card, .zedpera-plan-card, .zedpera-founder-visual, .zedpera-founder-card) {
+          transition:
+            transform 0.22s ease,
+            border-color 0.22s ease,
+            box-shadow 0.22s ease,
+            background 0.22s ease !important;
+        }
+
+        .zedpera-public-page :where(.zedpera-card, .zedpera-feature-card, .zedpera-about-card, .zedpera-review-card, .zedpera-comparison-card, .zedpera-mini-dashboard-card, .zedpera-plan-card, .zedpera-founder-visual, .zedpera-founder-card):hover {
+          transform: translateY(-5px) !important;
+          border-color: rgba(196, 181, 253, 0.72) !important;
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.12) inset,
+            0 36px 110px rgba(124, 58, 237, 0.26) !important;
+        }
+
+        .zedpera-public-page .zedpera-feature-card > div:first-child,
+        .zedpera-public-page .zedpera-about-card > div:first-child {
+          background: linear-gradient(135deg, rgba(124, 58, 237, 0.90), rgba(37, 99, 235, 0.70)) !important;
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          border: 1px solid rgba(255, 255, 255, 0.20) !important;
+          box-shadow: 0 18px 44px rgba(124, 58, 237, 0.32) !important;
+        }
+
+        .zedpera-public-page .zedpera-feature-card > div:first-child svg,
+        .zedpera-public-page .zedpera-about-card > div:first-child svg {
+          stroke: #ffffff !important;
+          color: #ffffff !important;
+        }
+
+        .zedpera-language-menu,
+        .zedpera-language-menu * {
+          opacity: 1 !important;
+          visibility: visible !important;
+          filter: none !important;
+          text-shadow: none !important;
+        }
+
+        .zedpera-language-trigger {
+          min-height: 72px !important;
+          background:
+            linear-gradient(135deg, rgba(124, 58, 237, 0.72), rgba(37, 99, 235, 0.52)) !important;
+          border: 2px solid rgba(255, 255, 255, 0.82) !important;
+          box-shadow:
+            0 0 0 1px rgba(255, 255, 255, 0.18) inset,
+            0 24px 80px rgba(0, 0, 0, 0.55),
+            0 0 70px rgba(139, 92, 246, 0.52) !important;
+        }
+
+        .zedpera-language-trigger:hover,
+        .zedpera-language-trigger:focus-visible {
+          transform: translateY(-2px);
+          border-color: #ffffff !important;
+          box-shadow:
+            0 0 0 2px rgba(255, 255, 255, 0.22) inset,
+            0 28px 90px rgba(0, 0, 0, 0.62),
+            0 0 90px rgba(168, 85, 247, 0.78) !important;
+        }
+
+        .zedpera-language-trigger,
+        .zedpera-language-trigger * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-language-globe {
+          background:
+            radial-gradient(circle at 30% 20%, #ffffff 0%, #f5f3ff 22%, #c4b5fd 42%, #8b5cf6 68%, #2563eb 100%) !important;
+          border: 3px solid #ffffff !important;
+          box-shadow:
+            0 0 0 5px rgba(255, 255, 255, 0.14),
+            0 16px 40px rgba(124, 58, 237, 0.58) !important;
+        }
+
+        .zedpera-language-globe,
+        .zedpera-language-globe * {
+          color: #111827 !important;
+          -webkit-text-fill-color: #111827 !important;
+          stroke: #111827 !important;
+        }
+
+        .zedpera-language-code {
+          background: #ffffff !important;
+          color: #4c1d95 !important;
+          -webkit-text-fill-color: #4c1d95 !important;
+          border: 2px solid rgba(221, 214, 254, 0.98) !important;
+          box-shadow: 0 12px 30px rgba(0, 0, 0, 0.30) !important;
+        }
+
+        .zedpera-language-label {
+          color: #ddd6fe !important;
+          -webkit-text-fill-color: #ddd6fe !important;
+          letter-spacing: 0.20em !important;
+        }
+
+        .zedpera-language-name {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-size: 1.12rem !important;
+        }
+
+        .zedpera-language-chevron {
+          background: rgba(255, 255, 255, 0.16) !important;
+          border: 1px solid rgba(255, 255, 255, 0.24) !important;
+        }
+
+        .zedpera-language-chevron svg {
+          stroke: #ffffff !important;
+          color: #ffffff !important;
+        }
+
+        .zedpera-language-dropdown {
+          background:
+            linear-gradient(180deg, rgba(13, 12, 28, 0.99), rgba(5, 4, 10, 0.99)) !important;
+          border: 2px solid rgba(221, 214, 254, 0.78) !important;
+          box-shadow:
+            0 36px 100px rgba(0, 0, 0, 0.76),
+            0 0 70px rgba(124, 58, 237, 0.46) !important;
+          backdrop-filter: blur(22px) !important;
+        }
+
+        .zedpera-language-option {
+          border: 1px solid rgba(255, 255, 255, 0.10) !important;
+        }
+
+        .zedpera-language-option-inactive {
+          background: rgba(255, 255, 255, 0.07) !important;
+        }
+
+        .zedpera-language-option-inactive:hover {
+          background: rgba(124, 58, 237, 0.24) !important;
+          border-color: rgba(221, 214, 254, 0.62) !important;
+        }
+
+        .zedpera-language-option-active {
+          background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%) !important;
+          border-color: rgba(255, 255, 255, 0.42) !important;
+          box-shadow: 0 18px 46px rgba(37, 99, 235, 0.46) !important;
+        }
+
+        .zedpera-language-option,
+        .zedpera-language-option * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-language-option-code {
+          background: #ffffff !important;
+          color: #111827 !important;
+          -webkit-text-fill-color: #111827 !important;
+          border: 2px solid rgba(255, 255, 255, 0.92) !important;
+          box-shadow: 0 10px 26px rgba(0, 0, 0, 0.32) !important;
+        }
+
+        .zedpera-language-option-code.is-active {
+          background: #ffffff !important;
+          color: #4c1d95 !important;
+          -webkit-text-fill-color: #4c1d95 !important;
+        }
+
+        .zedpera-language-option-name {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-size: 1.05rem !important;
+        }
+
+        .zedpera-language-option-hint {
+          color: #dbeafe !important;
+          -webkit-text-fill-color: #dbeafe !important;
+        }
+
+        .zedpera-founder-section {
+          position: relative;
+        }
+
+        .zedpera-founder-section::before {
+          content: "";
+          position: absolute;
+          inset: 40px 0 auto 0;
+          height: 1px;
+          background: linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.70), transparent);
+          pointer-events: none;
+        }
+
+        .zedpera-founder-step {
+          background: rgba(255, 255, 255, 0.045) !important;
+          border: 1px solid rgba(255, 255, 255, 0.12) !important;
+          box-shadow: 0 18px 50px rgba(0, 0, 0, 0.34) !important;
+        }
+
+        .zedpera-founder-step-number {
+          background: linear-gradient(135deg, #7c3aed, #2563eb) !important;
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          box-shadow: 0 14px 34px rgba(124, 58, 237, 0.45) !important;
+        }
+
+        .zedpera-founder-portrait-card {
+          background:
+            radial-gradient(circle at 38% 18%, rgba(168, 85, 247, 0.45), transparent 32%),
+            linear-gradient(180deg, rgba(21, 19, 50, 0.99), rgba(8, 7, 21, 0.99)) !important;
+          border: 1px solid rgba(221, 214, 254, 0.34) !important;
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.12) inset,
+            0 32px 100px rgba(124, 58, 237, 0.30) !important;
+        }
+
+        .zedpera-founder-avatar {
+          background:
+            radial-gradient(circle at 35% 20%, #ffffff 0%, #ddd6fe 22%, #8b5cf6 52%, #111827 100%) !important;
+          border: 2px solid rgba(255, 255, 255, 0.86) !important;
+          box-shadow:
+            0 0 0 6px rgba(124, 58, 237, 0.22),
+            0 26px 70px rgba(0, 0, 0, 0.50) !important;
+        }
+
+        .zedpera-founder-avatar,
+        .zedpera-founder-avatar * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-founder-avatar-initial {
+          background: rgba(255, 255, 255, 0.94) !important;
+          color: #4c1d95 !important;
+          -webkit-text-fill-color: #4c1d95 !important;
+          border: 1px solid rgba(255, 255, 255, 0.90) !important;
+        }
+
+        .zedpera-founder-badge {
+          background: linear-gradient(135deg, rgba(124, 58, 237, 0.32), rgba(37, 99, 235, 0.22)) !important;
+          border: 1px solid rgba(221, 214, 254, 0.38) !important;
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+        }
+
+        .zedpera-founder-badge svg {
+          stroke: #ffffff !important;
+        }
+
+        @media (max-width: 768px) {
+          .zedpera-language-dropdown {
+            left: 0 !important;
+            right: auto !important;
+            min-width: 100% !important;
+          }
+        }
+
+
+        /* =====================================================
+           TOPBAR FINAL - moderný vrch, viditeľné ikony jazyka
+        ===================================================== */
+        .zedpera-topbar {
+          background:
+            linear-gradient(180deg, rgba(5, 4, 10, 0.98), rgba(5, 4, 10, 0.86)) !important;
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.08) inset,
+            0 18px 60px rgba(0, 0, 0, 0.38) !important;
+        }
+
+        .zedpera-topbar-logo,
+        .zedpera-topbar-logo * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-public-page .zedpera-brand-icon {
+          display: flex !important;
+          background:
+            radial-gradient(circle at 30% 18%, #ffffff 0%, #ddd6fe 28%, #8b5cf6 58%, #2563eb 100%) !important;
+          color: #111827 !important;
+          -webkit-text-fill-color: #111827 !important;
+          border: 2px solid rgba(255, 255, 255, 0.92) !important;
+          box-shadow:
+            0 0 0 4px rgba(124, 58, 237, 0.18),
+            0 16px 38px rgba(124, 58, 237, 0.48) !important;
+        }
+
+        .zedpera-public-page .zedpera-brand-icon svg {
+          color: #111827 !important;
+          stroke: #111827 !important;
+          -webkit-text-fill-color: #111827 !important;
+        }
+
+        .zedpera-desktop-nav {
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.08) inset,
+            0 18px 50px rgba(0, 0, 0, 0.22) !important;
+        }
+
+        .zedpera-nav-link {
+          color: #eef2ff !important;
+          -webkit-text-fill-color: #eef2ff !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-nav-link:hover,
+        .zedpera-nav-link:focus-visible {
+          background: linear-gradient(135deg, rgba(124, 58, 237, 0.28), rgba(37, 99, 235, 0.18)) !important;
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          outline: none !important;
+          box-shadow: 0 0 0 1px rgba(221, 214, 254, 0.25) inset !important;
+        }
+
+        .zedpera-topbar-login,
+        .zedpera-topbar-program,
+        .zedpera-mobile-menu-btn {
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.10) inset,
+            0 18px 45px rgba(0, 0, 0, 0.30) !important;
+        }
+
+        .zedpera-topbar-login,
+        .zedpera-topbar-login * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+        }
+
+        .zedpera-topbar-program,
+        .zedpera-topbar-program * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+        }
+
+        .zedpera-language-menu {
+          z-index: 100000 !important;
+          position: relative !important;
+        }
+
+        .zedpera-language-trigger {
+          background:
+            linear-gradient(135deg, rgba(124, 58, 237, 0.46), rgba(37, 99, 235, 0.32)) !important;
+          border-color: rgba(221, 214, 254, 0.96) !important;
+          box-shadow:
+            0 0 0 1px rgba(255, 255, 255, 0.14) inset,
+            0 22px 65px rgba(0, 0, 0, 0.42),
+            0 0 46px rgba(124, 58, 237, 0.50) !important;
+        }
+
+        .zedpera-language-trigger:hover,
+        .zedpera-language-trigger:focus-visible {
+          transform: translateY(-1px);
+          background:
+            linear-gradient(135deg, rgba(147, 51, 234, 0.70), rgba(37, 99, 235, 0.46)) !important;
+          border-color: #ffffff !important;
+          outline: none !important;
+          box-shadow:
+            0 0 0 2px rgba(255, 255, 255, 0.22) inset,
+            0 26px 78px rgba(0, 0, 0, 0.52),
+            0 0 72px rgba(168, 85, 247, 0.76) !important;
+        }
+
+        .zedpera-language-trigger,
+        .zedpera-language-trigger * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-weight: 950 !important;
+          opacity: 1 !important;
+          visibility: visible !important;
+        }
+
+        .zedpera-language-globe {
+          background:
+            radial-gradient(circle at 30% 20%, #ffffff 0%, #f5f3ff 25%, #c4b5fd 42%, #8b5cf6 64%, #2563eb 100%) !important;
+          color: #111827 !important;
+          -webkit-text-fill-color: #111827 !important;
+          border: 2px solid rgba(255, 255, 255, 0.96) !important;
+          box-shadow:
+            0 0 0 4px rgba(124, 58, 237, 0.22),
+            0 16px 40px rgba(124, 58, 237, 0.56) !important;
+        }
+
+        .zedpera-language-globe svg {
+          color: #111827 !important;
+          stroke: #111827 !important;
+          -webkit-text-fill-color: #111827 !important;
+          opacity: 1 !important;
+          filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.78)) !important;
+        }
+
+        .zedpera-language-code {
+          background: #ffffff !important;
+          color: #4c1d95 !important;
+          -webkit-text-fill-color: #4c1d95 !important;
+          border: 2px solid rgba(221, 214, 254, 0.96) !important;
+          box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28) !important;
+        }
+
+        .zedpera-language-label {
+          color: #ddd6fe !important;
+          -webkit-text-fill-color: #ddd6fe !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-language-name,
+        .zedpera-language-chevron,
+        .zedpera-language-chevron svg {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          stroke: #ffffff !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-language-chevron {
+          background: rgba(255, 255, 255, 0.12) !important;
+          border: 1px solid rgba(255, 255, 255, 0.18) !important;
+        }
+
+        .zedpera-language-dropdown {
+          background: rgba(8, 7, 21, 0.985) !important;
+          border-color: rgba(221, 214, 254, 0.82) !important;
+          box-shadow:
+            0 34px 100px rgba(0, 0, 0, 0.76),
+            0 0 65px rgba(124, 58, 237, 0.48) !important;
+          backdrop-filter: blur(22px) !important;
+        }
+
+        .zedpera-language-option {
+          border: 1px solid transparent !important;
+        }
+
+        .zedpera-language-option,
+        .zedpera-language-option * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          stroke: #ffffff !important;
+          font-weight: 950 !important;
+          opacity: 1 !important;
+        }
+
+        .zedpera-language-option-inactive {
+          background: rgba(255, 255, 255, 0.06) !important;
+        }
+
+        .zedpera-language-option-inactive:hover,
+        .zedpera-language-option-inactive:focus-visible {
+          background: rgba(124, 58, 237, 0.24) !important;
+          border-color: rgba(196, 181, 253, 0.55) !important;
+          outline: none !important;
+        }
+
+        .zedpera-language-option-active {
+          background: linear-gradient(135deg, #7c3aed, #2563eb) !important;
+          border-color: rgba(255, 255, 255, 0.34) !important;
+          box-shadow: 0 16px 42px rgba(37, 99, 235, 0.42) !important;
+        }
+
+        .zedpera-language-option-code {
+          background: #ffffff !important;
+          color: #111827 !important;
+          -webkit-text-fill-color: #111827 !important;
+          stroke: #111827 !important;
+          border: 1px solid rgba(255, 255, 255, 0.25) !important;
+          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22) !important;
+        }
+
+        .zedpera-language-option-code.is-active {
+          color: #4c1d95 !important;
+          -webkit-text-fill-color: #4c1d95 !important;
+        }
+
+        .zedpera-language-option-name {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+        }
+
+        .zedpera-language-option-hint {
+          color: #dbeafe !important;
+          -webkit-text-fill-color: #dbeafe !important;
+        }
+
+        .zedpera-language-option-status {
+          background: rgba(255, 255, 255, 0.10) !important;
+          border: 1px solid rgba(255, 255, 255, 0.14) !important;
+        }
+
+        .zedpera-language-option-status svg {
+          stroke: #ffffff !important;
+        }
+
+        @media (max-width: 1279px) {
+          .zedpera-topbar {
+            padding-bottom: 0.85rem !important;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .zedpera-language-dropdown {
+            left: 0 !important;
+            right: auto !important;
+            min-width: 100% !important;
+          }
+        }
+
+
+        /* =====================================================
+           TOPBAR FINAL – presne podľa tmavej šablóny
+           - výrazné logo
+           - viditeľný prepínač jazykov
+           - čitateľné ikony a texty
+           - všetky prvky klikateľné
+        ===================================================== */
+
+        .zedpera-template-topbar {
+          background:
+            linear-gradient(180deg, rgba(5, 4, 10, 0.98), rgba(5, 4, 10, 0.92)) !important;
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.08) inset,
+            0 18px 60px rgba(0, 0, 0, 0.42) !important;
+        }
+
+        .zedpera-topbar-logo,
+        .zedpera-topbar-logo * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          opacity: 1 !important;
+          visibility: visible !important;
+        }
+
+        .zedpera-topbar-brand-icon {
+          display: flex !important;
+          background:
+            radial-gradient(circle at 30% 18%, #ffffff 0%, #ddd6fe 26%, #8b5cf6 58%, #2563eb 100%) !important;
+          border: 2px solid rgba(255, 255, 255, 0.88) !important;
+          color: #111827 !important;
+          -webkit-text-fill-color: #111827 !important;
+          box-shadow:
+            0 0 0 5px rgba(124, 58, 237, 0.16),
+            0 16px 42px rgba(124, 58, 237, 0.42) !important;
+        }
+
+        .zedpera-topbar-brand-icon svg {
+          stroke: #111827 !important;
+          color: #111827 !important;
+          opacity: 1 !important;
+          filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.7)) !important;
+        }
+
+        .zedpera-desktop-nav .zedpera-nav-link {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          border: 1px solid transparent !important;
+          opacity: 1 !important;
+        }
+
+        .zedpera-desktop-nav .zedpera-nav-link:hover,
+        .zedpera-desktop-nav .zedpera-nav-link:focus-visible {
+          background: rgba(255, 255, 255, 0.10) !important;
+          border-color: rgba(196, 181, 253, 0.35) !important;
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          outline: none !important;
+        }
+
+        .zedpera-language-menu {
+          z-index: 100000 !important;
+        }
+
+        .zedpera-language-trigger {
+          background:
+            linear-gradient(135deg, rgba(124, 58, 237, 0.50), rgba(37, 99, 235, 0.34)) !important;
+          border-color: rgba(221, 214, 254, 0.95) !important;
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          box-shadow:
+            0 0 0 1px rgba(255, 255, 255, 0.18) inset,
+            0 20px 60px rgba(0, 0, 0, 0.44),
+            0 0 54px rgba(124, 58, 237, 0.50) !important;
+        }
+
+        .zedpera-language-trigger:hover,
+        .zedpera-language-trigger:focus-visible {
+          transform: translateY(-1px);
+          border-color: #ffffff !important;
+          background:
+            linear-gradient(135deg, rgba(147, 51, 234, 0.68), rgba(37, 99, 235, 0.46)) !important;
+          outline: none !important;
+          box-shadow:
+            0 0 0 2px rgba(255, 255, 255, 0.22) inset,
+            0 24px 70px rgba(0, 0, 0, 0.52),
+            0 0 72px rgba(168, 85, 247, 0.78) !important;
+        }
+
+        .zedpera-language-trigger,
+        .zedpera-language-trigger * {
+          opacity: 1 !important;
+          visibility: visible !important;
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-language-globe {
+          background:
+            radial-gradient(circle at 30% 18%, #ffffff 0%, #ddd6fe 28%, #8b5cf6 58%, #2563eb 100%) !important;
+          border: 2px solid rgba(255, 255, 255, 0.95) !important;
+          box-shadow:
+            0 0 0 5px rgba(124, 58, 237, 0.18),
+            0 14px 38px rgba(124, 58, 237, 0.50) !important;
+        }
+
+        .zedpera-language-globe svg {
+          stroke: #111827 !important;
+          color: #111827 !important;
+          -webkit-text-fill-color: #111827 !important;
+          opacity: 1 !important;
+          filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.75)) !important;
+        }
+
+        .zedpera-language-code {
+          background: #ffffff !important;
+          color: #4c1d95 !important;
+          -webkit-text-fill-color: #4c1d95 !important;
+          border: 2px solid rgba(221, 214, 254, 0.96) !important;
+          box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25) !important;
+        }
+
+        .zedpera-language-label {
+          color: #ddd6fe !important;
+          -webkit-text-fill-color: #ddd6fe !important;
+          letter-spacing: 0.18em !important;
+        }
+
+        .zedpera-language-name {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-size: 1.05rem !important;
+        }
+
+        .zedpera-language-chevron {
+          background: rgba(255, 255, 255, 0.12) !important;
+          border: 1px solid rgba(255, 255, 255, 0.18) !important;
+        }
+
+        .zedpera-language-chevron svg {
+          stroke: #ffffff !important;
+          color: #ffffff !important;
+          opacity: 1 !important;
+        }
+
+        .zedpera-language-dropdown {
+          background: rgba(8, 7, 21, 0.99) !important;
+          border-color: rgba(221, 214, 254, 0.82) !important;
+          box-shadow:
+            0 34px 100px rgba(0, 0, 0, 0.74),
+            0 0 70px rgba(124, 58, 237, 0.48) !important;
+          backdrop-filter: blur(22px) !important;
+        }
+
+        .zedpera-language-option {
+          border: 1px solid transparent !important;
+          cursor: pointer !important;
+        }
+
+        .zedpera-language-option,
+        .zedpera-language-option * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          opacity: 1 !important;
+          visibility: visible !important;
+          font-weight: 950 !important;
+        }
+
+        .zedpera-language-option-inactive {
+          background: rgba(255, 255, 255, 0.055) !important;
+        }
+
+        .zedpera-language-option-inactive:hover {
+          background: rgba(124, 58, 237, 0.22) !important;
+          border-color: rgba(196, 181, 253, 0.52) !important;
+          transform: translateX(2px);
+        }
+
+        .zedpera-language-option-active {
+          background: linear-gradient(135deg, #7c3aed, #2563eb) !important;
+          border-color: rgba(255, 255, 255, 0.32) !important;
+          box-shadow: 0 16px 42px rgba(37, 99, 235, 0.38) !important;
+        }
+
+        .zedpera-language-option-code {
+          background: #ffffff !important;
+          color: #111827 !important;
+          -webkit-text-fill-color: #111827 !important;
+          border: 1px solid rgba(255, 255, 255, 0.28) !important;
+        }
+
+        .zedpera-language-option-code.is-active {
+          color: #4c1d95 !important;
+          -webkit-text-fill-color: #4c1d95 !important;
+        }
+
+        .zedpera-language-option-name {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          font-size: 1rem !important;
+        }
+
+        .zedpera-language-option-hint {
+          color: #dbeafe !important;
+          -webkit-text-fill-color: #dbeafe !important;
+          font-weight: 850 !important;
+        }
+
+        .zedpera-topbar-login,
+        .zedpera-topbar-program,
+        .zedpera-mobile-menu-btn {
+          opacity: 1 !important;
+          visibility: visible !important;
+        }
+
+        .zedpera-topbar-login,
+        .zedpera-topbar-login * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+        }
+
+        .zedpera-topbar-program,
+        .zedpera-topbar-program * {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+        }
+
+        @media (min-width: 1280px) {
+          .zedpera-language-menu:not(.zedpera-language-menu .zedpera-language-menu) {
+            min-width: 330px !important;
+          }
+        }
+
         @media (max-width: 768px) {
           .zedpera-language-dropdown {
             left: 0 !important;
@@ -1644,21 +2455,32 @@ export default function LandingPage() {
         }
       `}</style>
 
-      <header className="sticky top-0 z-[9999] border-b border-white/10 bg-[#05040a]/82 px-5 py-4 backdrop-blur-2xl">
+      <header className="zedpera-topbar zedpera-template-topbar sticky top-0 z-[9999] border-b border-violet-300/20 px-4 py-3 backdrop-blur-2xl sm:px-5">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
-          <Link href="#intro" className="zedpera-wordmark flex min-w-0 items-center gap-3">
-            <span className="zedpera-brand-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-950 shadow-xl">
-              <Sparkles size={20} />
+          <Link
+            href="#intro"
+            onClick={(event) => {
+              event.preventDefault();
+              scrollToSection('#intro');
+            }}
+            className="zedpera-wordmark zedpera-topbar-logo flex min-w-0 items-center gap-3 rounded-2xl px-2 py-1.5 transition hover:bg-white/[0.08]"
+            aria-label="Zedpera - návrat na úvod"
+          >
+            <span className="zedpera-brand-icon zedpera-topbar-brand-icon flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl shadow-xl">
+              <Sparkles size={23} strokeWidth={3} />
             </span>
-            <span className="min-w-0">
-              <span className="block text-2xl font-black tracking-tight">ZEDPERA</span>
-              <span className="block text-xs font-black uppercase tracking-[0.22em] text-violet-200">
+
+            <span className="min-w-0 leading-tight">
+              <span className="block text-2xl font-black tracking-[0.04em] text-white sm:text-3xl">
+                ZEDPERA
+              </span>
+              <span className="block text-[11px] font-black uppercase tracking-[0.28em] text-violet-200 sm:text-xs">
                 {content.brandSubtitle}
               </span>
             </span>
           </Link>
 
-          <nav className="hidden items-center gap-2 lg:flex">
+          <nav className="zedpera-desktop-nav hidden items-center gap-1 rounded-[1.35rem] border border-white/10 bg-white/[0.055] p-1.5 shadow-2xl shadow-black/20 lg:flex">
             {[
               [content.navIntro, '#intro'],
               [content.navAbout, '#about'],
@@ -1667,48 +2489,83 @@ export default function LandingPage() {
               [content.navPricing, '#pricing'],
               [content.navFaq, '#faq'],
             ].map(([label, href]) => (
-              <a
+              <button
                 key={href}
-                href={href}
-                className="rounded-2xl px-4 py-3 text-sm font-black text-slate-200 transition hover:bg-white/10 hover:text-white"
+                type="button"
+                onClick={() => scrollToSection(href)}
+                className="zedpera-nav-link rounded-2xl px-4 py-3 text-sm font-black transition"
               >
                 {label}
-              </a>
+              </button>
             ))}
           </nav>
 
           <div className="hidden items-center gap-3 xl:flex">
-            <DropdownLanguageMenu language={language} onChange={handleLanguageChange} />
-            <Link href="/login" className="zedpera-secondary-btn rounded-2xl px-5 py-3 text-sm font-black">
+            <DropdownLanguageMenu
+              language={language}
+              onChange={handleLanguageChange}
+            />
+
+            <Link
+              href="/login"
+              className="zedpera-topbar-login zedpera-secondary-btn inline-flex min-h-[62px] items-center justify-center rounded-[1.25rem] px-6 py-3 text-sm font-black transition"
+            >
               {content.login}
             </Link>
-            <a href="#pricing" className="zedpera-primary-btn rounded-2xl px-5 py-3 text-sm font-black">
+
+            <button
+              type="button"
+              onClick={() => scrollToSection('#pricing')}
+              className="zedpera-topbar-program zedpera-primary-btn inline-flex min-h-[62px] items-center justify-center rounded-[1.25rem] px-7 py-3 text-sm font-black transition"
+            >
               {content.chooseProgram}
-            </a>
+            </button>
           </div>
 
           <button
             type="button"
             onClick={() => setMobileMenuOpen(true)}
-            className="zedpera-secondary-btn inline-flex h-12 w-12 items-center justify-center rounded-2xl xl:hidden"
+            className="zedpera-mobile-menu-btn zedpera-secondary-btn inline-flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-2xl xl:hidden"
             aria-label={content.mobileOpenMenu}
           >
-            <Menu size={22} />
+            <Menu size={24} strokeWidth={3} />
           </button>
         </div>
 
+        <div className="mx-auto mt-3 flex max-w-7xl items-center justify-center gap-2 xl:hidden">
+          <div className="w-full max-w-md">
+            <DropdownLanguageMenu
+              language={language}
+              onChange={handleLanguageChange}
+              compact
+            />
+          </div>
+        </div>
+
         {mobileMenuOpen && (
-          <div className="fixed inset-0 z-[100000] bg-black/70 p-4 backdrop-blur-xl xl:hidden">
-            <div className="mx-auto max-w-md rounded-[2rem] border border-white/10 bg-[#0b0a18] p-5 shadow-2xl">
-              <div className="mb-5 flex items-center justify-between">
-                <div className="text-xl font-black text-white">ZEDPERA</div>
+          <div className="fixed inset-0 z-[100000] bg-black/85 p-4 backdrop-blur-xl xl:hidden">
+            <div className="mx-auto max-w-md rounded-[2rem] border border-violet-300/40 bg-[#0b0a18] p-5 shadow-2xl shadow-violet-900/50">
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="zedpera-brand-icon zedpera-topbar-brand-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-xl">
+                    <Sparkles size={21} strokeWidth={3} />
+                  </span>
+
+                  <div className="min-w-0">
+                    <div className="text-xl font-black text-white">ZEDPERA</div>
+                    <div className="truncate text-xs font-black uppercase tracking-[0.2em] text-violet-200">
+                      {content.brandSubtitle}
+                    </div>
+                  </div>
+                </div>
+
                 <button
                   type="button"
                   onClick={closeMobileMenu}
-                  className="rounded-2xl bg-white/10 p-3 text-white"
+                  className="rounded-2xl border border-white/10 bg-white/10 p-3 text-white transition hover:bg-white/20"
                   aria-label={content.mobileCloseMenu}
                 >
-                  <X size={22} />
+                  <X size={22} strokeWidth={3} />
                 </button>
               </div>
 
@@ -1729,15 +2586,19 @@ export default function LandingPage() {
                   [content.navPricing, '#pricing'],
                   [content.navFaq, '#faq'],
                 ].map(([label, href]) => (
-                  <a
+                  <button
                     key={href}
-                    href={href}
-                    onClick={closeMobileMenu}
-                    className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-4 text-sm font-black text-white"
+                    type="button"
+                    onClick={() => {
+                      closeMobileMenu();
+                      setTimeout(() => scrollToSection(href), 80);
+                    }}
+                    className="rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-4 text-left text-sm font-black text-white transition hover:bg-white/[0.14]"
                   >
                     {label}
-                  </a>
+                  </button>
                 ))}
+
                 <Link
                   href="/login"
                   onClick={closeMobileMenu}
@@ -1745,13 +2606,17 @@ export default function LandingPage() {
                 >
                   {content.login}
                 </Link>
-                <a
-                  href="#pricing"
-                  onClick={closeMobileMenu}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeMobileMenu();
+                    setTimeout(() => scrollToSection('#pricing'), 80);
+                  }}
                   className="zedpera-primary-btn rounded-2xl px-4 py-4 text-center text-sm font-black"
                 >
                   {content.chooseProgram}
-                </a>
+                </button>
               </div>
             </div>
           </div>
@@ -2066,9 +2931,85 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section id="founder" className="px-5 py-20 lg:px-8">
+      <section id="founder" className="zedpera-founder-section px-5 py-20 lg:px-8">
         <div className="mx-auto max-w-7xl">
-          <div className="grid items-stretch gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+          <div className="mx-auto mb-12 max-w-4xl text-center">
+            <div className="zedpera-pill mb-5 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-black">
+              <Sparkles size={18} />
+              Ako funguje Zedpera?
+            </div>
+            <h2 className="text-4xl font-black tracking-tight text-white md:text-6xl">
+              Od projektu až po obhajobu v jednom systéme
+            </h2>
+            <p className="mt-5 text-lg font-bold leading-9 text-slate-200">
+              Zedpera ťa prevedie celým procesom práce. Najskôr si vytvoríš profil,
+              následne pracuješ s AI vedúcim a na konci získaš podklady na obhajobu.
+            </p>
+          </div>
+
+          <div className="grid items-stretch gap-6 lg:grid-cols-[1fr_420px]">
+            <div className="grid gap-5 md:grid-cols-3 lg:grid-cols-1">
+              {[
+                {
+                  number: '01',
+                  title: 'Vytvoríš projekt',
+                  text: 'Zadáš tému, typ práce, odbor, cieľ, metodológiu a požiadavky školiteľa.',
+                  icon: FileCheck2,
+                },
+                {
+                  number: '02',
+                  title: 'AI vedúci ťa vedie',
+                  text: 'Kontroluje logiku, zdroje, citácie, štruktúru a upozorňuje na slabé miesta.',
+                  icon: Bot,
+                },
+                {
+                  number: '03',
+                  title: 'Dokončíš obhajobu',
+                  text: 'Pripravíš otázky, odpovede, argumentáciu a prezentáciu podľa posudkov.',
+                  icon: GraduationCap,
+                },
+              ].map((step) => {
+                const StepIcon = step.icon;
+
+                return (
+                  <article
+                    key={step.number}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => scrollToSection('#pricing')}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        scrollToSection('#pricing');
+                      }
+                    }}
+                    className="zedpera-founder-step zedpera-clickable rounded-[2rem] p-6 transition"
+                  >
+                    <div className="flex items-start gap-5">
+                      <span className="zedpera-founder-step-number flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-base font-black">
+                        {step.number}
+                      </span>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-3 flex items-center gap-3">
+                          <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-600/25 text-violet-100">
+                            <StepIcon size={22} />
+                          </span>
+                          <h3 className="text-2xl font-black text-white">
+                            {step.title}
+                          </h3>
+                        </div>
+
+                        <p className="text-sm font-bold leading-8 text-slate-200">
+                          {step.text}
+                        </p>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
             <article
               role="button"
               tabIndex={0}
@@ -2079,90 +3020,83 @@ export default function LandingPage() {
                   scrollToSection('#pricing');
                 }
               }}
-              className="zedpera-founder-visual zedpera-clickable relative overflow-hidden rounded-[2.2rem] border border-violet-400/40 bg-gradient-to-br from-violet-950 via-[#0b0a18] to-blue-950 p-8 shadow-2xl shadow-violet-950/40 transition"
+              className="zedpera-founder-portrait-card zedpera-founder-visual zedpera-clickable relative overflow-hidden rounded-[2.2rem] p-7 transition"
             >
-              <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-violet-500/30 blur-3xl" />
-              <div className="absolute -bottom-20 left-8 h-52 w-52 rounded-full bg-blue-500/20 blur-3xl" />
+              <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-violet-500/35 blur-3xl" />
+              <div className="absolute -bottom-20 left-6 h-56 w-56 rounded-full bg-blue-500/24 blur-3xl" />
 
-              <div className="relative z-10 flex h-full min-h-[360px] flex-col justify-between">
+              <div className="relative z-10 flex h-full min-h-[520px] flex-col justify-between">
                 <div>
-                  <div className="inline-flex items-center gap-2 rounded-full border border-violet-300/40 bg-violet-500/15 px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-violet-100">
+                  <div className="zedpera-founder-badge inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-black uppercase tracking-[0.18em]">
                     <Crown size={17} />
                     {content.founderBadge}
                   </div>
 
-                  <h2 className="mt-7 max-w-xl text-4xl font-black tracking-tight text-white md:text-6xl">
-                    Martina a 20 rokov skúseností v akademickej praxi
-                  </h2>
-                </div>
+                  <div className="mt-7 grid gap-5">
+                    <div className="zedpera-founder-avatar flex aspect-[4/5] min-h-[260px] items-center justify-center overflow-hidden rounded-[2rem]">
+                      <div className="text-center">
+                        <div className="zedpera-founder-avatar-initial mx-auto flex h-24 w-24 items-center justify-center rounded-full text-4xl font-black shadow-2xl">
+                          M
+                        </div>
+                        <div className="mt-5 text-xl font-black text-white">
+                          Martina
+                        </div>
+                        <div className="mt-2 text-sm font-black uppercase tracking-[0.18em] text-violet-100">
+                          Zakladateľka
+                        </div>
+                      </div>
+                    </div>
 
-                <div className="mt-8 grid gap-4 sm:grid-cols-[170px_1fr] sm:items-end">
-                  <div className="zedpera-founder-avatar flex aspect-[4/5] items-center justify-center overflow-hidden rounded-[2rem] border border-white/15 bg-gradient-to-br from-violet-500/40 to-blue-500/30 shadow-2xl shadow-black/30">
-                    <div className="flex h-24 w-24 items-center justify-center rounded-full bg-white text-4xl font-black text-violet-900 shadow-2xl">
-                      M
+                    <div className="rounded-[1.6rem] border border-white/12 bg-black/30 p-5 backdrop-blur-xl">
+                      <div className="text-xs font-black uppercase tracking-[0.16em] text-violet-100">
+                        O nej
+                      </div>
+                      <h3 className="mt-3 text-2xl font-black text-white">
+                        20 rokov skúseností v jednom systéme
+                      </h3>
+                      <p className="mt-4 text-sm font-bold leading-8 text-slate-200">
+                        Za Zedperou stoja reálne skúsenosti so študentmi,
+                        školiteľmi, posudkami, obhajobami a akademickým prostredím.
+                      </p>
                     </div>
                   </div>
-
-                  <div className="rounded-[1.6rem] border border-white/12 bg-black/25 p-5 backdrop-blur-xl">
-                    <div className="text-xs font-black uppercase tracking-[0.16em] text-violet-200">
-                      O nás
-                    </div>
-                    <p className="mt-3 text-base font-bold leading-8 text-slate-200">
-                      Za Zedperou stoja reálne skúsenosti so študentmi, školiteľmi,
-                      posudkami, obhajobami a akademickým prostredím. Preto systém
-                      nerieši iba text, ale celý proces práce.
-                    </p>
-                  </div>
                 </div>
+
+                <a
+                  href="#pricing"
+                  onClick={(event) => event.stopPropagation()}
+                  className="zedpera-primary-btn mt-7 inline-flex items-center justify-center gap-3 rounded-2xl px-6 py-4 text-sm font-black"
+                >
+                  {content.boundariesCta}
+                  <ArrowRight size={18} />
+                </a>
               </div>
             </article>
+          </div>
 
-            <article
-              role="button"
-              tabIndex={0}
-              onClick={() => scrollToSection('#pricing')}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  scrollToSection('#pricing');
-                }
-              }}
-              className="zedpera-card zedpera-clickable rounded-[2.2rem] p-8 transition"
-            >
-              <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-300/30 bg-emerald-500/10 px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-emerald-100">
-                <ShieldCheck size={17} />
-                Prečo dôverovať Zedpere?
-              </div>
-
-              <h2 className="text-4xl font-black tracking-tight text-white md:text-5xl">
-                {content.founderTitle}
-              </h2>
-
-              <div className="mt-6 space-y-4">
-                {content.founderParagraphs.map((paragraph, index) => (
-                  <div
-                    key={`${paragraph}-${index}`}
-                    className="flex gap-4 rounded-2xl border border-white/10 bg-white/[0.055] p-4"
-                  >
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-sm font-black text-white">
-                      {index + 1}
-                    </span>
-                    <p className="text-sm font-bold leading-8 text-slate-200">
-                      {paragraph}
-                    </p>
-                  </div>
-                ))}
-              </div>
-
-              <a
-                href="#pricing"
-                onClick={(event) => event.stopPropagation()}
-                className="zedpera-primary-btn mt-7 inline-flex items-center gap-3 rounded-2xl px-6 py-4 text-sm font-black"
+          <div className="mt-6 grid gap-5 lg:grid-cols-3">
+            {content.founderParagraphs.map((paragraph, index) => (
+              <article
+                key={`${paragraph}-${index}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => scrollToSection('#pricing')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    scrollToSection('#pricing');
+                  }
+                }}
+                className="zedpera-card zedpera-clickable rounded-[2rem] p-6 transition"
               >
-                {content.boundariesCta}
-                <ArrowRight size={18} />
-              </a>
-            </article>
+                <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-600 text-sm font-black text-white">
+                  {index + 1}
+                </div>
+                <p className="text-sm font-bold leading-8 text-slate-200">
+                  {paragraph}
+                </p>
+              </article>
+            ))}
           </div>
         </div>
       </section>

@@ -19,7 +19,9 @@ import {
   Home,
   Library,
   LogOut,
+  Menu,
   Sparkles,
+  UserCircle,
   Video,
   X,
 } from 'lucide-react';
@@ -37,6 +39,21 @@ type NavItem = {
 };
 
 type TranslationRecord = Record<string, unknown>;
+
+// =====================================================
+// ROUTES
+// =====================================================
+
+/**
+ * Dôležité:
+ * Profil v ľavom menu musí smerovať na frontend stránku /profile,
+ * nie na /api/profile.
+ *
+ * /api/profile je API endpoint, ktorý vracia JSON.
+ * /profile je stránka, ktorá renderuje app/profile/ProfileClient.tsx
+ * a ten si dáta načíta cez GET /api/profile.
+ */
+const PROFILE_PAGE_HREF = '/profile';
 
 // =====================================================
 // TRANSLATION HELPERS
@@ -66,6 +83,16 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
         dictionary,
         'dashboardMenuDescription',
         'Hlavný prehľad aplikácie',
+      ),
+    },
+    {
+      href: PROFILE_PAGE_HREF,
+      label: text(dictionary, 'clientProfile', 'Profil'),
+      icon: UserCircle,
+      description: text(
+        dictionary,
+        'clientProfileDescription',
+        'Profil klienta a nastavenia',
       ),
     },
     {
@@ -108,16 +135,16 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
         'Predplatné a doplnky',
       ),
     },
-{
-  href: '/history',
-  label: text(dictionary, 'chatHistory', 'História chatu'),
-  icon: History,
-  description: text(
-    dictionary,
-    'dashboardHistoryDescription',
-    'Uložené konverzácie a výstupy',
-  ),
-},
+    {
+      href: '/history',
+      label: text(dictionary, 'chatHistory', 'História chatu'),
+      icon: History,
+      description: text(
+        dictionary,
+        'dashboardHistoryDescription',
+        'Uložené konverzácie a výstupy',
+      ),
+    },
     {
       href: '/video',
       label: text(dictionary, 'dashboardVideo', 'Video návod'),
@@ -173,6 +200,11 @@ function AppShellContent({ children }: { children: ReactNode }) {
     return createNavItems(dictionary);
   }, [dictionary]);
 
+  /**
+   * Spodná mobilná navigácia má mať maximálne 5 položiek.
+   * Poradie:
+   * Menu, Profil, AI Chat, Moje práce, Zdroje
+   */
   const mobileNavItems = useMemo(() => {
     return navItems.slice(0, 5);
   }, [navItems]);
@@ -218,11 +250,13 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
   const activeTitle = useMemo(() => {
     const active = navItems.find((item) => isPathActive(pathname, item.href));
+
     return active?.label || 'Zedpera';
   }, [navItems, pathname]);
 
   const activeDescription = useMemo(() => {
     const active = navItems.find((item) => isPathActive(pathname, item.href));
+
     return (
       active?.description ||
       text(dictionary, 'publicHeroTitle', 'AI akademická platforma')
@@ -233,9 +267,14 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
   const goTo = (href: string) => {
     setMobileMenuOpen(false);
+
+    /**
+     * Navigácia používa iba frontend cesty.
+     * Profil ide na /profile, kde sa renderuje ProfileClient.
+     * ProfileClient si následne sám volá /api/profile.
+     */
     router.push(href);
   };
-
 
   const logoutAdminMode = () => {
     if (typeof window !== 'undefined') {
@@ -246,6 +285,20 @@ function AppShellContent({ children }: { children: ReactNode }) {
     }
 
     setIsAdminFree(false);
+    router.push('/');
+  };
+
+  const logoutUser = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('zedpera_is_logged_in');
+      localStorage.removeItem('zedpera_user_role');
+      localStorage.removeItem('zedpera_user_plan');
+      localStorage.removeItem('zedpera_selected_plan');
+      localStorage.removeItem('zedpera_admin_free');
+    }
+
+    setIsAdminFree(false);
+    setMobileMenuOpen(false);
     router.push('/');
   };
 
@@ -324,7 +377,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
             </div>
           )}
 
-          {isAdminFree && (
+          {isAdminFree ? (
             <button
               type="button"
               onClick={logoutAdminMode}
@@ -335,9 +388,18 @@ function AppShellContent({ children }: { children: ReactNode }) {
               </span>
               {text(dictionary, 'exitAdminMode', 'Ukončiť admin režim')}
             </button>
+          ) : (
+            <button
+              type="button"
+              onClick={logoutUser}
+              className="mb-3 flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold text-slate-400 transition hover:bg-rose-500/10 hover:text-rose-200"
+            >
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/5">
+                <LogOut size={17} />
+              </span>
+              {text(dictionary, 'logout', 'Odhlásiť sa')}
+            </button>
           )}
-
-         
 
           <div className="px-4 text-xs text-slate-500">
             © {new Date().getFullYear()} Zedpera
@@ -349,46 +411,64 @@ function AppShellContent({ children }: { children: ReactNode }) {
           CONTENT AREA
       ===================================================== */}
 
-<div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
         {/* MOBILE TOP BAR */}
 
-     <header className="flex shrink-0 flex-col gap-3 border-b border-white/10 bg-[#020617]/95 px-4 py-4 backdrop-blur lg:hidden">
-  <div className="flex items-center gap-3">
-    <div className="min-w-0">
-      <div className="truncate text-sm font-black">{activeTitle}</div>
-      <div className="truncate text-[11px] font-semibold text-slate-400">
-        {activeDescription}
-      </div>
-    </div>
-  </div>
+        <header className="flex shrink-0 flex-col gap-3 border-b border-white/10 bg-[#020617]/95 px-4 py-4 backdrop-blur lg:hidden">
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white transition hover:bg-white/[0.12]"
+              aria-label={text(dictionary, 'openMenu', 'Otvoriť menu')}
+            >
+              <Menu size={20} />
+            </button>
 
-  <div className="flex flex-wrap gap-2">
-    {navItems.map((item) => {
-      const active = isPathActive(pathname, item.href);
-      const Icon = item.icon;
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-black">{activeTitle}</div>
+              <div className="truncate text-[11px] font-semibold text-slate-400">
+                {activeDescription}
+              </div>
+            </div>
 
-      return (
-        <button
-          type="button"
-          key={item.href}
-          onClick={() => goTo(item.href)}
-          className={`inline-flex min-h-[40px] items-center gap-2 rounded-2xl px-3 py-2 text-[11px] font-black transition ${
-            active
-              ? 'bg-violet-600 text-white shadow-lg shadow-violet-700/25'
-              : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.12] hover:text-white'
-          }`}
-        >
-          <Icon size={15} />
-          {item.label}
-        </button>
-      );
-    })}
-  </div>
-</header>
+            <button
+              type="button"
+              onClick={() => goTo(PROFILE_PAGE_HREF)}
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white transition hover:bg-white/[0.12]"
+              aria-label={text(dictionary, 'clientProfile', 'Profil')}
+            >
+              <UserCircle size={20} />
+            </button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {navItems.map((item) => {
+              const active = isPathActive(pathname, item.href);
+              const Icon = item.icon;
+
+              return (
+                <button
+                  type="button"
+                  key={item.href}
+                  onClick={() => goTo(item.href)}
+                  className={`inline-flex min-h-[40px] items-center gap-2 rounded-2xl px-3 py-2 text-[11px] font-black transition ${
+                    active
+                      ? 'bg-violet-600 text-white shadow-lg shadow-violet-700/25'
+                      : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.12] hover:text-white'
+                  }`}
+                >
+                  <Icon size={15} />
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        </header>
 
         {/* MAIN CONTENT */}
 
-       <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#020617] p-3 pb-28 sm:p-4 md:p-6 lg:pb-6">
+        <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#020617] p-3 pb-28 sm:p-4 md:p-6 lg:pb-6">
           {!isDashboard && (
             <div className="sticky top-0 z-30 mb-5 rounded-3xl border border-white/10 bg-[#020617]/95 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -456,8 +536,8 @@ function AppShellContent({ children }: { children: ReactNode }) {
       ===================================================== */}
 
       {mobileMenuOpen && (
-  <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 lg:hidden">
-    <div className="min-h-dvh w-full bg-[#020617] p-4">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 lg:hidden">
+          <div className="min-h-dvh w-full bg-[#020617] p-4">
             <div className="mb-6 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 shadow-lg shadow-violet-700/25">
@@ -486,7 +566,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
               </button>
             </div>
 
-           <div className="grid grid-cols-1 gap-2 pb-6">
+            <div className="grid grid-cols-1 gap-2 pb-6">
               {navItems.map((item) => {
                 const active = isPathActive(pathname, item.href);
                 const Icon = item.icon;
@@ -520,26 +600,36 @@ function AppShellContent({ children }: { children: ReactNode }) {
               })}
             </div>
 
-            
-            {isAdminFree && (
-              <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-4 text-sm font-black text-emerald-200">
-                <div className="flex items-center justify-center gap-2">
-                  <Crown size={18} />
-                  {text(dictionary, 'adminAccount', 'Admin účet')}
-                </div>
-              </div>
-            )}
+            <div className="grid grid-cols-1 gap-2 border-t border-white/10 pt-4">
+              {isAdminFree ? (
+                <>
+                  <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-4 text-sm font-black text-emerald-200">
+                    <div className="flex items-center justify-center gap-2">
+                      <Crown size={18} />
+                      {text(dictionary, 'adminAccount', 'Admin účet')}
+                    </div>
+                  </div>
 
-            {isAdminFree && (
-              <button
-                type="button"
-                onClick={logoutAdminMode}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-4 text-sm font-black text-rose-200"
-              >
-                <LogOut size={18} />
-                {text(dictionary, 'exitAdminMode', 'Ukončiť admin režim')}
-              </button>
-            )}
+                  <button
+                    type="button"
+                    onClick={logoutAdminMode}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-4 text-sm font-black text-rose-200"
+                  >
+                    <LogOut size={18} />
+                    {text(dictionary, 'exitAdminMode', 'Ukončiť admin režim')}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={logoutUser}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-4 text-sm font-black text-rose-200"
+                >
+                  <LogOut size={18} />
+                  {text(dictionary, 'logout', 'Odhlásiť sa')}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -554,6 +644,10 @@ function AppShellContent({ children }: { children: ReactNode }) {
 function isPathActive(pathname: string, href: string) {
   if (href === '/dashboard') {
     return pathname === '/dashboard';
+  }
+
+  if (href === PROFILE_PAGE_HREF) {
+    return pathname === PROFILE_PAGE_HREF || pathname.startsWith('/profile/');
   }
 
   return pathname === href || pathname.startsWith(`${href}/`);

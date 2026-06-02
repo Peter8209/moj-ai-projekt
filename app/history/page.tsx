@@ -3,13 +3,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  ArrowLeft,
   ChevronRight,
   Clock3,
   Copy,
   Download,
+  Home,
   Inbox,
-  LayoutDashboard,
   Maximize2,
   MessageSquare,
   RefreshCcw,
@@ -76,10 +75,6 @@ const LOCAL_HISTORY_KEYS = [
   'zedpera_chat_history',
 ];
 
-const filters = [
-  { key: 'chat', label: 'AI chat' },
-];
-
 function isAiChatModuleValue(value: unknown) {
   const module = String(value || 'chat').trim().toLowerCase();
 
@@ -111,9 +106,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function cleanText(value: unknown): string {
   if (value === null || value === undefined) return '';
 
-  if (typeof value === 'string') {
-    return value.trim();
-  }
+  if (typeof value === 'string') return value.trim();
 
   if (typeof value === 'number' || typeof value === 'boolean') {
     return String(value);
@@ -344,26 +337,26 @@ function safelyParseLocalHistory(): RawHistoryItem[] {
   return allItems
     .filter((item) => isAiChatModuleValue(item.module || item.type))
     .filter((item, index) => {
-    const createdAt =
-      cleanText(item.created_at) ||
-      cleanText(item.createdAt) ||
-      cleanText(item.updated_at) ||
-      '';
+      const createdAt =
+        cleanText(item.created_at) ||
+        cleanText(item.createdAt) ||
+        cleanText(item.updated_at) ||
+        '';
 
-    const key = [
-      cleanText(item.id) || `bez-id-${index}`,
-      normalizeModule(item.module || item.type),
-      cleanText(item.title),
-      createdAt,
-      extractUserText(item).slice(0, 120),
-      extractAssistantText(item).slice(0, 120),
-    ].join('|');
+      const key = [
+        cleanText(item.id) || `bez-id-${index}`,
+        normalizeModule(item.module || item.type),
+        cleanText(item.title),
+        createdAt,
+        extractUserText(item).slice(0, 120),
+        extractAssistantText(item).slice(0, 120),
+      ].join('|');
 
-    if (seen.has(key)) return false;
+      if (seen.has(key)) return false;
 
-    seen.add(key);
-    return true;
-  });
+      seen.add(key);
+      return true;
+    });
 }
 
 function removeItemFromLocalStorage(item: HistoryItem) {
@@ -443,7 +436,7 @@ function removeItemFromLocalStorage(item: HistoryItem) {
   }
 }
 
-function filterItems(items: HistoryItem[], _activeFilter: string) {
+function filterItems(items: HistoryItem[]) {
   return items.filter((item) => item.module === 'chat');
 }
 
@@ -479,7 +472,6 @@ function getFullAssistantText(item: HistoryItem) {
 
 function createAutoSubmitHistoryPrompt(item: HistoryItem) {
   const title = item.title || getModuleLabel(item.module);
-  const moduleLabel = getModuleLabel(item.module);
   const userText = item.user_message?.trim();
   const assistantText = getFullAssistantText(item).trim();
 
@@ -546,23 +538,20 @@ function createContinueChatContext(item: HistoryItem): ContinueChatContext {
   };
 }
 
-function createCardPreview(item: HistoryItem) {
+function createCompactPreview(item: HistoryItem) {
   const userText = item.user_message?.trim();
-  const assistantText = getFullAssistantText(item);
+  const assistantText = getFullAssistantText(item).trim();
 
-  if (userText && assistantText && assistantText !== 'Bez uloženého výstupu.') {
-    return `POUŽÍVATEĽ: ${userText}\n\nODPOVEĎ: ${assistantText}`;
-  }
+  const text =
+    userText ||
+    assistantText ||
+    'Bez uloženého náhľadu. Kliknite pre otvorenie detailu.';
 
-  if (assistantText) return assistantText;
-  if (userText) return userText;
-
-  return 'Bez uloženého výstupu.';
+  return text.replace(/\s+/g, ' ').slice(0, 150);
 }
 
 function createFullReadableText(item: HistoryItem) {
   const title = item.title || getModuleLabel(item.module);
-  const moduleLabel = getModuleLabel(item.module);
   const date = formatDate(item.created_at);
   const userText = item.user_message?.trim();
   const assistantText = getFullAssistantText(item);
@@ -605,7 +594,6 @@ export default function HistoryPage() {
   const router = useRouter();
 
   const [items, setItems] = useState<HistoryItem[]>([]);
-  const [activeFilter, setActiveFilter] = useState('chat');
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -613,8 +601,8 @@ export default function HistoryPage() {
   const [selectedItem, setSelectedItem] = useState<HistoryItem | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  function goToMainMenu() {
-    router.push('/chat');
+  function goToMenu() {
+    router.push('/dashboard');
   }
 
   function openHistoryDetail(item: HistoryItem) {
@@ -739,7 +727,7 @@ export default function HistoryPage() {
             new Date(a.created_at).getTime(),
         );
 
-      const filteredLocalItems = filterItems(localItems, activeFilter);
+      const filteredLocalItems = filterItems(localItems);
 
       setItems(filteredLocalItems);
 
@@ -846,7 +834,7 @@ export default function HistoryPage() {
   useEffect(() => {
     loadHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFilter]);
+  }, []);
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
@@ -886,58 +874,43 @@ export default function HistoryPage() {
     });
   }, [items, searchQuery]);
 
-  const groupedItems = useMemo(() => {
-    return searchedItems.reduce<Record<string, HistoryItem[]>>((acc, item) => {
-      const key = item.module || 'chat';
-      acc[key] ||= [];
-      acc[key].push(item);
-      return acc;
-    }, {});
-  }, [searchedItems]);
-
   const totalCount = searchedItems.length;
 
   return (
-    <main className="min-h-screen bg-[#f6f7fb] text-slate-950 dark:bg-[#020617] dark:text-white">
+    <main className="min-h-screen bg-[#050816] text-white">
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-32 left-1/2 h-80 w-80 -translate-x-1/2 rounded-full bg-violet-500/20 blur-3xl dark:bg-violet-500/25" />
-        <div className="absolute right-0 top-40 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl dark:bg-blue-500/20" />
-        <div className="absolute bottom-0 left-0 h-96 w-96 rounded-full bg-fuchsia-500/10 blur-3xl dark:bg-fuchsia-500/20" />
+        <div className="absolute -top-40 left-1/2 h-[460px] w-[460px] -translate-x-1/2 rounded-full bg-violet-700/25 blur-3xl" />
+        <div className="absolute right-0 top-40 h-[420px] w-[420px] rounded-full bg-blue-700/15 blur-3xl" />
+        <div className="absolute bottom-0 left-0 h-[420px] w-[420px] rounded-full bg-fuchsia-700/15 blur-3xl" />
       </div>
 
-      <div className="relative mx-auto w-full max-w-[1500px] px-4 py-5 sm:px-6 lg:px-8">
-        <section className="mb-5 rounded-[2rem] border border-slate-200/80 bg-white/90 p-4 shadow-xl shadow-slate-200/70 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06] dark:shadow-black/30">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm dark:border-white/10 dark:bg-white/10 dark:text-white">
-                <MessageSquare className="h-6 w-6" />
-              </div>
+      <div className="relative mx-auto w-full max-w-[980px] px-4 py-8 sm:px-6">
+        <header className="mb-8">
+          <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="text-4xl font-black tracking-tight text-white">
+                História chatu
+              </h1>
 
-              <div>
-                <h1 className="text-xl font-black text-slate-950 dark:text-white">
-                  História AI chatu
-                </h1>
-
-                <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
-                  Po rozkliknutí sa otvorí celá uložená konverzácia z AI chatu.
-                </p>
-              </div>
+              <p className="mt-2 text-sm font-semibold text-slate-400">
+                Zoznam vašich konverzácií
+              </p>
             </div>
 
-            <div className="flex flex-1 flex-col gap-3 sm:flex-row xl:flex-none xl:items-center xl:justify-end">
+            <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={goToMainMenu}
-                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-white px-6 text-sm font-black text-slate-950 shadow-lg shadow-slate-950/10 transition hover:-translate-y-0.5 hover:bg-slate-100 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+                onClick={goToMenu}
+                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-500"
               >
-                <ArrowLeft className="h-4 w-4" />
-                AI chat
+                <Home className="h-4 w-4" />
+                Návrat do menu
               </button>
 
               <button
                 type="button"
                 onClick={loadHistory}
-                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-6 text-sm font-black text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
+                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-[#111827] px-5 text-sm font-black text-white transition hover:bg-[#1f2937]"
               >
                 <RefreshCcw className="h-4 w-4" />
                 Obnoviť
@@ -945,60 +918,32 @@ export default function HistoryPage() {
             </div>
           </div>
 
-          <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+          <div className="relative max-w-[420px]">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
 
-              <input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Vyhľadať v histórii AI chatu podľa názvu alebo obsahu..."
-                className="min-h-[52px] w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-4 text-sm font-semibold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder:text-slate-500"
-              />
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm font-black text-slate-700 dark:border-white/10 dark:bg-white/10 dark:text-slate-200">
-              {getResultText(totalCount)}
-            </div>
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Hľadať..."
+              className="h-11 w-full rounded-2xl border border-white/10 bg-[#111827] pl-11 pr-4 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-500/20"
+            />
           </div>
-        </section>
-
-        <section className="mb-5 rounded-[2rem] border border-slate-200/80 bg-white/90 p-4 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06]">
-          <div className="flex flex-wrap gap-2">
-            {filters.map((filter) => (
-              <button
-                key={filter.key}
-                type="button"
-                onClick={() => {
-                  setActiveFilter(filter.key);
-                  closeHistoryDetail();
-                }}
-                className={`shrink-0 rounded-2xl px-4 py-2.5 text-sm font-black transition ${
-                  activeFilter === filter.key
-                    ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/20'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/15'
-                }`}
-              >
-                {filter.label}
-              </button>
-            ))}
-          </div>
-        </section>
+        </header>
 
         {loading ? (
-          <div className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm dark:border-white/10 dark:bg-white/[0.06]">
+          <div className="rounded-3xl border border-white/10 bg-[#0b1020] p-6 shadow-xl shadow-black/30">
             <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-600/20 text-violet-200">
                 <RefreshCcw className="h-5 w-5 animate-spin" />
               </div>
 
               <div>
-                <div className="text-base font-black text-slate-950 dark:text-white">
-                  Načítavam záznamy...
+                <div className="text-base font-black text-white">
+                  Načítavam históriu...
                 </div>
 
-                <div className="mt-1 text-sm font-medium text-slate-500 dark:text-slate-400">
-                  Pripravujem uložené výstupy z databázy alebo lokálnej histórie.
+                <div className="mt-1 text-sm font-semibold text-slate-400">
+                  História sa načítava automaticky.
                 </div>
               </div>
             </div>
@@ -1006,203 +951,169 @@ export default function HistoryPage() {
         ) : null}
 
         {error ? (
-          <div className="rounded-[2rem] border border-red-200 bg-red-50 p-6 text-sm font-bold leading-6 text-red-700 shadow-sm dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+          <div className="rounded-3xl border border-red-400/30 bg-red-950/50 p-5 text-sm font-bold leading-6 text-red-100">
             {error}
           </div>
         ) : null}
 
         {!loading && !error && searchedItems.length === 0 ? (
-          <div className="rounded-[2rem] border border-slate-200 bg-white p-10 text-center shadow-sm dark:border-white/10 dark:bg-white/[0.06]">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300">
+          <div className="rounded-3xl border border-white/10 bg-[#0b1020] p-10 text-center shadow-xl shadow-black/30">
+            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-violet-600/20 text-violet-100">
               <Inbox className="h-7 w-7" />
             </div>
 
-            <h2 className="text-xl font-black text-slate-950 dark:text-white">
-              Zatiaľ tu nie sú žiadne záznamy
+            <h2 className="text-2xl font-black text-white">
+              Žiadne záznamy
             </h2>
 
-            <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6 text-slate-600 dark:text-slate-300">
-              Spustite AI chat a konverzácia sa sem automaticky uloží. Ak používate vyhľadávanie, skúste zadať iný výraz.
+            <p className="mx-auto mt-2 max-w-md text-sm font-semibold leading-6 text-slate-400">
+              História sa načíta automaticky. Ak používaš vyhľadávanie, skús iný výraz.
             </p>
-
-            <button
-              type="button"
-              onClick={goToMainMenu}
-              className="mt-6 inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-6 text-sm font-black text-white shadow-lg shadow-violet-950/20 transition hover:-translate-y-0.5 hover:bg-violet-500"
-            >
-              <MessageSquare className="h-4 w-4" />
-              Prejsť do AI chatu
-            </button>
           </div>
         ) : null}
 
         {!loading && !error && searchedItems.length > 0 ? (
-          <div className="space-y-6">
-            {Object.entries(groupedItems).map(([module, records]) => (
-              <section
-                key={module}
-                className="rounded-[2rem] border border-slate-200/80 bg-white/90 p-4 shadow-xl shadow-slate-200/60 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.05] dark:shadow-black/20 sm:p-5"
-              >
-                <div className="mb-4 flex flex-col gap-3 border-b border-slate-200 pb-4 dark:border-white/10 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
-                      {getModuleIcon(module)}
+          <section className="rounded-[2rem] border border-white/10 bg-[#0b1020]/95 p-4 shadow-2xl shadow-black/35">
+            <div className="mb-3 flex items-center justify-between px-2">
+              <div>
+                <h2 className="text-xl font-black text-white">
+                  Uložené konverzácie
+                </h2>
+
+                <p className="mt-1 text-sm font-bold text-slate-400">
+                  {getResultText(totalCount)}
+                </p>
+              </div>
+            </div>
+
+            <div className="divide-y divide-white/8">
+              {searchedItems.map((item) => (
+                <article
+                  key={item.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openHistoryDetail(item)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      openHistoryDetail(item);
+                    }
+                  }}
+                  className="group flex cursor-pointer items-start gap-4 rounded-2xl px-3 py-4 outline-none transition hover:bg-white/[0.04] focus:bg-white/[0.05] focus:ring-4 focus:ring-violet-500/20"
+                >
+                  <div className="mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-600/25 text-violet-100">
+                    <MessageSquare className="h-5 w-5" />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="truncate text-base font-black text-white">
+                        {item.title || getModuleLabel(item.module)}
+                      </h3>
                     </div>
 
-                    <div>
-                      <h2 className="text-base font-black text-slate-950 dark:text-white">
-                        {getModuleLabel(module)}
-                      </h2>
+                    <p className="mt-1 line-clamp-1 text-sm font-semibold leading-6 text-slate-400">
+                      {createCompactPreview(item)}
+                    </p>
 
-                      <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                        {getResultText(records.length)}
-                      </p>
+                    <div className="mt-1 flex items-center gap-2 text-xs font-bold text-slate-500">
+                      <Clock3 className="h-3.5 w-3.5" />
+                      {formatDate(item.created_at)}
                     </div>
                   </div>
-                </div>
 
-                <div className="grid gap-4">
-                  {records.map((item) => (
-                    <article
-                      key={item.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => openHistoryDetail(item)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          openHistoryDetail(item);
-                        }
+                  <div className="hidden shrink-0 items-center gap-2 sm:flex">
+                    <button
+                      type="button"
+                      title="Otvoriť"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openHistoryDetail(item);
                       }}
-                      className="group relative cursor-pointer overflow-hidden rounded-[1.75rem] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5 text-left shadow-sm outline-none transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-xl hover:shadow-violet-950/10 focus:border-violet-400 focus:ring-4 focus:ring-violet-500/15 dark:border-white/10 dark:from-white/[0.08] dark:to-white/[0.03] dark:hover:border-violet-400/60"
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-violet-600 hover:text-white"
                     >
-                      <div className="absolute inset-y-0 left-0 w-1.5 bg-violet-600" />
+                      <Maximize2 className="h-4 w-4" />
+                    </button>
 
-                      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px] xl:items-center">
-                        <div className="min-w-0 pl-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="inline-flex items-center gap-2 rounded-full bg-violet-50 px-3 py-1 text-xs font-black text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
-                              {getModuleIcon(item.module)}
-                              {getModuleLabel(item.module)}
-                            </span>
+                    <button
+                      type="button"
+                      title="Pokračovať v chate"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        continueInAiChat(item);
+                      }}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-violet-600 hover:text-white"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
 
-                            <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500 dark:bg-white/10 dark:text-slate-300">
-                              <Clock3 className="h-3.5 w-3.5" />
-                              {formatDate(item.created_at)}
-                            </span>
-                          </div>
-
-                          <h3 className="mt-3 text-lg font-black leading-snug text-slate-950 dark:text-white">
-                            {item.title || getModuleLabel(item.module)}
-                          </h3>
-
-                          <div className="mt-3 line-clamp-4 min-h-[92px] whitespace-pre-wrap text-sm font-medium leading-6 text-slate-700 dark:text-slate-200">
-                            {createCardPreview(item)}
-                          </div>
-
-                          <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black text-slate-600 transition group-hover:bg-violet-50 group-hover:text-violet-700 dark:bg-white/10 dark:text-slate-300 dark:group-hover:bg-violet-500/15 dark:group-hover:text-violet-200">
-                            <Maximize2 className="h-3.5 w-3.5" />
-                            Rozkliknúť celý výstup
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col gap-3 xl:items-end">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              openHistoryDetail(item);
-                            }}
-                            className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-black text-white shadow-lg shadow-slate-950/20 transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200 xl:w-[260px]"
-                          >
-                            Otvoriť celý výstup
-                            <Maximize2 className="h-4 w-4" />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              continueInAiChat(item);
-                            }}
-                            className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-5 text-sm font-black text-white shadow-lg shadow-violet-950/20 transition hover:bg-violet-500 xl:w-[260px]"
-                          >
-                            Pokračovať v AI chate
-                            <ChevronRight className="h-4 w-4" />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              deleteHistoryItem(item);
-                            }}
-                            disabled={deletingId === item.id}
-                            className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-5 text-sm font-black text-red-700 transition hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20 xl:w-[260px]"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            {deletingId === item.id
-                              ? 'Vymazávam...'
-                              : 'Vymazať históriu chatu'}
-                          </button>
-                        </div>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
+                    <button
+                      type="button"
+                      title="Vymazať"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteHistoryItem(item);
+                      }}
+                      disabled={deletingId === item.id}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-400/20 bg-red-950/30 text-red-200 transition hover:bg-red-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
         ) : null}
       </div>
 
       {selectedItem ? (
         <div
-          className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 p-3 backdrop-blur-md sm:p-5"
+          className="fixed inset-0 z-50 overflow-y-auto bg-black/80 p-3 backdrop-blur-md sm:p-5"
           role="dialog"
           aria-modal="true"
-          aria-label="Detail uloženého výstupu"
+          aria-label="Detail uloženej konverzácie"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
               closeHistoryDetail();
             }
           }}
         >
-          <section className="mx-auto flex min-h-[calc(100vh-1.5rem)] w-full max-w-[1400px] flex-col overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-2xl shadow-slate-950/40 dark:border-white/10 dark:bg-[#020617] sm:min-h-[calc(100vh-2.5rem)]">
-            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 p-4 backdrop-blur-xl dark:border-white/10 dark:bg-[#020617]/95 sm:p-5">
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                <div className="flex min-w-0 gap-3">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
+          <section className="mx-auto flex min-h-[calc(100vh-1.5rem)] w-full max-w-[1100px] flex-col overflow-hidden rounded-[2rem] border border-white/15 bg-[#070b1c] shadow-2xl shadow-black/60 sm:min-h-[calc(100vh-2.5rem)]">
+            <div className="sticky top-0 z-10 border-b border-white/15 bg-[#10162a]/98 p-5 backdrop-blur-xl sm:p-6">
+              <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                <div className="flex min-w-0 gap-4">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-600/25 text-violet-100">
                     {getModuleIcon(selectedItem.module)}
                   </div>
 
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="inline-flex items-center gap-2 rounded-full bg-violet-50 px-3 py-1 text-xs font-black text-violet-700 dark:bg-violet-500/15 dark:text-violet-200">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="inline-flex items-center gap-2 rounded-full border border-violet-300/30 bg-violet-600/25 px-4 py-1.5 text-sm font-black text-violet-100">
                         {getModuleLabel(selectedItem.module)}
                       </span>
 
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500 dark:bg-white/10 dark:text-slate-300">
-                        <Clock3 className="h-3.5 w-3.5" />
+                      <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-[#070b1c] px-4 py-1.5 text-sm font-black text-slate-100">
+                        <Clock3 className="h-4 w-4" />
                         {formatDate(selectedItem.created_at)}
                       </span>
                     </div>
 
-                    <h2 className="mt-3 text-2xl font-black leading-tight text-slate-950 dark:text-white">
+                    <h2 className="mt-4 text-2xl font-black leading-tight text-white sm:text-3xl">
                       {selectedItem.title || getModuleLabel(selectedItem.module)}
                     </h2>
 
-                    <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">
-                      Toto je plný detail uloženej konverzácie z AI chatu.
+                    <p className="mt-2 text-base font-bold leading-7 text-slate-300">
+                      Plný detail uloženej konverzácie.
                     </p>
                   </div>
                 </div>
 
-                <div className="grid gap-2 sm:grid-cols-2 xl:flex xl:shrink-0 xl:flex-wrap xl:justify-end">
+                <div className="grid gap-3 sm:grid-cols-2 xl:flex xl:shrink-0 xl:flex-wrap xl:justify-end">
                   <button
                     type="button"
                     onClick={() => copyHistoryItem(selectedItem)}
-                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-white/15 bg-[#1c2542] px-4 text-sm font-black text-white transition hover:bg-[#27345d]"
                   >
                     <Copy className="h-4 w-4" />
                     {copiedId === selectedItem.id ? 'Skopírované' : 'Kopírovať'}
@@ -1211,25 +1122,25 @@ export default function HistoryPage() {
                   <button
                     type="button"
                     onClick={() => downloadHistoryItem(selectedItem)}
-                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-white/15 bg-[#1c2542] px-4 text-sm font-black text-white transition hover:bg-[#27345d]"
                   >
                     <Download className="h-4 w-4" />
-                    Stiahnuť TXT
+                    TXT
                   </button>
 
                   <button
                     type="button"
                     onClick={() => continueInAiChat(selectedItem)}
-                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 text-sm font-black text-white shadow-lg shadow-violet-950/20 transition hover:bg-violet-500"
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 text-sm font-black text-white shadow-xl shadow-violet-950/40 transition hover:bg-violet-500"
                   >
-                    Pokračovať v AI chate
+                    Pokračovať
                     <ChevronRight className="h-4 w-4" />
                   </button>
 
                   <button
                     type="button"
                     onClick={closeHistoryDetail}
-                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-red-700 px-4 text-sm font-black text-white transition hover:bg-red-600"
                     aria-label="Zatvoriť detail"
                   >
                     <X className="h-4 w-4" />
@@ -1239,53 +1150,43 @@ export default function HistoryPage() {
               </div>
             </div>
 
-            <div className="grid flex-1 gap-5 p-4 sm:p-5 lg:grid-cols-[360px_minmax(0,1fr)]">
-              <aside className="space-y-4">
-                <div className="rounded-[1.75rem] border border-slate-200 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/[0.04]">
-                  <h3 className="text-sm font-black uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+            <div className="grid flex-1 gap-5 p-5 sm:p-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+              <aside className="space-y-5">
+                <div className="rounded-[1.5rem] border border-white/15 bg-[#10162a] p-5 shadow-xl shadow-black/25">
+                  <h3 className="text-xs font-black uppercase tracking-[0.18em] text-violet-200">
                     Informácie
                   </h3>
 
-                  <div className="mt-4 space-y-3 text-sm">
-                    <div className="rounded-2xl bg-white p-4 dark:bg-white/10">
+                  <div className="mt-5 space-y-3 text-sm">
+                    <div className="rounded-2xl border border-white/10 bg-[#070b1c] p-4">
                       <div className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
                         Modul
                       </div>
 
-                      <div className="mt-1 font-black text-slate-950 dark:text-white">
+                      <div className="mt-2 font-black text-white">
                         {getModuleLabel(selectedItem.module)}
                       </div>
                     </div>
 
-                    <div className="rounded-2xl bg-white p-4 dark:bg-white/10">
+                    <div className="rounded-2xl border border-white/10 bg-[#070b1c] p-4">
                       <div className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
                         Vytvorené
                       </div>
 
-                      <div className="mt-1 font-black text-slate-950 dark:text-white">
+                      <div className="mt-2 font-black text-white">
                         {formatDate(selectedItem.created_at)}
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl bg-white p-4 dark:bg-white/10">
-                      <div className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
-                        ID záznamu
-                      </div>
-
-                      <div className="mt-1 break-all font-mono text-xs font-bold text-slate-700 dark:text-slate-200">
-                        {selectedItem.id}
                       </div>
                     </div>
                   </div>
                 </div>
 
                 {selectedItem.user_message?.trim() ? (
-                  <div className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
-                    <h3 className="text-sm font-black uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                  <div className="rounded-[1.5rem] border border-white/15 bg-[#10162a] p-5 shadow-xl shadow-black/25">
+                    <h3 className="text-xs font-black uppercase tracking-[0.18em] text-violet-200">
                       Zadanie používateľa
                     </h3>
 
-                    <div className="mt-4 max-h-[360px] overflow-y-auto rounded-2xl bg-slate-50 p-4 text-sm font-medium leading-6 text-slate-700 dark:bg-white/10 dark:text-slate-200">
+                    <div className="mt-5 max-h-[320px] overflow-y-auto rounded-2xl border border-white/10 bg-[#070b1c] p-5 text-sm font-bold leading-7 text-slate-100">
                       <div className="whitespace-pre-wrap">
                         {selectedItem.user_message}
                       </div>
@@ -1294,15 +1195,15 @@ export default function HistoryPage() {
                 ) : null}
               </aside>
 
-              <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.04] sm:p-6">
-                <div className="mb-5 flex flex-col gap-3 border-b border-slate-200 pb-5 dark:border-white/10 sm:flex-row sm:items-center sm:justify-between">
+              <section className="rounded-[1.5rem] border border-white/15 bg-[#10162a] p-5 shadow-xl shadow-black/25 sm:p-6">
+                <div className="mb-5 flex flex-col gap-4 border-b border-white/15 pb-5 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <h3 className="text-lg font-black text-slate-950 dark:text-white">
+                    <h3 className="text-xl font-black text-white">
                       Celý výstup
                     </h3>
 
-                    <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
-                      Zobrazuje sa kompletný obsah uloženej konverzácie z AI chatu.
+                    <p className="mt-1 text-sm font-bold text-slate-400">
+                      Kompletný obsah uloženej konverzácie.
                     </p>
                   </div>
 
@@ -1310,14 +1211,14 @@ export default function HistoryPage() {
                     type="button"
                     onClick={() => deleteHistoryItem(selectedItem)}
                     disabled={deletingId === selectedItem.id}
-                    className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 text-sm font-black text-red-700 transition hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20"
+                    className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-2xl border border-red-400/40 bg-red-950/60 px-4 text-sm font-black text-red-100 transition hover:bg-red-900/80 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <Trash2 className="h-4 w-4" />
                     {deletingId === selectedItem.id ? 'Vymazávam...' : 'Vymazať'}
                   </button>
                 </div>
 
-                <div className="min-h-[520px] whitespace-pre-wrap rounded-[1.5rem] border border-slate-200 bg-slate-50 p-5 text-[15px] font-medium leading-8 text-slate-800 dark:border-white/10 dark:bg-black/20 dark:text-slate-100 sm:p-7">
+                <div className="min-h-[520px] whitespace-pre-wrap rounded-[1.5rem] border border-white/15 bg-[#070b1c] p-6 text-[15px] font-semibold leading-8 text-slate-50 shadow-inner shadow-black/30 sm:p-7">
                   {createFullReadableText(selectedItem)}
                 </div>
               </section>

@@ -220,7 +220,7 @@ function normalizeClientProfile(apiData: unknown, source: string): ClientProfile
       cleanText(data.userRole) ||
       cleanText(data.user_role) ||
       cleanText(local.role) ||
-      'client',
+      'klient',
     plan,
     selectedPlan,
     accountStatus:
@@ -433,7 +433,7 @@ export default function ClientAccountProfile() {
           lastError =
             cleanText((data as JsonRecord | null)?.error) ||
             cleanText((data as JsonRecord | null)?.message) ||
-            `Endpoint ${endpoint} vrátil chybu ${response.status}.`;
+            'Klientsky profil sa nepodarilo načítať.';
           continue;
         }
 
@@ -447,17 +447,17 @@ export default function ClientAccountProfile() {
         lastError =
           err instanceof Error
             ? err.message
-            : `Endpoint ${endpoint} sa nepodarilo načítať.`;
+            : 'Klientsky profil sa nepodarilo načítať.';
       }
     }
 
-    const fallback = normalizeClientProfile({}, 'localStorage fallback');
+    const fallback = normalizeClientProfile({}, 'lokálne údaje');
 
     setProfile(fallback);
     setLastLoadedAt(new Date().toISOString());
     setError(
       lastError ||
-        'API profil sa nepodarilo načítať. Zobrazujem aspoň lokálne údaje používateľa.',
+        'Klientsky profil sa nepodarilo načítať. Zobrazujem aspoň lokálne uložené údaje.',
     );
     setState('error');
   }, []);
@@ -501,7 +501,7 @@ export default function ClientAccountProfile() {
                 </h1>
 
                 <p className="mt-1 max-w-3xl text-sm font-bold leading-6 text-slate-400">
-                  Prehľad klienta napojený na API: účet, balíček, stav služieb,
+                  Klientsky profil zobrazuje účet, balíček, stav služieb,
                   kredity, projekty, predplatné a dátumy prístupov.
                 </p>
               </div>
@@ -550,11 +550,11 @@ export default function ClientAccountProfile() {
 
               <div>
                 <div className="text-lg font-black text-white">
-                  Načítavam účet klienta...
+                  Načítavam klientsky profil...
                 </div>
 
                 <div className="mt-1 text-sm font-bold text-slate-400">
-                  Pripájam sa na API profil používateľa.
+                  Pripravujem údaje klienta a jeho služieb.
                 </div>
               </div>
             </div>
@@ -593,7 +593,7 @@ export default function ClientAccountProfile() {
                           ? ` · použité: ${profile.usedCredits}`
                           : ''
                       }`
-                    : 'Limit nie je v API uvedený'
+                    : 'Limit nie je uvedený'
                 }
               />
 
@@ -622,7 +622,7 @@ export default function ClientAccountProfile() {
                     </h2>
 
                     <p className="mt-1 text-sm font-bold text-slate-400">
-                      Prehľad čerpania kreditov podľa údajov z API.
+                      Prehľad čerpania kreditov v klientskom účte.
                     </p>
                   </div>
 
@@ -653,13 +653,11 @@ export default function ClientAccountProfile() {
                     </h2>
 
                     <p className="text-sm font-bold text-slate-400">
-                      Základné údaje účtu a balíčka podľa dostupného API.
+                      Základné údaje účtu, balíčka a nastavení klienta.
                     </p>
                   </div>
                 </div>
 
-                <DetailRow label="ID profilu" value={profile.id} />
-                <DetailRow label="ID používateľa" value={profile.userId} />
                 <DetailRow label="Meno" value={profile.name} />
                 <DetailRow label="Email" value={profile.email} />
                 <DetailRow label="Rola" value={profile.role} />
@@ -669,14 +667,12 @@ export default function ClientAccountProfile() {
                   label="Balíček"
                   value={profile.packageLabel || profile.packageName}
                 />
-                <DetailRow label="Technický plán" value={profile.plan} />
                 <DetailRow label="Vybraný plán" value={profile.selectedPlan} />
                 <DetailRow label="Predplatné" value={profile.subscriptionStatus} />
                 <DetailRow
                   label="Posledné načítanie"
                   value={formatDate(lastLoadedAt)}
                 />
-                <DetailRow label="Zdroj dát" value={profile.source} />
               </div>
 
               <div className="space-y-6">
@@ -704,7 +700,7 @@ export default function ClientAccountProfile() {
                       ))
                     ) : (
                       <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm font-bold text-slate-300">
-                        API zatiaľ nevrátilo zoznam aktivovaných služieb.
+                        Zoznam aktivovaných služieb zatiaľ nie je dostupný.
                       </div>
                     )}
                   </div>
@@ -734,7 +730,7 @@ export default function ClientAccountProfile() {
                       ))
                     ) : (
                       <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm font-bold text-slate-300">
-                        API zatiaľ nevrátilo zoznam aktivovaných funkcií.
+                        Zoznam aktivovaných funkcií zatiaľ nie je dostupný.
                       </div>
                     )}
                   </div>
@@ -786,14 +782,14 @@ export default function ClientAccountProfile() {
                 icon={Mail}
                 label="Kontakt"
                 value={profile.email}
-                helper="Email používateľa alebo klienta"
+                helper="Email klienta"
               />
 
               <StatCard
                 icon={ShieldCheck}
                 label="Prístup"
                 value={profile.role}
-                helper="Rola používateľa v systéme"
+                helper="Rola klienta v systéme"
               />
 
               <StatCard

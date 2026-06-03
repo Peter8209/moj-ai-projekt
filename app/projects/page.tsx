@@ -194,6 +194,18 @@ type AppConfirmState = {
 
 const PROJECT_ORDER_KEY = 'zedpera_projects_order';
 const WIZARD_DRAFT_KEY = 'zedpera_profile_wizard_draft';
+const NEW_PROFILE_QUERY_KEY = 'new';
+
+function clearProfileWizardDraft() {
+  if (typeof window === 'undefined') return;
+
+  try {
+    localStorage.removeItem(WIZARD_DRAFT_KEY);
+  } catch (error) {
+    console.warn('CLEAR PROFILE WIZARD DRAFT WARNING:', error);
+  }
+}
+
 
 const WORK_TEMPLATES: Record<WorkTypeKey, WorkTemplate> = {
   essay: {
@@ -1076,6 +1088,18 @@ export default function ProjectsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const shouldOpenNewProfile =
+      new URLSearchParams(window.location.search).get(NEW_PROFILE_QUERY_KEY) === '1';
+
+    if (!shouldOpenNewProfile) return;
+
+    startEmptyProfileWizard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const goToMenu = () => router.push('/dashboard');
 
   const goToChatWithProfile = (profile: SavedProfile) => {
@@ -1083,16 +1107,19 @@ export default function ProjectsPage() {
     router.push('/chat');
   };
 
-  const openNewProfile = () => {
+  const startEmptyProfileWizard = () => {
+    clearProfileWizardDraft();
     setSelectedProfile(null);
     setEditingProfile(null);
     setProfileWizardOpen(true);
   };
 
+  const openNewProfile = () => {
+    startEmptyProfileWizard();
+  };
+
   const openBlankProfile = () => {
-    setSelectedProfile(null);
-    setEditingProfile(null);
-    setProfileWizardOpen(true);
+    startEmptyProfileWizard();
   };
 
   const loadActiveProfile = () => {
@@ -1603,6 +1630,7 @@ export default function ProjectsPage() {
           )}
 
           <ProfileWizardModal
+            key={editingProfile?.id || 'new-empty-profile'}
             initialProfile={editingProfile}
             onSave={(updatedProfile) => void handleProfileSaved(updatedProfile)}
             onClose={closeProfileWizard}
@@ -1852,13 +1880,17 @@ function getWizardFieldStatusLabel(label: string, filled: boolean, required: boo
 function readWizardDraft(initialProfile: SavedProfile | null, initialTypeKey: WorkTypeKey): ProfileWizardState | null {
   if (typeof window === 'undefined') return null;
 
+  // Pri novej práci nikdy nenačítavame posledný rozpracovaný alebo aktívny profil.
+  // Draft používame iba pri úprave existujúcej práce, kde sa ID draftu musí zhodovať.
+  if (!initialProfile?.id) return null;
+
   try {
     const raw = localStorage.getItem(WIZARD_DRAFT_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
 
     if (!parsed || typeof parsed !== 'object') return null;
 
-    if (initialProfile?.id && parsed.id && parsed.id !== initialProfile.id) {
+    if (!parsed.id || parsed.id !== initialProfile.id) {
       return null;
     }
 
@@ -2046,6 +2078,7 @@ function ProfileWizardModal({
   };
 
   const createEmptyProfile = () => {
+    clearProfileWizardDraft();
     const empty = createWizardProfileFromTemplate(WORK_TEMPLATES.essay, null);
     commitWizardProfile(empty);
     setActiveStep(1);

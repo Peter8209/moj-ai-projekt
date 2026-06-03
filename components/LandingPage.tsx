@@ -1,35 +1,28 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
-  ArrowUp,
   BookOpen,
   Bot,
   CheckCircle2,
   ChevronDown,
+  ChevronUp,
+  Clock3,
   Crown,
-  CreditCard,
-  FileCheck2,
-  Globe2,
   HelpCircle,
-  GraduationCap,
   Loader2,
   Menu,
   MessageCircle,
-  Quote,
+  PenTool,
+  Send,
   ShieldCheck,
   Sparkles,
   Star,
   X,
+  Zap,
 } from 'lucide-react';
-import {
-  languages,
-  normalizeLanguage,
-  type AppLanguage,
-} from '@/lib/i18n';
 
 type PlanId =
   | 'week-mini'
@@ -40,54 +33,22 @@ type PlanId =
   | 'year-pro'
   | 'year-max';
 
+type AppLanguage = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
+
 type Plan = {
   id: PlanId;
-  badge?: string;
+  label: string;
   name: string;
-  subtitle: string;
   price: string;
-  oldPrice?: string;
   period: string;
   description: string;
   button: string;
-  features: string[];
   highlighted?: boolean;
-};
-
-type FeatureIconKey =
-  | 'Bot'
-  | 'GraduationCap'
-  | 'BookOpen'
-  | 'FileCheck2'
-  | 'ShieldCheck'
-  | 'Crown';
-
-type FeatureItem = {
-  icon: FeatureIconKey;
-  title: string;
-  text: string;
-};
-
-type TextBlock = {
-  title: string;
-  text: string;
-};
-
-type ComparisonContent = {
-  badTitle: string;
-  zedperaTitle: string;
-  badItems: string[];
-  zedperaItems: string[];
 };
 
 type FaqItem = {
   question: string;
   answer: string;
-};
-
-type ReviewItem = {
-  name: string;
-  text: string;
 };
 
 type CheckoutResponse = {
@@ -99,577 +60,173 @@ type CheckoutResponse = {
   displayMessage?: string;
 };
 
-type LandingContent = {
-  brandSubtitle: string;
-
-  navIntro: string;
-  navAbout: string;
-  navFeatures: string;
-  navReviews: string;
-  navPricing: string;
-  navFaq: string;
-  login: string;
-  chooseProgram: string;
-
-  mobileOpenMenu: string;
-  mobileCloseMenu: string;
-
-  emailPrompt: string;
-  paymentEmailRequired: string;
-  paymentFailed: string;
-  stripeMissingUrl: string;
-  invalidPlanPrefix: string;
-  checkoutRedirecting: string;
-
-  heroBadge: string;
-  heroTitle: string;
-  heroText: string;
-  heroCta: string;
-  videoLabel: string;
-
-  aboutBadge: string;
-  aboutTitle: string;
-  aboutText: string;
-  aboutStoryTitle: string;
-  aboutParagraphs: string[];
-  aboutExperienceTitle: string;
-  aboutExperienceParagraphs: string[];
-  aboutCards: TextBlock[];
-  founderBadge: string;
-  founderTitle: string;
-  founderParagraphs: string[];
-  boundariesTitle: string;
-  boundariesParagraphs: string[];
-  boundariesCta: string;
-
-  introSmallLabel: string;
-  introTitle: string;
-  introText: string;
-  fiveBlocks: TextBlock[];
-  tryZedpera: string;
-
-  comparisonTitle: string;
-  comparisonText: string;
-  comparison: ComparisonContent;
-
-  reviewsBadge: string;
-  reviewsTitle: string;
-  reviewsText: string;
-  reviews: ReviewItem[];
-  reviewsCtaTitle: string;
-  reviewsCtaText: string;
-
-  featuresTitle: string;
-  featuresText: string;
-  features: FeatureItem[];
-
-  pricingBadge: string;
-  pricingTitle: string;
-  pricingText: string;
-  packageContent: string;
-  plans: Plan[];
-
-  faqTitle: string;
-  faqText: string;
-  faqItems: FaqItem[];
-
-  whyTitle: string;
-  whyItems: string[];
-
-  legalTitle: string;
-  legalText: string;
-  legalCta: string;
-
-  footerCopyright: string;
-  footerSubtitle: string;
-  terms: string;
-  gdpr: string;
-};
-
 const LANGUAGE_STORAGE_KEY = 'zedpera_language';
-const LANDING_TRANSLATION_VERSION = 'v2';
 
-const allowedPlans: PlanId[] = [
-  'week-mini',
-  'week-student',
-  'week-pro',
-  'monthly',
-  'three-months',
-  'year-pro',
-  'year-max',
+const languages: Array<{
+  code: AppLanguage;
+  label: string;
+  short: string;
+}> = [
+  { code: 'sk', label: 'Slovenčina', short: 'SK' },
+  { code: 'cs', label: 'Čeština', short: 'CZ' },
+  { code: 'en', label: 'English', short: 'EN' },
+  { code: 'de', label: 'Deutsch', short: 'DE' },
+  { code: 'pl', label: 'Polski', short: 'PL' },
+  { code: 'hu', label: 'Magyar', short: 'HU' },
 ];
 
-const languageLabels: Record<AppLanguage, string> = {
-  sk: 'Slovenčina',
-  cs: 'Čeština',
-  en: 'English',
-  de: 'Deutsch',
-  pl: 'Polski',
-  hu: 'Magyar',
-};
-
-const languageShortLabels: Record<AppLanguage, string> = {
-  sk: 'SK',
-  cs: 'CZ',
-  en: 'EN',
-  de: 'DE',
-  pl: 'PL',
-  hu: 'HU',
-};
-
-function getLanguageLabel(code: AppLanguage) {
-  return languageLabels[code] || code.toUpperCase();
-}
-
-function getLanguageShortLabel(code: AppLanguage) {
-  return languageShortLabels[code] || code.toUpperCase();
-}
-
-const featureIconMap = {
-  Bot,
-  GraduationCap,
-  BookOpen,
-  FileCheck2,
-  ShieldCheck,
-  Crown,
-};
-
-const baseContent: LandingContent = {
-  brandSubtitle: 'AI akademický asistent',
-
-  navIntro: 'Úvod',
-  navAbout: 'O nás',
-  navFeatures: 'Funkcie',
-  navReviews: 'Recenzie',
-  navPricing: 'Balíčky',
-  navFaq: 'Otázky',
-  login: 'Prihlásiť sa',
-  chooseProgram: 'Vybrať program',
-
-  mobileOpenMenu: 'Otvoriť menu',
-  mobileCloseMenu: 'Zavrieť menu',
-
-  emailPrompt: 'Zadajte e-mail, na ktorý bude naviazaná platba:',
-  paymentEmailRequired: 'Pre pokračovanie na platbu je potrebný e-mail.',
-  paymentFailed: 'Platbu sa nepodarilo vytvoriť.',
-  stripeMissingUrl: 'Stripe nevygeneroval platobnú URL.',
-  invalidPlanPrefix: 'Neplatný balík:',
-  checkoutRedirecting: 'Presmerovávam...',
-
-  heroBadge: 'Prvý akademický nástroj s AI vedúcim práce',
-  heroTitle:
-    'Prvý akademický nástroj na písanie prác, ktorý zvládne náročné praktické časti s AI vedúcim bez stresu a chaosu',
-  heroText:
-    'Vyskúšaj Zedperu, nástroj ktorý ťa prevedie celým procesom od prvého nápadu až po úspešnú obhajobu. AI vedúci práce ťa upozorní na chyby skôr, než ich uvidí školiteľ, je k dispozícii 24/7 a navrhne ti konkrétne opravy, ktoré posunú tvoju prácu na vyšší level.',
-  heroCta: 'Začni písať bez stresu už dnes',
-  videoLabel: 'Video',
-
-  aboutBadge: 'O nás',
-  aboutTitle: 'Zedpera vznikla z reálnych skúseností so študentmi',
-  aboutText:
-    'Za Zedperou stoja skúsenosti, ktoré nevznikli za pár mesiacov. Vznikali roky pri reálnych študentoch, ich problémoch, termínoch, pochybnostiach, školiteľoch, posudkoch, obhajobách a akademických prácach rôzneho typu.',
-  aboutStoryTitle: 'Príbeh, ktorý začal ešte počas štúdia',
-  aboutParagraphs: [
-    'Pred mnohými rokmi sa stretli dvaja študenti, ktorí brázdili lavice na rovnakej univerzite. Prechádzali skúškami a hľadali cestu, ako celý systém zjednodušiť. Po ukončení štúdia vymysleli jednoduchý projekt a vôbec netušili, do čoho idú.',
-    'Vytvorili sme službu, ktorá pomáha študentom pri písaní vysokoškolských prác a úspešne funguje 20 rokov. Za toto obdobie sme nazbierali množstvo reálnych skúseností a zistili, čo študentov najviac trápi.',
-    'Vypočuli sme si veľa životných osudov a príbehov. Naši klienti sa pre nás stali viac než len zákazníkmi. S mnohými sme spolupracovali roky počas celého štúdia. Dennodenne sme riešili telefonáty, konzultácie, pripomienky, termíny, stres aj neistotu.',
-    'Rukami nám prešli tisíce študentov denného aj externého štúdia. Práve preto sme hľadali cestu, ako celý proces zjednodušiť. Rozhodli sme sa využiť všetky skúsenosti, ktoré sme získali, a premeniť ich na systém, ktorý tento problém rieši komplexne, nie iba čiastočne.',
-  ],
-  aboutExperienceTitle: '20 rokov skúseností v jednom systéme',
-  aboutExperienceParagraphs: [
-    'Problém každého študenta nie je len zdĺhavé písanie práce. Často je to aj nefungujúci systém v školách, nedostatok času, ignorácia zo strany školiteľa alebo chýbajúca spätná väzba.',
-    'Preto sme vytvorili službu, ktorá pokrýva všetko, čo bežný študent potrebuje: písanie práce, praktickú časť, zdroje, citácie, orientačnú kontrolu originality, spätnú väzbu, opravy, návrhy riešení aj prípravu na obhajobu.',
-  ],
-  aboutCards: [
-    {
-      title: 'Komplexná pomoc študentovi',
-      text: 'Zedpera Vám pomôže s napísaním práce, praktickou časťou, vyhľadá zdroje, pomôže s citáciami, overí riziko zhody, bude Vašim školiteľom aj oponentom, opraví chyby, navrhne riešenia a pripraví Vás na obhajobu na základe posudkov.',
-    },
-    {
-      title: 'Testované akademickou praxou',
-      text: 'Zhrnuli sme do jedného projektu naše 20-ročné skúsenosti. Celý systém testovali stovky reálnych autorov, ktorí pôsobia priamo na akademickej pôde. Zedpera je trénovaná na rôzne typy prác od humanitných až po technické odbory.',
-    },
-    {
-      title: 'Viac než generovanie textu',
-      text: 'Nechceli sme vytvoriť iba ďalší nástroj na generovanie textov. Cieľom bolo vytvoriť systém, ktorý rozumie procesu písania, vie upozorniť na slabé miesta a pomáha študentovi premýšľať nad vlastnou prácou.',
-    },
-  ],
-  founderBadge: 'Zakladateľka Martina',
-  founderTitle: 'Skúsenosti zo štúdia, mentoringu aj akademického prostredia',
-  founderParagraphs: [
-    'Po ukončení vysokej školy založila spoločnosť, ktorá už 20 rokov pomáha študentom s písaním vysokoškolských prác. Zároveň sa venovala mentoringu v oblasti vzdelávania.',
-    'Medzičasom pokračovala v rozširovaní vedomostí na ďalších univerzitách a sama pôsobila niekoľko rokov na akademickej pôde.',
-    'Aktuálne sa venuje vývoju nových typov umelej inteligencie, ktoré sa dajú využiť v akademickom prostredí a pri podpore študentov počas celého procesu tvorby práce.',
-  ],
-  boundariesTitle: 'Neustále posúvame hranice',
-  boundariesParagraphs: [
-    'Zedpera nevznikla ako odpoveď na trend, ale ako reakcia na realitu, stres, časový tlak a pocit, že akademická práca je často skôr boj so systémom než proces učenia.',
-    'Od začiatku sme vedeli, že nebudeme vyvíjať len ďalší nástroj na generovanie textu. Chceli sme vytvoriť systém, ktorý rozumie tomu, čo sa deje medzi riadkami, keď študent hľadá správny smer, zasekne sa a potrebuje spätnú väzbu, nie iba výsledok.',
-    'Preto Zedpera nerastie len vo funkciách, ale hlavne v spôsobe, akým premýšľa. Neučíme ju len písať texty. Učíme ju rozumieť procesu.',
-    'A práve preto ju neustále posúvame ďalej. Nie iba ako produkt, ale ako nový spôsob, akým sa dá pristupovať k učeniu, písaniu a premýšľaniu.',
-  ],
-  boundariesCta: 'Chcem začať so Zedperou',
-
-  introSmallLabel: 'Úvodný text',
-  introTitle: 'Inteligentný nástroj novej generácie pre akademické písanie',
-  introText:
-    'Predstavujeme vám inteligentný nástroj novej generácie, ktorý zásadne mení spôsob písania akademických prác. Zedpera ti pomáha premýšľať a zlepšovať tvoju prácu krok za krokom. Vďaka nej presne vieš, čo máš robiť ďalej bez zbytočného stresu alebo neistoty.',
-  fiveBlocks: [
-    {
-      title: 'Rýchle vytvorenie práce',
-      text: 'Zadaj tému, vyplň profil a získaj kvalitný odborný text prispôsobený tvojim požiadavkám a zdrojom. Systém nehalucinuje ako bežné AI nástroje, ale vychádza výhradne z tvojich zdrojov. Využíva pritom viacero najnovších AI modelov. Cituje presne podľa noriem, takže sa nemusíš báť plagiátorstva. Dokonca zvládne aj výpočty pri praktickej časti. Už nemusíš hľadať žiadneho štatistu alebo pracovať v programoch, ktorým nerozumieš.',
-    },
-    {
-      title: 'AI kritik',
-      text: 'Asistent zanalyzuje tvoju prácu, upozorní ťa na nedostatky a zároveň navrhne konkrétne úpravy. Získaj okamžitú spätnú väzbu. Zároveň zobrazí skóre kvality napísanej práce.',
-    },
-    {
-      title: 'AI vedúci práce dostupný 24/7',
-      text: 'Sprevádza ťa celým procesom písania, kontroluje tvoj text, navrhuje vylepšenia a ukazuje ti, ako ho posunúť na vyššiu úroveň. Keď dostaneš pripomienky od školiteľa, pomôže ti ich jednoducho zapracovať. Je ti k dispozícii nonstop a vždy sa sústredí len na tvoju prácu.',
-    },
-    {
-      title: 'Kontrola originality',
-      text: 'Získaj prehľad o originalite práce a minimalizuj riziko problémov s plagiátorstvom. Zedpera celý text skontroluje a vyhodnotí percento zhody. Overenie prebieha bezpečne a bez ukladania obsahu do verejných databáz, takže sa nemusíš obávať nežiaducich zhôd pri následnom odovzdaní práce do školského systému. Výsledok ti poskytne orientačný prehľad o miere originality a pomôže identifikovať časti, ktoré je vhodné upraviť.',
-    },
-    {
-      title: 'Príprava na obhajobu',
-      text: 'Po dokončení práce systém vygeneruje obhajobu, pripraví ti prezentáciu, odpovede na otázky vedúceho aj oponenta na základe posudkov spolu so sprievodným textom.',
-    },
-  ],
-  tryZedpera: 'Chcem vyskúšať Zedperu',
-
-  comparisonTitle: 'Prečo nestačí bežná AI alebo LLM nástroj?',
-  comparisonText:
-    'Bežné AI nástroje často generujú všeobecné texty, môžu uvádzať nepresné zdroje a nepoznajú celý kontext práce. Zedpera funguje inak. Namiesto univerzálnych odpovedí dostaneš výstup, ktorý súvisí s tvojou prácou, zdrojmi a celým procesom písania.',
-  comparison: {
-    badTitle: 'Bežná AI',
-    zedperaTitle: 'Zedpera',
-    badItems: [
-      'Píše všeobecné texty a omáčky. Obsah môže byť síce dlhý, ale nemá žiadnu výpovednú hodnotu. Robí faktické chyby.',
-      'Bežná AI si nepamätá Vašu tému, preto jej musíte neustále opakovať všetky informácie a zadávať dlhé prompty.',
-      'Text je potrebné zdĺhavo upravovať.',
-      'Vymýšľa si zdroje.',
-      'Nechráni Vaše súkromie.',
-      'Nedokáže upozorniť na chyby.',
-      'Nerozumie pripomienkam od školiteľa.',
-      'Nepomôže ti s výpočtami a praktickou časťou.',
-      'Neoverí zhodu.',
-      'Nedokáže reagovať na posudky.',
-    ],
-    zedperaItems: [
-      'Pozná Vašu prácu. Dokonale si pamätá celú tému vrátane anotácie, cieľa, metodiky, hypotéz, spôsobu citovania, praktickej časti a kľúčových slov.',
-      'Pozná celú históriu, dokonca aj komunikáciu. Nemusíte jej nič opakovať.',
-      'Cituje presne podľa Vami zvolenej normy.',
-      'Vychádza z Vašich zdrojov.',
-      'Údaje sú chránené.',
-      'Zanalyzuje prácu a upozorní na problémové časti.',
-      'Sprevádza ťa celým procesom písania, kontroluje tvoj text, navrhuje vylepšenia a ukazuje ti, ako ho posunúť na vyššiu úroveň. Zároveň dokáže pomôcť s pripomienkami od vedúceho.',
-      'Dokáže ti pripraviť praktickú časť vrátane analýz a výpočtov.',
-      'Overí zhodu.',
-      'Pomôže s obhajobou na základe posudkov.',
-    ],
+const plans: Plan[] = [
+  {
+    id: 'week-mini',
+    label: 'MINI',
+    name: 'Na menšie úpravy',
+    price: '13,20 €',
+    period: '7 dní',
+    description:
+      'Vhodné na seminárnu prácu, jednu kapitolu alebo rýchlu úpravu.',
+    button: 'Kúpiť MINI',
   },
+  {
+    id: 'week-student',
+    label: 'ŠTUDENT',
+    name: 'Na väčšiu kapitolu',
+    price: '26,50 €',
+    period: '7 dní',
+    description:
+      'Vhodné na seminárku, ročníkovú prácu alebo rozsiahlejšiu kapitolu.',
+    button: 'Kúpiť ŠTUDENT',
+    highlighted: true,
+  },
+  {
+    id: 'week-pro',
+    label: 'PRO',
+    name: 'Intenzívna práca',
+    price: '39,90 €',
+    period: '7 dní',
+    description:
+      'Pre intenzívnu prácu tesne pred odovzdaním alebo pred obhajobou.',
+    button: 'Kúpiť PRO',
+  },
+];
 
-  reviewsBadge: 'Recenzie',
-  reviewsTitle: 'Skúsenosti študentov so Zedperou',
-  reviewsText:
-    'Skúsenosti používateľov, ktorí využili Zedperu pri seminárnych, bakalárskych, diplomových, rigoróznych a ďalších akademických prácach.',
-  reviews: [
-    {
-      name: 'Študentka diplomovej práce',
-      text: 'Zedperu používam niekoľko týždňov a fakt ma to s ňou baví. Školiteľka nechápe, ako je možné, že každý týždeň prídem na konzultáciu s novou kapitolou. Keď dá pripomienky, použijem AI vedúceho a obratom ich viem zapracovať. Sme iba v polovici, ale už z toho nemám strach.',
-    },
-    {
-      name: 'Používateľ seminárnych prác',
-      text: 'Chcem Vám poďakovať. Predplatil som si Zedperu a teraz viem pripraviť seminárku výrazne rýchlejšie. Nemusím strácať hodiny hľadaním zdrojov a parafrázovaním textov. Výstup si ešte upravím podľa seba, ale základ mám hotový veľmi rýchlo.',
-    },
-    {
-      name: 'Študentka po skúsenosti s bežnou AI',
-      text: 'Niekoľko týždňov som sa trápila s písaním práce pomocou bežných AI nástrojov. Zdroje boli nedohľadateľné, stále len všeobecné texty a nič konkrétne. Po vyplnení profilu v Zedpere som konečne videla relevantné zdroje a prvá kapitola vrátane úvodu bola hotová za pár minút.',
-    },
-    {
-      name: 'Študent bakalárskej práce',
-      text: 'Chcel som to len vyskúšať, lebo som nemal čas na písanie práce. Veľmi mi to uľahčilo život. Zdroje som našiel priamo v systéme a nemusel som behať po školskej knižnici. Práca bola hotová za pár dní a orientačná kontrola originality ukázala veľmi nízku zhodu.',
-    },
-    {
-      name: 'Používateľ AI vedúceho',
-      text: 'Veľkou výhodou je, že Zedpera si pamätá všetky informácie o mojej práci. Vedúci mi viackrát menil cieľ, ale stačilo ho zmeniť v profile a kapitoly som mal upravené v priebehu niekoľkých minút. Najviac mi pomohla funkcia AI vedúceho.',
-    },
-    {
-      name: 'Externá študentka',
-      text: 'Študujem externe druhú vysokú školu a popri práci a rodine je veľmi ťažké všetko stíhať. Zedperu mi odporučila spolužiačka. Konečne som mala seminárku hotovú za pár minút a nemusela som nad ňou stráviť celý víkend.',
-    },
-  ],
-  reviewsCtaTitle: 'Chceš si Zedperu vyskúšať aj ty?',
-  reviewsCtaText:
-    'Vyber si program podľa rozsahu práce a začni pracovať s AI vedúcim, zdrojmi, citáciami, kontrolou kvality a prípravou na obhajobu.',
+const faqItems: FaqItem[] = [
+  {
+    question: 'Je používanie Zedpery legálne?',
+    answer:
+      'Áno, používanie Zedpery je legálne. Systém slúži ako akademický asistent, ktorý pomáha s návrhom, štruktúrou, zdrojmi, kontrolou kvality a prípravou na obhajobu.',
+  },
+  {
+    question: 'Ako funguje overenie zhody?',
+    answer:
+      'Zedpera poskytuje orientačnú kontrolu originality a upozorní na časti, ktoré môžu vyžadovať úpravu, parafrázu alebo doplnenie citácie.',
+  },
+  {
+    question: 'Môžem službu použiť na viacero prác?',
+    answer:
+      'Áno. Podľa zvoleného balíka môžeš pracovať s jednou alebo viacerými prácami, ukladať históriu, upravovať profil a pokračovať v ďalších výstupoch.',
+  },
+  {
+    question: 'Aký je rozdiel medzi ChatGPT, Gemini a Zedperou?',
+    answer:
+      'Zedpera je prispôsobená na akademické písanie. Pracuje s profilom práce, štruktúrou, zdrojmi, citáciami, auditom kvality a obhajobou.',
+  },
+  {
+    question: 'V akých jazykoch môžem vytvoriť prácu?',
+    answer:
+      'Systém podporuje viacero jazykov a umožňuje prispôsobiť štýl, odbornosť a výstup podľa požiadaviek práce.',
+  },
+  {
+    question: 'Je Zedpera plagiátorstvo?',
+    answer:
+      'Nie. Zedpera je podporný nástroj. Výstup je potrebné skontrolovať, upraviť podľa vlastného zadania a používať v súlade s pravidlami školy.',
+  },
+];
 
-  featuresTitle: 'Funkcie aplikácie',
-  featuresText:
-    'Zedpera spája písanie, kontrolu kvality, citácie, obhajobu a odbornú spätnú väzbu v jednom rozhraní.',
-  features: [
-    {
-      icon: 'Bot',
-      title: 'AI písanie',
-      text: 'Generovanie odborných kapitol, úvodov, záverov a akademických textov podľa profilu práce.',
-    },
-    {
-      icon: 'GraduationCap',
-      title: 'AI vedúci práce',
-      text: 'Kritická spätná väzba k logike, metodológii, argumentácii, štruktúre a celkovej kvalite práce.',
-    },
-    {
-      icon: 'BookOpen',
-      title: 'Zdroje a citácie',
-      text: 'Pomoc pri práci so zdrojmi, rešeršou, citáciami, bibliografiou a odborným aparátom.',
-    },
-    {
-      icon: 'FileCheck2',
-      title: 'Audit kvality',
-      text: 'Kontrola slabých miest textu, rozporov, štylistiky, metodológie a akademickej presnosti.',
-    },
-    {
-      icon: 'ShieldCheck',
-      title: 'Originalita',
-      text: 'Predbežná orientačná kontrola originality, rizikových pasáží a miest, kde treba doplniť citácie.',
-    },
-    {
-      icon: 'Crown',
-      title: 'Obhajoba',
-      text: 'Príprava otázok, odpovedí, argumentácie, reakcií na posudok a prezentácie pred obhajobou.',
-    },
-  ],
+const features = [
+  {
+    icon: Bot,
+    title: 'AI vedúci práce',
+    text: 'Kontroluje logiku, metodológiu a upozorňuje na slabé miesta.',
+  },
+  {
+    icon: MessageCircle,
+    title: 'AI kritik',
+    text: 'Okamžitá spätná väzba a skóre kvality písomného výstupu.',
+  },
+  {
+    icon: PenTool,
+    title: 'AI písanie',
+    text: 'Generuje kapitoly, osnovy, úvody, závery a odborný text.',
+  },
+  {
+    icon: BookOpen,
+    title: 'Zdroje a citácie',
+    text: 'Pomoc pri rešerši, citáciách a zozname literatúry.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Originalita',
+    text: 'Orientačná kontrola zhody a rizikových pasáží.',
+  },
+  {
+    icon: Crown,
+    title: 'Obhajoba',
+    text: 'Príprava prezentácie, otázok, odpovedí a reakcií na posudky.',
+  },
+];
 
-  pricingBadge: 'Balíčky a platobná brána',
-  pricingTitle: 'Vyber si program a prejdi na platbu',
-  pricingText:
-    'Tu si klient vyberie program podľa rozsahu práce. Po kliknutí na tlačidlo bude presmerovaný na platobnú bránu.',
-  packageContent: 'Obsah balíka:',
-  plans: [
-    {
-      id: 'week-mini',
-      badge: 'Rýchly štart',
-      name: 'Týždeň MINI',
-      subtitle: 'Na menšie úpravy',
-      price: '13,20 €',
-      oldPrice: '15,84 €',
-      period: '7 dní',
-      description:
-        'Vhodné na seminárnu prácu, jednu kapitolu alebo rýchlu úpravu textu',
-      button: 'Kúpiť Týždeň MINI',
-      features: [
-        '25 strán',
-        '1 práca',
-        'Základné AI písanie',
-        '2 kontroly AI vedúceho',
-        '1 audit kvality',
-      ],
-    },
-    {
-      id: 'week-student',
-      badge: 'Študent',
-      name: 'Týždeň ŠTUDENT',
-      subtitle: 'Na väčšiu kapitolu',
-      price: '26,50 €',
-      oldPrice: '31,80 €',
-      period: '7 dní',
-      description:
-        'Vhodné na seminárku, ročníkovú prácu alebo rozsiahlejšiu kapitolu.',
-      button: 'Kúpiť Týždeň ŠTUDENT',
-      features: [
-        '50 strán',
-        '2 práce',
-        'AI písanie práce',
-        'AI vedúci práce',
-        'Audit kvality textu',
-        'Zdroje a citácie',
-      ],
-    },
-    {
-      id: 'week-pro',
-      badge: 'Pred odovzdaním',
-      name: 'Týždeň PRO',
-      subtitle: 'Intenzívna práca',
-      price: '39,90 €',
-      oldPrice: '47,88 €',
-      period: '7 dní',
-      description:
-        'Pre intenzívnu prácu tesne pred odovzdaním alebo pred obhajobou.',
-      button: 'Kúpiť Týždeň PRO',
-      features: [
-        '100 strán',
-        '3 práce',
-        '10 kontrol AI vedúceho',
-        '4 audity kvality',
-        '1 obhajoba',
-        'Prezentácia k obhajobe',
-      ],
-    },
-    {
-      id: 'monthly',
-      badge: 'Hlavný balík',
-      name: 'Mesačný START',
-      subtitle: 'Najrýchlejší štart',
-      price: '53,20 €',
-      oldPrice: '63,84 €',
-      period: '1 mesiac',
-      description:
-        'Vhodné pre používateľa, ktorý potrebuje intenzívne pracovať počas jedného mesiaca.',
-      button: 'Kúpiť mesačný balík',
-      highlighted: true,
-      features: [
-        '150 strán mesačne',
-        '5 prác',
-        'AI písanie kapitol',
-        'Tvorba osnovy a štruktúry',
-        'Práca so zdrojmi a citáciami',
-        'AI vedúci práce',
-        'Audit kvality',
-        '1 obhajoba',
-      ],
-    },
-    {
-      id: 'three-months',
-      badge: 'Najvýhodnejší',
-      name: '3 mesiace ŠTUDENT',
-      subtitle: 'Najvýhodnejší balík',
-      price: '93,30 €',
-      oldPrice: '111,96 €',
-      period: '3 mesiace',
-      description:
-        'Najlepší balík pre bakalársku alebo diplomovú prácu, kde je viac času na úpravy.',
-      button: 'Kúpiť 3-mesačný balík',
-      highlighted: true,
-      features: [
-        '350 strán na 3 mesiace',
-        '10 prác',
-        'Všetko z mesačného balíka',
-        'Dlhší prístup k aplikácii',
-        'Pokročilý AI vedúci práce',
-        'Kontrola logiky a argumentácie',
-        '12 auditov',
-        '3 obhajoby',
-      ],
-    },
-    {
-      id: 'year-pro',
-      badge: 'Ročný prístup',
-      name: 'Ročný PRO',
-      subtitle: 'Pre dlhodobé používanie',
-      price: '320 €',
-      oldPrice: '384 €',
-      period: '12 mesiacov',
-      description:
-        'Pre študentov, konzultantov alebo používateľov, ktorí chcú systém využívať počas celého akademického roka.',
-      button: 'Kúpiť ročný PRO',
-      features: [
-        '1 500 strán ročne',
-        'Neobmedzené projekty',
-        'Všetky hlavné moduly',
-        'AI vedúci práce',
-        'Audit kvality',
-        '10 obhajôb',
-        'Vhodné na celý akademický rok',
-      ],
-    },
-    {
-      id: 'year-max',
-      badge: 'Prémiový plán',
-      name: 'Ročný MAX',
-      subtitle: 'Najvyššie limity',
-      price: '532 €',
-      oldPrice: '638,40 €',
-      period: '12 mesiacov',
-      description:
-        'Pre náročných používateľov, ktorí chcú vyššie limity a prémiové moduly.',
-      button: 'Kúpiť ročný MAX',
-      features: [
-        '2 000 strán ročne',
-        'Neobmedzené projekty',
-        'Vyššie limity',
-        'Prémiové AI modely podľa dostupnosti',
-        'Rozšírený audit',
-        '15 obhajôb',
-        'Vhodné aj pre mentoring',
-      ],
-    },
-  ],
+const badAiItems = [
+  'Píše všeobecné texty a omáčky.',
+  'Nepamätá si tvoju prácu ani dôležité informácie.',
+  'Vymýšľa si zdroje.',
+  'Text je potrebné zdĺhavo upravovať.',
+  'Nedokáže upozorniť na chyby.',
+  'Nerozumie pripomienkam od školiteľa.',
+  'Nepomôže s praktickou časťou.',
+  'Nedokáže reagovať na posudky.',
+];
 
-  faqTitle: 'Často kladené otázky',
-  faqText:
-    'Najčastejšie otázky k používaniu Zedpery, AI vedúcemu, obhajobe, zdrojom a predplatnému.',
-  faqItems: [
-    {
-      question: 'Môžem službu používať počas celého štúdia na viacero prác?',
-      answer:
-        'Áno. Službu môžete využívať opakovane počas štúdia na rôzne typy akademických prác od seminárnych až po bakalárske, diplomové, dizertačné či rigorózne práce. Pre každé nové zadanie si jednoducho nastavíte nový projekt vo svojom profile.',
-    },
-    {
-      question: 'Zvládne ZEDPERA každý odbor?',
-      answer:
-        'Áno. ZEDPERA dokáže pracovať s akýmikoľvek materiálmi. Ak si chcete zjednodušiť prácu, môžete si stiahnuť zdroje z našej vedeckej databázy, alebo nahrať vlastné poznámky, súbory prípadne požiadavky školiteľa.',
-    },
-    {
-      question: 'Aký je rozdiel medzi ChatGPT, Gemini a ZEDPEROU?',
-      answer:
-        'ZEDPERA je vytvorená priamo pre akademické písanie. Na rozdiel od všeobecných nástrojov, ako ChatGPT alebo Gemini, pracuje s vaším konkrétnym zadaním. Nevymýšľa si. Celý systém sme navrhli tak, aby minimalizoval nepresnosti a uvádzal len relevantné zdroje. Využíva viacero špecializovaných modulov pre rôzne časti práce, ktoré boli vyvíjané tímom odborníkov s cieľom zjednodušiť a zrýchliť proces písania.',
-    },
-    {
-      question: 'Čo je AI vedúci práce a AI kritik?',
-      answer:
-        'AI vedúci práce pomáha pri písaní akademickej práce od prvotných návrhov až po finálnu verziu. AI kritik identifikuje chyby, upozorní na nedostatky v texte a navrhne konkrétne opravy.',
-    },
-    {
-      question: 'Čo je AI obhajoba?',
-      answer:
-        'AI obhajoba je nástroj, ktorý vám pomôže profesionálne pripraviť obhajobu. Na základe hotovej práce a posudkov vám spracuje prezentáciu, návrh obhajoby a poskytne odporúčania, ako všetko odprezentovať jasne a sebavedomo.',
-    },
-    {
-      question: 'Ako funguje overenie zhody?',
-      answer:
-        'Po dokončení práce si môžete jednoducho overiť jej originalitu priamo v systéme. Stačí vložiť celý text a ZEDPERA analyzuje jeho zhodu. Overenie prebieha bezpečne a bez ukladania obsahu do verejných databáz.',
-    },
-    {
-      question: 'Môžem použiť Zedperu len na vyhľadávanie zdrojov?',
-      answer:
-        'Áno, ak sa Vám nechce hľadať zdroje a čerpať z knižníc. V našej databáze nájdete množstvo najnovších článkov, kníh a publikácií.',
-    },
-    {
-      question: 'V akých jazykoch môžem vytvoriť prácu?',
-      answer:
-        'Služba je trénovaná na viacero jazykov, takže môžete písať akademické práce v rôznych jazykových variantoch a prispôsobiť štýl aj odbornú úroveň podľa zvoleného jazyka.',
-    },
-    {
-      question: 'Je používanie služby legálne?',
-      answer:
-        'Používanie umelej inteligencie pri písaní akademických prác nie je vo všeobecnosti zakázané, no školy kladú dôraz na transparentnosť. Odporúča sa preto uviesť využitie AI napríklad v metodológii alebo v prehlásení o použitých nástrojoch.',
-    },
-    {
-      question: 'Môžem predplatné kedykoľvek zrušiť?',
-      answer:
-        'Áno. Predplatné nie je viazané a môžete ho kedykoľvek zrušiť. Ak ho nezrušíte, automaticky sa obnoví a platba bude účtovaná aj počas ďalšieho obdobia podľa aktuálne zvoleného programu.',
-    },
-  ],
+const zedperaItems = [
+  'Pozná tvoju prácu a celý kontext.',
+  'Pamätá si históriu aj komunikáciu.',
+  'Cituje presne podľa zvolenej normy a používa tvoje zdroje.',
+  'Analyzuje prácu a upozorní na problémové časti.',
+  'Spracúva kapitoly, praktickú časť aj výpočty.',
+  'Dokáže pripraviť otázky, odpovede a obhajobu.',
+  'Overí zhodu a rizikové časti textu.',
+  'Pomôže s obhajobou na základe posudkov.',
+];
 
-  whyTitle: 'Prečo písať prácu so Zedperou',
-  whyItems: [
-    'Ušetrí ti mnoho času, nemusíš hľadať najnovšie zdroje v knižniciach, v našej databáze nájdeš všetko, čo potrebuješ.',
-    'Pozná tvoju tému, uvádza relevantné zdroje a vychádza z tvojich zdrojov.',
-    'K dispozícií máš AI vedúceho a kritika zároveň, prevedú ťa celým procesom a sú k dispozícií 24/7.',
-    'Zvládne aj praktickú časť vrátane výpočtov.',
-    'Overí originalitu a zároveň ťa pripraví k obhajobe.',
-  ],
+const reviews = [
+  {
+    text: 'AI vedúci mi pomohol pri pripomienkach od školiteľa a smeroval ma. Zedpera mi ušetrila neskutočne veľa času a stresu.',
+    name: 'Študentka diplomovej práce',
+  },
+  {
+    text: 'Zdroje som našiel priamo v systéme a práca bola hotová za pár dní. Originalita bola veľmi nízka. Super.',
+    name: 'Študent bakalárskej práce',
+  },
+  {
+    text: 'Bežné AI mi dávali len všeobecné texty. Zedpera mi po vyplnení profilu vygenerovala relevantné kapitoly za pár minút.',
+    name: 'Študentka po skúsenosti AI',
+  },
+  {
+    text: 'Študujem externe popri práci a rodine. Vďaka Zedpere stíham všetko. Seminárky mám rýchlo hotové.',
+    name: 'Externá študentka',
+  },
+];
 
-  legalTitle: 'Je používanie Zedpery legálne?',
-  legalText:
-    'Áno, používanie Zedpery je úplne legálne a etické. Nekopíruješ texty umelej inteligencie, ale ty sám ich tvoríš. Prechádzaš jednotlivými kapitolami a Zedpera ti pomáha napísať celú prácu za minimum času. Stačí keď doplníš do čestného prehlásenia svojej práce, že pri niektorých častiach bola použitá umelá inteligencia.',
-  legalCta: 'Začni písať bez stresu už dnes',
+function normalizeLanguage(value: string | null): AppLanguage {
+  const language = String(value || '').toLowerCase();
 
-  footerCopyright: '© 2026 Zedpera',
-  footerSubtitle: 'AI akademický asistent',
-  terms: 'Obchodné podmienky',
-  gdpr: 'GDPR',
-};
+  if (language === 'cs' || language === 'cz') return 'cs';
+  if (language === 'en') return 'en';
+  if (language === 'de') return 'de';
+  if (language === 'pl') return 'pl';
+  if (language === 'hu') return 'hu';
+
+  return 'sk';
+}
 
 function getCheckoutError(data: CheckoutResponse | null, fallback: string) {
   return (
@@ -681,483 +238,373 @@ function getCheckoutError(data: CheckoutResponse | null, fallback: string) {
   );
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
-
-function cleanUiString(value: string) {
-  return String(value || '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function shouldSkipLandingText(value: string, key = '') {
-  const text = cleanUiString(value);
-  const normalizedKey = key.toLowerCase();
-
-  if (!text) return true;
-  if (text.length < 2) return true;
-
-  if (
-    normalizedKey === 'id' ||
-    normalizedKey === 'icon' ||
-    normalizedKey === 'price' ||
-    normalizedKey === 'oldprice' ||
-    normalizedKey === 'highlighted'
-  ) {
-    return true;
-  }
-
-  if (/^https?:\/\//i.test(text)) return true;
-  if (/^[\d\s.,€%+\-/:()]+$/.test(text)) return true;
-  if (/^[A-Z0-9_-]{2,20}$/.test(text) && text !== 'GDPR') return true;
-
-  return false;
-}
-
-function collectTranslatableTexts(value: unknown, key = ''): string[] {
-  if (typeof value === 'string') {
-    const cleaned = cleanUiString(value);
-    return shouldSkipLandingText(cleaned, key) ? [] : [cleaned];
-  }
-
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => collectTranslatableTexts(item, key));
-  }
-
-  if (isRecord(value)) {
-    return Object.entries(value).flatMap(([entryKey, entryValue]) =>
-      collectTranslatableTexts(entryValue, entryKey),
-    );
-  }
-
-  return [];
-}
-
-function uniqueTranslatableTexts(value: unknown) {
-  return Array.from(new Set(collectTranslatableTexts(value)));
-}
-
-function applyAiTranslations<T>(value: T, translations: Record<string, string>, key = ''): T {
-  if (typeof value === 'string') {
-    const cleaned = cleanUiString(value);
-    const translated = translations[cleaned];
-
-    if (!translated || shouldSkipLandingText(cleaned, key)) {
-      return value;
-    }
-
-    return translated as T;
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => applyAiTranslations(item, translations, key)) as T;
-  }
-
-  if (isRecord(value)) {
-    const nextObject: Record<string, unknown> = {};
-
-    Object.entries(value).forEach(([entryKey, entryValue]) => {
-      nextObject[entryKey] = applyAiTranslations(entryValue, translations, entryKey);
-    });
-
-    return nextObject as T;
-  }
-
-  return value;
-}
-
-function mergeContent(base: LandingContent, translated: unknown): LandingContent {
-  if (!isRecord(translated)) return base;
-
-  return {
-    ...base,
-    ...(translated as Partial<LandingContent>),
-    comparison: {
-      ...base.comparison,
-      ...(isRecord(translated.comparison)
-        ? (translated.comparison as Partial<ComparisonContent>)
-        : {}),
-    },
-    plans: Array.isArray(translated.plans)
-      ? (translated.plans as Plan[]).map((plan, index) => ({
-          ...base.plans[index],
-          ...plan,
-          id: base.plans[index]?.id || plan.id,
-          price: base.plans[index]?.price || plan.price,
-          oldPrice: base.plans[index]?.oldPrice || plan.oldPrice,
-          highlighted: base.plans[index]?.highlighted || plan.highlighted,
-        }))
-      : base.plans,
-    features: Array.isArray(translated.features)
-      ? (translated.features as FeatureItem[]).map((feature, index) => ({
-          ...base.features[index],
-          ...feature,
-          icon: base.features[index]?.icon || feature.icon,
-        }))
-      : base.features,
-    fiveBlocks: Array.isArray(translated.fiveBlocks)
-      ? (translated.fiveBlocks as TextBlock[])
-      : base.fiveBlocks,
-    faqItems: Array.isArray(translated.faqItems)
-      ? (translated.faqItems as FaqItem[])
-      : base.faqItems,
-    reviews: Array.isArray(translated.reviews)
-      ? (translated.reviews as ReviewItem[])
-      : base.reviews,
-    aboutCards: Array.isArray(translated.aboutCards)
-      ? (translated.aboutCards as TextBlock[])
-      : base.aboutCards,
-    aboutParagraphs: Array.isArray(translated.aboutParagraphs)
-      ? (translated.aboutParagraphs as string[])
-      : base.aboutParagraphs,
-    aboutExperienceParagraphs: Array.isArray(translated.aboutExperienceParagraphs)
-      ? (translated.aboutExperienceParagraphs as string[])
-      : base.aboutExperienceParagraphs,
-    founderParagraphs: Array.isArray(translated.founderParagraphs)
-      ? (translated.founderParagraphs as string[])
-      : base.founderParagraphs,
-    boundariesParagraphs: Array.isArray(translated.boundariesParagraphs)
-      ? (translated.boundariesParagraphs as string[])
-      : base.boundariesParagraphs,
-    whyItems: Array.isArray(translated.whyItems)
-      ? (translated.whyItems as string[])
-      : base.whyItems,
-  };
-}
-
-async function translateTextChunk(language: AppLanguage, texts: string[]) {
-  if (!texts.length) return {} as Record<string, string>;
-
-  const res = await fetch('/api/translate-ui', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      language,
-      texts,
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error('Preklad stránky sa nepodarilo načítať.');
-  }
-
-  const data = await res.json();
-
-  if (!data?.ok || !isRecord(data.translations)) {
-    throw new Error('Preklad stránky nevrátil platnú mapu prekladov.');
-  }
-
-  return data.translations as Record<string, string>;
-}
-
-async function translateLandingContent(language: AppLanguage) {
-  if (language === 'sk') {
-    return baseContent;
-  }
-
-  const cacheKey = `zedpera_landing_${LANDING_TRANSLATION_VERSION}_${language}`;
-
-  if (typeof window !== 'undefined') {
-    const cached = localStorage.getItem(cacheKey);
-
-    if (cached) {
-      try {
-        return mergeContent(baseContent, JSON.parse(cached));
-      } catch {
-        localStorage.removeItem(cacheKey);
-      }
-    }
-  }
-
-  const uniqueTexts = uniqueTranslatableTexts(baseContent);
-  const chunks: string[][] = [];
-  const chunkSize = 80;
-
-  for (let index = 0; index < uniqueTexts.length; index += chunkSize) {
-    chunks.push(uniqueTexts.slice(index, index + chunkSize));
-  }
-
-  const translationEntries = await Promise.all(
-    chunks.map((chunk) => translateTextChunk(language, chunk)),
-  );
-
-  const translations = Object.assign({}, ...translationEntries) as Record<string, string>;
-  const translatedObject = applyAiTranslations(baseContent, translations);
-  const merged = mergeContent(baseContent, translatedObject);
-
-  if (typeof window !== 'undefined') {
-    localStorage.setItem(cacheKey, JSON.stringify(merged));
-  }
-
-  return merged;
-}
-  
-
-
-
-
-
-function DropdownLanguageMenu({
+function LanguageDropdown({
   language,
   onChange,
-  compact = false,
 }: {
   language: AppLanguage;
   onChange: (language: AppLanguage) => void;
-  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const current =
+    languages.find((item) => item.code === language) || languages[0];
 
-  const handleSelect = (nextLanguage: AppLanguage) => {
+  function handleSelect(nextLanguage: AppLanguage) {
     setOpen(false);
     onChange(nextLanguage);
-  };
+  }
 
   return (
-    <div
-      className={`zedpera-language-menu relative ${compact ? 'w-full' : 'w-full xl:w-[330px]'}`}
-      aria-label="Výber jazyka"
-    >
+    <div className="relative z-[90] hidden xl:block">
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
-        className="zedpera-language-trigger group flex min-h-[62px] w-full items-center justify-between gap-3 rounded-[1.25rem] border-2 px-3.5 py-3 text-left transition"
+        onClick={() => setOpen((value) => !value)}
+        className="flex h-[42px] min-w-[205px] items-center justify-between gap-3 rounded-md border border-white/10 bg-[#080816] px-4 text-[13px] font-black text-white shadow-[0_0_24px_rgba(124,58,237,0.16)] transition hover:border-violet-500/70 hover:bg-[#101026]"
         aria-expanded={open}
         aria-haspopup="listbox"
       >
-        <span className="flex min-w-0 items-center gap-3">
-          <span className="zedpera-language-globe flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl">
-            <Globe2 size={25} strokeWidth={3.2} />
+        <span className="flex items-center gap-3">
+          <span className="flex h-[28px] min-w-[40px] items-center justify-center rounded bg-violet-700 px-2 text-[12px] font-black text-white">
+            {current.short}
           </span>
 
-          <span className="zedpera-language-code flex h-11 min-w-14 shrink-0 items-center justify-center rounded-xl px-3 text-sm font-black">
-            {getLanguageShortLabel(language)}
-          </span>
-
-          <span className="min-w-0 leading-tight">
-            <span className="zedpera-language-label block truncate text-[10px] font-black uppercase tracking-[0.2em]">
-              Jazyk stránky
-            </span>
-            <span className="zedpera-language-name block truncate text-base font-black">
-              {getLanguageLabel(language)}
-            </span>
+          <span className="text-[14px] font-black text-white">
+            {current.label}
           </span>
         </span>
 
-        <span className="zedpera-language-chevron flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
-          <ChevronDown
-            size={22}
-            strokeWidth={3.2}
-            className={`transition ${open ? 'rotate-180' : ''}`}
-          />
-        </span>
+        <ChevronDown
+          size={16}
+          className={`text-violet-200 transition ${open ? 'rotate-180' : ''}`}
+        />
       </button>
 
-      {open && (
+      {open ? (
         <div
-          className="zedpera-language-dropdown absolute right-0 top-[calc(100%+0.7rem)] z-[99999] max-h-[460px] w-full min-w-[330px] overflow-y-auto rounded-[1.35rem] border-2 p-2"
+          className="absolute right-0 top-[calc(100%+0.55rem)] z-[100] w-[205px] overflow-hidden rounded-xl border border-violet-500/40 bg-[#090918] p-2 shadow-[0_22px_70px_rgba(0,0,0,0.7),0_0_35px_rgba(124,58,237,0.28)]"
           role="listbox"
         >
           {languages.map((item) => {
-            const code = item.code as AppLanguage;
-            const active = language === code;
+            const active = item.code === language;
 
             return (
               <button
-                key={code}
+                key={item.code}
                 type="button"
-                onClick={() => handleSelect(code)}
-                className={`zedpera-language-option flex min-h-[64px] w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left transition ${
-                  active ? 'zedpera-language-option-active' : 'zedpera-language-option-inactive'
+                onClick={() => handleSelect(item.code)}
+                className={`flex min-h-[44px] w-full items-center justify-between rounded-lg px-3 text-left text-[13px] font-black transition ${
+                  active
+                    ? 'bg-violet-700 text-white'
+                    : 'text-slate-300 hover:bg-white/5 hover:text-white'
                 }`}
                 role="option"
                 aria-selected={active}
               >
-                <span className="flex min-w-0 items-center gap-3">
+                <span className="flex items-center gap-3">
                   <span
-                    className={`zedpera-language-option-code flex h-11 w-14 shrink-0 items-center justify-center rounded-xl text-sm font-black ${
-                      active ? 'is-active' : ''
+                    className={`flex h-7 min-w-[40px] items-center justify-center rounded px-2 text-[12px] font-black ${
+                      active
+                        ? 'bg-white/15 text-white'
+                        : 'bg-white/5 text-violet-200'
                     }`}
                   >
-                    {getLanguageShortLabel(code)}
+                    {item.short}
                   </span>
 
-                  <span className="min-w-0">
-                    <span className="zedpera-language-option-name block truncate text-base font-black">
-                      {getLanguageLabel(code)}
-                    </span>
-                    <span className="zedpera-language-option-hint block truncate text-xs font-black">
-                      {active ? 'Aktuálne zvolený jazyk' : 'Prepnúť jazyk stránky'}
-                    </span>
-                  </span>
+                  {item.label}
                 </span>
 
-                <span className="zedpera-language-option-status flex h-9 w-9 shrink-0 items-center justify-center rounded-xl">
-                  {active ? (
-                    <CheckCircle2 size={22} strokeWidth={3.2} />
-                  ) : (
-                    <ArrowRight size={19} strokeWidth={3.2} />
-                  )}
-                </span>
+                {active ? <CheckCircle2 size={15} /> : null}
               </button>
             );
           })}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
+function MobileLanguageDropdown({
+  language,
+  onChange,
+}: {
+  language: AppLanguage;
+  onChange: (language: AppLanguage) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.035] p-2">
+      <div className="mb-2 px-2 text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+        Jazyk
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {languages.map((item) => {
+          const active = item.code === language;
+
+          return (
+            <button
+              key={item.code}
+              type="button"
+              onClick={() => onChange(item.code)}
+              className={`rounded-lg px-3 py-3 text-sm font-black ${
+                active
+                  ? 'bg-violet-700 text-white'
+                  : 'bg-white/5 text-slate-300'
+              }`}
+            >
+              {item.short} · {item.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AiLeaderPreview() {
+  const sidebar = [
+    'Prehľad',
+    'Projekt',
+    'Kapitoly',
+    'AI vedúci',
+    'Zdroje',
+    'Kontrola',
+    'Obhajoba',
+    'Nastavenia',
+  ];
+
+  return (
+    <div className="relative z-20 flex min-h-[520px] w-full items-center mt-10 xl:mt-0">
+      <div className="absolute -inset-8 rounded-[2rem] bg-violet-700/20 blur-3xl" />
+      <div className="absolute left-0 top-10 h-[440px] w-[90px] rounded-full bg-violet-600/25 blur-3xl" />
+
+      <div className="relative w-full overflow-hidden rounded-[1.55rem] border border-violet-500/35 bg-[#070714] p-3 shadow-[0_0_110px_rgba(124,58,237,0.33)]">
+        <div className="rounded-[1.25rem] border border-white/10 bg-[#0b0b1e]/95 p-5 shadow-inner shadow-black/40">
+          <div className="mb-5 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 via-violet-600 to-fuchsia-500 text-base font-black text-white shadow-[0_0_26px_rgba(124,58,237,0.6)]">
+                Z
+              </div>
+
+              <span className="text-[16px] font-black uppercase tracking-[0.22em] text-white">
+                Zedpera
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 rounded-full bg-emerald-500/10 px-4 py-1.5 text-[12px] font-black text-emerald-300">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.95)]" />
+              Online 24/7
+            </div>
+          </div>
+
+          <div className="grid gap-5 lg:grid-cols-[178px_1fr]">
+            <aside className="hidden rounded-2xl border border-white/5 bg-black/25 p-3 lg:block">
+              {sidebar.map((item) => {
+                const active = item === 'AI vedúci';
+
+                return (
+                  <div
+                    key={item}
+                    className={`mb-1.5 flex min-h-[39px] items-center gap-3 rounded-lg px-4 text-[13px] font-black transition ${
+                      active
+                        ? 'bg-violet-600 text-white shadow-lg shadow-violet-700/35'
+                        : 'text-slate-500'
+                    }`}
+                  >
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        active ? 'bg-white' : 'bg-slate-700'
+                      }`}
+                    />
+                    {item}
+                  </div>
+                );
+              })}
+            </aside>
+
+            <section className="rounded-2xl border border-white/10 bg-[#101026] p-6 shadow-inner shadow-black/30">
+              <div className="flex items-start justify-between gap-5">
+                <div>
+                  <h3 className="text-[29px] font-black leading-tight text-white">
+                    AI vedúci práce
+                  </h3>
+
+                  <p className="mt-3 text-[14px] font-semibold text-slate-400">
+                    Analyzoval som kapitolu 3. Tu sú moje odporúčania:
+                  </p>
+                </div>
+
+                <div className="hidden rounded-xl border border-emerald-400/15 bg-emerald-400/5 px-4 py-2 text-right xl:block">
+                  <div className="text-[11px] font-black uppercase tracking-[0.16em] text-emerald-300">
+                    Stav
+                  </div>
+
+                  <div className="mt-1 text-sm font-black text-white">
+                    Aktívny
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 rounded-xl border border-white/10 bg-black/25 p-5">
+                <p className="text-[16px] font-semibold leading-8 text-slate-100">
+                  Kapitola 3 obsahuje metodologický problém v popise výskumného
+                  postupu. Navrhujem doplniť informácie o výskumnom nástroji a
+                  vzorke.
+                </p>
+              </div>
+
+              <div className="mt-6">
+                <div className="mb-3 flex items-end justify-between gap-4">
+                  <div className="text-[14px] font-black text-slate-300">
+                    Skóre kvality práce
+                  </div>
+
+                  <div className="text-[31px] font-black leading-none text-emerald-400">
+                    88
+                    <span className="text-sm text-slate-400">/100</span>
+                  </div>
+                </div>
+
+                <div className="h-3 overflow-hidden rounded-full bg-white/10">
+                  <div className="h-full w-[88%] rounded-full bg-gradient-to-r from-violet-500 via-purple-400 to-emerald-400 shadow-[0_0_24px_rgba(124,58,237,0.75)]" />
+                </div>
+              </div>
+
+              <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.035] p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-sm font-black text-slate-400">
+                    Opýtať sa AI vedúceho...
+                  </span>
+
+                  <button
+                    type="button"
+                    className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-600 text-white shadow-lg shadow-violet-700/30 transition hover:bg-violet-500"
+                    aria-label="Odoslať otázku"
+                  >
+                    <Send size={17} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                {[
+                  [
+                    '92%',
+                    'Originalita',
+                    'text-emerald-400',
+                    'bg-emerald-500/10',
+                    'border-emerald-400/15',
+                  ],
+                  [
+                    '89/100',
+                    'Kvalita textu',
+                    'text-emerald-300',
+                    'bg-violet-500/10',
+                    'border-violet-400/15',
+                  ],
+                  [
+                    '85%',
+                    'Pripravenosť na obhajobu',
+                    'text-yellow-300',
+                    'bg-orange-500/10',
+                    'border-orange-400/15',
+                  ],
+                ].map(([number, label, numberClass, bgClass, borderClass]) => (
+                  <div
+                    key={label}
+                    className={`rounded-xl border ${borderClass} ${bgClass} p-4`}
+                  >
+                    <div className={`text-2xl font-black ${numberClass}`}>
+                      {number}
+                    </div>
+
+                    <div className="mt-1 text-[12px] font-bold leading-5 text-slate-400">
+                      {label}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function LandingPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [paymentError, setPaymentError] = useState('');
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
-  const [showBackToTop, setShowBackToTop] = useState(false);
-
   const [language, setLanguage] = useState<AppLanguage>('sk');
-  const [content, setContent] = useState<LandingContent>(baseContent);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  const allowedPlans = useMemo<PlanId[]>(
+    () => [
+      'week-mini',
+      'week-student',
+      'week-pro',
+      'monthly',
+      'three-months',
+      'year-pro',
+      'year-max',
+    ],
+    [],
+  );
 
   useEffect(() => {
-    const resolveStoredLanguage = () => {
-      if (typeof window === 'undefined') {
-        return 'sk' as AppLanguage;
-      }
+    document.documentElement.style.scrollBehavior = 'smooth';
 
-      return normalizeLanguage(
-        localStorage.getItem(LANGUAGE_STORAGE_KEY) ||
-          localStorage.getItem('zedpera_system_language') ||
-          localStorage.getItem('zedpera_work_language') ||
-          localStorage.getItem('app_language') ||
-          'sk',
-      );
-    };
+    const storedLanguage =
+      localStorage.getItem(LANGUAGE_STORAGE_KEY) ||
+      localStorage.getItem('zedpera_system_language') ||
+      localStorage.getItem('zedpera_work_language') ||
+      localStorage.getItem('app_language');
 
-    const syncLanguage = (nextLanguage: AppLanguage, persist = false) => {
-      void handleLanguageChange(nextLanguage, persist);
-    };
+    const nextLanguage = normalizeLanguage(storedLanguage);
 
-    syncLanguage(resolveStoredLanguage(), false);
+    setLanguage(nextLanguage);
+    document.documentElement.lang = nextLanguage;
 
-    const handleStorageLanguageChange = () => {
-      syncLanguage(resolveStoredLanguage(), false);
-    };
-
-    const handleCustomLanguageChange = (event: Event) => {
-      const customEvent = event as CustomEvent<AppLanguage | { language?: AppLanguage }>;
-      const detail = customEvent.detail;
-      const nextLanguage =
-        typeof detail === 'string'
-          ? normalizeLanguage(detail)
-          : normalizeLanguage(detail?.language || resolveStoredLanguage());
-
-      syncLanguage(nextLanguage, false);
-    };
-
-    window.addEventListener('storage', handleStorageLanguageChange);
-    window.addEventListener('zedpera-language-change', handleCustomLanguageChange);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageLanguageChange);
-      window.removeEventListener('zedpera-language-change', handleCustomLanguageChange);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
+    // Sledovanie scrollovania pre tlačidlo Hore
     const handleScroll = () => {
-      setShowBackToTop(window.scrollY > 520);
+      setShowScrollTop(window.scrollY > 400);
     };
 
-    handleScroll();
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('scroll', handleScroll);
 
     return () => {
+      document.documentElement.style.scrollBehavior = '';
       window.removeEventListener('scroll', handleScroll);
     };
   }, []);
 
-  const scrollToTop = () => {
-    if (typeof window === 'undefined') {
-      return;
+  function handleLanguageChange(nextLanguage: AppLanguage) {
+    setLanguage(nextLanguage);
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
+      localStorage.setItem('zedpera_system_language', nextLanguage);
+      localStorage.setItem('zedpera_work_language', nextLanguage);
+      localStorage.setItem('app_language', nextLanguage);
+
+      window.dispatchEvent(
+        new CustomEvent('zedpera-language-change', {
+          detail: nextLanguage,
+        }),
+      );
     }
 
-    window.scrollTo({
-      top: 0,
-      behavior: 'smooth',
-    });
-  };
-
-  const closeMobileMenu = () => {
-    setMobileMenuOpen(false);
-  };
-
-  const scrollToSection = (target: string) => {
-    if (typeof window === 'undefined') {
-      return;
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = nextLanguage;
+      document.documentElement.setAttribute('data-language', nextLanguage);
+      document.documentElement.setAttribute('data-system-language', nextLanguage);
+      document.documentElement.setAttribute('data-work-language', nextLanguage);
     }
+  }
 
-    const element = document.querySelector(target);
-
-    if (element) {
-      element.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      });
-    }
-  };
-
-  const handleLanguageChange = async (
-    nextLanguage: AppLanguage,
-    persist = true,
-  ) => {
-    try {
-      setLanguage(nextLanguage);
-
-      if (persist && typeof window !== 'undefined') {
-        localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
-        localStorage.setItem('zedpera_system_language', nextLanguage);
-        localStorage.setItem('zedpera_work_language', nextLanguage);
-      }
-
-      if (typeof document !== 'undefined') {
-        document.documentElement.lang = nextLanguage;
-        document.documentElement.setAttribute('data-language', nextLanguage);
-        document.documentElement.setAttribute('data-system-language', nextLanguage);
-        document.documentElement.setAttribute('data-work-language', nextLanguage);
-      }
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent('zedpera-language-change', {
-            detail: nextLanguage,
-          }),
-        );
-      }
-
-      if (nextLanguage === 'sk') {
-        setContent(baseContent);
-        return;
-      }
-
-      const translatedContent = await translateLandingContent(nextLanguage);
-      setContent(translatedContent);
-    } catch (error) {
-      console.warn('LANDING_TRANSLATION_WARNING:', error);
-      setContent(baseContent);
-    }
-  };
-
-  const getEmailForCheckout = async () => {
+  async function getEmailForCheckout() {
     let email = '';
 
     if (typeof window !== 'undefined') {
@@ -1170,7 +617,9 @@ export default function LandingPage() {
     }
 
     if (!email && typeof window !== 'undefined') {
-      const enteredEmail = window.prompt(content.emailPrompt);
+      const enteredEmail = window.prompt(
+        'Zadajte e-mail, na ktorý bude naviazaná platba:',
+      );
 
       email = enteredEmail?.trim() || '';
 
@@ -1181,34 +630,31 @@ export default function LandingPage() {
     }
 
     return email.trim().toLowerCase();
-  };
+  }
 
-  const buy = async (planId: PlanId) => {
+  async function buy(planId: PlanId) {
     try {
       setLoadingPlan(planId);
       setPaymentError('');
 
       if (!allowedPlans.includes(planId)) {
-        throw new Error(
-          `${content.invalidPlanPrefix} ${planId}. ${allowedPlans.join(', ')}`,
-        );
+        throw new Error(`Neplatný balík: ${planId}`);
       }
 
       const email = await getEmailForCheckout();
 
       if (!email) {
-        throw new Error(content.paymentEmailRequired);
+        throw new Error('Pre pokračovanie na platbu je potrebný e-mail.');
       }
 
-      const origin =
-        typeof window !== 'undefined' ? window.location.origin : '';
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
 
       const payload = {
         plan: planId,
         planId,
         addons: [],
         email,
-       successUrl: `${origin}/payment/success?plan=${planId}`,
+        successUrl: `${origin}/payment/success?plan=${planId}`,
         cancelUrl: `${origin}/pricing?payment=cancel&plan=${planId}`,
       };
 
@@ -1220,13 +666,12 @@ export default function LandingPage() {
         body: JSON.stringify(payload),
       });
 
-      const data = (await res.json().catch(() => null)) as
-        | CheckoutResponse
-        | null;
+      const data = (await res.json().catch(() => null)) as CheckoutResponse | null;
 
       if (!res.ok) {
-        console.error('CHECKOUT ERROR:', data);
-        throw new Error(getCheckoutError(data, content.paymentFailed));
+        throw new Error(
+          getCheckoutError(data, 'Platbu sa nepodarilo vytvoriť.'),
+        );
       }
 
       if (data?.url) {
@@ -1234,12 +679,13 @@ export default function LandingPage() {
         return;
       }
 
-      throw new Error(content.stripeMissingUrl);
+      throw new Error('Stripe nevygeneroval platobnú URL.');
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : content.paymentFailed;
+        error instanceof Error
+          ? error.message
+          : 'Platbu sa nepodarilo vytvoriť.';
 
-      console.error('BUY ERROR:', error);
       setPaymentError(message);
 
       if (typeof window !== 'undefined') {
@@ -1248,2173 +694,610 @@ export default function LandingPage() {
     } finally {
       setLoadingPlan(null);
     }
+  }
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const navItems = [
+    { href: '#features', label: 'Funkcie' },
+    { href: '#pricing', label: 'Cenník' },
+    { href: '#about', label: 'O nás' },
+    { href: '#reviews', label: 'Recenzie' },
+    { href: '#faq', label: 'FAQ' },
+    { href: '#blog', label: 'Blog' },
+    { href: '/gdpr', label: 'GDPR' },
+    { href: '/obchodne-podmienky', label: 'Obchodné podmienky' },
+  ];
+
   return (
-    <main className="zedpera-public-page min-h-screen overflow-x-hidden bg-[#05040a] text-white">
+    <main className="min-h-screen overflow-x-hidden bg-[#050511] text-white">
       <style jsx global>{`
         html,
         body {
-          background: #05040a !important;
-          color: #ffffff !important;
-          scroll-behavior: smooth;
+          background: #050511 !important;
         }
 
-        .zedpera-public-page,
-        .zedpera-public-page * {
-          opacity: 1 !important;
-          visibility: visible !important;
-          text-rendering: geometricPrecision !important;
-          -webkit-font-smoothing: antialiased !important;
-          text-shadow: none !important;
-          filter: none !important;
-          mix-blend-mode: normal !important;
-        }
-
-        .zedpera-public-page {
+        .zedpera-template {
+          color-scheme: dark;
           background:
-            radial-gradient(circle at 15% 8%, rgba(124, 58, 237, 0.34), transparent 28%),
-            radial-gradient(circle at 82% 18%, rgba(59, 130, 246, 0.22), transparent 28%),
-            radial-gradient(circle at 52% 72%, rgba(168, 85, 247, 0.16), transparent 32%),
-            linear-gradient(180deg, #05040a 0%, #080716 42%, #05040a 100%) !important;
+            radial-gradient(
+              circle at 13% 8%,
+              rgba(124, 58, 237, 0.3),
+              transparent 27%
+            ),
+            radial-gradient(
+              circle at 77% 4%,
+              rgba(59, 130, 246, 0.16),
+              transparent 25%
+            ),
+            radial-gradient(
+              circle at 72% 68%,
+              rgba(124, 58, 237, 0.22),
+              transparent 36%
+            ),
+            #050511;
         }
 
-        .zedpera-public-page :where(h1, h2, h3, h4, h5, h6, strong, b) {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-weight: 950 !important;
-          letter-spacing: -0.035em;
-        }
-
-        .zedpera-public-page :where(p, li, span, div, label, small) {
-          color: #dbeafe !important;
-          -webkit-text-fill-color: #dbeafe !important;
-          font-weight: 700 !important;
-        }
-
-        .zedpera-public-page a,
-        .zedpera-public-page button {
-          font-weight: 950 !important;
-        }
-
-        .zedpera-clickable,
-        .zedpera-card,
-        .zedpera-glass,
-        .zedpera-plan-card,
-        .zedpera-feature-card,
-        .zedpera-about-card,
-        .zedpera-review-card,
-        .zedpera-comparison-card,
-        .zedpera-mini-dashboard-card {
-          cursor: pointer !important;
-          user-select: none;
-        }
-
-        .zedpera-clickable:focus-visible,
-        .zedpera-card:focus-visible,
-        .zedpera-glass:focus-visible,
-        .zedpera-plan-card:focus-visible,
-        .zedpera-feature-card:focus-visible,
-        .zedpera-about-card:focus-visible,
-        .zedpera-review-card:focus-visible,
-        .zedpera-comparison-card:focus-visible,
-        .zedpera-mini-dashboard-card:focus-visible {
-          outline: 3px solid rgba(168, 85, 247, 0.95) !important;
-          outline-offset: 4px !important;
-        }
-
-        .zedpera-clickable:hover,
-        .zedpera-feature-card:hover,
-        .zedpera-about-card:hover,
-        .zedpera-review-card:hover,
-        .zedpera-comparison-card:hover,
-        .zedpera-mini-dashboard-card:hover {
-          transform: translateY(-3px);
-          border-color: rgba(168, 85, 247, 0.58) !important;
-          box-shadow: 0 28px 90px rgba(124, 58, 237, 0.22) !important;
-        }
-
-        .zedpera-public-page :where(.zedpera-card, .zedpera-glass, .zedpera-plan-card, .zedpera-feature-card, .zedpera-about-card, .zedpera-review-card, .zedpera-comparison-card) :where(p, li, span, div, label, small) {
-          color: #eaf2ff !important;
-          -webkit-text-fill-color: #eaf2ff !important;
-          font-weight: 850 !important;
-        }
-
-        .zedpera-public-page :where(.zedpera-card, .zedpera-glass, .zedpera-plan-card, .zedpera-feature-card, .zedpera-about-card, .zedpera-review-card, .zedpera-comparison-card) :where(h1, h2, h3, h4, h5, h6, strong, b) {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-glass {
-          background: rgba(13, 12, 28, 0.78) !important;
-          border: 1px solid rgba(255, 255, 255, 0.12) !important;
-          box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35) !important;
-          backdrop-filter: blur(18px);
-        }
-
-        .zedpera-card {
-          background: linear-gradient(180deg, rgba(18, 17, 38, 0.96), rgba(9, 8, 23, 0.96)) !important;
-          border: 1px solid rgba(255, 255, 255, 0.12) !important;
-          box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35) !important;
-        }
-
-        .zedpera-card:hover {
-          transform: translateY(-3px);
-          border-color: rgba(168, 85, 247, 0.55) !important;
-          box-shadow: 0 28px 90px rgba(124, 58, 237, 0.20) !important;
-        }
-
-        .zedpera-pill {
-          background: rgba(124, 58, 237, 0.14) !important;
-          border: 1px solid rgba(168, 85, 247, 0.42) !important;
-          color: #e9d5ff !important;
-          -webkit-text-fill-color: #e9d5ff !important;
-        }
-
-        .zedpera-primary-btn {
-          background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%) !important;
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          border: 1px solid rgba(255, 255, 255, 0.14) !important;
-          box-shadow: 0 18px 50px rgba(124, 58, 237, 0.38) !important;
-        }
-
-        .zedpera-secondary-btn {
-          background: rgba(255, 255, 255, 0.06) !important;
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          border: 1px solid rgba(255, 255, 255, 0.16) !important;
-        }
-
-        .zedpera-public-page header,
-        .zedpera-public-page header * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-        }
-
-        .zedpera-public-page .zedpera-wordmark,
-        .zedpera-public-page .zedpera-wordmark * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-public-page .zedpera-brand-icon {
-          display: none !important;
-        }
-
-        .zedpera-language-menu {
-          z-index: 100000 !important;
-        }
-
-        .zedpera-language-trigger {
-          background: linear-gradient(135deg, rgba(124, 58, 237, 0.25), rgba(37, 99, 235, 0.18)) !important;
-          border-color: rgba(196, 181, 253, 0.95) !important;
-          box-shadow:
-            0 0 0 1px rgba(255, 255, 255, 0.08) inset,
-            0 18px 50px rgba(0, 0, 0, 0.28),
-            0 0 35px rgba(124, 58, 237, 0.35) !important;
-        }
-
-        .zedpera-language-trigger:hover {
-          background: linear-gradient(135deg, rgba(124, 58, 237, 0.38), rgba(37, 99, 235, 0.26)) !important;
-          border-color: #ffffff !important;
-          box-shadow:
-            0 0 0 1px rgba(255, 255, 255, 0.18) inset,
-            0 22px 60px rgba(0, 0, 0, 0.35),
-            0 0 46px rgba(168, 85, 247, 0.55) !important;
-        }
-
-        .zedpera-language-trigger,
-        .zedpera-language-trigger * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-language-globe,
-        .zedpera-language-globe * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          stroke: #ffffff !important;
-          opacity: 1 !important;
-          visibility: visible !important;
-          filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.35)) !important;
-        }
-
-        .zedpera-language-code {
-          background: linear-gradient(135deg, #7c3aed, #2563eb) !important;
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          border: 1px solid rgba(255, 255, 255, 0.22) !important;
-        }
-
-        .zedpera-language-dropdown {
-          background: #0b0a18 !important;
-          border-color: rgba(168, 85, 247, 0.65) !important;
-          box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55) !important;
-        }
-
-        .zedpera-language-option:not([aria-selected='true']) {
-          background: transparent !important;
-        }
-
-        .zedpera-language-option,
-        .zedpera-language-option * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-language-option[aria-selected='true'] {
-          background: linear-gradient(135deg, #7c3aed, #2563eb) !important;
-        }
-
-        .zedpera-public-page input,
-        .zedpera-public-page textarea,
-        .zedpera-public-page select {
-          background: rgba(255, 255, 255, 0.08) !important;
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          border: 1px solid rgba(255, 255, 255, 0.16) !important;
-          font-weight: 900 !important;
-        }
-
-        .zedpera-public-page input::placeholder,
-        .zedpera-public-page textarea::placeholder {
-          color: #cbd5e1 !important;
-          -webkit-text-fill-color: #cbd5e1 !important;
-          opacity: 1 !important;
-        }
-
-        .zedpera-template-line {
-          background: linear-gradient(90deg, transparent, rgba(124, 58, 237, 0.95), transparent);
-          height: 1px;
-        }
-
-        .zedpera-mock-grid {
+        .zedpera-grid-bg {
           background-image:
-            linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-          background-size: 22px 22px;
+            linear-gradient(rgba(255, 255, 255, 0.032) 1px, transparent 1px),
+            linear-gradient(
+              90deg,
+              rgba(255, 255, 255, 0.032) 1px,
+              transparent 1px
+            );
+          background-size: 42px 42px;
         }
 
-
-
-        .zedpera-language-trigger {
-          background: linear-gradient(135deg, rgba(124, 58, 237, 0.44), rgba(37, 99, 235, 0.28)) !important;
-          border-color: rgba(221, 214, 254, 0.95) !important;
+        .zedpera-glow-border {
+          border: 1px solid rgba(139, 92, 246, 0.34);
           box-shadow:
-            0 0 0 1px rgba(255, 255, 255, 0.16) inset,
-            0 20px 60px rgba(0, 0, 0, 0.42),
-            0 0 42px rgba(124, 58, 237, 0.42) !important;
+            inset 0 1px 0 rgba(255, 255, 255, 0.04),
+            0 0 0 1px rgba(255, 255, 255, 0.03),
+            0 20px 70px rgba(0, 0, 0, 0.45);
         }
 
-        .zedpera-language-trigger:hover,
-        .zedpera-language-trigger:focus-visible {
-          transform: translateY(-1px);
-          background: linear-gradient(135deg, rgba(147, 51, 234, 0.60), rgba(37, 99, 235, 0.38)) !important;
-          border-color: #ffffff !important;
-          outline: none !important;
-          box-shadow:
-            0 0 0 2px rgba(255, 255, 255, 0.20) inset,
-            0 24px 70px rgba(0, 0, 0, 0.48),
-            0 0 60px rgba(168, 85, 247, 0.72) !important;
-        }
-
-        .zedpera-language-globe {
-          background: radial-gradient(circle at 30% 20%, #ffffff 0%, #ddd6fe 28%, #8b5cf6 58%, #2563eb 100%) !important;
-          color: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          border: 2px solid rgba(255, 255, 255, 0.92) !important;
-          box-shadow:
-            0 0 0 4px rgba(124, 58, 237, 0.18),
-            0 14px 34px rgba(124, 58, 237, 0.48) !important;
-        }
-
-        .zedpera-language-globe svg {
-          color: #111827 !important;
-          stroke: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.65)) !important;
-        }
-
-        .zedpera-language-code {
-          background: #ffffff !important;
-          color: #4c1d95 !important;
-          -webkit-text-fill-color: #4c1d95 !important;
-          border: 2px solid rgba(196, 181, 253, 0.95) !important;
-          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22) !important;
-        }
-
-        .zedpera-language-label {
-          color: #c4b5fd !important;
-          -webkit-text-fill-color: #c4b5fd !important;
-        }
-
-        .zedpera-language-name,
-        .zedpera-language-chevron,
-        .zedpera-language-chevron svg {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          stroke: #ffffff !important;
-        }
-
-        .zedpera-language-chevron {
-          background: rgba(255, 255, 255, 0.10) !important;
-          border: 1px solid rgba(255, 255, 255, 0.14) !important;
-        }
-
-        .zedpera-language-dropdown {
-          background: rgba(8, 7, 21, 0.98) !important;
-          border-color: rgba(221, 214, 254, 0.72) !important;
-          box-shadow:
-            0 30px 90px rgba(0, 0, 0, 0.70),
-            0 0 55px rgba(124, 58, 237, 0.42) !important;
-          backdrop-filter: blur(20px) !important;
-        }
-
-        .zedpera-language-option {
-          border: 1px solid transparent !important;
-        }
-
-        .zedpera-language-option-inactive {
-          background: rgba(255, 255, 255, 0.045) !important;
-          color: #ffffff !important;
-        }
-
-        .zedpera-language-option-inactive:hover {
-          background: rgba(124, 58, 237, 0.18) !important;
-          border-color: rgba(196, 181, 253, 0.42) !important;
-        }
-
-        .zedpera-language-option-active {
-          background: linear-gradient(135deg, #7c3aed, #2563eb) !important;
-          border-color: rgba(255, 255, 255, 0.26) !important;
-          box-shadow: 0 16px 38px rgba(37, 99, 235, 0.35) !important;
-        }
-
-        .zedpera-language-option-code {
-          background: #ffffff !important;
-          color: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          border: 1px solid rgba(255, 255, 255, 0.25) !important;
-        }
-
-        .zedpera-language-option-code.is-active {
-          color: #4c1d95 !important;
-          -webkit-text-fill-color: #4c1d95 !important;
-        }
-
-        .zedpera-language-option-name {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-        }
-
-        .zedpera-language-option-hint {
-          color: #cbd5e1 !important;
-          -webkit-text-fill-color: #cbd5e1 !important;
-        }
-
-        .zedpera-founder-card,
-        .zedpera-founder-visual {
-          cursor: pointer !important;
-        }
-
-        .zedpera-founder-visual:hover,
-        .zedpera-founder-card:hover {
-          transform: translateY(-4px);
-          border-color: rgba(196, 181, 253, 0.72) !important;
-          box-shadow: 0 32px 96px rgba(124, 58, 237, 0.26) !important;
-        }
-
-        .zedpera-founder-avatar,
-        .zedpera-founder-avatar * {
-          color: #4c1d95 !important;
-          -webkit-text-fill-color: #4c1d95 !important;
-        }
-
-
-        /* =====================================================
-           FINAL VISIBILITY + TEMPLATE ALIGNMENT OVERRIDES
-           - opravuje biele/neviditeľné znaky
-           - zvýrazňuje jazykové menu
-           - zobrazuje logo ikonu
-           - robí všetky karty a ikonky čitateľné podľa tmavej šablóny
-        ===================================================== */
-
-        .zedpera-public-page {
-          --zedpera-bg: #05040a;
-          --zedpera-panel: rgba(15, 14, 34, 0.96);
-          --zedpera-panel-strong: rgba(18, 17, 43, 0.98);
-          --zedpera-border: rgba(196, 181, 253, 0.24);
-          --zedpera-text: #ffffff;
-          --zedpera-muted: #dbeafe;
-          --zedpera-soft: #c4b5fd;
-          --zedpera-violet: #8b5cf6;
-          --zedpera-blue: #3b82f6;
-          --zedpera-green: #34d399;
-        }
-
-        .zedpera-public-page .mx-auto.max-w-7xl {
-          max-width: 1180px !important;
-        }
-
-        .zedpera-public-page section {
-          scroll-margin-top: 110px;
-        }
-
-        .zedpera-public-page .zedpera-brand-icon {
-          display: flex !important;
-          background: linear-gradient(135deg, #ffffff 0%, #ddd6fe 48%, #8b5cf6 100%) !important;
-          color: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          border: 2px solid rgba(255, 255, 255, 0.92) !important;
-          box-shadow:
-            0 0 0 5px rgba(139, 92, 246, 0.18),
-            0 18px 42px rgba(124, 58, 237, 0.36) !important;
-        }
-
-        .zedpera-public-page .zedpera-brand-icon svg {
-          stroke: #111827 !important;
-          color: #111827 !important;
-          opacity: 1 !important;
-          visibility: visible !important;
-          stroke-width: 3 !important;
-        }
-
-        .zedpera-public-page svg {
-          opacity: 1 !important;
-          visibility: visible !important;
-          stroke-width: 2.8 !important;
-          filter: none !important;
-        }
-
-        .zedpera-public-page :where(.zedpera-card, .zedpera-glass, .zedpera-plan-card, .zedpera-feature-card, .zedpera-about-card, .zedpera-review-card, .zedpera-comparison-card, .zedpera-founder-visual, .zedpera-founder-card) {
-          background:
-            linear-gradient(180deg, rgba(18, 17, 43, 0.98), rgba(8, 7, 21, 0.98)) !important;
-          border: 1px solid rgba(196, 181, 253, 0.22) !important;
-          box-shadow:
-            0 1px 0 rgba(255, 255, 255, 0.08) inset,
-            0 28px 90px rgba(0, 0, 0, 0.46) !important;
-        }
-
-        .zedpera-public-page :where(.zedpera-card, .zedpera-glass, .zedpera-plan-card, .zedpera-feature-card, .zedpera-about-card, .zedpera-review-card, .zedpera-comparison-card, .zedpera-founder-visual, .zedpera-founder-card) :where(h1, h2, h3, h4, h5, h6, strong, b) {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-public-page :where(.zedpera-card, .zedpera-glass, .zedpera-plan-card, .zedpera-feature-card, .zedpera-about-card, .zedpera-review-card, .zedpera-comparison-card, .zedpera-founder-visual, .zedpera-founder-card) :where(p, li, span, div, small) {
-          color: #eaf2ff !important;
-          -webkit-text-fill-color: #eaf2ff !important;
-          font-weight: 850 !important;
-        }
-
-        .zedpera-public-page :where(.zedpera-card, .zedpera-feature-card, .zedpera-about-card, .zedpera-review-card, .zedpera-comparison-card, .zedpera-mini-dashboard-card, .zedpera-plan-card, .zedpera-founder-visual, .zedpera-founder-card) {
-          transition:
-            transform 0.22s ease,
-            border-color 0.22s ease,
-            box-shadow 0.22s ease,
-            background 0.22s ease !important;
-        }
-
-        .zedpera-public-page :where(.zedpera-card, .zedpera-feature-card, .zedpera-about-card, .zedpera-review-card, .zedpera-comparison-card, .zedpera-mini-dashboard-card, .zedpera-plan-card, .zedpera-founder-visual, .zedpera-founder-card):hover {
-          transform: translateY(-5px) !important;
-          border-color: rgba(196, 181, 253, 0.72) !important;
-          box-shadow:
-            0 1px 0 rgba(255, 255, 255, 0.12) inset,
-            0 36px 110px rgba(124, 58, 237, 0.26) !important;
-        }
-
-        .zedpera-public-page .zedpera-feature-card > div:first-child,
-        .zedpera-public-page .zedpera-about-card > div:first-child {
-          background: linear-gradient(135deg, rgba(124, 58, 237, 0.90), rgba(37, 99, 235, 0.70)) !important;
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          border: 1px solid rgba(255, 255, 255, 0.20) !important;
-          box-shadow: 0 18px 44px rgba(124, 58, 237, 0.32) !important;
-        }
-
-        .zedpera-public-page .zedpera-feature-card > div:first-child svg,
-        .zedpera-public-page .zedpera-about-card > div:first-child svg {
-          stroke: #ffffff !important;
-          color: #ffffff !important;
-        }
-
-        .zedpera-language-menu,
-        .zedpera-language-menu * {
-          opacity: 1 !important;
-          visibility: visible !important;
-          filter: none !important;
-          text-shadow: none !important;
-        }
-
-        .zedpera-language-trigger {
-          min-height: 72px !important;
-          background:
-            linear-gradient(135deg, rgba(124, 58, 237, 0.72), rgba(37, 99, 235, 0.52)) !important;
-          border: 2px solid rgba(255, 255, 255, 0.82) !important;
-          box-shadow:
-            0 0 0 1px rgba(255, 255, 255, 0.18) inset,
-            0 24px 80px rgba(0, 0, 0, 0.55),
-            0 0 70px rgba(139, 92, 246, 0.52) !important;
-        }
-
-        .zedpera-language-trigger:hover,
-        .zedpera-language-trigger:focus-visible {
-          transform: translateY(-2px);
-          border-color: #ffffff !important;
-          box-shadow:
-            0 0 0 2px rgba(255, 255, 255, 0.22) inset,
-            0 28px 90px rgba(0, 0, 0, 0.62),
-            0 0 90px rgba(168, 85, 247, 0.78) !important;
-        }
-
-        .zedpera-language-trigger,
-        .zedpera-language-trigger * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-language-globe {
-          background:
-            radial-gradient(circle at 30% 20%, #ffffff 0%, #f5f3ff 22%, #c4b5fd 42%, #8b5cf6 68%, #2563eb 100%) !important;
-          border: 3px solid #ffffff !important;
-          box-shadow:
-            0 0 0 5px rgba(255, 255, 255, 0.14),
-            0 16px 40px rgba(124, 58, 237, 0.58) !important;
-        }
-
-        .zedpera-language-globe,
-        .zedpera-language-globe * {
-          color: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          stroke: #111827 !important;
-        }
-
-        .zedpera-language-code {
-          background: #ffffff !important;
-          color: #4c1d95 !important;
-          -webkit-text-fill-color: #4c1d95 !important;
-          border: 2px solid rgba(221, 214, 254, 0.98) !important;
-          box-shadow: 0 12px 30px rgba(0, 0, 0, 0.30) !important;
-        }
-
-        .zedpera-language-label {
-          color: #ddd6fe !important;
-          -webkit-text-fill-color: #ddd6fe !important;
-          letter-spacing: 0.20em !important;
-        }
-
-        .zedpera-language-name {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-size: 1.12rem !important;
-        }
-
-        .zedpera-language-chevron {
-          background: rgba(255, 255, 255, 0.16) !important;
-          border: 1px solid rgba(255, 255, 255, 0.24) !important;
-        }
-
-        .zedpera-language-chevron svg {
-          stroke: #ffffff !important;
-          color: #ffffff !important;
-        }
-
-        .zedpera-language-dropdown {
-          background:
-            linear-gradient(180deg, rgba(13, 12, 28, 0.99), rgba(5, 4, 10, 0.99)) !important;
-          border: 2px solid rgba(221, 214, 254, 0.78) !important;
-          box-shadow:
-            0 36px 100px rgba(0, 0, 0, 0.76),
-            0 0 70px rgba(124, 58, 237, 0.46) !important;
-          backdrop-filter: blur(22px) !important;
-        }
-
-        .zedpera-language-option {
-          border: 1px solid rgba(255, 255, 255, 0.10) !important;
-        }
-
-        .zedpera-language-option-inactive {
-          background: rgba(255, 255, 255, 0.07) !important;
-        }
-
-        .zedpera-language-option-inactive:hover {
-          background: rgba(124, 58, 237, 0.24) !important;
-          border-color: rgba(221, 214, 254, 0.62) !important;
-        }
-
-        .zedpera-language-option-active {
-          background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%) !important;
-          border-color: rgba(255, 255, 255, 0.42) !important;
-          box-shadow: 0 18px 46px rgba(37, 99, 235, 0.46) !important;
-        }
-
-        .zedpera-language-option,
-        .zedpera-language-option * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-language-option-code {
-          background: #ffffff !important;
-          color: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          border: 2px solid rgba(255, 255, 255, 0.92) !important;
-          box-shadow: 0 10px 26px rgba(0, 0, 0, 0.32) !important;
-        }
-
-        .zedpera-language-option-code.is-active {
-          background: #ffffff !important;
-          color: #4c1d95 !important;
-          -webkit-text-fill-color: #4c1d95 !important;
-        }
-
-        .zedpera-language-option-name {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-size: 1.05rem !important;
-        }
-
-        .zedpera-language-option-hint {
-          color: #dbeafe !important;
-          -webkit-text-fill-color: #dbeafe !important;
-        }
-
-        .zedpera-founder-section {
-          position: relative;
-        }
-
-        .zedpera-founder-section::before {
-          content: "";
-          position: absolute;
-          inset: 40px 0 auto 0;
-          height: 1px;
-          background: linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.70), transparent);
-          pointer-events: none;
-        }
-
-        .zedpera-founder-step {
-          background: rgba(255, 255, 255, 0.045) !important;
-          border: 1px solid rgba(255, 255, 255, 0.12) !important;
-          box-shadow: 0 18px 50px rgba(0, 0, 0, 0.34) !important;
-        }
-
-        .zedpera-founder-step-number {
-          background: linear-gradient(135deg, #7c3aed, #2563eb) !important;
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          box-shadow: 0 14px 34px rgba(124, 58, 237, 0.45) !important;
-        }
-
-        .zedpera-founder-portrait-card {
-          background:
-            radial-gradient(circle at 38% 18%, rgba(168, 85, 247, 0.45), transparent 32%),
-            linear-gradient(180deg, rgba(21, 19, 50, 0.99), rgba(8, 7, 21, 0.99)) !important;
-          border: 1px solid rgba(221, 214, 254, 0.34) !important;
-          box-shadow:
-            0 1px 0 rgba(255, 255, 255, 0.12) inset,
-            0 32px 100px rgba(124, 58, 237, 0.30) !important;
-        }
-
-        .zedpera-founder-avatar {
-          background:
-            radial-gradient(circle at 35% 20%, #ffffff 0%, #ddd6fe 22%, #8b5cf6 52%, #111827 100%) !important;
-          border: 2px solid rgba(255, 255, 255, 0.86) !important;
-          box-shadow:
-            0 0 0 6px rgba(124, 58, 237, 0.22),
-            0 26px 70px rgba(0, 0, 0, 0.50) !important;
-        }
-
-        .zedpera-founder-avatar,
-        .zedpera-founder-avatar * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-founder-avatar-initial {
-          background: rgba(255, 255, 255, 0.94) !important;
-          color: #4c1d95 !important;
-          -webkit-text-fill-color: #4c1d95 !important;
-          border: 1px solid rgba(255, 255, 255, 0.90) !important;
-        }
-
-        .zedpera-founder-badge {
-          background: linear-gradient(135deg, rgba(124, 58, 237, 0.32), rgba(37, 99, 235, 0.22)) !important;
-          border: 1px solid rgba(221, 214, 254, 0.38) !important;
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-        }
-
-        .zedpera-founder-badge svg {
-          stroke: #ffffff !important;
-        }
-
-        @media (max-width: 768px) {
-          .zedpera-language-dropdown {
-            left: 0 !important;
-            right: auto !important;
-            min-width: 100% !important;
-          }
-        }
-
-
-        /* =====================================================
-           TOPBAR FINAL - moderný vrch, viditeľné ikony jazyka
-        ===================================================== */
-        .zedpera-topbar {
-          background:
-            linear-gradient(180deg, rgba(5, 4, 10, 0.98), rgba(5, 4, 10, 0.86)) !important;
-          box-shadow:
-            0 1px 0 rgba(255, 255, 255, 0.08) inset,
-            0 18px 60px rgba(0, 0, 0, 0.38) !important;
-        }
-
-        .zedpera-topbar-logo,
-        .zedpera-topbar-logo * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-public-page .zedpera-brand-icon {
-          display: flex !important;
-          background:
-            radial-gradient(circle at 30% 18%, #ffffff 0%, #ddd6fe 28%, #8b5cf6 58%, #2563eb 100%) !important;
-          color: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          border: 2px solid rgba(255, 255, 255, 0.92) !important;
-          box-shadow:
-            0 0 0 4px rgba(124, 58, 237, 0.18),
-            0 16px 38px rgba(124, 58, 237, 0.48) !important;
-        }
-
-        .zedpera-public-page .zedpera-brand-icon svg {
-          color: #111827 !important;
-          stroke: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-        }
-
-        .zedpera-desktop-nav {
-          box-shadow:
-            0 1px 0 rgba(255, 255, 255, 0.08) inset,
-            0 18px 50px rgba(0, 0, 0, 0.22) !important;
-        }
-
-        .zedpera-nav-link {
-          color: #eef2ff !important;
-          -webkit-text-fill-color: #eef2ff !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-nav-link:hover,
-        .zedpera-nav-link:focus-visible {
-          background: linear-gradient(135deg, rgba(124, 58, 237, 0.28), rgba(37, 99, 235, 0.18)) !important;
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          outline: none !important;
-          box-shadow: 0 0 0 1px rgba(221, 214, 254, 0.25) inset !important;
-        }
-
-        .zedpera-topbar-login,
-        .zedpera-topbar-program,
-        .zedpera-mobile-menu-btn {
-          box-shadow:
-            0 1px 0 rgba(255, 255, 255, 0.10) inset,
-            0 18px 45px rgba(0, 0, 0, 0.30) !important;
-        }
-
-        .zedpera-topbar-login,
-        .zedpera-topbar-login * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-        }
-
-        .zedpera-topbar-program,
-        .zedpera-topbar-program * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-        }
-
-        .zedpera-language-menu {
-          z-index: 100000 !important;
-          position: relative !important;
-        }
-
-        .zedpera-language-trigger {
-          background:
-            linear-gradient(135deg, rgba(124, 58, 237, 0.46), rgba(37, 99, 235, 0.32)) !important;
-          border-color: rgba(221, 214, 254, 0.96) !important;
-          box-shadow:
-            0 0 0 1px rgba(255, 255, 255, 0.14) inset,
-            0 22px 65px rgba(0, 0, 0, 0.42),
-            0 0 46px rgba(124, 58, 237, 0.50) !important;
-        }
-
-        .zedpera-language-trigger:hover,
-        .zedpera-language-trigger:focus-visible {
-          transform: translateY(-1px);
-          background:
-            linear-gradient(135deg, rgba(147, 51, 234, 0.70), rgba(37, 99, 235, 0.46)) !important;
-          border-color: #ffffff !important;
-          outline: none !important;
-          box-shadow:
-            0 0 0 2px rgba(255, 255, 255, 0.22) inset,
-            0 26px 78px rgba(0, 0, 0, 0.52),
-            0 0 72px rgba(168, 85, 247, 0.76) !important;
-        }
-
-        .zedpera-language-trigger,
-        .zedpera-language-trigger * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-weight: 950 !important;
-          opacity: 1 !important;
-          visibility: visible !important;
-        }
-
-        .zedpera-language-globe {
-          background:
-            radial-gradient(circle at 30% 20%, #ffffff 0%, #f5f3ff 25%, #c4b5fd 42%, #8b5cf6 64%, #2563eb 100%) !important;
-          color: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          border: 2px solid rgba(255, 255, 255, 0.96) !important;
-          box-shadow:
-            0 0 0 4px rgba(124, 58, 237, 0.22),
-            0 16px 40px rgba(124, 58, 237, 0.56) !important;
-        }
-
-        .zedpera-language-globe svg {
-          color: #111827 !important;
-          stroke: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          opacity: 1 !important;
-          filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.78)) !important;
-        }
-
-        .zedpera-language-code {
-          background: #ffffff !important;
-          color: #4c1d95 !important;
-          -webkit-text-fill-color: #4c1d95 !important;
-          border: 2px solid rgba(221, 214, 254, 0.96) !important;
-          box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28) !important;
-        }
-
-        .zedpera-language-label {
-          color: #ddd6fe !important;
-          -webkit-text-fill-color: #ddd6fe !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-language-name,
-        .zedpera-language-chevron,
-        .zedpera-language-chevron svg {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          stroke: #ffffff !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-language-chevron {
-          background: rgba(255, 255, 255, 0.12) !important;
-          border: 1px solid rgba(255, 255, 255, 0.18) !important;
-        }
-
-        .zedpera-language-dropdown {
-          background: rgba(8, 7, 21, 0.985) !important;
-          border-color: rgba(221, 214, 254, 0.82) !important;
-          box-shadow:
-            0 34px 100px rgba(0, 0, 0, 0.76),
-            0 0 65px rgba(124, 58, 237, 0.48) !important;
-          backdrop-filter: blur(22px) !important;
-        }
-
-        .zedpera-language-option {
-          border: 1px solid transparent !important;
-        }
-
-        .zedpera-language-option,
-        .zedpera-language-option * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          stroke: #ffffff !important;
-          font-weight: 950 !important;
-          opacity: 1 !important;
-        }
-
-        .zedpera-language-option-inactive {
-          background: rgba(255, 255, 255, 0.06) !important;
-        }
-
-        .zedpera-language-option-inactive:hover,
-        .zedpera-language-option-inactive:focus-visible {
-          background: rgba(124, 58, 237, 0.24) !important;
-          border-color: rgba(196, 181, 253, 0.55) !important;
-          outline: none !important;
-        }
-
-        .zedpera-language-option-active {
-          background: linear-gradient(135deg, #7c3aed, #2563eb) !important;
-          border-color: rgba(255, 255, 255, 0.34) !important;
-          box-shadow: 0 16px 42px rgba(37, 99, 235, 0.42) !important;
-        }
-
-        .zedpera-language-option-code {
-          background: #ffffff !important;
-          color: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          stroke: #111827 !important;
-          border: 1px solid rgba(255, 255, 255, 0.25) !important;
-          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22) !important;
-        }
-
-        .zedpera-language-option-code.is-active {
-          color: #4c1d95 !important;
-          -webkit-text-fill-color: #4c1d95 !important;
-        }
-
-        .zedpera-language-option-name {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-        }
-
-        .zedpera-language-option-hint {
-          color: #dbeafe !important;
-          -webkit-text-fill-color: #dbeafe !important;
-        }
-
-        .zedpera-language-option-status {
-          background: rgba(255, 255, 255, 0.10) !important;
-          border: 1px solid rgba(255, 255, 255, 0.14) !important;
-        }
-
-        .zedpera-language-option-status svg {
-          stroke: #ffffff !important;
-        }
-
-        @media (max-width: 1279px) {
-          .zedpera-topbar {
-            padding-bottom: 0.85rem !important;
-          }
-        }
-
-        @media (max-width: 768px) {
-          .zedpera-language-dropdown {
-            left: 0 !important;
-            right: auto !important;
-            min-width: 100% !important;
-          }
-        }
-
-
-        /* =====================================================
-           TOPBAR FINAL – presne podľa tmavej šablóny
-           - výrazné logo
-           - viditeľný prepínač jazykov
-           - čitateľné ikony a texty
-           - všetky prvky klikateľné
-        ===================================================== */
-
-        .zedpera-template-topbar {
-          background:
-            linear-gradient(180deg, rgba(5, 4, 10, 0.98), rgba(5, 4, 10, 0.92)) !important;
-          box-shadow:
-            0 1px 0 rgba(255, 255, 255, 0.08) inset,
-            0 18px 60px rgba(0, 0, 0, 0.42) !important;
-        }
-
-        .zedpera-topbar-logo,
-        .zedpera-topbar-logo * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          opacity: 1 !important;
-          visibility: visible !important;
-        }
-
-        .zedpera-topbar-brand-icon {
-          display: flex !important;
-          background:
-            radial-gradient(circle at 30% 18%, #ffffff 0%, #ddd6fe 26%, #8b5cf6 58%, #2563eb 100%) !important;
-          border: 2px solid rgba(255, 255, 255, 0.88) !important;
-          color: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          box-shadow:
-            0 0 0 5px rgba(124, 58, 237, 0.16),
-            0 16px 42px rgba(124, 58, 237, 0.42) !important;
-        }
-
-        .zedpera-topbar-brand-icon svg {
-          stroke: #111827 !important;
-          color: #111827 !important;
-          opacity: 1 !important;
-          filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.7)) !important;
-        }
-
-        .zedpera-desktop-nav .zedpera-nav-link {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          border: 1px solid transparent !important;
-          opacity: 1 !important;
-        }
-
-        .zedpera-desktop-nav .zedpera-nav-link:hover,
-        .zedpera-desktop-nav .zedpera-nav-link:focus-visible {
-          background: rgba(255, 255, 255, 0.10) !important;
-          border-color: rgba(196, 181, 253, 0.35) !important;
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          outline: none !important;
-        }
-
-        .zedpera-language-menu {
-          z-index: 100000 !important;
-        }
-
-        .zedpera-language-trigger {
-          background:
-            linear-gradient(135deg, rgba(124, 58, 237, 0.50), rgba(37, 99, 235, 0.34)) !important;
-          border-color: rgba(221, 214, 254, 0.95) !important;
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          box-shadow:
-            0 0 0 1px rgba(255, 255, 255, 0.18) inset,
-            0 20px 60px rgba(0, 0, 0, 0.44),
-            0 0 54px rgba(124, 58, 237, 0.50) !important;
-        }
-
-        .zedpera-language-trigger:hover,
-        .zedpera-language-trigger:focus-visible {
-          transform: translateY(-1px);
-          border-color: #ffffff !important;
-          background:
-            linear-gradient(135deg, rgba(147, 51, 234, 0.68), rgba(37, 99, 235, 0.46)) !important;
-          outline: none !important;
-          box-shadow:
-            0 0 0 2px rgba(255, 255, 255, 0.22) inset,
-            0 24px 70px rgba(0, 0, 0, 0.52),
-            0 0 72px rgba(168, 85, 247, 0.78) !important;
-        }
-
-        .zedpera-language-trigger,
-        .zedpera-language-trigger * {
-          opacity: 1 !important;
-          visibility: visible !important;
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-language-globe {
-          background:
-            radial-gradient(circle at 30% 18%, #ffffff 0%, #ddd6fe 28%, #8b5cf6 58%, #2563eb 100%) !important;
-          border: 2px solid rgba(255, 255, 255, 0.95) !important;
-          box-shadow:
-            0 0 0 5px rgba(124, 58, 237, 0.18),
-            0 14px 38px rgba(124, 58, 237, 0.50) !important;
-        }
-
-        .zedpera-language-globe svg {
-          stroke: #111827 !important;
-          color: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          opacity: 1 !important;
-          filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.75)) !important;
-        }
-
-        .zedpera-language-code {
-          background: #ffffff !important;
-          color: #4c1d95 !important;
-          -webkit-text-fill-color: #4c1d95 !important;
-          border: 2px solid rgba(221, 214, 254, 0.96) !important;
-          box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25) !important;
-        }
-
-        .zedpera-language-label {
-          color: #ddd6fe !important;
-          -webkit-text-fill-color: #ddd6fe !important;
-          letter-spacing: 0.18em !important;
-        }
-
-        .zedpera-language-name {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-size: 1.05rem !important;
-        }
-
-        .zedpera-language-chevron {
-          background: rgba(255, 255, 255, 0.12) !important;
-          border: 1px solid rgba(255, 255, 255, 0.18) !important;
-        }
-
-        .zedpera-language-chevron svg {
-          stroke: #ffffff !important;
-          color: #ffffff !important;
-          opacity: 1 !important;
-        }
-
-        .zedpera-language-dropdown {
-          background: rgba(8, 7, 21, 0.99) !important;
-          border-color: rgba(221, 214, 254, 0.82) !important;
-          box-shadow:
-            0 34px 100px rgba(0, 0, 0, 0.74),
-            0 0 70px rgba(124, 58, 237, 0.48) !important;
-          backdrop-filter: blur(22px) !important;
-        }
-
-        .zedpera-language-option {
-          border: 1px solid transparent !important;
-          cursor: pointer !important;
-        }
-
-        .zedpera-language-option,
-        .zedpera-language-option * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          opacity: 1 !important;
-          visibility: visible !important;
-          font-weight: 950 !important;
-        }
-
-        .zedpera-language-option-inactive {
-          background: rgba(255, 255, 255, 0.055) !important;
-        }
-
-        .zedpera-language-option-inactive:hover {
-          background: rgba(124, 58, 237, 0.22) !important;
-          border-color: rgba(196, 181, 253, 0.52) !important;
-          transform: translateX(2px);
-        }
-
-        .zedpera-language-option-active {
-          background: linear-gradient(135deg, #7c3aed, #2563eb) !important;
-          border-color: rgba(255, 255, 255, 0.32) !important;
-          box-shadow: 0 16px 42px rgba(37, 99, 235, 0.38) !important;
-        }
-
-        .zedpera-language-option-code {
-          background: #ffffff !important;
-          color: #111827 !important;
-          -webkit-text-fill-color: #111827 !important;
-          border: 1px solid rgba(255, 255, 255, 0.28) !important;
-        }
-
-        .zedpera-language-option-code.is-active {
-          color: #4c1d95 !important;
-          -webkit-text-fill-color: #4c1d95 !important;
-        }
-
-        .zedpera-language-option-name {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-          font-size: 1rem !important;
-        }
-
-        .zedpera-language-option-hint {
-          color: #dbeafe !important;
-          -webkit-text-fill-color: #dbeafe !important;
-          font-weight: 850 !important;
-        }
-
-        .zedpera-topbar-login,
-        .zedpera-topbar-program,
-        .zedpera-mobile-menu-btn {
-          opacity: 1 !important;
-          visibility: visible !important;
-        }
-
-        .zedpera-topbar-login,
-        .zedpera-topbar-login * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-        }
-
-        .zedpera-topbar-program,
-        .zedpera-topbar-program * {
-          color: #ffffff !important;
-          -webkit-text-fill-color: #ffffff !important;
-        }
-
-        @media (min-width: 1280px) {
-          .zedpera-language-menu:not(.zedpera-language-menu .zedpera-language-menu) {
-            min-width: 330px !important;
-          }
-        }
-
-        @media (max-width: 768px) {
-          .zedpera-language-dropdown {
-            left: 0 !important;
-            right: auto !important;
-            min-width: 100% !important;
-          }
+        .zedpera-section-title {
+          text-shadow: 0 0 28px rgba(124, 58, 237, 0.32);
         }
       `}</style>
 
-      <header className="zedpera-topbar zedpera-template-topbar sticky top-0 z-[9999] border-b border-violet-300/20 px-4 py-3 backdrop-blur-2xl sm:px-5">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
-          <Link
-            href="#intro"
-            onClick={(event) => {
-              event.preventDefault();
-              scrollToSection('#intro');
-            }}
-            className="zedpera-wordmark zedpera-topbar-logo flex min-w-0 items-center gap-3 rounded-2xl px-2 py-1.5 transition hover:bg-white/[0.08]"
-            aria-label="Zedpera - návrat na úvod"
-          >
-            <span className="zedpera-brand-icon zedpera-topbar-brand-icon flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl shadow-xl">
-              <Sparkles size={23} strokeWidth={3} />
-            </span>
+      <div className="zedpera-template relative min-h-screen">
+        <div className="pointer-events-none fixed inset-0 z-0 zedpera-grid-bg opacity-45" />
+        <div className="pointer-events-none fixed left-1/2 top-0 z-0 h-[420px] w-[760px] -translate-x-1/2 rounded-full bg-violet-700/20 blur-[120px]" />
 
-            <span className="min-w-0 leading-tight">
-              <span className="block text-2xl font-black tracking-[0.04em] text-white sm:text-3xl">
-                ZEDPERA
-              </span>
-              <span className="block text-[11px] font-black uppercase tracking-[0.28em] text-violet-200 sm:text-xs">
-                {content.brandSubtitle}
-              </span>
-            </span>
-          </Link>
+        <header className="sticky top-0 z-50 border-b border-white/10 bg-[#050511]/92 backdrop-blur-2xl">
+          <div className="mx-auto flex h-[72px] max-w-[1920px] items-center px-8">
+            <Link href="/" className="flex shrink-0 items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 via-violet-600 to-fuchsia-500 text-2xl font-black text-white shadow-[0_0_28px_rgba(80,90,255,0.55)]">
+                Z
+              </div>
 
-          <nav className="zedpera-desktop-nav hidden items-center gap-1 rounded-[1.35rem] border border-white/10 bg-white/[0.055] p-1.5 shadow-2xl shadow-black/20 lg:flex">
-            {[
-              [content.navIntro, '#intro'],
-              [content.navAbout, '#about'],
-              [content.navFeatures, '#features'],
-              [content.navReviews, '#reviews'],
-              [content.navPricing, '#pricing'],
-              [content.navFaq, '#faq'],
-            ].map(([label, href]) => (
-              <button
-                key={href}
-                type="button"
-                onClick={() => scrollToSection(href)}
-                className="zedpera-nav-link rounded-2xl px-4 py-3 text-sm font-black transition"
-              >
-                {label}
-              </button>
-            ))}
-          </nav>
-
-          <div className="hidden items-center gap-3 xl:flex">
-            <DropdownLanguageMenu
-              language={language}
-              onChange={handleLanguageChange}
-            />
-
-            <Link
-              href="/login"
-              className="zedpera-topbar-login zedpera-secondary-btn inline-flex min-h-[62px] items-center justify-center rounded-[1.25rem] px-6 py-3 text-sm font-black transition"
-            >
-              {content.login}
+              <div className="text-[21px] font-black uppercase tracking-[0.12em] text-white">
+                Zedpera
+              </div>
             </Link>
+
+            <nav className="ml-10 hidden items-center gap-4 text-[14px] font-black text-white xl:flex">
+              {navItems.map((item) => (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  className="rounded-md px-2 py-2 transition hover:text-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-500/70"
+                >
+                  {item.label}
+                </a>
+              ))}
+            </nav>
+
+            <div className="ml-auto hidden shrink-0 items-center gap-3 xl:flex">
+              <LanguageDropdown
+                language={language}
+                onChange={handleLanguageChange}
+              />
+
+              <Link
+                href="/login"
+                className="inline-flex h-[42px] min-w-[138px] items-center justify-center rounded-md border border-white/10 bg-[#080816] px-5 text-[14px] font-black text-white transition hover:border-violet-500/70 hover:bg-[#101026]"
+              >
+                Prihlásiť sa
+              </Link>
+
+              <a
+                href="#pricing"
+                className="inline-flex h-[42px] min-w-[158px] items-center justify-center rounded-md bg-violet-600 px-6 text-[14px] font-black text-white shadow-lg shadow-violet-700/40 transition hover:bg-violet-500"
+              >
+                Začať zdarma
+              </a>
+            </div>
 
             <button
               type="button"
-              onClick={() => scrollToSection('#pricing')}
-              className="zedpera-topbar-program zedpera-primary-btn inline-flex min-h-[62px] items-center justify-center rounded-[1.25rem] px-7 py-3 text-sm font-black transition"
+              onClick={() => setMobileMenuOpen((value) => !value)}
+              className="ml-auto inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 text-white xl:hidden"
+              aria-label="Menu"
             >
-              {content.chooseProgram}
+              {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
             </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setMobileMenuOpen(true)}
-            className="zedpera-mobile-menu-btn zedpera-secondary-btn inline-flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-2xl xl:hidden"
-            aria-label={content.mobileOpenMenu}
-          >
-            <Menu size={24} strokeWidth={3} />
-          </button>
-        </div>
+          {mobileMenuOpen ? (
+            <div className="border-t border-white/10 bg-[#070716] px-5 py-4 xl:hidden shadow-xl">
+              <div className="grid gap-2">
+                {navItems.map((item) => (
+                  <a
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="rounded-xl px-4 py-3 text-sm font-bold text-slate-200 hover:bg-white/5"
+                  >
+                    {item.label}
+                  </a>
+                ))}
 
-        <div className="mx-auto mt-3 flex max-w-7xl items-center justify-center gap-2 xl:hidden">
-          <div className="w-full max-w-md">
-            <DropdownLanguageMenu
-              language={language}
-              onChange={handleLanguageChange}
-              compact
-            />
-          </div>
-        </div>
-
-        {mobileMenuOpen && (
-          <div className="fixed inset-0 z-[100000] bg-black/85 p-4 backdrop-blur-xl xl:hidden">
-            <div className="mx-auto max-w-md rounded-[2rem] border border-violet-300/40 bg-[#0b0a18] p-5 shadow-2xl shadow-violet-900/50">
-              <div className="mb-5 flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className="zedpera-brand-icon zedpera-topbar-brand-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-xl">
-                    <Sparkles size={21} strokeWidth={3} />
-                  </span>
-
-                  <div className="min-w-0">
-                    <div className="text-xl font-black text-white">ZEDPERA</div>
-                    <div className="truncate text-xs font-black uppercase tracking-[0.2em] text-violet-200">
-                      {content.brandSubtitle}
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={closeMobileMenu}
-                  className="rounded-2xl border border-white/10 bg-white/10 p-3 text-white transition hover:bg-white/20"
-                  aria-label={content.mobileCloseMenu}
-                >
-                  <X size={22} strokeWidth={3} />
-                </button>
-              </div>
-
-              <div className="mb-4">
-                <DropdownLanguageMenu
+                <MobileLanguageDropdown
                   language={language}
                   onChange={handleLanguageChange}
-                  compact
                 />
-              </div>
-
-              <div className="grid gap-2">
-                {[
-                  [content.navIntro, '#intro'],
-                  [content.navAbout, '#about'],
-                  [content.navFeatures, '#features'],
-                  [content.navReviews, '#reviews'],
-                  [content.navPricing, '#pricing'],
-                  [content.navFaq, '#faq'],
-                ].map(([label, href]) => (
-                  <button
-                    key={href}
-                    type="button"
-                    onClick={() => {
-                      closeMobileMenu();
-                      setTimeout(() => scrollToSection(href), 80);
-                    }}
-                    className="rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-4 text-left text-sm font-black text-white transition hover:bg-white/[0.14]"
-                  >
-                    {label}
-                  </button>
-                ))}
 
                 <Link
                   href="/login"
-                  onClick={closeMobileMenu}
-                  className="zedpera-secondary-btn rounded-2xl px-4 py-4 text-center text-sm font-black"
+                  className="mt-2 rounded-xl border border-white/15 px-4 py-3 text-center text-sm font-black text-white"
                 >
-                  {content.login}
+                  Prihlásiť sa
                 </Link>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    closeMobileMenu();
-                    setTimeout(() => scrollToSection('#pricing'), 80);
-                  }}
-                  className="zedpera-primary-btn rounded-2xl px-4 py-4 text-center text-sm font-black"
+                <a
+                  href="#pricing"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-xl bg-violet-600 px-4 py-3 text-center text-sm font-black text-white"
                 >
-                  {content.chooseProgram}
-                </button>
+                  Začať zdarma
+                </a>
               </div>
             </div>
-          </div>
-        )}
-      </header>
+          ) : null}
+        </header>
 
-      <section id="intro" className="relative isolate overflow-hidden px-5 pb-20 pt-20 lg:px-8 lg:pb-28 lg:pt-28">
-        <div className="absolute inset-0 -z-10 zedpera-mock-grid opacity-70" />
-        <div className="mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-[1.04fr_0.96fr]">
-          <div className="zedpera-hero-content">
-            <div className="zedpera-pill mb-7 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-black">
-              <Sparkles size={18} />
-              {content.heroBadge}
-            </div>
+        <section className="relative z-10 mx-auto max-w-[1860px] px-5 pb-8 pt-8 lg:px-10">
+          <div className="grid min-h-[560px] items-center gap-10 xl:grid-cols-[0.41fr_0.59fr]">
+            <div className="relative z-20 max-w-[720px] pt-1">
+              <div className="mb-8 inline-flex items-center rounded-full border border-violet-500/35 bg-violet-500/10 px-5 py-2 text-[13px] font-black uppercase tracking-[0.22em] text-violet-100">
+                Akademický asistent novej generácie
+              </div>
 
-            <h1 className="zedpera-hero-title max-w-5xl text-5xl font-black leading-[0.92] tracking-[-0.06em] text-white md:text-7xl xl:text-8xl">
-              {content.heroTitle}
-            </h1>
-
-            <p className="zedpera-hero-text mt-7 max-w-3xl text-lg font-bold leading-9 text-slate-300 md:text-xl">
-              {content.heroText}
-            </p>
-
-            <div className="mt-9 flex flex-col gap-4 sm:flex-row">
-              <a
-                href="#pricing"
-                className="zedpera-primary-btn inline-flex items-center justify-center gap-3 rounded-2xl px-7 py-5 text-base font-black"
-              >
-                {content.heroCta}
-                <ArrowRight size={20} />
-              </a>
-              <a
-                href="#features"
-                className="zedpera-secondary-btn inline-flex items-center justify-center gap-3 rounded-2xl px-7 py-5 text-base font-black"
-              >
-                {content.navFeatures}
-                <Sparkles size={20} />
-              </a>
-            </div>
-
-            <div className="mt-10 grid max-w-3xl grid-cols-2 gap-3 md:grid-cols-4">
-              {[
-                ['20', 'rokov skúseností'],
-                ['100+', 'akademických tém'],
-                ['24/7', 'AI vedúci'],
-                ['1', 'platforma'],
-              ].map(([value, label]) => (
-                <div key={label} role="button" tabIndex={0} onClick={() => scrollToSection('#features')} className="zedpera-glass zedpera-clickable rounded-3xl p-5 text-center">
-                  <div className="text-3xl font-black text-white">{value}</div>
-                  <div className="mt-1 text-xs font-black uppercase tracking-[0.16em] text-violet-200">
-                    {label}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="relative">
-            <div className="absolute -inset-8 -z-10 rounded-full bg-violet-600/25 blur-3xl" />
-            <div className="zedpera-glass overflow-hidden rounded-[2rem] p-4">
-              <div className="mb-4 flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <span className="h-3 w-3 rounded-full bg-red-400" />
-                  <span className="h-3 w-3 rounded-full bg-amber-300" />
-                  <span className="h-3 w-3 rounded-full bg-emerald-400" />
-                </div>
-                <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-black text-emerald-200">
-                  AI vedúci aktívny
+              <h1 className="text-[34px] font-black leading-[1.15] tracking-[-0.035em] text-white sm:text-[42px] lg:text-[48px] xl:text-[54px]">
+                Prvý AI vedúci práce,
+                <br />
+                ktorý vás prevedie
+                <br />
+                <span className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-purple-200 bg-clip-text text-transparent">
+                  od zadania až po obhajobu
                 </span>
+              </h1>
+
+              <p className="mt-9 max-w-2xl text-[17px] font-bold leading-8 text-slate-300">
+                Zedpera spája AI písanie, odbornú spätnú väzbu, kontrolu
+                kvality, zdroje, citácie, praktickú časť aj prípravu na
+                obhajobu v jednom systéme.
+              </p>
+
+              <div className="mt-10 flex flex-col gap-5 sm:flex-row">
+                <a
+                  href="#pricing"
+                  className="inline-flex min-h-[64px] min-w-[225px] items-center justify-center gap-4 rounded-xl bg-violet-600 px-9 text-[17px] font-black text-white shadow-2xl shadow-violet-700/35 transition hover:-translate-y-0.5 hover:bg-violet-500"
+                >
+                  Začať zdarma
+                  <ArrowRight size={23} />
+                </a>
+
+                <a
+                  href="#features"
+                  className="inline-flex min-h-[64px] min-w-[240px] items-center justify-center gap-4 rounded-xl border border-white/15 bg-white/5 px-9 text-[17px] font-black text-white transition hover:-translate-y-0.5 hover:border-violet-400 hover:bg-white/10"
+                >
+                  Pozrieť ukážku
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-sm">
+                    ▶
+                  </span>
+                </a>
               </div>
 
-              <div className="grid gap-4 lg:grid-cols-[160px_1fr]">
-                <aside className="rounded-3xl border border-white/10 bg-black/25 p-4">
-                  <div className="mb-4 text-xs font-black uppercase tracking-[0.22em] text-violet-200">
-                    Menu
-                  </div>
-                  {['AI Chat', 'Moje práce', 'Zdroje', 'Audit', 'Obhajoba'].map((item, index) => (
-                    <div
-                      key={item}
-                      className={`mb-2 rounded-2xl px-3 py-3 text-xs font-black ${
-                        index === 0 ? 'bg-violet-600 text-white' : 'bg-white/[0.05] text-slate-300'
-                      }`}
-                    >
-                      {item}
-                    </div>
-                  ))}
-                </aside>
+              <div className="mt-10 grid max-w-[760px] grid-cols-2 gap-5 text-[15px] font-black text-slate-100 sm:grid-cols-4">
+                <div className="flex items-center gap-3">
+                  <Bot className="h-6 w-6 text-violet-300" />
+                  AI vedúci 24/7
+                </div>
 
-                <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
-                  <div className="mb-5 flex items-start justify-between gap-4">
-                    <div>
-                      <div className="text-xs font-black uppercase tracking-[0.2em] text-violet-200">
-                        Dashboard práce
-                      </div>
-                      <div className="mt-2 text-2xl font-black text-white">
-                        AI vedúci práce
-                      </div>
-                    </div>
-                    <div className="rounded-2xl bg-violet-600/20 p-3 text-violet-200">
-                      <Bot size={24} />
-                    </div>
-                  </div>
+                <div className="flex items-center gap-3">
+                  <Sparkles className="h-6 w-6 text-violet-300" />
+                  Praktická časť vrátane výpočtov
+                </div>
 
-                  <div className="space-y-3">
-                    {content.fiveBlocks.slice(0, 4).map((block, index) => (
-                      <button
-                        key={block.title}
-                        type="button"
-                        onClick={() => scrollToSection('#features')}
-                        className="zedpera-mini-dashboard-card w-full rounded-2xl border border-white/10 bg-white/[0.05] p-4 text-left transition"
-                      >
-                        <div className="mb-2 flex items-center gap-2">
-                          <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-violet-600 text-xs font-black text-white">
-                            {index + 1}
-                          </span>
-                          <h3 className="text-sm font-black text-white">{block.title}</h3>
-                        </div>
-                        <p className="line-clamp-2 text-xs font-bold leading-6 text-slate-300">
-                          {block.text}
-                        </p>
-                      </button>
-                    ))}
-                  </div>
+                <div className="flex items-center gap-3">
+                  <BookOpen className="h-6 w-6 text-violet-300" />
+                  Citácie a zdroje
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <Crown className="h-6 w-6 text-violet-300" />
+                  Príprava na obhajobu
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
 
-      <section id="about" className="px-5 py-20 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <div className="mb-10 max-w-4xl">
-            <div className="zedpera-pill mb-5 inline-flex rounded-full px-5 py-3 text-sm font-black">
-              {content.aboutBadge}
-            </div>
-            <h2 className="text-4xl font-black tracking-tight text-white md:text-6xl">
-              {content.aboutTitle}
-            </h2>
-            <p className="mt-5 text-lg font-bold leading-9 text-slate-300">
-              {content.aboutText}
-            </p>
+            <AiLeaderPreview />
           </div>
 
-          <div className="grid gap-5 lg:grid-cols-3">
-            {content.aboutCards.map((card) => (
-              <article
-                key={card.title}
-                role="button"
-                tabIndex={0}
-                onClick={() => scrollToSection('#pricing')}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    scrollToSection('#pricing');
-                  }
-                }}
-                className="zedpera-card zedpera-about-card rounded-[2rem] p-7 transition"
+          <div className="mt-16 grid overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035] shadow-2xl shadow-black/30 sm:grid-cols-4">
+            {[
+              ['20', 'rokov skúseností'],
+              ['1000+', 'študentov'],
+              ['24/7', 'AI vedúci'],
+              ['1', 'platforma pre celý proces'],
+            ].map(([number, label]) => (
+              <div
+                key={label}
+                className="border-b border-white/10 px-5 py-5 text-center last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0"
               >
-                <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-600/20 text-violet-200">
-                  <Sparkles size={24} />
+                <div className="text-3xl font-black text-violet-400">
+                  {number}
                 </div>
-                <h3 className="text-2xl font-black text-white">{card.title}</h3>
-                <p className="mt-4 text-sm font-bold leading-8 text-slate-300">{card.text}</p>
-              </article>
+
+                <div className="mt-1 text-xs font-black uppercase tracking-wider text-slate-300">
+                  {label}
+                </div>
+              </div>
             ))}
           </div>
+        </section>
 
-          <div className="mt-8 grid gap-6 lg:grid-cols-[0.92fr_1.08fr]">
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={() => scrollToSection('#pricing')}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  scrollToSection('#pricing');
-                }
-              }}
-              className="zedpera-card zedpera-founder-card rounded-[2rem] p-7 transition"
-            >
-              <div className="zedpera-pill mb-5 inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-black">
-                <Crown size={16} />
-                {content.founderBadge}
-              </div>
-              <h3 className="text-3xl font-black text-white">{content.founderTitle}</h3>
-              <div className="mt-5 space-y-4">
-                {content.founderParagraphs.map((paragraph) => (
-                  <p key={paragraph} className="text-sm font-bold leading-8 text-slate-300">
-                    {paragraph}
-                  </p>
-                ))}
-              </div>
-            </div>
+        {/* --- Funkcie --- */}
+        <section
+          id="features"
+          className="relative z-10 mx-auto max-w-[1460px] px-5 py-24 lg:px-8"
+        >
+          <h2 className="zedpera-section-title text-center text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
+            Všetko, čo potrebujete na úspešnú prácu
+          </h2>
 
-            <div className="zedpera-card rounded-[2rem] p-7">
-              <h3 className="text-3xl font-black text-white">{content.boundariesTitle}</h3>
-              <div className="mt-5 space-y-4">
-                {content.boundariesParagraphs.slice(0, 3).map((paragraph) => (
-                  <p key={paragraph} className="text-sm font-bold leading-8 text-slate-300">
-                    {paragraph}
-                  </p>
-                ))}
-              </div>
-              <a href="#pricing" className="zedpera-primary-btn mt-7 inline-flex items-center gap-2 rounded-2xl px-6 py-4 text-sm font-black">
-                {content.boundariesCta}
-                <ArrowRight size={18} />
-              </a>
-            </div>
-          </div>
-        </div>
-      </section>
+          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {features.map((feature) => {
+              const Icon = feature.icon;
 
-      <section id="features" className="px-5 py-20 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <div className="mx-auto mb-12 max-w-4xl text-center">
-            <h2 className="text-4xl font-black tracking-tight text-white md:text-6xl">
-              {content.featuresTitle}
-            </h2>
-            <p className="mt-5 text-lg font-bold leading-9 text-slate-300">
-              {content.featuresText}
-            </p>
-          </div>
-
-          <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-            {content.features.map((feature) => {
-              const Icon = featureIconMap[feature.icon] || Sparkles;
               return (
                 <article
                   key={feature.title}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => scrollToSection('#pricing')}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      scrollToSection('#pricing');
-                    }
-                  }}
-                  className="zedpera-card zedpera-feature-card rounded-[2rem] p-7 transition"
+                  className="zedpera-glow-border flex flex-col items-start gap-4 rounded-2xl bg-white/[0.02] p-8 transition hover:bg-white/[0.04]"
                 >
-                  <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-600/20 text-violet-200">
-                    <Icon size={26} />
+                  <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-violet-600/20 text-violet-400 shadow-[0_0_15px_rgba(124,58,237,0.15)]">
+                    <Icon size={28} />
                   </div>
-                  <h3 className="text-2xl font-black text-white">{feature.title}</h3>
-                  <p className="mt-4 text-sm font-bold leading-8 text-slate-300">{feature.text}</p>
+                  <h3 className="text-xl font-bold text-white">
+                    {feature.title}
+                  </h3>
+                  <p className="text-sm font-semibold leading-relaxed text-slate-400">
+                    {feature.text}
+                  </p>
                 </article>
               );
             })}
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="px-5 py-20 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <div className="mx-auto mb-10 max-w-4xl text-center">
-            <h2 className="text-4xl font-black tracking-tight text-white md:text-6xl">
-              {content.comparisonTitle}
+        {/* --- Porovnanie (VS) --- */}
+        <section className="relative z-10 mx-auto max-w-[1260px] px-5 py-24 lg:px-8">
+          <div className="text-center">
+            <h2 className="zedpera-section-title text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
+              Prečo nestačí bežná AI alebo LLM nástroj?
             </h2>
-            <p className="mt-5 text-lg font-bold leading-9 text-slate-300">
-              {content.comparisonText}
+            <p className="mx-auto mt-4 max-w-2xl text-lg font-bold text-slate-400">
+              Zedpera funguje inak. Namiesto univerzálnych odpovedí dostanete
+              výstup, ktorý súvisí s vašou prácou, zdrojmi a celým procesom
+              písania.
             </p>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={() => scrollToSection('#pricing')}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  scrollToSection('#pricing');
-                }
-              }}
-              className="zedpera-card zedpera-comparison-card rounded-[2rem] p-7 transition"
-            >
-              <h3 className="mb-6 text-3xl font-black text-white">{content.comparison.badTitle}</h3>
-              <ul className="space-y-3">
-                {content.comparison.badItems.slice(0, 8).map((item) => (
-                  <li key={item} className="flex gap-3 rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm font-bold leading-7 text-slate-300">
-                    <span className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-red-500/20 text-red-200">!</span>
-                    <span>{item}</span>
+          <div className="mt-16 grid gap-8 lg:grid-cols-[1fr_auto_1fr] items-center">
+            {/* Bad AI */}
+            <div className="rounded-3xl border border-red-500/20 bg-red-500/5 p-8 shadow-[0_0_40px_rgba(239,68,68,0.05)]">
+              <h3 className="mb-6 text-2xl font-black text-red-400">Bežná AI</h3>
+              <ul className="space-y-4">
+                {badAiItems.map((item, index) => (
+                  <li key={index} className="flex items-start gap-3">
+                    <X className="mt-0.5 shrink-0 text-red-400" size={20} />
+                    <span className="text-sm font-semibold text-slate-300">
+                      {item}
+                    </span>
                   </li>
                 ))}
               </ul>
             </div>
 
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={() => scrollToSection('#pricing')}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  scrollToSection('#pricing');
-                }
-              }}
-              className="zedpera-comparison-card rounded-[2rem] border border-violet-400/40 bg-violet-600/10 p-7 shadow-2xl shadow-violet-900/30 transition"
-            >
-              <h3 className="mb-6 text-3xl font-black text-white">{content.comparison.zedperaTitle}</h3>
-              <ul className="space-y-3">
-                {content.comparison.zedperaItems.slice(0, 8).map((item) => (
-                  <li key={item} className="flex gap-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4 text-sm font-bold leading-7 text-slate-200">
-                    <CheckCircle2 className="mt-1 shrink-0 text-emerald-300" size={22} />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="founder" className="zedpera-founder-section px-5 py-20 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <div className="mx-auto mb-12 max-w-4xl text-center">
-            <div className="zedpera-pill mb-5 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-black">
-              <Sparkles size={18} />
-              Ako funguje Zedpera?
-            </div>
-            <h2 className="text-4xl font-black tracking-tight text-white md:text-6xl">
-              Od projektu až po obhajobu v jednom systéme
-            </h2>
-            <p className="mt-5 text-lg font-bold leading-9 text-slate-200">
-              Zedpera ťa prevedie celým procesom práce. Najskôr si vytvoríš profil,
-              následne pracuješ s AI vedúcim a na konci získaš podklady na obhajobu.
-            </p>
-          </div>
-
-          <div className="grid items-stretch gap-6 lg:grid-cols-[1fr_420px]">
-            <div className="grid gap-5 md:grid-cols-3 lg:grid-cols-1">
-              {[
-                {
-                  number: '01',
-                  title: 'Vytvoríš projekt',
-                  text: 'Zadáš tému, typ práce, odbor, cieľ, metodológiu a požiadavky školiteľa.',
-                  icon: FileCheck2,
-                },
-                {
-                  number: '02',
-                  title: 'AI vedúci ťa vedie',
-                  text: 'Kontroluje logiku, zdroje, citácie, štruktúru a upozorňuje na slabé miesta.',
-                  icon: Bot,
-                },
-                {
-                  number: '03',
-                  title: 'Dokončíš obhajobu',
-                  text: 'Pripravíš otázky, odpovede, argumentáciu a prezentáciu podľa posudkov.',
-                  icon: GraduationCap,
-                },
-              ].map((step) => {
-                const StepIcon = step.icon;
-
-                return (
-                  <article
-                    key={step.number}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => scrollToSection('#pricing')}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        scrollToSection('#pricing');
-                      }
-                    }}
-                    className="zedpera-founder-step zedpera-clickable rounded-[2rem] p-6 transition"
-                  >
-                    <div className="flex items-start gap-5">
-                      <span className="zedpera-founder-step-number flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-base font-black">
-                        {step.number}
-                      </span>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="mb-3 flex items-center gap-3">
-                          <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-600/25 text-violet-100">
-                            <StepIcon size={22} />
-                          </span>
-                          <h3 className="text-2xl font-black text-white">
-                            {step.title}
-                          </h3>
-                        </div>
-
-                        <p className="text-sm font-bold leading-8 text-slate-200">
-                          {step.text}
-                        </p>
-                      </div>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-
-            <article
-              role="button"
-              tabIndex={0}
-              onClick={() => scrollToSection('#pricing')}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  scrollToSection('#pricing');
-                }
-              }}
-              className="zedpera-founder-portrait-card zedpera-founder-visual zedpera-clickable relative overflow-hidden rounded-[2.2rem] p-7 transition"
-            >
-              <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-violet-500/35 blur-3xl" />
-              <div className="absolute -bottom-20 left-6 h-56 w-56 rounded-full bg-blue-500/24 blur-3xl" />
-
-              <div className="relative z-10 flex h-full min-h-[520px] flex-col justify-between">
-                <div>
-                  <div className="zedpera-founder-badge inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-black uppercase tracking-[0.18em]">
-                    <Crown size={17} />
-                    {content.founderBadge}
-                  </div>
-
-                  <div className="mt-7 grid gap-5">
-                    <div className="zedpera-founder-avatar flex aspect-[4/5] min-h-[260px] items-center justify-center overflow-hidden rounded-[2rem]">
-                      <div className="text-center">
-                        <div className="zedpera-founder-avatar-initial mx-auto flex h-24 w-24 items-center justify-center rounded-full text-4xl font-black shadow-2xl">
-                          M
-                        </div>
-                        <div className="mt-5 text-xl font-black text-white">
-                          Martina
-                        </div>
-                        <div className="mt-2 text-sm font-black uppercase tracking-[0.18em] text-violet-100">
-                          Zakladateľka
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-[1.6rem] border border-white/12 bg-black/30 p-5 backdrop-blur-xl">
-                      <div className="text-xs font-black uppercase tracking-[0.16em] text-violet-100">
-                        O nej
-                      </div>
-                      <h3 className="mt-3 text-2xl font-black text-white">
-                        20 rokov skúseností v jednom systéme
-                      </h3>
-                      <p className="mt-4 text-sm font-bold leading-8 text-slate-200">
-                        Za Zedperou stoja reálne skúsenosti so študentmi,
-                        školiteľmi, posudkami, obhajobami a akademickým prostredím.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <a
-                  href="#pricing"
-                  onClick={(event) => event.stopPropagation()}
-                  className="zedpera-primary-btn mt-7 inline-flex items-center justify-center gap-3 rounded-2xl px-6 py-4 text-sm font-black"
-                >
-                  {content.boundariesCta}
-                  <ArrowRight size={18} />
-                </a>
+            {/* VS Badge */}
+            <div className="flex justify-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#101026] text-xl font-black text-slate-400 shadow-[0_0_30px_rgba(0,0,0,0.5)]">
+                VS
               </div>
-            </article>
-          </div>
+            </div>
 
-          <div className="mt-6 grid gap-5 lg:grid-cols-3">
-            {content.founderParagraphs.map((paragraph, index) => (
-              <article
-                key={`${paragraph}-${index}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => scrollToSection('#pricing')}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    scrollToSection('#pricing');
-                  }
-                }}
-                className="zedpera-card zedpera-clickable rounded-[2rem] p-6 transition"
-              >
-                <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-600 text-sm font-black text-white">
-                  {index + 1}
+            {/* Zedpera AI */}
+            <div className="zedpera-glow-border rounded-3xl bg-violet-600/10 p-8 shadow-[0_0_50px_rgba(124,58,237,0.15)] relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-4">
+                <Crown className="text-violet-400 opacity-50" size={40} />
+              </div>
+              <h3 className="mb-6 text-2xl font-black text-violet-300">Zedpera</h3>
+              <ul className="space-y-4 relative z-10">
+                {zedperaItems.map((item, index) => (
+                  <li key={index} className="flex items-start gap-3">
+                    <CheckCircle2 className="mt-0.5 shrink-0 text-violet-400" size={20} />
+                    <span className="text-sm font-semibold text-white">
+                      {item}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        {/* --- Ako funguje Zedpera? --- */}
+        <section className="relative z-10 mx-auto max-w-[1260px] px-5 py-24 lg:px-8">
+          <h2 className="zedpera-section-title text-center text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
+            Ako funguje Zedpera?
+          </h2>
+
+          <div className="mt-16 grid gap-8 md:grid-cols-3 relative">
+            <div className="hidden md:block absolute top-1/2 left-0 w-full h-0.5 bg-gradient-to-r from-violet-600/0 via-violet-600/50 to-violet-600/0 -translate-y-1/2 z-0" />
+            
+            {[
+              {
+                step: '01',
+                title: 'Vytvoríte projekt',
+                text: 'Zadáte tému, typ práce, školu, požiadavky a ciele.',
+              },
+              {
+                step: '02',
+                title: 'AI vedúci vás vedie',
+                text: 'Pomáha s osnovou, textom a upozorňuje na chyby.',
+              },
+              {
+                step: '03',
+                title: 'Dokončíte a obhájite',
+                text: 'Skontrolujete kvalitu, originalitu, zdroje a metodiku a pripravíte sa na obhajobu.',
+              },
+            ].map((item, index) => (
+              <div key={index} className="relative z-10 flex flex-col items-center text-center">
+                <div className="flex h-20 w-20 items-center justify-center rounded-full border-4 border-[#050511] bg-violet-600 text-2xl font-black text-white shadow-[0_0_30px_rgba(124,58,237,0.4)]">
+                  {item.step}
                 </div>
-                <p className="text-sm font-bold leading-8 text-slate-200">
-                  {paragraph}
+                <h3 className="mt-6 text-xl font-black text-white">{item.title}</h3>
+                <p className="mt-3 text-sm font-semibold text-slate-400 max-w-[260px]">
+                  {item.text}
                 </p>
-              </article>
+              </div>
             ))}
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section id="reviews" className="px-5 py-20 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <div className="mx-auto mb-12 max-w-4xl text-center">
-            <div className="zedpera-pill mb-5 inline-flex rounded-full px-5 py-3 text-sm font-black">
-              {content.reviewsBadge}
+        {/* --- O nás (20 rokov skúseností) --- */}
+        <section id="about" className="relative z-10 mx-auto max-w-[1460px] px-5 py-24 lg:px-8">
+          <div className="zedpera-glow-border rounded-3xl bg-white/[0.02] p-8 lg:p-12 overflow-hidden relative">
+            <div className="absolute right-0 top-0 w-1/2 h-full bg-gradient-to-l from-violet-900/20 to-transparent pointer-events-none" />
+            <div className="grid gap-12 lg:grid-cols-2 items-center relative z-10">
+              <div>
+                <div className="mb-6 inline-flex items-center rounded-full border border-violet-500/35 bg-violet-500/10 px-4 py-1.5 text-[12px] font-black uppercase tracking-[0.2em] text-violet-200">
+                  O nás
+                </div>
+                <h2 className="text-3xl sm:text-4xl font-black text-white leading-tight">
+                  20 rokov skúseností<br />
+                  <span className="text-violet-400">v jednom systéme</span>
+                </h2>
+                <p className="mt-6 text-lg font-semibold text-slate-300">
+                  Za Zedperou stojí skúsený tím, ktorý už viac než 20 rokov pomáha
+                  študentom pri tvorbe akademických prác.
+                </p>
+                <p className="mt-4 text-lg font-semibold text-slate-400">
+                  Naše skúsenosti zo skutočnej praxe sme spojili s umelou
+                  inteligenciou, aby sme vám priniesli komplexnú podporu počas
+                  celého procesu písania.
+                </p>
+              </div>
+              <div className="relative h-[400px] rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center group border border-white/10">
+                 <img 
+                   src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=800&h=1000" 
+                   alt="Fotografia tímu" 
+                   className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                 />
+                 <div className="absolute inset-0 bg-gradient-to-t from-[#050511] via-[#050511]/30 to-transparent z-10 opacity-90" />
+              </div>
             </div>
-            <h2 className="text-4xl font-black tracking-tight text-white md:text-6xl">
-              {content.reviewsTitle}
-            </h2>
-            <p className="mt-5 text-lg font-bold leading-9 text-slate-300">
-              {content.reviewsText}
-            </p>
           </div>
+        </section>
 
-          <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-            {content.reviews.slice(0, 6).map((review) => (
-              <ReviewCard
-                key={`${review.name}-${review.text}`}
-                name={review.name}
-                text={review.text}
-                onClick={() => scrollToSection('#pricing')}
-              />
+        {/* --- Recenzie --- */}
+        <section id="reviews" className="relative z-10 mx-auto max-w-[1460px] px-5 py-24 lg:px-8">
+           <h2 className="zedpera-section-title text-center text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
+            Skúsenosti študentov so Zedperou
+          </h2>
+
+          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {reviews.map((review, index) => (
+              <div key={index} className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 shadow-lg flex flex-col justify-between">
+                <div>
+                  <div className="flex gap-1 text-yellow-400 mb-4">
+                    <Star size={18} fill="currentColor" />
+                    <Star size={18} fill="currentColor" />
+                    <Star size={18} fill="currentColor" />
+                    <Star size={18} fill="currentColor" />
+                    <Star size={18} fill="currentColor" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-300 italic mb-6">
+                    &quot;{review.text}&quot;
+                  </p>
+                </div>
+                <div className="text-[13px] font-black text-violet-300 uppercase tracking-wider">
+                  {review.name}
+                </div>
+              </div>
             ))}
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section id="pricing" className="px-5 py-20 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <div className="mx-auto mb-12 max-w-4xl text-center">
-            <div className="zedpera-pill mb-5 inline-flex rounded-full px-5 py-3 text-sm font-black">
-              {content.pricingBadge}
-            </div>
-            <h2 className="text-4xl font-black tracking-tight text-white md:text-6xl">
-              {content.pricingTitle}
+        {/* --- Cenník --- */}
+        <section id="pricing" className="relative z-10 mx-auto max-w-[1260px] px-5 py-24 lg:px-8">
+          <div className="text-center">
+            <h2 className="zedpera-section-title text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
+              Vyberte si program podľa rozsahu práce
             </h2>
-            <p className="mt-5 text-lg font-bold leading-9 text-slate-300">
-              {content.pricingText}
-            </p>
+          </div>
+
+          <div className="mt-16 grid gap-8 sm:grid-cols-3 max-w-[1000px] mx-auto">
+            {plans.map((plan) => (
+              <div
+                key={plan.id}
+                className={`relative flex flex-col rounded-3xl p-8 ${
+                  plan.highlighted
+                    ? 'zedpera-glow-border bg-violet-900/20 scale-105 z-10'
+                    : 'border border-white/10 bg-white/[0.02]'
+                }`}
+              >
+                {plan.highlighted && (
+                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 rounded-full bg-violet-500 px-4 py-1 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-violet-500/50">
+                    Najobľúbenejšie
+                  </div>
+                )}
+                
+                <div className="text-sm font-black uppercase tracking-wider text-violet-400 mb-2">
+                  {plan.label}
+                </div>
+                <h3 className="text-xl font-bold text-white mb-6">
+                  {plan.name}
+                </h3>
+                <div className="mb-6 flex items-baseline gap-2">
+                  <span className="text-4xl font-black text-white">{plan.price}</span>
+                  <span className="text-sm font-semibold text-slate-400">/ {plan.period}</span>
+                </div>
+                <p className="text-sm font-semibold text-slate-400 mb-8 min-h-[60px]">
+                  {plan.description}
+                </p>
+                
+                <button
+                  onClick={() => buy(plan.id)}
+                  disabled={loadingPlan === plan.id}
+                  className={`mt-auto w-full rounded-xl py-4 text-sm font-black transition flex items-center justify-center gap-2 ${
+                    plan.highlighted
+                      ? 'bg-violet-600 text-white hover:bg-violet-500 shadow-lg shadow-violet-600/30'
+                      : 'bg-white/10 text-white hover:bg-white/20'
+                  }`}
+                >
+                  {loadingPlan === plan.id ? <Loader2 className="animate-spin" size={18} /> : null}
+                  {plan.button}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-12 text-center">
+             <Link href="/pricing" className="inline-flex items-center gap-2 text-sm font-black text-violet-400 hover:text-violet-300 transition">
+               Zobraziť všetky balíčky a možnosti <ArrowRight size={16} />
+             </Link>
+             <p className="mt-2 text-xs font-semibold text-slate-500">
+               Pozrite si kompletnú ponuku mesačných a ročných balíčkov.
+             </p>
+          </div>
+          
+          {/* Guarantees */}
+          <div className="mt-12 flex flex-wrap justify-center gap-6 text-xs font-bold text-slate-400 uppercase tracking-widest">
+            <span className="flex items-center gap-2"><ShieldCheck size={16} className="text-violet-400"/> Bezpečné platby</span>
+            <span className="flex items-center gap-2"><Zap size={16} className="text-violet-400"/> Okamžitý prístup</span>
+            <span className="flex items-center gap-2"><CheckCircle2 size={16} className="text-violet-400"/> Záruka spokojnosti</span>
+            <span className="flex items-center gap-2"><X size={16} className="text-violet-400"/> Možnosť zrušenia kedykoľvek</span>
           </div>
 
           {paymentError && (
-            <div className="mx-auto mb-8 max-w-3xl rounded-3xl border border-red-400/40 bg-red-500/10 p-5 text-center text-sm font-black text-red-100">
+            <div className="mt-8 rounded-lg bg-red-500/10 p-4 text-center text-sm font-bold text-red-400 border border-red-500/20 max-w-md mx-auto">
               {paymentError}
             </div>
           )}
+        </section>
 
-          <div className="grid gap-5 lg:grid-cols-3">
-            {content.plans.map((plan) => (
-              <article
-                key={plan.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => void buy(plan.id)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    void buy(plan.id);
-                  }
-                }}
-                className={`zedpera-plan-card relative rounded-[2rem] border p-7 transition ${
-                  plan.highlighted
-                    ? 'border-violet-400/70 bg-violet-600/14 shadow-2xl shadow-violet-900/35'
-                    : 'zedpera-card'
-                }`}
-              >
-                {plan.badge && (
-                  <div className="mb-5 inline-flex rounded-full border border-violet-400/40 bg-violet-500/16 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-violet-100">
-                    {plan.badge}
-                  </div>
-                )}
-                <h3 className="text-3xl font-black text-white">{plan.name}</h3>
-                <p className="mt-2 text-sm font-black text-violet-200">{plan.subtitle}</p>
-                <div className="mt-6 flex items-end gap-3">
-                  <span className="text-5xl font-black text-white">{plan.price}</span>
-                  {plan.oldPrice && <span className="pb-2 text-lg font-black text-slate-500 line-through">{plan.oldPrice}</span>}
-                </div>
-                <div className="mt-2 text-sm font-black text-slate-300">{plan.period}</div>
-                <p className="mt-5 min-h-[72px] text-sm font-bold leading-7 text-slate-300">{plan.description}</p>
-                <div className="mt-6 text-xs font-black uppercase tracking-[0.16em] text-violet-200">
-                  {content.packageContent}
-                </div>
-                <ul className="mt-4 space-y-3">
-                  {plan.features.map((feature) => (
-                    <li key={feature} className="flex gap-3 text-sm font-bold text-slate-200">
-                      <CheckCircle2 className="shrink-0 text-emerald-300" size={20} />
-                      <span>{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void buy(plan.id);
-                  }}
-                  disabled={loadingPlan === plan.id}
-                  className="zedpera-primary-btn mt-7 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 text-sm font-black disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {loadingPlan === plan.id ? <Loader2 className="animate-spin" size={18} /> : <CreditCard size={18} />}
-                  {loadingPlan === plan.id ? content.checkoutRedirecting : plan.button}
-                </button>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section id="faq" className="px-5 py-20 lg:px-8">
-        <div className="mx-auto max-w-5xl">
-          <div className="mb-10 text-center">
-            <h2 className="text-4xl font-black tracking-tight text-white md:text-6xl">{content.faqTitle}</h2>
-            <p className="mt-5 text-lg font-bold leading-9 text-slate-300">{content.faqText}</p>
-          </div>
-          <div className="space-y-4">
-            {content.faqItems.map((item, index) => (
-              <div key={`${item.question}-${index}`} className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.06] shadow-2xl shadow-black/20">
-                <button
-                  type="button"
-                  onClick={() => setOpenFaqIndex(openFaqIndex === index ? null : index)}
-                  className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left"
-                >
-                  <span className="text-base font-black text-white md:text-lg">{item.question}</span>
-                  <ChevronDown className={`h-5 w-5 shrink-0 text-violet-200 transition ${openFaqIndex === index ? 'rotate-180' : ''}`} />
-                </button>
-                {openFaqIndex === index && (
-                  <div className="border-t border-white/10 px-6 pb-6 pt-1">
-                    <p className="text-sm font-bold leading-8 text-slate-300">{item.answer}</p>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="px-5 py-20 lg:px-8">
-        <div className="mx-auto max-w-6xl rounded-[2rem] border border-violet-400/40 bg-violet-600/15 p-8 text-center shadow-2xl shadow-violet-900/35 md:p-12">
-          <h2 className="text-4xl font-black tracking-tight text-white md:text-6xl">
-            {content.legalTitle}
+        {/* --- FAQ --- */}
+        <section id="faq" className="relative z-10 mx-auto max-w-[860px] px-5 py-24 lg:px-8">
+           <h2 className="zedpera-section-title text-center text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl mb-12">
+            Najčastejšie otázky
           </h2>
-          <p className="mx-auto mt-6 max-w-4xl text-lg font-bold leading-9 text-slate-200">
-            {content.legalText}
-          </p>
-          <a href="#pricing" className="zedpera-primary-btn mt-8 inline-flex items-center justify-center gap-3 rounded-2xl px-8 py-5 text-base font-black">
-            {content.legalCta}
-            <ArrowRight size={20} />
-          </a>
-        </div>
-      </section>
 
-      <footer className="border-t border-white/10 px-5 py-10 lg:px-8">
-        <div className="mx-auto flex max-w-7xl flex-col gap-5 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="text-lg font-black text-white">{content.footerCopyright}</div>
-            <div className="mt-1 text-sm font-bold text-slate-400">{content.footerSubtitle}</div>
+          <div className="space-y-4">
+            {faqItems.map((faq, index) => {
+              const isOpen = openFaqIndex === index;
+              return (
+                <div key={index} className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
+                  <button
+                    onClick={() => setOpenFaqIndex(isOpen ? null : index)}
+                    className="flex w-full items-center justify-between p-6 text-left hover:bg-white/[0.02] transition"
+                  >
+                    <span className="text-base font-bold text-white pr-4">{faq.question}</span>
+                    {isOpen ? (
+                      <ChevronUp className="shrink-0 text-violet-400" size={20} />
+                    ) : (
+                      <ChevronDown className="shrink-0 text-slate-500" size={20} />
+                    )}
+                  </button>
+                  {isOpen && (
+                    <div className="px-6 pb-6 text-sm font-semibold leading-relaxed text-slate-400">
+                      {faq.answer}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
-          <div className="flex flex-wrap gap-3">
-            <Link href="/obchodne-podmienky" className="zedpera-secondary-btn rounded-2xl px-5 py-3 text-sm font-black">
-              {content.terms}
-            </Link>
-            <Link href="/gdpr" className="zedpera-secondary-btn rounded-2xl px-5 py-3 text-sm font-black">
-              {content.gdpr}
-            </Link>
-          </div>
-        </div>
-      </footer>
+        </section>
 
-      {showBackToTop && (
-        <button
-          type="button"
-          onClick={scrollToTop}
-          className="zedpera-primary-btn fixed bottom-6 right-6 z-[99999] inline-flex items-center justify-center gap-3 rounded-2xl px-5 py-4 text-base font-black"
-          aria-label="Návrat hore"
-          title="Návrat hore"
-        >
-          <ArrowUp size={24} />
-          <span className="hidden sm:inline">Hore</span>
-        </button>
-      )}
-    </main>
-  );
-}
-
-function InfoPanel({ title, text }: { title: string; text: string }) {
-  return (
-    <div className="rounded-[1.5rem] border border-emerald-300 bg-white p-5 shadow-xl shadow-slate-200/70">
-      <h3 className="text-base font-black text-slate-950">{title}</h3>
-      <p className="mt-3 text-sm leading-7 text-slate-700">{text}</p>
-    </div>
-  );
-}
-
-function ComparisonBox({
-  title,
-  items,
-  negative = false,
-}: {
-  title: string;
-  items: string[];
-  negative?: boolean;
-}) {
-  return (
-    <div
-      className={`rounded-[2rem] border p-6 shadow-xl ${
-        negative
-          ? 'border-slate-200 bg-white shadow-slate-200/60'
-          : 'border-emerald-300 bg-emerald-50 shadow-emerald-100'
-      }`}
-    >
-      <h3 className="mb-5 text-center text-2xl font-black text-slate-950">
-        {title}
-      </h3>
-
-      <ul className="space-y-3">
-        {items.map((item) => (
-          <li key={item} className="flex gap-3 text-sm leading-7 text-slate-700">
-            <span
-              className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-xs font-black ${
-                negative
-                  ? 'bg-slate-100 text-slate-500'
-                  : 'bg-emerald-600 text-white'
-              }`}
+        {/* --- CTA / Footer --- */}
+        <section className="relative z-10 mx-auto max-w-[1260px] px-5 py-24 lg:px-8">
+          <div className="zedpera-glow-border rounded-[2.5rem] bg-gradient-to-br from-violet-900/40 to-blue-900/20 p-12 text-center shadow-2xl relative overflow-hidden">
+            <div className="absolute inset-0 bg-[url('/noise.png')] opacity-10 mix-blend-overlay pointer-events-none" />
+            <h2 className="text-3xl font-black text-white sm:text-5xl mb-6 relative z-10">
+              Začni písať bez stresu už dnes
+            </h2>
+            <p className="text-lg font-bold text-violet-200 max-w-2xl mx-auto mb-10 relative z-10">
+              AI vedúci, zdroje, citácie, kontrola kvality, praktická časť aj obhajoba v jednom systéme.
+            </p>
+            <a
+              href="#pricing"
+              className="inline-flex h-[60px] min-w-[240px] items-center justify-center gap-3 rounded-xl bg-white text-[17px] font-black text-violet-900 shadow-xl shadow-white/10 transition hover:scale-105 relative z-10"
             >
-              {negative ? '!' : '✓'}
-            </span>
-
-            <span>{item}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function ReviewCard({
-  name,
-  text,
-  onClick,
-}: {
-  name: string;
-  text: string;
-  onClick?: () => void;
-}) {
-  return (
-    <article
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={(event) => {
-        if ((event.key === 'Enter' || event.key === ' ') && onClick) {
-          event.preventDefault();
-          onClick();
-        }
-      }}
-      className="zedpera-review-card flex h-full flex-col rounded-[2rem] border border-white/10 bg-white/[0.05] p-6 shadow-2xl shadow-black/20 transition"
-    >
-      <div className="mb-5 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
-            <Quote size={22} />
+              Začať so Zedperou
+              <ArrowRight size={20} />
+            </a>
           </div>
+        </section>
 
-          <div>
-            <h3 className="text-sm font-black text-white">{name}</h3>
-
-            <div className="mt-1 flex items-center gap-1 text-amber-300">
-              <Star size={14} fill="currentColor" />
-              <Star size={14} fill="currentColor" />
-              <Star size={14} fill="currentColor" />
-              <Star size={14} fill="currentColor" />
-              <Star size={14} fill="currentColor" />
-            </div>
-          </div>
-        </div>
+        <footer className="border-t border-white/10 py-12 text-center text-sm font-semibold text-slate-500 relative z-10 bg-[#020208]/50 mt-12">
+           <div className="flex justify-center items-center gap-2 mb-4">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 via-violet-600 to-fuchsia-500 text-sm font-black text-white shadow-[0_0_15px_rgba(124,58,237,0.3)]">
+                Z
+              </div>
+              <span className="text-lg font-black uppercase tracking-widest text-white">Zedpera</span>
+           </div>
+           <p>© {new Date().getFullYear()} Zedpera. Všetky práva vyhradené.</p>
+        </footer>
       </div>
 
-      <p className="text-sm leading-7 text-slate-300">{text}</p>
-    </article>
-  );
-}
-
-function FaqRow({
-  item,
-  open,
-  onClick,
-}: {
-  item: FaqItem;
-  open: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
+      {/* Floating Scroll to Top Button */}
       <button
         type="button"
-        onClick={onClick}
-        className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left"
+        onClick={scrollToTop}
+        className={`fixed bottom-8 right-8 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-violet-600 text-white shadow-[0_0_25px_rgba(124,58,237,0.5)] transition-all duration-300 hover:scale-110 hover:bg-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-400 ${
+          showScrollTop ? 'translate-y-0 opacity-100' : 'translate-y-16 opacity-0 pointer-events-none'
+        }`}
+        aria-label="Návrat nahor"
       >
-        <span className="text-base font-black text-slate-950 md:text-lg">
-          {item.question}
-        </span>
-
-        <ChevronDown
-          className={`h-5 w-5 shrink-0 text-violet-700 transition ${
-            open ? 'rotate-180' : ''
-          }`}
-        />
+        <ChevronUp size={28} />
       </button>
-
-      {open && (
-        <div className="border-t border-slate-100 px-6 pb-6 pt-1">
-          <p className="text-sm leading-7 text-slate-600">{item.answer}</p>
-        </div>
-      )}
-    </div>
+    </main>
   );
 }

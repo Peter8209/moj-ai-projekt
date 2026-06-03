@@ -33,6 +33,7 @@ import { useLanguage } from '@/components/LanguageProvider';
 
 type NavItem = {
   href: string;
+  activePath: string;
   label: string;
   icon: LucideIcon;
   description?: string;
@@ -45,15 +46,21 @@ type TranslationRecord = Record<string, unknown>;
 // =====================================================
 
 /**
- * Dôležité:
- * Profil v ľavom menu musí smerovať na frontend stránku /profile,
- * nie na /api/profile.
+ * DÔLEŽITÉ:
  *
- * /api/profile je API endpoint, ktorý vracia JSON.
- * /profile je stránka, ktorá renderuje app/profile/ProfileClient.tsx
- * a ten si dáta načíta cez GET /api/profile.
+ * Profil v menu nesmie smerovať na /api/profile.
+ * Profil musí smerovať na frontend stránku /profile.
+ *
+ * Keďže chceš otvoriť priamo ClientAccountProfile.tsx,
+ * posielame používateľa na:
+ *
+ * /profile?tab=account
+ *
+ * Následne stránka /profile musí podľa query parametra tab=account
+ * zobraziť komponent ClientAccountProfile.
  */
-const PROFILE_PAGE_HREF = '/profile';
+const PROFILE_PAGE_PATH = '/profile';
+const PROFILE_CLIENT_ACCOUNT_HREF = '/profile?tab=account';
 
 // =====================================================
 // TRANSLATION HELPERS
@@ -77,6 +84,7 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
   return [
     {
       href: '/dashboard',
+      activePath: '/dashboard',
       label: text(dictionary, 'dashboardMenu', 'Menu'),
       icon: Home,
       description: text(
@@ -86,17 +94,19 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
       ),
     },
     {
-      href: PROFILE_PAGE_HREF,
+      href: PROFILE_CLIENT_ACCOUNT_HREF,
+      activePath: PROFILE_PAGE_PATH,
       label: text(dictionary, 'clientProfile', 'Profil'),
       icon: UserCircle,
       description: text(
         dictionary,
         'clientProfileDescription',
-        'Profil klienta a nastavenia',
+        'Účet klienta, balíček a nastavenia služieb',
       ),
     },
     {
       href: '/chat',
+      activePath: '/chat',
       label: text(dictionary, 'aiChat', 'AI Chat'),
       icon: Bot,
       description: text(
@@ -107,6 +117,7 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
     },
     {
       href: '/projects',
+      activePath: '/projects',
       label: text(dictionary, 'dashboardProjects', 'Moje práce'),
       icon: BookOpen,
       description: text(
@@ -117,6 +128,7 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
     },
     {
       href: '/sources',
+      activePath: '/sources',
       label: text(dictionary, 'sources', 'Zdroje'),
       icon: Library,
       description: text(
@@ -127,6 +139,7 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
     },
     {
       href: '/pricing',
+      activePath: '/pricing',
       label: text(dictionary, 'pricing', 'Balíčky'),
       icon: CreditCard,
       description: text(
@@ -137,6 +150,7 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
     },
     {
       href: '/history',
+      activePath: '/history',
       label: text(dictionary, 'chatHistory', 'História chatu'),
       icon: History,
       description: text(
@@ -147,6 +161,7 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
     },
     {
       href: '/video',
+      activePath: '/video',
       label: text(dictionary, 'dashboardVideo', 'Video návod'),
       icon: Video,
       description: text(
@@ -249,13 +264,17 @@ function AppShellContent({ children }: { children: ReactNode }) {
   }, [searchParams]);
 
   const activeTitle = useMemo(() => {
-    const active = navItems.find((item) => isPathActive(pathname, item.href));
+    const active = navItems.find((item) =>
+      isPathActive(pathname, item.activePath),
+    );
 
     return active?.label || 'Zedpera';
   }, [navItems, pathname]);
 
   const activeDescription = useMemo(() => {
-    const active = navItems.find((item) => isPathActive(pathname, item.href));
+    const active = navItems.find((item) =>
+      isPathActive(pathname, item.activePath),
+    );
 
     return (
       active?.description ||
@@ -265,18 +284,22 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
   const isDashboard = pathname === '/dashboard';
 
-  const goTo = (href: string) => {
+  function goTo(href: string) {
+    setMobileMenuOpen(false);
+    router.push(href);
+  }
+
+  function goToClientAccountProfile() {
     setMobileMenuOpen(false);
 
     /**
-     * Navigácia používa iba frontend cesty.
-     * Profil ide na /profile, kde sa renderuje ProfileClient.
-     * ProfileClient si následne sám volá /api/profile.
+     * Toto je hlavná úprava:
+     * otvorí sa /profile a rovno účet klienta.
      */
-    router.push(href);
-  };
+    router.push(PROFILE_CLIENT_ACCOUNT_HREF);
+  }
 
-  const logoutAdminMode = () => {
+  function logoutAdminMode() {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('zedpera_admin_free');
       localStorage.removeItem('zedpera_selected_plan');
@@ -286,9 +309,9 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
     setIsAdminFree(false);
     router.push('/');
-  };
+  }
 
-  const logoutUser = () => {
+  function logoutUser() {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('zedpera_is_logged_in');
       localStorage.removeItem('zedpera_user_role');
@@ -300,7 +323,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
     setIsAdminFree(false);
     setMobileMenuOpen(false);
     router.push('/');
-  };
+  }
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-[#020617] text-white">
@@ -311,14 +334,21 @@ function AppShellContent({ children }: { children: ReactNode }) {
       <aside className="hidden h-dvh w-[306px] shrink-0 flex-col overflow-hidden border-r border-white/10 bg-[#020617] p-5 lg:flex">
         <nav className="flex-1 space-y-2 overflow-visible pr-0">
           {navItems.map((item) => {
-            const active = isPathActive(pathname, item.href);
+            const active = isPathActive(pathname, item.activePath);
             const Icon = item.icon;
 
             return (
               <button
                 type="button"
                 key={item.href}
-                onClick={() => goTo(item.href)}
+                onClick={() => {
+                  if (item.activePath === PROFILE_PAGE_PATH) {
+                    goToClientAccountProfile();
+                    return;
+                  }
+
+                  goTo(item.href);
+                }}
                 className={`group flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
                   active
                     ? 'bg-white/12 text-white shadow-lg shadow-black/15'
@@ -434,7 +464,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
             <button
               type="button"
-              onClick={() => goTo(PROFILE_PAGE_HREF)}
+              onClick={goToClientAccountProfile}
               className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white transition hover:bg-white/[0.12]"
               aria-label={text(dictionary, 'clientProfile', 'Profil')}
             >
@@ -444,14 +474,21 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
           <div className="flex flex-wrap gap-2">
             {navItems.map((item) => {
-              const active = isPathActive(pathname, item.href);
+              const active = isPathActive(pathname, item.activePath);
               const Icon = item.icon;
 
               return (
                 <button
                   type="button"
                   key={item.href}
-                  onClick={() => goTo(item.href)}
+                  onClick={() => {
+                    if (item.activePath === PROFILE_PAGE_PATH) {
+                      goToClientAccountProfile();
+                      return;
+                    }
+
+                    goTo(item.href);
+                  }}
                   className={`inline-flex min-h-[40px] items-center gap-2 rounded-2xl px-3 py-2 text-[11px] font-black transition ${
                     active
                       ? 'bg-violet-600 text-white shadow-lg shadow-violet-700/25'
@@ -506,14 +543,21 @@ function AppShellContent({ children }: { children: ReactNode }) {
         <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-[#020617]/95 px-2 py-2 backdrop-blur lg:hidden">
           <div className="grid grid-cols-5 gap-1">
             {mobileNavItems.map((item) => {
-              const active = isPathActive(pathname, item.href);
+              const active = isPathActive(pathname, item.activePath);
               const Icon = item.icon;
 
               return (
                 <button
                   type="button"
                   key={item.href}
-                  onClick={() => goTo(item.href)}
+                  onClick={() => {
+                    if (item.activePath === PROFILE_PAGE_PATH) {
+                      goToClientAccountProfile();
+                      return;
+                    }
+
+                    goTo(item.href);
+                  }}
                   className={`flex flex-col items-center justify-center rounded-2xl px-2 py-2 text-[11px] font-bold transition ${
                     active
                       ? 'bg-white/12 text-white'
@@ -568,14 +612,21 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
             <div className="grid grid-cols-1 gap-2 pb-6">
               {navItems.map((item) => {
-                const active = isPathActive(pathname, item.href);
+                const active = isPathActive(pathname, item.activePath);
                 const Icon = item.icon;
 
                 return (
                   <button
                     type="button"
                     key={item.href}
-                    onClick={() => goTo(item.href)}
+                    onClick={() => {
+                      if (item.activePath === PROFILE_PAGE_PATH) {
+                        goToClientAccountProfile();
+                        return;
+                      }
+
+                      goTo(item.href);
+                    }}
                     className={`flex min-h-[54px] w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
                       active
                         ? 'bg-white/12 text-white'
@@ -641,14 +692,14 @@ function AppShellContent({ children }: { children: ReactNode }) {
 // HELPERS
 // =====================================================
 
-function isPathActive(pathname: string, href: string) {
-  if (href === '/dashboard') {
+function isPathActive(pathname: string, activePath: string) {
+  if (activePath === '/dashboard') {
     return pathname === '/dashboard';
   }
 
-  if (href === PROFILE_PAGE_HREF) {
-    return pathname === PROFILE_PAGE_HREF || pathname.startsWith('/profile/');
+  if (activePath === PROFILE_PAGE_PATH) {
+    return pathname === PROFILE_PAGE_PATH || pathname.startsWith('/profile/');
   }
 
-  return pathname === href || pathname.startsWith(`${href}/`);
+  return pathname === activePath || pathname.startsWith(`${activePath}/`);
 }

@@ -117,7 +117,13 @@ const MAX_TABLE_ROWS = 8;
 const MAX_TABLE_COLS = 6;
 const MAX_CHART_ITEMS = 7;
 const MAX_SOURCE_TEXT_CHARS = 220_000;
-const MAX_EXPORTED_SLIDES = 18;
+const MAX_EXPORTED_SLIDES = 28;
+
+// Bezpečné limity pre text, aby sa nikdy nerozsypal mimo snímky.
+const MAX_BULLET_CHARS = 155;
+const MAX_BULLET_CHARS_COMPACT = 115;
+const MAX_TOTAL_CHARS_PER_SLIDE = 620;
+const MAX_TITLE_CHARS = 92;
 
 // Všeobecná, svetlá a vysoko kontrastná šablóna.
 // Všetky názvy tém smerujeme na čitateľné farby, aby písmo nikdy nebolo bledé.
@@ -173,6 +179,170 @@ function truncate(value: string, max = MAX_SOURCE_TEXT_CHARS): string {
   const end = text.slice(text.length - Math.floor(max * 0.28));
 
   return `${start}\n\n${middle}\n\n${end}`.trim();
+}
+
+function splitLongTextToChunks(text: string, maxChars = MAX_BULLET_CHARS): string[] {
+  const clean = cleanInlineText(text);
+
+  if (!clean) return [];
+  if (clean.length <= maxChars) return [clean];
+
+  const sentences = clean
+    .split(/(?<=[.!?])\s+/)
+    .map((item) => cleanInlineText(item))
+    .filter(Boolean);
+
+  const chunks: string[] = [];
+  let current = '';
+
+  for (const sentence of sentences.length ? sentences : [clean]) {
+    if (!current) {
+      current = sentence;
+      continue;
+    }
+
+    if (`${current} ${sentence}`.length <= maxChars) {
+      current = `${current} ${sentence}`;
+    } else {
+      chunks.push(current);
+      current = sentence;
+    }
+  }
+
+  if (current) chunks.push(current);
+
+  return chunks
+    .flatMap((chunk) => {
+      if (chunk.length <= maxChars) return [chunk];
+
+      const parts: string[] = [];
+
+      for (let i = 0; i < chunk.length; i += maxChars) {
+        parts.push(`${chunk.slice(i, i + maxChars).trim()}${i + maxChars < chunk.length ? '…' : ''}`);
+      }
+
+      return parts;
+    })
+    .filter(Boolean);
+}
+
+function normalizeBulletsForSlides(bullets: string[]): string[] {
+  return bullets
+    .flatMap((bullet) => splitLongTextToChunks(bullet, MAX_BULLET_CHARS))
+    .map((bullet) => cleanInlineText(bullet).replace(/^[-•–—]\s*/, ''))
+    .filter(Boolean);
+}
+
+function getTextLengthScore(bullets: string[]) {
+  return bullets.reduce((sum, bullet) => sum + cleanInlineText(bullet).length, 0);
+}
+
+function paginateBullets(bullets: string[]): string[][] {
+  const normalized = normalizeBulletsForSlides(bullets);
+  const pages: string[][] = [];
+
+  let current: string[] = [];
+  let currentChars = 0;
+
+  for (const bullet of normalized) {
+    const bulletChars = bullet.length;
+    const wouldExceedCount = current.length >= MAX_BULLETS_PER_SLIDE;
+    const wouldExceedChars = currentChars + bulletChars > MAX_TOTAL_CHARS_PER_SLIDE;
+
+    if (current.length > 0 && (wouldExceedCount || wouldExceedChars)) {
+      pages.push(current);
+      current = [];
+      currentChars = 0;
+    }
+
+    current.push(bullet);
+    currentChars += bulletChars;
+  }
+
+  if (current.length > 0) pages.push(current);
+
+  return pages.length ? pages : [[]];
+}
+
+function safeSlideTitle(title: string, partIndex?: number, totalParts?: number) {
+  const clean = cleanInlineText(title || 'Snímka');
+
+  const base =
+    clean.length > MAX_TITLE_CHARS
+      ? `${clean.slice(0, MAX_TITLE_CHARS - 1).trim()}…`
+      : clean;
+
+  if (partIndex !== undefined && totalParts !== undefined && totalParts > 1) {
+    return `${base} (${partIndex + 1}/${totalParts})`;
+  }
+
+  return base;
+}
+
+function expandTextSlides(slides: DefenseSlide[]): DefenseSlide[] {
+  const expanded: DefenseSlide[] = [];
+
+  for (const slide of slides) {
+    if (
+      slide.layout === 'table' ||
+      slide.layout === 'chart' ||
+      slide.layout === 'image' ||
+      slide.table ||
+      slide.chart ||
+      slide.images?.length
+    ) {
+      expanded.push({
+        ...slide,
+        title: safeSlideTitle(slide.title),
+        bullets: slide.bullets.slice(0, MAX_BULLETS_PER_SLIDE),
+      });
+      continue;
+    }
+
+    const pages = paginateBullets(slide.bullets);
+
+    if (pages.length <= 1) {
+      expanded.push({
+        ...slide,
+        title: safeSlideTitle(slide.title),
+        bullets: pages[0] || slide.bullets.slice(0, MAX_BULLETS_PER_SLIDE),
+      });
+      continue;
+    }
+
+    pages.forEach((pageBullets, pageIndex) => {
+      expanded.push({
+        ...slide,
+        title: safeSlideTitle(slide.title, pageIndex, pages.length),
+        bullets: pageBullets,
+        layout: pageIndex === 0 ? slide.layout : 'bullets',
+        visualSuggestion: pageIndex === 0 ? slide.visualSuggestion : '',
+        speakerNotes: pageIndex === 0 ? slide.speakerNotes : undefined,
+      });
+    });
+  }
+
+  return expanded.slice(0, MAX_EXPORTED_SLIDES);
+}
+
+function getDynamicBulletFontSize(bullets: string[]) {
+  const totalChars = getTextLengthScore(bullets);
+  const count = bullets.length;
+
+  if (count <= 3 && totalChars <= 320) return 18;
+  if (count <= 4 && totalChars <= 460) return 16;
+  if (count <= 5 && totalChars <= 620) return 14.2;
+
+  return 12.5;
+}
+
+function getDynamicCardHeight(bullets: string[]) {
+  const count = Math.max(1, bullets.length);
+
+  if (count <= 3) return 1.08;
+  if (count === 4) return 0.86;
+
+  return 0.72;
 }
 
 function safeFileName(value: string): string {
@@ -316,9 +486,11 @@ function normalizeSlide(value: unknown, index: number): DefenseSlide {
   const item = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   const title = cleanInlineText(item.title || `Snímka ${index + 1}`);
 
-  const bullets = Array.isArray(item.bullets)
-    ? item.bullets.map((bullet: unknown) => cleanInlineText(bullet)).filter(Boolean).slice(0, MAX_BULLETS_PER_SLIDE)
+  const rawBullets = Array.isArray(item.bullets)
+    ? item.bullets.map((bullet: unknown) => cleanInlineText(bullet)).filter(Boolean)
     : [];
+
+  const bullets = normalizeBulletsForSlides(rawBullets);
 
   const table = normalizeTable(item.table);
   const chart = normalizeChart(item.chart);
@@ -331,7 +503,7 @@ function normalizeSlide(value: unknown, index: number): DefenseSlide {
   if (images.length > 0) layout = 'image';
 
   return {
-    title,
+    title: safeSlideTitle(title),
     bullets,
     speakerNotes: item.speakerNotes ? cleanText(item.speakerNotes) : undefined,
     layout,
@@ -369,7 +541,7 @@ function extractSection(text: string, patterns: RegExp[], maxSentences = 4): str
 function toBullets(sentences: string[], fallback: string[]): string[] {
   const bullets = sentences
     .map((sentence) => sentence.replace(/^[-•–—]\s*/, ''))
-    .map((sentence) => (sentence.length > 165 ? `${sentence.slice(0, 162)}…` : sentence))
+    .flatMap((sentence) => splitLongTextToChunks(sentence, MAX_BULLET_CHARS))
     .filter(Boolean)
     .slice(0, MAX_BULLETS_PER_SLIDE);
 
@@ -671,6 +843,8 @@ function addBackground(slide: PptxSlide, theme: PptTheme) {
 }
 
 function addHeader(slide: PptxSlide, theme: PptTheme, eyebrow: string, title: string) {
+  const cleanTitle = safeSlideTitle(title);
+
   slide.addText(eyebrow.toUpperCase(), {
     x: 0.65,
     y: 0.55,
@@ -683,18 +857,19 @@ function addHeader(slide: PptxSlide, theme: PptTheme, eyebrow: string, title: st
     margin: 0,
   });
 
-  slide.addText(title, {
+  slide.addText(cleanTitle, {
     x: 0.65,
-    y: 0.87,
+    y: 0.86,
     w: 11.95,
-    h: 0.78,
+    h: 0.86,
     fontFace: 'Arial',
-    fontSize: title.length > 72 ? 22 : 27,
+    fontSize: cleanTitle.length > 74 ? 21 : cleanTitle.length > 54 ? 24 : 27,
     bold: true,
     color: theme.title,
     fit: 'shrink',
     margin: 0,
     breakLine: false,
+    valign: 'mid',
   });
 }
 
@@ -748,16 +923,25 @@ function addSpeakerNotes(slide: PptxSlide, notes?: string) {
   }
 }
 
-function addBulletCards(slide: PptxSlide, theme: PptTheme, bullets: string[], startY = 1.92) {
-  const safeBullets = bullets.slice(0, MAX_BULLETS_PER_SLIDE);
-  const cardHeight = safeBullets.length <= 3 ? 0.9 : 0.7;
+function addBulletCards(slide: PptxSlide, theme: PptTheme, bullets: string[], startY = 1.86) {
+  const safeBullets = normalizeBulletsForSlides(bullets).slice(0, MAX_BULLETS_PER_SLIDE);
+
+  if (!safeBullets.length) {
+    safeBullets.push('Obsah snímky je potrebné doplniť podľa finálnej verzie práce.');
+  }
+
+  const fontSize = getDynamicBulletFontSize(safeBullets);
+  const cardHeight = getDynamicCardHeight(safeBullets);
+  const gap = safeBullets.length >= 5 ? 0.11 : 0.16;
+  const availableBottom = 6.58;
 
   safeBullets.forEach((bullet, index) => {
-    const y = startY + index * (cardHeight + 0.14);
+    const y = startY + index * (cardHeight + gap);
+    const safeY = Math.min(y, availableBottom - cardHeight);
 
     slide.addShape(ShapeType.roundRect, {
       x: 0.85,
-      y,
+      y: safeY,
       w: 11.75,
       h: cardHeight,
       rectRadius: 0.06,
@@ -767,7 +951,7 @@ function addBulletCards(slide: PptxSlide, theme: PptTheme, bullets: string[], st
 
     slide.addShape(ShapeType.rect, {
       x: 0.85,
-      y,
+      y: safeY,
       w: 0.11,
       h: cardHeight,
       fill: { color: index % 2 === 0 ? theme.accent : theme.accent2 },
@@ -776,23 +960,29 @@ function addBulletCards(slide: PptxSlide, theme: PptTheme, bullets: string[], st
 
     slide.addText(cleanInlineText(bullet), {
       x: 1.18,
-      y: y + 0.12,
+      y: safeY + 0.11,
       w: 10.92,
-      h: cardHeight - 0.22,
+      h: cardHeight - 0.2,
       fontFace: 'Arial',
-      fontSize: safeBullets.length <= 3 ? 17 : 14.5,
+      fontSize,
       bold: false,
       color: theme.text,
       fit: 'shrink',
-      valign: 'middle',
-      margin: 0,
+      valign: 'mid',
+      margin: 0.01,
       breakLine: false,
     });
   });
 }
 
 function addSplitSlide(slide: PptxSlide, theme: PptTheme, item: DefenseSlide) {
-  const bullets = item.bullets.slice(0, MAX_BULLETS_PER_SLIDE);
+  const bullets = normalizeBulletsForSlides(item.bullets).slice(0, MAX_BULLETS_PER_SLIDE);
+
+  if (bullets.length <= 3) {
+    addBulletCards(slide, theme, bullets);
+    return;
+  }
+
   const left = bullets.slice(0, Math.ceil(bullets.length / 2));
   const right = bullets.slice(Math.ceil(bullets.length / 2));
 
@@ -804,9 +994,9 @@ function addSplitSlide(slide: PptxSlide, theme: PptTheme, item: DefenseSlide) {
   boxes.forEach((box) => {
     slide.addShape(ShapeType.roundRect, {
       x: box.x,
-      y: 1.82,
+      y: 1.86,
       w: 5.75,
-      h: 4.75,
+      h: 4.7,
       rectRadius: 0.06,
       fill: { color: theme.card },
       line: { color: theme.border, transparency: 0, width: 1 },
@@ -814,9 +1004,9 @@ function addSplitSlide(slide: PptxSlide, theme: PptTheme, item: DefenseSlide) {
 
     slide.addShape(ShapeType.rect, {
       x: box.x,
-      y: 1.82,
+      y: 1.86,
       w: 5.75,
-      h: 0.14,
+      h: 0.13,
       fill: { color: box.accent },
       line: { color: box.accent },
     });
@@ -833,19 +1023,27 @@ function addSplitSlide(slide: PptxSlide, theme: PptTheme, item: DefenseSlide) {
       margin: 0,
     });
 
-    slide.addText(box.bullets.map((bullet) => `• ${bullet}`).join('\n'), {
-      x: box.x + 0.3,
-      y: 2.65,
-      w: 5.12,
-      h: 3.45,
-      fontFace: 'Arial',
-      fontSize: 14,
-      color: theme.text,
-      fit: 'shrink',
-      margin: 0.04,
-      breakLine: false,
-      paraSpaceAfter: 7,
-    });
+    slide.addText(
+      box.bullets
+        .map((bullet) => {
+          const compact = cleanInlineText(bullet);
+          return `• ${compact.length > MAX_BULLET_CHARS_COMPACT ? `${compact.slice(0, MAX_BULLET_CHARS_COMPACT).trim()}…` : compact}`;
+        })
+        .join('\n'),
+      {
+        x: box.x + 0.32,
+        y: 2.66,
+        w: 5.08,
+        h: 3.42,
+        fontFace: 'Arial',
+        fontSize: box.bullets.length >= 3 ? 12.4 : 13.6,
+        color: theme.text,
+        fit: 'shrink',
+        margin: 0.03,
+        breakLine: false,
+        paraSpaceAfter: 4,
+      },
+    );
   });
 }
 
@@ -1089,7 +1287,7 @@ function addImageSlide(slide: PptxSlide, theme: PptTheme, item: DefenseSlide) {
     });
   }
 
-  const bullets = item.bullets.slice(0, 4);
+  const bullets = normalizeBulletsForSlides(item.bullets).slice(0, 4);
 
   slide.addText(image.title || 'Vizuálny podklad', {
     x: 7.45,
@@ -1109,23 +1307,29 @@ function addImageSlide(slide: PptxSlide, theme: PptTheme, item: DefenseSlide) {
     w: 4.7,
     h: 3.2,
     fontFace: 'Arial',
-    fontSize: 13,
+    fontSize: 12.4,
     color: theme.text,
     fit: 'shrink',
-    margin: 0.04,
+    margin: 0.03,
     breakLine: false,
-    paraSpaceAfter: 7,
+    paraSpaceAfter: 4,
   });
 }
 
 function addQuoteSlide(slide: PptxSlide, theme: PptTheme, item: DefenseSlide) {
-  const quote = item.bullets[0] || item.visualSuggestion || 'Kľúčové zistenie práce';
+  const bullets = normalizeBulletsForSlides(item.bullets);
+  const quoteRaw = bullets[0] || item.visualSuggestion || 'Kľúčové zistenie práce';
+
+  const quote =
+    quoteRaw.length > 260
+      ? `${quoteRaw.slice(0, 257).trim()}…`
+      : quoteRaw;
 
   slide.addShape(ShapeType.roundRect, {
     x: 0.9,
-    y: 1.95,
+    y: 1.9,
     w: 11.55,
-    h: 3.25,
+    h: 3.15,
     rectRadius: 0.06,
     fill: { color: theme.card },
     line: { color: theme.border, transparency: 0, width: 1 },
@@ -1133,40 +1337,49 @@ function addQuoteSlide(slide: PptxSlide, theme: PptTheme, item: DefenseSlide) {
 
   slide.addShape(ShapeType.rect, {
     x: 0.9,
-    y: 1.95,
+    y: 1.9,
     w: 0.16,
-    h: 3.25,
+    h: 3.15,
     fill: { color: theme.accent },
     line: { color: theme.accent },
   });
 
   slide.addText(quote, {
     x: 1.35,
-    y: 2.35,
+    y: 2.23,
     w: 10.45,
-    h: 1.75,
+    h: 1.78,
     fontFace: 'Arial',
-    fontSize: quote.length > 120 ? 20 : 25,
+    fontSize: quote.length > 190 ? 18 : quote.length > 120 ? 21 : 25,
     bold: true,
     color: theme.title,
     fit: 'shrink',
     margin: 0,
     breakLine: false,
-    valign: 'middle',
+    valign: 'mid',
   });
 
-  if (item.bullets.length > 1) {
-    slide.addText(item.bullets.slice(1, 4).map((bullet) => `• ${bullet}`).join('\n'), {
+  if (bullets.length > 1) {
+    const otherBullets = bullets
+      .slice(1, 4)
+      .map((bullet) => {
+        const compact = bullet.length > 120 ? `${bullet.slice(0, 117).trim()}…` : bullet;
+        return `• ${compact}`;
+      })
+      .join('\n');
+
+    slide.addText(otherBullets, {
       x: 1.35,
-      y: 4.38,
+      y: 4.22,
       w: 10.45,
-      h: 0.95,
+      h: 0.9,
       fontFace: 'Arial',
-      fontSize: 12.5,
+      fontSize: 11.8,
       color: theme.muted,
       fit: 'shrink',
-      margin: 0,
+      margin: 0.01,
       breakLine: false,
+      paraSpaceAfter: 3,
     });
   }
 }
@@ -1175,23 +1388,26 @@ function addVisualSuggestion(slide: PptxSlide, theme: PptTheme, suggestion?: str
   const clean = cleanInlineText(suggestion);
   if (!clean) return;
 
+  const safeSuggestion =
+    clean.length > 135 ? `${clean.slice(0, 132).trim()}…` : clean;
+
   slide.addShape(ShapeType.roundRect, {
     x: 0.85,
-    y: 6.24,
+    y: 6.34,
     w: 11.75,
-    h: 0.42,
+    h: 0.32,
     rectRadius: 0.04,
     fill: { color: theme.soft },
     line: { color: theme.border, transparency: 0 },
   } as any);
 
-  slide.addText(`Vizuál: ${clean}`, {
+  slide.addText(`Vizuál: ${safeSuggestion}`, {
     x: 1.05,
-    y: 6.33,
+    y: 6.41,
     w: 11.35,
-    h: 0.2,
+    h: 0.16,
     fontFace: 'Arial',
-    fontSize: 8,
+    fontSize: 7.4,
     italic: true,
     color: theme.muted,
     fit: 'shrink',
@@ -1227,7 +1443,7 @@ function addCoverSlide(pptxDoc: PptxGen, theme: PptTheme, title: string, defense
     margin: 0,
   });
 
-  slide.addText(title, {
+  slide.addText(safeSlideTitle(title, undefined, undefined), {
     x: 0.8,
     y: 1.95,
     w: 11.85,
@@ -1279,8 +1495,9 @@ function addAgendaSlide(pptxDoc: PptxGen, theme: PptTheme, agenda: string[], tit
   addBackground(slide, theme);
   addHeader(slide, theme, 'Obsah prezentácie', 'Agenda obhajoby');
 
-  const left = agenda.slice(0, 5);
-  const right = agenda.slice(5, 10);
+  const safeAgenda = agenda.map((item) => safeSlideTitle(item)).slice(0, 10);
+  const left = safeAgenda.slice(0, 5);
+  const right = safeAgenda.slice(5, 10);
 
   [left, right].forEach((items, columnIndex) => {
     const x = columnIndex === 0 ? 0.9 : 6.85;
@@ -1332,25 +1549,37 @@ function addAgendaSlide(pptxDoc: PptxGen, theme: PptTheme, agenda: string[], tit
 
 function addContentSlide(pptxDoc: PptxGen, theme: PptTheme, item: DefenseSlide, slideNumber: number, workTitle: string) {
   const slide = pptxDoc.addSlide();
-  addBackground(slide, theme);
-  addHeader(slide, theme, `Snímka ${slideNumber}`, item.title || `Snímka ${slideNumber}`);
+  const safeItem: DefenseSlide = {
+    ...item,
+    title: safeSlideTitle(item.title || `Snímka ${slideNumber}`),
+    bullets: normalizeBulletsForSlides(item.bullets).slice(0, MAX_BULLETS_PER_SLIDE),
+  };
 
-  if (item.layout === 'table' && item.table) {
-    addTable(slide, theme, item.table);
-  } else if (item.layout === 'chart' && item.chart) {
-    addBarChart(slide, theme, item.chart);
-  } else if (item.layout === 'image') {
-    addImageSlide(slide, theme, item);
-  } else if (item.layout === 'quote' || item.layout === 'section') {
-    addQuoteSlide(slide, theme, item);
-  } else if (item.layout === 'split') {
-    addSplitSlide(slide, theme, item);
+  addBackground(slide, theme);
+  addHeader(slide, theme, `Snímka ${slideNumber}`, safeItem.title);
+
+  if (safeItem.layout === 'table' && safeItem.table) {
+    addTable(slide, theme, safeItem.table);
+  } else if (safeItem.layout === 'chart' && safeItem.chart) {
+    addBarChart(slide, theme, safeItem.chart);
+  } else if (safeItem.layout === 'image') {
+    addImageSlide(slide, theme, safeItem);
+  } else if (safeItem.layout === 'quote' || safeItem.layout === 'section') {
+    addQuoteSlide(slide, theme, safeItem);
+  } else if (safeItem.layout === 'split') {
+    addSplitSlide(slide, theme, safeItem);
   } else {
-    addBulletCards(slide, theme, item.bullets.length ? item.bullets : ['Obsah snímky je potrebné doplniť podľa finálnej verzie práce.']);
+    addBulletCards(
+      slide,
+      theme,
+      safeItem.bullets.length
+        ? safeItem.bullets
+        : ['Obsah snímky je potrebné doplniť podľa finálnej verzie práce.'],
+    );
   }
 
-  addVisualSuggestion(slide, theme, item.visualSuggestion);
-  addSpeakerNotes(slide, item.speakerNotes);
+  addVisualSuggestion(slide, theme, safeItem.visualSuggestion);
+  addSpeakerNotes(slide, safeItem.speakerNotes);
   addFooter(slide, theme, slideNumber, workTitle);
 }
 
@@ -1408,7 +1637,8 @@ function enrichSlidesWithDetectedVisuals(slides: DefenseSlide[], sourceText: str
 
   const enriched = slides.map((slide) => ({
     ...slide,
-    bullets: slide.bullets.slice(0, MAX_BULLETS_PER_SLIDE),
+    title: safeSlideTitle(slide.title),
+    bullets: normalizeBulletsForSlides(slide.bullets),
   }));
 
   if (!hasChart && extractedChart && enriched.length > 0) {
@@ -1453,7 +1683,7 @@ function normalizeSlidesFromBody(rawSlides: unknown, sourceText: string, title: 
     ? rawSlides
         .map((slide: unknown, index: number): DefenseSlide => normalizeSlide(slide, index))
         .filter((slide: DefenseSlide): boolean => slide.title.length > 0 || slide.bullets.length > 0)
-        .slice(0, 16)
+        .slice(0, 18)
     : [];
 
   let slides = initialSlides;
@@ -1466,7 +1696,9 @@ function normalizeSlidesFromBody(rawSlides: unknown, sourceText: string, title: 
     slides = generateSlidesFromSource('', title);
   }
 
-  return enrichSlidesWithDetectedVisuals(slides, sourceText);
+  const enriched = enrichSlidesWithDetectedVisuals(slides, sourceText);
+
+  return expandTextSlides(enriched);
 }
 
 function sourceTextFromBody(body: Record<string, unknown>): string {
@@ -1541,14 +1773,16 @@ async function buildPresentation(input: NormalizedPptxInput, theme: PptTheme): P
     lang: 'sk-SK',
   } as any;
 
-  addCoverSlide(pptxDoc, theme, input.title, input.defenseType);
-  addAgendaSlide(pptxDoc, theme, buildAgenda(input.slides), input.title);
+  const finalSlides = expandTextSlides(input.slides).slice(0, MAX_EXPORTED_SLIDES);
 
-  input.slides.forEach((item: DefenseSlide, index: number) => {
+  addCoverSlide(pptxDoc, theme, input.title, input.defenseType);
+  addAgendaSlide(pptxDoc, theme, buildAgenda(finalSlides), input.title);
+
+  finalSlides.forEach((item: DefenseSlide, index: number) => {
     addContentSlide(pptxDoc, theme, item, index + 2, input.title);
   });
 
-  addClosingSlide(pptxDoc, theme, input.title, input.slides.length + 2);
+  addClosingSlide(pptxDoc, theme, input.title, finalSlides.length + 2);
 
   const output = await (pptxDoc as any).write({ outputType: 'nodebuffer' });
 
@@ -1568,7 +1802,7 @@ async function buildPresentation(input: NormalizedPptxInput, theme: PptTheme): P
     fileName: `${safeFileName(input.title)}.pptx`,
     title: input.title,
     buffer,
-    slidesCount: input.slides.length + 3,
+    slidesCount: finalSlides.length + 3,
   };
 }
 

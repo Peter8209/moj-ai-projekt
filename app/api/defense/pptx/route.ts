@@ -869,7 +869,7 @@ function addHeader(slide: PptxSlide, theme: PptTheme, eyebrow: string, title: st
     fit: 'shrink',
     margin: 0,
     breakLine: false,
-    valign: 'mid',
+    valign: 'middle',
   });
 }
 
@@ -968,7 +968,7 @@ function addBulletCards(slide: PptxSlide, theme: PptTheme, bullets: string[], st
       bold: false,
       color: theme.text,
       fit: 'shrink',
-      valign: 'mid',
+      valign: 'middle',
       margin: 0.01,
       breakLine: false,
     });
@@ -1356,7 +1356,7 @@ function addQuoteSlide(slide: PptxSlide, theme: PptTheme, item: DefenseSlide) {
     fit: 'shrink',
     margin: 0,
     breakLine: false,
-    valign: 'mid',
+    valign: 'middle',
   });
 
   if (bullets.length > 1) {

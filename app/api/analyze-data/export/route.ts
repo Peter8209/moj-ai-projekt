@@ -20,6 +20,7 @@ type ExportColumn = {
 
 type ExportTable = {
   title: string;
+  sheetName?: string;
   description?: string;
   rows: Record<string, any>[];
 };
@@ -142,6 +143,9 @@ const COLUMN_LABELS: Record<string, string> = {
   variables: 'Premenné',
   reason: 'Odôvodnenie',
   assumptions: 'Predpoklady',
+  recommendation: 'Odporúčanie',
+  recommendedTest: 'Odporúčaný test',
+  normalityDecision: 'Rozhodnutie podľa normality',
   interpretation: 'Interpretácia',
   conclusion: 'Záver',
   result: 'Výsledok',
@@ -162,6 +166,7 @@ const COLUMN_LABELS: Record<string, string> = {
   dependentVariable: 'Závislá premenná',
   independentVariable: 'Nezávislá premenná',
   groupVariable: 'Skupinová premenná',
+  groupingVariable: 'Skupinová premenná',
   group1: 'Skupina 1',
   group2: 'Skupina 2',
   mean1: 'M1',
@@ -172,6 +177,10 @@ const COLUMN_LABELS: Record<string, string> = {
   n2: 'n2',
   statistic: 'Štatistika',
   t: 't',
+  u: 'U',
+  h: 'H',
+  f: 'F',
+  chiSquare: 'χ²',
   meanDifference: 'Rozdiel priemerov',
 
   alpha: 'Cronbach alfa',
@@ -180,6 +189,14 @@ const COLUMN_LABELS: Record<string, string> = {
   scale: 'Škála',
   items: 'Položky',
   itemCount: 'Počet položiek',
+  alphaIfItemDeleted: 'Alfa pri odstránení položky',
+  itemTotalCorrelation: 'Korelácia položka-celok',
+
+  shapiroW: 'Shapiro-Wilk W',
+  shapiro_w: 'Shapiro-Wilk W',
+  w: 'W',
+  normality: 'Normalita',
+  normallyDistributed: 'Normálne rozdelenie',
 
   fileName: 'Súbor',
   filename: 'Súbor',
@@ -263,13 +280,16 @@ function htmlEscape(value: unknown): string {
     .replaceAll("'", '&#039;');
 }
 
+function xmlEscape(value: unknown): string {
+  return htmlEscape(value);
+}
+
 function isVariableLikeColumn(key: string): boolean {
   return VARIABLE_SOURCE_KEYS.map(normalizeKey).includes(normalizeKey(key));
 }
 
 function isTechnicalIdName(value: unknown): boolean {
   const normalized = normalizeTextForCompare(value);
-
   return TECHNICAL_ID_COLUMNS.map(normalizeTextForCompare).includes(normalized);
 }
 
@@ -295,11 +315,9 @@ function normalizeRows(value: unknown): Record<string, any>[] {
 
     if (Array.isArray(row)) {
       const output: Record<string, any> = {};
-
       row.forEach((cell, cellIndex) => {
         output[`col_${cellIndex + 1}`] = cell;
       });
-
       return output;
     }
 
@@ -320,11 +338,9 @@ function getBestVariableValue(row: Record<string, any>): unknown {
   }
 
   const dynamicKey = Object.keys(row).find((key) => isVariableLikeColumn(key));
-
   if (!dynamicKey) return undefined;
 
   const value = row[dynamicKey];
-
   return value !== null && value !== undefined && value !== '' ? value : undefined;
 }
 
@@ -351,36 +367,26 @@ function getExportCellValue(row: Record<string, any>, column: ExportColumn): unk
 function hasVisibleValue(rows: Record<string, any>[], column: ExportColumn): boolean {
   return rows.some((row) => {
     const value = getExportCellValue(row, column);
-
     return value !== null && value !== undefined && value !== '';
   });
 }
 
 function isTechnicalRow(row: Record<string, any>): boolean {
   const variableName = getBestVariableValue(row);
-
   return isTechnicalIdName(variableName);
 }
 
 function shouldRemoveTechnicalRowsFromTable(title: string): boolean {
   const normalizedTitle = normalizeTextForCompare(title);
 
-  if (normalizedTitle.includes('identifikovane_premenne')) {
-    return false;
-  }
-
-  if (normalizedTitle.includes('spracovane_subory')) {
-    return false;
-  }
+  if (normalizedTitle.includes('identifikovane_premenne')) return false;
+  if (normalizedTitle.includes('spracovane_subory')) return false;
 
   return true;
 }
 
 function cleanRowsForTable(title: string, rows: Record<string, any>[]): Record<string, any>[] {
-  if (!shouldRemoveTechnicalRowsFromTable(title)) {
-    return rows;
-  }
-
+  if (!shouldRemoveTechnicalRowsFromTable(title)) return rows;
   return rows.filter((row) => !isTechnicalRow(row));
 }
 
@@ -428,6 +434,12 @@ function getColumns(rows: Record<string, any>[]): ExportColumn[] {
     'kurtosis',
     'distinctValues',
 
+    'shapiroW',
+    'shapiro_w',
+    'w',
+    'normality',
+    'normallyDistributed',
+
     'value',
     'category',
     'frequency',
@@ -458,6 +470,7 @@ function getColumns(rows: Record<string, any>[]): ExportColumn[] {
     'dependentVariable',
     'independentVariable',
     'groupVariable',
+    'groupingVariable',
     'group1',
     'group2',
     'mean1',
@@ -467,6 +480,9 @@ function getColumns(rows: Record<string, any>[]): ExportColumn[] {
     'n1',
     'n2',
     't',
+    'u',
+    'h',
+    'f',
     'statistic',
     'meanDifference',
 
@@ -476,8 +492,13 @@ function getColumns(rows: Record<string, any>[]): ExportColumn[] {
     'alpha',
     'cronbachAlpha',
     'cronbach_alpha',
+    'alphaIfItemDeleted',
+    'itemTotalCorrelation',
 
     'reason',
+    'recommendation',
+    'recommendedTest',
+    'normalityDecision',
     'description',
     'interpretation',
     'conclusion',
@@ -493,9 +514,7 @@ function getColumns(rows: Record<string, any>[]): ExportColumn[] {
   ];
 
   const allRawColumns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
-
   const variableSourceKeys = allRawColumns.filter((column) => isVariableLikeColumn(column));
-
   const nonVariableColumns = allRawColumns.filter((column) => !isVariableLikeColumn(column));
 
   const priorityColumns = priority.filter((column) => nonVariableColumns.includes(column));
@@ -527,9 +546,7 @@ function getColumns(rows: Record<string, any>[]): ExportColumn[] {
   for (const column of exportColumns) {
     const normalizedLabel = normalizeKey(column.label);
 
-    if (usedLabels.has(normalizedLabel)) {
-      continue;
-    }
+    if (usedLabels.has(normalizedLabel)) continue;
 
     usedLabels.add(normalizedLabel);
     dedupedColumns.push(column);
@@ -566,8 +583,8 @@ function getCellValue(value: unknown): string | number {
     }
   }
 
-  const text = String(value);
-  const normalized = text.trim().replace(/\s/g, '').replace(',', '.');
+  const text = String(value).trim();
+  const normalized = text.replace(/\s/g, '').replace(',', '.');
 
   if (/^-?\d+(\.\d+)?$/.test(normalized)) {
     const numeric = Number(normalized);
@@ -578,6 +595,21 @@ function getCellValue(value: unknown): string | number {
   }
 
   return text;
+}
+
+function isNumericLike(value: unknown): boolean {
+  if (typeof value === 'number') return Number.isFinite(value);
+
+  if (typeof value !== 'string') return false;
+
+  const normalized = value.trim().replace(/\s/g, '').replace(',', '.');
+
+  return /^-?\d+(\.\d+)?$/.test(normalized) && Number.isFinite(Number(normalized));
+}
+
+function getNumericValue(value: unknown): number {
+  if (typeof value === 'number') return value;
+  return Number(String(value).trim().replace(/\s/g, '').replace(',', '.'));
 }
 
 function getFrequencyRows(table: any): Record<string, any>[] {
@@ -592,12 +624,18 @@ function getFrequencyRows(table: any): Record<string, any>[] {
   );
 }
 
-function makeTable(title: string, rows: unknown, description = ''): ExportTable {
+function makeTable(
+  title: string,
+  rows: unknown,
+  description = '',
+  sheetName?: string,
+): ExportTable {
   const normalizedRows = normalizeRows(rows);
   const cleanedRows = cleanRowsForTable(title, normalizedRows);
 
   return {
     title,
+    sheetName,
     description,
     rows: cleanedRows,
   };
@@ -614,13 +652,12 @@ function getAllTables(result: any): ExportTable[] {
         'Spracované súbory',
         files,
         'Prehľad súborov použitých pri analýze.',
+        'Súhrn',
       ),
     );
   }
 
-  const variables = safeArray(
-    result?.variables || result?.detectedVariables || result?.columns,
-  );
+  const variables = safeArray(result?.variables || result?.detectedVariables || result?.columns);
 
   if (variables.length) {
     tables.push(
@@ -628,6 +665,7 @@ function getAllTables(result: any): ExportTable[] {
         'Identifikované premenné',
         variables,
         'Prehľad premenných rozpoznaných v dátach. Technické identifikátory ako ID môžu byť zobrazené iba informačne, ale nepočítajú sa do štatistických výpočtov.',
+        'Súhrn',
       ),
     );
   }
@@ -644,6 +682,28 @@ function getAllTables(result: any): ExportTable[] {
         'Deskriptívna štatistika',
         descriptive,
         'N, M, medián, SD, minimum, maximum, šikmosť a špicatosť. Technické stĺpce ako ID sú z exportovanej štatistiky odstránené.',
+        'Deskriptíva',
+      ),
+    );
+  }
+
+  const normality = safeArray(
+    result?.normality ||
+      result?.normalityTests ||
+      result?.normality_tests ||
+      result?.shapiroWilk ||
+      result?.shapiro_wilk ||
+      result?.shapiroWilkTests ||
+      result?.shapiro_wilk_tests,
+  );
+
+  if (normality.length) {
+    tables.push(
+      makeTable(
+        'Shapiro-Wilk test normality',
+        normality,
+        'Test normality dát. Pri p > 0,05 sa obvykle uvažuje normálne rozdelenie; pri p ≤ 0,05 sa odporúča neparametrický postup.',
+        'Deskriptíva',
       ),
     );
   }
@@ -656,13 +716,13 @@ function getAllTables(result: any): ExportTable[] {
 
   frequencies.forEach((table: any, index) => {
     const rows = cleanRowsForTable('Frekvenčné tabuľky', getFrequencyRows(table));
-
     if (!rows.length) return;
 
     tables.push({
       title:
         cleanText(table?.title) ||
         `Frekvenčná tabuľka – ${table?.variable || table?.name || index + 1}`,
+      sheetName: 'Frekvencia',
       description:
         cleanText(table?.description || table?.interpretation) ||
         'Frekvenčné rozdelenie hodnôt.',
@@ -677,7 +737,8 @@ function getAllTables(result: any): ExportTable[] {
       makeTable(
         'Pearsonove korelácie',
         pearson,
-        'Lineárne vzťahy medzi numerickými premennými.',
+        'Lineárne vzťahy medzi numerickými premennými. Vhodné najmä pri približne normálnom rozdelení dát.',
+        'Korelácie',
       ),
     );
   }
@@ -689,7 +750,8 @@ function getAllTables(result: any): ExportTable[] {
       makeTable(
         'Spearmanove korelácie',
         spearman,
-        'Poradové alebo monotónne vzťahy medzi premennými.',
+        'Poradové alebo monotónne vzťahy medzi premennými. Vhodné pri ordinálnych dátach alebo pri porušení normality.',
+        'Korelácie',
       ),
     );
   }
@@ -701,7 +763,8 @@ function getAllTables(result: any): ExportTable[] {
       makeTable(
         'Korelácie',
         correlations,
-        'Korelačné výsledky medzi premennými.',
+        'Korelačné výsledky medzi premennými. Ak nie je jasné, či použiť Pearson alebo Spearman, export ponechá všetky dostupné výpočty.',
+        'Korelácie',
       ),
     );
   }
@@ -719,6 +782,7 @@ function getAllTables(result: any): ExportTable[] {
         'Regresná analýza',
         regression,
         'Výsledky regresného modelovania.',
+        'Testy',
       ),
     );
   }
@@ -735,18 +799,20 @@ function getAllTables(result: any): ExportTable[] {
         'ANOVA',
         anova,
         'Analýza rozptylu pre porovnanie viacerých skupín.',
+        'Testy',
       ),
     );
   }
 
-  const tTests = safeArray(result?.tTests || result?.t_tests);
+  const tTests = safeArray(result?.tTests || result?.t_tests || result?.studentTests || result?.student_tests);
 
   if (tTests.length) {
     tables.push(
       makeTable(
-        'T-testy',
+        'Studentov t-test',
         tTests,
         'Porovnanie dvoch skupín pri numerických premenných.',
+        'Testy',
       ),
     );
   }
@@ -764,6 +830,7 @@ function getAllTables(result: any): ExportTable[] {
         'Mann-Whitney U test',
         mannWhitney,
         'Neparametrické porovnanie dvoch nezávislých skupín.',
+        'Testy',
       ),
     );
   }
@@ -781,6 +848,7 @@ function getAllTables(result: any): ExportTable[] {
         'Kruskal-Wallis test',
         kruskal,
         'Neparametrické porovnanie viacerých nezávislých skupín.',
+        'Testy',
       ),
     );
   }
@@ -789,7 +857,9 @@ function getAllTables(result: any): ExportTable[] {
     result?.cronbachAlpha ||
       result?.cronbach ||
       result?.cronbach_alpha ||
-      result?.reliability,
+      result?.reliability ||
+      result?.reliabilityAnalysis ||
+      result?.reliability_analysis,
   );
 
   if (cronbach.length) {
@@ -797,7 +867,8 @@ function getAllTables(result: any): ExportTable[] {
       makeTable(
         'Cronbach alfa',
         cronbach,
-        'Vnútorná konzistencia dotazníkových škál, napríklad WEMWBS a JSS.',
+        'Vnútorná konzistencia dotazníkových škál. Sociodemografické ukazovatele sa do Cronbachovej alfy nemajú zahŕňať.',
+        'Cronbach alfa',
       ),
     );
   }
@@ -814,6 +885,7 @@ function getAllTables(result: any): ExportTable[] {
         'Výsledky testovania hypotéz',
         hypothesisTests,
         'Výsledky štatistického testovania.',
+        'Testy',
       ),
     );
   }
@@ -829,7 +901,8 @@ function getAllTables(result: any): ExportTable[] {
       makeTable(
         'Odporúčané štatistické testy',
         recommendedTests,
-        'Testy odporúčané podľa typu premenných.',
+        'Odporúčanie podľa typu premenných, normality dát a počtu skupín. Ak systém nevie rozhodnúť jednoznačne, ponechá všetky dostupné výpočty a doplní odporúčanie, čo použiť v práci.',
+        'Testy',
       ),
     );
   }
@@ -846,6 +919,7 @@ function getAllTables(result: any): ExportTable[] {
         'Odporúčané grafy',
         recommendedCharts,
         'Grafy vhodné pre praktickú časť práce, napríklad histogramy, scatter grafy, stĺpcové grafy alebo boxploty.',
+        'Grafy',
       ),
     );
   }
@@ -868,6 +942,7 @@ function getAllTables(result: any): ExportTable[] {
 
     tables.push({
       title: cleanText(table.title || table.name || `Tabuľka ${index + 1}`),
+      sheetName: cleanText(table.sheetName || table.sheet || 'Doplnkové tabuľky'),
       description: cleanText(table.description || ''),
       rows,
     });
@@ -879,7 +954,6 @@ function getAllTables(result: any): ExportTable[] {
     if (!table.rows.length) return false;
 
     const columns = getColumns(table.rows);
-
     if (!columns.length) return false;
 
     const key = `${normalizeTextForCompare(table.title)}-${table.rows.length}-${columns
@@ -889,7 +963,6 @@ function getAllTables(result: any): ExportTable[] {
     if (seen.has(key)) return false;
 
     seen.add(key);
-
     return true;
   });
 }
@@ -903,7 +976,7 @@ function buildChartDataTables(result: any): ExportTable[] {
       result?.frequency_tables,
   );
 
-  frequencies.slice(0, 10).forEach((table: any, index) => {
+  frequencies.slice(0, 20).forEach((table: any, index) => {
     const rows = getFrequencyRows(table)
       .map((row) => ({
         Kategória: row.value ?? row.category ?? row.name ?? row.label ?? '',
@@ -918,6 +991,7 @@ function buildChartDataTables(result: any): ExportTable[] {
 
     output.push({
       title: `Grafové dáta – frekvencia ${table?.variable || table?.name || index + 1}`,
+      sheetName: 'Grafy',
       description:
         'Dáta pripravené na vytvorenie stĺpcového alebo koláčového grafu v Exceli.',
       rows,
@@ -944,6 +1018,7 @@ function buildChartDataTables(result: any): ExportTable[] {
   if (descriptive.length) {
     output.push({
       title: 'Grafové dáta – deskriptívna štatistika',
+      sheetName: 'Grafy',
       description:
         'Dáta pripravené na vizualizáciu priemerov, mediánov a variability.',
       rows: descriptive,
@@ -960,9 +1035,7 @@ function buildChartDataTables(result: any): ExportTable[] {
       Premenná1: row.variable1 || '',
       Premenná2: row.variable2 || '',
       Koeficient: row.coefficient ?? row.r ?? row.rho ?? '',
-      AbsolútnaHodnota: Math.abs(
-        Number(row.coefficient ?? row.r ?? row.rho ?? 0),
-      ),
+      AbsolútnaHodnota: Math.abs(Number(row.coefficient ?? row.r ?? row.rho ?? 0)),
       Sila: row.strength || '',
       Smer: row.direction || '',
     }))
@@ -977,6 +1050,7 @@ function buildChartDataTables(result: any): ExportTable[] {
   if (correlations.length) {
     output.push({
       title: 'Grafové dáta – korelácie',
+      sheetName: 'Grafy',
       description:
         'Dáta pripravené na vizualizáciu sily korelačných vzťahov.',
       rows: correlations,
@@ -1003,12 +1077,13 @@ function getSummaryMetrics(result: any, tables: ExportTable[]): SummaryMetric[] 
 
   const pearson = safeArray(result?.pearsonCorrelations || result?.pearson);
   const spearman = safeArray(result?.spearmanCorrelations || result?.spearman);
+  const normality = safeArray(result?.normality || result?.normalityTests || result?.shapiroWilk);
   const regression = safeArray(result?.regression || result?.regressions || result?.regressionResults);
   const anova = safeArray(result?.anova || result?.anovaResults);
-  const tTests = safeArray(result?.tTests || result?.t_tests);
+  const tTests = safeArray(result?.tTests || result?.t_tests || result?.studentTests);
   const mannWhitney = safeArray(result?.mannWhitney || result?.mannWhitneyTests || result?.mann_whitney);
   const kruskal = safeArray(result?.kruskalWallis || result?.kruskalWallisTests || result?.kruskal_wallis);
-  const cronbach = safeArray(result?.cronbachAlpha || result?.cronbach || result?.cronbach_alpha);
+  const cronbach = safeArray(result?.cronbachAlpha || result?.cronbach || result?.cronbach_alpha || result?.reliability);
 
   const recommendedTests = safeArray(
     result?.recommendedTests ||
@@ -1023,82 +1098,41 @@ function getSummaryMetrics(result: any, tables: ExportTable[]): SummaryMetric[] 
   );
 
   return [
-    {
-      label: 'Premenné',
-      value: variables.length,
-    },
-    {
-      label: 'Deskriptíva',
-      value: descriptive.length,
-    },
-    {
-      label: 'Frekvencie',
-      value: frequencies.length,
-    },
-    {
-      label: 'Pearson',
-      value: pearson.length,
-    },
-    {
-      label: 'Spearman',
-      value: spearman.length,
-    },
-    {
-      label: 'Regresia',
-      value: regression.length,
-    },
-    {
-      label: 'ANOVA',
-      value: anova.length,
-    },
-    {
-      label: 'T-testy',
-      value: tTests.length,
-    },
-    {
-      label: 'Mann-Whitney',
-      value: mannWhitney.length,
-    },
-    {
-      label: 'Kruskal',
-      value: kruskal.length,
-    },
-    {
-      label: 'Cronbach alfa',
-      value: cronbach.length,
-    },
-    {
-      label: 'Odporúčané testy',
-      value: recommendedTests.length,
-    },
-    {
-      label: 'Odporúčané grafy',
-      value: recommendedCharts.length,
-    },
-    {
-      label: 'Sekcie',
-      value: tables.length,
-    },
+    { label: 'Premenné', value: variables.length },
+    { label: 'Deskriptíva', value: descriptive.length },
+    { label: 'Frekvencie', value: frequencies.length },
+    { label: 'Shapiro-Wilk', value: normality.length },
+    { label: 'Pearson', value: pearson.length },
+    { label: 'Spearman', value: spearman.length },
+    { label: 'Regresia', value: regression.length },
+    { label: 'ANOVA', value: anova.length },
+    { label: 'T-testy', value: tTests.length },
+    { label: 'Mann-Whitney', value: mannWhitney.length },
+    { label: 'Kruskal-Wallis', value: kruskal.length },
+    { label: 'Cronbach alfa', value: cronbach.length },
+    { label: 'Odporúčané testy', value: recommendedTests.length },
+    { label: 'Odporúčané grafy', value: recommendedCharts.length },
+    { label: 'Sekcie', value: tables.length },
   ];
 }
 
 function buildSummaryMetricsHtml(metrics: SummaryMetric[]): string {
   if (!metrics.length) return '';
 
-  const cells = metrics
+  const rows = metrics
     .map(
       (metric) => `
-        <td class="metric-card">
-          <div class="metric-label">${htmlEscape(metric.label)}</div>
-          <div class="metric-value">${htmlEscape(metric.value)}</div>
-        </td>
+        <tr>
+          <td class="metric-label">${htmlEscape(metric.label)}</td>
+          <td class="metric-value">${htmlEscape(metric.value)}</td>
+        </tr>
       `,
     )
     .join('');
 
   return `
     <table class="metrics-table">
-      <tr>${cells}</tr>
+      ${rows}
     </table>
   `;
 }
@@ -1125,44 +1159,28 @@ function buildSectionTable(table: ExportTable, index: number): string {
     .join('');
 
   return `
-    <tr>
-      <td colspan="12" class="section-spacer">&nbsp;</td>
-    </tr>
-
-    <tr>
-      <td colspan="12" class="section-title" style="background:${color};">
-        ${htmlEscape(index + 1)}. ${htmlEscape(table.title)}
-      </td>
-    </tr>
+    <h2 style="border-left:10px solid ${color};padding-left:10px;">
+      ${htmlEscape(index + 1)}. ${htmlEscape(table.title)}
+    </h2>
 
     ${
       table.description
-        ? `
-          <tr>
-            <td colspan="12" class="section-description">
-              ${htmlEscape(table.description)}
-            </td>
-          </tr>
-        `
+        ? `<p class="section-description">${htmlEscape(table.description)}</p>`
         : ''
     }
 
-    <tr>
-      <td colspan="12" class="embedded-table-cell">
-        <table class="data-table">
-          <thead>
-            <tr>${headerHtml}</tr>
-          </thead>
-          <tbody>
-            ${bodyHtml}
-          </tbody>
-        </table>
-      </td>
-    </tr>
+    <table class="data-table">
+      <thead>
+        <tr>${headerHtml}</tr>
+      </thead>
+      <tbody>
+        ${bodyHtml}
+      </tbody>
+    </table>
   `;
 }
 
-function createOneSheetExcelHtml(title: string, result: any): string {
+function createWordHtml(title: string, result: any): string {
   const summary = cleanText(result?.summary || '');
 
   const interpretation = cleanText(
@@ -1176,7 +1194,6 @@ function createOneSheetExcelHtml(title: string, result: any): string {
   const warnings = safeArray<string>(result?.warnings);
 
   const tables = [...getAllTables(result), ...buildChartDataTables(result)];
-
   const metrics = getSummaryMetrics(result, tables);
 
   const tablesHtml = tables
@@ -1184,274 +1201,972 @@ function createOneSheetExcelHtml(title: string, result: any): string {
     .join('\n');
 
   return `
-<html xmlns:o="urn:schemas-microsoft-com:office:office"
-      xmlns:x="urn:schemas-microsoft-com:office:excel"
-      xmlns="http://www.w3.org/TR/REC-html40">
+<html>
 <head>
 <meta charset="utf-8" />
-<meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8" />
 <style>
+  @page {
+    size: A4;
+    margin: 1.2cm;
+  }
+
   body {
     font-family: Arial, sans-serif;
     color: #111827;
     background: #ffffff;
+    font-size: 10.5pt;
   }
 
-  .main-sheet {
-    width: 100%;
-    border-collapse: collapse;
+  h1 {
+    color: #0f172a;
+    font-size: 22pt;
+    margin-bottom: 4pt;
   }
 
-  .title-cell {
-    background: #0f172a;
-    color: #ffffff;
-    font-size: 24px;
-    font-weight: 800;
-    padding: 18px 20px;
-    border: 1px solid #0f172a;
+  h2 {
+    color: #0f172a;
+    font-size: 14pt;
+    margin-top: 18pt;
+    margin-bottom: 8pt;
   }
 
-  .subtitle-cell {
+  .subtitle {
     background: #e0f2fe;
     color: #0f172a;
-    font-size: 12px;
-    padding: 10px 20px;
+    padding: 8pt;
     border: 1px solid #bae6fd;
-  }
-
-  .meta-cell {
-    background: #f8fafc;
-    color: #475569;
-    font-size: 11px;
-    padding: 8px 20px;
-    border: 1px solid #e2e8f0;
   }
 
   .block-title {
     background: #1d4ed8;
     color: #ffffff;
     font-weight: 700;
-    font-size: 14px;
-    padding: 10px 14px;
-    border: 1px solid #1d4ed8;
+    padding: 6pt;
+    margin-top: 12pt;
   }
 
   .block-content {
-    background: #ffffff;
-    color: #111827;
-    font-size: 12px;
-    padding: 12px 14px;
     border: 1px solid #dbeafe;
-    line-height: 1.5;
+    padding: 8pt;
+    line-height: 1.45;
   }
 
   .warning-title {
     background: #d97706;
     color: #ffffff;
     font-weight: 700;
-    font-size: 14px;
-    padding: 10px 14px;
-    border: 1px solid #d97706;
+    padding: 6pt;
+    margin-top: 12pt;
   }
 
   .warning-content {
     background: #fffbeb;
     color: #78350f;
-    font-size: 12px;
-    padding: 12px 14px;
     border: 1px solid #fcd34d;
+    padding: 8pt;
   }
 
   .metrics-table {
     border-collapse: collapse;
     width: 100%;
-    margin: 10px 0;
   }
 
-  .metric-card {
-    background: #f8fafc;
+  .metrics-table td {
     border: 1px solid #cbd5e1;
-    padding: 10px;
-    min-width: 115px;
+    padding: 4pt 6pt;
   }
 
   .metric-label {
+    background: #f8fafc;
     color: #64748b;
-    font-size: 10px;
     font-weight: 700;
-    text-transform: uppercase;
+    width: 45%;
   }
 
   .metric-value {
     color: #0f172a;
-    font-size: 20px;
     font-weight: 800;
-    margin-top: 4px;
-  }
-
-  .section-spacer {
-    height: 16px;
-    background: #ffffff;
-    border: none;
-  }
-
-  .section-title {
-    color: #ffffff;
-    font-size: 15px;
-    font-weight: 800;
-    padding: 10px 14px;
-    border: 1px solid #cbd5e1;
   }
 
   .section-description {
     background: #f8fafc;
     color: #475569;
-    font-size: 11px;
     font-style: italic;
-    padding: 8px 14px;
+    padding: 6pt;
     border: 1px solid #e2e8f0;
-  }
-
-  .embedded-table-cell {
-    padding: 0;
-    border: 1px solid #cbd5e1;
   }
 
   .data-table {
     border-collapse: collapse;
     width: 100%;
-    margin: 0;
+    table-layout: fixed;
+    margin-bottom: 14pt;
   }
 
   .data-table th {
     background: #111827;
     color: #ffffff;
-    font-size: 11px;
+    font-size: 8pt;
     font-weight: 700;
     border: 1px solid #cbd5e1;
-    padding: 7px 8px;
+    padding: 4pt;
     text-align: center;
     vertical-align: middle;
   }
 
   .data-table td {
     color: #111827;
-    font-size: 11px;
+    font-size: 8pt;
     border: 1px solid #dbe3ef;
-    padding: 6px 8px;
+    padding: 4pt;
     vertical-align: top;
+    word-wrap: break-word;
   }
 
   .data-table tr:nth-child(even) td {
     background: #f8fafc;
   }
 
-  .data-table tr:nth-child(odd) td {
-    background: #ffffff;
-  }
-
-  .footer-cell {
+  .footer {
     background: #f1f5f9;
     color: #475569;
-    font-size: 11px;
-    padding: 10px 14px;
+    font-size: 9pt;
+    padding: 8pt;
     border: 1px solid #cbd5e1;
+    margin-top: 16pt;
   }
 </style>
 </head>
 
 <body>
-  <table class="main-sheet">
-    <tr>
-      <td colspan="12" class="title-cell">${htmlEscape(title)}</td>
-    </tr>
+  <h1>${htmlEscape(title)}</h1>
 
-    <tr>
-      <td colspan="12" class="subtitle-cell">
-        Profesionálne usporiadaný export výsledkov analýzy dát v jednom liste.
-      </td>
-    </tr>
+  <p class="subtitle">
+    Profesionálne usporiadaný export výsledkov analýzy dát. Tabuľky sú zúžené a prispôsobené na A4.
+  </p>
 
-    <tr>
-      <td colspan="12" class="meta-cell">
-        Vygenerované: ${htmlEscape(new Date().toLocaleString('sk-SK'))}
-      </td>
-    </tr>
+  <p>
+    <strong>Vygenerované:</strong> ${htmlEscape(new Date().toLocaleString('sk-SK'))}
+  </p>
 
-    <tr>
-      <td colspan="12" class="block-title">Prehľad výsledkov</td>
-    </tr>
+  <div class="block-title">Prehľad výsledkov</div>
+  <div class="block-content">
+    ${buildSummaryMetricsHtml(metrics)}
+  </div>
 
-    <tr>
-      <td colspan="12" class="block-content">
-        ${buildSummaryMetricsHtml(metrics)}
-      </td>
-    </tr>
+  ${
+    summary
+      ? `
+        <div class="block-title">Súhrn</div>
+        <div class="block-content">
+          ${htmlEscape(summary).replace(/\n/g, '<br />')}
+        </div>
+      `
+      : ''
+  }
 
-    ${
-      summary
-        ? `
-          <tr>
-            <td colspan="12" class="block-title">Súhrn</td>
-          </tr>
-          <tr>
-            <td colspan="12" class="block-content">
-              ${htmlEscape(summary).replace(/\n/g, '<br />')}
-            </td>
-          </tr>
-        `
-        : ''
-    }
+  ${
+    warnings.length
+      ? `
+        <div class="warning-title">Upozornenia</div>
+        <div class="warning-content">
+          ${warnings.map((warning) => `• ${htmlEscape(warning)}`).join('<br />')}
+        </div>
+      `
+      : ''
+  }
 
-    ${
-      warnings.length
-        ? `
-          <tr>
-            <td colspan="12" class="warning-title">Upozornenia</td>
-          </tr>
-          <tr>
-            <td colspan="12" class="warning-content">
-              ${warnings.map((warning) => `• ${htmlEscape(warning)}`).join('<br />')}
-            </td>
-          </tr>
-        `
-        : ''
-    }
+  ${
+    interpretation
+      ? `
+        <div class="block-title">Interpretácia / text do praktickej časti</div>
+        <div class="block-content">
+          ${htmlEscape(interpretation).replace(/\n/g, '<br />')}
+        </div>
+      `
+      : ''
+  }
 
-    ${
-      interpretation
-        ? `
-          <tr>
-            <td colspan="12" class="block-title">Interpretácia / text do praktickej časti</td>
-          </tr>
-          <tr>
-            <td colspan="12" class="block-content">
-              ${htmlEscape(interpretation).replace(/\n/g, '<br />')}
-            </td>
-          </tr>
-        `
-        : ''
-    }
+  ${tablesHtml}
 
-    ${tablesHtml}
-
-    <tr>
-      <td colspan="12" class="section-spacer">&nbsp;</td>
-    </tr>
-
-    <tr>
-      <td colspan="12" class="footer-cell">
-        Poznámka: Duplicitné stĺpce Premenná / Názov sú zlúčené do jedného stĺpca Premenná. Technické identifikátory ako ID sa nepoužívajú v štatistických výpočtoch.
-      </td>
-    </tr>
-  </table>
+  <div class="footer">
+    Poznámka: Ak systém nevie jednoznačne rozhodnúť medzi Pearson/Spearman alebo medzi parametrickým a neparametrickým testom, ponechá dostupné výpočty a pridá odporúčanie, čo použiť v práci.
+  </div>
 </body>
 </html>
 `;
 }
 
-function createWordHtml(title: string, result: any): string {
-  return createOneSheetExcelHtml(title, result);
+function getExcelSheetName(value: string): string {
+  const cleaned = cleanText(value)
+    .replace(/[\\/?*[\]:]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 31);
+
+  return cleaned || 'Sheet';
+}
+
+function groupTablesForSheets(result: any): Record<string, ExportTable[]> {
+  const tables = [...getAllTables(result), ...buildChartDataTables(result)];
+
+  const grouped: Record<string, ExportTable[]> = {
+    Súhrn: [],
+    Frekvencia: [],
+    Deskriptíva: [],
+    'Cronbach alfa': [],
+    Korelácie: [],
+    Testy: [],
+    Grafy: [],
+  };
+
+  tables.forEach((table) => {
+    const sheetName = getExcelSheetName(table.sheetName || 'Doplnkové tabuľky');
+
+    if (!grouped[sheetName]) grouped[sheetName] = [];
+    grouped[sheetName].push(table);
+  });
+
+  return Object.fromEntries(
+    Object.entries(grouped).filter(([, sheetTables]) => sheetTables.length > 0),
+  );
+}
+
+function buildExcelCell(value: unknown, styleId = 'Default'): string {
+  const cellValue = getCellValue(value);
+
+  if (isNumericLike(cellValue)) {
+    return `<Cell ss:StyleID="${styleId}"><Data ss:Type="Number">${getNumericValue(cellValue)}</Data></Cell>`;
+  }
+
+  return `<Cell ss:StyleID="${styleId}"><Data ss:Type="String">${xmlEscape(cellValue)}</Data></Cell>`;
+}
+
+function buildExcelTableRows(table: ExportTable, index: number): string {
+  const columns = getColumns(table.rows);
+
+  const titleRow = `
+    <Row>
+      <Cell ss:StyleID="SectionTitle" ss:MergeAcross="${Math.max(columns.length - 1, 0)}">
+        <Data ss:Type="String">${xmlEscape(index + 1)}. ${xmlEscape(table.title)}</Data>
+      </Cell>
+    </Row>
+  `;
+
+  const descriptionRow = table.description
+    ? `
+      <Row>
+        <Cell ss:StyleID="Description" ss:MergeAcross="${Math.max(columns.length - 1, 0)}">
+          <Data ss:Type="String">${xmlEscape(table.description)}</Data>
+        </Cell>
+      </Row>
+    `
+    : '';
+
+  const headerRow = `
+    <Row>
+      ${columns
+        .map((column) => `<Cell ss:StyleID="Header"><Data ss:Type="String">${xmlEscape(column.label)}</Data></Cell>`)
+        .join('')}
+    </Row>
+  `;
+
+  const dataRows = table.rows
+    .map(
+      (row) => `
+        <Row>
+          ${columns
+            .map((column) => buildExcelCell(getExportCellValue(row, column), 'Cell'))
+            .join('')}
+        </Row>
+      `,
+    )
+    .join('');
+
+  return `
+    <Row><Cell><Data ss:Type="String"></Data></Cell></Row>
+    ${titleRow}
+    ${descriptionRow}
+    ${headerRow}
+    ${dataRows}
+  `;
+}
+
+
+function clampNumber(value: number, min = 0, max = 100): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+function getChartNumber(value: unknown, fallback = 0): number {
+  if (value === null || value === undefined || value === '') return fallback;
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  const normalized = String(value)
+    .replace('%', '')
+    .replace(/\s/g, '')
+    .replace(',', '.');
+
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function getPercentLike(value: unknown): number {
+  const numeric = getChartNumber(value, 0);
+
+  if (numeric <= 1 && numeric > 0) {
+    return clampNumber(numeric * 100);
+  }
+
+  return clampNumber(numeric);
+}
+
+function getChartCellValue(row: Record<string, any>, keys: string[], fallback: unknown = ''): unknown {
+  for (const key of keys) {
+    const value = row[key];
+
+    if (value !== null && value !== undefined && value !== '') return value;
+  }
+
+  return fallback;
+}
+
+function buildBlankExcelRow(): string {
+  return '<Row><Cell><Data ss:Type="String"></Data></Cell></Row>';
+}
+
+function buildMergedExcelRow(text: unknown, styleId: string, mergeAcross = 17, height?: number): string {
+  return `
+    <Row${height ? ` ss:Height="${height}"` : ''}>
+      <Cell ss:StyleID="${styleId}" ss:MergeAcross="${mergeAcross}">
+        <Data ss:Type="String">${xmlEscape(text)}</Data>
+      </Cell>
+    </Row>
+  `;
+}
+
+function buildExcelBarCells(value: number, maxValue: number, segments = 14, activeStyle = 'ChartBarPurple'): string {
+  const safeMax = maxValue > 0 ? maxValue : 100;
+  const activeSegments = Math.max(0, Math.min(segments, Math.round((value / safeMax) * segments)));
+
+  return Array.from({ length: segments })
+    .map((_, index) => {
+      const styleId = index < activeSegments ? activeStyle : 'ChartBarEmpty';
+      return `<Cell ss:StyleID="${styleId}"><Data ss:Type="String"></Data></Cell>`;
+    })
+    .join('');
+}
+
+function buildExcelVisualBarRow(label: unknown, value: number, maxValue: number, suffix = '', activeStyle = 'ChartBarPurple'): string {
+  return `
+    <Row ss:Height="21">
+      <Cell ss:StyleID="ChartLabel"><Data ss:Type="String">${xmlEscape(label)}</Data></Cell>
+      <Cell ss:StyleID="ChartValue"><Data ss:Type="Number">${Number(value.toFixed(2))}</Data></Cell>
+      ${buildExcelBarCells(value, maxValue, 14, activeStyle)}
+      <Cell ss:StyleID="ChartNote" ss:MergeAcross="1"><Data ss:Type="String">${xmlEscape(`${Number(value.toFixed(2))}${suffix}`)}</Data></Cell>
+    </Row>
+  `;
+}
+
+function buildExcelMetricCard(label: unknown, value: unknown, styleId = 'MetricCard'): string {
+  return `
+    <Cell ss:StyleID="${styleId}" ss:MergeAcross="3">
+      <Data ss:Type="String">${xmlEscape(`${label}: ${value}`)}</Data>
+    </Cell>
+  `;
+}
+
+function getVisualFrequencyCharts(result: any): string {
+  const frequencies = safeArray(
+    result?.frequencies ||
+      result?.frequencyTables ||
+      result?.frequency_tables,
+  );
+
+  const blocks = frequencies.slice(0, 5).map((table: any, tableIndex) => {
+    const rawRows = getFrequencyRows(table)
+      .map((row) => ({
+        label: getChartCellValue(row, ['value', 'category', 'name', 'label', VARIABLE_COLUMN_KEY], ''),
+        count: getChartNumber(getChartCellValue(row, ['frequency', 'count', 'n', 'Počet'], 0), 0),
+        percent: getPercentLike(getChartCellValue(row, ['percent', 'percentage', 'validPercent', 'valid_percent'], 0)),
+      }))
+      .filter((row) => row.label !== '' && !isTechnicalIdName(row.label));
+
+    const rows = rawRows
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+
+    if (!rows.length) return '';
+
+    const max = Math.max(...rows.map((row) => row.count), 1);
+    const title = cleanText(table?.title || table?.variable || table?.name || `Frekvenčný graf ${tableIndex + 1}`);
+
+    return `
+      ${buildBlankExcelRow()}
+      ${buildMergedExcelRow(`Stĺpcový graf – ${title}`, 'ChartSectionTitle', 17)}
+      <Row>
+        <Cell ss:StyleID="ChartHeader"><Data ss:Type="String">Kategória</Data></Cell>
+        <Cell ss:StyleID="ChartHeader"><Data ss:Type="String">Počet</Data></Cell>
+        <Cell ss:StyleID="ChartHeader" ss:MergeAcross="13"><Data ss:Type="String">Vizuálny stĺpec</Data></Cell>
+        <Cell ss:StyleID="ChartHeader" ss:MergeAcross="1"><Data ss:Type="String">Hodnota</Data></Cell>
+      </Row>
+      ${rows
+        .map((row, index) =>
+          buildExcelVisualBarRow(
+            row.label,
+            row.count,
+            max,
+            row.percent ? ` (${Number(row.percent.toFixed(1))} %)` : '',
+            index % 2 === 0 ? 'ChartBarPurple' : 'ChartBarBlue',
+          ),
+        )
+        .join('')}
+    `;
+  });
+
+  return blocks.filter(Boolean).join('');
+}
+
+function getVisualDescriptiveCharts(result: any): string {
+  const descriptive = safeArray(
+    result?.descriptiveStatistics ||
+      result?.descriptive_statistics ||
+      result?.statistics,
+  )
+    .map((row: any) => ({
+      label: getBestVariableValue(row) || row.variable || row.name || row.label || '',
+      mean: getChartNumber(row.M ?? row.mean ?? row.average, NaN),
+      median: getChartNumber(row.Md ?? row.median, NaN),
+      sd: getChartNumber(row.SD ?? row.sd ?? row.stdDeviation ?? row.standardDeviation, NaN),
+      min: getChartNumber(row.min ?? row.minimum, NaN),
+      max: getChartNumber(row.max ?? row.maximum, NaN),
+    }))
+    .filter((row) => row.label && !isTechnicalIdName(row.label) && Number.isFinite(row.mean));
+
+  if (!descriptive.length) return '';
+
+  const rows = descriptive.slice(0, 10);
+  const maxMean = Math.max(...rows.map((row) => Math.abs(row.mean)), 1);
+  const maxSd = Math.max(...rows.map((row) => Math.abs(row.sd || 0)), 1);
+
+  return `
+    ${buildBlankExcelRow()}
+    ${buildMergedExcelRow('Deskriptívne grafy – priemery a variabilita', 'ChartSectionTitle', 17)}
+    <Row>
+      <Cell ss:StyleID="ChartHeader"><Data ss:Type="String">Premenná</Data></Cell>
+      <Cell ss:StyleID="ChartHeader"><Data ss:Type="String">Priemer</Data></Cell>
+      <Cell ss:StyleID="ChartHeader" ss:MergeAcross="13"><Data ss:Type="String">Vizuálny priemer</Data></Cell>
+      <Cell ss:StyleID="ChartHeader" ss:MergeAcross="1"><Data ss:Type="String">M / SD</Data></Cell>
+    </Row>
+    ${rows
+      .map((row) =>
+        buildExcelVisualBarRow(
+          row.label,
+          Math.abs(row.mean),
+          maxMean,
+          ` (M=${Number(row.mean.toFixed(2))}; SD=${Number((row.sd || 0).toFixed(2))})`,
+          'ChartBarGreen',
+        ),
+      )
+      .join('')}
+    ${buildBlankExcelRow()}
+    <Row>
+      <Cell ss:StyleID="ChartHeader"><Data ss:Type="String">Premenná</Data></Cell>
+      <Cell ss:StyleID="ChartHeader"><Data ss:Type="String">SD</Data></Cell>
+      <Cell ss:StyleID="ChartHeader" ss:MergeAcross="13"><Data ss:Type="String">Vizuálna variabilita</Data></Cell>
+      <Cell ss:StyleID="ChartHeader" ss:MergeAcross="1"><Data ss:Type="String">Rozptyl dát</Data></Cell>
+    </Row>
+    ${rows
+      .filter((row) => Number.isFinite(row.sd))
+      .map((row) =>
+        buildExcelVisualBarRow(
+          row.label,
+          Math.abs(row.sd || 0),
+          maxSd,
+          ` SD`,
+          'ChartBarOrange',
+        ),
+      )
+      .join('')}
+  `;
+}
+
+function getVisualCorrelationCharts(result: any): string {
+  const correlations = [
+    ...safeArray(result?.pearsonCorrelations || result?.pearson),
+    ...safeArray(result?.spearmanCorrelations || result?.spearman),
+    ...safeArray(result?.correlations || result?.correlationResults),
+  ]
+    .map((row: any) => {
+      const coefficient = getChartNumber(row.coefficient ?? row.r ?? row.rho, NaN);
+
+      return {
+        label: `${row.variable1 || row.Premenná1 || ''} × ${row.variable2 || row.Premenná2 || ''}`,
+        coefficient,
+        abs: Math.abs(coefficient),
+        p: row.pValue ?? row.p_value ?? row.p ?? '',
+        strength: row.strength || '',
+      };
+    })
+    .filter(
+      (row) =>
+        row.label.trim() !== '×' &&
+        Number.isFinite(row.coefficient) &&
+        !row.label.split('×').some((part) => isTechnicalIdName(part.trim())),
+    )
+    .sort((a, b) => b.abs - a.abs)
+    .slice(0, 10);
+
+  if (!correlations.length) return '';
+
+  return `
+    ${buildBlankExcelRow()}
+    ${buildMergedExcelRow('Korelačný graf – sila vzťahov', 'ChartSectionTitle', 17)}
+    <Row>
+      <Cell ss:StyleID="ChartHeader"><Data ss:Type="String">Vzťah</Data></Cell>
+      <Cell ss:StyleID="ChartHeader"><Data ss:Type="String">|r|</Data></Cell>
+      <Cell ss:StyleID="ChartHeader" ss:MergeAcross="13"><Data ss:Type="String">Vizuálna sila vzťahu</Data></Cell>
+      <Cell ss:StyleID="ChartHeader" ss:MergeAcross="1"><Data ss:Type="String">r / p</Data></Cell>
+    </Row>
+    ${correlations
+      .map((row) =>
+        buildExcelVisualBarRow(
+          row.label,
+          row.abs,
+          1,
+          ` (r=${Number(row.coefficient.toFixed(3))}${row.p !== '' ? `; p=${row.p}` : ''})`,
+          row.coefficient >= 0 ? 'ChartBarGreen' : 'ChartBarRed',
+        ),
+      )
+      .join('')}
+  `;
+}
+
+function buildExcelVisualCharts(result: any, title: string): string {
+  const allTables = [...getAllTables(result), ...buildChartDataTables(result)];
+  const metrics = getSummaryMetrics(result, allTables);
+  const metricMap = new Map(metrics.map((metric) => [metric.label, metric.value]));
+  const descriptiveCount = Number(metricMap.get('Deskriptíva') || 0);
+  const frequencyCount = Number(metricMap.get('Frekvencie') || 0);
+  const correlationCount = Number(metricMap.get('Pearson') || 0) + Number(metricMap.get('Spearman') || 0);
+  const chartCount = Number(metricMap.get('Odporúčané grafy') || 0);
+
+  const frequencyCharts = getVisualFrequencyCharts(result);
+  const descriptiveCharts = getVisualDescriptiveCharts(result);
+  const correlationCharts = getVisualCorrelationCharts(result);
+
+  return `
+    <Row>
+      <Cell ss:StyleID="DashboardTitle" ss:MergeAcross="17">
+        <Data ss:Type="String">${xmlEscape(`Vizuálne grafy – ${title}`)}</Data>
+      </Cell>
+    </Row>
+    <Row>
+      <Cell ss:StyleID="DashboardSubtitle" ss:MergeAcross="17">
+        <Data ss:Type="String">Grafy sú vložené priamo na liste Grafy ako vizuálne Excel panely. Sú pod nimi aj zdrojové dáta, aby sa dali ďalej upraviť alebo prerobiť na natívne grafy v Exceli.</Data>
+      </Cell>
+    </Row>
+    ${buildBlankExcelRow()}
+    <Row ss:Height="42">
+      ${buildExcelMetricCard('Frekvenčné grafy', frequencyCount, 'MetricCardPurple')}
+      ${buildExcelMetricCard('Deskriptívne grafy', descriptiveCount, 'MetricCardGreen')}
+      ${buildExcelMetricCard('Korelačné grafy', correlationCount, 'MetricCardBlue')}
+      ${buildExcelMetricCard('Odporúčané grafy', chartCount, 'MetricCardOrange')}
+    </Row>
+    ${frequencyCharts || buildMergedExcelRow('Frekvenčné grafy: dáta neboli dostupné alebo neobsahovali použiteľné kategórie.', 'Description', 17)}
+    ${descriptiveCharts || buildMergedExcelRow('Deskriptívne grafy: dáta neboli dostupné alebo neobsahovali číselné premenné.', 'Description', 17)}
+    ${correlationCharts || buildMergedExcelRow('Korelačný graf: korelačné výsledky neboli dostupné.', 'Description', 17)}
+    ${buildBlankExcelRow()}
+    ${buildMergedExcelRow('Zdrojové dáta pre grafy', 'SectionTitle', 17)}
+  `;
+}
+
+function createExcelXml(title: string, result: any): string {
+  const grouped = groupTablesForSheets(result);
+  const allTables = Object.values(grouped).flat();
+  const metrics = getSummaryMetrics(result, allTables);
+
+  const summary = cleanText(result?.summary || '');
+  const interpretation = cleanText(
+    result?.interpretation ||
+      result?.practicalText ||
+      result?.fullText ||
+      result?.output ||
+      '',
+  );
+
+  const warnings = safeArray<string>(result?.warnings);
+
+  const worksheets = Object.entries(grouped)
+    .map(([sheetName, tables]) => {
+      const safeSheetName = getExcelSheetName(sheetName);
+
+      const introRows =
+        safeSheetName === 'Súhrn'
+          ? `
+            <Row>
+              <Cell ss:StyleID="Title" ss:MergeAcross="7">
+                <Data ss:Type="String">${xmlEscape(title)}</Data>
+              </Cell>
+            </Row>
+            <Row>
+              <Cell ss:StyleID="Description" ss:MergeAcross="7">
+                <Data ss:Type="String">Vygenerované: ${xmlEscape(new Date().toLocaleString('sk-SK'))}</Data>
+              </Cell>
+            </Row>
+            <Row>
+              <Cell ss:StyleID="SectionTitle" ss:MergeAcross="1">
+                <Data ss:Type="String">Prehľad výsledkov</Data>
+              </Cell>
+            </Row>
+            ${metrics
+              .map(
+                (metric) => `
+                  <Row>
+                    <Cell ss:StyleID="Header"><Data ss:Type="String">${xmlEscape(metric.label)}</Data></Cell>
+                    ${buildExcelCell(metric.value, 'Cell')}
+                  </Row>
+                `,
+              )
+              .join('')}
+            ${
+              summary
+                ? `
+                  <Row><Cell><Data ss:Type="String"></Data></Cell></Row>
+                  <Row>
+                    <Cell ss:StyleID="SectionTitle" ss:MergeAcross="7">
+                      <Data ss:Type="String">Súhrn</Data>
+                    </Cell>
+                  </Row>
+                  <Row>
+                    <Cell ss:StyleID="LongText" ss:MergeAcross="7">
+                      <Data ss:Type="String">${xmlEscape(summary)}</Data>
+                    </Cell>
+                  </Row>
+                `
+                : ''
+            }
+            ${
+              interpretation
+                ? `
+                  <Row><Cell><Data ss:Type="String"></Data></Cell></Row>
+                  <Row>
+                    <Cell ss:StyleID="SectionTitle" ss:MergeAcross="7">
+                      <Data ss:Type="String">Interpretácia / text do praktickej časti</Data>
+                    </Cell>
+                  </Row>
+                  <Row>
+                    <Cell ss:StyleID="LongText" ss:MergeAcross="7">
+                      <Data ss:Type="String">${xmlEscape(interpretation)}</Data>
+                    </Cell>
+                  </Row>
+                `
+                : ''
+            }
+            ${
+              warnings.length
+                ? `
+                  <Row><Cell><Data ss:Type="String"></Data></Cell></Row>
+                  <Row>
+                    <Cell ss:StyleID="WarningTitle" ss:MergeAcross="7">
+                      <Data ss:Type="String">Upozornenia</Data>
+                    </Cell>
+                  </Row>
+                  ${warnings
+                    .map(
+                      (warning) => `
+                        <Row>
+                          <Cell ss:StyleID="Warning" ss:MergeAcross="7">
+                            <Data ss:Type="String">• ${xmlEscape(warning)}</Data>
+                          </Cell>
+                        </Row>
+                      `,
+                    )
+                    .join('')}
+                `
+                : ''
+            }
+          `
+          : safeSheetName === 'Grafy'
+            ? buildExcelVisualCharts(result, title)
+            : `
+              <Row>
+                <Cell ss:StyleID="Title" ss:MergeAcross="17">
+                  <Data ss:Type="String">${xmlEscape(safeSheetName)}</Data>
+                </Cell>
+              </Row>
+            `;
+
+      const tableRows = tables
+        .map((table, index) => buildExcelTableRows(table, index))
+        .join('');
+
+      return `
+        <Worksheet ss:Name="${xmlEscape(safeSheetName)}">
+          <Table ss:DefaultColumnWidth="115">
+            <Column ss:AutoFitWidth="1" ss:Width="170"/>
+            <Column ss:AutoFitWidth="1" ss:Width="78"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="24"/>
+            <Column ss:AutoFitWidth="1" ss:Width="135"/>
+            <Column ss:AutoFitWidth="1" ss:Width="135"/>
+            ${introRows}
+            ${tableRows}
+          </Table>
+          <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">
+            <PageSetup>
+              <Layout x:Orientation="Landscape"/>
+              <Header x:Margin="0.3"/>
+              <Footer x:Margin="0.3"/>
+              <PageMargins x:Bottom="0.5" x:Left="0.4" x:Right="0.4" x:Top="0.5"/>
+            </PageSetup>
+            <FitToPage/>
+            <Print>
+              <FitWidth>1</FitWidth>
+              <FitHeight>0</FitHeight>
+              <ValidPrinterInfo/>
+              <HorizontalResolution>600</HorizontalResolution>
+              <VerticalResolution>600</VerticalResolution>
+            </Print>
+            <FreezePanes/>
+            <FrozenNoSplit/>
+            <SplitHorizontal>1</SplitHorizontal>
+            <TopRowBottomPane>1</TopRowBottomPane>
+            <ActivePane>2</ActivePane>
+          </WorksheetOptions>
+        </Worksheet>
+      `;
+    })
+    .join('');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook
+  xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:o="urn:schemas-microsoft-com:office:office"
+  xmlns:x="urn:schemas-microsoft-com:office:excel"
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:html="http://www.w3.org/TR/REC-html40">
+
+  <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
+    <Author>Zedpera</Author>
+    <LastAuthor>Zedpera</LastAuthor>
+    <Created>${new Date().toISOString()}</Created>
+    <Company>Zedpera</Company>
+    <Version>16.00</Version>
+  </DocumentProperties>
+
+  <Styles>
+    <Style ss:ID="Default" ss:Name="Normal">
+      <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="10"/>
+    </Style>
+
+    <Style ss:ID="Title">
+      <Alignment ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="16" ss:Bold="1" ss:Color="#FFFFFF"/>
+      <Interior ss:Color="#0F172A" ss:Pattern="Solid"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1"/>
+      </Borders>
+    </Style>
+
+    <Style ss:ID="SectionTitle">
+      <Alignment ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#FFFFFF"/>
+      <Interior ss:Color="#2563EB" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="Header">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="9" ss:Bold="1" ss:Color="#FFFFFF"/>
+      <Interior ss:Color="#111827" ss:Pattern="Solid"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1"/>
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1"/>
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1"/>
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1"/>
+      </Borders>
+    </Style>
+
+    <Style ss:ID="Cell">
+      <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+      <NumberFormat ss:Format="General"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#DBE3EF"/>
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#DBE3EF"/>
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#DBE3EF"/>
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#DBE3EF"/>
+      </Borders>
+    </Style>
+
+    <Style ss:ID="Description">
+      <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="9" ss:Italic="1" ss:Color="#475569"/>
+      <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="LongText">
+      <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="10" ss:Color="#111827"/>
+    </Style>
+
+    <Style ss:ID="WarningTitle">
+      <Alignment ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#FFFFFF"/>
+      <Interior ss:Color="#D97706" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="Warning">
+      <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="10" ss:Color="#78350F"/>
+      <Interior ss:Color="#FFFBEB" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="DashboardTitle">
+      <Alignment ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="18" ss:Bold="1" ss:Color="#FFFFFF"/>
+      <Interior ss:Color="#111827" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="DashboardSubtitle">
+      <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="10" ss:Color="#CBD5E1"/>
+      <Interior ss:Color="#1E293B" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="ChartSectionTitle">
+      <Alignment ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="12" ss:Bold="1" ss:Color="#FFFFFF"/>
+      <Interior ss:Color="#7C3AED" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="ChartHeader">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="9" ss:Bold="1" ss:Color="#FFFFFF"/>
+      <Interior ss:Color="#334155" ss:Pattern="Solid"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#475569"/>
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#475569"/>
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#475569"/>
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#475569"/>
+      </Borders>
+    </Style>
+
+    <Style ss:ID="ChartLabel">
+      <Alignment ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="9" ss:Bold="1" ss:Color="#0F172A"/>
+      <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="ChartValue">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="9" ss:Bold="1" ss:Color="#0F172A"/>
+      <Interior ss:Color="#EEF2FF" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="ChartNote">
+      <Alignment ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="8" ss:Bold="1" ss:Color="#475569"/>
+      <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="ChartBarEmpty">
+      <Interior ss:Color="#E5E7EB" ss:Pattern="Solid"/>
+      <Borders>
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FFFFFF"/>
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FFFFFF"/>
+      </Borders>
+    </Style>
+
+    <Style ss:ID="ChartBarPurple">
+      <Interior ss:Color="#7C3AED" ss:Pattern="Solid"/>
+      <Borders>
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FFFFFF"/>
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FFFFFF"/>
+      </Borders>
+    </Style>
+
+    <Style ss:ID="ChartBarBlue">
+      <Interior ss:Color="#2563EB" ss:Pattern="Solid"/>
+      <Borders>
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FFFFFF"/>
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FFFFFF"/>
+      </Borders>
+    </Style>
+
+    <Style ss:ID="ChartBarGreen">
+      <Interior ss:Color="#059669" ss:Pattern="Solid"/>
+      <Borders>
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FFFFFF"/>
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FFFFFF"/>
+      </Borders>
+    </Style>
+
+    <Style ss:ID="ChartBarOrange">
+      <Interior ss:Color="#EA580C" ss:Pattern="Solid"/>
+      <Borders>
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FFFFFF"/>
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FFFFFF"/>
+      </Borders>
+    </Style>
+
+    <Style ss:ID="ChartBarRed">
+      <Interior ss:Color="#DC2626" ss:Pattern="Solid"/>
+      <Borders>
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FFFFFF"/>
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FFFFFF"/>
+      </Borders>
+    </Style>
+
+    <Style ss:ID="MetricCard">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/>
+      <Interior ss:Color="#334155" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="MetricCardPurple">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/>
+      <Interior ss:Color="#7C3AED" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="MetricCardGreen">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/>
+      <Interior ss:Color="#059669" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="MetricCardBlue">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/>
+      <Interior ss:Color="#2563EB" ss:Pattern="Solid"/>
+    </Style>
+
+    <Style ss:ID="MetricCardOrange">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/>
+      <Interior ss:Color="#EA580C" ss:Pattern="Solid"/>
+    </Style>
+  </Styles>
+
+  ${worksheets}
+</Workbook>`;
 }
 
 function pdfSafeText(value: unknown): string {
@@ -1490,9 +2205,7 @@ function wrapText(text: string, maxLength: number): string[] {
       }
     });
 
-    if (current) {
-      output.push(current);
-    }
+    if (current) output.push(current);
   });
 
   return output;
@@ -1500,7 +2213,6 @@ function wrapText(text: string, maxLength: number): string[] {
 
 function buildPdfLines(title: string, result: any): string[] {
   const tables = [...getAllTables(result), ...buildChartDataTables(result)];
-
   const lines: string[] = [];
 
   lines.push(title);
@@ -1545,7 +2257,6 @@ function buildPdfLines(title: string, result: any): string[] {
     }
 
     const columns = getColumns(table.rows);
-
     lines.push(columns.map((column) => column.label).join(' | '));
 
     table.rows.slice(0, 120).forEach((row) => {
@@ -1586,9 +2297,7 @@ function createPdfBuffer(title: string, result: any): Buffer {
     pages.push(lines.slice(index, index + maxLinesPerPage));
   }
 
-  if (!pages.length) {
-    pages.push(['Vysledky analyzy dat']);
-  }
+  if (!pages.length) pages.push(['Vysledky analyzy dat']);
 
   const objects: string[] = [];
 
@@ -1613,7 +2322,7 @@ function createPdfBuffer(title: string, result: any): Buffer {
     const contentLines: string[] = [];
 
     contentLines.push('BT');
-    contentLines.push(`/F1 9 Tf`);
+    contentLines.push('/F1 9 Tf');
     contentLines.push(`${marginLeft} ${startY} Td`);
 
     pageLines.forEach((line, lineIndex) => {
@@ -1685,7 +2394,6 @@ function fileResponse(params: {
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json().catch(() => ({}))) as ExportBody;
-
     const result = body.result;
 
     if (!result || typeof result !== 'object') {
@@ -1734,10 +2442,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const html = createOneSheetExcelHtml(title, result);
+    const excelXml = createExcelXml(title, result);
 
     return fileResponse({
-      buffer: html,
+      buffer: excelXml,
       fileName: `${baseFileName}.xls`,
       contentType: 'application/vnd.ms-excel; charset=utf-8',
     });
@@ -1765,6 +2473,6 @@ export async function GET() {
     methods: ['POST'],
     formats: ['word', 'doc', 'excel', 'xls', 'xlsx', 'pdf'],
     note:
-      'Export zlučuje duplicitné stĺpce Premenná / Názov do jedného stĺpca Premenná, technické ID odstraňuje zo štatistických tabuliek a PDF vracia ako skutočný application/pdf súbor.',
+      'Export delí Excel do samostatných sheetov: Súhrn, Frekvencia, Deskriptíva, Cronbach alfa, Korelácie, Testy a Grafy. Bunky s číslami sa zapisujú ako čísla, PDF sa vracia ako skutočný application/pdf súbor a Word je prispôsobený na A4.',
   });
 }

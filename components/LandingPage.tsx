@@ -2861,10 +2861,9 @@ export default function LandingPage() {
               </div>
             </div>
 
-            <div className="grid gap-6 xl:grid-cols-[0.48fr_0.52fr]">
-              <ModernWomanHeroCard />
-              <AiLeaderPreview t={t} />
-            </div>
+            <div className="grid gap-6">
+  <AiLeaderPreview t={t} />
+</div>
           </div>
 
           <div className="mt-16 grid overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035] shadow-2xl shadow-black/30 sm:grid-cols-4">

@@ -20,6 +20,7 @@ import {
   Sparkles,
   UserCircle,
   WalletCards,
+  XCircle,
 } from 'lucide-react';
 
 type JsonRecord = Record<string, unknown>;
@@ -53,9 +54,16 @@ type ClientProfile = {
   raw: JsonRecord;
 };
 
-type ApiLoadState = 'idle' | 'loading' | 'success' | 'error';
+type LoadState = 'idle' | 'loading' | 'success' | 'error';
+type CancelState = 'idle' | 'loading' | 'success' | 'error';
 
 const PROFILE_ENDPOINTS = ['/api/profile/me', '/api/profile', '/api/profile/get'];
+
+const CANCEL_SUBSCRIPTION_ENDPOINTS = [
+  '/api/subscription/cancel',
+  '/api/billing/cancel-subscription',
+  '/api/stripe/cancel-subscription',
+];
 
 function cleanText(value: unknown, fallback = '') {
   if (value === null || value === undefined) return fallback;
@@ -137,8 +145,8 @@ function readFromLocalStorage(): Partial<ClientProfile> {
   };
 }
 
-function normalizeClientProfile(apiData: unknown, source: string): ClientProfile {
-  const data = pickRecord(apiData);
+function normalizeClientProfile(profileData: unknown, source: string): ClientProfile {
+  const data = pickRecord(profileData);
   const local = readFromLocalStorage();
 
   const plan =
@@ -320,13 +328,52 @@ function formatValue(value: unknown) {
 function labelPlan(plan: string) {
   const value = plan.toLowerCase();
 
-  if (value.includes('admin')) return 'Admin prístup';
+  if (value.includes('elite')) return 'Elite Academic';
+  if (value.includes('student')) return 'Študent Plus';
+  if (value.includes('thesis')) return 'Pro Thesis';
+  if (value.includes('admin')) return 'Administrátorský prístup';
   if (value.includes('premium')) return 'Premium balíček';
   if (value.includes('pro')) return 'Pro balíček';
-  if (value.includes('basic')) return 'Basic balíček';
+  if (value.includes('basic')) return 'Start Basic';
   if (value.includes('free')) return 'Free balíček';
 
   return plan || 'Nezadaný balíček';
+}
+
+function normalizeSubscriptionStatus(status: string) {
+  const value = status.toLowerCase();
+
+  if (
+    value.includes('cancel') ||
+    value.includes('zruš') ||
+    value.includes('inactive') ||
+    value.includes('neaktív')
+  ) {
+    return 'zrušené';
+  }
+
+  if (
+    value.includes('active') ||
+    value.includes('aktív') ||
+    value.includes('trial') ||
+    value.includes('skúšob')
+  ) {
+    return 'aktívne';
+  }
+
+  return value || 'nezistené';
+}
+
+function canCancelSubscription(profile: ClientProfile | null) {
+  if (!profile) return false;
+
+  const status = normalizeSubscriptionStatus(profile.subscriptionStatus);
+  const plan = `${profile.plan} ${profile.selectedPlan} ${profile.packageName}`.toLowerCase();
+
+  if (status === 'zrušené') return false;
+  if (plan.includes('free')) return false;
+
+  return true;
 }
 
 function getUsagePercent(profile: ClientProfile) {
@@ -406,9 +453,13 @@ export default function ClientAccountProfile() {
   const router = useRouter();
 
   const [profile, setProfile] = useState<ClientProfile | null>(null);
-  const [state, setState] = useState<ApiLoadState>('idle');
+  const [state, setState] = useState<LoadState>('idle');
   const [error, setError] = useState('');
   const [lastLoadedAt, setLastLoadedAt] = useState('');
+
+  const [cancelState, setCancelState] = useState<CancelState>('idle');
+  const [cancelMessage, setCancelMessage] = useState('');
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   const loadProfile = useCallback(async () => {
     setState('loading');
@@ -462,6 +513,75 @@ export default function ClientAccountProfile() {
     setState('error');
   }, []);
 
+  const cancelSubscription = useCallback(async () => {
+    if (!profile || cancelState === 'loading') return;
+
+    setCancelState('loading');
+    setCancelMessage('');
+
+    let lastError = '';
+
+    for (const endpoint of CANCEL_SUBSCRIPTION_ENDPOINTS) {
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          cache: 'no-store',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: profile.email,
+            plan: profile.selectedPlan || profile.plan,
+          }),
+        });
+
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          lastError =
+            cleanText((data as JsonRecord | null)?.error) ||
+            cleanText((data as JsonRecord | null)?.message) ||
+            'Predplatné sa nepodarilo zrušiť.';
+          continue;
+        }
+
+        setProfile((current) =>
+          current
+            ? {
+                ...current,
+                subscriptionStatus: 'zrušené',
+                accountStatus: 'aktívny do konca zaplateného obdobia',
+                updatedAt: new Date().toISOString(),
+              }
+            : current,
+        );
+
+        setCancelState('success');
+        setCancelMessage(
+          'Predplatné bolo zrušené. Prístup zostáva zachovaný do konca zaplateného obdobia.',
+        );
+        setShowCancelConfirm(false);
+
+        await loadProfile();
+
+        return;
+      } catch (err) {
+        lastError =
+          err instanceof Error
+            ? err.message
+            : 'Predplatné sa nepodarilo zrušiť.';
+      }
+    }
+
+    setCancelState('error');
+    setCancelMessage(
+      lastError ||
+        'Predplatné sa nepodarilo zrušiť. Skúste to znova alebo kontaktujte podporu.',
+    );
+  }, [cancelState, loadProfile, profile]);
+
   useEffect(() => {
     loadProfile();
   }, [loadProfile]);
@@ -469,6 +589,8 @@ export default function ClientAccountProfile() {
   const usagePercent = useMemo(() => {
     return profile ? getUsagePercent(profile) : null;
   }, [profile]);
+
+  const subscriptionCanBeCancelled = canCancelSubscription(profile);
 
   function goToMenu() {
     router.push('/dashboard');
@@ -530,6 +652,19 @@ export default function ClientAccountProfile() {
                 )}
                 Obnoviť údaje
               </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCancelMessage('');
+                  setShowCancelConfirm(true);
+                }}
+                disabled={!subscriptionCanBeCancelled}
+                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-red-400/40 bg-red-500/10 px-5 text-sm font-black text-red-100 shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:border-red-300/70 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <XCircle size={18} />
+                Zrušiť predplatné
+              </button>
             </div>
           </div>
         </section>
@@ -539,6 +674,75 @@ export default function ClientAccountProfile() {
             <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
               <div>{error}</div>
+            </div>
+          </section>
+        ) : null}
+
+        {cancelMessage ? (
+          <section
+            className={`mb-6 rounded-[1.5rem] border p-5 text-sm font-bold leading-6 shadow-xl shadow-black/20 ${
+              cancelState === 'success'
+                ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-100'
+                : 'border-red-400/25 bg-red-500/10 text-red-100'
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              {cancelState === 'success' ? (
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+              ) : (
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+              )}
+
+              <div>{cancelMessage}</div>
+            </div>
+          </section>
+        ) : null}
+
+        {showCancelConfirm ? (
+          <section className="mb-6 rounded-[1.6rem] border border-red-400/30 bg-red-500/10 p-5 shadow-xl shadow-black/25">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-500/15 text-red-100">
+                  <XCircle size={23} />
+                </div>
+
+                <div>
+                  <h2 className="text-xl font-black text-white">
+                    Naozaj chcete zrušiť predplatné?
+                  </h2>
+
+                  <p className="mt-1 max-w-3xl text-sm font-bold leading-6 text-red-100/85">
+                    Po zrušení sa predplatné nebude automaticky obnovovať.
+                    Prístup k službám zostane zachovaný do konca už zaplateného
+                    obdobia.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row lg:shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowCancelConfirm(false)}
+                  disabled={cancelState === 'loading'}
+                  className="inline-flex min-h-[46px] items-center justify-center rounded-2xl border border-white/10 bg-white/[0.08] px-5 text-sm font-black text-white transition hover:bg-white/[0.14] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Ponechať predplatné
+                </button>
+
+                <button
+                  type="button"
+                  onClick={cancelSubscription}
+                  disabled={cancelState === 'loading'}
+                  className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-red-600 px-5 text-sm font-black text-white shadow-xl shadow-red-950/30 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {cancelState === 'loading' ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <XCircle size={18} />
+                  )}
+                  Potvrdiť zrušenie
+                </button>
+              </div>
             </div>
           </section>
         ) : null}
@@ -673,6 +877,34 @@ export default function ClientAccountProfile() {
                   label="Posledné načítanie"
                   value={formatDate(lastLoadedAt)}
                 />
+
+                <div className="mt-5 rounded-[1.25rem] border border-red-400/25 bg-red-500/10 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="text-sm font-black text-white">
+                        Správa predplatného
+                      </div>
+
+                      <p className="mt-1 text-sm font-bold leading-6 text-red-100/85">
+                        Predplatné môžete zrušiť. Automatické obnovenie sa
+                        vypne a prístup ostane do konca zaplateného obdobia.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCancelMessage('');
+                        setShowCancelConfirm(true);
+                      }}
+                      disabled={!subscriptionCanBeCancelled}
+                      className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 text-sm font-black text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <XCircle size={17} />
+                      Zrušiť predplatné
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-6">

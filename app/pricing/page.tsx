@@ -16,16 +16,13 @@ import {
 
 type PackagePlan = {
   id:
-    | 'week-mini'
-    | 'week-student'
-    | 'week-pro'
-    | 'monthly'
-    | 'three-months'
-    | 'year-pro'
+    | 'start-basic'
+    | 'student-plus'
+    | 'pro-thesis'
+    | 'elite-academic'
     | 'year-max';
   name: string;
   price: string;
-  oldPrice?: string;
   period: string;
   pages: string;
   works: string;
@@ -39,17 +36,17 @@ type PackagePlan = {
 
 type AddonService = {
   id:
-    | 'ai-supervisor'
-    | 'quality-audit'
-    | 'defense'
-    | 'originality'
     | 'extra-50'
     | 'extra-100'
-    | 'premium-model'
+    | 'ai-supervisor'
+    | 'quality-audit'
+    | 'defense-presentation'
+    | 'originality-check'
+    | 'premium-ai-mode'
+    | 'express-processing'
     | 'express';
   name: string;
   price: string;
-  oldPrice?: string;
   description: string;
 };
 
@@ -67,226 +64,155 @@ type CheckoutResponse = {
 };
 
 const VALID_PLAN_IDS: PackagePlan['id'][] = [
-  'week-mini',
-  'week-student',
-  'week-pro',
-  'monthly',
-  'three-months',
-  'year-pro',
-  'year-max',
+  'start-basic',
+  'student-plus',
+  'pro-thesis',
+  'elite-academic',
 ];
 
 const packagePlans: PackagePlan[] = [
   {
-    id: 'week-mini',
-    name: 'Týždeň MINI',
-    price: '13,20 €',
-    oldPrice: '15,84 €',
-    period: '7 dní',
-    pages: '25 strán',
-    works: '1 práca',
-    supervisor: '2 kontroly',
+    id: 'start-basic',
+    name: 'START BASIC',
+    price: '29 €',
+    period: 'mesiac',
+    pages: '60 strán / mesiac',
+    works: '1 aktívna práca',
+    supervisor: '2 kontroly AI vedúceho',
     audit: '1 audit',
     defense: 'Bez obhajoby',
-    badge: 'Rýchly štart',
+    badge: 'Základný štart',
     description:
-      'Vhodné na seminárnu prácu, kapitolu alebo rýchlu úpravu textu.',
+      'Základný mesačný plán pre jednu aktívnu prácu, písanie menších rozsahov a základnú AI podporu.',
     features: [
-      'Základné AI písanie',
-      'Profil práce a zadania',
-      'Základná spätná väzba',
-      'Export textového výstupu',
+      '60 strán / mesiac',
+      '1 aktívna práca',
+      'Základný AI model',
+      '2 kontroly AI vedúceho',
+      '1 audit',
+      'Bez obhajoby',
+      'Bez premium modelu',
     ],
   },
   {
-    id: 'week-student',
-    name: 'Týždeň ŠTUDENT',
-    price: '26,50 €',
-    oldPrice: '31,80 €',
-    period: '7 dní',
-    pages: '50 strán',
-    works: '2 práce',
-    supervisor: '5 kontrol',
-    audit: '2 audity',
-    defense: 'Bez obhajoby',
-    badge: 'Študentský balík',
-    description: 'Vhodné na seminárku, ročníkovú prácu alebo väčšiu kapitolu.',
-    features: [
-      'AI písanie práce',
-      'AI vedúci práce',
-      'Audit kvality textu',
-      'Zdroje a citácie',
-    ],
-  },
-  {
-    id: 'week-pro',
-    name: 'Týždeň PRO',
-    price: '39,90 €',
-    oldPrice: '47,88 €',
-    period: '7 dní',
-    pages: '100 strán',
-    works: '3 práce',
-    supervisor: '10 kontrol',
-    audit: '4 audity',
+    id: 'student-plus',
+    name: 'ŠTUDENT PLUS',
+    price: '59 €',
+    period: 'mesiac',
+    pages: '130 strán / mesiac',
+    works: '3 aktívne práce',
+    supervisor: '10 AI kontrol',
+    audit: '3 audity',
     defense: '1 obhajoba',
-    badge: 'Pred odovzdaním',
-    description: 'Pre intenzívnu prácu pred odovzdaním alebo obhajobou.',
+    badge: 'Najlepší pre študenta',
+    description:
+      'Mesačný plán pre študentov, ktorí potrebujú viac strán, viac aktívnych prác, citácie, zdroje a jednu obhajobu.',
     features: [
-      'AI písanie práce',
-      'AI vedúci práce',
-      'Audit kvality',
-      'Obhajoba + otázky',
-      'Prezentácia k obhajobe',
+      '130 strán / mesiac',
+      '3 aktívne práce',
+      '10 AI kontrol',
+      '3 audity',
+      '1 obhajoba',
+      'Citácie + zdroje',
+      'Štandard AI model',
     ],
   },
   {
-    id: 'monthly',
-    name: 'Mesačný START',
-    price: '53,20 €',
-    oldPrice: '63,84 €',
-    period: '1 mesiac',
-    pages: '150 strán',
+    id: 'pro-thesis',
+    name: 'PRO THESIS',
+    price: '99 €',
+    period: 'mesiac',
+    pages: '270 strán / mesiac',
     works: '5 prác',
-    supervisor: '15 kontrol',
-    audit: '5 auditov',
-    defense: '1 obhajoba',
-    badge: 'Hlavný balík',
-    description: 'Základný hlavný plán pre priebežnú prácu počas mesiaca.',
+    supervisor: '20 AI kontrol',
+    audit: '6 auditov',
+    defense: '2 obhajoby',
+    badge: 'Pre diplomovku / záverečnú prácu',
+    description:
+      'Výkonný mesačný plán pre rozsiahlejšiu záverečnú prácu, prioritné spracovanie, premium AI model a prezentáciu.',
     features: [
-      '150 strán mesačne',
-      'AI písanie práce',
-      'AI vedúci práce',
-      'Audit kvality',
-      'Obhajoba a prezentácia',
-      'Plánovanie a emaily',
+      '270 strán / mesiac',
+      '5 prác',
+      '20 AI kontrol',
+      '6 auditov',
+      '2 obhajoby',
+      'Prioritné spracovanie',
+      'Premium AI model Claude/Grok tier',
+      'Prezentácia',
     ],
   },
   {
-    id: 'three-months',
-    name: '3 mesiace ŠTUDENT',
-    price: '93,30 €',
-    oldPrice: '111,96 €',
-    period: '3 mesiace',
-    pages: '350 strán',
+    id: 'elite-academic',
+    name: 'ELITE ACADEMIC',
+    price: '149 €',
+    period: 'mesiac',
+    pages: '400 strán / mesiac',
     works: '10 prác',
-    supervisor: '35 kontrol',
-    audit: '12 auditov',
+    supervisor: '40 AI kontrol',
+    audit: '10 auditov',
     defense: '3 obhajoby',
-    badge: 'Najvýhodnejší',
+    badge: 'Najvyšší akademický plán',
     description:
-      'Najlepší pomer ceny a výkonu pre bakalársku alebo diplomovú prácu.',
+      'Najvyšší mesačný plán pre náročné akademické použitie, viacero prác, vysoké limity a plnú prémiovú AI kapacitu.',
     features: [
-      '350 strán na 3 mesiace',
-      'AI písanie a zdroje',
-      'AI vedúci práce',
-      'Audit kvality',
+      '400 strán / mesiac',
+      '10 prác',
+      '40 AI kontrol',
+      '10 auditov',
       '3 obhajoby',
-      'Dlhšie plánovanie práce',
-    ],
-  },
-  {
-    id: 'year-pro',
-    name: 'Ročný PRO',
-    price: '320 €',
-    oldPrice: '384 €',
-    period: '12 mesiacov',
-    pages: '1 500 strán',
-    works: 'Neobmedzené projekty',
-    supervisor: '150 kontrol',
-    audit: '50 auditov',
-    defense: '10 obhajôb',
-    badge: 'Dlhodobé používanie',
-    description:
-      'Ročný balík pre študentov, konzultantov alebo intenzívne používanie.',
-    features: [
-      '1 500 strán ročne',
-      'Všetky hlavné moduly',
-      'AI vedúci práce',
-      'Audit kvality',
-      '10 obhajôb',
-      'Vhodné na celý akademický rok',
-    ],
-  },
-  {
-    id: 'year-max',
-    name: 'Ročný MAX',
-    price: '532 €',
-    oldPrice: '638,40 €',
-    period: '12 mesiacov',
-    pages: '2 000 strán',
-    works: 'Neobmedzené projekty',
-    supervisor: '250 kontrol',
-    audit: '80 auditov',
-    defense: '15 obhajôb',
-    badge: 'Prémiový plán',
-    description:
-      'Pre náročných používateľov, ktorí chcú vyššie limity a prémiové moduly.',
-    features: [
-      '2 000 strán ročne',
-      'Vyššie limity',
-      'Prémiové AI modely podľa dostupnosti',
-      '15 obhajôb',
-      'Rozšírený audit',
-      'Vhodné aj pre mentoring',
+      'Full premium AI',
+      'Prioritná kapacita',
     ],
   },
 ];
 
 const addonServices: AddonService[] = [
   {
-    id: 'ai-supervisor',
-    name: 'AI vedúci práce',
-    price: '39,90 €',
-    oldPrice: '47,88 €',
-    description: 'Detailná spätná väzba do 100 strán.',
-  },
-  {
-    id: 'quality-audit',
-    name: 'Kontrola kvality práce',
-    price: '39,90 €',
-    oldPrice: '47,88 €',
-    description: 'Audit logiky, metodológie, argumentácie a štruktúry.',
-  },
-  {
-    id: 'defense',
-    name: 'Obhajoba + prezentácia',
-    price: '53,20 €',
-    oldPrice: '63,84 €',
-    description: 'Prezentácia, otázky komisie a návrhy odpovedí.',
-  },
-  {
-    id: 'originality',
-    name: 'Kontrola originality',
-    price: '16 €',
-    oldPrice: '19,20 €',
-    description: 'Orientačný report originality a rizikových pasáží.',
-  },
-  {
     id: 'extra-50',
     name: 'Extra 50 strán',
-    price: '13,20 €',
-    oldPrice: '15,84 €',
-    description: 'Doplnenie limitu o 50 strán.',
+    price: '19 €',
+    description: 'Doplnenie mesačného limitu o 50 strán.',
   },
   {
     id: 'extra-100',
     name: 'Extra 100 strán',
-    price: '26,50 €',
-    oldPrice: '31,80 €',
-    description: 'Doplnenie limitu o 100 strán.',
+    price: '35 €',
+    description: 'Doplnenie mesačného limitu o 100 strán.',
   },
   {
-    id: 'premium-model',
-    name: 'Prémiový model Claude/Grok',
-    price: '13,20 €',
-    oldPrice: '15,84 €',
-    description: 'Kvalitnejšia kritika, audit a odborné hodnotenie.',
+    id: 'ai-supervisor',
+    name: 'AI vedúci',
+    price: '59 €',
+    description: 'Samostatná služba AI vedúceho práce a detailnej spätnej väzby.',
   },
   {
-    id: 'express',
+    id: 'quality-audit',
+    name: 'Audit kvality',
+    price: '59 €',
+    description: 'Kontrola kvality, logiky, štruktúry, metodológie a argumentácie.',
+  },
+  {
+    id: 'defense-presentation',
+    name: 'Obhajoba + prezentácia',
+    price: '79 €',
+    description: 'Príprava obhajoby, otázok komisie, odpovedí a prezentácie.',
+  },
+  {
+    id: 'originality-check',
+    name: 'Kontrola originality',
+    price: '25 €',
+    description: 'Orientačná kontrola originality a rizikových pasáží.',
+  },
+  {
+    id: 'premium-ai-mode',
+    name: 'Premium AI mode',
+    price: '19 €',
+    description: 'Použitie prémiového AI režimu pre náročnejšie výstupy.',
+  },
+  {
+    id: 'express-processing',
     name: 'Expresné spracovanie',
-    price: '26,50 €',
-    oldPrice: '31,80 €',
+    price: '29 €',
     description: 'Prednostné spracovanie požiadaviek.',
   },
 ];
@@ -344,7 +270,7 @@ export default function PackagesPage() {
   const router = useRouter();
   const pageRef = useRef<HTMLDivElement | null>(null);
 
-  const [selectedPlan, setSelectedPlan] = useState<PackagePlan['id']>('monthly');
+  const [selectedPlan, setSelectedPlan] = useState<PackagePlan['id']>('student-plus');
   const [selectedAddons, setSelectedAddons] = useState<AddonService['id'][]>([]);
   const [loadingPayment, setLoadingPayment] = useState(false);
   const [loadingPlanId, setLoadingPlanId] = useState<PackagePlan['id'] | null>(
@@ -559,12 +485,11 @@ export default function PackagesPage() {
             </h1>
 
             <p className="mt-3 max-w-3xl text-lg text-gray-300 sm:text-xl">
-              Vyber si plán podľa rozsahu práce. Po kliknutí na tlačidlo
-              „Vybrať a zaplatiť“ ťa systém presmeruje na Stripe platobnú bránu.
+              Vyber si mesačný plán podľa rozsahu práce. Každý balík má mesačný limit strán, počet aktívnych prác, AI kontroly, audity a obhajoby podľa zvoleného programu.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-4">
             {packagePlans.map((plan) => {
               const selected = selectedPlan === plan.id;
               const isLoadingThisPlan = loadingPlanId === plan.id;
@@ -576,7 +501,7 @@ export default function PackagesPage() {
                     setSelectedPlan(plan.id);
                     setPaymentError('');
                   }}
-                  className={`relative flex min-h-[560px] cursor-pointer flex-col rounded-3xl border p-6 text-left shadow-xl transition ${
+                  className={`relative flex min-h-[610px] cursor-pointer flex-col rounded-3xl border p-6 text-left shadow-xl transition ${
                     selected
                       ? 'border-purple-400 bg-purple-600/20 shadow-purple-950/40'
                       : 'border-white/10 bg-[#0f172a] hover:border-purple-400/50 hover:bg-[#111c33]'
@@ -611,12 +536,6 @@ export default function PackagesPage() {
                     <div className="text-4xl font-black text-white">
                       {plan.price}
                     </div>
-
-                    {plan.oldPrice && (
-                      <div className="pb-1 text-sm text-gray-400 line-through">
-                        {plan.oldPrice}
-                      </div>
-                    )}
                   </div>
 
                   <div className="mt-1 text-sm text-gray-300">
@@ -679,7 +598,7 @@ export default function PackagesPage() {
             </h2>
 
             <p className="mt-2 text-sm text-gray-300">
-              Doplnky môžeš pridať k vybranému balíku pred platbou.
+              Doplnkové služby je možné dokúpiť samostatne alebo pridať k vybranému balíku pred platbou.
             </p>
           </div>
 
@@ -713,12 +632,6 @@ export default function PackagesPage() {
 
                   <div className="shrink-0 text-xl font-black text-white">
                     <div>{addon.price}</div>
-
-                    {addon.oldPrice && (
-                      <div className="text-right text-xs font-semibold text-gray-400 line-through">
-                        {addon.oldPrice}
-                      </div>
-                    )}
                   </div>
                 </button>
               );
@@ -851,10 +764,10 @@ export default function PackagesPage() {
         </section>
 
         <section className="rounded-3xl border border-yellow-500/20 bg-yellow-500/10 p-5 text-sm leading-6 text-yellow-100">
-          <strong>Poznámka k limitom:</strong> Limity strán sú orientačné a
-          zahŕňajú AI písanie, audit, prácu s profilom, obhajobu, plánovanie,
-          emaily a pomocné výstupy. Pri náročných alebo opakovaných požiadavkách
-          môže byť spotreba vyššia.
+          <strong>Poznámka k limitom:</strong> Limity strán sú mesačné a
+          predstavujú rozsah práce v rámci vybraného balíka. AI credits budú
+          riešené samostatne a ich hodnoty budú nastavené podľa finálneho
+          kreditového modelu.
         </section>
       </main>
 

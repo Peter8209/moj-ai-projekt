@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -214,7 +215,7 @@ const translations: Record<AppLanguage, Translation> = {
     },
     common: {
       login: 'Prihlásiť sa',
-      startFree: 'Začať zdarma',
+      startFree: 'Začať so Zedperou',
       language: 'Jazyk stránky',
       currentLanguage: 'Aktuálne zvolený jazyk',
       switchLanguage: 'Prepnúť jazyk stránky',
@@ -1898,6 +1899,28 @@ const translations: Record<AppLanguage, Translation> = {
 
 const featureIcons = [Bot, MessageCircle, PenTool, BookOpen, ShieldCheck, Crown];
 
+
+function applyLanguageToDocument(nextLanguage: AppLanguage) {
+  if (typeof document === 'undefined') return;
+
+  const lang = translations[nextLanguage]?.meta.documentLang || 'sk';
+
+  document.documentElement.lang = lang;
+  document.documentElement.setAttribute('data-language', nextLanguage);
+  document.documentElement.setAttribute('data-system-language', nextLanguage);
+  document.documentElement.setAttribute('data-work-language', nextLanguage);
+  document.body.setAttribute('data-language', nextLanguage);
+}
+
+function saveLanguageToStorage(nextLanguage: AppLanguage) {
+  if (typeof window === 'undefined') return;
+
+  localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
+  localStorage.setItem('zedpera_system_language', nextLanguage);
+  localStorage.setItem('zedpera_work_language', nextLanguage);
+  localStorage.setItem('app_language', nextLanguage);
+}
+
 function normalizeLanguage(value: string | null): AppLanguage {
   const language = String(value || '').toLowerCase();
 
@@ -2218,55 +2241,51 @@ function AiLeaderPreview({ t }: { t: Translation }) {
 
 function FounderPortrait({ t }: { t: Translation }) {
   return (
-    <div className="relative min-h-[460px] overflow-hidden rounded-3xl border border-violet-500/35 bg-black shadow-[0_0_80px_rgba(124,58,237,0.22)]">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_10%,rgba(124,58,237,0.38),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01))]" />
-      <div className="absolute left-1/2 top-8 h-48 w-48 -translate-x-1/2 rounded-full bg-violet-600/20 blur-3xl" />
+    <div className="relative min-h-[520px] overflow-hidden rounded-3xl border border-violet-500/45 bg-black shadow-[0_0_90px_rgba(124,58,237,0.28)]">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_8%,rgba(168,85,247,0.42),transparent_38%),radial-gradient(circle_at_85%_70%,rgba(37,99,235,0.22),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.035),rgba(255,255,255,0.01))]" />
+      <div className="absolute left-1/2 top-6 h-64 w-64 -translate-x-1/2 rounded-full bg-violet-600/25 blur-3xl" />
 
-      <div className="relative flex min-h-[460px] flex-col justify-between p-7">
-        <div className="flex items-center justify-between">
-          <div className="inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-600/15 px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-violet-100">
-            <Crown size={15} className="text-violet-300" />
+      <div className="relative flex min-h-[520px] flex-col justify-between p-7">
+        <div className="flex items-center justify-between gap-4">
+          <div className="inline-flex items-center gap-2 rounded-full border border-violet-400/40 bg-violet-600/20 px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-white shadow-[0_0_25px_rgba(124,58,237,0.22)]">
+            <Crown size={15} className="text-violet-200" />
             {t.about.founderBadge}
           </div>
 
-          <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black text-white">
+          <div className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-4 py-2 text-xs font-black text-emerald-200">
             {t.about.experience}
           </div>
         </div>
 
-        <div className="mx-auto mt-8 flex h-[250px] w-[210px] items-end justify-center">
-          <div className="relative h-[250px] w-[210px]">
-            <div className="absolute left-1/2 top-0 h-[96px] w-[96px] -translate-x-1/2 rounded-full bg-gradient-to-br from-amber-100 via-rose-200 to-pink-200 shadow-[0_16px_45px_rgba(0,0,0,0.35)]" />
-            <div className="absolute left-1/2 top-[75px] h-[34px] w-[124px] -translate-x-1/2 rounded-t-full bg-[#2b160f]" />
-            <div className="absolute left-[42px] top-[58px] h-[116px] w-[34px] rounded-full bg-[#25120c]" />
-            <div className="absolute right-[42px] top-[58px] h-[116px] w-[34px] rounded-full bg-[#25120c]" />
-            <div className="absolute left-1/2 top-[95px] h-[170px] w-[150px] -translate-x-1/2 rounded-t-[4rem] bg-gradient-to-br from-[#161827] via-[#090a12] to-black shadow-2xl" />
-            <div className="absolute left-[42px] top-[142px] h-[82px] w-[48px] -rotate-12 rounded-full bg-[#111320]" />
-            <div className="absolute right-[42px] top-[142px] h-[82px] w-[48px] rotate-12 rounded-full bg-[#111320]" />
-            <div className="absolute left-1/2 top-[115px] h-[64px] w-[44px] -translate-x-1/2 rounded-b-full bg-rose-100" />
-            <div className="absolute left-1/2 top-[134px] h-[112px] w-[112px] -translate-x-1/2 rounded-t-[3rem] border-t border-white/10 bg-[#080911]" />
-            <div className="absolute left-[84px] top-[38px] h-2 w-2 rounded-full bg-slate-900" />
-            <div className="absolute right-[84px] top-[38px] h-2 w-2 rounded-full bg-slate-900" />
-            <div className="absolute left-1/2 top-[59px] h-[5px] w-[30px] -translate-x-1/2 rounded-full bg-rose-400/80" />
+        <div className="relative mx-auto mt-8 w-full max-w-[380px] overflow-hidden rounded-[2rem] border border-white/12 bg-[#070714] shadow-[0_28px_85px_rgba(0,0,0,0.55)]">
+          <div className="absolute inset-0 z-10 bg-gradient-to-t from-black via-black/20 to-transparent" />
+          <Image
+            src="/images/founder-martina.jpg"
+            alt={`${t.about.founderName} - ${t.about.founderTitle}`}
+            width={760}
+            height={920}
+            priority={false}
+            className="h-[360px] w-full object-cover object-center"
+          />
+
+          <div className="absolute bottom-4 left-4 right-4 z-20 rounded-2xl border border-white/10 bg-black/70 p-4 backdrop-blur-xl">
+            <div className="text-sm font-black uppercase tracking-[0.16em] text-violet-300">
+              {t.about.founderName}
+            </div>
+            <div className="mt-1 text-lg font-black leading-tight text-white">
+              {t.about.founderTitle}
+            </div>
           </div>
         </div>
 
-        <div className="relative rounded-2xl border border-white/10 bg-black/55 p-5 backdrop-blur-xl">
-          <div className="text-sm font-black uppercase tracking-[0.16em] text-violet-300">
-            {t.about.founderName}
-          </div>
-
-          <h3 className="mt-2 text-2xl font-black leading-tight text-white">
-            {t.about.founderTitle}
-          </h3>
-
-          <p className="mt-4 text-sm font-bold leading-7 text-white">
+        <div className="relative mt-6 rounded-2xl border border-white/10 bg-black/72 p-5 backdrop-blur-xl">
+          <p className="text-sm font-bold leading-7 text-white">
             {t.about.founderText}
           </p>
 
           <div className="mt-5 grid grid-cols-2 gap-3">
-            <div className="rounded-xl border border-violet-400/20 bg-violet-600/10 p-3">
-              <div className="text-xl font-black text-violet-300">
+            <div className="rounded-xl border border-violet-400/25 bg-violet-600/15 p-3">
+              <div className="text-xl font-black text-violet-200">
                 {t.about.experience}
               </div>
               <div className="mt-1 text-xs font-black text-white">
@@ -2274,7 +2293,7 @@ function FounderPortrait({ t }: { t: Translation }) {
               </div>
             </div>
 
-            <div className="rounded-xl border border-emerald-400/20 bg-emerald-600/10 p-3">
+            <div className="rounded-xl border border-emerald-400/25 bg-emerald-600/12 p-3">
               <div className="text-xl font-black text-emerald-300">
                 {t.about.students}
               </div>
@@ -2295,6 +2314,7 @@ export default function LandingPage() {
   const [paymentError, setPaymentError] = useState('');
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const [language, setLanguage] = useState<AppLanguage>('sk');
+  const [translationVersion, setTranslationVersion] = useState(0);
 
   const allowedPlans = useMemo<PlanId[]>(
     () => [
@@ -2309,7 +2329,9 @@ export default function LandingPage() {
     [],
   );
 
-  const t = translations[language];
+  const t = useMemo(() => {
+    return translations[language] || translations.sk;
+  }, [language, translationVersion]);
 
   useEffect(() => {
     document.documentElement.style.scrollBehavior = 'smooth';
@@ -2323,35 +2345,62 @@ export default function LandingPage() {
     const nextLanguage = normalizeLanguage(storedLanguage);
 
     setLanguage(nextLanguage);
-    document.documentElement.lang = translations[nextLanguage].meta.documentLang;
+    applyLanguageToDocument(nextLanguage);
+
+    const handleExternalLanguageChange = (event: Event) => {
+      const customEvent = event as CustomEvent<AppLanguage>;
+      const next = normalizeLanguage(String(customEvent.detail || ''));
+
+      setLanguage(next);
+      setTranslationVersion((version) => version + 1);
+      applyLanguageToDocument(next);
+    };
+
+    const handleStorageLanguageChange = (event: StorageEvent) => {
+      if (
+        event.key !== LANGUAGE_STORAGE_KEY &&
+        event.key !== 'zedpera_system_language' &&
+        event.key !== 'zedpera_work_language' &&
+        event.key !== 'app_language'
+      ) {
+        return;
+      }
+
+      const next = normalizeLanguage(event.newValue);
+
+      setLanguage(next);
+      setTranslationVersion((version) => version + 1);
+      applyLanguageToDocument(next);
+    };
+
+    window.addEventListener('zedpera-language-change', handleExternalLanguageChange as EventListener);
+    window.addEventListener('storage', handleStorageLanguageChange);
 
     return () => {
       document.documentElement.style.scrollBehavior = '';
+      window.removeEventListener('zedpera-language-change', handleExternalLanguageChange as EventListener);
+      window.removeEventListener('storage', handleStorageLanguageChange);
     };
   }, []);
 
+  useEffect(() => {
+    applyLanguageToDocument(language);
+  }, [language]);
+
   function handleLanguageChange(nextLanguage: AppLanguage) {
-    setLanguage(nextLanguage);
+    const normalizedLanguage = normalizeLanguage(nextLanguage);
+
+    setLanguage(normalizedLanguage);
+    setTranslationVersion((version) => version + 1);
+    saveLanguageToStorage(normalizedLanguage);
+    applyLanguageToDocument(normalizedLanguage);
 
     if (typeof window !== 'undefined') {
-      localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
-      localStorage.setItem('zedpera_system_language', nextLanguage);
-      localStorage.setItem('zedpera_work_language', nextLanguage);
-      localStorage.setItem('app_language', nextLanguage);
-
       window.dispatchEvent(
         new CustomEvent('zedpera-language-change', {
-          detail: nextLanguage,
+          detail: normalizedLanguage,
         }),
       );
-    }
-
-    if (typeof document !== 'undefined') {
-      document.documentElement.lang =
-        translations[nextLanguage].meta.documentLang;
-      document.documentElement.setAttribute('data-language', nextLanguage);
-      document.documentElement.setAttribute('data-system-language', nextLanguage);
-      document.documentElement.setAttribute('data-work-language', nextLanguage);
     }
   }
 
@@ -2560,7 +2609,10 @@ export default function LandingPage() {
         }
       `}</style>
 
-      <div className="zedpera-template relative min-h-screen">
+      <div
+        key={`landing-${language}-${translationVersion}`}
+        className="zedpera-template relative min-h-screen"
+      >
         <div className="pointer-events-none fixed inset-0 z-0 zedpera-grid-bg opacity-45" />
         <div className="pointer-events-none fixed left-1/2 top-0 z-0 h-[420px] w-[760px] -translate-x-1/2 rounded-full bg-violet-700/20 blur-[120px]" />
 
@@ -3042,10 +3094,15 @@ export default function LandingPage() {
                 event.preventDefault();
                 scrollToHash('#pricing');
               }}
-              className="relative z-10 inline-flex h-[60px] min-w-[240px] items-center justify-center gap-3 rounded-xl bg-white text-[17px] font-black text-violet-900 shadow-xl shadow-white/10 transition hover:scale-105"
+              className="relative z-10 inline-flex h-[68px] min-w-[270px] items-center justify-center gap-4 rounded-2xl border border-violet-300/40 bg-gradient-to-r from-violet-600 via-fuchsia-600 to-blue-600 px-8 text-[18px] font-black text-white shadow-[0_0_45px_rgba(124,58,237,0.55)] transition hover:scale-105 hover:shadow-[0_0_70px_rgba(124,58,237,0.75)]"
             >
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/25 bg-black/25 text-white shadow-inner">
+                <Sparkles size={22} />
+              </span>
               {t.cta.button}
-              <ArrowRight size={20} />
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/12 text-white">
+                <ArrowRight size={21} />
+              </span>
             </a>
           </div>
         </section>

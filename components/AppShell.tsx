@@ -37,6 +37,7 @@ type NavItem = {
   label: string;
   icon: LucideIcon;
   description?: string;
+  action?: 'client-profile' | 'projects-list';
 };
 
 type TranslationRecord = Record<string, unknown>;
@@ -46,21 +47,27 @@ type TranslationRecord = Record<string, unknown>;
 // =====================================================
 
 /**
- * DÔLEŽITÉ:
- *
+ * PROFIL:
  * Profil v menu nesmie smerovať na /api/profile.
  * Profil musí smerovať na frontend stránku /profile.
  *
- * Keďže chceš otvoriť priamo ClientAccountProfile.tsx,
- * posielame používateľa na:
- *
- * /profile?tab=account
- *
- * Následne stránka /profile musí podľa query parametra tab=account
- * zobraziť komponent ClientAccountProfile.
+ * /profile?tab=account otvorí priamo klientsky účet.
  */
 const PROFILE_PAGE_PATH = '/profile';
 const PROFILE_CLIENT_ACCOUNT_HREF = '/profile?tab=account';
+
+/**
+ * MOJE PRÁCE:
+ * Dôležitá oprava:
+ * Kliknutie na „Moje práce“ nesmie otvoriť identitu práce ani posledný profil.
+ * Musí otvoriť zoznam prác.
+ *
+ * Preto používame /projects?view=list.
+ * Stránka /projects podľa tohto query parametra má zobraziť zoznam prác,
+ * nie wizard identity práce.
+ */
+const PROJECTS_PAGE_PATH = '/projects';
+const PROJECTS_LIST_HREF = '/projects?view=list';
 
 // =====================================================
 // TRANSLATION HELPERS
@@ -103,6 +110,7 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
         'clientProfileDescription',
         'Účet klienta, balíček a nastavenia služieb',
       ),
+      action: 'client-profile',
     },
     {
       href: '/chat',
@@ -116,15 +124,16 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
       ),
     },
     {
-      href: '/projects',
-      activePath: '/projects',
+      href: PROJECTS_LIST_HREF,
+      activePath: PROJECTS_PAGE_PATH,
       label: text(dictionary, 'dashboardProjects', 'Moje práce'),
       icon: BookOpen,
       description: text(
         dictionary,
         'dashboardProjectsDescription',
-        'Rozpracované projekty',
+        'Zoznam rozpracovaných prác',
       ),
+      action: 'projects-list',
     },
     {
       href: '/sources',
@@ -291,12 +300,44 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
   function goToClientAccountProfile() {
     setMobileMenuOpen(false);
+    router.push(PROFILE_CLIENT_ACCOUNT_HREF);
+  }
+
+  function goToProjectsList() {
+    setMobileMenuOpen(false);
 
     /**
-     * Toto je hlavná úprava:
-     * otvorí sa /profile a rovno účet klienta.
+     * Dôležité:
+     * Pri prechode na „Moje práce“ nechceme prenášať režim novej práce,
+     * identitu práce ani posledný otvorený profil.
+     *
+     * Tieto kľúče sú bezpečne odstránené len ako navigačné/draft pomocné stavy.
+     * Samotné uložené práce v databáze sa tým nemažú.
      */
-    router.push(PROFILE_CLIENT_ACCOUNT_HREF);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('zedpera_new_project_mode');
+      localStorage.removeItem('zedpera_open_identity');
+      localStorage.removeItem('zedpera_open_project_identity');
+      localStorage.removeItem('zedpera_continue_project_identity');
+      localStorage.removeItem('zedpera_last_project_identity');
+      localStorage.removeItem('zedpera_selected_project_identity');
+    }
+
+    router.push(PROJECTS_LIST_HREF);
+  }
+
+  function handleNavItemClick(item: NavItem) {
+    if (item.action === 'client-profile') {
+      goToClientAccountProfile();
+      return;
+    }
+
+    if (item.action === 'projects-list') {
+      goToProjectsList();
+      return;
+    }
+
+    goTo(item.href);
   }
 
   function logoutAdminMode() {
@@ -341,14 +382,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
               <button
                 type="button"
                 key={item.href}
-                onClick={() => {
-                  if (item.activePath === PROFILE_PAGE_PATH) {
-                    goToClientAccountProfile();
-                    return;
-                  }
-
-                  goTo(item.href);
-                }}
+                onClick={() => handleNavItemClick(item)}
                 className={`group flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
                   active
                     ? 'bg-white/12 text-white shadow-lg shadow-black/15'
@@ -481,14 +515,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
                 <button
                   type="button"
                   key={item.href}
-                  onClick={() => {
-                    if (item.activePath === PROFILE_PAGE_PATH) {
-                      goToClientAccountProfile();
-                      return;
-                    }
-
-                    goTo(item.href);
-                  }}
+                  onClick={() => handleNavItemClick(item)}
                   className={`inline-flex min-h-[40px] items-center gap-2 rounded-2xl px-3 py-2 text-[11px] font-black transition ${
                     active
                       ? 'bg-violet-600 text-white shadow-lg shadow-violet-700/25'
@@ -550,14 +577,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
                 <button
                   type="button"
                   key={item.href}
-                  onClick={() => {
-                    if (item.activePath === PROFILE_PAGE_PATH) {
-                      goToClientAccountProfile();
-                      return;
-                    }
-
-                    goTo(item.href);
-                  }}
+                  onClick={() => handleNavItemClick(item)}
                   className={`flex flex-col items-center justify-center rounded-2xl px-2 py-2 text-[11px] font-bold transition ${
                     active
                       ? 'bg-white/12 text-white'
@@ -619,14 +639,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
                   <button
                     type="button"
                     key={item.href}
-                    onClick={() => {
-                      if (item.activePath === PROFILE_PAGE_PATH) {
-                        goToClientAccountProfile();
-                        return;
-                      }
-
-                      goTo(item.href);
-                    }}
+                    onClick={() => handleNavItemClick(item)}
                     className={`flex min-h-[54px] w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
                       active
                         ? 'bg-white/12 text-white'
@@ -699,6 +712,10 @@ function isPathActive(pathname: string, activePath: string) {
 
   if (activePath === PROFILE_PAGE_PATH) {
     return pathname === PROFILE_PAGE_PATH || pathname.startsWith('/profile/');
+  }
+
+  if (activePath === PROJECTS_PAGE_PATH) {
+    return pathname === PROJECTS_PAGE_PATH || pathname.startsWith('/projects/');
   }
 
   return pathname === activePath || pathname.startsWith(`${activePath}/`);

@@ -192,6 +192,8 @@ const LANGUAGE_STORAGE_KEY = 'zedpera_language';
 
 const MODERN_WOMAN_IMAGE_URL = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=2400&q=100&dpr=2';
 
+const FOUNDER_MARTINA_IMAGE_URL = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=1800&q=100&dpr=2';
+
 const languages: Array<{
   code: AppLanguage;
   label: string;
@@ -2243,11 +2245,11 @@ function AiLeaderPreview({ t }: { t: Translation }) {
 
 function FounderPortrait({ t }: { t: Translation }) {
   return (
-    <div className="relative min-h-[520px] overflow-hidden rounded-3xl border border-violet-500/45 bg-black shadow-[0_0_90px_rgba(124,58,237,0.28)]">
+    <div className="relative min-h-[620px] overflow-hidden rounded-3xl border border-violet-500/45 bg-[#050511] shadow-[0_0_90px_rgba(124,58,237,0.28)]">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_8%,rgba(168,85,247,0.42),transparent_38%),radial-gradient(circle_at_85%_70%,rgba(37,99,235,0.22),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.035),rgba(255,255,255,0.01))]" />
-      <div className="absolute left-1/2 top-6 h-64 w-64 -translate-x-1/2 rounded-full bg-violet-600/25 blur-3xl" />
+      <div className="absolute left-1/2 top-6 h-72 w-72 -translate-x-1/2 rounded-full bg-violet-600/25 blur-3xl" />
 
-      <div className="relative flex min-h-[520px] flex-col justify-between p-7">
+      <div className="relative flex min-h-[620px] flex-col p-7">
         <div className="flex items-center justify-between gap-4">
           <div className="inline-flex items-center gap-2 rounded-full border border-violet-400/40 bg-violet-600/20 px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-white shadow-[0_0_25px_rgba(124,58,237,0.22)]">
             <Crown size={15} className="text-violet-200" />
@@ -2259,22 +2261,29 @@ function FounderPortrait({ t }: { t: Translation }) {
           </div>
         </div>
 
-        <div className="relative mx-auto mt-8 w-full max-w-[380px] overflow-hidden rounded-[2rem] border border-white/12 bg-[#070714] shadow-[0_28px_85px_rgba(0,0,0,0.55)]">
-          <div className="absolute inset-0 z-10 bg-gradient-to-t from-black via-black/20 to-transparent" />
+        <div className="relative mt-8 flex-1 overflow-hidden rounded-[2rem] border border-white/12 bg-[#070714] shadow-[0_28px_85px_rgba(0,0,0,0.55)]">
           <Image
-            src="/images/founder-martina.jpg"
+            src={FOUNDER_MARTINA_IMAGE_URL}
             alt={`${t.about.founderName} - ${t.about.founderTitle}`}
-            width={760}
-            height={920}
+            fill
             priority={false}
-            className="h-[360px] w-full object-cover object-center"
+            quality={100}
+            sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 44vw"
+            className="select-none object-cover object-[50%_30%]"
           />
 
-          <div className="absolute bottom-4 left-4 right-4 z-20 rounded-2xl border border-white/10 bg-black/70 p-4 backdrop-blur-xl">
+          <div className="absolute inset-0 bg-gradient-to-r from-black/72 via-black/22 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/92 via-black/16 to-black/10" />
+
+          <div className="absolute left-5 top-5 rounded-2xl border border-white/15 bg-black/55 px-4 py-3 text-xs font-black uppercase tracking-[0.18em] text-white shadow-xl shadow-black/40 backdrop-blur-xl">
+            {t.about.founderName}
+          </div>
+
+          <div className="absolute bottom-5 left-5 right-5 rounded-2xl border border-white/10 bg-black/78 p-5 backdrop-blur-xl">
             <div className="text-sm font-black uppercase tracking-[0.16em] text-violet-300">
               {t.about.founderName}
             </div>
-            <div className="mt-1 text-lg font-black leading-tight text-white">
+            <div className="mt-1 text-2xl font-black leading-tight text-white">
               {t.about.founderTitle}
             </div>
           </div>

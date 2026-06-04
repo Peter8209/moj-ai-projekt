@@ -85,8 +85,8 @@ type DefenseResponse = {
     warning?: string;
     detectedKind?: string;
   }>;
-  allowedExports?: Array<'docx' | 'pptx' | 'pdf'>;
-  disallowedExports?: Array<'xlsx'>;
+  allowedExports?: Array<'docx' | 'pdf'>;
+  disallowedExports?: Array<'pptx' | 'xlsx'>;
   warning?: string;
   error?: string;
   meta?: {
@@ -984,8 +984,8 @@ function buildFallbackDefenseResponse({
       warning: file.warning,
       detectedKind: file.detectedKind,
     })),
-    allowedExports: ['docx', 'pptx', 'pdf'],
-    disallowedExports: ['xlsx'],
+    allowedExports: ['docx', 'pdf'],
+    disallowedExports: ['pptx', 'xlsx'],
     warning,
     meta: {
       model,
@@ -1233,8 +1233,8 @@ export async function POST(req: NextRequest) {
         warning: file.warning,
         detectedKind: file.detectedKind,
       })),
-      allowedExports: ['docx', 'pptx', 'pdf'],
-      disallowedExports: ['xlsx'],
+      allowedExports: ['docx', 'pdf'],
+      disallowedExports: ['pptx', 'xlsx'],
       warning,
       meta: {
         model: MODEL,

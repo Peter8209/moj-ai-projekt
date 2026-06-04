@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import OpenAI from 'openai';
 import pptxgen from 'pptxgenjs';
 
-// PPTX export musí zostať iba na serveri/API route.
-// Nepoužívajte pptxgenjs v client komponentoch.
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 180;
 
 const ShapeType = {
   rect: 'rect',
@@ -14,72 +16,28 @@ const ShapeType = {
 type PptxGen = InstanceType<typeof pptxgen>;
 type PptxSlide = ReturnType<PptxGen['addSlide']>;
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-export const maxDuration = 90;
-
-type DefenseTable = {
-  title?: string;
-  headers?: string[];
-  rows?: Array<Array<string | number>>;
-};
-
-type DefenseChart = {
-  title?: string;
-  type?: 'bar' | 'column' | 'progress';
-  labels?: string[];
-  values?: number[];
-  unit?: string;
-};
-
-type DefenseImage = {
-  title?: string;
-  data?: string;
-  path?: string;
-  alt?: string;
-};
-
 type DefenseSlide = {
   title: string;
-  bullets: string[];
-  speakerNotes?: string;
   layout?:
     | 'cover'
     | 'agenda'
     | 'section'
     | 'bullets'
     | 'split'
-    | 'table'
-    | 'chart'
     | 'quote'
-    | 'image'
+    | 'chart'
+    | 'table'
     | 'closing';
+  bullets: string[];
+  speakerNotes?: string;
   visualSuggestion?: string;
-  table?: DefenseTable;
-  chart?: DefenseChart;
-  images?: DefenseImage[];
+  estimatedMinutes?: number;
 };
 
-type DefensePptxRequestBody = {
-  title?: unknown;
-  defenseType?: unknown;
-  slides?: unknown;
-  sourceText?: unknown;
-  extractedWorkText?: unknown;
-  attachmentText?: unknown;
-  text?: unknown;
-  workTitle?: unknown;
-  theme?: unknown;
-
-  // Batch režim: každá položka sa exportuje ako samostatný PPTX súbor.
-  works?: unknown;
-  selectedWorks?: unknown;
-  projects?: unknown;
-};
-
-type NormalizedPptxInput = {
+type NormalizedWork = {
   title: string;
   defenseType: string;
+  profileText: string;
   sourceText: string;
   slides: DefenseSlide[];
 };
@@ -91,44 +49,43 @@ type GeneratedPptxFile = {
   slidesCount: number;
 };
 
-type ThemeName = 'universal' | 'light' | 'academic' | 'dark';
+type DefensePptxRequestBody = {
+  title?: unknown;
+  workTitle?: unknown;
+  defenseType?: unknown;
+  type?: unknown;
+  theme?: unknown;
 
-type PptTheme = {
-  name: ThemeName;
-  bg: string;
-  bg2: string;
-  card: string;
-  card2: string;
-  text: string;
-  title: string;
-  muted: string;
-  accent: string;
-  accent2: string;
-  border: string;
-  soft: string;
-  headerText: string;
+  profile?: unknown;
+  activeProfile?: unknown;
+  savedProfile?: unknown;
+  workProfile?: unknown;
+
+  slides?: unknown;
+  text?: unknown;
+  content?: unknown;
+  summary?: unknown;
+  sourceText?: unknown;
+  extractedWorkText?: unknown;
+  clientExtractedText?: unknown;
+  attachmentText?: unknown;
+  workText?: unknown;
+
+  works?: unknown;
+  selectedWorks?: unknown;
+  projects?: unknown;
+
+  aiGenerate?: unknown;
 };
 
 const SLIDE_W = 13.333;
 const SLIDE_H = 7.5;
 
-const MAX_BULLETS_PER_SLIDE = 5;
-const MAX_TABLE_ROWS = 8;
-const MAX_TABLE_COLS = 6;
-const MAX_CHART_ITEMS = 7;
-const MAX_SOURCE_TEXT_CHARS = 220_000;
-const MAX_EXPORTED_SLIDES = 28;
+const MAX_SOURCE_CHARS_FOR_AI = 65_000;
+const MAX_RENDERED_SLIDES = 30;
+const TARGET_MINUTES = 40;
 
-// Bezpečné limity pre text, aby sa nikdy nerozsypal mimo snímky.
-const MAX_BULLET_CHARS = 155;
-const MAX_BULLET_CHARS_COMPACT = 115;
-const MAX_TOTAL_CHARS_PER_SLIDE = 620;
-const MAX_TITLE_CHARS = 92;
-
-// Všeobecná, svetlá a vysoko kontrastná šablóna.
-// Všetky názvy tém smerujeme na čitateľné farby, aby písmo nikdy nebolo bledé.
-const UNIVERSAL_THEME: PptTheme = {
-  name: 'universal',
+const THEME = {
   bg: 'FFFFFF',
   bg2: 'F8FAFC',
   card: 'FFFFFF',
@@ -141,13 +98,6 @@ const UNIVERSAL_THEME: PptTheme = {
   border: 'CBD5E1',
   soft: 'EEF2FF',
   headerText: 'FFFFFF',
-};
-
-const THEMES: Record<ThemeName, PptTheme> = {
-  universal: UNIVERSAL_THEME,
-  light: UNIVERSAL_THEME,
-  academic: UNIVERSAL_THEME,
-  dark: UNIVERSAL_THEME,
 };
 
 function cleanText(value: unknown): string {
@@ -164,189 +114,31 @@ function cleanText(value: unknown): string {
     .trim();
 }
 
-function cleanInlineText(value: unknown): string {
+function cleanInline(value: unknown): string {
   return cleanText(value).replace(/\s+/g, ' ').trim();
 }
 
-function truncate(value: string, max = MAX_SOURCE_TEXT_CHARS): string {
-  const text = cleanText(value);
+function truncateText(text: string, maxChars: number): string {
+  const clean = cleanText(text);
 
-  if (text.length <= max) return text;
+  if (clean.length <= maxChars) return clean;
 
-  const start = text.slice(0, Math.floor(max * 0.48));
-  const middleStart = Math.max(0, Math.floor(text.length / 2) - Math.floor(max * 0.12));
-  const middle = text.slice(middleStart, middleStart + Math.floor(max * 0.24));
-  const end = text.slice(text.length - Math.floor(max * 0.28));
+  const start = clean.slice(0, Math.floor(maxChars * 0.45));
+  const middleStart = Math.max(
+    0,
+    Math.floor(clean.length / 2) - Math.floor(maxChars * 0.15),
+  );
+  const middle = clean.slice(
+    middleStart,
+    middleStart + Math.floor(maxChars * 0.25),
+  );
+  const end = clean.slice(clean.length - Math.floor(maxChars * 0.3));
 
-  return `${start}\n\n${middle}\n\n${end}`.trim();
-}
-
-function splitLongTextToChunks(text: string, maxChars = MAX_BULLET_CHARS): string[] {
-  const clean = cleanInlineText(text);
-
-  if (!clean) return [];
-  if (clean.length <= maxChars) return [clean];
-
-  const sentences = clean
-    .split(/(?<=[.!?])\s+/)
-    .map((item) => cleanInlineText(item))
-    .filter(Boolean);
-
-  const chunks: string[] = [];
-  let current = '';
-
-  for (const sentence of sentences.length ? sentences : [clean]) {
-    if (!current) {
-      current = sentence;
-      continue;
-    }
-
-    if (`${current} ${sentence}`.length <= maxChars) {
-      current = `${current} ${sentence}`;
-    } else {
-      chunks.push(current);
-      current = sentence;
-    }
-  }
-
-  if (current) chunks.push(current);
-
-  return chunks
-    .flatMap((chunk) => {
-      if (chunk.length <= maxChars) return [chunk];
-
-      const parts: string[] = [];
-
-      for (let i = 0; i < chunk.length; i += maxChars) {
-        parts.push(`${chunk.slice(i, i + maxChars).trim()}${i + maxChars < chunk.length ? '…' : ''}`);
-      }
-
-      return parts;
-    })
-    .filter(Boolean);
-}
-
-function normalizeBulletsForSlides(bullets: string[]): string[] {
-  return bullets
-    .flatMap((bullet) => splitLongTextToChunks(bullet, MAX_BULLET_CHARS))
-    .map((bullet) => cleanInlineText(bullet).replace(/^[-•–—]\s*/, ''))
-    .filter(Boolean);
-}
-
-function getTextLengthScore(bullets: string[]) {
-  return bullets.reduce((sum, bullet) => sum + cleanInlineText(bullet).length, 0);
-}
-
-function paginateBullets(bullets: string[]): string[][] {
-  const normalized = normalizeBulletsForSlides(bullets);
-  const pages: string[][] = [];
-
-  let current: string[] = [];
-  let currentChars = 0;
-
-  for (const bullet of normalized) {
-    const bulletChars = bullet.length;
-    const wouldExceedCount = current.length >= MAX_BULLETS_PER_SLIDE;
-    const wouldExceedChars = currentChars + bulletChars > MAX_TOTAL_CHARS_PER_SLIDE;
-
-    if (current.length > 0 && (wouldExceedCount || wouldExceedChars)) {
-      pages.push(current);
-      current = [];
-      currentChars = 0;
-    }
-
-    current.push(bullet);
-    currentChars += bulletChars;
-  }
-
-  if (current.length > 0) pages.push(current);
-
-  return pages.length ? pages : [[]];
-}
-
-function safeSlideTitle(title: string, partIndex?: number, totalParts?: number) {
-  const clean = cleanInlineText(title || 'Snímka');
-
-  const base =
-    clean.length > MAX_TITLE_CHARS
-      ? `${clean.slice(0, MAX_TITLE_CHARS - 1).trim()}…`
-      : clean;
-
-  if (partIndex !== undefined && totalParts !== undefined && totalParts > 1) {
-    return `${base} (${partIndex + 1}/${totalParts})`;
-  }
-
-  return base;
-}
-
-function expandTextSlides(slides: DefenseSlide[]): DefenseSlide[] {
-  const expanded: DefenseSlide[] = [];
-
-  for (const slide of slides) {
-    if (
-      slide.layout === 'table' ||
-      slide.layout === 'chart' ||
-      slide.layout === 'image' ||
-      slide.table ||
-      slide.chart ||
-      slide.images?.length
-    ) {
-      expanded.push({
-        ...slide,
-        title: safeSlideTitle(slide.title),
-        bullets: slide.bullets.slice(0, MAX_BULLETS_PER_SLIDE),
-      });
-      continue;
-    }
-
-    const pages = paginateBullets(slide.bullets);
-
-    if (pages.length <= 1) {
-      expanded.push({
-        ...slide,
-        title: safeSlideTitle(slide.title),
-        bullets: pages[0] || slide.bullets.slice(0, MAX_BULLETS_PER_SLIDE),
-      });
-      continue;
-    }
-
-    pages.forEach((pageBullets, pageIndex) => {
-      expanded.push({
-        ...slide,
-        title: safeSlideTitle(slide.title, pageIndex, pages.length),
-        bullets: pageBullets,
-        layout: pageIndex === 0 ? slide.layout : 'bullets',
-        visualSuggestion: pageIndex === 0 ? slide.visualSuggestion : '',
-        speakerNotes: pageIndex === 0 ? slide.speakerNotes : undefined,
-      });
-    });
-  }
-
-  return expanded.slice(0, MAX_EXPORTED_SLIDES);
-}
-
-function getDynamicBulletFontSize(bullets: string[]) {
-  const totalChars = getTextLengthScore(bullets);
-  const count = bullets.length;
-
-  if (count <= 3 && totalChars <= 320) return 18;
-  if (count <= 4 && totalChars <= 460) return 16;
-  if (count <= 5 && totalChars <= 620) return 14.2;
-
-  return 12.5;
-}
-
-function getDynamicCardHeight(bullets: string[]) {
-  const count = Math.max(1, bullets.length);
-
-  if (count <= 3) return 1.08;
-  if (count === 4) return 0.86;
-
-  return 0.72;
+  return `${start}\n\n[... skrátený stred dokumentu ...]\n\n${middle}\n\n[... pokračovanie ...]\n\n${end}`;
 }
 
 function safeFileName(value: string): string {
-  const safe = cleanInlineText(value)
+  const safe = cleanInline(value)
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9-_]+/g, '-')
@@ -354,496 +146,626 @@ function safeFileName(value: string): string {
     .replace(/^-|-$/g, '')
     .toLowerCase();
 
-  return safe || 'prezentacia';
+  return safe || 'obhajoba-prace';
 }
 
-function asThemeName(value: unknown): ThemeName {
-  const theme = String(value || '').toLowerCase().trim();
+function tryParseJson(value: string): unknown {
+  const raw = cleanText(value);
 
-  if (theme === 'light') return 'light';
-  if (theme === 'academic') return 'academic';
-  if (theme === 'dark') return 'dark';
+  const withoutFence = raw
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/```$/i, '')
+    .trim();
 
-  return 'universal';
-}
+  try {
+    return JSON.parse(withoutFence);
+  } catch {
+    const first = withoutFence.indexOf('{');
+    const last = withoutFence.lastIndexOf('}');
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function parseNumber(value: unknown): number | null {
-  const normalized = String(value || '')
-    .replace(/\s+/g, '')
-    .replace(',', '.')
-    .replace(/[^0-9.-]/g, '');
-
-  if (!normalized || normalized === '-' || normalized === '.') return null;
-
-  const parsed = Number(normalized);
-
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function normalizeTable(value: unknown): DefenseTable | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-
-  const raw = value as Record<string, unknown>;
-
-  const headers = Array.isArray(raw.headers)
-    ? raw.headers.map((item) => cleanInlineText(item)).filter(Boolean).slice(0, MAX_TABLE_COLS)
-    : [];
-
-  const rows = Array.isArray(raw.rows)
-    ? raw.rows
-        .filter((row): row is unknown[] => Array.isArray(row))
-        .map((row) => row.map((cell) => cleanInlineText(cell)).slice(0, MAX_TABLE_COLS))
-        .filter((row) => row.some(Boolean))
-        .slice(0, MAX_TABLE_ROWS)
-    : [];
-
-  if (!headers.length && !rows.length) return undefined;
-
-  return {
-    title: cleanInlineText(raw.title),
-    headers,
-    rows,
-  };
-}
-
-function normalizeChart(value: unknown): DefenseChart | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-
-  const raw = value as Record<string, unknown>;
-
-  const labels = Array.isArray(raw.labels)
-    ? raw.labels.map((item) => cleanInlineText(item)).filter(Boolean).slice(0, MAX_CHART_ITEMS)
-    : [];
-
-  const values = Array.isArray(raw.values)
-    ? raw.values
-        .map((item) => parseNumber(item))
-        .filter((item): item is number => item !== null)
-        .slice(0, labels.length || MAX_CHART_ITEMS)
-    : [];
-
-  if (!labels.length || !values.length) return undefined;
-
-  const count = Math.min(labels.length, values.length, MAX_CHART_ITEMS);
-
-  return {
-    title: cleanInlineText(raw.title),
-    type: raw.type === 'progress' || raw.type === 'column' || raw.type === 'bar' ? raw.type : 'bar',
-    labels: labels.slice(0, count),
-    values: values.slice(0, count),
-    unit: cleanInlineText(raw.unit),
-  };
-}
-
-function normalizeImages(value: unknown): DefenseImage[] {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .map((item): DefenseImage | null => {
-      if (!item || typeof item !== 'object') return null;
-
-      const raw = item as Record<string, unknown>;
-      const title = cleanInlineText(raw.title);
-      const data = cleanInlineText(raw.data);
-      const path = cleanInlineText(raw.path);
-      const alt = cleanInlineText(raw.alt || title || 'Obrázok');
-
-      if (!data && !path) return null;
-
-      return { title, data, path, alt };
-    })
-    .filter((item): item is DefenseImage => item !== null)
-    .slice(0, 3);
-}
-
-function normalizeLayout(value: unknown, index: number): DefenseSlide['layout'] {
-  const layout = String(value || '').toLowerCase().trim();
-
-  if (
-    layout === 'section' ||
-    layout === 'table' ||
-    layout === 'chart' ||
-    layout === 'quote' ||
-    layout === 'split' ||
-    layout === 'closing' ||
-    layout === 'image' ||
-    layout === 'bullets'
-  ) {
-    return layout;
-  }
-
-  if (index === 0) return 'section';
-  if ((index + 1) % 5 === 0) return 'split';
-
-  return 'bullets';
-}
-
-function normalizeSlide(value: unknown, index: number): DefenseSlide {
-  const item = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
-  const title = cleanInlineText(item.title || `Snímka ${index + 1}`);
-
-  const rawBullets = Array.isArray(item.bullets)
-    ? item.bullets.map((bullet: unknown) => cleanInlineText(bullet)).filter(Boolean)
-    : [];
-
-  const bullets = normalizeBulletsForSlides(rawBullets);
-
-  const table = normalizeTable(item.table);
-  const chart = normalizeChart(item.chart);
-  const images = normalizeImages(item.images);
-
-  let layout = normalizeLayout(item.layout, index);
-
-  if (table) layout = 'table';
-  if (chart) layout = 'chart';
-  if (images.length > 0) layout = 'image';
-
-  return {
-    title: safeSlideTitle(title),
-    bullets,
-    speakerNotes: item.speakerNotes ? cleanText(item.speakerNotes) : undefined,
-    layout,
-    visualSuggestion: cleanInlineText(item.visualSuggestion),
-    table,
-    chart,
-    images,
-  };
-}
-
-function splitIntoSentences(text: string): string[] {
-  return cleanText(text)
-    .replace(/\s+/g, ' ')
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => cleanInlineText(sentence))
-    .filter((sentence) => sentence.length >= 35)
-    .slice(0, 90);
-}
-
-function extractSection(text: string, patterns: RegExp[], maxSentences = 4): string[] {
-  const sentences = splitIntoSentences(text);
-  const selected: string[] = [];
-
-  for (const sentence of sentences) {
-    if (patterns.some((pattern) => pattern.test(sentence))) {
-      selected.push(sentence);
+    if (first >= 0 && last > first) {
+      return JSON.parse(withoutFence.slice(first, last + 1));
     }
 
-    if (selected.length >= maxSentences) break;
+    throw new Error('AI nevrátila platný JSON pre prezentáciu.');
   }
-
-  return selected;
 }
 
-function toBullets(sentences: string[], fallback: string[]): string[] {
-  const bullets = sentences
-    .map((sentence) => sentence.replace(/^[-•–—]\s*/, ''))
-    .flatMap((sentence) => splitLongTextToChunks(sentence, MAX_BULLET_CHARS))
+function stringifyProfile(value: unknown): string {
+  if (!value) return '';
+
+  if (typeof value === 'string') return cleanText(value);
+
+  if (typeof value !== 'object') return cleanText(value);
+
+  const profile = value as Record<string, unknown>;
+
+  const fields = [
+    ['Názov práce', profile.title || profile.workTitle || profile.topic],
+    ['Typ práce', profile.type || profile.workType || profile.schema],
+    ['Odbor', profile.field || profile.studyField || profile.department],
+    ['Jazyk práce', profile.language || profile.workLanguage],
+    ['Cieľ práce', profile.goal || profile.objective],
+    ['Anotácia', profile.annotation || profile.abstract],
+    ['Výskumný problém', profile.problem || profile.researchProblem],
+    ['Výskumné otázky', profile.researchQuestions],
+    ['Hypotézy', profile.hypotheses],
+    ['Metodológia', profile.methodology || profile.methods],
+    ['Praktická časť', profile.practicalPart],
+    ['Prínos práce', profile.contribution || profile.scientificContribution],
+    ['Kľúčové slová', profile.keywords],
+    ['Norma citovania', profile.citationStyle],
+  ];
+
+  return fields
+    .map(([label, rawValue]) => {
+      const text = cleanInline(rawValue);
+
+      if (!text) return '';
+
+      return `${label}: ${text}`;
+    })
     .filter(Boolean)
-    .slice(0, MAX_BULLETS_PER_SLIDE);
-
-  return bullets.length ? bullets : fallback.slice(0, MAX_BULLETS_PER_SLIDE);
+    .join('\n');
 }
 
-function generateSlidesFromSource(sourceText: string, title: string): DefenseSlide[] {
-  const text = truncate(sourceText);
+function getBodySourceText(body: Record<string, unknown>): string {
+  return cleanText(
+    body.sourceText ||
+      body.extractedWorkText ||
+      body.clientExtractedText ||
+      body.attachmentText ||
+      body.workText ||
+      body.text ||
+      body.content ||
+      body.summary ||
+      '',
+  );
+}
 
-  if (!cleanText(text)) {
+function normalizeInputSlide(value: unknown, index: number): DefenseSlide | null {
+  if (!value || typeof value !== 'object') return null;
+
+  const raw = value as Record<string, unknown>;
+
+  const title = cleanInline(raw.title || `Snímka ${index + 1}`);
+  const bullets = Array.isArray(raw.bullets)
+    ? raw.bullets.map(cleanInline).filter(Boolean).slice(0, 6)
+    : [];
+
+  if (!title && !bullets.length) return null;
+
+  return {
+    title: title || `Snímka ${index + 1}`,
+    layout: cleanInline(raw.layout) as DefenseSlide['layout'],
+    bullets,
+    speakerNotes: cleanText(raw.speakerNotes),
+    visualSuggestion: cleanInline(raw.visualSuggestion),
+    estimatedMinutes: Number(raw.estimatedMinutes || 0) || undefined,
+  };
+}
+
+function normalizeSlides(rawSlides: unknown): DefenseSlide[] {
+  if (!Array.isArray(rawSlides)) return [];
+
+  return rawSlides
+    .map((slide, index) => normalizeInputSlide(slide, index))
+    .filter((slide): slide is DefenseSlide => Boolean(slide))
+    .slice(0, MAX_RENDERED_SLIDES);
+}
+
+function normalizeWorks(body: DefensePptxRequestBody): NormalizedWork[] {
+  const rawWorks = Array.isArray(body.works)
+    ? body.works
+    : Array.isArray(body.selectedWorks)
+      ? body.selectedWorks
+      : Array.isArray(body.projects)
+        ? body.projects
+        : [];
+
+  if (!rawWorks.length) {
+    const rawBody = body as Record<string, unknown>;
+    const title = cleanInline(
+      body.title || body.workTitle || 'Obhajoba záverečnej práce',
+    );
+
+    const defenseType = cleanInline(
+      body.defenseType || body.type || 'Obhajoba záverečnej práce',
+    );
+
+    const profileText = stringifyProfile(
+      body.profile || body.activeProfile || body.savedProfile || body.workProfile,
+    );
+
+    const sourceText = getBodySourceText(rawBody);
+
     return [
       {
-        title: 'Cieľ a zameranie práce',
-        layout: 'section',
-        bullets: [
-          'Predstaviť hlavný cieľ práce a dôvod výberu témy.',
-          'Stručne vysvetliť riešený problém.',
-          'Ukázať, ako je práca štruktúrovaná.',
-        ],
-        speakerNotes: 'Na úvod pokojne a vecne predstavte tému, cieľ a dôvod výberu práce.',
-      },
-      {
-        title: 'Metodika práce',
-        layout: 'bullets',
-        bullets: [
-          'Opísať použité metódy a postup spracovania.',
-          'Vysvetliť výber dát, zdrojov alebo výskumnej vzorky.',
-          'Uviesť spôsob vyhodnotenia výsledkov.',
-        ],
-      },
-      {
-        title: 'Hlavné výsledky',
-        layout: 'bullets',
-        bullets: [
-          'Zhrnúť najdôležitejšie zistenia práce.',
-          'Prepojiť výsledky s cieľom práce.',
-          'Zdôrazniť prínos pre prax alebo odbor.',
-        ],
-      },
-      {
-        title: 'Záver a otázky',
-        layout: 'closing',
-        bullets: [
-          'Zhrnúť cieľ, výsledky a prínos práce.',
-          'Poďakovať komisii za pozornosť.',
-          'Pripraviť sa na otázky komisie.',
-        ],
+        title,
+        defenseType,
+        profileText,
+        sourceText,
+        slides: normalizeSlides(body.slides),
       },
     ];
   }
 
-  const objective = toBullets(
-    extractSection(text, [/cieľ/i, /zameran/i, /predmetom práce/i, /účel/i], 4),
+  return rawWorks.map((work, index) => {
+    const raw = work && typeof work === 'object' ? (work as Record<string, unknown>) : {};
+
+    const title = cleanInline(
+      raw.title ||
+        raw.workTitle ||
+        raw.topic ||
+        raw.name ||
+        `Obhajoba práce ${index + 1}`,
+    );
+
+    const defenseType = cleanInline(
+      raw.defenseType ||
+        raw.type ||
+        body.defenseType ||
+        'Obhajoba záverečnej práce',
+    );
+
+    const profileText = stringifyProfile(
+      raw.profile ||
+        raw.activeProfile ||
+        raw.savedProfile ||
+        raw.workProfile ||
+        body.profile ||
+        body.activeProfile,
+    );
+
+    const sourceText = getBodySourceText({
+      ...raw,
+      fallbackText: body.text,
+    });
+
+    return {
+      title,
+      defenseType,
+      profileText,
+      sourceText,
+      slides: normalizeSlides(raw.slides),
+    };
+  });
+}
+
+function buildAiPrompt(work: NormalizedWork) {
+  const profileText = work.profileText || 'Profil práce nebol vyplnený.';
+  const sourceText = truncateText(work.sourceText, MAX_SOURCE_CHARS_FOR_AI);
+
+  return `
+Si expert na akademické obhajoby, školiteľ a tvorca profesionálnych PowerPoint prezentácií.
+
+Tvojou úlohou je vytvoriť kompletnú prezentáciu na obhajobu záverečnej práce na približne 40 minút.
+
+DÔLEŽITÉ PRAVIDLÁ:
+- Každá snímka musí priamo súvisieť s profilom práce a vloženým dokumentom.
+- Nepíš všeobecné univerzálne texty, ak sa dá vychádzať z dokumentu.
+- Ak v dokumente nájdeš cieľ, metodiku, výskumné otázky, hypotézy, výsledky alebo záver, použi ich.
+- Prezentácia má byť profesionálna, akademická a vhodná pred komisiu.
+- Každý slide musí mať speakerNotes, teda čo má študent hovoriť.
+- Celkový rozsah prezentácie má byť približne 40 minút.
+- Vytvor 20 až 24 obsahových snímok.
+- Neuvádzaj nič, čo nie je podporené profilom alebo dokumentom. Ak údaj chýba, formuluj opatrne.
+- Každý slide má obsahovať 3 až 5 kvalitných bodov.
+- Texty majú byť konkrétne, nie prázdne frázy.
+- Výstup musí byť striktne JSON.
+
+PROFIL PRÁCE:
+${profileText}
+
+NÁZOV PREZENTÁCIE:
+${work.title}
+
+TYP OBHAJOBY:
+${work.defenseType}
+
+TEXT PRÁCE / NÁHRATÝ DOKUMENT:
+${sourceText || 'Dokument nebol dostupný. Vychádzaj z profilu práce.'}
+
+Vráť iba JSON v tomto tvare:
+{
+  "slides": [
+    {
+      "title": "Názov snímky",
+      "layout": "section | bullets | split | quote | closing",
+      "estimatedMinutes": 2,
+      "bullets": [
+        "Konkrétny bod priamo z práce alebo profilu",
+        "Konkrétny bod priamo z práce alebo profilu",
+        "Konkrétny bod priamo z práce alebo profilu"
+      ],
+      "speakerNotes": "Detailný hovorený text pre študenta na 1 až 2 minúty. Musí vysvetľovať obsah snímky.",
+      "visualSuggestion": "Odporúčanie na graf, tabuľku, schému alebo vizuál."
+    }
+  ]
+}
+
+Odporúčaná štruktúra:
+1. Názov a predstavenie práce
+2. Kontext a význam témy
+3. Dôvod výberu témy
+4. Cieľ práce
+5. Výskumný problém
+6. Výskumné otázky / hypotézy
+7. Teoretický rámec
+8. Kľúčové pojmy
+9. Metodológia
+10. Dáta / výskumná vzorka / materiál
+11. Postup spracovania
+12. Praktická alebo analytická časť
+13. Hlavné výsledky 1
+14. Hlavné výsledky 2
+15. Interpretácia výsledkov
+16. Porovnanie s teóriou
+17. Prínos práce
+18. Limity práce
+19. Odporúčania
+20. Záver
+21. Možné otázky komisie
+22. Záverečné poďakovanie
+`.trim();
+}
+
+async function generateSlidesWithAi(work: NormalizedWork): Promise<DefenseSlide[]> {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    return buildFallbackSlides(work);
+  }
+
+  const openai = new OpenAI({
+    apiKey,
+  });
+
+  const model = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+
+  const completion = await openai.chat.completions.create({
+    model,
+    temperature: 0.35,
+    max_tokens: 9000,
+    response_format: {
+      type: 'json_object',
+    },
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Si akademický expert na tvorbu obhajob. Vždy vraciaš iba validný JSON.',
+      },
+      {
+        role: 'user',
+        content: buildAiPrompt(work),
+      },
+    ],
+  });
+
+  const content = completion.choices[0]?.message?.content || '';
+  const parsed = tryParseJson(content);
+
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('AI nevrátila objekt so snímkami.');
+  }
+
+  const rawSlides = (parsed as Record<string, unknown>).slides;
+
+  const slides = normalizeSlides(rawSlides);
+
+  if (!slides.length) {
+    throw new Error('AI nevygenerovala žiadne použiteľné snímky.');
+  }
+
+  return slides.slice(0, MAX_RENDERED_SLIDES);
+}
+
+function pickSentences(text: string, patterns: RegExp[], max = 4): string[] {
+  const sentences = cleanText(text)
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?])\s+/)
+    .map(cleanInline)
+    .filter((sentence) => sentence.length >= 35);
+
+  const found = sentences.filter((sentence) =>
+    patterns.some((pattern) => pattern.test(sentence)),
+  );
+
+  return found.slice(0, max);
+}
+
+function fallbackBullets(found: string[], fallback: string[]) {
+  return (found.length ? found : fallback)
+    .map((item) => (item.length > 180 ? `${item.slice(0, 177)}…` : item))
+    .slice(0, 5);
+}
+
+function buildFallbackSlides(work: NormalizedWork): DefenseSlide[] {
+  const text = `${work.profileText}\n\n${work.sourceText}`;
+
+  const objective = fallbackBullets(
+    pickSentences(text, [/cieľ/i, /cieľom/i, /zamer/i, /predmetom/i], 5),
     [
-      `Práca sa zameriava na tému: ${title}.`,
+      `Práca sa zameriava na tému: ${work.title}.`,
       'Hlavným cieľom je odborne spracovať riešený problém.',
-      'Výstupom je syntéza teoretických poznatkov a praktických zistení.',
+      'Prezentácia vychádza z dostupného profilu práce a nahratého dokumentu.',
     ],
   );
 
-  const theory = toBullets(
-    extractSection(text, [/teoret/i, /východisk/i, /literat/i, /autor/i, /koncept/i], 4),
+  const methodology = fallbackBullets(
+    pickSentences(text, [/metod/i, /postup/i, /analýz/i, /výskum/i], 5),
     [
-      'Teoretická časť vytvára odborný rámec riešenej problematiky.',
-      'V práci sú vysvetlené základné pojmy a súvislosti.',
-      'Literárne zdroje slúžia ako podklad pre vlastné spracovanie témy.',
+      'Metodologický postup je potrebné predstaviť vo vzťahu k cieľu práce.',
+      'Použité metódy majú ukázať, ako boli spracované údaje alebo odborné zdroje.',
+      'Postup práce prepája teoretickú a praktickú časť.',
     ],
   );
 
-  const methodology = toBullets(
-    extractSection(text, [/metod/i, /výskum/i, /vzorka/i, /dotazník/i, /analýz/i, /postup/i], 5),
+  const results = fallbackBullets(
+    pickSentences(text, [/výsled/i, /zisten/i, /potvrd/i, /ukáz/i], 5),
     [
-      'Praktická časť vychádza z metodického postupu zvoleného podľa charakteru témy.',
-      'Dáta alebo podklady boli spracované systematicky a vo vzťahu k cieľu práce.',
-      'Metodika umožnila formulovať závery a odporúčania.',
-    ],
-  );
-
-  const results = toBullets(
-    extractSection(text, [/výsled/i, /zisten/i, /potvrd/i, /preukáz/i, /ukáz/i, /hodnot/i], 5),
-    [
-      'Výsledky ukazujú hlavné zistenia súvisiace s cieľom práce.',
-      'Najdôležitejšie zistenia sú interpretované vo vzťahu k skúmanému problému.',
-      'Výsledky vytvárajú podklad pre odporúčania a záver práce.',
-    ],
-  );
-
-  const recommendations = toBullets(
-    extractSection(text, [/odporúč/i, /navrh/i, /riešen/i, /prínos/i, /záver/i, /limit/i], 5),
-    [
-      'Na základe výsledkov je možné formulovať praktické odporúčania.',
-      'Práca prináša odborný pohľad na riešenú problematiku.',
-      'Závery možno využiť pri ďalšom výskume alebo praktickej aplikácii.',
+      'Výsledky je potrebné predstaviť priamo vo vzťahu k cieľu práce.',
+      'Najdôležitejšie zistenia tvoria základ pre interpretáciu a odporúčania.',
+      'Pri obhajobe je vhodné zdôrazniť hlavný prínos výsledkov.',
     ],
   );
 
   return [
     {
-      title: 'Cieľ a zameranie práce',
+      title: work.title,
       layout: 'section',
+      estimatedMinutes: 2,
+      bullets: [
+        work.defenseType,
+        'Predstavenie témy, cieľa a štruktúry obhajoby.',
+        'Prezentácia je pripravená z profilu práce a dostupného dokumentu.',
+      ],
+      speakerNotes:
+        'Na úvod predstavte názov práce, typ práce a stručne vysvetlite, prečo je téma dôležitá.',
+      visualSuggestion: 'Titulný slide s názvom práce a menom autora.',
+    },
+    {
+      title: 'Význam a aktuálnosť témy',
+      layout: 'bullets',
+      estimatedMinutes: 2,
+      bullets: fallbackBullets(
+        pickSentences(text, [/význam/i, /aktuál/i, /dôležit/i, /problém/i], 5),
+        [
+          'Téma má odborný alebo praktický význam v danej oblasti.',
+          'Práca reaguje na konkrétny problém formulovaný v profile alebo dokumente.',
+          'Aktuálnosť témy je potrebné vysvetliť vo vzťahu k odboru.',
+        ],
+      ),
+      speakerNotes:
+        'Vysvetlite komisii, prečo bolo potrebné sa témou zaoberať a aký problém práca rieši.',
+      visualSuggestion: 'Schéma kontextu problému alebo mapa pojmov.',
+    },
+    {
+      title: 'Cieľ práce',
+      layout: 'quote',
+      estimatedMinutes: 2,
       bullets: objective,
-      speakerNotes: 'Predstavte tému, hlavný cieľ práce a stručne vysvetlite, čo bolo predmetom skúmania.',
+      speakerNotes:
+        'Cieľ práce povedzte jasne a priamo. Následne vysvetlite, ako je cieľ prepojený s metodikou a výsledkami.',
+      visualSuggestion: 'Veľká karta s hlavným cieľom práce.',
+    },
+    {
+      title: 'Výskumný problém a otázky',
+      layout: 'split',
+      estimatedMinutes: 2,
+      bullets: fallbackBullets(
+        pickSentences(text, [/výskumn/i, /otázk/i, /hypotéz/i, /problém/i], 5),
+        [
+          'Výskumný problém vychádza z cieľa práce.',
+          'Výskumné otázky alebo hypotézy určujú smer praktickej alebo analytickej časti.',
+          'Pri obhajobe je dôležité ukázať ich prepojenie s výsledkami.',
+        ],
+      ),
+      speakerNotes:
+        'Predstavte, čo presne práca skúmala alebo overovala. Ak boli použité hypotézy, vysvetlite ich význam.',
+      visualSuggestion: 'Dvojstĺpcové rozloženie: otázky a hypotézy.',
     },
     {
       title: 'Teoretické východiská',
       layout: 'bullets',
-      bullets: theory,
-      visualSuggestion: 'Možno doplniť jednoduchú schému hlavných pojmov.',
+      estimatedMinutes: 3,
+      bullets: fallbackBullets(
+        pickSentences(text, [/teoret/i, /literat/i, /autor/i, /koncept/i], 5),
+        [
+          'Teoretická časť vytvára odborný základ pre riešenú problematiku.',
+          'Kľúčové pojmy je potrebné vysvetliť stručne a vecne.',
+          'Teória musí byť prepojená s praktickou alebo analytickou časťou.',
+        ],
+      ),
+      speakerNotes:
+        'Nevymenúvajte celú teóriu. Vyberte iba tie pojmy a autorov, ktoré priamo podporujú cieľ práce.',
+      visualSuggestion: 'Schéma hlavných pojmov.',
     },
     {
-      title: 'Metodika a postup spracovania',
+      title: 'Metodológia práce',
       layout: 'split',
+      estimatedMinutes: 3,
       bullets: methodology,
-      visualSuggestion: 'Možno doplniť procesnú schému postupu.',
+      speakerNotes:
+        'Vysvetlite, aké metódy boli použité, prečo boli vhodné a ako pomohli splniť cieľ práce.',
+      visualSuggestion: 'Procesná schéma metodického postupu.',
+    },
+    {
+      title: 'Praktická alebo analytická časť',
+      layout: 'bullets',
+      estimatedMinutes: 3,
+      bullets: fallbackBullets(
+        pickSentences(text, [/praktick/i, /analytick/i, /dáta/i, /vzork/i], 5),
+        [
+          'Praktická časť ukazuje vlastné spracovanie témy.',
+          'Je potrebné predstaviť zdroj dát, postup a spôsob vyhodnotenia.',
+          'Táto časť prepája teóriu s konkrétnymi zisteniami.',
+        ],
+      ),
+      speakerNotes:
+        'Stručne popíšte, čo bolo predmetom praktickej časti a ako ste postupovali.',
+      visualSuggestion: 'Prehľadová karta: dáta, vzorka, postup.',
     },
     {
       title: 'Hlavné výsledky práce',
       layout: 'bullets',
+      estimatedMinutes: 4,
       bullets: results,
-      visualSuggestion: 'Možno doplniť graf alebo tabuľku s hlavnými výsledkami.',
+      speakerNotes:
+        'Pri výsledkoch hovorte konkrétne. Vyberte najdôležitejšie zistenia a vysvetlite ich význam.',
+      visualSuggestion: 'Graf alebo tabuľka hlavných výsledkov.',
     },
     {
-      title: 'Prínos, odporúčania a záver',
+      title: 'Interpretácia výsledkov',
+      layout: 'split',
+      estimatedMinutes: 3,
+      bullets: [
+        'Výsledky je potrebné interpretovať vo vzťahu k cieľu práce.',
+        'Diskusia ukazuje, čo zistenia znamenajú pre riešený problém.',
+        'Interpretácia prepája výsledky s teoretickými východiskami.',
+      ],
+      speakerNotes:
+        'Neopakujte len výsledky. Vysvetlite, čo znamenajú a ako podporujú záver práce.',
+      visualSuggestion: 'Porovnanie: výsledok verzus význam.',
+    },
+    {
+      title: 'Prínos práce',
       layout: 'quote',
-      bullets: recommendations,
-      speakerNotes: 'Zdôraznite, čo práca priniesla a ako možno výsledky využiť.',
+      estimatedMinutes: 2,
+      bullets: fallbackBullets(
+        pickSentences(text, [/prínos/i, /odporúč/i, /využiť/i, /aplik/i], 5),
+        [
+          'Prínos práce spočíva v odbornom spracovaní riešenej problematiky.',
+          'Výsledky môžu byť využité v praxi alebo ako podklad pre ďalší výskum.',
+          'Vlastný prínos autora je potrebné pomenovať konkrétne.',
+        ],
+      ),
+      speakerNotes:
+        'Zdôraznite, čo práca priniesla a komu môžu byť výsledky užitočné.',
+      visualSuggestion: 'Dve karty: prínos pre prax a prínos pre odbor.',
+    },
+    {
+      title: 'Limity práce',
+      layout: 'bullets',
+      estimatedMinutes: 2,
+      bullets: [
+        'Každá práca má obmedzenia, ktoré je vhodné pomenovať vecne.',
+        'Limity môžu súvisieť s rozsahom, dátami, metódou alebo dostupnosťou zdrojov.',
+        'Pomenovanie limitov ukazuje odbornú zrelosť autora.',
+      ],
+      speakerNotes:
+        'Limity neprezentujte ako slabinu, ale ako realistické vymedzenie práce.',
+      visualSuggestion: 'Tri karty limitov.',
+    },
+    {
+      title: 'Odporúčania a ďalší výskum',
+      layout: 'bullets',
+      estimatedMinutes: 2,
+      bullets: [
+        'Na základe výsledkov možno formulovať odporúčania.',
+        'Tému je možné ďalej rozvíjať v širšej vzorke alebo inom kontexte.',
+        'Odporúčania majú vychádzať z výsledkov, nie zo všeobecných tvrdení.',
+      ],
+      speakerNotes:
+        'Ukážte, ako sa dá na prácu nadviazať a ako môžu byť výsledky využité.',
+      visualSuggestion: 'Roadmapa ďalšieho výskumu.',
+    },
+    {
+      title: 'Možné otázky komisie',
+      layout: 'bullets',
+      estimatedMinutes: 3,
+      bullets: [
+        'Prečo ste si vybrali túto tému?',
+        'Ako cieľ práce súvisí s použitou metodológiou?',
+        'Aké boli hlavné výsledky práce?',
+        'Aký je hlavný prínos práce?',
+        'Ako by bolo možné vo výskume pokračovať?',
+      ],
+      speakerNotes:
+        'Na otázky odpovedajte stručne a vecne. Najprv povedzte odpoveď, potom krátke zdôvodnenie.',
+      visualSuggestion: 'Slide otázky a odpovede.',
+    },
+    {
+      title: 'Záver obhajoby',
+      layout: 'closing',
+      estimatedMinutes: 2,
+      bullets: [
+        'Práca splnila stanovený cieľ v rozsahu dostupných dát a metodiky.',
+        'Výsledky poskytujú podklad pre odborné zhodnotenie témy.',
+        'Ďakujem za pozornosť a som pripravený/pripravená odpovedať na otázky.',
+      ],
+      speakerNotes:
+        'Záver povedzte sebavedomo, krátko a profesionálne. Nepredlžujte ho zbytočne.',
+      visualSuggestion: 'Čistý záverečný slide s poďakovaním.',
     },
   ];
 }
 
-function extractMarkdownTables(text: string): DefenseTable[] {
-  const lines = cleanText(text).split('\n');
-  const tables: DefenseTable[] = [];
-  let block: string[] = [];
+function prepareSlidesFor40Minutes(slides: DefenseSlide[]): DefenseSlide[] {
+  const cleanSlides = slides
+    .map((slide, index) => ({
+      title: cleanInline(slide.title || `Snímka ${index + 1}`),
+      layout: slide.layout || 'bullets',
+      bullets: Array.isArray(slide.bullets)
+        ? slide.bullets.map(cleanInline).filter(Boolean).slice(0, 5)
+        : [],
+      speakerNotes: cleanText(slide.speakerNotes),
+      visualSuggestion: cleanInline(slide.visualSuggestion),
+      estimatedMinutes: Number(slide.estimatedMinutes || 2) || 2,
+    }))
+    .filter((slide) => slide.title && slide.bullets.length);
 
-  function flush() {
-    if (block.length < 2) {
-      block = [];
-      return;
-    }
-
-    const rows = block
-      .map((line) => line.split('|').map((cell) => cleanInlineText(cell)).filter(Boolean))
-      .filter((row) => row.length >= 2);
-
-    const filteredRows = rows.filter((row) => !row.every((cell) => /^:?-{2,}:?$/.test(cell)));
-
-    if (filteredRows.length >= 2) {
-      const headers = filteredRows[0].slice(0, MAX_TABLE_COLS);
-      const dataRows = filteredRows.slice(1, MAX_TABLE_ROWS + 1).map((row) => row.slice(0, MAX_TABLE_COLS));
-
-      tables.push({ title: 'Tabuľkové výsledky', headers, rows: dataRows });
-    }
-
-    block = [];
+  if (cleanSlides.length >= 18) {
+    return cleanSlides.slice(0, MAX_RENDERED_SLIDES);
   }
 
-  for (const line of lines) {
-    if (line.includes('|')) block.push(line);
-    else flush();
-  }
-
-  flush();
-
-  return tables.slice(0, 4);
+  return cleanSlides;
 }
 
-function extractLooseTables(text: string): DefenseTable[] {
-  const source = cleanText(text);
-  const tables: DefenseTable[] = [];
-
-  const candidateLines = source
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => {
-      if (!line) return false;
-      if (line.includes('|')) return false;
-
-      const parts = line.split(/\t|;| {2,}/).map((part) => part.trim()).filter(Boolean);
-
-      return parts.length >= 2 && parts.length <= MAX_TABLE_COLS;
-    });
-
-  if (candidateLines.length < 3) return [];
-
-  let block: string[][] = [];
-
-  function flushBlock() {
-    if (block.length < 3) {
-      block = [];
-      return;
-    }
-
-    const headers = block[0].slice(0, MAX_TABLE_COLS);
-    const rows = block.slice(1, MAX_TABLE_ROWS + 1).map((row) => row.slice(0, MAX_TABLE_COLS));
-
-    tables.push({ title: 'Prehľad údajov z práce', headers, rows });
-    block = [];
-  }
-
-  for (const line of candidateLines) {
-    const parts = line.split(/\t|;| {2,}/).map((part) => cleanInlineText(part)).filter(Boolean);
-
-    if (block.length === 0 || Math.abs(parts.length - block[0].length) <= 1) {
-      block.push(parts);
-    } else {
-      flushBlock();
-      block.push(parts);
-    }
-  }
-
-  flushBlock();
-
-  return tables.slice(0, 2);
-}
-
-function extractNumericChart(text: string): DefenseChart | undefined {
-  const source = cleanText(text);
-  const pairs: Array<{ label: string; value: number; hasPercent: boolean }> = [];
-
-  const patterns = [
-    /([A-Za-zÀ-ž0-9][A-Za-zÀ-ž0-9 .,/()_-]{2,48})\s*[:=–-]\s*(\d{1,4}(?:[,.]\d{1,2})?)\s*(%|percent|percentá|percento)?/giu,
-    /([A-Za-zÀ-ž0-9][A-Za-zÀ-ž0-9 .,/()_-]{2,48})\s+(\d{1,4}(?:[,.]\d{1,2})?)\s*(%|percent|percentá|percento)/giu,
-  ];
-
-  for (const pattern of patterns) {
-    let match: RegExpExecArray | null;
-
-    while ((match = pattern.exec(source)) && pairs.length < MAX_CHART_ITEMS) {
-      const label = cleanInlineText(match[1]).replace(/^[-•–—]\s*/, '').slice(0, 40);
-      const value = parseNumber(match[2]);
-      const hasPercent = Boolean(match[3]);
-
-      if (!label || value === null) continue;
-      if (value < 0 || value > 100000) continue;
-      if (/^(strana|kapitola|tabuľka|obrázok|graf|rok)$/i.test(label)) continue;
-
-      if (pairs.some((item) => item.label.toLowerCase() === label.toLowerCase())) continue;
-
-      pairs.push({ label, value, hasPercent });
-    }
-  }
-
-  if (pairs.length < 2) return undefined;
-
-  const percentCount = pairs.filter((item) => item.hasPercent || item.value <= 100).length;
-
-  return {
-    title: 'Kľúčové číselné výsledky',
-    type: percentCount >= Math.ceil(pairs.length / 2) ? 'bar' : 'column',
-    labels: pairs.map((item) => item.label),
-    values: pairs.map((item) => item.value),
-    unit: percentCount >= Math.ceil(pairs.length / 2) ? '%' : '',
-  };
-}
-
-function buildAgenda(slides: DefenseSlide[]): string[] {
-  return slides.map((slide) => slide.title).filter(Boolean).slice(0, 10);
-}
-
-function addBackground(slide: PptxSlide, theme: PptTheme) {
-  slide.background = { color: theme.bg };
+function addBackground(slide: PptxSlide) {
+  slide.background = { color: THEME.bg };
 
   slide.addShape(ShapeType.rect, {
     x: 0,
     y: 0,
     w: SLIDE_W,
     h: SLIDE_H,
-    fill: { color: theme.bg },
-    line: { color: theme.bg },
+    fill: { color: THEME.bg },
+    line: { color: THEME.bg },
   });
 
   slide.addShape(ShapeType.rect, {
     x: 0,
     y: 0,
     w: SLIDE_W,
-    h: 0.32,
-    fill: { color: theme.accent },
-    line: { color: theme.accent },
+    h: 0.34,
+    fill: { color: THEME.accent },
+    line: { color: THEME.accent },
   });
 
   slide.addShape(ShapeType.rect, {
     x: 0,
-    y: 0.32,
+    y: 0.34,
     w: SLIDE_W,
-    h: 0.04,
-    fill: { color: theme.accent2 },
-    line: { color: theme.accent2 },
+    h: 0.05,
+    fill: { color: THEME.accent2 },
+    line: { color: THEME.accent2 },
   });
 
-  slide.addShape(ShapeType.rect, {
-    x: 0,
-    y: 6.98,
-    w: SLIDE_W,
-    h: 0.02,
-    fill: { color: theme.border },
-    line: { color: theme.border },
+  slide.addShape(ShapeType.line, {
+    x: 0.65,
+    y: 6.95,
+    w: 12,
+    h: 0,
+    line: { color: THEME.border, width: 1 },
   });
 }
 
-function addHeader(slide: PptxSlide, theme: PptTheme, eyebrow: string, title: string) {
-  const cleanTitle = safeSlideTitle(title);
+function addHeader(slide: PptxSlide, eyebrow: string, title: string) {
+  const safeTitle =
+    title.length > 92 ? `${title.slice(0, 89).trim()}…` : title;
 
   slide.addText(eyebrow.toUpperCase(), {
     x: 0.65,
@@ -853,19 +775,19 @@ function addHeader(slide: PptxSlide, theme: PptTheme, eyebrow: string, title: st
     fontFace: 'Arial',
     fontSize: 8.5,
     bold: true,
-    color: theme.accent,
+    color: THEME.accent,
     margin: 0,
   });
 
-  slide.addText(cleanTitle, {
+  slide.addText(safeTitle, {
     x: 0.65,
     y: 0.86,
     w: 11.95,
     h: 0.86,
     fontFace: 'Arial',
-    fontSize: cleanTitle.length > 74 ? 21 : cleanTitle.length > 54 ? 24 : 27,
+    fontSize: safeTitle.length > 74 ? 21 : safeTitle.length > 54 ? 24 : 27,
     bold: true,
-    color: theme.title,
+    color: THEME.title,
     fit: 'shrink',
     margin: 0,
     breakLine: false,
@@ -873,7 +795,7 @@ function addHeader(slide: PptxSlide, theme: PptTheme, eyebrow: string, title: st
   });
 }
 
-function addFooter(slide: PptxSlide, theme: PptTheme, slideNumber: number, workTitle?: string) {
+function addFooter(slide: PptxSlide, slideNumber: number, workTitle: string) {
   slide.addText(String(slideNumber).padStart(2, '0'), {
     x: 0.65,
     y: 7.08,
@@ -882,18 +804,18 @@ function addFooter(slide: PptxSlide, theme: PptTheme, slideNumber: number, workT
     fontFace: 'Arial',
     fontSize: 8,
     bold: true,
-    color: theme.muted,
+    color: THEME.muted,
     margin: 0,
   });
 
-  slide.addText(cleanInlineText(workTitle || 'Prezentácia k obhajobe'), {
+  slide.addText(workTitle, {
     x: 1.35,
     y: 7.06,
     w: 9.6,
     h: 0.22,
     fontFace: 'Arial',
     fontSize: 8,
-    color: theme.muted,
+    color: THEME.muted,
     fit: 'shrink',
     margin: 0,
   });
@@ -906,7 +828,7 @@ function addFooter(slide: PptxSlide, theme: PptTheme, slideNumber: number, workT
     fontFace: 'Arial',
     fontSize: 8,
     bold: true,
-    color: theme.accent,
+    color: THEME.accent,
     margin: 0,
     align: 'right',
   });
@@ -914,510 +836,24 @@ function addFooter(slide: PptxSlide, theme: PptTheme, slideNumber: number, workT
 
 function addSpeakerNotes(slide: PptxSlide, notes?: string) {
   const clean = cleanText(notes);
+
   if (!clean) return;
 
   try {
     slide.addNotes(clean);
   } catch {
-    // Poznámky rečníka sú voliteľné a nesmú zhodiť export.
+    // Poznámky nesmú zhodiť export.
   }
 }
 
-function addBulletCards(slide: PptxSlide, theme: PptTheme, bullets: string[], startY = 1.86) {
-  const safeBullets = normalizeBulletsForSlides(bullets).slice(0, MAX_BULLETS_PER_SLIDE);
-
-  if (!safeBullets.length) {
-    safeBullets.push('Obsah snímky je potrebné doplniť podľa finálnej verzie práce.');
-  }
-
-  const fontSize = getDynamicBulletFontSize(safeBullets);
-  const cardHeight = getDynamicCardHeight(safeBullets);
-  const gap = safeBullets.length >= 5 ? 0.11 : 0.16;
-  const availableBottom = 6.58;
-
-  safeBullets.forEach((bullet, index) => {
-    const y = startY + index * (cardHeight + gap);
-    const safeY = Math.min(y, availableBottom - cardHeight);
-
-    slide.addShape(ShapeType.roundRect, {
-      x: 0.85,
-      y: safeY,
-      w: 11.75,
-      h: cardHeight,
-      rectRadius: 0.06,
-      fill: { color: index % 2 === 0 ? theme.card : theme.card2 },
-      line: { color: theme.border, transparency: 0, width: 1 },
-    } as any);
-
-    slide.addShape(ShapeType.rect, {
-      x: 0.85,
-      y: safeY,
-      w: 0.11,
-      h: cardHeight,
-      fill: { color: index % 2 === 0 ? theme.accent : theme.accent2 },
-      line: { color: index % 2 === 0 ? theme.accent : theme.accent2 },
-    });
-
-    slide.addText(cleanInlineText(bullet), {
-      x: 1.18,
-      y: safeY + 0.11,
-      w: 10.92,
-      h: cardHeight - 0.2,
-      fontFace: 'Arial',
-      fontSize,
-      bold: false,
-      color: theme.text,
-      fit: 'shrink',
-      valign: 'middle',
-      margin: 0.01,
-      breakLine: false,
-    });
-  });
-}
-
-function addSplitSlide(slide: PptxSlide, theme: PptTheme, item: DefenseSlide) {
-  const bullets = normalizeBulletsForSlides(item.bullets).slice(0, MAX_BULLETS_PER_SLIDE);
-
-  if (bullets.length <= 3) {
-    addBulletCards(slide, theme, bullets);
-    return;
-  }
-
-  const left = bullets.slice(0, Math.ceil(bullets.length / 2));
-  const right = bullets.slice(Math.ceil(bullets.length / 2));
-
-  const boxes = [
-    { x: 0.8, title: 'Kľúčové body', bullets: left, accent: theme.accent },
-    { x: 6.78, title: 'Dôraz pri obhajobe', bullets: right.length ? right : left, accent: theme.accent2 },
-  ];
-
-  boxes.forEach((box) => {
-    slide.addShape(ShapeType.roundRect, {
-      x: box.x,
-      y: 1.86,
-      w: 5.75,
-      h: 4.7,
-      rectRadius: 0.06,
-      fill: { color: theme.card },
-      line: { color: theme.border, transparency: 0, width: 1 },
-    } as any);
-
-    slide.addShape(ShapeType.rect, {
-      x: box.x,
-      y: 1.86,
-      w: 5.75,
-      h: 0.13,
-      fill: { color: box.accent },
-      line: { color: box.accent },
-    });
-
-    slide.addText(box.title, {
-      x: box.x + 0.28,
-      y: 2.18,
-      w: 5.15,
-      h: 0.32,
-      fontFace: 'Arial',
-      fontSize: 13,
-      bold: true,
-      color: box.accent,
-      margin: 0,
-    });
-
-    slide.addText(
-      box.bullets
-        .map((bullet) => {
-          const compact = cleanInlineText(bullet);
-          return `• ${compact.length > MAX_BULLET_CHARS_COMPACT ? `${compact.slice(0, MAX_BULLET_CHARS_COMPACT).trim()}…` : compact}`;
-        })
-        .join('\n'),
-      {
-        x: box.x + 0.32,
-        y: 2.66,
-        w: 5.08,
-        h: 3.42,
-        fontFace: 'Arial',
-        fontSize: box.bullets.length >= 3 ? 12.4 : 13.6,
-        color: theme.text,
-        fit: 'shrink',
-        margin: 0.03,
-        breakLine: false,
-        paraSpaceAfter: 4,
-      },
-    );
-  });
-}
-
-function addTable(slide: PptxSlide, theme: PptTheme, table: DefenseTable) {
-  const headers = table.headers?.length ? table.headers.slice(0, MAX_TABLE_COLS) : ['Ukazovateľ', 'Hodnota'];
-  const rows = table.rows?.length ? table.rows : [];
-
-  const normalizedRows = rows.slice(0, MAX_TABLE_ROWS).map((row) => {
-    const next = [...row.map((cell) => cleanInlineText(cell))];
-    while (next.length < headers.length) next.push('');
-    return next.slice(0, headers.length);
-  });
-
-  const tableData = [headers, ...normalizedRows].map((row, rowIndex) =>
-    row.map((cell) => ({
-      text: cleanInlineText(cell),
-      options: {
-        bold: rowIndex === 0,
-        color: rowIndex === 0 ? 'FFFFFF' : theme.text,
-        fill: { color: rowIndex === 0 ? theme.accent : rowIndex % 2 === 0 ? theme.card2 : theme.card },
-        margin: 0.06,
-        fontFace: 'Arial',
-        fontSize: rowIndex === 0 ? 10 : 9,
-        valign: 'middle',
-      },
-    })),
-  );
-
-  slide.addText(table.title || 'Prehľad výsledkov', {
-    x: 0.85,
-    y: 1.72,
-    w: 11.7,
-    h: 0.32,
-    fontFace: 'Arial',
-    fontSize: 14,
-    bold: true,
-    color: theme.accent2,
-    margin: 0,
-  });
-
-  try {
-    slide.addTable(tableData as any, {
-      x: 0.85,
-      y: 2.18,
-      w: 11.75,
-      h: 4.1,
-      border: { type: 'solid', color: theme.border, pt: 0.75 },
-      margin: 0.05,
-      fit: 'shrink',
-    } as any);
-  } catch {
-    const fallback = [headers.join(' | '), ...normalizedRows.map((row) => row.join(' | '))].join('\n');
-
-    slide.addText(fallback, {
-      x: 0.9,
-      y: 2.2,
-      w: 11.6,
-      h: 4.0,
-      fontFace: 'Arial',
-      fontSize: 12,
-      color: theme.text,
-      fit: 'shrink',
-      margin: 0.05,
-      breakLine: false,
-    });
-  }
-}
-
-function addBarChart(slide: PptxSlide, theme: PptTheme, chart: DefenseChart) {
-  const labels = chart.labels || [];
-  const values = chart.values || [];
-  const unit = chart.unit || '';
-  const count = Math.min(labels.length, values.length, MAX_CHART_ITEMS);
-  const maxValue = Math.max(...values.slice(0, count), 1);
-
-  slide.addText(chart.title || 'Grafické zobrazenie výsledkov', {
-    x: 0.85,
-    y: 1.72,
-    w: 11.7,
-    h: 0.32,
-    fontFace: 'Arial',
-    fontSize: 14,
-    bold: true,
-    color: theme.accent2,
-    margin: 0,
-  });
-
-  if (chart.type === 'column') {
-    const chartX = 1.0;
-    const chartY = 2.25;
-    const chartW = 11.1;
-    const chartH = 3.6;
-    const gap = 0.18;
-    const barW = (chartW - gap * (count - 1)) / Math.max(count, 1);
-
-    for (let i = 0; i < count; i += 1) {
-      const value = values[i];
-      const ratio = clamp(value / maxValue, 0, 1);
-      const h = Math.max(0.18, chartH * ratio);
-      const x = chartX + i * (barW + gap);
-      const y = chartY + chartH - h;
-
-      slide.addShape(ShapeType.rect, {
-        x,
-        y,
-        w: barW,
-        h,
-        fill: { color: i % 2 === 0 ? theme.accent : theme.accent2 },
-        line: { color: i % 2 === 0 ? theme.accent : theme.accent2 },
-      });
-
-      slide.addText(`${value}${unit}`, {
-        x,
-        y: y - 0.3,
-        w: barW,
-        h: 0.18,
-        fontFace: 'Arial',
-        fontSize: 8.5,
-        bold: true,
-        color: theme.text,
-        align: 'center',
-        margin: 0,
-      });
-
-      slide.addText(labels[i], {
-        x,
-        y: chartY + chartH + 0.18,
-        w: barW,
-        h: 0.45,
-        fontFace: 'Arial',
-        fontSize: 7.8,
-        color: theme.muted,
-        fit: 'shrink',
-        align: 'center',
-        margin: 0,
-      });
-    }
-
-    return;
-  }
-
-  const chartX = 1.05;
-  const chartY = 2.25;
-  const chartW = 10.95;
-  const rowH = Math.min(0.58, 3.9 / Math.max(count, 1));
-
-  for (let i = 0; i < count; i += 1) {
-    const label = labels[i];
-    const value = values[i];
-    const y = chartY + i * (rowH + 0.18);
-    const ratio = clamp(value / maxValue, 0, 1);
-    const barW = Math.max(0.25, (chartW - 3.35) * ratio);
-
-    slide.addText(label, {
-      x: chartX,
-      y,
-      w: 2.85,
-      h: rowH,
-      fontFace: 'Arial',
-      fontSize: 10,
-      color: theme.text,
-      fit: 'shrink',
-      margin: 0,
-      valign: 'middle',
-    });
-
-    slide.addShape(ShapeType.roundRect, {
-      x: chartX + 3.05,
-      y: y + 0.07,
-      w: chartW - 3.35,
-      h: rowH - 0.14,
-      rectRadius: 0.03,
-      fill: { color: theme.card2 },
-      line: { color: theme.border, transparency: 0 },
-    } as any);
-
-    slide.addShape(ShapeType.roundRect, {
-      x: chartX + 3.05,
-      y: y + 0.07,
-      w: barW,
-      h: rowH - 0.14,
-      rectRadius: 0.03,
-      fill: { color: i % 2 === 0 ? theme.accent : theme.accent2 },
-      line: { color: i % 2 === 0 ? theme.accent : theme.accent2 },
-    } as any);
-
-    slide.addText(`${value}${unit}`, {
-      x: Math.min(chartX + 3.18 + barW, 11.15),
-      y,
-      w: 1.05,
-      h: rowH,
-      fontFace: 'Arial',
-      fontSize: 10,
-      bold: true,
-      color: theme.text,
-      fit: 'shrink',
-      margin: 0,
-      valign: 'middle',
-    });
-  }
-}
-
-function addImageSlide(slide: PptxSlide, theme: PptTheme, item: DefenseSlide) {
-  const image = item.images?.[0];
-
-  if (!image) {
-    addBulletCards(slide, theme, item.bullets.length ? item.bullets : ['Vizuálnu prílohu je možné doplniť manuálne.']);
-    return;
-  }
-
-  slide.addShape(ShapeType.roundRect, {
-    x: 0.85,
-    y: 1.75,
-    w: 11.75,
-    h: 4.75,
-    rectRadius: 0.06,
-    fill: { color: theme.card },
-    line: { color: theme.border, transparency: 0 },
-  } as any);
-
-  try {
-    slide.addImage({
-      ...(image.data ? { data: image.data } : { path: image.path }),
-      x: 1.08,
-      y: 1.98,
-      w: 6.1,
-      h: 4.25,
-      sizing: { type: 'contain', x: 1.08, y: 1.98, w: 6.1, h: 4.25 },
-    } as any);
-  } catch {
-    slide.addText('Obrázok sa nepodarilo vložiť automaticky.', {
-      x: 1.08,
-      y: 3.55,
-      w: 6.1,
-      h: 0.35,
-      fontFace: 'Arial',
-      fontSize: 13,
-      color: theme.muted,
-      align: 'center',
-      margin: 0,
-    });
-  }
-
-  const bullets = normalizeBulletsForSlides(item.bullets).slice(0, 4);
-
-  slide.addText(image.title || 'Vizuálny podklad', {
-    x: 7.45,
-    y: 2.05,
-    w: 4.7,
-    h: 0.32,
-    fontFace: 'Arial',
-    fontSize: 14,
-    bold: true,
-    color: theme.accent2,
-    margin: 0,
-  });
-
-  slide.addText((bullets.length ? bullets : ['Vizuál podporuje vysvetlenie výsledkov alebo metodiky.']).map((bullet) => `• ${bullet}`).join('\n'), {
-    x: 7.45,
-    y: 2.58,
-    w: 4.7,
-    h: 3.2,
-    fontFace: 'Arial',
-    fontSize: 12.4,
-    color: theme.text,
-    fit: 'shrink',
-    margin: 0.03,
-    breakLine: false,
-    paraSpaceAfter: 4,
-  });
-}
-
-function addQuoteSlide(slide: PptxSlide, theme: PptTheme, item: DefenseSlide) {
-  const bullets = normalizeBulletsForSlides(item.bullets);
-  const quoteRaw = bullets[0] || item.visualSuggestion || 'Kľúčové zistenie práce';
-
-  const quote =
-    quoteRaw.length > 260
-      ? `${quoteRaw.slice(0, 257).trim()}…`
-      : quoteRaw;
-
-  slide.addShape(ShapeType.roundRect, {
-    x: 0.9,
-    y: 1.9,
-    w: 11.55,
-    h: 3.15,
-    rectRadius: 0.06,
-    fill: { color: theme.card },
-    line: { color: theme.border, transparency: 0, width: 1 },
-  } as any);
-
-  slide.addShape(ShapeType.rect, {
-    x: 0.9,
-    y: 1.9,
-    w: 0.16,
-    h: 3.15,
-    fill: { color: theme.accent },
-    line: { color: theme.accent },
-  });
-
-  slide.addText(quote, {
-    x: 1.35,
-    y: 2.23,
-    w: 10.45,
-    h: 1.78,
-    fontFace: 'Arial',
-    fontSize: quote.length > 190 ? 18 : quote.length > 120 ? 21 : 25,
-    bold: true,
-    color: theme.title,
-    fit: 'shrink',
-    margin: 0,
-    breakLine: false,
-    valign: 'middle',
-  });
-
-  if (bullets.length > 1) {
-    const otherBullets = bullets
-      .slice(1, 4)
-      .map((bullet) => {
-        const compact = bullet.length > 120 ? `${bullet.slice(0, 117).trim()}…` : bullet;
-        return `• ${compact}`;
-      })
-      .join('\n');
-
-    slide.addText(otherBullets, {
-      x: 1.35,
-      y: 4.22,
-      w: 10.45,
-      h: 0.9,
-      fontFace: 'Arial',
-      fontSize: 11.8,
-      color: theme.muted,
-      fit: 'shrink',
-      margin: 0.01,
-      breakLine: false,
-      paraSpaceAfter: 3,
-    });
-  }
-}
-
-function addVisualSuggestion(slide: PptxSlide, theme: PptTheme, suggestion?: string) {
-  const clean = cleanInlineText(suggestion);
-  if (!clean) return;
-
-  const safeSuggestion =
-    clean.length > 135 ? `${clean.slice(0, 132).trim()}…` : clean;
-
-  slide.addShape(ShapeType.roundRect, {
-    x: 0.85,
-    y: 6.34,
-    w: 11.75,
-    h: 0.32,
-    rectRadius: 0.04,
-    fill: { color: theme.soft },
-    line: { color: theme.border, transparency: 0 },
-  } as any);
-
-  slide.addText(`Vizuál: ${safeSuggestion}`, {
-    x: 1.05,
-    y: 6.41,
-    w: 11.35,
-    h: 0.16,
-    fontFace: 'Arial',
-    fontSize: 7.4,
-    italic: true,
-    color: theme.muted,
-    fit: 'shrink',
-    margin: 0,
-  });
-}
-
-function addCoverSlide(pptxDoc: PptxGen, theme: PptTheme, title: string, defenseType: string) {
+function addCoverSlide(
+  pptxDoc: PptxGen,
+  title: string,
+  defenseType: string,
+) {
   const slide = pptxDoc.addSlide();
-  addBackground(slide, theme);
+
+  addBackground(slide);
 
   slide.addText('ZEDPERA', {
     x: 0.78,
@@ -1427,7 +863,7 @@ function addCoverSlide(pptxDoc: PptxGen, theme: PptTheme, title: string, defense
     fontFace: 'Arial',
     fontSize: 8,
     bold: true,
-    color: theme.headerText,
+    color: THEME.headerText,
     margin: 0,
   });
 
@@ -1439,11 +875,11 @@ function addCoverSlide(pptxDoc: PptxGen, theme: PptTheme, title: string, defense
     fontFace: 'Arial',
     fontSize: 11,
     bold: true,
-    color: theme.accent2,
+    color: THEME.accent2,
     margin: 0,
   });
 
-  slide.addText(safeSlideTitle(title, undefined, undefined), {
+  slide.addText(title, {
     x: 0.8,
     y: 1.95,
     w: 11.85,
@@ -1451,7 +887,7 @@ function addCoverSlide(pptxDoc: PptxGen, theme: PptTheme, title: string, defense
     fontFace: 'Arial',
     fontSize: title.length > 95 ? 28 : 36,
     bold: true,
-    color: theme.title,
+    color: THEME.title,
     fit: 'shrink',
     margin: 0,
     breakLine: false,
@@ -1462,8 +898,8 @@ function addCoverSlide(pptxDoc: PptxGen, theme: PptTheme, title: string, defense
     y: 4.34,
     w: 4.4,
     h: 0.05,
-    fill: { color: theme.accent },
-    line: { color: theme.accent },
+    fill: { color: THEME.accent },
+    line: { color: THEME.accent },
   });
 
   slide.addText('Prezentácia na obhajobu záverečnej práce', {
@@ -1474,30 +910,31 @@ function addCoverSlide(pptxDoc: PptxGen, theme: PptTheme, title: string, defense
     fontFace: 'Arial',
     fontSize: 16,
     bold: true,
-    color: theme.text,
+    color: THEME.text,
     margin: 0,
   });
 
-  slide.addText('Všeobecná svetlá šablóna · vysoký kontrast · čitateľné písmo', {
+  slide.addText('AI spracovanie podľa profilu práce a nahratého dokumentu · 40 minút', {
     x: 0.82,
     y: 6.55,
     w: 11.5,
     h: 0.28,
     fontFace: 'Arial',
     fontSize: 10,
-    color: theme.muted,
+    color: THEME.muted,
     margin: 0,
   });
 }
 
-function addAgendaSlide(pptxDoc: PptxGen, theme: PptTheme, agenda: string[], title: string) {
+function addAgendaSlide(pptxDoc: PptxGen, slides: DefenseSlide[], workTitle: string) {
   const slide = pptxDoc.addSlide();
-  addBackground(slide, theme);
-  addHeader(slide, theme, 'Obsah prezentácie', 'Agenda obhajoby');
 
-  const safeAgenda = agenda.map((item) => safeSlideTitle(item)).slice(0, 10);
-  const left = safeAgenda.slice(0, 5);
-  const right = safeAgenda.slice(5, 10);
+  addBackground(slide);
+  addHeader(slide, 'Obsah prezentácie', 'Agenda obhajoby');
+
+  const agenda = slides.map((item) => item.title).slice(0, 10);
+  const left = agenda.slice(0, 5);
+  const right = agenda.slice(5, 10);
 
   [left, right].forEach((items, columnIndex) => {
     const x = columnIndex === 0 ? 0.9 : 6.85;
@@ -1512,8 +949,12 @@ function addAgendaSlide(pptxDoc: PptxGen, theme: PptTheme, agenda: string[], tit
         w: 0.5,
         h: 0.5,
         rectRadius: 0.04,
-        fill: { color: globalIndex % 2 === 0 ? theme.accent2 : theme.accent },
-        line: { color: globalIndex % 2 === 0 ? theme.accent2 : theme.accent },
+        fill: {
+          color: globalIndex % 2 === 0 ? THEME.accent2 : THEME.accent,
+        },
+        line: {
+          color: globalIndex % 2 === 0 ? THEME.accent2 : THEME.accent,
+        },
       } as any);
 
       slide.addText(String(globalIndex), {
@@ -1537,55 +978,113 @@ function addAgendaSlide(pptxDoc: PptxGen, theme: PptTheme, agenda: string[], tit
         fontFace: 'Arial',
         fontSize: 13.5,
         bold: true,
-        color: theme.text,
+        color: THEME.text,
         fit: 'shrink',
         margin: 0,
       });
     });
   });
 
-  addFooter(slide, theme, 1, title);
+  addFooter(slide, 1, workTitle);
 }
 
-function addContentSlide(pptxDoc: PptxGen, theme: PptTheme, item: DefenseSlide, slideNumber: number, workTitle: string) {
+function addBulletSlide(
+  pptxDoc: PptxGen,
+  slideData: DefenseSlide,
+  slideNumber: number,
+  workTitle: string,
+) {
   const slide = pptxDoc.addSlide();
-  const safeItem: DefenseSlide = {
-    ...item,
-    title: safeSlideTitle(item.title || `Snímka ${slideNumber}`),
-    bullets: normalizeBulletsForSlides(item.bullets).slice(0, MAX_BULLETS_PER_SLIDE),
-  };
 
-  addBackground(slide, theme);
-  addHeader(slide, theme, `Snímka ${slideNumber}`, safeItem.title);
+  addBackground(slide);
+  addHeader(slide, `Snímka ${slideNumber}`, slideData.title);
 
-  if (safeItem.layout === 'table' && safeItem.table) {
-    addTable(slide, theme, safeItem.table);
-  } else if (safeItem.layout === 'chart' && safeItem.chart) {
-    addBarChart(slide, theme, safeItem.chart);
-  } else if (safeItem.layout === 'image') {
-    addImageSlide(slide, theme, safeItem);
-  } else if (safeItem.layout === 'quote' || safeItem.layout === 'section') {
-    addQuoteSlide(slide, theme, safeItem);
-  } else if (safeItem.layout === 'split') {
-    addSplitSlide(slide, theme, safeItem);
-  } else {
-    addBulletCards(
-      slide,
-      theme,
-      safeItem.bullets.length
-        ? safeItem.bullets
-        : ['Obsah snímky je potrebné doplniť podľa finálnej verzie práce.'],
-    );
+  const bullets = slideData.bullets.slice(0, 5);
+  const fontSize =
+    bullets.join(' ').length > 520 ? 13.5 : bullets.length >= 5 ? 14.5 : 16;
+
+  const cardHeight = bullets.length >= 5 ? 0.74 : bullets.length === 4 ? 0.88 : 1.05;
+  const gap = bullets.length >= 5 ? 0.11 : 0.16;
+
+  bullets.forEach((bullet, index) => {
+    const y = 1.86 + index * (cardHeight + gap);
+
+    slide.addShape(ShapeType.roundRect, {
+      x: 0.85,
+      y,
+      w: 11.75,
+      h: cardHeight,
+      rectRadius: 0.06,
+      fill: { color: index % 2 === 0 ? THEME.card : THEME.card2 },
+      line: { color: THEME.border, transparency: 0, width: 1 },
+    } as any);
+
+    slide.addShape(ShapeType.rect, {
+      x: 0.85,
+      y,
+      w: 0.11,
+      h: cardHeight,
+      fill: { color: index % 2 === 0 ? THEME.accent : THEME.accent2 },
+      line: { color: index % 2 === 0 ? THEME.accent : THEME.accent2 },
+    });
+
+    slide.addText(bullet, {
+      x: 1.18,
+      y: y + 0.11,
+      w: 10.92,
+      h: cardHeight - 0.2,
+      fontFace: 'Arial',
+      fontSize,
+      color: THEME.text,
+      fit: 'shrink',
+      valign: 'middle',
+      margin: 0.01,
+      breakLine: false,
+    });
+  });
+
+  if (slideData.visualSuggestion) {
+    const suggestion =
+      slideData.visualSuggestion.length > 135
+        ? `${slideData.visualSuggestion.slice(0, 132).trim()}…`
+        : slideData.visualSuggestion;
+
+    slide.addShape(ShapeType.roundRect, {
+      x: 0.85,
+      y: 6.34,
+      w: 11.75,
+      h: 0.32,
+      rectRadius: 0.04,
+      fill: { color: THEME.soft },
+      line: { color: THEME.border, transparency: 0 },
+    } as any);
+
+    slide.addText(`Vizuál: ${suggestion}`, {
+      x: 1.05,
+      y: 6.41,
+      w: 11.35,
+      h: 0.16,
+      fontFace: 'Arial',
+      fontSize: 7.4,
+      italic: true,
+      color: THEME.muted,
+      fit: 'shrink',
+      margin: 0,
+    });
   }
 
-  addVisualSuggestion(slide, theme, safeItem.visualSuggestion);
-  addSpeakerNotes(slide, safeItem.speakerNotes);
-  addFooter(slide, theme, slideNumber, workTitle);
+  addSpeakerNotes(slide, slideData.speakerNotes);
+  addFooter(slide, slideNumber, workTitle);
 }
 
-function addClosingSlide(pptxDoc: PptxGen, theme: PptTheme, title: string, slideNumber: number) {
+function addClosingSlide(
+  pptxDoc: PptxGen,
+  title: string,
+  slideNumber: number,
+) {
   const slide = pptxDoc.addSlide();
-  addBackground(slide, theme);
+
+  addBackground(slide);
 
   slide.addText('Ďakujem za pozornosť', {
     x: 1.0,
@@ -1595,7 +1094,7 @@ function addClosingSlide(pptxDoc: PptxGen, theme: PptTheme, title: string, slide
     fontFace: 'Arial',
     fontSize: 39,
     bold: true,
-    color: theme.title,
+    color: THEME.title,
     align: 'center',
     margin: 0,
   });
@@ -1608,7 +1107,7 @@ function addClosingSlide(pptxDoc: PptxGen, theme: PptTheme, title: string, slide
     fontFace: 'Arial',
     fontSize: 17,
     bold: true,
-    color: theme.text,
+    color: THEME.text,
     align: 'center',
     margin: 0,
   });
@@ -1618,143 +1117,31 @@ function addClosingSlide(pptxDoc: PptxGen, theme: PptTheme, title: string, slide
     y: 4.15,
     w: 4.2,
     h: 0.05,
-    fill: { color: theme.accent },
-    line: { color: theme.accent },
+    fill: { color: THEME.accent },
+    line: { color: THEME.accent },
   });
 
-  addFooter(slide, theme, slideNumber, title);
+  addFooter(slide, slideNumber, title);
 }
 
-function enrichSlidesWithDetectedVisuals(slides: DefenseSlide[], sourceText: string): DefenseSlide[] {
-  const text = truncate(sourceText);
-  const markdownTables = extractMarkdownTables(text);
-  const looseTables = extractLooseTables(text);
-  const allTables = [...markdownTables, ...looseTables];
-  const extractedChart = extractNumericChart(text);
+async function buildPresentation(work: NormalizedWork): Promise<GeneratedPptxFile> {
+  const shouldAiGenerate = true;
 
-  const hasTable = slides.some((slide) => slide.table || slide.layout === 'table');
-  const hasChart = slides.some((slide) => slide.chart || slide.layout === 'chart');
+  let slides = work.slides;
 
-  const enriched = slides.map((slide) => ({
-    ...slide,
-    title: safeSlideTitle(slide.title),
-    bullets: normalizeBulletsForSlides(slide.bullets),
-  }));
-
-  if (!hasChart && extractedChart && enriched.length > 0) {
-    const targetIndex = enriched.findIndex((slide) => /výsled|analýz|zisten|respond|dát|graf|štat|hypot/i.test(slide.title));
-    const index = targetIndex >= 0 ? targetIndex : Math.min(6, enriched.length - 1);
-
-    enriched[index] = {
-      ...enriched[index],
-      layout: 'chart',
-      chart: extractedChart,
-      visualSuggestion: enriched[index].visualSuggestion || 'Doplniť jednoduchý graf k hlavným číselným výsledkom práce.',
-    };
-  }
-
-  if (!hasTable && allTables.length > 0 && enriched.length > 0) {
-    const targetIndex = enriched.findIndex((slide) => /výsled|tabuľ|analýz|zisten|dát|prehľad|výskum/i.test(slide.title));
-    const index = targetIndex >= 0 ? targetIndex : Math.min(7, enriched.length - 1);
-
-    if (enriched[index].layout !== 'chart') {
-      enriched[index] = {
-        ...enriched[index],
-        layout: 'table',
-        table: allTables[0],
-        visualSuggestion: enriched[index].visualSuggestion || 'Zobraziť kľúčové výsledky formou prehľadnej tabuľky.',
-      };
-    } else if (enriched.length > index + 1) {
-      enriched.splice(index + 1, 0, {
-        title: allTables[0].title || 'Prehľad výsledkov',
-        bullets: ['Tabuľka sumarizuje najdôležitejšie údaje využiteľné pri obhajobe.'],
-        layout: 'table',
-        table: allTables[0],
-        speakerNotes: 'Tabuľku vysvetlite stručne a zdôraznite iba hlavný trend alebo rozdiel.',
-      });
+  if (shouldAiGenerate) {
+    try {
+      slides = await generateSlidesWithAi(work);
+    } catch (error) {
+      console.error('AI_SLIDE_GENERATION_ERROR:', error);
+      slides = work.slides.length ? work.slides : buildFallbackSlides(work);
     }
   }
 
-  return enriched.slice(0, MAX_EXPORTED_SLIDES);
-}
-
-function normalizeSlidesFromBody(rawSlides: unknown, sourceText: string, title: string): DefenseSlide[] {
-  const initialSlides = Array.isArray(rawSlides)
-    ? rawSlides
-        .map((slide: unknown, index: number): DefenseSlide => normalizeSlide(slide, index))
-        .filter((slide: DefenseSlide): boolean => slide.title.length > 0 || slide.bullets.length > 0)
-        .slice(0, 18)
-    : [];
-
-  let slides = initialSlides;
-
-  if (!slides.length && sourceText) {
-    slides = generateSlidesFromSource(sourceText, title);
-  }
+  slides = prepareSlidesFor40Minutes(slides);
 
   if (!slides.length) {
-    slides = generateSlidesFromSource('', title);
-  }
-
-  const enriched = enrichSlidesWithDetectedVisuals(slides, sourceText);
-
-  return expandTextSlides(enriched);
-}
-
-function sourceTextFromBody(body: Record<string, unknown>): string {
-  return truncate(
-    cleanText(
-      body.sourceText ||
-        body.extractedWorkText ||
-        body.attachmentText ||
-        body.text ||
-        body.workText ||
-        body.content ||
-        body.summary ||
-        body.workTitle ||
-        '',
-    ),
-  );
-}
-
-function normalizeSingleInput(body: Record<string, unknown>): NormalizedPptxInput {
-  const title = cleanInlineText(body.title || body.workTitle || 'Obhajoba práce');
-  const defenseType = cleanInlineText(body.defenseType || body.type || 'Obhajoba záverečnej práce');
-  const sourceText = sourceTextFromBody(body);
-  const slides = normalizeSlidesFromBody(body.slides, sourceText, title);
-
-  return { title, defenseType, sourceText, slides };
-}
-
-function normalizeWorks(body: DefensePptxRequestBody): NormalizedPptxInput[] {
-  const rawWorks = Array.isArray(body.works)
-    ? body.works
-    : Array.isArray(body.selectedWorks)
-      ? body.selectedWorks
-      : Array.isArray(body.projects)
-        ? body.projects
-        : [];
-
-  if (!rawWorks.length) {
-    return [normalizeSingleInput(body as Record<string, unknown>)];
-  }
-
-  return rawWorks
-    .map((work, index): NormalizedPptxInput => {
-      const raw = work && typeof work === 'object' ? (work as Record<string, unknown>) : {};
-      const title = cleanInlineText(raw.title || raw.workTitle || raw.topic || raw.name || `Práca ${index + 1}`);
-      const defenseType = cleanInlineText(raw.defenseType || raw.type || body.defenseType || 'Obhajoba záverečnej práce');
-      const sourceText = sourceTextFromBody({ ...raw, fallbackText: body.text });
-      const slides = normalizeSlidesFromBody(raw.slides, sourceText, title);
-
-      return { title, defenseType, sourceText, slides };
-    })
-    .filter((item) => item.title || item.slides.length);
-}
-
-async function buildPresentation(input: NormalizedPptxInput, theme: PptTheme): Promise<GeneratedPptxFile> {
-  if (!input.slides.length) {
-    throw new Error(`Chýbajú snímky na export pre prácu: ${input.title}`);
+    slides = buildFallbackSlides(work);
   }
 
   const pptxDoc = new pptxgen();
@@ -1762,8 +1149,8 @@ async function buildPresentation(input: NormalizedPptxInput, theme: PptTheme): P
   pptxDoc.layout = 'LAYOUT_WIDE';
   pptxDoc.author = 'ZEDPERA';
   pptxDoc.company = 'ZEDPERA';
-  pptxDoc.subject = input.defenseType;
-  pptxDoc.title = input.title;
+  pptxDoc.subject = work.defenseType;
+  pptxDoc.title = work.title;
 
   (pptxDoc as any).lang = 'sk-SK';
 
@@ -1773,18 +1160,18 @@ async function buildPresentation(input: NormalizedPptxInput, theme: PptTheme): P
     lang: 'sk-SK',
   } as any;
 
-  const finalSlides = expandTextSlides(input.slides).slice(0, MAX_EXPORTED_SLIDES);
+  addCoverSlide(pptxDoc, work.title, work.defenseType);
+  addAgendaSlide(pptxDoc, slides, work.title);
 
-  addCoverSlide(pptxDoc, theme, input.title, input.defenseType);
-  addAgendaSlide(pptxDoc, theme, buildAgenda(finalSlides), input.title);
-
-  finalSlides.forEach((item: DefenseSlide, index: number) => {
-    addContentSlide(pptxDoc, theme, item, index + 2, input.title);
+  slides.slice(0, MAX_RENDERED_SLIDES).forEach((slide, index) => {
+    addBulletSlide(pptxDoc, slide, index + 2, work.title);
   });
 
-  addClosingSlide(pptxDoc, theme, input.title, finalSlides.length + 2);
+  addClosingSlide(pptxDoc, work.title, slides.length + 2);
 
-  const output = await (pptxDoc as any).write({ outputType: 'nodebuffer' });
+  const output = await (pptxDoc as any).write({
+    outputType: 'nodebuffer',
+  });
 
   const buffer = Buffer.isBuffer(output)
     ? output
@@ -1795,29 +1182,27 @@ async function buildPresentation(input: NormalizedPptxInput, theme: PptTheme): P
         : Buffer.from(String(output || ''), 'binary');
 
   if (!buffer.length) {
-    throw new Error(`PPTX export vrátil prázdny súbor pre prácu: ${input.title}`);
+    throw new Error(`PPTX export vrátil prázdny súbor pre prácu: ${work.title}`);
   }
 
   return {
-    fileName: `${safeFileName(input.title)}.pptx`,
-    title: input.title,
+    fileName: `${safeFileName(work.title)}.pptx`,
+    title: work.title,
     buffer,
-    slidesCount: finalSlides.length + 3,
+    slidesCount: slides.length + 3,
   };
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as DefensePptxRequestBody;
-    const themeName = asThemeName(body.theme);
-    const theme = THEMES[themeName];
     const works = normalizeWorks(body);
 
     if (!works.length) {
       return NextResponse.json(
         {
           ok: false,
-          error: 'Chýbajú vybrané práce alebo snímky na export.',
+          error: 'Chýba práca, profil alebo text dokumentu na export.',
         },
         { status: 400 },
       );
@@ -1826,7 +1211,7 @@ export async function POST(req: NextRequest) {
     const files: GeneratedPptxFile[] = [];
 
     for (const work of works) {
-      files.push(await buildPresentation(work, theme));
+      files.push(await buildPresentation(work));
     }
 
     if (files.length === 1) {
@@ -1835,7 +1220,8 @@ export async function POST(req: NextRequest) {
       return new NextResponse(new Uint8Array(file.buffer), {
         status: 200,
         headers: {
-          'Content-Type': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          'Content-Type':
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation',
           'Content-Disposition': `attachment; filename="${file.fileName}"`,
           'Cache-Control': 'no-store, max-age=0',
         },
@@ -1850,7 +1236,8 @@ export async function POST(req: NextRequest) {
         fileName: file.fileName,
         title: file.title,
         slidesCount: file.slidesCount,
-        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        mimeType:
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
         base64: file.buffer.toString('base64'),
       })),
     });
@@ -1860,7 +1247,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : 'Nepodarilo sa exportovať PowerPoint.',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Nepodarilo sa exportovať PowerPoint.',
       },
       { status: 500 },
     );

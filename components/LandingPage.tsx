@@ -190,6 +190,8 @@ type Translation = {
 
 const LANGUAGE_STORAGE_KEY = 'zedpera_language';
 
+const MODERN_WOMAN_IMAGE_URL = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=2400&q=100&dpr=2';
+
 const languages: Array<{
   code: AppLanguage;
   label: string;
@@ -235,7 +237,7 @@ const translations: Record<AppLanguage, Translation> = {
       title3: 'od zadania až po obhajobu',
       subtitle:
         'Zedpera spája AI písanie, odbornú spätnú väzbu, kontrolu kvality, zdroje, citácie, praktickú časť aj prípravu na obhajobu v jednom systéme.',
-      primary: 'Začať zdarma',
+      primary: 'Začať',
       secondary: 'Pozrieť ukážku',
       benefits: [
         'AI vedúci 24/7',
@@ -497,7 +499,7 @@ const translations: Record<AppLanguage, Translation> = {
     },
     common: {
       login: 'Přihlásit se',
-      startFree: 'Začít zdarma',
+      startFree: 'Začít',
       language: 'Jazyk stránky',
       currentLanguage: 'Aktuálně zvolený jazyk',
       switchLanguage: 'Přepnout jazyk stránky',
@@ -517,7 +519,7 @@ const translations: Record<AppLanguage, Translation> = {
       title3: 'od zadání až po obhajobu',
       subtitle:
         'Zedpera spojuje AI psaní, odbornou zpětnou vazbu, kontrolu kvality, zdroje, citace, praktickou část i přípravu na obhajobu v jednom systému.',
-      primary: 'Začít zdarma',
+      primary: 'Začít',
       secondary: 'Podívat se na ukázku',
       benefits: [
         'AI vedoucí 24/7',
@@ -779,7 +781,7 @@ const translations: Record<AppLanguage, Translation> = {
     },
     common: {
       login: 'Log in',
-      startFree: 'Start free',
+      startFree: 'Start',
       language: 'Page language',
       currentLanguage: 'Current language',
       switchLanguage: 'Switch page language',
@@ -799,7 +801,7 @@ const translations: Record<AppLanguage, Translation> = {
       title3: 'from assignment to defense',
       subtitle:
         'Zedpera combines AI writing, expert feedback, quality checks, sources, citations, practical work and defense preparation in one system.',
-      primary: 'Start free',
+      primary: 'Start',
       secondary: 'See demo',
       benefits: [
         'AI supervisor 24/7',
@@ -1061,7 +1063,7 @@ const translations: Record<AppLanguage, Translation> = {
     },
     common: {
       login: 'Einloggen',
-      startFree: 'Kostenlos starten',
+      startFree: 'Starten',
       language: 'Seitensprache',
       currentLanguage: 'Aktuelle Sprache',
       switchLanguage: 'Seitensprache wechseln',
@@ -1081,7 +1083,7 @@ const translations: Record<AppLanguage, Translation> = {
       title3: 'von der Aufgabenstellung bis zur Verteidigung',
       subtitle:
         'Zedpera verbindet KI-Schreiben, fachliches Feedback, Qualitätskontrolle, Quellen, Zitationen, praktische Teile und Verteidigungsvorbereitung in einem System.',
-      primary: 'Kostenlos starten',
+      primary: 'Starten',
       secondary: 'Demo ansehen',
       benefits: [
         'KI-Betreuer 24/7',
@@ -1343,7 +1345,7 @@ const translations: Record<AppLanguage, Translation> = {
     },
     common: {
       login: 'Zaloguj się',
-      startFree: 'Zacznij za darmo',
+      startFree: 'Zacznij',
       language: 'Język strony',
       currentLanguage: 'Aktualnie wybrany język',
       switchLanguage: 'Zmień język strony',
@@ -1363,7 +1365,7 @@ const translations: Record<AppLanguage, Translation> = {
       title3: 'od tematu aż po obronę',
       subtitle:
         'Zedpera łączy pisanie AI, ekspercką informację zwrotną, kontrolę jakości, źródła, cytowania, część praktyczną i przygotowanie do obrony w jednym systemie.',
-      primary: 'Zacznij za darmo',
+      primary: 'Zacznij',
       secondary: 'Zobacz demo',
       benefits: [
         'Opiekun AI 24/7',
@@ -1625,7 +1627,7 @@ const translations: Record<AppLanguage, Translation> = {
     },
     common: {
       login: 'Bejelentkezés',
-      startFree: 'Ingyenes kezdés',
+      startFree: 'Kezdés',
       language: 'Oldal nyelve',
       currentLanguage: 'Aktuális nyelv',
       switchLanguage: 'Oldal nyelvének váltása',
@@ -1645,7 +1647,7 @@ const translations: Record<AppLanguage, Translation> = {
       title3: 'a feladattól a védésig',
       subtitle:
         'A Zedpera egy rendszerben egyesíti az AI írást, szakmai visszajelzést, minőségellenőrzést, forrásokat, hivatkozásokat, gyakorlati részt és védésre készülést.',
-      primary: 'Ingyenes kezdés',
+      primary: 'Kezdés',
       secondary: 'Demó megtekintése',
       benefits: [
         'AI témavezető 24/7',
@@ -2308,6 +2310,84 @@ function FounderPortrait({ t }: { t: Translation }) {
   );
 }
 
+
+function ModernWomanHeroCard() {
+  return (
+    <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.07] p-4 shadow-2xl shadow-violet-950/40 backdrop-blur-xl">
+      <div className="absolute inset-0 bg-gradient-to-br from-violet-500/20 via-fuchsia-500/10 to-indigo-500/20" />
+
+      <div className="relative">
+        <div className="relative h-[420px] overflow-hidden rounded-[1.5rem] bg-slate-950 sm:h-[500px] xl:h-[560px]">
+          <Image
+            src={MODERN_WOMAN_IMAGE_URL}
+            alt="Moderná akademická mentorka Zedpera"
+            fill
+            priority
+            quality={100}
+            sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 42vw"
+            className="select-none object-cover object-[50%_34%]"
+          />
+
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-950/70 via-slate-950/25 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/88 via-slate-950/18 to-black/12" />
+
+          <div className="absolute bottom-0 left-0 right-0 p-5 sm:p-6">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-black/55 px-4 py-2 text-xs font-black uppercase tracking-[0.2em] text-white shadow-xl shadow-black/30 backdrop-blur-xl">
+              <Sparkles size={15} className="text-violet-200" />
+              AI akademická podpora
+            </div>
+
+            <h3 className="mt-4 max-w-[520px] text-2xl font-black leading-tight text-white drop-shadow-2xl sm:text-3xl">
+              Moderný akademický asistent pre študentov
+            </h3>
+
+            <p className="mt-3 max-w-md text-sm font-bold leading-6 text-slate-100 drop-shadow-xl">
+              Zedpera pomáha s písaním, zdrojmi, citáciami, kontrolou kvality a prípravou na obhajobu.
+            </p>
+          </div>
+        </div>
+
+        <div className="absolute -right-3 top-8 rounded-2xl border border-white/20 bg-white/95 p-4 text-slate-950 shadow-2xl shadow-black/30 backdrop-blur sm:-right-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white">
+              <Crown size={20} />
+            </div>
+
+            <div>
+              <div className="text-xs font-black uppercase tracking-[0.18em] text-slate-600">
+                Mentoring
+              </div>
+
+              <div className="text-sm font-black text-slate-950">
+                20+ rokov skúseností
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="absolute -left-3 bottom-8 rounded-2xl border border-violet-300/30 bg-black/65 p-4 text-white shadow-2xl shadow-violet-950/40 backdrop-blur-xl sm:-left-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-200">
+              <CheckCircle2 size={19} />
+            </div>
+
+            <div>
+              <div className="text-xs font-black uppercase tracking-[0.18em] text-violet-200">
+                Podpora 24/7
+              </div>
+
+              <div className="text-sm font-black text-white">
+                AI vedúci práce
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 export default function LandingPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
@@ -2500,6 +2580,7 @@ export default function LandingPage() {
     { href: '#pricing', label: t.nav.pricing, icon: Crown },
     { href: '#reviews', label: t.nav.reviews, icon: Star },
     { href: '#faq', label: t.nav.faq, icon: HelpCircle },
+    { href: '/blog', label: t.footer.links.blog, icon: Newspaper },
   ];
 
   const footerLinks = [
@@ -2637,8 +2718,10 @@ export default function LandingPage() {
                     key={item.href}
                     href={item.href}
                     onClick={(event) => {
-                      event.preventDefault();
-                      scrollToHash(item.href);
+                      if (item.href.startsWith('#')) {
+                        event.preventDefault();
+                        scrollToHash(item.href);
+                      }
                     }}
                     className="inline-flex items-center gap-2 rounded-md px-2 py-2 font-black text-white transition hover:text-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-500/70"
                   >
@@ -2695,7 +2778,14 @@ export default function LandingPage() {
                     <a
                       key={item.href}
                       href={item.href}
-                      onClick={() => setMobileMenuOpen(false)}
+                      onClick={(event) => {
+                        setMobileMenuOpen(false);
+
+                        if (item.href.startsWith('#')) {
+                          event.preventDefault();
+                          scrollToHash(item.href);
+                        }
+                      }}
                       className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-black text-white hover:bg-white/5"
                     >
                       <Icon size={17} className="text-violet-300" />
@@ -2730,7 +2820,7 @@ export default function LandingPage() {
         </header>
 
         <section className="relative z-10 mx-auto max-w-[1860px] px-5 pb-8 pt-8 lg:px-10">
-          <div className="grid min-h-[560px] items-center gap-10 xl:grid-cols-[0.41fr_0.59fr]">
+          <div className="grid min-h-[560px] items-center gap-10 xl:grid-cols-[0.36fr_0.64fr]">
             <div className="relative z-20 max-w-[720px] pt-1">
               <div className="mb-8 inline-flex items-center rounded-full border border-violet-500/35 bg-violet-500/10 px-5 py-2 text-[13px] font-black uppercase tracking-[0.22em] text-violet-100">
                 {t.hero.badge}
@@ -2788,7 +2878,10 @@ export default function LandingPage() {
               </div>
             </div>
 
-            <AiLeaderPreview t={t} />
+            <div className="grid gap-6 xl:grid-cols-[0.48fr_0.52fr]">
+              <ModernWomanHeroCard />
+              <AiLeaderPreview t={t} />
+            </div>
           </div>
 
           <div className="mt-16 grid overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035] shadow-2xl shadow-black/30 sm:grid-cols-4">

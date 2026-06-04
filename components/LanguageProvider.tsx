@@ -24,6 +24,13 @@ type LanguageContextValue = {
   appLanguages: typeof languages;
   isTranslatingInterface: boolean;
   translationProgress: number;
+
+  /**
+   * Zmení sa pri každom prepnutí jazyka.
+   * Použi v dashboarde/logine ako key, ak sa niektoré časti neprekreslia:
+   * key={`${language}-${languageVersion}`}
+   */
+  languageVersion: number;
 };
 
 type StoredProfile = {
@@ -42,12 +49,14 @@ const ACTIVE_PROFILE_KEY = 'active_profile';
 const LEGACY_PROFILE_KEY = 'profile';
 const PROFILES_FULL_KEY = 'profiles_full';
 
-/**
- * Kľúč, ktorý hovorí, že používateľ jazyk vybral vedome.
- * Vďaka tomu sa jazyk aplikácie nebude náhodne preberať z prehliadača,
- * starého profilu alebo automatického prekladača.
- */
 const LANGUAGE_USER_SELECTED_KEY = 'zedpera_language_user_selected';
+
+const LANGUAGE_EVENTS = [
+  'zedpera-language-change',
+  'zedpera-language-updated',
+  'zedpera-interface-language-change',
+  'zedpera-force-language-refresh',
+];
 
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
@@ -247,9 +256,16 @@ function applyLanguageToDocument(nextLanguage: AppLanguage) {
   document.documentElement.setAttribute('data-language', nextLanguage);
   document.documentElement.setAttribute('data-system-language', nextLanguage);
   document.documentElement.setAttribute('data-work-language', nextLanguage);
-
   document.documentElement.setAttribute('translate', 'no');
   document.documentElement.classList.add('notranslate');
+
+  if (document.body) {
+    document.body.setAttribute('data-language', nextLanguage);
+    document.body.setAttribute('data-system-language', nextLanguage);
+    document.body.setAttribute('data-work-language', nextLanguage);
+    document.body.setAttribute('translate', 'no');
+    document.body.classList.add('notranslate');
+  }
 
   ensureNoTranslateMetaTag();
 }
@@ -302,6 +318,25 @@ function dispatchLanguageChange(nextLanguage: AppLanguage) {
       },
     }),
   );
+
+  window.dispatchEvent(
+    new CustomEvent<{ language: AppLanguage }>(
+      'zedpera-interface-language-change',
+      {
+        detail: {
+          language: nextLanguage,
+        },
+      },
+    ),
+  );
+
+  window.dispatchEvent(
+    new CustomEvent<{ language: AppLanguage }>('zedpera-force-language-refresh', {
+      detail: {
+        language: nextLanguage,
+      },
+    }),
+  );
 }
 
 function readLanguageFromCustomEvent(event: Event): AppLanguage | null {
@@ -321,6 +356,7 @@ function readLanguageFromCustomEvent(event: Event): AppLanguage | null {
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<AppLanguage>('sk');
   const [isReady, setIsReady] = useState(false);
+  const [languageVersion, setLanguageVersion] = useState(0);
 
   const applyLanguage = useCallback(
     (
@@ -330,6 +366,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
         markAsUserSelected?: boolean;
         updateProfile?: boolean;
         updateWorkLanguage?: boolean;
+        forceVersionUpdate?: boolean;
       },
     ) => {
       if (!isValidLanguage(nextLanguage)) return;
@@ -338,8 +375,13 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       const markAsUserSelected = options?.markAsUserSelected ?? false;
       const updateProfile = options?.updateProfile ?? true;
       const updateWorkLanguage = options?.updateWorkLanguage ?? false;
+      const forceVersionUpdate = options?.forceVersionUpdate ?? true;
 
       setLanguageState(nextLanguage);
+
+      if (forceVersionUpdate) {
+        setLanguageVersion((version) => version + 1);
+      }
 
       persistLanguage(nextLanguage, {
         markAsUserSelected,
@@ -358,6 +400,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     const initialLanguage = getInitialLanguage();
 
     setLanguageState(initialLanguage);
+    setLanguageVersion((version) => version + 1);
 
     persistLanguage(initialLanguage, {
       markAsUserSelected: false,
@@ -366,7 +409,6 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     });
 
     setIsReady(true);
-
     dispatchLanguageChange(initialLanguage);
   }, []);
 
@@ -385,10 +427,11 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       if (!nextLanguage) return;
 
       applyLanguage(nextLanguage, {
-        shouldDispatch: false,
+        shouldDispatch: true,
         markAsUserSelected: false,
         updateProfile: false,
         updateWorkLanguage: false,
+        forceVersionUpdate: true,
       });
     };
 
@@ -402,53 +445,36 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
         markAsUserSelected: true,
         updateProfile: true,
         updateWorkLanguage: true,
+        forceVersionUpdate: true,
       });
     };
 
     const handleProfileChange = () => {
       const storedLanguage = getStoredLanguage();
 
-      if (!storedLanguage) {
-        applyLanguage('sk', {
-          shouldDispatch: true,
-          markAsUserSelected: false,
-          updateProfile: false,
-          updateWorkLanguage: false,
-        });
-
-        return;
-      }
-
-      applyLanguage(storedLanguage, {
+      applyLanguage(storedLanguage || 'sk', {
         shouldDispatch: true,
         markAsUserSelected: false,
         updateProfile: false,
         updateWorkLanguage: false,
+        forceVersionUpdate: true,
       });
     };
 
     window.addEventListener('storage', handleStorageChange);
-    window.addEventListener(
-      'zedpera-language-change',
-      handleCustomLanguageChange,
-    );
-    window.addEventListener(
-      'zedpera-language-updated',
-      handleCustomLanguageChange,
-    );
     window.addEventListener('zedpera-profile-change', handleProfileChange);
+
+    LANGUAGE_EVENTS.forEach((eventName) => {
+      window.addEventListener(eventName, handleCustomLanguageChange);
+    });
 
     return () => {
       window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener(
-        'zedpera-language-change',
-        handleCustomLanguageChange,
-      );
-      window.removeEventListener(
-        'zedpera-language-updated',
-        handleCustomLanguageChange,
-      );
       window.removeEventListener('zedpera-profile-change', handleProfileChange);
+
+      LANGUAGE_EVENTS.forEach((eventName) => {
+        window.removeEventListener(eventName, handleCustomLanguageChange);
+      });
     };
   }, [applyLanguage]);
 
@@ -461,6 +487,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
         markAsUserSelected: true,
         updateProfile: true,
         updateWorkLanguage: true,
+        forceVersionUpdate: true,
       });
     },
     [applyLanguage],
@@ -474,8 +501,9 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       appLanguages: languages,
       isTranslatingInterface: false,
       translationProgress: 100,
+      languageVersion,
     };
-  }, [language, setLanguage]);
+  }, [language, setLanguage, languageVersion]);
 
   return (
     <LanguageContext.Provider value={value}>

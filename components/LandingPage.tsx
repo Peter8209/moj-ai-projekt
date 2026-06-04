@@ -2322,81 +2322,55 @@ function FounderPortrait({ t }: { t: Translation }) {
 
 function ModernWomanHeroCard() {
   return (
-    <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.07] p-4 shadow-2xl shadow-violet-950/40 backdrop-blur-xl">
+    <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.07] p-6 shadow-2xl shadow-violet-950/40 backdrop-blur-xl">
       <div className="absolute inset-0 bg-gradient-to-br from-violet-500/20 via-fuchsia-500/10 to-indigo-500/20" />
 
-      <div className="relative">
-        <div className="relative h-[420px] overflow-hidden rounded-[1.5rem] bg-slate-950 sm:h-[500px] xl:h-[560px]">
-          <Image
-            src={MODERN_WOMAN_IMAGE_URL}
-            alt="Moderná akademická mentorka Zedpera"
-            fill
-            priority
-            quality={100}
-            sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 42vw"
-            className="select-none object-cover object-[50%_34%]"
-          />
-
-          <div className="absolute inset-0 bg-gradient-to-r from-slate-950/70 via-slate-950/25 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/88 via-slate-950/18 to-black/12" />
-
-          <div className="absolute bottom-0 left-0 right-0 p-5 sm:p-6">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-black/55 px-4 py-2 text-xs font-black uppercase tracking-[0.2em] text-white shadow-xl shadow-black/30 backdrop-blur-xl">
-              <Sparkles size={15} className="text-violet-200" />
-              AI akademická podpora
-            </div>
-
-            <h3 className="mt-4 max-w-[520px] text-2xl font-black leading-tight text-white drop-shadow-2xl sm:text-3xl">
-              Moderný akademický asistent pre študentov
-            </h3>
-
-            <p className="mt-3 max-w-md text-sm font-bold leading-6 text-slate-100 drop-shadow-xl">
-              Zedpera pomáha s písaním, zdrojmi, citáciami, kontrolou kvality a prípravou na obhajobu.
-            </p>
-          </div>
+      <div className="relative rounded-[1.7rem] border border-white/10 bg-[#0b1020]/95 p-6 shadow-2xl shadow-black/40 sm:p-8">
+        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-violet-400/35 bg-violet-600/20 px-4 py-2 text-xs font-black uppercase tracking-[0.22em] text-violet-100">
+          <Sparkles size={15} className="text-violet-200" />
+          Zakladateľka
         </div>
 
-        <div className="absolute -right-3 top-8 rounded-2xl border border-white/20 bg-white/95 p-4 text-slate-950 shadow-2xl shadow-black/30 backdrop-blur sm:-right-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white">
-              <Crown size={20} />
+        <h3 className="text-3xl font-black leading-tight text-white sm:text-4xl">
+          Martina
+        </h3>
+
+        <p className="mt-3 text-base font-black leading-7 text-violet-100 sm:text-lg">
+          20 rokov skúseností so študentmi
+        </p>
+
+        <p className="mt-5 text-sm font-bold leading-7 text-slate-200 sm:text-base">
+          Martina dlhodobo pomáha študentom so štruktúrou práce, odbornými
+          zdrojmi, citáciami, konzultáciami, kontrolou textu a prípravou na
+          odovzdanie alebo obhajobu.
+        </p>
+
+        <div className="mt-7 grid gap-4 sm:grid-cols-2">
+          <div className="rounded-2xl border border-white/10 bg-black/35 p-5">
+            <div className="text-3xl font-black text-white">20+</div>
+            <div className="mt-1 text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+              rokov skúseností
             </div>
+          </div>
 
-            <div>
-              <div className="text-xs font-black uppercase tracking-[0.18em] text-slate-600">
-                Mentoring
-              </div>
-
-              <div className="text-sm font-black text-slate-950">
-                20+ rokov skúseností
-              </div>
+          <div className="rounded-2xl border border-white/10 bg-black/35 p-5">
+            <div className="text-3xl font-black text-white">1000+</div>
+            <div className="mt-1 text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+              študentov
             </div>
           </div>
         </div>
 
-        <div className="absolute -left-3 bottom-8 rounded-2xl border border-violet-300/30 bg-black/65 p-4 text-white shadow-2xl shadow-violet-950/40 backdrop-blur-xl sm:-left-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-200">
-              <CheckCircle2 size={19} />
-            </div>
-
-            <div>
-              <div className="text-xs font-black uppercase tracking-[0.18em] text-violet-200">
-                Podpora 24/7
-              </div>
-
-              <div className="text-sm font-black text-white">
-                AI vedúci práce
-              </div>
-            </div>
-          </div>
+        <div className="mt-7 rounded-[1.4rem] border border-violet-400/25 bg-violet-600/15 p-5">
+          <p className="text-sm font-bold leading-7 text-slate-100">
+            Skúsenosti z praxe sú spojené s AI technológiou, aby študent získal
+            odbornú podporu pri písaní práce od zadania až po obhajobu.
+          </p>
         </div>
       </div>
     </div>
   );
 }
-
-
 export default function LandingPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);

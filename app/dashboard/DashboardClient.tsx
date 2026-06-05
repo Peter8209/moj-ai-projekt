@@ -3527,17 +3527,17 @@ const active = activeModule === item.key;
     type="button"
     onClick={runModule}
     disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl border border-violet-300 bg-violet-700 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/40 ring-2 ring-violet-400/40 transition hover:bg-violet-600 hover:ring-violet-300/70 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-60 disabled:shadow-none disabled:ring-0"
   >
     {isLoading ? (
       <>
         <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
+        Generujem obhajobu...
       </>
     ) : (
       <>
-        <Send className="h-4 w-4" />
-        Vytvoriť prezentáciu k obhajobe
+        <Presentation className="h-4 w-4" />
+        Vygenerovať sprievodný text prezentácie
       </>
     )}
   </button>
@@ -3735,8 +3735,13 @@ const active = activeModule === item.key;
     <button
   type="button"
   onClick={downloadPpt}
-  disabled={isLoading}
-  className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-900 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+  disabled={
+    !stripModuleExtraSections(
+      canvasText || result,
+      activeModule,
+    ).trim()
+  }
+  className="inline-flex items-center gap-2 rounded-2xl border border-violet-400 bg-violet-700 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-900/40 ring-2 ring-violet-400/40 transition hover:bg-violet-600 hover:ring-violet-300/70 disabled:cursor-not-allowed disabled:border-slate-700 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-60 disabled:shadow-none disabled:ring-0"
 >
   <Presentation className="h-4 w-4" />
   Stiahnuť PPTX

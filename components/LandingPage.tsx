@@ -18,7 +18,6 @@ import {
   Loader2,
   Menu,
   MessageCircle,
-  Newspaper,
   PenTool,
   Send,
   ShieldCheck,
@@ -276,7 +275,7 @@ const translations: Record<AppLanguage, Translation> = {
       quality: 'Skóre kvality práce',
       ask: 'Opýtať sa AI vedúceho...',
       metrics: [
-        ['92%', 'Originalita'],
+        ['92%', 'Kvalita zdrojov'],
         ['89/100', 'Kvalita textu'],
         ['85%', 'Pripravenosť na obhajobu'],
       ],
@@ -294,15 +293,15 @@ const translations: Record<AppLanguage, Translation> = {
         },
         {
           title: 'AI písanie',
-          text: 'Generuje kapitoly, osnovy, úvody, závery a odborný text.',
+          text: 'Napíše kapitolu, pripraví osnovu, úvod, záver a akýkoľvek odborný text na základe požiadaviek.',
         },
         {
           title: 'Zdroje a citácie',
           text: 'Pomoc pri rešerši, citáciách a zozname literatúry.',
         },
         {
-          title: 'Originalita',
-          text: 'Orientačná kontrola zhody a rizikových pasáží.',
+          title: 'Analýza dát',
+          text: 'Príprava praktickej časti vrátane štatistík.',
         },
         {
           title: 'Obhajoba',
@@ -333,7 +332,7 @@ const translations: Record<AppLanguage, Translation> = {
         'Analyzuje prácu a upozorní na problémové časti.',
         'Spracúva kapitoly, praktickú časť aj výpočty.',
         'Dokáže pripraviť otázky, odpovede a obhajobu.',
-        'Overí zhodu a rizikové časti textu.',
+        'Nahradí vedúceho práce a je k dispozícii 24/7.',
         'Pomôže s obhajobou na základe posudkov.',
       ],
     },
@@ -362,14 +361,14 @@ const translations: Record<AppLanguage, Translation> = {
       title: '20 rokov skúseností',
       highlighted: 'v jednom systéme',
       p1:
-        'Za Zedperou stojí skúsený tím, ktorý už viac než 20 rokov pomáha študentom pri tvorbe akademických prác.',
+        'Za Zedperou stojí skúsený tím, ktorý už viac než 20 rokov pomáha pri tvorbe akademických prác.',
       p2:
-        'Naše skúsenosti zo skutočnej praxe sme spojili s umelou inteligenciou, aby sme vám priniesli komplexnú podporu počas celého procesu písania.',
-      founderBadge: 'Zakladateľka',
+        'Skúsenosti zo skutočnej praxe sme spojili s umelou inteligenciou, aby sme priniesli komplexnú podporu počas celého procesu písania.',
+      founderBadge: '',
       founderName: 'Martina',
-      founderTitle: '20 rokov skúseností so študentmi',
+      founderTitle: '',
       founderText:
-        'Martina dlhodobo pomáha študentom s akademickými prácami, konzultáciami, štruktúrou textu, zdrojmi a prípravou na odovzdanie. Tieto skúsenosti sú zapracované do Zedpery.',
+        'Zedpera nevznikla ako odpoveď na trend, ale ako reakcia na realitu, stres, časový tlak a pocit, že akademická práca je často skôr boj so systémom než proces učenia.',
       experience: '20+ rokov',
       students: '1000+ študentov',
     },
@@ -381,7 +380,7 @@ const translations: Record<AppLanguage, Translation> = {
           name: 'Študentka diplomovej práce',
         },
         {
-          text: 'Zdroje som našiel priamo v systéme a práca bola hotová za pár dní. Originalita bola veľmi nízka. Super.',
+          text: 'Zdroje som našiel priamo v systéme a práca bola hotová za pár dní. Veľmi mi pomohla praktická časť aj citácie.',
           name: 'Študent bakalárskej práce',
         },
         {
@@ -438,7 +437,7 @@ const translations: Record<AppLanguage, Translation> = {
       ],
     },
     faq: {
-      title: 'Najčastejšie otázky',
+      title: 'Často kladené otázky',
       items: [
         {
           question: 'Je používanie Zedpery legálne?',
@@ -446,9 +445,9 @@ const translations: Record<AppLanguage, Translation> = {
             'Áno, používanie Zedpery je legálne. Systém slúži ako akademický asistent, ktorý pomáha s návrhom, štruktúrou, zdrojmi, kontrolou kvality a prípravou na obhajobu.',
         },
         {
-          question: 'Ako funguje overenie zhody?',
+          question: 'Zvládne ZEDPERA každý odbor?',
           answer:
-            'Zedpera poskytuje orientačnú kontrolu originality a upozorní na časti, ktoré môžu vyžadovať úpravu, parafrázu alebo doplnenie citácie.',
+            'Áno. ZEDPERA dokáže pracovať s akýmikoľvek materiálmi. Ak si chcete zjednodušiť prácu, môžete si stiahnuť zdroje z našej vedeckej databázy, ktorej súčasťou sú tisícky článkov, kníh, vedeckých publikácií a najnovších výskumov, alebo nahrať vlastné poznámky, súbory prípadne požiadavky školiteľa.',
         },
         {
           question: 'Môžem službu použiť na viacero prác?',
@@ -466,9 +465,9 @@ const translations: Record<AppLanguage, Translation> = {
             'Systém podporuje viacero jazykov a umožňuje prispôsobiť štýl, odbornosť a výstup podľa požiadaviek práce.',
         },
         {
-          question: 'Je Zedpera plagiátorstvo?',
+          question: 'Čo je AI Vedúci práce a AI kritik?',
           answer:
-            'Nie. Zedpera je podporný nástroj. Výstup je potrebné skontrolovať, upraviť podľa vlastného zadania a používať v súlade s pravidlami školy.',
+            'AI vedúci práce je školiteľ, ktorý vám pomáha pri písaní akademickej práce od prvotných návrhov až po finálnu verziu. AI kritik dokáže identifikovať chyby, upozorniť na nedostatky v texte a zároveň navrhnúť ich konkrétne opravy. Slúžia ako podpora počas celého procesu písania a pomáhajú zlepšiť kvalitu vašej práce, aby bola prehľadná, logická a správne štylisticky spracovaná. Zároveň ich môžete využiť v prípade, že školiteľ s Vami nekomunikuje a chýba Vám spätná väzba.',
         },
       ],
     },
@@ -558,7 +557,7 @@ const translations: Record<AppLanguage, Translation> = {
       quality: 'Skóre kvality práce',
       ask: 'Zeptat se AI vedoucího...',
       metrics: [
-        ['92%', 'Originalita'],
+        ['92%', 'Kvalita zdrojov'],
         ['89/100', 'Kvalita textu'],
         ['85%', 'Připravenost k obhajobě'],
       ],
@@ -576,15 +575,15 @@ const translations: Record<AppLanguage, Translation> = {
         },
         {
           title: 'AI psaní',
-          text: 'Generuje kapitoly, osnovy, úvody, závěry a odborný text.',
+          text: 'Napíše kapitolu, připraví osnovu, úvod, závěr a jakýkoli odborný text podle požadavků.',
         },
         {
           title: 'Zdroje a citace',
           text: 'Pomoc s rešerší, citacemi a seznamem literatury.',
         },
         {
-          title: 'Originalita',
-          text: 'Orientační kontrola shody a rizikových pasáží.',
+          title: 'Analýza dat',
+          text: 'Příprava praktické části včetně statistik.',
         },
         {
           title: 'Obhajoba',
@@ -615,7 +614,7 @@ const translations: Record<AppLanguage, Translation> = {
         'Analyzuje práci a upozorňuje na problémové části.',
         'Zpracuje kapitoly, praktickou část i výpočty.',
         'Dokáže připravit otázky, odpovědi a obhajobu.',
-        'Ověří shodu a rizikové části textu.',
+        'Nahradí vedoucího práce a je k dispozici 24/7.',
         'Pomůže s obhajobou podle posudků.',
       ],
     },
@@ -644,14 +643,14 @@ const translations: Record<AppLanguage, Translation> = {
       title: '20 let zkušeností',
       highlighted: 'v jednom systému',
       p1:
-        'Za Zedperou stojí zkušený tým, který už více než 20 let pomáhá studentům při tvorbě akademických prací.',
+        'Za Zedperou stojí zkušený tým, který už více než 20 let pomáhá při tvorbě akademických prací.',
       p2:
-        'Naše zkušenosti z praxe jsme spojili s umělou inteligencí, abychom přinesli komplexní podporu během celého procesu psaní.',
-      founderBadge: 'Zakladatelka',
+        'Zkušenosti ze skutečné praxe jsme spojili s umělou inteligencí, abychom přinesli komplexní podporu během celého procesu psaní.',
+      founderBadge: '',
       founderName: 'Martina',
-      founderTitle: '20 let zkušeností se studenty',
+      founderTitle: '',
       founderText:
-        'Martina dlouhodobě pomáhá studentům s akademickými pracemi, konzultacemi, strukturou textu, zdroji a přípravou na odevzdání. Tyto zkušenosti jsou zapracované do Zedpery.',
+        'Zedpera nevznikla jako odpověď na trend, ale jako reakce na realitu, stres, časový tlak a pocit, že akademická práce je často spíše boj se systémem než proces učení.',
       experience: '20+ let',
       students: '1000+ studentů',
     },
@@ -663,7 +662,7 @@ const translations: Record<AppLanguage, Translation> = {
           name: 'Studentka diplomové práce',
         },
         {
-          text: 'Zdroje jsem našel přímo v systému a práce byla hotová za pár dní. Originalita byla velmi nízká. Super.',
+          text: 'Zdroje jsem našel přímo v systému a práce byla hotová za pár dní. Velmi mi pomohla praktická část i citace.',
           name: 'Student bakalářské práce',
         },
         {
@@ -720,7 +719,7 @@ const translations: Record<AppLanguage, Translation> = {
       ],
     },
     faq: {
-      title: 'Nejčastější otázky',
+      title: 'Často kladené otázky',
       items: [
         {
           question: 'Je používání Zedpery legální?',
@@ -728,9 +727,9 @@ const translations: Record<AppLanguage, Translation> = {
             'Ano, používání Zedpery je legální. Systém slouží jako akademický asistent, který pomáhá s návrhem, strukturou, zdroji, kontrolou kvality a přípravou na obhajobu.',
         },
         {
-          question: 'Jak funguje ověření shody?',
+          question: 'Zvládne ZEDPERA každý obor?',
           answer:
-            'Zedpera poskytuje orientační kontrolu originality a upozorní na části, které mohou vyžadovat úpravu, parafrázi nebo doplnění citace.',
+            'Ano. ZEDPERA dokáže pracovat s jakýmikoli materiály. Pro zjednodušení práce můžete využít zdroje z vědecké databáze nebo nahrát vlastní poznámky, soubory a požadavky školitele.',
         },
         {
           question: 'Mohu službu použít na více prací?',
@@ -748,9 +747,9 @@ const translations: Record<AppLanguage, Translation> = {
             'Systém podporuje více jazyků a umožňuje přizpůsobit styl, odbornost a výstup podle požadavků práce.',
         },
         {
-          question: 'Je Zedpera plagiátorství?',
+          question: 'Co je AI vedoucí práce a AI kritik?',
           answer:
-            'Ne. Zedpera je podpůrný nástroj. Výstup je třeba zkontrolovat, upravit podle vlastního zadání a používat v souladu s pravidly školy.',
+            'AI vedoucí práce pomáhá při psaní akademické práce od prvních návrhů až po finální verzi. AI kritik identifikuje chyby, upozorní na nedostatky a navrhne konkrétní opravy.',
         },
       ],
     },
@@ -840,7 +839,7 @@ const translations: Record<AppLanguage, Translation> = {
       quality: 'Work quality score',
       ask: 'Ask the AI supervisor...',
       metrics: [
-        ['92%', 'Originality'],
+        ['92%', 'Source quality'],
         ['89/100', 'Text quality'],
         ['85%', 'Defense readiness'],
       ],
@@ -858,15 +857,15 @@ const translations: Record<AppLanguage, Translation> = {
         },
         {
           title: 'AI writing',
-          text: 'Generates chapters, outlines, introductions, conclusions and academic text.',
+          text: 'Writes chapters, prepares outlines, introductions, conclusions and any academic text based on requirements.',
         },
         {
           title: 'Sources and citations',
           text: 'Helps with research, citations and bibliography.',
         },
         {
-          title: 'Originality',
-          text: 'Orientation check for similarity and risky passages.',
+          title: 'Data analysis',
+          text: 'Preparation of the practical part including statistics.',
         },
         {
           title: 'Defense',
@@ -897,7 +896,7 @@ const translations: Record<AppLanguage, Translation> = {
         'Analyzes the work and flags problem areas.',
         'Processes chapters, practical parts and calculations.',
         'Can prepare questions, answers and defense.',
-        'Checks similarity and risky text parts.',
+        'Replaces the thesis supervisor and is available 24/7.',
         'Helps with defense based on reviews.',
       ],
     },
@@ -926,14 +925,14 @@ const translations: Record<AppLanguage, Translation> = {
       title: '20 years of experience',
       highlighted: 'in one system',
       p1:
-        'Behind Zedpera is an experienced team that has helped students with academic writing for more than 20 years.',
+        'Behind Zedpera is an experienced team that has helped with academic writing for more than 20 years.',
       p2:
         'We combined real-world experience with artificial intelligence to provide comprehensive support throughout the writing process.',
-      founderBadge: 'Founder',
+      founderBadge: '',
       founderName: 'Martina',
-      founderTitle: '20 years of experience with students',
+      founderTitle: '',
       founderText:
-        'Martina has long helped students with academic papers, consultations, text structure, sources and final submission preparation. These experiences are built into Zedpera.',
+        'Zedpera was not created as a response to a trend, but as a reaction to reality, stress, time pressure and the feeling that academic work is often more of a fight with the system than a learning process.',
       experience: '20+ years',
       students: '1000+ students',
     },
@@ -945,7 +944,7 @@ const translations: Record<AppLanguage, Translation> = {
           name: 'Master thesis student',
         },
         {
-          text: 'I found sources directly in the system and finished the work in a few days. Originality was very low. Great.',
+          text: 'I found sources directly in the system and finished the work in a few days. The practical part and citations helped me a lot.',
           name: 'Bachelor thesis student',
         },
         {
@@ -1010,9 +1009,9 @@ const translations: Record<AppLanguage, Translation> = {
             'Yes, using Zedpera is legal. The system is an academic assistant helping with structure, sources, quality checks and defense preparation.',
         },
         {
-          question: 'How does originality checking work?',
+          question: 'Can ZEDPERA handle every field?',
           answer:
-            'Zedpera provides an orientation originality check and highlights parts that may require editing, paraphrasing or citation.',
+            'Yes. ZEDPERA can work with different materials. You can use sources from the scientific database or upload your own notes, files and supervisor requirements.',
         },
         {
           question: 'Can I use it for multiple works?',
@@ -1030,9 +1029,9 @@ const translations: Record<AppLanguage, Translation> = {
             'The system supports multiple languages and lets you adjust style, expertise and outputs according to the work requirements.',
         },
         {
-          question: 'Is Zedpera plagiarism?',
+          question: 'What are the AI thesis supervisor and AI critic?',
           answer:
-            'No. Zedpera is a support tool. The output must be checked, edited according to your assignment and used according to school rules.',
+            'The AI thesis supervisor helps with academic writing from the first drafts to the final version. The AI critic identifies mistakes, points out weaknesses and suggests specific improvements.',
         },
       ],
     },
@@ -1122,7 +1121,7 @@ const translations: Record<AppLanguage, Translation> = {
       quality: 'Qualitätspunktzahl',
       ask: 'KI-Betreuer fragen...',
       metrics: [
-        ['92%', 'Originalität'],
+        ['92%', 'Quellenqualität'],
         ['89/100', 'Textqualität'],
         ['85%', 'Verteidigungsreife'],
       ],
@@ -1140,15 +1139,15 @@ const translations: Record<AppLanguage, Translation> = {
         },
         {
           title: 'KI-Schreiben',
-          text: 'Generiert Kapitel, Gliederungen, Einleitungen, Fazits und Fachtexte.',
+          text: 'Schreibt Kapitel, erstellt Gliederungen, Einleitungen, Fazits und fachliche Texte nach Anforderungen.',
         },
         {
           title: 'Quellen und Zitate',
           text: 'Hilfe bei Recherche, Zitaten und Literaturverzeichnis.',
         },
         {
-          title: 'Originalität',
-          text: 'Orientierende Prüfung von Ähnlichkeiten und Risikopassagen.',
+          title: 'Datenanalyse',
+          text: 'Vorbereitung des praktischen Teils einschließlich Statistiken.',
         },
         {
           title: 'Verteidigung',
@@ -1179,7 +1178,7 @@ const translations: Record<AppLanguage, Translation> = {
         'Analysiert die Arbeit und markiert Problemstellen.',
         'Bearbeitet Kapitel, praktische Teile und Berechnungen.',
         'Bereitet Fragen, Antworten und Verteidigung vor.',
-        'Prüft Ähnlichkeiten und Risikopassagen.',
+        'Ersetzt den Betreuer und ist 24/7 verfügbar.',
         'Hilft bei der Verteidigung anhand von Gutachten.',
       ],
     },
@@ -1199,7 +1198,7 @@ const translations: Record<AppLanguage, Translation> = {
         {
           step: '03',
           title: 'Fertigstellen und verteidigen',
-          text: 'Qualität, Originalität, Quellen und Methodik prüfen und Verteidigung vorbereiten.',
+          text: 'Qualität, Quellen und Methodik prüfen und Verteidigung vorbereiten.',
         },
       ],
     },
@@ -1208,14 +1207,14 @@ const translations: Record<AppLanguage, Translation> = {
       title: '20 Jahre Erfahrung',
       highlighted: 'in einem System',
       p1:
-        'Hinter Zedpera steht ein erfahrenes Team, das Studierende seit mehr als 20 Jahren bei akademischen Arbeiten unterstützt.',
+        'Hinter Zedpera steht ein erfahrenes Team, das seit mehr als 20 Jahren bei akademischen Arbeiten hilft.',
       p2:
         'Wir haben praktische Erfahrung mit künstlicher Intelligenz verbunden, um umfassende Unterstützung im gesamten Schreibprozess zu bieten.',
-      founderBadge: 'Gründerin',
+      founderBadge: '',
       founderName: 'Martina',
-      founderTitle: '20 Jahre Erfahrung mit Studierenden',
+      founderTitle: '',
       founderText:
-        'Martina unterstützt Studierende seit vielen Jahren bei akademischen Arbeiten, Beratungen, Textstruktur, Quellen und Abgabevorbereitung. Diese Erfahrungen sind in Zedpera integriert.',
+        'Zedpera entstand nicht als Antwort auf einen Trend, sondern als Reaktion auf Realität, Stress, Zeitdruck und das Gefühl, dass akademische Arbeit oft eher ein Kampf mit dem System als ein Lernprozess ist.',
       experience: '20+ Jahre',
       students: '1000+ Studierende',
     },
@@ -1227,7 +1226,7 @@ const translations: Record<AppLanguage, Translation> = {
           name: 'Masterstudentin',
         },
         {
-          text: 'Ich fand Quellen direkt im System und die Arbeit war in wenigen Tagen fertig. Die Originalität war sehr niedrig. Super.',
+          text: 'Ich fand Quellen direkt im System und die Arbeit war in wenigen Tagen fertig. Der praktische Teil und die Zitate halfen mir sehr.',
           name: 'Bachelorstudent',
         },
         {
@@ -1292,9 +1291,9 @@ const translations: Record<AppLanguage, Translation> = {
             'Ja, die Nutzung von Zedpera ist legal. Das System dient als akademischer Assistent und hilft mit Struktur, Quellen, Qualitätskontrolle und Verteidigungsvorbereitung.',
         },
         {
-          question: 'Wie funktioniert die Originalitätsprüfung?',
+          question: 'Kann ZEDPERA jedes Fachgebiet bearbeiten?',
           answer:
-            'Zedpera bietet eine orientierende Originalitätsprüfung und markiert Stellen, die Bearbeitung, Paraphrase oder Zitation benötigen können.',
+            'Ja. ZEDPERA kann mit unterschiedlichen Materialien arbeiten. Sie können Quellen aus der wissenschaftlichen Datenbank nutzen oder eigene Notizen, Dateien und Anforderungen des Betreuers hochladen.',
         },
         {
           question: 'Kann ich den Dienst für mehrere Arbeiten nutzen?',
@@ -1312,9 +1311,9 @@ const translations: Record<AppLanguage, Translation> = {
             'Das System unterstützt mehrere Sprachen und passt Stil, Fachlichkeit und Ausgabe an die Anforderungen an.',
         },
         {
-          question: 'Ist Zedpera Plagiat?',
+          question: 'Was sind der KI-Betreuer und der KI-Kritiker?',
           answer:
-            'Nein. Zedpera ist ein Unterstützungstool. Die Ausgabe muss geprüft, angepasst und gemäß Schulregeln verwendet werden.',
+            'Der KI-Betreuer unterstützt beim Schreiben von den ersten Entwürfen bis zur finalen Version. Der KI-Kritiker erkennt Fehler, weist auf Schwächen hin und schlägt konkrete Verbesserungen vor.',
         },
       ],
     },
@@ -1404,7 +1403,7 @@ const translations: Record<AppLanguage, Translation> = {
       quality: 'Wynik jakości pracy',
       ask: 'Zapytaj opiekuna AI...',
       metrics: [
-        ['92%', 'Oryginalność'],
+        ['92%', 'Jakość źródeł'],
         ['89/100', 'Jakość tekstu'],
         ['85%', 'Gotowość do obrony'],
       ],
@@ -1422,15 +1421,15 @@ const translations: Record<AppLanguage, Translation> = {
         },
         {
           title: 'Pisanie AI',
-          text: 'Generuje rozdziały, konspekty, wstępy, zakończenia i tekst naukowy.',
+          text: 'Pisze rozdziały, przygotowuje konspekt, wstęp, zakończenie i dowolny tekst naukowy zgodnie z wymaganiami.',
         },
         {
           title: 'Źródła i cytowania',
           text: 'Pomoc w researchu, cytowaniach i bibliografii.',
         },
         {
-          title: 'Oryginalność',
-          text: 'Orientacyjna kontrola podobieństwa i ryzykownych fragmentów.',
+          title: 'Analiza danych',
+          text: 'Przygotowanie części praktycznej wraz ze statystykami.',
         },
         {
           title: 'Obrona',
@@ -1461,7 +1460,7 @@ const translations: Record<AppLanguage, Translation> = {
         'Analizuje pracę i wskazuje problemy.',
         'Opracowuje rozdziały, część praktyczną i obliczenia.',
         'Przygotowuje pytania, odpowiedzi i obronę.',
-        'Sprawdza podobieństwo i ryzykowne fragmenty.',
+        'Zastępuje promotora i jest dostępna 24/7.',
         'Pomaga w obronie na podstawie recenzji.',
       ],
     },
@@ -1490,14 +1489,14 @@ const translations: Record<AppLanguage, Translation> = {
       title: '20 lat doświadczenia',
       highlighted: 'w jednym systemie',
       p1:
-        'Za Zedperą stoi doświadczony zespół, który od ponad 20 lat pomaga studentom w tworzeniu prac akademickich.',
+        'Za Zedperą stoi doświadczony zespół, który od ponad 20 lat pomaga w tworzeniu prac akademickich.',
       p2:
         'Połączyliśmy praktyczne doświadczenie ze sztuczną inteligencją, aby zapewnić kompleksowe wsparcie w całym procesie pisania.',
-      founderBadge: 'Założycielka',
+      founderBadge: '',
       founderName: 'Martina',
-      founderTitle: '20 lat doświadczenia ze studentami',
+      founderTitle: '',
       founderText:
-        'Martina od lat pomaga studentom przy pracach akademickich, konsultacjach, strukturze tekstu, źródłach i przygotowaniu do złożenia. Te doświadczenia są częścią Zedpery.',
+        'Zedpera nie powstała jako odpowiedź na trend, ale jako reakcja na rzeczywistość, stres, presję czasu i poczucie, że praca akademicka jest często bardziej walką z systemem niż procesem uczenia się.',
       experience: '20+ lat',
       students: '1000+ studentów',
     },
@@ -1509,7 +1508,7 @@ const translations: Record<AppLanguage, Translation> = {
           name: 'Studentka pracy magisterskiej',
         },
         {
-          text: 'Źródła znalazłem bezpośrednio w systemie, a praca była gotowa w kilka dni. Oryginalność była bardzo niska. Super.',
+          text: 'Źródła znalazłem bezpośrednio w systemie, a praca była gotowa w kilka dni. Bardzo pomogła mi część praktyczna i cytowania.',
           name: 'Student pracy licencjackiej',
         },
         {
@@ -1574,9 +1573,9 @@ const translations: Record<AppLanguage, Translation> = {
             'Tak, korzystanie z Zedpery jest legalne. System działa jako asystent akademicki pomagający w strukturze, źródłach, kontroli jakości i przygotowaniu do obrony.',
         },
         {
-          question: 'Jak działa kontrola oryginalności?',
+          question: 'Czy ZEDPERA poradzi sobie z każdą dziedziną?',
           answer:
-            'Zedpera zapewnia orientacyjną kontrolę oryginalności i wskazuje fragmenty, które mogą wymagać korekty, parafrazy lub cytowania.',
+            'Tak. ZEDPERA potrafi pracować z różnymi materiałami. Możesz skorzystać ze źródeł z bazy naukowej albo przesłać własne notatki, pliki i wymagania promotora.',
         },
         {
           question: 'Czy mogę używać usługi do wielu prac?',
@@ -1594,9 +1593,9 @@ const translations: Record<AppLanguage, Translation> = {
             'System obsługuje wiele języków i pozwala dostosować styl, poziom merytoryczny oraz wynik do wymagań pracy.',
         },
         {
-          question: 'Czy Zedpera to plagiat?',
+          question: 'Czym są AI promotor pracy i AI krytyk?',
           answer:
-            'Nie. Zedpera jest narzędziem wspierającym. Wynik należy sprawdzić, dostosować do zadania i używać zgodnie z zasadami szkoły.',
+            'AI promotor pracy pomaga w pisaniu od pierwszych propozycji aż po wersję finalną. AI krytyk identyfikuje błędy, wskazuje braki i proponuje konkretne poprawki.',
         },
       ],
     },
@@ -1686,7 +1685,7 @@ const translations: Record<AppLanguage, Translation> = {
       quality: 'Munka minőségi pontszáma',
       ask: 'Kérdezd az AI témavezetőt...',
       metrics: [
-        ['92%', 'Eredetiség'],
+        ['92%', 'Forrásminőség'],
         ['89/100', 'Szövegminőség'],
         ['85%', 'Védésre készültség'],
       ],
@@ -1704,15 +1703,15 @@ const translations: Record<AppLanguage, Translation> = {
         },
         {
           title: 'AI írás',
-          text: 'Fejezeteket, vázlatokat, bevezetést, összegzést és szakmai szöveget készít.',
+          text: 'Fejezetet ír, vázlatot, bevezetést, lezárást és bármilyen szakmai szöveget készít a követelmények alapján.',
         },
         {
           title: 'Források és hivatkozások',
           text: 'Segít kutatásban, hivatkozásokban és bibliográfiában.',
         },
         {
-          title: 'Eredetiség',
-          text: 'Tájékoztató jellegű egyezés- és kockázatos szövegrész-ellenőrzés.',
+          title: 'Adatelemzés',
+          text: 'A gyakorlati rész előkészítése statisztikákkal együtt.',
         },
         {
           title: 'Védés',
@@ -1743,7 +1742,7 @@ const translations: Record<AppLanguage, Translation> = {
         'Elemzi a munkát és jelzi a problémás részeket.',
         'Fejezeteket, gyakorlati részt és számításokat dolgoz fel.',
         'Kérdéseket, válaszokat és védést készít elő.',
-        'Ellenőrzi az egyezést és a kockázatos részeket.',
+        'Helyettesíti a témavezetőt és 24/7 elérhető.',
         'Segít a védésben a bírálatok alapján.',
       ],
     },
@@ -1772,14 +1771,14 @@ const translations: Record<AppLanguage, Translation> = {
       title: '20 év tapasztalat',
       highlighted: 'egy rendszerben',
       p1:
-        'A Zedpera mögött tapasztalt csapat áll, amely több mint 20 éve segít hallgatóknak akadémiai munkák elkészítésében.',
+        'A Zedpera mögött tapasztalt csapat áll, amely több mint 20 éve segít akadémiai munkák elkészítésében.',
       p2:
         'A valós tapasztalatot mesterséges intelligenciával kapcsoltuk össze, hogy teljes támogatást nyújtsunk az írás egész folyamata során.',
-      founderBadge: 'Alapító',
+      founderBadge: '',
       founderName: 'Martina',
-      founderTitle: '20 év tapasztalat hallgatókkal',
+      founderTitle: '',
       founderText:
-        'Martina régóta segíti a hallgatókat akadémiai munkákkal, konzultációkkal, szövegszerkezettel, forrásokkal és leadási felkészüléssel. Ez a tapasztalat beépült a Zedperába.',
+        'A Zedpera nem egy trendre adott válaszként jött létre, hanem a valóságra, a stresszre, az időnyomásra és arra az érzésre adott reakcióként, hogy az akadémiai munka gyakran inkább küzdelem a rendszerrel, mint tanulási folyamat.',
       experience: '20+ év',
       students: '1000+ hallgató',
     },
@@ -1856,9 +1855,9 @@ const translations: Record<AppLanguage, Translation> = {
             'Igen, a Zedpera használata legális. A rendszer akadémiai asszisztensként segít struktúrában, forrásokban, minőségellenőrzésben és védésre felkészülésben.',
         },
         {
-          question: 'Hogyan működik az eredetiség ellenőrzése?',
+          question: 'A ZEDPERA minden szakterülettel megbirkózik?',
           answer:
-            'A Zedpera tájékoztató eredetiségellenőrzést ad és jelzi azokat a részeket, amelyek javítást, parafrázist vagy hivatkozást igényelhetnek.',
+            'Igen. A ZEDPERA különféle anyagokkal tud dolgozni. Használhatsz forrásokat a tudományos adatbázisból, vagy feltöltheted saját jegyzeteidet, fájljaidat és a témavezető követelményeit.',
         },
         {
           question: 'Több munkához is használhatom?',
@@ -1876,9 +1875,9 @@ const translations: Record<AppLanguage, Translation> = {
             'A rendszer több nyelvet támogat, és a stílust, szakmaiságot és kimenetet a követelményekhez igazítja.',
         },
         {
-          question: 'A Zedpera plágium?',
+          question: 'Mi az AI témavezető és az AI kritikus?',
           answer:
-            'Nem. A Zedpera támogató eszköz. A kimenetet ellenőrizni, saját feladathoz igazítani és az iskola szabályai szerint használni kell.',
+            'Az AI témavezető a kezdeti javaslatoktól a végleges verzióig segít az akadémiai munka írásában. Az AI kritikus hibákat azonosít, hiányosságokra figyelmeztet és konkrét javításokat javasol.',
         },
       ],
     },
@@ -2245,75 +2244,28 @@ function AiLeaderPreview({ t }: { t: Translation }) {
 
 function FounderPortrait({ t }: { t: Translation }) {
   return (
-    <div className="relative min-h-[620px] overflow-hidden rounded-3xl border border-violet-500/45 bg-[#050511] shadow-[0_0_90px_rgba(124,58,237,0.28)]">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_8%,rgba(168,85,247,0.42),transparent_38%),radial-gradient(circle_at_85%_70%,rgba(37,99,235,0.22),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.035),rgba(255,255,255,0.01))]" />
-      <div className="absolute left-1/2 top-6 h-72 w-72 -translate-x-1/2 rounded-full bg-violet-600/25 blur-3xl" />
+    <div className="relative overflow-hidden rounded-[2.5rem] border border-violet-500/35 bg-[#050511] p-4 shadow-[0_0_90px_rgba(124,58,237,0.24)] sm:p-5">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(168,85,247,0.34),transparent_38%),radial-gradient(circle_at_85%_70%,rgba(37,99,235,0.18),transparent_36%)]" />
 
-      <div className="relative flex min-h-[620px] flex-col p-7">
-        <div className="flex items-center justify-between gap-4">
-          <div className="inline-flex items-center gap-2 rounded-full border border-violet-400/40 bg-violet-600/20 px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-white shadow-[0_0_25px_rgba(124,58,237,0.22)]">
-            <Crown size={15} className="text-violet-200" />
-            {t.about.founderBadge}
-          </div>
-
-          <div className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-4 py-2 text-xs font-black text-emerald-200">
-            {t.about.experience}
-          </div>
-        </div>
-
-        <div className="relative mt-8 flex-1 overflow-hidden rounded-[2rem] border border-white/12 bg-[#070714] shadow-[0_28px_85px_rgba(0,0,0,0.55)]">
+      <div className="relative overflow-hidden rounded-[2rem] border border-white/12 bg-black shadow-[0_32px_90px_rgba(0,0,0,0.62)]">
+        <div className="relative h-[520px] sm:h-[620px]">
           <Image
             src={FOUNDER_MARTINA_IMAGE_URL}
-            alt={`${t.about.founderName} - ${t.about.founderTitle}`}
+            alt="Zedpera"
             fill
             priority={false}
             quality={100}
             sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 44vw"
-            className="select-none object-cover object-[50%_30%]"
+            className="select-none object-cover object-[50%_28%] transition duration-700 hover:scale-[1.03]"
           />
-
-          <div className="absolute inset-0 bg-gradient-to-r from-black/72 via-black/22 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/92 via-black/16 to-black/10" />
-
-          <div className="absolute left-5 top-5 rounded-2xl border border-white/15 bg-black/55 px-4 py-3 text-xs font-black uppercase tracking-[0.18em] text-white shadow-xl shadow-black/40 backdrop-blur-xl">
-            {t.about.founderName}
-          </div>
-
-          <div className="absolute bottom-5 left-5 right-5 rounded-2xl border border-white/10 bg-black/78 p-5 backdrop-blur-xl">
-            <div className="text-sm font-black uppercase tracking-[0.16em] text-violet-300">
-              {t.about.founderName}
-            </div>
-            <div className="mt-1 text-2xl font-black leading-tight text-white">
-              {t.about.founderTitle}
-            </div>
-          </div>
+          <div className="absolute inset-0 bg-gradient-to-t from-black/38 via-transparent to-transparent" />
         </div>
+      </div>
 
-        <div className="relative mt-6 rounded-2xl border border-white/10 bg-black/72 p-5 backdrop-blur-xl">
-          <p className="text-sm font-bold leading-7 text-white">
-            {t.about.founderText}
-          </p>
-
-          <div className="mt-5 grid grid-cols-2 gap-3">
-            <div className="rounded-xl border border-violet-400/25 bg-violet-600/15 p-3">
-              <div className="text-xl font-black text-violet-200">
-                {t.about.experience}
-              </div>
-              <div className="mt-1 text-xs font-black text-white">
-                {t.about.title}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-emerald-400/25 bg-emerald-600/12 p-3">
-              <div className="text-xl font-black text-emerald-300">
-                {t.about.students}
-              </div>
-              <div className="mt-1 text-xs font-black text-white">
-                {t.hero.stats[1][1]}
-              </div>
-            </div>
-          </div>
-        </div>
+      <div className="relative mt-5 rounded-[1.7rem] border border-white/10 bg-white/[0.055] p-6 shadow-2xl shadow-black/35 backdrop-blur-xl sm:p-7">
+        <p className="text-base font-bold leading-8 text-white sm:text-lg">
+          {t.about.founderText}
+        </p>
       </div>
     </div>
   );
@@ -2328,26 +2280,24 @@ function ModernWomanHeroCard() {
       <div className="relative rounded-[1.7rem] border border-white/10 bg-[#0b1020]/95 p-6 shadow-2xl shadow-black/40 sm:p-8">
         <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-violet-400/35 bg-violet-600/20 px-4 py-2 text-xs font-black uppercase tracking-[0.22em] text-violet-100">
           <Sparkles size={15} className="text-violet-200" />
-          Zakladateľka
+          Zedpera
         </div>
 
         <h3 className="text-3xl font-black leading-tight text-white sm:text-4xl">
-          Martina
+          Akademická podpora
         </h3>
 
         <p className="mt-3 text-base font-black leading-7 text-violet-100 sm:text-lg">
-          20 rokov skúseností so študentmi
+          Podpora pri písaní od zadania až po obhajobu
         </p>
 
         <p className="mt-5 text-sm font-bold leading-7 text-slate-200 sm:text-base">
-          Martina dlhodobo pomáha študentom so štruktúrou práce, odbornými
-          zdrojmi, citáciami, konzultáciami, kontrolou textu a prípravou na
-          odovzdanie alebo obhajobu.
+          Zedpera spája praktické skúsenosti, odbornú spätnú väzbu a AI podporu do jedného prehľadného systému.
         </p>
 
         <div className="mt-7 grid gap-4 sm:grid-cols-2">
           <div className="rounded-2xl border border-white/10 bg-black/35 p-5">
-            <div className="text-3xl font-black text-white">20+</div>
+            
             <div className="mt-1 text-xs font-black uppercase tracking-[0.16em] text-slate-400">
               rokov skúseností
             </div>
@@ -2355,9 +2305,7 @@ function ModernWomanHeroCard() {
 
           <div className="rounded-2xl border border-white/10 bg-black/35 p-5">
             <div className="text-3xl font-black text-white">1000+</div>
-            <div className="mt-1 text-xs font-black uppercase tracking-[0.16em] text-slate-400">
-              študentov
-            </div>
+          
           </div>
         </div>
 
@@ -2375,7 +2323,7 @@ export default function LandingPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [paymentError, setPaymentError] = useState('');
-  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
   const [language, setLanguage] = useState<AppLanguage>('sk');
   const [translationVersion, setTranslationVersion] = useState(0);
 
@@ -2563,11 +2511,9 @@ export default function LandingPage() {
     { href: '#pricing', label: t.nav.pricing, icon: Crown },
     { href: '#reviews', label: t.nav.reviews, icon: Star },
     { href: '#faq', label: t.nav.faq, icon: HelpCircle },
-    { href: '/blog', label: t.footer.links.blog, icon: Newspaper },
   ];
 
   const footerLinks = [
-    { href: '/blog', label: t.footer.links.blog, icon: Newspaper },
     { href: '/gdpr', label: t.footer.links.gdpr, icon: ShieldCheck },
     { href: '/obchodne-podmienky', label: t.footer.links.terms, icon: FileText },
     { href: '/cookies', label: t.footer.links.cookies, icon: Cookie },
@@ -3224,7 +3170,7 @@ export default function LandingPage() {
             </div>
 
             <div className="mt-10 flex flex-col gap-3 border-t border-white/10 pt-6 text-sm font-bold text-white sm:flex-row sm:items-center sm:justify-between">
-              <span>© {new Date().getFullYear()} Zedpera. {t.common.rights}</span>
+              <span>© {new Date().getFullYear()}{' '}Zedpera. {t.common.rights}</span>
               <span className="flex items-center gap-2 text-violet-300">
                 <ShieldCheck size={16} />
                 {t.common.securePlatform}

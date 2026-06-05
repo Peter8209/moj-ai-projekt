@@ -12,6 +12,7 @@ import {
   ArrowUp,
   CreditCard,
   Loader2,
+  Coins,
 } from 'lucide-react';
 
 type PackagePlan = {
@@ -25,6 +26,7 @@ type PackagePlan = {
   price: string;
   period: string;
   pages: string;
+  credits: string;
   works: string;
   supervisor: string;
   audit: string;
@@ -77,15 +79,17 @@ const packagePlans: PackagePlan[] = [
     price: '29 €',
     period: 'mesiac',
     pages: '60 strán / mesiac',
+    credits: '100 AI credits',
     works: '1 aktívna práca',
     supervisor: '2 kontroly AI vedúceho',
     audit: '1 audit',
     defense: 'Bez obhajoby',
     badge: 'Základný štart',
     description:
-      'Základný mesačný plán pre jednu aktívnu prácu, písanie menších rozsahov a základnú AI podporu.',
+      'Základný mesačný plán pre jednu aktívnu prácu, menší rozsah strán a základnú AI podporu.',
     features: [
       '60 strán / mesiac',
+      '100 AI credits',
       '1 aktívna práca',
       'Základný AI model',
       '2 kontroly AI vedúceho',
@@ -100,6 +104,7 @@ const packagePlans: PackagePlan[] = [
     price: '59 €',
     period: 'mesiac',
     pages: '130 strán / mesiac',
+    credits: '300 AI credits',
     works: '3 aktívne práce',
     supervisor: '10 AI kontrol',
     audit: '3 audity',
@@ -109,6 +114,7 @@ const packagePlans: PackagePlan[] = [
       'Mesačný plán pre študentov, ktorí potrebujú viac strán, viac aktívnych prác, citácie, zdroje a jednu obhajobu.',
     features: [
       '130 strán / mesiac',
+      '300 AI credits',
       '3 aktívne práce',
       '10 AI kontrol',
       '3 audity',
@@ -123,6 +129,7 @@ const packagePlans: PackagePlan[] = [
     price: '99 €',
     period: 'mesiac',
     pages: '270 strán / mesiac',
+    credits: '700 AI credits',
     works: '5 prác',
     supervisor: '20 AI kontrol',
     audit: '6 auditov',
@@ -132,6 +139,7 @@ const packagePlans: PackagePlan[] = [
       'Výkonný mesačný plán pre rozsiahlejšiu záverečnú prácu, prioritné spracovanie, premium AI model a prezentáciu.',
     features: [
       '270 strán / mesiac',
+      '700 AI credits',
       '5 prác',
       '20 AI kontrol',
       '6 auditov',
@@ -147,6 +155,7 @@ const packagePlans: PackagePlan[] = [
     price: '149 €',
     period: 'mesiac',
     pages: '400 strán / mesiac',
+    credits: '1500 AI credits',
     works: '10 prác',
     supervisor: '40 AI kontrol',
     audit: '10 auditov',
@@ -156,6 +165,7 @@ const packagePlans: PackagePlan[] = [
       'Najvyšší mesačný plán pre náročné akademické použitie, viacero prác, vysoké limity a plnú prémiovú AI kapacitu.',
     features: [
       '400 strán / mesiac',
+      '1500 AI credits',
       '10 prác',
       '40 AI kontrol',
       '10 auditov',
@@ -270,7 +280,8 @@ export default function PackagesPage() {
   const router = useRouter();
   const pageRef = useRef<HTMLDivElement | null>(null);
 
-  const [selectedPlan, setSelectedPlan] = useState<PackagePlan['id']>('student-plus');
+  const [selectedPlan, setSelectedPlan] =
+    useState<PackagePlan['id']>('student-plus');
   const [selectedAddons, setSelectedAddons] = useState<AddonService['id'][]>([]);
   const [loadingPayment, setLoadingPayment] = useState(false);
   const [loadingPlanId, setLoadingPlanId] = useState<PackagePlan['id'] | null>(
@@ -375,6 +386,8 @@ export default function PackagesPage() {
         planName: checkoutPlan.name,
         price: checkoutPlan.price,
         period: checkoutPlan.period,
+        pages: checkoutPlan.pages,
+        credits: checkoutPlan.credits,
 
         addons: selectedAddons,
         addOns: selectedAddons,
@@ -485,7 +498,9 @@ export default function PackagesPage() {
             </h1>
 
             <p className="mt-3 max-w-3xl text-lg text-gray-300 sm:text-xl">
-              Vyber si mesačný plán podľa rozsahu práce. Každý balík má mesačný limit strán, počet aktívnych prác, AI kontroly, audity a obhajoby podľa zvoleného programu.
+              Vyber si mesačný plán podľa rozsahu práce. Každý balík má
+              mesačný limit strán, počet aktívnych prác, AI kontroly, audity,
+              obhajoby a vlastný limit AI kreditov.
             </p>
           </div>
 
@@ -501,7 +516,7 @@ export default function PackagesPage() {
                     setSelectedPlan(plan.id);
                     setPaymentError('');
                   }}
-                  className={`relative flex min-h-[610px] cursor-pointer flex-col rounded-3xl border p-6 text-left shadow-xl transition ${
+                  className={`relative flex min-h-[660px] cursor-pointer flex-col rounded-3xl border p-6 text-left shadow-xl transition ${
                     selected
                       ? 'border-purple-400 bg-purple-600/20 shadow-purple-950/40'
                       : 'border-white/10 bg-[#0f172a] hover:border-purple-400/50 hover:bg-[#111c33]'
@@ -539,13 +554,24 @@ export default function PackagesPage() {
                   </div>
 
                   <div className="mt-1 text-sm text-gray-300">
-                    {plan.period}
+                    / {plan.period}
+                  </div>
+
+                  <div className="mt-5 rounded-2xl border border-purple-400/30 bg-purple-500/10 p-4">
+                    <div className="flex items-center gap-2 text-sm font-black uppercase tracking-wide text-purple-200">
+                      <Coins size={18} />
+                      AI credits
+                    </div>
+
+                    <div className="mt-2 text-2xl font-black text-white">
+                      {plan.credits}
+                    </div>
                   </div>
 
                   <div className="mt-6 grid grid-cols-2 gap-3 text-sm">
                     <PackageInfo label="Limit" value={plan.pages} />
                     <PackageInfo label="Práce" value={plan.works} />
-                    <PackageInfo label="AI vedúci" value={plan.supervisor} />
+                    <PackageInfo label="AI kontroly" value={plan.supervisor} />
                     <PackageInfo label="Audit" value={plan.audit} />
                   </div>
 
@@ -598,7 +624,8 @@ export default function PackagesPage() {
             </h2>
 
             <p className="mt-2 text-sm text-gray-300">
-              Doplnkové služby je možné dokúpiť samostatne alebo pridať k vybranému balíku pred platbou.
+              Doplnkové služby je možné dokúpiť samostatne alebo pridať
+              k vybranému balíku pred platbou.
             </p>
           </div>
 
@@ -651,7 +678,7 @@ export default function PackagesPage() {
 
                 <div className="mt-1 text-sm text-gray-300">
                   {selectedPlanData.period} · {selectedPlanData.pages} ·{' '}
-                  {selectedPlanData.works}
+                  {selectedPlanData.credits} · {selectedPlanData.works}
                 </div>
               </div>
 
@@ -761,13 +788,6 @@ export default function PackagesPage() {
               </a>
             </div>
           </div>
-        </section>
-
-        <section className="rounded-3xl border border-yellow-500/20 bg-yellow-500/10 p-5 text-sm leading-6 text-yellow-100">
-          <strong>Poznámka k limitom:</strong> Limity strán sú mesačné a
-          predstavujú rozsah práce v rámci vybraného balíka. AI credits budú
-          riešené samostatne a ich hodnoty budú nastavené podľa finálneho
-          kreditového modelu.
         </section>
       </main>
 

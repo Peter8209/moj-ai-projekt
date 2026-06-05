@@ -1705,7 +1705,7 @@ function ProfessionalNoticeDialog({
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex min-h-[46px] items-center justify-center rounded-2xl bg-white px-6 text-sm font-black text-slate-950 transition hover:bg-slate-200"
+              className="inline-flex min-h-[46px] items-center justify-center rounded-2xl border border-emerald-400/40 bg-[#0f172a] px-6 text-sm font-black text-white shadow-lg shadow-emerald-950/30 transition hover:border-emerald-300/70 hover:bg-[#111827] focus:outline-none focus:ring-4 focus:ring-emerald-400/25"
             >
               {notice.closeLabel || 'Rozumiem'}
             </button>

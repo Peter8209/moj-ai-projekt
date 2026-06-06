@@ -2619,290 +2619,328 @@ export default function LandingPage() {
         }
 
 
-        /* =========================================================
-           MOBILNÁ RESPONZÍVNA ÚPRAVA LANDING PAGE
-           Nič z obsahu sa neodstraňuje. Úprava iba zlepšuje zobrazenie
-           na šírkach 320–480 px a tabletoch.
-        ========================================================= */
+        /* ===============================
+           PROFESIONÁLNA MOBILNÁ VERZIA
+           čierne pozadie + biele písmo
+           obsah ostáva nezmenený
+        =============================== */
         @media (max-width: 1024px) {
           html,
-          body {
+          body,
+          main,
+          .zedpera-template {
             width: 100%;
             max-width: 100%;
-            overflow-x: hidden !important;
+            overflow-x: hidden;
+            background: #000000 !important;
+            color: #ffffff !important;
           }
 
           .zedpera-template {
-            width: 100%;
-            max-width: 100vw;
-            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
           }
 
           .zedpera-template section {
-            max-width: 100vw;
-          }
-
-          .zedpera-template img,
-          .zedpera-template video,
-          .zedpera-template canvas,
-          .zedpera-template svg {
+            width: 100%;
             max-width: 100%;
           }
         }
 
         @media (max-width: 768px) {
+          .zedpera-template,
+          .zedpera-template * {
+            box-sizing: border-box;
+          }
+
+          .zedpera-template p,
+          .zedpera-template span,
+          .zedpera-template li,
+          .zedpera-template a,
+          .zedpera-template button,
+          .zedpera-template h1,
+          .zedpera-template h2,
+          .zedpera-template h3,
+          .zedpera-template h4,
+          .zedpera-template div {
+            color: #ffffff !important;
+          }
+
+          .zedpera-template .bg-clip-text,
+          .zedpera-template .text-transparent {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            background: none !important;
+          }
+
+          .zedpera-template header {
+            background: rgba(0, 0, 0, 0.98) !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.14) !important;
+          }
+
           .zedpera-template header > div {
-            height: 64px !important;
+            height: 66px !important;
             padding-left: 16px !important;
             padding-right: 16px !important;
           }
 
-          .zedpera-template header a[href="/"] {
-            min-width: 0;
-            gap: 10px;
-          }
-
-          .zedpera-template header a[href="/"] > div:first-child {
-            width: 40px !important;
-            height: 40px !important;
-            border-radius: 12px !important;
-            font-size: 20px !important;
-          }
-
-          .zedpera-template header a[href="/"] > div:last-child {
-            max-width: 150px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+          .zedpera-template header a[href='/'] > div:last-child {
             font-size: 17px !important;
             letter-spacing: 0.08em !important;
           }
 
-          .zedpera-template h1 {
-            font-size: clamp(2.15rem, 12vw, 3.7rem) !important;
-            line-height: 0.98 !important;
-            letter-spacing: -0.055em !important;
-            word-break: normal;
+          .zedpera-template header a[href='/'] > div:first-child {
+            width: 40px !important;
+            height: 40px !important;
+            border-radius: 14px !important;
           }
 
-          .zedpera-template h2 {
-            font-size: clamp(1.8rem, 8.2vw, 2.55rem) !important;
-            line-height: 1.08 !important;
-            letter-spacing: -0.045em !important;
+          .zedpera-template header button[aria-label='Menu'] {
+            width: 46px !important;
+            height: 46px !important;
+            border-radius: 14px !important;
+            background: rgba(255, 255, 255, 0.06) !important;
+            border-color: rgba(255, 255, 255, 0.18) !important;
           }
 
-          .zedpera-template h3 {
-            line-height: 1.14 !important;
+          .zedpera-template header .border-t {
+            background: #000000 !important;
+            padding: 14px 16px 18px !important;
           }
 
-          .zedpera-template p {
-            font-size: 15px;
-            line-height: 1.72;
+          .zedpera-template header .border-t a,
+          .zedpera-template header .border-t button {
+            min-height: 48px !important;
+            border-radius: 14px !important;
+            font-size: 14px !important;
           }
 
           .zedpera-template section {
             padding-left: 16px !important;
             padding-right: 16px !important;
-            padding-top: 64px !important;
-            padding-bottom: 64px !important;
+            padding-top: 56px !important;
+            padding-bottom: 56px !important;
           }
 
-          .zedpera-template .zedpera-section-title {
-            text-align: center;
-            text-wrap: balance;
+          .zedpera-template section:first-of-type {
+            padding-top: 30px !important;
+            padding-bottom: 44px !important;
           }
 
-          .zedpera-template .zedpera-glow-border {
-            border-color: rgba(139, 92, 246, 0.46);
-            box-shadow:
-              inset 0 1px 0 rgba(255, 255, 255, 0.05),
-              0 16px 46px rgba(0, 0, 0, 0.42),
-              0 0 34px rgba(124, 58, 237, 0.16);
+          .zedpera-template section:first-of-type > div:first-child {
+            min-height: auto !important;
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+            gap: 34px !important;
           }
 
-          .zedpera-template [class*="grid"] {
-            min-width: 0;
+          .zedpera-template h1 {
+            max-width: 100% !important;
+            font-size: clamp(32px, 9.2vw, 44px) !important;
+            line-height: 1.08 !important;
+            letter-spacing: -0.045em !important;
+            text-align: left !important;
           }
 
-          .zedpera-template [class*="rounded-[2.5rem]"],
-          .zedpera-template [class*="rounded-[2rem]"] {
+          .zedpera-template h2,
+          .zedpera-section-title {
+            font-size: clamp(27px, 7vw, 36px) !important;
+            line-height: 1.12 !important;
+            letter-spacing: -0.035em !important;
+          }
+
+          .zedpera-template h3 {
+            line-height: 1.2 !important;
+          }
+
+          .zedpera-template p {
+            font-size: 15px !important;
+            line-height: 1.75 !important;
+          }
+
+          .zedpera-template .inline-flex.rounded-full {
+            max-width: 100% !important;
+            white-space: normal !important;
+            text-align: left !important;
+            line-height: 1.45 !important;
+            letter-spacing: 0.12em !important;
+          }
+
+          .zedpera-template a[href='#pricing'],
+          .zedpera-template a[href='#features'] {
+            width: 100% !important;
+            min-width: 0 !important;
+            min-height: 56px !important;
+            justify-content: center !important;
+            border-radius: 16px !important;
+            padding-left: 18px !important;
+            padding-right: 18px !important;
+            text-align: center !important;
+          }
+
+          .zedpera-template .grid {
+            min-width: 0 !important;
+          }
+
+          .zedpera-template .sm\:grid-cols-4,
+          .zedpera-template .sm\:grid-cols-3,
+          .zedpera-template .sm\:grid-cols-2,
+          .zedpera-template .md\:grid-cols-3,
+          .zedpera-template .lg\:grid-cols-3,
+          .zedpera-template .lg\:grid-cols-2,
+          .zedpera-template .xl\:grid-cols-\[0\.36fr_0\.64fr\] {
+            grid-template-columns: 1fr !important;
+          }
+
+          .zedpera-template article,
+          .zedpera-template .zedpera-glow-border,
+          .zedpera-template .rounded-3xl,
+          .zedpera-template .rounded-\[2\.5rem\],
+          .zedpera-template .rounded-\[2rem\] {
             border-radius: 24px !important;
           }
 
-          .zedpera-template [class*="rounded-[1.7rem]"],
-          .zedpera-template [class*="rounded-[1.55rem]"],
-          .zedpera-template [class*="rounded-[1.4rem]"] {
-            border-radius: 20px !important;
+          .zedpera-template article,
+          .zedpera-template .zedpera-glow-border {
+            background: rgba(5, 5, 12, 0.96) !important;
+            border-color: rgba(139, 92, 246, 0.34) !important;
+            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.65) !important;
           }
 
-          .zedpera-template a,
-          .zedpera-template button {
-            min-height: 44px;
-            -webkit-tap-highlight-color: transparent;
+          .zedpera-template .p-8,
+          .zedpera-template .lg\:p-12 {
+            padding: 22px !important;
+          }
+
+          .zedpera-template .py-24 {
+            padding-top: 58px !important;
+            padding-bottom: 58px !important;
+          }
+
+          .zedpera-template .mt-16 {
+            margin-top: 34px !important;
+          }
+
+          .zedpera-template .mt-12 {
+            margin-top: 28px !important;
+          }
+
+          .zedpera-template .mt-10 {
+            margin-top: 28px !important;
+          }
+
+          .zedpera-template .mt-9 {
+            margin-top: 22px !important;
+          }
+
+          .zedpera-template .gap-12 {
+            gap: 30px !important;
+          }
+
+          .zedpera-template .gap-10,
+          .zedpera-template .gap-8,
+          .zedpera-template .gap-6 {
+            gap: 22px !important;
+          }
+
+          .zedpera-template img {
+            max-width: 100% !important;
+            height: auto !important;
+            object-fit: cover !important;
+          }
+
+          .zedpera-template .absolute.left-0.top-1\/2 {
+            display: none !important;
+          }
+
+          .zedpera-template .border-red-500\/20 {
+            background: rgba(0, 0, 0, 0.96) !important;
+            border-color: rgba(248, 113, 113, 0.55) !important;
+          }
+
+          .zedpera-template .bg-red-500\/5 {
+            background: rgba(0, 0, 0, 0.96) !important;
+          }
+
+          .zedpera-template .bg-violet-600\/10,
+          .zedpera-template .bg-white\/\[0\.02\],
+          .zedpera-template .bg-white\/\[0\.035\],
+          .zedpera-template .bg-white\/5,
+          .zedpera-template .bg-white\/\[0\.07\] {
+            background-color: rgba(0, 0, 0, 0.92) !important;
           }
 
           .zedpera-template input,
           .zedpera-template textarea,
           .zedpera-template select {
-            font-size: 16px !important;
-          }
-        }
-
-        @media (max-width: 640px) {
-          .zedpera-template section:first-of-type {
-            padding-top: 42px !important;
+            background: #050505 !important;
+            color: #ffffff !important;
+            border-color: rgba(255, 255, 255, 0.18) !important;
           }
 
-          .zedpera-template section:first-of-type > div {
-            grid-template-columns: 1fr !important;
-            gap: 34px !important;
-          }
-
-          .zedpera-template section:first-of-type .inline-flex {
-            max-width: 100%;
-          }
-
-          .zedpera-template section:first-of-type a[href="#pricing"],
-          .zedpera-template section:first-of-type a[href="#preview"] {
-            width: 100%;
-            min-width: 0 !important;
-            height: 58px !important;
-            justify-content: center;
-            padding-left: 18px !important;
-            padding-right: 18px !important;
-            font-size: 15px !important;
-          }
-
-          .zedpera-template section:first-of-type a[href="#pricing"] span,
-          .zedpera-template section:first-of-type a[href="#preview"] span {
-            flex-shrink: 0;
-          }
-
-          .zedpera-template section:first-of-type [class*="grid-cols-2"],
-          .zedpera-template section:first-of-type [class*="sm:grid-cols-4"] {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-            gap: 12px !important;
-          }
-
-          .zedpera-template section:first-of-type [class*="text-5xl"] {
-            font-size: 34px !important;
-          }
-
-          .zedpera-template section:first-of-type [class*="min-h-[520px]"] {
-            min-height: auto !important;
-            margin-top: 10px !important;
-          }
-
-          .zedpera-template [id="features"] > div:last-child,
-          .zedpera-template [id="reviews"] > div:last-child,
-          .zedpera-template [id="pricing"] > div:nth-of-type(2) {
-            grid-template-columns: 1fr !important;
-            gap: 18px !important;
-          }
-
-          .zedpera-template [id="features"] .rounded-3xl,
-          .zedpera-template [id="reviews"] .rounded-3xl,
-          .zedpera-template [id="pricing"] .rounded-3xl {
-            padding: 24px !important;
-          }
-
-          .zedpera-template [id="comparison"] > div:last-child {
-            grid-template-columns: 1fr !important;
-            gap: 20px !important;
-          }
-
-          .zedpera-template [id="comparison"] .rounded-[2rem],
-          .zedpera-template [id="comparison"] .rounded-3xl {
-            background: rgba(255, 255, 255, 0.96) !important;
-            color: #050505 !important;
-          }
-
-          .zedpera-template [id="comparison"] .rounded-[2rem] *,
-          .zedpera-template [id="comparison"] .rounded-3xl * {
-            color: #050505 !important;
-            -webkit-text-fill-color: #050505 !important;
-          }
-
-          .zedpera-template [id="comparison"] .text-red-300,
-          .zedpera-template [id="comparison"] .text-rose-300 {
-            color: #dc2626 !important;
-            -webkit-text-fill-color: #dc2626 !important;
-          }
-
-          .zedpera-template [id="comparison"] .text-emerald-300,
-          .zedpera-template [id="comparison"] .text-green-300 {
-            color: #059669 !important;
-            -webkit-text-fill-color: #059669 !important;
-          }
-
-          .zedpera-template [id="process"] > div:last-child {
-            grid-template-columns: 1fr !important;
-            gap: 18px !important;
-          }
-
-          .zedpera-template [id="process"] .rounded-full {
-            width: 64px !important;
-            height: 64px !important;
-            min-width: 64px !important;
-            min-height: 64px !important;
-            font-size: 18px !important;
-          }
-
-          .zedpera-template [id="pricing"] .scale-105 {
-            transform: none !important;
-          }
-
-          .zedpera-template [id="pricing"] .flex-wrap {
-            justify-content: flex-start !important;
-            gap: 12px !important;
-          }
-
-          .zedpera-template [id="faq"] button {
-            padding: 20px !important;
-          }
-
-          .zedpera-template [id="faq"] button span {
-            font-size: 15px !important;
-            line-height: 1.45 !important;
-          }
-
-          .zedpera-template [id="faq"] button + div {
-            padding-left: 20px !important;
-            padding-right: 20px !important;
-          }
-
-          .zedpera-template footer {
-            padding-left: 16px !important;
-            padding-right: 16px !important;
-          }
-
-          .zedpera-template footer .grid {
-            grid-template-columns: 1fr !important;
-          }
-
-          .zedpera-template footer a {
-            width: 100%;
+          .zedpera-template input::placeholder,
+          .zedpera-template textarea::placeholder {
+            color: rgba(255, 255, 255, 0.78) !important;
           }
         }
 
         @media (max-width: 480px) {
-          .zedpera-template {
-            font-size: 15px;
-          }
-
           .zedpera-template section {
             padding-left: 14px !important;
             padding-right: 14px !important;
-            padding-top: 54px !important;
-            padding-bottom: 54px !important;
           }
 
           .zedpera-template h1 {
-            font-size: clamp(2rem, 12.5vw, 3rem) !important;
+            font-size: 31px !important;
           }
 
-          .zedpera-template h2 {
-            font-size: clamp(1.65rem, 8.5vw, 2.2rem) !important;
+          .zedpera-template h2,
+          .zedpera-section-title {
+            font-size: 26px !important;
+          }
+
+          .zedpera-template p,
+          .zedpera-template li span {
+            font-size: 14px !important;
+          }
+
+          .zedpera-template .grid.max-w-\[760px\] {
+            grid-template-columns: 1fr !important;
+            gap: 14px !important;
+          }
+
+          .zedpera-template .mt-16.grid.overflow-hidden {
+            grid-template-columns: 1fr 1fr !important;
+            border-radius: 20px !important;
+          }
+
+          .zedpera-template .mt-16.grid.overflow-hidden > div {
+            border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+            padding: 16px 10px !important;
+          }
+
+          .zedpera-template .mt-16.grid.overflow-hidden > div:nth-child(2n) {
+            border-right: 0 !important;
+          }
+
+          .zedpera-template .mt-16.grid.overflow-hidden > div:nth-last-child(-n + 2) {
+            border-bottom: 0 !important;
+          }
+
+          .zedpera-template .text-3xl {
+            font-size: 25px !important;
+          }
+
+          .zedpera-template .text-2xl {
+            font-size: 22px !important;
+          }
+
+          .zedpera-template .p-8,
+          .zedpera-template .p-6,
+          .zedpera-template .p-5,
+          .zedpera-template .lg\:p-12 {
+            padding: 18px !important;
           }
 
           .zedpera-template .language-chip {
@@ -2910,114 +2948,32 @@ export default function LandingPage() {
             height: 26px;
             font-size: 11px;
           }
-
-          .zedpera-template [class*="p-12"] {
-            padding: 28px !important;
-          }
-
-          .zedpera-template [class*="p-10"] {
-            padding: 26px !important;
-          }
-
-          .zedpera-template [class*="p-8"] {
-            padding: 24px !important;
-          }
-
-          .zedpera-template [class*="p-7"] {
-            padding: 22px !important;
-          }
-
-          .zedpera-template [class*="p-6"] {
-            padding: 20px !important;
-          }
-
-          .zedpera-template [class*="gap-8"] {
-            gap: 20px !important;
-          }
-
-          .zedpera-template [class*="gap-6"] {
-            gap: 16px !important;
-          }
-
-          .zedpera-template [class*="mt-16"] {
-            margin-top: 36px !important;
-          }
-
-          .zedpera-template [class*="mt-12"] {
-            margin-top: 30px !important;
-          }
-
-          .zedpera-template [class*="mb-12"] {
-            margin-bottom: 30px !important;
-          }
-
-          .zedpera-template [class*="h-[520px]"] {
-            height: 410px !important;
-          }
-
-          .zedpera-template [class*="h-[620px]"] {
-            height: 430px !important;
-          }
-
-          .zedpera-template [class*="min-w-[270px]"],
-          .zedpera-template [class*="min-w-[250px]"],
-          .zedpera-template [class*="min-w-[220px]"] {
-            min-width: 0 !important;
-            width: 100% !important;
-          }
-
-          .zedpera-template [class*="h-[68px]"] {
-            height: auto !important;
-            min-height: 58px !important;
-            padding-top: 12px !important;
-            padding-bottom: 12px !important;
-          }
-
-          .zedpera-template [class*="text-[18px]"] {
-            font-size: 15px !important;
-          }
-
-          .zedpera-template [class*="text-[17px]"] {
-            font-size: 15px !important;
-          }
-
-          .zedpera-template .shadow-2xl,
-          .zedpera-template [class*="shadow-[0_0_110px"],
-          .zedpera-template [class*="shadow-[0_0_90px"] {
-            box-shadow: 0 18px 45px rgba(0, 0, 0, 0.42) !important;
-          }
         }
 
         @media (max-width: 380px) {
-          .zedpera-template header a[href="/"] > div:last-child {
-            max-width: 118px;
+          .zedpera-template header > div {
+            padding-left: 12px !important;
+            padding-right: 12px !important;
+          }
+
+          .zedpera-template header a[href='/'] > div:last-child {
             font-size: 15px !important;
+          }
+
+          .zedpera-template h1 {
+            font-size: 28px !important;
+          }
+
+          .zedpera-template h2,
+          .zedpera-section-title {
+            font-size: 24px !important;
           }
 
           .zedpera-template section {
             padding-left: 12px !important;
             padding-right: 12px !important;
           }
-
-          .zedpera-template h1 {
-            font-size: 2rem !important;
-          }
-
-          .zedpera-template h2 {
-            font-size: 1.55rem !important;
-          }
-
-          .zedpera-template p {
-            font-size: 14px;
-          }
-
-          .zedpera-template [id="features"] .rounded-3xl,
-          .zedpera-template [id="reviews"] .rounded-3xl,
-          .zedpera-template [id="pricing"] .rounded-3xl {
-            padding: 20px !important;
-          }
         }
-
       `}</style>
 
       <div

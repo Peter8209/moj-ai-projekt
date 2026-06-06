@@ -3444,6 +3444,151 @@ export default function LandingPage() {
           }
         }
 
+
+
+        /* =========================================================
+           FINAL MOBILE BLACK UI OVERRIDE
+           Purpose: every inner white window/card/pill on mobile becomes
+           black/dark with strong white readable text.
+        ========================================================= */
+        @media (max-width: 1279px) {
+          .zedpera-template,
+          .zedpera-template * {
+            box-sizing: border-box !important;
+          }
+
+          .zedpera-template {
+            background: #000000 !important;
+            color: #ffffff !important;
+          }
+
+          /* Remove ALL white windows, including Tailwind bg-white/5, bg-white/10, bg-white/[...] */
+          .zedpera-template [class*='bg-white'],
+          .zedpera-template [class~='bg-white'] {
+            background: linear-gradient(180deg, rgba(10, 10, 18, 0.98) 0%, rgba(0, 0, 0, 0.98) 100%) !important;
+            background-color: #05050b !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            border-color: rgba(255, 255, 255, 0.16) !important;
+            box-shadow: 0 18px 55px rgba(0, 0, 0, 0.58), inset 0 0 0 1px rgba(255, 255, 255, 0.045) !important;
+          }
+
+          .zedpera-template [class*='bg-white'] *,
+          .zedpera-template [class~='bg-white'] * {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            border-color: rgba(255, 255, 255, 0.14) !important;
+          }
+
+          .zedpera-template [class*='text-black'],
+          .zedpera-template [class*='text-slate'],
+          .zedpera-template [class*='text-zinc'],
+          .zedpera-template [class*='text-neutral'],
+          .zedpera-template [class*='text-gray'] {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+          }
+
+          /* Keep violet/blue CTA buttons visible and modern */
+          .zedpera-template :is([class*='bg-violet'], [class*='bg-blue'], [class*='bg-fuchsia'], [class*='bg-gradient-to']) {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+          }
+
+          .zedpera-template :is([class*='bg-violet'], [class*='bg-blue'], [class*='bg-fuchsia'], [class*='bg-gradient-to']) * {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+          }
+
+          /* Hero top badge/pills and empty-looking bars */
+          .zedpera-template .rounded-full,
+          .zedpera-template .rounded-xl,
+          .zedpera-template .rounded-2xl,
+          .zedpera-template .rounded-3xl,
+          .zedpera-template .rounded-\[2rem\],
+          .zedpera-template .rounded-\[2\.5rem\] {
+            border-color: rgba(255, 255, 255, 0.14) !important;
+          }
+
+          /* Mobile header: button hore must stay visible */
+          .zedpera-template header a[href='#pricing'] {
+            display: inline-flex !important;
+            opacity: 1 !important;
+            visibility: visible !important;
+            background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #2563eb 100%) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            border: 1px solid rgba(221, 214, 254, 0.56) !important;
+            box-shadow: 0 16px 38px rgba(124, 58, 237, 0.48) !important;
+          }
+
+          .zedpera-template header button[aria-label='Menu'] {
+            background: rgba(7, 7, 13, 0.96) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            border: 1px solid rgba(255, 255, 255, 0.20) !important;
+          }
+
+          /* Professional dark mobile menu drawer */
+          .zedpera-template header .fixed.left-0.right-0 {
+            background: rgba(0, 0, 0, 0.985) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            border: 1px solid rgba(167, 139, 250, 0.30) !important;
+            box-shadow: 0 30px 90px rgba(0, 0, 0, 0.88), inset 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
+          }
+
+          .zedpera-template header .fixed.left-0.right-0 a,
+          .zedpera-template header .fixed.left-0.right-0 button,
+          .zedpera-template .zedpera-mobile-bottom-nav a {
+            background: rgba(8, 8, 16, 0.96) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            border: 1px solid rgba(255, 255, 255, 0.14) !important;
+          }
+
+          .zedpera-template header .fixed.left-0.right-0 a[href='#pricing'],
+          .zedpera-template .zedpera-mobile-bottom-nav a[href='#pricing'] {
+            background: linear-gradient(135deg, #7c3aed 0%, #a855f7 48%, #2563eb 100%) !important;
+            border-color: rgba(221, 214, 254, 0.58) !important;
+            box-shadow: 0 16px 36px rgba(124, 58, 237, 0.42) !important;
+          }
+
+          /* Bottom mobile nav: black glass, readable, safe-area ready */
+          .zedpera-template .zedpera-mobile-bottom-nav {
+            display: grid !important;
+            background: rgba(0, 0, 0, 0.96) !important;
+            border: 1px solid rgba(255, 255, 255, 0.16) !important;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.86), inset 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
+            backdrop-filter: blur(24px) !important;
+            padding-bottom: calc(0.5rem + env(safe-area-inset-bottom)) !important;
+          }
+        }
+
+        @media (max-width: 430px) {
+          .zedpera-template [class*='bg-white'],
+          .zedpera-template [class~='bg-white'] {
+            border-radius: 18px !important;
+          }
+
+          .zedpera-template .zedpera-mobile-bottom-nav {
+            left: 10px !important;
+            right: 10px !important;
+            bottom: 10px !important;
+            grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+            gap: 6px !important;
+            border-radius: 22px !important;
+          }
+
+          .zedpera-template .zedpera-mobile-bottom-nav a {
+            min-height: 56px !important;
+            padding-left: 4px !important;
+            padding-right: 4px !important;
+            font-size: 9px !important;
+            line-height: 1.1 !important;
+          }
+        }
+
       `}</style>
 
       <div

@@ -23,15 +23,25 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 const THEME_STORAGE_KEY = 'zedpera_theme';
 const LEGACY_THEME_STORAGE_KEY = 'zedpera-theme';
-const THEME_STYLE_ID = 'zedpera-global-dark-ui-style-v1';
+const THEME_STYLE_ID = 'zedpera-global-force-light-ui-style-v4';
 
 function isTheme(value: unknown): value is Theme {
   return value === 'light' || value === 'dark';
 }
 
+function getSystemTheme(): Theme {
+  if (typeof window === 'undefined') {
+    return 'light';
+  }
+
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : 'light';
+}
+
 function getInitialTheme(): Theme {
   if (typeof window === 'undefined') {
-    return 'dark';
+    return 'light';
   }
 
   try {
@@ -46,7 +56,7 @@ function getInitialTheme(): Theme {
     // ignore
   }
 
-  return 'dark';
+  return getSystemTheme();
 }
 
 function injectThemeStyle() {
@@ -54,8 +64,7 @@ function injectThemeStyle() {
     return;
   }
 
-  const existingStyle = document.getElementById(THEME_STYLE_ID);
-  if (existingStyle) {
+  if (document.getElementById(THEME_STYLE_ID)) {
     return;
   }
 
@@ -64,53 +73,13 @@ function injectThemeStyle() {
 
   style.innerHTML = `
     /* =========================================================
-       ZEDPERA GLOBAL THEME
-       Predvolený režim: DARK
+       ZEDPERA - FORCE GLOBAL LIGHT UI
        Cieľ:
-       - tmavé pozadie
-       - biele čitateľné písmo
-       - tmavé karty, modaly, menu, inputy, tabuľky
-       - profesionálna mobilná responzivita
+       - light režim = všetko svetlé
+       - text musí byť tmavý a kontrastný
+       - žiadne tmavé karty, modaly, boxy v light režime
+       - bočná lišta, dashboard, wizard, detail práce, história, všetko
     ========================================================= */
-
-    html[data-theme='dark'] {
-      color-scheme: dark;
-
-      --zed-bg: #03040a;
-      --zed-bg-2: #050711;
-      --zed-bg-3: #080b16;
-
-      --zed-surface: #080b16;
-      --zed-surface-2: #0b1020;
-      --zed-surface-3: #10172a;
-      --zed-surface-4: #151d33;
-
-      --zed-sidebar: #050711;
-      --zed-sidebar-active: #17102f;
-
-      --zed-border: rgba(255,255,255,0.12);
-      --zed-border-strong: rgba(255,255,255,0.22);
-      --zed-ring: rgba(139,92,246,0.22);
-
-      --zed-text: #ffffff;
-      --zed-text-2: #f8fafc;
-      --zed-text-3: #e5e7eb;
-      --zed-soft: #cbd5e1;
-      --zed-muted: #94a3b8;
-      --zed-placeholder: #94a3b8;
-
-      --zed-primary: #8b5cf6;
-      --zed-primary-2: #a855f7;
-      --zed-primary-3: #d946ef;
-      --zed-primary-soft: rgba(139,92,246,0.18);
-
-      --zed-success: #34d399;
-      --zed-danger: #fb7185;
-      --zed-info: #60a5fa;
-
-      --zed-shadow: 0 18px 45px rgba(0,0,0,0.45);
-      --zed-shadow-strong: 0 24px 70px rgba(0,0,0,0.60);
-    }
 
     html[data-theme='light'] {
       color-scheme: light;
@@ -120,35 +89,70 @@ function injectThemeStyle() {
       --zed-bg-3: #f8fafc;
 
       --zed-surface: #ffffff;
-      --zed-surface-2: #f8fafc;
-      --zed-surface-3: #eef2ff;
-      --zed-surface-4: #e9d5ff;
+      --zed-surface-2: #f8fbff;
+      --zed-surface-3: #eef4fb;
+      --zed-surface-4: #e9f0f8;
 
-      --zed-sidebar: #ffffff;
-      --zed-sidebar-active: #f3e8ff;
+      --zed-sidebar: #f7f9fc;
+      --zed-sidebar-active: #ffffff;
 
       --zed-border: #cbd5e1;
       --zed-border-strong: #94a3b8;
-      --zed-ring: rgba(124,58,237,0.18);
+      --zed-ring: rgba(124, 58, 237, 0.16);
 
       --zed-text: #020617;
       --zed-text-2: #0f172a;
       --zed-text-3: #1e293b;
       --zed-soft: #334155;
-      --zed-muted: #475569;
       --zed-placeholder: #64748b;
 
       --zed-primary: #7c3aed;
       --zed-primary-2: #9333ea;
-      --zed-primary-3: #c026d3;
-      --zed-primary-soft: rgba(124,58,237,0.10);
+      --zed-primary-soft: rgba(124, 58, 237, 0.08);
 
       --zed-success: #047857;
       --zed-danger: #dc2626;
       --zed-info: #2563eb;
 
-      --zed-shadow: 0 14px 35px rgba(15,23,42,0.10);
-      --zed-shadow-strong: 0 20px 50px rgba(15,23,42,0.16);
+      --zed-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      --zed-shadow-strong: 0 14px 38px rgba(15, 23, 42, 0.12);
+    }
+
+    html[data-theme='dark'] {
+      color-scheme: dark;
+
+      --zed-bg: #050711;
+      --zed-bg-2: #070a16;
+      --zed-bg-3: #0b1020;
+
+      --zed-surface: #0b1020;
+      --zed-surface-2: #10172a;
+      --zed-surface-3: #151d33;
+      --zed-surface-4: #172038;
+
+      --zed-sidebar: #050711;
+      --zed-sidebar-active: #111827;
+
+      --zed-border: rgba(255,255,255,0.12);
+      --zed-border-strong: rgba(255,255,255,0.20);
+      --zed-ring: rgba(139, 92, 246, 0.18);
+
+      --zed-text: #ffffff;
+      --zed-text-2: #f8fafc;
+      --zed-text-3: #e2e8f0;
+      --zed-soft: #cbd5e1;
+      --zed-placeholder: #94a3b8;
+
+      --zed-primary: #8b5cf6;
+      --zed-primary-2: #d946ef;
+      --zed-primary-soft: rgba(139, 92, 246, 0.14);
+
+      --zed-success: #34d399;
+      --zed-danger: #f87171;
+      --zed-info: #60a5fa;
+
+      --zed-shadow: 0 14px 40px rgba(0, 0, 0, 0.42);
+      --zed-shadow-strong: 0 18px 48px rgba(0, 0, 0, 0.52);
     }
 
     html,
@@ -162,7 +166,7 @@ function injectThemeStyle() {
       margin: 0;
       -webkit-font-smoothing: antialiased;
       text-rendering: geometricPrecision;
-      font-weight: 650;
+      font-weight: 600;
     }
 
     .theme-root,
@@ -178,27 +182,21 @@ function injectThemeStyle() {
     .dashboard-shell,
     .dashboard-shell *,
     .dashboard-page,
-    .dashboard-page *,
-    body * {
+    .dashboard-page * {
       box-sizing: border-box;
       -webkit-font-smoothing: antialiased;
       text-rendering: geometricPrecision;
+      transition:
+        background-color 0.22s ease,
+        color 0.22s ease,
+        border-color 0.22s ease,
+        box-shadow 0.22s ease,
+        opacity 0.22s ease;
     }
 
-    .theme-root :where(
-      h1,
-      h2,
-      h3,
-      h4,
-      h5,
-      h6,
-      strong,
-      b
-    ) {
-      color: var(--zed-text) !important;
-      font-weight: 900 !important;
-      opacity: 1 !important;
-    }
+    /* =========================================================
+       1. GLOBÁLNY TMAVÝ A ZVÝRAZNENÝ TEXT
+    ========================================================= */
 
     .theme-root :where(
       p,
@@ -210,154 +208,226 @@ function injectThemeStyle() {
       td,
       th,
       a,
-      button
+      button,
+      input,
+      textarea,
+      select
     ) {
-      color: var(--zed-text-2) !important;
-      opacity: 1 !important;
       font-weight: 700;
     }
 
-    html[data-theme='dark'] body :where(
-      main,
-      section,
-      article,
-      aside,
-      nav,
-      header,
-      footer,
-      form,
-      dialog
+    html[data-theme='light'] .theme-root :where(
+      p,
+      span,
+      div,
+      label,
+      small,
+      li,
+      td,
+      th,
+      a
     ) {
-      background-color: transparent;
+      color: var(--zed-text-2) !important;
+      opacity: 1 !important;
+    }
+
+    html[data-theme='dark'] .theme-root :where(
+      p,
+      span,
+      div,
+      label,
+      small,
+      li,
+      td,
+      th,
+      a
+    ) {
+      color: var(--zed-text-2) !important;
+      opacity: 1 !important;
+    }
+
+    .theme-root :where(h1, h2, h3, h4, h5, h6, strong, b) {
       color: var(--zed-text) !important;
+      font-weight: 900 !important;
+      letter-spacing: -0.01em;
+      opacity: 1 !important;
     }
 
     /* =========================================================
-       DARK MODE - všetky svetlé okná prepísať na tmavé
+       2. PREPÍSANIE BLEDÝCH TEXTOV
     ========================================================= */
 
-    html[data-theme='dark'] body [class*="bg-white"],
-    html[data-theme='dark'] body [class*="bg-white/"],
-    html[data-theme='dark'] body [class*="bg-slate-50"],
-    html[data-theme='dark'] body [class*="bg-slate-100"],
-    html[data-theme='dark'] body [class*="bg-slate-200"],
-    html[data-theme='dark'] body [class*="bg-gray-50"],
-    html[data-theme='dark'] body [class*="bg-gray-100"],
-    html[data-theme='dark'] body [class*="bg-gray-200"],
-    html[data-theme='dark'] body [class*="bg-zinc-50"],
-    html[data-theme='dark'] body [class*="bg-zinc-100"],
-    html[data-theme='dark'] body [class*="bg-zinc-200"],
-    html[data-theme='dark'] body [class*="bg-neutral-50"],
-    html[data-theme='dark'] body [class*="bg-neutral-100"],
-    html[data-theme='dark'] body [class*="bg-neutral-200"],
-    html[data-theme='dark'] body [class*="bg-stone-50"],
-    html[data-theme='dark'] body [class*="bg-stone-100"],
-    html[data-theme='dark'] body [class*="bg-violet-50"],
-    html[data-theme='dark'] body [class*="bg-purple-50"],
-    html[data-theme='dark'] body [class*="bg-indigo-50"] {
-      background: var(--zed-surface-2) !important;
-      background-color: var(--zed-surface-2) !important;
-      color: var(--zed-text) !important;
-      border-color: var(--zed-border) !important;
-      box-shadow: var(--zed-shadow) !important;
-    }
-
-    html[data-theme='dark'] body [class*="bg-white"] *,
-    html[data-theme='dark'] body [class*="bg-white/"] *,
-    html[data-theme='dark'] body [class*="bg-slate-50"] *,
-    html[data-theme='dark'] body [class*="bg-slate-100"] *,
-    html[data-theme='dark'] body [class*="bg-slate-200"] *,
-    html[data-theme='dark'] body [class*="bg-gray-50"] *,
-    html[data-theme='dark'] body [class*="bg-gray-100"] *,
-    html[data-theme='dark'] body [class*="bg-gray-200"] *,
-    html[data-theme='dark'] body [class*="bg-zinc-50"] *,
-    html[data-theme='dark'] body [class*="bg-zinc-100"] *,
-    html[data-theme='dark'] body [class*="bg-zinc-200"] *,
-    html[data-theme='dark'] body [class*="bg-neutral-50"] *,
-    html[data-theme='dark'] body [class*="bg-neutral-100"] *,
-    html[data-theme='dark'] body [class*="bg-neutral-200"] *,
-    html[data-theme='dark'] body [class*="bg-stone-50"] *,
-    html[data-theme='dark'] body [class*="bg-stone-100"] *,
-    html[data-theme='dark'] body [class*="bg-violet-50"] *,
-    html[data-theme='dark'] body [class*="bg-purple-50"] *,
-    html[data-theme='dark'] body [class*="bg-indigo-50"] * {
-      color: var(--zed-text) !important;
+    html[data-theme='light'] .theme-root [class*="text-slate-"],
+    html[data-theme='light'] .theme-root [class*="text-gray-"],
+    html[data-theme='light'] .theme-root [class*="text-zinc-"],
+    html[data-theme='light'] .theme-root [class*="text-neutral-"],
+    html[data-theme='light'] .theme-root [class*="text-stone-"] {
+      color: var(--zed-text-3) !important;
       opacity: 1 !important;
       font-weight: 750 !important;
     }
 
+    html[data-theme='dark'] .theme-root [class*="text-slate-"],
+    html[data-theme='dark'] .theme-root [class*="text-gray-"],
+    html[data-theme='dark'] .theme-root [class*="text-zinc-"],
+    html[data-theme='dark'] .theme-root [class*="text-neutral-"],
+    html[data-theme='dark'] .theme-root [class*="text-stone-"] {
+      color: var(--zed-soft) !important;
+      opacity: 1 !important;
+      font-weight: 750 !important;
+    }
+
+    html[data-theme='light'] .theme-root [class*="text-violet-"],
+    html[data-theme='light'] .theme-root [class*="text-purple-"],
+    html[data-theme='light'] .theme-root [class*="text-fuchsia-"] {
+      color: #6d28d9 !important;
+      opacity: 1 !important;
+      font-weight: 800 !important;
+    }
+
+    html[data-theme='dark'] .theme-root [class*="text-violet-"],
+    html[data-theme='dark'] .theme-root [class*="text-purple-"],
+    html[data-theme='dark'] .theme-root [class*="text-fuchsia-"] {
+      color: #e9d5ff !important;
+      opacity: 1 !important;
+      font-weight: 800 !important;
+    }
+
     /* =========================================================
-       Karty / boxy / modaly / panely
+       3. OPACITY - nič nesmie byť nečitateľné
     ========================================================= */
 
-    .theme-root .dashboard-surface,
-    .theme-root .dashboard-surface-soft,
-    .theme-root .card,
-    .theme-root [data-card='true'],
-    .theme-root [data-surface='soft'],
-    .theme-root [class*="rounded-"][class*="border"],
-    .theme-root [class*="shadow"] {
-      background: var(--zed-surface-2) !important;
+    .theme-root [class*="opacity-0"],
+    .theme-root [class*="opacity-5"],
+    .theme-root [class*="opacity-10"],
+    .theme-root [class*="opacity-20"],
+    .theme-root [class*="opacity-25"],
+    .theme-root [class*="opacity-30"],
+    .theme-root [class*="opacity-40"],
+    .theme-root [class*="opacity-50"],
+    .theme-root [class*="opacity-60"],
+    .theme-root [class*="opacity-70"],
+    .theme-root [class*="opacity-75"] {
+      opacity: 1 !important;
+    }
+
+    .theme-root :where(
+      button:disabled,
+      input:disabled,
+      textarea:disabled,
+      select:disabled,
+      [aria-disabled='true']
+    ) {
+      opacity: 0.92 !important;
+      color: var(--zed-soft) !important;
+      cursor: not-allowed !important;
+      font-weight: 700 !important;
+    }
+
+    /* =========================================================
+       4. LIGHT MODE - úplne všetko svetlé
+    ========================================================= */
+
+    html[data-theme='light'] .theme-root,
+    html[data-theme='light'] .theme-root main,
+    html[data-theme='light'] .theme-root section,
+    html[data-theme='light'] .theme-root article,
+    html[data-theme='light'] .theme-root aside,
+    html[data-theme='light'] .theme-root nav,
+    html[data-theme='light'] .theme-root header,
+    html[data-theme='light'] .theme-root footer,
+    html[data-theme='light'] .theme-root form,
+    html[data-theme='light'] .theme-root dialog {
+      color: var(--zed-text) !important;
+    }
+
+    html[data-theme='light'] .theme-root [class*="bg-[#050711]"],
+    html[data-theme='light'] .theme-root [class*="bg-[#070a16]"],
+    html[data-theme='light'] .theme-root [class*="bg-[#0b1020]"],
+    html[data-theme='light'] .theme-root [class*="bg-[#020617]"],
+    html[data-theme='light'] .theme-root [class*="bg-slate-950"],
+    html[data-theme='light'] .theme-root [class*="bg-slate-900"],
+    html[data-theme='light'] .theme-root [class*="bg-slate-800"],
+    html[data-theme='light'] .theme-root [class*="bg-gray-950"],
+    html[data-theme='light'] .theme-root [class*="bg-gray-900"],
+    html[data-theme='light'] .theme-root [class*="bg-gray-800"],
+    html[data-theme='light'] .theme-root [class*="bg-zinc-950"],
+    html[data-theme='light'] .theme-root [class*="bg-zinc-900"],
+    html[data-theme='light'] .theme-root [class*="bg-zinc-800"],
+    html[data-theme='light'] .theme-root [class*="bg-neutral-950"],
+    html[data-theme='light'] .theme-root [class*="bg-neutral-900"],
+    html[data-theme='light'] .theme-root [class*="bg-black"],
+    html[data-theme='light'] .theme-root [class*="bg-black/"],
+    html[data-theme='light'] .theme-root [class*="bg-violet-950"],
+    html[data-theme='light'] .theme-root [class*="bg-purple-950"],
+    html[data-theme='light'] .theme-root [class*="bg-indigo-950"] {
+      background: var(--zed-surface) !important;
       color: var(--zed-text) !important;
       border-color: var(--zed-border) !important;
       box-shadow: var(--zed-shadow) !important;
     }
 
-    .theme-root .dashboard-surface *,
-    .theme-root .dashboard-surface-soft *,
-    .theme-root .card *,
-    .theme-root [data-card='true'] *,
-    .theme-root [data-surface='soft'] *,
-    .theme-root [class*="rounded-"][class*="border"] *,
-    .theme-root [class*="shadow"] * {
-      color: var(--zed-text) !important;
-      opacity: 1 !important;
-    }
-
-    body :where(
-      [role='dialog'],
-      dialog,
-      [data-modal='true'],
-      [data-dialog='true'],
-      [data-radix-dialog-content],
-      [data-headlessui-state],
-      [aria-modal='true'],
-      .modal,
-      .dialog,
-      .Dialog,
-      .ReactModal__Content
-    ) {
+    html[data-theme='light'] .theme-root [class*="bg-white/"],
+    html[data-theme='light'] .theme-root [class*="bg-white["],
+    html[data-theme='light'] .theme-root [class*="bg-slate-50"],
+    html[data-theme='light'] .theme-root [class*="bg-slate-100"],
+    html[data-theme='light'] .theme-root [class*="bg-slate-200"],
+    html[data-theme='light'] .theme-root [class*="bg-gray-50"],
+    html[data-theme='light'] .theme-root [class*="bg-gray-100"],
+    html[data-theme='light'] .theme-root [class*="bg-gray-200"],
+    html[data-theme='light'] .theme-root [class*="bg-zinc-50"],
+    html[data-theme='light'] .theme-root [class*="bg-zinc-100"],
+    html[data-theme='light'] .theme-root [class*="bg-zinc-200"],
+    html[data-theme='light'] .theme-root [class*="bg-neutral-50"],
+    html[data-theme='light'] .theme-root [class*="bg-neutral-100"],
+    html[data-theme='light'] .theme-root [class*="bg-neutral-200"],
+    html[data-theme='light'] .theme-root [class*="bg-violet-50"],
+    html[data-theme='light'] .theme-root [class*="bg-purple-50"],
+    html[data-theme='light'] .theme-root [class*="bg-indigo-50"] {
       background: var(--zed-surface-2) !important;
       color: var(--zed-text) !important;
       border-color: var(--zed-border) !important;
-      box-shadow: var(--zed-shadow-strong) !important;
     }
 
-    body :where(
-      [role='dialog'],
-      dialog,
-      [data-modal='true'],
-      [data-dialog='true'],
-      [data-radix-dialog-content],
-      [data-headlessui-state],
-      [aria-modal='true'],
-      .modal,
-      .dialog,
-      .Dialog,
-      .ReactModal__Content
-    ) * {
-      color: var(--zed-text) !important;
+    /* Tmavé karty a detail boxy - ich obsah tiež tmavý */
+    html[data-theme='light'] .theme-root [class*="bg-[#050711]"] *,
+    html[data-theme='light'] .theme-root [class*="bg-[#070a16]"] *,
+    html[data-theme='light'] .theme-root [class*="bg-[#0b1020]"] *,
+    html[data-theme='light'] .theme-root [class*="bg-[#020617]"] *,
+    html[data-theme='light'] .theme-root [class*="bg-slate-950"] *,
+    html[data-theme='light'] .theme-root [class*="bg-slate-900"] *,
+    html[data-theme='light'] .theme-root [class*="bg-slate-800"] *,
+    html[data-theme='light'] .theme-root [class*="bg-gray-950"] *,
+    html[data-theme='light'] .theme-root [class*="bg-gray-900"] *,
+    html[data-theme='light'] .theme-root [class*="bg-gray-800"] *,
+    html[data-theme='light'] .theme-root [class*="bg-zinc-950"] *,
+    html[data-theme='light'] .theme-root [class*="bg-zinc-900"] *,
+    html[data-theme='light'] .theme-root [class*="bg-zinc-800"] *,
+    html[data-theme='light'] .theme-root [class*="bg-neutral-950"] *,
+    html[data-theme='light'] .theme-root [class*="bg-neutral-900"] * {
+      color: var(--zed-text-2) !important;
       opacity: 1 !important;
     }
 
+    /* Gradienty a jemné highlight bloky */
+    html[data-theme='light'] .theme-root [class*="from-violet-"],
+    html[data-theme='light'] .theme-root [class*="from-purple-"],
+    html[data-theme='light'] .theme-root [class*="from-fuchsia-"],
+    html[data-theme='light'] .theme-root [class*="from-indigo-"],
+    html[data-theme='light'] .theme-root [class*="to-violet-"],
+    html[data-theme='light'] .theme-root [class*="to-purple-"],
+    html[data-theme='light'] .theme-root [class*="to-fuchsia-"],
+    html[data-theme='light'] .theme-root [class*="to-indigo-"] {
+      border-color: #d8b4fe !important;
+    }
+
     /* =========================================================
-       Sidebar / header / menu
+       5. SIDEBAR / MENU / HEADER
     ========================================================= */
 
     .theme-root aside,
     .theme-root nav,
     .theme-root header,
-    .theme-root footer,
     .theme-root .dashboard-sidebar,
     .theme-root .sidebar,
     .theme-root [data-sidebar='true'] {
@@ -369,7 +439,6 @@ function injectThemeStyle() {
     .theme-root aside *,
     .theme-root nav *,
     .theme-root header *,
-    .theme-root footer *,
     .theme-root .dashboard-sidebar *,
     .theme-root .sidebar *,
     .theme-root [data-sidebar='true'] * {
@@ -389,53 +458,80 @@ function injectThemeStyle() {
     }
 
     /* =========================================================
-       Text farby / opacity
+       6. KARTY, BOXES, SURFACES, WIZARD BLOKY
     ========================================================= */
 
-    .theme-root [class*="text-slate-"],
-    .theme-root [class*="text-gray-"],
-    .theme-root [class*="text-zinc-"],
-    .theme-root [class*="text-neutral-"],
-    .theme-root [class*="text-stone-"] {
-      color: var(--zed-soft) !important;
-      opacity: 1 !important;
-      font-weight: 750 !important;
+    .theme-root .dashboard-surface,
+    .theme-root .card,
+    .theme-root [data-card='true'],
+    .theme-root [class*="rounded-"][class*="border"],
+    .theme-root [class*="shadow"] {
+      border-color: var(--zed-border) !important;
     }
 
-    .theme-root [class*="text-violet-"],
-    .theme-root [class*="text-purple-"],
-    .theme-root [class*="text-fuchsia-"],
-    .theme-root [class*="text-indigo-"] {
-      color: #e9d5ff !important;
-      opacity: 1 !important;
-      font-weight: 850 !important;
+    html[data-theme='light'] .theme-root .dashboard-surface,
+    html[data-theme='light'] .theme-root .card,
+    html[data-theme='light'] .theme-root [data-card='true'] {
+      background: var(--zed-surface) !important;
+      color: var(--zed-text) !important;
+      border-color: var(--zed-border) !important;
+      box-shadow: var(--zed-shadow) !important;
     }
 
-    .theme-root [class*="opacity-0"],
-    .theme-root [class*="opacity-5"],
-    .theme-root [class*="opacity-10"],
-    .theme-root [class*="opacity-20"],
-    .theme-root [class*="opacity-25"],
-    .theme-root [class*="opacity-30"],
-    .theme-root [class*="opacity-40"],
-    .theme-root [class*="opacity-50"],
-    .theme-root [class*="opacity-60"],
-    .theme-root [class*="opacity-70"],
-    .theme-root [class*="opacity-75"] {
+    html[data-theme='light'] .theme-root .dashboard-surface-soft,
+    html[data-theme='light'] .theme-root [data-surface='soft'] {
+      background: var(--zed-surface-2) !important;
+      color: var(--zed-text) !important;
+      border-color: var(--zed-border) !important;
+      box-shadow: none !important;
+    }
+
+    /* Pomoc pre modaly a detail práce */
+    html[data-theme='light'] .theme-root [role='dialog'],
+    html[data-theme='light'] .theme-root dialog,
+    html[data-theme='light'] .theme-root [class*="modal"],
+    html[data-theme='light'] .theme-root [class*="Dialog"] {
+      background: var(--zed-surface) !important;
+      color: var(--zed-text) !important;
+      border-color: var(--zed-border) !important;
+      box-shadow: var(--zed-shadow-strong) !important;
+    }
+
+    html[data-theme='light'] .theme-root [role='dialog'] *,
+    html[data-theme='light'] .theme-root dialog *,
+    html[data-theme='light'] .theme-root [class*="modal"] *,
+    html[data-theme='light'] .theme-root [class*="Dialog"] * {
+      color: var(--zed-text-2) !important;
       opacity: 1 !important;
     }
 
     /* =========================================================
-       Inputy / selecty / textarea
+       7. BORDERS
+    ========================================================= */
+
+    .theme-root .border,
+    .theme-root [class*="border"] {
+      border-color: var(--zed-border) !important;
+    }
+
+    .theme-root [class*="border-white/"],
+    .theme-root [class*="border-slate-"],
+    .theme-root [class*="border-gray-"],
+    .theme-root [class*="border-zinc-"],
+    .theme-root [class*="border-neutral-"],
+    .theme-root [class*="border-violet-"],
+    .theme-root [class*="border-purple-"] {
+      border-color: var(--zed-border) !important;
+    }
+
+    /* =========================================================
+       8. INPUTY / PLACEHOLDERY / TEXTAREA
     ========================================================= */
 
     .theme-root input,
     .theme-root textarea,
-    .theme-root select,
-    body input,
-    body textarea,
-    body select {
-      background: var(--zed-surface-2) !important;
+    .theme-root select {
+      background: var(--zed-surface) !important;
       color: var(--zed-text) !important;
       border-color: var(--zed-border) !important;
       caret-color: var(--zed-primary) !important;
@@ -443,9 +539,7 @@ function injectThemeStyle() {
     }
 
     .theme-root input::placeholder,
-    .theme-root textarea::placeholder,
-    body input::placeholder,
-    body textarea::placeholder {
+    .theme-root textarea::placeholder {
       color: var(--zed-placeholder) !important;
       opacity: 1 !important;
       font-weight: 700 !important;
@@ -453,17 +547,14 @@ function injectThemeStyle() {
 
     .theme-root input:focus,
     .theme-root textarea:focus,
-    .theme-root select:focus,
-    body input:focus,
-    body textarea:focus,
-    body select:focus {
+    .theme-root select:focus {
       outline: none !important;
       border-color: var(--zed-primary) !important;
       box-shadow: 0 0 0 4px var(--zed-ring) !important;
     }
 
     /* =========================================================
-       Buttony
+       9. BUTTONY
     ========================================================= */
 
     .theme-root button,
@@ -474,12 +565,12 @@ function injectThemeStyle() {
       opacity: 1 !important;
     }
 
-    .theme-root button:not([class*="bg-violet"]):not([class*="bg-purple"]):not([class*="bg-fuchsia"]):not([class*="bg-blue"]):not([class*="bg-red"]):not([class*="bg-emerald"]),
-    .theme-root a:not([class*="bg-violet"]):not([class*="bg-purple"]):not([class*="bg-fuchsia"]):not([class*="bg-blue"]):not([class*="bg-red"]):not([class*="bg-emerald"]) {
+    html[data-theme='light'] .theme-root button:not([class*="bg-violet"]):not([class*="bg-purple"]):not([class*="bg-fuchsia"]):not([class*="bg-blue"]):not([class*="bg-red"]):not([class*="bg-emerald"]),
+    html[data-theme='light'] .theme-root a:not([class*="bg-violet"]):not([class*="bg-purple"]):not([class*="bg-fuchsia"]):not([class*="bg-blue"]):not([class*="bg-red"]):not([class*="bg-emerald"]) {
       color: var(--zed-text) !important;
-      border-color: var(--zed-border) !important;
     }
 
+    /* Farebné CTA tlačidlá ostávajú biele */
     .theme-root [class*="bg-violet-"],
     .theme-root [class*="bg-purple-"],
     .theme-root [class*="bg-fuchsia-"],
@@ -490,7 +581,6 @@ function injectThemeStyle() {
     .theme-root [class*="from-purple-"],
     .theme-root [class*="to-fuchsia-"],
     .theme-root [class*="to-violet-"] {
-      color: #ffffff !important;
       font-weight: 900 !important;
     }
 
@@ -508,140 +598,654 @@ function injectThemeStyle() {
       font-weight: 900 !important;
     }
 
-    button:disabled,
-    input:disabled,
-    textarea:disabled,
-    select:disabled,
-    [aria-disabled='true'] {
-      opacity: 0.88 !important;
-      color: var(--zed-muted) !important;
-      cursor: not-allowed !important;
-    }
-
-    /* =========================================================
-       Tabuľky
-    ========================================================= */
-
-    .theme-root table,
-    body table {
-      background: var(--zed-surface-2) !important;
+    /* Bledé tlačidlá v light mode nech sú svetlé a čitateľné */
+    html[data-theme='light'] .theme-root button:not([class*="bg-violet"]):not([class*="bg-purple"]):not([class*="bg-fuchsia"]):not([class*="bg-blue"]):not([class*="bg-red"]):not([class*="bg-emerald"]) {
+      background: var(--zed-surface) !important;
       color: var(--zed-text) !important;
       border-color: var(--zed-border) !important;
     }
 
-    .theme-root th,
-    body th {
+    /* =========================================================
+       10. TABUĽKY / MODALY / POPUPY
+    ========================================================= */
+
+    .theme-root table {
+      background: var(--zed-surface) !important;
+      color: var(--zed-text) !important;
+      border-color: var(--zed-border) !important;
+    }
+
+    .theme-root th {
       color: var(--zed-text) !important;
       font-weight: 900 !important;
     }
 
-    .theme-root td,
-    body td {
+    .theme-root td {
       color: var(--zed-text-2) !important;
       font-weight: 700 !important;
     }
 
-    /* =========================================================
-       Borders / SVG / scrollbar
-    ========================================================= */
-
-    .theme-root .border,
-    .theme-root [class*="border"],
-    body [class*="border"] {
-      border-color: var(--zed-border) !important;
+    html[data-theme='light'] .theme-root [class*="fixed inset-0"][class*="bg-black"],
+    html[data-theme='light'] .theme-root [class*="bg-black/80"],
+    html[data-theme='light'] .theme-root [class*="bg-black/70"],
+    html[data-theme='light'] .theme-root [class*="bg-black/60"],
+    html[data-theme='light'] .theme-root [class*="bg-black/50"] {
+      background: rgba(148, 163, 184, 0.18) !important;
     }
 
-    .theme-root svg,
-    body svg {
+    /* =========================================================
+       11. SVG IKONY
+    ========================================================= */
+
+    .theme-root svg {
       color: currentColor;
       stroke: currentColor;
       stroke-width: 2.25 !important;
       opacity: 1 !important;
     }
 
-    ::selection {
-      background: rgba(168,85,247,0.36);
-      color: #ffffff;
+    html[data-theme='light'] .theme-root svg {
+      color: var(--zed-text-3) !important;
     }
 
-    .theme-root ::-webkit-scrollbar,
-    body ::-webkit-scrollbar {
+    html[data-theme='dark'] .theme-root svg {
+      color: var(--zed-soft) !important;
+    }
+
+    .theme-root [class*="bg-violet-"] svg,
+    .theme-root [class*="bg-purple-"] svg,
+    .theme-root [class*="bg-fuchsia-"] svg,
+    .theme-root [class*="bg-blue-"] svg,
+    .theme-root [class*="bg-red-"] svg,
+    .theme-root [class*="bg-emerald-"] svg {
+      color: #ffffff !important;
+      stroke: #ffffff !important;
+    }
+
+    /* =========================================================
+       12. SCROLLBAR
+    ========================================================= */
+
+    .theme-root ::-webkit-scrollbar {
       width: 10px;
       height: 10px;
     }
 
-    .theme-root ::-webkit-scrollbar-track,
-    body ::-webkit-scrollbar-track {
-      background: #0f172a;
+    html[data-theme='light'] .theme-root ::-webkit-scrollbar-track {
+      background: #e2e8f0;
     }
 
-    .theme-root ::-webkit-scrollbar-thumb,
-    body ::-webkit-scrollbar-thumb {
+    html[data-theme='light'] .theme-root ::-webkit-scrollbar-thumb {
       background: #8b5cf6;
       border-radius: 999px;
     }
 
+    html[data-theme='dark'] .theme-root ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+
+    html[data-theme='dark'] .theme-root ::-webkit-scrollbar-thumb {
+      background: #8b5cf6;
+      border-radius: 999px;
+    }
+
+
+
     /* =========================================================
-       Mobilná profesionálna úprava
+       12B. DETAIL PRÁCE / MODAL / PORTAL / BODY - FORCE LIGHT
+       Toto rieši tmavé boxy v detaile práce, ktoré sú často mimo .theme-root.
     ========================================================= */
 
-    @media (max-width: 768px) {
-      html,
-      body,
-      .theme-root,
-      .dashboard-shell,
-      .dashboard-page {
-        background: #03040a !important;
-        color: #ffffff !important;
-      }
-
-      body {
-        overflow-x: hidden !important;
-      }
-
-      .theme-root main,
-      .theme-root section,
-      .theme-root article,
-      .theme-root aside,
-      .theme-root nav,
-      .theme-root header,
-      .theme-root footer {
-        max-width: 100vw !important;
-      }
-
-      .theme-root [class*="rounded"],
-      .theme-root [class*="shadow"],
-      .theme-root [class*="border"] {
-        background: var(--zed-surface-2) !important;
-        color: #ffffff !important;
-        border-color: rgba(255,255,255,0.14) !important;
-      }
-
-      .theme-root [class*="bg-white"],
-      .theme-root [class*="bg-slate-50"],
-      .theme-root [class*="bg-gray-50"],
-      .theme-root [class*="bg-zinc-50"],
-      .theme-root [class*="bg-neutral-50"] {
-        background: var(--zed-surface-2) !important;
-        color: #ffffff !important;
-      }
-
-      .theme-root [class*="bg-white"] *,
-      .theme-root [class*="bg-slate-50"] *,
-      .theme-root [class*="bg-gray-50"] *,
-      .theme-root [class*="bg-zinc-50"] *,
-      .theme-root [class*="bg-neutral-50"] * {
-        color: #ffffff !important;
-      }
-
-      .theme-root button,
-      .theme-root a,
-      .theme-root input,
-      .theme-root textarea,
-      .theme-root select {
-        min-height: 44px;
-      }
+    html[data-theme='light'] body {
+      background: #f4f7fb !important;
+      color: #020617 !important;
     }
+
+    html[data-theme='light'] body :where(
+      [role='dialog'],
+      dialog,
+      [data-modal='true'],
+      [data-dialog='true'],
+      [data-radix-dialog-content],
+      [data-headlessui-state],
+      .modal,
+      .dialog,
+      .Dialog,
+      .ReactModal__Content
+    ) {
+      background: #ffffff !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 18px 50px rgba(15, 23, 42, 0.16) !important;
+    }
+
+    html[data-theme='light'] body :where(
+      [role='dialog'],
+      dialog,
+      [data-modal='true'],
+      [data-dialog='true'],
+      [data-radix-dialog-content],
+      .modal,
+      .dialog,
+      .Dialog,
+      .ReactModal__Content
+    ) :where(
+      div,
+      section,
+      article,
+      header,
+      footer,
+      form,
+      p,
+      span,
+      small,
+      label,
+      strong,
+      b,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6
+    ) {
+      color: #020617 !important;
+      opacity: 1 !important;
+    }
+
+    html[data-theme='light'] body [class*="bg-[#050711]"],
+    html[data-theme='light'] body [class*="bg-[#070a16]"],
+    html[data-theme='light'] body [class*="bg-[#0b1020]"],
+    html[data-theme='light'] body [class*="bg-[#020617]"],
+    html[data-theme='light'] body [class*="bg-[#111827]"],
+    html[data-theme='light'] body [class*="bg-slate-950"],
+    html[data-theme='light'] body [class*="bg-slate-900"],
+    html[data-theme='light'] body [class*="bg-slate-800"],
+    html[data-theme='light'] body [class*="bg-gray-950"],
+    html[data-theme='light'] body [class*="bg-gray-900"],
+    html[data-theme='light'] body [class*="bg-gray-800"],
+    html[data-theme='light'] body [class*="bg-zinc-950"],
+    html[data-theme='light'] body [class*="bg-zinc-900"],
+    html[data-theme='light'] body [class*="bg-zinc-800"],
+    html[data-theme='light'] body [class*="bg-neutral-950"],
+    html[data-theme='light'] body [class*="bg-neutral-900"],
+    html[data-theme='light'] body [class*="bg-neutral-800"],
+    html[data-theme='light'] body [class*="bg-black"],
+    html[data-theme='light'] body [class*="bg-black/"],
+    html[data-theme='light'] body [class*="bg-violet-950"],
+    html[data-theme='light'] body [class*="bg-purple-950"],
+    html[data-theme='light'] body [class*="bg-indigo-950"] {
+      background: #ffffff !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08) !important;
+    }
+
+    html[data-theme='light'] body [class*="bg-[#050711]"] *,
+    html[data-theme='light'] body [class*="bg-[#070a16]"] *,
+    html[data-theme='light'] body [class*="bg-[#0b1020]"] *,
+    html[data-theme='light'] body [class*="bg-[#020617]"] *,
+    html[data-theme='light'] body [class*="bg-[#111827]"] *,
+    html[data-theme='light'] body [class*="bg-slate-950"] *,
+    html[data-theme='light'] body [class*="bg-slate-900"] *,
+    html[data-theme='light'] body [class*="bg-slate-800"] *,
+    html[data-theme='light'] body [class*="bg-gray-950"] *,
+    html[data-theme='light'] body [class*="bg-gray-900"] *,
+    html[data-theme='light'] body [class*="bg-gray-800"] *,
+    html[data-theme='light'] body [class*="bg-zinc-950"] *,
+    html[data-theme='light'] body [class*="bg-zinc-900"] *,
+    html[data-theme='light'] body [class*="bg-zinc-800"] *,
+    html[data-theme='light'] body [class*="bg-neutral-950"] *,
+    html[data-theme='light'] body [class*="bg-neutral-900"] *,
+    html[data-theme='light'] body [class*="bg-neutral-800"] *,
+    html[data-theme='light'] body [class*="bg-black"] *,
+    html[data-theme='light'] body [class*="bg-black/"] * {
+      color: #020617 !important;
+      opacity: 1 !important;
+      font-weight: 800 !important;
+    }
+
+    html[data-theme='light'] body :where(
+      [class*="tracking"],
+      [class*="uppercase"],
+      label,
+      small
+    ) {
+      color: #1e293b !important;
+      opacity: 1 !important;
+      font-weight: 900 !important;
+    }
+
+    html[data-theme='light'] body :where(
+      p,
+      span,
+      div,
+      li,
+      td,
+      th,
+      a,
+      button
+    ) {
+      color: #0f172a !important;
+      opacity: 1 !important;
+    }
+
+    html[data-theme='light'] body :where(
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6,
+      strong,
+      b
+    ) {
+      color: #020617 !important;
+      opacity: 1 !important;
+      font-weight: 900 !important;
+    }
+
+    html[data-theme='light'] body [class*="rounded-"][class*="border"] {
+      border-color: #cbd5e1 !important;
+    }
+
+    html[data-theme='light'] body [class*="text-slate-"],
+    html[data-theme='light'] body [class*="text-gray-"],
+    html[data-theme='light'] body [class*="text-zinc-"],
+    html[data-theme='light'] body [class*="text-neutral-"],
+    html[data-theme='light'] body [class*="text-stone-"] {
+      color: #1e293b !important;
+      opacity: 1 !important;
+      font-weight: 800 !important;
+    }
+
+    html[data-theme='light'] body [class*="opacity-0"],
+    html[data-theme='light'] body [class*="opacity-5"],
+    html[data-theme='light'] body [class*="opacity-10"],
+    html[data-theme='light'] body [class*="opacity-20"],
+    html[data-theme='light'] body [class*="opacity-25"],
+    html[data-theme='light'] body [class*="opacity-30"],
+    html[data-theme='light'] body [class*="opacity-40"],
+    html[data-theme='light'] body [class*="opacity-50"],
+    html[data-theme='light'] body [class*="opacity-60"],
+    html[data-theme='light'] body [class*="opacity-70"],
+    html[data-theme='light'] body [class*="opacity-75"] {
+      opacity: 1 !important;
+    }
+
+    html[data-theme='light'] body input,
+    html[data-theme='light'] body textarea,
+    html[data-theme='light'] body select {
+      background: #ffffff !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      font-weight: 800 !important;
+    }
+
+    html[data-theme='light'] body input::placeholder,
+    html[data-theme='light'] body textarea::placeholder {
+      color: #475569 !important;
+      opacity: 1 !important;
+      font-weight: 750 !important;
+    }
+
+    html[data-theme='light'] body [class*="bg-red-"],
+    html[data-theme='light'] body [class*="bg-red-"] * {
+      color: #ffffff !important;
+      background-color: #ef4444 !important;
+      font-weight: 900 !important;
+    }
+
+    html[data-theme='light'] body [class*="bg-violet-"],
+    html[data-theme='light'] body [class*="bg-purple-"],
+    html[data-theme='light'] body [class*="bg-fuchsia-"],
+    html[data-theme='light'] body [class*="bg-blue-"],
+    html[data-theme='light'] body [class*="from-violet-"],
+    html[data-theme='light'] body [class*="from-purple-"],
+    html[data-theme='light'] body [class*="to-fuchsia-"],
+    html[data-theme='light'] body [class*="to-violet-"] {
+      color: #ffffff !important;
+      font-weight: 900 !important;
+    }
+
+    html[data-theme='light'] body [class*="bg-violet-"] *,
+    html[data-theme='light'] body [class*="bg-purple-"] *,
+    html[data-theme='light'] body [class*="bg-fuchsia-"] *,
+    html[data-theme='light'] body [class*="bg-blue-"] *,
+    html[data-theme='light'] body [class*="from-violet-"] *,
+    html[data-theme='light'] body [class*="from-purple-"] *,
+    html[data-theme='light'] body [class*="to-fuchsia-"] *,
+    html[data-theme='light'] body [class*="to-violet-"] * {
+      color: #ffffff !important;
+      font-weight: 900 !important;
+    }
+
+
+    /* =========================================================
+       12C. PROJECTS / DETAIL PRÁCE - FORCE LIGHT V4
+       Opravuje tmavé karty v "Moje práce" / "Projects" detaile.
+       Dôvod: tieto boxy môžu mať vlastné className alebo inline background.
+    ========================================================= */
+
+    html[data-theme='light'] body,
+    html[data-theme='light'] #__next,
+    html[data-theme='light'] main,
+    html[data-theme='light'] [data-theme-ready],
+    html[data-theme='light'] .theme-root,
+    html[data-theme='light'] .dashboard-shell,
+    html[data-theme='light'] .dashboard-page {
+      background: #f4f7fb !important;
+      color: #020617 !important;
+    }
+
+    /* Hlavné veľké okno detailu práce */
+    html[data-theme='light'] body :where(
+      [role='dialog'],
+      dialog,
+      [data-modal='true'],
+      [data-dialog='true'],
+      [data-radix-dialog-content],
+      [data-headlessui-state],
+      [aria-modal='true'],
+      .modal,
+      .dialog,
+      .Dialog,
+      .ReactModal__Content
+    ) {
+      background: #ffffff !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 18px 55px rgba(15, 23, 42, 0.16) !important;
+    }
+
+    /* Všetky bežné texty v projekte a detaile práce */
+    html[data-theme='light'] body :where(
+      [role='dialog'],
+      dialog,
+      [data-modal='true'],
+      [data-dialog='true'],
+      [data-radix-dialog-content],
+      [aria-modal='true'],
+      .modal,
+      .dialog,
+      .Dialog,
+      .ReactModal__Content
+    ) :where(
+      div,
+      section,
+      article,
+      header,
+      footer,
+      form,
+      p,
+      span,
+      small,
+      label,
+      strong,
+      b,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6,
+      li,
+      td,
+      th
+    ) {
+      color: #020617 !important;
+      opacity: 1 !important;
+      text-shadow: none !important;
+    }
+
+    /* Najagresívnejšie prepísanie tmavých kariet v detaili práce */
+    html[data-theme='light'] body [class*="bg-[#"],
+    html[data-theme='light'] body [class*="bg-["],
+    html[data-theme='light'] body [class*="bg-slate-950"],
+    html[data-theme='light'] body [class*="bg-slate-900"],
+    html[data-theme='light'] body [class*="bg-slate-800"],
+    html[data-theme='light'] body [class*="bg-slate-700"],
+    html[data-theme='light'] body [class*="bg-gray-950"],
+    html[data-theme='light'] body [class*="bg-gray-900"],
+    html[data-theme='light'] body [class*="bg-gray-800"],
+    html[data-theme='light'] body [class*="bg-gray-700"],
+    html[data-theme='light'] body [class*="bg-zinc-950"],
+    html[data-theme='light'] body [class*="bg-zinc-900"],
+    html[data-theme='light'] body [class*="bg-zinc-800"],
+    html[data-theme='light'] body [class*="bg-zinc-700"],
+    html[data-theme='light'] body [class*="bg-neutral-950"],
+    html[data-theme='light'] body [class*="bg-neutral-900"],
+    html[data-theme='light'] body [class*="bg-neutral-800"],
+    html[data-theme='light'] body [class*="bg-neutral-700"],
+    html[data-theme='light'] body [class*="bg-stone-950"],
+    html[data-theme='light'] body [class*="bg-stone-900"],
+    html[data-theme='light'] body [class*="bg-black"],
+    html[data-theme='light'] body [class*="bg-black/"] {
+      background: #ffffff !important;
+      background-color: #ffffff !important;
+      background-image: none !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08) !important;
+    }
+
+    /* Obsah vo vnútri tmavých kariet */
+    html[data-theme='light'] body [class*="bg-[#"] *,
+    html[data-theme='light'] body [class*="bg-["] *,
+    html[data-theme='light'] body [class*="bg-slate-950"] *,
+    html[data-theme='light'] body [class*="bg-slate-900"] *,
+    html[data-theme='light'] body [class*="bg-slate-800"] *,
+    html[data-theme='light'] body [class*="bg-slate-700"] *,
+    html[data-theme='light'] body [class*="bg-gray-950"] *,
+    html[data-theme='light'] body [class*="bg-gray-900"] *,
+    html[data-theme='light'] body [class*="bg-gray-800"] *,
+    html[data-theme='light'] body [class*="bg-gray-700"] *,
+    html[data-theme='light'] body [class*="bg-zinc-950"] *,
+    html[data-theme='light'] body [class*="bg-zinc-900"] *,
+    html[data-theme='light'] body [class*="bg-zinc-800"] *,
+    html[data-theme='light'] body [class*="bg-zinc-700"] *,
+    html[data-theme='light'] body [class*="bg-neutral-950"] *,
+    html[data-theme='light'] body [class*="bg-neutral-900"] *,
+    html[data-theme='light'] body [class*="bg-neutral-800"] *,
+    html[data-theme='light'] body [class*="bg-neutral-700"] *,
+    html[data-theme='light'] body [class*="bg-stone-950"] *,
+    html[data-theme='light'] body [class*="bg-stone-900"] *,
+    html[data-theme='light'] body [class*="bg-black"] *,
+    html[data-theme='light'] body [class*="bg-black/"] * {
+      color: #020617 !important;
+      opacity: 1 !important;
+      font-weight: 800 !important;
+      text-shadow: none !important;
+    }
+
+    /* Inline style background - často používané v kartách detailu práce */
+    html[data-theme='light'] body :where(
+      div,
+      section,
+      article,
+      aside,
+      header,
+      footer,
+      form
+    )[style*="background"] {
+      background: #ffffff !important;
+      background-color: #ffffff !important;
+      background-image: none !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+    }
+
+    html[data-theme='light'] body :where(
+      div,
+      section,
+      article,
+      aside,
+      header,
+      footer,
+      form
+    )[style*="background"] * {
+      color: #020617 !important;
+      opacity: 1 !important;
+      font-weight: 800 !important;
+    }
+
+    /* Karty v detaile práce - typické rounded + border bloky */
+    html[data-theme='light'] body :where(
+      div,
+      section,
+      article
+    )[class*="rounded"][class*="border"] {
+      background: #ffffff !important;
+      background-color: #ffffff !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08) !important;
+    }
+
+    html[data-theme='light'] body :where(
+      div,
+      section,
+      article
+    )[class*="rounded"][class*="border"] * {
+      color: #020617 !important;
+      opacity: 1 !important;
+    }
+
+    /* Labely v detaili práce: NÁZOV PRÁCE, CIEĽ PRÁCE, METODOLÓGIA... */
+    html[data-theme='light'] body :where(
+      [class*="uppercase"],
+      [class*="tracking"],
+      label,
+      small
+    ) {
+      color: #1e293b !important;
+      opacity: 1 !important;
+      font-weight: 900 !important;
+      letter-spacing: 0.08em;
+    }
+
+    /* Textové hodnoty v detaili práce */
+    html[data-theme='light'] body :where(
+      p,
+      span,
+      div,
+      li,
+      td,
+      th
+    ) {
+      color: #0f172a !important;
+      opacity: 1 !important;
+    }
+
+    /* Nadpisy */
+    html[data-theme='light'] body :where(
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6,
+      strong,
+      b
+    ) {
+      color: #020617 !important;
+      opacity: 1 !important;
+      font-weight: 900 !important;
+    }
+
+    /* Tailwind text farby mimo theme-root */
+    html[data-theme='light'] body [class*="text-slate-"],
+    html[data-theme='light'] body [class*="text-gray-"],
+    html[data-theme='light'] body [class*="text-zinc-"],
+    html[data-theme='light'] body [class*="text-neutral-"],
+    html[data-theme='light'] body [class*="text-stone-"] {
+      color: #1e293b !important;
+      opacity: 1 !important;
+      font-weight: 800 !important;
+    }
+
+    /* Opacity mimo theme-root */
+    html[data-theme='light'] body [class*="opacity-0"],
+    html[data-theme='light'] body [class*="opacity-5"],
+    html[data-theme='light'] body [class*="opacity-10"],
+    html[data-theme='light'] body [class*="opacity-20"],
+    html[data-theme='light'] body [class*="opacity-25"],
+    html[data-theme='light'] body [class*="opacity-30"],
+    html[data-theme='light'] body [class*="opacity-40"],
+    html[data-theme='light'] body [class*="opacity-50"],
+    html[data-theme='light'] body [class*="opacity-60"],
+    html[data-theme='light'] body [class*="opacity-70"],
+    html[data-theme='light'] body [class*="opacity-75"] {
+      opacity: 1 !important;
+    }
+
+    /* Inputy v projects detaile */
+    html[data-theme='light'] body input,
+    html[data-theme='light'] body textarea,
+    html[data-theme='light'] body select {
+      background: #ffffff !important;
+      color: #020617 !important;
+      border-color: #cbd5e1 !important;
+      font-weight: 800 !important;
+    }
+
+    html[data-theme='light'] body input::placeholder,
+    html[data-theme='light'] body textarea::placeholder {
+      color: #475569 !important;
+      opacity: 1 !important;
+      font-weight: 750 !important;
+    }
+
+    /* Zachovať farebné CTA tlačidlá */
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-red-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-red-"] * {
+      color: #ffffff !important;
+      background-color: #ef4444 !important;
+      font-weight: 900 !important;
+    }
+
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-violet-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-purple-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-fuchsia-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-blue-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="from-violet-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="from-purple-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="to-fuchsia-"],
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="to-violet-"] {
+      color: #ffffff !important;
+      font-weight: 900 !important;
+    }
+
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-violet-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-purple-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-fuchsia-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="bg-blue-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="from-violet-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="from-purple-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="to-fuchsia-"] *,
+    html[data-theme='light'] body :where(button, a, [role='button'])[class*="to-violet-"] * {
+      color: #ffffff !important;
+      font-weight: 900 !important;
+    }
+
+
+    /* =========================================================
+       13. SELECTION
+    ========================================================= */
+
+    html[data-theme='light'] ::selection {
+      background: rgba(124, 58, 237, 0.22);
+      color: #020617;
+    }
+
+    html[data-theme='dark'] ::selection {
+      background: rgba(168, 85, 247, 0.36);
+      color: #ffffff;
+    }
+
+    /* =========================================================
+       14. HELPER TRIEDY
+    ========================================================= */
 
     .force-readable,
     .force-readable * {
@@ -649,20 +1253,20 @@ function injectThemeStyle() {
     }
 
     .dashboard-muted {
-      color: var(--zed-soft) !important;
+      color: var(--zed-text-3) !important;
       font-weight: 750 !important;
       opacity: 1 !important;
     }
 
     .dashboard-surface {
-      background: var(--zed-surface-2) !important;
+      background: var(--zed-surface) !important;
       color: var(--zed-text) !important;
       border-color: var(--zed-border) !important;
       box-shadow: var(--zed-shadow) !important;
     }
 
     .dashboard-surface-soft {
-      background: var(--zed-surface-3) !important;
+      background: var(--zed-surface-2) !important;
       color: var(--zed-text) !important;
       border-color: var(--zed-border) !important;
     }
@@ -721,7 +1325,7 @@ function notifyThemeChange(theme: Theme) {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('dark');
+  const [theme, setThemeState] = useState<Theme>('light');
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {

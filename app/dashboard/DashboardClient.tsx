@@ -9,6 +9,7 @@ import {
 } from 'react';
 import {
   BookOpen,
+  ChevronDown,
   ClipboardCheck,
   Download,
   FileDown,
@@ -17,6 +18,7 @@ import {
   GraduationCap,
   Languages,
   Mail,
+  Menu,
   Mic,
   Paintbrush,
   Paperclip,
@@ -25,20 +27,19 @@ import {
   Search,
   Send,
   ShieldCheck,
+  Sparkles,
   Trash2,
   UploadCloud,
   User,
   X,
 } from 'lucide-react';
-
 import AnalysisResultsModal from '@/components/analysis/AnalysisResultsModal';
 import type { AnalysisResult } from '@/components/analysis/analysisTypes';
+import { useLanguage } from '@/components/LanguageProvider';
 import ThemeToggleButton from '@/components/ThemeToggleButton';
 import ImprovementBox from '@/components/ImprovementBox';
 import { useRouter } from 'next/navigation';
-import {
-  Sparkles,
-} from 'lucide-react';
+
 
 // ================= TYPES =================
 
@@ -171,118 +172,69 @@ const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 
 const moduleInfos: {
   key: ModuleKey;
-  label: string;
-  buttonLabel: string;
-  inputLabel: string;
-  inputPlaceholder: string;
-  infoText: string;
+  translationKey:
+    | 'aiSupervisor'
+    | 'qualityAudit'
+    | 'defense'
+    | 'translation'
+    | 'dataAnalysis'
+    | 'planning'
+    | 'emails'
+    | 'originalityCheck'
+    | 'textHumanization';
   infoClassName: string;
 }[] = [
   {
     key: 'supervisor',
-    label: 'AI vedúci',
-    buttonLabel: 'Spustiť AI vedúceho',
-    inputLabel: 'Zadanie alebo text',
-    inputPlaceholder:
-      'Vlož text práce, otázku alebo časť, ktorú chceš skontrolovať.',
-    infoText:
-      'Vlož text práce alebo otázku. Systém pripraví odborné odporúčania, pripomienky a návrhy na zlepšenie.',
+    translationKey: 'aiSupervisor',
     infoClassName:
       'mb-4 rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-3 text-sm text-violet-100',
   },
   {
     key: 'quality',
-    label: 'Audit kvality',
-    buttonLabel: 'Spustiť audit kvality',
-    inputLabel: 'Text na audit kvality',
-    inputPlaceholder:
-      'Vlož text práce, kapitolu, úvod, záver alebo časť, ktorú chceš odborne skontrolovať.',
-    infoText:
-      'Vlož text práce. Systém skontroluje štylistiku, logiku, štruktúru, citácie a kvalitu akademického spracovania.',
+    translationKey: 'qualityAudit',
     infoClassName:
       'mb-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100',
   },
   {
     key: 'defense',
-    label: 'Obhajoba',
-    buttonLabel: 'Spustiť obhajobu',
-    inputLabel: 'Podklady k obhajobe',
-    inputPlaceholder:
-      'Vlož stručný obsah práce alebo nahraj dokument. Systém pripraví prezentáciu, sprievodný text, otázky komisie a odpovede.',
-    infoText:
-      'Vlož stručný obsah práce alebo nahraj dokument. Systém pripraví prezentáciu, sprievodný text, otázky komisie a odpovede.',
+    translationKey: 'defense',
     infoClassName:
       'mb-4 rounded-2xl border border-purple-400/20 bg-purple-500/10 px-4 py-3 text-sm text-purple-100',
   },
   {
     key: 'translation',
-    label: 'Preklad',
-    buttonLabel: 'Spustiť preklad',
-    inputLabel: 'Text na preklad',
-    inputPlaceholder:
-      'Vlož text, ktorý chceš preložiť. Vyber zdrojový a cieľový jazyk.',
-    infoText:
-      'Vlož text na preklad. Vyber zdrojový a cieľový jazyk a systém pripraví odborný preklad.',
+    translationKey: 'translation',
     infoClassName:
       'mb-4 rounded-2xl border border-sky-400/20 bg-sky-500/10 px-4 py-3 text-sm text-sky-100',
   },
   {
     key: 'data',
-    label: 'Analýza dát',
-    buttonLabel: 'Spustiť analýzu dát',
-    inputLabel: 'Zadanie analýzy dát',
-    inputPlaceholder:
-      'Popíš dáta, výskumnú otázku, hypotézy alebo nahraj Excel, CSV, PDF, Word, TXT či výstupy z JASP/SPSS.',
-    infoText:
-      'Môžeš priložiť Excel, CSV, PDF, Word, TXT alebo výstupy z JASP/SPSS. Po spracovaní sa otvorí samostatné modálne okno „Výsledky analýzy“ s tabuľkami, premennými, odporúčanými grafmi a testami.',
+    translationKey: 'dataAnalysis',
     infoClassName:
       'mb-4 rounded-2xl border border-blue-400/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-100',
   },
   {
     key: 'planning',
-    label: 'Plánovanie',
-    buttonLabel: 'Spustiť plánovanie',
-    inputLabel: 'Zadanie plánu',
-    inputPlaceholder:
-      'Napíš termín odovzdania, aktuálny stav práce a požadovaný plán. Termín nesmie byť v minulosti.',
-    infoText:
-      'Napíš termín odovzdania, stav práce a požadovaný plán. Termín nesmie byť v minulosti.',
+    translationKey: 'planning',
     infoClassName:
       'mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100',
   },
   {
     key: 'emails',
-    label: 'Emaily',
-    buttonLabel: 'Vygenerovať email',
-    inputLabel: 'Zadanie emailu',
-    inputPlaceholder:
-      'Napíš komu je email určený, čo chceš oznámiť, aký má byť tón a či má byť formálny alebo stručný.',
-    infoText:
-      'Napíš komu chceš email poslať, účel správy a tón komunikácie. Systém pripraví formálny email.',
+    translationKey: 'emails',
     infoClassName:
       'mb-4 rounded-2xl border border-pink-400/20 bg-pink-500/10 px-4 py-3 text-sm text-pink-100',
   },
   {
     key: 'originality',
-    label: 'Originalita práce',
-    buttonLabel: 'Spustiť kontrolu originality',
-    inputLabel: 'Text na kontrolu originality',
-    inputPlaceholder:
-      'Nahraj alebo vlož text práce. Systém pripraví orientačný protokol kontroly originality.',
-    infoText:
-      'Nahraj alebo vlož text práce. Systém pripraví orientačný protokol kontroly originality.',
+    translationKey: 'originalityCheck',
     infoClassName:
       'mb-4 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-100',
   },
   {
     key: 'humanizer',
-    label: 'Humanizácia textu',
-    buttonLabel: 'Humanizovať text',
-    inputLabel: 'Text na humanizáciu',
-    inputPlaceholder:
-      'Vlož text, ktorý chceš upraviť do prirodzenejšej, plynulejšej a menej strojovej podoby.',
-    infoText:
-      'Vlož text, ktorý chceš upraviť do prirodzenejšej, plynulejšej a menej strojovej podoby.',
+    translationKey: 'textHumanization',
     infoClassName:
       'mb-4 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-4 py-3 text-sm text-fuchsia-100',
   },
@@ -1290,8 +1242,10 @@ const hypothesisTestsBlock =
 export default function DashboardPage() {
   const router = useRouter();
   const agent = defaultAgent;
+  const { t } = useLanguage();
 
   const [activeModule, setActiveModule] = useState<ModuleKey>('supervisor');
+const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   const [input, setInput] = useState('');
@@ -1310,10 +1264,10 @@ const [activeAttachmentText, setActiveAttachmentText] = useState('');
 
   const [qualityMode, setQualityMode] = useState('style');
   const [outputMode, setOutputMode] = useState('detailed');
-  const [translationFrom, setTranslationFrom] = useState('Slovenčina');
-  const [translationTo, setTranslationTo] = useState('Maďarčina');
-  const [emailType, setEmailType] = useState('Email vedúcemu');
-  const [emailTone, setEmailTone] = useState('Profesionálny a slušný');
+  const [translationFrom, setTranslationFrom] = useState('sk');
+const [translationTo, setTranslationTo] = useState('hu');
+const [emailType, setEmailType] = useState('supervisor');
+const [emailTone, setEmailTone] = useState('professional');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const resultRef = useRef<HTMLDivElement | null>(null);
@@ -1323,12 +1277,34 @@ const [activeAttachmentText, setActiveAttachmentText] = useState('');
     moduleInfos.find((item) => item.key === activeModule) || moduleInfos[0]
   );
 }, [activeModule]);
+const activeTranslationKey = activeModuleInfo.translationKey;
+
+const activeModuleLabel =
+  t.dashboardTools.tools[activeTranslationKey];
+
+const activeModuleButtonLabel =
+  t.dashboardTools.buttons[activeTranslationKey];
+
+const activeModuleInputLabel =
+  t.dashboardTools.inputLabels?.[activeTranslationKey] ||
+  t.dashboardTools.common.assignmentLabel;
+
+const activeModulePlaceholder =
+  t.dashboardTools.placeholders[activeTranslationKey];
+
+const activeModuleInfoText =
+  t.dashboardTools.infoTexts?.[activeTranslationKey] ||
+  t.dashboardTools.common.infoText;
+
+const activeModuleResultTitle =
+  t.dashboardTools.resultTitles?.[activeTranslationKey] ||
+  activeModuleLabel;
 
 const exportTitle = useMemo(() => {
-  return `${activeModuleInfo.label} - ${
-    activeProfile?.title || 'výstup'
+  return `${activeModuleLabel} - ${
+    activeProfile?.title || 'output'
   }`.trim();
-}, [activeModuleInfo.label, activeProfile]);
+}, [activeModuleLabel, activeProfile]);
 
 useEffect(() => {
   function handleActiveProfileChanged(event: Event) {
@@ -2054,15 +2030,14 @@ formData.append('profile', JSON.stringify(profileForApi || null));
       setResult(output);
       setCanvasText(output);
 
-      await saveHistoryItem({
-        module: 'data',
-        title: 'Analýza dát',
-        userMessage: input || 'Analýza dát zo súborov.',
-        assistantMessage: output,
-        result: {
-          analysis: normalizedData,
-          profileTitle: profileForApi?.title || '',
-profileId: profileForApi?.id || null,
+     await saveHistoryItem({
+  module: 'data',
+  title: activeModuleResultTitle,
+  userMessage: input || 'Analýza dát zo súborov.',
+  assistantMessage: output,
+  result: {
+    analysis: normalizedData,
+    profileTitle: profileForApi?.title || '',
           attachedFiles: attachedFiles.map((file) => ({
             name: file.name,
             size: file.size,
@@ -2700,7 +2675,7 @@ formData.append(
 
     await saveHistoryItem({
       module: activeModule,
-      title: getResultTitle(activeModule),
+      title: activeModuleResultTitle,
       userMessage: input || secondaryInput || 'Bez textového zadania.',
       assistantMessage: cleaned,
       result: {
@@ -3215,7 +3190,7 @@ const downloadExcel = () => {
             : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
         }`}
       >
-        {item.label}
+      {t.dashboardTools.tools[item.translationKey]}
       </button>
     );
   })}
@@ -3240,6 +3215,75 @@ const downloadExcel = () => {
 
   <ThemeToggleButton />
 </div>
+
+<div className="flex w-full flex-col gap-3 xl:hidden">
+  <button
+    type="button"
+    onClick={() => setMobileMenuOpen((value) => !value)}
+    className="flex min-h-[52px] w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm font-black text-slate-900 shadow-sm transition dark:border-white/10 dark:bg-white/[0.06] dark:text-white"
+  >
+    <span className="flex items-center gap-2">
+      <Menu className="h-4 w-4 text-violet-400" />
+      {activeModuleLabel}
+    </span>
+
+    <ChevronDown
+      className={`h-4 w-4 text-violet-400 transition ${
+        mobileMenuOpen ? 'rotate-180' : ''
+      }`}
+    />
+  </button>
+
+  {mobileMenuOpen ? (
+    <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-white/10 dark:bg-[#090918] sm:grid-cols-2">
+      {moduleInfos.map((item) => {
+        const active = activeModule === item.key;
+
+        return (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => {
+              setActiveModule(item.key);
+              setMobileMenuOpen(false);
+            }}
+            className={`rounded-xl px-4 py-3 text-left text-sm font-black transition ${
+              active
+                ? 'bg-violet-600 text-white'
+                : 'bg-slate-100 text-slate-800 hover:bg-slate-200 dark:bg-white/[0.06] dark:text-slate-200 dark:hover:bg-white/[0.1]'
+            }`}
+          >
+            {t.dashboardTools.tools[item.translationKey]}
+          </button>
+        );
+      })}
+
+      <button
+        type="button"
+        onClick={() => {
+          setMobileMenuOpen(false);
+          router.push('/projects?new=1');
+        }}
+        className="rounded-xl bg-violet-600 px-4 py-3 text-left text-sm font-black text-white"
+      >
+        New Work
+      </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          setMobileMenuOpen(false);
+          router.push('/projects');
+        }}
+        className="rounded-xl bg-slate-100 px-4 py-3 text-left text-sm font-black text-slate-800 dark:bg-white/[0.06] dark:text-slate-200"
+      >
+        My Works
+      </button>
+    </div>
+  ) : null}
+</div>
+
+
 
   <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
     <span className="font-black text-slate-950 dark:text-white">
@@ -3266,7 +3310,7 @@ const active = activeModule === item.key;
           : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
       }`}
     >
-      {item.label}
+  {t.dashboardTools.tools[item.translationKey]}
     </button>
   );
 })}
@@ -3351,84 +3395,79 @@ const active = activeModule === item.key;
                   </div>
                 )}
 
-                {activeModule === 'translation' && (
-                  <div className="mb-4 grid gap-3 md:grid-cols-3">
-                    <FieldSelect
-                      label="Z jazyka"
-                      value={translationFrom}
-                      onChange={setTranslationFrom}
-                      options={[
-                        ['Slovenčina', 'Slovenčina'],
-                        ['Čeština', 'Čeština'],
-                        ['Angličtina', 'Angličtina'],
-                        ['Nemčina', 'Nemčina'],
-                        ['Maďarčina', 'Maďarčina'],
-                        ['Poľština', 'Poľština'],
-                      ]}
-                    />
+{activeModule === 'translation' && (
+  <div className="mb-4 grid gap-3 md:grid-cols-3">
+    <FieldSelect
+      label="Zdrojový jazyk"
+      value={translationFrom}
+      onChange={setTranslationFrom}
+      options={[
+        ['sk', 'Slovenčina'],
+        ['cs', 'Čeština'],
+        ['en', 'Angličtina'],
+        ['de', 'Nemčina'],
+        ['hu', 'Maďarčina'],
+        ['pl', 'Poľština'],
+      ]}
+    />
 
-                    <FieldSelect
-                      label="Do jazyka"
-                      value={translationTo}
-                      onChange={setTranslationTo}
-                      options={[
-                        ['Slovenčina', 'Slovenčina'],
-                        ['Čeština', 'Čeština'],
-                        ['Angličtina', 'Angličtina'],
-                        ['Nemčina', 'Nemčina'],
-                        ['Maďarčina', 'Maďarčina'],
-                        ['Poľština', 'Poľština'],
-                      ]}
-                    />
+    <FieldSelect
+      label="Cieľový jazyk"
+      value={translationTo}
+      onChange={setTranslationTo}
+      options={[
+        ['sk', 'Slovenčina'],
+        ['cs', 'Čeština'],
+        ['en', 'Angličtina'],
+        ['de', 'Nemčina'],
+        ['hu', 'Maďarčina'],
+        ['pl', 'Poľština'],
+      ]}
+    />
 
-                    <FieldSelect
-                      label="Štýl prekladu"
-                      value="Akademický"
-                      onChange={() => undefined}
-                      options={[['Akademický', 'Akademický']]}
-                    />
-                  </div>
-                )}
-
-                {activeModule === 'emails' && (
-                  <div className="mb-4 grid gap-3 md:grid-cols-2">
-                    <FieldSelect
-                      label="Typ emailu"
-                      value={emailType}
-                      onChange={setEmailType}
-                      options={[
-                        ['Email vedúcemu', 'Email vedúcemu'],
-                        ['Žiadosť o konzultáciu', 'Žiadosť o konzultáciu'],
-                        ['Ospravedlnenie', 'Ospravedlnenie'],
-                        ['Doplnenie podkladov', 'Doplnenie podkladov'],
-                        [
-                          'Všeobecný akademický email',
-                          'Všeobecný akademický email',
-                        ],
-                      ]}
-                    />
-
-                    <FieldSelect
-                      label="Tón"
-                      value={emailTone}
-                      onChange={setEmailTone}
-                      options={[
-                        [
-                          'Profesionálny a slušný',
-                          'Profesionálny a slušný',
-                        ],
-                        ['Stručný', 'Stručný'],
-                        ['Veľmi formálny', 'Veľmi formálny'],
-                      ]}
-                    />
-                  </div>
-                )}
-
-                {'infoText' in activeModuleInfo && 'infoClassName' in activeModuleInfo ? (
-  <div className={String(activeModuleInfo.infoClassName)}>
-    {String(activeModuleInfo.infoText)}
+    <FieldSelect
+      label="Štýl prekladu"
+      value="academic"
+      onChange={() => undefined}
+      options={[
+        ['academic', 'Akademický'],
+      ]}
+    />
   </div>
-) : null}
+)}
+
+{activeModule === 'emails' && (
+  <div className="mb-4 grid gap-3 md:grid-cols-2">
+    <FieldSelect
+      label="Typ emailu"
+      value={emailType}
+      onChange={setEmailType}
+      options={[
+        ['supervisor', 'Email vedúcemu'],
+        ['consultation', 'Žiadosť o konzultáciu'],
+        ['apology', 'Ospravedlnenie'],
+        ['documents', 'Odoslanie dokumentov'],
+        ['general', 'Všeobecný akademický email'],
+      ]}
+    />
+
+    <FieldSelect
+      label="Tón emailu"
+      value={emailTone}
+      onChange={setEmailTone}
+      options={[
+        ['professional', 'Profesionálny a slušný'],
+        ['formal', 'Formálny'],
+        ['friendly', 'Priateľský'],
+        ['brief', 'Stručný'],
+      ]}
+    />
+  </div>
+)}
+
+                <div className={String(activeModuleInfo.infoClassName)}>
+  {activeModuleInfoText}
+</div>
 
                 {(activeModule === 'supervisor' ||
                   activeModule === 'quality' ||
@@ -3445,41 +3484,23 @@ const active = activeModule === item.key;
 
 <div className="mt-4">
   <label className="mb-2 block text-sm font-black text-slate-800 dark:text-slate-300">
-    {activeModule === 'translation'
-      ? 'Text na preklad'
-      : activeModule === 'data'
-        ? 'Zadanie analýzy dát'
-        : activeModule === 'emails'
-          ? 'Obsah / zámer emailu'
-          : activeModule === 'defense'
-            ? 'Stručný obsah práce alebo podklady k prezentácii'
-            : activeModule === 'originality'
-              ? 'Text práce alebo nahraj súbor'
-              : activeModule === 'humanizer'
-                ? 'Text na humanizáciu'
-                : activeModuleInfo.inputLabel || 'Zadanie alebo text'}
+    {activeModuleInputLabel}
   </label>
 
   <textarea
     value={input}
     onChange={(event) => setInput(event.target.value)}
-    placeholder={
-      activeModule === 'data'
-        ? 'Napíš, čo má systém s dátami urobiť. Napríklad: priprav frekvenčnú analýzu, deskriptívnu štatistiku, grafy, korelácie Pearson/Spearman, t-testy a interpretáciu výsledkov do práce.'
-        : activeModuleInfo.inputPlaceholder || getPlaceholder(activeModule)
-    }
+    placeholder={activeModulePlaceholder}
     className="min-h-[190px] w-full resize-y rounded-2xl border border-slate-300 bg-white px-4 py-4 text-sm leading-7 text-slate-950 outline-none placeholder:text-slate-400 transition-colors duration-300 focus:border-violet-500 dark:border-white/10 dark:bg-white/[0.055] dark:text-white dark:placeholder:text-slate-500"
   />
 
-  {activeModule === 'data' && (
-    <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
-      Nahraj Excel, CSV alebo výstup z JASP/SPSS a do poľa napíš iba požiadavku na analýzu. 
-      Napríklad: „Vypočítaj frekvencie, M, SD, medián, minimum, maximum, šikmosť, špicatosť, Pearson/Spearman korelácie, t-testy a priprav grafy.“
-    </p>
-  )}
-</div>
+{activeModule === 'data' && (
+  <p className="mt-2 text-xs text-slate-400">
+    Môžete priložiť Excel, CSV, PDF, Word, TXT alebo výstupy z JASP/SPSS. Po spracovaní sa otvorí samostatné okno s výsledkami analýzy, tabuľkami, premennými, grafmi a odporúčanými testami.
+  </p>
+)}
 
-                <div className="mt-6 flex flex-wrap items-center gap-3 pb-6">
+                <div className="mt-6 grid gap-3 pb-6 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center">
                   {activeModule === 'supervisor' && (
   <button
     type="button"
@@ -3487,18 +3508,18 @@ const active = activeModule === item.key;
     disabled={isLoading}
     className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
   >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť AI vedúceho
-      </>
-    )}
-  </button>
+{isLoading ? (
+  <>
+    <RefreshCcw className="h-4 w-4 animate-spin" />
+    Spracúvam...
+  </>
+) : (
+  <>
+    <Send className="h-4 w-4" />
+    {activeModuleButtonLabel}
+  </>
+)}
+</button>
 )}
 
 {activeModule === 'quality' && (
@@ -3543,26 +3564,6 @@ const active = activeModule === item.key;
   </button>
 )}
 
-{activeModule === 'translation' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť preklad
-      </>
-    )}
-  </button>
-)}
 
 {activeModule === 'data' && (
   <button
@@ -3700,37 +3701,38 @@ const active = activeModule === item.key;
                     Vyčistiť
                   </button>
 
-                  {activeModule === 'data' && analysisResult && (
-                    <button
-                      type="button"
-                      onClick={() => setAnalysisModalOpen(true)}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-blue-400/30 bg-blue-500/10 px-4 py-3 text-sm font-black text-blue-100 hover:bg-blue-500/20"
-                    >
-                      <Search className="h-4 w-4" />
-                      Otvoriť výsledky analýzy
-                    </button>
-                  )}
+                 {activeModule === 'data' && analysisResult && (
+  <button
+    type="button"
+    onClick={() => setAnalysisModalOpen(true)}
+    className="inline-flex items-center gap-2 rounded-2xl border border-blue-400/30 bg-blue-500/10 px-4 py-3 text-sm font-black text-blue-100 hover:bg-blue-500/20"
+  >
+    <Search className="h-4 w-4" />
+    Otvoriť výsledky analýzy
+  </button>
+)}
                 </div>
-              </section>
+              </div>
+            </section>
 
-              {result && (
-                <section
-                  ref={resultRef}
-                  className="mb-40 rounded-[28px] border border-white/10 bg-[#070a16] p-5 shadow-2xl shadow-black/30"
-                >
-                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <h2 className="text-xl font-black">
-                        {getResultTitle(activeModule)}
-                      </h2>
+            {result && (
+              <section
+                ref={resultRef}
+                className="mb-40 rounded-[28px] border border-white/10 bg-[#070a16] p-5 shadow-2xl shadow-black/30"
+              >
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-black">
+                      {activeModuleResultTitle}
+                    </h2>
 
-                      <p className="mt-1 text-sm text-slate-400">
-                        Výstup je očistený od poškodených znakov a pripravený na
-                        kopírovanie alebo export.
-                      </p>
-                    </div>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Výstup je očistený od poškodených znakov a pripravený na
+                      kopírovanie alebo export.
+                    </p>
+                  </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
   {activeModule === 'defense' ? (
     <button
   type="button"
@@ -3950,7 +3952,7 @@ function FileUploadBox({
         onChange={(event) => onFiles(event.target.files)}
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center xl:justify-between">
         <div>
           <div className="flex items-center gap-2 text-sm font-black text-slate-200">
             <UploadCloud className="h-4 w-4 text-violet-300" />
@@ -4007,71 +4009,4 @@ function FileUploadBox({
 }
 
 
-// ================= TEXTS =================
 
-function getPlaceholder(module: ModuleKey) {
-  if (module === 'supervisor') {
-  return 'Vlož kapitolu, osnovu, cieľ práce, metodológiu alebo problém, ktorý chceš odborne posúdiť.';
-}
-
-  if (module === 'quality') {
-  return 'Vlož text na kontrolu kvality. Systém posúdi štylistiku, logiku, akademickosť, citácie a navrhne konkrétne opravy.';
-}
-
-  if (module === 'defense') {
-    return 'Vlož stručný obsah práce alebo nahraj dokument. Systém pripraví prezentáciu, sprievodný text, otázky komisie a odpovede. Po vytvorení sa zobrazí aj tlačidlo PPTX.';
-  }
-
-  if (module === 'translation') {
-    return 'Vlož text, ktorý chceš preložiť. Výstup bude obsahovať iba samotný preložený text bez analýzy a skóre.';
-  }
-
-  if (module === 'data') {
-    return 'Vlož dáta, tabuľku, CSV obsah, text z JASP/SPSS alebo nahraj Excel, CSV, PDF, Word či TXT súbor.';
-  }
-
-  if (module === 'planning') {
-    return `Napíš termín odovzdania, stav práce a požadovaný plán. Termín nesmie byť v minulosti. Dnes je ${getTodaySkDate()}. Výstup bude iba predbežný a orientačný.`;
-  }
-
-  if (module === 'emails') {
-    return 'Napíš, čo má email riešiť. Výstup bude iba hotový email vo formáte Predmet a Text emailu.';
-  }
-
-  if (module === 'originality') {
-    return 'Vlož text práce alebo nahraj celý dokument práce ako prílohu.';
-  }
-
-if (module === 'humanizer') {
-  return 'Vlož text, ktorý chceš preformulovať prirodzenejšie a ľudskejšie.';
-}
-
-  return 'Napíš zadanie.';
-}
-
-function getButtonLabel(module: ModuleKey) {
-  if (module === 'supervisor') return 'Spustiť AI vedúceho';
-  if (module === 'quality') return 'Spustiť audit kvality';
-  if (module === 'defense') return 'Spustiť obhajobu';
-  if (module === 'translation') return 'Spustiť preklad';
-  if (module === 'data') return 'Spustiť analýzu dát';
-  if (module === 'planning') return 'Spustiť plánovanie';
-  if (module === 'emails') return 'Spustiť email';
-  if (module === 'originality') return 'Spustiť kontrolu originality';
-  if (module === 'humanizer') return 'Spustiť humanizáciu textu';
-
-  return 'Spustiť';
-}
-
-function getResultTitle(module: ModuleKey) {
-  if (module === 'supervisor') return 'Hodnotenie práce';
-  if (module === 'quality') return 'Výsledok kontroly kvality';
-  if (module === 'defense') return 'Prezentácia, sprievodný text a obhajoba';
-  if (module === 'translation') return 'Preložený text';
-  if (module === 'data') return 'Výsledok analýzy dát';
-  if (module === 'planning') return 'Predbežný plán práce';
-  if (module === 'emails') return 'Email';
-  if (module === 'originality') return 'Výsledok kontroly originality';
-if (module === 'humanizer') return 'Humanizovaný text';
-  return 'Výstup';
-}

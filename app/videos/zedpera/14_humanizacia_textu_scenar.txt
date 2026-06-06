@@ -1,0 +1,9 @@
+Humanizácia textu
+
+Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
+
+- Upraví text tak, aby pôsobil prirodzenejšie.
+- Použite ju, keď text znie príliš strojovo alebo opakovane.
+- Zachovajte odborný, akademický alebo formálny štýl.
+
+Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

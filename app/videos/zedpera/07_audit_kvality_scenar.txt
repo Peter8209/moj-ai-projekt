@@ -1,0 +1,9 @@
+Audit kvality
+
+Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
+
+- Audit kvality kontroluje celkovú úroveň akademickej práce.
+- Zameriava sa na cieľ, metodológiu, logiku, štruktúru a záver.
+- Odporúča sa pred finálnym odovzdaním práce.
+
+Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

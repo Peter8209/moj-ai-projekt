@@ -1,0 +1,9 @@
+Analýza dát
+
+Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
+
+- Pomáha spracovať tabuľky, dotazníky a výsledky výskumu.
+- Systém vie interpretovať tabuľky, grafy a štatistické výstupy.
+- Vhodné pre praktickú a výskumnú časť práce.
+
+Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

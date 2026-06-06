@@ -1,0 +1,9 @@
+Profil používateľa
+
+Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
+
+- V profile nastavíte účet, balík a základné nastavenia.
+- Profil pomáha systému prispôsobiť dostupné funkcie a limity.
+- Pred začiatkom práce skontrolujte, či je profil správne vyplnený.
+
+Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

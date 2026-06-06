@@ -1,0 +1,9 @@
+Video návod
+
+Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
+
+- Obsahuje postupy používania aplikácie.
+- Návody vás prevedú hlavnými funkciami krok za krokom.
+- Začnite profilom práce, novou prácou, AI chatom a obhajobou.
+
+Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

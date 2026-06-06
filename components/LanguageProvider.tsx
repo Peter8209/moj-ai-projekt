@@ -42,6 +42,17 @@ type DashboardModuleTranslation = {
   emptyState: string;
 };
 
+type DashboardToolTranslationKey =
+  | 'aiSupervisor'
+  | 'qualityAudit'
+  | 'defense'
+  | 'translation'
+  | 'dataAnalysis'
+  | 'planning'
+  | 'emails'
+  | 'originalityCheck'
+  | 'textHumanization';
+
 type DashboardToolTranslations = {
   common: {
     assignmentLabel: string;
@@ -53,41 +64,18 @@ type DashboardToolTranslations = {
     clear: string;
     infoText: string;
   };
-  tools: {
-    aiSupervisor: string;
-    qualityAudit: string;
-    defense: string;
-    translation: string;
-    dataAnalysis: string;
-    planning: string;
-    emails: string;
-    originalityCheck: string;
-    textHumanization: string;
-  };
-  buttons: {
-    aiSupervisor: string;
-    qualityAudit: string;
-    defense: string;
-    translation: string;
-    dataAnalysis: string;
-    planning: string;
-    emails: string;
-    originalityCheck: string;
-    textHumanization: string;
-  };
-  placeholders: {
-    aiSupervisor: string;
-    qualityAudit: string;
-    defense: string;
-    translation: string;
-    dataAnalysis: string;
-    planning: string;
-    emails: string;
-    originalityCheck: string;
-    textHumanization: string;
-  };
+
+  tools: Record<DashboardToolTranslationKey, string>;
+  buttons: Record<DashboardToolTranslationKey, string>;
+  placeholders: Record<DashboardToolTranslationKey, string>;
+
+  inputLabels?: Partial<Record<DashboardToolTranslationKey, string>>;
+  infoTexts?: Partial<Record<DashboardToolTranslationKey, string>>;
+  resultTitles?: Partial<Record<DashboardToolTranslationKey, string>>;
+
   cards: Record<DashboardToolKey, DashboardToolCardTranslation>;
   modules: Record<DashboardToolKey, DashboardModuleTranslation>;
+
   resultLabels: {
     generatedOutput: string;
     report: string;
@@ -98,6 +86,7 @@ type DashboardToolTranslations = {
     openResult: string;
     processing: string;
   };
+
   qualityAudit: {
     review: string;
     output: string;
@@ -109,6 +98,7 @@ type DashboardToolTranslations = {
     detailedReport: string;
     shortReport: string;
   };
+
   emails: {
     emailType: string;
     tone: string;
@@ -122,6 +112,7 @@ type DashboardToolTranslations = {
     friendly: string;
     brief: string;
   };
+
   planning: {
     todaysDate: string;
   };

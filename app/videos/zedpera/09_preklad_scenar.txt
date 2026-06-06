@@ -1,0 +1,9 @@
+Preklad
+
+Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
+
+- Preklad slúži na preklad odborných textov do iného jazyka.
+- Vhodné pre abstrakt, anotáciu, kapitoly alebo formálne e-maily.
+- Do zadania uveďte jazyk a požadovaný štýl prekladu.
+
+Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

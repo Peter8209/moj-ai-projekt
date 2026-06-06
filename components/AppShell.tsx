@@ -169,8 +169,8 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
       ),
     },
     {
-      href: '/video',
-      activePath: '/video',
+      href: '/videos',
+      activePath: '/videos',
       label: text(dictionary, 'dashboardVideo', 'Video návod'),
       icon: Video,
       description: text(

@@ -3189,9 +3189,265 @@ export default function LandingPage() {
           }
         }
 
+
+
+        /* =========================================================
+           ULTIMATE MOBILE FIX 2026
+           - landing page remains black with white typography
+           - true white cards/windows keep black readable text
+           - top CTA button is always visible on mobile
+           - mobile menu is isolated and cannot overlap content incorrectly
+           - bottom mobile navigation is fixed, modern and safe-area ready
+        ========================================================= */
+        @media (max-width: 1279px) {
+          html,
+          body,
+          #__next,
+          main,
+          .zedpera-template {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-height: 100% !important;
+            overflow-x: hidden !important;
+            background: #000000 !important;
+            color: #ffffff !important;
+          }
+
+          .zedpera-template {
+            padding-bottom: calc(86px + env(safe-area-inset-bottom)) !important;
+          }
+
+          .zedpera-template header {
+            position: sticky !important;
+            top: 0 !important;
+            z-index: 90 !important;
+            background: rgba(0, 0, 0, 0.96) !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+            backdrop-filter: blur(22px) !important;
+          }
+
+          .zedpera-template header > div {
+            height: 64px !important;
+            min-height: 64px !important;
+            padding-left: 14px !important;
+            padding-right: 14px !important;
+            gap: 10px !important;
+          }
+
+          .zedpera-template header a[href='/'] {
+            flex: 0 0 auto !important;
+            min-width: 0 !important;
+            gap: 8px !important;
+          }
+
+          .zedpera-template header a[href='/'] > div:first-child {
+            width: 38px !important;
+            height: 38px !important;
+            border-radius: 12px !important;
+            font-size: 18px !important;
+          }
+
+          .zedpera-template header a[href='/'] > div:last-child {
+            display: none !important;
+          }
+
+          .zedpera-template header a[href='#pricing'] {
+            display: inline-flex !important;
+            flex: 0 0 auto !important;
+            height: 42px !important;
+            min-width: 96px !important;
+            margin-left: auto !important;
+            margin-right: 6px !important;
+            align-items: center !important;
+            justify-content: center !important;
+            border: 1px solid rgba(221, 214, 254, 0.55) !important;
+            border-radius: 14px !important;
+            background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #2563eb 100%) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            font-size: 13px !important;
+            font-weight: 950 !important;
+            line-height: 1 !important;
+            box-shadow: 0 14px 34px rgba(124, 58, 237, 0.42) !important;
+            opacity: 1 !important;
+            visibility: visible !important;
+          }
+
+          .zedpera-template header button[aria-label='Menu'] {
+            display: inline-flex !important;
+            flex: 0 0 auto !important;
+            width: 42px !important;
+            height: 42px !important;
+            min-width: 42px !important;
+            align-items: center !important;
+            justify-content: center !important;
+            border: 1px solid rgba(255, 255, 255, 0.22) !important;
+            border-radius: 14px !important;
+            background: rgba(255, 255, 255, 0.10) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            box-shadow: 0 14px 34px rgba(0, 0, 0, 0.38) !important;
+            opacity: 1 !important;
+            visibility: visible !important;
+          }
+
+          .zedpera-template header .fixed.left-0.right-0 {
+            position: fixed !important;
+            top: 64px !important;
+            left: 10px !important;
+            right: 10px !important;
+            width: auto !important;
+            max-height: calc(100dvh - 82px - env(safe-area-inset-bottom)) !important;
+            overflow-y: auto !important;
+            overscroll-behavior: contain !important;
+            border: 1px solid rgba(167, 139, 250, 0.28) !important;
+            border-radius: 22px !important;
+            background: rgba(2, 2, 8, 0.985) !important;
+            box-shadow: 0 26px 80px rgba(0, 0, 0, 0.86), 0 0 0 1px rgba(255,255,255,0.06) inset !important;
+            backdrop-filter: blur(26px) !important;
+            padding: 12px !important;
+            z-index: 95 !important;
+          }
+
+          .zedpera-template header .fixed.left-0.right-0 > div {
+            max-width: 100% !important;
+          }
+
+          .zedpera-template header .fixed.left-0.right-0 a,
+          .zedpera-template header .fixed.left-0.right-0 button {
+            min-height: 48px !important;
+            border-radius: 15px !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            background: rgba(255, 255, 255, 0.055) !important;
+            border: 1px solid rgba(255, 255, 255, 0.12) !important;
+            font-weight: 950 !important;
+          }
+
+          .zedpera-template header .fixed.left-0.right-0 a[href='#pricing'] {
+            justify-content: center !important;
+            background: linear-gradient(135deg, #7c3aed, #2563eb) !important;
+            border-color: rgba(221, 214, 254, 0.55) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+          }
+
+          .zedpera-template .zedpera-mobile-bottom-nav {
+            display: grid !important;
+          }
+
+          .zedpera-template section {
+            scroll-margin-top: 82px !important;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .zedpera-template section {
+            padding-left: 18px !important;
+            padding-right: 18px !important;
+          }
+
+          .zedpera-template h1 {
+            font-size: clamp(30px, 8.5vw, 42px) !important;
+            line-height: 1.12 !important;
+            letter-spacing: -0.045em !important;
+          }
+
+          .zedpera-template h2 {
+            font-size: clamp(26px, 7.4vw, 38px) !important;
+            line-height: 1.14 !important;
+          }
+
+          .zedpera-template p,
+          .zedpera-template li {
+            font-size: 15px !important;
+            line-height: 1.72 !important;
+          }
+
+          .zedpera-template .grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .zedpera-template :is(.rounded-\[2\.5rem\], .rounded-\[2rem\], .rounded-3xl) {
+            border-radius: 24px !important;
+          }
+
+          .zedpera-template :is(article, .zedpera-glow-border) {
+            overflow: hidden !important;
+          }
+
+          .zedpera-template :is(a, button) {
+            min-height: 44px;
+            touch-action: manipulation !important;
+          }
+
+          /* White windows/cards must have black text on mobile */
+          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) {
+            background: #ffffff !important;
+            background-color: #ffffff !important;
+            color: #050505 !important;
+            -webkit-text-fill-color: #050505 !important;
+            border-color: rgba(15, 23, 42, 0.12) !important;
+          }
+
+          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) * {
+            color: #050505 !important;
+            -webkit-text-fill-color: #050505 !important;
+            border-color: rgba(15, 23, 42, 0.14) !important;
+          }
+
+          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) :is(svg, svg *) {
+            color: currentColor !important;
+            -webkit-text-fill-color: currentColor !important;
+          }
+
+          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) .text-white,
+          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) [class*='text-white'] {
+            color: #050505 !important;
+            -webkit-text-fill-color: #050505 !important;
+          }
+
+          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) a,
+          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) button {
+            color: #050505 !important;
+            -webkit-text-fill-color: #050505 !important;
+          }
+
+          /* But colored CTA buttons inside white cards stay readable */
+          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) :is([class*='bg-violet'], [class*='bg-blue'], [class*='bg-fuchsia'], [class*='bg-gradient']) {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+          }
+
+          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) :is([class*='bg-violet'], [class*='bg-blue'], [class*='bg-fuchsia'], [class*='bg-gradient']) * {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+          }
+        }
+
+        @media (max-width: 390px) {
+          .zedpera-template header > div {
+            padding-left: 10px !important;
+            padding-right: 10px !important;
+          }
+
+          .zedpera-template header a[href='#pricing'] {
+            min-width: 84px !important;
+            padding-left: 10px !important;
+            padding-right: 10px !important;
+            font-size: 12px !important;
+          }
+
+          .zedpera-template section {
+            padding-left: 14px !important;
+            padding-right: 14px !important;
+          }
+        }
+
       `}</style>
 
       <div
+        id="top"
         key={`landing-${language}-${translationVersion}`}
         className="zedpera-template relative min-h-screen"
       >
@@ -3762,6 +4018,56 @@ export default function LandingPage() {
             </div>
           </div>
         </footer>
+
+        <nav className="zedpera-mobile-bottom-nav fixed inset-x-3 bottom-3 z-[88] hidden grid-cols-4 gap-2 rounded-[24px] border border-white/12 bg-black/92 p-2 shadow-[0_22px_70px_rgba(0,0,0,0.78),0_0_0_1px_rgba(255,255,255,0.05)_inset] backdrop-blur-2xl xl:hidden">
+          <a
+            href="#top"
+            onClick={(event) => {
+              event.preventDefault();
+              setMobileMenuOpen(false);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl bg-white/[0.055] px-2 text-center text-[10px] font-black uppercase tracking-[0.08em] text-white"
+          >
+            <Bot size={18} className="text-violet-300" />
+            {t.hero.primary}
+          </a>
+
+          <a
+            href="#features"
+            onClick={(event) => {
+              event.preventDefault();
+              setMobileMenuOpen(false);
+              scrollToHash('#features');
+            }}
+            className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl bg-white/[0.055] px-2 text-center text-[10px] font-black uppercase tracking-[0.08em] text-white"
+          >
+            <Sparkles size={18} className="text-violet-300" />
+            {t.nav.features}
+          </a>
+
+          <a
+            href="#pricing"
+            onClick={(event) => {
+              event.preventDefault();
+              setMobileMenuOpen(false);
+              scrollToHash('#pricing');
+            }}
+            className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl bg-gradient-to-br from-violet-600 to-blue-600 px-2 text-center text-[10px] font-black uppercase tracking-[0.08em] text-white shadow-lg shadow-violet-700/30"
+          >
+            <Crown size={18} className="text-white" />
+            {t.nav.pricing}
+          </a>
+
+          <Link
+            href="/login"
+            onClick={() => setMobileMenuOpen(false)}
+            className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl bg-white/[0.055] px-2 text-center text-[10px] font-black uppercase tracking-[0.08em] text-white"
+          >
+            <MessageCircle size={18} className="text-violet-300" />
+            {t.common.login}
+          </Link>
+        </nav>
       </div>
     </main>
   );

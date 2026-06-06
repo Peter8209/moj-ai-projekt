@@ -2062,12 +2062,8 @@ function MobileLanguageDropdown({
   onChange: (language: AppLanguage) => void;
   onClose?: () => void;
 }) {
-  function selectMobileLanguage(nextLanguage: AppLanguage) {
-    onChange(nextLanguage);
-    onClose?.();
-  }
   return (
-    <div className="rounded-xl border border-white/15 bg-[#05050b] p-2 shadow-[0_18px_45px_rgba(0,0,0,0.55)]">
+    <div className="rounded-xl border border-white/10 bg-white/[0.035] p-2">
       <div className="mb-2 flex items-center gap-2 px-2 text-xs font-black uppercase tracking-[0.16em] text-white">
         <Languages size={15} className="text-violet-300" />
         {labels.language}
@@ -2081,11 +2077,14 @@ function MobileLanguageDropdown({
             <button
               key={item.code}
               type="button"
-              onClick={() => selectMobileLanguage(item.code)}
+              onClick={() => {
+                onChange(item.code);
+                onClose?.();
+              }}
               className={`rounded-lg px-3 py-3 text-sm font-black ${
                 active
-                  ? 'bg-violet-700 text-white shadow-lg shadow-violet-700/30'
-                  : 'bg-[#090912] text-white hover:bg-[#121225]'
+                  ? 'bg-violet-700 text-white'
+                  : 'bg-white/5 text-white'
               }`}
             >
               <span className={`language-chip language-${item.code} mr-2`}>
@@ -2096,6 +2095,96 @@ function MobileLanguageDropdown({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function MobileHeaderLanguageSelector({
+  language,
+  labels,
+  onChange,
+}: {
+  language: AppLanguage;
+  labels: Translation['common'];
+  onChange: (language: AppLanguage) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current =
+    languages.find((item) => item.code === language) || languages[0];
+
+  function handleSelect(nextLanguage: AppLanguage) {
+    onChange(nextLanguage);
+    setOpen(false);
+  }
+
+  return (
+    <div className="relative z-[95] ml-auto xl:hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="mobile-language-trigger flex h-11 min-w-[88px] items-center justify-center gap-2 rounded-xl border border-violet-400/45 bg-[#080816] px-3 text-[12px] font-black text-white shadow-[0_0_24px_rgba(124,58,237,0.25)]"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={labels.language}
+      >
+        <Languages size={16} className="text-violet-200" />
+        <span className={`language-chip language-${current.code}`}>
+          {current.short}
+        </span>
+        <ChevronDown
+          size={14}
+          className={`text-violet-200 transition ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {open ? (
+        <div
+          className="mobile-language-popover absolute right-0 top-[calc(100%+0.65rem)] z-[120] w-[min(86vw,320px)] overflow-hidden rounded-2xl border border-violet-400/40 bg-[#050711] p-2 shadow-[0_24px_70px_rgba(0,0,0,0.85),0_0_34px_rgba(124,58,237,0.28)]"
+          role="listbox"
+        >
+          <div className="mb-2 flex items-center gap-2 rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-white">
+            <Languages size={15} className="text-violet-300" />
+            {labels.language}
+          </div>
+
+          <div className="grid gap-2">
+            {languages.map((item) => {
+              const active = item.code === language;
+
+              return (
+                <button
+                  key={item.code}
+                  type="button"
+                  onClick={() => handleSelect(item.code)}
+                  className={`flex min-h-[48px] w-full items-center justify-between rounded-xl border px-3 text-left text-[13px] font-black transition ${
+                    active
+                      ? 'border-violet-400 bg-violet-700 text-white shadow-[0_0_24px_rgba(124,58,237,0.35)]'
+                      : 'border-white/10 bg-[#0b1020] text-white hover:border-violet-400/50 hover:bg-[#11172a]'
+                  }`}
+                  role="option"
+                  aria-selected={active}
+                >
+                  <span className="flex items-center gap-3">
+                    <span className={`language-chip language-${item.code}`}>
+                      {item.short}
+                    </span>
+                    <span className="flex flex-col leading-tight">
+                      <span className="text-[13px] font-black text-white">
+                        {item.label}
+                      </span>
+                      <span className="text-[10px] font-black uppercase tracking-[0.12em] text-violet-200">
+                        {active ? labels.currentLanguage : labels.switchLanguage}
+                      </span>
+                    </span>
+                  </span>
+
+                  {active ? <CheckCircle2 size={17} /> : <ArrowRight size={16} />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2624,632 +2713,71 @@ export default function LandingPage() {
           background: linear-gradient(135deg, #10b981 0%, #16a34a 100%);
         }
 
+        /* =========================================================
+           MOBILE ONLY - profesionálna mobilná verzia
+           Desktop/web ostáva pôvodný. Mobil má tmavé okná a biele písmo.
+        ========================================================= */
 
-        /* ===============================
-           PROFESIONÁLNA MOBILNÁ VERZIA
-           čierne pozadie + biele písmo
-           obsah ostáva nezmenený
-        =============================== */
-        @media (max-width: 1024px) {
+        @media (max-width: 1279px) {
           html,
-          body,
-          main,
-          .zedpera-template {
-            width: 100%;
-            max-width: 100%;
-            overflow-x: hidden;
+          body {
+            overflow-x: hidden !important;
             background: #000000 !important;
+          }
+
+          .zedpera-template {
+            min-height: 100vh;
+            overflow-x: hidden !important;
+            background:
+              radial-gradient(circle at 50% 0%, rgba(124, 58, 237, 0.22), transparent 34rem),
+              linear-gradient(180deg, #080014 0%, #000000 46%, #000000 100%) !important;
             color: #ffffff !important;
           }
 
-          .zedpera-template {
-            -webkit-font-smoothing: antialiased;
-            text-rendering: optimizeLegibility;
-          }
-
-          .zedpera-template section {
-            width: 100%;
-            max-width: 100%;
-          }
-        }
-
-        @media (max-width: 768px) {
-          .zedpera-template,
-          .zedpera-template * {
-            box-sizing: border-box;
-          }
-
+          .zedpera-template *,
           .zedpera-template p,
           .zedpera-template span,
+          .zedpera-template div,
           .zedpera-template li,
           .zedpera-template a,
           .zedpera-template button,
+          .zedpera-template label,
+          .zedpera-template small,
           .zedpera-template h1,
           .zedpera-template h2,
           .zedpera-template h3,
           .zedpera-template h4,
-          .zedpera-template div {
-            color: #ffffff !important;
-          }
-
-          .zedpera-template .bg-clip-text,
-          .zedpera-template .text-transparent {
+          .zedpera-template h5,
+          .zedpera-template h6 {
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
-            background: none !important;
-          }
-
-          .zedpera-template header {
-            background: rgba(0, 0, 0, 0.98) !important;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.14) !important;
-          }
-
-          .zedpera-template header > div {
-            height: 66px !important;
-            padding-left: 16px !important;
-            padding-right: 16px !important;
-          }
-
-          .zedpera-template header a[href='/'] > div:last-child {
-            font-size: 17px !important;
-            letter-spacing: 0.08em !important;
-          }
-
-          .zedpera-template header a[href='/'] > div:first-child {
-            width: 40px !important;
-            height: 40px !important;
-            border-radius: 14px !important;
-          }
-
-          .zedpera-template header button[aria-label='Menu'] {
-            width: 46px !important;
-            height: 46px !important;
-            border-radius: 14px !important;
-            background: rgba(255, 255, 255, 0.06) !important;
-            border-color: rgba(255, 255, 255, 0.18) !important;
-          }
-
-          .zedpera-template header .border-t {
-            background: #000000 !important;
-            padding: 14px 16px 18px !important;
-          }
-
-          .zedpera-template header .border-t a,
-          .zedpera-template header .border-t button {
-            min-height: 48px !important;
-            border-radius: 14px !important;
-            font-size: 14px !important;
-          }
-
-          .zedpera-template section {
-            padding-left: 16px !important;
-            padding-right: 16px !important;
-            padding-top: 56px !important;
-            padding-bottom: 56px !important;
-          }
-
-          .zedpera-template section:first-of-type {
-            padding-top: 30px !important;
-            padding-bottom: 44px !important;
-          }
-
-          .zedpera-template section:first-of-type > div:first-child {
-            min-height: auto !important;
-            display: grid !important;
-            grid-template-columns: 1fr !important;
-            gap: 34px !important;
-          }
-
-          .zedpera-template h1 {
-            max-width: 100% !important;
-            font-size: clamp(32px, 9.2vw, 44px) !important;
-            line-height: 1.08 !important;
-            letter-spacing: -0.045em !important;
-            text-align: left !important;
-          }
-
-          .zedpera-template h2,
-          .zedpera-section-title {
-            font-size: clamp(27px, 7vw, 36px) !important;
-            line-height: 1.12 !important;
-            letter-spacing: -0.035em !important;
-          }
-
-          .zedpera-template h3 {
-            line-height: 1.2 !important;
-          }
-
-          .zedpera-template p {
-            font-size: 15px !important;
-            line-height: 1.75 !important;
-          }
-
-          .zedpera-template .inline-flex.rounded-full {
-            max-width: 100% !important;
-            white-space: normal !important;
-            text-align: left !important;
-            line-height: 1.45 !important;
-            letter-spacing: 0.12em !important;
-          }
-
-          .zedpera-template a[href='#pricing'],
-          .zedpera-template a[href='#features'] {
-            width: 100% !important;
-            min-width: 0 !important;
-            min-height: 56px !important;
-            justify-content: center !important;
-            border-radius: 16px !important;
-            padding-left: 18px !important;
-            padding-right: 18px !important;
-            text-align: center !important;
-          }
-
-          .zedpera-template .grid {
-            min-width: 0 !important;
-          }
-
-          .zedpera-template .sm\:grid-cols-4,
-          .zedpera-template .sm\:grid-cols-3,
-          .zedpera-template .sm\:grid-cols-2,
-          .zedpera-template .md\:grid-cols-3,
-          .zedpera-template .lg\:grid-cols-3,
-          .zedpera-template .lg\:grid-cols-2,
-          .zedpera-template .xl\:grid-cols-\[0\.36fr_0\.64fr\] {
-            grid-template-columns: 1fr !important;
-          }
-
-          .zedpera-template article,
-          .zedpera-template .zedpera-glow-border,
-          .zedpera-template .rounded-3xl,
-          .zedpera-template .rounded-\[2\.5rem\],
-          .zedpera-template .rounded-\[2rem\] {
-            border-radius: 24px !important;
-          }
-
-          .zedpera-template article,
-          .zedpera-template .zedpera-glow-border {
-            background: rgba(5, 5, 12, 0.96) !important;
-            border-color: rgba(139, 92, 246, 0.34) !important;
-            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.65) !important;
-          }
-
-          .zedpera-template .p-8,
-          .zedpera-template .lg\:p-12 {
-            padding: 22px !important;
-          }
-
-          .zedpera-template .py-24 {
-            padding-top: 58px !important;
-            padding-bottom: 58px !important;
-          }
-
-          .zedpera-template .mt-16 {
-            margin-top: 34px !important;
-          }
-
-          .zedpera-template .mt-12 {
-            margin-top: 28px !important;
-          }
-
-          .zedpera-template .mt-10 {
-            margin-top: 28px !important;
-          }
-
-          .zedpera-template .mt-9 {
-            margin-top: 22px !important;
-          }
-
-          .zedpera-template .gap-12 {
-            gap: 30px !important;
-          }
-
-          .zedpera-template .gap-10,
-          .zedpera-template .gap-8,
-          .zedpera-template .gap-6 {
-            gap: 22px !important;
-          }
-
-          .zedpera-template img {
-            max-width: 100% !important;
-            height: auto !important;
-            object-fit: cover !important;
-          }
-
-          .zedpera-template .absolute.left-0.top-1\/2 {
-            display: none !important;
-          }
-
-          .zedpera-template .border-red-500\/20 {
-            background: rgba(0, 0, 0, 0.96) !important;
-            border-color: rgba(248, 113, 113, 0.55) !important;
-          }
-
-          .zedpera-template .bg-red-500\/5 {
-            background: rgba(0, 0, 0, 0.96) !important;
-          }
-
-          .zedpera-template .bg-violet-600\/10,
-          .zedpera-template .bg-white\/\[0\.02\],
-          .zedpera-template .bg-white\/\[0\.035\],
-          .zedpera-template .bg-white\/5,
-          .zedpera-template .bg-white\/\[0\.07\] {
-            background-color: rgba(0, 0, 0, 0.92) !important;
-          }
-
-          .zedpera-template input,
-          .zedpera-template textarea,
-          .zedpera-template select {
-            background: #050505 !important;
-            color: #ffffff !important;
-            border-color: rgba(255, 255, 255, 0.18) !important;
-          }
-
-          .zedpera-template input::placeholder,
-          .zedpera-template textarea::placeholder {
-            color: rgba(255, 255, 255, 0.78) !important;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .zedpera-template section {
-            padding-left: 14px !important;
-            padding-right: 14px !important;
-          }
-
-          .zedpera-template h1 {
-            font-size: 31px !important;
-          }
-
-          .zedpera-template h2,
-          .zedpera-section-title {
-            font-size: 26px !important;
-          }
-
-          .zedpera-template p,
-          .zedpera-template li span {
-            font-size: 14px !important;
-          }
-
-          .zedpera-template .grid.max-w-\[760px\] {
-            grid-template-columns: 1fr !important;
-            gap: 14px !important;
-          }
-
-          .zedpera-template .mt-16.grid.overflow-hidden {
-            grid-template-columns: 1fr 1fr !important;
-            border-radius: 20px !important;
-          }
-
-          .zedpera-template .mt-16.grid.overflow-hidden > div {
-            border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
-            padding: 16px 10px !important;
-          }
-
-          .zedpera-template .mt-16.grid.overflow-hidden > div:nth-child(2n) {
-            border-right: 0 !important;
-          }
-
-          .zedpera-template .mt-16.grid.overflow-hidden > div:nth-last-child(-n + 2) {
-            border-bottom: 0 !important;
-          }
-
-          .zedpera-template .text-3xl {
-            font-size: 25px !important;
-          }
-
-          .zedpera-template .text-2xl {
-            font-size: 22px !important;
-          }
-
-          .zedpera-template .p-8,
-          .zedpera-template .p-6,
-          .zedpera-template .p-5,
-          .zedpera-template .lg\:p-12 {
-            padding: 18px !important;
-          }
-
-          .zedpera-template .language-chip {
-            min-width: 36px;
-            height: 26px;
-            font-size: 11px;
-          }
-        }
-
-        @media (max-width: 380px) {
-          .zedpera-template header > div {
-            padding-left: 12px !important;
-            padding-right: 12px !important;
-          }
-
-          .zedpera-template header a[href='/'] > div:last-child {
-            font-size: 15px !important;
-          }
-
-          .zedpera-template h1 {
-            font-size: 28px !important;
-          }
-
-          .zedpera-template h2,
-          .zedpera-section-title {
-            font-size: 24px !important;
-          }
-
-          .zedpera-template section {
-            padding-left: 12px !important;
-            padding-right: 12px !important;
-          }
-        }
-
-
-        /* =========================================================
-           FINÁLNA MOBILNÁ OPRAVA: BLACK UI / WHITE TEXT / MENU FIX
-           - všetky biele karty sa na mobile zmenia na tmavé
-           - všetky tmavé texty sa prepíšu na biele
-           - horné tlačidlo zostáva viditeľné
-           - mobilné menu je fixed panel a neprekrýva obsah chaoticky
-        ========================================================= */
-        @media (max-width: 1279px) {
-          .zedpera-template header {
-            position: sticky !important;
-            top: 0 !important;
-            z-index: 999 !important;
-            background: rgba(0, 0, 0, 0.98) !important;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.14) !important;
-          }
-
-          .zedpera-template header > div {
-            height: 66px !important;
-            min-height: 66px !important;
-          }
-
-          .zedpera-template header a[href='/'] {
-            min-width: 0 !important;
-          }
-
-          .zedpera-template header a[href='/'] > div:last-child {
-            max-width: 128px !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            white-space: nowrap !important;
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-
-          .zedpera-template header a[href='#pricing'] {
-            display: inline-flex !important;
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-
-          .zedpera-template header button[aria-label='Menu'] {
-            display: inline-flex !important;
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-        }
-
-        @media (max-width: 768px) {
-          html,
-          body,
-          #__next,
-          main,
-          .zedpera-template {
-            background: #000000 !important;
-            color: #ffffff !important;
-            overflow-x: hidden !important;
-          }
-
-          .zedpera-template,
-          .zedpera-template::before,
-          .zedpera-template::after {
-            background-color: #000000 !important;
-          }
-
-          .zedpera-template * {
-            border-color: rgba(255, 255, 255, 0.16) !important;
-          }
-
-          .zedpera-template :is(h1,h2,h3,h4,h5,h6,p,span,li,a,button,label,strong,small,div) {
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-
-          .zedpera-template :is(.text-black,.text-slate-950,.text-slate-900,.text-slate-800,.text-slate-700,.text-zinc-950,.text-zinc-900,.text-zinc-800,.text-neutral-950,.text-neutral-900,.text-neutral-800,.text-gray-950,.text-gray-900,.text-gray-800,.text-gray-700) {
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-
-          .zedpera-template :is(.text-slate-600,.text-slate-500,.text-zinc-600,.text-zinc-500,.text-neutral-600,.text-neutral-500,.text-gray-600,.text-gray-500) {
-            color: rgba(255, 255, 255, 0.82) !important;
-            -webkit-text-fill-color: rgba(255, 255, 255, 0.82) !important;
-          }
-
-          .zedpera-template :is(.bg-white,.bg-slate-50,.bg-slate-100,.bg-zinc-50,.bg-zinc-100,.bg-neutral-50,.bg-neutral-100,.bg-gray-50,.bg-gray-100) {
-            background: #050509 !important;
-            background-color: #050509 !important;
-          }
-
-          .zedpera-template [class*='bg-white/'],
-          .zedpera-template [class*='bg-black/'],
-          .zedpera-template [class*='bg-slate-'],
-          .zedpera-template [class*='bg-zinc-'],
-          .zedpera-template [class*='bg-neutral-'],
-          .zedpera-template [class*='bg-gray-'] {
-            background-color: rgba(7, 7, 12, 0.96) !important;
-          }
-
-          .zedpera-template :is(article,section > div > div,.zedpera-glow-border,.rounded-3xl,.rounded-\[2\.5rem\],.rounded-\[2rem\]) {
-            color: #ffffff !important;
-          }
-
-          .zedpera-template article,
-          .zedpera-template .zedpera-glow-border {
-            background: linear-gradient(180deg, rgba(12, 12, 18, 0.98), rgba(2, 2, 6, 0.98)) !important;
-            border: 1px solid rgba(139, 92, 246, 0.34) !important;
-          }
-
-          .zedpera-template .bg-red-500,
-          .zedpera-template .bg-red-600,
-          .zedpera-template [class*='bg-red-500'],
-          .zedpera-template [class*='bg-red-600'] {
-            background: #111111 !important;
-            background-color: #111111 !important;
-          }
-
-          .zedpera-template .text-transparent,
-          .zedpera-template .bg-clip-text {
-            background: none !important;
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-
-          .zedpera-template header + section {
-            padding-top: 26px !important;
-          }
-
-          .zedpera-template header .fixed.left-0.right-0 {
-            background: rgba(0, 0, 0, 0.985) !important;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
-          }
-
-          .zedpera-template header .fixed.left-0.right-0 a,
-          .zedpera-template header .fixed.left-0.right-0 button {
-            min-height: 50px !important;
-            width: 100% !important;
-            justify-content: flex-start !important;
-            border-radius: 16px !important;
-            background: rgba(255, 255, 255, 0.045) !important;
-            border: 1px solid rgba(255, 255, 255, 0.11) !important;
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-
-          .zedpera-template header .fixed.left-0.right-0 a:hover,
-          .zedpera-template header .fixed.left-0.right-0 button:hover {
-            background: rgba(124, 58, 237, 0.26) !important;
-            border-color: rgba(167, 139, 250, 0.45) !important;
-          }
-
-          .zedpera-template header .fixed.left-0.right-0 a[href='#pricing'] {
-            justify-content: center !important;
-            background: #7c3aed !important;
-            border-color: rgba(167, 139, 250, 0.5) !important;
-          }
-
-          .zedpera-template .grid {
-            grid-template-columns: 1fr !important;
-          }
-
-          .zedpera-template section {
-            padding-left: 16px !important;
-            padding-right: 16px !important;
-          }
-
-          .zedpera-template .max-w-\[1860px\],
-          .zedpera-template .max-w-\[1920px\],
-          .zedpera-template .max-w-7xl,
-          .zedpera-template .max-w-6xl,
-          .zedpera-template .max-w-5xl,
-          .zedpera-template .max-w-4xl,
-          .zedpera-template .max-w-3xl,
-          .zedpera-template .max-w-2xl {
-            max-width: 100% !important;
-          }
-
-          .zedpera-template a,
-          .zedpera-template button {
-            touch-action: manipulation !important;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .zedpera-template header a[href='/'] > div:first-child {
-            width: 38px !important;
-            height: 38px !important;
-            font-size: 20px !important;
-          }
-
-          .zedpera-template header a[href='/'] > div:last-child {
-            font-size: 14px !important;
-            max-width: 98px !important;
-          }
-
-          .zedpera-template header a[href='#pricing'] {
-            min-width: 82px !important;
-            height: 42px !important;
-            padding-left: 12px !important;
-            padding-right: 12px !important;
-            font-size: 12px !important;
-          }
-
-          .zedpera-template header button[aria-label='Menu'] {
-            width: 42px !important;
-            height: 42px !important;
-          }
-
-          .zedpera-template header .fixed.left-0.right-0 {
-            top: 66px !important;
-            padding-left: 14px !important;
-            padding-right: 14px !important;
-          }
-        }
-
-
-
-        /* =========================================================
-           ULTIMATE MOBILE FIX 2026
-           - landing page remains black with white typography
-           - true white cards/windows keep black readable text
-           - top CTA button is always visible on mobile
-           - mobile menu is isolated and cannot overlap content incorrectly
-           - bottom mobile navigation is fixed, modern and safe-area ready
-        ========================================================= */
-        @media (max-width: 1279px) {
-          html,
-          body,
-          #__next,
-          main,
-          .zedpera-template {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-height: 100% !important;
-            overflow-x: hidden !important;
-            background: #000000 !important;
-            color: #ffffff !important;
-          }
-
-          .zedpera-template {
-            padding-bottom: calc(86px + env(safe-area-inset-bottom)) !important;
+            opacity: 1 !important;
+            text-shadow: none;
           }
 
           .zedpera-template header {
             position: sticky !important;
             top: 0 !important;
-            z-index: 90 !important;
+            z-index: 100 !important;
             background: rgba(0, 0, 0, 0.96) !important;
             border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
-            backdrop-filter: blur(22px) !important;
+            backdrop-filter: blur(22px);
           }
 
           .zedpera-template header > div {
             height: 64px !important;
-            min-height: 64px !important;
             padding-left: 14px !important;
             padding-right: 14px !important;
-            gap: 10px !important;
           }
 
           .zedpera-template header a[href='/'] {
-            flex: 0 0 auto !important;
             min-width: 0 !important;
-            gap: 8px !important;
           }
 
           .zedpera-template header a[href='/'] > div:first-child {
-            width: 38px !important;
-            height: 38px !important;
-            border-radius: 12px !important;
+            height: 40px !important;
+            width: 40px !important;
+            border-radius: 14px !important;
             font-size: 18px !important;
           }
 
@@ -3257,528 +2785,288 @@ export default function LandingPage() {
             display: none !important;
           }
 
-          .zedpera-template header a[href='#pricing'] {
-            display: inline-flex !important;
-            flex: 0 0 auto !important;
-            height: 42px !important;
-            min-width: 96px !important;
-            margin-left: auto !important;
-            margin-right: 6px !important;
-            align-items: center !important;
-            justify-content: center !important;
-            border: 1px solid rgba(221, 214, 254, 0.55) !important;
-            border-radius: 14px !important;
-            background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #2563eb 100%) !important;
+          .mobile-language-trigger,
+          .mobile-language-popover,
+          .mobile-language-popover *,
+          .zedpera-template header button,
+          .zedpera-template header [role='listbox'],
+          .zedpera-template header [role='option'] {
+            background-color: #050711 !important;
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
-            font-size: 13px !important;
-            font-weight: 950 !important;
-            line-height: 1 !important;
-            box-shadow: 0 14px 34px rgba(124, 58, 237, 0.42) !important;
-            opacity: 1 !important;
-            visibility: visible !important;
+            border-color: rgba(255, 255, 255, 0.14) !important;
           }
 
-          .zedpera-template header button[aria-label='Menu'] {
-            display: inline-flex !important;
-            flex: 0 0 auto !important;
-            width: 42px !important;
-            height: 42px !important;
-            min-width: 42px !important;
-            align-items: center !important;
-            justify-content: center !important;
-            border: 1px solid rgba(255, 255, 255, 0.22) !important;
-            border-radius: 14px !important;
-            background: rgba(255, 255, 255, 0.10) !important;
+          .mobile-language-trigger {
+            min-width: 90px !important;
+            background: linear-gradient(180deg, #11172a 0%, #070a16 100%) !important;
+          }
+
+          .mobile-language-popover {
+            max-height: calc(100vh - 92px);
+            overflow-y: auto;
+          }
+
+          .zedpera-template header + div,
+          .zedpera-template header div[class*='border-t'] {
+            background: #03040a !important;
+            border-color: rgba(255, 255, 255, 0.12) !important;
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.78) !important;
+          }
+
+          .zedpera-template header div[class*='border-t'] a,
+          .zedpera-template header div[class*='border-t'] button,
+          .zedpera-template header div[class*='border-t'] > div > div,
+          .zedpera-template header div[class*='border-t'] [class*='rounded'] {
+            background: #0b1020 !important;
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
-            box-shadow: 0 14px 34px rgba(0, 0, 0, 0.38) !important;
-            opacity: 1 !important;
-            visibility: visible !important;
-          }
-
-          .zedpera-template header .fixed.left-0.right-0 {
-            position: fixed !important;
-            top: 64px !important;
-            left: 10px !important;
-            right: 10px !important;
-            width: auto !important;
-            max-height: calc(100dvh - 82px - env(safe-area-inset-bottom)) !important;
-            overflow-y: auto !important;
-            overscroll-behavior: contain !important;
-            border: 1px solid rgba(167, 139, 250, 0.28) !important;
-            border-radius: 22px !important;
-            background: rgba(2, 2, 8, 0.985) !important;
-            box-shadow: 0 26px 80px rgba(0, 0, 0, 0.86), 0 0 0 1px rgba(255,255,255,0.06) inset !important;
-            backdrop-filter: blur(26px) !important;
-            padding: 12px !important;
-            z-index: 95 !important;
-          }
-
-          .zedpera-template header .fixed.left-0.right-0 > div {
-            max-width: 100% !important;
-          }
-
-          .zedpera-template header .fixed.left-0.right-0 a,
-          .zedpera-template header .fixed.left-0.right-0 button {
-            min-height: 48px !important;
-            border-radius: 15px !important;
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-            background: rgba(255, 255, 255, 0.055) !important;
             border: 1px solid rgba(255, 255, 255, 0.12) !important;
-            font-weight: 950 !important;
           }
 
-          .zedpera-template header .fixed.left-0.right-0 a[href='#pricing'] {
-            justify-content: center !important;
-            background: linear-gradient(135deg, #7c3aed, #2563eb) !important;
-            border-color: rgba(221, 214, 254, 0.55) !important;
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-
-          .zedpera-template .zedpera-mobile-bottom-nav {
-            display: grid !important;
-          }
-
-          .zedpera-template section {
-            scroll-margin-top: 82px !important;
-          }
-        }
-
-        @media (max-width: 768px) {
           .zedpera-template section {
             padding-left: 18px !important;
             padding-right: 18px !important;
           }
 
           .zedpera-template h1 {
-            font-size: clamp(30px, 8.5vw, 42px) !important;
-            line-height: 1.12 !important;
+            font-size: clamp(2.05rem, 11vw, 3.15rem) !important;
+            line-height: 1.04 !important;
             letter-spacing: -0.045em !important;
           }
 
           .zedpera-template h2 {
-            font-size: clamp(26px, 7.4vw, 38px) !important;
-            line-height: 1.14 !important;
+            font-size: clamp(1.8rem, 8vw, 2.55rem) !important;
+            line-height: 1.08 !important;
+            letter-spacing: -0.035em !important;
           }
 
-          .zedpera-template p,
-          .zedpera-template li {
-            font-size: 15px !important;
+          .zedpera-template p {
+            font-size: 0.98rem !important;
             line-height: 1.72 !important;
           }
 
-          .zedpera-template .grid {
-            grid-template-columns: 1fr !important;
+          .zedpera-template [class*='min-h-[560px]'] {
+            min-height: auto !important;
           }
 
-          .zedpera-template :is(.rounded-\[2\.5rem\], .rounded-\[2rem\], .rounded-3xl) {
-            border-radius: 24px !important;
+          .zedpera-template [class*='grid'] {
+            max-width: 100% !important;
           }
 
-          .zedpera-template :is(article, .zedpera-glow-border) {
-            overflow: hidden !important;
+          .zedpera-template img,
+          .zedpera-template video,
+          .zedpera-template canvas,
+          .zedpera-template svg {
+            max-width: 100% !important;
           }
 
-          .zedpera-template :is(a, button) {
-            min-height: 44px;
-            touch-action: manipulation !important;
-          }
-
-          /* White windows/cards must have black text on mobile */
-          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) {
-            background: #ffffff !important;
-            background-color: #ffffff !important;
-            color: #050505 !important;
-            -webkit-text-fill-color: #050505 !important;
-            border-color: rgba(15, 23, 42, 0.12) !important;
-          }
-
-          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) * {
-            color: #050505 !important;
-            -webkit-text-fill-color: #050505 !important;
-            border-color: rgba(15, 23, 42, 0.14) !important;
-          }
-
-          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) :is(svg, svg *) {
-            color: currentColor !important;
-            -webkit-text-fill-color: currentColor !important;
-          }
-
-          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) .text-white,
-          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) [class*='text-white'] {
-            color: #050505 !important;
-            -webkit-text-fill-color: #050505 !important;
-          }
-
-          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) a,
-          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) button {
-            color: #050505 !important;
-            -webkit-text-fill-color: #050505 !important;
-          }
-
-          /* But colored CTA buttons inside white cards stay readable */
-          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) :is([class*='bg-violet'], [class*='bg-blue'], [class*='bg-fuchsia'], [class*='bg-gradient']) {
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-
-          .zedpera-template :is(.bg-white, [class~='bg-white']):not([class*='bg-white/']) :is([class*='bg-violet'], [class*='bg-blue'], [class*='bg-fuchsia'], [class*='bg-gradient']) * {
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-        }
-
-        @media (max-width: 390px) {
-          .zedpera-template header > div {
-            padding-left: 10px !important;
-            padding-right: 10px !important;
-          }
-
-          .zedpera-template header a[href='#pricing'] {
-            min-width: 84px !important;
-            padding-left: 10px !important;
-            padding-right: 10px !important;
-            font-size: 12px !important;
-          }
-
-          .zedpera-template section {
-            padding-left: 14px !important;
-            padding-right: 14px !important;
-          }
-        }
-
-
-
-        /* =========================================================
-           FINAL MOBILE BLACK UI OVERRIDE
-           Purpose: every inner white window/card/pill on mobile becomes
-           black/dark with strong white readable text.
-        ========================================================= */
-        @media (max-width: 1279px) {
-          .zedpera-template,
-          .zedpera-template * {
-            box-sizing: border-box !important;
-          }
-
-          .zedpera-template {
-            background: #000000 !important;
-            color: #ffffff !important;
-          }
-
-          /* Remove ALL white windows, including Tailwind bg-white/5, bg-white/10, bg-white/[...] */
           .zedpera-template [class*='bg-white'],
-          .zedpera-template [class~='bg-white'] {
-            background: linear-gradient(180deg, rgba(10, 10, 18, 0.98) 0%, rgba(0, 0, 0, 0.98) 100%) !important;
-            background-color: #05050b !important;
+          .zedpera-template [class*='bg-white/'],
+          .zedpera-template [class*='bg-slate-50'],
+          .zedpera-template [class*='bg-slate-100'],
+          .zedpera-template [class*='bg-slate-200'],
+          .zedpera-template [class*='bg-gray-50'],
+          .zedpera-template [class*='bg-gray-100'],
+          .zedpera-template [class*='bg-gray-200'],
+          .zedpera-template [class*='bg-zinc-50'],
+          .zedpera-template [class*='bg-zinc-100'],
+          .zedpera-template [class*='bg-zinc-200'],
+          .zedpera-template [class*='bg-neutral-50'],
+          .zedpera-template [class*='bg-neutral-100'],
+          .zedpera-template [class*='bg-neutral-200'],
+          .zedpera-template [class*='bg-stone-50'],
+          .zedpera-template [class*='bg-stone-100'],
+          .zedpera-template [class*='bg-violet-50'],
+          .zedpera-template [class*='bg-purple-50'],
+          .zedpera-template [class*='bg-indigo-50'] {
+            background: linear-gradient(180deg, #11172a 0%, #070a16 100%) !important;
+            background-color: #0b1020 !important;
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
-            border-color: rgba(255, 255, 255, 0.16) !important;
-            box-shadow: 0 18px 55px rgba(0, 0, 0, 0.58), inset 0 0 0 1px rgba(255, 255, 255, 0.045) !important;
+            border-color: rgba(255, 255, 255, 0.14) !important;
+            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42) !important;
           }
 
           .zedpera-template [class*='bg-white'] *,
-          .zedpera-template [class~='bg-white'] * {
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-            border-color: rgba(255, 255, 255, 0.14) !important;
-          }
-
-          .zedpera-template [class*='text-black'],
-          .zedpera-template [class*='text-slate'],
-          .zedpera-template [class*='text-zinc'],
-          .zedpera-template [class*='text-neutral'],
-          .zedpera-template [class*='text-gray'] {
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-
-          /* Keep violet/blue CTA buttons visible and modern */
-          .zedpera-template :is([class*='bg-violet'], [class*='bg-blue'], [class*='bg-fuchsia'], [class*='bg-gradient-to']) {
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-
-          .zedpera-template :is([class*='bg-violet'], [class*='bg-blue'], [class*='bg-fuchsia'], [class*='bg-gradient-to']) * {
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-
-          /* Hero top badge/pills and empty-looking bars */
-          .zedpera-template .rounded-full,
-          .zedpera-template .rounded-xl,
-          .zedpera-template .rounded-2xl,
-          .zedpera-template .rounded-3xl,
-          .zedpera-template .rounded-\[2rem\],
-          .zedpera-template .rounded-\[2\.5rem\] {
-            border-color: rgba(255, 255, 255, 0.14) !important;
-          }
-
-          /* Mobile header: button hore must stay visible */
-          .zedpera-template header a[href='#pricing'] {
-            display: inline-flex !important;
-            opacity: 1 !important;
-            visibility: visible !important;
-            background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #2563eb 100%) !important;
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-            border: 1px solid rgba(221, 214, 254, 0.56) !important;
-            box-shadow: 0 16px 38px rgba(124, 58, 237, 0.48) !important;
-          }
-
-          .zedpera-template header button[aria-label='Menu'] {
-            background: rgba(7, 7, 13, 0.96) !important;
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-            border: 1px solid rgba(255, 255, 255, 0.20) !important;
-          }
-
-          /* Professional dark mobile menu drawer */
-          .zedpera-template header .fixed.left-0.right-0 {
-            background: rgba(0, 0, 0, 0.985) !important;
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-            border: 1px solid rgba(167, 139, 250, 0.30) !important;
-            box-shadow: 0 30px 90px rgba(0, 0, 0, 0.88), inset 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
-          }
-
-          .zedpera-template header .fixed.left-0.right-0 a,
-          .zedpera-template header .fixed.left-0.right-0 button,
-          .zedpera-template .zedpera-mobile-bottom-nav a {
-            background: rgba(8, 8, 16, 0.96) !important;
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-            border: 1px solid rgba(255, 255, 255, 0.14) !important;
-          }
-
-          .zedpera-template header .fixed.left-0.right-0 a[href='#pricing'],
-          .zedpera-template .zedpera-mobile-bottom-nav a[href='#pricing'] {
-            background: linear-gradient(135deg, #7c3aed 0%, #a855f7 48%, #2563eb 100%) !important;
-            border-color: rgba(221, 214, 254, 0.58) !important;
-            box-shadow: 0 16px 36px rgba(124, 58, 237, 0.42) !important;
-          }
-
-          /* Bottom mobile nav: black glass, readable, safe-area ready */
-          .zedpera-template .zedpera-mobile-bottom-nav {
-            display: grid !important;
-            background: rgba(0, 0, 0, 0.96) !important;
-            border: 1px solid rgba(255, 255, 255, 0.16) !important;
-            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.86), inset 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
-            backdrop-filter: blur(24px) !important;
-            padding-bottom: calc(0.5rem + env(safe-area-inset-bottom)) !important;
-          }
-        }
-
-        @media (max-width: 430px) {
-          .zedpera-template [class*='bg-white'],
-          .zedpera-template [class~='bg-white'] {
-            border-radius: 18px !important;
-          }
-
-          .zedpera-template .zedpera-mobile-bottom-nav {
-            left: 10px !important;
-            right: 10px !important;
-            bottom: 10px !important;
-            grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-            gap: 6px !important;
-            border-radius: 22px !important;
-          }
-
-          .zedpera-template .zedpera-mobile-bottom-nav a {
-            min-height: 56px !important;
-            padding-left: 4px !important;
-            padding-right: 4px !important;
-            font-size: 9px !important;
-            line-height: 1.1 !important;
-          }
-        }
-
-
-        /* =========================================================
-           ZEDPERA MOBILE DARK MASTER OVERRIDE - 2026
-           - absolutne zrusenie bielych okien v mobilnej verzii
-           - vsetky panely/karty/pill/menu/formulare su cierne
-           - vsetky texty v landing page su biele a kontrastne
-           - jazykove okno sa po vybere zavrie cez onClose
-        ========================================================= */
-        @media (max-width: 1279px) {
-          html,
-          body,
-          #__next,
-          main,
-          .theme-root,
-          .zedpera-template {
-            background: #000000 !important;
-            background-color: #000000 !important;
-            color: #ffffff !important;
-            color-scheme: dark !important;
-          }
-
-          .zedpera-template :where(
-            section,
-            article,
-            aside,
-            nav,
-            header,
-            footer,
-            form,
-            dialog,
-            div,
-            a,
-            button,
-            input,
-            textarea,
-            select
-          ) {
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-          }
-
-          .zedpera-template :where(h1,h2,h3,h4,h5,h6,p,span,strong,b,small,label,li,td,th) {
+          .zedpera-template [class*='bg-white/'] *,
+          .zedpera-template [class*='bg-slate-50'] *,
+          .zedpera-template [class*='bg-slate-100'] *,
+          .zedpera-template [class*='bg-slate-200'] *,
+          .zedpera-template [class*='bg-gray-50'] *,
+          .zedpera-template [class*='bg-gray-100'] *,
+          .zedpera-template [class*='bg-gray-200'] *,
+          .zedpera-template [class*='bg-zinc-50'] *,
+          .zedpera-template [class*='bg-zinc-100'] *,
+          .zedpera-template [class*='bg-zinc-200'] *,
+          .zedpera-template [class*='bg-neutral-50'] *,
+          .zedpera-template [class*='bg-neutral-100'] *,
+          .zedpera-template [class*='bg-neutral-200'] *,
+          .zedpera-template [class*='bg-stone-50'] *,
+          .zedpera-template [class*='bg-stone-100'] *,
+          .zedpera-template [class*='bg-violet-50'] *,
+          .zedpera-template [class*='bg-purple-50'] *,
+          .zedpera-template [class*='bg-indigo-50'] * {
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
             opacity: 1 !important;
-          }
-
-          .zedpera-template :where(
-            .bg-white,
-            .bg-slate-50,
-            .bg-slate-100,
-            .bg-slate-200,
-            .bg-gray-50,
-            .bg-gray-100,
-            .bg-gray-200,
-            .bg-zinc-50,
-            .bg-zinc-100,
-            .bg-zinc-200,
-            .bg-neutral-50,
-            .bg-neutral-100,
-            .bg-neutral-200,
-            .bg-stone-50,
-            .bg-stone-100,
-            .bg-stone-200
-          ),
-          .zedpera-template [class*="bg-white"],
-          .zedpera-template [class*="bg-slate-"],
-          .zedpera-template [class*="bg-gray-"],
-          .zedpera-template [class*="bg-zinc-"],
-          .zedpera-template [class*="bg-neutral-"],
-          .zedpera-template [class*="bg-stone-"],
-          .zedpera-template [style*="background: white"],
-          .zedpera-template [style*="background-color: white"],
-          .zedpera-template [style*="background:#fff"],
-          .zedpera-template [style*="background-color:#fff"],
-          .zedpera-template [style*="background: #fff"],
-          .zedpera-template [style*="background-color: #fff"] {
-            background: linear-gradient(180deg, #080812 0%, #000000 100%) !important;
-            background-color: #05050b !important;
-            background-image: linear-gradient(180deg, #080812 0%, #000000 100%) !important;
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-            border-color: rgba(255, 255, 255, 0.16) !important;
-            box-shadow:
-              0 18px 55px rgba(0, 0, 0, 0.62),
-              inset 0 0 0 1px rgba(255, 255, 255, 0.045) !important;
-          }
-
-          .zedpera-template :where(
-            .bg-white,
-            .bg-slate-50,
-            .bg-slate-100,
-            .bg-slate-200,
-            .bg-gray-50,
-            .bg-gray-100,
-            .bg-gray-200,
-            .bg-zinc-50,
-            .bg-zinc-100,
-            .bg-zinc-200,
-            .bg-neutral-50,
-            .bg-neutral-100,
-            .bg-neutral-200,
-            .bg-stone-50,
-            .bg-stone-100,
-            .bg-stone-200
-          ) *,
-          .zedpera-template [class*="bg-white"] *,
-          .zedpera-template [class*="bg-slate-"] *,
-          .zedpera-template [class*="bg-gray-"] *,
-          .zedpera-template [class*="bg-zinc-"] *,
-          .zedpera-template [class*="bg-neutral-"] *,
-          .zedpera-template [class*="bg-stone-"] * {
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-            opacity: 1 !important;
-          }
-
-          .zedpera-template [class*="text-black"],
-          .zedpera-template [class*="text-slate"],
-          .zedpera-template [class*="text-gray"],
-          .zedpera-template [class*="text-zinc"],
-          .zedpera-template [class*="text-neutral"],
-          .zedpera-template [class*="text-stone"] {
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
           }
 
           .zedpera-template input,
           .zedpera-template textarea,
           .zedpera-template select {
-            background: #05050b !important;
-            background-color: #05050b !important;
+            min-height: 48px !important;
+            background: #0b1020 !important;
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
-            border: 1px solid rgba(255, 255, 255, 0.18) !important;
-            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035) !important;
+            border: 1px solid rgba(255, 255, 255, 0.14) !important;
+            border-radius: 16px !important;
           }
 
           .zedpera-template input::placeholder,
           .zedpera-template textarea::placeholder {
-            color: rgba(255, 255, 255, 0.72) !important;
-            -webkit-text-fill-color: rgba(255, 255, 255, 0.72) !important;
+            color: #cbd5e1 !important;
+            -webkit-text-fill-color: #cbd5e1 !important;
+            opacity: 1 !important;
           }
 
-          .zedpera-template header,
-          .zedpera-template header .fixed.left-0.right-0,
-          .zedpera-template .zedpera-mobile-bottom-nav {
-            background: rgba(0, 0, 0, 0.985) !important;
-            background-color: rgba(0, 0, 0, 0.985) !important;
+          .zedpera-template a,
+          .zedpera-template button {
+            min-height: 44px;
+            touch-action: manipulation;
+          }
+
+          .zedpera-template [class*='rounded'] {
+            border-color: rgba(255, 255, 255, 0.12) !important;
+          }
+
+          .language-chip {
+            background-clip: padding-box !important;
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
           }
+        }
 
-          .zedpera-template header .fixed.left-0.right-0 a,
-          .zedpera-template header .fixed.left-0.right-0 button,
-          .zedpera-template .zedpera-mobile-bottom-nav a {
-            background: #070711 !important;
-            background-color: #070711 !important;
+
+
+          /* =========================================================
+             FIX: MOBIL NIKDY NESMIE ZBELIEŤ ANI KEĎ THEMEPROVIDER
+             ALEBO LOCALSTORAGE DRŽÍ LIGHT REŽIM.
+             Prepíše aj bg-[#...], bg-[...], inline background a biele karty.
+          ========================================================= */
+
+          html[data-theme='light'] body .zedpera-template,
+          html[data-theme='dark'] body .zedpera-template,
+          body .zedpera-template {
+            background:
+              radial-gradient(circle at 50% 0%, rgba(124, 58, 237, 0.24), transparent 34rem),
+              linear-gradient(180deg, #080014 0%, #000000 46%, #000000 100%) !important;
             color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
           }
 
-          .zedpera-template :where([class*="bg-violet"], [class*="bg-purple"], [class*="bg-fuchsia"], [class*="bg-blue"], [class*="from-violet"], [class*="from-purple"], [class*="to-fuchsia"], [class*="to-blue"], [class*="bg-gradient-to"]) {
+          html[data-theme='light'] body .zedpera-template [class*='bg-[#'],
+          html[data-theme='light'] body .zedpera-template [class*='bg-['],
+          html[data-theme='light'] body .zedpera-template [class*='bg-white'],
+          html[data-theme='light'] body .zedpera-template [class*='bg-slate-50'],
+          html[data-theme='light'] body .zedpera-template [class*='bg-slate-100'],
+          html[data-theme='light'] body .zedpera-template [class*='bg-slate-200'],
+          html[data-theme='light'] body .zedpera-template [class*='bg-gray-50'],
+          html[data-theme='light'] body .zedpera-template [class*='bg-gray-100'],
+          html[data-theme='light'] body .zedpera-template [class*='bg-gray-200'],
+          html[data-theme='light'] body .zedpera-template [class*='bg-zinc-50'],
+          html[data-theme='light'] body .zedpera-template [class*='bg-zinc-100'],
+          html[data-theme='light'] body .zedpera-template [class*='bg-neutral-50'],
+          html[data-theme='light'] body .zedpera-template [class*='bg-neutral-100'],
+          html[data-theme='dark'] body .zedpera-template [class*='bg-white'],
+          html[data-theme='dark'] body .zedpera-template [class*='bg-slate-50'],
+          html[data-theme='dark'] body .zedpera-template [class*='bg-gray-50'],
+          html[data-theme='dark'] body .zedpera-template [class*='bg-zinc-50'],
+          html[data-theme='dark'] body .zedpera-template [class*='bg-neutral-50'] {
+            background: linear-gradient(180deg, #11172a 0%, #070a16 100%) !important;
+            background-color: #0b1020 !important;
+            background-image: linear-gradient(180deg, #11172a 0%, #070a16 100%) !important;
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
+            border-color: rgba(255,255,255,0.14) !important;
+            box-shadow: 0 18px 48px rgba(0,0,0,0.48) !important;
           }
 
-          .zedpera-template :where([class*="bg-violet"], [class*="bg-purple"], [class*="bg-fuchsia"], [class*="bg-blue"], [class*="from-violet"], [class*="from-purple"], [class*="to-fuchsia"], [class*="to-blue"], [class*="bg-gradient-to"]) * {
+          html[data-theme='light'] body .zedpera-template [class*='bg-[#'] *,
+          html[data-theme='light'] body .zedpera-template [class*='bg-['] *,
+          html[data-theme='light'] body .zedpera-template [class*='bg-white'] *,
+          html[data-theme='light'] body .zedpera-template [class*='bg-slate-50'] *,
+          html[data-theme='light'] body .zedpera-template [class*='bg-slate-100'] *,
+          html[data-theme='light'] body .zedpera-template [class*='bg-gray-50'] *,
+          html[data-theme='light'] body .zedpera-template [class*='bg-gray-100'] *,
+          html[data-theme='light'] body .zedpera-template [class*='bg-zinc-50'] *,
+          html[data-theme='light'] body .zedpera-template [class*='bg-neutral-50'] *,
+          html[data-theme='dark'] body .zedpera-template [class*='bg-white'] *,
+          html[data-theme='dark'] body .zedpera-template [class*='bg-slate-50'] *,
+          html[data-theme='dark'] body .zedpera-template [class*='bg-gray-50'] *,
+          html[data-theme='dark'] body .zedpera-template [class*='bg-zinc-50'] *,
+          html[data-theme='dark'] body .zedpera-template [class*='bg-neutral-50'] * {
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
+            opacity: 1 !important;
           }
 
-          .zedpera-template .language-chip {
+          html[data-theme='light'] body .zedpera-template :where(div, section, article, aside, header, footer, form)[style*='background'],
+          html[data-theme='dark'] body .zedpera-template :where(div, section, article, aside, header, footer, form)[style*='background'] {
+            background: linear-gradient(180deg, #11172a 0%, #070a16 100%) !important;
+            background-color: #0b1020 !important;
+            background-image: linear-gradient(180deg, #11172a 0%, #070a16 100%) !important;
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
-            border-color: rgba(255, 255, 255, 0.30) !important;
-            box-shadow: 0 10px 26px rgba(0, 0, 0, 0.46) !important;
+            border-color: rgba(255,255,255,0.14) !important;
+          }
+
+          html[data-theme='light'] body .zedpera-template :where(input, textarea, select),
+          html[data-theme='dark'] body .zedpera-template :where(input, textarea, select),
+          body .zedpera-template :where(input, textarea, select) {
+            background: #0b1020 !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            border: 1px solid rgba(255,255,255,0.16) !important;
+          }
+
+          html[data-theme='light'] body .zedpera-template .mobile-bottom-nav,
+          html[data-theme='light'] body .zedpera-template .mobile-bottom-nav *,
+          html[data-theme='dark'] body .zedpera-template .mobile-bottom-nav,
+          html[data-theme='dark'] body .zedpera-template .mobile-bottom-nav * {
+            background-color: #050711 !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            border-color: rgba(255,255,255,0.16) !important;
+          }
+
+        @media (max-width: 480px) {
+          .zedpera-template section {
+            padding-left: 14px !important;
+            padding-right: 14px !important;
+          }
+
+          .zedpera-template [class*='rounded-[2.5rem]'],
+          .zedpera-template [class*='rounded-[2rem]'] {
+            border-radius: 1.45rem !important;
+          }
+
+          .zedpera-template [class*='p-12'] {
+            padding: 1.35rem !important;
+          }
+
+          .zedpera-template [class*='px-8'] {
+            padding-left: 1.1rem !important;
+            padding-right: 1.1rem !important;
+          }
+
+          .zedpera-template [class*='gap-10'] {
+            gap: 1.5rem !important;
           }
         }
 
       `}</style>
 
       <div
-        id="top"
         key={`landing-${language}-${translationVersion}`}
         className="zedpera-template relative min-h-screen"
       >
@@ -3846,22 +3134,16 @@ export default function LandingPage() {
               </a>
             </div>
 
-            <a
-              href="#pricing"
-              onClick={(event) => {
-                event.preventDefault();
-                setMobileMenuOpen(false);
-                scrollToHash('#pricing');
-              }}
-              className="ml-auto mr-3 inline-flex h-11 min-w-[96px] items-center justify-center rounded-xl bg-violet-600 px-4 text-[13px] font-black text-white shadow-lg shadow-violet-700/35 transition hover:bg-violet-500 xl:hidden"
-            >
-              {t.hero.primary}
-            </a>
+            <MobileHeaderLanguageSelector
+              language={language}
+              labels={t.common}
+              onChange={handleLanguageChange}
+            />
 
             <button
               type="button"
               onClick={() => setMobileMenuOpen((value) => !value)}
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-white shadow-lg shadow-black/30 xl:hidden"
+              className="ml-2 inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-[#080816] text-white shadow-[0_0_18px_rgba(124,58,237,0.16)] xl:hidden"
               aria-label="Menu"
             >
               {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
@@ -3869,8 +3151,8 @@ export default function LandingPage() {
           </div>
 
           {mobileMenuOpen ? (
-            <div className="fixed left-0 right-0 top-[66px] z-[70] max-h-[calc(100dvh-66px)] overflow-y-auto border-t border-white/10 bg-black/98 px-4 py-4 shadow-2xl shadow-black/80 backdrop-blur-2xl xl:hidden">
-              <div className="mx-auto grid w-full max-w-[460px] gap-2">
+            <div className="border-t border-white/10 bg-black px-5 py-4 xl:hidden">
+              <div className="grid gap-2">
                 {navItems.map((item) => {
                   const Icon = item.icon;
 
@@ -3908,13 +3190,6 @@ export default function LandingPage() {
                   {t.common.login}
                 </Link>
 
-                <a
-                  href="#pricing"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="rounded-xl bg-violet-600 px-4 py-3 text-center text-sm font-black text-white"
-                >
-                  {t.common.startFree}
-                </a>
               </div>
             </div>
           ) : null}
@@ -4350,56 +3625,6 @@ export default function LandingPage() {
             </div>
           </div>
         </footer>
-
-        <nav className="zedpera-mobile-bottom-nav fixed inset-x-3 bottom-3 z-[88] hidden grid-cols-4 gap-2 rounded-[24px] border border-white/12 bg-black/92 p-2 shadow-[0_22px_70px_rgba(0,0,0,0.78),0_0_0_1px_rgba(255,255,255,0.05)_inset] backdrop-blur-2xl xl:hidden">
-          <a
-            href="#top"
-            onClick={(event) => {
-              event.preventDefault();
-              setMobileMenuOpen(false);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl bg-white/[0.055] px-2 text-center text-[10px] font-black uppercase tracking-[0.08em] text-white"
-          >
-            <Bot size={18} className="text-violet-300" />
-            {t.hero.primary}
-          </a>
-
-          <a
-            href="#features"
-            onClick={(event) => {
-              event.preventDefault();
-              setMobileMenuOpen(false);
-              scrollToHash('#features');
-            }}
-            className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl bg-white/[0.055] px-2 text-center text-[10px] font-black uppercase tracking-[0.08em] text-white"
-          >
-            <Sparkles size={18} className="text-violet-300" />
-            {t.nav.features}
-          </a>
-
-          <a
-            href="#pricing"
-            onClick={(event) => {
-              event.preventDefault();
-              setMobileMenuOpen(false);
-              scrollToHash('#pricing');
-            }}
-            className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl bg-gradient-to-br from-violet-600 to-blue-600 px-2 text-center text-[10px] font-black uppercase tracking-[0.08em] text-white shadow-lg shadow-violet-700/30"
-          >
-            <Crown size={18} className="text-white" />
-            {t.nav.pricing}
-          </a>
-
-          <Link
-            href="/login"
-            onClick={() => setMobileMenuOpen(false)}
-            className="flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-2xl bg-white/[0.055] px-2 text-center text-[10px] font-black uppercase tracking-[0.08em] text-white"
-          >
-            <MessageCircle size={18} className="text-violet-300" />
-            {t.common.login}
-          </Link>
-        </nav>
       </div>
     </main>
   );

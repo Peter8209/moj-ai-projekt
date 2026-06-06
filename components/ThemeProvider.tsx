@@ -23,25 +23,15 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 const THEME_STORAGE_KEY = 'zedpera_theme';
 const LEGACY_THEME_STORAGE_KEY = 'zedpera-theme';
-const THEME_STYLE_ID = 'zedpera-global-force-light-ui-style-v4';
+const THEME_STYLE_ID = 'zedpera-global-dark-ui-style-v5';
 
 function isTheme(value: unknown): value is Theme {
   return value === 'light' || value === 'dark';
 }
 
-function getSystemTheme(): Theme {
-  if (typeof window === 'undefined') {
-    return 'light';
-  }
-
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches
-    ? 'dark'
-    : 'light';
-}
-
 function getInitialTheme(): Theme {
   if (typeof window === 'undefined') {
-    return 'light';
+    return 'dark';
   }
 
   try {
@@ -49,14 +39,16 @@ function getInitialTheme(): Theme {
       window.localStorage.getItem(THEME_STORAGE_KEY) ||
       window.localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
 
-    if (isTheme(savedTheme)) {
-      return savedTheme;
+    // Predvolený režim má byť tmavý. Ak bol v prehliadači uložený starý light režim,
+    // prepíšeme ho na dark, aby sa mobilné okná nevracali do bieleho pozadia.
+    if (savedTheme === 'dark') {
+      return 'dark';
     }
   } catch {
     // ignore
   }
 
-  return getSystemTheme();
+  return 'dark';
 }
 
 function injectThemeStyle() {
@@ -1325,11 +1317,18 @@ function notifyThemeChange(theme: Theme) {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('light');
+  const [theme, setThemeState] = useState<Theme>('dark');
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     const initialTheme = getInitialTheme();
+
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, initialTheme);
+      window.localStorage.setItem(LEGACY_THEME_STORAGE_KEY, initialTheme);
+    } catch {
+      // ignore
+    }
 
     setThemeState(initialTheme);
     applyThemeToDocument(initialTheme);

@@ -2055,13 +2055,19 @@ function MobileLanguageDropdown({
   language,
   labels,
   onChange,
+  onClose,
 }: {
   language: AppLanguage;
   labels: Translation['common'];
   onChange: (language: AppLanguage) => void;
+  onClose?: () => void;
 }) {
+  function selectMobileLanguage(nextLanguage: AppLanguage) {
+    onChange(nextLanguage);
+    onClose?.();
+  }
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.035] p-2">
+    <div className="rounded-xl border border-white/15 bg-[#05050b] p-2 shadow-[0_18px_45px_rgba(0,0,0,0.55)]">
       <div className="mb-2 flex items-center gap-2 px-2 text-xs font-black uppercase tracking-[0.16em] text-white">
         <Languages size={15} className="text-violet-300" />
         {labels.language}
@@ -2075,11 +2081,11 @@ function MobileLanguageDropdown({
             <button
               key={item.code}
               type="button"
-              onClick={() => onChange(item.code)}
+              onClick={() => selectMobileLanguage(item.code)}
               className={`rounded-lg px-3 py-3 text-sm font-black ${
                 active
-                  ? 'bg-violet-700 text-white'
-                  : 'bg-white/5 text-white'
+                  ? 'bg-violet-700 text-white shadow-lg shadow-violet-700/30'
+                  : 'bg-[#090912] text-white hover:bg-[#121225]'
               }`}
             >
               <span className={`language-chip language-${item.code} mr-2`}>
@@ -3589,6 +3595,186 @@ export default function LandingPage() {
           }
         }
 
+
+        /* =========================================================
+           ZEDPERA MOBILE DARK MASTER OVERRIDE - 2026
+           - absolutne zrusenie bielych okien v mobilnej verzii
+           - vsetky panely/karty/pill/menu/formulare su cierne
+           - vsetky texty v landing page su biele a kontrastne
+           - jazykove okno sa po vybere zavrie cez onClose
+        ========================================================= */
+        @media (max-width: 1279px) {
+          html,
+          body,
+          #__next,
+          main,
+          .theme-root,
+          .zedpera-template {
+            background: #000000 !important;
+            background-color: #000000 !important;
+            color: #ffffff !important;
+            color-scheme: dark !important;
+          }
+
+          .zedpera-template :where(
+            section,
+            article,
+            aside,
+            nav,
+            header,
+            footer,
+            form,
+            dialog,
+            div,
+            a,
+            button,
+            input,
+            textarea,
+            select
+          ) {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+          }
+
+          .zedpera-template :where(h1,h2,h3,h4,h5,h6,p,span,strong,b,small,label,li,td,th) {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            opacity: 1 !important;
+          }
+
+          .zedpera-template :where(
+            .bg-white,
+            .bg-slate-50,
+            .bg-slate-100,
+            .bg-slate-200,
+            .bg-gray-50,
+            .bg-gray-100,
+            .bg-gray-200,
+            .bg-zinc-50,
+            .bg-zinc-100,
+            .bg-zinc-200,
+            .bg-neutral-50,
+            .bg-neutral-100,
+            .bg-neutral-200,
+            .bg-stone-50,
+            .bg-stone-100,
+            .bg-stone-200
+          ),
+          .zedpera-template [class*="bg-white"],
+          .zedpera-template [class*="bg-slate-"],
+          .zedpera-template [class*="bg-gray-"],
+          .zedpera-template [class*="bg-zinc-"],
+          .zedpera-template [class*="bg-neutral-"],
+          .zedpera-template [class*="bg-stone-"],
+          .zedpera-template [style*="background: white"],
+          .zedpera-template [style*="background-color: white"],
+          .zedpera-template [style*="background:#fff"],
+          .zedpera-template [style*="background-color:#fff"],
+          .zedpera-template [style*="background: #fff"],
+          .zedpera-template [style*="background-color: #fff"] {
+            background: linear-gradient(180deg, #080812 0%, #000000 100%) !important;
+            background-color: #05050b !important;
+            background-image: linear-gradient(180deg, #080812 0%, #000000 100%) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            border-color: rgba(255, 255, 255, 0.16) !important;
+            box-shadow:
+              0 18px 55px rgba(0, 0, 0, 0.62),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.045) !important;
+          }
+
+          .zedpera-template :where(
+            .bg-white,
+            .bg-slate-50,
+            .bg-slate-100,
+            .bg-slate-200,
+            .bg-gray-50,
+            .bg-gray-100,
+            .bg-gray-200,
+            .bg-zinc-50,
+            .bg-zinc-100,
+            .bg-zinc-200,
+            .bg-neutral-50,
+            .bg-neutral-100,
+            .bg-neutral-200,
+            .bg-stone-50,
+            .bg-stone-100,
+            .bg-stone-200
+          ) *,
+          .zedpera-template [class*="bg-white"] *,
+          .zedpera-template [class*="bg-slate-"] *,
+          .zedpera-template [class*="bg-gray-"] *,
+          .zedpera-template [class*="bg-zinc-"] *,
+          .zedpera-template [class*="bg-neutral-"] *,
+          .zedpera-template [class*="bg-stone-"] * {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            opacity: 1 !important;
+          }
+
+          .zedpera-template [class*="text-black"],
+          .zedpera-template [class*="text-slate"],
+          .zedpera-template [class*="text-gray"],
+          .zedpera-template [class*="text-zinc"],
+          .zedpera-template [class*="text-neutral"],
+          .zedpera-template [class*="text-stone"] {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+          }
+
+          .zedpera-template input,
+          .zedpera-template textarea,
+          .zedpera-template select {
+            background: #05050b !important;
+            background-color: #05050b !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            border: 1px solid rgba(255, 255, 255, 0.18) !important;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035) !important;
+          }
+
+          .zedpera-template input::placeholder,
+          .zedpera-template textarea::placeholder {
+            color: rgba(255, 255, 255, 0.72) !important;
+            -webkit-text-fill-color: rgba(255, 255, 255, 0.72) !important;
+          }
+
+          .zedpera-template header,
+          .zedpera-template header .fixed.left-0.right-0,
+          .zedpera-template .zedpera-mobile-bottom-nav {
+            background: rgba(0, 0, 0, 0.985) !important;
+            background-color: rgba(0, 0, 0, 0.985) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+          }
+
+          .zedpera-template header .fixed.left-0.right-0 a,
+          .zedpera-template header .fixed.left-0.right-0 button,
+          .zedpera-template .zedpera-mobile-bottom-nav a {
+            background: #070711 !important;
+            background-color: #070711 !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+          }
+
+          .zedpera-template :where([class*="bg-violet"], [class*="bg-purple"], [class*="bg-fuchsia"], [class*="bg-blue"], [class*="from-violet"], [class*="from-purple"], [class*="to-fuchsia"], [class*="to-blue"], [class*="bg-gradient-to"]) {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+          }
+
+          .zedpera-template :where([class*="bg-violet"], [class*="bg-purple"], [class*="bg-fuchsia"], [class*="bg-blue"], [class*="from-violet"], [class*="from-purple"], [class*="to-fuchsia"], [class*="to-blue"], [class*="bg-gradient-to"]) * {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+          }
+
+          .zedpera-template .language-chip {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            border-color: rgba(255, 255, 255, 0.30) !important;
+            box-shadow: 0 10px 26px rgba(0, 0, 0, 0.46) !important;
+          }
+        }
+
       `}</style>
 
       <div
@@ -3712,6 +3898,7 @@ export default function LandingPage() {
                   language={language}
                   labels={t.common}
                   onChange={handleLanguageChange}
+                  onClose={() => setMobileMenuOpen(false)}
                 />
 
                 <Link

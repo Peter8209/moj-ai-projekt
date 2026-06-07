@@ -1,0 +1,9 @@
+Balíčky
+
+Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
+
+- Vyberiete si predplatné podľa rozsahu používania.
+- Balík obsahuje strany, práce, AI kontroly, audity a kredity.
+- Doplnky umožnia pridať extra strany alebo ďalšie služby.
+
+Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

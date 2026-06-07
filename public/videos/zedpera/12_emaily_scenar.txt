@@ -1,0 +1,9 @@
+Emaily
+
+Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
+
+- Sekcia Emaily pripravuje profesionálnu komunikáciu.
+- Vhodné pre vedúceho práce, školiteľa alebo študijné oddelenie.
+- Stačí zadať komu píšete a čo potrebujete oznámiť.
+
+Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

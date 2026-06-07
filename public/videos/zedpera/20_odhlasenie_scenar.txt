@@ -1,0 +1,9 @@
+Odhlásenie
+
+Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
+
+- Na konci práce kliknite v ľavom menu na Odhlásiť sa.
+- Účet sa bezpečne ukončí a údaje ostanú chránené.
+- Odhlasovanie je dôležité najmä na zdieľanom počítači.
+
+Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

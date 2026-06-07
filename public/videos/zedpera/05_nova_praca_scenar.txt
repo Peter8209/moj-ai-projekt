@@ -1,0 +1,9 @@
+Nová práca
+
+Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
+
+- Kliknite na tlačidlo Nová práca.
+- Vyberte typ práce a doplňte názov, odbor, jazyk a citačnú normu.
+- Vyplňte cieľ, metodológiu, otázky, hypotézy a kľúčové slová.
+
+Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

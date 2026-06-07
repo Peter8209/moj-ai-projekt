@@ -1,0 +1,9 @@
+Moje práce
+
+Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
+
+- Tu nájdete všetky rozpracované projekty.
+- Každá práca má vlastný profil, tému, odbor, jazyk a nastavenia.
+- Vyberte existujúcu prácu alebo vytvorte novú.
+
+Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

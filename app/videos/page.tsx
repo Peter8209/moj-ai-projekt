@@ -31,6 +31,8 @@ type VideoTutorial = {
   steps: string[];
 };
 
+const VIDEO_BASE_PATH = '/videos/zedpera_fixed';
+
 const videoTutorials: VideoTutorial[] = [
   {
     id: 'hlavne-menu',
@@ -39,8 +41,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Orientácia v aplikácii',
     category: 'Základy',
     duration: '45 sekúnd',
-    src: '/videos/zedpera/01_hlavne_menu.mp4',
-    poster: '/videos/zedpera/01_hlavne_menu.png',
+    src: `${VIDEO_BASE_PATH}/01_hlavne_menu.mp4`,
+    poster: `${VIDEO_BASE_PATH}/01_hlavne_menu.png`,
     description:
       'Profesionálny úvod do hlavného menu Zedpera. Používateľ sa naučí, kde nájde dashboard, profil, AI moduly, práce, zdroje, balíčky, históriu a videonávody.',
     avatarLine:
@@ -60,8 +62,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Účet, balík a nastavenia',
     category: 'Profil',
     duration: '60 sekúnd',
-    src: '/videos/zedpera/02_profil.mp4',
-    poster: '/videos/zedpera/02_profil.png',
+    src: `${VIDEO_BASE_PATH}/02_profil.mp4`,
+    poster: `${VIDEO_BASE_PATH}/02_profil.png`,
     description:
       'Manuál vysvetľuje, kde sa nachádza profil používateľa, ako skontrolovať údaje účtu, aktívny balík a základné nastavenia.',
     avatarLine:
@@ -81,8 +83,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Písanie a úprava textu',
     category: 'AI nástroje',
     duration: '75 sekúnd',
-    src: '/videos/zedpera/03_ai_chat.mp4',
-    poster: '/videos/zedpera/03_ai_chat.png',
+    src: `${VIDEO_BASE_PATH}/03_ai_chat.mp4`,
+    poster: `${VIDEO_BASE_PATH}/03_ai_chat.png`,
     description:
       'AI Chat pomáha vytvárať odborný text, osnovy, kapitoly, návrhy, úpravy a vysvetlenia podľa zadania používateľa.',
     avatarLine:
@@ -102,8 +104,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Správa rozpracovaných prác',
     category: 'Práce',
     duration: '60 sekúnd',
-    src: '/videos/zedpera/04_moje_prace.mp4',
-    poster: '/videos/zedpera/04_moje_prace.png',
+    src: `${VIDEO_BASE_PATH}/04_moje_prace.mp4`,
+    poster: `${VIDEO_BASE_PATH}/04_moje_prace.png`,
     description:
       'Používateľ sa naučí spravovať uložené práce, vybrať aktívnu prácu a pokračovať v rozpracovanom projekte.',
     avatarLine:
@@ -123,8 +125,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Vytvorenie profilu práce',
     category: 'Práce',
     duration: '90 sekúnd',
-    src: '/videos/zedpera/05_nova_praca.mp4',
-    poster: '/videos/zedpera/05_nova_praca.png',
+    src: `${VIDEO_BASE_PATH}/05_nova_praca.mp4`,
+    poster: `${VIDEO_BASE_PATH}/05_nova_praca.png`,
     description:
       'Detailný postup vytvorenia novej akademickej práce vrátane názvu, témy, cieľa, metodológie, jazyka, citácií a kľúčových slov.',
     avatarLine:
@@ -145,8 +147,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Odborná spätná väzba',
     category: 'AI nástroje',
     duration: '75 sekúnd',
-    src: '/videos/zedpera/06_ai_veduci.mp4',
-    poster: '/videos/zedpera/06_ai_veduci.png',
+    src: `${VIDEO_BASE_PATH}/06_ai_veduci.mp4`,
+    poster: `${VIDEO_BASE_PATH}/06_ai_veduci.png`,
     description:
       'AI školiteľ kontroluje logiku, štruktúru, nadväznosť, metodológiu, cieľ práce a odbornú kvalitu textu.',
     avatarLine:
@@ -166,8 +168,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Kontrola akademického textu',
     category: 'Kontrola',
     duration: '75 sekúnd',
-    src: '/videos/zedpera/07_audit_kvality.mp4',
-    poster: '/videos/zedpera/07_audit_kvality.png',
+    src: `${VIDEO_BASE_PATH}/07_audit_kvality.mp4`,
+    poster: `${VIDEO_BASE_PATH}/07_audit_kvality.png`,
     description:
       'Audit kvality kontroluje štylistiku, citácie, logiku, metodológiu, odbornú presnosť a celkovú úroveň práce.',
     avatarLine:
@@ -187,8 +189,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Prezentácia, otázky a odpovede',
     category: 'Obhajoba',
     duration: '90 sekúnd',
-    src: '/videos/zedpera/08_obhajoba.mp4',
-    poster: '/videos/zedpera/08_obhajoba.png',
+    src: `${VIDEO_BASE_PATH}/08_obhajoba.mp4`,
+    poster: `${VIDEO_BASE_PATH}/08_obhajoba.png`,
     description:
       'Modul Obhajoba pripraví podklady na prezentáciu, sprievodný text, otázky komisie a odporúčané odpovede.',
     avatarLine:
@@ -209,8 +211,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Preklad odborného textu',
     category: 'AI nástroje',
     duration: '60 sekúnd',
-    src: '/videos/zedpera/09_preklad.mp4',
-    poster: '/videos/zedpera/09_preklad.png',
+    src: `${VIDEO_BASE_PATH}/09_preklad.mp4`,
+    poster: `${VIDEO_BASE_PATH}/09_preklad.png`,
     description:
       'Preklad umožňuje prekladať odborné, akademické a formálne texty podľa zvoleného jazyka a štýlu.',
     avatarLine:
@@ -230,8 +232,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Tabuľky, grafy a výsledky',
     category: 'Výskum',
     duration: '75 sekúnd',
-    src: '/videos/zedpera/10_analyza_dat.mp4',
-    poster: '/videos/zedpera/10_analyza_dat.png',
+    src: `${VIDEO_BASE_PATH}/10_analyza_dat.mp4`,
+    poster: `${VIDEO_BASE_PATH}/10_analyza_dat.png`,
     description:
       'Analýza dát pomáha spracovať tabuľky, dotazníky, premenné, grafy a štatistické výsledky.',
     avatarLine:
@@ -251,8 +253,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Harmonogram písania práce',
     category: 'Organizácia',
     duration: '60 sekúnd',
-    src: '/videos/zedpera/11_planovanie.mp4',
-    poster: '/videos/zedpera/11_planovanie.png',
+    src: `${VIDEO_BASE_PATH}/11_planovanie.mp4`,
+    poster: `${VIDEO_BASE_PATH}/11_planovanie.png`,
     description:
       'Plánovanie vytvorí harmonogram písania práce, rozdelí úlohy a pomôže kontrolovať termíny.',
     avatarLine:
@@ -272,8 +274,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Profesionálna komunikácia',
     category: 'Komunikácia',
     duration: '60 sekúnd',
-    src: '/videos/zedpera/12_emaily.mp4',
-    poster: '/videos/zedpera/12_emaily.png',
+    src: `${VIDEO_BASE_PATH}/12_emaily.mp4`,
+    poster: `${VIDEO_BASE_PATH}/12_emaily.png`,
     description:
       'Modul Emaily pripraví profesionálne emaily pre vedúceho práce, vyučujúceho, školu alebo administratívu.',
     avatarLine:
@@ -293,8 +295,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Orientačná kontrola textu',
     category: 'Kontrola',
     duration: '60 sekúnd',
-    src: '/videos/zedpera/13_originalita_prace.mp4',
-    poster: '/videos/zedpera/13_originalita_prace.png',
+    src: `${VIDEO_BASE_PATH}/13_originalita_prace.mp4`,
+    poster: `${VIDEO_BASE_PATH}/13_originalita_prace.png`,
     description:
       'Originalita práce pomáha nájsť rizikové, všeobecné alebo nedostatočne odcitované pasáže.',
     avatarLine:
@@ -314,8 +316,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Prirodzenejší akademický štýl',
     category: 'AI nástroje',
     duration: '60 sekúnd',
-    src: '/videos/zedpera/14_humanizacia_textu.mp4',
-    poster: '/videos/zedpera/14_humanizacia_textu.png',
+    src: `${VIDEO_BASE_PATH}/14_humanizacia_textu.mp4`,
+    poster: `${VIDEO_BASE_PATH}/14_humanizacia_textu.png`,
     description:
       'Humanizácia upraví text tak, aby pôsobil prirodzenejšie, čitateľnejšie a menej strojovo.',
     avatarLine:
@@ -335,8 +337,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Literatúra a citačné záznamy',
     category: 'Zdroje',
     duration: '75 sekúnd',
-    src: '/videos/zedpera/15_zdroje_citacie.mp4',
-    poster: '/videos/zedpera/15_zdroje_citacie.png',
+    src: `${VIDEO_BASE_PATH}/15_zdroje_citacie.mp4`,
+    poster: `${VIDEO_BASE_PATH}/15_zdroje_citacie.png`,
     description:
       'Sekcia Zdroje slúži na prácu s literatúrou, odbornými článkami, citáciami a bibliografickými údajmi.',
     avatarLine:
@@ -356,8 +358,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Predplatné a doplnkové služby',
     category: 'Platby',
     duration: '75 sekúnd',
-    src: '/videos/zedpera/16_balicky.mp4',
-    poster: '/videos/zedpera/16_balicky.png',
+    src: `${VIDEO_BASE_PATH}/16_balicky.mp4`,
+    poster: `${VIDEO_BASE_PATH}/16_balicky.png`,
     description:
       'Balíčky určujú mesačné limity strán, AI kontroly, audity, obhajoby a dostupné funkcie.',
     avatarLine:
@@ -377,8 +379,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Uložené konverzácie a výstupy',
     category: 'História',
     duration: '60 sekúnd',
-    src: '/videos/zedpera/17_historia_chatu.mp4',
-    poster: '/videos/zedpera/17_historia_chatu.png',
+    src: `${VIDEO_BASE_PATH}/17_historia_chatu.mp4`,
+    poster: `${VIDEO_BASE_PATH}/17_historia_chatu.png`,
     description:
       'História chatu uchováva staršie odpovede, osnovy, kapitoly, audity a pripravené výstupy.',
     avatarLine:
@@ -398,8 +400,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Postupy používania aplikácie',
     category: 'Pomoc',
     duration: '30 sekúnd',
-    src: '/videos/zedpera/18_video_navod.mp4',
-    poster: '/videos/zedpera/18_video_navod.png',
+    src: `${VIDEO_BASE_PATH}/18_video_navod.mp4`,
+    poster: `${VIDEO_BASE_PATH}/18_video_navod.png`,
     description:
       'Sekcia Video návod obsahuje jednoduché návody ku všetkým hlavným funkciám aplikácie.',
     avatarLine:
@@ -418,8 +420,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Prepnutie vzhľadu aplikácie',
     category: 'Nastavenia',
     duration: '30 sekúnd',
-    src: '/videos/zedpera/19_vzhlad_aplikacie.mp4',
-    poster: '/videos/zedpera/19_vzhlad_aplikacie.png',
+    src: `${VIDEO_BASE_PATH}/19_vzhlad_aplikacie.mp4`,
+    poster: `${VIDEO_BASE_PATH}/19_vzhlad_aplikacie.png`,
     description:
       'Návod ukazuje prepínanie medzi svetlým a tmavým režimom aplikácie.',
     avatarLine:
@@ -438,8 +440,8 @@ const videoTutorials: VideoTutorial[] = [
     subtitle: 'Bezpečné ukončenie práce',
     category: 'Účet',
     duration: '30 sekúnd',
-    src: '/videos/zedpera/20_odhlasenie.mp4',
-    poster: '/videos/zedpera/20_odhlasenie.png',
+    src: `${VIDEO_BASE_PATH}/20_odhlasenie.mp4`,
+    poster: `${VIDEO_BASE_PATH}/20_odhlasenie.png`,
     description:
       'Odhlásenie bezpečne ukončí prácu v účte, najmä pri používaní školského alebo zdieľaného počítača.',
     avatarLine:
@@ -786,8 +788,8 @@ function ProfessionalVideoPlayer({
 
               <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">
                 Skontrolujte, či je MP4 uložené v priečinku
-                public/videos/zedpera a či názov súboru presne zodpovedá tomuto
-                odkazu:
+                public/videos/zedpera_fixed a či názov súboru presne zodpovedá
+                tomuto odkazu:
               </p>
 
               <code className="mt-4 inline-block rounded-xl bg-black/50 px-4 py-3 text-xs font-bold text-purple-200">
@@ -873,7 +875,7 @@ function ScenarioPanel({ video }: { video: VideoTutorial }) {
 
       <ul className="mt-4 space-y-3">
         {video.steps.map((step, index) => (
-          <li key={step} className="flex gap-3 text-sm text-slate-200">
+          <li key={`${video.id}-${index}`} className="flex gap-3 text-sm text-slate-200">
             <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-purple-400" />
 
             <span>

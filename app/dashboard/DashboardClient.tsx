@@ -86,88 +86,273 @@ type SelectOption<T extends string = string> = {
   labelKey: string;
 };
 
-const languageSelectOptions: Array<ClickableChoice<LanguageCode>> = [
-  { value: 'sk', label: 'Slovenčina' },
-  { value: 'cs', label: 'Čeština' },
-  { value: 'en', label: 'English' },
-  { value: 'de', label: 'Deutsch' },
-  { value: 'pl', label: 'Polski' },
-  { value: 'hu', label: 'Magyar' },
-];
+type ClickableChoice<T extends string> = {
+  value: T;
+  label: string;
+  description?: string;
+};
 
-const translationStyleOptions: SelectOption<TranslationStyle>[] = [
-  { value: 'academic', labelKey: 'academic' },
-  { value: 'formal', labelKey: 'formal' },
-  { value: 'natural', labelKey: 'natural' },
-  { value: 'simple', labelKey: 'simple' },
-];
+type DashboardSelectorTranslations = {
+  translationFrom: string;
+  translationTo: string;
+  translationStyle: string;
+  emailType: string;
+  emailTone: string;
 
-const emailTypeOptions: SelectOption<EmailType>[] = [
-  { value: 'supervisor', labelKey: 'supervisor' },
-  { value: 'teacher', labelKey: 'teacher' },
-  { value: 'consultation', labelKey: 'consultation' },
-  { value: 'deadline', labelKey: 'deadline' },
-  { value: 'request', labelKey: 'request' },
-  { value: 'apology', labelKey: 'apology' },
-  { value: 'business', labelKey: 'business' },
-  { value: 'other', labelKey: 'other' },
-];
+  languages: {
+    slovak: string;
+    czech: string;
+    english: string;
+    german: string;
+    polish: string;
+    hungarian: string;
+  };
 
-const emailToneOptions: SelectOption<EmailTone>[] = [
-  { value: 'professional', labelKey: 'professional' },
-  { value: 'formal', labelKey: 'formal' },
-  { value: 'friendly', labelKey: 'friendly' },
-  { value: 'polite', labelKey: 'polite' },
-  { value: 'urgent', labelKey: 'urgent' },
-  { value: 'short', labelKey: 'short' },
-];
+  translationStyles: {
+    academic: string;
+    formal: string;
+    natural: string;
+    simple: string;
+  };
 
-function getDashboardSelectorTranslations(t: any) {
-  return (
-    t?.dashboardTools?.selectors || {
-      translationFrom: 'Preložiť z jazyka',
-      translationTo: 'Preložiť do jazyka',
-      translationStyle: 'Štýl prekladu',
-      emailType: 'Typ emailu',
-      emailTone: 'Tón emailu',
+  emailTypes: {
+    supervisor: string;
+    teacher: string;
+    consultation: string;
+    deadline: string;
+    request: string;
+    apology: string;
+    business: string;
+    other: string;
+  };
 
-      languages: {
-        slovak: 'Slovenčina',
-        czech: 'Čeština',
-        english: 'Angličtina',
-        german: 'Nemčina',
-        polish: 'Poľština',
-        hungarian: 'Maďarčina',
-      },
+  emailTones: {
+    professional: string;
+    formal: string;
+    friendly: string;
+    polite: string;
+    urgent: string;
+    short: string;
+  };
+};
 
-      translationStyles: {
-        academic: 'Akademický',
-        formal: 'Formálny',
-        natural: 'Prirodzený',
-        simple: 'Jednoduchý',
-      },
+function getDashboardSelectorTranslations(t: any): DashboardSelectorTranslations {
+  const fallback: DashboardSelectorTranslations = {
+    translationFrom: 'Preložiť z jazyka',
+    translationTo: 'Preložiť do jazyka',
+    translationStyle: 'Štýl prekladu',
+    emailType: 'Typ emailu',
+    emailTone: 'Tón emailu',
 
-      emailTypes: {
-        supervisor: 'Email vedúcemu práce',
-        teacher: 'Email vyučujúcemu',
-        consultation: 'Žiadosť o konzultáciu',
-        deadline: 'Termín / odovzdanie',
-        request: 'Žiadosť',
-        apology: 'Ospravedlnenie',
-        business: 'Obchodný email',
-        other: 'Iný email',
-      },
+    languages: {
+      slovak: 'Slovenčina',
+      czech: 'Čeština',
+      english: 'Angličtina',
+      german: 'Nemčina',
+      polish: 'Poľština',
+      hungarian: 'Maďarčina',
+    },
 
-      emailTones: {
-        professional: 'Profesionálny',
-        formal: 'Formálny',
-        friendly: 'Priateľský',
-        polite: 'Zdvorilý',
-        urgent: 'Urgentný',
-        short: 'Krátky a vecný',
-      },
-    }
-  );
+    translationStyles: {
+      academic: 'Akademický',
+      formal: 'Formálny',
+      natural: 'Prirodzený',
+      simple: 'Jednoduchý',
+    },
+
+    emailTypes: {
+      supervisor: 'Email vedúcemu práce',
+      teacher: 'Email vyučujúcemu',
+      consultation: 'Žiadosť o konzultáciu',
+      deadline: 'Termín / odovzdanie',
+      request: 'Žiadosť',
+      apology: 'Ospravedlnenie',
+      business: 'Obchodný email',
+      other: 'Iný email',
+    },
+
+    emailTones: {
+      professional: 'Profesionálny',
+      formal: 'Formálny',
+      friendly: 'Priateľský',
+      polite: 'Zdvorilý',
+      urgent: 'Urgentný',
+      short: 'Krátky a vecný',
+    },
+  };
+
+  return {
+    ...fallback,
+    ...(t?.dashboardTools?.selectors || {}),
+
+    languages: {
+      ...fallback.languages,
+      ...(t?.dashboardTools?.selectors?.languages || {}),
+    },
+
+    translationStyles: {
+      ...fallback.translationStyles,
+      ...(t?.dashboardTools?.selectors?.translationStyles || {}),
+    },
+
+    emailTypes: {
+      ...fallback.emailTypes,
+      ...(t?.dashboardTools?.selectors?.emailTypes || {}),
+    },
+
+    emailTones: {
+      ...fallback.emailTones,
+      ...(t?.dashboardTools?.selectors?.emailTones || {}),
+    },
+  };
+}
+
+function createLanguageSelectOptions(
+  selectorTranslations: DashboardSelectorTranslations,
+): Array<ClickableChoice<LanguageCode>> {
+  return [
+    {
+      value: 'sk',
+      label: selectorTranslations.languages.slovak,
+      description: 'Slovak',
+    },
+    {
+      value: 'cs',
+      label: selectorTranslations.languages.czech,
+      description: 'Czech',
+    },
+    {
+      value: 'en',
+      label: selectorTranslations.languages.english,
+      description: 'English',
+    },
+    {
+      value: 'de',
+      label: selectorTranslations.languages.german,
+      description: 'German',
+    },
+    {
+      value: 'pl',
+      label: selectorTranslations.languages.polish,
+      description: 'Polish',
+    },
+    {
+      value: 'hu',
+      label: selectorTranslations.languages.hungarian,
+      description: 'Hungarian',
+    },
+  ];
+}
+
+function createTranslationStyleOptions(
+  selectorTranslations: DashboardSelectorTranslations,
+): Array<ClickableChoice<TranslationStyle>> {
+  return [
+    {
+      value: 'academic',
+      label: selectorTranslations.translationStyles.academic,
+      description: 'Odborný štýl pre akademické práce',
+    },
+    {
+      value: 'formal',
+      label: selectorTranslations.translationStyles.formal,
+      description: 'Oficiálny a profesionálny štýl',
+    },
+    {
+      value: 'natural',
+      label: selectorTranslations.translationStyles.natural,
+      description: 'Plynulý a prirodzený jazyk',
+    },
+    {
+      value: 'simple',
+      label: selectorTranslations.translationStyles.simple,
+      description: 'Jednoduchý a zrozumiteľný text',
+    },
+  ];
+}
+
+function createEmailTypeOptions(
+  selectorTranslations: DashboardSelectorTranslations,
+): Array<ClickableChoice<EmailType>> {
+  return [
+    {
+      value: 'supervisor',
+      label: selectorTranslations.emailTypes.supervisor,
+      description: 'Správa pre školiteľa alebo konzultanta',
+    },
+    {
+      value: 'teacher',
+      label: selectorTranslations.emailTypes.teacher,
+      description: 'Formálna správa pre pedagóga',
+    },
+    {
+      value: 'consultation',
+      label: selectorTranslations.emailTypes.consultation,
+      description: 'Dohodnutie termínu konzultácie',
+    },
+    {
+      value: 'deadline',
+      label: selectorTranslations.emailTypes.deadline,
+      description: 'Komunikácia k termínu práce',
+    },
+    {
+      value: 'request',
+      label: selectorTranslations.emailTypes.request,
+      description: 'Formálna alebo administratívna žiadosť',
+    },
+    {
+      value: 'apology',
+      label: selectorTranslations.emailTypes.apology,
+      description: 'Slušné a profesionálne ospravedlnenie',
+    },
+    {
+      value: 'business',
+      label: selectorTranslations.emailTypes.business,
+      description: 'Profesionálna obchodná komunikácia',
+    },
+    {
+      value: 'other',
+      label: selectorTranslations.emailTypes.other,
+      description: 'Vlastný typ emailovej správy',
+    },
+  ];
+}
+
+function createEmailToneOptions(
+  selectorTranslations: DashboardSelectorTranslations,
+): Array<ClickableChoice<EmailTone>> {
+  return [
+    {
+      value: 'professional',
+      label: selectorTranslations.emailTones.professional,
+      description: 'Vecný a reprezentatívny tón',
+    },
+    {
+      value: 'formal',
+      label: selectorTranslations.emailTones.formal,
+      description: 'Úradný a presný tón komunikácie',
+    },
+    {
+      value: 'friendly',
+      label: selectorTranslations.emailTones.friendly,
+      description: 'Milý, ale stále slušný prejav',
+    },
+    {
+      value: 'polite',
+      label: selectorTranslations.emailTones.polite,
+      description: 'Rešpektujúci a kultivovaný tón',
+    },
+    {
+      value: 'urgent',
+      label: selectorTranslations.emailTones.urgent,
+      description: 'Dôrazný email s jasnou prioritou',
+    },
+    {
+      value: 'short',
+      label: selectorTranslations.emailTones.short,
+      description: 'Stručná správa bez zbytočností',
+    },
+  ];
 }
 
 type AttachedFile = {
@@ -1354,7 +1539,8 @@ const hypothesisTestsBlock =
 
 type ClickableChoice<T extends string> = {
   value: T;
-  label?: string;
+  label: string;
+  description?: string;
 };
 
 type ClickableOptionGroupProps<T extends string> = {
@@ -1362,6 +1548,7 @@ type ClickableOptionGroupProps<T extends string> = {
   value: T;
   options: ClickableChoice<T>[];
   onChange: (value: T) => void;
+  columns?: 'languages' | 'styles' | 'emails';
 };
 
 function ClickableOptionGroup<T extends string>({
@@ -1369,38 +1556,83 @@ function ClickableOptionGroup<T extends string>({
   value,
   options,
   onChange,
+  columns = 'languages',
 }: ClickableOptionGroupProps<T>) {
-  return (
-    <div className="space-y-3">
-      <p className="text-sm font-black uppercase tracking-wide text-white">
-        {label}
-      </p>
+  const gridClass =
+    columns === 'styles'
+      ? 'grid-cols-1 sm:grid-cols-2'
+      : columns === 'emails'
+        ? 'grid-cols-1 sm:grid-cols-2'
+        : 'grid-cols-1 sm:grid-cols-2';
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+  return (
+    <div className="rounded-[1.75rem] border border-white/10 bg-[#03111f]/95 p-5 shadow-inner shadow-black/40">
+      <div className="mb-5 flex items-center gap-3">
+        <p className="shrink-0 text-xs font-black uppercase tracking-[0.24em] text-slate-100">
+          {label}
+        </p>
+
+        <div className="h-px flex-1 bg-gradient-to-r from-white/20 via-white/10 to-transparent" />
+      </div>
+
+      <div className={`grid ${gridClass} gap-3`}>
         {options.map((option) => {
           const isActive = value === option.value;
-
-          const visibleLabel =
-            option.label && option.label.trim().length > 0
-              ? option.label
-              : option.value;
 
           return (
             <button
               key={option.value}
               type="button"
               onClick={() => onChange(option.value)}
+              aria-pressed={isActive}
+              title={option.label}
               className={[
-                'flex min-h-[56px] items-center justify-center rounded-2xl border px-4 py-3',
-                'text-center text-sm font-black leading-tight text-white',
-                'transition focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2 focus:ring-offset-black',
+                'group relative min-h-[74px] w-full overflow-hidden rounded-2xl border px-4 py-3 text-left transition-all duration-200',
+                'focus:outline-none focus:ring-2 focus:ring-violet-400 focus:ring-offset-2 focus:ring-offset-[#020617]',
                 isActive
-                  ? 'border-purple-400 bg-purple-600 text-white shadow-lg shadow-purple-900/50'
-                  : 'border-white/20 bg-black/70 text-white hover:border-purple-400 hover:bg-purple-950/60',
+                  ? 'border-violet-300 bg-gradient-to-br from-violet-600 via-purple-600 to-fuchsia-600 text-white shadow-xl shadow-violet-950/60'
+                  : 'border-white/10 bg-[#050b16] text-white shadow-lg shadow-black/25 hover:-translate-y-0.5 hover:border-violet-300/60 hover:bg-[#0b1224]',
               ].join(' ')}
             >
-              <span className="block text-white">
-                {visibleLabel}
+              <span
+                className={[
+                  'pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-200',
+                  isActive
+                    ? 'bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.32),transparent_38%)] opacity-100'
+                    : 'group-hover:bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.25),transparent_40%)] group-hover:opacity-100',
+                ].join(' ')}
+              />
+
+              <span className="relative z-10 flex min-w-0 items-center justify-between gap-4">
+                <span className="min-w-0 flex-1">
+                  <span className="block whitespace-normal break-words text-[15px] font-black leading-5 text-white">
+                    {option.label}
+                  </span>
+
+                  {option.description ? (
+                    <span
+                      className={[
+                        'mt-1 block whitespace-normal break-words text-xs font-bold leading-5',
+                        isActive ? 'text-violet-50' : 'text-slate-400',
+                      ].join(' ')}
+                    >
+                      {option.description}
+                    </span>
+                  ) : null}
+                </span>
+
+                <span
+                  className={[
+                    'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border transition',
+                    isActive
+                      ? 'border-white bg-white'
+                      : 'border-white/20 bg-white/5 group-hover:border-violet-300',
+                  ].join(' ')}
+                >
+                  {isActive ? (
+                    <span className="h-3 w-3 rounded-full bg-violet-600" />
+                  ) : null}
+                </span>
               </span>
             </button>
           );
@@ -1485,16 +1717,45 @@ const exportTitle = useMemo(() => {
 
 const selectorTranslations = getDashboardSelectorTranslations(t);
 
-const languageLabels = selectorTranslations.languages || {};
-const translationStyleLabels =
-  selectorTranslations.translationStyles || {};
-const emailTypeLabels = selectorTranslations.emailTypes || {};
-const emailToneLabels = selectorTranslations.emailTones || {};
+const languageSelectOptions = createLanguageSelectOptions(selectorTranslations);
 
-const getLanguageLabel = (value: LanguageCode) => {
-  const option = languageSelectOptions.find((option) => option.value === value);
+const translationStyleOptions =
+  createTranslationStyleOptions(selectorTranslations);
 
-  return option?.label || value;
+const emailTypeOptions = createEmailTypeOptions(selectorTranslations);
+
+const emailToneOptions = createEmailToneOptions(selectorTranslations);
+
+const getLanguageLabel = (value: LanguageCode): string => {
+  const option = languageSelectOptions.find(
+    (languageOption) => languageOption.value === value,
+  );
+
+  return option?.label ?? value;
+};
+
+const getTranslationStyleLabel = (value: TranslationStyle): string => {
+  const option = translationStyleOptions.find(
+    (styleOption) => styleOption.value === value,
+  );
+
+  return option?.label ?? value;
+};
+
+const getEmailTypeLabel = (value: EmailType): string => {
+  const option = emailTypeOptions.find(
+    (emailTypeOption) => emailTypeOption.value === value,
+  );
+
+  return option?.label ?? value;
+};
+
+const getEmailToneLabel = (value: EmailTone): string => {
+  const option = emailToneOptions.find(
+    (emailToneOption) => emailToneOption.value === value,
+  );
+
+  return option?.label ?? value;
 };
 
 function SelectField<T extends string>({
@@ -1542,31 +1803,6 @@ function SelectField<T extends string>({
 
 
 
-const getTranslationStyleLabel = (value: TranslationStyle) => {
-  const option = translationStyleOptions.find(
-    (item) => item.value === value,
-  );
-
-  return option
-    ? translationStyleLabels[option.labelKey] || option.value
-    : value;
-};
-
-const getEmailTypeLabel = (value: EmailType) => {
-  const option = emailTypeOptions.find((item) => item.value === value);
-
-  return option
-    ? emailTypeLabels[option.labelKey] || option.value
-    : value;
-};
-
-const getEmailToneLabel = (value: EmailTone) => {
-  const option = emailToneOptions.find((item) => item.value === value);
-
-  return option
-    ? emailToneLabels[option.labelKey] || option.value
-    : value;
-};
 
 useEffect(() => {
   function handleActiveProfileChanged(event: Event) {

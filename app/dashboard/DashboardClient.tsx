@@ -86,13 +86,13 @@ type SelectOption<T extends string = string> = {
   labelKey: string;
 };
 
-const languageSelectOptions: SelectOption<LanguageCode>[] = [
-  { value: 'sk', labelKey: 'slovak' },
-  { value: 'cs', labelKey: 'czech' },
-  { value: 'en', labelKey: 'english' },
-  { value: 'de', labelKey: 'german' },
-  { value: 'pl', labelKey: 'polish' },
-  { value: 'hu', labelKey: 'hungarian' },
+const languageSelectOptions: Array<ClickableChoice<LanguageCode>> = [
+  { value: 'sk', label: 'Slovenčina' },
+  { value: 'cs', label: 'Čeština' },
+  { value: 'en', label: 'English' },
+  { value: 'de', label: 'Deutsch' },
+  { value: 'pl', label: 'Polski' },
+  { value: 'hu', label: 'Magyar' },
 ];
 
 const translationStyleOptions: SelectOption<TranslationStyle>[] = [
@@ -1352,59 +1352,7 @@ const hypothesisTestsBlock =
 }
 
 
-type SelectOption<T extends string> = {
-  value: T;
-  label: string;
-};
-
-type SelectFieldProps<T extends string> = {
-  label: string;
-  value: T;
-  options: SelectOption<T>[];
-  onChange: (value: T) => void;
-  className?: string;
-};
-
-function SelectField<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-  className = '',
-}: SelectFieldProps<T>) {
-  return (
-    <label className={`flex flex-col gap-2 ${className}`}>
-      <span className="text-sm font-bold text-white">
-        {label}
-      </span>
-
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value as T)}
-        className="
-          w-full rounded-xl border border-white/15 bg-black px-4 py-3
-          text-sm font-semibold text-white outline-none
-          transition
-          hover:border-white/30
-          focus:border-white focus:ring-2 focus:ring-white/20
-        "
-      >
-        {options.map((option) => (
-          <option
-            key={option.value}
-            value={option.value}
-            className="bg-black text-white"
-          >
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-
-type ClickableOption<T extends string> = {
+type ClickableChoice<T extends string> = {
   value: T;
   label?: string;
 };
@@ -1412,7 +1360,7 @@ type ClickableOption<T extends string> = {
 type ClickableOptionGroupProps<T extends string> = {
   label: string;
   value: T;
-  options: ClickableOption<T>[];
+  options: ClickableChoice<T>[];
   onChange: (value: T) => void;
 };
 
@@ -1431,6 +1379,7 @@ function ClickableOptionGroup<T extends string>({
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
         {options.map((option) => {
           const isActive = value === option.value;
+
           const visibleLabel =
             option.label && option.label.trim().length > 0
               ? option.label
@@ -1543,8 +1492,10 @@ const emailTypeLabels = selectorTranslations.emailTypes || {};
 const emailToneLabels = selectorTranslations.emailTones || {};
 
 const getLanguageLabel = (value: LanguageCode) => {
-  const option = languageSelectOptions.find((item) => item.value === value);
+  const option = languageSelectOptions.find((option) => option.value === value);
 
+  return option?.label || value;
+};
 
 function SelectField<T extends string>({
   label,
@@ -1589,10 +1540,7 @@ function SelectField<T extends string>({
 }
 
 
-  return option
-    ? languageLabels[option.labelKey] || option.value
-    : value;
-};
+
 
 const getTranslationStyleLabel = (value: TranslationStyle) => {
   const option = translationStyleOptions.find(

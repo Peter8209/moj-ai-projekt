@@ -1,12 +1,14 @@
 'use client';
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type RefObject,
 } from 'react';
+
 import {
   BookOpen,
   ChevronDown,
@@ -38,6 +40,7 @@ import type { AnalysisResult } from '@/components/analysis/analysisTypes';
 import { useLanguage } from '@/components/LanguageProvider';
 import ThemeToggleButton from '@/components/ThemeToggleButton';
 import ImprovementBox from '@/components/ImprovementBox';
+import MobileDashboardNavigation from '@/components/dashboard/MobileDashboardNavigation';
 import { useRouter } from 'next/navigation';
 
 
@@ -525,12 +528,14 @@ const moduleInfos: {
     infoClassName:
       'mb-4 rounded-2xl border border-pink-400/20 bg-pink-500/10 px-4 py-3 text-sm text-pink-100',
   },
-  {
-    key: 'originality',
-    translationKey: 'originalityCheck',
-    infoClassName:
-      'mb-4 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-100',
-  },
+
+  // {
+//   key: 'originality',
+//   translationKey: 'originalityCheck',
+//   infoClassName:
+//     'mb-4 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-100',
+// },
+
   {
     key: 'humanizer',
     translationKey: 'textHumanization',
@@ -1646,6 +1651,7 @@ export default function DashboardPage() {
   const { t } = useLanguage();
 
   const [activeModule, setActiveModule] = useState<ModuleKey>('supervisor');
+const [mobileModuleMenuOpen, setMobileModuleMenuOpen] = useState(false);
 const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
@@ -1674,7 +1680,8 @@ const [emailType, setEmailType] = useState<EmailType>('supervisor');
 const [emailTone, setEmailTone] = useState<EmailTone>('professional');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const resultRef = useRef<HTMLDivElement | null>(null);
+const resultRef = useRef<HTMLDivElement | null>(null);
+const mobileToolPanelRef = useRef<HTMLDivElement | null>(null);
 
   const activeModuleInfo = useMemo(() => {
   return (
@@ -1703,6 +1710,34 @@ const activeModuleInfoText =
 const activeModuleResultTitle =
   t.dashboardTools.resultTitles?.[activeTranslationKey] ||
   activeModuleLabel;
+
+const activeModuleCard =
+  t.dashboardTools.cards?.[activeTranslationKey];
+
+const activeModuleTexts =
+  t.dashboardTools.modules?.[activeTranslationKey];
+
+const activeModuleIntro =
+  activeModuleTexts?.intro || activeModuleInfoText;
+
+const activeModuleInputHelp =
+  activeModuleTexts?.inputHelp || activeModulePlaceholder;
+
+const activeModuleResultHelp =
+  activeModuleTexts?.resultHelp || '';
+
+const activeModuleEmptyState =
+  activeModuleTexts?.emptyState || 'Zatiaľ nie je vložený žiadny text.';
+
+const activeModuleCardTitle =
+  activeModuleCard?.title || activeModuleLabel;
+
+const activeModuleCardSubtitle =
+  activeModuleCard?.subtitle || 'AI nástroj';
+
+const activeModuleCardDescription =
+  activeModuleCard?.description || activeModuleIntro;
+
 
 const exportTitle = useMemo(() => {
   return `${activeModuleLabel} - ${
@@ -2392,6 +2427,20 @@ Text emailu:
 
     return input;
   };
+
+
+
+const selectDashboardModule = useCallback((moduleKey: ModuleKey) => {
+  setActiveModule(moduleKey);
+  setMobileMenuOpen(false);
+
+  window.setTimeout(() => {
+    mobileToolPanelRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }, 80);
+}, []);
 
 async function runModule() {
   if (isLoading) return;
@@ -3647,71 +3696,10 @@ const downloadExcel = () => {
 
     <main className="flex min-h-screen w-full bg-slate-50 text-slate-950 transition-colors duration-300 dark:bg-[#050711] dark:text-white">
         <section className="flex min-h-screen min-w-0 flex-1 flex-col">
-         <header className="sticky top-0 z-40 shrink-0 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur-xl transition-colors duration-300 dark:border-white/10 dark:bg-[#050711]/95 md:px-8">
-   <div className="flex flex-wrap items-center justify-between gap-3">
-  <div className="hidden flex-wrap items-center gap-2 xl:flex">
-  {moduleInfos.map((item) => {
-    const active = activeModule === item.key;
-
-    return (
-      <button
-        key={item.key}
-        type="button"
-        onClick={() => {
-          setActiveModule(item.key);
-        }}
-        className={`rounded-2xl border px-5 py-3 text-sm font-black transition ${
-          active
-            ? 'border-violet-400/40 bg-violet-600 text-white'
-            : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
-        }`}
-      >
-      {t.dashboardTools.tools[item.translationKey]}
-      </button>
-    );
-  })}
-
-  <button
-    type="button"
-    onClick={() => router.push('/projects?new=1')}
-    className="inline-flex items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-600 px-4 py-2 text-xs font-black text-white shadow-sm transition hover:bg-violet-500 dark:border-violet-400/30 dark:bg-violet-600 dark:text-white dark:hover:bg-violet-500"
-  >
-    <FileText className="h-4 w-4" />
-    Nová práca
-  </button>
-
-  <button
-    type="button"
-    onClick={() => router.push('/projects')}
-    className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-100 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300 dark:hover:bg-white/[0.1] dark:hover:text-white"
-  >
-    <BookOpen className="h-4 w-4" />
-    Moje práce
-  </button>
-
-  <ThemeToggleButton />
-</div>
-
-<div className="flex w-full flex-col gap-3 xl:hidden">
-  <button
-    type="button"
-    onClick={() => setMobileMenuOpen((value) => !value)}
-    className="flex min-h-[52px] w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm font-black text-slate-900 shadow-sm transition dark:border-white/10 dark:bg-white/[0.06] dark:text-white"
-  >
-    <span className="flex items-center gap-2">
-      <Menu className="h-4 w-4 text-violet-400" />
-      {activeModuleLabel}
-    </span>
-
-    <ChevronDown
-      className={`h-4 w-4 text-violet-400 transition ${
-        mobileMenuOpen ? 'rotate-180' : ''
-      }`}
-    />
-  </button>
-
-  {mobileMenuOpen ? (
-    <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-white/10 dark:bg-[#090918] sm:grid-cols-2">
+         <header className="sticky top-0 z-40 shrink-0 border-b border-white/10 bg-[#050711]/95 px-4 py-4 backdrop-blur-xl md:px-8">
+  <div className="flex flex-col gap-4">
+    {/* DESKTOP MENU */}
+    <div className="hidden flex-wrap items-center gap-2 xl:flex">
       {moduleInfos.map((item) => {
         const active = activeModule === item.key;
 
@@ -3719,14 +3707,11 @@ const downloadExcel = () => {
           <button
             key={item.key}
             type="button"
-            onClick={() => {
-              setActiveModule(item.key);
-              setMobileMenuOpen(false);
-            }}
-            className={`rounded-xl px-4 py-3 text-left text-sm font-black transition ${
+            onClick={() => selectDashboardModule(item.key)}
+            className={`inline-flex min-h-[56px] items-center justify-center rounded-2xl border px-6 py-3 text-sm font-black transition ${
               active
-                ? 'bg-violet-600 text-white'
-                : 'bg-slate-100 text-slate-800 hover:bg-slate-200 dark:bg-white/[0.06] dark:text-slate-200 dark:hover:bg-white/[0.1]'
+                ? 'border-violet-400/40 bg-violet-600 text-white shadow-lg shadow-violet-950/30'
+                : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
             }`}
           >
             {t.dashboardTools.tools[item.translationKey]}
@@ -3736,98 +3721,67 @@ const downloadExcel = () => {
 
       <button
         type="button"
-        onClick={() => {
-          setMobileMenuOpen(false);
-          router.push('/projects?new=1');
-        }}
-        className="rounded-xl bg-violet-600 px-4 py-3 text-left text-sm font-black text-white"
+        onClick={() => router.push('/projects?new=1')}
+        className="inline-flex min-h-[50px] items-center justify-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-sm transition hover:bg-violet-500"
       >
-        New Work
+        <FileText className="h-4 w-4" />
+        Nová práca
       </button>
 
       <button
         type="button"
-        onClick={() => {
-          setMobileMenuOpen(false);
-          router.push('/projects');
-        }}
-        className="rounded-xl bg-slate-100 px-4 py-3 text-left text-sm font-black text-slate-800 dark:bg-white/[0.06] dark:text-slate-200"
+        onClick={() => router.push('/projects')}
+        className="inline-flex min-h-[50px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-slate-300 shadow-sm transition hover:bg-white/[0.1] hover:text-white"
       >
-        My Works
+        <BookOpen className="h-4 w-4" />
+        Moje práce
       </button>
+
+      <button
+        type="button"
+        onClick={() => router.push('/video')}
+        className="inline-flex min-h-[50px] items-center justify-center gap-2 rounded-2xl border border-cyan-400/30 bg-cyan-500/10 px-5 py-3 text-sm font-black text-cyan-100 shadow-sm transition hover:bg-cyan-500/20"
+      >
+        <Presentation className="h-4 w-4" />
+        Videonávody
+      </button>
+
+      <div className="shrink-0">
+        <ThemeToggleButton />
+      </div>
     </div>
-  ) : null}
-</div>
 
-
-
-  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
-    <span className="font-black text-slate-950 dark:text-white">
-      {activeProfile?.title || 'Nie je vybraná žiadna práca'}
-    </span>
-    <span className="ml-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
-      {activeProfile?.type || activeProfile?.schema?.label || ''}
-    </span>
+    {/* MOBILE MENU */}
+    <MobileDashboardNavigation
+      activeModule={activeModule}
+      activeModuleLabel={activeModuleLabel}
+      activeModuleSubtitle={activeModuleCardSubtitle}
+      activeProfileTitle={
+        activeProfile?.title ||
+        activeProfile?.topic ||
+        'Nie je vybraná žiadna práca'
+      }
+      activeProfileType={
+        activeProfile?.type ||
+        activeProfile?.schema?.label ||
+        ''
+      }
+      moduleInfos={moduleInfos}
+      t={t}
+      onSelectModule={(moduleKey) =>
+        selectDashboardModule(moduleKey as ModuleKey)
+      }
+      onNavigate={(path) => {
+        setMobileMenuOpen(false);
+        setMobileModuleMenuOpen(false);
+        router.push(path);
+      }}
+    />
   </div>
-</div>
+</header>
 
-           <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto xl:hidden">
-{moduleInfos.map((item) => {
-const active = activeModule === item.key;
+{activeModule === 'planning' && (
 
-  return (
-    <button
-      key={item.key}
-      type="button"
-      onClick={() => setActiveModule(item.key)}
-      className={`inline-flex items-center justify-center rounded-2xl border px-5 py-3 text-sm font-black transition ${
-        active
-          ? 'border-violet-400/40 bg-violet-600 text-white shadow-lg shadow-violet-950/30'
-          : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
-      }`}
-    >
-  {t.dashboardTools.tools[item.translationKey]}
-    </button>
-  );
-})}
-
-<button
-  type="button"
-  onClick={() => router.push('/projects?new=1')}
-  className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-600 px-4 py-2 text-xs font-black text-white dark:border-violet-400/30 dark:bg-violet-600"
->
-  <FileText className="h-4 w-4" />
-  Nová práca
-</button>
-
-<button
-  type="button"
-  onClick={() => router.push('/projects')}
-  className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300"
->
-  <BookOpen className="h-4 w-4" />
-  Moje práce
-</button>
-
-
-  <div className="shrink-0">
-    <ThemeToggleButton />
-  </div>
-</div>
- </header>
-
- <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 pb-40 md:px-8">
-     <div className="mx-auto max-w-6xl">
-             <section className="mb-10 rounded-[28px] border border-slate-200 bg-white p-5 shadow-2xl shadow-slate-200/70 transition-colors duration-300 dark:border-white/10 dark:bg-[#070a16] dark:shadow-black/30">
-                <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-           <div className="flex items-start gap-4">
-  <div>
-  
-</div>
-</div>
-                </div>
-
-          {activeModule === 'planning' && (
                   <div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
                     Dnešný dátum: {getTodaySkDate()}.
                   </div>
@@ -3843,7 +3797,7 @@ const active = activeModule === item.key;
       </h3>
     </div>
 
-    <div className="grid gap-5 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-5">
   <ClickableOptionGroup<LanguageCode>
     label={selectorTranslations.translationFrom || 'Source language'}
     value={translationFrom}
@@ -3878,7 +3832,7 @@ const active = activeModule === item.key;
       </h3>
     </div>
 
-   <div className="grid gap-5 lg:grid-cols-2">
+   <div className="grid grid-cols-1 gap-5">
   <ClickableOptionGroup<EmailType>
     label={selectorTranslations.emailType || 'Email type'}
     value={emailType}
@@ -3896,8 +3850,8 @@ const active = activeModule === item.key;
   </div>
 )}
 
-                <div className={String(activeModuleInfo.infoClassName)}>
-  {activeModuleInfoText}
+<div className={String(activeModuleInfo.infoClassName)}>
+  {activeModuleIntro}
 </div>
 
                 {(activeModule === 'supervisor' ||
@@ -3917,6 +3871,10 @@ const active = activeModule === item.key;
   <label className="mb-2 block text-sm font-black text-slate-800 dark:text-slate-300">
     {activeModuleInputLabel}
   </label>
+
+  <p className="mb-3 text-xs font-semibold leading-5 text-slate-400">
+    {activeModuleInputHelp}
+  </p>
 
   <textarea
     value={input}
@@ -4144,187 +4102,284 @@ const active = activeModule === item.key;
 )}
                 </div>
               </div>
-            </section>
-
-            {result && (
-              <section
-                ref={resultRef}
-                className="mb-40 rounded-[28px] border border-white/10 bg-[#070a16] p-5 shadow-2xl shadow-black/30"
-              >
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-xl font-black">
-                      {activeModuleResultTitle}
-                    </h2>
-
-                    <p className="mt-1 text-sm text-slate-400">
-                      Výstup je očistený od poškodených znakov a pripravený na
-                      kopírovanie alebo export.
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-  {activeModule === 'defense' ? (
-    <button
-  type="button"
-  onClick={downloadPpt}
-  disabled={
-    !stripModuleExtraSections(
-      canvasText || result,
-      activeModule,
-    ).trim()
-  }
-  className="inline-flex items-center gap-2 rounded-2xl border border-violet-400 bg-violet-700 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-900/40 ring-2 ring-violet-400/40 transition hover:bg-violet-600 hover:ring-violet-300/70 disabled:cursor-not-allowed disabled:border-slate-700 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-60 disabled:shadow-none disabled:ring-0"
+<section
+  ref={mobileToolPanelRef}
+  className="scroll-mt-32 rounded-[28px] border border-white/10 bg-[#070a16] p-5 shadow-2xl shadow-black/30"
 >
-  <Presentation className="h-4 w-4" />
-  Stiahnuť PPTX
-</button>
-  ) : null}
+  <div className="mb-5 rounded-2xl border border-violet-400/20 bg-violet-500/10 p-4">
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <p className="text-xs font-black uppercase tracking-[0.25em] text-violet-300">
+          {activeModuleCardSubtitle}
+        </p>
 
-  <button
-    type="button"
-    onClick={downloadDoc}
-    className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 shadow-sm transition hover:bg-slate-100 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.08] dark:text-white dark:hover:bg-white/[0.13]"
-  >
-    <FileText className="h-4 w-4" />
-    Word
-  </button>
+        <h1 className="mt-2 text-2xl font-black text-white">
+          {activeModuleCardTitle}
+        </h1>
 
- {activeModule === 'data' && analysisResult && (
-  <button
-    type="button"
-    onClick={() => downloadAnalysisExport('xlsx')}
-    className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-black text-white hover:bg-emerald-500 sm:w-auto"
-  >
-    <Download className="h-4 w-4" />
-    Excel
-  </button>
+        <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">
+          {activeModuleCardDescription}
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={resetCurrentModule}
+        className="shrink-0 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-white hover:bg-white/[0.1]"
+      >
+        Vymazať
+      </button>
+    </div>
+  </div>
+
+  {activeProfile && (
+    <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+      <p className="text-xs font-black uppercase tracking-[0.25em] text-slate-500">
+        Aktívna práca
+      </p>
+
+      <p className="mt-2 text-sm font-black text-white">
+        {activeProfile.title || activeProfile.topic || 'Bez názvu práce'}
+      </p>
+
+      <p className="mt-1 text-xs font-semibold text-slate-400">
+        {activeProfile.type ||
+          activeProfile.schema?.label ||
+          'Typ práce nie je vyplnený'}
+      </p>
+    </div>
+  )}
+
+  {activeModule === 'translation' && (
+    <div className="mb-5 rounded-3xl border border-sky-400/20 bg-sky-500/10 p-4">
+      <div className="mb-4 flex items-center gap-2">
+        <Languages className="h-5 w-5 text-sky-200" />
+        <h3 className="text-lg font-black text-white">
+          {activeModuleLabel}
+        </h3>
+      </div>
+
+     <div className="grid grid-cols-1 gap-5">
+        <ClickableOptionGroup<LanguageCode>
+          label={selectorTranslations.translationFrom || 'Source language'}
+          value={translationFrom}
+          options={languageSelectOptions}
+          onChange={setTranslationFrom}
+        />
+
+        <ClickableOptionGroup<LanguageCode>
+          label={selectorTranslations.translationTo || 'Target language'}
+          value={translationTo}
+          options={languageSelectOptions}
+          onChange={setTranslationTo}
+        />
+
+        <ClickableOptionGroup<TranslationStyle>
+          label={selectorTranslations.translationStyle || 'Translation style'}
+          value={translationStyle}
+          options={translationStyleOptions}
+          onChange={setTranslationStyle}
+        />
+      </div>
+    </div>
+  )}
+
+  {activeModule === 'emails' && (
+    <div className="mb-5 rounded-3xl border border-pink-400/20 bg-pink-500/10 p-4">
+      <div className="mb-4 flex items-center gap-2">
+        <Mail className="h-5 w-5 text-pink-200" />
+        <h3 className="text-lg font-black text-white">
+          {activeModuleLabel}
+        </h3>
+      </div>
+
+     <div className="grid grid-cols-1 gap-5">
+        <ClickableOptionGroup<EmailType>
+          label={selectorTranslations.emailType || 'Email type'}
+          value={emailType}
+          options={emailTypeOptions}
+          onChange={setEmailType}
+        />
+
+        <ClickableOptionGroup<EmailTone>
+          label={selectorTranslations.emailTone || 'Email tone'}
+          value={emailTone}
+          options={emailToneOptions}
+          onChange={setEmailTone}
+        />
+      </div>
+    </div>
+  )}
+
+  <div className={String(activeModuleInfo.infoClassName)}>
+    {activeModuleIntro}
+  </div>
+
+  {(activeModule === 'supervisor' ||
+    activeModule === 'quality' ||
+    activeModule === 'defense' ||
+    activeModule === 'data' ||
+    activeModule === 'originality') && (
+    <FileUploadBox
+      files={attachedFiles}
+      fileInputRef={fileInputRef}
+      onFiles={handleFiles}
+      onRemove={removeFile}
+    />
+  )}
+
+  <div className="mt-4">
+    <label className="mb-2 block text-sm font-black text-slate-300">
+      {activeModuleInputLabel}
+    </label>
+
+    <p className="mb-3 text-xs font-semibold leading-5 text-slate-400">
+      {activeModuleInputHelp}
+    </p>
+
+    <textarea
+      value={input}
+      onChange={(event) => setInput(event.target.value)}
+      placeholder={activeModulePlaceholder}
+      className="min-h-[190px] w-full resize-y rounded-2xl border border-white/10 bg-white/[0.055] px-4 py-4 text-sm leading-7 text-white outline-none placeholder:text-slate-500 transition-colors duration-300 focus:border-violet-500"
+    />
+
+    {activeModule === 'data' && (
+      <p className="mt-2 text-xs text-slate-400">
+        Môžete priložiť Excel, CSV, PDF, Word, TXT alebo výstupy z JASP/SPSS.
+        Po spracovaní sa otvorí samostatné okno s výsledkami analýzy,
+        tabuľkami, premennými, grafmi a odporúčanými testami.
+      </p>
+    )}
+  </div>
+
+  <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+    <button
+      type="button"
+      onClick={runModule}
+      disabled={isLoading}
+      className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {isLoading ? (
+        <>
+          <RefreshCcw className="h-4 w-4 animate-spin" />
+          Spracúvam...
+        </>
+      ) : (
+        <>
+          <Send className="h-4 w-4" />
+          {activeModuleButtonLabel}
+        </>
+      )}
+    </button>
+
+    <button
+      type="button"
+      onClick={() => fileInputRef.current?.click()}
+      className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-6 py-4 text-sm font-black text-white transition hover:bg-white/[0.1]"
+    >
+      <Paperclip className="h-4 w-4" />
+      Priložiť súbor
+    </button>
+
+    <button
+      type="button"
+      onClick={startDictation}
+      className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-6 py-4 text-sm font-black text-white transition hover:bg-white/[0.1]"
+    >
+      <Mic className="h-4 w-4" />
+      {isListening ? 'Počúvam...' : 'Diktovať'}
+    </button>
+
+    <button
+      type="button"
+      onClick={() => {
+        setCanvasText(result || input || '');
+        setCanvasOpen(true);
+      }}
+      className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-6 py-4 text-sm font-black text-white transition hover:bg-white/[0.1]"
+    >
+      <Paintbrush className="h-4 w-4" />
+      Canvas
+    </button>
+
+    {analysisResult && activeModule === 'data' && (
+      <button
+        type="button"
+        onClick={() => setAnalysisModalOpen(true)}
+        className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl border border-blue-400/30 bg-blue-500/10 px-6 py-4 text-sm font-black text-blue-100 transition hover:bg-blue-500/20"
+      >
+        <Search className="h-4 w-4" />
+        Otvoriť výsledky analýzy
+      </button>
+    )}
+  </div>
+
+  {activeModuleResultHelp && (
+    <p className="mt-4 text-xs font-semibold leading-5 text-slate-500">
+      {activeModuleResultHelp}
+    </p>
+  )}
+</section>
+</section>
+</main>
+
+{canvasOpen && (
+  <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">
+    <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
+      <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+        <div>
+          <h2 className="text-lg font-black text-white">Canvas</h2>
+          <p className="text-sm font-semibold text-slate-400">
+            Upravte alebo skopírujte výsledný text.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setCanvasOpen(false)}
+          className="rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-white transition hover:bg-white/[0.12]"
+        >
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+
+      <textarea
+        value={canvasText}
+        onChange={(event) => setCanvasText(event.target.value)}
+        className="min-h-0 flex-1 resize-none border-0 bg-[#050814] p-6 text-sm font-semibold leading-7 text-white outline-none"
+      />
+
+      <div className="flex flex-wrap items-center justify-end gap-3 border-t border-white/10 px-6 py-4">
+        <button
+          type="button"
+          onClick={() => {
+            navigator.clipboard.writeText(canvasText || '');
+          }}
+          className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+        >
+          Kopírovať
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setCanvasOpen(false)}
+          className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white transition hover:bg-violet-500"
+        >
+          Zavrieť
+        </button>
+      </div>
+    </div>
+  </div>
 )}
 
-  <button
-    type="button"
-    onClick={downloadPdf}
-    className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 shadow-sm transition hover:bg-slate-100 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.08] dark:text-white dark:hover:bg-white/[0.13]"
-  >
-    <FileDown className="h-4 w-4" />
-    PDF
-  </button>
-</div>
-                  </div>
-
-                  <div className="whitespace-pre-wrap rounded-2xl border border-white/10 bg-black/20 p-5 text-sm leading-8 text-slate-200">
-                    {result}
-                  </div>
-                </section>
-              )}
-            </div>
-          </div>
-        </section>
-
-        {canvasOpen && (
-          <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">
-            <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
-              <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
-                <div>
-                  <h2 className="text-2xl font-black">Canvas</h2>
-
-                  <p className="text-sm text-slate-400">
-                    Tu môžeš upravovať výsledný text a stiahnuť ho ako PPTX,
-                    DOC alebo PDF.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {activeModule === 'data' && analysisResult && (
-                    <button
-                      type="button"
-                      onClick={() => setAnalysisModalOpen(true)}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white hover:bg-blue-500"
-                    >
-                      <Search className="h-4 w-4" />
-                      Výsledky analýzy
-                    </button>
-                  )}
-
-                  {activeModule === 'defense' && (
-                    <button
-                      type="button"
-                      onClick={downloadPpt}
-                      disabled={
-                        !stripModuleExtraSections(
-                          canvasText || result,
-                          activeModule,
-                        ).trim()
-                      }
-                      className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-black text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <Presentation className="h-4 w-4" />
-                      PPTX
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={downloadDoc}
-                    disabled={
-                      !stripModuleExtraSections(
-                        canvasText || result,
-                        activeModule,
-                      ).trim()
-                    }
-                    className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <Download className="h-4 w-4" />
-                    DOC
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={downloadPdf}
-                    disabled={
-                      !stripModuleExtraSections(
-                        canvasText || result,
-                        activeModule,
-                      ).trim()
-                    }
-                    className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <FileDown className="h-4 w-4" />
-                    PDF
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setCanvasOpen(false)}
-                    className="rounded-2xl bg-red-500/90 p-3 text-white hover:bg-red-400"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-
-              <textarea
-                value={canvasText || result}
-                onChange={(event) =>
-                  setCanvasText(
-                    stripModuleExtraSections(event.target.value, activeModule),
-                  )
-                }
-                placeholder="Canvas je zatiaľ prázdny."
-                className="no-scrollbar flex-1 resize-none bg-[#050711] p-6 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-600"
-              />
-            </div>
-          </div>
-        )}
-
-        <AnalysisResultsModal
-          open={analysisModalOpen}
-          result={analysisResult}
-          onClose={() => setAnalysisModalOpen(false)}
-        />
-      </main>
-    </>
-  );
+<AnalysisResultsModal
+  open={analysisModalOpen}
+  result={analysisResult}
+  onClose={() => setAnalysisModalOpen(false)}
+/>
+</>
+);
 }
 
 // ================= COMPONENTS =================

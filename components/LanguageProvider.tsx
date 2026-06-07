@@ -69,6 +69,22 @@ type DashboardToolTranslations = {
   buttons: Record<DashboardToolTranslationKey, string>;
   placeholders: Record<DashboardToolTranslationKey, string>;
 
+  languageNames?: {
+    sk: string;
+    cs: string;
+    en: string;
+    de: string;
+    hu: string;
+    pl: string;
+  };
+
+  translation?: {
+    sourceLanguage: string;
+    targetLanguage: string;
+    style: string;
+    academic: string;
+  };
+
   inputLabels?: Partial<Record<DashboardToolTranslationKey, string>>;
   infoTexts?: Partial<Record<DashboardToolTranslationKey, string>>;
   resultTitles?: Partial<Record<DashboardToolTranslationKey, string>>;
@@ -172,7 +188,7 @@ const dashboardToolTranslations: Record<AppLanguage, DashboardToolTranslations> 
         'Vložte text práce alebo otázku. Systém pripraví odborné odporúčania, komentáre a návrhy na zlepšenie.',
     },
     tools: {
-      aiSupervisor: 'AI supervízor',
+      aiSupervisor: 'AI školiteľ',
       qualityAudit: 'Audit kvality',
       defense: 'Obhajoba',
       translation: 'Preklad',
@@ -183,7 +199,7 @@ const dashboardToolTranslations: Record<AppLanguage, DashboardToolTranslations> 
       textHumanization: 'Humanizácia textu',
     },
     buttons: {
-      aiSupervisor: 'Spustiť AI supervízora',
+      aiSupervisor: 'Spustiť AI školiteľa',
       qualityAudit: 'Spustiť audit kvality',
       defense: 'Pripraviť obhajobu',
       translation: 'Preložiť text',
@@ -213,9 +229,23 @@ const dashboardToolTranslations: Record<AppLanguage, DashboardToolTranslations> 
       textHumanization:
         'Vložte text, ktorý chcete upraviť do prirodzenejšej, plynulejšej a menej strojovej podoby.',
     },
+    languageNames: {
+      sk: 'Slovenčina',
+      cs: 'Čeština',
+      en: 'Angličtina',
+      de: 'Nemčina',
+      hu: 'Maďarčina',
+      pl: 'Poľština',
+    },
+    translation: {
+      sourceLanguage: 'Preložiť z jazyka',
+      targetLanguage: 'Preložiť do jazyka',
+      style: 'Štýl prekladu',
+      academic: 'Akademický',
+    },
     cards: {
       aiSupervisor: {
-        title: 'AI supervízor',
+        title: 'AI školiteľ',
         subtitle: 'Odborné vedenie práce',
         description:
           'Skontroluje zadanie, štruktúru, odborný štýl a navrhne konkrétne zlepšenia práce.',
@@ -280,10 +310,10 @@ const dashboardToolTranslations: Record<AppLanguage, DashboardToolTranslations> 
     },
     modules: {
       aiSupervisor: {
-        intro: 'AI supervízor pomôže skontrolovať zadanie, štruktúru práce, odborný štýl a návrhy na zlepšenie.',
+        intro: 'AI školiteľ pomôže skontrolovať zadanie, štruktúru práce, odborný štýl a návrhy na zlepšenie.',
         inputHelp: 'Vložte text práce, zadanie, otázku alebo časť, ktorú chcete odborne skontrolovať.',
         resultHelp: 'Výstup obsahuje odborné pripomienky, odporúčania a konkrétne návrhy úprav.',
-        emptyState: 'Zatiaľ nie je vložený text pre AI supervízora.',
+        emptyState: 'Zatiaľ nie je vložený text pre AI školiteľa.',
       },
       defense: {
         intro: 'Obhajoba pripraví osnovu vystúpenia, otázky komisie, odpovede a podklady k prezentácii.',
@@ -427,6 +457,20 @@ const dashboardToolTranslations: Record<AppLanguage, DashboardToolTranslations> 
         'Nahrajte nebo vložte text práce. Systém připraví orientační protokol kontroly originality.',
       textHumanization:
         'Vložte text, který chcete upravit do přirozenější, plynulejší a méně strojové podoby.',
+    },
+    languageNames: {
+      sk: 'Slovenština',
+      cs: 'Čeština',
+      en: 'Angličtina',
+      de: 'Němčina',
+      hu: 'Maďarština',
+      pl: 'Polština',
+    },
+    translation: {
+      sourceLanguage: 'Přeložit z jazyka',
+      targetLanguage: 'Přeložit do jazyka',
+      style: 'Styl překladu',
+      academic: 'Akademický',
     },
     cards: {
       aiSupervisor: {
@@ -643,6 +687,20 @@ const dashboardToolTranslations: Record<AppLanguage, DashboardToolTranslations> 
       textHumanization:
         'Insert the text you want to rewrite into a more natural, fluent, and less machine-like form.',
     },
+    languageNames: {
+      sk: 'Slovak',
+      cs: 'Czech',
+      en: 'English',
+      de: 'German',
+      hu: 'Hungarian',
+      pl: 'Polish',
+    },
+    translation: {
+      sourceLanguage: 'Source Language',
+      targetLanguage: 'Target Language',
+      style: 'Translation Style',
+      academic: 'Academic',
+    },
     cards: {
       aiSupervisor: {
         title: 'AI Supervisor',
@@ -857,6 +915,20 @@ const dashboardToolTranslations: Record<AppLanguage, DashboardToolTranslations> 
         'Laden Sie den Text hoch oder fügen Sie ihn ein. Das System erstellt ein orientierendes Originalitätsprotokoll.',
       textHumanization:
         'Fügen Sie den Text ein, der natürlicher, flüssiger und weniger maschinell wirken soll.',
+    },
+    languageNames: {
+      sk: 'Slowakisch',
+      cs: 'Tschechisch',
+      en: 'Englisch',
+      de: 'Deutsch',
+      hu: 'Ungarisch',
+      pl: 'Polnisch',
+    },
+    translation: {
+      sourceLanguage: 'Ausgangssprache',
+      targetLanguage: 'Zielsprache',
+      style: 'Übersetzungsstil',
+      academic: 'Akademisch',
     },
     cards: {
       aiSupervisor: {
@@ -1073,6 +1145,20 @@ const dashboardToolTranslations: Record<AppLanguage, DashboardToolTranslations> 
       textHumanization:
         'Wklej tekst, który chcesz zmienić na bardziej naturalny i płynny.',
     },
+    languageNames: {
+      sk: 'Słowacki',
+      cs: 'Czeski',
+      en: 'Angielski',
+      de: 'Niemiecki',
+      hu: 'Węgierski',
+      pl: 'Polski',
+    },
+    translation: {
+      sourceLanguage: 'Język źródłowy',
+      targetLanguage: 'Język docelowy',
+      style: 'Styl tłumaczenia',
+      academic: 'Akademicki',
+    },
     cards: {
       aiSupervisor: {
         title: 'Opiekun AI',
@@ -1287,6 +1373,20 @@ const dashboardToolTranslations: Record<AppLanguage, DashboardToolTranslations> 
         'Töltsd fel vagy illeszd be a dolgozat szövegét. A rendszer tájékoztató eredetiségellenőrzési protokollt készít.',
       textHumanization:
         'Illeszd be a szöveget, amelyet természetesebbé és gördülékenyebbé szeretnél tenni.',
+    },
+    languageNames: {
+      sk: 'Szlovák',
+      cs: 'Cseh',
+      en: 'Angol',
+      de: 'Német',
+      hu: 'Magyar',
+      pl: 'Lengyel',
+    },
+    translation: {
+      sourceLanguage: 'Forrásnyelv',
+      targetLanguage: 'Célnyelv',
+      style: 'Fordítási stílus',
+      academic: 'Akadémiai',
     },
     cards: {
       aiSupervisor: {

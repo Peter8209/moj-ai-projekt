@@ -281,7 +281,7 @@ const translations: Record<AppLanguage, Translation> = {
       ],
     },
     features: {
-      title: 'Všetko, čo potrebujete na úspešnú prácu',
+      title: 'Všetko, čo potrebujete pre úspešnú prácu',
       items: [
         {
           title: 'AI vedúci práce',
@@ -352,7 +352,7 @@ const translations: Record<AppLanguage, Translation> = {
         {
           step: '03',
           title: 'Dokončíte a obhájite',
-          text: 'Skontrolujete kvalitu, originalitu, zdroje a metodiku a pripravíte sa na obhajobu.',
+          text: 'Skontrolujete kvalitu, zdroje, metodiku a pripravíte sa na obhajobu.',
         },
       ],
     },
@@ -634,7 +634,7 @@ const translations: Record<AppLanguage, Translation> = {
         {
           step: '03',
           title: 'Dokončíte a obhájíte',
-          text: 'Zkontrolujete kvalitu, originalitu, zdroje a metodiku a připravíte se na obhajobu.',
+          text: 'Zkontrolujete kvalitu, zdroje, metodiku a připravíte se na obhajobu.',
         },
       ],
     },
@@ -916,7 +916,7 @@ const translations: Record<AppLanguage, Translation> = {
         {
           step: '03',
           title: 'Finish and defend',
-          text: 'Check quality, originality, sources and methodology and prepare for defense.',
+          text: 'Check quality, sources and methodology and prepare for defense.',
         },
       ],
     },
@@ -1480,7 +1480,7 @@ const translations: Record<AppLanguage, Translation> = {
         {
           step: '03',
           title: 'Kończysz i bronisz',
-          text: 'Sprawdzasz jakość, oryginalność, źródła i metodologię oraz przygotowujesz się do obrony.',
+          text: 'Sprawdzasz jakość, źródła i metodologię oraz przygotowujesz się do obrony.',
         },
       ],
     },
@@ -1762,7 +1762,7 @@ const translations: Record<AppLanguage, Translation> = {
         {
           step: '03',
           title: 'Befejezés és védés',
-          text: 'Ellenőrzöd a minőséget, eredetiséget, forrásokat és módszertant, majd felkészülsz a védésre.',
+          text: 'Ellenőrzöd a minőséget, forrásokat és módszertant, majd felkészülsz a védésre.',
         },
       ],
     },
@@ -1901,6 +1901,60 @@ const translations: Record<AppLanguage, Translation> = {
 };
 
 const featureIcons = [Bot, MessageCircle, PenTool, BookOpen, ShieldCheck, Crown];
+
+
+type BlogCopy = {
+  title: string;
+  subtitle: string;
+  emptyTitle: string;
+  emptyText: string;
+  button: string;
+};
+
+const blogCopies: Record<AppLanguage, BlogCopy> = {
+  sk: {
+    title: 'Blog',
+    subtitle: 'Praktické články k akademickému písaniu, práci so zdrojmi, metodike a obhajobe.',
+    emptyTitle: 'Prvý článok pripravujeme',
+    emptyText: 'Sekcia blog je pripravená. Články zobrazíme až vtedy, keď budú finálne napísané a schválené.',
+    button: 'Otvoriť blog',
+  },
+  cs: {
+    title: 'Blog',
+    subtitle: 'Praktické články k akademickému psaní, práci se zdroji, metodice a obhajobě.',
+    emptyTitle: 'První článek připravujeme',
+    emptyText: 'Sekce blog je připravena. Články zobrazíme až tehdy, když budou finálně napsané a schválené.',
+    button: 'Otevřít blog',
+  },
+  en: {
+    title: 'Blog',
+    subtitle: 'Practical articles about academic writing, sources, methodology and defense preparation.',
+    emptyTitle: 'The first article is being prepared',
+    emptyText: 'The blog section is ready. Articles will appear only after they are fully written and approved.',
+    button: 'Open blog',
+  },
+  de: {
+    title: 'Blog',
+    subtitle: 'Praktische Artikel zu akademischem Schreiben, Quellen, Methodik und Verteidigung.',
+    emptyTitle: 'Der erste Artikel wird vorbereitet',
+    emptyText: 'Der Blogbereich ist vorbereitet. Artikel werden erst angezeigt, wenn sie vollständig geschrieben und freigegeben sind.',
+    button: 'Blog öffnen',
+  },
+  pl: {
+    title: 'Blog',
+    subtitle: 'Praktyczne artykuły o pisaniu akademickim, źródłach, metodologii i obronie.',
+    emptyTitle: 'Pierwszy artykuł jest przygotowywany',
+    emptyText: 'Sekcja blog jest gotowa. Artykuły pokażemy dopiero wtedy, gdy będą finalnie napisane i zatwierdzone.',
+    button: 'Otwórz blog',
+  },
+  hu: {
+    title: 'Blog',
+    subtitle: 'Gyakorlati cikkek az akadémiai írásról, forrásokról, módszertanról és védésről.',
+    emptyTitle: 'Az első cikk készül',
+    emptyText: 'A blog szekció készen áll. A cikkek csak akkor jelennek meg, amikor véglegesek és jóváhagyottak.',
+    button: 'Blog megnyitása',
+  },
+};
 
 
 function applyLanguageToDocument(nextLanguage: AppLanguage) {
@@ -2339,11 +2393,11 @@ function AiLeaderPreview({ t }: { t: Translation }) {
 
 function FounderPortrait({ t }: { t: Translation }) {
   return (
-    <div className="relative overflow-hidden rounded-[2.5rem] border border-violet-500/35 bg-[#050511] p-4 shadow-[0_0_90px_rgba(124,58,237,0.24)] sm:p-5">
+    <div className="relative mx-auto w-full max-w-[560px] overflow-hidden rounded-[2rem] border border-violet-500/35 bg-[#050511] p-3 shadow-[0_0_70px_rgba(124,58,237,0.2)] sm:p-4">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(168,85,247,0.34),transparent_38%),radial-gradient(circle_at_85%_70%,rgba(37,99,235,0.18),transparent_36%)]" />
 
       <div className="relative overflow-hidden rounded-[2rem] border border-white/12 bg-black shadow-[0_32px_90px_rgba(0,0,0,0.62)]">
-        <div className="relative h-[520px] sm:h-[620px]">
+        <div className="relative h-[300px] sm:h-[360px] lg:h-[400px]">
           <Image
             src={FOUNDER_MARTINA_IMAGE_URL}
             alt="Zedpera"
@@ -2357,8 +2411,8 @@ function FounderPortrait({ t }: { t: Translation }) {
         </div>
       </div>
 
-      <div className="relative mt-5 rounded-[1.7rem] border border-white/10 bg-white/[0.055] p-6 shadow-2xl shadow-black/35 backdrop-blur-xl sm:p-7">
-        <p className="text-base font-bold leading-8 text-white sm:text-lg">
+      <div className="relative mt-4 rounded-[1.4rem] border border-white/10 bg-white/[0.055] p-5 shadow-2xl shadow-black/35 backdrop-blur-xl sm:p-6">
+        <p className="text-sm font-bold leading-7 text-white sm:text-base">
           {t.about.founderText}
         </p>
       </div>
@@ -2438,6 +2492,8 @@ export default function LandingPage() {
   const t = useMemo(() => {
     return translations[language] || translations.sk;
   }, [language, translationVersion]);
+
+  const blogCopy = blogCopies[language] || blogCopies.sk;
 
   useEffect(() => {
     document.documentElement.style.scrollBehavior = 'smooth';
@@ -2604,11 +2660,13 @@ export default function LandingPage() {
     { href: '#features', label: t.nav.features, icon: Sparkles },
     { href: '#comparison', label: t.nav.comparison, icon: ShieldCheck },
     { href: '#pricing', label: t.nav.pricing, icon: Crown },
+    { href: '#blog', label: t.footer.links.blog, icon: PenTool },
     { href: '#reviews', label: t.nav.reviews, icon: Star },
     { href: '#faq', label: t.nav.faq, icon: HelpCircle },
   ];
 
   const footerLinks = [
+    { href: '/blog', label: t.footer.links.blog, icon: PenTool },
     { href: '/gdpr', label: t.footer.links.gdpr, icon: ShieldCheck },
     { href: '/obchodne-podmienky', label: t.footer.links.terms, icon: FileText },
     { href: '/cookies', label: t.footer.links.cookies, icon: Cookie },
@@ -3385,10 +3443,10 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="about" className="relative z-10 mx-auto max-w-[1460px] px-5 py-24 lg:px-8">
+        <section id="about" className="relative z-10 mx-auto max-w-[1260px] px-5 py-20 lg:px-8">
           <div className="zedpera-glow-border relative overflow-hidden rounded-3xl bg-white/[0.02] p-8 lg:p-12">
             <div className="pointer-events-none absolute right-0 top-0 h-full w-1/2 bg-gradient-to-l from-violet-900/20 to-transparent" />
-            <div className="relative z-10 grid items-center gap-12 lg:grid-cols-[0.95fr_1.05fr]">
+            <div className="relative z-10 grid items-center gap-10 lg:grid-cols-[1fr_0.82fr]">
               <div>
                 <div className="mb-6 inline-flex items-center rounded-full border border-violet-500/35 bg-violet-500/10 px-4 py-1.5 text-[12px] font-black uppercase tracking-[0.2em] text-violet-200">
                   {t.about.badge}
@@ -3434,6 +3492,50 @@ export default function LandingPage() {
                 </div>
               </div>
             ))}
+          </div>
+        </section>
+
+
+        <section id="blog" className="relative z-10 mx-auto max-w-[1260px] px-5 py-20 lg:px-8">
+          <div className="rounded-[2.2rem] border border-white/10 bg-[#070716] p-6 shadow-2xl shadow-black/35 sm:p-8 lg:p-10">
+            <div className="grid gap-8 lg:grid-cols-[1fr_auto] lg:items-center">
+              <div>
+                <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-xs font-black uppercase tracking-[0.2em] text-violet-200">
+                  <PenTool size={15} />
+                  {blogCopy.title}
+                </div>
+
+                <h2 className="zedpera-section-title text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
+                  {blogCopy.title}
+                </h2>
+
+                <p className="mt-4 max-w-2xl text-base font-bold leading-7 text-white sm:text-lg">
+                  {blogCopy.subtitle}
+                </p>
+              </div>
+
+              <Link
+                href="/blog"
+                className="inline-flex min-h-[54px] items-center justify-center gap-3 rounded-2xl border border-violet-300/35 bg-violet-600 px-6 text-sm font-black text-white shadow-lg shadow-violet-950/35 transition hover:bg-violet-500"
+              >
+                {blogCopy.button}
+                <ArrowRight size={18} />
+              </Link>
+            </div>
+
+            <div className="mt-8 rounded-[1.7rem] border border-dashed border-violet-400/30 bg-black/30 p-6 text-center sm:p-8">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-600/20 text-violet-300">
+                <FileText size={26} />
+              </div>
+
+              <h3 className="mt-5 text-2xl font-black text-white">
+                {blogCopy.emptyTitle}
+              </h3>
+
+              <p className="mx-auto mt-3 max-w-2xl text-sm font-bold leading-7 text-slate-300">
+                {blogCopy.emptyText}
+              </p>
+            </div>
           </div>
         </section>
 

@@ -23,7 +23,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 const THEME_STORAGE_KEY = 'zedpera_theme';
 const LEGACY_THEME_STORAGE_KEY = 'zedpera-theme';
-const THEME_STYLE_ID = 'zedpera-global-dark-ui-style-v5';
+const THEME_STYLE_ID = 'zedpera-global-dark-ui-style-v6-icons';
 
 function isTheme(value: unknown): value is Theme {
   return value === 'light' || value === 'dark';
@@ -652,6 +652,231 @@ function injectThemeStyle() {
     .theme-root [class*="bg-emerald-"] svg {
       color: #ffffff !important;
       stroke: #ffffff !important;
+    }
+
+
+    /* =========================================================
+       11B. LIGHT MODE - VÝRAZNÉ IKONY V CELEJ APLIKÁCII
+       Opravuje neviditeľné ikony v svetlom režime:
+       - horné menu v chate
+       - návrhové karty v chate
+       - spodný chat panel
+       - Moje práce / Projects
+       - História chatu
+       - checkboxy, malé akčné ikony, trash/delete ikony
+    ========================================================= */
+
+    html[data-theme='light'] :where(svg, .lucide) {
+      color: #0f172a !important;
+      stroke: #0f172a !important;
+      fill: none !important;
+      stroke-width: 2.8 !important;
+      opacity: 1 !important;
+      filter: none !important;
+    }
+
+    html[data-theme='light'] :where(button, a, [role='button'], [role='tab']) :where(svg, .lucide) {
+      color: #0f172a !important;
+      stroke: #0f172a !important;
+      stroke-width: 2.9 !important;
+      opacity: 1 !important;
+    }
+
+    html[data-theme='light'] :where(
+      aside,
+      nav,
+      header,
+      main,
+      section,
+      article,
+      form,
+      [data-sidebar='true'],
+      .dashboard-sidebar,
+      .dashboard-shell,
+      .dashboard-page,
+      .theme-root
+    ) :where(svg, .lucide) {
+      color: #111827 !important;
+      stroke: #111827 !important;
+      stroke-width: 2.85 !important;
+      opacity: 1 !important;
+    }
+
+    /* Ikony v bielych kartách a návrhových promptoch v chate */
+    html[data-theme='light'] body :where(
+      [class*='rounded'],
+      [class*='border'],
+      [class*='shadow'],
+      [class*='bg-white'],
+      [class*='bg-slate-50'],
+      [class*='bg-slate-100']
+    ) :where(svg, .lucide) {
+      color: #0f172a !important;
+      stroke: #0f172a !important;
+      stroke-width: 3 !important;
+      opacity: 1 !important;
+    }
+
+    /* Ikony v hornej lište chatu a v spodnom chat inpute */
+    html[data-theme='light'] body :where(
+      [class*='chat'],
+      [class*='Chat'],
+      [class*='message'],
+      [class*='Message'],
+      [class*='input'],
+      [class*='Input'],
+      [class*='toolbar'],
+      [class*='Toolbar']
+    ) :where(svg, .lucide) {
+      color: #020617 !important;
+      stroke: #020617 !important;
+      stroke-width: 3 !important;
+      opacity: 1 !important;
+    }
+
+    /* Moje práce / projekty / história - malé ikony a checkboxy */
+    html[data-theme='light'] body :where(
+      [class*='project'],
+      [class*='Project'],
+      [class*='works'],
+      [class*='Works'],
+      [class*='history'],
+      [class*='History'],
+      [class*='conversation'],
+      [class*='Conversation']
+    ) :where(svg, .lucide) {
+      color: #0f172a !important;
+      stroke: #0f172a !important;
+      stroke-width: 3 !important;
+      opacity: 1 !important;
+    }
+
+    /* Červené delete/trash ikony musia zostať viditeľné a výrazné */
+    html[data-theme='light'] body :where(
+      button,
+      a,
+      [role='button']
+    ) :where(svg[class*='trash'], svg[class*='Trash'], .lucide-trash, .lucide-trash-2, .lucide-x, .lucide-circle-x) {
+      color: #dc2626 !important;
+      stroke: #dc2626 !important;
+      stroke-width: 3.2 !important;
+      opacity: 1 !important;
+    }
+
+    html[data-theme='light'] body :where(
+      button[class*='bg-red'],
+      [role='button'][class*='bg-red'],
+      a[class*='bg-red']
+    ) :where(svg, .lucide) {
+      color: #ffffff !important;
+      stroke: #ffffff !important;
+    }
+
+    /* Fialové/modré/gradientové CTA tlačidlá - ikony musia byť biele */
+    html[data-theme='light'] body :where(
+      button[class*='bg-violet'],
+      button[class*='bg-purple'],
+      button[class*='bg-fuchsia'],
+      button[class*='bg-blue'],
+      button[class*='from-violet'],
+      button[class*='from-purple'],
+      a[class*='bg-violet'],
+      a[class*='bg-purple'],
+      a[class*='bg-fuchsia'],
+      a[class*='bg-blue'],
+      a[class*='from-violet'],
+      a[class*='from-purple'],
+      [role='button'][class*='bg-violet'],
+      [role='button'][class*='bg-purple'],
+      [role='button'][class*='from-violet'],
+      [role='button'][class*='from-purple']
+    ) :where(svg, .lucide) {
+      color: #ffffff !important;
+      stroke: #ffffff !important;
+      stroke-width: 2.9 !important;
+      opacity: 1 !important;
+    }
+
+    /* Checkboxy a prázdne malé štvorčeky v histórii/projektoch */
+    html[data-theme='light'] body :where(input[type='checkbox']) {
+      appearance: none !important;
+      width: 18px !important;
+      height: 18px !important;
+      min-width: 18px !important;
+      border: 2px solid #334155 !important;
+      border-radius: 6px !important;
+      background: #ffffff !important;
+      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.14) !important;
+      opacity: 1 !important;
+    }
+
+    html[data-theme='light'] body :where(input[type='checkbox']:checked) {
+      background: #7c3aed !important;
+      border-color: #7c3aed !important;
+      box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.18) !important;
+    }
+
+    html[data-theme='light'] body :where(
+      [role='checkbox'],
+      [aria-checked],
+      [data-state='checked'],
+      [data-state='unchecked']
+    ) {
+      border-color: #334155 !important;
+      color: #0f172a !important;
+      opacity: 1 !important;
+    }
+
+    html[data-theme='light'] body :where(
+      [role='checkbox'],
+      [aria-checked],
+      [data-state='checked'],
+      [data-state='unchecked']
+    ) :where(svg, .lucide) {
+      color: #0f172a !important;
+      stroke: #0f172a !important;
+      opacity: 1 !important;
+    }
+
+    html[data-theme='light'] body :where(
+      [data-state='checked'],
+      [aria-checked='true']
+    ) :where(svg, .lucide) {
+      color: #ffffff !important;
+      stroke: #ffffff !important;
+    }
+
+    /* Hover zvýraznenie ikon v svetlom režime */
+    html[data-theme='light'] body :where(button:hover, a:hover, [role='button']:hover) :where(svg, .lucide) {
+      color: #6d28d9 !important;
+      stroke: #6d28d9 !important;
+      opacity: 1 !important;
+    }
+
+    html[data-theme='light'] body :where(
+      button[class*='bg-violet']:hover,
+      button[class*='bg-purple']:hover,
+      button[class*='bg-fuchsia']:hover,
+      button[class*='bg-blue']:hover,
+      button[class*='bg-red']:hover,
+      button[class*='from-violet']:hover,
+      button[class*='from-purple']:hover,
+      a[class*='bg-violet']:hover,
+      a[class*='bg-purple']:hover,
+      a[class*='bg-fuchsia']:hover,
+      a[class*='bg-blue']:hover,
+      a[class*='bg-red']:hover,
+      a[class*='from-violet']:hover,
+      a[class*='from-purple']:hover
+    ) :where(svg, .lucide) {
+      color: #ffffff !important;
+      stroke: #ffffff !important;
+    }
+
+    /* Ak ikona nemá lucide class, ale je priamo path/polyline/circle v SVG */
+    html[data-theme='light'] body svg :where(path, line, polyline, polygon, circle, rect) {
+      stroke: currentColor !important;
+      opacity: 1 !important;
     }
 
     /* =========================================================

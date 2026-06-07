@@ -1537,11 +1537,7 @@ const hypothesisTestsBlock =
 }
 
 
-type ClickableChoice<T extends string> = {
-  value: T;
-  label: string;
-  description?: string;
-};
+
 
 type ClickableOptionGroupProps<T extends string> = {
   label: string;

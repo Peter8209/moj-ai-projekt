@@ -3832,6 +3832,31 @@ const downloadExcel = () => {
         <section className="flex min-h-screen min-w-0 flex-1 flex-col">
          <header className="sticky top-0 z-40 shrink-0 border-b border-white/10 bg-[#050711]/95 px-4 py-4 backdrop-blur-xl md:px-8">
   <div className="flex flex-col gap-4">
+
+        {/* MOBILNÉ MENU DASHBOARDU */}
+        <div className="xl:hidden">
+          <MobileDashboardNavigation
+            activeModule={activeModule}
+            activeModuleLabel={activeModuleLabel}
+            activeModuleSubtitle={activeModuleCardSubtitle}
+            activeProfileTitle={
+              activeProfile?.title ||
+              activeProfile?.topic ||
+              'Bez vybranej práce'
+            }
+            activeProfileType={activeProfile?.type || activeProfile?.level || ''}
+            moduleInfos={moduleInfos}
+            t={t}
+            language={getStoredSystemLanguage()}
+            onChangeLanguage={(nextLanguage) => {
+              persistSystemLanguage(nextLanguage);
+              window.location.reload();
+            }}
+            onSelectModule={(moduleKey) => selectDashboardModule(moduleKey as ModuleKey)}
+            onNavigate={(path) => router.push(path)}
+          />
+        </div>
+
     {/* DESKTOP MENU */}
     <div className="hidden flex-wrap items-center gap-2 xl:flex">
       {moduleInfos.map((item) => {

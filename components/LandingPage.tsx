@@ -2504,6 +2504,50 @@ export default function LandingPage() {
 
   const blogCopy = blogCopies[language] || blogCopies.sk;
 
+
+const mobileMenuItems = useMemo(
+  () => [
+    {
+      href: '#features',
+      label: t.nav.features,
+      icon: Sparkles,
+    },
+    {
+      href: '#comparison',
+      label: t.nav.comparison,
+      icon: ShieldCheck,
+    },
+    {
+      href: '#pricing',
+      label: t.nav.pricing,
+      icon: Crown,
+    },
+    {
+      href: '#reviews',
+      label: t.nav.reviews,
+      icon: Star,
+    },
+    {
+      href: '#faq',
+      label: t.nav.faq,
+      icon: HelpCircle,
+    },
+    {
+      href: '/blog',
+      label: t.footer.links.blog || 'Blog',
+      icon: BookOpen,
+    },
+  ],
+  [
+    t.nav.features,
+    t.nav.comparison,
+    t.nav.pricing,
+    t.nav.reviews,
+    t.nav.faq,
+    t.footer.links.blog,
+  ],
+);
+
   useEffect(() => {
     document.documentElement.style.scrollBehavior = 'smooth';
 
@@ -3131,6 +3175,207 @@ export default function LandingPage() {
           }
         }
 
+
+
+
+/* =========================================================
+   MOBILE LANDING MENU - FINAL
+   Upravuje iba mobilnú landing page.
+   Desktop ostáva nezmenený.
+========================================================= */
+
+.zedpera-template .mobile-main-menu {
+  position: fixed !important;
+  left: 12px !important;
+  right: 12px !important;
+  top: 76px !important;
+  z-index: 90 !important;
+  max-height: calc(100dvh - 92px) !important;
+  overflow: hidden !important;
+  border-radius: 24px !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(10, 14, 30, 0.98) 0%,
+      rgba(3, 5, 14, 0.98) 100%
+    ) !important;
+  box-shadow:
+    0 30px 90px rgba(0, 0, 0, 0.82),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  backdrop-filter: blur(22px) !important;
+}
+
+.zedpera-template .mobile-main-menu-scroll {
+  max-height: calc(100dvh - 104px) !important;
+  overflow-y: auto !important;
+  padding: 14px !important;
+  overscroll-behavior: contain !important;
+}
+
+.zedpera-template .mobile-main-menu-section {
+  margin-bottom: 12px !important;
+  border-radius: 20px !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  background: rgba(10, 16, 32, 0.76) !important;
+  padding: 12px !important;
+}
+
+.zedpera-template .mobile-main-menu-title {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  margin-bottom: 10px !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-size: 12px !important;
+  font-weight: 950 !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+}
+
+.zedpera-template .mobile-main-menu-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 9px !important;
+}
+
+.zedpera-template .mobile-main-menu-card {
+  display: flex !important;
+  min-height: 54px !important;
+  align-items: center !important;
+  gap: 10px !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  background: #0b1020 !important;
+  padding: 10px 12px !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  text-decoration: none !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+.zedpera-template .mobile-main-menu-card:active {
+  transform: scale(0.985) !important;
+}
+
+.zedpera-template .mobile-main-menu-icon {
+  display: flex !important;
+  height: 32px !important;
+  width: 32px !important;
+  flex-shrink: 0 !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 13px !important;
+  background: rgba(124, 58, 237, 0.22) !important;
+  color: #c4b5fd !important;
+  -webkit-text-fill-color: #c4b5fd !important;
+}
+
+.zedpera-template .mobile-main-menu-label {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-size: 13px !important;
+  font-weight: 900 !important;
+  line-height: 1.15 !important;
+}
+
+.zedpera-template .mobile-language-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 9px !important;
+}
+
+.zedpera-template .mobile-language-option {
+  display: flex !important;
+  min-height: 52px !important;
+  align-items: center !important;
+  gap: 10px !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  background: #0b1020 !important;
+  padding: 9px 10px !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+.zedpera-template .mobile-language-option-active {
+  border-color: rgba(167, 139, 250, 0.78) !important;
+  background: rgba(124, 58, 237, 0.35) !important;
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.28) !important;
+}
+
+.zedpera-template .mobile-language-label {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-size: 13px !important;
+  font-weight: 900 !important;
+}
+
+.zedpera-template .mobile-main-menu-actions {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 9px !important;
+}
+
+.zedpera-template .mobile-main-menu-login,
+.zedpera-template .mobile-main-menu-start {
+  display: inline-flex !important;
+  min-height: 52px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  border-radius: 16px !important;
+  text-align: center !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-size: 14px !important;
+  font-weight: 950 !important;
+  text-decoration: none !important;
+}
+
+.zedpera-template .mobile-main-menu-login {
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  background: #0b1020 !important;
+}
+
+.zedpera-template .mobile-main-menu-start {
+  border: 1px solid rgba(167, 139, 250, 0.5) !important;
+  background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%) !important;
+  box-shadow: 0 18px 42px rgba(91, 33, 182, 0.36) !important;
+}
+
+@media (max-width: 1279px) {
+  .zedpera-template header {
+    z-index: 100 !important;
+  }
+
+  .zedpera-template header a[href='/'] {
+    min-width: 0 !important;
+  }
+
+  .zedpera-template header a[href='/'] > div:last-child {
+    display: none !important;
+  }
+
+  .zedpera-template header .language-chip {
+    min-width: 32px !important;
+    height: 26px !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    font-size: 11px !important;
+    font-weight: 950 !important;
+  }
+}
+
       `}</style>
 
       <div
@@ -3141,157 +3386,223 @@ export default function LandingPage() {
         <div className="pointer-events-none fixed left-1/2 top-0 z-0 h-[420px] w-[760px] -translate-x-1/2 rounded-full bg-violet-700/20 blur-[120px]" />
 
         <header className="sticky top-0 z-50 border-b border-white/10 bg-black/92 backdrop-blur-2xl">
-          <div className="mx-auto flex h-[72px] max-w-[1920px] items-center px-8">
-            <Link href="/" className="flex shrink-0 items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 via-violet-600 to-fuchsia-500 text-2xl font-black text-white shadow-[0_0_28px_rgba(80,90,255,0.55)]">
-                Z
-              </div>
+  <div className="mx-auto flex h-[72px] max-w-[1920px] items-center px-8">
+    <Link href="/" className="flex shrink-0 items-center gap-3">
+      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 via-violet-600 to-fuchsia-500 text-2xl font-black text-white shadow-[0_0_28px_rgba(80,90,255,0.55)]">
+        Z
+      </div>
 
-              <div className="text-[21px] font-black uppercase tracking-[0.12em] text-white">
-                Zedpera
-              </div>
-            </Link>
+      <div className="hidden text-[21px] font-black uppercase tracking-[0.12em] text-white sm:block">
+        Zedpera
+      </div>
+    </Link>
 
-            <nav className="ml-10 hidden items-center gap-6 text-[15px] font-black text-white xl:flex">
-              {navItems.map((item) => {
-                const Icon = item.icon;
+    {/* DESKTOP MENU */}
+    <nav className="ml-10 hidden items-center gap-6 text-[15px] font-black text-white xl:flex">
+      {navItems.map((item) => {
+        const Icon = item.icon;
 
+        return (
+          <a
+            key={item.href}
+            href={item.href}
+            onClick={(event) => {
+              if (item.href.startsWith('#')) {
+                event.preventDefault();
+                scrollToHash(item.href);
+              }
+            }}
+            className="inline-flex items-center gap-2 rounded-md px-2 py-2 font-black text-white transition hover:text-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-500/70"
+          >
+            <Icon size={17} className="text-violet-300" />
+            {item.label}
+          </a>
+        );
+      })}
+    </nav>
+
+    {/* DESKTOP ACTIONS */}
+    <div className="ml-auto hidden shrink-0 items-center gap-3 xl:flex">
+      <LanguageDropdown
+        language={language}
+        labels={t.common}
+        onChange={handleLanguageChange}
+      />
+
+      <Link
+        href="/login"
+        className="inline-flex h-[42px] min-w-[138px] items-center justify-center rounded-md border border-white/10 bg-[#080816] px-5 text-[14px] font-black text-white transition hover:border-violet-500/70 hover:bg-[#101026]"
+      >
+        {t.common.login}
+      </Link>
+
+      <a
+        href="#pricing"
+        onClick={(event) => {
+          event.preventDefault();
+          scrollToHash('#pricing');
+        }}
+        className="inline-flex h-[42px] min-w-[158px] items-center justify-center rounded-md bg-violet-600 px-6 text-[14px] font-black text-white shadow-lg shadow-violet-700/40 transition hover:bg-violet-500"
+      >
+        {t.common.startFree}
+      </a>
+    </div>
+
+    {/* MOBILE HEADER ACTIONS */}
+    <div className="ml-auto flex items-center gap-2 xl:hidden">
+      <button
+        type="button"
+        onClick={() => setMobileMenuOpen((value) => !value)}
+        className="inline-flex h-11 min-w-[84px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#080816] px-3 text-sm font-black text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
+        aria-label={t.common.switchLanguage}
+      >
+        <Languages className="h-4 w-4 text-violet-300" />
+
+        <span className={`language-chip language-${language}`}>
+          {languages.find((item) => item.code === language)?.short || 'SK'}
+        </span>
+
+        <ChevronDown
+          className={`h-4 w-4 text-slate-300 transition ${
+            mobileMenuOpen ? 'rotate-180' : ''
+          }`}
+        />
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setMobileMenuOpen((value) => !value)}
+        className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-[#080816] text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
+        aria-label="Menu"
+      >
+        {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
+      </button>
+    </div>
+  </div>
+
+  {/* MOBILE OPEN MENU */}
+  {mobileMenuOpen ? (
+    <div className="mobile-main-menu xl:hidden">
+      <div className="mobile-main-menu-scroll">
+        {/* HLAVNÉ MENU */}
+        <section className="mobile-main-menu-section">
+          <div className="mobile-main-menu-title">
+            <Menu className="h-4 w-4 text-violet-300" />
+            <span>Menu</span>
+          </div>
+
+          <div className="mobile-main-menu-grid">
+            {mobileMenuItems.map((item) => {
+              const Icon = item.icon;
+              const isHashLink = item.href.startsWith('#');
+
+              if (isHashLink) {
                 return (
                   <a
                     key={item.href}
                     href={item.href}
                     onClick={(event) => {
-                      if (item.href.startsWith('#')) {
-                        event.preventDefault();
-                        scrollToHash(item.href);
-                      }
+                      event.preventDefault();
+                      setMobileMenuOpen(false);
+                      scrollToHash(item.href);
                     }}
-                    className="inline-flex items-center gap-2 rounded-md px-2 py-2 font-black text-white transition hover:text-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-500/70"
+                    className="mobile-main-menu-card"
                   >
-                    <Icon size={17} className="text-violet-300" />
-                    {item.label}
+                    <span className="mobile-main-menu-icon">
+                      <Icon className="h-4 w-4" />
+                    </span>
+
+                    <span className="mobile-main-menu-label">
+                      {item.label}
+                    </span>
                   </a>
                 );
-              })}
-            </nav>
+              }
 
-            <div className="ml-auto hidden shrink-0 items-center gap-3 xl:flex">
-              <LanguageDropdown
-                language={language}
-                labels={t.common}
-                onChange={handleLanguageChange}
-              />
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="mobile-main-menu-card"
+                >
+                  <span className="mobile-main-menu-icon">
+                    <Icon className="h-4 w-4" />
+                  </span>
 
-              <Link
-                href="/login"
-                className="inline-flex h-[42px] min-w-[138px] items-center justify-center rounded-md border border-white/10 bg-[#080816] px-5 text-[14px] font-black text-white transition hover:border-violet-500/70 hover:bg-[#101026]"
-              >
-                {t.common.login}
-              </Link>
+                  <span className="mobile-main-menu-label">
+                    {item.label}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
 
-              <a
-                href="#pricing"
-                onClick={(event) => {
-                  event.preventDefault();
-                  scrollToHash('#pricing');
-                }}
-                className="inline-flex h-[42px] min-w-[158px] items-center justify-center rounded-md bg-violet-600 px-6 text-[14px] font-black text-white shadow-lg shadow-violet-700/40 transition hover:bg-violet-500"
-              >
-                {t.common.startFree}
-              </a>
-            </div>
-
-            <MobileHeaderLanguageSelector
-              language={language}
-              labels={t.common}
-              onChange={handleLanguageChange}
-            />
-
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen((value) => !value)}
-              className="ml-2 inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-[#080816] text-white shadow-[0_0_18px_rgba(124,58,237,0.16)] xl:hidden"
-              aria-label="Menu"
-            >
-              {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
-            </button>
+        {/* JAZYK STRÁNKY */}
+        <section className="mobile-main-menu-section">
+          <div className="mobile-main-menu-title">
+            <Languages className="h-4 w-4 text-violet-300" />
+            <span>{t.common.language}</span>
           </div>
 
-          {mobileMenuOpen ? (
-  <div className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+1rem)] top-[72px] z-[9999] overflow-hidden rounded-3xl border border-white/10 bg-[#050711] shadow-2xl shadow-black/80 xl:hidden">
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center justify-between border-b border-white/10 bg-[#050711] px-4 py-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-violet-600 text-sm font-black text-white">
-            Z
+          <div className="mobile-language-grid">
+            {languages.map((item) => {
+              const active = language === item.code;
+
+              return (
+                <button
+                  key={item.code}
+                  type="button"
+                  onClick={() => {
+                    handleLanguageChange(item.code);
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`mobile-language-option ${
+                    active ? 'mobile-language-option-active' : ''
+                  }`}
+                  aria-pressed={active}
+                >
+                  <span className={`language-chip language-${item.code}`}>
+                    {item.short}
+                  </span>
+
+                  <span className="mobile-language-label">
+                    {item.label}
+                  </span>
+                </button>
+              );
+            })}
           </div>
+        </section>
 
-          <div>
-            <p className="text-sm font-black text-white">Zedpera</p>
-            <p className="text-[11px] font-bold text-slate-400">
-              {t.common.language}
-            </p>
-          </div>
-        </div>
+        {/* AKCIE */}
+        <section className="mobile-main-menu-actions">
+          <Link
+            href="/login"
+            onClick={() => setMobileMenuOpen(false)}
+            className="mobile-main-menu-login"
+          >
+            {t.common.login}
+          </Link>
 
-        <button
-          type="button"
-          onClick={() => setMobileMenuOpen(false)}
-          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white"
-          aria-label="Zatvoriť menu"
-        >
-          <X size={20} />
-        </button>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 pb-6">
-        <div className="grid gap-2">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-
-            return (
-              <a
-                key={item.href}
-                href={item.href}
-                onClick={(event) => {
-                  setMobileMenuOpen(false);
-
-                  if (item.href.startsWith('#')) {
-                    event.preventDefault();
-                    scrollToHash(item.href);
-                  }
-                }}
-                className="flex min-h-[50px] items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-black text-white hover:bg-white/[0.08]"
-              >
-                <Icon size={17} className="shrink-0 text-violet-300" />
-                <span className="min-w-0 truncate">{item.label}</span>
-              </a>
-            );
-          })}
-
-          <MobileLanguageDropdown
-            language={language}
-            labels={t.common}
-            onChange={handleLanguageChange}
-            onClose={() => setMobileMenuOpen(false)}
-          />
-        </div>
-      </div>
-
-      <div className="shrink-0 border-t border-white/10 bg-[#050711] p-3">
-        <Link
-          href="/login"
-          onClick={() => setMobileMenuOpen(false)}
-          className="flex min-h-[52px] items-center justify-center rounded-xl border border-white/10 bg-white/[0.05] px-4 py-3 text-center text-sm font-black text-white hover:bg-white/[0.08]"
-        >
-          {t.common.login}
-        </Link>
+          <a
+            href="#pricing"
+            onClick={(event) => {
+              event.preventDefault();
+              setMobileMenuOpen(false);
+              scrollToHash('#pricing');
+            }}
+            className="mobile-main-menu-start"
+          >
+            {t.common.startFree}
+            <ArrowRight className="h-4 w-4" />
+          </a>
+        </section>
       </div>
     </div>
-  </div>
-) : null}
-
-        </header>
+  ) : null}
+</header>
 
         <section className="relative z-10 mx-auto max-w-[1860px] px-5 pb-8 pt-8 lg:px-10">
           <div className="grid min-h-[560px] items-center gap-10 xl:grid-cols-[0.36fr_0.64fr]">

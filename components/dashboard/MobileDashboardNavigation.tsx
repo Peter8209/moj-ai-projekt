@@ -2,18 +2,12 @@
 
 import {
   BarChart3,
-  BookOpen,
   CalendarDays,
   Check,
-  CreditCard,
-  FileText,
   GraduationCap,
-  History,
-  Home,
   Languages,
   Mail,
   PlayCircle,
-  Search,
   ShieldCheck,
   Sparkles,
   User,
@@ -146,67 +140,6 @@ function getModuleDescription(moduleKey: string) {
   }
 }
 
-function getBottomMainMenuItems(onNavigate: (path: string) => void) {
-  return [
-    {
-      key: 'overview',
-      label: 'Menu',
-      description: 'Hlavný prehľad',
-      icon: <Home className="h-4 w-4" />,
-      onClick: () => onNavigate('/dashboard'),
-    },
-    {
-      key: 'profile',
-      label: 'Profil',
-      description: 'Účet klienta',
-      icon: <User className="h-4 w-4" />,
-      onClick: () => onNavigate('/profile?tab=account'),
-    },
-    {
-      key: 'chat',
-      label: 'AI Chat',
-      description: 'Písanie a úprava textu',
-      icon: <Sparkles className="h-4 w-4" />,
-      onClick: () => onNavigate('/chat'),
-    },
-    {
-      key: 'new-work',
-      label: 'Nová práca',
-      description: 'Vytvoriť prácu',
-      icon: <FileText className="h-4 w-4" />,
-      onClick: () => onNavigate('/projects?new=1'),
-    },
-    {
-      key: 'works',
-      label: 'Moje práce',
-      description: 'Rozpracované práce',
-      icon: <BookOpen className="h-4 w-4" />,
-      onClick: () => onNavigate('/projects?view=list'),
-    },
-    {
-      key: 'sources',
-      label: 'Zdroje',
-      description: 'Literatúra',
-      icon: <Search className="h-4 w-4" />,
-      onClick: () => onNavigate('/sources'),
-    },
-    {
-      key: 'packages',
-      label: 'Balíčky',
-      description: 'Predplatné',
-      icon: <CreditCard className="h-4 w-4" />,
-      onClick: () => onNavigate('/pricing'),
-    },
-    {
-      key: 'history',
-      label: 'História',
-      description: 'História chatu',
-      icon: <History className="h-4 w-4" />,
-      onClick: () => onNavigate('/history'),
-    },
-  ];
-}
-
 function getFallbackLanguage(): LanguageCode {
   if (typeof window === 'undefined') return 'sk';
 
@@ -281,10 +214,6 @@ export default function MobileDashboardNavigation({
     return moduleInfos;
   }, [moduleInfos]);
 
-  const bottomMainMenuItems = useMemo(() => {
-    return getBottomMainMenuItems(onNavigate);
-  }, [onNavigate]);
-
   function scrollToDashboardToolPanel() {
     window.setTimeout(() => {
       const dashboardPanel =
@@ -313,7 +242,7 @@ export default function MobileDashboardNavigation({
     <>
       {/* =====================================================
           MOBILNÁ VRCHNÁ LIŠTA — IBA AI SEKCIA
-          Toto nahrádza pôvodné horné menu.
+          Žiadne hlavné mobilné menu.
       ===================================================== */}
 
       <section className="sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-3 pt-3 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
@@ -362,7 +291,7 @@ export default function MobileDashboardNavigation({
           </div>
         )}
 
-        {/* JAZYKY — OSTÁVAJÚ HORE POD AI SEKCIOU */}
+        {/* JAZYKY — HORE POD AI SEKCOU */}
         <div className="mb-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex min-w-max gap-2">
             {dashboardLanguages.map((item) => {
@@ -440,59 +369,6 @@ export default function MobileDashboardNavigation({
           </div>
         </div>
       </section>
-
-      {/* =====================================================
-          MOBILNÁ SPODNÁ LIŠTA — HLAVNÉ MENU
-      ===================================================== */}
-
-      <nav className="fixed inset-x-0 bottom-0 z-[90] border-t border-white/10 bg-[#020617]/95 px-3 pb-[calc(env(safe-area-inset-bottom)+0.55rem)] pt-2 text-white shadow-2xl shadow-black/70 backdrop-blur-2xl xl:hidden">
-        <div className="mb-2 flex items-center justify-between gap-3 px-1">
-          <div className="min-w-0">
-            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-violet-300">
-              Hlavné menu
-            </p>
-
-            <p className="line-clamp-1 text-xs font-black text-white">
-              Zedpera Dashboard
-            </p>
-          </div>
-
-          <p className="line-clamp-1 text-[10px] font-bold text-slate-400">
-            Práca, profil, zdroje a história
-          </p>
-        </div>
-
-        <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="flex min-w-max gap-2">
-            {bottomMainMenuItems.map((item) => {
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => {
-                    item.onClick();
-
-                    if (item.key === 'overview') {
-                      scrollToDashboardToolPanel();
-                    }
-                  }}
-                  className="flex min-h-[62px] w-[92px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-2 text-[10px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-[0.97]"
-                  title={item.description}
-                >
-                  <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-black/25 text-violet-200">
-                    {item.icon}
-                  </span>
-
-                  <span className="max-w-full truncate">{item.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </nav>
-
-      {/* MEDZERA, ABY SPODNÁ HLAVNÁ LIŠTA NEPREKRÝVALA OBSAH */}
-      <div className="h-[108px] xl:hidden" aria-hidden="true" />
     </>
   );
 }

@@ -10,7 +10,6 @@ import {
   PlayCircle,
   ShieldCheck,
   Sparkles,
-  User,
   WandSparkles,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -34,7 +33,12 @@ type MobileDashboardNavigationProps = {
   language?: LanguageCode;
   onChangeLanguage?: (language: LanguageCode) => void;
   onSelectModule: (moduleKey: string) => void;
-  onNavigate: (path: string) => void;
+
+  /**
+   * Ponechané len kvôli kompatibilite s DashboardClient.tsx.
+   * V tomto komponente už nevykresľujeme žiadne hlavné menu.
+   */
+  onNavigate?: (path: string) => void;
 };
 
 const dashboardLanguages: Array<{
@@ -67,22 +71,31 @@ function getModuleIcon(moduleKey: string) {
   switch (moduleKey) {
     case 'supervisor':
       return <GraduationCap className="h-4 w-4" />;
+
     case 'quality':
       return <ShieldCheck className="h-4 w-4" />;
+
     case 'defense':
       return <PlayCircle className="h-4 w-4" />;
+
     case 'translation':
       return <Languages className="h-4 w-4" />;
+
     case 'data':
       return <BarChart3 className="h-4 w-4" />;
+
     case 'planning':
       return <CalendarDays className="h-4 w-4" />;
+
     case 'emails':
       return <Mail className="h-4 w-4" />;
+
     case 'humanizer':
       return <WandSparkles className="h-4 w-4" />;
+
     case 'originality':
       return <ShieldCheck className="h-4 w-4" />;
+
     default:
       return <Sparkles className="h-4 w-4" />;
   }
@@ -94,22 +107,31 @@ function getShortModuleLabel(moduleKey: string, label: string) {
   switch (moduleKey) {
     case 'supervisor':
       return 'AI školiteľ';
+
     case 'quality':
       return 'Audit';
+
     case 'defense':
       return 'Obhajoba';
+
     case 'translation':
       return 'Preklad';
+
     case 'data':
       return 'Dáta';
+
     case 'planning':
       return 'Plán';
+
     case 'emails':
       return 'Email';
+
     case 'humanizer':
       return 'Humanizér';
+
     case 'originality':
       return 'Originalita';
+
     default:
       return normalized;
   }
@@ -119,22 +141,31 @@ function getModuleDescription(moduleKey: string) {
   switch (moduleKey) {
     case 'supervisor':
       return 'Odborné pripomienky';
+
     case 'quality':
       return 'Kontrola kvality';
+
     case 'defense':
       return 'Príprava obhajoby';
+
     case 'translation':
       return 'Odborný preklad';
+
     case 'data':
       return 'Tabuľky a grafy';
+
     case 'planning':
       return 'Harmonogram';
+
     case 'emails':
       return 'Komunikácia';
+
     case 'humanizer':
       return 'Prirodzený štýl';
+
     case 'originality':
       return 'Originalita textu';
+
     default:
       return 'AI nástroj';
   }
@@ -194,7 +225,6 @@ export default function MobileDashboardNavigation({
   language,
   onChangeLanguage,
   onSelectModule,
-  onNavigate,
 }: MobileDashboardNavigationProps) {
   const [localLanguage, setLocalLanguage] = useState<LanguageCode>(() => {
     return language || getFallbackLanguage();
@@ -242,12 +272,13 @@ export default function MobileDashboardNavigation({
     <>
       {/* =====================================================
           MOBILNÁ VRCHNÁ LIŠTA — IBA AI SEKCIA
-          Žiadne hlavné mobilné menu.
+          Bez hlavného mobilného menu.
+          Jazykové tlačidlá ponechané.
       ===================================================== */}
 
       <section className="sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-3 pt-3 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div className="min-w-0 flex-1">
+        <div className="mb-3">
+          <div className="min-w-0">
             <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
               AI sekcia
             </p>
@@ -260,15 +291,6 @@ export default function MobileDashboardNavigation({
               {activeModuleSubtitle || 'Vyberte AI nástroj pre aktuálnu prácu'}
             </p>
           </div>
-
-          <button
-            type="button"
-            onClick={() => onNavigate('/profile?tab=account')}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white transition hover:bg-white/[0.1] active:scale-95"
-            aria-label="Profil"
-          >
-            <User className="h-5 w-5" />
-          </button>
         </div>
 
         {(activeProfileTitle || activeProfileSubtitle || activeProfileType) && (
@@ -291,7 +313,7 @@ export default function MobileDashboardNavigation({
           </div>
         )}
 
-        {/* JAZYKY — HORE POD AI SEKCOU */}
+        {/* JAZYKOVÉ TLAČIDLÁ — PONECHANÉ */}
         <div className="mb-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex min-w-max gap-2">
             {dashboardLanguages.map((item) => {

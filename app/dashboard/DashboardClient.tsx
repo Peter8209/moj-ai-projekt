@@ -38,7 +38,6 @@ import {
 import AnalysisResultsModal from '@/components/analysis/AnalysisResultsModal';
 import type { AnalysisResult } from '@/components/analysis/analysisTypes';
 import { useLanguage } from '@/components/LanguageProvider';
-import ThemeToggleButton from '@/components/ThemeToggleButton';
 import ImprovementBox from '@/components/ImprovementBox';
 import MobileDashboardNavigation from '@/components/dashboard/MobileDashboardNavigation';
 import { useRouter } from 'next/navigation';
@@ -675,6 +674,20 @@ const dashboardModuleOrder: ModuleKey[] = [
   'emails',
   'humanizer',
 ];
+
+function isModuleKey(value: string): value is ModuleKey {
+  return (
+    value === 'supervisor' ||
+    value === 'quality' ||
+    value === 'defense' ||
+    value === 'translation' ||
+    value === 'data' ||
+    value === 'planning' ||
+    value === 'emails' ||
+    value === 'originality' ||
+    value === 'humanizer'
+  );
+}
 
 
 
@@ -2712,8 +2725,8 @@ formData.append('profile', JSON.stringify(profileForApi || null));
       return;
     }
 
-    // ================= ORIGINALITA =================
-    // ================= ORIGINALITA =================
+   
+  // ================= ORIGINALITA =================
 if (activeModule === 'originality') {
   const formData = new FormData();
 
@@ -3828,91 +3841,150 @@ const downloadExcel = () => {
   }
 `}</style>
 
-    <main className="flex min-h-screen w-full bg-slate-50 text-slate-950 transition-colors duration-300 dark:bg-[#050711] dark:text-white">
-        <section className="flex min-h-screen min-w-0 flex-1 flex-col">
-         <header className="sticky top-0 z-40 shrink-0 border-b border-white/10 bg-[#050711]/95 px-4 py-4 backdrop-blur-xl md:px-8">
-  <div className="flex flex-col gap-4">
+<main className="flex min-h-screen w-full bg-slate-50 text-slate-950 transition-colors duration-300 dark:bg-[#050711] dark:text-white">
+  <section className="flex min-h-screen min-w-0 flex-1 flex-col pb-24 xl:pb-0">
+    {/* DESKTOP AI LIŠTA - zobrazuje sa iba na počítači */}
+    <header className="sticky top-0 z-40 hidden shrink-0 border-b border-white/10 bg-[#050711]/95 px-4 py-3 backdrop-blur-xl xl:block">
+      <div className="flex w-full flex-col gap-3">
+        {/* AI MODULY - 2 stĺpce, rovnomerne rozdelené */}
+        <nav
+          aria-label="AI moduly dashboardu"
+          className="grid w-full grid-cols-2 gap-3 rounded-[1.75rem] border border-white/10 bg-white/[0.025] p-2 shadow-inner shadow-black/30"
+        >
+          {/* ĽAVÝ STĹPEC */}
+          <div className="flex min-w-0 flex-col gap-2">
+            {moduleInfos
+              .filter((item) => item.key !== 'originality')
+              .slice(
+                0,
+                Math.ceil(
+                  moduleInfos.filter((item) => item.key !== 'originality')
+                    .length / 2,
+                ),
+              )
+              .map((item) => {
+                const active = activeModule === item.key;
 
-        {/* MOBILNÉ MENU DASHBOARDU */}
-        <div className="xl:hidden">
-          <MobileDashboardNavigation
-            activeModule={activeModule}
-            activeModuleLabel={activeModuleLabel}
-            activeModuleSubtitle={activeModuleCardSubtitle}
-            activeProfileTitle={
-              activeProfile?.title ||
-              activeProfile?.topic ||
-              'Bez vybranej práce'
-            }
-            activeProfileType={activeProfile?.type || activeProfile?.level || ''}
-            moduleInfos={moduleInfos}
-            t={t}
-            language={getStoredSystemLanguage()}
-            onChangeLanguage={(nextLanguage) => {
-              persistSystemLanguage(nextLanguage);
-              window.location.reload();
-            }}
-            onSelectModule={(moduleKey) => selectDashboardModule(moduleKey as ModuleKey)}
-            onNavigate={(path) => router.push(path)}
-          />
-        </div>
+                const label =
+                  t.dashboardTools?.tools?.[item.translationKey] ||
+                  fixedModuleUi[item.key]?.shortLabel ||
+                  item.key;
 
-    {/* DESKTOP MENU */}
-    <div className="hidden flex-wrap items-center gap-2 xl:flex">
-      {moduleInfos.map((item) => {
-        const active = activeModule === item.key;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => selectDashboardModule(item.key)}
+                    title={label}
+                    aria-pressed={active}
+                    className={[
+                      'inline-flex h-[36px] w-full min-w-0 items-center justify-center rounded-2xl border px-4 text-[13px] font-black tracking-tight transition-all duration-200',
+                      'focus:outline-none focus:ring-2 focus:ring-violet-400/80 focus:ring-offset-2 focus:ring-offset-[#050711]',
+                      active
+                        ? 'border-violet-300/70 bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white shadow-lg shadow-violet-950/50'
+                        : 'border-white/10 bg-white/[0.055] text-slate-200 hover:-translate-y-0.5 hover:border-violet-300/50 hover:bg-white/[0.10] hover:text-white',
+                    ].join(' ')}
+                  >
+                    <span className="block w-full truncate text-center">
+                      {label}
+                    </span>
+                  </button>
+                );
+              })}
+          </div>
 
-        return (
+          {/* PRAVÝ STĹPEC */}
+          <div className="flex min-w-0 flex-col gap-2">
+            {moduleInfos
+              .filter((item) => item.key !== 'originality')
+              .slice(
+                Math.ceil(
+                  moduleInfos.filter((item) => item.key !== 'originality')
+                    .length / 2,
+                ),
+              )
+              .map((item) => {
+                const active = activeModule === item.key;
+
+                const label =
+                  t.dashboardTools?.tools?.[item.translationKey] ||
+                  fixedModuleUi[item.key]?.shortLabel ||
+                  item.key;
+
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => selectDashboardModule(item.key)}
+                    title={label}
+                    aria-pressed={active}
+                    className={[
+                      'inline-flex h-[36px] w-full min-w-0 items-center justify-center rounded-2xl border px-4 text-[13px] font-black tracking-tight transition-all duration-200',
+                      'focus:outline-none focus:ring-2 focus:ring-violet-400/80 focus:ring-offset-2 focus:ring-offset-[#050711]',
+                      active
+                        ? 'border-violet-300/70 bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white shadow-lg shadow-violet-950/50'
+                        : 'border-white/10 bg-white/[0.055] text-slate-200 hover:-translate-y-0.5 hover:border-violet-300/50 hover:bg-white/[0.10] hover:text-white',
+                    ].join(' ')}
+                  >
+                    <span className="block w-full truncate text-center">
+                      {label}
+                    </span>
+                  </button>
+                );
+              })}
+          </div>
+        </nav>
+
+        {/* AKČNÉ TLAČIDLÁ - samostatný spodný riadok */}
+        <div className="flex w-full items-center justify-end gap-2 rounded-[1.75rem] border border-white/10 bg-white/[0.02] p-2 shadow-inner shadow-black/20">
           <button
-            key={item.key}
             type="button"
-            onClick={() => selectDashboardModule(item.key)}
-            className={`inline-flex min-h-[56px] items-center justify-center rounded-2xl border px-6 py-3 text-sm font-black transition ${
-              active
-                ? 'border-violet-400/40 bg-violet-600 text-white shadow-lg shadow-violet-950/30'
-                : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
-            }`}
+            onClick={() => router.push('/profile?new=1')}
+            title="Nová práca"
+            className="inline-flex h-[40px] shrink-0 items-center justify-center gap-2 rounded-2xl border border-violet-300/50 bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 px-5 text-[13px] font-black text-white shadow-lg shadow-violet-950/45 transition-all duration-200 hover:-translate-y-0.5 hover:from-violet-500 hover:via-purple-500 hover:to-fuchsia-500 focus:outline-none focus:ring-2 focus:ring-violet-400/80 focus:ring-offset-2 focus:ring-offset-[#050711]"
           >
-            {t.dashboardTools.tools[item.translationKey]}
+            <FileText className="h-4 w-4 shrink-0" />
+            <span className="whitespace-nowrap">Nová práca</span>
           </button>
-        );
-      })}
 
-      <button
-        type="button"
-        onClick={() => router.push('/projects?new=1')}
-        className="inline-flex min-h-[50px] items-center justify-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-sm transition hover:bg-violet-500"
-      >
-        <FileText className="h-4 w-4" />
-        Nová práca
-      </button>
+          <button
+            type="button"
+            onClick={() => router.push('/profile')}
+            title="Moje práce"
+            className="inline-flex h-[40px] shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 text-[13px] font-black text-white shadow-lg shadow-black/20 transition-all duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.10] focus:outline-none focus:ring-2 focus:ring-violet-400/70 focus:ring-offset-2 focus:ring-offset-[#050711]"
+          >
+            <BookOpen className="h-4 w-4 shrink-0" />
+            <span className="whitespace-nowrap">Moje práce</span>
+          </button>
 
-      <button
-        type="button"
-        onClick={() => router.push('/projects')}
-        className="inline-flex min-h-[50px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-slate-300 shadow-sm transition hover:bg-white/[0.1] hover:text-white"
-      >
-        <BookOpen className="h-4 w-4" />
-        Moje práce
-      </button>
-
-      <button
-        type="button"
-        onClick={() => router.push('/video')}
-        className="inline-flex min-h-[50px] items-center justify-center gap-2 rounded-2xl border border-cyan-400/30 bg-cyan-500/10 px-5 py-3 text-sm font-black text-cyan-100 shadow-sm transition hover:bg-cyan-500/20"
-      >
-        <Presentation className="h-4 w-4" />
-        Videonávody
-      </button>
-
-      <div className="shrink-0">
-        <ThemeToggleButton />
+          <button
+            type="button"
+            onClick={() => router.push('/video')}
+            title="Videonávody"
+            className="inline-flex h-[40px] shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 text-[13px] font-black text-white shadow-lg shadow-black/20 transition-all duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.10] focus:outline-none focus:ring-2 focus:ring-violet-400/70 focus:ring-offset-2 focus:ring-offset-[#050711]"
+          >
+            <Presentation className="h-4 w-4 shrink-0" />
+            <span className="whitespace-nowrap">Videonávody</span>
+          </button>
+        </div>
       </div>
-    </div>
+    </header>
 
-    
-  </div>
-</header>
+        {/* MOBILNÁ AI LIŠTA - zobrazuje sa iba na mobile ako spodná fixná lišta */}
+        <MobileDashboardNavigation
+          activeModule={activeModule}
+          activeModuleLabel={activeModuleLabel}
+          activeModuleSubtitle={activeModuleCardSubtitle}
+          activeProfileTitle={activeProfile?.title || 'Profil práce'}
+          activeProfileSubtitle={activeProfile?.topic || activeProfile?.field || 'Aktívny profil'}
+          moduleInfos={moduleInfos}
+          onSelectModule={(moduleKey: string) => {
+            if (isModuleKey(moduleKey)) {
+              selectDashboardModule(moduleKey);
+            }
+          }}
+          onNavigate={(path: string) => router.push(path)}
+        />
 
 {activeModule === 'planning' && (
 
@@ -3983,10 +4055,6 @@ const downloadExcel = () => {
 </div>
   </div>
 )}
-
-<div className={String(activeModuleInfo.infoClassName)}>
-  {activeModuleIntro}
-</div>
 
                 {(activeModule === 'supervisor' ||
                   activeModule === 'quality' ||

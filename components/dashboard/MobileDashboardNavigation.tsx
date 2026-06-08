@@ -33,9 +33,10 @@ type MobileDashboardNavigationProps = {
   activeModuleLabel: string;
   activeModuleSubtitle?: string;
   activeProfileTitle?: string;
+  activeProfileSubtitle?: string;
   activeProfileType?: string;
   moduleInfos: MobileDashboardModuleInfo[];
-  t: any;
+  t?: any;
   language?: LanguageCode;
   onChangeLanguage?: (language: LanguageCode) => void;
   onSelectModule: (moduleKey: string) => void;
@@ -145,15 +146,15 @@ function getModuleDescription(moduleKey: string) {
   }
 }
 
-function getTopMainMenuItems(onNavigate: (path: string) => void) {
+function getBottomMainMenuItems(onNavigate: (path: string) => void) {
   return [
     {
       key: 'overview',
       label: 'Prehľad',
-      description: 'Hlavný prehľad aplikácie',
+      description: 'Hlavný prehľad',
       icon: <Home className="h-4 w-4" />,
       onClick: () => onNavigate('/dashboard'),
-      active: true,
+      activePath: '/dashboard',
     },
     {
       key: 'profile',
@@ -161,15 +162,15 @@ function getTopMainMenuItems(onNavigate: (path: string) => void) {
       description: 'Účet klienta',
       icon: <User className="h-4 w-4" />,
       onClick: () => onNavigate('/profile'),
-      active: false,
+      activePath: '/profile',
     },
     {
       key: 'new-work',
       label: 'Nová práca',
-      description: 'Vytvoriť novú prácu',
+      description: 'Vytvoriť prácu',
       icon: <FileText className="h-4 w-4" />,
       onClick: () => onNavigate('/projects?new=1'),
-      active: false,
+      activePath: '/projects?new=1',
     },
     {
       key: 'works',
@@ -177,15 +178,15 @@ function getTopMainMenuItems(onNavigate: (path: string) => void) {
       description: 'Rozpracované práce',
       icon: <BookOpen className="h-4 w-4" />,
       onClick: () => onNavigate('/projects'),
-      active: false,
+      activePath: '/projects',
     },
     {
       key: 'sources',
       label: 'Zdroje',
-      description: 'Literatúra a zdroje',
+      description: 'Literatúra',
       icon: <Search className="h-4 w-4" />,
       onClick: () => onNavigate('/sources'),
-      active: false,
+      activePath: '/sources',
     },
     {
       key: 'videos',
@@ -193,7 +194,7 @@ function getTopMainMenuItems(onNavigate: (path: string) => void) {
       description: 'Video návody',
       icon: <PlayCircle className="h-4 w-4" />,
       onClick: () => onNavigate('/video'),
-      active: false,
+      activePath: '/video',
     },
     {
       key: 'packages',
@@ -201,7 +202,7 @@ function getTopMainMenuItems(onNavigate: (path: string) => void) {
       description: 'Predplatné',
       icon: <CreditCard className="h-4 w-4" />,
       onClick: () => onNavigate('/packages'),
-      active: false,
+      activePath: '/packages',
     },
     {
       key: 'history',
@@ -209,7 +210,7 @@ function getTopMainMenuItems(onNavigate: (path: string) => void) {
       description: 'História chatu',
       icon: <History className="h-4 w-4" />,
       onClick: () => onNavigate('/history'),
-      active: false,
+      activePath: '/history',
     },
   ];
 }
@@ -261,6 +262,7 @@ export default function MobileDashboardNavigation({
   activeModuleLabel,
   activeModuleSubtitle,
   activeProfileTitle,
+  activeProfileSubtitle,
   activeProfileType,
   moduleInfos,
   t,
@@ -280,11 +282,15 @@ export default function MobileDashboardNavigation({
   }, [activeModuleLabel]);
 
   const visibleModules = useMemo(() => {
-    return moduleInfos.filter((item) => item.key !== 'originality');
+    if (!Array.isArray(moduleInfos)) {
+      return [];
+    }
+
+    return moduleInfos;
   }, [moduleInfos]);
 
-  const topMainMenuItems = useMemo(() => {
-    return getTopMainMenuItems(onNavigate);
+  const bottomMainMenuItems = useMemo(() => {
+    return getBottomMainMenuItems(onNavigate);
   }, [onNavigate]);
 
   function scrollToDashboardToolPanel() {
@@ -313,20 +319,23 @@ export default function MobileDashboardNavigation({
 
   return (
     <>
-      {/* HORNÉ HLAVNÉ MENU SYSTÉMU */}
+      {/* =====================================================
+          MOBILNÁ VRCHNÁ LIŠTA — AI SEKCIE
+      ===================================================== */}
+
       <section className="sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-3 pt-3 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
-              Hlavné menu
+              AI sekcia
             </p>
 
             <h2 className="mt-1 line-clamp-1 text-lg font-black leading-tight text-white">
-              Zedpera Dashboard
+              {cleanActiveModuleLabel}
             </h2>
 
             <p className="mt-1 line-clamp-1 text-xs font-semibold text-slate-400">
-              {activeProfileTitle || 'Prehľad práce, profilu, zdrojov a histórie'}
+              {activeModuleSubtitle || 'Vyberte AI nástroj pre aktuálnu prácu'}
             </p>
           </div>
 
@@ -340,15 +349,27 @@ export default function MobileDashboardNavigation({
           </button>
         </div>
 
-        {activeProfileType ? (
+        {(activeProfileTitle || activeProfileSubtitle || activeProfileType) && (
           <div className="mb-3 rounded-2xl border border-white/10 bg-black/25 px-3 py-2">
-            <p className="line-clamp-1 text-[11px] font-bold text-slate-300">
-              {activeProfileType}
+            <p className="line-clamp-1 text-[11px] font-black text-white">
+              {activeProfileTitle || 'Profil práce'}
             </p>
-          </div>
-        ) : null}
 
-        {/* JAZYKY HORE */}
+            {activeProfileSubtitle ? (
+              <p className="mt-0.5 line-clamp-1 text-[10px] font-semibold text-slate-400">
+                {activeProfileSubtitle}
+              </p>
+            ) : null}
+
+            {activeProfileType ? (
+              <p className="mt-0.5 line-clamp-1 text-[10px] font-semibold text-violet-300">
+                {activeProfileType}
+              </p>
+            ) : null}
+          </div>
+        )}
+
+        {/* JAZYKOVÉ MUTÁCIE HORE */}
         <div className="mb-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex min-w-max gap-2">
             {dashboardLanguages.map((item) => {
@@ -359,7 +380,7 @@ export default function MobileDashboardNavigation({
                   key={item.code}
                   type="button"
                   onClick={() => handleChangeLanguage(item.code)}
-                  className={`flex min-h-[42px] min-w-[86px] shrink-0 items-center justify-center gap-2 rounded-2xl border px-3 py-2 text-xs font-black transition active:scale-95 ${
+                  className={`flex min-h-[40px] min-w-[74px] shrink-0 items-center justify-center gap-2 rounded-2xl border px-3 py-2 text-xs font-black transition active:scale-95 ${
                     active
                       ? 'border-cyan-300 bg-cyan-500 text-white shadow-lg shadow-cyan-950/40'
                       : 'border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1] hover:text-white'
@@ -384,81 +405,8 @@ export default function MobileDashboardNavigation({
           </div>
         </div>
 
-        {/* KLIKATEĽNÉ HLAVNÉ MENU HORE */}
+        {/* AI MODULY HORE — POSÚVATEĽNÉ */}
         <div className="-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="flex min-w-max gap-2">
-            {topMainMenuItems.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => {
-                  item.onClick();
-
-                  if (item.key === 'overview') {
-                    scrollToDashboardToolPanel();
-                  }
-                }}
-                className={`min-h-[76px] w-[126px] shrink-0 rounded-2xl border px-3 py-3 text-left transition active:scale-[0.97] ${
-                  item.active
-                    ? 'border-violet-300 bg-violet-600 text-white shadow-lg shadow-violet-950/50'
-                    : 'border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1] hover:text-white'
-                }`}
-                title={item.description}
-              >
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span
-                    className={`flex h-8 w-8 items-center justify-center rounded-xl ${
-                      item.active
-                        ? 'bg-white/20 text-white'
-                        : 'bg-black/25 text-violet-200'
-                    }`}
-                  >
-                    {item.icon}
-                  </span>
-
-                  {item.active ? (
-                    <span className="rounded-full bg-white/20 px-2 py-0.5 text-[8px] font-black uppercase tracking-wide text-white">
-                      ON
-                    </span>
-                  ) : null}
-                </div>
-
-                <p className="line-clamp-1 text-sm font-black leading-5">
-                  {item.label}
-                </p>
-
-                <p
-                  className={`mt-0.5 line-clamp-1 text-[10px] font-semibold leading-4 ${
-                    item.active ? 'text-violet-100' : 'text-slate-400'
-                  }`}
-                >
-                  {item.description}
-                </p>
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* DOLNÁ POSÚVAJÚCA AI LIŠTA */}
-      <nav className="fixed inset-x-0 bottom-0 z-[90] border-t border-white/10 bg-[#020617]/95 px-3 pb-[calc(env(safe-area-inset-bottom)+0.55rem)] pt-2 text-white shadow-2xl shadow-black/70 backdrop-blur-2xl xl:hidden">
-        <div className="mb-2 flex items-center justify-between gap-3 px-1">
-          <div className="min-w-0">
-            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-violet-300">
-              AI lišta
-            </p>
-
-            <p className="line-clamp-1 text-xs font-black text-white">
-              {cleanActiveModuleLabel}
-            </p>
-          </div>
-
-          <p className="line-clamp-1 text-[10px] font-bold text-slate-400">
-            {activeModuleSubtitle || 'Vyberte AI nástroj'}
-          </p>
-        </div>
-
-        <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex min-w-max gap-2">
             {visibleModules.map((item) => {
               const active = activeModule === item.key;
@@ -474,7 +422,7 @@ export default function MobileDashboardNavigation({
                   key={item.key}
                   type="button"
                   onClick={() => handleSelectModule(item.key)}
-                  className={`flex min-h-[62px] w-[92px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.97] ${
+                  className={`flex min-h-[62px] w-[96px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.97] ${
                     active
                       ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
                       : 'border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1] hover:text-white'
@@ -484,7 +432,9 @@ export default function MobileDashboardNavigation({
                 >
                   <span
                     className={`flex h-7 w-7 items-center justify-center rounded-xl ${
-                      active ? 'bg-white/20 text-white' : 'bg-black/25 text-violet-200'
+                      active
+                        ? 'bg-white/20 text-white'
+                        : 'bg-black/25 text-violet-200'
                     }`}
                   >
                     {getModuleIcon(item.key)}
@@ -496,9 +446,59 @@ export default function MobileDashboardNavigation({
             })}
           </div>
         </div>
+      </section>
+
+      {/* =====================================================
+          MOBILNÁ SPODNÁ LIŠTA — HLAVNÉ MENU
+      ===================================================== */}
+
+      <nav className="fixed inset-x-0 bottom-0 z-[90] border-t border-white/10 bg-[#020617]/95 px-3 pb-[calc(env(safe-area-inset-bottom)+0.55rem)] pt-2 text-white shadow-2xl shadow-black/70 backdrop-blur-2xl xl:hidden">
+        <div className="mb-2 flex items-center justify-between gap-3 px-1">
+          <div className="min-w-0">
+            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-violet-300">
+              Hlavné menu
+            </p>
+
+            <p className="line-clamp-1 text-xs font-black text-white">
+              Zedpera Dashboard
+            </p>
+          </div>
+
+          <p className="line-clamp-1 text-[10px] font-bold text-slate-400">
+            Práca, profil, zdroje a história
+          </p>
+        </div>
+
+        <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex min-w-max gap-2">
+            {bottomMainMenuItems.map((item) => {
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => {
+                    item.onClick();
+
+                    if (item.key === 'overview') {
+                      scrollToDashboardToolPanel();
+                    }
+                  }}
+                  className="flex min-h-[62px] w-[92px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-2 text-[10px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-[0.97]"
+                  title={item.description}
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-black/25 text-violet-200">
+                    {item.icon}
+                  </span>
+
+                  <span className="max-w-full truncate">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </nav>
 
-      {/* MEDZERA, ABY DOLNÁ AI LIŠTA NEPREKRÝVALA OBSAH */}
+      {/* MEDZERA, ABY SPODNÁ HLAVNÁ LIŠTA NEPREKRÝVALA OBSAH */}
       <div className="h-[108px] xl:hidden" aria-hidden="true" />
     </>
   );

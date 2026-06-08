@@ -1,9 +1,3 @@
-$ErrorActionPreference = "Stop"
-
-$ProjectRoot = (Get-Location).Path
-$NodeScriptPath = Join-Path $ProjectRoot "scripts\_create-localized-video-manuals.cjs"
-
-$nodeScript = @"
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
@@ -94,7 +88,7 @@ function buildVoiceText(segment, languageCode, fileBase) {
   const body = extractLanguageBody(segment, languageCode);
 
   if (!body) {
-    return `Zedpera video manual. Missing translation for language ${languageCode}. File: ${fileBase}.`;
+    return Zedpera video manual. Missing translation for language . File: .;
   }
 
   const title = extractStringField(body, 'title');
@@ -106,17 +100,17 @@ function buildVoiceText(segment, languageCode, fileBase) {
 
   if (title) parts.push(title);
   if (description) parts.push(description);
-  if (category) parts.push(`Kategoria: ${category}`);
+  if (category) parts.push(Kategoria: );
 
   if (steps.length > 0) {
     parts.push('Postup krok za krokom.');
 
     steps.forEach((step, index) => {
-      parts.push(`${index + 1}. ${step}`);
+      parts.push(${index + 1}. );
     });
   }
 
-  return parts.join('\n\n').trim() || `Zedpera video manual ${fileBase}.`;
+  return parts.join('\n\n').trim() || Zedpera video manual .;
 }
 
 function getManualSegments(content) {
@@ -151,11 +145,11 @@ function copyIfExists(source, target) {
 function createSrtText(text) {
   const oneLine = String(text || '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
 
-  return `1
+  return 1
 00:00:00,000 --> 00:01:30,000
-${oneLine}
 
-`;
+
+;
 }
 
 function runEdgeTts(textFile, voice, audioFile) {
@@ -359,12 +353,3 @@ console.log('');
 console.log('Zdrojove SK videa musia byt v: public/video-manualy/sk');
 console.log('Nazvy musia sediet s fileBase z lib/videoManuals.ts.');
 console.log('');
-"@
-
-[System.IO.File]::WriteAllText($NodeScriptPath, $nodeScript, [System.Text.UTF8Encoding]::new($false))
-
-node $NodeScriptPath
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Node skript skoncil s chybou."
-}

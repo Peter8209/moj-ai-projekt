@@ -11,18 +11,25 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { LucideIcon } from 'lucide-react';
 import {
   ArrowLeft,
+  BarChart3,
   BookOpen,
   Bot,
+  Brain,
   CreditCard,
   Crown,
+  FileText,
   History,
   Home,
+  Languages,
   Library,
   LogOut,
+  Mail,
   Menu,
+  Presentation,
   Sparkles,
   UserCircle,
   Video,
+  Wand2,
   X,
 } from 'lucide-react';
 import { useLanguage } from '@/components/LanguageProvider';
@@ -40,32 +47,21 @@ type NavItem = {
   action?: 'client-profile' | 'projects-list';
 };
 
+type AiSectionItem = {
+  key: string;
+  label: string;
+  icon: LucideIcon;
+};
+
 type TranslationRecord = Record<string, unknown>;
 
 // =====================================================
 // ROUTES
 // =====================================================
 
-/**
- * PROFIL:
- * Profil v menu nesmie smerovať na /api/profile.
- * Profil musí smerovať na frontend stránku /profile.
- *
- * /profile?tab=account otvorí priamo klientsky účet.
- */
 const PROFILE_PAGE_PATH = '/profile';
 const PROFILE_CLIENT_ACCOUNT_HREF = '/profile?tab=account';
 
-/**
- * MOJE PRÁCE:
- * Dôležitá oprava:
- * Kliknutie na „Moje práce“ nesmie otvoriť identitu práce ani posledný profil.
- * Musí otvoriť zoznam prác.
- *
- * Preto používame /projects?view=list.
- * Stránka /projects podľa tohto query parametra má zobraziť zoznam prác,
- * nie wizard identity práce.
- */
 const PROJECTS_PAGE_PATH = '/projects';
 const PROJECTS_LIST_HREF = '/projects?view=list';
 
@@ -86,6 +82,10 @@ function text(
 
   return fallback;
 }
+
+// =====================================================
+// MAIN MENU ITEMS
+// =====================================================
 
 function createNavItems(dictionary: TranslationRecord): NavItem[] {
   return [
@@ -183,6 +183,55 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
 }
 
 // =====================================================
+// MOBILE TOP AI SECTIONS
+// =====================================================
+
+function createAiSectionItems(dictionary: TranslationRecord): AiSectionItem[] {
+  return [
+    {
+      key: 'coach',
+      label: text(dictionary, 'aiCoach', 'AI školiteľ'),
+      icon: Brain,
+    },
+    {
+      key: 'audit',
+      label: text(dictionary, 'qualityAudit', 'Audit kvality'),
+      icon: Sparkles,
+    },
+    {
+      key: 'defense',
+      label: text(dictionary, 'defense', 'Obhajoba'),
+      icon: Presentation,
+    },
+    {
+      key: 'translation',
+      label: text(dictionary, 'translation', 'Preklad'),
+      icon: Languages,
+    },
+    {
+      key: 'data',
+      label: text(dictionary, 'dataAnalysis', 'Analýza dát'),
+      icon: BarChart3,
+    },
+    {
+      key: 'planning',
+      label: text(dictionary, 'planning', 'Plánovanie'),
+      icon: FileText,
+    },
+    {
+      key: 'emails',
+      label: text(dictionary, 'emails', 'Emaily'),
+      icon: Mail,
+    },
+    {
+      key: 'humanizer',
+      label: text(dictionary, 'humanizer', 'Humanizácia textu'),
+      icon: Wand2,
+    },
+  ];
+}
+
+// =====================================================
 // DEFAULT EXPORT
 // =====================================================
 
@@ -224,17 +273,25 @@ function AppShellContent({ children }: { children: ReactNode }) {
     return createNavItems(dictionary);
   }, [dictionary]);
 
-  /**
-   * Spodná mobilná navigácia má mať maximálne 5 položiek.
-   * Poradie:
-   * Menu, Profil, AI Chat, Moje práce, Zdroje
-   */
-  const mobileNavItems = useMemo(() => {
-    return navItems.slice(0, 5);
-  }, [navItems]);
+  const aiSectionItems = useMemo(() => {
+    return createAiSectionItems(dictionary);
+  }, [dictionary]);
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isAdminFree, setIsAdminFree] = useState(false);
+  const [activeAiSection, setActiveAiSection] = useState<string>('coach');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const storedModule =
+      localStorage.getItem('zedpera_active_dashboard_module') ||
+      searchParams?.get('module');
+
+    if (storedModule) {
+      setActiveAiSection(storedModule);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -306,14 +363,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
   function goToProjectsList() {
     setMobileMenuOpen(false);
 
-    /**
-     * Dôležité:
-     * Pri prechode na „Moje práce“ nechceme prenášať režim novej práce,
-     * identitu práce ani posledný otvorený profil.
-     *
-     * Tieto kľúče sú bezpečne odstránené len ako navigačné/draft pomocné stavy.
-     * Samotné uložené práce v databáze sa tým nemažú.
-     */
     if (typeof window !== 'undefined') {
       localStorage.removeItem('zedpera_new_project_mode');
       localStorage.removeItem('zedpera_open_identity');
@@ -338,6 +387,24 @@ function AppShellContent({ children }: { children: ReactNode }) {
     }
 
     goTo(item.href);
+  }
+
+  function handleAiSectionClick(moduleKey: string) {
+    setActiveAiSection(moduleKey);
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('zedpera_active_dashboard_module', moduleKey);
+
+      window.dispatchEvent(
+        new CustomEvent('zedpera-dashboard-module-change', {
+          detail: {
+            moduleKey,
+          },
+        }),
+      );
+    }
+
+    router.push(`/dashboard?module=${encodeURIComponent(moduleKey)}`);
   }
 
   function logoutAdminMode() {
@@ -476,63 +543,13 @@ function AppShellContent({ children }: { children: ReactNode }) {
       ===================================================== */}
 
       <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
-        {/* MOBILE TOP BAR */}
+        
 
-        <header className="flex shrink-0 flex-col gap-3 border-b border-white/10 bg-[#020617]/95 px-4 py-4 backdrop-blur lg:hidden">
-          <div className="flex items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(true)}
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white transition hover:bg-white/[0.12]"
-              aria-label={text(dictionary, 'openMenu', 'Otvoriť menu')}
-            >
-              <Menu size={20} />
-            </button>
+        {/* =====================================================
+            MAIN CONTENT
+        ===================================================== */}
 
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-black">{activeTitle}</div>
-              <div className="truncate text-[11px] font-semibold text-slate-400">
-                {activeDescription}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={goToClientAccountProfile}
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white transition hover:bg-white/[0.12]"
-              aria-label={text(dictionary, 'clientProfile', 'Profil')}
-            >
-              <UserCircle size={20} />
-            </button>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {navItems.map((item) => {
-              const active = isPathActive(pathname, item.activePath);
-              const Icon = item.icon;
-
-              return (
-                <button
-                  type="button"
-                  key={item.href}
-                  onClick={() => handleNavItemClick(item)}
-                  className={`inline-flex min-h-[40px] items-center gap-2 rounded-2xl px-3 py-2 text-[11px] font-black transition ${
-                    active
-                      ? 'bg-violet-600 text-white shadow-lg shadow-violet-700/25'
-                      : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.12] hover:text-white'
-                  }`}
-                >
-                  <Icon size={15} />
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
-        </header>
-
-        {/* MAIN CONTENT */}
-
-        <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#020617] p-3 pb-28 sm:p-4 md:p-6 lg:pb-6">
+<main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#020617] p-3 pb-24 sm:p-4 sm:pb-24 md:p-6 md:pb-24 lg:pb-6 lg:pt-6">
           {!isDashboard && (
             <div className="sticky top-0 z-30 mb-5 rounded-3xl border border-white/10 bg-[#020617]/95 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -565,32 +582,36 @@ function AppShellContent({ children }: { children: ReactNode }) {
           {children}
         </main>
 
-        {/* MOBILE BOTTOM NAV */}
+        {/* =====================================================
+            MOBILE BOTTOM MAIN MENU
+        ===================================================== */}
 
         <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-[#020617]/95 px-2 py-2 backdrop-blur lg:hidden">
-          <div className="grid grid-cols-5 gap-1">
-            {mobileNavItems.map((item) => {
-              const active = isPathActive(pathname, item.activePath);
-              const Icon = item.icon;
+          <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex min-w-max items-center gap-2">
+              {navItems.map((item) => {
+                const active = isPathActive(pathname, item.activePath);
+                const Icon = item.icon;
 
-              return (
-                <button
-                  type="button"
-                  key={item.href}
-                  onClick={() => handleNavItemClick(item)}
-                  className={`flex flex-col items-center justify-center rounded-2xl px-2 py-2 text-[11px] font-bold transition ${
-                    active
-                      ? 'bg-white/12 text-white'
-                      : 'text-slate-400 hover:bg-white/[0.06] hover:text-white'
-                  }`}
-                >
-                  <Icon size={18} />
-                  <span className="mt-1 max-w-full truncate">
-                    {item.label}
-                  </span>
-                </button>
-              );
-            })}
+                return (
+                  <button
+                    type="button"
+                    key={item.href}
+                    onClick={() => handleNavItemClick(item)}
+                    className={`flex h-[58px] min-w-[76px] flex-col items-center justify-center rounded-2xl px-3 text-[10px] font-black transition ${
+                      active
+                        ? 'bg-white/12 text-white shadow-lg shadow-black/20'
+                        : 'text-slate-400 hover:bg-white/[0.06] hover:text-white'
+                    }`}
+                  >
+                    <Icon size={18} />
+                    <span className="mt-1 max-w-[70px] truncate">
+                      {item.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </nav>
       </div>
@@ -630,38 +651,78 @@ function AppShellContent({ children }: { children: ReactNode }) {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 pb-6">
-              {navItems.map((item) => {
-                const active = isPathActive(pathname, item.activePath);
-                const Icon = item.icon;
+            <div className="mb-6">
+              <div className="mb-3 text-xs font-black uppercase tracking-[0.18em] text-violet-300">
+                AI sekcie
+              </div>
 
-                return (
-                  <button
-                    type="button"
-                    key={item.href}
-                    onClick={() => handleNavItemClick(item)}
-                    className={`flex min-h-[54px] w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
-                      active
-                        ? 'bg-white/12 text-white'
-                        : 'text-slate-400 hover:bg-white/[0.06] hover:text-white'
-                    }`}
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/5">
-                      <Icon size={18} />
-                    </span>
+              <div className="grid grid-cols-2 gap-2">
+                {aiSectionItems.map((item) => {
+                  const active = activeAiSection === item.key && isDashboard;
+                  const Icon = item.icon;
 
-                    <span className="min-w-0">
-                      <span className="block truncate">{item.label}</span>
+                  return (
+                    <button
+                      type="button"
+                      key={item.key}
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        handleAiSectionClick(item.key);
+                      }}
+                      className={`flex min-h-[54px] w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
+                        active
+                          ? 'bg-violet-600 text-white'
+                          : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.12] hover:text-white'
+                      }`}
+                    >
+                      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">
+                        <Icon size={18} />
+                      </span>
+                      <span className="min-w-0 truncate">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-                      {item.description && (
-                        <span className="mt-0.5 block truncate text-[11px] font-semibold text-slate-500">
-                          {item.description}
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="mb-6">
+              <div className="mb-3 text-xs font-black uppercase tracking-[0.18em] text-violet-300">
+                Hlavné menu
+              </div>
+
+              <div className="grid grid-cols-1 gap-2">
+                {navItems.map((item) => {
+                  const active = isPathActive(pathname, item.activePath);
+                  const Icon = item.icon;
+
+                  return (
+                    <button
+                      type="button"
+                      key={item.href}
+                      onClick={() => handleNavItemClick(item)}
+                      className={`flex min-h-[54px] w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
+                        active
+                          ? 'bg-white/12 text-white'
+                          : 'text-slate-400 hover:bg-white/[0.06] hover:text-white'
+                      }`}
+                    >
+                      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/5">
+                        <Icon size={18} />
+                      </span>
+
+                      <span className="min-w-0">
+                        <span className="block truncate">{item.label}</span>
+
+                        {item.description && (
+                          <span className="mt-0.5 block truncate text-[11px] font-semibold text-slate-500">
+                            {item.description}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="grid grid-cols-1 gap-2 border-t border-white/10 pt-4">

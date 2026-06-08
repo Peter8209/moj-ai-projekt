@@ -2,19 +2,25 @@
 
 import {
   BarChart3,
+  BookOpen,
+  Bot,
+  BriefcaseBusiness,
   CalendarDays,
-  Check,
   GraduationCap,
-  Languages,
+  History,
+  Home,
   Mail,
+  Menu,
+  Package,
   PlayCircle,
   ShieldCheck,
   Sparkles,
+  UserCircle,
+  Video,
   WandSparkles,
+  X,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-
-type LanguageCode = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
 
 type MobileDashboardModuleInfo = {
   key: string;
@@ -30,28 +36,56 @@ type MobileDashboardNavigationProps = {
   activeProfileType?: string;
   moduleInfos: MobileDashboardModuleInfo[];
   t?: any;
-  language?: LanguageCode;
-  onChangeLanguage?: (language: LanguageCode) => void;
   onSelectModule: (moduleKey: string) => void;
 
   /**
-   * Ponechané len kvôli kompatibilite s DashboardClient.tsx.
-   * V tomto komponente už nevykresľujeme žiadne hlavné menu.
+   * Navigácia z DashboardClient.tsx.
+   * Používa sa pre rozbaľovacie hlavné menu.
    */
   onNavigate?: (path: string) => void;
 };
 
-const dashboardLanguages: Array<{
-  code: LanguageCode;
-  label: string;
-  short: string;
-}> = [
-  { code: 'sk', label: 'Slovenčina', short: 'SK' },
-  { code: 'cs', label: 'Čeština', short: 'CZ' },
-  { code: 'en', label: 'English', short: 'EN' },
-  { code: 'de', label: 'Deutsch', short: 'DE' },
-  { code: 'pl', label: 'Polski', short: 'PL' },
-  { code: 'hu', label: 'Magyar', short: 'HU' },
+const mobileMainMenuItems = [
+  {
+    label: 'Menu',
+    href: '/dashboard',
+    icon: Home,
+  },
+  {
+    label: 'Profil',
+    href: '/profile',
+    icon: UserCircle,
+  },
+  {
+    label: 'AI Chat',
+    href: '/chat',
+    icon: Bot,
+  },
+  {
+    label: 'Moje práce',
+    href: '/dashboard',
+    icon: BriefcaseBusiness,
+  },
+  {
+    label: 'Zdroje',
+    href: '/sources',
+    icon: BookOpen,
+  },
+  {
+    label: 'Balíčky',
+    href: '/packages',
+    icon: Package,
+  },
+  {
+    label: 'História',
+    href: '/history',
+    icon: History,
+  },
+  {
+    label: 'Video návod',
+    href: '/video',
+    icon: Video,
+  },
 ];
 
 function normalizeModuleLabel(label: string) {
@@ -79,7 +113,7 @@ function getModuleIcon(moduleKey: string) {
       return <PlayCircle className="h-4 w-4" />;
 
     case 'translation':
-      return <Languages className="h-4 w-4" />;
+      return <Sparkles className="h-4 w-4" />;
 
     case 'data':
       return <BarChart3 className="h-4 w-4" />;
@@ -171,48 +205,6 @@ function getModuleDescription(moduleKey: string) {
   }
 }
 
-function getFallbackLanguage(): LanguageCode {
-  if (typeof window === 'undefined') return 'sk';
-
-  const stored =
-    window.localStorage.getItem('zedpera_language') ||
-    window.localStorage.getItem('zedpera_system_language') ||
-    'sk';
-
-  if (
-    stored === 'sk' ||
-    stored === 'cs' ||
-    stored === 'en' ||
-    stored === 'de' ||
-    stored === 'pl' ||
-    stored === 'hu'
-  ) {
-    return stored;
-  }
-
-  return 'sk';
-}
-
-function persistDashboardLanguage(language: LanguageCode) {
-  if (typeof window === 'undefined') return;
-
-  window.localStorage.setItem('zedpera_language', language);
-  window.localStorage.setItem('zedpera_system_language', language);
-
-  document.documentElement.lang = language;
-  document.documentElement.setAttribute('data-language', language);
-  document.documentElement.setAttribute('data-system-language', language);
-  document.documentElement.setAttribute('data-work-language', language);
-
-  window.dispatchEvent(
-    new CustomEvent('zedpera:language-changed', {
-      detail: {
-        language,
-      },
-    }),
-  );
-}
-
 export default function MobileDashboardNavigation({
   activeModule,
   activeModuleLabel,
@@ -222,15 +214,10 @@ export default function MobileDashboardNavigation({
   activeProfileType,
   moduleInfos,
   t,
-  language,
-  onChangeLanguage,
   onSelectModule,
+  onNavigate,
 }: MobileDashboardNavigationProps) {
-  const [localLanguage, setLocalLanguage] = useState<LanguageCode>(() => {
-    return language || getFallbackLanguage();
-  });
-
-  const selectedLanguage = language || localLanguage;
+  const [isMainMenuOpen, setIsMainMenuOpen] = useState(false);
 
   const cleanActiveModuleLabel = useMemo(() => {
     return normalizeModuleLabel(activeModuleLabel);
@@ -262,23 +249,29 @@ export default function MobileDashboardNavigation({
     scrollToDashboardToolPanel();
   }
 
-  function handleChangeLanguage(nextLanguage: LanguageCode) {
-    setLocalLanguage(nextLanguage);
-    persistDashboardLanguage(nextLanguage);
-    onChangeLanguage?.(nextLanguage);
+  function handleNavigate(path: string) {
+    setIsMainMenuOpen(false);
+
+    if (onNavigate) {
+      onNavigate(path);
+      return;
+    }
+
+    window.location.href = path;
   }
 
   return (
     <>
       {/* =====================================================
-          MOBILNÁ VRCHNÁ LIŠTA — IBA AI SEKCIA
-          Bez hlavného mobilného menu.
-          Jazykové tlačidlá ponechané.
+          MOBILNÁ VRCHNÁ LIŠTA
+          - jazyky odstránené
+          - hlavné menu sa otvorí/zatvorí po kliknutí
+          - AI moduly ostávajú ako posuvná horná lišta
       ===================================================== */}
 
       <section className="sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-3 pt-3 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
-        <div className="mb-3">
-          <div className="min-w-0">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
             <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
               AI sekcia
             </p>
@@ -291,6 +284,21 @@ export default function MobileDashboardNavigation({
               {activeModuleSubtitle || 'Vyberte AI nástroj pre aktuálnu prácu'}
             </p>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setIsMainMenuOpen((value) => !value)}
+            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border text-white shadow-lg transition active:scale-95 ${
+              isMainMenuOpen
+                ? 'border-violet-300 bg-violet-600 shadow-violet-950/40'
+                : 'border-white/10 bg-white/[0.06] hover:bg-white/[0.1]'
+            }`}
+            aria-expanded={isMainMenuOpen}
+            aria-label={isMainMenuOpen ? 'Zatvoriť hlavné menu' : 'Otvoriť hlavné menu'}
+            title={isMainMenuOpen ? 'Zatvoriť menu' : 'Otvoriť menu'}
+          >
+            {isMainMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
         </div>
 
         {(activeProfileTitle || activeProfileSubtitle || activeProfileType) && (
@@ -313,41 +321,49 @@ export default function MobileDashboardNavigation({
           </div>
         )}
 
-        {/* JAZYKOVÉ TLAČIDLÁ — PONECHANÉ */}
-        <div className="mb-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="flex min-w-max gap-2">
-            {dashboardLanguages.map((item) => {
-              const active = selectedLanguage === item.code;
+        {/* HLAVNÉ MENU — SKRYTÉ / ODKRYTÉ PO KLIKNUTÍ */}
+        {isMainMenuOpen ? (
+          <div className="mb-3 rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
+                Hlavné menu
+              </p>
 
-              return (
-                <button
-                  key={item.code}
-                  type="button"
-                  onClick={() => handleChangeLanguage(item.code)}
-                  className={`flex min-h-[40px] min-w-[74px] shrink-0 items-center justify-center gap-2 rounded-2xl border px-3 py-2 text-xs font-black transition active:scale-95 ${
-                    active
-                      ? 'border-cyan-300 bg-cyan-500 text-white shadow-lg shadow-cyan-950/40'
-                      : 'border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1] hover:text-white'
-                  }`}
-                  aria-pressed={active}
-                  title={item.label}
-                >
-                  <span
-                    className={`flex h-6 min-w-8 items-center justify-center rounded-xl px-2 text-[10px] font-black ${
-                      active
-                        ? 'bg-white/20 text-white'
-                        : 'bg-black/30 text-cyan-200'
-                    }`}
+              <button
+                type="button"
+                onClick={() => setIsMainMenuOpen(false)}
+                className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
+              >
+                Skryť
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {mobileMainMenuItems.map((item) => {
+                const Icon = item.icon;
+
+                return (
+                  <button
+                    key={`${item.href}-${item.label}`}
+                    type="button"
+                    onClick={() => handleNavigate(item.href)}
+                    className="flex min-h-[54px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-left text-white transition hover:border-violet-300/40 hover:bg-violet-600/20 active:scale-[0.98]"
                   >
-                    {item.short}
-                  </span>
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/30 text-violet-200">
+                      <Icon className="h-4 w-4" />
+                    </span>
 
-                  {active ? <Check className="h-3.5 w-3.5" /> : null}
-                </button>
-              );
-            })}
+                    <span className="min-w-0">
+                      <span className="block truncate text-xs font-black">
+                        {item.label}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        ) : null}
 
         {/* AI MODULY — VRCHNÁ POSÚVATEĽNÁ LIŠTA */}
         <div className="-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">

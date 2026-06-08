@@ -2181,7 +2181,7 @@ function MobileHeaderLanguageSelector({
   }
 
   return (
-    <div className="relative z-[95] ml-auto xl:hidden">
+    <div className="relative z-[95] xl:hidden">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -3209,6 +3209,23 @@ const mobileMenuItems = useMemo(
    Desktop ostáva nezmenený.
 ========================================================= */
 
+
+.zedpera-template .mobile-header-login {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  text-decoration: none !important;
+  white-space: nowrap !important;
+  pointer-events: auto !important;
+}
+
+.zedpera-template .mobile-header-menu-button,
+.zedpera-template .mobile-language-trigger,
+.zedpera-template .mobile-main-menu,
+.zedpera-template .mobile-main-menu *,
+.zedpera-template .mobile-menu-backdrop {
+  pointer-events: auto !important;
+}
+
 .zedpera-template .mobile-main-menu {
   position: fixed !important;
   left: 12px !important;
@@ -3277,6 +3294,8 @@ const mobileMenuItems = useMemo(
   color: #ffffff !important;
   -webkit-text-fill-color: #ffffff !important;
   text-decoration: none !important;
+  cursor: pointer !important;
+  touch-action: manipulation !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
 }
 
@@ -3326,6 +3345,8 @@ const mobileMenuItems = useMemo(
   padding: 9px 10px !important;
   color: #ffffff !important;
   -webkit-text-fill-color: #ffffff !important;
+  cursor: pointer !important;
+  touch-action: manipulation !important;
 }
 
 .zedpera-template .mobile-language-option-active {
@@ -3423,6 +3444,7 @@ const mobileMenuItems = useMemo(
             padding-right: 14px !important;
           }
 
+          .zedpera-template .mobile-header-login,
           .zedpera-template .mobile-header-menu-button,
           .zedpera-template .mobile-language-trigger {
             background: linear-gradient(180deg, #11172a 0%, #050711 100%) !important;
@@ -3506,6 +3528,8 @@ const mobileMenuItems = useMemo(
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
             text-decoration: none !important;
+            cursor: pointer !important;
+            touch-action: manipulation !important;
             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
           }
 
@@ -3682,6 +3706,14 @@ const mobileMenuItems = useMemo(
 
     {/* MOBILE HEADER ACTIONS */}
     <div className="ml-auto flex items-center gap-2 xl:hidden">
+      <Link
+        href="/login"
+        className="mobile-header-login inline-flex h-11 items-center justify-center rounded-xl border border-violet-400/30 bg-[#080816] px-3 text-[12px] font-black text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
+        aria-label={t.common.login}
+      >
+        {t.common.login}
+      </Link>
+
       <MobileHeaderLanguageSelector
         language={language}
         labels={t.common}

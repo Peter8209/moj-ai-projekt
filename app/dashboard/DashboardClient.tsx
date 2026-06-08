@@ -544,6 +544,140 @@ const moduleInfos: {
   },
 ];
 
+const fixedModuleUi: Record<
+  ModuleKey,
+  {
+    label: string;
+    shortLabel: string;
+    button: string;
+    inputLabel: string;
+    placeholder: string;
+    intro: string;
+    resultTitle: string;
+  }
+> = {
+  supervisor: {
+    label: 'AI školiteľ',
+    shortLabel: 'AI školiteľ',
+    button: 'Spustiť AI školiteľa',
+    inputLabel: 'Text alebo zadanie pre AI školiteľa',
+    placeholder:
+      'Vložte text práce, kapitolu, zadanie, otázku alebo časť, ktorú má AI školiteľ skontrolovať.',
+    intro:
+      'AI školiteľ skontroluje štruktúru, logiku, cieľ, metodológiu, argumentáciu a odbornú kvalitu práce.',
+    resultTitle: 'Výstup AI školiteľa',
+  },
+
+  quality: {
+    label: 'Audit kvality',
+    shortLabel: 'Audit kvality',
+    button: 'Spustiť audit kvality',
+    inputLabel: 'Text alebo zadanie pre audit kvality',
+    placeholder:
+      'Vložte text práce, kapitolu, úvod, záver alebo časť, ktorú chcete odborne skontrolovať.',
+    intro:
+      'Audit kvality overí štylistiku, logiku, citácie, nadväznosť kapitol, metodológiu a celkovú kvalitu textu.',
+    resultTitle: 'Výstup auditu kvality',
+  },
+
+  defense: {
+    label: 'Obhajoba',
+    shortLabel: 'Obhajoba',
+    button: 'Pripraviť obhajobu',
+    inputLabel: 'Text alebo podklady k obhajobe',
+    placeholder:
+      'Vložte text práce, abstrakt, záver, otázky komisie alebo požiadavky k obhajobe.',
+    intro:
+      'Obhajoba pripraví otázky, odpovede, osnovu prezentácie a podklady pre profesionálne vystúpenie.',
+    resultTitle: 'Výstup k obhajobe',
+  },
+
+  translation: {
+    label: 'Preklad',
+    shortLabel: 'Preklad',
+    button: 'Preložiť text',
+    inputLabel: 'Text na preklad',
+    placeholder:
+      'Vložte text, ktorý chcete preložiť do zvoleného cieľového jazyka.',
+    intro:
+      'Preklad preloží odborný text do zvoleného jazyka so zachovaním významu, štýlu a terminológie.',
+    resultTitle: 'Výstup prekladu',
+  },
+
+  data: {
+    label: 'Analýza dát',
+    shortLabel: 'Analýza dát',
+    button: 'Spustiť analýzu dát',
+    inputLabel: 'Zadanie k analýze dát',
+    placeholder:
+      'Popíšte, čo má systém spraviť s dátami. Napríklad frekvenčná analýza, deskriptívna štatistika, grafy, korelácie, testy a interpretácia.',
+    intro:
+      'Analýza dát pripraví tabuľky, grafy, testy, interpretáciu a odporúčania pre praktickú časť práce.',
+    resultTitle: 'Výsledky analýzy dát',
+  },
+
+  planning: {
+    label: 'Plánovanie',
+    shortLabel: 'Plánovanie',
+    button: 'Spustiť plánovanie',
+    inputLabel: 'Zadanie pre plánovanie',
+    placeholder:
+      'Napíšte termín odovzdania, aktuálny stav práce a požadovaný plán. Termín nesmie byť v minulosti.',
+    intro:
+      'Plánovanie rozdelí prácu na kroky, termíny a priority podľa dátumu odovzdania a aktuálneho stavu.',
+    resultTitle: 'Výstup plánovania',
+  },
+
+  emails: {
+    label: 'Emaily',
+    shortLabel: 'Emaily',
+    button: 'Vygenerovať email',
+    inputLabel: 'Zadanie pre email',
+    placeholder:
+      'Napíšte, komu má byť email určený a čo má obsahovať. Stačí stručne.',
+    intro:
+      'Emaily pripravia profesionálnu správu pre školiteľa, školu, vyučujúceho alebo konzultanta.',
+    resultTitle: 'Vygenerovaný email',
+  },
+
+  originality: {
+    label: 'Kontrola originality',
+    shortLabel: 'Originalita',
+    button: 'Spustiť kontrolu originality',
+    inputLabel: 'Text na kontrolu originality',
+    placeholder:
+      'Vložte alebo nahrajte text práce na orientačnú kontrolu originality.',
+    intro:
+      'Kontrola originality pripraví orientačný protokol rizikových alebo nedostatočne odcitovaných pasáží.',
+    resultTitle: 'Výstup kontroly originality',
+  },
+
+  humanizer: {
+    label: 'Humanizátor',
+    shortLabel: 'Humanizátor',
+    button: 'Spustiť humanizáciu textu',
+    inputLabel: 'Text na humanizáciu',
+    placeholder:
+      'Vložte text, ktorý chcete upraviť do prirodzenejšej, plynulejšej a menej strojovej podoby.',
+    intro:
+      'Humanizátor upraví text tak, aby pôsobil prirodzenejšie, plynulejšie a akademicky.',
+    resultTitle: 'Humanizovaný text',
+  },
+};
+
+const dashboardModuleOrder: ModuleKey[] = [
+  'supervisor',
+  'quality',
+  'defense',
+  'translation',
+  'data',
+  'planning',
+  'emails',
+  'humanizer',
+];
+
+
+
 // ================= HELPERS =================
 
 function getFileExtension(fileName: string) {

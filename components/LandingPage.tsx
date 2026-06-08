@@ -2602,6 +2602,31 @@ const mobileMenuItems = useMemo(
     applyLanguageToDocument(language);
   }, [language]);
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const originalOverflow = document.body.style.overflow;
+
+    if (mobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = originalOverflow;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMobileMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [mobileMenuOpen]);
+
   function handleLanguageChange(nextLanguage: AppLanguage) {
     const normalizedLanguage = normalizeLanguage(nextLanguage);
 
@@ -3376,6 +3401,213 @@ const mobileMenuItems = useMemo(
   }
 }
 
+
+        /* =========================================================
+           PROFESIONÁLNA MOBILNÁ VERZIA - FINÁLNE PREPÍSANIE
+           Jazyk je samostatné tlačidlo, menu je samostatné tlačidlo.
+           Všetky mobilné okná ostávajú čierne, čitateľné a klikateľné.
+        ========================================================= */
+        @media (max-width: 1279px) {
+          .zedpera-template header {
+            position: sticky !important;
+            top: 0 !important;
+            z-index: 120 !important;
+            background: rgba(0, 0, 0, 0.94) !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+            backdrop-filter: blur(22px) saturate(150%) !important;
+          }
+
+          .zedpera-template header > div {
+            height: 66px !important;
+            padding-left: 14px !important;
+            padding-right: 14px !important;
+          }
+
+          .zedpera-template .mobile-header-menu-button,
+          .zedpera-template .mobile-language-trigger {
+            background: linear-gradient(180deg, #11172a 0%, #050711 100%) !important;
+            border: 1px solid rgba(167, 139, 250, 0.24) !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42), 0 0 20px rgba(124, 58, 237, 0.16) !important;
+          }
+
+          .zedpera-template .mobile-menu-backdrop {
+            position: fixed !important;
+            inset: 66px 0 0 0 !important;
+            z-index: 105 !important;
+            display: block !important;
+            width: 100vw !important;
+            min-height: calc(100dvh - 66px) !important;
+            border: 0 !important;
+            background: rgba(0, 0, 0, 0.72) !important;
+            backdrop-filter: blur(10px) !important;
+          }
+
+          .zedpera-template .mobile-main-menu {
+            position: fixed !important;
+            left: 12px !important;
+            right: 12px !important;
+            top: 76px !important;
+            z-index: 115 !important;
+            max-height: calc(100dvh - 90px) !important;
+            overflow: hidden !important;
+            border-radius: 28px !important;
+            border: 1px solid rgba(167, 139, 250, 0.24) !important;
+            background: linear-gradient(180deg, rgba(9, 13, 28, 0.99) 0%, rgba(3, 5, 14, 0.99) 100%) !important;
+            box-shadow: 0 34px 120px rgba(0, 0, 0, 0.88), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+          }
+
+          .zedpera-template .mobile-main-menu-scroll {
+            max-height: calc(100dvh - 90px) !important;
+            overflow-y: auto !important;
+            padding: 14px !important;
+            overscroll-behavior: contain !important;
+          }
+
+          .zedpera-template .mobile-main-menu-section {
+            margin-bottom: 12px !important;
+            border-radius: 22px !important;
+            border: 1px solid rgba(255, 255, 255, 0.11) !important;
+            background: rgba(8, 13, 28, 0.92) !important;
+            padding: 13px !important;
+          }
+
+          .zedpera-template .mobile-main-menu-title {
+            display: flex !important;
+            align-items: center !important;
+            gap: 8px !important;
+            margin-bottom: 11px !important;
+            font-size: 11px !important;
+            font-weight: 950 !important;
+            letter-spacing: 0.18em !important;
+            text-transform: uppercase !important;
+            color: #ddd6fe !important;
+            -webkit-text-fill-color: #ddd6fe !important;
+          }
+
+          .zedpera-template .mobile-main-menu-grid,
+          .zedpera-template .mobile-language-grid {
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 10px !important;
+          }
+
+          .zedpera-template .mobile-main-menu-card,
+          .zedpera-template .mobile-language-option {
+            display: flex !important;
+            min-height: 56px !important;
+            align-items: center !important;
+            gap: 10px !important;
+            border-radius: 18px !important;
+            border: 1px solid rgba(255, 255, 255, 0.12) !important;
+            background: linear-gradient(180deg, #11172a 0%, #0a0f20 100%) !important;
+            padding: 10px 11px !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            text-decoration: none !important;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+          }
+
+          .zedpera-template .mobile-main-menu-card:hover,
+          .zedpera-template .mobile-language-option:hover {
+            border-color: rgba(167, 139, 250, 0.52) !important;
+            background: linear-gradient(180deg, #171f38 0%, #0d1328 100%) !important;
+          }
+
+          .zedpera-template .mobile-main-menu-icon {
+            display: flex !important;
+            height: 34px !important;
+            width: 34px !important;
+            flex-shrink: 0 !important;
+            align-items: center !important;
+            justify-content: center !important;
+            border-radius: 14px !important;
+            background: rgba(124, 58, 237, 0.25) !important;
+            color: #c4b5fd !important;
+            -webkit-text-fill-color: #c4b5fd !important;
+          }
+
+          .zedpera-template .mobile-main-menu-label,
+          .zedpera-template .mobile-language-label {
+            min-width: 0 !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            font-size: 13px !important;
+            font-weight: 950 !important;
+          }
+
+          .zedpera-template .mobile-language-option-active {
+            border-color: rgba(196, 181, 253, 0.84) !important;
+            background: linear-gradient(135deg, rgba(124, 58, 237, 0.72) 0%, rgba(37, 99, 235, 0.48) 100%) !important;
+            box-shadow: 0 0 0 1px rgba(196, 181, 253, 0.24), 0 16px 34px rgba(91, 33, 182, 0.28) !important;
+          }
+
+          .zedpera-template .mobile-main-menu-actions {
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+            gap: 10px !important;
+          }
+
+          .zedpera-template .mobile-main-menu-login,
+          .zedpera-template .mobile-main-menu-start {
+            min-height: 54px !important;
+            border-radius: 18px !important;
+            font-size: 14px !important;
+            font-weight: 950 !important;
+          }
+
+          .zedpera-template .mobile-main-menu-start {
+            background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%) !important;
+            box-shadow: 0 20px 48px rgba(91, 33, 182, 0.45) !important;
+          }
+
+          .zedpera-template section:first-of-type {
+            padding-top: 22px !important;
+          }
+
+          .zedpera-template section:first-of-type > div {
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+            gap: 28px !important;
+            min-height: auto !important;
+          }
+
+          .zedpera-template section:first-of-type h1 {
+            font-size: clamp(2.25rem, 10.5vw, 3.35rem) !important;
+            line-height: 1.02 !important;
+            letter-spacing: -0.055em !important;
+          }
+
+          .zedpera-template section:first-of-type p {
+            max-width: 100% !important;
+            font-size: 1rem !important;
+            line-height: 1.72 !important;
+          }
+
+          .zedpera-template section:first-of-type a[href='#pricing'],
+          .zedpera-template section:first-of-type a[href='#features'] {
+            width: 100% !important;
+            min-width: 0 !important;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .zedpera-template .mobile-main-menu-grid,
+          .zedpera-template .mobile-language-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .zedpera-template .mobile-main-menu {
+            left: 10px !important;
+            right: 10px !important;
+            border-radius: 24px !important;
+          }
+        }
+
       `}</style>
 
       <div
@@ -3450,30 +3682,19 @@ const mobileMenuItems = useMemo(
 
     {/* MOBILE HEADER ACTIONS */}
     <div className="ml-auto flex items-center gap-2 xl:hidden">
-      <button
-        type="button"
-        onClick={() => setMobileMenuOpen((value) => !value)}
-        className="inline-flex h-11 min-w-[84px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#080816] px-3 text-sm font-black text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
-        aria-label={t.common.switchLanguage}
-      >
-        <Languages className="h-4 w-4 text-violet-300" />
-
-        <span className={`language-chip language-${language}`}>
-          {languages.find((item) => item.code === language)?.short || 'SK'}
-        </span>
-
-        <ChevronDown
-          className={`h-4 w-4 text-slate-300 transition ${
-            mobileMenuOpen ? 'rotate-180' : ''
-          }`}
-        />
-      </button>
+      <MobileHeaderLanguageSelector
+        language={language}
+        labels={t.common}
+        onChange={handleLanguageChange}
+      />
 
       <button
         type="button"
         onClick={() => setMobileMenuOpen((value) => !value)}
-        className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-[#080816] text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
+        className="mobile-header-menu-button inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-[#080816] text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
         aria-label="Menu"
+        aria-expanded={mobileMenuOpen}
+        aria-controls="mobile-main-menu"
       >
         {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
       </button>
@@ -3482,8 +3703,16 @@ const mobileMenuItems = useMemo(
 
   {/* MOBILE OPEN MENU */}
   {mobileMenuOpen ? (
-    <div className="mobile-main-menu xl:hidden">
-      <div className="mobile-main-menu-scroll">
+    <>
+      <button
+        type="button"
+        className="mobile-menu-backdrop xl:hidden"
+        aria-label="Zavrieť mobilné menu"
+        onClick={() => setMobileMenuOpen(false)}
+      />
+
+      <div id="mobile-main-menu" className="mobile-main-menu xl:hidden">
+        <div className="mobile-main-menu-scroll">
         {/* HLAVNÉ MENU */}
         <section className="mobile-main-menu-section">
           <div className="mobile-main-menu-title">
@@ -3599,8 +3828,9 @@ const mobileMenuItems = useMemo(
             <ArrowRight className="h-4 w-4" />
           </a>
         </section>
+        </div>
       </div>
-    </div>
+    </>
   ) : null}
 </header>
 

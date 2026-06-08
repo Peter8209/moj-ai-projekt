@@ -517,6 +517,148 @@ const moduleInfos: {
   },
 ];
 
+
+type FixedModuleUi = {
+  label: string;
+  button: string;
+  inputLabel: string;
+  placeholder: string;
+  intro: string;
+  resultTitle: string;
+  cardTitle: string;
+  cardSubtitle: string;
+  cardDescription: string;
+};
+
+const fixedModuleUi: Record<ModuleKey, FixedModuleUi> = {
+  supervisor: {
+    label: 'AI školiteľ',
+    button: 'Spustiť AI školiteľa',
+    inputLabel: 'Text alebo zadanie pre AI školiteľa',
+    placeholder:
+      'Vložte text práce, kapitolu, zadanie, otázku alebo časť, ktorú má AI školiteľ skontrolovať.',
+    intro:
+      'AI školiteľ skontroluje štruktúru, logiku, cieľ, metodológiu, argumentáciu a odbornú kvalitu práce.',
+    resultTitle: 'Výstup AI školiteľa',
+    cardTitle: 'AI školiteľ',
+    cardSubtitle: 'Odborné vedenie práce',
+    cardDescription:
+      'Skontroluje zadanie, štruktúru, odborný štýl a navrhne konkrétne zlepšenia práce.',
+  },
+  quality: {
+    label: 'Audit kvality',
+    button: 'Spustiť audit kvality',
+    inputLabel: 'Text na audit kvality',
+    placeholder:
+      'Vložte text práce, kapitolu, úvod, záver alebo inú časť, ktorú chcete skontrolovať.',
+    intro:
+      'Audit kvality overí štylistiku, logiku, citácie, nadväznosť kapitol, metodológiu a celkovú kvalitu textu.',
+    resultTitle: 'Výstup auditu kvality',
+    cardTitle: 'Audit kvality',
+    cardSubtitle: 'Odborná kontrola textu',
+    cardDescription:
+      'Overí štylistiku, logiku, citácie, nadväznosť kapitol a pripraví jasnú správu kvality.',
+  },
+  defense: {
+    label: 'Obhajoba',
+    button: 'Pripraviť obhajobu',
+    inputLabel: 'Text alebo podklady k obhajobe',
+    placeholder:
+      'Vložte text práce, abstrakt, záver, otázky komisie alebo požiadavky k obhajobe.',
+    intro:
+      'Obhajoba pripraví otázky, odpovede, osnovu prezentácie a podklady pre profesionálne vystúpenie.',
+    resultTitle: 'Výstup k obhajobe',
+    cardTitle: 'Obhajoba',
+    cardSubtitle: 'Príprava na prezentáciu',
+    cardDescription:
+      'Vytvorí otázky, odpovede, osnovu obhajoby a podklady pre profesionálne vystúpenie.',
+  },
+  translation: {
+    label: 'Preklad',
+    button: 'Preložiť text',
+    inputLabel: 'Text na preklad',
+    placeholder:
+      'Vložte text, ktorý chcete preložiť do zvoleného cieľového jazyka.',
+    intro:
+      'Preklad preloží odborný text do zvoleného jazyka so zachovaním významu, štýlu a terminológie.',
+    resultTitle: 'Výstup prekladu',
+    cardTitle: 'Preklad',
+    cardSubtitle: 'Akademický preklad textu',
+    cardDescription:
+      'Preloží odborný text do zvoleného jazyka so zachovaním významu, štýlu a terminológie.',
+  },
+  data: {
+    label: 'Analýza dát',
+    button: 'Spustiť analýzu dát',
+    inputLabel: 'Zadanie k analýze dát',
+    placeholder:
+      'Popíšte, čo má systém spraviť s dátami. Napríklad frekvenčná analýza, deskriptívna štatistika, grafy, korelácie, testy a interpretácia.',
+    intro:
+      'Analýza dát pripraví tabuľky, grafy, testy, interpretáciu a odporúčania pre praktickú časť práce.',
+    resultTitle: 'Výsledky analýzy dát',
+    cardTitle: 'Analýza dát',
+    cardSubtitle: 'Štatistika a interpretácia',
+    cardDescription:
+      'Pripraví praktickú analýzu dát, tabuľky, grafy, testy a interpretáciu výsledkov do práce.',
+  },
+  planning: {
+    label: 'Plánovanie',
+    button: 'Spustiť plánovanie',
+    inputLabel: 'Zadanie pre plánovanie',
+    placeholder:
+      'Napíšte termín odovzdania, aktuálny stav práce a požadovaný plán. Termín nesmie byť v minulosti.',
+    intro:
+      'Plánovanie rozdelí prácu na kroky, termíny a priority podľa dátumu odovzdania a aktuálneho stavu.',
+    resultTitle: 'Výstup plánovania',
+    cardTitle: 'Plánovanie',
+    cardSubtitle: 'Časový plán práce',
+    cardDescription:
+      'Rozdelí prácu na kroky, termíny a priority podľa dátumu odovzdania a aktuálneho stavu.',
+  },
+  emails: {
+    label: 'Emaily',
+    button: 'Vygenerovať email',
+    inputLabel: 'Zadanie pre email',
+    placeholder:
+      'Napíšte, komu má byť email určený a čo má obsahovať. Stačí stručne.',
+    intro:
+      'Emaily pripravia profesionálnu správu pre školiteľa, školu, vyučujúceho alebo konzultanta.',
+    resultTitle: 'Vygenerovaný email',
+    cardTitle: 'Emaily',
+    cardSubtitle: 'Akademická komunikácia',
+    cardDescription:
+      'Vygeneruje profesionálny email vedúcemu, škole alebo konzultantovi v správnom tóne.',
+  },
+  originality: {
+    label: 'Kontrola originality',
+    button: 'Spustiť kontrolu originality',
+    inputLabel: 'Text na kontrolu originality',
+    placeholder:
+      'Vložte alebo nahrajte text práce na orientačnú kontrolu originality.',
+    intro:
+      'Kontrola originality pripraví orientačný protokol rizikových alebo nedostatočne odcitovaných pasáží.',
+    resultTitle: 'Výstup kontroly originality',
+    cardTitle: 'Kontrola originality',
+    cardSubtitle: 'Orientačná kontrola textu',
+    cardDescription:
+      'Vyhodnotí rizikové pasáže, navrhne úpravy a odporúčania na zníženie podobnosti.',
+  },
+  humanizer: {
+    label: 'Humanizátor',
+    button: 'Spustiť humanizáciu textu',
+    inputLabel: 'Text na humanizáciu',
+    placeholder:
+      'Vložte text, ktorý chcete upraviť do prirodzenejšej, plynulejšej a menej strojovej podoby.',
+    intro:
+      'Humanizátor upraví text tak, aby pôsobil prirodzenejšie, plynulejšie a akademicky.',
+    resultTitle: 'Humanizovaný text',
+    cardTitle: 'Humanizátor',
+    cardSubtitle: 'Prirodzenejší akademický text',
+    cardDescription:
+      'Prepíše text tak, aby pôsobil plynulo, prirodzene a menej strojovo bez zmeny významu.',
+  },
+};
+
 // ================= HELPERS =================
 
 function getFileExtension(fileName: string) {
@@ -1656,60 +1798,25 @@ const resultRef = useRef<HTMLDivElement | null>(null);
 const mobileToolPanelRef = useRef<HTMLDivElement | null>(null);
 
   const activeModuleInfo = useMemo(() => {
-  return (
-    moduleInfos.find((item) => item.key === activeModule) || moduleInfos[0]
-  );
-}, [activeModule]);
-const activeTranslationKey = activeModuleInfo.translationKey;
+    return (
+      moduleInfos.find((item) => item.key === activeModule) || moduleInfos[0]
+    );
+  }, [activeModule]);
 
-const activeModuleLabel =
-  t.dashboardTools.tools[activeTranslationKey];
+  const activeFixedUi = fixedModuleUi[activeModule];
 
-const activeModuleButtonLabel =
-  t.dashboardTools.buttons[activeTranslationKey];
+  const activeModuleLabel = activeFixedUi.label;
+  const activeModuleButtonLabel = activeFixedUi.button;
+  const activeModuleInputLabel = activeFixedUi.inputLabel;
+  const activeModulePlaceholder = activeFixedUi.placeholder;
+  const activeModuleResultTitle = activeFixedUi.resultTitle;
 
-const activeModuleInputLabel =
-  t.dashboardTools.inputLabels?.[activeTranslationKey] ||
-  t.dashboardTools.common.assignmentLabel;
-
-const activeModulePlaceholder =
-  t.dashboardTools.placeholders[activeTranslationKey];
-
-const activeModuleInfoText =
-  t.dashboardTools.infoTexts?.[activeTranslationKey] ||
-  t.dashboardTools.common.infoText;
-
-const activeModuleResultTitle =
-  t.dashboardTools.resultTitles?.[activeTranslationKey] ||
-  activeModuleLabel;
-
-const activeModuleCard =
-  t.dashboardTools.cards?.[activeTranslationKey];
-
-const activeModuleTexts =
-  t.dashboardTools.modules?.[activeTranslationKey];
-
-const activeModuleIntro =
-  activeModuleTexts?.intro || activeModuleInfoText;
-
-const activeModuleInputHelp =
-  activeModuleTexts?.inputHelp || activeModulePlaceholder;
-
-const activeModuleResultHelp =
-  activeModuleTexts?.resultHelp || '';
-
-const activeModuleEmptyState =
-  activeModuleTexts?.emptyState || 'Zatiaľ nie je vložený žiadny text.';
-
-const activeModuleCardTitle =
-  activeModuleCard?.title || activeModuleLabel;
-
-const activeModuleCardSubtitle =
-  activeModuleCard?.subtitle || 'AI nástroj';
-
-const activeModuleCardDescription =
-  activeModuleCard?.description || activeModuleIntro;
-
+  const activeModuleIntro = activeFixedUi.intro;
+  const activeModuleInputHelp = activeFixedUi.placeholder;
+  const activeModuleResultHelp = '';
+  const activeModuleCardTitle = activeFixedUi.cardTitle;
+  const activeModuleCardSubtitle = activeFixedUi.cardSubtitle;
+  const activeModuleCardDescription = activeFixedUi.cardDescription;
 
 const exportTitle = useMemo(() => {
   return `${activeModuleLabel} - ${
@@ -3676,7 +3783,7 @@ const downloadExcel = () => {
                 : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
             }`}
           >
-            {t.dashboardTools.tools[item.translationKey]}
+            {fixedModuleUi[item.key].label}
           </button>
         );
       })}
@@ -3747,31 +3854,7 @@ const downloadExcel = () => {
   data-mobile-tool-panel="true"
   className="scroll-mt-32 rounded-[28px] border border-white/10 bg-[#070a16] p-5 shadow-2xl shadow-black/30"
 >
-  <div className="mb-5 rounded-2xl border border-violet-400/20 bg-violet-500/10 p-4">
-    <div className="flex items-start justify-between gap-4">
-      <div className="min-w-0">
-        <p className="text-xs font-black uppercase tracking-[0.25em] text-violet-300">
-          {activeModuleCardSubtitle}
-        </p>
 
-        <h1 className="mt-2 text-2xl font-black text-white">
-          {activeModuleCardTitle}
-        </h1>
-
-        <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">
-          {activeModuleCardDescription}
-        </p>
-      </div>
-
-      <button
-        type="button"
-        onClick={resetCurrentModule}
-        className="shrink-0 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-white hover:bg-white/[0.1]"
-      >
-        Vymazať
-      </button>
-    </div>
-  </div>
 
   {activeProfile && (
     <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.04] p-4">

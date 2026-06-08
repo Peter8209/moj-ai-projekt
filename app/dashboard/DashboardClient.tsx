@@ -20,7 +20,6 @@ import {
   GraduationCap,
   Languages,
   Mail,
-  Menu,
   Mic,
   Paintbrush,
   Paperclip,
@@ -247,32 +246,6 @@ function createLanguageSelectOptions(
   ];
 }
 
-function createTranslationStyleOptions(
-  selectorTranslations: DashboardSelectorTranslations,
-): Array<ClickableChoice<TranslationStyle>> {
-  return [
-    {
-      value: 'academic',
-      label: selectorTranslations.translationStyles.academic,
-      description: 'Odborný štýl pre akademické práce',
-    },
-    {
-      value: 'formal',
-      label: selectorTranslations.translationStyles.formal,
-      description: 'Oficiálny a profesionálny štýl',
-    },
-    {
-      value: 'natural',
-      label: selectorTranslations.translationStyles.natural,
-      description: 'Plynulý a prirodzený jazyk',
-    },
-    {
-      value: 'simple',
-      label: selectorTranslations.translationStyles.simple,
-      description: 'Jednoduchý a zrozumiteľný text',
-    },
-  ];
-}
 
 function createEmailTypeOptions(
   selectorTranslations: DashboardSelectorTranslations,
@@ -1651,8 +1624,6 @@ export default function DashboardPage() {
   const { t } = useLanguage();
 
   const [activeModule, setActiveModule] = useState<ModuleKey>('supervisor');
-const [mobileModuleMenuOpen, setMobileModuleMenuOpen] = useState(false);
-const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   const [input, setInput] = useState('');
@@ -1669,12 +1640,13 @@ const [activeAttachmentText, setActiveAttachmentText] = useState('');
   const [analysisResult, setAnalysisResult] =
     useState<AnalysisResult | null>(null);
 
-  const [qualityMode, setQualityMode] = useState('style');
-  const [outputMode, setOutputMode] = useState('detailed');
-  const [translationFrom, setTranslationFrom] = useState<LanguageCode>('sk');
+  type QualityMode = 'style' | 'citations' | 'logic' | 'full';
+
+const [qualityMode] = useState<QualityMode>('full');
+const translationStyle: TranslationStyle = 'academic';
+
+const [translationFrom, setTranslationFrom] = useState<LanguageCode>('sk');
 const [translationTo, setTranslationTo] = useState<LanguageCode>('hu');
-const [translationStyle, setTranslationStyle] =
-  useState<TranslationStyle>('academic');
 
 const [emailType, setEmailType] = useState<EmailType>('supervisor');
 const [emailTone, setEmailTone] = useState<EmailTone>('professional');
@@ -1750,8 +1722,6 @@ const selectorTranslations = getDashboardSelectorTranslations(t);
 
 const languageSelectOptions = createLanguageSelectOptions(selectorTranslations);
 
-const translationStyleOptions =
-  createTranslationStyleOptions(selectorTranslations);
 
 const emailTypeOptions = createEmailTypeOptions(selectorTranslations);
 
@@ -1765,13 +1735,6 @@ const getLanguageLabel = (value: LanguageCode): string => {
   return option?.label ?? value;
 };
 
-const getTranslationStyleLabel = (value: TranslationStyle): string => {
-  const option = translationStyleOptions.find(
-    (styleOption) => styleOption.value === value,
-  );
-
-  return option?.label ?? value;
-};
 
 const getEmailTypeLabel = (value: EmailType): string => {
   const option = emailTypeOptions.find(
@@ -2305,7 +2268,7 @@ Prelož text akademicky, prirodzene a presne.
 
 Zo jazyka: ${getLanguageLabel(translationFrom)}
 Do jazyka: ${getLanguageLabel(translationTo)}
-Štýl prekladu: ${getTranslationStyleLabel(translationStyle)}
+Štýl prekladu: akademický
 
 TEXT NA PREKLAD:
 ${input}
@@ -2432,7 +2395,6 @@ Text emailu:
 
 const selectDashboardModule = useCallback((moduleKey: ModuleKey) => {
   setActiveModule(moduleKey);
-  setMobileMenuOpen(false);
 
   window.setTimeout(() => {
     mobileToolPanelRef.current?.scrollIntoView({
@@ -3772,338 +3734,17 @@ const downloadExcel = () => {
         selectDashboardModule(moduleKey as ModuleKey)
       }
       onNavigate={(path) => {
-        setMobileMenuOpen(false);
-        setMobileModuleMenuOpen(false);
         router.push(path);
       }}
     />
   </div>
 </header>
 
-{activeModule === 'planning' && (
-
-                  <div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                    Dnešný dátum: {getTodaySkDate()}.
-                  </div>
-                )}
-
-          
-{activeModule === 'translation' && (
-  <div className="mb-5 rounded-3xl border border-sky-400/20 bg-sky-500/10 p-4">
-    <div className="mb-4 flex items-center gap-2">
-      <Languages className="h-5 w-5 text-sky-200" />
-      <h3 className="text-lg font-black text-white">
-        {activeModuleLabel}
-      </h3>
-    </div>
-
-    <div className="grid grid-cols-1 gap-5">
-  <ClickableOptionGroup<LanguageCode>
-    label={selectorTranslations.translationFrom || 'Source language'}
-    value={translationFrom}
-    options={languageSelectOptions}
-    onChange={setTranslationFrom}
-  />
-
-  <ClickableOptionGroup<LanguageCode>
-    label={selectorTranslations.translationTo || 'Target language'}
-    value={translationTo}
-    options={languageSelectOptions}
-    onChange={setTranslationTo}
-  />
-
-  <ClickableOptionGroup<TranslationStyle>
-    label={selectorTranslations.translationStyle || 'Translation style'}
-    value={translationStyle}
-    options={translationStyleOptions}
-    onChange={setTranslationStyle}
-  />
-</div>
-
-  </div>
-)}
-
-{activeModule === 'emails' && (
-  <div className="mb-5 rounded-3xl border border-pink-400/20 bg-pink-500/10 p-4">
-    <div className="mb-4 flex items-center gap-2">
-      <Mail className="h-5 w-5 text-pink-200" />
-      <h3 className="text-lg font-black text-white">
-        {activeModuleLabel}
-      </h3>
-    </div>
-
-   <div className="grid grid-cols-1 gap-5">
-  <ClickableOptionGroup<EmailType>
-    label={selectorTranslations.emailType || 'Email type'}
-    value={emailType}
-    options={emailTypeOptions}
-    onChange={setEmailType}
-  />
-
-  <ClickableOptionGroup<EmailTone>
-    label={selectorTranslations.emailTone || 'Email tone'}
-    value={emailTone}
-    options={emailToneOptions}
-    onChange={setEmailTone}
-  />
-</div>
-  </div>
-)}
-
-<div className={String(activeModuleInfo.infoClassName)}>
-  {activeModuleIntro}
-</div>
-
-                {(activeModule === 'supervisor' ||
-                  activeModule === 'quality' ||
-                  activeModule === 'defense' ||
-                  activeModule === 'data' ||
-                  activeModule === 'originality') && (
-                  <FileUploadBox
-                    files={attachedFiles}
-                    fileInputRef={fileInputRef}
-                    onFiles={handleFiles}
-                    onRemove={removeFile}
-                  />
-                )}
-
-<div className="mt-4">
-  <label className="mb-2 block text-sm font-black text-slate-800 dark:text-slate-300">
-    {activeModuleInputLabel}
-  </label>
-
-  <p className="mb-3 text-xs font-semibold leading-5 text-slate-400">
-    {activeModuleInputHelp}
-  </p>
-
-  <textarea
-    value={input}
-    onChange={(event) => setInput(event.target.value)}
-    placeholder={activeModulePlaceholder}
-    className="min-h-[190px] w-full resize-y rounded-2xl border border-slate-300 bg-white px-4 py-4 text-sm leading-7 text-slate-950 outline-none placeholder:text-slate-400 transition-colors duration-300 focus:border-violet-500 dark:border-white/10 dark:bg-white/[0.055] dark:text-white dark:placeholder:text-slate-500"
-  />
-
-{activeModule === 'data' && (
-  <p className="mt-2 text-xs text-slate-400">
-    Môžete priložiť Excel, CSV, PDF, Word, TXT alebo výstupy z JASP/SPSS. Po spracovaní sa otvorí samostatné okno s výsledkami analýzy, tabuľkami, premennými, grafmi a odporúčanými testami.
-  </p>
-)}
-
-                <div className="mt-6 grid gap-3 pb-6 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center">
-                  {activeModule === 'supervisor' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
-  >
-{isLoading ? (
-  <>
-    <RefreshCcw className="h-4 w-4 animate-spin" />
-    Spracúvam...
-  </>
-) : (
-  <>
-    <Send className="h-4 w-4" />
-    {activeModuleButtonLabel}
-  </>
-)}
-</button>
-)}
-
-{activeModule === 'quality' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť audit kvality
-      </>
-    )}
-  </button>
-)}
-
-{activeModule === 'defense' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl border border-violet-300 bg-violet-700 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/40 ring-2 ring-violet-400/40 transition hover:bg-violet-600 hover:ring-violet-300/70 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-60 disabled:shadow-none disabled:ring-0"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Generujem obhajobu...
-      </>
-    ) : (
-      <>
-        <Presentation className="h-4 w-4" />
-        Vygenerovať sprievodný text prezentácie
-      </>
-    )}
-  </button>
-)}
-
-
-{activeModule === 'data' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť analýzu dát
-      </>
-    )}
-  </button>
-)}
-
-{activeModule === 'planning' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť plánovanie
-      </>
-    )}
-  </button>
-)}
-
-{activeModule === 'emails' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť email
-      </>
-    )}
-  </button>
-)}
-
-{activeModule === 'originality' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť kontrolu originality
-      </>
-    )}
-  </button>
-)}
-
-{activeModule === 'humanizer' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť humanizáciu textu
-      </>
-    )}
-  </button>
-)}
-
-                  <button
-                    type="button"
-                    onClick={startDictation}
-                    className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-black transition ${
-                      isListening
-                        ? 'border-red-400/50 bg-red-500 text-white'
-                        : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1]'
-                    }`}
-                  >
-                    <Mic className="h-4 w-4" />
-                    Diktovať
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setCanvasOpen(true)}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 hover:bg-white/[0.1]"
-                  >
-                    <Paintbrush className="h-4 w-4" />
-                    Canvas
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={resetCurrentModule}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm font-black text-red-200 hover:bg-red-500/20"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Vyčistiť
-                  </button>
-
-                 {activeModule === 'data' && analysisResult && (
-  <button
-    type="button"
-    onClick={() => setAnalysisModalOpen(true)}
-    className="inline-flex items-center gap-2 rounded-2xl border border-blue-400/30 bg-blue-500/10 px-4 py-3 text-sm font-black text-blue-100 hover:bg-blue-500/20"
-  >
-    <Search className="h-4 w-4" />
-    Otvoriť výsledky analýzy
-  </button>
-)}
-                </div>
-              </div>
 <section
+  id="dashboard-tool-panel"
   ref={mobileToolPanelRef}
+  data-dashboard-tool-panel="true"
+  data-mobile-tool-panel="true"
   className="scroll-mt-32 rounded-[28px] border border-white/10 bg-[#070a16] p-5 shadow-2xl shadow-black/30"
 >
   <div className="mb-5 rounded-2xl border border-violet-400/20 bg-violet-500/10 p-4">
@@ -4172,13 +3813,6 @@ const downloadExcel = () => {
           value={translationTo}
           options={languageSelectOptions}
           onChange={setTranslationTo}
-        />
-
-        <ClickableOptionGroup<TranslationStyle>
-          label={selectorTranslations.translationStyle || 'Translation style'}
-          value={translationStyle}
-          options={translationStyleOptions}
-          onChange={setTranslationStyle}
         />
       </div>
     </div>

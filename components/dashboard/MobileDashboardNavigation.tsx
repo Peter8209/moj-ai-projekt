@@ -45,6 +45,7 @@ function normalizeModuleLabel(label: string) {
   return value
     .replace(/AI\s*supervisor/gi, 'AI školiteľ')
     .replace(/AI\s*supervízor/gi, 'AI školiteľ')
+    .replace(/AI\s*supervizor/gi, 'AI školiteľ')
     .replace(/AI\s*vedúci/gi, 'AI školiteľ')
     .replace(/AI\s*veduci/gi, 'AI školiteľ')
     .replace(/Originalita/gi, 'Kontrola originality');
@@ -198,8 +199,6 @@ function getBottomNavItems(onNavigate: (path: string) => void) {
 
 export default function MobileDashboardNavigation({
   activeModule,
-  activeModuleLabel,
-  activeModuleSubtitle,
   activeProfileTitle,
   activeProfileType,
   moduleInfos,
@@ -207,10 +206,6 @@ export default function MobileDashboardNavigation({
   onSelectModule,
   onNavigate,
 }: MobileDashboardNavigationProps) {
-  const cleanActiveModuleLabel = useMemo(() => {
-    return normalizeModuleLabel(activeModuleLabel);
-  }, [activeModuleLabel]);
-
   const visibleModules = useMemo(() => {
     return moduleInfos.filter((item) => item.key !== 'originality');
   }, [moduleInfos]);
@@ -223,7 +218,8 @@ export default function MobileDashboardNavigation({
     window.setTimeout(() => {
       const dashboardPanel =
         document.getElementById('dashboard-tool-panel') ||
-        document.querySelector('[data-dashboard-tool-panel="true"]');
+        document.querySelector('[data-dashboard-tool-panel="true"]') ||
+        document.querySelector('[data-mobile-tool-panel="true"]');
 
       dashboardPanel?.scrollIntoView({
         behavior: 'smooth',
@@ -239,7 +235,7 @@ export default function MobileDashboardNavigation({
 
   return (
     <>
-      {/* VRCHNÁ MOBILNÁ LIŠTA AI MODULOV */}
+      {/* HORNÁ MOBILNÁ LIŠTA: IBA AI NÁSTROJE */}
       <section className="sticky top-0 z-40 -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-3 pt-3 shadow-2xl shadow-black/40 backdrop-blur-xl xl:hidden">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="min-w-0">
@@ -247,15 +243,15 @@ export default function MobileDashboardNavigation({
               AI nástroje
             </p>
 
-            <h2 className="mt-1 line-clamp-1 text-lg font-black leading-tight text-white">
-              {cleanActiveModuleLabel}
-            </h2>
-
             <p className="mt-1 line-clamp-1 text-xs font-semibold text-slate-400">
-              {activeModuleSubtitle ||
-                activeProfileTitle ||
-                'Vyberte AI modul a pokračujte v práci'}
+              {activeProfileTitle || 'Vyberte AI modul a pokračujte v práci'}
             </p>
+
+            {activeProfileType ? (
+              <p className="mt-1 line-clamp-1 text-[11px] font-bold text-slate-500">
+                {activeProfileType}
+              </p>
+            ) : null}
           </div>
 
           <button
@@ -267,14 +263,6 @@ export default function MobileDashboardNavigation({
             <User className="h-5 w-5" />
           </button>
         </div>
-
-        {activeProfileType ? (
-          <div className="mb-3 rounded-2xl border border-white/10 bg-black/25 px-3 py-2">
-            <p className="line-clamp-1 text-[11px] font-bold text-slate-300">
-              {activeProfileType}
-            </p>
-          </div>
-        ) : null}
 
         <div className="-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex min-w-max gap-2">
@@ -336,7 +324,7 @@ export default function MobileDashboardNavigation({
         </div>
       </section>
 
-      {/* SPODNÁ MOBILNÁ LIŠTA HLAVNÝCH SEKCII APLIKÁCIE */}
+      {/* SPODNÁ MOBILNÁ LIŠTA: HLAVNÝ PREHĽAD APLIKÁCIE */}
       <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#020617]/95 px-3 pb-[calc(env(safe-area-inset-bottom)+0.55rem)] pt-2 text-white shadow-2xl shadow-black/70 backdrop-blur-xl xl:hidden">
         <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex min-w-max gap-2">

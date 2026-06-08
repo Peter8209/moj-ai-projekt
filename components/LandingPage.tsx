@@ -2117,8 +2117,8 @@ function MobileLanguageDropdown({
   onClose?: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.035] p-2">
-      <div className="mb-2 flex items-center gap-2 px-2 text-xs font-black uppercase tracking-[0.16em] text-white">
+    <div className="rounded-2xl border border-white/10 bg-[#080d1c] p-3">
+      <div className="mb-3 flex items-center gap-2 px-1 text-[11px] font-black uppercase tracking-[0.20em] text-slate-300">
         <Languages size={15} className="text-violet-300" />
         {labels.language}
       </div>
@@ -2135,16 +2135,25 @@ function MobileLanguageDropdown({
                 onChange(item.code);
                 onClose?.();
               }}
-              className={`rounded-lg px-3 py-3 text-sm font-black ${
+              className={`flex min-h-[48px] items-center gap-3 rounded-xl border px-3 py-2 text-left text-sm font-black transition ${
                 active
-                  ? 'bg-violet-700 text-white'
-                  : 'bg-white/5 text-white'
+                  ? 'border-violet-400 bg-violet-600 text-white shadow-lg shadow-violet-950/40'
+                  : 'border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]'
               }`}
             >
-              <span className={`language-chip language-${item.code} mr-2`}>
+              <span
+                className={`flex h-8 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-black ${
+                  active
+                    ? 'bg-white/20 text-white'
+                    : 'bg-slate-800 text-slate-200'
+                }`}
+              >
                 {item.short}
               </span>
-              {item.label}
+
+              <span className="min-w-0 truncate">
+                {item.label}
+              </span>
             </button>
           );
         })}
@@ -3209,48 +3218,79 @@ export default function LandingPage() {
           </div>
 
           {mobileMenuOpen ? (
-            <div className="border-t border-white/10 bg-black px-5 py-4 xl:hidden">
-              <div className="grid gap-2">
-                {navItems.map((item) => {
-                  const Icon = item.icon;
+  <div className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+1rem)] top-[72px] z-[9999] overflow-hidden rounded-3xl border border-white/10 bg-[#050711] shadow-2xl shadow-black/80 xl:hidden">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center justify-between border-b border-white/10 bg-[#050711] px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-violet-600 text-sm font-black text-white">
+            Z
+          </div>
 
-                  return (
-                    <a
-                      key={item.href}
-                      href={item.href}
-                      onClick={(event) => {
-                        setMobileMenuOpen(false);
+          <div>
+            <p className="text-sm font-black text-white">Zedpera</p>
+            <p className="text-[11px] font-bold text-slate-400">
+              {t.common.language}
+            </p>
+          </div>
+        </div>
 
-                        if (item.href.startsWith('#')) {
-                          event.preventDefault();
-                          scrollToHash(item.href);
-                        }
-                      }}
-                      className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-black text-white hover:bg-white/5"
-                    >
-                      <Icon size={17} className="text-violet-300" />
-                      {item.label}
-                    </a>
-                  );
-                })}
+        <button
+          type="button"
+          onClick={() => setMobileMenuOpen(false)}
+          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white"
+          aria-label="Zatvoriť menu"
+        >
+          <X size={20} />
+        </button>
+      </div>
 
-                <MobileLanguageDropdown
-                  language={language}
-                  labels={t.common}
-                  onChange={handleLanguageChange}
-                  onClose={() => setMobileMenuOpen(false)}
-                />
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 pb-6">
+        <div className="grid gap-2">
+          {navItems.map((item) => {
+            const Icon = item.icon;
 
-                <Link
-                  href="/login"
-                  className="mt-2 rounded-xl border border-white/15 px-4 py-3 text-center text-sm font-black text-white"
-                >
-                  {t.common.login}
-                </Link>
+            return (
+              <a
+                key={item.href}
+                href={item.href}
+                onClick={(event) => {
+                  setMobileMenuOpen(false);
 
-              </div>
-            </div>
-          ) : null}
+                  if (item.href.startsWith('#')) {
+                    event.preventDefault();
+                    scrollToHash(item.href);
+                  }
+                }}
+                className="flex min-h-[50px] items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-black text-white hover:bg-white/[0.08]"
+              >
+                <Icon size={17} className="shrink-0 text-violet-300" />
+                <span className="min-w-0 truncate">{item.label}</span>
+              </a>
+            );
+          })}
+
+          <MobileLanguageDropdown
+            language={language}
+            labels={t.common}
+            onChange={handleLanguageChange}
+            onClose={() => setMobileMenuOpen(false)}
+          />
+        </div>
+      </div>
+
+      <div className="shrink-0 border-t border-white/10 bg-[#050711] p-3">
+        <Link
+          href="/login"
+          onClick={() => setMobileMenuOpen(false)}
+          className="flex min-h-[52px] items-center justify-center rounded-xl border border-white/10 bg-white/[0.05] px-4 py-3 text-center text-sm font-black text-white hover:bg-white/[0.08]"
+        >
+          {t.common.login}
+        </Link>
+      </div>
+    </div>
+  </div>
+) : null}
+
         </header>
 
         <section className="relative z-10 mx-auto max-w-[1860px] px-5 pb-8 pt-8 lg:px-10">

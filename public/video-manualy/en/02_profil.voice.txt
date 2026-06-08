@@ -1,1 +1,9 @@
-The user profile in Zedpera is used to manage basic account information, client details, and subscription settings. After opening the profile section, check your name, email address, and client information. You can also review your active package, available services, and the tools included in your plan.
+Zedpera video guide: User profile.
+
+This is an English Zedpera video guide. We will show the main workflow, system navigation, and practical use of this feature step by step.
+
+Tento navod je pripraveny v jazyku: EN.
+
+Najprv si pozorne pozrite obrazovku a nasledne vykonajte jednotlive kroky priamo v aplikacii.
+
+Po skonceni videa odporucame otvorit dashboard Zedpera a vyskusat si danu funkciu na vlastnom projekte.

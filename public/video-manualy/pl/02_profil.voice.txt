@@ -1,1 +1,9 @@
-Profil uĹĽytkownika w aplikacji Zedpera sĹ‚uĹĽy do zarzÄ…dzania podstawowymi danymi konta, danymi klienta oraz informacjami o pakiecie. Po otwarciu profilu sprawdĹş imiÄ™, adres e-mail oraz dane klienta. MoĹĽesz rĂłwnieĹĽ sprawdziÄ‡ aktywny pakiet i dostÄ™pne usĹ‚ugi.
+Instrukcja wideo Zedpera: Profil uzytkownika.
+
+To jest polska instrukcja wideo aplikacji Zedpera. Pokazemy glowny przebieg pracy, nawigacje w systemie oraz praktyczne uzycie tej funkcji krok po kroku.
+
+Tento navod je pripraveny v jazyku: PL.
+
+Najprv si pozorne pozrite obrazovku a nasledne vykonajte jednotlive kroky priamo v aplikacii.
+
+Po skonceni videa odporucame otvorit dashboard Zedpera a vyskusat si danu funkciu na vlastnom projekte.

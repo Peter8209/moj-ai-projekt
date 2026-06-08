@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
@@ -53,6 +53,8 @@ const pageCopy = {
     botName: 'Zedpera Bot',
     botDescription: 'vedie používateľa krok za krokom',
     allCategories: 'Všetko',
+    categoryLabel: 'Kategória',
+    languageLabel: 'Jazyk videa',
   },
   cs: {
     menu: 'Menu',
@@ -83,6 +85,8 @@ const pageCopy = {
     botName: 'Zedpera Bot',
     botDescription: 'vede uživatele krok za krokem',
     allCategories: 'Vše',
+    categoryLabel: 'Kategorie',
+    languageLabel: 'Jazyk videa',
   },
   en: {
     menu: 'Menu',
@@ -113,6 +117,8 @@ const pageCopy = {
     botName: 'Zedpera Bot',
     botDescription: 'guides the user step by step',
     allCategories: 'All',
+    categoryLabel: 'Category',
+    languageLabel: 'Video language',
   },
   de: {
     menu: 'Menü',
@@ -143,6 +149,8 @@ const pageCopy = {
     botName: 'Zedpera Bot',
     botDescription: 'führt den Benutzer Schritt für Schritt',
     allCategories: 'Alles',
+    categoryLabel: 'Kategorie',
+    languageLabel: 'Videosprache',
   },
   pl: {
     menu: 'Menu',
@@ -173,6 +181,8 @@ const pageCopy = {
     botName: 'Zedpera Bot',
     botDescription: 'prowadzi użytkownika krok po kroku',
     allCategories: 'Wszystko',
+    categoryLabel: 'Kategoria',
+    languageLabel: 'Język wideo',
   },
   hu: {
     menu: 'Menü',
@@ -203,24 +213,72 @@ const pageCopy = {
     botName: 'Zedpera Bot',
     botDescription: 'lépésről lépésre vezeti a felhasználót',
     allCategories: 'Összes',
+    categoryLabel: 'Kategória',
+    languageLabel: 'Videó nyelve',
   },
 };
 
 type PageLanguage = keyof typeof pageCopy;
 
+const supportedPageLanguages: PageLanguage[] = [
+  'sk',
+  'cs',
+  'en',
+  'de',
+  'pl',
+  'hu',
+];
+
+function normalizePageLanguage(value: unknown): PageLanguage {
+  return supportedPageLanguages.includes(value as PageLanguage)
+    ? (value as PageLanguage)
+    : 'sk';
+}
+
+function getSubtitleUrl(videoUrl: string) {
+  if (!videoUrl) return '';
+
+  return videoUrl.replace(/\.mp4($|\?)/i, '.srt$1');
+}
+
 export default function VideoNavodPage() {
   const router = useRouter();
   const { language } = useLanguage();
 
-  const copy = pageCopy[(language as PageLanguage) || 'sk'] || pageCopy.sk;
+  const pageLanguage = normalizePageLanguage(language);
+  const copy = pageCopy[pageLanguage];
 
   const topRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  const localizedVideos = useMemo(
-    () => getLocalizedVisibleVideoManuals(language),
-    [language],
-  );
+  const localizedVideos = useMemo(() => {
+    return getLocalizedVisibleVideoManuals(pageLanguage);
+  }, [pageLanguage]);
+
+  const [selectedVideoId, setSelectedVideoId] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState(copy.allCategories);
+  const [search, setSearch] = useState('');
+  const [videoError, setVideoError] = useState(false);
+
+  useEffect(() => {
+    setSelectedCategory(copy.allCategories);
+    setSearch('');
+    setVideoError(false);
+
+    setSelectedVideoId((currentSlug) => {
+      const currentExists = localizedVideos.some(
+        (video) => video.slug === currentSlug,
+      );
+
+      if (currentExists) return currentSlug;
+
+      return localizedVideos[0]?.slug || '';
+    });
+  }, [copy.allCategories, localizedVideos]);
+
+  const selectedVideo =
+    localizedVideos.find((video) => video.slug === selectedVideoId) ||
+    localizedVideos[0];
 
   const categories = useMemo(() => {
     return [
@@ -228,17 +286,6 @@ export default function VideoNavodPage() {
       ...Array.from(new Set(localizedVideos.map((item) => item.category))),
     ];
   }, [copy.allCategories, localizedVideos]);
-
-  const [selectedVideoId, setSelectedVideoId] = useState<string>(
-    localizedVideos[0]?.slug || '',
-  );
-  const [selectedCategory, setSelectedCategory] = useState(copy.allCategories);
-  const [search, setSearch] = useState('');
-  const [videoError, setVideoError] = useState(false);
-
-  const selectedVideo =
-    localizedVideos.find((video) => video.slug === selectedVideoId) ||
-    localizedVideos[0];
 
   const filteredVideos = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -250,12 +297,7 @@ export default function VideoNavodPage() {
 
       const matchesSearch =
         !q ||
-        [
-          item.title,
-          item.category,
-          item.description,
-          ...item.steps,
-        ]
+        [item.title, item.category, item.description, ...item.steps]
           .join(' ')
           .toLowerCase()
           .includes(q);
@@ -281,7 +323,7 @@ export default function VideoNavodPage() {
       if (videoRef.current) {
         videoRef.current.currentTime = 0;
         videoRef.current.play().catch(() => {
-          // Autoplay môže byť blokovaný prehliadačom.
+          // Prehliadač môže blokovať automatické prehrávanie.
         });
       }
     }, 120);
@@ -292,10 +334,11 @@ export default function VideoNavodPage() {
       <main className="flex min-h-dvh items-center justify-center bg-[#020617] px-4 text-white">
         <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8 text-center">
           <p className="text-lg font-black">{copy.noResults}</p>
+
           <button
             type="button"
             onClick={goToMenu}
-            className="mt-5 rounded-2xl bg-purple-600 px-5 py-3 text-sm font-black text-white"
+            className="mt-5 rounded-2xl bg-purple-600 px-5 py-3 text-sm font-black text-white transition hover:bg-purple-500"
           >
             {copy.backToMenu}
           </button>
@@ -366,6 +409,16 @@ export default function VideoNavodPage() {
                 <p className="mt-1 text-sm font-semibold text-slate-300">
                   {selectedVideo.description}
                 </p>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="rounded-full border border-purple-400/30 bg-purple-500/10 px-3 py-1 text-xs font-black text-purple-100">
+                    {copy.categoryLabel}: {selectedVideo.category}
+                  </span>
+
+                  <span className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-xs font-black text-cyan-100">
+                    {copy.languageLabel}: {pageLanguage.toUpperCase()}
+                  </span>
+                </div>
               </div>
 
               <div className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-black/30 px-4 py-2 text-sm font-black text-slate-200">
@@ -379,6 +432,7 @@ export default function VideoNavodPage() {
               videoRef={videoRef}
               videoError={videoError}
               copy={copy}
+              pageLanguage={pageLanguage}
               onVideoLoaded={() => setVideoError(false)}
               onVideoError={() => setVideoError(true)}
             />
@@ -498,7 +552,13 @@ export default function VideoNavodPage() {
 
             <button
               type="button"
-              onClick={() => playVideo(localizedVideos[0])}
+              onClick={() => {
+                const firstVideo = localizedVideos[0];
+
+                if (firstVideo) {
+                  playVideo(firstVideo);
+                }
+              }}
               className="inline-flex items-center justify-center gap-2 rounded-2xl bg-purple-600 px-6 py-4 text-sm font-black text-white transition hover:bg-purple-500"
             >
               <Home size={18} />
@@ -516,22 +576,26 @@ function ProfessionalVideoPlayer({
   videoRef,
   videoError,
   copy,
+  pageLanguage,
   onVideoLoaded,
   onVideoError,
 }: {
   video: LocalizedVideoManual;
   videoRef: RefObject<HTMLVideoElement | null>;
   videoError: boolean;
-  copy: (typeof pageCopy)['sk'];
+  copy: (typeof pageCopy)[PageLanguage];
+  pageLanguage: PageLanguage;
   onVideoLoaded: () => void;
   onVideoError: () => void;
 }) {
+  const subtitleUrl = getSubtitleUrl(video.videoUrl);
+
   return (
     <div className="overflow-hidden rounded-3xl border border-white/10 bg-black">
       <div className="relative aspect-video overflow-hidden bg-[#020617]">
         {!videoError ? (
           <video
-            key={video.videoUrl}
+            key={`${pageLanguage}-${video.videoUrl}`}
             ref={videoRef}
             controls
             playsInline
@@ -543,6 +607,18 @@ function ProfessionalVideoPlayer({
             onError={onVideoError}
           >
             <source src={video.videoUrl} type="video/mp4" />
+
+            {subtitleUrl ? (
+              <track
+                key={`${pageLanguage}-${subtitleUrl}`}
+                src={subtitleUrl}
+                kind="subtitles"
+                srcLang={pageLanguage}
+                label={pageLanguage.toUpperCase()}
+                default
+              />
+            ) : null}
+
             {copy.browserUnsupported}
           </video>
         ) : (
@@ -558,24 +634,24 @@ function ProfessionalVideoPlayer({
                 {copy.videoNotFoundDescription}
               </p>
 
-              <code className="mt-4 inline-block rounded-xl bg-black/50 px-4 py-3 text-xs font-bold text-purple-200">
+              <code className="mt-4 inline-block max-w-full break-all rounded-xl bg-black/50 px-4 py-3 text-xs font-bold text-purple-200">
                 {video.videoUrl}
               </code>
             </div>
           </div>
         )}
 
-        <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-2xl border border-white/10 bg-black/45 px-4 py-3 backdrop-blur-xl">
+        <div className="pointer-events-none absolute left-4 top-4 z-20 max-w-[calc(100%-2rem)] rounded-2xl border border-white/10 bg-black/45 px-4 py-3 backdrop-blur-xl md:max-w-md">
           <div className="text-xs font-black uppercase tracking-[0.22em] text-purple-200">
             {copy.aiGuide}
           </div>
 
-          <div className="mt-1 max-w-md text-sm font-bold leading-5 text-white">
+          <div className="mt-1 line-clamp-3 text-sm font-bold leading-5 text-white">
             {video.description}
           </div>
         </div>
 
-        <div className="pointer-events-none absolute right-4 top-4 z-20 flex items-center gap-3 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 backdrop-blur-xl">
+        <div className="pointer-events-none absolute right-4 top-4 z-20 hidden items-center gap-3 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 backdrop-blur-xl md:flex">
           <div className="relative flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 via-fuchsia-500 to-cyan-400 shadow-lg shadow-purple-950/40">
             <Bot className="h-6 w-6 text-white" />
             <span className="absolute -right-1 -top-1 h-4 w-4 animate-ping rounded-full bg-emerald-400" />
@@ -629,7 +705,7 @@ function ScenarioPanel({
   copy,
 }: {
   video: LocalizedVideoManual;
-  copy: (typeof pageCopy)['sk'];
+  copy: (typeof pageCopy)[PageLanguage];
 }) {
   return (
     <div className="mt-5 rounded-3xl border border-white/10 bg-black/30 p-5">

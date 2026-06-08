@@ -1,1 +1,9 @@
-Profil uzivatele v aplikaci Zedpera slouzi ke sprave zakladnich udaju, nastaveni uctu a informaci o aktivnim balicku. Po otevreni profilu si zkontrolujte jmeno, email a udaje klienta. Dale si muzete overit informace o svem balicku, dostupnych sluzbach a moznostech vyuziti jednotlivych nastroju.
+Video navod Zedpera: Profil uzivatele.
+
+Toto je cesky video navod aplikace Zedpera. Ukazeme si hlavni postup, ovladani systemu a prakticke pouziti dane funkce krok za krokem.
+
+Tento navod je pripraveny v jazyku: CS.
+
+Najprv si pozorne pozrite obrazovku a nasledne vykonajte jednotlive kroky priamo v aplikacii.
+
+Po skonceni videa odporucame otvorit dashboard Zedpera a vyskusat si danu funkciu na vlastnom projekte.

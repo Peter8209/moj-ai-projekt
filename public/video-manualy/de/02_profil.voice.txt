@@ -1,1 +1,9 @@
-Das Benutzerprofil in Zedpera dient zur Verwaltung grundlegender Kontodaten, Kundendaten und Paketinformationen. Nach dem Ă–ffnen des Profils ĂĽberprĂĽfen Sie zuerst Ihren Namen, Ihre E-Mail-Adresse und die Kundendaten. Sie kĂ¶nnen auĂźerdem Informationen zu Ihrem aktiven Paket und verfĂĽgbaren Diensten einsehen.
+Zedpera Videoanleitung: Benutzerprofil.
+
+Dies ist eine deutsche Videoanleitung fur Zedpera. Wir zeigen den wichtigsten Ablauf, die Navigation im System und die praktische Nutzung dieser Funktion Schritt fur Schritt.
+
+Tento navod je pripraveny v jazyku: DE.
+
+Najprv si pozorne pozrite obrazovku a nasledne vykonajte jednotlive kroky priamo v aplikacii.
+
+Po skonceni videa odporucame otvorit dashboard Zedpera a vyskusat si danu funkciu na vlastnom projekte.

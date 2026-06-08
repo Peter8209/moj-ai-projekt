@@ -1798,8 +1798,7 @@ export default function DashboardPage() {
   const { t } = useLanguage();
 
   const [activeModule, setActiveModule] = useState<ModuleKey>('supervisor');
-const [mobileModuleMenuOpen, setMobileModuleMenuOpen] = useState(false);
-const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   const [input, setInput] = useState('');
@@ -2579,8 +2578,7 @@ Text emailu:
 
 const selectDashboardModule = useCallback((moduleKey: ModuleKey) => {
   setActiveModule(moduleKey);
-  setMobileMenuOpen(false);
-
+  
   window.setTimeout(() => {
     mobileToolPanelRef.current?.scrollIntoView({
       behavior: 'smooth',
@@ -3972,19 +3970,21 @@ const downloadExcel = () => {
 
         {/* MOBILNÁ AI LIŠTA - zobrazuje sa iba na mobile ako spodná fixná lišta */}
         <MobileDashboardNavigation
-          activeModule={activeModule}
-          activeModuleLabel={activeModuleLabel}
-          activeModuleSubtitle={activeModuleCardSubtitle}
-          activeProfileTitle={activeProfile?.title || 'Profil práce'}
-          activeProfileSubtitle={activeProfile?.topic || activeProfile?.field || 'Aktívny profil'}
-          moduleInfos={moduleInfos}
-          onSelectModule={(moduleKey: string) => {
-            if (isModuleKey(moduleKey)) {
-              selectDashboardModule(moduleKey);
-            }
-          }}
-          onNavigate={(path: string) => router.push(path)}
-        />
+  activeModule={activeModule}
+  activeModuleLabel={activeModuleLabel}
+  activeModuleSubtitle={activeModuleCardSubtitle}
+  activeProfileTitle={activeProfile?.title || 'Profil práce'}
+  activeProfileSubtitle={activeProfile?.field || activeProfile?.level || ''}
+  activeProfileType={activeProfile?.type || ''}
+  moduleInfos={moduleInfos}
+  t={t}
+  onSelectModule={(moduleKey: string) => {
+    if (isModuleKey(moduleKey)) {
+      selectDashboardModule(moduleKey);
+    }
+  }}
+  onNavigate={(path) => router.push(path)}
+/>
 
 {activeModule === 'planning' && (
 

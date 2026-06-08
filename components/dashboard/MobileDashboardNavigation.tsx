@@ -63,7 +63,7 @@ const mobileMainMenuItems = [
   },
   {
     label: 'Moje práce',
-    href: '/dashboard',
+    href: '/works',
     icon: BriefcaseBusiness,
   },
   {

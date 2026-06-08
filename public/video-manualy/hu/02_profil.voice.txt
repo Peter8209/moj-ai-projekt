@@ -1,0 +1,1 @@
+A Zedpera felhasznĂˇlĂłi profilja az alapvetĹ‘ fiĂłkadatok, ĂĽgyfĂ©ladatok Ă©s csomaginformĂˇciĂłk kezelĂ©sĂ©re szolgĂˇl. A profil megnyitĂˇsa utĂˇn ellenĹ‘rizze a nevĂ©t, az e-mail-cĂ­mĂ©t Ă©s az ĂĽgyfĂ©ladatokat. Itt megtekintheti az aktĂ­v csomagot Ă©s az elĂ©rhetĹ‘ szolgĂˇltatĂˇsokat is.

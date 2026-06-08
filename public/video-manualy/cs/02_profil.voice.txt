@@ -1,0 +1,1 @@
+Profil uzivatele v aplikaci Zedpera slouzi ke sprave zakladnich udaju, nastaveni uctu a informaci o aktivnim balicku. Po otevreni profilu si zkontrolujte jmeno, email a udaje klienta. Dale si muzete overit informace o svem balicku, dostupnych sluzbach a moznostech vyuziti jednotlivych nastroju.

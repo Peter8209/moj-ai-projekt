@@ -1,0 +1,1 @@
+The user profile in Zedpera is used to manage basic account information, client details, and subscription settings. After opening the profile section, check your name, email address, and client information. You can also review your active package, available services, and the tools included in your plan.

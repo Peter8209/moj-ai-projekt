@@ -1,0 +1,1 @@
+Profil uĹĽytkownika w aplikacji Zedpera sĹ‚uĹĽy do zarzÄ…dzania podstawowymi danymi konta, danymi klienta oraz informacjami o pakiecie. Po otwarciu profilu sprawdĹş imiÄ™, adres e-mail oraz dane klienta. MoĹĽesz rĂłwnieĹĽ sprawdziÄ‡ aktywny pakiet i dostÄ™pne usĹ‚ugi.

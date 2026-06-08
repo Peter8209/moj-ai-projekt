@@ -17,490 +17,243 @@ import {
   Video,
 } from 'lucide-react';
 
-type VideoTutorial = {
-  id: string;
-  order: number;
-  title: string;
-  subtitle: string;
-  category: string;
-  duration: string;
-  src: string;
-  poster: string;
-  description: string;
-  avatarLine: string;
-  steps: string[];
+import { useLanguage } from '@/components/LanguageProvider';
+import {
+  getLocalizedVisibleVideoManuals,
+  type LocalizedVideoManual,
+} from '@/lib/videoManuals';
+
+const pageCopy = {
+  sk: {
+    menu: 'Menu',
+    backToMenu: 'Späť do menu',
+    headerSmall: 'Profesionálne manuály Zedpera',
+    badge: 'Video manuály s AI sprievodcom',
+    title: 'Video návody Zedpera',
+    description:
+      'Každý manuál sa automaticky zobrazí v aktuálne nastavenom jazyku dashboardu. Video, text sprievodcu, kategórie aj scenár sa prepnú podľa jazyka systému.',
+    nowPlaying: 'Práve prehrávate',
+    listTitle: 'Zoznam návodov',
+    listDescription:
+      'Kliknite na manuál. Vľavo sa spustí video vo vybranom jazyku a zobrazí sa jeho scenár.',
+    searchPlaceholder: 'Hľadať video návod...',
+    noResults: 'Nenašiel sa žiadny video návod.',
+    recommendedTitle: 'Odporúčaný postup pre nového používateľa',
+    recommendedDescription:
+      'Najskôr si pozrite Hlavné menu, Profil používateľa, Novú prácu, AI Chat, AI školiteľa a Obhajobu.',
+    startFromBeginning: 'Spustiť od začiatku',
+    scenarioTitle: 'Scenár a postup manuálu',
+    guideText: 'Text sprievodcu',
+    step: 'Krok',
+    videoNotFound: 'Video súbor sa nenašiel',
+    videoNotFoundDescription:
+      'Skontrolujte, či je MP4 uložené v správnom jazykovom priečinku a či názov súboru presne zodpovedá odkazu:',
+    browserUnsupported: 'Váš prehliadač nepodporuje prehrávanie videa.',
+    aiGuide: 'AI sprievodca',
+    botName: 'Zedpera Bot',
+    botDescription: 'vedie používateľa krok za krokom',
+    allCategories: 'Všetko',
+  },
+  cs: {
+    menu: 'Menu',
+    backToMenu: 'Zpět do menu',
+    headerSmall: 'Profesionální manuály Zedpera',
+    badge: 'Video návody s AI průvodcem',
+    title: 'Video návody Zedpera',
+    description:
+      'Každý návod se automaticky zobrazí v aktuálně nastaveném jazyce dashboardu. Video, text průvodce, kategorie i scénář se přepnou podle jazyka systému.',
+    nowPlaying: 'Právě přehráváte',
+    listTitle: 'Seznam návodů',
+    listDescription:
+      'Klikněte na návod. Vlevo se spustí video ve vybraném jazyce a zobrazí se jeho scénář.',
+    searchPlaceholder: 'Hledat video návod...',
+    noResults: 'Nebyl nalezen žádný video návod.',
+    recommendedTitle: 'Doporučený postup pro nového uživatele',
+    recommendedDescription:
+      'Nejprve si prohlédněte Hlavní menu, Profil uživatele, Novou práci, AI Chat, AI školitele a Obhajobu.',
+    startFromBeginning: 'Spustit od začátku',
+    scenarioTitle: 'Scénář a postup návodu',
+    guideText: 'Text průvodce',
+    step: 'Krok',
+    videoNotFound: 'Video soubor nebyl nalezen',
+    videoNotFoundDescription:
+      'Zkontrolujte, zda je MP4 uložené ve správné jazykové složce a zda název souboru přesně odpovídá odkazu:',
+    browserUnsupported: 'Váš prohlížeč nepodporuje přehrávání videa.',
+    aiGuide: 'AI průvodce',
+    botName: 'Zedpera Bot',
+    botDescription: 'vede uživatele krok za krokem',
+    allCategories: 'Vše',
+  },
+  en: {
+    menu: 'Menu',
+    backToMenu: 'Back to menu',
+    headerSmall: 'Professional Zedpera manuals',
+    badge: 'Video guides with AI assistant',
+    title: 'Zedpera Video Guides',
+    description:
+      'Each manual is displayed automatically in the current dashboard language. The video, guide text, categories, and scenario switch according to the system language.',
+    nowPlaying: 'Now playing',
+    listTitle: 'Guide list',
+    listDescription:
+      'Click a guide. The video in the selected language will start on the left and its scenario will be displayed.',
+    searchPlaceholder: 'Search video guide...',
+    noResults: 'No video guide found.',
+    recommendedTitle: 'Recommended path for a new user',
+    recommendedDescription:
+      'Start with Main Menu, User Profile, New Work, AI Chat, AI Supervisor, and Defense.',
+    startFromBeginning: 'Start from the beginning',
+    scenarioTitle: 'Manual scenario and steps',
+    guideText: 'Guide text',
+    step: 'Step',
+    videoNotFound: 'Video file was not found',
+    videoNotFoundDescription:
+      'Check whether the MP4 file is stored in the correct language folder and whether the filename matches this link exactly:',
+    browserUnsupported: 'Your browser does not support video playback.',
+    aiGuide: 'AI guide',
+    botName: 'Zedpera Bot',
+    botDescription: 'guides the user step by step',
+    allCategories: 'All',
+  },
+  de: {
+    menu: 'Menü',
+    backToMenu: 'Zurück zum Menü',
+    headerSmall: 'Professionelle Zedpera-Anleitungen',
+    badge: 'Videoanleitungen mit KI-Begleiter',
+    title: 'Zedpera Videoanleitungen',
+    description:
+      'Jede Anleitung wird automatisch in der aktuell eingestellten Dashboard-Sprache angezeigt. Video, Begleittext, Kategorien und Szenario wechseln entsprechend der Systemsprache.',
+    nowPlaying: 'Wird gerade abgespielt',
+    listTitle: 'Liste der Anleitungen',
+    listDescription:
+      'Klicken Sie auf eine Anleitung. Links startet das Video in der gewählten Sprache und das Szenario wird angezeigt.',
+    searchPlaceholder: 'Videoanleitung suchen...',
+    noResults: 'Keine Videoanleitung gefunden.',
+    recommendedTitle: 'Empfohlener Ablauf für neue Benutzer',
+    recommendedDescription:
+      'Beginnen Sie mit Hauptmenü, Benutzerprofil, Neue Arbeit, AI Chat, KI-Betreuer und Verteidigung.',
+    startFromBeginning: 'Von Anfang an starten',
+    scenarioTitle: 'Szenario und Schritte der Anleitung',
+    guideText: 'Begleittext',
+    step: 'Schritt',
+    videoNotFound: 'Videodatei wurde nicht gefunden',
+    videoNotFoundDescription:
+      'Prüfen Sie, ob die MP4-Datei im richtigen Sprachordner gespeichert ist und der Dateiname exakt diesem Link entspricht:',
+    browserUnsupported: 'Ihr Browser unterstützt die Videowiedergabe nicht.',
+    aiGuide: 'KI-Begleiter',
+    botName: 'Zedpera Bot',
+    botDescription: 'führt den Benutzer Schritt für Schritt',
+    allCategories: 'Alles',
+  },
+  pl: {
+    menu: 'Menu',
+    backToMenu: 'Powrót do menu',
+    headerSmall: 'Profesjonalne instrukcje Zedpera',
+    badge: 'Instrukcje wideo z asystentem AI',
+    title: 'Instrukcje wideo Zedpera',
+    description:
+      'Każda instrukcja automatycznie wyświetla się w aktualnie ustawionym języku dashboardu. Wideo, tekst przewodnika, kategorie i scenariusz przełączają się zgodnie z językiem systemu.',
+    nowPlaying: 'Teraz odtwarzane',
+    listTitle: 'Lista instrukcji',
+    listDescription:
+      'Kliknij instrukcję. Po lewej uruchomi się wideo w wybranym języku i wyświetli się jego scenariusz.',
+    searchPlaceholder: 'Szukaj instrukcji wideo...',
+    noResults: 'Nie znaleziono żadnej instrukcji wideo.',
+    recommendedTitle: 'Zalecana ścieżka dla nowego użytkownika',
+    recommendedDescription:
+      'Najpierw obejrzyj Menu główne, Profil użytkownika, Nową pracę, AI Chat, Opiekuna AI i Obronę.',
+    startFromBeginning: 'Uruchom od początku',
+    scenarioTitle: 'Scenariusz i kroki instrukcji',
+    guideText: 'Tekst przewodnika',
+    step: 'Krok',
+    videoNotFound: 'Nie znaleziono pliku wideo',
+    videoNotFoundDescription:
+      'Sprawdź, czy plik MP4 jest zapisany we właściwym folderze językowym i czy nazwa pliku dokładnie odpowiada temu linkowi:',
+    browserUnsupported: 'Twoja przeglądarka nie obsługuje odtwarzania wideo.',
+    aiGuide: 'Przewodnik AI',
+    botName: 'Zedpera Bot',
+    botDescription: 'prowadzi użytkownika krok po kroku',
+    allCategories: 'Wszystko',
+  },
+  hu: {
+    menu: 'Menü',
+    backToMenu: 'Vissza a menübe',
+    headerSmall: 'Professzionális Zedpera útmutatók',
+    badge: 'Videó útmutatók AI kísérővel',
+    title: 'Zedpera videó útmutatók',
+    description:
+      'Minden útmutató automatikusan az irányítópulton beállított aktuális nyelven jelenik meg. A videó, a kísérőszöveg, a kategóriák és a forgatókönyv a rendszer nyelvéhez igazodik.',
+    nowPlaying: 'Most lejátszás alatt',
+    listTitle: 'Útmutatók listája',
+    listDescription:
+      'Kattintson egy útmutatóra. Bal oldalon elindul a kiválasztott nyelvű videó, és megjelenik a forgatókönyv.',
+    searchPlaceholder: 'Videó útmutató keresése...',
+    noResults: 'Nem található videó útmutató.',
+    recommendedTitle: 'Ajánlott folyamat új felhasználónak',
+    recommendedDescription:
+      'Először nézze meg a Főmenüt, Felhasználói profilt, Új munkát, AI Chatet, AI témavezetőt és Védést.',
+    startFromBeginning: 'Indítás az elejétől',
+    scenarioTitle: 'Útmutató forgatókönyve és lépései',
+    guideText: 'Kísérőszöveg',
+    step: 'Lépés',
+    videoNotFound: 'A videófájl nem található',
+    videoNotFoundDescription:
+      'Ellenőrizze, hogy az MP4 fájl a megfelelő nyelvi mappában van-e, és a fájlnév pontosan megegyezik-e ezzel a hivatkozással:',
+    browserUnsupported: 'A böngésző nem támogatja a videó lejátszását.',
+    aiGuide: 'AI kísérő',
+    botName: 'Zedpera Bot',
+    botDescription: 'lépésről lépésre vezeti a felhasználót',
+    allCategories: 'Összes',
+  },
 };
 
-const VIDEO_BASE_PATH = '/videos/zedpera_fixed';
-
-const videoTutorials: VideoTutorial[] = [
-  {
-    id: 'hlavne-menu',
-    order: 1,
-    title: 'Hlavné menu Zedpera',
-    subtitle: 'Orientácia v aplikácii',
-    category: 'Základy',
-    duration: '45 sekúnd',
-    src: `${VIDEO_BASE_PATH}/01_hlavne_menu.mp4`,
-    poster: `${VIDEO_BASE_PATH}/01_hlavne_menu.png`,
-    description:
-      'Profesionálny úvod do hlavného menu Zedpera. Používateľ sa naučí, kde nájde dashboard, profil, AI moduly, práce, zdroje, balíčky, históriu a videonávody.',
-    avatarLine:
-      'Vitajte v Zedpere. Ukážem vám, kde sa nachádzajú hlavné časti systému a ako sa v aplikácii pohybovať.',
-    steps: [
-      'Otvorte aplikáciu Zedpera a prihláste sa.',
-      'Po prihlásení sa zobrazí hlavný dashboard.',
-      'V hlavnom menu nájdete sekcie Profil, AI Chat, Moje práce, Zdroje, Balíčky, História a Video návod.',
-      'Kliknutím na jednotlivé položky sa presúvate medzi časťami systému.',
-      'Ak chcete pracovať s AI modulmi, vráťte sa na dashboard.',
-    ],
-  },
-  {
-    id: 'profil',
-    order: 2,
-    title: 'Profil používateľa',
-    subtitle: 'Účet, balík a nastavenia',
-    category: 'Profil',
-    duration: '60 sekúnd',
-    src: `${VIDEO_BASE_PATH}/02_profil.mp4`,
-    poster: `${VIDEO_BASE_PATH}/02_profil.png`,
-    description:
-      'Manuál vysvetľuje, kde sa nachádza profil používateľa, ako skontrolovať údaje účtu, aktívny balík a základné nastavenia.',
-    avatarLine:
-      'Profil používateľa je dôležitý pre správne nastavenie účtu, balíka a personalizáciu práce so systémom.',
-    steps: [
-      'Kliknite na položku Profil.',
-      'Skontrolujte základné údaje používateľa.',
-      'Overte aktívny balík a dostupné limity.',
-      'Doplňte alebo upravte chýbajúce údaje.',
-      'Po kontrole sa vráťte späť na dashboard.',
-    ],
-  },
-  {
-    id: 'ai-chat',
-    order: 3,
-    title: 'AI Chat',
-    subtitle: 'Písanie a úprava textu',
-    category: 'AI nástroje',
-    duration: '75 sekúnd',
-    src: `${VIDEO_BASE_PATH}/03_ai_chat.mp4`,
-    poster: `${VIDEO_BASE_PATH}/03_ai_chat.png`,
-    description:
-      'AI Chat pomáha vytvárať odborný text, osnovy, kapitoly, návrhy, úpravy a vysvetlenia podľa zadania používateľa.',
-    avatarLine:
-      'Do AI chatu vždy píšte presné zadanie. Čím lepší kontext zadáte, tým kvalitnejší výstup získate.',
-    steps: [
-      'Otvorte sekciu AI Chat.',
-      'Do textového poľa vložte presné zadanie.',
-      'Uveďte, aký typ textu chcete vytvoriť.',
-      'Ak máte vyplnený profil práce, AI odpoveď prispôsobí téme.',
-      'Odošlite zadanie a počkajte na odpoveď.',
-    ],
-  },
-  {
-    id: 'moje-prace',
-    order: 4,
-    title: 'Moje práce',
-    subtitle: 'Správa rozpracovaných prác',
-    category: 'Práce',
-    duration: '60 sekúnd',
-    src: `${VIDEO_BASE_PATH}/04_moje_prace.mp4`,
-    poster: `${VIDEO_BASE_PATH}/04_moje_prace.png`,
-    description:
-      'Používateľ sa naučí spravovať uložené práce, vybrať aktívnu prácu a pokračovať v rozpracovanom projekte.',
-    avatarLine:
-      'V sekcii Moje práce si vyberáte, s ktorou prácou bude Zedpera ďalej pracovať.',
-    steps: [
-      'Kliknite na Moje práce.',
-      'Pozrite si zoznam uložených prác.',
-      'Vyberte prácu, s ktorou chcete pokračovať.',
-      'Skontrolujte, či je označená ako aktívna.',
-      'Po návrate na dashboard budú moduly používať vybraný profil.',
-    ],
-  },
-  {
-    id: 'nova-praca',
-    order: 5,
-    title: 'Nová práca',
-    subtitle: 'Vytvorenie profilu práce',
-    category: 'Práce',
-    duration: '90 sekúnd',
-    src: `${VIDEO_BASE_PATH}/05_nova_praca.mp4`,
-    poster: `${VIDEO_BASE_PATH}/05_nova_praca.png`,
-    description:
-      'Detailný postup vytvorenia novej akademickej práce vrátane názvu, témy, cieľa, metodológie, jazyka, citácií a kľúčových slov.',
-    avatarLine:
-      'Profil práce je základ. Podľa neho sa budú správať všetky AI moduly v systéme.',
-    steps: [
-      'Kliknite na Nová práca.',
-      'Vyberte typ práce.',
-      'Doplňte názov, tému, odbor a jazyk práce.',
-      'Vyplňte cieľ práce, metodológiu, hypotézy alebo výskumné otázky.',
-      'Vyberte citačnú normu.',
-      'Profil práce uložte.',
-    ],
-  },
-  {
-    id: 'ai-veduci',
-    order: 6,
-    title: 'AI školiteľ',
-    subtitle: 'Odborná spätná väzba',
-    category: 'AI nástroje',
-    duration: '75 sekúnd',
-    src: `${VIDEO_BASE_PATH}/06_ai_veduci.mp4`,
-    poster: `${VIDEO_BASE_PATH}/06_ai_veduci.png`,
-    description:
-      'AI školiteľ kontroluje logiku, štruktúru, nadväznosť, metodológiu, cieľ práce a odbornú kvalitu textu.',
-    avatarLine:
-      'AI školiteľ vám pomôže nájsť slabé miesta práce a navrhne konkrétne zlepšenia.',
-    steps: [
-      'Na dashboarde vyberte modul AI školiteľ.',
-      'Skontrolujte aktívny profil práce.',
-      'Vložte text alebo priložte dokument.',
-      'Spustite kontrolu.',
-      'Prečítajte si silné stránky, slabé stránky a odporúčané úpravy.',
-    ],
-  },
-  {
-    id: 'audit-kvality',
-    order: 7,
-    title: 'Audit kvality',
-    subtitle: 'Kontrola akademického textu',
-    category: 'Kontrola',
-    duration: '75 sekúnd',
-    src: `${VIDEO_BASE_PATH}/07_audit_kvality.mp4`,
-    poster: `${VIDEO_BASE_PATH}/07_audit_kvality.png`,
-    description:
-      'Audit kvality kontroluje štylistiku, citácie, logiku, metodológiu, odbornú presnosť a celkovú úroveň práce.',
-    avatarLine:
-      'Audit kvality používajte pred odovzdaním textu alebo pri väčších úpravách práce.',
-    steps: [
-      'Kliknite na Audit kvality.',
-      'Vyberte typ kontroly.',
-      'Vložte text alebo nahrajte dokument.',
-      'Spustite audit.',
-      'Prejdite nájdené problémy a odporúčané opravy.',
-    ],
-  },
-  {
-    id: 'obhajoba',
-    order: 8,
-    title: 'Obhajoba',
-    subtitle: 'Prezentácia, otázky a odpovede',
-    category: 'Obhajoba',
-    duration: '90 sekúnd',
-    src: `${VIDEO_BASE_PATH}/08_obhajoba.mp4`,
-    poster: `${VIDEO_BASE_PATH}/08_obhajoba.png`,
-    description:
-      'Modul Obhajoba pripraví podklady na prezentáciu, sprievodný text, otázky komisie a odporúčané odpovede.',
-    avatarLine:
-      'Pri obhajobe je dôležité vedieť stručne vysvetliť cieľ, metodológiu, výsledky a prínos práce.',
-    steps: [
-      'Otvorte modul Obhajoba.',
-      'Skontrolujte, či máte vyplnený profil práce.',
-      'Vložte obsah práce alebo nahrajte dokument.',
-      'Spustite generovanie podkladov.',
-      'Skontrolujte otázky komisie a odporúčané odpovede.',
-      'Výstup exportujte do Wordu, PDF alebo PPTX.',
-    ],
-  },
-  {
-    id: 'preklad',
-    order: 9,
-    title: 'Preklad',
-    subtitle: 'Preklad odborného textu',
-    category: 'AI nástroje',
-    duration: '60 sekúnd',
-    src: `${VIDEO_BASE_PATH}/09_preklad.mp4`,
-    poster: `${VIDEO_BASE_PATH}/09_preklad.png`,
-    description:
-      'Preklad umožňuje prekladať odborné, akademické a formálne texty podľa zvoleného jazyka a štýlu.',
-    avatarLine:
-      'Pri preklade si vždy vyberte zdrojový jazyk, cieľový jazyk a štýl prekladu.',
-    steps: [
-      'Otvorte modul Preklad.',
-      'Vyberte jazyk, z ktorého sa prekladá.',
-      'Vyberte cieľový jazyk.',
-      'Zvoľte štýl prekladu.',
-      'Vložte text a spustite preklad.',
-    ],
-  },
-  {
-    id: 'analyza-dat',
-    order: 10,
-    title: 'Analýza dát',
-    subtitle: 'Tabuľky, grafy a výsledky',
-    category: 'Výskum',
-    duration: '75 sekúnd',
-    src: `${VIDEO_BASE_PATH}/10_analyza_dat.mp4`,
-    poster: `${VIDEO_BASE_PATH}/10_analyza_dat.png`,
-    description:
-      'Analýza dát pomáha spracovať tabuľky, dotazníky, premenné, grafy a štatistické výsledky.',
-    avatarLine:
-      'Nahrajte Excel alebo CSV a Zedpera pripraví interpretáciu, tabuľky a odporúčané testy.',
-    steps: [
-      'Otvorte modul Analýza dát.',
-      'Nahrajte Excel, CSV alebo iný podporovaný súbor.',
-      'Doplňte, čo chcete analyzovať.',
-      'Spustite spracovanie.',
-      'Pozrite si premenné, tabuľky a odporúčané testy.',
-    ],
-  },
-  {
-    id: 'planovanie',
-    order: 11,
-    title: 'Plánovanie',
-    subtitle: 'Harmonogram písania práce',
-    category: 'Organizácia',
-    duration: '60 sekúnd',
-    src: `${VIDEO_BASE_PATH}/11_planovanie.mp4`,
-    poster: `${VIDEO_BASE_PATH}/11_planovanie.png`,
-    description:
-      'Plánovanie vytvorí harmonogram písania práce, rozdelí úlohy a pomôže kontrolovať termíny.',
-    avatarLine:
-      'Zadajte termín odovzdania a aktuálny stav práce. Systém navrhne realistický plán.',
-    steps: [
-      'Otvorte modul Plánovanie.',
-      'Zadajte termín odovzdania.',
-      'Doplňte aktuálny stav práce.',
-      'Spustite vytvorenie harmonogramu.',
-      'Skontrolujte navrhnuté úlohy a dátumy.',
-    ],
-  },
-  {
-    id: 'emaily',
-    order: 12,
-    title: 'Emaily',
-    subtitle: 'Profesionálna komunikácia',
-    category: 'Komunikácia',
-    duration: '60 sekúnd',
-    src: `${VIDEO_BASE_PATH}/12_emaily.mp4`,
-    poster: `${VIDEO_BASE_PATH}/12_emaily.png`,
-    description:
-      'Modul Emaily pripraví profesionálne emaily pre vedúceho práce, vyučujúceho, školu alebo administratívu.',
-    avatarLine:
-      'Vyberte typ emailu, tón komunikácie a napíšte, čo potrebujete oznámiť.',
-    steps: [
-      'Otvorte modul Emaily.',
-      'Vyberte typ emailu.',
-      'Vyberte tón komunikácie.',
-      'Napíšte obsah požiadavky.',
-      'Spustite generovanie a skopírujte výsledok.',
-    ],
-  },
-  {
-    id: 'originalita-prace',
-    order: 13,
-    title: 'Originalita práce',
-    subtitle: 'Orientačná kontrola textu',
-    category: 'Kontrola',
-    duration: '60 sekúnd',
-    src: `${VIDEO_BASE_PATH}/13_originalita_prace.mp4`,
-    poster: `${VIDEO_BASE_PATH}/13_originalita_prace.png`,
-    description:
-      'Originalita práce pomáha nájsť rizikové, všeobecné alebo nedostatočne odcitované pasáže.',
-    avatarLine:
-      'Tento modul slúži ako orientačná pomôcka pri kontrole textu a citácií.',
-    steps: [
-      'Otvorte Originalitu práce.',
-      'Vložte text.',
-      'Spustite kontrolu.',
-      'Skontrolujte rizikové pasáže.',
-      'Doplňte alebo opravte citácie.',
-    ],
-  },
-  {
-    id: 'humanizacia-textu',
-    order: 14,
-    title: 'Humanizácia textu',
-    subtitle: 'Prirodzenejší akademický štýl',
-    category: 'AI nástroje',
-    duration: '60 sekúnd',
-    src: `${VIDEO_BASE_PATH}/14_humanizacia_textu.mp4`,
-    poster: `${VIDEO_BASE_PATH}/14_humanizacia_textu.png`,
-    description:
-      'Humanizácia upraví text tak, aby pôsobil prirodzenejšie, čitateľnejšie a menej strojovo.',
-    avatarLine:
-      'Vložte text a nechajte systém upraviť jeho plynulosť, prirodzenosť a akademický tón.',
-    steps: [
-      'Otvorte Humanizáciu textu.',
-      'Vložte text, ktorý chcete upraviť.',
-      'Vyberte štýl úpravy.',
-      'Spustite humanizáciu.',
-      'Porovnajte pôvodný a upravený text.',
-    ],
-  },
-  {
-    id: 'zdroje-citacie',
-    order: 15,
-    title: 'Zdroje a citácie',
-    subtitle: 'Literatúra a citačné záznamy',
-    category: 'Zdroje',
-    duration: '75 sekúnd',
-    src: `${VIDEO_BASE_PATH}/15_zdroje_citacie.mp4`,
-    poster: `${VIDEO_BASE_PATH}/15_zdroje_citacie.png`,
-    description:
-      'Sekcia Zdroje slúži na prácu s literatúrou, odbornými článkami, citáciami a bibliografickými údajmi.',
-    avatarLine:
-      'Pri práci so zdrojmi si vždy overte autora, rok, názov, vydavateľa a citačnú normu.',
-    steps: [
-      'Kliknite na Zdroje.',
-      'Zadajte tému alebo kľúčové slová.',
-      'Vyberte vhodné odborné zdroje.',
-      'Skontrolujte bibliografické údaje.',
-      'Použite zdroje v texte práce.',
-    ],
-  },
-  {
-    id: 'balicky',
-    order: 16,
-    title: 'Balíčky',
-    subtitle: 'Predplatné a doplnkové služby',
-    category: 'Platby',
-    duration: '75 sekúnd',
-    src: `${VIDEO_BASE_PATH}/16_balicky.mp4`,
-    poster: `${VIDEO_BASE_PATH}/16_balicky.png`,
-    description:
-      'Balíčky určujú mesačné limity strán, AI kontroly, audity, obhajoby a dostupné funkcie.',
-    avatarLine:
-      'Vyberte si balík podľa toho, koľko prác, strán, auditov a obhajob potrebujete.',
-    steps: [
-      'Otvorte sekciu Balíčky.',
-      'Porovnajte dostupné programy.',
-      'Skontrolujte limity strán, auditov a obhajob.',
-      'Vyberte vhodný balíček.',
-      'Pokračujte podľa pokynov systému.',
-    ],
-  },
-  {
-    id: 'historia-chatu',
-    order: 17,
-    title: 'História chatu',
-    subtitle: 'Uložené konverzácie a výstupy',
-    category: 'História',
-    duration: '60 sekúnd',
-    src: `${VIDEO_BASE_PATH}/17_historia_chatu.mp4`,
-    poster: `${VIDEO_BASE_PATH}/17_historia_chatu.png`,
-    description:
-      'História chatu uchováva staršie odpovede, osnovy, kapitoly, audity a pripravené výstupy.',
-    avatarLine:
-      'História vám umožní vrátiť sa k starším výstupom bez straty kontextu.',
-    steps: [
-      'Kliknite na História chatu.',
-      'Vyhľadajte staršiu konverzáciu.',
-      'Otvorte konkrétny výstup.',
-      'Skopírujte alebo znova použite uložený text.',
-      'Pokračujte v práci.',
-    ],
-  },
-  {
-    id: 'video-navod',
-    order: 18,
-    title: 'Video návod',
-    subtitle: 'Postupy používania aplikácie',
-    category: 'Pomoc',
-    duration: '30 sekúnd',
-    src: `${VIDEO_BASE_PATH}/18_video_navod.mp4`,
-    poster: `${VIDEO_BASE_PATH}/18_video_navod.png`,
-    description:
-      'Sekcia Video návod obsahuje jednoduché návody ku všetkým hlavným funkciám aplikácie.',
-    avatarLine:
-      'Tu nájdete všetky návody na jednom mieste. Vyberte sekciu, ktorú chcete vysvetliť.',
-    steps: [
-      'Otvorte Video návod.',
-      'Vyberte požadovanú časť aplikácie.',
-      'Pozrite si krátky postup používania.',
-      'Postupujte podľa krokov pod videom.',
-    ],
-  },
-  {
-    id: 'vzhlad-aplikacie',
-    order: 19,
-    title: 'Svetlý a tmavý režim',
-    subtitle: 'Prepnutie vzhľadu aplikácie',
-    category: 'Nastavenia',
-    duration: '30 sekúnd',
-    src: `${VIDEO_BASE_PATH}/19_vzhlad_aplikacie.mp4`,
-    poster: `${VIDEO_BASE_PATH}/19_vzhlad_aplikacie.png`,
-    description:
-      'Návod ukazuje prepínanie medzi svetlým a tmavým režimom aplikácie.',
-    avatarLine:
-      'Vyberte režim, ktorý je pre vás najčitateľnejší a najpohodlnejší.',
-    steps: [
-      'Nájdite ikonu vzhľadu aplikácie.',
-      'Kliknutím prepnite režim.',
-      'Vyberte svetlý alebo tmavý režim.',
-      'Skontrolujte čitateľnosť obrazovky.',
-    ],
-  },
-  {
-    id: 'odhlasenie',
-    order: 20,
-    title: 'Odhlásenie',
-    subtitle: 'Bezpečné ukončenie práce',
-    category: 'Účet',
-    duration: '30 sekúnd',
-    src: `${VIDEO_BASE_PATH}/20_odhlasenie.mp4`,
-    poster: `${VIDEO_BASE_PATH}/20_odhlasenie.png`,
-    description:
-      'Odhlásenie bezpečne ukončí prácu v účte, najmä pri používaní školského alebo zdieľaného počítača.',
-    avatarLine:
-      'Po ukončení práce sa vždy odhláste, najmä ak používate zdieľané zariadenie.',
-    steps: [
-      'Kliknite na používateľské menu alebo profil.',
-      'Vyberte možnosť Odhlásiť sa.',
-      'Počkajte na ukončenie relácie.',
-      'Účet je bezpečne odhlásený.',
-    ],
-  },
-];
-
-const categories = [
-  'Všetko',
-  'Základy',
-  'Profil',
-  'Práce',
-  'AI nástroje',
-  'Kontrola',
-  'Obhajoba',
-  'Výskum',
-  'Organizácia',
-  'Komunikácia',
-  'Zdroje',
-  'Platby',
-  'História',
-  'Pomoc',
-  'Nastavenia',
-  'Účet',
-];
+type PageLanguage = keyof typeof pageCopy;
 
 export default function VideoNavodPage() {
   const router = useRouter();
+  const { language } = useLanguage();
+
+  const copy = pageCopy[(language as PageLanguage) || 'sk'] || pageCopy.sk;
+
   const topRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  const [selectedVideo, setSelectedVideo] = useState<VideoTutorial>(
-    videoTutorials[0],
+  const localizedVideos = useMemo(
+    () => getLocalizedVisibleVideoManuals(language),
+    [language],
   );
-  const [selectedCategory, setSelectedCategory] = useState('Všetko');
+
+  const categories = useMemo(() => {
+    return [
+      copy.allCategories,
+      ...Array.from(new Set(localizedVideos.map((item) => item.category))),
+    ];
+  }, [copy.allCategories, localizedVideos]);
+
+  const [selectedVideoId, setSelectedVideoId] = useState<string>(
+    localizedVideos[0]?.slug || '',
+  );
+  const [selectedCategory, setSelectedCategory] = useState(copy.allCategories);
   const [search, setSearch] = useState('');
   const [videoError, setVideoError] = useState(false);
+
+  const selectedVideo =
+    localizedVideos.find((video) => video.slug === selectedVideoId) ||
+    localizedVideos[0];
 
   const filteredVideos = useMemo(() => {
     const q = search.trim().toLowerCase();
 
-    return videoTutorials.filter((item) => {
+    return localizedVideos.filter((item) => {
       const matchesCategory =
-        selectedCategory === 'Všetko' || item.category === selectedCategory;
+        selectedCategory === copy.allCategories ||
+        item.category === selectedCategory;
 
       const matchesSearch =
         !q ||
         [
           item.title,
-          item.subtitle,
           item.category,
           item.description,
-          item.avatarLine,
           ...item.steps,
         ]
           .join(' ')
@@ -509,14 +262,14 @@ export default function VideoNavodPage() {
 
       return matchesCategory && matchesSearch;
     });
-  }, [selectedCategory, search]);
+  }, [copy.allCategories, localizedVideos, selectedCategory, search]);
 
   const goToMenu = () => {
     router.push('/dashboard');
   };
 
-  const playVideo = (video: VideoTutorial) => {
-    setSelectedVideo(video);
+  const playVideo = (video: LocalizedVideoManual) => {
+    setSelectedVideoId(video.slug);
     setVideoError(false);
 
     setTimeout(() => {
@@ -534,6 +287,23 @@ export default function VideoNavodPage() {
     }, 120);
   };
 
+  if (!selectedVideo) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-[#020617] px-4 text-white">
+        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8 text-center">
+          <p className="text-lg font-black">{copy.noResults}</p>
+          <button
+            type="button"
+            onClick={goToMenu}
+            className="mt-5 rounded-2xl bg-purple-600 px-5 py-3 text-sm font-black text-white"
+          >
+            {copy.backToMenu}
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-dvh overflow-x-hidden bg-[#020617] text-white">
       <div
@@ -547,11 +317,11 @@ export default function VideoNavodPage() {
             className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-black text-white transition hover:bg-white/20"
           >
             <Menu size={18} />
-            Menu
+            {copy.menu}
           </button>
 
           <div className="hidden text-sm font-semibold text-slate-400 sm:block">
-            Profesionálne manuály Zedpera
+            {copy.headerSmall}
           </div>
 
           <button
@@ -560,7 +330,7 @@ export default function VideoNavodPage() {
             className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-purple-400/30 bg-purple-600/20 px-4 py-2 text-sm font-black text-purple-100 transition hover:bg-purple-600/30"
           >
             <ArrowLeft size={18} />
-            Späť do menu
+            {copy.backToMenu}
           </button>
         </div>
       </div>
@@ -569,17 +339,15 @@ export default function VideoNavodPage() {
         <div className="mb-8">
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-sm font-black text-purple-200">
             <Video size={16} />
-            Video manuály s AI sprievodcom
+            {copy.badge}
           </div>
 
           <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl lg:text-6xl">
-            Video návody Zedpera
+            {copy.title}
           </h1>
 
           <p className="mt-3 max-w-3xl text-lg font-semibold leading-8 text-slate-300">
-            Každý manuál obsahuje správne priradené video, farebného AI
-            sprievodcu, pohybujúci sa kurzor a detailný scenár práce so
-            Zedperou krok za krokom.
+            {copy.description}
           </p>
         </div>
 
@@ -588,15 +356,15 @@ export default function VideoNavodPage() {
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <div className="text-sm font-black uppercase tracking-wide text-purple-300">
-                  Práve prehrávate
+                  {copy.nowPlaying}
                 </div>
 
                 <h2 className="mt-1 text-2xl font-black text-white">
-                  {selectedVideo.order}. {selectedVideo.title}
+                  {selectedVideo.title}
                 </h2>
 
                 <p className="mt-1 text-sm font-semibold text-slate-300">
-                  {selectedVideo.subtitle}
+                  {selectedVideo.description}
                 </p>
               </div>
 
@@ -610,22 +378,22 @@ export default function VideoNavodPage() {
               video={selectedVideo}
               videoRef={videoRef}
               videoError={videoError}
+              copy={copy}
               onVideoLoaded={() => setVideoError(false)}
               onVideoError={() => setVideoError(true)}
             />
 
-            <ScenarioPanel video={selectedVideo} />
+            <ScenarioPanel video={selectedVideo} copy={copy} />
           </div>
 
           <aside className="rounded-[2rem] border border-white/10 bg-[#050816] p-4 shadow-2xl shadow-black/30 sm:p-6">
             <div className="mb-4">
               <h3 className="text-2xl font-black text-white">
-                Zoznam návodov
+                {copy.listTitle}
               </h3>
 
               <p className="mt-2 text-sm font-semibold leading-6 text-slate-400">
-                Kliknite na manuál. Vľavo sa spustí správne video a zobrazí sa
-                jeho profesionálny scenár.
+                {copy.listDescription}
               </p>
             </div>
 
@@ -635,7 +403,7 @@ export default function VideoNavodPage() {
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Hľadať video návod..."
+                placeholder={copy.searchPlaceholder}
                 className="w-full rounded-2xl border border-white/10 bg-white/[0.06] py-4 pl-12 pr-4 text-sm font-semibold text-white outline-none placeholder:text-slate-500 focus:border-purple-400"
               />
             </div>
@@ -660,15 +428,15 @@ export default function VideoNavodPage() {
             <div className="max-h-[760px] space-y-3 overflow-y-auto pr-1">
               {filteredVideos.length === 0 ? (
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 text-center text-sm text-slate-400">
-                  Nenašiel sa žiadny video návod.
+                  {copy.noResults}
                 </div>
               ) : (
                 filteredVideos.map((video) => {
-                  const active = selectedVideo.id === video.id;
+                  const active = selectedVideo.slug === video.slug;
 
                   return (
                     <button
-                      key={video.id}
+                      key={video.slug}
                       type="button"
                       onClick={() => playVideo(video)}
                       className={`w-full rounded-2xl border p-4 text-left transition ${
@@ -691,7 +459,7 @@ export default function VideoNavodPage() {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-3">
                             <div className="font-black text-white">
-                              {video.order}. {video.title}
+                              {video.title}
                             </div>
 
                             <div className="shrink-0 rounded-full bg-black/30 px-2 py-1 text-[11px] font-bold text-slate-300">
@@ -720,23 +488,21 @@ export default function VideoNavodPage() {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-2xl font-black text-white">
-                Odporúčaný postup pre nového používateľa
+                {copy.recommendedTitle}
               </h2>
 
               <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-purple-100">
-                Najskôr si pozrite Hlavné menu, Profil používateľa, Novú prácu,
-                AI Chat, AI školiteľa a Obhajobu. Tieto návody vysvetľujú
-                základný spôsob práce so Zedperou.
+                {copy.recommendedDescription}
               </p>
             </div>
 
             <button
               type="button"
-              onClick={() => playVideo(videoTutorials[0])}
+              onClick={() => playVideo(localizedVideos[0])}
               className="inline-flex items-center justify-center gap-2 rounded-2xl bg-purple-600 px-6 py-4 text-sm font-black text-white transition hover:bg-purple-500"
             >
               <Home size={18} />
-              Spustiť od začiatku
+              {copy.startFromBeginning}
             </button>
           </div>
         </section>
@@ -749,12 +515,14 @@ function ProfessionalVideoPlayer({
   video,
   videoRef,
   videoError,
+  copy,
   onVideoLoaded,
   onVideoError,
 }: {
-  video: VideoTutorial;
+  video: LocalizedVideoManual;
   videoRef: RefObject<HTMLVideoElement | null>;
   videoError: boolean;
+  copy: (typeof pageCopy)['sk'];
   onVideoLoaded: () => void;
   onVideoError: () => void;
 }) {
@@ -763,19 +531,19 @@ function ProfessionalVideoPlayer({
       <div className="relative aspect-video overflow-hidden bg-[#020617]">
         {!videoError ? (
           <video
-            key={video.src}
+            key={video.videoUrl}
             ref={videoRef}
             controls
             playsInline
             preload="metadata"
-            poster={video.poster}
+            poster={video.thumbnail}
             className="h-full w-full bg-black object-contain"
             onLoadedData={onVideoLoaded}
             onCanPlay={onVideoLoaded}
             onError={onVideoError}
           >
-            <source src={video.src} type="video/mp4" />
-            Váš prehliadač nepodporuje prehrávanie videa.
+            <source src={video.videoUrl} type="video/mp4" />
+            {copy.browserUnsupported}
           </video>
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-[#050816] p-8 text-center">
@@ -783,17 +551,15 @@ function ProfessionalVideoPlayer({
               <Bot className="mx-auto mb-4 h-12 w-12 text-purple-300" />
 
               <p className="text-xl font-black text-white">
-                Video súbor sa nenašiel
+                {copy.videoNotFound}
               </p>
 
               <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">
-                Skontrolujte, či je MP4 uložené v priečinku
-                public/videos/zedpera_fixed a či názov súboru presne zodpovedá
-                tomuto odkazu:
+                {copy.videoNotFoundDescription}
               </p>
 
               <code className="mt-4 inline-block rounded-xl bg-black/50 px-4 py-3 text-xs font-bold text-purple-200">
-                {video.src}
+                {video.videoUrl}
               </code>
             </div>
           </div>
@@ -801,11 +567,11 @@ function ProfessionalVideoPlayer({
 
         <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-2xl border border-white/10 bg-black/45 px-4 py-3 backdrop-blur-xl">
           <div className="text-xs font-black uppercase tracking-[0.22em] text-purple-200">
-            AI sprievodca
+            {copy.aiGuide}
           </div>
 
           <div className="mt-1 max-w-md text-sm font-bold leading-5 text-white">
-            {video.avatarLine}
+            {video.description}
           </div>
         </div>
 
@@ -817,11 +583,11 @@ function ProfessionalVideoPlayer({
 
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-100">
-              Zedpera Bot
+              {copy.botName}
             </p>
 
             <p className="text-xs font-bold text-slate-200">
-              vedie používateľa krok za krokom
+              {copy.botDescription}
             </p>
           </div>
         </div>
@@ -858,14 +624,20 @@ function ProfessionalVideoPlayer({
   );
 }
 
-function ScenarioPanel({ video }: { video: VideoTutorial }) {
+function ScenarioPanel({
+  video,
+  copy,
+}: {
+  video: LocalizedVideoManual;
+  copy: (typeof pageCopy)['sk'];
+}) {
   return (
     <div className="mt-5 rounded-3xl border border-white/10 bg-black/30 p-5">
       <div className="mb-3 flex items-center gap-2">
         <BookOpen className="text-purple-400" size={22} />
 
         <h3 className="text-xl font-black text-white">
-          Scenár a postup manuálu
+          {copy.scenarioTitle}
         </h3>
       </div>
 
@@ -875,11 +647,16 @@ function ScenarioPanel({ video }: { video: VideoTutorial }) {
 
       <ul className="mt-4 space-y-3">
         {video.steps.map((step, index) => (
-          <li key={`${video.id}-${index}`} className="flex gap-3 text-sm text-slate-200">
+          <li
+            key={`${video.slug}-${index}`}
+            className="flex gap-3 text-sm text-slate-200"
+          >
             <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-purple-400" />
 
             <span>
-              <strong className="text-white">Krok {index + 1}: </strong>
+              <strong className="text-white">
+                {copy.step} {index + 1}:{' '}
+              </strong>
               {step}
             </span>
           </li>
@@ -893,10 +670,10 @@ function ScenarioPanel({ video }: { video: VideoTutorial }) {
           </div>
 
           <div>
-            <p className="font-black text-white">Text sprievodcu</p>
+            <p className="font-black text-white">{copy.guideText}</p>
 
             <p className="mt-1 text-sm font-semibold leading-6 text-purple-100">
-              {video.avatarLine}
+              {video.description}
             </p>
           </div>
         </div>

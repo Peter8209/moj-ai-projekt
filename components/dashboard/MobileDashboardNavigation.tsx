@@ -150,19 +150,24 @@ function getBottomMainMenuItems(onNavigate: (path: string) => void) {
   return [
     {
       key: 'overview',
-      label: 'Prehľad',
+      label: 'Menu',
       description: 'Hlavný prehľad',
       icon: <Home className="h-4 w-4" />,
       onClick: () => onNavigate('/dashboard'),
-      activePath: '/dashboard',
     },
     {
       key: 'profile',
       label: 'Profil',
       description: 'Účet klienta',
       icon: <User className="h-4 w-4" />,
-      onClick: () => onNavigate('/profile'),
-      activePath: '/profile',
+      onClick: () => onNavigate('/profile?tab=account'),
+    },
+    {
+      key: 'chat',
+      label: 'AI Chat',
+      description: 'Písanie a úprava textu',
+      icon: <Sparkles className="h-4 w-4" />,
+      onClick: () => onNavigate('/chat'),
     },
     {
       key: 'new-work',
@@ -170,15 +175,13 @@ function getBottomMainMenuItems(onNavigate: (path: string) => void) {
       description: 'Vytvoriť prácu',
       icon: <FileText className="h-4 w-4" />,
       onClick: () => onNavigate('/projects?new=1'),
-      activePath: '/projects?new=1',
     },
     {
       key: 'works',
       label: 'Moje práce',
       description: 'Rozpracované práce',
       icon: <BookOpen className="h-4 w-4" />,
-      onClick: () => onNavigate('/projects'),
-      activePath: '/projects',
+      onClick: () => onNavigate('/projects?view=list'),
     },
     {
       key: 'sources',
@@ -186,23 +189,13 @@ function getBottomMainMenuItems(onNavigate: (path: string) => void) {
       description: 'Literatúra',
       icon: <Search className="h-4 w-4" />,
       onClick: () => onNavigate('/sources'),
-      activePath: '/sources',
-    },
-    {
-      key: 'videos',
-      label: 'Videá',
-      description: 'Video návody',
-      icon: <PlayCircle className="h-4 w-4" />,
-      onClick: () => onNavigate('/video'),
-      activePath: '/video',
     },
     {
       key: 'packages',
       label: 'Balíčky',
       description: 'Predplatné',
       icon: <CreditCard className="h-4 w-4" />,
-      onClick: () => onNavigate('/packages'),
-      activePath: '/packages',
+      onClick: () => onNavigate('/pricing'),
     },
     {
       key: 'history',
@@ -210,7 +203,6 @@ function getBottomMainMenuItems(onNavigate: (path: string) => void) {
       description: 'História chatu',
       icon: <History className="h-4 w-4" />,
       onClick: () => onNavigate('/history'),
-      activePath: '/history',
     },
   ];
 }
@@ -320,12 +312,13 @@ export default function MobileDashboardNavigation({
   return (
     <>
       {/* =====================================================
-          MOBILNÁ VRCHNÁ LIŠTA — AI SEKCIE
+          MOBILNÁ VRCHNÁ LIŠTA — IBA AI SEKCIA
+          Toto nahrádza pôvodné horné menu.
       ===================================================== */}
 
       <section className="sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-3 pt-3 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
               AI sekcia
             </p>
@@ -341,7 +334,7 @@ export default function MobileDashboardNavigation({
 
           <button
             type="button"
-            onClick={() => onNavigate('/profile')}
+            onClick={() => onNavigate('/profile?tab=account')}
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white transition hover:bg-white/[0.1] active:scale-95"
             aria-label="Profil"
           >
@@ -369,7 +362,7 @@ export default function MobileDashboardNavigation({
           </div>
         )}
 
-        {/* JAZYKOVÉ MUTÁCIE HORE */}
+        {/* JAZYKY — OSTÁVAJÚ HORE POD AI SEKCIOU */}
         <div className="mb-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex min-w-max gap-2">
             {dashboardLanguages.map((item) => {
@@ -405,7 +398,7 @@ export default function MobileDashboardNavigation({
           </div>
         </div>
 
-        {/* AI MODULY HORE — POSÚVATEĽNÉ */}
+        {/* AI MODULY — VRCHNÁ POSÚVATEĽNÁ LIŠTA */}
         <div className="-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex min-w-max gap-2">
             {visibleModules.map((item) => {

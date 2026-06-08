@@ -219,7 +219,7 @@ function getBottomNavItems(onNavigate: (path: string) => void) {
       label: 'Videá',
       description: 'Video návod',
       icon: <PlayCircle className="h-4 w-4" />,
-      onClick: () => onNavigate('/videos'),
+      onClick: () => onNavigate('/video'),
       active: false,
     },
     {
@@ -340,11 +340,12 @@ export default function MobileDashboardNavigation({
 
   return (
     <>
-      <section className="sticky top-0 z-40 -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-3 pt-3 shadow-2xl shadow-black/40 backdrop-blur-xl xl:hidden">
+      {/* HORNÉ KLIKATEĽNÉ VNÚTORNÉ MENU AI MODULOV */}
+      <section className="sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-3 pt-3 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
-              AI nástroje
+              Vnútorné AI menu
             </p>
 
             <h2 className="mt-1 line-clamp-1 text-lg font-black leading-tight text-white">
@@ -361,7 +362,7 @@ export default function MobileDashboardNavigation({
           <button
             type="button"
             onClick={() => onNavigate('/profile')}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white transition hover:bg-white/[0.1]"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white transition hover:bg-white/[0.1] active:scale-95"
             aria-label="Profil"
           >
             <User className="h-5 w-5" />
@@ -376,6 +377,7 @@ export default function MobileDashboardNavigation({
           </div>
         ) : null}
 
+        {/* JAZYKY V HORNEJ ČASTI */}
         <div className="mb-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex min-w-max gap-2">
             {dashboardLanguages.map((item) => {
@@ -386,17 +388,19 @@ export default function MobileDashboardNavigation({
                   key={item.code}
                   type="button"
                   onClick={() => handleChangeLanguage(item.code)}
-                  className={`flex min-h-[42px] min-w-[86px] shrink-0 items-center justify-center gap-2 rounded-2xl border px-3 py-2 text-xs font-black transition ${
+                  className={`flex min-h-[42px] min-w-[86px] shrink-0 items-center justify-center gap-2 rounded-2xl border px-3 py-2 text-xs font-black transition active:scale-95 ${
                     active
                       ? 'border-cyan-300 bg-cyan-500 text-white shadow-lg shadow-cyan-950/40'
-                      : 'border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]'
+                      : 'border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1] hover:text-white'
                   }`}
                   aria-pressed={active}
                   title={item.label}
                 >
                   <span
                     className={`flex h-6 min-w-8 items-center justify-center rounded-xl px-2 text-[10px] font-black ${
-                      active ? 'bg-white/20 text-white' : 'bg-black/30 text-cyan-200'
+                      active
+                        ? 'bg-white/20 text-white'
+                        : 'bg-black/30 text-cyan-200'
                     }`}
                   >
                     {item.short}
@@ -409,6 +413,7 @@ export default function MobileDashboardNavigation({
           </div>
         </div>
 
+        {/* KLIKATEĽNÉ AI MODULY HORE */}
         <div className="-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex min-w-max gap-2">
             {visibleModules.map((item) => {
@@ -426,10 +431,10 @@ export default function MobileDashboardNavigation({
                   key={item.key}
                   type="button"
                   onClick={() => handleSelectModule(item.key)}
-                  className={`min-h-[76px] w-[132px] shrink-0 rounded-2xl border px-3 py-3 text-left transition ${
+                  className={`min-h-[76px] w-[132px] shrink-0 rounded-2xl border px-3 py-3 text-left transition active:scale-[0.97] ${
                     active
                       ? 'border-violet-300 bg-violet-600 text-white shadow-lg shadow-violet-950/50'
-                      : 'border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]'
+                      : 'border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1] hover:text-white'
                   }`}
                   aria-pressed={active}
                 >
@@ -469,7 +474,8 @@ export default function MobileDashboardNavigation({
         </div>
       </section>
 
-      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#020617]/95 px-3 pb-[calc(env(safe-area-inset-bottom)+0.55rem)] pt-2 text-white shadow-2xl shadow-black/70 backdrop-blur-xl xl:hidden">
+      {/* DOLNÁ POSÚVAJÚCA HLAVNÁ LIŠTA */}
+      <nav className="fixed inset-x-0 bottom-0 z-[90] border-t border-white/10 bg-[#020617]/95 px-3 pb-[calc(env(safe-area-inset-bottom)+0.55rem)] pt-2 text-white shadow-2xl shadow-black/70 backdrop-blur-2xl xl:hidden">
         <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex min-w-max gap-2">
             {bottomNavItems.map((item) => (
@@ -483,10 +489,10 @@ export default function MobileDashboardNavigation({
                     scrollToDashboardToolPanel();
                   }
                 }}
-                className={`flex min-h-[60px] w-[86px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition ${
+                className={`flex min-h-[60px] w-[86px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.97] ${
                   item.active
                     ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
-                    : 'border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]'
+                    : 'border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1] hover:text-white'
                 }`}
                 title={item.description}
               >
@@ -498,6 +504,7 @@ export default function MobileDashboardNavigation({
         </div>
       </nav>
 
+      {/* MEDZERA, ABY DOLNÉ MENU NEPREKRÝVALO OBSAH */}
       <div className="h-[88px] xl:hidden" aria-hidden="true" />
     </>
   );

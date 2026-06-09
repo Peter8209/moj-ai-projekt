@@ -40,11 +40,6 @@ type MobileDashboardNavigationProps = {
   moduleInfos: MobileDashboardModuleInfo[];
   t?: any;
   onSelectModule: (moduleKey: string) => void;
-
-  /**
-   * Navigácia z DashboardClient.tsx.
-   * Používa sa pre hlavné mobilné menu.
-   */
   onNavigate?: (path: string) => void;
 };
 
@@ -109,6 +104,8 @@ function normalizeModuleLabel(label: string) {
     .replace(/AI\s*supervízor/gi, 'AI školiteľ')
     .replace(/AI\s*vedúci/gi, 'AI školiteľ')
     .replace(/AI\s*veduci/gi, 'AI školiteľ')
+    .replace(/Preklad/gi, 'Translator')
+    .replace(/Translation/gi, 'Translator')
     .replace(/Originalita/gi, 'Kontrola originality');
 }
 
@@ -160,7 +157,7 @@ function getShortModuleLabel(moduleKey: string, label: string) {
       return 'Obhajoba';
 
     case 'translation':
-      return 'Preklad';
+      return 'Translator';
 
     case 'data':
       return 'Analýza dát';
@@ -200,10 +197,10 @@ function getModuleDescription(moduleKey: string) {
       return 'Tabuľky, výpočty a grafy';
 
     case 'planning':
-      return 'Harmonogram práce';
+      return 'Plánovanie termínov';
 
     case 'emails':
-      return 'Akademická komunikácia';
+      return 'Profesionálne písanie emailov';
 
     case 'humanizer':
       return 'Prirodzený štýl textu';
@@ -235,8 +232,20 @@ export default function MobileDashboardNavigation({
     useState<string>(activeModule);
 
   const cleanActiveModuleLabel = useMemo(() => {
+    if (activeModule === 'translation') {
+      return 'Translator';
+    }
+
+    if (activeModule === 'planning') {
+      return 'Plánovanie termínov';
+    }
+
+    if (activeModule === 'emails') {
+      return 'Profesionálne písanie emailov';
+    }
+
     return normalizeModuleLabel(activeModuleLabel);
-  }, [activeModuleLabel]);
+  }, [activeModule, activeModuleLabel]);
 
   const visibleModules = useMemo(() => {
     if (!Array.isArray(moduleInfos)) {
@@ -513,7 +522,7 @@ export default function MobileDashboardNavigation({
 
             <div className="mt-3 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 p-3">
               <p className="text-[11px] font-bold leading-5 text-cyan-100">
-                AI školiteľ, Audit, Obhajoba a Preklad sú na karte{' '}
+                AI školiteľ, Audit, Obhajoba a Translator sú na karte{' '}
                 <button
                   type="button"
                   onClick={() => setActiveTab('ai')}

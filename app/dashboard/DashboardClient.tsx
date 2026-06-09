@@ -1852,14 +1852,27 @@ const activeModuleButtonLabel =
 const fixedActiveModuleUi = fixedModuleUi[activeModule];
 
 const activeModuleInputLabel =
-  fixedActiveModuleUi?.inputLabel ||
-  t.dashboardTools.inputLabels?.[activeTranslationKey] ||
-  t.dashboardTools.common.assignmentLabel;
+  activeModule === 'translation'
+    ? 'Translator'
+    : activeModule === 'planning'
+      ? 'Plánovanie termínov'
+      : activeModule === 'emails'
+        ? 'Profesionálne písanie emailov'
+        : fixedUi?.inputLabel ||
+          t?.dashboardTools?.inputLabels?.[activeTranslationKey] ||
+          t?.dashboardTools?.common?.assignmentLabel ||
+          'Zadanie';
 
 const activeModulePlaceholder =
-  fixedActiveModuleUi?.placeholder ||
-  t.dashboardTools.placeholders?.[activeTranslationKey] ||
-  '';
+  activeModule === 'translation'
+    ? 'Vložte text, ktorý chcete preložiť. Potom vyberte zdrojový a cieľový jazyk.'
+    : activeModule === 'planning'
+      ? 'Zadajte termín odovzdania, aktuálny stav práce a požadovaný harmonogram.'
+      : activeModule === 'emails'
+        ? 'Napíšte, komu má byť email určený a čo má obsahovať.'
+        : fixedUi?.placeholder ||
+          t?.dashboardTools?.placeholders?.[activeTranslationKey] ||
+          '';
 
 const activeModuleCard =
   t?.dashboardTools?.cards?.[activeTranslationKey];
@@ -1875,7 +1888,7 @@ const activeModuleIntro =
 
 const activeModuleInputHelp =
   activeModule === 'translation'
-    ? 'Vložte text, ktorý chcete preložiť, a vyberte cieľový jazyk prekladu.'
+    ? ''
     : activeModule === 'planning'
       ? ''
       : activeModule === 'emails'

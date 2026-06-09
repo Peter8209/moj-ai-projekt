@@ -1849,44 +1849,48 @@ const activeModuleButtonLabel =
   t?.dashboardTools?.buttons?.[activeTranslationKey] ||
   fixedUi.button;
 
+const fixedActiveModuleUi = fixedModuleUi[activeModule];
+
 const activeModuleInputLabel =
-  t?.dashboardTools?.inputLabels?.[activeTranslationKey] ||
-  fixedUi.inputLabel ||
-  t?.dashboardTools?.common?.assignmentLabel ||
-  'Zadanie alebo text';
+  fixedActiveModuleUi?.inputLabel ||
+  t.dashboardTools.inputLabels?.[activeTranslationKey] ||
+  t.dashboardTools.common.assignmentLabel;
 
 const activeModulePlaceholder =
-  t?.dashboardTools?.placeholders?.[activeTranslationKey] ||
-  fixedUi.placeholder;
-
-const activeModuleInfoText =
-  t?.dashboardTools?.infoTexts?.[activeTranslationKey] ||
-  fixedUi.intro ||
-  t?.dashboardTools?.common?.infoText ||
+  fixedActiveModuleUi?.placeholder ||
+  t.dashboardTools.placeholders?.[activeTranslationKey] ||
   '';
-
-const activeModuleResultTitle =
-  t?.dashboardTools?.resultTitles?.[activeTranslationKey] ||
-  fixedUi.resultTitle ||
-  activeModuleLabel;
 
 const activeModuleCard =
   t?.dashboardTools?.cards?.[activeTranslationKey];
 
-const activeModuleTexts =
+const activeDashboardModuleTexts =
   t?.dashboardTools?.modules?.[activeTranslationKey];
 
 const activeModuleIntro =
-  activeModuleTexts?.intro || activeModuleInfoText || fixedUi.intro;
+  fixedUi?.intro ||
+  activeDashboardModuleTexts?.intro ||
+  activeModuleCard?.description ||
+  '';
 
 const activeModuleInputHelp =
-  activeModuleTexts?.inputHelp || activeModulePlaceholder || fixedUi.placeholder;
+  activeModule === 'translation'
+    ? 'Vložte text, ktorý chcete preložiť, a vyberte cieľový jazyk prekladu.'
+    : activeModule === 'planning'
+      ? ''
+      : activeModule === 'emails'
+        ? ''
+        : activeDashboardModuleTexts?.inputHelp ||
+          activeModulePlaceholder ||
+          fixedUi?.placeholder ||
+          '';
 
 const activeModuleResultHelp =
-  activeModuleTexts?.resultHelp || '';
+  activeDashboardModuleTexts?.resultHelp || '';
 
 const activeModuleEmptyState =
-  activeModuleTexts?.emptyState || 'Zatiaľ nie je vložený žiadny text.';
+  activeDashboardModuleTexts?.emptyState ||
+  'Zatiaľ nie je vložený žiadny text.';
 
 const activeModuleCardTitle =
   activeModuleCard?.title || activeModuleLabel;
@@ -1897,6 +1901,11 @@ const activeModuleCardSubtitle =
 const activeModuleCardDescription =
   activeModuleCard?.description || activeModuleIntro;
 
+const activeModuleResultTitle =
+  fixedUi?.resultTitle ||
+  activeModuleCard?.title ||
+  activeModuleLabel ||
+  'Výstup';
 
 const exportTitle = useMemo(() => {
   return `${activeModuleLabel} - ${
@@ -1904,17 +1913,19 @@ const exportTitle = useMemo(() => {
   }`.trim();
 }, [activeModuleLabel, activeProfile]);
 
-
 const selectorTranslations = getDashboardSelectorTranslations(t);
 
-const languageSelectOptions = createLanguageSelectOptions(selectorTranslations);
+const languageSelectOptions =
+  createLanguageSelectOptions(selectorTranslations);
 
 const translationStyleOptions =
   createTranslationStyleOptions(selectorTranslations);
 
-const emailTypeOptions = createEmailTypeOptions(selectorTranslations);
+const emailTypeOptions =
+  createEmailTypeOptions(selectorTranslations);
 
-const emailToneOptions = createEmailToneOptions(selectorTranslations);
+const emailToneOptions =
+  createEmailToneOptions(selectorTranslations);
 
 const getLanguageLabel = (value: LanguageCode): string => {
   const option = languageSelectOptions.find(

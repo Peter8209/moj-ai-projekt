@@ -8,12 +8,12 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronUp,
+  CreditCard,
   GraduationCap,
   History,
   Home,
   Mail,
   Menu,
-  Package,
   PlayCircle,
   ShieldCheck,
   Sparkles,
@@ -57,8 +57,8 @@ const mobileMainMenuItems = [
   },
   {
     label: 'Profil',
-    description: 'Profil práce',
-    href: '/profile',
+    description: 'Účet klienta',
+    href: '/profile?tab=account',
     icon: UserCircle,
   },
   {
@@ -69,8 +69,8 @@ const mobileMainMenuItems = [
   },
   {
     label: 'Moje práce',
-    description: 'Uložené projekty',
-    href: '/works',
+    description: 'Zoznam rozpracovaných prác',
+    href: '/projects?view=list',
     icon: BriefcaseBusiness,
   },
   {
@@ -81,9 +81,9 @@ const mobileMainMenuItems = [
   },
   {
     label: 'Balíčky',
-    description: 'Predplatné a plány',
-    href: '/packages',
-    icon: Package,
+    description: 'Predplatné a doplnky',
+    href: '/pricing',
+    icon: CreditCard,
   },
   {
     label: 'História',
@@ -93,8 +93,8 @@ const mobileMainMenuItems = [
   },
   {
     label: 'Video návod',
-    description: 'Návody k systému',
-    href: '/video',
+    description: 'Mobilné video návody',
+    href: '/videos',
     icon: Video,
   },
 ];
@@ -301,6 +301,15 @@ export default function MobileDashboardNavigation({
   }
 
   function handleNavigate(path: string) {
+    if (typeof window !== 'undefined' && path.startsWith('/projects')) {
+      localStorage.removeItem('zedpera_new_project_mode');
+      localStorage.removeItem('zedpera_open_identity');
+      localStorage.removeItem('zedpera_open_project_identity');
+      localStorage.removeItem('zedpera_continue_project_identity');
+      localStorage.removeItem('zedpera_last_project_identity');
+      localStorage.removeItem('zedpera_selected_project_identity');
+    }
+
     if (onNavigate) {
       onNavigate(path);
       return;
@@ -311,20 +320,7 @@ export default function MobileDashboardNavigation({
 
   return (
     <>
-      {/* =====================================================
-          MOBILNÁ ÚVODNÁ STRÁNKA DASHBOARDU
-
-          1. karta: Hlavné menu
-          2. karta: AI nástroje
-          3. karta: Samostatná karta otvoreného modulu
-
-          Na tretej karte je menu skryté / odkryté.
-          Keď je menu skryté, používateľ vidí len kompaktnú lištu
-          a môže pracovať s modulom nižšie na stránke.
-      ===================================================== */}
-
       <section className="sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-4 pt-4 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
-        {/* HLAVIČKA MOBILNEJ APLIKÁCIE */}
         <div className="mb-3">
           <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
             Mobilná aplikácia
@@ -349,7 +345,6 @@ export default function MobileDashboardNavigation({
           </p>
         </div>
 
-        {/* PROFIL PRÁCE */}
         {(activeProfileTitle || activeProfileSubtitle || activeProfileType) &&
         activeTab !== 'module' ? (
           <div className="mb-3 rounded-2xl border border-white/10 bg-black/25 px-3 py-2">
@@ -371,8 +366,7 @@ export default function MobileDashboardNavigation({
           </div>
         ) : null}
 
-        {/* PREPÍNANIE KARIET */}
-        {activeTab !== 'module' || isModuleMenuVisible ? (
+        {(activeTab !== 'module' || isModuleMenuVisible) && (
           <div className="mb-3 grid grid-cols-3 gap-2 rounded-3xl border border-white/10 bg-[#070b18] p-2 shadow-2xl shadow-black/40">
             <button
               type="button"
@@ -434,9 +428,8 @@ export default function MobileDashboardNavigation({
               Modul
             </button>
           </div>
-        ) : null}
+        )}
 
-        {/* KARTA 1 — HLAVNÉ MENU */}
         {activeTab === 'main' ? (
           <div className="rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
             <div className="mb-3 flex items-center justify-between gap-3">
@@ -477,33 +470,35 @@ export default function MobileDashboardNavigation({
             </div>
 
             {isMainMenuVisible ? (
-              <div className="grid grid-cols-2 gap-2">
-                {mobileMainMenuItems.map((item) => {
-                  const Icon = item.icon;
+              <div className="max-h-[54dvh] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="grid grid-cols-2 gap-2">
+                  {mobileMainMenuItems.map((item) => {
+                    const Icon = item.icon;
 
-                  return (
-                    <button
-                      key={`${item.href}-${item.label}`}
-                      type="button"
-                      onClick={() => handleNavigate(item.href)}
-                      className="flex min-h-[64px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-left text-white transition hover:border-violet-300/40 hover:bg-violet-600/20 active:scale-[0.98]"
-                    >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/30 text-violet-200">
-                        <Icon className="h-4 w-4" />
-                      </span>
-
-                      <span className="min-w-0">
-                        <span className="block truncate text-xs font-black">
-                          {item.label}
+                    return (
+                      <button
+                        key={`${item.href}-${item.label}`}
+                        type="button"
+                        onClick={() => handleNavigate(item.href)}
+                        className="flex min-h-[68px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-left text-white transition hover:border-violet-300/40 hover:bg-violet-600/20 active:scale-[0.98]"
+                      >
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/30 text-violet-200">
+                          <Icon className="h-4 w-4" />
                         </span>
 
-                        <span className="mt-0.5 block truncate text-[10px] font-semibold text-slate-500">
-                          {item.description}
+                        <span className="min-w-0">
+                          <span className="block truncate text-xs font-black">
+                            {item.label}
+                          </span>
+
+                          <span className="mt-0.5 block truncate text-[10px] font-semibold text-slate-500">
+                            {item.description}
+                          </span>
                         </span>
-                      </span>
-                    </button>
-                  );
-                })}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             ) : (
               <button
@@ -532,7 +527,6 @@ export default function MobileDashboardNavigation({
           </div>
         ) : null}
 
-        {/* KARTA 2 — AI NÁSTROJE */}
         {activeTab === 'ai' ? (
           <div className="rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
             <div className="mb-3 flex items-center justify-between gap-3">
@@ -622,14 +616,12 @@ export default function MobileDashboardNavigation({
           </div>
         ) : null}
 
-        {/* KARTA 3 — SAMOSTATNÝ MODUL */}
         {activeTab === 'module' ? (
           <div
             className={`rounded-3xl border border-violet-400/20 bg-[#070b18] shadow-2xl shadow-black/40 ${
               isModuleMenuVisible ? 'p-3' : 'p-2'
             }`}
           >
-            {/* KOMPAKTNÁ LIŠTA MODULU — vždy viditeľná */}
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
@@ -675,7 +667,6 @@ export default function MobileDashboardNavigation({
               </button>
             </div>
 
-            {/* ODKRYTÉ MENU MODULU */}
             {isModuleMenuVisible ? (
               <div className="mt-3">
                 <div className="mb-3 rounded-2xl border border-white/10 bg-black/25 p-3">

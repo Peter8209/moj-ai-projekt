@@ -2172,6 +2172,7 @@ function MobileHeaderLanguageSelector({
   onChange: (language: AppLanguage) => void;
 }) {
   const [open, setOpen] = useState(false);
+
   const current =
     languages.find((item) => item.code === language) || languages[0];
 
@@ -2181,71 +2182,91 @@ function MobileHeaderLanguageSelector({
   }
 
   return (
-    <div className="relative z-[95] xl:hidden">
+    <div className="relative z-[140] xl:hidden">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="mobile-language-trigger flex h-11 min-w-[88px] items-center justify-center gap-2 rounded-xl border border-violet-400/45 bg-[#080816] px-3 text-[12px] font-black text-white shadow-[0_0_24px_rgba(124,58,237,0.25)]"
+        className="mobile-language-trigger mobile-language-trigger-wide flex h-11 min-w-[168px] items-center justify-between gap-2 rounded-2xl border border-violet-400/45 bg-[#080816] px-3 text-white shadow-[0_0_24px_rgba(124,58,237,0.25)]"
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-label={labels.language}
       >
-        <Languages size={16} className="text-violet-200" />
-        <span className={`language-chip language-${current.code}`}>
-          {current.short}
+        <span className="flex min-w-0 items-center gap-2">
+          <span className={`language-chip language-${current.code}`}>
+            {current.short}
+          </span>
+
+          <span className="min-w-0 text-left leading-tight">
+            <span className="block truncate text-[9px] font-black uppercase tracking-[0.18em] text-violet-100">
+              {labels.language}
+            </span>
+
+            <span className="block truncate text-[12px] font-black text-white">
+              {current.label}
+            </span>
+          </span>
         </span>
+
         <ChevronDown
           size={14}
-          className={`text-violet-200 transition ${open ? 'rotate-180' : ''}`}
+          className={`shrink-0 text-violet-200 transition ${
+            open ? 'rotate-180' : ''
+          }`}
         />
       </button>
 
       {open ? (
         <div
-          className="mobile-language-popover absolute right-0 top-[calc(100%+0.65rem)] z-[120] w-[min(86vw,320px)] overflow-hidden rounded-2xl border border-violet-400/40 bg-[#050711] p-2 shadow-[0_24px_70px_rgba(0,0,0,0.85),0_0_34px_rgba(124,58,237,0.28)]"
+          className="absolute right-0 top-[calc(100%+0.55rem)] z-[150] w-[285px] overflow-hidden rounded-2xl border border-violet-500/40 bg-[#050711] p-2 shadow-[0_22px_70px_rgba(0,0,0,0.82),0_0_35px_rgba(124,58,237,0.28)]"
           role="listbox"
         >
-          <div className="mb-2 flex items-center gap-2 rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-white">
+          <div className="mb-2 flex items-center gap-2 rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-[11px] font-black uppercase tracking-[0.18em] text-violet-100">
             <Languages size={15} className="text-violet-300" />
             {labels.language}
           </div>
 
-          <div className="grid gap-2">
-            {languages.map((item) => {
-              const active = item.code === language;
+          {languages.map((item) => {
+            const active = item.code === language;
 
-              return (
-                <button
-                  key={item.code}
-                  type="button"
-                  onClick={() => handleSelect(item.code)}
-                  className={`flex min-h-[48px] w-full items-center justify-between rounded-xl border px-3 text-left text-[13px] font-black transition ${
-                    active
-                      ? 'border-violet-400 bg-violet-700 text-white shadow-[0_0_24px_rgba(124,58,237,0.35)]'
-                      : 'border-white/10 bg-[#0b1020] text-white hover:border-violet-400/50 hover:bg-[#11172a]'
-                  }`}
-                  role="option"
-                  aria-selected={active}
-                >
-                  <span className="flex items-center gap-3">
-                    <span className={`language-chip language-${item.code}`}>
-                      {item.short}
-                    </span>
-                    <span className="flex flex-col leading-tight">
-                      <span className="text-[13px] font-black text-white">
-                        {item.label}
-                      </span>
-                      <span className="text-[10px] font-black uppercase tracking-[0.12em] text-violet-200">
-                        {active ? labels.currentLanguage : labels.switchLanguage}
-                      </span>
-                    </span>
+            return (
+              <button
+                key={item.code}
+                type="button"
+                onClick={() => handleSelect(item.code)}
+                className={`flex min-h-[52px] w-full items-center justify-between rounded-xl px-3 text-left text-[13px] font-black transition ${
+                  active
+                    ? 'bg-violet-700 text-white'
+                    : 'text-white hover:bg-white/5 hover:text-white'
+                }`}
+                role="option"
+                aria-selected={active}
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className={`language-chip language-${item.code}`}>
+                    {item.short}
                   </span>
 
-                  {active ? <CheckCircle2 size={17} /> : <ArrowRight size={16} />}
-                </button>
-              );
-            })}
-          </div>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[14px] font-black text-white">
+                      {item.label}
+                    </span>
+
+                    <span className="block truncate text-[11px] font-bold text-violet-200">
+                      {active
+                        ? labels.currentLanguage
+                        : labels.switchLanguage}
+                    </span>
+                  </span>
+                </span>
+
+                {active ? (
+                  <CheckCircle2 size={17} />
+                ) : (
+                  <ArrowRight size={16} />
+                )}
+              </button>
+            );
+          })}
         </div>
       ) : null}
     </div>
@@ -3796,14 +3817,6 @@ const mobileMenuItems = useMemo(
 
 {/* MOBILE HEADER ACTIONS */}
 <div className="relative ml-auto flex items-center gap-2 xl:hidden">
-  <Link
-    href="/login"
-    className="mobile-header-login inline-flex h-11 shrink-0 items-center justify-center rounded-2xl border border-violet-400/30 bg-[#080816] px-3 text-[12px] font-black text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
-    aria-label={t.common.login}
-  >
-    {t.common.login}
-  </Link>
-
   <MobileHeaderLanguageSelector
     language={language}
     labels={t.common}
@@ -3813,19 +3826,16 @@ const mobileMenuItems = useMemo(
   <button
     type="button"
     onClick={() => setMobileMenuOpen((value) => !value)}
-    className="mobile-header-menu-button inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-violet-400/45 bg-[#080816] px-3 text-[12px] font-black text-white shadow-[0_0_24px_rgba(124,58,237,0.25)]"
-    aria-label={mobileMenuOpen ? 'Zavrieť mobilné menu' : 'Otvoriť mobilné menu'}
+    className="mobile-header-menu-button inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-[#080816] px-3 text-[12px] font-black text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
+    aria-label="Menu"
     aria-expanded={mobileMenuOpen}
-    aria-haspopup="menu"
     aria-controls="mobile-main-menu"
   >
     {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
-    <span>Menu</span>
-    <ChevronDown
-      size={14}
-      className={`text-violet-200 transition ${mobileMenuOpen ? 'rotate-180' : ''}`}
-    />
+    <span className="hidden min-[390px]:inline">Menu</span>
   </button>
+</div>
+
 
   {/* MOBILNÉ MENU AKO JAZYKOVÁ MUTÁCIA - DROPDOWN */}
   {mobileMenuOpen ? (
@@ -3973,7 +3983,7 @@ const mobileMenuItems = useMemo(
       </div>
     </div>
   ) : null}
-</div>
+
 </div>
 </header>
 

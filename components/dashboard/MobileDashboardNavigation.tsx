@@ -6,6 +6,8 @@ import {
   Bot,
   BriefcaseBusiness,
   CalendarDays,
+  ChevronDown,
+  ChevronUp,
   GraduationCap,
   History,
   Home,
@@ -19,7 +21,9 @@ import {
   Video,
   WandSparkles,
 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+
+type MobileDashboardTab = 'main' | 'ai';
 
 type MobileDashboardModuleInfo = {
   key: string;
@@ -47,41 +51,49 @@ type MobileDashboardNavigationProps = {
 const mobileMainMenuItems = [
   {
     label: 'Menu',
+    description: 'Úvodná obrazovka',
     href: '/dashboard',
     icon: Home,
   },
   {
     label: 'Profil',
+    description: 'Profil práce',
     href: '/profile',
     icon: UserCircle,
   },
   {
     label: 'AI Chat',
+    description: 'Samostatný chat',
     href: '/chat',
     icon: Bot,
   },
   {
     label: 'Moje práce',
+    description: 'Uložené projekty',
     href: '/works',
     icon: BriefcaseBusiness,
   },
   {
     label: 'Zdroje',
+    description: 'Literatúra a citácie',
     href: '/sources',
     icon: BookOpen,
   },
   {
     label: 'Balíčky',
+    description: 'Predplatné a plány',
     href: '/packages',
     icon: Package,
   },
   {
     label: 'História',
+    description: 'História výstupov',
     href: '/history',
     icon: History,
   },
   {
     label: 'Video návod',
+    description: 'Návody k systému',
     href: '/video',
     icon: Video,
   },
@@ -206,6 +218,8 @@ function getModuleDescription(moduleKey: string) {
 
 export default function MobileDashboardNavigation({
   activeModule,
+  activeModuleLabel,
+  activeModuleSubtitle,
   activeProfileTitle,
   activeProfileSubtitle,
   activeProfileType,
@@ -214,6 +228,13 @@ export default function MobileDashboardNavigation({
   onSelectModule,
   onNavigate,
 }: MobileDashboardNavigationProps) {
+  const [activeTab, setActiveTab] = useState<MobileDashboardTab>('main');
+  const [isMainMenuVisible, setIsMainMenuVisible] = useState(true);
+
+  const cleanActiveModuleLabel = useMemo(() => {
+    return normalizeModuleLabel(activeModuleLabel);
+  }, [activeModuleLabel]);
+
   const visibleModules = useMemo(() => {
     if (!Array.isArray(moduleInfos)) {
       return [];
@@ -253,12 +274,14 @@ export default function MobileDashboardNavigation({
     <>
       {/* =====================================================
           MOBILNÁ ÚVODNÁ STRÁNKA DASHBOARDU
-          - po prihlásení sa zobrazí hlavné menu
+          - 1. karta: Hlavné menu
+          - 2. karta: AI nástroje
+          - hlavné menu sa dá skryť / odkryť
           - spodná AI lišta je odstránená
-          - AI nástroje sú vložené priamo do hlavného menu
       ===================================================== */}
 
       <section className="sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-4 pt-4 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
+        {/* HLAVIČKA MOBILNEJ APLIKÁCIE */}
         <div className="mb-3">
           <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
             Mobilná aplikácia
@@ -269,10 +292,11 @@ export default function MobileDashboardNavigation({
           </h2>
 
           <p className="mt-1 text-xs font-semibold text-slate-400">
-            Vyberte sekciu alebo AI nástroj, s ktorým chcete pracovať.
+            Vyberte sekciu systému alebo prejdite na AI nástroje.
           </p>
         </div>
 
+        {/* PROFIL PRÁCE */}
         {(activeProfileTitle || activeProfileSubtitle || activeProfileType) && (
           <div className="mb-3 rounded-2xl border border-white/10 bg-black/25 px-3 py-2">
             <p className="line-clamp-1 text-[11px] font-black text-white">
@@ -293,66 +317,169 @@ export default function MobileDashboardNavigation({
           </div>
         )}
 
-        <div className="rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-600/20 text-violet-200">
-              <Menu className="h-4 w-4" />
-            </span>
+        {/* PREPÍNANIE KARIET */}
+        <div className="mb-3 grid grid-cols-2 gap-2 rounded-3xl border border-white/10 bg-[#070b18] p-2 shadow-2xl shadow-black/40">
+          <button
+            type="button"
+            onClick={() => setActiveTab('main')}
+            className={`flex min-h-[54px] items-center justify-center gap-2 rounded-2xl px-3 py-2 text-xs font-black transition active:scale-[0.98] ${
+              activeTab === 'main'
+                ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
+                : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+            }`}
+            aria-pressed={activeTab === 'main'}
+          >
+            <Menu className="h-4 w-4" />
+            Hlavné menu
+          </button>
 
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
-                Hlavné menu
-              </p>
-              <p className="text-[11px] font-semibold text-slate-500">
-                Základné sekcie systému
-              </p>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('ai')}
+            className={`flex min-h-[54px] items-center justify-center gap-2 rounded-2xl px-3 py-2 text-xs font-black transition active:scale-[0.98] ${
+              activeTab === 'ai'
+                ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
+                : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+            }`}
+            aria-pressed={activeTab === 'ai'}
+          >
+            <Sparkles className="h-4 w-4" />
+            AI nástroje
+          </button>
+        </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            {mobileMainMenuItems.map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <button
-                  key={`${item.href}-${item.label}`}
-                  type="button"
-                  onClick={() => handleNavigate(item.href)}
-                  className="flex min-h-[58px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-left text-white transition hover:border-violet-300/40 hover:bg-violet-600/20 active:scale-[0.98]"
-                >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/30 text-violet-200">
-                    <Icon className="h-4 w-4" />
-                  </span>
-
-                  <span className="min-w-0">
-                    <span className="block truncate text-xs font-black">
-                      {item.label}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {visibleModules.length > 0 ? (
-            <>
-              <div className="my-4 h-px bg-white/10" />
-
-              <div className="mb-3 flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-200">
-                  <Sparkles className="h-4 w-4" />
+        {/* KARTA 1 — HLAVNÉ MENU */}
+        {activeTab === 'main' ? (
+          <div className="rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-600/20 text-violet-200">
+                  <Menu className="h-4 w-4" />
                 </span>
 
-                <div>
+                <div className="min-w-0">
                   <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
-                    AI nástroje
+                    Hlavné menu
                   </p>
-                  <p className="text-[11px] font-semibold text-slate-500">
-                    Školiteľ, audit, obhajoba a ďalšie moduly
+                  <p className="line-clamp-1 text-[11px] font-semibold text-slate-500">
+                    Základné sekcie systému
                   </p>
                 </div>
               </div>
 
+              <button
+                type="button"
+                onClick={() => setIsMainMenuVisible((value) => !value)}
+                className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
+                aria-expanded={isMainMenuVisible}
+              >
+                {isMainMenuVisible ? (
+                  <>
+                    Skryť
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  </>
+                ) : (
+                  <>
+                    Zobraziť
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </>
+                )}
+              </button>
+            </div>
+
+            {isMainMenuVisible ? (
+              <div className="grid grid-cols-2 gap-2">
+                {mobileMainMenuItems.map((item) => {
+                  const Icon = item.icon;
+
+                  return (
+                    <button
+                      key={`${item.href}-${item.label}`}
+                      type="button"
+                      onClick={() => handleNavigate(item.href)}
+                      className="flex min-h-[64px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-left text-white transition hover:border-violet-300/40 hover:bg-violet-600/20 active:scale-[0.98]"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/30 text-violet-200">
+                        <Icon className="h-4 w-4" />
+                      </span>
+
+                      <span className="min-w-0">
+                        <span className="block truncate text-xs font-black">
+                          {item.label}
+                        </span>
+
+                        <span className="mt-0.5 block truncate text-[10px] font-semibold text-slate-500">
+                          {item.description}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsMainMenuVisible(true)}
+                className="flex min-h-[58px] w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-violet-400/30 bg-violet-500/10 px-3 py-3 text-xs font-black text-violet-100 transition hover:bg-violet-500/15 active:scale-[0.98]"
+              >
+                <ChevronDown className="h-4 w-4" />
+                Zobraziť hlavné menu
+              </button>
+            )}
+
+            <div className="mt-3 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 p-3">
+              <p className="text-[11px] font-bold leading-5 text-cyan-100">
+                AI školiteľ, Audit, Obhajoba a Preklad sú presunuté na druhú
+                kartu <span className="font-black">AI nástroje</span>.
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        {/* KARTA 2 — AI NÁSTROJE */}
+        {activeTab === 'ai' ? (
+          <div className="rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-200">
+                  <Sparkles className="h-4 w-4" />
+                </span>
+
+                <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
+                    AI nástroje
+                  </p>
+                  <p className="line-clamp-1 text-[11px] font-semibold text-slate-500">
+                    {cleanActiveModuleLabel || 'Vyberte AI modul'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('main')}
+                className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
+              >
+                Späť
+              </button>
+            </div>
+
+            <div className="mb-3 rounded-2xl border border-white/10 bg-black/25 p-3">
+              <p className="text-[11px] font-black uppercase tracking-[0.16em] text-violet-300">
+                Aktívny modul
+              </p>
+
+              <p className="mt-1 line-clamp-1 text-sm font-black text-white">
+                {cleanActiveModuleLabel}
+              </p>
+
+              <p className="mt-1 line-clamp-2 text-[11px] font-semibold leading-5 text-slate-400">
+                {activeModuleSubtitle ||
+                  'Kliknite na AI nástroj a otvorí sa príslušný modul.'}
+              </p>
+            </div>
+
+            {visibleModules.length > 0 ? (
               <div className="grid grid-cols-2 gap-2">
                 {visibleModules.map((item) => {
                   const active = activeModule === item.key;
@@ -368,7 +495,7 @@ export default function MobileDashboardNavigation({
                       key={item.key}
                       type="button"
                       onClick={() => handleSelectModule(item.key)}
-                      className={`flex min-h-[58px] items-center gap-3 rounded-2xl border px-3 py-2 text-left transition active:scale-[0.98] ${
+                      className={`flex min-h-[66px] items-center gap-3 rounded-2xl border px-3 py-2 text-left transition active:scale-[0.98] ${
                         active
                           ? 'border-violet-300 bg-violet-600 text-white shadow-lg shadow-violet-950/40'
                           : 'border-white/10 bg-white/[0.06] text-white hover:border-violet-300/40 hover:bg-violet-600/20'
@@ -403,9 +530,15 @@ export default function MobileDashboardNavigation({
                   );
                 })}
               </div>
-            </>
-          ) : null}
-        </div>
+            ) : (
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-center">
+                <p className="text-xs font-bold text-slate-400">
+                  AI nástroje nie sú dostupné.
+                </p>
+              </div>
+            )}
+          </div>
+        ) : null}
       </section>
     </>
   );

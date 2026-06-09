@@ -3204,221 +3204,311 @@ const mobileMenuItems = useMemo(
 
 
 /* =========================================================
-   MOBILE LANDING MENU - FINAL
+   MOBILE LANDING MENU - PROFESSIONAL FINAL
    Upravuje iba mobilnú landing page.
-   Desktop ostáva nezmenený.
+   Desktop verzia ostáva nezmenená.
 ========================================================= */
-
-
-.zedpera-template .mobile-header-login {
-  color: #ffffff !important;
-  -webkit-text-fill-color: #ffffff !important;
-  text-decoration: none !important;
-  white-space: nowrap !important;
-  pointer-events: auto !important;
-}
-
-.zedpera-template .mobile-header-menu-button,
-.zedpera-template .mobile-language-trigger,
-.zedpera-template .mobile-main-menu,
-.zedpera-template .mobile-main-menu *,
-.zedpera-template .mobile-menu-backdrop {
-  pointer-events: auto !important;
-}
-
-.zedpera-template .mobile-main-menu {
-  position: fixed !important;
-  left: 12px !important;
-  right: 12px !important;
-  top: 76px !important;
-  z-index: 90 !important;
-  max-height: calc(100dvh - 92px) !important;
-  overflow: hidden !important;
-  border-radius: 24px !important;
-  border: 1px solid rgba(255, 255, 255, 0.14) !important;
-  background:
-    linear-gradient(
-      180deg,
-      rgba(10, 14, 30, 0.98) 0%,
-      rgba(3, 5, 14, 0.98) 100%
-    ) !important;
-  box-shadow:
-    0 30px 90px rgba(0, 0, 0, 0.82),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
-  backdrop-filter: blur(22px) !important;
-}
-
-.zedpera-template .mobile-main-menu-scroll {
-  max-height: calc(100dvh - 104px) !important;
-  overflow-y: auto !important;
-  padding: 14px !important;
-  overscroll-behavior: contain !important;
-}
-
-.zedpera-template .mobile-main-menu-section {
-  margin-bottom: 12px !important;
-  border-radius: 20px !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  background: rgba(10, 16, 32, 0.76) !important;
-  padding: 12px !important;
-}
-
-.zedpera-template .mobile-main-menu-title {
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  margin-bottom: 10px !important;
-  color: #ffffff !important;
-  -webkit-text-fill-color: #ffffff !important;
-  font-size: 12px !important;
-  font-weight: 950 !important;
-  letter-spacing: 0.14em !important;
-  text-transform: uppercase !important;
-}
-
-.zedpera-template .mobile-main-menu-grid {
-  display: grid !important;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  gap: 9px !important;
-}
-
-.zedpera-template .mobile-main-menu-card {
-  display: flex !important;
-  min-height: 54px !important;
-  align-items: center !important;
-  gap: 10px !important;
-  border-radius: 16px !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  background: #0b1020 !important;
-  padding: 10px 12px !important;
-  color: #ffffff !important;
-  -webkit-text-fill-color: #ffffff !important;
-  text-decoration: none !important;
-  cursor: pointer !important;
-  touch-action: manipulation !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
-}
-
-.zedpera-template .mobile-main-menu-card:active {
-  transform: scale(0.985) !important;
-}
-
-.zedpera-template .mobile-main-menu-icon {
-  display: flex !important;
-  height: 32px !important;
-  width: 32px !important;
-  flex-shrink: 0 !important;
-  align-items: center !important;
-  justify-content: center !important;
-  border-radius: 13px !important;
-  background: rgba(124, 58, 237, 0.22) !important;
-  color: #c4b5fd !important;
-  -webkit-text-fill-color: #c4b5fd !important;
-}
-
-.zedpera-template .mobile-main-menu-label {
-  min-width: 0 !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-  color: #ffffff !important;
-  -webkit-text-fill-color: #ffffff !important;
-  font-size: 13px !important;
-  font-weight: 900 !important;
-  line-height: 1.15 !important;
-}
-
-.zedpera-template .mobile-language-grid {
-  display: grid !important;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  gap: 9px !important;
-}
-
-.zedpera-template .mobile-language-option {
-  display: flex !important;
-  min-height: 52px !important;
-  align-items: center !important;
-  gap: 10px !important;
-  border-radius: 16px !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  background: #0b1020 !important;
-  padding: 9px 10px !important;
-  color: #ffffff !important;
-  -webkit-text-fill-color: #ffffff !important;
-  cursor: pointer !important;
-  touch-action: manipulation !important;
-}
-
-.zedpera-template .mobile-language-option-active {
-  border-color: rgba(167, 139, 250, 0.78) !important;
-  background: rgba(124, 58, 237, 0.35) !important;
-  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.28) !important;
-}
-
-.zedpera-template .mobile-language-label {
-  min-width: 0 !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-  color: #ffffff !important;
-  -webkit-text-fill-color: #ffffff !important;
-  font-size: 13px !important;
-  font-weight: 900 !important;
-}
-
-.zedpera-template .mobile-main-menu-actions {
-  display: grid !important;
-  grid-template-columns: 1fr !important;
-  gap: 9px !important;
-}
-
-.zedpera-template .mobile-main-menu-login,
-.zedpera-template .mobile-main-menu-start {
-  display: inline-flex !important;
-  min-height: 52px !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 8px !important;
-  border-radius: 16px !important;
-  text-align: center !important;
-  color: #ffffff !important;
-  -webkit-text-fill-color: #ffffff !important;
-  font-size: 14px !important;
-  font-weight: 950 !important;
-  text-decoration: none !important;
-}
-
-.zedpera-template .mobile-main-menu-login {
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  background: #0b1020 !important;
-}
-
-.zedpera-template .mobile-main-menu-start {
-  border: 1px solid rgba(167, 139, 250, 0.5) !important;
-  background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%) !important;
-  box-shadow: 0 18px 42px rgba(91, 33, 182, 0.36) !important;
-}
 
 @media (max-width: 1279px) {
   .zedpera-template header {
-    z-index: 100 !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 120 !important;
+    background: rgba(0, 0, 0, 0.96) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+    backdrop-filter: blur(22px) saturate(150%) !important;
   }
 
-  .zedpera-template header a[href='/'] {
+  .zedpera-template header > div {
+    min-height: 66px !important;
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+
+  .zedpera-template .mobile-header-login,
+  .zedpera-template .mobile-header-menu-button,
+  .zedpera-template .mobile-language-trigger {
+    height: 44px !important;
+    background: linear-gradient(180deg, #11172a 0%, #050711 100%) !important;
+    border: 1px solid rgba(167, 139, 250, 0.24) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    box-shadow:
+      0 12px 32px rgba(0, 0, 0, 0.42),
+      0 0 20px rgba(124, 58, 237, 0.16) !important;
+  }
+
+  .zedpera-template .mobile-header-menu-button {
+    min-width: 82px !important;
+  }
+
+  .zedpera-template .mobile-header-login {
+    max-width: 116px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .zedpera-template .mobile-menu-backdrop {
+    position: fixed !important;
+    inset: 66px 0 0 0 !important;
+    z-index: 105 !important;
+    display: block !important;
+    width: 100vw !important;
+    min-height: calc(100dvh - 66px) !important;
+    border: 0 !important;
+    background: rgba(0, 0, 0, 0.76) !important;
+    backdrop-filter: blur(10px) !important;
+  }
+
+  .zedpera-template .mobile-main-menu {
+    position: fixed !important;
+    left: 12px !important;
+    right: 12px !important;
+    top: 76px !important;
+    z-index: 115 !important;
+    max-height: calc(100dvh - 90px) !important;
+    overflow: hidden !important;
+    border-radius: 28px !important;
+    border: 1px solid rgba(167, 139, 250, 0.24) !important;
+    background:
+      radial-gradient(circle at top left, rgba(124, 58, 237, 0.26), transparent 20rem),
+      linear-gradient(180deg, rgba(9, 13, 28, 0.98) 0%, rgba(3, 5, 14, 0.98) 100%) !important;
+    box-shadow:
+      0 32px 95px rgba(0, 0, 0, 0.86),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+    backdrop-filter: blur(24px) saturate(160%) !important;
+  }
+
+  .zedpera-template .mobile-main-menu-scroll {
+    max-height: calc(100dvh - 90px) !important;
+    overflow-y: auto !important;
+    padding: 14px !important;
+    overscroll-behavior: contain !important;
+  }
+
+  .zedpera-template .mobile-main-menu-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 12px !important;
+    margin-bottom: 12px !important;
+    padding: 4px 2px 10px !important;
+  }
+
+  .zedpera-template .mobile-main-menu-brand {
+    display: flex !important;
     min-width: 0 !important;
+    align-items: center !important;
+    gap: 10px !important;
   }
 
-  .zedpera-template header a[href='/'] > div:last-child {
+  .zedpera-template .mobile-main-menu-logo {
+    display: flex !important;
+    height: 42px !important;
+    width: 42px !important;
+    flex-shrink: 0 !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 16px !important;
+    background: linear-gradient(135deg, #7c3aed 0%, #06b6d4 100%) !important;
+    color: #ffffff !important;
+    box-shadow: 0 16px 36px rgba(124, 58, 237, 0.32) !important;
+  }
+
+  .zedpera-template .mobile-main-menu-eyebrow {
+    margin: 0 !important;
+    color: #c4b5fd !important;
+    -webkit-text-fill-color: #c4b5fd !important;
+    font-size: 10px !important;
+    font-weight: 950 !important;
+    letter-spacing: 0.18em !important;
+    text-transform: uppercase !important;
+  }
+
+  .zedpera-template .mobile-main-menu-heading {
+    margin: 2px 0 0 !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    font-size: 18px !important;
+    font-weight: 950 !important;
+    line-height: 1.1 !important;
+  }
+
+  .zedpera-template .mobile-main-menu-close {
+    display: flex !important;
+    height: 42px !important;
+    width: 42px !important;
+    flex-shrink: 0 !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 16px !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    background: rgba(255, 255, 255, 0.07) !important;
+    color: #ffffff !important;
+  }
+
+  .zedpera-template .mobile-main-menu-section {
+    margin-bottom: 12px !important;
+    border-radius: 22px !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    background: rgba(10, 16, 32, 0.78) !important;
+    padding: 12px !important;
+  }
+
+  .zedpera-template .mobile-main-menu-title {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    margin-bottom: 10px !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    font-size: 12px !important;
+    font-weight: 950 !important;
+    letter-spacing: 0.14em !important;
+    text-transform: uppercase !important;
+  }
+
+  .zedpera-template .mobile-main-menu-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 9px !important;
+  }
+
+  .zedpera-template .mobile-main-menu-card {
+    display: flex !important;
+    min-height: 76px !important;
+    min-width: 0 !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    border-radius: 18px !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.035)) !important;
+    padding: 12px !important;
+    text-decoration: none !important;
+    transition:
+      transform 0.16s ease,
+      border-color 0.16s ease,
+      background 0.16s ease !important;
+  }
+
+  .zedpera-template .mobile-main-menu-card:active {
+    transform: scale(0.97) !important;
+  }
+
+  .zedpera-template .mobile-main-menu-card:hover {
+    border-color: rgba(167, 139, 250, 0.5) !important;
+    background: rgba(124, 58, 237, 0.16) !important;
+  }
+
+  .zedpera-template .mobile-main-menu-icon {
+    display: flex !important;
+    height: 32px !important;
+    width: 32px !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 14px !important;
+    background: rgba(124, 58, 237, 0.18) !important;
+    color: #c4b5fd !important;
+  }
+
+  .zedpera-template .mobile-main-menu-label {
+    display: block !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    font-size: 13px !important;
+    font-weight: 950 !important;
+    line-height: 1.2 !important;
+  }
+
+  .zedpera-template .mobile-language-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 9px !important;
+  }
+
+  .zedpera-template .mobile-language-card {
+    display: flex !important;
+    min-height: 52px !important;
+    min-width: 0 !important;
+    align-items: center !important;
+    gap: 9px !important;
+    border-radius: 17px !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    background: rgba(255, 255, 255, 0.055) !important;
+    padding: 9px !important;
+    color: #ffffff !important;
+    text-align: left !important;
+  }
+
+  .zedpera-template .mobile-language-card-active {
+    border-color: rgba(34, 211, 238, 0.55) !important;
+    background: rgba(8, 145, 178, 0.22) !important;
+  }
+
+  .zedpera-template .mobile-language-label {
+    min-width: 0 !important;
+    flex: 1 !important;
+    overflow: hidden !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    font-size: 12px !important;
+    font-weight: 900 !important;
+  }
+
+  .zedpera-template .mobile-main-menu-action-section {
+    display: grid !important;
+    gap: 9px !important;
+  }
+
+  .zedpera-template .mobile-main-menu-primary,
+  .zedpera-template .mobile-main-menu-secondary {
+    display: flex !important;
+    min-height: 50px !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    border-radius: 18px !important;
+    text-decoration: none !important;
+    font-size: 13px !important;
+    font-weight: 950 !important;
+  }
+
+  .zedpera-template .mobile-main-menu-primary {
+    background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%) !important;
+    color: #ffffff !important;
+    box-shadow: 0 18px 42px rgba(124, 58, 237, 0.32) !important;
+  }
+
+  .zedpera-template .mobile-main-menu-secondary {
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    background: rgba(255, 255, 255, 0.07) !important;
+    color: #ffffff !important;
+  }
+}
+
+@media (max-width: 390px) {
+  .zedpera-template .mobile-header-login {
     display: none !important;
   }
 
-  .zedpera-template header .language-chip {
-    min-width: 32px !important;
-    height: 26px !important;
-    padding-left: 8px !important;
-    padding-right: 8px !important;
-    font-size: 11px !important;
-    font-weight: 950 !important;
+  .zedpera-template .mobile-header-menu-button {
+    min-width: 76px !important;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+
+  .zedpera-template .mobile-main-menu-grid,
+  .zedpera-template .mobile-language-grid {
+    grid-template-columns: 1fr !important;
   }
 }
 
@@ -3641,8 +3731,8 @@ const mobileMenuItems = useMemo(
         <div className="pointer-events-none fixed inset-0 z-0 zedpera-grid-bg opacity-45" />
         <div className="pointer-events-none fixed left-1/2 top-0 z-0 h-[420px] w-[760px] -translate-x-1/2 rounded-full bg-violet-700/20 blur-[120px]" />
 
-        <header className="sticky top-0 z-50 border-b border-white/10 bg-black/92 backdrop-blur-2xl">
-  <div className="mx-auto flex h-[72px] max-w-[1920px] items-center px-8">
+        <header className="sticky top-0 z-[250] border-b border-white/10 bg-black/95 backdrop-blur-2xl">
+  <div className="mx-auto flex h-[72px] max-w-[1920px] items-center px-4 sm:px-6 xl:px-8">
     <Link href="/" className="flex shrink-0 items-center gap-3">
       <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 via-violet-600 to-fuchsia-500 text-2xl font-black text-white shadow-[0_0_28px_rgba(80,90,255,0.55)]">
         Z
@@ -3704,58 +3794,104 @@ const mobileMenuItems = useMemo(
       </a>
     </div>
 
-    {/* MOBILE HEADER ACTIONS */}
-    <div className="ml-auto flex items-center gap-2 xl:hidden">
-      <Link
-        href="/login"
-        className="mobile-header-login inline-flex h-11 items-center justify-center rounded-xl border border-violet-400/30 bg-[#080816] px-3 text-[12px] font-black text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
-        aria-label={t.common.login}
-      >
-        {t.common.login}
-      </Link>
+{/* MOBILE HEADER ACTIONS */}
+<div className="ml-auto flex items-center gap-2 xl:hidden">
+  <Link
+    href="/login"
+    className="mobile-header-login inline-flex h-11 shrink-0 items-center justify-center rounded-2xl border border-violet-400/30 bg-[#080816] px-3 text-[12px] font-black text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
+    aria-label={t.common.login}
+  >
+    {t.common.login}
+  </Link>
 
-      <MobileHeaderLanguageSelector
-        language={language}
-        labels={t.common}
-        onChange={handleLanguageChange}
-      />
+  <MobileHeaderLanguageSelector
+    language={language}
+    labels={t.common}
+    onChange={handleLanguageChange}
+  />
 
-      <button
-        type="button"
-        onClick={() => setMobileMenuOpen((value) => !value)}
-        className="mobile-header-menu-button inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-[#080816] text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
-        aria-label="Menu"
-        aria-expanded={mobileMenuOpen}
-        aria-controls="mobile-main-menu"
-      >
-        {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
-      </button>
-    </div>
-  </div>
+  <button
+    type="button"
+    onClick={() => setMobileMenuOpen((value) => !value)}
+    className="mobile-header-menu-button inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-[#080816] px-3 text-[12px] font-black text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
+    aria-label="Otvoriť mobilné menu"
+    aria-expanded={mobileMenuOpen}
+    aria-controls="mobile-main-menu"
+  >
+    {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
+    <span>Menu</span>
+  </button>
+</div>
+</div>
 
-  {/* MOBILE OPEN MENU */}
-  {mobileMenuOpen ? (
-    <>
-      <button
-        type="button"
-        className="mobile-menu-backdrop xl:hidden"
-        aria-label="Zavrieť mobilné menu"
-        onClick={() => setMobileMenuOpen(false)}
-      />
+{/* MOBILE OPEN MENU - full screen professional overlay */}
+{mobileMenuOpen ? (
+  <div className="fixed inset-0 z-[9999] xl:hidden">
+    <button
+      type="button"
+      className="absolute inset-0 block h-full w-full border-0 bg-black/85 backdrop-blur-xl"
+      aria-label="Zavrieť mobilné menu"
+      onClick={() => setMobileMenuOpen(false)}
+    />
 
-      <div id="mobile-main-menu" className="mobile-main-menu xl:hidden">
-        <div className="mobile-main-menu-scroll">
-        {/* HLAVNÉ MENU */}
-        <section className="mobile-main-menu-section">
-          <div className="mobile-main-menu-title">
-            <Menu className="h-4 w-4 text-violet-300" />
-            <span>Menu</span>
+    <section
+      id="mobile-main-menu"
+      className="absolute inset-x-3 bottom-3 top-3 flex flex-col overflow-hidden rounded-[2rem] border border-violet-300/25 bg-[#020617] shadow-[0_35px_120px_rgba(0,0,0,0.9)]"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Mobilné menu Zedpera"
+    >
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-gradient-to-r from-violet-950/70 via-slate-950 to-cyan-950/50 px-4 py-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 via-fuchsia-600 to-cyan-500 text-white shadow-[0_0_28px_rgba(124,58,237,0.55)]">
+            <Sparkles className="h-5 w-5" />
           </div>
 
-          <div className="mobile-main-menu-grid">
+          <div className="min-w-0">
+            <p className="text-[11px] font-black uppercase tracking-[0.22em] text-violet-200">
+              Zedpera
+            </p>
+            <h2 className="truncate text-xl font-black leading-tight text-white">
+              Menu
+            </h2>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setMobileMenuOpen(false)}
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white transition hover:bg-white/[0.12] active:scale-95"
+          aria-label="Zavrieť menu"
+        >
+          <X className="h-6 w-6" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-3">
+          <div className="mb-3 flex items-center gap-2 text-[12px] font-black uppercase tracking-[0.18em] text-violet-200">
+            <Menu className="h-4 w-4" />
+            <span>Hlavné menu</span>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {mobileMenuItems.map((item) => {
               const Icon = item.icon;
               const isHashLink = item.href.startsWith('#');
+
+              const content = (
+                <>
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/20 text-violet-100 ring-1 ring-violet-300/20">
+                    <Icon className="h-5 w-5" />
+                  </span>
+
+                  <span className="min-w-0 flex-1 truncate text-left text-[15px] font-black text-white">
+                    {item.label}
+                  </span>
+
+                  <ArrowRight className="h-4 w-4 shrink-0 text-violet-200" />
+                </>
+              );
 
               if (isHashLink) {
                 return (
@@ -3765,17 +3901,14 @@ const mobileMenuItems = useMemo(
                     onClick={(event) => {
                       event.preventDefault();
                       setMobileMenuOpen(false);
-                      scrollToHash(item.href);
-                    }}
-                    className="mobile-main-menu-card"
-                  >
-                    <span className="mobile-main-menu-icon">
-                      <Icon className="h-4 w-4" />
-                    </span>
 
-                    <span className="mobile-main-menu-label">
-                      {item.label}
-                    </span>
+                      window.setTimeout(() => {
+                        scrollToHash(item.href);
+                      }, 80);
+                    }}
+                    className="flex min-h-[62px] items-center gap-3 rounded-2xl border border-white/10 bg-[#0b1020] px-3 py-2 text-white no-underline shadow-lg shadow-black/20 transition hover:border-violet-300/50 hover:bg-violet-600/20 active:scale-[0.98]"
+                  >
+                    {content}
                   </a>
                 );
               }
@@ -3785,29 +3918,22 @@ const mobileMenuItems = useMemo(
                   key={item.href}
                   href={item.href}
                   onClick={() => setMobileMenuOpen(false)}
-                  className="mobile-main-menu-card"
+                  className="flex min-h-[62px] items-center gap-3 rounded-2xl border border-white/10 bg-[#0b1020] px-3 py-2 text-white no-underline shadow-lg shadow-black/20 transition hover:border-violet-300/50 hover:bg-violet-600/20 active:scale-[0.98]"
                 >
-                  <span className="mobile-main-menu-icon">
-                    <Icon className="h-4 w-4" />
-                  </span>
-
-                  <span className="mobile-main-menu-label">
-                    {item.label}
-                  </span>
+                  {content}
                 </Link>
               );
             })}
           </div>
         </section>
 
-        {/* JAZYK STRÁNKY */}
-        <section className="mobile-main-menu-section">
-          <div className="mobile-main-menu-title">
-            <Languages className="h-4 w-4 text-violet-300" />
+        <section className="mt-4 rounded-3xl border border-white/10 bg-white/[0.04] p-3">
+          <div className="mb-3 flex items-center gap-2 text-[12px] font-black uppercase tracking-[0.18em] text-cyan-200">
+            <Languages className="h-4 w-4" />
             <span>{t.common.language}</span>
           </div>
 
-          <div className="mobile-language-grid">
+          <div className="grid grid-cols-2 gap-2">
             {languages.map((item) => {
               const active = language === item.code;
 
@@ -3819,8 +3945,10 @@ const mobileMenuItems = useMemo(
                     handleLanguageChange(item.code);
                     setMobileMenuOpen(false);
                   }}
-                  className={`mobile-language-option ${
-                    active ? 'mobile-language-option-active' : ''
+                  className={`flex min-h-[56px] items-center gap-2 rounded-2xl border px-3 py-2 text-left transition active:scale-[0.98] ${
+                    active
+                      ? 'border-cyan-300/60 bg-cyan-500/20 shadow-lg shadow-cyan-950/30'
+                      : 'border-white/10 bg-[#0b1020] hover:border-cyan-300/40 hover:bg-cyan-500/10'
                   }`}
                   aria-pressed={active}
                 >
@@ -3828,22 +3956,26 @@ const mobileMenuItems = useMemo(
                     {item.short}
                   </span>
 
-                  <span className="mobile-language-label">
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-black text-white">
                     {item.label}
                   </span>
+
+                  {active ? (
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-cyan-200" />
+                  ) : null}
                 </button>
               );
             })}
           </div>
         </section>
 
-        {/* AKCIE */}
-        <section className="mobile-main-menu-actions">
+        <section className="mt-4 grid gap-2 pb-2">
           <Link
             href="/login"
             onClick={() => setMobileMenuOpen(false)}
-            className="mobile-main-menu-login"
+            className="flex min-h-[58px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.07] px-5 text-[15px] font-black text-white no-underline transition hover:bg-white/[0.12] active:scale-[0.98]"
           >
+            <Bot className="h-5 w-5 text-violet-200" />
             {t.common.login}
           </Link>
 
@@ -3852,18 +3984,21 @@ const mobileMenuItems = useMemo(
             onClick={(event) => {
               event.preventDefault();
               setMobileMenuOpen(false);
-              scrollToHash('#pricing');
+
+              window.setTimeout(() => {
+                scrollToHash('#pricing');
+              }, 80);
             }}
-            className="mobile-main-menu-start"
+            className="flex min-h-[60px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 via-fuchsia-600 to-cyan-500 px-5 text-[15px] font-black text-white no-underline shadow-2xl shadow-violet-950/50 transition hover:from-violet-500 hover:via-fuchsia-500 hover:to-cyan-400 active:scale-[0.98]"
           >
             {t.common.startFree}
-            <ArrowRight className="h-4 w-4" />
+            <ArrowRight className="h-5 w-5" />
           </a>
         </section>
-        </div>
       </div>
-    </>
-  ) : null}
+    </section>
+  </div>
+) : null}
 </header>
 
         <section className="relative z-10 mx-auto max-w-[1860px] px-5 pb-8 pt-8 lg:px-10">

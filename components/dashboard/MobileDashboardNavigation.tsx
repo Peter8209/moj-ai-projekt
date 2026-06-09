@@ -230,6 +230,7 @@ export default function MobileDashboardNavigation({
 }: MobileDashboardNavigationProps) {
   const [activeTab, setActiveTab] = useState<MobileDashboardTab>('main');
   const [isMainMenuVisible, setIsMainMenuVisible] = useState(true);
+  const [isModuleMenuVisible, setIsModuleMenuVisible] = useState(false);
   const [selectedMobileModuleKey, setSelectedMobileModuleKey] =
     useState<string>(activeModule);
 
@@ -285,9 +286,15 @@ export default function MobileDashboardNavigation({
     }, 120);
   }
 
+  function showWorkingPanelOnly() {
+    setIsModuleMenuVisible(false);
+    scrollToDashboardToolPanel();
+  }
+
   function handleSelectModule(moduleKey: string) {
     setSelectedMobileModuleKey(moduleKey);
     setActiveTab('module');
+    setIsModuleMenuVisible(false);
 
     onSelectModule(moduleKey);
     scrollToDashboardToolPanel();
@@ -311,8 +318,9 @@ export default function MobileDashboardNavigation({
           2. karta: AI nástroje
           3. karta: Samostatná karta otvoreného modulu
 
-          Po kliknutí na AI modul sa už nevracia na prvú kartu.
-          Modul sa otvorí na samostatnej karte.
+          Na tretej karte je menu skryté / odkryté.
+          Keď je menu skryté, používateľ vidí len kompaktnú lištu
+          a môže pracovať s modulom nižšie na stránke.
       ===================================================== */}
 
       <section className="sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-4 pt-4 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
@@ -322,7 +330,7 @@ export default function MobileDashboardNavigation({
             Mobilná aplikácia
           </p>
 
-          <h2 className="mt-1 text-xl font-black leading-tight text-white">
+          <h2 className="mt-1 line-clamp-1 text-xl font-black leading-tight text-white">
             {activeTab === 'main'
               ? 'Hlavné menu'
               : activeTab === 'ai'
@@ -330,17 +338,20 @@ export default function MobileDashboardNavigation({
                 : selectedMobileModuleLabel}
           </h2>
 
-          <p className="mt-1 text-xs font-semibold text-slate-400">
+          <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-400">
             {activeTab === 'main'
               ? 'Vyberte sekciu systému alebo prejdite na AI nástroje.'
               : activeTab === 'ai'
                 ? 'Vyberte AI nástroj, ktorý chcete otvoriť.'
-                : selectedMobileModuleDescription}
+                : isModuleMenuVisible
+                  ? 'Menu modulu je odkryté. Môžete zmeniť nástroj alebo skryť menu.'
+                  : 'Menu je skryté. Pracovný panel modulu je nižšie na stránke.'}
           </p>
         </div>
 
         {/* PROFIL PRÁCE */}
-        {(activeProfileTitle || activeProfileSubtitle || activeProfileType) && (
+        {(activeProfileTitle || activeProfileSubtitle || activeProfileType) &&
+        activeTab !== 'module' ? (
           <div className="mb-3 rounded-2xl border border-white/10 bg-black/25 px-3 py-2">
             <p className="line-clamp-1 text-[11px] font-black text-white">
               {activeProfileTitle || 'Profil práce'}
@@ -358,63 +369,72 @@ export default function MobileDashboardNavigation({
               </p>
             ) : null}
           </div>
-        )}
+        ) : null}
 
         {/* PREPÍNANIE KARIET */}
-        <div className="mb-3 grid grid-cols-3 gap-2 rounded-3xl border border-white/10 bg-[#070b18] p-2 shadow-2xl shadow-black/40">
-          <button
-            type="button"
-            onClick={() => setActiveTab('main')}
-            className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
-              activeTab === 'main'
-                ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
-                : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
-            }`}
-            aria-pressed={activeTab === 'main'}
-          >
-            <Menu className="h-4 w-4" />
-            Menu
-          </button>
+        {activeTab !== 'module' || isModuleMenuVisible ? (
+          <div className="mb-3 grid grid-cols-3 gap-2 rounded-3xl border border-white/10 bg-[#070b18] p-2 shadow-2xl shadow-black/40">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('main');
+                setIsModuleMenuVisible(false);
+              }}
+              className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
+                activeTab === 'main'
+                  ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
+                  : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+              }`}
+              aria-pressed={activeTab === 'main'}
+            >
+              <Menu className="h-4 w-4" />
+              Menu
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('ai')}
-            className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
-              activeTab === 'ai'
-                ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
-                : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
-            }`}
-            aria-pressed={activeTab === 'ai'}
-          >
-            <Sparkles className="h-4 w-4" />
-            AI nástroje
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              if (selectedMobileModule) {
-                setActiveTab('module');
-                scrollToDashboardToolPanel();
-              } else {
+            <button
+              type="button"
+              onClick={() => {
                 setActiveTab('ai');
-              }
-            }}
-            className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
-              activeTab === 'module'
-                ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
-                : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
-            }`}
-            aria-pressed={activeTab === 'module'}
-          >
-            {selectedMobileModule ? (
-              getModuleIcon(selectedMobileModule.key)
-            ) : (
-              <PlayCircle className="h-4 w-4" />
-            )}
-            Modul
-          </button>
-        </div>
+                setIsModuleMenuVisible(false);
+              }}
+              className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
+                activeTab === 'ai'
+                  ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
+                  : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+              }`}
+              aria-pressed={activeTab === 'ai'}
+            >
+              <Sparkles className="h-4 w-4" />
+              AI nástroje
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (selectedMobileModule) {
+                  setActiveTab('module');
+                  setIsModuleMenuVisible(false);
+                  scrollToDashboardToolPanel();
+                } else {
+                  setActiveTab('ai');
+                }
+              }}
+              className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
+                activeTab === 'module'
+                  ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
+                  : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+              }`}
+              aria-pressed={activeTab === 'module'}
+            >
+              {selectedMobileModule ? (
+                getModuleIcon(selectedMobileModule.key)
+              ) : (
+                <PlayCircle className="h-4 w-4" />
+              )}
+              Modul
+            </button>
+          </div>
+        ) : null}
 
         {/* KARTA 1 — HLAVNÉ MENU */}
         {activeTab === 'main' ? (
@@ -602,11 +622,21 @@ export default function MobileDashboardNavigation({
           </div>
         ) : null}
 
-        {/* KARTA 3 — SAMOSTATNÁ KARTA OTVORENÉHO MODULU */}
+        {/* KARTA 3 — SAMOSTATNÝ MODUL */}
         {activeTab === 'module' ? (
-          <div className="rounded-3xl border border-violet-400/20 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
+          <div
+            className={`rounded-3xl border border-violet-400/20 bg-[#070b18] shadow-2xl shadow-black/40 ${
+              isModuleMenuVisible ? 'p-3' : 'p-2'
+            }`}
+          >
+            {/* KOMPAKTNÁ LIŠTA MODULU — vždy viditeľná */}
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setIsModuleMenuVisible((value) => !value)}
+                className="flex min-h-[48px] min-w-0 flex-1 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-left text-white transition hover:bg-white/[0.1] active:scale-[0.98]"
+                aria-expanded={isModuleMenuVisible}
+              >
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-lg shadow-violet-950/40">
                   {selectedMobileModule ? (
                     getModuleIcon(selectedMobileModule.key)
@@ -615,64 +645,89 @@ export default function MobileDashboardNavigation({
                   )}
                 </span>
 
-                <div className="min-w-0">
-                  <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-300">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-black text-white">
+                    {selectedMobileModuleLabel}
+                  </span>
+
+                  <span className="block truncate text-[10px] font-semibold text-slate-400">
+                    {isModuleMenuVisible
+                      ? 'Menu modulu je otvorené'
+                      : 'Menu skryté — pracujte v module nižšie'}
+                  </span>
+                </span>
+
+                {isModuleMenuVisible ? (
+                  <ChevronUp className="h-4 w-4 shrink-0 text-slate-300" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 shrink-0 text-slate-300" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={showWorkingPanelOnly}
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-600 text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-500 active:scale-95"
+                aria-label="Otvoriť pracovný panel modulu"
+                title="Otvoriť pracovný panel"
+              >
+                <PlayCircle className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* ODKRYTÉ MENU MODULU */}
+            {isModuleMenuVisible ? (
+              <div className="mt-3">
+                <div className="mb-3 rounded-2xl border border-white/10 bg-black/25 p-3">
+                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-violet-300">
                     Otvorený modul
                   </p>
 
-                  <p className="line-clamp-1 text-sm font-black text-white">
+                  <h3 className="mt-1 text-lg font-black text-white">
                     {selectedMobileModuleLabel}
+                  </h3>
+
+                  <p className="mt-1 text-xs font-semibold leading-5 text-slate-400">
+                    {selectedMobileModuleDescription}
+                  </p>
+
+                  <p className="mt-3 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-[11px] font-bold leading-5 text-cyan-100">
+                    Kliknite na <span className="font-black">Skryť menu</span>.
+                    Zostane iba pracovný panel modulu, kde môžete písať text,
+                    vkladať podklady a pracovať s vybraným AI nástrojom.
                   </p>
                 </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('ai')}
+                    className="flex min-h-[50px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-white transition hover:bg-white/[0.1] active:scale-[0.98]"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    Iný nástroj
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={showWorkingPanelOnly}
+                    className="flex min-h-[50px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-3 py-2 text-xs font-black text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-500 active:scale-[0.98]"
+                  >
+                    <ChevronUp className="h-4 w-4" />
+                    Skryť menu
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={showWorkingPanelOnly}
+                  className="mt-2 flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-cyan-400/25 bg-cyan-500/10 px-3 py-2 text-xs font-black text-cyan-100 transition hover:bg-cyan-500/15 active:scale-[0.98]"
+                >
+                  <PlayCircle className="h-4 w-4" />
+                  Prejsť do pracovného panelu modulu
+                </button>
               </div>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab('ai')}
-                className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
-              >
-                AI nástroje
-              </button>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
-              <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">
-                Modul je otvorený samostatne
-              </p>
-
-              <h3 className="mt-1 text-lg font-black text-white">
-                {selectedMobileModuleLabel}
-              </h3>
-
-              <p className="mt-1 text-xs font-semibold leading-5 text-slate-400">
-                {selectedMobileModuleDescription}
-              </p>
-
-              <p className="mt-3 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-[11px] font-bold leading-5 text-cyan-100">
-                Výsledný pracovný panel modulu sa zobrazuje nižšie na stránke.
-                Táto karta ostane otvorená a nevráti vás späť na Hlavné menu.
-              </p>
-            </div>
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveTab('ai')}
-                className="flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-white transition hover:bg-white/[0.1] active:scale-[0.98]"
-              >
-                <Sparkles className="h-4 w-4" />
-                Iný nástroj
-              </button>
-
-              <button
-                type="button"
-                onClick={scrollToDashboardToolPanel}
-                className="flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-3 py-2 text-xs font-black text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-500 active:scale-[0.98]"
-              >
-                <PlayCircle className="h-4 w-4" />
-                Otvoriť panel
-              </button>
-            </div>
+            ) : null}
           </div>
         ) : null}
       </section>

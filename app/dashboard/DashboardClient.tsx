@@ -10,6 +10,7 @@ import {
 } from 'react';
 
 import {
+  BarChart3,
   BookOpen,
   ChevronDown,
   ClipboardCheck,
@@ -35,12 +36,13 @@ import {
   User,
   X,
 } from 'lucide-react';
+
 import AnalysisResultsModal from '@/components/analysis/AnalysisResultsModal';
 import type { AnalysisResult } from '@/components/analysis/analysisTypes';
 import { useLanguage } from '@/components/LanguageProvider';
 import ImprovementBox from '@/components/ImprovementBox';
 import MobileDashboardNavigation from '@/components/dashboard/MobileDashboardNavigation';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 
 // ================= TYPES =================
@@ -440,7 +442,7 @@ declare global {
 
 // ================= CONFIG =================
 
-const defaultAgent: Agent = 'gemini';
+const defaultAgent: Agent = 'openai';
 
 const ORIGINALITY_PROTOCOL_STORAGE_KEY =
   'zedpera_originality_protocol_result';
@@ -1793,7 +1795,8 @@ function ClickableOptionGroup<T extends string>({
 // ================= PAGE =================
 
 export default function DashboardPage() {
-  const router = useRouter();
+ const router = useRouter();
+const searchParams = useSearchParams();
   const agent = defaultAgent;
   const { t } = useLanguage();
 
@@ -1836,38 +1839,48 @@ const mobileToolPanelRef = useRef<HTMLDivElement | null>(null);
 }, [activeModule]);
 const activeTranslationKey = activeModuleInfo.translationKey;
 
+const fixedUi = fixedModuleUi[activeModule];
+
 const activeModuleLabel =
-  t.dashboardTools.tools[activeTranslationKey];
+  t?.dashboardTools?.tools?.[activeTranslationKey] ||
+  fixedUi.label;
 
 const activeModuleButtonLabel =
-  t.dashboardTools.buttons[activeTranslationKey];
+  t?.dashboardTools?.buttons?.[activeTranslationKey] ||
+  fixedUi.button;
 
 const activeModuleInputLabel =
-  t.dashboardTools.inputLabels?.[activeTranslationKey] ||
-  t.dashboardTools.common.assignmentLabel;
+  t?.dashboardTools?.inputLabels?.[activeTranslationKey] ||
+  fixedUi.inputLabel ||
+  t?.dashboardTools?.common?.assignmentLabel ||
+  'Zadanie alebo text';
 
 const activeModulePlaceholder =
-  t.dashboardTools.placeholders[activeTranslationKey];
+  t?.dashboardTools?.placeholders?.[activeTranslationKey] ||
+  fixedUi.placeholder;
 
 const activeModuleInfoText =
-  t.dashboardTools.infoTexts?.[activeTranslationKey] ||
-  t.dashboardTools.common.infoText;
+  t?.dashboardTools?.infoTexts?.[activeTranslationKey] ||
+  fixedUi.intro ||
+  t?.dashboardTools?.common?.infoText ||
+  '';
 
 const activeModuleResultTitle =
-  t.dashboardTools.resultTitles?.[activeTranslationKey] ||
+  t?.dashboardTools?.resultTitles?.[activeTranslationKey] ||
+  fixedUi.resultTitle ||
   activeModuleLabel;
 
 const activeModuleCard =
-  t.dashboardTools.cards?.[activeTranslationKey];
+  t?.dashboardTools?.cards?.[activeTranslationKey];
 
 const activeModuleTexts =
-  t.dashboardTools.modules?.[activeTranslationKey];
+  t?.dashboardTools?.modules?.[activeTranslationKey];
 
 const activeModuleIntro =
-  activeModuleTexts?.intro || activeModuleInfoText;
+  activeModuleTexts?.intro || activeModuleInfoText || fixedUi.intro;
 
 const activeModuleInputHelp =
-  activeModuleTexts?.inputHelp || activeModulePlaceholder;
+  activeModuleTexts?.inputHelp || activeModulePlaceholder || fixedUi.placeholder;
 
 const activeModuleResultHelp =
   activeModuleTexts?.resultHelp || '';
@@ -1934,6 +1947,42 @@ const getEmailToneLabel = (value: EmailTone): string => {
 
   return option?.label ?? value;
 };
+
+const startNewWork = useCallback(() => {
+  setActiveProfile(null);
+  setActiveModule('supervisor');
+  setInput('');
+  setSecondaryInput('');
+  setResult('');
+  setCanvasText('');
+  setAttachedFiles([]);
+  setAnalysisResult(null);
+  setAnalysisModalOpen(false);
+
+  try {
+    localStorage.removeItem('active_profile');
+    localStorage.removeItem('profile');
+    localStorage.removeItem('latest_generated_work_text');
+    localStorage.removeItem('last_ai_output');
+  } catch {
+    // localStorage nemusí byť dostupný
+  }
+
+  window.dispatchEvent(
+    new CustomEvent('zedpera:active-profile-changed', {
+      detail: null,
+    }),
+  );
+
+  setTimeout(() => {
+    mobileToolPanelRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }, 120);
+}, []);
+
+
 
 function SelectField<T extends string>({
   label,
@@ -2055,6 +2104,12 @@ useEffect(() => {
     setAnalysisModalOpen(false);
   }, [activeModule]);
 
+  useEffect(() => {
+    if (!isLoading && canvasText.trim().length > 0) {
+      setCanvasOpen(true);
+    }
+  }, [canvasText, isLoading]);
+
   const handleFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
@@ -2125,7 +2180,11 @@ useEffect(() => {
     setAnalysisModalOpen(false);
   };
 
-
+useEffect(() => {
+  if (searchParams.get('newWork') === '1') {
+    startNewWork();
+  }
+}, [searchParams, startNewWork]);
 
 async function saveHistoryItem(inputData: {
   module: ModuleKey;
@@ -2576,19 +2635,11 @@ Text emailu:
 
 
 
-const selectDashboardModule = useCallback((moduleKey: ModuleKey) => {
-  setActiveModule(moduleKey);
-  
-  window.setTimeout(() => {
-    mobileToolPanelRef.current?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    });
-  }, 80);
-}, []);
-
-async function runModule() {
+const runModule = async () => {
   if (isLoading) return;
+
+  const userText = input.trim();
+  const secondaryText = secondaryInput.trim();
 
   const hasUsableProfile = Boolean(
     activeProfile &&
@@ -2601,328 +2652,133 @@ async function runModule() {
       ),
   );
 
-  const hasDefenseInput = Boolean(input.trim() || attachedFiles.length > 0 || hasUsableProfile);
+  const hasAnyInput = Boolean(
+    userText ||
+      secondaryText ||
+      attachedFiles.length > 0 ||
+      hasUsableProfile,
+  );
 
-  if (!hasUsableProfile && activeModule !== 'defense') {
-    alert(
-      'Najprv vyberte alebo vytvorte profil práce. Systém nevie, ku ktorej práci má výstup priradiť.',
-    );
+  if (!hasAnyInput) {
+    alert('Najskôr vložte zadanie, text, prílohu alebo vyberte profil práce.');
     return;
   }
 
-  if (activeModule === 'defense' && !hasDefenseInput) {
-    alert(
-      'Na vytvorenie prezentácie nahrajte prácu, vložte text alebo vyberte profil práce.',
-    );
-    return;
-  }
+  if (activeModule === 'planning') {
+    const validation = validatePlanningDatesNoPast(userText || secondaryText);
 
-  if (activeModule !== 'defense' && !activeProfile?.type && !activeProfile?.schema?.label) {
-    alert('V aktívnom profile chýba typ práce. Skontrolujte profil práce.');
-    return;
-  }
-
-  if (activeModule !== 'defense' && !activeProfile?.workLanguage && !activeProfile?.language) {
-    alert('V aktívnom profile chýba jazyk práce. Skontrolujte profil práce.');
-    return;
+    if (!validation.ok) {
+      alert(validation.message);
+      return;
+    }
   }
 
   setIsLoading(true);
   setResult('');
+  setCanvasText('');
   setAnalysisResult(null);
   setAnalysisModalOpen(false);
 
   try {
-    // ================= ANALÝZA DÁT =================
-    if (activeModule === 'data') {
-      const formData = new FormData();
+    const systemLanguage = getStoredSystemLanguage();
+    persistSystemLanguage(systemLanguage);
 
-      const systemLanguage = getStoredSystemLanguage();
-      persistSystemLanguage(systemLanguage);
+    const profileForApi = prepareProfileForApi(
+      activeProfile,
+      systemLanguage,
+    );
 
-      const profileForApi = prepareProfileForApi(
-  activeProfile,
-  systemLanguage,
-);
+    const finalWorkLanguage = getWorkLanguage(profileForApi);
+    const prompt = buildModulePrompt();
 
-const finalWorkLanguage = getWorkLanguage(profileForApi);
-
-formData.append('language', finalWorkLanguage);
-formData.append('outputLanguage', finalWorkLanguage);
-formData.append('systemLanguage', systemLanguage);
-formData.append('interfaceLanguage', systemLanguage);
-formData.append('workLanguage', finalWorkLanguage);
-
-      formData.append('analysisGoal', input || '');
-formData.append('dataDescription', input || '');
-formData.append('activeProfile', JSON.stringify(profileForApi || null));
-formData.append('profile', JSON.stringify(profileForApi || null));
-
-      if (profileForApi?.id) {
-        formData.append('projectId', profileForApi.id);
-      }
-
-      attachedFiles.forEach((item) => {
-        if (item.file instanceof File) {
-          formData.append('files', item.file, item.name);
-        }
-      });
-
-      if (input.trim()) {
-        const textFile = createTextFileFromInput(input);
-        formData.append('files', textFile, textFile.name);
-      }
-
-      const res = await fetch('/api/analysis/files', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!res.ok) {
-        throw new Error(await readApiErrorResponse(res));
-      }
-
-      const rawData = (await res.json()) as ApiAnalysisResponse;
-
-      if (!rawData?.ok) {
-        throw new Error(
-          rawData?.error || rawData?.message || 'Analýza dát zlyhala.',
-        );
-      }
-
-      const normalizedData = normalizeAnalysisResult(rawData);
-
-      setAnalysisResult(normalizedData);
-      setAnalysisModalOpen(true);
-
-      const output = createAnalysisOutputText(normalizedData);
-
-      setResult(output);
-      setCanvasText(output);
-
-     await saveHistoryItem({
-  module: 'data',
-  title: activeModuleResultTitle,
-  userMessage: input || 'Analýza dát zo súborov.',
-  assistantMessage: output,
-  result: {
-    analysis: normalizedData,
-    profileTitle: profileForApi?.title || '',
-          attachedFiles: attachedFiles.map((file) => ({
-            name: file.name,
-            size: file.size,
-            type: file.type,
-          })),
-        },
-      });
-
-      setTimeout(() => {
-        resultRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 150);
-
-      return;
-    }
-
-   
-  // ================= ORIGINALITA =================
-if (activeModule === 'originality') {
+if (activeModule === 'data') {
   const formData = new FormData();
 
-  const systemLanguage = getStoredSystemLanguage();
-  persistSystemLanguage(systemLanguage);
+  formData.append('prompt', userText || 'Analyzuj priložené dáta.');
+  formData.append('assignment', userText || '');
+  formData.append('analysisGoal', userText || '');
+  formData.append('dataDescription', userText || '');
+  formData.append('module', activeModule);
 
-  const profileForApi = prepareProfileForApi(
-    activeProfile,
-    systemLanguage,
-  );
-
-  const finalWorkLanguage = getWorkLanguage(profileForApi);
-
-  formData.append('agent', agent);
-  formData.append('text', input);
-  formData.append('activeProfile', JSON.stringify(profileForApi || null));
-  formData.append('profile', JSON.stringify(profileForApi || null));
-
-  formData.append(
-    'profileSnapshot',
-    JSON.stringify({
-      id: profileForApi?.id || null,
-      title: profileForApi?.title || '',
-      topic: profileForApi?.topic || '',
-      type: getWorkType(profileForApi),
-      expertise: getExpertise(profileForApi),
-      workLanguage: getWorkLanguage(profileForApi),
-      citation: getCitationStyle(profileForApi),
-    }),
-  );
-
-  formData.append('language', finalWorkLanguage);
-  formData.append('outputLanguage', finalWorkLanguage);
+  formData.append('language', finalWorkLanguage || systemLanguage);
+  formData.append('outputLanguage', finalWorkLanguage || systemLanguage);
   formData.append('systemLanguage', systemLanguage);
   formData.append('interfaceLanguage', systemLanguage);
-  formData.append('workLanguage', finalWorkLanguage);
+  formData.append('workLanguage', finalWorkLanguage || systemLanguage);
 
-  formData.append(
-    'title',
-    profileForApi?.title ||
-      activeProfile?.title ||
-      'Kontrola originality',
-  );
-
-  formData.append(
-    'author',
-    (profileForApi as any)?.author ||
-      (activeProfile as any)?.author ||
-      '',
-  );
-
-  formData.append(
-    'authorName',
-    (profileForApi as any)?.authorName ||
-      (profileForApi as any)?.author ||
-      (activeProfile as any)?.authorName ||
-      (activeProfile as any)?.author ||
-      '',
-  );
-
-  formData.append(
-    'school',
-    (profileForApi as any)?.school ||
-      (activeProfile as any)?.school ||
-      '',
-  );
-
-  formData.append(
-    'faculty',
-    (profileForApi as any)?.faculty ||
-      (activeProfile as any)?.faculty ||
-      '',
-  );
-
-  formData.append(
-    'studyProgram',
-    (profileForApi as any)?.studyProgram ||
-      (activeProfile as any)?.studyProgram ||
-      '',
-  );
-
-  formData.append(
-    'supervisor',
-    profileForApi?.supervisor ||
-      activeProfile?.supervisor ||
-      '',
-  );
-
-  formData.append(
-    'workType',
-    getWorkType(profileForApi),
-  );
-
-  formData.append(
-    'citationStyle',
-    getCitationStyle(profileForApi),
-  );
-
-  formData.append('checkAuthenticity', 'true');
+  formData.append('profile', JSON.stringify(profileForApi || {}));
+  formData.append('activeProfile', JSON.stringify(profileForApi || {}));
+  formData.append('profileContext', buildProfileBlock(profileForApi));
 
   if (profileForApi?.id) {
-    formData.append('profileId', profileForApi.id);
     formData.append('projectId', profileForApi.id);
   }
 
   attachedFiles.forEach((item) => {
-    if (!item.file) return;
-    formData.append('files', item.file, item.name || item.file.name);
+    if (item.file instanceof File) {
+      formData.append('files', item.file, item.name || item.file.name);
+    }
   });
 
-  let protocolWindow: Window | null = null;
-
-  try {
-    localStorage.removeItem(ORIGINALITY_PROTOCOL_STORAGE_KEY);
-    sessionStorage.removeItem(ORIGINALITY_PROTOCOL_STORAGE_KEY);
-
-    protocolWindow = window.open(
-      '/originality/protocol?loading=1',
-      '_blank',
-      'width=1300,height=900,noopener,noreferrer',
-    );
-  } catch {
-    protocolWindow = null;
+  if (!attachedFiles.length && userText) {
+    const textFile = createTextFileFromInput(userText);
+    formData.append('files', textFile, textFile.name);
   }
 
-  const res = await fetch('/api/originality', {
+  let response = await fetch('/api/analysis/files', {
     method: 'POST',
     body: formData,
   });
 
-  if (!res.ok) {
-    throw new Error(await readApiErrorResponse(res));
+  // Fallback, ak ešte nemáš novú API route /api/analysis/files
+  if (response.status === 404) {
+    response = await fetch('/api/analyze-data', {
+      method: 'POST',
+      body: formData,
+    });
   }
 
-  const data = await res.json();
+  if (!response.ok) {
+    throw new Error(await readApiErrorResponse(response));
+  }
 
-  if (!data || data.ok === false) {
+  const data = (await response.json()) as ApiAnalysisResponse;
+
+  if (data?.ok === false) {
     throw new Error(
-      data?.message ||
-        data?.error ||
-        'Kontrola originality nevrátila platný výsledok.',
+      data?.error || data?.message || 'Analýza dát zlyhala.',
     );
   }
 
-  const protocolPayload = {
-    ...data,
-    result: data,
-    createdAt: data.createdAt || new Date().toISOString(),
-  };
+  const normalized = normalizeAnalysisResult(data);
+  const outputText = createAnalysisOutputText(normalized);
 
-  localStorage.setItem(
-    ORIGINALITY_PROTOCOL_STORAGE_KEY,
-    JSON.stringify(protocolPayload),
-  );
+  if (!outputText.trim()) {
+    throw new Error('Analýza dát nevrátila žiadny výstup.');
+  }
 
-  sessionStorage.setItem(
-    ORIGINALITY_PROTOCOL_STORAGE_KEY,
-    JSON.stringify(protocolPayload),
-  );
+  setAnalysisResult(normalized);
+  setAnalysisModalOpen(true);
+  setResult(outputText);
+  setCanvasText(outputText);
+  setCanvasOpen(true);
 
-  const similarityScore =
-    data?.score ??
-    data?.similarityRiskScore ??
-    data?.similarityScore ??
-    data?.percent ??
-    data?.overallPercent ??
-    'neuvedené';
-
-  const output = cleanFinalOutput(
-    [
-      'Kontrola originality bola dokončená.',
-      '',
-      `Percento podobnosti: ${
-        typeof similarityScore === 'number'
-          ? `${similarityScore.toFixed(2).replace('.', ',')}%`
-          : similarityScore
-      }`,
-      '',
-      data?.summary || '',
-      '',
-      data?.recommendation || '',
-      '',
-      'Kompletný vizuálny protokol s grafmi, histogramom, tabuľkami a pasážami bol otvorený na samostatnej podstránke.',
-    ].join('\n'),
-  );
-
-  setResult(output);
-  setCanvasText(output);
+  try {
+    localStorage.setItem('latest_generated_work_text', outputText);
+    localStorage.setItem('last_ai_output', outputText);
+  } catch {
+    // localStorage nemusí byť dostupný
+  }
 
   await saveHistoryItem({
-    module: 'originality',
-    title: 'Kontrola originality',
-    userMessage: input || 'Kontrola originality z nahraného dokumentu.',
-    assistantMessage: output,
+    module: activeModule,
+    title: 'Výsledky analýzy dát',
+    userMessage: userText || 'Analýza priložených dát.',
+    assistantMessage: outputText,
     result: {
-      originality: data,
-      profileTitle: activeProfile?.title || '',
-      profileId: activeProfile?.id || null,
+      analysis: normalized as unknown as Record<string, unknown>,
+      profileTitle: profileForApi?.title || '',
+      profileId: profileForApi?.id || null,
       attachedFiles: attachedFiles.map((file) => ({
         name: file.name,
         size: file.size,
@@ -2931,19 +2787,6 @@ if (activeModule === 'originality') {
     },
   });
 
-  const protocolUrl = `/originality/protocol?ts=${Date.now()}`;
-
-  if (protocolWindow && !protocolWindow.closed) {
-    protocolWindow.location.href = protocolUrl;
-    protocolWindow.focus();
-  } else {
-    window.open(
-      protocolUrl,
-      '_blank',
-      'width=1300,height=900,noopener,noreferrer',
-    );
-  }
-
   setTimeout(() => {
     resultRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, 150);
@@ -2951,236 +2794,81 @@ if (activeModule === 'originality') {
   return;
 }
 
-    const prompt = buildModulePrompt();
-
-// ================= HUMANIZÁCIA TEXTU =================
-if (activeModule === 'humanizer') {
-  const textToHumanize = input.trim();
-
-  if (!textToHumanize) {
-    alert('Najprv vlož text, ktorý chceš humanizovať.');
-    return;
-  }
-
-  if (textToHumanize.length < 20) {
-    alert('Text na humanizáciu musí mať aspoň 20 znakov.');
-    return;
-  }
-
-  const systemLanguage = getStoredSystemLanguage();
-  persistSystemLanguage(systemLanguage);
-
-  const res = await fetch('/api/humanizer', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    credentials: 'include',
-    cache: 'no-store',
-    body: JSON.stringify({
-      text: textToHumanize,
-      language: systemLanguage,
-      outputLanguage: systemLanguage,
-      profile: activeProfile || null,
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error(await readApiErrorResponse(res));
-  }
-
-  const data = await res.json();
-
-  if (!data?.ok) {
-    throw new Error(
-      data?.message || data?.error || 'Humanizácia textu zlyhala.',
-    );
-  }
-
-  const output = cleanFinalOutput(
-    data.humanizedText || data.output || data.text || '',
-  );
-
-  if (!output) {
-    throw new Error('Humanizátor nevrátil žiadny text.');
-  }
-
-  setResult(output);
-  setCanvasText(output);
-
-  try {
-    localStorage.setItem('latest_generated_work_text', output);
-    localStorage.setItem('last_ai_output', output);
-  } catch {
-    // localStorage nemusí byť dostupný
-  }
-
-  await saveHistoryItem({
-    module: 'humanizer',
-    title: 'Humanizácia textu',
-    userMessage: textToHumanize,
-    assistantMessage: output,
-    result: {
-      profileTitle: activeProfile?.title || '',
-      profileId: activeProfile?.id || null,
-    },
-  });
-
-  setTimeout(() => {
-    resultRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, 150);
-
-  return;
-}
-
-    // ================= OBHAJOBA =================
-    if (activeModule === 'defense') {
-      const formData = new FormData();
-
-      const systemLanguage = getStoredSystemLanguage();
-      persistSystemLanguage(systemLanguage);
-
-      const profileForApi = prepareProfileForApi(
-  activeProfile,
-  systemLanguage,
-);
-
-const finalWorkLanguage = getWorkLanguage(profileForApi);
-
-      const fallbackSummary = [
-        profileForApi?.annotation,
-        profileForApi?.goal,
-        profileForApi?.problem,
-        profileForApi?.methodology,
-        profileForApi?.hypotheses,
-        profileForApi?.researchQuestions,
-        profileForApi?.practicalPart,
-        profileForApi?.scientificContribution,
-      ]
-        .filter(Boolean)
-        .join('\n\n');
-
-      formData.append(
-        'title',
-        profileForApi?.title ||
-          activeProfile?.title ||
-          'Obhajoba záverečnej práce',
-      );
-
-      formData.append('summary', input.trim() || fallbackSummary);
-
-      formData.append(
-        'defenseType',
-        profileForApi?.type ||
-          profileForApi?.schema?.label ||
-          'Záverečná práca',
-      );
-
-      formData.append('activeProfile', JSON.stringify(profileForApi || null));
-      formData.append('profile', JSON.stringify(profileForApi || null));
-
-formData.append(
-  'profileSnapshot',
-  JSON.stringify({
-    id: profileForApi?.id || null,
-    title: profileForApi?.title || '',
-    topic: profileForApi?.topic || '',
-    type: getWorkType(profileForApi),
-    expertise: getExpertise(profileForApi),
-    workLanguage: getWorkLanguage(profileForApi),
-    citation: getCitationStyle(profileForApi),
-  }),
-);
-
-
-
-      formData.append('language', finalWorkLanguage);
-formData.append('outputLanguage', finalWorkLanguage);
-formData.append('systemLanguage', systemLanguage);
-formData.append('interfaceLanguage', systemLanguage);
-formData.append('workLanguage', finalWorkLanguage);
-
-      if (profileForApi?.id) {
-        formData.append('projectId', profileForApi.id);
+    // =====================================================
+    // HUMANIZÁTOR
+    // =====================================================
+    if (activeModule === 'humanizer') {
+      if (!userText) {
+        alert('Najprv vlož text, ktorý chceš humanizovať.');
+        return;
       }
 
-      attachedFiles.forEach((item) => {
-        if (!(item.file instanceof File)) return;
+      if (userText.length < 20) {
+        alert('Text na humanizáciu musí mať aspoň 20 znakov.');
+        return;
+      }
 
-        formData.append('reviews', item.file, item.name || item.file.name);
-        formData.append('files', item.file, item.name || item.file.name);
-      });
-
-      const res = await fetch('/api/defense', {
+      const response = await fetch('/api/humanizer', {
         method: 'POST',
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        credentials: 'include',
+        cache: 'no-store',
+        body: JSON.stringify({
+          text: userText,
+          language: finalWorkLanguage,
+          outputLanguage: finalWorkLanguage,
+          systemLanguage,
+          profile: profileForApi || null,
+        }),
       });
 
-      if (!res.ok) {
-        throw new Error(await readApiErrorResponse(res));
+      if (!response.ok) {
+        throw new Error(await readApiErrorResponse(response));
       }
 
-      const data = await res.json();
+      const data = await response.json();
 
-      if (!data || data.ok === false) {
+      if (data?.ok === false) {
         throw new Error(
-          data?.message ||
-            data?.error ||
-            'Obhajoba nevrátila platný výsledok.',
+          data?.message || data?.error || 'Humanizácia textu zlyhala.',
         );
       }
 
-      const output =
-        data.textOutput ||
-        (Array.isArray(data.slides)
-          ? data.slides
-              .map((slide: any, index: number) => {
-                const bullets = Array.isArray(slide.bullets)
-                  ? slide.bullets.map((item: string) => `- ${item}`).join('\n')
-                  : '';
-
-                return [
-                  `Snímka ${index + 1}: ${slide.title || 'Bez názvu'}`,
-                  bullets,
-                  slide.speakerNotes
-                    ? `Poznámky k vystúpeniu: ${slide.speakerNotes}`
-                    : '',
-                ]
-                  .filter(Boolean)
-                  .join('\n');
-              })
-              .join('\n\n')
-          : '');
-
-      const cleaned = stripModuleExtraSections(
-        output || 'Obhajoba bola vytvorená, ale neobsahuje textový výstup.',
-        'defense',
+      const output = cleanFinalOutput(
+        data.humanizedText ||
+          data.output ||
+          data.result ||
+          data.text ||
+          data.message ||
+          '',
       );
 
-      setResult(cleaned);
-      setCanvasText(cleaned);
+      if (!output.trim()) {
+        throw new Error('Humanizátor nevrátil žiadny text.');
+      }
+
+      setResult(output);
+      setCanvasText(output);
+      setCanvasOpen(true);
 
       try {
-        localStorage.setItem('latest_generated_work_text', cleaned);
-        localStorage.setItem('last_ai_output', cleaned);
+        localStorage.setItem('latest_generated_work_text', output);
+        localStorage.setItem('last_ai_output', output);
       } catch {
         // localStorage nemusí byť dostupný
       }
 
       await saveHistoryItem({
-        module: 'defense',
-        title: 'Obhajoba práce',
-        userMessage: input || 'Obhajoba vytvorená podľa profilu práce.',
-        assistantMessage: cleaned,
+        module: 'humanizer',
+        title: activeModuleResultTitle,
+        userMessage: userText,
+        assistantMessage: output,
         result: {
-          profileTitle: activeProfile?.title || '',
-          profileId: activeProfile?.id || null,
-          attachedFiles: attachedFiles.map((file) => ({
-            name: file.name,
-            size: file.size,
-            type: file.type,
-          })),
+          profileTitle: profileForApi?.title || '',
+          profileId: profileForApi?.id || null,
         },
       });
 
@@ -3191,63 +2879,85 @@ formData.append('workLanguage', finalWorkLanguage);
       return;
     }
 
-    // ================= BEŽNÉ MODULY =================
-    const apiMessages = [
-      {
-        role: 'user' as const,
-        content: prompt,
-      },
-    ];
-
+    // =====================================================
+    // BEŽNÉ AI MODULY:
+    // AI školiteľ, Audit, Obhajoba, Preklad, Plánovanie, Emaily
+    // =====================================================
     const formData = new FormData();
 
-    const systemLanguage = getStoredSystemLanguage();
-    persistSystemLanguage(systemLanguage);
-
-    const profileForApi = prepareProfileForApi(
-  activeProfile,
-  systemLanguage,
-);
-
-const finalWorkLanguage = getWorkLanguage(profileForApi);
-
     formData.append('agent', agent);
+    formData.append('model', agent);
     formData.append('module', activeModule);
 
     formData.append('language', finalWorkLanguage);
-formData.append('outputLanguage', finalWorkLanguage);
-formData.append('systemLanguage', systemLanguage);
-formData.append('interfaceLanguage', systemLanguage);
-formData.append('workLanguage', finalWorkLanguage);
+    formData.append('outputLanguage', finalWorkLanguage);
+    formData.append('systemLanguage', systemLanguage);
+    formData.append('interfaceLanguage', systemLanguage);
+    formData.append('workLanguage', finalWorkLanguage);
 
-    formData.append('messages', JSON.stringify(apiMessages));
-    formData.append('profile', JSON.stringify(profileForApi || null));
+    formData.append('message', userText || secondaryText || prompt);
+    formData.append('prompt', prompt);
+    formData.append('input', userText);
+    formData.append('secondaryInput', secondaryText);
 
-formData.append(
-  'profileSnapshot',
-  JSON.stringify({
-    id: profileForApi?.id || null,
-    title: profileForApi?.title || '',
-    topic: profileForApi?.topic || '',
-    type: getWorkType(profileForApi),
-    expertise: getExpertise(profileForApi),
-    workLanguage: getWorkLanguage(profileForApi),
-    citation: getCitationStyle(profileForApi),
-  }),
-);
+    formData.append('profile', JSON.stringify(profileForApi || {}));
+    formData.append('activeProfile', JSON.stringify(profileForApi || {}));
+    formData.append('profileContext', buildProfileBlock(profileForApi));
+    formData.append('attachmentsContext', buildAttachmentBlock(attachedFiles));
 
+    formData.append(
+      'messages',
+      JSON.stringify([
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ]),
+    );
 
+    formData.append(
+      'moduleSettings',
+      JSON.stringify({
+        activeModule,
+        qualityMode,
+        outputMode,
+        translationFrom,
+        translationTo,
+        translationStyle,
+        emailType,
+        emailTone,
+        translationFromLabel: getLanguageLabel(translationFrom),
+        translationToLabel: getLanguageLabel(translationTo),
+        translationStyleLabel: getTranslationStyleLabel(translationStyle),
+        emailTypeLabel: getEmailTypeLabel(emailType),
+        emailToneLabel: getEmailToneLabel(emailTone),
+      }),
+    );
+
+    formData.append(
+      'profileSnapshot',
+      JSON.stringify({
+        id: profileForApi?.id || null,
+        title: profileForApi?.title || '',
+        topic: profileForApi?.topic || '',
+        type: getWorkType(profileForApi),
+        expertise: getExpertise(profileForApi),
+        workLanguage: finalWorkLanguage,
+        citation: getCitationStyle(profileForApi),
+      }),
+    );
+
+    formData.append('citation', getCitationStyle(profileForApi));
     formData.append('useSemanticScholar', 'false');
     formData.append('sourceMode', 'uploaded_documents_first');
     formData.append('validateAttachmentsAgainstProfile', 'true');
     formData.append('requireSourceList', 'true');
-
     formData.append('allowAiKnowledgeFallback', 'true');
     formData.append('extractUploadedText', 'true');
     formData.append('useExtractedTextFirst', 'true');
     formData.append('returnExtractedFilesInfo', 'true');
-
     formData.append('contextaCitationFormat', 'false');
+
     formData.append(
       'filesMetadata',
       JSON.stringify(
@@ -3270,21 +2980,20 @@ formData.append(
       }
     });
 
-    const res = await fetch('/api/chat', {
+    const response = await fetch('/api/chat', {
       method: 'POST',
       body: formData,
     });
 
-    if (!res.ok) {
-      throw new Error(await readApiErrorResponse(res));
+    if (!response.ok) {
+      throw new Error(await readApiErrorResponse(response));
     }
 
-    const contentType = res.headers.get('content-type') || '';
-
+    const contentType = response.headers.get('content-type') || '';
     let fullText = '';
 
     if (contentType.includes('application/json')) {
-      const data = await res.json();
+      const data = await response.json();
 
       fullText =
         data.output ||
@@ -3292,17 +3001,20 @@ formData.append(
         data.message ||
         data.text ||
         data.answer ||
+        data.content ||
+        data.response ||
+        data?.choices?.[0]?.message?.content ||
         '';
 
       if (!fullText && data.ok === false) {
         throw new Error(data.message || data.error || 'API nevrátilo výstup.');
       }
     } else {
-      if (!res.body) {
+      if (!response.body) {
         throw new Error('API nevrátilo odpoveď.');
       }
 
-      const reader = res.body.getReader();
+      const reader = response.body.getReader();
       const decoder = new TextDecoder();
 
       while (true) {
@@ -3313,11 +3025,31 @@ formData.append(
         const chunk = decoder.decode(value, { stream: true });
         fullText += chunk;
 
-        setResult(stripModuleExtraSections(fullText, activeModule));
+        const liveCleaned = stripModuleExtraSections(
+          fullText
+            .replace(/^data:\s*/gm, '')
+            .replace(/\[DONE\]/g, ''),
+          activeModule,
+        );
+
+        if (liveCleaned.trim()) {
+          setResult(liveCleaned);
+        }
       }
     }
 
-    let cleaned = stripModuleExtraSections(fullText, activeModule);
+    let cleaned = stripModuleExtraSections(
+      fullText
+        .replace(/^data:\s*/gm, '')
+        .replace(/\[DONE\]/g, ''),
+      activeModule,
+    );
+
+    if (!cleaned.trim()) {
+      throw new Error(
+        'API odpovedalo, ale výstup bol prázdny. Skontrolujte /api/chat a vrátené polia output/result/message/text.',
+      );
+    }
 
     if (activeModule === 'planning') {
       cleaned = cleanFinalOutput(
@@ -3335,22 +3067,24 @@ formData.append(
 
     setResult(cleaned);
     setCanvasText(cleaned);
+    setCanvasOpen(true);
 
     try {
       localStorage.setItem('latest_generated_work_text', cleaned);
       localStorage.setItem('last_ai_output', cleaned);
     } catch {
-      // localStorage nemusí byť dostupný v niektorých režimoch prehliadača
+      // localStorage nemusí byť dostupný
     }
 
     await saveHistoryItem({
       module: activeModule,
       title: activeModuleResultTitle,
-      userMessage: input || secondaryInput || 'Bez textového zadania.',
+      userMessage: userText || secondaryText || 'Bez textového zadania.',
       assistantMessage: cleaned,
       result: {
-        profileTitle: activeProfile?.title || '',
-        profileId: activeProfile?.id || null,
+        profileTitle: profileForApi?.title || '',
+        profileId: profileForApi?.id || null,
+        activeModule,
         attachedFiles: attachedFiles.map((file) => ({
           name: file.name,
           size: file.size,
@@ -3363,6 +3097,8 @@ formData.append(
       resultRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 150);
   } catch (error) {
+    console.error('RUN_MODULE_ERROR:', error);
+
     const message =
       error instanceof Error
         ? error.message
@@ -3372,8 +3108,20 @@ formData.append(
   } finally {
     setIsLoading(false);
   }
-}
+};
+
+
+const selectDashboardModule = useCallback((moduleKey: ModuleKey) => {
+  setActiveModule(moduleKey);
   
+  window.setTimeout(() => {
+    mobileToolPanelRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }, 80);
+}, []);
+
 const downloadPdf = () => {
   const text = stripModuleExtraSections(canvasText || result, activeModule);
 
@@ -3498,11 +3246,11 @@ const downloadExcel = () => {
   };
 
   const csv = [
-    ['Poradie', 'Text'].map(escapeCell).join(';'),
-    ...rows.map((row) =>
-      [row.poradie, row.text].map(escapeCell).join(';'),
-    ),
-  ].join('\n');
+  ['Poradie', 'Text'].map(escapeCell).join(';'),
+  ...rows.map((row) =>
+    [row.poradie, row.text].map(escapeCell).join(';'),
+  ),
+].join('\n');
 
   const blob = new Blob([`\uFEFF${csv}`], {
     type: 'text/csv;charset=utf-8;',
@@ -3933,38 +3681,6 @@ const downloadExcel = () => {
           </div>
         </nav>
 
-        {/* AKČNÉ TLAČIDLÁ - samostatný spodný riadok */}
-        <div className="flex w-full items-center justify-end gap-2 rounded-[1.75rem] border border-white/10 bg-white/[0.02] p-2 shadow-inner shadow-black/20">
-          <button
-            type="button"
-            onClick={() => router.push('/profile?new=1')}
-            title="Nová práca"
-            className="inline-flex h-[40px] shrink-0 items-center justify-center gap-2 rounded-2xl border border-violet-300/50 bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 px-5 text-[13px] font-black text-white shadow-lg shadow-violet-950/45 transition-all duration-200 hover:-translate-y-0.5 hover:from-violet-500 hover:via-purple-500 hover:to-fuchsia-500 focus:outline-none focus:ring-2 focus:ring-violet-400/80 focus:ring-offset-2 focus:ring-offset-[#050711]"
-          >
-            <FileText className="h-4 w-4 shrink-0" />
-            <span className="whitespace-nowrap">Nová práca</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => router.push('/profile')}
-            title="Moje práce"
-            className="inline-flex h-[40px] shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 text-[13px] font-black text-white shadow-lg shadow-black/20 transition-all duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.10] focus:outline-none focus:ring-2 focus:ring-violet-400/70 focus:ring-offset-2 focus:ring-offset-[#050711]"
-          >
-            <BookOpen className="h-4 w-4 shrink-0" />
-            <span className="whitespace-nowrap">Moje práce</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => router.push('/video')}
-            title="Videonávody"
-            className="inline-flex h-[40px] shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 text-[13px] font-black text-white shadow-lg shadow-black/20 transition-all duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.10] focus:outline-none focus:ring-2 focus:ring-violet-400/70 focus:ring-offset-2 focus:ring-offset-[#050711]"
-          >
-            <Presentation className="h-4 w-4 shrink-0" />
-            <span className="whitespace-nowrap">Videonávody</span>
-          </button>
-        </div>
       </div>
     </header>
 
@@ -4085,6 +3801,28 @@ const downloadExcel = () => {
     className="min-h-[190px] w-full resize-y rounded-2xl border border-slate-300 bg-white px-4 py-4 text-sm leading-7 text-slate-950 outline-none placeholder:text-slate-400 transition-colors duration-300 focus:border-violet-500 dark:border-white/10 dark:bg-white/[0.055] dark:text-white dark:placeholder:text-slate-500"
   />
 
+
+{activeModule === 'translation' && (
+  <button
+    type="button"
+    onClick={runModule}
+    disabled={isLoading}
+    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-sky-900/30 transition hover:from-sky-500 hover:via-cyan-500 hover:to-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+  >
+    {isLoading ? (
+      <>
+        <RefreshCcw className="h-4 w-4 animate-spin" />
+        Prekladám...
+      </>
+    ) : (
+      <>
+        <Languages className="h-4 w-4" />
+        {activeModuleButtonLabel || 'Preložiť text'}
+      </>
+    )}
+  </button>
+)}
+
 {activeModule === 'data' && (
   <p className="mt-2 text-xs text-slate-400">
     Môžete priložiť Excel, CSV, PDF, Word, TXT alebo výstupy z JASP/SPSS. Po spracovaní sa otvorí samostatné okno s výsledkami analýzy, tabuľkami, premennými, grafmi a odporúčanými testami.
@@ -4157,24 +3895,50 @@ const downloadExcel = () => {
 
 
 {activeModule === 'data' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť analýzu dát
-      </>
-    )}
-  </button>
+  <div className="mt-4 rounded-3xl border border-cyan-300/30 bg-gradient-to-br from-cyan-500/10 via-blue-500/10 to-violet-500/10 p-4 shadow-2xl shadow-cyan-950/30">
+    <div className="mb-3 flex items-start gap-3">
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-cyan-500/20 text-cyan-100 ring-1 ring-cyan-300/30">
+        <BarChart3 className="h-5 w-5" />
+      </div>
+
+      <div className="min-w-0">
+        <h3 className="text-sm font-black text-white sm:text-base">
+          Analýza dát
+        </h3>
+
+        <p className="mt-1 text-xs font-semibold leading-5 text-slate-300 sm:text-sm">
+          Spustí spracovanie tabuľky, premenných, štatistík, grafov a otvorí výsledky v samostatnom okne.
+        </p>
+      </div>
+    </div>
+
+    <button
+      type="button"
+      onClick={runModule}
+      disabled={isLoading}
+      className="group relative inline-flex min-h-[58px] w-full items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-600 px-6 py-4 text-sm font-black text-white shadow-2xl shadow-cyan-950/50 ring-2 ring-cyan-300/50 transition hover:from-emerald-400 hover:via-cyan-400 hover:to-blue-500 hover:ring-cyan-200/80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+    >
+      <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.35),transparent_38%)] opacity-70 transition group-hover:opacity-100" />
+
+      <span className="relative z-10 flex items-center justify-center gap-2">
+        {isLoading ? (
+          <>
+            <RefreshCcw className="h-5 w-5 animate-spin" />
+            Spracúvam analýzu dát...
+          </>
+        ) : (
+          <>
+            <Send className="h-5 w-5" />
+            Spustiť analýzu dát a otvoriť výsledky
+          </>
+        )}
+      </span>
+    </button>
+
+    <p className="mt-3 text-[11px] font-bold leading-5 text-cyan-100/90">
+      Výsledok sa zobrazí v prehľadnom modálnom okne a následne ho bude možné exportovať do Word, PDF alebo Excel.
+    </p>
+  </div>
 )}
 
 {activeModule === 'planning' && (

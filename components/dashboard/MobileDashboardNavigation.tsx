@@ -18,9 +18,8 @@ import {
   UserCircle,
   Video,
   WandSparkles,
-  X,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
 type MobileDashboardModuleInfo = {
   key: string;
@@ -40,7 +39,7 @@ type MobileDashboardNavigationProps = {
 
   /**
    * Navigácia z DashboardClient.tsx.
-   * Používa sa pre rozbaľovacie hlavné menu.
+   * Používa sa pre hlavné mobilné menu.
    */
   onNavigate?: (path: string) => void;
 };
@@ -152,13 +151,13 @@ function getShortModuleLabel(moduleKey: string, label: string) {
       return 'Preklad';
 
     case 'data':
-      return 'Dáta';
+      return 'Analýza dát';
 
     case 'planning':
-      return 'Plán';
+      return 'Plánovanie';
 
     case 'emails':
-      return 'Email';
+      return 'Emaily';
 
     case 'humanizer':
       return 'Humanizér';
@@ -174,31 +173,31 @@ function getShortModuleLabel(moduleKey: string, label: string) {
 function getModuleDescription(moduleKey: string) {
   switch (moduleKey) {
     case 'supervisor':
-      return 'Odborné pripomienky';
+      return 'Odborné vedenie práce';
 
     case 'quality':
-      return 'Kontrola kvality';
+      return 'Kontrola kvality práce';
 
     case 'defense':
       return 'Príprava obhajoby';
 
     case 'translation':
-      return 'Odborný preklad';
+      return 'Odborný preklad textu';
 
     case 'data':
-      return 'Tabuľky a grafy';
+      return 'Tabuľky, výpočty a grafy';
 
     case 'planning':
-      return 'Harmonogram';
+      return 'Harmonogram práce';
 
     case 'emails':
-      return 'Komunikácia';
+      return 'Akademická komunikácia';
 
     case 'humanizer':
-      return 'Prirodzený štýl';
+      return 'Prirodzený štýl textu';
 
     case 'originality':
-      return 'Originalita textu';
+      return 'Kontrola originality textu';
 
     default:
       return 'AI nástroj';
@@ -207,8 +206,6 @@ function getModuleDescription(moduleKey: string) {
 
 export default function MobileDashboardNavigation({
   activeModule,
-  activeModuleLabel,
-  activeModuleSubtitle,
   activeProfileTitle,
   activeProfileSubtitle,
   activeProfileType,
@@ -217,12 +214,6 @@ export default function MobileDashboardNavigation({
   onSelectModule,
   onNavigate,
 }: MobileDashboardNavigationProps) {
-  const [isMainMenuOpen, setIsMainMenuOpen] = useState(false);
-
-  const cleanActiveModuleLabel = useMemo(() => {
-    return normalizeModuleLabel(activeModuleLabel);
-  }, [activeModuleLabel]);
-
   const visibleModules = useMemo(() => {
     if (!Array.isArray(moduleInfos)) {
       return [];
@@ -250,8 +241,6 @@ export default function MobileDashboardNavigation({
   }
 
   function handleNavigate(path: string) {
-    setIsMainMenuOpen(false);
-
     if (onNavigate) {
       onNavigate(path);
       return;
@@ -263,42 +252,25 @@ export default function MobileDashboardNavigation({
   return (
     <>
       {/* =====================================================
-          MOBILNÁ VRCHNÁ LIŠTA
-          - jazyky odstránené
-          - hlavné menu sa otvorí/zatvorí po kliknutí
-          - AI moduly ostávajú ako posuvná horná lišta
+          MOBILNÁ ÚVODNÁ STRÁNKA DASHBOARDU
+          - po prihlásení sa zobrazí hlavné menu
+          - spodná AI lišta je odstránená
+          - AI nástroje sú vložené priamo do hlavného menu
       ===================================================== */}
 
-      <section className="sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-3 pt-3 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
-              AI sekcia
-            </p>
+      <section className="sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-4 pt-4 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
+        <div className="mb-3">
+          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
+            Mobilná aplikácia
+          </p>
 
-            <h2 className="mt-1 line-clamp-1 text-lg font-black leading-tight text-white">
-              {cleanActiveModuleLabel}
-            </h2>
+          <h2 className="mt-1 text-xl font-black leading-tight text-white">
+            Hlavné menu
+          </h2>
 
-            <p className="mt-1 line-clamp-1 text-xs font-semibold text-slate-400">
-              {activeModuleSubtitle || 'Vyberte AI nástroj pre aktuálnu prácu'}
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setIsMainMenuOpen((value) => !value)}
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border text-white shadow-lg transition active:scale-95 ${
-              isMainMenuOpen
-                ? 'border-violet-300 bg-violet-600 shadow-violet-950/40'
-                : 'border-white/10 bg-white/[0.06] hover:bg-white/[0.1]'
-            }`}
-            aria-expanded={isMainMenuOpen}
-            aria-label={isMainMenuOpen ? 'Zatvoriť hlavné menu' : 'Otvoriť hlavné menu'}
-            title={isMainMenuOpen ? 'Zatvoriť menu' : 'Otvoriť menu'}
-          >
-            {isMainMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </button>
+          <p className="mt-1 text-xs font-semibold text-slate-400">
+            Vyberte sekciu alebo AI nástroj, s ktorým chcete pracovať.
+          </p>
         </div>
 
         {(activeProfileTitle || activeProfileSubtitle || activeProfileType) && (
@@ -321,90 +293,118 @@ export default function MobileDashboardNavigation({
           </div>
         )}
 
-        {/* HLAVNÉ MENU — SKRYTÉ / ODKRYTÉ PO KLIKNUTÍ */}
-        {isMainMenuOpen ? (
-          <div className="mb-3 rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
-            <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-600/20 text-violet-200">
+              <Menu className="h-4 w-4" />
+            </span>
+
+            <div>
               <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
                 Hlavné menu
               </p>
-
-              <button
-                type="button"
-                onClick={() => setIsMainMenuOpen(false)}
-                className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
-              >
-                Skryť
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              {mobileMainMenuItems.map((item) => {
-                const Icon = item.icon;
-
-                return (
-                  <button
-                    key={`${item.href}-${item.label}`}
-                    type="button"
-                    onClick={() => handleNavigate(item.href)}
-                    className="flex min-h-[54px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-left text-white transition hover:border-violet-300/40 hover:bg-violet-600/20 active:scale-[0.98]"
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/30 text-violet-200">
-                      <Icon className="h-4 w-4" />
-                    </span>
-
-                    <span className="min-w-0">
-                      <span className="block truncate text-xs font-black">
-                        {item.label}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
+              <p className="text-[11px] font-semibold text-slate-500">
+                Základné sekcie systému
+              </p>
             </div>
           </div>
-        ) : null}
 
-        {/* AI MODULY — VRCHNÁ POSÚVATEĽNÁ LIŠTA */}
-        <div className="-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="flex min-w-max gap-2">
-            {visibleModules.map((item) => {
-              const active = activeModule === item.key;
-
-              const rawLabel =
-                t?.dashboardTools?.tools?.[item.translationKey] ||
-                item.translationKey;
-
-              const label = getShortModuleLabel(item.key, rawLabel);
+          <div className="grid grid-cols-2 gap-2">
+            {mobileMainMenuItems.map((item) => {
+              const Icon = item.icon;
 
               return (
                 <button
-                  key={item.key}
+                  key={`${item.href}-${item.label}`}
                   type="button"
-                  onClick={() => handleSelectModule(item.key)}
-                  className={`flex min-h-[62px] w-[96px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.97] ${
-                    active
-                      ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
-                      : 'border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1] hover:text-white'
-                  }`}
-                  aria-pressed={active}
-                  title={getModuleDescription(item.key)}
+                  onClick={() => handleNavigate(item.href)}
+                  className="flex min-h-[58px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-left text-white transition hover:border-violet-300/40 hover:bg-violet-600/20 active:scale-[0.98]"
                 >
-                  <span
-                    className={`flex h-7 w-7 items-center justify-center rounded-xl ${
-                      active
-                        ? 'bg-white/20 text-white'
-                        : 'bg-black/25 text-violet-200'
-                    }`}
-                  >
-                    {getModuleIcon(item.key)}
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/30 text-violet-200">
+                    <Icon className="h-4 w-4" />
                   </span>
 
-                  <span className="max-w-full truncate">{label}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-black">
+                      {item.label}
+                    </span>
+                  </span>
                 </button>
               );
             })}
           </div>
+
+          {visibleModules.length > 0 ? (
+            <>
+              <div className="my-4 h-px bg-white/10" />
+
+              <div className="mb-3 flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-200">
+                  <Sparkles className="h-4 w-4" />
+                </span>
+
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
+                    AI nástroje
+                  </p>
+                  <p className="text-[11px] font-semibold text-slate-500">
+                    Školiteľ, audit, obhajoba a ďalšie moduly
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                {visibleModules.map((item) => {
+                  const active = activeModule === item.key;
+
+                  const rawLabel =
+                    t?.dashboardTools?.tools?.[item.translationKey] ||
+                    item.translationKey;
+
+                  const label = getShortModuleLabel(item.key, rawLabel);
+
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => handleSelectModule(item.key)}
+                      className={`flex min-h-[58px] items-center gap-3 rounded-2xl border px-3 py-2 text-left transition active:scale-[0.98] ${
+                        active
+                          ? 'border-violet-300 bg-violet-600 text-white shadow-lg shadow-violet-950/40'
+                          : 'border-white/10 bg-white/[0.06] text-white hover:border-violet-300/40 hover:bg-violet-600/20'
+                      }`}
+                      title={getModuleDescription(item.key)}
+                      aria-pressed={active}
+                    >
+                      <span
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                          active
+                            ? 'bg-white/20 text-white'
+                            : 'bg-black/30 text-violet-200'
+                        }`}
+                      >
+                        {getModuleIcon(item.key)}
+                      </span>
+
+                      <span className="min-w-0">
+                        <span className="block truncate text-xs font-black">
+                          {label}
+                        </span>
+
+                        <span
+                          className={`mt-0.5 block truncate text-[10px] font-semibold ${
+                            active ? 'text-violet-100' : 'text-slate-500'
+                          }`}
+                        >
+                          {getModuleDescription(item.key)}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : null}
         </div>
       </section>
     </>

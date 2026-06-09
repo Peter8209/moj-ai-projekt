@@ -3731,8 +3731,8 @@ const mobileMenuItems = useMemo(
         <div className="pointer-events-none fixed inset-0 z-0 zedpera-grid-bg opacity-45" />
         <div className="pointer-events-none fixed left-1/2 top-0 z-0 h-[420px] w-[760px] -translate-x-1/2 rounded-full bg-violet-700/20 blur-[120px]" />
 
-        <header className="sticky top-0 z-[250] border-b border-white/10 bg-black/95 backdrop-blur-2xl">
-  <div className="mx-auto flex h-[72px] max-w-[1920px] items-center px-4 sm:px-6 xl:px-8">
+        <header className="sticky top-0 z-50 border-b border-white/10 bg-black/92 backdrop-blur-2xl">
+  <div className="mx-auto flex h-[72px] max-w-[1920px] items-center px-8">
     <Link href="/" className="flex shrink-0 items-center gap-3">
       <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 via-violet-600 to-fuchsia-500 text-2xl font-black text-white shadow-[0_0_28px_rgba(80,90,255,0.55)]">
         Z
@@ -3795,7 +3795,7 @@ const mobileMenuItems = useMemo(
     </div>
 
 {/* MOBILE HEADER ACTIONS */}
-<div className="ml-auto flex items-center gap-2 xl:hidden">
+<div className="relative ml-auto flex items-center gap-2 xl:hidden">
   <Link
     href="/login"
     className="mobile-header-login inline-flex h-11 shrink-0 items-center justify-center rounded-2xl border border-violet-400/30 bg-[#080816] px-3 text-[12px] font-black text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
@@ -3813,192 +3813,168 @@ const mobileMenuItems = useMemo(
   <button
     type="button"
     onClick={() => setMobileMenuOpen((value) => !value)}
-    className="mobile-header-menu-button inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-[#080816] px-3 text-[12px] font-black text-white shadow-[0_0_18px_rgba(124,58,237,0.16)]"
-    aria-label="Otvoriť mobilné menu"
+    className="mobile-header-menu-button inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-violet-400/45 bg-[#080816] px-3 text-[12px] font-black text-white shadow-[0_0_24px_rgba(124,58,237,0.25)]"
+    aria-label={mobileMenuOpen ? 'Zavrieť mobilné menu' : 'Otvoriť mobilné menu'}
     aria-expanded={mobileMenuOpen}
+    aria-haspopup="menu"
     aria-controls="mobile-main-menu"
   >
     {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
     <span>Menu</span>
-  </button>
-</div>
-</div>
-
-{/* MOBILE OPEN MENU - full screen professional overlay */}
-{mobileMenuOpen ? (
-  <div className="fixed inset-0 z-[9999] xl:hidden">
-    <button
-      type="button"
-      className="absolute inset-0 block h-full w-full border-0 bg-black/85 backdrop-blur-xl"
-      aria-label="Zavrieť mobilné menu"
-      onClick={() => setMobileMenuOpen(false)}
+    <ChevronDown
+      size={14}
+      className={`text-violet-200 transition ${mobileMenuOpen ? 'rotate-180' : ''}`}
     />
+  </button>
 
-    <section
+  {/* MOBILNÉ MENU AKO JAZYKOVÁ MUTÁCIA - DROPDOWN */}
+  {mobileMenuOpen ? (
+    <div
       id="mobile-main-menu"
-      className="absolute inset-x-3 bottom-3 top-3 flex flex-col overflow-hidden rounded-[2rem] border border-violet-300/25 bg-[#020617] shadow-[0_35px_120px_rgba(0,0,0,0.9)]"
-      role="dialog"
-      aria-modal="true"
+      className="absolute right-0 top-[calc(100%+0.65rem)] z-[130] w-[min(92vw,360px)] overflow-hidden rounded-2xl border border-violet-400/40 bg-[#050711] p-2 shadow-[0_24px_70px_rgba(0,0,0,0.85),0_0_34px_rgba(124,58,237,0.28)] xl:hidden"
+      role="menu"
       aria-label="Mobilné menu Zedpera"
     >
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-gradient-to-r from-violet-950/70 via-slate-950 to-cyan-950/50 px-4 py-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 via-fuchsia-600 to-cyan-500 text-white shadow-[0_0_28px_rgba(124,58,237,0.55)]">
-            <Sparkles className="h-5 w-5" />
-          </div>
-
-          <div className="min-w-0">
-            <p className="text-[11px] font-black uppercase tracking-[0.22em] text-violet-200">
-              Zedpera
-            </p>
-            <h2 className="truncate text-xl font-black leading-tight text-white">
-              Menu
-            </h2>
-          </div>
-        </div>
+      <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-[11px] font-black uppercase tracking-[0.16em] text-white">
+        <span className="inline-flex items-center gap-2">
+          <Menu size={15} className="text-violet-300" />
+          Menu
+        </span>
 
         <button
           type="button"
           onClick={() => setMobileMenuOpen(false)}
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white transition hover:bg-white/[0.12] active:scale-95"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06] text-white transition hover:bg-white/[0.12]"
           aria-label="Zavrieť menu"
         >
-          <X className="h-6 w-6" />
+          <X size={15} />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-3">
-          <div className="mb-3 flex items-center gap-2 text-[12px] font-black uppercase tracking-[0.18em] text-violet-200">
-            <Menu className="h-4 w-4" />
-            <span>Hlavné menu</span>
-          </div>
+      <div className="grid gap-2">
+        {mobileMenuItems.map((item) => {
+          const Icon = item.icon;
+          const isHashLink = item.href.startsWith('#');
+          const itemClassName =
+            'flex min-h-[50px] w-full items-center justify-between rounded-xl border border-white/10 bg-[#0b1020] px-3 text-left text-[13px] font-black text-white transition hover:border-violet-400/50 hover:bg-[#11172a]';
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {mobileMenuItems.map((item) => {
-              const Icon = item.icon;
-              const isHashLink = item.href.startsWith('#');
+          if (isHashLink) {
+            return (
+              <a
+                key={item.href}
+                href={item.href}
+                role="menuitem"
+                onClick={(event) => {
+                  event.preventDefault();
+                  setMobileMenuOpen(false);
 
-              const content = (
-                <>
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/20 text-violet-100 ring-1 ring-violet-300/20">
-                    <Icon className="h-5 w-5" />
+                  window.setTimeout(() => {
+                    scrollToHash(item.href);
+                  }, 80);
+                }}
+                className={itemClassName}
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-200 ring-1 ring-violet-400/20">
+                    <Icon className="h-4 w-4" />
                   </span>
 
-                  <span className="min-w-0 flex-1 truncate text-left text-[15px] font-black text-white">
-                    {item.label}
-                  </span>
+                  <span className="truncate">{item.label}</span>
+                </span>
 
-                  <ArrowRight className="h-4 w-4 shrink-0 text-violet-200" />
-                </>
-              );
+                <ArrowRight className="h-4 w-4 shrink-0 text-violet-300" />
+              </a>
+            );
+          }
 
-              if (isHashLink) {
-                return (
-                  <a
-                    key={item.href}
-                    href={item.href}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      setMobileMenuOpen(false);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              role="menuitem"
+              onClick={() => setMobileMenuOpen(false)}
+              className={itemClassName}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-200 ring-1 ring-violet-400/20">
+                  <Icon className="h-4 w-4" />
+                </span>
 
-                      window.setTimeout(() => {
-                        scrollToHash(item.href);
-                      }, 80);
-                    }}
-                    className="flex min-h-[62px] items-center gap-3 rounded-2xl border border-white/10 bg-[#0b1020] px-3 py-2 text-white no-underline shadow-lg shadow-black/20 transition hover:border-violet-300/50 hover:bg-violet-600/20 active:scale-[0.98]"
-                  >
-                    {content}
-                  </a>
-                );
-              }
+                <span className="truncate">{item.label}</span>
+              </span>
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="flex min-h-[62px] items-center gap-3 rounded-2xl border border-white/10 bg-[#0b1020] px-3 py-2 text-white no-underline shadow-lg shadow-black/20 transition hover:border-violet-300/50 hover:bg-violet-600/20 active:scale-[0.98]"
-                >
-                  {content}
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="mt-4 rounded-3xl border border-white/10 bg-white/[0.04] p-3">
-          <div className="mb-3 flex items-center gap-2 text-[12px] font-black uppercase tracking-[0.18em] text-cyan-200">
-            <Languages className="h-4 w-4" />
-            <span>{t.common.language}</span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            {languages.map((item) => {
-              const active = language === item.code;
-
-              return (
-                <button
-                  key={item.code}
-                  type="button"
-                  onClick={() => {
-                    handleLanguageChange(item.code);
-                    setMobileMenuOpen(false);
-                  }}
-                  className={`flex min-h-[56px] items-center gap-2 rounded-2xl border px-3 py-2 text-left transition active:scale-[0.98] ${
-                    active
-                      ? 'border-cyan-300/60 bg-cyan-500/20 shadow-lg shadow-cyan-950/30'
-                      : 'border-white/10 bg-[#0b1020] hover:border-cyan-300/40 hover:bg-cyan-500/10'
-                  }`}
-                  aria-pressed={active}
-                >
-                  <span className={`language-chip language-${item.code}`}>
-                    {item.short}
-                  </span>
-
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-black text-white">
-                    {item.label}
-                  </span>
-
-                  {active ? (
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-cyan-200" />
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="mt-4 grid gap-2 pb-2">
-          <Link
-            href="/login"
-            onClick={() => setMobileMenuOpen(false)}
-            className="flex min-h-[58px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.07] px-5 text-[15px] font-black text-white no-underline transition hover:bg-white/[0.12] active:scale-[0.98]"
-          >
-            <Bot className="h-5 w-5 text-violet-200" />
-            {t.common.login}
-          </Link>
-
-          <a
-            href="#pricing"
-            onClick={(event) => {
-              event.preventDefault();
-              setMobileMenuOpen(false);
-
-              window.setTimeout(() => {
-                scrollToHash('#pricing');
-              }, 80);
-            }}
-            className="flex min-h-[60px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 via-fuchsia-600 to-cyan-500 px-5 text-[15px] font-black text-white no-underline shadow-2xl shadow-violet-950/50 transition hover:from-violet-500 hover:via-fuchsia-500 hover:to-cyan-400 active:scale-[0.98]"
-          >
-            {t.common.startFree}
-            <ArrowRight className="h-5 w-5" />
-          </a>
-        </section>
+              <ArrowRight className="h-4 w-4 shrink-0 text-violet-300" />
+            </Link>
+          );
+        })}
       </div>
-    </section>
-  </div>
-) : null}
+
+      <div className="mt-2 rounded-xl border border-white/10 bg-[#0b1020] p-2">
+        <div className="mb-2 flex items-center gap-2 px-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-300">
+          <Languages size={14} className="text-cyan-300" />
+          {t.common.language}
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          {languages.map((item) => {
+            const active = language === item.code;
+
+            return (
+              <button
+                key={item.code}
+                type="button"
+                onClick={() => {
+                  handleLanguageChange(item.code);
+                  setMobileMenuOpen(false);
+                }}
+                className={`flex min-h-[42px] items-center justify-center gap-2 rounded-xl border px-2 text-[12px] font-black transition ${
+                  active
+                    ? 'border-violet-400 bg-violet-700 text-white shadow-[0_0_24px_rgba(124,58,237,0.35)]'
+                    : 'border-white/10 bg-[#050711] text-white hover:border-violet-400/50 hover:bg-[#11172a]'
+                }`}
+                aria-pressed={active}
+              >
+                <span className={`language-chip language-${item.code}`}>
+                  {item.short}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-2 grid gap-2">
+        <Link
+          href="/login"
+          role="menuitem"
+          onClick={() => setMobileMenuOpen(false)}
+          className="inline-flex min-h-[50px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-4 text-[13px] font-black text-white transition hover:bg-white/[0.12]"
+        >
+          <Bot className="h-4 w-4" />
+          {t.common.login}
+        </Link>
+
+        <a
+          href="#pricing"
+          role="menuitem"
+          onClick={(event) => {
+            event.preventDefault();
+            setMobileMenuOpen(false);
+
+            window.setTimeout(() => {
+              scrollToHash('#pricing');
+            }, 80);
+          }}
+          className="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 text-[13px] font-black text-white shadow-lg shadow-violet-700/40 transition hover:bg-violet-500"
+        >
+          {t.common.startFree}
+          <ArrowRight className="h-4 w-4" />
+        </a>
+      </div>
+    </div>
+  ) : null}
+</div>
+</div>
 </header>
 
         <section className="relative z-10 mx-auto max-w-[1860px] px-5 pb-8 pt-8 lg:px-10">

@@ -2320,7 +2320,34 @@ const searchParams = useSearchParams();
   const agent = defaultAgent;
   const { t } = useLanguage();
 
-  const [activeModule, setActiveModule] = useState<ModuleKey>('supervisor');
+ const [activeModule, setActiveModule] = useState<ModuleKey>(() => {
+  if (typeof window === 'undefined') {
+    return 'supervisor';
+  }
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const moduleFromUrl = urlParams.get('module');
+
+  if (moduleFromUrl === 'coach') return 'supervisor';
+  if (moduleFromUrl === 'audit') return 'quality';
+
+  if (moduleFromUrl && isModuleKey(moduleFromUrl)) {
+    return moduleFromUrl;
+  }
+
+  const storedModule = localStorage.getItem(
+    'zedpera_active_dashboard_module',
+  );
+
+  if (storedModule === 'coach') return 'supervisor';
+  if (storedModule === 'audit') return 'quality';
+
+  if (storedModule && isModuleKey(storedModule)) {
+    return storedModule;
+  }
+
+  return 'supervisor';
+});
 
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
@@ -2396,38 +2423,16 @@ useEffect(() => {
 
 const fixedUi = getFixedModuleUi(systemLanguage)[activeModule];
 const currentFixedModuleUi = getFixedModuleUi(systemLanguage);
-const activeModuleLabel =
-  t?.dashboardTools?.tools?.[activeTranslationKey] ||
-  fixedUi.label;
 
-const activeModuleButtonLabel =
-  t?.dashboardTools?.buttons?.[activeTranslationKey] ||
-  fixedUi.button;
+const activeModuleLabel = fixedUi.label;
+
+const activeModuleButtonLabel = fixedUi.button;
 
 const fixedActiveModuleUi = fixedUi;
 
-const activeModuleInputLabel =
-  activeModule === 'translation'
-    ? 'Translator'
-    : activeModule === 'planning'
-      ? 'Plánovanie termínov'
-      : activeModule === 'emails'
-        ? 'Profesionálne písanie emailov'
-        : fixedUi?.inputLabel ||
-          t?.dashboardTools?.inputLabels?.[activeTranslationKey] ||
-          t?.dashboardTools?.common?.assignmentLabel ||
-          'Zadanie';
+const activeModuleInputLabel = fixedUi.inputLabel;
 
-const activeModulePlaceholder =
-  activeModule === 'translation'
-    ? 'Vložte text, ktorý chcete preložiť. Potom vyberte zdrojový a cieľový jazyk.'
-    : activeModule === 'planning'
-      ? 'Zadajte termín odovzdania, aktuálny stav práce a požadovaný harmonogram.'
-      : activeModule === 'emails'
-        ? 'Napíšte, komu má byť email určený a čo má obsahovať.'
-        : fixedUi?.placeholder ||
-          t?.dashboardTools?.placeholders?.[activeTranslationKey] ||
-          '';
+const activeModulePlaceholder = fixedUi.placeholder;
 
 const activeModuleCard =
   t?.dashboardTools?.cards?.[activeTranslationKey];
@@ -2435,23 +2440,9 @@ const activeModuleCard =
 const activeDashboardModuleTexts =
   t?.dashboardTools?.modules?.[activeTranslationKey];
 
-const activeModuleIntro =
-  fixedUi?.intro ||
-  activeDashboardModuleTexts?.intro ||
-  activeModuleCard?.description ||
-  '';
+const activeModuleIntro = fixedUi.intro;
 
-const activeModuleInputHelp =
-  activeModule === 'translation'
-    ? ''
-    : activeModule === 'planning'
-      ? ''
-      : activeModule === 'emails'
-        ? ''
-        : activeDashboardModuleTexts?.inputHelp ||
-          activeModulePlaceholder ||
-          fixedUi?.placeholder ||
-          '';
+const activeModuleInputHelp = '';
 
 const activeModuleResultHelp =
   activeDashboardModuleTexts?.resultHelp || '';
@@ -2460,21 +2451,13 @@ const activeModuleEmptyState =
   activeDashboardModuleTexts?.emptyState ||
   'Zatiaľ nie je vložený žiadny text.';
 
-const activeModuleCardTitle =
-  activeModuleCard?.title || activeModuleLabel;
+const activeModuleCardTitle = fixedUi.label;
 
-const activeModuleCardSubtitle =
-  activeModuleCard?.subtitle || 'AI nástroj';
+const activeModuleCardSubtitle = fixedUi.shortLabel;
 
-const activeModuleCardDescription =
-  activeModuleCard?.description || activeModuleIntro;
+const activeModuleCardDescription = fixedUi.intro;
 
-const activeModuleResultTitle =
-  fixedUi?.resultTitle ||
-  activeModuleCard?.title ||
-  activeModuleLabel ||
-  'Výstup';
-
+const activeModuleResultTitle = fixedUi.resultTitle;
 const exportTitle = useMemo(() => {
   return `${activeModuleLabel} - ${
     activeProfile?.title || 'output'
@@ -3690,16 +3673,32 @@ if (activeModule === 'data') {
 };
 
 
-const selectDashboardModule = useCallback((moduleKey: ModuleKey) => {
-  setActiveModule(moduleKey);
-  
-  window.setTimeout(() => {
-    mobileToolPanelRef.current?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
+const selectDashboardModule = useCallback(
+  (moduleKey: ModuleKey) => {
+    if (!isModuleKey(moduleKey)) return;
+
+    setActiveModule(moduleKey);
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(
+        'zedpera_active_dashboard_module',
+        moduleKey,
+      );
+    }
+
+    router.replace(`/dashboard?module=${moduleKey}`, {
+      scroll: false,
     });
-  }, 80);
-}, []);
+
+    window.setTimeout(() => {
+      mobileToolPanelRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }, 80);
+  },
+  [router],
+);
 
 const downloadPdf = () => {
   const text = stripModuleExtraSections(canvasText || result, activeModule);
@@ -4365,20 +4364,12 @@ const downloadExcel = () => {
                 )}
 
 <div className="mt-4">
-  <label className="mb-2 block text-sm font-black text-slate-800 dark:text-slate-300">
-    {activeModuleInputLabel}
-  </label>
-
-  <p className="mb-3 text-xs font-semibold leading-5 text-slate-400">
-    {activeModuleInputHelp}
-  </p>
-
   <textarea
-    value={input}
-    onChange={(event) => setInput(event.target.value)}
-    placeholder={activeModulePlaceholder}
-    className="min-h-[190px] w-full resize-y rounded-2xl border border-slate-300 bg-white px-4 py-4 text-sm leading-7 text-slate-950 outline-none placeholder:text-slate-400 transition-colors duration-300 focus:border-violet-500 dark:border-white/10 dark:bg-white/[0.055] dark:text-white dark:placeholder:text-slate-500"
-  />
+  value={input}
+  onChange={(event) => setInput(event.target.value)}
+  placeholder={activeModulePlaceholder}
+  className="min-h-[240px] w-full resize-y rounded-3xl border border-white/10 bg-[#070b18] px-5 py-5 text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/10"
+/>
 
 
 {activeModule === 'translation' && (
@@ -4626,6 +4617,29 @@ const downloadExcel = () => {
                     Canvas
                   </button>
 
+                  {(result || canvasText) && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={downloadPdf}
+                        className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 hover:bg-white/[0.1]"
+                      >
+                        <FileDown className="h-4 w-4" />
+                        PDF
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={downloadDoc}
+                        className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 hover:bg-white/[0.1]"
+                      >
+                        <Download className="h-4 w-4" />
+                        Word
+                      </button>
+                    </>
+                  )}
+
+
                   <button
                     type="button"
                     onClick={resetCurrentModule}
@@ -4685,6 +4699,24 @@ const downloadExcel = () => {
           className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
         >
           Kopírovať
+        </button>
+
+        <button
+          type="button"
+          onClick={downloadPdf}
+          className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+        >
+          <FileDown className="h-4 w-4" />
+          PDF
+        </button>
+
+        <button
+          type="button"
+          onClick={downloadDoc}
+          className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+        >
+          <Download className="h-4 w-4" />
+          Word
         </button>
 
         <button

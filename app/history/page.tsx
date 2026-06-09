@@ -7,6 +7,7 @@ import {
   Clock3,
   Copy,
   Download,
+  FileDown,
   Home,
   Inbox,
   Maximize2,
@@ -656,6 +657,102 @@ export default function HistoryPage() {
     URL.revokeObjectURL(url);
   }
 
+  function historyHtmlEscape(value: string) {
+    return String(value || '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
+  function createHistoryExportHtml(item: HistoryItem) {
+    const title = item.title || getModuleLabel(item.module);
+    const content = createFullReadableText(item);
+
+    const paragraphs = content
+      .split('\n')
+      .map((line) => {
+        if (!line.trim()) return '<p>&nbsp;</p>';
+        return `<p>${historyHtmlEscape(line)}</p>`;
+      })
+      .join('');
+
+    return `
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${historyHtmlEscape(title)}</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 12pt;
+      line-height: 1.6;
+      color: #111827;
+      padding: 40px;
+    }
+
+    h1 {
+      font-size: 20pt;
+      margin-bottom: 24px;
+    }
+
+    p {
+      margin: 0 0 11px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>${historyHtmlEscape(title)}</h1>
+  ${paragraphs}
+</body>
+</html>
+`;
+  }
+
+  function downloadHistoryWord(item: HistoryItem) {
+    if (typeof window === 'undefined') return;
+
+    const title = item.title || getModuleLabel(item.module);
+    const html = createHistoryExportHtml(item);
+    const blob = new Blob([html], {
+      type: 'application/msword;charset=utf-8',
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = `${createSafeFileName(title)}.doc`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadHistoryPdf(item: HistoryItem) {
+    if (typeof window === 'undefined') return;
+
+    const html = createHistoryExportHtml(item);
+    const printWindow = window.open('', '_blank');
+
+    if (!printWindow) {
+      alert('Prehliadač zablokoval otvorenie PDF okna. Povoľte vyskakovacie okná.');
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+
+    printWindow.onload = () => {
+      printWindow.focus();
+      printWindow.print();
+    };
+  }
+
   async function deleteHistoryItem(item: HistoryItem) {
     const confirmed = window.confirm(
       'Naozaj chcete vymazať tento záznam z histórie chatu?',
@@ -1130,6 +1227,24 @@ export default function HistoryPage() {
 
                   <button
                     type="button"
+                    onClick={() => downloadHistoryPdf(selectedItem)}
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-white/15 bg-[#1c2542] px-4 text-sm font-black text-white transition hover:bg-[#27345d]"
+                  >
+                    <FileDown className="h-4 w-4" />
+                    PDF
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => downloadHistoryWord(selectedItem)}
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-white/15 bg-[#1c2542] px-4 text-sm font-black text-white transition hover:bg-[#27345d]"
+                  >
+                    <Download className="h-4 w-4" />
+                    Word
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => continueInAiChat(selectedItem)}
                     className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 text-sm font-black text-white shadow-xl shadow-violet-950/40 transition hover:bg-violet-500"
                   >
@@ -1144,7 +1259,7 @@ export default function HistoryPage() {
                     aria-label="Zatvoriť detail"
                   >
                     <X className="h-4 w-4" />
-                    Zavrieť
+                    Word
                   </button>
                 </div>
               </div>

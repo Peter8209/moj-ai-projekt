@@ -189,12 +189,12 @@ function createNavItems(dictionary: TranslationRecord): NavItem[] {
 function createAiSectionItems(dictionary: TranslationRecord): AiSectionItem[] {
   return [
     {
-      key: 'coach',
-      label: text(dictionary, 'aiCoach', 'AI školiteľ'),
+      key: 'supervisor',
+      label: text(dictionary, 'aiSupervisor', 'AI školiteľ'),
       icon: Brain,
     },
     {
-      key: 'audit',
+      key: 'quality',
       label: text(dictionary, 'qualityAudit', 'Audit kvality'),
       icon: Sparkles,
     },
@@ -225,10 +225,40 @@ function createAiSectionItems(dictionary: TranslationRecord): AiSectionItem[] {
     },
     {
       key: 'humanizer',
-      label: text(dictionary, 'humanizer', 'Humanizácia textu'),
+      label: text(dictionary, 'textHumanization', 'Humanizácia textu'),
       icon: Wand2,
     },
   ];
+}
+
+
+const VALID_DASHBOARD_MODULE_KEYS = [
+  'supervisor',
+  'quality',
+  'defense',
+  'translation',
+  'data',
+  'planning',
+  'emails',
+  'humanizer',
+] as const;
+
+type DashboardModuleKey =
+  (typeof VALID_DASHBOARD_MODULE_KEYS)[number];
+
+function normalizeDashboardModuleKey(
+  value: string | null | undefined,
+): DashboardModuleKey | null {
+  if (!value) return null;
+
+  if (value === 'coach') return 'supervisor';
+  if (value === 'audit') return 'quality';
+
+  return VALID_DASHBOARD_MODULE_KEYS.includes(
+    value as DashboardModuleKey,
+  )
+    ? (value as DashboardModuleKey)
+    : null;
 }
 
 // =====================================================
@@ -279,19 +309,29 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isAdminFree, setIsAdminFree] = useState(false);
-  const [activeAiSection, setActiveAiSection] = useState<string>('coach');
+  const [activeAiSection, setActiveAiSection] =
+  useState<DashboardModuleKey>('supervisor');
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined') return;
 
-    const storedModule =
-      localStorage.getItem('zedpera_active_dashboard_module') ||
-      searchParams?.get('module');
+  const moduleFromUrl = normalizeDashboardModuleKey(
+    searchParams?.get('module'),
+  );
 
-    if (storedModule) {
-      setActiveAiSection(storedModule);
-    }
-  }, [searchParams]);
+  const moduleFromStorage = normalizeDashboardModuleKey(
+    localStorage.getItem('zedpera_active_dashboard_module'),
+  );
+
+  const nextModule =
+    moduleFromUrl || moduleFromStorage || 'supervisor';
+
+  setActiveAiSection(nextModule);
+  localStorage.setItem(
+    'zedpera_active_dashboard_module',
+    nextModule,
+  );
+}, [searchParams]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -390,22 +430,30 @@ function AppShellContent({ children }: { children: ReactNode }) {
   }
 
   function handleAiSectionClick(moduleKey: string) {
-    setActiveAiSection(moduleKey);
+  const normalizedModuleKey =
+    normalizeDashboardModuleKey(moduleKey) || 'supervisor';
 
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('zedpera_active_dashboard_module', moduleKey);
+  setActiveAiSection(normalizedModuleKey);
 
-      window.dispatchEvent(
-        new CustomEvent('zedpera-dashboard-module-change', {
-          detail: {
-            moduleKey,
-          },
-        }),
-      );
-    }
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(
+      'zedpera_active_dashboard_module',
+      normalizedModuleKey,
+    );
 
-    router.push(`/dashboard?module=${encodeURIComponent(moduleKey)}`);
+    window.dispatchEvent(
+      new CustomEvent('zedpera-dashboard-module-change', {
+        detail: {
+          moduleKey: normalizedModuleKey,
+        },
+      }),
+    );
   }
+
+  router.push(
+    `/dashboard?module=${encodeURIComponent(normalizedModuleKey)}`,
+  );
+}
 
   function logoutAdminMode() {
     if (typeof window !== 'undefined') {

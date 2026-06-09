@@ -545,126 +545,646 @@ const moduleInfos: {
   },
 ];
 
-const fixedModuleUi: Record<
-  ModuleKey,
-  {
-    label: string;
-    shortLabel: string;
-    button: string;
-    inputLabel: string;
-    placeholder: string;
-    intro: string;
-    resultTitle: string;
-  }
-> = {
-  supervisor: {
-    label: 'AI školiteľ',
-    shortLabel: 'AI školiteľ',
-    button: 'Spustiť AI školiteľa',
-    inputLabel: 'Text alebo zadanie pre AI školiteľa',
-    placeholder:
-      'Vložte text práce, kapitolu, zadanie, otázku alebo časť, ktorú má AI školiteľ skontrolovať.',
-    intro:
-      'AI školiteľ skontroluje štruktúru, logiku, cieľ, metodológiu, argumentáciu a odbornú kvalitu práce.',
-    resultTitle: 'Výstup AI školiteľa',
+
+type ModuleUiText = {
+  label: string;
+  shortLabel: string;
+  button: string;
+  inputLabel: string;
+  placeholder: string;
+  intro: string;
+  resultTitle: string;
+};
+
+type ModuleUiTranslations = Record<ModuleKey, ModuleUiText>;
+
+const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
+  sk: {
+    supervisor: {
+      label: 'AI školiteľ',
+      shortLabel: 'AI školiteľ',
+      button: 'Spustiť AI školiteľa',
+      inputLabel: 'Text alebo zadanie pre AI školiteľa',
+      placeholder:
+        'Vložte text práce, kapitolu, zadanie, otázku alebo časť, ktorú má AI školiteľ skontrolovať.',
+      intro:
+        'AI školiteľ skontroluje štruktúru, logiku, cieľ, metodológiu, argumentáciu a odbornú kvalitu práce.',
+      resultTitle: 'Výstup AI školiteľa',
+    },
+    quality: {
+      label: 'Audit kvality',
+      shortLabel: 'Audit kvality',
+      button: 'Spustiť audit kvality',
+      inputLabel: 'Text alebo zadanie pre audit kvality',
+      placeholder:
+        'Vložte text práce, kapitolu, úvod, záver alebo časť, ktorú chcete odborne skontrolovať.',
+      intro:
+        'Audit kvality overí štylistiku, logiku, citácie, nadväznosť kapitol, metodológiu a celkovú kvalitu textu.',
+      resultTitle: 'Výstup auditu kvality',
+    },
+    defense: {
+      label: 'Obhajoba',
+      shortLabel: 'Obhajoba',
+      button: 'Pripraviť obhajobu',
+      inputLabel: 'Text alebo podklady k obhajobe',
+      placeholder:
+        'Vložte text práce, abstrakt, záver, otázky komisie alebo požiadavky k obhajobe.',
+      intro:
+        'Obhajoba pripraví otázky, odpovede, osnovu prezentácie a podklady pre profesionálne vystúpenie.',
+      resultTitle: 'Výstup k obhajobe',
+    },
+    translation: {
+      label: 'Preklad',
+      shortLabel: 'Preklad',
+      button: 'Preložiť text',
+      inputLabel: 'Text na preklad',
+      placeholder:
+        'Vložte text, ktorý chcete preložiť do zvoleného cieľového jazyka.',
+      intro:
+        'Preklad preloží odborný text do zvoleného jazyka so zachovaním významu, štýlu a terminológie.',
+      resultTitle: 'Výstup prekladu',
+    },
+    data: {
+      label: 'Analýza dát',
+      shortLabel: 'Analýza dát',
+      button: 'Spustiť analýzu dát',
+      inputLabel: 'Zadanie k analýze dát',
+      placeholder:
+        'Popíšte, čo má systém spraviť s dátami. Napríklad frekvenčná analýza, deskriptívna štatistika, grafy, korelácie, testy a interpretácia.',
+      intro:
+        'Analýza dát pripraví tabuľky, grafy, testy, interpretáciu a odporúčania pre praktickú časť práce.',
+      resultTitle: 'Výsledky analýzy dát',
+    },
+    planning: {
+      label: 'Plánovanie',
+      shortLabel: 'Plánovanie',
+      button: 'Spustiť plánovanie',
+      inputLabel: 'Zadanie pre plánovanie',
+      placeholder:
+        'Napíšte termín odovzdania, aktuálny stav práce a požadovaný plán. Termín nesmie byť v minulosti.',
+      intro:
+        'Plánovanie rozdelí prácu na kroky, termíny a priority podľa dátumu odovzdania a aktuálneho stavu.',
+      resultTitle: 'Výstup plánovania',
+    },
+    emails: {
+      label: 'Emaily',
+      shortLabel: 'Emaily',
+      button: 'Vygenerovať email',
+      inputLabel: 'Zadanie pre email',
+      placeholder:
+        'Napíšte, komu má byť email určený a čo má obsahovať. Stačí stručne.',
+      intro:
+        'Emaily pripravia profesionálnu správu pre školiteľa, školu, vyučujúceho alebo konzultanta.',
+      resultTitle: 'Vygenerovaný email',
+    },
+    originality: {
+      label: 'Kontrola originality',
+      shortLabel: 'Originalita',
+      button: 'Spustiť kontrolu originality',
+      inputLabel: 'Text na kontrolu originality',
+      placeholder:
+        'Vložte alebo nahrajte text práce na orientačnú kontrolu originality.',
+      intro:
+        'Kontrola originality pripraví orientačný protokol rizikových alebo nedostatočne odcitovaných pasáží.',
+      resultTitle: 'Výstup kontroly originality',
+    },
+    humanizer: {
+      label: 'Humanizátor',
+      shortLabel: 'Humanizátor',
+      button: 'Spustiť humanizáciu textu',
+      inputLabel: 'Text na humanizáciu',
+      placeholder:
+        'Vložte text, ktorý chcete upraviť do prirodzenejšej, plynulejšej a menej strojovej podoby.',
+      intro:
+        'Humanizátor upraví text tak, aby pôsobil prirodzenejšie, plynulejšie a akademicky.',
+      resultTitle: 'Humanizovaný text',
+    },
   },
 
-  quality: {
-    label: 'Audit kvality',
-    shortLabel: 'Audit kvality',
-    button: 'Spustiť audit kvality',
-    inputLabel: 'Text alebo zadanie pre audit kvality',
-    placeholder:
-      'Vložte text práce, kapitolu, úvod, záver alebo časť, ktorú chcete odborne skontrolovať.',
-    intro:
-      'Audit kvality overí štylistiku, logiku, citácie, nadväznosť kapitol, metodológiu a celkovú kvalitu textu.',
-    resultTitle: 'Výstup auditu kvality',
+  en: {
+    supervisor: {
+      label: 'AI Supervisor',
+      shortLabel: 'AI Supervisor',
+      button: 'Run AI Supervisor',
+      inputLabel: 'Text or prompt for AI Supervisor',
+      placeholder:
+        'Insert your paper text, chapter, assignment, question, or section that the AI Supervisor should review.',
+      intro:
+        'The AI Supervisor checks structure, logic, objective, methodology, argumentation, and academic quality.',
+      resultTitle: 'AI Supervisor output',
+    },
+    quality: {
+      label: 'Quality Audit',
+      shortLabel: 'Quality Audit',
+      button: 'Run quality audit',
+      inputLabel: 'Text or prompt for quality audit',
+      placeholder:
+        'Insert a chapter, introduction, conclusion, or full paper section you want to review.',
+      intro:
+        'The quality audit checks style, logic, citations, chapter continuity, methodology, and overall text quality.',
+      resultTitle: 'Quality audit output',
+    },
+    defense: {
+      label: 'Defense',
+      shortLabel: 'Defense',
+      button: 'Prepare defense',
+      inputLabel: 'Text or materials for defense',
+      placeholder:
+        'Insert your thesis text, abstract, conclusion, committee questions, or defense requirements.',
+      intro:
+        'The defense module prepares questions, answers, presentation outline, and professional speaking materials.',
+      resultTitle: 'Defense output',
+    },
+    translation: {
+      label: 'Translation',
+      shortLabel: 'Translation',
+      button: 'Translate text',
+      inputLabel: 'Text for translation',
+      placeholder:
+        'Insert the text you want to translate into the selected target language.',
+      intro:
+        'Translation converts academic text into the selected language while preserving meaning, style, and terminology.',
+      resultTitle: 'Translation output',
+    },
+    data: {
+      label: 'Data Analysis',
+      shortLabel: 'Data Analysis',
+      button: 'Run data analysis',
+      inputLabel: 'Data analysis assignment',
+      placeholder:
+        'Describe what the system should do with the data, such as frequency analysis, descriptive statistics, charts, correlations, tests, and interpretation.',
+      intro:
+        'Data analysis prepares tables, charts, tests, interpretation, and recommendations for the practical part of the paper.',
+      resultTitle: 'Data analysis results',
+    },
+    planning: {
+      label: 'Planning',
+      shortLabel: 'Planning',
+      button: 'Run planning',
+      inputLabel: 'Planning assignment',
+      placeholder:
+        'Enter the submission deadline, current progress, and requested plan. The deadline must not be in the past.',
+      intro:
+        'Planning divides the work into steps, deadlines, and priorities according to the submission date and current progress.',
+      resultTitle: 'Planning output',
+    },
+    emails: {
+      label: 'Emails',
+      shortLabel: 'Emails',
+      button: 'Generate email',
+      inputLabel: 'Email assignment',
+      placeholder:
+        'Write who the email is for and what it should contain. A short description is enough.',
+      intro:
+        'Emails prepare professional messages for a supervisor, school, teacher, or consultant.',
+      resultTitle: 'Generated email',
+    },
+    originality: {
+      label: 'Originality Check',
+      shortLabel: 'Originality',
+      button: 'Run originality check',
+      inputLabel: 'Text for originality check',
+      placeholder:
+        'Insert or upload the text of your paper for an indicative originality check.',
+      intro:
+        'The originality check prepares an indicative protocol of risky or insufficiently cited passages.',
+      resultTitle: 'Originality check output',
+    },
+    humanizer: {
+      label: 'Text Humanization',
+      shortLabel: 'Humanization',
+      button: 'Humanize text',
+      inputLabel: 'Text for humanization',
+      placeholder:
+        'Insert text that you want to make more natural, fluent, and less machine-like.',
+      intro:
+        'Text humanization rewrites the text so it sounds more natural, fluent, and academic.',
+      resultTitle: 'Humanized text',
+    },
   },
 
-  defense: {
-    label: 'Obhajoba',
-    shortLabel: 'Obhajoba',
-    button: 'Pripraviť obhajobu',
-    inputLabel: 'Text alebo podklady k obhajobe',
-    placeholder:
-      'Vložte text práce, abstrakt, záver, otázky komisie alebo požiadavky k obhajobe.',
-    intro:
-      'Obhajoba pripraví otázky, odpovede, osnovu prezentácie a podklady pre profesionálne vystúpenie.',
-    resultTitle: 'Výstup k obhajobe',
+  cs: {
+    supervisor: {
+      label: 'AI vedoucí',
+      shortLabel: 'AI vedoucí',
+      button: 'Spustit AI vedoucího',
+      inputLabel: 'Text nebo zadání pro AI vedoucího',
+      placeholder:
+        'Vložte text práce, kapitolu, zadání, otázku nebo část, kterou má AI vedoucí zkontrolovat.',
+      intro:
+        'AI vedoucí zkontroluje strukturu, logiku, cíl, metodologii, argumentaci a odbornou kvalitu práce.',
+      resultTitle: 'Výstup AI vedoucího',
+    },
+    quality: {
+      label: 'Audit kvality',
+      shortLabel: 'Audit kvality',
+      button: 'Spustit audit kvality',
+      inputLabel: 'Text nebo zadání pro audit kvality',
+      placeholder:
+        'Vložte text práce, kapitolu, úvod, závěr nebo část, kterou chcete odborně zkontrolovat.',
+      intro:
+        'Audit kvality ověří stylistiku, logiku, citace, návaznost kapitol, metodologii a celkovou kvalitu textu.',
+      resultTitle: 'Výstup auditu kvality',
+    },
+    defense: {
+      label: 'Obhajoba',
+      shortLabel: 'Obhajoba',
+      button: 'Připravit obhajobu',
+      inputLabel: 'Text nebo podklady k obhajobě',
+      placeholder:
+        'Vložte text práce, abstrakt, závěr, otázky komise nebo požadavky k obhajobě.',
+      intro:
+        'Obhajoba připraví otázky, odpovědi, osnovu prezentace a podklady pro profesionální vystoupení.',
+      resultTitle: 'Výstup k obhajobě',
+    },
+    translation: {
+      label: 'Překlad',
+      shortLabel: 'Překlad',
+      button: 'Přeložit text',
+      inputLabel: 'Text k překladu',
+      placeholder:
+        'Vložte text, který chcete přeložit do zvoleného cílového jazyka.',
+      intro:
+        'Překlad převede odborný text do zvoleného jazyka se zachováním významu, stylu a terminologie.',
+      resultTitle: 'Výstup překladu',
+    },
+    data: {
+      label: 'Analýza dat',
+      shortLabel: 'Analýza dat',
+      button: 'Spustit analýzu dat',
+      inputLabel: 'Zadání k analýze dat',
+      placeholder:
+        'Popište, co má systém s daty udělat. Například frekvenční analýzu, deskriptivní statistiku, grafy, korelace, testy a interpretaci.',
+      intro:
+        'Analýza dat připraví tabulky, grafy, testy, interpretaci a doporučení pro praktickou část práce.',
+      resultTitle: 'Výsledky analýzy dat',
+    },
+    planning: {
+      label: 'Plánování',
+      shortLabel: 'Plánování',
+      button: 'Spustit plánování',
+      inputLabel: 'Zadání pro plánování',
+      placeholder:
+        'Napište termín odevzdání, aktuální stav práce a požadovaný plán. Termín nesmí být v minulosti.',
+      intro:
+        'Plánování rozdělí práci na kroky, termíny a priority podle data odevzdání a aktuálního stavu.',
+      resultTitle: 'Výstup plánování',
+    },
+    emails: {
+      label: 'Emaily',
+      shortLabel: 'Emaily',
+      button: 'Vygenerovat email',
+      inputLabel: 'Zadání pro email',
+      placeholder:
+        'Napište, komu má být email určen a co má obsahovat. Stačí stručně.',
+      intro:
+        'Emaily připraví profesionální zprávu pro vedoucího, školu, vyučujícího nebo konzultanta.',
+      resultTitle: 'Vygenerovaný email',
+    },
+    originality: {
+      label: 'Kontrola originality',
+      shortLabel: 'Originalita',
+      button: 'Spustit kontrolu originality',
+      inputLabel: 'Text ke kontrole originality',
+      placeholder:
+        'Vložte nebo nahrajte text práce pro orientační kontrolu originality.',
+      intro:
+        'Kontrola originality připraví orientační protokol rizikových nebo nedostatečně citovaných pasáží.',
+      resultTitle: 'Výstup kontroly originality',
+    },
+    humanizer: {
+      label: 'Humanizátor',
+      shortLabel: 'Humanizátor',
+      button: 'Spustit humanizaci textu',
+      inputLabel: 'Text k humanizaci',
+      placeholder:
+        'Vložte text, který chcete upravit do přirozenější, plynulejší a méně strojové podoby.',
+      intro:
+        'Humanizátor upraví text tak, aby působil přirozeněji, plynuleji a akademicky.',
+      resultTitle: 'Humanizovaný text',
+    },
   },
 
-  translation: {
-    label: 'Preklad',
-    shortLabel: 'Preklad',
-    button: 'Preložiť text',
-    inputLabel: 'Text na preklad',
-    placeholder:
-      'Vložte text, ktorý chcete preložiť do zvoleného cieľového jazyka.',
-    intro:
-      'Preklad preloží odborný text do zvoleného jazyka so zachovaním významu, štýlu a terminológie.',
-    resultTitle: 'Výstup prekladu',
+  de: {
+    supervisor: {
+      label: 'KI-Betreuer',
+      shortLabel: 'KI-Betreuer',
+      button: 'KI-Betreuer starten',
+      inputLabel: 'Text oder Aufgabe für den KI-Betreuer',
+      placeholder:
+        'Fügen Sie den Text der Arbeit, ein Kapitel, eine Aufgabe, eine Frage oder einen Abschnitt ein, den der KI-Betreuer prüfen soll.',
+      intro:
+        'Der KI-Betreuer prüft Struktur, Logik, Ziel, Methodik, Argumentation und fachliche Qualität der Arbeit.',
+      resultTitle: 'Ausgabe des KI-Betreuers',
+    },
+    quality: {
+      label: 'Qualitätsaudit',
+      shortLabel: 'Qualitätsaudit',
+      button: 'Qualitätsaudit starten',
+      inputLabel: 'Text oder Aufgabe für das Qualitätsaudit',
+      placeholder:
+        'Fügen Sie den Text der Arbeit, ein Kapitel, die Einleitung, den Schluss oder einen Abschnitt ein, den Sie fachlich prüfen möchten.',
+      intro:
+        'Das Qualitätsaudit prüft Stil, Logik, Zitationen, Kapitelanschlüsse, Methodik und die Gesamtqualität des Textes.',
+      resultTitle: 'Ausgabe des Qualitätsaudits',
+    },
+    defense: {
+      label: 'Verteidigung',
+      shortLabel: 'Verteidigung',
+      button: 'Verteidigung vorbereiten',
+      inputLabel: 'Text oder Unterlagen zur Verteidigung',
+      placeholder:
+        'Fügen Sie den Text der Arbeit, Abstract, Schluss, Fragen der Kommission oder Anforderungen zur Verteidigung ein.',
+      intro:
+        'Die Verteidigung bereitet Fragen, Antworten, Präsentationsstruktur und Unterlagen für einen professionellen Auftritt vor.',
+      resultTitle: 'Ausgabe zur Verteidigung',
+    },
+    translation: {
+      label: 'Übersetzung',
+      shortLabel: 'Übersetzung',
+      button: 'Text übersetzen',
+      inputLabel: 'Text zur Übersetzung',
+      placeholder:
+        'Fügen Sie den Text ein, den Sie in die ausgewählte Zielsprache übersetzen möchten.',
+      intro:
+        'Die Übersetzung überträgt fachlichen Text in die ausgewählte Sprache und bewahrt Bedeutung, Stil und Terminologie.',
+      resultTitle: 'Übersetzungsausgabe',
+    },
+    data: {
+      label: 'Datenanalyse',
+      shortLabel: 'Datenanalyse',
+      button: 'Datenanalyse starten',
+      inputLabel: 'Aufgabe zur Datenanalyse',
+      placeholder:
+        'Beschreiben Sie, was das System mit den Daten tun soll, z. B. Häufigkeitsanalyse, deskriptive Statistik, Diagramme, Korrelationen, Tests und Interpretation.',
+      intro:
+        'Die Datenanalyse erstellt Tabellen, Diagramme, Tests, Interpretationen und Empfehlungen für den praktischen Teil der Arbeit.',
+      resultTitle: 'Ergebnisse der Datenanalyse',
+    },
+    planning: {
+      label: 'Planung',
+      shortLabel: 'Planung',
+      button: 'Planung starten',
+      inputLabel: 'Aufgabe für die Planung',
+      placeholder:
+        'Geben Sie Abgabefrist, aktuellen Stand und gewünschten Plan ein. Die Frist darf nicht in der Vergangenheit liegen.',
+      intro:
+        'Die Planung teilt die Arbeit in Schritte, Termine und Prioritäten nach Abgabedatum und aktuellem Stand ein.',
+      resultTitle: 'Planungsausgabe',
+    },
+    emails: {
+      label: 'E-Mails',
+      shortLabel: 'E-Mails',
+      button: 'E-Mail generieren',
+      inputLabel: 'Aufgabe für die E-Mail',
+      placeholder:
+        'Schreiben Sie, an wen die E-Mail gerichtet ist und was sie enthalten soll. Eine kurze Beschreibung reicht.',
+      intro:
+        'E-Mails erstellen professionelle Nachrichten an Betreuer, Schule, Lehrende oder Berater.',
+      resultTitle: 'Generierte E-Mail',
+    },
+    originality: {
+      label: 'Originalitätsprüfung',
+      shortLabel: 'Originalität',
+      button: 'Originalitätsprüfung starten',
+      inputLabel: 'Text zur Originalitätsprüfung',
+      placeholder:
+        'Fügen Sie den Text der Arbeit ein oder laden Sie ihn hoch, um eine orientierende Originalitätsprüfung durchzuführen.',
+      intro:
+        'Die Originalitätsprüfung erstellt ein orientierendes Protokoll riskanter oder unzureichend zitierter Passagen.',
+      resultTitle: 'Ausgabe der Originalitätsprüfung',
+    },
+    humanizer: {
+      label: 'Text-Humanisierung',
+      shortLabel: 'Humanisierung',
+      button: 'Text humanisieren',
+      inputLabel: 'Text zur Humanisierung',
+      placeholder:
+        'Fügen Sie Text ein, der natürlicher, flüssiger und weniger maschinell wirken soll.',
+      intro:
+        'Die Humanisierung überarbeitet den Text, damit er natürlicher, flüssiger und akademischer wirkt.',
+      resultTitle: 'Humanisierter Text',
+    },
   },
 
-  data: {
-    label: 'Analýza dát',
-    shortLabel: 'Analýza dát',
-    button: 'Spustiť analýzu dát',
-    inputLabel: 'Zadanie k analýze dát',
-    placeholder:
-      'Popíšte, čo má systém spraviť s dátami. Napríklad frekvenčná analýza, deskriptívna štatistika, grafy, korelácie, testy a interpretácia.',
-    intro:
-      'Analýza dát pripraví tabuľky, grafy, testy, interpretáciu a odporúčania pre praktickú časť práce.',
-    resultTitle: 'Výsledky analýzy dát',
+  pl: {
+    supervisor: {
+      label: 'Opiekun AI',
+      shortLabel: 'Opiekun AI',
+      button: 'Uruchom opiekuna AI',
+      inputLabel: 'Tekst lub zadanie dla opiekuna AI',
+      placeholder:
+        'Wklej tekst pracy, rozdział, zadanie, pytanie lub fragment, który opiekun AI ma sprawdzić.',
+      intro:
+        'Opiekun AI sprawdza strukturę, logikę, cel, metodologię, argumentację i jakość merytoryczną pracy.',
+      resultTitle: 'Wynik opiekuna AI',
+    },
+    quality: {
+      label: 'Audyt jakości',
+      shortLabel: 'Audyt jakości',
+      button: 'Uruchom audyt jakości',
+      inputLabel: 'Tekst lub zadanie do audytu jakości',
+      placeholder:
+        'Wklej tekst pracy, rozdział, wstęp, zakończenie lub fragment, który chcesz profesjonalnie sprawdzić.',
+      intro:
+        'Audyt jakości sprawdza styl, logikę, cytowania, spójność rozdziałów, metodologię i ogólną jakość tekstu.',
+      resultTitle: 'Wynik audytu jakości',
+    },
+    defense: {
+      label: 'Obrona',
+      shortLabel: 'Obrona',
+      button: 'Przygotuj obronę',
+      inputLabel: 'Tekst lub materiały do obrony',
+      placeholder:
+        'Wklej tekst pracy, abstrakt, zakończenie, pytania komisji lub wymagania dotyczące obrony.',
+      intro:
+        'Moduł obrony przygotowuje pytania, odpowiedzi, konspekt prezentacji i materiały do profesjonalnego wystąpienia.',
+      resultTitle: 'Wynik przygotowania do obrony',
+    },
+    translation: {
+      label: 'Tłumaczenie',
+      shortLabel: 'Tłumaczenie',
+      button: 'Przetłumacz tekst',
+      inputLabel: 'Tekst do tłumaczenia',
+      placeholder:
+        'Wklej tekst, który chcesz przetłumaczyć na wybrany język docelowy.',
+      intro:
+        'Tłumaczenie przekłada tekst specjalistyczny na wybrany język, zachowując znaczenie, styl i terminologię.',
+      resultTitle: 'Wynik tłumaczenia',
+    },
+    data: {
+      label: 'Analiza danych',
+      shortLabel: 'Analiza danych',
+      button: 'Uruchom analizę danych',
+      inputLabel: 'Zadanie do analizy danych',
+      placeholder:
+        'Opisz, co system ma zrobić z danymi, np. analizę częstości, statystykę opisową, wykresy, korelacje, testy i interpretację.',
+      intro:
+        'Analiza danych przygotuje tabele, wykresy, testy, interpretację i rekomendacje do części praktycznej pracy.',
+      resultTitle: 'Wyniki analizy danych',
+    },
+    planning: {
+      label: 'Planowanie',
+      shortLabel: 'Planowanie',
+      button: 'Uruchom planowanie',
+      inputLabel: 'Zadanie do planowania',
+      placeholder:
+        'Podaj termin oddania, aktualny stan pracy i oczekiwany plan. Termin nie może być w przeszłości.',
+      intro:
+        'Planowanie dzieli pracę na kroki, terminy i priorytety zgodnie z datą oddania i aktualnym stanem.',
+      resultTitle: 'Wynik planowania',
+    },
+    emails: {
+      label: 'E-maile',
+      shortLabel: 'E-maile',
+      button: 'Wygeneruj e-mail',
+      inputLabel: 'Zadanie do e-maila',
+      placeholder:
+        'Napisz, do kogo ma być skierowany e-mail i co ma zawierać. Wystarczy krótki opis.',
+      intro:
+        'E-maile przygotowują profesjonalne wiadomości do promotora, szkoły, wykładowcy lub konsultanta.',
+      resultTitle: 'Wygenerowany e-mail',
+    },
+    originality: {
+      label: 'Kontrola oryginalności',
+      shortLabel: 'Oryginalność',
+      button: 'Uruchom kontrolę oryginalności',
+      inputLabel: 'Tekst do kontroli oryginalności',
+      placeholder:
+        'Wklej lub prześlij tekst pracy do orientacyjnej kontroli oryginalności.',
+      intro:
+        'Kontrola oryginalności przygotuje orientacyjny protokół ryzykownych lub niedostatecznie cytowanych fragmentów.',
+      resultTitle: 'Wynik kontroli oryginalności',
+    },
+    humanizer: {
+      label: 'Humanizator',
+      shortLabel: 'Humanizator',
+      button: 'Humanizuj tekst',
+      inputLabel: 'Tekst do humanizacji',
+      placeholder:
+        'Wklej tekst, który chcesz przeredagować na bardziej naturalny, płynny i mniej maszynowy.',
+      intro:
+        'Humanizator przerabia tekst tak, aby brzmiał bardziej naturalnie, płynnie i akademicko.',
+      resultTitle: 'Zhumanizowany tekst',
+    },
   },
 
-  planning: {
-    label: 'Plánovanie',
-    shortLabel: 'Plánovanie',
-    button: 'Spustiť plánovanie',
-    inputLabel: 'Zadanie pre plánovanie',
-    placeholder:
-      'Napíšte termín odovzdania, aktuálny stav práce a požadovaný plán. Termín nesmie byť v minulosti.',
-    intro:
-      'Plánovanie rozdelí prácu na kroky, termíny a priority podľa dátumu odovzdania a aktuálneho stavu.',
-    resultTitle: 'Výstup plánovania',
-  },
-
-  emails: {
-    label: 'Emaily',
-    shortLabel: 'Emaily',
-    button: 'Vygenerovať email',
-    inputLabel: 'Zadanie pre email',
-    placeholder:
-      'Napíšte, komu má byť email určený a čo má obsahovať. Stačí stručne.',
-    intro:
-      'Emaily pripravia profesionálnu správu pre školiteľa, školu, vyučujúceho alebo konzultanta.',
-    resultTitle: 'Vygenerovaný email',
-  },
-
-  originality: {
-    label: 'Kontrola originality',
-    shortLabel: 'Originalita',
-    button: 'Spustiť kontrolu originality',
-    inputLabel: 'Text na kontrolu originality',
-    placeholder:
-      'Vložte alebo nahrajte text práce na orientačnú kontrolu originality.',
-    intro:
-      'Kontrola originality pripraví orientačný protokol rizikových alebo nedostatočne odcitovaných pasáží.',
-    resultTitle: 'Výstup kontroly originality',
-  },
-
-  humanizer: {
-    label: 'Humanizátor',
-    shortLabel: 'Humanizátor',
-    button: 'Spustiť humanizáciu textu',
-    inputLabel: 'Text na humanizáciu',
-    placeholder:
-      'Vložte text, ktorý chcete upraviť do prirodzenejšej, plynulejšej a menej strojovej podoby.',
-    intro:
-      'Humanizátor upraví text tak, aby pôsobil prirodzenejšie, plynulejšie a akademicky.',
-    resultTitle: 'Humanizovaný text',
+  hu: {
+    supervisor: {
+      label: 'AI témavezető',
+      shortLabel: 'AI témavezető',
+      button: 'AI témavezető indítása',
+      inputLabel: 'Szöveg vagy feladat az AI témavezetőnek',
+      placeholder:
+        'Illeszd be a dolgozat szövegét, fejezetet, feladatot, kérdést vagy részt, amelyet az AI témavezető ellenőrizzen.',
+      intro:
+        'Az AI témavezető ellenőrzi a struktúrát, logikát, célt, módszertant, érvelést és szakmai minőséget.',
+      resultTitle: 'AI témavezető eredménye',
+    },
+    quality: {
+      label: 'Minőségi audit',
+      shortLabel: 'Minőségi audit',
+      button: 'Minőségi audit indítása',
+      inputLabel: 'Szöveg vagy feladat minőségi audithoz',
+      placeholder:
+        'Illeszd be a dolgozat szövegét, fejezetet, bevezetést, lezárást vagy részt, amelyet szakmailag ellenőrizni szeretnél.',
+      intro:
+        'A minőségi audit ellenőrzi a stílust, logikát, hivatkozásokat, fejezetek kapcsolódását, módszertant és az általános minőséget.',
+      resultTitle: 'Minőségi audit eredménye',
+    },
+    defense: {
+      label: 'Védés',
+      shortLabel: 'Védés',
+      button: 'Védés előkészítése',
+      inputLabel: 'Szöveg vagy anyag a védéshez',
+      placeholder:
+        'Illeszd be a dolgozat szövegét, absztraktot, lezárást, bizottsági kérdéseket vagy védési követelményeket.',
+      intro:
+        'A védési modul kérdéseket, válaszokat, prezentációs vázlatot és professzionális előadási anyagokat készít.',
+      resultTitle: 'Védési eredmény',
+    },
+    translation: {
+      label: 'Fordítás',
+      shortLabel: 'Fordítás',
+      button: 'Szöveg fordítása',
+      inputLabel: 'Fordítandó szöveg',
+      placeholder:
+        'Illeszd be a szöveget, amelyet a kiválasztott célnyelvre szeretnél fordítani.',
+      intro:
+        'A fordítás a szakmai szöveget a kiválasztott nyelvre fordítja, megőrizve a jelentést, stílust és terminológiát.',
+      resultTitle: 'Fordítás eredménye',
+    },
+    data: {
+      label: 'Adatelemzés',
+      shortLabel: 'Adatelemzés',
+      button: 'Adatelemzés indítása',
+      inputLabel: 'Adatelemzési feladat',
+      placeholder:
+        'Írd le, mit végezzen a rendszer az adatokkal, például gyakorisági elemzést, leíró statisztikát, grafikonokat, korrelációkat, teszteket és értelmezést.',
+      intro:
+        'Az adatelemzés táblákat, grafikonokat, teszteket, értelmezést és ajánlásokat készít a gyakorlati részhez.',
+      resultTitle: 'Adatelemzés eredményei',
+    },
+    planning: {
+      label: 'Tervezés',
+      shortLabel: 'Tervezés',
+      button: 'Tervezés indítása',
+      inputLabel: 'Tervezési feladat',
+      placeholder:
+        'Add meg a leadási határidőt, az aktuális állapotot és a kért tervet. A határidő nem lehet múltbeli.',
+      intro:
+        'A tervezés lépésekre, határidőkre és prioritásokra bontja a munkát a leadási dátum és aktuális állapot alapján.',
+      resultTitle: 'Tervezési eredmény',
+    },
+    emails: {
+      label: 'E-mailek',
+      shortLabel: 'E-mailek',
+      button: 'E-mail generálása',
+      inputLabel: 'E-mail feladat',
+      placeholder:
+        'Írd le, kinek szól az e-mail és mit tartalmazzon. Rövid leírás is elég.',
+      intro:
+        'Az e-mail modul professzionális üzenetet készít témavezetőnek, iskolának, oktatónak vagy konzultánsnak.',
+      resultTitle: 'Generált e-mail',
+    },
+    originality: {
+      label: 'Eredetiség-ellenőrzés',
+      shortLabel: 'Eredetiség',
+      button: 'Eredetiség ellenőrzése',
+      inputLabel: 'Szöveg eredetiség-ellenőrzéshez',
+      placeholder:
+        'Illeszd be vagy töltsd fel a dolgozat szövegét tájékoztató eredetiség-ellenőrzéshez.',
+      intro:
+        'Az eredetiség-ellenőrzés tájékoztató protokollt készít kockázatos vagy nem megfelelően hivatkozott részekről.',
+      resultTitle: 'Eredetiség-ellenőrzés eredménye',
+    },
+    humanizer: {
+      label: 'Humanizátor',
+      shortLabel: 'Humanizátor',
+      button: 'Szöveg humanizálása',
+      inputLabel: 'Humanizálandó szöveg',
+      placeholder:
+        'Illeszd be a szöveget, amelyet természetesebbé, gördülékenyebbé és kevésbé gépi hangzásúvá szeretnél alakítani.',
+      intro:
+        'A humanizátor természetesebb, gördülékenyebb és akadémikusabb szöveggé alakítja az anyagot.',
+      resultTitle: 'Humanizált szöveg',
+    },
   },
 };
+
+function getFixedModuleUi(language?: string): ModuleUiTranslations {
+  const safeLanguage: LanguageCode =
+    language === 'cs' ||
+    language === 'en' ||
+    language === 'de' ||
+    language === 'pl' ||
+    language === 'hu' ||
+    language === 'sk'
+      ? language
+      : 'sk';
+
+  return fixedModuleUiByLanguage[safeLanguage] || fixedModuleUiByLanguage.sk;
+}
 
 const dashboardModuleOrder: ModuleKey[] = [
   'supervisor',
@@ -1839,8 +2359,43 @@ const mobileToolPanelRef = useRef<HTMLDivElement | null>(null);
 }, [activeModule]);
 const activeTranslationKey = activeModuleInfo.translationKey;
 
-const fixedUi = fixedModuleUi[activeModule];
+const [systemLanguage, setSystemLanguage] = useState<LanguageCode>('sk');
 
+useEffect(() => {
+  const syncLanguage = () => {
+    const stored =
+      localStorage.getItem('zedpera_language') ||
+      localStorage.getItem('zedpera_system_language') ||
+      'sk';
+
+    const safeLanguage: LanguageCode =
+      stored === 'cs' ||
+      stored === 'en' ||
+      stored === 'de' ||
+      stored === 'pl' ||
+      stored === 'hu' ||
+      stored === 'sk'
+        ? stored
+        : 'sk';
+
+    setSystemLanguage(safeLanguage);
+  };
+
+  syncLanguage();
+
+  window.addEventListener('storage', syncLanguage);
+  window.addEventListener('zedpera:language-changed', syncLanguage);
+  window.addEventListener('zedpera:system-language-changed', syncLanguage);
+
+  return () => {
+    window.removeEventListener('storage', syncLanguage);
+    window.removeEventListener('zedpera:language-changed', syncLanguage);
+    window.removeEventListener('zedpera:system-language-changed', syncLanguage);
+  };
+}, []);
+
+const fixedUi = getFixedModuleUi(systemLanguage)[activeModule];
+const currentFixedModuleUi = getFixedModuleUi(systemLanguage);
 const activeModuleLabel =
   t?.dashboardTools?.tools?.[activeTranslationKey] ||
   fixedUi.label;
@@ -1849,7 +2404,7 @@ const activeModuleButtonLabel =
   t?.dashboardTools?.buttons?.[activeTranslationKey] ||
   fixedUi.button;
 
-const fixedActiveModuleUi = fixedModuleUi[activeModule];
+const fixedActiveModuleUi = fixedUi;
 
 const activeModuleInputLabel =
   activeModule === 'translation'
@@ -3636,9 +4191,9 @@ const downloadExcel = () => {
                 const active = activeModule === item.key;
 
                 const label =
-                  t.dashboardTools?.tools?.[item.translationKey] ||
-                  fixedModuleUi[item.key]?.shortLabel ||
-                  item.key;
+  t.dashboardTools?.tools?.[item.translationKey] ||
+  getFixedModuleUi(systemLanguage)[item.key]?.shortLabel ||
+  item.key;
 
                 return (
                   <button
@@ -3678,7 +4233,7 @@ const downloadExcel = () => {
 
                 const label =
                   t.dashboardTools?.tools?.[item.translationKey] ||
-                  fixedModuleUi[item.key]?.shortLabel ||
+                  getFixedModuleUi(systemLanguage)[item.key]?.shortLabel ||
                   item.key;
 
                 return (

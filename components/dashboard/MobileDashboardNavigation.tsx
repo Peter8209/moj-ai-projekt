@@ -21,9 +21,9 @@ import {
   Video,
   WandSparkles,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-type MobileDashboardTab = 'main' | 'ai';
+type MobileDashboardTab = 'main' | 'ai' | 'module';
 
 type MobileDashboardModuleInfo = {
   key: string;
@@ -230,6 +230,8 @@ export default function MobileDashboardNavigation({
 }: MobileDashboardNavigationProps) {
   const [activeTab, setActiveTab] = useState<MobileDashboardTab>('main');
   const [isMainMenuVisible, setIsMainMenuVisible] = useState(true);
+  const [selectedMobileModuleKey, setSelectedMobileModuleKey] =
+    useState<string>(activeModule);
 
   const cleanActiveModuleLabel = useMemo(() => {
     return normalizeModuleLabel(activeModuleLabel);
@@ -243,6 +245,33 @@ export default function MobileDashboardNavigation({
     return moduleInfos;
   }, [moduleInfos]);
 
+  const selectedMobileModule = useMemo(() => {
+    return (
+      visibleModules.find((item) => item.key === selectedMobileModuleKey) ||
+      visibleModules.find((item) => item.key === activeModule) ||
+      visibleModules[0]
+    );
+  }, [activeModule, selectedMobileModuleKey, visibleModules]);
+
+  const selectedMobileModuleRawLabel = selectedMobileModule
+    ? t?.dashboardTools?.tools?.[selectedMobileModule.translationKey] ||
+      selectedMobileModule.translationKey
+    : cleanActiveModuleLabel;
+
+  const selectedMobileModuleLabel = selectedMobileModule
+    ? getShortModuleLabel(selectedMobileModule.key, selectedMobileModuleRawLabel)
+    : cleanActiveModuleLabel;
+
+  const selectedMobileModuleDescription = selectedMobileModule
+    ? getModuleDescription(selectedMobileModule.key)
+    : activeModuleSubtitle || 'AI nástroj';
+
+  useEffect(() => {
+    if (activeModule) {
+      setSelectedMobileModuleKey(activeModule);
+    }
+  }, [activeModule]);
+
   function scrollToDashboardToolPanel() {
     window.setTimeout(() => {
       const dashboardPanel =
@@ -253,10 +282,13 @@ export default function MobileDashboardNavigation({
         behavior: 'smooth',
         block: 'start',
       });
-    }, 80);
+    }, 120);
   }
 
   function handleSelectModule(moduleKey: string) {
+    setSelectedMobileModuleKey(moduleKey);
+    setActiveTab('module');
+
     onSelectModule(moduleKey);
     scrollToDashboardToolPanel();
   }
@@ -274,10 +306,13 @@ export default function MobileDashboardNavigation({
     <>
       {/* =====================================================
           MOBILNÁ ÚVODNÁ STRÁNKA DASHBOARDU
-          - 1. karta: Hlavné menu
-          - 2. karta: AI nástroje
-          - hlavné menu sa dá skryť / odkryť
-          - spodná AI lišta je odstránená
+
+          1. karta: Hlavné menu
+          2. karta: AI nástroje
+          3. karta: Samostatná karta otvoreného modulu
+
+          Po kliknutí na AI modul sa už nevracia na prvú kartu.
+          Modul sa otvorí na samostatnej karte.
       ===================================================== */}
 
       <section className="sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/95 px-4 pb-4 pt-4 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
@@ -288,11 +323,19 @@ export default function MobileDashboardNavigation({
           </p>
 
           <h2 className="mt-1 text-xl font-black leading-tight text-white">
-            Hlavné menu
+            {activeTab === 'main'
+              ? 'Hlavné menu'
+              : activeTab === 'ai'
+                ? 'AI nástroje'
+                : selectedMobileModuleLabel}
           </h2>
 
           <p className="mt-1 text-xs font-semibold text-slate-400">
-            Vyberte sekciu systému alebo prejdite na AI nástroje.
+            {activeTab === 'main'
+              ? 'Vyberte sekciu systému alebo prejdite na AI nástroje.'
+              : activeTab === 'ai'
+                ? 'Vyberte AI nástroj, ktorý chcete otvoriť.'
+                : selectedMobileModuleDescription}
           </p>
         </div>
 
@@ -318,11 +361,11 @@ export default function MobileDashboardNavigation({
         )}
 
         {/* PREPÍNANIE KARIET */}
-        <div className="mb-3 grid grid-cols-2 gap-2 rounded-3xl border border-white/10 bg-[#070b18] p-2 shadow-2xl shadow-black/40">
+        <div className="mb-3 grid grid-cols-3 gap-2 rounded-3xl border border-white/10 bg-[#070b18] p-2 shadow-2xl shadow-black/40">
           <button
             type="button"
             onClick={() => setActiveTab('main')}
-            className={`flex min-h-[54px] items-center justify-center gap-2 rounded-2xl px-3 py-2 text-xs font-black transition active:scale-[0.98] ${
+            className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
               activeTab === 'main'
                 ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
                 : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
@@ -330,13 +373,13 @@ export default function MobileDashboardNavigation({
             aria-pressed={activeTab === 'main'}
           >
             <Menu className="h-4 w-4" />
-            Hlavné menu
+            Menu
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('ai')}
-            className={`flex min-h-[54px] items-center justify-center gap-2 rounded-2xl px-3 py-2 text-xs font-black transition active:scale-[0.98] ${
+            className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
               activeTab === 'ai'
                 ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
                 : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
@@ -345,6 +388,31 @@ export default function MobileDashboardNavigation({
           >
             <Sparkles className="h-4 w-4" />
             AI nástroje
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (selectedMobileModule) {
+                setActiveTab('module');
+                scrollToDashboardToolPanel();
+              } else {
+                setActiveTab('ai');
+              }
+            }}
+            className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
+              activeTab === 'module'
+                ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
+                : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+            }`}
+            aria-pressed={activeTab === 'module'}
+          >
+            {selectedMobileModule ? (
+              getModuleIcon(selectedMobileModule.key)
+            ) : (
+              <PlayCircle className="h-4 w-4" />
+            )}
+            Modul
           </button>
         </div>
 
@@ -361,6 +429,7 @@ export default function MobileDashboardNavigation({
                   <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
                     Hlavné menu
                   </p>
+
                   <p className="line-clamp-1 text-[11px] font-semibold text-slate-500">
                     Základné sekcie systému
                   </p>
@@ -429,8 +498,15 @@ export default function MobileDashboardNavigation({
 
             <div className="mt-3 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 p-3">
               <p className="text-[11px] font-bold leading-5 text-cyan-100">
-                AI školiteľ, Audit, Obhajoba a Preklad sú presunuté na druhú
-                kartu <span className="font-black">AI nástroje</span>.
+                AI školiteľ, Audit, Obhajoba a Preklad sú na karte{' '}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('ai')}
+                  className="font-black text-white underline decoration-cyan-300/60 underline-offset-4"
+                >
+                  AI nástroje
+                </button>
+                .
               </p>
             </div>
           </div>
@@ -449,8 +525,9 @@ export default function MobileDashboardNavigation({
                   <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
                     AI nástroje
                   </p>
+
                   <p className="line-clamp-1 text-[11px] font-semibold text-slate-500">
-                    {cleanActiveModuleLabel || 'Vyberte AI modul'}
+                    Kliknite na nástroj a otvorí sa na samostatnej karte.
                   </p>
                 </div>
               </div>
@@ -462,21 +539,6 @@ export default function MobileDashboardNavigation({
               >
                 Späť
               </button>
-            </div>
-
-            <div className="mb-3 rounded-2xl border border-white/10 bg-black/25 p-3">
-              <p className="text-[11px] font-black uppercase tracking-[0.16em] text-violet-300">
-                Aktívny modul
-              </p>
-
-              <p className="mt-1 line-clamp-1 text-sm font-black text-white">
-                {cleanActiveModuleLabel}
-              </p>
-
-              <p className="mt-1 line-clamp-2 text-[11px] font-semibold leading-5 text-slate-400">
-                {activeModuleSubtitle ||
-                  'Kliknite na AI nástroj a otvorí sa príslušný modul.'}
-              </p>
             </div>
 
             {visibleModules.length > 0 ? (
@@ -495,7 +557,7 @@ export default function MobileDashboardNavigation({
                       key={item.key}
                       type="button"
                       onClick={() => handleSelectModule(item.key)}
-                      className={`flex min-h-[66px] items-center gap-3 rounded-2xl border px-3 py-2 text-left transition active:scale-[0.98] ${
+                      className={`flex min-h-[68px] items-center gap-3 rounded-2xl border px-3 py-2 text-left transition active:scale-[0.98] ${
                         active
                           ? 'border-violet-300 bg-violet-600 text-white shadow-lg shadow-violet-950/40'
                           : 'border-white/10 bg-white/[0.06] text-white hover:border-violet-300/40 hover:bg-violet-600/20'
@@ -537,6 +599,80 @@ export default function MobileDashboardNavigation({
                 </p>
               </div>
             )}
+          </div>
+        ) : null}
+
+        {/* KARTA 3 — SAMOSTATNÁ KARTA OTVORENÉHO MODULU */}
+        {activeTab === 'module' ? (
+          <div className="rounded-3xl border border-violet-400/20 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-lg shadow-violet-950/40">
+                  {selectedMobileModule ? (
+                    getModuleIcon(selectedMobileModule.key)
+                  ) : (
+                    <PlayCircle className="h-4 w-4" />
+                  )}
+                </span>
+
+                <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-300">
+                    Otvorený modul
+                  </p>
+
+                  <p className="line-clamp-1 text-sm font-black text-white">
+                    {selectedMobileModuleLabel}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('ai')}
+                className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
+              >
+                AI nástroje
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
+              <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">
+                Modul je otvorený samostatne
+              </p>
+
+              <h3 className="mt-1 text-lg font-black text-white">
+                {selectedMobileModuleLabel}
+              </h3>
+
+              <p className="mt-1 text-xs font-semibold leading-5 text-slate-400">
+                {selectedMobileModuleDescription}
+              </p>
+
+              <p className="mt-3 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-[11px] font-bold leading-5 text-cyan-100">
+                Výsledný pracovný panel modulu sa zobrazuje nižšie na stránke.
+                Táto karta ostane otvorená a nevráti vás späť na Hlavné menu.
+              </p>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveTab('ai')}
+                className="flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-white transition hover:bg-white/[0.1] active:scale-[0.98]"
+              >
+                <Sparkles className="h-4 w-4" />
+                Iný nástroj
+              </button>
+
+              <button
+                type="button"
+                onClick={scrollToDashboardToolPanel}
+                className="flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-3 py-2 text-xs font-black text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-500 active:scale-[0.98]"
+              >
+                <PlayCircle className="h-4 w-4" />
+                Otvoriť panel
+              </button>
+            </div>
           </div>
         ) : null}
       </section>

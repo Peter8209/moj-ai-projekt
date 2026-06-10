@@ -438,6 +438,11 @@ export default function MobileDashboardNavigation({
             max-width: 100% !important;
           }
 
+          /*
+            Analýza dát - mobilný fix rolovania.
+            Pôvodne boli výsledky analýzy nastavené na overflow: visible,
+            preto sa vnútorný panel / modal v mobile nevedel samostatne rolovať.
+          */
           html[data-zedpera-mobile-dashboard-tab='module']
             [data-analysis-results='true'],
           html[data-zedpera-mobile-dashboard-tab='module']
@@ -454,8 +459,59 @@ export default function MobileDashboardNavigation({
             .analysis-result,
           html[data-zedpera-mobile-dashboard-tab='module']
             .analysis-panel {
-            max-height: none !important;
-            overflow: visible !important;
+            max-height: calc(100dvh - 180px) !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            -webkit-overflow-scrolling: touch !important;
+            overscroll-behavior: contain !important;
+            touch-action: pan-y !important;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-results='true'] *,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-result='true'] *,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-panel='true'] *,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-modal='true'] *,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-content='true'] * {
+            min-width: 0 !important;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-results='true']
+            table,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-result='true']
+            table,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-panel='true']
+            table,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-modal='true']
+            table,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-content='true']
+            table {
+            width: max-content !important;
+            min-width: 100% !important;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-table='true'],
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-table-wrapper='true'],
+          html[data-zedpera-mobile-dashboard-tab='module']
+            .analysis-table,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            .analysis-table-wrapper {
+            width: 100% !important;
+            max-width: 100% !important;
+            overflow-x: auto !important;
+            overflow-y: visible !important;
+            -webkit-overflow-scrolling: touch !important;
           }
 
           html[data-zedpera-mobile-dashboard-tab='module']
@@ -463,6 +519,19 @@ export default function MobileDashboardNavigation({
           html[data-zedpera-mobile-dashboard-tab='module']
             [aria-modal='true'] {
             max-height: 100dvh !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+            overscroll-behavior: contain !important;
+            touch-action: pan-y !important;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [role='dialog']
+            > *,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [aria-modal='true']
+            > * {
+            max-height: calc(100dvh - 24px) !important;
             overflow-y: auto !important;
             -webkit-overflow-scrolling: touch !important;
           }

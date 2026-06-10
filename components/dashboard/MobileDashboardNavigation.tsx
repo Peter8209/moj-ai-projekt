@@ -212,6 +212,15 @@ function getModuleDescription(moduleKey: string) {
   }
 }
 
+function scrollToTop() {
+  if (typeof window === 'undefined') return;
+
+  window.scrollTo({
+    top: 0,
+    behavior: 'smooth',
+  });
+}
+
 export default function MobileDashboardNavigation({
   activeModule,
   activeModuleLabel,
@@ -311,7 +320,22 @@ export default function MobileDashboardNavigation({
         behavior: 'smooth',
         block: 'start',
       });
-    }, 120);
+    }, 140);
+  }
+
+  function openMainPage() {
+    setActiveTab('main');
+    scrollToTop();
+  }
+
+  function openAiPage() {
+    setActiveTab('ai');
+    scrollToTop();
+  }
+
+  function openModulePage() {
+    setActiveTab('module');
+    scrollToDashboardToolPanel();
   }
 
   function handleSelectModule(moduleKey: string) {
@@ -321,15 +345,7 @@ export default function MobileDashboardNavigation({
 
     window.setTimeout(() => {
       scrollToDashboardToolPanel();
-    }, 180);
-  }
-
-  function handleOpenModule() {
-    setActiveTab('module');
-
-    window.setTimeout(() => {
-      scrollToDashboardToolPanel();
-    }, 120);
+    }, 200);
   }
 
   function handleNavigate(path: string) {
@@ -350,15 +366,16 @@ export default function MobileDashboardNavigation({
     window.location.href = path;
   }
 
-  const rootClassName =
-    activeTab === 'module'
-      ? 'relative z-[70] -mx-4 border-b border-white/10 bg-[#020617]/98 px-4 pb-3 pt-3 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden'
-      : 'relative z-[70] -mx-4 min-h-[100dvh] border-b border-white/10 bg-[#020617]/98 px-4 pb-5 pt-4 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden';
-
   return (
     <>
       <style jsx global>{`
         @media (max-width: 1279px) {
+          html,
+          body {
+            min-height: 100%;
+            overflow-x: hidden !important;
+          }
+
           html[data-zedpera-mobile-dashboard-tab='main'],
           body[data-zedpera-mobile-dashboard-tab='main'],
           html[data-zedpera-mobile-dashboard-tab='ai'],
@@ -382,8 +399,11 @@ export default function MobileDashboardNavigation({
             opacity: 0 !important;
             pointer-events: none !important;
             height: 0 !important;
+            min-height: 0 !important;
             max-height: 0 !important;
             overflow: hidden !important;
+            margin: 0 !important;
+            padding: 0 !important;
           }
 
           html[data-zedpera-mobile-dashboard-tab='module']
@@ -394,6 +414,7 @@ export default function MobileDashboardNavigation({
             visibility: visible !important;
             opacity: 1 !important;
             pointer-events: auto !important;
+            width: 100% !important;
             height: auto !important;
             min-height: auto !important;
             max-height: none !important;
@@ -414,7 +435,7 @@ export default function MobileDashboardNavigation({
           html[data-zedpera-mobile-dashboard-tab='module']
             [data-dashboard-tool-panel='true']
             * {
-            max-width: 100%;
+            max-width: 100% !important;
           }
 
           html[data-zedpera-mobile-dashboard-tab='module']
@@ -424,6 +445,10 @@ export default function MobileDashboardNavigation({
           html[data-zedpera-mobile-dashboard-tab='module']
             [data-analysis-panel='true'],
           html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-modal='true'],
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-content='true'],
+          html[data-zedpera-mobile-dashboard-tab='module']
             .analysis-results,
           html[data-zedpera-mobile-dashboard-tab='module']
             .analysis-result,
@@ -431,6 +456,15 @@ export default function MobileDashboardNavigation({
             .analysis-panel {
             max-height: none !important;
             overflow: visible !important;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [role='dialog'],
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [aria-modal='true'] {
+            max-height: 100dvh !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
           }
 
           html[data-zedpera-mobile-dashboard-tab='module']
@@ -446,19 +480,19 @@ export default function MobileDashboardNavigation({
             a[class*='bg-white'] {
             color: #ffffff !important;
             border-color: rgba(255, 255, 255, 0.18) !important;
-            background: rgba(30, 41, 59, 0.9) !important;
+            background: rgba(30, 41, 59, 0.92) !important;
           }
 
           html[data-zedpera-mobile-dashboard-tab='module']
             button[class*='bg-white']:hover,
           html[data-zedpera-mobile-dashboard-tab='module']
             a[class*='bg-white']:hover {
-            background: rgba(51, 65, 85, 0.95) !important;
+            background: rgba(51, 65, 85, 0.98) !important;
           }
         }
       `}</style>
 
-      <section className={rootClassName}>
+      <section className="relative z-[70] -mx-4 border-b border-white/10 bg-[#020617]/98 px-4 pb-4 pt-4 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
         {activeTab === 'module' ? (
           <div className="rounded-3xl border border-violet-400/20 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
             <div className="flex items-center justify-between gap-3">
@@ -488,7 +522,7 @@ export default function MobileDashboardNavigation({
 
               <button
                 type="button"
-                onClick={() => setActiveTab('ai')}
+                onClick={openAiPage}
                 className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
@@ -499,7 +533,7 @@ export default function MobileDashboardNavigation({
             <div className="mt-3 grid grid-cols-3 gap-2">
               <button
                 type="button"
-                onClick={() => setActiveTab('main')}
+                onClick={openMainPage}
                 className="flex min-h-[46px] items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-2 text-[10px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-[0.98]"
               >
                 <Menu className="h-3.5 w-3.5" />
@@ -508,7 +542,7 @@ export default function MobileDashboardNavigation({
 
               <button
                 type="button"
-                onClick={() => setActiveTab('ai')}
+                onClick={openAiPage}
                 className="flex min-h-[46px] items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-2 text-[10px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-[0.98]"
               >
                 <Sparkles className="h-3.5 w-3.5" />
@@ -526,7 +560,7 @@ export default function MobileDashboardNavigation({
             </div>
           </div>
         ) : (
-          <>
+          <div className="flex min-h-[calc(100dvh-2rem)] flex-col">
             <div className="mb-4">
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
                 Mobilná aplikácia
@@ -568,7 +602,7 @@ export default function MobileDashboardNavigation({
             <div className="mb-4 grid grid-cols-3 gap-2 rounded-3xl border border-white/10 bg-[#070b18] p-2 shadow-2xl shadow-black/40">
               <button
                 type="button"
-                onClick={() => setActiveTab('main')}
+                onClick={openMainPage}
                 className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
                   activeTab === 'main'
                     ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
@@ -582,7 +616,7 @@ export default function MobileDashboardNavigation({
 
               <button
                 type="button"
-                onClick={() => setActiveTab('ai')}
+                onClick={openAiPage}
                 className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
                   activeTab === 'ai'
                     ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
@@ -596,7 +630,7 @@ export default function MobileDashboardNavigation({
 
               <button
                 type="button"
-                onClick={handleOpenModule}
+                onClick={openModulePage}
                 className="flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-2 text-[10px] font-black text-slate-300 transition hover:bg-white/[0.1] hover:text-white active:scale-[0.98]"
               >
                 {selectedMobileModule ? (
@@ -609,7 +643,7 @@ export default function MobileDashboardNavigation({
             </div>
 
             {activeTab === 'main' ? (
-              <div className="rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
+              <div className="flex-1 rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
                 <div className="mb-3 flex items-center gap-2">
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-600/20 text-violet-200">
                     <Menu className="h-4 w-4" />
@@ -626,7 +660,7 @@ export default function MobileDashboardNavigation({
                   </div>
                 </div>
 
-                <div className="max-h-[62dvh] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="max-h-[calc(100dvh-260px)] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   <div className="grid grid-cols-2 gap-2">
                     {mobileMainMenuItems.map((item) => {
                       const Icon = item.icon;
@@ -659,7 +693,7 @@ export default function MobileDashboardNavigation({
 
                 <button
                   type="button"
-                  onClick={() => setActiveTab('ai')}
+                  onClick={openAiPage}
                   className="mt-3 flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-xs font-black text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-500 active:scale-[0.98]"
                 >
                   <Sparkles className="h-4 w-4" />
@@ -669,7 +703,7 @@ export default function MobileDashboardNavigation({
             ) : null}
 
             {activeTab === 'ai' ? (
-              <div className="rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
+              <div className="flex-1 rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-200">
@@ -689,7 +723,7 @@ export default function MobileDashboardNavigation({
 
                   <button
                     type="button"
-                    onClick={() => setActiveTab('main')}
+                    onClick={openMainPage}
                     className="inline-flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
                   >
                     <ChevronLeft className="h-3.5 w-3.5" />
@@ -698,7 +732,7 @@ export default function MobileDashboardNavigation({
                 </div>
 
                 {visibleModules.length > 0 ? (
-                  <div className="max-h-[64dvh] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <div className="max-h-[calc(100dvh-260px)] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     <div className="grid grid-cols-2 gap-2">
                       {visibleModules.map((item) => {
                         const active = activeModule === item.key;
@@ -759,7 +793,7 @@ export default function MobileDashboardNavigation({
                 )}
               </div>
             ) : null}
-          </>
+          </div>
         )}
       </section>
     </>

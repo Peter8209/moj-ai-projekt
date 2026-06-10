@@ -12,26 +12,107 @@ function RegisterContent() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  function registerUser() {
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [marketingConsent, setMarketingConsent] = useState(false);
+  const [consentError, setConsentError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function saveConsentToDatabase(params: {
+    cleanEmail: string;
+    cleanName: string;
+  }) {
+    try {
+      await fetch('/api/marketing-consent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: params.cleanName,
+          email: params.cleanEmail,
+          source: 'registration',
+          planId: selectedPlan,
+          termsAccepted,
+          marketingConsent,
+          termsConsentText:
+            'Súhlasím s obchodnými podmienkami a beriem na vedomie spracovanie osobných údajov.',
+          marketingConsentText:
+            'Súhlasím so zasielaním marketingových e-mailov, noviniek a ponúk služby Zedpera na uvedenú e-mailovú adresu. Súhlas môžem kedykoľvek odvolať.',
+        }),
+      });
+    } catch (error) {
+      console.error('Nepodarilo sa uložiť marketingový súhlas:', error);
+    }
+  }
+
+  async function registerUser() {
+    if (isSubmitting) return;
+
     if (!name.trim() || !email.trim() || !password.trim()) {
-      alert('Vyplň meno, e-mail a heslo.');
+      setConsentError('Vyplň meno, e-mail a heslo.');
       return;
     }
+
+    if (!email.includes('@')) {
+      setConsentError('Zadaj platnú e-mailovú adresu.');
+      return;
+    }
+
+    if (!termsAccepted) {
+      setConsentError(
+        'Pre registráciu je potrebné súhlasiť s obchodnými podmienkami.',
+      );
+      return;
+    }
+
+    setConsentError('');
+    setIsSubmitting(true);
 
     const cleanName = name.trim();
     const cleanEmail = email.trim().toLowerCase();
 
-    localStorage.setItem('zedpera_user_name', cleanName);
-    localStorage.setItem('zedpera_user_email', cleanEmail);
-    localStorage.setItem('zedpera_email', cleanEmail);
-    localStorage.setItem('user_email', cleanEmail);
-    localStorage.setItem('zedpera_user_plan', selectedPlan);
-    localStorage.setItem('zedpera_user_role', 'user');
-    localStorage.setItem('zedpera_is_logged_in', 'true');
+    try {
+      localStorage.setItem('zedpera_user_name', cleanName);
+      localStorage.setItem('zedpera_user_email', cleanEmail);
+      localStorage.setItem('zedpera_email', cleanEmail);
+      localStorage.setItem('user_email', cleanEmail);
+      localStorage.setItem('zedpera_user_plan', selectedPlan);
+      localStorage.setItem('zedpera_user_role', 'user');
+      localStorage.setItem('zedpera_is_logged_in', 'true');
 
-    window.location.href = `/dashboard?registered=true&plan=${encodeURIComponent(
-      selectedPlan,
-    )}`;
+      localStorage.setItem('zedpera_terms_accepted', 'true');
+      localStorage.setItem(
+        'zedpera_terms_accepted_at',
+        new Date().toISOString(),
+      );
+
+      localStorage.setItem(
+        'zedpera_marketing_consent',
+        marketingConsent ? 'true' : 'false',
+      );
+
+      if (marketingConsent) {
+        localStorage.setItem(
+          'zedpera_marketing_consent_at',
+          new Date().toISOString(),
+        );
+      }
+
+      await saveConsentToDatabase({
+        cleanEmail,
+        cleanName,
+      });
+
+      window.location.href = `/dashboard?registered=true&plan=${encodeURIComponent(
+        selectedPlan,
+      )}`;
+    } catch (error) {
+      console.error(error);
+      setConsentError(
+        'Registráciu sa nepodarilo dokončiť. Skúste to prosím znova.',
+      );
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -74,12 +155,68 @@ function RegisterContent() {
             className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-indigo-400"
           />
 
+          <div className="rounded-2xl border border-white/10 bg-slate-900/80 p-4">
+            <label className="flex cursor-pointer items-start gap-3 text-sm leading-6 text-slate-200">
+              <input
+                type="checkbox"
+                checked={termsAccepted}
+                onChange={(event) => setTermsAccepted(event.target.checked)}
+                className="mt-1 h-4 w-4 shrink-0 rounded border-white/20 bg-slate-950 accent-indigo-500"
+                required
+              />
+
+              <span>
+                Súhlasím s{' '}
+                <Link
+                  href="/terms"
+                  target="_blank"
+                  className="font-bold text-indigo-300 underline underline-offset-4 hover:text-indigo-200"
+                >
+                  obchodnými podmienkami
+                </Link>{' '}
+                a beriem na vedomie spracovanie osobných údajov.
+                <span className="ml-1 font-bold text-red-300">*</span>
+              </span>
+            </label>
+
+            <label className="mt-4 flex cursor-pointer items-start gap-3 text-sm leading-6 text-slate-300">
+              <input
+                type="checkbox"
+                checked={marketingConsent}
+                onChange={(event) =>
+                  setMarketingConsent(event.target.checked)
+                }
+                className="mt-1 h-4 w-4 shrink-0 rounded border-white/20 bg-slate-950 accent-indigo-500"
+              />
+
+              <span>
+                Súhlasím so zasielaním marketingových e-mailov, noviniek a
+                ponúk služby Zedpera na uvedenú e-mailovú adresu. Súhlas môžem
+                kedykoľvek odvolať.
+              </span>
+            </label>
+
+            <p className="mt-3 text-xs leading-5 text-slate-500">
+              Pole označené hviezdičkou je povinné. Marketingový súhlas je
+              dobrovoľný a nie je podmienkou registrácie.
+            </p>
+          </div>
+
+          {consentError ? (
+            <div className="rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-200">
+              {consentError}
+            </div>
+          ) : null}
+
           <button
             type="button"
             onClick={registerUser}
-            className="w-full rounded-full bg-indigo-600 px-5 py-4 font-black text-white transition hover:bg-indigo-700"
+            disabled={isSubmitting}
+            className="w-full rounded-full bg-indigo-600 px-5 py-4 font-black text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Registrovať sa a vstúpiť do aplikácie
+            {isSubmitting
+              ? 'Registrujem...'
+              : 'Registrovať sa a vstúpiť do aplikácie'}
           </button>
         </div>
 

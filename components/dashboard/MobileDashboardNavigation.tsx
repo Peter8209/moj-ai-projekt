@@ -249,7 +249,7 @@ export default function MobileDashboardNavigation({
       return [];
     }
 
-    return moduleInfos;
+    return moduleInfos.filter((item) => item.key !== 'originality');
   }, [moduleInfos]);
 
   const selectedMobileModule = useMemo(() => {
@@ -287,10 +287,17 @@ export default function MobileDashboardNavigation({
       activeTab,
     );
 
+    document.body.setAttribute(
+      'data-zedpera-mobile-dashboard-tab',
+      activeTab,
+    );
+
     return () => {
       document.documentElement.removeAttribute(
         'data-zedpera-mobile-dashboard-tab',
       );
+
+      document.body.removeAttribute('data-zedpera-mobile-dashboard-tab');
     };
   }, [activeTab]);
 
@@ -304,7 +311,7 @@ export default function MobileDashboardNavigation({
         behavior: 'smooth',
         block: 'start',
       });
-    }, 80);
+    }, 120);
   }
 
   function handleSelectModule(moduleKey: string) {
@@ -314,12 +321,15 @@ export default function MobileDashboardNavigation({
 
     window.setTimeout(() => {
       scrollToDashboardToolPanel();
-    }, 120);
+    }, 180);
   }
 
   function handleOpenModule() {
     setActiveTab('module');
-    scrollToDashboardToolPanel();
+
+    window.setTimeout(() => {
+      scrollToDashboardToolPanel();
+    }, 120);
   }
 
   function handleNavigate(path: string) {
@@ -342,21 +352,38 @@ export default function MobileDashboardNavigation({
 
   const rootClassName =
     activeTab === 'module'
-      ? 'sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/98 px-4 pb-3 pt-3 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden'
-      : 'sticky top-0 z-[70] -mx-4 min-h-[100dvh] border-b border-white/10 bg-[#020617]/98 px-4 pb-5 pt-4 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden';
+      ? 'relative z-[70] -mx-4 border-b border-white/10 bg-[#020617]/98 px-4 pb-3 pt-3 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden'
+      : 'relative z-[70] -mx-4 min-h-[100dvh] border-b border-white/10 bg-[#020617]/98 px-4 pb-5 pt-4 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden';
 
   return (
     <>
       <style jsx global>{`
         @media (max-width: 1279px) {
+          html[data-zedpera-mobile-dashboard-tab='main'],
+          body[data-zedpera-mobile-dashboard-tab='main'],
+          html[data-zedpera-mobile-dashboard-tab='ai'],
+          body[data-zedpera-mobile-dashboard-tab='ai'] {
+            background: #020617 !important;
+          }
+
           html[data-zedpera-mobile-dashboard-tab='main']
             #dashboard-tool-panel,
           html[data-zedpera-mobile-dashboard-tab='main']
             [data-dashboard-tool-panel='true'],
+          html[data-zedpera-mobile-dashboard-tab='main']
+            [data-mobile-dashboard-hidden-on-menu='true'],
           html[data-zedpera-mobile-dashboard-tab='ai'] #dashboard-tool-panel,
           html[data-zedpera-mobile-dashboard-tab='ai']
-            [data-dashboard-tool-panel='true'] {
+            [data-dashboard-tool-panel='true'],
+          html[data-zedpera-mobile-dashboard-tab='ai']
+            [data-mobile-dashboard-hidden-on-menu='true'] {
             display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            height: 0 !important;
+            max-height: 0 !important;
+            overflow: hidden !important;
           }
 
           html[data-zedpera-mobile-dashboard-tab='module']
@@ -366,13 +393,11 @@ export default function MobileDashboardNavigation({
             display: block !important;
             visibility: visible !important;
             opacity: 1 !important;
-          }
-
-          html[data-zedpera-mobile-dashboard-tab='main']
-            [data-mobile-dashboard-hidden-on-menu='true'],
-          html[data-zedpera-mobile-dashboard-tab='ai']
-            [data-mobile-dashboard-hidden-on-menu='true'] {
-            display: none !important;
+            pointer-events: auto !important;
+            height: auto !important;
+            min-height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
           }
 
           html[data-zedpera-mobile-dashboard-tab='module']
@@ -380,6 +405,55 @@ export default function MobileDashboardNavigation({
             display: block !important;
             visibility: visible !important;
             opacity: 1 !important;
+            pointer-events: auto !important;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            #dashboard-tool-panel
+            *,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-dashboard-tool-panel='true']
+            * {
+            max-width: 100%;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-results='true'],
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-result='true'],
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-panel='true'],
+          html[data-zedpera-mobile-dashboard-tab='module']
+            .analysis-results,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            .analysis-result,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            .analysis-panel {
+            max-height: none !important;
+            overflow: visible !important;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            button,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            a {
+            -webkit-tap-highlight-color: transparent;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            button[class*='bg-white'],
+          html[data-zedpera-mobile-dashboard-tab='module']
+            a[class*='bg-white'] {
+            color: #ffffff !important;
+            border-color: rgba(255, 255, 255, 0.18) !important;
+            background: rgba(30, 41, 59, 0.9) !important;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            button[class*='bg-white']:hover,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            a[class*='bg-white']:hover {
+            background: rgba(51, 65, 85, 0.95) !important;
           }
         }
       `}</style>
@@ -469,9 +543,9 @@ export default function MobileDashboardNavigation({
               </p>
             </div>
 
-            {(activeProfileTitle ||
-              activeProfileSubtitle ||
-              activeProfileType) ? (
+            {activeProfileTitle ||
+            activeProfileSubtitle ||
+            activeProfileType ? (
               <div className="mb-3 rounded-2xl border border-white/10 bg-black/25 px-3 py-2">
                 <p className="line-clamp-1 text-[11px] font-black text-white">
                   {activeProfileTitle || 'Profil práce'}

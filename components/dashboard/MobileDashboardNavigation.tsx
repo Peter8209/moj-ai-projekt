@@ -304,13 +304,21 @@ export default function MobileDashboardNavigation({
         behavior: 'smooth',
         block: 'start',
       });
-    }, 120);
+    }, 80);
   }
 
   function handleSelectModule(moduleKey: string) {
     setSelectedMobileModuleKey(moduleKey);
     setActiveTab('module');
     onSelectModule(moduleKey);
+
+    window.setTimeout(() => {
+      scrollToDashboardToolPanel();
+    }, 120);
+  }
+
+  function handleOpenModule() {
+    setActiveTab('module');
     scrollToDashboardToolPanel();
   }
 
@@ -332,6 +340,11 @@ export default function MobileDashboardNavigation({
     window.location.href = path;
   }
 
+  const rootClassName =
+    activeTab === 'module'
+      ? 'sticky top-0 z-[70] -mx-4 border-b border-white/10 bg-[#020617]/98 px-4 pb-3 pt-3 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden'
+      : 'sticky top-0 z-[70] -mx-4 min-h-[100dvh] border-b border-white/10 bg-[#020617]/98 px-4 pb-5 pt-4 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden';
+
   return (
     <>
       <style jsx global>{`
@@ -346,269 +359,35 @@ export default function MobileDashboardNavigation({
             display: none !important;
           }
 
+          html[data-zedpera-mobile-dashboard-tab='module']
+            #dashboard-tool-panel,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-dashboard-tool-panel='true'] {
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+          }
+
           html[data-zedpera-mobile-dashboard-tab='main']
             [data-mobile-dashboard-hidden-on-menu='true'],
           html[data-zedpera-mobile-dashboard-tab='ai']
             [data-mobile-dashboard-hidden-on-menu='true'] {
             display: none !important;
           }
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-mobile-dashboard-hidden-on-menu='true'] {
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+          }
         }
       `}</style>
 
-      <section className="sticky top-0 z-[70] -mx-4 min-h-[100dvh] border-b border-white/10 bg-[#020617]/98 px-4 pb-5 pt-4 text-white shadow-2xl shadow-black/40 backdrop-blur-2xl xl:hidden">
-        <div className="mb-4">
-          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
-            Mobilná aplikácia
-          </p>
-
-          <h2 className="mt-1 line-clamp-1 text-xl font-black leading-tight text-white">
-            {activeTab === 'main'
-              ? 'Hlavné menu'
-              : activeTab === 'ai'
-                ? 'AI nástroje'
-                : selectedMobileModuleLabel}
-          </h2>
-
-          <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-400">
-            {activeTab === 'main'
-              ? 'Prvá stránka obsahuje iba hlavné menu systému.'
-              : activeTab === 'ai'
-                ? 'Druhá stránka obsahuje iba výber AI nástrojov.'
-                : 'Tretia stránka zobrazuje vybraný modul a pracovný panel.'}
-          </p>
-        </div>
-
-        {activeTab !== 'module' &&
-        (activeProfileTitle || activeProfileSubtitle || activeProfileType) ? (
-          <div className="mb-3 rounded-2xl border border-white/10 bg-black/25 px-3 py-2">
-            <p className="line-clamp-1 text-[11px] font-black text-white">
-              {activeProfileTitle || 'Profil práce'}
-            </p>
-
-            {activeProfileSubtitle ? (
-              <p className="mt-0.5 line-clamp-1 text-[10px] font-semibold text-slate-400">
-                {activeProfileSubtitle}
-              </p>
-            ) : null}
-
-            {activeProfileType ? (
-              <p className="mt-0.5 line-clamp-1 text-[10px] font-semibold text-violet-300">
-                {activeProfileType}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div className="mb-4 grid grid-cols-3 gap-2 rounded-3xl border border-white/10 bg-[#070b18] p-2 shadow-2xl shadow-black/40">
-          <button
-            type="button"
-            onClick={() => setActiveTab('main')}
-            className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
-              activeTab === 'main'
-                ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
-                : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
-            }`}
-            aria-pressed={activeTab === 'main'}
-          >
-            <Menu className="h-4 w-4" />
-            Menu
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('ai')}
-            className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
-              activeTab === 'ai'
-                ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
-                : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
-            }`}
-            aria-pressed={activeTab === 'ai'}
-          >
-            <Sparkles className="h-4 w-4" />
-            AI nástroje
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              if (selectedMobileModule) {
-                setActiveTab('module');
-                scrollToDashboardToolPanel();
-              } else {
-                setActiveTab('ai');
-              }
-            }}
-            className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
-              activeTab === 'module'
-                ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
-                : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
-            }`}
-            aria-pressed={activeTab === 'module'}
-          >
-            {selectedMobileModule ? (
-              getModuleIcon(selectedMobileModule.key)
-            ) : (
-              <PlayCircle className="h-4 w-4" />
-            )}
-            Modul
-          </button>
-        </div>
-
-        {activeTab === 'main' ? (
-          <div className="rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
-            <div className="mb-3 flex items-center gap-2">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-600/20 text-violet-200">
-                <Menu className="h-4 w-4" />
-              </span>
-
-              <div className="min-w-0">
-                <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
-                  Hlavné menu
-                </p>
-
-                <p className="line-clamp-1 text-[11px] font-semibold text-slate-500">
-                  Základné sekcie systému
-                </p>
-              </div>
-            </div>
-
-            <div className="max-h-[62dvh] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <div className="grid grid-cols-2 gap-2">
-                {mobileMainMenuItems.map((item) => {
-                  const Icon = item.icon;
-
-                  return (
-                    <button
-                      key={`${item.href}-${item.label}`}
-                      type="button"
-                      onClick={() => handleNavigate(item.href)}
-                      className="flex min-h-[68px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-left text-white transition hover:border-violet-300/40 hover:bg-violet-600/20 active:scale-[0.98]"
-                    >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/30 text-violet-200">
-                        <Icon className="h-4 w-4" />
-                      </span>
-
-                      <span className="min-w-0">
-                        <span className="block truncate text-xs font-black">
-                          {item.label}
-                        </span>
-
-                        <span className="mt-0.5 block truncate text-[10px] font-semibold text-slate-500">
-                          {item.description}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('ai')}
-              className="mt-3 flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-xs font-black text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-500 active:scale-[0.98]"
-            >
-              <Sparkles className="h-4 w-4" />
-              Pokračovať na AI nástroje
-            </button>
-          </div>
-        ) : null}
-
-        {activeTab === 'ai' ? (
-          <div className="rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-200">
-                  <Sparkles className="h-4 w-4" />
-                </span>
-
-                <div className="min-w-0">
-                  <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
-                    AI nástroje
-                  </p>
-
-                  <p className="line-clamp-1 text-[11px] font-semibold text-slate-500">
-                    Vyberte nástroj a otvorí sa tretia stránka modulu.
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab('main')}
-                className="inline-flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
-              >
-                <ChevronLeft className="h-3.5 w-3.5" />
-                Späť
-              </button>
-            </div>
-
-            {visibleModules.length > 0 ? (
-              <div className="max-h-[64dvh] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                <div className="grid grid-cols-2 gap-2">
-                  {visibleModules.map((item) => {
-                    const active = activeModule === item.key;
-
-                    const rawLabel =
-                      t?.dashboardTools?.tools?.[item.translationKey] ||
-                      item.translationKey;
-
-                    const label = getShortModuleLabel(item.key, rawLabel);
-
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onClick={() => handleSelectModule(item.key)}
-                        className={`flex min-h-[68px] items-center gap-3 rounded-2xl border px-3 py-2 text-left transition active:scale-[0.98] ${
-                          active
-                            ? 'border-violet-300 bg-violet-600 text-white shadow-lg shadow-violet-950/40'
-                            : 'border-white/10 bg-white/[0.06] text-white hover:border-violet-300/40 hover:bg-violet-600/20'
-                        }`}
-                        title={getModuleDescription(item.key)}
-                        aria-pressed={active}
-                      >
-                        <span
-                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
-                            active
-                              ? 'bg-white/20 text-white'
-                              : 'bg-black/30 text-violet-200'
-                          }`}
-                        >
-                          {getModuleIcon(item.key)}
-                        </span>
-
-                        <span className="min-w-0">
-                          <span className="block truncate text-xs font-black">
-                            {label}
-                          </span>
-
-                          <span
-                            className={`mt-0.5 block truncate text-[10px] font-semibold ${
-                              active ? 'text-violet-100' : 'text-slate-500'
-                            }`}
-                          >
-                            {getModuleDescription(item.key)}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-center">
-                <p className="text-xs font-bold text-slate-400">
-                  AI nástroje nie sú dostupné.
-                </p>
-              </div>
-            )}
-          </div>
-        ) : null}
-
+      <section className={rootClassName}>
         {activeTab === 'module' ? (
           <div className="rounded-3xl border border-violet-400/20 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
-            <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-lg shadow-violet-950/40">
                   {selectedMobileModule ? (
@@ -636,28 +415,278 @@ export default function MobileDashboardNavigation({
               <button
                 type="button"
                 onClick={() => setActiveTab('ai')}
-                className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
+                className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
                 AI nástroje
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={scrollToDashboardToolPanel}
-              className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-xs font-black text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-500 active:scale-[0.98]"
-            >
-              <PlayCircle className="h-4 w-4" />
-              Otvoriť pracovný panel modulu
-            </button>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveTab('main')}
+                className="flex min-h-[46px] items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-2 text-[10px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-[0.98]"
+              >
+                <Menu className="h-3.5 w-3.5" />
+                Menu
+              </button>
 
-            <p className="mt-3 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-[11px] font-bold leading-5 text-cyan-100">
-              Na tejto tretej stránke je aktívny iba vybraný modul. Hlavné menu
-              a AI zoznam sú skryté, aby sa neprekrývali s pracovným panelom.
-            </p>
+              <button
+                type="button"
+                onClick={() => setActiveTab('ai')}
+                className="flex min-h-[46px] items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-2 text-[10px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-[0.98]"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                AI nástroje
+              </button>
+
+              <button
+                type="button"
+                onClick={scrollToDashboardToolPanel}
+                className="flex min-h-[46px] items-center justify-center gap-1 rounded-2xl bg-violet-600 px-2 py-2 text-[10px] font-black text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-500 active:scale-[0.98]"
+              >
+                <PlayCircle className="h-3.5 w-3.5" />
+                Panel
+              </button>
+            </div>
           </div>
-        ) : null}
+        ) : (
+          <>
+            <div className="mb-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
+                Mobilná aplikácia
+              </p>
+
+              <h2 className="mt-1 line-clamp-1 text-xl font-black leading-tight text-white">
+                {activeTab === 'main' ? 'Hlavné menu' : 'AI nástroje'}
+              </h2>
+
+              <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-400">
+                {activeTab === 'main'
+                  ? 'Prvá stránka obsahuje iba hlavné menu systému.'
+                  : 'Druhá stránka obsahuje iba výber AI nástrojov.'}
+              </p>
+            </div>
+
+            {(activeProfileTitle ||
+              activeProfileSubtitle ||
+              activeProfileType) ? (
+              <div className="mb-3 rounded-2xl border border-white/10 bg-black/25 px-3 py-2">
+                <p className="line-clamp-1 text-[11px] font-black text-white">
+                  {activeProfileTitle || 'Profil práce'}
+                </p>
+
+                {activeProfileSubtitle ? (
+                  <p className="mt-0.5 line-clamp-1 text-[10px] font-semibold text-slate-400">
+                    {activeProfileSubtitle}
+                  </p>
+                ) : null}
+
+                {activeProfileType ? (
+                  <p className="mt-0.5 line-clamp-1 text-[10px] font-semibold text-violet-300">
+                    {activeProfileType}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="mb-4 grid grid-cols-3 gap-2 rounded-3xl border border-white/10 bg-[#070b18] p-2 shadow-2xl shadow-black/40">
+              <button
+                type="button"
+                onClick={() => setActiveTab('main')}
+                className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
+                  activeTab === 'main'
+                    ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
+                    : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+                }`}
+                aria-pressed={activeTab === 'main'}
+              >
+                <Menu className="h-4 w-4" />
+                Menu
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('ai')}
+                className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition active:scale-[0.98] ${
+                  activeTab === 'ai'
+                    ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/40'
+                    : 'border border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+                }`}
+                aria-pressed={activeTab === 'ai'}
+              >
+                <Sparkles className="h-4 w-4" />
+                AI nástroje
+              </button>
+
+              <button
+                type="button"
+                onClick={handleOpenModule}
+                className="flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-2 text-[10px] font-black text-slate-300 transition hover:bg-white/[0.1] hover:text-white active:scale-[0.98]"
+              >
+                {selectedMobileModule ? (
+                  getModuleIcon(selectedMobileModule.key)
+                ) : (
+                  <PlayCircle className="h-4 w-4" />
+                )}
+                Modul
+              </button>
+            </div>
+
+            {activeTab === 'main' ? (
+              <div className="rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-600/20 text-violet-200">
+                    <Menu className="h-4 w-4" />
+                  </span>
+
+                  <div className="min-w-0">
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
+                      Hlavné menu
+                    </p>
+
+                    <p className="line-clamp-1 text-[11px] font-semibold text-slate-500">
+                      Základné sekcie systému
+                    </p>
+                  </div>
+                </div>
+
+                <div className="max-h-[62dvh] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <div className="grid grid-cols-2 gap-2">
+                    {mobileMainMenuItems.map((item) => {
+                      const Icon = item.icon;
+
+                      return (
+                        <button
+                          key={`${item.href}-${item.label}`}
+                          type="button"
+                          onClick={() => handleNavigate(item.href)}
+                          className="flex min-h-[68px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-left text-white transition hover:border-violet-300/40 hover:bg-violet-600/20 active:scale-[0.98]"
+                        >
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/30 text-violet-200">
+                            <Icon className="h-4 w-4" />
+                          </span>
+
+                          <span className="min-w-0">
+                            <span className="block truncate text-xs font-black">
+                              {item.label}
+                            </span>
+
+                            <span className="mt-0.5 block truncate text-[10px] font-semibold text-slate-500">
+                              {item.description}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('ai')}
+                  className="mt-3 flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-xs font-black text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-500 active:scale-[0.98]"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Pokračovať na AI nástroje
+                </button>
+              </div>
+            ) : null}
+
+            {activeTab === 'ai' ? (
+              <div className="rounded-3xl border border-white/10 bg-[#070b18] p-3 shadow-2xl shadow-black/40">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-200">
+                      <Sparkles className="h-4 w-4" />
+                    </span>
+
+                    <div className="min-w-0">
+                      <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
+                        AI nástroje
+                      </p>
+
+                      <p className="line-clamp-1 text-[11px] font-semibold text-slate-500">
+                        Vyberte nástroj a otvorí sa pracovná stránka modulu.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('main')}
+                    className="inline-flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    Späť
+                  </button>
+                </div>
+
+                {visibleModules.length > 0 ? (
+                  <div className="max-h-[64dvh] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    <div className="grid grid-cols-2 gap-2">
+                      {visibleModules.map((item) => {
+                        const active = activeModule === item.key;
+
+                        const rawLabel =
+                          t?.dashboardTools?.tools?.[item.translationKey] ||
+                          item.translationKey;
+
+                        const label = getShortModuleLabel(item.key, rawLabel);
+
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => handleSelectModule(item.key)}
+                            className={`flex min-h-[68px] items-center gap-3 rounded-2xl border px-3 py-2 text-left transition active:scale-[0.98] ${
+                              active
+                                ? 'border-violet-300 bg-violet-600 text-white shadow-lg shadow-violet-950/40'
+                                : 'border-white/10 bg-white/[0.06] text-white hover:border-violet-300/40 hover:bg-violet-600/20'
+                            }`}
+                            title={getModuleDescription(item.key)}
+                            aria-pressed={active}
+                          >
+                            <span
+                              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                                active
+                                  ? 'bg-white/20 text-white'
+                                  : 'bg-black/30 text-violet-200'
+                              }`}
+                            >
+                              {getModuleIcon(item.key)}
+                            </span>
+
+                            <span className="min-w-0">
+                              <span className="block truncate text-xs font-black">
+                                {label}
+                              </span>
+
+                              <span
+                                className={`mt-0.5 block truncate text-[10px] font-semibold ${
+                                  active ? 'text-violet-100' : 'text-slate-500'
+                                }`}
+                              >
+                                {getModuleDescription(item.key)}
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-center">
+                    <p className="text-xs font-bold text-slate-400">
+                      AI nástroje nie sú dostupné.
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </>
+        )}
       </section>
     </>
   );

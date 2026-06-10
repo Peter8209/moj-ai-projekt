@@ -447,7 +447,7 @@ function downloadBlob(blob: Blob, fileName: string) {
 function getFileName(format: ExportFormat) {
   if (format === 'word') return 'vysledky-analyzy-dat.doc';
   if (format === 'xls') return 'vysledky-analyzy-dat.xls';
-  return 'vysledky-analyzy-dat.txt';
+  return 'vysledky-analyzy-dat.pdf';
 }
 
 function StatCard({ label, value }: { label: string; value: number }) {
@@ -807,7 +807,8 @@ export default function AnalysisResultsModal({
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/80 px-3 py-4 backdrop-blur-md sm:px-5"
+      data-analysis-modal="true"
+      className="fixed inset-0 z-[9999] flex min-h-0 items-stretch justify-center overflow-hidden bg-slate-950/80 p-2 backdrop-blur-md sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Výsledky analýzy dát"
@@ -819,8 +820,46 @@ export default function AnalysisResultsModal({
         aria-label="Zavrieť modálne okno"
       />
 
-      <div className="relative z-10 flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-2xl shadow-black/50 transition-colors duration-300 dark:border-white/10 dark:bg-[#070a16]">
-        <div className="border-b border-slate-200 bg-gradient-to-r from-blue-600/10 via-violet-600/10 to-cyan-500/10 px-5 py-5 dark:border-white/10 dark:from-blue-600/20 dark:via-violet-600/15 dark:to-cyan-500/10 sm:px-7">
+      <style jsx global>{`
+        .analysis-modal-scroll {
+          -webkit-overflow-scrolling: touch;
+          touch-action: pan-y;
+          overscroll-behavior: contain;
+        }
+
+        .analysis-modal-scroll::-webkit-scrollbar {
+          width: 10px;
+          height: 10px;
+        }
+
+        .analysis-modal-scroll::-webkit-scrollbar-track {
+          background: rgba(15, 23, 42, 0.45);
+          border-radius: 999px;
+        }
+
+        .analysis-modal-scroll::-webkit-scrollbar-thumb {
+          background: rgba(37, 99, 235, 0.75);
+          border-radius: 999px;
+        }
+
+        .analysis-modal-scroll table {
+          border-collapse: collapse;
+        }
+
+        @media (max-width: 767px) {
+          [data-analysis-modal='true'] {
+            align-items: stretch !important;
+          }
+
+          [data-analysis-modal='true'] .analysis-modal-scroll {
+            max-height: none !important;
+            overflow-y: auto !important;
+          }
+        }
+      `}</style>
+
+      <div className="relative z-10 flex h-[100dvh] min-h-0 w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-2xl shadow-black/50 transition-colors duration-300 dark:border-white/10 dark:bg-[#070a16] sm:h-[calc(100dvh-2rem)]">
+        <div className="shrink-0 border-b border-slate-200 bg-gradient-to-r from-blue-600/10 via-violet-600/10 to-cyan-500/10 px-4 py-4 dark:border-white/10 dark:from-blue-600/20 dark:via-violet-600/15 dark:to-cyan-500/10 sm:px-7 sm:py-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="flex items-start gap-4">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200">
@@ -944,7 +983,10 @@ export default function AnalysisResultsModal({
           </div>
         </div>
 
-        <div className="no-scrollbar flex-1 scroll-smooth overflow-y-auto px-4 py-5 sm:px-7">
+        <div
+          data-analysis-content="true"
+          className="analysis-modal-scroll min-h-0 flex-1 scroll-smooth overflow-y-auto overscroll-contain px-4 py-5 [scrollbar-width:thin] [scrollbar-color:#2563eb_#020617] sm:px-7"
+        >
           <div ref={overviewRef} className="scroll-mt-6">
             <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
               <section className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/[0.04]">
@@ -1085,7 +1127,7 @@ export default function AnalysisResultsModal({
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 dark:border-white/10 dark:bg-slate-950/70 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+        <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-4 dark:border-white/10 dark:bg-slate-950/70 sm:flex sm:items-center sm:justify-between sm:px-7">
           <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
             Výsledky sú orientačné. Pred finálnou interpretáciou odporúčame
             overiť typ premenných, metodiku práce, normalitu rozdelenia a
@@ -1194,7 +1236,7 @@ function TableDetailModal({
   const columns = getColumns(rows);
 
   return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-950/80 px-3 py-4 backdrop-blur-md">
+    <div className="fixed inset-0 z-[10000] flex min-h-0 items-stretch justify-center overflow-hidden bg-slate-950/80 p-2 backdrop-blur-md sm:p-4">
       <button
         type="button"
         className="absolute inset-0 cursor-default"
@@ -1202,8 +1244,8 @@ function TableDetailModal({
         aria-label="Zavrieť tabuľku"
       />
 
-      <div className="relative z-10 flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#070a16]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-5 dark:border-white/10">
+      <div className="relative z-10 flex h-[100dvh] min-h-0 w-full max-w-6xl flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#070a16] sm:h-[calc(100dvh-2rem)]">
+        <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-5 dark:border-white/10">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-700 dark:text-blue-300">
               Detail tabuľky
@@ -1226,7 +1268,7 @@ function TableDetailModal({
           </button>
         </div>
 
-        <div className="flex-1 overflow-auto p-5">
+        <div className="analysis-modal-scroll min-h-0 flex-1 overflow-auto overscroll-contain p-4 [scrollbar-width:thin] [scrollbar-color:#2563eb_#020617] sm:p-5">
           <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-white/10">
             <table className="w-full min-w-[960px] border-collapse text-sm">
               <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-[#0b1020]">
@@ -1263,7 +1305,7 @@ function TableDetailModal({
           </div>
         </div>
 
-        <div className="border-t border-slate-200 bg-slate-50 px-5 py-4 dark:border-white/10 dark:bg-slate-950/70">
+        <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-4 dark:border-white/10 dark:bg-slate-950/70">
           <button
             type="button"
             onClick={onClose}

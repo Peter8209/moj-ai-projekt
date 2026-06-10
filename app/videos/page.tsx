@@ -229,10 +229,96 @@ const supportedPageLanguages: PageLanguage[] = [
   'hu',
 ];
 
+const VIDEO_LANGUAGE_STORAGE_KEYS = [
+  'zedpera_language',
+  'zedpera_system_language',
+  'zedpera_interface_language',
+  'zedpera_work_language',
+  'language',
+];
+
+function normalizeVideoLanguage(value: unknown): PageLanguage | null {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace('_', '-')
+    .split('-')[0];
+
+  if (!normalized) return null;
+
+  if (normalized === 'cz') return 'cs';
+  if (normalized === 'cze') return 'cs';
+  if (normalized === 'czech') return 'cs';
+  if (normalized === 'slovak') return 'sk';
+  if (normalized === 'english') return 'en';
+  if (normalized === 'german') return 'de';
+  if (normalized === 'polish') return 'pl';
+  if (normalized === 'hungarian') return 'hu';
+
+  return supportedPageLanguages.includes(normalized as PageLanguage)
+    ? (normalized as PageLanguage)
+    : null;
+}
+
 function normalizePageLanguage(value: unknown): PageLanguage {
-  return supportedPageLanguages.includes(value as PageLanguage)
-    ? (value as PageLanguage)
-    : 'sk';
+  return normalizeVideoLanguage(value) || 'sk';
+}
+
+function getStoredVideoLanguage(): PageLanguage {
+  if (typeof window === 'undefined') return 'sk';
+
+  for (const key of VIDEO_LANGUAGE_STORAGE_KEYS) {
+    const storedLanguage = normalizeVideoLanguage(window.localStorage.getItem(key));
+
+    if (storedLanguage) return storedLanguage;
+  }
+
+  const html = document.documentElement;
+
+  return (
+    normalizeVideoLanguage(html.lang) ||
+    normalizeVideoLanguage(html.getAttribute('data-language')) ||
+    normalizeVideoLanguage(html.getAttribute('data-system-language')) ||
+    normalizeVideoLanguage(html.getAttribute('data-work-language')) ||
+    'sk'
+  );
+}
+
+function forcePublicVideoManualLanguagePath(
+  value: string | undefined,
+  language: PageLanguage,
+) {
+  if (!value) return '';
+
+  if (/^(https?:|blob:|data:)/i.test(value)) {
+    return value;
+  }
+
+  const cleanValue = value.replace(/\\/g, '/');
+
+  if (cleanValue.includes('/video-manualy/')) {
+    return cleanValue.replace(
+      /\/video-manualy\/(sk|cs|cz|en|de|pl|hu)\//i,
+      `/video-manualy/${language}/`,
+    );
+  }
+
+  const fileName = cleanValue.split('/').filter(Boolean).pop() || cleanValue;
+
+  return `/video-manualy/${language}/${fileName}`;
+}
+
+function normalizeVideoManualForLanguage(
+  video: LocalizedVideoManual,
+  language: PageLanguage,
+): LocalizedVideoManual {
+  return {
+    ...video,
+    videoUrl: forcePublicVideoManualLanguagePath(video.videoUrl, language),
+    thumbnail: video.thumbnail
+      ? forcePublicVideoManualLanguagePath(video.thumbnail, language)
+      : video.thumbnail,
+  };
 }
 
 function getSubtitleUrl(videoUrl: string) {
@@ -245,14 +331,39 @@ export default function VideoNavodPage() {
   const router = useRouter();
   const { language } = useLanguage();
 
-  const pageLanguage = normalizePageLanguage(language);
+  const [storedVideoLanguage, setStoredVideoLanguage] = useState<PageLanguage>(() =>
+    getStoredVideoLanguage(),
+  );
+
+  useEffect(() => {
+    function syncVideoLanguageFromStorage() {
+      setStoredVideoLanguage(getStoredVideoLanguage());
+    }
+
+    syncVideoLanguageFromStorage();
+
+    window.addEventListener('storage', syncVideoLanguageFromStorage);
+    window.addEventListener('focus', syncVideoLanguageFromStorage);
+
+    return () => {
+      window.removeEventListener('storage', syncVideoLanguageFromStorage);
+      window.removeEventListener('focus', syncVideoLanguageFromStorage);
+    };
+  }, []);
+
+  const pageLanguage = useMemo(() => {
+    return normalizeVideoLanguage(language) || storedVideoLanguage || 'sk';
+  }, [language, storedVideoLanguage]);
+
   const copy = pageCopy[pageLanguage];
 
   const topRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const localizedVideos = useMemo(() => {
-    return getLocalizedVisibleVideoManuals(pageLanguage);
+    return getLocalizedVisibleVideoManuals(pageLanguage).map((video) =>
+      normalizeVideoManualForLanguage(video, pageLanguage),
+    );
   }, [pageLanguage]);
 
   const [selectedVideoId, setSelectedVideoId] = useState('');

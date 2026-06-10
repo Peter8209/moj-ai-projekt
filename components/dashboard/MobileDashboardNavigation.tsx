@@ -24,6 +24,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 type MobileDashboardTab = 'main' | 'ai' | 'module';
 
+type SupportedVideoLanguage = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
+
 type MobileDashboardModuleInfo = {
   key: string;
   translationKey: string;
@@ -42,56 +44,439 @@ type MobileDashboardNavigationProps = {
   onNavigate?: (path: string) => void;
 };
 
-const mobileMainMenuItems = [
-  {
-    label: 'Menu',
-    description: 'Úvodná obrazovka',
-    href: '/dashboard',
-    icon: Home,
+type MobileMenuCopy = {
+  mainTitle: string;
+  mainDescription: string;
+  aiTitle: string;
+  aiDescription: string;
+  mobileApp: string;
+  openedModule: string;
+  menu: string;
+  aiTools: string;
+  module: string;
+  panel: string;
+  back: string;
+  continueToAiTools: string;
+  mainMenu: string;
+  mainMenuDescription: string;
+  basicSections: string;
+  selectToolDescription: string;
+  noAiTools: string;
+  items: {
+    menu: string;
+    menuDescription: string;
+    profile: string;
+    profileDescription: string;
+    aiChat: string;
+    aiChatDescription: string;
+    projects: string;
+    projectsDescription: string;
+    sources: string;
+    sourcesDescription: string;
+    pricing: string;
+    pricingDescription: string;
+    history: string;
+    historyDescription: string;
+    videos: string;
+    videosDescription: string;
+  };
+};
+
+const mobileCopyByLanguage: Record<SupportedVideoLanguage, MobileMenuCopy> = {
+  sk: {
+    mainTitle: 'Hlavné menu',
+    mainDescription: 'Prvá stránka obsahuje iba hlavné menu systému.',
+    aiTitle: 'AI nástroje',
+    aiDescription: 'Druhá stránka obsahuje iba výber AI nástrojov.',
+    mobileApp: 'Mobilná aplikácia',
+    openedModule: 'Otvorený modul',
+    menu: 'Menu',
+    aiTools: 'AI nástroje',
+    module: 'Modul',
+    panel: 'Panel',
+    back: 'Späť',
+    continueToAiTools: 'Pokračovať na AI nástroje',
+    mainMenu: 'Hlavné menu',
+    mainMenuDescription: 'Základné sekcie systému',
+    basicSections: 'Základné sekcie systému',
+    selectToolDescription:
+      'Vyberte nástroj a otvorí sa pracovná stránka modulu.',
+    noAiTools: 'AI nástroje nie sú dostupné.',
+    items: {
+      menu: 'Menu',
+      menuDescription: 'Úvodná obrazovka',
+      profile: 'Profil',
+      profileDescription: 'Účet klienta',
+      aiChat: 'AI Chat',
+      aiChatDescription: 'Samostatný chat',
+      projects: 'Moje práce',
+      projectsDescription: 'Zoznam rozpracovaných prác',
+      sources: 'Zdroje',
+      sourcesDescription: 'Literatúra a citácie',
+      pricing: 'Balíčky',
+      pricingDescription: 'Predplatné a doplnky',
+      history: 'História',
+      historyDescription: 'História výstupov',
+      videos: 'Video návody',
+      videosDescription: 'Video manuály podľa jazyka',
+    },
   },
-  {
-    label: 'Profil',
-    description: 'Účet klienta',
-    href: '/profile?tab=account',
-    icon: UserCircle,
+
+  cs: {
+    mainTitle: 'Hlavní menu',
+    mainDescription: 'První stránka obsahuje pouze hlavní menu systému.',
+    aiTitle: 'AI nástroje',
+    aiDescription: 'Druhá stránka obsahuje pouze výběr AI nástrojů.',
+    mobileApp: 'Mobilní aplikace',
+    openedModule: 'Otevřený modul',
+    menu: 'Menu',
+    aiTools: 'AI nástroje',
+    module: 'Modul',
+    panel: 'Panel',
+    back: 'Zpět',
+    continueToAiTools: 'Pokračovat na AI nástroje',
+    mainMenu: 'Hlavní menu',
+    mainMenuDescription: 'Základní sekce systému',
+    basicSections: 'Základní sekce systému',
+    selectToolDescription:
+      'Vyberte nástroj a otevře se pracovní stránka modulu.',
+    noAiTools: 'AI nástroje nejsou dostupné.',
+    items: {
+      menu: 'Menu',
+      menuDescription: 'Úvodní obrazovka',
+      profile: 'Profil',
+      profileDescription: 'Účet klienta',
+      aiChat: 'AI Chat',
+      aiChatDescription: 'Samostatný chat',
+      projects: 'Moje práce',
+      projectsDescription: 'Seznam rozpracovaných prací',
+      sources: 'Zdroje',
+      sourcesDescription: 'Literatura a citace',
+      pricing: 'Balíčky',
+      pricingDescription: 'Předplatné a doplňky',
+      history: 'Historie',
+      historyDescription: 'Historie výstupů',
+      videos: 'Video návody',
+      videosDescription: 'Video manuály podle jazyka',
+    },
   },
-  {
-    label: 'AI Chat',
-    description: 'Samostatný chat',
-    href: '/chat',
-    icon: Bot,
+
+  en: {
+    mainTitle: 'Main menu',
+    mainDescription: 'The first page contains only the main system menu.',
+    aiTitle: 'AI tools',
+    aiDescription: 'The second page contains only the AI tool selection.',
+    mobileApp: 'Mobile application',
+    openedModule: 'Opened module',
+    menu: 'Menu',
+    aiTools: 'AI tools',
+    module: 'Module',
+    panel: 'Panel',
+    back: 'Back',
+    continueToAiTools: 'Continue to AI tools',
+    mainMenu: 'Main menu',
+    mainMenuDescription: 'Basic system sections',
+    basicSections: 'Basic system sections',
+    selectToolDescription:
+      'Select a tool and the module workspace will open.',
+    noAiTools: 'AI tools are not available.',
+    items: {
+      menu: 'Menu',
+      menuDescription: 'Home screen',
+      profile: 'Profile',
+      profileDescription: 'Client account',
+      aiChat: 'AI Chat',
+      aiChatDescription: 'Standalone chat',
+      projects: 'My works',
+      projectsDescription: 'List of works in progress',
+      sources: 'Sources',
+      sourcesDescription: 'Literature and citations',
+      pricing: 'Packages',
+      pricingDescription: 'Subscriptions and add-ons',
+      history: 'History',
+      historyDescription: 'Output history',
+      videos: 'Video guides',
+      videosDescription: 'Video manuals by language',
+    },
   },
-  {
-    label: 'Moje práce',
-    description: 'Zoznam rozpracovaných prác',
-    href: '/projects?view=list',
-    icon: BriefcaseBusiness,
+
+  de: {
+    mainTitle: 'Hauptmenü',
+    mainDescription: 'Die erste Seite enthält nur das Hauptmenü des Systems.',
+    aiTitle: 'KI-Werkzeuge',
+    aiDescription: 'Die zweite Seite enthält nur die Auswahl der KI-Werkzeuge.',
+    mobileApp: 'Mobile Anwendung',
+    openedModule: 'Geöffnetes Modul',
+    menu: 'Menü',
+    aiTools: 'KI-Werkzeuge',
+    module: 'Modul',
+    panel: 'Panel',
+    back: 'Zurück',
+    continueToAiTools: 'Weiter zu KI-Werkzeugen',
+    mainMenu: 'Hauptmenü',
+    mainMenuDescription: 'Grundlegende Systembereiche',
+    basicSections: 'Grundlegende Systembereiche',
+    selectToolDescription:
+      'Wählen Sie ein Werkzeug aus und der Arbeitsbereich des Moduls wird geöffnet.',
+    noAiTools: 'KI-Werkzeuge sind nicht verfügbar.',
+    items: {
+      menu: 'Menü',
+      menuDescription: 'Startbildschirm',
+      profile: 'Profil',
+      profileDescription: 'Kundenkonto',
+      aiChat: 'KI-Chat',
+      aiChatDescription: 'Eigenständiger Chat',
+      projects: 'Meine Arbeiten',
+      projectsDescription: 'Liste laufender Arbeiten',
+      sources: 'Quellen',
+      sourcesDescription: 'Literatur und Zitationen',
+      pricing: 'Pakete',
+      pricingDescription: 'Abonnements und Add-ons',
+      history: 'Verlauf',
+      historyDescription: 'Ausgabeverlauf',
+      videos: 'Videoanleitungen',
+      videosDescription: 'Videomanuale nach Sprache',
+    },
   },
-  {
-    label: 'Zdroje',
-    description: 'Literatúra a citácie',
-    href: '/sources',
-    icon: BookOpen,
+
+  pl: {
+    mainTitle: 'Menu główne',
+    mainDescription: 'Pierwsza strona zawiera tylko główne menu systemu.',
+    aiTitle: 'Narzędzia AI',
+    aiDescription: 'Druga strona zawiera tylko wybór narzędzi AI.',
+    mobileApp: 'Aplikacja mobilna',
+    openedModule: 'Otwarty moduł',
+    menu: 'Menu',
+    aiTools: 'Narzędzia AI',
+    module: 'Moduł',
+    panel: 'Panel',
+    back: 'Wstecz',
+    continueToAiTools: 'Przejdź do narzędzi AI',
+    mainMenu: 'Menu główne',
+    mainMenuDescription: 'Podstawowe sekcje systemu',
+    basicSections: 'Podstawowe sekcje systemu',
+    selectToolDescription:
+      'Wybierz narzędzie, a otworzy się strona robocza modułu.',
+    noAiTools: 'Narzędzia AI nie są dostępne.',
+    items: {
+      menu: 'Menu',
+      menuDescription: 'Ekran główny',
+      profile: 'Profil',
+      profileDescription: 'Konto klienta',
+      aiChat: 'AI Chat',
+      aiChatDescription: 'Samodzielny chat',
+      projects: 'Moje prace',
+      projectsDescription: 'Lista prac w toku',
+      sources: 'Źródła',
+      sourcesDescription: 'Literatura i cytowania',
+      pricing: 'Pakiety',
+      pricingDescription: 'Subskrypcje i dodatki',
+      history: 'Historia',
+      historyDescription: 'Historia wyników',
+      videos: 'Instrukcje wideo',
+      videosDescription: 'Wideo instrukcje według języka',
+    },
   },
-  {
-    label: 'Balíčky',
-    description: 'Predplatné a doplnky',
-    href: '/pricing',
-    icon: CreditCard,
+
+  hu: {
+    mainTitle: 'Főmenü',
+    mainDescription: 'Az első oldal csak a rendszer főmenüjét tartalmazza.',
+    aiTitle: 'AI eszközök',
+    aiDescription: 'A második oldal csak az AI eszközök kiválasztását tartalmazza.',
+    mobileApp: 'Mobilalkalmazás',
+    openedModule: 'Megnyitott modul',
+    menu: 'Menü',
+    aiTools: 'AI eszközök',
+    module: 'Modul',
+    panel: 'Panel',
+    back: 'Vissza',
+    continueToAiTools: 'Tovább az AI eszközökhöz',
+    mainMenu: 'Főmenü',
+    mainMenuDescription: 'Alapvető rendszerszekciók',
+    basicSections: 'Alapvető rendszerszekciók',
+    selectToolDescription:
+      'Válasszon eszközt, és megnyílik a modul munkafelülete.',
+    noAiTools: 'Az AI eszközök nem elérhetők.',
+    items: {
+      menu: 'Menü',
+      menuDescription: 'Kezdőképernyő',
+      profile: 'Profil',
+      profileDescription: 'Ügyfélfiók',
+      aiChat: 'AI Chat',
+      aiChatDescription: 'Önálló chat',
+      projects: 'Munkáim',
+      projectsDescription: 'Folyamatban lévő munkák listája',
+      sources: 'Források',
+      sourcesDescription: 'Irodalom és hivatkozások',
+      pricing: 'Csomagok',
+      pricingDescription: 'Előfizetések és kiegészítők',
+      history: 'Előzmények',
+      historyDescription: 'Kimenetek előzményei',
+      videos: 'Videó útmutatók',
+      videosDescription: 'Videó manuálok nyelv szerint',
+    },
   },
-  {
-    label: 'História',
-    description: 'História výstupov',
-    href: '/history',
-    icon: History,
-  },
-  {
-    label: 'Video návod',
-    description: 'Mobilné video návody',
-    href: '/videos',
-    icon: Video,
-  },
-];
+};
+
+function normalizeVideoLanguage(value: unknown): SupportedVideoLanguage {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
+
+  if (
+    normalized === 'sk' ||
+    normalized === 'slovak' ||
+    normalized === 'slovenčina' ||
+    normalized === 'slovencina'
+  ) {
+    return 'sk';
+  }
+
+  if (
+    normalized === 'cs' ||
+    normalized === 'cz' ||
+    normalized === 'czech' ||
+    normalized === 'čeština' ||
+    normalized === 'cestina'
+  ) {
+    return 'cs';
+  }
+
+  if (
+    normalized === 'en' ||
+    normalized === 'eng' ||
+    normalized === 'english' ||
+    normalized === 'angličtina' ||
+    normalized === 'anglictina'
+  ) {
+    return 'en';
+  }
+
+  if (
+    normalized === 'de' ||
+    normalized === 'ger' ||
+    normalized === 'german' ||
+    normalized === 'deutsch' ||
+    normalized === 'nemčina' ||
+    normalized === 'nemcina'
+  ) {
+    return 'de';
+  }
+
+  if (
+    normalized === 'pl' ||
+    normalized === 'polish' ||
+    normalized === 'polski' ||
+    normalized === 'poľština' ||
+    normalized === 'polstina'
+  ) {
+    return 'pl';
+  }
+
+  if (
+    normalized === 'hu' ||
+    normalized === 'hungarian' ||
+    normalized === 'magyar' ||
+    normalized === 'maďarčina' ||
+    normalized === 'madarcina'
+  ) {
+    return 'hu';
+  }
+
+  return 'sk';
+}
+
+function getStoredVideoLanguage(): SupportedVideoLanguage {
+  if (typeof window === 'undefined') return 'sk';
+
+  const htmlLanguage =
+    document.documentElement.getAttribute('data-language') ||
+    document.documentElement.getAttribute('data-system-language') ||
+    document.documentElement.getAttribute('lang') ||
+    '';
+
+  const storedLanguage =
+    localStorage.getItem('zedpera_language') ||
+    localStorage.getItem('zedpera_system_language') ||
+    localStorage.getItem('zedpera_selected_language') ||
+    localStorage.getItem('zedpera_interface_language') ||
+    localStorage.getItem('zedpera_work_language') ||
+    htmlLanguage ||
+    'sk';
+
+  return normalizeVideoLanguage(storedLanguage);
+}
+
+function persistVideoLanguage(language: SupportedVideoLanguage) {
+  if (typeof window === 'undefined') return;
+
+  localStorage.setItem('zedpera_language', language);
+  localStorage.setItem('zedpera_system_language', language);
+  localStorage.setItem('zedpera_selected_language', language);
+  localStorage.setItem('zedpera_interface_language', language);
+
+  document.documentElement.lang = language;
+  document.documentElement.setAttribute('data-language', language);
+  document.documentElement.setAttribute('data-system-language', language);
+}
+
+function createVideoManualsHref(language: SupportedVideoLanguage) {
+  return `/videos?lang=${language}`;
+}
+
+function createMobileMainMenuItems(copy: MobileMenuCopy, language: SupportedVideoLanguage) {
+  return [
+    {
+      label: copy.items.menu,
+      description: copy.items.menuDescription,
+      href: '/dashboard',
+      icon: Home,
+    },
+    {
+      label: copy.items.profile,
+      description: copy.items.profileDescription,
+      href: '/profile?tab=account',
+      icon: UserCircle,
+    },
+    {
+      label: copy.items.aiChat,
+      description: copy.items.aiChatDescription,
+      href: '/chat',
+      icon: Bot,
+    },
+    {
+      label: copy.items.projects,
+      description: copy.items.projectsDescription,
+      href: '/projects?view=list',
+      icon: BriefcaseBusiness,
+    },
+    {
+      label: copy.items.sources,
+      description: copy.items.sourcesDescription,
+      href: '/sources',
+      icon: BookOpen,
+    },
+    {
+      label: copy.items.pricing,
+      description: copy.items.pricingDescription,
+      href: '/pricing',
+      icon: CreditCard,
+    },
+    {
+      label: copy.items.history,
+      description: copy.items.historyDescription,
+      href: '/history',
+      icon: History,
+    },
+    {
+      label: copy.items.videos,
+      description: copy.items.videosDescription,
+      href: createVideoManualsHref(language),
+      icon: Video,
+      isVideoManual: true,
+    },
+  ];
+}
 
 function normalizeModuleLabel(label: string) {
   const value = String(label || '').trim();
@@ -236,6 +621,16 @@ export default function MobileDashboardNavigation({
   const [activeTab, setActiveTab] = useState<MobileDashboardTab>('main');
   const [selectedMobileModuleKey, setSelectedMobileModuleKey] =
     useState<string>(activeModule);
+  const [videoLanguage, setVideoLanguage] =
+    useState<SupportedVideoLanguage>('sk');
+
+  const copy = useMemo(() => {
+    return mobileCopyByLanguage[videoLanguage] || mobileCopyByLanguage.sk;
+  }, [videoLanguage]);
+
+  const mobileMainMenuItems = useMemo(() => {
+    return createMobileMainMenuItems(copy, videoLanguage);
+  }, [copy, videoLanguage]);
 
   const cleanActiveModuleLabel = useMemo(() => {
     if (activeModule === 'translation') {
@@ -281,6 +676,28 @@ export default function MobileDashboardNavigation({
   const selectedMobileModuleDescription = selectedMobileModule
     ? getModuleDescription(selectedMobileModule.key)
     : activeModuleSubtitle || 'AI nástroj';
+
+  useEffect(() => {
+    setVideoLanguage(getStoredVideoLanguage());
+
+    function syncLanguageFromStorage() {
+      setVideoLanguage(getStoredVideoLanguage());
+    }
+
+    window.addEventListener('storage', syncLanguageFromStorage);
+    window.addEventListener('zedpera-language-change', syncLanguageFromStorage);
+
+    const interval = window.setInterval(syncLanguageFromStorage, 700);
+
+    return () => {
+      window.removeEventListener('storage', syncLanguageFromStorage);
+      window.removeEventListener(
+        'zedpera-language-change',
+        syncLanguageFromStorage,
+      );
+      window.clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     if (activeModule) {
@@ -358,12 +775,22 @@ export default function MobileDashboardNavigation({
       localStorage.removeItem('zedpera_selected_project_identity');
     }
 
+    let nextPath = path;
+
+    if (typeof window !== 'undefined' && path.startsWith('/videos')) {
+      const currentLanguage = getStoredVideoLanguage();
+
+      persistVideoLanguage(currentLanguage);
+
+      nextPath = createVideoManualsHref(currentLanguage);
+    }
+
     if (onNavigate) {
-      onNavigate(path);
+      onNavigate(nextPath);
       return;
     }
 
-    window.location.href = path;
+    window.location.href = nextPath;
   }
 
   return (
@@ -576,7 +1003,7 @@ export default function MobileDashboardNavigation({
 
                 <div className="min-w-0">
                   <p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-300">
-                    Otvorený modul
+                    {copy.openedModule}
                   </p>
 
                   <h3 className="line-clamp-1 text-base font-black text-white">
@@ -595,7 +1022,7 @@ export default function MobileDashboardNavigation({
                 className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
-                AI nástroje
+                {copy.aiTools}
               </button>
             </div>
 
@@ -606,7 +1033,7 @@ export default function MobileDashboardNavigation({
                 className="flex min-h-[46px] items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-2 text-[10px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-[0.98]"
               >
                 <Menu className="h-3.5 w-3.5" />
-                Menu
+                {copy.menu}
               </button>
 
               <button
@@ -615,7 +1042,7 @@ export default function MobileDashboardNavigation({
                 className="flex min-h-[46px] items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-2 text-[10px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-[0.98]"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                AI nástroje
+                {copy.aiTools}
               </button>
 
               <button
@@ -624,7 +1051,7 @@ export default function MobileDashboardNavigation({
                 className="flex min-h-[46px] items-center justify-center gap-1 rounded-2xl bg-violet-600 px-2 py-2 text-[10px] font-black text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-500 active:scale-[0.98]"
               >
                 <PlayCircle className="h-3.5 w-3.5" />
-                Panel
+                {copy.panel}
               </button>
             </div>
           </div>
@@ -632,17 +1059,17 @@ export default function MobileDashboardNavigation({
           <div className="flex min-h-[calc(100dvh-2rem)] flex-col">
             <div className="mb-4">
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
-                Mobilná aplikácia
+                {copy.mobileApp}
               </p>
 
               <h2 className="mt-1 line-clamp-1 text-xl font-black leading-tight text-white">
-                {activeTab === 'main' ? 'Hlavné menu' : 'AI nástroje'}
+                {activeTab === 'main' ? copy.mainTitle : copy.aiTitle}
               </h2>
 
               <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-400">
                 {activeTab === 'main'
-                  ? 'Prvá stránka obsahuje iba hlavné menu systému.'
-                  : 'Druhá stránka obsahuje iba výber AI nástrojov.'}
+                  ? copy.mainDescription
+                  : copy.aiDescription}
               </p>
             </div>
 
@@ -680,7 +1107,7 @@ export default function MobileDashboardNavigation({
                 aria-pressed={activeTab === 'main'}
               >
                 <Menu className="h-4 w-4" />
-                Menu
+                {copy.menu}
               </button>
 
               <button
@@ -694,7 +1121,7 @@ export default function MobileDashboardNavigation({
                 aria-pressed={activeTab === 'ai'}
               >
                 <Sparkles className="h-4 w-4" />
-                AI nástroje
+                {copy.aiTools}
               </button>
 
               <button
@@ -707,7 +1134,7 @@ export default function MobileDashboardNavigation({
                 ) : (
                   <PlayCircle className="h-4 w-4" />
                 )}
-                Modul
+                {copy.module}
               </button>
             </div>
 
@@ -720,11 +1147,11 @@ export default function MobileDashboardNavigation({
 
                   <div className="min-w-0">
                     <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
-                      Hlavné menu
+                      {copy.mainMenu}
                     </p>
 
                     <p className="line-clamp-1 text-[11px] font-semibold text-slate-500">
-                      Základné sekcie systému
+                      {copy.basicSections}
                     </p>
                   </div>
                 </div>
@@ -766,7 +1193,7 @@ export default function MobileDashboardNavigation({
                   className="mt-3 flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-xs font-black text-white shadow-lg shadow-violet-950/40 transition hover:bg-violet-500 active:scale-[0.98]"
                 >
                   <Sparkles className="h-4 w-4" />
-                  Pokračovať na AI nástroje
+                  {copy.continueToAiTools}
                 </button>
               </div>
             ) : null}
@@ -781,11 +1208,11 @@ export default function MobileDashboardNavigation({
 
                     <div className="min-w-0">
                       <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-300">
-                        AI nástroje
+                        {copy.aiTools}
                       </p>
 
                       <p className="line-clamp-1 text-[11px] font-semibold text-slate-500">
-                        Vyberte nástroj a otvorí sa pracovná stránka modulu.
+                        {copy.selectToolDescription}
                       </p>
                     </div>
                   </div>
@@ -796,7 +1223,7 @@ export default function MobileDashboardNavigation({
                     className="inline-flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-black text-slate-200 transition hover:bg-white/[0.1] hover:text-white active:scale-95"
                   >
                     <ChevronLeft className="h-3.5 w-3.5" />
-                    Späť
+                    {copy.back}
                   </button>
                 </div>
 
@@ -856,7 +1283,7 @@ export default function MobileDashboardNavigation({
                 ) : (
                   <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-center">
                     <p className="text-xs font-bold text-slate-400">
-                      AI nástroje nie sú dostupné.
+                      {copy.noAiTools}
                     </p>
                   </div>
                 )}

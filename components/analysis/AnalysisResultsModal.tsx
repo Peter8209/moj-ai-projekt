@@ -2,14 +2,19 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  AlertTriangle,
   BarChart3,
+  Brain,
   ChevronRight,
   FileDown,
   FileSpreadsheet,
   FileText,
+  FlaskConical,
+  Info,
   Loader2,
   Maximize2,
   PieChart,
+  Sigma,
   Table2,
   X,
 } from 'lucide-react';
@@ -31,9 +36,13 @@ type TableSection = {
   title: string;
   description: string;
   rows: unknown[];
+  icon?: ReactNode;
 };
 
 const COLUMN_LABELS: Record<string, string> = {
+  id: 'ID',
+  scaleId: 'ID škály',
+  scaleName: 'Škála / subškála',
   name: 'Premenná',
   variable: 'Premenná',
   label: 'Názov',
@@ -43,29 +52,44 @@ const COLUMN_LABELS: Record<string, string> = {
   variableType: 'Typ premennej',
   measurementLevel: 'Úroveň merania',
   valid: 'N platných',
+  validRows: 'N platných riadkov',
   validValues: 'N platných',
   n: 'N',
+  nTotal: 'N spolu',
+  respondentCount: 'Počet respondentov',
   count: 'Počet',
   frequency: 'Počet',
   missing: 'Chýbajúce',
+  missingRows: 'Chýbajúce riadky',
   missingValues: 'Chýbajúce',
+  total: 'Spolu',
   mean: 'M',
   M: 'M',
   average: 'Priemer',
   median: 'Medián',
   Md: 'Medián',
+  mode: 'Modus',
   stdDeviation: 'SD',
   standardDeviation: 'SD',
   stdDev: 'SD',
   SD: 'SD',
   sd: 'SD',
+  variance: 'Variancia',
   minimum: 'Min',
   min: 'Min',
   maximum: 'Max',
   max: 'Max',
+  q1: 'Q1',
+  q3: 'Q3',
+  iqr: 'IQR',
   sum: 'Súčet',
+  scoring: 'Výpočet',
+  itemsUsed: 'Použité položky',
+  items: 'Položky',
   skewness: 'Šikmosť',
+  standardErrorSkewness: 'SE šikmosti',
   kurtosis: 'Špicatosť',
+  standardErrorKurtosis: 'SE špicatosti',
   distinctValues: 'Počet hodnôt',
   value: 'Hodnota',
   category: 'Kategória',
@@ -74,12 +98,15 @@ const COLUMN_LABELS: Record<string, string> = {
   validPercent: 'Validné percento',
   cumulativePercent: 'Kumulatívne percento',
   test: 'Test',
+  testType: 'Typ testu',
   hypothesis: 'Hypotéza',
   variables: 'Premenné',
   reason: 'Odôvodnenie',
   assumptions: 'Predpoklady',
   interpretation: 'Interpretácia',
   description: 'Popis',
+  variableA: 'Premenná 1',
+  variableB: 'Premenná 2',
   variable1: 'Premenná 1',
   variable2: 'Premenná 2',
   coefficient: 'Koeficient',
@@ -88,11 +115,18 @@ const COLUMN_LABELS: Record<string, string> = {
   pValue: 'p',
   p: 'p',
   df: 'df',
+  statistic: 'Štatistika',
+  significance: 'Významnosť',
   strength: 'Sila vzťahu',
   direction: 'Smer vzťahu',
   significant: 'Signifikantné',
+  method: 'Metóda',
+  fisherZ: 'Fisherovo z',
+  standardError: 'SE',
   dependentVariable: 'Závislá premenná',
   independentVariable: 'Nezávislá premenná',
+  groupVariable: 'Skupinová premenná',
+  groups: 'Skupiny',
   group1: 'Skupina 1',
   group2: 'Skupina 2',
   mean1: 'M1',
@@ -101,9 +135,13 @@ const COLUMN_LABELS: Record<string, string> = {
   sd2: 'SD2',
   n1: 'n1',
   n2: 'n2',
-  statistic: 'Štatistika',
   t: 't',
   meanDifference: 'Rozdiel priemerov',
+  isNormal: 'Normalita',
+  recommendation: 'Odporúčanie',
+  note: 'Poznámka',
+  cronbachAlpha: 'Cronbach alfa',
+  alpha: 'Alfa',
   sheetName: 'Hárok',
   headers: 'Hlavičky',
   rows: 'Riadky',
@@ -111,37 +149,51 @@ const COLUMN_LABELS: Record<string, string> = {
   fileName: 'Súbor',
   extension: 'Prípona',
   size: 'Veľkosť',
-  method: 'Metóda',
   warnings: 'Upozornenia',
 };
 
 const COLUMN_PRIORITY = [
-  'name',
+  'scaleName',
   'variable',
+  'name',
   'label',
   'title',
   'type',
   'variableType',
   'measurementLevel',
   'valid',
+  'validRows',
   'validValues',
   'n',
+  'nTotal',
   'missing',
+  'missingRows',
   'missingValues',
+  'total',
   'mean',
   'M',
   'median',
   'Md',
+  'mode',
   'stdDeviation',
   'standardDeviation',
   'SD',
+  'variance',
   'minimum',
   'min',
   'maximum',
   'max',
+  'q1',
+  'q3',
+  'iqr',
   'sum',
+  'scoring',
+  'itemsUsed',
+  'items',
   'skewness',
+  'standardErrorSkewness',
   'kurtosis',
+  'standardErrorKurtosis',
   'distinctValues',
   'value',
   'category',
@@ -151,21 +203,36 @@ const COLUMN_PRIORITY = [
   'percentage',
   'validPercent',
   'cumulativePercent',
+  'method',
+  'statistic',
+  'pValue',
+  'p',
+  'isNormal',
+  'recommendation',
+  'note',
+  'cronbachAlpha',
+  'interpretation',
   'test',
+  'testType',
   'hypothesis',
   'variables',
+  'variableA',
+  'variableB',
   'variable1',
   'variable2',
   'coefficient',
   'r',
   'rho',
-  'pValue',
-  'p',
   'df',
+  'significance',
+  'fisherZ',
+  'standardError',
   'strength',
   'direction',
   'dependentVariable',
   'independentVariable',
+  'groupVariable',
+  'groups',
   'group1',
   'group2',
   'mean1',
@@ -177,7 +244,6 @@ const COLUMN_PRIORITY = [
   't',
   'reason',
   'description',
-  'interpretation',
 ];
 
 function safeArray<T = unknown>(value: unknown): T[] {
@@ -289,55 +355,250 @@ function getColumns(rows: DataRow[]) {
   return [...priorityColumns, ...restColumns];
 }
 
+function getNestedArray<T = unknown>(raw: any, path: string): T[] {
+  const parts = path.split('.');
+  let current = raw;
+
+  for (const part of parts) {
+    current = current?.[part];
+  }
+
+  return safeArray<T>(current);
+}
+
 function getSummaryLines(result: AnalysisResult | null) {
-  const summary = String((result as any)?.summary || '').trim();
+  const raw = (result || {}) as any;
 
-  if (!summary) return [];
+  const summary = String(raw.summary || '').trim();
 
-  return summary
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const aiRecommendation = safeArray<string>(
+    raw.aiRecommendation || raw.statisticalAnalysis?.aiRecommendation,
+  );
+
+  const meta = raw.meta || raw.statisticalAnalysis?.meta;
+
+  const generatedLines: string[] = [];
+
+  if (isRecord(meta)) {
+    const respondentCount = meta.respondentCount;
+    const idColumn = meta.idColumn;
+
+    if (respondentCount) {
+      generatedLines.push(`Počet respondentov: N = ${respondentCount}.`);
+    }
+
+    if (idColumn) {
+      generatedLines.push(
+        `Stĺpec "${idColumn}" bol rozpoznaný ako ID a nebol použitý v štatistických výpočtoch.`,
+      );
+    }
+  }
+
+  return [
+    ...generatedLines,
+    ...summary
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean),
+    ...aiRecommendation,
+  ].filter(Boolean);
+}
+
+function normalizeFrequencyTables(frequencies: unknown[]): unknown[] {
+  const rows: unknown[] = [];
+
+  frequencies.forEach((table) => {
+    if (!isRecord(table)) {
+      rows.push(table);
+      return;
+    }
+
+    const values = safeArray(table.values || table.rows || table.data || table.items);
+
+    if (values.length === 0) {
+      rows.push(table);
+      return;
+    }
+
+    values.forEach((item) => {
+      if (isRecord(item)) {
+        rows.push({
+          variable: table.variable || table.name || table.title,
+          valid: table.valid,
+          missing: table.missing,
+          total: table.total,
+          ...item,
+        });
+      }
+    });
+  });
+
+  return rows;
+}
+
+function normalizeCorrelations(correlations: unknown[]): unknown[] {
+  return correlations.map((item) => {
+    if (!isRecord(item)) return item;
+
+    return {
+      ...item,
+      variable1: item.variable1 ?? item.variableA,
+      variable2: item.variable2 ?? item.variableB,
+      coefficient: item.coefficient ?? item.r ?? item.rho,
+      p: item.p ?? item.pValue,
+    };
+  });
 }
 
 function getResultArrays(result: AnalysisResult | null) {
   const raw = (result || {}) as any;
+  const statistical = raw.statisticalAnalysis || raw.stats || raw.analysisStats || raw;
+
+  const frequencies = safeArray<any>(
+    statistical.frequencies ||
+      raw.frequencies ||
+      raw.frequencyTables ||
+      raw.frequency_tables,
+  );
+
+  const itemDescriptives = safeArray<any>(
+    statistical.itemDescriptives ||
+      raw.itemDescriptives ||
+      raw.descriptiveStatistics ||
+      raw.descriptive_statistics ||
+      raw.statistics,
+  );
+
+  const scaleDescriptives = safeArray<any>(
+    statistical.scaleDescriptives ||
+      raw.scaleDescriptives ||
+      raw.scale_descriptives ||
+      raw.scalesDescriptiveStatistics,
+  );
+
+  const scaleScores = safeArray<any>(
+    statistical.scaleScores || raw.scaleScores || raw.scales,
+  );
+
+  const normality = safeArray<any>(statistical.normality || raw.normality);
+
+  const pearsonCorrelations = safeArray<any>(
+    statistical.correlations?.pearson ||
+      raw.pearsonCorrelations ||
+      raw.pearson_correlations,
+  );
+
+  const spearmanCorrelations = safeArray<any>(
+    statistical.correlations?.spearman ||
+      raw.spearmanCorrelations ||
+      raw.spearman_correlations,
+  );
+
+  const recommendedCorrelations = safeArray<any>(
+    statistical.correlations?.recommended || raw.recommendedCorrelations,
+  );
+
+  const reliability = safeArray<any>(
+    statistical.reliability || raw.reliability || raw.cronbachAlpha,
+  );
+
+  const parametricGroupTests = safeArray<any>(
+    statistical.groupTests?.parametric ||
+      raw.parametricGroupTests ||
+      raw.parametricTests,
+  );
+
+  const nonParametricGroupTests = safeArray<any>(
+    statistical.groupTests?.nonParametric ||
+      raw.nonParametricGroupTests ||
+      raw.nonParametricTests,
+  );
+
+  const recommendedGroupTests = safeArray<any>(
+    statistical.groupTests?.recommended ||
+      raw.recommendedGroupTests ||
+      raw.recommendedTests ||
+      raw.recommended_tests ||
+      raw.tests,
+  );
+
+  const oldTTests = safeArray<any>(raw.tTests || raw.t_tests);
+  const oldHypothesisTests = safeArray<any>(
+    raw.hypothesisTests || raw.hypothesis_tests || raw.testResults,
+  );
+
+  const files = safeArray<any>(raw.files || raw.extractedFiles || raw.attachments);
+
+  const variables = safeArray<any>(
+    raw.variables || raw.detectedVariables || raw.columns,
+  );
+
+  const selectedAnalyses = safeArray<any>(
+    raw.selectedAnalyses || raw.selected_analyses,
+  );
+
+  const recommendedCharts = safeArray<any>(
+    raw.recommendedCharts || raw.recommended_charts || raw.charts,
+  );
+
+  const excelTables = safeArray<any>(
+    raw.excelTables || raw.excel_tables || raw.tables,
+  );
+
+  const warnings = safeArray<string>(raw.warnings || statistical.warnings);
+
+  const aiRecommendation = safeArray<string>(
+    statistical.aiRecommendation || raw.aiRecommendation,
+  );
 
   return {
-    warnings: safeArray<string>(raw.warnings),
-    files: safeArray<any>(raw.files || raw.extractedFiles || raw.attachments),
-    variables: safeArray<any>(
-      raw.variables || raw.detectedVariables || raw.columns,
-    ),
-    descriptiveStatistics: safeArray<any>(
-      raw.descriptiveStatistics ||
-        raw.descriptive_statistics ||
-        raw.statistics,
-    ),
-    frequencies: safeArray<any>(
-      raw.frequencies || raw.frequencyTables || raw.frequency_tables,
-    ),
-    correlations: safeArray<any>(
-      raw.correlations || raw.pearsonCorrelations || raw.spearmanCorrelations,
-    ),
-    pearsonCorrelations: safeArray<any>(raw.pearsonCorrelations),
-    spearmanCorrelations: safeArray<any>(raw.spearmanCorrelations),
-    tTests: safeArray<any>(raw.tTests || raw.t_tests),
-    hypothesisTests: safeArray<any>(
-      raw.hypothesisTests || raw.hypothesis_tests || raw.testResults,
-    ),
-    recommendedTests: safeArray<any>(
-      raw.recommendedTests || raw.recommended_tests || raw.tests,
-    ),
-    recommendedCharts: safeArray<any>(
-      raw.recommendedCharts || raw.recommended_charts || raw.charts,
-    ),
-    excelTables: safeArray<any>(
-      raw.excelTables || raw.excel_tables || raw.tables,
-    ),
-    selectedAnalyses: safeArray<any>(
-      raw.selectedAnalyses || raw.selected_analyses,
-    ),
+    meta: statistical.meta || raw.meta || null,
+    warnings,
+    files,
+    variables,
+    selectedAnalyses,
+
+    frequencies,
+    frequencyRows: normalizeFrequencyTables(frequencies),
+
+    itemDescriptives,
+    scaleScores,
+    scaleDescriptives,
+    normality,
+
+    correlations: normalizeCorrelations([
+      ...pearsonCorrelations,
+      ...spearmanCorrelations,
+    ]),
+    pearsonCorrelations: normalizeCorrelations(pearsonCorrelations),
+    spearmanCorrelations: normalizeCorrelations(spearmanCorrelations),
+    recommendedCorrelations: normalizeCorrelations(recommendedCorrelations),
+
+    reliability,
+
+    parametricGroupTests,
+    nonParametricGroupTests,
+    recommendedGroupTests,
+
+    tTests: oldTTests,
+    hypothesisTests: oldHypothesisTests,
+
+    recommendedTests: [
+      ...recommendedGroupTests,
+      ...safeArray<any>(raw.recommendedTests || raw.recommended_tests),
+    ],
+
+    recommendedCharts,
+    excelTables,
+    aiRecommendation,
+    correlationRecommendationNote:
+      statistical.correlations?.recommendationNote ||
+      raw.correlationRecommendationNote ||
+      '',
+    groupTestsRecommendationNote:
+      statistical.groupTests?.recommendationNote ||
+      raw.groupTestsRecommendationNote ||
+      '',
   };
 }
 
@@ -349,7 +610,9 @@ function getFrequencyRows(table: unknown): DataRow[] {
       ? safeArray(table.rows)
       : safeArray(table.data).length > 0
         ? safeArray(table.data)
-        : safeArray(table.items);
+        : safeArray(table.items).length > 0
+          ? safeArray(table.items)
+          : safeArray(table.values);
 
   return normalizeRows(rows);
 }
@@ -363,67 +626,134 @@ function createTableSections(result: AnalysisResult | null): TableSection[] {
       title: 'Spracované súbory',
       description: 'Prehľad súborov použitých pri analýze.',
       rows: arrays.files,
+      icon: <FileText className="h-5 w-5" />,
     },
     {
       key: 'variables',
       title: 'Identifikované premenné',
       description: 'Premenné rozpoznané zo súboru alebo vložených dát.',
       rows: arrays.variables,
-    },
-    {
-      key: 'descriptiveStatistics',
-      title: 'Deskriptívna štatistika',
-      description: 'N, M, medián, SD, minimum, maximum, šikmosť a špicatosť.',
-      rows: arrays.descriptiveStatistics,
+      icon: <Table2 className="h-5 w-5" />,
     },
     {
       key: 'frequencies',
-      title: 'Frekvenčné tabuľky',
+      title: 'Frekvenčná analýza',
       description:
-        'Početnosti, percentá, validné percentá a kumulatívne percentá.',
-      rows: arrays.frequencies,
+        'Početnosti, percentá, validné percentá a kumulatívne percentá po jednotlivých položkách.',
+      rows: arrays.frequencyRows.length > 0 ? arrays.frequencyRows : arrays.frequencies,
+      icon: <BarChart3 className="h-5 w-5" />,
+    },
+    {
+      key: 'itemDescriptives',
+      title: 'Deskriptívna štatistika položiek',
+      description:
+        'Deskriptívna štatistika po jednotlivých položkách – vhodná skôr na kontrolu dát.',
+      rows: arrays.itemDescriptives,
+      icon: <Sigma className="h-5 w-5" />,
+    },
+    {
+      key: 'scaleScores',
+      title: 'Vypočítané škály a subškály',
+      description:
+        'Súčty alebo priemery položiek podľa definovaných škál a subškál dotazníka.',
+      rows: arrays.scaleScores,
+      icon: <Brain className="h-5 w-5" />,
+    },
+    {
+      key: 'scaleDescriptives',
+      title: 'Deskriptívna štatistika škál a subškál',
+      description:
+        'Hlavná deskriptívna štatistika vhodná do práce – N, M, medián, SD, min, max, šikmosť, špicatosť.',
+      rows: arrays.scaleDescriptives,
+      icon: <Sigma className="h-5 w-5" />,
+    },
+    {
+      key: 'normality',
+      title: 'Normalita dát',
+      description:
+        'Posúdenie normality škál a subškál a odporúčanie parametrických alebo neparametrických testov.',
+      rows: arrays.normality,
+      icon: <FlaskConical className="h-5 w-5" />,
     },
     {
       key: 'pearsonCorrelations',
       title: 'Pearsonove korelácie',
-      description: 'Lineárne vzťahy medzi numerickými premennými.',
+      description: 'Parametrické korelácie medzi škálami a subškálami.',
       rows: arrays.pearsonCorrelations,
+      icon: <Sigma className="h-5 w-5" />,
     },
     {
       key: 'spearmanCorrelations',
       title: 'Spearmanove korelácie',
-      description: 'Poradové alebo monotónne vzťahy medzi premennými.',
+      description: 'Neparametrické korelácie medzi škálami a subškálami.',
       rows: arrays.spearmanCorrelations,
+      icon: <Sigma className="h-5 w-5" />,
+    },
+    {
+      key: 'recommendedCorrelations',
+      title: 'Odporúčaná korelačná analýza',
+      description:
+        'Korelácie odporúčané podľa normality dát – Pearson alebo Spearman.',
+      rows: arrays.recommendedCorrelations,
+      icon: <Brain className="h-5 w-5" />,
+    },
+    {
+      key: 'reliability',
+      title: 'Reliabilita – Cronbach alfa',
+      description:
+        'Vnútorná konzistencia škál a subškál štandardizovaného dotazníka.',
+      rows: arrays.reliability,
+      icon: <FlaskConical className="h-5 w-5" />,
+    },
+    {
+      key: 'parametricGroupTests',
+      title: 'Parametrické testy',
+      description: 'Independent t-test a ANOVA pre porovnanie rozdielov medzi skupinami.',
+      rows: arrays.parametricGroupTests,
+      icon: <Sigma className="h-5 w-5" />,
+    },
+    {
+      key: 'nonParametricGroupTests',
+      title: 'Neparametrické testy',
+      description: 'Mann-Whitney U test a Kruskal-Wallis test pre porovnanie skupín.',
+      rows: arrays.nonParametricGroupTests,
+      icon: <Sigma className="h-5 w-5" />,
+    },
+    {
+      key: 'recommendedGroupTests',
+      title: 'Odporúčané testovanie rozdielov',
+      description:
+        'Testy odporúčané podľa normality dát a počtu skupín.',
+      rows: arrays.recommendedGroupTests,
+      icon: <Brain className="h-5 w-5" />,
     },
     {
       key: 'tTests',
       title: 'T-testy',
-      description: 'Porovnanie dvoch skupín pri numerických premenných.',
+      description: 'Starší formát výsledkov t-testov, ak bol v odpovedi dostupný.',
       rows: arrays.tTests,
+      icon: <Sigma className="h-5 w-5" />,
     },
     {
       key: 'hypothesisTests',
       title: 'Výsledky testovania hypotéz',
       description: 'Súhrn vykonaných alebo odporúčaných testov.',
       rows: arrays.hypothesisTests,
-    },
-    {
-      key: 'recommendedTests',
-      title: 'Odporúčané štatistické testy',
-      description: 'Testy odporúčané podľa typu premenných.',
-      rows: arrays.recommendedTests,
+      icon: <FlaskConical className="h-5 w-5" />,
     },
     {
       key: 'recommendedCharts',
       title: 'Odporúčané grafy',
       description: 'Grafy vhodné pre praktickú časť práce.',
       rows: arrays.recommendedCharts,
+      icon: <PieChart className="h-5 w-5" />,
     },
     {
       key: 'excelTables',
       title: 'Odporúčané tabuľky do práce',
       description: 'Tabuľky vhodné do Excelu, Wordu alebo prílohy práce.',
       rows: arrays.excelTables,
+      icon: <FileSpreadsheet className="h-5 w-5" />,
     },
   ];
 
@@ -450,7 +780,15 @@ function getFileName(format: ExportFormat) {
   return 'vysledky-analyzy-dat.pdf';
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function StatCard({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: number | string;
+  note?: string;
+}) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-white/10 dark:bg-white/[0.05]">
       <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
@@ -459,6 +797,11 @@ function StatCard({ label, value }: { label: string; value: number }) {
       <p className="mt-1 text-2xl font-black text-slate-950 dark:text-white">
         {value}
       </p>
+      {note ? (
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          {note}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -629,13 +972,19 @@ function ChartGallery({ result }: { result: AnalysisResult | null }) {
       : `Premenná ${index + 1}`;
 
     if (rows.length > 0) {
+      const valueKey = rows.some((row) => row.frequency !== undefined)
+        ? 'frequency'
+        : rows.some((row) => row.count !== undefined)
+          ? 'count'
+          : 'valid';
+
       charts.push(
         <BarChart
           key={`freq-bar-${index}`}
           title={`Frekvencia – ${variable}`}
           data={rows}
           labelKey="value"
-          valueKey="frequency"
+          valueKey={valueKey}
         />,
       );
 
@@ -645,32 +994,49 @@ function ChartGallery({ result }: { result: AnalysisResult | null }) {
           title={`Podiely – ${variable}`}
           data={rows}
           labelKey="value"
-          valueKey="frequency"
+          valueKey={valueKey}
         />,
       );
     }
   });
 
-  const descriptiveRows = normalizeRows(arrays.descriptiveStatistics).filter(
-    (row) => toNumber(row.M ?? row.mean) !== null,
+  const scaleDescriptiveRows = normalizeRows(arrays.scaleDescriptives).filter(
+    (row) => toNumber(row.mean ?? row.M) !== null,
   );
 
-  if (descriptiveRows.length > 0) {
+  if (scaleDescriptiveRows.length > 0) {
     charts.push(
       <BarChart
-        key="descriptive-means"
-        title="Porovnanie priemerov M"
-        data={descriptiveRows}
+        key="scale-descriptive-means"
+        title="Porovnanie priemerov škál a subškál"
+        data={scaleDescriptiveRows}
         labelKey="variable"
-        valueKey="M"
+        valueKey={scaleDescriptiveRows.some((row) => row.mean !== undefined) ? 'mean' : 'M'}
+      />,
+    );
+  }
+
+  const itemDescriptiveRows = normalizeRows(arrays.itemDescriptives).filter(
+    (row) => toNumber(row.mean ?? row.M) !== null,
+  );
+
+  if (scaleDescriptiveRows.length === 0 && itemDescriptiveRows.length > 0) {
+    charts.push(
+      <BarChart
+        key="item-descriptive-means"
+        title="Porovnanie priemerov položiek"
+        data={itemDescriptiveRows}
+        labelKey="variable"
+        valueKey={itemDescriptiveRows.some((row) => row.mean !== undefined) ? 'mean' : 'M'}
       />,
     );
   }
 
   const correlationRows = normalizeRows([
+    ...arrays.recommendedCorrelations,
     ...arrays.pearsonCorrelations,
     ...arrays.spearmanCorrelations,
-  ]).filter((row) => toNumber(row.coefficient) !== null);
+  ]).filter((row) => toNumber(row.coefficient ?? row.r ?? row.rho) !== null);
 
   if (correlationRows.length > 0) {
     charts.push(
@@ -679,13 +1045,31 @@ function ChartGallery({ result }: { result: AnalysisResult | null }) {
         title="Korelačné koeficienty"
         data={correlationRows.map((row) => ({
           ...row,
-          label: `${valueToText(row.variable1)} × ${valueToText(
-            row.variable2,
+          label: `${valueToText(row.variable1 ?? row.variableA)} × ${valueToText(
+            row.variable2 ?? row.variableB,
           )}`,
-          absoluteCoefficient: Math.abs(toNumber(row.coefficient) || 0),
+          absoluteCoefficient: Math.abs(
+            toNumber(row.coefficient ?? row.r ?? row.rho) || 0,
+          ),
         }))}
         labelKey="label"
         valueKey="absoluteCoefficient"
+      />,
+    );
+  }
+
+  const reliabilityRows = normalizeRows(arrays.reliability).filter(
+    (row) => toNumber(row.cronbachAlpha) !== null,
+  );
+
+  if (reliabilityRows.length > 0) {
+    charts.push(
+      <BarChart
+        key="cronbach-alpha"
+        title="Reliabilita škál – Cronbach alfa"
+        data={reliabilityRows}
+        labelKey="scaleName"
+        valueKey="cronbachAlpha"
       />,
     );
   }
@@ -764,7 +1148,7 @@ export default function AnalysisResultsModal({
         },
         body: JSON.stringify({
           format,
-          title: result.title || 'Výsledky analýzy dát',
+          title: (result as any).title || 'Výsledky analýzy dát',
           result,
         }),
       });
@@ -797,6 +1181,19 @@ export default function AnalysisResultsModal({
         (result as any).fullText ||
         '',
     ).trim() || 'Interpretácia nebola dostupná.';
+
+  const meta = arrays.meta as any;
+
+  const respondentCount =
+    Number(meta?.respondentCount || meta?.n || meta?.totalRows || 0) || 0;
+
+  const idColumn = String(meta?.idColumn || '').trim();
+
+  const testsCount =
+    arrays.recommendedGroupTests.length ||
+    arrays.parametricGroupTests.length + arrays.nonParametricGroupTests.length ||
+    arrays.hypothesisTests.length ||
+    arrays.tTests.length;
 
   const scrollTo = (target: HTMLDivElement | null) => {
     target?.scrollIntoView({
@@ -872,13 +1269,14 @@ export default function AnalysisResultsModal({
                 </p>
 
                 <h2 className="mt-1 text-xl font-black text-slate-950 dark:text-white sm:text-2xl">
-                  {result.title || 'Výsledky analýzy dát'}
+                  {(result as any).title || 'Výsledky analýzy dát'}
                 </h2>
 
                 <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-                  Výsledky sú rozdelené do samostatných sekcií. Tabuľky sú
-                  klikateľné, grafy sa vykresľujú automaticky a export vytvorí
-                  samostatný súbor Word, Excel alebo PDF.
+                  Výsledky sú rozdelené na frekvencie, deskriptívnu štatistiku
+                  položiek, škály a subškály, normalitu, korelácie, reliabilitu
+                  a testovanie rozdielov medzi skupinami. ID stĺpec je
+                  ignorovaný vo výpočtoch a slúži iba na počet respondentov.
                 </p>
               </div>
             </div>
@@ -937,19 +1335,49 @@ export default function AnalysisResultsModal({
             </div>
           </div>
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            <StatCard
+              label="Respondenti"
+              value={respondentCount || '—'}
+              note={idColumn ? `ID: ${idColumn}` : 'ID nebolo zadané'}
+            />
             <StatCard label="Premenné" value={arrays.variables.length} />
-            <StatCard
-              label="Deskriptíva"
-              value={arrays.descriptiveStatistics.length}
-            />
             <StatCard label="Frekvencie" value={arrays.frequencies.length} />
+            <StatCard label="Škály" value={arrays.scaleScores.length} />
             <StatCard
-              label="Testy"
-              value={arrays.hypothesisTests.length || arrays.tTests.length}
+              label="Korelácie"
+              value={
+                arrays.recommendedCorrelations.length ||
+                arrays.pearsonCorrelations.length + arrays.spearmanCorrelations.length
+              }
             />
-            <StatCard label="Tabuľky" value={tableSections.length} />
+            <StatCard label="Testy" value={testsCount} />
           </div>
+
+          {arrays.correlationRecommendationNote ||
+          arrays.groupTestsRecommendationNote ||
+          arrays.aiRecommendation.length > 0 ? (
+            <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-900 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-100">
+              <div className="mb-2 flex items-center gap-2 font-black">
+                <Brain className="h-4 w-4" />
+                AI odporúčanie pre interpretáciu
+              </div>
+
+              <div className="space-y-1">
+                {arrays.correlationRecommendationNote ? (
+                  <p>• {arrays.correlationRecommendationNote}</p>
+                ) : null}
+
+                {arrays.groupTestsRecommendationNote ? (
+                  <p>• {arrays.groupTestsRecommendationNote}</p>
+                ) : null}
+
+                {arrays.aiRecommendation.map((item, index) => (
+                  <p key={`${item}-${index}`}>• {item}</p>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-5 flex gap-2 overflow-x-auto pb-1">
             <button
@@ -990,7 +1418,8 @@ export default function AnalysisResultsModal({
           <div ref={overviewRef} className="scroll-mt-6">
             <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
               <section className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/[0.04]">
-                <h3 className="mb-3 text-lg font-black text-slate-950 dark:text-white">
+                <h3 className="mb-3 flex items-center gap-2 text-lg font-black text-slate-950 dark:text-white">
+                  <Info className="h-5 w-5 text-blue-600 dark:text-blue-300" />
                   Súhrn analýzy
                 </h3>
 
@@ -1008,7 +1437,10 @@ export default function AnalysisResultsModal({
 
                 {arrays.warnings.length > 0 ? (
                   <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-100">
-                    <div className="mb-2 font-black">Upozornenia</div>
+                    <div className="mb-2 flex items-center gap-2 font-black">
+                      <AlertTriangle className="h-4 w-4" />
+                      Upozornenia
+                    </div>
                     <ul className="space-y-1">
                       {arrays.warnings.map((item, index) => (
                         <li key={`${String(item)}-${index}`}>
@@ -1021,7 +1453,8 @@ export default function AnalysisResultsModal({
               </section>
 
               <section className="rounded-[28px] border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-white/[0.04]">
-                <h3 className="mb-3 text-lg font-black text-slate-950 dark:text-white">
+                <h3 className="mb-3 flex items-center gap-2 text-lg font-black text-slate-950 dark:text-white">
+                  <Table2 className="h-5 w-5 text-emerald-600 dark:text-emerald-300" />
                   Prehľad tabuliek
                 </h3>
 
@@ -1036,6 +1469,9 @@ export default function AnalysisResultsModal({
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
+                            <div className="mb-2 text-blue-700 dark:text-blue-300">
+                              {section.icon}
+                            </div>
                             <p className="font-black text-slate-950 dark:text-white">
                               {section.title}
                             </p>
@@ -1072,7 +1508,7 @@ export default function AnalysisResultsModal({
                 </h3>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
                   Grafy sa vytvárajú automaticky z frekvencií, deskriptívnych
-                  štatistík a korelácií.
+                  štatistík škál, korelácií a reliability.
                 </p>
               </div>
             </div>
@@ -1130,14 +1566,14 @@ export default function AnalysisResultsModal({
         <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-4 dark:border-white/10 dark:bg-slate-950/70 sm:flex sm:items-center sm:justify-between sm:px-7">
           <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
             Výsledky sú orientačné. Pred finálnou interpretáciou odporúčame
-            overiť typ premenných, metodiku práce, normalitu rozdelenia a
-            požiadavky školy.
+            overiť typ premenných, metodiku práce, normalitu rozdelenia,
+            reliabilitu škál a požiadavky školy.
           </p>
 
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex justify-center rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-black text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+            className="mt-3 inline-flex justify-center rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-black text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200 sm:mt-0"
           >
             Zavrieť výsledky
           </button>
@@ -1173,6 +1609,9 @@ function TableCard({
     >
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
+          <div className="mb-2 text-blue-700 dark:text-blue-300">
+            {section.icon}
+          </div>
           <h4 className="text-base font-black text-slate-950 dark:text-white">
             {section.title}
           </h4>
@@ -1302,6 +1741,12 @@ function TableDetailModal({
                 ))}
               </tbody>
             </table>
+
+            {rows.length === 0 ? (
+              <div className="p-6 text-sm text-slate-500 dark:text-slate-400">
+                Tabuľka neobsahuje žiadne riadky.
+              </div>
+            ) : null}
           </div>
         </div>
 

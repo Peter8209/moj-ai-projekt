@@ -121,7 +121,6 @@ const mobileCopyByLanguage: Record<SupportedVideoLanguage, MobileMenuCopy> = {
       videosDescription: 'Video manuály podľa jazyka',
     },
   },
-
   cs: {
     mainTitle: 'Hlavní menu',
     mainDescription: 'První stránka obsahuje pouze hlavní menu systému.',
@@ -160,7 +159,6 @@ const mobileCopyByLanguage: Record<SupportedVideoLanguage, MobileMenuCopy> = {
       videosDescription: 'Video manuály podle jazyka',
     },
   },
-
   en: {
     mainTitle: 'Main menu',
     mainDescription: 'The first page contains only the main system menu.',
@@ -199,7 +197,6 @@ const mobileCopyByLanguage: Record<SupportedVideoLanguage, MobileMenuCopy> = {
       videosDescription: 'Video manuals by language',
     },
   },
-
   de: {
     mainTitle: 'Hauptmenü',
     mainDescription: 'Die erste Seite enthält nur das Hauptmenü des Systems.',
@@ -238,7 +235,6 @@ const mobileCopyByLanguage: Record<SupportedVideoLanguage, MobileMenuCopy> = {
       videosDescription: 'Videomanuale nach Sprache',
     },
   },
-
   pl: {
     mainTitle: 'Menu główne',
     mainDescription: 'Pierwsza strona zawiera tylko główne menu systemu.',
@@ -277,7 +273,6 @@ const mobileCopyByLanguage: Record<SupportedVideoLanguage, MobileMenuCopy> = {
       videosDescription: 'Wideo instrukcje według języka',
     },
   },
-
   hu: {
     mainTitle: 'Főmenü',
     mainDescription: 'Az első oldal csak a rendszer főmenüjét tartalmazza.',
@@ -319,9 +314,7 @@ const mobileCopyByLanguage: Record<SupportedVideoLanguage, MobileMenuCopy> = {
 };
 
 function normalizeVideoLanguage(value: unknown): SupportedVideoLanguage {
-  const normalized = String(value || '')
-    .trim()
-    .toLowerCase();
+  const normalized = String(value || '').trim().toLowerCase();
 
   if (
     normalized === 'sk' ||
@@ -424,7 +417,10 @@ function createVideoManualsHref(language: SupportedVideoLanguage) {
   return `/videos?lang=${language}`;
 }
 
-function createMobileMainMenuItems(copy: MobileMenuCopy, language: SupportedVideoLanguage) {
+function createMobileMainMenuItems(
+  copy: MobileMenuCopy,
+  language: SupportedVideoLanguage,
+) {
   return [
     {
       label: copy.items.menu,
@@ -718,14 +714,25 @@ export default function MobileDashboardNavigation({
       activeTab,
     );
 
+    if (activeModule) {
+      document.documentElement.setAttribute(
+        'data-zedpera-active-module',
+        activeModule,
+      );
+
+      document.body.setAttribute('data-zedpera-active-module', activeModule);
+    }
+
     return () => {
       document.documentElement.removeAttribute(
         'data-zedpera-mobile-dashboard-tab',
       );
 
       document.body.removeAttribute('data-zedpera-mobile-dashboard-tab');
+      document.documentElement.removeAttribute('data-zedpera-active-module');
+      document.body.removeAttribute('data-zedpera-active-module');
     };
-  }, [activeTab]);
+  }, [activeTab, activeModule]);
 
   function scrollToDashboardToolPanel() {
     window.setTimeout(() => {
@@ -800,13 +807,17 @@ export default function MobileDashboardNavigation({
           html,
           body {
             min-height: 100%;
+            width: 100%;
             overflow-x: hidden !important;
+            background: #020617 !important;
           }
 
           html[data-zedpera-mobile-dashboard-tab='main'],
           body[data-zedpera-mobile-dashboard-tab='main'],
           html[data-zedpera-mobile-dashboard-tab='ai'],
-          body[data-zedpera-mobile-dashboard-tab='ai'] {
+          body[data-zedpera-mobile-dashboard-tab='ai'],
+          html[data-zedpera-mobile-dashboard-tab='module'],
+          body[data-zedpera-mobile-dashboard-tab='module'] {
             background: #020617 !important;
           }
 
@@ -842,10 +853,16 @@ export default function MobileDashboardNavigation({
             opacity: 1 !important;
             pointer-events: auto !important;
             width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
             height: auto !important;
             min-height: auto !important;
             max-height: none !important;
             overflow: visible !important;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
           }
 
           html[data-zedpera-mobile-dashboard-tab='module']
@@ -862,16 +879,88 @@ export default function MobileDashboardNavigation({
           html[data-zedpera-mobile-dashboard-tab='module']
             [data-dashboard-tool-panel='true']
             * {
+            box-sizing: border-box !important;
+            min-width: 0 !important;
             max-width: 100% !important;
           }
 
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-zedpera-active-module='data']
+            #dashboard-tool-panel,
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel,
+          body[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel {
+            width: 100% !important;
+            max-width: 100% !important;
+            overflow: visible !important;
+          }
+
           /*
-            Analýza dát - mobilný fix podľa kontroly z prílohy.
-            1) Výsledky analýzy sa v mobile nesmú orezať na malú výšku.
-            2) Statické výsledky nechávame celé v stránke a roluje sa celá stránka.
-            3) Tabuľky sa posúvajú vodorovne, aby neodrezali stĺpce.
-            4) Modálne okná majú vlastné rolovanie iba vnútri okna.
+            ANALÝZA DÁT - hlavný mobilný fix:
+            - výsledky sa nesmú odrezať,
+            - stránka roluje zvislo,
+            - tabuľky a grafy majú samostatné vodorovné rolovanie,
+            - karty sa na mobile skladajú pod seba.
           */
+
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            section,
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            article,
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            div {
+            min-width: 0 !important;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            [class*='max-h-'],
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            [class*='h-['],
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            [class*='overflow-hidden'] {
+            max-height: none !important;
+            height: auto !important;
+            overflow: visible !important;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            [class*='grid-cols-2'],
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            [class*='grid-cols-3'],
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            [class*='grid-cols-4'],
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            [class*='grid-cols-5'],
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            [class*='lg:grid-cols-'],
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            [class*='xl:grid-cols-'] {
+            grid-template-columns: minmax(0, 1fr) !important;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            .recharts-wrapper,
+          html[data-zedpera-mobile-dashboard-tab='module'][data-zedpera-active-module='data']
+            #dashboard-tool-panel
+            .recharts-surface {
+            width: 100% !important;
+            max-width: 100% !important;
+          }
+
           html[data-zedpera-mobile-dashboard-tab='module']
             [data-analysis-results='true'],
           html[data-zedpera-mobile-dashboard-tab='module']
@@ -899,60 +988,16 @@ export default function MobileDashboardNavigation({
           }
 
           html[data-zedpera-mobile-dashboard-tab='module']
-            [data-analysis-modal='true'],
-          html[data-zedpera-mobile-dashboard-tab='module']
-            [role='dialog'][data-analysis-modal='true'],
-          html[data-zedpera-mobile-dashboard-tab='module']
-            [aria-modal='true'][data-analysis-modal='true'] {
-            display: flex !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-            width: 100% !important;
-            max-width: 100vw !important;
-            height: auto !important;
-            max-height: 100dvh !important;
-            overflow-y: auto !important;
-            overflow-x: hidden !important;
-            -webkit-overflow-scrolling: touch !important;
-            overscroll-behavior: contain !important;
-            touch-action: pan-y !important;
-          }
-
-          html[data-zedpera-mobile-dashboard-tab='module']
             [data-analysis-results='true'] *,
           html[data-zedpera-mobile-dashboard-tab='module']
             [data-analysis-result='true'] *,
           html[data-zedpera-mobile-dashboard-tab='module']
             [data-analysis-panel='true'] *,
           html[data-zedpera-mobile-dashboard-tab='module']
-            [data-analysis-modal='true'] *,
-          html[data-zedpera-mobile-dashboard-tab='module']
             [data-analysis-content='true'] * {
             min-width: 0 !important;
             max-width: 100% !important;
             box-sizing: border-box !important;
-          }
-
-          html[data-zedpera-mobile-dashboard-tab='module']
-            [data-analysis-results='true']
-            table,
-          html[data-zedpera-mobile-dashboard-tab='module']
-            [data-analysis-result='true']
-            table,
-          html[data-zedpera-mobile-dashboard-tab='module']
-            [data-analysis-panel='true']
-            table,
-          html[data-zedpera-mobile-dashboard-tab='module']
-            [data-analysis-modal='true']
-            table,
-          html[data-zedpera-mobile-dashboard-tab='module']
-            [data-analysis-content='true']
-            table {
-            display: table !important;
-            width: max-content !important;
-            min-width: 100% !important;
-            max-width: none !important;
-            border-collapse: collapse !important;
           }
 
           html[data-zedpera-mobile-dashboard-tab='module']
@@ -971,6 +1016,56 @@ export default function MobileDashboardNavigation({
             overflow-x: auto !important;
             overflow-y: visible !important;
             -webkit-overflow-scrolling: touch !important;
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-results='true']
+            table,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-result='true']
+            table,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-panel='true']
+            table,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-content='true']
+            table,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-table='true']
+            table,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-table-wrapper='true']
+            table {
+            display: table !important;
+            width: max-content !important;
+            min-width: 100% !important;
+            max-width: none !important;
+            border-collapse: collapse !important;
+          }
+
+          /*
+            MODAL VÝSLEDKOV ANALÝZY:
+            V mobile musí ísť rolovať celé okno.
+          */
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-analysis-modal='true'],
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [role='dialog'][data-analysis-modal='true'],
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [aria-modal='true'][data-analysis-modal='true'] {
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            width: 100% !important;
+            max-width: 100vw !important;
+            height: auto !important;
+            max-height: 100dvh !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            -webkit-overflow-scrolling: touch !important;
+            overscroll-behavior: contain !important;
+            touch-action: pan-y !important;
           }
 
           html[data-zedpera-mobile-dashboard-tab='module']
@@ -998,18 +1093,11 @@ export default function MobileDashboardNavigation({
             -webkit-overflow-scrolling: touch !important;
           }
 
-          html[data-zedpera-mobile-dashboard-tab='module']
-            button,
-          html[data-zedpera-mobile-dashboard-tab='module']
-            a {
-            -webkit-tap-highlight-color: transparent;
-          }
-
           /*
-            Zvýraznenie bieleho tlačidla z prílohy.
-            Tlačidlá, ktoré boli biele a nevýrazné na tmavom pozadí,
-            v mobile prefarbujeme na výrazný fialový CTA štýl.
+            Zvýraznenie bieleho tlačidla v module Analýza dát.
+            Toto rieši biele nevýrazné tlačidlo z obrázka.
           */
+
           html[data-zedpera-mobile-dashboard-tab='module']
             button[class*='bg-white'],
           html[data-zedpera-mobile-dashboard-tab='module']
@@ -1017,11 +1105,20 @@ export default function MobileDashboardNavigation({
           html[data-zedpera-mobile-dashboard-tab='module']
             [data-analysis-export-button='true'],
           html[data-zedpera-mobile-dashboard-tab='module']
-            [data-export-button='true'] {
+            [data-export-button='true'],
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-open-analysis-results='true'] {
             color: #ffffff !important;
-            border: 1px solid rgba(196, 181, 253, 0.95) !important;
-            background: linear-gradient(135deg, #7c3aed 0%, #db2777 100%) !important;
-            box-shadow: 0 16px 40px rgba(124, 58, 237, 0.45) !important;
+            border: 1px solid rgba(216, 180, 254, 0.95) !important;
+            background: linear-gradient(
+              135deg,
+              #7c3aed 0%,
+              #9333ea 45%,
+              #db2777 100%
+            ) !important;
+            box-shadow:
+              0 16px 40px rgba(124, 58, 237, 0.45),
+              inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
             font-weight: 900 !important;
           }
 
@@ -1032,9 +1129,23 @@ export default function MobileDashboardNavigation({
           html[data-zedpera-mobile-dashboard-tab='module']
             [data-analysis-export-button='true']:hover,
           html[data-zedpera-mobile-dashboard-tab='module']
-            [data-export-button='true']:hover {
-            background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%) !important;
+            [data-export-button='true']:hover,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            [data-open-analysis-results='true']:hover {
+            background: linear-gradient(
+              135deg,
+              #8b5cf6 0%,
+              #a855f7 45%,
+              #ec4899 100%
+            ) !important;
             transform: translateY(-1px);
+          }
+
+          html[data-zedpera-mobile-dashboard-tab='module']
+            button,
+          html[data-zedpera-mobile-dashboard-tab='module']
+            a {
+            -webkit-tap-highlight-color: transparent;
           }
         }
       `}</style>

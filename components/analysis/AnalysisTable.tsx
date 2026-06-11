@@ -1,13 +1,23 @@
 'use client';
 
 import { Table2 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import type { AnalysisTable as AnalysisTableType } from './analysisTypes';
 
 type Props = {
   table: AnalysisTableType;
 };
 
-type RowValue = string | number | boolean | null | undefined;
+type RowValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | string[]
+  | number[]
+  | Array<string | number | null>
+  | Record<string, unknown>;
 
 type NormalizedColumn = {
   key: string;
@@ -17,40 +27,66 @@ type NormalizedColumn = {
 
 type TableRow = Record<string, RowValue>;
 
-function normalizeKey(key: string) {
+const TECHNICAL_COLUMNS = [
+  'id',
+  'ID',
+  'Id',
+  'respondent',
+  'respondent_id',
+  'respondent id',
+  'Respondent',
+  'Respondent ID',
+  'index',
+  'poradie',
+  'Poradie',
+  'cislo',
+  'číslo',
+  'c',
+  'timestamp',
+  'datum',
+  'dátum',
+  'cas',
+  'čas',
+  'created_at',
+  'updated_at',
+];
+
+function normalizeKey(key: string): string {
   return String(key || '')
     .trim()
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, '_')
-    .replace(/-/g, '_');
+    .replace(/-/g, '_')
+    .replace(/[^\w]/g, '');
 }
 
-function formatCellValue(value: RowValue) {
-  if (value === null || value === undefined || value === '') {
-    return '—';
-  }
+function isTechnicalColumn(key: string): boolean {
+  const normalized = normalizeKey(key);
 
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) return '—';
-
-    return Number.isInteger(value)
-      ? String(value)
-      : value.toFixed(4).replace(/\.?0+$/, '');
-  }
-
-  if (typeof value === 'boolean') {
-    return value ? 'áno' : 'nie';
-  }
-
-  return String(value);
+  return TECHNICAL_COLUMNS.map(normalizeKey).includes(normalized);
 }
 
-function getColumnLabel(key: string) {
+function formatNumber(value: number): string {
+  if (!Number.isFinite(value)) return '—';
+
+  if (Number.isInteger(value)) return String(value);
+
+  return value.toLocaleString('sk-SK', {
+    maximumFractionDigits: 4,
+  });
+}
+
+function getColumnLabel(key: string): string {
   const normalized = normalizeKey(key);
 
   const labels: Record<string, string> = {
+    scaleid: 'ID škály',
+    scale_id: 'ID škály',
+    scalename: 'Škála / subškála',
+    scale_name: 'Škála / subškála',
+
     variable: 'Premenná',
     premenna: 'Premenná',
     column: 'Premenná',
@@ -62,6 +98,7 @@ function getColumnLabel(key: string) {
 
     title: 'Názov',
     description: 'Popis',
+    note: 'Poznámka',
 
     type: 'Typ premennej',
     variabletype: 'Typ premennej',
@@ -76,12 +113,19 @@ function getColumnLabel(key: string) {
     uroven_merania: 'Úroveň merania',
 
     count: 'Počet',
+    frequency: 'Frekvencia',
+    freq: 'Frekvencia',
     n: 'N',
+    ntotal: 'N spolu',
+    n_total: 'N spolu',
     total: 'Spolu',
+
     valid: 'N platných',
     validn: 'N platných',
     valid_n: 'N platných',
     valid_count: 'N platných',
+    validvalues: 'N platných',
+    valid_values: 'N platných',
     n_valid: 'N platných',
     platne: 'N platných',
     platne_hodnoty: 'N platných',
@@ -90,6 +134,10 @@ function getColumnLabel(key: string) {
     missingn: 'N chýbajúcich',
     missing_n: 'N chýbajúcich',
     missing_count: 'N chýbajúcich',
+    missingvalues: 'N chýbajúcich',
+    missing_values: 'N chýbajúcich',
+    missingrows: 'Chýbajúce riadky',
+    missing_rows: 'Chýbajúce riadky',
     n_missing: 'N chýbajúcich',
     chybajuce: 'N chýbajúcich',
     chybajuce_hodnoty: 'N chýbajúcich',
@@ -102,6 +150,7 @@ function getColumnLabel(key: string) {
 
     median: 'Medián',
     median_value: 'Medián',
+    md: 'Medián',
 
     mode: 'Modus',
     modus: 'Modus',
@@ -113,6 +162,10 @@ function getColumnLabel(key: string) {
     range: 'Rozpätie',
     variance: 'Rozptyl',
 
+    q1: 'Q1',
+    q3: 'Q3',
+    iqr: 'IQR',
+
     std: 'Smerodajná odchýlka',
     sd: 'Smerodajná odchýlka',
     stddeviation: 'Smerodajná odchýlka',
@@ -121,7 +174,12 @@ function getColumnLabel(key: string) {
     standard_deviation: 'Smerodajná odchýlka',
 
     skewness: 'Šikmosť',
+    standarderrorskewness: 'SE šikmosti',
+    standard_error_skewness: 'SE šikmosti',
+
     kurtosis: 'Špicatosť',
+    standarderrorkurtosis: 'SE špicatosti',
+    standard_error_kurtosis: 'SE špicatosti',
 
     percent: 'Percento',
     percentage: 'Percento',
@@ -130,17 +188,31 @@ function getColumnLabel(key: string) {
     cumulativepercent: 'Kumulatívne percento',
     cumulative_percent: 'Kumulatívne percento',
 
-    frequency: 'Frekvencia',
-    freq: 'Frekvencia',
     value: 'Hodnota',
     category: 'Kategória',
     kategoria: 'Kategória',
 
+    scoring: 'Výpočet',
+    items: 'Položky',
+    itemsused: 'Použité položky',
+    items_used: 'Použité položky',
+    scores: 'Skóre',
+
     group: 'Skupina',
+    groups: 'Skupiny',
     group1: 'Skupina 1',
     group2: 'Skupina 2',
+    groupvariable: 'Skupinová premenná',
+    group_variable: 'Skupinová premenná',
+
+    dependentvariable: 'Závislá premenná',
+    dependent_variable: 'Závislá premenná',
+    independentvariable: 'Nezávislá premenná',
+    independent_variable: 'Nezávislá premenná',
 
     test: 'Test',
+    testtype: 'Typ testu',
+    test_type: 'Typ testu',
     statistic: 'Štatistika',
     statistic_value: 'Štatistika',
     p: 'p-hodnota',
@@ -149,11 +221,26 @@ function getColumnLabel(key: string) {
     df: 'Stupne voľnosti',
     effectsize: 'Veľkosť efektu',
     effect_size: 'Veľkosť efektu',
+    significance: 'Významnosť',
 
     correlation: 'Korelácia',
+    coefficient: 'Koeficient',
     r: 'r',
+    rho: 'ρ',
     r2: 'R²',
     r_squared: 'R²',
+    fisherz: 'Fisherovo z',
+    fisher_z: 'Fisherovo z',
+    standarderror: 'SE',
+    standard_error: 'SE',
+
+    variablea: 'Premenná 1',
+    variable_a: 'Premenná 1',
+    variableb: 'Premenná 2',
+    variable_b: 'Premenná 2',
+    variable1: 'Premenná 1',
+    variable2: 'Premenná 2',
+
     beta: 'Beta',
     intercept: 'Konštanta',
     slope: 'Smernica',
@@ -161,6 +248,12 @@ function getColumnLabel(key: string) {
     alpha: 'Cronbach alfa',
     cronbachalpha: 'Cronbach alfa',
     cronbach_alpha: 'Cronbach alfa',
+    validrows: 'N platných riadkov',
+    valid_rows: 'N platných riadkov',
+
+    method: 'Metóda',
+    isnormal: 'Normalita',
+    is_normal: 'Normalita',
 
     interpretation: 'Interpretácia',
     recommendation: 'Odporúčanie',
@@ -170,7 +263,57 @@ function getColumnLabel(key: string) {
   return labels[normalized] || key;
 }
 
-function isVariableLikeColumn(key: string) {
+function formatCellValue(value: RowValue): string {
+  if (value === null || value === undefined || value === '') {
+    return '—';
+  }
+
+  if (typeof value === 'number') {
+    return formatNumber(value);
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'áno' : 'nie';
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '—';
+
+    const formattedItems = value
+      .map((item): string | null => {
+        if (item === null || item === undefined || item === '') return null;
+
+        if (typeof item === 'number') {
+          return formatNumber(item);
+        }
+
+        return String(item);
+      })
+      .filter((item): item is string => Boolean(item));
+
+    return formattedItems.length > 0 ? formattedItems.join(', ') : '—';
+  }
+
+  if (typeof value === 'object') {
+    const entries = Object.entries(value);
+
+    if (entries.length === 0) return '—';
+
+    const formattedEntries = entries
+      .map(([key, val]): string | null => {
+        if (val === null || val === undefined || val === '') return null;
+
+        return `${getColumnLabel(key)}: ${formatCellValue(val as RowValue)}`;
+      })
+      .filter((item): item is string => Boolean(item));
+
+    return formattedEntries.length > 0 ? formattedEntries.join('\n') : '—';
+  }
+
+  return String(value);
+}
+
+function isVariableLikeColumn(key: string): boolean {
   const normalized = normalizeKey(key);
 
   return [
@@ -182,11 +325,15 @@ function isVariableLikeColumn(key: string) {
     'name',
     'nazov',
     'label',
+    'scalename',
+    'scale_name',
   ].includes(normalized);
 }
 
-function getBestVariableValue(row: TableRow) {
+function getBestVariableValue(row: TableRow): RowValue {
   const priorityKeys = [
+    'scaleName',
+    'scale_name',
     'variable',
     'premenná',
     'premenna',
@@ -241,7 +388,10 @@ function getCellValue(row: TableRow, column: NormalizedColumn): RowValue {
   return row[column.key];
 }
 
-function hasAnyVisibleValue(rows: TableRow[], column: NormalizedColumn) {
+function hasAnyVisibleValue(
+  rows: TableRow[],
+  column: NormalizedColumn,
+): boolean {
   return rows.some((row) => {
     const value = getCellValue(row, column);
 
@@ -249,12 +399,16 @@ function hasAnyVisibleValue(rows: TableRow[], column: NormalizedColumn) {
   });
 }
 
-function dedupeColumns(columns: NormalizedColumn[]) {
+function dedupeColumns(columns: NormalizedColumn[]): NormalizedColumn[] {
   const result: NormalizedColumn[] = [];
   const usedLabels = new Set<string>();
   const variableSourceKeys: string[] = [];
 
   for (const column of columns) {
+    if (isTechnicalColumn(column.key)) {
+      continue;
+    }
+
     if (isVariableLikeColumn(column.key)) {
       variableSourceKeys.push(column.key);
       continue;
@@ -273,7 +427,7 @@ function dedupeColumns(columns: NormalizedColumn[]) {
   if (variableSourceKeys.length > 0) {
     result.unshift({
       key: '__variable__',
-      label: 'Premenná',
+      label: 'Premenná / škála',
       sourceKeys: variableSourceKeys,
     });
   }
@@ -281,36 +435,108 @@ function dedupeColumns(columns: NormalizedColumn[]) {
   return result;
 }
 
-function normalizeColumns(table: AnalysisTableType, rows: TableRow[]) {
+function normalizeTableRows(table: AnalysisTableType): TableRow[] {
+  if (!Array.isArray(table.rows)) return [];
+
+  return table.rows.map((row): TableRow => {
+    if (row && typeof row === 'object' && !Array.isArray(row)) {
+      return row as TableRow;
+    }
+
+    return {
+      value: row as RowValue,
+    };
+  });
+}
+
+function normalizeColumns(
+  table: AnalysisTableType,
+  rows: TableRow[],
+): NormalizedColumn[] {
   let columns: NormalizedColumn[] = [];
 
-  if (table.columns && table.columns.length > 0) {
+  if (Array.isArray(table.columns) && table.columns.length > 0) {
     columns = table.columns.map((column) => ({
-      key: column.key,
-      label: column.label || getColumnLabel(column.key),
+      key: String(column.key),
+      label: column.label || getColumnLabel(String(column.key)),
     }));
   } else {
-    const firstRow = rows[0];
+    const allKeys = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
 
-    if (!firstRow) return [];
-
-    columns = Object.keys(firstRow).map((key) => ({
+    columns = allKeys.map((key) => ({
       key,
       label: getColumnLabel(key),
     }));
   }
 
-  const dedupedColumns = dedupeColumns(columns);
+  const priority = [
+    '__variable__',
+    'scaleName',
+    'scale_name',
+    'variable',
+    'name',
+    'label',
+    'valid',
+    'n',
+    'missing',
+    'mean',
+    'M',
+    'median',
+    'standardDeviation',
+    'SD',
+    'minimum',
+    'maximum',
+    'skewness',
+    'kurtosis',
+    'pValue',
+    'p',
+    'r',
+    'rho',
+    'coefficient',
+    'cronbachAlpha',
+    'statistic',
+    'testType',
+    'recommendation',
+    'interpretation',
+  ];
 
-  return dedupedColumns.filter((column) => hasAnyVisibleValue(rows, column));
+  const dedupedColumns = dedupeColumns(columns).filter((column) =>
+    hasAnyVisibleValue(rows, column),
+  );
+
+  return dedupedColumns.sort((a, b) => {
+    const aIndex = priority.findIndex(
+      (item) => normalizeKey(item) === normalizeKey(a.key),
+    );
+
+    const bIndex = priority.findIndex(
+      (item) => normalizeKey(item) === normalizeKey(b.key),
+    );
+
+    if (aIndex === -1 && bIndex === -1) {
+      return a.label.localeCompare(b.label, 'sk');
+    }
+
+    if (aIndex === -1) return 1;
+    if (bIndex === -1) return -1;
+
+    return aIndex - bIndex;
+  });
+}
+
+function renderCellValue(value: RowValue): ReactNode {
+  return formatCellValue(value);
 }
 
 export default function AnalysisTable({ table }: Props) {
-  const rows = Array.isArray(table.rows) ? (table.rows as TableRow[]) : [];
+  const rows = normalizeTableRows(table);
   const columns = normalizeColumns(table, rows);
 
   return (
-    <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/20">
+    <div
+      data-analysis-table="true"
+      className="overflow-hidden rounded-3xl border border-white/10 bg-black/20"
+    >
       <div className="border-b border-white/10 bg-white/[0.045] px-4 py-4">
         <div className="flex items-center gap-2">
           <Table2 className="h-4 w-4 text-violet-200" />
@@ -332,7 +558,10 @@ export default function AnalysisTable({ table }: Props) {
           Tabuľka neobsahuje zobraziteľné riadky alebo stĺpce.
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div
+          data-analysis-table-wrapper="true"
+          className="overflow-x-auto"
+        >
           <table className="min-w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-white/10 bg-white/[0.035]">
@@ -356,9 +585,9 @@ export default function AnalysisTable({ table }: Props) {
                   {columns.map((column) => (
                     <td
                       key={`${rowIndex}-${column.key}`}
-                      className="whitespace-nowrap px-4 py-3 text-slate-200"
+                      className="max-w-[360px] whitespace-pre-wrap px-4 py-3 align-top text-slate-200"
                     >
-                      {formatCellValue(getCellValue(row, column))}
+                      {renderCellValue(getCellValue(row, column))}
                     </td>
                   ))}
                 </tr>

@@ -1,7 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+
 import {
   ArrowLeft,
   CheckCircle2,
@@ -12,333 +16,497 @@ import {
   Lock,
   ShieldCheck,
 } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
 
-function getSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+type AppLanguage = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error(
-      'Chýba NEXT_PUBLIC_SUPABASE_URL alebo NEXT_PUBLIC_SUPABASE_ANON_KEY.',
-    );
-  }
+const LANGUAGE_STORAGE_KEY = 'zedpera_language';
 
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-    },
-  });
+const copy = {
+  sk: {
+    badge: 'NOVÉ HESLO',
+    title: 'Nastavte nové heslo',
+    description:
+      'Zadajte nové heslo pre svoj ZEDPERA účet. Po uložení sa budete môcť prihlásiť.',
+    cardTitle: 'Zmena hesla',
+    cardSubtitle:
+      'Heslo musí mať aspoň 8 znakov. Odporúčame kombináciu písmen, číslic a symbolov.',
+    password: 'Nové heslo',
+    passwordPlaceholder: 'Zadajte nové heslo',
+    confirmPassword: 'Potvrdenie hesla',
+    confirmPasswordPlaceholder: 'Zopakujte nové heslo',
+    showPassword: 'Zobraziť heslo',
+    hidePassword: 'Skryť heslo',
+    save: 'Uložiť nové heslo',
+    saving: 'Ukladám heslo...',
+    success: 'Heslo bolo úspešne zmenené. Presmerujeme vás na prihlásenie.',
+    missing: 'Vyplňte nové heslo aj potvrdenie hesla.',
+    minLength: 'Heslo musí mať aspoň 8 znakov.',
+    mismatch: 'Heslá sa nezhodujú.',
+    noSession:
+      'Odkaz na reset hesla je neplatný alebo expiroval. Požiadajte o nový resetovací odkaz.',
+    error: 'Heslo sa nepodarilo zmeniť. Skúste to znova.',
+    backToLogin: 'Späť na prihlásenie',
+    requestNewLink: 'Požiadať o nový odkaz',
+  },
+  cs: {
+    badge: 'NOVÉ HESLO',
+    title: 'Nastavte nové heslo',
+    description:
+      'Zadejte nové heslo pro svůj ZEDPERA účet. Po uložení se budete moci přihlásit.',
+    cardTitle: 'Změna hesla',
+    cardSubtitle:
+      'Heslo musí mít alespoň 8 znaků. Doporučujeme kombinaci písmen, číslic a symbolů.',
+    password: 'Nové heslo',
+    passwordPlaceholder: 'Zadejte nové heslo',
+    confirmPassword: 'Potvrzení hesla',
+    confirmPasswordPlaceholder: 'Zopakujte nové heslo',
+    showPassword: 'Zobrazit heslo',
+    hidePassword: 'Skrýt heslo',
+    save: 'Uložit nové heslo',
+    saving: 'Ukládám heslo...',
+    success: 'Heslo bylo úspěšně změněno. Přesměrujeme vás na přihlášení.',
+    missing: 'Vyplňte nové heslo i potvrzení hesla.',
+    minLength: 'Heslo musí mít alespoň 8 znaků.',
+    mismatch: 'Hesla se neshodují.',
+    noSession:
+      'Odkaz pro reset hesla je neplatný nebo vypršel. Požádejte o nový resetovací odkaz.',
+    error: 'Heslo se nepodařilo změnit. Zkuste to znovu.',
+    backToLogin: 'Zpět na přihlášení',
+    requestNewLink: 'Požádat o nový odkaz',
+  },
+  en: {
+    badge: 'NEW PASSWORD',
+    title: 'Set a new password',
+    description:
+      'Enter a new password for your ZEDPERA account. After saving, you can sign in.',
+    cardTitle: 'Change password',
+    cardSubtitle:
+      'The password must have at least 8 characters. We recommend combining letters, numbers and symbols.',
+    password: 'New password',
+    passwordPlaceholder: 'Enter new password',
+    confirmPassword: 'Confirm password',
+    confirmPasswordPlaceholder: 'Repeat new password',
+    showPassword: 'Show password',
+    hidePassword: 'Hide password',
+    save: 'Save new password',
+    saving: 'Saving password...',
+    success: 'Password was changed successfully. We will redirect you to login.',
+    missing: 'Enter the new password and password confirmation.',
+    minLength: 'Password must have at least 8 characters.',
+    mismatch: 'Passwords do not match.',
+    noSession:
+      'The password reset link is invalid or expired. Request a new reset link.',
+    error: 'Password could not be changed. Please try again.',
+    backToLogin: 'Back to Login',
+    requestNewLink: 'Request new link',
+  },
+  de: {
+    badge: 'NEUES PASSWORT',
+    title: 'Neues Passwort festlegen',
+    description:
+      'Geben Sie ein neues Passwort für Ihr ZEDPERA Konto ein. Danach können Sie sich anmelden.',
+    cardTitle: 'Passwort ändern',
+    cardSubtitle:
+      'Das Passwort muss mindestens 8 Zeichen haben. Wir empfehlen eine Kombination aus Buchstaben, Zahlen und Symbolen.',
+    password: 'Neues Passwort',
+    passwordPlaceholder: 'Neues Passwort eingeben',
+    confirmPassword: 'Passwort bestätigen',
+    confirmPasswordPlaceholder: 'Neues Passwort wiederholen',
+    showPassword: 'Passwort anzeigen',
+    hidePassword: 'Passwort ausblenden',
+    save: 'Neues Passwort speichern',
+    saving: 'Passwort wird gespeichert...',
+    success:
+      'Das Passwort wurde erfolgreich geändert. Sie werden zur Anmeldung weitergeleitet.',
+    missing: 'Geben Sie das neue Passwort und die Bestätigung ein.',
+    minLength: 'Das Passwort muss mindestens 8 Zeichen haben.',
+    mismatch: 'Die Passwörter stimmen nicht überein.',
+    noSession:
+      'Der Link zum Zurücksetzen ist ungültig oder abgelaufen. Fordern Sie einen neuen Link an.',
+    error:
+      'Das Passwort konnte nicht geändert werden. Bitte versuchen Sie es erneut.',
+    backToLogin: 'Zurück zur Anmeldung',
+    requestNewLink: 'Neuen Link anfordern',
+  },
+  pl: {
+    badge: 'NOWE HASŁO',
+    title: 'Ustaw nowe hasło',
+    description:
+      'Wpisz nowe hasło do swojego konta ZEDPERA. Po zapisaniu możesz się zalogować.',
+    cardTitle: 'Zmiana hasła',
+    cardSubtitle:
+      'Hasło musi mieć co najmniej 8 znaków. Zalecamy połączenie liter, cyfr i symboli.',
+    password: 'Nowe hasło',
+    passwordPlaceholder: 'Wpisz nowe hasło',
+    confirmPassword: 'Potwierdź hasło',
+    confirmPasswordPlaceholder: 'Powtórz nowe hasło',
+    showPassword: 'Pokaż hasło',
+    hidePassword: 'Ukryj hasło',
+    save: 'Zapisz nowe hasło',
+    saving: 'Zapisuję hasło...',
+    success: 'Hasło zostało zmienione. Przekierujemy Cię do logowania.',
+    missing: 'Wpisz nowe hasło i jego potwierdzenie.',
+    minLength: 'Hasło musi mieć co najmniej 8 znaków.',
+    mismatch: 'Hasła nie są takie same.',
+    noSession:
+      'Link resetowania hasła jest nieprawidłowy lub wygasł. Poproś o nowy link.',
+    error: 'Nie udało się zmienić hasła. Spróbuj ponownie.',
+    backToLogin: 'Powrót do logowania',
+    requestNewLink: 'Poproś o nowy link',
+  },
+  hu: {
+    badge: 'ÚJ JELSZÓ',
+    title: 'Új jelszó beállítása',
+    description:
+      'Adja meg az új jelszót a ZEDPERA fiókjához. Mentés után be tud jelentkezni.',
+    cardTitle: 'Jelszó módosítása',
+    cardSubtitle:
+      'A jelszónak legalább 8 karakterből kell állnia. Betűk, számok és szimbólumok kombinációját ajánljuk.',
+    password: 'Új jelszó',
+    passwordPlaceholder: 'Adja meg az új jelszót',
+    confirmPassword: 'Jelszó megerősítése',
+    confirmPasswordPlaceholder: 'Ismételje meg az új jelszót',
+    showPassword: 'Jelszó megjelenítése',
+    hidePassword: 'Jelszó elrejtése',
+    save: 'Új jelszó mentése',
+    saving: 'Jelszó mentése...',
+    success: 'A jelszó sikeresen megváltozott. Átirányítjuk a bejelentkezéshez.',
+    missing: 'Adja meg az új jelszót és a megerősítést.',
+    minLength: 'A jelszónak legalább 8 karakterből kell állnia.',
+    mismatch: 'A jelszavak nem egyeznek.',
+    noSession:
+      'A jelszó-visszaállító link érvénytelen vagy lejárt. Kérjen új linket.',
+    error: 'A jelszó módosítása sikertelen. Próbálja újra.',
+    backToLogin: 'Vissza a bejelentkezéshez',
+    requestNewLink: 'Új link kérése',
+  },
+} satisfies Record<AppLanguage, Record<string, string>>;
+
+function normalizeLanguage(value: unknown): AppLanguage {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (['sk', 'slovak', 'slovenčina', 'slovencina'].includes(normalized)) return 'sk';
+  if (['cs', 'cz', 'czech', 'čeština', 'cestina'].includes(normalized)) return 'cs';
+  if (['en', 'eng', 'english', 'angličtina', 'anglictina'].includes(normalized)) return 'en';
+  if (['de', 'ger', 'german', 'deutsch', 'nemčina', 'nemcina'].includes(normalized)) return 'de';
+  if (['pl', 'polish', 'polski', 'poľština', 'polstina'].includes(normalized)) return 'pl';
+  if (['hu', 'hungarian', 'magyar', 'maďarčina', 'madarcina'].includes(normalized)) return 'hu';
+
+  return 'sk';
 }
 
-function validatePassword(password: string) {
-  if (password.length < 8) {
-    return 'Heslo musí mať aspoň 8 znakov.';
-  }
+function ResetPasswordContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
-  if (!/[A-ZÁČĎÉÍĽĹŇÓÔŔŠŤÚÝŽ]/.test(password)) {
-    return 'Heslo musí obsahovať aspoň jedno veľké písmeno.';
-  }
+  const currentLanguage = useMemo<AppLanguage>(() => {
+    const urlLang = searchParams.get('lang');
 
-  if (!/[a-záäčďéíľĺňóôŕšťúýž]/.test(password)) {
-    return 'Heslo musí obsahovať aspoň jedno malé písmeno.';
-  }
+    if (urlLang) {
+      return normalizeLanguage(urlLang);
+    }
 
-  if (!/[0-9]/.test(password)) {
-    return 'Heslo musí obsahovať aspoň jedno číslo.';
-  }
+    if (typeof window === 'undefined') {
+      return 'sk';
+    }
 
-  return '';
-}
+    const saved =
+      window.localStorage.getItem(LANGUAGE_STORAGE_KEY) ||
+      window.localStorage.getItem('zedpera_system_language') ||
+      window.localStorage.getItem('zedpera_interface_language') ||
+      document.documentElement.lang;
 
-export default function ResetPasswordPage() {
-  const supabase = useMemo(() => getSupabaseClient(), []);
+    return normalizeLanguage(saved);
+  }, [searchParams]);
+
+  const t = copy[currentLanguage];
 
   const [password, setPassword] = useState('');
-  const [passwordAgain, setPasswordAgain] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [sessionReady, setSessionReady] = useState(false);
-  const [status, setStatus] = useState<
-    'checking' | 'idle' | 'loading' | 'success' | 'error'
-  >('checking');
-  const [message, setMessage] = useState(
-    'Kontrolujem platnosť odkazu na obnovenie hesla...',
-  );
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [hasRecoverySession, setHasRecoverySession] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [status, setStatus] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     let mounted = true;
 
     async function checkSession() {
-      const { data } = await supabase.auth.getSession();
+      const supabase = createSupabaseBrowserClient();
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
       if (!mounted) return;
 
-      if (data.session) {
-        setSessionReady(true);
-        setStatus('idle');
-        setMessage('');
-        return;
-      }
-
-      setStatus('error');
-      setMessage(
-        'Odkaz na obnovenie hesla nie je platný alebo už vypršal. Požiadajte o nový odkaz.',
-      );
+      setHasRecoverySession(Boolean(session));
+      setCheckingSession(false);
     }
+
+    void checkSession();
+
+    const supabase = createSupabaseBrowserClient();
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY' || session) {
-        setSessionReady(true);
-        setStatus('idle');
-        setMessage('');
+        setHasRecoverySession(true);
+        setCheckingSession(false);
       }
     });
-
-    window.setTimeout(checkSession, 400);
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [supabase]);
+  }, []);
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function saveNewPassword() {
+    setStatus('');
+    setError('');
 
     const cleanPassword = password.trim();
-    const cleanPasswordAgain = passwordAgain.trim();
+    const cleanConfirmPassword = confirmPassword.trim();
 
-    if (!sessionReady) {
-      setStatus('error');
-      setMessage(
-        'Odkaz na obnovenie hesla nie je pripravený. Otvorte stránku priamo z e-mailu.',
-      );
+    if (!cleanPassword || !cleanConfirmPassword) {
+      setError(t.missing);
       return;
     }
 
-    const validationMessage = validatePassword(cleanPassword);
-
-    if (validationMessage) {
-      setStatus('error');
-      setMessage(validationMessage);
+    if (cleanPassword.length < 8) {
+      setError(t.minLength);
       return;
     }
 
-    if (cleanPassword !== cleanPasswordAgain) {
-      setStatus('error');
-      setMessage('Heslá sa nezhodujú.');
+    if (cleanPassword !== cleanConfirmPassword) {
+      setError(t.mismatch);
+      return;
+    }
+
+    if (!hasRecoverySession) {
+      setError(t.noSession);
       return;
     }
 
     try {
-      setStatus('loading');
-      setMessage('');
+      setIsSaving(true);
 
-      const { error } = await supabase.auth.updateUser({
+      const supabase = createSupabaseBrowserClient();
+
+      const { error: updateError } = await supabase.auth.updateUser({
         password: cleanPassword,
       });
 
-      if (error) {
-        throw error;
+      if (updateError) {
+        setError(updateError.message || t.error);
+        return;
       }
 
-      setStatus('success');
-      setMessage('Heslo bolo úspešne zmenené. Teraz sa môžete prihlásiť.');
-      setPassword('');
-      setPasswordAgain('');
+      setStatus(t.success);
 
       window.setTimeout(() => {
-        window.location.href = '/login?password=changed';
-      }, 1400);
-    } catch (error) {
-      setStatus('error');
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : 'Heslo sa nepodarilo zmeniť.',
-      );
+        router.push(`/login?password=changed&lang=${currentLanguage}`);
+      }, 1800);
+    } catch (unknownError) {
+      setError(unknownError instanceof Error ? unknownError.message : t.error);
+    } finally {
+      setIsSaving(false);
     }
   }
 
   return (
-    <main className="min-h-screen bg-[#020617] px-4 py-6 text-white sm:px-6 lg:px-8">
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute left-1/2 top-[-180px] h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-violet-700/25 blur-3xl" />
-        <div className="absolute bottom-[-160px] right-[-120px] h-[420px] w-[420px] rounded-full bg-cyan-600/15 blur-3xl" />
-      </div>
+    <main className="min-h-screen overflow-hidden bg-[#020617] text-white">
+      <section className="relative min-h-screen px-4 py-6 sm:px-6 lg:px-8">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-purple-700/30 blur-3xl" />
+        <div className="pointer-events-none absolute bottom-0 left-0 h-96 w-96 rounded-full bg-indigo-700/20 blur-3xl" />
+        <div className="pointer-events-none absolute right-0 top-20 h-96 w-96 rounded-full bg-purple-700/20 blur-3xl" />
 
-      <section className="relative mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-6xl items-center justify-center">
-        <div className="grid w-full overflow-hidden rounded-[2rem] border border-white/10 bg-[#070b18]/95 shadow-2xl shadow-black/50 backdrop-blur-xl lg:grid-cols-[0.95fr_1.05fr]">
-          <div className="hidden border-r border-white/10 bg-gradient-to-br from-violet-600/20 via-[#070b18] to-cyan-600/10 p-10 lg:block">
-            <div className="inline-flex items-center gap-2 rounded-full border border-violet-300/25 bg-violet-500/10 px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-violet-100">
+        <div className="relative mx-auto grid min-h-[calc(100vh-3rem)] w-full max-w-7xl overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.04] shadow-2xl shadow-black/40 lg:grid-cols-[1.05fr_0.95fr]">
+          <div className="border-b border-white/10 bg-gradient-to-br from-purple-950/45 via-slate-950 to-slate-950 p-6 sm:p-10 lg:border-b-0 lg:border-r lg:p-12">
+            <div className="inline-flex items-center gap-2 rounded-full border border-purple-300/20 bg-purple-400/10 px-4 py-2 text-xs font-black uppercase tracking-[0.3em] text-purple-100 sm:px-5">
               <ShieldCheck className="h-4 w-4" />
-              Nové heslo
+              {t.badge}
             </div>
 
-            <h1 className="mt-8 text-5xl font-black leading-tight tracking-tight">
-              Nastavte nové heslo
-            </h1>
+            <div className="mt-10 max-w-xl">
+              <h1 className="text-5xl font-black leading-tight tracking-tight sm:text-6xl lg:text-7xl">
+                {t.title}
+              </h1>
 
-            <p className="mt-5 max-w-md text-base font-semibold leading-8 text-slate-300">
-              Po kliknutí na odkaz z e-mailu si nastavíte nové bezpečné heslo
-              pre svoj účet.
-            </p>
-
-            <div className="mt-8 rounded-3xl border border-white/10 bg-black/20 p-5">
-              <p className="text-sm font-bold leading-7 text-slate-300">
-                Odporúčanie:
+              <p className="mt-6 max-w-2xl text-lg font-bold leading-8 text-slate-300 sm:text-xl">
+                {t.description}
               </p>
-
-              <ul className="mt-3 space-y-2 text-sm font-semibold text-slate-300">
-                <li>• minimálne 8 znakov,</li>
-                <li>• veľké a malé písmeno,</li>
-                <li>• aspoň jedno číslo,</li>
-                <li>• nepoužívajte staré heslo.</li>
-              </ul>
             </div>
           </div>
 
-          <div className="p-5 sm:p-8 lg:p-10">
-            <Link
-              href="/login"
-              className="mb-6 inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-black text-slate-200 transition hover:bg-white/[0.12] hover:text-white"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Späť na prihlásenie
-            </Link>
+          <div className="flex items-center bg-slate-950/80 p-6 sm:p-10 lg:p-12">
+            <div className="w-full">
+              <Link
+                href={`/login?lang=${currentLanguage}`}
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] hover:text-white"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                {t.backToLogin}
+              </Link>
 
-            <div className="mb-7">
-              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-600 text-white shadow-lg shadow-violet-950/40">
-                <KeyRound className="h-6 w-6" />
+              <div className="mt-8 flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-br from-purple-600 to-fuchsia-700 shadow-lg shadow-purple-950/40">
+                <KeyRound className="h-8 w-8" />
               </div>
 
-              <h2 className="text-3xl font-black tracking-tight text-white sm:text-4xl">
-                Obnova hesla
+              <h2 className="mt-6 text-4xl font-black tracking-tight sm:text-5xl">
+                {t.cardTitle}
               </h2>
 
-              <p className="mt-3 text-sm font-semibold leading-6 text-slate-400">
-                Táto stránka je responzívna pre mobil aj desktop.
+              <p className="mt-4 text-base font-bold leading-7 text-slate-300">
+                {t.cardSubtitle}
               </p>
-            </div>
 
-            {status === 'checking' ? (
-              <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-4 text-sm font-bold text-slate-200">
-                <div className="flex items-center gap-3">
-                  <Loader2 className="h-5 w-5 animate-spin text-violet-300" />
-                  {message}
+              {checkingSession ? (
+                <div className="mt-8 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.05] p-5 text-sm font-black text-slate-200">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Kontrolujem resetovací odkaz...
                 </div>
-              </div>
-            ) : null}
+              ) : null}
 
-            {status !== 'checking' ? (
-              <form onSubmit={handleSubmit} className="space-y-5">
-                <div>
-                  <label
-                    htmlFor="password"
-                    className="mb-2 block text-sm font-black text-slate-200"
-                  >
-                    Nové heslo
-                  </label>
+              {!checkingSession && !hasRecoverySession ? (
+                <div className="mt-8 rounded-2xl border border-red-400/20 bg-red-500/10 p-5 text-sm font-black leading-6 text-red-100 sm:text-base">
+                  {t.noSession}
 
-                  <div className="relative">
-                    <Lock className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
-
-                    <input
-                      id="password"
-                      type={showPassword ? 'text' : 'password'}
-                      autoComplete="new-password"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                      placeholder="Zadajte nové heslo"
-                      className="h-14 w-full rounded-2xl border border-white/10 bg-[#0b1020] pl-12 pr-14 text-base font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-500/15"
-                    />
-
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((value) => !value)}
-                      className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/[0.06] hover:text-white"
-                      aria-label={
-                        showPassword ? 'Skryť heslo' : 'Zobraziť heslo'
-                      }
+                  <div className="mt-5">
+                    <Link
+                      href={`/forgot-password?lang=${currentLanguage}`}
+                      className="inline-flex items-center justify-center rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-slate-200"
                     >
-                      {showPassword ? (
-                        <EyeOff className="h-5 w-5" />
-                      ) : (
-                        <Eye className="h-5 w-5" />
-                      )}
-                    </button>
+                      {t.requestNewLink}
+                    </Link>
                   </div>
                 </div>
+              ) : null}
 
-                <div>
-                  <label
-                    htmlFor="passwordAgain"
-                    className="mb-2 block text-sm font-black text-slate-200"
-                  >
-                    Zopakovať nové heslo
+              {!checkingSession && hasRecoverySession ? (
+                <div className="mt-8 space-y-5">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-black text-slate-300">
+                      {t.password}
+                    </span>
+
+                    <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-800 px-5 py-4 transition focus-within:border-purple-400 focus-within:ring-4 focus-within:ring-purple-500/20">
+                      <Lock className="h-5 w-5 shrink-0 text-slate-400" />
+
+                      <input
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            void saveNewPassword();
+                          }
+                        }}
+                        type={showPassword ? 'text' : 'password'}
+                        autoComplete="new-password"
+                        placeholder={t.passwordPlaceholder}
+                        className="w-full bg-transparent text-base font-bold text-white outline-none placeholder:text-slate-500 sm:text-lg"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((value) => !value)}
+                        aria-label={
+                          showPassword ? t.hidePassword : t.showPassword
+                        }
+                        className="text-slate-400 transition hover:text-white"
+                      >
+                        {showPassword ? (
+                          <EyeOff className="h-5 w-5" />
+                        ) : (
+                          <Eye className="h-5 w-5" />
+                        )}
+                      </button>
+                    </div>
                   </label>
 
-                  <input
-                    id="passwordAgain"
-                    type={showPassword ? 'text' : 'password'}
-                    autoComplete="new-password"
-                    value={passwordAgain}
-                    onChange={(event) => setPasswordAgain(event.target.value)}
-                    placeholder="Zopakujte nové heslo"
-                    className="h-14 w-full rounded-2xl border border-white/10 bg-[#0b1020] px-4 text-base font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-500/15"
-                  />
-                </div>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-black text-slate-300">
+                      {t.confirmPassword}
+                    </span>
 
-                {message ? (
-                  <div
-                    className={`rounded-2xl border px-4 py-3 text-sm font-bold leading-6 ${
-                      status === 'success'
-                        ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-100'
-                        : 'border-red-400/25 bg-red-500/10 text-red-100'
-                    }`}
-                  >
-                    <div className="flex gap-2">
-                      {status === 'success' ? (
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                      ) : null}
+                    <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-800 px-5 py-4 transition focus-within:border-purple-400 focus-within:ring-4 focus-within:ring-purple-500/20">
+                      <Lock className="h-5 w-5 shrink-0 text-slate-400" />
 
-                      <span>{message}</span>
+                      <input
+                        value={confirmPassword}
+                        onChange={(event) =>
+                          setConfirmPassword(event.target.value)
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            void saveNewPassword();
+                          }
+                        }}
+                        type={showPassword ? 'text' : 'password'}
+                        autoComplete="new-password"
+                        placeholder={t.confirmPasswordPlaceholder}
+                        className="w-full bg-transparent text-base font-bold text-white outline-none placeholder:text-slate-500 sm:text-lg"
+                      />
                     </div>
-                  </div>
-                ) : null}
+                  </label>
 
-                <button
-                  type="submit"
-                  disabled={status === 'loading' || !sessionReady}
-                  className="inline-flex min-h-[56px] w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-5 py-3 text-base font-black text-white shadow-xl shadow-violet-950/40 transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {status === 'loading' ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <KeyRound className="h-5 w-5" />
-                  )}
+                  {status ? (
+                    <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4 text-sm font-black leading-6 text-emerald-100 sm:text-base">
+                      <div className="flex items-start gap-3">
+                        <CheckCircle2 className="mt-1 h-5 w-5 shrink-0" />
+                        <span>{status}</span>
+                      </div>
+                    </div>
+                  ) : null}
 
-                  {status === 'loading' ? 'Ukladám heslo...' : 'Zmeniť heslo'}
-                </button>
-              </form>
-            ) : null}
+                  {error ? (
+                    <div className="rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm font-black leading-6 text-red-100 sm:text-base">
+                      {error}
+                    </div>
+                  ) : null}
 
-            <p className="mt-6 text-center text-sm font-semibold text-slate-500">
-              Potrebujete nový odkaz?{' '}
-              <Link
-                href="/forgot-password"
-                className="font-black text-violet-300 hover:text-violet-200"
-              >
-                Poslať znova
-              </Link>
-            </p>
+                  <button
+                    type="button"
+                    onClick={() => void saveNewPassword()}
+                    disabled={isSaving}
+                    className="flex w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-purple-600 via-fuchsia-600 to-purple-700 px-6 py-5 text-base font-black text-white shadow-xl shadow-purple-950/40 transition hover:scale-[1.01] hover:opacity-95 disabled:cursor-not-allowed disabled:scale-100 disabled:opacity-60 sm:text-lg"
+                  >
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                        {t.saving}
+                      </>
+                    ) : (
+                      <>
+                        <KeyRound className="h-5 w-5" />
+                        {t.save}
+                      </>
+                    )}
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       </section>
     </main>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center bg-[#020617] text-white">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </main>
+      }
+    >
+      <ResetPasswordContent />
+    </Suspense>
   );
 }

@@ -259,44 +259,60 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function normalizeColumnKey(key: string) {
-  return key
+function normalizeColumnKey(key: string): string {
+  return String(key || '')
+    .trim()
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]/g, '');
 }
 
-function isTechnicalIdColumn(key: string) {
+function normalizeColumnLabel(key: string): string {
+  return normalizeColumnKey(getFieldLabel(key));
+}
+
+function isTechnicalIdColumn(key: string): boolean {
   const normalized = normalizeColumnKey(key);
 
   return [
     'id',
+    'iD',
     'respondent',
     'respondentid',
+    'respondent_id',
+    'respondentnumber',
+    'respondentcislo',
+    'respondentporadie',
     'index',
     'poradie',
     'cislo',
     'cisloriadku',
     'row',
+    'rowid',
+    'row_id',
     'riadok',
     'timestamp',
     'createdat',
+    'created_at',
     'updatedat',
-  ].includes(normalized);
+    'updated_at',
+  ]
+    .map(normalizeColumnKey)
+    .includes(normalized);
 }
 
-function getFieldLabel(key: string) {
+function getFieldLabel(key: string): string {
   if (COLUMN_LABELS[key]) return COLUMN_LABELS[key];
 
-  return key
+  return String(key || '')
     .replace(/([A-Z])/g, ' $1')
     .replace(/_/g, ' ')
     .replace(/-/g, ' ')
     .replace(/^\w/, (char) => char.toUpperCase());
 }
 
-function formatNumber(value: number) {
+function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return '—';
 
   if (Number.isInteger(value)) return String(value);
@@ -322,17 +338,21 @@ function valueToText(value: unknown): string {
       .map((item) => {
         if (isRecord(item)) {
           return Object.entries(item)
+            .filter(([key]) => !isTechnicalIdColumn(key))
             .map(([key, val]) => `${getFieldLabel(key)}: ${valueToText(val)}`)
             .join(', ');
         }
 
         return valueToText(item);
       })
+      .filter(Boolean)
       .join('\n');
   }
 
   if (isRecord(value)) {
-    const entries = Object.entries(value);
+    const entries = Object.entries(value).filter(
+      ([key]) => !isTechnicalIdColumn(key),
+    );
 
     if (!entries.length) return '—';
 
@@ -364,15 +384,16 @@ function normalizeRows(rows: unknown[]): DataRow[] {
   return rows.map((row, index) => {
     if (isRecord(row)) {
       const cleaned: DataRow = {};
-      const usedKeys = new Set<string>();
+      const usedLabels = new Set<string>();
 
       Object.entries(row).forEach(([key, value]) => {
         if (isTechnicalIdColumn(key)) return;
 
-        const normalized = normalizeColumnKey(getFieldLabel(key));
-        if (usedKeys.has(normalized)) return;
+        const normalizedLabel = normalizeColumnLabel(key);
 
-        usedKeys.add(normalized);
+        if (usedLabels.has(normalizedLabel)) return;
+
+        usedLabels.add(normalizedLabel);
         cleaned[key] = value;
       });
 
@@ -386,17 +407,32 @@ function normalizeRows(rows: unknown[]): DataRow[] {
   });
 }
 
-function getColumns(rows: DataRow[]) {
-  const allColumns = Array.from(
-    new Set(rows.flatMap((row) => Object.keys(row))),
-  ).filter((column) => !isTechnicalIdColumn(column));
+function getColumns(rows: DataRow[]): string[] {
+  const allColumns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))))
+    .filter((column) => !isTechnicalIdColumn(column))
+    .filter((column) => {
+      const label = normalizeColumnLabel(column);
+
+      return ![
+        'id',
+        'respondent',
+        'respondentid',
+        'index',
+        'poradie',
+        'cislo',
+        'row',
+        'riadok',
+      ].includes(label);
+    });
 
   const usedLabels = new Set<string>();
 
-  function acceptColumn(column: string) {
-    const normalized = normalizeColumnKey(getFieldLabel(column));
-    if (usedLabels.has(normalized)) return false;
-    usedLabels.add(normalized);
+  function acceptColumn(column: string): boolean {
+    const normalizedLabel = normalizeColumnLabel(column);
+
+    if (usedLabels.has(normalizedLabel)) return false;
+
+    usedLabels.add(normalizedLabel);
     return true;
   }
 
@@ -406,13 +442,13 @@ function getColumns(rows: DataRow[]) {
 
   const restColumns = allColumns
     .filter((column) => !priorityColumns.includes(column))
-    .sort((a, b) => a.localeCompare(b, 'sk'))
+    .sort((a, b) => getFieldLabel(a).localeCompare(getFieldLabel(b), 'sk'))
     .filter(acceptColumn);
 
   return [...priorityColumns, ...restColumns];
 }
 
-function getSummaryLines(result: AnalysisResult | null) {
+function getSummaryLines(result: AnalysisResult | null): string[] {
   const raw = (result || {}) as any;
 
   const summary = String(raw.summary || '').trim();
@@ -459,7 +495,9 @@ function normalizeFrequencyTables(frequencies: unknown[]): unknown[] {
       return;
     }
 
-    const values = safeArray(table.values || table.rows || table.data || table.items);
+    const values = safeArray(
+      table.values || table.rows || table.data || table.items,
+    );
 
     if (values.length === 0) {
       rows.push(table);
@@ -563,6 +601,7 @@ function getFallbackRespondentCount(
   }
 
   const dataDescription = String(raw.dataDescription || '').trim();
+
   if (dataDescription) {
     const lines = dataDescription
       .split('\n')
@@ -573,28 +612,6 @@ function getFallbackRespondentCount(
   }
 
   return 0;
-}
-
-function getTotalCorrelationCount(arrays: ReturnType<typeof getResultArrays>): number {
-  return (
-    arrays.recommendedCorrelations.length +
-    arrays.pearsonCorrelations.length +
-    arrays.spearmanCorrelations.length
-  );
-}
-
-function getTotalTestsCount(arrays: ReturnType<typeof getResultArrays>): number {
-  return (
-    arrays.recommendedGroupTests.length +
-    arrays.parametricGroupTests.length +
-    arrays.nonParametricGroupTests.length +
-    arrays.hypothesisTests.length +
-    arrays.tTests.length
-  );
-}
-
-function getTotalScaleCount(arrays: ReturnType<typeof getResultArrays>): number {
-  return arrays.scaleScores.length || arrays.scaleDescriptives.length;
 }
 
 function getResultArrays(result: AnalysisResult | null) {
@@ -670,6 +687,7 @@ function getResultArrays(result: AnalysisResult | null) {
   );
 
   const oldTTests = safeArray<any>(raw.tTests || raw.t_tests);
+
   const oldHypothesisTests = safeArray<any>(
     raw.hypothesisTests || raw.hypothesis_tests || raw.testResults,
   );
@@ -750,6 +768,30 @@ function getResultArrays(result: AnalysisResult | null) {
   };
 }
 
+function getTotalCorrelationCount(
+  arrays: ReturnType<typeof getResultArrays>,
+): number {
+  return (
+    arrays.recommendedCorrelations.length +
+    arrays.pearsonCorrelations.length +
+    arrays.spearmanCorrelations.length
+  );
+}
+
+function getTotalTestsCount(arrays: ReturnType<typeof getResultArrays>): number {
+  return (
+    arrays.recommendedGroupTests.length +
+    arrays.parametricGroupTests.length +
+    arrays.nonParametricGroupTests.length +
+    arrays.hypothesisTests.length +
+    arrays.tTests.length
+  );
+}
+
+function getTotalScaleCount(arrays: ReturnType<typeof getResultArrays>): number {
+  return arrays.scaleScores.length || arrays.scaleDescriptives.length;
+}
+
 function getFrequencyRows(table: unknown): DataRow[] {
   if (!isRecord(table)) return [];
 
@@ -788,7 +830,10 @@ function createTableSections(result: AnalysisResult | null): TableSection[] {
       title: 'Frekvenčná analýza',
       description:
         'Početnosti, percentá, validné percentá a kumulatívne percentá po jednotlivých položkách.',
-      rows: arrays.frequencyRows.length > 0 ? arrays.frequencyRows : arrays.frequencies,
+      rows:
+        arrays.frequencyRows.length > 0
+          ? arrays.frequencyRows
+          : arrays.frequencies,
       icon: <BarChart3 className="h-5 w-5" />,
     },
     {
@@ -872,16 +917,14 @@ function createTableSections(result: AnalysisResult | null): TableSection[] {
     {
       key: 'recommendedGroupTests',
       title: 'Odporúčané testovanie rozdielov',
-      description:
-        'Testy odporúčané podľa normality dát a počtu skupín.',
+      description: 'Testy odporúčané podľa normality dát a počtu skupín.',
       rows: arrays.recommendedGroupTests,
       icon: <Brain className="h-5 w-5" />,
     },
     {
       key: 'tTests',
       title: 'T-testy',
-      description:
-        'Starší formát výsledkov t-testov, ak bol v odpovedi dostupný.',
+      description: 'Starší formát výsledkov t-testov, ak bol v odpovedi dostupný.',
       rows: arrays.tTests,
       icon: <Sigma className="h-5 w-5" />,
     },
@@ -911,7 +954,7 @@ function createTableSections(result: AnalysisResult | null): TableSection[] {
   return sections.filter((section) => safeArray(section.rows).length > 0);
 }
 
-function downloadBlob(blob: Blob, fileName: string) {
+function downloadBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
 
@@ -925,9 +968,10 @@ function downloadBlob(blob: Blob, fileName: string) {
   URL.revokeObjectURL(url);
 }
 
-function getFileName(format: ExportFormat) {
+function getFileName(format: ExportFormat): string {
   if (format === 'word') return 'vysledky-analyzy-dat.doc';
   if (format === 'xls') return 'vysledky-analyzy-dat.xls';
+
   return 'vysledky-analyzy-dat.pdf';
 }
 
@@ -945,19 +989,15 @@ function StatCard({
       <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
         {label}
       </p>
-      <p className="mt-1 text-2xl font-black text-white">
-        {value}
-      </p>
-      {note ? (
-        <p className="mt-1 text-xs text-slate-400">
-          {note}
-        </p>
-      ) : null}
+
+      <p className="mt-1 text-2xl font-black text-white">{value}</p>
+
+      {note ? <p className="mt-1 text-xs text-slate-400">{note}</p> : null}
     </div>
   );
 }
 
-function getChartColor(index: number) {
+function getChartColor(index: number): string {
   const colors = [
     '#2563eb',
     '#7c3aed',
@@ -1009,6 +1049,7 @@ function BarChart({
               <span className="truncate font-bold text-slate-200">
                 {item.label}
               </span>
+
               <span className="font-black text-white">
                 {formatNumber(item.value)}
               </span>
@@ -1115,10 +1156,7 @@ function ChartGallery({ result }: { result: AnalysisResult | null }) {
     const rows = getFrequencyRows(table);
     const variable = isRecord(table)
       ? String(
-          table.variable ||
-            table.name ||
-            table.title ||
-            `Premenná ${index + 1}`,
+          table.variable || table.name || table.title || `Premenná ${index + 1}`,
         )
       : `Premenná ${index + 1}`;
 
@@ -1162,7 +1200,9 @@ function ChartGallery({ result }: { result: AnalysisResult | null }) {
         title="Porovnanie priemerov škál a subškál"
         data={scaleDescriptiveRows}
         labelKey="variable"
-        valueKey={scaleDescriptiveRows.some((row) => row.mean !== undefined) ? 'mean' : 'M'}
+        valueKey={
+          scaleDescriptiveRows.some((row) => row.mean !== undefined) ? 'mean' : 'M'
+        }
       />,
     );
   }
@@ -1178,7 +1218,9 @@ function ChartGallery({ result }: { result: AnalysisResult | null }) {
         title="Porovnanie priemerov položiek"
         data={itemDescriptiveRows}
         labelKey="variable"
-        valueKey={itemDescriptiveRows.some((row) => row.mean !== undefined) ? 'mean' : 'M'}
+        valueKey={
+          itemDescriptiveRows.some((row) => row.mean !== undefined) ? 'mean' : 'M'
+        }
       />,
     );
   }
@@ -1228,12 +1270,11 @@ function ChartGallery({ result }: { result: AnalysisResult | null }) {
   if (!charts.length) {
     return (
       <section className="rounded-[28px] border border-white/10 bg-[#0b1020] p-5">
-        <h3 className="text-lg font-black text-white">
-          Grafy
-        </h3>
+        <h3 className="text-lg font-black text-white">Grafy</h3>
+
         <p className="mt-2 text-sm text-slate-400">
-          Z aktuálnych dát sa nepodarilo automaticky vytvoriť grafy. Nahraj
-          Excel alebo CSV s číselnými a kategorizovanými premennými.
+          Z aktuálnych dát sa nepodarilo automaticky vytvoriť grafy. Nahraj Excel
+          alebo CSV s číselnými a kategorizovanými premennými.
         </p>
       </section>
     );
@@ -1259,7 +1300,6 @@ export default function AnalysisResultsModal({
   const chartsRef = useRef<HTMLDivElement | null>(null);
   const tablesRef = useRef<HTMLDivElement | null>(null);
   const interpretationRef = useRef<HTMLDivElement | null>(null);
-  const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -1353,11 +1393,7 @@ export default function AnalysisResultsModal({
         getFallbackRespondentCount(result, arrays.files),
     ) || 0;
 
-  const idColumn = String(
-    meta?.idColumn ||
-      (result as any).idColumn ||
-      '',
-  ).trim();
+  const idColumn = String(meta?.idColumn || (result as any).idColumn || '').trim();
 
   const frequencyCount = arrays.frequencies.length || arrays.frequencyRows.length;
   const itemDescriptiveCount = arrays.itemDescriptives.length;
@@ -1378,11 +1414,37 @@ export default function AnalysisResultsModal({
   return (
     <div
       data-analysis-modal="true"
-      className="fixed inset-0 z-[9999] flex items-start justify-center overflow-hidden bg-black/90 p-2 text-white backdrop-blur-md sm:p-4"
+      className="fixed inset-0 z-[9999] overflow-y-auto overflow-x-hidden bg-black/90 p-2 text-white backdrop-blur-md sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Výsledky analýzy dát"
     >
+      <style jsx global>{`
+        .analysis-modal-scroll {
+          -webkit-overflow-scrolling: touch;
+          touch-action: pan-y;
+          overscroll-behavior: contain;
+          scrollbar-width: thin;
+        }
+
+        .analysis-table-scroll {
+          -webkit-overflow-scrolling: touch;
+          touch-action: pan-x pan-y;
+          overscroll-behavior: contain;
+          scrollbar-width: thin;
+        }
+
+        .analysis-table-scroll table {
+          border-collapse: collapse;
+        }
+
+        @media (max-width: 767px) {
+          [data-analysis-modal='true'] {
+            padding: 0.5rem !important;
+          }
+        }
+      `}</style>
+
       <button
         type="button"
         className="fixed inset-0 cursor-default"
@@ -1390,51 +1452,9 @@ export default function AnalysisResultsModal({
         aria-label="Zavrieť modálne okno"
       />
 
-      <style jsx global>{`
-        .analysis-modal-scroll {
-          -webkit-overflow-scrolling: touch;
-          touch-action: pan-y;
-          overscroll-behavior: contain;
-          scrollbar-width: none;
-          -ms-overflow-style: none;
-        }
-
-        .analysis-modal-scroll::-webkit-scrollbar {
-          width: 0;
-          height: 0;
-          display: none;
-        }
-
-        .analysis-modal-scroll table {
-          border-collapse: collapse;
-        }
-
-        @media (max-width: 767px) {
-          [data-analysis-modal='true'] {
-            align-items: stretch !important;
-          }
-
-          [data-analysis-modal='true'] .analysis-modal-scroll {
-            max-height: none !important;
-            overflow-y: auto !important;
-          }
-        }
-      `}</style>
-
       <div
-        className="relative z-10 my-2 flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#050814] text-white shadow-2xl shadow-black/70 transition-colors duration-300 sm:my-4 sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)]"
-        onWheelCapture={(event) => {
-          const target = event.target as HTMLElement | null;
-          const nativeScrollable = target?.closest?.('[data-native-scroll="true"]');
-
-          if (nativeScrollable) return;
-
-          const scrollElement = contentScrollRef.current;
-          if (!scrollElement) return;
-
-          scrollElement.scrollTop += event.deltaY;
-          event.preventDefault();
-        }}
+        data-analysis-results="true"
+        className="relative z-10 mx-auto my-2 flex max-h-[calc(100dvh-1rem)] min-h-[calc(100dvh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#050814] text-white shadow-2xl shadow-black/70 transition-colors duration-300 sm:my-4 sm:max-h-[calc(100dvh-2rem)] sm:min-h-[calc(100dvh-2rem)]"
       >
         <div className="shrink-0 border-b border-white/10 bg-gradient-to-r from-slate-950 via-[#0b1020] to-slate-950 px-4 py-4 sm:px-7 sm:py-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -1454,9 +1474,9 @@ export default function AnalysisResultsModal({
 
                 <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-300">
                   Výsledky sú rozdelené na frekvencie, deskriptívnu štatistiku
-                  položiek, škály a subškály, normalitu, korelácie, reliabilitu
-                  a testovanie rozdielov medzi skupinami. ID stĺpec je
-                  ignorovaný vo výpočtoch a slúži iba na počet respondentov.
+                  položiek, škály a subškály, normalitu, korelácie, reliabilitu a
+                  testovanie rozdielov medzi skupinami. ID stĺpec je ignorovaný
+                  vo výpočtoch a slúži iba na počet respondentov.
                 </p>
               </div>
             </div>
@@ -1613,9 +1633,8 @@ export default function AnalysisResultsModal({
         </div>
 
         <div
-          ref={contentScrollRef}
           data-analysis-content="true"
-          className="analysis-modal-scroll min-h-0 flex-1 overflow-y-auto scroll-smooth px-4 py-5 sm:px-7"
+          className="analysis-modal-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden scroll-smooth px-4 py-5 sm:px-7"
         >
           <div ref={overviewRef} className="scroll-mt-6">
             <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
@@ -1643,6 +1662,7 @@ export default function AnalysisResultsModal({
                       <AlertTriangle className="h-4 w-4" />
                       Upozornenia
                     </div>
+
                     <ul className="space-y-1">
                       {arrays.warnings.map((item, index) => (
                         <li key={`${String(item)}-${index}`}>
@@ -1674,12 +1694,15 @@ export default function AnalysisResultsModal({
                             <div className="mb-2 text-blue-300">
                               {section.icon}
                             </div>
+
                             <p className="font-black text-white">
                               {section.title}
                             </p>
+
                             <p className="mt-1 text-xs leading-5 text-slate-400">
                               {section.description}
                             </p>
+
                             <p className="mt-2 text-xs font-black text-blue-300">
                               {safeArray(section.rows).length} záznamov
                             </p>
@@ -1714,8 +1737,9 @@ export default function AnalysisResultsModal({
                     </h3>
 
                     <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
-                      Odborné vysvetlenie výsledkov, odporúčanie testov, upozornenie k ID stĺpcu
-                      a text použiteľný do praktickej časti práce.
+                      Odborné vysvetlenie výsledkov, odporúčanie testov,
+                      upozornenie k ID stĺpcu a text použiteľný do praktickej
+                      časti práce.
                     </p>
                   </div>
 
@@ -1733,7 +1757,7 @@ export default function AnalysisResultsModal({
                 ) : null}
 
                 {claudeAgent.text ? (
-                  <div data-native-scroll="true" className="analysis-modal-scroll max-h-[620px] overflow-y-auto whitespace-pre-wrap rounded-2xl border border-white/10 bg-black p-5 text-sm leading-7 text-white shadow-inner">
+                  <div className="analysis-modal-scroll max-h-[620px] overflow-y-auto whitespace-pre-wrap rounded-2xl border border-white/10 bg-black p-5 text-sm leading-7 text-white shadow-inner">
                     {claudeAgent.text}
                   </div>
                 ) : null}
@@ -1746,10 +1770,10 @@ export default function AnalysisResultsModal({
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-200">
                 <BarChart3 className="h-5 w-5" />
               </div>
+
               <div>
-                <h3 className="text-xl font-black text-white">
-                  Grafy
-                </h3>
+                <h3 className="text-xl font-black text-white">Grafy</h3>
+
                 <p className="text-sm text-slate-400">
                   Grafy sa vytvárajú automaticky z frekvencií, deskriptívnych
                   štatistík škál, korelácií a reliability.
@@ -1765,10 +1789,10 @@ export default function AnalysisResultsModal({
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-200">
                 <Table2 className="h-5 w-5" />
               </div>
+
               <div>
-                <h3 className="text-xl font-black text-white">
-                  Tabuľky
-                </h3>
+                <h3 className="text-xl font-black text-white">Tabuľky</h3>
+
                 <p className="text-sm text-slate-400">
                   Každú tabuľku otvoríš samostatne kliknutím na kartu.
                 </p>
@@ -1800,7 +1824,7 @@ export default function AnalysisResultsModal({
                 Akademická interpretácia
               </h3>
 
-              <div data-native-scroll="true" className="analysis-modal-scroll max-h-[620px] overflow-y-auto whitespace-pre-wrap rounded-2xl border border-white/10 bg-black p-5 text-sm leading-7 text-slate-100">
+              <div className="analysis-modal-scroll max-h-[620px] overflow-y-auto whitespace-pre-wrap rounded-2xl border border-white/10 bg-black p-5 text-sm leading-7 text-slate-100">
                 {interpretation}
               </div>
             </section>
@@ -1853,12 +1877,10 @@ function TableCard({
     >
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
-          <div className="mb-2 text-blue-300">
-            {section.icon}
-          </div>
-          <h4 className="text-base font-black text-white">
-            {section.title}
-          </h4>
+          <div className="mb-2 text-blue-300">{section.icon}</div>
+
+          <h4 className="text-base font-black text-white">{section.title}</h4>
+
           <p className="mt-1 text-xs leading-5 text-slate-400">
             {section.description}
           </p>
@@ -1880,6 +1902,7 @@ function TableCard({
                     <span className="font-bold text-slate-400">
                       {getFieldLabel(column)}
                     </span>
+
                     <span className="truncate text-right">
                       {valueToText(row[column])}
                     </span>
@@ -1889,16 +1912,13 @@ function TableCard({
             ))}
           </div>
         ) : (
-          <p className="text-xs text-slate-400">
-            Bez náhľadu.
-          </p>
+          <p className="text-xs text-slate-400">Bez náhľadu.</p>
         )}
       </div>
 
       <div className="mt-4 flex items-center justify-between text-xs">
-        <span className="font-black text-blue-300">
-          {rows.length} záznamov
-        </span>
+        <span className="font-black text-blue-300">{rows.length} záznamov</span>
+
         <span className="inline-flex items-center gap-1 font-black text-slate-400 transition group-hover:text-blue-300">
           Otvoriť
           <ChevronRight className="h-4 w-4" />
@@ -1919,23 +1939,25 @@ function TableDetailModal({
   const columns = getColumns(rows);
 
   return (
-    <div className="fixed inset-0 z-[10000] flex items-start justify-center overflow-hidden bg-black/90 p-2 text-white backdrop-blur-md sm:p-4">
+    <div className="fixed inset-0 z-[10000] overflow-y-auto overflow-x-hidden bg-black/90 p-2 text-white backdrop-blur-md sm:p-4">
       <button
         type="button"
-        className="absolute inset-0 cursor-default"
+        className="fixed inset-0 cursor-default"
         onClick={onClose}
         aria-label="Zavrieť tabuľku"
       />
 
-      <div className="relative z-10 my-2 flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[30px] border border-white/10 bg-[#050814] text-white shadow-2xl sm:my-4 sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)]">
+      <div className="relative z-10 mx-auto my-2 flex max-h-[calc(100dvh-1rem)] min-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[30px] border border-white/10 bg-[#050814] text-white shadow-2xl sm:my-4 sm:max-h-[calc(100dvh-2rem)] sm:min-h-[calc(100dvh-2rem)]">
         <div className="shrink-0 flex items-start justify-between gap-4 border-b border-white/10 px-5 py-5">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
               Detail tabuľky
             </p>
+
             <h3 className="mt-1 text-xl font-black text-white">
               {section.title}
             </h3>
+
             <p className="mt-1 text-sm text-slate-400">
               {section.description}
             </p>
@@ -1951,15 +1973,15 @@ function TableDetailModal({
           </button>
         </div>
 
-        <div className="analysis-modal-scroll min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
-          <div className="overflow-x-auto rounded-2xl border border-white/10">
-            <table className="w-full min-w-[960px] border-collapse text-sm">
+        <div className="analysis-modal-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5">
+          <div className="analysis-table-scroll max-h-full overflow-auto rounded-2xl border border-white/10">
+            <table className="min-w-[960px] border-collapse text-sm">
               <thead className="sticky top-0 z-10 bg-[#0b1020]">
                 <tr>
                   {columns.map((column) => (
                     <th
                       key={column}
-                      className="border-b border-white/10 px-4 py-3 text-left text-xs font-black uppercase tracking-[0.12em] text-slate-300"
+                      className="whitespace-nowrap border-b border-white/10 px-4 py-3 text-left text-xs font-black uppercase tracking-[0.12em] text-slate-300"
                     >
                       {getFieldLabel(column)}
                     </th>
@@ -1976,7 +1998,7 @@ function TableDetailModal({
                     {columns.map((column) => (
                       <td
                         key={`${rowIndex}-${column}`}
-                        className="whitespace-pre-wrap border-b border-white/10 px-4 py-3 align-top leading-6 text-slate-200"
+                        className="max-w-[460px] whitespace-pre-wrap break-words border-b border-white/10 px-4 py-3 align-top leading-6 text-slate-200"
                       >
                         {valueToText(row[column])}
                       </td>

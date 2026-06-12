@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  runFullStatisticalAnalysis,
+  type AnalysisRow,
+  type CombinedScaleDefinition,
+  type ScaleDefinition,
+  type StatisticalAnalysisResult,
+} from '@/components/analysis/analysisStats';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +47,8 @@ type VariableSummary = {
   distinctValues: number;
   variableType: 'numeric' | 'categorical' | 'text';
   measurementLevel: 'scale' | 'nominal' | 'ordinal' | 'text';
+  ignored: boolean;
+  ignoredReason?: string;
   description: string;
 };
 
@@ -171,6 +181,19 @@ type ExcelTable = {
   interpretation?: string;
 };
 
+type ClaudeAgentResult = {
+  enabled: boolean;
+  ok: boolean;
+  provider: 'anthropic';
+  model: string | null;
+  text: string;
+  error: string | null;
+  usage: {
+    input_tokens?: number;
+    output_tokens?: number;
+  } | null;
+};
+
 type AnalysisResult = {
   ok: boolean;
   title: string;
@@ -200,6 +223,11 @@ type AnalysisResult = {
   warnings: string[];
   selectedAnalyses: string[];
   dataDescription: string;
+  idColumn: string | null;
+  ignoredColumns: string[];
+  respondentCount: number;
+  statisticalAnalysis: StatisticalAnalysisResult | null;
+  claudeAgent: ClaudeAgentResult;
 };
 
 const MAX_FILE_SIZE_MB = 50;
@@ -245,8 +273,54 @@ async function fileToBuffer(file: File) {
   return Buffer.from(arrayBuffer);
 }
 
+function normalizeText(value: unknown) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function isIdColumnName(columnName: string) {
+  const normalized = normalizeText(columnName);
+
+  return (
+    normalized === 'id' ||
+    normalized === 'respondent' ||
+    normalized === 'respondentid' ||
+    normalized === 'cislo' ||
+    normalized === 'poradie' ||
+    normalized === 'index' ||
+    normalized === 'row' ||
+    normalized === 'riadok' ||
+    normalized.includes('respondentid')
+  );
+}
+
+function detectIdColumn(headers: string[]) {
+  const exact = headers.find((header) => isIdColumnName(header));
+
+  if (exact) return exact;
+
+  const first = headers[0];
+
+  if (first && normalizeText(first).includes('id')) {
+    return first;
+  }
+
+  return null;
+}
+
 function toNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 1 : 0;
+  }
 
   const cleaned = String(value)
     .trim()
@@ -803,6 +877,7 @@ function detectMeasurementLevel(
   variableType: VariableSummary['variableType'],
   distinctValues: number,
 ): VariableSummary['measurementLevel'] {
+  if (variableType === 'numeric' && distinctValues <= 10) return 'ordinal';
   if (variableType === 'numeric') return 'scale';
   if (variableType === 'categorical' && distinctValues <= 10) return 'ordinal';
   if (variableType === 'categorical') return 'nominal';
@@ -814,7 +889,12 @@ function describeVariable(variable: {
   variableType: VariableSummary['variableType'];
   valid: number;
   distinctValues: number;
+  ignored: boolean;
 }) {
+  if (variable.ignored) {
+    return `Premenná ${variable.name} bola rozpoznaná ako ID/respondent. Slúži iba na poradie a počet respondentov, nie na štatistické výpočty.`;
+  }
+
   if (variable.variableType === 'numeric') {
     return `Premenná ${variable.name} bola rozpoznaná ako numerická premenná s ${variable.valid} platnými hodnotami.`;
   }
@@ -826,13 +906,17 @@ function describeVariable(variable: {
   return `Premenná ${variable.name} bola rozpoznaná ako textová premenná.`;
 }
 
-function analyzeVariables(rows: Record<string, unknown>[]): VariableSummary[] {
+function analyzeVariables(
+  rows: Record<string, unknown>[],
+  idColumn: string | null,
+): VariableSummary[] {
   if (!rows.length) return [];
 
   const totalRows = rows.length;
   const headers = getAllHeaders(rows);
 
   return headers.map((header) => {
+    const ignored = idColumn === header || isIdColumnName(header);
     const values = getColumnValues(rows, header);
 
     const validValues = values.filter((value) => !isMissingValue(value));
@@ -847,11 +931,10 @@ function analyzeVariables(rows: Record<string, unknown>[]): VariableSummary[] {
       validValues.map((value) => String(value).trim()),
     ).size;
 
-    const variableType: VariableSummary['variableType'] =
-      numericRatio >= 0.8
-        ? distinctValues <= 10
-          ? 'categorical'
-          : 'numeric'
+    const variableType: VariableSummary['variableType'] = ignored
+      ? 'text'
+      : numericRatio >= 0.8
+        ? 'numeric'
         : distinctValues <= 20
           ? 'categorical'
           : 'text';
@@ -861,15 +944,17 @@ function analyzeVariables(rows: Record<string, unknown>[]): VariableSummary[] {
         ? numericValues.reduce((total, value) => total + value, 0)
         : null;
 
-    const meanValue = roundNumber(mean(numericValues));
-    const medianValue = roundNumber(median(numericValues));
-    const sdValue = roundNumber(stdDeviation(numericValues));
-    const minValue = numericValues.length
-      ? roundNumber(Math.min(...numericValues))
-      : null;
-    const maxValue = numericValues.length
-      ? roundNumber(Math.max(...numericValues))
-      : null;
+    const meanValue = ignored ? null : roundNumber(mean(numericValues));
+    const medianValue = ignored ? null : roundNumber(median(numericValues));
+    const sdValue = ignored ? null : roundNumber(stdDeviation(numericValues));
+    const minValue =
+      !ignored && numericValues.length
+        ? roundNumber(Math.min(...numericValues))
+        : null;
+    const maxValue =
+      !ignored && numericValues.length
+        ? roundNumber(Math.max(...numericValues))
+        : null;
 
     const base = {
       name: header,
@@ -889,12 +974,18 @@ function analyzeVariables(rows: Record<string, unknown>[]): VariableSummary[] {
       min: minValue,
       maximum: maxValue,
       max: maxValue,
-      sum: roundNumber(sum),
-      skewness: roundNumber(skewness(numericValues)),
-      kurtosis: roundNumber(kurtosis(numericValues)),
+      sum: ignored ? null : roundNumber(sum),
+      skewness: ignored ? null : roundNumber(skewness(numericValues)),
+      kurtosis: ignored ? null : roundNumber(kurtosis(numericValues)),
       distinctValues,
       variableType,
-      measurementLevel: detectMeasurementLevel(variableType, distinctValues),
+      measurementLevel: ignored
+        ? ('text' as const)
+        : detectMeasurementLevel(variableType, distinctValues),
+      ignored,
+      ignoredReason: ignored
+        ? 'ID/respondent sa nepoužíva v štatistických výpočtoch.'
+        : undefined,
     };
 
     return {
@@ -907,40 +998,42 @@ function analyzeVariables(rows: Record<string, unknown>[]): VariableSummary[] {
 function createDescriptiveStatistics(
   variables: VariableSummary[],
 ): DescriptiveStatistic[] {
-  return variables.map((variable) => {
-    const interpretation =
-      variable.variableType === 'numeric'
-        ? `Premenná ${variable.name} má priemer M = ${
-            variable.M ?? '—'
-          }, medián Md = ${variable.Md ?? '—'} a štandardnú odchýlku SD = ${
-            variable.SD ?? '—'
-          }.`
-        : `Premenná ${variable.name} je kategorizovaná alebo textová premenná. Pri tejto premennej je vhodnejšia frekvenčná analýza.`;
+  return variables
+    .filter((variable) => !variable.ignored)
+    .map((variable) => {
+      const interpretation =
+        variable.variableType === 'numeric'
+          ? `Premenná ${variable.name} má priemer M = ${
+              variable.M ?? '—'
+            }, medián Md = ${variable.Md ?? '—'} a štandardnú odchýlku SD = ${
+              variable.SD ?? '—'
+            }.`
+          : `Premenná ${variable.name} je kategorizovaná alebo textová premenná. Pri tejto premennej je vhodnejšia frekvenčná analýza.`;
 
-    return {
-      name: variable.name,
-      variable: variable.name,
-      label: variable.label,
-      valid: variable.valid,
-      n: variable.valid,
-      missing: variable.missing,
-      mean: variable.mean,
-      M: variable.M,
-      median: variable.median,
-      Md: variable.Md,
-      stdDeviation: variable.stdDeviation,
-      standardDeviation: variable.stdDeviation,
-      SD: variable.SD,
-      minimum: variable.minimum,
-      min: variable.min,
-      maximum: variable.maximum,
-      max: variable.max,
-      sum: variable.sum,
-      skewness: variable.skewness,
-      kurtosis: variable.kurtosis,
-      interpretation,
-    };
-  });
+      return {
+        name: variable.name,
+        variable: variable.name,
+        label: variable.label,
+        valid: variable.valid,
+        n: variable.valid,
+        missing: variable.missing,
+        mean: variable.mean,
+        M: variable.M,
+        median: variable.median,
+        Md: variable.Md,
+        stdDeviation: variable.stdDeviation,
+        standardDeviation: variable.stdDeviation,
+        SD: variable.SD,
+        minimum: variable.minimum,
+        min: variable.min,
+        maximum: variable.maximum,
+        max: variable.max,
+        sum: variable.sum,
+        skewness: variable.skewness,
+        kurtosis: variable.kurtosis,
+        interpretation,
+      };
+    });
 }
 
 function createFrequencyTables(
@@ -953,8 +1046,11 @@ function createFrequencyTables(
 
   return variables
     .filter((variable) => {
+      if (variable.ignored) return false;
+
       return (
         variable.variableType === 'categorical' ||
+        variable.measurementLevel === 'ordinal' ||
         variable.distinctValues <= 20 ||
         /^WEM\d+$/i.test(variable.name) ||
         /^JSS\d+$/i.test(variable.name)
@@ -1103,6 +1199,7 @@ function createCorrelationInterpretation(params: {
   variable1: string;
   variable2: string;
   coefficient: number | null;
+  pValue: number | null;
   n: number;
 }) {
   const symbol = params.test === 'Pearson' ? 'r' : 'ρ';
@@ -1111,14 +1208,19 @@ function createCorrelationInterpretation(params: {
       ? 'Pearsonov korelačný koeficient'
       : 'Spearmanov korelačný koeficient';
 
+  const pText =
+    params.pValue === null
+      ? 'p-hodnota nie je dostupná'
+      : `p = ${params.pValue}`;
+
   return [
     `${label} medzi premennými ${params.variable1} a ${params.variable2} je ${symbol} = ${
       params.coefficient ?? '—'
     }.`,
     `Počet párových pozorovaní je n = ${params.n}.`,
+    `${pText}.`,
     `Sila vzťahu: ${getCorrelationStrength(params.coefficient)}.`,
     `Smer vzťahu: ${getCorrelationDirection(params.coefficient)}.`,
-    'Hodnota p nie je v tomto rýchlom výpočte dopočítaná, preto štatistickú významnosť odporúčame overiť v JASP, SPSS, R alebo inom štatistickom softvéri.',
   ].join(' ');
 }
 
@@ -1128,6 +1230,7 @@ function createCorrelationResults(
 ) {
   const numericVariables = variables.filter(
     (variable) =>
+      !variable.ignored &&
       variable.variableType === 'numeric' &&
       getNumericColumnValues(rows, variable.name).length >= 3,
   );
@@ -1179,6 +1282,7 @@ function createCorrelationResults(
           variable1: first.name,
           variable2: second.name,
           coefficient: pearson,
+          pValue: null,
           n: paired.length,
         }),
       });
@@ -1203,6 +1307,7 @@ function createCorrelationResults(
           variable1: first.name,
           variable2: second.name,
           coefficient: spearman,
+          pValue: null,
           n: paired.length,
         }),
       });
@@ -1244,11 +1349,12 @@ function createTTests(
   variables: VariableSummary[],
 ): TTestResult[] {
   const numericVariables = variables.filter(
-    (variable) => variable.variableType === 'numeric',
+    (variable) => !variable.ignored && variable.variableType === 'numeric',
   );
 
   const groupVariables = variables.filter(
     (variable) =>
+      !variable.ignored &&
       variable.variableType === 'categorical' &&
       variable.distinctValues === 2,
   );
@@ -1335,7 +1441,6 @@ function createTTests(
           `Skupina ${groupNames[0]} dosiahla M = ${mean1 ?? '—'}, SD = ${sd1 ?? '—'}, n = ${firstValues.length}.`,
           `Skupina ${groupNames[1]} dosiahla M = ${mean2 ?? '—'}, SD = ${sd2 ?? '—'}, n = ${secondValues.length}.`,
           `Vypočítaná hodnota t = ${t ?? '—'}, df = ${df ?? '—'}.`,
-          'Hodnota p nie je v tomto rýchlom výpočte dopočítaná, preto štatistickú významnosť odporúčame overiť v JASP, SPSS, R alebo inom štatistickom softvéri.',
         ].join(' '),
       });
     }
@@ -1346,9 +1451,10 @@ function createTTests(
 
 function recommendCharts(variables: VariableSummary[]) {
   const charts: RecommendedChart[] = [];
+  const activeVariables = variables.filter((variable) => !variable.ignored);
 
   const findVariable = (patterns: RegExp[]) => {
-    return variables.find((variable) =>
+    return activeVariables.find((variable) =>
       patterns.some((pattern) => pattern.test(variable.name)),
     );
   };
@@ -1454,7 +1560,7 @@ function recommendCharts(variables: VariableSummary[]) {
     );
   }
 
-  const jssSubscales = variables
+  const jssSubscales = activeVariables
     .filter((variable) => {
       return /^JSS_/i.test(variable.name) && !/skore/i.test(variable.name);
     })
@@ -1474,8 +1580,9 @@ function recommendCharts(variables: VariableSummary[]) {
 
 function recommendTests(variables: VariableSummary[]) {
   const tests: RecommendedTest[] = [];
+  const activeVariables = variables.filter((variable) => !variable.ignored);
 
-  const names = variables.map((variable) => variable.name);
+  const names = activeVariables.map((variable) => variable.name);
   const has = (pattern: RegExp) => names.find((name) => pattern.test(name));
 
   const vek = has(/^vek$/i);
@@ -1509,9 +1616,9 @@ function recommendTests(variables: VariableSummary[]) {
     pushTest({
       hypothesis: 'Vzťah medzi vekom a celkovým skóre well-beingu',
       variables: [vek, wemwbs],
-      test: 'Spearmanova korelácia',
+      test: 'Spearmanova korelácia alebo Pearsonova korelácia podľa normality',
       reason:
-        'Vhodné pri nenormálnom rozdelení alebo ordinálnych/škálových dátach.',
+        'Pearson je vhodný pri približne normálnom rozdelení a lineárnom vzťahu, inak Spearman.',
       parametric: false,
     });
   }
@@ -1520,9 +1627,9 @@ function recommendTests(variables: VariableSummary[]) {
     pushTest({
       hypothesis: 'Vzťah medzi vekom a pracovnou spokojnosťou',
       variables: [vek, jss],
-      test: 'Spearmanova korelácia',
+      test: 'Spearmanova alebo Pearsonova korelácia podľa normality',
       reason:
-        'Vhodné na overenie monotónneho vzťahu medzi vekom a skóre spokojnosti.',
+        'Test sa volí podľa normality a charakteru dát.',
       parametric: false,
     });
   }
@@ -1531,7 +1638,7 @@ function recommendTests(variables: VariableSummary[]) {
     pushTest({
       hypothesis: 'Vzťah medzi well-beingom a pracovnou spokojnosťou',
       variables: [wemwbs, jss],
-      test: 'Spearmanova alebo Pearsonova korelácia',
+      test: 'Pearsonova alebo Spearmanova korelácia',
       reason:
         'Pearson možno použiť pri splnení normality a lineárneho vzťahu, inak Spearman.',
       parametric: false,
@@ -1542,7 +1649,7 @@ function recommendTests(variables: VariableSummary[]) {
     pushTest({
       hypothesis: 'Rozdiely v skóre podľa pohlavia',
       variables: compactStrings([pohlavie, wemwbs, jss]),
-      test: 'Mann-Whitney U test alebo nezávislý t-test',
+      test: 'Independent t-test alebo Mann-Whitney U test',
       reason:
         'Pohlavie má dve skupiny. Pri splnení normality možno použiť t-test, inak Mann-Whitney U test.',
       parametric: false,
@@ -1553,7 +1660,7 @@ function recommendTests(variables: VariableSummary[]) {
     pushTest({
       hypothesis: 'Rozdiely v skóre podľa typu podniku',
       variables: compactStrings([typPodniku, wemwbs, jss]),
-      test: 'Mann-Whitney U test alebo nezávislý t-test',
+      test: 'Independent t-test alebo Mann-Whitney U test',
       reason:
         'Typ podniku má dve skupiny, preto je vhodné porovnať dve nezávislé skupiny.',
       parametric: false,
@@ -1564,7 +1671,7 @@ function recommendTests(variables: VariableSummary[]) {
     pushTest({
       hypothesis: 'Rozdiely v skóre podľa rodinného stavu',
       variables: compactStrings([rodinnyStav, wemwbs, jss]),
-      test: 'Kruskal-Wallis test alebo ANOVA',
+      test: 'ANOVA alebo Kruskal-Wallis test',
       reason:
         'Rodinný stav má viac ako dve skupiny, preto je vhodné použiť test pre viac nezávislých skupín.',
       parametric: false,
@@ -1609,6 +1716,7 @@ function createExcelTables(params: {
   recommendedTests: RecommendedTest[];
   correlations: CorrelationResult[];
   tTests: TTestResult[];
+  statisticalAnalysis: StatisticalAnalysisResult | null;
 }) {
   const {
     variables,
@@ -1618,6 +1726,7 @@ function createExcelTables(params: {
     recommendedTests,
     correlations,
     tTests,
+    statisticalAnalysis,
   } = params;
 
   const tables: ExcelTable[] = [];
@@ -1634,6 +1743,8 @@ function createExcelTables(params: {
       'N platných',
       'Chýbajúce',
       'Počet odlišných hodnôt',
+      'Ignorovaná',
+      'Dôvod ignorovania',
     ],
     columns: [
       'name',
@@ -1642,6 +1753,8 @@ function createExcelTables(params: {
       'valid',
       'missing',
       'distinctValues',
+      'ignored',
+      'ignoredReason',
     ],
     rows: variables.map((item) => [
       item.name,
@@ -1650,6 +1763,8 @@ function createExcelTables(params: {
       item.valid,
       item.missing,
       item.distinctValues,
+      item.ignored ? 'áno' : 'nie',
+      item.ignoredReason || '',
     ]),
     data: variables,
   });
@@ -1744,6 +1859,7 @@ function createExcelTables(params: {
       'Premenná 1',
       'Premenná 2',
       'Koeficient',
+      'p',
       'N',
       'Sila',
       'Smer',
@@ -1753,6 +1869,7 @@ function createExcelTables(params: {
       'variable1',
       'variable2',
       'coefficient',
+      'p',
       'n',
       'strength',
       'direction',
@@ -1762,6 +1879,7 @@ function createExcelTables(params: {
       item.variable1,
       item.variable2,
       item.coefficient,
+      item.p,
       item.n,
       item.strength,
       item.direction,
@@ -1787,6 +1905,7 @@ function createExcelTables(params: {
       'n2',
       't',
       'df',
+      'p',
     ],
     columns: [
       'dependentVariable',
@@ -1801,6 +1920,7 @@ function createExcelTables(params: {
       'n2',
       't',
       'df',
+      'p',
     ],
     rows: tTests.map((item) => [
       item.dependentVariable,
@@ -1815,9 +1935,76 @@ function createExcelTables(params: {
       item.n2,
       item.t,
       item.df,
+      item.p,
     ]),
     data: tTests as unknown as Record<string, unknown>[],
   });
+
+  if (statisticalAnalysis) {
+    tables.push({
+      title: 'Normalita dát',
+      name: 'Normalita dát',
+      sheetName: 'Normalita',
+      description: 'Test normality škál a subškál.',
+      headers: ['Premenná', 'N', 'Metóda', 'Štatistika', 'p', 'Odporúčanie'],
+      columns: ['variable', 'valid', 'method', 'statistic', 'pValue', 'note'],
+      rows: statisticalAnalysis.normality.map((item) => [
+        item.variable,
+        item.valid,
+        item.method,
+        item.statistic,
+        item.pValue,
+        item.note,
+      ]),
+      data: statisticalAnalysis.normality as unknown as Record<string, unknown>[],
+    });
+
+    tables.push({
+      title: 'Reliabilita',
+      name: 'Reliabilita',
+      sheetName: 'Reliabilita',
+      description: 'Cronbachovo alfa pre škály a subškály.',
+      headers: ['Škála', 'Počet položiek', 'Validné riadky', 'Cronbach alfa', 'Interpretácia'],
+      columns: ['scaleName', 'items', 'validRows', 'cronbachAlpha', 'interpretation'],
+      rows: statisticalAnalysis.reliability.map((item) => [
+        item.scaleName,
+        item.items.length,
+        item.validRows,
+        item.cronbachAlpha,
+        item.interpretation,
+      ]),
+      data: statisticalAnalysis.reliability as unknown as Record<string, unknown>[],
+    });
+
+    tables.push({
+      title: 'Odporúčané skupinové testy',
+      name: 'Odporúčané skupinové testy',
+      sheetName: 'Testy odporúčané',
+      description: statisticalAnalysis.groupTests.recommendationNote,
+      headers: ['Závislá premenná', 'Skupinová premenná', 'Test', 'Skupiny', 'N', 'Štatistika', 'p', 'Odporúčanie'],
+      columns: [
+        'dependentVariable',
+        'groupVariable',
+        'testType',
+        'groups',
+        'nTotal',
+        'statistic',
+        'pValue',
+        'recommendation',
+      ],
+      rows: statisticalAnalysis.groupTests.recommended.map((item) => [
+        item.dependentVariable,
+        item.groupVariable,
+        item.testType,
+        item.groups.join(', '),
+        item.nTotal,
+        item.statistic,
+        item.pValue,
+        item.recommendation,
+      ]),
+      data: statisticalAnalysis.groupTests.recommended as unknown as Record<string, unknown>[],
+    });
+  }
 
   tables.push({
     title: 'Odporúčané grafy',
@@ -1858,16 +2045,25 @@ function createPracticalText(params: {
   variables: VariableSummary[];
   correlations: CorrelationResult[];
   tTests: TTestResult[];
+  statisticalAnalysis: StatisticalAnalysisResult | null;
 }) {
-  const { variables, correlations, tTests } = params;
+  const { variables, correlations, tTests, statisticalAnalysis } = params;
 
-  const vek = variables.find((variable) => /^vek$/i.test(variable.name));
-  const wemwbs = variables.find((variable) => /WEMWBS/i.test(variable.name));
-  const jss = variables.find((variable) => /^JSS_skore$/i.test(variable.name));
+  const activeVariables = variables.filter((variable) => !variable.ignored);
+
+  const vek = activeVariables.find((variable) => /^vek$/i.test(variable.name));
+  const wemwbs = activeVariables.find((variable) => /WEMWBS/i.test(variable.name));
+  const jss = activeVariables.find((variable) => /^JSS_skore$/i.test(variable.name));
 
   const parts = [
-    'Do praktickej časti práce je vhodné zaradiť najskôr charakteristiku výskumného súboru, následne deskriptívnu štatistiku hlavných premenných, frekvenčné tabuľky kategorizovaných premenných a potom testovanie hypotéz.',
+    'Do praktickej časti práce je vhodné zaradiť najskôr charakteristiku výskumného súboru, následne frekvenčnú analýzu položiek, deskriptívnu štatistiku hlavných škál a subškál, kontrolu normality, korelačnú analýzu, testovanie rozdielov medzi skupinami a reliabilitu dotazníkových škál.',
   ];
+
+  if (statisticalAnalysis?.meta.idColumn) {
+    parts.push(
+      `Stĺpec ${statisticalAnalysis.meta.idColumn} bol rozpoznaný ako ID respondenta. Tento stĺpec sa nepoužíva v štatistických výpočtoch a slúži iba na určenie počtu respondentov N = ${statisticalAnalysis.meta.respondentCount}.`,
+    );
+  }
 
   if (vek) {
     parts.push(
@@ -1899,15 +2095,19 @@ function createPracticalText(params: {
     );
   }
 
+  if (statisticalAnalysis) {
+    parts.push(...statisticalAnalysis.aiRecommendation);
+  }
+
   if (correlations.length > 0) {
     parts.push(
-      `Bolo vytvorených ${correlations.length} orientačných korelačných výpočtov. Pri ich interpretácii je potrebné doplniť štatistickú významnosť p-hodnotou zo štatistického softvéru.`,
+      `Bolo vytvorených ${correlations.length} korelačných výpočtov. Pri interpretácii je potrebné rozlišovať Pearsonovu koreláciu pri približne normálnom rozdelení dát a Spearmanovu koreláciu pri nenormálnom alebo ordinálnom rozdelení dát.`,
     );
   }
 
   if (tTests.length > 0) {
     parts.push(
-      `Bolo vytvorených ${tTests.length} orientačných porovnaní dvoch skupín. Výsledky t-testov je potrebné overiť spolu s predpokladmi normality a homogenity rozptylov.`,
+      `Bolo vytvorených ${tTests.length} porovnaní dvoch skupín. Pri dvoch skupinách sa podľa normality odporúča Independent t-test alebo Mann-Whitney U test.`,
     );
   }
 
@@ -1927,6 +2127,7 @@ function createSummary(params: {
   recommendedTests: RecommendedTest[];
   correlations: CorrelationResult[];
   tTests: TTestResult[];
+  statisticalAnalysis: StatisticalAnalysisResult | null;
 }) {
   const {
     files,
@@ -1937,12 +2138,15 @@ function createSummary(params: {
     recommendedTests,
     correlations,
     tTests,
+    statisticalAnalysis,
   } = params;
 
   const fileNames = files.map((file) => file.fileName).join(', ') || 'bez súboru';
 
   return [
     `Spracované súbory: ${fileNames}.`,
+    `Počet respondentov: ${statisticalAnalysis?.meta.respondentCount ?? 'nezistené'}.`,
+    `Ignorovaný ID stĺpec: ${statisticalAnalysis?.meta.idColumn ?? 'nezistený'}.`,
     `Počet identifikovaných premenných: ${variables.length}.`,
     `Počet deskriptívnych výpočtov: ${descriptiveStatistics.length}.`,
     `Počet frekvenčných tabuliek: ${frequencyTables.length}.`,
@@ -1950,6 +2154,7 @@ function createSummary(params: {
     `Počet orientačných t-testov: ${tTests.length}.`,
     `Počet odporúčaných grafov: ${recommendedCharts.length}.`,
     `Počet odporúčaných štatistických testov: ${recommendedTests.length}.`,
+    `Nový štatistický engine: ${statisticalAnalysis ? 'zapnutý' : 'nezapnutý'}.`,
   ].join('\n');
 }
 
@@ -1963,6 +2168,7 @@ function createFullText(params: {
   tTests: TTestResult[];
   practicalText: string;
   warnings: string[];
+  statisticalAnalysis: StatisticalAnalysisResult | null;
 }) {
   const {
     variables,
@@ -1974,11 +2180,12 @@ function createFullText(params: {
     tTests,
     practicalText,
     warnings,
+    statisticalAnalysis,
   } = params;
 
   const variableText = variables
     .map((variable) => {
-      return `${variable.name}: validné=${variable.valid}, chýbajúce=${variable.missing}, typ=${variable.variableType}, úroveň=${variable.measurementLevel}`;
+      return `${variable.name}: validné=${variable.valid}, chýbajúce=${variable.missing}, typ=${variable.variableType}, úroveň=${variable.measurementLevel}, ignorovaná=${variable.ignored ? 'áno' : 'nie'}`;
     })
     .join('\n');
 
@@ -2012,7 +2219,7 @@ function createFullText(params: {
     .map((item) => {
       return `${item.test}: ${item.variable1} × ${item.variable2}, koeficient=${
         item.coefficient ?? '—'
-      }, n=${item.n}, sila=${item.strength}, smer=${item.direction}`;
+      }, p=${item.p ?? '—'}, n=${item.n}, sila=${item.strength}, smer=${item.direction}`;
     })
     .join('\n');
 
@@ -2021,9 +2228,34 @@ function createFullText(params: {
     .map((item) => {
       return `${item.name}: ${item.group1} M=${item.mean1 ?? '—'} vs. ${
         item.group2
-      } M=${item.mean2 ?? '—'}, t=${item.t ?? '—'}, df=${item.df ?? '—'}`;
+      } M=${item.mean2 ?? '—'}, t=${item.t ?? '—'}, df=${item.df ?? '—'}, p=${item.p ?? '—'}`;
     })
     .join('\n');
+
+  const normalityText = statisticalAnalysis
+    ? statisticalAnalysis.normality
+        .map((item) => {
+          return `${item.variable}: ${item.method}, štatistika=${item.statistic ?? '—'}, p=${item.pValue ?? '—'}, ${item.note}`;
+        })
+        .join('\n')
+    : '';
+
+  const reliabilityText = statisticalAnalysis
+    ? statisticalAnalysis.reliability
+        .map((item) => {
+          return `${item.scaleName}: Cronbach alfa=${item.cronbachAlpha ?? '—'}, ${item.interpretation}`;
+        })
+        .join('\n')
+    : '';
+
+  const recommendedGroupTestsText = statisticalAnalysis
+    ? statisticalAnalysis.groupTests.recommended
+        .slice(0, 40)
+        .map((item) => {
+          return `${item.testType}: ${item.dependentVariable} podľa ${item.groupVariable}, štatistika=${item.statistic ?? '—'}, p=${item.pValue ?? '—'}, ${item.recommendation}`;
+        })
+        .join('\n')
+    : '';
 
   const chartText = recommendedCharts
     .map((chart) => {
@@ -2060,21 +2292,356 @@ ${descriptiveText || 'Nebola vytvorená deskriptívna štatistika.'}
 4. Frekvenčné tabuľky
 ${frequencyText || 'Neboli vytvorené frekvenčné tabuľky.'}
 
-5. Korelačná analýza
+5. Normalita dát
+${normalityText || 'Normalita dát nebola vypočítaná, pravdepodobne neboli definované škály/subškály.'}
+
+6. Korelačná analýza
 ${correlationText || 'Neboli vytvorené korelačné výpočty.'}
 
-6. Orientačné t-testy
-${tTestText || 'Neboli vytvorené orientačné t-testy.'}
+7. Skupinové testy
+${recommendedGroupTestsText || tTestText || 'Neboli vytvorené skupinové testy.'}
 
-7. Odporúčané grafy
+8. Reliabilita
+${reliabilityText || 'Reliabilita nebola vypočítaná, pravdepodobne neboli zadané definície škál/subškál.'}
+
+9. Odporúčané grafy
 ${chartText || 'Neboli navrhnuté grafy.'}
 
-8. Odporúčané štatistické testy
+10. Odporúčané štatistické testy
 ${testText || 'Neboli navrhnuté testy.'}
 
-9. Text do praktickej časti
+11. Text do praktickej časti
 ${practicalText}
 `);
+}
+
+function parseBoolean(value: FormDataEntryValue | null) {
+  const text = String(value || '').trim().toLowerCase();
+
+  return (
+    text === 'true' ||
+    text === '1' ||
+    text === 'yes' ||
+    text === 'ano' ||
+    text === 'áno'
+  );
+}
+
+function parseJsonArray<T>(value: FormDataEntryValue | null): T[] {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(String(value));
+
+    if (Array.isArray(parsed)) {
+      return parsed as T[];
+    }
+
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function parseStringArray(value: FormDataEntryValue | null): string[] {
+  if (!value) return [];
+
+  const raw = String(value).trim();
+
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item)).filter(Boolean);
+    }
+  } catch {
+    // fallback nižšie
+  }
+
+  return raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function toAnalysisRows(rows: Record<string, unknown>[]): AnalysisRow[] {
+  return rows.map((row) => {
+    const output: AnalysisRow = {};
+
+    for (const [key, value] of Object.entries(row)) {
+      if (
+        typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean' ||
+        value === null ||
+        value === undefined
+      ) {
+        output[key] = value;
+      } else {
+        output[key] = String(value);
+      }
+    }
+
+    return output;
+  });
+}
+
+function safeStringify(value: unknown, maxLength = 45000) {
+  try {
+    const text = JSON.stringify(value, null, 2);
+
+    if (text.length <= maxLength) {
+      return text;
+    }
+
+    return `${text.slice(0, maxLength)}\n\n[SKRÁTENÉ: výsledok bol príliš dlhý pre jeden Claude request]`;
+  } catch {
+    return String(value);
+  }
+}
+
+function normalizeLanguage(language: unknown) {
+  const value = String(language || '').trim().toLowerCase();
+
+  if (value === 'cs' || value === 'cz') return 'češtine';
+  if (value === 'en') return 'angličtine';
+  if (value === 'de') return 'nemčine';
+  if (value === 'pl') return 'poľštine';
+  if (value === 'hu') return 'maďarčine';
+
+  return 'slovenčine';
+}
+
+function getClaudeModel() {
+  return process.env.ANTHROPIC_MODEL?.trim() || 'claude-sonnet-4-5';
+}
+
+function buildClaudeSystemPrompt(languageLabel: string) {
+  return `
+Si Claude AI agent integrovaný v aplikácii ZEDPERA, modul Analýza dát.
+
+Tvoja úloha:
+- interpretovať štatistickú analýzu pre študenta,
+- vysvetliť výsledky odborne, ale zrozumiteľne,
+- upozorniť, že ID/respondent sa nepoužíva vo výpočtoch,
+- vysvetliť frekvenčnú analýzu, deskriptívnu štatistiku, škály, subškály, normalitu, korelácie, reliabilitu a skupinové testy,
+- odporučiť Pearson alebo Spearman podľa normality,
+- odporučiť Independent t-test/ANOVA alebo Mann-Whitney/Kruskal-Wallis podľa počtu skupín a normality,
+- nepridávať čísla, ktoré nie sú vo vstupných dátach,
+- ak niečo chýba, jasne povedať, že to nie je možné spoľahlivo vyhodnotiť.
+
+Metodické pravidlá:
+1. ID stĺpec je iba identifikátor respondenta a nikdy sa neinterpretuje ako premenná.
+2. Frekvenčná analýza sa robí po jednotlivých položkách.
+3. Deskriptívna štatistika pre odbornú prácu má byť najmä po škálach a subškálach.
+4. Pri štandardizovaných dotazníkoch je potrebné vypočítať skóre škál a subškál.
+5. Reliabilita sa hodnotí cez Cronbachovo alfa.
+6. Ak normalita nie je potvrdená, odporúčaj neparametrické postupy.
+7. Píš v ${languageLabel}.
+`.trim();
+}
+
+function buildClaudeUserPrompt(params: {
+  analysisResult: unknown;
+  fileName: string;
+  language: string;
+  userQuestion: string;
+}) {
+  const languageLabel = normalizeLanguage(params.language);
+
+  return `
+Jazyk odpovede: ${languageLabel}
+
+Názov súboru:
+${params.fileName || 'nezadaný'}
+
+Otázka používateľa:
+${params.userQuestion || 'Vysvetli výsledky štatistickej analýzy odborne a zrozumiteľne.'}
+
+Štatistický výsledok zo ZEDPERA:
+${safeStringify(params.analysisResult)}
+
+Požadovaná štruktúra odpovede:
+1. Stručné zhrnutie dát
+2. Upozornenie k ID stĺpcu
+3. Frekvenčná analýza
+4. Deskriptívna štatistika
+5. Škály a subškály
+6. Normalita dát
+7. Korelačná analýza – Pearson/Spearman
+8. Testovanie rozdielov – t-test, ANOVA, Mann-Whitney, Kruskal-Wallis
+9. Reliabilita – Cronbachovo alfa
+10. Odporúčanie pre študenta
+11. Text použiteľný do práce
+
+Nepíš falošné hodnoty. Ak údaj nie je vo výsledku, napíš, že údaj nebol dostupný.
+`.trim();
+}
+
+type ClaudeTextBlock = {
+  type: 'text';
+  text: string;
+};
+
+type ClaudeMessageResponse = {
+  content?: Array<ClaudeTextBlock | Record<string, unknown>>;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+  };
+  error?: {
+    type?: string;
+    message?: string;
+  };
+};
+
+function extractClaudeText(data: ClaudeMessageResponse) {
+  const blocks = Array.isArray(data.content) ? data.content : [];
+
+  return blocks
+    .map((block) => {
+      if (block && block.type === 'text' && 'text' in block) {
+        return String(block.text || '');
+      }
+
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+}
+
+async function runClaudeAgent(params: {
+  enabled: boolean;
+  analysisResult: unknown;
+  fileName: string;
+  language: string;
+  userQuestion: string;
+}): Promise<ClaudeAgentResult> {
+  const model = getClaudeModel();
+
+  if (!params.enabled) {
+    return {
+      enabled: false,
+      ok: false,
+      provider: 'anthropic',
+      model,
+      text: '',
+      error: null,
+      usage: null,
+    };
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+
+  if (!apiKey) {
+    return {
+      enabled: true,
+      ok: false,
+      provider: 'anthropic',
+      model,
+      text: '',
+      error:
+        'Claude AI agent je zapnutý, ale chýba ANTHROPIC_API_KEY v .env.local alebo vo Vercel Environment Variables.',
+      usage: null,
+    };
+  }
+
+  try {
+    const languageLabel = normalizeLanguage(params.language);
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 3500,
+        temperature: 0.2,
+        system: buildClaudeSystemPrompt(languageLabel),
+        messages: [
+          {
+            role: 'user',
+            content: buildClaudeUserPrompt({
+              analysisResult: params.analysisResult,
+              fileName: params.fileName,
+              language: params.language,
+              userQuestion: params.userQuestion,
+            }),
+          },
+        ],
+      }),
+    });
+
+    const data = (await response.json()) as ClaudeMessageResponse;
+
+    if (!response.ok) {
+      return {
+        enabled: true,
+        ok: false,
+        provider: 'anthropic',
+        model,
+        text: '',
+        error:
+          data.error?.message ||
+          `Claude API chyba: ${response.status} ${response.statusText}`,
+        usage: data.usage || null,
+      };
+    }
+
+    return {
+      enabled: true,
+      ok: true,
+      provider: 'anthropic',
+      model,
+      text: extractClaudeText(data),
+      error: null,
+      usage: data.usage || null,
+    };
+  } catch (error) {
+    return {
+      enabled: true,
+      ok: false,
+      provider: 'anthropic',
+      model,
+      text: '',
+      error: getErrorMessage(error),
+      usage: null,
+    };
+  }
+}
+
+function createSelectedAnalyses(statisticalAnalysis: StatisticalAnalysisResult | null) {
+  const selected = [
+    'frequency',
+    'descriptive',
+    'correlation',
+    'pearson',
+    'spearman',
+    'ttest',
+    'charts',
+    'interpretation',
+  ];
+
+  if (statisticalAnalysis) {
+    selected.push(
+      'normality',
+      'reliability',
+      'scales',
+      'subscales',
+      'anova',
+      'mann-whitney',
+      'kruskal-wallis',
+      'claude-agent',
+    );
+  }
+
+  return selected;
 }
 
 export async function POST(req: NextRequest) {
@@ -2119,8 +2686,13 @@ export async function POST(req: NextRequest) {
     );
 
     const allRows = mergeRows(extractedFiles);
+    const headers = getAllHeaders(allRows);
 
-    const variables = analyzeVariables(allRows);
+    const explicitIdColumn = String(formData.get('idColumn') || '').trim();
+    const detectedIdColumn = detectIdColumn(headers);
+    const idColumn = explicitIdColumn || detectedIdColumn;
+
+    const variables = analyzeVariables(allRows, idColumn);
     const descriptiveStatistics = createDescriptiveStatistics(variables);
     const frequencyTables = createFrequencyTables(allRows, variables);
     const recommendedCharts = recommendCharts(variables);
@@ -2133,6 +2705,29 @@ export async function POST(req: NextRequest) {
 
     const tTests = createTTests(allRows, variables);
 
+    const scales = parseJsonArray<ScaleDefinition>(formData.get('scales'));
+    const combinedScales = parseJsonArray<CombinedScaleDefinition>(
+      formData.get('combinedScales'),
+    );
+    const groupColumns = parseStringArray(formData.get('groupColumns'));
+
+    let statisticalAnalysis: StatisticalAnalysisResult | null = null;
+
+    if (allRows.length > 0) {
+      statisticalAnalysis = runFullStatisticalAnalysis(
+        toAnalysisRows(allRows),
+        {
+          idColumn: idColumn || undefined,
+          scales,
+          combinedScales,
+          groupColumns,
+          alpha: 0.05,
+          includeFrequencies: true,
+          includeItemDescriptives: true,
+        },
+      );
+    }
+
     const warnings = extractedFiles.flatMap((file) => file.warnings);
 
     if (!allRows.length) {
@@ -2141,22 +2736,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (correlations.length > 0) {
+    if (idColumn) {
       warnings.push(
-        'Korelácie sú vypočítané orientačne bez p-hodnôt. Štatistickú významnosť odporúčame overiť v JASP, SPSS, R alebo inom štatistickom softvéri.',
+        `Stĺpec "${idColumn}" bol rozpoznaný ako ID/respondent. Nebol použitý v korelácii, t-teste, ANOVA, reliabilite ani v iných štatistických výpočtoch.`,
       );
     }
 
-    if (tTests.length > 0) {
+    if (!scales.length) {
       warnings.push(
-        'T-testy sú vypočítané orientačne bez p-hodnôt. Pred interpretáciou treba overiť normalitu, homogenitu rozptylov a štatistickú významnosť.',
+        'Neboli zadané definície škál a subškál. Deskriptíva položiek a frekvencie budú vypočítané, ale pre štandardizované dotazníky odporúčame doplniť škály/subškály.',
       );
+    }
+
+    if (statisticalAnalysis?.correlations.recommendationNote) {
+      warnings.push(statisticalAnalysis.correlations.recommendationNote);
+    }
+
+    if (statisticalAnalysis?.groupTests.recommendationNote) {
+      warnings.push(statisticalAnalysis.groupTests.recommendationNote);
     }
 
     const practicalText = createPracticalText({
       variables,
       correlations,
       tTests,
+      statisticalAnalysis,
     });
 
     const summary = createSummary({
@@ -2168,6 +2772,7 @@ export async function POST(req: NextRequest) {
       recommendedTests,
       correlations,
       tTests,
+      statisticalAnalysis,
     });
 
     const fullText = createFullText({
@@ -2180,6 +2785,7 @@ export async function POST(req: NextRequest) {
       tTests,
       practicalText,
       warnings,
+      statisticalAnalysis,
     });
 
     const excelTables = createExcelTables({
@@ -2190,12 +2796,45 @@ export async function POST(req: NextRequest) {
       recommendedTests,
       correlations,
       tTests,
+      statisticalAnalysis,
     });
 
     const hypothesisTests: Array<CorrelationResult | TTestResult> = [
       ...correlations,
       ...tTests,
     ];
+
+    const useClaudeAgent =
+      parseBoolean(formData.get('useClaudeAgent')) ||
+      parseBoolean(formData.get('claude')) ||
+      parseBoolean(formData.get('runClaude'));
+
+    const language = String(formData.get('language') || 'sk');
+    const userQuestion = String(
+      formData.get('userQuestion') ||
+        'Vytvor odbornú interpretáciu štatistickej analýzy pre študenta vrátane odporúčania testov.',
+    );
+
+    const analysisForClaude = {
+      summary,
+      variables,
+      warnings,
+      descriptiveStatistics,
+      frequencyTables,
+      recommendedTests,
+      correlations,
+      tTests,
+      statisticalAnalysis,
+      practicalText,
+    };
+
+    const claudeAgent = await runClaudeAgent({
+      enabled: useClaudeAgent,
+      analysisResult: analysisForClaude,
+      fileName: extractedFiles.map((file) => file.fileName).join(', '),
+      language,
+      userQuestion,
+    });
 
     const result: AnalysisResult = {
       ok: true,
@@ -2221,20 +2860,21 @@ export async function POST(req: NextRequest) {
       excelTables,
       tables: excelTables,
       practicalText,
-      interpretation: practicalText,
-      fullText,
+      interpretation: claudeAgent.ok && claudeAgent.text ? claudeAgent.text : practicalText,
+      fullText:
+        claudeAgent.ok && claudeAgent.text
+          ? `${fullText}\n\n\nCLAUDE AI AGENT – ODBORNÁ INTERPRETÁCIA\n\n${claudeAgent.text}`
+          : fullText,
       warnings,
-      selectedAnalyses: [
-        'frequency',
-        'descriptive',
-        'correlation',
-        'pearson',
-        'spearman',
-        'ttest',
-        'charts',
-        'interpretation',
-      ],
+      selectedAnalyses: createSelectedAnalyses(statisticalAnalysis),
       dataDescription: recordsToText(allRows).slice(0, 20_000),
+      idColumn: idColumn || null,
+      ignoredColumns: idColumn ? [idColumn] : [],
+      respondentCount:
+        statisticalAnalysis?.meta.respondentCount ||
+        allRows.length,
+      statisticalAnalysis,
+      claudeAgent,
     };
 
     return NextResponse.json(result);

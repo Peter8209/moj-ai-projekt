@@ -31,17 +31,24 @@ const TECHNICAL_COLUMNS = [
   'id',
   'ID',
   'Id',
+  'iD',
   'respondent',
   'respondent_id',
   'respondent id',
   'Respondent',
   'Respondent ID',
+  'respondentId',
+  'respondentID',
+  'row_id',
+  'rowid',
   'index',
+  'Index',
   'poradie',
   'Poradie',
   'cislo',
   'číslo',
   'c',
+  'C',
   'timestamp',
   'datum',
   'dátum',
@@ -62,10 +69,38 @@ function normalizeKey(key: string): string {
     .replace(/[^\w]/g, '');
 }
 
+function normalizeLabel(label: string): string {
+  return normalizeKey(label)
+    .replace(/^id_/, '')
+    .replace(/_id$/, '')
+    .replace(/^respondent_/, '')
+    .replace(/_respondent$/, '');
+}
+
 function isTechnicalColumn(key: string): boolean {
   const normalized = normalizeKey(key);
 
   return TECHNICAL_COLUMNS.map(normalizeKey).includes(normalized);
+}
+
+function isIdLikeColumn(key: string, label?: string): boolean {
+  const normalizedKey = normalizeKey(key);
+  const normalizedLabel = normalizeKey(label || key);
+
+  const blocked = new Set([
+    'id',
+    'respondent_id',
+    'respondentid',
+    'respondent',
+    'row_id',
+    'rowid',
+    'index',
+    'poradie',
+    'cislo',
+    'c',
+  ]);
+
+  return blocked.has(normalizedKey) || blocked.has(normalizedLabel);
 }
 
 function formatNumber(value: number): string {
@@ -300,6 +335,7 @@ function formatCellValue(value: RowValue): string {
     if (entries.length === 0) return '—';
 
     const formattedEntries = entries
+      .filter(([key]) => !isIdLikeColumn(key))
       .map(([key, val]): string | null => {
         if (val === null || val === undefined || val === '') return null;
 
@@ -401,34 +437,50 @@ function hasAnyVisibleValue(
 
 function dedupeColumns(columns: NormalizedColumn[]): NormalizedColumn[] {
   const result: NormalizedColumn[] = [];
-  const usedLabels = new Set<string>();
+  const usedColumnNames = new Set<string>();
   const variableSourceKeys: string[] = [];
 
   for (const column of columns) {
-    if (isTechnicalColumn(column.key)) {
+    const safeKey = String(column.key || '');
+    const safeLabel = String(column.label || safeKey);
+
+    if (isTechnicalColumn(safeKey) || isIdLikeColumn(safeKey, safeLabel)) {
       continue;
     }
 
-    if (isVariableLikeColumn(column.key)) {
-      variableSourceKeys.push(column.key);
+    if (isVariableLikeColumn(safeKey)) {
+      variableSourceKeys.push(safeKey);
       continue;
     }
 
-    const normalizedLabel = normalizeKey(column.label);
+    const normalizedKey = normalizeKey(safeKey);
+    const normalizedLabel = normalizeLabel(safeLabel);
+    const uniqueName = `${normalizedKey}__${normalizedLabel}`;
 
-    if (usedLabels.has(normalizedLabel)) {
+    if (
+      usedColumnNames.has(normalizedKey) ||
+      usedColumnNames.has(normalizedLabel) ||
+      usedColumnNames.has(uniqueName)
+    ) {
       continue;
     }
 
-    usedLabels.add(normalizedLabel);
-    result.push(column);
+    usedColumnNames.add(normalizedKey);
+    usedColumnNames.add(normalizedLabel);
+    usedColumnNames.add(uniqueName);
+
+    result.push({
+      key: safeKey,
+      label: safeLabel,
+      sourceKeys: column.sourceKeys,
+    });
   }
 
   if (variableSourceKeys.length > 0) {
     result.unshift({
       key: '__variable__',
       label: 'Premenná / škála',
-      sourceKeys: variableSourceKeys,
+      sourceKeys: Array.from(new Set(variableSourceKeys)),
     });
   }
 
@@ -457,8 +509,8 @@ function normalizeColumns(
 
   if (Array.isArray(table.columns) && table.columns.length > 0) {
     columns = table.columns.map((column) => ({
-      key: String(column.key),
-      label: column.label || getColumnLabel(String(column.key)),
+      key: String(column.key || ''),
+      label: String(column.label || getColumnLabel(String(column.key || ''))),
     }));
   } else {
     const allKeys = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
@@ -535,7 +587,7 @@ export default function AnalysisTable({ table }: Props) {
   return (
     <div
       data-analysis-table="true"
-      className="overflow-hidden rounded-3xl border border-white/10 bg-black/20"
+      className="w-full min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-black/20"
     >
       <div className="border-b border-white/10 bg-white/[0.045] px-4 py-4">
         <div className="flex items-center gap-2">
@@ -560,10 +612,10 @@ export default function AnalysisTable({ table }: Props) {
       ) : (
         <div
           data-analysis-table-wrapper="true"
-          className="overflow-x-auto"
+          className="max-h-[70vh] w-full overflow-auto overscroll-contain"
         >
-          <table className="min-w-full border-collapse text-left text-sm">
-            <thead>
+          <table className="min-w-max border-collapse text-left text-sm">
+            <thead className="sticky top-0 z-10 bg-slate-950">
               <tr className="border-b border-white/10 bg-white/[0.035]">
                 {columns.map((column) => (
                   <th
@@ -585,7 +637,7 @@ export default function AnalysisTable({ table }: Props) {
                   {columns.map((column) => (
                     <td
                       key={`${rowIndex}-${column.key}`}
-                      className="max-w-[360px] whitespace-pre-wrap px-4 py-3 align-top text-slate-200"
+                      className="max-w-[420px] whitespace-pre-wrap break-words px-4 py-3 align-top text-slate-200"
                     >
                       {renderCellValue(getCellValue(row, column))}
                     </td>

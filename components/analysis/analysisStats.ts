@@ -8,7 +8,7 @@
  * - počet respondentov N,
  * - frekvenčnú analýzu po položkách,
  * - deskriptívnu štatistiku po položkách,
- * - výpočet škál a subškál,
+ * - automatické aj manuálne škály a subškály,
  * - deskriptívnu štatistiku po škálach a subškálách,
  * - normalitu dát,
  * - Pearsonovu a Spearmanovu koreláciu,
@@ -52,125 +52,51 @@ export type TestRecommendation =
   | 'not-enough-data';
 
 export interface ScaleDefinition {
-  /**
-   * Interné ID škály.
-   * Príklad: "sembu_father_rejection"
-   */
   id: string;
-
-  /**
-   * Názov zobrazovaný používateľovi.
-   * Príklad: "s-EMBU Otec – Odmietanie"
-   */
   name: string;
-
-  /**
-   * Položky, z ktorých sa škála počíta.
-   * Môžu byť:
-   * - názvy stĺpcov: ["Otec_1", "Otec_4"]
-   * - čísla položiek: [1, 4, 7]
-   *
-   * Ak použiješ čísla, systém sa pokúsi nájsť stĺpec, ktorý obsahuje dané číslo položky.
-   */
   items: ScaleItemReference[];
-
-  /**
-   * Reverzne kódované položky.
-   * Príklad: [17] alebo ["17R"] alebo ["Položka 17"]
-   */
   reverseItems?: ScaleItemReference[];
-
-  /**
-   * Minimum položky.
-   * Pri Likertovej škále napr. 1.
-   */
   minValue?: number;
-
-  /**
-   * Maximum položky.
-   * Pri Likertovej škále napr. 4 alebo 5.
-   */
   maxValue?: number;
-
-  /**
-   * Spôsob výpočtu škály.
-   * sum = súčet položiek
-   * mean = priemer položiek
-   */
   scoring?: ScaleScoringMode;
-
-  /**
-   * Voliteľný popis.
-   */
   description?: string;
 }
 
 export interface CombinedScaleDefinition {
-  /**
-   * Interné ID kombinovanej škály.
-   */
   id: string;
-
-  /**
-   * Názov kombinovanej škály.
-   * Príklad: "s-EMBU Celkom – Odmietanie"
-   */
   name: string;
-
-  /**
-   * ID škál, ktoré sa majú spojiť.
-   * Príklad: ["sembu_father_rejection", "sembu_mother_rejection"]
-   */
   scaleIds: string[];
-
-  /**
-   * sum = súčet škál
-   * mean = priemer škál
-   */
   scoring?: ScaleScoringMode;
-
   description?: string;
 }
 
 export interface StatisticalAnalysisOptions {
-  /**
-   * Explicitne zadaný ID stĺpec.
-   * Ak nezadáš, systém sa pokúsi ID stĺpec nájsť automaticky.
-   */
   idColumn?: string;
-
-  /**
-   * Definície škál a subškál.
-   */
   scales?: ScaleDefinition[];
-
-  /**
-   * Definície kombinovaných škál.
-   * Napr. otec + matka = celkové skóre.
-   */
   combinedScales?: CombinedScaleDefinition[];
-
-  /**
-   * Skupinové stĺpce pre t-test, ANOVA, Mann-Whitney, Kruskal-Wallis.
-   * Príklad: ["pohlavie", "rocnik", "skupina"]
-   */
   groupColumns?: string[];
-
-  /**
-   * Alfa hladina významnosti.
-   * Predvolené: 0.05
-   */
   alpha?: number;
-
-  /**
-   * Či počítať aj deskriptívu po jednotlivých položkách.
-   */
   includeItemDescriptives?: boolean;
+  includeFrequencies?: boolean;
 
   /**
-   * Či počítať frekvenčnú analýzu po jednotlivých položkách.
+   * Ak true, systém sa pokúsi automaticky rozpoznať známe škály:
+   * - WEM / WEMWBS,
+   * - JSS,
+   * - s-EMBU,
+   * - školská začlenenosť.
+   *
+   * Predvolené: true.
    */
-  includeFrequencies?: boolean;
+  autoDetectScales?: boolean;
+
+  /**
+   * Ak true, pri absencii škál sa pre normalitu, korelácie a skupinové testy
+   * použijú numerické premenné ako náhradné skóre.
+   *
+   * Predvolené: true.
+   */
+  fallbackToNumericVariables?: boolean;
 }
 
 export interface FrequencyValueResult {
@@ -270,8 +196,13 @@ export interface StatisticalAnalysisResult {
     idColumn: string | null;
     ignoredColumns: string[];
     numericColumns: string[];
+    ordinalNumericColumns: string[];
+    continuousNumericColumns: string[];
     groupColumns: string[];
     alpha: number;
+    autoDetectedScaleCount: number;
+    manualScaleCount: number;
+    fallbackUsed: boolean;
   };
 
   frequencies: FrequencyAnalysisResult[];
@@ -309,68 +240,127 @@ export function runFullStatisticalAnalysis(
   options: StatisticalAnalysisOptions = {},
 ): StatisticalAnalysisResult {
   const alpha = options.alpha ?? 0.05;
+  const autoDetectScales = options.autoDetectScales !== false;
+  const fallbackToNumericVariables = options.fallbackToNumericVariables !== false;
 
   const cleanRows = normalizeRows(rows);
   const columns = getColumns(cleanRows);
 
-  const idColumn = options.idColumn ?? detectIdColumn(columns);
+  const idColumn = options.idColumn ?? detectIdColumn(columns, cleanRows);
   const ignoredColumns = idColumn ? [idColumn] : [];
 
-  const candidateColumns = columns.filter((column) => !ignoredColumns.includes(column));
+  const candidateColumns = columns.filter((column) => {
+    if (ignoredColumns.includes(column)) return false;
+    if (isIdColumnName(column)) return false;
+
+    return true;
+  });
 
   const numericColumns = candidateColumns.filter((column) =>
     isMostlyNumeric(cleanRows.map((row) => row[column])),
   );
 
-  const autoGroupColumns = candidateColumns.filter((column) =>
-    !numericColumns.includes(column) && hasReasonableGroupCount(cleanRows.map((row) => row[column])),
+  const ordinalNumericColumns = numericColumns.filter((column) =>
+    looksOrdinalOrLikert(cleanRows.map((row) => row[column])),
   );
 
-  const groupColumns = uniqueStrings([...(options.groupColumns ?? []), ...autoGroupColumns]).filter(
-    (column) => columns.includes(column) && column !== idColumn,
+  const continuousNumericColumns = numericColumns.filter(
+    (column) => !ordinalNumericColumns.includes(column),
   );
+
+  const autoGroupColumns = candidateColumns.filter((column) => {
+    if (numericColumns.includes(column) && !looksLikeGroupNumeric(cleanRows.map((row) => row[column]))) {
+      return false;
+    }
+
+    return hasReasonableGroupCount(cleanRows.map((row) => row[column]));
+  });
+
+  const groupColumns = uniqueStrings([
+    ...(options.groupColumns ?? []),
+    ...autoGroupColumns,
+  ]).filter((column) => columns.includes(column) && column !== idColumn && !isIdColumnName(column));
 
   const respondentCount = countRespondents(cleanRows, idColumn);
 
-  const frequencies = options.includeFrequencies === false
-    ? []
-    : numericColumns.map((column) => calculateFrequencyAnalysis(cleanRows, column));
+  const frequencies =
+    options.includeFrequencies === false
+      ? []
+      : candidateColumns
+          .filter((column) => {
+            const values = cleanRows.map((row) => row[column]);
 
-  const itemDescriptives = options.includeItemDescriptives === false
-    ? []
-    : numericColumns.map((column) => calculateDescriptiveStatistics(column, getNumericColumn(cleanRows, column)));
+            return (
+              hasReasonableFrequencyCount(values) ||
+              ordinalNumericColumns.includes(column)
+            );
+          })
+          .map((column) => calculateFrequencyAnalysis(cleanRows, column));
 
-  const baseScaleScores = calculateScaleScores(cleanRows, numericColumns, options.scales ?? []);
-  const combinedScaleScores = calculateCombinedScaleScores(baseScaleScores, options.combinedScales ?? []);
-  const allScaleScores = [...baseScaleScores, ...combinedScaleScores];
+  const itemDescriptives =
+    options.includeItemDescriptives === false
+      ? []
+      : numericColumns.map((column) =>
+          calculateDescriptiveStatistics(column, getNumericColumn(cleanRows, column)),
+        );
 
-  const scaleDescriptives = allScaleScores.map((scale) =>
+  const manualScales = options.scales ?? [];
+  const autoScales = autoDetectScales
+    ? autoDetectScaleDefinitions(numericColumns)
+    : [];
+
+  const mergedScales = mergeScaleDefinitions(manualScales, autoScales);
+
+  const manualCombinedScales = options.combinedScales ?? [];
+  const autoCombinedScales = autoDetectCombinedScaleDefinitions(mergedScales);
+
+  const mergedCombinedScales = mergeCombinedScaleDefinitions(
+    manualCombinedScales,
+    autoCombinedScales,
+  );
+
+  const baseScaleScores = calculateScaleScores(cleanRows, numericColumns, mergedScales);
+  const combinedScaleScores = calculateCombinedScaleScores(
+    baseScaleScores,
+    mergedCombinedScales,
+  );
+
+  const allScaleScores = [...baseScaleScores, ...combinedScaleScores].filter(
+    (scale) => scale.itemsUsed.length > 0 || scale.scores.some(isFiniteNumber),
+  );
+
+  const fallbackScores: ScaleScoreResult[] =
+    allScaleScores.length === 0 && fallbackToNumericVariables
+      ? numericColumns.map((column) => ({
+          scaleId: `numeric_${slugify(column)}`,
+          scaleName: column,
+          scores: getNumericColumn(cleanRows, column),
+          itemsUsed: [column],
+          missingRows: getNumericColumn(cleanRows, column).filter((value) => value === null).length,
+          scoring: 'sum',
+        }))
+      : [];
+
+  const analysisScores = allScaleScores.length > 0 ? allScaleScores : fallbackScores;
+  const fallbackUsed = allScaleScores.length === 0 && fallbackScores.length > 0;
+
+  const scaleDescriptives = analysisScores.map((scale) =>
     calculateDescriptiveStatistics(scale.scaleName, scale.scores),
   );
 
-  const normality = allScaleScores.map((scale) =>
+  const normality = analysisScores.map((scale) =>
     calculateNormality(scale.scaleName, scale.scores, alpha),
   );
 
-  const pearson = calculatePairwiseCorrelations(allScaleScores, 'pearson');
-  const spearman = calculatePairwiseCorrelations(allScaleScores, 'spearman');
+  const pearson = calculatePairwiseCorrelations(analysisScores, 'pearson');
+  const spearman = calculatePairwiseCorrelations(analysisScores, 'spearman');
 
-  const shouldUseParametric = normality.length > 0 && normality.every((item) => item.isNormal === true);
-
+  const shouldUseParametric = decideParametricByNormality(normality);
   const recommendedCorrelations = shouldUseParametric ? pearson : spearman;
 
-  const reliability = calculateReliabilityForScales(cleanRows, numericColumns, options.scales ?? []);
+  const reliability = calculateReliabilityForScales(cleanRows, numericColumns, mergedScales);
 
-  const groupTestInput = allScaleScores.length > 0
-    ? allScaleScores
-    : numericColumns.map((column) => ({
-        scaleId: column,
-        scaleName: column,
-        scores: getNumericColumn(cleanRows, column),
-        itemsUsed: [column],
-        missingRows: 0,
-        scoring: 'sum' as const,
-      }));
+  const groupTestInput = analysisScores;
 
   const parametricGroupTests: GroupTestResult[] = [];
   const nonParametricGroupTests: GroupTestResult[] = [];
@@ -384,23 +374,29 @@ export function runFullStatisticalAnalysis(
 
     for (const variable of groupTestInput) {
       const grouped = buildGroupedValues(variable.scores, groupValues);
+      const realGroupCount = Object.values(grouped).filter((values) => values.length > 0).length;
 
-      if (groupCount === 2) {
+      if (realGroupCount < 2) continue;
+
+      const variableNormality = normality.find((item) => item.variable === variable.scaleName);
+      const variableIsNormal = variableNormality?.isNormal === true;
+
+      if (realGroupCount === 2) {
         const tTest = calculateIndependentTTest(variable.scaleName, groupColumn, grouped);
         const mannWhitney = calculateMannWhitneyUTest(variable.scaleName, groupColumn, grouped);
 
         parametricGroupTests.push(tTest);
         nonParametricGroupTests.push(mannWhitney);
-        recommendedGroupTests.push(shouldUseParametric ? tTest : mannWhitney);
+        recommendedGroupTests.push(variableIsNormal ? tTest : mannWhitney);
       }
 
-      if (groupCount >= 3) {
+      if (realGroupCount >= 3) {
         const anova = calculateOneWayAnova(variable.scaleName, groupColumn, grouped);
         const kruskal = calculateKruskalWallisTest(variable.scaleName, groupColumn, grouped);
 
         parametricGroupTests.push(anova);
         nonParametricGroupTests.push(kruskal);
-        recommendedGroupTests.push(shouldUseParametric ? anova : kruskal);
+        recommendedGroupTests.push(variableIsNormal ? anova : kruskal);
       }
     }
   }
@@ -411,7 +407,10 @@ export function runFullStatisticalAnalysis(
     normality,
     shouldUseParametric,
     hasScales: allScaleScores.length > 0,
+    fallbackUsed,
     groupColumns,
+    manualScaleCount: manualScales.length,
+    autoDetectedScaleCount: autoScales.length,
   });
 
   return {
@@ -421,14 +420,19 @@ export function runFullStatisticalAnalysis(
       idColumn,
       ignoredColumns,
       numericColumns,
+      ordinalNumericColumns,
+      continuousNumericColumns,
       groupColumns,
       alpha,
+      autoDetectedScaleCount: autoScales.length,
+      manualScaleCount: manualScales.length,
+      fallbackUsed,
     },
 
     frequencies,
     itemDescriptives,
 
-    scaleScores: allScaleScores,
+    scaleScores: analysisScores,
     scaleDescriptives,
     normality,
 
@@ -437,8 +441,8 @@ export function runFullStatisticalAnalysis(
       spearman,
       recommended: recommendedCorrelations,
       recommendationNote: shouldUseParametric
-        ? 'Na základe normality dát odporúčame interpretovať Pearsonovu koreláciu.'
-        : 'Na základe normality dát odporúčame interpretovať Spearmanovu koreláciu.',
+        ? 'Na základe kontroly normality odporúčame interpretovať Pearsonovu koreláciu. Pri ordinálnych položkách alebo pochybnej normalite je bezpečnejší Spearman.'
+        : 'Na základe kontroly normality odporúčame interpretovať Spearmanovu koreláciu, pretože normalita nie je potvrdená alebo ide o ordinálne/škálové dáta.',
     },
 
     reliability,
@@ -448,8 +452,8 @@ export function runFullStatisticalAnalysis(
       nonParametric: nonParametricGroupTests,
       recommended: recommendedGroupTests,
       recommendationNote: shouldUseParametric
-        ? 'Dáta sú približne normálne rozdelené, preto odporúčame parametrické testy: Independent t-test alebo ANOVA.'
-        : 'Dáta nie sú normálne rozdelené alebo normalita nie je potvrdená, preto odporúčame neparametrické testy: Mann-Whitney U alebo Kruskal-Wallis.',
+        ? 'Pre premenné s približne normálnym rozdelením odporúčame parametrické testy: Independent t-test pri dvoch skupinách a ANOVA pri troch a viacerých skupinách.'
+        : 'Ak normalita nie je potvrdená, odporúčame neparametrické testy: Mann-Whitney U pri dvoch skupinách a Kruskal-Wallis pri troch a viacerých skupinách.',
     },
 
     aiRecommendation,
@@ -480,30 +484,51 @@ function getColumns(rows: AnalysisRow[]): string[] {
   return Array.from(set);
 }
 
-function detectIdColumn(columns: string[]): string | null {
-  const candidates = [
-    'id',
-    'ID',
-    'Id',
-    'respondent',
-    'Respondent',
-    'respondent_id',
-    'Respondent ID',
-    'číslo',
-    'cislo',
-    'poradie',
-    'Poradie',
-  ];
+function isIdColumnName(columnName: string): boolean {
+  const normalized = normalizeText(columnName);
 
-  for (const candidate of candidates) {
-    const found = columns.find((column) => normalizeText(column) === normalizeText(candidate));
-    if (found) return found;
-  }
+  return (
+    normalized === 'id' ||
+    normalized === 'respondent' ||
+    normalized === 'respondentid' ||
+    normalized === 'cislo' ||
+    normalized === 'poradie' ||
+    normalized === 'index' ||
+    normalized === 'row' ||
+    normalized === 'riadok' ||
+    normalized === 'cisloriadku' ||
+    normalized === 'respondentcislo'
+  );
+}
+
+function detectIdColumn(columns: string[], rows: AnalysisRow[]): string | null {
+  const direct = columns.find((column) => isIdColumnName(column));
+  if (direct) return direct;
 
   const firstColumn = columns[0];
 
-  if (firstColumn && normalizeText(firstColumn).includes('id')) {
+  if (!firstColumn) return null;
+
+  const normalizedFirst = normalizeText(firstColumn);
+
+  if (normalizedFirst.includes('id') || normalizedFirst.includes('respondent')) {
     return firstColumn;
+  }
+
+  const firstValues = rows.map((row) => row[firstColumn]);
+  const numericValues = firstValues
+    .filter((value) => !isMissing(value))
+    .map(toNumber)
+    .filter(isFiniteNumber);
+
+  if (numericValues.length >= Math.max(3, Math.floor(rows.length * 0.8))) {
+    const looksSequential = numericValues.every((value, index) => {
+      return value === index + 1 || value === index;
+    });
+
+    if (looksSequential) {
+      return firstColumn;
+    }
   }
 
   return null;
@@ -562,7 +587,7 @@ export function calculateFrequencyAnalysis(
       count,
       percent: round2(percent),
       validPercent: round2(validPercent),
-      cumulativePercent: round2(cumulative),
+      cumulativePercent: round2(Math.min(cumulative, 100)),
     };
   });
 
@@ -626,9 +651,9 @@ export function calculateDescriptiveStatistics(
     standardDeviation: round2(standardDeviationValue),
     variance: round2(varianceValue),
     skewness: round2(skewness(values)),
-    standardErrorSkewness: round2(Math.sqrt(6 / valid)),
+    standardErrorSkewness: valid > 0 ? round2(Math.sqrt(6 / valid)) : null,
     kurtosis: round2(kurtosis(values)),
-    standardErrorKurtosis: round2(Math.sqrt(24 / valid)),
+    standardErrorKurtosis: valid > 0 ? round2(Math.sqrt(24 / valid)) : null,
     minimum: round2(values[0]),
     maximum: round2(values[values.length - 1]),
     q1: round2(q1),
@@ -750,11 +775,16 @@ function resolveItemColumn(item: ScaleItemReference, columns: string[]): string 
 
     if (numberMatches.length === 1) return numberMatches[0];
 
-    const preferred = numberMatches.find((column) =>
-      normalizeText(column).includes(`polozka${itemNumber}`) ||
-      normalizeText(column).includes(`item${itemNumber}`) ||
-      normalizeText(column).includes(`otazka${itemNumber}`),
-    );
+    const preferred = numberMatches.find((column) => {
+      const normalized = normalizeText(column);
+
+      return (
+        normalized.includes(`polozka${itemNumber}`) ||
+        normalized.includes(`item${itemNumber}`) ||
+        normalized.includes(`otazka${itemNumber}`) ||
+        normalized.endsWith(String(itemNumber))
+      );
+    });
 
     if (preferred) return preferred;
   }
@@ -767,6 +797,243 @@ function resolveItemColumn(item: ScaleItemReference, columns: string[]): string 
 
 function reverseCode(value: number, minValue: number, maxValue: number): number {
   return minValue + maxValue - value;
+}
+
+/* -------------------------------------------------------------------------- */
+/* AUTOMATICKÁ DETEKCIA ŠKÁL                                                   */
+/* -------------------------------------------------------------------------- */
+
+function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[] {
+  const scales: ScaleDefinition[] = [];
+
+  const normalizedColumns = numericColumns.map((column) => ({
+    original: column,
+    normalized: normalizeText(column),
+  }));
+
+  const wemItems = normalizedColumns
+    .filter((item) => /^wem\d+$/.test(item.normalized) || /^wemwbs\d+$/.test(item.normalized))
+    .map((item) => item.original);
+
+  if (wemItems.length >= 3) {
+    scales.push({
+      id: 'wemwbs_total',
+      name: 'WEMWBS – celkové skóre',
+      items: wemItems,
+      minValue: 1,
+      maxValue: 5,
+      scoring: 'sum',
+      description: 'Automaticky rozpoznaná škála WEM/WEMWBS.',
+    });
+  }
+
+  const jssItems = normalizedColumns
+    .filter((item) => /^jss\d+$/.test(item.normalized))
+    .map((item) => item.original);
+
+  if (jssItems.length >= 3) {
+    scales.push({
+      id: 'jss_total',
+      name: 'JSS – celkové skóre',
+      items: jssItems,
+      minValue: 1,
+      maxValue: 6,
+      scoring: 'sum',
+      description: 'Automaticky rozpoznaná škála JSS.',
+    });
+  }
+
+  const fatherColumns = numericColumns.filter((column) => {
+    const n = normalizeText(column);
+    return n.includes('otec') || n.includes('father') || n.includes('otc');
+  });
+
+  const motherColumns = numericColumns.filter((column) => {
+    const n = normalizeText(column);
+    return n.includes('matka') || n.includes('mother') || n.includes('mat');
+  });
+
+  if (fatherColumns.length >= 6) {
+    scales.push(
+      {
+        id: 'sembu_father_rejection',
+        name: 's-EMBU Otec – Odmietanie',
+        items: findColumnsByItemNumbers(fatherColumns, [1, 4, 7, 13, 15, 16, 21]),
+        minValue: 1,
+        maxValue: 4,
+        scoring: 'sum',
+      },
+      {
+        id: 'sembu_father_warmth',
+        name: 's-EMBU Otec – Emočná vrelosť',
+        items: findColumnsByItemNumbers(fatherColumns, [2, 6, 12, 14, 19, 23]),
+        minValue: 1,
+        maxValue: 4,
+        scoring: 'sum',
+      },
+      {
+        id: 'sembu_father_overprotection',
+        name: 's-EMBU Otec – Hyperprotektivita',
+        items: findColumnsByItemNumbers(fatherColumns, [3, 5, 8, 10, 11, 17, 18, 20, 22]),
+        reverseItems: findColumnsByItemNumbers(fatherColumns, [17]),
+        minValue: 1,
+        maxValue: 4,
+        scoring: 'sum',
+      },
+    );
+  }
+
+  if (motherColumns.length >= 6) {
+    scales.push(
+      {
+        id: 'sembu_mother_rejection',
+        name: 's-EMBU Matka – Odmietanie',
+        items: findColumnsByItemNumbers(motherColumns, [1, 4, 7, 13, 15, 16, 21]),
+        minValue: 1,
+        maxValue: 4,
+        scoring: 'sum',
+      },
+      {
+        id: 'sembu_mother_warmth',
+        name: 's-EMBU Matka – Emočná vrelosť',
+        items: findColumnsByItemNumbers(motherColumns, [2, 6, 12, 14, 19, 23]),
+        minValue: 1,
+        maxValue: 4,
+        scoring: 'sum',
+      },
+      {
+        id: 'sembu_mother_overprotection',
+        name: 's-EMBU Matka – Hyperprotektivita',
+        items: findColumnsByItemNumbers(motherColumns, [3, 5, 8, 10, 11, 17, 18, 20, 22]),
+        reverseItems: findColumnsByItemNumbers(motherColumns, [17]),
+        minValue: 1,
+        maxValue: 4,
+        scoring: 'sum',
+      },
+    );
+  }
+
+  const schoolInclusionColumns = numericColumns.filter((column) => {
+    const n = normalizeText(column);
+    return (
+      n.includes('zaclenen') ||
+      n.includes('skola') ||
+      n.includes('school') ||
+      n.includes('inclusion') ||
+      /^si\d+$/.test(n)
+    );
+  });
+
+  if (schoolInclusionColumns.length >= 6) {
+    scales.push(
+      {
+        id: 'school_social_acceptance',
+        name: 'Škála školskej začlenenosti – sociálna akceptácia',
+        items: findColumnsByItemNumbers(schoolInclusionColumns, [1, 3, 5, 7, 9]),
+        minValue: 1,
+        maxValue: 4,
+        scoring: 'sum',
+      },
+      {
+        id: 'school_social_exclusion_reversed',
+        name: 'Škála školskej začlenenosti – sociálne vylúčenie reverzne',
+        items: findColumnsByItemNumbers(schoolInclusionColumns, [2, 4, 6, 8, 10]),
+        reverseItems: findColumnsByItemNumbers(schoolInclusionColumns, [2, 4, 6, 8, 10]),
+        minValue: 1,
+        maxValue: 4,
+        scoring: 'sum',
+      },
+    );
+  }
+
+  return scales.filter((scale) => scale.items.length > 0);
+}
+
+function autoDetectCombinedScaleDefinitions(
+  scales: ScaleDefinition[],
+): CombinedScaleDefinition[] {
+  const ids = new Set(scales.map((scale) => scale.id));
+  const combined: CombinedScaleDefinition[] = [];
+
+  if (ids.has('sembu_father_rejection') && ids.has('sembu_mother_rejection')) {
+    combined.push({
+      id: 'sembu_total_rejection',
+      name: 's-EMBU Celkom – Odmietanie',
+      scaleIds: ['sembu_father_rejection', 'sembu_mother_rejection'],
+      scoring: 'sum',
+    });
+  }
+
+  if (ids.has('sembu_father_warmth') && ids.has('sembu_mother_warmth')) {
+    combined.push({
+      id: 'sembu_total_warmth',
+      name: 's-EMBU Celkom – Emočná vrelosť',
+      scaleIds: ['sembu_father_warmth', 'sembu_mother_warmth'],
+      scoring: 'sum',
+    });
+  }
+
+  if (ids.has('sembu_father_overprotection') && ids.has('sembu_mother_overprotection')) {
+    combined.push({
+      id: 'sembu_total_overprotection',
+      name: 's-EMBU Celkom – Hyperprotektivita',
+      scaleIds: ['sembu_father_overprotection', 'sembu_mother_overprotection'],
+      scoring: 'sum',
+    });
+  }
+
+  if (ids.has('school_social_acceptance') && ids.has('school_social_exclusion_reversed')) {
+    combined.push({
+      id: 'school_inclusion_total',
+      name: 'Škála školskej začlenenosti – celkové skóre',
+      scaleIds: ['school_social_acceptance', 'school_social_exclusion_reversed'],
+      scoring: 'sum',
+    });
+  }
+
+  return combined;
+}
+
+function findColumnsByItemNumbers(columns: string[], itemNumbers: number[]): string[] {
+  return itemNumbers
+    .map((number) => {
+      return columns.find((column) => extractAllNumbers(column).includes(number));
+    })
+    .filter(Boolean) as string[];
+}
+
+function mergeScaleDefinitions(
+  manualScales: ScaleDefinition[],
+  autoScales: ScaleDefinition[],
+): ScaleDefinition[] {
+  const map = new Map<string, ScaleDefinition>();
+
+  for (const scale of autoScales) {
+    map.set(scale.id, scale);
+  }
+
+  for (const scale of manualScales) {
+    map.set(scale.id, scale);
+  }
+
+  return Array.from(map.values());
+}
+
+function mergeCombinedScaleDefinitions(
+  manualCombined: CombinedScaleDefinition[],
+  autoCombined: CombinedScaleDefinition[],
+): CombinedScaleDefinition[] {
+  const map = new Map<string, CombinedScaleDefinition>();
+
+  for (const scale of autoCombined) {
+    map.set(scale.id, scale);
+  }
+
+  for (const scale of manualCombined) {
+    map.set(scale.id, scale);
+  }
+
+  return Array.from(map.values());
 }
 
 /* -------------------------------------------------------------------------- */
@@ -797,14 +1064,6 @@ export function calculateNormality(
   const skew = skewness(values);
   const kurt = kurtosis(values);
 
-  /**
-   * Praktická aproximácia:
-   * Jarque-Bera štatistika používa šikmosť a špicatosť.
-   * Pre df = 2 je p približne exp(-JB / 2).
-   *
-   * V UI to môžeš zobraziť ako orientačný test normality.
-   * Ak chceš presný Shapiro-Wilk, treba neskôr doplniť špecializovanú knižnicu.
-   */
   const jb = (n / 6) * (Math.pow(skew, 2) + Math.pow(kurt, 2) / 4);
   const pValue = Math.exp(-jb / 2);
 
@@ -822,6 +1081,14 @@ export function calculateNormality(
       ? 'Dáta možno považovať za približne normálne rozdelené.'
       : 'Normalita dát nie je potvrdená, odporúčame neparametrické testy.',
   };
+}
+
+function decideParametricByNormality(normality: NormalityResult[]): boolean {
+  const validNormality = normality.filter((item) => item.isNormal !== null);
+
+  if (validNormality.length === 0) return false;
+
+  return validNormality.every((item) => item.isNormal === true);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1310,7 +1577,7 @@ function emptyGroupTestResult(
     groupVariable,
     testType,
     groups,
-    nTotal: groups.reduce((acc) => acc, 0),
+    nTotal: groups.length,
     statistic: null,
     pValue: null,
     significance: '',
@@ -1328,7 +1595,10 @@ function buildAiRecommendation(input: {
   normality: NormalityResult[];
   shouldUseParametric: boolean;
   hasScales: boolean;
+  fallbackUsed: boolean;
   groupColumns: string[];
+  manualScaleCount: number;
+  autoDetectedScaleCount: number;
 }): string[] {
   const notes: string[] = [];
 
@@ -1338,11 +1608,25 @@ function buildAiRecommendation(input: {
     );
   }
 
-  if (!input.hasScales) {
+  if (input.manualScaleCount > 0) {
     notes.push(
-      'Nie sú zadané definície škál/subškál. Frekvenčná a deskriptívna analýza sa vypočíta po položkách, ale pre odbornú prácu odporúčame doplniť definície škál a subškál štandardizovaného dotazníka.',
+      `Boli použité manuálne zadané definície škál/subškál: ${input.manualScaleCount}.`,
     );
-  } else {
+  }
+
+  if (input.autoDetectedScaleCount > 0) {
+    notes.push(
+      `Systém automaticky rozpoznal možné škály/subškály: ${input.autoDetectedScaleCount}. Odporúčame skontrolovať, či položky zodpovedajú metodike dotazníka.`,
+    );
+  }
+
+  if (!input.hasScales && input.fallbackUsed) {
+    notes.push(
+      'Neboli zadané ani spoľahlivo rozpoznané škály/subškály. Systém preto použil numerické premenné ako náhradné skóre. Pre odbornú prácu odporúčame doplniť presné definície škál a subškál štandardizovaného dotazníka.',
+    );
+  }
+
+  if (input.hasScales) {
     notes.push(
       'Deskriptívna štatistika, normalita, korelácie a reliabilita boli pripravené primárne pre škály a subškály, nie iba pre jednotlivé položky.',
     );
@@ -1350,11 +1634,11 @@ function buildAiRecommendation(input: {
 
   if (input.shouldUseParametric) {
     notes.push(
-      'Normalita dát je približne splnená. Pre korelačnú analýzu odporúčame Pearsonovu koreláciu. Pre porovnanie dvoch skupín Independent t-test a pre tri a viac skupín ANOVA.',
+      'Normalita dát je približne splnená. Pre korelačnú analýzu možno interpretovať Pearsonovu koreláciu. Pre porovnanie dvoch skupín možno použiť Independent t-test a pre tri a viac skupín ANOVA.',
     );
   } else {
     notes.push(
-      'Normalita dát nie je potvrdená pri všetkých škálach/subškálach. Pre korelačnú analýzu odporúčame Spearmanovu koreláciu. Pre porovnanie dvoch skupín Mann-Whitney U test a pre tri a viac skupín Kruskal-Wallis test.',
+      'Normalita dát nie je potvrdená pri všetkých premenných. Pre korelačnú analýzu je bezpečnejšie použiť Spearmanovu koreláciu. Pre porovnanie dvoch skupín odporúčame Mann-Whitney U test a pre tri a viac skupín Kruskal-Wallis test.',
     );
   }
 
@@ -1393,6 +1677,7 @@ function toNumber(value: RawValue): number | null {
   const cleaned = String(value)
     .trim()
     .replace(/\s/g, '')
+    .replace('%', '')
     .replace(',', '.');
 
   if (cleaned === '') return null;
@@ -1414,6 +1699,44 @@ function isMostlyNumeric(values: RawValue[]): boolean {
   const numeric = nonMissing.filter((value) => toNumber(value) !== null);
 
   return numeric.length / nonMissing.length >= 0.8;
+}
+
+function looksOrdinalOrLikert(values: RawValue[]): boolean {
+  const numeric = values
+    .filter((value) => !isMissing(value))
+    .map(toNumber)
+    .filter(isFiniteNumber);
+
+  if (numeric.length === 0) return false;
+
+  const unique = uniqueNumbers(numeric);
+  const min = Math.min(...numeric);
+  const max = Math.max(...numeric);
+
+  return unique.length <= 10 && min >= 0 && max <= 10;
+}
+
+function looksLikeGroupNumeric(values: RawValue[]): boolean {
+  const numeric = values
+    .filter((value) => !isMissing(value))
+    .map(toNumber)
+    .filter(isFiniteNumber);
+
+  if (numeric.length === 0) return false;
+
+  const unique = uniqueNumbers(numeric);
+
+  return unique.length >= 2 && unique.length <= 6;
+}
+
+function hasReasonableFrequencyCount(values: RawValue[]): boolean {
+  const normalized = values
+    .filter((value) => !isMissing(value))
+    .map((value) => String(value).trim());
+
+  const unique = uniqueStrings(normalized);
+
+  return unique.length >= 1 && unique.length <= 30;
 }
 
 function hasReasonableGroupCount(values: RawValue[]): boolean {
@@ -1710,9 +2033,6 @@ function erf(x: number): number {
 function approximateChiSquarePValue(chiSquare: number, df: number): number {
   if (df <= 0) return 1;
 
-  /**
-   * Wilson-Hilferty transform – praktická aproximácia.
-   */
   const z =
     (Math.pow(chiSquare / df, 1 / 3) - (1 - 2 / (9 * df))) /
     Math.sqrt(2 / (9 * df));
@@ -1723,18 +2043,18 @@ function approximateChiSquarePValue(chiSquare: number, df: number): number {
 function approximateFTestPValue(f: number, df1: number, df2: number): number {
   if (df1 <= 0 || df2 <= 0) return 1;
 
-  /**
-   * Praktická aproximácia cez log-transformáciu.
-   * Na produkčné vedecké výstupy môžeš neskôr nahradiť presnou F distribúciou.
-   */
   const z =
-    (Math.log(f) - Math.log(df2 / Math.max(1, df2 - 2))) /
+    (Math.log(Math.max(f, 1e-12)) - Math.log(df2 / Math.max(1, df2 - 2))) /
     Math.sqrt(2 / df1 + 2 / df2);
 
   return 1 - normalCdf(z);
 }
 
 function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function uniqueNumbers(values: number[]): number[] {
   return Array.from(new Set(values));
 }
 
@@ -1754,4 +2074,8 @@ function extractFirstNumber(value: string): number | null {
 function extractAllNumbers(value: string): number[] {
   const matches = value.match(/\d+/g);
   return matches ? matches.map(Number) : [];
+}
+
+function slugify(value: string): string {
+  return normalizeText(value) || 'variable';
 }

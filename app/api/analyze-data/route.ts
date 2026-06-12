@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
+import {
+  runFullStatisticalAnalysis,
+  type AnalysisRow,
+  type CombinedScaleDefinition,
+  type ScaleDefinition,
+  type StatisticalAnalysisResult,
+} from '@/components/analysis/analysisStats';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 90;
@@ -81,6 +89,7 @@ type ComputedAnalysis = {
   extractedRows: number;
   extractedColumns: number;
   extractedFiles: string[];
+  statisticalAnalysis: StatisticalAnalysisResult;
 };
 
 // ================= TEXT HELPERS =================
@@ -144,16 +153,6 @@ function extractJsonFromText(text: string) {
   return cleaned;
 }
 
-function normalizeKey(value: string) {
-  return value
-    .trim()
-    .replace(/\s+/g, '_')
-    .replace(/[^\p{L}\p{N}_-]/gu, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .toLowerCase();
-}
-
 function round(value: number, digits = 2) {
   if (!Number.isFinite(value)) return 0;
   const factor = 10 ** digits;
@@ -179,6 +178,28 @@ function parseNumericValue(value: unknown): number | null {
   if (!Number.isFinite(number)) return null;
 
   return number;
+}
+
+function parseNumberFromFormData(value: FormDataEntryValue | null): number | undefined {
+  const parsed = parseNumericValue(value);
+  return parsed === null ? undefined : parsed;
+}
+
+function parseStringArrayFromFormData(value: FormDataEntryValue | null): string[] | undefined {
+  if (!value) return undefined;
+
+  const parsed = safeJsonParse<string[]>(value);
+  if (Array.isArray(parsed)) {
+    return parsed.map((item) => cleanText(item)).filter(Boolean);
+  }
+
+  const text = cleanText(value);
+  if (!text) return undefined;
+
+  return text
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function median(values: number[]) {
@@ -301,9 +322,10 @@ function parseDelimitedTextToRows(text: string): DataRow[] {
       const rawValue = cells[index] ?? '';
       const numericValue = parseNumericValue(rawValue);
 
-      row[header] = numericValue !== null && rawValue.trim() !== ''
-        ? numericValue
-        : cleanText(rawValue);
+      row[header] =
+        numericValue !== null && rawValue.trim() !== ''
+          ? numericValue
+          : cleanText(rawValue);
     });
 
     rows.push(row);
@@ -498,9 +520,9 @@ function buildDescriptiveStatistics(rows: DataRow[]): AnalysisTable[] {
 
   return [
     {
-      title: 'Deskriptívna štatistika',
+      title: 'Deskriptívna štatistika položiek',
       description:
-        'Súhrnné štatistiky pre číselné premenné: počet platných odpovedí, priemer, medián, smerodajná odchýlka, minimum, kvartily a maximum.',
+        'Základná deskriptívna štatistika pre číselné premenné/položky z dátového súboru.',
       columns: [
         { key: 'variable', label: 'Premenná' },
         { key: 'n', label: 'N' },
@@ -566,7 +588,7 @@ function buildFrequencyTables(rows: DataRow[]): AnalysisTable[] {
 
     return {
       title: variable.name,
-      description: `Frekvenčná tabuľka pre premennú/stĺpec „${variable.name}“. Názov tabuľky je zhodný s názvom stĺpca z Excelu.`,
+      description: `Frekvenčná tabuľka pre premennú/stĺpec „${variable.name}“.`,
       columns: [
         { key: 'value', label: variable.name },
         { key: 'frequency', label: 'Frekvencia' },
@@ -583,7 +605,7 @@ function buildRecommendedCharts(frequencies: AnalysisTable[]): RecommendedChart[
   return frequencies.map((table) => ({
     title: `Stĺpcový graf – ${table.title}`,
     type: 'bar',
-    description: `Stĺpcový graf sa má generovať zo stĺpca Percent vo frekvenčnej tabuľke „${table.title}“. Os X predstavuje odpovede, os Y percentuálne zastúpenie.`,
+    description: `Stĺpcový graf sa má generovať zo stĺpca Percent vo frekvenčnej tabuľke „${table.title}“.`,
     variables: [table.title],
     xKey: 'value',
     yKey: 'percent',
@@ -606,7 +628,7 @@ function buildHypothesisTests(rows: DataRow[], profile: SavedProfile | null): Hy
     tests.push({
       title: 'Testovanie hypotéz podľa zadania práce',
       description:
-        'Na základe uvedených hypotéz alebo výskumných otázok je potrebné zvoliť test podľa typu premenných. Nižšie sú odporúčané testy podľa štruktúry dát.',
+        'Na základe uvedených hypotéz alebo výskumných otázok je potrebné zvoliť test podľa typu premenných.',
       variables: [],
       test: 'Výber podľa hypotézy',
       reason: cleanText(`${profile?.hypotheses || ''}\n${profile?.researchQuestions || ''}`),
@@ -620,8 +642,7 @@ function buildHypothesisTests(rows: DataRow[], profile: SavedProfile | null): Hy
         'Pre dvojice číselných premenných odporúčam korelačnú analýzu. Pri normálnom rozdelení Pearsonovu koreláciu, pri porušení normality Spearmanovu koreláciu.',
       variables: numericVariables.slice(0, 5).map((variable) => variable.name),
       test: 'Pearsonova alebo Spearmanova korelácia',
-      reason:
-        'Používa sa na overenie vzťahu medzi dvomi číselnými premennými.',
+      reason: 'Používa sa na overenie vzťahu medzi dvomi číselnými premennými.',
     });
   }
 
@@ -630,13 +651,9 @@ function buildHypothesisTests(rows: DataRow[], profile: SavedProfile | null): Hy
       title: 'Rozdiely v číselnej premennej podľa skupín',
       description:
         'Ak kategóriová premenná tvorí skupiny a číselná premenná je výsledok, odporúčam t-test pri dvoch skupinách, ANOVA pri troch a viacerých skupinách. Pri nenormálnom rozdelení Mann-Whitney alebo Kruskal-Wallis.',
-      variables: [
-        categoricalVariables[0].name,
-        numericVariables[0].name,
-      ],
+      variables: [categoricalVariables[0].name, numericVariables[0].name],
       test: 't-test / ANOVA / Mann-Whitney / Kruskal-Wallis',
-      reason:
-        'Používa sa na porovnanie priemerov alebo rozdelení medzi skupinami.',
+      reason: 'Používa sa na porovnanie priemerov alebo rozdelení medzi skupinami.',
     });
   }
 
@@ -644,11 +661,10 @@ function buildHypothesisTests(rows: DataRow[], profile: SavedProfile | null): Hy
     tests.push({
       title: 'Vzťah medzi kategóriovými premennými',
       description:
-        'Pre dve kategóriové premenné odporúčam chí-kvadrát test nezávislosti. Ak sú očakávané početnosti nízke, treba zvážiť Fisherov exaktný test.',
+        'Pre dve kategóriové premenné odporúčam chí-kvadrát test nezávislosti.',
       variables: categoricalVariables.slice(0, 2).map((variable) => variable.name),
       test: 'Chí-kvadrát test nezávislosti',
-      reason:
-        'Používa sa na overenie, či medzi dvomi kategóriovými premennými existuje štatisticky významná súvislosť.',
+      reason: 'Používa sa na overenie súvislosti medzi dvomi kategóriovými premennými.',
     });
   }
 
@@ -659,8 +675,7 @@ function buildHypothesisTests(rows: DataRow[], profile: SavedProfile | null): Hy
         'Pred výberom parametrických testov odporúčam overiť normalitu rozdelenia pomocou Shapiro-Wilkovho testu, histogramu a Q-Q grafu.',
       variables: numericVariables.map((variable) => variable.name),
       test: 'Shapiro-Wilkov test normality',
-      reason:
-        'Výsledok normality pomáha rozhodnúť, či použiť parametrické alebo neparametrické testy.',
+      reason: 'Výsledok normality pomáha rozhodnúť, či použiť parametrické alebo neparametrické testy.',
     });
   }
 
@@ -668,7 +683,7 @@ function buildHypothesisTests(rows: DataRow[], profile: SavedProfile | null): Hy
     tests.push({
       title: 'Odporúčanie k hypotézam',
       description:
-        'V nahraných dátach nie je dostatok štruktúrovaných premenných na automatické odporúčanie testov. Doplňte hypotézy, výskumné otázky alebo tabuľkové dáta.',
+        'V nahraných dátach nie je dostatok štruktúrovaných premenných na automatické odporúčanie testov.',
       variables: [],
       test: 'Nie je možné určiť',
       reason: 'Chýbajú vhodné premenné alebo dáta.',
@@ -678,13 +693,174 @@ function buildHypothesisTests(rows: DataRow[], profile: SavedProfile | null): Hy
   return tests;
 }
 
+function toStatisticalRows(rows: DataRow[]): AnalysisRow[] {
+  return rows.map((row) => {
+    const output: AnalysisRow = {};
+
+    Object.entries(row).forEach(([key, value]) => {
+      output[key] = value;
+    });
+
+    return output;
+  });
+}
+
+function buildStatisticalTables(statisticalAnalysis: StatisticalAnalysisResult): AnalysisTable[] {
+  const frequencyTables: AnalysisTable[] = statisticalAnalysis.frequencies.map((table) => ({
+    title: `Frekvencie – ${table.variable}`,
+    description:
+      'Frekvenčná tabuľka vypočítaná zo štatistického jadra vrátane percent, validných percent a kumulatívnych percent.',
+    columns: [
+      { key: 'value', label: 'Hodnota' },
+      { key: 'count', label: 'Počet' },
+      { key: 'percent', label: 'Percent' },
+      { key: 'validPercent', label: 'Validné percento' },
+      { key: 'cumulativePercent', label: 'Kumulatívne percento' },
+    ],
+    rows: table.values.map((row) => ({
+      value: row.value,
+      count: row.count,
+      percent: row.percent,
+      validPercent: row.validPercent,
+      cumulativePercent: row.cumulativePercent,
+    })),
+  }));
+
+  const scaleDescriptivesTable: AnalysisTable = {
+    title: 'Deskriptívna štatistika škál a subškál',
+    description:
+      'JASP štýl tabuľky pre škály a subškály: Valid, Missing, Median, Mean, SD, Skewness, Kurtosis, Shapiro-Wilk, p-hodnota, Minimum a Maximum.',
+    columns: [
+      { key: 'variable', label: 'Škála / subškála' },
+      { key: 'valid', label: 'Valid' },
+      { key: 'missing', label: 'Missing' },
+      { key: 'median', label: 'Median' },
+      { key: 'mean', label: 'Mean' },
+      { key: 'standardDeviation', label: 'Std. Deviation' },
+      { key: 'skewness', label: 'Skewness' },
+      { key: 'standardErrorSkewness', label: 'Std. Error of Skewness' },
+      { key: 'kurtosis', label: 'Kurtosis' },
+      { key: 'standardErrorKurtosis', label: 'Std. Error of Kurtosis' },
+      { key: 'shapiroWilk', label: 'Shapiro-Wilk' },
+      { key: 'pValueOfShapiroWilk', label: 'P-value of Shapiro-Wilk' },
+      { key: 'minimum', label: 'Minimum' },
+      { key: 'maximum', label: 'Maximum' },
+    ],
+    rows: statisticalAnalysis.scaleDescriptives.map((row) => {
+      const normality = statisticalAnalysis.normality.find(
+        (item) => item.variable === row.variable,
+      );
+
+      return {
+        variable: row.variable,
+        valid: row.valid,
+        missing: row.missing,
+        median: row.median,
+        mean: row.mean,
+        standardDeviation: row.standardDeviation,
+        skewness: row.skewness,
+        standardErrorSkewness: row.standardErrorSkewness,
+        kurtosis: row.kurtosis,
+        standardErrorKurtosis: row.standardErrorKurtosis,
+        shapiroWilk: normality?.statistic ?? null,
+        pValueOfShapiroWilk: normality?.pValue ?? null,
+        minimum: row.minimum,
+        maximum: row.maximum,
+      };
+    }),
+  };
+
+  const reliabilityTable: AnalysisTable = {
+    title: 'Reliabilita škál – Cronbach alfa',
+    description:
+      'Reliabilita vypočítaná pre automaticky alebo manuálne rozpoznané škály a subškály.',
+    columns: [
+      { key: 'scaleName', label: 'Škála / subškála' },
+      { key: 'validRows', label: 'Valid rows' },
+      { key: 'cronbachAlpha', label: "Cronbach's alpha" },
+      { key: 'interpretation', label: 'Interpretácia' },
+    ],
+    rows: statisticalAnalysis.reliability.map((row) => ({
+      scaleName: row.scaleName,
+      validRows: row.validRows,
+      cronbachAlpha: row.cronbachAlpha,
+      interpretation: row.interpretation,
+    })),
+  };
+
+  const spearmanTable: AnalysisTable = {
+    title: 'Spearmanove korelácie medzi škálami a subškálami',
+    description:
+      'Korelačná analýza medzi vypočítanými škálami/subškálami. Vhodné pre malé súbory a ordinálne alebo nenormálne dáta.',
+    columns: [
+      { key: 'variableA', label: 'Premenná 1' },
+      { key: 'variableB', label: 'Premenná 2' },
+      { key: 'rho', label: "Spearman's rho" },
+      { key: 'pValue', label: 'p' },
+      { key: 'significance', label: 'Signifikancia' },
+      { key: 'fisherZ', label: "Effect size Fisher's z" },
+      { key: 'standardError', label: 'SE Effect size' },
+      { key: 'interpretation', label: 'Interpretácia' },
+    ],
+    rows: statisticalAnalysis.correlations.spearman.map((row) => ({
+      variableA: row.variableA,
+      variableB: row.variableB,
+      rho: row.r,
+      pValue: row.pValue,
+      significance: row.significance,
+      fisherZ: row.fisherZ,
+      standardError: row.standardError,
+      interpretation: row.interpretation,
+    })),
+  };
+
+  const normalityTable: AnalysisTable = {
+    title: 'Normalita dát',
+    description:
+      'Posúdenie normality škál a subškál a odporúčanie parametrických alebo neparametrických testov.',
+    columns: [
+      { key: 'variable', label: 'Premenná' },
+      { key: 'valid', label: 'Valid' },
+      { key: 'method', label: 'Metóda' },
+      { key: 'statistic', label: 'Štatistika' },
+      { key: 'pValue', label: 'p' },
+      { key: 'isNormal', label: 'Normálne rozdelenie' },
+      { key: 'recommendation', label: 'Odporúčanie' },
+      { key: 'note', label: 'Poznámka' },
+    ],
+    rows: statisticalAnalysis.normality.map((row) => ({
+      variable: row.variable,
+      valid: row.valid,
+      method: row.method,
+      statistic: row.statistic,
+      pValue: row.pValue,
+      isNormal: row.isNormal === null ? null : row.isNormal ? 'Áno' : 'Nie',
+      recommendation: row.recommendation,
+      note: row.note,
+    })),
+  };
+
+  const output: AnalysisTable[] = [
+    ...frequencyTables,
+  ];
+
+  if (scaleDescriptivesTable.rows.length > 0) output.push(scaleDescriptivesTable);
+  if (normalityTable.rows.length > 0) output.push(normalityTable);
+  if (reliabilityTable.rows.length > 0) output.push(reliabilityTable);
+  if (spearmanTable.rows.length > 0) output.push(spearmanTable);
+
+  return output;
+}
+
 function buildExcelTables(
   descriptiveStatistics: AnalysisTable[],
   frequencies: AnalysisTable[],
+  statisticalTables: AnalysisTable[],
 ) {
   return [
     ...descriptiveStatistics,
     ...frequencies,
+    ...statisticalTables,
   ];
 }
 
@@ -693,11 +869,13 @@ function buildComputedAnalysis({
   files,
   dataDescription,
   profile,
+  statisticalAnalysis,
 }: {
   rows: DataRow[];
   files: File[];
   dataDescription: string;
   profile: SavedProfile | null;
+  statisticalAnalysis: StatisticalAnalysisResult;
 }): ComputedAnalysis {
   const warnings: string[] = [];
 
@@ -713,11 +891,18 @@ function buildComputedAnalysis({
     warnings.push('Neboli identifikované žiadne premenné/stĺpce.');
   }
 
+  if (statisticalAnalysis.meta.fallbackUsed) {
+    warnings.push(
+      'Neboli spoľahlivo rozpoznané škály/subškály. Systém preto použil numerické premenné ako náhradné skóre. Pre presné výsledky odporúčame zadať alebo overiť definície škál.',
+    );
+  }
+
   const descriptiveStatistics = buildDescriptiveStatistics(rows);
   const frequencies = buildFrequencyTables(rows);
+  const statisticalTables = buildStatisticalTables(statisticalAnalysis);
   const recommendedCharts = buildRecommendedCharts(frequencies);
   const hypothesisTests = buildHypothesisTests(rows, profile);
-  const excelTables = buildExcelTables(descriptiveStatistics, frequencies);
+  const excelTables = buildExcelTables(descriptiveStatistics, frequencies, statisticalTables);
 
   const extractedColumns = getColumnNames(rows).length;
 
@@ -737,56 +922,130 @@ function buildComputedAnalysis({
     extractedRows: rows.length,
     extractedColumns,
     extractedFiles: files.map((file) => file.name),
+    statisticalAnalysis,
   };
 }
 
-// ================= AI FALLBACK / INTERPRETATION =================
+// ================= RESPONSE HELPERS =================
 
-function fallbackResult(fullText: string, computed?: ComputedAnalysis) {
+function buildBaseResponse({
+  title,
+  summary,
+  computed,
+  practicalText,
+  interpretation,
+  extraWarnings = [],
+}: {
+  title: string;
+  summary: string;
+  computed: ComputedAnalysis;
+  practicalText: string;
+  interpretation: string;
+  extraWarnings?: string[];
+}) {
+  const statisticalAnalysis = computed.statisticalAnalysis;
+
   return {
     ok: true,
-    title: 'Výsledky analýzy',
-    summary:
-      'Analýza bola vytvorená, ale odpoveď AI nebola v presnom JSON formáte. Zobrazuje sa kombinovaný výstup s vypočítanými tabuľkami.',
-    dataDescription:
-      computed?.dataDescription ||
-      'Dáta je potrebné skontrolovať podľa priloženého súboru.',
+    title,
+    summary,
+    dataDescription: computed.dataDescription,
+
+    files: computed.extractedFiles.map((fileName) => ({
+      fileName,
+    })),
+    extractedFiles: computed.extractedFiles,
+
+    variables: computed.variables,
     selectedAnalyses: [
       {
         title: 'Frekvenčná analýza',
         description:
-          'Pre kategóriové premenné boli vytvorené frekvenčné tabuľky s percentami.',
+          'Pre položky a kategóriové premenné boli vypočítané frekvenčné tabuľky s percentami, validnými percentami a kumulatívnymi percentami.',
       },
       {
-        title: 'Deskriptívna štatistika',
+        title: 'Deskriptívna štatistika škál a subškál',
         description:
-          'Pre číselné premenné boli vypočítané základné deskriptívne štatistiky.',
+          'Pre škály a subškály boli vypočítané Valid, Missing, Median, Mean, SD, Skewness, Kurtosis, Shapiro-Wilk, p-hodnota, Minimum a Maximum.',
+      },
+      {
+        title: 'Reliabilita a korelačná analýza',
+        description:
+          'Pre škály boli vypočítané Cronbachovo alfa a korelácie medzi škálami/subškálami.',
       },
     ],
-    descriptiveStatistics: computed?.descriptiveStatistics || [],
-    frequencies: computed?.frequencies || [],
-    recommendedCharts: computed?.recommendedCharts || [],
-    excelTables: computed?.excelTables || [],
-    hypothesisTests: computed?.hypothesisTests || [],
-    recommendedTests: computed?.hypothesisTests || [],
-    practicalText: fullText,
-    interpretation: fullText,
-    warnings: [
-      ...(computed?.warnings || []),
-      'AI výstup nebol v presnom JSON formáte. Skontroluj prompt alebo model.',
+
+    descriptiveStatistics: computed.descriptiveStatistics,
+    frequencies: statisticalAnalysis.frequencies,
+    frequencyTables: statisticalAnalysis.frequencies,
+
+    itemDescriptives: statisticalAnalysis.itemDescriptives,
+    scaleScores: statisticalAnalysis.scaleScores,
+    scaleDescriptives: statisticalAnalysis.scaleDescriptives,
+    normality: statisticalAnalysis.normality,
+
+    pearsonCorrelations: statisticalAnalysis.correlations.pearson,
+    spearmanCorrelations: statisticalAnalysis.correlations.spearman,
+    recommendedCorrelations: statisticalAnalysis.correlations.recommended,
+
+    reliability: statisticalAnalysis.reliability,
+
+    parametricGroupTests: statisticalAnalysis.groupTests.parametric,
+    nonParametricGroupTests: statisticalAnalysis.groupTests.nonParametric,
+    recommendedGroupTests: statisticalAnalysis.groupTests.recommended,
+
+    statisticalAnalysis,
+
+    recommendedCharts: computed.recommendedCharts,
+    excelTables: computed.excelTables,
+    hypothesisTests: computed.hypothesisTests,
+    recommendedTests: [
+      ...computed.hypothesisTests,
+      ...statisticalAnalysis.groupTests.recommended.map((test) => ({
+        title: test.testType,
+        description: test.recommendation,
+        variables: [test.dependentVariable, test.groupVariable],
+        test: test.testType,
+        reason: test.significance,
+      })),
     ],
-    fullText,
+
+    practicalText,
+    interpretation,
+    warnings: [...computed.warnings, ...extraWarnings],
+    fullText: `${practicalText}\n\nInterpretácia:\n${interpretation}`,
+
     exportReady: {
       word: true,
       pdf: true,
       excel: true,
-      tables: computed?.excelTables || [],
-      charts: computed?.recommendedCharts || [],
+      tables: computed.excelTables,
+      charts: computed.recommendedCharts,
     },
+
     meta: {
+      ...statisticalAnalysis.meta,
+      filesCount: computed.extractedFiles.length,
+      extractedRows: computed.extractedRows,
+      extractedColumns: computed.extractedColumns,
+      extractedFiles: computed.extractedFiles,
       generatedAt: new Date().toISOString(),
     },
   };
+}
+
+function fallbackResult(fullText: string, computed: ComputedAnalysis) {
+  return buildBaseResponse({
+    title: 'Výsledky analýzy',
+    summary:
+      'Analýza bola vytvorená, ale odpoveď AI nebola v presnom JSON formáte. Zobrazujú sa vypočítané štatistické tabuľky.',
+    computed,
+    practicalText: fullText,
+    interpretation: fullText,
+    extraWarnings: [
+      'AI výstup nebol v presnom JSON formáte. Skontroluj prompt alebo model.',
+    ],
+  });
 }
 
 function buildPrompt({
@@ -809,10 +1068,8 @@ Tvojou úlohou je pripraviť presnú analýzu údajov pre praktickú časť prá
 
 DÔLEŽITÉ:
 - Neignoruj vypočítané tabuľky.
-- Frekvenčné tabuľky už majú názov podľa názvu stĺpca z Excelu.
-- Pri grafoch používaj stĺpcové grafy zo stĺpca "percent".
-- Interpretácia a praktický text nesmú byť prázdne.
-- Odporúčané testy hypotéz nesmú byť prázdne.
+- V odpovedi interpretuj najmä škály a subškály, nie iba jednotlivé položky.
+- Ak je dostupná normalita, reliabilita, Spearmanova korelácia a testovanie rozdielov, opíš ich.
 - Výstup musí byť v slovenčine.
 - Výstup musí byť iba validný JSON bez markdown blokov.
 
@@ -841,7 +1098,16 @@ PRILOŽENÉ SÚBORY:
 ${filesBlock || 'Bez priložených súborov.'}
 
 VYPOČÍTANÁ ANALÝZA Z DÁT:
-${JSON.stringify(computed, null, 2)}
+${JSON.stringify(
+  {
+    dataDescription: computed.dataDescription,
+    variables: computed.variables,
+    statisticalAnalysis: computed.statisticalAnalysis,
+    warnings: computed.warnings,
+  },
+  null,
+  2,
+)}
 
 VRÁŤ PRESNE TÚTO JSON ŠTRUKTÚRU:
 
@@ -849,42 +1115,17 @@ VRÁŤ PRESNE TÚTO JSON ŠTRUKTÚRU:
   "ok": true,
   "title": "Výsledky analýzy",
   "summary": "stručný súhrn analýzy",
-  "dataDescription": "popis dát",
-  "selectedAnalyses": [
-    {
-      "title": "názov analýzy",
-      "description": "prečo je vhodná"
-    }
-  ],
-  "descriptiveStatistics": [],
-  "frequencies": [],
-  "recommendedCharts": [],
-  "excelTables": [],
-  "hypothesisTests": [],
-  "recommendedTests": [],
   "practicalText": "súvislý text do praktickej časti práce",
   "interpretation": "interpretácia výsledkov",
   "warnings": [],
-  "fullText": "kompletný slovný výstup",
-  "exportReady": {
-    "word": true,
-    "pdf": true,
-    "excel": true,
-    "tables": [],
-    "charts": []
-  }
+  "fullText": "kompletný slovný výstup"
 }
 
-PRAVIDLÁ PRE NAPLNENIE:
-- Do descriptiveStatistics vlož vypočítané descriptiveStatistics z VYPOČÍTANÁ ANALÝZA Z DÁT.
-- Do frequencies vlož vypočítané frequencies z VYPOČÍTANÁ ANALÝZA Z DÁT.
-- Do recommendedCharts vlož vypočítané recommendedCharts z VYPOČÍTANÁ ANALÝZA Z DÁT.
-- Do excelTables vlož vypočítané excelTables z VYPOČÍTANÁ ANALÝZA Z DÁT.
-- Do hypothesisTests aj recommendedTests vlož vypočítané hypothesisTests z VYPOČÍTANÁ ANALÝZA Z DÁT.
-- Do practicalText napíš akademický text vhodný do praktickej časti.
-- Do interpretation napíš vecnú interpretáciu výsledkov.
-- Do exportReady.tables vlož tabuľky pripravené na export do Word/PDF/Excel.
-- Do exportReady.charts vlož grafy pripravené na export.
+PRAVIDLÁ:
+- practicalText nesmie byť prázdny.
+- interpretation nesmie byť prázdna.
+- Neprepisuj vypočítané tabuľky, iba ich interpretuj.
+- Uveď, že ID stĺpec bol vynechaný z výpočtov, ak bol rozpoznaný.
 `.trim();
 }
 
@@ -897,6 +1138,17 @@ export async function POST(req: NextRequest) {
     const analysisGoal = cleanText(formData.get('analysisGoal'));
     const dataDescription = cleanText(formData.get('dataDescription'));
     const profile = safeJsonParse<SavedProfile>(formData.get('activeProfile'));
+
+    const idColumn = cleanText(formData.get('idColumn')) || undefined;
+    const alpha = parseNumberFromFormData(formData.get('alpha'));
+    const groupColumns = parseStringArrayFromFormData(formData.get('groupColumns'));
+
+    const scales =
+      safeJsonParse<ScaleDefinition[]>(formData.get('scales')) || undefined;
+
+    const combinedScales =
+      safeJsonParse<CombinedScaleDefinition[]>(formData.get('combinedScales')) ||
+      undefined;
 
     const files = formData
       .getAll('files')
@@ -934,62 +1186,46 @@ ${text || 'Text sa nepodarilo načítať.'}
       );
     }
 
+    const statisticalRows = toStatisticalRows(extractedRows);
+
+    const statisticalAnalysis = runFullStatisticalAnalysis(statisticalRows, {
+      idColumn,
+      scales,
+      combinedScales,
+      groupColumns,
+      alpha,
+      includeItemDescriptives: true,
+      includeFrequencies: true,
+      autoDetectScales: true,
+      fallbackToNumericVariables: true,
+    });
+
     const computed = buildComputedAnalysis({
       rows: extractedRows,
       files,
       dataDescription,
       profile,
+      statisticalAnalysis,
     });
 
+    const defaultPracticalText =
+      'Na základe analyzovaných údajov bola pripravená štruktúra praktickej časti. V praktickej časti je vhodné najskôr opísať výskumnú vzorku, následne uviesť frekvenčné tabuľky pre dotazníkové položky, potom deskriptívnu štatistiku škál a subškál, kontrolu normality, reliabilitu škál a korelačnú alebo skupinovú analýzu podľa výskumných otázok. ID stĺpec sa nepoužíva v štatistických výpočtoch, ale slúži iba na identifikáciu respondentov a určenie veľkosti výskumnej vzorky.';
+
+    const defaultInterpretation =
+      'Výsledky je potrebné interpretovať podľa vypočítaných tabuliek. Frekvenčné tabuľky ukazujú rozdelenie odpovedí respondentov. Deskriptívna štatistika škál a subškál uvádza počet platných odpovedí, chýbajúce hodnoty, medián, priemer, smerodajnú odchýlku, šikmosť, špicatosť, orientačný test normality, minimum a maximum. Reliabilita pomocou Cronbachovho alfa hodnotí vnútornú konzistenciu škál. Spearmanove korelácie sú vhodné najmä pri menšom súbore, ordinálnych dátach alebo pri nenormálnom rozdelení škál.';
+
     if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json({
-        ok: true,
-        title: 'Výsledky analýzy',
-        summary:
-          'Analýza bola vypočítaná zo súboru. Interpretácia pomocou AI nebola doplnená, pretože chýba OPENAI_API_KEY.',
-        dataDescription: computed.dataDescription,
-        selectedAnalyses: [
-          {
-            title: 'Deskriptívna štatistika',
-            description:
-              'Pre číselné premenné boli vypočítané základné deskriptívne ukazovatele.',
-          },
-          {
-            title: 'Frekvenčná analýza',
-            description:
-              'Pre kategóriové premenné boli vypočítané frekvencie, percentá, validné percentá a kumulatívne percentá.',
-          },
-        ],
-        descriptiveStatistics: computed.descriptiveStatistics,
-        frequencies: computed.frequencies,
-        recommendedCharts: computed.recommendedCharts,
-        excelTables: computed.excelTables,
-        hypothesisTests: computed.hypothesisTests,
-        recommendedTests: computed.hypothesisTests,
-        practicalText:
-          'Na základe analyzovaných údajov bola pripravená štruktúra praktickej časti. V praktickej časti je vhodné najskôr opísať výskumnú vzorku, následne uviesť frekvenčné tabuľky pre dotazníkové otázky, deskriptívnu štatistiku pre číselné premenné a potom interpretovať výsledky vo vzťahu k cieľu práce, hypotézam a výskumným otázkam.',
-        interpretation:
-          'Výsledky je potrebné interpretovať podľa jednotlivých tabuliek. Frekvenčné tabuľky ukazujú rozdelenie odpovedí respondentov, pričom stĺpec Percent slúži ako podklad pre stĺpcové grafy. Deskriptívna štatistika opisuje základné charakteristiky číselných premenných.',
-        warnings: computed.warnings,
-        fullText:
-          'Analýza bola vytvorená automaticky zo štruktúrovaných údajov. AI interpretácia nebola použitá, pretože chýba OPENAI_API_KEY.',
-        exportReady: {
-          word: true,
-          pdf: true,
-          excel: true,
-          tables: computed.excelTables,
-          charts: computed.recommendedCharts,
-        },
-        meta: {
-          filesCount: files.length,
-          extractedRows: computed.extractedRows,
-          extractedColumns: computed.extractedColumns,
-          extractedFiles: computed.extractedFiles,
-          extractedChars: filesBlock.length + dataDescription.length,
-          generatedAt: new Date().toISOString(),
-          profileTitle: profile?.title || null,
-        },
-      });
+      return NextResponse.json(
+        buildBaseResponse({
+          title: 'Výsledky analýzy',
+          summary:
+            'Analýza bola vypočítaná zo súboru. AI interpretácia nebola doplnená, pretože chýba OPENAI_API_KEY.',
+          computed,
+          practicalText: defaultPracticalText,
+          interpretation: defaultInterpretation,
+          extraWarnings: [],
+        }),
+      );
     }
 
     const prompt = buildPrompt({
@@ -1001,7 +1237,7 @@ ${text || 'Text sa nepodarilo načítať.'}
     });
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4.1-mini',
+      model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
       temperature: 0.2,
       response_format: {
         type: 'json_object',
@@ -1010,7 +1246,7 @@ ${text || 'Text sa nepodarilo načítať.'}
         {
           role: 'system',
           content:
-            'Si štatistik a metodológ. Vždy vraciaš iba validný JSON bez markdownu. Nikdy nenechaj prázdne interpretation, practicalText, hypothesisTests ani recommendedTests.',
+            'Si štatistik a metodológ. Vždy vraciaš iba validný JSON bez markdownu. Nikdy nenechaj prázdne interpretation ani practicalText.',
         },
         {
           role: 'user',
@@ -1023,11 +1259,15 @@ ${text || 'Text sa nepodarilo načítať.'}
 
     if (!raw.trim()) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: 'AI nevrátila výsledok analýzy.',
-        },
-        { status: 500 },
+        buildBaseResponse({
+          title: 'Výsledky analýzy',
+          summary:
+            'Analýza bola vypočítaná, ale AI nevrátila slovnú interpretáciu.',
+          computed,
+          practicalText: defaultPracticalText,
+          interpretation: defaultInterpretation,
+          extraWarnings: ['AI nevrátila výsledok analýzy.'],
+        }),
       );
     }
 
@@ -1036,102 +1276,26 @@ ${text || 'Text sa nepodarilo načítať.'}
     try {
       const parsed = JSON.parse(jsonText);
 
-      const descriptiveStatistics =
-        Array.isArray(parsed.descriptiveStatistics) &&
-        parsed.descriptiveStatistics.length > 0
-          ? parsed.descriptiveStatistics
-          : computed.descriptiveStatistics;
-
-      const frequencies =
-        Array.isArray(parsed.frequencies) && parsed.frequencies.length > 0
-          ? parsed.frequencies
-          : computed.frequencies;
-
-      const recommendedCharts =
-        Array.isArray(parsed.recommendedCharts) &&
-        parsed.recommendedCharts.length > 0
-          ? parsed.recommendedCharts
-          : computed.recommendedCharts;
-
-      const excelTables =
-        Array.isArray(parsed.excelTables) && parsed.excelTables.length > 0
-          ? parsed.excelTables
-          : computed.excelTables;
-
-      const hypothesisTests =
-        Array.isArray(parsed.hypothesisTests) && parsed.hypothesisTests.length > 0
-          ? parsed.hypothesisTests
-          : computed.hypothesisTests;
-
-      const recommendedTests =
-        Array.isArray(parsed.recommendedTests) && parsed.recommendedTests.length > 0
-          ? parsed.recommendedTests
-          : hypothesisTests;
-
       const practicalText =
-        cleanText(parsed.practicalText) ||
-        'Na základe získaných údajov bola spracovaná praktická časť, ktorá obsahuje frekvenčnú analýzu dotazníkových otázok, deskriptívnu štatistiku číselných premenných a odporúčané štatistické testy na overenie hypotéz.';
+        cleanText(parsed.practicalText) || defaultPracticalText;
 
       const interpretation =
-        cleanText(parsed.interpretation) ||
-        'Frekvenčné tabuľky interpretujú rozdelenie odpovedí respondentov. Stĺpec Percent je určený ako podklad pre tvorbu stĺpcových grafov. Deskriptívna štatistika sumarizuje základné charakteristiky číselných premenných.';
+        cleanText(parsed.interpretation) || defaultInterpretation;
 
       return NextResponse.json({
-        ...parsed,
-        ok: true,
-        title: parsed.title || 'Výsledky analýzy',
-        summary:
-          parsed.summary ||
-          'Analýza obsahuje deskriptívnu štatistiku, frekvenčné tabuľky, odporúčané grafy, odporúčané testy hypotéz, interpretáciu a text do praktickej časti.',
-        dataDescription: parsed.dataDescription || computed.dataDescription,
-        selectedAnalyses:
-          Array.isArray(parsed.selectedAnalyses) &&
-          parsed.selectedAnalyses.length > 0
-            ? parsed.selectedAnalyses
-            : [
-                {
-                  title: 'Deskriptívna štatistika',
-                  description:
-                    'Pre číselné premenné boli vypočítané základné deskriptívne ukazovatele.',
-                },
-                {
-                  title: 'Frekvenčná analýza',
-                  description:
-                    'Pre kategóriové premenné boli vypočítané frekvencie a percentá.',
-                },
-              ],
-        descriptiveStatistics,
-        frequencies,
-        recommendedCharts,
-        excelTables,
-        hypothesisTests,
-        recommendedTests,
-        practicalText,
-        interpretation,
-        warnings: [
-          ...(Array.isArray(parsed.warnings) ? parsed.warnings : []),
-          ...computed.warnings,
-        ],
+        ...buildBaseResponse({
+          title: parsed.title || 'Výsledky analýzy',
+          summary:
+            parsed.summary ||
+            'Analýza obsahuje frekvenčné tabuľky, deskriptívnu štatistiku škál a subškál, normalitu, reliabilitu, korelácie a odporúčané testy.',
+          computed,
+          practicalText,
+          interpretation,
+          extraWarnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
+        }),
         fullText:
-          parsed.fullText ||
+          cleanText(parsed.fullText) ||
           `${practicalText}\n\nInterpretácia:\n${interpretation}`,
-        exportReady: {
-          word: true,
-          pdf: true,
-          excel: true,
-          tables: excelTables,
-          charts: recommendedCharts,
-        },
-        meta: {
-          ...(parsed.meta || {}),
-          filesCount: files.length,
-          extractedRows: computed.extractedRows,
-          extractedColumns: computed.extractedColumns,
-          extractedFiles: computed.extractedFiles,
-          extractedChars: filesBlock.length + dataDescription.length,
-          generatedAt: new Date().toISOString(),
-          profileTitle: profile?.title || null,
-        },
       });
     } catch {
       return NextResponse.json(fallbackResult(raw, computed));

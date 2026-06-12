@@ -153,6 +153,11 @@ const COLUMN_LABELS: Record<string, string> = {
   extension: 'Prípona',
   size: 'Veľkosť',
   warnings: 'Upozornenia',
+  shapiroWilk: 'Shapiro-Wilk',
+  pValueOfShapiroWilk: 'P-value Shapiro-Wilk',
+  pValueShapiroWilk: 'P-value Shapiro-Wilk',
+  shapiroWilkPValue: 'P-value Shapiro-Wilk',
+  effectSize: 'Effect size',
 };
 
 const COLUMN_PRIORITY = [
@@ -199,6 +204,10 @@ const COLUMN_PRIORITY = [
   'standardErrorSkewness',
   'kurtosis',
   'standardErrorKurtosis',
+  'shapiroWilk',
+  'pValueOfShapiroWilk',
+  'pValueShapiroWilk',
+  'shapiroWilkPValue',
   'distinctValues',
   'value',
   'category',
@@ -807,8 +816,121 @@ function getFrequencyRows(table: unknown): DataRow[] {
   return normalizeRows(rows);
 }
 
+
+function getNormalityForVariable(
+  normalityRows: unknown[],
+  variable: unknown,
+): Record<string, unknown> | null {
+  const variableName = String(variable || '').trim();
+
+  if (!variableName) return null;
+
+  const normalizedVariableName = normalizeColumnKey(variableName);
+
+  const found = normalityRows.find((row) => {
+    if (!isRecord(row)) return false;
+
+    const rowVariable = String(
+      row.variable || row.name || row.scaleName || row.label || '',
+    ).trim();
+
+    return normalizeColumnKey(rowVariable) === normalizedVariableName;
+  });
+
+  return isRecord(found) ? found : null;
+}
+
+function getCorrelationCoefficient(row: Record<string, unknown>): unknown {
+  return row.coefficient ?? row.rho ?? row.r ?? row.value ?? null;
+}
+
+function buildJaspScaleDescriptiveRows(arrays: ReturnType<typeof getResultArrays>): DataRow[] {
+  return normalizeRows(arrays.scaleDescriptives).map((row) => {
+    const normality = getNormalityForVariable(
+      arrays.normality,
+      row.variable || row.name || row.scaleName || row.label,
+    );
+
+    return {
+      variable: row.variable || row.name || row.scaleName || row.label,
+      valid: row.valid ?? row.validRows ?? row.n,
+      missing: row.missing ?? row.missingRows ?? row.missingValues,
+      median: row.median ?? row.Md,
+      mean: row.mean ?? row.M ?? row.average,
+      standardDeviation:
+        row.standardDeviation ?? row.stdDeviation ?? row.stdDev ?? row.SD ?? row.sd,
+      skewness: row.skewness,
+      standardErrorSkewness: row.standardErrorSkewness,
+      kurtosis: row.kurtosis,
+      standardErrorKurtosis: row.standardErrorKurtosis,
+      shapiroWilk:
+        row.shapiroWilk ??
+        row.shapiroWilkStatistic ??
+        normality?.statistic ??
+        null,
+      pValueOfShapiroWilk:
+        row.pValueOfShapiroWilk ??
+        row.pValueShapiroWilk ??
+        row.shapiroWilkPValue ??
+        normality?.pValue ??
+        normality?.p ??
+        null,
+      minimum: row.minimum ?? row.min,
+      maximum: row.maximum ?? row.max,
+    };
+  });
+}
+
+function buildJaspSpearmanRows(arrays: ReturnType<typeof getResultArrays>): DataRow[] {
+  return normalizeRows(arrays.spearmanCorrelations).map((row) => {
+    return {
+      variableA: row.variableA || row.variable1 || row.x || row.left,
+      variableB: row.variableB || row.variable2 || row.y || row.right,
+      rho: getCorrelationCoefficient(row),
+      pValue: row.pValue ?? row.p,
+      significance: row.significance,
+      fisherZ: row.fisherZ,
+      standardError: row.standardError ?? row.se,
+      interpretation: row.interpretation,
+    };
+  });
+}
+
+function buildJaspReliabilityRows(arrays: ReturnType<typeof getResultArrays>): DataRow[] {
+  return normalizeRows(arrays.reliability).map((row) => {
+    return {
+      scaleName: row.scaleName || row.variable || row.name || row.label,
+      validRows: row.validRows ?? row.valid ?? row.n,
+      cronbachAlpha: row.cronbachAlpha ?? row.alpha,
+      interpretation: row.interpretation,
+      items: row.items,
+    };
+  });
+}
+
+function buildJaspNormalityRows(arrays: ReturnType<typeof getResultArrays>): DataRow[] {
+  return normalizeRows(arrays.normality).map((row) => {
+    return {
+      variable: row.variable || row.name || row.scaleName || row.label,
+      valid: row.valid ?? row.n,
+      method: row.method,
+      statistic: row.statistic ?? row.shapiroWilk,
+      pValue: row.pValue ?? row.p,
+      isNormal: row.isNormal,
+      recommendation: row.recommendation,
+      note: row.note,
+    };
+  });
+}
+
+
 function createTableSections(result: AnalysisResult | null): TableSection[] {
   const arrays = getResultArrays(result);
+
+  const jaspScaleRows = buildJaspScaleDescriptiveRows(arrays);
+  const jaspNormalityRows = buildJaspNormalityRows(arrays);
+  const jaspReliabilityRows = buildJaspReliabilityRows(arrays);
+  const jaspSpearmanRows = buildJaspSpearmanRows(arrays);
 
   const sections: TableSection[] = [
     {
@@ -824,6 +946,38 @@ function createTableSections(result: AnalysisResult | null): TableSection[] {
       description: 'Premenné rozpoznané zo súboru alebo vložených dát.',
       rows: arrays.variables,
       icon: <Table2 className="h-5 w-5" />,
+    },
+    {
+      key: 'jaspScaleDescriptives',
+      title: 'JASP tabuľka – deskriptívna štatistika škál a subškál',
+      description:
+        'Hlavná tabuľka podľa JASP: Valid, Missing, Median, Mean, SD, Skewness, Kurtosis, Shapiro-Wilk, p-hodnota, Minimum a Maximum.',
+      rows: jaspScaleRows,
+      icon: <Sigma className="h-5 w-5" />,
+    },
+    {
+      key: 'jaspNormality',
+      title: 'JASP tabuľka – normalita dát',
+      description:
+        'Kontrola normality škál a subškál vrátane štatistiky, p-hodnoty a odporúčania.',
+      rows: jaspNormalityRows,
+      icon: <FlaskConical className="h-5 w-5" />,
+    },
+    {
+      key: 'jaspReliability',
+      title: 'JASP tabuľka – reliabilita škál',
+      description:
+        'Cronbachovo alfa pre rozpoznané alebo manuálne definované škály a subškály.',
+      rows: jaspReliabilityRows,
+      icon: <FlaskConical className="h-5 w-5" />,
+    },
+    {
+      key: 'jaspSpearman',
+      title: 'JASP tabuľka – Spearmanove korelácie',
+      description:
+        'Spearmanove korelácie medzi škálami a subškálami vrátane p-hodnoty, Fisherovho z a SE efektu.',
+      rows: jaspSpearmanRows,
+      icon: <Sigma className="h-5 w-5" />,
     },
     {
       key: 'frequencies',

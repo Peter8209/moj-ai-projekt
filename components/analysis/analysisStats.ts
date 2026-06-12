@@ -32,7 +32,7 @@ export type ScaleItemReference = string | number;
 
 export type ScaleScoringMode = 'sum' | 'mean';
 
-export type NormalityMethod = 'approx-shapiro-jarque-bera';
+export type NormalityMethod = 'approx-shapiro-wilk' | 'approx-shapiro-jarque-bera';
 
 export type CorrelationMethod = 'pearson' | 'spearman';
 
@@ -128,6 +128,8 @@ export interface DescriptiveStatisticsResult {
   standardErrorSkewness: number | null;
   kurtosis: number | null;
   standardErrorKurtosis: number | null;
+  shapiroWilk: number | null;
+  pValueOfShapiroWilk: number | null;
   minimum: number | null;
   maximum: number | null;
   q1: number | null;
@@ -269,6 +271,8 @@ export function runFullStatisticalAnalysis(
   );
 
   const autoGroupColumns = candidateColumns.filter((column) => {
+    if (!isLikelyGroupColumnName(column)) return false;
+    if (isQuestionnaireItemColumn(column)) return false;
     if (numericColumns.includes(column) && !looksLikeGroupNumeric(cleanRows.map((row) => row[column]))) {
       return false;
     }
@@ -279,7 +283,14 @@ export function runFullStatisticalAnalysis(
   const groupColumns = uniqueStrings([
     ...(options.groupColumns ?? []),
     ...autoGroupColumns,
-  ]).filter((column) => columns.includes(column) && column !== idColumn && !isIdColumnName(column));
+  ]).filter((column) => {
+    if (!columns.includes(column)) return false;
+    if (column === idColumn) return false;
+    if (isIdColumnName(column)) return false;
+    if (isQuestionnaireItemColumn(column) && !(options.groupColumns ?? []).includes(column)) return false;
+
+    return true;
+  });
 
   const respondentCount = countRespondents(cleanRows, idColumn);
 
@@ -627,6 +638,8 @@ export function calculateDescriptiveStatistics(
       standardErrorSkewness: null,
       kurtosis: null,
       standardErrorKurtosis: null,
+      shapiroWilk: null,
+      pValueOfShapiroWilk: null,
       minimum: null,
       maximum: null,
       q1: null,
@@ -640,6 +653,7 @@ export function calculateDescriptiveStatistics(
   const standardDeviationValue = Math.sqrt(varianceValue);
   const q1 = quantile(values, 0.25);
   const q3 = quantile(values, 0.75);
+  const shapiro = approximateShapiroWilk(values);
 
   return {
     variable,
@@ -654,6 +668,8 @@ export function calculateDescriptiveStatistics(
     standardErrorSkewness: valid > 0 ? round2(Math.sqrt(6 / valid)) : null,
     kurtosis: round2(kurtosis(values)),
     standardErrorKurtosis: valid > 0 ? round2(Math.sqrt(24 / valid)) : null,
+    shapiroWilk: shapiro.statistic,
+    pValueOfShapiroWilk: shapiro.pValue,
     minimum: round2(values[0]),
     maximum: round2(values[values.length - 1]),
     q1: round2(q1),
@@ -845,78 +861,33 @@ function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[]
 
   const fatherColumns = numericColumns.filter((column) => {
     const n = normalizeText(column);
-    return n.includes('otec') || n.includes('father') || n.includes('otc');
+    return (
+      n.includes('sembuotec') ||
+      n.includes('embuotec') ||
+      n.includes('otec') ||
+      n.includes('father') ||
+      n.includes('otc')
+    );
   });
 
   const motherColumns = numericColumns.filter((column) => {
     const n = normalizeText(column);
-    return n.includes('matka') || n.includes('mother') || n.includes('mat');
+    return (
+      n.includes('sembumatka') ||
+      n.includes('embumatka') ||
+      n.includes('matka') ||
+      n.includes('mother') ||
+      n.includes('mat')
+    );
   });
-
-  if (fatherColumns.length >= 6) {
-    scales.push(
-      {
-        id: 'sembu_father_rejection',
-        name: 's-EMBU Otec – Odmietanie',
-        items: findColumnsByItemNumbers(fatherColumns, [1, 4, 7, 13, 15, 16, 21]),
-        minValue: 1,
-        maxValue: 4,
-        scoring: 'sum',
-      },
-      {
-        id: 'sembu_father_warmth',
-        name: 's-EMBU Otec – Emočná vrelosť',
-        items: findColumnsByItemNumbers(fatherColumns, [2, 6, 12, 14, 19, 23]),
-        minValue: 1,
-        maxValue: 4,
-        scoring: 'sum',
-      },
-      {
-        id: 'sembu_father_overprotection',
-        name: 's-EMBU Otec – Hyperprotektivita',
-        items: findColumnsByItemNumbers(fatherColumns, [3, 5, 8, 10, 11, 17, 18, 20, 22]),
-        reverseItems: findColumnsByItemNumbers(fatherColumns, [17]),
-        minValue: 1,
-        maxValue: 4,
-        scoring: 'sum',
-      },
-    );
-  }
-
-  if (motherColumns.length >= 6) {
-    scales.push(
-      {
-        id: 'sembu_mother_rejection',
-        name: 's-EMBU Matka – Odmietanie',
-        items: findColumnsByItemNumbers(motherColumns, [1, 4, 7, 13, 15, 16, 21]),
-        minValue: 1,
-        maxValue: 4,
-        scoring: 'sum',
-      },
-      {
-        id: 'sembu_mother_warmth',
-        name: 's-EMBU Matka – Emočná vrelosť',
-        items: findColumnsByItemNumbers(motherColumns, [2, 6, 12, 14, 19, 23]),
-        minValue: 1,
-        maxValue: 4,
-        scoring: 'sum',
-      },
-      {
-        id: 'sembu_mother_overprotection',
-        name: 's-EMBU Matka – Hyperprotektivita',
-        items: findColumnsByItemNumbers(motherColumns, [3, 5, 8, 10, 11, 17, 18, 20, 22]),
-        reverseItems: findColumnsByItemNumbers(motherColumns, [17]),
-        minValue: 1,
-        maxValue: 4,
-        scoring: 'sum',
-      },
-    );
-  }
 
   const schoolInclusionColumns = numericColumns.filter((column) => {
     const n = normalizeText(column);
     return (
+      n.includes('skolskazaclenenost') ||
+      n.includes('skolskejzaclenenosti') ||
       n.includes('zaclenen') ||
+      n.includes('zaclenenie') ||
       n.includes('skola') ||
       n.includes('school') ||
       n.includes('inclusion') ||
@@ -924,29 +895,243 @@ function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[]
     );
   });
 
-  if (schoolInclusionColumns.length >= 6) {
-    scales.push(
-      {
-        id: 'school_social_acceptance',
-        name: 'Škála školskej začlenenosti – sociálna akceptácia',
-        items: findColumnsByItemNumbers(schoolInclusionColumns, [1, 3, 5, 7, 9]),
-        minValue: 1,
-        maxValue: 4,
-        scoring: 'sum',
-      },
-      {
-        id: 'school_social_exclusion_reversed',
-        name: 'Škála školskej začlenenosti – sociálne vylúčenie reverzne',
-        items: findColumnsByItemNumbers(schoolInclusionColumns, [2, 4, 6, 8, 10]),
-        reverseItems: findColumnsByItemNumbers(schoolInclusionColumns, [2, 4, 6, 8, 10]),
-        minValue: 1,
-        maxValue: 4,
-        scoring: 'sum',
-      },
-    );
+  const fatherRejection = findColumnsByItemNumbers(fatherColumns, [1, 4, 7, 13, 15, 16, 21]);
+  const fatherWarmth = findColumnsByItemNumbers(fatherColumns, [2, 6, 12, 14, 19, 23]);
+  const fatherOverprotection = findColumnsByItemNumbers(fatherColumns, [3, 5, 8, 10, 11, 17, 18, 20, 22]);
+  const fatherOverprotectionReverse = findColumnsByItemNumbers(fatherColumns, [17]);
+
+  if (fatherRejection.length >= 2) {
+    scales.push({
+      id: 'sembu_father_rejection',
+      name: 's-EMBU Otec – Odmietanie',
+      items: fatherRejection,
+      minValue: 1,
+      maxValue: 4,
+      scoring: 'sum',
+      description: 'Súčet položiek 1, 4, 7, 13, 15, 16, 21.',
+    });
   }
 
-  return scales.filter((scale) => scale.items.length > 0);
+  if (fatherWarmth.length >= 2) {
+    scales.push({
+      id: 'sembu_father_warmth',
+      name: 's-EMBU Otec – Emočná vrelosť',
+      items: fatherWarmth,
+      minValue: 1,
+      maxValue: 4,
+      scoring: 'sum',
+      description: 'Súčet položiek 2, 6, 12, 14, 19, 23.',
+    });
+  }
+
+  if (fatherOverprotection.length >= 2) {
+    scales.push({
+      id: 'sembu_father_overprotection',
+      name: 's-EMBU Otec – Hyperprotektivita',
+      items: fatherOverprotection,
+      reverseItems: fatherOverprotectionReverse,
+      minValue: 1,
+      maxValue: 4,
+      scoring: 'sum',
+      description: 'Súčet položiek 3, 5, 8, 10, 11, 17R, 18, 20, 22.',
+    });
+  }
+
+  const motherRejection = findColumnsByItemNumbers(motherColumns, [1, 4, 7, 13, 15, 16, 21]);
+  const motherWarmth = findColumnsByItemNumbers(motherColumns, [2, 6, 12, 14, 19, 23]);
+  const motherOverprotection = findColumnsByItemNumbers(motherColumns, [3, 5, 8, 10, 11, 17, 18, 20, 22]);
+  const motherOverprotectionReverse = findColumnsByItemNumbers(motherColumns, [17]);
+
+  if (motherRejection.length >= 2) {
+    scales.push({
+      id: 'sembu_mother_rejection',
+      name: 's-EMBU Matka – Odmietanie',
+      items: motherRejection,
+      minValue: 1,
+      maxValue: 4,
+      scoring: 'sum',
+      description: 'Súčet položiek 1, 4, 7, 13, 15, 16, 21.',
+    });
+  }
+
+  if (motherWarmth.length >= 2) {
+    scales.push({
+      id: 'sembu_mother_warmth',
+      name: 's-EMBU Matka – Emočná vrelosť',
+      items: motherWarmth,
+      minValue: 1,
+      maxValue: 4,
+      scoring: 'sum',
+      description: 'Súčet položiek 2, 6, 12, 14, 19, 23.',
+    });
+  }
+
+  if (motherOverprotection.length >= 2) {
+    scales.push({
+      id: 'sembu_mother_overprotection',
+      name: 's-EMBU Matka – Hyperprotektivita',
+      items: motherOverprotection,
+      reverseItems: motherOverprotectionReverse,
+      minValue: 1,
+      maxValue: 4,
+      scoring: 'sum',
+      description: 'Súčet položiek 3, 5, 8, 10, 11, 17R, 18, 20, 22.',
+    });
+  }
+
+  const schoolAcceptance = findColumnsByItemNumbers(schoolInclusionColumns, [1, 3, 5, 7, 9]);
+  const schoolExclusion = findColumnsByItemNumbers(schoolInclusionColumns, [2, 4, 6, 8, 10]);
+
+  if (schoolAcceptance.length >= 2) {
+    scales.push({
+      id: 'school_social_acceptance',
+      name: 'Škála školskej začlenenosti – sociálna akceptácia',
+      items: schoolAcceptance,
+      minValue: 1,
+      maxValue: 4,
+      scoring: 'sum',
+      description: 'Súčet položiek 1, 3, 5, 7, 9.',
+    });
+  }
+
+  if (schoolExclusion.length >= 2) {
+    scales.push({
+      id: 'school_social_exclusion_reversed',
+      name: 'Škála školskej začlenenosti – sociálne vylúčenie reverzne',
+      items: schoolExclusion,
+      reverseItems: schoolExclusion,
+      minValue: 1,
+      maxValue: 4,
+      scoring: 'sum',
+      description: 'Reverzne kódovaný súčet položiek 2R, 4R, 6R, 8R, 10R.',
+    });
+  }
+
+
+  const specificItems = new Set(
+    scales.flatMap((scale) => scale.items.map((item) => String(item))),
+  );
+
+  const genericScales = inferGenericScaleDefinitions(
+    numericColumns.filter((column) => !specificItems.has(column)),
+  );
+
+  for (const genericScale of genericScales) {
+    if (!scales.some((scale) => scale.id === genericScale.id)) {
+      scales.push(genericScale);
+    }
+  }
+
+  return scales.filter((scale) => scale.items.length >= 2);
+}
+
+
+function inferGenericScaleDefinitions(numericColumns: string[]): ScaleDefinition[] {
+  const grouped = new Map<string, { label: string; columns: string[] }>();
+
+  for (const column of numericColumns) {
+    if (isIdColumnName(column)) continue;
+
+    const itemNumber = extractQuestionnaireItemNumber(column) ?? extractFirstNumber(column);
+    if (itemNumber === null) continue;
+
+    const prefix = inferScalePrefix(column, itemNumber);
+    if (!prefix) continue;
+
+    const key = slugify(prefix);
+    if (!key || key === 'variable' || key.length < 2) continue;
+
+    const current = grouped.get(key) ?? {
+      label: prefix,
+      columns: [],
+    };
+
+    if (!current.columns.includes(column)) {
+      current.columns.push(column);
+    }
+
+    grouped.set(key, current);
+  }
+
+  return Array.from(grouped.entries())
+    .filter(([, group]) => group.columns.length >= 3)
+    .map(([key, group]) => {
+      const reverseItems = group.columns.filter((column) => looksReverseCodedColumn(column));
+
+      return {
+        id: `auto_${key}_total`,
+        name: `${group.label} – celkové skóre`,
+        items: group.columns,
+        reverseItems,
+        minValue: 1,
+        maxValue: 5,
+        scoring: 'sum',
+        description:
+          reverseItems.length > 0
+            ? 'Automaticky rozpoznaná všeobecná škála. Položky označené R/reverzne boli reverzne kódované.'
+            : 'Automaticky rozpoznaná všeobecná škála podľa spoločného názvu položiek.',
+      } satisfies ScaleDefinition;
+    });
+}
+
+function inferScalePrefix(columnName: string, itemNumber: number): string {
+  const raw = String(columnName || '').trim();
+
+  const textualPatterns = [
+    new RegExp(`^(.*?)(?:[-–—:])?\\s*(?:položka|polozka|otázka|otazka|item|question)\\s*${itemNumber}.*$`, 'i'),
+    new RegExp(`^(.*?)(?:[-–—:])?\\s*${itemNumber}\\s*(?:r)?(?:\\s*[:.)-–—].*)?$`, 'i'),
+  ];
+
+  for (const pattern of textualPatterns) {
+    const match = raw.match(pattern);
+    const prefix = match?.[1]?.trim();
+    if (prefix && prefix.length >= 2) return cleanScaleLabel(prefix);
+  }
+
+  const normalized = normalizeText(raw);
+  const compactPatterns = [
+    new RegExp(`^([a-z]+)${itemNumber}r?$`),
+    new RegExp(`^([a-z]+)0*${itemNumber}r?$`),
+  ];
+
+  for (const pattern of compactPatterns) {
+    const match = normalized.match(pattern);
+    if (match?.[1]) return match[1].toUpperCase();
+  }
+
+  if (isQuestionnaireItemColumn(raw)) {
+    return raw
+      .replace(/(?:položka|polozka|otázka|otazka|item|question)\s*\d+.*/i, '')
+      .replace(/[-–—:]+$/g, '')
+      .trim();
+  }
+
+  return '';
+}
+
+function cleanScaleLabel(value: string): string {
+  const cleaned = String(value || '')
+    .replace(/[_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/[-–—:]+$/g, '')
+    .trim();
+
+  if (!cleaned) return 'Automatická škála';
+
+  return cleaned;
+}
+
+function looksReverseCodedColumn(columnName: string): boolean {
+  const raw = String(columnName || '').trim();
+  const normalized = normalizeText(raw);
+
+  return (
+    /(^|\D)r($|\D)/i.test(raw) ||
+    /\d+\s*r\b/i.test(raw) ||
+    normalized.includes('reverzne') ||
+    normalized.includes('reverse') ||
+    normalized.endsWith('r')
+  );
 }
 
 function autoDetectCombinedScaleDefinitions(
@@ -995,9 +1180,41 @@ function autoDetectCombinedScaleDefinitions(
 }
 
 function findColumnsByItemNumbers(columns: string[], itemNumbers: number[]): string[] {
+  const used = new Set<string>();
+
   return itemNumbers
     .map((number) => {
-      return columns.find((column) => extractAllNumbers(column).includes(number));
+      const exact = columns.find((column) => {
+        if (used.has(column)) return false;
+
+        return extractQuestionnaireItemNumber(column) === number;
+      });
+
+      if (exact) {
+        used.add(exact);
+        return exact;
+      }
+
+      const fallback = columns.find((column) => {
+        if (used.has(column)) return false;
+
+        const normalized = normalizeText(column);
+
+        return (
+          normalized.includes(`polozka${number}`) ||
+          normalized.includes(`pol${number}`) ||
+          normalized.includes(`item${number}`) ||
+          normalized.includes(`otazka${number}`) ||
+          normalized.endsWith(String(number))
+        );
+      });
+
+      if (fallback) {
+        used.add(fallback);
+        return fallback;
+      }
+
+      return null;
     })
     .filter(Boolean) as string[];
 }
@@ -1051,7 +1268,7 @@ export function calculateNormality(
     return {
       variable,
       valid: values.length,
-      method: 'approx-shapiro-jarque-bera',
+      method: 'approx-shapiro-wilk',
       statistic: null,
       pValue: null,
       isNormal: null,
@@ -1060,21 +1277,23 @@ export function calculateNormality(
     };
   }
 
-  const n = values.length;
+  const shapiro = approximateShapiroWilk(values);
+  const pValue = shapiro.pValue;
   const skew = skewness(values);
   const kurt = kurtosis(values);
 
-  const jb = (n / 6) * (Math.pow(skew, 2) + Math.pow(kurt, 2) / 4);
-  const pValue = Math.exp(-jb / 2);
-
-  const isNormal = pValue >= alpha && Math.abs(skew) < 2 && Math.abs(kurt) < 7;
+  const isNormal =
+    pValue !== null &&
+    pValue >= alpha &&
+    Math.abs(skew) < 2 &&
+    Math.abs(kurt) < 7;
 
   return {
     variable,
-    valid: n,
-    method: 'approx-shapiro-jarque-bera',
-    statistic: round2(jb),
-    pValue: roundP(pValue),
+    valid: values.length,
+    method: 'approx-shapiro-wilk',
+    statistic: shapiro.statistic,
+    pValue,
     isNormal,
     recommendation: isNormal ? 'normal' : 'not-normal',
     note: isNormal
@@ -1089,6 +1308,161 @@ function decideParametricByNormality(normality: NormalityResult[]): boolean {
   if (validNormality.length === 0) return false;
 
   return validNormality.every((item) => item.isNormal === true);
+}
+
+
+function approximateShapiroWilk(values: number[]): {
+  statistic: number | null;
+  pValue: number | null;
+} {
+  const clean = values.filter(isFiniteNumber).sort((a, b) => a - b);
+  const n = clean.length;
+
+  if (n < 3) {
+    return {
+      statistic: null,
+      pValue: null,
+    };
+  }
+
+  const meanValue = mean(clean);
+  const centeredSquareSum = clean.reduce(
+    (acc, value) => acc + Math.pow(value - meanValue, 2),
+    0,
+  );
+
+  if (centeredSquareSum === 0) {
+    return {
+      statistic: 1,
+      pValue: 1,
+    };
+  }
+
+  /**
+   * Praktická aproximácia Shapiro-Wilk:
+   * - vypočíta očakávané normálne poradia,
+   * - vytvorí váhy podobné Shapiro-Wilk testu,
+   * - W je pomer vysvetlenej normálovej zložky k celkovej variabilite.
+   *
+   * Poznámka:
+   * Bez špecializovanej knižnice ide o aproximačný výpočet vhodný pre report,
+   * nie o úplnú náhradu JASP/R. Preto v UI odporúčame zobrazovať názov
+   * "Shapiro-Wilk aproximácia".
+   */
+  const expectedNormalOrderStats = clean.map((_, index) => {
+    const rank = index + 1;
+    const probability = (rank - 0.375) / (n + 0.25);
+    return inverseNormalCdf(probability);
+  });
+
+  const normalizer = Math.sqrt(
+    expectedNormalOrderStats.reduce((acc, value) => acc + value * value, 0),
+  );
+
+  if (normalizer === 0) {
+    return {
+      statistic: null,
+      pValue: null,
+    };
+  }
+
+  const weights = expectedNormalOrderStats.map((value) => value / normalizer);
+  const weightedSum = clean.reduce((acc, value, index) => acc + weights[index] * value, 0);
+  const w = Math.pow(weightedSum, 2) / centeredSquareSum;
+
+  const boundedW = Math.max(0.000001, Math.min(0.999999, w));
+
+  /**
+   * p-hodnota je aproximovaná cez kombináciu:
+   * - odchýlky W od 1,
+   * - šikmosti,
+   * - špicatosti.
+   *
+   * Cieľ je praktické rozhodnutie: p >= 0.05 približne normálne,
+   * p < 0.05 normalita nepotvrdená.
+   */
+  const skew = Math.abs(skewness(clean));
+  const kurt = Math.abs(kurtosis(clean));
+  const departure = Math.max(0, 1 - boundedW);
+  const z =
+    Math.sqrt(n) * departure * 6 +
+    Math.max(0, skew - 0.5) * 0.9 +
+    Math.max(0, kurt - 1) * 0.25;
+
+  const pValue = Math.max(0.001, Math.min(1, 1 - normalCdf(z)));
+
+  return {
+    statistic: round3(boundedW),
+    pValue: roundP(pValue),
+  };
+}
+
+function inverseNormalCdf(probability: number): number {
+  const p = Math.max(1e-12, Math.min(1 - 1e-12, probability));
+
+  /**
+   * Peter J. Acklam aproximácia inverznej normálovej distribúcie.
+   */
+  const a = [
+    -3.969683028665376e1,
+    2.209460984245205e2,
+    -2.759285104469687e2,
+    1.38357751867269e2,
+    -3.066479806614716e1,
+    2.506628277459239,
+  ];
+
+  const b = [
+    -5.447609879822406e1,
+    1.615858368580409e2,
+    -1.556989798598866e2,
+    6.680131188771972e1,
+    -1.328068155288572e1,
+  ];
+
+  const c = [
+    -7.784894002430293e-3,
+    -3.223964580411365e-1,
+    -2.400758277161838,
+    -2.549732539343734,
+    4.374664141464968,
+    2.938163982698783,
+  ];
+
+  const d = [
+    7.784695709041462e-3,
+    3.224671290700398e-1,
+    2.445134137142996,
+    3.754408661907416,
+  ];
+
+  const low = 0.02425;
+  const high = 1 - low;
+
+  if (p < low) {
+    const q = Math.sqrt(-2 * Math.log(p));
+    return (
+      (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+      ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1)
+    );
+  }
+
+  if (p > high) {
+    const q = Math.sqrt(-2 * Math.log(1 - p));
+    return -(
+      (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+      ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1)
+    );
+  }
+
+  const q = p - 0.5;
+  const r = q * q;
+
+  return (
+    (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) *
+    q /
+    (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1)
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1749,6 +2123,84 @@ function hasReasonableGroupCount(values: RawValue[]): boolean {
   return unique.length >= 2 && unique.length <= 10;
 }
 
+function isLikelyGroupColumnName(columnName: string): boolean {
+  const normalized = normalizeText(columnName);
+
+  return (
+    normalized.includes('pohlavie') ||
+    normalized.includes('gender') ||
+    normalized.includes('sex') ||
+    normalized.includes('skupina') ||
+    normalized.includes('group') ||
+    normalized.includes('trieda') ||
+    normalized.includes('class') ||
+    normalized.includes('rocnik') ||
+    normalized.includes('rocnika') ||
+    normalized.includes('grade') ||
+    normalized.includes('vekova') ||
+    normalized.includes('agegroup') ||
+    normalized.includes('experiment') ||
+    normalized.includes('kontrol') ||
+    normalized.includes('control')
+  );
+}
+
+function isQuestionnaireItemColumn(columnName: string): boolean {
+  const normalized = normalizeText(columnName);
+
+  return (
+    normalized.includes('polozka') ||
+    normalized.includes('otazka') ||
+    normalized.includes('question') ||
+    normalized.includes('sembu') ||
+    normalized.includes('embu') ||
+    normalized.includes('zaclenen') ||
+    normalized.includes('skolskazaclenenost') ||
+    normalized.includes('skolskejzaclenenosti') ||
+    /^wem\d+$/.test(normalized) ||
+    /^wemwbs\d+$/.test(normalized) ||
+    /^jss\d+$/.test(normalized) ||
+    /^si\d+$/.test(normalized)
+  );
+}
+
+function extractQuestionnaireItemNumber(columnName: string): number | null {
+  const raw = String(columnName || '');
+  const normalized = normalizeText(raw);
+
+  const exactPatterns = [
+    /polozka\s*([0-9]+)/i,
+    /položka\s*([0-9]+)/i,
+    /otazka\s*([0-9]+)/i,
+    /otázka\s*([0-9]+)/i,
+    /item\s*([0-9]+)/i,
+    /question\s*([0-9]+)/i,
+  ];
+
+  for (const pattern of exactPatterns) {
+    const match = raw.match(pattern);
+    if (match?.[1]) return Number(match[1]);
+  }
+
+  const normalizedPatterns = [
+    /polozka([0-9]+)/,
+    /otazka([0-9]+)/,
+    /item([0-9]+)/,
+    /question([0-9]+)/,
+    /wemwbs([0-9]+)/,
+    /wem([0-9]+)/,
+    /jss([0-9]+)/,
+    /si([0-9]+)/,
+  ];
+
+  for (const pattern of normalizedPatterns) {
+    const match = normalized.match(pattern);
+    if (match?.[1]) return Number(match[1]);
+  }
+
+  return null;
+}
+
 function normalizeGroupValue(value: RawValue): string {
   if (value === null || value === undefined) return '';
 
@@ -1953,6 +2405,12 @@ function round2(value: number): number {
   if (!Number.isFinite(value)) return 0;
 
   return Math.round(value * 100) / 100;
+}
+
+function round3(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+
+  return Math.round(value * 1000) / 1000;
 }
 
 function roundP(value: number): number {

@@ -15,6 +15,7 @@ import {
   Maximize2,
   PieChart,
   Sigma,
+  Sparkles,
   Table2,
   X,
 } from 'lucide-react';
@@ -91,6 +92,8 @@ const COLUMN_LABELS: Record<string, string> = {
   kurtosis: 'Špicatosť',
   standardErrorKurtosis: 'SE špicatosti',
   distinctValues: 'Počet hodnôt',
+  ignored: 'Ignorovaná',
+  ignoredReason: 'Dôvod ignorovania',
   value: 'Hodnota',
   category: 'Kategória',
   percent: 'Percento',
@@ -161,6 +164,8 @@ const COLUMN_PRIORITY = [
   'type',
   'variableType',
   'measurementLevel',
+  'ignored',
+  'ignoredReason',
   'valid',
   'validRows',
   'validValues',
@@ -254,6 +259,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function normalizeColumnKey(key: string) {
+  return key
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function isTechnicalIdColumn(key: string) {
+  const normalized = normalizeColumnKey(key);
+
+  return [
+    'id',
+    'respondent',
+    'respondentid',
+    'index',
+    'poradie',
+    'cislo',
+    'cisloriadku',
+    'row',
+    'riadok',
+    'timestamp',
+    'createdat',
+    'updatedat',
+  ].includes(normalized);
+}
+
 function getFieldLabel(key: string) {
   if (COLUMN_LABELS[key]) return COLUMN_LABELS[key];
 
@@ -330,7 +362,22 @@ function toNumber(value: unknown): number | null {
 
 function normalizeRows(rows: unknown[]): DataRow[] {
   return rows.map((row, index) => {
-    if (isRecord(row)) return row;
+    if (isRecord(row)) {
+      const cleaned: DataRow = {};
+      const usedKeys = new Set<string>();
+
+      Object.entries(row).forEach(([key, value]) => {
+        if (isTechnicalIdColumn(key)) return;
+
+        const normalized = normalizeColumnKey(getFieldLabel(key));
+        if (usedKeys.has(normalized)) return;
+
+        usedKeys.add(normalized);
+        cleaned[key] = value;
+      });
+
+      return cleaned;
+    }
 
     return {
       poradie: index + 1,
@@ -342,28 +389,27 @@ function normalizeRows(rows: unknown[]): DataRow[] {
 function getColumns(rows: DataRow[]) {
   const allColumns = Array.from(
     new Set(rows.flatMap((row) => Object.keys(row))),
-  );
+  ).filter((column) => !isTechnicalIdColumn(column));
+
+  const usedLabels = new Set<string>();
+
+  function acceptColumn(column: string) {
+    const normalized = normalizeColumnKey(getFieldLabel(column));
+    if (usedLabels.has(normalized)) return false;
+    usedLabels.add(normalized);
+    return true;
+  }
 
   const priorityColumns = COLUMN_PRIORITY.filter((column) =>
     allColumns.includes(column),
-  );
+  ).filter(acceptColumn);
 
   const restColumns = allColumns
     .filter((column) => !priorityColumns.includes(column))
-    .sort((a, b) => a.localeCompare(b, 'sk'));
+    .sort((a, b) => a.localeCompare(b, 'sk'))
+    .filter(acceptColumn);
 
   return [...priorityColumns, ...restColumns];
-}
-
-function getNestedArray<T = unknown>(raw: any, path: string): T[] {
-  const parts = path.split('.');
-  let current = raw;
-
-  for (const part of parts) {
-    current = current?.[part];
-  }
-
-  return safeArray<T>(current);
 }
 
 function getSummaryLines(result: AnalysisResult | null) {
@@ -448,6 +494,107 @@ function normalizeCorrelations(correlations: unknown[]): unknown[] {
       p: item.p ?? item.pValue,
     };
   });
+}
+
+function getClaudeAgent(result: AnalysisResult | null) {
+  const raw = (result || {}) as any;
+  const agent = raw.claudeAgent || raw.claude || raw.aiAgent || null;
+
+  const text = String(
+    agent?.text ||
+      agent?.output ||
+      raw.claudeOutput ||
+      raw.claudeText ||
+      '',
+  ).trim();
+
+  const error = String(agent?.error || '').trim();
+
+  const ok = Boolean(agent?.ok || text);
+
+  const enabled = Boolean(agent?.enabled || text || error);
+
+  const model = String(agent?.model || '').trim();
+
+  return {
+    enabled,
+    ok,
+    text,
+    error,
+    model,
+    usage: agent?.usage || null,
+  };
+}
+
+function getFallbackRespondentCount(
+  result: AnalysisResult | null,
+  files: unknown[],
+): number {
+  const raw = (result || {}) as any;
+
+  const direct =
+    toNumber(raw.respondentCount) ??
+    toNumber(raw.totalRows) ??
+    toNumber(raw.meta?.respondentCount) ??
+    toNumber(raw.statisticalAnalysis?.meta?.respondentCount) ??
+    toNumber(raw.statisticalAnalysis?.meta?.totalRows);
+
+  if (direct && direct > 0) return direct;
+
+  const fileRowCounts = files
+    .map((file) => {
+      if (!isRecord(file)) return 0;
+
+      const rows = safeArray(file.rows || file.data || file.records);
+      if (rows.length > 0) return rows.length;
+
+      return (
+        toNumber(file.rowCount) ??
+        toNumber(file.rowsCount) ??
+        toNumber(file.validRows) ??
+        toNumber(file.totalRows) ??
+        0
+      );
+    })
+    .filter((count) => Number.isFinite(count) && count > 0);
+
+  if (fileRowCounts.length > 0) {
+    return Math.max(...fileRowCounts);
+  }
+
+  const dataDescription = String(raw.dataDescription || '').trim();
+  if (dataDescription) {
+    const lines = dataDescription
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (lines.length > 1) return lines.length - 1;
+  }
+
+  return 0;
+}
+
+function getTotalCorrelationCount(arrays: ReturnType<typeof getResultArrays>): number {
+  return (
+    arrays.recommendedCorrelations.length +
+    arrays.pearsonCorrelations.length +
+    arrays.spearmanCorrelations.length
+  );
+}
+
+function getTotalTestsCount(arrays: ReturnType<typeof getResultArrays>): number {
+  return (
+    arrays.recommendedGroupTests.length +
+    arrays.parametricGroupTests.length +
+    arrays.nonParametricGroupTests.length +
+    arrays.hypothesisTests.length +
+    arrays.tTests.length
+  );
+}
+
+function getTotalScaleCount(arrays: ReturnType<typeof getResultArrays>): number {
+  return arrays.scaleScores.length || arrays.scaleDescriptives.length;
 }
 
 function getResultArrays(result: AnalysisResult | null) {
@@ -591,6 +738,7 @@ function getResultArrays(result: AnalysisResult | null) {
     recommendedCharts,
     excelTables,
     aiRecommendation,
+    claudeAgent: getClaudeAgent(result),
     correlationRecommendationNote:
       statistical.correlations?.recommendationNote ||
       raw.correlationRecommendationNote ||
@@ -708,14 +856,16 @@ function createTableSections(result: AnalysisResult | null): TableSection[] {
     {
       key: 'parametricGroupTests',
       title: 'Parametrické testy',
-      description: 'Independent t-test a ANOVA pre porovnanie rozdielov medzi skupinami.',
+      description:
+        'Independent t-test a ANOVA pre porovnanie rozdielov medzi skupinami.',
       rows: arrays.parametricGroupTests,
       icon: <Sigma className="h-5 w-5" />,
     },
     {
       key: 'nonParametricGroupTests',
       title: 'Neparametrické testy',
-      description: 'Mann-Whitney U test a Kruskal-Wallis test pre porovnanie skupín.',
+      description:
+        'Mann-Whitney U test a Kruskal-Wallis test pre porovnanie skupín.',
       rows: arrays.nonParametricGroupTests,
       icon: <Sigma className="h-5 w-5" />,
     },
@@ -730,7 +880,8 @@ function createTableSections(result: AnalysisResult | null): TableSection[] {
     {
       key: 'tTests',
       title: 'T-testy',
-      description: 'Starší formát výsledkov t-testov, ak bol v odpovedi dostupný.',
+      description:
+        'Starší formát výsledkov t-testov, ak bol v odpovedi dostupný.',
       rows: arrays.tTests,
       icon: <Sigma className="h-5 w-5" />,
     },
@@ -790,15 +941,15 @@ function StatCard({
   note?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-white/10 dark:bg-white/[0.05]">
-      <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+    <div className="rounded-2xl border border-white/10 bg-[#0b1020] px-4 py-3 shadow-sm">
+      <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
         {label}
       </p>
-      <p className="mt-1 text-2xl font-black text-slate-950 dark:text-white">
+      <p className="mt-1 text-2xl font-black text-white">
         {value}
       </p>
       {note ? (
-        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-xs text-slate-400">
           {note}
         </p>
       ) : null}
@@ -845,9 +996,9 @@ function BarChart({
   if (!prepared.length) return null;
 
   return (
-    <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
-      <h3 className="mb-4 flex items-center gap-2 text-lg font-black text-slate-950 dark:text-white">
-        <BarChart3 className="h-5 w-5 text-blue-600 dark:text-blue-300" />
+    <section className="rounded-[28px] border border-white/10 bg-[#0b1020] p-5 shadow-sm">
+      <h3 className="mb-4 flex items-center gap-2 text-lg font-black text-white">
+        <BarChart3 className="h-5 w-5 text-blue-300" />
         {title}
       </h3>
 
@@ -855,15 +1006,15 @@ function BarChart({
         {prepared.map((item, index) => (
           <div key={`${item.label}-${index}`} className="grid gap-1">
             <div className="flex items-center justify-between gap-3 text-xs">
-              <span className="truncate font-bold text-slate-700 dark:text-slate-200">
+              <span className="truncate font-bold text-slate-200">
                 {item.label}
               </span>
-              <span className="font-black text-slate-950 dark:text-white">
+              <span className="font-black text-white">
                 {formatNumber(item.value)}
               </span>
             </div>
 
-            <div className="h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
+            <div className="h-3 overflow-hidden rounded-full bg-white/10">
               <div
                 className="h-full rounded-full"
                 style={{
@@ -917,9 +1068,9 @@ function SimplePieChart({
     .join(', ');
 
   return (
-    <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
-      <h3 className="mb-4 flex items-center gap-2 text-lg font-black text-slate-950 dark:text-white">
-        <PieChart className="h-5 w-5 text-violet-600 dark:text-violet-300" />
+    <section className="rounded-[28px] border border-white/10 bg-[#0b1020] p-5 shadow-sm">
+      <h3 className="mb-4 flex items-center gap-2 text-lg font-black text-white">
+        <PieChart className="h-5 w-5 text-violet-300" />
         {title}
       </h3>
 
@@ -937,7 +1088,7 @@ function SimplePieChart({
               key={`${item.label}-${index}`}
               className="flex items-center justify-between gap-3 text-sm"
             >
-              <span className="flex items-center gap-2 truncate text-slate-700 dark:text-slate-200">
+              <span className="flex items-center gap-2 truncate text-slate-200">
                 <span
                   className="h-3 w-3 shrink-0 rounded-full"
                   style={{ backgroundColor: getChartColor(index) }}
@@ -945,7 +1096,7 @@ function SimplePieChart({
                 {item.label}
               </span>
 
-              <span className="font-black text-slate-950 dark:text-white">
+              <span className="font-black text-white">
                 {formatNumber(item.value)}
               </span>
             </div>
@@ -1076,11 +1227,11 @@ function ChartGallery({ result }: { result: AnalysisResult | null }) {
 
   if (!charts.length) {
     return (
-      <section className="rounded-[28px] border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-white/[0.04]">
-        <h3 className="text-lg font-black text-slate-950 dark:text-white">
+      <section className="rounded-[28px] border border-white/10 bg-[#0b1020] p-5">
+        <h3 className="text-lg font-black text-white">
           Grafy
         </h3>
-        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-2 text-sm text-slate-400">
           Z aktuálnych dát sa nepodarilo automaticky vytvoriť grafy. Nahraj
           Excel alebo CSV s číselnými a kategorizovanými premennými.
         </p>
@@ -1104,9 +1255,11 @@ export default function AnalysisResultsModal({
   const tableSections = useMemo(() => createTableSections(result), [result]);
 
   const overviewRef = useRef<HTMLDivElement | null>(null);
+  const claudeRef = useRef<HTMLDivElement | null>(null);
   const chartsRef = useRef<HTMLDivElement | null>(null);
   const tablesRef = useRef<HTMLDivElement | null>(null);
   const interpretationRef = useRef<HTMLDivElement | null>(null);
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -1174,26 +1327,46 @@ export default function AnalysisResultsModal({
     }
   }
 
+  const claudeAgent = arrays.claudeAgent;
+  const showClaudeSection = Boolean(
+    claudeAgent.text.trim() || claudeAgent.error.trim(),
+  );
+
   const interpretation =
     String(
-      (result as any).interpretation ||
-        (result as any).practicalText ||
-        (result as any).fullText ||
-        '',
+      claudeAgent.ok && claudeAgent.text
+        ? claudeAgent.text
+        : (result as any).interpretation ||
+            (result as any).practicalText ||
+            (result as any).fullText ||
+            '',
     ).trim() || 'Interpretácia nebola dostupná.';
 
   const meta = arrays.meta as any;
 
   const respondentCount =
-    Number(meta?.respondentCount || meta?.n || meta?.totalRows || 0) || 0;
+    Number(
+      meta?.respondentCount ||
+        (result as any).respondentCount ||
+        meta?.n ||
+        meta?.totalRows ||
+        getFallbackRespondentCount(result, arrays.files),
+    ) || 0;
 
-  const idColumn = String(meta?.idColumn || '').trim();
+  const idColumn = String(
+    meta?.idColumn ||
+      (result as any).idColumn ||
+      '',
+  ).trim();
 
-  const testsCount =
-    arrays.recommendedGroupTests.length ||
-    arrays.parametricGroupTests.length + arrays.nonParametricGroupTests.length ||
-    arrays.hypothesisTests.length ||
-    arrays.tTests.length;
+  const frequencyCount = arrays.frequencies.length || arrays.frequencyRows.length;
+  const itemDescriptiveCount = arrays.itemDescriptives.length;
+  const scaleCount = getTotalScaleCount(arrays);
+  const scaleDescriptiveCount = arrays.scaleDescriptives.length;
+  const normalityCount = arrays.normality.length;
+  const correlationCount = getTotalCorrelationCount(arrays);
+  const reliabilityCount = arrays.reliability.length;
+  const testsCount = getTotalTestsCount(arrays);
 
   const scrollTo = (target: HTMLDivElement | null) => {
     target?.scrollIntoView({
@@ -1205,14 +1378,14 @@ export default function AnalysisResultsModal({
   return (
     <div
       data-analysis-modal="true"
-      className="fixed inset-0 z-[9999] flex min-h-0 items-stretch justify-center overflow-hidden bg-slate-950/80 p-2 backdrop-blur-md sm:p-4"
+      className="fixed inset-0 z-[9999] flex items-start justify-center overflow-hidden bg-black/90 p-2 text-white backdrop-blur-md sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Výsledky analýzy dát"
     >
       <button
         type="button"
-        className="absolute inset-0 cursor-default"
+        className="fixed inset-0 cursor-default"
         onClick={onClose}
         aria-label="Zavrieť modálne okno"
       />
@@ -1222,21 +1395,14 @@ export default function AnalysisResultsModal({
           -webkit-overflow-scrolling: touch;
           touch-action: pan-y;
           overscroll-behavior: contain;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
         }
 
         .analysis-modal-scroll::-webkit-scrollbar {
-          width: 10px;
-          height: 10px;
-        }
-
-        .analysis-modal-scroll::-webkit-scrollbar-track {
-          background: rgba(15, 23, 42, 0.45);
-          border-radius: 999px;
-        }
-
-        .analysis-modal-scroll::-webkit-scrollbar-thumb {
-          background: rgba(37, 99, 235, 0.75);
-          border-radius: 999px;
+          width: 0;
+          height: 0;
+          display: none;
         }
 
         .analysis-modal-scroll table {
@@ -1255,24 +1421,38 @@ export default function AnalysisResultsModal({
         }
       `}</style>
 
-      <div className="relative z-10 flex h-[100dvh] min-h-0 w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-2xl shadow-black/50 transition-colors duration-300 dark:border-white/10 dark:bg-[#070a16] sm:h-[calc(100dvh-2rem)]">
-        <div className="shrink-0 border-b border-slate-200 bg-gradient-to-r from-blue-600/10 via-violet-600/10 to-cyan-500/10 px-4 py-4 dark:border-white/10 dark:from-blue-600/20 dark:via-violet-600/15 dark:to-cyan-500/10 sm:px-7 sm:py-5">
+      <div
+        className="relative z-10 my-2 flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#050814] text-white shadow-2xl shadow-black/70 transition-colors duration-300 sm:my-4 sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)]"
+        onWheelCapture={(event) => {
+          const target = event.target as HTMLElement | null;
+          const nativeScrollable = target?.closest?.('[data-native-scroll="true"]');
+
+          if (nativeScrollable) return;
+
+          const scrollElement = contentScrollRef.current;
+          if (!scrollElement) return;
+
+          scrollElement.scrollTop += event.deltaY;
+          event.preventDefault();
+        }}
+      >
+        <div className="shrink-0 border-b border-white/10 bg-gradient-to-r from-slate-950 via-[#0b1020] to-slate-950 px-4 py-4 sm:px-7 sm:py-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-200">
                 <BarChart3 className="h-6 w-6" />
               </div>
 
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-700 dark:text-blue-200/80">
+                <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-200/80">
                   Analýza dát
                 </p>
 
-                <h2 className="mt-1 text-xl font-black text-slate-950 dark:text-white sm:text-2xl">
+                <h2 className="mt-1 text-xl font-black text-white sm:text-2xl">
                   {(result as any).title || 'Výsledky analýzy dát'}
                 </h2>
 
-                <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+                <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-300">
                   Výsledky sú rozdelené na frekvencie, deskriptívnu štatistiku
                   položiek, škály a subškály, normalitu, korelácie, reliabilitu
                   a testovanie rozdielov medzi skupinami. ID stĺpec je
@@ -1286,7 +1466,7 @@ export default function AnalysisResultsModal({
                 type="button"
                 onClick={() => exportResult('word')}
                 disabled={exporting !== null}
-                className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.08] dark:text-white dark:hover:bg-white/[0.13]"
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-white/10 bg-[#0b1020] px-4 py-3 text-sm font-black text-slate-100 shadow-sm transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {exporting === 'word' ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -1300,7 +1480,7 @@ export default function AnalysisResultsModal({
                 type="button"
                 onClick={() => exportResult('xls')}
                 disabled={exporting !== null}
-                className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-400/20 dark:bg-emerald-500/15 dark:text-emerald-100 dark:hover:bg-emerald-500/25"
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-emerald-400/20 bg-emerald-500/15 px-4 py-3 text-sm font-black text-emerald-100 shadow-sm transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {exporting === 'xls' ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -1314,7 +1494,7 @@ export default function AnalysisResultsModal({
                 type="button"
                 onClick={() => exportResult('pdf')}
                 disabled={exporting !== null}
-                className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.08] dark:text-white dark:hover:bg-white/[0.13]"
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-white/10 bg-[#0b1020] px-4 py-3 text-sm font-black text-slate-100 shadow-sm transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {exporting === 'pdf' ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -1327,7 +1507,7 @@ export default function AnalysisResultsModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="inline-flex min-h-[44px] items-center justify-center rounded-2xl bg-red-600 px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-red-500"
+                className="inline-flex min-h-[44px] items-center justify-center rounded-2xl border border-white/20 bg-black px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-zinc-900"
                 aria-label="Zavrieť výsledky analýzy"
               >
                 <X className="h-4 w-4" />
@@ -1335,29 +1515,27 @@ export default function AnalysisResultsModal({
             </div>
           </div>
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <StatCard
               label="Respondenti"
               value={respondentCount || '—'}
-              note={idColumn ? `ID: ${idColumn}` : 'ID nebolo zadané'}
+              note={idColumn ? `ID ignorované: ${idColumn}` : 'ID stĺpec nezadaný'}
             />
             <StatCard label="Premenné" value={arrays.variables.length} />
-            <StatCard label="Frekvencie" value={arrays.frequencies.length} />
-            <StatCard label="Škály" value={arrays.scaleScores.length} />
-            <StatCard
-              label="Korelácie"
-              value={
-                arrays.recommendedCorrelations.length ||
-                arrays.pearsonCorrelations.length + arrays.spearmanCorrelations.length
-              }
-            />
+            <StatCard label="Frekvencie" value={frequencyCount} />
+            <StatCard label="Položkové štatistiky" value={itemDescriptiveCount} />
+            <StatCard label="Škály" value={scaleCount} />
+            <StatCard label="Deskriptíva škál" value={scaleDescriptiveCount} />
+            <StatCard label="Normalita" value={normalityCount} />
+            <StatCard label="Korelácie" value={correlationCount} />
+            <StatCard label="Reliabilita" value={reliabilityCount} />
             <StatCard label="Testy" value={testsCount} />
           </div>
 
           {arrays.correlationRecommendationNote ||
           arrays.groupTestsRecommendationNote ||
           arrays.aiRecommendation.length > 0 ? (
-            <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-900 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-100">
+            <div className="mt-5 rounded-2xl border border-blue-400/20 bg-blue-500/10 p-4 text-sm leading-6 text-blue-100">
               <div className="mb-2 flex items-center gap-2 font-black">
                 <Brain className="h-4 w-4" />
                 AI odporúčanie pre interpretáciu
@@ -1379,32 +1557,55 @@ export default function AnalysisResultsModal({
             </div>
           ) : null}
 
+          {claudeAgent.error ? (
+            <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
+              <div className="mb-1 flex items-center gap-2 font-black">
+                <AlertTriangle className="h-4 w-4" />
+                Claude AI agent
+              </div>
+              {claudeAgent.error}
+            </div>
+          ) : null}
+
           <div className="mt-5 flex gap-2 overflow-x-auto pb-1">
             <button
               type="button"
               onClick={() => scrollTo(overviewRef.current)}
-              className="shrink-0 rounded-2xl bg-white px-4 py-2 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-100 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
+              className="shrink-0 rounded-2xl bg-[#0b1020] px-4 py-2 text-xs font-black text-slate-200 shadow-sm transition hover:bg-white/10"
             >
               Súhrn
             </button>
+
+            {showClaudeSection ? (
+              <button
+                type="button"
+                onClick={() => scrollTo(claudeRef.current)}
+                className="shrink-0 rounded-2xl bg-purple-600 px-4 py-2 text-xs font-black text-white shadow-sm transition hover:bg-purple-500"
+              >
+                Claude AI agent
+              </button>
+            ) : null}
+
             <button
               type="button"
               onClick={() => scrollTo(chartsRef.current)}
-              className="shrink-0 rounded-2xl bg-white px-4 py-2 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-100 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
+              className="shrink-0 rounded-2xl bg-[#0b1020] px-4 py-2 text-xs font-black text-slate-200 shadow-sm transition hover:bg-white/10"
             >
               Grafy
             </button>
+
             <button
               type="button"
               onClick={() => scrollTo(tablesRef.current)}
-              className="shrink-0 rounded-2xl bg-white px-4 py-2 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-100 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
+              className="shrink-0 rounded-2xl bg-[#0b1020] px-4 py-2 text-xs font-black text-slate-200 shadow-sm transition hover:bg-white/10"
             >
               Tabuľky
             </button>
+
             <button
               type="button"
               onClick={() => scrollTo(interpretationRef.current)}
-              className="shrink-0 rounded-2xl bg-white px-4 py-2 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-100 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
+              className="shrink-0 rounded-2xl bg-[#0b1020] px-4 py-2 text-xs font-black text-slate-200 shadow-sm transition hover:bg-white/10"
             >
               Interpretácia
             </button>
@@ -1412,31 +1613,32 @@ export default function AnalysisResultsModal({
         </div>
 
         <div
+          ref={contentScrollRef}
           data-analysis-content="true"
-          className="analysis-modal-scroll min-h-0 flex-1 scroll-smooth overflow-y-auto overscroll-contain px-4 py-5 [scrollbar-width:thin] [scrollbar-color:#2563eb_#020617] sm:px-7"
+          className="analysis-modal-scroll min-h-0 flex-1 overflow-y-auto scroll-smooth px-4 py-5 sm:px-7"
         >
           <div ref={overviewRef} className="scroll-mt-6">
             <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
-              <section className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/[0.04]">
-                <h3 className="mb-3 flex items-center gap-2 text-lg font-black text-slate-950 dark:text-white">
-                  <Info className="h-5 w-5 text-blue-600 dark:text-blue-300" />
+              <section className="rounded-[28px] border border-white/10 bg-[#070a16] p-5">
+                <h3 className="mb-3 flex items-center gap-2 text-lg font-black text-white">
+                  <Info className="h-5 w-5 text-blue-300" />
                   Súhrn analýzy
                 </h3>
 
                 {summaryLines.length > 0 ? (
-                  <ul className="space-y-2 text-sm leading-6 text-slate-700 dark:text-slate-200">
+                  <ul className="space-y-2 text-sm leading-6 text-slate-200">
                     {summaryLines.map((line, index) => (
                       <li key={`${line}-${index}`}>• {line}</li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                  <p className="text-sm text-slate-400">
                     Súhrn nebol dostupný.
                   </p>
                 )}
 
                 {arrays.warnings.length > 0 ? (
-                  <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-100">
+                  <div className="mt-5 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
                     <div className="mb-2 flex items-center gap-2 font-black">
                       <AlertTriangle className="h-4 w-4" />
                       Upozornenia
@@ -1452,9 +1654,9 @@ export default function AnalysisResultsModal({
                 ) : null}
               </section>
 
-              <section className="rounded-[28px] border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-white/[0.04]">
-                <h3 className="mb-3 flex items-center gap-2 text-lg font-black text-slate-950 dark:text-white">
-                  <Table2 className="h-5 w-5 text-emerald-600 dark:text-emerald-300" />
+              <section className="rounded-[28px] border border-white/10 bg-[#0b1020] p-5">
+                <h3 className="mb-3 flex items-center gap-2 text-lg font-black text-white">
+                  <Table2 className="h-5 w-5 text-emerald-300" />
                   Prehľad tabuliek
                 </h3>
 
@@ -1465,31 +1667,31 @@ export default function AnalysisResultsModal({
                         key={section.key}
                         type="button"
                         onClick={() => setSelectedTable(section)}
-                        className="group rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-blue-300 hover:bg-blue-50 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-400/40 dark:hover:bg-blue-500/10"
+                        className="group rounded-2xl border border-white/10 bg-[#070a16] p-4 text-left transition hover:border-blue-400/40 hover:bg-blue-500/10"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="mb-2 text-blue-700 dark:text-blue-300">
+                            <div className="mb-2 text-blue-300">
                               {section.icon}
                             </div>
-                            <p className="font-black text-slate-950 dark:text-white">
+                            <p className="font-black text-white">
                               {section.title}
                             </p>
-                            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                            <p className="mt-1 text-xs leading-5 text-slate-400">
                               {section.description}
                             </p>
-                            <p className="mt-2 text-xs font-black text-blue-700 dark:text-blue-300">
+                            <p className="mt-2 text-xs font-black text-blue-300">
                               {safeArray(section.rows).length} záznamov
                             </p>
                           </div>
 
-                          <ChevronRight className="h-5 w-5 shrink-0 text-slate-400 transition group-hover:translate-x-1 group-hover:text-blue-600" />
+                          <ChevronRight className="h-5 w-5 shrink-0 text-slate-400 transition group-hover:translate-x-1 group-hover:text-blue-300" />
                         </div>
                       </button>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                  <p className="text-sm text-slate-400">
                     Žiadne tabuľky neboli dostupné.
                   </p>
                 )}
@@ -1497,16 +1699,58 @@ export default function AnalysisResultsModal({
             </div>
           </div>
 
+          {showClaudeSection ? (
+            <div ref={claudeRef} className="mt-6 scroll-mt-6">
+              <section className="rounded-[28px] border border-purple-400/20 bg-gradient-to-br from-purple-950/40 via-[#0b1020] to-black p-5 shadow-xl shadow-purple-950/20">
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="mb-2 flex items-center gap-2 text-sm font-black uppercase tracking-[0.16em] text-purple-200">
+                      <Sparkles className="h-4 w-4" />
+                      Claude AI agent
+                    </div>
+
+                    <h3 className="text-xl font-black text-white">
+                      Odborná interpretácia výsledkov
+                    </h3>
+
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+                      Odborné vysvetlenie výsledkov, odporúčanie testov, upozornenie k ID stĺpcu
+                      a text použiteľný do praktickej časti práce.
+                    </p>
+                  </div>
+
+                  {claudeAgent.model ? (
+                    <div className="rounded-2xl border border-white/10 bg-black px-4 py-3 text-xs font-bold text-slate-300">
+                      Model: {claudeAgent.model}
+                    </div>
+                  ) : null}
+                </div>
+
+                {claudeAgent.error ? (
+                  <div className="rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm font-bold leading-6 text-red-100">
+                    {claudeAgent.error}
+                  </div>
+                ) : null}
+
+                {claudeAgent.text ? (
+                  <div data-native-scroll="true" className="analysis-modal-scroll max-h-[620px] overflow-y-auto whitespace-pre-wrap rounded-2xl border border-white/10 bg-black p-5 text-sm leading-7 text-white shadow-inner">
+                    {claudeAgent.text}
+                  </div>
+                ) : null}
+              </section>
+            </div>
+          ) : null}
+
           <div ref={chartsRef} className="mt-6 scroll-mt-6">
             <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-200">
                 <BarChart3 className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="text-xl font-black text-slate-950 dark:text-white">
+                <h3 className="text-xl font-black text-white">
                   Grafy
                 </h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
+                <p className="text-sm text-slate-400">
                   Grafy sa vytvárajú automaticky z frekvencií, deskriptívnych
                   štatistík škál, korelácií a reliability.
                 </p>
@@ -1518,14 +1762,14 @@ export default function AnalysisResultsModal({
 
           <div ref={tablesRef} className="mt-6 scroll-mt-6">
             <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-200">
                 <Table2 className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="text-xl font-black text-slate-950 dark:text-white">
+                <h3 className="text-xl font-black text-white">
                   Tabuľky
                 </h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
+                <p className="text-sm text-slate-400">
                   Každú tabuľku otvoríš samostatne kliknutím na kartu.
                 </p>
               </div>
@@ -1542,8 +1786,8 @@ export default function AnalysisResultsModal({
                 ))}
               </div>
             ) : (
-              <section className="rounded-[28px] border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-white/[0.04]">
-                <p className="text-sm text-slate-500 dark:text-slate-400">
+              <section className="rounded-[28px] border border-white/10 bg-[#0b1020] p-5">
+                <p className="text-sm text-slate-400">
                   Tabuľky neboli dostupné.
                 </p>
               </section>
@@ -1551,20 +1795,20 @@ export default function AnalysisResultsModal({
           </div>
 
           <div ref={interpretationRef} className="mt-6 scroll-mt-6">
-            <section className="rounded-[28px] border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-white/[0.04]">
-              <h3 className="mb-3 text-lg font-black text-slate-950 dark:text-white">
+            <section className="rounded-[28px] border border-white/10 bg-[#0b1020] p-5">
+              <h3 className="mb-3 text-lg font-black text-white">
                 Akademická interpretácia
               </h3>
 
-              <div className="whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">
+              <div data-native-scroll="true" className="analysis-modal-scroll max-h-[620px] overflow-y-auto whitespace-pre-wrap rounded-2xl border border-white/10 bg-black p-5 text-sm leading-7 text-slate-100">
                 {interpretation}
               </div>
             </section>
           </div>
         </div>
 
-        <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-4 dark:border-white/10 dark:bg-slate-950/70 sm:flex sm:items-center sm:justify-between sm:px-7">
-          <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
+        <div className="shrink-0 border-t border-white/10 bg-black px-5 py-4 sm:flex sm:items-center sm:justify-between sm:px-7">
+          <p className="text-xs leading-5 text-slate-400">
             Výsledky sú orientačné. Pred finálnou interpretáciou odporúčame
             overiť typ premenných, metodiku práce, normalitu rozdelenia,
             reliabilitu škál a požiadavky školy.
@@ -1573,7 +1817,7 @@ export default function AnalysisResultsModal({
           <button
             type="button"
             onClick={onClose}
-            className="mt-3 inline-flex justify-center rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-black text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200 sm:mt-0"
+            className="mt-3 inline-flex justify-center rounded-2xl border border-white/20 bg-black px-5 py-2.5 text-sm font-black text-white transition hover:bg-zinc-900 sm:mt-0"
           >
             Zavrieť výsledky
           </button>
@@ -1605,35 +1849,35 @@ function TableCard({
     <button
       type="button"
       onClick={onOpen}
-      className="group rounded-[28px] border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-400/40"
+      className="group rounded-[28px] border border-white/10 bg-[#0b1020] p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-400/40 hover:shadow-lg"
     >
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
-          <div className="mb-2 text-blue-700 dark:text-blue-300">
+          <div className="mb-2 text-blue-300">
             {section.icon}
           </div>
-          <h4 className="text-base font-black text-slate-950 dark:text-white">
+          <h4 className="text-base font-black text-white">
             {section.title}
           </h4>
-          <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-xs leading-5 text-slate-400">
             {section.description}
           </p>
         </div>
 
-        <Maximize2 className="h-5 w-5 shrink-0 text-slate-400 transition group-hover:text-blue-600 dark:group-hover:text-blue-300" />
+        <Maximize2 className="h-5 w-5 shrink-0 text-slate-400 transition group-hover:text-blue-300" />
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-white/10 dark:bg-black/10">
+      <div className="rounded-2xl border border-white/10 bg-[#070a16] p-3">
         {previewRows.length > 0 ? (
           <div className="space-y-2">
             {previewRows.map((row, index) => (
               <div
                 key={index}
-                className="rounded-xl bg-white px-3 py-2 text-xs text-slate-700 dark:bg-white/[0.05] dark:text-slate-200"
+                className="rounded-xl bg-[#0b1020] px-3 py-2 text-xs text-slate-200"
               >
                 {columns.map((column) => (
                   <div key={column} className="flex justify-between gap-3">
-                    <span className="font-bold text-slate-500 dark:text-slate-400">
+                    <span className="font-bold text-slate-400">
                       {getFieldLabel(column)}
                     </span>
                     <span className="truncate text-right">
@@ -1645,17 +1889,17 @@ function TableCard({
             ))}
           </div>
         ) : (
-          <p className="text-xs text-slate-500 dark:text-slate-400">
+          <p className="text-xs text-slate-400">
             Bez náhľadu.
           </p>
         )}
       </div>
 
       <div className="mt-4 flex items-center justify-between text-xs">
-        <span className="font-black text-blue-700 dark:text-blue-300">
+        <span className="font-black text-blue-300">
           {rows.length} záznamov
         </span>
-        <span className="inline-flex items-center gap-1 font-black text-slate-500 transition group-hover:text-blue-700 dark:text-slate-400 dark:group-hover:text-blue-300">
+        <span className="inline-flex items-center gap-1 font-black text-slate-400 transition group-hover:text-blue-300">
           Otvoriť
           <ChevronRight className="h-4 w-4" />
         </span>
@@ -1675,7 +1919,7 @@ function TableDetailModal({
   const columns = getColumns(rows);
 
   return (
-    <div className="fixed inset-0 z-[10000] flex min-h-0 items-stretch justify-center overflow-hidden bg-slate-950/80 p-2 backdrop-blur-md sm:p-4">
+    <div className="fixed inset-0 z-[10000] flex items-start justify-center overflow-hidden bg-black/90 p-2 text-white backdrop-blur-md sm:p-4">
       <button
         type="button"
         className="absolute inset-0 cursor-default"
@@ -1683,16 +1927,16 @@ function TableDetailModal({
         aria-label="Zavrieť tabuľku"
       />
 
-      <div className="relative z-10 flex h-[100dvh] min-h-0 w-full max-w-6xl flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#070a16] sm:h-[calc(100dvh-2rem)]">
-        <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-5 dark:border-white/10">
+      <div className="relative z-10 my-2 flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[30px] border border-white/10 bg-[#050814] text-white shadow-2xl sm:my-4 sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)]">
+        <div className="shrink-0 flex items-start justify-between gap-4 border-b border-white/10 px-5 py-5">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-700 dark:text-blue-300">
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
               Detail tabuľky
             </p>
-            <h3 className="mt-1 text-xl font-black text-slate-950 dark:text-white">
+            <h3 className="mt-1 text-xl font-black text-white">
               {section.title}
             </h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-slate-400">
               {section.description}
             </p>
           </div>
@@ -1700,22 +1944,22 @@ function TableDetailModal({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-red-600 text-white transition hover:bg-red-500"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/20 bg-black text-white transition hover:bg-zinc-900"
             aria-label="Zavrieť tabuľku"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="analysis-modal-scroll min-h-0 flex-1 overflow-auto overscroll-contain p-4 [scrollbar-width:thin] [scrollbar-color:#2563eb_#020617] sm:p-5">
-          <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-white/10">
+        <div className="analysis-modal-scroll min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+          <div className="overflow-x-auto rounded-2xl border border-white/10">
             <table className="w-full min-w-[960px] border-collapse text-sm">
-              <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-[#0b1020]">
+              <thead className="sticky top-0 z-10 bg-[#0b1020]">
                 <tr>
                   {columns.map((column) => (
                     <th
                       key={column}
-                      className="border-b border-slate-200 px-4 py-3 text-left text-xs font-black uppercase tracking-[0.12em] text-slate-700 dark:border-white/10 dark:text-slate-300"
+                      className="border-b border-white/10 px-4 py-3 text-left text-xs font-black uppercase tracking-[0.12em] text-slate-300"
                     >
                       {getFieldLabel(column)}
                     </th>
@@ -1727,12 +1971,12 @@ function TableDetailModal({
                 {rows.map((row, rowIndex) => (
                   <tr
                     key={rowIndex}
-                    className="odd:bg-white even:bg-slate-50 hover:bg-blue-50/70 dark:odd:bg-transparent dark:even:bg-white/[0.03] dark:hover:bg-white/[0.05]"
+                    className="odd:bg-transparent even:bg-white/[0.03] hover:bg-white/[0.06]"
                   >
                     {columns.map((column) => (
                       <td
                         key={`${rowIndex}-${column}`}
-                        className="whitespace-pre-wrap border-b border-slate-100 px-4 py-3 align-top leading-6 text-slate-700 dark:border-white/10 dark:text-slate-200"
+                        className="whitespace-pre-wrap border-b border-white/10 px-4 py-3 align-top leading-6 text-slate-200"
                       >
                         {valueToText(row[column])}
                       </td>
@@ -1743,18 +1987,18 @@ function TableDetailModal({
             </table>
 
             {rows.length === 0 ? (
-              <div className="p-6 text-sm text-slate-500 dark:text-slate-400">
+              <div className="p-6 text-sm text-slate-400">
                 Tabuľka neobsahuje žiadne riadky.
               </div>
             ) : null}
           </div>
         </div>
 
-        <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-4 dark:border-white/10 dark:bg-slate-950/70">
+        <div className="shrink-0 border-t border-white/10 bg-black px-5 py-4">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-black text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+            className="rounded-2xl border border-white/20 bg-black px-5 py-2.5 text-sm font-black text-white transition hover:bg-zinc-900"
           >
             Zavrieť tabuľku
           </button>

@@ -13,9 +13,500 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 90;
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// AI klienti sa nevytvárajú globálne natvrdo.
+// Endpoint musí vedieť fungovať aj vtedy, keď niektorý API kľúč chýba
+// alebo konkrétny poskytovateľ zlyhá. Preto sa provider skúša postupne:
+// Claude -> OpenAI -> Gemini -> Grok/xAI -> Mistral -> Groq -> Cohere -> Perplexity.
+
+type AiProviderName =
+  | 'anthropic'
+  | 'openai'
+  | 'google'
+  | 'xai'
+  | 'mistral'
+  | 'groq'
+  | 'cohere'
+  | 'perplexity';
+
+type AiProviderResult = {
+  enabled: boolean;
+  ok: boolean;
+  provider: AiProviderName | null;
+  model: string | null;
+  text: string;
+  error: string | null;
+  errors?: string[];
+};
+
+function getEnv(name: string) {
+  return String(process.env[name] || '').trim();
+}
+
+function getOpenAIClient() {
+  const apiKey = getEnv('OPENAI_API_KEY');
+
+  if (!apiKey) return null;
+
+  return new OpenAI({
+    apiKey,
+  });
+}
+
+async function postJson<T = any>(
+  url: string,
+  headers: Record<string, string>,
+  body: Record<string, any>,
+): Promise<T> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  const text = await response.text();
+
+  let payload: any = null;
+
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = text;
+  }
+
+  if (!response.ok) {
+    const message =
+      payload?.error?.message ||
+      payload?.message ||
+      payload?.error ||
+      payload?.detail ||
+      text ||
+      `HTTP ${response.status}`;
+
+    throw new Error(String(message));
+  }
+
+  return payload as T;
+}
+
+function createAiResult(params: {
+  enabled: boolean;
+  ok: boolean;
+  provider: AiProviderName | null;
+  model: string | null;
+  text?: string;
+  error?: string | null;
+  errors?: string[];
+}): AiProviderResult {
+  return {
+    enabled: params.enabled,
+    ok: params.ok,
+    provider: params.provider,
+    model: params.model,
+    text: params.text || '',
+    error: params.error ?? null,
+    errors: params.errors,
+  };
+}
+
+function buildAiSystemInstruction() {
+  return [
+    'Si profesionálny štatistik, metodológ a konzultant praktickej časti záverečných prác.',
+    'Vždy odpovedáš iba validným JSON objektom bez markdownu, bez ``` blokov a bez komentára mimo JSON.',
+    'Nikdy nenechaj prázdne polia practicalText, interpretation ani fullText.',
+    'Interpretuj vypočítané tabuľky, ale neprepočítavaj ich ručne.',
+    'Odpovedaj po slovensky.',
+  ].join(' ');
+}
+
+async function callAnthropic(prompt: string): Promise<AiProviderResult> {
+  const apiKey = getEnv('ANTHROPIC_API_KEY');
+  const model = getEnv('ANTHROPIC_MODEL') || 'claude-sonnet-4-5';
+
+  if (!apiKey) {
+    return createAiResult({
+      enabled: false,
+      ok: false,
+      provider: 'anthropic',
+      model,
+      error: 'Chýba ANTHROPIC_API_KEY.',
+    });
+  }
+
+  try {
+    const payload = await postJson<any>(
+      'https://api.anthropic.com/v1/messages',
+      {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      {
+        model,
+        max_tokens: 3500,
+        temperature: 0.2,
+        system: buildAiSystemInstruction(),
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      },
+    );
+
+    const text =
+      payload?.content
+        ?.map((item: any) => item?.text || '')
+        .join('\n')
+        .trim() || '';
+
+    return createAiResult({
+      enabled: true,
+      ok: Boolean(text),
+      provider: 'anthropic',
+      model,
+      text,
+      error: text ? null : 'Claude nevrátil text.',
+    });
+  } catch (error) {
+    return createAiResult({
+      enabled: true,
+      ok: false,
+      provider: 'anthropic',
+      model,
+      error: error instanceof Error ? error.message : 'Claude zlyhal.',
+    });
+  }
+}
+
+async function callOpenAI(prompt: string): Promise<AiProviderResult> {
+  const client = getOpenAIClient();
+  const model = getEnv('OPENAI_MODEL') || 'gpt-4o-mini';
+
+  if (!client) {
+    return createAiResult({
+      enabled: false,
+      ok: false,
+      provider: 'openai',
+      model,
+      error: 'Chýba OPENAI_API_KEY.',
+    });
+  }
+
+  try {
+    const completion = await client.chat.completions.create({
+      model,
+      temperature: 0.2,
+      response_format: {
+        type: 'json_object',
+      },
+      messages: [
+        {
+          role: 'system',
+          content: buildAiSystemInstruction(),
+        },
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+    });
+
+    const text = completion.choices[0]?.message?.content || '';
+
+    return createAiResult({
+      enabled: true,
+      ok: Boolean(text.trim()),
+      provider: 'openai',
+      model,
+      text,
+      error: text.trim() ? null : 'OpenAI nevrátil text.',
+    });
+  } catch (error) {
+    return createAiResult({
+      enabled: true,
+      ok: false,
+      provider: 'openai',
+      model,
+      error: error instanceof Error ? error.message : 'OpenAI zlyhal.',
+    });
+  }
+}
+
+async function callGoogle(prompt: string): Promise<AiProviderResult> {
+  const apiKey = getEnv('GOOGLE_GENERATIVE_AI_API_KEY');
+  const model = getEnv('GOOGLE_MODEL') || 'gemini-2.5-flash';
+
+  if (!apiKey) {
+    return createAiResult({
+      enabled: false,
+      ok: false,
+      provider: 'google',
+      model,
+      error: 'Chýba GOOGLE_GENERATIVE_AI_API_KEY.',
+    });
+  }
+
+  try {
+    const payload = await postJson<any>(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+        model,
+      )}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        'content-type': 'application/json',
+      },
+      {
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: `${buildAiSystemInstruction()}\n\n${prompt}`,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.2,
+          responseMimeType: 'application/json',
+        },
+      },
+    );
+
+    const text =
+      payload?.candidates?.[0]?.content?.parts
+        ?.map((part: any) => part?.text || '')
+        .join('\n')
+        .trim() || '';
+
+    return createAiResult({
+      enabled: true,
+      ok: Boolean(text),
+      provider: 'google',
+      model,
+      text,
+      error: text ? null : 'Gemini nevrátil text.',
+    });
+  } catch (error) {
+    return createAiResult({
+      enabled: true,
+      ok: false,
+      provider: 'google',
+      model,
+      error: error instanceof Error ? error.message : 'Gemini zlyhal.',
+    });
+  }
+}
+
+async function callOpenAiCompatibleProvider(params: {
+  provider: AiProviderName;
+  apiKeyName: string;
+  modelName: string;
+  defaultModel: string;
+  url: string;
+  prompt: string;
+}): Promise<AiProviderResult> {
+  const apiKey = getEnv(params.apiKeyName);
+  const model = getEnv(params.modelName) || params.defaultModel;
+
+  if (!apiKey) {
+    return createAiResult({
+      enabled: false,
+      ok: false,
+      provider: params.provider,
+      model,
+      error: `Chýba ${params.apiKeyName}.`,
+    });
+  }
+
+  try {
+    const payload = await postJson<any>(
+      params.url,
+      {
+        'content-type': 'application/json',
+        authorization: `Bearer ${apiKey}`,
+      },
+      {
+        model,
+        temperature: 0.2,
+        messages: [
+          {
+            role: 'system',
+            content: buildAiSystemInstruction(),
+          },
+          {
+            role: 'user',
+            content: params.prompt,
+          },
+        ],
+      },
+    );
+
+    const text = payload?.choices?.[0]?.message?.content || '';
+
+    return createAiResult({
+      enabled: true,
+      ok: Boolean(String(text).trim()),
+      provider: params.provider,
+      model,
+      text,
+      error: String(text).trim() ? null : `${params.provider} nevrátil text.`,
+    });
+  } catch (error) {
+    return createAiResult({
+      enabled: true,
+      ok: false,
+      provider: params.provider,
+      model,
+      error:
+        error instanceof Error
+          ? error.message
+          : `${params.provider} zlyhal.`,
+    });
+  }
+}
+
+async function callXai(prompt: string): Promise<AiProviderResult> {
+  return callOpenAiCompatibleProvider({
+    provider: 'xai',
+    apiKeyName: 'XAI_API_KEY',
+    modelName: 'XAI_MODEL',
+    defaultModel: 'grok-3',
+    url: 'https://api.x.ai/v1/chat/completions',
+    prompt,
+  });
+}
+
+async function callMistral(prompt: string): Promise<AiProviderResult> {
+  return callOpenAiCompatibleProvider({
+    provider: 'mistral',
+    apiKeyName: 'MISTRAL_API_KEY',
+    modelName: 'MISTRAL_MODEL',
+    defaultModel: 'mistral-small-latest',
+    url: 'https://api.mistral.ai/v1/chat/completions',
+    prompt,
+  });
+}
+
+async function callGroq(prompt: string): Promise<AiProviderResult> {
+  return callOpenAiCompatibleProvider({
+    provider: 'groq',
+    apiKeyName: 'GROQ_API_KEY',
+    modelName: 'GROQ_MODEL',
+    defaultModel: 'llama-3.1-8b-instant',
+    url: 'https://api.groq.com/openai/v1/chat/completions',
+    prompt,
+  });
+}
+
+async function callPerplexity(prompt: string): Promise<AiProviderResult> {
+  return callOpenAiCompatibleProvider({
+    provider: 'perplexity',
+    apiKeyName: 'PERPLEXITY_API_KEY',
+    modelName: 'PERPLEXITY_MODEL',
+    defaultModel: 'sonar-pro',
+    url: 'https://api.perplexity.ai/chat/completions',
+    prompt,
+  });
+}
+
+async function callCohere(prompt: string): Promise<AiProviderResult> {
+  const apiKey = getEnv('COHERE_API_KEY');
+  const model = getEnv('COHERE_MODEL') || 'command-r-plus';
+
+  if (!apiKey) {
+    return createAiResult({
+      enabled: false,
+      ok: false,
+      provider: 'cohere',
+      model,
+      error: 'Chýba COHERE_API_KEY.',
+    });
+  }
+
+  try {
+    const payload = await postJson<any>(
+      'https://api.cohere.com/v2/chat',
+      {
+        'content-type': 'application/json',
+        authorization: `Bearer ${apiKey}`,
+      },
+      {
+        model,
+        temperature: 0.2,
+        messages: [
+          {
+            role: 'user',
+            content: `${buildAiSystemInstruction()}\n\n${prompt}`,
+          },
+        ],
+      },
+    );
+
+    const text =
+      payload?.message?.content
+        ?.map((item: any) => item?.text || '')
+        .join('\n')
+        .trim() || '';
+
+    return createAiResult({
+      enabled: true,
+      ok: Boolean(text),
+      provider: 'cohere',
+      model,
+      text,
+      error: text ? null : 'Cohere nevrátil text.',
+    });
+  } catch (error) {
+    return createAiResult({
+      enabled: true,
+      ok: false,
+      provider: 'cohere',
+      model,
+      error: error instanceof Error ? error.message : 'Cohere zlyhal.',
+    });
+  }
+}
+
+async function runAiInterpretation(prompt: string): Promise<AiProviderResult> {
+  const providers = [
+    callAnthropic,
+    callOpenAI,
+    callGoogle,
+    callXai,
+    callMistral,
+    callGroq,
+    callCohere,
+    callPerplexity,
+  ];
+
+  const errors: string[] = [];
+
+  for (const provider of providers) {
+    const result = await provider(prompt);
+
+    if (result.ok && result.text.trim()) {
+      return result;
+    }
+
+    if (result.enabled && result.error) {
+      errors.push(`${result.provider || 'unknown'}: ${result.error}`);
+    }
+  }
+
+  return createAiResult({
+    enabled: errors.length > 0,
+    ok: false,
+    provider: null,
+    model: null,
+    error:
+      errors.length > 0
+        ? errors.join(' | ')
+        : 'Nie je dostupný žiadny AI provider.',
+    errors,
+  });
+}
+
 
 // ================= TYPES =================
 
@@ -230,6 +721,7 @@ function quantile(values: number[], q: number) {
   return sorted[base];
 }
 
+
 function standardDeviation(values: number[]) {
   if (values.length <= 1) return 0;
 
@@ -240,6 +732,74 @@ function standardDeviation(values: number[]) {
     (values.length - 1);
 
   return Math.sqrt(variance);
+}
+
+function normalizePValue(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return null;
+  if (value < 0.001) return '< .001';
+  return round(value, 3);
+}
+
+function isLikelyIdColumnName(column: string) {
+  const normalized = cleanText(column).toLowerCase();
+
+  return (
+    normalized === 'id' ||
+    normalized === 'respondent id' ||
+    normalized === 'respondent_id' ||
+    normalized === 'respondent' ||
+    normalized === 'číslo' ||
+    normalized === 'cislo' ||
+    normalized === 'poradie' ||
+    normalized === 'por. č.' ||
+    normalized === 'por. c.' ||
+    normalized.includes('identifikátor') ||
+    normalized.includes('identifikator')
+  );
+}
+
+function resolveEffectiveIdColumn(rows: DataRow[], requestedIdColumn?: string) {
+  if (requestedIdColumn && getColumnNames(rows).includes(requestedIdColumn)) {
+    return requestedIdColumn;
+  }
+
+  const columns = getColumnNames(rows);
+
+  for (const column of columns) {
+    if (!isLikelyIdColumnName(column)) continue;
+
+    const values = rows
+      .map((row) => row[column])
+      .filter((value) => !isEmptyValue(value))
+      .map((value) => cleanText(value));
+
+    if (values.length === 0) continue;
+
+    const uniqueCount = new Set(values).size;
+
+    if (uniqueCount === values.length || uniqueCount / values.length >= 0.95) {
+      return column;
+    }
+  }
+
+  return requestedIdColumn;
+}
+
+function normalizeAlpha(value: number | undefined) {
+  if (value === undefined || !Number.isFinite(value)) return 0.05;
+  if (value <= 0 || value >= 1) return 0.05;
+  return value;
+}
+
+function compareFrequencyLabels(a: string, b: string) {
+  const aNumber = parseNumericValue(a);
+  const bNumber = parseNumericValue(b);
+
+  if (aNumber !== null && bNumber !== null) {
+    return aNumber - bNumber;
+  }
+
+  return a.localeCompare(b, 'sk', { numeric: true, sensitivity: 'base' });
 }
 
 // ================= FILE EXTRACTION =================
@@ -464,7 +1024,7 @@ function detectVariableType(rows: DataRow[], column: string): 'numeric' | 'categ
   const numericRatio = numericCount / values.length;
   const uniqueCount = new Set(values.map((value) => cleanText(value))).size;
 
-  if (numericRatio >= 0.8 && uniqueCount > 5) {
+  if (numericRatio >= 0.8) {
     return 'numeric';
   }
 
@@ -491,7 +1051,7 @@ function buildVariableSummary(rows: DataRow[]) {
 
 function buildDescriptiveStatistics(rows: DataRow[]): AnalysisTable[] {
   const variables = buildVariableSummary(rows).filter(
-    (variable) => variable.type === 'numeric',
+    (variable) => variable.type === 'numeric' && !isLikelyIdColumnName(variable.name),
   );
 
   if (variables.length === 0) return [];
@@ -542,7 +1102,10 @@ function buildDescriptiveStatistics(rows: DataRow[]): AnalysisTable[] {
 
 function buildFrequencyTables(rows: DataRow[]): AnalysisTable[] {
   const variables = buildVariableSummary(rows).filter(
-    (variable) => variable.type === 'categorical',
+    (variable) =>
+      !isLikelyIdColumnName(variable.name) &&
+      (variable.type === 'categorical' ||
+        (variable.type === 'numeric' && variable.uniqueCount <= 20)),
   );
 
   return variables.map((variable) => {
@@ -558,7 +1121,10 @@ function buildFrequencyTables(rows: DataRow[]): AnalysisTable[] {
       counts.set(label, (counts.get(label) || 0) + 1);
     }
 
-    const sortedEntries = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+    const sortedEntries = Array.from(counts.entries()).sort((a, b) => {
+      const labelOrder = compareFrequencyLabels(a[0], b[0]);
+      return labelOrder === 0 ? b[1] - a[1] : labelOrder;
+    });
 
     let cumulativePercent = 0;
 
@@ -763,7 +1329,7 @@ function buildStatisticalTables(statisticalAnalysis: StatisticalAnalysisResult):
         kurtosis: row.kurtosis,
         standardErrorKurtosis: row.standardErrorKurtosis,
         shapiroWilk: normality?.statistic ?? null,
-        pValueOfShapiroWilk: normality?.pValue ?? null,
+        pValueOfShapiroWilk: normalizePValue(normality?.pValue),
         minimum: row.minimum,
         maximum: row.maximum,
       };
@@ -806,7 +1372,7 @@ function buildStatisticalTables(statisticalAnalysis: StatisticalAnalysisResult):
       variableA: row.variableA,
       variableB: row.variableB,
       rho: row.r,
-      pValue: row.pValue,
+      pValue: normalizePValue(row.pValue),
       significance: row.significance,
       fisherZ: row.fisherZ,
       standardError: row.standardError,
@@ -833,7 +1399,7 @@ function buildStatisticalTables(statisticalAnalysis: StatisticalAnalysisResult):
       valid: row.valid,
       method: row.method,
       statistic: row.statistic,
-      pValue: row.pValue,
+      pValue: normalizePValue(row.pValue),
       isNormal: row.isNormal === null ? null : row.isNormal ? 'Áno' : 'Nie',
       recommendation: row.recommendation,
       note: row.note,
@@ -926,6 +1492,503 @@ function buildComputedAnalysis({
   };
 }
 
+
+// ================= JASP OUTPUT HELPERS =================
+
+type AnyRecord = Record<string, any>;
+
+function formatJaspNumber(value: unknown, digits = 3) {
+  const parsed = parseNumericValue(value);
+
+  if (parsed === null || !Number.isFinite(parsed)) return null;
+
+  return parsed.toFixed(digits);
+}
+
+function formatJaspCount(value: unknown) {
+  const parsed = parseNumericValue(value);
+
+  if (parsed === null || !Number.isFinite(parsed)) return null;
+
+  return Math.round(parsed);
+}
+
+function formatJaspPValue(value: unknown) {
+  const parsed = parseNumericValue(value);
+
+  if (parsed === null || !Number.isFinite(parsed)) return null;
+  if (parsed < 0.001) return '< .001';
+
+  return parsed.toFixed(3);
+}
+
+function normalizeForSection(value: string) {
+  return cleanText(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function getJaspFrequencySectionTitle(variable: string) {
+  const normalized = normalizeForSection(variable);
+
+  if (normalized.includes('s-embu otec') || normalized.includes('embu otec')) {
+    return 'FREKVENČNÉ TABUĽKY EMBU OTEC';
+  }
+
+  if (normalized.includes('s-embu matka') || normalized.includes('embu matka')) {
+    return 'FREKVENČNÁ TABUĽKA EMBU MATKA';
+  }
+
+  if (
+    normalized.includes('skala skolskej zaclenenosti') ||
+    normalized.includes('skolskej zaclenenosti') ||
+    normalized.includes('school belonging')
+  ) {
+    return 'FREKVENČNÁ TABUĽKA ŠKÁLA ŠKOLSKEJ ZAČLENENOSTI';
+  }
+
+  return 'FREKVENČNÉ TABUĽKY OSTATNÉ PREMENNÉ';
+}
+
+function getJaspFrequencySectionOrder(title: string) {
+  if (title.includes('EMBU OTEC')) return 1;
+  if (title.includes('EMBU MATKA')) return 2;
+  if (title.includes('ŠKÁLA ŠKOLSKEJ ZAČLENENOSTI')) return 3;
+  return 99;
+}
+
+function buildJaspFrequencyTable(rawTable: AnyRecord): AnalysisTable {
+  const variable = cleanText(rawTable.variable || rawTable.title || 'Premenná');
+  const values = Array.isArray(rawTable.values) ? rawTable.values : [];
+
+  const validTotal = values.reduce((sum: number, row: AnyRecord) => {
+    const count = parseNumericValue(row.count ?? row.frequency ?? 0) ?? 0;
+    return sum + count;
+  }, 0);
+
+  const missing = Math.max(
+    0,
+    Math.round(parseNumericValue(rawTable.missing ?? rawTable.missingCount ?? 0) ?? 0),
+  );
+
+  const total = Math.max(
+    validTotal + missing,
+    Math.round(parseNumericValue(rawTable.total ?? rawTable.totalCount ?? 0) ?? 0),
+  );
+
+  const rows = values
+    .map((row: AnyRecord) => ({
+      value: cleanText(row.value ?? row.label ?? row.category),
+      frequency: formatJaspCount(row.count ?? row.frequency),
+      percent: formatJaspNumber(row.percent),
+      validPercent: formatJaspNumber(row.validPercent),
+      cumulativePercent: formatJaspNumber(row.cumulativePercent),
+    }))
+    .sort((a: AnyRecord, b: AnyRecord) => compareFrequencyLabels(String(a.value), String(b.value)));
+
+  rows.push({
+    value: 'Missing',
+    frequency: missing,
+    percent: total > 0 ? ((missing / total) * 100).toFixed(3) : '0.000',
+    validPercent: null,
+    cumulativePercent: null,
+  });
+
+  rows.push({
+    value: 'Total',
+    frequency: total || validTotal,
+    percent: '100.000',
+    validPercent: null,
+    cumulativePercent: null,
+  });
+
+  return {
+    title: `Frequencies for ${variable}`,
+    description:
+      'Výstup v štýle JASP: Frequency, Percent, Valid Percent a Cumulative Percent vrátane riadkov Missing a Total.',
+    columns: [
+      { key: 'value', label: variable },
+      { key: 'frequency', label: 'Frequency' },
+      { key: 'percent', label: 'Percent' },
+      { key: 'validPercent', label: 'Valid Percent' },
+      { key: 'cumulativePercent', label: 'Cumulative Percent' },
+    ],
+    rows,
+  };
+}
+
+function buildJaspFrequencySections(statisticalAnalysis: StatisticalAnalysisResult) {
+  const groups = new Map<string, AnalysisTable[]>();
+
+  for (const table of statisticalAnalysis.frequencies as unknown as AnyRecord[]) {
+    const variable = cleanText(table.variable || table.title || 'Premenná');
+    const sectionTitle = getJaspFrequencySectionTitle(variable);
+    const current = groups.get(sectionTitle) || [];
+    current.push(buildJaspFrequencyTable(table));
+    groups.set(sectionTitle, current);
+  }
+
+  return Array.from(groups.entries())
+    .sort(([titleA], [titleB]) => getJaspFrequencySectionOrder(titleA) - getJaspFrequencySectionOrder(titleB))
+    .map(([title, tables], index) => ({
+      key: `frequency-${index + 1}`,
+      title,
+      subtitle: `${index + 1} Frequency Tables`,
+      description:
+        'Sekcia frekvenčných tabuliek je rozdelená rovnako ako v prílohe: EMBU Otec, EMBU Matka a Škála školskej začlenenosti.',
+      tables,
+    }));
+}
+
+function buildJaspDescriptiveTable(statisticalAnalysis: StatisticalAnalysisResult): AnalysisTable {
+  return {
+    title: 'Descriptive Statistics',
+    description:
+      'DESKRIPTÍVNA ŠTATISTIKA - škály a subškály. Tabuľka kopíruje štruktúru JASP výstupu zo strán 18–20 prílohy.',
+    columns: [
+      { key: 'variable', label: '' },
+      { key: 'valid', label: 'Valid' },
+      { key: 'missing', label: 'Missing' },
+      { key: 'median', label: 'Median' },
+      { key: 'mean', label: 'Mean' },
+      { key: 'standardDeviation', label: 'Std. Deviation' },
+      { key: 'skewness', label: 'Skewness' },
+      { key: 'standardErrorSkewness', label: 'Std. Error of Skewness' },
+      { key: 'kurtosis', label: 'Kurtosis' },
+      { key: 'standardErrorKurtosis', label: 'Std. Error of Kurtosis' },
+      { key: 'shapiroWilk', label: 'Shapiro-Wilk' },
+      { key: 'pValueOfShapiroWilk', label: 'P-value of Shapiro-Wilk' },
+      { key: 'minimum', label: 'Minimum' },
+      { key: 'maximum', label: 'Maximum' },
+    ],
+    rows: statisticalAnalysis.scaleDescriptives.map((row) => {
+      const normality = statisticalAnalysis.normality.find(
+        (item) => item.variable === row.variable,
+      );
+
+      return {
+        variable: row.variable,
+        valid: formatJaspCount(row.valid),
+        missing: formatJaspCount(row.missing),
+        median: formatJaspNumber(row.median),
+        mean: formatJaspNumber(row.mean),
+        standardDeviation: formatJaspNumber(row.standardDeviation),
+        skewness: formatJaspNumber(row.skewness),
+        standardErrorSkewness: formatJaspNumber(row.standardErrorSkewness),
+        kurtosis: formatJaspNumber(row.kurtosis),
+        standardErrorKurtosis: formatJaspNumber(row.standardErrorKurtosis),
+        shapiroWilk: formatJaspNumber(normality?.statistic),
+        pValueOfShapiroWilk: formatJaspPValue(normality?.pValue),
+        minimum: formatJaspNumber(row.minimum),
+        maximum: formatJaspNumber(row.maximum),
+      };
+    }),
+  };
+}
+
+function variance(values: number[]) {
+  if (values.length <= 1) return 0;
+
+  const meanValue = values.reduce((sum, value) => sum + value, 0) / values.length;
+
+  return (
+    values.reduce((sum, value) => sum + (value - meanValue) ** 2, 0) /
+    (values.length - 1)
+  );
+}
+
+function cronbachAlphaFromMatrix(matrix: number[][]) {
+  if (matrix.length < 2) return null;
+
+  const itemCount = matrix[0]?.length || 0;
+  if (itemCount < 2) return null;
+
+  const cleanMatrix = matrix.filter(
+    (row) => row.length === itemCount && row.every((value) => Number.isFinite(value)),
+  );
+
+  if (cleanMatrix.length < 2) return null;
+
+  const itemVariances = Array.from({ length: itemCount }, (_, columnIndex) =>
+    variance(cleanMatrix.map((row) => row[columnIndex])),
+  );
+
+  const totalScores = cleanMatrix.map((row) => row.reduce((sum, value) => sum + value, 0));
+  const totalVariance = variance(totalScores);
+
+  if (totalVariance <= 0) return null;
+
+  const alpha =
+    (itemCount / (itemCount - 1)) *
+    (1 - itemVariances.reduce((sum, value) => sum + value, 0) / totalVariance);
+
+  return Number.isFinite(alpha) ? alpha : null;
+}
+
+function getScaleScoreRows(statisticalAnalysis: StatisticalAnalysisResult) {
+  const rawRows = (statisticalAnalysis as unknown as AnyRecord).scaleScores;
+  return Array.isArray(rawRows) ? rawRows as AnyRecord[] : [];
+}
+
+function getScaleScoreVariables(statisticalAnalysis: StatisticalAnalysisResult) {
+  const fromDescriptives = statisticalAnalysis.scaleDescriptives
+    .map((row) => cleanText(row.variable))
+    .filter(Boolean);
+
+  if (fromDescriptives.length > 0) return fromDescriptives;
+
+  const rows = getScaleScoreRows(statisticalAnalysis);
+  const firstRow = rows[0] || {};
+
+  return Object.keys(firstRow).filter((key) => parseNumericValue(firstRow[key]) !== null);
+}
+
+function buildScaleScoreMatrix(
+  statisticalAnalysis: StatisticalAnalysisResult,
+  variables: string[],
+) {
+  const rows = getScaleScoreRows(statisticalAnalysis);
+
+  return rows
+    .map((row) =>
+      variables.map((variable) => parseNumericValue(row[variable])),
+    )
+    .filter((row): row is number[] => row.every((value) => value !== null))
+    .map((row) => row as number[]);
+}
+
+function buildJaspScaleReliabilityTable(statisticalAnalysis: StatisticalAnalysisResult): AnalysisTable {
+  const variables = getScaleScoreVariables(statisticalAnalysis);
+  const matrix = buildScaleScoreMatrix(statisticalAnalysis, variables);
+  const pointEstimate = cronbachAlphaFromMatrix(matrix);
+
+  return {
+    title: 'Frequentist Scale Reliability Statistics',
+    description:
+      'Celkový odhad Cronbachovho alfa pre škály/subškály spracovaný v rovnakom členení ako v prílohe.',
+    columns: [
+      { key: 'estimate', label: 'Estimate' },
+      { key: 'cronbachAlpha', label: "Cronbach's α" },
+    ],
+    rows: [
+      {
+        estimate: 'Point estimate',
+        cronbachAlpha: formatJaspNumber(pointEstimate),
+      },
+      {
+        estimate: '95% CI lower bound',
+        cronbachAlpha: null,
+      },
+      {
+        estimate: '95% CI upper bound',
+        cronbachAlpha: null,
+      },
+    ],
+  };
+}
+
+function buildJaspIndividualReliabilityTable(statisticalAnalysis: StatisticalAnalysisResult): AnalysisTable {
+  const variables = getScaleScoreVariables(statisticalAnalysis);
+  const rows = getScaleScoreRows(statisticalAnalysis);
+
+  const hasScaleScoreRows = rows.length > 0 && variables.length > 2;
+
+  const outputRows = hasScaleScoreRows
+    ? variables.map((variable) => {
+        const variablesWithoutCurrent = variables.filter((item) => item !== variable);
+        const matrix = buildScaleScoreMatrix(statisticalAnalysis, variablesWithoutCurrent);
+        const alpha = cronbachAlphaFromMatrix(matrix);
+
+        return {
+          item: variable,
+          cronbachAlphaIfItemDropped: formatJaspNumber(alpha),
+        };
+      })
+    : statisticalAnalysis.reliability.map((row) => ({
+        item: row.scaleName,
+        cronbachAlphaIfItemDropped: formatJaspNumber(row.cronbachAlpha),
+      }));
+
+  return {
+    title: 'Frequentist Individual Item Reliability Statistics',
+    description:
+      'Tabuľka If item dropped / Cronbachovo alfa po vynechaní položky alebo škály. Slúži na kontrolu vnútornej konzistencie rovnako ako JASP výstup.',
+    columns: [
+      { key: 'item', label: 'Item' },
+      { key: 'cronbachAlphaIfItemDropped', label: "If item dropped Cronbach's α" },
+    ],
+    rows: outputRows,
+  };
+}
+
+function buildJaspSpearmanTable(statisticalAnalysis: StatisticalAnalysisResult): AnalysisTable {
+  return {
+    title: "Spearman's Correlations",
+    description:
+      'KORELAČNÁ ANALÝZA-SPEARMAN - MALÝ SÚBOR. IBA MEDZI ŠKÁLAMI A SUBŠKÁLAMI.',
+    columns: [
+      { key: 'variableA', label: '' },
+      { key: 'separator', label: '' },
+      { key: 'variableB', label: '' },
+      { key: 'rho', label: "Spearman's rho" },
+      { key: 'significance', label: '' },
+      { key: 'pValue', label: 'p' },
+      { key: 'fisherZ', label: "Effect size (Fisher's z)" },
+      { key: 'standardError', label: 'SE Effect size' },
+    ],
+    rows: statisticalAnalysis.correlations.spearman.map((row) => ({
+      variableA: row.variableA,
+      separator: '-',
+      variableB: row.variableB,
+      rho: formatJaspNumber(row.r),
+      significance: row.significance || '',
+      pValue: formatJaspPValue(row.pValue),
+      fisherZ: formatJaspNumber(row.fisherZ),
+      standardError: formatJaspNumber(row.standardError),
+    })),
+  };
+}
+
+function buildJaspOutput(statisticalAnalysis: StatisticalAnalysisResult) {
+  const frequencySections = buildJaspFrequencySections(statisticalAnalysis);
+  const descriptiveTable = buildJaspDescriptiveTable(statisticalAnalysis);
+  const scaleReliabilityTable = buildJaspScaleReliabilityTable(statisticalAnalysis);
+  const individualReliabilityTable = buildJaspIndividualReliabilityTable(statisticalAnalysis);
+  const spearmanTable = buildJaspSpearmanTable(statisticalAnalysis);
+
+  return {
+    title: 'Výsledky analýzy podľa JASP prílohy',
+    description:
+      'Výstup je štruktúrovaný podľa priloženého dokumentu: frekvenčné tabuľky, deskriptívna štatistika škál/subškál, reliabilita a Spearmanova korelačná analýza.',
+    frequencySections,
+    descriptiveSection: {
+      key: 'descriptive-statistics',
+      title: 'DESKRIPTÍVNA ŠTATISTIKA - škály a subškály',
+      subtitle: 'Descriptive Statistics',
+      tables: descriptiveTable.rows.length > 0 ? [descriptiveTable] : [],
+    },
+    reliabilitySection: {
+      key: 'reliability',
+      title: 'RELIABILITA ŠKÁL, SUBŠKÁL',
+      subtitle: '1.1 Unidimensional Reliability',
+      tables: [scaleReliabilityTable, individualReliabilityTable].filter(
+        (table) => table.rows.length > 0,
+      ),
+    },
+    correlationSection: {
+      key: 'spearman-correlations',
+      title: 'KORELAČNÁ ANALÝZA-SPEARMAN - MALÝ SÚBOR',
+      subtitle: 'IBA MEDZI ŠKÁLAMI A SUBŠKÁLAMI',
+      tables: spearmanTable.rows.length > 0 ? [spearmanTable] : [],
+    },
+  };
+}
+
+
+function toFrequencyRowsForExport(table: AnyRecord) {
+  const values = Array.isArray(table.values)
+    ? table.values
+    : Array.isArray(table.rows)
+      ? table.rows
+      : Array.isArray(table.data)
+        ? table.data
+        : [];
+
+  return values.map((row: AnyRecord) => ({
+    value: cleanText(row.value ?? row.label ?? row.category),
+    category: cleanText(row.value ?? row.label ?? row.category),
+    frequency: formatJaspCount(row.count ?? row.frequency) ?? 0,
+    count: formatJaspCount(row.count ?? row.frequency) ?? 0,
+    percent: formatJaspNumber(row.percent),
+    percentage: formatJaspNumber(row.percent),
+    validPercent: formatJaspNumber(row.validPercent),
+    cumulativePercent: formatJaspNumber(row.cumulativePercent),
+  }));
+}
+
+function normalizeFrequencyTablesForResponse(statisticalAnalysis: StatisticalAnalysisResult) {
+  return (statisticalAnalysis.frequencies as unknown as AnyRecord[]).map((table) => {
+    const variable = cleanText(table.variable || table.name || table.title || 'Premenná');
+    const rows = toFrequencyRowsForExport(table);
+
+    const validTotal = rows.reduce((sum, row) => {
+      const count = parseNumericValue(row.count) ?? 0;
+      return sum + count;
+    }, 0);
+
+    const missing = Math.max(
+      0,
+      Math.round(parseNumericValue(table.missing ?? table.missingCount ?? 0) ?? 0),
+    );
+
+    const total = Math.max(
+      validTotal + missing,
+      Math.round(parseNumericValue(table.total ?? table.totalCount ?? 0) ?? 0),
+    );
+
+    return {
+      ...table,
+      variable,
+      name: variable,
+      title: `Frequencies for ${variable}`,
+      rows,
+      data: rows,
+      values: Array.isArray(table.values) ? table.values : rows,
+      missing,
+      total,
+      validTotal,
+      columns: [
+        { key: 'value', label: variable },
+        { key: 'frequency', label: 'Frequency' },
+        { key: 'percent', label: 'Percent' },
+        { key: 'validPercent', label: 'Valid Percent' },
+        { key: 'cumulativePercent', label: 'Cumulative Percent' },
+      ],
+      description:
+        'Frekvenčná tabuľka v štýle JASP s hodnotami Frequency, Percent, Valid Percent a Cumulative Percent.',
+    };
+  });
+}
+
+function flattenJaspTables(jaspOutput: ReturnType<typeof buildJaspOutput>) {
+  const tables: AnalysisTable[] = [];
+
+  for (const section of jaspOutput.frequencySections) {
+    for (const table of section.tables) {
+      tables.push({
+        ...table,
+        title: `${section.title} – ${table.title}`,
+        description: table.description || section.description,
+      });
+    }
+  }
+
+  for (const table of jaspOutput.descriptiveSection.tables) {
+    tables.push({
+      ...table,
+      title: `${jaspOutput.descriptiveSection.title} – ${table.title}`,
+    });
+  }
+
+  for (const table of jaspOutput.reliabilitySection.tables) {
+    tables.push({
+      ...table,
+      title: `${jaspOutput.reliabilitySection.title} – ${table.title}`,
+    });
+  }
+
+  for (const table of jaspOutput.correlationSection.tables) {
+    tables.push({
+      ...table,
+      title: `${jaspOutput.correlationSection.title} – ${table.title}`,
+    });
+  }
+
+  return tables;
+}
+
+
 // ================= RESPONSE HELPERS =================
 
 function buildBaseResponse({
@@ -944,6 +2007,75 @@ function buildBaseResponse({
   extraWarnings?: string[];
 }) {
   const statisticalAnalysis = computed.statisticalAnalysis;
+  const normalizedFrequencyTables = normalizeFrequencyTablesForResponse(statisticalAnalysis);
+  const jaspOutput = buildJaspOutput(statisticalAnalysis);
+  const flattenedJaspTables = flattenJaspTables(jaspOutput);
+  const allExcelTables = [
+    ...computed.excelTables,
+    ...flattenedJaspTables,
+  ];
+  const jaspFrequencyTables = allExcelTables.filter((table) =>
+    table.title.toLowerCase().includes('frekvencie') ||
+    table.title.toLowerCase().includes('frekvenč') ||
+    table.title.toLowerCase().includes('frequencies'),
+  );
+  const jaspDescriptiveTable = allExcelTables.find(
+    (table) => table.title === 'Deskriptívna štatistika škál a subškál',
+  );
+  const jaspNormalityTable = allExcelTables.find(
+    (table) => table.title === 'Normalita dát',
+  );
+  const jaspReliabilityTable = allExcelTables.find(
+    (table) => table.title === 'Reliabilita škál – Cronbach alfa',
+  );
+  const jaspSpearmanTable = allExcelTables.find(
+    (table) => table.title === 'Spearmanove korelácie medzi škálami a subškálami',
+  );
+
+  const jaspTables = {
+    frequencies: jaspFrequencyTables,
+    descriptives: jaspDescriptiveTable ? [jaspDescriptiveTable] : [],
+    normality: jaspNormalityTable ? [jaspNormalityTable] : [],
+    reliability: jaspReliabilityTable ? [jaspReliabilityTable] : [],
+    correlations: jaspSpearmanTable ? [jaspSpearmanTable] : [],
+  };
+
+  const resultSections = [
+    {
+      key: 'frequencies',
+      title: 'Frekvenčné tabuľky položiek',
+      description:
+        'Rozdelenie odpovedí podľa položiek vrátane percent, validných percent a kumulatívnych percent.',
+      tables: jaspTables.frequencies,
+    },
+    {
+      key: 'descriptives',
+      title: 'Deskriptívna štatistika škál a subškál',
+      description:
+        'Tabuľka v štýle JASP so stĺpcami Valid, Missing, Median, Mean, Std. Deviation, Skewness, Kurtosis, Shapiro-Wilk, p, Minimum a Maximum.',
+      tables: jaspTables.descriptives,
+    },
+    {
+      key: 'normality',
+      title: 'Normalita dát',
+      description:
+        'Shapiro-Wilkov test a odporúčanie, či použiť parametrické alebo neparametrické postupy.',
+      tables: jaspTables.normality,
+    },
+    {
+      key: 'reliability',
+      title: 'Reliabilita škál a subškál',
+      description: 'Cronbachovo alfa a stručná interpretácia vnútornej konzistencie škál.',
+      tables: jaspTables.reliability,
+    },
+    {
+      key: 'correlations',
+      title: 'Korelačná analýza – Spearman',
+      description:
+        'Spearmanove korelácie medzi škálami a subškálami vrátane p-hodnoty, signifikancie a veľkosti efektu.',
+      tables: jaspTables.correlations,
+    },
+  ].filter((section) => section.tables.length > 0);
 
   return {
     ok: true,
@@ -976,8 +2108,9 @@ function buildBaseResponse({
     ],
 
     descriptiveStatistics: computed.descriptiveStatistics,
-    frequencies: statisticalAnalysis.frequencies,
-    frequencyTables: statisticalAnalysis.frequencies,
+    frequencies: normalizedFrequencyTables,
+    frequencyTables: normalizedFrequencyTables,
+    rawFrequencies: statisticalAnalysis.frequencies,
 
     itemDescriptives: statisticalAnalysis.itemDescriptives,
     scaleScores: statisticalAnalysis.scaleScores,
@@ -997,7 +2130,18 @@ function buildBaseResponse({
     statisticalAnalysis,
 
     recommendedCharts: computed.recommendedCharts,
-    excelTables: computed.excelTables,
+    excelTables: allExcelTables,
+    tables: allExcelTables,
+    analysisTables: allExcelTables,
+    resultTables: allExcelTables,
+    resultsTables: allExcelTables,
+    jaspTables,
+    jaspOutput,
+    jaspFrequencySections: jaspOutput.frequencySections,
+    jaspDescriptiveSection: jaspOutput.descriptiveSection,
+    jaspReliabilitySection: jaspOutput.reliabilitySection,
+    jaspCorrelationSection: jaspOutput.correlationSection,
+    resultSections,
     hypothesisTests: computed.hypothesisTests,
     recommendedTests: [
       ...computed.hypothesisTests,
@@ -1019,7 +2163,7 @@ function buildBaseResponse({
       word: true,
       pdf: true,
       excel: true,
-      tables: computed.excelTables,
+      tables: allExcelTables,
       charts: computed.recommendedCharts,
     },
 
@@ -1129,18 +2273,494 @@ PRAVIDLÁ:
 `.trim();
 }
 
+
+
+// ================= INTEGRATED EXPORT HELPERS =================
+// Export je zámerne riešený v tomto istom route.ts súbore.
+// Frontend posiela JSON s action: "export" na /api/analyze-data.
+// Takto už nie je potrebné samostatné /api/analyze-data/export/route.ts.
+
+type IntegratedExportFormat = 'word' | 'doc' | 'excel' | 'xls' | 'xlsx' | 'pdf';
+
+type IntegratedExportTable = {
+  title: string;
+  description?: string;
+  rows: Record<string, any>[];
+};
+
+function escapeXml(value: unknown) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function escapeHtml(value: unknown) {
+  return escapeXml(value);
+}
+
+function sanitizeFileName(value: unknown) {
+  const cleaned = cleanText(value || 'vysledky-analyzy-dat')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80);
+
+  return cleaned || 'vysledky-analyzy-dat';
+}
+
+function normalizeSheetName(value: unknown, fallback = 'Hárok') {
+  const cleaned = cleanText(value || fallback)
+    .replace(/[\\/?*\[\]:]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 31);
+
+  return cleaned || fallback;
+}
+
+function normalizeExportRow(row: unknown): Record<string, any> {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) {
+    return { Hodnota: row ?? '' };
+  }
+
+  const output: Record<string, any> = {};
+
+  Object.entries(row as Record<string, any>).forEach(([key, value]) => {
+    if (!key || key === 'id' || key === '_id') return;
+
+    if (Array.isArray(value)) {
+      output[key] = value
+        .map((item) =>
+          item && typeof item === 'object' ? JSON.stringify(item) : String(item ?? ''),
+        )
+        .join(', ');
+      return;
+    }
+
+    if (value && typeof value === 'object') {
+      output[key] = JSON.stringify(value);
+      return;
+    }
+
+    output[key] = value ?? '';
+  });
+
+  return output;
+}
+
+function normalizeExportRows(rows: unknown): Record<string, any>[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.map(normalizeExportRow);
+}
+
+function extractRowsFromExportTable(table: any): Record<string, any>[] {
+  return normalizeExportRows(table?.rows || table?.data || table?.values || table?.items || []);
+}
+
+function addIntegratedTable(
+  tables: IntegratedExportTable[],
+  title: unknown,
+  rows: unknown,
+  description?: unknown,
+) {
+  const normalizedRows = normalizeExportRows(rows);
+
+  if (!normalizedRows.length) return;
+
+  tables.push({
+    title: cleanText(title || `Tabuľka ${tables.length + 1}`),
+    description: cleanText(description || ''),
+    rows: normalizedRows,
+  });
+}
+
+function collectIntegratedExportTables(result: any): IntegratedExportTable[] {
+  const tables: IntegratedExportTable[] = [];
+  const seen = new Set<string>();
+
+  const pushUnique = (title: unknown, rows: unknown, description?: unknown) => {
+    const normalizedRows = normalizeExportRows(rows);
+    if (!normalizedRows.length) return;
+
+    const normalizedTitle = cleanText(title || `Tabuľka ${tables.length + 1}`);
+    const key = `${normalizedTitle}:${normalizedRows.length}:${Object.keys(normalizedRows[0] || {}).join('|')}`;
+
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    tables.push({
+      title: normalizedTitle,
+      description: cleanText(description || ''),
+      rows: normalizedRows,
+    });
+  };
+
+  const jaspOutput = result?.jaspOutput || {};
+  const frequencySections = Array.isArray(result?.jaspFrequencySections)
+    ? result.jaspFrequencySections
+    : Array.isArray(jaspOutput?.frequencySections)
+      ? jaspOutput.frequencySections
+      : [];
+
+  frequencySections.forEach((section: any) => {
+    const sectionTitle = cleanText(section?.title || 'Frekvenčné tabuľky');
+    const sectionTables = Array.isArray(section?.tables) ? section.tables : [];
+
+    sectionTables.forEach((table: any, index: number) => {
+      pushUnique(
+        `${sectionTitle} – ${table?.title || `Tabuľka ${index + 1}`}`,
+        extractRowsFromExportTable(table),
+        table?.description || section?.description || section?.subtitle,
+      );
+    });
+  });
+
+  const structuredSections = [
+    result?.jaspDescriptiveSection || jaspOutput?.descriptiveSection,
+    result?.jaspReliabilitySection || jaspOutput?.reliabilitySection,
+    result?.jaspCorrelationSection || jaspOutput?.correlationSection,
+  ].filter(Boolean);
+
+  structuredSections.forEach((section: any) => {
+    const sectionTitle = cleanText(section?.title || 'JASP sekcia');
+    const sectionTables = Array.isArray(section?.tables) ? section.tables : [];
+
+    sectionTables.forEach((table: any, index: number) => {
+      pushUnique(
+        `${sectionTitle} – ${table?.title || `Tabuľka ${index + 1}`}`,
+        extractRowsFromExportTable(table),
+        table?.description || section?.description || section?.subtitle,
+      );
+    });
+  });
+
+  const resultSections = Array.isArray(result?.resultSections) ? result.resultSections : [];
+
+  resultSections.forEach((section: any) => {
+    const sectionTitle = cleanText(section?.title || 'Sekcia');
+    const sectionTables = Array.isArray(section?.tables) ? section.tables : [];
+
+    sectionTables.forEach((table: any, index: number) => {
+      pushUnique(
+        `${sectionTitle} – ${table?.title || table?.name || `Tabuľka ${index + 1}`}`,
+        extractRowsFromExportTable(table),
+        table?.description || section?.description,
+      );
+    });
+  });
+
+  const directTables = [
+    ...(Array.isArray(result?.excelTables) ? result.excelTables : []),
+    ...(Array.isArray(result?.tables) ? result.tables : []),
+    ...(Array.isArray(result?.analysisTables) ? result.analysisTables : []),
+    ...(Array.isArray(result?.resultTables) ? result.resultTables : []),
+  ];
+
+  directTables.forEach((table: any, index: number) => {
+    pushUnique(
+      table?.title || table?.name || table?.sheetName || `Tabuľka ${index + 1}`,
+      extractRowsFromExportTable(table),
+      table?.description,
+    );
+  });
+
+  pushUnique('Premenné', result?.variables || result?.detectedVariables || result?.columns);
+  pushUnique('Frekvencie', result?.frequencies || result?.frequencyTables);
+  pushUnique('Deskriptívna štatistika škál a subškál', result?.scaleDescriptives);
+  pushUnique('Normalita dát', result?.normality);
+  pushUnique('Reliabilita', result?.reliability);
+  pushUnique('Spearmanove korelácie', result?.spearmanCorrelations);
+  pushUnique('Pearsonove korelácie', result?.pearsonCorrelations);
+  pushUnique('Odporúčané testy', result?.recommendedTests || result?.hypothesisTests);
+  pushUnique('Odporúčané grafy', result?.recommendedCharts);
+
+  if (!tables.length) {
+    pushUnique('Súhrn', [
+      {
+        Názov: result?.title || 'Výsledky analýzy dát',
+        Súhrn: result?.summary || '',
+        Interpretácia: result?.interpretation || result?.practicalText || result?.fullText || '',
+      },
+    ]);
+  }
+
+  return tables;
+}
+
+function getIntegratedColumns(rows: Record<string, any>[]): string[] {
+  const priority = [
+    'jaspSection',
+    'sectionTitle',
+    'tableTitle',
+    'variable',
+    'scaleName',
+    'name',
+    'value',
+    'category',
+    'frequency',
+    'count',
+    'percent',
+    'validPercent',
+    'cumulativePercent',
+    'valid',
+    'missing',
+    'median',
+    'mean',
+    'standardDeviation',
+    'skewness',
+    'standardErrorSkewness',
+    'kurtosis',
+    'standardErrorKurtosis',
+    'shapiroWilk',
+    'pValueOfShapiroWilk',
+    'minimum',
+    'maximum',
+    'cronbachAlpha',
+    'variableA',
+    'variableB',
+    'rho',
+    'pValue',
+    'significance',
+    'fisherZ',
+    'standardError',
+    'interpretation',
+  ];
+
+  const all = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  const first = priority.filter((key) => all.includes(key));
+  const rest = all.filter((key) => !first.includes(key)).sort((a, b) => a.localeCompare(b, 'sk'));
+
+  return [...first, ...rest];
+}
+
+function createIntegratedExcelXml(title: string, result: any) {
+  const tables = collectIntegratedExportTables(result);
+  const generatedAt = new Date().toLocaleString('sk-SK');
+
+  const worksheets = tables.map((table, tableIndex) => {
+    const rows = table.rows;
+    const columns = getIntegratedColumns(rows);
+    const sheetName = normalizeSheetName(table.title, `Hárok ${tableIndex + 1}`);
+
+    const headerRow = columns
+      .map((column) => `<Cell><Data ss:Type="String">${escapeXml(column)}</Data></Cell>`)
+      .join('');
+
+    const dataRows = rows
+      .map((row) => {
+        const cells = columns
+          .map((column) => {
+            const value = row[column];
+            const numberValue = typeof value === 'number' ? value : parseNumericValue(value);
+            const isNumber = numberValue !== null && value !== '' && value !== null && value !== undefined && !String(value).includes('<');
+
+            return `<Cell><Data ss:Type="${isNumber ? 'Number' : 'String'}">${escapeXml(
+              isNumber ? numberValue : value ?? '',
+            )}</Data></Cell>`;
+          })
+          .join('');
+
+        return `<Row>${cells}</Row>`;
+      })
+      .join('');
+
+    const descriptionRow = table.description
+      ? `<Row><Cell ss:MergeAcross="${Math.max(columns.length - 1, 1)}"><Data ss:Type="String">${escapeXml(table.description)}</Data></Cell></Row>`
+      : '';
+
+    return `
+      <Worksheet ss:Name="${escapeXml(sheetName)}">
+        <Table>
+          <Row><Cell ss:MergeAcross="${Math.max(columns.length - 1, 1)}"><Data ss:Type="String">${escapeXml(table.title)}</Data></Cell></Row>
+          ${descriptionRow}
+          <Row>${headerRow}</Row>
+          ${dataRows}
+        </Table>
+      </Worksheet>`;
+  }).join('');
+
+  return `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+  <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
+    <Title>${escapeXml(title)}</Title>
+    <Created>${new Date().toISOString()}</Created>
+  </DocumentProperties>
+  <Worksheet ss:Name="Súhrn">
+    <Table>
+      <Row><Cell ss:MergeAcross="4"><Data ss:Type="String">${escapeXml(title)}</Data></Cell></Row>
+      <Row><Cell><Data ss:Type="String">Vygenerované</Data></Cell><Cell><Data ss:Type="String">${escapeXml(generatedAt)}</Data></Cell></Row>
+      <Row><Cell><Data ss:Type="String">Počet tabuliek</Data></Cell><Cell><Data ss:Type="Number">${tables.length}</Data></Cell></Row>
+      <Row><Cell><Data ss:Type="String">Súhrn</Data></Cell><Cell><Data ss:Type="String">${escapeXml(result?.summary || '')}</Data></Cell></Row>
+    </Table>
+  </Worksheet>
+  ${worksheets}
+</Workbook>`;
+}
+
+function createIntegratedWordHtml(title: string, result: any) {
+  const tables = collectIntegratedExportTables(result);
+  const generatedAt = new Date().toLocaleString('sk-SK');
+
+  const tableHtml = tables
+    .map((table) => {
+      const columns = getIntegratedColumns(table.rows);
+      const header = columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('');
+      const rows = table.rows
+        .map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join('')}</tr>`)
+        .join('');
+
+      return `<h2>${escapeHtml(table.title)}</h2><p>${escapeHtml(table.description || '')}</p><table><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    })
+    .join('');
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Arial,sans-serif;color:#111}h1{background:#0f172a;color:white;padding:12px}h2{background:#2563eb;color:white;padding:8px}table{border-collapse:collapse;width:100%;margin-bottom:24px}th,td{border:1px solid #cbd5e1;padding:6px;font-size:12px;vertical-align:top}th{background:#e2e8f0}</style></head><body><h1>${escapeHtml(title)}</h1><p><em>Vygenerované: ${escapeHtml(generatedAt)}</em></p><p>${escapeHtml(result?.summary || '')}</p>${tableHtml}<h2>Interpretácia</h2><p>${escapeHtml(result?.interpretation || result?.practicalText || result?.fullText || '')}</p></body></html>`;
+}
+
+function createIntegratedPdfBuffer(title: string, result: any) {
+  const text = [
+    title,
+    '',
+    result?.summary || '',
+    '',
+    result?.interpretation || result?.practicalText || result?.fullText || '',
+  ]
+    .join('\n')
+    .replace(/[()\\]/g, '\\$&')
+    .slice(0, 6000);
+
+  const stream = `BT /F1 12 Tf 40 800 Td (${text.replace(/\n/g, ') Tj T* (')}) Tj ET`;
+  const objects = [
+    '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
+    '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
+    '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
+    '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
+    `5 0 obj << /Length ${Buffer.byteLength(stream)} >> stream\n${stream}\nendstream endobj`,
+  ];
+
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+
+  objects.forEach((object) => {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${object}\n`;
+  });
+
+  const xrefOffset = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  offsets.slice(1).forEach((offset) => {
+    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  });
+  pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+  return Buffer.from(pdf, 'binary');
+}
+
+function integratedFileResponse(params: {
+  body: string | Buffer;
+  fileName: string;
+  contentType: string;
+}) {
+  const responseBody =
+    typeof params.body === 'string'
+      ? params.body
+      : new Uint8Array(params.body);
+
+  return new NextResponse(responseBody, {
+    status: 200,
+    headers: {
+      'Content-Type': params.contentType,
+      'Content-Disposition': `attachment; filename="${params.fileName}"`,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
+
+async function handleIntegratedExport(req: NextRequest) {
+  try {
+    const body = (await req.json().catch(() => ({}))) as any;
+    const result = body?.result;
+
+    if (!result || typeof result !== 'object') {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'MISSING_RESULT',
+          message: 'Chýba objekt result s výsledkami analýzy.',
+        },
+        { status: 400 },
+      );
+    }
+
+    const requestedFormat = cleanText(body.format || body.exportFormat || 'excel').toLowerCase() as IntegratedExportFormat;
+    const title = cleanText(body.title || result.title || 'Výsledky analýzy dát');
+    const baseFileName = sanitizeFileName(title);
+
+    if (requestedFormat === 'word' || requestedFormat === 'doc') {
+      return integratedFileResponse({
+        body: createIntegratedWordHtml(title, result),
+        fileName: `${baseFileName}.doc`,
+        contentType: 'application/msword; charset=utf-8',
+      });
+    }
+
+    if (requestedFormat === 'pdf') {
+      return integratedFileResponse({
+        body: createIntegratedPdfBuffer(title, result),
+        fileName: `${baseFileName}.pdf`,
+        contentType: 'application/pdf',
+      });
+    }
+
+    return integratedFileResponse({
+      body: createIntegratedExcelXml(title, result),
+      fileName: `${baseFileName}.xls`,
+      contentType: 'application/vnd.ms-excel; charset=utf-8',
+    });
+  } catch (error) {
+    console.error('ANALYZE_DATA_INTEGRATED_EXPORT_ERROR:', error);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'EXPORT_FAILED',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Nepodarilo sa vytvoriť export analýzy.',
+      },
+      { status: 500 },
+    );
+  }
+}
+
 // ================= ROUTE =================
 
 export async function POST(req: NextRequest) {
   try {
+    const contentType = req.headers.get('content-type') || '';
+
+    if (contentType.includes('application/json')) {
+      return handleIntegratedExport(req);
+    }
+
     const formData = await req.formData();
 
     const analysisGoal = cleanText(formData.get('analysisGoal'));
     const dataDescription = cleanText(formData.get('dataDescription'));
     const profile = safeJsonParse<SavedProfile>(formData.get('activeProfile'));
 
-    const idColumn = cleanText(formData.get('idColumn')) || undefined;
-    const alpha = parseNumberFromFormData(formData.get('alpha'));
+    const requestedIdColumn = cleanText(formData.get('idColumn')) || undefined;
+    const alpha = normalizeAlpha(parseNumberFromFormData(formData.get('alpha')));
     const groupColumns = parseStringArrayFromFormData(formData.get('groupColumns'));
 
     const scales =
@@ -1150,9 +2770,10 @@ export async function POST(req: NextRequest) {
       safeJsonParse<CombinedScaleDefinition[]>(formData.get('combinedScales')) ||
       undefined;
 
-    const files = formData
-      .getAll('files')
-      .filter((item): item is File => item instanceof File);
+    const files = [
+      ...formData.getAll('files'),
+      ...formData.getAll('file'),
+    ].filter((item): item is File => item instanceof File);
 
     const fileTexts: string[] = [];
     const extractedRows: DataRow[] = [];
@@ -1187,9 +2808,10 @@ ${text || 'Text sa nepodarilo načítať.'}
     }
 
     const statisticalRows = toStatisticalRows(extractedRows);
+    const effectiveIdColumn = resolveEffectiveIdColumn(extractedRows, requestedIdColumn);
 
     const statisticalAnalysis = runFullStatisticalAnalysis(statisticalRows, {
-      idColumn,
+      idColumn: effectiveIdColumn,
       scales,
       combinedScales,
       groupColumns,
@@ -1208,25 +2830,17 @@ ${text || 'Text sa nepodarilo načítať.'}
       statisticalAnalysis,
     });
 
+    if (effectiveIdColumn) {
+      computed.warnings.push(
+        `Stĺpec „${effectiveIdColumn}“ bol rozpoznaný ako ID a v štatistických výpočtoch sa nepoužíva ako analyzovaná premenná.`,
+      );
+    }
+
     const defaultPracticalText =
       'Na základe analyzovaných údajov bola pripravená štruktúra praktickej časti. V praktickej časti je vhodné najskôr opísať výskumnú vzorku, následne uviesť frekvenčné tabuľky pre dotazníkové položky, potom deskriptívnu štatistiku škál a subškál, kontrolu normality, reliabilitu škál a korelačnú alebo skupinovú analýzu podľa výskumných otázok. ID stĺpec sa nepoužíva v štatistických výpočtoch, ale slúži iba na identifikáciu respondentov a určenie veľkosti výskumnej vzorky.';
 
     const defaultInterpretation =
       'Výsledky je potrebné interpretovať podľa vypočítaných tabuliek. Frekvenčné tabuľky ukazujú rozdelenie odpovedí respondentov. Deskriptívna štatistika škál a subškál uvádza počet platných odpovedí, chýbajúce hodnoty, medián, priemer, smerodajnú odchýlku, šikmosť, špicatosť, orientačný test normality, minimum a maximum. Reliabilita pomocou Cronbachovho alfa hodnotí vnútornú konzistenciu škál. Spearmanove korelácie sú vhodné najmä pri menšom súbore, ordinálnych dátach alebo pri nenormálnom rozdelení škál.';
-
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        buildBaseResponse({
-          title: 'Výsledky analýzy',
-          summary:
-            'Analýza bola vypočítaná zo súboru. AI interpretácia nebola doplnená, pretože chýba OPENAI_API_KEY.',
-          computed,
-          practicalText: defaultPracticalText,
-          interpretation: defaultInterpretation,
-          extraWarnings: [],
-        }),
-      );
-    }
 
     const prompt = buildPrompt({
       profile,
@@ -1236,39 +2850,26 @@ ${text || 'Text sa nepodarilo načítať.'}
       computed,
     });
 
-    const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
-      temperature: 0.2,
-      response_format: {
-        type: 'json_object',
-      },
-      messages: [
-        {
-          role: 'system',
-          content:
-            'Si štatistik a metodológ. Vždy vraciaš iba validný JSON bez markdownu. Nikdy nenechaj prázdne interpretation ani practicalText.',
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    });
+    const aiResult = await runAiInterpretation(prompt);
+    const raw = aiResult.text || '';
 
-    const raw = completion.choices[0]?.message?.content || '';
-
-    if (!raw.trim()) {
-      return NextResponse.json(
-        buildBaseResponse({
+if (!raw.trim()) {
+      return NextResponse.json({
+        ...buildBaseResponse({
           title: 'Výsledky analýzy',
           summary:
-            'Analýza bola vypočítaná, ale AI nevrátila slovnú interpretáciu.',
+            'Analýza bola vypočítaná zo súboru. AI interpretácia nebola doplnená, pretože žiadny AI provider nevrátil platný výstup.',
           computed,
           practicalText: defaultPracticalText,
           interpretation: defaultInterpretation,
-          extraWarnings: ['AI nevrátila výsledok analýzy.'],
+          extraWarnings: [
+            aiResult.error ||
+              'Claude/OpenAI/Gemini/Grok/Mistral/Groq/Cohere/Perplexity nevrátili použiteľnú odpoveď.',
+          ],
         }),
-      );
+        aiAgent: aiResult,
+        claudeAgent: aiResult.provider === 'anthropic' ? aiResult : null,
+      });
     }
 
     const jsonText = extractJsonFromText(raw);
@@ -1293,12 +2894,18 @@ ${text || 'Text sa nepodarilo načítať.'}
           interpretation,
           extraWarnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
         }),
+        aiAgent: aiResult,
+        claudeAgent: aiResult.provider === 'anthropic' ? aiResult : null,
         fullText:
           cleanText(parsed.fullText) ||
           `${practicalText}\n\nInterpretácia:\n${interpretation}`,
       });
     } catch {
-      return NextResponse.json(fallbackResult(raw, computed));
+      return NextResponse.json({
+        ...fallbackResult(raw, computed),
+        aiAgent: aiResult,
+        claudeAgent: aiResult.provider === 'anthropic' ? aiResult : null,
+      });
     }
   } catch (error) {
     console.error('ANALYZE_DATA_ERROR:', error);
@@ -1314,4 +2921,31 @@ ${text || 'Text sa nepodarilo načítať.'}
       { status: 500 },
     );
   }
+}
+
+
+export async function OPTIONS() {
+  return NextResponse.json(
+    { ok: true },
+    {
+      headers: {
+        Allow: 'GET,POST,OPTIONS',
+      },
+    },
+  );
+}
+
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    endpoint: '/api/analyze-data',
+    message: 'Analyze-data backend beží správne. Analýza aj export sú v jednom route.ts súbore.',
+    export: {
+      enabled: true,
+      url: '/api/analyze-data',
+      method: 'POST',
+      body: { action: 'export', format: 'excel | word | pdf', result: 'AnalysisResult' },
+    },
+    generatedAt: new Date().toISOString(),
+  });
 }

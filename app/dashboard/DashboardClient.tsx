@@ -3287,10 +3287,10 @@ if (activeModule === 'data') {
     formData.append('files', textFile, textFile.name);
   }
 
-  let response = await fetch('/api/analysis/files', {
-    method: 'POST',
-    body: formData,
-  });
+let response = await fetch('/api/analyze-data', {
+  method: 'POST',
+  body: formData,
+});
 
   // Fallback, ak ešte nemáš novú API route /api/analysis/files
   if (response.status === 404) {

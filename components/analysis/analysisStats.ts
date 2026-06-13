@@ -97,6 +97,12 @@ export interface StatisticalAnalysisOptions {
    * Predvolené: true.
    */
   fallbackToNumericVariables?: boolean;
+
+  /**
+   * Ak true, systém automaticky hľadá skupinové premenné pre t-test/ANOVA.
+   * Predvolené: false, aby nevznikali tisíce testov pri dotazníkových položkách.
+   */
+  autoDetectGroupColumns?: boolean;
 }
 
 export interface FrequencyValueResult {
@@ -130,8 +136,10 @@ export interface DescriptiveStatisticsResult {
   standardErrorKurtosis: number | null;
   shapiroWilk: number | null;
   pValueOfShapiroWilk: number | null;
+  pValueOfShapiroWilkText: string | null;
   minimum: number | null;
   maximum: number | null;
+  sum: number | null;
   q1: number | null;
   q3: number | null;
   iqr: number | null;
@@ -152,6 +160,7 @@ export interface NormalityResult {
   method: NormalityMethod;
   statistic: number | null;
   pValue: number | null;
+  pValueText?: string | null;
   isNormal: boolean | null;
   recommendation: 'normal' | 'not-normal' | 'not-enough-data';
   note: string;
@@ -164,6 +173,7 @@ export interface CorrelationResult {
   n: number;
   r: number | null;
   pValue: number | null;
+  pValueText?: string | null;
   significance: string;
   fisherZ: number | null;
   standardError: number | null;
@@ -187,6 +197,7 @@ export interface GroupTestResult {
   nTotal: number;
   statistic: number | null;
   pValue: number | null;
+  pValueText?: string | null;
   significance: string;
   recommendation: string;
 }
@@ -244,6 +255,7 @@ export function runFullStatisticalAnalysis(
   const alpha = options.alpha ?? 0.05;
   const autoDetectScales = options.autoDetectScales !== false;
   const fallbackToNumericVariables = options.fallbackToNumericVariables !== false;
+  const autoDetectGroupColumns = options.autoDetectGroupColumns === true;
 
   const cleanRows = normalizeRows(rows);
   const columns = getColumns(cleanRows);
@@ -270,7 +282,7 @@ export function runFullStatisticalAnalysis(
     (column) => !ordinalNumericColumns.includes(column),
   );
 
-  const autoGroupColumns = candidateColumns.filter((column) => {
+  const autoGroupColumns = autoDetectGroupColumns ? candidateColumns.filter((column) => {
     if (!isLikelyGroupColumnName(column)) return false;
     if (isQuestionnaireItemColumn(column)) return false;
     if (numericColumns.includes(column) && !looksLikeGroupNumeric(cleanRows.map((row) => row[column]))) {
@@ -278,7 +290,7 @@ export function runFullStatisticalAnalysis(
     }
 
     return hasReasonableGroupCount(cleanRows.map((row) => row[column]));
-  });
+  }) : [];
 
   const groupColumns = uniqueStrings([
     ...(options.groupColumns ?? []),
@@ -596,9 +608,9 @@ export function calculateFrequencyAnalysis(
     return {
       value,
       count,
-      percent: round2(percent),
-      validPercent: round2(validPercent),
-      cumulativePercent: round2(Math.min(cumulative, 100)),
+      percent: round3(percent),
+      validPercent: round3(validPercent),
+      cumulativePercent: round3(Math.min(cumulative, 100)),
     };
   });
 
@@ -640,8 +652,10 @@ export function calculateDescriptiveStatistics(
       standardErrorKurtosis: null,
       shapiroWilk: null,
       pValueOfShapiroWilk: null,
+      pValueOfShapiroWilkText: null,
       minimum: null,
       maximum: null,
+      sum: null,
       q1: null,
       q3: null,
       iqr: null,
@@ -659,22 +673,24 @@ export function calculateDescriptiveStatistics(
     variable,
     valid,
     missing,
-    mean: round2(meanValue),
-    median: round2(median(values)),
+    mean: round3(meanValue),
+    median: round3(median(values)),
     mode: calculateMode(values),
-    standardDeviation: round2(standardDeviationValue),
-    variance: round2(varianceValue),
-    skewness: round2(skewness(values)),
-    standardErrorSkewness: valid > 0 ? round2(Math.sqrt(6 / valid)) : null,
-    kurtosis: round2(kurtosis(values)),
-    standardErrorKurtosis: valid > 0 ? round2(Math.sqrt(24 / valid)) : null,
+    standardDeviation: round3(standardDeviationValue),
+    variance: round3(varianceValue),
+    skewness: round3(skewness(values)),
+    standardErrorSkewness: valid > 0 ? round3(Math.sqrt(6 / valid)) : null,
+    kurtosis: round3(kurtosis(values)),
+    standardErrorKurtosis: valid > 0 ? round3(Math.sqrt(24 / valid)) : null,
     shapiroWilk: shapiro.statistic,
     pValueOfShapiroWilk: shapiro.pValue,
-    minimum: round2(values[0]),
-    maximum: round2(values[values.length - 1]),
-    q1: round2(q1),
-    q3: round2(q3),
-    iqr: round2(q3 - q1),
+    pValueOfShapiroWilkText: formatPValue(shapiro.pValue),
+    minimum: round3(values[0]),
+    maximum: round3(values[values.length - 1]),
+    sum: round3(sum(values)),
+    q1: round3(q1),
+    q3: round3(q3),
+    iqr: round3(q3 - q1),
   };
 }
 
@@ -720,10 +736,10 @@ export function calculateScaleScores(
       if (itemValues.length === 0) return null;
 
       if (scoring === 'mean') {
-        return round2(mean(itemValues));
+        return round3(mean(itemValues));
       }
 
-      return round2(sum(itemValues));
+      return round3(sum(itemValues));
     });
 
     return {
@@ -761,7 +777,7 @@ export function calculateCombinedScaleScores(
         continue;
       }
 
-      scores.push(scoring === 'mean' ? round2(mean(rowValues)) : round2(sum(rowValues)));
+      scores.push(scoring === 'mean' ? round3(mean(rowValues)) : round3(sum(rowValues)));
     }
 
     return {
@@ -1008,6 +1024,62 @@ function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[]
   }
 
 
+  const workEngagement = detectWorkEngagementColumns(numericColumns);
+
+  if (workEngagement.energy.length >= 2) {
+    scales.push({
+      id: 'work_engagement_energy',
+      name: 'Pracovné zapojenie – energia',
+      items: workEngagement.energy,
+      minValue: 1,
+      maxValue: 5,
+      scoring: 'mean',
+      description:
+        'Priemer položiek: V práci sa cítim plný energie; V práci sa cítim silný a plný energie.',
+    });
+  }
+
+  if (workEngagement.meaningDedication.length >= 2) {
+    scales.push({
+      id: 'work_engagement_meaning_dedication',
+      name: 'Pracovné zapojenie – zmysluplnosť a nadšenie',
+      items: workEngagement.meaningDedication,
+      minValue: 1,
+      maxValue: 5,
+      scoring: 'mean',
+      description:
+        'Priemer položiek: Práca, ktorú vykonávam, považujem za zmysluplnú; Som nadšený zo svojej práce.',
+    });
+  }
+
+  if (workEngagement.absorption.length >= 1) {
+    scales.push({
+      id: 'work_engagement_absorption',
+      name: 'Pracovné zapojenie – absorpcia',
+      items: workEngagement.absorption,
+      minValue: 1,
+      maxValue: 5,
+      scoring: 'mean',
+      description:
+        'Položka: Keď pracujem, čas rýchlo letí. Pri jednej položke sa Cronbachovo alfa nevypočítava.',
+    });
+  }
+
+  if (workEngagement.total.length >= 3) {
+    scales.push({
+      id: 'work_engagement_total',
+      name: 'Pracovné zapojenie – celkové skóre',
+      items: workEngagement.total,
+      minValue: 1,
+      maxValue: 5,
+      scoring: 'mean',
+      description:
+        'Priemer piatich položiek pracovného zapojenia na škále 1–5.',
+    });
+  }
+
+
+
   const specificItems = new Set(
     scales.flatMap((scale) => scale.items.map((item) => String(item))),
   );
@@ -1022,7 +1094,7 @@ function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[]
     }
   }
 
-  return scales.filter((scale) => scale.items.length >= 2);
+  return scales.filter((scale) => scale.items.length >= 1);
 }
 
 
@@ -1133,6 +1205,58 @@ function looksReverseCodedColumn(columnName: string): boolean {
     normalized.endsWith('r')
   );
 }
+
+
+function detectWorkEngagementColumns(numericColumns: string[]): {
+  energy: string[];
+  meaningDedication: string[];
+  absorption: string[];
+  total: string[];
+} {
+  const findFirst = (patterns: string[]): string | null => {
+    return (
+      numericColumns.find((column) => {
+        const normalized = normalizeText(column);
+
+        return patterns.every((pattern) => normalized.includes(normalizeText(pattern)));
+      }) || null
+    );
+  };
+
+  const energyPrimary = findFirst(['plny', 'energie']);
+  const energyStrong = findFirst(['silny', 'plny', 'energie']);
+  const meaningfulWork = findFirst(['praca', 'vykonavam', 'zmysluplnu']);
+  const timeFlies = findFirst(['cas', 'rychlo', 'leti']);
+  const enthusiasm = findFirst(['nadseny', 'prace']);
+
+  const energy = uniqueStrings([
+    energyPrimary,
+    energyStrong,
+  ].filter(Boolean) as string[]);
+
+  const meaningDedication = uniqueStrings([
+    meaningfulWork,
+    enthusiasm,
+  ].filter(Boolean) as string[]);
+
+  const absorption = uniqueStrings([
+    timeFlies,
+  ].filter(Boolean) as string[]);
+
+  const total = uniqueStrings([
+    ...energy,
+    ...meaningDedication,
+    ...absorption,
+  ]);
+
+  return {
+    energy,
+    meaningDedication,
+    absorption,
+    total,
+  };
+}
+
 
 function autoDetectCombinedScaleDefinitions(
   scales: ScaleDefinition[],
@@ -1271,6 +1395,7 @@ export function calculateNormality(
       method: 'approx-shapiro-wilk',
       statistic: null,
       pValue: null,
+      pValueText: null,
       isNormal: null,
       recommendation: 'not-enough-data',
       note: 'Na posúdenie normality nie je dostatok dát.',
@@ -1294,6 +1419,7 @@ export function calculateNormality(
     method: 'approx-shapiro-wilk',
     statistic: shapiro.statistic,
     pValue,
+    pValueText: formatPValue(pValue),
     isNormal,
     recommendation: isNormal ? 'normal' : 'not-normal',
     note: isNormal
@@ -1509,6 +1635,7 @@ export function calculateCorrelation(
       n: pairs.length,
       r: null,
       pValue: null,
+      pValueText: null,
       significance: '',
       fisherZ: null,
       standardError: null,
@@ -1532,6 +1659,7 @@ export function calculateCorrelation(
       n: pairs.length,
       r: null,
       pValue: null,
+      pValueText: null,
       significance: '',
       fisherZ: null,
       standardError: null,
@@ -1552,6 +1680,7 @@ export function calculateCorrelation(
     n,
     r: round2(r),
     pValue: roundP(pValue),
+    pValueText: formatPValue(pValue),
     significance: significanceStars(pValue),
     fisherZ: round2(fisherZ),
     standardError: standardError === null ? null : round2(standardError),
@@ -1729,6 +1858,7 @@ export function calculateIndependentTTest(
     nTotal: a.length + b.length,
     statistic: round2(t),
     pValue: roundP(pValue),
+    pValueText: formatPValue(pValue),
     significance: significanceStars(pValue),
     recommendation: pValue < 0.05
       ? 'Rozdiel medzi dvoma skupinami je štatisticky významný.'
@@ -1792,6 +1922,7 @@ export function calculateMannWhitneyUTest(
     nTotal: n1 + n2,
     statistic: round2(u),
     pValue: roundP(pValue),
+    pValueText: formatPValue(pValue),
     significance: significanceStars(pValue),
     recommendation: pValue < 0.05
       ? 'Rozdiel medzi dvoma skupinami je štatisticky významný podľa Mann-Whitney U testu.'
@@ -1867,6 +1998,7 @@ export function calculateOneWayAnova(
     nTotal: allValues.length,
     statistic: round2(f),
     pValue: roundP(pValue),
+    pValueText: formatPValue(pValue),
     significance: significanceStars(pValue),
     recommendation: pValue < 0.05
       ? 'Medzi skupinami existuje štatisticky významný rozdiel podľa ANOVA.'
@@ -1932,6 +2064,7 @@ export function calculateKruskalWallisTest(
     nTotal: n,
     statistic: round2(h),
     pValue: roundP(pValue),
+    pValueText: formatPValue(pValue),
     significance: significanceStars(pValue),
     recommendation: pValue < 0.05
       ? 'Medzi skupinami existuje štatisticky významný rozdiel podľa Kruskal-Wallis testu.'
@@ -2340,7 +2473,7 @@ function calculateMode(values: number[]): number | null {
     }
   }
 
-  return round2(bestValue);
+  return round3(bestValue);
 }
 
 function pearsonCorrelation(x: number[], y: number[]): number | null {
@@ -2419,6 +2552,12 @@ function roundP(value: number): number {
   if (value < 0.001) return 0.001;
 
   return Math.round(value * 1000) / 1000;
+}
+
+function formatPValue(pValue: number | null): string | null {
+  if (pValue === null) return null;
+  if (pValue < 0.001) return '< .001';
+  return pValue.toFixed(3);
 }
 
 function significanceStars(pValue: number | null): string {

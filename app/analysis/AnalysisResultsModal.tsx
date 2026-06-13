@@ -466,8 +466,14 @@ function getColumns(rows: DataRow[]): string[] {
 
 function getSummaryLines(result: AnalysisResult | null): string[] {
   const raw = (result || {}) as any;
+  const parsedSource = getParsedAiSource(result);
 
-  const summary = String(raw.summary || '').trim();
+  const summary = getFirstTextValue(
+    parsedSource?.summary,
+    raw.summary,
+    raw.aiAgent?.summary,
+    raw.claudeAgent?.summary,
+  );
 
   const aiRecommendation = safeArray<string>(
     raw.aiRecommendation || raw.statisticalAnalysis?.aiRecommendation,
@@ -494,12 +500,11 @@ function getSummaryLines(result: AnalysisResult | null): string[] {
 
   return [
     ...generatedLines,
-    ...summary
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean),
-    ...aiRecommendation,
-  ].filter(Boolean);
+    ...splitTextToParagraphs(summary),
+    ...aiRecommendation.map((item) => cleanOutputText(item)).filter(Boolean),
+  ]
+    .filter(Boolean)
+    .filter((line, index, array) => array.indexOf(line) === index);
 }
 
 function normalizeFrequencyTables(frequencies: unknown[]): unknown[] {
@@ -1244,13 +1249,32 @@ function createTableSections(result: AnalysisResult | null): TableSection[] {
 
 
 
+function decodeEscapedText(value: unknown): string {
+  return String(value || '')
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, ' ')
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+}
+
+function unwrapPossibleJsonText(value: unknown): string {
+  return decodeEscapedText(value)
+    .replace(/^\s*```json\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .replace(/^\s*json\s*/i, '')
+    .replace(/^\s*Academic\s+Interpretation\s*/i, '')
+    .trim();
+}
+
 function tryParseJsonObject(value: unknown): Record<string, unknown> | null {
-  const text = String(value || '').trim();
+  const text = unwrapPossibleJsonText(value);
 
   if (!text) return null;
 
-  const candidates: string[] = [];
-  candidates.push(text);
+  const candidates: string[] = [text];
 
   const fenced = text.match(/```json\s*([\s\S]*?)```/i);
   if (fenced?.[1]) candidates.push(fenced[1].trim());
@@ -1263,8 +1287,14 @@ function tryParseJsonObject(value: unknown): Record<string, unknown> | null {
   }
 
   for (const candidate of candidates) {
+    const normalized = candidate
+      .replace(/^\s*json\s*/i, '')
+      .replace(/^\s*Academic\s+Interpretation\s*/i, '')
+      .replace(/[;\s]*$/g, '')
+      .trim();
+
     try {
-      const parsed = JSON.parse(candidate);
+      const parsed = JSON.parse(normalized);
 
       if (isRecord(parsed)) return parsed;
     } catch {
@@ -1275,43 +1305,178 @@ function tryParseJsonObject(value: unknown): Record<string, unknown> | null {
   return null;
 }
 
-function cleanOutputText(value: unknown): string {
-  const parsed = tryParseJsonObject(value);
+function extractJsonStringField(value: unknown, fieldName: string): string {
+  const text = unwrapPossibleJsonText(value);
 
-  if (parsed) {
-    return [
-      parsed.summary,
-      parsed.practicalText,
-      parsed.interpretation,
-      parsed.fullText,
-    ]
-      .map((item) => String(item || '').trim())
-      .filter(Boolean)
-      .join('\n\n')
-      .replace(/\\n/g, '\n')
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  }
+  if (!text) return '';
 
-  return String(value || '')
-    .replace(/```json/gi, '')
-    .replace(/```/g, '')
-    .replace(/\\n/g, '\n')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/^\s*[{}]\s*$/gm, '')
-    .replace(/\n{3,}/g, '\n\n')
+  const pattern = new RegExp(
+    `"${fieldName}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`,
+    'i',
+  );
+
+  const match = text.match(pattern);
+
+  if (!match?.[1]) return '';
+
+  return decodeEscapedText(match[1])
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, code) =>
+      String.fromCharCode(parseInt(code, 16)),
+    )
     .trim();
 }
 
+function extractJsonArrayField(value: unknown, fieldName: string): string[] {
+  const text = unwrapPossibleJsonText(value);
+
+  if (!text) return [];
+
+  const pattern = new RegExp(`"${fieldName}"\\s*:\\s*\\[([\\s\\S]*?)\\]`, 'i');
+  const match = text.match(pattern);
+
+  if (!match?.[1]) return [];
+
+  return Array.from(match[1].matchAll(/"((?:\\.|[^"\\])*)"/g))
+    .map((item) => decodeEscapedText(item[1]).trim())
+    .filter(Boolean);
+}
+
+function getAiTextCandidates(result: AnalysisResult | null): unknown[] {
+  const raw = (result || {}) as any;
+  const agent = getClaudeAgent(result);
+
+  return [
+    raw.summary,
+    raw.practicalText,
+    raw.interpretation,
+    raw.fullText,
+    agent.text,
+    raw.aiAgent?.text,
+    raw.claudeAgent?.text,
+    raw.claudeOutput,
+    raw.claudeText,
+  ];
+}
+
+function getParsedAiSource(result: AnalysisResult | null): Record<string, unknown> | null {
+  for (const candidate of getAiTextCandidates(result)) {
+    const parsed = tryParseJsonObject(candidate);
+
+    if (
+      parsed &&
+      (parsed.summary || parsed.practicalText || parsed.interpretation || parsed.fullText)
+    ) {
+      return parsed;
+    }
+  }
+
+  const fallbackSource: Record<string, unknown> = {};
+
+  for (const candidate of getAiTextCandidates(result)) {
+    const summary = extractJsonStringField(candidate, 'summary');
+    const practicalText = extractJsonStringField(candidate, 'practicalText');
+    const interpretation = extractJsonStringField(candidate, 'interpretation');
+    const fullText = extractJsonStringField(candidate, 'fullText');
+    const title = extractJsonStringField(candidate, 'title');
+    const warnings = extractJsonArrayField(candidate, 'warnings');
+
+    if (title && !fallbackSource.title) fallbackSource.title = title;
+    if (summary && !fallbackSource.summary) fallbackSource.summary = summary;
+    if (practicalText && !fallbackSource.practicalText) fallbackSource.practicalText = practicalText;
+    if (interpretation && !fallbackSource.interpretation) fallbackSource.interpretation = interpretation;
+    if (fullText && !fallbackSource.fullText) fallbackSource.fullText = fullText;
+    if (warnings.length && !fallbackSource.warnings) fallbackSource.warnings = warnings;
+  }
+
+  return Object.keys(fallbackSource).length > 0 ? fallbackSource : null;
+}
+
+function stripJsonLikeText(value: unknown): string {
+  const text = unwrapPossibleJsonText(value);
+
+  if (!text) return '';
+
+  const parsed = tryParseJsonObject(text);
+  if (parsed) {
+    return getFirstTextValue(
+      parsed.interpretation,
+      parsed.practicalText,
+      parsed.fullText,
+      parsed.summary,
+    );
+  }
+
+  const directFields = [
+    extractJsonStringField(text, 'interpretation'),
+    extractJsonStringField(text, 'practicalText'),
+    extractJsonStringField(text, 'fullText'),
+    extractJsonStringField(text, 'summary'),
+  ].filter(Boolean);
+
+  if (directFields.length > 0) return directFields.join('\n\n');
+
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    const before = text.slice(0, firstBrace).trim();
+    const after = text.slice(lastBrace + 1).trim();
+
+    const cleaned = [before, after]
+      .join('\n\n')
+      .replace(/^Academic\s+Interpretation\s*$/im, '')
+      .replace(/^json\s*$/im, '')
+      .trim();
+
+    if (cleaned) return cleaned;
+
+    return '';
+  }
+
+  return text;
+}
+
+function cleanOutputText(value: unknown): string {
+  const text = stripJsonLikeText(value)
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, ' ')
+    .replace(/\\"/g, '"')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/^\s*json\s*$/gim, '')
+    .replace(/^\s*Academic\s+Interpretation\s*$/gim, '')
+    .replace(/^\s*[{}]\s*$/gm, '')
+    .replace(/^\s*"?(ok|title|summary|practicalText|interpretation|warnings|fullText)"?\s*:\s*/gim, '')
+    .replace(/",?\s*$/gm, '')
+    .replace(/^"/gm, '')
+    .replace(/^\s*,\s*$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  if (!text) return '';
+  if (text === '{' || text === '}') return '';
+  if (/^json\s*$/i.test(text)) return '';
+  if (text.startsWith('{') && text.endsWith('}')) return '';
+
+  return text;
+}
+
 function splitTextToParagraphs(value: unknown): string[] {
-  return cleanOutputText(value)
+  const cleaned = cleanOutputText(value);
+
+  if (!cleaned) return [];
+
+  return cleaned
     .split(/\n\s*\n|(?<=\.)\s+(?=[A-ZÁČĎÉÍĽĹŇÓÔŔŠŤÚÝŽ])/g)
     .map((paragraph) => paragraph.trim())
-    .filter(Boolean)
-    .filter((paragraph) => !/^"?(ok|title|summary|practicalText|interpretation|warnings|fullText)"?\s*:/.test(paragraph));
+    .filter((paragraph) => {
+      if (!paragraph) return false;
+      if (/^json$/i.test(paragraph)) return false;
+      if (paragraph === '{' || paragraph === '}') return false;
+      if (/^"?(ok|title|summary|practicalText|interpretation|warnings|fullText)"?\s*:/i.test(paragraph)) return false;
+      if (paragraph.startsWith('{') && paragraph.endsWith('}')) return false;
+      return true;
+    });
 }
 
 function getFirstTextValue(...values: unknown[]): string {
@@ -1324,49 +1489,64 @@ function getFirstTextValue(...values: unknown[]): string {
   return '';
 }
 
-function getParsedAiSource(result: AnalysisResult | null): Record<string, unknown> | null {
+function buildProfessionalFallbackFromStatistics(result: AnalysisResult | null): string {
+  const arrays = getResultArrays(result);
   const raw = (result || {}) as any;
-  const agent = getClaudeAgent(result);
+  const meta = arrays.meta as any;
+  const respondentCount =
+    meta?.respondentCount ||
+    raw.respondentCount ||
+    meta?.n ||
+    meta?.totalRows ||
+    getFallbackRespondentCount(result, arrays.files);
 
-  const candidates = [
-    agent.text,
-    raw.aiAgent?.text,
-    raw.claudeAgent?.text,
-    raw.fullText,
-    raw.interpretation,
-    raw.practicalText,
-    raw.summary,
-  ];
+  const idColumn = String(meta?.idColumn || raw.idColumn || '').trim();
+  const normalityRejected = arrays.normality.filter((row) => {
+    if (!isRecord(row)) return false;
+    const p = toNumber(row.pValue ?? row.p);
+    return p !== null && p < 0.05;
+  }).length;
+  const reliabilityCount = arrays.reliability.length;
+  const spearmanCount = arrays.spearmanCorrelations.length;
 
-  for (const candidate of candidates) {
-    const parsed = tryParseJsonObject(candidate);
-
-    if (
-      parsed &&
-      (parsed.summary || parsed.practicalText || parsed.interpretation || parsed.fullText)
-    ) {
-      return parsed;
-    }
-  }
-
-  return null;
+  return [
+    respondentCount
+      ? `Analýza bola spracovaná na výskumnej vzorke N = ${respondentCount} respondentov.`
+      : 'Analýza bola spracovaná na základe nahraného dátového súboru.',
+    idColumn
+      ? `Stĺpec „${idColumn}“ bol identifikovaný ako technický identifikátor respondentov a nebol zahrnutý medzi analyzované premenné.`
+      : '',
+    `Výstup obsahuje frekvenčné tabuľky, deskriptívnu štatistiku, kontrolu normality, reliabilitu škál a korelačné alebo skupinové analýzy podľa dostupných premenných.`,
+    normalityRejected > 0
+      ? `Keďže pri časti premenných nebola potvrdená normalita rozdelenia, pri interpretácii vzťahov a rozdielov je vhodné uprednostniť neparametrické postupy, najmä Spearmanovu koreláciu a neparametrické skupinové testy.`
+      : '',
+    reliabilityCount > 0
+      ? `Reliabilita škál bola posúdená pomocou Cronbachovho alfa. Hodnoty reliability je potrebné interpretovať podľa počtu položiek, charakteru škály a metodiky použitého dotazníka.`
+      : '',
+    spearmanCount > 0
+      ? `Vzťahy medzi škálami a subškálami boli interpretované predovšetkým prostredníctvom Spearmanových korelácií, ktoré sú vhodné pri ordinálnych dátach, menších výberoch alebo pri porušení normality.`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 function getProfessionalInterpretation(result: AnalysisResult | null) {
   const raw = (result || {}) as any;
   const agent = getClaudeAgent(result);
   const source = getParsedAiSource(result);
+  const fallback = buildProfessionalFallbackFromStatistics(result);
 
   const title = getFirstTextValue(
     source?.title,
     raw.title,
-    'Odborná interpretácia výsledkov',
+    'Akademická interpretácia výsledkov',
   );
 
   const summary = getFirstTextValue(
     source?.summary,
     raw.summary,
-    'Analýza bola spracovaná. Nižšie je odborný výstup pripravený do praktickej časti práce.',
+    'Analýza bola spracovaná a nižšie je pripravený odborný výstup vhodný do praktickej časti práce.',
   );
 
   const practicalText = getFirstTextValue(
@@ -1390,31 +1570,33 @@ function getProfessionalInterpretation(result: AnalysisResult | null) {
     ...safeArray(raw.warnings),
   ]
     .map((item) => valueToText(item))
-    .filter((item, index, array) => item && item !== '—' && array.indexOf(item) === index);
+    .map((item) => cleanOutputText(item))
+    .filter((item, index, array) => item && item !== '—' && array.indexOf(item) === index)
+    .filter((item) => !item.startsWith('{') && !/^"?(ok|title|summary|practicalText|interpretation|warnings|fullText)"?\s*:/i.test(item));
 
   const sections = [
     {
       key: 'summary',
-      title: 'Súhrn výsledkov',
+      title: '1. Súhrn výsledkov',
       text: summary,
     },
     {
       key: 'practicalText',
-      title: 'Text do praktickej časti práce',
+      title: '2. Text do praktickej časti práce',
       text: practicalText,
     },
     {
       key: 'interpretation',
-      title: 'Odborná interpretácia výsledkov',
-      text: interpretation || fallbackFromAgent,
+      title: '3. Odborná interpretácia výsledkov',
+      text: interpretation || fallbackFromAgent || fallback,
     },
-  ].filter((section) => cleanOutputText(section.text));
+  ].filter((section) => splitTextToParagraphs(section.text).length > 0);
 
   return {
-    title,
+    title: cleanOutputText(title) || 'Akademická interpretácia výsledkov',
     summary,
     practicalText,
-    interpretation: interpretation || fallbackFromAgent || summary,
+    interpretation: interpretation || fallbackFromAgent || fallback || summary,
     warnings,
     sections,
     model: agent.model,
@@ -1961,7 +2143,7 @@ export default function AnalysisResultsModal({
 
       <div
         data-analysis-results="true"
-        className="relative z-10 mx-auto my-2 flex max-h-[calc(100dvh-1rem)] min-h-[calc(100dvh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#050814] text-white shadow-2xl shadow-black/70 transition-colors duration-300 sm:my-4 sm:max-h-[calc(100dvh-2rem)] sm:min-h-[calc(100dvh-2rem)]"
+        className="relative z-10 mx-auto my-2 flex h-[calc(100dvh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#050814] text-white shadow-2xl shadow-black/70 transition-colors duration-300 sm:my-4 sm:h-[calc(100dvh-2rem)]"
       >
         <div className="shrink-0 border-b border-white/10 bg-gradient-to-r from-slate-950 via-[#0b1020] to-slate-950 px-4 py-4 sm:px-7 sm:py-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -2317,7 +2499,7 @@ export default function AnalysisResultsModal({
                   </h3>
 
                   <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-300">
-                    Výstup je zobrazený ako finálny odborný text vhodný do praktickej časti práce. Technické JSON dáta sa automaticky rozparsujú a používateľovi sa nezobrazujú.
+                    Výstup je zobrazený ako finálny odborný text vhodný do praktickej časti práce. Text je rozdelený do prehľadných odsekov a pripravený na priame použitie v práci.
                   </p>
                 </div>
 

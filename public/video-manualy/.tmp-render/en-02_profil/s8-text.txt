@@ -1,0 +1,2 @@
+The Projects card shows the number of
+projects and available limit.

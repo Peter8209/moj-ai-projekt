@@ -1,0 +1,2 @@
+Karta Projects ukazuje počet projektů a
+dostupný limit.

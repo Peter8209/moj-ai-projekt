@@ -1,0 +1,4 @@
+Na górze znajduje się tytuł Client Account
+and Services. Strona pokazuje konto, pakiet,
+status usługi, kredyty, projekty i daty
+dostępu.

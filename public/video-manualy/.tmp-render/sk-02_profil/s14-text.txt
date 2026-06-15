@@ -1,0 +1,3 @@
+Spodné informačné karty Contact, Access a
+Updated sumarizujú email, rolu a poslednú
+aktualizáciu klienta.

@@ -1,0 +1,59 @@
+1
+00:00:00,000 --> 00:00:06,900
+Hauptmenü
+Professionelle Präsentationsanleitung: Hauptmenü
+
+2
+00:00:07,000 --> 00:00:13,900
+Schritt 1 von 10
+Der Menüpunkt ist die Hauptübersicht der Anwendung und Einstieg in alle Systembereiche.
+
+3
+00:00:14,000 --> 00:00:20,899
+Schritt 2 von 10
+Profil enthält Kontodaten, Plan, Service und grundlegende Benutzereinstellungen.
+
+4
+00:00:21,000 --> 00:00:27,899
+Schritt 3 von 10
+AI Chat dient zum Schreiben, Bearbeiten, Erklären und Generieren akademischer Texte.
+
+5
+00:00:28,000 --> 00:00:34,899
+Schritt 4 von 10
+Meine Arbeiten öffnet laufende akademische Arbeiten, gespeicherte Projekte und Arbeitsprofile.
+
+6
+00:00:35,000 --> 00:00:41,899
+Schritt 5 von 10
+Ressourcen dienen zur Literatur, Zitaten und Verwaltung fachlicher Grundlagen.
+
+7
+00:00:42,000 --> 00:00:48,899
+Schritt 6 von 10
+Pakete zeigen Abonnement, Add-ons und Grenzen verfügbarer Funktionen.
+
+8
+00:00:49,000 --> 00:00:55,899
+Schritt 7 von 10
+Chatverlauf speichert Gespräche, Ausgaben und frühere Antworten.
+
+9
+00:00:56,000 --> 00:01:02,899
+Schritt 8 von 10
+Videoanleitung öffnet Benutzerhandbücher und Abmelden beendet die Sitzung sicher.
+
+10
+00:01:03,000 --> 00:01:09,900
+Schritt 9 von 10
+Oben in der Mitte befinden sich KI-Module: Betreuer, Datenanalyse, Audit, Planung, Verteidigung, E-Mails, Übersetzung und Humanisierung.
+
+11
+00:01:10,000 --> 00:01:16,900
+Schritt 10 von 10
+Der Arbeitsbereich enthält Anhänge, ein großes Textfeld und Aktionsschaltflächen Dictate, Canvas und Clear.
+
+12
+00:01:17,000 --> 00:01:23,900
+Hauptmenü erklärt
+Sie kennen nun den Systemaufbau und wissen, wo jede Hauptfunktion zu finden ist.

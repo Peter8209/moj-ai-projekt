@@ -1,1 +1,0 @@
-Audit checks text, structure, and citations.

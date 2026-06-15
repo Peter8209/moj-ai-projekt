@@ -1,0 +1,2 @@
+Die Karte Credits zeigt verbleibende Credits
+und Nutzung.

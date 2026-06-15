@@ -1,0 +1,3 @@
+Az alsó Contact, Access és Updated kártyák
+az emailt, szerepet és utolsó frissítést
+foglalják össze.

@@ -1,0 +1,70 @@
+{
+  "generatedAt": "2026-06-15T04:13:31.043Z",
+  "root": "C:\\ZEDPERA\\moj-ai-projekt\\public\\video-manualy",
+  "mode": "profile-client-account-services-walkthrough",
+  "video": "02_profil",
+  "languages": [
+    "sk",
+    "cs",
+    "en",
+    "de",
+    "pl",
+    "hu"
+  ],
+  "results": [
+    {
+      "lang": "sk",
+      "slug": "02_profil",
+      "title": "Profil používateľa",
+      "ok": false,
+      "skipped": false,
+      "error": "FFmpeg zlyhal."
+    },
+    {
+      "lang": "cs",
+      "slug": "02_profil",
+      "title": "Profil uživatele",
+      "ok": false,
+      "skipped": false,
+      "error": "FFmpeg zlyhal."
+    },
+    {
+      "lang": "en",
+      "slug": "02_profil",
+      "title": "Client Account and Services",
+      "ok": false,
+      "skipped": false,
+      "error": "FFmpeg zlyhal."
+    },
+    {
+      "lang": "de",
+      "slug": "02_profil",
+      "title": "Benutzerkonto und Dienste",
+      "ok": false,
+      "skipped": false,
+      "error": "FFmpeg zlyhal."
+    },
+    {
+      "lang": "pl",
+      "slug": "02_profil",
+      "title": "Konto klienta i usługi",
+      "ok": false,
+      "skipped": false,
+      "error": "FFmpeg zlyhal."
+    },
+    {
+      "lang": "hu",
+      "slug": "02_profil",
+      "title": "Ügyfélfiók és szolgáltatások",
+      "ok": false,
+      "skipped": false,
+      "error": "FFmpeg zlyhal."
+    }
+  ],
+  "finishedAt": "2026-06-15T04:13:31.274Z",
+  "summary": {
+    "ok": 0,
+    "fail": 6,
+    "skip": 0
+  }
+}

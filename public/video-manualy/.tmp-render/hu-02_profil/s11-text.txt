@@ -1,0 +1,2 @@
+Az Activated Services az ügyfél számára
+elérhető szolgáltatásokat mutatja.

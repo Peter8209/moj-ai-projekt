@@ -1,0 +1,2 @@
+Karta Plan zobrazuje aktuální plán a stav
+účtu.

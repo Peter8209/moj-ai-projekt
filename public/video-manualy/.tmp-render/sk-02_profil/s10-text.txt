@@ -1,0 +1,3 @@
+Subscription Management vysvetľuje možnosť
+zrušenia predplatného a zachovanie prístupu
+do konca zaplateného obdobia.

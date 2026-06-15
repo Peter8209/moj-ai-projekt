@@ -1,0 +1,4 @@
+Felül a Client Account and Services cím
+látható. Az oldal megjeleníti a fiókot,
+csomagot, szolgáltatásállapotot, krediteket,
+projekteket és hozzáférési dátumokat.

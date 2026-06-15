@@ -1,0 +1,3 @@
+The Cancel Subscription button is used to
+cancel the subscription and turn off
+auto-renewal.

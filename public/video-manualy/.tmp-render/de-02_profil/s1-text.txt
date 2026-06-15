@@ -1,0 +1,4 @@
+Oben steht der Titel Client Account and
+Services. Diese Seite zeigt Konto, Paket,
+Dienststatus, Credits, Projekte und
+Zugriffsdaten.

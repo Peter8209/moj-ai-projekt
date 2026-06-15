@@ -1,0 +1,59 @@
+1
+00:00:00,000 --> 00:00:06,900
+Hlavní menu
+Profesionální prezentační návod: Hlavní menu
+
+2
+00:00:07,000 --> 00:00:13,900
+Krok 1 z 10
+Položka Menu je hlavní přehled celé aplikace a vstup do všech sekcí systému.
+
+3
+00:00:14,000 --> 00:00:20,899
+Krok 2 z 10
+Profil obsahuje údaje účtu, plán, službu a základní uživatelská nastavení.
+
+4
+00:00:21,000 --> 00:00:27,899
+Krok 3 z 10
+AI Chat slouží k psaní, úpravě, vysvětlování a generování odborného textu.
+
+5
+00:00:28,000 --> 00:00:34,899
+Krok 4 z 10
+Moje práce otevře rozpracované akademické práce, uložené projekty a pracovní profily.
+
+6
+00:00:35,000 --> 00:00:41,899
+Krok 5 z 10
+Zdroje slouží pro literaturu, citace a správu odborných podkladů.
+
+7
+00:00:42,000 --> 00:00:48,899
+Krok 6 z 10
+Balíčky zobrazují předplatné, doplňky a limity dostupných funkcí.
+
+8
+00:00:49,000 --> 00:00:55,899
+Krok 7 z 10
+Historie chatu uchovává uložené konverzace, výstupy a předchozí odpovědi.
+
+9
+00:00:56,000 --> 00:01:02,899
+Krok 8 z 10
+Video návod otevře uživatelské návody a Odhlášení bezpečně ukončí práci.
+
+10
+00:01:03,000 --> 00:01:09,900
+Krok 9 z 10
+V horní střední části jsou AI moduly: školitel, analýza dat, audit, plánování, obhajoba, e-maily, překlad a humanizace.
+
+11
+00:01:10,000 --> 00:01:16,900
+Krok 10 z 10
+V pracovní části jsou přílohy, velké textové pole a akční tlačítka Dictate, Canvas a Clear.
+
+12
+00:01:17,000 --> 00:01:23,900
+Hlavní menu je vysvětleno
+Nyní znáte rozložení systému a víte, kde se nachází každá hlavní funkce.

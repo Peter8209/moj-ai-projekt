@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-06-14T20:57:36.199Z",
-  "mode": "zedpera-presentation-videos",
+  "generatedAt": "2026-06-15T03:55:13.043Z",
   "root": "C:\\ZEDPERA\\moj-ai-projekt\\public\\video-manualy",
-  "langs": [
+  "mode": "professional-walkthrough-no-ai-guide",
+  "languages": [
     "sk",
     "cs",
     "en",
@@ -11,531 +11,74 @@
     "hu"
   ],
   "manuals": [
-    "01_hlavne_menu",
-    "02_profil",
-    "03_ai_chat",
-    "04_moje_prace",
-    "05_nova_praca",
-    "06_ai_veduci",
-    "07_audit_kvality",
-    "08_obhajoba",
-    "09_preklad",
-    "10_analyza_dat",
-    "11_planovanie",
-    "12_emaily",
-    "13_originalita_prace",
-    "14_humanizacia_textu",
-    "15_zdroje_citacie",
-    "16_balicky",
-    "17_historia_chatu",
-    "18_video_navod",
-    "19_vzhlad_aplikacie",
-    "20_odhlasenie"
+    "01_hlavne_menu"
   ],
   "results": [
     {
       "lang": "sk",
       "slug": "01_hlavne_menu",
       "title": "Hlavné menu",
-      "category": "basics",
       "ok": true,
       "skipped": false,
       "error": null,
-      "elapsedMs": 31990,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "02_profil",
-      "title": "Profil používateľa",
-      "category": "profile",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 36624,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "03_ai_chat",
-      "title": "AI Chat",
-      "category": "ai",
-      "ok": false,
-      "skipped": false,
-      "error": "EPERM: operation not permitted, rename 'C:\\ZEDPERA\\moj-ai-projekt\\public\\video-manualy\\sk\\03_ai_chat.mp4.tmp.mp4' -> 'C:\\ZEDPERA\\moj-ai-projekt\\public\\video-manualy\\sk\\03_ai_chat.mp4'"
-    },
-    {
-      "lang": "sk",
-      "slug": "04_moje_prace",
-      "title": "Moje práce",
-      "category": "works",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 46983,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "05_nova_praca",
-      "title": "Nová práca",
-      "category": "works",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 54921,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "06_ai_veduci",
-      "title": "AI školiteľ",
-      "category": "ai",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 46864,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "07_audit_kvality",
-      "title": "Audit kvality",
-      "category": "review",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 46465,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "08_obhajoba",
-      "title": "Obhajoba",
-      "category": "defense",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 33118,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "09_preklad",
-      "title": "Preklad",
-      "category": "communication",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 25225,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "10_analyza_dat",
-      "title": "Analýza dát",
-      "category": "research",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 37785,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "11_planovanie",
-      "title": "Plánovanie",
-      "category": "organization",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 32972,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "12_emaily",
-      "title": "Emaily",
-      "category": "communication",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 28197,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "13_originalita_prace",
-      "title": "Originalita práce",
-      "category": "review",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 28571,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "14_humanizacia_textu",
-      "title": "Humanizácia textu",
-      "category": "ai",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 31605,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "15_zdroje_citacie",
-      "title": "Zdroje a citácie",
-      "category": "sources",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 29585,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "16_balicky",
-      "title": "Balíčky",
-      "category": "payments",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 40674,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "17_historia_chatu",
-      "title": "História chatu",
-      "category": "history",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 45907,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "18_video_navod",
-      "title": "Video návod",
-      "category": "help",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 37082,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "19_vzhlad_aplikacie",
-      "title": "Vzhľad aplikácie",
-      "category": "settings",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 36968,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "sk",
-      "slug": "20_odhlasenie",
-      "title": "Odhlásenie",
-      "category": "settings",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 51618,
-      "durationSeconds": 30
+      "elapsedMs": 41165,
+      "durationSeconds": 84
     },
     {
       "lang": "cs",
       "slug": "01_hlavne_menu",
       "title": "Hlavní menu",
-      "category": "basics",
       "ok": true,
       "skipped": false,
       "error": null,
-      "elapsedMs": 48306,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "02_profil",
-      "title": "Profil uživatele",
-      "category": "profile",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 27527,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "03_ai_chat",
-      "title": "AI Chat",
-      "category": "ai",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 24628,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "04_moje_prace",
-      "title": "Moje práce",
-      "category": "works",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 22151,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "05_nova_praca",
-      "title": "Nová práce",
-      "category": "works",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 21632,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "06_ai_veduci",
-      "title": "AI školitel",
-      "category": "ai",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 22795,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "07_audit_kvality",
-      "title": "Audit kvality",
-      "category": "review",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 24570,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "08_obhajoba",
-      "title": "Obhajoba",
-      "category": "defense",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 25009,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "09_preklad",
-      "title": "Překlad",
-      "category": "communication",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 21583,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "10_analyza_dat",
-      "title": "Analýza dat",
-      "category": "research",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 21139,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "11_planovanie",
-      "title": "Plánování",
-      "category": "organization",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 20880,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "12_emaily",
-      "title": "E-maily",
-      "category": "communication",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 24672,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "13_originalita_prace",
-      "title": "Originalita práce",
-      "category": "review",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 28021,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "14_humanizacia_textu",
-      "title": "Humanizace textu",
-      "category": "ai",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 25513,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "15_zdroje_citacie",
-      "title": "Zdroje a citace",
-      "category": "sources",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 25526,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "16_balicky",
-      "title": "Balíčky",
-      "category": "payments",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 30590,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "17_historia_chatu",
-      "title": "Historie chatu",
-      "category": "history",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 24893,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "18_video_navod",
-      "title": "Video návod",
-      "category": "help",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 21678,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "19_vzhlad_aplikacie",
-      "title": "Vzhled aplikace",
-      "category": "settings",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 21292,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "cs",
-      "slug": "20_odhlasenie",
-      "title": "Odhlášení",
-      "category": "settings",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 23235,
-      "durationSeconds": 30
+      "elapsedMs": 46749,
+      "durationSeconds": 84
     },
     {
       "lang": "en",
       "slug": "01_hlavne_menu",
-      "title": "Main menu",
-      "category": "basics",
+      "title": "Main Menu",
       "ok": true,
       "skipped": false,
       "error": null,
-      "elapsedMs": 31307,
-      "durationSeconds": 30
+      "elapsedMs": 41637,
+      "durationSeconds": 84
     },
     {
-      "lang": "en",
-      "slug": "02_profil",
-      "title": "User profile",
-      "category": "profile",
+      "lang": "de",
+      "slug": "01_hlavne_menu",
+      "title": "Hauptmenü",
       "ok": true,
       "skipped": false,
       "error": null,
-      "elapsedMs": 44654,
-      "durationSeconds": 30
+      "elapsedMs": 45849,
+      "durationSeconds": 84
     },
     {
-      "lang": "en",
-      "slug": "03_ai_chat",
-      "title": "AI Chat",
-      "category": "ai",
+      "lang": "pl",
+      "slug": "01_hlavne_menu",
+      "title": "Menu główne",
       "ok": true,
       "skipped": false,
       "error": null,
-      "elapsedMs": 33354,
-      "durationSeconds": 30
+      "elapsedMs": 49528,
+      "durationSeconds": 84
     },
     {
-      "lang": "en",
-      "slug": "04_moje_prace",
-      "title": "My works",
-      "category": "works",
+      "lang": "hu",
+      "slug": "01_hlavne_menu",
+      "title": "Főmenü",
       "ok": true,
       "skipped": false,
       "error": null,
-      "elapsedMs": 26667,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "en",
-      "slug": "05_nova_praca",
-      "title": "New work",
-      "category": "works",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 24070,
-      "durationSeconds": 30
-    },
-    {
-      "lang": "en",
-      "slug": "06_ai_veduci",
-      "title": "AI supervisor",
-      "category": "ai",
-      "ok": true,
-      "skipped": false,
-      "error": null,
-      "elapsedMs": 25367,
-      "durationSeconds": 30
+      "elapsedMs": 49287,
+      "durationSeconds": 84
     }
-  ]
+  ],
+  "finishedAt": "2026-06-15T03:59:47.530Z",
+  "summary": {
+    "ok": 6,
+    "fail": 0,
+    "skip": 0
+  }
 }

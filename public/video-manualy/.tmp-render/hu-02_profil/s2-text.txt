@@ -1,0 +1,2 @@
+A Return to Menu gomb visszavisz az
+alkalmazás főmenüjébe.

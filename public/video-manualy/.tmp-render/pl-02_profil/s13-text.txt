@@ -1,0 +1,3 @@
+Subscription & Access zawiera daty
+subskrypcji, utworzenia konta, zmian i
+ostatniego logowania.

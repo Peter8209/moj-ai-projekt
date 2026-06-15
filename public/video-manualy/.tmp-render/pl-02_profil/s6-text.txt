@@ -1,0 +1,2 @@
+Karta Plan pokazuje aktualny plan i status
+konta.

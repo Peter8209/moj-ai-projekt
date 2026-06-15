@@ -1,0 +1,2 @@
+Activated Services pokazuje usługi dostępne
+dla klienta.

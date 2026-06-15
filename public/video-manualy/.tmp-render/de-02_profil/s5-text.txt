@@ -1,0 +1,2 @@
+Die Karte Client zeigt Kundenname und
+Konto-E-Mail.

@@ -25,6 +25,7 @@
     "ai": "^6.0.184",
     "axios": "^1.15.2",
     "bcryptjs": "^3.0.3",
+    "exceljs": "^4.4.0",
     "html2pdf.js": "^0.14.0",
     "jszip": "^3.10.1",
     "lucide-react": "^1.14.0",

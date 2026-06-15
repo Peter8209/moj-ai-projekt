@@ -1,87 +1,39 @@
 'use client';
 
-import { BarChart3, LineChart, ScatterChart } from 'lucide-react';
+import {
+  BarChart3,
+  LineChart,
+  PieChart,
+  Sigma,
+  Table2,
+  TrendingUp,
+} from 'lucide-react';
 
-type AnyRecord = Record<string, any>;
+import type { AnalysisResult } from './analysisTypes';
 
-type Props = {
-  result?: any;
-  data?: any;
-  tables?: any[];
-  maxCharts?: number;
+type AnalysisChartsProps = {
+  result?: AnalysisResult | null;
 };
 
-type ChartType = 'bar' | 'histogram' | 'scatter' | 'line';
-
-type ChartPoint = {
-  label?: string;
-  x?: number;
-  y?: number;
-  value?: number;
-};
-
-type ChartConfig = {
-  id: string;
-  type: ChartType;
-  title: string;
+type ChartItem = {
+  label: string;
+  value: number;
   description?: string;
-  xLabel?: string;
-  yLabel?: string;
-  points: ChartPoint[];
 };
 
-const TECHNICAL_COLUMNS = [
-  'id',
-  'ID',
-  'Id',
-  'respondent',
-  'respondent_id',
-  'respondent id',
-  'Respondent',
-  'Respondent ID',
-  'index',
-  'poradie',
-  'Poradie',
-  'cislo',
-  'číslo',
-  'c',
-  'timestamp',
-  'datum',
-  'dátum',
-  'cas',
-  'čas',
-  'created_at',
-  'updated_at',
-];
+type UnknownRecord = Record<string, unknown>;
 
-function normalizeText(value: unknown) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, '_')
-    .replace(/-/g, '_')
-    .replace(/[^\w]/g, '');
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isTechnicalColumn(value: unknown) {
-  const normalized = normalizeText(value);
-
-  return TECHNICAL_COLUMNS.map(normalizeText).includes(normalized);
-}
-
-function safeArray<T = any>(value: unknown): T[] {
+function safeArray<T = unknown>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
-function isRecord(value: unknown): value is AnyRecord {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function toNumber(value: unknown): number | null {
+function toNumber(value: unknown, fallback = 0): number {
   if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : null;
+    return Number.isFinite(value) ? value : fallback;
   }
 
   if (typeof value === 'string') {
@@ -91,1061 +43,929 @@ function toNumber(value: unknown): number | null {
       .replace('%', '')
       .replace(',', '.');
 
-    if (/^-?\d+(\.\d+)?$/.test(normalized)) {
-      const numeric = Number(normalized);
-      return Number.isFinite(numeric) ? numeric : null;
+    if (!normalized) return fallback;
+
+    const number = Number(normalized);
+    return Number.isFinite(number) ? number : fallback;
+  }
+
+  return fallback;
+}
+
+function toPositiveNumber(value: unknown, fallback = 0): number {
+  const number = toNumber(value, fallback);
+  return number > 0 ? number : fallback;
+}
+
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
+
+function getPercentFromRatio(value: unknown): number {
+  const number = toNumber(value, 0);
+
+  if (number <= 1) {
+    return clampPercent(number * 100);
+  }
+
+  return clampPercent(number);
+}
+
+function normalizeText(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat('sk-SK', {
+    maximumFractionDigits: Number.isInteger(value) ? 0 : 3,
+  }).format(value);
+}
+
+function getNestedValue(source: unknown, paths: string[][]): unknown {
+  for (const path of paths) {
+    let current: unknown = source;
+
+    for (const key of path) {
+      if (!isRecord(current)) {
+        current = undefined;
+        break;
+      }
+
+      current = current[key];
+    }
+
+    if (current !== undefined && current !== null && current !== '') {
+      return current;
     }
   }
 
-  return null;
+  return undefined;
 }
 
-function cleanLabel(value: unknown) {
-  const text = String(value ?? '').trim();
-  return text || '—';
+function getPreparedDataset(result?: AnalysisResult | null): UnknownRecord {
+  if (!result) return {};
+
+  const root = result as unknown as UnknownRecord;
+
+  return isRecord(root.preparedDataset) ? root.preparedDataset : {};
 }
 
-function uniqueById(charts: ChartConfig[]) {
-  const seen = new Set<string>();
-
-  return charts.filter((chart) => {
-    const key = normalizeText(chart.id || chart.title);
-
-    if (seen.has(key)) return false;
-
-    seen.add(key);
-    return true;
-  });
+function isAoATable(value: unknown): value is unknown[][] {
+  return Array.isArray(value) && value.length > 0 && Array.isArray(value[0]);
 }
 
-function getStatisticalSource(result: any) {
-  return result?.statisticalAnalysis || result?.analysisStats || result?.stats || result || {};
-}
+function getPreparedRowCount(result?: AnalysisResult | null): number {
+  const preparedDataset = getPreparedDataset(result);
+  const quality = isRecord(preparedDataset.quality)
+    ? preparedDataset.quality
+    : {};
 
-function getNestedArray<T = any>(source: any, path: string): T[] {
-  const parts = path.split('.');
-  let current = source;
+  const fromQuality = toPositiveNumber(quality.rowCount);
+  if (fromQuality > 0) return fromQuality;
 
-  for (const part of parts) {
-    current = current?.[part];
+  if (Array.isArray(preparedDataset.rows)) {
+    return preparedDataset.rows.length;
   }
 
-  return safeArray<T>(current);
-}
-
-function getFrequencyRows(table: any): AnyRecord[] {
-  if (!table || typeof table !== 'object') return [];
-
-  const rows =
-    safeArray<AnyRecord>(table.values).length > 0
-      ? safeArray<AnyRecord>(table.values)
-      : safeArray<AnyRecord>(table.rows).length > 0
-        ? safeArray<AnyRecord>(table.rows)
-        : safeArray<AnyRecord>(table.data).length > 0
-          ? safeArray<AnyRecord>(table.data)
-          : safeArray<AnyRecord>(table.items);
-
-  return rows;
-}
-
-function getFrequencies(result: any) {
-  const statistical = getStatisticalSource(result);
-
-  return safeArray(
-    statistical?.frequencies ||
-      result?.frequencies ||
-      result?.frequencyTables ||
-      result?.frequency_tables,
-  );
-}
-
-function getScaleDescriptives(result: any) {
-  const statistical = getStatisticalSource(result);
-
-  return safeArray(
-    statistical?.scaleDescriptives ||
-      result?.scaleDescriptives ||
-      result?.scale_descriptives ||
-      result?.scalesDescriptiveStatistics,
-  );
-}
-
-function getItemDescriptives(result: any) {
-  const statistical = getStatisticalSource(result);
-
-  return safeArray(
-    statistical?.itemDescriptives ||
-      result?.itemDescriptives ||
-      result?.descriptiveStatistics ||
-      result?.descriptive_statistics ||
-      result?.statistics,
-  );
-}
-
-function getNormality(result: any) {
-  const statistical = getStatisticalSource(result);
-
-  return safeArray(statistical?.normality || result?.normality);
-}
-
-function getPearsonCorrelations(result: any) {
-  const statistical = getStatisticalSource(result);
-
-  return safeArray(
-    statistical?.correlations?.pearson ||
-      result?.pearsonCorrelations ||
-      result?.pearson_correlations ||
-      result?.pearson,
-  );
-}
-
-function getSpearmanCorrelations(result: any) {
-  const statistical = getStatisticalSource(result);
-
-  return safeArray(
-    statistical?.correlations?.spearman ||
-      result?.spearmanCorrelations ||
-      result?.spearman_correlations ||
-      result?.spearman,
-  );
-}
-
-function getRecommendedCorrelations(result: any) {
-  const statistical = getStatisticalSource(result);
-
-  return safeArray(
-    statistical?.correlations?.recommended ||
-      result?.recommendedCorrelations ||
-      result?.recommended_correlations,
-  );
-}
-
-function getReliability(result: any) {
-  const statistical = getStatisticalSource(result);
-
-  return safeArray(
-    statistical?.reliability ||
-      result?.reliability ||
-      result?.cronbachAlpha ||
-      result?.cronbach_alpha,
-  );
-}
-
-function getGroupTests(result: any) {
-  const statistical = getStatisticalSource(result);
-
-  return [
-    ...safeArray(statistical?.groupTests?.recommended),
-    ...safeArray(result?.recommendedGroupTests),
-    ...safeArray(statistical?.groupTests?.parametric),
-    ...safeArray(statistical?.groupTests?.nonParametric),
-    ...safeArray(result?.parametricGroupTests),
-    ...safeArray(result?.nonParametricGroupTests),
-    ...safeArray(result?.tTests || result?.t_tests),
-    ...safeArray(result?.hypothesisTests || result?.hypothesis_tests),
-  ];
-}
-
-function normalizeCorrelationRow(row: any) {
-  if (!isRecord(row)) return null;
-
-  const variable1 =
-    row.variable1 ||
-    row.variableA ||
-    row.x ||
-    row.firstVariable ||
-    row.left ||
-    row.source;
-
-  const variable2 =
-    row.variable2 ||
-    row.variableB ||
-    row.y ||
-    row.secondVariable ||
-    row.right ||
-    row.target;
-
-  const coefficient =
-    toNumber(row.coefficient) ??
-    toNumber(row.r) ??
-    toNumber(row.rho) ??
-    toNumber(row.value);
-
-  if (coefficient === null) return null;
-
-  const left = cleanLabel(variable1);
-  const right = cleanLabel(variable2);
-
-  if (left === '—' || right === '—') return null;
-  if (isTechnicalColumn(left) || isTechnicalColumn(right)) return null;
-
-  return {
-    label: `${left} × ${right}`,
-    value: coefficient,
-  };
-}
-
-function buildFrequencyCharts(result: any): ChartConfig[] {
-  const output: ChartConfig[] = [];
-  const frequencies = getFrequencies(result);
-
-  frequencies.forEach((table: any, index) => {
-    const variableName = cleanLabel(
-      table?.variable || table?.name || table?.title || `Premenná ${index + 1}`,
-    );
-
-    if (isTechnicalColumn(variableName)) return;
-
-    const rows = getFrequencyRows(table)
-      .map((row) => {
-        const label =
-          row.value ??
-          row.category ??
-          row.name ??
-          row.label ??
-          row.kategoria ??
-          row.hodnota;
-
-        const value =
-          toNumber(row.frequency) ??
-          toNumber(row.count) ??
-          toNumber(row.n) ??
-          toNumber(row.počet) ??
-          toNumber(row.pocet) ??
-          0;
-
-        return {
-          label: cleanLabel(label),
-          value,
-        };
-      })
-      .filter((point) => point.label !== '—' && !isTechnicalColumn(point.label));
-
-    if (rows.length < 1) return;
-
-    output.push({
-      id: `frequency-${variableName}-${index}`,
-      type: 'bar',
-      title: `Frekvenčný graf – ${variableName}`,
-      description:
-        'Stĺpcový graf zobrazuje početnosti jednotlivých odpovedí alebo kategórií. ID/respondent sa automaticky vynecháva.',
-      xLabel: variableName,
-      yLabel: 'Počet',
-      points: rows.slice(0, 20),
-    });
-  });
-
-  return output;
-}
-
-function buildScaleDescriptiveCharts(result: any): ChartConfig[] {
-  const scaleDescriptives = getScaleDescriptives(result);
-
-  const meanPoints = scaleDescriptives
-    .map((row: any) => {
-      const label = row.variable || row.scaleName || row.name || row.label || row.column;
-      const value = toNumber(row.mean ?? row.M ?? row.average);
-
-      return {
-        label: cleanLabel(label),
-        value: value ?? 0,
-      };
-    })
-    .filter((point) => point.label !== '—' && !isTechnicalColumn(point.label));
-
-  const sdPoints = scaleDescriptives
-    .map((row: any) => {
-      const label = row.variable || row.scaleName || row.name || row.label || row.column;
-      const value = toNumber(
-        row.standardDeviation ?? row.stdDeviation ?? row.SD ?? row.sd,
-      );
-
-      return {
-        label: cleanLabel(label),
-        value: value ?? 0,
-      };
-    })
-    .filter((point) => point.label !== '—' && !isTechnicalColumn(point.label));
-
-  const charts: ChartConfig[] = [];
-
-  if (meanPoints.length > 0) {
-    charts.push({
-      id: 'scale-descriptive-means',
-      type: 'bar',
-      title: 'Priemery škál a subškál',
-      description:
-        'Hlavný graf pre deskriptívnu štatistiku. Zobrazuje priemerné hodnoty škál a subškál dotazníka.',
-      xLabel: 'Škála / subškála',
-      yLabel: 'Priemer',
-      points: meanPoints.slice(0, 25),
-    });
+  if (isAoATable(preparedDataset.rawDataSheet)) {
+    return Math.max(preparedDataset.rawDataSheet.length - 1, 0);
   }
 
-  if (sdPoints.length > 0) {
-    charts.push({
-      id: 'scale-descriptive-standard-deviations',
-      type: 'bar',
-      title: 'Smerodajné odchýlky škál a subškál',
-      description:
-        'Graf zobrazuje variabilitu výsledkov pri jednotlivých škálach a subškálach.',
-      xLabel: 'Škála / subškála',
-      yLabel: 'SD',
-      points: sdPoints.slice(0, 25),
-    });
+  return 0;
+}
+
+function getPreparedVariableCount(result?: AnalysisResult | null): number {
+  const preparedDataset = getPreparedDataset(result);
+  const quality = isRecord(preparedDataset.quality)
+    ? preparedDataset.quality
+    : {};
+
+  const fromQuality = toPositiveNumber(quality.variableCount);
+  if (fromQuality > 0) return fromQuality;
+
+  if (Array.isArray(preparedDataset.variables)) {
+    return preparedDataset.variables.length;
   }
 
-  return charts;
-}
-
-function buildItemDescriptiveFallbackCharts(result: any): ChartConfig[] {
-  const descriptive = getItemDescriptives(result);
-
-  const points = descriptive
-    .map((row: any) => {
-      const label = row.variable || row.name || row.label || row.column;
-      const value = toNumber(row.M ?? row.mean ?? row.average);
-
-      return {
-        label: cleanLabel(label),
-        value: value ?? 0,
-      };
-    })
-    .filter((point) => point.label !== '—' && !isTechnicalColumn(point.label));
-
-  if (!points.length) return [];
-
-  return [
-    {
-      id: 'item-descriptive-means',
-      type: 'bar',
-      title: 'Porovnanie priemerov položiek',
-      description:
-        'Graf zobrazuje priemerné hodnoty jednotlivých položiek. Pre finálnu prácu je vhodnejšie použiť grafy škál a subškál.',
-      xLabel: 'Položka',
-      yLabel: 'Priemer',
-      points: points.slice(0, 25),
-    },
-  ];
-}
-
-function buildNormalityCharts(result: any): ChartConfig[] {
-  const normality = getNormality(result);
-
-  const points = normality
-    .map((row: any) => {
-      const label = row.variable || row.scaleName || row.name || row.label;
-      const value = toNumber(row.pValue ?? row.p);
-
-      return {
-        label: cleanLabel(label),
-        value: value ?? 0,
-      };
-    })
-    .filter((point) => point.label !== '—' && !isTechnicalColumn(point.label));
-
-  if (!points.length) return [];
-
-  return [
-    {
-      id: 'normality-p-values',
-      type: 'bar',
-      title: 'Normalita dát – p hodnoty',
-      description:
-        'Graf zobrazuje p hodnoty testu normality pre škály a subškály. Hodnota p ≥ 0,05 naznačuje približne normálne rozdelenie.',
-      xLabel: 'Škála / subškála',
-      yLabel: 'p hodnota',
-      points: points.slice(0, 25),
-    },
-  ];
-}
-
-function buildCorrelationCharts(result: any): ChartConfig[] {
-  const recommended = getRecommendedCorrelations(result)
-    .map(normalizeCorrelationRow)
-    .filter(Boolean) as ChartPoint[];
-
-  const pearson = getPearsonCorrelations(result)
-    .map(normalizeCorrelationRow)
-    .filter(Boolean) as ChartPoint[];
-
-  const spearman = getSpearmanCorrelations(result)
-    .map(normalizeCorrelationRow)
-    .filter(Boolean) as ChartPoint[];
-
-  const charts: ChartConfig[] = [];
-
-  if (recommended.length > 0) {
-    charts.push({
-      id: 'recommended-correlation-strengths',
-      type: 'bar',
-      title: 'Odporúčané korelačné koeficienty',
-      description:
-        'Graf zobrazuje odporúčanú korelačnú analýzu podľa normality dát – Pearson alebo Spearman.',
-      xLabel: 'Dvojica škál',
-      yLabel: 'Koeficient',
-      points: recommended.slice(0, 25),
-    });
-
-    return charts;
+  if (Array.isArray(preparedDataset.headers)) {
+    return preparedDataset.headers.length;
   }
 
-  if (pearson.length > 0) {
-    charts.push({
-      id: 'pearson-correlation-strengths',
-      type: 'bar',
-      title: 'Pearsonove korelačné koeficienty',
-      description:
-        'Graf zobrazuje Pearsonove korelácie medzi škálami a subškálami.',
-      xLabel: 'Dvojica škál',
-      yLabel: 'r',
-      points: pearson.slice(0, 25),
-    });
+  if (Array.isArray(preparedDataset.originalHeaders)) {
+    return preparedDataset.originalHeaders.length;
   }
 
-  if (spearman.length > 0) {
-    charts.push({
-      id: 'spearman-correlation-strengths',
-      type: 'bar',
-      title: 'Spearmanove korelačné koeficienty',
-      description:
-        'Graf zobrazuje Spearmanove korelácie medzi škálami a subškálami.',
-      xLabel: 'Dvojica škál',
-      yLabel: 'ρ',
-      points: spearman.slice(0, 25),
-    });
+  return 0;
+}
+
+function getScaleCount(result?: AnalysisResult | null): number {
+  const preparedDataset = getPreparedDataset(result);
+  const quality = isRecord(preparedDataset.quality)
+    ? preparedDataset.quality
+    : {};
+
+  const fromQuality = toPositiveNumber(quality.scaleCount);
+  if (fromQuality > 0) return fromQuality;
+
+  return safeArray(preparedDataset.scaleDefinitions).length;
+}
+
+function getSubscaleCount(result?: AnalysisResult | null): number {
+  const preparedDataset = getPreparedDataset(result);
+  const quality = isRecord(preparedDataset.quality)
+    ? preparedDataset.quality
+    : {};
+
+  const fromQuality = toPositiveNumber(quality.subscaleCount);
+  if (fromQuality > 0) return fromQuality;
+
+  return safeArray(preparedDataset.subscaleDefinitions).length;
+}
+
+function getRemovedEmptyRows(result?: AnalysisResult | null): number {
+  const preparedDataset = getPreparedDataset(result);
+  const quality = isRecord(preparedDataset.quality)
+    ? preparedDataset.quality
+    : {};
+
+  return toPositiveNumber(quality.removedEmptyRows);
+}
+
+function getRemovedDuplicateRows(result?: AnalysisResult | null): number {
+  const preparedDataset = getPreparedDataset(result);
+  const quality = isRecord(preparedDataset.quality)
+    ? preparedDataset.quality
+    : {};
+
+  return toPositiveNumber(quality.removedDuplicateRows);
+}
+
+function getResultArray(result: AnalysisResult | null | undefined, keys: string[]): unknown[] {
+  if (!result) return [];
+
+  const root = result as unknown as UnknownRecord;
+
+  for (const key of keys) {
+    const value = root[key];
+
+    if (Array.isArray(value)) return value;
   }
 
-  return charts;
+  return [];
 }
 
-function buildReliabilityCharts(result: any): ChartConfig[] {
-  const reliability = getReliability(result);
+function getStatisticsArrays(result?: AnalysisResult | null) {
+  const root = (result || {}) as unknown as UnknownRecord;
 
-  const points = reliability
-    .map((row: any) => {
-      const label = row.scaleName || row.variable || row.name || row.label;
-      const value = toNumber(row.cronbachAlpha ?? row.alpha);
-
-      return {
-        label: cleanLabel(label),
-        value: value ?? 0,
-      };
-    })
-    .filter((point) => point.label !== '—' && !isTechnicalColumn(point.label));
-
-  if (!points.length) return [];
-
-  return [
-    {
-      id: 'cronbach-alpha',
-      type: 'bar',
-      title: 'Reliabilita škál – Cronbach alfa',
-      description:
-        'Graf zobrazuje vnútornú konzistenciu škál. Hodnoty nad 0,70 sa zvyčajne považujú za akceptovateľné.',
-      xLabel: 'Škála / subškála',
-      yLabel: 'Cronbach alfa',
-      points: points.slice(0, 25),
-    },
-  ];
-}
-
-function buildGroupTestCharts(result: any): ChartConfig[] {
-  const tests = getGroupTests(result);
-
-  const points = tests
-    .map((row: any) => {
-      const dependent = row.dependentVariable || row.variable || row.name || row.label;
-      const group = row.groupVariable || row.independentVariable || row.group || '';
-      const test = row.testType || row.test || '';
-      const value = toNumber(row.pValue ?? row.p);
-
-      const label = [dependent, group, test]
-        .map(cleanLabel)
-        .filter((item) => item && item !== '—')
-        .join(' / ');
-
-      return {
-        label,
-        value: value ?? 0,
-      };
-    })
-    .filter((point) => point.label !== '—' && !isTechnicalColumn(point.label));
-
-  if (!points.length) return [];
-
-  return [
-    {
-      id: 'group-test-p-values',
-      type: 'bar',
-      title: 'Testovanie rozdielov medzi skupinami – p hodnoty',
-      description:
-        'Graf zobrazuje p hodnoty testov rozdielov medzi skupinami: t-test, ANOVA, Mann-Whitney U alebo Kruskal-Wallis.',
-      xLabel: 'Test',
-      yLabel: 'p hodnota',
-      points: points.slice(0, 25),
-    },
-  ];
-}
-
-function buildScatterCharts(result: any): ChartConfig[] {
-  const output: ChartConfig[] = [];
-
-  const scatterSources = safeArray(
-    result?.scatterPlots ||
-      result?.scatterplots ||
-      result?.scatterCharts ||
-      result?.scatter_charts,
-  );
-
-  scatterSources.forEach((chart: any, index) => {
-    const xName = cleanLabel(chart.xVariable || chart.x || chart.xLabel || 'X');
-    const yName = cleanLabel(chart.yVariable || chart.y || chart.yLabel || 'Y');
-
-    if (isTechnicalColumn(xName) || isTechnicalColumn(yName)) return;
-
-    const points = safeArray(chart.points || chart.data || chart.rows)
-      .map((point: any) => {
-        const x = toNumber(point.x ?? point[xName]);
-        const y = toNumber(point.y ?? point[yName]);
-
-        if (x === null || y === null) return null;
-
-        return {
-          x,
-          y,
-        };
-      })
-      .filter(Boolean) as ChartPoint[];
-
-    if (points.length < 2) return;
-
-    output.push({
-      id: `scatter-${xName}-${yName}-${index}`,
-      type: 'scatter',
-      title: `Scatter graf – ${xName} × ${yName}`,
-      description:
-        'Bodový graf zobrazuje vzťah medzi dvomi numerickými premennými.',
-      xLabel: xName,
-      yLabel: yName,
-      points: points.slice(0, 500),
-    });
-  });
-
-  return output;
-}
-
-function buildHistogramCharts(result: any): ChartConfig[] {
-  const output: ChartConfig[] = [];
-
-  const histogramSources = safeArray(
-    result?.histograms ||
-      result?.histogramCharts ||
-      result?.histogram_charts,
-  );
-
-  histogramSources.forEach((chart: any, index) => {
-    const variableName = cleanLabel(
-      chart.variable || chart.name || chart.title || `Premenná ${index + 1}`,
-    );
-
-    if (isTechnicalColumn(variableName)) return;
-
-    const points = safeArray(chart.bins || chart.points || chart.data || chart.rows)
-      .map((row: any) => {
-        const label =
-          row.label ??
-          row.bin ??
-          row.range ??
-          `${row.from ?? ''}–${row.to ?? ''}`;
-
-        const value =
-          toNumber(row.count) ??
-          toNumber(row.frequency) ??
-          toNumber(row.n) ??
-          toNumber(row.value) ??
-          0;
-
-        return {
-          label: cleanLabel(label),
-          value,
-        };
-      })
-      .filter((point) => point.label !== '—');
-
-    if (!points.length) return;
-
-    output.push({
-      id: `histogram-${variableName}-${index}`,
-      type: 'histogram',
-      title: `Histogram – ${variableName}`,
-      description:
-        'Histogram zobrazuje rozdelenie hodnôt numerickej premennej.',
-      xLabel: variableName,
-      yLabel: 'Počet',
-      points: points.slice(0, 25),
-    });
-  });
-
-  return output;
-}
-
-function buildRecommendedChartFallbacks(result: any): ChartConfig[] {
-  const output: ChartConfig[] = [];
-
-  const recommendedCharts = safeArray(
-    result?.recommendedCharts ||
-      result?.recommended_charts ||
-      result?.charts,
-  );
-
-  recommendedCharts.forEach((chart: any, index) => {
-    const title = cleanLabel(
-      chart.title || chart.name || chart.type || `Graf ${index + 1}`,
-    );
-
-    const variable = cleanLabel(
-      chart.variable || chart.variableName || chart.x || chart.y || '',
-    );
-
-    if (variable && isTechnicalColumn(variable)) return;
-
-    const rows = safeArray(chart.points || chart.data || chart.rows)
-      .map((row: any) => {
-        const label = row.label ?? row.category ?? row.name ?? row.value;
-        const value =
-          toNumber(row.count) ??
-          toNumber(row.frequency) ??
-          toNumber(row.percent) ??
-          toNumber(row.value) ??
-          toNumber(row.y) ??
-          0;
-
-        return {
-          label: cleanLabel(label),
-          value,
-        };
-      })
-      .filter((point) => point.label !== '—');
-
-    if (!rows.length) return;
-
-    const normalizedType = normalizeText(chart.type);
-
-    output.push({
-      id: `recommended-${title}-${index}`,
-      type: normalizedType.includes('histogram')
-        ? 'histogram'
-        : normalizedType.includes('scatter')
-          ? 'scatter'
-          : normalizedType.includes('line')
-            ? 'line'
-            : 'bar',
-      title,
-      description: cleanLabel(chart.description || chart.reason || ''),
-      xLabel: cleanLabel(chart.xLabel || chart.variable || ''),
-      yLabel: cleanLabel(chart.yLabel || 'Hodnota'),
-      points: rows.slice(0, 25),
-    });
-  });
-
-  return output;
-}
-
-function buildCharts(result: any, maxCharts: number): ChartConfig[] {
-  const scaleCharts = buildScaleDescriptiveCharts(result);
-  const itemCharts = scaleCharts.length === 0 ? buildItemDescriptiveFallbackCharts(result) : [];
-
-  const charts = uniqueById([
-    ...buildFrequencyCharts(result),
-    ...scaleCharts,
-    ...itemCharts,
-    ...buildNormalityCharts(result),
-    ...buildCorrelationCharts(result),
-    ...buildReliabilityCharts(result),
-    ...buildGroupTestCharts(result),
-    ...buildHistogramCharts(result),
-    ...buildScatterCharts(result),
-    ...buildRecommendedChartFallbacks(result),
+  const descriptiveStatistics = getResultArray(result, [
+    'descriptives',
+    'descriptiveStatistics',
+    'descriptive_statistics',
+    'statistics',
   ]);
 
-  return charts.slice(0, maxCharts);
-}
+  const frequencies = getResultArray(result, [
+    'frequencies',
+    'frequencyTables',
+    'frequency_tables',
+  ]);
 
-function getChartIcon(type: ChartType) {
-  if (type === 'scatter') return <ScatterChart className="h-4 w-4" />;
-  if (type === 'line') return <LineChart className="h-4 w-4" />;
-  return <BarChart3 className="h-4 w-4" />;
-}
+  const reliabilities = getResultArray(result, [
+    'reliabilities',
+    'reliability',
+    'cronbachAlpha',
+  ]);
 
-function getMinMax(values: number[]) {
-  const clean = values.filter((value) => Number.isFinite(value));
+  const correlations = [
+    ...getResultArray(result, ['correlations', 'correlationResults']),
+    ...getResultArray(result, ['pearsonCorrelations', 'pearson']),
+    ...getResultArray(result, ['spearmanCorrelations', 'spearman']),
+  ];
 
-  if (!clean.length) {
-    return {
-      min: 0,
-      max: 1,
-    };
-  }
+  const statisticalTests = getResultArray(result, [
+    'statisticalTests',
+    'statistical_tests',
+    'hypothesisTests',
+    'hypothesis_tests',
+    'testResults',
+    'tTests',
+    't_tests',
+  ]);
 
-  const min = Math.min(...clean);
-  const max = Math.max(...clean);
+  const recommendedCharts = getResultArray(result, [
+    'recommendedCharts',
+    'recommended_charts',
+    'charts',
+  ]);
 
-  if (min === max) {
-    return {
-      min: Math.min(0, min),
-      max: max + 1,
-    };
-  }
+  const recommendedTests = getResultArray(result, [
+    'recommendedTests',
+    'recommended_tests',
+    'tests',
+  ]);
+
+  const preparedDataset = getPreparedDataset(result);
 
   return {
-    min,
-    max,
+    root,
+    preparedDataset,
+    descriptiveStatistics,
+    frequencies,
+    reliabilities,
+    correlations,
+    statisticalTests,
+    recommendedCharts,
+    recommendedTests,
   };
 }
 
-function formatTick(value: number) {
-  if (!Number.isFinite(value)) return '0';
-  if (Number.isInteger(value)) return String(value);
-  return value.toFixed(2);
-}
+function getOverviewItems(result?: AnalysisResult | null): ChartItem[] {
+  if (!result) return [];
 
-function BarSvg({ chart }: { chart: ChartConfig }) {
-  const width = 760;
-  const height = 320;
-  const paddingLeft = 58;
-  const paddingRight = 28;
-  const paddingTop = 28;
-  const paddingBottom = 84;
-  const plotWidth = width - paddingLeft - paddingRight;
-  const plotHeight = height - paddingTop - paddingBottom;
+  const arrays = getStatisticsArrays(result);
+  const root = arrays.root;
 
-  const values = chart.points.map((point) => toNumber(point.value) ?? 0);
+  const preparedRows = getPreparedRowCount(result);
+  const preparedVariables = getPreparedVariableCount(result);
+  const scaleCount = getScaleCount(result);
+  const subscaleCount = getSubscaleCount(result);
 
-  const minValue = Math.min(0, ...values);
-  const maxValue = Math.max(1, ...values);
-  const valueRange = maxValue - minValue || 1;
+  const oldRows = getNestedValue(root, [
+    ['summary', 'totalRows'],
+    ['summary', 'rows'],
+    ['summary', 'count'],
+    ['descriptiveStatistics', 'totalRows'],
+    ['descriptiveStatistics', 'rows'],
+    ['data', 'totalRows'],
+    ['data', 'rows'],
+    ['meta', 'respondentCount'],
+    ['statisticalAnalysis', 'meta', 'respondentCount'],
+  ]);
 
-  const barGap = 8;
-  const barWidth = Math.max(
-    10,
-    (plotWidth - barGap * Math.max(0, chart.points.length - 1)) /
-      Math.max(1, chart.points.length),
-  );
+  const oldVariables = getNestedValue(root, [
+    ['summary', 'totalVariables'],
+    ['summary', 'variables'],
+    ['variables', 'total'],
+    ['variables', 'count'],
+    ['descriptiveStatistics', 'totalVariables'],
+    ['descriptiveStatistics', 'variables'],
+  ]);
 
-  const zeroY =
-    paddingTop + plotHeight - ((0 - minValue) / valueRange) * plotHeight;
+  const rowsNumber = preparedRows || toPositiveNumber(oldRows);
+  const variablesNumber =
+    preparedVariables ||
+    toPositiveNumber(oldVariables) ||
+    safeArray(root.variables).length;
 
-  return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      className="h-auto w-full overflow-visible"
-      role="img"
-      aria-label={chart.title}
-    >
-      <line
-        x1={paddingLeft}
-        y1={paddingTop}
-        x2={paddingLeft}
-        y2={paddingTop + plotHeight}
-        stroke="currentColor"
-        className="text-slate-500"
-        strokeWidth="1"
-      />
+  const items: ChartItem[] = [];
 
-      <line
-        x1={paddingLeft}
-        y1={zeroY}
-        x2={width - paddingRight}
-        y2={zeroY}
-        stroke="currentColor"
-        className="text-slate-500"
-        strokeWidth="1"
-      />
-
-      {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
-        const y = paddingTop + plotHeight - tick * plotHeight;
-        const value = minValue + tick * valueRange;
-
-        return (
-          <g key={tick}>
-            <line
-              x1={paddingLeft}
-              y1={y}
-              x2={width - paddingRight}
-              y2={y}
-              stroke="currentColor"
-              className="text-white/10"
-              strokeWidth="1"
-            />
-            <text
-              x={paddingLeft - 10}
-              y={y + 4}
-              textAnchor="end"
-              className="fill-slate-400 text-[10px]"
-            >
-              {formatTick(value)}
-            </text>
-          </g>
-        );
-      })}
-
-      {chart.points.map((point, index) => {
-        const value = toNumber(point.value) ?? 0;
-        const x = paddingLeft + index * (barWidth + barGap);
-        const barHeight = Math.abs((value / valueRange) * plotHeight);
-        const y = value >= 0 ? zeroY - barHeight : zeroY;
-
-        return (
-          <g key={`${point.label}-${index}`}>
-            <rect
-              x={x}
-              y={y}
-              width={barWidth}
-              height={Math.max(1, barHeight)}
-              rx="5"
-              className="fill-violet-400/80"
-            />
-            <text
-              x={x + barWidth / 2}
-              y={value >= 0 ? y - 6 : y + barHeight + 14}
-              textAnchor="middle"
-              className="fill-slate-200 text-[10px] font-bold"
-            >
-              {formatTick(value)}
-            </text>
-            <text
-              x={x + barWidth / 2}
-              y={height - 38}
-              textAnchor="end"
-              transform={`rotate(-35 ${x + barWidth / 2} ${height - 38})`}
-              className="fill-slate-400 text-[10px]"
-            >
-              {String(point.label || '').slice(0, 22)}
-            </text>
-          </g>
-        );
-      })}
-
-      {chart.yLabel ? (
-        <text
-          x={18}
-          y={height / 2}
-          textAnchor="middle"
-          transform={`rotate(-90 18 ${height / 2})`}
-          className="fill-slate-400 text-[11px] font-bold"
-        >
-          {chart.yLabel}
-        </text>
-      ) : null}
-    </svg>
-  );
-}
-
-function ScatterSvg({ chart }: { chart: ChartConfig }) {
-  const width = 760;
-  const height = 320;
-  const paddingLeft = 56;
-  const paddingRight = 28;
-  const paddingTop = 26;
-  const paddingBottom = 54;
-  const plotWidth = width - paddingLeft - paddingRight;
-  const plotHeight = height - paddingTop - paddingBottom;
-
-  const xs = chart.points.map((point) => toNumber(point.x) ?? 0);
-  const ys = chart.points.map((point) => toNumber(point.y) ?? 0);
-
-  const { min: minX, max: maxX } = getMinMax(xs);
-  const { min: minY, max: maxY } = getMinMax(ys);
-
-  const xRange = maxX - minX || 1;
-  const yRange = maxY - minY || 1;
-
-  function scaleX(value: number) {
-    return paddingLeft + ((value - minX) / xRange) * plotWidth;
+  if (rowsNumber > 0) {
+    items.push({
+      label: 'Pripravené raw dáta',
+      value: rowsNumber,
+      description: 'Počet riadkov po vyčistení a príprave dát.',
+    });
   }
 
-  function scaleY(value: number) {
-    return paddingTop + plotHeight - ((value - minY) / yRange) * plotHeight;
+  if (variablesNumber > 0) {
+    items.push({
+      label: 'Premenné',
+      value: variablesNumber,
+      description: 'Počet rozpoznaných premenných v dátovom súbore.',
+    });
   }
 
+  if (scaleCount > 0) {
+    items.push({
+      label: 'Škály',
+      value: scaleCount,
+      description: 'Automaticky alebo manuálne definované celkové škály.',
+    });
+  }
+
+  if (subscaleCount > 0) {
+    items.push({
+      label: 'Subškály',
+      value: subscaleCount,
+      description: 'Rozpoznané subškály použité pri výpočtoch.',
+    });
+  }
+
+  if (arrays.descriptiveStatistics.length > 0) {
+    items.push({
+      label: 'Deskriptívne výstupy',
+      value: arrays.descriptiveStatistics.length,
+      description: 'Počet vypočítaných deskriptívnych štatistík.',
+    });
+  }
+
+  if (arrays.frequencies.length > 0) {
+    items.push({
+      label: 'Frekvenčné tabuľky',
+      value: arrays.frequencies.length,
+      description: 'Počet dostupných frekvenčných výstupov.',
+    });
+  }
+
+  if (arrays.reliabilities.length > 0) {
+    items.push({
+      label: 'Reliability',
+      value: arrays.reliabilities.length,
+      description: 'Počet výpočtov Cronbachovej alfy.',
+    });
+  }
+
+  if (arrays.correlations.length > 0) {
+    items.push({
+      label: 'Korelácie',
+      value: arrays.correlations.length,
+      description: 'Počet vypočítaných Pearson/Spearman korelácií.',
+    });
+  }
+
+  if (arrays.statisticalTests.length > 0) {
+    items.push({
+      label: 'Štatistické testy',
+      value: arrays.statisticalTests.length,
+      description: 't-test, ANOVA, Mann-Whitney alebo Kruskal-Wallis.',
+    });
+  }
+
+  return items;
+}
+
+function getQualityItems(result?: AnalysisResult | null): ChartItem[] {
+  if (!result) return [];
+
+  const root = result as unknown as UnknownRecord;
+  const preparedDataset = getPreparedDataset(result);
+  const quality = isRecord(preparedDataset.quality)
+    ? preparedDataset.quality
+    : {};
+
+  const originalRowCount = toPositiveNumber(quality.originalRowCount);
+  const rowCount = getPreparedRowCount(result);
+  const removedEmptyRows = getRemovedEmptyRows(result);
+  const removedDuplicateRows = getRemovedDuplicateRows(result);
+
+  const dataQuality = getNestedValue(root, [
+    ['dataQuality', 'score'],
+    ['dataQuality', 'quality'],
+    ['quality', 'score'],
+    ['summary', 'quality'],
+    ['summary', 'score'],
+    ['score'],
+  ]);
+
+  const completeness = getNestedValue(root, [
+    ['dataQuality', 'completeness'],
+    ['quality', 'completeness'],
+    ['summary', 'completeness'],
+    ['descriptiveStatistics', 'completeness'],
+    ['completeness'],
+  ]);
+
+  const reliability = getNestedValue(root, [
+    ['quality', 'reliability'],
+    ['summary', 'reliability'],
+  ]);
+
+  const items: ChartItem[] = [];
+
+  if (originalRowCount > 0 && rowCount > 0) {
+    items.push({
+      label: 'Zachované riadky',
+      value: clampPercent((rowCount / originalRowCount) * 100),
+      description: 'Podiel riadkov zachovaných po príprave raw dát.',
+    });
+  }
+
+  if (removedEmptyRows > 0 && originalRowCount > 0) {
+    items.push({
+      label: 'Odstránené prázdne riadky',
+      value: clampPercent((removedEmptyRows / originalRowCount) * 100),
+      description: 'Podiel prázdnych riadkov odstránených pri príprave.',
+    });
+  }
+
+  if (removedDuplicateRows > 0 && originalRowCount > 0) {
+    items.push({
+      label: 'Odstránené duplicity',
+      value: clampPercent((removedDuplicateRows / originalRowCount) * 100),
+      description: 'Podiel duplicitných riadkov odstránených pri príprave.',
+    });
+  }
+
+  if (dataQuality !== undefined && dataQuality !== null) {
+    items.push({
+      label: 'Kvalita dát',
+      value: getPercentFromRatio(dataQuality),
+      description: 'Orientačné skóre kvality spracovania dát.',
+    });
+  }
+
+  if (completeness !== undefined && completeness !== null) {
+    items.push({
+      label: 'Úplnosť dát',
+      value: getPercentFromRatio(completeness),
+      description: 'Podiel vyplnených a použiteľných údajov.',
+    });
+  }
+
+  if (reliability !== undefined && reliability !== null) {
+    items.push({
+      label: 'Spoľahlivosť',
+      value: getPercentFromRatio(reliability),
+      description: 'Orientačné hodnotenie spoľahlivosti výstupu.',
+    });
+  }
+
+  return items;
+}
+
+function getScaleReliabilityItems(result?: AnalysisResult | null): ChartItem[] {
+  const reliabilities = getStatisticsArrays(result).reliabilities;
+  const items: ChartItem[] = [];
+
+  for (const item of reliabilities) {
+    if (!isRecord(item)) continue;
+
+    const label = normalizeText(
+      item.scale ??
+        item.scaleName ??
+        item.name ??
+        item.label ??
+        item.variable ??
+        'Škála',
+    );
+
+    const alpha = toNumber(item.cronbachAlpha ?? item.alpha, NaN);
+
+    if (!Number.isFinite(alpha)) continue;
+
+    items.push({
+      label,
+      value: clampPercent(alpha * 100),
+      description: `Cronbachova alfa: ${formatNumber(alpha)}`,
+    });
+  }
+
+  return items;
+}
+
+function getMeanItems(result?: AnalysisResult | null): ChartItem[] {
+  const descriptives = getStatisticsArrays(result).descriptiveStatistics;
+  const items: ChartItem[] = [];
+
+  for (const item of descriptives) {
+    if (!isRecord(item)) continue;
+
+    const label = normalizeText(
+      item.variable ?? item.name ?? item.label ?? item.scale ?? '',
+    );
+
+    const mean = toNumber(item.mean ?? item.M ?? item.average, NaN);
+
+    if (!label || !Number.isFinite(mean)) continue;
+
+    items.push({
+      label,
+      value: mean,
+      description: 'Priemer vypočítaný z pripravených raw dát.',
+    });
+
+    if (items.length >= 12) break;
+  }
+
+  return items;
+}
+
+function getCorrelationItems(result?: AnalysisResult | null): ChartItem[] {
+  const correlations = getStatisticsArrays(result).correlations;
+  const items: ChartItem[] = [];
+
+  for (const item of correlations) {
+    if (!isRecord(item)) continue;
+
+    const variable1 = normalizeText(
+      item.variable1 ?? item.variableA ?? item.variableX ?? '',
+    );
+
+    const variable2 = normalizeText(
+      item.variable2 ?? item.variableB ?? item.variableY ?? '',
+    );
+
+    const coefficient = toNumber(
+      item.coefficient ??
+        item.r ??
+        item.rho ??
+        item.pearsonR ??
+        item.spearmanRho,
+      NaN,
+    );
+
+    if (!Number.isFinite(coefficient)) continue;
+
+    const label =
+      variable1 && variable2
+        ? `${variable1} × ${variable2}`
+        : normalizeText(item.name ?? item.label ?? 'Korelácia');
+
+    items.push({
+      label,
+      value: Math.abs(coefficient),
+      description: `Koeficient: ${formatNumber(coefficient)}`,
+    });
+
+    if (items.length >= 12) break;
+  }
+
+  return items;
+}
+
+function getRecommendedChartItems(result?: AnalysisResult | null): string[] {
+  if (!result) return [];
+
+  const root = result as unknown as UnknownRecord;
+
+  const recommendedCharts = getNestedValue(root, [
+    ['recommendedCharts'],
+    ['recommended_charts'],
+    ['charts'],
+    ['summary', 'recommendedCharts'],
+    ['summary', 'charts'],
+    ['visualizations'],
+    ['recommendedVisualizations'],
+  ]);
+
+  if (Array.isArray(recommendedCharts)) {
+    return recommendedCharts
+      .map((item) => {
+        if (typeof item === 'string') return item;
+
+        if (isRecord(item)) {
+          return (
+            item.name ??
+            item.title ??
+            item.label ??
+            item.type ??
+            item.chart ??
+            item.chartType ??
+            ''
+          );
+        }
+
+        return '';
+      })
+      .map(normalizeText)
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+
+  if (typeof recommendedCharts === 'string') {
+    return recommendedCharts
+      .split(/\n|;|,/)
+      .map(normalizeText)
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+
+  return [
+    'Stĺpcový graf pre frekvenčné tabuľky',
+    'Boxplot pre porovnanie škál medzi skupinami',
+    'Stĺpcový graf priemerov škál a subškál',
+    'Korelačná matica pre Pearson/Spearman korelácie',
+  ];
+}
+
+function EmptyState({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      className="h-auto w-full"
-      role="img"
-      aria-label={chart.title}
-    >
-      <line
-        x1={paddingLeft}
-        y1={paddingTop}
-        x2={paddingLeft}
-        y2={paddingTop + plotHeight}
-        stroke="currentColor"
-        className="text-slate-500"
-      />
-      <line
-        x1={paddingLeft}
-        y1={paddingTop + plotHeight}
-        x2={width - paddingRight}
-        y2={paddingTop + plotHeight}
-        stroke="currentColor"
-        className="text-slate-500"
-      />
-
-      {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
-        const x = paddingLeft + tick * plotWidth;
-        const y = paddingTop + plotHeight - tick * plotHeight;
-
-        return (
-          <g key={tick}>
-            <line
-              x1={x}
-              y1={paddingTop}
-              x2={x}
-              y2={paddingTop + plotHeight}
-              stroke="currentColor"
-              className="text-white/10"
-            />
-            <line
-              x1={paddingLeft}
-              y1={y}
-              x2={width - paddingRight}
-              y2={y}
-              stroke="currentColor"
-              className="text-white/10"
-            />
-            <text
-              x={x}
-              y={height - 28}
-              textAnchor="middle"
-              className="fill-slate-400 text-[10px]"
-            >
-              {formatTick(minX + tick * xRange)}
-            </text>
-            <text
-              x={paddingLeft - 10}
-              y={y + 4}
-              textAnchor="end"
-              className="fill-slate-400 text-[10px]"
-            >
-              {formatTick(minY + tick * yRange)}
-            </text>
-          </g>
-        );
-      })}
-
-      {chart.points.map((point, index) => {
-        const x = toNumber(point.x);
-        const y = toNumber(point.y);
-
-        if (x === null || y === null) return null;
-
-        return (
-          <circle
-            key={index}
-            cx={scaleX(x)}
-            cy={scaleY(y)}
-            r="4"
-            className="fill-cyan-300/80"
-          />
-        );
-      })}
-
-      {chart.xLabel ? (
-        <text
-          x={paddingLeft + plotWidth / 2}
-          y={height - 6}
-          textAnchor="middle"
-          className="fill-slate-400 text-[11px] font-bold"
-        >
-          {chart.xLabel}
-        </text>
-      ) : null}
-
-      {chart.yLabel ? (
-        <text
-          x={18}
-          y={height / 2}
-          textAnchor="middle"
-          transform={`rotate(-90 18 ${height / 2})`}
-          className="fill-slate-400 text-[11px] font-bold"
-        >
-          {chart.yLabel}
-        </text>
-      ) : null}
-    </svg>
+    <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 text-sm leading-6 text-slate-400">
+      {children}
+    </div>
   );
 }
 
-function ChartCard({ chart }: { chart: ChartConfig }) {
+function MaxBarChart({ items }: { items: ChartItem[] }) {
+  if (!items.length) {
+    return (
+      <EmptyState>
+        Pre túto časť zatiaľ nie sú dostupné číselné údaje na grafické
+        zobrazenie.
+      </EmptyState>
+    );
+  }
+
+  const max = Math.max(...items.map((item) => item.value), 1);
+
   return (
-    <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/20">
-      <div className="border-b border-white/10 bg-white/[0.045] px-4 py-4">
-        <div className="flex items-center gap-2 text-violet-200">
-          {getChartIcon(chart.type)}
-          <h4 className="font-black text-white">{chart.title}</h4>
-        </div>
+    <div className="space-y-4">
+      {items.map((item) => {
+        const width = clampPercent((item.value / max) * 100);
 
-        {chart.description ? (
-          <p className="mt-1 text-xs leading-5 text-slate-400">
-            {chart.description}
-          </p>
-        ) : null}
-      </div>
+        return (
+          <div
+            key={item.label}
+            className="rounded-3xl border border-white/10 bg-white/[0.045] p-4"
+          >
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-black text-white">
+                  {item.label}
+                </div>
 
-      <div className="p-4">
-        {chart.type === 'scatter' ? (
-          <ScatterSvg chart={chart} />
-        ) : (
-          <BarSvg chart={chart} />
-        )}
-      </div>
+                {item.description ? (
+                  <div className="mt-1 text-xs leading-5 text-slate-400">
+                    {item.description}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="shrink-0 rounded-2xl bg-violet-500/15 px-3 py-1 text-sm font-black text-violet-100">
+                {formatNumber(item.value)}
+              </div>
+            </div>
+
+            <div className="h-3 overflow-hidden rounded-full bg-black/30">
+              <div
+                className="h-full rounded-full bg-violet-500 transition-all duration-500"
+                style={{ width: `${width}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PercentChart({ items }: { items: ChartItem[] }) {
+  if (!items.length) {
+    return (
+      <EmptyState>
+        Percentuálne hodnotenie zatiaľ nie je dostupné.
+      </EmptyState>
+    );
+  }
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      {items.map((item) => {
+        const percent = clampPercent(item.value);
+
+        return (
+          <div
+            key={item.label}
+            className="rounded-3xl border border-white/10 bg-white/[0.045] p-5"
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-black text-white">
+                  {item.label}
+                </div>
+
+                {item.description ? (
+                  <div className="mt-1 text-xs leading-5 text-slate-400">
+                    {item.description}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="text-2xl font-black text-emerald-300">
+                {Math.round(percent)} %
+              </div>
+            </div>
+
+            <div className="h-3 overflow-hidden rounded-full bg-black/30">
+              <div
+                className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function CompactBarChart({
+  items,
+  valueSuffix = '',
+}: {
+  items: ChartItem[];
+  valueSuffix?: string;
+}) {
+  if (!items.length) {
+    return (
+      <EmptyState>
+        Pre túto časť zatiaľ nie sú dostupné údaje.
+      </EmptyState>
+    );
+  }
+
+  const max = Math.max(...items.map((item) => Math.abs(item.value)), 1);
+
+  return (
+    <div className="space-y-3">
+      {items.map((item) => {
+        const width = clampPercent((Math.abs(item.value) / max) * 100);
+
+        return (
+          <div
+            key={item.label}
+            className="rounded-2xl border border-white/10 bg-black/20 p-4"
+          >
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-black text-white">
+                  {item.label}
+                </div>
+
+                {item.description ? (
+                  <div className="mt-1 text-xs leading-5 text-slate-400">
+                    {item.description}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="shrink-0 rounded-2xl bg-blue-500/15 px-3 py-1 text-sm font-black text-blue-100">
+                {formatNumber(item.value)}
+                {valueSuffix}
+              </div>
+            </div>
+
+            <div className="h-2.5 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-blue-500 transition-all duration-500"
+                style={{ width: `${width}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 export default function AnalysisCharts({
   result,
-  data,
-  maxCharts = 12,
-}: Props) {
-  const source = result || data || {};
-  const charts = buildCharts(source, maxCharts);
-
-  if (!charts.length) {
-    return (
-      <div className="rounded-3xl border border-white/10 bg-black/20 px-4 py-5 text-sm leading-7 text-slate-400">
-        Grafy zatiaľ nie sú dostupné. Analýza nevrátila frekvenčné tabuľky,
-        deskriptívne dáta škál/subškál, normalitu, korelácie, reliabilitu,
-        testovanie rozdielov, histogramy ani scatter dáta vhodné na automatické
-        vykreslenie. Technické stĺpce typu ID sa automaticky vynechávajú.
-      </div>
-    );
-  }
+}: AnalysisChartsProps) {
+  const overviewItems = getOverviewItems(result);
+  const qualityItems = getQualityItems(result);
+  const reliabilityItems = getScaleReliabilityItems(result);
+  const meanItems = getMeanItems(result);
+  const correlationItems = getCorrelationItems(result);
+  const recommendedCharts = getRecommendedChartItems(result);
 
   return (
     <div className="space-y-5">
-      <div className="rounded-3xl border border-violet-400/20 bg-violet-400/10 px-4 py-4">
-        <div className="flex items-center gap-2 text-violet-100">
-          <BarChart3 className="h-4 w-4" />
-          <h3 className="text-sm font-black uppercase tracking-[0.16em]">
-            Automaticky vykreslené grafy
-          </h3>
+      <section className="rounded-[28px] border border-white/10 bg-white/[0.035] p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-200">
+            <BarChart3 className="h-5 w-5" />
+          </div>
+
+          <div>
+            <h3 className="text-lg font-black text-white">
+              Prehľad analýzy
+            </h3>
+
+            <p className="text-sm text-slate-400">
+              Základné ukazovatele z pripraveného raw-data súboru a
+              následných štatistických výpočtov.
+            </p>
+          </div>
         </div>
 
-        <p className="mt-2 text-sm leading-6 text-slate-300">
-          Grafy sa vytvárajú automaticky podľa typu dát: frekvencie ako
-          stĺpcové grafy, škály a subškály ako porovnanie priemerov a SD,
-          normalita ako p hodnoty, korelácie ako koeficienty, reliabilita ako
-          Cronbach alfa a testovanie rozdielov ako p hodnoty. Technické stĺpce
-          typu ID/respondent sa automaticky vynechávajú.
-        </p>
-      </div>
+        <MaxBarChart items={overviewItems} />
+      </section>
 
-      {charts.map((chart) => (
-        <ChartCard key={chart.id} chart={chart} />
-      ))}
+      <section className="rounded-[28px] border border-white/10 bg-white/[0.035] p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-200">
+            <TrendingUp className="h-5 w-5" />
+          </div>
+
+          <div>
+            <h3 className="text-lg font-black text-white">
+              Kvalita prípravy dát
+            </h3>
+
+            <p className="text-sm text-slate-400">
+              Percentuálny pohľad na zachované riadky, odstránené duplicity,
+              úplnosť a kvalitu dát.
+            </p>
+          </div>
+        </div>
+
+        <PercentChart items={qualityItems} />
+      </section>
+
+      <section className="rounded-[28px] border border-white/10 bg-white/[0.035] p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-200">
+            <Table2 className="h-5 w-5" />
+          </div>
+
+          <div>
+            <h3 className="text-lg font-black text-white">
+              Priemery škál, subškál a číselných premenných
+            </h3>
+
+            <p className="text-sm text-slate-400">
+              Grafické porovnanie priemerov z deskriptívnej štatistiky.
+            </p>
+          </div>
+        </div>
+
+        <CompactBarChart items={meanItems} />
+      </section>
+
+      <section className="rounded-[28px] border border-white/10 bg-white/[0.035] p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-200">
+            <Sigma className="h-5 w-5" />
+          </div>
+
+          <div>
+            <h3 className="text-lg font-black text-white">
+              Reliabilita škál
+            </h3>
+
+            <p className="text-sm text-slate-400">
+              Cronbachova alfa zobrazená ako percentuálny ukazovateľ vnútornej
+              konzistencie.
+            </p>
+          </div>
+        </div>
+
+        <PercentChart items={reliabilityItems} />
+      </section>
+
+      <section className="rounded-[28px] border border-white/10 bg-white/[0.035] p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-500/15 text-cyan-200">
+            <LineChart className="h-5 w-5" />
+          </div>
+
+          <div>
+            <h3 className="text-lg font-black text-white">
+              Korelačné koeficienty
+            </h3>
+
+            <p className="text-sm text-slate-400">
+              Absolútna sila Pearsonových alebo Spearmanových korelácií.
+            </p>
+          </div>
+        </div>
+
+        <CompactBarChart items={correlationItems} />
+      </section>
+
+      <section className="rounded-[28px] border border-white/10 bg-white/[0.035] p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-fuchsia-500/15 text-fuchsia-200">
+            <PieChart className="h-5 w-5" />
+          </div>
+
+          <div>
+            <h3 className="text-lg font-black text-white">
+              Odporúčané grafy
+            </h3>
+
+            <p className="text-sm text-slate-400">
+              Typy grafov vhodné pre interpretáciu pripravených raw dát a
+              výsledkov štatistického testovania.
+            </p>
+          </div>
+        </div>
+
+        {recommendedCharts.length > 0 ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {recommendedCharts.map((item) => (
+              <div
+                key={item}
+                className="flex items-start gap-3 rounded-3xl border border-white/10 bg-black/20 p-4"
+              >
+                <LineChart className="mt-0.5 h-5 w-5 shrink-0 text-violet-200" />
+
+                <div className="text-sm font-bold leading-6 text-slate-100">
+                  {item}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-3xl border border-white/10 bg-black/20 p-4 text-sm leading-6 text-slate-400">
+            Analýza zatiaľ neobsahuje odporúčané typy grafov.
+          </div>
+        )}
+      </section>
     </div>
   );
 }

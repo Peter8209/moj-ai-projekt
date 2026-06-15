@@ -1215,6 +1215,70 @@ function isModuleKey(value: string): value is ModuleKey {
 
 // ================= HELPERS =================
 
+function base64ToBlob(base64: string, mimeType: string): Blob {
+  const cleanedBase64 = String(base64 || '')
+    .replace(/^data:.*?;base64,/i, '')
+    .replace(/\s/g, '');
+
+  if (!cleanedBase64) {
+    return new Blob([], { type: mimeType });
+  }
+
+  const byteCharacters = atob(cleanedBase64);
+  const arrayBuffers: ArrayBuffer[] = [];
+  const sliceSize = 1024;
+
+  for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+    const slice = byteCharacters.slice(offset, offset + sliceSize);
+    const byteNumbers = new Array<number>(slice.length);
+
+    for (let index = 0; index < slice.length; index += 1) {
+      byteNumbers[index] = slice.charCodeAt(index);
+    }
+
+    const byteArray = new Uint8Array(byteNumbers);
+
+    const arrayBuffer = byteArray.buffer.slice(
+      byteArray.byteOffset,
+      byteArray.byteOffset + byteArray.byteLength,
+    ) as ArrayBuffer;
+
+    arrayBuffers.push(arrayBuffer);
+  }
+
+  return new Blob(arrayBuffers, { type: mimeType });
+}
+
+function downloadBase64File(
+  base64: string,
+  fileName: string,
+  mimeType: string,
+): void {
+  const blob = base64ToBlob(base64, mimeType);
+
+  if (blob.size === 0) {
+    console.error('Súbor sa nepodarilo stiahnuť, pretože base64 obsah je prázdny.');
+    alert('Súbor sa nepodarilo stiahnuť, pretože export je prázdny.');
+    return;
+  }
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+
+  link.href = url;
+  link.download = fileName;
+  link.rel = 'noopener';
+
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 1000);
+}
+
+
 function getFileExtension(fileName: string) {
   const index = fileName.lastIndexOf('.');
   if (index === -1) return '';
@@ -2093,10 +2157,32 @@ function createAnalysisSummary({
 }
 
 function createAnalysisOutputText(data: AnalysisResult) {
-  const warningsBlock =
-    data.warnings && data.warnings.length > 0
-      ? `Upozornenia:\n${data.warnings.map((item) => `- ${item}`).join('\n')}`
-      : '';
+  const warningItems = Array.isArray(data.warnings)
+  ? data.warnings.map((item) => {
+      if (typeof item === 'string') return item;
+
+      if (item && typeof item === 'object') {
+        const record = item as Record<string, unknown>;
+
+        return String(
+          record.message ||
+            record.text ||
+            record.warning ||
+            record.title ||
+            JSON.stringify(record),
+        );
+      }
+
+      return String(item);
+    })
+  : typeof data.warnings === 'string' && data.warnings.trim()
+    ? [data.warnings.trim()]
+    : [];
+
+const warningsBlock =
+  warningItems.length > 0
+    ? `Upozornenia:\n${warningItems.map((item) => `- ${item}`).join('\n')}`
+    : '';
 
   const variablesBlock =
     data.variables && data.variables.length > 0
@@ -2113,38 +2199,118 @@ function createAnalysisOutputText(data: AnalysisResult) {
       : '';
 
 
-const descriptiveBlock =
-  data.descriptiveStatistics && data.descriptiveStatistics.length > 0
-    ? `Deskriptívna štatistika:\n${data.descriptiveStatistics
-        .map((item: any) => {
-          const name = item.name || item.variable || item.premenna || 'Premenná';
-          const valid = item.valid ?? item.n ?? item.count ?? 'neuvedené';
-          const missing = item.missing ?? 'neuvedené';
-          const mean = item.mean ?? item.M ?? 'neuvedené';
-          const median = item.median ?? item.Md ?? 'neuvedené';
-          const sd = item.stdDeviation ?? item.sd ?? item.SD ?? 'neuvedené';
-          const min = item.minimum ?? item.min ?? 'neuvedené';
-          const max = item.maximum ?? item.max ?? 'neuvedené';
-          const skewness = item.skewness ?? 'neuvedené';
-          const kurtosis = item.kurtosis ?? 'neuvedené';
+const descriptiveStatisticsItems = Array.isArray(data.descriptiveStatistics)
+  ? data.descriptiveStatistics
+  : Array.isArray((data as any).descriptives)
+    ? (data as any).descriptives
+    : Array.isArray((data as any).statistics)
+      ? (data as any).statistics
+      : [];
 
-          return `- ${name}: N = ${valid}, chýbajúce = ${missing}, M = ${mean}, Md = ${median}, SD = ${sd}, Min = ${min}, Max = ${max}, šikmosť = ${skewness}, špicatosť = ${kurtosis}`;
+const descriptiveBlock =
+  descriptiveStatisticsItems.length > 0
+    ? `Deskriptívna štatistika:\n${descriptiveStatisticsItems
+        .map((item: unknown) => {
+          if (!item || typeof item !== 'object') {
+            return `- ${String(item)}`;
+          }
+
+          const record = item as Record<string, unknown>;
+
+          const name =
+            record.name ||
+            record.variable ||
+            record.premenna ||
+            record.label ||
+            'Premenná';
+
+          const mean =
+            record.mean ??
+            record.priemer ??
+            record.M ??
+            record.average ??
+            '—';
+
+          const sd =
+            record.sd ??
+            record.standardDeviation ??
+            record.stdDeviation ??
+            record.SD ??
+            '—';
+
+          const n =
+            record.n ??
+            record.N ??
+            record.valid ??
+            record.validN ??
+            '—';
+
+          return `- ${String(name)}: N=${String(n)}, M=${String(mean)}, SD=${String(sd)}`;
         })
         .join('\n')}`
     : '';
 
-const hypothesisTestsBlock =
-  data.hypothesisTests && data.hypothesisTests.length > 0
-    ? `Výsledky štatistických testov:\n${data.hypothesisTests
-        .map((item: any) => {
-          const test = item.test || item.name || 'Štatistický test';
-          const variable = item.variable || item.variables || item.dependentVariable || '';
-          const statistic = item.statistic ?? item.value ?? item.t ?? item.r ?? 'neuvedené';
-          const pValue = item.pValue ?? item.p ?? 'neuvedené';
-          const interpretation =
-            item.interpretation || item.result || item.conclusion || 'Interpretáciu je potrebné doplniť podľa výsledku.';
 
-          return `- ${test}${variable ? ` (${variable})` : ''}: štatistika = ${statistic}, p = ${pValue}. ${interpretation}`;
+const hypothesisTestItems = Array.isArray(data.hypothesisTests)
+  ? data.hypothesisTests
+  : Array.isArray((data as any).hypothesis_tests)
+    ? (data as any).hypothesis_tests
+    : Array.isArray((data as any).statisticalTests)
+      ? (data as any).statisticalTests
+      : Array.isArray((data as any).statistical_tests)
+        ? (data as any).statistical_tests
+        : Array.isArray((data as any).testResults)
+          ? (data as any).testResults
+          : Array.isArray((data as any).tTests)
+            ? (data as any).tTests
+            : [];
+
+const hypothesisTestsBlock =
+  hypothesisTestItems.length > 0
+    ? `Výsledky štatistických testov:\n${hypothesisTestItems
+        .map((item: unknown) => {
+          if (!item || typeof item !== 'object') {
+            return `- ${String(item)}`;
+          }
+
+          const record = item as Record<string, unknown>;
+
+          const test =
+            record.test ||
+            record.testType ||
+            record.name ||
+            record.title ||
+            'Štatistický test';
+
+          const p =
+            record.p ??
+            record.pValue ??
+            record.p_hodnota ??
+            '—';
+
+          const statistic =
+            record.statistic ??
+            record.t ??
+            record.f ??
+            record.u ??
+            record.h ??
+            '';
+
+          const result =
+            record.result ||
+            record.interpretation ||
+            record.description ||
+            record.recommendation ||
+            '';
+
+          const statisticText =
+            statistic !== null && statistic !== undefined && String(statistic) !== ''
+              ? `, štatistika=${String(statistic)}`
+              : '';
+
+          const resultText = result ? `, ${String(result)}` : '';
+
+          return `- ${String(test)}: p=${String(p)}${statisticText}${resultText}`;
         })
         .join('\n')}`
     : '';
@@ -2352,18 +2518,53 @@ const searchParams = useSearchParams();
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
   const [input, setInput] = useState('');
-  const [secondaryInput, setSecondaryInput] = useState('');
-  const [result, setResult] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+const [secondaryInput, setSecondaryInput] = useState('');
+const [result, setResult] = useState('');
+const [isLoading, setIsLoading] = useState(false);
+
 const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
 const [activeAttachmentText, setActiveAttachmentText] = useState('');
-  const [isListening, setIsListening] = useState(false);
-  const [canvasOpen, setCanvasOpen] = useState(false);
-  const [canvasText, setCanvasText] = useState('');
 
-  const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
-  const [analysisResult, setAnalysisResult] =
-    useState<AnalysisResult | null>(null);
+const [isListening, setIsListening] = useState(false);
+
+const [canvasOpen, setCanvasOpen] = useState(false);
+const [canvasText, setCanvasText] = useState('');
+
+const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
+const [analysisResult, setAnalysisResult] =
+  useState<AnalysisResult | null>(null);
+
+/**
+ * Pripravený Excel súbor pre modul Analýza dát.
+ *
+ * Tento stav sa naplní až po úspešnom volaní:
+ * /api/analyze-data/prepare
+ *
+ * Obsahuje nový Excel súbor podľa vzoru:
+ * - DATA_RAW
+ * - DATA_CLEAN
+ * - VARIABLE_DICTIONARY
+ * - SCORING
+ * - QUALITY_REPORT
+ * - README
+ *
+ * Tento súbor sa dá následne stiahnuť a zároveň sa z neho spúšťa štatistika.
+ */
+const [preparedDataFile, setPreparedDataFile] = useState<{
+  fileName: string;
+  base64: string;
+  mimeType: string;
+  rows?: number;
+  columns?: number;
+  warnings?: string[];
+  sheets?: string[];
+  qualityReport?: Array<{
+    kontrola?: string;
+    vysledok?: string | number;
+    stav?: 'ok' | 'warning' | 'error';
+    poznamka?: string;
+  }>;
+} | null>(null);
 
   const [qualityMode, setQualityMode] = useState('style');
   const [outputMode, setOutputMode] = useState('detailed');
@@ -3254,49 +3455,196 @@ const runModule = async () => {
     const prompt = buildModulePrompt();
 
 if (activeModule === 'data') {
-  const formData = new FormData();
+  const promptText = userText || 'Analyzuj priložené dáta.';
+  const workLanguage = finalWorkLanguage || systemLanguage;
 
-  formData.append('prompt', userText || 'Analyzuj priložené dáta.');
-  formData.append('assignment', userText || '');
-  formData.append('analysisGoal', userText || '');
-  formData.append('dataDescription', userText || '');
-  formData.append('module', activeModule);
+  const originalFormData = new FormData();
 
-  formData.append('language', finalWorkLanguage || systemLanguage);
-  formData.append('outputLanguage', finalWorkLanguage || systemLanguage);
-  formData.append('systemLanguage', systemLanguage);
-  formData.append('interfaceLanguage', systemLanguage);
-  formData.append('workLanguage', finalWorkLanguage || systemLanguage);
+  originalFormData.append('prompt', promptText);
+  originalFormData.append('assignment', userText || '');
+  originalFormData.append('analysisGoal', userText || '');
+  originalFormData.append('dataDescription', userText || '');
+  originalFormData.append('module', activeModule);
 
-  formData.append('profile', JSON.stringify(profileForApi || {}));
-  formData.append('activeProfile', JSON.stringify(profileForApi || {}));
-  formData.append('profileContext', buildProfileBlock(profileForApi));
+  originalFormData.append('language', workLanguage);
+  originalFormData.append('outputLanguage', workLanguage);
+  originalFormData.append('systemLanguage', systemLanguage);
+  originalFormData.append('interfaceLanguage', systemLanguage);
+  originalFormData.append('workLanguage', workLanguage);
+
+  originalFormData.append('profile', JSON.stringify(profileForApi || {}));
+  originalFormData.append('activeProfile', JSON.stringify(profileForApi || {}));
+  originalFormData.append('profileContext', buildProfileBlock(profileForApi));
 
   if (profileForApi?.id) {
-    formData.append('projectId', profileForApi.id);
+    originalFormData.append('projectId', profileForApi.id);
   }
 
   attachedFiles.forEach((item) => {
     if (item.file instanceof File) {
-      formData.append('files', item.file, item.name || item.file.name);
+      originalFormData.append('file', item.file, item.name || item.file.name);
+      originalFormData.append('files', item.file, item.name || item.file.name);
     }
   });
 
   if (!attachedFiles.length && userText) {
     const textFile = createTextFileFromInput(userText);
-    formData.append('files', textFile, textFile.name);
+
+    originalFormData.append('file', textFile, textFile.name);
+    originalFormData.append('files', textFile, textFile.name);
   }
 
-let response = await fetch('/api/analyze-data', {
-  method: 'POST',
-  body: formData,
-});
+  /**
+   * KROK 1:
+   * Najprv pripravíme súbor podľa vzoru.
+   * Endpoint /api/analyze-data/prepare vytvorí nový Excel:
+   *
+   * - DATA_RAW
+   * - DATA_CLEAN
+   * - VARIABLE_DICTIONARY
+   * - SCORING
+   * - QUALITY_REPORT
+   * - README
+   */
+  const prepareResponse = await fetch('/api/analyze-data/prepare', {
+    method: 'POST',
+    body: originalFormData,
+  });
 
-  // Fallback, ak ešte nemáš novú API route /api/analysis/files
+  if (!prepareResponse.ok) {
+    throw new Error(await readApiErrorResponse(prepareResponse));
+  }
+
+  const prepareResult = await prepareResponse.json();
+
+  if (prepareResult?.ok === false) {
+    throw new Error(
+      prepareResult?.error ||
+        prepareResult?.message ||
+        'Príprava súboru podľa vzoru zlyhala.',
+    );
+  }
+
+  const preparedFileBase64 = String(prepareResult?.preparedFileBase64 || '');
+  const preparedFileName = String(
+    prepareResult?.preparedFileName || 'prepared-data.xlsx',
+  );
+
+  const preparedMimeType = String(
+    prepareResult?.mimeType ||
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  );
+
+  if (!preparedFileBase64) {
+    throw new Error(
+      'Príprava súboru prebehla, ale API nevrátilo pripravený Excel súbor.',
+    );
+  }
+
+  /**
+   * Voliteľné:
+   * Ak máš v DashboardClient.tsx stav preparedDataFile,
+   * uložíme pripravený súbor, aby sa dal stiahnuť cez tlačidlo.
+   *
+   * Potrebuješ mať hore:
+   *
+   * const [preparedDataFile, setPreparedDataFile] = useState<{
+   *   fileName: string;
+   *   base64: string;
+   *   mimeType: string;
+   *   rows?: number;
+   *   columns?: number;
+   *   warnings?: string[];
+   * } | null>(null);
+   */
+  if (typeof setPreparedDataFile === 'function') {
+    setPreparedDataFile({
+      fileName: preparedFileName,
+      base64: preparedFileBase64,
+      mimeType: preparedMimeType,
+      rows:
+        typeof prepareResult?.rows === 'number'
+          ? prepareResult.rows
+          : undefined,
+      columns:
+        typeof prepareResult?.columns === 'number'
+          ? prepareResult.columns
+          : undefined,
+      warnings: Array.isArray(prepareResult?.warnings)
+        ? prepareResult.warnings
+        : [],
+    });
+  }
+
+  /**
+   * KROK 2:
+   * Z Base64 vytvoríme späť File objekt.
+   * Tento File už predstavuje pripravený Excel podľa vzoru.
+   */
+  const preparedBlob = base64ToBlob(preparedFileBase64, preparedMimeType);
+
+  const preparedFile = new File([preparedBlob], preparedFileName, {
+    type: preparedMimeType,
+  });
+
+  /**
+   * KROK 3:
+   * Až teraz posielame pripravený Excel do štatistiky.
+   * Dôležité: posielame sheetName = DATA_CLEAN.
+   */
+  const analysisFormData = new FormData();
+
+  analysisFormData.append('prompt', promptText);
+  analysisFormData.append('assignment', userText || '');
+  analysisFormData.append('analysisGoal', userText || '');
+  analysisFormData.append('dataDescription', userText || '');
+  analysisFormData.append('module', activeModule);
+
+  analysisFormData.append('language', workLanguage);
+  analysisFormData.append('outputLanguage', workLanguage);
+  analysisFormData.append('systemLanguage', systemLanguage);
+  analysisFormData.append('interfaceLanguage', systemLanguage);
+  analysisFormData.append('workLanguage', workLanguage);
+
+  analysisFormData.append('profile', JSON.stringify(profileForApi || {}));
+  analysisFormData.append('activeProfile', JSON.stringify(profileForApi || {}));
+  analysisFormData.append('profileContext', buildProfileBlock(profileForApi));
+
+  analysisFormData.append('source', 'prepared');
+  analysisFormData.append('sheetName', 'DATA_CLEAN');
+  analysisFormData.append('preparedFileName', preparedFileName);
+  analysisFormData.append('preparedRows', String(prepareResult?.rows || 0));
+  analysisFormData.append('preparedColumns', String(prepareResult?.columns || 0));
+  analysisFormData.append(
+    'prepareQualityReport',
+    JSON.stringify(prepareResult?.qualityReport || []),
+  );
+  analysisFormData.append(
+    'prepareWarnings',
+    JSON.stringify(prepareResult?.warnings || []),
+  );
+
+  if (profileForApi?.id) {
+    analysisFormData.append('projectId', profileForApi.id);
+  }
+
+  analysisFormData.append('file', preparedFile, preparedFile.name);
+  analysisFormData.append('files', preparedFile, preparedFile.name);
+
+  let response = await fetch('/api/analyze-data', {
+    method: 'POST',
+    body: analysisFormData,
+  });
+
+  /**
+   * Fallback:
+   * Ak by si neskôr používal inú API route, tu môže zostať poistka.
+   * Momentálne fallback smeruje späť na /api/analyze-data.
+   */
   if (response.status === 404) {
     response = await fetch('/api/analyze-data', {
       method: 'POST',
-      body: formData,
+      body: analysisFormData,
     });
   }
 
@@ -3312,7 +3660,19 @@ let response = await fetch('/api/analyze-data', {
     );
   }
 
-  const normalized = normalizeAnalysisResult(data);
+  const normalized = normalizeAnalysisResult({
+    ...data,
+    preparedFile: {
+      fileName: preparedFileName,
+      mimeType: preparedMimeType,
+      rows: prepareResult?.rows || 0,
+      columns: prepareResult?.columns || 0,
+      sheets: prepareResult?.sheets || [],
+      warnings: prepareResult?.warnings || [],
+      qualityReport: prepareResult?.qualityReport || [],
+    },
+  });
+
   const outputText = createAnalysisOutputText(normalized);
 
   if (!outputText.trim()) {
@@ -3329,7 +3689,7 @@ let response = await fetch('/api/analyze-data', {
     localStorage.setItem('latest_generated_work_text', outputText);
     localStorage.setItem('last_ai_output', outputText);
   } catch {
-    // localStorage nemusí byť dostupný
+    // localStorage nemusí byť dostupný alebo môže byť plný
   }
 
   await saveHistoryItem({
@@ -3339,6 +3699,15 @@ let response = await fetch('/api/analyze-data', {
     assistantMessage: outputText,
     result: {
       analysis: normalized as unknown as Record<string, unknown>,
+      preparedFile: {
+        fileName: preparedFileName,
+        mimeType: preparedMimeType,
+        rows: prepareResult?.rows || 0,
+        columns: prepareResult?.columns || 0,
+        sheets: prepareResult?.sheets || [],
+        warnings: prepareResult?.warnings || [],
+        qualityReport: prepareResult?.qualityReport || [],
+      },
       profileTitle: profileForApi?.title || '',
       profileId: profileForApi?.id || null,
       attachedFiles: attachedFiles.map((file) => ({

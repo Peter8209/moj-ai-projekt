@@ -1,0 +1,3 @@
+Most már tudja, hol találhatók a fiókadatok,
+csomag, kreditek, projektek, szolgáltatások
+és hozzáférési adatok.

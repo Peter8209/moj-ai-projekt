@@ -1,0 +1,3 @@
+Przycisk Cancel Subscription służy do
+anulowania subskrypcji i wyłączenia
+automatycznego odnowienia.

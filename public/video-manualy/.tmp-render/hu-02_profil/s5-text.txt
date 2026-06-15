@@ -1,0 +1,2 @@
+A Client kártya az ügyfél nevét és e-mail
+címét mutatja.

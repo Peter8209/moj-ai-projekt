@@ -1,0 +1,4 @@
+At the top is the Client Account and
+Services title. This page shows account,
+package, service status, credits, projects
+and access dates.

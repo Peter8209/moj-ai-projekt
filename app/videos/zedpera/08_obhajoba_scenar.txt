@@ -1,9 +1,0 @@
-Obhajoba
-
-Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
-
-- Sekcia pripraví text prezentácie, otázky komisie a odpovede.
-- Vložte tému, cieľ, metodológiu a hlavné výsledky práce.
-- Kliknite na vygenerovanie sprievodného textu prezentácie.
-
-Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

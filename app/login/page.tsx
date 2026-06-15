@@ -43,8 +43,6 @@ const loginCopy: Record<
     noAccount: string;
     register: string;
     backHome: string;
-    demoLogin: string;
-    demoLoading: string;
     missingFields: string;
     loginFailed: string;
     genericError: string;
@@ -54,7 +52,8 @@ const loginCopy: Record<
   sk: {
     title: 'Prihlásenie',
     subtitle: 'ZEDPERA účet',
-    description: 'Prihlás sa do používateľského alebo admin menu ZEDPERA.',
+    description:
+      'Prihlásenie je dostupné iba pre registrovaných používateľov ZEDPERA.',
     email: 'E-mail',
     emailPlaceholder: 'napr. peter@email.com',
     password: 'Heslo',
@@ -67,8 +66,6 @@ const loginCopy: Record<
     noAccount: 'Nemáš účet?',
     register: 'Registrovať sa',
     backHome: 'Späť na úvodnú stránku',
-    demoLogin: 'Pokračovať ako demo používateľ',
-    demoLoading: 'Otváram demo...',
     missingFields: 'Vyplň e-mail a heslo.',
     loginFailed: 'Prihlásenie zlyhalo. Skontroluj e-mail a heslo.',
     genericError: 'Prihlásenie zlyhalo. Skús to znova.',
@@ -77,7 +74,8 @@ const loginCopy: Record<
   cs: {
     title: 'Přihlášení',
     subtitle: 'ZEDPERA účet',
-    description: 'Přihlaste se do uživatelského nebo admin menu ZEDPERA.',
+    description:
+      'Přihlášení je dostupné pouze pro registrované uživatele ZEDPERA.',
     email: 'E-mail',
     emailPlaceholder: 'např. peter@email.com',
     password: 'Heslo',
@@ -90,8 +88,6 @@ const loginCopy: Record<
     noAccount: 'Nemáte účet?',
     register: 'Registrovat se',
     backHome: 'Zpět na úvodní stránku',
-    demoLogin: 'Pokračovat jako demo uživatel',
-    demoLoading: 'Otevírám demo...',
     missingFields: 'Vyplňte e-mail a heslo.',
     loginFailed: 'Přihlášení selhalo. Zkontrolujte e-mail a heslo.',
     genericError: 'Přihlášení selhalo. Zkuste to znovu.',
@@ -100,7 +96,8 @@ const loginCopy: Record<
   en: {
     title: 'Login',
     subtitle: 'ZEDPERA account',
-    description: 'Sign in to your ZEDPERA user or admin menu.',
+    description:
+      'Sign in is available only for registered ZEDPERA users.',
     email: 'Email',
     emailPlaceholder: 'e.g. peter@email.com',
     password: 'Password',
@@ -113,8 +110,6 @@ const loginCopy: Record<
     noAccount: "Don't have an account?",
     register: 'Register',
     backHome: 'Back to homepage',
-    demoLogin: 'Continue as demo user',
-    demoLoading: 'Opening demo...',
     missingFields: 'Enter email and password.',
     loginFailed: 'Login failed. Check your email and password.',
     genericError: 'Login failed. Please try again.',
@@ -123,7 +118,8 @@ const loginCopy: Record<
   de: {
     title: 'Anmeldung',
     subtitle: 'ZEDPERA Konto',
-    description: 'Melden Sie sich im Benutzer- oder Admin-Menü von ZEDPERA an.',
+    description:
+      'Die Anmeldung ist nur für registrierte ZEDPERA-Benutzer verfügbar.',
     email: 'E-Mail',
     emailPlaceholder: 'z. B. peter@email.com',
     password: 'Passwort',
@@ -136,8 +132,6 @@ const loginCopy: Record<
     noAccount: 'Sie haben kein Konto?',
     register: 'Registrieren',
     backHome: 'Zurück zur Startseite',
-    demoLogin: 'Als Demo-Benutzer fortfahren',
-    demoLoading: 'Demo wird geöffnet...',
     missingFields: 'E-Mail und Passwort ausfüllen.',
     loginFailed: 'Anmeldung fehlgeschlagen. Prüfen Sie E-Mail und Passwort.',
     genericError: 'Anmeldung fehlgeschlagen. Bitte versuchen Sie es erneut.',
@@ -147,7 +141,8 @@ const loginCopy: Record<
   pl: {
     title: 'Logowanie',
     subtitle: 'Konto ZEDPERA',
-    description: 'Zaloguj się do menu użytkownika lub administratora ZEDPERA.',
+    description:
+      'Logowanie jest dostępne tylko dla zarejestrowanych użytkowników ZEDPERA.',
     email: 'E-mail',
     emailPlaceholder: 'np. peter@email.com',
     password: 'Hasło',
@@ -160,8 +155,6 @@ const loginCopy: Record<
     noAccount: 'Nie masz konta?',
     register: 'Zarejestruj się',
     backHome: 'Powrót do strony głównej',
-    demoLogin: 'Kontynuuj jako użytkownik demo',
-    demoLoading: 'Otwieram demo...',
     missingFields: 'Wpisz e-mail i hasło.',
     loginFailed: 'Logowanie nie powiodło się. Sprawdź e-mail i hasło.',
     genericError: 'Logowanie nie powiodło się. Spróbuj ponownie.',
@@ -172,7 +165,7 @@ const loginCopy: Record<
     title: 'Bejelentkezés',
     subtitle: 'ZEDPERA fiók',
     description:
-      'Jelentkezzen be a ZEDPERA felhasználói vagy admin menüjébe.',
+      'A bejelentkezés csak regisztrált ZEDPERA felhasználók számára érhető el.',
     email: 'E-mail',
     emailPlaceholder: 'pl. peter@email.com',
     password: 'Jelszó',
@@ -185,8 +178,6 @@ const loginCopy: Record<
     noAccount: 'Nincs fiókja?',
     register: 'Regisztráció',
     backHome: 'Vissza a kezdőlapra',
-    demoLogin: 'Folytatás demo felhasználóként',
-    demoLoading: 'Demo megnyitása...',
     missingFields: 'Adja meg az e-mail címet és a jelszót.',
     loginFailed:
       'A bejelentkezés sikertelen. Ellenőrizze az e-mail címet és a jelszót.',
@@ -323,7 +314,6 @@ export default function LoginPage() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [demoLoading, setDemoLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -502,40 +492,6 @@ export default function LoginPage() {
     }
   };
 
-  const loginAsDemoUser = async () => {
-    const demoEmail = 'demo@zedpera.com';
-
-    try {
-      setDemoLoading(true);
-      setError('');
-      setNotice('');
-
-      const supabase = createSupabaseBrowserClient();
-
-      await supabase.auth.signOut();
-
-      saveLoginData({
-        userEmail: demoEmail,
-        userName: 'Demo používateľ',
-        role: 'user',
-        plan: 'free',
-      });
-
-      redirectToDashboard('?demo=true');
-    } catch {
-      saveLoginData({
-        userEmail: demoEmail,
-        userName: 'Demo používateľ',
-        role: 'user',
-        plan: 'free',
-      });
-
-      redirectToDashboard('?demo=true');
-    } finally {
-      setDemoLoading(false);
-    }
-  };
-
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950 transition-colors duration-300 dark:bg-[#020617] dark:text-white">
       <section className="relative flex min-h-screen items-center justify-center px-4 py-10 sm:px-6 lg:px-8">
@@ -650,7 +606,7 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => void loginUser()}
-              disabled={loading || demoLoading}
+              disabled={loading}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-700 px-5 py-4 font-black text-white shadow-xl shadow-purple-950/30 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? (
@@ -663,22 +619,6 @@ export default function LoginPage() {
                   <LogIn size={20} />
                   {copy.loginButton}
                 </>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => void loginAsDemoUser()}
-              disabled={loading || demoLoading}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-4 font-black text-slate-800 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.1]"
-            >
-              {demoLoading ? (
-                <>
-                  <Loader2 className="animate-spin" size={20} />
-                  {copy.demoLoading}
-                </>
-              ) : (
-                copy.demoLogin
               )}
             </button>
           </div>

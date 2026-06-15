@@ -1,9 +1,0 @@
-Originalita práce
-
-Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
-
-- Slúži na orientačnú kontrolu rizikových pasáží.
-- Upozorní na všeobecné, neodcitované alebo problematické časti.
-- Nenahrádza oficiálny školský systém originality.
-
-Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

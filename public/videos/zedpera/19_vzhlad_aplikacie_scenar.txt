@@ -1,9 +1,0 @@
-Svetlý a tmavý režim
-
-Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
-
-- V hornej časti aplikácie je prepínač vzhľadu.
-- Ikona slnka a mesiaca prepína svetlý a tmavý režim.
-- Tmavý režim je vhodný pri dlhšej práci večer.
-
-Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

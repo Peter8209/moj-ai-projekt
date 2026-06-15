@@ -1,9 +1,0 @@
-Hlavné menu Zedpera
-
-Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
-
-- Ľavé menu je hlavný rozcestník aplikácie.
-- Otvorte Profil, AI Chat, Moje práce, Zdroje, Balíčky a Históriu.
-- Menu vás vždy vráti na hlavný prehľad aplikácie.
-
-Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

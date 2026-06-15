@@ -1,9 +1,0 @@
-Plánovanie
-
-Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
-
-- Plánovanie rozdelí písanie práce na menšie úlohy.
-- Zadajte termín odovzdania a rozsah práce.
-- AI pripraví harmonogram kapitol, konzultácií a úloh.
-
-Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

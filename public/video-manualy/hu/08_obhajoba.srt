@@ -1,4 +1,0 @@
-1
-00:00:00,000 --> 00:01:30,000
-Zedpera video utmutato: Vedes. Ez a Zedpera magyar nyelvu video utmutatoja. Bemutatjuk a fo munkafolyamatot, a rendszer hasznalatat es az adott funkcio gyakorlati alkalmazasat lepesrol lepesre. Tento navod je pripraveny v jazyku: HU. Najprv si pozorne pozrite obrazovku a nasledne vykonajte jednotlive kroky priamo v aplikacii. Po skonceni videa odporucame otvorit dashboard Zedpera a vyskusat si danu funkciu na vlastnom projekte.
-

@@ -1,4 +1,0 @@
-1
-00:00:00,000 --> 00:01:30,000
-Zedpera Videoanleitung: Qualitatsaudit. Dies ist eine deutsche Videoanleitung fur Zedpera. Wir zeigen den wichtigsten Ablauf, die Navigation im System und die praktische Nutzung dieser Funktion Schritt fur Schritt. Tento navod je pripraveny v jazyku: DE. Najprv si pozorne pozrite obrazovku a nasledne vykonajte jednotlive kroky priamo v aplikacii. Po skonceni videa odporucame otvorit dashboard Zedpera a vyskusat si danu funkciu na vlastnom projekte.
-

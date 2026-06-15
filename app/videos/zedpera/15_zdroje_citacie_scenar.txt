@@ -1,9 +1,0 @@
-Zdroje a citácie
-
-Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
-
-- Sekcia slúži na literatúru a citačné záznamy.
-- Ukladajte knihy, články, webové stránky a legislatívu.
-- Zdroje odporúčame dopĺňať priebežne počas písania.
-
-Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

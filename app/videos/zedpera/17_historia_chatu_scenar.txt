@@ -1,9 +1,0 @@
-História chatu
-
-Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
-
-- Uchováva staršie konverzácie a výstupy.
-- Môžete sa vrátiť ku kapitolám, osnovám alebo odpovediam AI.
-- Užitočné pri pokračovaní v rozpracovanej práci.
-
-Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

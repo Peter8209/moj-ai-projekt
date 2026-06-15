@@ -1,9 +1,0 @@
-AI Chat
-
-Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
-
-- AI Chat slúži na písanie a úpravu odborného textu.
-- Zadajte presnú požiadavku: úvod, kapitola, záver, kontrola alebo zhrnutie.
-- Čím presnejšie zadanie, tým kvalitnejší výstup.
-
-Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

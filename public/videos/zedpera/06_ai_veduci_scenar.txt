@@ -1,9 +1,0 @@
-AI vedúci
-
-Vitajte v Zedpere. V tomto krátkom návode si ukážeme túto časť aplikácie.
-
-- AI vedúci poskytuje spätnú väzbu k textu práce.
-- Kontroluje logiku, štruktúru, odborný štýl a nadväznosť.
-- Používajte ho priebežne počas písania.
-
-Hotovo. Teraz môžete túto funkciu používať pri tvorbe svojej práce.

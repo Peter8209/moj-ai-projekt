@@ -3299,31 +3299,29 @@ PRÍSNE PRAVIDLÁ PRE VÝSTUP:
 ${baseRules}
 
 ÚLOHA:
-Analyzuj priložené dáta, tabuľky alebo štatistické výstupy.
+Používateľ spustil modul Analýza dát.
 
-ZADANIE ANALÝZY:
+Dashboard nesmie počítať štatistiku. Dashboard iba riadi tok analýzy:
+1. nahratý súbor sa odošle do /api/analyze-data/prepare,
+2. prepare endpoint vytvorí prepared raw data,
+3. prepared súbor sa odošle do /api/analyze-data,
+4. štatistiku vypočíta backend cez analysisStats.ts,
+5. výsledok sa zobrazí v AnalysisResultsModal.
+
+ZADANIE POUŽÍVATEĽA:
 ${input || 'Použi priložené dátové súbory, ak sú dostupné.'}
 
-POVINNÝ VÝSTUP:
-1. Popis dát
-2. Identifikované premenné
-3. Frekvenčná analýza
-4. Deskriptívna štatistika
-5. Korelačná analýza Pearson/Spearman, ak je vhodná podľa typu premenných
-6. T-testy alebo iné testy rozdielov, ak sú vhodné podľa typu premenných
-7. Odporúčané grafy
-8. Interpretácia výsledkov do praktickej časti práce
-9. Upozornenia na chýbajúce alebo nevhodné údaje
-
 PRAVIDLÁ:
-- Používaj slovenské názvy stĺpcov a štatistík.
-- Premenné uvádzaj podľa názvov zo súboru.
-- Pri deskriptívnej štatistike uvádzaj: N, chýbajúce hodnoty, M, medián, SD, minimum, maximum, suma, šikmosť a špicatosť.
-- Pri frekvenciách uvádzaj hodnotu, počet, percento, validné percento a kumulatívne percento.
-- Pri grafoch navrhni vhodný typ: stĺpcový graf, koláčový graf, histogram alebo boxplot.
-- Nevymýšľaj výsledky, ktoré nie sú v dátach dostupné.
+- Nevymýšľaj štatistické výsledky.
+- Nevytváraj fiktívne hodnoty, tabuľky ani grafy.
+- Výsledky frekvencií, deskriptívnej štatistiky, normality, reliability, korelácií a testov musia pochádzať z backendu.
+- Dáta sa najprv pripravujú v /api/analyze-data/prepare.
+- Analýza sa následne počíta v /api/analyze-data.
+- Výpočty patria do components/analysis/analysisStats.ts.
+- DashboardClient.tsx je iba orchestrátor toku analýzy.
 `.trim();
 }
+
 
     if (moduleKey  === 'planning') {
       return `
@@ -3455,50 +3453,29 @@ const runModule = async () => {
     const prompt = buildModulePrompt();
 
 if (activeModule === 'data') {
-  const promptText = userText || 'Analyzuj priložené dáta.';
-  const workLanguage = finalWorkLanguage || systemLanguage;
+  const dataFiles = attachedFiles.filter((item) => item.file instanceof File);
 
-  const originalFormData = new FormData();
-
-  originalFormData.append('prompt', promptText);
-  originalFormData.append('assignment', userText || '');
-  originalFormData.append('analysisGoal', userText || '');
-  originalFormData.append('dataDescription', userText || '');
-  originalFormData.append('module', activeModule);
-
-  originalFormData.append('language', workLanguage);
-  originalFormData.append('outputLanguage', workLanguage);
-  originalFormData.append('systemLanguage', systemLanguage);
-  originalFormData.append('interfaceLanguage', systemLanguage);
-  originalFormData.append('workLanguage', workLanguage);
-
-  originalFormData.append('profile', JSON.stringify(profileForApi || {}));
-  originalFormData.append('activeProfile', JSON.stringify(profileForApi || {}));
-  originalFormData.append('profileContext', buildProfileBlock(profileForApi));
-
-  if (profileForApi?.id) {
-    originalFormData.append('projectId', profileForApi.id);
+  if (!dataFiles.length) {
+    alert('Najprv nahraj Excel, CSV alebo TXT súbor s dátami.');
+    setIsLoading(false);
+    return;
   }
 
-  attachedFiles.forEach((item) => {
-    if (item.file instanceof File) {
-      originalFormData.append('file', item.file, item.name || item.file.name);
-      originalFormData.append('files', item.file, item.name || item.file.name);
-    }
-  });
+  const workLanguage =
+    finalWorkLanguage ||
+    profileForApi?.workLanguage ||
+    profileForApi?.language ||
+    systemLanguage;
 
-  if (!attachedFiles.length && userText) {
-    const textFile = createTextFileFromInput(userText);
-
-    originalFormData.append('file', textFile, textFile.name);
-    originalFormData.append('files', textFile, textFile.name);
-  }
+  const promptText =
+    prompt ||
+    userText ||
+    'Priprav raw dáta a vykonaj štatistickú analýzu.';
 
   /**
    * KROK 1:
-   * Najprv pripravíme súbor podľa vzoru.
-   * Endpoint /api/analyze-data/prepare vytvorí nový Excel:
-   *
+   * Dashboard iba pošle pôvodný súbor do prepare endpointu.
+   * Prepare endpoint vytvorí nový prepared Excel:
    * - DATA_RAW
    * - DATA_CLEAN
    * - VARIABLE_DICTIONARY
@@ -3506,9 +3483,38 @@ if (activeModule === 'data') {
    * - QUALITY_REPORT
    * - README
    */
+  const prepareFormData = new FormData();
+
+  prepareFormData.append('module', 'data');
+  prepareFormData.append('prompt', promptText);
+  prepareFormData.append('assignment', userText || '');
+  prepareFormData.append('analysisGoal', userText || '');
+  prepareFormData.append('dataDescription', userText || '');
+
+  prepareFormData.append('language', workLanguage);
+  prepareFormData.append('outputLanguage', workLanguage);
+  prepareFormData.append('systemLanguage', systemLanguage);
+  prepareFormData.append('interfaceLanguage', systemLanguage);
+  prepareFormData.append('workLanguage', workLanguage);
+
+  prepareFormData.append('profile', JSON.stringify(profileForApi || {}));
+  prepareFormData.append('activeProfile', JSON.stringify(profileForApi || {}));
+  prepareFormData.append('profileContext', buildProfileBlock(profileForApi));
+
+  if (profileForApi?.id) {
+    prepareFormData.append('projectId', profileForApi.id);
+  }
+
+  dataFiles.forEach((item) => {
+    if (item.file instanceof File) {
+      prepareFormData.append('file', item.file, item.name || item.file.name);
+      prepareFormData.append('files', item.file, item.name || item.file.name);
+    }
+  });
+
   const prepareResponse = await fetch('/api/analyze-data/prepare', {
     method: 'POST',
-    body: originalFormData,
+    body: prepareFormData,
   });
 
   if (!prepareResponse.ok) {
@@ -3521,7 +3527,7 @@ if (activeModule === 'data') {
     throw new Error(
       prepareResult?.error ||
         prepareResult?.message ||
-        'Príprava súboru podľa vzoru zlyhala.',
+        'Príprava raw dát zlyhala.',
     );
   }
 
@@ -3537,49 +3543,54 @@ if (activeModule === 'data') {
 
   if (!preparedFileBase64) {
     throw new Error(
-      'Príprava súboru prebehla, ale API nevrátilo pripravený Excel súbor.',
+      'Prepare endpoint nevrátil preparedFileBase64. Skontroluj app/api/analyze-data/prepare/route.ts.',
     );
   }
 
   /**
-   * Voliteľné:
-   * Ak máš v DashboardClient.tsx stav preparedDataFile,
-   * uložíme pripravený súbor, aby sa dal stiahnuť cez tlačidlo.
-   *
-   * Potrebuješ mať hore:
-   *
-   * const [preparedDataFile, setPreparedDataFile] = useState<{
-   *   fileName: string;
-   *   base64: string;
-   *   mimeType: string;
-   *   rows?: number;
-   *   columns?: number;
-   *   warnings?: string[];
-   * } | null>(null);
+   * Uloženie prepared súboru pre používateľa.
+   * Dashboard stále nič nepočíta, iba si drží pripravený súbor.
    */
-  if (typeof setPreparedDataFile === 'function') {
-    setPreparedDataFile({
+  setPreparedDataFile({
+    fileName: preparedFileName,
+    base64: preparedFileBase64,
+    mimeType: preparedMimeType,
+    rows:
+      typeof prepareResult?.rows === 'number'
+        ? prepareResult.rows
+        : undefined,
+    columns:
+      typeof prepareResult?.columns === 'number'
+        ? prepareResult.columns
+        : undefined,
+    sheets: Array.isArray(prepareResult?.sheets)
+      ? prepareResult.sheets
+      : [],
+    warnings: Array.isArray(prepareResult?.warnings)
+      ? prepareResult.warnings
+      : [],
+    qualityReport: Array.isArray(prepareResult?.qualityReport)
+      ? prepareResult.qualityReport
+      : [],
+  });
+
+  localStorage.setItem(
+    'zedpera_last_prepared_data',
+    JSON.stringify({
       fileName: preparedFileName,
-      base64: preparedFileBase64,
       mimeType: preparedMimeType,
-      rows:
-        typeof prepareResult?.rows === 'number'
-          ? prepareResult.rows
-          : undefined,
-      columns:
-        typeof prepareResult?.columns === 'number'
-          ? prepareResult.columns
-          : undefined,
-      warnings: Array.isArray(prepareResult?.warnings)
-        ? prepareResult.warnings
-        : [],
-    });
-  }
+      rows: prepareResult?.rows || 0,
+      columns: prepareResult?.columns || 0,
+      sheets: prepareResult?.sheets || [],
+      warnings: prepareResult?.warnings || [],
+      qualityReport: prepareResult?.qualityReport || [],
+    }),
+  );
 
   /**
    * KROK 2:
-   * Z Base64 vytvoríme späť File objekt.
-   * Tento File už predstavuje pripravený Excel podľa vzoru.
+   * Z preparedFileBase64 vytvoríme File objekt.
+   * Tento súbor pošleme do /api/analyze-data.
    */
   const preparedBlob = base64ToBlob(preparedFileBase64, preparedMimeType);
 
@@ -3589,74 +3600,64 @@ if (activeModule === 'data') {
 
   /**
    * KROK 3:
-   * Až teraz posielame pripravený Excel do štatistiky.
-   * Dôležité: posielame sheetName = DATA_CLEAN.
+   * Dashboard pošle prepared Excel do hlavnej analyze route.
+   * Dôležité: route má čítať hárok DATA_CLEAN.
    */
-  const analysisFormData = new FormData();
+  const analyzeFormData = new FormData();
 
-  analysisFormData.append('prompt', promptText);
-  analysisFormData.append('assignment', userText || '');
-  analysisFormData.append('analysisGoal', userText || '');
-  analysisFormData.append('dataDescription', userText || '');
-  analysisFormData.append('module', activeModule);
+  analyzeFormData.append('module', 'data');
+  analyzeFormData.append('prompt', promptText);
+  analyzeFormData.append('assignment', userText || '');
+  analyzeFormData.append('analysisGoal', userText || '');
+  analyzeFormData.append('dataDescription', userText || '');
 
-  analysisFormData.append('language', workLanguage);
-  analysisFormData.append('outputLanguage', workLanguage);
-  analysisFormData.append('systemLanguage', systemLanguage);
-  analysisFormData.append('interfaceLanguage', systemLanguage);
-  analysisFormData.append('workLanguage', workLanguage);
+  analyzeFormData.append('language', workLanguage);
+  analyzeFormData.append('outputLanguage', workLanguage);
+  analyzeFormData.append('systemLanguage', systemLanguage);
+  analyzeFormData.append('interfaceLanguage', systemLanguage);
+  analyzeFormData.append('workLanguage', workLanguage);
 
-  analysisFormData.append('profile', JSON.stringify(profileForApi || {}));
-  analysisFormData.append('activeProfile', JSON.stringify(profileForApi || {}));
-  analysisFormData.append('profileContext', buildProfileBlock(profileForApi));
+  analyzeFormData.append('profile', JSON.stringify(profileForApi || {}));
+  analyzeFormData.append('activeProfile', JSON.stringify(profileForApi || {}));
+  analyzeFormData.append('profileContext', buildProfileBlock(profileForApi));
 
-  analysisFormData.append('source', 'prepared');
-  analysisFormData.append('sheetName', 'DATA_CLEAN');
-  analysisFormData.append('preparedFileName', preparedFileName);
-  analysisFormData.append('preparedRows', String(prepareResult?.rows || 0));
-  analysisFormData.append('preparedColumns', String(prepareResult?.columns || 0));
-  analysisFormData.append(
-    'prepareQualityReport',
-    JSON.stringify(prepareResult?.qualityReport || []),
-  );
-  analysisFormData.append(
+  if (profileForApi?.id) {
+    analyzeFormData.append('projectId', profileForApi.id);
+  }
+
+  analyzeFormData.append('source', 'prepared');
+  analyzeFormData.append('sheetName', 'DATA_CLEAN');
+  analyzeFormData.append('preparedFileName', preparedFileName);
+  analyzeFormData.append('preparedRows', String(prepareResult?.rows || 0));
+  analyzeFormData.append('preparedColumns', String(prepareResult?.columns || 0));
+  analyzeFormData.append(
     'prepareWarnings',
     JSON.stringify(prepareResult?.warnings || []),
   );
+  analyzeFormData.append(
+    'prepareQualityReport',
+    JSON.stringify(prepareResult?.qualityReport || []),
+  );
 
-  if (profileForApi?.id) {
-    analysisFormData.append('projectId', profileForApi.id);
-  }
+  analyzeFormData.append('file', preparedFile, preparedFile.name);
+  analyzeFormData.append('files', preparedFile, preparedFile.name);
 
-  analysisFormData.append('file', preparedFile, preparedFile.name);
-  analysisFormData.append('files', preparedFile, preparedFile.name);
-
-  let response = await fetch('/api/analyze-data', {
+  const analyzeResponse = await fetch('/api/analyze-data', {
     method: 'POST',
-    body: analysisFormData,
+    body: analyzeFormData,
   });
 
-  /**
-   * Fallback:
-   * Ak by si neskôr používal inú API route, tu môže zostať poistka.
-   * Momentálne fallback smeruje späť na /api/analyze-data.
-   */
-  if (response.status === 404) {
-    response = await fetch('/api/analyze-data', {
-      method: 'POST',
-      body: analysisFormData,
-    });
+  if (!analyzeResponse.ok) {
+    throw new Error(await readApiErrorResponse(analyzeResponse));
   }
 
-  if (!response.ok) {
-    throw new Error(await readApiErrorResponse(response));
-  }
-
-  const data = (await response.json()) as ApiAnalysisResponse;
+  const data = (await analyzeResponse.json()) as ApiAnalysisResponse;
 
   if (data?.ok === false) {
     throw new Error(
-      data?.error || data?.message || 'Analýza dát zlyhala.',
+      data?.error ||
+        data?.message ||
+        'Analýza pripravených dát zlyhala.',
     );
   }
 
@@ -3689,7 +3690,7 @@ if (activeModule === 'data') {
     localStorage.setItem('latest_generated_work_text', outputText);
     localStorage.setItem('last_ai_output', outputText);
   } catch {
-    // localStorage nemusí byť dostupný alebo môže byť plný
+    // localStorage nemusí byť dostupný
   }
 
   await saveHistoryItem({
@@ -3710,7 +3711,7 @@ if (activeModule === 'data') {
       },
       profileTitle: profileForApi?.title || '',
       profileId: profileForApi?.id || null,
-      attachedFiles: attachedFiles.map((file) => ({
+      attachedFiles: dataFiles.map((file) => ({
         name: file.name,
         size: file.size,
         type: file.type,
@@ -3722,6 +3723,7 @@ if (activeModule === 'data') {
     resultRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, 150);
 
+  setIsLoading(false);
   return;
 }
 
@@ -4124,14 +4126,16 @@ const downloadAnalysisExport = async (format: 'word' | 'pdf' | 'xlsx') => {
   }
 
   try {
-    const response = await fetch('/api/analyze-data/export', {
+    const response = await fetch('/api/analyze-data', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        format,
+        action: 'export',
+        format: format === 'xlsx' ? 'excel' : format,
         title: analysisResult.title || 'Výsledky analýzy dát',
+        exportMode: 'jasp',
         result: analysisResult,
       }),
     });
@@ -4146,9 +4150,15 @@ const downloadAnalysisExport = async (format: 'word' | 'pdf' | 'xlsx') => {
     const extension =
       format === 'word' ? 'doc' : format === 'pdf' ? 'pdf' : 'xlsx';
 
-    const fileName = `vysledky-analyzy-dat.${extension}`;
+    const mimeType =
+      format === 'word'
+        ? 'application/msword'
+        : format === 'pdf'
+          ? 'application/pdf'
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-    const url = URL.createObjectURL(blob);
+    const fileName = `vysledky-analyzy-dat.${extension}`;
+    const url = URL.createObjectURL(new Blob([blob], { type: mimeType }));
     const link = document.createElement('a');
 
     link.href = url;
@@ -4158,17 +4168,33 @@ const downloadAnalysisExport = async (format: 'word' | 'pdf' | 'xlsx') => {
     link.click();
     link.remove();
 
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => {
+      URL.revokeObjectURL(url);
+    }, 1000);
   } catch (error) {
-    console.error('EXPORT_ANALYSIS_ERROR:', error);
-
+    console.error(error);
     alert(
       error instanceof Error
         ? error.message
-        : 'Nepodarilo sa exportovať výsledky analýzy.',
+        : 'Export analýzy sa nepodarilo vytvoriť.',
     );
   }
 };
+
+function downloadPreparedDataFile(): void {
+  if (!preparedDataFile?.base64) {
+    alert('Prepared raw data ešte neboli vytvorené. Najprv spusti analýzu dát.');
+    return;
+  }
+
+  downloadBase64File(
+    preparedDataFile.base64,
+    preparedDataFile.fileName || 'prepared-data.xlsx',
+    preparedDataFile.mimeType ||
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  );
+}
+
 
 const downloadExcel = () => {
   const text = stripModuleExtraSections(canvasText || result || '', activeModule);
@@ -4762,33 +4788,24 @@ const downloadExcel = () => {
   </button>
 )}
 
-{activeModule === 'data' && (
-  <p className="mt-2 text-xs text-slate-400">
-    Môžete priložiť Excel, CSV, PDF, Word, TXT alebo výstupy z JASP/SPSS. Po spracovaní sa otvorí samostatné okno s výsledkami analýzy, tabuľkami, premennými, grafmi a odporúčanými testami.
-  </p>
-)}
+<button
+  type="button"
+  onClick={runModule}
+  disabled={isLoading}
+  className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+>
+  {isLoading ? 'Spracúvam...' : 'Spustiť analýzu'}
+</button>
 
-                <div className="mt-6 grid gap-3 pb-6 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center">
-                  {activeModule === 'supervisor' && (
+{preparedDataFile ? (
   <button
     type="button"
-    onClick={runModule}
-    disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+    onClick={downloadPreparedDataFile}
+    className="rounded-xl border border-emerald-400/60 bg-emerald-500/10 px-5 py-3 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/20"
   >
-{isLoading ? (
-  <>
-    <RefreshCcw className="h-4 w-4 animate-spin" />
-    Spracúvam...
-  </>
-) : (
-  <>
-    <Send className="h-4 w-4" />
-    {activeModuleButtonLabel}
-  </>
-)}
-</button>
-)}
+    Stiahnuť raw-data.xlsx
+  </button>
+) : null}
 
 {activeModule === 'quality' && (
   <button
@@ -4833,7 +4850,7 @@ const downloadExcel = () => {
 )}
 
 
-{activeModule === 'data' && (
+{activeModule === 'data' ? (
   <div className="mt-4 rounded-3xl border border-cyan-300/30 bg-gradient-to-br from-cyan-500/10 via-blue-500/10 to-violet-500/10 p-4 shadow-2xl shadow-cyan-950/30">
     <div className="mb-3 flex items-start gap-3">
       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-cyan-500/20 text-cyan-100 ring-1 ring-cyan-300/30">
@@ -4851,34 +4868,59 @@ const downloadExcel = () => {
       </div>
     </div>
 
-    <button
-      type="button"
-      onClick={runModule}
-      disabled={isLoading}
-      className="group relative inline-flex min-h-[58px] w-full items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-600 px-6 py-4 text-sm font-black text-white shadow-2xl shadow-cyan-950/50 ring-2 ring-cyan-300/50 transition hover:from-emerald-400 hover:via-cyan-400 hover:to-blue-500 hover:ring-cyan-200/80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-    >
-      <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.35),transparent_38%)] opacity-70 transition group-hover:opacity-100" />
+    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+      <button
+        type="button"
+        onClick={runModule}
+        disabled={isLoading}
+        className="group relative inline-flex min-h-[58px] w-full items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-600 px-6 py-4 text-sm font-black text-white shadow-2xl shadow-cyan-950/50 ring-2 ring-cyan-300/50 transition hover:from-emerald-400 hover:via-cyan-400 hover:to-blue-500 hover:ring-cyan-200/80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+      >
+        <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.35),transparent_38%)] opacity-70 transition group-hover:opacity-100" />
 
-      <span className="relative z-10 flex items-center justify-center gap-2">
-        {isLoading ? (
-          <>
-            <RefreshCcw className="h-5 w-5 animate-spin" />
-            Spracúvam analýzu dát...
-          </>
-        ) : (
-          <>
-            <Send className="h-5 w-5" />
-            Spustiť analýzu dát a otvoriť výsledky
-          </>
-        )}
-      </span>
-    </button>
+        <span className="relative z-10 flex items-center justify-center gap-2">
+          {isLoading ? (
+            <>
+              <RefreshCcw className="h-5 w-5 animate-spin" />
+              <span>Spracúvam analýzu dát...</span>
+            </>
+          ) : (
+            <>
+              <Send className="h-5 w-5" />
+              <span>Spustiť analýzu dát a otvoriť výsledky</span>
+            </>
+          )}
+        </span>
+      </button>
+
+      {preparedDataFile ? (
+        <button
+          type="button"
+          onClick={downloadPreparedDataFile}
+          className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-2xl border border-blue-300/30 bg-blue-500/10 px-4 py-3 text-sm font-black text-blue-100 transition hover:bg-blue-500/20 sm:w-auto"
+        >
+          <FileSpreadsheet className="h-4 w-4" />
+          <span>Stiahnuť prepared raw data</span>
+        </button>
+      ) : null}
+
+      {analysisResult ? (
+        <button
+          type="button"
+          onClick={() => setAnalysisModalOpen(true)}
+          className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15 sm:w-auto"
+        >
+          <BarChart3 className="h-4 w-4" />
+          <span>Otvoriť výsledky analýzy</span>
+        </button>
+      ) : null}
+    </div>
 
     <p className="mt-3 text-[11px] font-bold leading-5 text-cyan-100/90">
       Výsledok sa zobrazí v prehľadnom modálnom okne a následne ho bude možné exportovať do Word, PDF alebo Excel.
     </p>
   </div>
-)}
+) : null}
+
 
 {activeModule === 'planning' && (
   <button
@@ -5018,96 +5060,98 @@ const downloadExcel = () => {
                     Vyčistiť
                   </button>
 
-                 {activeModule === 'data' && analysisResult && (
+                 {activeModule === 'data' && analysisResult ? (
   <button
     type="button"
     onClick={() => setAnalysisModalOpen(true)}
-    className="inline-flex items-center gap-2 rounded-2xl border border-blue-400/30 bg-blue-500/10 px-4 py-3 text-sm font-black text-blue-100 hover:bg-blue-500/20"
+    className="inline-flex items-center gap-2 rounded-2xl border border-blue-400/30 bg-blue-500/10 px-4 py-3 text-sm font-black text-blue-100 transition hover:bg-blue-500/20"
   >
     <Search className="h-4 w-4" />
-    Otvoriť výsledky analýzy
+    <span>Otvoriť výsledky analýzy</span>
   </button>
-)}
+) : null}
+
+                            </div>
+          </section>
+        </main>
+
+        {canvasOpen ? (
+            <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">
+              <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
+                <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+                  <div>
+                    <h2 className="text-lg font-black text-white">Canvas</h2>
+                    <p className="text-sm font-semibold text-slate-400">
+                      Upravte alebo skopírujte výsledný text.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setCanvasOpen(false)}
+                    className="rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-white transition hover:bg-white/[0.12]"
+                    aria-label="Zavrieť canvas"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <textarea
+                  value={canvasText}
+                  onChange={(event) => setCanvasText(event.target.value)}
+                  className="min-h-0 flex-1 resize-none border-0 bg-[#050814] p-6 text-sm font-semibold leading-7 text-white outline-none"
+                />
+
+                <div className="flex flex-wrap items-center justify-end gap-3 border-t border-white/10 px-6 py-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(canvasText || '');
+                    }}
+                    className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+                  >
+                    Kopírovať
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={downloadPdf}
+                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+                  >
+                    <FileDown className="h-4 w-4" />
+                    <span>PDF</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={downloadDoc}
+                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+                  >
+                    <Download className="h-4 w-4" />
+                    <span>Word</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCanvasOpen(false)}
+                    className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white transition hover:bg-violet-500"
+                  >
+                    Zavrieť
+                  </button>
                 </div>
               </div>
-</section>
-</main>
+            </div>
+          ) : null}
 
-{canvasOpen && (
-  <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">
-    <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
-      <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
-        <div>
-          <h2 className="text-lg font-black text-white">Canvas</h2>
-          <p className="text-sm font-semibold text-slate-400">
-            Upravte alebo skopírujte výsledný text.
-          </p>
-        </div>
+          <AnalysisResultsModal
+            open={analysisModalOpen}
+            result={analysisResult}
+            onClose={() => setAnalysisModalOpen(false)}
+          />
+        </>
+      );
+    }
 
-        <button
-          type="button"
-          onClick={() => setCanvasOpen(false)}
-          className="rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-white transition hover:bg-white/[0.12]"
-        >
-          <X className="h-5 w-5" />
-        </button>
-      </div>
-
-      <textarea
-        value={canvasText}
-        onChange={(event) => setCanvasText(event.target.value)}
-        className="min-h-0 flex-1 resize-none border-0 bg-[#050814] p-6 text-sm font-semibold leading-7 text-white outline-none"
-      />
-
-      <div className="flex flex-wrap items-center justify-end gap-3 border-t border-white/10 px-6 py-4">
-        <button
-          type="button"
-          onClick={() => {
-            navigator.clipboard.writeText(canvasText || '');
-          }}
-          className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
-        >
-          Kopírovať
-        </button>
-
-        <button
-          type="button"
-          onClick={downloadPdf}
-          className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
-        >
-          <FileDown className="h-4 w-4" />
-          PDF
-        </button>
-
-        <button
-          type="button"
-          onClick={downloadDoc}
-          className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
-        >
-          <Download className="h-4 w-4" />
-          Word
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setCanvasOpen(false)}
-          className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white transition hover:bg-violet-500"
-        >
-          Zavrieť
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-
-<AnalysisResultsModal
-  open={analysisModalOpen}
-  result={analysisResult}
-  onClose={() => setAnalysisModalOpen(false)}
-/>
-</>
-);
-}
 
 // ================= COMPONENTS =================
 

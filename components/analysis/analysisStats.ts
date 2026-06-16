@@ -100,7 +100,7 @@ export interface StatisticalAnalysisOptions {
 
   /**
    * Ak true, systém automaticky hľadá skupinové premenné pre t-test/ANOVA.
-   * Predvolené: false, aby nevznikali tisíce testov pri dotazníkových položkách.
+   * Predvolené: true. Filter zároveň bráni tomu, aby sa dotazníkové položky použili ako skupinové premenné.
    */
   autoDetectGroupColumns?: boolean;
 }
@@ -202,6 +202,37 @@ export interface GroupTestResult {
   recommendation: string;
 }
 
+export interface ScaleScoreExportRow {
+  respondentIndex: number;
+  [scaleName: string]: RawValue;
+}
+
+export interface CorrelationMatrixRow {
+  variable: string;
+  [variableName: string]: RawValue;
+}
+
+export interface ChartDataPoint {
+  label: string;
+  value: number;
+  description?: string;
+  group?: string;
+}
+
+export interface AnalysisChartData {
+  frequencyBars: ChartDataPoint[];
+  meanBars: ChartDataPoint[];
+  reliabilityBars: ChartDataPoint[];
+  correlationBars: ChartDataPoint[];
+  normalityBars: ChartDataPoint[];
+}
+
+export interface AnalysisChartTable {
+  key: string;
+  title: string;
+  rows: Array<Record<string, RawValue>>;
+}
+
 export interface StatisticalAnalysisResult {
   meta: {
     totalRows: number;
@@ -241,6 +272,23 @@ export interface StatisticalAnalysisResult {
     recommendationNote: string;
   };
 
+  /** Definície škál a podškál použité pri výpočte. */
+  scaleDefinitions: ScaleDefinition[];
+  combinedScaleDefinitions: CombinedScaleDefinition[];
+
+  /** Excel-ready tabuľka: respondent × vypočítané skóre škály/subškály. */
+  scaleScoreRows: ScaleScoreExportRow[];
+
+  /** Korelačná matica pre odporúčanú metódu. */
+  correlationMatrix: CorrelationMatrixRow[];
+
+  /** Dáta pripravené pre grafy v UI a pre Excel export. */
+  chartData: AnalysisChartData;
+  chartTables: AnalysisChartTable[];
+
+  /** Aliasové polia pripravené pre staršie komponenty/exportéry. */
+  aliases: Record<string, unknown>;
+
   aiRecommendation: string[];
 }
 
@@ -255,7 +303,7 @@ export function runFullStatisticalAnalysis(
   const alpha = options.alpha ?? 0.05;
   const autoDetectScales = options.autoDetectScales !== false;
   const fallbackToNumericVariables = options.fallbackToNumericVariables !== false;
-  const autoDetectGroupColumns = options.autoDetectGroupColumns === true;
+  const autoDetectGroupColumns = options.autoDetectGroupColumns !== false;
 
   const cleanRows = normalizeRows(rows);
   const columns = getColumns(cleanRows);
@@ -436,6 +484,44 @@ export function runFullStatisticalAnalysis(
     autoDetectedScaleCount: autoScales.length,
   });
 
+  const correlationMatrix = buildCorrelationMatrix(
+    recommendedCorrelations.length > 0 ? recommendedCorrelations : spearman.length > 0 ? spearman : pearson,
+  );
+
+  const scaleScoreRows = buildScaleScoreRowsForExport(analysisScores, respondentCount);
+
+  const chartData = buildAnalysisChartData({
+    frequencies,
+    itemDescriptives,
+    scaleDescriptives,
+    normality,
+    reliability,
+    correlations: recommendedCorrelations.length > 0 ? recommendedCorrelations : spearman.length > 0 ? spearman : pearson,
+  });
+
+  const chartTables = buildAnalysisChartTables(chartData);
+
+  const aliases = buildAnalysisAliases({
+    frequencies,
+    itemDescriptives,
+    scaleScores: analysisScores,
+    scaleDescriptives,
+    normality,
+    reliability,
+    pearson,
+    spearman,
+    recommendedCorrelations,
+    correlationMatrix,
+    parametricGroupTests,
+    nonParametricGroupTests,
+    recommendedGroupTests,
+    chartData,
+    chartTables,
+    scaleDefinitions: mergedScales,
+    combinedScaleDefinitions: mergedCombinedScales,
+    scaleScoreRows,
+  });
+
   return {
     meta: {
       totalRows: cleanRows.length,
@@ -478,6 +564,14 @@ export function runFullStatisticalAnalysis(
         ? 'Pre premenné s približne normálnym rozdelením odporúčame parametrické testy: Independent t-test pri dvoch skupinách a ANOVA pri troch a viacerých skupinách.'
         : 'Ak normalita nie je potvrdená, odporúčame neparametrické testy: Mann-Whitney U pri dvoch skupinách a Kruskal-Wallis pri troch a viacerých skupinách.',
     },
+
+    scaleDefinitions: mergedScales,
+    combinedScaleDefinitions: mergedCombinedScales,
+    scaleScoreRows,
+    correlationMatrix,
+    chartData,
+    chartTables,
+    aliases,
 
     aiRecommendation,
   };
@@ -2156,6 +2250,340 @@ function buildAiRecommendation(input: {
   }
 
   return notes;
+}
+
+
+/* -------------------------------------------------------------------------- */
+/* EXPORTNÉ ALIASY, SKÓRE, MATICA A GRAFY                                     */
+/* -------------------------------------------------------------------------- */
+
+function buildScaleScoreRowsForExport(
+  scaleScores: ScaleScoreResult[],
+  respondentCount: number,
+): ScaleScoreExportRow[] {
+  const maxRows = Math.max(
+    respondentCount,
+    ...scaleScores.map((scale) => scale.scores.length),
+    0,
+  );
+
+  const rows: ScaleScoreExportRow[] = [];
+
+  for (let index = 0; index < maxRows; index += 1) {
+    const row: ScaleScoreExportRow = {
+      respondentIndex: index + 1,
+    };
+
+    for (const scale of scaleScores) {
+      row[scale.scaleName] = scale.scores[index] ?? null;
+    }
+
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function buildCorrelationMatrix(
+  correlations: CorrelationResult[],
+): CorrelationMatrixRow[] {
+  const variables = uniqueStrings(
+    correlations.flatMap((item) => [item.variableA, item.variableB]),
+  );
+
+  return variables.map((variable) => {
+    const row: CorrelationMatrixRow = { variable };
+
+    for (const otherVariable of variables) {
+      if (variable === otherVariable) {
+        row[otherVariable] = 1;
+        continue;
+      }
+
+      const found = correlations.find(
+        (item) =>
+          (item.variableA === variable && item.variableB === otherVariable) ||
+          (item.variableA === otherVariable && item.variableB === variable),
+      );
+
+      row[otherVariable] = found?.r ?? null;
+    }
+
+    return row;
+  });
+}
+
+function buildAnalysisChartData(input: {
+  frequencies: FrequencyAnalysisResult[];
+  itemDescriptives: DescriptiveStatisticsResult[];
+  scaleDescriptives: DescriptiveStatisticsResult[];
+  normality: NormalityResult[];
+  reliability: ReliabilityResult[];
+  correlations: CorrelationResult[];
+}): AnalysisChartData {
+  const frequencyBars = input.frequencies
+    .flatMap((frequency) =>
+      frequency.values.map((value) => ({
+        label: `${frequency.variable}: ${value.value}`,
+        value: value.count,
+        group: frequency.variable,
+        description: `${value.validPercent.toFixed(1)} % validných odpovedí`,
+      })),
+    )
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 50);
+
+  const preferredDescriptives = input.scaleDescriptives.length > 0
+    ? input.scaleDescriptives
+    : input.itemDescriptives;
+
+  const meanBars = preferredDescriptives
+    .filter((item) => isFiniteNumber(item.mean))
+    .map((item) => ({
+      label: item.variable,
+      value: item.mean ?? 0,
+      description: `N=${item.valid}, SD=${item.standardDeviation ?? '—'}`,
+    }))
+    .slice(0, 50);
+
+  const reliabilityBars = input.reliability
+    .filter((item) => isFiniteNumber(item.cronbachAlpha))
+    .map((item) => ({
+      label: item.scaleName,
+      value: item.cronbachAlpha === null ? 0 : round3(item.cronbachAlpha * 100),
+      description: `Cronbachovo alfa = ${item.cronbachAlpha}`,
+    }));
+
+  const correlationBars = input.correlations
+    .filter((item) => isFiniteNumber(item.r))
+    .map((item) => ({
+      label: `${item.variableA} × ${item.variableB}`,
+      value: item.r === null ? 0 : round3(Math.abs(item.r)),
+      description: `${item.method}, r=${item.r}, p=${item.pValueText ?? item.pValue ?? '—'}`,
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 50);
+
+  const normalityBars = input.normality
+    .filter((item) => isFiniteNumber(item.pValue))
+    .map((item) => ({
+      label: item.variable,
+      value: item.pValue === null ? 0 : item.pValue,
+      description: item.note,
+    }));
+
+  return {
+    frequencyBars,
+    meanBars,
+    reliabilityBars,
+    correlationBars,
+    normalityBars,
+  };
+}
+
+function buildAnalysisChartTables(chartData: AnalysisChartData): AnalysisChartTable[] {
+  return [
+    {
+      key: 'chart-frequency-bars',
+      title: 'Graf – frekvencie',
+      rows: chartData.frequencyBars.map(chartPointToRow),
+    },
+    {
+      key: 'chart-mean-bars',
+      title: 'Graf – priemery škál/položiek',
+      rows: chartData.meanBars.map(chartPointToRow),
+    },
+    {
+      key: 'chart-reliability-bars',
+      title: 'Graf – reliabilita',
+      rows: chartData.reliabilityBars.map(chartPointToRow),
+    },
+    {
+      key: 'chart-correlation-bars',
+      title: 'Graf – korelácie',
+      rows: chartData.correlationBars.map(chartPointToRow),
+    },
+    {
+      key: 'chart-normality-bars',
+      title: 'Graf – normalita',
+      rows: chartData.normalityBars.map(chartPointToRow),
+    },
+  ].filter((table) => table.rows.length > 0);
+}
+
+function chartPointToRow(point: ChartDataPoint): Record<string, RawValue> {
+  return {
+    label: point.label,
+    value: point.value,
+    group: point.group ?? null,
+    description: point.description ?? null,
+  };
+}
+
+function flattenFrequenciesForExport(
+  frequencies: FrequencyAnalysisResult[],
+): Array<Record<string, RawValue>> {
+  return frequencies.flatMap((frequency) => [
+    ...frequency.values.map((value) => ({
+      variable: frequency.variable,
+      valid: frequency.valid,
+      missing: frequency.missing,
+      total: frequency.total,
+      value: value.value,
+      count: value.count,
+      percent: value.percent,
+      validPercent: value.validPercent,
+      cumulativePercent: value.cumulativePercent,
+    })),
+    {
+      variable: frequency.variable,
+      valid: frequency.valid,
+      missing: frequency.missing,
+      total: frequency.total,
+      value: 'Missing',
+      count: frequency.missing,
+      percent: frequency.total > 0 ? round3((frequency.missing / frequency.total) * 100) : 0,
+      validPercent: null,
+      cumulativePercent: null,
+    },
+    {
+      variable: frequency.variable,
+      valid: frequency.valid,
+      missing: frequency.missing,
+      total: frequency.total,
+      value: 'Total',
+      count: frequency.total,
+      percent: 100,
+      validPercent: null,
+      cumulativePercent: null,
+    },
+  ]);
+}
+
+function scaleScoresToDefinitionRows(
+  scaleScores: ScaleScoreResult[],
+): Array<Record<string, RawValue>> {
+  return scaleScores.map((scale) => ({
+    scaleId: scale.scaleId,
+    scaleName: scale.scaleName,
+    itemsUsed: scale.itemsUsed.join(', '),
+    itemCount: scale.itemsUsed.length,
+    scoring: scale.scoring,
+    missingRows: scale.missingRows,
+  }));
+}
+
+function correlationsToRows(correlations: CorrelationResult[]): Array<Record<string, RawValue>> {
+  return correlations.map((item) => ({
+    variableA: item.variableA,
+    variableB: item.variableB,
+    method: item.method,
+    n: item.n,
+    r: item.r,
+    pValue: item.pValue,
+    pValueText: item.pValueText ?? null,
+    significance: item.significance,
+    fisherZ: item.fisherZ,
+    standardError: item.standardError,
+    interpretation: item.interpretation,
+  }));
+}
+
+function groupTestsToRows(groupTests: GroupTestResult[]): Array<Record<string, RawValue>> {
+  return groupTests.map((item) => ({
+    dependentVariable: item.dependentVariable,
+    groupVariable: item.groupVariable,
+    testType: item.testType,
+    groups: item.groups.join(' / '),
+    nTotal: item.nTotal,
+    statistic: item.statistic,
+    pValue: item.pValue,
+    pValueText: item.pValueText ?? null,
+    significance: item.significance,
+    recommendation: item.recommendation,
+  }));
+}
+
+function buildAnalysisAliases(input: {
+  frequencies: FrequencyAnalysisResult[];
+  itemDescriptives: DescriptiveStatisticsResult[];
+  scaleScores: ScaleScoreResult[];
+  scaleDescriptives: DescriptiveStatisticsResult[];
+  normality: NormalityResult[];
+  reliability: ReliabilityResult[];
+  pearson: CorrelationResult[];
+  spearman: CorrelationResult[];
+  recommendedCorrelations: CorrelationResult[];
+  correlationMatrix: CorrelationMatrixRow[];
+  parametricGroupTests: GroupTestResult[];
+  nonParametricGroupTests: GroupTestResult[];
+  recommendedGroupTests: GroupTestResult[];
+  chartData: AnalysisChartData;
+  chartTables: AnalysisChartTable[];
+  scaleDefinitions: ScaleDefinition[];
+  combinedScaleDefinitions: CombinedScaleDefinition[];
+  scaleScoreRows: ScaleScoreExportRow[];
+}): Record<string, unknown> {
+  const frequencyRows = flattenFrequenciesForExport(input.frequencies);
+  const pearsonRows = correlationsToRows(input.pearson);
+  const spearmanRows = correlationsToRows(input.spearman);
+  const recommendedCorrelationRows = correlationsToRows(input.recommendedCorrelations);
+  const parametricRows = groupTestsToRows(input.parametricGroupTests);
+  const nonParametricRows = groupTestsToRows(input.nonParametricGroupTests);
+  const recommendedGroupRows = groupTestsToRows(input.recommendedGroupTests);
+
+  return {
+    frequencies: frequencyRows,
+    frequencyTables: frequencyRows,
+    itemDescriptives: input.itemDescriptives,
+    descriptives: input.scaleDescriptives.length > 0 ? input.scaleDescriptives : input.itemDescriptives,
+    descriptiveStatistics: input.scaleDescriptives.length > 0 ? input.scaleDescriptives : input.itemDescriptives,
+    scaleDefinitions: input.scaleDefinitions,
+    subscaleDefinitions: input.combinedScaleDefinitions,
+    scaleScores: input.scaleScores,
+    scaleScoreRows: input.scaleScoreRows,
+    scaleSubscaleScores: input.scaleScoreRows,
+    scaleDescriptives: input.scaleDescriptives,
+    scaleSubscaleDescriptives: input.scaleDescriptives,
+    normality: input.normality,
+    reliability: input.reliability,
+    reliabilities: input.reliability,
+    cronbachAlpha: input.reliability,
+    pearsonCorrelations: pearsonRows,
+    spearmanCorrelations: spearmanRows,
+    recommendedCorrelations: recommendedCorrelationRows,
+    correlations: [...pearsonRows, ...spearmanRows],
+    correlationResults: [...pearsonRows, ...spearmanRows],
+    correlationMatrix: input.correlationMatrix,
+    parametricGroupTests: parametricRows,
+    nonParametricGroupTests: nonParametricRows,
+    recommendedGroupTests: recommendedGroupRows,
+    statisticalTests: [...parametricRows, ...nonParametricRows],
+    hypothesisTests: recommendedGroupRows.length > 0 ? recommendedGroupRows : [...parametricRows, ...nonParametricRows],
+    testResults: recommendedGroupRows.length > 0 ? recommendedGroupRows : [...parametricRows, ...nonParametricRows],
+    recommendedTests: recommendedGroupRows,
+    chartData: input.chartData,
+    chartTables: input.chartTables,
+    charts: input.chartTables,
+    recommendedCharts: input.chartTables.map((table) => ({
+      title: table.title,
+      type: table.key,
+      rows: table.rows.length,
+    })),
+  };
+}
+
+/**
+ * Pomocná funkcia pre route.ts: rozbalí výsledok do top-level polí,
+ * ktoré očakávajú staršie komponenty AnalysisResultsModal a AnalysisCharts.
+ */
+export function expandStatisticalAnalysisForApi(
+  analysis: StatisticalAnalysisResult,
+): Record<string, unknown> {
+  return {
+    statisticalAnalysis: analysis,
+    ...analysis.aliases,
+  };
 }
 
 /* -------------------------------------------------------------------------- */

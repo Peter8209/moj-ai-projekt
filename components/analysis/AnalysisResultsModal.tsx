@@ -755,11 +755,14 @@ function getResultArrays(result: AnalysisResult | null) {
   const itemDescriptives = getFirstArray(
     statistical.itemDescriptives,
     raw.itemDescriptives,
+    raw.item_descriptives,
   );
 
   const scaleDescriptives = getFirstArray(
     statistical.scaleDescriptives,
     raw.scaleDescriptives,
+    raw.scaleSubscaleDescriptives,
+    raw.scale_subscale_descriptives,
     raw.scale_descriptives,
     raw.scalesDescriptiveStatistics,
     raw.descriptives,
@@ -771,6 +774,8 @@ function getResultArrays(result: AnalysisResult | null) {
   const scaleScores = getFirstArray(
     statistical.scaleScores,
     raw.scaleScores,
+    raw.scaleSubscaleScores,
+    raw.scale_subscale_scores,
     raw.scales,
   );
 
@@ -804,6 +809,7 @@ function getResultArrays(result: AnalysisResult | null) {
     statistical.reliability,
     raw.reliabilities,
     raw.reliability,
+    raw.reliabilityDetail,
     raw.cronbachAlpha,
   );
 
@@ -2148,6 +2154,427 @@ function toExcelCellValue(value: unknown): unknown {
   return String(value);
 }
 
+
+function toCleanArrayBuffer(value: unknown): ArrayBuffer {
+  if (value instanceof ArrayBuffer) {
+    return value.slice(0);
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView;
+    return view.buffer.slice(
+      view.byteOffset,
+      view.byteOffset + view.byteLength,
+    ) as ArrayBuffer;
+  }
+
+  if (Array.isArray(value)) {
+    return new Uint8Array(value as number[]).buffer.slice(0) as ArrayBuffer;
+  }
+
+  const text = String(value ?? '');
+  const bytes = new TextEncoder().encode(text);
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+}
+
+function createValidXlsxBlob(output: unknown): Blob {
+  return new Blob([toCleanArrayBuffer(output)], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+}
+
+
+type PureXlsxSheet = {
+  sheetName: string;
+  rows: unknown[][];
+};
+
+function xmlEscape(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ' ');
+}
+
+function pureColumnName(index: number): string {
+  let column = index + 1;
+  let letters = '';
+
+  while (column > 0) {
+    const mod = (column - 1) % 26;
+    letters = String.fromCharCode(65 + mod) + letters;
+    column = Math.floor((column - mod) / 26);
+  }
+
+  return letters;
+}
+
+function normalizePureXlsxRows(rows: unknown[][]): unknown[][] {
+  const safeRows = Array.isArray(rows) && rows.length > 0 ? rows : [['Žiadne dáta']];
+  const normalizedRows = safeRows
+    .map((row) => (Array.isArray(row) ? row : [row]))
+    .filter((row) => row.some((cell) => cell !== null && cell !== undefined && String(cell).trim() !== ''));
+
+  return normalizedRows.length > 0 ? normalizedRows : [['Žiadne dáta']];
+}
+
+function pureWorksheetXml(rows: unknown[][]): string {
+  const normalizedRows = normalizePureXlsxRows(rows);
+  const maxColumnCount = Math.max(1, ...normalizedRows.map((row) => row.length));
+  const dimension = `A1:${pureColumnName(maxColumnCount - 1)}${normalizedRows.length}`;
+
+  const sheetData = normalizedRows
+    .map((row, rowIndex) => {
+      const rowNumber = rowIndex + 1;
+      const cells = Array.from({ length: maxColumnCount }, (_, columnIndex) => {
+        const value = row[columnIndex];
+        const cellReference = `${pureColumnName(columnIndex)}${rowNumber}`;
+
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          return `<c r="${cellReference}"><v>${value}</v></c>`;
+        }
+
+        if (typeof value === 'boolean') {
+          return `<c r="${cellReference}" t="b"><v>${value ? 1 : 0}</v></c>`;
+        }
+
+        const textValue = valueToText(value);
+        const finalText = textValue === '—' ? '' : textValue;
+
+        return `<c r="${cellReference}" t="inlineStr"><is><t>${xmlEscape(finalText)}</t></is></c>`;
+      }).join('');
+
+      return `<row r="${rowNumber}">${cells}</row>`;
+    })
+    .join('');
+
+  const cols = Array.from({ length: maxColumnCount }, (_, index) => {
+    const width = Math.min(
+      60,
+      Math.max(
+        12,
+        ...normalizedRows.slice(0, 200).map((row) => String(valueToText(row[index] ?? '')).length + 2),
+      ),
+    );
+
+    return `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`;
+  }).join('');
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <dimension ref="${dimension}"/>
+  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <cols>${cols}</cols>
+  <sheetData>${sheetData}</sheetData>
+  <autoFilter ref="${dimension}"/>
+</worksheet>`;
+}
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+
+  for (let index = 0; index < bytes.length; index += 1) {
+    crc ^= bytes[index];
+
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function writeUInt16LE(target: Uint8Array, offset: number, value: number): void {
+  target[offset] = value & 0xff;
+  target[offset + 1] = (value >>> 8) & 0xff;
+}
+
+function writeUInt32LE(target: Uint8Array, offset: number, value: number): void {
+  target[offset] = value & 0xff;
+  target[offset + 1] = (value >>> 8) & 0xff;
+  target[offset + 2] = (value >>> 16) & 0xff;
+  target[offset + 3] = (value >>> 24) & 0xff;
+}
+
+function concatUint8Arrays(parts: Uint8Array[]): Uint8Array {
+  const totalLength = parts.reduce((sum, part) => sum + part.length, 0);
+  const output = new Uint8Array(totalLength);
+  let offset = 0;
+
+  parts.forEach((part) => {
+    output.set(part, offset);
+    offset += part.length;
+  });
+
+  return output;
+}
+
+function createZipBlob(files: Array<{ path: string; content: string }>): Blob {
+  const encoder = new TextEncoder();
+  const localParts: Uint8Array[] = [];
+  const centralParts: Uint8Array[] = [];
+  let offset = 0;
+
+  files.forEach((file) => {
+    const nameBytes = encoder.encode(file.path);
+    const contentBytes = encoder.encode(file.content);
+    const crc = crc32(contentBytes);
+    const localHeader = new Uint8Array(30 + nameBytes.length);
+
+    writeUInt32LE(localHeader, 0, 0x04034b50);
+    writeUInt16LE(localHeader, 4, 20);
+    writeUInt16LE(localHeader, 6, 0);
+    writeUInt16LE(localHeader, 8, 0);
+    writeUInt16LE(localHeader, 10, 0);
+    writeUInt16LE(localHeader, 12, 0);
+    writeUInt32LE(localHeader, 14, crc);
+    writeUInt32LE(localHeader, 18, contentBytes.length);
+    writeUInt32LE(localHeader, 22, contentBytes.length);
+    writeUInt16LE(localHeader, 26, nameBytes.length);
+    writeUInt16LE(localHeader, 28, 0);
+    localHeader.set(nameBytes, 30);
+
+    localParts.push(localHeader, contentBytes);
+
+    const centralHeader = new Uint8Array(46 + nameBytes.length);
+    writeUInt32LE(centralHeader, 0, 0x02014b50);
+    writeUInt16LE(centralHeader, 4, 20);
+    writeUInt16LE(centralHeader, 6, 20);
+    writeUInt16LE(centralHeader, 8, 0);
+    writeUInt16LE(centralHeader, 10, 0);
+    writeUInt16LE(centralHeader, 12, 0);
+    writeUInt16LE(centralHeader, 14, 0);
+    writeUInt32LE(centralHeader, 16, crc);
+    writeUInt32LE(centralHeader, 20, contentBytes.length);
+    writeUInt32LE(centralHeader, 24, contentBytes.length);
+    writeUInt16LE(centralHeader, 28, nameBytes.length);
+    writeUInt16LE(centralHeader, 30, 0);
+    writeUInt16LE(centralHeader, 32, 0);
+    writeUInt16LE(centralHeader, 34, 0);
+    writeUInt16LE(centralHeader, 36, 0);
+    writeUInt32LE(centralHeader, 38, 0);
+    writeUInt32LE(centralHeader, 42, offset);
+    centralHeader.set(nameBytes, 46);
+
+    centralParts.push(centralHeader);
+    offset += localHeader.length + contentBytes.length;
+  });
+
+  const centralDirectory = concatUint8Arrays(centralParts);
+  const endRecord = new Uint8Array(22);
+
+  writeUInt32LE(endRecord, 0, 0x06054b50);
+  writeUInt16LE(endRecord, 4, 0);
+  writeUInt16LE(endRecord, 6, 0);
+  writeUInt16LE(endRecord, 8, files.length);
+  writeUInt16LE(endRecord, 10, files.length);
+  writeUInt32LE(endRecord, 12, centralDirectory.length);
+  writeUInt32LE(endRecord, 16, offset);
+  writeUInt16LE(endRecord, 20, 0);
+
+  const zipBytes = concatUint8Arrays([...localParts, centralDirectory, endRecord]);
+
+  const arrayBuffer = zipBytes.buffer.slice(
+    zipBytes.byteOffset,
+    zipBytes.byteOffset + zipBytes.byteLength,
+  ) as ArrayBuffer;
+
+  return new Blob([arrayBuffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+}
+
+function createPureXlsxBlob(sheets: PureXlsxSheet[]): Blob {
+  const usedNames = new Set<string>();
+  const safeSheets = sheets.length > 0 ? sheets : [{ sheetName: 'Export', rows: [['Žiadne dáta']] }];
+  const normalizedSheets = safeSheets.map((sheet, index) => ({
+    sheetName: ensureUniqueSheetName(sheet.sheetName || `Hárok ${index + 1}`, usedNames),
+    rows: normalizePureXlsxRows(sheet.rows),
+  }));
+
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+  ${normalizedSheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('\n')}
+</Types>`;
+
+  const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>`;
+
+  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    ${normalizedSheets.map((sheet, index) => `<sheet name="${xmlEscape(sheet.sheetName)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join('\n')}
+  </sheets>
+</workbook>`;
+
+  const workbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  ${normalizedSheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join('\n')}
+  <Relationship Id="rId${normalizedSheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>
+  <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+
+  const now = new Date().toISOString();
+  const coreXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:creator>ZEDPERA</dc:creator>
+  <cp:lastModifiedBy>ZEDPERA</cp:lastModifiedBy>
+  <dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created>
+  <dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified>
+</cp:coreProperties>`;
+
+  const appXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>ZEDPERA</Application>
+  <DocSecurity>0</DocSecurity>
+  <ScaleCrop>false</ScaleCrop>
+  <HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>${normalizedSheets.length}</vt:i4></vt:variant></vt:vector></HeadingPairs>
+  <TitlesOfParts><vt:vector size="${normalizedSheets.length}" baseType="lpstr">${normalizedSheets.map((sheet) => `<vt:lpstr>${xmlEscape(sheet.sheetName)}</vt:lpstr>`).join('')}</vt:vector></TitlesOfParts>
+</Properties>`;
+
+  const files = [
+    { path: '[Content_Types].xml', content: contentTypes },
+    { path: '_rels/.rels', content: rootRels },
+    { path: 'docProps/core.xml', content: coreXml },
+    { path: 'docProps/app.xml', content: appXml },
+    { path: 'xl/workbook.xml', content: workbookXml },
+    { path: 'xl/_rels/workbook.xml.rels', content: workbookRels },
+    { path: 'xl/styles.xml', content: stylesXml },
+    ...normalizedSheets.map((sheet, index) => ({
+      path: `xl/worksheets/sheet${index + 1}.xml`,
+      content: pureWorksheetXml(sheet.rows),
+    })),
+  ];
+
+  return createZipBlob(files);
+}
+
+function createPureAnalysisExportBlob(params: {
+  exportPayload: any;
+  tableSections: TableSection[];
+  arrays: ReturnType<typeof getResultArrays>;
+  professionalInterpretation: ReturnType<typeof getProfessionalInterpretation>;
+}): Blob {
+  const payload = params.exportPayload || {};
+  const preparedDataset = payload.preparedDataset || params.arrays.preparedDataset || {};
+  const chartData = normalizePayloadChartData(payload, params.arrays);
+  const contingency = buildContingencyExport({ arrays: params.arrays, payload });
+  const usedNames = new Set<string>();
+  const sheets: PureXlsxSheet[] = [];
+  const registry: Array<{ sheetName: string; title: string; description: string; rowCount: number }> = [];
+
+  const addSheet = (sheetName: string, title: string, description: string, rows: unknown[][]) => {
+    const realName = ensureUniqueSheetName(sheetName, usedNames);
+    const safeRows = normalizePureXlsxRows(rows);
+    sheets.push({ sheetName: realName, rows: safeRows });
+    registry.push({ sheetName: realName, title, description, rowCount: Math.max(0, safeRows.length - 1) });
+  };
+
+  addSheet('01 Súhrn', 'Súhrn analýzy', 'Základné informácie o exporte a spracovaní dát.', aoaFromRowsForXlsx(createIntroRows(payload, params.professionalInterpretation), 'Žiadne súhrnné údaje'));
+  addSheet('02 raw-data', 'Raw dáta', 'Pripravený dátový súbor použitý na výpočty.', aoaFromPreparedSheetForXlsx(preparedDataset.rawDataSheet, params.arrays.preparedRawRows, 'Žiadne raw dáta'));
+  addSheet('03 variable-map', 'Mapa premenných', 'Rozpoznané premenné a analytické roly.', aoaFromPreparedSheetForXlsx(preparedDataset.variableMapSheet, params.arrays.variables, 'Žiadna mapa premenných'));
+  addSheet('04 data-quality', 'Kvalita dát', 'Kontrola kvality dát.', aoaFromPreparedSheetForXlsx(preparedDataset.dataQualitySheet, params.arrays.preparedDataQualityRows, 'Žiadne údaje o kvalite dát'));
+
+  [
+    { sheetName: '05 Premenné', title: 'Premenné', description: 'Kompletný zoznam premenných.', rows: params.arrays.variables },
+    { sheetName: '06 Frekvencie JASP', title: 'Frekvenčné tabuľky JASP', description: 'Početnosti a percentá.', rows: params.arrays.frequencyRows.length ? params.arrays.frequencyRows : params.arrays.frequencies },
+    { sheetName: '07 Deskriptíva', title: 'Deskriptívna štatistika', description: 'Deskriptívne výsledky.', rows: params.arrays.scaleDescriptives.length ? params.arrays.scaleDescriptives : payload.descriptives || payload.descriptiveStatistics || [] },
+    { sheetName: '08 Položky', title: 'Deskriptívna štatistika položiek', description: 'Deskriptívna štatistika položiek.', rows: params.arrays.itemDescriptives },
+    { sheetName: '09 Škály podškály', title: 'Škály a podškály', description: 'Definícia škál a subškál.', rows: [...safeArray(preparedDataset.scaleDefinitions), ...safeArray(preparedDataset.subscaleDefinitions)] },
+    { sheetName: '10 Skóre škál', title: 'Skóre škál', description: 'Vypočítané skóre škál.', rows: params.arrays.scaleScores },
+    { sheetName: '11 Normalita', title: 'Normalita dát', description: 'Normalita dát.', rows: params.arrays.normality },
+    { sheetName: '12 Reliabilita', title: 'Reliabilita – Cronbach alfa', description: 'Cronbachova alfa.', rows: params.arrays.reliability },
+    { sheetName: '13 Pearson', title: 'Pearsonove korelácie', description: 'Pearsonove korelácie.', rows: params.arrays.pearsonCorrelations },
+    { sheetName: '14 Spearman', title: 'Spearmanove korelácie', description: 'Spearmanove korelácie.', rows: params.arrays.spearmanCorrelations },
+    { sheetName: '15 Korelácie', title: 'Korelačná analýza – súhrn', description: 'Súhrnná korelačná tabuľka.', rows: params.arrays.correlations },
+    { sheetName: '16 Param testy', title: 'Parametrické testy', description: 't-testy a ANOVA.', rows: params.arrays.parametricGroupTests.length ? params.arrays.parametricGroupTests : payload.anovaTests || payload.tTests || [] },
+    { sheetName: '17 Neparam testy', title: 'Neparametrické testy', description: 'Mann-Whitney U a Kruskal-Wallis.', rows: params.arrays.nonParametricGroupTests.length ? params.arrays.nonParametricGroupTests : payload.mannWhitneyTests || payload.kruskalWallisTests || [] },
+    { sheetName: '18 Kontingencne tab', title: 'Kontingenčné tabuľky', description: 'Count, Row %, Column % a Total %.', rows: contingency.tables },
+    { sheetName: '19 Chi-square', title: 'Chí-kvadrát testy', description: 'Súhrn chí-kvadrát testov.', rows: contingency.chiSquare },
+    { sheetName: '20 Odpor testy', title: 'Odporúčané testy', description: 'Odporúčané štatistické testy.', rows: params.arrays.recommendedTests },
+    { sheetName: '21 Odpor grafy', title: 'Odporúčané grafy', description: 'Odporúčané grafy.', rows: params.arrays.recommendedCharts },
+    { sheetName: '22 Graf frekvencie', title: 'Graf frekvencií – dátová tabuľka', description: 'Dátový podklad pre graf frekvencií.', rows: chartData.frequencyChartRows || [] },
+    { sheetName: '23 Graf priemery', title: 'Graf priemerov – dátová tabuľka', description: 'Dátový podklad pre graf priemerov škál.', rows: chartData.scaleMeanChartRows || [] },
+    { sheetName: '24 Graf reliabilita', title: 'Graf reliability – dátová tabuľka', description: 'Dátový podklad pre graf Cronbachovej alfy.', rows: chartData.reliabilityChartRows || [] },
+    { sheetName: '25 Graf korelacie', title: 'Graf korelácií – dátová tabuľka', description: 'Dátový podklad pre graf korelácií.', rows: chartData.correlationChartRows || [] },
+  ].forEach((table) => addSheet(table.sheetName, table.title, table.description, aoaFromRowsForXlsx(table.rows, 'Žiadne dáta')));
+
+  safeArray<any>(payload.exportTables).forEach((table, index) => {
+    addSheet(`${String(index + 26).padStart(2, '0')} ${table.sheetName || table.title || 'Tabuľka'}`, table.title || `Tabuľka ${index + 1}`, table.description || 'Doplnková exportovaná tabuľka.', aoaFromRowsForXlsx(table.rows || [], 'Žiadne dáta'));
+  });
+
+  const navigationRows: unknown[][] = [
+    ['ZEDPERA – profesionálny export výsledkov analýzy dát'],
+    [params.professionalInterpretation.title || 'Výsledky analýzy dát'],
+    ['Poznámka', 'Tento XLSX bol vytvorený interným exportérom bez závislosti od balíkov exceljs/xlsx.'],
+    [],
+    ['Poradie', 'Hárok', 'Obsah', 'Počet riadkov'],
+    ...registry.map((sheet, index) => [index + 1, sheet.sheetName, `${sheet.title} – ${sheet.description}`, sheet.rowCount]),
+  ];
+
+  return createPureXlsxBlob([{ sheetName: '00 Úvod navigácia', rows: navigationRows }, ...sheets]);
+}
+
+function createPureRawDataBlob(result: AnalysisResult | null, arrays: ReturnType<typeof getResultArrays>): Blob {
+  const raw = (result || {}) as any;
+  const preparedDataset = raw.preparedDataset || arrays.preparedDataset || {};
+
+  return createPureXlsxBlob([
+    { sheetName: 'raw-data', rows: aoaFromPreparedSheetForXlsx(preparedDataset.rawDataSheet, arrays.preparedRawRows, 'Žiadne raw dáta') },
+    { sheetName: 'variable-map', rows: aoaFromPreparedSheetForXlsx(preparedDataset.variableMapSheet, arrays.variables, 'Žiadna mapa premenných') },
+    { sheetName: 'data-quality', rows: aoaFromPreparedSheetForXlsx(preparedDataset.dataQualitySheet, arrays.preparedDataQualityRows, 'Žiadne údaje o kvalite dát') },
+    { sheetName: 'raw-data-rows', rows: aoaFromRowsForXlsx(arrays.preparedRawRows, 'Žiadne raw dáta') },
+  ]);
+}
+
+async function assertValidXlsxBlob(blob: Blob, source = 'Excel export'): Promise<void> {
+  if (!blob || blob.size < 1000) {
+    const text = blob ? await blob.text().catch(() => '') : '';
+    throw new Error(
+      `${source} nevytvoril platný XLSX súbor. Súbor je prázdny alebo príliš malý. ${text.slice(0, 300)}`,
+    );
+  }
+
+  const header = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+  const isZip =
+    header[0] === 0x50 &&
+    header[1] === 0x4b &&
+    (header[2] === 0x03 || header[2] === 0x05 || header[2] === 0x07) &&
+    (header[3] === 0x04 || header[3] === 0x06 || header[3] === 0x08);
+
+  if (!isZip) {
+    const text = await blob.text().catch(() => '');
+    throw new Error(
+      `${source} nie je platný XLSX/ZIP súbor. Namiesto Excelu sa pravdepodobne stiahla chyba alebo HTML odpoveď. Začiatok obsahu: ${text.slice(0, 500)}`,
+    );
+  }
+}
+
 function normalizeExportTableRows(rows: unknown[], limit?: number): DataRow[] {
   return sanitizeExportRows(rows, limit).filter((row) =>
     Object.values(row).some(
@@ -2997,17 +3424,7 @@ async function createXlsxFallbackExportBlob(params: {
   const XLSX = await loadXlsxModule();
 
   if (!XLSX?.utils || !XLSX?.write) {
-    const diagnostic = [
-      'Export Excelu sa nepodarilo vytvoriť.',
-      '',
-      'Dôvod: v projekte nie je dostupný balík exceljs ani xlsx.',
-      'Riešenie:',
-      'npm install exceljs xlsx',
-    ].join('\n');
-
-    return new Blob([diagnostic], {
-      type: 'text/plain;charset=utf-8',
-    });
+    return createPureAnalysisExportBlob(params);
   }
 
   const workbook = XLSX.utils.book_new();
@@ -3021,7 +3438,7 @@ async function createXlsxFallbackExportBlob(params: {
   const usedNames = new Set<string>();
   const payload = params.exportPayload || {};
   const preparedDataset = payload.preparedDataset || params.arrays.preparedDataset || {};
-  const chartData = payload.chartData || buildChartExportData(params.arrays);
+  const chartData = normalizePayloadChartData(payload, params.arrays);
   const contingency = buildContingencyExport({ arrays: params.arrays, payload });
 
   const sheetRegistry: Array<{ sheetName: string; title: string; description: string; rowCount: number }> = [];
@@ -3069,7 +3486,7 @@ async function createXlsxFallbackExportBlob(params: {
     { sheetName: '06 Frekvencie JASP', title: 'Frekvenčné tabuľky JASP', description: 'Početnosti, percentá, validné percentá a kumulatívne percentá.', rows: params.arrays.frequencyRows.length ? params.arrays.frequencyRows : params.arrays.frequencies },
     { sheetName: '07 Deskriptíva', title: 'Deskriptívna štatistika', description: 'Valid, Missing, Mean, Median, SD, Min, Max, Skewness a Kurtosis.', rows: params.arrays.scaleDescriptives.length ? params.arrays.scaleDescriptives : payload.descriptives || payload.descriptiveStatistics || [] },
     { sheetName: '08 Položky', title: 'Deskriptívna štatistika položiek', description: 'Deskriptívna štatistika jednotlivých položiek.', rows: params.arrays.itemDescriptives },
-    { sheetName: '09 Škály podškály', title: 'Škály a podškály', description: 'Definícia škál, subškál, skórovania a použitých položiek.', rows: [...safeArray(preparedDataset.scaleDefinitions), ...safeArray(preparedDataset.subscaleDefinitions)] },
+    { sheetName: '09 Škály podškály', title: 'Škály a podškály', description: 'Definícia škál, subškál, skórovania a použitých položiek.', rows: [...safeArray(preparedDataset.scaleDefinitions), ...safeArray(preparedDataset.subscaleDefinitions), ...safeArray(payload.scaleSubscaleDefinitions), ...safeArray(payload.scaleDefinitionsTable)] },
     { sheetName: '10 Skóre škál', title: 'Skóre škál', description: 'Vypočítané skóre škál a subškál pre respondentov.', rows: params.arrays.scaleScores },
     { sheetName: '11 Normalita', title: 'Normalita dát', description: 'Shapiro-Wilk a odporúčanie testov.', rows: params.arrays.normality },
     { sheetName: '12 Reliabilita', title: 'Reliabilita – Cronbach alfa', description: 'Cronbachova alfa, položky, validné riadky a interpretácia.', rows: params.arrays.reliability },
@@ -3146,9 +3563,7 @@ async function createXlsxFallbackExportBlob(params: {
     compression: true,
   });
 
-  return new Blob([output], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  });
+  return createValidXlsxBlob(output);
 }
 
 async function createXlsxRawDataFallbackBlob(
@@ -3158,17 +3573,7 @@ async function createXlsxRawDataFallbackBlob(
   const XLSX = await loadXlsxModule();
 
   if (!XLSX?.utils || !XLSX?.write) {
-    const diagnostic = [
-      'Raw-data export sa nepodarilo vytvoriť.',
-      '',
-      'Dôvod: v projekte nie je dostupný balík exceljs ani xlsx.',
-      'Riešenie:',
-      'npm install exceljs xlsx',
-    ].join('\n');
-
-    return new Blob([diagnostic], {
-      type: 'text/plain;charset=utf-8',
-    });
+    return createPureRawDataBlob(result, arrays);
   }
 
   const workbook = XLSX.utils.book_new();
@@ -3214,9 +3619,7 @@ async function createXlsxRawDataFallbackBlob(
     compression: true,
   });
 
-  return new Blob([output], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  });
+  return createValidXlsxBlob(output);
 }
 
 async function createClientExcelExportBlob(params: {
@@ -3242,7 +3645,7 @@ async function createClientExcelExportBlob(params: {
   const usedNames = new Set<string>();
   const payload = params.exportPayload || {};
   const preparedDataset = payload.preparedDataset || params.arrays.preparedDataset || {};
-  const chartData = payload.chartData || buildChartExportData(params.arrays);
+  const chartData = normalizePayloadChartData(payload, params.arrays);
   const contingency = buildContingencyExport({ arrays: params.arrays, payload });
 
   const introSheet = createProfessionalIntroSheet({
@@ -3342,9 +3745,7 @@ async function createClientExcelExportBlob(params: {
   workbook.views = [{ activeTab: 0, firstSheet: 0, visibility: 'visible' }];
   const output = await workbook.xlsx.writeBuffer();
 
-  return new Blob([output], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  });
+  return createValidXlsxBlob(output);
 }
 
 
@@ -3358,9 +3759,7 @@ async function createClientRawDataBlob(result: AnalysisResult | null, arrays: Re
       bytes[index] = byteCharacters.charCodeAt(index);
     }
 
-    return new Blob([bytes], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
+    return createValidXlsxBlob(bytes);
   }
 
   const ExcelJS = await loadExcelJsModule();
@@ -3427,9 +3826,7 @@ async function createClientRawDataBlob(result: AnalysisResult | null, arrays: Re
   });
 
   const output = await workbook.xlsx.writeBuffer();
-  return new Blob([output], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  });
+  return createValidXlsxBlob(output);
 }
 
 function createClientDocumentBlob(params: {
@@ -3664,6 +4061,32 @@ function buildChartExportData(arrays: ReturnType<typeof getResultArrays>): Recor
   };
 }
 
+
+function normalizePayloadChartData(payload: any, arrays: ReturnType<typeof getResultArrays>): Record<string, DataRow[]> {
+  const source = payload?.chartData || payload?.chartsData || payload?.chartTables || null;
+
+  if (!source || !isRecord(source)) {
+    return buildChartExportData(arrays);
+  }
+
+  const fallback = buildChartExportData(arrays);
+
+  return {
+    frequencyChartRows: sanitizeExportRows(
+      safeArray(source.frequencyChartRows || fallback.frequencyChartRows),
+    ),
+    scaleMeanChartRows: sanitizeExportRows(
+      safeArray(source.scaleMeanChartRows || source.meanChartRows || fallback.scaleMeanChartRows),
+    ),
+    reliabilityChartRows: sanitizeExportRows(
+      safeArray(source.reliabilityChartRows || fallback.reliabilityChartRows),
+    ),
+    correlationChartRows: sanitizeExportRows(
+      safeArray(source.correlationChartRows || fallback.correlationChartRows),
+    ),
+  };
+}
+
 function buildCompleteExportPayload(params: {
   result: AnalysisResult;
   arrays: ReturnType<typeof getResultArrays>;
@@ -3673,11 +4096,13 @@ function buildCompleteExportPayload(params: {
   const raw = params.result as any;
   const preparedDataset = params.arrays.preparedDataset;
   const visibleExportTables = buildExportTablesFromVisibleSections(params.tableSections);
-  const chartData = buildChartExportData(params.arrays);
+  const chartData = normalizePayloadChartData(raw, params.arrays);
 
   const scaleDefinitionRows = sanitizeExportRows([
     ...safeArray(preparedDataset.scaleDefinitions),
     ...safeArray(preparedDataset.subscaleDefinitions),
+    ...safeArray(raw.scaleSubscaleDefinitions),
+    ...safeArray(raw.scaleDefinitionsTable),
   ]);
 
   const payload = {
@@ -4366,12 +4791,14 @@ export default function AnalysisResultsModal({
           professionalInterpretation,
         });
 
+        await assertValidXlsxBlob(blob, 'Excel export');
         downloadBlob(blob, getFileName(format));
         return;
       }
 
       if (format === 'raw') {
         const blob = await createClientRawDataBlob(result, arrays);
+        await assertValidXlsxBlob(blob, 'Raw-data export');
         downloadBlob(blob, getFileName(format));
         return;
       }
@@ -4455,12 +4882,14 @@ export default function AnalysisResultsModal({
             tableSections,
             professionalInterpretation,
           });
+          await assertValidXlsxBlob(fallbackBlob, 'Excel fallback export');
           downloadBlob(fallbackBlob, getFileName(format));
           return;
         }
 
         if (format === 'raw') {
           const fallbackBlob = await createClientRawDataBlob(result, arrays);
+          await assertValidXlsxBlob(fallbackBlob, 'Raw-data fallback export');
           downloadBlob(fallbackBlob, getFileName(format));
           return;
         }

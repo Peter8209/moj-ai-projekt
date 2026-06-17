@@ -222,9 +222,12 @@ export interface ChartDataPoint {
 export interface AnalysisChartData {
   frequencyBars: ChartDataPoint[];
   meanBars: ChartDataPoint[];
+  scaleScoreBars: ChartDataPoint[];
+  subscaleScoreBars: ChartDataPoint[];
   reliabilityBars: ChartDataPoint[];
   correlationBars: ChartDataPoint[];
   normalityBars: ChartDataPoint[];
+  missingValueBars: ChartDataPoint[];
 }
 
 export interface AnalysisChartTable {
@@ -493,10 +496,13 @@ export function runFullStatisticalAnalysis(
   const chartData = buildAnalysisChartData({
     frequencies,
     itemDescriptives,
+    scaleScores: analysisScores,
     scaleDescriptives,
     normality,
     reliability,
     correlations: recommendedCorrelations.length > 0 ? recommendedCorrelations : spearman.length > 0 ? spearman : pearson,
+    scaleDefinitions: mergedScales,
+    combinedScaleDefinitions: mergedCombinedScales,
   });
 
   const chartTables = buildAnalysisChartTables(chartData);
@@ -2316,10 +2322,13 @@ function buildCorrelationMatrix(
 function buildAnalysisChartData(input: {
   frequencies: FrequencyAnalysisResult[];
   itemDescriptives: DescriptiveStatisticsResult[];
+  scaleScores: ScaleScoreResult[];
   scaleDescriptives: DescriptiveStatisticsResult[];
   normality: NormalityResult[];
   reliability: ReliabilityResult[];
   correlations: CorrelationResult[];
+  scaleDefinitions: ScaleDefinition[];
+  combinedScaleDefinitions: CombinedScaleDefinition[];
 }): AnalysisChartData {
   const frequencyBars = input.frequencies
     .flatMap((frequency) =>
@@ -2342,9 +2351,41 @@ function buildAnalysisChartData(input: {
     .map((item) => ({
       label: item.variable,
       value: item.mean ?? 0,
-      description: `N=${item.valid}, SD=${item.standardDeviation ?? '—'}`,
+      description: `N=${item.valid}, SD=${item.standardDeviation ?? '—'}, missing=${item.missing}`,
     }))
     .slice(0, 50);
+
+  const combinedNames = new Set(input.combinedScaleDefinitions.map((scale) => scale.name));
+  const totalLikeNames = new Set(
+    input.scaleDefinitions
+      .filter((scale) => /celkov|total|overall/i.test(scale.name) || /total/i.test(scale.id))
+      .map((scale) => scale.name),
+  );
+
+  const isSubscaleName = (name: string): boolean => {
+    if (combinedNames.has(name)) return true;
+    if (/subšk|subsk|subscale/i.test(name)) return true;
+    if (/energia|zmyslupl|nadšen|nadsen|absorp|odmiet|vrelosť|vrelost|hyperprotekt|akcept|vylúčen|vylucen/i.test(name)) return true;
+    return !totalLikeNames.has(name) && !/celkov|total|overall/i.test(name);
+  };
+
+  const scaleScoreBars = input.scaleDescriptives
+    .filter((item) => isFiniteNumber(item.mean) && !isSubscaleName(item.variable))
+    .map((item) => ({
+      label: item.variable,
+      value: item.mean ?? 0,
+      description: `Priemer škály, N=${item.valid}, SD=${item.standardDeviation ?? '—'}`,
+    }))
+    .slice(0, 40);
+
+  const subscaleScoreBars = input.scaleDescriptives
+    .filter((item) => isFiniteNumber(item.mean) && isSubscaleName(item.variable))
+    .map((item) => ({
+      label: item.variable,
+      value: item.mean ?? 0,
+      description: `Priemer subškály, N=${item.valid}, SD=${item.standardDeviation ?? '—'}`,
+    }))
+    .slice(0, 40);
 
   const reliabilityBars = input.reliability
     .filter((item) => isFiniteNumber(item.cronbachAlpha))
@@ -2372,12 +2413,25 @@ function buildAnalysisChartData(input: {
       description: item.note,
     }));
 
+  const missingValueBars = [...input.itemDescriptives, ...input.scaleDescriptives]
+    .filter((item) => item.missing > 0)
+    .map((item) => ({
+      label: item.variable,
+      value: item.missing,
+      description: `Chýbajúce údaje: ${item.missing}, validné údaje: ${item.valid}`,
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 50);
+
   return {
     frequencyBars,
     meanBars,
+    scaleScoreBars,
+    subscaleScoreBars,
     reliabilityBars,
     correlationBars,
     normalityBars,
+    missingValueBars,
   };
 }
 
@@ -2394,6 +2448,16 @@ function buildAnalysisChartTables(chartData: AnalysisChartData): AnalysisChartTa
       rows: chartData.meanBars.map(chartPointToRow),
     },
     {
+      key: 'chart-scale-score-bars',
+      title: 'Graf – priemery celkových škál',
+      rows: chartData.scaleScoreBars.map(chartPointToRow),
+    },
+    {
+      key: 'chart-subscale-score-bars',
+      title: 'Graf – priemery subškál',
+      rows: chartData.subscaleScoreBars.map(chartPointToRow),
+    },
+    {
       key: 'chart-reliability-bars',
       title: 'Graf – reliabilita',
       rows: chartData.reliabilityBars.map(chartPointToRow),
@@ -2407,6 +2471,11 @@ function buildAnalysisChartTables(chartData: AnalysisChartData): AnalysisChartTa
       key: 'chart-normality-bars',
       title: 'Graf – normalita',
       rows: chartData.normalityBars.map(chartPointToRow),
+    },
+    {
+      key: 'chart-missing-value-bars',
+      title: 'Graf – chýbajúce údaje',
+      rows: chartData.missingValueBars.map(chartPointToRow),
     },
   ].filter((table) => table.rows.length > 0);
 }
@@ -2471,6 +2540,52 @@ function scaleScoresToDefinitionRows(
     scoring: scale.scoring,
     missingRows: scale.missingRows,
   }));
+}
+
+function scaleDefinitionsToRows(
+  scales: ScaleDefinition[],
+): Array<Record<string, RawValue>> {
+  return scales.map((scale) => ({
+    scaleId: scale.id,
+    scaleName: scale.name,
+    itemCount: scale.items.length,
+    items: scale.items.map(String).join(', '),
+    reverseItems: (scale.reverseItems ?? []).map(String).join(', '),
+    minValue: scale.minValue ?? null,
+    maxValue: scale.maxValue ?? null,
+    scoring: scale.scoring ?? 'sum',
+    description: scale.description ?? null,
+  }));
+}
+
+function combinedScaleDefinitionsToRows(
+  combinedScales: CombinedScaleDefinition[],
+): Array<Record<string, RawValue>> {
+  return combinedScales.map((scale) => ({
+    subscaleId: scale.id,
+    subscaleName: scale.name,
+    sourceScaleIds: scale.scaleIds.join(', '),
+    sourceScaleCount: scale.scaleIds.length,
+    scoring: scale.scoring ?? 'sum',
+    description: scale.description ?? null,
+  }));
+}
+
+function missingDataToRows(
+  itemDescriptives: DescriptiveStatisticsResult[],
+  scaleDescriptives: DescriptiveStatisticsResult[],
+): Array<Record<string, RawValue>> {
+  return [...itemDescriptives, ...scaleDescriptives]
+    .filter((item) => item.missing > 0)
+    .map((item) => ({
+      variable: item.variable,
+      valid: item.valid,
+      missing: item.missing,
+      missingPercent:
+        item.valid + item.missing > 0
+          ? round3((item.missing / (item.valid + item.missing)) * 100)
+          : 0,
+    }));
 }
 
 function correlationsToRows(correlations: CorrelationResult[]): Array<Record<string, RawValue>> {
@@ -2539,7 +2654,13 @@ function buildAnalysisAliases(input: {
     descriptives: input.scaleDescriptives.length > 0 ? input.scaleDescriptives : input.itemDescriptives,
     descriptiveStatistics: input.scaleDescriptives.length > 0 ? input.scaleDescriptives : input.itemDescriptives,
     scaleDefinitions: input.scaleDefinitions,
+    scaleDefinitionRows: scaleDefinitionsToRows(input.scaleDefinitions),
+    scales: scaleDefinitionsToRows(input.scaleDefinitions),
     subscaleDefinitions: input.combinedScaleDefinitions,
+    subscaleDefinitionRows: combinedScaleDefinitionsToRows(input.combinedScaleDefinitions),
+    subscales: combinedScaleDefinitionsToRows(input.combinedScaleDefinitions),
+    missingData: missingDataToRows(input.itemDescriptives, input.scaleDescriptives),
+    missingValues: missingDataToRows(input.itemDescriptives, input.scaleDescriptives),
     scaleScores: input.scaleScores,
     scaleScoreRows: input.scaleScoreRows,
     scaleSubscaleScores: input.scaleScoreRows,
@@ -3103,4 +3224,764 @@ function extractAllNumbers(value: string): number[] {
 
 function slugify(value: string): string {
   return normalizeText(value) || 'variable';
+}
+/* -------------------------------------------------------------------------- */
+/* API WRAPPER PRE app/api/analyze-data/route.ts                              */
+/* -------------------------------------------------------------------------- */
+/**
+ * Tento blok dopĺňa serverovú API funkciu, ktorú importuje:
+ * app/api/analyze-data/route.ts
+ *
+ * Route môže používať:
+ *
+ * import {
+ *   analyzeUploadedDataFile,
+ *   type AnalyzeDataApiResponse,
+ * } from '@/components/analysis/analysisStats';
+ *
+ * Poznámka:
+ * XLSX sa načítava dynamicky iba na serveri, aby sa zbytočne neťahal do UI bundle.
+ */
+
+export type AnalyzeDataApiResponse = {
+  ok: boolean;
+  title: string;
+  summary: string;
+  dataDescription: string;
+  warnings: string[];
+
+  variables: Array<Record<string, unknown>>;
+  frequencies: Array<Record<string, unknown>>;
+  descriptiveStatistics: Array<Record<string, unknown>>;
+  recommendedTests: Array<Record<string, unknown>>;
+  recommendedCharts: Array<Record<string, unknown>>;
+  hypothesisTests: Array<Record<string, unknown>>;
+  excelTables: string[];
+
+  practicalText: string;
+  interpretation: string;
+  fullText: string;
+
+  meta: {
+    filesCount: number;
+    extractedChars: number;
+    generatedAt: string;
+    source?: string;
+    sheetName?: string;
+    preparedFileName?: string;
+    rows?: number;
+    columns?: number;
+  };
+
+  preparedFile?: {
+    fileName?: string;
+    rows?: number;
+    columns?: number;
+    warnings?: string[];
+    qualityReport?: unknown[];
+  };
+
+  statistics?: StatisticalAnalysisResult;
+
+  message?: string;
+  error?: string;
+};
+
+type ApiUploadFile = File;
+
+const API_MAX_FILE_SIZE_MB = 30;
+const API_MAX_FILE_SIZE_BYTES = API_MAX_FILE_SIZE_MB * 1024 * 1024;
+
+function apiEmptyAnalysisResponse(
+  message: string,
+  error?: string,
+): AnalyzeDataApiResponse {
+  return {
+    ok: false,
+    title: 'Analýza dát',
+    summary: '',
+    dataDescription: '',
+    warnings: [],
+    variables: [],
+    frequencies: [],
+    descriptiveStatistics: [],
+    recommendedTests: [],
+    recommendedCharts: [],
+    hypothesisTests: [],
+    excelTables: [],
+    practicalText: '',
+    interpretation: '',
+    fullText: '',
+    meta: {
+      filesCount: 0,
+      extractedChars: 0,
+      generatedAt: new Date().toISOString(),
+    },
+    message,
+    error,
+  };
+}
+
+function apiIsExcelFileName(fileName: string): boolean {
+  return /\.(xlsx|xls|xlsm)$/i.test(fileName);
+}
+
+function apiIsCsvFileName(fileName: string): boolean {
+  return /\.csv$/i.test(fileName);
+}
+
+function apiGetUploadedFiles(formData: FormData): ApiUploadFile[] {
+  const files: ApiUploadFile[] = [];
+
+  const singleFile = formData.get('file');
+
+  if (singleFile instanceof File) {
+    files.push(singleFile);
+  }
+
+  formData.getAll('files').forEach((item) => {
+    if (item instanceof File) {
+      files.push(item);
+    }
+  });
+
+  const unique = new Map<string, ApiUploadFile>();
+
+  files.forEach((file) => {
+    const key = `${file.name}-${file.size}-${file.type}`;
+
+    if (!unique.has(key)) {
+      unique.set(key, file);
+    }
+  });
+
+  return Array.from(unique.values());
+}
+
+function apiNormalizeCellValue(value: unknown): RawValue {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  const text = String(value).trim();
+
+  return text ? text : null;
+}
+
+function apiIsMissing(value: unknown): boolean {
+  return value === null || value === undefined || String(value).trim() === '';
+}
+
+function apiRemoveDiacritics(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function apiNormalizeHeader(value: unknown, index: number): string {
+  const original = String(value ?? '').trim();
+
+  if (!original) {
+    return `STLPEC_${index + 1}`;
+  }
+
+  const normalized = apiRemoveDiacritics(original)
+    .trim()
+    .replace(/\s+/g, '_')
+    .replace(/[^\w]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  return normalized || `STLPEC_${index + 1}`;
+}
+
+function apiMakeUniqueHeaders(headers: string[]): string[] {
+  const used = new Map<string, number>();
+
+  return headers.map((header) => {
+    const count = used.get(header) ?? 0;
+    used.set(header, count + 1);
+
+    return count === 0 ? header : `${header}_${count + 1}`;
+  });
+}
+
+function apiDetectHeaderRow(rows: unknown[][]): number {
+  const maxRowsToScan = Math.min(rows.length, 15);
+
+  let bestIndex = 0;
+  let bestScore = -1;
+
+  for (let rowIndex = 0; rowIndex < maxRowsToScan; rowIndex += 1) {
+    const row = rows[rowIndex] ?? [];
+
+    const nonEmptyCount = row.filter((cell) => !apiIsMissing(cell)).length;
+
+    const textCount = row.filter((cell) => {
+      if (apiIsMissing(cell)) {
+        return false;
+      }
+
+      return Number.isNaN(Number(String(cell).replace(',', '.')));
+    }).length;
+
+    const score = nonEmptyCount + textCount * 2;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = rowIndex;
+    }
+  }
+
+  return bestIndex;
+}
+
+function apiRowsToObjects(rows: unknown[][]): {
+  rows: AnalysisRow[];
+  headers: string[];
+} {
+  if (!rows.length) {
+    return {
+      rows: [],
+      headers: [],
+    };
+  }
+
+  const headerRowIndex = apiDetectHeaderRow(rows);
+  const rawHeaders = rows[headerRowIndex] ?? [];
+
+  const headers = apiMakeUniqueHeaders(
+    rawHeaders.map((header, index) => apiNormalizeHeader(header, index)),
+  );
+
+  const dataRows = rows.slice(headerRowIndex + 1);
+  const outputRows: AnalysisRow[] = [];
+
+  dataRows.forEach((row) => {
+    const outputRow: AnalysisRow = {};
+    let nonEmptyCells = 0;
+
+    headers.forEach((header, index) => {
+      const value = apiNormalizeCellValue(row[index]);
+
+      if (!apiIsMissing(value)) {
+        nonEmptyCells += 1;
+      }
+
+      outputRow[header] = value;
+    });
+
+    if (nonEmptyCells > 0) {
+      outputRows.push(outputRow);
+    }
+  });
+
+  return {
+    rows: outputRows,
+    headers,
+  };
+}
+
+async function apiReadWorkbookFromFile(file: ApiUploadFile): Promise<{
+  workbook: import('xlsx').WorkBook;
+  xlsx: typeof import('xlsx');
+}> {
+  if (file.size > API_MAX_FILE_SIZE_BYTES) {
+    throw new Error(
+      `Súbor "${file.name}" je príliš veľký. Maximálna veľkosť je ${API_MAX_FILE_SIZE_MB} MB.`,
+    );
+  }
+
+  if (!apiIsExcelFileName(file.name) && !apiIsCsvFileName(file.name)) {
+    throw new Error(
+      `Nepodporovaný typ súboru "${file.name}". Nahrajte .xlsx, .xls, .xlsm alebo .csv.`,
+    );
+  }
+
+  const xlsx = await import('xlsx');
+  const buffer = Buffer.from(await file.arrayBuffer());
+
+  if (apiIsCsvFileName(file.name)) {
+    return {
+      xlsx,
+      workbook: xlsx.read(buffer.toString('utf8'), {
+        type: 'string',
+        raw: false,
+      }),
+    };
+  }
+
+  return {
+    xlsx,
+    workbook: xlsx.read(buffer, {
+      type: 'buffer',
+      cellDates: true,
+      raw: false,
+    }),
+  };
+}
+
+function apiReadSheetRows(
+  workbook: import('xlsx').WorkBook,
+  xlsx: typeof import('xlsx'),
+  preferredSheetName?: string,
+): unknown[][] {
+  const sheetName =
+    preferredSheetName && workbook.SheetNames.includes(preferredSheetName)
+      ? preferredSheetName
+      : workbook.SheetNames.includes('DATA_CLEAN')
+        ? 'DATA_CLEAN'
+        : workbook.SheetNames[0];
+
+  if (!sheetName) {
+    return [];
+  }
+
+  const worksheet = workbook.Sheets[sheetName];
+
+  if (!worksheet) {
+    return [];
+  }
+
+  return xlsx.utils.sheet_to_json<unknown[]>(worksheet, {
+    header: 1,
+    defval: null,
+    blankrows: false,
+  });
+}
+
+function apiParseJsonArray(value: FormDataEntryValue | null): unknown[] {
+  try {
+    const parsed = JSON.parse(String(value || '[]'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function apiParseStringArray(value: FormDataEntryValue | null): string[] {
+  const parsed = apiParseJsonArray(value);
+
+  return parsed
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+}
+
+function apiCreateVariablesFromStatistics(
+  statistics: StatisticalAnalysisResult,
+): Array<Record<string, unknown>> {
+  const allColumns = uniqueStrings([
+    ...statistics.meta.numericColumns,
+    ...statistics.meta.ordinalNumericColumns,
+    ...statistics.meta.continuousNumericColumns,
+    ...statistics.meta.groupColumns,
+  ]);
+
+  return allColumns.map((column) => ({
+    name: column,
+    label: column,
+    type: statistics.meta.groupColumns.includes(column)
+      ? 'kategorizovaná'
+      : statistics.meta.ordinalNumericColumns.includes(column)
+        ? 'ordinálna / škálová'
+        : 'číselná',
+    ignored: statistics.meta.ignoredColumns.includes(column),
+  }));
+}
+
+function apiCreateDefaultExcelTables(): string[] {
+  return [
+    'Tabuľka 1: Charakteristika výskumného súboru',
+    'Tabuľka 2: Frekvenčné rozdelenie kategorizovaných premenných',
+    'Tabuľka 3: Deskriptívna štatistika položiek',
+    'Tabuľka 4: Deskriptívna štatistika škál a subškál',
+    'Tabuľka 5: Test normality',
+    'Tabuľka 6: Korelačná matica',
+    'Tabuľka 7: Pearsonova korelácia',
+    'Tabuľka 8: Spearmanova korelácia',
+    'Tabuľka 9: Reliabilita škál – Cronbachovo alfa',
+    'Tabuľka 10: Independent t-test / Mann-Whitney U test',
+    'Tabuľka 11: ANOVA / Kruskal-Wallis test',
+    'Tabuľka 12: Vypočítané skóre škál a subškál',
+  ];
+}
+
+function apiBuildRecommendedCharts(
+  statistics: StatisticalAnalysisResult,
+): Array<Record<string, unknown>> {
+  const charts: Array<Record<string, unknown>> = [];
+
+  if (statistics.frequencies.length > 0) {
+    charts.push({
+      title: 'Frekvenčné rozdelenie premenných',
+      type: 'bar',
+      variables: statistics.frequencies.slice(0, 5).map((item) => item.variable),
+      description:
+        'Stĺpcový graf početnosti kategorizovaných alebo ordinálnych premenných.',
+      reason: 'Vhodné na predstavenie výskumného súboru.',
+    });
+  }
+
+  if (statistics.scaleDescriptives.length > 0) {
+    charts.push({
+      title: 'Priemerné hodnoty škál a subškál',
+      type: 'bar',
+      variables: statistics.scaleDescriptives.map((item) => item.variable),
+      description: 'Stĺpcový graf priemerov vypočítaných škál a subškál.',
+      reason: 'Vhodné na porovnanie úrovne jednotlivých škál.',
+    });
+  }
+
+  if (statistics.normality.length > 0) {
+    charts.push({
+      title: 'Normalita škál',
+      type: 'bar',
+      variables: statistics.normality.map((item) => item.variable),
+      description: 'Graf p-hodnôt alebo rozhodnutia normality.',
+      reason:
+        'Vhodné na vysvetlenie, prečo sa odporúčajú parametrické alebo neparametrické testy.',
+    });
+  }
+
+  if (statistics.correlations.recommended.length > 0) {
+    charts.push({
+      title: 'Odporúčané korelácie',
+      type: 'heatmap',
+      variables: uniqueStrings(
+        statistics.correlations.recommended.flatMap((item) => [
+          item.variableA,
+          item.variableB,
+        ]),
+      ),
+      description: 'Korelačná matica hlavných škál a subškál.',
+      reason: 'Vhodné na zobrazenie vzťahov medzi premennými.',
+    });
+  }
+
+  if (statistics.reliability.length > 0) {
+    charts.push({
+      title: 'Reliabilita škál',
+      type: 'bar',
+      variables: statistics.reliability.map((item) => item.scaleName),
+      description: 'Graf Cronbachovej alfy pre škály a subškály.',
+      reason: 'Vhodné na posúdenie vnútornej konzistencie dotazníkov.',
+    });
+  }
+
+  return charts;
+}
+
+function apiBuildRecommendedTests(
+  statistics: StatisticalAnalysisResult,
+): Array<Record<string, unknown>> {
+  const tests: Array<Record<string, unknown>> = [];
+
+  if (statistics.correlations.recommended.length > 0) {
+    tests.push({
+      title: 'Korelačná analýza škál a subškál',
+      hypothesis: 'Vzťahy medzi vypočítanými škálami a subškálami.',
+      variables: uniqueStrings(
+        statistics.correlations.recommended.flatMap((item) => [
+          item.variableA,
+          item.variableB,
+        ]),
+      ),
+      test:
+        statistics.correlations.recommended[0]?.method === 'pearson'
+          ? 'Pearsonova korelácia'
+          : 'Spearmanova korelácia',
+      description:
+        'Overenie vzťahov medzi vypočítanými skóre škál a subškál.',
+      reason: statistics.correlations.recommendationNote,
+      parametric:
+        statistics.correlations.recommended[0]?.method === 'pearson',
+    });
+  }
+
+  if (statistics.reliability.length > 0) {
+    tests.push({
+      title: 'Vnútorná konzistencia škál',
+      hypothesis: 'Reliabilita použitých škál a subškál.',
+      variables: statistics.reliability.flatMap((item) => item.items),
+      test: 'Cronbachova alfa',
+      description:
+        'Overenie vnútornej konzistencie dotazníkových škál a subškál.',
+      reason:
+        'Cronbachovo alfa je vhodné na overenie reliability viacerých položiek tvoriacich jednu škálu.',
+      parametric: false,
+    });
+  }
+
+  if (statistics.groupTests.recommended.length > 0) {
+    tests.push({
+      title: 'Rozdielové testy podľa skupín',
+      hypothesis: 'Rozdiely v skóre škál podľa skupinových premenných.',
+      variables: uniqueStrings(
+        statistics.groupTests.recommended.flatMap((item) => [
+          item.groupVariable,
+          item.dependentVariable,
+        ]),
+      ),
+      test: 't-test / Mann-Whitney U / ANOVA / Kruskal-Wallis',
+      description:
+        'Porovnanie skóre škál a subškál medzi skupinami.',
+      reason: statistics.groupTests.recommendationNote,
+      parametric: statistics.groupTests.recommended.some((item) =>
+        item.testType === 'independent-t-test' || item.testType === 'anova',
+      ),
+    });
+  }
+
+  return tests;
+}
+
+function apiBuildPracticalText(statistics: StatisticalAnalysisResult): string {
+  return `
+V praktickej časti práce sa odporúča postupovať systematicky. Najprv je potrebné predstaviť výskumný súbor. Počet respondentov bol identifikovaný ako N = ${statistics.meta.respondentCount}. ${
+    statistics.meta.idColumn
+      ? `Stĺpec "${statistics.meta.idColumn}" bol rozpoznaný ako identifikátor respondenta a nebol použitý v štatistických výpočtoch.`
+      : ''
+  }
+
+Následne sa odporúča uviesť frekvenčnú analýzu kategorizovaných a ordinálnych premenných. Pri každej takejto premennej treba uviesť početnosť, percento, validné percento a kumulatívne percento.
+
+Pri číselných premenných, položkách, škálach a subškálach je vhodné uviesť deskriptívnu štatistiku: počet platných odpovedí, chýbajúce hodnoty, priemer, medián, modus, smerodajnú odchýlku, rozptyl, šikmosť, špicatosť, minimum, maximum, kvartily a interkvartilové rozpätie.
+
+Pri dotazníkových škálach je potrebné uviesť spôsob výpočtu skóre. Tento výstup obsahuje automaticky rozpoznané alebo manuálne zadané škály a subškály. Pri škálach s viacerými položkami sa odporúča overiť reliabilitu pomocou Cronbachovej alfy.
+
+Pred overovaním hypotéz je potrebné vyhodnotiť normalitu dát. Ak normalita nie je potvrdená alebo ide o ordinálne dáta, odporúča sa interpretovať najmä Spearmanovu koreláciu a neparametrické skupinové testy. Pri splnení predpokladov možno použiť Pearsonovu koreláciu, independent t-test alebo ANOVA.
+`.trim();
+}
+
+function apiBuildInterpretationText(statistics: StatisticalAnalysisResult): string {
+  return `
+Výsledky interpretujte vo väzbe na výskumné otázky a hypotézy. Pri korelácii uvádzajte použitú metódu, počet párových pozorovaní, korelačný koeficient, p-hodnotu a vecnú interpretáciu sily vzťahu.
+
+Pri reliabilite uvádzajte Cronbachovo alfa pre každú škálu alebo subškálu. Hodnoty nad 0,70 sa zvyčajne interpretujú ako prijateľné, hodnoty nad 0,80 ako dobré a hodnoty nad 0,90 ako veľmi vysoké.
+
+Pri rozdielových testoch uvádzajte závislú premennú, skupinovú premennú, názov testu, testovú štatistiku, p-hodnotu a slovnú interpretáciu. Ak p < 0,05, výsledok možno považovať za štatisticky významný. Ak p ≥ 0,05, štatisticky významný rozdiel alebo vzťah sa nepreukázal.
+
+${statistics.correlations.recommendationNote}
+
+${statistics.groupTests.recommendationNote}
+`.trim();
+}
+
+function apiBuildFullText(input: {
+  title: string;
+  summary: string;
+  dataDescription: string;
+  warnings: string[];
+  statistics: StatisticalAnalysisResult;
+  recommendedTests: Array<Record<string, unknown>>;
+  recommendedCharts: Array<Record<string, unknown>>;
+  practicalText: string;
+  interpretation: string;
+}): string {
+  const {
+    title,
+    summary,
+    dataDescription,
+    warnings,
+    statistics,
+    recommendedTests,
+    recommendedCharts,
+    practicalText,
+    interpretation,
+  } = input;
+
+  return [
+    title,
+    '',
+    summary,
+    '',
+    dataDescription,
+    '',
+    'Prehľad výpočtov:',
+    `- Počet respondentov: ${statistics.meta.respondentCount}`,
+    `- Počet numerických premenných: ${statistics.meta.numericColumns.length}`,
+    `- Počet skupinových premenných: ${statistics.meta.groupColumns.length}`,
+    `- Počet vypočítaných škál/subškál: ${statistics.scaleScores.length}`,
+    `- Počet testov normality: ${statistics.normality.length}`,
+    `- Počet odporúčaných korelácií: ${statistics.correlations.recommended.length}`,
+    `- Počet reliabilít: ${statistics.reliability.length}`,
+    `- Počet odporúčaných skupinových testov: ${statistics.groupTests.recommended.length}`,
+    '',
+    'Odporúčané testy:',
+    ...recommendedTests.map((item) => `- ${String(item.title || '')}: ${String(item.test || '')}`),
+    '',
+    'Odporúčané grafy:',
+    ...recommendedCharts.map((item) => `- ${String(item.title || '')}: ${String(item.type || '')}`),
+    '',
+    'Odporúčania systému:',
+    ...statistics.aiRecommendation.map((item) => `- ${item}`),
+    '',
+    'Upozornenia:',
+    ...warnings.map((warning) => `- ${warning}`),
+    '',
+    'Praktická časť:',
+    practicalText,
+    '',
+    'Interpretácia:',
+    interpretation,
+  ].join('\n');
+}
+
+export async function analyzeUploadedDataFile(
+  formData: FormData,
+): Promise<AnalyzeDataApiResponse> {
+  try {
+    const prompt = String(formData.get('prompt') || '');
+    const source = String(formData.get('source') || '');
+    const sheetName = String(formData.get('sheetName') || 'DATA_CLEAN');
+    const preparedFileName = String(formData.get('preparedFileName') || '');
+
+    const prepareWarnings = apiParseStringArray(formData.get('prepareWarnings'));
+    const prepareQualityReport = apiParseJsonArray(
+      formData.get('prepareQualityReport'),
+    );
+
+    const files = apiGetUploadedFiles(formData);
+
+    if (!files.length) {
+      return apiEmptyAnalysisResponse(
+        'Analýza dát zlyhala.',
+        'Nebola nahratá žiadna príloha.',
+      );
+    }
+
+    const file = files[0];
+    const { workbook, xlsx } = await apiReadWorkbookFromFile(file);
+    const sheetRows = apiReadSheetRows(workbook, xlsx, sheetName);
+    const parsed = apiRowsToObjects(sheetRows);
+
+    if (!parsed.rows.length) {
+      return apiEmptyAnalysisResponse(
+        'Analýza dát zlyhala.',
+        'Vybraný hárok neobsahuje dátové riadky. Skontrolujte DATA_CLEAN.',
+      );
+    }
+
+    const statistics = runFullStatisticalAnalysis(parsed.rows, {
+      alpha: 0.05,
+      autoDetectScales: true,
+      fallbackToNumericVariables: true,
+      autoDetectGroupColumns: true,
+      includeFrequencies: true,
+      includeItemDescriptives: true,
+    });
+
+    const variables = apiCreateVariablesFromStatistics(statistics);
+    const frequencies = statistics.frequencies as unknown as Array<Record<string, unknown>>;
+    const descriptiveStatistics = [
+      ...statistics.itemDescriptives,
+      ...statistics.scaleDescriptives,
+    ] as unknown as Array<Record<string, unknown>>;
+
+    const recommendedTests = apiBuildRecommendedTests(statistics);
+    const recommendedCharts = apiBuildRecommendedCharts(statistics);
+    const excelTables = apiCreateDefaultExcelTables();
+
+    const warnings = uniqueStrings([
+      ...prepareWarnings,
+      ...statistics.aiRecommendation,
+      statistics.meta.fallbackUsed
+        ? 'Neboli rozpoznané samostatné škály, preto boli použité numerické premenné ako náhradné skóre.'
+        : '',
+      statistics.reliability.length === 0
+        ? 'Reliabilita nebola vypočítaná, pretože neboli rozpoznané škály s minimálne dvoma položkami.'
+        : '',
+      statistics.correlations.recommended.length === 0
+        ? 'Neboli vypočítané odporúčané korelácie, pretože nie je dostatok vhodných škál alebo numerických premenných.'
+        : '',
+      'Pred finálnou interpretáciou treba skontrolovať typy premenných, chýbajúce hodnoty a metodiku výpočtu skóre.',
+    ].filter(Boolean));
+
+    const title = 'Výsledky analýzy dát';
+
+    const summary = [
+      `Analyzovaný súbor obsahuje ${statistics.meta.totalRows} dátových riadkov a ${parsed.headers.length} premenných.`,
+      `Počet respondentov bol určený ako N = ${statistics.meta.respondentCount}.`,
+      source === 'prepared'
+        ? 'Štatistika bola spustená nad pripraveným súborom podľa vzoru, konkrétne nad listom DATA_CLEAN.'
+        : 'Štatistika bola spustená nad nahratým dátovým súborom.',
+      prompt ? `Zadanie používateľa: ${prompt}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    const dataDescription = [
+      'Dáta boli načítané z tabuľkového súboru.',
+      `Použitý hárok: ${sheetName || 'prvý dostupný hárok'}.`,
+      `Ignorované stĺpce: ${statistics.meta.ignoredColumns.length ? statistics.meta.ignoredColumns.join(', ') : 'žiadne'}.`,
+      `Automaticky rozpoznané škály/subškály: ${statistics.meta.autoDetectedScaleCount}.`,
+    ].join(' ');
+
+    const practicalText = apiBuildPracticalText(statistics);
+    const interpretation = apiBuildInterpretationText(statistics);
+
+    const fullText = apiBuildFullText({
+      title,
+      summary,
+      dataDescription,
+      warnings,
+      statistics,
+      recommendedTests,
+      recommendedCharts,
+      practicalText,
+      interpretation,
+    });
+
+    return {
+      ok: true,
+      title,
+      summary,
+      dataDescription,
+      warnings,
+      variables,
+      frequencies,
+      descriptiveStatistics,
+      recommendedTests,
+      recommendedCharts,
+      hypothesisTests: [
+        ...statistics.correlations.recommended,
+        ...statistics.groupTests.recommended,
+      ] as unknown as Array<Record<string, unknown>>,
+      excelTables,
+      practicalText,
+      interpretation,
+      fullText,
+      statistics,
+      meta: {
+        filesCount: files.length,
+        extractedChars: fullText.length,
+        generatedAt: new Date().toISOString(),
+        source,
+        sheetName,
+        preparedFileName,
+        rows: statistics.meta.totalRows,
+        columns: parsed.headers.length,
+      },
+      preparedFile: {
+        fileName: preparedFileName || file.name,
+        rows: Number(formData.get('preparedRows') || statistics.meta.totalRows),
+        columns: Number(formData.get('preparedColumns') || parsed.headers.length),
+        warnings: prepareWarnings,
+        qualityReport: prepareQualityReport,
+      },
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Neznáma chyba pri analýze dát.';
+
+    return apiEmptyAnalysisResponse('Analýza dát zlyhala.', message);
+  }
 }

@@ -39,11 +39,16 @@ import {
 
 import AnalysisResultsModal from '@/components/analysis/AnalysisResultsModal';
 import type { AnalysisResult } from '@/components/analysis/analysisTypes';
+
+import {
+  runFullStatisticalAnalysis,
+  type AnalysisRow,
+} from '@/components/analysis/analysisStats';
+
 import { useLanguage } from '@/components/LanguageProvider';
 import ImprovementBox from '@/components/ImprovementBox';
 import MobileDashboardNavigation from '@/components/dashboard/MobileDashboardNavigation';
 import { useRouter, useSearchParams } from 'next/navigation';
-
 
 // ================= TYPES =================
 
@@ -424,14 +429,7 @@ type SlideContent = {
   body: string[];
 };
 
-type ApiAnalysisResponse = Partial<AnalysisResult> & {
-  ok?: boolean;
-  error?: string;
-  message?: string;
-  frequencyTables?: unknown[];
-  files?: unknown[];
-  extractedFiles?: unknown[];
-};
+
 
 declare global {
   interface Window {
@@ -2011,129 +2009,6 @@ function createTextFileFromInput(text: string) {
   });
 }
 
-function normalizeAnalysisResult(data: ApiAnalysisResponse): AnalysisResult {
-  const anyData = data as any;
-
-  const frequencies = Array.isArray(anyData.frequencies)
-    ? anyData.frequencies
-    : Array.isArray(anyData.frequencyTables)
-      ? anyData.frequencyTables
-      : Array.isArray(anyData.frequency_tables)
-        ? anyData.frequency_tables
-        : [];
-
-  const extractedFiles = Array.isArray(anyData.files)
-    ? anyData.files
-    : Array.isArray(anyData.extractedFiles)
-      ? anyData.extractedFiles
-      : Array.isArray(anyData.attachments)
-        ? anyData.attachments
-        : [];
-
-  const variables = Array.isArray(anyData.variables)
-    ? anyData.variables
-    : Array.isArray(anyData.detectedVariables)
-      ? anyData.detectedVariables
-      : Array.isArray(anyData.columns)
-        ? anyData.columns
-        : [];
-
-  const warnings = Array.isArray(anyData.warnings)
-    ? anyData.warnings
-    : Array.isArray(anyData.alerts)
-      ? anyData.alerts
-      : [];
-
-  const recommendedTests = Array.isArray(anyData.recommendedTests)
-    ? anyData.recommendedTests
-    : Array.isArray(anyData.tests)
-      ? anyData.tests
-      : Array.isArray(anyData.recommended_tests)
-        ? anyData.recommended_tests
-        : [];
-
-  const recommendedCharts = Array.isArray(anyData.recommendedCharts)
-    ? anyData.recommendedCharts
-    : Array.isArray(anyData.charts)
-      ? anyData.charts
-      : Array.isArray(anyData.recommended_charts)
-        ? anyData.recommended_charts
-        : [];
-
-  const excelTables = Array.isArray(anyData.excelTables)
-    ? anyData.excelTables
-    : Array.isArray(anyData.tables)
-      ? anyData.tables
-      : Array.isArray(anyData.excel_tables)
-        ? anyData.excel_tables
-        : [];
-
-  const descriptiveStatistics = Array.isArray(anyData.descriptiveStatistics)
-    ? anyData.descriptiveStatistics
-    : Array.isArray(anyData.descriptive_statistics)
-      ? anyData.descriptive_statistics
-      : Array.isArray(anyData.statistics)
-        ? anyData.statistics
-        : [];
-
-  const hypothesisTests = Array.isArray(anyData.hypothesisTests)
-    ? anyData.hypothesisTests
-    : Array.isArray(anyData.hypothesis_tests)
-      ? anyData.hypothesis_tests
-      : Array.isArray(anyData.testResults)
-        ? anyData.testResults
-        : [];
-
-  const selectedAnalyses = Array.isArray(anyData.selectedAnalyses)
-    ? anyData.selectedAnalyses
-    : Array.isArray(anyData.selected_analyses)
-      ? anyData.selected_analyses
-      : [];
-
-  const summary =
-    anyData.summary ||
-    createAnalysisSummary({
-      variablesCount: variables.length,
-      frequenciesCount: frequencies.length,
-      filesCount: extractedFiles.length,
-      warningsCount: warnings.length,
-    });
-
-  const fullText =
-    anyData.fullText ||
-    anyData.fullResult ||
-    anyData.text ||
-    anyData.output ||
-    anyData.result ||
-    anyData.interpretation ||
-    '';
-
-  const practicalText =
-    anyData.practicalText ||
-    anyData.practical_text ||
-    anyData.interpretation ||
-    'Do praktickej časti je vhodné zaradiť deskriptívnu štatistiku, frekvenčné tabuľky, grafy a následne testovanie hypotéz podľa typu premenných.';
-
-  return {
-    ok: Boolean(data.ok),
-    title: anyData.title || 'Výsledky analýzy dát',
-    summary,
-    warnings,
-    variables,
-    frequencies,
-    recommendedTests,
-    recommendedCharts,
-    excelTables,
-    practicalText,
-    fullText,
-
-    dataDescription: anyData.dataDescription || anyData.data_description || '',
-    selectedAnalyses,
-    descriptiveStatistics,
-    hypothesisTests,
-    interpretation: anyData.interpretation || practicalText || fullText || '',
-  } as AnalysisResult;
-}
 
 function createAnalysisSummary({
   variablesCount,
@@ -3301,12 +3176,13 @@ ${baseRules}
 ÚLOHA:
 Používateľ spustil modul Analýza dát.
 
-Dashboard nesmie počítať štatistiku. Dashboard iba riadi tok analýzy:
-1. nahratý súbor sa odošle do /api/analyze-data/prepare,
-2. prepare endpoint vytvorí prepared raw data,
-3. prepared súbor sa odošle do /api/analyze-data,
-4. štatistiku vypočíta backend cez analysisStats.ts,
-5. výsledok sa zobrazí v AnalysisResultsModal.
+Správny tok analýzy:
+1. pôvodný Excel/CSV/TXT sa odošle do /api/analyze-data/prepare,
+2. prepare endpoint vytvorí prepared raw data Excel,
+3. DashboardClient.tsx z prepared súboru načíta hárok DATA_CLEAN,
+4. štatistika sa vypočíta v components/analysis/analysisStats.ts,
+5. výsledky sa zobrazia v components/analysis/AnalysisResultsModal.tsx,
+6. export výsledkov robí AnalysisResultsModal.tsx.
 
 ZADANIE POUŽÍVATEĽA:
 ${input || 'Použi priložené dátové súbory, ak sú dostupné.'}
@@ -3314,11 +3190,11 @@ ${input || 'Použi priložené dátové súbory, ak sú dostupné.'}
 PRAVIDLÁ:
 - Nevymýšľaj štatistické výsledky.
 - Nevytváraj fiktívne hodnoty, tabuľky ani grafy.
-- Výsledky frekvencií, deskriptívnej štatistiky, normality, reliability, korelácií a testov musia pochádzať z backendu.
-- Dáta sa najprv pripravujú v /api/analyze-data/prepare.
-- Analýza sa následne počíta v /api/analyze-data.
+- Raw dáta sa musia najprv pripraviť cez /api/analyze-data/prepare.
+- Štatistika sa musí počítať až z prepared raw dát z hárku DATA_CLEAN.
 - Výpočty patria do components/analysis/analysisStats.ts.
-- DashboardClient.tsx je iba orchestrátor toku analýzy.
+- Export výsledkov patrí do AnalysisResultsModal.tsx.
+- Hlavný app/api/analyze-data/route.ts sa nepoužíva.
 `.trim();
 }
 
@@ -3394,7 +3270,83 @@ Text emailu:
     return input;
   };
 
+function normalizeDashboardCellValue(value: unknown): string | number | null {
+  if (value === null || value === undefined) return null;
 
+  const text = String(value).trim();
+
+  if (!text) return null;
+
+  const numeric = Number(
+    text
+      .replace(/\s/g, '')
+      .replace(',', '.')
+      .replace('%', ''),
+  );
+
+  if (Number.isFinite(numeric)) {
+    return numeric;
+  }
+
+  return text;
+}
+
+async function readPreparedExcelCleanRows(file: File): Promise<AnalysisRow[]> {
+  const XLSX = await import('xlsx');
+  const buffer = await file.arrayBuffer();
+
+  const workbook = XLSX.read(buffer, {
+    type: 'array',
+    cellDates: true,
+    cellNF: false,
+    cellText: false,
+  });
+
+  const preferredSheetName = workbook.SheetNames.find(
+    (sheetName) => sheetName.toUpperCase() === 'DATA_CLEAN',
+  );
+
+  const sheetName = preferredSheetName || workbook.SheetNames[0];
+
+  if (!sheetName) {
+    throw new Error('Prepared Excel neobsahuje žiadny hárok.');
+  }
+
+  const sheet = workbook.Sheets[sheetName];
+
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    defval: '',
+    raw: false,
+  });
+
+  return rows
+    .map((row) => {
+      const normalizedRow: AnalysisRow = {};
+
+      Object.entries(row).forEach(([key, value]) => {
+        const header = String(key || '').trim();
+
+        if (!header || header.startsWith('__EMPTY')) return;
+
+        normalizedRow[header] = normalizeDashboardCellValue(value);
+      });
+
+      return normalizedRow;
+    })
+    .filter((row) => Object.keys(row).length > 0);
+}
+
+function getDashboardColumnNames(rows: AnalysisRow[]): string[] {
+  const columns = new Set<string>();
+
+  rows.forEach((row) => {
+    Object.keys(row || {}).forEach((key) => {
+      if (key.trim()) columns.add(key);
+    });
+  });
+
+  return Array.from(columns);
+}
 
 const runModule = async () => {
   if (isLoading) return;
@@ -3461,6 +3413,23 @@ if (activeModule === 'data') {
     return;
   }
 
+  const allowedDataFiles = dataFiles.filter((item) => {
+    const extension = getFileExtension(item.name || item.file?.name || '');
+
+    return (
+      extension === '.xlsx' ||
+      extension === '.xls' ||
+      extension === '.csv' ||
+      extension === '.txt'
+    );
+  });
+
+  if (!allowedDataFiles.length) {
+    alert('Pre analýzu dát nahraj Excel, CSV alebo TXT súbor.');
+    setIsLoading(false);
+    return;
+  }
+
   const workLanguage =
     finalWorkLanguage ||
     profileForApi?.workLanguage ||
@@ -3472,17 +3441,6 @@ if (activeModule === 'data') {
     userText ||
     'Priprav raw dáta a vykonaj štatistickú analýzu.';
 
-  /**
-   * KROK 1:
-   * Dashboard iba pošle pôvodný súbor do prepare endpointu.
-   * Prepare endpoint vytvorí nový prepared Excel:
-   * - DATA_RAW
-   * - DATA_CLEAN
-   * - VARIABLE_DICTIONARY
-   * - SCORING
-   * - QUALITY_REPORT
-   * - README
-   */
   const prepareFormData = new FormData();
 
   prepareFormData.append('module', 'data');
@@ -3505,7 +3463,7 @@ if (activeModule === 'data') {
     prepareFormData.append('projectId', profileForApi.id);
   }
 
-  dataFiles.forEach((item) => {
+  allowedDataFiles.forEach((item) => {
     if (item.file instanceof File) {
       prepareFormData.append('file', item.file, item.name || item.file.name);
       prepareFormData.append('files', item.file, item.name || item.file.name);
@@ -3532,8 +3490,11 @@ if (activeModule === 'data') {
   }
 
   const preparedFileBase64 = String(prepareResult?.preparedFileBase64 || '');
+
   const preparedFileName = String(
-    prepareResult?.preparedFileName || 'prepared-data.xlsx',
+    prepareResult?.preparedFileName ||
+      prepareResult?.fileName ||
+      'prepared-raw-data.xlsx',
   );
 
   const preparedMimeType = String(
@@ -3547,10 +3508,6 @@ if (activeModule === 'data') {
     );
   }
 
-  /**
-   * Uloženie prepared súboru pre používateľa.
-   * Dashboard stále nič nepočíta, iba si drží pripravený súbor.
-   */
   setPreparedDataFile({
     fileName: preparedFileName,
     base64: preparedFileBase64,
@@ -3574,105 +3531,145 @@ if (activeModule === 'data') {
       : [],
   });
 
-  localStorage.setItem(
-    'zedpera_last_prepared_data',
-    JSON.stringify({
-      fileName: preparedFileName,
-      mimeType: preparedMimeType,
-      rows: prepareResult?.rows || 0,
-      columns: prepareResult?.columns || 0,
-      sheets: prepareResult?.sheets || [],
-      warnings: prepareResult?.warnings || [],
-      qualityReport: prepareResult?.qualityReport || [],
-    }),
-  );
-
-  /**
-   * KROK 2:
-   * Z preparedFileBase64 vytvoríme File objekt.
-   * Tento súbor pošleme do /api/analyze-data.
-   */
   const preparedBlob = base64ToBlob(preparedFileBase64, preparedMimeType);
 
   const preparedFile = new File([preparedBlob], preparedFileName, {
     type: preparedMimeType,
   });
 
-  /**
-   * KROK 3:
-   * Dashboard pošle prepared Excel do hlavnej analyze route.
-   * Dôležité: route má čítať hárok DATA_CLEAN.
-   */
-  const analyzeFormData = new FormData();
+  const cleanRows = await readPreparedExcelCleanRows(preparedFile);
 
-  analyzeFormData.append('module', 'data');
-  analyzeFormData.append('prompt', promptText);
-  analyzeFormData.append('assignment', userText || '');
-  analyzeFormData.append('analysisGoal', userText || '');
-  analyzeFormData.append('dataDescription', userText || '');
-
-  analyzeFormData.append('language', workLanguage);
-  analyzeFormData.append('outputLanguage', workLanguage);
-  analyzeFormData.append('systemLanguage', systemLanguage);
-  analyzeFormData.append('interfaceLanguage', systemLanguage);
-  analyzeFormData.append('workLanguage', workLanguage);
-
-  analyzeFormData.append('profile', JSON.stringify(profileForApi || {}));
-  analyzeFormData.append('activeProfile', JSON.stringify(profileForApi || {}));
-  analyzeFormData.append('profileContext', buildProfileBlock(profileForApi));
-
-  if (profileForApi?.id) {
-    analyzeFormData.append('projectId', profileForApi.id);
-  }
-
-  analyzeFormData.append('source', 'prepared');
-  analyzeFormData.append('sheetName', 'DATA_CLEAN');
-  analyzeFormData.append('preparedFileName', preparedFileName);
-  analyzeFormData.append('preparedRows', String(prepareResult?.rows || 0));
-  analyzeFormData.append('preparedColumns', String(prepareResult?.columns || 0));
-  analyzeFormData.append(
-    'prepareWarnings',
-    JSON.stringify(prepareResult?.warnings || []),
-  );
-  analyzeFormData.append(
-    'prepareQualityReport',
-    JSON.stringify(prepareResult?.qualityReport || []),
-  );
-
-  analyzeFormData.append('file', preparedFile, preparedFile.name);
-  analyzeFormData.append('files', preparedFile, preparedFile.name);
-
-  const analyzeResponse = await fetch('/api/analyze-data', {
-    method: 'POST',
-    body: analyzeFormData,
-  });
-
-  if (!analyzeResponse.ok) {
-    throw new Error(await readApiErrorResponse(analyzeResponse));
-  }
-
-  const data = (await analyzeResponse.json()) as ApiAnalysisResponse;
-
-  if (data?.ok === false) {
+  if (!cleanRows.length) {
     throw new Error(
-      data?.error ||
-        data?.message ||
-        'Analýza pripravených dát zlyhala.',
+      'Z pripraveného súboru sa nepodarilo načítať hárok DATA_CLEAN alebo hárok neobsahuje žiadne riadky.',
     );
   }
 
-  const normalized = normalizeAnalysisResult({
-    ...data,
+  const columns = getDashboardColumnNames(cleanRows);
+
+  const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
+    alpha: 0.05,
+    language: workLanguage,
+    profile: profileForApi || {},
+    assignment: userText || '',
+    source: 'prepared-raw-data',
+    sheetName: 'DATA_CLEAN',
+    includeItemDescriptives: true,
+    includeFrequencies: true,
+    autoDetectScales: true,
+    fallbackToNumericVariables: true,
+  } as any);
+
+  const normalized = {
+    ok: true,
+    title: 'Výsledky analýzy dát',
+
+    summary: [
+      `Raw dáta boli najprv pripravené do súboru: ${preparedFileName}.`,
+      'Štatistika bola vypočítaná z hárku DATA_CLEAN.',
+      `Počet riadkov: ${cleanRows.length}.`,
+      `Počet premenných/stĺpcov: ${columns.length}.`,
+      `Frekvenčné tabuľky: ${
+        Array.isArray((statisticalAnalysis as any)?.frequencies)
+          ? (statisticalAnalysis as any).frequencies.length
+          : 0
+      }.`,
+      `Reliabilita: ${
+        Array.isArray((statisticalAnalysis as any)?.reliability)
+          ? (statisticalAnalysis as any).reliability.length
+          : 0
+      }.`,
+      `Spearmanove korelácie: ${
+        Array.isArray((statisticalAnalysis as any)?.correlations?.spearman)
+          ? (statisticalAnalysis as any).correlations.spearman.length
+          : 0
+      }.`,
+    ].join('\n'),
+
+    dataDescription: `Pripravený dátový súbor obsahuje ${cleanRows.length} riadkov a ${columns.length} stĺpcov.`,
+
+    variables: columns.map((column) => ({
+      name: column,
+      variable: column,
+    })),
+
+    frequencies: (statisticalAnalysis as any)?.frequencies || [],
+    frequencyTables: (statisticalAnalysis as any)?.frequencies || [],
+
+    itemDescriptives: (statisticalAnalysis as any)?.itemDescriptives || [],
+    scaleScores: (statisticalAnalysis as any)?.scaleScores || [],
+    scaleDescriptives: (statisticalAnalysis as any)?.scaleDescriptives || [],
+    normality: (statisticalAnalysis as any)?.normality || [],
+    reliability: (statisticalAnalysis as any)?.reliability || [],
+
+    pearsonCorrelations:
+      (statisticalAnalysis as any)?.correlations?.pearson || [],
+    spearmanCorrelations:
+      (statisticalAnalysis as any)?.correlations?.spearman || [],
+    recommendedCorrelations:
+      (statisticalAnalysis as any)?.correlations?.recommended || [],
+
+    parametricGroupTests:
+      (statisticalAnalysis as any)?.groupTests?.parametric || [],
+    nonParametricGroupTests:
+      (statisticalAnalysis as any)?.groupTests?.nonParametric || [],
+    recommendedGroupTests:
+      (statisticalAnalysis as any)?.groupTests?.recommended || [],
+
+    statisticalAnalysis,
+
+    practicalText: [
+      'Raw dáta boli najprv pripravené a vyčistené do samostatného Excel súboru.',
+      'Štatistická analýza bola následne vypočítaná až z pripraveného hárku DATA_CLEAN.',
+      `Analyzované súbory: ${allowedDataFiles.map((file) => file.name).join(', ')}.`,
+      `Počet riadkov v pripravených dátach: ${cleanRows.length}.`,
+      `Počet premenných: ${columns.length}.`,
+    ].join('\n'),
+
+    interpretation: [
+      'Výsledky analýzy vychádzajú z pripravených raw dát.',
+      'Do praktickej časti je vhodné vložiť frekvenčné tabuľky, deskriptívnu štatistiku, reliabilitu škál, korelačnú analýzu a skupinové testy podľa charakteru premenných.',
+    ].join('\n'),
+
+    warnings: [
+      ...(Array.isArray(prepareResult?.warnings)
+        ? prepareResult.warnings
+        : []),
+      ...(Array.isArray((statisticalAnalysis as any)?.warnings)
+        ? (statisticalAnalysis as any).warnings
+        : []),
+    ],
+
     preparedFile: {
       fileName: preparedFileName,
+      base64: preparedFileBase64,
       mimeType: preparedMimeType,
-      rows: prepareResult?.rows || 0,
-      columns: prepareResult?.columns || 0,
+      rows: prepareResult?.rows || cleanRows.length,
+      columns: prepareResult?.columns || columns.length,
       sheets: prepareResult?.sheets || [],
-      warnings: prepareResult?.warnings || [],
       qualityReport: prepareResult?.qualityReport || [],
+      warnings: prepareResult?.warnings || [],
     },
-  });
+
+    files: allowedDataFiles.map((file) => ({
+      fileName: file.name,
+      size: file.size,
+      type: file.type,
+    })),
+
+    extractedFiles: allowedDataFiles.map((file) => file.name),
+
+    meta: {
+      rows: cleanRows.length,
+      columns: columns.length,
+      source: 'prepared-raw-data',
+      preparedFileName,
+      preparedSheetName: 'DATA_CLEAN',
+      generatedAt: new Date().toISOString(),
+      profileTitle: profileForApi?.title || '',
+      profileId: profileForApi?.id || null,
+    },
+  } as unknown as AnalysisResult;
 
   const outputText = createAnalysisOutputText(normalized);
 
@@ -3689,6 +3686,18 @@ if (activeModule === 'data') {
   try {
     localStorage.setItem('latest_generated_work_text', outputText);
     localStorage.setItem('last_ai_output', outputText);
+    localStorage.setItem(
+      'zedpera_last_prepared_data',
+      JSON.stringify({
+        fileName: preparedFileName,
+        mimeType: preparedMimeType,
+        rows: cleanRows.length,
+        columns: columns.length,
+        sheets: prepareResult?.sheets || [],
+        warnings: prepareResult?.warnings || [],
+        qualityReport: prepareResult?.qualityReport || [],
+      }),
+    );
   } catch {
     // localStorage nemusí byť dostupný
   }
@@ -3703,15 +3712,15 @@ if (activeModule === 'data') {
       preparedFile: {
         fileName: preparedFileName,
         mimeType: preparedMimeType,
-        rows: prepareResult?.rows || 0,
-        columns: prepareResult?.columns || 0,
+        rows: cleanRows.length,
+        columns: columns.length,
         sheets: prepareResult?.sheets || [],
         warnings: prepareResult?.warnings || [],
         qualityReport: prepareResult?.qualityReport || [],
       },
       profileTitle: profileForApi?.title || '',
       profileId: profileForApi?.id || null,
-      attachedFiles: dataFiles.map((file) => ({
+      attachedFiles: allowedDataFiles.map((file) => ({
         name: file.name,
         size: file.size,
         type: file.type,
@@ -4125,44 +4134,367 @@ const downloadAnalysisExport = async (format: 'word' | 'pdf' | 'xlsx') => {
     return;
   }
 
-  try {
-    const response = await fetch('/api/analyze-data', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        action: 'export',
-        format: format === 'xlsx' ? 'excel' : format,
-        title: analysisResult.title || 'Výsledky analýzy dát',
-        exportMode: 'jasp',
-        result: analysisResult,
-      }),
-    });
+  const safeText = (value: unknown): string => {
+    if (value === null || value === undefined) return '';
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || 'Export analýzy sa nepodarilo vytvoriť.');
+    if (typeof value === 'string') return value;
+
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
     }
 
-    const blob = await response.blob();
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  };
 
-    const extension =
-      format === 'word' ? 'doc' : format === 'pdf' ? 'pdf' : 'xlsx';
+  const escapeHtml = (value: unknown): string => {
+    return safeText(value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  };
 
-    const mimeType =
-      format === 'word'
-        ? 'application/msword'
-        : format === 'pdf'
-          ? 'application/pdf'
-          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  const normalizeRows = (value: unknown): Array<Record<string, unknown>> => {
+    if (!Array.isArray(value)) return [];
 
-    const fileName = `vysledky-analyzy-dat.${extension}`;
-    const url = URL.createObjectURL(new Blob([blob], { type: mimeType }));
+    return value
+      .map((item) => {
+        if (item && typeof item === 'object' && !Array.isArray(item)) {
+          return item as Record<string, unknown>;
+        }
+
+        return {
+          hodnota: item,
+        };
+      })
+      .filter((row) => Object.keys(row).length > 0);
+  };
+
+  const collectExportTables = (): Array<{
+    title: string;
+    rows: Array<Record<string, unknown>>;
+  }> => {
+    const result = analysisResult as any;
+
+    const tables: Array<{
+      title: string;
+      rows: Array<Record<string, unknown>>;
+    }> = [];
+
+    const pushTable = (title: string, rowsValue: unknown) => {
+      const rows = normalizeRows(rowsValue);
+
+      if (rows.length > 0) {
+        tables.push({
+          title,
+          rows,
+        });
+      }
+    };
+
+    pushTable('Premenné', result.variables);
+    pushTable('Frekvenčné tabuľky', result.frequencies || result.frequencyTables);
+    pushTable('Deskriptívna štatistika položiek', result.itemDescriptives);
+    pushTable('Skóre škál a subškál', result.scaleScores);
+    pushTable('Deskriptívna štatistika škál', result.scaleDescriptives);
+    pushTable('Normalita dát', result.normality);
+    pushTable('Reliabilita škál', result.reliability);
+    pushTable('Pearsonove korelácie', result.pearsonCorrelations);
+    pushTable('Spearmanove korelácie', result.spearmanCorrelations);
+    pushTable('Odporúčané korelácie', result.recommendedCorrelations);
+    pushTable('Parametrické skupinové testy', result.parametricGroupTests);
+    pushTable('Neparametrické skupinové testy', result.nonParametricGroupTests);
+    pushTable('Odporúčané skupinové testy', result.recommendedGroupTests);
+    pushTable('Štatistické testy', result.statisticalTests || result.hypothesisTests);
+    pushTable('Upozornenia', result.warnings);
+
+    if (result.statisticalAnalysis) {
+      pushTable(
+        'Statistical Analysis - Frequencies',
+        result.statisticalAnalysis.frequencies,
+      );
+
+      pushTable(
+        'Statistical Analysis - Item Descriptives',
+        result.statisticalAnalysis.itemDescriptives,
+      );
+
+      pushTable(
+        'Statistical Analysis - Scale Scores',
+        result.statisticalAnalysis.scaleScores,
+      );
+
+      pushTable(
+        'Statistical Analysis - Scale Descriptives',
+        result.statisticalAnalysis.scaleDescriptives,
+      );
+
+      pushTable(
+        'Statistical Analysis - Normality',
+        result.statisticalAnalysis.normality,
+      );
+
+      pushTable(
+        'Statistical Analysis - Reliability',
+        result.statisticalAnalysis.reliability,
+      );
+
+      pushTable(
+        'Statistical Analysis - Pearson',
+        result.statisticalAnalysis.correlations?.pearson,
+      );
+
+      pushTable(
+        'Statistical Analysis - Spearman',
+        result.statisticalAnalysis.correlations?.spearman,
+      );
+
+      pushTable(
+        'Statistical Analysis - Recommended Correlations',
+        result.statisticalAnalysis.correlations?.recommended,
+      );
+
+      pushTable(
+        'Statistical Analysis - Parametric Tests',
+        result.statisticalAnalysis.groupTests?.parametric,
+      );
+
+      pushTable(
+        'Statistical Analysis - Nonparametric Tests',
+        result.statisticalAnalysis.groupTests?.nonParametric,
+      );
+
+      pushTable(
+        'Statistical Analysis - Recommended Tests',
+        result.statisticalAnalysis.groupTests?.recommended,
+      );
+    }
+
+    const seen = new Set<string>();
+
+    return tables.filter((table) => {
+      const signature = `${table.title}-${table.rows.length}-${Object.keys(
+        table.rows[0] || {},
+      ).join('|')}`;
+
+      if (seen.has(signature)) return false;
+
+      seen.add(signature);
+      return true;
+    });
+  };
+
+  const createHtmlTable = (
+    title: string,
+    rows: Array<Record<string, unknown>>,
+  ): string => {
+    if (!rows.length) return '';
+
+    const columns = Array.from(
+      new Set(rows.flatMap((row) => Object.keys(row))),
+    );
+
+    const headerHtml = columns
+      .map(
+        (column) =>
+          `<th>${escapeHtml(column)}</th>`,
+      )
+      .join('');
+
+    const rowsHtml = rows
+      .map((row) => {
+        const cellsHtml = columns
+          .map((column) => `<td>${escapeHtml(row[column])}</td>`)
+          .join('');
+
+        return `<tr>${cellsHtml}</tr>`;
+      })
+      .join('');
+
+    return `
+      <h2>${escapeHtml(title)}</h2>
+      <table>
+        <thead>
+          <tr>${headerHtml}</tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    `;
+  };
+
+  const createFullHtml = (): string => {
+    const result = analysisResult as any;
+    const tables = collectExportTables();
+
+    const summary = safeText(result.summary);
+    const dataDescription = safeText(result.dataDescription);
+    const practicalText = safeText(result.practicalText);
+    const interpretation = safeText(result.interpretation);
+    const fullText = safeText(result.fullText);
+
+    const tablesHtml = tables
+      .map((table) => createHtmlTable(table.title, table.rows))
+      .join('\n');
+
+    return `
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(result.title || 'Výsledky analýzy dát')}</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.55;
+      color: #111827;
+      padding: 36px;
+    }
+
+    h1 {
+      font-size: 22pt;
+      margin: 0 0 18px 0;
+      color: #0f172a;
+    }
+
+    h2 {
+      margin-top: 28px;
+      margin-bottom: 10px;
+      font-size: 15pt;
+      color: #1e3a8a;
+      border-bottom: 1px solid #cbd5e1;
+      padding-bottom: 6px;
+    }
+
+    h3 {
+      margin-top: 18px;
+      font-size: 12pt;
+      color: #334155;
+    }
+
+    p {
+      margin: 0 0 10px 0;
+      white-space: pre-wrap;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 22px 0;
+      page-break-inside: auto;
+      font-size: 9pt;
+    }
+
+    th {
+      background: #1e293b;
+      color: white;
+      font-weight: 700;
+      text-align: left;
+      padding: 7px;
+      border: 1px solid #94a3b8;
+    }
+
+    td {
+      padding: 6px;
+      border: 1px solid #cbd5e1;
+      vertical-align: top;
+    }
+
+    tr:nth-child(even) td {
+      background: #f8fafc;
+    }
+
+    .box {
+      border: 1px solid #cbd5e1;
+      background: #f8fafc;
+      padding: 14px;
+      border-radius: 10px;
+      margin-bottom: 16px;
+      white-space: pre-wrap;
+    }
+
+    @media print {
+      body {
+        padding: 18mm;
+      }
+
+      table {
+        page-break-inside: auto;
+      }
+
+      tr {
+        page-break-inside: avoid;
+        page-break-after: auto;
+      }
+
+      thead {
+        display: table-header-group;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(result.title || 'Výsledky analýzy dát')}</h1>
+
+  <h2>Súhrn</h2>
+  <div class="box">${escapeHtml(summary || 'Súhrn nie je dostupný.')}</div>
+
+  ${
+    dataDescription
+      ? `
+  <h2>Opis dát</h2>
+  <div class="box">${escapeHtml(dataDescription)}</div>
+  `
+      : ''
+  }
+
+  ${
+    practicalText
+      ? `
+  <h2>Text do praktickej časti</h2>
+  <div class="box">${escapeHtml(practicalText)}</div>
+  `
+      : ''
+  }
+
+  ${
+    interpretation
+      ? `
+  <h2>Interpretácia</h2>
+  <div class="box">${escapeHtml(interpretation)}</div>
+  `
+      : ''
+  }
+
+  ${tablesHtml}
+
+  ${
+    fullText
+      ? `
+  <h2>Kompletný textový výstup</h2>
+  <div class="box">${escapeHtml(fullText)}</div>
+  `
+      : ''
+  }
+</body>
+</html>
+`;
+  };
+
+  const triggerDownload = (blob: Blob, fileName: string) => {
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
 
     link.href = url;
     link.download = fileName;
+    link.rel = 'noopener';
 
     document.body.appendChild(link);
     link.click();
@@ -4171,8 +4503,118 @@ const downloadAnalysisExport = async (format: 'word' | 'pdf' | 'xlsx') => {
     window.setTimeout(() => {
       URL.revokeObjectURL(url);
     }, 1000);
+  };
+
+  try {
+    const fileBase = 'vysledky-analyzy-dat';
+
+    if (format === 'word') {
+      const html = createFullHtml();
+
+      const blob = new Blob([html], {
+        type: 'application/msword;charset=utf-8',
+      });
+
+      triggerDownload(blob, `${fileBase}.doc`);
+      return;
+    }
+
+    if (format === 'pdf') {
+      const html = createFullHtml();
+      const printWindow = window.open('', '_blank');
+
+      if (!printWindow) {
+        alert(
+          'Prehliadač zablokoval otvorenie PDF okna. Povoľte vyskakovacie okná.',
+        );
+        return;
+      }
+
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+
+      printWindow.onload = () => {
+        printWindow.focus();
+        printWindow.print();
+      };
+
+      return;
+    }
+
+    if (format === 'xlsx') {
+      const XLSX = await import('xlsx');
+
+      const workbook = XLSX.utils.book_new();
+      const result = analysisResult as any;
+      const tables = collectExportTables();
+
+      const summaryRows = [
+        {
+          položka: 'Názov',
+          hodnota: result.title || 'Výsledky analýzy dát',
+        },
+        {
+          položka: 'Súhrn',
+          hodnota: safeText(result.summary),
+        },
+        {
+          položka: 'Opis dát',
+          hodnota: safeText(result.dataDescription),
+        },
+        {
+          položka: 'Text do praktickej časti',
+          hodnota: safeText(result.practicalText),
+        },
+        {
+          položka: 'Interpretácia',
+          hodnota: safeText(result.interpretation),
+        },
+        {
+          položka: 'Vygenerované',
+          hodnota: new Date().toLocaleString('sk-SK'),
+        },
+      ];
+
+      const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+      XLSX.utils.book_append_sheet(workbook, summarySheet, 'Súhrn');
+
+      tables.forEach((table, index) => {
+        const sheetNameBase =
+          table.title
+            .replace(/[\\/?*[\]:]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 28) || `Tabuľka ${index + 1}`;
+
+        const safeSheetName =
+          sheetNameBase.length > 0
+            ? sheetNameBase
+            : `Tabuľka ${index + 1}`;
+
+        const worksheet = XLSX.utils.json_to_sheet(table.rows);
+
+        XLSX.utils.book_append_sheet(
+          workbook,
+          worksheet,
+          `${safeSheetName}`.slice(0, 31),
+        );
+      });
+
+      const excelBuffer = XLSX.write(workbook, {
+        bookType: 'xlsx',
+        type: 'array',
+      });
+
+      const blob = new Blob([excelBuffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+
+      triggerDownload(blob, `${fileBase}.xlsx`);
+    }
   } catch (error) {
-    console.error(error);
+    console.error('ANALYSIS_EXPORT_ERROR:', error);
+
     alert(
       error instanceof Error
         ? error.message

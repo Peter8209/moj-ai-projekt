@@ -2824,6 +2824,9 @@ useEffect(() => {
   }
 }, [searchParams, startNewWork]);
 
+
+
+
 async function saveHistoryItem(inputData: {
   module: ModuleKey;
   title: string;
@@ -5586,10 +5589,11 @@ const downloadExcel = () => {
           ) : null}
 
           <AnalysisResultsModal
-            open={analysisModalOpen}
-            result={analysisResult}
-            onClose={() => setAnalysisModalOpen(false)}
-          />
+  open={analysisModalOpen}
+  result={analysisResult}
+  preparedDataFile={preparedDataFile}
+  onClose={() => setAnalysisModalOpen(false)}
+/>
         </>
       );
     }

@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 type RowValue = string | number | boolean | null;
 
@@ -252,25 +252,361 @@ function detectHeaderRow(rows: unknown[][]): number {
   return bestIndex;
 }
 
+
+function looksLikeQuestionColumn(header: string): boolean {
+  const normalized = removeDiacritics(String(header || ''))
+    .toLowerCase()
+    .trim();
+
+  return (
+    normalized.includes('otaz') ||
+    normalized.includes('otáz') ||
+    normalized.includes('polozk') ||
+    normalized.includes('položk') ||
+    normalized.includes('item') ||
+    normalized.includes('question') ||
+    normalized.includes('tvrden') ||
+    normalized.includes('vyrok') ||
+    normalized.includes('výrok') ||
+    normalized.includes('skore') ||
+    normalized.includes('skóre') ||
+    normalized.includes('spokoj') ||
+    normalized.includes('pohod') ||
+    normalized.includes('well') ||
+    normalized.includes('being') ||
+    normalized.includes('praca') ||
+    normalized.includes('práca') ||
+    normalized.includes('zamestn') ||
+    normalized.includes('nadriaden') ||
+    normalized.includes('benefit') ||
+    normalized.includes('benefitov') ||
+    normalized.includes('plat') ||
+    normalized.includes('mzda') ||
+    normalized.includes('odmen') ||
+    normalized.includes('uznanie') ||
+    normalized.includes('povysen') ||
+    normalized.includes('povýšen') ||
+    normalized.includes('kolegov') ||
+    normalized.includes('spolupracov') ||
+    normalized.includes('komunik') ||
+    normalized.includes('podmien') ||
+    normalized.includes('organizac') ||
+    normalized.includes('vykonavam') ||
+    normalized.includes('vykonávam') ||
+    normalized.includes('nadšen') ||
+    normalized.includes('nadsen') ||
+    normalized.includes('energie') ||
+    normalized.includes('silny') ||
+    normalized.includes('silný') ||
+    normalized.includes('cas rychlo') ||
+    normalized.includes('čas rýchlo')
+  );
+}
+
+function isLikelyDemographicColumn(header: string): boolean {
+  const normalized = removeDiacritics(String(header || ''))
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[^\w]/g, '');
+
+  return (
+    normalized === 'id' ||
+    normalized === 'respondent' ||
+    normalized === 'respondentid' ||
+    normalized === 'cislo' ||
+    normalized === 'cislodotaznika' ||
+    normalized === 'poradie' ||
+    normalized === 'poradovecislo' ||
+    normalized === 'index' ||
+    normalized === 'vek' ||
+    normalized === 'age' ||
+    normalized === 'pohlavie' ||
+    normalized === 'gender' ||
+    normalized === 'sex' ||
+    normalized === 'rodinnystav' ||
+    normalized === 'maritalstatus' ||
+    normalized === 'stav' ||
+    normalized === 'typpodniku' ||
+    normalized === 'typfirmy' ||
+    normalized === 'companytype' ||
+    normalized.includes('respondent') ||
+    normalized.includes('cislo') ||
+    normalized.includes('poradie') ||
+    normalized.includes('vzdelanie') ||
+    normalized.includes('pozicia') ||
+    normalized.includes('pracovnapozicia') ||
+    normalized.includes('dlzkapraxe') ||
+    normalized.includes('dlžkapraxe') ||
+    normalized.includes('prax') ||
+    normalized.includes('bydlisko') ||
+    normalized.includes('kraj') ||
+    normalized.includes('mesto') ||
+    normalized.includes('okres') ||
+    normalized.includes('datum') ||
+    normalized.includes('casova') ||
+    normalized.includes('timestamp')
+  );
+}
+
+function normalizeQuestionnaireHeader(header: string): {
+  normalized: string;
+  compact: string;
+} {
+  const normalized = removeDiacritics(String(header || ''))
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^\w]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  return {
+    normalized,
+    compact: normalized.replace(/_/g, ''),
+  };
+}
+
+function getExplicitQuestionnaireColumnType(header: string): 'WEM' | 'JSS' | null {
+  const { compact } = normalizeQuestionnaireHeader(header);
+
+  if (
+    /^wem(?:wbs)?0?(\d{1,2})$/.test(compact) ||
+    /^wem(?:wbs)?_?0?(\d{1,2})$/.test(compact) ||
+    /^w0?(\d{1,2})$/.test(compact) ||
+    /wem(?:wbs)?(?:polozka|item|otazka|question)?0?(\d{1,2})/.test(compact)
+  ) {
+    return 'WEM';
+  }
+
+  if (
+    /^jss0?(\d{1,2})$/.test(compact) ||
+    /^jss_?0?(\d{1,2})$/.test(compact) ||
+    /^js0?(\d{1,2})$/.test(compact) ||
+    /jss(?:polozka|item|otazka|question)?0?(\d{1,2})/.test(compact)
+  ) {
+    return 'JSS';
+  }
+
+  const rawLower = removeDiacritics(header).toLowerCase();
+
+  if (/(wem|wemwbs|well|pohod|dusev|psychick).*?(\d{1,2})/.test(rawLower)) {
+    return 'WEM';
+  }
+
+  if (/(jss|job satisfaction|pracovn|spokoj|zamestn).*?(\d{1,2})/.test(rawLower)) {
+    return 'JSS';
+  }
+
+  return null;
+}
+
+function autoMapQuestionnaireColumnsByOrder(
+  rawHeaders: unknown[],
+  mappedHeaders: string[],
+): {
+  headers: string[];
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const nextHeaders = [...mappedHeaders];
+
+  const hasAnyWem =
+    nextHeaders.some((header) => /^WEM\d+$/.test(header)) ||
+    nextHeaders.includes('WEMWBS_skore');
+
+  const hasAnyJss =
+    nextHeaders.some((header) => /^JSS\d+$/.test(header)) ||
+    nextHeaders.includes('JSS_skore');
+
+  const alreadyMappedIndexes = new Set<number>();
+
+  nextHeaders.forEach((header, index) => {
+    if (
+      header === 'ID' ||
+      header === 'Vek' ||
+      header === 'POHLAVIE' ||
+      header === 'RODINNY_STAV' ||
+      header === 'TYP_PODNIKU' ||
+      /^WEM\d+$/.test(header) ||
+      /^JSS\d+$/.test(header)
+    ) {
+      alreadyMappedIndexes.add(index);
+    }
+  });
+
+  const candidateIndexes = rawHeaders
+    .map((header, index) => ({
+      header: String(header || '').trim(),
+      index,
+    }))
+    .filter((item) => {
+      if (!item.header) return false;
+      if (alreadyMappedIndexes.has(item.index)) return false;
+      if (isLikelyDemographicColumn(item.header)) return false;
+
+      /*
+       * Zámerne pripúšťame aj všeobecné dotazníkové stĺpce bez kľúčových slov.
+       * Mnohé exporty z Forms / Google Forms majú v hlavičke iba plný text otázky,
+       * nie kód WEM1/JSS1. Preto sa po odfiltrovaní demografie mapuje podľa poradia.
+       */
+      return looksLikeQuestionColumn(item.header) || true;
+    })
+    .map((item) => item.index);
+
+  /*
+   * Ak máme explicitné názvy WEM/JSS, poradie už netreba agresívne prepisovať.
+   */
+  if (hasAnyWem && hasAnyJss) {
+    return {
+      headers: nextHeaders,
+      warnings,
+    };
+  }
+
+  /*
+   * Variant 1: súbor obsahuje WEMWBS + JSS spolu.
+   * Prvých 14 dotazníkových stĺpcov po demografii = WEM1–WEM14.
+   * Ďalších 36 dotazníkových stĺpcov = JSS1–JSS36.
+   */
+  if (!hasAnyWem && !hasAnyJss && candidateIndexes.length >= 50) {
+    const wemIndexes = candidateIndexes.slice(0, 14);
+    const jssIndexes = candidateIndexes.slice(14, 50);
+
+    wemIndexes.forEach((columnIndex, itemIndex) => {
+      nextHeaders[columnIndex] = `WEM${itemIndex + 1}`;
+      alreadyMappedIndexes.add(columnIndex);
+    });
+
+    jssIndexes.forEach((columnIndex, itemIndex) => {
+      nextHeaders[columnIndex] = `JSS${itemIndex + 1}`;
+      alreadyMappedIndexes.add(columnIndex);
+    });
+
+    warnings.push(
+      'Súbor pravdepodobne obsahuje WEMWBS + JSS. Položky WEM1–WEM14 a JSS1–JSS36 boli vytvorené automaticky podľa poradia stĺpcov.',
+    );
+
+    return {
+      headers: nextHeaders,
+      warnings,
+    };
+  }
+
+  /*
+   * Variant 2: súbor obsahuje iba JSS.
+   * Musí byť pred WEM-only vetvou, aby sa 36 položiek nemapovalo nesprávne ako WEM + zvyšok.
+   */
+  if (!hasAnyWem && !hasAnyJss && candidateIndexes.length >= 36) {
+    const jssIndexes = candidateIndexes.slice(0, 36);
+
+    jssIndexes.forEach((columnIndex, itemIndex) => {
+      nextHeaders[columnIndex] = `JSS${itemIndex + 1}`;
+      alreadyMappedIndexes.add(columnIndex);
+    });
+
+    warnings.push(
+      'Súbor pravdepodobne obsahuje iba JSS dotazník. Položky JSS1 až JSS36 boli vytvorené automaticky podľa poradia stĺpcov.',
+    );
+
+    return {
+      headers: nextHeaders,
+      warnings,
+    };
+  }
+
+  /*
+   * Variant 3: súbor obsahuje iba WEMWBS.
+   */
+  if (!hasAnyWem && !hasAnyJss && candidateIndexes.length >= 14) {
+    const wemIndexes = candidateIndexes.slice(0, 14);
+
+    wemIndexes.forEach((columnIndex, itemIndex) => {
+      nextHeaders[columnIndex] = `WEM${itemIndex + 1}`;
+      alreadyMappedIndexes.add(columnIndex);
+    });
+
+    warnings.push(
+      'Súbor pravdepodobne obsahuje iba WEMWBS dotazník. Položky WEM1 až WEM14 boli vytvorené automaticky podľa poradia stĺpcov.',
+    );
+
+    return {
+      headers: nextHeaders,
+      warnings,
+    };
+  }
+
+  /*
+   * Variant 4: už existuje WEM, ale JSS chýba – zvyšné dotazníkové stĺpce mapujeme na JSS.
+   */
+  if (hasAnyWem && !hasAnyJss) {
+    const remainingCandidateIndexes = candidateIndexes.filter(
+      (index) => !alreadyMappedIndexes.has(index),
+    );
+
+    if (remainingCandidateIndexes.length >= 36) {
+      const jssIndexes = remainingCandidateIndexes.slice(0, 36);
+
+      jssIndexes.forEach((columnIndex, itemIndex) => {
+        nextHeaders[columnIndex] = `JSS${itemIndex + 1}`;
+        alreadyMappedIndexes.add(columnIndex);
+      });
+
+      warnings.push(
+        'Položky JSS1 až JSS36 boli doplnené automaticky podľa poradia zostávajúcich dotazníkových stĺpcov.',
+      );
+    }
+  }
+
+  /*
+   * Variant 5: už existuje JSS, ale WEM chýba – prvých 14 zvyšných stĺpcov mapujeme na WEM.
+   */
+  if (hasAnyJss && !hasAnyWem && candidateIndexes.length >= 14) {
+    const wemIndexes = candidateIndexes.slice(0, 14);
+
+    wemIndexes.forEach((columnIndex, itemIndex) => {
+      nextHeaders[columnIndex] = `WEM${itemIndex + 1}`;
+      alreadyMappedIndexes.add(columnIndex);
+    });
+
+    warnings.push(
+      'Položky WEM1 až WEM14 boli doplnené automaticky podľa poradia zostávajúcich dotazníkových stĺpcov.',
+    );
+  }
+
+  return {
+    headers: nextHeaders,
+    warnings,
+  };
+}
+
 function createUniqueHeaders(rawHeaders: unknown[]): {
   headers: string[];
   originalHeaders: string[];
   duplicateWarnings: string[];
 } {
   const used = new Map<string, number>();
-  const headers: string[] = [];
   const originalHeaders: string[] = [];
-  const duplicateWarnings: string[] = [];
 
-  rawHeaders.forEach((header, index) => {
+  const mappedHeaders = rawHeaders.map((header, index) => {
     const original =
       String(header ?? '').trim() || `Stĺpec_${index + 1}`;
 
-    const normalized = normalizeHeaderKey(original);
-    const mapped = mapColumnName(original, index);
+    originalHeaders.push(original);
 
-    const baseName =
-      mapped || normalized || `STLPEC_${index + 1}`;
+    return mapColumnName(original, index);
+  });
+
+  const orderMapping = autoMapQuestionnaireColumnsByOrder(
+    rawHeaders,
+    mappedHeaders,
+  );
+
+  const headers: string[] = [];
+  const duplicateWarnings: string[] = [...orderMapping.warnings];
+
+  orderMapping.headers.forEach((header, index) => {
+    const baseName = header || `STLPEC_${index + 1}`;
 
     const previousCount = used.get(baseName) ?? 0;
     used.set(baseName, previousCount + 1);
@@ -285,7 +621,6 @@ function createUniqueHeaders(rawHeaders: unknown[]): {
     }
 
     headers.push(finalName);
-    originalHeaders.push(original);
   });
 
   return {
@@ -296,23 +631,79 @@ function createUniqueHeaders(rawHeaders: unknown[]): {
 }
 
 function mapColumnName(originalHeader: string, index: number): string {
-  const normalized = normalizeHeaderKey(originalHeader);
+  const raw = String(originalHeader || '').trim();
+
+  const { normalized, compact } = normalizeQuestionnaireHeader(raw);
 
   if (STANDARD_COLUMN_MAP[normalized]) {
     return STANDARD_COLUMN_MAP[normalized];
   }
 
-  const wemMatch = normalized.match(/^wem(?:wbs)?_?(\d{1,2})$/i);
+  if (STANDARD_COLUMN_MAP[compact]) {
+    return STANDARD_COLUMN_MAP[compact];
+  }
 
-  if (wemMatch?.[1]) {
-    const number = Number(wemMatch[1]);
+  if (
+    compact === 'id' ||
+    compact === 'respondent' ||
+    compact === 'respondentid' ||
+    compact === 'cislo' ||
+    compact === 'cislodotaznika' ||
+    compact === 'poradie' ||
+    compact === 'poradovecislo' ||
+    compact === 'index'
+  ) {
+    return 'ID';
+  }
 
-    if (number >= 1 && number <= 14) {
-      return `WEM${number}`;
+  if (compact === 'vek' || compact === 'age') {
+    return 'Vek';
+  }
+
+  if (
+    compact === 'pohlavie' ||
+    compact === 'gender' ||
+    compact === 'sex'
+  ) {
+    return 'POHLAVIE';
+  }
+
+  if (
+    compact === 'rodinnystav' ||
+    compact === 'maritalstatus'
+  ) {
+    return 'RODINNY_STAV';
+  }
+
+  if (
+    compact === 'typpodniku' ||
+    compact === 'typfirmy' ||
+    compact === 'companytype'
+  ) {
+    return 'TYP_PODNIKU';
+  }
+
+  const wemPatterns = [
+    /^wem(?:wbs)?0?(\d{1,2})$/,
+    /^wem(?:wbs)?_?0?(\d{1,2})$/,
+    /^w0?(\d{1,2})$/,
+  ];
+
+  for (const pattern of wemPatterns) {
+    const match = compact.match(pattern);
+
+    if (match?.[1]) {
+      const number = Number(match[1]);
+
+      if (number >= 1 && number <= 14) {
+        return `WEM${number}`;
+      }
     }
   }
 
-  const wemTextMatch = normalized.match(/wem.*?(\d{1,2})/i);
+  const wemTextMatch = compact.match(
+    /wem(?:wbs)?(?:polozka|item|otazka|question)?0?(\d{1,2})/,
+  );
 
   if (wemTextMatch?.[1]) {
     const number = Number(wemTextMatch[1]);
@@ -322,20 +713,56 @@ function mapColumnName(originalHeader: string, index: number): string {
     }
   }
 
-  const jssMatch = normalized.match(/^jss_?(\d{1,2})$/i);
+  const jssPatterns = [
+    /^jss0?(\d{1,2})$/,
+    /^jss_?0?(\d{1,2})$/,
+    /^js0?(\d{1,2})$/,
+  ];
 
-  if (jssMatch?.[1]) {
-    const number = Number(jssMatch[1]);
+  for (const pattern of jssPatterns) {
+    const match = compact.match(pattern);
+
+    if (match?.[1]) {
+      const number = Number(match[1]);
+
+      if (number >= 1 && number <= 36) {
+        return `JSS${number}`;
+      }
+    }
+  }
+
+  const jssTextMatch = compact.match(
+    /jss(?:polozka|item|otazka|question)?0?(\d{1,2})/,
+  );
+
+  if (jssTextMatch?.[1]) {
+    const number = Number(jssTextMatch[1]);
 
     if (number >= 1 && number <= 36) {
       return `JSS${number}`;
     }
   }
 
-  const jssTextMatch = normalized.match(/jss.*?(\d{1,2})/i);
+  const rawLower = removeDiacritics(raw).toLowerCase();
 
-  if (jssTextMatch?.[1]) {
-    const number = Number(jssTextMatch[1]);
+  const wemLooseMatch = rawLower.match(
+    /(wem|wemwbs|well|pohod|dusev|psychick).*?(\d{1,2})/,
+  );
+
+  if (wemLooseMatch?.[2]) {
+    const number = Number(wemLooseMatch[2]);
+
+    if (number >= 1 && number <= 14) {
+      return `WEM${number}`;
+    }
+  }
+
+  const jssLooseMatch = rawLower.match(
+    /(jss|job satisfaction|pracovn|spokoj|zamestn).*?(\d{1,2})/,
+  );
+
+  if (jssLooseMatch?.[2]) {
+    const number = Number(jssLooseMatch[2]);
 
     if (number >= 1 && number <= 36) {
       return `JSS${number}`;
@@ -346,10 +773,7 @@ function mapColumnName(originalHeader: string, index: number): string {
     return `STLPEC_${index + 1}`;
   }
 
-  return normalized
-    .toUpperCase()
-    .replace(/^RODINNY_STAV$/, 'RODINNY_STAV')
-    .replace(/^TYP_PODNIKU$/, 'TYP_PODNIKU');
+  return normalized.toUpperCase();
 }
 
 function convertRowsToObjects(rows: unknown[][]): {

@@ -22,10 +22,37 @@ import {
 
 import type { AnalysisResult } from './analysisTypes';
 
+type PreparedDataFileLike = {
+  fileName?: string;
+  base64?: string;
+  mimeType?: string;
+  rows?: number;
+  columns?: number;
+  warnings?: string[];
+  sheets?: string[];
+  qualityReport?: unknown[];
+} | null;
+
 type Props = {
   open: boolean;
   result: AnalysisResult | null;
   onClose: () => void;
+
+  /**
+   * Voliteľný pripravený Excel z /api/analyze-data/prepare.
+   * Ak ho Dashboard pošle do modalu, profesionálny export doplní:
+   * - 02 raw-data,
+   * - 04 data-quality,
+   * - QUALITY_REPORT,
+   * - pôvodný DATA_RAW/DATA_CLEAN.
+   */
+  preparedDataFile?: PreparedDataFileLike;
+
+  /**
+   * Voliteľný externý handler z DashboardClient.tsx.
+   * Ak nie je poslaný, modal použije vlastný export cez /api/analyze-data/export.
+   */
+  onExportExcel?: () => void | Promise<void>;
 };
 
 type ExportFormat = 'word' | 'xls' | 'pdf' | 'raw';
@@ -670,6 +697,33 @@ function getPreparedDataset(result: AnalysisResult | null): PreparedDatasetLike 
   }
 
   return {};
+}
+
+function getPreparedDataFileFromResult(result: AnalysisResult | null): PreparedDataFileLike {
+  const raw = (result || {}) as Record<string, unknown>;
+
+  const candidates = [
+    raw.preparedDataFile,
+    raw.preparedFileData,
+    raw.preparedFile,
+    raw.preparedDatasetFile,
+  ];
+
+  for (const candidate of candidates) {
+    if (!isRecord(candidate)) continue;
+
+    const hasUsefulData =
+      typeof candidate.base64 === 'string' ||
+      typeof candidate.fileName === 'string' ||
+      Array.isArray(candidate.qualityReport) ||
+      Array.isArray(candidate.warnings);
+
+    if (hasUsefulData) {
+      return candidate as PreparedDataFileLike;
+    }
+  }
+
+  return null;
 }
 
 function getPreparedDatasetQualityRows(
@@ -4399,9 +4453,147 @@ function SimplePieChart({
   );
 }
 
+
+function getChartDataSource(result: AnalysisResult | null): Record<string, unknown> {
+  const raw = (result || {}) as any;
+  const statistical = raw.statisticalAnalysis || raw.stats || raw.analysisStats || {};
+
+  const chartData =
+    raw.chartData ||
+    statistical.chartData ||
+    raw.chartsData ||
+    raw.graphData ||
+    {};
+
+  return isRecord(chartData) ? chartData : {};
+}
+
+function normalizeChartDataRows(value: unknown): DataRow[] {
+  return safeArray(value)
+    .map((item, index) => {
+      if (isRecord(item)) {
+        const label = String(
+          item.label ||
+            item.name ||
+            item.variable ||
+            item.title ||
+            item.group ||
+            `Položka ${index + 1}`,
+        );
+
+        const rawValue =
+          item.value ??
+          item.count ??
+          item.mean ??
+          item.percent ??
+          item.percentage ??
+          item.cronbachAlpha ??
+          item.r ??
+          item.rho ??
+          item.coefficient ??
+          0;
+
+        const numericValue = toNumber(rawValue);
+
+        return {
+          ...item,
+          label,
+          value:
+            numericValue === null
+              ? 0
+              : Math.abs(numericValue),
+          originalValue: numericValue ?? rawValue,
+        };
+      }
+
+      return {
+        label: `Položka ${index + 1}`,
+        value: toNumber(item) ?? 0,
+        originalValue: item,
+      };
+    })
+    .filter((item) => toNumber(item.value) !== null && Math.abs(toNumber(item.value) || 0) > 0);
+}
+
+function pushChartDataBar(
+  charts: ReactNode[],
+  key: string,
+  title: string,
+  rows: DataRow[],
+) {
+  if (!rows.length) return;
+
+  charts.push(
+    <BarChart
+      key={key}
+      title={title}
+      data={rows}
+      labelKey="label"
+      valueKey="value"
+    />,
+  );
+}
+
 function ChartGallery({ result }: { result: AnalysisResult | null }) {
   const arrays = getResultArrays(result);
   const charts: ReactNode[] = [];
+  const chartData = getChartDataSource(result);
+
+  pushChartDataBar(
+    charts,
+    'api-chart-frequency-bars',
+    'Frekvenčné grafy z API',
+    normalizeChartDataRows(chartData.frequencyBars),
+  );
+
+  pushChartDataBar(
+    charts,
+    'api-chart-mean-bars',
+    'Priemery položiek z API',
+    normalizeChartDataRows(chartData.meanBars),
+  );
+
+  pushChartDataBar(
+    charts,
+    'api-chart-scale-score-bars',
+    'Priemery škál z API',
+    normalizeChartDataRows(chartData.scaleScoreBars),
+  );
+
+  pushChartDataBar(
+    charts,
+    'api-chart-subscale-score-bars',
+    'Priemery subškál z API',
+    normalizeChartDataRows(chartData.subscaleScoreBars),
+  );
+
+  pushChartDataBar(
+    charts,
+    'api-chart-reliability-bars',
+    'Reliabilita – Cronbach alfa z API',
+    normalizeChartDataRows(chartData.reliabilityBars),
+  );
+
+  pushChartDataBar(
+    charts,
+    'api-chart-correlation-bars',
+    'Korelácie z API',
+    normalizeChartDataRows(chartData.correlationBars),
+  );
+
+  pushChartDataBar(
+    charts,
+    'api-chart-normality-bars',
+    'Normalita z API',
+    normalizeChartDataRows(chartData.normalityBars),
+  );
+
+  pushChartDataBar(
+    charts,
+    'api-chart-missing-value-bars',
+    'Chýbajúce hodnoty z API',
+    normalizeChartDataRows(chartData.missingValueBars),
+  );
 
   arrays.frequencies.slice(0, 4).forEach((table, index) => {
     const rows = getFrequencyRows(table);
@@ -4731,6 +4923,8 @@ export default function AnalysisResultsModal({
   open,
   result,
   onClose,
+  preparedDataFile: preparedDataFileFromProps = null,
+  onExportExcel,
 }: Props) {
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
   const [selectedTable, setSelectedTable] = useState<TableSection | null>(null);
@@ -4738,6 +4932,10 @@ export default function AnalysisResultsModal({
   const arrays = useMemo(() => getResultArrays(result), [result]);
   const summaryLines = useMemo(() => getSummaryLines(result), [result]);
   const tableSections = useMemo(() => createTableSections(result), [result]);
+  const preparedDataFile = useMemo(
+    () => preparedDataFileFromProps || getPreparedDataFileFromResult(result),
+    [preparedDataFileFromProps, result],
+  );
 
   const overviewRef = useRef<HTMLDivElement | null>(null);
   const chartsRef = useRef<HTMLDivElement | null>(null);
@@ -4769,6 +4967,50 @@ export default function AnalysisResultsModal({
     };
   }, [open, onClose, selectedTable]);
 
+  async function exportProfessionalExcelFromModal() {
+    if (!result) return false;
+
+    if (onExportExcel) {
+      await onExportExcel();
+      return true;
+    }
+
+    const response = await fetch('/api/analyze-data/export', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        result,
+        analysisResult: result,
+        preparedDataFile,
+        exportFormat: 'excel',
+        format: 'excel',
+        type: 'excel',
+        fileName: 'ZEDPERA_profesionalny_export_analyzy_dat',
+      }),
+    });
+
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type') || '';
+      const errorText = contentType.includes('application/json')
+        ? JSON.stringify(await response.json())
+        : await response.text();
+
+      throw new Error(errorText || 'Profesionálny Excel export zlyhal.');
+    }
+
+    const blob = await response.blob();
+
+    if (blob.size === 0) {
+      throw new Error('Profesionálny Excel export je prázdny.');
+    }
+
+    downloadBlob(blob, 'ZEDPERA_profesionalny_export_analyzy_dat.xlsx');
+
+    return true;
+  }
+
   async function exportResult(format: ExportFormat) {
     if (!result) return;
 
@@ -4784,6 +5026,19 @@ export default function AnalysisResultsModal({
       });
 
       if (format === 'xls') {
+        try {
+          const exportedByServer = await exportProfessionalExcelFromModal();
+
+          if (exportedByServer) {
+            return;
+          }
+        } catch (serverExportError) {
+          console.warn(
+            'ANALYSIS_MODAL_SERVER_EXCEL_EXPORT_FALLBACK:',
+            serverExportError,
+          );
+        }
+
         const blob = await createClientExcelExportBlob({
           exportPayload,
           arrays,
@@ -4791,7 +5046,7 @@ export default function AnalysisResultsModal({
           professionalInterpretation,
         });
 
-        await assertValidXlsxBlob(blob, 'Excel export');
+        await assertValidXlsxBlob(blob, 'Excel fallback export');
         downloadBlob(blob, getFileName(format));
         return;
       }
@@ -5059,7 +5314,7 @@ export default function AnalysisResultsModal({
                 ) : (
                   <FileSpreadsheet className="h-4 w-4" />
                 )}
-                Excel
+                Profesionálny Excel
               </button>
 
               <button

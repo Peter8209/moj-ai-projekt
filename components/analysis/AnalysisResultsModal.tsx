@@ -4302,157 +4302,55 @@ function StatCard({
   );
 }
 
-function getChartColor(index: number): string {
+
+type ChartPoint = {
+  label: string;
+  value: number;
+  originalValue?: unknown;
+  description?: string;
+  group?: string;
+  meta?: Record<string, unknown>;
+};
+
+type ProfessionalChartSection = {
+  key: string;
+  title: string;
+  description: string;
+  items: ChartPoint[];
+  kind?: 'bar' | 'diverging' | 'pie' | 'gauge';
+  valueSuffix?: string;
+  limit?: number;
+};
+
+function getChartTone(index: number): string {
+  const tones = [
+    'from-blue-500 via-cyan-400 to-sky-300',
+    'from-violet-500 via-fuchsia-400 to-pink-300',
+    'from-emerald-500 via-teal-400 to-cyan-300',
+    'from-amber-500 via-orange-400 to-yellow-300',
+    'from-rose-500 via-pink-400 to-orange-300',
+    'from-indigo-500 via-blue-400 to-cyan-300',
+    'from-lime-500 via-emerald-400 to-teal-300',
+    'from-purple-500 via-violet-400 to-indigo-300',
+  ];
+
+  return tones[index % tones.length];
+}
+
+function getChartSolidColor(index: number): string {
   const colors = [
-    '#2563eb',
-    '#7c3aed',
-    '#059669',
-    '#f59e0b',
-    '#dc2626',
-    '#0891b2',
-    '#be185d',
-    '#4f46e5',
+    '#38bdf8',
+    '#a78bfa',
+    '#34d399',
+    '#fbbf24',
+    '#fb7185',
+    '#60a5fa',
+    '#a3e635',
+    '#c084fc',
   ];
 
   return colors[index % colors.length];
 }
-
-function BarChart({
-  title,
-  data,
-  valueKey,
-  labelKey,
-}: {
-  title: string;
-  data: DataRow[];
-  valueKey: string;
-  labelKey: string;
-}) {
-  const prepared = data
-    .map((row) => ({
-      label: valueToText(row[labelKey]),
-      value: toNumber(row[valueKey]) || 0,
-    }))
-    .filter((item) => item.value > 0)
-    .slice(0, 12);
-
-  const max = Math.max(...prepared.map((item) => item.value), 1);
-
-  if (!prepared.length) return null;
-
-  return (
-    <section className="rounded-[28px] border border-white/10 bg-[#0b1020] p-5 shadow-sm">
-      <h3 className="mb-4 flex items-center gap-2 text-lg font-black text-white">
-        <BarChart3 className="h-5 w-5 text-blue-300" />
-        {title}
-      </h3>
-
-      <div className="space-y-3">
-        {prepared.map((item, index) => (
-          <div key={`${item.label}-${index}`} className="grid gap-1">
-            <div className="flex items-center justify-between gap-3 text-xs">
-              <span className="truncate font-bold text-slate-200">
-                {item.label}
-              </span>
-
-              <span className="font-black text-white">
-                {formatNumber(item.value)}
-              </span>
-            </div>
-
-            <div className="h-3 overflow-hidden rounded-full bg-white/10">
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${Math.max((item.value / max) * 100, 3)}%`,
-                  backgroundColor: getChartColor(index),
-                }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function SimplePieChart({
-  title,
-  data,
-  valueKey,
-  labelKey,
-}: {
-  title: string;
-  data: DataRow[];
-  valueKey: string;
-  labelKey: string;
-}) {
-  const prepared = data
-    .map((row) => ({
-      label: valueToText(row[labelKey]),
-      value: toNumber(row[valueKey]) || 0,
-    }))
-    .filter((item) => item.value > 0)
-    .slice(0, 8);
-
-  const total = prepared.reduce((sum, item) => sum + item.value, 0);
-
-  if (!prepared.length || total <= 0) return null;
-
-  let offset = 0;
-
-  const gradient = prepared
-    .map((item, index) => {
-      const start = offset;
-      const percent = (item.value / total) * 100;
-      const end = start + percent;
-
-      offset = end;
-
-      return `${getChartColor(index)} ${start}% ${end}%`;
-    })
-    .join(', ');
-
-  return (
-    <section className="rounded-[28px] border border-white/10 bg-[#0b1020] p-5 shadow-sm">
-      <h3 className="mb-4 flex items-center gap-2 text-lg font-black text-white">
-        <PieChart className="h-5 w-5 text-violet-300" />
-        {title}
-      </h3>
-
-      <div className="grid gap-5 md:grid-cols-[180px_1fr] md:items-center">
-        <div
-          className="mx-auto h-40 w-40 rounded-full shadow-inner"
-          style={{
-            background: `conic-gradient(${gradient})`,
-          }}
-        />
-
-        <div className="space-y-2">
-          {prepared.map((item, index) => (
-            <div
-              key={`${item.label}-${index}`}
-              className="flex items-center justify-between gap-3 text-sm"
-            >
-              <span className="flex items-center gap-2 truncate text-slate-200">
-                <span
-                  className="h-3 w-3 shrink-0 rounded-full"
-                  style={{ backgroundColor: getChartColor(index) }}
-                />
-                {item.label}
-              </span>
-
-              <span className="font-black text-white">
-                {formatNumber(item.value)}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 
 function getChartDataSource(result: AnalysisResult | null): Record<string, unknown> {
   const raw = (result || {}) as any;
@@ -4468,133 +4366,102 @@ function getChartDataSource(result: AnalysisResult | null): Record<string, unkno
   return isRecord(chartData) ? chartData : {};
 }
 
-function normalizeChartDataRows(value: unknown): DataRow[] {
+function normalizeChartPoint(item: unknown, index: number): ChartPoint | null {
+  if (isRecord(item)) {
+    const label = String(
+      item.label ||
+        item.name ||
+        item.variable ||
+        item.scaleName ||
+        item.title ||
+        item.group ||
+        item.category ||
+        `Položka ${index + 1}`,
+    ).trim();
+
+    const rawValue =
+      item.value ??
+      item.count ??
+      item.mean ??
+      item.average ??
+      item.frequency ??
+      item.percent ??
+      item.percentage ??
+      item.validPercent ??
+      item.cronbachAlpha ??
+      item.alpha ??
+      item.r ??
+      item.rho ??
+      item.coefficient ??
+      item.statistic ??
+      0;
+
+    const numericValue = toNumber(rawValue);
+
+    if (!label || numericValue === null || !Number.isFinite(numericValue)) {
+      return null;
+    }
+
+    return {
+      label,
+      value: numericValue,
+      originalValue: rawValue,
+      description: String(
+        item.description ||
+          item.interpretation ||
+          item.recommendation ||
+          item.note ||
+          '',
+      ).trim(),
+      group: String(
+        item.group ||
+          item.category ||
+          item.type ||
+          item.method ||
+          '',
+      ).trim(),
+      meta: item,
+    };
+  }
+
+  const numericValue = toNumber(item);
+
+  if (numericValue === null || !Number.isFinite(numericValue)) {
+    return null;
+  }
+
+  return {
+    label: `Položka ${index + 1}`,
+    value: numericValue,
+    originalValue: item,
+  };
+}
+
+function normalizeChartDataRows(value: unknown): ChartPoint[] {
   return safeArray(value)
-    .map((item, index) => {
-      if (isRecord(item)) {
-        const label = String(
-          item.label ||
-            item.name ||
-            item.variable ||
-            item.title ||
-            item.group ||
-            `Položka ${index + 1}`,
-        );
-
-        const rawValue =
-          item.value ??
-          item.count ??
-          item.mean ??
-          item.percent ??
-          item.percentage ??
-          item.cronbachAlpha ??
-          item.r ??
-          item.rho ??
-          item.coefficient ??
-          0;
-
-        const numericValue = toNumber(rawValue);
-
-        return {
-          ...item,
-          label,
-          value:
-            numericValue === null
-              ? 0
-              : Math.abs(numericValue),
-          originalValue: numericValue ?? rawValue,
-        };
-      }
-
-      return {
-        label: `Položka ${index + 1}`,
-        value: toNumber(item) ?? 0,
-        originalValue: item,
-      };
-    })
-    .filter((item) => toNumber(item.value) !== null && Math.abs(toNumber(item.value) || 0) > 0);
+    .map((item, index) => normalizeChartPoint(item, index))
+    .filter((item): item is ChartPoint => Boolean(item))
+    .filter((item) => Number.isFinite(item.value));
 }
 
-function pushChartDataBar(
-  charts: ReactNode[],
-  key: string,
-  title: string,
-  rows: DataRow[],
+function createChartSection(
+  sections: ProfessionalChartSection[],
+  params: ProfessionalChartSection,
 ) {
-  if (!rows.length) return;
+  const cleanItems = params.items.filter((item) => Number.isFinite(item.value));
 
-  charts.push(
-    <BarChart
-      key={key}
-      title={title}
-      data={rows}
-      labelKey="label"
-      valueKey="value"
-    />,
-  );
+  if (!cleanItems.length) return;
+
+  sections.push({
+    ...params,
+    items: cleanItems,
+  });
 }
 
-function ChartGallery({ result }: { result: AnalysisResult | null }) {
-  const arrays = getResultArrays(result);
-  const charts: ReactNode[] = [];
-  const chartData = getChartDataSource(result);
-
-  pushChartDataBar(
-    charts,
-    'api-chart-frequency-bars',
-    'Frekvenčné grafy z API',
-    normalizeChartDataRows(chartData.frequencyBars),
-  );
-
-  pushChartDataBar(
-    charts,
-    'api-chart-mean-bars',
-    'Priemery položiek z API',
-    normalizeChartDataRows(chartData.meanBars),
-  );
-
-  pushChartDataBar(
-    charts,
-    'api-chart-scale-score-bars',
-    'Priemery škál z API',
-    normalizeChartDataRows(chartData.scaleScoreBars),
-  );
-
-  pushChartDataBar(
-    charts,
-    'api-chart-subscale-score-bars',
-    'Priemery subškál z API',
-    normalizeChartDataRows(chartData.subscaleScoreBars),
-  );
-
-  pushChartDataBar(
-    charts,
-    'api-chart-reliability-bars',
-    'Reliabilita – Cronbach alfa z API',
-    normalizeChartDataRows(chartData.reliabilityBars),
-  );
-
-  pushChartDataBar(
-    charts,
-    'api-chart-correlation-bars',
-    'Korelácie z API',
-    normalizeChartDataRows(chartData.correlationBars),
-  );
-
-  pushChartDataBar(
-    charts,
-    'api-chart-normality-bars',
-    'Normalita z API',
-    normalizeChartDataRows(chartData.normalityBars),
-  );
-
-  pushChartDataBar(
-    charts,
-    'api-chart-missing-value-bars',
-    'Chýbajúce hodnoty z API',
-    normalizeChartDataRows(chartData.missingValueBars),
-  );
-
+function createFallbackFrequencyChartSections(
+  sections: ProfessionalChartSection[],
+  arrays: ReturnType<typeof getResultArrays>,
+) {
   arrays.frequencies.slice(0, 4).forEach((table, index) => {
     const rows = getFrequencyRows(table);
     const variable = isRecord(table)
@@ -4603,96 +4470,191 @@ function ChartGallery({ result }: { result: AnalysisResult | null }) {
         )
       : `Premenná ${index + 1}`;
 
-    if (rows.length > 0) {
-      const valueKey = rows.some((row) => row.frequency !== undefined)
-        ? 'frequency'
-        : rows.some((row) => row.count !== undefined)
-          ? 'count'
-          : 'valid';
+    if (!rows.length) return;
 
-      charts.push(
-        <BarChart
-          key={`freq-bar-${index}`}
-          title={`Frekvencia – ${variable}`}
-          data={rows}
-          labelKey="value"
-          valueKey={valueKey}
-        />,
-      );
+    const valueKey = rows.some((row) => row.frequency !== undefined)
+      ? 'frequency'
+      : rows.some((row) => row.count !== undefined)
+        ? 'count'
+        : 'valid';
 
-      charts.push(
-        <SimplePieChart
-          key={`freq-pie-${index}`}
-          title={`Podiely – ${variable}`}
-          data={rows}
-          labelKey="value"
-          valueKey={valueKey}
-        />,
-      );
-    }
+    const chartItems = rows
+      .map((row, rowIndex) =>
+        normalizeChartPoint(
+          {
+            label: row.value ?? row.category ?? row.label ?? `Kategória ${rowIndex + 1}`,
+            value: row[valueKey],
+            description: variable,
+            group: 'frekvencia',
+          },
+          rowIndex,
+        ),
+      )
+      .filter((item): item is ChartPoint => Boolean(item))
+      .filter((item) => item.value > 0);
+
+    createChartSection(sections, {
+      key: `fallback-frequency-${index}`,
+      title: `Frekvencia – ${variable}`,
+      description:
+        'Profesionálny graf početností podľa kategórií. Vhodné pre demografické a kategorizované premenné.',
+      items: chartItems,
+      kind: 'bar',
+      limit: 14,
+    });
+  });
+}
+
+function getProfessionalChartSections(
+  result: AnalysisResult | null,
+): ProfessionalChartSection[] {
+  const arrays = getResultArrays(result);
+  const chartData = getChartDataSource(result);
+  const sections: ProfessionalChartSection[] = [];
+
+  createChartSection(sections, {
+    key: 'api-frequency-bars',
+    title: 'Frekvenčné rozdelenie',
+    description:
+      'Početnosti a percentuálne rozdelenie kategorizovaných premenných z API výstupu.',
+    items: normalizeChartDataRows(chartData.frequencyBars),
+    kind: 'bar',
+    limit: 18,
+  });
+
+  createChartSection(sections, {
+    key: 'api-mean-bars',
+    title: 'Priemery položiek',
+    description:
+      'Grafické porovnanie priemerných hodnôt jednotlivých dotazníkových položiek.',
+    items: normalizeChartDataRows(chartData.meanBars),
+    kind: 'bar',
+    limit: 22,
+  });
+
+  createChartSection(sections, {
+    key: 'api-scale-score-bars',
+    title: 'Hlavné škály',
+    description:
+      'Porovnanie vypočítaných hlavných škál, napríklad WEMWBS a JSS.',
+    items: normalizeChartDataRows(chartData.scaleScoreBars),
+    kind: 'bar',
+    limit: 16,
+  });
+
+  createChartSection(sections, {
+    key: 'api-subscale-score-bars',
+    title: 'Subškály',
+    description:
+      'Grafické porovnanie vypočítaných subškál a odvodených dimenzií.',
+    items: normalizeChartDataRows(chartData.subscaleScoreBars),
+    kind: 'bar',
+    limit: 24,
+  });
+
+  createChartSection(sections, {
+    key: 'api-reliability-bars',
+    title: 'Reliabilita škál',
+    description:
+      'Cronbachovo alfa zobrazené ako graf vnútornej konzistencie škál.',
+    items: normalizeChartDataRows(chartData.reliabilityBars),
+    kind: 'gauge',
+    limit: 16,
+  });
+
+  createChartSection(sections, {
+    key: 'api-correlation-bars',
+    title: 'Korelačné vzťahy',
+    description:
+      'Sila a smer korelácií medzi škálami, subškálami alebo vybranými premennými.',
+    items: normalizeChartDataRows(chartData.correlationBars),
+    kind: 'diverging',
+    limit: 20,
+  });
+
+  createChartSection(sections, {
+    key: 'api-normality-bars',
+    title: 'Normalita dát',
+    description:
+      'Grafické zobrazenie výsledkov kontroly normality premenných.',
+    items: normalizeChartDataRows(chartData.normalityBars),
+    kind: 'bar',
+    limit: 20,
+  });
+
+  createChartSection(sections, {
+    key: 'api-missing-value-bars',
+    title: 'Chýbajúce hodnoty',
+    description:
+      'Prehľad chýbajúcich hodnôt v dátach podľa premenných.',
+    items: normalizeChartDataRows(chartData.missingValueBars),
+    kind: 'bar',
+    limit: 20,
   });
 
   const scaleDescriptiveRows = normalizeRows(arrays.scaleDescriptives).filter(
-    (row) => toNumber(row.mean ?? row.M) !== null,
+    (row) => toNumber(row.mean ?? row.M ?? row.average) !== null,
   );
 
   if (scaleDescriptiveRows.length > 0) {
-    charts.push(
-      <BarChart
-        key="scale-descriptive-means"
-        title="Porovnanie priemerov škál a subškál"
-        data={scaleDescriptiveRows}
-        labelKey="variable"
-        valueKey={
-          scaleDescriptiveRows.some((row) => row.mean !== undefined) ? 'mean' : 'M'
-        }
-      />,
-    );
+    createChartSection(sections, {
+      key: 'fallback-scale-descriptive-means',
+      title: 'Priemery škál a subškál',
+      description:
+        'Graf vytvorený z deskriptívnej štatistiky škál a subškál, ak API neposlalo samostatné chartData.',
+      items: scaleDescriptiveRows
+        .map((row, index) =>
+          normalizeChartPoint(
+            {
+              label:
+                row.variable ||
+                row.name ||
+                row.scaleName ||
+                row.label ||
+                `Škála ${index + 1}`,
+              value: row.mean ?? row.M ?? row.average,
+              description: row.interpretation || row.note,
+              group: 'škála/subškála',
+            },
+            index,
+          ),
+        )
+        .filter((item): item is ChartPoint => Boolean(item)),
+      kind: 'bar',
+      limit: 24,
+    });
   }
 
   const itemDescriptiveRows = normalizeRows(arrays.itemDescriptives).filter(
-    (row) => toNumber(row.mean ?? row.M) !== null,
+    (row) => toNumber(row.mean ?? row.M ?? row.average) !== null,
   );
 
   if (scaleDescriptiveRows.length === 0 && itemDescriptiveRows.length > 0) {
-    charts.push(
-      <BarChart
-        key="item-descriptive-means"
-        title="Porovnanie priemerov položiek"
-        data={itemDescriptiveRows}
-        labelKey="variable"
-        valueKey={
-          itemDescriptiveRows.some((row) => row.mean !== undefined) ? 'mean' : 'M'
-        }
-      />,
-    );
-  }
-
-  const correlationRows = normalizeRows([
-    ...arrays.recommendedCorrelations,
-    ...arrays.pearsonCorrelations,
-    ...arrays.spearmanCorrelations,
-    ...arrays.correlations,
-  ]).filter((row) => toNumber(row.coefficient ?? row.r ?? row.rho ?? row.pearsonR ?? row.spearmanRho) !== null);
-
-  if (correlationRows.length > 0) {
-    charts.push(
-      <BarChart
-        key="correlations"
-        title="Korelačné koeficienty"
-        data={correlationRows.map((row) => ({
-          ...row,
-          label: `${valueToText(row.variable1 ?? row.variableA ?? row.variableX)} × ${valueToText(
-            row.variable2 ?? row.variableB ?? row.variableY,
-          )}`,
-          absoluteCoefficient: Math.abs(
-            toNumber(row.coefficient ?? row.r ?? row.rho ?? row.pearsonR ?? row.spearmanRho) || 0,
+    createChartSection(sections, {
+      key: 'fallback-item-descriptive-means',
+      title: 'Priemery položiek',
+      description:
+        'Graf vytvorený z deskriptívnej štatistiky položiek.',
+      items: itemDescriptiveRows
+        .map((row, index) =>
+          normalizeChartPoint(
+            {
+              label:
+                row.variable ||
+                row.name ||
+                row.label ||
+                `Položka ${index + 1}`,
+              value: row.mean ?? row.M ?? row.average,
+              description: row.interpretation || row.note,
+              group: 'položka',
+            },
+            index,
           ),
-        }))}
-        labelKey="label"
-        valueKey="absoluteCoefficient"
-      />,
-    );
+        )
+        .filter((item): item is ChartPoint => Boolean(item)),
+      kind: 'bar',
+      limit: 24,
+    });
   }
 
   const reliabilityRows = normalizeRows(arrays.reliability).filter(
@@ -4700,35 +4662,627 @@ function ChartGallery({ result }: { result: AnalysisResult | null }) {
   );
 
   if (reliabilityRows.length > 0) {
-    charts.push(
-      <BarChart
-        key="cronbach-alpha"
-        title="Reliabilita škál – Cronbach alfa"
-        data={reliabilityRows.map((row) => ({
-          ...row,
-          scaleName: row.scaleName || row.scale || row.variable || row.name || row.label,
-          cronbachAlpha: row.cronbachAlpha ?? row.alpha,
-        }))}
-        labelKey="scaleName"
-        valueKey="cronbachAlpha"
-      />,
-    );
+    createChartSection(sections, {
+      key: 'fallback-cronbach-alpha',
+      title: 'Cronbachovo alfa',
+      description:
+        'Grafické porovnanie reliability škál podľa hodnoty Cronbachovho alfa.',
+      items: reliabilityRows
+        .map((row, index) =>
+          normalizeChartPoint(
+            {
+              label:
+                row.scaleName ||
+                row.scale ||
+                row.variable ||
+                row.name ||
+                row.label ||
+                `Škála ${index + 1}`,
+              value: row.cronbachAlpha ?? row.alpha,
+              description: row.interpretation,
+              group: 'reliabilita',
+            },
+            index,
+          ),
+        )
+        .filter((item): item is ChartPoint => Boolean(item)),
+      kind: 'gauge',
+      limit: 16,
+    });
   }
 
-  if (!charts.length) {
+  const correlationRows = normalizeRows([
+    ...arrays.recommendedCorrelations,
+    ...arrays.pearsonCorrelations,
+    ...arrays.spearmanCorrelations,
+    ...arrays.correlations,
+  ]).filter((row) => {
     return (
-      <section className="rounded-[28px] border border-white/10 bg-[#0b1020] p-5">
-        <h3 className="text-lg font-black text-white">Grafy</h3>
+      toNumber(
+        row.coefficient ??
+          row.r ??
+          row.rho ??
+          row.pearsonR ??
+          row.spearmanRho,
+      ) !== null
+    );
+  });
 
-        <p className="mt-2 text-sm text-slate-400">
-          Z aktuálnych dát sa nepodarilo automaticky vytvoriť grafy. Nahraj Excel
-          alebo CSV s číselnými a kategorizovanými premennými.
+  if (correlationRows.length > 0) {
+    createChartSection(sections, {
+      key: 'fallback-correlations',
+      title: 'Korelačné koeficienty',
+      description:
+        'Graf zobrazuje smer a silu korelačných vzťahov. Záporné hodnoty sú vyznačené opačným smerom.',
+      items: correlationRows
+        .map((row, index) =>
+          normalizeChartPoint(
+            {
+              label: `${valueToText(
+                row.variable1 ?? row.variableA ?? row.variableX,
+              )} × ${valueToText(row.variable2 ?? row.variableB ?? row.variableY)}`,
+              value:
+                row.coefficient ??
+                row.r ??
+                row.rho ??
+                row.pearsonR ??
+                row.spearmanRho,
+              description: row.interpretation || row.significance,
+              group: row.method || row.test || 'korelácia',
+            },
+            index,
+          ),
+        )
+        .filter((item): item is ChartPoint => Boolean(item)),
+      kind: 'diverging',
+      limit: 20,
+    });
+  }
+
+  createFallbackFrequencyChartSections(sections, arrays);
+
+  return sections;
+}
+
+function ProfessionalBarChart({
+  section,
+}: {
+  section: ProfessionalChartSection;
+}) {
+  const cleanItems = section.items
+    .filter((item) => Number.isFinite(item.value))
+    .slice(0, section.limit ?? 20);
+
+  if (!cleanItems.length) return null;
+
+  const maxAbsValue = Math.max(
+    ...cleanItems.map((item) => Math.abs(item.value)),
+    1,
+  );
+
+  const total = cleanItems.reduce((sum, item) => sum + Math.abs(item.value), 0);
+  const average = total / cleanItems.length;
+
+  return (
+    <section className="overflow-hidden rounded-[32px] border border-white/10 bg-gradient-to-br from-[#07111f] via-[#0b1020] to-[#050814] shadow-2xl shadow-black/30">
+      <div className="border-b border-white/10 bg-white/[0.035] px-5 py-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-cyan-100">
+              <BarChart3 className="h-3.5 w-3.5" />
+              Profesionálny graf
+            </div>
+
+            <h3 className="text-xl font-black text-white">
+              {section.title}
+            </h3>
+
+            <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
+              {section.description}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                Položky
+              </p>
+              <p className="mt-1 text-xl font-black text-white">
+                {cleanItems.length}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                Maximum
+              </p>
+              <p className="mt-1 text-xl font-black text-white">
+                {formatNumber(maxAbsValue)}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                Priemer
+              </p>
+              <p className="mt-1 text-xl font-black text-white">
+                {formatNumber(average)}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-4 p-5">
+        {cleanItems.map((item, index) => {
+          const rawWidth =
+            section.kind === 'gauge'
+              ? Math.max(0, Math.min(1, item.value)) * 100
+              : (Math.abs(item.value) / maxAbsValue) * 100;
+
+          const width = Math.max(4, Math.min(100, rawWidth));
+          const tone = getChartTone(index);
+          const isNegative = item.value < 0;
+          const percentageOfTotal =
+            total > 0 ? (Math.abs(item.value) / total) * 100 : 0;
+
+          return (
+            <div
+              key={`${section.key}-${item.label}-${index}`}
+              className="rounded-3xl border border-white/10 bg-black/25 p-4 transition hover:border-cyan-300/25 hover:bg-black/35"
+            >
+              <div className="mb-3 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-white/10 text-xs font-black text-white">
+                      {index + 1}
+                    </span>
+
+                    <h4 className="truncate text-sm font-black text-white">
+                      {item.label}
+                    </h4>
+                  </div>
+
+                  {item.description ? (
+                    <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-400">
+                      {item.description}
+                    </p>
+                  ) : null}
+
+                  {item.group ? (
+                    <p className="mt-1 text-xs font-bold text-cyan-200">
+                      {item.group}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="shrink-0 text-right">
+                  <div className="rounded-2xl border border-white/10 bg-white/10 px-3 py-1 text-sm font-black text-white">
+                    {formatNumber(item.value)}
+                    {section.valueSuffix || ''}
+                  </div>
+                  <div className="mt-1 text-[11px] font-bold text-slate-500">
+                    {formatNumber(percentageOfTotal)} % z grafu
+                  </div>
+                </div>
+              </div>
+
+              {section.kind === 'diverging' ? (
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                  <div className="h-5 overflow-hidden rounded-full bg-slate-950 ring-1 ring-white/10">
+                    {isNegative ? (
+                      <div
+                        className="ml-auto h-full rounded-full bg-gradient-to-r from-rose-400 via-orange-400 to-amber-300 shadow-lg shadow-rose-500/20"
+                        style={{ width: `${width}%` }}
+                      />
+                    ) : null}
+                  </div>
+
+                  <div className="h-7 w-px bg-white/25" />
+
+                  <div className="h-5 overflow-hidden rounded-full bg-slate-950 ring-1 ring-white/10">
+                    {!isNegative ? (
+                      <div
+                        className={`h-full rounded-full bg-gradient-to-r ${tone} shadow-lg shadow-cyan-500/20`}
+                        style={{ width: `${width}%` }}
+                      />
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <div className="h-5 overflow-hidden rounded-full bg-slate-950 ring-1 ring-white/10">
+                  <div
+                    className={`h-full rounded-full bg-gradient-to-r ${tone} shadow-lg shadow-cyan-500/20`}
+                    style={{ width: `${width}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ProfessionalPieChart({
+  section,
+}: {
+  section: ProfessionalChartSection;
+}) {
+  const cleanItems = section.items
+    .filter((item) => Number.isFinite(item.value) && item.value > 0)
+    .slice(0, Math.min(section.limit ?? 8, 8));
+
+  if (cleanItems.length < 2) return null;
+
+  const total = cleanItems.reduce((sum, item) => sum + item.value, 0);
+
+  if (total <= 0) return null;
+
+  let offset = 0;
+
+  const gradient = cleanItems
+    .map((item, index) => {
+      const start = offset;
+      const share = (item.value / total) * 100;
+      const end = start + share;
+
+      offset = end;
+
+      return `${getChartSolidColor(index)} ${start}% ${end}%`;
+    })
+    .join(', ');
+
+  return (
+    <section className="overflow-hidden rounded-[32px] border border-white/10 bg-gradient-to-br from-[#07111f] via-[#0b1020] to-[#050814] shadow-2xl shadow-black/30">
+      <div className="border-b border-white/10 bg-white/[0.035] px-5 py-5">
+        <div className="inline-flex items-center gap-2 rounded-full border border-violet-300/20 bg-violet-400/10 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-violet-100">
+          <PieChart className="h-3.5 w-3.5" />
+          Podielový graf
+        </div>
+
+        <h3 className="mt-3 text-xl font-black text-white">{section.title}</h3>
+        <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
+          {section.description}
         </p>
+      </div>
+
+      <div className="grid gap-6 p-5 lg:grid-cols-[240px_1fr] lg:items-center">
+        <div
+          className="mx-auto h-56 w-56 rounded-full shadow-2xl shadow-black/40 ring-8 ring-white/5"
+          style={{
+            background: `conic-gradient(${gradient})`,
+          }}
+        />
+
+        <div className="space-y-3">
+          {cleanItems.map((item, index) => {
+            const share = (item.value / total) * 100;
+
+            return (
+              <div
+                key={`${section.key}-pie-${item.label}-${index}`}
+                className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-black/25 px-4 py-3"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span
+                    className="h-4 w-4 shrink-0 rounded-full shadow"
+                    style={{ backgroundColor: getChartSolidColor(index) }}
+                  />
+                  <span className="truncate text-sm font-bold text-slate-100">
+                    {item.label}
+                  </span>
+                </div>
+
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-black text-white">
+                    {formatNumber(item.value)}
+                  </p>
+                  <p className="text-xs font-bold text-slate-500">
+                    {formatNumber(share)} %
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
+function scoreNumericChartColumn(column: string): number {
+  const normalized = normalizeColumnKey(column);
+
+  if (['mean', 'm', 'average', 'priemer'].includes(normalized)) return 100;
+  if (['cronbachalpha', 'alpha', 'alfa'].includes(normalized)) return 95;
+  if (['coefficient', 'koeficient', 'r', 'rho', 'pearsonr', 'spearmanrho'].includes(normalized)) return 92;
+  if (['count', 'frequency', 'pocet', 'frequencycount'].includes(normalized)) return 90;
+  if (['percent', 'percentage', 'validpercent', 'validnepercento'].includes(normalized)) return 88;
+  if (['statistic', 'statistika', 'shapirowilk', 't', 'f', 'u', 'h'].includes(normalized)) return 72;
+  if (['valid', 'n', 'total', 'spolu'].includes(normalized)) return 55;
+  if (normalized.includes('skore') || normalized.includes('score')) return 80;
+  if (normalized.includes('priemer') || normalized.includes('mean')) return 80;
+  if (normalized.includes('pocet') || normalized.includes('count')) return 75;
+  if (normalized.includes('percent')) return 74;
+  if (normalized.includes('alpha') || normalized.includes('alfa')) return 95;
+  if (normalized.includes('coefficient') || normalized.includes('koeficient')) return 90;
+
+  return 10;
+}
+
+function findBestNumericChartColumn(rows: DataRow[]): string | null {
+  if (!rows.length) return null;
+
+  const columns = getColumns(rows).filter((column) => {
+    if (isTechnicalIdColumn(column) && normalizeColumnKey(column) !== 'id') return false;
+    const normalized = normalizeColumnKey(column);
+    return !['id', 'respondent', 'respondentid', 'poradie', 'index'].includes(normalized);
+  });
+
+  let bestColumn: string | null = null;
+  let bestScore = -1;
+
+  columns.forEach((column) => {
+    const numericValues = rows
+      .map((row) => toNumber(row[column]))
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+
+    if (!numericValues.length) return;
+
+    const numericRatio = numericValues.length / Math.max(rows.length, 1);
+    const nonZeroCount = numericValues.filter((value) => value !== 0).length;
+    const score = scoreNumericChartColumn(column) + numericRatio * 20 + Math.min(nonZeroCount, 10);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestColumn = column;
+    }
+  });
+
+  return bestColumn;
+}
+
+function scoreLabelChartColumn(column: string): number {
+  const normalized = normalizeColumnKey(column);
+
+  if (['variable', 'premenna', 'name', 'nazov', 'label', 'scalename', 'scale', 'category', 'kategoria', 'value', 'hodnota'].includes(normalized)) {
+    return 100;
+  }
+
+  if (normalized.includes('variable') || normalized.includes('premenna')) return 95;
+  if (normalized.includes('scale') || normalized.includes('skala')) return 92;
+  if (normalized.includes('category') || normalized.includes('kategoria')) return 90;
+  if (normalized.includes('name') || normalized.includes('nazov') || normalized.includes('label')) return 88;
+  if (normalized.includes('title') || normalized.includes('tabletitle')) return 50;
+
+  return 10;
+}
+
+function findBestLabelChartColumn(rows: DataRow[], valueColumn: string): string | null {
+  const columns = getColumns(rows).filter((column) => {
+    if (column === valueColumn) return false;
+    if (isTechnicalIdColumn(column) && normalizeColumnKey(column) !== 'id') return false;
+    return true;
+  });
+
+  let bestColumn: string | null = null;
+  let bestScore = -1;
+
+  columns.forEach((column) => {
+    const filledValues = rows
+      .map((row) => row[column])
+      .filter((value) => value !== null && value !== undefined && valueToText(value) !== '—');
+
+    if (!filledValues.length) return;
+
+    const textValues = filledValues.filter((value) => toNumber(value) === null);
+    const score = scoreLabelChartColumn(column) + (textValues.length / Math.max(filledValues.length, 1)) * 20;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestColumn = column;
+    }
+  });
+
+  return bestColumn || columns[0] || null;
+}
+
+function inferChartKindFromSection(section: TableSection): ProfessionalChartSection['kind'] {
+  const text = `${section.key} ${section.title} ${section.description}`.toLowerCase();
+
+  if (text.includes('korel') || text.includes('correl') || text.includes('spearman') || text.includes('pearson')) {
+    return 'diverging';
+  }
+
+  if (text.includes('reliabil') || text.includes('cronbach') || text.includes('alfa') || text.includes('alpha')) {
+    return 'gauge';
+  }
+
+  return 'bar';
+}
+
+function createChartSectionFromTableSection(
+  section: TableSection,
+  sectionIndex: number,
+): ProfessionalChartSection | null {
+  const rows = normalizeRows(safeArray(section.rows));
+
+  if (!rows.length) return null;
+
+  const valueColumn = findBestNumericChartColumn(rows);
+  if (!valueColumn) return null;
+
+  const labelColumn = findBestLabelChartColumn(rows, valueColumn);
+
+      const items: ChartPoint[] = rows
+    .map((row, rowIndex): ChartPoint | null => {
+      const numericValue = toNumber(row[valueColumn]);
+      if (numericValue === null || !Number.isFinite(numericValue)) return null;
+
+      const labelValue = labelColumn ? row[labelColumn] : null;
+      const label = valueToText(labelValue);
+
+      return {
+        label:
+          label && label !== '—'
+            ? label.slice(0, 120)
+            : `${section.title} ${rowIndex + 1}`,
+        value: numericValue,
+        originalValue: row[valueColumn],
+        description: section.description,
+        group: getFieldLabel(valueColumn),
+        meta: row,
+      };
+    })
+    .filter((item): item is ChartPoint => item !== null)
+    .filter((item) => Number.isFinite(item.value));
+
+  if (!items.length) return null;
+
+  return {
+    key: `table-fallback-chart-${section.key}-${sectionIndex}`,
+    title: `Graf – ${section.title}`,
+    description: `Automaticky vykreslený graf z tabuľky „${section.title}“. Hodnota: ${getFieldLabel(valueColumn)}.`,
+    items,
+    kind: inferChartKindFromSection(section),
+    limit: section.key.toLowerCase().includes('frequency') || section.title.toLowerCase().includes('frekven') ? 16 : 24,
+  };
+}
+
+function createChartSectionsFromTableSections(
+  tableSections: TableSection[],
+): ProfessionalChartSection[] {
+  const preferredOrder = [
+    'recommendedCharts',
+    'scaleDescriptives',
+    'jaspScaleDescriptives',
+    'scaleScores',
+    'reliability',
+    'jaspReliability',
+    'spearmanCorrelations',
+    'pearsonCorrelations',
+    'recommendedCorrelations',
+    'correlations',
+    'frequencies',
+    'normality',
+    'jaspNormality',
+    'parametricGroupTests',
+    'nonParametricGroupTests',
+  ];
+
+  const ordered = [...tableSections].sort((a, b) => {
+    const aIndex = preferredOrder.indexOf(a.key);
+    const bIndex = preferredOrder.indexOf(b.key);
+
+    const safeA = aIndex === -1 ? 999 : aIndex;
+    const safeB = bIndex === -1 ? 999 : bIndex;
+
+    return safeA - safeB;
+  });
+
+  const usedTitles = new Set<string>();
+  const sections: ProfessionalChartSection[] = [];
+
+  ordered.forEach((section, index) => {
+    const chartSection = createChartSectionFromTableSection(section, index);
+    if (!chartSection) return;
+
+    const normalizedTitle = normalizeColumnKey(chartSection.title);
+    if (usedTitles.has(normalizedTitle)) return;
+
+    usedTitles.add(normalizedTitle);
+    sections.push(chartSection);
+  });
+
+  return sections.slice(0, 10);
+}
+
+function ChartGallery({
+  result,
+  tableSections = [],
+}: {
+  result: AnalysisResult | null;
+  tableSections?: TableSection[];
+}) {
+  const resultChartSections = getProfessionalChartSections(result);
+  const tableChartSections = createChartSectionsFromTableSections(tableSections);
+
+  const chartSections = resultChartSections.length > 0
+    ? [
+        ...resultChartSections,
+        ...tableChartSections.filter((section) =>
+          !resultChartSections.some((existing) => normalizeColumnKey(existing.title) === normalizeColumnKey(section.title)),
+        ),
+      ].slice(0, 12)
+    : tableChartSections;
+
+  if (!chartSections.length) {
+    return (
+      <section className="rounded-[30px] border border-amber-300/20 bg-amber-500/10 p-5">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-1 h-5 w-5 text-amber-200" />
+
+          <div>
+            <h3 className="text-lg font-black text-amber-100">
+              Grafické dáta zatiaľ nie sú dostupné
+            </h3>
+
+            <p className="mt-2 text-sm leading-6 text-amber-50/90">
+              API musí vrátiť <strong>chartData</strong>, alebo aspoň tabuľkové
+              dáta ako scaleDescriptives, reliability, correlations a frequencies.
+              Po doplnení týchto polí sa grafy zobrazia automaticky.
+            </p>
+          </div>
+        </div>
       </section>
     );
   }
 
-  return <div className="grid gap-5 xl:grid-cols-2">{charts}</div>;
+  return (
+    <section className="space-y-6">
+      <div className="rounded-[32px] border border-violet-300/20 bg-gradient-to-br from-violet-500/15 via-blue-500/10 to-cyan-500/10 p-5 shadow-2xl shadow-black/20">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-500/20 text-violet-100">
+              <PieChart className="h-6 w-6" />
+            </div>
+
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.22em] text-violet-200/80">
+                Profesionálne vizualizácie
+              </p>
+              <h3 className="mt-1 text-xl font-black text-white">
+                Grafické výstupy analýzy dát
+              </h3>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-violet-100/80">
+                Grafy sú vytvorené z vypočítaných štatistických dát – frekvencie,
+                priemery, škály, subškály, reliabilita, korelácie, normalita a
+                chýbajúce hodnoty.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-black text-white">
+            {chartSections.length} grafických sekcií
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-6">
+        {chartSections.map((section) => (
+          <div key={section.key} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+            <ProfessionalBarChart section={section} />
+            {section.kind !== 'diverging' ? (
+              <ProfessionalPieChart section={section} />
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function TablePreview({
@@ -5501,7 +6055,7 @@ export default function AnalysisResultsModal({
               <h3 className="text-lg font-black text-white">Grafické náhľady</h3>
             </div>
 
-            <ChartGallery result={result} />
+            <ChartGallery result={result} tableSections={tableSections} />
           </div>
 
           <div ref={tablesRef} className="mt-6 space-y-5">

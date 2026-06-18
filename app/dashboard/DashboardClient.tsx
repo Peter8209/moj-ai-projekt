@@ -5233,14 +5233,7 @@ const downloadExcel = () => {
   </button>
 )}
 
-<button
-  type="button"
-  onClick={runModule}
-  disabled={isLoading}
-  className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
->
-  {isLoading ? 'Spracúvam...' : 'Spustiť analýzu'}
-</button>
+
 
 {preparedDataFile ? (
   <button

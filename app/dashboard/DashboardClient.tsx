@@ -90,6 +90,77 @@ type EmailTone =
   | 'urgent'
   | 'short';
 
+type QuestionnaireMode =
+  | 'none'
+  | 'selected'
+  | 'manual'
+  | 'auto-suggest-only';
+
+type QuestionnaireOptionId =
+  | ''
+  | 'none'
+  | 'resilience_scale'
+  | 'sehs_s_2020'
+  | 'wemwbs'
+  | 'jss'
+  | 'custom';
+
+type QuestionnaireConfig = {
+  mode: QuestionnaireMode;
+  selectedQuestionnaires: string[];
+  customQuestionnaires: unknown[];
+};
+
+const questionnaireOptions: Array<{
+  value: QuestionnaireOptionId;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: '',
+    label: 'Neviem / iba navrhnúť',
+    description:
+      'Systém môže navrhnúť podobný dotazník, ale nebude ho automaticky počítať.',
+  },
+  {
+    value: 'none',
+    label: 'Bez štandardizovaného dotazníka',
+    description:
+      'Použije sa iba frekvenčná analýza položiek a všeobecná štatistika bez škál dotazníka.',
+  },
+  {
+    value: 'resilience_scale',
+    label: 'Škála reziliencie',
+    description:
+      'Použiť výpočty pre škálu reziliencie, ak sú položky správne namapované.',
+  },
+  {
+    value: 'sehs_s_2020',
+    label: 'SEHS-S-2020',
+    description:
+      'Použiť výpočty pre SEHS-S-2020, škály, subškály, domény a subdomény.',
+  },
+  {
+    value: 'wemwbs',
+    label: 'WEMWBS',
+    description:
+      'Použiť iba vtedy, ak práca naozaj obsahuje WEMWBS.',
+  },
+  {
+    value: 'jss',
+    label: 'JSS',
+    description:
+      'Použiť iba vtedy, ak práca naozaj obsahuje JSS.',
+  },
+  {
+    value: 'custom',
+    label: 'Vlastný dotazník / vlastné škály',
+    description:
+      'Používateľ neskôr doplní vlastné škály, subškály a položky.',
+  },
+];
+
+
 type SelectOption<T extends string = string> = {
   value: T;
   labelKey: string;
@@ -2409,6 +2480,46 @@ const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
 const [analysisResult, setAnalysisResult] =
   useState<AnalysisResult | null>(null);
 
+const [questionnaireMode, setQuestionnaireMode] =
+  useState<QuestionnaireMode>('auto-suggest-only');
+
+const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<string[]>(
+  [],
+);
+
+const questionnaireConfig = useMemo<QuestionnaireConfig>(() => {
+  return {
+    mode: questionnaireMode,
+    selectedQuestionnaires,
+    customQuestionnaires: [],
+  };
+}, [questionnaireMode, selectedQuestionnaires]);
+
+function handleQuestionnaireChange(value: QuestionnaireOptionId) {
+  if (!value) {
+    setQuestionnaireMode('auto-suggest-only');
+    setSelectedQuestionnaires([]);
+    return;
+  }
+
+  if (value === 'none') {
+    setQuestionnaireMode('none');
+    setSelectedQuestionnaires([]);
+    return;
+  }
+
+  if (value === 'custom') {
+    setQuestionnaireMode('manual');
+    setSelectedQuestionnaires(['custom']);
+    return;
+  }
+
+  setQuestionnaireMode('selected');
+  setSelectedQuestionnaires([value]);
+}
+
+
+
 /**
  * Pripravený Excel súbor pre modul Analýza dát.
  *
@@ -3462,6 +3573,20 @@ if (activeModule === 'data') {
   prepareFormData.append('activeProfile', JSON.stringify(profileForApi || {}));
   prepareFormData.append('profileContext', buildProfileBlock(profileForApi));
 
+prepareFormData.append(
+  'questionnaireConfig',
+  JSON.stringify(questionnaireConfig),
+);
+
+prepareFormData.append('questionnaireMode', questionnaireConfig.mode);
+
+prepareFormData.append(
+  'selectedQuestionnaires',
+  JSON.stringify(questionnaireConfig.selectedQuestionnaires),
+);
+
+
+
   if (profileForApi?.id) {
     prepareFormData.append('projectId', profileForApi.id);
   }
@@ -3551,17 +3676,30 @@ if (activeModule === 'data') {
   const columns = getDashboardColumnNames(cleanRows);
 
   const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
-    alpha: 0.05,
-    language: workLanguage,
-    profile: profileForApi || {},
-    assignment: userText || '',
-    source: 'prepared-raw-data',
-    sheetName: 'DATA_CLEAN',
-    includeItemDescriptives: true,
-    includeFrequencies: true,
-    autoDetectScales: true,
-    fallbackToNumericVariables: true,
-  } as any);
+  alpha: 0.05,
+  language: workLanguage,
+  profile: profileForApi || {},
+  assignment: userText || '',
+  source: 'prepared-raw-data',
+  sheetName: 'DATA_CLEAN',
+  includeItemDescriptives: true,
+  includeFrequencies: true,
+
+  // Dôležité:
+  // Automatické rozpoznanie štandardizovaných dotazníkov sa nesmie spúšťať bez výberu používateľa.
+  autoDetectScales:
+    questionnaireConfig.mode === 'selected' ||
+    questionnaireConfig.mode === 'manual',
+
+  fallbackToNumericVariables: true,
+
+  questionnaireConfig,
+  selectedQuestionnaires: questionnaireConfig.selectedQuestionnaires,
+  customQuestionnaires: questionnaireConfig.customQuestionnaires,
+
+  strictQuestionnaireMode: true,
+  allowUnconfirmedStandardizedQuestionnaires: false,
+} as any);
 
   const normalized = {
     ok: true,
@@ -5305,6 +5443,61 @@ const downloadExcel = () => {
         </p>
       </div>
     </div>
+
+{activeModule === 'data' ? (
+  <div className="rounded-[28px] border border-blue-300/20 bg-blue-500/10 p-5 shadow-2xl shadow-blue-950/20">
+    <div className="flex flex-col gap-2">
+      <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-200">
+        Štandardizovaný dotazník
+      </p>
+
+      <h3 className="text-lg font-black text-white">
+        Aký dotazník používa práca?
+      </h3>
+
+      <p className="max-w-3xl text-sm font-bold leading-6 text-slate-300">
+        Vyberte konkrétny dotazník iba vtedy, ak ho databáza naozaj obsahuje.
+        Bez potvrdenia sa WEMWBS ani JSS nebudú počítať automaticky.
+      </p>
+    </div>
+
+    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {questionnaireOptions.map((option) => {
+        const currentValue =
+          questionnaireMode === 'none'
+            ? 'none'
+            : questionnaireMode === 'manual'
+              ? 'custom'
+              : selectedQuestionnaires[0] || '';
+
+        const isActive = currentValue === option.value;
+
+        return (
+          <button
+            key={option.value || 'auto-suggest-only'}
+            type="button"
+            onClick={() => handleQuestionnaireChange(option.value)}
+            className={[
+              'rounded-2xl border p-4 text-left transition',
+              isActive
+                ? 'border-blue-300 bg-blue-500/20 shadow-lg shadow-blue-950/30'
+                : 'border-white/10 bg-white/5 hover:border-blue-300/50 hover:bg-white/10',
+            ].join(' ')}
+          >
+            <span className="block text-sm font-black text-white">
+              {option.label}
+            </span>
+
+            <span className="mt-1 block text-xs font-bold leading-5 text-slate-300">
+              {option.description}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  </div>
+) : null}
+
 
     <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
       <button

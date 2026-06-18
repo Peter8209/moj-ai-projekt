@@ -70,6 +70,47 @@ export interface CombinedScaleDefinition {
   description?: string;
 }
 
+
+export type QuestionnaireMode = 'none' | 'selected' | 'manual' | 'auto-suggest-only';
+
+export interface CustomQuestionnaireScaleDefinition {
+  id?: string;
+  name?: string;
+  items?: ScaleItemReference[];
+  reverseItems?: ScaleItemReference[];
+  minValue?: number;
+  maxValue?: number;
+  scoring?: ScaleScoringMode;
+  description?: string;
+}
+
+export interface CustomQuestionnaireCombinedScaleDefinition {
+  id?: string;
+  name?: string;
+  scaleIds?: string[];
+  scoring?: ScaleScoringMode;
+  description?: string;
+}
+
+export interface CustomQuestionnaireDefinition {
+  id?: string;
+  name?: string;
+  questionnaireId?: string;
+  questionnaireName?: string;
+  responseMin?: number;
+  responseMax?: number;
+  scoring?: ScaleScoringMode;
+  scales?: CustomQuestionnaireScaleDefinition[];
+  subscales?: CustomQuestionnaireScaleDefinition[];
+  combinedScales?: CustomQuestionnaireCombinedScaleDefinition[];
+}
+
+export interface QuestionnaireConfig {
+  mode?: QuestionnaireMode;
+  selectedQuestionnaires?: string[];
+  customQuestionnaires?: CustomQuestionnaireDefinition[];
+}
+
 export interface StatisticalAnalysisOptions {
   idColumn?: string;
   scales?: ScaleDefinition[];
@@ -103,6 +144,21 @@ export interface StatisticalAnalysisOptions {
    * Predvolené: true. Filter zároveň bráni tomu, aby sa dotazníkové položky použili ako skupinové premenné.
    */
   autoDetectGroupColumns?: boolean;
+
+  /**
+   * Konfigurácia dotazníkov poslaná z Dashboardu.
+   * V strict režime sa WEMWBS/JSS a ďalšie pomenované štandardizované dotazníky
+   * nepoužijú bez výslovného výberu používateľa.
+   */
+  questionnaireConfig?: QuestionnaireConfig;
+  selectedQuestionnaires?: string[];
+  customQuestionnaires?: CustomQuestionnaireDefinition[];
+
+  /** Ak true, známe štandardizované dotazníky sa počítajú iba po potvrdení. */
+  strictQuestionnaireMode?: boolean;
+
+  /** Ak false, systém nesmie počítať nepotvrdené WEMWBS/JSS iba podľa názvu stĺpca. */
+  allowUnconfirmedStandardizedQuestionnaires?: boolean;
 }
 
 export interface FrequencyValueResult {
@@ -304,7 +360,7 @@ export function runFullStatisticalAnalysis(
   options: StatisticalAnalysisOptions = {},
 ): StatisticalAnalysisResult {
   const alpha = options.alpha ?? 0.05;
-  const autoDetectScales = options.autoDetectScales !== false;
+  const autoDetectScales = shouldRunAutoScaleDetection(options);
   const fallbackToNumericVariables = options.fallbackToNumericVariables !== false;
   const autoDetectGroupColumns = options.autoDetectGroupColumns !== false;
 
@@ -378,15 +434,31 @@ export function runFullStatisticalAnalysis(
           calculateDescriptiveStatistics(column, getNumericColumn(cleanRows, column)),
         );
 
-  const manualScales = options.scales ?? [];
+  const questionnaireDefinitions = buildQuestionnaireScaleDefinitions(
+    numericColumns,
+    options,
+  );
+
+  const manualScales = [
+    ...(options.scales ?? []),
+    ...questionnaireDefinitions.scales,
+  ];
+
   const autoScales = autoDetectScales
-    ? autoDetectScaleDefinitions(numericColumns)
+    ? autoDetectScaleDefinitions(numericColumns, options)
     : [];
 
   const mergedScales = mergeScaleDefinitions(manualScales, autoScales);
 
-  const manualCombinedScales = options.combinedScales ?? [];
-  const autoCombinedScales = autoDetectCombinedScaleDefinitions(mergedScales);
+  const manualCombinedScales = [
+    ...(options.combinedScales ?? []),
+    ...questionnaireDefinitions.combinedScales,
+  ];
+
+  const autoCombinedScales = autoDetectCombinedScaleDefinitions(
+    mergedScales,
+    options,
+  );
 
   const mergedCombinedScales = mergeCombinedScaleDefinitions(
     manualCombinedScales,
@@ -932,10 +1004,182 @@ function reverseCode(value: number, minValue: number, maxValue: number): number 
 }
 
 /* -------------------------------------------------------------------------- */
+/* DOTAZNÍKOVÝ REŽIM – ochrana pred chybným WEMWBS/JSS                         */
+/* -------------------------------------------------------------------------- */
+
+function normalizeQuestionnaireId(value: unknown): string {
+  return normalizeText(String(value ?? ''))
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function getSelectedQuestionnaireIds(
+  options: StatisticalAnalysisOptions = {},
+): Set<string> {
+  const selected = [
+    ...(options.selectedQuestionnaires ?? []),
+    ...(options.questionnaireConfig?.selectedQuestionnaires ?? []),
+  ];
+
+  return new Set(
+    selected
+      .map(normalizeQuestionnaireId)
+      .filter(Boolean),
+  );
+}
+
+function getQuestionnaireMode(
+  options: StatisticalAnalysisOptions = {},
+): QuestionnaireMode {
+  return options.questionnaireConfig?.mode ?? 'auto-suggest-only';
+}
+
+function isStrictQuestionnaireMode(
+  options: StatisticalAnalysisOptions = {},
+): boolean {
+  return (
+    options.strictQuestionnaireMode === true ||
+    options.allowUnconfirmedStandardizedQuestionnaires === false ||
+    getQuestionnaireMode(options) === 'none' ||
+    getQuestionnaireMode(options) === 'selected' ||
+    getQuestionnaireMode(options) === 'manual' ||
+    getQuestionnaireMode(options) === 'auto-suggest-only'
+  );
+}
+
+function shouldRunAutoScaleDetection(
+  options: StatisticalAnalysisOptions = {},
+): boolean {
+  if (options.autoDetectScales === false) return false;
+
+  const mode = getQuestionnaireMode(options);
+
+  if (mode === 'none' || mode === 'auto-suggest-only') {
+    return false;
+  }
+
+  if (mode === 'selected' || mode === 'manual') {
+    return true;
+  }
+
+  return true;
+}
+
+function shouldInferGenericScales(
+  options: StatisticalAnalysisOptions = {},
+): boolean {
+  const mode = getQuestionnaireMode(options);
+
+  if (mode === 'none' || mode === 'auto-suggest-only') return false;
+
+  return mode === 'selected' || mode === 'manual' || options.autoDetectScales === true;
+}
+
+function shouldComputeQuestionnaire(
+  questionnaireId: string,
+  options: StatisticalAnalysisOptions = {},
+): boolean {
+  const selected = getSelectedQuestionnaireIds(options);
+  const normalizedId = normalizeQuestionnaireId(questionnaireId);
+  const aliases: Record<string, string[]> = {
+    wemwbs: ['wemwbs', 'wem', 'warwick_edinburgh', 'warwick_edinburgh_mental_wellbeing_scale'],
+    jss: ['jss', 'job_satisfaction_survey'],
+    sembu: ['sembu', 's_embu', 'embu'],
+    school_inclusion: ['school_inclusion', 'skolska_zaclenenost', 'skolskej_zaclenenosti'],
+    work_engagement: ['work_engagement', 'pracovne_zapojenie', 'uwes'],
+    resilience_scale: ['resilience_scale', 'skala_reziliencie', 'reziliencia', 'resilience'],
+    sehs_s_2020: ['sehs_s_2020', 'sehs', 'sehs_s'],
+  };
+
+  const acceptedIds = aliases[normalizedId] ?? [normalizedId];
+  const explicitlySelected = acceptedIds.some((id) => selected.has(id));
+
+  if (explicitlySelected) return true;
+
+  if (isStrictQuestionnaireMode(options)) return false;
+
+  return options.allowUnconfirmedStandardizedQuestionnaires === true;
+}
+
+function buildQuestionnaireScaleDefinitions(
+  numericColumns: string[],
+  options: StatisticalAnalysisOptions = {},
+): {
+  scales: ScaleDefinition[];
+  combinedScales: CombinedScaleDefinition[];
+} {
+  const configCustom = options.questionnaireConfig?.customQuestionnaires ?? [];
+  const directCustom = options.customQuestionnaires ?? [];
+  const customQuestionnaires = [...configCustom, ...directCustom];
+
+  const scales: ScaleDefinition[] = [];
+  const combinedScales: CombinedScaleDefinition[] = [];
+
+  customQuestionnaires.forEach((questionnaire, questionnaireIndex) => {
+    const questionnaireId = normalizeQuestionnaireId(
+      questionnaire.id || questionnaire.questionnaireId || `custom_${questionnaireIndex + 1}`,
+    );
+    const questionnaireName =
+      String(questionnaire.name || questionnaire.questionnaireName || questionnaireId || 'Vlastný dotazník').trim();
+    const minValue = questionnaire.responseMin ?? 1;
+    const maxValue = questionnaire.responseMax ?? 5;
+    const scoring = questionnaire.scoring ?? 'mean';
+
+    [...(questionnaire.scales ?? []), ...(questionnaire.subscales ?? [])]
+      .forEach((scale, scaleIndex) => {
+        const items = (scale.items ?? []).filter((item) =>
+          resolveItemColumn(item, numericColumns),
+        );
+
+        if (!items.length) return;
+
+        scales.push({
+          id: normalizeQuestionnaireId(
+            scale.id || `${questionnaireId}_scale_${scaleIndex + 1}`,
+          ),
+          name: String(scale.name || `${questionnaireName} – škála ${scaleIndex + 1}`),
+          items,
+          reverseItems: scale.reverseItems ?? [],
+          minValue: scale.minValue ?? minValue,
+          maxValue: scale.maxValue ?? maxValue,
+          scoring: scale.scoring ?? scoring,
+          description: scale.description || `Manuálne zadaná škála z dotazníka ${questionnaireName}.`,
+        });
+      });
+
+    (questionnaire.combinedScales ?? []).forEach((combined, combinedIndex) => {
+      const scaleIds = (combined.scaleIds ?? [])
+        .map(normalizeQuestionnaireId)
+        .filter(Boolean);
+
+      if (scaleIds.length < 2) return;
+
+      combinedScales.push({
+        id: normalizeQuestionnaireId(
+          combined.id || `${questionnaireId}_combined_${combinedIndex + 1}`,
+        ),
+        name: String(combined.name || `${questionnaireName} – kombinovaná škála ${combinedIndex + 1}`),
+        scaleIds,
+        scoring: combined.scoring ?? scoring,
+        description: combined.description,
+      });
+    });
+  });
+
+  return {
+    scales,
+    combinedScales,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
 /* AUTOMATICKÁ DETEKCIA ŠKÁL                                                   */
 /* -------------------------------------------------------------------------- */
 
-function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[] {
+function autoDetectScaleDefinitions(
+  numericColumns: string[],
+  options: StatisticalAnalysisOptions = {},
+): ScaleDefinition[] {
   const scales: ScaleDefinition[] = [];
 
   const normalizedColumns = numericColumns.map((column) => ({
@@ -943,11 +1187,16 @@ function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[]
     normalized: normalizeText(column),
   }));
 
+  const allowSembu = shouldComputeQuestionnaire('sembu', options);
+  const allowSchoolInclusion = shouldComputeQuestionnaire('school_inclusion', options);
+  const allowWorkEngagement = shouldComputeQuestionnaire('work_engagement', options);
+  const allowGeneric = shouldInferGenericScales(options);
+
   const wemItems = normalizedColumns
     .filter((item) => /^wem\d+$/.test(item.normalized) || /^wemwbs\d+$/.test(item.normalized))
     .map((item) => item.original);
 
-  if (wemItems.length >= 3) {
+  if (shouldComputeQuestionnaire('wemwbs', options) && wemItems.length >= 3) {
     scales.push({
       id: 'wemwbs_total',
       name: 'WEMWBS – celkové skóre',
@@ -963,7 +1212,7 @@ function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[]
     .filter((item) => /^jss\d+$/.test(item.normalized))
     .map((item) => item.original);
 
-  if (jssItems.length >= 3) {
+  if (shouldComputeQuestionnaire('jss', options) && jssItems.length >= 3) {
     scales.push({
       id: 'jss_total',
       name: 'JSS – celkové skóre',
@@ -975,7 +1224,7 @@ function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[]
     });
   }
 
-  const fatherColumns = numericColumns.filter((column) => {
+  const fatherColumns = allowSembu ? numericColumns.filter((column) => {
     const n = normalizeText(column);
     return (
       n.includes('sembuotec') ||
@@ -984,9 +1233,9 @@ function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[]
       n.includes('father') ||
       n.includes('otc')
     );
-  });
+  }) : [];
 
-  const motherColumns = numericColumns.filter((column) => {
+  const motherColumns = allowSembu ? numericColumns.filter((column) => {
     const n = normalizeText(column);
     return (
       n.includes('sembumatka') ||
@@ -995,9 +1244,9 @@ function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[]
       n.includes('mother') ||
       n.includes('mat')
     );
-  });
+  }) : [];
 
-  const schoolInclusionColumns = numericColumns.filter((column) => {
+  const schoolInclusionColumns = allowSchoolInclusion ? numericColumns.filter((column) => {
     const n = normalizeText(column);
     return (
       n.includes('skolskazaclenenost') ||
@@ -1009,7 +1258,7 @@ function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[]
       n.includes('inclusion') ||
       /^si\d+$/.test(n)
     );
-  });
+  }) : [];
 
   const fatherRejection = findColumnsByItemNumbers(fatherColumns, [1, 4, 7, 13, 15, 16, 21]);
   const fatherWarmth = findColumnsByItemNumbers(fatherColumns, [2, 6, 12, 14, 19, 23]);
@@ -1124,7 +1373,9 @@ function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[]
   }
 
 
-  const workEngagement = detectWorkEngagementColumns(numericColumns);
+  const workEngagement = allowWorkEngagement
+    ? detectWorkEngagementColumns(numericColumns)
+    : { energy: [], meaningDedication: [], absorption: [], total: [] };
 
   if (workEngagement.energy.length >= 2) {
     scales.push({
@@ -1184,9 +1435,11 @@ function autoDetectScaleDefinitions(numericColumns: string[]): ScaleDefinition[]
     scales.flatMap((scale) => scale.items.map((item) => String(item))),
   );
 
-  const genericScales = inferGenericScaleDefinitions(
-    numericColumns.filter((column) => !specificItems.has(column)),
-  );
+  const genericScales = allowGeneric
+    ? inferGenericScaleDefinitions(
+        numericColumns.filter((column) => !specificItems.has(column)),
+      )
+    : [];
 
   for (const genericScale of genericScales) {
     if (!scales.some((scale) => scale.id === genericScale.id)) {
@@ -1360,11 +1613,15 @@ function detectWorkEngagementColumns(numericColumns: string[]): {
 
 function autoDetectCombinedScaleDefinitions(
   scales: ScaleDefinition[],
+  options: StatisticalAnalysisOptions = {},
 ): CombinedScaleDefinition[] {
   const ids = new Set(scales.map((scale) => scale.id));
   const combined: CombinedScaleDefinition[] = [];
 
-  if (ids.has('sembu_father_rejection') && ids.has('sembu_mother_rejection')) {
+  const allowSembu = shouldComputeQuestionnaire('sembu', options);
+  const allowSchoolInclusion = shouldComputeQuestionnaire('school_inclusion', options);
+
+  if (allowSembu && ids.has('sembu_father_rejection') && ids.has('sembu_mother_rejection')) {
     combined.push({
       id: 'sembu_total_rejection',
       name: 's-EMBU Celkom – Odmietanie',
@@ -1373,7 +1630,7 @@ function autoDetectCombinedScaleDefinitions(
     });
   }
 
-  if (ids.has('sembu_father_warmth') && ids.has('sembu_mother_warmth')) {
+  if (allowSembu && ids.has('sembu_father_warmth') && ids.has('sembu_mother_warmth')) {
     combined.push({
       id: 'sembu_total_warmth',
       name: 's-EMBU Celkom – Emočná vrelosť',
@@ -1382,7 +1639,7 @@ function autoDetectCombinedScaleDefinitions(
     });
   }
 
-  if (ids.has('sembu_father_overprotection') && ids.has('sembu_mother_overprotection')) {
+  if (allowSembu && ids.has('sembu_father_overprotection') && ids.has('sembu_mother_overprotection')) {
     combined.push({
       id: 'sembu_total_overprotection',
       name: 's-EMBU Celkom – Hyperprotektivita',
@@ -1391,7 +1648,7 @@ function autoDetectCombinedScaleDefinitions(
     });
   }
 
-  if (ids.has('school_social_acceptance') && ids.has('school_social_exclusion_reversed')) {
+  if (allowSchoolInclusion && ids.has('school_social_acceptance') && ids.has('school_social_exclusion_reversed')) {
     combined.push({
       id: 'school_inclusion_total',
       name: 'Škála školskej začlenenosti – celkové skóre',

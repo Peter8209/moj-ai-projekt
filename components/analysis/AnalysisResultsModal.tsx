@@ -4448,15 +4448,35 @@ function createChartSection(
   sections: ProfessionalChartSection[],
   params: ProfessionalChartSection,
 ) {
-  const cleanItems = params.items.filter((item) => Number.isFinite(item.value));
+  const cleanItems = safeArray<ProfessionalChartSection['items'][number]>(params.items)
+    .map((item) => {
+      const value = toNumber(item.value);
 
-  if (!cleanItems.length) return;
+      if (value === null || !Number.isFinite(value)) {
+        return null;
+      }
+
+      return {
+        ...item,
+        value,
+        label: String(item.label || 'Položka').trim() || 'Položka',
+      };
+    })
+    .filter((item): item is ProfessionalChartSection['items'][number] =>
+      Boolean(item),
+    );
+
+  if (!cleanItems.length) {
+    return;
+  }
 
   sections.push({
     ...params,
     items: cleanItems,
   });
 }
+
+
 
 function createFallbackFrequencyChartSections(
   sections: ProfessionalChartSection[],
@@ -5472,7 +5492,6 @@ function FullTableDialog({
     </div>
   );
 }
-
 export default function AnalysisResultsModal({
   open,
   result,
@@ -5580,30 +5599,30 @@ export default function AnalysisResultsModal({
       });
 
       if (format === 'xls') {
-        try {
-          const exportedByServer = await exportProfessionalExcelFromModal();
+  try {
+    const exportedByServer = await exportProfessionalExcelFromModal();
 
-          if (exportedByServer) {
-            return;
-          }
-        } catch (serverExportError) {
-          console.warn(
-            'ANALYSIS_MODAL_SERVER_EXCEL_EXPORT_FALLBACK:',
-            serverExportError,
-          );
-        }
+    if (exportedByServer) {
+      return;
+    }
+  } catch (serverExportError) {
+    console.warn(
+      'ANALYSIS_MODAL_SERVER_EXCEL_EXPORT_FALLBACK:',
+      serverExportError,
+    );
+  }
 
-        const blob = await createClientExcelExportBlob({
-          exportPayload,
-          arrays,
-          tableSections,
-          professionalInterpretation,
-        });
+  const blob = await createClientExcelExportBlob({
+    exportPayload,
+    arrays,
+    tableSections,
+    professionalInterpretation,
+  });
 
-        await assertValidXlsxBlob(blob, 'Excel fallback export');
-        downloadBlob(blob, getFileName(format));
-        return;
-      }
+  await assertValidXlsxBlob(blob, 'Excel fallback export');
+  downloadBlob(blob, getFileName(format));
+  return;
+}
 
       if (format === 'raw') {
         const blob = await createClientRawDataBlob(result, arrays);
@@ -5679,20 +5698,35 @@ export default function AnalysisResultsModal({
         const professionalInterpretation = getProfessionalInterpretation(result);
 
         if (format === 'xls') {
-          const exportPayload = buildCompleteExportPayload({
+          try {
+            const exportedByServer = await exportProfessionalExcelFromModal();
+
+            if (exportedByServer) {
+              return;
+            }
+          } catch (serverExportError) {
+            console.warn(
+              'ANALYSIS_MODAL_SERVER_EXCEL_EXPORT_FALLBACK:',
+              serverExportError,
+            );
+          }
+
+          const fallbackExportPayload = buildCompleteExportPayload({
             result,
             arrays,
             tableSections,
             professionalInterpretation,
           });
-          const fallbackBlob = await createClientExcelExportBlob({
-            exportPayload,
+
+          const blob = await createClientExcelExportBlob({
+            exportPayload: fallbackExportPayload,
             arrays,
             tableSections,
             professionalInterpretation,
           });
-          await assertValidXlsxBlob(fallbackBlob, 'Excel fallback export');
-          downloadBlob(fallbackBlob, getFileName(format));
+
+          await assertValidXlsxBlob(blob, 'Excel fallback export');
+          downloadBlob(blob, getFileName(format));
           return;
         }
 

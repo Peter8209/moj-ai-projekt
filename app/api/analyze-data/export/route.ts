@@ -2216,27 +2216,40 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const professionalBuffer = await buildProfessionalExcelWithRenderedCharts(result, preparedDataFile);
+   const professionalBuffer = await buildProfessionalExcelWithRenderedCharts(
+  result,
+  preparedDataFile,
+);
 
-    const buffer = professionalBuffer || (XLSX.write(buildWorkbook(result, preparedDataFile), {
-      bookType: 'xlsx',
-      type: 'buffer',
-      compression: true,
-    }) as Buffer);
+console.log('[EXPORT XLSX CHARTS]', {
+  professionalBuffer: Boolean(professionalBuffer),
+  chartSections: buildChartSections(result).length,
+  pieSections: buildPieChartSections(result).length,
+});
 
-    const fileName = getDownloadFileName(payload, format);
+const fallbackBuffer = XLSX.write(buildWorkbook(result, preparedDataFile), {
+  bookType: 'xlsx',
+  type: 'buffer',
+  compression: true,
+}) as Buffer;
 
-    return new NextResponse(new Uint8Array(buffer), {
-      status: 200,
-      headers: {
-        'Content-Type': EXCEL_MIME_TYPE,
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(
-          fileName,
-        )}"`,
-        'Cache-Control': 'no-store',
-        'X-Zedpera-Export': 'data-analysis',
-      },
-    });
+const buffer = professionalBuffer ?? fallbackBuffer;
+
+const fileName = getDownloadFileName(payload, format);
+
+return new NextResponse(new Uint8Array(buffer), {
+  status: 200,
+  headers: {
+    'Content-Type': EXCEL_MIME_TYPE,
+    'Content-Disposition': `attachment; filename="${encodeURIComponent(
+      fileName,
+    )}"`,
+    'Cache-Control': 'no-store',
+    'X-Zedpera-Export': 'data-analysis',
+    'X-Zedpera-Excel-Charts': professionalBuffer ? 'rendered' : 'fallback',
+  },
+});
+
   } catch (error) {
     const message =
       error instanceof Error

@@ -108,7 +108,7 @@ type QuestionnaireOptionId =
 type QuestionnaireConfig = {
   mode: QuestionnaireMode;
   selectedQuestionnaires: string[];
-  customQuestionnaires: unknown[];
+  customQuestionnairesText: string;
 };
 
 const questionnaireOptions: Array<{
@@ -2487,13 +2487,15 @@ const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<string[]>(
   [],
 );
 
+const [customQuestionnairesText, setCustomQuestionnairesText] = useState('');
+
 const questionnaireConfig = useMemo<QuestionnaireConfig>(() => {
   return {
     mode: questionnaireMode,
     selectedQuestionnaires,
-    customQuestionnaires: [],
+    customQuestionnairesText,
   };
-}, [questionnaireMode, selectedQuestionnaires]);
+}, [questionnaireMode, selectedQuestionnaires, customQuestionnairesText]);
 
 function handleQuestionnaireChange(value: QuestionnaireOptionId) {
   if (!value) {
@@ -2505,19 +2507,34 @@ function handleQuestionnaireChange(value: QuestionnaireOptionId) {
   if (value === 'none') {
     setQuestionnaireMode('none');
     setSelectedQuestionnaires([]);
+    setCustomQuestionnairesText('');
     return;
   }
 
   if (value === 'custom') {
     setQuestionnaireMode('manual');
-    setSelectedQuestionnaires(['custom']);
+    setSelectedQuestionnaires([]);
     return;
   }
 
   setQuestionnaireMode('selected');
-  setSelectedQuestionnaires([value]);
-}
 
+  setSelectedQuestionnaires((current) => {
+    const alreadySelected = current.includes(value);
+
+    if (alreadySelected) {
+      const next = current.filter((item) => item !== value);
+
+      if (next.length === 0) {
+        setQuestionnaireMode('auto-suggest-only');
+      }
+
+      return next;
+    }
+
+    return [...current, value];
+  });
+}
 
 
 /**
@@ -3693,12 +3710,12 @@ prepareFormData.append(
 
   fallbackToNumericVariables: true,
 
-  questionnaireConfig,
-  selectedQuestionnaires: questionnaireConfig.selectedQuestionnaires,
-  customQuestionnaires: questionnaireConfig.customQuestionnaires,
+ questionnaireConfig,
+selectedQuestionnaires: questionnaireConfig.selectedQuestionnaires,
+customQuestionnaires: [],
 
-  strictQuestionnaireMode: true,
-  allowUnconfirmedStandardizedQuestionnaires: false,
+strictQuestionnaireMode: true,
+allowUnconfirmedStandardizedQuestionnaires: false,
 } as any);
 
   const normalized = {
@@ -5461,16 +5478,16 @@ const downloadExcel = () => {
       </p>
     </div>
 
-    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       {questionnaireOptions.map((option) => {
-        const currentValue =
-          questionnaireMode === 'none'
-            ? 'none'
-            : questionnaireMode === 'manual'
-              ? 'custom'
-              : selectedQuestionnaires[0] || '';
-
-        const isActive = currentValue === option.value;
+        const isActive =
+          option.value === ''
+            ? questionnaireMode === 'auto-suggest-only'
+            : option.value === 'none'
+              ? questionnaireMode === 'none'
+              : option.value === 'custom'
+                ? questionnaireMode === 'manual'
+                : selectedQuestionnaires.includes(option.value);
 
         return (
           <button
@@ -5494,6 +5511,30 @@ const downloadExcel = () => {
           </button>
         );
       })}
+    </div>
+
+    <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+      <label className="block text-sm font-black text-white">
+        Vlastné štandardizované dotazníky / subškály
+      </label>
+
+      <p className="mt-1 text-xs font-bold leading-5 text-slate-300">
+        Ak študent používa iný dotazník, vpíše jeho názov, položky, škály a
+        subškály. Napríklad: JSS + WEMWBS, CD-RISC, BDI-II, vlastná škála.
+      </p>
+
+      <textarea
+        value={customQuestionnairesText}
+        onChange={(event) => {
+          setQuestionnaireMode('manual');
+          setSelectedQuestionnaires([]);
+          setCustomQuestionnairesText(event.target.value);
+        }}
+        rows={4}
+        placeholder="Príklad: Používam JSS – 36 položiek, 9 subškál: mzda, povýšenie, vedenie, benefity, odmeny, pracovné podmienky, spolupracovníci, povaha práce, komunikácia. Druhý dotazník: WEMWBS – celkové skóre."
+        className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
+      />
+   
     </div>
   </div>
 ) : null}

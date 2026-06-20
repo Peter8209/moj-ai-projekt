@@ -14,6 +14,13 @@ type AnyRecord = Record<string, unknown>;
 
 type QuestionnaireMode = 'none' | 'selected' | 'manual' | 'auto-suggest-only';
 
+type QuestionnaireId =
+  | 'wemwbs'
+  | 'jss'
+  | 'sehs_s_2020'
+  | 'resilience_scale'
+  | 'custom';
+
 type CustomQuestionnaireDefinition = {
   id?: string;
   name?: string;
@@ -27,23 +34,39 @@ type CustomQuestionnaireDefinition = {
 
 type QuestionnaireConfig = {
   mode: QuestionnaireMode;
-  selectedQuestionnaires: string[];
+  selectedQuestionnaires: QuestionnaireId[];
   customQuestionnaires: CustomQuestionnaireDefinition[];
+  customQuestionnairesText: string;
 };
 
 const DEFAULT_QUESTIONNAIRE_CONFIG: QuestionnaireConfig = {
   mode: 'auto-suggest-only',
   selectedQuestionnaires: [],
   customQuestionnaires: [],
+  customQuestionnairesText: '',
 };
 
-const AUTO_DETECTABLE_STANDARDIZED_QUESTIONNAIRES = new Set([
+const QUESTIONNAIRE_LABELS: Record<QuestionnaireId, string> = {
+  wemwbs: 'WEMWBS',
+  jss: 'JSS – Job Satisfaction Survey',
+  sehs_s_2020: 'SEHS-S-2020',
+  resilience_scale: 'Škála reziliencie',
+  custom: 'Vlastný dotazník / vlastné škály',
+};
+
+/*
+ * Dôležité:
+ * Automaticky vypočítateľné sú iba tie dotazníky, ku ktorým máme
+ * v kóde presné položky / pravidlá. SEHS-S-2020 a rezilienciu nechávame
+ * ako používateľom zvolený kontext, kým nebude doplnená presná metodika.
+ */
+const AUTO_DETECTABLE_STANDARDIZED_QUESTIONNAIRES = new Set<QuestionnaireId>([
   'wemwbs',
   'jss',
 ]);
 
-function normalizeQuestionnaireId(value: unknown): string {
-  return String(value || '')
+function normalizeQuestionnaireId(value: unknown): QuestionnaireId | null {
+  const normalized = String(value || '')
     .trim()
     .toLowerCase()
     .normalize('NFD')
@@ -51,6 +74,57 @@ function normalizeQuestionnaireId(value: unknown): string {
     .replace(/[^a-z0-9_-]+/g, '_')
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '');
+
+  if (!normalized) return null;
+
+  if (
+    normalized === 'wemwbs' ||
+    normalized === 'wembs' ||
+    normalized === 'wem' ||
+    normalized.includes('warwick') ||
+    normalized.includes('wellbeing')
+  ) {
+    return 'wemwbs';
+  }
+
+  if (
+    normalized === 'jss' ||
+    normalized.includes('job_satisfaction') ||
+    normalized.includes('pracovna_spokojnost') ||
+    normalized.includes('pracovnej_spokojnosti')
+  ) {
+    return 'jss';
+  }
+
+  if (
+    normalized === 'sehs' ||
+    normalized === 'sehs_s' ||
+    normalized === 'sehs_s_2020' ||
+    normalized.includes('social_emotional_health')
+  ) {
+    return 'sehs_s_2020';
+  }
+
+  if (
+    normalized === 'resilience' ||
+    normalized === 'resilience_scale' ||
+    normalized === 'reziliencia' ||
+    normalized === 'skala_reziliencie' ||
+    normalized === 'rs' ||
+    normalized.includes('cd_risc')
+  ) {
+    return 'resilience_scale';
+  }
+
+  if (
+    normalized === 'custom' ||
+    normalized === 'vlastny' ||
+    normalized.includes('vlastn')
+  ) {
+    return 'custom';
+  }
+
+  return null;
 }
 
 function parseJsonLikeField(value: FormDataEntryValue | null): unknown {
@@ -78,6 +152,9 @@ function readQuestionnaireConfig(formData: FormData): QuestionnaireConfig {
     formData.get('selectedQuestionnaire') ||
     formData.get('standardizedQuestionnaire');
 
+  const directSelectedQuestionnaires =
+    parseJsonLikeField(formData.get('selectedQuestionnaires'));
+
   const directMode = String(formData.get('questionnaireMode') || '').trim();
 
   const configSource =
@@ -89,7 +166,7 @@ function readQuestionnaireConfig(formData: FormData): QuestionnaireConfig {
     configSource.mode || directMode || DEFAULT_QUESTIONNAIRE_CONFIG.mode,
   ).trim() as QuestionnaireMode;
 
-  const mode: QuestionnaireMode =
+  let mode: QuestionnaireMode =
     rawMode === 'none' ||
     rawMode === 'selected' ||
     rawMode === 'manual' ||
@@ -103,14 +180,27 @@ function readQuestionnaireConfig(formData: FormData): QuestionnaireConfig {
       ? rawConfig
       : [];
 
+  const selectedFromDirectField = Array.isArray(directSelectedQuestionnaires)
+    ? directSelectedQuestionnaires
+    : [];
+
   const selectedQuestionnaires = [
     ...selectedFromConfig,
+    ...selectedFromDirectField,
     typeof directQuestionnaire === 'string' ? directQuestionnaire : '',
   ]
     .map(normalizeQuestionnaireId)
-    .filter(Boolean)
-    .filter((id, index, array) => array.indexOf(id) === index)
-    .filter((id) => id !== 'none' && id !== 'auto' && id !== 'unknown');
+    .filter((id): id is QuestionnaireId => Boolean(id))
+    .filter((id) => id !== 'custom')
+    .filter((id, index, array) => array.indexOf(id) === index);
+
+  const customQuestionnairesText = String(
+    configSource.customQuestionnairesText ??
+      configSource.customQuestionnaireText ??
+      formData.get('customQuestionnairesText') ??
+      formData.get('customQuestionnaireText') ??
+      '',
+  ).trim();
 
   const customQuestionnaires = Array.isArray(configSource.customQuestionnaires)
     ? (configSource.customQuestionnaires.filter(
@@ -124,26 +214,104 @@ function readQuestionnaireConfig(formData: FormData): QuestionnaireConfig {
       mode: 'none',
       selectedQuestionnaires: [],
       customQuestionnaires: [],
+      customQuestionnairesText: '',
     };
   }
 
+  if (mode === 'auto-suggest-only' && selectedQuestionnaires.length > 0) {
+    mode = 'selected';
+  }
+
+  if (mode === 'manual' && !customQuestionnairesText && !customQuestionnaires.length) {
+    mode = selectedQuestionnaires.length > 0 ? 'selected' : 'auto-suggest-only';
+  }
+
   return {
-    mode: selectedQuestionnaires.length > 0 && mode === 'auto-suggest-only'
-      ? 'selected'
-      : mode,
+    mode,
     selectedQuestionnaires,
     customQuestionnaires,
+    customQuestionnairesText,
   };
+}
+
+function selectedQuestionnaireLabels(questionnaireConfig: QuestionnaireConfig): string[] {
+  return questionnaireConfig.selectedQuestionnaires.map(
+    (id) => QUESTIONNAIRE_LABELS[id] ?? id,
+  );
+}
+
+function customTextMentionsQuestionnaire(
+  questionnaireConfig: QuestionnaireConfig,
+  questionnaireId: QuestionnaireId,
+): boolean {
+  const text = String(questionnaireConfig.customQuestionnairesText || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (!text) return false;
+
+  if (questionnaireId === 'wemwbs') {
+    return /wem|wembs|warwick|wellbeing|pohod/.test(text);
+  }
+
+  if (questionnaireId === 'jss') {
+    return /\bjss\b|job satisfaction|pracovn.*spokoj|spokojnost.*prac/.test(text);
+  }
+
+  if (questionnaireId === 'sehs_s_2020') {
+    return /sehs|social emotional health/.test(text);
+  }
+
+  if (questionnaireId === 'resilience_scale') {
+    return /rezilien|resilien|cd[\s_-]?risc|\brs\b/.test(text);
+  }
+
+  return false;
+}
+
+function isQuestionnaireConfirmed(
+  questionnaireConfig: QuestionnaireConfig,
+  questionnaireId: QuestionnaireId,
+): boolean {
+  if (questionnaireConfig.mode === 'none') return false;
+
+  if (questionnaireConfig.mode === 'selected') {
+    return questionnaireConfig.selectedQuestionnaires.includes(questionnaireId);
+  }
+
+  if (questionnaireConfig.mode === 'manual') {
+    return (
+      customTextMentionsQuestionnaire(questionnaireConfig, questionnaireId) ||
+      questionnaireConfig.customQuestionnaires.some((item) => {
+        return normalizeQuestionnaireId(item.id || item.name) === questionnaireId;
+      })
+    );
+  }
+
+  return questionnaireConfig.mode === 'auto-suggest-only';
 }
 
 function shouldAllowAutomaticScaleDetection(
   questionnaireConfig: QuestionnaireConfig,
 ): boolean {
   if (questionnaireConfig.mode === 'none') return false;
-  if (questionnaireConfig.mode === 'auto-suggest-only') return false;
+
+  if (questionnaireConfig.mode === 'auto-suggest-only') {
+    /*
+     * V tomto režime systém môže iba odporúčať / navrhovať. Aby sa používateľovi
+     * do výsledkov nevypočítali nesprávne štandardizované škály, automatické
+     * výpočty škál ostávajú vypnuté.
+     */
+    return false;
+  }
 
   if (questionnaireConfig.mode === 'manual') {
-    return questionnaireConfig.customQuestionnaires.length > 0;
+    return (
+      questionnaireConfig.customQuestionnaires.length > 0 ||
+      customTextMentionsQuestionnaire(questionnaireConfig, 'wemwbs') ||
+      customTextMentionsQuestionnaire(questionnaireConfig, 'jss')
+    );
   }
 
   return questionnaireConfig.selectedQuestionnaires.some((id) =>
@@ -151,13 +319,20 @@ function shouldAllowAutomaticScaleDetection(
   );
 }
 
+function normalizeHeaderForCompare(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
 function headerLooksLike(headers: string[], prefixes: string[]): boolean {
-  const normalizedHeaders = headers.map((header) =>
-    normalizeQuestionnaireId(header).replace(/_/g, ''),
-  );
+  const normalizedHeaders = headers.map(normalizeHeaderForCompare);
 
   return prefixes.some((prefix) => {
-    const normalizedPrefix = normalizeQuestionnaireId(prefix).replace(/_/g, '');
+    const normalizedPrefix = normalizeHeaderForCompare(prefix);
     const count = normalizedHeaders.filter((header) =>
       header.startsWith(normalizedPrefix),
     ).length;
@@ -179,6 +354,14 @@ function createQuestionnaireWarnings(
     ];
   }
 
+  if (questionnaireConfig.mode === 'manual') {
+    warnings.push(
+      questionnaireConfig.customQuestionnairesText
+        ? `Používateľ zadal vlastné dotazníky/subškály: ${questionnaireConfig.customQuestionnairesText}.`
+        : 'Používateľ zvolil vlastný dotazník alebo vlastné škály. Automatická detekcia známych škál sa nepoužije bez presnej definície.',
+    );
+  }
+
   if (questionnaireConfig.mode === 'auto-suggest-only') {
     if (headerLooksLike(headers, ['wem', 'wemwbs'])) {
       warnings.push(
@@ -191,9 +374,21 @@ function createQuestionnaireWarnings(
         'Systém našiel stĺpce podobné JSS, ale dotazník nebol používateľom potvrdený. JSS sa preto nepoužil vo výpočtoch.',
       );
     }
+
+    if (!warnings.length) {
+      warnings.push(
+        'Režim Neviem / iba navrhnúť: systém môže odporučiť podobný dotazník, ale štandardizované škály sa nevypočítajú bez potvrdenia používateľom.',
+      );
+    }
   }
 
   if (questionnaireConfig.mode === 'selected') {
+    const labels = selectedQuestionnaireLabels(questionnaireConfig);
+
+    warnings.push(
+      `Používateľ ručne vybral dotazníky: ${labels.join(' + ')}. Tento výber má prednosť pred automatickou detekciou.`,
+    );
+
     if (selected.has('resilience_scale')) {
       warnings.push(
         'Používateľ vybral Škálu reziliencie. Presné položky, subškály a reverzne skórované položky musia byť dodané v definícii dotazníka alebo šablóne.',
@@ -208,6 +403,64 @@ function createQuestionnaireWarnings(
   }
 
   return warnings;
+}
+
+function shouldRemoveUnconfirmedQuestionnaireRecord(
+  record: unknown,
+  questionnaireConfig: QuestionnaireConfig,
+): boolean {
+  const text = JSON.stringify(record ?? {})
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (!text) return false;
+
+  const mentionsWem =
+    /\bwem\b|wemwbs|wembs|warwick|wellbeing|psychickej pohody/.test(text);
+  const mentionsJss =
+    /\bjss\b|job satisfaction|pracovnej spokojnosti|pracovna spokojnost/.test(
+      text,
+    );
+
+  if (mentionsWem && !isQuestionnaireConfirmed(questionnaireConfig, 'wemwbs')) {
+    return true;
+  }
+
+  if (mentionsJss && !isQuestionnaireConfirmed(questionnaireConfig, 'jss')) {
+    return true;
+  }
+
+  return false;
+}
+
+function filterQuestionnaireRows<T>(
+  rows: unknown,
+  questionnaireConfig: QuestionnaireConfig,
+): T[] {
+  return asRecordArray(rows).filter(
+    (row) => !shouldRemoveUnconfirmedQuestionnaireRecord(row, questionnaireConfig),
+  ) as T[];
+}
+
+function filterQuestionnaireWarnings(
+  warnings: unknown[],
+  questionnaireConfig: QuestionnaireConfig,
+): string[] {
+  return warnings
+    .map((item) => String(item))
+    .filter(Boolean)
+    .filter((warning) => {
+      if (questionnaireConfig.mode === 'auto-suggest-only') {
+        return true;
+      }
+
+      return !shouldRemoveUnconfirmedQuestionnaireRecord(
+        { warning },
+        questionnaireConfig,
+      );
+    })
+    .filter((item, index, array) => array.indexOf(item) === index);
 }
 
 const MAX_FILE_SIZE_MB = 30;
@@ -724,18 +977,46 @@ export async function POST(request: Request) {
     });
 
     const recommendedCharts = normalizeRecommendedCharts(stats);
-    const recommendedTests = normalizeRecommendedTests(stats);
-    const excelTables = createExcelTables(stats);
+    const recommendedTests = normalizeRecommendedTests(stats).filter(
+      (row) => !shouldRemoveUnconfirmedQuestionnaireRecord(row, questionnaireConfig),
+    );
+    const excelTables = createExcelTables(stats)
+      .map((table) => {
+        const tableRecord = table as AnyRecord;
+
+        return {
+          ...tableRecord,
+          rows: Array.isArray(tableRecord.rows)
+            ? tableRecord.rows.filter(
+                (row) =>
+                  !shouldRemoveUnconfirmedQuestionnaireRecord(
+                    row,
+                    questionnaireConfig,
+                  ),
+              )
+            : tableRecord.rows,
+        };
+      })
+      .filter(
+        (table) =>
+          !shouldRemoveUnconfirmedQuestionnaireRecord(
+            table,
+            questionnaireConfig,
+          ),
+      );
 
     const descriptiveStatistics = [
       ...asArray(stats.itemDescriptives),
-      ...asArray(stats.scaleDescriptives),
+      ...filterQuestionnaireRows(stats.scaleDescriptives, questionnaireConfig),
     ];
 
-    const warnings = [
-      ...questionnaireWarnings,
-      ...asArray(stats.warnings).map((item) => String(item)),
-    ].filter((item, index, array) => item && array.indexOf(item) === index);
+    const warnings = filterQuestionnaireWarnings(
+      [
+        ...questionnaireWarnings,
+        ...asArray(stats.warnings),
+      ],
+      questionnaireConfig,
+    );
 
     const respondentCount =
       Number(getNestedValue(stats, ['meta', 'respondentCount'])) ||
@@ -793,15 +1074,15 @@ export async function POST(request: Request) {
       statisticalAnalysis: stats,
       chartData: stats.chartData || {},
       chartTables: stats.chartTables || [],
-      scaleScores: asArray(stats.scaleScores),
-      scaleDescriptives: asArray(stats.scaleDescriptives),
-      normality: asArray(stats.normality),
+      scaleScores: filterQuestionnaireRows(stats.scaleScores, questionnaireConfig),
+      scaleDescriptives: filterQuestionnaireRows(stats.scaleDescriptives, questionnaireConfig),
+      normality: filterQuestionnaireRows(stats.normality, questionnaireConfig),
       correlations: stats.correlations || {},
-      reliability: asArray(stats.reliability),
+      reliability: filterQuestionnaireRows(stats.reliability, questionnaireConfig),
       groupTests: stats.groupTests || {},
-      correlationMatrix: asArray(stats.correlationMatrix),
-      scaleDefinitions: asArray(stats.scaleDefinitions),
-      combinedScaleDefinitions: asArray(stats.combinedScaleDefinitions),
+      correlationMatrix: filterQuestionnaireRows(stats.correlationMatrix, questionnaireConfig),
+      scaleDefinitions: filterQuestionnaireRows(stats.scaleDefinitions, questionnaireConfig),
+      combinedScaleDefinitions: filterQuestionnaireRows(stats.combinedScaleDefinitions, questionnaireConfig),
       scaleScoreRows: asArray(stats.scaleScoreRows),
       aliases: stats.aliases || {},
 

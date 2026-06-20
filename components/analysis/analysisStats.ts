@@ -100,6 +100,7 @@ export interface CustomQuestionnaireDefinition {
   responseMin?: number;
   responseMax?: number;
   scoring?: ScaleScoringMode;
+  description?: string;
   scales?: CustomQuestionnaireScaleDefinition[];
   subscales?: CustomQuestionnaireScaleDefinition[];
   combinedScales?: CustomQuestionnaireCombinedScaleDefinition[];
@@ -109,6 +110,11 @@ export interface QuestionnaireConfig {
   mode?: QuestionnaireMode;
   selectedQuestionnaires?: string[];
   customQuestionnaires?: CustomQuestionnaireDefinition[];
+  /**
+   * Voľný text z Dashboardu: používateľ vie napísať názov dotazníka,
+   * položky, škály a subškály. Používa sa hlavne v režime manual.
+   */
+  customQuestionnairesText?: string;
 }
 
 export interface StatisticalAnalysisOptions {
@@ -306,6 +312,9 @@ export interface StatisticalAnalysisResult {
     autoDetectedScaleCount: number;
     manualScaleCount: number;
     fallbackUsed: boolean;
+    questionnaireMode?: QuestionnaireMode;
+    selectedQuestionnaires?: string[];
+    customQuestionnairesText?: string;
   };
 
   frequencies: FrequencyAnalysisResult[];
@@ -524,16 +533,13 @@ export function runFullStatisticalAnalysis(
 
       if (realGroupCount < 2) continue;
 
-      const variableNormality = normality.find((item) => item.variable === variable.scaleName);
-      const variableIsNormal = variableNormality?.isNormal === true;
-
       if (realGroupCount === 2) {
         const tTest = calculateIndependentTTest(variable.scaleName, groupColumn, grouped);
         const mannWhitney = calculateMannWhitneyUTest(variable.scaleName, groupColumn, grouped);
 
         parametricGroupTests.push(tTest);
         nonParametricGroupTests.push(mannWhitney);
-        recommendedGroupTests.push(variableIsNormal ? tTest : mannWhitney);
+        recommendedGroupTests.push(shouldUseParametric ? tTest : mannWhitney);
       }
 
       if (realGroupCount >= 3) {
@@ -542,10 +548,19 @@ export function runFullStatisticalAnalysis(
 
         parametricGroupTests.push(anova);
         nonParametricGroupTests.push(kruskal);
-        recommendedGroupTests.push(variableIsNormal ? anova : kruskal);
+        recommendedGroupTests.push(shouldUseParametric ? anova : kruskal);
       }
     }
   }
+
+  const exportedPearson = shouldUseParametric ? pearson : [];
+  const exportedSpearman = shouldUseParametric ? [] : spearman;
+  const exportedRecommendedCorrelations = shouldUseParametric ? pearson : spearman;
+  const exportedParametricGroupTests = shouldUseParametric ? parametricGroupTests : [];
+  const exportedNonParametricGroupTests = shouldUseParametric ? [] : nonParametricGroupTests;
+  const exportedRecommendedGroupTests = shouldUseParametric
+    ? parametricGroupTests
+    : nonParametricGroupTests;
 
   const aiRecommendation = buildAiRecommendation({
     idColumn,
@@ -560,7 +575,7 @@ export function runFullStatisticalAnalysis(
   });
 
   const correlationMatrix = buildCorrelationMatrix(
-    recommendedCorrelations.length > 0 ? recommendedCorrelations : spearman.length > 0 ? spearman : pearson,
+    exportedRecommendedCorrelations,
   );
 
   const scaleScoreRows = buildScaleScoreRowsForExport(analysisScores, respondentCount);
@@ -572,7 +587,7 @@ export function runFullStatisticalAnalysis(
     scaleDescriptives,
     normality,
     reliability,
-    correlations: recommendedCorrelations.length > 0 ? recommendedCorrelations : spearman.length > 0 ? spearman : pearson,
+    correlations: exportedRecommendedCorrelations,
     scaleDefinitions: mergedScales,
     combinedScaleDefinitions: mergedCombinedScales,
   });
@@ -586,13 +601,13 @@ export function runFullStatisticalAnalysis(
     scaleDescriptives,
     normality,
     reliability,
-    pearson,
-    spearman,
-    recommendedCorrelations,
+    pearson: exportedPearson,
+    spearman: exportedSpearman,
+    recommendedCorrelations: exportedRecommendedCorrelations,
     correlationMatrix,
-    parametricGroupTests,
-    nonParametricGroupTests,
-    recommendedGroupTests,
+    parametricGroupTests: exportedParametricGroupTests,
+    nonParametricGroupTests: exportedNonParametricGroupTests,
+    recommendedGroupTests: exportedRecommendedGroupTests,
     chartData,
     chartTables,
     scaleDefinitions: mergedScales,
@@ -614,6 +629,9 @@ export function runFullStatisticalAnalysis(
       autoDetectedScaleCount: autoScales.length,
       manualScaleCount: manualScales.length,
       fallbackUsed,
+      questionnaireMode: getQuestionnaireMode(options),
+      selectedQuestionnaires: Array.from(getSelectedQuestionnaireIds(options)),
+      customQuestionnairesText: options.questionnaireConfig?.customQuestionnairesText ?? '',
     },
 
     frequencies,
@@ -624,9 +642,9 @@ export function runFullStatisticalAnalysis(
     normality,
 
     correlations: {
-      pearson,
-      spearman,
-      recommended: recommendedCorrelations,
+      pearson: exportedPearson,
+      spearman: exportedSpearman,
+      recommended: exportedRecommendedCorrelations,
       recommendationNote: shouldUseParametric
         ? 'Na základe kontroly normality odporúčame interpretovať Pearsonovu koreláciu. Pri ordinálnych položkách alebo pochybnej normalite je bezpečnejší Spearman.'
         : 'Na základe kontroly normality odporúčame interpretovať Spearmanovu koreláciu, pretože normalita nie je potvrdená alebo ide o ordinálne/škálové dáta.',
@@ -635,9 +653,9 @@ export function runFullStatisticalAnalysis(
     reliability,
 
     groupTests: {
-      parametric: parametricGroupTests,
-      nonParametric: nonParametricGroupTests,
-      recommended: recommendedGroupTests,
+      parametric: exportedParametricGroupTests,
+      nonParametric: exportedNonParametricGroupTests,
+      recommended: exportedRecommendedGroupTests,
       recommendationNote: shouldUseParametric
         ? 'Pre premenné s približne normálnym rozdelením odporúčame parametrické testy: Independent t-test pri dvoch skupinách a ANOVA pri troch a viacerých skupinách.'
         : 'Ak normalita nie je potvrdená, odporúčame neparametrické testy: Mann-Whitney U pri dvoch skupinách a Kruskal-Wallis pri troch a viacerých skupinách.',
@@ -1008,9 +1026,62 @@ function reverseCode(value: number, minValue: number, maxValue: number): number 
 /* -------------------------------------------------------------------------- */
 
 function normalizeQuestionnaireId(value: unknown): string {
-  return normalizeText(String(value ?? ''))
+  const raw = String(value ?? '').trim();
+  const compact = normalizeText(raw);
+  const underscored = raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
+
+  if (!compact) return '';
+
+  if (
+    compact === 'wem' ||
+    compact === 'wembs' ||
+    compact === 'wemwbs' ||
+    compact.includes('warwick') ||
+    compact.includes('wellbeing')
+  ) {
+    return 'wemwbs';
+  }
+
+  if (
+    compact === 'jss' ||
+    compact.includes('jobsatisfaction') ||
+    compact.includes('pracovaspokojnost') ||
+    compact.includes('pracovnespokojnosti')
+  ) {
+    return 'jss';
+  }
+
+  if (
+    compact === 'sehs' ||
+    compact === 'sehss' ||
+    compact === 'sehss2020' ||
+    compact.includes('socialemotionalhealth')
+  ) {
+    return 'sehs_s_2020';
+  }
+
+  if (
+    compact === 'resilience' ||
+    compact === 'resiliencie' ||
+    compact === 'reziliencia' ||
+    compact === 'skalareziliencie' ||
+    compact === 'resiliencescale' ||
+    compact === 'rs' ||
+    compact.includes('cdrisc')
+  ) {
+    return 'resilience_scale';
+  }
+
+  if (compact === 'custom' || compact.includes('vlastny') || compact.includes('vlastne')) {
+    return 'custom';
+  }
+
+  return underscored || compact;
 }
 
 function getSelectedQuestionnaireIds(
@@ -1075,6 +1146,63 @@ function shouldInferGenericScales(
   return mode === 'selected' || mode === 'manual' || options.autoDetectScales === true;
 }
 
+function getManualQuestionnaireText(
+  options: StatisticalAnalysisOptions = {},
+): string {
+  return normalizeText(
+    [
+      options.questionnaireConfig?.customQuestionnairesText,
+      ...(options.customQuestionnaires ?? []).map((item) =>
+        [
+          item.id,
+          item.name,
+          item.questionnaireId,
+          item.questionnaireName,
+          item.description,
+        ].join(' '),
+      ),
+      ...(options.questionnaireConfig?.customQuestionnaires ?? []).map((item) =>
+        [
+          item.id,
+          item.name,
+          item.questionnaireId,
+          item.questionnaireName,
+          item.description,
+        ].join(' '),
+      ),
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+}
+
+function manualTextMentionsQuestionnaire(
+  questionnaireId: string,
+  options: StatisticalAnalysisOptions = {},
+): boolean {
+  const text = getManualQuestionnaireText(options);
+
+  if (!text) return false;
+
+  if (questionnaireId === 'wemwbs') {
+    return /wem|wembs|wemwbs|warwick|wellbeing|pohod/.test(text);
+  }
+
+  if (questionnaireId === 'jss') {
+    return /jss|jobsatisfaction|pracovn.*spokoj|spokojnost.*prac/.test(text);
+  }
+
+  if (questionnaireId === 'sehs_s_2020') {
+    return /sehs|socialemotionalhealth/.test(text);
+  }
+
+  if (questionnaireId === 'resilience_scale') {
+    return /rezilien|resilien|cdrisc|skalareziliencie/.test(text);
+  }
+
+  return false;
+}
+
 function shouldComputeQuestionnaire(
   questionnaireId: string,
   options: StatisticalAnalysisOptions = {},
@@ -1092,9 +1220,18 @@ function shouldComputeQuestionnaire(
   };
 
   const acceptedIds = aliases[normalizedId] ?? [normalizedId];
-  const explicitlySelected = acceptedIds.some((id) => selected.has(id));
+  const explicitlySelected = acceptedIds.some((id) =>
+    selected.has(normalizeQuestionnaireId(id)),
+  );
 
   if (explicitlySelected) return true;
+
+  if (
+    getQuestionnaireMode(options) === 'manual' &&
+    acceptedIds.some((id) => manualTextMentionsQuestionnaire(id, options))
+  ) {
+    return true;
+  }
 
   if (isStrictQuestionnaireMode(options)) return false;
 
@@ -1222,6 +1359,76 @@ function autoDetectScaleDefinitions(
       scoring: 'sum',
       description: 'Automaticky rozpoznaná škála JSS.',
     });
+  }
+
+  if (shouldComputeQuestionnaire('jss', options) && jssItems.length >= 3) {
+    const jssSubscales: Array<{
+      id: string;
+      name: string;
+      itemNumbers: number[];
+    }> = [
+      {
+        id: 'jss_pay',
+        name: 'JSS – Mzda',
+        itemNumbers: [1, 10, 19, 28],
+      },
+      {
+        id: 'jss_promotion',
+        name: 'JSS – Povýšenie',
+        itemNumbers: [2, 11, 20, 33],
+      },
+      {
+        id: 'jss_supervision',
+        name: 'JSS – Vedenie / nadriadený',
+        itemNumbers: [3, 12, 21, 30],
+      },
+      {
+        id: 'jss_benefits',
+        name: 'JSS – Benefity',
+        itemNumbers: [4, 13, 22, 29],
+      },
+      {
+        id: 'jss_rewards',
+        name: 'JSS – Odmeny',
+        itemNumbers: [5, 14, 23, 32],
+      },
+      {
+        id: 'jss_operating_conditions',
+        name: 'JSS – Pracovné podmienky',
+        itemNumbers: [6, 15, 24, 31],
+      },
+      {
+        id: 'jss_coworkers',
+        name: 'JSS – Spolupracovníci',
+        itemNumbers: [7, 16, 25, 34],
+      },
+      {
+        id: 'jss_nature_of_work',
+        name: 'JSS – Povaha práce',
+        itemNumbers: [8, 17, 27, 35],
+      },
+      {
+        id: 'jss_communication',
+        name: 'JSS – Komunikácia',
+        itemNumbers: [9, 18, 26, 36],
+      },
+    ];
+
+    for (const subscale of jssSubscales) {
+      const items = findColumnsByItemNumbers(jssItems, subscale.itemNumbers);
+
+      if (items.length >= 2) {
+        scales.push({
+          id: subscale.id,
+          name: subscale.name,
+          items,
+          minValue: 1,
+          maxValue: 6,
+          scoring: 'sum',
+          description: `JSS subškála: ${subscale.name}. Položky: ${subscale.itemNumbers.join(', ')}.`,
+        });
+      }
+    }
   }
 
   const fatherColumns = allowSembu ? numericColumns.filter((column) => {
@@ -2900,9 +3107,72 @@ function buildAnalysisAliases(input: {
   const pearsonRows = correlationsToRows(input.pearson);
   const spearmanRows = correlationsToRows(input.spearman);
   const recommendedCorrelationRows = correlationsToRows(input.recommendedCorrelations);
+  const allCorrelationRows = [
+    ...pearsonRows.map((row) => ({ ...row, odporúčané: false, skupina_testov: 'parametrické' })),
+    ...spearmanRows.map((row) => ({ ...row, odporúčané: false, skupina_testov: 'neparametrické' })),
+  ];
+
+  const recommendedCorrelationKeys = new Set(
+  recommendedCorrelationRows.map((row) => {
+    const safeRow = row as Record<string, unknown>;
+
+    return [
+      String(safeRow['premenná_1'] ?? safeRow['variableA'] ?? ''),
+      String(safeRow['premenná_2'] ?? safeRow['variableB'] ?? ''),
+      String(safeRow['metóda'] ?? safeRow['method'] ?? ''),
+    ].join('||');
+  }),
+);
+
+ const allCorrelationRowsWithRecommendation = allCorrelationRows.map((row) => {
+  const safeRow = row as Record<string, unknown>;
+
+  const key = [
+    String(safeRow['premenná_1'] ?? safeRow['variableA'] ?? ''),
+    String(safeRow['premenná_2'] ?? safeRow['variableB'] ?? ''),
+    String(safeRow['metóda'] ?? safeRow['method'] ?? ''),
+  ].join('||');
+
+  return {
+    ...safeRow,
+    odporúčané: recommendedCorrelationKeys.has(key),
+  };
+});
+
   const parametricRows = groupTestsToRows(input.parametricGroupTests);
   const nonParametricRows = groupTestsToRows(input.nonParametricGroupTests);
   const recommendedGroupRows = groupTestsToRows(input.recommendedGroupTests);
+  const allGroupTestRows = [
+    ...parametricRows.map((row) => ({ ...row, skupina_testov: 'parametrické' })),
+    ...nonParametricRows.map((row) => ({ ...row, skupina_testov: 'neparametrické' })),
+  ];
+
+ const recommendedGroupKeys = new Set(
+  recommendedGroupRows.map((row) => {
+    const safeRow = row as Record<string, unknown>;
+
+    return [
+      String(safeRow['závislá_premenná'] ?? safeRow['dependentVariable'] ?? ''),
+      String(safeRow['skupinová_premenná'] ?? safeRow['groupVariable'] ?? ''),
+      String(safeRow['test'] ?? safeRow['testType'] ?? ''),
+    ].join('||');
+  }),
+);
+
+  const allGroupTestRowsWithRecommendation = allGroupTestRows.map((row) => {
+  const safeRow = row as Record<string, unknown>;
+
+  const key = [
+    String(safeRow['závislá_premenná'] ?? safeRow['dependentVariable'] ?? ''),
+    String(safeRow['skupinová_premenná'] ?? safeRow['groupVariable'] ?? ''),
+    String(safeRow['test'] ?? safeRow['testType'] ?? ''),
+  ].join('||');
+
+  return {
+    ...safeRow,
+    odporúčané: recommendedGroupKeys.has(key),
+  };
+});
 
   return {
     frequencies: frequencyRows,
@@ -2930,15 +3200,28 @@ function buildAnalysisAliases(input: {
     pearsonCorrelations: pearsonRows,
     spearmanCorrelations: spearmanRows,
     recommendedCorrelations: recommendedCorrelationRows,
-    correlations: [...pearsonRows, ...spearmanRows],
-    correlationResults: [...pearsonRows, ...spearmanRows],
+
+    // DÔLEŽITÉ:
+    // Používateľ chce v exporte aj parametrické aj neparametrické korelácie.
+    // Preto hlavné aliasy correlations/correlationResults obsahujú Pearson aj Spearman.
+    // Stĺpec odporúčané označí, ktorú metódu systém odporúča interpretovať podľa normality.
+    allCorrelations: allCorrelationRowsWithRecommendation,
+    correlations: allCorrelationRowsWithRecommendation,
+    correlationResults: allCorrelationRowsWithRecommendation,
     correlationMatrix: input.correlationMatrix,
+
     parametricGroupTests: parametricRows,
     nonParametricGroupTests: nonParametricRows,
     recommendedGroupTests: recommendedGroupRows,
-    statisticalTests: [...parametricRows, ...nonParametricRows],
-    hypothesisTests: recommendedGroupRows.length > 0 ? recommendedGroupRows : [...parametricRows, ...nonParametricRows],
-    testResults: recommendedGroupRows.length > 0 ? recommendedGroupRows : [...parametricRows, ...nonParametricRows],
+
+    // DÔLEŽITÉ:
+    // Používateľ chce v exporte všetky testy: t-test, ANOVA, Mann-Whitney aj Kruskal-Wallis.
+    // Preto hlavné aliasy statisticalTests/hypothesisTests/testResults obsahujú všetko.
+    // Stĺpec odporúčané označí, ktoré testy sú odporúčané podľa normality.
+    allGroupTests: allGroupTestRowsWithRecommendation,
+    statisticalTests: allGroupTestRowsWithRecommendation,
+    hypothesisTests: allGroupTestRowsWithRecommendation,
+    testResults: allGroupTestRowsWithRecommendation,
     recommendedTests: recommendedGroupRows,
     chartData: input.chartData,
     chartTables: input.chartTables,

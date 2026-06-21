@@ -438,8 +438,8 @@ function flattenFrequencies(result: unknown): AnyRecord[] {
   const rows: AnyRecord[] = [];
 
   asRecords(getNestedValue(result, ['frequencies'])).forEach((frequency) => {
-    const variable = String(frequency.variable || frequency.name || '');
-    const values = asRecords(frequency.values || frequency.items);
+    const variable = String(frequency['variable'] || frequency['name'] || '');
+    const values = asRecords(frequency['values'] || frequency['items']);
 
     values.forEach((item) => {
       rows.push({
@@ -705,9 +705,9 @@ function buildContingencyTables(result: unknown): AnyRecord[] {
   ];
 
   frequencies.forEach((frequency) => {
-    const variable = String(frequency.variable || frequency.name || '');
-    const values = asRecords(frequency.values || frequency.items);
-    const total = Number(frequency.total || frequency.valid || 0);
+    const variable = String(frequency['variable'] || frequency['name'] || '');
+    const values = asRecords(frequency['values'] || frequency['items']);
+    const total = Number(frequency['total'] || frequency['valid'] || 0);
 
     values.forEach((item) => {
       const count = Number(item.count || 0);
@@ -1527,8 +1527,8 @@ function buildPieChartSections(result: unknown): DashboardPieSection[] {
   const sections: DashboardPieSection[] = [];
 
   frequencies.forEach((frequency, index) => {
-    const variable = String(frequency.variable || frequency.name || `Premenná ${index + 1}`).trim();
-    const values = asRecords(frequency.values || frequency.items);
+    const variable = String(frequency['variable'] || frequency['name'] || `Premenná ${index + 1}`).trim();
+    const values = asRecords(frequency['values'] || frequency['items']);
     const points = buildChartPoints(
       values,
       ['value', 'label', 'category', 'hodnota'],
@@ -2122,6 +2122,51 @@ function getDownloadFileName(payload: ExportPayload, format: ExportFormat = 'exc
   return `ZEDPERA_analyza_dat_export_${date}.${extension}`;
 }
 
+function asciiDownloadFileName(fileName: string): string {
+  const extensionMatch = String(fileName || '').match(/\.[A-Za-z0-9]+$/);
+  const extension = extensionMatch ? extensionMatch[0] : '';
+  const baseName = String(fileName || 'ZEDPERA_export')
+    .replace(/\.[^.]+$/g, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9_-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 120) || 'ZEDPERA_export';
+
+  return `${baseName}${extension}`;
+}
+
+function downloadHeaders(
+  contentType: string,
+  fileName: string,
+  extraHeaders: Record<string, string> = {},
+): HeadersInit {
+  const asciiName = asciiDownloadFileName(fileName);
+  const encodedName = encodeURIComponent(fileName);
+
+  return {
+    'Content-Type': contentType,
+    'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${encodedName}`,
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+    Pragma: 'no-cache',
+    Expires: '0',
+    ...extraHeaders,
+  };
+}
+
+function binaryDownloadResponse(
+  buffer: Buffer | Uint8Array,
+  contentType: string,
+  fileName: string,
+  extraHeaders: Record<string, string> = {},
+): NextResponse {
+  return new NextResponse(new Uint8Array(buffer), {
+    status: 200,
+    headers: downloadHeaders(contentType, fileName, extraHeaders),
+  });
+}
+
 export async function GET() {
   return jsonResponse({
     ok: true,
@@ -2188,14 +2233,13 @@ export async function POST(request: NextRequest) {
 
       return new NextResponse(html, {
         status: 200,
-        headers: {
-          'Content-Type': format === 'html' ? HTML_MIME_TYPE : WORD_MIME_TYPE,
-          'Content-Disposition': `attachment; filename="${encodeURIComponent(
-            fileName,
-          )}"`,
-          'Cache-Control': 'no-store',
-          'X-Zedpera-Export': 'data-analysis-word',
-        },
+        headers: downloadHeaders(
+          format === 'html' ? HTML_MIME_TYPE : WORD_MIME_TYPE,
+          fileName,
+          {
+            'X-Zedpera-Export': 'data-analysis-word',
+          },
+        ),
       });
     }
 
@@ -2203,52 +2247,36 @@ export async function POST(request: NextRequest) {
       const pdfBuffer = buildPdfBuffer(result, preparedDataFile);
       const fileName = getDownloadFileName(payload, format);
 
-      return new NextResponse(new Uint8Array(pdfBuffer), {
-        status: 200,
-        headers: {
-          'Content-Type': PDF_MIME_TYPE,
-          'Content-Disposition': `attachment; filename="${encodeURIComponent(
-            fileName,
-          )}"`,
-          'Cache-Control': 'no-store',
-          'X-Zedpera-Export': 'data-analysis-pdf',
-        },
+      return binaryDownloadResponse(pdfBuffer, PDF_MIME_TYPE, fileName, {
+        'X-Zedpera-Export': 'data-analysis-pdf',
       });
     }
 
-   const professionalBuffer = await buildProfessionalExcelWithRenderedCharts(
-  result,
-  preparedDataFile,
-);
+    const professionalBuffer = await buildProfessionalExcelWithRenderedCharts(
+      result,
+      preparedDataFile,
+    );
 
-console.log('[EXPORT XLSX CHARTS]', {
-  professionalBuffer: Boolean(professionalBuffer),
-  chartSections: buildChartSections(result).length,
-  pieSections: buildPieChartSections(result).length,
-});
+    console.log('[EXPORT XLSX CHARTS]', {
+      professionalBuffer: Boolean(professionalBuffer),
+      chartSections: buildChartSections(result).length,
+      pieSections: buildPieChartSections(result).length,
+    });
 
-const fallbackBuffer = XLSX.write(buildWorkbook(result, preparedDataFile), {
-  bookType: 'xlsx',
-  type: 'buffer',
-  compression: true,
-}) as Buffer;
+    const fallbackWorkbook = buildWorkbook(result, preparedDataFile);
+    const fallbackBuffer = XLSX.write(fallbackWorkbook, {
+      bookType: 'xlsx',
+      type: 'buffer',
+      compression: true,
+    }) as Buffer;
 
-const buffer = professionalBuffer ?? fallbackBuffer;
+    const buffer = professionalBuffer ?? fallbackBuffer;
+    const fileName = getDownloadFileName(payload, 'excel');
 
-const fileName = getDownloadFileName(payload, format);
-
-return new NextResponse(new Uint8Array(buffer), {
-  status: 200,
-  headers: {
-    'Content-Type': EXCEL_MIME_TYPE,
-    'Content-Disposition': `attachment; filename="${encodeURIComponent(
-      fileName,
-    )}"`,
-    'Cache-Control': 'no-store',
-    'X-Zedpera-Export': 'data-analysis',
-    'X-Zedpera-Excel-Charts': professionalBuffer ? 'rendered' : 'fallback',
-  },
-});
+    return binaryDownloadResponse(buffer, EXCEL_MIME_TYPE, fileName, {
+      'X-Zedpera-Export': 'data-analysis',
+      'X-Zedpera-Excel-Charts': professionalBuffer ? 'rendered' : 'fallback',
+    });
 
   } catch (error) {
     const message =

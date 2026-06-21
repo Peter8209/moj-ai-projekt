@@ -106,6 +106,15 @@ export interface CustomQuestionnaireDefinition {
   combinedScales?: CustomQuestionnaireCombinedScaleDefinition[];
 }
 
+export interface ManualAnalysisConfig {
+  questionnaireMode?: QuestionnaireMode | string;
+  selectedQuestionnaires?: string[];
+  customQuestionnairesText?: string;
+  manualScalesText?: string;
+  manualSubscalesText?: string;
+  groupingColumnsText?: string;
+}
+
 export interface QuestionnaireConfig {
   mode?: QuestionnaireMode;
   selectedQuestionnaires?: string[];
@@ -115,6 +124,16 @@ export interface QuestionnaireConfig {
    * položky, škály a subškály. Používa sa hlavne v režime manual.
    */
   customQuestionnairesText?: string;
+
+  /**
+   * Textové definície zo sekcie Analýza dát.
+   * Formát:
+   * Názov škály: položka1, položka2, položka3
+   */
+  manualScalesText?: string;
+  manualSubscalesText?: string;
+  groupingColumnsText?: string;
+  manualAnalysisConfig?: ManualAnalysisConfig;
 }
 
 export interface StatisticalAnalysisOptions {
@@ -122,6 +141,16 @@ export interface StatisticalAnalysisOptions {
   scales?: ScaleDefinition[];
   combinedScales?: CombinedScaleDefinition[];
   groupColumns?: string[];
+
+  /**
+   * Manuálne zadané škály/subškály z DashboardClient.tsx.
+   * Tieto texty majú prednosť pred automatickým hádaním škál.
+   */
+  manualScalesText?: string;
+  manualSubscalesText?: string;
+  groupingColumnsText?: string;
+  manualAnalysisConfig?: ManualAnalysisConfig;
+
   alpha?: number;
   includeItemDescriptives?: boolean;
   includeFrequencies?: boolean;
@@ -315,6 +344,9 @@ export interface StatisticalAnalysisResult {
     questionnaireMode?: QuestionnaireMode;
     selectedQuestionnaires?: string[];
     customQuestionnairesText?: string;
+    manualScalesText?: string;
+    manualSubscalesText?: string;
+    groupingColumnsText?: string;
   };
 
   frequencies: FrequencyAnalysisResult[];
@@ -408,8 +440,14 @@ export function runFullStatisticalAnalysis(
     return hasReasonableGroupCount(cleanRows.map((row) => row[column]));
   }) : [];
 
+  const manualGroupingColumns = parseManualGroupingColumns(
+    getOptionTextValue(options, 'groupingColumnsText'),
+    candidateColumns,
+  );
+
   const groupColumns = uniqueStrings([
     ...(options.groupColumns ?? []),
+    ...manualGroupingColumns,
     ...autoGroupColumns,
   ]).filter((column) => {
     if (!columns.includes(column)) return false;
@@ -448,9 +486,21 @@ export function runFullStatisticalAnalysis(
     options,
   );
 
+  const manualDashboardScales = parseManualScaleDefinitionsFromText(
+    getOptionTextValue(options, 'manualScalesText'),
+    'scale',
+  );
+
+  const manualDashboardSubscales = parseManualScaleDefinitionsFromText(
+    getOptionTextValue(options, 'manualSubscalesText'),
+    'subscale',
+  );
+
   const manualScales = [
     ...(options.scales ?? []),
     ...questionnaireDefinitions.scales,
+    ...manualDashboardScales,
+    ...manualDashboardSubscales,
   ];
 
   const autoScales = autoDetectScales
@@ -631,7 +681,13 @@ export function runFullStatisticalAnalysis(
       fallbackUsed,
       questionnaireMode: getQuestionnaireMode(options),
       selectedQuestionnaires: Array.from(getSelectedQuestionnaireIds(options)),
-      customQuestionnairesText: options.questionnaireConfig?.customQuestionnairesText ?? '',
+      customQuestionnairesText:
+        options.questionnaireConfig?.customQuestionnairesText ??
+        options.manualAnalysisConfig?.customQuestionnairesText ??
+        '',
+      manualScalesText: getOptionTextValue(options, 'manualScalesText'),
+      manualSubscalesText: getOptionTextValue(options, 'manualSubscalesText'),
+      groupingColumnsText: getOptionTextValue(options, 'groupingColumnsText'),
     },
 
     frequencies,
@@ -1152,6 +1208,10 @@ function getManualQuestionnaireText(
   return normalizeText(
     [
       options.questionnaireConfig?.customQuestionnairesText,
+      getOptionTextValue(options, 'customQuestionnairesText'),
+      getOptionTextValue(options, 'manualScalesText'),
+      getOptionTextValue(options, 'manualSubscalesText'),
+      getOptionTextValue(options, 'groupingColumnsText'),
       ...(options.customQuestionnaires ?? []).map((item) =>
         [
           item.id,
@@ -1237,6 +1297,191 @@ function shouldComputeQuestionnaire(
 
   return options.allowUnconfirmedStandardizedQuestionnaires === true;
 }
+
+
+function getOptionTextValue(
+  options: StatisticalAnalysisOptions,
+  field: keyof ManualAnalysisConfig,
+): string {
+  const directValue = (options as any)[field];
+  const manualConfigValue = options.manualAnalysisConfig?.[field];
+  const questionnaireConfigValue = (options.questionnaireConfig as any)?.[field];
+  const nestedQuestionnaireManualValue =
+    options.questionnaireConfig?.manualAnalysisConfig?.[field];
+
+  return String(
+    directValue ??
+      manualConfigValue ??
+      questionnaireConfigValue ??
+      nestedQuestionnaireManualValue ??
+      '',
+  );
+}
+
+function parseManualScaleDefinitionsFromText(
+  textValue: string,
+  kind: 'scale' | 'subscale',
+): ScaleDefinition[] {
+  const lines = String(textValue || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return lines
+    .map((line, index): ScaleDefinition | null => {
+      const parsed = parseManualDefinitionLine(line, index, kind);
+      if (!parsed || parsed.items.length === 0) return null;
+      return parsed;
+    })
+    .filter((definition): definition is ScaleDefinition => Boolean(definition));
+}
+
+function parseManualDefinitionLine(
+  line: string,
+  index: number,
+  kind: 'scale' | 'subscale',
+): ScaleDefinition | null {
+  const normalizedLine = String(line || '').trim();
+  if (!normalizedLine) return null;
+
+  const parts = normalizedLine
+    .split('|')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const mainPart = parts[0] || '';
+  const colonIndex = mainPart.indexOf(':');
+
+  const rawName =
+    colonIndex >= 0
+      ? mainPart.slice(0, colonIndex).trim()
+      : `${kind === 'scale' ? 'Škála' : 'Subškála'} ${index + 1}`;
+
+  const rawItems =
+    colonIndex >= 0
+      ? mainPart.slice(colonIndex + 1).trim()
+      : mainPart.trim();
+
+  const optionsMap = parseManualDefinitionOptions(parts.slice(1));
+
+  const items = splitManualItems(rawItems);
+  const reverseItems = splitManualItems(
+    optionsMap.reverse ||
+      optionsMap.reverzne ||
+      optionsMap.reverznepolozky ||
+      optionsMap.reverseitems ||
+      '',
+  );
+
+  const minValue = toNumber(optionsMap.min ?? optionsMap.minimum) ?? 1;
+  const maxValue = toNumber(optionsMap.max ?? optionsMap.maximum) ?? 5;
+
+  const scoringRaw = normalizeText(
+    optionsMap.scoring ||
+      optionsMap.vypocet ||
+      optionsMap.skore ||
+      optionsMap.score ||
+      '',
+  );
+
+  const scoring: ScaleScoringMode =
+    scoringRaw.includes('sum') ||
+    scoringRaw.includes('sucet') ||
+    scoringRaw.includes('suma')
+      ? 'sum'
+      : 'mean';
+
+  const safeName =
+    rawName && rawName.length > 0
+      ? rawName
+      : `${kind === 'scale' ? 'Škála' : 'Subškála'} ${index + 1}`;
+
+  const idPrefix = kind === 'scale' ? 'manual_scale' : 'manual_subscale';
+
+  return {
+    id: `${idPrefix}_${index + 1}_${slugify(safeName)}`,
+    name: safeName,
+    items,
+    reverseItems,
+    minValue,
+    maxValue,
+    scoring,
+    description:
+      kind === 'scale'
+        ? 'Manuálne zadaná škála pred spustením analýzy dát.'
+        : 'Manuálne zadaná subškála pred spustením analýzy dát.',
+  };
+}
+
+function parseManualDefinitionOptions(parts: string[]): Record<string, string> {
+  const result: Record<string, string> = {};
+
+  parts.forEach((part) => {
+    const separatorIndex = part.indexOf(':') >= 0 ? part.indexOf(':') : part.indexOf('=');
+
+    if (separatorIndex < 0) return;
+
+    const key = normalizeText(part.slice(0, separatorIndex));
+    const value = part.slice(separatorIndex + 1).trim();
+
+    if (!key || !value) return;
+
+    result[key] = value;
+  });
+
+  return result;
+}
+
+function splitManualItems(value: string): string[] {
+  return String(value || '')
+    .split(/[,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseManualGroupingColumns(
+  textValue: string,
+  availableColumns: string[],
+): string[] {
+  const requested = String(textValue || '')
+    .split(/[\n,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return uniqueStrings(
+    requested
+      .map((requestedColumn) => resolveManualColumnName(requestedColumn, availableColumns))
+      .filter(Boolean) as string[],
+  );
+}
+
+function resolveManualColumnName(
+  requestedColumn: string,
+  availableColumns: string[],
+): string | null {
+  const requested = String(requestedColumn || '').trim();
+  if (!requested) return null;
+
+  const exact = availableColumns.find((column) => column === requested);
+  if (exact) return exact;
+
+  const normalizedRequested = normalizeText(requested);
+
+  const normalizedExact = availableColumns.find(
+    (column) => normalizeText(column) === normalizedRequested,
+  );
+
+  if (normalizedExact) return normalizedExact;
+
+  const partial = availableColumns.find((column) =>
+    normalizeText(column).includes(normalizedRequested),
+  );
+
+  if (partial) return partial;
+
+  return null;
+}
+
 
 function buildQuestionnaireScaleDefinitions(
   numericColumns: string[],

@@ -11,6 +11,16 @@ type RowValue = string | number | boolean | null;
 type DataRow = Record<string, RowValue>;
 type AnyRecord = Record<string, unknown>;
 
+type ChartDashboardRow = {
+  section: string;
+  chartKey: string;
+  chartTitle: string;
+  chartType: string;
+  label: string;
+  value: number | null;
+  description: string;
+};
+
 
 type QuestionnaireMode = 'none' | 'selected' | 'manual' | 'auto-suggest-only';
 
@@ -1428,6 +1438,85 @@ function normalizeRecommendedTests(stats: AnyRecord): AnyRecord[] {
   return [...correlationRows, ...groupRows];
 }
 
+
+function createChartDashboardRows(
+  recommendedCharts: AnyRecord[],
+  chartData: Record<string, AnyRecord[]>,
+): ChartDashboardRow[] {
+  const rows: ChartDashboardRow[] = [];
+
+  recommendedCharts.forEach((chart) => {
+    const chartKey = String(chart['key'] ?? '').trim();
+    const chartTitle = String(chart['title'] ?? chartKey).trim();
+    const chartType = String(chart['type'] ?? 'bar').trim();
+
+    const existingData = asRecordArray(chart['data']);
+    const data = existingData.length > 0 ? existingData : asRecordArray(chartData[chartKey]);
+
+    data.slice(0, 30).forEach((item) => {
+      rows.push({
+        section: 'Odporúčané grafy',
+        chartKey,
+        chartTitle,
+        chartType,
+        label: String(item['label'] ?? ''),
+        value: asChartNumber(item['value']),
+        description: String(item['description'] ?? ''),
+      });
+    });
+  });
+
+  if (rows.length > 0) {
+    return rows;
+  }
+
+  Object.entries(chartData).forEach(([chartKey, data]) => {
+    asRecordArray(data).slice(0, 30).forEach((item) => {
+      rows.push({
+        section: 'Dáta pre grafy',
+        chartKey,
+        chartTitle: `Graf – ${chartKey}`,
+        chartType: 'bar',
+        label: String(item['label'] ?? ''),
+        value: asChartNumber(item['value']),
+        description: String(item['description'] ?? ''),
+      });
+    });
+  });
+
+  return rows;
+}
+
+function createChartDashboardTable(
+  recommendedCharts: AnyRecord[],
+  chartData: Record<string, AnyRecord[]>,
+): AnyRecord {
+  return {
+    key: 'chart_dashboard',
+    title: 'Dashboard grafov',
+    rows: createChartDashboardRows(recommendedCharts, chartData),
+  };
+}
+
+function createChartDataTables(chartData: Record<string, AnyRecord[]>): AnyRecord[] {
+  return Object.entries(chartData)
+    .filter(([, rows]) => rows.length > 0)
+    .map(([key, rows]) => ({
+      key: `graf_${key}`,
+      title: `Graf – ${key}`,
+      rows: rows.map((row, index) => ({
+        poradie: index + 1,
+        chartKey: key,
+        label: String(row['label'] ?? ''),
+        value: asChartNumber(row['value']),
+        group: String(row['group'] ?? ''),
+        description: String(row['description'] ?? ''),
+        ...row,
+      })),
+    }));
+}
+
+
 function createExcelTables(
   stats: AnyRecord,
   questionnaireConfig: QuestionnaireConfig,
@@ -1483,13 +1572,7 @@ function createExcelTables(
         },
       ];
 
-  const graphTables = Object.entries(chartData)
-    .filter(([, rows]) => rows.length > 0)
-    .map(([key, rows]) => ({
-      key: `graf_${key}`,
-      title: `Graf – ${key}`,
-      rows,
-    }));
+  const graphTables = createChartDataTables(chartData);
 
   return [...baseTables, ...graphTables]
     .map((table) => {
@@ -1650,7 +1733,16 @@ export async function POST(request: Request) {
     const recommendedTests = normalizeRecommendedTests(stats).filter(
       (row) => !shouldRemoveUnconfirmedQuestionnaireRecord(row, questionnaireConfig),
     );
-    const excelTables = createExcelTables(stats, questionnaireConfig, chartData)
+
+    const chartDashboardTable = createChartDashboardTable(
+      recommendedCharts,
+      chartData,
+    );
+
+    const excelTables = [
+      ...createExcelTables(stats, questionnaireConfig, chartData),
+      chartDashboardTable,
+    ]
       .map((table) => {
         const tableRecord = table as AnyRecord;
 
@@ -1750,6 +1842,7 @@ export async function POST(request: Request) {
 
         return String(tableRecord['key'] ?? '').startsWith('graf_');
       }),
+      chartDashboard: asRecordArray(chartDashboardTable['rows']),
       scaleScores: filterQuestionnaireRows(stats.scaleScores, questionnaireConfig),
       scaleDescriptives: filterQuestionnaireRows(stats.scaleDescriptives, questionnaireConfig),
       normality: filterQuestionnaireRows(stats.normality, questionnaireConfig),

@@ -105,61 +105,540 @@ type QuestionnaireOptionId =
   | 'jss'
   | 'custom';
 
+type ManualScaleDefinition = {
+  id: string;
+  name: string;
+  itemsText: string;
+  reverseItemsText: string;
+  min: number;
+  max: number;
+  scoring: 'sum' | 'mean';
+};
+
+type ManualSubscaleDefinition = {
+  id: string;
+  scaleName: string;
+  name: string;
+  itemsText: string;
+  reverseItemsText: string;
+  min: number;
+  max: number;
+  scoring: 'sum' | 'mean';
+};
+
 type QuestionnaireConfig = {
   mode: QuestionnaireMode;
   selectedQuestionnaires: string[];
   customQuestionnairesText: string;
+
+  manualScalesText: string;
+  manualSubscalesText: string;
+  groupingColumnsText: string;
 };
 
-const questionnaireOptions: Array<{
+type QuestionnaireOption = {
   value: QuestionnaireOptionId;
   label: string;
   description: string;
-}> = [
-  {
-    value: '',
-    label: 'Neviem / iba navrhnúť',
-    description:
-      'Systém môže navrhnúť podobný dotazník, ale nebude ho automaticky počítať.',
-  },
-  {
-    value: 'none',
-    label: 'Bez štandardizovaného dotazníka',
-    description:
-      'Použije sa iba frekvenčná analýza položiek a všeobecná štatistika bez škál dotazníka.',
-  },
-  {
-    value: 'resilience_scale',
-    label: 'Škála reziliencie',
-    description:
-      'Použiť výpočty pre škálu reziliencie, ak sú položky správne namapované.',
-  },
-  {
-    value: 'sehs_s_2020',
-    label: 'SEHS-S-2020',
-    description:
-      'Použiť výpočty pre SEHS-S-2020, škály, subškály, domény a subdomény.',
-  },
-  {
-    value: 'wemwbs',
-    label: 'WEMWBS',
-    description:
-      'Použiť iba vtedy, ak práca naozaj obsahuje WEMWBS.',
-  },
-  {
-    value: 'jss',
-    label: 'JSS',
-    description:
-      'Použiť iba vtedy, ak práca naozaj obsahuje JSS.',
-  },
-  {
-    value: 'custom',
-    label: 'Vlastný dotazník / vlastné škály',
-    description:
-      'Používateľ neskôr doplní vlastné škály, subškály a položky.',
-  },
-];
+};
 
+type QuestionnaireLanguage = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
+
+type QuestionnaireText = {
+  eyebrow: string;
+  title: string;
+  description: string;
+  options: QuestionnaireOption[];
+
+  customLabel: string;
+  customDescription: string;
+  customPlaceholder: string;
+
+  manualScalesLabel: string;
+  manualScalesDescription: string;
+  manualScalesPlaceholder: string;
+
+  manualSubscalesLabel: string;
+  manualSubscalesDescription: string;
+  manualSubscalesPlaceholder: string;
+
+  groupingColumnsLabel: string;
+  groupingColumnsDescription: string;
+  groupingColumnsPlaceholder: string;
+
+  outputTitle: string;
+  outputDescription: string;
+};
+
+function normalizeQuestionnaireLanguage(value: unknown): QuestionnaireLanguage {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (normalized === 'cz') return 'cs';
+
+  if (
+    normalized === 'sk' ||
+    normalized === 'cs' ||
+    normalized === 'en' ||
+    normalized === 'de' ||
+    normalized === 'pl' ||
+    normalized === 'hu'
+  ) {
+    return normalized;
+  }
+
+  return 'sk';
+}
+
+const QUESTIONNAIRE_TEXTS: Record<QuestionnaireLanguage, QuestionnaireText> = {
+  sk: {
+    eyebrow: 'Štandardizovaný dotazník',
+    title: 'Aký dotazník používa práca?',
+    description:
+      'Vyberte jeden alebo viac štandardizovaných dotazníkov iba vtedy, ak ich databáza naozaj obsahuje. Bez potvrdenia sa WEMWBS ani JSS nebudú počítať automaticky.',
+    options: [
+      {
+        value: '',
+        label: 'Neviem / iba navrhnúť',
+        description:
+          'Systém môže navrhnúť podobný dotazník, ale nebude ho automaticky počítať.',
+      },
+      {
+        value: 'none',
+        label: 'Bez štandardizovaného dotazníka',
+        description:
+          'Použije sa iba frekvenčná analýza položiek a všeobecná štatistika bez škál dotazníka.',
+      },
+      {
+        value: 'resilience_scale',
+        label: 'Škála reziliencie',
+        description:
+          'Použiť výpočty pre škálu reziliencie, ak sú položky správne namapované.',
+      },
+      {
+        value: 'sehs_s_2020',
+        label: 'SEHS-S-2020',
+        description:
+          'Použiť výpočty pre SEHS-S-2020, škály, subškály, domény a subdomény.',
+      },
+      {
+        value: 'wemwbs',
+        label: 'WEMWBS',
+        description:
+          'Použiť iba vtedy, ak práca naozaj obsahuje WEMWBS.',
+      },
+      {
+        value: 'jss',
+        label: 'JSS',
+        description:
+          'Použiť iba vtedy, ak práca naozaj obsahuje JSS.',
+      },
+      {
+        value: 'custom',
+        label: 'Vlastný dotazník / vlastné škály',
+        description:
+          'Používateľ doplní vlastné škály, subškály a položky.',
+      },
+    ],
+    customLabel: 'Vlastné štandardizované dotazníky / subškály',
+    customDescription:
+      'Ak študent používa iný dotazník, vpíšte jeho názov, položky, škály a subškály.',
+    customPlaceholder:
+      'Príklad: Používam JSS – 36 položiek, 9 subškál: mzda, povýšenie, vedenie, benefity, odmeny, pracovné podmienky, spolupracovníci, povaha práce, komunikácia. Druhý dotazník: WEMWBS – celkové skóre.',
+    manualScalesLabel: 'Manuálne škály',
+    manualScalesDescription:
+      'Sem napíšte celkové škály, ktoré sa majú vypočítať.',
+    manualScalesPlaceholder:
+      'Príklad: WEMWBS_skore = WEM1 + WEM2 + ... + WEM14; JSS_skore = JSS1 až JSS36.',
+    manualSubscalesLabel: 'Manuálne subškály',
+    manualSubscalesDescription:
+      'Sem napíšte subškály a položky.',
+    manualSubscalesPlaceholder:
+      'Príklad: Mzda = JSS1, JSS10, JSS19, JSS28; Povýšenie = JSS2, JSS11, JSS20, JSS33.',
+    groupingColumnsLabel: 'Skupinové premenné',
+    groupingColumnsDescription:
+      'Sem napíšte premenné pre t-test, ANOVA, Mann-Whitney alebo Kruskal-Wallis.',
+    groupingColumnsPlaceholder:
+      'Príklad: pohlavie, typ školy, ročník, rodinný stav, typ podniku.',
+    outputTitle: 'Výstup analýzy',
+    outputDescription:
+      'Výsledok sa zobrazí v prehľadnom modálnom okne a následne ho bude možné exportovať do Word, PDF alebo Excel.',
+  },
+
+  en: {
+    eyebrow: 'Standardized questionnaire',
+    title: 'Which questionnaire does the work use?',
+    description:
+      'Select one or more standardized questionnaires only if the dataset truly contains them. Without confirmation, WEMWBS and JSS will not be calculated automatically.',
+    options: [
+      {
+        value: '',
+        label: "I don't know / Suggest only",
+        description:
+          'The system can suggest a similar questionnaire, but it will not calculate it automatically.',
+      },
+      {
+        value: 'none',
+        label: 'Without a standardized questionnaire',
+        description:
+          'Only item frequency analysis and general statistics will be used, without questionnaire scales.',
+      },
+      {
+        value: 'resilience_scale',
+        label: 'Resilience Scale',
+        description:
+          'Apply calculations for the Resilience Scale if items are correctly mapped.',
+      },
+      {
+        value: 'sehs_s_2020',
+        label: 'SEHS-S-2020',
+        description:
+          'Apply calculations for SEHS-S-2020, scales, subscales, domains, and subdomains.',
+      },
+      {
+        value: 'wemwbs',
+        label: 'WEMWBS',
+        description:
+          'Apply only if the work truly contains WEMWBS.',
+      },
+      {
+        value: 'jss',
+        label: 'JSS',
+        description:
+          'Apply only if the work truly contains JSS.',
+      },
+      {
+        value: 'custom',
+        label: 'Custom questionnaire / custom scales',
+        description:
+          'Use this when the work contains another questionnaire or manually defined scales.',
+      },
+    ],
+    customLabel: 'Custom standardized questionnaires / subscales',
+    customDescription:
+      'If the student uses another questionnaire, enter its name, items, scales, and subscales.',
+    customPlaceholder:
+      'Example: I use JSS – 36 items, 9 subscales: pay, promotion, supervision, benefits, rewards, operating conditions, coworkers, nature of work, communication. Second questionnaire: WEMWBS – total score.',
+    manualScalesLabel: 'Manual scales',
+    manualScalesDescription:
+      'Enter the total scales that should be calculated.',
+    manualScalesPlaceholder:
+      'Example: WEMWBS_score = WEM1 + WEM2 + ... + WEM14; JSS_score = JSS1 to JSS36.',
+    manualSubscalesLabel: 'Manual subscales',
+    manualSubscalesDescription:
+      'Enter subscales and their items.',
+    manualSubscalesPlaceholder:
+      'Example: Pay = JSS1, JSS10, JSS19, JSS28; Promotion = JSS2, JSS11, JSS20, JSS33.',
+    groupingColumnsLabel: 'Grouping variables',
+    groupingColumnsDescription:
+      'Enter variables for t-test, ANOVA, Mann-Whitney, or Kruskal-Wallis.',
+    groupingColumnsPlaceholder:
+      'Example: gender, school type, grade, marital status, company type.',
+    outputTitle: 'Analysis output',
+    outputDescription:
+      'The result will be displayed in a clear modal window and can then be exported to Word, PDF, or Excel.',
+  },
+
+  cs: {
+    eyebrow: 'Standardizovaný dotazník',
+    title: 'Jaký dotazník práce používá?',
+    description:
+      'Vyberte jeden nebo více standardizovaných dotazníků pouze tehdy, pokud je datový soubor skutečně obsahuje. Bez potvrzení se WEMWBS ani JSS nebudou počítat automaticky.',
+    options: [
+      {
+        value: '',
+        label: 'Nevím / pouze navrhnout',
+        description:
+          'Systém může navrhnout podobný dotazník, ale nebude ho automaticky počítat.',
+      },
+      {
+        value: 'none',
+        label: 'Bez standardizovaného dotazníku',
+        description:
+          'Použije se pouze frekvenční analýza položek a obecná statistika bez dotazníkových škál.',
+      },
+      {
+        value: 'resilience_scale',
+        label: 'Škála resilience',
+        description:
+          'Použít výpočty pro škálu resilience, pokud jsou položky správně namapované.',
+      },
+      {
+        value: 'sehs_s_2020',
+        label: 'SEHS-S-2020',
+        description:
+          'Použít výpočty pro SEHS-S-2020, škály, subškály, domény a subdomény.',
+      },
+      {
+        value: 'wemwbs',
+        label: 'WEMWBS',
+        description:
+          'Použít pouze tehdy, pokud práce skutečně obsahuje WEMWBS.',
+      },
+      {
+        value: 'jss',
+        label: 'JSS',
+        description:
+          'Použít pouze tehdy, pokud práce skutečně obsahuje JSS.',
+      },
+      {
+        value: 'custom',
+        label: 'Vlastní dotazník / vlastní škály',
+        description:
+          'Použijte u jiného dotazníku nebo u ručně definovaných škál.',
+      },
+    ],
+    customLabel: 'Vlastní standardizované dotazníky / subškály',
+    customDescription:
+      'Pokud student používá jiný dotazník, zadejte jeho název, položky, škály a subškály.',
+    customPlaceholder:
+      'Příklad: Používám JSS – 36 položek, 9 subškál: mzda, povýšení, vedení, benefity, odměny, pracovní podmínky, spolupracovníci, povaha práce, komunikace.',
+    manualScalesLabel: 'Manuální škály',
+    manualScalesDescription:
+      'Zadejte celkové škály, které se mají vypočítat.',
+    manualScalesPlaceholder:
+      'Příklad: WEMWBS_score = WEM1 + WEM2 + ... + WEM14; JSS_score = JSS1 až JSS36.',
+    manualSubscalesLabel: 'Manuální subškály',
+    manualSubscalesDescription:
+      'Zadejte subškály a jejich položky.',
+    manualSubscalesPlaceholder:
+      'Příklad: Mzda = JSS1, JSS10, JSS19, JSS28; Povýšení = JSS2, JSS11, JSS20, JSS33.',
+    groupingColumnsLabel: 'Skupinové proměnné',
+    groupingColumnsDescription:
+      'Zadejte proměnné pro t-test, ANOVA, Mann-Whitney nebo Kruskal-Wallis.',
+    groupingColumnsPlaceholder:
+      'Příklad: pohlaví, typ školy, ročník, rodinný stav, typ podniku.',
+    outputTitle: 'Výstup analýzy',
+    outputDescription:
+      'Výsledek se zobrazí v přehledném modálním okně a následně jej bude možné exportovat do Wordu, PDF nebo Excelu.',
+  },
+
+  de: {
+    eyebrow: 'Standardisierter Fragebogen',
+    title: 'Welchen Fragebogen verwendet die Arbeit?',
+    description:
+      'Wählen Sie einen oder mehrere standardisierte Fragebögen nur dann aus, wenn der Datensatz sie tatsächlich enthält. Ohne Bestätigung werden WEMWBS und JSS nicht automatisch berechnet.',
+    options: [
+      {
+        value: '',
+        label: 'Ich weiß es nicht / nur vorschlagen',
+        description:
+          'Das System kann einen ähnlichen Fragebogen vorschlagen, berechnet ihn aber nicht automatisch.',
+      },
+      {
+        value: 'none',
+        label: 'Ohne standardisierten Fragebogen',
+        description:
+          'Es werden nur Häufigkeitsanalysen der Items und allgemeine Statistiken ohne Fragebogenskalen verwendet.',
+      },
+      {
+        value: 'resilience_scale',
+        label: 'Resilienzskala',
+        description:
+          'Berechnungen für die Resilienzskala anwenden, wenn die Items korrekt zugeordnet sind.',
+      },
+      {
+        value: 'sehs_s_2020',
+        label: 'SEHS-S-2020',
+        description:
+          'Berechnungen für SEHS-S-2020, Skalen, Subskalen, Domänen und Subdomänen anwenden.',
+      },
+      {
+        value: 'wemwbs',
+        label: 'WEMWBS',
+        description:
+          'Nur anwenden, wenn die Arbeit tatsächlich WEMWBS enthält.',
+      },
+      {
+        value: 'jss',
+        label: 'JSS',
+        description:
+          'Nur anwenden, wenn die Arbeit tatsächlich JSS enthält.',
+      },
+      {
+        value: 'custom',
+        label: 'Eigener Fragebogen / eigene Skalen',
+        description:
+          'Verwenden, wenn die Arbeit einen anderen Fragebogen oder manuell definierte Skalen enthält.',
+      },
+    ],
+    customLabel: 'Eigene standardisierte Fragebögen / Subskalen',
+    customDescription:
+      'Wenn ein anderer Fragebogen verwendet wird, geben Sie Namen, Items, Skalen und Subskalen ein.',
+    customPlaceholder:
+      'Beispiel: JSS – 36 Items, 9 Subskalen: Gehalt, Beförderung, Führung, Zusatzleistungen, Belohnungen, Arbeitsbedingungen, Kollegen, Art der Arbeit, Kommunikation.',
+    manualScalesLabel: 'Manuelle Skalen',
+    manualScalesDescription:
+      'Geben Sie die Gesamtskalen ein, die berechnet werden sollen.',
+    manualScalesPlaceholder:
+      'Beispiel: WEMWBS_score = WEM1 + WEM2 + ... + WEM14; JSS_score = JSS1 bis JSS36.',
+    manualSubscalesLabel: 'Manuelle Subskalen',
+    manualSubscalesDescription:
+      'Geben Sie Subskalen und deren Items ein.',
+    manualSubscalesPlaceholder:
+      'Beispiel: Gehalt = JSS1, JSS10, JSS19, JSS28; Beförderung = JSS2, JSS11, JSS20, JSS33.',
+    groupingColumnsLabel: 'Gruppierungsvariablen',
+    groupingColumnsDescription:
+      'Geben Sie Variablen für t-Test, ANOVA, Mann-Whitney oder Kruskal-Wallis ein.',
+    groupingColumnsPlaceholder:
+      'Beispiel: Geschlecht, Schultyp, Jahrgang, Familienstand, Unternehmenstyp.',
+    outputTitle: 'Analyseausgabe',
+    outputDescription:
+      'Das Ergebnis wird in einem übersichtlichen modalen Fenster angezeigt und kann anschließend nach Word, PDF oder Excel exportiert werden.',
+  },
+
+  pl: {
+    eyebrow: 'Standaryzowany kwestionariusz',
+    title: 'Jakiego kwestionariusza używa praca?',
+    description:
+      'Wybierz jeden lub więcej standaryzowanych kwestionariuszy tylko wtedy, gdy zestaw danych faktycznie je zawiera. Bez potwierdzenia WEMWBS i JSS nie będą obliczane automatycznie.',
+    options: [
+      {
+        value: '',
+        label: 'Nie wiem / tylko zasugeruj',
+        description:
+          'System może zasugerować podobny kwestionariusz, ale nie obliczy go automatycznie.',
+      },
+      {
+        value: 'none',
+        label: 'Bez standaryzowanego kwestionariusza',
+        description:
+          'Zostanie użyta tylko analiza częstości pozycji i ogólne statystyki bez skal kwestionariusza.',
+      },
+      {
+        value: 'resilience_scale',
+        label: 'Skala rezyliencji',
+        description:
+          'Zastosuj obliczenia dla skali rezyliencji, jeśli pozycje są poprawnie zmapowane.',
+      },
+      {
+        value: 'sehs_s_2020',
+        label: 'SEHS-S-2020',
+        description:
+          'Zastosuj obliczenia dla SEHS-S-2020, skal, podskal, domen i subdomen.',
+      },
+      {
+        value: 'wemwbs',
+        label: 'WEMWBS',
+        description:
+          'Zastosuj tylko wtedy, gdy praca rzeczywiście zawiera WEMWBS.',
+      },
+      {
+        value: 'jss',
+        label: 'JSS',
+        description:
+          'Zastosuj tylko wtedy, gdy praca rzeczywiście zawiera JSS.',
+      },
+      {
+        value: 'custom',
+        label: 'Własny kwestionariusz / własne skale',
+        description:
+          'Użyj, gdy praca zawiera inny kwestionariusz lub ręcznie zdefiniowane skale.',
+      },
+    ],
+    customLabel: 'Własne standaryzowane kwestionariusze / podskale',
+    customDescription:
+      'Jeśli student używa innego kwestionariusza, wpisz jego nazwę, pozycje, skale i podskale.',
+    customPlaceholder:
+      'Przykład: JSS – 36 pozycji, 9 podskal: wynagrodzenie, awans, nadzór, benefity, nagrody, warunki pracy, współpracownicy, charakter pracy, komunikacja.',
+    manualScalesLabel: 'Skale ręczne',
+    manualScalesDescription:
+      'Wpisz skale całkowite, które mają zostać obliczone.',
+    manualScalesPlaceholder:
+      'Przykład: WEMWBS_score = WEM1 + WEM2 + ... + WEM14; JSS_score = JSS1 do JSS36.',
+    manualSubscalesLabel: 'Podskale ręczne',
+    manualSubscalesDescription:
+      'Wpisz podskale i ich pozycje.',
+    manualSubscalesPlaceholder:
+      'Przykład: Wynagrodzenie = JSS1, JSS10, JSS19, JSS28; Awans = JSS2, JSS11, JSS20, JSS33.',
+    groupingColumnsLabel: 'Zmienne grupujące',
+    groupingColumnsDescription:
+      'Wpisz zmienne dla testu t, ANOVA, Mann-Whitney lub Kruskal-Wallis.',
+    groupingColumnsPlaceholder:
+      'Przykład: płeć, typ szkoły, rok, stan cywilny, typ firmy.',
+    outputTitle: 'Wynik analizy',
+    outputDescription:
+      'Wynik zostanie wyświetlony w przejrzystym oknie modalnym, a następnie będzie można go wyeksportować do Word, PDF lub Excel.',
+  },
+
+  hu: {
+    eyebrow: 'Standardizált kérdőív',
+    title: 'Milyen kérdőívet használ a munka?',
+    description:
+      'Csak akkor válasszon ki egy vagy több standardizált kérdőívet, ha az adatkészlet valóban tartalmazza azokat. Megerősítés nélkül a WEMWBS és a JSS nem kerül automatikus kiszámításra.',
+    options: [
+      {
+        value: '',
+        label: 'Nem tudom / csak javaslat',
+        description:
+          'A rendszer javasolhat hasonló kérdőívet, de nem számítja ki automatikusan.',
+      },
+      {
+        value: 'none',
+        label: 'Standardizált kérdőív nélkül',
+        description:
+          'Csak tételgyakorisági elemzés és általános statisztika készül kérdőívskálák nélkül.',
+      },
+      {
+        value: 'resilience_scale',
+        label: 'Reziliencia skála',
+        description:
+          'Reziliencia skála számításainak alkalmazása, ha a tételek helyesen vannak hozzárendelve.',
+      },
+      {
+        value: 'sehs_s_2020',
+        label: 'SEHS-S-2020',
+        description:
+          'SEHS-S-2020 skálák, alskálák, domének és aldomének számítása.',
+      },
+      {
+        value: 'wemwbs',
+        label: 'WEMWBS',
+        description:
+          'Csak akkor alkalmazza, ha a munka valóban tartalmaz WEMWBS-t.',
+      },
+      {
+        value: 'jss',
+        label: 'JSS',
+        description:
+          'Csak akkor alkalmazza, ha a munka valóban tartalmaz JSS-t.',
+      },
+      {
+        value: 'custom',
+        label: 'Saját kérdőív / saját skálák',
+        description:
+          'Akkor használja, ha a munka más kérdőívet vagy manuálisan megadott skálákat tartalmaz.',
+      },
+    ],
+    customLabel: 'Saját standardizált kérdőívek / alskálák',
+    customDescription:
+      'Ha a hallgató más kérdőívet használ, adja meg annak nevét, tételeit, skáláit és alskáláit.',
+    customPlaceholder:
+      'Példa: JSS – 36 tétel, 9 alskála: fizetés, előléptetés, vezetés, juttatások, jutalmak, munkakörülmények, munkatársak, munka jellege, kommunikáció.',
+    manualScalesLabel: 'Manuális skálák',
+    manualScalesDescription:
+      'Adja meg a kiszámítandó összskálákat.',
+    manualScalesPlaceholder:
+      'Példa: WEMWBS_score = WEM1 + WEM2 + ... + WEM14; JSS_score = JSS1–JSS36.',
+    manualSubscalesLabel: 'Manuális alskálák',
+    manualSubscalesDescription:
+      'Adja meg az alskálákat és azok tételeit.',
+    manualSubscalesPlaceholder:
+      'Példa: Fizetés = JSS1, JSS10, JSS19, JSS28; Előléptetés = JSS2, JSS11, JSS20, JSS33.',
+    groupingColumnsLabel: 'Csoportosító változók',
+    groupingColumnsDescription:
+      'Adja meg a t-próbához, ANOVA-hoz, Mann-Whitney vagy Kruskal-Wallis teszthez használt változókat.',
+    groupingColumnsPlaceholder:
+      'Példa: nem, iskola típusa, évfolyam, családi állapot, vállalattípus.',
+    outputTitle: 'Elemzési kimenet',
+    outputDescription:
+      'Az eredmény áttekinthető modális ablakban jelenik meg, majd Word, PDF vagy Excel formátumba exportálható.',
+  },
+};
+
+function getQuestionnaireText(languageValue: unknown): QuestionnaireText {
+  const questionnaireLanguage = normalizeQuestionnaireLanguage(languageValue);
+  return QUESTIONNAIRE_TEXTS[questionnaireLanguage] ?? QUESTIONNAIRE_TEXTS.sk;
+}
 
 type SelectOption<T extends string = string> = {
   value: T;
@@ -2487,20 +2966,42 @@ const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<string[]>(
   [],
 );
 
+const questionnaireText = getQuestionnaireText('en');
+const questionnaireOptions = questionnaireText.options;
+
 const [customQuestionnairesText, setCustomQuestionnairesText] = useState('');
+
+const [manualScalesText, setManualScalesText] = useState('');
+const [manualSubscalesText, setManualSubscalesText] = useState('');
+const [groupingColumnsText, setGroupingColumnsText] = useState('');
+
 
 const questionnaireConfig = useMemo<QuestionnaireConfig>(() => {
   return {
     mode: questionnaireMode,
     selectedQuestionnaires,
     customQuestionnairesText,
+    manualScalesText,
+    manualSubscalesText,
+    groupingColumnsText,
   };
-}, [questionnaireMode, selectedQuestionnaires, customQuestionnairesText]);
+}, [
+  questionnaireMode,
+  selectedQuestionnaires,
+  customQuestionnairesText,
+  manualScalesText,
+  manualSubscalesText,
+  groupingColumnsText,
+]);
 
 function handleQuestionnaireChange(value: QuestionnaireOptionId) {
   if (!value) {
     setQuestionnaireMode('auto-suggest-only');
     setSelectedQuestionnaires([]);
+    setCustomQuestionnairesText('');
+    setManualScalesText('');
+    setManualSubscalesText('');
+    setGroupingColumnsText('');
     return;
   }
 
@@ -2508,6 +3009,9 @@ function handleQuestionnaireChange(value: QuestionnaireOptionId) {
     setQuestionnaireMode('none');
     setSelectedQuestionnaires([]);
     setCustomQuestionnairesText('');
+    setManualScalesText('');
+    setManualSubscalesText('');
+    setGroupingColumnsText('');
     return;
   }
 
@@ -2518,6 +3022,7 @@ function handleQuestionnaireChange(value: QuestionnaireOptionId) {
   }
 
   setQuestionnaireMode('selected');
+  setCustomQuestionnairesText('');
 
   setSelectedQuestionnaires((current) => {
     const alreadySelected = current.includes(value);
@@ -2535,7 +3040,6 @@ function handleQuestionnaireChange(value: QuestionnaireOptionId) {
     return [...current, value];
   });
 }
-
 
 /**
  * Pripravený Excel súbor pre modul Analýza dát.
@@ -3602,7 +4106,21 @@ prepareFormData.append(
   JSON.stringify(questionnaireConfig.selectedQuestionnaires),
 );
 
+prepareFormData.append('manualScalesText', manualScalesText);
+prepareFormData.append('manualSubscalesText', manualSubscalesText);
+prepareFormData.append('groupingColumnsText', groupingColumnsText);
 
+prepareFormData.append(
+  'manualAnalysisConfig',
+  JSON.stringify({
+    questionnaireMode,
+    selectedQuestionnaires,
+    customQuestionnairesText,
+    manualScalesText,
+    manualSubscalesText,
+    groupingColumnsText,
+  }),
+);
 
   if (profileForApi?.id) {
     prepareFormData.append('projectId', profileForApi.id);
@@ -3708,11 +4226,24 @@ prepareFormData.append(
     questionnaireConfig.mode === 'selected' ||
     questionnaireConfig.mode === 'manual',
 
-  fallbackToNumericVariables: true,
+  fallbackToNumericVariables: questionnaireConfig.mode !== 'manual',
 
- questionnaireConfig,
+questionnaireConfig,
 selectedQuestionnaires: questionnaireConfig.selectedQuestionnaires,
 customQuestionnaires: [],
+
+manualScalesText,
+manualSubscalesText,
+groupingColumnsText,
+
+manualAnalysisConfig: {
+  questionnaireMode,
+  selectedQuestionnaires,
+  customQuestionnairesText,
+  manualScalesText,
+  manualSubscalesText,
+  groupingColumnsText,
+},
 
 strictQuestionnaireMode: true,
 allowUnconfirmedStandardizedQuestionnaires: false,
@@ -5443,7 +5974,7 @@ const downloadExcel = () => {
 )}
 
 
-{activeModule === 'data' ? (
+{activeModule === 'data' && (
   <div className="mt-4 rounded-3xl border border-cyan-300/30 bg-gradient-to-br from-cyan-500/10 via-blue-500/10 to-violet-500/10 p-4 shadow-2xl shadow-cyan-950/30">
     <div className="mb-3 flex items-start gap-3">
       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-cyan-500/20 text-cyan-100 ring-1 ring-cyan-300/30">
@@ -5461,57 +5992,104 @@ const downloadExcel = () => {
       </div>
     </div>
 
-{activeModule === 'data' ? (
-  <div className="rounded-[28px] border border-blue-300/20 bg-blue-500/10 p-5 shadow-2xl shadow-blue-950/20">
-    <div className="flex flex-col gap-2">
-      <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-200">
-        Štandardizovaný dotazník
-      </p>
+    <div className="rounded-[28px] border border-blue-300/20 bg-blue-500/10 p-5 shadow-2xl shadow-blue-950/20">
+      <div className="flex flex-col gap-2">
+        <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-200">
+          Štandardizovaný dotazník
+        </p>
 
-      <h3 className="text-lg font-black text-white">
-        Aký dotazník používa práca?
-      </h3>
+        <h3 className="text-lg font-black text-white">
+          Aký dotazník používa práca?
+        </h3>
 
-      <p className="max-w-3xl text-sm font-bold leading-6 text-slate-300">
-        Vyberte konkrétny dotazník iba vtedy, ak ho databáza naozaj obsahuje.
-        Bez potvrdenia sa WEMWBS ani JSS nebudú počítať automaticky.
-      </p>
-    </div>
+        <p className="max-w-3xl text-sm font-bold leading-6 text-slate-300">
+          Vyberte jeden alebo viac štandardizovaných dotazníkov iba vtedy, ak ich databáza naozaj obsahuje.
+          Bez potvrdenia sa WEMWBS ani JSS nebudú počítať automaticky.
+        </p>
+      </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-      {questionnaireOptions.map((option) => {
-        const isActive =
-          option.value === ''
-            ? questionnaireMode === 'auto-suggest-only'
-            : option.value === 'none'
-              ? questionnaireMode === 'none'
-              : option.value === 'custom'
-                ? questionnaireMode === 'manual'
-                : selectedQuestionnaires.includes(option.value);
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+  {questionnaireOptions.map((option) => {
+    const isActive =
+      option.value === ''
+        ? questionnaireMode === 'auto-suggest-only'
+        : option.value === 'none'
+          ? questionnaireMode === 'none'
+          : option.value === 'custom'
+            ? questionnaireMode === 'manual'
+            : selectedQuestionnaires.includes(option.value);
 
-        return (
-          <button
-            key={option.value || 'auto-suggest-only'}
-            type="button"
-            onClick={() => handleQuestionnaireChange(option.value)}
+    return (
+      <button
+        key={option.value || 'auto-suggest-only'}
+        type="button"
+        onClick={() => handleQuestionnaireChange(option.value)}
+        className={[
+          'rounded-2xl border p-4 text-left transition',
+          isActive
+            ? 'border-blue-300 bg-blue-500/20 shadow-lg shadow-blue-950/30'
+            : 'border-white/10 bg-white/5 hover:border-blue-300/50 hover:bg-white/10',
+        ].join(' ')}
+      >
+        <span className="flex items-center gap-2 text-sm font-black text-white">
+          <span
             className={[
-              'rounded-2xl border p-4 text-left transition',
+              'flex h-5 w-5 items-center justify-center rounded-md border text-[10px]',
               isActive
-                ? 'border-blue-300 bg-blue-500/20 shadow-lg shadow-blue-950/30'
-                : 'border-white/10 bg-white/5 hover:border-blue-300/50 hover:bg-white/10',
+                ? 'border-blue-200 bg-blue-400 text-slate-950'
+                : 'border-white/20 bg-white/5 text-transparent',
             ].join(' ')}
           >
-            <span className="block text-sm font-black text-white">
-              {option.label}
-            </span>
+            ✓
+          </span>
 
-            <span className="mt-1 block text-xs font-bold leading-5 text-slate-300">
-              {option.description}
-            </span>
-          </button>
-        );
-      })}
+          {option.label}
+        </span>
+
+        <span className="mt-2 block text-xs font-bold leading-5 text-slate-300">
+          {option.description}
+        </span>
+      </button>
+    );
+  })}
+</div>
+
+      <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+        <label className="block text-sm font-black text-white">
+          Vlastné štandardizované dotazníky / subškály
+        </label>
+
+        <p className="mt-1 text-xs font-bold leading-5 text-slate-300">
+          Ak študent používa iný dotazník, vpíše jeho názov, položky, škály a subškály.
+          Napríklad: JSS + WEMWBS, SEHS-S-2020, Škála reziliencie, CD-RISC alebo vlastná škála.
+        </p>
+
+        <textarea
+          value={customQuestionnairesText}
+          onChange={(event) => {
+            setQuestionnaireMode('manual');
+            setSelectedQuestionnaires([]);
+            setCustomQuestionnairesText(event.target.value);
+          }}
+          rows={4}
+          placeholder="Príklad: Používam JSS – 36 položiek, 9 subškál: mzda, povýšenie, vedenie, benefity, odmeny, pracovné podmienky, spolupracovníci, povaha práce, komunikácia. Druhý dotazník: WEMWBS – celkové skóre."
+          className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
+        />
+      </div>
     </div>
+
+    <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+      <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-200">
+        Výstup analýzy
+      </p>
+
+      <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">
+        Výsledok sa zobrazí v prehľadnom modálnom okne a následne ho bude možné exportovať do Word, PDF alebo Excel.
+      </p>
+    </div>
+  </div>
+)}
+
 
     <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
       <label className="block text-sm font-black text-white">
@@ -5523,21 +6101,125 @@ const downloadExcel = () => {
         subškály. Napríklad: JSS + WEMWBS, CD-RISC, BDI-II, vlastná škála.
       </p>
 
+<textarea
+  value={customQuestionnairesText}
+  onChange={(event) => {
+    setQuestionnaireMode('manual');
+    setSelectedQuestionnaires([]);
+    setCustomQuestionnairesText(event.target.value);
+  }}
+  rows={4}
+  placeholder="Príklad: Používam SEHS-S-2020 a Škálu reziliencie. Prosím vypočítať škály, subškály, reliabilitu, deskriptívnu štatistiku, korelácie a testovanie rozdielov."
+  className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
+/>
+
+<div className="mt-5 rounded-3xl border border-blue-300/20 bg-blue-500/10 p-4">
+  <div className="flex items-start gap-3">
+    <div className="mt-1 rounded-2xl bg-blue-400/20 p-2 text-blue-100">
+      <BarChart3 className="h-5 w-5" />
+    </div>
+
+    <div>
+      <h4 className="text-sm font-black text-white">
+        Manuálne zadanie škál a subškál pred analýzou
+      </h4>
+
+      <p className="mt-1 text-xs font-semibold leading-5 text-blue-100/80">
+        Pre štandardizované dotazníky je najbezpečnejšie, aby používateľ pred
+        spustením analýzy presne zadal, ktoré stĺpce patria do škál,
+        subškál a podľa ktorých premenných sa majú robiť testy rozdielov.
+      </p>
+    </div>
+  </div>
+
+  <div className="mt-5 grid gap-4 lg:grid-cols-3">
+    <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+      <label className="block text-sm font-black text-white">
+        Škály
+      </label>
+
+      <p className="mt-1 text-xs font-bold leading-5 text-slate-400">
+        Každú škálu zadajte na nový riadok vo formáte:
+        názov škály: položka1, položka2, položka3
+      </p>
+
       <textarea
-        value={customQuestionnairesText}
+        value={manualScalesText}
         onChange={(event) => {
           setQuestionnaireMode('manual');
           setSelectedQuestionnaires([]);
-          setCustomQuestionnairesText(event.target.value);
+          setManualScalesText(event.target.value);
         }}
-        rows={4}
-        placeholder="Príklad: Používam JSS – 36 položiek, 9 subškál: mzda, povýšenie, vedenie, benefity, odmeny, pracovné podmienky, spolupracovníci, povaha práce, komunikácia. Druhý dotazník: WEMWBS – celkové skóre."
+        rows={9}
+        placeholder={`Príklad:
+Škála reziliencie: R1, R2, R3, R4, R5, R6
+SEHS-S-2020 celkové skóre: SEHS1, SEHS2, SEHS3, SEHS4, SEHS5, SEHS6
+Well-being: WEMWBS1, WEMWBS2, WEMWBS3, WEMWBS4`}
         className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
       />
-   
+    </div>
+
+    <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+      <label className="block text-sm font-black text-white">
+        Subškály
+      </label>
+
+      <p className="mt-1 text-xs font-bold leading-5 text-slate-400">
+        Každú subškálu zadajte na nový riadok vo formáte:
+        názov subškály: položka1, položka2, položka3
+      </p>
+
+      <textarea
+        value={manualSubscalesText}
+        onChange={(event) => {
+          setQuestionnaireMode('manual');
+          setSelectedQuestionnaires([]);
+          setManualSubscalesText(event.target.value);
+        }}
+        rows={9}
+        placeholder={`Príklad:
+Sebaúčinnosť: SEHS1, SEHS2, SEHS3
+Sebauvedomenie: SEHS4, SEHS5, SEHS6
+Podpora školy: SEHS7, SEHS8, SEHS9
+Rodinná súdržnosť: SEHS10, SEHS11, SEHS12`}
+        className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
+      />
+    </div>
+
+    <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+      <label className="block text-sm font-black text-white">
+        Skupinové premenné
+      </label>
+
+      <p className="mt-1 text-xs font-bold leading-5 text-slate-400">
+        Zadajte premenné, podľa ktorých sa majú robiť t-testy, ANOVA,
+        Mann-Whitney alebo Kruskal-Wallis.
+      </p>
+
+      <textarea
+        value={groupingColumnsText}
+        onChange={(event) => {
+          setGroupingColumnsText(event.target.value);
+        }}
+        rows={9}
+        placeholder={`Príklad:
+pohlavie
+typ_skoly
+rocnik
+druh_sportu
+uroven_sportu`}
+        className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
+      />
     </div>
   </div>
-) : null}
+
+  <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-xs font-bold leading-5 text-amber-50">
+    Dôležité: Ak používateľ nezadá škály a subškály, systém má spraviť iba
+    základnú frekvenčnú a deskriptívnu analýzu položiek. Reliabilita,
+    korelácie a testovanie rozdielov sa majú počítať až zo zadaných škál
+    a subškál.
+  </div>
+</div>
 
 
     <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -5591,7 +6273,7 @@ const downloadExcel = () => {
       Výsledok sa zobrazí v prehľadnom modálnom okne a následne ho bude možné exportovať do Word, PDF alebo Excel.
     </p>
   </div>
-) : null}
+
 
 
 {activeModule === 'planning' && (

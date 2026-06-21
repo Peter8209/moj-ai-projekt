@@ -746,43 +746,652 @@ function getNestedValue(source: unknown, path: string[]): unknown {
   return current;
 }
 
-function normalizeRecommendedCharts(stats: AnyRecord): AnyRecord[] {
-  const existing = asRecordArray((stats as AnyRecord).recommendedCharts);
-
-  if (existing.length > 0) {
-    return existing;
+function asChartNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') {
+    return null;
   }
 
-  const chartData =
-    getNestedValue(stats, ['chartData']) ||
-    getNestedValue(stats, ['statisticalAnalysis', 'chartData']);
-
-  if (!chartData || typeof chartData !== 'object') {
-    return [];
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
   }
 
-  const rows: AnyRecord[] = [];
+  const numeric = Number(
+    String(value)
+      .trim()
+      .replace(/\s/g, '')
+      .replace(',', '.'),
+  );
 
-  Object.entries(chartData as AnyRecord).forEach(([key, value]) => {
-    const items = asRecordArray(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
 
-    if (!items.length) {
+function chartLabelFromRecord(record: AnyRecord): string {
+  return String(
+    record['label'] ??
+      record['variable'] ??
+      record['scaleName'] ??
+      record['scale'] ??
+      record['name'] ??
+      record['title'] ??
+      record['value'] ??
+      '',
+  ).trim();
+}
+
+function chartNumberFromRecord(record: AnyRecord): number | null {
+  return (
+    asChartNumber(record['value']) ??
+    asChartNumber(record['mean']) ??
+    asChartNumber(record['count']) ??
+    asChartNumber(record['percent']) ??
+    asChartNumber(record['validPercent']) ??
+    asChartNumber(record['cronbachAlpha']) ??
+    asChartNumber(record['r']) ??
+    asChartNumber(record['statistic']) ??
+    asChartNumber(record['pValue']) ??
+    asChartNumber(record['valid'])
+  );
+}
+
+function normalizeChartPoint(record: AnyRecord): AnyRecord | null {
+  const label = chartLabelFromRecord(record);
+  const value = chartNumberFromRecord(record);
+
+  if (!label || value === null) {
+    return null;
+  }
+
+  return {
+    ...record,
+    label,
+    value,
+    description: String(
+      record['description'] ??
+        record['interpretation'] ??
+        record['note'] ??
+        record['significance'] ??
+        '',
+    ),
+    group: String(record['group'] ?? record['method'] ?? record['testType'] ?? ''),
+  };
+}
+
+function normalizeChartPoints(
+  value: unknown,
+  questionnaireConfig: QuestionnaireConfig,
+): AnyRecord[] {
+  return asRecordArray(value)
+    .filter(
+      (row) =>
+        !shouldRemoveUnconfirmedQuestionnaireRecord(row, questionnaireConfig),
+    )
+    .map(normalizeChartPoint)
+    .filter((row): row is AnyRecord => Boolean(row))
+    .slice(0, 80);
+}
+
+function buildFrequencyChartPoints(
+  stats: AnyRecord,
+  questionnaireConfig: QuestionnaireConfig,
+): AnyRecord[] {
+  const output: AnyRecord[] = [];
+
+  asRecordArray(stats.frequencies).forEach((frequency) => {
+    if (shouldRemoveUnconfirmedQuestionnaireRecord(frequency, questionnaireConfig)) {
       return;
     }
 
-    rows.push({
-      title: key,
-      type: 'bar',
-      variables: items
-        .map((item) => item.label)
-        .filter(Boolean)
-        .slice(0, 10),
-      description: `Grafová sekcia ${key} obsahuje ${items.length} položiek.`,
-      reason: 'Dáta boli vytvorené automaticky zo štatistickej analýzy.',
+    const variable = String(frequency.variable ?? '');
+    const values = asRecordArray(frequency.values).slice(0, 8);
+
+    values.forEach((item) => {
+      const label = `${variable}: ${String(item.value ?? '')}`.trim();
+      const count = asChartNumber(item.count);
+      const percent = asChartNumber(item.percent);
+
+      if (!variable || count === null) return;
+
+      output.push({
+        label,
+        value: count,
+        count,
+        percent,
+        variable,
+        category: String(item.value ?? ''),
+        description:
+          percent === null
+            ? `${count} odpovedí`
+            : `${count} odpovedí (${percent} %)`,
+      });
     });
   });
 
-  return rows;
+  return output.slice(0, 80);
+}
+
+
+function buildDescriptiveChartPoints(
+  rows: unknown,
+  questionnaireConfig: QuestionnaireConfig,
+): AnyRecord[] {
+  const output: AnyRecord[] = [];
+
+  asRecordArray(rows)
+    .filter(
+      (row) =>
+        !shouldRemoveUnconfirmedQuestionnaireRecord(row, questionnaireConfig),
+    )
+    .forEach((row) => {
+      const value = asChartNumber(row.mean);
+
+      if (value === null) {
+        return;
+      }
+
+      const label = String(row.variable ?? row.scaleName ?? row.name ?? '').trim();
+
+      if (!label) {
+        return;
+      }
+
+      output.push({
+        label,
+        value,
+        mean: value,
+        standardDeviation: asChartNumber(row.standardDeviation),
+        valid: asChartNumber(row.valid),
+        description: `Priemer: ${value}`,
+      });
+    });
+
+  return output.slice(0, 80);
+}
+
+
+function buildScaleScoreChartPoints(
+  stats: AnyRecord,
+  questionnaireConfig: QuestionnaireConfig,
+): AnyRecord[] {
+  const output: AnyRecord[] = [];
+
+  asRecordArray(stats.scaleScores)
+    .filter(
+      (row) =>
+        !shouldRemoveUnconfirmedQuestionnaireRecord(row, questionnaireConfig),
+    )
+    .forEach((scale) => {
+      const scores = asArray(scale.scores)
+        .map(asChartNumber)
+        .filter((value): value is number => value !== null);
+
+      if (!scores.length) {
+        return;
+      }
+
+      const mean =
+        scores.reduce((sum, value) => sum + value, 0) / scores.length;
+
+      const label = String(scale.scaleName ?? scale.scaleId ?? '').trim();
+
+      if (!label) {
+        return;
+      }
+
+      output.push({
+        label,
+        value: Number(mean.toFixed(3)),
+        valid: scores.length,
+        missingRows: asChartNumber(scale.missingRows),
+        scoring: String(scale.scoring ?? ''),
+        description: `Priemerné skóre: ${Number(mean.toFixed(3))}`,
+      });
+    });
+
+  return output.slice(0, 80);
+}
+
+
+function buildReliabilityChartPoints(
+  stats: AnyRecord,
+  questionnaireConfig: QuestionnaireConfig,
+): AnyRecord[] {
+  const output: AnyRecord[] = [];
+
+  asRecordArray(stats.reliability)
+    .filter(
+      (row) =>
+        !shouldRemoveUnconfirmedQuestionnaireRecord(row, questionnaireConfig),
+    )
+    .forEach((row) => {
+      const value = asChartNumber(row.cronbachAlpha);
+
+      if (value === null) {
+        return;
+      }
+
+      const label = String(row.scaleName ?? row.scaleId ?? '').trim();
+
+      if (!label) {
+        return;
+      }
+
+      output.push({
+        label,
+        value,
+        cronbachAlpha: value,
+        validRows: asChartNumber(row.validRows),
+        description: String(row.interpretation ?? ''),
+      });
+    });
+
+  return output.slice(0, 80);
+}
+
+
+function buildNormalityChartPoints(
+  stats: AnyRecord,
+  questionnaireConfig: QuestionnaireConfig,
+): AnyRecord[] {
+  const output: AnyRecord[] = [];
+
+  asRecordArray(stats.normality)
+    .filter(
+      (row) =>
+        !shouldRemoveUnconfirmedQuestionnaireRecord(row, questionnaireConfig),
+    )
+    .forEach((row) => {
+      const value = asChartNumber(row.pValue);
+
+      if (value === null) {
+        return;
+      }
+
+      const label = String(row.variable ?? '').trim();
+
+      if (!label) {
+        return;
+      }
+
+      output.push({
+        label,
+        value,
+        pValue: value,
+        statistic: asChartNumber(row.statistic),
+        recommendation: String(row.recommendation ?? ''),
+        description: String(row.note ?? ''),
+      });
+    });
+
+  return output.slice(0, 80);
+}
+
+
+
+
+function buildCorrelationChartPoints(
+  stats: AnyRecord,
+  questionnaireConfig: QuestionnaireConfig,
+): AnyRecord[] {
+  const output: AnyRecord[] = [];
+
+  const pearsonRows: AnyRecord[] = asRecordArray(
+    getNestedValue(stats, ['correlations', 'pearson']),
+  ).map((item): AnyRecord => {
+    const row = item as AnyRecord;
+
+    return {
+      ...row,
+      method: String(row['method'] ?? 'pearson'),
+    };
+  });
+
+  const spearmanRows: AnyRecord[] = asRecordArray(
+    getNestedValue(stats, ['correlations', 'spearman']),
+  ).map((item): AnyRecord => {
+    const row = item as AnyRecord;
+
+    return {
+      ...row,
+      method: String(row['method'] ?? 'spearman'),
+    };
+  });
+
+  const rows: AnyRecord[] = [...pearsonRows, ...spearmanRows];
+
+  rows
+    .filter(
+      (item) =>
+        !shouldRemoveUnconfirmedQuestionnaireRecord(item, questionnaireConfig),
+    )
+    .forEach((item) => {
+      const row = item as AnyRecord;
+
+      const r = asChartNumber(
+        row['r'] ??
+          row['correlation'] ??
+          row['correlationCoefficient'] ??
+          row['coefficient'] ??
+          row['rho'] ??
+          row['pearsonR'] ??
+          row['spearmanR'],
+      );
+
+      if (r === null) {
+        return;
+      }
+
+      const method = String(row['method'] ?? '').trim();
+
+      const variableA = String(
+        row['variableA'] ??
+          row['variable_a'] ??
+          row['premenná_1'] ??
+          row['premenna_1'] ??
+          row['x'] ??
+          '',
+      ).trim();
+
+      const variableB = String(
+        row['variableB'] ??
+          row['variable_b'] ??
+          row['premenná_2'] ??
+          row['premenna_2'] ??
+          row['y'] ??
+          '',
+      ).trim();
+
+      if (!variableA || !variableB) {
+        return;
+      }
+
+      output.push({
+        label: `${method}: ${variableA} × ${variableB}`,
+        value: Math.abs(r),
+        r,
+        pValue: asChartNumber(row['pValue'] ?? row['p'] ?? row['p_value']),
+        method,
+        variableA,
+        variableB,
+        description: String(
+          row['interpretation'] ??
+            row['significance'] ??
+            row['description'] ??
+            '',
+        ),
+      });
+    });
+
+  return output.slice(0, 80);
+}
+
+
+function buildGroupTestChartPoints(
+  stats: AnyRecord,
+  questionnaireConfig: QuestionnaireConfig,
+): AnyRecord[] {
+  const output: AnyRecord[] = [];
+
+  const parametricRows: AnyRecord[] = asRecordArray(
+    getNestedValue(stats, ['groupTests', 'parametric']),
+  ).map((item): AnyRecord => {
+    const row = item as AnyRecord;
+
+    return {
+      ...row,
+      testGroup: 'parametrické',
+    };
+  });
+
+  const nonParametricRows: AnyRecord[] = asRecordArray(
+    getNestedValue(stats, ['groupTests', 'nonParametric']),
+  ).map((item): AnyRecord => {
+    const row = item as AnyRecord;
+
+    return {
+      ...row,
+      testGroup: 'neparametrické',
+    };
+  });
+
+  const rows: AnyRecord[] = [...parametricRows, ...nonParametricRows];
+
+  rows
+    .filter(
+      (item) =>
+        !shouldRemoveUnconfirmedQuestionnaireRecord(item, questionnaireConfig),
+    )
+    .forEach((item) => {
+      const row = item as AnyRecord;
+
+      const pValue = asChartNumber(row['pValue'] ?? row['p'] ?? row['p_value']);
+
+      const statistic = asChartNumber(
+        row['statistic'] ??
+          row['testStatistic'] ??
+          row['f'] ??
+          row['t'] ??
+          row['u'] ??
+          row['h'],
+      );
+
+      const value = pValue ?? statistic;
+
+      if (value === null) {
+        return;
+      }
+
+      const testType = String(
+        row['testType'] ?? row['test'] ?? row['method'] ?? 'test',
+      ).trim();
+
+      const dependentVariable = String(
+        row['dependentVariable'] ??
+          row['dependent_variable'] ??
+          row['závislá_premenná'] ??
+          row['zavisla_premenna'] ??
+          row['variable'] ??
+          '',
+      ).trim();
+
+      const groupVariable = String(
+        row['groupVariable'] ??
+          row['group_variable'] ??
+          row['skupinová_premenná'] ??
+          row['skupinova_premenna'] ??
+          row['groupColumn'] ??
+          '',
+      ).trim();
+
+      if (!dependentVariable || !groupVariable) {
+        return;
+      }
+
+      output.push({
+        label: `${testType}: ${dependentVariable} podľa ${groupVariable}`,
+        value,
+        pValue,
+        statistic,
+        testType,
+        group: String(row['testGroup'] ?? ''),
+        description: String(
+          row['recommendation'] ??
+            row['significance'] ??
+            row['interpretation'] ??
+            '',
+        ),
+      });
+    });
+
+  return output.slice(0, 80);
+}
+
+function normalizeAnalysisChartData(
+  stats: AnyRecord,
+  questionnaireConfig: QuestionnaireConfig,
+): Record<string, AnyRecord[]> {
+  const source =
+    getNestedValue(stats, ['chartData']) ||
+    getNestedValue(stats, ['statisticalAnalysis', 'chartData']);
+
+  const sourceRecord =
+    source && typeof source === 'object' && !Array.isArray(source)
+      ? (source as AnyRecord)
+      : {};
+
+  const frequencyBars =
+    normalizeChartPoints(sourceRecord.frequencyBars, questionnaireConfig);
+  const meanBars = normalizeChartPoints(sourceRecord.meanBars, questionnaireConfig);
+  const scaleScoreBars = normalizeChartPoints(
+    sourceRecord.scaleScoreBars,
+    questionnaireConfig,
+  );
+  const subscaleScoreBars = normalizeChartPoints(
+    sourceRecord.subscaleScoreBars,
+    questionnaireConfig,
+  );
+  const reliabilityBars = normalizeChartPoints(
+    sourceRecord.reliabilityBars,
+    questionnaireConfig,
+  );
+  const correlationBars = normalizeChartPoints(
+    sourceRecord.correlationBars,
+    questionnaireConfig,
+  );
+  const normalityBars = normalizeChartPoints(
+    sourceRecord.normalityBars,
+    questionnaireConfig,
+  );
+  const missingValueBars = normalizeChartPoints(
+    sourceRecord.missingValueBars,
+    questionnaireConfig,
+  );
+
+  return {
+    frequencyBars:
+      frequencyBars.length > 0
+        ? frequencyBars
+        : buildFrequencyChartPoints(stats, questionnaireConfig),
+    meanBars:
+      meanBars.length > 0
+        ? meanBars
+        : buildDescriptiveChartPoints(stats.itemDescriptives, questionnaireConfig),
+    scaleScoreBars:
+      scaleScoreBars.length > 0
+        ? scaleScoreBars
+        : buildScaleScoreChartPoints(stats, questionnaireConfig),
+    subscaleScoreBars:
+      subscaleScoreBars.length > 0
+        ? subscaleScoreBars
+        : buildDescriptiveChartPoints(stats.scaleDescriptives, questionnaireConfig),
+    reliabilityBars:
+      reliabilityBars.length > 0
+        ? reliabilityBars
+        : buildReliabilityChartPoints(stats, questionnaireConfig),
+    correlationBars:
+      correlationBars.length > 0
+        ? correlationBars
+        : buildCorrelationChartPoints(stats, questionnaireConfig),
+    normalityBars:
+      normalityBars.length > 0
+        ? normalityBars
+        : buildNormalityChartPoints(stats, questionnaireConfig),
+    groupTestBars: buildGroupTestChartPoints(stats, questionnaireConfig),
+    missingValueBars,
+  };
+}
+
+function normalizeRecommendedCharts(
+  stats: AnyRecord,
+  questionnaireConfig: QuestionnaireConfig,
+  chartData: Record<string, AnyRecord[]>,
+): AnyRecord[] {
+  const existing = asRecordArray((stats as AnyRecord).recommendedCharts);
+
+  if (existing.length > 0) {
+    return existing
+      .filter(
+        (row) =>
+          !shouldRemoveUnconfirmedQuestionnaireRecord(row, questionnaireConfig),
+      )
+      .map((row) => ({
+        ...row,
+        rows: asArray(row.rows).length || asChartNumber(row.rows) || 0,
+        data: asRecordArray(row.data).slice(0, 30),
+      }));
+  }
+
+  const definitions: Array<{
+    key: string;
+    title: string;
+    type: 'bar' | 'line' | 'scatter' | 'pie';
+    description: string;
+  }> = [
+    {
+      key: 'frequencyBars',
+      title: 'Frekvenčné grafy',
+      type: 'bar',
+      description: 'Početnosti odpovedí a kategórií po premenných.',
+    },
+    {
+      key: 'meanBars',
+      title: 'Priemery položiek',
+      type: 'bar',
+      description: 'Porovnanie priemerných hodnôt položiek.',
+    },
+    {
+      key: 'scaleScoreBars',
+      title: 'Priemerné skóre škál',
+      type: 'bar',
+      description: 'Graf celkových škál a dotazníkových skóre.',
+    },
+    {
+      key: 'subscaleScoreBars',
+      title: 'Priemerné skóre subškál',
+      type: 'bar',
+      description: 'Graf subškál a odvodených škálových premenných.',
+    },
+    {
+      key: 'reliabilityBars',
+      title: 'Reliabilita škál',
+      type: 'bar',
+      description: 'Cronbachovo alfa pre dostupné škály.',
+    },
+    {
+      key: 'normalityBars',
+      title: 'Normalita dát',
+      type: 'bar',
+      description: 'p-hodnoty testov normality pre analyzované premenné.',
+    },
+    {
+      key: 'correlationBars',
+      title: 'Korelácie',
+      type: 'bar',
+      description: 'Sila Pearsonových a Spearmanových korelácií.',
+    },
+    {
+      key: 'groupTestBars',
+      title: 'Skupinové testy',
+      type: 'bar',
+      description: 'p-hodnoty alebo štatistiky t-testu, ANOVA, Mann-Whitney a Kruskal-Wallis.',
+    },
+  ];
+
+  return definitions
+    .map((definition) => {
+      const data = chartData[definition.key] ?? [];
+
+      return {
+        ...definition,
+        rows: data.length,
+        variables: data.map((item) => item.label).filter(Boolean).slice(0, 12),
+        data: data.slice(0, 30),
+        reason:
+          data.length > 0
+            ? 'Graf je dostupný z vypočítanej štatistickej analýzy.'
+            : 'Graf zatiaľ nemá dostatok dát.',
+      };
+    })
+    .filter((item) => item.rows > 0);
 }
 
 function normalizeRecommendedTests(stats: AnyRecord): AnyRecord[] {
@@ -819,39 +1428,95 @@ function normalizeRecommendedTests(stats: AnyRecord): AnyRecord[] {
   return [...correlationRows, ...groupRows];
 }
 
-function createExcelTables(stats: AnyRecord): AnyRecord[] {
+function createExcelTables(
+  stats: AnyRecord,
+  questionnaireConfig: QuestionnaireConfig,
+  chartData: Record<string, AnyRecord[]>,
+): AnyRecord[] {
   const chartTables = asRecordArray(stats.chartTables);
 
-  if (chartTables.length > 0) {
-    return chartTables;
-  }
+  const baseTables = chartTables.length > 0
+    ? chartTables
+    : [
+        {
+          key: 'frequencies',
+          title: 'Frekvenčné tabuľky',
+          rows: asArray(stats.frequencies),
+        },
+        {
+          key: 'descriptives',
+          title: 'Deskriptívna štatistika',
+          rows: [
+            ...asArray(stats.itemDescriptives),
+            ...asArray(stats.scaleDescriptives),
+          ],
+        },
+        {
+          key: 'reliability',
+          title: 'Reliabilita',
+          rows: asArray(stats.reliability),
+        },
+        {
+          key: 'normality',
+          title: 'Normalita',
+          rows: asArray(stats.normality),
+        },
+        {
+          key: 'pearson_correlations',
+          title: 'Pearson korelácie',
+          rows: asArray(getNestedValue(stats, ['correlations', 'pearson'])),
+        },
+        {
+          key: 'spearman_correlations',
+          title: 'Spearman korelácie',
+          rows: asArray(getNestedValue(stats, ['correlations', 'spearman'])),
+        },
+        {
+          key: 'parametric_tests',
+          title: 'Parametrické testy – t-test a ANOVA',
+          rows: asArray(getNestedValue(stats, ['groupTests', 'parametric'])),
+        },
+        {
+          key: 'non_parametric_tests',
+          title: 'Neparametrické testy – Mann-Whitney a Kruskal-Wallis',
+          rows: asArray(getNestedValue(stats, ['groupTests', 'nonParametric'])),
+        },
+      ];
 
-  return [
-    {
-      key: 'frequencies',
-      title: 'Frekvenčné tabuľky',
-      rows: asArray(stats.frequencies),
-    },
-    {
-      key: 'descriptives',
-      title: 'Deskriptívna štatistika',
-      rows: [
-        ...asArray(stats.itemDescriptives),
-        ...asArray(stats.scaleDescriptives),
-      ],
-    },
-    {
-      key: 'reliability',
-      title: 'Reliabilita',
-      rows: asArray(stats.reliability),
-    },
-    {
-      key: 'normality',
-      title: 'Normalita',
-      rows: asArray(stats.normality),
-    },
-  ];
+  const graphTables = Object.entries(chartData)
+    .filter(([, rows]) => rows.length > 0)
+    .map(([key, rows]) => ({
+      key: `graf_${key}`,
+      title: `Graf – ${key}`,
+      rows,
+    }));
+
+  return [...baseTables, ...graphTables]
+    .map((table) => {
+      const tableRecord = table as AnyRecord;
+
+      return {
+        ...tableRecord,
+        rows: Array.isArray(tableRecord.rows)
+          ? tableRecord.rows.filter(
+              (row) =>
+                !shouldRemoveUnconfirmedQuestionnaireRecord(
+                  row,
+                  questionnaireConfig,
+                ),
+            )
+          : tableRecord.rows,
+      };
+    })
+    .filter((table) => {
+      if (shouldRemoveUnconfirmedQuestionnaireRecord(table, questionnaireConfig)) {
+        return false;
+      }
+
+      return Array.isArray(table.rows) ? table.rows.length > 0 : true;
+    });
 }
+
 
 export async function GET() {
   return createJsonResponse(
@@ -976,11 +1641,16 @@ export async function POST(request: Request) {
       allowUnconfirmedStandardizedQuestionnaires: false,
     });
 
-    const recommendedCharts = normalizeRecommendedCharts(stats);
+    const chartData = normalizeAnalysisChartData(stats, questionnaireConfig);
+    const recommendedCharts = normalizeRecommendedCharts(
+      stats,
+      questionnaireConfig,
+      chartData,
+    );
     const recommendedTests = normalizeRecommendedTests(stats).filter(
       (row) => !shouldRemoveUnconfirmedQuestionnaireRecord(row, questionnaireConfig),
     );
-    const excelTables = createExcelTables(stats)
+    const excelTables = createExcelTables(stats, questionnaireConfig, chartData)
       .map((table) => {
         const tableRecord = table as AnyRecord;
 
@@ -1061,6 +1731,8 @@ export async function POST(request: Request) {
       descriptiveStatistics,
       recommendedTests,
       recommendedCharts,
+      chartCards: recommendedCharts,
+      graphData: chartData,
       hypothesisTests: asArray(getNestedValue(stats, ['groupTests', 'recommended'])),
       excelTables,
 
@@ -1072,8 +1744,12 @@ export async function POST(request: Request) {
       questionnaireSuggestions: questionnaireWarnings,
 
       statisticalAnalysis: stats,
-      chartData: stats.chartData || {},
-      chartTables: stats.chartTables || [],
+      chartData,
+      chartTables: excelTables.filter((table) => {
+        const tableRecord = table as AnyRecord;
+
+        return String(tableRecord['key'] ?? '').startsWith('graf_');
+      }),
       scaleScores: filterQuestionnaireRows(stats.scaleScores, questionnaireConfig),
       scaleDescriptives: filterQuestionnaireRows(stats.scaleDescriptives, questionnaireConfig),
       normality: filterQuestionnaireRows(stats.normality, questionnaireConfig),

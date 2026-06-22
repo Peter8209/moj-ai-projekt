@@ -318,6 +318,7 @@ export interface AnalysisChartData {
   reliabilityBars: ChartDataPoint[];
   correlationBars: ChartDataPoint[];
   normalityBars: ChartDataPoint[];
+  groupTestBars: ChartDataPoint[];
   missingValueBars: ChartDataPoint[];
 }
 
@@ -559,9 +560,13 @@ export function runFullStatisticalAnalysis(
 
   const pearson = calculatePairwiseCorrelations(analysisScores, 'pearson');
   const spearman = calculatePairwiseCorrelations(analysisScores, 'spearman');
+  const recommendedCorrelations = calculateRecommendedCorrelationsByNormality(
+    analysisScores,
+    normality,
+  );
 
   const shouldUseParametric = decideParametricByNormality(normality);
-  const recommendedCorrelations = shouldUseParametric ? pearson : spearman;
+  const normalityLookup = buildNormalityLookup(normality);
 
   const reliability = calculateReliabilityForScales(cleanRows, numericColumns, mergedScales);
 
@@ -589,7 +594,9 @@ export function runFullStatisticalAnalysis(
 
         parametricGroupTests.push(tTest);
         nonParametricGroupTests.push(mannWhitney);
-        recommendedGroupTests.push(shouldUseParametric ? tTest : mannWhitney);
+        recommendedGroupTests.push(
+          isVariableNormal(variable.scaleName, normalityLookup) ? tTest : mannWhitney,
+        );
       }
 
       if (realGroupCount >= 3) {
@@ -598,19 +605,19 @@ export function runFullStatisticalAnalysis(
 
         parametricGroupTests.push(anova);
         nonParametricGroupTests.push(kruskal);
-        recommendedGroupTests.push(shouldUseParametric ? anova : kruskal);
+        recommendedGroupTests.push(
+          isVariableNormal(variable.scaleName, normalityLookup) ? anova : kruskal,
+        );
       }
     }
   }
 
-  const exportedPearson = shouldUseParametric ? pearson : [];
-  const exportedSpearman = shouldUseParametric ? [] : spearman;
-  const exportedRecommendedCorrelations = shouldUseParametric ? pearson : spearman;
-  const exportedParametricGroupTests = shouldUseParametric ? parametricGroupTests : [];
-  const exportedNonParametricGroupTests = shouldUseParametric ? [] : nonParametricGroupTests;
-  const exportedRecommendedGroupTests = shouldUseParametric
-    ? parametricGroupTests
-    : nonParametricGroupTests;
+  const exportedPearson = pearson;
+  const exportedSpearman = spearman;
+  const exportedRecommendedCorrelations = recommendedCorrelations;
+  const exportedParametricGroupTests = parametricGroupTests;
+  const exportedNonParametricGroupTests = nonParametricGroupTests;
+  const exportedRecommendedGroupTests = recommendedGroupTests;
 
   const aiRecommendation = buildAiRecommendation({
     idColumn,
@@ -638,6 +645,7 @@ export function runFullStatisticalAnalysis(
     normality,
     reliability,
     correlations: exportedRecommendedCorrelations,
+    groupTests: exportedRecommendedGroupTests,
     scaleDefinitions: mergedScales,
     combinedScaleDefinitions: mergedCombinedScales,
   });
@@ -701,9 +709,8 @@ export function runFullStatisticalAnalysis(
       pearson: exportedPearson,
       spearman: exportedSpearman,
       recommended: exportedRecommendedCorrelations,
-      recommendationNote: shouldUseParametric
-        ? 'Na základe kontroly normality odporúčame interpretovať Pearsonovu koreláciu. Pri ordinálnych položkách alebo pochybnej normalite je bezpečnejší Spearman.'
-        : 'Na základe kontroly normality odporúčame interpretovať Spearmanovu koreláciu, pretože normalita nie je potvrdená alebo ide o ordinálne/škálové dáta.',
+      recommendationNote:
+        'Odporúčaná korelácia sa vyberá pre každú dvojicu premenných samostatne: ak sú obe premenné približne normálne, použije sa Pearson; ak aspoň jedna premenná nemá potvrdenú normalitu, použije sa Spearman.',
     },
 
     reliability,
@@ -712,9 +719,8 @@ export function runFullStatisticalAnalysis(
       parametric: exportedParametricGroupTests,
       nonParametric: exportedNonParametricGroupTests,
       recommended: exportedRecommendedGroupTests,
-      recommendationNote: shouldUseParametric
-        ? 'Pre premenné s približne normálnym rozdelením odporúčame parametrické testy: Independent t-test pri dvoch skupinách a ANOVA pri troch a viacerých skupinách.'
-        : 'Ak normalita nie je potvrdená, odporúčame neparametrické testy: Mann-Whitney U pri dvoch skupinách a Kruskal-Wallis pri troch a viacerých skupinách.',
+      recommendationNote:
+        'Odporúčaný test rozdielov sa vyberá podľa normality závislej škály/subškály a počtu skupín: 2 skupiny + normalita = Independent t-test, 2 skupiny + nenormalita = Mann-Whitney U, 3+ skupín + normalita = ANOVA, 3+ skupín + nenormalita = Kruskal-Wallis.',
     },
 
     scaleDefinitions: mergedScales,
@@ -1336,6 +1342,7 @@ function parseManualScaleDefinitionsFromText(
     .filter((definition): definition is ScaleDefinition => Boolean(definition));
 }
 
+
 function parseManualDefinitionLine(
   line: string,
   index: number,
@@ -1350,16 +1357,24 @@ function parseManualDefinitionLine(
     .filter(Boolean);
 
   const mainPart = parts[0] || '';
-  const colonIndex = mainPart.indexOf(':');
+  const separatorCandidates = [
+    mainPart.indexOf('='),
+    mainPart.indexOf(':'),
+  ].filter((value) => value >= 0);
+
+  const separatorIndex =
+    separatorCandidates.length > 0
+      ? Math.min(...separatorCandidates)
+      : -1;
 
   const rawName =
-    colonIndex >= 0
-      ? mainPart.slice(0, colonIndex).trim()
+    separatorIndex >= 0
+      ? mainPart.slice(0, separatorIndex).trim()
       : `${kind === 'scale' ? 'Škála' : 'Subškála'} ${index + 1}`;
 
   const rawItems =
-    colonIndex >= 0
-      ? mainPart.slice(colonIndex + 1).trim()
+    separatorIndex >= 0
+      ? mainPart.slice(separatorIndex + 1).trim()
       : mainPart.trim();
 
   const optionsMap = parseManualDefinitionOptions(parts.slice(1));
@@ -1413,6 +1428,7 @@ function parseManualDefinitionLine(
   };
 }
 
+
 function parseManualDefinitionOptions(parts: string[]): Record<string, string> {
   const result: Record<string, string> = {};
 
@@ -1432,12 +1448,92 @@ function parseManualDefinitionOptions(parts: string[]): Record<string, string> {
   return result;
 }
 
+
 function splitManualItems(value: string): string[] {
-  return String(value || '')
-    .split(/[,;]+/)
+  const source = String(value || '').trim();
+  if (!source) return [];
+
+  const items: string[] = [];
+
+  const addItem = (item: string) => {
+    const cleaned = item
+      .trim()
+      .replace(/^[\s"'`]+|[\s"'`]+$/g, '')
+      .replace(/\s+/g, '');
+
+    if (cleaned && !items.includes(cleaned)) {
+      items.push(cleaned);
+    }
+  };
+
+  const addRange = (prefix: string, from: number, to: number, suffix = '') => {
+    if (!prefix || !Number.isFinite(from) || !Number.isFinite(to)) return;
+
+    const step = from <= to ? 1 : -1;
+    const maxItems = Math.min(Math.abs(to - from) + 1, 250);
+
+    for (let offset = 0; offset < maxItems; offset += 1) {
+      addItem(`${prefix}${from + offset * step}${suffix}`);
+    }
+  };
+
+  const normalizedSource = source
+    .replace(/\bdo\b/gi, ' až ')
+    .replace(/\bto\b/gi, ' až ')
+    .replace(/\baz\b/gi, ' až ');
+
+  const rangeRegex =
+    /([A-Za-zÀ-ž_]+)\s*0*(\d+)\s*(?:až|az|to|do|\.{2,}|-|–|—)\s*(?:\1\s*)?0*(\d+)([Rr])?/gu;
+
+  for (const match of normalizedSource.matchAll(rangeRegex)) {
+    const prefix = match[1] || '';
+    const from = Number(match[2]);
+    const to = Number(match[3]);
+    const suffix = match[4] || '';
+
+    addRange(prefix, from, to, suffix);
+  }
+
+  const ellipsisRegex =
+    /([A-Za-zÀ-ž_]+)\s*0*(\d+)[^,\n;]*\.{2,}[^,\n;]*?(?:\1\s*)?0*(\d+)([Rr])?/gu;
+
+  for (const match of normalizedSource.matchAll(ellipsisRegex)) {
+    const prefix = match[1] || '';
+    const from = Number(match[2]);
+    const to = Number(match[3]);
+    const suffix = match[4] || '';
+
+    addRange(prefix, from, to, suffix);
+  }
+
+  normalizedSource
+    .replace(rangeRegex, ' ')
+    .replace(ellipsisRegex, ' ')
+    .split(/[,;\n+]+/)
     .map((item) => item.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .forEach((token) => {
+      const compactToken = token.replace(/\s+/g, '');
+
+      if (compactToken === '...' || compactToken === '…') {
+        return;
+      }
+
+      const directItemMatches = Array.from(
+        compactToken.matchAll(/([A-Za-zÀ-ž_]+0*\d+[Rr]?)/gu),
+      ).map((match) => match[1]);
+
+      if (directItemMatches.length > 0) {
+        directItemMatches.forEach(addItem);
+        return;
+      }
+
+      addItem(token);
+    });
+
+  return items;
 }
+
 
 function parseManualGroupingColumns(
   textValue: string,
@@ -2245,6 +2341,58 @@ function decideParametricByNormality(normality: NormalityResult[]): boolean {
   return validNormality.every((item) => item.isNormal === true);
 }
 
+function buildNormalityLookup(normality: NormalityResult[]): Map<string, boolean> {
+  const lookup = new Map<string, boolean>();
+
+  normality.forEach((item) => {
+    if (item.isNormal !== null) {
+      lookup.set(item.variable, item.isNormal === true);
+    }
+  });
+
+  return lookup;
+}
+
+function isVariableNormal(
+  variableName: string,
+  normalityLookup: Map<string, boolean>,
+): boolean {
+  return normalityLookup.get(variableName) === true;
+}
+
+function calculateRecommendedCorrelationsByNormality(
+  scaleScores: ScaleScoreResult[],
+  normality: NormalityResult[],
+): CorrelationResult[] {
+  const normalityLookup = buildNormalityLookup(normality);
+  const results: CorrelationResult[] = [];
+
+  for (let i = 0; i < scaleScores.length; i++) {
+    for (let j = i + 1; j < scaleScores.length; j++) {
+      const first = scaleScores[i];
+      const second = scaleScores[j];
+
+      const method: CorrelationMethod =
+        isVariableNormal(first.scaleName, normalityLookup) &&
+        isVariableNormal(second.scaleName, normalityLookup)
+          ? 'pearson'
+          : 'spearman';
+
+      results.push(
+        calculateCorrelation(
+          first.scaleName,
+          first.scores,
+          second.scaleName,
+          second.scores,
+          method,
+        ),
+      );
+    }
+  }
+
+  return results;
+}
+
 
 function approximateShapiroWilk(values: number[]): {
   statistic: number | null;
@@ -3036,6 +3184,7 @@ function buildAnalysisChartData(input: {
   normality: NormalityResult[];
   reliability: ReliabilityResult[];
   correlations: CorrelationResult[];
+  groupTests?: GroupTestResult[];
   scaleDefinitions: ScaleDefinition[];
   combinedScaleDefinitions: CombinedScaleDefinition[];
 }): AnalysisChartData {
@@ -3140,6 +3289,8 @@ function buildAnalysisChartData(input: {
     reliabilityBars,
     correlationBars,
     normalityBars,
+    groupTestBars: [],
+
     missingValueBars,
   };
 }

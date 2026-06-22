@@ -2959,6 +2959,41 @@ const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
 const [analysisResult, setAnalysisResult] =
   useState<AnalysisResult | null>(null);
 
+const [systemLanguage, setSystemLanguage] = useState<LanguageCode>('sk');
+
+useEffect(() => {
+  const syncLanguage = () => {
+    const stored =
+      localStorage.getItem('zedpera_language') ||
+      localStorage.getItem('zedpera_system_language') ||
+      'sk';
+
+    const safeLanguage: LanguageCode =
+      stored === 'cs' ||
+      stored === 'en' ||
+      stored === 'de' ||
+      stored === 'pl' ||
+      stored === 'hu' ||
+      stored === 'sk'
+        ? stored
+        : 'sk';
+
+    setSystemLanguage(safeLanguage);
+  };
+
+  syncLanguage();
+
+  window.addEventListener('storage', syncLanguage);
+  window.addEventListener('zedpera:language-changed', syncLanguage);
+  window.addEventListener('zedpera:system-language-changed', syncLanguage);
+
+  return () => {
+    window.removeEventListener('storage', syncLanguage);
+    window.removeEventListener('zedpera:language-changed', syncLanguage);
+    window.removeEventListener('zedpera:system-language-changed', syncLanguage);
+  };
+}, []);
+
 const [questionnaireMode, setQuestionnaireMode] =
   useState<QuestionnaireMode>('auto-suggest-only');
 
@@ -2966,7 +3001,11 @@ const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<string[]>(
   [],
 );
 
-const questionnaireText = getQuestionnaireText('en');
+const questionnaireText = useMemo(
+  () => getQuestionnaireText(systemLanguage),
+  [systemLanguage],
+);
+
 const questionnaireOptions = questionnaireText.options;
 
 const [customQuestionnairesText, setCustomQuestionnairesText] = useState('');
@@ -3094,40 +3133,7 @@ const mobileToolPanelRef = useRef<HTMLDivElement | null>(null);
 }, [activeModule]);
 const activeTranslationKey = activeModuleInfo.translationKey;
 
-const [systemLanguage, setSystemLanguage] = useState<LanguageCode>('sk');
 
-useEffect(() => {
-  const syncLanguage = () => {
-    const stored =
-      localStorage.getItem('zedpera_language') ||
-      localStorage.getItem('zedpera_system_language') ||
-      'sk';
-
-    const safeLanguage: LanguageCode =
-      stored === 'cs' ||
-      stored === 'en' ||
-      stored === 'de' ||
-      stored === 'pl' ||
-      stored === 'hu' ||
-      stored === 'sk'
-        ? stored
-        : 'sk';
-
-    setSystemLanguage(safeLanguage);
-  };
-
-  syncLanguage();
-
-  window.addEventListener('storage', syncLanguage);
-  window.addEventListener('zedpera:language-changed', syncLanguage);
-  window.addEventListener('zedpera:system-language-changed', syncLanguage);
-
-  return () => {
-    window.removeEventListener('storage', syncLanguage);
-    window.removeEventListener('zedpera:language-changed', syncLanguage);
-    window.removeEventListener('zedpera:system-language-changed', syncLanguage);
-  };
-}, []);
 
 const fixedUi = getFixedModuleUi(systemLanguage)[activeModule];
 const currentFixedModuleUi = getFixedModuleUi(systemLanguage);

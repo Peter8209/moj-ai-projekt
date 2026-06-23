@@ -397,12 +397,97 @@ export interface StatisticalAnalysisResult {
 /* HLAVNÁ FUNKCIA                                                             */
 /* -------------------------------------------------------------------------- */
 
+
+function hasManualScaleOrSubscaleInput(
+  options: StatisticalAnalysisOptions = {},
+): boolean {
+  return (
+    getOptionTextValue(options, 'manualScalesText').trim().length > 0 ||
+    getOptionTextValue(options, 'manualSubscalesText').trim().length > 0 ||
+    getOptionTextValue(options, 'groupingColumnsText').trim().length > 0 ||
+    getOptionTextValue(options, 'customQuestionnairesText').trim().length > 0
+  );
+}
+
+function hasOnlyManualNamesWithoutItems(textValue: string): boolean {
+  const lines = String(textValue || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) return false;
+
+  return lines.some((line) => !line.includes('=') && !line.includes(':'));
+}
+
+function expandManualDefinitionsByColumnNames(
+  definitions: ScaleDefinition[],
+  numericColumns: string[],
+): ScaleDefinition[] {
+  return definitions.map((definition) => {
+    const explicitItems = definition.items
+      .map((item) => String(item).trim())
+      .filter(Boolean);
+
+    const hasExplicitItemSyntax = explicitItems.some((item) =>
+      /\d/.test(item) ||
+      item.includes(',') ||
+      item.includes('+') ||
+      item.includes('až') ||
+      item.includes('az') ||
+      item.includes('do') ||
+      item.includes('to') ||
+      item.includes('...') ||
+      item.includes('–') ||
+      item.includes('-')
+    );
+
+    if (hasExplicitItemSyntax) {
+      return definition;
+    }
+
+    /*
+     * Ak používateľ zadá iba názov škály/subškály bez položiek, napr.:
+     * "Vyrovnanosť"
+     * systém sa pokúsi nájsť stĺpce, ktoré obsahujú tento názov.
+     * Toto je pomocná logika, nie náhrada za presný zápis "Názov = položky".
+     */
+    const normalizedName = normalizeText(definition.name);
+    if (!normalizedName || normalizedName.length < 3) {
+      return definition;
+    }
+
+    const matchingColumns = numericColumns.filter((column) => {
+      const normalizedColumn = normalizeText(column);
+
+      return (
+        normalizedColumn.includes(normalizedName) ||
+        normalizedName.includes(normalizedColumn)
+      );
+    });
+
+    if (matchingColumns.length >= 2) {
+      return {
+        ...definition,
+        items: matchingColumns,
+        description:
+          `${definition.description || ''} Položky boli doplnené podľa názvov stĺpcov, pretože používateľ zadal iba názov škály/subškály.`.trim(),
+      };
+    }
+
+    return definition;
+  });
+}
+
 export function runFullStatisticalAnalysis(
   rows: AnalysisRow[],
   options: StatisticalAnalysisOptions = {},
 ): StatisticalAnalysisResult {
   const alpha = options.alpha ?? 0.05;
-  const autoDetectScales = shouldRunAutoScaleDetection(options);
+  const manualInputProvided = hasManualScaleOrSubscaleInput(options);
+  const autoDetectScales = manualInputProvided
+    ? options.autoDetectScales === true
+    : shouldRunAutoScaleDetection(options);
   const fallbackToNumericVariables = options.fallbackToNumericVariables !== false;
   const autoDetectGroupColumns = options.autoDetectGroupColumns !== false;
 
@@ -487,19 +572,26 @@ export function runFullStatisticalAnalysis(
     options,
   );
 
-  const manualDashboardScales = parseManualScaleDefinitionsFromText(
-    getOptionTextValue(options, 'manualScalesText'),
-    'scale',
+  const manualScaleText = getOptionTextValue(options, 'manualScalesText');
+  const manualSubscaleText = getOptionTextValue(options, 'manualSubscalesText');
+
+  const manualDashboardScales = expandManualDefinitionsByColumnNames(
+    parseManualScaleDefinitionsFromText(manualScaleText, 'scale'),
+    numericColumns,
   );
 
-  const manualDashboardSubscales = parseManualScaleDefinitionsFromText(
-    getOptionTextValue(options, 'manualSubscalesText'),
-    'subscale',
+  const manualDashboardSubscales = expandManualDefinitionsByColumnNames(
+    parseManualScaleDefinitionsFromText(manualSubscaleText, 'subscale'),
+    numericColumns,
   );
 
   const manualScales = [
     ...(options.scales ?? []),
-    ...questionnaireDefinitions.scales,
+    /*
+     * Pri novom workflowe má používateľ zadať škály a subškály ručne.
+     * Preto pri vyplnených manuálnych poliach nepridávame natvrdo WEMWBS/JSS/SEHS/Resilience.
+     */
+    ...(manualInputProvided ? [] : questionnaireDefinitions.scales),
     ...manualDashboardScales,
     ...manualDashboardSubscales,
   ];
@@ -512,7 +604,7 @@ export function runFullStatisticalAnalysis(
 
   const manualCombinedScales = [
     ...(options.combinedScales ?? []),
-    ...questionnaireDefinitions.combinedScales,
+    ...(manualInputProvided ? [] : questionnaireDefinitions.combinedScales),
   ];
 
   const autoCombinedScales = autoDetectCombinedScaleDefinitions(
@@ -630,6 +722,15 @@ export function runFullStatisticalAnalysis(
     manualScaleCount: manualScales.length,
     autoDetectedScaleCount: autoScales.length,
   });
+
+  if (
+    hasOnlyManualNamesWithoutItems(manualScaleText) ||
+    hasOnlyManualNamesWithoutItems(manualSubscaleText)
+  ) {
+    aiRecommendation.unshift(
+      'Používateľ zadal aspoň jednu škálu/subškálu iba názvom bez položiek. Pre spoľahlivý výpočet treba zadávať formát: Názov škály = položka1, položka2 alebo Názov škály = položka1 až položka10.',
+    );
+  }
 
   const correlationMatrix = buildCorrelationMatrix(
     exportedRecommendedCorrelations,
@@ -1045,17 +1146,49 @@ export function calculateCombinedScaleScores(
 
 function resolveItemColumn(item: ScaleItemReference, columns: string[]): string | null {
   const itemText = String(item).trim();
+  if (!itemText) return null;
 
-  const exact = columns.find((column) => normalizeText(column) === normalizeText(itemText));
+  const normalizedItem = normalizeText(itemText);
+
+  const exact = columns.find((column) => normalizeText(column) === normalizedItem);
   if (exact) return exact;
 
-  const itemNumber = extractFirstNumber(itemText);
+  const compactItemMatch = normalizedItem.match(/^([a-z]+)0*(\d+)(r)?$/i);
+  const itemPrefix = compactItemMatch?.[1] ?? '';
+  const itemNumber = compactItemMatch?.[2]
+    ? Number(compactItemMatch[2])
+    : extractFirstNumber(itemText);
 
   if (itemNumber !== null) {
     const numberMatches = columns.filter((column) => {
       const columnNumbers = extractAllNumbers(column);
       return columnNumbers.includes(itemNumber);
     });
+
+    /*
+     * Pri položke R1 preferuj stĺpce s rovnakým prefixom R/RS/rezil...
+     * Pri WEM1/JSS1 preferuj WEM/JSS.
+     */
+    if (itemPrefix) {
+      const prefixMatches = numberMatches.filter((column) => {
+        const normalizedColumn = normalizeText(column);
+
+        return (
+          normalizedColumn.startsWith(itemPrefix) ||
+          normalizedColumn.includes(`${itemPrefix}${itemNumber}`) ||
+          normalizedColumn.includes(`${itemPrefix}0${itemNumber}`)
+        );
+      });
+
+      if (prefixMatches.length === 1) return prefixMatches[0];
+
+      const strictPrefix = prefixMatches.find((column) =>
+        normalizeText(column).endsWith(`${itemPrefix}${itemNumber}`) ||
+        normalizeText(column) === `${itemPrefix}${itemNumber}`,
+      );
+
+      if (strictPrefix) return strictPrefix;
+    }
 
     if (numberMatches.length === 1) return numberMatches[0];
 
@@ -1066,6 +1199,7 @@ function resolveItemColumn(item: ScaleItemReference, columns: string[]): string 
         normalized.includes(`polozka${itemNumber}`) ||
         normalized.includes(`item${itemNumber}`) ||
         normalized.includes(`otazka${itemNumber}`) ||
+        normalized.includes(`otazka${itemNumber}`) ||
         normalized.endsWith(String(itemNumber))
       );
     });
@@ -1073,7 +1207,7 @@ function resolveItemColumn(item: ScaleItemReference, columns: string[]): string 
     if (preferred) return preferred;
   }
 
-  const partial = columns.find((column) => normalizeText(column).includes(normalizeText(itemText)));
+  const partial = columns.find((column) => normalizeText(column).includes(normalizedItem));
   if (partial) return partial;
 
   return null;
@@ -1164,7 +1298,11 @@ function getSelectedQuestionnaireIds(
 function getQuestionnaireMode(
   options: StatisticalAnalysisOptions = {},
 ): QuestionnaireMode {
-  return options.questionnaireConfig?.mode ?? 'auto-suggest-only';
+  if (hasManualScaleOrSubscaleInput(options)) {
+    return 'manual';
+  }
+
+  return options.questionnaireConfig?.mode ?? 'manual';
 }
 
 function isStrictQuestionnaireMode(
@@ -1185,27 +1323,36 @@ function shouldRunAutoScaleDetection(
 ): boolean {
   if (options.autoDetectScales === false) return false;
 
+  if (hasManualScaleOrSubscaleInput(options)) {
+    /*
+     * Nový požadovaný workflow:
+     * používateľ zadá vlastné škály/subškály. Vtedy sa nemajú natvrdo dopĺňať
+     * WEMWBS/JSS/SEHS/Resilience ani iné automatické štandardizované dotazníky.
+     */
+    return options.autoDetectScales === true;
+  }
+
   const mode = getQuestionnaireMode(options);
 
   if (mode === 'none' || mode === 'auto-suggest-only') {
     return false;
   }
 
-  if (mode === 'selected' || mode === 'manual') {
-    return true;
-  }
-
-  return true;
+  return mode === 'selected';
 }
 
 function shouldInferGenericScales(
   options: StatisticalAnalysisOptions = {},
 ): boolean {
+  if (hasManualScaleOrSubscaleInput(options)) {
+    return options.autoDetectScales === true;
+  }
+
   const mode = getQuestionnaireMode(options);
 
   if (mode === 'none' || mode === 'auto-suggest-only') return false;
 
-  return mode === 'selected' || mode === 'manual' || options.autoDetectScales === true;
+  return mode === 'selected' || options.autoDetectScales === true;
 }
 
 function getManualQuestionnaireText(
@@ -1292,11 +1439,13 @@ function shouldComputeQuestionnaire(
 
   if (explicitlySelected) return true;
 
-  if (
-    getQuestionnaireMode(options) === 'manual' &&
-    acceptedIds.some((id) => manualTextMentionsQuestionnaire(id, options))
-  ) {
-    return true;
+  /*
+   * Dôležité: v režime manual už text "JSS", "WEMWBS", "reziliencia" atď.
+   * nesmie automaticky spustiť pevný štandardizovaný dotazník.
+   * Manuálny text sa má spracovať ako používateľom zadané škály/subškály.
+   */
+  if (getQuestionnaireMode(options) === 'manual') {
+    return false;
   }
 
   if (isStrictQuestionnaireMode(options)) return false;
@@ -1480,8 +1629,16 @@ function splitManualItems(value: string): string[] {
   const normalizedSource = source
     .replace(/\bdo\b/gi, ' až ')
     .replace(/\bto\b/gi, ' až ')
-    .replace(/\baz\b/gi, ' až ');
+    .replace(/\baz\b/gi, ' až ')
+    .replace(/…/g, '...');
 
+  /*
+   * Podporované:
+   * R1 až R25
+   * R1-R25
+   * WEM1 + WEM2 + ... + WEM14
+   * JSS1, JSS10, JSS19, JSS28
+   */
   const rangeRegex =
     /([A-Za-zÀ-ž_]+)\s*0*(\d+)\s*(?:až|az|to|do|\.{2,}|-|–|—)\s*(?:\1\s*)?0*(\d+)([Rr])?/gu;
 
@@ -1515,7 +1672,12 @@ function splitManualItems(value: string): string[] {
     .forEach((token) => {
       const compactToken = token.replace(/\s+/g, '');
 
-      if (compactToken === '...' || compactToken === '…') {
+      if (
+        compactToken === '...' ||
+        compactToken === '…' ||
+        compactToken.toLowerCase() === 'az' ||
+        compactToken.toLowerCase() === 'až'
+      ) {
         return;
       }
 

@@ -20,7 +20,20 @@ type QuestionnaireMode =
 type QuestionnaireConfig = {
   mode: QuestionnaireMode;
   selectedQuestionnaires: string[];
+
+  /**
+   * Voľný text – názov dotazníka alebo všeobecný popis.
+   * Už neslúži na pevné vyberanie WEMWBS/JSS/SEHS/Resilience.
+   */
   customQuestionnairesText: string;
+
+  /**
+   * Hlavné 3 kolónky z Dashboardu.
+   * Toto je nový základ workflow: používateľ zadá škály, subškály a skupinové premenné.
+   */
+  manualScalesText: string;
+  manualSubscalesText: string;
+  groupingColumnsText: string;
 };
 
 type QuestionnaireId =
@@ -181,6 +194,44 @@ function normalizeQuestionnaireConfig(formData: FormData): QuestionnaireConfig {
     formData.get('questionnaireConfig'),
   );
 
+  const manualAnalysisConfig =
+    safeJsonParse<Partial<QuestionnaireConfig>>(formData.get('manualAnalysisConfig')) ??
+    {};
+
+  const customQuestionnairesText = String(
+    parsed?.customQuestionnairesText ??
+      manualAnalysisConfig.customQuestionnairesText ??
+      formData.get('customQuestionnairesText') ??
+      '',
+  ).trim();
+
+  const manualScalesText = String(
+    parsed?.manualScalesText ??
+      manualAnalysisConfig.manualScalesText ??
+      formData.get('manualScalesText') ??
+      '',
+  ).trim();
+
+  const manualSubscalesText = String(
+    parsed?.manualSubscalesText ??
+      manualAnalysisConfig.manualSubscalesText ??
+      formData.get('manualSubscalesText') ??
+      '',
+  ).trim();
+
+  const groupingColumnsText = String(
+    parsed?.groupingColumnsText ??
+      manualAnalysisConfig.groupingColumnsText ??
+      formData.get('groupingColumnsText') ??
+      '',
+  ).trim();
+
+  const hasManualDefinitions =
+    customQuestionnairesText.length > 0 ||
+    manualScalesText.length > 0 ||
+    manualSubscalesText.length > 0 ||
+    groupingColumnsText.length > 0;
+
   const selectedFromConfig = Array.isArray(parsed?.selectedQuestionnaires)
     ? parsed.selectedQuestionnaires
     : [];
@@ -188,6 +239,11 @@ function normalizeQuestionnaireConfig(formData: FormData): QuestionnaireConfig {
   const selectedFromField =
     safeJsonParse<unknown[]>(formData.get('selectedQuestionnaires')) ?? [];
 
+  /*
+   * Starý výber konkrétnych dotazníkov ponechávame iba ako spätnú kompatibilitu.
+   * Nový workflow nemá pevné tlačidlá WEMWBS/JSS/SEHS/Resilience – používateľ zadáva
+   * škály a subškály ručne v troch textových poliach.
+   */
   const selectedQuestionnaires = [
     ...selectedFromConfig,
     ...selectedFromField,
@@ -195,17 +251,16 @@ function normalizeQuestionnaireConfig(formData: FormData): QuestionnaireConfig {
     .map(normalizeQuestionnaireId)
     .filter((id): id is QuestionnaireId => Boolean(id) && id !== 'custom');
 
-  const uniqueSelected = Array.from(new Set(selectedQuestionnaires));
+  const uniqueSelected = hasManualDefinitions
+    ? []
+    : Array.from(new Set(selectedQuestionnaires));
 
   const rawMode = String(
-    parsed?.mode ?? formData.get('questionnaireMode') ?? 'auto-suggest-only',
+    parsed?.mode ??
+      manualAnalysisConfig.mode ??
+      formData.get('questionnaireMode') ??
+      'manual',
   );
-
-  const customQuestionnairesText = String(
-    parsed?.customQuestionnairesText ??
-      formData.get('customQuestionnairesText') ??
-      '',
-  ).trim();
 
   let mode: QuestionnaireMode =
     rawMode === 'selected' ||
@@ -213,20 +268,23 @@ function normalizeQuestionnaireConfig(formData: FormData): QuestionnaireConfig {
     rawMode === 'none' ||
     rawMode === 'auto-suggest-only'
       ? rawMode
-      : 'auto-suggest-only';
+      : 'manual';
 
-  if (mode === 'selected' && uniqueSelected.length === 0) {
-    mode = 'auto-suggest-only';
+  if (hasManualDefinitions) {
+    mode = 'manual';
   }
 
-  if (mode === 'manual' && !customQuestionnairesText) {
-    mode = uniqueSelected.length > 0 ? 'selected' : 'auto-suggest-only';
+  if (mode === 'selected' && uniqueSelected.length === 0) {
+    mode = 'manual';
   }
 
   return {
     mode,
     selectedQuestionnaires: uniqueSelected,
     customQuestionnairesText,
+    manualScalesText,
+    manualSubscalesText,
+    groupingColumnsText,
   };
 }
 
@@ -234,7 +292,15 @@ function getNormalizedManualQuestionnaireText(
   questionnaireConfig: QuestionnaireConfig,
 ): string {
   return removeDiacritics(
-    questionnaireConfig.customQuestionnairesText.toLowerCase(),
+    [
+      questionnaireConfig.customQuestionnairesText,
+      questionnaireConfig.manualScalesText,
+      questionnaireConfig.manualSubscalesText,
+      questionnaireConfig.groupingColumnsText,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase(),
   );
 }
 
@@ -302,13 +368,29 @@ function createQuestionnaireSelectionWarnings(
     );
 
     return [
-      `Používateľ ručne vybral dotazníky: ${labels.join(' + ')}. Automatická detekcia nesmie tento výber prepísať.`,
+      `Používateľ ručne vybral dotazníky: ${labels.join(' + ')}. Tento režim je ponechaný iba pre spätnú kompatibilitu.`,
     ];
   }
 
   if (questionnaireConfig.mode === 'manual') {
     return [
-      `Používateľ zadal vlastné dotazníky/subškály: ${questionnaireConfig.customQuestionnairesText || 'bez textového popisu'}.`,
+      [
+        'Používateľ zadal vlastné škály/subškály a skupinové premenné.',
+        questionnaireConfig.customQuestionnairesText
+          ? `Popis: ${questionnaireConfig.customQuestionnairesText}`
+          : '',
+        questionnaireConfig.manualScalesText
+          ? `Škály: ${questionnaireConfig.manualScalesText}`
+          : '',
+        questionnaireConfig.manualSubscalesText
+          ? `Subškály: ${questionnaireConfig.manualSubscalesText}`
+          : '',
+        questionnaireConfig.groupingColumnsText
+          ? `Skupiny: ${questionnaireConfig.groupingColumnsText}`
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
     ];
   }
 
@@ -319,7 +401,7 @@ function createQuestionnaireSelectionWarnings(
   }
 
   return [
-    'Režim dotazníkov: Neviem / iba navrhnúť. Systém môže automaticky navrhnúť pravdepodobný typ dotazníka podľa stĺpcov.',
+    'Režim dotazníkov: iba všeobecná príprava dát. Pevné dotazníky sa automaticky nepočítajú; škály a subškály sa majú zadať v troch manuálnych poliach.',
   ];
 }
 
@@ -677,14 +759,12 @@ function autoMapQuestionnaireColumnsByOrder(
   }
 
   const selectedWem =
-    questionnaireConfig.selectedQuestionnaires.includes('wemwbs') ||
-    (questionnaireConfig.mode === 'manual' &&
-      manualTextMentionsQuestionnaire(questionnaireConfig, 'wemwbs'));
+    questionnaireConfig.mode === 'selected' &&
+    questionnaireConfig.selectedQuestionnaires.includes('wemwbs');
 
   const selectedJss =
-    questionnaireConfig.selectedQuestionnaires.includes('jss') ||
-    (questionnaireConfig.mode === 'manual' &&
-      manualTextMentionsQuestionnaire(questionnaireConfig, 'jss'));
+    questionnaireConfig.mode === 'selected' &&
+    questionnaireConfig.selectedQuestionnaires.includes('jss');
 
   const hasAnyWem =
     nextHeaders.some((header) => /^WEM\d+$/.test(header)) ||
@@ -1237,6 +1317,73 @@ function hasColumns(headers: string[], expectedColumns: string[]): boolean {
   return expectedColumns.every((column) => headers.includes(column));
 }
 
+
+function splitManualLines(text: string): string[] {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function parseManualScoringLine(
+  line: string,
+  kind: 'škála' | 'subškála',
+  index: number,
+): ScoringItem | null {
+  const value = String(line || '').trim();
+  if (!value) return null;
+
+  const separatorCandidates = [
+    value.indexOf('='),
+    value.indexOf(':'),
+  ].filter((position) => position >= 0);
+
+  const separatorIndex =
+    separatorCandidates.length > 0
+      ? Math.min(...separatorCandidates)
+      : -1;
+
+  const name =
+    separatorIndex >= 0
+      ? value.slice(0, separatorIndex).trim()
+      : `${kind} ${index + 1}`;
+
+  const items =
+    separatorIndex >= 0
+      ? value.slice(separatorIndex + 1).trim()
+      : value;
+
+  if (!items) {
+    return null;
+  }
+
+  const outputName = `${kind === 'škála' ? 'SCALE' : 'SUBSCALE'}_${normalizeHeaderKey(name).toUpperCase()}`;
+
+  return {
+    skala: name || `${kind} ${index + 1}`,
+    polozky: items,
+    vypocet:
+      'Definícia zo zadania používateľa. Finálne skóre, deskriptíva, reliabilita, normalita, korelácie a testy rozdielov sa počítajú v analysisStats.ts.',
+    vyslednaPremenna: outputName,
+    poznamka:
+      kind === 'škála'
+        ? 'Manuálne zadaná škála pred spustením analýzy dát.'
+        : 'Manuálne zadaná subškála pred spustením analýzy dát.',
+  };
+}
+
+function createManualScoringItems(questionnaireConfig: QuestionnaireConfig): ScoringItem[] {
+  const scaleItems = splitManualLines(questionnaireConfig.manualScalesText)
+    .map((line, index) => parseManualScoringLine(line, 'škála', index))
+    .filter((item): item is ScoringItem => Boolean(item));
+
+  const subscaleItems = splitManualLines(questionnaireConfig.manualSubscalesText)
+    .map((line, index) => parseManualScoringLine(line, 'subškála', index))
+    .filter((item): item is ScoringItem => Boolean(item));
+
+  return [...scaleItems, ...subscaleItems];
+}
+
 function calculateScores(
   cleanRows: DataRow[],
   headers: string[],
@@ -1249,7 +1396,7 @@ function calculateScores(
 } {
   const nextHeaders = [...headers];
   const warnings: string[] = [];
-  const scoringItems: ScoringItem[] = [];
+  const scoringItems: ScoringItem[] = createManualScoringItems(questionnaireConfig);
 
   const wemColumns = Array.from({ length: 14 }, (_, index) => `WEM${index + 1}`);
   const jssColumns = Array.from({ length: 36 }, (_, index) => `JSS${index + 1}`);
@@ -1260,18 +1407,22 @@ function calculateScores(
   const autoHasAnyJss = jssColumns.some((column) => nextHeaders.includes(column));
   const autoHasAllJss = hasColumns(nextHeaders, jssColumns);
 
-  const hasAnyWem = shouldUseQuestionnaire(
-    questionnaireConfig,
-    'wemwbs',
-    autoHasAnyWem,
-  );
+  const hasAnyWem =
+    questionnaireConfig.mode === 'selected' &&
+    shouldUseQuestionnaire(
+      questionnaireConfig,
+      'wemwbs',
+      autoHasAnyWem,
+    );
   const hasAllWem = hasAnyWem && autoHasAllWem;
 
-  const hasAnyJss = shouldUseQuestionnaire(
-    questionnaireConfig,
-    'jss',
-    autoHasAnyJss,
-  );
+  const hasAnyJss =
+    questionnaireConfig.mode === 'selected' &&
+    shouldUseQuestionnaire(
+      questionnaireConfig,
+      'jss',
+      autoHasAnyJss,
+    );
   const hasAllJss = hasAnyJss && autoHasAllJss;
 
   if (hasAnyWem && !autoHasAnyWem) {
@@ -1660,6 +1811,7 @@ function createQualityReport(params: {
 
   const hasWemScore = headers.includes('WEMWBS_skore');
   const hasJssScore = headers.includes('JSS_skore');
+  const hasManualScoring = scoringItems.length > 0;
 
   return [
     {
@@ -1701,20 +1853,19 @@ function createQualityReport(params: {
           : 'Pred interpretáciou treba pracovať s validnými percentami a skontrolovať rozsah chýbania.',
     },
     {
-      kontrola: 'WEMWBS skóre',
-      vysledok: hasWemScore ? 'vytvorené' : 'nevytvorené',
-      stav: hasWemScore ? 'ok' : 'warning',
-      poznamka: hasWemScore
-        ? 'Premenná WEMWBS_skore bola dopočítaná.'
-        : 'V dátach neboli nájdené položky WEM alebo ich názvy nezodpovedajú očakávanému vzoru.',
+      kontrola: 'Manuálne škály a subškály',
+      vysledok: hasManualScoring ? scoringItems.length : 'nezadané',
+      stav: hasManualScoring ? 'ok' : 'warning',
+      poznamka: hasManualScoring
+        ? 'Používateľom zadané škály/subškály boli zapísané do SCORING a odovzdajú sa do štatistického výpočtu.'
+        : 'Neboli zadané manuálne škály ani subškály. Systém použije iba všeobecnú analýzu dostupných premenných.',
     },
     {
-      kontrola: 'JSS skóre',
-      vysledok: hasJssScore ? 'vytvorené' : 'nevytvorené',
-      stav: hasJssScore ? 'ok' : 'warning',
-      poznamka: hasJssScore
-        ? 'Premenná JSS_skore a subškály boli dopočítané.'
-        : 'V dátach neboli nájdené položky JSS alebo ich názvy nezodpovedajú očakávanému vzoru.',
+      kontrola: 'Legacy WEMWBS/JSS skóre',
+      vysledok: hasWemScore || hasJssScore ? 'vytvorené v režime spätnej kompatibility' : 'nepoužité',
+      stav: 'ok',
+      poznamka:
+        'Pevné dotazníky WEMWBS/JSS už nie sú hlavný workflow. Používateľ má zadávať škály a subškály ručne.',
     },
     {
       kontrola: 'Výpočtové pravidlá',
@@ -1774,12 +1925,17 @@ function createReadmeRows(): Array<Record<string, string>> {
     {
       cast: 'SCORING',
       popis:
-        'Popis výpočtu skóre a subškál, napríklad WEMWBS_skore, JSS_skore a JSS subškály.',
+        'Popis používateľom zadaných škál a subškál. Formát: Názov škály = položka1, položka2 alebo položka1 až položka10.',
     },
     {
       cast: 'QUALITY_REPORT',
       popis:
         'Kontrola kvality pripraveného súboru pred spustením štatistiky.',
+    },
+    {
+      cast: 'DÔLEŽITÉ',
+      popis:
+        'Prepare route už nepracuje s pevnými kartičkami WEMWBS/JSS/SEHS/Resilience ako hlavným workflow. Používateľ zadáva vlastné škály, subškály a skupinové premenné v troch kolónkach pred analýzou.',
     },
   ];
 }
@@ -1792,7 +1948,7 @@ function createQuestionnaireSetupRows(
       pole: 'mode',
       hodnota: questionnaireConfig.mode,
       popis:
-        'Režim výberu dotazníka: selected = ručný výber, manual = vlastný text, none = bez dotazníka, auto-suggest-only = iba návrh.',
+        'Režim prípravy dát. Pri vyplnení škál, subškál alebo skupinových premenných sa automaticky používa manual.',
     },
     {
       pole: 'selectedQuestionnaires',
@@ -1800,12 +1956,31 @@ function createQuestionnaireSetupRows(
         questionnaireConfig.selectedQuestionnaires
           .map((id) => QUESTIONNAIRE_LABELS[id as QuestionnaireId] ?? id)
           .join(' + ') || '',
-      popis: 'Dotazníky, ktoré používateľ výslovne vybral.',
+      popis:
+        'Starý výber konkrétnych dotazníkov – ponechaný iba pre spätnú kompatibilitu.',
     },
     {
       pole: 'customQuestionnairesText',
       hodnota: questionnaireConfig.customQuestionnairesText || '',
-      popis: 'Textové zadanie vlastných dotazníkov, škál alebo subškál.',
+      popis: 'Voľný popis dotazníka alebo metodiky.',
+    },
+    {
+      pole: 'manualScalesText',
+      hodnota: questionnaireConfig.manualScalesText || '',
+      popis:
+        'Manuálne zadané celkové škály. Príklad: Celková reziliencia = R1 až R25.',
+    },
+    {
+      pole: 'manualSubscalesText',
+      hodnota: questionnaireConfig.manualSubscalesText || '',
+      popis:
+        'Manuálne zadané subškály. Príklad: Mzda = JSS1, JSS10, JSS19, JSS28.',
+    },
+    {
+      pole: 'groupingColumnsText',
+      hodnota: questionnaireConfig.groupingColumnsText || '',
+      popis:
+        'Skupinové premenné pre t-test, ANOVA, Mann-Whitney alebo Kruskal-Wallis.',
     },
   ];
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { deflateSync } from 'zlib';
 
 export const runtime = 'nodejs';
@@ -1584,16 +1585,17 @@ function chartSectionForTable(definition: ExportTableDefinition): ChartSection |
   return exact;
 }
 
-async function loadExcelJs(): Promise<any | null> {
-  try {
-    const moduleName = 'exceljs';
-    const dynamicImport = new Function('moduleName', 'return import(moduleName)') as (moduleName: string) => Promise<any>;
-    const imported = await dynamicImport(moduleName);
-    return imported?.default || imported;
-  } catch (error) {
-    console.warn('[api/analyze-data/export] exceljs nie je dostupný, používam fallback xlsx export bez obrázkov.', error);
-    return null;
-  }
+async function loadExcelJs(): Promise<any> {
+  /*
+   * DÔLEŽITÉ PRE VERCEL:
+   * Nepoužívame dynamický import cez new Function('return import(moduleName)').
+   * Next/Vercel bundler takýto import nevie spoľahlivo vystopovať a exceljs sa nemusí
+   * dostať do serverless buildu. Výsledok bol x-zedpera-excel-charts: fallback.
+   *
+   * Statický import `import ExcelJS from 'exceljs';` hore v súbore zabezpečí,
+   * že exceljs bude súčasťou produkčného serverového bundlu.
+   */
+  return ExcelJS;
 }
 
 function setCellStyle(cell: any, options: { header?: boolean; title?: boolean; subtitle?: boolean; fill?: string } = {}) {
@@ -1812,10 +1814,10 @@ async function buildProfessionalExcelWithRenderedCharts(
   result: unknown,
   preparedDataFile: ExportPayload['preparedDataFile'],
 ): Promise<Buffer | null> {
-  const ExcelJS = await loadExcelJs();
-  if (!ExcelJS) return null;
+  try {
+    const ExcelJSRuntime = await loadExcelJs();
 
-  const workbook = new ExcelJS.Workbook();
+    const workbook = new ExcelJSRuntime.Workbook();
   workbook.creator = 'ZEDPERA';
   workbook.created = new Date();
   workbook.modified = new Date();
@@ -1826,8 +1828,12 @@ async function buildProfessionalExcelWithRenderedCharts(
   definitions.forEach((definition, index) => addProfessionalWorksheetWithChart(workbook, definition, index));
   addStandaloneChartWorksheets(workbook, result);
 
-  const output = await workbook.xlsx.writeBuffer();
-  return Buffer.from(output as ArrayBuffer);
+    const output = await workbook.xlsx.writeBuffer();
+    return Buffer.from(output as ArrayBuffer);
+  } catch (error) {
+    console.error('[api/analyze-data/export] Rendered ExcelJS export zlyhal:', error);
+    return null;
+  }
 }
 
 function chartSectionToHtml(section: ChartSection): string {
@@ -2276,6 +2282,7 @@ export async function POST(request: NextRequest) {
     return binaryDownloadResponse(buffer, EXCEL_MIME_TYPE, fileName, {
       'X-Zedpera-Export': 'data-analysis',
       'X-Zedpera-Excel-Charts': professionalBuffer ? 'rendered' : 'fallback',
+      'X-Zedpera-ExcelJS-Loader': 'static-import',
     });
 
   } catch (error) {

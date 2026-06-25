@@ -5950,30 +5950,7 @@ const downloadExcel = () => {
         Výsledok sa zobrazí v prehľadnom modálnom okne a následne ho bude možné exportovať do Word, PDF alebo Excel.
       </p>
     </div>
-  </div>
-)}
 
-
-    <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
-      <label className="block text-sm font-black text-white">
-        Vlastná metodika / poznámka k škálam
-      </label>
-
-      <p className="mt-1 text-xs font-bold leading-5 text-slate-300">
-        Voliteľne vpíšte krátky popis metodiky, názvy škál alebo poznámku k položkám.
-      </p>
-
-<textarea
-  value={customQuestionnairesText}
-  onChange={(event) => {
-    setQuestionnaireMode('manual');
-    setSelectedQuestionnaires([]);
-    setCustomQuestionnairesText(event.target.value);
-  }}
-  rows={4}
-  placeholder="Príklad: Prosím vypočítať manuálne zadané škály, subškály, reliabilitu, deskriptívnu štatistiku, korelácie a testovanie rozdielov."
-  className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
-/>
 
 <div className="mt-5 rounded-3xl border border-blue-300/20 bg-blue-500/10 p-4">
   <div className="flex items-start gap-3">
@@ -6084,7 +6061,6 @@ uroven_sportu`}
   </div>
 </div>
 
-
     <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
       <button
         type="button"
@@ -6131,12 +6107,8 @@ uroven_sportu`}
         </button>
       ) : null}
     </div>
-
-    <p className="mt-3 text-[11px] font-bold leading-5 text-cyan-100/90">
-      Výsledok sa zobrazí v prehľadnom modálnom okne a následne ho bude možné exportovať do Word, PDF alebo Excel.
-    </p>
   </div>
-
+)}
 
 
 {activeModule === 'planning' && (

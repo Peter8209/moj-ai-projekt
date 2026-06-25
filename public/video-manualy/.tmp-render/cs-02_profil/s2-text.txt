@@ -1,2 +1,0 @@
-Tlačítko Return to Menu vás vrátí zpět do
-hlavního menu aplikace.

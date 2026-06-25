@@ -1,0 +1,79 @@
+1
+00:00:00,000 --> 00:00:06,400
+Benutzerprofil
+Konto, Plan, Kundendaten und Grundeinstellungen.
+
+2
+00:00:06,500 --> 00:00:12,900
+Schritt 1 von 14
+Der obere Bereich zeigt Profilname und Kontozusammenfassung.
+
+3
+00:00:13,000 --> 00:00:19,399
+Schritt 2 von 14
+Return to Menu führt zurück zum Hauptmenü.
+
+4
+00:00:19,500 --> 00:00:25,899
+Schritt 3 von 14
+Refresh Data lädt aktuelle Kundendaten neu.
+
+5
+00:00:26,000 --> 00:00:32,399
+Schritt 4 von 14
+Cancel Subscription beendet die Abo-Verlängerung.
+
+6
+00:00:32,500 --> 00:00:38,899
+Schritt 5 von 14
+Die Karte Client zeigt Name und E-Mail.
+
+7
+00:00:39,000 --> 00:00:45,399
+Schritt 6 von 14
+Die Karte Plan zeigt den aktuellen Plan.
+
+8
+00:00:45,500 --> 00:00:51,899
+Schritt 7 von 14
+Credits zeigt verbleibende Credits.
+
+9
+00:00:52,000 --> 00:00:58,399
+Schritt 8 von 14
+Projects zeigt Projektanzahl und Limit.
+
+10
+00:00:58,500 --> 00:01:04,900
+Schritt 9 von 14
+Client Details enthält Konto, Sprache, Status und Plan.
+
+11
+00:01:05,000 --> 00:01:11,400
+Schritt 10 von 14
+Subscription Management erklärt die Kündigung.
+
+12
+00:01:11,500 --> 00:01:17,900
+Schritt 11 von 14
+Activated Services zeigt verfügbare Dienste.
+
+13
+00:01:18,000 --> 00:01:24,400
+Schritt 12 von 14
+Enabled Features zeigt aktivierte Funktionen.
+
+14
+00:01:24,500 --> 00:01:30,900
+Schritt 13 von 14
+Subscription & Access enthält Zugriffsdaten.
+
+15
+00:01:31,000 --> 00:01:37,400
+Schritt 14 von 14
+Untere Karten fassen Kontakt, Rolle und Aktualisierung zusammen.
+
+16
+00:01:37,500 --> 00:01:43,900
+Modul erklärt
+Der Benutzer weiß, wo das Modul zu finden ist, welche Bereiche wichtig sind und wie er weiterarbeitet.

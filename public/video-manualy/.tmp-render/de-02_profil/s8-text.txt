@@ -1,2 +1,0 @@
-Die Karte Projects zeigt Anzahl der Projekte
-und verfügbares Limit.

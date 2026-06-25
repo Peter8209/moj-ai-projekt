@@ -1,0 +1,2 @@
+Sekce Attachments umožňuje nahrát PDF,
+DOCX, Excel, CSV, PPT nebo obrázky.

@@ -1,0 +1,54 @@
+1
+00:00:00,000 --> 00:00:06,400
+Munkáim
+Mentett munkák kezelése, aktív projektek választása és írás folytatása.
+
+2
+00:00:06,500 --> 00:00:12,900
+Lépés 1 / 9
+A Menu visszavisz a főmenübe.
+
+3
+00:00:13,000 --> 00:00:19,399
+Lépés 2 / 9
+A Create Empty Profile üres munkaprofilt hoz létre.
+
+4
+00:00:19,500 --> 00:00:25,899
+Lépés 3 / 9
+A New Work megnyitja az új munka varázslót.
+
+5
+00:00:26,000 --> 00:00:32,399
+Lépés 4 / 9
+A keresés cím, terület vagy témavezető szerint szűr.
+
+6
+00:00:32,500 --> 00:00:38,899
+Lépés 5 / 9
+A projektkártya típust, címet, dátumot és gombokat tartalmaz.
+
+7
+00:00:39,000 --> 00:00:45,399
+Lépés 6 / 9
+További kártyák mentett vagy félkész munkákat mutatnak.
+
+8
+00:00:45,500 --> 00:00:51,899
+Lépés 7 / 9
+A kitöltött kártya címet, területet és témavezetőt mutat.
+
+9
+00:00:52,000 --> 00:00:58,399
+Lépés 8 / 9
+A Select for Generation aktív profilnak választja a munkát.
+
+10
+00:00:58,500 --> 00:01:04,900
+Lépés 9 / 9
+A Continue Work, Open és Edit folytatást, megnyitást és szerkesztést jelent.
+
+11
+00:01:05,000 --> 00:01:11,400
+A modul bemutatva
+A felhasználó tudja, hol találja a modult, mely részeket használja és hogyan folytassa a munkát.

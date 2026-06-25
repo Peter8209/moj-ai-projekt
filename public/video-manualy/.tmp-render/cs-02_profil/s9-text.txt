@@ -1,3 +1,0 @@
-Sekce Client Details obsahuje podrobné
-údaje: jméno, email, roli, jazyk, stav účtu
-a plán.

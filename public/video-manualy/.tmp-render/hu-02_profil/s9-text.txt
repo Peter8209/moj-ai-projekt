@@ -1,3 +1,0 @@
-A Client Details szekció részletes adatokat
-tartalmaz: név, email, szerep, nyelv,
-fiókállapot és csomag.

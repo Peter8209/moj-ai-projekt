@@ -1,0 +1,3 @@
+Horní tlačítka umožňují návrat do
+menu, prázdný profil, uložení nebo
+zavření.

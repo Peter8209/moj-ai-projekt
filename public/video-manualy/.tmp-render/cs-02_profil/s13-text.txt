@@ -1,3 +1,0 @@
-Subscription & Access obsahuje data
-předplatného, vytvoření účtu, úprav a
-posledního přihlášení.

@@ -1,2 +1,0 @@
-The Client card shows the client name and
-account email.

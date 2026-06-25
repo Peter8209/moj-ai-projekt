@@ -1,0 +1,2 @@
+Profil: Konto, plan, informacje
+klienta i podstawowe ustawienia.

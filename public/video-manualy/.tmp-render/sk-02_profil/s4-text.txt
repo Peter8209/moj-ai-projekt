@@ -1,3 +1,0 @@
-Tlačidlo Cancel Subscription slúži na
-zrušenie predplatného a vypnutie
-automatického obnovenia.

@@ -1,2 +1,0 @@
-Sekcja Client Details zawiera dane: imię,
-email, rolę, język, status konta i plan.

@@ -1,2 +1,0 @@
-Die Schaltfläche Return to Menu führt zurück
-zum Hauptmenü der Anwendung.

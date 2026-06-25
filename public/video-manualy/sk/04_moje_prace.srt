@@ -1,0 +1,54 @@
+1
+00:00:00,000 --> 00:00:06,400
+Moje práce
+Správa uložených prác, výber aktívnych projektov a pokračovanie v písaní.
+
+2
+00:00:06,500 --> 00:00:12,900
+Krok 1 z 9
+Menu vráti používateľa do hlavného menu.
+
+3
+00:00:13,000 --> 00:00:19,399
+Krok 2 z 9
+Create Empty Profile vytvorí prázdny profil práce bez šablóny.
+
+4
+00:00:19,500 --> 00:00:25,899
+Krok 3 z 9
+New Work otvorí sprievodcu vytvorením novej práce.
+
+5
+00:00:26,000 --> 00:00:32,399
+Krok 4 z 9
+Vyhľadávanie filtruje práce podľa názvu, odboru alebo školiteľa.
+
+6
+00:00:32,500 --> 00:00:38,899
+Krok 5 z 9
+Projektová karta obsahuje typ práce, názov, dátum a akčné tlačidlá.
+
+7
+00:00:39,000 --> 00:00:45,399
+Krok 6 z 9
+Ďalšie karty predstavujú uložené alebo rozpracované práce.
+
+8
+00:00:45,500 --> 00:00:51,899
+Krok 7 z 9
+Karta s vyplnenými údajmi ukazuje názov, odbor a školiteľa.
+
+9
+00:00:52,000 --> 00:00:58,399
+Krok 8 z 9
+Select for Generation zvolí prácu ako aktívny profil pre generovanie.
+
+10
+00:00:58,500 --> 00:01:04,900
+Krok 9 z 9
+Continue Work, Open a Edit slúžia na pokračovanie, otvorenie a úpravu práce.
+
+11
+00:01:05,000 --> 00:01:11,400
+Modul je vysvetlený
+Používateľ vie, kde modul nájde, ktoré časti ovláda a ako pokračuje v práci.

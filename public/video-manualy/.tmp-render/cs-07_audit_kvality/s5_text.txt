@@ -1,0 +1,2 @@
+Velké vstupní pole je místo pro text,
+zadání, otázku nebo data.

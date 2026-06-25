@@ -4074,43 +4074,67 @@ prepareFormData.append(
 
   const columns = getDashboardColumnNames(cleanRows);
 
-  const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
+  const hasManualScales =
+  Boolean(manualScalesText.trim()) ||
+  Boolean(manualSubscalesText.trim());
+
+const hasGroupingColumns = Boolean(groupingColumnsText.trim());
+
+const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
   alpha: 0.05,
   language: workLanguage,
   profile: profileForApi || {},
   assignment: userText || '',
   source: 'prepared-raw-data',
   sheetName: 'DATA_CLEAN',
-  includeItemDescriptives: true,
+
+  // Vždy počítať základné výstupy z DATA_CLEAN
   includeFrequencies: true,
+  includeItemDescriptives: true,
+  includeNormality: true,
+  includeCorrelations: true,
+  includeRecommendedCorrelations: true,
 
-  // Dôležité:
-  // Automatické rozpoznanie manuálnych škál sa nesmie spúšťať bez výberu používateľa.
-  autoDetectScales:
-    questionnaireConfig.mode === 'selected' ||
-    questionnaireConfig.mode === 'manual',
+  // Škály, subškály a reliabilita sa počítajú len vtedy,
+  // keď používateľ zadá škály alebo subškály.
+  includeScaleScores: hasManualScales,
+  includeScaleDescriptives: hasManualScales,
+  includeReliability: hasManualScales,
 
-  fallbackToNumericVariables: questionnaireConfig.mode !== 'manual',
+  // Testy skupín sa počítajú len vtedy,
+  // keď používateľ zadá skupinové premenné.
+  includeGroupTests: hasGroupingColumns,
+  includeParametricTests: hasGroupingColumns,
+  includeNonParametricTests: hasGroupingColumns,
+  includeRecommendedGroupTests: hasGroupingColumns,
 
-questionnaireConfig,
-selectedQuestionnaires: questionnaireConfig.selectedQuestionnaires,
-customQuestionnaires: [],
+  // Toto musí byť TRUE, inak sa pri manuálnom režime
+  // nepoužijú numerické premenné z prepared raw data.
+  fallbackToNumericVariables: true,
 
-manualScalesText,
-manualSubscalesText,
-groupingColumnsText,
+  // Manuálne škály sa rozpoznávajú iba vtedy,
+  // keď sú naozaj zadané.
+  autoDetectScales: hasManualScales,
 
-manualAnalysisConfig: {
-  questionnaireMode,
-  selectedQuestionnaires,
-  customQuestionnairesText,
+  questionnaireConfig,
+  selectedQuestionnaires: questionnaireConfig.selectedQuestionnaires,
+  customQuestionnaires: [],
+
   manualScalesText,
   manualSubscalesText,
   groupingColumnsText,
-},
 
-strictQuestionnaireMode: true,
-allowUnconfirmedStandardizedQuestionnaires: false,
+  manualAnalysisConfig: {
+    questionnaireMode,
+    selectedQuestionnaires,
+    customQuestionnairesText,
+    manualScalesText,
+    manualSubscalesText,
+    groupingColumnsText,
+  },
+
+  strictQuestionnaireMode: true,
+  allowUnconfirmedStandardizedQuestionnaires: false,
 } as any);
 
   const normalized = {

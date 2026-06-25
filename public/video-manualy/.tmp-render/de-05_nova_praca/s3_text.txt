@@ -1,0 +1,3 @@
+Obere Schaltflächen führen zum Menü,
+leerem Profil, Speichern oder
+Schließen.

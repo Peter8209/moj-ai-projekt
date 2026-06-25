@@ -1,3 +1,0 @@
-The Client Details section contains detailed
-data: name, email, role, language, account
-status and plan.

@@ -1,0 +1,2 @@
+Hlavní tlačítko spustí zpracování
+vybraného modulu.

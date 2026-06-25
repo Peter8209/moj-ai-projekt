@@ -1,0 +1,44 @@
+1
+00:00:00,000 --> 00:00:06,400
+AI Chat
+Akadémiai szöveg írása, szerkesztése és generálása AI chattel.
+
+2
+00:00:06,500 --> 00:00:12,900
+Lépés 1 / 7
+A Menu gomb megnyitja a főmenüt.
+
+3
+00:00:13,000 --> 00:00:19,399
+Lépés 2 / 7
+A New Chat új beszélgetést indít.
+
+4
+00:00:19,500 --> 00:00:25,899
+Lépés 3 / 7
+Az Active Profile mutatja a kiválasztott munkát.
+
+5
+00:00:26,000 --> 00:00:32,399
+Lépés 4 / 7
+A gyors kártyák segítenek bevezető, absztrakt, vázlat, fejezet, hivatkozás vagy átírás indításában.
+
+6
+00:00:32,500 --> 00:00:38,899
+Lépés 5 / 7
+A modellfülek Gemini, OpenAI, Claude, Mistral vagy Grok választását adják.
+
+7
+00:00:39,000 --> 00:00:45,399
+Lépés 6 / 7
+Az üzenetmezőbe kérdés, fejezet vagy utasítás kerül.
+
+8
+00:00:45,500 --> 00:00:51,899
+Lépés 7 / 7
+A küldés ikon elindítja a választ.
+
+9
+00:00:52,000 --> 00:00:58,399
+A modul bemutatva
+A felhasználó tudja, hol találja a modult, mely részeket használja és hogyan folytassa a munkát.

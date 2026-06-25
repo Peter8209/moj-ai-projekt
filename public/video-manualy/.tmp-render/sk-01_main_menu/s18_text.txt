@@ -1,0 +1,3 @@
+Nastavenia: Prepínanie vzhľadu
+aplikácie podľa preferencie
+používateľa.

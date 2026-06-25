@@ -1,0 +1,3 @@
+Górne przyciski pozwalają wrócić do
+menu, utworzyć pusty profil, zapisać
+lub zamknąć.

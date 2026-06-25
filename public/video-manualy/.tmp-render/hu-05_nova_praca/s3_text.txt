@@ -1,0 +1,2 @@
+A felső gombok menüt, üres profilt,
+mentést vagy bezárást adnak.

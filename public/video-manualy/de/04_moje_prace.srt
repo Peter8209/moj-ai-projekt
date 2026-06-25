@@ -1,0 +1,54 @@
+1
+00:00:00,000 --> 00:00:06,400
+Meine Arbeiten
+Gespeicherte Arbeiten verwalten, aktive Projekte wählen und weiterschreiben.
+
+2
+00:00:06,500 --> 00:00:12,900
+Schritt 1 von 9
+Menu führt zum Hauptmenü zurück.
+
+3
+00:00:13,000 --> 00:00:19,399
+Schritt 2 von 9
+Create Empty Profile erstellt ein leeres Arbeitsprofil.
+
+4
+00:00:19,500 --> 00:00:25,899
+Schritt 3 von 9
+New Work öffnet den Assistenten für eine neue Arbeit.
+
+5
+00:00:26,000 --> 00:00:32,399
+Schritt 4 von 9
+Die Suche filtert nach Titel, Fach oder Betreuer.
+
+6
+00:00:32,500 --> 00:00:38,899
+Schritt 5 von 9
+Eine Projektkarte enthält Typ, Titel, Datum und Aktionen.
+
+7
+00:00:39,000 --> 00:00:45,399
+Schritt 6 von 9
+Weitere Karten zeigen gespeicherte oder begonnene Arbeiten.
+
+8
+00:00:45,500 --> 00:00:51,899
+Schritt 7 von 9
+Eine ausgefüllte Karte zeigt Titel, Fach und Betreuer.
+
+9
+00:00:52,000 --> 00:00:58,399
+Schritt 8 von 9
+Select for Generation wählt die Arbeit als aktives Profil.
+
+10
+00:00:58,500 --> 00:01:04,900
+Schritt 9 von 9
+Continue Work, Open und Edit dienen zum Fortsetzen, Öffnen und Bearbeiten.
+
+11
+00:01:05,000 --> 00:01:11,400
+Modul erklärt
+Der Benutzer weiß, wo das Modul zu finden ist, welche Bereiche wichtig sind und wie er weiterarbeitet.

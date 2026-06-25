@@ -1,0 +1,3 @@
+Ustawienia: Przełączanie wyglądu
+aplikacji według preferencji
+użytkownika.

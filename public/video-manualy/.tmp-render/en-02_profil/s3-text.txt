@@ -1,3 +1,0 @@
-The Refresh Data button reloads client
-details, plan, credits, projects and access
-information.

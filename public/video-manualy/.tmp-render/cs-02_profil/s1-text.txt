@@ -1,4 +1,0 @@
-V horní části je nadpis Client Account and
-Services. Tato stránka zobrazuje účet,
-balíček, stav služby, kredity, projekty a
-data přístupu.

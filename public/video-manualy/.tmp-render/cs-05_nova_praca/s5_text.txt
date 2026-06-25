@@ -1,0 +1,2 @@
+Uživatel si vybere šablonu práce z
+nabídky typů.

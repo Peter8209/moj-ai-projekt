@@ -1,0 +1,2 @@
+Levé menu umožňuje přepínat hlavní
+části aplikace.

@@ -1,0 +1,3 @@
+Der Benutzer weiß, wo das Modul zu
+finden ist, welche Bereiche wichtig
+sind und wie er weiterarbeitet.

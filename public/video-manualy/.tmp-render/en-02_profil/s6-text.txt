@@ -1,2 +1,0 @@
-The Plan card shows the current plan and
-account status.

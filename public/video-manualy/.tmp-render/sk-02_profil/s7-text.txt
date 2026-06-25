@@ -1,2 +1,0 @@
-Karta Credits ukazuje zostávajúce kredity a
-ich použitie.

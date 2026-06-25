@@ -1,0 +1,2 @@
+The left panel shows five steps of the
+work profile wizard.

@@ -1,3 +1,0 @@
-A Refresh Data gomb frissíti az
-ügyféladatokat, csomagot, krediteket,
-projekteket és hozzáférési információkat.

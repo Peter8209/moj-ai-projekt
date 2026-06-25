@@ -1,0 +1,2 @@
+Přepínač modulů nahoře určuje aktivní
+nástroj.

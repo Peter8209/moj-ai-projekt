@@ -1,3 +1,0 @@
-Refresh Data lädt Kundendaten, Plan,
-Credits, Projekte und Zugriffsinformationen
-neu.

@@ -1,2 +1,0 @@
-Karta Client zobrazuje meno klienta a email
-účtu.

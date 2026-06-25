@@ -1,2 +1,0 @@
-The Return to Menu button takes you back to
-the main application menu.

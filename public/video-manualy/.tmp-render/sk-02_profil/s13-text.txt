@@ -1,3 +1,0 @@
-Subscription & Access obsahuje dátumy
-predplatného, vytvorenia účtu, úprav a
-posledného prihlásenia.

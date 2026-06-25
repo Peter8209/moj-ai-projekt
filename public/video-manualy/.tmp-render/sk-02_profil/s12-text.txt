@@ -1,2 +1,0 @@
-Enabled Features zobrazuje funkcie povolené
-pre tento účet.

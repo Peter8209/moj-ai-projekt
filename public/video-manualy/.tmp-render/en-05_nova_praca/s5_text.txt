@@ -1,0 +1,2 @@
+The user selects a work template from
+the type grid.

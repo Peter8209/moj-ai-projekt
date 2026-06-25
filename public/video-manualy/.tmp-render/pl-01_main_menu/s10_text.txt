@@ -1,0 +1,3 @@
+Badania: Przetwarzanie tabel,
+kwestionariuszy, wykresów i wyników
+statystycznych.

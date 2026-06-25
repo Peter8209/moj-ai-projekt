@@ -1,3 +1,0 @@
-Przycisk Refresh Data odświeża dane klienta,
-plan, kredyty, projekty i informacje o
-dostępie.

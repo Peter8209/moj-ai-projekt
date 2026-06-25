@@ -1,3 +1,0 @@
-Cancel Subscription dient zur Kündigung des
-Abonnements und deaktiviert die automatische
-Verlängerung.

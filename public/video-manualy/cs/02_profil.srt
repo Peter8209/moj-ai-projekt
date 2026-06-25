@@ -1,0 +1,79 @@
+1
+00:00:00,000 --> 00:00:06,400
+Uživatelský profil
+Účet, plán, informace klienta a základní nastavení.
+
+2
+00:00:06,500 --> 00:00:12,900
+Krok 1 z 14
+Horní panel zobrazuje název profilu a základní popis účtu.
+
+3
+00:00:13,000 --> 00:00:19,399
+Krok 2 z 14
+Return to Menu slouží k návratu do hlavního menu.
+
+4
+00:00:19,500 --> 00:00:25,899
+Krok 3 z 14
+Refresh Data obnoví aktuální údaje klienta.
+
+5
+00:00:26,000 --> 00:00:32,399
+Krok 4 z 14
+Cancel Subscription zruší automatické obnovení předplatného.
+
+6
+00:00:32,500 --> 00:00:38,899
+Krok 5 z 14
+Karta Client ukazuje jméno a email.
+
+7
+00:00:39,000 --> 00:00:45,399
+Krok 6 z 14
+Karta Plan ukazuje aktuální plán.
+
+8
+00:00:45,500 --> 00:00:51,899
+Krok 7 z 14
+Karta Credits ukazuje zůstatek kreditů.
+
+9
+00:00:52,000 --> 00:00:58,399
+Krok 8 z 14
+Karta Projects ukazuje počet projektů a limit.
+
+10
+00:00:58,500 --> 00:01:04,900
+Krok 9 z 14
+Client Details obsahuje údaje účtu, jazyk, stav a plán.
+
+11
+00:01:05,000 --> 00:01:11,400
+Krok 10 z 14
+Subscription Management vysvětluje zrušení předplatného.
+
+12
+00:01:11,500 --> 00:01:17,900
+Krok 11 z 14
+Activated Services ukazuje dostupné služby.
+
+13
+00:01:18,000 --> 00:01:24,400
+Krok 12 z 14
+Enabled Features ukazuje povolené funkce.
+
+14
+00:01:24,500 --> 00:01:30,900
+Krok 13 z 14
+Subscription & Access obsahuje data přístupu.
+
+15
+00:01:31,000 --> 00:01:37,400
+Krok 14 z 14
+Spodní karty shrnují kontakt, roli a poslední aktualizaci.
+
+16
+00:01:37,500 --> 00:01:43,900
+Modul je vysvětlen
+Uživatel ví, kde modul najde, které části ovládá a jak pokračuje v práci.

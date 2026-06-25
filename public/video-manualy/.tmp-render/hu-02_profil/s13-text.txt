@@ -1,3 +1,0 @@
-A Subscription & Access előfizetési
-dátumokat, fióklétrehozást, módosítást és
-utolsó bejelentkezést tartalmaz.

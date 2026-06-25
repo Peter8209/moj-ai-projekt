@@ -1,0 +1,2 @@
+Navigácia cez aplikáciu, dashboard,
+menu a hlavné systémové sekcie.

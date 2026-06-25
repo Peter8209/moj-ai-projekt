@@ -1,3 +1,0 @@
-A Cancel Subscription gomb az előfizetés
-lemondására és az automatikus megújítás
-kikapcsolására szolgál.

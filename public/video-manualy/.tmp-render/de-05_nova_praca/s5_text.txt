@@ -1,0 +1,2 @@
+Der Benutzer wählt eine Vorlage aus
+dem Raster.

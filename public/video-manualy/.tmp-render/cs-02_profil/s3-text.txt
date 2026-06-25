@@ -1,3 +1,0 @@
-Tlačítko Refresh Data obnoví údaje klienta,
-plán, kredity, projekty a přístupové
-informace.

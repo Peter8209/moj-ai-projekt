@@ -1,2 +1,0 @@
-Client Details enthält Name, E-Mail, Rolle,
-Sprache, Kontostatus und Plan.

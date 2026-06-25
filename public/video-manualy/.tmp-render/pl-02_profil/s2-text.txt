@@ -1,2 +1,0 @@
-Przycisk Return to Menu przenosi z powrotem
-do głównego menu aplikacji.

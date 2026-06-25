@@ -1,0 +1,3 @@
+Top buttons allow returning to menu,
+creating an empty profile, saving or
+closing.

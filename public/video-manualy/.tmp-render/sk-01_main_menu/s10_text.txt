@@ -1,0 +1,3 @@
+Výskum: Spracovanie tabuliek,
+dotazníkov, grafov a štatistických
+výsledkov.

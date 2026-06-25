@@ -1,0 +1,2 @@
+Jazykový prepínač nastavuje jazyk
+budúcej práce.

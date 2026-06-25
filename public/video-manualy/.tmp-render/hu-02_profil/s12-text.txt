@@ -1,2 +1,0 @@
-Az Enabled Features a fiókhoz engedélyezett
-funkciókat mutatja.

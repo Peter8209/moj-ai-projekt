@@ -1,2 +1,0 @@
-A Plan kártya az aktuális csomagot és fióká
-állapotát mutatja.

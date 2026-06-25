@@ -1,2 +1,0 @@
-Die Karte Plan zeigt den aktuellen Plan und
-Kontostatus.

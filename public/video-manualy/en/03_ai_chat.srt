@@ -1,0 +1,44 @@
+1
+00:00:00,000 --> 00:00:06,400
+AI Chat
+Write, edit and generate academic text with AI chat.
+
+2
+00:00:06,500 --> 00:00:12,900
+Step 1 of 7
+The Menu button opens the main application menu.
+
+3
+00:00:13,000 --> 00:00:19,399
+Step 2 of 7
+New Chat starts a new independent conversation.
+
+4
+00:00:19,500 --> 00:00:25,899
+Step 3 of 7
+Active Profile shows which work is currently selected.
+
+5
+00:00:26,000 --> 00:00:32,399
+Step 4 of 7
+Quick cards help start an introduction, abstract, outline, chapter, citations or academic rewrite.
+
+6
+00:00:32,500 --> 00:00:38,899
+Step 5 of 7
+Model tabs let the user choose Gemini, OpenAI, Claude, Mistral or Grok.
+
+7
+00:00:39,000 --> 00:00:45,399
+Step 6 of 7
+The message box accepts the question, chapter or AI instruction.
+
+8
+00:00:45,500 --> 00:00:51,899
+Step 7 of 7
+The send icon starts the answer with the selected model.
+
+9
+00:00:52,000 --> 00:00:58,399
+Module explained
+The user knows where to find the module, which parts to use and how to continue working.

@@ -1,0 +1,3 @@
+AI nástroje: Preklad akademického
+textu podľa zdrojového a cieľového
+jazyka.

@@ -1,2 +1,0 @@
-Karta Client pokazuje nazwę klienta i email
-konta.

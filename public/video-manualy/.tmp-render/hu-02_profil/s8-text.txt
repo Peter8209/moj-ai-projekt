@@ -1,2 +1,0 @@
-A Projects kártya a projektek számát és a
-limitet mutatja.

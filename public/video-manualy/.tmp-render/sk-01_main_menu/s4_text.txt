@@ -1,0 +1,3 @@
+Práce: Správa uložených prác, výber
+aktívnych projektov a pokračovanie v
+písaní.

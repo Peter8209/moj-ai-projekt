@@ -457,22 +457,31 @@ function flattenFrequencies(result: unknown): AnyRecord[] {
   return rows;
 }
 
-function flattenDescriptiveRows(result: unknown): AnyRecord[] {
+function flattenDescriptiveRows(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
   const candidates = [
     ...asRecords(getNestedValue(result, ['descriptiveStatistics'])),
+    ...asRecords(getNestedValue(result, ['descriptives'])),
+    ...asRecords(getNestedValue(result, ['itemDescriptives'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'descriptiveStatistics'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'descriptives'])),
     ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'itemDescriptives'])),
     ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'scaleDescriptives'])),
     ...asRecords(getNestedValue(result, ['scaleDescriptives'])),
   ];
 
-  return candidates.map((item) => ({
-    premenna: item.variable ?? item.name ?? '',
+  const directRows = candidates.map((item) => ({
+    zdroj: item.source ?? item.zdroj ?? 'analysis-result',
+    typ: item.type ?? item.typ ?? '',
+    premenna: item.variable ?? item.name ?? item.nazov ?? '',
     valid: item.valid ?? item.n ?? '',
     missing: item.missing ?? '',
-    mean: item.mean ?? '',
+    mean: item.mean ?? item.priemer ?? '',
     median: item.median ?? '',
     mode: item.mode ?? '',
-    standard_deviation: item.standardDeviation ?? item.sd ?? '',
+    standard_deviation: item.standardDeviation ?? item.sd ?? item.standard_deviation ?? '',
     variance: item.variance ?? '',
     skewness: item.skewness ?? '',
     kurtosis: item.kurtosis ?? '',
@@ -482,10 +491,24 @@ function flattenDescriptiveRows(result: unknown): AnyRecord[] {
     q1: item.q1 ?? '',
     q3: item.q3 ?? '',
     iqr: item.iqr ?? '',
+    poznamka: item.note ?? item.poznamka ?? '',
   }));
+
+  const computedRows = buildComputedScaleRowsFromRawData(
+    result,
+    preparedDataFile,
+  ).descriptiveRows;
+
+  return deduplicateRowsByKey(
+    [...directRows, ...computedRows],
+    (row) => `${normalizeReliabilityItemName(row.premenna)}|${normalizeReliabilityItemName(row.typ)}|${normalizeReliabilityItemName(row.zdroj)}`,
+  );
 }
 
-function flattenScaleRows(result: unknown): AnyRecord[] {
+function flattenScaleRows(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
   const scaleDefinitions = asRecords(
     getNestedValue(result, ['scaleDefinitions']),
   );
@@ -515,10 +538,14 @@ function flattenScaleRows(result: unknown): AnyRecord[] {
     getNestedValue(result, ['statisticalAnalysis', 'scaleDescriptives']),
   );
 
-  const allScaleDefinitions = [
-    ...scaleDefinitions,
-    ...statisticalScaleDefinitions,
-  ];
+  const allScaleDefinitions = deduplicateRowsByKey(
+    [
+      ...scaleDefinitions,
+      ...statisticalScaleDefinitions,
+      ...getReliabilityDefinitions(result),
+    ],
+    (item) => `${normalizeReliabilityItemName(item.id)}|${normalizeReliabilityItemName(item.name ?? item.scaleName ?? item.label ?? item.title)}|${parseReliabilityItems(getItemsValueFromDefinition(item)).map(normalizeReliabilityItemName).join('|')}`,
+  );
 
   const allCombinedScaleDefinitions = [
     ...combinedScaleDefinitions,
@@ -535,65 +562,99 @@ function flattenScaleRows(result: unknown): AnyRecord[] {
     ...statisticalScaleDescriptives,
   ];
 
-  const definitionRows = allScaleDefinitions.map((item) => ({
-    typ: 'škála',
-    id: item.id ?? '',
-    nazov: item.name ?? '',
-    polozky: Array.isArray(item.items) ? item.items.join(', ') : '',
-    reverzne_polozky: Array.isArray(item.reverseItems)
-      ? item.reverseItems.join(', ')
-      : '',
-    minimum: item.minValue ?? '',
-    maximum: item.maxValue ?? '',
-    skoring: item.scoring ?? '',
-    popis: item.description ?? '',
-  }));
+  const definitionRows = allScaleDefinitions.map((item, index) => {
+    const items = parseReliabilityItems(getItemsValueFromDefinition(item));
+    const reverseItems = parseReliabilityItems(
+      item.reverseItems ??
+        item.reverseItemsText ??
+        item.reverseColumns ??
+        item.reverzne_polozky,
+    );
+    const source = String(item.source ?? item.type ?? item.typ ?? 'scale-definition');
+
+    return {
+      typ: source.toLowerCase().includes('subscale') || source.toLowerCase().includes('subškála')
+        ? 'subškála'
+        : 'škála',
+      id: item.id ?? `scale-definition-${index + 1}`,
+      nazov: item.name ?? item.scaleName ?? item.label ?? item.title ?? item.id ?? `Škála ${index + 1}`,
+      polozky: items.join(', '),
+      reverzne_polozky: reverseItems.join(', '),
+      minimum: item.minValue ?? item.min ?? '',
+      maximum: item.maxValue ?? item.max ?? '',
+      skoring: item.scoring ?? item.scoreType ?? 'mean',
+      zdroj: source,
+      popis: item.description ?? item.popis ?? '',
+    };
+  });
 
   const combinedRows = allCombinedScaleDefinitions.map((item) => ({
     typ: 'kombinovaná škála / subškála',
     id: item.id ?? '',
-    nazov: item.name ?? '',
-    polozky: Array.isArray(item.scaleIds) ? item.scaleIds.join(', ') : '',
+    nazov: item.name ?? item.scaleName ?? item.label ?? '',
+    polozky: Array.isArray(item.scaleIds) ? item.scaleIds.join(', ') : stringifyValue(item.scaleIds ?? item.items ?? ''),
     reverzne_polozky: '',
     minimum: '',
     maximum: '',
-    skoring: item.scoring ?? '',
+    skoring: item.scoring ?? item.scoreType ?? '',
+    zdroj: item.source ?? 'combinedScaleDefinitions',
     popis: item.description ?? '',
   }));
 
   const scoreRows = allScaleScores.map((item) => ({
     typ: 'vypočítané skóre',
-    id: item.scaleId ?? '',
-    nazov: item.scaleName ?? '',
-    polozky: Array.isArray(item.itemsUsed) ? item.itemsUsed.join(', ') : '',
+    id: item.scaleId ?? item.id ?? '',
+    nazov: item.scaleName ?? item.name ?? item.variable ?? '',
+    polozky: Array.isArray(item.itemsUsed) ? item.itemsUsed.join(', ') : stringifyValue(item.itemsUsed ?? item.items ?? ''),
     reverzne_polozky: '',
     minimum: '',
     maximum: '',
-    skoring: item.scoring ?? '',
-    pocet_chybajucich_riadkov: item.missingRows ?? '',
-    popis: '',
-  }));
-
-  const descriptiveRows = allScaleDescriptives.map((item) => ({
-    typ: 'deskriptívna štatistika škály',
-    id: '',
-    nazov: item.variable ?? '',
+    skoring: item.scoring ?? item.scoreType ?? '',
     valid: item.valid ?? item.n ?? '',
     missing: item.missing ?? '',
     mean: item.mean ?? '',
     median: item.median ?? '',
-    sd: item.standardDeviation ?? '',
+    sd: item.standardDeviation ?? item.sd ?? '',
     min: item.minimum ?? item.min ?? '',
     max: item.maximum ?? item.max ?? '',
-    popis: '',
+    pocet_chybajucich_riadkov: item.missingRows ?? '',
+    zdroj: item.source ?? 'scaleScores',
+    popis: item.note ?? '',
   }));
 
-  return [
-    ...definitionRows,
-    ...combinedRows,
-    ...scoreRows,
-    ...descriptiveRows,
-  ];
+  const descriptiveRows = allScaleDescriptives.map((item) => ({
+    typ: 'deskriptívna štatistika škály',
+    id: item.scaleId ?? '',
+    nazov: item.variable ?? item.name ?? item.scaleName ?? '',
+    valid: item.valid ?? item.n ?? '',
+    missing: item.missing ?? '',
+    mean: item.mean ?? '',
+    median: item.median ?? '',
+    sd: item.standardDeviation ?? item.sd ?? '',
+    min: item.minimum ?? item.min ?? '',
+    max: item.maximum ?? item.max ?? '',
+    zdroj: item.source ?? 'scaleDescriptives',
+    popis: item.note ?? '',
+  }));
+
+  const computedRows = buildComputedScaleRowsFromRawData(
+    result,
+    preparedDataFile,
+  ).scaleRows;
+
+  return deduplicateRowsByKey(
+    [
+      ...definitionRows,
+      ...combinedRows,
+      ...scoreRows,
+      ...descriptiveRows,
+      ...computedRows,
+    ],
+    (row) => {
+      const record = row as AnyRecord;
+      return `${normalizeReliabilityItemName(record.typ)}|${normalizeReliabilityItemName(record.id)}|${normalizeReliabilityItemName(record.nazov)}|${normalizeReliabilityItemName(record.polozky)}|${normalizeReliabilityItemName(record.zdroj)}`;
+    },
+  );
 }
 
 function flattenNormalityRows(result: unknown): AnyRecord[] {
@@ -614,20 +675,783 @@ function flattenNormalityRows(result: unknown): AnyRecord[] {
   }));
 }
 
-function flattenReliabilityRows(result: unknown): AnyRecord[] {
-  const rows = [
-    ...asRecords(getNestedValue(result, ['reliability'])),
-    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'reliability'])),
+function normalizeReliabilityItemName(value: unknown): string {
+  return stripDiacritics(String(value ?? ''))
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[_\-–—]+/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function findMatchingColumnName(headers: string[], itemName: string): string | null {
+  const item = String(itemName || '').trim();
+
+  if (!item) return null;
+
+  const exact = headers.find((header) => header === item);
+  if (exact) return exact;
+
+  const normalizedItem = normalizeReliabilityItemName(item);
+
+  return headers.find((header) => normalizeReliabilityItemName(header) === normalizedItem) || null;
+}
+
+function parseRangePart(value: string): string[] {
+  const text = String(value || '').trim();
+
+  if (!text) return [];
+
+  const rangeMatch = text.match(/^(.*?)\s*(?:až|az|do|to|-|–|—)\s*(.*?)$/i);
+
+  if (!rangeMatch) {
+    return [text];
+  }
+
+  const left = rangeMatch[1].trim();
+  const right = rangeMatch[2].trim();
+  const leftMatch = left.match(/^(.*?)(\d+)$/);
+  const rightMatch = right.match(/^(.*?)(\d+)$/);
+
+  if (!leftMatch || !rightMatch) {
+    return [text];
+  }
+
+  const leftPrefix = leftMatch[1].trim();
+  const rightPrefix = rightMatch[1].trim() || leftPrefix;
+  const start = Number(leftMatch[2]);
+  const end = Number(rightMatch[2]);
+
+  if (
+    !Number.isFinite(start) ||
+    !Number.isFinite(end) ||
+    start > end ||
+    normalizeReliabilityItemName(leftPrefix) !== normalizeReliabilityItemName(rightPrefix)
+  ) {
+    return [text];
+  }
+
+  return Array.from({ length: end - start + 1 }, (_, index) => `${leftPrefix}${start + index}`);
+}
+
+function parseReliabilityItems(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((item) => parseReliabilityItems(item))
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  const text = String(value ?? '').trim();
+
+  if (!text) return [];
+
+  return text
+    .replace(/\r/g, '\n')
+    .split(/[,;\n]+/)
+    .flatMap((part) => parseRangePart(part))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function splitManualDefinitionLines(text: unknown): string[] {
+  const normalized = String(text ?? '')
+    .replace(/\r/g, '\n')
+    .replace(/[•·]/g, '\n')
+    .trim();
+
+  if (!normalized) return [];
+
+  const lines = normalized
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const expanded: string[] = [];
+
+  lines.forEach((line) => {
+    const semicolonParts = line.split(/;+/).map((part) => part.trim()).filter(Boolean);
+    const looksLikeMultipleDefinitions = semicolonParts.filter((part) => /^[^:=]{1,90}\s*[:=]/.test(part)).length > 1;
+
+    if (looksLikeMultipleDefinitions) {
+      expanded.push(...semicolonParts);
+    } else {
+      expanded.push(line);
+    }
+  });
+
+  return expanded;
+}
+
+function parseManualScaleTextToDefinitions(text: unknown, type: 'manual-scale' | 'manual-subscale'): AnyRecord[] {
+  return splitManualDefinitionLines(text)
+    .map((line, index) => {
+      const separatorMatch = line.match(/^([^:=]{1,120})\s*[:=]\s*(.+)$/);
+      const name = separatorMatch
+        ? separatorMatch[1].trim()
+        : `${type === 'manual-scale' ? 'Škála' : 'Subškála'} ${index + 1}`;
+      const itemsText = separatorMatch ? separatorMatch[2].trim() : line;
+
+      return {
+        id: `${type}-${index + 1}`,
+        name,
+        scaleName: name,
+        items: parseReliabilityItems(itemsText),
+        source: type,
+        scoring: 'mean',
+      };
+    })
+    .filter((definition) => parseReliabilityItems(definition.items).length >= 2);
+}
+
+function getItemsValueFromDefinition(definition: AnyRecord): unknown {
+  return definition.items ??
+    definition.itemsUsed ??
+    definition.itemColumns ??
+    definition.columns ??
+    definition.questions ??
+    definition.questionItems ??
+    definition.questionColumns ??
+    definition.variables ??
+    definition.polozky;
+}
+
+function isScaleDefinitionLike(value: unknown): value is AnyRecord {
+  if (!isRecord(value)) return false;
+
+  const items = parseReliabilityItems(getItemsValueFromDefinition(value));
+  const name = value.name ?? value.scaleName ?? value.label ?? value.title ?? value.id;
+
+  return Boolean(name) && items.length >= 2;
+}
+
+function collectScaleDefinitionsDeep(value: unknown, depth = 0): AnyRecord[] {
+  if (depth > 5 || value === null || value === undefined) return [];
+
+  if (Array.isArray(value)) {
+    const direct = value.filter(isScaleDefinitionLike);
+    const nested = value.flatMap((item) => collectScaleDefinitionsDeep(item, depth + 1));
+    return [...direct, ...nested];
+  }
+
+  if (!isRecord(value)) return [];
+
+  const rows: AnyRecord[] = [];
+
+  Object.entries(value).forEach(([key, child]) => {
+    const normalizedKey = normalizeReliabilityItemName(key);
+    const keyLooksRelevant =
+      normalizedKey.includes('scale') ||
+      normalizedKey.includes('subscale') ||
+      normalizedKey.includes('skala') ||
+      normalizedKey.includes('subskala') ||
+      normalizedKey.includes('dotaznik') ||
+      normalizedKey.includes('questionnaire') ||
+      normalizedKey.includes('manual') ||
+      normalizedKey.includes('config');
+
+    if (Array.isArray(child)) {
+      const direct = child.filter(isScaleDefinitionLike);
+      if (keyLooksRelevant || direct.length > 0) {
+        rows.push(...direct);
+      }
+    }
+
+    if (keyLooksRelevant || depth < 2) {
+      rows.push(...collectScaleDefinitionsDeep(child, depth + 1));
+    }
+  });
+
+  return rows;
+}
+
+function collectManualScaleTextsDeep(value: unknown, depth = 0, currentKey = ''): string[] {
+  if (depth > 5 || value === null || value === undefined) return [];
+
+  const normalizedKey = normalizeReliabilityItemName(currentKey);
+  const keyLooksRelevant =
+    normalizedKey.includes('scale') ||
+    normalizedKey.includes('subscale') ||
+    normalizedKey.includes('skala') ||
+    normalizedKey.includes('subskala') ||
+    normalizedKey.includes('manual') ||
+    normalizedKey.includes('command') ||
+    normalizedKey.includes('prompt') ||
+    normalizedKey.includes('instruction') ||
+    normalizedKey.includes('config');
+
+  if (typeof value === 'string') {
+    const text = value.trim();
+    const hasDefinitionSyntax = /[:=]/.test(text) && /[,;\n]|\b(?:az|až|do|to)\b|-|–|—/i.test(text);
+    return keyLooksRelevant && hasDefinitionSyntax ? [text] : [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectManualScaleTextsDeep(item, depth + 1, currentKey));
+  }
+
+  if (!isRecord(value)) return [];
+
+  return Object.entries(value).flatMap(([key, child]) =>
+    collectManualScaleTextsDeep(child, depth + 1, key),
+  );
+}
+
+function deduplicateRowsByKey<T extends AnyRecord>(rows: T[], getKey: (row: T) => string): T[] {
+  const used = new Set<string>();
+  const result: T[] = [];
+
+  rows.forEach((row) => {
+    const key = getKey(row);
+    if (!key || used.has(key)) return;
+    used.add(key);
+    result.push(row);
+  });
+
+  return result;
+}
+
+function getReliabilityDefinitions(result: unknown): AnyRecord[] {
+  const definitions = [
+    ...asRecords(getNestedValue(result, ['scaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['subscaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['manualScaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['manualSubscaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['customScaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['customSubscaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['analysisConfig', 'scaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['analysisConfig', 'subscaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['manualAnalysisConfig', 'scaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['manualAnalysisConfig', 'subscaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'scaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'subscaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'manualScaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'manualSubscaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'manualAnalysisConfig', 'scaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'manualAnalysisConfig', 'subscaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['questionnaireConfig', 'scaleDefinitions'])),
+    ...asRecords(getNestedValue(result, ['questionnaireConfig', 'subscaleDefinitions'])),
+    ...collectScaleDefinitionsDeep(result),
   ];
 
-  return rows.map((item) => ({
-    id: item.scaleId ?? '',
-    skala: item.scaleName ?? '',
-    polozky: Array.isArray(item.items) ? item.items.join(', ') : '',
-    validne_riadky: item.validRows ?? '',
-    cronbach_alpha: item.cronbachAlpha ?? '',
-    interpretacia: item.interpretation ?? '',
+  const manualScaleTexts = [
+    getNestedValue(result, ['manualScalesText']),
+    getNestedValue(result, ['manualSubscalesText']),
+    getNestedValue(result, ['customScalesText']),
+    getNestedValue(result, ['customSubscalesText']),
+    getNestedValue(result, ['scaleInput']),
+    getNestedValue(result, ['subscaleInput']),
+    getNestedValue(result, ['userCommands']),
+    getNestedValue(result, ['userCommand']),
+    getNestedValue(result, ['userPrompt']),
+    getNestedValue(result, ['instructions']),
+    getNestedValue(result, ['analysisConfig', 'manualScalesText']),
+    getNestedValue(result, ['analysisConfig', 'manualSubscalesText']),
+    getNestedValue(result, ['manualAnalysisConfig', 'manualScalesText']),
+    getNestedValue(result, ['manualAnalysisConfig', 'manualSubscalesText']),
+    getNestedValue(result, ['questionnaireConfig', 'manualScalesText']),
+    getNestedValue(result, ['questionnaireConfig', 'manualSubscalesText']),
+    getNestedValue(result, ['statisticalAnalysis', 'manualScalesText']),
+    getNestedValue(result, ['statisticalAnalysis', 'manualSubscalesText']),
+    getNestedValue(result, ['statisticalAnalysis', 'manualAnalysisConfig', 'manualScalesText']),
+    getNestedValue(result, ['statisticalAnalysis', 'manualAnalysisConfig', 'manualSubscalesText']),
+    ...collectManualScaleTextsDeep(result),
+  ];
+
+  const parsedDefinitions = manualScaleTexts.flatMap((text, index) => {
+    const type = index % 2 === 1 ? 'manual-subscale' : 'manual-scale';
+    return parseManualScaleTextToDefinitions(text, type);
+  });
+
+  return deduplicateRowsByKey(
+    [...definitions.filter(isScaleDefinitionLike), ...parsedDefinitions],
+    (definition) => `${normalizeReliabilityItemName(definition.id)}|${normalizeReliabilityItemName(definition.name ?? definition.scaleName ?? definition.label ?? definition.title)}|${parseReliabilityItems(getItemsValueFromDefinition(definition)).map(normalizeReliabilityItemName).join('|')}`,
+  );
+}
+
+function variance(values: number[]): number {
+  if (values.length < 2) return 0;
+
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const sumSquares = values.reduce((sum, value) => sum + (value - mean) ** 2, 0);
+
+  return sumSquares / (values.length - 1);
+}
+
+function interpretCronbachAlpha(alpha: number | null): string {
+  if (alpha === null || !Number.isFinite(alpha)) {
+    return 'Reliabilitu sa nepodarilo vypočítať.';
+  }
+
+  if (alpha >= 0.9) return 'Výborná vnútorná konzistencia.';
+  if (alpha >= 0.8) return 'Dobrá vnútorná konzistencia.';
+  if (alpha >= 0.7) return 'Akceptovateľná vnútorná konzistencia.';
+  if (alpha >= 0.6) return 'Hraničná vnútorná konzistencia – interpretovať opatrne.';
+
+  return 'Nízka vnútorná konzistencia – škálu je potrebné skontrolovať.';
+}
+
+function quantile(sortedValues: number[], percentile: number): number | null {
+  if (!sortedValues.length) return null;
+  if (sortedValues.length === 1) return sortedValues[0];
+
+  const position = (sortedValues.length - 1) * percentile;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  const weight = position - lower;
+
+  return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
+}
+
+function mode(values: number[]): number | null {
+  if (!values.length) return null;
+
+  const counts = new Map<number, number>();
+  values.forEach((value) => counts.set(value, (counts.get(value) || 0) + 1));
+
+  let bestValue = values[0];
+  let bestCount = 0;
+
+  counts.forEach((count, value) => {
+    if (count > bestCount) {
+      bestCount = count;
+      bestValue = value;
+    }
+  });
+
+  return bestCount > 1 ? bestValue : null;
+}
+
+function computeDescriptiveStats(values: number[], missing = 0): AnyRecord {
+  const cleanValues = values.filter((value) => Number.isFinite(value));
+  const sorted = [...cleanValues].sort((a, b) => a - b);
+  const n = sorted.length;
+  const sum = sorted.reduce((total, value) => total + value, 0);
+  const mean = n > 0 ? sum / n : null;
+  const q1 = quantile(sorted, 0.25);
+  const median = quantile(sorted, 0.5);
+  const q3 = quantile(sorted, 0.75);
+  const sampleVariance = n > 1 ? variance(sorted) : null;
+  const sd = sampleVariance === null ? null : Math.sqrt(sampleVariance);
+
+  return {
+    valid: n,
+    missing,
+    mean: mean === null ? '' : Number(mean.toFixed(4)),
+    median: median === null ? '' : Number(median.toFixed(4)),
+    mode: mode(sorted) ?? '',
+    standard_deviation: sd === null ? '' : Number(sd.toFixed(4)),
+    variance: sampleVariance === null ? '' : Number(sampleVariance.toFixed(4)),
+    minimum: n > 0 ? sorted[0] : '',
+    maximum: n > 0 ? sorted[n - 1] : '',
+    sum: n > 0 ? Number(sum.toFixed(4)) : '',
+    q1: q1 === null ? '' : Number(q1.toFixed(4)),
+    q3: q3 === null ? '' : Number(q3.toFixed(4)),
+    iqr: q1 === null || q3 === null ? '' : Number((q3 - q1).toFixed(4)),
+  };
+}
+
+function getScaleScoreType(definition: AnyRecord): 'sum' | 'mean' {
+  const scoring = String(definition.scoring ?? definition.scoreType ?? definition.aggregation ?? 'mean')
+    .trim()
+    .toLowerCase();
+
+  return scoring.includes('sum') || scoring.includes('total') || scoring.includes('súčet') || scoring.includes('sucet')
+    ? 'sum'
+    : 'mean';
+}
+
+function scoreScaleRow(params: {
+  row: AnyRecord;
+  itemColumns: string[];
+  reverseColumns: string[];
+  minValue?: unknown;
+  maxValue?: unknown;
+  scoring: 'sum' | 'mean';
+}): number | null {
+  const reverseSet = new Set(params.reverseColumns.map((item) => normalizeReliabilityItemName(item)));
+  const min = toFiniteNumber(params.minValue);
+  const max = toFiniteNumber(params.maxValue);
+
+  const values = params.itemColumns.map((column) => {
+    const numeric = toFiniteNumber(params.row[column]);
+
+    if (numeric === null) return null;
+
+    if (reverseSet.has(normalizeReliabilityItemName(column)) && min !== null && max !== null) {
+      return min + max - numeric;
+    }
+
+    return numeric;
+  });
+
+  if (values.some((value) => value === null)) return null;
+
+  const numericValues = values.filter(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value),
+  );
+
+  if (!numericValues.length) return null;
+
+  const sum = numericValues.reduce((total, value) => total + value, 0);
+  return params.scoring === 'mean' ? sum / numericValues.length : sum;
+}
+
+function buildComputedScaleRowsFromRawData(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): { scaleRows: AnyRecord[]; descriptiveRows: AnyRecord[] } {
+  const rawRows = flattenRawData(result, preparedDataFile);
+
+  if (!rawRows.length) {
+    return { scaleRows: [], descriptiveRows: [] };
+  }
+
+  const headers = Object.keys(rawRows[0] || {});
+  const definitions = getReliabilityDefinitions(result);
+  const scaleRows: AnyRecord[] = [];
+  const descriptiveRows: AnyRecord[] = [];
+  const used = new Set<string>();
+
+  definitions.forEach((definition, index) => {
+    const rawItems = parseReliabilityItems(getItemsValueFromDefinition(definition));
+    const matchedItems = rawItems
+      .map((item) => findMatchingColumnName(headers, item))
+      .filter((item): item is string => Boolean(item));
+    const uniqueItems = Array.from(new Set(matchedItems));
+    const scaleName = String(
+      definition.scaleName ??
+        definition.name ??
+        definition.label ??
+        definition.title ??
+        definition.id ??
+        `Škála ${index + 1}`,
+    );
+    const key = `${normalizeReliabilityItemName(scaleName)}|${uniqueItems.map(normalizeReliabilityItemName).join('|')}`;
+
+    if (used.has(key)) return;
+    used.add(key);
+
+    const scoring = getScaleScoreType(definition);
+    const reverseColumns = parseReliabilityItems(
+      definition.reverseItems ??
+        definition.reverseItemsText ??
+        definition.reverseColumns ??
+        definition.reverzne_polozky,
+    )
+      .map((item) => findMatchingColumnName(headers, item))
+      .filter((item): item is string => Boolean(item));
+
+    if (uniqueItems.length < 2) {
+      if (rawItems.length > 0) {
+        scaleRows.push({
+          typ: 'zadaná škála/subškála – nespárovaná',
+          id: definition.id ?? `computed-scale-${index + 1}`,
+          nazov: scaleName,
+          polozky: rawItems.join(', '),
+          pouzite_polozky: uniqueItems.join(', '),
+          skoring: scoring,
+          valid: 0,
+          missing: rawRows.length,
+          zdroj: definition.source ?? 'manual-definition',
+          popis: 'V dátach sa nenašli aspoň 2 stĺpce podľa zadaných položiek. Skontrolujte názvy položiek/stĺpcov.',
+        });
+      }
+      return;
+    }
+
+    const scores = rawRows
+      .map((row) => scoreScaleRow({
+        row,
+        itemColumns: uniqueItems,
+        reverseColumns,
+        minValue: definition.min ?? definition.minValue,
+        maxValue: definition.max ?? definition.maxValue,
+        scoring,
+      }))
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+
+    const stats = computeDescriptiveStats(scores, rawRows.length - scores.length);
+    const common = {
+      id: definition.id ?? `computed-scale-${index + 1}`,
+      nazov: scaleName,
+      polozky: rawItems.join(', '),
+      pouzite_polozky: uniqueItems.join(', '),
+      reverzne_polozky: reverseColumns.join(', '),
+      minimum: definition.minValue ?? definition.min ?? '',
+      maximum: definition.maxValue ?? definition.max ?? '',
+      skoring: scoring,
+      zdroj: definition.source ?? 'manual-definition',
+    };
+
+    scaleRows.push({
+      typ: 'vypočítané skóre zo zadaných škál/subškál',
+      ...common,
+      valid: stats.valid,
+      missing: stats.missing,
+      mean: stats.mean,
+      median: stats.median,
+      sd: stats.standard_deviation,
+      min: stats.minimum,
+      max: stats.maximum,
+      popis: 'Skóre bolo dopočítané priamo z DATA_CLEAN podľa položiek zadaných používateľom.',
+    });
+
+    descriptiveRows.push({
+      zdroj: 'computed-manual-scale',
+      typ: 'škála/subškála',
+      premenna: scaleName,
+      ...stats,
+      poznamka: `Dopočítané z položiek: ${uniqueItems.join(', ')}. Skoring: ${scoring}.`,
+    });
+  });
+
+  return { scaleRows, descriptiveRows };
+}
+
+function computeCronbachAlphaFromRows(params: {
+  rows: AnyRecord[];
+  itemColumns: string[];
+  reverseColumns?: string[];
+  minValue?: unknown;
+  maxValue?: unknown;
+}): {
+  alpha: number | null;
+  validRows: number;
+  itemCount: number;
+  usedItems: string[];
+  note: string;
+} {
+  const { rows, itemColumns } = params;
+  const reverseSet = new Set((params.reverseColumns || []).map((item) => normalizeReliabilityItemName(item)));
+  const min = toFiniteNumber(params.minValue);
+  const max = toFiniteNumber(params.maxValue);
+  const itemValues: number[][] = itemColumns.map(() => []);
+  const totalScores: number[] = [];
+
+  rows.forEach((row) => {
+    const values = itemColumns.map((column) => {
+      const numeric = toFiniteNumber(row[column]);
+
+      if (numeric === null) return null;
+
+      if (reverseSet.has(normalizeReliabilityItemName(column)) && min !== null && max !== null) {
+        return min + max - numeric;
+      }
+
+      return numeric;
+    });
+
+    if (values.some((value) => value === null)) {
+      return;
+    }
+
+    const validValues = values.filter(
+      (value): value is number =>
+        typeof value === 'number' && Number.isFinite(value),
+    );
+
+    if (validValues.length !== itemColumns.length) {
+      return;
+    }
+
+    validValues.forEach((value, index) => {
+      itemValues[index].push(value);
+    });
+
+    totalScores.push(validValues.reduce((sum, value) => sum + value, 0));
+  });
+
+  if (itemColumns.length < 2) {
+    return {
+      alpha: null,
+      validRows: totalScores.length,
+      itemCount: itemColumns.length,
+      usedItems: itemColumns,
+      note: 'Cronbachovo alfa potrebuje minimálne 2 položky.',
+    };
+  }
+
+  if (totalScores.length < 2) {
+    return {
+      alpha: null,
+      validRows: totalScores.length,
+      itemCount: itemColumns.length,
+      usedItems: itemColumns,
+      note: 'Na výpočet reliability sú potrebné aspoň 2 kompletné riadky.',
+    };
+  }
+
+  const totalVariance = variance(totalScores);
+  const itemVarianceSum = itemValues.reduce((sum, values) => sum + variance(values), 0);
+
+  if (totalVariance <= 0) {
+    return {
+      alpha: null,
+      validRows: totalScores.length,
+      itemCount: itemColumns.length,
+      usedItems: itemColumns,
+      note: 'Rozptyl celkového skóre je nulový, Cronbachovo alfa sa nedá vypočítať.',
+    };
+  }
+
+  const itemCount = itemColumns.length;
+  const alpha = (itemCount / (itemCount - 1)) * (1 - itemVarianceSum / totalVariance);
+
+  return {
+    alpha: Number(alpha.toFixed(4)),
+    validRows: totalScores.length,
+    itemCount,
+    usedItems: itemColumns,
+    note: '',
+  };
+}
+
+function buildReliabilityRowsFromRawData(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
+  const rawRows = flattenRawData(result, preparedDataFile);
+
+  if (!rawRows.length) return [];
+
+  const headers = Object.keys(rawRows[0] || {});
+  const definitions = getReliabilityDefinitions(result);
+  const usedScaleKeys = new Set<string>();
+  const rows: AnyRecord[] = [];
+
+  definitions.forEach((definition, index) => {
+    const rawItems = parseReliabilityItems(
+      definition.items ??
+        definition.itemsUsed ??
+        definition.itemColumns ??
+        definition.columns ??
+        definition.questions ??
+        definition.polozky,
+    );
+
+    const matchedItems = rawItems
+      .map((item) => findMatchingColumnName(headers, item))
+      .filter((item): item is string => Boolean(item));
+
+    const uniqueItems = Array.from(new Set(matchedItems));
+    const scaleName = String(
+      definition.scaleName ??
+        definition.name ??
+        definition.label ??
+        definition.title ??
+        definition.id ??
+        `Škála ${index + 1}`,
+    );
+
+    const scaleKey = `${normalizeReliabilityItemName(scaleName)}|${uniqueItems.join('|')}`;
+
+    if (usedScaleKeys.has(scaleKey)) return;
+    usedScaleKeys.add(scaleKey);
+
+    if (uniqueItems.length < 2) {
+      if (rawItems.length > 0) {
+        rows.push({
+          id: definition.id ?? `reliability-${index + 1}`,
+          skala: scaleName,
+          polozky: rawItems.join(', '),
+          pouzite_polozky: uniqueItems.join(', '),
+          validne_riadky: 0,
+          pocet_poloziek: uniqueItems.length,
+          cronbach_alpha: '',
+          interpretacia: 'Reliabilita nebola vypočítaná.',
+          poznamka:
+            'V DATA_CLEAN sa nenašli aspoň 2 položky tejto škály. Skontrolujte názvy stĺpcov a zápis položiek.',
+        });
+      }
+
+      return;
+    }
+
+    const reverseColumns = parseReliabilityItems(
+      definition.reverseItems ??
+        definition.reverseItemsText ??
+        definition.reverseColumns ??
+        definition.reverzne_polozky,
+    )
+      .map((item) => findMatchingColumnName(headers, item))
+      .filter((item): item is string => Boolean(item));
+
+    const calculation = computeCronbachAlphaFromRows({
+      rows: rawRows,
+      itemColumns: uniqueItems,
+      reverseColumns,
+      minValue: definition.min ?? definition.minValue,
+      maxValue: definition.max ?? definition.maxValue,
+    });
+
+    rows.push({
+      id: definition.id ?? `reliability-${index + 1}`,
+      skala: scaleName,
+      polozky: rawItems.join(', '),
+      pouzite_polozky: calculation.usedItems.join(', '),
+      reverzne_polozky: reverseColumns.join(', '),
+      validne_riadky: calculation.validRows,
+      pocet_poloziek: calculation.itemCount,
+      cronbach_alpha: calculation.alpha ?? '',
+      interpretacia: interpretCronbachAlpha(calculation.alpha),
+      poznamka: calculation.note,
+    });
+  });
+
+  return rows;
+}
+
+function flattenReliabilityRows(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
+  const rows = [
+    ...asRecords(getNestedValue(result, ['reliability'])),
+    ...asRecords(getNestedValue(result, ['reliabilities'])),
+    ...asRecords(getNestedValue(result, ['cronbachAlpha'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'reliability'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'reliabilities'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'cronbachAlpha'])),
+  ];
+
+  const directRows = rows.map((item) => ({
+    id: item.scaleId ?? item.id ?? '',
+    skala: item.scaleName ?? item.scale ?? item.variable ?? item.name ?? '',
+    polozky: Array.isArray(item.items)
+      ? item.items.join(', ')
+      : Array.isArray(item.itemsUsed)
+        ? item.itemsUsed.join(', ')
+        : item.items ?? item.itemsUsed ?? '',
+    pouzite_polozky: Array.isArray(item.usedItems)
+      ? item.usedItems.join(', ')
+      : Array.isArray(item.itemColumns)
+        ? item.itemColumns.join(', ')
+        : item.usedItems ?? item.itemColumns ?? '',
+    validne_riadky: item.validRows ?? item.validN ?? item.valid ?? item.n ?? '',
+    pocet_poloziek: item.itemCount ?? '',
+    cronbach_alpha: item.cronbachAlpha ?? item.alpha ?? '',
+    interpretacia: item.interpretation ?? interpretCronbachAlpha(toFiniteNumber(item.cronbachAlpha ?? item.alpha)),
+    poznamka: item.note ?? item.warning ?? '',
   }));
+
+  if (directRows.length > 0) {
+    return directRows;
+  }
+
+  const computedRows = buildReliabilityRowsFromRawData(result, preparedDataFile);
+
+  if (computedRows.length > 0) {
+    return computedRows;
+  }
+
+  return [
+    {
+      stav: 'reliabilita nie je dostupná',
+      poznamka:
+        'Cronbachovo alfa sa vypočíta až vtedy, keď výsledok obsahuje definície škál/subškál s položkami a v pripravených dátach DATA_CLEAN existujú príslušné stĺpce.',
+    },
+  ];
 }
 
 function flattenCorrelationRows(result: unknown, method: 'pearson' | 'spearman' | 'recommended'): AnyRecord[] {
@@ -659,42 +1483,770 @@ function flattenCorrelationMatrix(result: unknown): AnyRecord[] {
   return rows;
 }
 
-function flattenParametricTests(result: unknown): AnyRecord[] {
-  const rows = [
-    ...asRecords(getNestedValue(result, ['groupTests', 'parametric'])),
-    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'groupTests', 'parametric'])),
+
+
+type TestValueGroup = {
+  group: string;
+  values: number[];
+};
+
+type DependentScoreSeries = {
+  name: string;
+  source: string;
+  usedItems: string[];
+  values: Array<number | null>;
+};
+
+function parseLooseList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => parseLooseList(item));
+  }
+
+  if (value === null || value === undefined) return [];
+
+  return String(value)
+    .replace(/\r/g, '\n')
+    .split(/[,;\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function collectGroupingTextsDeep(value: unknown, depth = 0, currentKey = ''): string[] {
+  if (depth > 5 || value === null || value === undefined) return [];
+
+  const normalizedKey = normalizeReliabilityItemName(currentKey);
+  const keyLooksRelevant =
+    normalizedKey.includes('grouping') ||
+    normalizedKey.includes('groupvariable') ||
+    normalizedKey.includes('groupvariables') ||
+    normalizedKey.includes('groupcolumns') ||
+    normalizedKey.includes('skupinov') ||
+    normalizedKey.includes('premennepretest') ||
+    normalizedKey.includes('testvariables');
+
+  if (typeof value === 'string') {
+    const text = value.trim();
+    return keyLooksRelevant && text.length > 0 && text.length <= 1200 ? [text] : [];
+  }
+
+  if (Array.isArray(value)) {
+    if (keyLooksRelevant) {
+      return value.flatMap((item) => parseLooseList(item));
+    }
+
+    return value.flatMap((item) => collectGroupingTextsDeep(item, depth + 1, currentKey));
+  }
+
+  if (!isRecord(value)) return [];
+
+  return Object.entries(value).flatMap(([key, child]) =>
+    collectGroupingTextsDeep(child, depth + 1, key),
+  );
+}
+
+function collectGroupingColumnNames(result: unknown): string[] {
+  const candidates = [
+    getNestedValue(result, ['groupingColumns']),
+    getNestedValue(result, ['groupColumns']),
+    getNestedValue(result, ['groupVariables']),
+    getNestedValue(result, ['groupingVariables']),
+    getNestedValue(result, ['groupingColumnsText']),
+    getNestedValue(result, ['analysisConfig', 'groupingColumns']),
+    getNestedValue(result, ['analysisConfig', 'groupColumns']),
+    getNestedValue(result, ['analysisConfig', 'groupVariables']),
+    getNestedValue(result, ['analysisConfig', 'groupingColumnsText']),
+    getNestedValue(result, ['manualAnalysisConfig', 'groupingColumns']),
+    getNestedValue(result, ['manualAnalysisConfig', 'groupColumns']),
+    getNestedValue(result, ['manualAnalysisConfig', 'groupVariables']),
+    getNestedValue(result, ['manualAnalysisConfig', 'groupingColumnsText']),
+    getNestedValue(result, ['questionnaireConfig', 'groupingColumns']),
+    getNestedValue(result, ['questionnaireConfig', 'groupColumns']),
+    getNestedValue(result, ['questionnaireConfig', 'groupVariables']),
+    getNestedValue(result, ['questionnaireConfig', 'groupingColumnsText']),
+    getNestedValue(result, ['statisticalAnalysis', 'groupingColumns']),
+    getNestedValue(result, ['statisticalAnalysis', 'groupColumns']),
+    getNestedValue(result, ['statisticalAnalysis', 'groupVariables']),
+    getNestedValue(result, ['statisticalAnalysis', 'groupingColumnsText']),
+    getNestedValue(result, ['statisticalAnalysis', 'manualAnalysisConfig', 'groupingColumns']),
+    getNestedValue(result, ['statisticalAnalysis', 'manualAnalysisConfig', 'groupingColumnsText']),
+    ...collectGroupingTextsDeep(result),
   ];
 
-  return rows.map((item) => ({
-    zavisla_premenna: item.dependentVariable ?? '',
-    skupinova_premenna: item.groupVariable ?? '',
-    test: item.testType ?? '',
-    skupiny: Array.isArray(item.groups) ? item.groups.join(', ') : '',
-    n: item.nTotal ?? '',
-    statistika: item.statistic ?? '',
-    p_hodnota: item.pValueText ?? item.pValue ?? '',
-    signifikancia: item.significance ?? '',
-    odporucanie: item.recommendation ?? '',
+  return Array.from(
+    new Set(
+      candidates
+        .flatMap((candidate) => parseLooseList(candidate))
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function getNumericColumnValues(rows: AnyRecord[], column: string): number[] {
+  return rows
+    .map((row) => toFiniteNumber(row[column]))
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+}
+
+function isMostlyNumericColumn(rows: AnyRecord[], column: string): boolean {
+  const nonEmptyValues = rows
+    .map((row) => row[column])
+    .filter((value) => value !== null && value !== undefined && String(value).trim() !== '');
+
+  if (nonEmptyValues.length < 2) return false;
+
+  const numericCount = nonEmptyValues.filter((value) => toFiniteNumber(value) !== null).length;
+  return numericCount / nonEmptyValues.length >= 0.75;
+}
+
+function detectFallbackNumericColumns(rows: AnyRecord[], excludedColumns: string[], limit = 30): string[] {
+  const excluded = new Set(excludedColumns.map((column) => normalizeReliabilityItemName(column)));
+  const headers = Object.keys(rows[0] || {});
+
+  return headers
+    .filter((header) => !excluded.has(normalizeReliabilityItemName(header)))
+    .filter((header) => getNumericColumnValues(rows, header).length >= 3)
+    .slice(0, limit);
+}
+
+function detectFallbackGroupingColumns(rows: AnyRecord[], excludedColumns: string[], limit = 8): string[] {
+  const excluded = new Set(excludedColumns.map((column) => normalizeReliabilityItemName(column)));
+  const headers = Object.keys(rows[0] || {});
+
+  return headers
+    .filter((header) => !excluded.has(normalizeReliabilityItemName(header)))
+    .filter((header) => {
+      const values = rows
+        .map((row) => row[header])
+        .filter((value) => value !== null && value !== undefined && String(value).trim() !== '')
+        .map((value) => String(value).trim());
+      const uniqueValues = Array.from(new Set(values));
+
+      if (values.length < 4) return false;
+      if (uniqueValues.length < 2 || uniqueValues.length > 8) return false;
+      if (isMostlyNumericColumn(rows, header) && uniqueValues.length > 5) return false;
+
+      return true;
+    })
+    .slice(0, limit);
+}
+
+function buildDependentScoreSeries(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+  groupingColumns: string[] = [],
+): DependentScoreSeries[] {
+  const rawRows = flattenRawData(result, preparedDataFile);
+
+  if (!rawRows.length) return [];
+
+  const headers = Object.keys(rawRows[0] || {});
+  const definitions = getReliabilityDefinitions(result);
+  const series: DependentScoreSeries[] = [];
+  const used = new Set<string>();
+
+  definitions.forEach((definition, index) => {
+    const rawItems = parseReliabilityItems(getItemsValueFromDefinition(definition));
+    const itemColumns = rawItems
+      .map((item) => findMatchingColumnName(headers, item))
+      .filter((item): item is string => Boolean(item));
+    const uniqueItems = Array.from(new Set(itemColumns));
+
+    if (uniqueItems.length < 2) return;
+
+    const reverseColumns = parseReliabilityItems(
+      definition.reverseItems ??
+        definition.reverseItemsText ??
+        definition.reverseColumns ??
+        definition.reverzne_polozky,
+    )
+      .map((item) => findMatchingColumnName(headers, item))
+      .filter((item): item is string => Boolean(item));
+
+    const name = String(
+      definition.scaleName ??
+        definition.name ??
+        definition.label ??
+        definition.title ??
+        definition.id ??
+        `Škála ${index + 1}`,
+    ).trim();
+
+    const key = `${normalizeReliabilityItemName(name)}|${uniqueItems.map(normalizeReliabilityItemName).join('|')}`;
+    if (used.has(key)) return;
+    used.add(key);
+
+    const scoring = getScaleScoreType(definition);
+    const values = rawRows.map((row) =>
+      scoreScaleRow({
+        row,
+        itemColumns: uniqueItems,
+        reverseColumns,
+        minValue: definition.min ?? definition.minValue,
+        maxValue: definition.max ?? definition.maxValue,
+        scoring,
+      }),
+    );
+
+    if (values.filter((value): value is number => value !== null && Number.isFinite(value)).length >= 3) {
+      series.push({
+        name,
+        source: String(definition.source ?? 'manual-scale'),
+        usedItems: uniqueItems,
+        values,
+      });
+    }
+  });
+
+  if (series.length > 0) {
+    return series.slice(0, 30);
+  }
+
+  return detectFallbackNumericColumns(rawRows, groupingColumns, 30).map((column) => ({
+    name: column,
+    source: 'numeric-column-fallback',
+    usedItems: [column],
+    values: rawRows.map((row) => toFiniteNumber(row[column])),
   }));
 }
 
-function flattenNonParametricTests(result: unknown): AnyRecord[] {
-  const rows = [
-    ...asRecords(getNestedValue(result, ['groupTests', 'nonParametric'])),
-    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'groupTests', 'nonParametric'])),
+function resolveGroupingColumns(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+  excludedDependentColumns: string[] = [],
+): string[] {
+  const rawRows = flattenRawData(result, preparedDataFile);
+  if (!rawRows.length) return [];
+
+  const headers = Object.keys(rawRows[0] || {});
+  const explicitColumns = collectGroupingColumnNames(result)
+    .map((name) => findMatchingColumnName(headers, name))
+    .filter((name): name is string => Boolean(name));
+
+  const uniqueExplicitColumns = Array.from(new Set(explicitColumns));
+
+  if (uniqueExplicitColumns.length > 0) {
+    return uniqueExplicitColumns.slice(0, 8);
+  }
+
+  return detectFallbackGroupingColumns(rawRows, excludedDependentColumns, 8);
+}
+
+function groupDependentValues(
+  rawRows: AnyRecord[],
+  series: DependentScoreSeries,
+  groupColumn: string,
+): TestValueGroup[] {
+  const grouped = new Map<string, number[]>();
+
+  rawRows.forEach((row, index) => {
+    const numeric = series.values[index];
+    const rawGroup = row[groupColumn];
+
+    if (numeric === null || numeric === undefined || !Number.isFinite(numeric)) return;
+    if (rawGroup === null || rawGroup === undefined || String(rawGroup).trim() === '') return;
+
+    const groupName = String(rawGroup).trim();
+    const values = grouped.get(groupName) || [];
+    values.push(numeric);
+    grouped.set(groupName, values);
+  });
+
+  return Array.from(grouped.entries())
+    .map(([group, values]) => ({ group, values }))
+    .filter((item) => item.values.length >= 2)
+    .slice(0, 12);
+}
+
+function mean(values: number[]): number {
+  return values.length
+    ? values.reduce((sum, value) => sum + value, 0) / values.length
+    : 0;
+}
+
+function standardDeviation(values: number[]): number {
+  return values.length > 1 ? Math.sqrt(variance(values)) : 0;
+}
+
+function erfApprox(value: number): number {
+  const sign = value < 0 ? -1 : 1;
+  const x = Math.abs(value);
+  const t = 1 / (1 + 0.3275911 * x);
+  const a1 = 0.254829592;
+  const a2 = -0.284496736;
+  const a3 = 1.421413741;
+  const a4 = -1.453152027;
+  const a5 = 1.061405429;
+  const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+  return sign * y;
+}
+
+function normalCdf(value: number): number {
+  return 0.5 * (1 + erfApprox(value / Math.SQRT2));
+}
+
+function logGamma(value: number): number {
+  const coefficients = [
+    676.5203681218851,
+    -1259.1392167224028,
+    771.32342877765313,
+    -176.61502916214059,
+    12.507343278686905,
+    -0.13857109526572012,
+    9.9843695780195716e-6,
+    1.5056327351493116e-7,
   ];
 
-  return rows.map((item) => ({
-    zavisla_premenna: item.dependentVariable ?? '',
-    skupinova_premenna: item.groupVariable ?? '',
-    test: item.testType ?? '',
-    skupiny: Array.isArray(item.groups) ? item.groups.join(', ') : '',
-    n: item.nTotal ?? '',
-    statistika: item.statistic ?? '',
-    p_hodnota: item.pValueText ?? item.pValue ?? '',
-    signifikancia: item.significance ?? '',
-    odporucanie: item.recommendation ?? '',
+  if (value < 0.5) {
+    return Math.log(Math.PI) - Math.log(Math.sin(Math.PI * value)) - logGamma(1 - value);
+  }
+
+  let x = 0.99999999999980993;
+  const z = value - 1;
+
+  coefficients.forEach((coefficient, index) => {
+    x += coefficient / (z + index + 1);
+  });
+
+  const t = z + coefficients.length - 0.5;
+  return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
+}
+
+function betaContinuedFraction(x: number, a: number, b: number): number {
+  const maxIterations = 120;
+  const epsilon = 3e-7;
+  const fpmin = 1e-30;
+  const qab = a + b;
+  const qap = a + 1;
+  const qam = a - 1;
+  let c = 1;
+  let d = 1 - (qab * x) / qap;
+
+  if (Math.abs(d) < fpmin) d = fpmin;
+  d = 1 / d;
+
+  let h = d;
+
+  for (let m = 1; m <= maxIterations; m += 1) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < fpmin) d = fpmin;
+    c = 1 + aa / c;
+    if (Math.abs(c) < fpmin) c = fpmin;
+    d = 1 / d;
+    h *= d * c;
+
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < fpmin) d = fpmin;
+    c = 1 + aa / c;
+    if (Math.abs(c) < fpmin) c = fpmin;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+
+    if (Math.abs(del - 1) < epsilon) break;
+  }
+
+  return h;
+}
+
+function regularizedBeta(x: number, a: number, b: number): number {
+  if (!Number.isFinite(x) || !Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) return NaN;
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+
+  const bt = Math.exp(
+    logGamma(a + b) -
+      logGamma(a) -
+      logGamma(b) +
+      a * Math.log(x) +
+      b * Math.log(1 - x),
+  );
+
+  if (x < (a + 1) / (a + b + 2)) {
+    return (bt * betaContinuedFraction(x, a, b)) / a;
+  }
+
+  return 1 - (bt * betaContinuedFraction(1 - x, b, a)) / b;
+}
+
+function studentTCdf(t: number, degreesOfFreedom: number): number {
+  if (!Number.isFinite(t) || !Number.isFinite(degreesOfFreedom) || degreesOfFreedom <= 0) return NaN;
+
+  const x = degreesOfFreedom / (degreesOfFreedom + t * t);
+  const ib = regularizedBeta(x, degreesOfFreedom / 2, 0.5);
+
+  if (!Number.isFinite(ib)) return NaN;
+  return t >= 0 ? 1 - 0.5 * ib : 0.5 * ib;
+}
+
+function fCdf(fValue: number, df1: number, df2: number): number {
+  if (!Number.isFinite(fValue) || !Number.isFinite(df1) || !Number.isFinite(df2) || fValue < 0 || df1 <= 0 || df2 <= 0) {
+    return NaN;
+  }
+
+  const x = (df1 * fValue) / (df1 * fValue + df2);
+  return regularizedBeta(x, df1 / 2, df2 / 2);
+}
+
+function chiSquareSurvivalWilsonHilferty(value: number, degreesOfFreedom: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(degreesOfFreedom) || value < 0 || degreesOfFreedom <= 0) return NaN;
+
+  const z = (Math.pow(value / degreesOfFreedom, 1 / 3) - (1 - 2 / (9 * degreesOfFreedom))) /
+    Math.sqrt(2 / (9 * degreesOfFreedom));
+
+  return 1 - normalCdf(z);
+}
+
+function formatPValue(value: number): string {
+  if (!Number.isFinite(value)) return '';
+  if (value < 0.001) return '< 0,001';
+  return value.toFixed(4).replace('.', ',');
+}
+
+function interpretPValue(value: number): string {
+  if (!Number.isFinite(value)) return 'p-hodnota nie je dostupná';
+  return value < 0.05 ? 'štatisticky významné' : 'štatisticky nevýznamné';
+}
+
+function formatGroupSummary(groups: TestValueGroup[], statistic: 'mean' | 'median'): string {
+  return groups
+    .map((group) => {
+      const values = [...group.values].sort((a, b) => a - b);
+      const center = statistic === 'mean' ? mean(values) : quantile(values, 0.5);
+      const sd = standardDeviation(values);
+      const centerText = center === null ? '' : Number(center.toFixed(4));
+      return `${group.group}: n=${values.length}, ${statistic === 'mean' ? 'M' : 'Md'}=${centerText}, SD=${Number(sd.toFixed(4))}`;
+    })
+    .join(' | ');
+}
+
+function rankValues(values: number[]): Array<{ value: number; index: number; rank: number }> {
+  const sorted = values
+    .map((value, index) => ({ value, index, rank: 0 }))
+    .sort((a, b) => a.value - b.value);
+
+  let position = 0;
+
+  while (position < sorted.length) {
+    let end = position + 1;
+    while (end < sorted.length && sorted[end].value === sorted[position].value) {
+      end += 1;
+    }
+
+    const averageRank = (position + 1 + end) / 2;
+    for (let index = position; index < end; index += 1) {
+      sorted[index].rank = averageRank;
+    }
+
+    position = end;
+  }
+
+  return sorted.sort((a, b) => a.index - b.index);
+}
+
+function buildParametricTestsFromRawData(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
+  const rawRows = flattenRawData(result, preparedDataFile);
+
+  if (!rawRows.length) return [];
+
+  const initialGroupingColumns = resolveGroupingColumns(result, preparedDataFile);
+  const series = buildDependentScoreSeries(result, preparedDataFile, initialGroupingColumns);
+  const groupingColumns = resolveGroupingColumns(
+    result,
+    preparedDataFile,
+    series.flatMap((item) => item.usedItems),
+  );
+
+  if (!series.length || !groupingColumns.length) {
+    return [
+      {
+        stav: 'parametrické testy nie sú dostupné',
+        poznamka:
+          'Na dopočítanie t-testu alebo ANOVA sú potrebné číselné škály/subškály a aspoň jedna skupinová premenná. Zadajte napríklad: pohlavie, typ_skoly, rocnik.',
+      },
+    ];
+  }
+
+  const rows: AnyRecord[] = [];
+
+  groupingColumns.forEach((groupColumn) => {
+    series.forEach((dependent) => {
+      const groups = groupDependentValues(rawRows, dependent, groupColumn);
+      const allValues = groups.flatMap((group) => group.values);
+
+      if (groups.length < 2 || allValues.length < 4) return;
+
+      if (groups.length === 2) {
+        const [groupA, groupB] = groups;
+        const n1 = groupA.values.length;
+        const n2 = groupB.values.length;
+        const mean1 = mean(groupA.values);
+        const mean2 = mean(groupB.values);
+        const var1 = variance(groupA.values);
+        const var2 = variance(groupB.values);
+        const standardError = Math.sqrt(var1 / n1 + var2 / n2);
+        const tStatistic = standardError > 0 ? (mean1 - mean2) / standardError : NaN;
+        const numerator = (var1 / n1 + var2 / n2) ** 2;
+        const denominator = (var1 ** 2) / (n1 ** 2 * Math.max(n1 - 1, 1)) + (var2 ** 2) / (n2 ** 2 * Math.max(n2 - 1, 1));
+        const df = denominator > 0 ? numerator / denominator : n1 + n2 - 2;
+        const pValue = Number.isFinite(tStatistic) ? 2 * (1 - studentTCdf(Math.abs(tStatistic), df)) : NaN;
+        const pooledSd = Math.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / Math.max(n1 + n2 - 2, 1));
+        const cohenD = pooledSd > 0 ? (mean1 - mean2) / pooledSd : NaN;
+
+        rows.push({
+          zavisla_premenna: dependent.name,
+          skupinova_premenna: groupColumn,
+          test: 'Welchov t-test',
+          skupiny: `${groupA.group}; ${groupB.group}`,
+          n: n1 + n2,
+          n_skupiny: `${groupA.group}: ${n1}; ${groupB.group}: ${n2}`,
+          priemery: formatGroupSummary(groups, 'mean'),
+          df1: '',
+          df2: Number(df.toFixed(4)),
+          statistika: Number(tStatistic.toFixed(4)),
+          p_hodnota: formatPValue(pValue),
+          signifikancia: interpretPValue(pValue),
+          efekt: Number.isFinite(cohenD) ? `Cohen d = ${Number(cohenD.toFixed(4))}` : '',
+          odporucanie: 'Parametrický test rozdielu dvoch skupín. Pred finálnou interpretáciou overte normalitu a extrémne hodnoty.',
+          zdroj: `dopočítané z DATA_CLEAN (${dependent.source})`,
+        });
+
+        return;
+      }
+
+      const grandMean = mean(allValues);
+      const ssBetween = groups.reduce((sum, group) => sum + group.values.length * (mean(group.values) - grandMean) ** 2, 0);
+      const ssWithin = groups.reduce((sum, group) => sum + group.values.reduce((innerSum, value) => innerSum + (value - mean(group.values)) ** 2, 0), 0);
+      const dfBetween = groups.length - 1;
+      const dfWithin = allValues.length - groups.length;
+      const msBetween = ssBetween / Math.max(dfBetween, 1);
+      const msWithin = ssWithin / Math.max(dfWithin, 1);
+      const fStatistic = msWithin > 0 ? msBetween / msWithin : NaN;
+      const pValue = Number.isFinite(fStatistic) ? 1 - fCdf(fStatistic, dfBetween, dfWithin) : NaN;
+      const etaSquared = ssBetween + ssWithin > 0 ? ssBetween / (ssBetween + ssWithin) : NaN;
+
+      rows.push({
+        zavisla_premenna: dependent.name,
+        skupinova_premenna: groupColumn,
+        test: 'Jednofaktorová ANOVA',
+        skupiny: groups.map((group) => group.group).join('; '),
+        n: allValues.length,
+        n_skupiny: groups.map((group) => `${group.group}: ${group.values.length}`).join('; '),
+        priemery: formatGroupSummary(groups, 'mean'),
+        df1: dfBetween,
+        df2: dfWithin,
+        statistika: Number(fStatistic.toFixed(4)),
+        p_hodnota: formatPValue(pValue),
+        signifikancia: interpretPValue(pValue),
+        efekt: Number.isFinite(etaSquared) ? `eta² = ${Number(etaSquared.toFixed(4))}` : '',
+        odporucanie: 'Parametrický test rozdielu troch a viac skupín. Pri významnom výsledku doplňte post-hoc porovnania.',
+        zdroj: `dopočítané z DATA_CLEAN (${dependent.source})`,
+      });
+    });
+  });
+
+  return rows.slice(0, 240);
+}
+
+function buildNonParametricTestsFromRawData(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
+  const rawRows = flattenRawData(result, preparedDataFile);
+
+  if (!rawRows.length) return [];
+
+  const initialGroupingColumns = resolveGroupingColumns(result, preparedDataFile);
+  const series = buildDependentScoreSeries(result, preparedDataFile, initialGroupingColumns);
+  const groupingColumns = resolveGroupingColumns(
+    result,
+    preparedDataFile,
+    series.flatMap((item) => item.usedItems),
+  );
+
+  if (!series.length || !groupingColumns.length) {
+    return [
+      {
+        stav: 'neparametrické testy nie sú dostupné',
+        poznamka:
+          'Na dopočítanie Mann-Whitney alebo Kruskal-Wallis testu sú potrebné číselné škály/subškály a skupinová premenná.',
+      },
+    ];
+  }
+
+  const rows: AnyRecord[] = [];
+
+  groupingColumns.forEach((groupColumn) => {
+    series.forEach((dependent) => {
+      const groups = groupDependentValues(rawRows, dependent, groupColumn);
+      const allValues = groups.flatMap((group) => group.values);
+
+      if (groups.length < 2 || allValues.length < 4) return;
+
+      if (groups.length === 2) {
+        const [groupA, groupB] = groups;
+        const combined = [...groupA.values, ...groupB.values];
+        const ranks = rankValues(combined);
+        const rankSumA = ranks.slice(0, groupA.values.length).reduce((sum, item) => sum + item.rank, 0);
+        const n1 = groupA.values.length;
+        const n2 = groupB.values.length;
+        const u1 = rankSumA - (n1 * (n1 + 1)) / 2;
+        const u2 = n1 * n2 - u1;
+        const u = Math.min(u1, u2);
+        const meanU = (n1 * n2) / 2;
+        const sdU = Math.sqrt((n1 * n2 * (n1 + n2 + 1)) / 12);
+        const z = sdU > 0 ? (u - meanU) / sdU : NaN;
+        const pValue = Number.isFinite(z) ? 2 * (1 - normalCdf(Math.abs(z))) : NaN;
+        const rEffect = Number.isFinite(z) ? Math.abs(z) / Math.sqrt(n1 + n2) : NaN;
+
+        rows.push({
+          zavisla_premenna: dependent.name,
+          skupinova_premenna: groupColumn,
+          test: 'Mann-Whitney U',
+          skupiny: `${groupA.group}; ${groupB.group}`,
+          n: n1 + n2,
+          n_skupiny: `${groupA.group}: ${n1}; ${groupB.group}: ${n2}`,
+          mediany: formatGroupSummary(groups, 'median'),
+          df: '',
+          statistika: Number(u.toFixed(4)),
+          z: Number(z.toFixed(4)),
+          p_hodnota: formatPValue(pValue),
+          signifikancia: interpretPValue(pValue),
+          efekt: Number.isFinite(rEffect) ? `r = ${Number(rEffect.toFixed(4))}` : '',
+          odporucanie: 'Neparametrický test rozdielu dvoch nezávislých skupín.',
+          zdroj: `dopočítané z DATA_CLEAN (${dependent.source})`,
+        });
+
+        return;
+      }
+
+      const combined = groups.flatMap((group) => group.values.map((value) => ({ value, group: group.group })));
+      const ranks = rankValues(combined.map((item) => item.value));
+      const rankSums = new Map<string, number>();
+
+      combined.forEach((item, index) => {
+        rankSums.set(item.group, (rankSums.get(item.group) || 0) + ranks[index].rank);
+      });
+
+      const n = combined.length;
+      const h = (12 / (n * (n + 1))) * groups.reduce((sum, group) => {
+        const rankSum = rankSums.get(group.group) || 0;
+        return sum + (rankSum ** 2) / group.values.length;
+      }, 0) - 3 * (n + 1);
+      const df = groups.length - 1;
+      const pValue = chiSquareSurvivalWilsonHilferty(h, df);
+      const epsilonSquared = n > groups.length ? (h - groups.length + 1) / (n - groups.length) : NaN;
+
+      rows.push({
+        zavisla_premenna: dependent.name,
+        skupinova_premenna: groupColumn,
+        test: 'Kruskal-Wallis H',
+        skupiny: groups.map((group) => group.group).join('; '),
+        n,
+        n_skupiny: groups.map((group) => `${group.group}: ${group.values.length}`).join('; '),
+        mediany: formatGroupSummary(groups, 'median'),
+        df,
+        statistika: Number(h.toFixed(4)),
+        p_hodnota: formatPValue(pValue),
+        signifikancia: interpretPValue(pValue),
+        efekt: Number.isFinite(epsilonSquared) ? `epsilon² = ${Number(epsilonSquared.toFixed(4))}` : '',
+        odporucanie: 'Neparametrický test rozdielu troch a viac nezávislých skupín.',
+        zdroj: `dopočítané z DATA_CLEAN (${dependent.source})`,
+      });
+    });
+  });
+
+  return rows.slice(0, 240);
+}
+
+function flattenParametricTests(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
+  const rows = [
+    ...asRecords(getNestedValue(result, ['parametricTests'])),
+    ...asRecords(getNestedValue(result, ['tests', 'parametric'])),
+    ...asRecords(getNestedValue(result, ['groupTests', 'parametric'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'parametricTests'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'tests', 'parametric'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'groupTests', 'parametric'])),
+  ];
+
+  const directRows = rows.map((item) => ({
+    zavisla_premenna: item.dependentVariable ?? item.variable ?? item.premenna ?? item.zavisla_premenna ?? '',
+    skupinova_premenna: item.groupVariable ?? item.groupColumn ?? item.groupingVariable ?? item.skupinova_premenna ?? '',
+    test: item.testType ?? item.test ?? item.method ?? '',
+    skupiny: Array.isArray(item.groups) ? item.groups.join(', ') : item.groups ?? item.skupiny ?? '',
+    n: item.nTotal ?? item.n ?? '',
+    n_skupiny: item.groupNs ?? item.n_skupiny ?? '',
+    priemery: item.means ?? item.priemery ?? '',
+    df1: item.df1 ?? '',
+    df2: item.df2 ?? item.df ?? '',
+    statistika: item.statistic ?? item.t ?? item.f ?? item.statistika ?? '',
+    p_hodnota: item.pValueText ?? item.pValue ?? item.p_hodnota ?? '',
+    signifikancia: item.significance ?? item.signifikancia ?? '',
+    efekt: item.effectSize ?? item.effect ?? item.efekt ?? '',
+    odporucanie: item.recommendation ?? item.odporucanie ?? '',
+    zdroj: item.source ?? 'analysis-result',
   }));
+
+  const computedRows = buildParametricTestsFromRawData(result, preparedDataFile);
+
+  return deduplicateRowsByKey(
+    [...directRows, ...computedRows],
+    (row) => `${normalizeReliabilityItemName(row.zavisla_premenna)}|${normalizeReliabilityItemName(row.skupinova_premenna)}|${normalizeReliabilityItemName(row.test)}|${normalizeReliabilityItemName(row.skupiny)}|${normalizeReliabilityItemName(row.zdroj)}`,
+  );
+}
+
+function flattenNonParametricTests(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
+  const rows = [
+    ...asRecords(getNestedValue(result, ['nonParametricTests'])),
+    ...asRecords(getNestedValue(result, ['nonparametricTests'])),
+    ...asRecords(getNestedValue(result, ['tests', 'nonParametric'])),
+    ...asRecords(getNestedValue(result, ['tests', 'nonparametric'])),
+    ...asRecords(getNestedValue(result, ['groupTests', 'nonParametric'])),
+    ...asRecords(getNestedValue(result, ['groupTests', 'nonparametric'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'nonParametricTests'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'nonparametricTests'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'tests', 'nonParametric'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'tests', 'nonparametric'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'groupTests', 'nonParametric'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'groupTests', 'nonparametric'])),
+  ];
+
+  const directRows = rows.map((item) => ({
+    zavisla_premenna: item.dependentVariable ?? item.variable ?? item.premenna ?? item.zavisla_premenna ?? '',
+    skupinova_premenna: item.groupVariable ?? item.groupColumn ?? item.groupingVariable ?? item.skupinova_premenna ?? '',
+    test: item.testType ?? item.test ?? item.method ?? '',
+    skupiny: Array.isArray(item.groups) ? item.groups.join(', ') : item.groups ?? item.skupiny ?? '',
+    n: item.nTotal ?? item.n ?? '',
+    n_skupiny: item.groupNs ?? item.n_skupiny ?? '',
+    mediany: item.medians ?? item.mediany ?? '',
+    df: item.df ?? '',
+    statistika: item.statistic ?? item.u ?? item.h ?? item.statistika ?? '',
+    z: item.z ?? '',
+    p_hodnota: item.pValueText ?? item.pValue ?? item.p_hodnota ?? '',
+    signifikancia: item.significance ?? item.signifikancia ?? '',
+    efekt: item.effectSize ?? item.effect ?? item.efekt ?? '',
+    odporucanie: item.recommendation ?? item.odporucanie ?? '',
+    zdroj: item.source ?? 'analysis-result',
+  }));
+
+  const computedRows = buildNonParametricTestsFromRawData(result, preparedDataFile);
+
+  return deduplicateRowsByKey(
+    [...directRows, ...computedRows],
+    (row) => `${normalizeReliabilityItemName(row.zavisla_premenna)}|${normalizeReliabilityItemName(row.skupinova_premenna)}|${normalizeReliabilityItemName(row.test)}|${normalizeReliabilityItemName(row.skupiny)}|${normalizeReliabilityItemName(row.zdroj)}`,
+  );
 }
 
 function buildContingencyTables(result: unknown): AnyRecord[] {
@@ -1040,7 +2592,10 @@ function normalizeChartDataRows(result: unknown): AnyRecord[] {
   return rows;
 }
 
-function buildChartSections(result: unknown): ChartSection[] {
+function buildChartSections(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): ChartSection[] {
   const sections: Array<ChartSection | null> = [];
 
   const chartRows = normalizeChartDataRows(result);
@@ -1086,7 +2641,7 @@ function buildChartSections(result: unknown): ChartSection[] {
       key: 'descriptives-mean',
       title: 'Priemery premenných',
       description: 'Priemerné hodnoty položiek, škál alebo subškál.',
-      rows: flattenDescriptiveRows(result),
+      rows: flattenDescriptiveRows(result, preparedDataFile),
       labelKeys: ['premenna', 'nazov', 'variable', 'name'],
       valueKeys: ['mean', 'priemer', 'average'],
       valueLabel: 'Priemer',
@@ -1099,7 +2654,7 @@ function buildChartSections(result: unknown): ChartSection[] {
       key: 'scale-means',
       title: 'Škály a subškály',
       description: 'Grafické porovnanie vypočítaných škál a subškál.',
-      rows: flattenScaleRows(result),
+      rows: flattenScaleRows(result, preparedDataFile),
       labelKeys: ['nazov', 'id', 'premenna'],
       valueKeys: ['mean', 'valid', 'missing', 'pocet_chybajucich_riadkov'],
       valueLabel: 'Hodnota',
@@ -1112,7 +2667,7 @@ function buildChartSections(result: unknown): ChartSection[] {
       key: 'reliability-alpha',
       title: 'Reliabilita – Cronbach alfa',
       description: 'Vnútorná konzistencia škál. Vyššia hodnota znamená vyššiu reliabilitu.',
-      rows: flattenReliabilityRows(result),
+      rows: flattenReliabilityRows(result, preparedDataFile),
       labelKeys: ['skala', 'id', 'premenna'],
       valueKeys: ['cronbach_alpha', 'alpha', 'cronbachAlpha'],
       valueLabel: 'Cronbach alfa',
@@ -1246,8 +2801,12 @@ function addExcelChartSheet(workbook: XLSX.WorkBook, section: ChartSection, inde
   );
 }
 
-function addExcelChartSheets(workbook: XLSX.WorkBook, result: unknown) {
-  const chartSections = buildChartSections(result);
+function addExcelChartSheets(
+  workbook: XLSX.WorkBook,
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+) {
+  const chartSections = buildChartSections(result, preparedDataFile);
 
   if (!chartSections.length) {
     addJsonSheet(workbook, '22 Grafy', [
@@ -1501,21 +3060,20 @@ function getTableDefinitions(result: unknown, preparedDataFile: ExportPayload['p
     { sheetName: '02 raw-data', title: 'Raw dáta', description: 'Dáta použité pri analýze.', rows: flattenRawData(result, preparedDataFile) },
     { sheetName: '03 frequencies', title: 'Frekvenčné tabuľky', description: 'Početnosti a percentá odpovedí.', rows: flattenFrequencies(result) },
     { sheetName: '04 data-quality', title: 'Kontrola kvality dát', description: 'Upozornenia a kontrola vstupného súboru.', rows: flattenDataQuality(result, preparedDataFile) },
-    { sheetName: '05 descriptives', title: 'Deskriptívna štatistika', description: 'Priemery, mediány, smerodajné odchýlky a rozsahy.', rows: flattenDescriptiveRows(result) },
+    { sheetName: '05 descriptives', title: 'Deskriptívna štatistika', description: 'Priemery, mediány, smerodajné odchýlky a rozsahy.', rows: flattenDescriptiveRows(result, preparedDataFile) },
     { sheetName: '06 normality', title: 'Normalita dát', description: 'Testy normality a odporúčania.', rows: flattenNormalityRows(result) },
-    { sheetName: '07 reliability', title: 'Reliabilita', description: 'Cronbachovo alfa a vnútorná konzistencia.', rows: flattenReliabilityRows(result) },
-    { sheetName: '08 correlations', title: 'Odporúčané korelácie', description: 'Korelácie odporúčané podľa normality.', rows: flattenCorrelationRows(result, 'recommended') },
-    { sheetName: '09 Škály podškály', title: 'Škály a subškály', description: 'Definície, skóre a deskriptíva škál.', rows: flattenScaleRows(result) },
-    { sheetName: '10 Pearson', title: 'Pearsonove korelácie', description: 'Parametrické korelácie.', rows: flattenCorrelationRows(result, 'pearson') },
-    { sheetName: '11 Spearman', title: 'Spearmanove korelácie', description: 'Neparametrické korelácie.', rows: flattenCorrelationRows(result, 'spearman') },
-    { sheetName: '12 Corr matrix', title: 'Korelačná matica', description: 'Maticový výstup korelácií.', rows: flattenCorrelationMatrix(result) },
-    { sheetName: '13 Chart data', title: 'Dáta pre grafy', description: 'Podkladové dáta grafických výstupov.', rows: flattenChartData(result) },
-    { sheetName: '16 Param testy', title: 'Parametrické testy', description: 't-test a ANOVA.', rows: flattenParametricTests(result) },
-    { sheetName: '17 Neparam testy', title: 'Neparametrické testy', description: 'Mann-Whitney a Kruskal-Wallis.', rows: flattenNonParametricTests(result) },
-    { sheetName: '18 Kontingencne tab', title: 'Kontingenčné tabuľky', description: 'Podklady pre kategorizované premenné.', rows: buildContingencyTables(result) },
-    { sheetName: '19 Chi-square', title: 'Chí-kvadrát', description: 'Súhrny pre chí-kvadrát testy.', rows: buildChiSquareTests(result) },
-    { sheetName: '20 Odpor testy', title: 'Odporúčané testy', description: 'Odporúčané štatistické testovanie.', rows: flattenRecommendedTests(result) },
-    { sheetName: '21 Odpor grafy', title: 'Odporúčané grafy', description: 'Odporúčané grafické výstupy.', rows: flattenRecommendedCharts(result) },
+    { sheetName: '07 correlations', title: 'Odporúčané korelácie', description: 'Korelácie odporúčané podľa normality.', rows: flattenCorrelationRows(result, 'recommended') },
+    { sheetName: '08 Škály podškály', title: 'Škály a subškály', description: 'Definície, skóre a deskriptíva škál.', rows: flattenScaleRows(result, preparedDataFile) },
+    { sheetName: '09 Pearson', title: 'Pearsonove korelácie', description: 'Parametrické korelácie.', rows: flattenCorrelationRows(result, 'pearson') },
+    { sheetName: '10 Spearman', title: 'Spearmanove korelácie', description: 'Neparametrické korelácie.', rows: flattenCorrelationRows(result, 'spearman') },
+    { sheetName: '11 Corr matrix', title: 'Korelačná matica', description: 'Maticový výstup korelácií.', rows: flattenCorrelationMatrix(result) },
+    { sheetName: '12 Chart data', title: 'Dáta pre grafy', description: 'Podkladové dáta grafických výstupov.', rows: flattenChartData(result) },
+    { sheetName: '13 Param testy', title: 'Parametrické testy', description: 't-test a ANOVA.', rows: flattenParametricTests(result, preparedDataFile) },
+    { sheetName: '14 Neparam testy', title: 'Neparametrické testy', description: 'Mann-Whitney a Kruskal-Wallis.', rows: flattenNonParametricTests(result, preparedDataFile) },
+    { sheetName: '15 Kontingencne tab', title: 'Kontingenčné tabuľky', description: 'Podklady pre kategorizované premenné.', rows: buildContingencyTables(result) },
+    { sheetName: '16 Chi-square', title: 'Chí-kvadrát', description: 'Súhrny pre chí-kvadrát testy.', rows: buildChiSquareTests(result) },
+    { sheetName: '17 Odpor testy', title: 'Odporúčané testy', description: 'Odporúčané štatistické testovanie.', rows: flattenRecommendedTests(result) },
+    { sheetName: '18 Odpor grafy', title: 'Odporúčané grafy', description: 'Odporúčané grafické výstupy.', rows: flattenRecommendedCharts(result) },
   ];
 }
 
@@ -1723,7 +3281,7 @@ function addDashboardWorksheet(workbook: any, result: unknown, preparedDataFile:
   addRowsAsProfessionalTable(worksheet, overview, 4);
 
   const pieSections = buildPieChartSections(result);
-  const chartSections = buildChartSections(result);
+  const chartSections = buildChartSections(result, preparedDataFile);
   let imageRow = 12;
 
   pieSections.slice(0, 4).forEach((section, index) => {
@@ -1784,8 +3342,12 @@ function addProfessionalWorksheetWithChart(workbook: any, definition: ExportTabl
   }
 }
 
-function addStandaloneChartWorksheets(workbook: any, result: unknown) {
-  const chartSections = buildChartSections(result);
+function addStandaloneChartWorksheets(
+  workbook: any,
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+) {
+  const chartSections = buildChartSections(result, preparedDataFile);
   const pieSections = buildPieChartSections(result);
 
   [...pieSections, ...chartSections].slice(0, 24).forEach((section: any, index) => {
@@ -1826,7 +3388,7 @@ async function buildProfessionalExcelWithRenderedCharts(
   addDashboardWorksheet(workbook, result, preparedDataFile);
   const definitions = getTableDefinitions(result, preparedDataFile);
   definitions.forEach((definition, index) => addProfessionalWorksheetWithChart(workbook, definition, index));
-  addStandaloneChartWorksheets(workbook, result);
+  addStandaloneChartWorksheets(workbook, result, preparedDataFile);
 
     const output = await workbook.xlsx.writeBuffer();
     return Buffer.from(output as ArrayBuffer);
@@ -1904,7 +3466,7 @@ function chartSectionToPieHtml(section: DashboardPieSection): string {
 
 function buildExportHtmlDocument(result: unknown, preparedDataFile: ExportPayload['preparedDataFile']): string {
   const overviewRows = flattenOverview(result, preparedDataFile);
-  const chartSections = buildChartSections(result);
+  const chartSections = buildChartSections(result, preparedDataFile);
   const pieSections = buildPieChartSections(result);
 
   const overviewHtml = overviewRows
@@ -1959,7 +3521,7 @@ function buildExportHtmlDocument(result: unknown, preparedDataFile: ExportPayloa
 }
 
 function buildPdfBuffer(result: unknown, preparedDataFile: ExportPayload['preparedDataFile']): Buffer {
-  const sections = buildChartSections(result);
+  const sections = buildChartSections(result, preparedDataFile);
   const overview = flattenOverview(result, preparedDataFile);
   const pages: string[] = [];
 
@@ -2056,45 +3618,11 @@ function addProfessionalDataAnalysisSheets(
   result: unknown,
   preparedDataFile: ExportPayload['preparedDataFile'],
 ) {
-  addJsonSheet(workbook, '01 overview', flattenOverview(result, preparedDataFile));
+  getTableDefinitions(result, preparedDataFile).forEach((definition) => {
+    addJsonSheet(workbook, definition.sheetName, definition.rows);
+  });
 
-  addJsonSheet(workbook, '02 raw-data', flattenRawData(result, preparedDataFile));
-
-  addJsonSheet(workbook, '03 frequencies', flattenFrequencies(result));
-
-  addJsonSheet(workbook, '04 data-quality', flattenDataQuality(result, preparedDataFile));
-
-  addJsonSheet(workbook, '05 descriptives', flattenDescriptiveRows(result));
-
-  addJsonSheet(workbook, '06 normality', flattenNormalityRows(result));
-
-  addJsonSheet(workbook, '07 reliability', flattenReliabilityRows(result));
-
-  addJsonSheet(workbook, '08 correlations', flattenCorrelationRows(result, 'recommended'));
-
-  addJsonSheet(workbook, '09 Škály podškály', flattenScaleRows(result));
-
-  addJsonSheet(workbook, '10 Pearson', flattenCorrelationRows(result, 'pearson'));
-
-  addJsonSheet(workbook, '11 Spearman', flattenCorrelationRows(result, 'spearman'));
-
-  addJsonSheet(workbook, '12 Corr matrix', flattenCorrelationMatrix(result));
-
-  addJsonSheet(workbook, '13 Chart data', flattenChartData(result));
-
-  addJsonSheet(workbook, '16 Param testy', flattenParametricTests(result));
-
-  addJsonSheet(workbook, '17 Neparam testy', flattenNonParametricTests(result));
-
-  addJsonSheet(workbook, '18 Kontingencne tab', buildContingencyTables(result));
-
-  addJsonSheet(workbook, '19 Chi-square', buildChiSquareTests(result));
-
-  addJsonSheet(workbook, '20 Odpor testy', flattenRecommendedTests(result));
-
-  addJsonSheet(workbook, '21 Odpor grafy', flattenRecommendedCharts(result));
-
-  addExcelChartSheets(workbook, result);
+  addExcelChartSheets(workbook, result, preparedDataFile);
 }
 
 function buildWorkbook(
@@ -2221,15 +3749,16 @@ export async function POST(request: NextRequest) {
         format: 'raw',
         rawData: flattenRawData(result, preparedDataFile),
         dataQuality: flattenDataQuality(result, preparedDataFile),
-        scales: flattenScaleRows(result),
-        parametricTests: flattenParametricTests(result),
-        nonParametricTests: flattenNonParametricTests(result),
+        scales: flattenScaleRows(result, preparedDataFile),
+        reliability: flattenReliabilityRows(result, preparedDataFile),
+        parametricTests: flattenParametricTests(result, preparedDataFile),
+        nonParametricTests: flattenNonParametricTests(result, preparedDataFile),
         contingencyTables: buildContingencyTables(result),
         chiSquare: buildChiSquareTests(result),
         recommendedTests: flattenRecommendedTests(result),
         recommendedCharts: flattenRecommendedCharts(result),
         chartData: flattenChartData(result),
-        chartSections: buildChartSections(result),
+        chartSections: buildChartSections(result, preparedDataFile),
       });
     }
 
@@ -2265,7 +3794,7 @@ export async function POST(request: NextRequest) {
 
     console.log('[EXPORT XLSX CHARTS]', {
       professionalBuffer: Boolean(professionalBuffer),
-      chartSections: buildChartSections(result).length,
+      chartSections: buildChartSections(result, preparedDataFile).length,
       pieSections: buildPieChartSections(result).length,
     });
 

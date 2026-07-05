@@ -67,6 +67,22 @@ type ScoringItem = {
   poznamka: string;
 };
 
+type JaspTableRow = Record<string, string | number | null>;
+
+type JaspAnalysisResult = {
+  summary: JaspTableRow[];
+  variables: JaspTableRow[];
+  descriptives: JaspTableRow[];
+  frequencies: JaspTableRow[];
+  reliability: JaspTableRow[];
+  normality: JaspTableRow[];
+  correlations: JaspTableRow[];
+  parametricTests: JaspTableRow[];
+  nonParametricTests: JaspTableRow[];
+  testSelection: JaspTableRow[];
+  warnings: JaspTableRow[];
+};
+
 type PrepareResponse = {
   ok: boolean;
   message: string;
@@ -79,6 +95,7 @@ type PrepareResponse = {
   warnings?: string[];
   qualityReport?: QualityReportItem[];
   questionnaireConfig?: QuestionnaireConfig;
+  jaspSummary?: JaspTableRow[];
   error?: string;
 };
 
@@ -538,23 +555,32 @@ function getUploadedFile(formData: FormData): File | null {
 }
 
 function getWorkbookFirstSheetRows(workbook: XLSX.WorkBook): unknown[][] {
-  const firstSheetName = workbook.SheetNames[0];
+  let bestRows: unknown[][] = [];
+  let bestScore = -1;
 
-  if (!firstSheetName) {
-    return [];
-  }
+  workbook.SheetNames.forEach((sheetName) => {
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) return;
 
-  const worksheet = workbook.Sheets[firstSheetName];
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+      header: 1,
+      defval: null,
+      blankrows: false,
+    });
 
-  if (!worksheet) {
-    return [];
-  }
+    const nonEmptyCells = rows.reduce(
+      (sum, row) => sum + row.filter((cell) => !isEmptyCell(cell)).length,
+      0,
+    );
+    const score = rows.length * 10 + nonEmptyCells;
 
-  return XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
-    header: 1,
-    defval: null,
-    blankrows: false,
+    if (score > bestScore) {
+      bestScore = score;
+      bestRows = rows;
+    }
   });
+
+  return bestRows;
 }
 
 function detectHeaderRow(rows: unknown[][]): number {
@@ -1319,10 +1345,143 @@ function hasColumns(headers: string[], expectedColumns: string[]): boolean {
 
 
 function splitManualLines(text: string): string[] {
-  return String(text || '')
-    .split(/\r?\n/)
+  const normalized = String(text || '')
+    .replace(/\r/g, '\n')
+    .replace(/[•·]/g, '\n')
+    .trim();
+
+  if (!normalized) return [];
+
+  const baseLines = normalized
+    .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
+
+  const lines: string[] = [];
+
+  baseLines.forEach((line) => {
+    const parts = line
+      .split(/;+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    const definitionCount = parts.filter((part) => /^[^:=]{1,140}\s*[:=]/.test(part)).length;
+
+    if (definitionCount > 1) {
+      lines.push(...parts);
+    } else {
+      lines.push(line);
+    }
+  });
+
+  return lines;
+}
+
+function expandManualItemRange(value: string): string[] {
+  const text = String(value || '').trim();
+  if (!text) return [];
+
+  const match = text.match(/^(.*?)\s*(?:až|az|do|to|–|—|-)\s*(.*?)$/i);
+
+  if (!match) {
+    return [text];
+  }
+
+  const left = match[1].trim();
+  const right = match[2].trim();
+  const leftMatch = left.match(/^(.*?)(\d+)$/);
+  const rightMatch = right.match(/^(.*?)(\d+)$/);
+
+  if (!leftMatch || !rightMatch) {
+    return [text];
+  }
+
+  const leftPrefix = leftMatch[1].trim();
+  const rightPrefix = rightMatch[1].trim() || leftPrefix;
+  const start = Number(leftMatch[2]);
+  const end = Number(rightMatch[2]);
+
+  if (
+    !Number.isFinite(start) ||
+    !Number.isFinite(end) ||
+    start > end ||
+    normalizeHeaderKey(leftPrefix) !== normalizeHeaderKey(rightPrefix)
+  ) {
+    return [text];
+  }
+
+  return Array.from({ length: end - start + 1 }, (_, index) => `${leftPrefix}${start + index}`);
+}
+
+function parseManualItemTokens(value: string): string[] {
+  return String(value || '')
+    .replace(/\r/g, '\n')
+    .replace(/\+/g, ',')
+    .split(/[,;\n]+/)
+    .flatMap((part) => expandManualItemRange(part))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function findMatchingHeader(headers: string[], requestedItem: string): string | null {
+  const item = String(requestedItem || '').trim();
+  if (!item) return null;
+
+  const exact = headers.find((header) => header === item);
+  if (exact) return exact;
+
+  const normalizedItem = normalizeHeaderKey(item);
+
+  const normalizedExact = headers.find(
+    (header) => normalizeHeaderKey(header) === normalizedItem,
+  );
+
+  if (normalizedExact) return normalizedExact;
+
+  const compactItem = normalizedItem.replace(/_/g, '');
+
+  const compactExact = headers.find(
+    (header) => normalizeHeaderKey(header).replace(/_/g, '') === compactItem,
+  );
+
+  if (compactExact) return compactExact;
+
+  return null;
+}
+
+type ManualScoringRuntime = {
+  item: ScoringItem;
+  requestedItems: string[];
+  matchedColumns: string[];
+  missingItems: string[];
+  minRequiredItems: number;
+};
+
+function createManualScoringRuntime(
+  scoringItems: ScoringItem[],
+  headers: string[],
+): ManualScoringRuntime[] {
+  return scoringItems.map((item) => {
+    const requestedItems = parseManualItemTokens(item.polozky);
+    const matchedColumns = Array.from(
+      new Set(
+        requestedItems
+          .map((requestedItem) => findMatchingHeader(headers, requestedItem))
+          .filter((column): column is string => Boolean(column)),
+      ),
+    );
+    const missingItems = requestedItems.filter(
+      (requestedItem) => !findMatchingHeader(headers, requestedItem),
+    );
+
+    return {
+      item,
+      requestedItems,
+      matchedColumns,
+      missingItems,
+      minRequiredItems: Math.max(1, Math.ceil(matchedColumns.length * 0.5)),
+    };
+  });
 }
 
 function parseManualScoringLine(
@@ -1363,7 +1522,7 @@ function parseManualScoringLine(
     skala: name || `${kind} ${index + 1}`,
     polozky: items,
     vypocet:
-      'Definícia zo zadania používateľa. Finálne skóre, deskriptíva, reliabilita, normalita, korelácie a testy rozdielov sa počítajú v analysisStats.ts.',
+      'Priemer dostupných číselných položiek. Pri minimálne 50 % platných položiek sa vytvorí nová skórovacia premenná v DATA_CLEAN.',
     vyslednaPremenna: outputName,
     poznamka:
       kind === 'škála'
@@ -1527,6 +1686,28 @@ function calculateScores(
     }
   }
 
+  const manualRuntime = createManualScoringRuntime(scoringItems, nextHeaders);
+
+  manualRuntime.forEach((runtime) => {
+    if (!runtime.item.vyslednaPremenna || runtime.matchedColumns.length < 2) {
+      warnings.push(
+        `Manuálna škála/subškála "${runtime.item.skala}" nebola vypočítaná, pretože sa našlo menej ako 2 zadaných položiek v DATA_CLEAN.`,
+      );
+      return;
+    }
+
+    if (!nextHeaders.includes(runtime.item.vyslednaPremenna)) {
+      nextHeaders.push(runtime.item.vyslednaPremenna);
+    }
+
+    runtime.item.polozky = runtime.requestedItems.join(', ');
+    runtime.item.vypocet =
+      `Priemer položiek: ${runtime.matchedColumns.join(', ')}. Výpočet prebehne, ak je dostupných aspoň ${runtime.minRequiredItems} z ${runtime.matchedColumns.length} položiek.`;
+    runtime.item.poznamka = runtime.missingItems.length > 0
+      ? `Nájdené položky: ${runtime.matchedColumns.join(', ')}. Nenájdené položky: ${runtime.missingItems.join(', ')}.`
+      : `Všetky položky boli nájdené: ${runtime.matchedColumns.join(', ')}.`;
+  });
+
   const rows = cleanRows.map((row) => {
     const nextRow: DataRow = { ...row };
 
@@ -1553,6 +1734,21 @@ function calculateScores(
         nextRow[subscaleName] = sumExistingValues(values);
       });
     }
+
+    manualRuntime.forEach((runtime) => {
+      if (!runtime.item.vyslednaPremenna || runtime.matchedColumns.length < 2) {
+        return;
+      }
+
+      const values = runtime.matchedColumns
+        .map((column) => toNumber(nextRow[column]))
+        .filter((value): value is number => value !== null);
+
+      nextRow[runtime.item.vyslednaPremenna] =
+        values.length >= runtime.minRequiredItems
+          ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(4))
+          : null;
+    });
 
     return nextRow;
   });
@@ -1905,6 +2101,860 @@ function createQualityReport(params: {
   ];
 }
 
+function roundStat(value: number | null | undefined, digits = 4): number | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) return null;
+  return Number(value.toFixed(digits));
+}
+
+function compactPValue(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return '';
+  if (value < 0.001) return '< .001';
+  return roundStat(value, 4)?.toString() ?? '';
+}
+
+function mean(values: number[]): number | null {
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function sampleVariance(values: number[]): number | null {
+  if (values.length < 2) return null;
+  const valueMean = mean(values);
+  if (valueMean === null) return null;
+  return values.reduce((sum, value) => sum + (value - valueMean) ** 2, 0) / (values.length - 1);
+}
+
+function standardDeviation(values: number[]): number | null {
+  const variance = sampleVariance(values);
+  return variance === null ? null : Math.sqrt(variance);
+}
+
+function quantile(values: number[], q: number): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const position = (sorted.length - 1) * q;
+  const base = Math.floor(position);
+  const rest = position - base;
+  const next = sorted[base + 1];
+  if (next === undefined) return sorted[base];
+  return sorted[base] + rest * (next - sorted[base]);
+}
+
+function median(values: number[]): number | null {
+  return quantile(values, 0.5);
+}
+
+function numericValues(rows: DataRow[], column: string): number[] {
+  return rows
+    .map((row) => toNumber(row[column]))
+    .filter((value): value is number => value !== null);
+}
+
+function nonEmptyValues(rows: DataRow[], column: string): RowValue[] {
+  return rows
+    .map((row) => row[column])
+    .filter((value): value is RowValue => !isEmptyCell(value));
+}
+
+function uniqueValues(rows: DataRow[], column: string): string[] {
+  return Array.from(new Set(nonEmptyValues(rows, column).map((value) => String(value))));
+}
+
+function numericRatio(rows: DataRow[], column: string): number {
+  const values = nonEmptyValues(rows, column);
+  if (!values.length) return 0;
+  const numericCount = values.filter((value) => toNumber(value) !== null).length;
+  return numericCount / values.length;
+}
+
+function isIdentifierLike(column: string, rows: DataRow[]): boolean {
+  const normalized = normalizeHeaderKey(column);
+  const values = nonEmptyValues(rows, column);
+  const unique = new Set(values.map((value) => String(value))).size;
+
+  return (
+    normalized === 'id' ||
+    normalized.includes('respondent') ||
+    normalized.includes('identifikator') ||
+    normalized.includes('poradie') ||
+    (values.length > 0 && unique === values.length && numericRatio(rows, column) >= 0.95)
+  );
+}
+
+function getJaspMeasureType(column: string, rows: DataRow[]): 'Scale' | 'Ordinal' | 'Nominal' | 'Text' {
+  const values = nonEmptyValues(rows, column);
+  if (!values.length) return 'Text';
+
+  const ratio = numericRatio(rows, column);
+  const unique = uniqueValues(rows, column).length;
+  const normalized = normalizeHeaderKey(column).toLowerCase();
+
+  if (isIdentifierLike(column, rows)) return 'Nominal';
+
+  if (
+    ratio >= 0.85 &&
+    (
+      unique > 7 ||
+      normalized.includes('score') ||
+      normalized.includes('skore') ||
+      normalized.includes('priemer') ||
+      normalized.startsWith('scale_') ||
+      normalized.startsWith('subscale_') ||
+      normalized === 'vek'
+    )
+  ) {
+    return 'Scale';
+  }
+
+  if (ratio >= 0.85) return 'Ordinal';
+  if (unique <= 30) return 'Nominal';
+  return 'Text';
+}
+
+function getNumericAnalysisColumns(headers: string[], rows: DataRow[]): string[] {
+  const scored = headers.filter((header) => {
+    const normalized = normalizeHeaderKey(header).toLowerCase();
+    return (
+      normalized.startsWith('scale_') ||
+      normalized.startsWith('subscale_') ||
+      normalized.endsWith('_skore') ||
+      normalized.endsWith('_priemer') ||
+      normalized.includes('score')
+    ) && numericValues(rows, header).length >= 3;
+  });
+
+  const scale = headers.filter((header) =>
+    getJaspMeasureType(header, rows) === 'Scale' &&
+    numericValues(rows, header).length >= 3 &&
+    !isIdentifierLike(header, rows),
+  );
+
+  const ordinal = headers.filter((header) =>
+    getJaspMeasureType(header, rows) === 'Ordinal' &&
+    numericValues(rows, header).length >= 3 &&
+    !isIdentifierLike(header, rows),
+  );
+
+  return Array.from(new Set([...scored, ...scale, ...ordinal])).slice(0, 60);
+}
+
+function getGroupingColumns(headers: string[], rows: DataRow[], questionnaireConfig: QuestionnaireConfig): string[] {
+  const requested = parseManualItemTokens(questionnaireConfig.groupingColumnsText)
+    .map((item) => findMatchingHeader(headers, item))
+    .filter((item): item is string => Boolean(item));
+
+  if (requested.length > 0) {
+    return Array.from(new Set(requested));
+  }
+
+  return headers.filter((header) => {
+    if (isIdentifierLike(header, rows)) return false;
+    const measure = getJaspMeasureType(header, rows);
+    const unique = uniqueValues(rows, header).length;
+    return (measure === 'Nominal' || measure === 'Ordinal') && unique >= 2 && unique <= 10;
+  }).slice(0, 12);
+}
+
+function createJaspSummary(params: {
+  fileName: string;
+  rows: DataRow[];
+  headers: string[];
+  scoringItems: ScoringItem[];
+  numericColumns: string[];
+  groupingColumns: string[];
+}): JaspTableRow[] {
+  return [
+    { parameter: 'Softvérový štýl', value: 'JASP-like report', note: 'Výstup je pripravený ako univerzálny štatistický report pre ľubovoľnú databázu.' },
+    { parameter: 'Zdrojový súbor', value: params.fileName, note: '' },
+    { parameter: 'Respondenti / riadky', value: params.rows.length, note: '' },
+    { parameter: 'Premenné / stĺpce', value: params.headers.length, note: '' },
+    { parameter: 'Číselné premenné pre štatistiku', value: params.numericColumns.length, note: params.numericColumns.slice(0, 15).join(', ') },
+    { parameter: 'Skupinové premenné', value: params.groupingColumns.length, note: params.groupingColumns.slice(0, 15).join(', ') },
+    { parameter: 'Manuálne škály/subškály', value: params.scoringItems.length, note: params.scoringItems.map((item) => item.skala).slice(0, 15).join(', ') },
+  ];
+}
+
+function createJaspVariables(headers: string[], rows: DataRow[]): JaspTableRow[] {
+  return headers.map((header) => {
+    const values = nonEmptyValues(rows, header);
+    const missing = rows.length - values.length;
+    const unique = uniqueValues(rows, header).length;
+    const numbers = numericValues(rows, header);
+    return {
+      variable: header,
+      measure: getJaspMeasureType(header, rows),
+      type: numbers.length / Math.max(values.length, 1) >= 0.85 ? 'Numeric' : 'Text / Factor',
+      valid: values.length,
+      missing,
+      missing_percent: rows.length > 0 ? roundStat((missing / rows.length) * 100, 2) : 0,
+      unique_values: unique,
+      use_as: getJaspMeasureType(header, rows) === 'Scale' ? 'Dependent / Scale variable' : 'Factor / Grouping / Frequency',
+    };
+  });
+}
+
+function createJaspDescriptives(headers: string[], rows: DataRow[]): JaspTableRow[] {
+  return getNumericAnalysisColumns(headers, rows).map((column) => {
+    const values = numericValues(rows, column);
+    const valueMean = mean(values);
+    const sd = standardDeviation(values);
+    const q1 = quantile(values, 0.25);
+    const q3 = quantile(values, 0.75);
+    const med = median(values);
+    const min = values.length ? Math.min(...values) : null;
+    const max = values.length ? Math.max(...values) : null;
+    const variance = sampleVariance(values);
+    const se = sd !== null && values.length > 0 ? sd / Math.sqrt(values.length) : null;
+    const skewness = computeSkewness(values);
+    const kurtosis = computeKurtosisExcess(values);
+
+    return {
+      variable: column,
+      n: values.length,
+      missing: rows.length - values.length,
+      mean: roundStat(valueMean),
+      sd: roundStat(sd),
+      se: roundStat(se),
+      median: roundStat(med),
+      variance: roundStat(variance),
+      min: roundStat(min),
+      max: roundStat(max),
+      q1: roundStat(q1),
+      q3: roundStat(q3),
+      iqr: q1 !== null && q3 !== null ? roundStat(q3 - q1) : null,
+      skewness: roundStat(skewness),
+      kurtosis: roundStat(kurtosis),
+      ci95_lower: valueMean !== null && se !== null ? roundStat(valueMean - 1.96 * se) : null,
+      ci95_upper: valueMean !== null && se !== null ? roundStat(valueMean + 1.96 * se) : null,
+    };
+  });
+}
+
+function computeSkewness(values: number[]): number | null {
+  if (values.length < 3) return null;
+  const valueMean = mean(values);
+  const sd = standardDeviation(values);
+  if (valueMean === null || sd === null || sd === 0) return null;
+  const n = values.length;
+  const thirdMoment = values.reduce((sum, value) => sum + ((value - valueMean) / sd) ** 3, 0);
+  return (n / ((n - 1) * (n - 2))) * thirdMoment;
+}
+
+function computeKurtosisExcess(values: number[]): number | null {
+  if (values.length < 4) return null;
+  const valueMean = mean(values);
+  const sd = standardDeviation(values);
+  if (valueMean === null || sd === null || sd === 0) return null;
+  const n = values.length;
+  const fourth = values.reduce((sum, value) => sum + ((value - valueMean) / sd) ** 4, 0);
+  return ((n * (n + 1)) / ((n - 1) * (n - 2) * (n - 3))) * fourth - (3 * (n - 1) ** 2) / ((n - 2) * (n - 3));
+}
+
+function createJaspFrequencies(headers: string[], rows: DataRow[]): JaspTableRow[] {
+  const candidateColumns = headers.filter((header) => {
+    const measure = getJaspMeasureType(header, rows);
+    const unique = uniqueValues(rows, header).length;
+    return !isIdentifierLike(header, rows) && (measure !== 'Scale' || unique <= 20) && unique > 0 && unique <= 50;
+  }).slice(0, 60);
+
+  const output: JaspTableRow[] = [];
+
+  candidateColumns.forEach((column) => {
+    const values = nonEmptyValues(rows, column).map((value) => String(value));
+    const total = values.length;
+    const counts = new Map<string, number>();
+
+    values.forEach((value) => counts.set(value, (counts.get(value) ?? 0) + 1));
+
+    Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 50)
+      .forEach(([value, count]) => {
+        output.push({
+          variable: column,
+          value,
+          count,
+          percent: total > 0 ? roundStat((count / total) * 100, 2) : 0,
+          valid_percent: total > 0 ? roundStat((count / total) * 100, 2) : 0,
+        });
+      });
+  });
+
+  return output.length ? output : [{ variable: '', value: '', count: 0, percent: 0, valid_percent: 0 }];
+}
+
+function cronbachAlpha(rows: DataRow[], columns: string[]): {
+  alpha: number | null;
+  completeRows: number;
+  itemCount: number;
+  note: string;
+} {
+  if (columns.length < 2) {
+    return { alpha: null, completeRows: 0, itemCount: columns.length, note: 'Cronbachovo alfa vyžaduje minimálne 2 položky.' };
+  }
+
+  const itemValues = columns.map(() => [] as number[]);
+  const totals: number[] = [];
+
+  rows.forEach((row) => {
+    const values = columns.map((column) => toNumber(row[column]));
+    const numericValues = values.filter((value): value is number => value !== null);
+
+    if (numericValues.length !== columns.length) return;
+
+    numericValues.forEach((value, index) => {
+      itemValues[index].push(value);
+    });
+
+    totals.push(numericValues.reduce((sum, value) => sum + value, 0));
+  });
+
+  if (totals.length < 2) {
+    return { alpha: null, completeRows: totals.length, itemCount: columns.length, note: 'Na výpočet sú potrebné aspoň 2 kompletné riadky.' };
+  }
+
+  const totalVariance = sampleVariance(totals);
+  if (totalVariance === null || totalVariance <= 0) {
+    return { alpha: null, completeRows: totals.length, itemCount: columns.length, note: 'Rozptyl celkového skóre je nulový.' };
+  }
+
+  const itemVarianceSum = itemValues.reduce((sum, values) => sum + (sampleVariance(values) ?? 0), 0);
+  const k = columns.length;
+  const alpha = (k / (k - 1)) * (1 - itemVarianceSum / totalVariance);
+
+  return { alpha, completeRows: totals.length, itemCount: k, note: '' };
+}
+
+function interpretAlpha(alpha: number | null): string {
+  if (alpha === null || !Number.isFinite(alpha)) return 'nevypočítané';
+  if (alpha >= 0.9) return 'excellent';
+  if (alpha >= 0.8) return 'good';
+  if (alpha >= 0.7) return 'acceptable';
+  if (alpha >= 0.6) return 'questionable';
+  return 'low';
+}
+
+function createJaspReliability(rows: DataRow[], headers: string[], scoringItems: ScoringItem[]): JaspTableRow[] {
+  const runtime = createManualScoringRuntime(scoringItems, headers);
+  const output: JaspTableRow[] = [];
+
+  runtime.forEach((item) => {
+    if (item.matchedColumns.length < 2) {
+      output.push({
+        scale: item.item.skala,
+        items_requested: item.requestedItems.join(', '),
+        items_used: item.matchedColumns.join(', '),
+        items_missing: item.missingItems.join(', '),
+        cronbach_alpha: null,
+        n_complete: 0,
+        item_count: item.matchedColumns.length,
+        interpretation: 'nevypočítané',
+        note: 'Nenašli sa aspoň 2 položky. Skontrolujte názvy stĺpcov v DATA_CLEAN.',
+      });
+      return;
+    }
+
+    const alpha = cronbachAlpha(rows, item.matchedColumns);
+    output.push({
+      scale: item.item.skala,
+      items_requested: item.requestedItems.join(', '),
+      items_used: item.matchedColumns.join(', '),
+      items_missing: item.missingItems.join(', '),
+      cronbach_alpha: roundStat(alpha.alpha),
+      n_complete: alpha.completeRows,
+      item_count: alpha.itemCount,
+      interpretation: interpretAlpha(alpha.alpha),
+      note: alpha.note,
+    });
+  });
+
+  return output.length ? output : [{ scale: '', items_requested: '', items_used: '', items_missing: '', cronbach_alpha: null, n_complete: 0, item_count: 0, interpretation: 'nezadané', note: 'Reliabilita sa počíta iba pre používateľom zadané škály/subškály s minimálne 2 položkami.' }];
+}
+
+function normalCdf(x: number): number {
+  const sign = x < 0 ? -1 : 1;
+  const absX = Math.abs(x) / Math.sqrt(2);
+  const t = 1 / (1 + 0.3275911 * absX);
+  const a1 = 0.254829592;
+  const a2 = -0.284496736;
+  const a3 = 1.421413741;
+  const a4 = -1.453152027;
+  const a5 = 1.061405429;
+  const erf = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-absX * absX);
+  return 0.5 * (1 + sign * erf);
+}
+
+function logGamma(z: number): number {
+  const coefficients = [
+    676.5203681218851,
+    -1259.1392167224028,
+    771.32342877765313,
+    -176.61502916214059,
+    12.507343278686905,
+    -0.13857109526572012,
+    9.9843695780195716e-6,
+    1.5056327351493116e-7,
+  ];
+
+  if (z < 0.5) {
+    return Math.log(Math.PI) - Math.log(Math.sin(Math.PI * z)) - logGamma(1 - z);
+  }
+
+  let x = 0.99999999999980993;
+  const adjusted = z - 1;
+  coefficients.forEach((coefficient, index) => {
+    x += coefficient / (adjusted + index + 1);
+  });
+  const t = adjusted + coefficients.length - 0.5;
+  return 0.5 * Math.log(2 * Math.PI) + (adjusted + 0.5) * Math.log(t) - t + Math.log(x);
+}
+
+function betaContinuedFraction(x: number, a: number, b: number): number {
+  const maxIterations = 120;
+  const epsilon = 3e-7;
+  const fpMin = 1e-30;
+  let qab = a + b;
+  let qap = a + 1;
+  let qam = a - 1;
+  let c = 1;
+  let d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < fpMin) d = fpMin;
+  d = 1 / d;
+  let h = d;
+
+  for (let m = 1; m <= maxIterations; m += 1) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < fpMin) d = fpMin;
+    c = 1 + aa / c;
+    if (Math.abs(c) < fpMin) c = fpMin;
+    d = 1 / d;
+    h *= d * c;
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < fpMin) d = fpMin;
+    c = 1 + aa / c;
+    if (Math.abs(c) < fpMin) c = fpMin;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < epsilon) break;
+  }
+
+  return h;
+}
+
+function regularizedBeta(x: number, a: number, b: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+
+  const bt = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+  if (x < (a + 1) / (a + b + 2)) {
+    return (bt * betaContinuedFraction(x, a, b)) / a;
+  }
+  return 1 - (bt * betaContinuedFraction(1 - x, b, a)) / b;
+}
+
+function studentTCdf(t: number, df: number): number {
+  if (!Number.isFinite(t) || !Number.isFinite(df) || df <= 0) return NaN;
+  const x = df / (df + t * t);
+  const ib = regularizedBeta(x, df / 2, 0.5);
+  return t >= 0 ? 1 - 0.5 * ib : 0.5 * ib;
+}
+
+function fCdf(f: number, df1: number, df2: number): number {
+  if (f <= 0) return 0;
+  const x = (df1 * f) / (df1 * f + df2);
+  return regularizedBeta(x, df1 / 2, df2 / 2);
+}
+
+function gammaLowerRegularized(s: number, x: number): number {
+  if (x <= 0) return 0;
+  if (x < s + 1) {
+    let sum = 1 / s;
+    let term = sum;
+    for (let n = 1; n < 120; n += 1) {
+      term *= x / (s + n);
+      sum += term;
+      if (Math.abs(term) < Math.abs(sum) * 1e-8) break;
+    }
+    return sum * Math.exp(-x + s * Math.log(x) - logGamma(s));
+  }
+
+  let b = x + 1 - s;
+  let c = 1 / 1e-30;
+  let d = 1 / b;
+  let h = d;
+  for (let i = 1; i < 120; i += 1) {
+    const an = -i * (i - s);
+    b += 2;
+    d = an * d + b;
+    if (Math.abs(d) < 1e-30) d = 1e-30;
+    c = b + an / c;
+    if (Math.abs(c) < 1e-30) c = 1e-30;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 1e-8) break;
+  }
+  return 1 - Math.exp(-x + s * Math.log(x) - logGamma(s)) * h;
+}
+
+function chiSquarePValue(chiSquare: number, df: number): number | null {
+  if (!Number.isFinite(chiSquare) || !Number.isFinite(df) || df <= 0) return null;
+  return 1 - gammaLowerRegularized(df / 2, chiSquare / 2);
+}
+
+function createJaspNormality(headers: string[], rows: DataRow[]): JaspTableRow[] {
+  return getNumericAnalysisColumns(headers, rows).map((column) => {
+    const values = numericValues(rows, column);
+    const skewness = computeSkewness(values);
+    const kurtosis = computeKurtosisExcess(values);
+    const n = values.length;
+    const jb = n > 0 && skewness !== null && kurtosis !== null
+      ? (n / 6) * (skewness ** 2 + (kurtosis ** 2) / 4)
+      : null;
+    const p = jb !== null ? chiSquarePValue(jb, 2) : null;
+
+    return {
+      variable: column,
+      test: 'Jarque-Bera normality screen',
+      statistic: roundStat(jb),
+      p: compactPValue(p),
+      normality_flag: p === null ? '' : p >= 0.05 ? 'compatible with normality' : 'deviation from normality',
+      n,
+      skewness: roundStat(skewness),
+      kurtosis: roundStat(kurtosis),
+      note: 'JASP-style normality table. Exact JASP Shapiro-Wilk is not used in this route; this is a server-side approximation for automated screening.',
+    };
+  });
+}
+
+function pearsonCorrelation(x: number[], y: number[]): number | null {
+  if (x.length !== y.length || x.length < 3) return null;
+  const mx = mean(x);
+  const my = mean(y);
+  if (mx === null || my === null) return null;
+  const sx = standardDeviation(x);
+  const sy = standardDeviation(y);
+  if (sx === null || sy === null || sx === 0 || sy === 0) return null;
+  const covariance = x.reduce((sum, value, index) => sum + (value - mx) * (y[index] - my), 0) / (x.length - 1);
+  return covariance / (sx * sy);
+}
+
+function ranks(values: number[]): number[] {
+  const indexed = values.map((value, index) => ({ value, index })).sort((a, b) => a.value - b.value);
+  const output = new Array(values.length).fill(0);
+  let i = 0;
+  while (i < indexed.length) {
+    let j = i;
+    while (j + 1 < indexed.length && indexed[j + 1].value === indexed[i].value) j += 1;
+    const averageRank = (i + j + 2) / 2;
+    for (let k = i; k <= j; k += 1) output[indexed[k].index] = averageRank;
+    i = j + 1;
+  }
+  return output;
+}
+
+function createJaspCorrelations(headers: string[], rows: DataRow[]): JaspTableRow[] {
+  const columns = getNumericAnalysisColumns(headers, rows).slice(0, 30);
+  const output: JaspTableRow[] = [];
+
+  for (let i = 0; i < columns.length; i += 1) {
+    for (let j = i + 1; j < columns.length; j += 1) {
+      const a = columns[i];
+      const b = columns[j];
+      const pairs = rows
+        .map((row) => [toNumber(row[a]), toNumber(row[b])] as [number | null, number | null])
+        .filter((pair): pair is [number, number] => pair[0] !== null && pair[1] !== null);
+      if (pairs.length < 3) continue;
+
+      const x = pairs.map((pair) => pair[0]);
+      const y = pairs.map((pair) => pair[1]);
+      const r = pearsonCorrelation(x, y);
+      const t = r !== null && Math.abs(r) < 1 ? r * Math.sqrt((pairs.length - 2) / (1 - r * r)) : null;
+      const p = t !== null ? 2 * (1 - studentTCdf(Math.abs(t), pairs.length - 2)) : null;
+      const rx = ranks(x);
+      const ry = ranks(y);
+      const rho = pearsonCorrelation(rx, ry);
+      const ts = rho !== null && Math.abs(rho) < 1 ? rho * Math.sqrt((pairs.length - 2) / (1 - rho * rho)) : null;
+      const ps = ts !== null ? 2 * (1 - studentTCdf(Math.abs(ts), pairs.length - 2)) : null;
+
+      output.push({
+        variable_a: a,
+        variable_b: b,
+        n: pairs.length,
+        pearson_r: roundStat(r),
+        pearson_p: compactPValue(p),
+        spearman_rho: roundStat(rho),
+        spearman_p: compactPValue(ps),
+      });
+    }
+  }
+
+  return output.length ? output : [{ variable_a: '', variable_b: '', n: 0, pearson_r: null, pearson_p: '', spearman_rho: null, spearman_p: '' }];
+}
+
+function groupedNumericValues(rows: DataRow[], groupColumn: string, numericColumn: string): Array<{ group: string; values: number[] }> {
+  const groups = new Map<string, number[]>();
+
+  rows.forEach((row) => {
+    const groupValue = row[groupColumn];
+    const numeric = toNumber(row[numericColumn]);
+    if (isEmptyCell(groupValue) || numeric === null) return;
+    const group = String(groupValue);
+    const values = groups.get(group) ?? [];
+    values.push(numeric);
+    groups.set(group, values);
+  });
+
+  return Array.from(groups.entries())
+    .map(([group, values]) => ({ group, values }))
+    .filter((item) => item.values.length >= 2)
+    .sort((a, b) => a.group.localeCompare(b.group));
+}
+
+function welchTTest(groupA: number[], groupB: number[]): { t: number | null; df: number | null; p: number | null; d: number | null } {
+  const m1 = mean(groupA);
+  const m2 = mean(groupB);
+  const v1 = sampleVariance(groupA);
+  const v2 = sampleVariance(groupB);
+  if (m1 === null || m2 === null || v1 === null || v2 === null) return { t: null, df: null, p: null, d: null };
+  const n1 = groupA.length;
+  const n2 = groupB.length;
+  const se = Math.sqrt(v1 / n1 + v2 / n2);
+  if (se === 0) return { t: null, df: null, p: null, d: null };
+  const t = (m1 - m2) / se;
+  const df = ((v1 / n1 + v2 / n2) ** 2) / (((v1 / n1) ** 2) / (n1 - 1) + ((v2 / n2) ** 2) / (n2 - 1));
+  const p = 2 * (1 - studentTCdf(Math.abs(t), df));
+  const pooled = Math.sqrt(((n1 - 1) * v1 + (n2 - 1) * v2) / (n1 + n2 - 2));
+  const d = pooled > 0 ? (m1 - m2) / pooled : null;
+  return { t, df, p, d };
+}
+
+function oneWayAnova(groups: Array<{ group: string; values: number[] }>): { f: number | null; df1: number; df2: number; p: number | null; eta2: number | null } {
+  const allValues = groups.flatMap((group) => group.values);
+  const grandMean = mean(allValues);
+  if (grandMean === null || groups.length < 2) return { f: null, df1: groups.length - 1, df2: allValues.length - groups.length, p: null, eta2: null };
+  const ssBetween = groups.reduce((sum, group) => {
+    const groupMean = mean(group.values);
+    return groupMean === null ? sum : sum + group.values.length * (groupMean - grandMean) ** 2;
+  }, 0);
+  const ssWithin = groups.reduce((sum, group) => {
+    const groupMean = mean(group.values);
+    return groupMean === null ? sum : sum + group.values.reduce((inner, value) => inner + (value - groupMean) ** 2, 0);
+  }, 0);
+  const df1 = groups.length - 1;
+  const df2 = allValues.length - groups.length;
+  if (df1 <= 0 || df2 <= 0 || ssWithin <= 0) return { f: null, df1, df2, p: null, eta2: null };
+  const f = (ssBetween / df1) / (ssWithin / df2);
+  const p = 1 - fCdf(f, df1, df2);
+  const eta2 = (ssBetween + ssWithin) > 0 ? ssBetween / (ssBetween + ssWithin) : null;
+  return { f, df1, df2, p, eta2 };
+}
+
+function createJaspParametricTests(headers: string[], rows: DataRow[], questionnaireConfig: QuestionnaireConfig): JaspTableRow[] {
+  const numericColumns = getNumericAnalysisColumns(headers, rows).slice(0, 30);
+  const groupColumns = getGroupingColumns(headers, rows, questionnaireConfig).slice(0, 10);
+  const output: JaspTableRow[] = [];
+
+  groupColumns.forEach((groupColumn) => {
+    numericColumns.forEach((numericColumn) => {
+      if (groupColumn === numericColumn) return;
+      const groups = groupedNumericValues(rows, groupColumn, numericColumn).filter((group) => group.values.length >= 2);
+      if (groups.length === 2) {
+        const test = welchTTest(groups[0].values, groups[1].values);
+        output.push({
+          test: 'Welch independent samples t-test',
+          dependent: numericColumn,
+          factor: groupColumn,
+          groups: groups.map((group) => `${group.group} (n=${group.values.length})`).join(' | '),
+          statistic: roundStat(test.t),
+          df: roundStat(test.df),
+          p: compactPValue(test.p),
+          effect: roundStat(test.d),
+          effect_name: 'Cohen d',
+          mean_group_1: roundStat(mean(groups[0].values)),
+          mean_group_2: roundStat(mean(groups[1].values)),
+        });
+      } else if (groups.length >= 3 && groups.length <= 10) {
+        const test = oneWayAnova(groups);
+        output.push({
+          test: 'One-way ANOVA',
+          dependent: numericColumn,
+          factor: groupColumn,
+          groups: groups.map((group) => `${group.group} (n=${group.values.length})`).join(' | '),
+          statistic: roundStat(test.f),
+          df: `${test.df1}, ${test.df2}`,
+          p: compactPValue(test.p),
+          effect: roundStat(test.eta2),
+          effect_name: 'eta squared',
+          mean_group_1: '',
+          mean_group_2: '',
+        });
+      }
+    });
+  });
+
+  return output.length ? output : [{ test: '', dependent: '', factor: '', groups: '', statistic: null, df: '', p: '', effect: null, effect_name: '', mean_group_1: '', mean_group_2: '' }];
+}
+
+function mannWhitney(groupA: number[], groupB: number[]): { u: number | null; z: number | null; p: number | null; effect: number | null } {
+  const combined = [...groupA.map((value) => ({ value, group: 1 })), ...groupB.map((value) => ({ value, group: 2 }))];
+  const rankValues = ranks(combined.map((item) => item.value));
+  const r1 = rankValues.reduce((sum, rank, index) => sum + (combined[index].group === 1 ? rank : 0), 0);
+  const n1 = groupA.length;
+  const n2 = groupB.length;
+  const u1 = r1 - (n1 * (n1 + 1)) / 2;
+  const u2 = n1 * n2 - u1;
+  const u = Math.min(u1, u2);
+  const meanU = (n1 * n2) / 2;
+  const sdU = Math.sqrt((n1 * n2 * (n1 + n2 + 1)) / 12);
+  if (sdU === 0) return { u, z: null, p: null, effect: null };
+  const z = (u - meanU) / sdU;
+  const p = 2 * (1 - normalCdf(Math.abs(z)));
+  const effect = 1 - (2 * u) / (n1 * n2);
+  return { u, z, p, effect };
+}
+
+function kruskalWallis(groups: Array<{ group: string; values: number[] }>): { h: number | null; df: number; p: number | null; effect: number | null } {
+  const combined: Array<{ value: number; groupIndex: number }> = [];
+  groups.forEach((group, groupIndex) => group.values.forEach((value) => combined.push({ value, groupIndex })));
+  if (groups.length < 2 || combined.length <= groups.length) return { h: null, df: groups.length - 1, p: null, effect: null };
+  const rankValues = ranks(combined.map((item) => item.value));
+  const n = combined.length;
+  let sum = 0;
+  groups.forEach((group, groupIndex) => {
+    const rankSum = rankValues.reduce((inner, rank, index) => inner + (combined[index].groupIndex === groupIndex ? rank : 0), 0);
+    sum += (rankSum ** 2) / group.values.length;
+  });
+  const h = (12 / (n * (n + 1))) * sum - 3 * (n + 1);
+  const df = groups.length - 1;
+  const p = chiSquarePValue(h, df);
+  const effect = n > groups.length ? (h - groups.length + 1) / (n - groups.length) : null;
+  return { h, df, p, effect };
+}
+
+function createJaspNonParametricTests(headers: string[], rows: DataRow[], questionnaireConfig: QuestionnaireConfig): JaspTableRow[] {
+  const numericColumns = getNumericAnalysisColumns(headers, rows).slice(0, 30);
+  const groupColumns = getGroupingColumns(headers, rows, questionnaireConfig).slice(0, 10);
+  const output: JaspTableRow[] = [];
+
+  groupColumns.forEach((groupColumn) => {
+    numericColumns.forEach((numericColumn) => {
+      if (groupColumn === numericColumn) return;
+      const groups = groupedNumericValues(rows, groupColumn, numericColumn).filter((group) => group.values.length >= 2);
+      if (groups.length === 2) {
+        const test = mannWhitney(groups[0].values, groups[1].values);
+        output.push({
+          test: 'Mann-Whitney U',
+          dependent: numericColumn,
+          factor: groupColumn,
+          groups: groups.map((group) => `${group.group} (n=${group.values.length})`).join(' | '),
+          statistic: roundStat(test.u),
+          z: roundStat(test.z),
+          df: '',
+          p: compactPValue(test.p),
+          effect: roundStat(test.effect),
+          effect_name: 'rank-biserial correlation',
+          median_group_1: roundStat(median(groups[0].values)),
+          median_group_2: roundStat(median(groups[1].values)),
+        });
+      } else if (groups.length >= 3 && groups.length <= 10) {
+        const test = kruskalWallis(groups);
+        output.push({
+          test: 'Kruskal-Wallis H',
+          dependent: numericColumn,
+          factor: groupColumn,
+          groups: groups.map((group) => `${group.group} (n=${group.values.length})`).join(' | '),
+          statistic: roundStat(test.h),
+          z: '',
+          df: test.df,
+          p: compactPValue(test.p),
+          effect: roundStat(test.effect),
+          effect_name: 'epsilon squared',
+          median_group_1: '',
+          median_group_2: '',
+        });
+      }
+    });
+  });
+
+  return output.length ? output : [{ test: '', dependent: '', factor: '', groups: '', statistic: null, z: '', df: '', p: '', effect: null, effect_name: '', median_group_1: '', median_group_2: '' }];
+}
+
+function createJaspTestSelection(headers: string[], rows: DataRow[], questionnaireConfig: QuestionnaireConfig): JaspTableRow[] {
+  const numericColumns = getNumericAnalysisColumns(headers, rows);
+  const groupColumns = getGroupingColumns(headers, rows, questionnaireConfig);
+  const output: JaspTableRow[] = [];
+
+  numericColumns.forEach((column) => {
+    output.push({ role: 'Dependent / Scale variable', variable: column, measure: getJaspMeasureType(column, rows), valid: numericValues(rows, column).length, note: 'Premenná použitá v deskriptíve, normalite, koreláciách a testoch rozdielov.' });
+  });
+
+  groupColumns.forEach((column) => {
+    output.push({ role: 'Factor / Grouping variable', variable: column, measure: getJaspMeasureType(column, rows), valid: nonEmptyValues(rows, column).length, note: `Počet skupín: ${uniqueValues(rows, column).length}.` });
+  });
+
+  return output;
+}
+
+function createJaspWarnings(headers: string[], rows: DataRow[], questionnaireConfig: QuestionnaireConfig, scoringItems: ScoringItem[]): JaspTableRow[] {
+  const warnings: string[] = [];
+  const numericColumns = getNumericAnalysisColumns(headers, rows);
+  const groupColumns = getGroupingColumns(headers, rows, questionnaireConfig);
+
+  if (numericColumns.length === 0) warnings.push('Neboli identifikované číselné premenné vhodné na štatistiku.');
+  if (groupColumns.length === 0) warnings.push('Neboli zadané ani automaticky nájdené skupinové premenné. Parametrické a neparametrické testy rozdielov nebudú dostupné.');
+  if (scoringItems.length === 0) warnings.push('Neboli zadané škály/subškály, preto reliabilita nebude vypočítaná.');
+
+  const highMissingColumns = headers.filter((column) => {
+    const missing = rows.length - nonEmptyValues(rows, column).length;
+    return rows.length > 0 && missing / rows.length > 0.25;
+  });
+
+  if (highMissingColumns.length > 0) {
+    warnings.push(`Premenné s viac ako 25 % chýbajúcich hodnôt: ${highMissingColumns.slice(0, 20).join(', ')}.`);
+  }
+
+  return warnings.length
+    ? warnings.map((warning, index) => ({ id: index + 1, warning, severity: 'warning' }))
+    : [{ id: 1, warning: 'Bez zásadných upozornení.', severity: 'ok' }];
+}
+
+function buildJaspAnalysis(params: {
+  fileName: string;
+  rows: DataRow[];
+  headers: string[];
+  scoringItems: ScoringItem[];
+  questionnaireConfig: QuestionnaireConfig;
+}): JaspAnalysisResult {
+  const numericColumns = getNumericAnalysisColumns(params.headers, params.rows);
+  const groupingColumns = getGroupingColumns(params.headers, params.rows, params.questionnaireConfig);
+
+  return {
+    summary: createJaspSummary({
+      fileName: params.fileName,
+      rows: params.rows,
+      headers: params.headers,
+      scoringItems: params.scoringItems,
+      numericColumns,
+      groupingColumns,
+    }),
+    variables: createJaspVariables(params.headers, params.rows),
+    descriptives: createJaspDescriptives(params.headers, params.rows),
+    frequencies: createJaspFrequencies(params.headers, params.rows),
+    reliability: createJaspReliability(params.rows, params.headers, params.scoringItems),
+    normality: createJaspNormality(params.headers, params.rows),
+    correlations: createJaspCorrelations(params.headers, params.rows),
+    parametricTests: createJaspParametricTests(params.headers, params.rows, params.questionnaireConfig),
+    nonParametricTests: createJaspNonParametricTests(params.headers, params.rows, params.questionnaireConfig),
+    testSelection: createJaspTestSelection(params.headers, params.rows, params.questionnaireConfig),
+    warnings: createJaspWarnings(params.headers, params.rows, params.questionnaireConfig, params.scoringItems),
+  };
+}
+
 function createReadmeRows(): Array<Record<string, string>> {
   return [
     {
@@ -1931,6 +2981,61 @@ function createReadmeRows(): Array<Record<string, string>> {
       cast: 'QUALITY_REPORT',
       popis:
         'Kontrola kvality pripraveného súboru pred spustením štatistiky.',
+    },
+    {
+      cast: 'JASP_SUMMARY',
+      popis:
+        'Prehľad JASP-like analýzy: počet premenných, riadkov, škál, skupinových premenných a číselných premenných.',
+    },
+    {
+      cast: 'JASP_VARIABLES',
+      popis:
+        'JASP-like prehľad premenných s meracou úrovňou Scale / Ordinal / Nominal / Text.',
+    },
+    {
+      cast: 'JASP_DESCRIPTIVES',
+      popis:
+        'Deskriptívna štatistika pre všetky vhodné číselné premenné: mean, SD, median, IQR, min, max, šikmosť, špicatosť a CI.',
+    },
+    {
+      cast: 'JASP_FREQUENCIES',
+      popis:
+        'Frekvenčné tabuľky pre kategorizované a nízkokardinálne premenné.',
+    },
+    {
+      cast: 'JASP_RELIABILITY',
+      popis:
+        'Reliabilita škál a subškál: Cronbachovo alfa, počet položiek, kompletné riadky a interpretácia.',
+    },
+    {
+      cast: 'JASP_NORMALITY',
+      popis:
+        'Normalitné skríningové tabuľky pre číselné premenné.',
+    },
+    {
+      cast: 'JASP_CORRELATIONS',
+      popis:
+        'Pearsonove a Spearmanove korelácie medzi číselnými premennými.',
+    },
+    {
+      cast: 'JASP_PARAMETRIC',
+      popis:
+        'Parametrické testy rozdielov: Welchov t-test pre 2 skupiny a jednofaktorová ANOVA pre 3 a viac skupín.',
+    },
+    {
+      cast: 'JASP_NONPARAMETRIC',
+      popis:
+        'Neparametrické testy rozdielov: Mann-Whitney U pre 2 skupiny a Kruskal-Wallis H pre 3 a viac skupín.',
+    },
+    {
+      cast: 'JASP_TEST_SELECTION',
+      popis:
+        'Automatický výber závislých, škálových a skupinových premenných použitých vo výpočtoch.',
+    },
+    {
+      cast: 'JASP_WARNINGS',
+      popis:
+        'Upozornenia k dátam, chýbajúcim hodnotám, škálam, skupinám a výpočtom.',
     },
     {
       cast: 'DÔLEŽITÉ',
@@ -1990,7 +3095,9 @@ function addWorksheetFromJson<T extends Record<string, unknown>>(
   name: string,
   rows: T[],
 ) {
-  const worksheet = XLSX.utils.json_to_sheet(rows.length ? rows : [{}]);
+  const worksheet = XLSX.utils.json_to_sheet(
+    (rows.length ? rows : [{}]) as Record<string, unknown>[],
+  );
   XLSX.utils.book_append_sheet(workbook, worksheet, normalizeSheetName(name));
 }
 
@@ -2001,6 +3108,7 @@ function buildPreparedWorkbook(params: {
   scoringItems: ScoringItem[];
   qualityReport: QualityReportItem[];
   questionnaireConfig: QuestionnaireConfig;
+  jaspAnalysis: JaspAnalysisResult;
 }): XLSX.WorkBook {
   const workbook = XLSX.utils.book_new();
 
@@ -2018,6 +3126,17 @@ function buildPreparedWorkbook(params: {
     createQuestionnaireSetupRows(params.questionnaireConfig),
   );
   addWorksheetFromJson(workbook, 'QUALITY_REPORT', params.qualityReport);
+  addWorksheetFromJson(workbook, 'JASP_SUMMARY', params.jaspAnalysis.summary);
+  addWorksheetFromJson(workbook, 'JASP_VARIABLES', params.jaspAnalysis.variables);
+  addWorksheetFromJson(workbook, 'JASP_DESCRIPTIVES', params.jaspAnalysis.descriptives);
+  addWorksheetFromJson(workbook, 'JASP_FREQUENCIES', params.jaspAnalysis.frequencies);
+  addWorksheetFromJson(workbook, 'JASP_RELIABILITY', params.jaspAnalysis.reliability);
+  addWorksheetFromJson(workbook, 'JASP_NORMALITY', params.jaspAnalysis.normality);
+  addWorksheetFromJson(workbook, 'JASP_CORRELATIONS', params.jaspAnalysis.correlations);
+  addWorksheetFromJson(workbook, 'JASP_PARAMETRIC', params.jaspAnalysis.parametricTests);
+  addWorksheetFromJson(workbook, 'JASP_NONPARAMETRIC', params.jaspAnalysis.nonParametricTests);
+  addWorksheetFromJson(workbook, 'JASP_TEST_SELECTION', params.jaspAnalysis.testSelection);
+  addWorksheetFromJson(workbook, 'JASP_WARNINGS', params.jaspAnalysis.warnings);
   addWorksheetFromJson(workbook, 'README', createReadmeRows());
 
   return workbook;
@@ -2096,7 +3215,7 @@ export async function POST(request: Request) {
         {
           ok: false,
           message: 'Súbor neobsahuje dáta.',
-          error: 'Prvý hárok je prázdny alebo sa ho nepodarilo načítať.',
+          error: 'Žiadny hárok neobsahuje čitateľnú tabuľku alebo sa dáta nepodarilo načítať.',
         },
         400,
       );
@@ -2140,6 +3259,14 @@ export async function POST(request: Request) {
       scoringItems: scoringResult.scoringItems,
     });
 
+    const jaspAnalysis = buildJaspAnalysis({
+      fileName: file.name || 'data.xlsx',
+      rows: scoringResult.rows,
+      headers: scoringResult.headers,
+      scoringItems: scoringResult.scoringItems,
+      questionnaireConfig,
+    });
+
     const preparedWorkbook = buildPreparedWorkbook({
       rawRows: converted.rawRows,
       cleanRows: scoringResult.rows,
@@ -2147,6 +3274,7 @@ export async function POST(request: Request) {
       scoringItems: scoringResult.scoringItems,
       qualityReport,
       questionnaireConfig,
+      jaspAnalysis,
     });
 
     const preparedBuffer = XLSX.write(preparedWorkbook, {
@@ -2161,7 +3289,7 @@ export async function POST(request: Request) {
     return createJsonResponse({
       ok: true,
       message:
-        'Súbor bol pripravený podľa vzoru. Štatistiku spúšťajte až nad listom DATA_CLEAN z pripraveného súboru.',
+        'Súbor bol pripravený v JASP-like štruktúre pre ľubovoľnú databázu. Výstup obsahuje DATA_CLEAN aj samostatné hárky pre deskriptívu, frekvencie, reliabilitu, normalitu, korelácie, parametrické a neparametrické testy.',
       preparedFileName,
       preparedFileBase64,
       mimeType: EXCEL_MIME_TYPE,
@@ -2174,11 +3302,23 @@ export async function POST(request: Request) {
         'SCORING',
         'QUESTIONNAIRE_SETUP',
         'QUALITY_REPORT',
+        'JASP_SUMMARY',
+        'JASP_VARIABLES',
+        'JASP_DESCRIPTIVES',
+        'JASP_FREQUENCIES',
+        'JASP_RELIABILITY',
+        'JASP_NORMALITY',
+        'JASP_CORRELATIONS',
+        'JASP_PARAMETRIC',
+        'JASP_NONPARAMETRIC',
+        'JASP_TEST_SELECTION',
+        'JASP_WARNINGS',
         'README',
       ],
       warnings: finalWarnings,
       qualityReport,
       questionnaireConfig,
+      jaspSummary: jaspAnalysis.summary,
     });
   } catch (error) {
     const message =

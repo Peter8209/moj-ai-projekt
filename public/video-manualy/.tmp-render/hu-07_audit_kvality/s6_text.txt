@@ -1,0 +1,1 @@
+A fő gomb elindítja a feldolgozást.

@@ -1,0 +1,44 @@
+1
+00:00:00,000 --> 00:00:06,400
+Védés
+Prezentáció, bizottsági kérdések és ajánlott válaszok készítése.
+
+2
+00:00:06,500 --> 00:00:12,900
+Lépés 1 / 7
+A bal menü vált az alkalmazás fő részei között.
+
+3
+00:00:13,000 --> 00:00:19,399
+Lépés 2 / 7
+A felső modulváltó kiválasztja az aktív eszközt.
+
+4
+00:00:19,500 --> 00:00:25,899
+Lépés 3 / 7
+A lila kiemelés mutatja a kiválasztott modult.
+
+5
+00:00:26,000 --> 00:00:32,399
+Lépés 4 / 7
+Az Attachments PDF, DOCX, Excel, CSV, PPT vagy képeket tölt fel.
+
+6
+00:00:32,500 --> 00:00:38,899
+Lépés 5 / 7
+A nagy beviteli mezőbe szöveg, feladat, kérdés vagy adat kerül.
+
+7
+00:00:39,000 --> 00:00:45,399
+Lépés 6 / 7
+A fő gomb elindítja a feldolgozást.
+
+8
+00:00:45,500 --> 00:00:51,899
+Lépés 7 / 7
+A Dictate, Canvas és Clear segíti a bevitelt.
+
+9
+00:00:52,000 --> 00:00:58,399
+A modul bemutatva
+A felhasználó tudja, hol találja a modult, mely részeket használja és hogyan folytassa a munkát.

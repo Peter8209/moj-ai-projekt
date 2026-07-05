@@ -1,0 +1,3 @@
+The large input field is where text,
+assignment, question or data is
+entered.

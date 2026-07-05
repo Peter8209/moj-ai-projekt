@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Wylogowanie
+Bezpieczne zakończenie pracy na koncie użytkownika.
+
+2
+00:00:06,500 --> 00:00:12,900
+Krok 1 z 6
+Lewe menu szybko przełącza moduły.
+
+3
+00:00:13,000 --> 00:00:19,399
+Krok 2 z 6
+Górny panel pokazuje nazwę i cel sekcji.
+
+4
+00:00:19,500 --> 00:00:25,899
+Krok 3 z 6
+Pierwsza karta pokazuje główne informacje i opcje.
+
+5
+00:00:26,000 --> 00:00:32,399
+Krok 4 z 6
+Druga karta pokazuje dodatkowe ustawienia lub status.
+
+6
+00:00:32,500 --> 00:00:38,899
+Krok 5 z 6
+Główna przestrzeń zawiera wyniki, listy lub rekomendacje.
+
+7
+00:00:39,000 --> 00:00:45,399
+Krok 6 z 6
+Użytkownik może zapisać, otworzyć lub wrócić do menu.
+
+8
+00:00:45,500 --> 00:00:51,899
+Moduł wyjaśniony
+Użytkownik wie, gdzie znaleźć moduł, które części obsługiwać i jak kontynuować pracę.

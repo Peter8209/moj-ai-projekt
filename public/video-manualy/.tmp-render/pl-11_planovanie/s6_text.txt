@@ -1,0 +1,2 @@
+Główny przycisk uruchamia
+przetwarzanie.

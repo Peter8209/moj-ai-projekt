@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Historie chatu
+Uložené konverzace, výstupy, osnovy, kapitoly a audity.
+
+2
+00:00:06,500 --> 00:00:12,900
+Krok 1 z 6
+Nadpis Chat History zobrazuje sekci uložených konverzací a předchozích výstupů.
+
+3
+00:00:13,000 --> 00:00:19,399
+Krok 2 z 6
+Return to Menu vrátí uživatele do hlavního menu a Refresh obnoví seznam konverzací.
+
+4
+00:00:19,500 --> 00:00:25,899
+Krok 3 z 6
+Vyhledávací pole filtruje historii podle názvu, obsahu nebo části požadavku.
+
+5
+00:00:26,000 --> 00:00:32,399
+Krok 4 z 6
+Panel Uložené konverzace zobrazuje celkový počet záznamů a seznam předchozích výstupů.
+
+6
+00:00:32,500 --> 00:00:38,899
+Krok 5 z 6
+Každý záznam obsahuje název, ukázku uživatelské otázky, ukázku odpovědi a datum vytvoření.
+
+7
+00:00:39,000 --> 00:00:45,399
+Krok 6 z 6
+Akční tlačítka u záznamu slouží k otevření, pokračování nebo odstranění konkrétní konverzace.
+
+8
+00:00:45,500 --> 00:00:51,899
+Modul je vysvětlen
+Uživatel ví, kde modul najde, které části ovládá a jak pokračuje v práci.

@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Źródła i cytowania
+Praca z literaturą, artykułami naukowymi i bibliografią.
+
+2
+00:00:06,500 --> 00:00:12,900
+Krok 1 z 6
+Przycisk Menu w górnym pasku przenosi użytkownika z powrotem do głównego menu aplikacji.
+
+3
+00:00:13,000 --> 00:00:19,399
+Krok 2 z 6
+Nagłówek Academic Resources & Citations oznacza sekcję poświęconą literaturze, źródłom i materiałom cytowań.
+
+4
+00:00:19,500 --> 00:00:25,899
+Krok 3 z 6
+Pole wyszukiwania służy do wpisania tematu pracy, słowa kluczowego lub pytania badawczego.
+
+5
+00:00:26,000 --> 00:00:32,399
+Krok 4 z 6
+Sugerowane tagi pomagają szybko wstawić popularne tematy i obszary specjalistyczne.
+
+6
+00:00:32,500 --> 00:00:38,899
+Krok 5 z 6
+Filtry PDF Only, Last 2 Years, Last 5 Years oraz zakresy dat doprecyzowują typ i aktualność źródeł.
+
+7
+00:00:39,000 --> 00:00:45,399
+Krok 6 z 6
+Search uruchamia wyszukiwanie źródeł akademickich, a Reset czyści ustawione filtry.
+
+8
+00:00:45,500 --> 00:00:51,899
+Moduł wyjaśniony
+Użytkownik wie, gdzie znaleźć moduł, które części obsługiwać i jak kontynuować pracę.

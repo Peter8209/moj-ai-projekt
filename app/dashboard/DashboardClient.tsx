@@ -192,24 +192,8 @@ const QUESTIONNAIRE_TEXTS: Record<QuestionnaireLanguage, QuestionnaireText> = {
     description:
       'Štandardizovaných dotazníkov je veľa, preto nepoužívame pevné kartičky dotazníkov. Zadajte vlastné škály, subškály a skupinové premenné nižšie.',
     options: [
-  {
-    value: '',
-    label: 'Neviem / iba navrhnúť',
-    description:
-      'Systém nebude automaticky počítať pevný dotazník. Použije iba škály a subškály zadané nižšie.',
-  },
-  {
-    value: 'none',
-    label: 'Bez škál a subškál',
-    description:
-      'Použije sa iba frekvenčná analýza položiek a všeobecná deskriptívna štatistika.',
-  },
-  {
-    value: 'custom',
-    label: 'Vlastné škály a subškály',
-    description:
-      'Používateľ zadá názvy škál, subškál, položky a skupinové premenné.',
-  },
+  
+
 ],
 
     customLabel: 'Vlastná metodika / poznámka k škálam',
@@ -4137,6 +4121,7 @@ const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
   allowUnconfirmedStandardizedQuestionnaires: false,
 } as any);
 
+
   const normalized = {
     ok: true,
     title: 'Výsledky analýzy dát',
@@ -5890,10 +5875,7 @@ const downloadExcel = () => {
           Zadajte škály, subškály a skupinové premenné
         </h3>
 
-        <p className="max-w-3xl text-sm font-bold leading-6 text-slate-300">
-          Vyberte jeden alebo viac manuálnych škál iba vtedy, ak ich databáza naozaj obsahuje.
-          Bez potvrdenia sa celkové skóre ani pracovná spokojnosť nebudú počítať automaticky.
-        </p>
+      
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">

@@ -1,0 +1,2 @@
+A bal menü vált az alkalmazás fő
+részei között.

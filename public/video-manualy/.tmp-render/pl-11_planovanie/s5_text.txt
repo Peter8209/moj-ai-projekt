@@ -1,0 +1,2 @@
+Duże pole wejściowe przyjmuje tekst,
+zadanie, pytanie lub dane.

@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Text Humanization
+Rewrite text into a more natural academic style.
+
+2
+00:00:06,500 --> 00:00:12,900
+Step 1 of 6
+The left menu keeps orientation across the application and allows quick access to other modules.
+
+3
+00:00:13,000 --> 00:00:19,399
+Step 2 of 6
+The module switcher highlights Text Humanization as the active section.
+
+4
+00:00:19,500 --> 00:00:25,899
+Step 3 of 6
+The large text area is used to insert text that should become more natural, fluent and less machine-like.
+
+5
+00:00:26,000 --> 00:00:32,399
+Step 4 of 6
+The Humanize Text button starts a professional rewrite into a natural academic style.
+
+6
+00:00:32,500 --> 00:00:38,899
+Step 5 of 6
+Dictate lets the user input text by voice instead of typing.
+
+7
+00:00:39,000 --> 00:00:45,399
+Step 6 of 6
+Canvas opens a convenient workspace for longer text and Clear removes the current content.
+
+8
+00:00:45,500 --> 00:00:51,899
+Module explained
+The user knows where to find the module, which parts to use and how to continue working.

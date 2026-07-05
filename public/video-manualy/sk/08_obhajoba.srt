@@ -1,0 +1,44 @@
+1
+00:00:00,000 --> 00:00:06,400
+Obhajoba
+Príprava prezentácie, otázok komisie a odporúčaných odpovedí.
+
+2
+00:00:06,500 --> 00:00:12,900
+Krok 1 z 7
+Ľavé menu umožňuje prepínať medzi hlavnými časťami aplikácie.
+
+3
+00:00:13,000 --> 00:00:19,399
+Krok 2 z 7
+Modulový prepínač hore určuje aktívny nástroj.
+
+4
+00:00:19,500 --> 00:00:25,899
+Krok 3 z 7
+Fialové zvýraznenie ukazuje vybraný modul.
+
+5
+00:00:26,000 --> 00:00:32,399
+Krok 4 z 7
+Sekcia Attachments umožňuje nahrať PDF, DOCX, Excel, CSV, PPT alebo obrázky.
+
+6
+00:00:32,500 --> 00:00:38,899
+Krok 5 z 7
+Veľké vstupné pole je miesto pre text, zadanie, otázku alebo dáta.
+
+7
+00:00:39,000 --> 00:00:45,399
+Krok 6 z 7
+Hlavné tlačidlo spustí spracovanie vybraného modulu.
+
+8
+00:00:45,500 --> 00:00:51,899
+Krok 7 z 7
+Doplnkové tlačidlá Dictate, Canvas a Clear pomáhajú s ovládaním vstupu.
+
+9
+00:00:52,000 --> 00:00:58,399
+Modul je vysvetlený
+Používateľ vie, kde modul nájde, ktoré časti ovláda a ako pokračuje v práci.

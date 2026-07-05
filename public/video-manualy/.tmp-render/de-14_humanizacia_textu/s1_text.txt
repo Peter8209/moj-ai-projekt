@@ -1,0 +1,3 @@
+Das linke Menü sorgt für Orientierung
+in der Anwendung und ermöglicht
+schnellen Zugriff auf andere Module.

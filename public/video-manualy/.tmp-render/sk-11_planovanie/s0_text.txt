@@ -1,0 +1,2 @@
+Vytvorenie harmonogramu písania podľa
+termínu odovzdania.

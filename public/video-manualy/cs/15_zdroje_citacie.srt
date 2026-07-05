@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Zdroje a citace
+Práce s literaturou, akademickými články a bibliografickými údaji.
+
+2
+00:00:06,500 --> 00:00:12,900
+Krok 1 z 6
+Tlačítko Menu v horní liště vrátí uživatele zpět do hlavního menu aplikace.
+
+3
+00:00:13,000 --> 00:00:19,399
+Krok 2 z 6
+Nadpis Academic Resources & Citations označuje samostatnou sekci pro literaturu, zdroje a citační podklady.
+
+4
+00:00:19,500 --> 00:00:25,899
+Krok 3 z 6
+Vyhledávací pole slouží k zadání tématu práce, klíčového slova nebo výzkumné otázky.
+
+5
+00:00:26,000 --> 00:00:32,399
+Krok 4 z 6
+Doporučené štítky pomáhají rychle vložit často používaná témata a odborné oblasti.
+
+6
+00:00:32,500 --> 00:00:38,899
+Krok 5 z 6
+Filtry PDF Only, Last 2 Years, Last 5 Years a časové intervaly zpřesňují typ a aktuálnost zdrojů.
+
+7
+00:00:39,000 --> 00:00:45,399
+Krok 6 z 6
+Tlačítko Search spustí vyhledání akademických zdrojů a Reset vymaže nastavené filtry.
+
+8
+00:00:45,500 --> 00:00:51,899
+Modul je vysvětlen
+Uživatel ví, kde modul najde, které části ovládá a jak pokračuje v práci.

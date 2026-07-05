@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Szöveg humanizálása
+Szöveg átírása természetesebb akadémiai stílusra.
+
+2
+00:00:06,500 --> 00:00:12,900
+Lépés 1 / 6
+A bal oldali menü segít az alkalmazásban való tájékozódásban és gyors hozzáférést ad más modulokhoz.
+
+3
+00:00:13,000 --> 00:00:19,399
+Lépés 2 / 6
+A modulváltó a Text Humanization részt jelöli aktív szekcióként.
+
+4
+00:00:19,500 --> 00:00:25,899
+Lépés 3 / 6
+A nagy szövegmezőbe olyan szöveg kerül, amelyet természetesebbé, gördülékenyebbé és kevésbé gépiessé kell alakítani.
+
+5
+00:00:26,000 --> 00:00:32,399
+Lépés 4 / 6
+A Humanize Text gomb professzionális átírást indít természetes akadémiai stílusban.
+
+6
+00:00:32,500 --> 00:00:38,899
+Lépés 5 / 6
+A Dictate lehetővé teszi a szöveg hangalapú bevitelét gépelés helyett.
+
+7
+00:00:39,000 --> 00:00:45,399
+Lépés 6 / 6
+A Canvas kényelmes munkaterületet nyit hosszabb szöveghez, a Clear törli az aktuális tartalmat.
+
+8
+00:00:45,500 --> 00:00:51,899
+A modul bemutatva
+A felhasználó tudja, hol találja a modult, mely részeket használja és hogyan folytassa a munkát.

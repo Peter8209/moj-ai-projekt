@@ -1,0 +1,3 @@
+The search field is used to enter a
+paper topic, keyword or research
+question.

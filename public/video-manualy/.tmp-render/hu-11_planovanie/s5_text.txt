@@ -1,0 +1,2 @@
+A nagy beviteli mezőbe szöveg,
+feladat, kérdés vagy adat kerül.

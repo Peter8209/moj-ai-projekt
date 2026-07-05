@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Historia czatu
+Zapisane rozmowy, wyniki, konspekty, rozdziały i audyty.
+
+2
+00:00:06,500 --> 00:00:12,900
+Krok 1 z 6
+Nagłówek Chat History otwiera sekcję zapisanych rozmów i wcześniejszych wyników.
+
+3
+00:00:13,000 --> 00:00:19,399
+Krok 2 z 6
+Return to Menu wraca do głównego menu, a Refresh odświeża listę rozmów.
+
+4
+00:00:19,500 --> 00:00:25,899
+Krok 3 z 6
+Pole wyszukiwania filtruje historię według tytułu, treści lub fragmentu zapytania.
+
+5
+00:00:26,000 --> 00:00:32,399
+Krok 4 z 6
+Panel Zapisane konwersacje pokazuje liczbę rekordów i listę wcześniejszych wyników.
+
+6
+00:00:32,500 --> 00:00:38,899
+Krok 5 z 6
+Każdy rekord zawiera tytuł, podgląd pytania użytkownika, podgląd odpowiedzi i datę utworzenia.
+
+7
+00:00:39,000 --> 00:00:45,399
+Krok 6 z 6
+Przyciski akcji przy rekordzie służą do otwarcia, kontynuacji lub usunięcia rozmowy.
+
+8
+00:00:45,500 --> 00:00:51,899
+Moduł wyjaśniony
+Użytkownik wie, gdzie znaleźć moduł, które części obsługiwać i jak kontynuować pracę.

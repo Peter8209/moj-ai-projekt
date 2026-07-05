@@ -1,0 +1,2 @@
+Dictate, Canvas and Clear help control
+the input.

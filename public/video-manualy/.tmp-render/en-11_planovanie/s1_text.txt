@@ -1,0 +1,2 @@
+The left menu switches between main
+application areas.

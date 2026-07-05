@@ -1,0 +1,2 @@
+The Attachments section uploads PDF,
+DOCX, Excel, CSV, PPT or images.

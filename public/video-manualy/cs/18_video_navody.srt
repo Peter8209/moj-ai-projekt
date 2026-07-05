@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Video návody
+Přehled všech video návodů na jednom místě.
+
+2
+00:00:06,500 --> 00:00:12,900
+Krok 1 z 6
+Tlačítko Menu nebo Back to menu slouží k návratu z video návodů do aplikace.
+
+3
+00:00:13,000 --> 00:00:19,399
+Krok 2 z 6
+Horní nadpis Professional Zedpera manuals označuje centrum všech uživatelských návodů.
+
+4
+00:00:19,500 --> 00:00:25,899
+Krok 3 z 6
+Panel Now Playing ukazuje právě vybraný video návod, jeho kategorii, jazyk a délku.
+
+5
+00:00:26,000 --> 00:00:32,399
+Krok 4 z 6
+Tlačítko Open video otevře vybrané video v samostatném okně pro pohodlné sledování.
+
+6
+00:00:32,500 --> 00:00:38,899
+Krok 5 z 6
+Sekce Manual scenario and steps zobrazuje textový scénář videa a přesné kroky návodu.
+
+7
+00:00:39,000 --> 00:00:45,399
+Krok 6 z 6
+Seznam kroků umožňuje uživateli projít návod i bez videa a zkontrolovat pracovní postup.
+
+8
+00:00:45,500 --> 00:00:51,899
+Modul je vysvětlen
+Uživatel ví, kde modul najde, které části ovládá a jak pokračuje v práci.

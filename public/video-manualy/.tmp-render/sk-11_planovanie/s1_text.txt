@@ -1,0 +1,2 @@
+Ľavé menu umožňuje prepínať medzi
+hlavnými časťami aplikácie.

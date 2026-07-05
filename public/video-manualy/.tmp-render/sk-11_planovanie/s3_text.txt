@@ -1,0 +1,2 @@
+Fialové zvýraznenie ukazuje vybraný
+modul.

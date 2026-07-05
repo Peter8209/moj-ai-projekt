@@ -1,0 +1,3 @@
+A felhasználó tudja, hol találja a
+modult, mely részeket használja és
+hogyan folytassa a munkát.

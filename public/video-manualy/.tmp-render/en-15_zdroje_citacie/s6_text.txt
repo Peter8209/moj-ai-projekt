@@ -1,0 +1,3 @@
+Search starts the academic source
+search and Reset clears the selected
+filters.

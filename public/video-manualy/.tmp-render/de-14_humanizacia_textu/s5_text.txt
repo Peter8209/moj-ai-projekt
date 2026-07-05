@@ -1,0 +1,2 @@
+Dictate ermöglicht die Spracheingabe
+statt manueller Texteingabe.

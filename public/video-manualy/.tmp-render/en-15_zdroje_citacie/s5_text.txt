@@ -1,0 +1,3 @@
+PDF Only, Last 2 Years, Last 5 Years
+and date-range filters refine the
+source type and recency.

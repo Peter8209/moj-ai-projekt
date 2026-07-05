@@ -1,0 +1,2 @@
+Fioletowe podświetlenie pokazuje
+wybrany moduł.

@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Preklad
+Preklad akademického textu podľa zdrojového a cieľového jazyka.
+
+2
+00:00:06,500 --> 00:00:12,900
+Krok 1 z 6
+Ľavé menu zostáva dostupné na rýchlu navigáciu.
+
+3
+00:00:13,000 --> 00:00:19,399
+Krok 2 z 6
+Jazykový riadok určuje zdrojový a cieľový jazyk prekladu.
+
+4
+00:00:19,500 --> 00:00:25,899
+Krok 3 z 6
+Prepínač modulov ukazuje, že aktívny je modul Translation.
+
+5
+00:00:26,000 --> 00:00:32,399
+Krok 4 z 6
+Štýl prekladu vyberá prirodzený alebo jednoduchý výsledok.
+
+6
+00:00:32,500 --> 00:00:38,899
+Krok 5 z 6
+Do poľa sa vkladá text na preklad.
+
+7
+00:00:39,000 --> 00:00:45,399
+Krok 6 z 6
+Translate text spustí preklad do zvoleného jazyka.
+
+8
+00:00:45,500 --> 00:00:51,899
+Modul je vysvetlený
+Používateľ vie, kde modul nájde, ktoré časti ovláda a ako pokračuje v práci.

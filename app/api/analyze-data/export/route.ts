@@ -19,6 +19,7 @@ type ExportTableDefinition = {
 };
 
 type ExportPayload = {
+  [key: string]: unknown;
   result?: unknown;
   analysisResult?: unknown;
   data?: unknown;
@@ -36,6 +37,20 @@ type ExportPayload = {
   exportFormat?: ExportFormat | string;
   type?: ExportFormat | string;
   fileName?: string;
+  userCommand?: unknown;
+  userCommands?: unknown;
+  userPrompt?: unknown;
+  instructions?: unknown;
+  manualScalesText?: unknown;
+  manualSubscalesText?: unknown;
+  customScalesText?: unknown;
+  customSubscalesText?: unknown;
+  scaleDefinitions?: unknown;
+  subscaleDefinitions?: unknown;
+  manualScaleDefinitions?: unknown;
+  manualSubscaleDefinitions?: unknown;
+  groupingColumns?: unknown;
+  groupVariables?: unknown;
 };
 
 type ApiUsage = {
@@ -234,6 +249,127 @@ function tryParseJson(value: unknown): unknown {
   }
 }
 
+
+function extractFormDataPayloadExtras(formData: FormData): AnyRecord {
+  const extras: AnyRecord = {};
+
+  formData.forEach((value, key) => {
+    if (
+      key === 'result' ||
+      key === 'analysisResult' ||
+      key === 'data' ||
+      key === 'preparedDataFile' ||
+      key === 'format' ||
+      key === 'exportFormat' ||
+      key === 'type' ||
+      key === 'fileName'
+    ) {
+      return;
+    }
+
+    if (typeof value === 'string') {
+      extras[key] = tryParseJson(value);
+    }
+  });
+
+  return extras;
+}
+
+function mergeDefinedObjects(...objects: Array<unknown>): AnyRecord {
+  const merged: AnyRecord = {};
+
+  objects.forEach((object) => {
+    if (!isRecord(object)) return;
+
+    Object.entries(object).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        merged[key] = value;
+      }
+    });
+  });
+
+  return merged;
+}
+
+const USER_INPUT_EXPORT_KEYS = [
+  'userCommand',
+  'userCommands',
+  'userPrompt',
+  'instructions',
+  'manualScalesText',
+  'manualSubscalesText',
+  'customScalesText',
+  'customSubscalesText',
+  'scaleInput',
+  'subscaleInput',
+  'scaleDefinitions',
+  'subscaleDefinitions',
+  'manualScaleDefinitions',
+  'manualSubscaleDefinitions',
+  'customScaleDefinitions',
+  'customSubscaleDefinitions',
+  'questionnaireName',
+  'questionnaire',
+  'standardizedQuestionnaires',
+  'groupingColumns',
+  'groupColumns',
+  'groupVariables',
+  'groupingVariables',
+  'groupingColumnsText',
+] as const;
+
+function getPayloadUserInputs(payload: ExportPayload): AnyRecord {
+  const inputs: AnyRecord = {};
+
+  USER_INPUT_EXPORT_KEYS.forEach((key) => {
+    const value = payload[key];
+    if (value !== undefined && value !== null && value !== '') {
+      inputs[key] = value;
+    }
+  });
+
+  return inputs;
+}
+
+function hydrateAnalysisResultWithPayloadInputs(
+  result: unknown,
+  payload: ExportPayload,
+): unknown {
+  const userInputs = getPayloadUserInputs(payload);
+
+  if (Object.keys(userInputs).length === 0) {
+    return result;
+  }
+
+  if (!isRecord(result)) {
+    return {
+      value: result,
+      analysisConfig: userInputs,
+      manualAnalysisConfig: userInputs,
+      questionnaireConfig: userInputs,
+    };
+  }
+
+  return {
+    ...result,
+    ...Object.fromEntries(
+      Object.entries(userInputs).filter(([key]) => (result as AnyRecord)[key] === undefined),
+    ),
+    analysisConfig: mergeDefinedObjects(
+      getNestedValue(result, ['analysisConfig']),
+      userInputs,
+    ),
+    manualAnalysisConfig: mergeDefinedObjects(
+      getNestedValue(result, ['manualAnalysisConfig']),
+      userInputs,
+    ),
+    questionnaireConfig: mergeDefinedObjects(
+      getNestedValue(result, ['questionnaireConfig']),
+      userInputs,
+    ),
+  };
+}
+
 async function readPayload(request: NextRequest): Promise<ExportPayload> {
   const contentType = request.headers.get('content-type') || '';
 
@@ -264,6 +400,7 @@ async function readPayload(request: NextRequest): Promise<ExportPayload> {
       exportFormat: String(formData.get('exportFormat') || ''),
       type: String(formData.get('type') || ''),
       fileName: String(formData.get('fileName') || ''),
+      ...extractFormDataPayloadExtras(formData),
     };
   }
 
@@ -499,8 +636,10 @@ function flattenDescriptiveRows(
     preparedDataFile,
   ).descriptiveRows;
 
+  const finalRows = computedRows.length > 0 ? computedRows : directRows;
+
   return deduplicateRowsByKey(
-    [...directRows, ...computedRows],
+    finalRows,
     (row) => `${normalizeReliabilityItemName(row.premenna)}|${normalizeReliabilityItemName(row.typ)}|${normalizeReliabilityItemName(row.zdroj)}`,
   );
 }
@@ -542,7 +681,7 @@ function flattenScaleRows(
     [
       ...scaleDefinitions,
       ...statisticalScaleDefinitions,
-      ...getReliabilityDefinitions(result),
+      ...getReliabilityDefinitions(result, preparedDataFile),
     ],
     (item) => `${normalizeReliabilityItemName(item.id)}|${normalizeReliabilityItemName(item.name ?? item.scaleName ?? item.label ?? item.title)}|${parseReliabilityItems(getItemsValueFromDefinition(item)).map(normalizeReliabilityItemName).join('|')}`,
   );
@@ -657,22 +796,98 @@ function flattenScaleRows(
   );
 }
 
-function flattenNormalityRows(result: unknown): AnyRecord[] {
+function sampleSkewness(values: number[]): number | null {
+  if (values.length < 3) return null;
+
+  const avg = mean(values);
+  const sd = standardDeviation(values);
+
+  if (sd <= 0) return null;
+
+  const n = values.length;
+  const thirdMoment = values.reduce((sum, value) => sum + ((value - avg) / sd) ** 3, 0);
+  return (n / ((n - 1) * (n - 2))) * thirdMoment;
+}
+
+function sampleExcessKurtosis(values: number[]): number | null {
+  if (values.length < 4) return null;
+
+  const avg = mean(values);
+  const sd = standardDeviation(values);
+
+  if (sd <= 0) return null;
+
+  const n = values.length;
+  const fourthMoment = values.reduce((sum, value) => sum + ((value - avg) / sd) ** 4, 0);
+  return ((n * (n + 1)) / ((n - 1) * (n - 2) * (n - 3))) * fourthMoment -
+    (3 * (n - 1) ** 2) / ((n - 2) * (n - 3));
+}
+
+function isSeriesApproximatelyNormal(values: number[]): boolean {
+  const cleanValues = values.filter((value) => Number.isFinite(value));
+
+  if (cleanValues.length < 8) return false;
+
+  const skewness = sampleSkewness(cleanValues);
+  const kurtosis = sampleExcessKurtosis(cleanValues);
+
+  if (skewness === null || kurtosis === null) return false;
+
+  return Math.abs(skewness) <= 1 && Math.abs(kurtosis) <= 2;
+}
+
+function buildNormalityRowsFromRawData(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
+  const series = buildDependentScoreSeries(result, preparedDataFile);
+
+  return series.map((item) => {
+    const values = item.values.filter((value): value is number => value !== null && Number.isFinite(value));
+    const skewness = sampleSkewness(values);
+    const kurtosis = sampleExcessKurtosis(values);
+    const normal = isSeriesApproximatelyNormal(values);
+
+    return {
+      premenna: item.name,
+      valid: values.length,
+      metoda: 'orientačná kontrola skewness/kurtosis',
+      statistika: skewness === null ? '' : `skew=${Number(skewness.toFixed(4))}; kurt=${kurtosis === null ? '' : Number(kurtosis.toFixed(4))}`,
+      p_hodnota: '',
+      normalita: normal ? 'áno' : 'nie',
+      odporucanie: normal ? 'Odporúčané parametrické testy / Pearson.' : 'Odporúčané neparametrické testy / Spearman.',
+      poznamka: 'Dopočítané zo skóre škál/subškál podľa zadaných alebo rozpoznaných položiek.',
+    };
+  });
+}
+
+function flattenNormalityRows(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
   const rows = [
     ...asRecords(getNestedValue(result, ['normality'])),
     ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'normality'])),
   ];
 
-  return rows.map((item) => ({
-    premenna: item.variable ?? '',
-    valid: item.valid ?? '',
-    metoda: item.method ?? '',
-    statistika: item.statistic ?? '',
-    p_hodnota: item.pValueText ?? item.pValue ?? '',
-    normalita: item.isNormal ?? '',
-    odporucanie: item.recommendation ?? '',
-    poznamka: item.note ?? '',
+  const directRows: AnyRecord[] = rows.map((item) => ({
+    premenna: item.variable ?? item.premenna ?? item.name ?? '',
+    valid: item.valid ?? item.n ?? '',
+    metoda: item.method ?? item.metoda ?? '',
+    statistika: item.statistic ?? item.statistika ?? '',
+    p_hodnota: item.pValueText ?? item.pValue ?? item.p_hodnota ?? '',
+    normalita: item.isNormal ?? item.normalita ?? '',
+    odporucanie: item.recommendation ?? item.odporucanie ?? '',
+    poznamka: item.note ?? item.poznamka ?? '',
   }));
+
+  const computedRows = buildNormalityRowsFromRawData(result, preparedDataFile);
+  const finalRows = computedRows.length > 0 ? computedRows : directRows;
+
+  return deduplicateRowsByKey(
+    finalRows,
+    (row) => `${normalizeReliabilityItemName(row.premenna)}|${normalizeReliabilityItemName(row.metoda)}`,
+  );
 }
 
 function normalizeReliabilityItemName(value: unknown): string {
@@ -694,7 +909,30 @@ function findMatchingColumnName(headers: string[], itemName: string): string | n
 
   const normalizedItem = normalizeReliabilityItemName(item);
 
-  return headers.find((header) => normalizeReliabilityItemName(header) === normalizedItem) || null;
+  const normalizedExact = headers.find((header) => normalizeReliabilityItemName(header) === normalizedItem);
+  if (normalizedExact) return normalizedExact;
+
+  const itemCodeMatch = normalizedItem.match(/^(?:q|otazka|polozka|item|jss|wemwbs|sehs|rs)(\d+)$/i);
+  if (itemCodeMatch) {
+    const codeNumber = itemCodeMatch[1].replace(/^0+/, '');
+    const byCode = headers.find((header) => {
+      const normalizedHeader = normalizeReliabilityItemName(header);
+      const headerCode = normalizedHeader.match(/^(?:q|otazka|polozka|item|jss|wemwbs|sehs|rs)?0*(\d+)$/i);
+      return headerCode?.[1] === codeNumber;
+    });
+    if (byCode) return byCode;
+  }
+
+  if (normalizedItem.length >= 14) {
+    const substringMatch = headers.find((header) => {
+      const normalizedHeader = normalizeReliabilityItemName(header);
+      return normalizedHeader.includes(normalizedItem) || normalizedItem.includes(normalizedHeader);
+    });
+
+    if (substringMatch) return substringMatch;
+  }
+
+  return null;
 }
 
 function parseRangePart(value: string): string[] {
@@ -754,6 +992,205 @@ function parseReliabilityItems(value: unknown): string[] {
     .filter(Boolean);
 }
 
+
+const RESILIENCE_RS25_ITEMS = [
+  'Ak si niečo naplánujem, dotiahnem to dokonca..',
+  'Zvyčajne si nejako poradím..',
+  'Som schopný/-á spoľahnúť sa na seba viac ako na kohokoľvek iného..',
+  'Byť zaujatý vecami je pre mňa dôležité. .',
+  'Dokážem byť samostatný/-á, ak sa to vyžaduje..',
+  'Cítim hrdosť, že som dokázal/-a uskutočniť vo svojom živote niektoré veci..',
+  'Zvyčajne ľahko prekonávam prekážky..',
+  'Dobre vychádzam sám/sama so sebou..',
+  'Cítim, že dokážem zvládnuť naraz viacero vecí.',
+  'Som rozhodný/-á (odhodlaný/-á). .',
+  'Len zriedka si lámem hlavu, čo je zmyslom toho všetkého..',
+  'Pripúšťam si veci len raz za čas..',
+  'Dokážem sa preniesť cez ťažké časy, pretože už predtým som zažil/-a zložité chvíle..',
+  'Mám sebadisciplínu..',
+  'Udržiavam si záujem o veci..',
+  'Dokážem zvyčajne nájsť niečo, na čom sa dá zasmiať..',
+  'Viera v seba mi pomáha preniesť sa cez ťažké časy..',
+  'Za mimoriadnych okolností som ten/tá, na koho sa ľudia môžu spoľahnúť..',
+  'Zvyčajne sa viem pozrieť na situáciu mnohými spôsobmi..',
+  'Niekedy sa nútim robiť veci bez ohľadu na to, či to chcem alebo nie..',
+  'Môj život má význam (zmysel)..Príkaz 1',
+  'Nebazírujem na veciach, s ktorými nemôžem nič urobiť.',
+  'Keď sa ocitnem v zložitej situácii, zvyčajne z nej viem nájsť cestu von..',
+  'Mám dostatok energie, aby som robil/-a, čo musím.',
+  'Je v poriadku, ak existujú ľudia, ktorí ma nemajú radi. .',
+];
+
+const SEHS_S_2020_ITEMS = [
+  'Ak sa snažím, zvládnem väčšinu vecí..',
+  'Veľa vecí robím dobre..',
+  'Mám zmysel života..',
+  'Rozumiem svojim náladám a pocitom..',
+  'Rozumiem, prečo robím to čo robím..',
+  'Keď niečomu nerozumiem, pýtam sa na to opakovane učiteľa, kým tomu neporozumiem.',
+  'Snažím sa zodpovedať na všetky otázky položené na hodine..',
+  'Matematické úlohy riešim dovtedy, kým nenájdem konečné riešenie..',
+  'V škole existuje učiteľ alebo iný dospelý, ktorý chce, aby som napredoval..',
+  'V škole je učiteľ alebo iný dospelý, ktorý ma vypočuje..',
+  'V škole je učiteľ alebo iný dospelý, ktorý verí, že budem úspešný..',
+  'Moji rodinní príslušníci si navzájom pomáhajú a podporujú sa..',
+  'V mojej rodine vládne pocit súdržnosti..',
+  'Moja rodina vychádza spolu dobre..',
+  'Mám priateľa v mojom veku, ktorému na mne skutočne záleží..',
+  'Mám priateľa, ktorý sa so mnou rozpráva o mojich problémoch..',
+  'Mám priateľa, ktorý mi pomôže, keď mám problémy..',
+  'Prijímam zodpovednosť za svoje činy..',
+  'Viem si uznať chybu..',
+  'Viem sa vyrovnať s odmietnutím..',
+  'Cítim sa zle, keď je niekto citovo zranený..',
+  'Snažím sa pochopiť, čím prechádzajú iný ľudia..',
+  'Snažím sa pochopiť, čo iní ľudia cítia a ako rozmýšľajú..',
+  'Som trpezlivý, viem počkať na to, čo chcem..',
+  'Neobťažujem ostatných, keď toho majú veľa..',
+  'Rozmýšľam prv, než konám..',
+  'Každý deň sa teším na to, že sa budem dobre baviť..',
+  'Zvyčajne očakávam, že budem mať dobrý deň..',
+  'Verím tomu, že sa mi prihodí viac dobrých vecí než zlých..',
+  'Som vďačný mnohým ľuďom..',
+  'Som nadšený, entuziastický..',
+  'Som cenný človek..',
+  'Cítim sa byť plný síl a energie..',
+  'Cítim sa byť aktívny..',
+  'Cítim sa byť vitálny, plný života..',
+];
+
+function normalizeBuiltinItemText(value: string): string {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .trim();
+}
+
+function itemRange(items: string[], startIndexOneBased: number, count: number): string[] {
+  return items.slice(startIndexOneBased - 1, startIndexOneBased - 1 + count);
+}
+
+function createStandardDefinition(
+  name: string,
+  items: string[],
+  source: string,
+  type: 'scale' | 'subscale' = 'subscale',
+  scoring: 'sum' | 'mean' = 'mean',
+): AnyRecord {
+  return {
+    id: `${source}-${normalizeReliabilityItemName(name)}`,
+    name,
+    scaleName: name,
+    items: items.map(normalizeBuiltinItemText),
+    source,
+    type,
+    scoring,
+  };
+}
+
+const BUILTIN_STANDARD_DEFINITIONS: AnyRecord[] = [
+  createStandardDefinition('ŠKÁLA REZILIENCIE', RESILIENCE_RS25_ITEMS, 'standard-template:RS-25', 'scale', 'mean'),
+  createStandardDefinition('Vyrovnanosť', [RESILIENCE_RS25_ITEMS[7], RESILIENCE_RS25_ITEMS[10], RESILIENCE_RS25_ITEMS[11], RESILIENCE_RS25_ITEMS[21], RESILIENCE_RS25_ITEMS[24]], 'standard-template:RS-25'),
+  createStandardDefinition('Zmysluplnosť', [RESILIENCE_RS25_ITEMS[3], RESILIENCE_RS25_ITEMS[14], RESILIENCE_RS25_ITEMS[15], RESILIENCE_RS25_ITEMS[20], RESILIENCE_RS25_ITEMS[23]], 'standard-template:RS-25'),
+  createStandardDefinition('Sebadôvera', [RESILIENCE_RS25_ITEMS[1], RESILIENCE_RS25_ITEMS[2], RESILIENCE_RS25_ITEMS[4], RESILIENCE_RS25_ITEMS[16], RESILIENCE_RS25_ITEMS[17]], 'standard-template:RS-25'),
+  createStandardDefinition('Vytrvalosť', [RESILIENCE_RS25_ITEMS[0], RESILIENCE_RS25_ITEMS[6], RESILIENCE_RS25_ITEMS[12], RESILIENCE_RS25_ITEMS[19], RESILIENCE_RS25_ITEMS[22]], 'standard-template:RS-25'),
+  createStandardDefinition('Existenciálna osamelosť', [RESILIENCE_RS25_ITEMS[5], RESILIENCE_RS25_ITEMS[8], RESILIENCE_RS25_ITEMS[9], RESILIENCE_RS25_ITEMS[13], RESILIENCE_RS25_ITEMS[18]], 'standard-template:RS-25'),
+
+  createStandardDefinition('SEHS-S-2020', SEHS_S_2020_ITEMS, 'standard-template:SEHS-S-2020', 'scale', 'mean'),
+  createStandardDefinition('Viera v seba:', itemRange(SEHS_S_2020_ITEMS, 1, 9), 'standard-template:SEHS-S-2020', 'scale', 'mean'),
+  createStandardDefinition('Sebaúčinnosť', itemRange(SEHS_S_2020_ITEMS, 1, 3), 'standard-template:SEHS-S-2020'),
+  createStandardDefinition('Sebauvedomenie', itemRange(SEHS_S_2020_ITEMS, 4, 3), 'standard-template:SEHS-S-2020'),
+  createStandardDefinition('Húževnatosť (Vytrvalosť)', itemRange(SEHS_S_2020_ITEMS, 7, 3), 'standard-template:SEHS-S-2020'),
+  createStandardDefinition('Viera v druhých:', itemRange(SEHS_S_2020_ITEMS, 10, 9), 'standard-template:SEHS-S-2020', 'scale', 'mean'),
+  createStandardDefinition('Podpora školy', itemRange(SEHS_S_2020_ITEMS, 10, 3), 'standard-template:SEHS-S-2020'),
+  createStandardDefinition('Rodinná súdržnosť', itemRange(SEHS_S_2020_ITEMS, 13, 3), 'standard-template:SEHS-S-2020'),
+  createStandardDefinition('Podpora rovesníkov', itemRange(SEHS_S_2020_ITEMS, 16, 3), 'standard-template:SEHS-S-2020'),
+  createStandardDefinition('Emocionálna kompetencia:', itemRange(SEHS_S_2020_ITEMS, 19, 9), 'standard-template:SEHS-S-2020', 'scale', 'mean'),
+  createStandardDefinition('Regulácia emócií', itemRange(SEHS_S_2020_ITEMS, 19, 3), 'standard-template:SEHS-S-2020'),
+  createStandardDefinition('Empatia', itemRange(SEHS_S_2020_ITEMS, 22, 3), 'standard-template:SEHS-S-2020'),
+  createStandardDefinition('Sebakontrola', itemRange(SEHS_S_2020_ITEMS, 25, 3), 'standard-template:SEHS-S-2020'),
+  createStandardDefinition('Životná angažovanosť:', itemRange(SEHS_S_2020_ITEMS, 28, 9), 'standard-template:SEHS-S-2020', 'scale', 'mean'),
+  createStandardDefinition('Optimizmus', itemRange(SEHS_S_2020_ITEMS, 28, 3), 'standard-template:SEHS-S-2020'),
+  createStandardDefinition('Vďačnosť', itemRange(SEHS_S_2020_ITEMS, 31, 3), 'standard-template:SEHS-S-2020'),
+  createStandardDefinition('Životný elán (Zest)', itemRange(SEHS_S_2020_ITEMS, 34, 3), 'standard-template:SEHS-S-2020'),
+
+  createStandardDefinition('WEMWBS', Array.from({ length: 14 }, (_, index) => `WEMWBS${index + 1}`), 'standard-template:WEMWBS', 'scale', 'sum'),
+  createStandardDefinition('JSS – Pay', ['JSS1', 'JSS10', 'JSS19', 'JSS28'], 'standard-template:JSS'),
+  createStandardDefinition('JSS – Promotion', ['JSS2', 'JSS11', 'JSS20', 'JSS33'], 'standard-template:JSS'),
+  createStandardDefinition('JSS – Supervision', ['JSS3', 'JSS12', 'JSS21', 'JSS30'], 'standard-template:JSS'),
+  createStandardDefinition('JSS – Fringe Benefits', ['JSS4', 'JSS13', 'JSS22', 'JSS29'], 'standard-template:JSS'),
+  createStandardDefinition('JSS – Contingent Rewards', ['JSS5', 'JSS14', 'JSS23', 'JSS32'], 'standard-template:JSS'),
+  createStandardDefinition('JSS – Operating Conditions', ['JSS6', 'JSS15', 'JSS24', 'JSS31'], 'standard-template:JSS'),
+  createStandardDefinition('JSS – Coworkers', ['JSS7', 'JSS16', 'JSS25', 'JSS34'], 'standard-template:JSS'),
+  createStandardDefinition('JSS – Nature of Work', ['JSS8', 'JSS17', 'JSS27', 'JSS35'], 'standard-template:JSS'),
+  createStandardDefinition('JSS – Communication', ['JSS9', 'JSS18', 'JSS26', 'JSS36'], 'standard-template:JSS'),
+  createStandardDefinition('JSS – total score', Array.from({ length: 36 }, (_, index) => `JSS${index + 1}`), 'standard-template:JSS', 'scale', 'sum'),
+];
+
+function countMatchingItemsInHeaders(headers: string[], items: string[]): number {
+  return items.filter((item) => findMatchingColumnName(headers, item)).length;
+}
+
+function getRequestedQuestionnaireTokens(result: unknown): string[] {
+  const candidateValues = [
+    getNestedValue(result, ['questionnaireName']),
+    getNestedValue(result, ['questionnaire']),
+    getNestedValue(result, ['standardizedQuestionnaires']),
+    getNestedValue(result, ['analysisConfig', 'questionnaireName']),
+    getNestedValue(result, ['analysisConfig', 'questionnaire']),
+    getNestedValue(result, ['analysisConfig', 'standardizedQuestionnaires']),
+    getNestedValue(result, ['questionnaireConfig', 'questionnaireName']),
+    getNestedValue(result, ['questionnaireConfig', 'questionnaire']),
+    getNestedValue(result, ['questionnaireConfig', 'standardizedQuestionnaires']),
+    getNestedValue(result, ['userCommand']),
+    getNestedValue(result, ['userCommands']),
+    getNestedValue(result, ['instructions']),
+  ];
+
+  const knownQuestionnaireHints = [
+    'sehs',
+    'sehss2020',
+    'rs25',
+    'reziliencia',
+    'resilience',
+    'wemwbs',
+    'jss',
+    'spector',
+  ];
+
+  return candidateValues
+    .flatMap((value) => parseLooseList(value))
+    .map(normalizeReliabilityItemName)
+    .filter((token) => knownQuestionnaireHints.some((hint) => token.includes(hint)));
+}
+
+function sourceMatchesRequestedQuestionnaire(source: unknown, tokens: string[]): boolean {
+  if (tokens.length === 0) return true;
+
+  const normalizedSource = normalizeReliabilityItemName(source);
+  return tokens.some((token) => normalizedSource.includes(token) || token.includes(normalizedSource));
+}
+
+function buildBuiltinDefinitionsForRawData(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
+  const rawRows = flattenRawData(result, preparedDataFile);
+  const headers = Object.keys(rawRows[0] || {});
+
+  if (!headers.length) return [];
+
+  const requestedTokens = getRequestedQuestionnaireTokens(result);
+
+  return BUILTIN_STANDARD_DEFINITIONS.filter((definition) => {
+    const items = parseReliabilityItems(getItemsValueFromDefinition(definition));
+    const matched = countMatchingItemsInHeaders(headers, items);
+    const required = items.length <= 4 ? Math.min(items.length, 2) : Math.max(2, Math.ceil(items.length * 0.6));
+
+    return matched >= required && sourceMatchesRequestedQuestionnaire(definition.source, requestedTokens);
+  });
+}
+
 function splitManualDefinitionLines(text: unknown): string[] {
   const normalized = String(text ?? '')
     .replace(/\r/g, '\n')
@@ -783,22 +1220,60 @@ function splitManualDefinitionLines(text: unknown): string[] {
   return expanded;
 }
 
+function extractManualScaleDefinitionMeta(itemsText: string): {
+  items: string[];
+  reverseItems: string[];
+  minValue: number | null;
+  maxValue: number | null;
+  scoring: 'sum' | 'mean';
+} {
+  const reverseMatches = Array.from(
+    itemsText.matchAll(/(?:reverzné|reverzne|reverse|r)\s*(?:položky|polozky|items)?\s*[:=]\s*([^;\n]+)/giu),
+  );
+  const reverseItems = reverseMatches.flatMap((match) => parseReliabilityItems(match[1]));
+  const minMatch = itemsText.match(/(?:min|minimum|od)\s*[:=]\s*(-?\d+(?:[,.]\d+)?)/i);
+  const maxMatch = itemsText.match(/(?:max|maximum|do)\s*[:=]\s*(-?\d+(?:[,.]\d+)?)/i);
+  const scoringMatch = itemsText.match(/(?:skoring|scoring|score|výpočet|vypocet)\s*[:=]\s*(sum|súčet|sucet|total|mean|priemer)/i);
+  const cleanedItemsText = itemsText
+    .replace(/(?:reverzné|reverzne|reverse|r)\s*(?:položky|polozky|items)?\s*[:=]\s*[^;\n]+/giu, '')
+    .replace(/(?:min|minimum|od)\s*[:=]\s*-?\d+(?:[,.]\d+)?/gi, '')
+    .replace(/(?:max|maximum|do)\s*[:=]\s*-?\d+(?:[,.]\d+)?/gi, '')
+    .replace(/(?:skoring|scoring|score|výpočet|vypocet)\s*[:=]\s*(sum|súčet|sucet|total|mean|priemer)/gi, '')
+    .replace(/\(.*?reverz.*?\)/giu, '')
+    .trim();
+  const scoringText = String(scoringMatch?.[1] || '').toLowerCase();
+
+  return {
+    items: parseReliabilityItems(cleanedItemsText),
+    reverseItems,
+    minValue: toFiniteNumber(minMatch?.[1]),
+    maxValue: toFiniteNumber(maxMatch?.[1]),
+    scoring: scoringText.includes('sum') || scoringText.includes('súčet') || scoringText.includes('sucet') || scoringText.includes('total') ? 'sum' : 'mean',
+  };
+}
+
 function parseManualScaleTextToDefinitions(text: unknown, type: 'manual-scale' | 'manual-subscale'): AnyRecord[] {
   return splitManualDefinitionLines(text)
     .map((line, index) => {
-      const separatorMatch = line.match(/^([^:=]{1,120})\s*[:=]\s*(.+)$/);
+      const separatorMatch =
+        line.match(/^([^:=]{1,140})\s*[:=]\s*(.+)$/) ||
+        line.match(/^(.{1,140}?)\s+[-–—]\s+(.+)$/);
       const name = separatorMatch
-        ? separatorMatch[1].trim()
+        ? separatorMatch[1].replace(/^\d+[.)]\s*/, '').trim()
         : `${type === 'manual-scale' ? 'Škála' : 'Subškála'} ${index + 1}`;
       const itemsText = separatorMatch ? separatorMatch[2].trim() : line;
+      const meta = extractManualScaleDefinitionMeta(itemsText);
 
       return {
-        id: `${type}-${index + 1}`,
+        id: `${type}-${index + 1}-${normalizeReliabilityItemName(name).slice(0, 24)}`,
         name,
         scaleName: name,
-        items: parseReliabilityItems(itemsText),
+        items: meta.items,
+        reverseItems: meta.reverseItems,
+        minValue: meta.minValue ?? undefined,
+        maxValue: meta.maxValue ?? undefined,
         source: type,
-        scoring: 'mean',
+        scoring: meta.scoring,
       };
     })
     .filter((definition) => parseReliabilityItems(definition.items).length >= 2);
@@ -911,7 +1386,10 @@ function deduplicateRowsByKey<T extends AnyRecord>(rows: T[], getKey: (row: T) =
   return result;
 }
 
-function getReliabilityDefinitions(result: unknown): AnyRecord[] {
+function getReliabilityDefinitions(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
   const definitions = [
     ...asRecords(getNestedValue(result, ['scaleDefinitions'])),
     ...asRecords(getNestedValue(result, ['subscaleDefinitions'])),
@@ -932,6 +1410,7 @@ function getReliabilityDefinitions(result: unknown): AnyRecord[] {
     ...asRecords(getNestedValue(result, ['questionnaireConfig', 'scaleDefinitions'])),
     ...asRecords(getNestedValue(result, ['questionnaireConfig', 'subscaleDefinitions'])),
     ...collectScaleDefinitionsDeep(result),
+    ...buildBuiltinDefinitionsForRawData(result, preparedDataFile),
   ];
 
   const manualScaleTexts = [
@@ -1108,7 +1587,7 @@ function buildComputedScaleRowsFromRawData(
   }
 
   const headers = Object.keys(rawRows[0] || {});
-  const definitions = getReliabilityDefinitions(result);
+  const definitions = getReliabilityDefinitions(result, preparedDataFile);
   const scaleRows: AnyRecord[] = [];
   const descriptiveRows: AnyRecord[] = [];
   const used = new Set<string>();
@@ -1316,7 +1795,7 @@ function buildReliabilityRowsFromRawData(
   if (!rawRows.length) return [];
 
   const headers = Object.keys(rawRows[0] || {});
-  const definitions = getReliabilityDefinitions(result);
+  const definitions = getReliabilityDefinitions(result, preparedDataFile);
   const usedScaleKeys = new Set<string>();
   const rows: AnyRecord[] = [];
 
@@ -1415,7 +1894,7 @@ function flattenReliabilityRows(
     ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'cronbachAlpha'])),
   ];
 
-  const directRows = rows.map((item) => ({
+  const directRows: AnyRecord[] = rows.map((item) => ({
     id: item.scaleId ?? item.id ?? '',
     skala: item.scaleName ?? item.scale ?? item.variable ?? item.name ?? '',
     polozky: Array.isArray(item.items)
@@ -1433,16 +1912,25 @@ function flattenReliabilityRows(
     cronbach_alpha: item.cronbachAlpha ?? item.alpha ?? '',
     interpretacia: item.interpretation ?? interpretCronbachAlpha(toFiniteNumber(item.cronbachAlpha ?? item.alpha)),
     poznamka: item.note ?? item.warning ?? '',
+    zdroj: item.source ?? 'analysis-result',
   }));
 
-  if (directRows.length > 0) {
-    return directRows;
-  }
+  const computedRows: AnyRecord[] = buildReliabilityRowsFromRawData(result, preparedDataFile).map((row) => ({
+    ...row,
+    zdroj: row.zdroj ?? 'computed-from-DATA_CLEAN',
+  }));
 
-  const computedRows = buildReliabilityRowsFromRawData(result, preparedDataFile);
+  const finalRows: AnyRecord[] = computedRows.length > 0
+    ? [...computedRows, ...directRows]
+    : directRows;
 
-  if (computedRows.length > 0) {
-    return computedRows;
+  const deduplicated = deduplicateRowsByKey(
+    finalRows,
+    (row) => `${normalizeReliabilityItemName(row.skala)}|${normalizeReliabilityItemName(row.polozky)}|${normalizeReliabilityItemName(row.pouzite_polozky)}`,
+  );
+
+  if (deduplicated.length > 0) {
+    return deduplicated;
   }
 
   return [
@@ -1454,24 +1942,144 @@ function flattenReliabilityRows(
   ];
 }
 
-function flattenCorrelationRows(result: unknown, method: 'pearson' | 'spearman' | 'recommended'): AnyRecord[] {
+function pairedNumericValues(
+  a: Array<number | null>,
+  b: Array<number | null>,
+): Array<[number, number]> {
+  const pairs: Array<[number, number]> = [];
+  const length = Math.min(a.length, b.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const valueA = a[index];
+    const valueB = b[index];
+
+    if (
+      valueA !== null &&
+      valueB !== null &&
+      Number.isFinite(valueA) &&
+      Number.isFinite(valueB)
+    ) {
+      pairs.push([valueA, valueB]);
+    }
+  }
+
+  return pairs;
+}
+
+function pearsonR(xValues: number[], yValues: number[]): number | null {
+  if (xValues.length !== yValues.length || xValues.length < 3) return null;
+
+  const meanX = mean(xValues);
+  const meanY = mean(yValues);
+  const numerator = xValues.reduce((sum, value, index) => sum + (value - meanX) * (yValues[index] - meanY), 0);
+  const sumSquaresX = xValues.reduce((sum, value) => sum + (value - meanX) ** 2, 0);
+  const sumSquaresY = yValues.reduce((sum, value) => sum + (value - meanY) ** 2, 0);
+  const denominator = Math.sqrt(sumSquaresX * sumSquaresY);
+
+  if (denominator <= 0) return null;
+
+  return numerator / denominator;
+}
+
+function spearmanR(xValues: number[], yValues: number[]): number | null {
+  if (xValues.length !== yValues.length || xValues.length < 3) return null;
+
+  const rankX = rankValues(xValues).map((item) => item.rank);
+  const rankY = rankValues(yValues).map((item) => item.rank);
+
+  return pearsonR(rankX, rankY);
+}
+
+function correlationPValue(r: number | null, n: number): number {
+  if (r === null || !Number.isFinite(r) || n < 4 || Math.abs(r) >= 1) return NaN;
+
+  const t = r * Math.sqrt((n - 2) / Math.max(1 - r ** 2, 1e-12));
+  return 2 * (1 - studentTCdf(Math.abs(t), n - 2));
+}
+
+function buildCorrelationRowsFromRawData(
+  result: unknown,
+  method: 'pearson' | 'spearman' | 'recommended',
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
+  const series = buildDependentScoreSeries(result, preparedDataFile);
+  const rows: AnyRecord[] = [];
+
+  for (let first = 0; first < series.length; first += 1) {
+    for (let second = first + 1; second < series.length; second += 1) {
+      const left = series[first];
+      const right = series[second];
+      const pairs = pairedNumericValues(left.values, right.values);
+
+      if (pairs.length < 4) continue;
+
+      const xValues = pairs.map((pair) => pair[0]);
+      const yValues = pairs.map((pair) => pair[1]);
+      const leftNormal = isSeriesApproximatelyNormal(xValues);
+      const rightNormal = isSeriesApproximatelyNormal(yValues);
+      const chosenMethod = method === 'recommended'
+        ? (leftNormal && rightNormal ? 'pearson' : 'spearman')
+        : method;
+      const r = chosenMethod === 'pearson'
+        ? pearsonR(xValues, yValues)
+        : spearmanR(xValues, yValues);
+
+      if (r === null || !Number.isFinite(r)) continue;
+
+      const pValue = correlationPValue(r, pairs.length);
+
+      rows.push({
+        premenna_a: left.name,
+        premenna_b: right.name,
+        metoda: chosenMethod === 'pearson' ? 'Pearson r' : 'Spearman rho',
+        n: pairs.length,
+        r: Number(r.toFixed(4)),
+        p_hodnota: formatPValue(pValue),
+        signifikancia: interpretPValue(pValue),
+        fisher_z: Math.abs(r) < 1 ? Number((0.5 * Math.log((1 + r) / (1 - r))).toFixed(4)) : '',
+        standard_error: pairs.length > 3 ? Number((1 / Math.sqrt(pairs.length - 3)).toFixed(4)) : '',
+        interpretacia: chosenMethod === 'pearson'
+          ? 'Parametrická korelácia použitá pri približne normálnych dátach.'
+          : 'Neparametrická korelácia použitá pri nenormálnych/ordinálnych dátach.',
+        zdroj: `dopočítané z DATA_CLEAN (${left.source}; ${right.source})`,
+      });
+    }
+  }
+
+  return rows.slice(0, 240);
+}
+
+function flattenCorrelationRows(
+  result: unknown,
+  method: 'pearson' | 'spearman' | 'recommended',
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
   const rootRows = asRecords(getNestedValue(result, ['correlations', method]));
   const statRows = asRecords(
     getNestedValue(result, ['statisticalAnalysis', 'correlations', method]),
   );
 
-  return [...rootRows, ...statRows].map((item) => ({
-    premenna_a: item.variableA ?? '',
-    premenna_b: item.variableB ?? '',
-    metoda: item.method ?? method,
+  const directRows = [...rootRows, ...statRows].map((item) => ({
+    premenna_a: item.variableA ?? item.premenna_a ?? '',
+    premenna_b: item.variableB ?? item.premenna_b ?? '',
+    metoda: item.method ?? item.metoda ?? method,
     n: item.n ?? '',
-    r: item.r ?? '',
-    p_hodnota: item.pValueText ?? item.pValue ?? '',
-    signifikancia: item.significance ?? '',
-    fisher_z: item.fisherZ ?? '',
-    standard_error: item.standardError ?? '',
-    interpretacia: item.interpretation ?? '',
+    r: item.r ?? item.rho ?? '',
+    p_hodnota: item.pValueText ?? item.pValue ?? item.p_hodnota ?? '',
+    signifikancia: item.significance ?? item.signifikancia ?? '',
+    fisher_z: item.fisherZ ?? item.fisher_z ?? '',
+    standard_error: item.standardError ?? item.standard_error ?? '',
+    interpretacia: item.interpretation ?? item.interpretacia ?? '',
+    zdroj: item.source ?? 'analysis-result',
   }));
+
+  const computedRows = buildCorrelationRowsFromRawData(result, method, preparedDataFile);
+  const finalRows = computedRows.length > 0 ? computedRows : directRows;
+
+  return deduplicateRowsByKey(
+    finalRows,
+    (row) => `${normalizeReliabilityItemName(row.premenna_a)}|${normalizeReliabilityItemName(row.premenna_b)}|${normalizeReliabilityItemName(row.metoda)}`,
+  );
 }
 
 function flattenCorrelationMatrix(result: unknown): AnyRecord[] {
@@ -1641,7 +2249,7 @@ function buildDependentScoreSeries(
   if (!rawRows.length) return [];
 
   const headers = Object.keys(rawRows[0] || {});
-  const definitions = getReliabilityDefinitions(result);
+  const definitions = getReliabilityDefinitions(result, preparedDataFile);
   const series: DependentScoreSeries[] = [];
   const used = new Set<string>();
 
@@ -1981,6 +2589,27 @@ function buildParametricTestsFromRawData(
       const allValues = groups.flatMap((group) => group.values);
 
       if (groups.length < 2 || allValues.length < 4) return;
+
+      if (!isSeriesApproximatelyNormal(allValues)) {
+        rows.push({
+          zavisla_premenna: dependent.name,
+          skupinova_premenna: groupColumn,
+          test: 'nepočítané – odporúčaný neparametrický test',
+          skupiny: groups.map((group) => group.group).join('; '),
+          n: allValues.length,
+          n_skupiny: groups.map((group) => `${group.group}: ${group.values.length}`).join('; '),
+          priemery: formatGroupSummary(groups, 'mean'),
+          df1: '',
+          df2: '',
+          statistika: '',
+          p_hodnota: '',
+          signifikancia: '',
+          efekt: '',
+          odporucanie: 'Normalita nebola splnená, preto je pre túto premennú vhodný neparametrický test v hárku 17 Neparam testy.',
+          zdroj: `dopočítané z DATA_CLEAN (${dependent.source})`,
+        });
+        return;
+      }
 
       if (groups.length === 2) {
         const [groupA, groupB] = groups;
@@ -2682,9 +3311,9 @@ function buildChartSections(
       title: 'Korelačné vzťahy',
       description: 'Sila korelačných vzťahov medzi premennými.',
       rows: [
-        ...flattenCorrelationRows(result, 'recommended'),
-        ...flattenCorrelationRows(result, 'pearson'),
-        ...flattenCorrelationRows(result, 'spearman'),
+        ...flattenCorrelationRows(result, 'recommended', preparedDataFile),
+        ...flattenCorrelationRows(result, 'pearson', preparedDataFile),
+        ...flattenCorrelationRows(result, 'spearman', preparedDataFile),
       ].map((row) => ({
         ...row,
         nazov: `${row.premenna_a ?? ''} × ${row.premenna_b ?? ''}`,
@@ -2702,7 +3331,7 @@ function buildChartSections(
       key: 'normality-p',
       title: 'Normalita dát',
       description: 'p-hodnoty testu normality podľa analyzovaných premenných.',
-      rows: flattenNormalityRows(result),
+      rows: flattenNormalityRows(result, preparedDataFile),
       labelKeys: ['premenna', 'nazov'],
       valueKeys: ['p_hodnota', 'statistika'],
       valueLabel: 'p / štatistika',
@@ -3060,20 +3689,21 @@ function getTableDefinitions(result: unknown, preparedDataFile: ExportPayload['p
     { sheetName: '02 raw-data', title: 'Raw dáta', description: 'Dáta použité pri analýze.', rows: flattenRawData(result, preparedDataFile) },
     { sheetName: '03 frequencies', title: 'Frekvenčné tabuľky', description: 'Početnosti a percentá odpovedí.', rows: flattenFrequencies(result) },
     { sheetName: '04 data-quality', title: 'Kontrola kvality dát', description: 'Upozornenia a kontrola vstupného súboru.', rows: flattenDataQuality(result, preparedDataFile) },
-    { sheetName: '05 descriptives', title: 'Deskriptívna štatistika', description: 'Priemery, mediány, smerodajné odchýlky a rozsahy.', rows: flattenDescriptiveRows(result, preparedDataFile) },
-    { sheetName: '06 normality', title: 'Normalita dát', description: 'Testy normality a odporúčania.', rows: flattenNormalityRows(result) },
-    { sheetName: '07 correlations', title: 'Odporúčané korelácie', description: 'Korelácie odporúčané podľa normality.', rows: flattenCorrelationRows(result, 'recommended') },
-    { sheetName: '08 Škály podškály', title: 'Škály a subškály', description: 'Definície, skóre a deskriptíva škál.', rows: flattenScaleRows(result, preparedDataFile) },
-    { sheetName: '09 Pearson', title: 'Pearsonove korelácie', description: 'Parametrické korelácie.', rows: flattenCorrelationRows(result, 'pearson') },
-    { sheetName: '10 Spearman', title: 'Spearmanove korelácie', description: 'Neparametrické korelácie.', rows: flattenCorrelationRows(result, 'spearman') },
-    { sheetName: '11 Corr matrix', title: 'Korelačná matica', description: 'Maticový výstup korelácií.', rows: flattenCorrelationMatrix(result) },
-    { sheetName: '12 Chart data', title: 'Dáta pre grafy', description: 'Podkladové dáta grafických výstupov.', rows: flattenChartData(result) },
-    { sheetName: '13 Param testy', title: 'Parametrické testy', description: 't-test a ANOVA.', rows: flattenParametricTests(result, preparedDataFile) },
-    { sheetName: '14 Neparam testy', title: 'Neparametrické testy', description: 'Mann-Whitney a Kruskal-Wallis.', rows: flattenNonParametricTests(result, preparedDataFile) },
-    { sheetName: '15 Kontingencne tab', title: 'Kontingenčné tabuľky', description: 'Podklady pre kategorizované premenné.', rows: buildContingencyTables(result) },
-    { sheetName: '16 Chi-square', title: 'Chí-kvadrát', description: 'Súhrny pre chí-kvadrát testy.', rows: buildChiSquareTests(result) },
-    { sheetName: '17 Odpor testy', title: 'Odporúčané testy', description: 'Odporúčané štatistické testovanie.', rows: flattenRecommendedTests(result) },
-    { sheetName: '18 Odpor grafy', title: 'Odporúčané grafy', description: 'Odporúčané grafické výstupy.', rows: flattenRecommendedCharts(result) },
+    { sheetName: '05 descriptives', title: 'Deskriptívna štatistika', description: 'Výpočty škál a subškál podľa používateľského zadania alebo rozpoznaného dotazníka.', rows: flattenDescriptiveRows(result, preparedDataFile) },
+    { sheetName: '06 normality', title: 'Normalita dát', description: 'Vyhodnotenie normality pre vypočítané škály/subškály a odporúčanie Pearson/Spearman.', rows: flattenNormalityRows(result, preparedDataFile) },
+    { sheetName: '07 reliability', title: 'Reliabilita', description: 'Cronbachovo alfa pre škály a subškály.', rows: flattenReliabilityRows(result, preparedDataFile) },
+    { sheetName: '08 correlations', title: 'Odporúčané korelácie', description: 'Korelácie zvolené podľa normality dát.', rows: flattenCorrelationRows(result, 'recommended', preparedDataFile) },
+    { sheetName: '09 Škály podškály', title: 'Škály a subškály', description: 'Definície, skóre a deskriptíva škál.', rows: flattenScaleRows(result, preparedDataFile) },
+    { sheetName: '10 Pearson', title: 'Pearsonove korelácie', description: 'Parametrické korelácie.', rows: flattenCorrelationRows(result, 'pearson', preparedDataFile) },
+    { sheetName: '11 Spearman', title: 'Spearmanove korelácie', description: 'Neparametrické korelácie.', rows: flattenCorrelationRows(result, 'spearman', preparedDataFile) },
+    { sheetName: '12 Corr matrix', title: 'Korelačná matica', description: 'Maticový výstup korelácií.', rows: flattenCorrelationMatrix(result) },
+    { sheetName: '13 Chart data', title: 'Dáta pre grafy', description: 'Podkladové dáta grafických výstupov.', rows: flattenChartData(result) },
+    { sheetName: '16 Param testy', title: 'Parametrické testy', description: 't-test a ANOVA podľa normálnosti a počtu skupín.', rows: flattenParametricTests(result, preparedDataFile) },
+    { sheetName: '17 Neparam testy', title: 'Neparametrické testy', description: 'Mann-Whitney a Kruskal-Wallis.', rows: flattenNonParametricTests(result, preparedDataFile) },
+    { sheetName: '18 Kontingencne tab', title: 'Kontingenčné tabuľky', description: 'Podklady pre kategorizované premenné.', rows: buildContingencyTables(result) },
+    { sheetName: '19 Chi-square', title: 'Chí-kvadrát', description: 'Súhrny pre chí-kvadrát testy.', rows: buildChiSquareTests(result) },
+    { sheetName: '20 Odpor testy', title: 'Odporúčané testy', description: 'Odporúčané štatistické testovanie.', rows: flattenRecommendedTests(result) },
+    { sheetName: '21 Odpor grafy', title: 'Odporúčané grafy', description: 'Odporúčané grafické výstupy.', rows: flattenRecommendedCharts(result) },
   ];
 }
 
@@ -3714,10 +4344,11 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const payload = await readPayload(request);
-    const result = getAnalysisResult(payload);
+    const rawResult = getAnalysisResult(payload);
     const preparedDataFile = getPreparedDataFile(payload);
+    const result = hydrateAnalysisResultWithPayloadInputs(rawResult, payload);
 
-    if (!result) {
+    if (!rawResult) {
       return jsonResponse(
         {
           ok: false,

@@ -1,0 +1,2 @@
+Wiersz języka określa język źródłowy i
+docelowy.

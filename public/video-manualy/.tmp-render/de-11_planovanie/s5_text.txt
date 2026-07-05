@@ -1,0 +1,2 @@
+Das große Eingabefeld nimmt Text,
+Aufgabe, Frage oder Daten auf.

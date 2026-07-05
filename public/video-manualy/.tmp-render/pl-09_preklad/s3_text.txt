@@ -1,0 +1,2 @@
+Przełącznik modułów pokazuje aktywny
+Translation.

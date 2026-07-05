@@ -1,0 +1,2 @@
+The module switcher at the top selects
+the active tool.

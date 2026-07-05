@@ -1,0 +1,3 @@
+Canvas öffnet einen komfortablen
+Arbeitsbereich für längere Texte und
+Clear löscht den aktuellen Inhalt.

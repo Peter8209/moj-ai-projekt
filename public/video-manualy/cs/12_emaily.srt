@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Emaily
+Generování profesionálních emailů pro školu, školitele nebo administrativu.
+
+2
+00:00:06,500 --> 00:00:12,900
+Krok 1 z 6
+Levé menu zachovává rychlý návrat do hlavních částí.
+
+3
+00:00:13,000 --> 00:00:19,399
+Krok 2 z 6
+Přepínač modulů ukazuje aktivní Emails.
+
+4
+00:00:19,500 --> 00:00:25,899
+Krok 3 z 6
+Email Type vybírá typ zprávy: školitel, vyučující, termín, žádost nebo omluva.
+
+5
+00:00:26,000 --> 00:00:32,399
+Krok 4 z 6
+Druhá část nastavuje tón emailu, například urgentní nebo stručný.
+
+6
+00:00:32,500 --> 00:00:38,899
+Krok 5 z 6
+Do textového pole uživatel stručně napíše, komu a o čem má email být.
+
+7
+00:00:39,000 --> 00:00:45,399
+Krok 6 z 6
+Generate Email vytvoří profesionální email ke kontrole a odeslání.
+
+8
+00:00:45,500 --> 00:00:51,899
+Modul je vysvětlen
+Uživatel ví, kde modul najde, které části ovládá a jak pokračuje v práci.

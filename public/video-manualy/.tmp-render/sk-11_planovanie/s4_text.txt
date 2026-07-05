@@ -1,0 +1,3 @@
+Sekcia Attachments umožňuje nahrať
+PDF, DOCX, Excel, CSV, PPT alebo
+obrázky.

@@ -1,0 +1,2 @@
+The purple highlight shows the
+selected module.

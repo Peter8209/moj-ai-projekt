@@ -1,0 +1,2 @@
+Przełącznik modułów u góry wybiera
+aktywne narzędzie.

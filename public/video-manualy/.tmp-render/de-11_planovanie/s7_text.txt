@@ -1,0 +1,2 @@
+Dictate, Canvas und Clear steuern die
+Eingabe.

@@ -1,0 +1,2 @@
+Modulový prepínač hore určuje aktívny
+nástroj.

@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Packages
+Overview of subscriptions, limits and available features.
+
+2
+00:00:06,500 --> 00:00:12,900
+Step 1 of 6
+The top Menu or Back to Menu button returns the user to the main menu.
+
+3
+00:00:13,000 --> 00:00:19,399
+Step 2 of 6
+The Packages and Add-ons introduction explains that plans are chosen according to workload and monthly scope.
+
+4
+00:00:19,500 --> 00:00:25,899
+Step 3 of 6
+START BASIC is the entry plan for one active project and basic AI support.
+
+5
+00:00:26,000 --> 00:00:32,399
+Step 4 of 6
+STUDENT PLUS is highlighted as the recommended student plan with higher limits and expanded features.
+
+6
+00:00:32,500 --> 00:00:38,899
+Step 5 of 6
+PRO THESIS is intended for more extensive final projects with priority processing.
+
+7
+00:00:39,000 --> 00:00:45,399
+Step 6 of 6
+ELITE ACADEMIC is the highest plan for demanding academic use, multiple projects and premium AI capacity.
+
+8
+00:00:45,500 --> 00:00:51,899
+Module explained
+The user knows where to find the module, which parts to use and how to continue working.

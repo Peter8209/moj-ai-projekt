@@ -1,0 +1,3 @@
+The user knows where to find the
+module, which parts to use and how to
+continue working.

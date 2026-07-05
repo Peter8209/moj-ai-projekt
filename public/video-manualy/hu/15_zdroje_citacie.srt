@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Források és hivatkozások
+Irodalom, tudományos cikkek és bibliográfiai adatok kezelése.
+
+2
+00:00:06,500 --> 00:00:12,900
+Lépés 1 / 6
+A felső sáv Menu gombja visszaviszi a felhasználót az alkalmazás főmenüjébe.
+
+3
+00:00:13,000 --> 00:00:19,399
+Lépés 2 / 6
+Az Academic Resources & Citations cím a szakirodalom, források és hivatkozási anyagok külön szekcióját jelöli.
+
+4
+00:00:19,500 --> 00:00:25,899
+Lépés 3 / 6
+A keresőmezőbe dolgozati téma, kulcsszó vagy kutatási kérdés írható.
+
+5
+00:00:26,000 --> 00:00:32,399
+Lépés 4 / 6
+A javasolt címkék segítenek gyakori témák és szakmai területek gyors beszúrásában.
+
+6
+00:00:32,500 --> 00:00:38,899
+Lépés 5 / 6
+A PDF Only, Last 2 Years, Last 5 Years és dátumszűrők pontosítják a forrás típusát és frissességét.
+
+7
+00:00:39,000 --> 00:00:45,399
+Lépés 6 / 6
+A Search elindítja az akadémiai forráskeresést, a Reset törli a beállított szűrőket.
+
+8
+00:00:45,500 --> 00:00:51,899
+A modul bemutatva
+A felhasználó tudja, hol találja a modult, mely részeket használja és hogyan folytassa a munkát.

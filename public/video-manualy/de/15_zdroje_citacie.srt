@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Quellen und Zitate
+Arbeiten mit Literatur, wissenschaftlichen Artikeln und bibliografischen Daten.
+
+2
+00:00:06,500 --> 00:00:12,900
+Schritt 1 von 6
+Die Menü-Schaltfläche in der oberen Leiste führt zurück zum Hauptmenü der Anwendung.
+
+3
+00:00:13,000 --> 00:00:19,399
+Schritt 2 von 6
+Die Überschrift Academic Resources & Citations kennzeichnet den Bereich für Literatur, Quellen und Zitationsmaterial.
+
+4
+00:00:19,500 --> 00:00:25,899
+Schritt 3 von 6
+Das Suchfeld dient zur Eingabe eines Arbeitsthemas, Schlüsselworts oder einer Forschungsfrage.
+
+5
+00:00:26,000 --> 00:00:32,399
+Schritt 4 von 6
+Vorgeschlagene Tags helfen, häufige Themen und Fachbereiche schnell einzufügen.
+
+6
+00:00:32,500 --> 00:00:38,899
+Schritt 5 von 6
+PDF Only, Last 2 Years, Last 5 Years und Zeitfilter verfeinern Quellentyp und Aktualität.
+
+7
+00:00:39,000 --> 00:00:45,399
+Schritt 6 von 6
+Search startet die Suche nach akademischen Quellen und Reset löscht die gesetzten Filter.
+
+8
+00:00:45,500 --> 00:00:51,899
+Modul erklärt
+Der Benutzer weiß, wo das Modul zu finden ist, welche Bereiche wichtig sind und wie er weiterarbeitet.

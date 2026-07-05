@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Übersetzung
+Akademischen Text nach Ausgangs- und Zielsprache übersetzen.
+
+2
+00:00:06,500 --> 00:00:12,900
+Schritt 1 von 6
+Das linke Menü bleibt für schnelle Navigation verfügbar.
+
+3
+00:00:13,000 --> 00:00:19,399
+Schritt 2 von 6
+Die Sprachzeile definiert Ausgangs- und Zielsprache.
+
+4
+00:00:19,500 --> 00:00:25,899
+Schritt 3 von 6
+Der Modulumschalter zeigt Translation als aktiv.
+
+5
+00:00:26,000 --> 00:00:32,399
+Schritt 4 von 6
+Der Übersetzungsstil wählt natürliches oder einfaches Ergebnis.
+
+6
+00:00:32,500 --> 00:00:38,899
+Schritt 5 von 6
+Der zu übersetzende Text wird in das Feld eingefügt.
+
+7
+00:00:39,000 --> 00:00:45,399
+Schritt 6 von 6
+Translate text startet die Übersetzung.
+
+8
+00:00:45,500 --> 00:00:51,899
+Modul erklärt
+Der Benutzer weiß, wo das Modul zu finden ist, welche Bereiche wichtig sind und wie er weiterarbeitet.

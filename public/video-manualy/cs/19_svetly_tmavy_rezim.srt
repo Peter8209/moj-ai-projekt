@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:06,400
+Světlý a tmavý režim
+Přepínání vzhledu aplikace podle preference uživatele.
+
+2
+00:00:06,500 --> 00:00:12,900
+Krok 1 z 6
+Levé menu slouží k rychlému přepínání modulů.
+
+3
+00:00:13,000 --> 00:00:19,399
+Krok 2 z 6
+Horní panel zobrazuje název a účel vybrané sekce.
+
+4
+00:00:19,500 --> 00:00:25,899
+Krok 3 z 6
+První karta ukazuje hlavní informace a dostupné možnosti.
+
+5
+00:00:26,000 --> 00:00:32,399
+Krok 4 z 6
+Druhá karta ukazuje doplňková nastavení nebo stav.
+
+6
+00:00:32,500 --> 00:00:38,899
+Krok 5 z 6
+Hlavní pracovní plocha obsahuje výstupy, seznamy nebo doporučení.
+
+7
+00:00:39,000 --> 00:00:45,399
+Krok 6 z 6
+Uživatel může výsledek uložit, otevřít nebo se vrátit do menu.
+
+8
+00:00:45,500 --> 00:00:51,899
+Modul je vysvětlen
+Uživatel ví, kde modul najde, které části ovládá a jak pokračuje v práci.

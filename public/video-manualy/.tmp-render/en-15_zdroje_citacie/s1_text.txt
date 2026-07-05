@@ -1,0 +1,2 @@
+The Menu button in the top bar returns
+the user to the main application menu.

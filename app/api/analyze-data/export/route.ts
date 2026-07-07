@@ -612,7 +612,7 @@ function flattenDescriptiveRows(
   const directRows = candidates.map((item) => ({
     zdroj: item.source ?? item.zdroj ?? 'analysis-result',
     typ: item.type ?? item.typ ?? '',
-    premenna: item.variable ?? item.name ?? item.nazov ?? '',
+    premenna: item.variable ?? item.name ?? item.nazov ?? item.scaleName ?? item.scale ?? '',
     valid: item.valid ?? item.n ?? '',
     missing: item.missing ?? '',
     mean: item.mean ?? item.priemer ?? '',
@@ -636,12 +636,29 @@ function flattenDescriptiveRows(
     preparedDataFile,
   ).descriptiveRows;
 
-  const finalRows = computedRows.length > 0 ? computedRows : directRows;
+  const scaleSeriesRows = buildDescriptiveRowsFromScoreSeries(
+    buildDependentScoreSeries(result, preparedDataFile),
+  );
 
-  return deduplicateRowsByKey(
+  const scaleOnlyDirectRows = filterRowsByScaleOrSubscaleNames(
+    directRows,
+    result,
+    preparedDataFile,
+    ['premenna', 'nazov', 'skala', 'scaleName', 'name'],
+  );
+
+  const finalRows = [
+    ...scaleSeriesRows,
+    ...computedRows,
+    ...scaleOnlyDirectRows,
+  ];
+
+  const deduplicated = deduplicateRowsByKey(
     finalRows,
     (row) => `${normalizeReliabilityItemName(row.premenna)}|${normalizeReliabilityItemName(row.typ)}|${normalizeReliabilityItemName(row.zdroj)}`,
   );
+
+  return deduplicated.length > 0 ? deduplicated : buildMissingScaleRowsMessage('Deskriptívna štatistika');
 }
 
 function flattenScaleRows(
@@ -780,6 +797,7 @@ function flattenScaleRows(
     result,
     preparedDataFile,
   ).scaleRows;
+  const precomputedRows = buildPrecomputedScaleRowsFromRawData(result, preparedDataFile);
 
   return deduplicateRowsByKey(
     [
@@ -788,6 +806,7 @@ function flattenScaleRows(
       ...scoreRows,
       ...descriptiveRows,
       ...computedRows,
+      ...precomputedRows,
     ],
     (row) => {
       const record = row as AnyRecord;
@@ -882,12 +901,20 @@ function flattenNormalityRows(
   }));
 
   const computedRows = buildNormalityRowsFromRawData(result, preparedDataFile);
-  const finalRows = computedRows.length > 0 ? computedRows : directRows;
+  const scaleOnlyDirectRows = filterRowsByScaleOrSubscaleNames(
+    directRows,
+    result,
+    preparedDataFile,
+    ['premenna', 'variable', 'name'],
+  );
+  const finalRows = computedRows.length > 0 ? computedRows : scaleOnlyDirectRows;
 
-  return deduplicateRowsByKey(
+  const deduplicated = deduplicateRowsByKey(
     finalRows,
     (row) => `${normalizeReliabilityItemName(row.premenna)}|${normalizeReliabilityItemName(row.metoda)}`,
   );
+
+  return deduplicated.length > 0 ? deduplicated : buildMissingScaleRowsMessage('Normalita dát');
 }
 
 function normalizeReliabilityItemName(value: unknown): string {
@@ -1920,9 +1947,16 @@ function flattenReliabilityRows(
     zdroj: row.zdroj ?? 'computed-from-DATA_CLEAN',
   }));
 
+  const scaleOnlyDirectRows = filterRowsByScaleOrSubscaleNames(
+    directRows,
+    result,
+    preparedDataFile,
+    ['skala', 'scaleName', 'scale', 'variable', 'name'],
+  );
+
   const finalRows: AnyRecord[] = computedRows.length > 0
-    ? [...computedRows, ...directRows]
-    : directRows;
+    ? [...computedRows, ...scaleOnlyDirectRows]
+    : scaleOnlyDirectRows;
 
   const deduplicated = deduplicateRowsByKey(
     finalRows,
@@ -2074,7 +2108,12 @@ function flattenCorrelationRows(
   }));
 
   const computedRows = buildCorrelationRowsFromRawData(result, method, preparedDataFile);
-  const finalRows = computedRows.length > 0 ? computedRows : directRows;
+  const knownScaleNames = getKnownScaleNameSet(result, preparedDataFile);
+  const scaleOnlyDirectRows = directRows.filter((row) =>
+    isLikelyScaleOrSubscaleVariableName(row.premenna_a, knownScaleNames) &&
+    isLikelyScaleOrSubscaleVariableName(row.premenna_b, knownScaleNames),
+  );
+  const finalRows = computedRows.length > 0 ? computedRows : scaleOnlyDirectRows;
 
   return deduplicateRowsByKey(
     finalRows,
@@ -2082,14 +2121,40 @@ function flattenCorrelationRows(
   );
 }
 
-function flattenCorrelationMatrix(result: unknown): AnyRecord[] {
+function flattenCorrelationMatrix(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
   const rows = [
     ...asRecords(getNestedValue(result, ['correlationMatrix'])),
     ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'correlationMatrix'])),
   ];
 
-  return rows;
+  if (!rows.length) return [];
+
+  const knownScaleNames = getKnownScaleNameSet(result, preparedDataFile);
+  const metadataKeys = new Set(['premenna', 'variable', 'name', 'skala', 'scale', 'metoda', 'method']);
+
+  return rows
+    .map((row) => {
+      const rowVariable = getOutputVariableName(row, ['premenna', 'variable', 'name', 'skala', 'scale']);
+      if (rowVariable && !isLikelyScaleOrSubscaleVariableName(rowVariable, knownScaleNames)) {
+        return null;
+      }
+
+      const filteredRow: AnyRecord = {};
+      Object.entries(row).forEach(([key, value]) => {
+        const normalizedKey = normalizeReliabilityItemName(key);
+        if (metadataKeys.has(key) || metadataKeys.has(normalizedKey) || isLikelyScaleOrSubscaleVariableName(key, knownScaleNames)) {
+          filteredRow[key] = value;
+        }
+      });
+
+      return Object.keys(filteredRow).length > 0 ? filteredRow : null;
+    })
+    .filter((row): row is AnyRecord => row !== null);
 }
+
 
 
 
@@ -2207,6 +2272,352 @@ function isMostlyNumericColumn(rows: AnyRecord[], column: string): boolean {
   return numericCount / nonEmptyValues.length >= 0.75;
 }
 
+const SCALE_OR_SUBSCALE_NAME_HINTS = [
+  'skala',
+  'subskala',
+  'scale',
+  'subscale',
+  'score',
+  'skore',
+  'total',
+  'celkom',
+  'celkove',
+  'sum',
+  'sucet',
+  'priemer',
+  'index',
+  'faktor',
+  'domena',
+  'dimenzia',
+  'rs25',
+  'rs',
+  'sehs',
+  'sehss',
+  'wemwbs',
+  'jss',
+  'rezilien',
+  'resilien',
+  'covitalita',
+  'angazovanyzivot',
+  'zivotnaangazovanost',
+  'viera',
+  'sebaucinnost',
+  'sebauvedomenie',
+  'vytrvalost',
+  'rodinnasudrznost',
+  'podporaskoly',
+  'podporarovesnikov',
+  'regulaciaemocii',
+  'empatia',
+  'sebakontrola',
+  'optimizmus',
+  'vdacnost',
+  'vitalita',
+  'zapal',
+  'osobnakompetencia',
+  'akceptaciasabaazivota',
+];
+
+const NON_DEPENDENT_COLUMN_HINTS = [
+  'id',
+  'respondent',
+  'participant',
+  'pohlavie',
+  'gender',
+  'vek',
+  'age',
+  'rocnik',
+  'ročník',
+  'skola',
+  'škola',
+  'typ',
+  'druh',
+  'uroven',
+  'úroveň',
+  'datum',
+  'dátum',
+  'cas',
+  'čas',
+  'sport',
+  'šport',
+  'trening',
+  'tréning',
+];
+
+function getOutputVariableName(row: AnyRecord, keys: string[]): string {
+  for (const key of keys) {
+    const value = row[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return String(value).trim();
+    }
+  }
+
+  return '';
+}
+
+function isRawItemLikeVariableName(value: unknown): boolean {
+  const text = String(value ?? '').trim();
+  if (!text) return false;
+
+  const normalized = normalizeReliabilityItemName(text);
+
+  if (/^(?:q|otazka|polozka|item|jss|wemwbs|rs)0*\d+$/i.test(normalized)) {
+    return true;
+  }
+
+  if (text.length >= 65 && /[?]|\.\.$|\b(?:na škále|na skale|cítim|citim|som|mám|mam|viem|dokážem|dokazem|snažím|snazim|rozumiem|verím|verim|môj|moj|moja|moji)\b/i.test(text)) {
+    return true;
+  }
+
+  if (/\.\.$/.test(text) && text.length >= 18) {
+    return true;
+  }
+
+  return false;
+}
+
+function isNonDependentMetadataColumnName(value: unknown): boolean {
+  const normalized = normalizeReliabilityItemName(value);
+  if (!normalized) return true;
+
+  return NON_DEPENDENT_COLUMN_HINTS.some((hint) => {
+    const normalizedHint = normalizeReliabilityItemName(hint);
+    return normalized === normalizedHint || normalized.includes(normalizedHint);
+  });
+}
+
+function getKnownScaleNameSet(result: unknown, preparedDataFile?: ExportPayload['preparedDataFile']): Set<string> {
+  const names = new Set<string>();
+
+  getReliabilityDefinitions(result, preparedDataFile).forEach((definition) => {
+    [
+      definition.name,
+      definition.scaleName,
+      definition.label,
+      definition.title,
+      definition.id,
+    ].forEach((value) => {
+      const normalized = normalizeReliabilityItemName(value);
+      if (normalized) names.add(normalized);
+    });
+  });
+
+  const additionalCandidates = [
+    ...asRecords(getNestedValue(result, ['scaleScores'])),
+    ...asRecords(getNestedValue(result, ['scaleDescriptives'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'scaleScores'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'scaleDescriptives'])),
+    ...asRecords(getNestedValue(result, ['descriptiveStatistics'])),
+    ...asRecords(getNestedValue(result, ['descriptives'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'descriptiveStatistics'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'descriptives'])),
+  ];
+
+  additionalCandidates.forEach((row) => {
+    [
+      row.scaleName,
+      row.scale,
+      row.variable,
+      row.premenna,
+      row.name,
+      row.nazov,
+      row.id,
+    ].forEach((value) => {
+      const text = String(value ?? '').trim();
+      const normalized = normalizeReliabilityItemName(text);
+      if (normalized && isLikelyScaleOrSubscaleVariableName(text, names)) {
+        names.add(normalized);
+      }
+    });
+  });
+
+  return names;
+}
+
+function isKnownScaleName(value: unknown, knownScaleNames: Set<string>): boolean {
+  const normalized = normalizeReliabilityItemName(value);
+  if (!normalized) return false;
+
+  if (knownScaleNames.has(normalized)) return true;
+
+  for (const knownName of knownScaleNames) {
+    if (!knownName) continue;
+    if (normalized.includes(knownName) || knownName.includes(normalized)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasScaleOrSubscaleKeyword(value: unknown): boolean {
+  const normalized = normalizeReliabilityItemName(value);
+
+  return SCALE_OR_SUBSCALE_NAME_HINTS.some((hint) => {
+    const normalizedHint = normalizeReliabilityItemName(hint);
+    return normalized.includes(normalizedHint);
+  });
+}
+
+function isLikelyScaleOrSubscaleVariableName(
+  value: unknown,
+  knownScaleNames: Set<string> = new Set<string>(),
+): boolean {
+  const text = String(value ?? '').trim();
+  if (!text) return false;
+
+  if (isRawItemLikeVariableName(text)) return false;
+  if (isNonDependentMetadataColumnName(text) && !hasScaleOrSubscaleKeyword(text) && !isKnownScaleName(text, knownScaleNames)) return false;
+
+  if (isKnownScaleName(text, knownScaleNames)) return true;
+  if (hasScaleOrSubscaleKeyword(text)) return true;
+
+  return false;
+}
+
+function filterRowsByScaleOrSubscaleNames(
+  rows: AnyRecord[],
+  result: unknown,
+  preparedDataFile: ExportPayload['preparedDataFile'] | undefined,
+  variableKeys: string[],
+): AnyRecord[] {
+  const knownScaleNames = getKnownScaleNameSet(result, preparedDataFile);
+
+  return rows.filter((row) => {
+    const variableName = getOutputVariableName(row, variableKeys);
+    return isLikelyScaleOrSubscaleVariableName(variableName, knownScaleNames);
+  });
+}
+
+function buildMissingScaleRowsMessage(section: string): AnyRecord[] {
+  return [
+    {
+      stav: `${section} nie sú dostupné pre škály/subškály`,
+      poznamka:
+        'Od deskriptívnej štatistiky po testovanie sa exportujú iba vypočítané škály a subškály. Do vstupného súboru doplňte samostatné stĺpce so skóre škál/subškál alebo zadajte definície položiek škál/subškál pred analýzou.',
+    },
+  ];
+}
+
+function buildPrecomputedScaleSeriesFromRawData(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+  groupingColumns: string[] = [],
+  limit = 40,
+): DependentScoreSeries[] {
+  const rawRows = flattenRawData(result, preparedDataFile);
+  if (!rawRows.length) return [];
+
+  const knownScaleNames = getKnownScaleNameSet(result, preparedDataFile);
+  const groupingSet = new Set(groupingColumns.map((column) => normalizeReliabilityItemName(column)));
+  const headers = Object.keys(rawRows[0] || {});
+  const used = new Set<string>();
+
+  return headers
+    .filter((header) => !groupingSet.has(normalizeReliabilityItemName(header)))
+    .filter((header) => isMostlyNumericColumn(rawRows, header))
+    .filter((header) => isLikelyScaleOrSubscaleVariableName(header, knownScaleNames))
+    .map((header) => ({
+      name: header,
+      source: 'precomputed-scale-column',
+      usedItems: [header],
+      values: rawRows.map((row) => toFiniteNumber(row[header])),
+    }))
+    .filter((series) => {
+      const key = normalizeReliabilityItemName(series.name);
+      if (!key || used.has(key)) return false;
+      used.add(key);
+      return series.values.filter((value): value is number => value !== null && Number.isFinite(value)).length >= 3;
+    })
+    .slice(0, limit);
+}
+
+function buildDescriptiveRowsFromScoreSeries(series: DependentScoreSeries[]): AnyRecord[] {
+  return series.map((item) => {
+    const values = item.values.filter((value): value is number => value !== null && Number.isFinite(value));
+    const stats = computeDescriptiveStats(values, item.values.length - values.length);
+    const skewness = sampleSkewness(values);
+    const kurtosis = sampleExcessKurtosis(values);
+
+    return {
+      zdroj: item.source,
+      typ: 'škála/subškála',
+      premenna: item.name,
+      ...stats,
+      skewness: skewness === null ? '' : Number(skewness.toFixed(4)),
+      kurtosis: kurtosis === null ? '' : Number(kurtosis.toFixed(4)),
+      poznamka: item.source === 'precomputed-scale-column'
+        ? 'Dopočítané zo stĺpca so skóre škály/subškály vo vstupnom súbore.'
+        : `Dopočítané z položiek: ${item.usedItems.join(', ')}.`,
+    };
+  });
+}
+
+function buildPrecomputedScaleRowsFromRawData(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
+  return buildPrecomputedScaleSeriesFromRawData(result, preparedDataFile).map((series, index) => {
+    const values = series.values.filter((value): value is number => value !== null && Number.isFinite(value));
+    const stats = computeDescriptiveStats(values, series.values.length - values.length);
+
+    return {
+      typ: 'vypočítané skóre zo stĺpca v databáze',
+      id: `precomputed-scale-${index + 1}`,
+      nazov: series.name,
+      polozky: '',
+      pouzite_polozky: series.usedItems.join(', '),
+      reverzne_polozky: '',
+      minimum: stats.minimum,
+      maximum: stats.maximum,
+      skoring: 'precomputed',
+      valid: stats.valid,
+      missing: stats.missing,
+      mean: stats.mean,
+      median: stats.median,
+      sd: stats.standard_deviation,
+      min: stats.minimum,
+      max: stats.maximum,
+      zdroj: series.source,
+      popis: 'Použitý bol už vypočítaný stĺpec škály/subškály z databázy používateľa.',
+    };
+  });
+}
+
+function flattenItemDescriptiveRows(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
+  const rawRows = flattenRawData(result, preparedDataFile);
+  if (!rawRows.length) return [];
+
+  const knownScaleNames = getKnownScaleNameSet(result, preparedDataFile);
+  const groupingColumns = new Set(resolveGroupingColumns(result, preparedDataFile).map((column) => normalizeReliabilityItemName(column)));
+  const headers = Object.keys(rawRows[0] || {});
+
+  return headers
+    .filter((header) => !groupingColumns.has(normalizeReliabilityItemName(header)))
+    .filter((header) => isMostlyNumericColumn(rawRows, header))
+    .filter((header) => !isLikelyScaleOrSubscaleVariableName(header, knownScaleNames))
+    .filter((header) => isRawItemLikeVariableName(header) || !isNonDependentMetadataColumnName(header))
+    .slice(0, 300)
+    .map((header, index) => {
+      const values = getNumericColumnValues(rawRows, header);
+      const stats = computeDescriptiveStats(values, rawRows.length - values.length);
+      const skewness = sampleSkewness(values);
+      const kurtosis = sampleExcessKurtosis(values);
+
+      return {
+        poradie: index + 1,
+        polozka: header,
+        ...stats,
+        skewness: skewness === null ? '' : Number(skewness.toFixed(4)),
+        kurtosis: kurtosis === null ? '' : Number(kurtosis.toFixed(4)),
+        poznamka: 'Položková deskriptíva je presunutá do samostatného hárka, aby hlavné štatistické hárky obsahovali iba škály a subškály.',
+      };
+    });
+}
+
 function detectFallbackNumericColumns(rows: AnyRecord[], excludedColumns: string[], limit = 30): string[] {
   const excluded = new Set(excludedColumns.map((column) => normalizeReliabilityItemName(column)));
   const headers = Object.keys(rows[0] || {});
@@ -2306,16 +2717,17 @@ function buildDependentScoreSeries(
     }
   });
 
-  if (series.length > 0) {
-    return series.slice(0, 30);
-  }
+  buildPrecomputedScaleSeriesFromRawData(result, preparedDataFile, groupingColumns).forEach((precomputedSeries) => {
+    const key = normalizeReliabilityItemName(precomputedSeries.name);
+    if (!key || used.has(key)) return;
+    used.add(key);
+    series.push(precomputedSeries);
+  });
 
-  return detectFallbackNumericColumns(rawRows, groupingColumns, 30).map((column) => ({
-    name: column,
-    source: 'numeric-column-fallback',
-    usedItems: [column],
-    values: rawRows.map((row) => toFiniteNumber(row[column])),
-  }));
+  // Zámerne už nepoužívame fallback na všetky číselné stĺpce.
+  // Od deskriptívnej štatistiky po testovanie majú ísť do exportu iba škály a subškály,
+  // nie demografické premenné ani jednotlivé položky dotazníka.
+  return series.slice(0, 40);
 }
 
 function resolveGroupingColumns(
@@ -2826,9 +3238,15 @@ function flattenParametricTests(
   }));
 
   const computedRows = buildParametricTestsFromRawData(result, preparedDataFile);
+  const scaleOnlyDirectRows = filterRowsByScaleOrSubscaleNames(
+    directRows,
+    result,
+    preparedDataFile,
+    ['zavisla_premenna', 'dependentVariable', 'variable', 'premenna'],
+  );
 
   return deduplicateRowsByKey(
-    [...directRows, ...computedRows],
+    [...scaleOnlyDirectRows, ...computedRows],
     (row) => `${normalizeReliabilityItemName(row.zavisla_premenna)}|${normalizeReliabilityItemName(row.skupinova_premenna)}|${normalizeReliabilityItemName(row.test)}|${normalizeReliabilityItemName(row.skupiny)}|${normalizeReliabilityItemName(row.zdroj)}`,
   );
 }
@@ -2871,9 +3289,15 @@ function flattenNonParametricTests(
   }));
 
   const computedRows = buildNonParametricTestsFromRawData(result, preparedDataFile);
+  const scaleOnlyDirectRows = filterRowsByScaleOrSubscaleNames(
+    directRows,
+    result,
+    preparedDataFile,
+    ['zavisla_premenna', 'dependentVariable', 'variable', 'premenna'],
+  );
 
   return deduplicateRowsByKey(
-    [...directRows, ...computedRows],
+    [...scaleOnlyDirectRows, ...computedRows],
     (row) => `${normalizeReliabilityItemName(row.zavisla_premenna)}|${normalizeReliabilityItemName(row.skupinova_premenna)}|${normalizeReliabilityItemName(row.test)}|${normalizeReliabilityItemName(row.skupiny)}|${normalizeReliabilityItemName(row.zdroj)}`,
   );
 }
@@ -3689,14 +4113,14 @@ function getTableDefinitions(result: unknown, preparedDataFile: ExportPayload['p
     { sheetName: '02 raw-data', title: 'Raw dáta', description: 'Dáta použité pri analýze.', rows: flattenRawData(result, preparedDataFile) },
     { sheetName: '03 frequencies', title: 'Frekvenčné tabuľky', description: 'Početnosti a percentá odpovedí.', rows: flattenFrequencies(result) },
     { sheetName: '04 data-quality', title: 'Kontrola kvality dát', description: 'Upozornenia a kontrola vstupného súboru.', rows: flattenDataQuality(result, preparedDataFile) },
-    { sheetName: '05 descriptives', title: 'Deskriptívna štatistika', description: 'Výpočty škál a subškál podľa používateľského zadania alebo rozpoznaného dotazníka.', rows: flattenDescriptiveRows(result, preparedDataFile) },
-    { sheetName: '06 normality', title: 'Normalita dát', description: 'Vyhodnotenie normality pre vypočítané škály/subškály a odporúčanie Pearson/Spearman.', rows: flattenNormalityRows(result, preparedDataFile) },
-    { sheetName: '07 reliability', title: 'Reliabilita', description: 'Cronbachovo alfa pre škály a subškály.', rows: flattenReliabilityRows(result, preparedDataFile) },
+    { sheetName: '05 descriptives', title: 'Deskriptívna štatistika', description: 'Od tohto hárka sú v hlavných výstupoch ponechané iba vypočítané škály a subškály; položky sú presunuté do záverečného hárka.', rows: flattenDescriptiveRows(result, preparedDataFile) },
+    { sheetName: '06 normality', title: 'Normalita dát', description: 'Vyhodnotenie normality iba pre vypočítané škály/subškály a odporúčanie Pearson/Spearman.', rows: flattenNormalityRows(result, preparedDataFile) },
+    { sheetName: '07 reliability', title: 'Reliabilita', description: 'Cronbachovo alfa pre škály a subškály vypočítané z položiek dotazníka.', rows: flattenReliabilityRows(result, preparedDataFile) },
     { sheetName: '08 correlations', title: 'Odporúčané korelácie', description: 'Korelácie zvolené podľa normality dát.', rows: flattenCorrelationRows(result, 'recommended', preparedDataFile) },
     { sheetName: '09 Škály podškály', title: 'Škály a subškály', description: 'Definície, skóre a deskriptíva škál.', rows: flattenScaleRows(result, preparedDataFile) },
     { sheetName: '10 Pearson', title: 'Pearsonove korelácie', description: 'Parametrické korelácie.', rows: flattenCorrelationRows(result, 'pearson', preparedDataFile) },
     { sheetName: '11 Spearman', title: 'Spearmanove korelácie', description: 'Neparametrické korelácie.', rows: flattenCorrelationRows(result, 'spearman', preparedDataFile) },
-    { sheetName: '12 Corr matrix', title: 'Korelačná matica', description: 'Maticový výstup korelácií.', rows: flattenCorrelationMatrix(result) },
+    { sheetName: '12 Corr matrix', title: 'Korelačná matica', description: 'Maticový výstup korelácií.', rows: flattenCorrelationMatrix(result, preparedDataFile) },
     { sheetName: '13 Chart data', title: 'Dáta pre grafy', description: 'Podkladové dáta grafických výstupov.', rows: flattenChartData(result) },
     { sheetName: '16 Param testy', title: 'Parametrické testy', description: 't-test a ANOVA podľa normálnosti a počtu skupín.', rows: flattenParametricTests(result, preparedDataFile) },
     { sheetName: '17 Neparam testy', title: 'Neparametrické testy', description: 'Mann-Whitney a Kruskal-Wallis.', rows: flattenNonParametricTests(result, preparedDataFile) },
@@ -3704,6 +4128,7 @@ function getTableDefinitions(result: unknown, preparedDataFile: ExportPayload['p
     { sheetName: '19 Chi-square', title: 'Chí-kvadrát', description: 'Súhrny pre chí-kvadrát testy.', rows: buildChiSquareTests(result) },
     { sheetName: '20 Odpor testy', title: 'Odporúčané testy', description: 'Odporúčané štatistické testovanie.', rows: flattenRecommendedTests(result) },
     { sheetName: '21 Odpor grafy', title: 'Odporúčané grafy', description: 'Odporúčané grafické výstupy.', rows: flattenRecommendedCharts(result) },
+    { sheetName: '22 Polozky', title: 'Položkové deskriptívy', description: 'Samostatný záverečný hárok pre položky z raw dát. Hlavné štatistické hárky tak zostávajú čisto pre škály a subškály.', rows: flattenItemDescriptiveRows(result, preparedDataFile) },
   ];
 }
 
@@ -3979,10 +4404,11 @@ function addStandaloneChartWorksheets(
 ) {
   const chartSections = buildChartSections(result, preparedDataFile);
   const pieSections = buildPieChartSections(result);
+  const chartStartNumber = getTableDefinitions(result, preparedDataFile || null).length + 1;
 
   [...pieSections, ...chartSections].slice(0, 24).forEach((section: any, index) => {
     const isPie = String(section.key || '').startsWith('pie-');
-    const worksheet = workbook.addWorksheet(safeSheetName(`${22 + index} Graf ${index + 1}`), {
+    const worksheet = workbook.addWorksheet(safeSheetName(`${chartStartNumber + index} Graf ${index + 1}`), {
       views: [{ showGridLines: false }],
       properties: { tabColor: { argb: `FF${PROFESSIONAL_COLORS[index % PROFESSIONAL_COLORS.length]}` } },
     });

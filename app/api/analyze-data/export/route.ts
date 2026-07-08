@@ -18,6 +18,129 @@ type ExportTableDefinition = {
   rows: AnyRecord[];
 };
 
+type SheetHelperRow = {
+  poradie: number;
+  list: string;
+  cast: string;
+  co_obsahuje: string;
+  preco_je_dolezity: string;
+  ako_sa_pocita: string;
+  kedy_moze_chybat: string;
+  odporucanie: string;
+};
+
+const SCALE_SHEET_HEADERS = [
+  'typ',
+  'id',
+  'nazov',
+  'polozky',
+  'pouzite_polozky',
+  'reverzne_polozky',
+  'minimum',
+  'maximum',
+  'skoring',
+  'valid',
+  'missing',
+  'mean',
+  'median',
+  'sd',
+  'standard_deviation',
+  'min',
+  'max',
+  'minimum_hodnota',
+  'maximum_hodnota',
+  'pocet_chybajucich_riadkov',
+  'cronbach_alpha',
+  'interpretacia',
+  'zdroj',
+  'popis',
+  'poznamka',
+];
+
+const SCALE_SCORE_SHEET_HEADERS = [
+  'respondent',
+  'riadok',
+  'rowIndex',
+  'id',
+  'nazov',
+  'skala',
+  'subskala',
+  'score',
+  'skore',
+  'hodnota',
+  'valid_items',
+  'missing_items',
+  'pouzite_polozky',
+  'skoring',
+  'zdroj',
+  'poznamka',
+];
+
+const RELIABILITY_SHEET_HEADERS = [
+  'skala',
+  'nazov',
+  'id',
+  'typ',
+  'pocet_poloziek',
+  'item_count',
+  'valid_riadky',
+  'validRows',
+  'cronbach_alpha',
+  'alpha',
+  'interpretacia',
+  'pouzite_polozky',
+  'usedItems',
+  'chybajuce_polozky',
+  'missingItems',
+  'zdroj',
+  'poznamka',
+  'note',
+];
+
+const DESCRIPTIVE_SHEET_HEADERS = [
+  'zdroj',
+  'typ',
+  'premenna',
+  'nazov',
+  'valid',
+  'missing',
+  'mean',
+  'median',
+  'mode',
+  'standard_deviation',
+  'sd',
+  'variance',
+  'skewness',
+  'kurtosis',
+  'minimum',
+  'maximum',
+  'min',
+  'max',
+  'sum',
+  'q1',
+  'q3',
+  'iqr',
+  'poznamka',
+];
+
+const DATA_QUALITY_SHEET_HEADERS = [
+  'oblast',
+  'kontrola',
+  'premenna',
+  'stlpec',
+  'typ',
+  'valid',
+  'missing',
+  'missing_percent',
+  'unique',
+  'minimum',
+  'maximum',
+  'vysledok',
+  'stav',
+  'odporucanie',
+  'poznamka',
+];
+
 type ExportPayload = {
   [key: string]: unknown;
   result?: unknown;
@@ -27,11 +150,17 @@ type ExportPayload = {
     fileName?: string;
     base64?: string;
     mimeType?: string;
-    rows?: number;
+    rows?: number | AnyRecord[];
     columns?: number;
     warnings?: string[];
     sheets?: string[];
     qualityReport?: unknown[];
+    rawData?: AnyRecord[];
+    rawRows?: AnyRecord[];
+    cleanRows?: AnyRecord[];
+    dataRows?: AnyRecord[];
+    preparedRows?: AnyRecord[];
+    data?: unknown;
   } | null;
   format?: ExportFormat | string;
   exportFormat?: ExportFormat | string;
@@ -188,6 +317,62 @@ function normalizeRowsForExcel(rows: AnyRecord[]): AnyRecord[] {
   });
 }
 
+function getAllHeadersFromRows(
+  rows: AnyRecord[],
+  preferredHeaders: string[] = [],
+): string[] {
+  const used = new Set<string>();
+  const headers: string[] = [];
+
+  function addHeader(header: unknown) {
+    const value = String(header ?? '').trim();
+    if (!value || used.has(value)) return;
+    used.add(value);
+    headers.push(value);
+  }
+
+  preferredHeaders.forEach(addHeader);
+  rows.forEach((row) => Object.keys(row || {}).forEach(addHeader));
+
+  return headers;
+}
+
+function getPreferredHeadersForSheet(sheetName: string): string[] {
+  const normalized = normalizeReliabilityItemName(sheetName);
+
+  if (normalized.includes('skaly') || normalized.includes('podskaly') || normalized.includes('scales')) {
+    return SCALE_SHEET_HEADERS;
+  }
+
+  if (normalized.includes('scoreskal') || normalized.includes('score') || normalized.includes('skore')) {
+    return SCALE_SCORE_SHEET_HEADERS;
+  }
+
+  if (normalized.includes('reliability') || normalized.includes('reliabilita')) {
+    return RELIABILITY_SHEET_HEADERS;
+  }
+
+  if (normalized.includes('descriptives') || normalized.includes('deskript')) {
+    return DESCRIPTIVE_SHEET_HEADERS;
+  }
+
+  if (normalized.includes('dataquality') || normalized.includes('kvalita')) {
+    return DATA_QUALITY_SHEET_HEADERS;
+  }
+
+  return [];
+}
+
+function normalizeRowsToHeaders(rows: AnyRecord[], headers: string[]): AnyRecord[] {
+  return rows.map((row) => {
+    const normalized: AnyRecord = {};
+    headers.forEach((header) => {
+      normalized[header] = Object.prototype.hasOwnProperty.call(row, header) ? row[header] : '';
+    });
+    return normalized;
+  });
+}
+
 function addJsonSheet(
   workbook: XLSX.WorkBook,
   sheetName: string,
@@ -204,9 +389,15 @@ function addJsonSheet(
           },
         ];
 
-  const worksheet = XLSX.utils.json_to_sheet(finalRows);
+  const headers = getAllHeadersFromRows(
+    finalRows,
+    getPreferredHeadersForSheet(sheetName),
+  );
+  const normalizedFinalRows = normalizeRowsToHeaders(finalRows, headers);
+  const worksheet = XLSX.utils.json_to_sheet(normalizedFinalRows, {
+    header: headers,
+  });
 
-  const headers = Object.keys(finalRows[0] || {});
   worksheet['!cols'] = headers.map((header) => ({
     wch: Math.min(Math.max(header.length + 8, 16), 45),
   }));
@@ -247,6 +438,214 @@ function tryParseJson(value: unknown): unknown {
   } catch {
     return value;
   }
+}
+
+
+type PreparedFileLike = {
+  fileName?: string;
+  base64?: string;
+  mimeType?: string;
+  rows?: number | AnyRecord[];
+  columns?: number;
+  warnings?: string[];
+  sheets?: string[];
+  qualityReport?: unknown[];
+  rawData?: AnyRecord[];
+  rawRows?: AnyRecord[];
+  cleanRows?: AnyRecord[];
+  dataRows?: AnyRecord[];
+  preparedRows?: AnyRecord[];
+  data?: unknown;
+};
+
+function isFileLikeFormValue(value: unknown): value is Blob & { name?: string; type?: string; arrayBuffer: () => Promise<ArrayBuffer> } {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      typeof (value as Blob).arrayBuffer === 'function' &&
+      typeof (value as Blob).size === 'number',
+  );
+}
+
+async function formFileToPreparedDataFile(
+  value: Blob & { name?: string; type?: string; arrayBuffer: () => Promise<ArrayBuffer> },
+): Promise<PreparedFileLike> {
+  const arrayBuffer = await value.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  return {
+    fileName: value.name || 'uploaded-data-file',
+    mimeType: value.type || 'application/octet-stream',
+    base64: buffer.toString('base64'),
+  };
+}
+
+async function getFirstUploadedPreparedFile(formData: FormData): Promise<PreparedFileLike | null> {
+  const preferredKeys = ['file', 'upload', 'attachment', 'dataFile', 'preparedFile', 'preparedDataFile'];
+
+  for (const key of preferredKeys) {
+    const value = formData.get(key);
+    if (isFileLikeFormValue(value)) {
+      return formFileToPreparedDataFile(value);
+    }
+  }
+
+  let discoveredFile: Blob & { name?: string; type?: string; arrayBuffer: () => Promise<ArrayBuffer> } | null = null;
+
+  formData.forEach((value) => {
+    if (!discoveredFile && isFileLikeFormValue(value)) {
+      discoveredFile = value;
+    }
+  });
+
+  return discoveredFile ? formFileToPreparedDataFile(discoveredFile) : null;
+}
+
+function getFileExtension(fileName?: string): string {
+  const match = String(fileName || '').toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match?.[1] || '';
+}
+
+function decodePreparedFileText(buffer: Buffer): string {
+  return buffer.toString('utf8').replace(/^\uFEFF/, '');
+}
+
+function detectDelimiter(text: string, explicitDelimiter?: string): string {
+  if (explicitDelimiter) return explicitDelimiter;
+
+  const sampleLines = text.split(/\r\n|\n|\r/).slice(0, 20).filter((line) => line.trim() !== '');
+  const candidates = [',', ';', '\t', '|'];
+  let bestDelimiter = ',';
+  let bestScore = -1;
+
+  candidates.forEach((delimiter) => {
+    const counts = sampleLines.map((line) => splitDelimitedLine(line, delimiter).length);
+    const avg = counts.reduce((sum, value) => sum + value, 0) / Math.max(counts.length, 1);
+    const stable = counts.filter((count) => count === counts[0]).length;
+    const score = avg + stable * 0.25;
+
+    if (avg >= 2 && score > bestScore) {
+      bestDelimiter = delimiter;
+      bestScore = score;
+    }
+  });
+
+  return bestDelimiter;
+}
+
+function splitDelimitedLine(line: string, delimiter: string): string[] {
+  const values: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === delimiter && !inQuotes) {
+      values.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  values.push(current.trim());
+  return values;
+}
+
+function dedupeHeaders(headers: string[]): string[] {
+  const used = new Map<string, number>();
+
+  return headers.map((header, index) => {
+    const base = String(header || `Premenná ${index + 1}`).trim() || `Premenná ${index + 1}`;
+    const count = used.get(base) || 0;
+    used.set(base, count + 1);
+    return count === 0 ? base : `${base}_${count + 1}`;
+  });
+}
+
+function parseDelimitedTextRows(text: string, explicitDelimiter?: string): AnyRecord[] {
+  const lines = text
+    .split(/\r\n|\n|\r/)
+    .filter((line) => line.trim() !== '');
+
+  if (lines.length < 2) return [];
+
+  const delimiter = detectDelimiter(text, explicitDelimiter);
+  const headers = dedupeHeaders(splitDelimitedLine(lines[0], delimiter));
+
+  return lines.slice(1).map((line) => {
+    const values = splitDelimitedLine(line, delimiter);
+    const row: AnyRecord = {};
+
+    headers.forEach((header, index) => {
+      row[header] = values[index] ?? '';
+    });
+
+    return row;
+  });
+}
+
+function extractRowsFromJsonLike(value: unknown): AnyRecord[] {
+  const rows = extractRowsFromUnknown(value);
+  if (rows.length > 0) return rows;
+
+  if (isRecord(value)) {
+    const objectRows = Object.entries(value).map(([key, child]) => {
+      if (isRecord(child)) {
+        return { id: key, ...child };
+      }
+      return { id: key, value: child };
+    });
+
+    return objectRows.length > 0 ? objectRows : [];
+  }
+
+  return [];
+}
+
+function getRowsFromPreparedTextFile(
+  preparedDataFile: ExportPayload['preparedDataFile'],
+  buffer: Buffer,
+): AnyRecord[] {
+  const fileName = preparedDataFile?.fileName || '';
+  const mimeType = String(preparedDataFile?.mimeType || '').toLowerCase();
+  const extension = getFileExtension(fileName);
+  const text = decodePreparedFileText(buffer);
+  const looksTextual =
+    ['csv', 'tsv', 'txt', 'json'].includes(extension) ||
+    mimeType.includes('csv') ||
+    mimeType.includes('json') ||
+    mimeType.includes('text') ||
+    mimeType.includes('tab-separated');
+
+  if (!looksTextual || !text.trim()) return [];
+
+  if (extension === 'json' || mimeType.includes('json') || text.trim().startsWith('{') || text.trim().startsWith('[')) {
+    try {
+      return extractRowsFromJsonLike(JSON.parse(text));
+    } catch {
+      // Pokračujeme cez delimited fallback, ak JSON parsing zlyhá.
+    }
+  }
+
+  if (extension === 'tsv' || mimeType.includes('tab-separated')) {
+    return parseDelimitedTextRows(text, '\t');
+  }
+
+  return parseDelimitedTextRows(text);
 }
 
 
@@ -388,6 +787,9 @@ async function readPayload(request: NextRequest): Promise<ExportPayload> {
       tryParseJson(formData.get('data'));
 
     const preparedDataFile = tryParseJson(formData.get('preparedDataFile'));
+    const uploadedPreparedFile = isRecord(preparedDataFile)
+      ? null
+      : await getFirstUploadedPreparedFile(formData);
 
     return {
       result,
@@ -395,11 +797,11 @@ async function readPayload(request: NextRequest): Promise<ExportPayload> {
       data: result,
       preparedDataFile: isRecord(preparedDataFile)
         ? (preparedDataFile as ExportPayload['preparedDataFile'])
-        : null,
+        : (uploadedPreparedFile as ExportPayload['preparedDataFile']),
       format: String(formData.get('format') || ''),
       exportFormat: String(formData.get('exportFormat') || ''),
       type: String(formData.get('type') || ''),
-      fileName: String(formData.get('fileName') || ''),
+      fileName: String(formData.get('fileName') || uploadedPreparedFile?.fileName || ''),
       ...extractFormDataPayloadExtras(formData),
     };
   }
@@ -411,13 +813,78 @@ function getAnalysisResult(payload: ExportPayload): unknown {
   return payload.result || payload.analysisResult || payload.data || null;
 }
 
-function getPreparedDataFile(payload: ExportPayload): ExportPayload['preparedDataFile'] {
-  return payload.preparedDataFile || null;
+function getPreparedDataFile(
+  payload: ExportPayload,
+  result?: unknown,
+): ExportPayload['preparedDataFile'] {
+  const direct = payload.preparedDataFile;
+
+  if (isRecord(direct)) {
+    return direct as ExportPayload['preparedDataFile'];
+  }
+
+  const nestedCandidates = [
+    getNestedValue(result, ['preparedDataFile']),
+    getNestedValue(result, ['preparedFile']),
+    getNestedValue(result, ['dataFile']),
+    getNestedValue(result, ['statisticalAnalysis', 'preparedDataFile']),
+    getNestedValue(result, ['statisticalAnalysis', 'preparedFile']),
+  ];
+
+  for (const candidate of nestedCandidates) {
+    if (isRecord(candidate)) {
+      return candidate as ExportPayload['preparedDataFile'];
+    }
+  }
+
+  return null;
 }
 
-function getResultRowsFromPreparedBase64(
+function isPlaceholderOnlyRows(rows: AnyRecord[]): boolean {
+  if (!rows.length) return true;
+
+  const meaningfulRows = rows.filter((row) =>
+    Object.values(row).some((value) => value !== null && value !== undefined && String(value).trim() !== ''),
+  );
+
+  if (!meaningfulRows.length) return true;
+
+  if (meaningfulRows.length === 1) {
+    const text = Object.values(meaningfulRows[0]).map((value) => String(value ?? '')).join(' ').toLowerCase();
+    return text.includes('žiadne') || text.includes('ziadne') || text.includes('bez údajov') || text.includes('bez udajov') || text.includes('no data');
+  }
+
+  return false;
+}
+
+function normalizeSheetLookupName(value: string): string {
+  return stripDiacritics(String(value || ''))
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function sheetNameMatchesCandidate(sheetName: string, candidate: string): boolean {
+  const sheet = normalizeSheetLookupName(sheetName);
+  const wanted = normalizeSheetLookupName(candidate);
+
+  if (!sheet || !wanted) return false;
+  return sheet === wanted || sheet.includes(wanted) || wanted.includes(sheet);
+}
+
+function getRowsFromWorksheet(workbook: XLSX.WorkBook, sheetName: string): AnyRecord[] {
+  const worksheet = workbook.Sheets[sheetName];
+
+  if (!worksheet) return [];
+
+  return XLSX.utils.sheet_to_json<AnyRecord>(worksheet, {
+    defval: '',
+  });
+}
+
+function getRowsFromPreparedBase64Sheets(
   preparedDataFile: ExportPayload['preparedDataFile'],
-  sheetName: string,
+  preferredSheetNames: string[],
 ): AnyRecord[] {
   if (!preparedDataFile?.base64) {
     return [];
@@ -425,6 +892,11 @@ function getResultRowsFromPreparedBase64(
 
   try {
     const buffer = Buffer.from(preparedDataFile.base64, 'base64');
+    const textRows = getRowsFromPreparedTextFile(preparedDataFile, buffer);
+
+    if (!isPlaceholderOnlyRows(textRows)) {
+      return textRows;
+    }
 
     const workbook = XLSX.read(buffer, {
       type: 'buffer',
@@ -432,26 +904,72 @@ function getResultRowsFromPreparedBase64(
       raw: false,
     });
 
-    const selectedSheetName = workbook.SheetNames.includes(sheetName)
-      ? sheetName
-      : workbook.SheetNames[0];
+    const exactOrAliasSheets = workbook.SheetNames.filter((sheetName) =>
+      preferredSheetNames.some((candidate) => sheetNameMatchesCandidate(sheetName, candidate)),
+    );
 
-    if (!selectedSheetName) {
-      return [];
-    }
-
-    const worksheet = workbook.Sheets[selectedSheetName];
-
-    if (!worksheet) {
-      return [];
-    }
-
-    return XLSX.utils.sheet_to_json<AnyRecord>(worksheet, {
-      defval: '',
+    const fallbackDataSheets = workbook.SheetNames.filter((sheetName) => {
+      const normalized = normalizeSheetLookupName(sheetName);
+      return (
+        normalized.includes('rawdata') ||
+        normalized.includes('dataraw') ||
+        normalized.includes('dataclean') ||
+        normalized.includes('cleandata') ||
+        normalized === 'data' ||
+        normalized === 'sheet1'
+      );
     });
+
+    const candidateSheetNames = Array.from(new Set([...exactOrAliasSheets, ...fallbackDataSheets]));
+
+    for (const sheetName of candidateSheetNames) {
+      const rows = getRowsFromWorksheet(workbook, sheetName);
+      if (!isPlaceholderOnlyRows(rows)) {
+        return rows;
+      }
+    }
+
+    // Posledná záchrana: použijeme prvý hárok, ktorý vyzerá ako dátová tabuľka, nie úvod/navigácia.
+    for (const sheetName of workbook.SheetNames) {
+      const normalized = normalizeSheetLookupName(sheetName);
+      if (normalized.includes('uvod') || normalized.includes('summary') || normalized.includes('suhrn') || normalized.includes('navigation')) {
+        continue;
+      }
+
+      const rows = getRowsFromWorksheet(workbook, sheetName);
+      const headerCount = rows.length > 0 ? Object.keys(rows[0] || {}).length : 0;
+      if (headerCount >= 2 && rows.length >= 2 && !isPlaceholderOnlyRows(rows)) {
+        return rows;
+      }
+    }
   } catch {
     return [];
   }
+
+  return [];
+}
+
+function getResultRowsFromPreparedBase64(
+  preparedDataFile: ExportPayload['preparedDataFile'],
+  sheetName: string,
+): AnyRecord[] {
+  return getRowsFromPreparedBase64Sheets(preparedDataFile, [sheetName]);
+}
+
+function extractRowsFromUnknown(value: unknown): AnyRecord[] {
+  const directRows = asRecords(value);
+  if (directRows.length > 0) return directRows;
+
+  if (!isRecord(value)) return [];
+
+  const nestedKeys = ['rows', 'data', 'rawData', 'rawRows', 'cleanRows', 'dataRows', 'preparedRows', 'records', 'items', 'values'];
+
+  for (const key of nestedKeys) {
+    const nestedRows = asRecords((value as AnyRecord)[key]);
+    if (nestedRows.length > 0) return nestedRows;
+  }
+
+  return [];
 }
 
 function flattenOverview(result: unknown, preparedDataFile: ExportPayload['preparedDataFile']): AnyRecord[] {
@@ -495,42 +1013,154 @@ function flattenRawData(
   result: unknown,
   preparedDataFile: ExportPayload['preparedDataFile'],
 ): AnyRecord[] {
-  const fromPreparedRaw = getResultRowsFromPreparedBase64(
-    preparedDataFile,
-    'DATA_RAW',
-  );
-
-  if (fromPreparedRaw.length > 0) {
-    return fromPreparedRaw;
-  }
-
-  const fromPreparedClean = getResultRowsFromPreparedBase64(
-    preparedDataFile,
-    'DATA_CLEAN',
-  );
-
-  if (fromPreparedClean.length > 0) {
-    return fromPreparedClean;
-  }
-
-  const candidates = [
+  const directCandidates = [
+    result,
     getNestedValue(result, ['rawData']),
     getNestedValue(result, ['rawRows']),
     getNestedValue(result, ['dataRows']),
     getNestedValue(result, ['preparedRows']),
-    getNestedValue(result, ['scaleScoreRows']),
+    getNestedValue(result, ['cleanRows']),
+    getNestedValue(result, ['rows']),
+    getNestedValue(result, ['records']),
+    getNestedValue(result, ['dataset', 'rows']),
+    getNestedValue(result, ['table', 'rows']),
+    getNestedValue(result, ['preparedDataFile', 'rawData']),
+    getNestedValue(result, ['preparedDataFile', 'rawRows']),
+    getNestedValue(result, ['preparedDataFile', 'cleanRows']),
+    getNestedValue(result, ['preparedDataFile', 'dataRows']),
+    getNestedValue(result, ['preparedDataFile', 'preparedRows']),
+    getNestedValue(result, ['preparedDataFile', 'rows']),
+    getNestedValue(result, ['preparedFile', 'rawData']),
+    getNestedValue(result, ['preparedFile', 'rawRows']),
+    getNestedValue(result, ['preparedFile', 'cleanRows']),
+    getNestedValue(result, ['preparedFile', 'dataRows']),
+    getNestedValue(result, ['preparedFile', 'preparedRows']),
+    getNestedValue(result, ['preparedFile', 'rows']),
+    getNestedValue(result, ['statisticalAnalysis', 'rawData']),
+    getNestedValue(result, ['statisticalAnalysis', 'rawRows']),
+    getNestedValue(result, ['statisticalAnalysis', 'dataRows']),
+    getNestedValue(result, ['statisticalAnalysis', 'preparedRows']),
     getNestedValue(result, ['statisticalAnalysis', 'scaleScoreRows']),
+    preparedDataFile?.rawData,
+    preparedDataFile?.rawRows,
+    preparedDataFile?.cleanRows,
+    preparedDataFile?.dataRows,
+    preparedDataFile?.preparedRows,
+    preparedDataFile?.rows,
+    preparedDataFile?.data,
   ];
 
-  for (const candidate of candidates) {
-    const rows = asRecords(candidate);
+  for (const candidate of directCandidates) {
+    const rows = extractRowsFromUnknown(candidate);
 
-    if (rows.length > 0) {
+    if (!isPlaceholderOnlyRows(rows)) {
       return rows;
     }
   }
 
+  const fromPreparedRaw = getRowsFromPreparedBase64Sheets(preparedDataFile, [
+    'DATA_RAW',
+    '02 raw-data',
+    'raw-data',
+    'Raw dáta',
+    'Raw data',
+  ]);
+
+  if (!isPlaceholderOnlyRows(fromPreparedRaw)) {
+    return fromPreparedRaw;
+  }
+
+  const fromPreparedClean = getRowsFromPreparedBase64Sheets(preparedDataFile, [
+    'DATA_CLEAN',
+    'clean-data',
+    'Data clean',
+    'Dáta',
+    'Data',
+  ]);
+
+  if (!isPlaceholderOnlyRows(fromPreparedClean)) {
+    return fromPreparedClean;
+  }
+
   return [];
+}
+
+function inferColumnKind(values: unknown[]): string {
+  const nonEmpty = values.filter((value) => value !== null && value !== undefined && String(value).trim() !== '');
+  if (!nonEmpty.length) return 'prázdny stĺpec';
+
+  const numericCount = nonEmpty.filter((value) => toFiniteNumber(value) !== null).length;
+  if (numericCount / nonEmpty.length >= 0.85) return 'číselná premenná';
+
+  const dateCount = nonEmpty.filter((value) => value instanceof Date || !Number.isNaN(Date.parse(String(value)))).length;
+  if (dateCount / nonEmpty.length >= 0.85) return 'dátumová premenná';
+
+  return 'kategorizovaná/textová premenná';
+}
+
+function buildComputedDataQualityRows(rawRows: AnyRecord[]): AnyRecord[] {
+  if (!rawRows.length) {
+    return [
+      {
+        kontrola: 'Raw dáta',
+        vysledok: 'error',
+        stav: 'chýbajú',
+        poznamka: 'Export nedostal raw dáta ani pripravený DATA_RAW/DATA_CLEAN súbor. Skontrolujte, či frontend posiela preparedDataFile.base64 alebo rawData/dataRows.',
+      },
+    ];
+  }
+
+  const headers = Object.keys(rawRows[0] || {});
+  const totalCells = rawRows.length * Math.max(headers.length, 1);
+  const missingCells = rawRows.reduce((sum, row) =>
+    sum + headers.filter((header) => row[header] === null || row[header] === undefined || String(row[header]).trim() === '').length,
+  0);
+
+  const summaryRows: AnyRecord[] = [
+    {
+      kontrola: 'Počet riadkov',
+      vysledok: 'ok',
+      stav: rawRows.length,
+      poznamka: 'Počet respondentov/záznamov načítaných do exportu.',
+    },
+    {
+      kontrola: 'Počet stĺpcov',
+      vysledok: 'ok',
+      stav: headers.length,
+      poznamka: 'Počet premenných načítaných do exportu.',
+    },
+    {
+      kontrola: 'Chýbajúce bunky spolu',
+      vysledok: missingCells > 0 ? 'warning' : 'ok',
+      stav: missingCells,
+      percento: totalCells > 0 ? Number(((missingCells / totalCells) * 100).toFixed(2)) : 0,
+      poznamka: 'Súčet prázdnych buniek v raw dátach.',
+    },
+  ];
+
+  const columnRows = headers.slice(0, 250).map((header) => {
+    const values = rawRows.map((row) => row[header]);
+    const nonEmptyValues = values.filter((value) => value !== null && value !== undefined && String(value).trim() !== '');
+    const missing = values.length - nonEmptyValues.length;
+    const numericCount = nonEmptyValues.filter((value) => toFiniteNumber(value) !== null).length;
+    const uniqueCount = new Set(nonEmptyValues.map((value) => String(value).trim())).size;
+
+    return {
+      kontrola: 'Profil stĺpca',
+      stlpec: header,
+      typ: inferColumnKind(values),
+      valid: nonEmptyValues.length,
+      missing,
+      missing_percent: values.length > 0 ? Number(((missing / values.length) * 100).toFixed(2)) : 0,
+      numeric_count: numericCount,
+      unique_count: uniqueCount,
+      vysledok: missing > 0 ? 'warning' : 'ok',
+      stav: missing > 0 ? 'obsahuje chýbajúce hodnoty' : 'OK',
+      poznamka: missing > 0 ? 'Skontrolujte prázdne hodnoty pred interpretáciou výsledkov.' : 'Bez zistených chýbajúcich hodnôt.',
+    };
+  });
+
+  return [...summaryRows, ...columnRows];
 }
 
 function flattenDataQuality(
@@ -539,21 +1169,26 @@ function flattenDataQuality(
 ): AnyRecord[] {
   const qualityFromPreparedFile = asRecords(preparedDataFile?.qualityReport);
 
-  const qualityFromResultPrepared = asRecords(
-    getNestedValue(result, ['preparedFile', 'qualityReport']),
-  );
+  const qualityFromResultPrepared = [
+    ...asRecords(getNestedValue(result, ['preparedFile', 'qualityReport'])),
+    ...asRecords(getNestedValue(result, ['preparedDataFile', 'qualityReport'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'qualityReport'])),
+    ...asRecords(getNestedValue(result, ['statisticalAnalysis', 'dataQuality'])),
+  ];
 
-  const qualityFromRoot = asRecords(
-    getNestedValue(result, ['qualityReport']),
-  );
+  const qualityFromRoot = [
+    ...asRecords(getNestedValue(result, ['qualityReport'])),
+    ...asRecords(getNestedValue(result, ['dataQuality'])),
+  ];
 
   const warningsFromPrepared = Array.isArray(preparedDataFile?.warnings)
     ? preparedDataFile.warnings
     : [];
 
-  const warningsFromResult = Array.isArray(getNestedValue(result, ['warnings']))
-    ? (getNestedValue(result, ['warnings']) as unknown[])
-    : [];
+  const warningsFromResult = [
+    ...(Array.isArray(getNestedValue(result, ['warnings'])) ? (getNestedValue(result, ['warnings']) as unknown[]) : []),
+    ...(Array.isArray(getNestedValue(result, ['statisticalAnalysis', 'warnings'])) ? (getNestedValue(result, ['statisticalAnalysis', 'warnings']) as unknown[]) : []),
+  ];
 
   const warningRows = [...warningsFromPrepared, ...warningsFromResult].map(
     (warning) => ({
@@ -564,12 +1199,18 @@ function flattenDataQuality(
     }),
   );
 
-  return [
+  const availableRows = [
     ...qualityFromPreparedFile,
     ...qualityFromResultPrepared,
     ...qualityFromRoot,
     ...warningRows,
   ];
+
+  if (availableRows.length > 0) {
+    return availableRows;
+  }
+
+  return buildComputedDataQualityRows(flattenRawData(result, preparedDataFile));
 }
 
 function flattenFrequencies(result: unknown): AnyRecord[] {
@@ -1413,11 +2054,157 @@ function deduplicateRowsByKey<T extends AnyRecord>(rows: T[], getKey: (row: T) =
   return result;
 }
 
+
+function getNumericColumnProfile(rawRows: AnyRecord[], header: string): {
+  header: string;
+  values: number[];
+  nonEmptyCount: number;
+  numericRatio: number;
+  uniqueCount: number;
+  min: number | null;
+  max: number | null;
+} {
+  const rawValues = rawRows.map((row) => row[header]);
+  const nonEmptyValues = rawValues.filter((value) => value !== null && value !== undefined && String(value).trim() !== '');
+  const values = nonEmptyValues
+    .map((value) => toFiniteNumber(value))
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+  const sorted = [...values].sort((a, b) => a - b);
+
+  return {
+    header,
+    values,
+    nonEmptyCount: nonEmptyValues.length,
+    numericRatio: nonEmptyValues.length > 0 ? values.length / nonEmptyValues.length : 0,
+    uniqueCount: new Set(values.map((value) => String(value))).size,
+    min: sorted.length > 0 ? sorted[0] : null,
+    max: sorted.length > 0 ? sorted[sorted.length - 1] : null,
+  };
+}
+
+function looksLikeIdentifierColumn(header: string, profile: ReturnType<typeof getNumericColumnProfile>, rowCount: number): boolean {
+  const normalized = normalizeReliabilityItemName(header);
+  const suspiciousName =
+    normalized === 'id' ||
+    normalized.endsWith('id') ||
+    normalized.includes('timestamp') ||
+    normalized.includes('datum') ||
+    normalized.includes('date') ||
+    normalized.includes('cas') ||
+    normalized.includes('time') ||
+    normalized.includes('email') ||
+    normalized.includes('telefon') ||
+    normalized.includes('phone') ||
+    normalized.includes('ico') ||
+    normalized.includes('rodne') ||
+    normalized.includes('respondent');
+
+  if (suspiciousName) return true;
+
+  const almostEveryValueUnique = rowCount > 10 && profile.uniqueCount / Math.max(profile.values.length, 1) > 0.9;
+  const largeSequentialLikeValues = profile.max !== null && profile.min !== null && profile.max - profile.min > 1000;
+
+  return almostEveryValueUnique || largeSequentialLikeValues;
+}
+
+function looksLikeLikertOrScaleColumn(rawRows: AnyRecord[], header: string): boolean {
+  const profile = getNumericColumnProfile(rawRows, header);
+
+  if (profile.nonEmptyCount < 2 || profile.numericRatio < 0.8) return false;
+  if (looksLikeIdentifierColumn(header, profile, rawRows.length)) return false;
+
+  const normalized = normalizeReliabilityItemName(header);
+  const itemNameHint = /^(q|otazka|polozka|item|jss|wemwbs|sehs|rs|s|skala|scale)\d+/.test(normalized) || /\d+$/.test(normalized);
+  const ordinalRange = profile.min !== null && profile.max !== null && profile.min >= 0 && profile.max <= 10 && profile.uniqueCount <= 12;
+  const compactSurveyRange = profile.uniqueCount <= 20 && profile.max !== null && profile.min !== null && profile.max - profile.min <= 20;
+
+  return itemNameHint || ordinalRange || compactSurveyRange;
+}
+
+function getAutoScaleGroupKey(header: string): string | null {
+  const normalized = normalizeReliabilityItemName(header);
+  const numbered = normalized.match(/^([a-z]{1,20})0*\d{1,4}$/);
+
+  if (numbered?.[1]) return numbered[1];
+
+  const textNumber = normalized.match(/^(.+?)(?:otazka|polozka|item|q)0*\d{1,4}$/);
+  if (textNumber?.[1]) return textNumber[1];
+
+  return null;
+}
+
+function buildAutoScaleDefinitionsFromRawData(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
+  const rawRows = flattenRawData(result, preparedDataFile);
+
+  if (rawRows.length < 2) return [];
+
+  const headers = Object.keys(rawRows[0] || {});
+  const candidates = headers.filter((header) => looksLikeLikertOrScaleColumn(rawRows, header));
+
+  if (candidates.length < 2) return [];
+
+  const groups = new Map<string, string[]>();
+  candidates.forEach((header) => {
+    const key = getAutoScaleGroupKey(header);
+    if (!key) return;
+    groups.set(key, [...(groups.get(key) || []), header]);
+  });
+
+  const groupDefinitions = Array.from(groups.entries())
+    .filter(([, items]) => items.length >= 2)
+    .map(([key, items], index) => ({
+      id: `auto-scale-${index + 1}-${key}`,
+      name: `Automaticky rozpoznaná škála ${key.toUpperCase()}`,
+      scaleName: `Automaticky rozpoznaná škála ${key.toUpperCase()}`,
+      items,
+      source: 'auto-detected-likert-columns',
+      type: 'scale',
+      scoring: 'mean',
+      description:
+        'Automaticky vytvorené z číselných/Likert položiek so spoločným prefixom. Overte názov a vecný význam škály pred akademickou interpretáciou.',
+    }));
+
+  const fallbackDefinition = candidates.length >= 3
+    ? [{
+        id: 'auto-scale-all-numeric-likert-items',
+        name: 'Automaticky rozpoznané číselné/Likert položky',
+        scaleName: 'Automaticky rozpoznané číselné/Likert položky',
+        items: candidates,
+        source: 'auto-detected-likert-columns',
+        type: 'scale',
+        scoring: 'mean',
+        description:
+          'Orientácia pre ľubovoľný dataset bez zadanej definície škál. Ide o automatický návrh, nie o potvrdenú štandardizovanú škálu.',
+      }]
+    : [];
+
+  return deduplicateRowsByKey(
+    [...groupDefinitions, ...fallbackDefinition],
+    (definition) => `${normalizeReliabilityItemName(definition.name)}|${parseReliabilityItems(definition.items).map(normalizeReliabilityItemName).join('|')}`,
+  );
+}
+
+function definitionMatchesRawColumns(
+  definition: AnyRecord,
+  rawRows: AnyRecord[],
+): boolean {
+  if (!rawRows.length) return false;
+
+  const headers = Object.keys(rawRows[0] || {});
+  const items = parseReliabilityItems(getItemsValueFromDefinition(definition));
+  const matchedCount = items.filter((item) => findMatchingColumnName(headers, item)).length;
+
+  return matchedCount >= Math.min(2, items.length);
+}
+
 function getReliabilityDefinitions(
   result: unknown,
   preparedDataFile?: ExportPayload['preparedDataFile'],
 ): AnyRecord[] {
-  const definitions = [
+  const configuredDefinitions = [
     ...asRecords(getNestedValue(result, ['scaleDefinitions'])),
     ...asRecords(getNestedValue(result, ['subscaleDefinitions'])),
     ...asRecords(getNestedValue(result, ['manualScaleDefinitions'])),
@@ -1469,8 +2256,20 @@ function getReliabilityDefinitions(
     return parseManualScaleTextToDefinitions(text, type);
   });
 
+  const configuredAndParsed = [
+    ...configuredDefinitions.filter(isScaleDefinitionLike),
+    ...parsedDefinitions,
+  ];
+  const rawRows = flattenRawData(result, preparedDataFile);
+  const hasUsableConfiguredDefinition = configuredAndParsed.some((definition) =>
+    definitionMatchesRawColumns(definition, rawRows),
+  );
+  const autoDefinitions = hasUsableConfiguredDefinition
+    ? []
+    : buildAutoScaleDefinitionsFromRawData(result, preparedDataFile);
+
   return deduplicateRowsByKey(
-    [...definitions.filter(isScaleDefinitionLike), ...parsedDefinitions],
+    [...configuredAndParsed, ...autoDefinitions],
     (definition) => `${normalizeReliabilityItemName(definition.id)}|${normalizeReliabilityItemName(definition.name ?? definition.scaleName ?? definition.label ?? definition.title)}|${parseReliabilityItems(getItemsValueFromDefinition(definition)).map(normalizeReliabilityItemName).join('|')}`,
   );
 }
@@ -2728,6 +3527,55 @@ function buildDependentScoreSeries(
   // Od deskriptívnej štatistiky po testovanie majú ísť do exportu iba škály a subškály,
   // nie demografické premenné ani jednotlivé položky dotazníka.
   return series.slice(0, 40);
+}
+
+function flattenScaleScoreRows(
+  result: unknown,
+  preparedDataFile?: ExportPayload['preparedDataFile'],
+): AnyRecord[] {
+  const rawRows = flattenRawData(result, preparedDataFile || null);
+  const series = buildDependentScoreSeries(result, preparedDataFile);
+
+  if (!rawRows.length) {
+    return [
+      {
+        stav: 'skóre škál nie je dostupné',
+        poznamka: 'Nie sú dostupné raw dáta, z ktorých by bolo možné vypočítať skóre škál a subškál po respondentoch.',
+      },
+    ];
+  }
+
+  if (!series.length) {
+    return [
+      {
+        stav: 'skóre škál nie je dostupné',
+        poznamka: 'Export nenašiel definície škál/subškál alebo už vypočítané skórové stĺpce. Doplňte scaleDefinitions/subscaleDefinitions alebo text typu „Názov škály: položka1, položka2, položka3“.',
+      },
+    ];
+  }
+
+  const groupingColumns = resolveGroupingColumns(
+    result,
+    preparedDataFile,
+    series.flatMap((item) => item.usedItems),
+  ).slice(0, 6);
+
+  return rawRows.map((row, rowIndex) => {
+    const output: AnyRecord = { riadok: rowIndex + 1 };
+
+    groupingColumns.forEach((column) => {
+      output[column] = row[column] ?? '';
+    });
+
+    series.forEach((item) => {
+      const score = item.values[rowIndex];
+      output[item.name] = score === null || score === undefined || !Number.isFinite(score)
+        ? ''
+        : Number(score.toFixed(4));
+    });
+
+    return output;
+  });
 }
 
 function resolveGroupingColumns(
@@ -4107,6 +4955,246 @@ function renderBarChartPng(section: ChartSection, width = 900, height = 460): Bu
   return encodePng(width, height, rgba);
 }
 
+
+function buildWorkbookHelperRows(): SheetHelperRow[] {
+  return [
+    {
+      poradie: 0,
+      list: '00 Pomocnik',
+      cast: 'Návod k exportu',
+      co_obsahuje: 'Vysvetlenie všetkých hárkov, význam stĺpcov, výpočtov a dôvody, prečo môže niektorá hodnota chýbať.',
+      preco_je_dolezity: 'Používateľ nemusí poznať štatistiku ani štruktúru exportu. Tento list slúži ako metodický manuál priamo v Exceli.',
+      ako_sa_pocita: 'Tento list je statický metodický popis. Nevypočítava výsledky, ale opisuje výpočty v ostatných listoch.',
+      kedy_moze_chybat: 'Nemal by chýbať nikdy. Generuje sa ako prvý list pri každom Excel exporte.',
+      odporucanie: 'Začnite týmto listom, potom skontrolujte raw-data, data-quality, škály/subškály, skóre a reliabilitu.',
+    },
+    {
+      poradie: 1,
+      list: '01 Dashboard',
+      cast: 'Manažérsky prehľad a grafy',
+      co_obsahuje: 'Základný prehľad súboru, počty riadkov/stĺpcov, hlavné grafické výstupy, frekvencie, priemery, korelácie a reliabilitu podľa dostupných dát.',
+      preco_je_dolezity: 'Slúži na rýchlu orientáciu bez prechádzania všetkých štatistických listov.',
+      ako_sa_pocita: 'Dashboard preberá hodnoty z výstupných tabuliek. Grafy sa tvoria z count, percent, mean, r/rho, cronbach_alpha alebo iných číselných stĺpcov.',
+      kedy_moze_chybat: 'Graf sa nezobrazí, ak v príslušnej tabuľke nie sú číselné hodnoty vhodné na graf.',
+      odporucanie: 'Ak je graf prázdny, pozrite príslušný dátový list a overte, či obsahuje číselné výsledky.',
+    },
+    {
+      poradie: 2,
+      list: '01 overview',
+      cast: 'Základné informácie',
+      co_obsahuje: 'Názov reportu, dátum generovania, názov zdrojového súboru, počet respondentov/riadkov, počet premenných/stĺpcov a použitý hárok.',
+      preco_je_dolezity: 'Overuje, či export pracoval so správnym súborom a správnym rozsahom dát.',
+      ako_sa_pocita: 'Hodnoty sa čítajú z metadát analýzy, z preparedDataFile alebo priamo z prílohy.',
+      kedy_moze_chybat: 'Niektoré položky môžu byť prázdne, ak API neposlalo metadáta alebo súbor nemal názov/počet stĺpcov.',
+      odporucanie: 'Ak nesedí počet riadkov alebo stĺpcov, skontrolujte vstupnú prílohu a import dát.',
+    },
+    {
+      poradie: 3,
+      list: '02 raw-data',
+      cast: 'Pôvodné dáta',
+      co_obsahuje: 'Riadky a stĺpce, ktoré boli použité ako vstup pre výpočty. Preferuje DATA_RAW, potom DATA_CLEAN, rawData, rawRows, dataRows, preparedRows alebo nahranú prílohu.',
+      preco_je_dolezity: 'Bez raw dát nie je možné spätne overiť deskriptívu, škály, reliabilitu ani testy.',
+      ako_sa_pocita: 'Raw-data sa nepočíta. Ide o priamy prepis vstupných dát po normalizácii objektov/zoznamov na text.',
+      kedy_moze_chybat: 'Chýba, ak API nepošle raw dáta, príloha sa nedá prečítať alebo používateľ pošle iba hotový štatistický výsledok bez dát.',
+      odporucanie: 'Pri probléme najprv overte, či tento list obsahuje skutočné dáta a nie hlásenie bez údajov.',
+    },
+    {
+      poradie: 4,
+      list: '03 frequencies',
+      cast: 'Frekvenčné tabuľky',
+      co_obsahuje: 'Početnosti kategórií, percentá, validné percentá a kumulatívne percentá pre kategorizované premenné.',
+      preco_je_dolezity: 'Ukazuje rozdelenie odpovedí a kategórií podobne ako v štatistických programoch.',
+      ako_sa_pocita: 'Pre každú kategóriu sa počíta počet výskytov. Percento = počet kategórie / počet všetkých odpovedí × 100. Validné percento ignoruje chýbajúce hodnoty.',
+      kedy_moze_chybat: 'Chýba, ak výsledok neobsahuje frekvencie a z raw dát sa nenašli vhodné kategorizované stĺpce.',
+      odporucanie: 'Pre dotazníkové odpovede kontrolujte, či sú kategórie správne zakódované a nie sú pomiešané texty s číslami.',
+    },
+    {
+      poradie: 5,
+      list: '04 data-quality',
+      cast: 'Kontrola kvality dát',
+      co_obsahuje: 'Počet validných a chýbajúcich hodnôt, typy stĺpcov, počet unikátnych hodnôt, upozornenia a odporúčania.',
+      preco_je_dolezity: 'Odhaľuje dôvody, prečo výpočty môžu chýbať alebo vychádzať nesprávne.',
+      ako_sa_pocita: 'Pre každý stĺpec sa počíta valid = neprázdne hodnoty, missing = prázdne hodnoty, missing_percent = missing / počet riadkov × 100, unique = počet jedinečných hodnôt.',
+      kedy_moze_chybat: 'Nemal by chýbať. Ak nepríde qualityReport, systém sa ho pokúsi dopočítať z raw dát.',
+      odporucanie: 'Ak je missing vysoký alebo typ stĺpca nesedí, opravte vstupný Excel alebo mapovanie premenných.',
+    },
+    {
+      poradie: 6,
+      list: '05 descriptives',
+      cast: 'Deskriptívna štatistika škál/subškál',
+      co_obsahuje: 'Valid, missing, priemer, medián, modus, smerodajnú odchýlku, rozptyl, minimum, maximum, kvartily, IQR, šikmosť a špicatosť podľa dostupných hodnôt.',
+      preco_je_dolezity: 'Je základom akademickej interpretácie výsledkov a porovnania škál.',
+      ako_sa_pocita: 'Mean = súčet hodnôt / N. Median = stredná hodnota zoradeného súboru. SD = výberová smerodajná odchýlka. Variance = výberový rozptyl. Q1/Q3 sú 25. a 75. percentil.',
+      kedy_moze_chybat: 'Chýba, ak sa nenašli číselné hodnoty alebo škály/subškály nemajú aspoň použiteľné skóre.',
+      odporucanie: 'Ak chcete odborné škály, zadajte definície položiek, napríklad Podpora rodiny: Q1, Q2, Q3.',
+    },
+    {
+      poradie: 7,
+      list: '06 normality',
+      cast: 'Kontrola normality',
+      co_obsahuje: 'Orientačnú alebo dodanú kontrolu normality, štatistiku, p-hodnotu a odporúčanie Pearson/Spearman alebo parametrické/neparametrické testy.',
+      preco_je_dolezity: 'Normalita rozhoduje, či použiť parametrické alebo neparametrické testy.',
+      ako_sa_pocita: 'Ak nie je dostupný formálny test, systém používa orientačnú kontrolu šikmosti a špicatosti: približne normálne, ak |skewness| ≤ 1 a |kurtosis| ≤ 2.',
+      kedy_moze_chybat: 'Chýba, ak nie je dosť číselných hodnôt. Orientačne sa vyžaduje aspoň približne 8 validných hodnôt.',
+      odporucanie: 'Pri malých vzorkách interpretujte normalitu opatrne a zvážte neparametrické testy.',
+    },
+    {
+      poradie: 8,
+      list: '07 reliability',
+      cast: 'Cronbachovo alfa',
+      co_obsahuje: 'Reliabilitu škál/subškál, počet položiek, počet kompletných riadkov, použité položky a interpretáciu vnútornej konzistencie.',
+      preco_je_dolezity: 'Overuje, či položky v jednej škále merajú spoločný konštrukt.',
+      ako_sa_pocita: 'Cronbach alfa = k/(k-1) × (1 - súčet rozptylov položiek / rozptyl celkového skóre), kde k je počet položiek. Potrebné sú aspoň 2 položky a aspoň 2 kompletné riadky.',
+      kedy_moze_chybat: 'Chýba, ak škála obsahuje iba jednu položku, položky sa nespárovali s názvami stĺpcov alebo je nulový rozptyl celkového skóre.',
+      odporucanie: 'Pre reliabilitu vždy zadajte presné položky škál/subškál a min/max pri reverzných položkách.',
+    },
+    {
+      poradie: 9,
+      list: '08 correlations',
+      cast: 'Odporúčané korelácie',
+      co_obsahuje: 'Korelačné páry vybrané podľa normality dát. Použije Pearson pri približnej normalite, inak Spearman.',
+      preco_je_dolezity: 'Znižuje riziko nesprávne zvoleného korelačného testu.',
+      ako_sa_pocita: 'Pearson pracuje s lineárnym vzťahom číselných hodnôt. Spearman pracuje s poradím hodnôt. Výstupom je koeficient r/rho a p-hodnota, ak sú dostupné.',
+      kedy_moze_chybat: 'Chýba, ak nie sú aspoň dve číselné premenné alebo skóre škál.',
+      odporucanie: 'Pri dotazníkoch porovnávajte hlavne vypočítané škály/subškály, nie jednotlivé položky.',
+    },
+    {
+      poradie: 10,
+      list: '09 Škály podškály',
+      cast: 'Definície a súhrn škál/subškál',
+      co_obsahuje: 'Názov škály, položky, použité položky, reverzné položky, min/max, spôsob skórovania, valid, missing, mean, median, SD, min, max, zdroj a poznámku.',
+      preco_je_dolezity: 'Je to hlavný akademický list pre kontrolu, z čoho sa škály počítali a aké majú súhrnné hodnoty.',
+      ako_sa_pocita: 'Pre každú škálu sa spárujú zadané položky so stĺpcami. Skóre riadku = súčet alebo priemer položiek podľa nastavenia skoring. Súhrnné hodnoty sa počítajú zo skóre všetkých validných riadkov.',
+      kedy_moze_chybat: 'Hodnoty chýbajú, ak systém našiel iba definíciu, ale nenašiel položky v raw dátach. Ak je škála automaticky rozpoznaná z jedného stĺpca, reliabilita nebude možná.',
+      odporucanie: 'Pre presné výsledky zadávajte definície napríklad: Rodinná súdržnosť: Q1, Q2, Q3; skoring=mean; min=1; max=5.',
+    },
+    {
+      poradie: 11,
+      list: '10 Skóre škál',
+      cast: 'Skóre po respondentoch',
+      co_obsahuje: 'Vypočítané skóre každej škály/subškály pre každý riadok/respondenta.',
+      preco_je_dolezity: 'Umožňuje kontrolu, z akých konkrétnych hodnôt vznikli priemery, korelácie a testy.',
+      ako_sa_pocita: 'Pre každý riadok sa vezmú položky škály. Pri mean sa spočíta priemer položiek, pri sum sa spočíta súčet. Reverzná položka sa prepočíta ako min + max - hodnota.',
+      kedy_moze_chybat: 'Chýba, ak nie sú raw dáta alebo definície škál/subškál.',
+      odporucanie: 'Ak sa skóre neobjaví, skontrolujte názvy položiek v definícii a v raw dátach.',
+    },
+    {
+      poradie: 12,
+      list: '11 Pearson',
+      cast: 'Parametrické korelácie',
+      co_obsahuje: 'Pearsonove korelácie medzi číselnými premennými alebo škálami.',
+      preco_je_dolezity: 'Používa sa pri približne normálnych dátach a lineárnych vzťahoch.',
+      ako_sa_pocita: 'r = kovariancia premenných / súčin ich smerodajných odchýlok. Hodnota je od -1 po 1.',
+      kedy_moze_chybat: 'Chýba pri nedostatku číselných premenných, nulovom rozptyle alebo malom počte validných párov.',
+      odporucanie: 'Interpretujte spolu s p-hodnotou a veľkosťou vzorky.',
+    },
+    {
+      poradie: 13,
+      list: '12 Spearman',
+      cast: 'Neparametrické korelácie',
+      co_obsahuje: 'Spearmanove korelácie medzi premennými alebo škálami.',
+      preco_je_dolezity: 'Vhodné pre ordinálne dáta, Likert škály alebo nenormálne rozdelenia.',
+      ako_sa_pocita: 'Hodnoty sa najprv prevedú na poradia a následne sa počíta korelácia poradí.',
+      kedy_moze_chybat: 'Chýba pri nedostatku validných párov alebo ak sa nedajú vytvoriť poradia.',
+      odporucanie: 'Pre Likertové dotazníky je Spearman často bezpečnejšia voľba.',
+    },
+    {
+      poradie: 14,
+      list: '13 Corr matrix',
+      cast: 'Korelačná matica',
+      co_obsahuje: 'Maticové zobrazenie korelácií medzi viacerými premennými alebo škálami.',
+      preco_je_dolezity: 'Rýchlo ukazuje štruktúru vzťahov medzi premennými.',
+      ako_sa_pocita: 'Každá bunka predstavuje koreláciu medzi dvojicou premenných. Diagonála je spravidla 1.',
+      kedy_moze_chybat: 'Chýba, ak neexistujú aspoň dve vhodné číselné premenné.',
+      odporucanie: 'Silné korelácie ďalej interpretujte vecne, nie iba podľa čísla.',
+    },
+    {
+      poradie: 15,
+      list: '14 Chart data',
+      cast: 'Dáta pre grafy',
+      co_obsahuje: 'Podkladové tabuľky, z ktorých sa vytvárajú grafické listy.',
+      preco_je_dolezity: 'Umožňuje kontrolu, či graf vznikol zo správnych údajov.',
+      ako_sa_pocita: 'Hodnoty sa preberajú zo štatistických tabuliek alebo z chartData/chartTables vo výsledku API.',
+      kedy_moze_chybat: 'Chýba, ak nie sú dostupné vhodné číselné dáta pre grafy.',
+      odporucanie: 'Ak graf nevyzerá správne, porovnajte ho s týmto listom.',
+    },
+    {
+      poradie: 16,
+      list: '16 Param testy',
+      cast: 'Parametrické testy',
+      co_obsahuje: 't-test, ANOVA alebo iné parametrické porovnania podľa dostupných skupín a premenných.',
+      preco_je_dolezity: 'Testuje rozdiely pri približne normálnych dátach.',
+      ako_sa_pocita: 't-test porovnáva priemery dvoch skupín. ANOVA porovnáva priemery troch a viac skupín. Výstupom je štatistika, df a p-hodnota, ak sú dostupné.',
+      kedy_moze_chybat: 'Chýba, ak nie je skupinová premenná, závislá číselná premenná alebo sú nesplnené podmienky.',
+      odporucanie: 'Zadajte groupVariables/groupingColumns, ak chcete presné skupinové testy.',
+    },
+    {
+      poradie: 17,
+      list: '17 Neparam testy',
+      cast: 'Neparametrické testy',
+      co_obsahuje: 'Mann-Whitney, Kruskal-Wallis alebo iné neparametrické porovnania.',
+      preco_je_dolezity: 'Používa sa pri nenormálnych dátach, ordinálnych dátach alebo malých vzorkách.',
+      ako_sa_pocita: 'Testy pracujú s poradím hodnôt namiesto priamych priemerov. Výstupom je testová štatistika a p-hodnota, ak sú dostupné.',
+      kedy_moze_chybat: 'Chýba, ak nie je skupinová premenná alebo nie sú validné hodnoty v porovnávaných skupinách.',
+      odporucanie: 'Pri Likertových dátach preferujte neparametrické testy, ak normalita nevychádza.',
+    },
+    {
+      poradie: 18,
+      list: '18 Kontingencne tab',
+      cast: 'Kontingenčné tabuľky',
+      co_obsahuje: 'Krížové tabuľky kategorizovaných premenných.',
+      preco_je_dolezity: 'Ukazuje vzťah medzi dvoma kategóriami, napríklad pohlavie × odpoveď.',
+      ako_sa_pocita: 'Počíta sa počet výskytov každej kombinácie kategórií riadok × stĺpec.',
+      kedy_moze_chybat: 'Chýba, ak nie sú aspoň dve kategorizované premenné.',
+      odporucanie: 'Skontrolujte, či kategórie nie sú zbytočne rozdelené rôznym zápisom.',
+    },
+    {
+      poradie: 19,
+      list: '19 Chi-square',
+      cast: 'Chí-kvadrát test',
+      co_obsahuje: 'Test nezávislosti kategorizovaných premenných.',
+      preco_je_dolezity: 'Overuje, či rozdelenie kategórií súvisí s inou kategóriou.',
+      ako_sa_pocita: 'Porovnáva pozorované a očakávané početnosti: χ² = súčet (O - E)² / E.',
+      kedy_moze_chybat: 'Chýba, ak nie sú kontingenčné tabuľky alebo očakávané početnosti nie sú vhodné.',
+      odporucanie: 'Pri malých početnostiach interpretujte opatrne alebo použite vhodnú alternatívu.',
+    },
+    {
+      poradie: 20,
+      list: '20 Odpor testy',
+      cast: 'Odporúčané testovanie',
+      co_obsahuje: 'Automatické odporúčania, ktoré testy sú vhodné podľa typu premenných, normality a skupín.',
+      preco_je_dolezity: 'Pomáha používateľovi, ktorý nevie, aký test má použiť.',
+      ako_sa_pocita: 'Systém vyhodnotí typy premenných, počet skupín a normalitu. Potom odporučí koreláciu, t-test/ANOVA alebo neparametrickú alternatívu.',
+      kedy_moze_chybat: 'Chýba, ak nie sú dostupné typy premenných alebo dostatok dát.',
+      odporucanie: 'Odporúčanie berte ako metodickú pomôcku, nie ako náhradu odborného posúdenia.',
+    },
+    {
+      poradie: 21,
+      list: '21 Odpor grafy',
+      cast: 'Odporúčané grafy',
+      co_obsahuje: 'Návrhy grafov pre frekvencie, deskriptívu, korelácie, reliabilitu a skupinové porovnania.',
+      preco_je_dolezity: 'Pomáha vytvoriť vizuálne výstupy do práce alebo prezentácie.',
+      ako_sa_pocita: 'Výber grafu závisí od typu dát: kategórie → stĺpcový/koláčový graf, škály → stĺpcový graf priemerov, korelácie → heatmap/matica.',
+      kedy_moze_chybat: 'Chýba, ak sa nedajú identifikovať vhodné dáta pre graf.',
+      odporucanie: 'Grafy používajte najmä zo škál/subškál, nie z nespracovaných textových položiek.',
+    },
+    {
+      poradie: 22,
+      list: '22 Polozky',
+      cast: 'Položkové deskriptívy',
+      co_obsahuje: 'Deskriptívne štatistiky jednotlivých položiek/stĺpcov z raw dát.',
+      preco_je_dolezity: 'Oddeľuje položky od hlavných škál, aby akademický výstup nebol zahltený.',
+      ako_sa_pocita: 'Rovnaké deskriptívne vzorce ako pri škálach, ale na úrovni jednotlivých položiek.',
+      kedy_moze_chybat: 'Chýba, ak nie sú číselné položky v raw dátach.',
+      odporucanie: 'Používajte na kontrolu položiek pred výpočtom škál a reliability.',
+    },
+  ];
+}
+
+function addWorkbookHelperSheet(workbook: XLSX.WorkBook) {
+  addJsonSheet(workbook, '00 Pomocnik', buildWorkbookHelperRows() as unknown as AnyRecord[]);
+}
+
 function getTableDefinitions(result: unknown, preparedDataFile: ExportPayload['preparedDataFile']): ExportTableDefinition[] {
   return [
     { sheetName: '01 overview', title: 'Prehľad exportu', description: 'Základné informácie o analýze.', rows: flattenOverview(result, preparedDataFile) },
@@ -4117,11 +5205,12 @@ function getTableDefinitions(result: unknown, preparedDataFile: ExportPayload['p
     { sheetName: '06 normality', title: 'Normalita dát', description: 'Vyhodnotenie normality iba pre vypočítané škály/subškály a odporúčanie Pearson/Spearman.', rows: flattenNormalityRows(result, preparedDataFile) },
     { sheetName: '07 reliability', title: 'Reliabilita', description: 'Cronbachovo alfa pre škály a subškály vypočítané z položiek dotazníka.', rows: flattenReliabilityRows(result, preparedDataFile) },
     { sheetName: '08 correlations', title: 'Odporúčané korelácie', description: 'Korelácie zvolené podľa normality dát.', rows: flattenCorrelationRows(result, 'recommended', preparedDataFile) },
-    { sheetName: '09 Škály podškály', title: 'Škály a subškály', description: 'Definície, skóre a deskriptíva škál.', rows: flattenScaleRows(result, preparedDataFile) },
-    { sheetName: '10 Pearson', title: 'Pearsonove korelácie', description: 'Parametrické korelácie.', rows: flattenCorrelationRows(result, 'pearson', preparedDataFile) },
-    { sheetName: '11 Spearman', title: 'Spearmanove korelácie', description: 'Neparametrické korelácie.', rows: flattenCorrelationRows(result, 'spearman', preparedDataFile) },
-    { sheetName: '12 Corr matrix', title: 'Korelačná matica', description: 'Maticový výstup korelácií.', rows: flattenCorrelationMatrix(result, preparedDataFile) },
-    { sheetName: '13 Chart data', title: 'Dáta pre grafy', description: 'Podkladové dáta grafických výstupov.', rows: flattenChartData(result) },
+    { sheetName: '09 Škály podškály', title: 'Škály a subškály', description: 'Definície, vypočítané skóre a deskriptíva škál/subškál.', rows: flattenScaleRows(result, preparedDataFile) },
+    { sheetName: '10 Skóre škál', title: 'Skóre škál a subškál po riadkoch', description: 'Skóre škál/subškál vypočítané pre každého respondenta alebo záznam.', rows: flattenScaleScoreRows(result, preparedDataFile) },
+    { sheetName: '11 Pearson', title: 'Pearsonove korelácie', description: 'Parametrické korelácie.', rows: flattenCorrelationRows(result, 'pearson', preparedDataFile) },
+    { sheetName: '12 Spearman', title: 'Spearmanove korelácie', description: 'Neparametrické korelácie.', rows: flattenCorrelationRows(result, 'spearman', preparedDataFile) },
+    { sheetName: '13 Corr matrix', title: 'Korelačná matica', description: 'Maticový výstup korelácií.', rows: flattenCorrelationMatrix(result, preparedDataFile) },
+    { sheetName: '14 Chart data', title: 'Dáta pre grafy', description: 'Podkladové dáta grafických výstupov.', rows: flattenChartData(result) },
     { sheetName: '16 Param testy', title: 'Parametrické testy', description: 't-test a ANOVA podľa normálnosti a počtu skupín.', rows: flattenParametricTests(result, preparedDataFile) },
     { sheetName: '17 Neparam testy', title: 'Neparametrické testy', description: 'Mann-Whitney a Kruskal-Wallis.', rows: flattenNonParametricTests(result, preparedDataFile) },
     { sheetName: '18 Kontingencne tab', title: 'Kontingenčné tabuľky', description: 'Podklady pre kategorizované premenné.', rows: buildContingencyTables(result) },
@@ -4244,9 +5333,84 @@ function setCellStyle(cell: any, options: { header?: boolean; title?: boolean; s
   }
 }
 
-function addRowsAsProfessionalTable(worksheet: any, rows: AnyRecord[], startRow: number) {
+function getProfessionalFillForCell(header: string, value: unknown, rowIndex: number): string {
+  const normalizedHeader = normalizeReliabilityItemName(header);
+  const text = String(value ?? '').trim().toLowerCase();
+  const numeric = toFiniteNumber(value);
+
+  if (text.includes('error') || text.includes('chyba') || text.includes('chýba') || text.includes('chybaju') || text.includes('nízka')) {
+    return 'FFFEE2E2';
+  }
+
+  if (text.includes('warning') || text.includes('upozornen') || text.includes('hranič') || text.includes('hranic')) {
+    return 'FFFEF3C7';
+  }
+
+  if (text === 'ok' || text.includes('výborn') || text.includes('dobrá') || text.includes('dobra') || text.includes('akceptovateľ')) {
+    return 'FFDCFCE7';
+  }
+
+  if (normalizedHeader.includes('cronbach') || normalizedHeader === 'alpha') {
+    if (numeric === null) return rowIndex % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC';
+    if (numeric >= 0.7) return 'FFDCFCE7';
+    if (numeric >= 0.6) return 'FFFEF3C7';
+    return 'FFFEE2E2';
+  }
+
+  if (normalizedHeader.includes('phodnota') || normalizedHeader === 'pvalue') {
+    if (numeric === null) return rowIndex % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC';
+    return numeric < 0.05 ? 'FFDCFCE7' : 'FFF8FAFC';
+  }
+
+  if (normalizedHeader.includes('missing') || normalizedHeader.includes('chybaj')) {
+    if (numeric !== null && numeric > 0) return 'FFFEF3C7';
+  }
+
+  return rowIndex % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC';
+}
+
+function applyProfessionalNumberFormat(cell: any, header: string, value: unknown) {
+  const normalizedHeader = normalizeReliabilityItemName(header);
+
+  if (typeof value !== 'number' || !Number.isFinite(value)) return;
+
+  if (
+    normalizedHeader.includes('percent') ||
+    normalizedHeader.includes('podiel')
+  ) {
+    cell.numFmt = '0.00%';
+    return;
+  }
+
+  if (
+    normalizedHeader.includes('mean') ||
+    normalizedHeader.includes('priemer') ||
+    normalizedHeader.includes('median') ||
+    normalizedHeader.includes('sd') ||
+    normalizedHeader.includes('variance') ||
+    normalizedHeader.includes('cronbach') ||
+    normalizedHeader.includes('alpha') ||
+    normalizedHeader.includes('phodnota') ||
+    normalizedHeader.includes('pvalue') ||
+    normalizedHeader === 'r' ||
+    normalizedHeader === 'rho'
+  ) {
+    cell.numFmt = '0.0000';
+    return;
+  }
+
+  cell.numFmt = Number.isInteger(value) ? '0' : '0.00';
+}
+
+function addRowsAsProfessionalTable(
+  worksheet: any,
+  rows: AnyRecord[],
+  startRow: number,
+  preferredHeaders: string[] = [],
+) {
   const finalRows = rows.length ? normalizeRowsForExcel(rows) : [{ stav: 'bez údajov', poznamka: 'Pre túto tabuľku nie sú dostupné dáta.' }];
-  const headers = Object.keys(finalRows[0] || {});
+  const headers = getAllHeadersFromRows(finalRows, preferredHeaders);
+  const normalizedFinalRows = normalizeRowsToHeaders(finalRows, headers);
   const headerRow = worksheet.getRow(startRow);
 
   headers.forEach((header, index) => {
@@ -4256,14 +5420,15 @@ function addRowsAsProfessionalTable(worksheet: any, rows: AnyRecord[], startRow:
     worksheet.getColumn(index + 1).width = Math.min(Math.max(header.length + 8, 18), 46);
   });
 
-  finalRows.forEach((row, rowIndex) => {
+  normalizedFinalRows.forEach((row, rowIndex) => {
     const excelRow = worksheet.getRow(startRow + rowIndex + 1);
-    const fill = rowIndex % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC';
-
     headers.forEach((header, index) => {
       const cell = excelRow.getCell(index + 1);
-      cell.value = toExcelValueForExcelJs(row[header]);
+      const value = toExcelValueForExcelJs(row[header]);
+      const fill = getProfessionalFillForCell(header, row[header], rowIndex);
+      cell.value = value;
       setCellStyle(cell, { fill });
+      applyProfessionalNumberFormat(cell, header, value);
     });
   });
 
@@ -4317,8 +5482,49 @@ function addWorksheetImage(workbook: any, worksheet: any, pngBuffer: Buffer, col
   });
 }
 
+
+function addHelperWorksheet(workbook: any) {
+  const worksheet = workbook.addWorksheet('00 Pomocnik', {
+    views: [{ state: 'frozen', ySplit: 5, showGridLines: false }],
+    properties: { tabColor: { argb: 'FF0F172A' } },
+  });
+
+  worksheet.mergeCells('A1:H1');
+  worksheet.getCell('A1').value = 'ZEDPERA – pomocník k Excel exportu analýzy dát';
+  setCellStyle(worksheet.getCell('A1'), { title: true });
+  worksheet.getRow(1).height = 34;
+
+  worksheet.mergeCells('A2:H2');
+  worksheet.getCell('A2').value = 'Tento prvý list vysvetľuje každý hárok, každú časť výstupu, spôsob výpočtu a dôvod, prečo niektoré hodnoty môžu chýbať.';
+  setCellStyle(worksheet.getCell('A2'), { subtitle: true });
+
+  worksheet.mergeCells('A3:H3');
+  worksheet.getCell('A3').value = 'Kľúčové pravidlo: odborné škály a subškály sa nedajú spoľahlivo uhádnuť z ľubovoľného Excelu. Ak používateľ nezadá definície škál, systém vytvorí iba automaticky rozpoznané/orientačné škály z číselných alebo Likert položiek a jasne označí ich zdroj.';
+  setCellStyle(worksheet.getCell('A3'), { fill: 'FFFEF3C7' });
+
+  worksheet.mergeCells('A4:H4');
+  worksheet.getCell('A4').value = 'Príklad definície: Rodinná súdržnosť: Q1, Q2, Q3; Podpora priateľov: Q4 až Q6; skoring=mean; min=1; max=5; reverzné položky=Q2.';
+  setCellStyle(worksheet.getCell('A4'), { fill: 'FFDCFCE7' });
+
+  addRowsAsProfessionalTable(
+    worksheet,
+    buildWorkbookHelperRows() as unknown as AnyRecord[],
+    6,
+    ['poradie', 'list', 'cast', 'co_obsahuje', 'preco_je_dolezity', 'ako_sa_pocita', 'kedy_moze_chybat', 'odporucanie'],
+  );
+
+  worksheet.getColumn(1).width = 10;
+  worksheet.getColumn(2).width = 24;
+  worksheet.getColumn(3).width = 28;
+  worksheet.getColumn(4).width = 48;
+  worksheet.getColumn(5).width = 48;
+  worksheet.getColumn(6).width = 56;
+  worksheet.getColumn(7).width = 48;
+  worksheet.getColumn(8).width = 48;
+}
+
 function addDashboardWorksheet(workbook: any, result: unknown, preparedDataFile: ExportPayload['preparedDataFile']) {
-  const worksheet = workbook.addWorksheet('00 Dashboard', {
+  const worksheet = workbook.addWorksheet('01 Dashboard', {
     views: [{ showGridLines: false }],
     properties: { tabColor: { argb: 'FF0F172A' } },
   });
@@ -4329,7 +5535,7 @@ function addDashboardWorksheet(workbook: any, result: unknown, preparedDataFile:
   worksheet.getRow(1).height = 34;
 
   worksheet.mergeCells('A2:H2');
-  worksheet.getCell('A2').value = 'Prvá strana obsahuje prehľad, koláčové grafy a hlavné grafické výstupy.';
+  worksheet.getCell('A2').value = 'Druhá strana obsahuje prehľad, koláčové grafy a hlavné grafické výstupy. Prvý list Pomocnik vysvetľuje metodiku exportu.';
   setCellStyle(worksheet.getCell('A2'), { subtitle: true });
 
   const overview = flattenOverview(result, preparedDataFile);
@@ -4376,24 +5582,36 @@ function addProfessionalWorksheetWithChart(workbook: any, definition: ExportTabl
   worksheet.getCell('A2').value = definition.description;
   setCellStyle(worksheet.getCell('A2'), { subtitle: true });
 
-  const tableMeta = addRowsAsProfessionalTable(worksheet, asRecords(definition.rows), 4);
+  const tableMeta = addRowsAsProfessionalTable(
+    worksheet,
+    asRecords(definition.rows),
+    4,
+    getPreferredHeadersForSheet(definition.sheetName),
+  );
   const chartSection = chartSectionForTable(definition);
 
   if (chartSection && chartSection.points.length > 0) {
-    const imageStartRow = 5;
-    const imageStartCol = Math.min(Math.max(tableMeta.columnCount + 2, 6), 10);
-    worksheet.getRow(4).getCell(imageStartCol).value = `Graf k tabuľke – ${definition.title}`;
-    setCellStyle(worksheet.getRow(4).getCell(imageStartCol), { header: true, fill: 'FF7C3AED' });
-    addWorksheetImage(
-      workbook,
-      worksheet,
-      renderBarChartPng(chartSection),
-      imageStartCol - 1,
-      imageStartRow,
-      560,
-      300,
-    );
-    addSectionDataTable(worksheet, chartSection, imageStartRow + 18, imageStartCol);
+    try {
+      const imageStartRow = 5;
+      const imageStartCol = Math.min(Math.max(tableMeta.columnCount + 2, 6), 10);
+      worksheet.getRow(4).getCell(imageStartCol).value = `Graf k tabuľke – ${definition.title}`;
+      setCellStyle(worksheet.getRow(4).getCell(imageStartCol), { header: true, fill: 'FF7C3AED' });
+      addWorksheetImage(
+        workbook,
+        worksheet,
+        renderBarChartPng(chartSection),
+        imageStartCol - 1,
+        imageStartRow,
+        560,
+        300,
+      );
+      addSectionDataTable(worksheet, chartSection, imageStartRow + 18, imageStartCol);
+    } catch (error) {
+      const noteCell = worksheet.getRow(4).getCell(Math.min(Math.max(tableMeta.columnCount + 2, 6), 10));
+      noteCell.value = 'Graf sa nepodarilo vložiť, tabuľkové dáta zostali zachované.';
+      setCellStyle(noteCell, { header: true, fill: 'FFF59E0B' });
+      console.warn('[api/analyze-data/export] Graf hárka sa nepodarilo vložiť:', definition.sheetName, error);
+    }
   }
 }
 
@@ -4428,6 +5646,60 @@ function addStandaloneChartWorksheets(
   });
 }
 
+async function buildProfessionalExcelTablesOnly(
+  result: unknown,
+  preparedDataFile: ExportPayload['preparedDataFile'],
+): Promise<Buffer | null> {
+  try {
+    const ExcelJSRuntime = await loadExcelJs();
+    const workbook = new ExcelJSRuntime.Workbook();
+    workbook.creator = 'ZEDPERA';
+    workbook.created = new Date();
+    workbook.modified = new Date();
+    workbook.views = [{ x: 0, y: 0, width: 18000, height: 12000, firstSheet: 0, activeTab: 0, visibility: 'visible' }];
+
+    addHelperWorksheet(workbook);
+
+    const dashboard = workbook.addWorksheet('01 Dashboard', {
+      views: [{ showGridLines: false }],
+      properties: { tabColor: { argb: 'FF0F172A' } },
+    });
+    dashboard.mergeCells('A1:H1');
+    dashboard.getCell('A1').value = 'ZEDPERA – profesionálny export analýzy dát';
+    setCellStyle(dashboard.getCell('A1'), { title: true });
+    dashboard.mergeCells('A2:H2');
+    dashboard.getCell('A2').value = 'Farebný Excel export bez obrázkov grafov – tabuľkové dáta, raw-data, data-quality, škály, skóre a reliabilita sú zachované.';
+    setCellStyle(dashboard.getCell('A2'), { subtitle: true });
+    addRowsAsProfessionalTable(dashboard, flattenOverview(result, preparedDataFile), 4);
+
+    getTableDefinitions(result, preparedDataFile).forEach((definition, index) => {
+      const worksheet = workbook.addWorksheet(safeSheetName(definition.sheetName), {
+        views: [{ state: 'frozen', ySplit: 4, showGridLines: false }],
+        properties: { tabColor: { argb: `FF${PROFESSIONAL_COLORS[index % PROFESSIONAL_COLORS.length]}` } },
+      });
+
+      worksheet.mergeCells('A1:H1');
+      worksheet.getCell('A1').value = definition.title;
+      setCellStyle(worksheet.getCell('A1'), { title: true });
+      worksheet.mergeCells('A2:H2');
+      worksheet.getCell('A2').value = definition.description;
+      setCellStyle(worksheet.getCell('A2'), { subtitle: true });
+      addRowsAsProfessionalTable(
+        worksheet,
+        asRecords(definition.rows),
+        4,
+        getPreferredHeadersForSheet(definition.sheetName),
+      );
+    });
+
+    const output = await workbook.xlsx.writeBuffer();
+    return Buffer.from(output as ArrayBuffer);
+  } catch (error) {
+    console.error('[api/analyze-data/export] ExcelJS tabuľkový export zlyhal:', error);
+    return null;
+  }
+}
+
 async function buildProfessionalExcelWithRenderedCharts(
   result: unknown,
   preparedDataFile: ExportPayload['preparedDataFile'],
@@ -4436,21 +5708,22 @@ async function buildProfessionalExcelWithRenderedCharts(
     const ExcelJSRuntime = await loadExcelJs();
 
     const workbook = new ExcelJSRuntime.Workbook();
-  workbook.creator = 'ZEDPERA';
-  workbook.created = new Date();
-  workbook.modified = new Date();
-  workbook.views = [{ x: 0, y: 0, width: 18000, height: 12000, firstSheet: 0, activeTab: 0, visibility: 'visible' }];
+    workbook.creator = 'ZEDPERA';
+    workbook.created = new Date();
+    workbook.modified = new Date();
+    workbook.views = [{ x: 0, y: 0, width: 18000, height: 12000, firstSheet: 0, activeTab: 0, visibility: 'visible' }];
 
-  addDashboardWorksheet(workbook, result, preparedDataFile);
-  const definitions = getTableDefinitions(result, preparedDataFile);
-  definitions.forEach((definition, index) => addProfessionalWorksheetWithChart(workbook, definition, index));
-  addStandaloneChartWorksheets(workbook, result, preparedDataFile);
+    addHelperWorksheet(workbook);
+    addDashboardWorksheet(workbook, result, preparedDataFile);
+    const definitions = getTableDefinitions(result, preparedDataFile);
+    definitions.forEach((definition, index) => addProfessionalWorksheetWithChart(workbook, definition, index));
+    addStandaloneChartWorksheets(workbook, result, preparedDataFile);
 
     const output = await workbook.xlsx.writeBuffer();
     return Buffer.from(output as ArrayBuffer);
   } catch (error) {
-    console.error('[api/analyze-data/export] Rendered ExcelJS export zlyhal:', error);
-    return null;
+    console.error('[api/analyze-data/export] Rendered ExcelJS export zlyhal, používam farebný tabuľkový fallback:', error);
+    return buildProfessionalExcelTablesOnly(result, preparedDataFile);
   }
 }
 
@@ -4687,6 +5960,7 @@ function buildWorkbook(
 ): XLSX.WorkBook {
   const workbook = XLSX.utils.book_new();
 
+  addWorkbookHelperSheet(workbook);
   addProfessionalDataAnalysisSheets(workbook, result, preparedDataFile);
 
   return workbook;
@@ -4770,11 +6044,15 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const payload = await readPayload(request);
-    const rawResult = getAnalysisResult(payload);
-    const preparedDataFile = getPreparedDataFile(payload);
+    const payloadPreparedDataFile = getPreparedDataFile(payload, null);
+    const detectedResult = getAnalysisResult(payload);
+    const rawResult = isFileLikeFormValue(detectedResult) && payloadPreparedDataFile
+      ? {}
+      : detectedResult || (payloadPreparedDataFile ? {} : null);
     const result = hydrateAnalysisResultWithPayloadInputs(rawResult, payload);
+    const preparedDataFile = getPreparedDataFile(payload, result);
 
-    if (!rawResult) {
+    if (!rawResult && !preparedDataFile) {
       return jsonResponse(
         {
           ok: false,
@@ -4845,31 +6123,39 @@ export async function POST(request: NextRequest) {
     }
 
     const professionalBuffer = await buildProfessionalExcelWithRenderedCharts(
-      result,
-      preparedDataFile,
-    );
+  result,
+  preparedDataFile,
+);
 
-    console.log('[EXPORT XLSX CHARTS]', {
-      professionalBuffer: Boolean(professionalBuffer),
-      chartSections: buildChartSections(result, preparedDataFile).length,
-      pieSections: buildPieChartSections(result).length,
-    });
+console.log('[EXPORT XLSX PROFESSIONAL]', {
+  professionalBuffer: Boolean(professionalBuffer),
+  chartSections: buildChartSections(result, preparedDataFile).length,
+  pieSections: buildPieChartSections(result).length,
+});
 
-    const fallbackWorkbook = buildWorkbook(result, preparedDataFile);
-    const fallbackBuffer = XLSX.write(fallbackWorkbook, {
-      bookType: 'xlsx',
-      type: 'buffer',
-      compression: true,
-    }) as Buffer;
+if (!professionalBuffer) {
+  return jsonResponse(
+    {
+      ok: false,
+      route: EXPORT_ROUTE,
+      error:
+        'Profesionálny ExcelJS export zlyhal. Starý bezfarebný SheetJS fallback je zámerne vypnutý, aby sa na produkcii negeneroval nesprávny Excel bez Pomocníka, farieb a grafov.',
+      recommendation:
+        'Skontrolujte Vercel logs, či je nainštalovaný balík exceljs a či API route beží v nodejs runtime.',
+    },
+    500,
+  );
+}
 
-    const buffer = professionalBuffer ?? fallbackBuffer;
-    const fileName = getDownloadFileName(payload, 'excel');
+const fileName = getDownloadFileName(payload, 'excel');
 
-    return binaryDownloadResponse(buffer, EXCEL_MIME_TYPE, fileName, {
-      'X-Zedpera-Export': 'data-analysis',
-      'X-Zedpera-Excel-Charts': professionalBuffer ? 'rendered' : 'fallback',
-      'X-Zedpera-ExcelJS-Loader': 'static-import',
-    });
+return binaryDownloadResponse(professionalBuffer, EXCEL_MIME_TYPE, fileName, {
+  'X-Zedpera-Export': 'data-analysis',
+  'X-Zedpera-Export-Version': 'professional-excel-v6-no-sheetjs-fallback',
+  'X-Zedpera-Excel-Charts': 'rendered-or-exceljs-table',
+  'X-Zedpera-ExcelJS-Loader': 'static-import',
+  'Cache-Control': 'no-store, no-cache, max-age=0',
+});
 
   } catch (error) {
     const message =

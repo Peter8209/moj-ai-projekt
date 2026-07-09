@@ -6161,10 +6161,11 @@ const fileName = getDownloadFileName(payload, 'excel');
 
 return binaryDownloadResponse(professionalBuffer, EXCEL_MIME_TYPE, fileName, {
   'X-Zedpera-Export': 'data-analysis',
-  'X-Zedpera-Export-Version': 'professional-excel-v7-vercel-optimized-no-sheets-22-37',
+  'X-Zedpera-Export-Version': 'professional-excel-v8-FORCE-vercel-no-sheets-22-37-CANARY',
   'X-Zedpera-Excel-Charts': 'dashboard-limited-rendered',
   'X-Zedpera-Removed-Sheets': '22-37',
   'X-Zedpera-Vercel-Optimized': 'true',
+  'X-Zedpera-Canary': 'ROUTE_V8_FORCE_2026_07_09',
   'X-Zedpera-ExcelJS-Loader': 'static-import',
   'Cache-Control': 'no-store, no-cache, max-age=0',
 });

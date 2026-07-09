@@ -57,6 +57,163 @@ type Props = {
 
 type ExportFormat = 'word' | 'xls' | 'pdf' | 'raw';
 
+type JsonObject = Record<string, unknown>;
+
+const SERVER_EXCEL_EXPORT_SAFE_LIMIT_MB = 3.8;
+
+function getJsonPayloadSizeMb(payload: unknown): number {
+  try {
+    return new Blob([JSON.stringify(payload)]).size / 1024 / 1024;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function isPlainObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stripLargeFieldsForServerExport(value: unknown, depth = 0): unknown {
+  if (value === null || value === undefined) return value;
+
+  if (depth > 8) {
+    return '[removed-too-deep]';
+  }
+
+  if (typeof value === 'string') {
+    if (value.length > 120_000) {
+      return `${value.slice(0, 120_000)}... [truncated-large-string:${value.length}]`;
+    }
+
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length > 800) {
+      return value.slice(0, 800).map((item) =>
+        stripLargeFieldsForServerExport(item, depth + 1),
+      );
+    }
+
+    return value.map((item) => stripLargeFieldsForServerExport(item, depth + 1));
+  }
+
+  if (!isPlainObject(value)) {
+    return value;
+  }
+
+  const blockedKeys = new Set([
+    'base64',
+    'fileBase64',
+    'contentBase64',
+    'rawFileBase64',
+    'xlsxBase64',
+    'originalFileBase64',
+    'binary',
+    'buffer',
+
+    'rawData',
+    'rawRows',
+    'cleanRows',
+    'dataRows',
+    'preparedRows',
+    'records',
+    'rows',
+
+    'chatHistory',
+    'chat_history',
+    'history',
+    'messages',
+
+    'file',
+    'files',
+    'attachment',
+    'attachments',
+  ]);
+
+  const cleaned: JsonObject = {};
+
+  Object.entries(value).forEach(([key, child]) => {
+    if (blockedKeys.has(key)) {
+      if (Array.isArray(child)) {
+        cleaned[`${key}Removed`] = true;
+        cleaned[`${key}Count`] = child.length;
+      } else if (typeof child === 'string') {
+        cleaned[`${key}Removed`] = true;
+        cleaned[`${key}Length`] = child.length;
+      } else {
+        cleaned[`${key}Removed`] = true;
+      }
+
+      return;
+    }
+
+    cleaned[key] = stripLargeFieldsForServerExport(child, depth + 1);
+  });
+
+  return cleaned;
+}
+
+function createSafePreparedDataFileForServerExport(preparedDataFile: any) {
+  if (!preparedDataFile) return null;
+
+  return {
+    fileName: preparedDataFile.fileName,
+    mimeType: preparedDataFile.mimeType,
+    rows: Array.isArray(preparedDataFile.rows)
+      ? preparedDataFile.rows.length
+      : preparedDataFile.rows,
+    columns: preparedDataFile.columns,
+    warnings: Array.isArray(preparedDataFile.warnings)
+      ? preparedDataFile.warnings.slice(0, 100)
+      : preparedDataFile.warnings,
+    sheets: Array.isArray(preparedDataFile.sheets)
+      ? preparedDataFile.sheets.slice(0, 100)
+      : preparedDataFile.sheets,
+    qualityReport: Array.isArray(preparedDataFile.qualityReport)
+      ? preparedDataFile.qualityReport.slice(0, 300)
+      : preparedDataFile.qualityReport,
+  };
+}
+
+function createSafeResultForServerExport(result: unknown): unknown {
+  if (!isPlainObject(result)) {
+    return stripLargeFieldsForServerExport(result);
+  }
+
+  const cleaned: JsonObject = {};
+
+  Object.entries(result).forEach(([key, value]) => {
+    if (
+      key === 'preparedDataFile' ||
+      key === 'preparedFile' ||
+      key === 'dataFile'
+    ) {
+      cleaned[key] = createSafePreparedDataFileForServerExport(value);
+      return;
+    }
+
+    if (
+      key === 'rawData' ||
+      key === 'rawRows' ||
+      key === 'cleanRows' ||
+      key === 'dataRows' ||
+      key === 'preparedRows' ||
+      key === 'records' ||
+      key === 'rows'
+    ) {
+      cleaned[`${key}Removed`] = true;
+      cleaned[`${key}Count`] = Array.isArray(value) ? value.length : undefined;
+      return;
+    }
+
+    cleaned[key] = stripLargeFieldsForServerExport(value);
+  });
+
+  return cleaned;
+}
+
+
 type DataRow = Record<string, unknown>;
 
 type TableSection = {
@@ -2093,11 +2250,13 @@ function downloadBlob(blob: Blob, fileName: string): void {
 }
 
 function getFileName(format: ExportFormat): string {
-  if (format === 'word') return 'vysledky-analyzy-dat.doc';
-  if (format === 'xls') return 'statisticka-analyza.xlsx';
-  if (format === 'raw') return 'raw-data.xlsx';
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
-  return 'vysledky-analyzy-dat.pdf';
+  if (format === 'word') return `ZEDPERA_vysledky_analyzy_dat_${timestamp}.doc`;
+  if (format === 'xls') return `ZEDPERA_profesionalny_export_analyzy_dat_${timestamp}.xlsx`;
+  if (format === 'raw') return `ZEDPERA_raw_data_${timestamp}.xlsx`;
+
+  return `ZEDPERA_vysledky_analyzy_dat_${timestamp}.pdf`;
 }
 
 
@@ -2549,7 +2708,7 @@ function createPureAnalysisExportBlob(params: {
     registry.push({ sheetName: realName, title, description, rowCount: Math.max(0, safeRows.length - 1) });
   };
 
-  addSheet('01 Súhrn', 'Súhrn analýzy', 'Základné informácie o exporte a spracovaní dát.', aoaFromRowsForXlsx(createIntroRows(payload, params.professionalInterpretation), 'Žiadne súhrnné údaje'));
+  addSheet('01 Dashboard', 'Dashboard analýzy', 'Základné informácie o exporte, spracovaní dát a výsledkoch.', aoaFromRowsForXlsx(createIntroRows(payload, params.professionalInterpretation), 'Žiadne súhrnné údaje'));
   addSheet('02 raw-data', 'Raw dáta', 'Pripravený dátový súbor použitý na výpočty.', aoaFromPreparedSheetForXlsx(preparedDataset.rawDataSheet, params.arrays.preparedRawRows, 'Žiadne raw dáta'));
   addSheet('03 variable-map', 'Mapa premenných', 'Rozpoznané premenné a analytické roly.', aoaFromPreparedSheetForXlsx(preparedDataset.variableMapSheet, params.arrays.variables, 'Žiadna mapa premenných'));
   addSheet('04 data-quality', 'Kvalita dát', 'Kontrola kvality dát.', aoaFromPreparedSheetForXlsx(preparedDataset.dataQualitySheet, params.arrays.preparedDataQualityRows, 'Žiadne údaje o kvalite dát'));
@@ -2591,7 +2750,7 @@ function createPureAnalysisExportBlob(params: {
     ...registry.map((sheet, index) => [index + 1, sheet.sheetName, `${sheet.title} – ${sheet.description}`, sheet.rowCount]),
   ];
 
-  return createPureXlsxBlob([{ sheetName: '00 Úvod navigácia', rows: navigationRows }, ...sheets]);
+  return createPureXlsxBlob([{ sheetName: '00 Pomocnik', rows: navigationRows }, ...sheets]);
 }
 
 function createPureRawDataBlob(result: AnalysisResult | null, arrays: ReturnType<typeof getResultArrays>): Blob {
@@ -3019,7 +3178,7 @@ function createProfessionalIntroSheet(params: {
   exportPayload: any;
   professionalInterpretation: ReturnType<typeof getProfessionalInterpretation>;
 }): ExcelWorksheetLike {
-  const sheetName = ensureUniqueSheetName('00 Úvod a navigácia', params.usedNames);
+  const sheetName = ensureUniqueSheetName('00 Pomocnik', params.usedNames);
   const sheet = params.workbook.addWorksheet(sheetName, {
     properties: { tabColor: { argb: EXCEL_THEME.navy } },
   });
@@ -3508,8 +3667,8 @@ async function createXlsxFallbackExportBlob(params: {
   };
 
   addSheet(
-    '01 Súhrn',
-    'Súhrn analýzy',
+    '01 Dashboard',
+    'Dashboard analýzy',
     'Základné informácie o exporte a spracovaní dát.',
     aoaFromRowsForXlsx(createIntroRows(payload, params.professionalInterpretation), 'Žiadne súhrnné údaje'),
   );
@@ -3595,7 +3754,7 @@ async function createXlsxFallbackExportBlob(params: {
 
   const navigationWorksheet = XLSX.utils.aoa_to_sheet(navigationRows);
   navigationWorksheet['!cols'] = [{ wch: 10 }, { wch: 26 }, { wch: 90 }, { wch: 14 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(workbook, navigationWorksheet, ensureUniqueSheetName('00 Úvod navigácia', usedNames));
+  XLSX.utils.book_append_sheet(workbook, navigationWorksheet, ensureUniqueSheetName('00 Pomocnik', usedNames));
 
   if (workbook.SheetNames?.length > 1) {
     const lastSheet = workbook.Sheets[workbook.SheetNames[workbook.SheetNames.length - 1]];
@@ -3742,7 +3901,7 @@ async function createClientExcelExportBlob(params: {
     if (sheet) introIndex += 1;
   };
 
-  addTable('01 Súhrn', 'Súhrn analýzy', 'Základné informácie o súbore, rozsahu dát, škálach, subškálach a exporte.', createIntroRows(payload, params.professionalInterpretation), EXCEL_THEME.navy);
+  addTable('01 Dashboard', 'Dashboard analýzy', 'Základné informácie o súbore, rozsahu dát, škálach, subškálach a exporte.', createIntroRows(payload, params.professionalInterpretation), EXCEL_THEME.navy);
   addAoa('02 raw-data', 'Raw dáta', 'Pripravený dátový súbor, z ktorého boli počítané všetky výsledky.', preparedDataset.rawDataSheet, EXCEL_THEME.blue);
   addAoa('03 variable-map', 'Mapa premenných', 'Rozpoznané premenné, typy premenných, roly, missing hodnoty a príklady.', preparedDataset.variableMapSheet, EXCEL_THEME.blue);
   addAoa('04 data-quality', 'Kvalita dát', 'Kontrola hárku, počet riadkov, premenných, škál, subškál a upozornenia.', preparedDataset.dataQualitySheet, EXCEL_THEME.blue);
@@ -5540,28 +5699,86 @@ export default function AnalysisResultsModal({
     };
   }, [open, onClose, selectedTable]);
 
+  function getFileNameFromContentDisposition(
+    contentDisposition: string | null,
+    fallbackFileName: string,
+  ): string {
+    if (!contentDisposition) return fallbackFileName;
+
+    const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match?.[1]) {
+      try {
+        return decodeURIComponent(utf8Match[1].replace(/"/g, '').trim());
+      } catch {
+        return utf8Match[1].replace(/"/g, '').trim() || fallbackFileName;
+      }
+    }
+
+    const fileNameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+    return fileNameMatch?.[1]?.trim() || fallbackFileName;
+  }
+
+  function logServerExcelFallback(error: unknown, reason: string) {
+    console.warn('ANALYSIS_MODAL_SERVER_EXCEL_EXPORT_FALLBACK:', {
+      error,
+      reason,
+      recommendation:
+        'Ak sa objaví HTTP 413/FUNCTION_PAYLOAD_TOO_LARGE, serverový export na Verceli dostal príliš veľké telo requestu. Modal preto použije klientsky profesionálny Excel export bez odosielania veľkého JSON payloadu.',
+    });
+  }
+
   async function exportProfessionalExcelFromModal() {
     if (!result) return false;
 
     if (onExportExcel) {
-      await onExportExcel();
-      return true;
+      console.info('ANALYSIS_MODAL_EXTERNAL_EXCEL_HANDLER_BYPASSED:', {
+        reason:
+          'Externý onExportExcel handler sa nepoužil, aby sa neodosielal starý veľký payload na Vercel. Používa sa bezpečný interný export modalu.',
+      });
+    }
+
+    const safeResult = createSafeResultForServerExport(result);
+    const safePreparedDataFile =
+      createSafePreparedDataFileForServerExport(preparedDataFile);
+
+    const serverExportPayload = {
+      result: safeResult,
+      analysisResult: safeResult,
+      preparedDataFile: safePreparedDataFile,
+      exportFormat: 'excel',
+      format: 'excel',
+      type: 'excel',
+      fileName: 'ZEDPERA_profesionalny_export_analyzy_dat',
+      source: 'AnalysisResultsModal.safe-server-export',
+    };
+
+    const payloadSizeMb = getJsonPayloadSizeMb(serverExportPayload);
+
+    console.log('[ZEDPERA SERVER EXCEL EXPORT PAYLOAD MB]', {
+      sizeMb: Number(payloadSizeMb.toFixed(2)),
+      limitMb: SERVER_EXCEL_EXPORT_SAFE_LIMIT_MB,
+    });
+
+    if (payloadSizeMb > SERVER_EXCEL_EXPORT_SAFE_LIMIT_MB) {
+      logServerExcelFallback(
+        new Error(
+          `Serverový Excel export bol preskočený, payload má ${payloadSizeMb.toFixed(
+            2,
+          )} MB.`,
+        ),
+        'Payload je väčší ako bezpečný limit pre Vercel. Použije sa klientsky profesionálny Excel export.',
+      );
+
+      return false;
     }
 
     const response = await fetch('/api/analyze-data/export', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-Zedpera-Export-Source': 'analysis-results-modal-safe',
       },
-      body: JSON.stringify({
-        result,
-        analysisResult: result,
-        preparedDataFile,
-        exportFormat: 'excel',
-        format: 'excel',
-        type: 'excel',
-        fileName: 'ZEDPERA_profesionalny_export_analyzy_dat',
-      }),
+      body: JSON.stringify(serverExportPayload),
     });
 
     if (!response.ok) {
@@ -5570,16 +5787,24 @@ export default function AnalysisResultsModal({
         ? JSON.stringify(await response.json())
         : await response.text();
 
-      throw new Error(errorText || 'Profesionálny Excel export zlyhal.');
+      throw new Error(
+        errorText ||
+          `Profesionálny Excel export zlyhal. HTTP status: ${response.status}.`,
+      );
     }
 
     const blob = await response.blob();
 
-    if (blob.size === 0) {
+    if (!blob.size) {
       throw new Error('Profesionálny Excel export je prázdny.');
     }
 
-    downloadBlob(blob, 'ZEDPERA_profesionalny_export_analyzy_dat.xlsx');
+    const fileName = getFileNameFromContentDisposition(
+      response.headers.get('content-disposition'),
+      getFileName('xls'),
+    );
+
+    downloadBlob(blob, fileName);
 
     return true;
   }
@@ -5599,30 +5824,30 @@ export default function AnalysisResultsModal({
       });
 
       if (format === 'xls') {
-  try {
-    const exportedByServer = await exportProfessionalExcelFromModal();
+        try {
+          const exportedByServer = await exportProfessionalExcelFromModal();
 
-    if (exportedByServer) {
-      return;
-    }
-  } catch (serverExportError) {
-    console.warn(
-      'ANALYSIS_MODAL_SERVER_EXCEL_EXPORT_FALLBACK:',
-      serverExportError,
-    );
-  }
+          if (exportedByServer) {
+            return;
+          }
+        } catch (serverExportError) {
+          logServerExcelFallback(
+            serverExportError,
+            'Serverový Excel export zlyhal. Používa sa klientsky profesionálny Excel export.',
+          );
+        }
 
-  const blob = await createClientExcelExportBlob({
-    exportPayload,
-    arrays,
-    tableSections,
-    professionalInterpretation,
-  });
+        const blob = await createClientExcelExportBlob({
+          exportPayload,
+          arrays,
+          tableSections,
+          professionalInterpretation,
+        });
 
-  await assertValidXlsxBlob(blob, 'Excel fallback export');
-  downloadBlob(blob, getFileName(format));
-  return;
-}
+        await assertValidXlsxBlob(blob, 'Excel klientsky profesionálny export');
+        downloadBlob(blob, getFileName(format));
+        return;
+      }
 
       if (format === 'raw') {
         const blob = await createClientRawDataBlob(result, arrays);
@@ -5632,65 +5857,61 @@ export default function AnalysisResultsModal({
       }
 
       const normalizedFormat: 'word' | 'pdf' = format;
+      const safeExportPayload = createSafeResultForServerExport(exportPayload);
+      const documentServerPayload = {
+        action: 'export',
+        mode: 'export',
+        format: normalizedFormat,
+        type: normalizedFormat,
+        title:
+          (result as any).title ||
+          professionalInterpretation.title ||
+          'Výsledky analýzy dát',
+        exportMode: 'jasp-professional-complete',
+        fileName: getFileName(format),
+        result: safeExportPayload,
+        analysis: safeExportPayload,
+        payload: safeExportPayload,
+        source: 'AnalysisResultsModal.safe-document-export',
+      };
 
-      const response = await fetch('/api/analyze-data', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          action: 'export',
-          mode: 'export',
-          format: normalizedFormat,
-          type: normalizedFormat,
-          title:
-            (result as any).title ||
-            professionalInterpretation.title ||
-            'Výsledky analýzy dát',
-          exportMode: 'jasp-professional-complete',
-          fileName: getFileName(format),
-          result: exportPayload,
-          analysis: exportPayload,
-          payload: exportPayload,
-          preparedDataset: exportPayload.preparedDataset,
-          frequencies: exportPayload.frequencies,
-          descriptives: exportPayload.descriptives,
-          descriptiveStatistics: exportPayload.descriptiveStatistics,
-          scaleScores: exportPayload.scaleScores,
-          scaleDescriptives: exportPayload.scaleDescriptives,
-          reliability: exportPayload.reliability,
-          reliabilities: exportPayload.reliabilities,
-          correlations: exportPayload.correlations,
-          pearsonCorrelations: exportPayload.pearsonCorrelations,
-          spearmanCorrelations: exportPayload.spearmanCorrelations,
-          statisticalTests: exportPayload.statisticalTests,
-          parametricGroupTests: exportPayload.parametricGroupTests,
-          nonParametricGroupTests: exportPayload.nonParametricGroupTests,
-          recommendedTests: exportPayload.recommendedTests,
-          recommendedCharts: exportPayload.recommendedCharts,
-          chartData: exportPayload.chartData,
-          tables: exportPayload.tables,
-          excelTables: exportPayload.excelTables,
-          exportTables: exportPayload.exportTables,
-          warnings: exportPayload.warnings,
-        }),
-      });
+      const documentPayloadSizeMb = getJsonPayloadSizeMb(documentServerPayload);
 
-      if (!response.ok) {
-        const fallbackBlob = createClientDocumentBlob({
-          format,
-          result,
-          professionalInterpretation,
-          tableSections,
+      if (documentPayloadSizeMb <= SERVER_EXCEL_EXPORT_SAFE_LIMIT_MB) {
+        const response = await fetch('/api/analyze-data', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Zedpera-Export-Source': 'analysis-results-modal-safe',
+          },
+          body: JSON.stringify(documentServerPayload),
         });
 
-        downloadBlob(fallbackBlob, getFileName(format));
-        return;
+        if (response.ok) {
+          const blob = await response.blob();
+          if (blob.size > 0) {
+            downloadBlob(blob, getFileName(format));
+            return;
+          }
+        }
+      } else {
+        console.warn('ANALYSIS_MODAL_DOCUMENT_SERVER_EXPORT_SKIPPED:', {
+          format,
+          sizeMb: Number(documentPayloadSizeMb.toFixed(2)),
+          limitMb: SERVER_EXCEL_EXPORT_SAFE_LIMIT_MB,
+          reason:
+            'Dokumentový export by prekročil bezpečný Vercel limit. Používa sa klientsky export.',
+        });
       }
 
-      const blob = await response.blob();
+      const fallbackBlob = createClientDocumentBlob({
+        format,
+        result,
+        professionalInterpretation,
+        tableSections,
+      });
 
-      downloadBlob(blob, getFileName(format));
+      downloadBlob(fallbackBlob, getFileName(format));
     } catch (error) {
       console.error('ANALYSIS_MODAL_EXPORT_ERROR:', error);
 
@@ -5698,19 +5919,6 @@ export default function AnalysisResultsModal({
         const professionalInterpretation = getProfessionalInterpretation(result);
 
         if (format === 'xls') {
-          try {
-            const exportedByServer = await exportProfessionalExcelFromModal();
-
-            if (exportedByServer) {
-              return;
-            }
-          } catch (serverExportError) {
-            console.warn(
-              'ANALYSIS_MODAL_SERVER_EXCEL_EXPORT_FALLBACK:',
-              serverExportError,
-            );
-          }
-
           const fallbackExportPayload = buildCompleteExportPayload({
             result,
             arrays,
@@ -5725,7 +5933,7 @@ export default function AnalysisResultsModal({
             professionalInterpretation,
           });
 
-          await assertValidXlsxBlob(blob, 'Excel fallback export');
+          await assertValidXlsxBlob(blob, 'Excel klientsky fallback export');
           downloadBlob(blob, getFileName(format));
           return;
         }

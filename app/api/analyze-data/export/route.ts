@@ -141,6 +141,36 @@ const DATA_QUALITY_SHEET_HEADERS = [
   'poznamka',
 ];
 
+const IS_VERCEL_RUNTIME = Boolean(process.env.VERCEL);
+
+/**
+ * Produkčné limity pre Vercel/serverless export.
+ *
+ * Dôvod:
+ * - localhost zvládne generovať veľa PNG grafov aj niekoľko minút,
+ * - Vercel API route musí odpovedať výrazne rýchlejšie,
+ * - preto ponechávame metodiku, farby, tabuľky, škály, skóre a reliabilitu,
+ *   ale obmedzujeme počet obrázkov grafov a úplne vypíname samostatné grafové listy 22–37.
+ */
+const EXCEL_EXPORT_LIMITS = {
+  maxDashboardPieSections: IS_VERCEL_RUNTIME ? 2 : 2,
+  maxDashboardBarSections: IS_VERCEL_RUNTIME ? 3 : 4,
+  maxChartSections: IS_VERCEL_RUNTIME ? 4 : 6,
+  maxPieSections: IS_VERCEL_RUNTIME ? 2 : 3,
+  maxStandaloneChartSheets: 0,
+  maxPerTableCharts: 0,
+  piePngWidth: IS_VERCEL_RUNTIME ? 520 : 640,
+  piePngHeight: IS_VERCEL_RUNTIME ? 320 : 380,
+  barPngWidth: IS_VERCEL_RUNTIME ? 620 : 760,
+  barPngHeight: IS_VERCEL_RUNTIME ? 340 : 420,
+  pieDisplayWidth: IS_VERCEL_RUNTIME ? 300 : 340,
+  pieDisplayHeight: IS_VERCEL_RUNTIME ? 175 : 200,
+  barDisplayWidth: IS_VERCEL_RUNTIME ? 360 : 430,
+  barDisplayHeight: IS_VERCEL_RUNTIME ? 195 : 230,
+  removeNumberedSheetsFrom: 22,
+  removeNumberedSheetsTo: 37,
+} as const;
+
 type ExportPayload = {
   [key: string]: unknown;
   result?: unknown;
@@ -4622,7 +4652,7 @@ function buildChartSections(
       }
     });
 
-  return Array.from(deduplicated.values()).slice(0, 12);
+  return Array.from(deduplicated.values()).slice(0, EXCEL_EXPORT_LIMITS.maxChartSections);
 }
 
 function formatExportNumber(value: number): string {
@@ -4649,57 +4679,17 @@ function makeTextBar(value: number, maxAbsValue: number, kind?: ChartSection['ki
 }
 
 function addChartDataSheet(workbook: XLSX.WorkBook, chartSections: ChartSection[]) {
-  const rows: AnyRecord[] = [];
-
-  chartSections.forEach((section) => {
-    section.points.forEach((point) => {
-      rows.push({
-        graf: section.title,
-        label: point.label,
-        hodnota: point.value,
-        bar: makeTextBar(
-          point.value,
-          Math.max(...section.points.map((item) => Math.abs(item.value)), 1),
-          section.kind,
-        ),
-        popis: point.description || '',
-        skupina: point.group || '',
-      });
-    });
-  });
-
-  addJsonSheet(workbook, '22 Grafy data', rows);
+  // Starý SheetJS grafový výstup je vypnutý, aby nevznikali listy 22–37.
+  // Podkladové dáta pre grafy sa exportujú v hlavnom liste 14 Chart data.
+  void workbook;
+  void chartSections;
 }
 
 function addExcelChartSheet(workbook: XLSX.WorkBook, section: ChartSection, index: number) {
-  const maxAbsValue = Math.max(...section.points.map((item) => Math.abs(item.value)), 1);
-
-  const rows: unknown[][] = [
-    [section.title],
-    [section.description],
-    [],
-    ['Položka', section.valueLabel, 'Grafické vykreslenie', 'Poznámka'],
-    ...section.points.map((point) => [
-      point.label,
-      point.value,
-      makeTextBar(point.value, maxAbsValue, section.kind),
-      point.description || point.group || '',
-    ]),
-  ];
-
-  const worksheet = XLSX.utils.aoa_to_sheet(rows);
-  worksheet['!cols'] = [
-    { wch: 42 },
-    { wch: 16 },
-    { wch: 38 },
-    { wch: 55 },
-  ];
-
-  XLSX.utils.book_append_sheet(
-    workbook,
-    worksheet,
-    safeSheetName(`${23 + index} ${section.title}`),
-  );
+  // Staré samostatné textové grafové hárky sú vypnuté.
+  void workbook;
+  void section;
+  void index;
 }
 
 function addExcelChartSheets(
@@ -4707,21 +4697,13 @@ function addExcelChartSheets(
   result: unknown,
   preparedDataFile?: ExportPayload['preparedDataFile'],
 ) {
-  const chartSections = buildChartSections(result, preparedDataFile);
-
-  if (!chartSections.length) {
-    addJsonSheet(workbook, '22 Grafy', [
-      {
-        stav: 'bez grafov',
-        poznamka:
-          'Export nenašiel číselné podklady pre grafy. Skontrolujte, či API vracia chartData alebo štatistické tabuľky s hodnotami mean/count/r/cronbach_alpha.',
-      },
-    ]);
-    return;
-  }
-
-  addChartDataSheet(workbook, chartSections);
-  chartSections.forEach((section, index) => addExcelChartSheet(workbook, section, index));
+  // Zámerne nevytvárame samostatné grafové hárky 22–37.
+  // Dáta pre grafy zostávajú v liste 14 Chart data a skutočné obrázky grafov sú iba na 01 Dashboard.
+  // Tým sa export výrazne zrýchli na Verceli a zároveň zostanú zachované helper, farby,
+  // raw-data, data-quality, škály, skóre, reliabilita a štatistické tabuľky.
+  void workbook;
+  void result;
+  void preparedDataFile;
 }
 
 
@@ -4966,7 +4948,7 @@ function buildWorkbookHelperRows(): SheetHelperRow[] {
       preco_je_dolezity: 'Používateľ nemusí poznať štatistiku ani štruktúru exportu. Tento list slúži ako metodický manuál priamo v Exceli.',
       ako_sa_pocita: 'Tento list je statický metodický popis. Nevypočítava výsledky, ale opisuje výpočty v ostatných listoch.',
       kedy_moze_chybat: 'Nemal by chýbať nikdy. Generuje sa ako prvý list pri každom Excel exporte.',
-      odporucanie: 'Začnite týmto listom, potom skontrolujte raw-data, data-quality, škály/subškály, skóre a reliabilitu.',
+      odporucanie: 'Začnite týmto listom, potom skontrolujte raw-data, data-quality, škály/subškály, skóre a reliabilitu. Samostatné grafové listy 22–37 sa na Verceli negenerujú – grafy sú sústredené na Dashboarde a ich dátový podklad je v liste 14 Chart data.',
     },
     {
       poradie: 1,
@@ -5178,16 +5160,6 @@ function buildWorkbookHelperRows(): SheetHelperRow[] {
       kedy_moze_chybat: 'Chýba, ak sa nedajú identifikovať vhodné dáta pre graf.',
       odporucanie: 'Grafy používajte najmä zo škál/subškál, nie z nespracovaných textových položiek.',
     },
-    {
-      poradie: 22,
-      list: '22 Polozky',
-      cast: 'Položkové deskriptívy',
-      co_obsahuje: 'Deskriptívne štatistiky jednotlivých položiek/stĺpcov z raw dát.',
-      preco_je_dolezity: 'Oddeľuje položky od hlavných škál, aby akademický výstup nebol zahltený.',
-      ako_sa_pocita: 'Rovnaké deskriptívne vzorce ako pri škálach, ale na úrovni jednotlivých položiek.',
-      kedy_moze_chybat: 'Chýba, ak nie sú číselné položky v raw dátach.',
-      odporucanie: 'Používajte na kontrolu položiek pred výpočtom škál a reliability.',
-    },
   ];
 }
 
@@ -5201,7 +5173,7 @@ function getTableDefinitions(result: unknown, preparedDataFile: ExportPayload['p
     { sheetName: '02 raw-data', title: 'Raw dáta', description: 'Dáta použité pri analýze.', rows: flattenRawData(result, preparedDataFile) },
     { sheetName: '03 frequencies', title: 'Frekvenčné tabuľky', description: 'Početnosti a percentá odpovedí.', rows: flattenFrequencies(result) },
     { sheetName: '04 data-quality', title: 'Kontrola kvality dát', description: 'Upozornenia a kontrola vstupného súboru.', rows: flattenDataQuality(result, preparedDataFile) },
-    { sheetName: '05 descriptives', title: 'Deskriptívna štatistika', description: 'Od tohto hárka sú v hlavných výstupoch ponechané iba vypočítané škály a subškály; položky sú presunuté do záverečného hárka.', rows: flattenDescriptiveRows(result, preparedDataFile) },
+    { sheetName: '05 descriptives', title: 'Deskriptívna štatistika', description: 'V hlavných výstupoch sú ponechané najmä vypočítané škály a subškály; jednotlivé položky zostávajú kontrolovateľné v raw-data a data-quality.', rows: flattenDescriptiveRows(result, preparedDataFile) },
     { sheetName: '06 normality', title: 'Normalita dát', description: 'Vyhodnotenie normality iba pre vypočítané škály/subškály a odporúčanie Pearson/Spearman.', rows: flattenNormalityRows(result, preparedDataFile) },
     { sheetName: '07 reliability', title: 'Reliabilita', description: 'Cronbachovo alfa pre škály a subškály vypočítané z položiek dotazníka.', rows: flattenReliabilityRows(result, preparedDataFile) },
     { sheetName: '08 correlations', title: 'Odporúčané korelácie', description: 'Korelácie zvolené podľa normality dát.', rows: flattenCorrelationRows(result, 'recommended', preparedDataFile) },
@@ -5217,7 +5189,6 @@ function getTableDefinitions(result: unknown, preparedDataFile: ExportPayload['p
     { sheetName: '19 Chi-square', title: 'Chí-kvadrát', description: 'Súhrny pre chí-kvadrát testy.', rows: buildChiSquareTests(result) },
     { sheetName: '20 Odpor testy', title: 'Odporúčané testy', description: 'Odporúčané štatistické testovanie.', rows: flattenRecommendedTests(result) },
     { sheetName: '21 Odpor grafy', title: 'Odporúčané grafy', description: 'Odporúčané grafické výstupy.', rows: flattenRecommendedCharts(result) },
-    { sheetName: '22 Polozky', title: 'Položkové deskriptívy', description: 'Samostatný záverečný hárok pre položky z raw dát. Hlavné štatistické hárky tak zostávajú čisto pre škály a subškály.', rows: flattenItemDescriptiveRows(result, preparedDataFile) },
   ];
 }
 
@@ -5248,7 +5219,7 @@ function buildPieChartSections(result: unknown): DashboardPieSection[] {
     }
   });
 
-  if (sections.length > 0) return sections.slice(0, 6);
+  if (sections.length > 0) return sections.slice(0, EXCEL_EXPORT_LIMITS.maxPieSections);
 
   const contingency = buildContingencyTables(result);
   const grouped = new Map<string, AnyRecord[]>();
@@ -5266,7 +5237,7 @@ function buildPieChartSections(result: unknown): DashboardPieSection[] {
     }
   });
 
-  return sections.slice(0, 6);
+  return sections.slice(0, EXCEL_EXPORT_LIMITS.maxPieSections);
 }
 
 function chartSectionForTable(definition: ExportTableDefinition): ChartSection | null {
@@ -5506,10 +5477,14 @@ function addHelperWorksheet(workbook: any) {
   worksheet.getCell('A4').value = 'Príklad definície: Rodinná súdržnosť: Q1, Q2, Q3; Podpora priateľov: Q4 až Q6; skoring=mean; min=1; max=5; reverzné položky=Q2.';
   setCellStyle(worksheet.getCell('A4'), { fill: 'FFDCFCE7' });
 
+  worksheet.mergeCells('A5:H5');
+  worksheet.getCell('A5').value = 'Vercel optimalizácia: listy 22–37 sa negenerujú. Export ostáva metodicky kompletný, ale grafy sú sústredené na 01 Dashboard a číselné podklady ku grafom sú v liste 14 Chart data.';
+  setCellStyle(worksheet.getCell('A5'), { fill: 'FFE0F2FE' });
+
   addRowsAsProfessionalTable(
     worksheet,
     buildWorkbookHelperRows() as unknown as AnyRecord[],
-    6,
+    7,
     ['poradie', 'list', 'cast', 'co_obsahuje', 'preco_je_dolezity', 'ako_sa_pocita', 'kedy_moze_chybat', 'odporucanie'],
   );
 
@@ -5541,26 +5516,26 @@ function addDashboardWorksheet(workbook: any, result: unknown, preparedDataFile:
   const overview = flattenOverview(result, preparedDataFile);
   addRowsAsProfessionalTable(worksheet, overview, 4);
 
-  const pieSections = buildPieChartSections(result);
-  const chartSections = buildChartSections(result, preparedDataFile);
+  const pieSections = buildPieChartSections(result).slice(0, EXCEL_EXPORT_LIMITS.maxDashboardPieSections);
+  const chartSections = buildChartSections(result, preparedDataFile).slice(0, EXCEL_EXPORT_LIMITS.maxDashboardBarSections);
   let imageRow = 12;
 
-  pieSections.slice(0, 4).forEach((section, index) => {
+  pieSections.forEach((section, index) => {
     const col = index % 2 === 0 ? 0 : 5;
     const row = imageRow + Math.floor(index / 2) * 17;
     worksheet.getRow(row).getCell(col + 1).value = section.title;
     setCellStyle(worksheet.getRow(row).getCell(col + 1), { header: true, fill: 'FF7C3AED' });
-    addWorksheetImage(workbook, worksheet, renderPieChartPng(section), col, row, 360, 210);
+    addWorksheetImage(workbook, worksheet, renderPieChartPng(section, EXCEL_EXPORT_LIMITS.piePngWidth, EXCEL_EXPORT_LIMITS.piePngHeight), col, row, EXCEL_EXPORT_LIMITS.pieDisplayWidth, EXCEL_EXPORT_LIMITS.pieDisplayHeight);
     addSectionDataTable(worksheet, section, row + 13, col + 1);
   });
 
   imageRow = 48;
-  chartSections.slice(0, 4).forEach((section, index) => {
+  chartSections.forEach((section, index) => {
     const col = index % 2 === 0 ? 0 : 5;
     const row = imageRow + Math.floor(index / 2) * 19;
     worksheet.getRow(row).getCell(col + 1).value = section.title;
     setCellStyle(worksheet.getRow(row).getCell(col + 1), { header: true, fill: 'FF059669' });
-    addWorksheetImage(workbook, worksheet, renderBarChartPng(section), col, row, 440, 230);
+    addWorksheetImage(workbook, worksheet, renderBarChartPng(section, EXCEL_EXPORT_LIMITS.barPngWidth, EXCEL_EXPORT_LIMITS.barPngHeight), col, row, EXCEL_EXPORT_LIMITS.barDisplayWidth, EXCEL_EXPORT_LIMITS.barDisplayHeight);
   });
 
   for (let column = 1; column <= 10; column += 1) {
@@ -5588,7 +5563,9 @@ function addProfessionalWorksheetWithChart(workbook: any, definition: ExportTabl
     4,
     getPreferredHeadersForSheet(definition.sheetName),
   );
-  const chartSection = chartSectionForTable(definition);
+  const chartSection = index < EXCEL_EXPORT_LIMITS.maxPerTableCharts
+    ? chartSectionForTable(definition)
+    : null;
 
   if (chartSection && chartSection.points.length > 0) {
     try {
@@ -5599,11 +5576,11 @@ function addProfessionalWorksheetWithChart(workbook: any, definition: ExportTabl
       addWorksheetImage(
         workbook,
         worksheet,
-        renderBarChartPng(chartSection),
+        renderBarChartPng(chartSection, EXCEL_EXPORT_LIMITS.barPngWidth, EXCEL_EXPORT_LIMITS.barPngHeight),
         imageStartCol - 1,
         imageStartRow,
-        560,
-        300,
+        EXCEL_EXPORT_LIMITS.barDisplayWidth,
+        EXCEL_EXPORT_LIMITS.barDisplayHeight,
       );
       addSectionDataTable(worksheet, chartSection, imageStartRow + 18, imageStartCol);
     } catch (error) {
@@ -5620,31 +5597,55 @@ function addStandaloneChartWorksheets(
   result: unknown,
   preparedDataFile?: ExportPayload['preparedDataFile'],
 ) {
-  const chartSections = buildChartSections(result, preparedDataFile);
-  const pieSections = buildPieChartSections(result);
-  const chartStartNumber = getTableDefinitions(result, preparedDataFile || null).length + 1;
+  // Vypnuté zámerne: samostatné grafové listy 22–37 boli najväčší dôvod pomalého exportu.
+  // Grafy ostávajú na 01 Dashboard a dátové podklady ostávajú v 14 Chart data.
+  void workbook;
+  void result;
+  void preparedDataFile;
+}
 
-  [...pieSections, ...chartSections].slice(0, 24).forEach((section: any, index) => {
-    const isPie = String(section.key || '').startsWith('pie-');
-    const worksheet = workbook.addWorksheet(safeSheetName(`${chartStartNumber + index} Graf ${index + 1}`), {
-      views: [{ showGridLines: false }],
-      properties: { tabColor: { argb: `FF${PROFESSIONAL_COLORS[index % PROFESSIONAL_COLORS.length]}` } },
-    });
+function getLeadingSheetNumber(sheetName: string): number | null {
+  const match = String(sheetName || '').trim().match(/^(\d{1,2})(?:\s|\b|[-_])/);
+  if (!match) return null;
 
-    worksheet.mergeCells('A1:H1');
-    worksheet.getCell('A1').value = section.title;
-    setCellStyle(worksheet.getCell('A1'), { title: true });
-    worksheet.mergeCells('A2:H2');
-    worksheet.getCell('A2').value = isPie ? 'Koláčový graf podielov kategórií.' : section.description;
-    setCellStyle(worksheet.getCell('A2'), { subtitle: true });
-    addWorksheetImage(workbook, worksheet, isPie ? renderPieChartPng(section) : renderBarChartPng(section), 0, 4, isPie ? 560 : 700, 360);
-    addSectionDataTable(worksheet, section, 26, 1);
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
 
-    for (let column = 1; column <= 8; column += 1) {
-      worksheet.getColumn(column).width = 24;
+function removeForbiddenNumberedSheets(workbook: any) {
+  const sheets = Array.isArray(workbook?.worksheets) ? [...workbook.worksheets] : [];
+
+  sheets.forEach((worksheet: any) => {
+    const number = getLeadingSheetNumber(worksheet?.name);
+    if (
+      number !== null &&
+      number >= EXCEL_EXPORT_LIMITS.removeNumberedSheetsFrom &&
+      number <= EXCEL_EXPORT_LIMITS.removeNumberedSheetsTo
+    ) {
+      workbook.removeWorksheet(worksheet.id);
     }
   });
 }
+
+function assertNoForbiddenNumberedSheets(workbook: any) {
+  const sheets = Array.isArray(workbook?.worksheets) ? workbook.worksheets : [];
+  const forbidden = sheets
+    .map((worksheet: any) => String(worksheet?.name || ''))
+    .filter((name: string) => {
+      const number = getLeadingSheetNumber(name);
+      return (
+        number !== null &&
+        number >= EXCEL_EXPORT_LIMITS.removeNumberedSheetsFrom &&
+        number <= EXCEL_EXPORT_LIMITS.removeNumberedSheetsTo
+      );
+    });
+
+  if (forbidden.length > 0) {
+    throw new Error(`Excel export stále obsahuje zakázané listy 22–37: ${forbidden.join(', ')}`);
+  }
+}
+
+
 
 async function buildProfessionalExcelTablesOnly(
   result: unknown,
@@ -5692,6 +5693,9 @@ async function buildProfessionalExcelTablesOnly(
       );
     });
 
+    removeForbiddenNumberedSheets(workbook);
+    assertNoForbiddenNumberedSheets(workbook);
+
     const output = await workbook.xlsx.writeBuffer();
     return Buffer.from(output as ArrayBuffer);
   } catch (error) {
@@ -5718,6 +5722,9 @@ async function buildProfessionalExcelWithRenderedCharts(
     const definitions = getTableDefinitions(result, preparedDataFile);
     definitions.forEach((definition, index) => addProfessionalWorksheetWithChart(workbook, definition, index));
     addStandaloneChartWorksheets(workbook, result, preparedDataFile);
+
+    removeForbiddenNumberedSheets(workbook);
+    assertNoForbiddenNumberedSheets(workbook);
 
     const output = await workbook.xlsx.writeBuffer();
     return Buffer.from(output as ArrayBuffer);
@@ -5795,8 +5802,8 @@ function chartSectionToPieHtml(section: DashboardPieSection): string {
 
 function buildExportHtmlDocument(result: unknown, preparedDataFile: ExportPayload['preparedDataFile']): string {
   const overviewRows = flattenOverview(result, preparedDataFile);
-  const chartSections = buildChartSections(result, preparedDataFile);
-  const pieSections = buildPieChartSections(result);
+  const chartSections = buildChartSections(result, preparedDataFile).slice(0, EXCEL_EXPORT_LIMITS.maxChartSections);
+  const pieSections = buildPieChartSections(result).slice(0, EXCEL_EXPORT_LIMITS.maxPieSections);
 
   const overviewHtml = overviewRows
     .map((row) => `<tr><th>${htmlEscape(row.oblast)}</th><td>${htmlEscape(row.hodnota)}</td></tr>`)
@@ -5850,7 +5857,7 @@ function buildExportHtmlDocument(result: unknown, preparedDataFile: ExportPayloa
 }
 
 function buildPdfBuffer(result: unknown, preparedDataFile: ExportPayload['preparedDataFile']): Buffer {
-  const sections = buildChartSections(result, preparedDataFile);
+  const sections = buildChartSections(result, preparedDataFile).slice(0, EXCEL_EXPORT_LIMITS.maxChartSections);
   const overview = flattenOverview(result, preparedDataFile);
   const pages: string[] = [];
 
@@ -6131,6 +6138,9 @@ console.log('[EXPORT XLSX PROFESSIONAL]', {
   professionalBuffer: Boolean(professionalBuffer),
   chartSections: buildChartSections(result, preparedDataFile).length,
   pieSections: buildPieChartSections(result).length,
+  dashboardCharts: EXCEL_EXPORT_LIMITS.maxDashboardBarSections,
+  dashboardPies: EXCEL_EXPORT_LIMITS.maxDashboardPieSections,
+  removedSheets: `${EXCEL_EXPORT_LIMITS.removeNumberedSheetsFrom}-${EXCEL_EXPORT_LIMITS.removeNumberedSheetsTo}`,
 });
 
 if (!professionalBuffer) {
@@ -6151,8 +6161,10 @@ const fileName = getDownloadFileName(payload, 'excel');
 
 return binaryDownloadResponse(professionalBuffer, EXCEL_MIME_TYPE, fileName, {
   'X-Zedpera-Export': 'data-analysis',
-  'X-Zedpera-Export-Version': 'professional-excel-v6-no-sheetjs-fallback',
-  'X-Zedpera-Excel-Charts': 'rendered-or-exceljs-table',
+  'X-Zedpera-Export-Version': 'professional-excel-v7-vercel-optimized-no-sheets-22-37',
+  'X-Zedpera-Excel-Charts': 'dashboard-limited-rendered',
+  'X-Zedpera-Removed-Sheets': '22-37',
+  'X-Zedpera-Vercel-Optimized': 'true',
   'X-Zedpera-ExcelJS-Loader': 'static-import',
   'Cache-Control': 'no-store, no-cache, max-age=0',
 });

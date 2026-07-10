@@ -4235,7 +4235,7 @@ function buildChartSections(
       }
     });
 
-  return Array.from(deduplicated.values()).slice(0, 12);
+  return Array.from(deduplicated.values()).slice(0, 1);
 }
 
 function formatExportNumber(value: number): string {
@@ -4800,7 +4800,7 @@ function addDashboardWorksheet(workbook: any, result: unknown, preparedDataFile:
   const chartSections = buildChartSections(result, preparedDataFile);
   let imageRow = 12;
 
-  pieSections.slice(0, 4).forEach((section, index) => {
+  pieSections.slice(0, 0).forEach((section, index) => {
     const col = index % 2 === 0 ? 0 : 5;
     const row = imageRow + Math.floor(index / 2) * 17;
     worksheet.getRow(row).getCell(col + 1).value = section.title;
@@ -4810,7 +4810,7 @@ function addDashboardWorksheet(workbook: any, result: unknown, preparedDataFile:
   });
 
   imageRow = 48;
-  chartSections.slice(0, 4).forEach((section, index) => {
+  chartSections.slice(0, 1).forEach((section, index) => {
     const col = index % 2 === 0 ? 0 : 5;
     const row = imageRow + Math.floor(index / 2) * 19;
     worksheet.getRow(row).getCell(col + 1).value = section.title;
@@ -4867,7 +4867,7 @@ function addStandaloneChartWorksheets(
   const pieSections = buildPieChartSections(result);
   const chartStartNumber = getTableDefinitions(result, preparedDataFile || null).length + 1;
 
-  [...pieSections, ...chartSections].slice(0, 24).forEach((section: any, index) => {
+  [...pieSections, ...chartSections].slice(0, 1).forEach((section: any, index) => {
     const isPie = String(section.key || '').startsWith('pie-');
     const worksheet = workbook.addWorksheet(safeSheetName(`${chartStartNumber + index} Graf ${index + 1}`), {
       views: [{ showGridLines: false }],
@@ -4983,6 +4983,8 @@ function chartSectionToPieHtml(section: DashboardPieSection): string {
 
 function buildExportHtmlDocument(result: unknown, preparedDataFile: ExportPayload['preparedDataFile']): string {
   const definitions = getTableDefinitions(result, preparedDataFile);
+  const singleChart = buildChartSections(result, preparedDataFile)[0] || null;
+  const singleChartHtml = singleChart ? chartSectionToHtml(singleChart) : '';
 
   const sectionsHtml = definitions
     .map((definition) => {
@@ -5015,6 +5017,11 @@ function buildExportHtmlDocument(result: unknown, preparedDataFile: ExportPayloa
     table { border-collapse: collapse; width: 100%; margin: 14px 0 24px; }
     th, td { border: 1px solid #cbd5e1; padding: 7px 9px; text-align: left; vertical-align: top; font-size: 11px; }
     th { background: #e2e8f0; color: #0f172a; }
+    .chart-card { page-break-inside: avoid; border: 1px solid #cbd5e1; border-radius: 14px; padding: 16px; margin: 18px 0; background: #ffffff; }
+    .chart-row { display:grid; grid-template-columns: 180px 70px 1fr; gap:10px; align-items:center; margin:8px 0; font-size:11px; }
+    .chart-track { height:14px; background:#e2e8f0; border-radius:7px; overflow:hidden; }
+    .chart-bar { height:100%; border-radius:7px; }
+    .chart-note { grid-column:1 / -1; color:#64748b; font-size:10px; }
     .table-card { page-break-inside: avoid; border: 1px solid #cbd5e1; border-radius: 14px; padding: 16px; margin: 18px 0; background: #f8fafc; }
     .notice { padding: 12px 14px; background: #ecfdf5; border: 1px solid #10b981; border-radius: 12px; color: #065f46; }
     .footer { margin-top: 28px; color: #64748b; font-size: 11px; }
@@ -5022,7 +5029,8 @@ function buildExportHtmlDocument(result: unknown, preparedDataFile: ExportPayloa
 </head>
 <body>
   <h1>ZEDPERA – výsledky analýzy dát</h1>
-  <p class="notice">Export je tabuľkový a zámerne neobsahuje žiadne grafy, obrázky ani dashboardové vizualizácie.</p>
+  <p class="notice">Export obsahuje všetky tabuľkové výsledky a najviac jeden prehľadový graf bez duplicitných vizualizácií.</p>
+  ${singleChartHtml}
   ${sectionsHtml}
   <div class="footer">Vygenerované: ${htmlEscape(new Date().toLocaleString('sk-SK'))}</div>
 </body>
@@ -5055,6 +5063,22 @@ function buildPdfBuffer(result: unknown, preparedDataFile: ExportPayload['prepar
     cy -= 18;
   });
   pages.push(catalogPage);
+
+  const pdfChart = buildChartSections(result, preparedDataFile)[0] || null;
+  if (pdfChart) {
+    let chartPage = textLine(50, 790, 16, pdfChart.title.slice(0, 70));
+    chartPage += textLine(50, 770, 9, pdfChart.description.slice(0, 90));
+    const maxAbs = Math.max(...pdfChart.points.map((point) => Math.abs(point.value)), 1);
+    let py = 735;
+    pdfChart.points.slice(0, 14).forEach((point) => {
+      const barWidth = Math.max(2, Math.min(360, Math.round((Math.abs(point.value) / maxAbs) * 360)));
+      chartPage += textLine(50, py + 3, 8, point.label.slice(0, 32));
+      chartPage += `q 0.15 0.39 0.92 rg 180 ${py} ${barWidth} 10 re f Q\n`;
+      chartPage += textLine(545, py + 3, 8, formatExportNumber(point.value));
+      py -= 24;
+    });
+    pages.push(chartPage);
+  }
 
   const objects: string[] = [];
   objects.push('<< /Type /Catalog /Pages 2 0 R >>');
@@ -5195,7 +5219,7 @@ export async function GET() {
   });
 }
 
-export async function POST(request: NextRequest) {
+export async function handleExportRequest(request: NextRequest, forcedFormat?: ExportFormat) {
   try {
     const payload = await readPayload(request);
     const rawResult = getAnalysisResult(payload);
@@ -5215,7 +5239,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const format = normalizeExportFormat(
+    const format = forcedFormat || normalizeExportFormat(
       payload.exportFormat || payload.format || payload.type,
     );
 
@@ -5271,18 +5295,20 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const workbook = buildWorkbook(result, preparedDataFile);
-    const buffer = XLSX.write(workbook, {
+    const renderedBuffer = await buildProfessionalExcelWithRenderedCharts(result, preparedDataFile);
+    const workbook = renderedBuffer ? null : buildWorkbook(result, preparedDataFile);
+    const buffer = renderedBuffer || (XLSX.write(workbook as XLSX.WorkBook, {
       bookType: 'xlsx',
       type: 'buffer',
       compression: true,
-    }) as Buffer;
+    }) as Buffer);
     const fileName = getDownloadFileName(payload, 'excel');
 
     return binaryDownloadResponse(buffer, EXCEL_MIME_TYPE, fileName, {
-      'X-Zedpera-Export': 'data-analysis-table-only',
-      'X-Zedpera-Excel-Charts': 'disabled',
-      'X-Zedpera-First-Sheet': '00 Pomocnik',
+      'X-Zedpera-Export': 'data-analysis-excel',
+      'X-Zedpera-Excel-Charts': renderedBuffer ? 'single' : 'fallback-none',
+      'X-Zedpera-Chart-Limit': '1',
+      'X-Zedpera-First-Sheet': renderedBuffer ? '00 Dashboard' : '00 Pomocnik',
     });
 
   } catch (error) {
@@ -5339,4 +5365,8 @@ export async function DELETE() {
     },
     405,
   );
+}
+
+export async function POST(request: NextRequest) {
+  return handleExportRequest(request);
 }

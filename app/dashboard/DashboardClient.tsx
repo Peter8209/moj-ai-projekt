@@ -5747,47 +5747,6 @@ const downloadExcel = () => {
                 )}
 
 
-{activeModule === 'supervisor' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={isLoading}
-    className={[
-      'inline-flex min-h-[54px] items-center justify-center gap-2',
-      'rounded-2xl px-6 py-4',
-      'bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600',
-      'text-sm font-black text-white',
-      'shadow-lg shadow-violet-900/30',
-      'transition',
-      'hover:from-violet-500 hover:via-purple-500 hover:to-fuchsia-500',
-      'disabled:cursor-not-allowed disabled:opacity-60',
-    ].join(' ')}
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw
-          className="h-4 w-4 animate-spin"
-          aria-hidden="true"
-        />
-
-        <span>Kontrolujem dokument...</span>
-      </>
-    ) : (
-      <>
-        <GraduationCap
-          className="h-4 w-4"
-          aria-hidden="true"
-        />
-
-        <span>
-          {activeModuleButtonLabel ||
-            'Spustiť AI školiteľa'}
-        </span>
-      </>
-    )}
-  </button>
-)}
-          
 {activeModule === 'translation' && (
   <div className="mb-5 rounded-3xl border border-sky-400/20 bg-sky-500/10 p-4">
     <div className="mb-4 flex items-center gap-2">
@@ -5863,7 +5822,7 @@ const downloadExcel = () => {
                   />
                 )}
 
-<div className="mt-4">
+<div className="mt-4 pb-28 lg:pb-0">
   <textarea
   value={input}
   onChange={(event) => setInput(event.target.value)}
@@ -5872,12 +5831,52 @@ const downloadExcel = () => {
 />
 
 
+{activeModule === 'supervisor' && (
+  <button
+    type="button"
+    onClick={runModule}
+    disabled={isLoading}
+    className={[
+      'mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2',
+      'rounded-2xl px-6 py-4 sm:mr-3 sm:w-auto',
+      'bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600',
+      'text-sm font-black text-white',
+      'shadow-lg shadow-violet-900/30',
+      'transition',
+      'hover:from-violet-500 hover:via-purple-500 hover:to-fuchsia-500',
+      'active:scale-[0.98]',
+      'disabled:cursor-not-allowed disabled:opacity-60',
+    ].join(' ')}
+  >
+    {isLoading ? (
+      <>
+        <RefreshCcw
+          className="h-4 w-4 animate-spin"
+          aria-hidden="true"
+        />
+        <span>Kontrolujem dokument...</span>
+      </>
+    ) : (
+      <>
+        <GraduationCap
+          className="h-4 w-4"
+          aria-hidden="true"
+        />
+        <span>
+          {activeModuleButtonLabel ||
+            'Spustiť AI školiteľa'}
+        </span>
+      </>
+    )}
+  </button>
+)}
+
 {activeModule === 'translation' && (
   <button
     type="button"
     onClick={runModule}
     disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-sky-900/30 transition hover:from-sky-500 hover:via-cyan-500 hover:to-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-sky-900/30 transition hover:from-sky-500 hover:via-cyan-500 hover:to-blue-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
       <>
@@ -5899,7 +5898,7 @@ const downloadExcel = () => {
   <button
     type="button"
     onClick={downloadPreparedDataFile}
-    className="rounded-xl border border-emerald-400/60 bg-emerald-500/10 px-5 py-3 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/20"
+    className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center rounded-xl border border-emerald-400/60 bg-emerald-500/10 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20 sm:mr-3 sm:w-auto"
   >
     Stiahnuť raw-data.xlsx
   </button>
@@ -5910,7 +5909,7 @@ const downloadExcel = () => {
     type="button"
     onClick={runModule}
     disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
       <>
@@ -5931,7 +5930,7 @@ const downloadExcel = () => {
     type="button"
     onClick={runModule}
     disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl border border-violet-300 bg-violet-700 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/40 ring-2 ring-violet-400/40 transition hover:bg-violet-600 hover:ring-violet-300/70 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-60 disabled:shadow-none disabled:ring-0"
+    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl border border-violet-300 bg-violet-700 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/40 ring-2 ring-violet-400/40 transition hover:bg-violet-600 hover:ring-violet-300/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-60 disabled:shadow-none disabled:ring-0 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
       <>
@@ -6223,7 +6222,7 @@ uroven_sportu`}
     type="button"
     onClick={runModule}
     disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
       <>
@@ -6244,7 +6243,7 @@ uroven_sportu`}
     type="button"
     onClick={runModule}
     disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
       <>
@@ -6265,7 +6264,7 @@ uroven_sportu`}
     type="button"
     onClick={runModule}
     disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
       <>
@@ -6286,7 +6285,7 @@ uroven_sportu`}
     type="button"
     onClick={runModule}
     disabled={isLoading}
-    className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-60"
+    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
       <>
@@ -6305,7 +6304,7 @@ uroven_sportu`}
                   <button
                     type="button"
                     onClick={startDictation}
-                    className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-black transition ${
+                    className={`mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-black transition sm:mr-3 sm:w-auto ${
                       isListening
                         ? 'border-red-400/50 bg-red-500 text-white'
                         : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1]'
@@ -6318,7 +6317,7 @@ uroven_sportu`}
                   <button
                     type="button"
                     onClick={() => setCanvasOpen(true)}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 hover:bg-white/[0.1]"
+                    className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] sm:mr-3 sm:w-auto"
                   >
                     <Paintbrush className="h-4 w-4" />
                     Canvas
@@ -6329,7 +6328,7 @@ uroven_sportu`}
                       <button
                         type="button"
                         onClick={downloadPdf}
-                        className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 hover:bg-white/[0.1]"
+                        className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] sm:mr-3 sm:w-auto"
                       >
                         <FileDown className="h-4 w-4" />
                         PDF
@@ -6338,7 +6337,7 @@ uroven_sportu`}
                       <button
                         type="button"
                         onClick={downloadDoc}
-                        className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 hover:bg-white/[0.1]"
+                        className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] sm:mr-3 sm:w-auto"
                       >
                         <Download className="h-4 w-4" />
                         Word
@@ -6350,7 +6349,7 @@ uroven_sportu`}
                   <button
                     type="button"
                     onClick={resetCurrentModule}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm font-black text-red-200 hover:bg-red-500/20"
+                    className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm font-black text-red-200 transition hover:bg-red-500/20 sm:mr-3 sm:w-auto"
                   >
                     <Trash2 className="h-4 w-4" />
                     Vyčistiť
@@ -6360,7 +6359,7 @@ uroven_sportu`}
   <button
     type="button"
     onClick={() => setAnalysisModalOpen(true)}
-    className="inline-flex items-center gap-2 rounded-2xl border border-blue-400/30 bg-blue-500/10 px-4 py-3 text-sm font-black text-blue-100 transition hover:bg-blue-500/20"
+    className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-blue-400/30 bg-blue-500/10 px-4 py-3 text-sm font-black text-blue-100 transition hover:bg-blue-500/20 sm:mr-3 sm:w-auto"
   >
     <Search className="h-4 w-4" />
     <span>Otvoriť výsledky analýzy</span>

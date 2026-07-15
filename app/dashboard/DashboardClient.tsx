@@ -3331,17 +3331,77 @@ async function saveHistoryItem(inputData: {
   };
 
   try {
-    const raw = localStorage.getItem('chat_history');
-    const existing = raw ? JSON.parse(raw) : [];
-    const list = Array.isArray(existing) ? existing : [];
+  const raw = localStorage.getItem('chat_history');
+  const existing = raw ? JSON.parse(raw) : [];
+  const list = Array.isArray(existing) ? existing : [];
 
-    localStorage.setItem(
-      'chat_history',
-      JSON.stringify([localItem, ...list].slice(0, 300)),
-    );
-  } catch (error) {
-    console.warn('Lokálna história sa neuložila:', error);
+  /**
+   * Do localStorage neukladáme celý result analýzy.
+   * Kompletný výsledok sa ďalej uloží cez /api/history.
+   */
+  const localItemForStorage = {
+    ...localItem,
+
+    user_message: String(inputData.userMessage || '').slice(0, 10_000),
+
+    assistant_message: String(
+      inputData.assistantMessage || '',
+    ).slice(0, 40_000),
+
+    result: {
+      module: inputData.module,
+      title: inputData.title,
+      hasResult: Boolean(inputData.result),
+    },
+  };
+
+  /**
+   * Pôvodne sa ukladalo 300 záznamov.
+   * V localStorage ponecháme maximálne 40 ľahkých záznamov.
+   */
+  let nextItems = [
+    localItemForStorage,
+    ...list,
+  ].slice(0, 40);
+
+  let saved = false;
+
+  while (nextItems.length > 0 && !saved) {
+    try {
+      localStorage.setItem(
+        'chat_history',
+        JSON.stringify(nextItems),
+      );
+
+      saved = true;
+    } catch (storageError) {
+      const quotaExceeded =
+        storageError instanceof DOMException &&
+        (
+          storageError.name === 'QuotaExceededError' ||
+          storageError.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+          storageError.code === 22 ||
+          storageError.code === 1014
+        );
+
+      if (!quotaExceeded) {
+        throw storageError;
+      }
+
+      // Pri plnom úložisku odstránime najstarší záznam.
+      nextItems = nextItems.slice(0, -1);
+    }
   }
+
+  if (!saved) {
+    localStorage.removeItem('chat_history');
+  }
+} catch (error) {
+  console.warn(
+    'Lokálna história sa neuložila:',
+    error instanceof Error ? error.message : String(error),
+  );
+}
 
   try {
     const res = await fetch('/api/history', {
@@ -5686,6 +5746,47 @@ const downloadExcel = () => {
                   </div>
                 )}
 
+
+{activeModule === 'supervisor' && (
+  <button
+    type="button"
+    onClick={runModule}
+    disabled={isLoading}
+    className={[
+      'inline-flex min-h-[54px] items-center justify-center gap-2',
+      'rounded-2xl px-6 py-4',
+      'bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600',
+      'text-sm font-black text-white',
+      'shadow-lg shadow-violet-900/30',
+      'transition',
+      'hover:from-violet-500 hover:via-purple-500 hover:to-fuchsia-500',
+      'disabled:cursor-not-allowed disabled:opacity-60',
+    ].join(' ')}
+  >
+    {isLoading ? (
+      <>
+        <RefreshCcw
+          className="h-4 w-4 animate-spin"
+          aria-hidden="true"
+        />
+
+        <span>Kontrolujem dokument...</span>
+      </>
+    ) : (
+      <>
+        <GraduationCap
+          className="h-4 w-4"
+          aria-hidden="true"
+        />
+
+        <span>
+          {activeModuleButtonLabel ||
+            'Spustiť AI školiteľa'}
+        </span>
+      </>
+    )}
+  </button>
+)}
           
 {activeModule === 'translation' && (
   <div className="mb-5 rounded-3xl border border-sky-400/20 bg-sky-500/10 p-4">

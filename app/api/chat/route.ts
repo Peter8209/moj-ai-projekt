@@ -236,7 +236,8 @@ type SlovakApiError = {
 // LIMITS
 // =====================================================
 
-const maxCompressedFileSizeBytes = 1 * 1024 * 1024;
+const maxCompressedFileSizeBytes = 30 * 1024 * 1024;
+const maxDecompressedFileSizeBytes = 60 * 1024 * 1024;
 const maxExtractedCharsPerAttachment = 18_000;
 const maxClientExtractedChars = 45_000;
 const maxProjectDocumentChars = 18_000;
@@ -2511,33 +2512,80 @@ async function getUsableFileBuffer(file: File) {
   const originalBuffer = Buffer.from(await file.arrayBuffer());
   const gzip = isGzipFile(file);
 
+  if (originalBuffer.length === 0) {
+    throw new Error('EMPTY_ATTACHMENT: Priložený súbor je prázdny.');
+  }
+
+  if (originalBuffer.length > maxCompressedFileSizeBytes) {
+    throw new Error(
+      `ATTACHMENT_TOO_LARGE: Súbor má ${originalBuffer.length} bajtov. Maximálna povolená veľkosť je ${maxCompressedFileSizeBytes} bajtov (30 MB).`,
+    );
+  }
+
   if (!gzip) {
     return {
       usableBuffer: originalBuffer,
       compressedSize: originalBuffer.length,
       decompressedSize: originalBuffer.length,
       wasDecompressed: false,
-      compressionWithinLimit: originalBuffer.length <= maxCompressedFileSizeBytes,
-      compressionStatus: originalBuffer.length <= maxCompressedFileSizeBytes ? 'Súbor nie je gzip, ale veľkosť je do 1 MB.' : 'Súbor nie je gzip a veľkosť je väčšia ako 1 MB.',
+      compressionWithinLimit: true,
+      compressionStatus: 'Súbor je v povolenom limite do 30 MB.',
     };
   }
 
   const decompressed = safeGunzip(originalBuffer);
+
+  if (decompressed.length > maxDecompressedFileSizeBytes) {
+    throw new Error(
+      `DECOMPRESSED_ATTACHMENT_TOO_LARGE: Rozbalený súbor má ${decompressed.length} bajtov. Maximálna povolená rozbalená veľkosť je ${maxDecompressedFileSizeBytes} bajtov (60 MB).`,
+    );
+  }
+
   return {
     usableBuffer: decompressed,
     compressedSize: originalBuffer.length,
     decompressedSize: decompressed.length,
     wasDecompressed: true,
-    compressionWithinLimit: originalBuffer.length <= maxCompressedFileSizeBytes,
-    compressionStatus: originalBuffer.length <= maxCompressedFileSizeBytes ? 'Komprimovaný súbor je do 1 MB a bol úspešne rozbalený.' : 'Komprimovaný súbor je väčší ako 1 MB, ale bol úspešne rozbalený.',
+    compressionWithinLimit: true,
+    compressionStatus: 'Komprimovaný súbor je v povolenom limite a bol úspešne rozbalený.',
   };
 }
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
   const pdfParseModule: any = await import('pdf-parse');
-  const pdfParse = pdfParseModule.default || pdfParseModule;
-  const result = await pdfParse(buffer);
-  return normalizeText(result?.text || '');
+
+  // pdf-parse v2 používa triedu PDFParse.
+  if (typeof pdfParseModule?.PDFParse === 'function') {
+    const parser = new pdfParseModule.PDFParse({
+      data: new Uint8Array(buffer),
+    });
+
+    try {
+      const result = await parser.getText();
+      return normalizeText(result?.text || '');
+    } finally {
+      if (typeof parser.destroy === 'function') {
+        await parser.destroy().catch(() => undefined);
+      }
+    }
+  }
+
+  // Spätná kompatibilita s pdf-parse v1.
+  const legacyPdfParse =
+    typeof pdfParseModule?.default === 'function'
+      ? pdfParseModule.default
+      : typeof pdfParseModule === 'function'
+        ? pdfParseModule
+        : null;
+
+  if (legacyPdfParse) {
+    const result = await legacyPdfParse(buffer);
+    return normalizeText(result?.text || '');
+  }
+
+  throw new Error(
+    'PDF_PARSER_NOT_AVAILABLE: Nainštalovaná verzia pdf-parse neposkytuje podporované API.',
+  );
 }
 
 async function extractDocxText(buffer: Buffer): Promise<string> {
@@ -2734,8 +2782,20 @@ async function extractAttachmentTexts({
   const compactSources = buildCompactSourceSummary({ clientDetectedSourcesSummary, clientDetectedSources, extractedFiles });
   const attachmentTexts: string[] = [];
 
-  if (preparedFilesSummary.trim()) attachmentTexts.push(`TECHNICKÝ PREHĽAD PRÍLOH\n${limitText(preparedFilesSummary, 12_000)}`);
-  attachmentTexts.push(compactSources.text);
+  if (preparedFilesSummary.trim()) {
+    attachmentTexts.push(
+      `TECHNICKÝ PREHĽAD PRÍLOH\n${limitText(preparedFilesSummary, 12_000)}`,
+    );
+  }
+
+  const hasMeaningfulCompactSources =
+    compactSources.sources.length > 0 ||
+    compactSources.authors.length > 0 ||
+    clientDetectedSourcesSummary.trim().length > 0;
+
+  if (hasMeaningfulCompactSources) {
+    attachmentTexts.push(compactSources.text);
+  }
 
   if (clientExtractedText.trim()) {
     const frontendCitations = extractInTextCitations(clientExtractedText);
@@ -3710,6 +3770,17 @@ await saveGeneratedHistory({
     profileRelevance: relevance,
     externalResearch,
     extractedFiles: extractedFilesPayload,
+    extractedFilesInfo: extractedFilesPayload.map((file) => ({
+      fileName: file.originalName || file.name,
+      preparedName: file.preparedName,
+      extension: file.effectiveExtension,
+      characters: file.extractedChars,
+      ok:
+        file.extractedChars > 0 &&
+        !file.error,
+      status: file.status,
+      error: file.error || null,
+    })),
     sourcePolicy: {
       sourceConstruction: 'model_generated',
       backendDidNotAppendSources: true,
@@ -4070,9 +4141,45 @@ if (profile) {
         [],
       );
 
-      files = formData
-        .getAll('files')
-        .filter((item): item is File => item instanceof File);
+      const receivedFileEntries = [
+        ...formData.getAll('files'),
+        ...formData.getAll('file'),
+        ...formData.getAll('attachments'),
+      ];
+
+      const receivedFiles = receivedFileEntries.filter(
+        (item): item is File =>
+          item instanceof File &&
+          item.size > 0 &&
+          Boolean(item.name?.trim()),
+      );
+
+      const uniqueReceivedFiles = new Map<string, File>();
+
+      for (const file of receivedFiles) {
+        const key = [
+          file.name,
+          file.size,
+          file.type,
+          file.lastModified,
+        ].join('|');
+
+        if (!uniqueReceivedFiles.has(key)) {
+          uniqueReceivedFiles.set(key, file);
+        }
+      }
+
+      files = Array.from(uniqueReceivedFiles.values());
+
+      console.log('CHAT_ATTACHMENT_UPLOAD_DEBUG:', {
+        count: files.length,
+        files: files.map((file) => ({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          extension: getEffectiveExtension(file.name),
+        })),
+      });
     }
 
     // =====================================================
@@ -4304,6 +4411,75 @@ try {
       clientDetectedSources,
     });
 
+    const extractableUploadedFiles = files.filter((file) =>
+      extractableAttachmentExtensions.includes(
+        getEffectiveExtension(file.name),
+      ),
+    );
+
+    const successfullyExtractedFiles = extractedFiles.filter(
+      (file) =>
+        file.extractedChars > 0 &&
+        file.extractedText.trim().length > 0 &&
+        !file.error,
+    );
+
+    console.log('CHAT_ATTACHMENT_EXTRACTION_DEBUG:', {
+      receivedFiles: files.length,
+      extractableFiles: extractableUploadedFiles.length,
+      successfullyExtractedFiles: successfullyExtractedFiles.length,
+      details: extractedFiles.map((file) => ({
+        name: file.originalName,
+        preparedName: file.preparedName,
+        extension: file.effectiveExtension,
+        extractedChars: file.extractedChars,
+        status: file.status,
+        error: file.error || null,
+      })),
+    });
+
+    if (
+      extractableUploadedFiles.length > 0 &&
+      successfullyExtractedFiles.length === 0 &&
+      !clientExtractedText.trim()
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: 'ATTACHMENT_EXTRACTION_FAILED',
+          message:
+            'Príloha bola prijatá, ale nepodarilo sa z nej načítať text.',
+          detail:
+            'Skontrolujte formát a obsah súboru. Podporované textové formáty v AI chate sú PDF, DOCX, TXT, MD, CSV a RTF.',
+          extractedFiles: extractedFiles.map((file) => ({
+            name: file.originalName,
+            preparedName: file.preparedName,
+            extension: file.effectiveExtension,
+            extractedChars: file.extractedChars,
+            status: file.status,
+            error: file.error || null,
+          })),
+          extractedFilesInfo: extractedFiles.map((file) => ({
+            fileName: file.originalName,
+            preparedName: file.preparedName,
+            extension: file.effectiveExtension,
+            characters: file.extractedChars,
+            ok:
+              file.extractedChars > 0 &&
+              file.extractedText.trim().length > 0 &&
+              !file.error,
+            status: file.status,
+            error: file.error || null,
+          })),
+        },
+        { status: 422 },
+      );
+    }
+
+    const hasSuccessfullyExtractedUpload =
+      successfullyExtractedFiles.length > 0 ||
+      clientExtractedText.trim().length > 0;
+
     // =====================================================
     // PROJEKTOVÉ DOKUMENTY
     // =====================================================
@@ -4398,6 +4574,7 @@ ${
     };
 
     const shouldSearchExternalSources =
+      !hasSuccessfullyExtractedUpload &&
       settings.useExternalAcademicSources &&
       settings.allowAiKnowledgeFallback &&
       (isChapterRequest || sourcesOnly || module === 'chat') &&

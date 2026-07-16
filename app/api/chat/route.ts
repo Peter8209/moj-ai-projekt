@@ -1,4 +1,5 @@
 import { generateText, streamText } from 'ai';
+import { randomUUID } from 'node:crypto';
 import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
@@ -11,6 +12,30 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { normalizeProfile } from '@/lib/profile-storage';
 import { getCitationInstruction, getCitationLabel } from '@/lib/citations';
+import {
+  CHARACTERS_PER_PAGE,
+  PageLimitError,
+  consumePagesForOutput,
+  countGeneratedPages,
+  getOutputTokenLimit,
+  requireAvailablePages,
+  type PageQuota,
+} from '@/lib/page-quota';
+import {
+  AttachmentLimitError,
+  EntitlementError,
+  FeatureAccessError,
+  MODULE_FEATURE_MAP,
+  PromptLimitError,
+  consumeSuccessfulPrompt,
+  entitlementErrorResponse,
+  getFeatureLabel,
+  requireModuleAccess,
+  serializeEntitlements,
+  type AppModuleKey,
+  type CurrentEntitlements,
+} from '@/lib/entitlements';
+import type { FeatureKey } from '@/lib/billing/catalog';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 90;
@@ -3628,6 +3653,128 @@ function isContextWindowError(error: unknown) {
   return message.includes('context window') || message.includes('maximum context') || message.includes('input exceeds') || message.includes('too many tokens') || message.includes('token limit') || message.includes('prompt is too long') || message.includes('input is too long') || message.includes('maximum number of tokens');
 }
 
+
+type LimitedPageOutput = {
+  output: string;
+  wasTruncated: boolean;
+  maximumCharacters: number;
+};
+
+function isPageLimitError(error: unknown) {
+  if (error instanceof PageLimitError) return true;
+
+  const message =
+    error instanceof Error
+      ? error.message
+      : String(error || '');
+
+  return message.includes('PAGE_LIMIT_REACHED');
+}
+
+function pageLimitErrorResponse(error?: unknown) {
+  const message =
+    error instanceof PageLimitError
+      ? error.message
+      : 'Stránkový limit bol vyčerpaný. Pre pokračovanie si dokúpte ďalšie strany.';
+
+  return NextResponse.json(
+    {
+      ok: false,
+      code: 'PAGE_LIMIT_REACHED',
+      message,
+      detail:
+        'Používateľ už nemá k dispozícii žiadne voľné strany. Po úspešnom dokúpení extra strán sa generovanie automaticky odblokuje.',
+      pageLimitReached: true,
+      purchaseUrl: '/pricing#doplnkove-sluzby',
+    },
+    {
+      status: 402,
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+    },
+  );
+}
+
+function buildPageLimitInstruction(pageQuota: PageQuota) {
+  return `
+STRÁNKOVÝ LIMIT POUŽÍVATEĽA:
+- Celkový limit: ${pageQuota.pageLimit} normostrán.
+- Už použité: ${pageQuota.pagesUsed} normostrán.
+- Zostáva pred touto požiadavkou: ${pageQuota.pagesRemaining} normostrán.
+- Jedna normostrana sa v systéme počíta ako ${CHARACTERS_PER_PAGE} znakov vrátane medzier.
+- Výstup nesmie prekročiť zostávajúci počet normostrán.
+- Keď je požadovaný rozsah väčší než zostatok, vytvor maximálny zmysluplný výstup v rámci zostávajúceho limitu.
+`.trim();
+}
+
+function limitOutputToRemainingPages(
+  value: string,
+  remainingPages: number,
+): LimitedPageOutput {
+  const output = String(value || '');
+  const maximumCharacters =
+    Math.max(remainingPages, 0) *
+    CHARACTERS_PER_PAGE;
+
+  if (maximumCharacters <= 0) {
+    throw new PageLimitError();
+  }
+
+  if (output.length <= maximumCharacters) {
+    return {
+      output,
+      wasTruncated: false,
+      maximumCharacters,
+    };
+  }
+
+  const notice =
+    '\n\n[Výstup bol ukončený po dosiahnutí zostávajúceho stránkového limitu.]';
+
+  const availableForContent = Math.max(
+    maximumCharacters - notice.length,
+    0,
+  );
+
+  const limitedOutput = `${output
+    .slice(0, availableForContent)
+    .trimEnd()}${notice}`.slice(
+    0,
+    maximumCharacters,
+  );
+
+  return {
+    output: limitedOutput,
+    wasTruncated: true,
+    maximumCharacters,
+  };
+}
+
+function createPageUsagePayload({
+  quota,
+  output,
+  requestId,
+  outputWasTruncated,
+}: {
+  quota: PageQuota;
+  output: string;
+  requestId: string;
+  outputWasTruncated: boolean;
+}) {
+  return {
+    ...quota,
+    pagesConsumedThisRequest:
+      countGeneratedPages(output),
+    charactersGenerated:
+      String(output || '').length,
+    charactersPerPage:
+      CHARACTERS_PER_PAGE,
+    requestId,
+    outputWasTruncated,
+  };
+}
+
 function translateApiErrorToSlovak(error: unknown): SlovakApiError {
   const rawMessage = error instanceof Error ? error.message : typeof error === 'string' ? error : 'Neznáma chyba servera.';
   const message = rawMessage.toLowerCase();
@@ -3651,12 +3798,504 @@ function jsonSimpleErrorResponse({ code, message, detail, status }: { code: stri
 }
 
 // =====================================================
+// ENTITLEMENT HELPERS
+// =====================================================
+
+type PromptUsageResult = Awaited<
+  ReturnType<typeof consumeSuccessfulPrompt>
+>;
+
+type EntitlementGuardResult = {
+  entitlements: CurrentEntitlements;
+  entitlementModule: AppModuleKey;
+  requiredFeatures: FeatureKey[];
+  receivedAttachments: number;
+};
+
+function resolveEntitlementModule(
+  module: ModuleKey,
+): AppModuleKey {
+  // Pôvodný endpoint podporoval aj požiadavky bez explicitného modulu.
+  // Takúto požiadavku zachováme a z pohľadu balíka ju vyhodnotíme ako AI chat.
+  return module === 'unknown'
+    ? 'chat'
+    : module;
+}
+
+function isExplicitChapterGenerationRequest(
+  value: string,
+): boolean {
+  const normalized =
+    normalizeForSemanticMatch(value);
+
+  return [
+    'napis kapitolu',
+    'napis prvu kapitolu',
+    'vytvor kapitolu',
+    'spracuj kapitolu',
+    'dokonci kapitolu',
+    'rozsir kapitolu',
+    'dopln kapitolu',
+    'napis uvod',
+    'vytvor uvod',
+    'spracuj uvod',
+    'write chapter',
+    'create chapter',
+    'generate chapter',
+  ].some((pattern) =>
+    normalized.includes(pattern),
+  );
+}
+
+function detectAdditionalRequiredFeatures({
+  module,
+  isChapterRequest,
+  sourcesOnly,
+  lastUserMessage,
+}: {
+  module: ModuleKey;
+  isChapterRequest: boolean;
+  sourcesOnly: boolean;
+  lastUserMessage: string;
+}): FeatureKey[] {
+  const requiredFeatures = new Set<FeatureKey>();
+  const normalizedMessage =
+    normalizeForSemanticMatch(lastUserMessage);
+
+  const supportsSupervisorActions =
+    module === 'supervisor' ||
+    module === 'chat' ||
+    module === 'unknown';
+
+  // Kapitoly sa nesmú obísť cez všeobecný AI chat,
+  // ale samotná zmienka o kapitole pri audite alebo preklade
+  // nesmie zablokovať pôvodnú funkcionalitu.
+  if (
+    supportsSupervisorActions &&
+    isChapterRequest &&
+    isExplicitChapterGenerationRequest(
+      lastUserMessage,
+    )
+  ) {
+    requiredFeatures.add(
+      'chapter-generation',
+    );
+  }
+
+  // Samostatné vytvorenie zoznamu zdrojov sa kontroluje
+  // iba v AI školiteľovi a všeobecnom AI chate.
+  if (
+    supportsSupervisorActions &&
+    sourcesOnly
+  ) {
+    requiredFeatures.add('citations');
+  }
+
+  // Explicitná požiadavka na osnovu alebo štruktúru práce.
+  if (
+    (module === 'supervisor' ||
+      module === 'chat' ||
+      module === 'unknown') &&
+    (
+      normalizedMessage.includes(
+        'navrhni osnovu',
+      ) ||
+      normalizedMessage.includes(
+        'vytvor osnovu',
+      ) ||
+      normalizedMessage.includes(
+        'struktura prace',
+      ) ||
+      normalizedMessage.includes(
+        'štruktúra práce',
+      ) ||
+      normalizedMessage.includes(
+        'outline',
+      )
+    )
+  ) {
+    requiredFeatures.add(
+      'outline-generation',
+    );
+  }
+
+  return Array.from(requiredFeatures);
+}
+
+function countReceivedAttachments({
+  files,
+  preparedFilesMetadata,
+  clientExtractedText,
+}: {
+  files: File[];
+  preparedFilesMetadata: PreparedFileMetadata[];
+  clientExtractedText: string;
+}): number {
+  const metadataKeys = new Set<string>();
+
+  for (const item of preparedFilesMetadata) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+
+    const key = [
+      item.originalId || '',
+      item.originalName || '',
+      item.preparedName || '',
+      item.originalSize ?? '',
+    ].join('|');
+
+    if (key.replace(/\|/g, '').trim()) {
+      metadataKeys.add(key);
+    }
+  }
+
+  const clientTextAttachmentCount =
+    clientExtractedText.trim().length > 0
+      ? 1
+      : 0;
+
+  // Súbory a metadata často opisujú tie isté prílohy,
+  // preto ich nesčítavame. Použijeme najvyšší známy počet.
+  return Math.max(
+    files.length,
+    metadataKeys.size,
+    clientTextAttachmentCount,
+  );
+}
+
+async function requireChatRequestEntitlements({
+  module,
+  isChapterRequest,
+  sourcesOnly,
+  lastUserMessage,
+  receivedAttachments,
+}: {
+  module: ModuleKey;
+  isChapterRequest: boolean;
+  sourcesOnly: boolean;
+  lastUserMessage: string;
+  receivedAttachments: number;
+}): Promise<EntitlementGuardResult> {
+  const entitlementModule =
+    resolveEntitlementModule(module);
+
+  // Jedno načítanie oprávnení zároveň overí prihlásenie
+  // a základnú funkciu priradenú k modulu.
+  const entitlements =
+    await requireModuleAccess(
+      entitlementModule,
+    );
+
+  const moduleFeature =
+    MODULE_FEATURE_MAP[
+      entitlementModule === 'unknown'
+        ? 'chat'
+        : entitlementModule
+    ];
+
+  const additionalFeatures =
+    detectAdditionalRequiredFeatures({
+      module,
+      isChapterRequest,
+      sourcesOnly,
+      lastUserMessage,
+    });
+
+  const requiredFeatures = Array.from(
+    new Set<FeatureKey>([
+      moduleFeature,
+      ...additionalFeatures,
+    ]),
+  );
+
+  for (const feature of additionalFeatures) {
+    if (!entitlements.features.has(feature)) {
+      throw new FeatureAccessError(
+        feature,
+      );
+    }
+  }
+
+  if (
+    entitlements.promptLimit !== null &&
+    entitlements.promptsUsed >=
+      entitlements.promptLimit
+  ) {
+    throw new PromptLimitError({
+      promptLimit:
+        entitlements.promptLimit,
+      promptsUsed:
+        entitlements.promptsUsed,
+    });
+  }
+
+  if (
+    receivedAttachments >
+    entitlements.attachmentLimit
+  ) {
+    throw new AttachmentLimitError({
+      attachmentLimit:
+        entitlements.attachmentLimit,
+      receivedAttachments,
+    });
+  }
+
+  return {
+    entitlements,
+    entitlementModule,
+    requiredFeatures,
+    receivedAttachments,
+  };
+}
+
+function serializeEntitlementGuard(
+  guard: EntitlementGuardResult,
+  promptUsage?: PromptUsageResult,
+) {
+  const serialized =
+    serializeEntitlements(
+      guard.entitlements,
+    );
+
+  return {
+    ...serialized,
+    ...(promptUsage
+      ? {
+          promptLimit:
+            promptUsage.promptLimit,
+          promptsUsed:
+            promptUsage.promptsUsed,
+          promptsRemaining:
+            promptUsage.promptsRemaining,
+          promptLimitReached:
+            promptUsage.promptLimitReached,
+        }
+      : {}),
+    access: {
+      module:
+        guard.entitlementModule,
+      requiredFeatures:
+        guard.requiredFeatures,
+      requiredFeatureLabels:
+        guard.requiredFeatures.map(
+          getFeatureLabel,
+        ),
+      receivedAttachments:
+        guard.receivedAttachments,
+    },
+  };
+}
+
+function entitlementApiErrorResponse(
+  error: unknown,
+) {
+  const serialized =
+    entitlementErrorResponse(error);
+
+  return NextResponse.json(
+    serialized.body,
+    {
+      status: serialized.status,
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+    },
+  );
+}
+
+// =====================================================
 // RESPONSE HELPERS
 // =====================================================
 
-async function createStreamResponse({ model, systemPrompt, normalizedMessages }: { model: ModelResult['model']; systemPrompt: string; normalizedMessages: ReturnType<typeof normalizeMessages> }) {
-  const result = streamText({ model, system: systemPrompt, messages: normalizedMessages, temperature: 0.2, maxOutputTokens: streamOutputTokens });
-  return result.toTextStreamResponse();
+async function createStreamResponse({
+  model,
+  systemPrompt,
+  normalizedMessages,
+  module,
+  pageQuota,
+  pageRequestId,
+  entitlementGuard,
+}: {
+  model: ModelResult['model'];
+  systemPrompt: string;
+  normalizedMessages: ReturnType<typeof normalizeMessages>;
+  module: ModuleKey;
+  pageQuota: PageQuota;
+  pageRequestId: string;
+  entitlementGuard: EntitlementGuardResult;
+}) {
+  const effectiveOutputTokens = getOutputTokenLimit(
+    pageQuota.pagesRemaining,
+    streamOutputTokens,
+  );
+
+  if (effectiveOutputTokens <= 0) {
+    throw new PageLimitError();
+  }
+
+  const result = streamText({
+    model,
+    system: systemPrompt,
+    messages: normalizedMessages,
+    temperature: 0.2,
+    maxOutputTokens: effectiveOutputTokens,
+  });
+
+  const encoder = new TextEncoder();
+  const maximumCharacters =
+    pageQuota.pagesRemaining *
+    CHARACTERS_PER_PAGE;
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let deliveredOutput = '';
+      let outputWasTruncated = false;
+
+      try {
+        for await (const chunk of result.textStream) {
+          const currentChunk =
+            String(chunk || '');
+
+          if (!currentChunk) continue;
+
+          const remainingCharacters =
+            maximumCharacters -
+            deliveredOutput.length;
+
+          if (remainingCharacters <= 0) {
+            outputWasTruncated = true;
+            break;
+          }
+
+          if (
+            currentChunk.length <=
+            remainingCharacters
+          ) {
+            deliveredOutput += currentChunk;
+
+            controller.enqueue(
+              encoder.encode(currentChunk),
+            );
+
+            continue;
+          }
+
+          const notice =
+            '\n\n[Výstup bol ukončený po dosiahnutí zostávajúceho stránkového limitu.]';
+
+          const availableForContent =
+            Math.max(
+              remainingCharacters -
+                notice.length,
+              0,
+            );
+
+          const finalChunk =
+            `${currentChunk.slice(
+              0,
+              availableForContent,
+            )}${notice}`.slice(
+              0,
+              remainingCharacters,
+            );
+
+          deliveredOutput += finalChunk;
+          outputWasTruncated = true;
+
+          if (finalChunk) {
+            controller.enqueue(
+              encoder.encode(finalChunk),
+            );
+          }
+
+          break;
+        }
+
+        if (deliveredOutput.trim()) {
+          // Prompt sa odpočíta až po úspešnom vytvorení viditeľného výstupu.
+          const promptUsage =
+            await consumeSuccessfulPrompt();
+
+          const updatedQuota =
+            await consumePagesForOutput({
+              text: deliveredOutput,
+              module,
+              requestId: pageRequestId,
+            });
+
+          console.log(
+            'PROMPT_USAGE_STREAM_CONSUMED:',
+            {
+              requestId: pageRequestId,
+              module,
+              ...promptUsage,
+            },
+          );
+
+          console.log(
+            'PAGE_QUOTA_STREAM_CONSUMED:',
+            createPageUsagePayload({
+              quota: updatedQuota,
+              output: deliveredOutput,
+              requestId: pageRequestId,
+              outputWasTruncated,
+            }),
+          );
+        }
+
+        controller.close();
+      } catch (error) {
+        console.error(
+          'PAGE_QUOTA_STREAM_ERROR:',
+          error,
+        );
+
+        controller.error(error);
+      }
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      'Content-Type':
+        'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Zedpera-Page-Request-Id':
+        pageRequestId,
+      'X-Zedpera-Page-Limit':
+        String(pageQuota.pageLimit),
+      'X-Zedpera-Pages-Used-Before':
+        String(pageQuota.pagesUsed),
+      'X-Zedpera-Pages-Remaining-Before':
+        String(pageQuota.pagesRemaining),
+      'X-Zedpera-Characters-Per-Page':
+        String(CHARACTERS_PER_PAGE),
+      'X-Zedpera-Plan-Id':
+        entitlementGuard.entitlements.planId,
+      'X-Zedpera-Plan-Name':
+        encodeURIComponent(
+          entitlementGuard.entitlements.planName,
+        ),
+      'X-Zedpera-Prompt-Limit':
+        entitlementGuard.entitlements.promptLimit === null
+          ? 'unlimited'
+          : String(
+              entitlementGuard.entitlements.promptLimit,
+            ),
+      'X-Zedpera-Prompts-Used-Before':
+        String(
+          entitlementGuard.entitlements.promptsUsed,
+        ),
+      'X-Zedpera-Attachment-Limit':
+        String(
+          entitlementGuard.entitlements.attachmentLimit,
+        ),
+      'X-Zedpera-Required-Features':
+        entitlementGuard.requiredFeatures.join(','),
+    },
+  });
 }
 async function createJsonResponse({
   model,
@@ -3673,6 +4312,9 @@ async function createJsonResponse({
   relevance,
   detectedSourcesForOutput,
   externalResearch,
+  pageQuota,
+  pageRequestId,
+  entitlementGuard,
 }: {
   model: any;
   systemPrompt: string;
@@ -3688,6 +4330,9 @@ async function createJsonResponse({
   relevance: ProfileRelevanceResult;
   detectedSourcesForOutput: BibliographicCandidate[];
   externalResearch: ExternalResearchResult;
+  pageQuota: PageQuota;
+  pageRequestId: string;
+  entitlementGuard: EntitlementGuardResult;
 }) {
   const extractedFilesPayload = extractedFiles.map((file) => ({
     name: file.name,
@@ -3715,12 +4360,27 @@ async function createJsonResponse({
     formattedSources: file.formattedSources,
   }));
 
+  const requestedOutputTokens =
+    isChapterRequest || sourcesOnly
+      ? chapterOutputTokens
+      : defaultOutputTokens;
+
+  const effectiveOutputTokens =
+    getOutputTokenLimit(
+      pageQuota.pagesRemaining,
+      requestedOutputTokens,
+    );
+
+  if (effectiveOutputTokens <= 0) {
+    throw new PageLimitError();
+  }
+
   const result = await generateText({
     model,
     system: systemPrompt,
     messages: normalizedMessages,
     temperature: 0.2,
-    maxOutputTokens: isChapterRequest || sourcesOnly ? chapterOutputTokens : defaultOutputTokens,
+    maxOutputTokens: effectiveOutputTokens,
   });
 
   let output = isStrictNoAcademicTailModule(module)
@@ -3747,6 +4407,49 @@ if (isChapterRequest || sourcesOnly || module === 'chat') {
 
   output = removeForbiddenInternalSourcesFromOutput(output);
 }
+
+const limitedPageOutput =
+  limitOutputToRemainingPages(
+    output,
+    pageQuota.pagesRemaining,
+  );
+
+output = limitedPageOutput.output;
+
+// Prompt sa odpočíta iba po úspešnom vygenerovaní a vyčistení výstupu.
+const promptUsage =
+  await consumeSuccessfulPrompt();
+
+const updatedPageQuota =
+  await consumePagesForOutput({
+    text: output,
+    module,
+    requestId: pageRequestId,
+  });
+
+console.log(
+  'PROMPT_USAGE_JSON_CONSUMED:',
+  {
+    requestId: pageRequestId,
+    module,
+    ...promptUsage,
+  },
+);
+
+const pageUsage =
+  createPageUsagePayload({
+    quota: updatedPageQuota,
+    output,
+    requestId: pageRequestId,
+    outputWasTruncated:
+      limitedPageOutput.wasTruncated,
+  });
+
+console.log(
+  'PAGE_QUOTA_JSON_CONSUMED:',
+  pageUsage,
+);
+
 await saveGeneratedHistory({
   module,
   profile,
@@ -3767,9 +4470,16 @@ await saveGeneratedHistory({
     ok: true,
     provider: providerLabel,
     output,
+    entitlements:
+      serializeEntitlementGuard(
+        entitlementGuard,
+        promptUsage,
+      ),
+    promptUsage,
     profileRelevance: relevance,
     externalResearch,
     extractedFiles: extractedFilesPayload,
+    pageUsage,
     extractedFilesInfo: extractedFilesPayload.map((file) => ({
       fileName: file.originalName || file.name,
       preparedName: file.preparedName,
@@ -4014,6 +4724,10 @@ export async function POST(req: Request) {
     let files: File[] = [];
     let projectId: string | null = null;
     let outputLanguage: AppLanguage = 'sk';
+    let clientRequestId =
+      req.headers
+        .get('x-request-id')
+        ?.trim() || '';
 
     let validateAttachmentsAgainstProfile = true;
     let requireSourceList = true;
@@ -4032,6 +4746,13 @@ export async function POST(req: Request) {
     // =====================================================
     if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData();
+
+      clientRequestId =
+        formData
+          .get('requestId')
+          ?.toString()
+          .trim() ||
+        clientRequestId;
 
       rawAgent = formData.get('agent')?.toString() || 'gemini';
       module = normalizeModule(formData.get('module')?.toString());
@@ -4187,6 +4908,10 @@ if (profile) {
     // =====================================================
     else {
       const body = await req.json().catch(() => null);
+
+      clientRequestId =
+        toCleanString(body?.requestId) ||
+        clientRequestId;
 
       rawAgent = body?.agent || 'gemini';
       module = normalizeModule(body?.module);
@@ -4394,6 +5119,80 @@ try {
     const isChapterRequest = isAcademicChapterRequest(normalizedMessages);
     const requestedChapterNumber = detectChapterNumberFromText(lastUserMessage);
     const sourcesOnly = userWantsSourcesOnly(normalizedMessages);
+
+    const receivedAttachments =
+      countReceivedAttachments({
+        files,
+        preparedFilesMetadata,
+        clientExtractedText,
+      });
+
+    const entitlementGuard =
+      await requireChatRequestEntitlements({
+        module,
+        isChapterRequest,
+        sourcesOnly,
+        lastUserMessage,
+        receivedAttachments,
+      });
+
+    console.log(
+      'CHAT_ENTITLEMENTS_GRANTED:',
+      {
+        module,
+        entitlementModule:
+          entitlementGuard.entitlementModule,
+        planId:
+          entitlementGuard.entitlements.planId,
+        requiredFeatures:
+          entitlementGuard.requiredFeatures,
+        promptLimit:
+          entitlementGuard.entitlements.promptLimit,
+        promptsUsed:
+          entitlementGuard.entitlements.promptsUsed,
+        promptsRemaining:
+          entitlementGuard.entitlements.promptsRemaining,
+        attachmentLimit:
+          entitlementGuard.entitlements.attachmentLimit,
+        receivedAttachments,
+      },
+    );
+
+    const pageRequestId =
+      clientRequestId ||
+      randomUUID();
+
+    let pageQuota: PageQuota;
+
+    try {
+      pageQuota =
+        await requireAvailablePages();
+    } catch (quotaError) {
+      if (isPageLimitError(quotaError)) {
+        return pageLimitErrorResponse(
+          quotaError,
+        );
+      }
+
+      throw quotaError;
+    }
+
+    console.log(
+      'PAGE_QUOTA_BEFORE_GENERATION:',
+      {
+        requestId: pageRequestId,
+        module,
+        planId: pageQuota.planId,
+        pageLimit:
+          pageQuota.pageLimit,
+        pagesUsed:
+          pageQuota.pagesUsed,
+        pagesRemaining:
+          pageQuota.pagesRemaining,
+        charactersPerPage:
+          CHARACTERS_PER_PAGE,
+      },
+    );
 
     // =====================================================
     // PRÍLOHY
@@ -4629,6 +5428,8 @@ POVINNÉ PRAVIDLO:
 - Ak je v profile Chicago, používaj poznámkový štýl alebo chicago bibliografický zápis.
 - Nevymýšľaj autorov, DOI, URL ani zdroje.
 - Ak bibliografický údaj chýba, napíš: údaj je potrebné overiť.
+
+${buildPageLimitInstruction(pageQuota)}
 `.trim(),
       maxSystemPromptChars,
     );
@@ -4660,6 +5461,9 @@ POVINNÉ PRAVIDLO:
           relevance,
           detectedSourcesForOutput: finalDetectedSourcesForOutput,
           externalResearch,
+          pageQuota,
+          pageRequestId,
+          entitlementGuard,
         });
       }
 
@@ -4667,9 +5471,19 @@ POVINNÉ PRAVIDLO:
         model: primary.model,
         systemPrompt: finalSystemPrompt,
         normalizedMessages,
+        module,
+        pageQuota,
+        pageRequestId,
+        entitlementGuard,
       });
     } catch (primaryError) {
       console.error('PRIMARY_MODEL_ERROR:', primaryError);
+
+      if (isPageLimitError(primaryError)) {
+        return pageLimitErrorResponse(
+          primaryError,
+        );
+      }
 
       if (isContextWindowError(primaryError)) {
         return jsonErrorResponse(translateApiErrorToSlovak(primaryError), 413);
@@ -4724,6 +5538,9 @@ Dodrž:
           relevance,
           detectedSourcesForOutput: finalDetectedSourcesForOutput,
           externalResearch,
+          pageQuota,
+          pageRequestId,
+          entitlementGuard,
         });
       }
 
@@ -4731,10 +5548,28 @@ Dodrž:
         model: fallback.model,
         systemPrompt: fallbackSystemPrompt,
         normalizedMessages,
+        module,
+        pageQuota,
+        pageRequestId,
+        entitlementGuard,
       });
     }
   } catch (error) {
     console.error('CHAT_API_ERROR:', error);
-    return jsonErrorResponse(translateApiErrorToSlovak(error), 500);
+
+    if (error instanceof EntitlementError) {
+      return entitlementApiErrorResponse(
+        error,
+      );
+    }
+
+    if (isPageLimitError(error)) {
+      return pageLimitErrorResponse(error);
+    }
+
+    return jsonErrorResponse(
+      translateApiErrorToSlovak(error),
+      500,
+    );
   }
 }

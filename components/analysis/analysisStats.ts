@@ -1,5 +1,13 @@
 /* components/analysis/analysisStats.ts */
 
+import {
+  ADDONS,
+  PLANS,
+  type AddonId,
+  type FeatureKey,
+  type PlanId,
+} from '@/lib/billing/catalog';
+
 /**
  * ZEDPERA – štatistické výpočty pre modul Analýza dát
  *
@@ -17,7 +25,9 @@
  * - Mann-Whitney U test,
  * - ANOVA,
  * - Kruskal-Wallis test,
- * - odporúčanie, ktorý test použiť.
+ * - odporúčanie, ktorý test použiť,
+ * - pricing a feature gating podľa PLANS/ADDONS a serverových entitlements,
+ * - odporúčanie vhodného balíka alebo doplnku pri zamknutých výpočtoch.
  *
  * Dôležité:
  * ID stĺpec sa nepoužíva v korelácii, t-teste, ANOVA, reliabilite ani v iných výpočtoch.
@@ -50,6 +60,144 @@ export type TestRecommendation =
   | 'anova'
   | 'kruskal-wallis'
   | 'not-enough-data';
+
+export type AnalysisCapabilityKey =
+  | 'descriptive'
+  | 'questionnaires'
+  | 'reliability'
+  | 'normality'
+  | 'correlations'
+  | 'parametric-tests'
+  | 'nonparametric-tests'
+  | 'charts';
+
+export type AnalysisPricingMode =
+  | 'disabled'
+  | 'metadata-only'
+  | 'enforce';
+
+export type AnalysisPricingSource =
+  | 'legacy-unrestricted'
+  | 'catalog'
+  | 'entitlements';
+
+export interface AnalysisPricingOptions {
+  /**
+   * disabled      = pricing sa ignoruje a zachová sa pôvodné správanie,
+   * metadata-only = všetko sa vypočíta, ale výsledok obsahuje informáciu o zamknutých funkciách,
+   * enforce       = výpočty bez oprávnenia sa nevykonajú a vrátia sa ako zamknuté.
+   */
+  mode?: AnalysisPricingMode;
+
+  /** Aktívny balík načítaný zo serverových entitlements. */
+  planId?: PlanId | string | null;
+
+  /** Aktívne doplnky používateľa. */
+  addonIds?: ReadonlyArray<AddonId | string> | null;
+
+  /**
+   * Serverom vyriešený zoznam FeatureKey. Ak je zadaný, má prednosť pred
+   * odvodzovaním funkcií z PLANS a ADDONS.
+   */
+  features?:
+    | ReadonlyArray<FeatureKey | string>
+    | ReadonlySet<FeatureKey | string>
+    | null;
+
+  planName?: string | null;
+  planPriceCents?: number | null;
+  currency?: string;
+  locale?: string;
+  pricingPath?: string;
+  checkoutPath?: string;
+  includeUpgradeRecommendation?: boolean;
+}
+
+export interface AnalysisPricingCapabilityResult {
+  capability: AnalysisCapabilityKey;
+  feature: FeatureKey;
+  label: string;
+  allowed: boolean;
+  requested: boolean;
+  computed: boolean;
+  lockedReason: string | null;
+}
+
+export interface AnalysisPricingPurchaseOption {
+  kind: 'plan' | 'addon';
+  id: PlanId | AddonId;
+  name: string;
+  priceCents: number;
+  priceFormatted: string;
+  additionalPriceCents: number;
+  additionalPriceFormatted: string;
+  targetTotalPriceCents: number;
+  targetTotalPriceFormatted: string;
+  coveredCapabilities: AnalysisCapabilityKey[];
+  coversAllLockedCapabilities: boolean;
+}
+
+export interface AnalysisPricingResult {
+  enabled: boolean;
+  mode: AnalysisPricingMode;
+  enforced: boolean;
+  source: AnalysisPricingSource;
+
+  planId: PlanId | null;
+  planName: string;
+  addonIds: AddonId[];
+  addonNames: string[];
+
+  currency: string;
+  locale: string;
+  basePriceCents: number;
+  addonsPriceCents: number;
+  totalPriceCents: number;
+  totalPriceFormatted: string;
+
+  capabilities: AnalysisPricingCapabilityResult[];
+  requestedCapabilities: AnalysisCapabilityKey[];
+  availableCapabilities: AnalysisCapabilityKey[];
+  lockedCapabilities: AnalysisCapabilityKey[];
+  computedCapabilities: AnalysisCapabilityKey[];
+  skippedCapabilities: AnalysisCapabilityKey[];
+  upgradeRequired: boolean;
+
+  recommendedPurchase: AnalysisPricingPurchaseOption | null;
+  purchaseAlternatives: AnalysisPricingPurchaseOption[];
+
+  pricingPath: string;
+  checkoutPath: string;
+  note: string;
+}
+
+export const ANALYSIS_CAPABILITY_FEATURE_MAP: Record<
+  AnalysisCapabilityKey,
+  FeatureKey
+> = {
+  descriptive: 'data-descriptive',
+  questionnaires: 'data-questionnaires',
+  reliability: 'data-reliability',
+  normality: 'data-normality',
+  correlations: 'data-correlations',
+  'parametric-tests': 'data-parametric-tests',
+  'nonparametric-tests': 'data-nonparametric-tests',
+  charts: 'data-charts',
+};
+
+export const ANALYSIS_CAPABILITY_LABELS: Record<
+  AnalysisCapabilityKey,
+  string
+> = {
+  descriptive: 'Deskriptívna štatistika a frekvencie',
+  questionnaires: 'Škály, subškály a dotazníky',
+  reliability: 'Reliabilita škál – Cronbachovo alfa',
+  normality: 'Testovanie normality',
+  correlations: 'Pearsonove a Spearmanove korelácie',
+  'parametric-tests': 'Parametrické testy – t-test a ANOVA',
+  'nonparametric-tests': 'Neparametrické testy – Mann-Whitney a Kruskal-Wallis',
+  charts: 'Grafy a grafické tabuľky',
+};
 
 export interface ScaleDefinition {
   id: string;
@@ -194,6 +342,20 @@ export interface StatisticalAnalysisOptions {
 
   /** Ak false, systém nesmie počítať nepotvrdené WEMWBS/JSS iba podľa názvu stĺpca. */
   allowUnconfirmedStandardizedQuestionnaires?: boolean;
+
+  /** Centrálna pricing/entitlement konfigurácia pre modul Analýza dát. */
+  pricing?: AnalysisPricingOptions;
+
+  /**
+   * Kompatibilné skratky pre existujúce volania. Nový kód má preferovať options.pricing.
+   */
+  planId?: PlanId | string | null;
+  addonIds?: ReadonlyArray<AddonId | string> | null;
+  entitlementFeatures?:
+    | ReadonlyArray<FeatureKey | string>
+    | ReadonlySet<FeatureKey | string>
+    | null;
+  enforcePricing?: boolean;
 }
 
 export interface FrequencyValueResult {
@@ -387,10 +549,469 @@ export interface StatisticalAnalysisResult {
   chartData: AnalysisChartData;
   chartTables: AnalysisChartTable[];
 
+  /** Pricing, dostupnosť funkcií a odporúčanie vhodného balíka/doplnku. */
+  pricing: AnalysisPricingResult;
+
   /** Aliasové polia pripravené pre staršie komponenty/exportéry. */
   aliases: Record<string, unknown>;
 
   aiRecommendation: string[];
+}
+
+/* -------------------------------------------------------------------------- */
+/* PRICING A OPRÁVNENIA PRE ANALÝZU DÁT                                      */
+/* -------------------------------------------------------------------------- */
+
+const ANALYSIS_CAPABILITIES = Object.keys(
+  ANALYSIS_CAPABILITY_FEATURE_MAP,
+) as AnalysisCapabilityKey[];
+
+const ANALYSIS_VALID_PLAN_IDS = new Set<PlanId>(
+  Object.keys(PLANS) as PlanId[],
+);
+
+const ANALYSIS_VALID_ADDON_IDS = new Set<AddonId>(
+  Object.keys(ADDONS) as AddonId[],
+);
+
+const ANALYSIS_VALID_FEATURE_IDS = new Set<FeatureKey>([
+  ...Object.values(PLANS).flatMap((plan) => plan.features),
+  ...Object.values(ADDONS).flatMap((addon) => addon.features),
+]);
+
+type ResolvedAnalysisPricingContext = {
+  enabled: boolean;
+  mode: AnalysisPricingMode;
+  enforced: boolean;
+  source: AnalysisPricingSource;
+  planId: PlanId | null;
+  planName: string;
+  addonIds: AddonId[];
+  addonNames: string[];
+  currency: string;
+  locale: string;
+  basePriceCents: number;
+  addonsPriceCents: number;
+  totalPriceCents: number;
+  pricingPath: string;
+  checkoutPath: string;
+  includeUpgradeRecommendation: boolean;
+  availableFeatures: Set<FeatureKey>;
+};
+
+function normalizeAnalysisPlanId(value: unknown): PlanId | null {
+  const candidate = String(value ?? '').trim() as PlanId;
+  return ANALYSIS_VALID_PLAN_IDS.has(candidate) ? candidate : null;
+}
+
+function normalizeAnalysisAddonIds(
+  value: ReadonlyArray<AddonId | string> | null | undefined,
+): AddonId[] {
+  if (!Array.isArray(value)) return [];
+
+  return Array.from(
+    new Set(
+      value
+        .map((item) => String(item ?? '').trim() as AddonId)
+        .filter((item) => ANALYSIS_VALID_ADDON_IDS.has(item)),
+    ),
+  );
+}
+
+function normalizeAnalysisFeatures(
+  value:
+    | ReadonlyArray<FeatureKey | string>
+    | ReadonlySet<FeatureKey | string>
+    | null
+    | undefined,
+): FeatureKey[] | null {
+  if (value === null || value === undefined) return null;
+
+  const source = value instanceof Set ? Array.from(value) : Array.from(value);
+
+  return Array.from(
+    new Set(
+      source
+        .map((item) => String(item ?? '').trim() as FeatureKey)
+        .filter((item) => ANALYSIS_VALID_FEATURE_IDS.has(item)),
+    ),
+  );
+}
+
+function toSafePriceCents(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return Math.max(0, Math.round(fallback));
+  return Math.max(0, Math.round(parsed));
+}
+
+function formatAnalysisPrice(
+  priceCents: number,
+  currency: string,
+  locale: string,
+): string {
+  try {
+    return new Intl.NumberFormat(locale || 'sk-SK', {
+      style: 'currency',
+      currency: currency || 'EUR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(priceCents / 100);
+  } catch {
+    return `${round2(priceCents / 100)} ${currency || 'EUR'}`;
+  }
+}
+
+function getPricingInput(
+  options: StatisticalAnalysisOptions,
+): AnalysisPricingOptions | null {
+  const explicit = options.pricing;
+  const hasCompatibilityInput =
+    options.planId !== undefined ||
+    options.addonIds !== undefined ||
+    options.entitlementFeatures !== undefined ||
+    options.enforcePricing !== undefined;
+
+  if (!explicit && !hasCompatibilityInput) {
+    return null;
+  }
+
+  return {
+    ...explicit,
+    planId: explicit?.planId ?? options.planId,
+    addonIds: explicit?.addonIds ?? options.addonIds,
+    features: explicit?.features ?? options.entitlementFeatures,
+    mode:
+      explicit?.mode ??
+      (options.enforcePricing === true ? 'enforce' : 'metadata-only'),
+  };
+}
+
+function resolveAnalysisPricingContext(
+  options: StatisticalAnalysisOptions,
+): ResolvedAnalysisPricingContext {
+  const pricing = getPricingInput(options);
+
+  if (!pricing || pricing.mode === 'disabled') {
+    return {
+      enabled: false,
+      mode: 'disabled',
+      enforced: false,
+      source: 'legacy-unrestricted',
+      planId: null,
+      planName: 'Neobmedzený kompatibilný režim',
+      addonIds: [],
+      addonNames: [],
+      currency: 'EUR',
+      locale: 'sk-SK',
+      basePriceCents: 0,
+      addonsPriceCents: 0,
+      totalPriceCents: 0,
+      pricingPath: '/pricing',
+      checkoutPath: '/pricing',
+      includeUpgradeRecommendation: false,
+      availableFeatures: new Set(ANALYSIS_VALID_FEATURE_IDS),
+    };
+  }
+
+  const planId = normalizeAnalysisPlanId(pricing.planId) ?? 'free';
+  const plan = PLANS[planId];
+  const addonIds = normalizeAnalysisAddonIds(pricing.addonIds);
+  const explicitFeatures = normalizeAnalysisFeatures(pricing.features);
+
+  const availableFeatures = explicitFeatures
+    ? new Set<FeatureKey>(explicitFeatures)
+    : new Set<FeatureKey>([
+        ...plan.features,
+        ...addonIds.flatMap((addonId) => ADDONS[addonId]?.features ?? []),
+      ]);
+
+  const basePriceCents = toSafePriceCents(
+    pricing.planPriceCents,
+    plan.priceCents,
+  );
+  const addonsPriceCents = addonIds.reduce(
+    (total, addonId) => total + (ADDONS[addonId]?.priceCents ?? 0),
+    0,
+  );
+
+  return {
+    enabled: true,
+    mode: pricing.mode ?? 'metadata-only',
+    enforced: pricing.mode === 'enforce',
+    source: explicitFeatures ? 'entitlements' : 'catalog',
+    planId,
+    planName: String(pricing.planName || plan.name),
+    addonIds,
+    addonNames: addonIds.map((addonId) => ADDONS[addonId]?.name ?? addonId),
+    currency: String(pricing.currency || 'EUR').toUpperCase(),
+    locale: String(pricing.locale || 'sk-SK'),
+    basePriceCents,
+    addonsPriceCents,
+    totalPriceCents: basePriceCents + addonsPriceCents,
+    pricingPath: String(pricing.pricingPath || '/pricing'),
+    checkoutPath: String(pricing.checkoutPath || '/pricing'),
+    includeUpgradeRecommendation:
+      pricing.includeUpgradeRecommendation !== false,
+    availableFeatures,
+  };
+}
+
+function pricingAllowsCapability(
+  pricing: ResolvedAnalysisPricingContext,
+  capability: AnalysisCapabilityKey,
+): boolean {
+  if (!pricing.enabled) return true;
+
+  return pricing.availableFeatures.has(
+    ANALYSIS_CAPABILITY_FEATURE_MAP[capability],
+  );
+}
+
+function pricingMayComputeCapability(
+  pricing: ResolvedAnalysisPricingContext,
+  capability: AnalysisCapabilityKey,
+): boolean {
+  return !pricing.enforced || pricingAllowsCapability(pricing, capability);
+}
+
+function buildAnalysisPurchaseOptions(
+  pricing: ResolvedAnalysisPricingContext,
+  lockedRequestedCapabilities: AnalysisCapabilityKey[],
+): AnalysisPricingPurchaseOption[] {
+  if (
+    !pricing.enabled ||
+    !pricing.includeUpgradeRecommendation ||
+    lockedRequestedCapabilities.length === 0
+  ) {
+    return [];
+  }
+
+  const buildOption = (input: {
+    kind: 'plan' | 'addon';
+    id: PlanId | AddonId;
+    name: string;
+    priceCents: number;
+    targetTotalPriceCents: number;
+    candidateFeatures: Set<FeatureKey>;
+  }): AnalysisPricingPurchaseOption | null => {
+    const coveredCapabilities = lockedRequestedCapabilities.filter((capability) =>
+      input.candidateFeatures.has(ANALYSIS_CAPABILITY_FEATURE_MAP[capability]),
+    );
+
+    if (coveredCapabilities.length === 0) return null;
+
+    const coversAllLockedCapabilities = lockedRequestedCapabilities.every(
+      (capability) =>
+        input.candidateFeatures.has(ANALYSIS_CAPABILITY_FEATURE_MAP[capability]),
+    );
+    const additionalPriceCents = Math.max(
+      input.targetTotalPriceCents - pricing.totalPriceCents,
+      0,
+    );
+
+    return {
+      kind: input.kind,
+      id: input.id,
+      name: input.name,
+      priceCents: input.priceCents,
+      priceFormatted: formatAnalysisPrice(
+        input.priceCents,
+        pricing.currency,
+        pricing.locale,
+      ),
+      additionalPriceCents,
+      additionalPriceFormatted: formatAnalysisPrice(
+        additionalPriceCents,
+        pricing.currency,
+        pricing.locale,
+      ),
+      targetTotalPriceCents: input.targetTotalPriceCents,
+      targetTotalPriceFormatted: formatAnalysisPrice(
+        input.targetTotalPriceCents,
+        pricing.currency,
+        pricing.locale,
+      ),
+      coveredCapabilities,
+      coversAllLockedCapabilities,
+    };
+  };
+
+  /*
+   * Pri prechode na vyšší balík ponechávame iba stránkové doplnky.
+   * Funkčný doplnok Analýza dát sa pri pláne, ktorý už analytické funkcie
+   * obsahuje, nemá započítať druhýkrát do odporúčanej cieľovej ceny.
+   */
+  const retainedAddonIdsForPlanUpgrade = pricing.addonIds.filter(
+    (addonId) => (ADDONS[addonId]?.extraPages ?? 0) > 0,
+  );
+  const retainedAddonPriceForPlanUpgrade = retainedAddonIdsForPlanUpgrade.reduce(
+    (total, addonId) => total + (ADDONS[addonId]?.priceCents ?? 0),
+    0,
+  );
+  const retainedAddonFeaturesForPlanUpgrade = retainedAddonIdsForPlanUpgrade.flatMap(
+    (addonId) => ADDONS[addonId]?.features ?? [],
+  );
+
+  const planOptions = (Object.values(PLANS) as Array<(typeof PLANS)[PlanId]>)
+    .filter((plan) => plan.id !== pricing.planId)
+    .map((plan) =>
+      buildOption({
+        kind: 'plan',
+        id: plan.id,
+        name: plan.name,
+        priceCents: plan.priceCents,
+        targetTotalPriceCents:
+          plan.priceCents + retainedAddonPriceForPlanUpgrade,
+        candidateFeatures: new Set<FeatureKey>([
+          ...plan.features,
+          ...retainedAddonFeaturesForPlanUpgrade,
+        ]),
+      }),
+    )
+    .filter((option): option is AnalysisPricingPurchaseOption => Boolean(option));
+
+  const addonOptions = (Object.values(ADDONS) as Array<(typeof ADDONS)[AddonId]>)
+    .filter((addon) => !pricing.addonIds.includes(addon.id))
+    .map((addon) =>
+      buildOption({
+        kind: 'addon',
+        id: addon.id,
+        name: addon.name,
+        priceCents: addon.priceCents,
+        targetTotalPriceCents: pricing.totalPriceCents + addon.priceCents,
+        candidateFeatures: new Set<FeatureKey>([
+          ...pricing.availableFeatures,
+          ...addon.features,
+        ]),
+      }),
+    )
+    .filter((option): option is AnalysisPricingPurchaseOption => Boolean(option));
+
+  return [...planOptions, ...addonOptions].sort((a, b) => {
+    if (a.coversAllLockedCapabilities !== b.coversAllLockedCapabilities) {
+      return a.coversAllLockedCapabilities ? -1 : 1;
+    }
+
+    if (a.additionalPriceCents !== b.additionalPriceCents) {
+      return a.additionalPriceCents - b.additionalPriceCents;
+    }
+
+    return b.coveredCapabilities.length - a.coveredCapabilities.length;
+  });
+}
+
+function finalizeAnalysisPricing(
+  pricing: ResolvedAnalysisPricingContext,
+  requestedCapabilities: AnalysisCapabilityKey[],
+  computedCapabilities: AnalysisCapabilityKey[],
+): AnalysisPricingResult {
+  const requestedSet = new Set(requestedCapabilities);
+  const computedSet = new Set(computedCapabilities);
+
+  const capabilities = ANALYSIS_CAPABILITIES.map((capability) => {
+    const allowed = pricingAllowsCapability(pricing, capability);
+    const requested = requestedSet.has(capability);
+    const computed = computedSet.has(capability);
+
+    return {
+      capability,
+      feature: ANALYSIS_CAPABILITY_FEATURE_MAP[capability],
+      label: ANALYSIS_CAPABILITY_LABELS[capability],
+      allowed,
+      requested,
+      computed,
+      lockedReason: allowed
+        ? null
+        : `Funkcia „${ANALYSIS_CAPABILITY_LABELS[capability]}“ nie je súčasťou aktívneho balíka.`,
+    } satisfies AnalysisPricingCapabilityResult;
+  });
+
+  const availableCapabilities = capabilities
+    .filter((item) => item.allowed)
+    .map((item) => item.capability);
+  const lockedCapabilities = capabilities
+    .filter((item) => !item.allowed)
+    .map((item) => item.capability);
+  const lockedRequestedCapabilities = capabilities
+    .filter((item) => item.requested && !item.allowed)
+    .map((item) => item.capability);
+  const skippedCapabilities = capabilities
+    .filter((item) => item.requested && !item.computed)
+    .map((item) => item.capability);
+
+  const purchaseAlternatives = buildAnalysisPurchaseOptions(
+    pricing,
+    lockedRequestedCapabilities,
+  ).slice(0, 5);
+
+  return {
+    enabled: pricing.enabled,
+    mode: pricing.mode,
+    enforced: pricing.enforced,
+    source: pricing.source,
+    planId: pricing.planId,
+    planName: pricing.planName,
+    addonIds: pricing.addonIds,
+    addonNames: pricing.addonNames,
+    currency: pricing.currency,
+    locale: pricing.locale,
+    basePriceCents: pricing.basePriceCents,
+    addonsPriceCents: pricing.addonsPriceCents,
+    totalPriceCents: pricing.totalPriceCents,
+    totalPriceFormatted: formatAnalysisPrice(
+      pricing.totalPriceCents,
+      pricing.currency,
+      pricing.locale,
+    ),
+    capabilities,
+    requestedCapabilities: Array.from(requestedSet),
+    availableCapabilities,
+    lockedCapabilities,
+    computedCapabilities: Array.from(computedSet),
+    skippedCapabilities,
+    upgradeRequired: lockedRequestedCapabilities.length > 0,
+    recommendedPurchase: purchaseAlternatives[0] ?? null,
+    purchaseAlternatives,
+    pricingPath: pricing.pricingPath,
+    checkoutPath: pricing.checkoutPath,
+    note: pricing.enabled
+      ? pricing.enforced
+        ? 'Pricing bol vynútený: výpočty bez serverového oprávnenia neboli vykonané. Oprávnenia musí vždy overiť aj serverová API route.'
+        : 'Pricing je v informačnom režime: výsledok označuje zamknuté funkcie, ale kvôli spätnej kompatibilite boli výpočty vykonané.'
+      : 'Použitý je spätný kompatibilný režim bez pricing obmedzení. Pre produkciu odovzdajte serverom načítané entitlements cez options.pricing.',
+  };
+}
+
+function buildPricingRecommendations(
+  pricing: AnalysisPricingResult,
+): string[] {
+  if (!pricing.enabled || !pricing.upgradeRequired) return [];
+
+  const lockedLabels = pricing.capabilities
+    .filter((item) => item.requested && !item.allowed)
+    .map((item) => item.label);
+  const recommendation = pricing.recommendedPurchase;
+
+  return [
+    `Aktívny balík „${pricing.planName}“ neobsahuje všetky požadované analytické funkcie: ${lockedLabels.join(', ')}.`,
+    recommendation
+      ? `Odporúčaný nákup: ${recommendation.name} (${recommendation.additionalPriceFormatted} navyše; cieľová cena ${recommendation.targetTotalPriceFormatted}).`
+      : 'Pre sprístupnenie zamknutých analytických funkcií je potrebné zmeniť balík alebo aktivovať vhodný doplnok.',
+  ];
+}
+
+function emptyAnalysisChartData(): AnalysisChartData {
+  return {
+    frequencyBars: [],
+    meanBars: [],
+    scaleScoreBars: [],
+    subscaleScoreBars: [],
+    reliabilityBars: [],
+    correlationBars: [],
+    normalityBars: [],
+    groupTestBars: [],
+    missingValueBars: [],
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -484,6 +1105,41 @@ export function runFullStatisticalAnalysis(
   options: StatisticalAnalysisOptions = {},
 ): StatisticalAnalysisResult {
   const alpha = options.alpha ?? 0.05;
+  const pricingContext = resolveAnalysisPricingContext(options);
+
+  const canCalculateDescriptive = pricingMayComputeCapability(
+    pricingContext,
+    'descriptive',
+  );
+  const canCalculateQuestionnaires = pricingMayComputeCapability(
+    pricingContext,
+    'questionnaires',
+  );
+  const canCalculateReliability = pricingMayComputeCapability(
+    pricingContext,
+    'reliability',
+  );
+  const canCalculateNormality = pricingMayComputeCapability(
+    pricingContext,
+    'normality',
+  );
+  const canCalculateCorrelations = pricingMayComputeCapability(
+    pricingContext,
+    'correlations',
+  );
+  const canCalculateParametricTests = pricingMayComputeCapability(
+    pricingContext,
+    'parametric-tests',
+  );
+  const canCalculateNonParametricTests = pricingMayComputeCapability(
+    pricingContext,
+    'nonparametric-tests',
+  );
+  const canCalculateCharts = pricingMayComputeCapability(
+    pricingContext,
+    'charts',
+  );
+
   const manualInputProvided = hasManualScaleOrSubscaleInput(options);
   const autoDetectScales = manualInputProvided
     ? options.autoDetectScales === true
@@ -547,7 +1203,7 @@ export function runFullStatisticalAnalysis(
   const respondentCount = countRespondents(cleanRows, idColumn);
 
   const frequencies =
-    options.includeFrequencies === false
+    options.includeFrequencies === false || !canCalculateDescriptive
       ? []
       : candidateColumns
           .filter((column) => {
@@ -561,7 +1217,7 @@ export function runFullStatisticalAnalysis(
           .map((column) => calculateFrequencyAnalysis(cleanRows, column));
 
   const itemDescriptives =
-    options.includeItemDescriptives === false
+    options.includeItemDescriptives === false || !canCalculateDescriptive
       ? []
       : numericColumns.map((column) =>
           calculateDescriptiveStatistics(column, getNumericColumn(cleanRows, column)),
@@ -617,18 +1273,33 @@ export function runFullStatisticalAnalysis(
     autoCombinedScales,
   );
 
-  const baseScaleScores = calculateScaleScores(cleanRows, numericColumns, mergedScales);
-  const combinedScaleScores = calculateCombinedScaleScores(
-    baseScaleScores,
-    mergedCombinedScales,
-  );
+  const baseScaleScores = canCalculateQuestionnaires
+    ? calculateScaleScores(cleanRows, numericColumns, mergedScales)
+    : [];
+  const combinedScaleScores = canCalculateQuestionnaires
+    ? calculateCombinedScaleScores(
+        baseScaleScores,
+        mergedCombinedScales,
+      )
+    : [];
 
-  const allScaleScores = [...baseScaleScores, ...combinedScaleScores].filter(
-    (scale) => scale.itemsUsed.length > 0 || scale.scores.some(isFiniteNumber),
-  );
+  const allScaleScores = canCalculateQuestionnaires
+    ? [...baseScaleScores, ...combinedScaleScores].filter(
+        (scale) => scale.itemsUsed.length > 0 || scale.scores.some(isFiniteNumber),
+      )
+    : [];
+
+  const canUseNumericFallback =
+    canCalculateDescriptive ||
+    canCalculateNormality ||
+    canCalculateCorrelations ||
+    canCalculateParametricTests ||
+    canCalculateNonParametricTests;
 
   const fallbackScores: ScaleScoreResult[] =
-    allScaleScores.length === 0 && fallbackToNumericVariables
+    allScaleScores.length === 0 &&
+    fallbackToNumericVariables &&
+    canUseNumericFallback
       ? numericColumns.map((column) => ({
           scaleId: `numeric_${slugify(column)}`,
           scaleName: column,
@@ -642,25 +1313,37 @@ export function runFullStatisticalAnalysis(
   const analysisScores = allScaleScores.length > 0 ? allScaleScores : fallbackScores;
   const fallbackUsed = allScaleScores.length === 0 && fallbackScores.length > 0;
 
-  const scaleDescriptives = analysisScores.map((scale) =>
-    calculateDescriptiveStatistics(scale.scaleName, scale.scores),
-  );
+  const scaleDescriptives = canCalculateDescriptive
+    ? analysisScores.map((scale) =>
+        calculateDescriptiveStatistics(scale.scaleName, scale.scores),
+      )
+    : [];
 
-  const normality = analysisScores.map((scale) =>
-    calculateNormality(scale.scaleName, scale.scores, alpha),
-  );
+  const normality = canCalculateNormality
+    ? analysisScores.map((scale) =>
+        calculateNormality(scale.scaleName, scale.scores, alpha),
+      )
+    : [];
 
-  const pearson = calculatePairwiseCorrelations(analysisScores, 'pearson');
-  const spearman = calculatePairwiseCorrelations(analysisScores, 'spearman');
-  const recommendedCorrelations = calculateRecommendedCorrelationsByNormality(
-    analysisScores,
-    normality,
-  );
+  const pearson = canCalculateCorrelations
+    ? calculatePairwiseCorrelations(analysisScores, 'pearson')
+    : [];
+  const spearman = canCalculateCorrelations
+    ? calculatePairwiseCorrelations(analysisScores, 'spearman')
+    : [];
+  const recommendedCorrelations = canCalculateCorrelations
+    ? calculateRecommendedCorrelationsByNormality(
+        analysisScores,
+        normality,
+      )
+    : [];
 
   const shouldUseParametric = decideParametricByNormality(normality);
   const normalityLookup = buildNormalityLookup(normality);
 
-  const reliability = calculateReliabilityForScales(cleanRows, numericColumns, mergedScales);
+  const reliability = canCalculateReliability
+    ? calculateReliabilityForScales(cleanRows, numericColumns, mergedScales)
+    : [];
 
   const groupTestInput = analysisScores;
 
@@ -681,25 +1364,39 @@ export function runFullStatisticalAnalysis(
       if (realGroupCount < 2) continue;
 
       if (realGroupCount === 2) {
-        const tTest = calculateIndependentTTest(variable.scaleName, groupColumn, grouped);
-        const mannWhitney = calculateMannWhitneyUTest(variable.scaleName, groupColumn, grouped);
+        const tTest = canCalculateParametricTests
+          ? calculateIndependentTTest(variable.scaleName, groupColumn, grouped)
+          : null;
+        const mannWhitney = canCalculateNonParametricTests
+          ? calculateMannWhitneyUTest(variable.scaleName, groupColumn, grouped)
+          : null;
 
-        parametricGroupTests.push(tTest);
-        nonParametricGroupTests.push(mannWhitney);
-        recommendedGroupTests.push(
-          isVariableNormal(variable.scaleName, normalityLookup) ? tTest : mannWhitney,
-        );
+        if (tTest) parametricGroupTests.push(tTest);
+        if (mannWhitney) nonParametricGroupTests.push(mannWhitney);
+
+        const preferred = isVariableNormal(variable.scaleName, normalityLookup)
+          ? tTest ?? mannWhitney
+          : mannWhitney ?? tTest;
+
+        if (preferred) recommendedGroupTests.push(preferred);
       }
 
       if (realGroupCount >= 3) {
-        const anova = calculateOneWayAnova(variable.scaleName, groupColumn, grouped);
-        const kruskal = calculateKruskalWallisTest(variable.scaleName, groupColumn, grouped);
+        const anova = canCalculateParametricTests
+          ? calculateOneWayAnova(variable.scaleName, groupColumn, grouped)
+          : null;
+        const kruskal = canCalculateNonParametricTests
+          ? calculateKruskalWallisTest(variable.scaleName, groupColumn, grouped)
+          : null;
 
-        parametricGroupTests.push(anova);
-        nonParametricGroupTests.push(kruskal);
-        recommendedGroupTests.push(
-          isVariableNormal(variable.scaleName, normalityLookup) ? anova : kruskal,
-        );
+        if (anova) parametricGroupTests.push(anova);
+        if (kruskal) nonParametricGroupTests.push(kruskal);
+
+        const preferred = isVariableNormal(variable.scaleName, normalityLookup)
+          ? anova ?? kruskal
+          : kruskal ?? anova;
+
+        if (preferred) recommendedGroupTests.push(preferred);
       }
     }
   }
@@ -710,6 +1407,42 @@ export function runFullStatisticalAnalysis(
   const exportedParametricGroupTests = parametricGroupTests;
   const exportedNonParametricGroupTests = nonParametricGroupTests;
   const exportedRecommendedGroupTests = recommendedGroupTests;
+
+  /*
+   * Požadované oblasti sa určujú z dostupných dát a konfigurácie, nie z už
+   * zablokovaných výsledkov. Vďaka tomu FREE používateľ dostane korektné
+   * odporúčanie balíka aj vtedy, keď režim enforce výpočty zastavil.
+   */
+  const requestedCapabilities = uniqueStrings([
+    options.includeFrequencies === false && options.includeItemDescriptives === false
+      ? ''
+      : 'descriptive',
+    mergedScales.length > 0 || manualInputProvided || autoDetectScales
+      ? 'questionnaires'
+      : '',
+    mergedScales.some((scale) => scale.items.length >= 2)
+      ? 'reliability'
+      : '',
+    numericColumns.length > 0 ? 'normality' : '',
+    numericColumns.length >= 2 ? 'correlations' : '',
+    groupColumns.length > 0 && numericColumns.length > 0
+      ? 'parametric-tests'
+      : '',
+    groupColumns.length > 0 && numericColumns.length > 0
+      ? 'nonparametric-tests'
+      : '',
+    cleanRows.length > 0 ? 'charts' : '',
+  ].filter(Boolean)) as AnalysisCapabilityKey[];
+
+  const computedCapabilities = requestedCapabilities.filter((capability) =>
+    pricingMayComputeCapability(pricingContext, capability),
+  );
+
+  const pricing = finalizeAnalysisPricing(
+    pricingContext,
+    requestedCapabilities,
+    computedCapabilities,
+  );
 
   const aiRecommendation = buildAiRecommendation({
     idColumn,
@@ -722,6 +1455,8 @@ export function runFullStatisticalAnalysis(
     manualScaleCount: manualScales.length,
     autoDetectedScaleCount: autoScales.length,
   });
+
+  aiRecommendation.unshift(...buildPricingRecommendations(pricing));
 
   if (
     hasOnlyManualNamesWithoutItems(manualScaleText) ||
@@ -738,20 +1473,31 @@ export function runFullStatisticalAnalysis(
 
   const scaleScoreRows = buildScaleScoreRowsForExport(analysisScores, respondentCount);
 
-  const chartData = buildAnalysisChartData({
-    frequencies,
-    itemDescriptives,
-    scaleScores: analysisScores,
-    scaleDescriptives,
-    normality,
-    reliability,
-    correlations: exportedRecommendedCorrelations,
-    groupTests: exportedRecommendedGroupTests,
-    scaleDefinitions: mergedScales,
-    combinedScaleDefinitions: mergedCombinedScales,
-  });
+  const exportedScaleDefinitions = canCalculateQuestionnaires
+    ? mergedScales
+    : [];
+  const exportedCombinedScaleDefinitions = canCalculateQuestionnaires
+    ? mergedCombinedScales
+    : [];
 
-  const chartTables = buildAnalysisChartTables(chartData);
+  const chartData = canCalculateCharts
+    ? buildAnalysisChartData({
+        frequencies,
+        itemDescriptives,
+        scaleScores: analysisScores,
+        scaleDescriptives,
+        normality,
+        reliability,
+        correlations: exportedRecommendedCorrelations,
+        groupTests: exportedRecommendedGroupTests,
+        scaleDefinitions: exportedScaleDefinitions,
+        combinedScaleDefinitions: exportedCombinedScaleDefinitions,
+      })
+    : emptyAnalysisChartData();
+
+  const chartTables = canCalculateCharts
+    ? buildAnalysisChartTables(chartData)
+    : [];
 
   const aliases = buildAnalysisAliases({
     frequencies,
@@ -769,10 +1515,15 @@ export function runFullStatisticalAnalysis(
     recommendedGroupTests: exportedRecommendedGroupTests,
     chartData,
     chartTables,
-    scaleDefinitions: mergedScales,
-    combinedScaleDefinitions: mergedCombinedScales,
+    scaleDefinitions: exportedScaleDefinitions,
+    combinedScaleDefinitions: exportedCombinedScaleDefinitions,
     scaleScoreRows,
   });
+
+  aliases.pricing = pricing;
+  aliases.analysisPricing = pricing;
+  aliases.lockedAnalysisCapabilities = pricing.lockedCapabilities;
+  aliases.recommendedPurchase = pricing.recommendedPurchase;
 
   return {
     meta: {
@@ -824,12 +1575,13 @@ export function runFullStatisticalAnalysis(
         'Odporúčaný test rozdielov sa vyberá podľa normality závislej škály/subškály a počtu skupín: 2 skupiny + normalita = Independent t-test, 2 skupiny + nenormalita = Mann-Whitney U, 3+ skupín + normalita = ANOVA, 3+ skupín + nenormalita = Kruskal-Wallis.',
     },
 
-    scaleDefinitions: mergedScales,
-    combinedScaleDefinitions: mergedCombinedScales,
+    scaleDefinitions: exportedScaleDefinitions,
+    combinedScaleDefinitions: exportedCombinedScaleDefinitions,
     scaleScoreRows,
     correlationMatrix,
     chartData,
     chartTables,
+    pricing,
     aliases,
 
     aiRecommendation,
@@ -3801,6 +4553,8 @@ export function expandStatisticalAnalysisForApi(
 ): Record<string, unknown> {
   return {
     statisticalAnalysis: analysis,
+    pricing: analysis.pricing,
+    analysisPricing: analysis.pricing,
     ...analysis.aliases,
   };
 }
@@ -4341,6 +5095,14 @@ function slugify(value: string): string {
  * XLSX sa načítava dynamicky iba na serveri, aby sa zbytočne neťahal do UI bundle.
  */
 
+export interface AnalyzeUploadedDataRuntimeOptions {
+  /**
+   * Pricing musí byť vytvorený zo serverom overených entitlements.
+   * Nikdy ho nenahrádzajte hodnotami planId/features poslanými klientom vo FormData.
+   */
+  pricing?: AnalysisPricingOptions;
+}
+
 export type AnalyzeDataApiResponse = {
   ok: boolean;
   title: string;
@@ -4380,6 +5142,7 @@ export type AnalyzeDataApiResponse = {
   };
 
   statistics?: StatisticalAnalysisResult;
+  pricing?: AnalysisPricingResult;
 
   message?: string;
   error?: string;
@@ -4910,6 +5673,10 @@ function apiBuildFullText(input: {
     `- Počet odporúčaných korelácií: ${statistics.correlations.recommended.length}`,
     `- Počet reliabilít: ${statistics.reliability.length}`,
     `- Počet odporúčaných skupinových testov: ${statistics.groupTests.recommended.length}`,
+    `- Aktívny balík: ${statistics.pricing.planName}`,
+    `- Cena balíka a doplnkov: ${statistics.pricing.totalPriceFormatted}`,
+    `- Pricing režim: ${statistics.pricing.mode}`,
+    `- Zamknuté analytické oblasti: ${statistics.pricing.lockedCapabilities.length ? statistics.pricing.lockedCapabilities.join(', ') : 'žiadne'}`,
     '',
     'Odporúčané testy:',
     ...recommendedTests.map((item) => `- ${String(item.title || '')}: ${String(item.test || '')}`),
@@ -4933,6 +5700,7 @@ function apiBuildFullText(input: {
 
 export async function analyzeUploadedDataFile(
   formData: FormData,
+  runtimeOptions: AnalyzeUploadedDataRuntimeOptions = {},
 ): Promise<AnalyzeDataApiResponse> {
   try {
     const prompt = String(formData.get('prompt') || '');
@@ -4973,6 +5741,7 @@ export async function analyzeUploadedDataFile(
       autoDetectGroupColumns: true,
       includeFrequencies: true,
       includeItemDescriptives: true,
+      pricing: runtimeOptions.pricing,
     });
 
     const variables = apiCreateVariablesFromStatistics(statistics);
@@ -4996,7 +5765,13 @@ export async function analyzeUploadedDataFile(
         ? 'Reliabilita nebola vypočítaná, pretože neboli rozpoznané škály s minimálne dvoma položkami.'
         : '',
       statistics.correlations.recommended.length === 0
-        ? 'Neboli vypočítané odporúčané korelácie, pretože nie je dostatok vhodných škál alebo numerických premenných.'
+        ? 'Neboli vypočítané odporúčané korelácie, pretože nie je dostatok vhodných škál alebo numerických premenných alebo ich aktívny balík nepovoľuje.'
+        : '',
+      statistics.pricing.upgradeRequired
+        ? `Aktívny balík nepovoľuje všetky požadované výpočty. Zamknuté oblasti: ${statistics.pricing.capabilities
+            .filter((item) => item.requested && !item.allowed)
+            .map((item) => item.label)
+            .join(', ')}.`
         : '',
       'Pred finálnou interpretáciou treba skontrolovať typy premenných, chýbajúce hodnoty a metodiku výpočtu skóre.',
     ].filter(Boolean));
@@ -5056,6 +5831,7 @@ export async function analyzeUploadedDataFile(
       interpretation,
       fullText,
       statistics,
+      pricing: statistics.pricing,
       meta: {
         filesCount: files.length,
         extractedChars: fullText.length,

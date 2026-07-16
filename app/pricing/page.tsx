@@ -1,60 +1,66 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  ExternalLink,
-  CheckCircle2,
-  Crown,
-  Sparkles,
-  Menu,
   ArrowLeft,
   ArrowUp,
+  BarChart3,
+  CheckCircle2,
   CreditCard,
+  Crown,
+  ExternalLink,
+  FileText,
+  Gift,
   Loader2,
-  Coins,
+  Menu,
+  Paperclip,
+  ShieldCheck,
+  Sparkles,
 } from 'lucide-react';
 
+import {
+  ADDONS,
+  PLANS,
+  type AddonId,
+  type PlanId,
+} from '@/lib/billing/catalog';
+
+
+
 type PackagePlan = {
-  id:
-    | 'start-basic'
-    | 'student-plus'
-    | 'pro-thesis'
-    | 'elite-academic'
-    | 'year-max';
+  id: PlanId;
   name: string;
   price: string;
+  priceAmount: number;
   period: string;
-  pages: string;
-  credits: string;
-  works: string;
-  supervisor: string;
-  audit: string;
-  defense: string;
+  scope: string;
   badge?: string;
   description: string;
   features: string[];
+  isFree?: boolean;
+  highlighted?: boolean;
 };
 
 type AddonService = {
-  id:
-    | 'extra-50'
-    | 'extra-100'
-    | 'ai-supervisor'
-    | 'quality-audit'
-    | 'defense-presentation'
-    | 'originality-check'
-    | 'premium-ai-mode'
-    | 'express-processing'
-    | 'express';
+  id: AddonId;
   name: string;
   price: string;
+  priceAmount: number;
   description: string;
+  features: string[];
 };
 
 type CheckoutResponse = {
   ok?: boolean;
   url?: string;
+  code?: string;
   error?: string;
   message?: string;
   detail?: string;
@@ -65,183 +71,249 @@ type CheckoutResponse = {
   receivedPlan?: string;
 };
 
-const VALID_PLAN_IDS: PackagePlan['id'][] = [
-  'start-basic',
-  'student-plus',
-  'pro-thesis',
-  'elite-academic',
-];
+const VALID_PLAN_IDS = Object.keys(PLANS) as PlanId[];
+
+const VALID_PAID_PLAN_IDS = VALID_PLAN_IDS.filter(
+  (planId): planId is Exclude<PlanId, 'free'> => planId !== 'free',
+);
+
+const VALID_ADDON_IDS = Object.keys(ADDONS) as AddonId[];
+
+const DEFAULT_PLAN_ID: PlanId = 'bachelor-thesis';
+
+const STORAGE_SELECTED_PLAN = 'zedpera_selected_plan';
+const STORAGE_SELECTED_ADDONS = 'zedpera_selected_addons';
+
+function formatCatalogPrice(priceCents: number) {
+  return new Intl.NumberFormat('sk-SK', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(priceCents / 100);
+}
 
 const packagePlans: PackagePlan[] = [
   {
-    id: 'start-basic',
-    name: 'START BASIC',
-    price: '29 €',
-    period: 'mesiac',
-    pages: '60 strán / mesiac',
-    credits: '100 AI credits',
-    works: '1 aktívna práca',
-    supervisor: '2 kontroly AI vedúceho',
-    audit: '1 audit',
-    defense: 'Bez obhajoby',
-    badge: 'Základný štart',
+    id: 'free',
+    name: 'FREE VERZIA',
+    price: formatCatalogPrice(PLANS.free.priceCents),
+    priceAmount: PLANS.free.priceCents / 100,
+    period: 'bez platby',
+    scope: `${PLANS.free.pageLimit} strany · ${PLANS.free.attachmentLimit} príloha · ${PLANS.free.promptLimit ?? 0} skúšobné prompty`,
+    badge: 'Bezplatné vyskúšanie',
     description:
-      'Základný mesačný plán pre jednu aktívnu prácu, menší rozsah strán a základnú AI podporu.',
+      'Základná skúšobná verzia na overenie fungovania AI chatu a práce s jednou prílohou.',
+    isFree: true,
     features: [
-      '60 strán / mesiac',
-      '100 AI credits',
-      '1 aktívna práca',
-      'Základný AI model',
-      '2 kontroly AI vedúceho',
-      '1 audit',
-      'Bez obhajoby',
-      'Bez premium modelu',
+      `${PLANS.free.attachmentLimit} nahraná príloha`,
+      `${PLANS.free.promptLimit ?? 0} skúšobné AI prompty`,
+      'Základné vyskúšanie AI chatu',
+      'Bez platobnej karty',
+      'Obmedzený skúšobný režim',
     ],
   },
   {
-    id: 'student-plus',
-    name: 'ŠTUDENT PLUS',
-    price: '59 €',
-    period: 'mesiac',
-    pages: '130 strán / mesiac',
-    credits: '300 AI credits',
-    works: '3 aktívne práce',
-    supervisor: '10 AI kontrol',
-    audit: '3 audity',
-    defense: '1 obhajoba',
-    badge: 'Najlepší pre študenta',
+    id: 'seminar-work',
+    name: 'SEMINÁRNA PRÁCA',
+    price: formatCatalogPrice(PLANS['seminar-work'].priceCents),
+    priceAmount: PLANS['seminar-work'].priceCents / 100,
+    period: 'jednorazovo',
+    scope: `Rozsah do ${PLANS['seminar-work'].pageLimit} strán`,
+    badge: 'Pre kratšie akademické práce',
     description:
-      'Mesačný plán pre študentov, ktorí potrebujú viac strán, viac aktívnych prác, citácie, zdroje a jednu obhajobu.',
+      `Ideálne riešenie pre seminárne, ročníkové a zápočtové práce do ${PLANS['seminar-work'].pageLimit} strán.`,
     features: [
-      '130 strán / mesiac',
-      '300 AI credits',
-      '3 aktívne práce',
-      '10 AI kontrol',
-      '3 audity',
-      '1 obhajoba',
-      'Citácie + zdroje',
-      'Štandard AI model',
+      'Vytvorenie celej seminárnej práce',
+      'AI pomoc pri písaní jednotlivých kapitol',
+      'Metodické vedenie počas celej práce',
+      'Kontrola kvality a logiky textu',
+      'Humanizácia textu',
+      'Návrh štruktúry a osnovy',
+      'Pomoc s citáciami a zdrojmi',
+      'Plánovanie práce',
+      'Príprava e-mailov pre vyučujúceho',
+      'Všetko v jednom systéme',
     ],
   },
   {
-    id: 'pro-thesis',
-    name: 'PRO THESIS',
-    price: '99 €',
-    period: 'mesiac',
-    pages: '270 strán / mesiac',
-    credits: '700 AI credits',
-    works: '5 prác',
-    supervisor: '20 AI kontrol',
-    audit: '6 auditov',
-    defense: '2 obhajoby',
-    badge: 'Pre diplomovku / záverečnú prácu',
+    id: 'bachelor-thesis',
+    name: 'BAKALÁRSKA PRÁCA',
+    price: formatCatalogPrice(PLANS['bachelor-thesis'].priceCents),
+    priceAmount: PLANS['bachelor-thesis'].priceCents / 100,
+    period: 'jednorazovo',
+    scope: `Rozsah do ${PLANS['bachelor-thesis'].pageLimit} strán`,
+    badge: 'Najobľúbenejší balík',
     description:
-      'Výkonný mesačný plán pre rozsiahlejšiu záverečnú prácu, prioritné spracovanie, premium AI model a prezentáciu.',
+      'Kompletné riešenie od prvého zadania až po prípravu na úspešnú obhajobu bakalárskej práce.',
+    highlighted: true,
     features: [
-      '270 strán / mesiac',
-      '700 AI credits',
-      '5 prác',
-      '20 AI kontrol',
-      '6 auditov',
-      '2 obhajoby',
-      'Prioritné spracovanie',
-      'Premium AI model Claude/Grok tier',
-      'Prezentácia',
+      'Vytvorenie celej bakalárskej práce',
+      'Metodické vedenie počas celého písania',
+      'Kontrola kvality, logiky a konzistentnosti textu',
+      'Humanizácia textu',
+      'Pomoc so správnymi citáciami a zdrojmi',
+      'Spracovanie dotazníkov a štatistiky',
+      'Tvorba grafov a tabuliek',
+      'Príprava prezentácie na obhajobu',
+      'Príprava odpovedí na otázky komisie',
+      'Plánovanie práce a termínov',
+      'Návrhy e-mailov pre školiteľa',
+      'Všetko v jednom systéme',
     ],
   },
   {
-    id: 'elite-academic',
-    name: 'ELITE ACADEMIC',
-    price: '149 €',
-    period: 'mesiac',
-    pages: '400 strán / mesiac',
-    credits: '1500 AI credits',
-    works: '10 prác',
-    supervisor: '40 AI kontrol',
-    audit: '10 auditov',
-    defense: '3 obhajoby',
-    badge: 'Najvyšší akademický plán',
+    id: 'master-thesis',
+    name: 'DIPLOMOVÁ / MAGISTERSKÁ PRÁCA',
+    price: formatCatalogPrice(PLANS['master-thesis'].priceCents),
+    priceAmount: PLANS['master-thesis'].priceCents / 100,
+    period: 'jednorazovo',
+    scope: `Rozsah do ${PLANS['master-thesis'].pageLimit} strán`,
+    badge: 'Najkomplexnejší balík',
     description:
-      'Najvyšší mesačný plán pre náročné akademické použitie, viacero prác, vysoké limity a plnú prémiovú AI kapacitu.',
+      'Najkomplexnejší balík pre náročné záverečné práce s pokročilou metodikou a analýzou dát.',
     features: [
-      '400 strán / mesiac',
-      '1500 AI credits',
-      '10 prác',
-      '40 AI kontrol',
-      '10 auditov',
-      '3 obhajoby',
-      'Full premium AI',
-      'Prioritná kapacita',
+      'Vytvorenie celej diplomovej alebo magisterskej práce',
+      'Metodické vedenie počas celého procesu',
+      'Kontrola kvality a odbornosti textu',
+      'Humanizácia textu',
+      'Pomoc so zdrojmi a citáciami',
+      'Komplexné spracovanie štatistiky',
+      'Deskriptívna štatistika',
+      'Testovanie hypotéz',
+      'Korelačné analýzy',
+      'Testovanie normality dát',
+      'Tvorba grafov a tabuliek',
+      'Príprava prezentácie na obhajobu',
+      'Simulácia otázok komisie',
+      'Plánovanie celej práce',
+      'Podklady pre komunikáciu so školiteľom',
+      'Všetko v jednom systéme',
     ],
   },
 ];
 
 const addonServices: AddonService[] = [
   {
-    id: 'extra-50',
-    name: 'Extra 50 strán',
-    price: '19 €',
-    description: 'Doplnenie mesačného limitu o 50 strán.',
+    id: 'data-analysis',
+    name: 'Analýza dát',
+    price: formatCatalogPrice(ADDONS['data-analysis'].priceCents),
+    priceAmount: ADDONS['data-analysis'].priceCents / 100,
+    description:
+      'Kompletné spracovanie štatistickej a analytickej časti práce.',
+    features: [
+      'Spracovanie dotazníkov',
+      'Čistenie a príprava dát',
+      'Deskriptívna štatistika',
+      'Testovanie normality',
+      'Korelačné analýzy',
+      'Frekvenčné tabuľky',
+      'Tvorba škál a subškál',
+      'Grafy a tabuľky',
+    ],
   },
   {
-    id: 'extra-100',
-    name: 'Extra 100 strán',
-    price: '35 €',
-    description: 'Doplnenie mesačného limitu o 100 strán.',
+    id: 'extra-20',
+    name: 'Extra 20 strán',
+    price: formatCatalogPrice(ADDONS['extra-20'].priceCents),
+    priceAmount: ADDONS['extra-20'].priceCents / 100,
+    description:
+      'Rozšírenie vybraného projektu o ďalších 20 spracovaných strán.',
+    features: [
+      `Rozšírenie rozsahu o ${ADDONS['extra-20'].extraPages} strán`,
+      'Zachovanie štýlu a štruktúry práce',
+      'Kontrola nadväznosti nového obsahu',
+    ],
   },
   {
-    id: 'ai-supervisor',
-    name: 'AI vedúci',
-    price: '59 €',
-    description: 'Samostatná služba AI vedúceho práce a detailnej spätnej väzby.',
+    id: 'extra-40',
+    name: 'Extra 40 strán',
+    price: formatCatalogPrice(ADDONS['extra-40'].priceCents),
+    priceAmount: ADDONS['extra-40'].priceCents / 100,
+    description:
+      'Rozšírenie vybraného projektu o ďalších 40 spracovaných strán.',
+    features: [
+      `Rozšírenie rozsahu o ${ADDONS['extra-40'].extraPages} strán`,
+      'Zachovanie štýlu a štruktúry práce',
+      'Kontrola nadväznosti nového obsahu',
+    ],
   },
   {
-    id: 'quality-audit',
-    name: 'Audit kvality',
-    price: '59 €',
-    description: 'Kontrola kvality, logiky, štruktúry, metodológie a argumentácie.',
-  },
-  {
-    id: 'defense-presentation',
-    name: 'Obhajoba + prezentácia',
-    price: '79 €',
-    description: 'Príprava obhajoby, otázok komisie, odpovedí a prezentácie.',
-  },
-  {
-    id: 'originality-check',
-    name: 'Kontrola originality',
-    price: '25 €',
-    description: 'Orientačná kontrola originality a rizikových pasáží.',
-  },
-  {
-    id: 'premium-ai-mode',
-    name: 'Premium AI mode',
-    price: '19 €',
-    description: 'Použitie prémiového AI režimu pre náročnejšie výstupy.',
-  },
-  {
-    id: 'express-processing',
-    name: 'Expresné spracovanie',
-    price: '29 €',
-    description: 'Prednostné spracovanie požiadaviek.',
+    id: 'extra-60',
+    name: 'Extra 60 strán',
+    price: formatCatalogPrice(ADDONS['extra-60'].priceCents),
+    priceAmount: ADDONS['extra-60'].priceCents / 100,
+    description:
+      'Rozšírenie vybraného projektu o ďalších 60 spracovaných strán.',
+    features: [
+      `Rozšírenie rozsahu o ${ADDONS['extra-60'].extraPages} strán`,
+      'Zachovanie štýlu a štruktúry práce',
+      'Kontrola nadväznosti nového obsahu',
+    ],
   },
 ];
 
-function isValidPlanId(value: string): value is PackagePlan['id'] {
-  return VALID_PLAN_IDS.includes(value as PackagePlan['id']);
+function isValidPlanId(value: unknown): value is PlanId {
+  return (
+    typeof value === 'string' &&
+    VALID_PLAN_IDS.includes(value as PlanId)
+  );
 }
 
-function getFriendlyCheckoutError(data: CheckoutResponse, fallback: string) {
+function isValidAddonId(value: unknown): value is AddonId {
+  return (
+    typeof value === 'string' &&
+    VALID_ADDON_IDS.includes(value as AddonId)
+  );
+}
+
+function parseStoredAddonIds(raw: string | null): AddonId[] {
+  if (!raw) return [];
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = raw.split(',').map((value) => value.trim());
+  }
+
+  if (!Array.isArray(parsed)) return [];
+
+  return Array.from(new Set(parsed.filter(isValidAddonId)));
+}
+
+function isValidPaidPlanId(
+  value: string,
+): value is Exclude<PlanId, 'free'> {
+  return VALID_PAID_PLAN_IDS.includes(
+    value as Exclude<PlanId, 'free'>,
+  );
+}
+
+function formatPrice(amount: number) {
+  return new Intl.NumberFormat('sk-SK', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function getFriendlyCheckoutError(
+  data: CheckoutResponse,
+  fallback: string,
+) {
   if (data?.displayMessage) return data.displayMessage;
 
-  if (data?.error === 'INVALID_PLAN') {
+  if (data?.error === 'INVALID_PLAN' || data?.code === 'INVALID_PLAN') {
     return [
       'Backend odmietol balík ako INVALID_PLAN.',
       '',
       `Odoslaný plán: ${data.receivedPlan || 'nezistené'}`,
       '',
-      'Skontroluj, či má backend v app/api/payments/checkout/route.ts rovnaké ID balíkov:',
-      VALID_PLAN_IDS.join(', '),
+      'V súbore app/api/payments/checkout/route.ts musia byť povolené tieto ID platených balíkov:',
+      VALID_PAID_PLAN_IDS.join(', '),
     ].join('\n');
   }
 
@@ -251,7 +323,9 @@ function getFriendlyCheckoutError(data: CheckoutResponse, fallback: string) {
     data?.detail,
     data?.reason ? `Dôvod: ${data.reason}` : '',
     data?.solution ? `Riešenie: ${data.solution}` : '',
-    data?.technicalCode ? `Technický kód: ${data.technicalCode}` : '',
+    data?.technicalCode
+      ? `Technický kód: ${data.technicalCode}`
+      : '',
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -259,16 +333,20 @@ function getFriendlyCheckoutError(data: CheckoutResponse, fallback: string) {
   return message || fallback;
 }
 
-async function postCheckout(endpoint: string, payload: unknown) {
-  const response = await fetch(endpoint, {
+async function postCheckout(payload: unknown) {
+  const response = await fetch('/api/payments/checkout', {
     method: 'POST',
+    credentials: 'include',
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
   });
 
-  const data = (await response.json().catch(() => ({}))) as CheckoutResponse;
+  const data = (await response
+    .json()
+    .catch(() => ({}))) as CheckoutResponse;
 
   return {
     response,
@@ -281,23 +359,87 @@ export default function PackagesPage() {
   const pageRef = useRef<HTMLDivElement | null>(null);
 
   const [selectedPlan, setSelectedPlan] =
-    useState<PackagePlan['id']>('student-plus');
-  const [selectedAddons, setSelectedAddons] = useState<AddonService['id'][]>([]);
-  const [loadingPayment, setLoadingPayment] = useState(false);
-  const [loadingPlanId, setLoadingPlanId] = useState<PackagePlan['id'] | null>(
-    null,
-  );
-  const [paymentError, setPaymentError] = useState('');
+    useState<PlanId>(DEFAULT_PLAN_ID);
+
+  const [selectedAddons, setSelectedAddons] =
+    useState<AddonId[]>([]);
+
+  const [loadingPayment, setLoadingPayment] =
+    useState(false);
+
+  const [loadingPlanId, setLoadingPlanId] =
+    useState<PlanId | null>(null);
+
+  const [paymentError, setPaymentError] =
+    useState('');
+
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const storedPlan = window.localStorage.getItem(
+      STORAGE_SELECTED_PLAN,
+    );
+
+    if (isValidPlanId(storedPlan)) {
+      setSelectedPlan(storedPlan);
+    } else if (storedPlan) {
+      window.localStorage.removeItem(STORAGE_SELECTED_PLAN);
+    }
+
+    const storedAddons = parseStoredAddonIds(
+      window.localStorage.getItem(STORAGE_SELECTED_ADDONS),
+    );
+
+    setSelectedAddons(storedAddons);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    window.localStorage.setItem(
+      STORAGE_SELECTED_PLAN,
+      selectedPlan,
+    );
+
+    if (selectedPlan === 'free') {
+      if (selectedAddons.length > 0) {
+        setSelectedAddons([]);
+      }
+
+      window.localStorage.removeItem(STORAGE_SELECTED_ADDONS);
+      return;
+    }
+
+    window.localStorage.setItem(
+      STORAGE_SELECTED_ADDONS,
+      JSON.stringify(selectedAddons.filter(isValidAddonId)),
+    );
+  }, [selectedPlan, selectedAddons]);
 
   const selectedPlanData = useMemo(() => {
     return (
-      packagePlans.find((plan) => plan.id === selectedPlan) || packagePlans[0]
+      packagePlans.find(
+        (plan) => plan.id === selectedPlan,
+      ) || packagePlans[0]
     );
   }, [selectedPlan]);
 
   const selectedAddonData = useMemo(() => {
-    return addonServices.filter((addon) => selectedAddons.includes(addon.id));
+    return addonServices.filter((addon) =>
+      selectedAddons.includes(addon.id),
+    );
   }, [selectedAddons]);
+
+  const addonsTotal = useMemo(() => {
+    return selectedAddonData.reduce(
+      (sum, addon) => sum + addon.priceAmount,
+      0,
+    );
+  }, [selectedAddonData]);
+
+  const totalAmount =
+    selectedPlanData.priceAmount + addonsTotal;
 
   const goToMenu = () => {
     router.push('/dashboard');
@@ -310,7 +452,40 @@ export default function PackagesPage() {
     });
   };
 
-  const toggleAddon = (addonId: AddonService['id']) => {
+  const activateFreePlan = () => {
+    setSelectedPlan('free');
+    setSelectedAddons([]);
+    setPaymentError('');
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(
+        STORAGE_SELECTED_PLAN,
+        'free',
+      );
+      window.localStorage.removeItem(STORAGE_SELECTED_ADDONS);
+    }
+
+    // Serverové entitlements zostávajú jediným zdrojom oprávnení.
+    router.push('/dashboard?plan=free');
+  };
+
+  const toggleAddon = (addonId: AddonId) => {
+    if (!isValidAddonId(addonId)) {
+      setPaymentError(
+        'Vybraný doplnok nie je súčasťou aktuálneho billing katalógu.',
+      );
+      return;
+    }
+
+    if (selectedPlan === 'free') {
+      setPaymentError(
+        'Doplnkové služby je možné pridať k platenému balíku. Najskôr vyberte seminárnu, bakalársku alebo diplomovú prácu.',
+      );
+      return;
+    }
+
+    setPaymentError('');
+
     setSelectedAddons((current) =>
       current.includes(addonId)
         ? current.filter((id) => id !== addonId)
@@ -323,8 +498,12 @@ export default function PackagesPage() {
 
     if (typeof window !== 'undefined') {
       email =
-        window.localStorage.getItem('zedpera_user_email') ||
-        window.localStorage.getItem('zedpera_email') ||
+        window.localStorage.getItem(
+          'zedpera_user_email',
+        ) ||
+        window.localStorage.getItem(
+          'zedpera_email',
+        ) ||
         window.localStorage.getItem('user_email') ||
         window.localStorage.getItem('email') ||
         '';
@@ -338,26 +517,50 @@ export default function PackagesPage() {
       email = enteredEmail?.trim() || '';
 
       if (email) {
-        window.localStorage.setItem('zedpera_email', email);
+        window.localStorage.setItem(
+          'zedpera_email',
+          email,
+        );
       }
     }
 
-    return email.trim();
+    email = email.trim().toLowerCase();
+
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new Error('Zadajte platnú e-mailovú adresu.');
+    }
+
+    return email;
   };
 
-  const handleCheckout = async (planId?: PackagePlan['id']) => {
-    const checkoutPlanId = planId || selectedPlan;
+  const handleCheckout = async (
+    planId?: PlanId,
+  ) => {
+    const checkoutPlanId =
+      planId || selectedPlan;
 
-    if (!isValidPlanId(checkoutPlanId)) {
+    if (checkoutPlanId === 'free') {
+      activateFreePlan();
+      return;
+    }
+
+    if (!isValidPaidPlanId(checkoutPlanId)) {
       setPaymentError(
-        `Neplatný balík: ${checkoutPlanId}. Skontroluj ID balíka vo frontende.`,
+        `Neplatný balík: ${checkoutPlanId}. Skontrolujte ID balíka vo frontende a na backende.`,
       );
       return;
     }
 
-    const checkoutPlan =
-      packagePlans.find((plan) => plan.id === checkoutPlanId) ||
-      selectedPlanData;
+    const checkoutPlan = packagePlans.find(
+      (plan) => plan.id === checkoutPlanId,
+    );
+
+    if (!checkoutPlan) {
+      setPaymentError(
+        'Vybraný balík sa nenašiel v aktuálnom pricing katalógu.',
+      );
+      return;
+    }
 
     try {
       setLoadingPayment(true);
@@ -367,78 +570,65 @@ export default function PackagesPage() {
       const email = await getEmailForCheckout();
 
       if (!email) {
-        setPaymentError('Pre pokračovanie na platbu je potrebný e-mail.');
+        setPaymentError(
+          'Pre pokračovanie na platbu je potrebný e-mail.',
+        );
         return;
       }
 
       const origin =
-        typeof window !== 'undefined' ? window.location.origin : '';
+        typeof window !== 'undefined'
+          ? window.location.origin
+          : '';
+
+      const validAddonIds = selectedAddons.filter(isValidAddonId);
 
       if (typeof window !== 'undefined') {
-        window.localStorage.setItem('zedpera_selected_plan', checkoutPlan.id);
-        window.localStorage.setItem('zedpera_user_plan', checkoutPlan.id);
+        window.localStorage.setItem(
+          STORAGE_SELECTED_PLAN,
+          checkoutPlan.id,
+        );
+
+        window.localStorage.setItem(
+          STORAGE_SELECTED_ADDONS,
+          JSON.stringify(validAddonIds),
+        );
       }
 
+      /*
+       * Klient posiela iba kanonické ID balíka a doplnkov.
+       * Backend musí cenu a Stripe Price ID načítať zo serverového katalógu.
+       */
       const payload = {
         plan: checkoutPlan.id,
         planId: checkoutPlan.id,
-        selectedPlan: checkoutPlan.id,
-        planName: checkoutPlan.name,
-        price: checkoutPlan.price,
-        period: checkoutPlan.period,
-        pages: checkoutPlan.pages,
-        credits: checkoutPlan.credits,
-
-        addons: selectedAddons,
-        addOns: selectedAddons,
-        selectedAddons,
-
+        addons: validAddonIds,
+        addonIds: validAddonIds,
         email,
         customerEmail: email,
-
-        successUrl: `${origin}/dashboard?success=1&payment=success&plan=${checkoutPlan.id}`,
-        cancelUrl: `${origin}/pricing?canceled=1&plan=${checkoutPlan.id}`,
+        successUrl: `${origin}/dashboard?success=1&payment=success&plan=${encodeURIComponent(
+          checkoutPlan.id,
+        )}`,
+        cancelUrl: `${origin}/pricing?canceled=1&plan=${encodeURIComponent(
+          checkoutPlan.id,
+        )}`,
       };
 
-      const firstTry = await postCheckout('/api/payments/checkout', payload);
+      const checkoutResult = await postCheckout(payload);
 
-      if (firstTry.response.ok && firstTry.data?.ok && firstTry.data?.url) {
-        window.location.assign(firstTry.data.url);
+      if (
+        checkoutResult.response.ok &&
+        checkoutResult.data?.url
+      ) {
+        window.location.assign(checkoutResult.data.url);
         return;
       }
-
-      const secondTry = await postCheckout('/api/checkout', payload);
-
-      if (secondTry.response.ok && secondTry.data?.ok && secondTry.data?.url) {
-        window.location.assign(secondTry.data.url);
-        return;
-      }
-
-      const firstError = getFriendlyCheckoutError(
-        firstTry.data,
-        'Platobnú bránu sa nepodarilo spustiť cez /api/payments/checkout.',
-      );
-
-      const secondError = getFriendlyCheckoutError(
-        secondTry.data,
-        'Platobnú bránu sa nepodarilo spustiť ani cez /api/checkout.',
-      );
 
       throw new Error(
-        [
-          'Stripe platbu sa nepodarilo spustiť.',
-          '',
-          'Odoslaný balík:',
-          checkoutPlan.id,
-          '',
-          'Prvý pokus:',
-          firstError,
-          '',
-          'Druhý pokus:',
-          secondError,
-          '',
-          'Dôležité: backend musí mať rovnaké ID balíkov ako frontend.',
-        ].join('\n'),
+        getFriendlyCheckoutError(
+          checkoutResult.data,
+          `Platobnú bránu sa nepodarilo spustiť. HTTP ${checkoutResult.response.status}.`,
+        ),
       );
     } catch (error: unknown) {
       const message =
@@ -446,7 +636,11 @@ export default function PackagesPage() {
           ? error.message
           : 'Platbu sa nepodarilo spustiť.';
 
-      console.error('PAYMENT ERROR:', error);
+      console.error(
+        'PAYMENT ERROR:',
+        error,
+      );
+
       setPaymentError(message);
     } finally {
       setLoadingPayment(false);
@@ -459,55 +653,78 @@ export default function PackagesPage() {
       ref={pageRef}
       className="fixed inset-0 h-[100dvh] w-full overflow-y-auto overflow-x-hidden bg-[#020617] text-white"
     >
-      <div className="sticky top-0 z-50 border-b border-white/10 bg-[#020617]/95 backdrop-blur">
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#020617]/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-8">
           <button
             type="button"
             onClick={goToMenu}
-            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20"
+            className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20"
           >
             <Menu size={18} />
             Menu
           </button>
 
-          <div className="hidden text-sm font-semibold text-gray-400 sm:block">
-            Balíčky a doplnky
+          <div className="hidden text-sm font-semibold text-slate-400 sm:block">
+            Jednorazové akademické balíky
           </div>
 
           <button
             type="button"
             onClick={goToMenu}
-            className="inline-flex items-center gap-2 rounded-2xl border border-purple-400/30 bg-purple-600/20 px-4 py-2 text-sm font-bold text-purple-100 transition hover:bg-purple-600/30"
+            className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-purple-400/30 bg-purple-600/20 px-4 py-2 text-sm font-bold text-purple-100 transition hover:bg-purple-600/30"
           >
             <ArrowLeft size={18} />
             Späť do menu
           </button>
         </div>
-      </div>
+      </header>
 
       <main className="mx-auto max-w-7xl space-y-10 px-4 py-10 pb-32 sm:px-6 lg:px-8">
         <section>
           <div className="mb-8">
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-sm font-semibold text-purple-200">
               <Crown size={16} />
-              Predplatné a doplnkové služby
+              Akademické balíky a doplnkové služby
             </div>
 
-            <h1 className="text-4xl font-black text-white sm:text-5xl lg:text-6xl">
-              Balíčky a doplnky
+            <h1 className="max-w-5xl text-4xl font-black tracking-tight text-white sm:text-5xl lg:text-6xl">
+              Vyberte si riešenie podľa typu a rozsahu práce
             </h1>
 
-            <p className="mt-3 max-w-3xl text-lg text-gray-300 sm:text-xl">
-              Vyber si mesačný plán podľa rozsahu práce. Každý balík má
-              mesačný limit strán, počet aktívnych prác, AI kontroly, audity,
-              obhajoby a vlastný limit AI kreditov.
+            <p className="mt-4 max-w-4xl text-base leading-7 text-slate-300 sm:text-lg">
+              Platené balíky sú jednorazové. Zahŕňajú AI podporu, metodické vedenie,
+              kontrolu kvality, prácu so zdrojmi, plánovanie a ďalšie funkcie podľa
+              zvoleného typu akademickej práce.
             </p>
+
+            <div className="mt-5 grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-3">
+              <HeroInfo
+                icon={<ShieldCheck size={18} />}
+                title="Jednorazová platba"
+                text="Bez automatického mesačného predplatného."
+              />
+
+              <HeroInfo
+                icon={<FileText size={18} />}
+                title="Rozsah podľa balíka"
+                text="Jasne určený maximálny rozsah práce."
+              />
+
+              <HeroInfo
+                icon={<Sparkles size={18} />}
+                title="Všetko v jednom"
+                text="Písanie, kontrola, zdroje, plánovanie aj obhajoba."
+              />
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
             {packagePlans.map((plan) => {
-              const selected = selectedPlan === plan.id;
-              const isLoadingThisPlan = loadingPlanId === plan.id;
+              const selected =
+                selectedPlan === plan.id;
+
+              const isLoadingThisPlan =
+                loadingPlanId === plan.id;
 
               return (
                 <article
@@ -515,94 +732,122 @@ export default function PackagesPage() {
                   onClick={() => {
                     setSelectedPlan(plan.id);
                     setPaymentError('');
+
+                    if (plan.isFree) {
+                      setSelectedAddons([]);
+                    }
                   }}
-                  className={`relative flex min-h-[660px] cursor-pointer flex-col rounded-3xl border p-6 text-left shadow-xl transition ${
+                  className={[
+                    'relative flex cursor-pointer flex-col rounded-3xl border p-6 text-left shadow-xl transition',
+                    'hover:-translate-y-1',
                     selected
                       ? 'border-purple-400 bg-purple-600/20 shadow-purple-950/40'
-                      : 'border-white/10 bg-[#0f172a] hover:border-purple-400/50 hover:bg-[#111c33]'
-                  }`}
+                      : 'border-white/10 bg-[#0f172a] hover:border-purple-400/50 hover:bg-[#111c33]',
+                    plan.highlighted
+                      ? 'ring-1 ring-fuchsia-400/30'
+                      : '',
+                  ].join(' ')}
                 >
                   {plan.badge && (
                     <div className="mb-4 flex w-fit items-center gap-2 rounded-full bg-purple-600/40 px-3 py-1 text-xs font-black uppercase tracking-wide text-purple-100">
-                      <Crown size={14} />
+                      {plan.isFree ? (
+                        <Gift size={14} />
+                      ) : (
+                        <Crown size={14} />
+                      )}
+
                       {plan.badge}
                     </div>
                   )}
 
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h2 className="text-2xl font-black text-white">
+                      <h2 className="text-xl font-black leading-7 text-white">
                         {plan.name}
                       </h2>
 
-                      <p className="mt-2 text-sm leading-6 text-gray-300">
+                      <p className="mt-2 text-sm leading-6 text-slate-300">
                         {plan.description}
                       </p>
                     </div>
 
                     {selected && (
-                      <div className="rounded-full bg-green-500/20 px-3 py-1 text-xs font-bold text-green-300">
+                      <div className="shrink-0 rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-bold text-emerald-300">
                         Vybrané
                       </div>
                     )}
                   </div>
 
-                  <div className="mt-6 flex flex-wrap items-end gap-3">
+                  <div className="mt-6">
                     <div className="text-4xl font-black text-white">
                       {plan.price}
                     </div>
-                  </div>
 
-                  <div className="mt-1 text-sm text-gray-300">
-                    / {plan.period}
+                    <div className="mt-1 text-sm font-semibold text-slate-400">
+                      {plan.period}
+                    </div>
                   </div>
 
                   <div className="mt-5 rounded-2xl border border-purple-400/30 bg-purple-500/10 p-4">
-                    <div className="flex items-center gap-2 text-sm font-black uppercase tracking-wide text-purple-200">
-                      <Coins size={18} />
-                      AI credits
+                    <div className="text-xs font-black uppercase tracking-wide text-purple-200">
+                      Rozsah balíka
                     </div>
 
-                    <div className="mt-2 text-2xl font-black text-white">
-                      {plan.credits}
+                    <div className="mt-2 text-base font-black text-white">
+                      {plan.scope}
                     </div>
                   </div>
 
-                  <div className="mt-6 grid grid-cols-2 gap-3 text-sm">
-                    <PackageInfo label="Limit" value={plan.pages} />
-                    <PackageInfo label="Práce" value={plan.works} />
-                    <PackageInfo label="AI kontroly" value={plan.supervisor} />
-                    <PackageInfo label="Audit" value={plan.audit} />
-                  </div>
-
-                  <div className="mt-5 rounded-2xl border border-white/10 bg-black/30 p-3 text-sm">
-                    <div className="text-gray-400">Obhajoba</div>
-                    <div className="font-bold text-white">{plan.defense}</div>
-                  </div>
-
-                  <ul className="mt-5 flex-1 space-y-2 text-sm text-gray-200">
-                    {plan.features.map((feature) => (
-                      <li key={feature} className="flex gap-2">
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-purple-400" />
-                        <span>{feature}</span>
-                      </li>
-                    ))}
+                  <ul className="mt-6 flex-1 space-y-3 text-sm leading-6 text-slate-200">
+                    {plan.features.map(
+                      (feature) => (
+                        <li
+                          key={feature}
+                          className="flex gap-2"
+                        >
+                          <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-purple-400" />
+                          <span>{feature}</span>
+                        </li>
+                      ),
+                    )}
                   </ul>
 
                   <button
                     type="button"
-                    onClick={(event) => {
+                    onClick={(event: MouseEvent<HTMLButtonElement>) => {
                       event.stopPropagation();
                       setSelectedPlan(plan.id);
+                      setPaymentError('');
+
+                      if (plan.isFree) {
+                        activateFreePlan();
+                        return;
+                      }
+
                       void handleCheckout(plan.id);
                     }}
                     disabled={loadingPayment}
-                    className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-5 py-4 text-sm font-black text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                    className={[
+                      'mt-7 inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-2xl px-5 py-4',
+                      'text-sm font-black text-white transition',
+                      'disabled:cursor-not-allowed disabled:opacity-60',
+                      plan.isFree
+                        ? 'border border-emerald-400/30 bg-emerald-600 hover:bg-emerald-500'
+                        : 'bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:opacity-90',
+                    ].join(' ')}
                   >
                     {isLoadingThisPlan ? (
                       <>
-                        <Loader2 className="animate-spin" size={18} />
+                        <Loader2
+                          className="animate-spin"
+                          size={18}
+                        />
                         Presmerovávam...
+                      </>
+                    ) : plan.isFree ? (
+                      <>
+                        <Gift size={18} />
+                        Vyskúšať zadarmo
                       </>
                     ) : (
                       <>
@@ -617,82 +862,128 @@ export default function PackagesPage() {
           </div>
         </section>
 
-        <section className="rounded-3xl border border-white/10 bg-[#050816] p-6 shadow-xl">
-          <div className="mb-5">
-            <h2 className="text-2xl font-black text-white">
-              Doplnkové služby
-            </h2>
+        <section className="rounded-3xl border border-white/10 bg-[#050816] p-5 shadow-xl sm:p-7">
+          <div className="mb-6">
+            <div className="inline-flex items-center gap-2 text-purple-300">
+              <BarChart3 size={21} />
 
-            <p className="mt-2 text-sm text-gray-300">
-              Doplnkové služby je možné dokúpiť samostatne alebo pridať
-              k vybranému balíku pred platbou.
+              <h2 className="text-2xl font-black text-white">
+                Doplnkové služby
+              </h2>
+            </div>
+
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+              Doplnkové služby môžete pridať k seminárnej, bakalárskej alebo
+              diplomovej práci. Pri zvolenej FREE verzii nie sú doplnky dostupné.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {addonServices.map((addon) => {
-              const selected = selectedAddons.includes(addon.id);
+              const selected =
+                selectedAddons.includes(addon.id);
+
+              const disabled =
+                selectedPlan === 'free';
 
               return (
                 <button
                   key={addon.id}
                   type="button"
-                  onClick={() => {
-                    toggleAddon(addon.id);
-                    setPaymentError('');
-                  }}
-                  className={`flex items-center justify-between gap-4 rounded-2xl border p-5 text-left transition ${
-                    selected
-                      ? 'border-purple-400 bg-purple-600/20'
-                      : 'border-white/10 bg-[#0f172a] hover:bg-[#111c33]'
-                  }`}
+                  disabled={disabled}
+                  onClick={() =>
+                    toggleAddon(addon.id)
+                  }
+                  className={[
+                    'flex min-h-[170px] flex-col justify-between gap-5 rounded-2xl border p-5 text-left transition sm:flex-row',
+                    disabled
+                      ? 'cursor-not-allowed border-white/5 bg-white/[0.03] opacity-50'
+                      : selected
+                        ? 'border-purple-400 bg-purple-600/20'
+                        : 'border-white/10 bg-[#0f172a] hover:border-purple-400/40 hover:bg-[#111c33]',
+                  ].join(' ')}
                 >
                   <div>
-                    <div className="text-lg font-bold text-white">
+                    <div className="text-lg font-black text-white">
                       {addon.name}
                     </div>
 
-                    <div className="mt-1 text-sm text-gray-300">
+                    <div className="mt-1 text-sm leading-6 text-slate-300">
                       {addon.description}
                     </div>
+
+                    <ul className="mt-3 space-y-1.5 text-xs leading-5 text-slate-400">
+                      {addon.features.map(
+                        (feature) => (
+                          <li
+                            key={feature}
+                            className="flex gap-2"
+                          >
+                            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-purple-400" />
+                            <span>{feature}</span>
+                          </li>
+                        ),
+                      )}
+                    </ul>
                   </div>
 
-                  <div className="shrink-0 text-xl font-black text-white">
-                    <div>{addon.price}</div>
+                  <div className="shrink-0 text-2xl font-black text-white">
+                    {addon.price}
                   </div>
                 </button>
               );
             })}
           </div>
 
-          <div className="mt-6 rounded-2xl border border-white/10 bg-black/30 p-5">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="mt-7 rounded-3xl border border-white/10 bg-black/30 p-5 sm:p-6">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
               <div>
-                <div className="text-sm font-bold uppercase tracking-wide text-purple-300">
+                <div className="text-xs font-black uppercase tracking-wide text-purple-300">
                   Vybraný balík
                 </div>
 
                 <div className="mt-1 text-2xl font-black text-white">
-                  {selectedPlanData.name} – {selectedPlanData.price}
+                  {selectedPlanData.name}
                 </div>
 
-                <div className="mt-1 text-sm text-gray-300">
-                  {selectedPlanData.period} · {selectedPlanData.pages} ·{' '}
-                  {selectedPlanData.credits} · {selectedPlanData.works}
+                <div className="mt-1 text-sm leading-6 text-slate-300">
+                  {selectedPlanData.price} ·{' '}
+                  {selectedPlanData.period} ·{' '}
+                  {selectedPlanData.scope}
                 </div>
               </div>
 
-              {selectedAddonData.length > 0 && (
-                <div className="max-w-xl text-sm text-gray-200">
-                  <div className="font-bold text-white">Doplnky:</div>
-                  <div className="mt-1">
-                    {selectedAddonData
-                      .map((addon) => `${addon.name} (${addon.price})`)
-                      .join(', ')}
-                  </div>
+              <div className="xl:text-right">
+                <div className="text-xs font-black uppercase tracking-wide text-slate-400">
+                  Celková cena
                 </div>
-              )}
+
+                <div className="mt-1 text-4xl font-black text-white">
+                  {formatPrice(totalAmount)}
+                </div>
+              </div>
             </div>
+
+            {selectedAddonData.length > 0 && (
+              <div className="mt-5 border-t border-white/10 pt-5">
+                <div className="text-sm font-bold text-white">
+                  Vybrané doplnkové služby
+                </div>
+
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {selectedAddonData.map(
+                    (addon) => (
+                      <span
+                        key={addon.id}
+                        className="rounded-full border border-purple-400/20 bg-purple-500/10 px-3 py-1.5 text-xs font-semibold text-purple-100"
+                      >
+                        {addon.name} ({addon.price})
+                      </span>
+                    ),
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {paymentError && (
@@ -703,38 +994,64 @@ export default function PackagesPage() {
 
           <button
             type="button"
-            onClick={() => void handleCheckout()}
+            onClick={() =>
+              void handleCheckout()
+            }
             disabled={loadingPayment}
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-6 py-4 text-center text-lg font-black text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            className={[
+              'mt-6 flex min-h-[56px] w-full items-center justify-center gap-2 rounded-2xl px-6 py-4',
+              'text-center text-base font-black text-white transition sm:text-lg',
+              'disabled:cursor-not-allowed disabled:opacity-60',
+              selectedPlanData.isFree
+                ? 'bg-emerald-600 hover:bg-emerald-500'
+                : 'bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:opacity-90',
+            ].join(' ')}
           >
             {loadingPayment ? (
               <>
-                <Loader2 className="animate-spin" size={20} />
-                Presmerovávam na Stripe...
+                <Loader2
+                  className="animate-spin"
+                  size={20}
+                />
+                Presmerovávam na platbu...
+              </>
+            ) : selectedPlanData.isFree ? (
+              <>
+                <Gift size={20} />
+                Pokračovať do FREE verzie
               </>
             ) : (
               <>
                 <CreditCard size={20} />
-                Pokračovať na platbu
+                Zaplatiť {formatPrice(totalAmount)}
               </>
             )}
           </button>
+
+          <p className="mt-4 text-center text-xs leading-5 text-slate-500">
+            AI systém poskytuje odbornú podporu pri príprave akademickej práce.
+            Používateľ je zodpovedný za kontrolu, konečnú úpravu, správnosť údajov
+            a dodržanie pravidiel svojej školy.
+          </p>
         </section>
 
         <section className="rounded-3xl border border-white/10 bg-[#0f172a] p-6 shadow-xl">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <Sparkles className="text-purple-400" size={24} />
+                <Paperclip
+                  className="text-purple-400"
+                  size={24}
+                />
 
                 <h2 className="text-2xl font-black text-white">
-                  Akademický pracovník + mentoring
+                  Akademický pracovník a individuálny mentoring
                 </h2>
               </div>
 
-              <p className="mt-2 text-gray-300">
-                Potrebuješ pomoc od reálneho experta? Klikni podľa krajiny a
-                otvorí sa webová stránka.
+              <p className="mt-2 max-w-3xl leading-7 text-slate-300">
+                Potrebujete individuálnu pomoc od odborníka? Vyberte si krajinu
+                a pokračujte na stránku partnerskej služby.
               </p>
 
               <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -744,7 +1061,9 @@ export default function PackagesPage() {
                   rel="noopener noreferrer"
                   className="rounded-2xl border border-white/10 bg-black/30 p-4 transition hover:border-green-400/50 hover:bg-green-500/10"
                 >
-                  <div className="text-sm text-gray-400">Slovensko</div>
+                  <div className="text-sm text-slate-400">
+                    Slovensko
+                  </div>
 
                   <div className="mt-1 font-bold text-white">
                     www.zaverecneprace.sk
@@ -757,7 +1076,9 @@ export default function PackagesPage() {
                   rel="noopener noreferrer"
                   className="rounded-2xl border border-white/10 bg-black/30 p-4 transition hover:border-blue-400/50 hover:bg-blue-500/10"
                 >
-                  <div className="text-sm text-gray-400">Česko</div>
+                  <div className="text-sm text-slate-400">
+                    Česko
+                  </div>
 
                   <div className="mt-1 font-bold text-white">
                     www.zaverecne-prace.cz
@@ -771,7 +1092,7 @@ export default function PackagesPage() {
                 href="https://www.zaverecneprace.sk"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-green-600 px-5 py-3 font-bold text-white transition hover:bg-green-500"
+                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-green-600 px-5 py-3 font-bold text-white transition hover:bg-green-500"
               >
                 <ExternalLink size={18} />
                 Slovensko
@@ -781,7 +1102,7 @@ export default function PackagesPage() {
                 href="https://www.zaverecne-prace.cz"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white transition hover:bg-blue-500"
+                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white transition hover:bg-blue-500"
               >
                 <ExternalLink size={18} />
                 Česko
@@ -803,11 +1124,27 @@ export default function PackagesPage() {
   );
 }
 
-function PackageInfo({ label, value }: { label: string; value: string }) {
+function HeroInfo({
+  icon,
+  title,
+  text,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  text: string;
+}) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
-      <div className="text-gray-400">{label}</div>
-      <div className="font-bold text-white">{value}</div>
+    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+      <div className="flex items-center gap-2 text-purple-300">
+        {icon}
+        <div className="text-sm font-black text-white">
+          {title}
+        </div>
+      </div>
+
+      <p className="mt-2 text-xs leading-5 text-slate-400">
+        {text}
+      </p>
     </div>
   );
 }

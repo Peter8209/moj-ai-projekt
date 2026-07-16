@@ -45,6 +45,12 @@ import {
   type AnalysisRow,
 } from '@/components/analysis/analysisStats';
 
+import type {
+  AddonId,
+  FeatureKey,
+  PlanId,
+} from '@/lib/billing/catalog';
+
 import { useLanguage } from '@/components/LanguageProvider';
 import ImprovementBox from '@/components/ImprovementBox';
 import MobileDashboardNavigation from '@/components/dashboard/MobileDashboardNavigation';
@@ -65,6 +71,75 @@ type ModuleKey =
 
 type Agent = 'openai' | 'claude' | 'gemini' | 'grok' | 'mistral';
 type LanguageCode = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
+
+type DashboardEntitlements = {
+  ok?: boolean;
+  userId: string;
+  email: string | null;
+  planId: PlanId;
+  planName: string;
+  planPriceCents: number;
+  pageLimit: number;
+  addonIds: AddonId[];
+  addonNames: string[];
+  features: FeatureKey[];
+  promptLimit: number | null;
+  promptsUsed: number;
+  promptsRemaining: number | null;
+  promptLimitReached: boolean;
+  attachmentLimit: number;
+  activatedAt: string | null;
+  validUntil: string | null;
+  updatedAt: string | null;
+};
+
+type DashboardPageQuota = {
+  ok?: boolean;
+  planId: string;
+  basePageLimit: number;
+  extraPageLimit: number;
+  pageLimit: number;
+  pagesUsed: number;
+  pagesRemaining: number;
+  pageLimitReached: boolean;
+};
+
+type BillingNotice = {
+  code: string;
+  message: string;
+  detail?: string;
+  purchaseUrl: string;
+};
+
+type DashboardApiErrorParams = {
+  status: number;
+  code: string;
+  message: string;
+  detail?: string;
+  purchaseUrl?: string;
+};
+
+class DashboardApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly detail?: string;
+  readonly purchaseUrl?: string;
+
+  constructor({
+    status,
+    code,
+    message,
+    detail,
+    purchaseUrl,
+  }: DashboardApiErrorParams) {
+    super(message);
+    this.name = 'DashboardApiError';
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+    this.purchaseUrl = purchaseUrl;
+  }
+}
 
 type TranslationStyle =
   | 'academic'
@@ -1582,6 +1657,27 @@ const dashboardModuleOrder: ModuleKey[] = [
   'humanizer',
 ];
 
+const MODULE_REQUIRED_FEATURE: Record<ModuleKey, FeatureKey> = {
+  supervisor: 'ai-supervisor',
+  quality: 'quality-audit',
+  defense: 'defense',
+  translation: 'translation',
+  data: 'data-prepare',
+  planning: 'planning',
+  emails: 'emails',
+  originality: 'originality',
+  humanizer: 'humanizer',
+};
+
+const BILLING_ERROR_CODES = new Set([
+  'PAGE_LIMIT_REACHED',
+  'PROMPT_LIMIT_REACHED',
+  'FEATURE_NOT_INCLUDED',
+  'REQUIRED_FEATURES_MISSING',
+  'NO_REQUIRED_FEATURE_INCLUDED',
+  'ATTACHMENT_LIMIT_REACHED',
+]);
+
 function isModuleKey(value: string): value is ModuleKey {
   return (
     value === 'supervisor' ||
@@ -1596,7 +1692,346 @@ function isModuleKey(value: string): value is ModuleKey {
   );
 }
 
+// ================= BILLING NORMALIZATION =================
 
+type UnknownRecord = Record<string, unknown>;
+
+const DASHBOARD_PLAN_DEFAULTS: Record<
+  PlanId,
+  {
+    name: string;
+    priceCents: number;
+    pageLimit: number;
+    attachmentLimit: number;
+  }
+> = {
+  free: {
+    name: 'FREE',
+    priceCents: 0,
+    pageLimit: 3,
+    attachmentLimit: 1,
+  },
+  'seminar-work': {
+    name: 'Seminárna práca',
+    priceCents: 3900,
+    pageLimit: 15,
+    attachmentLimit: 12,
+  },
+  'bachelor-thesis': {
+    name: 'Bakalárska práca',
+    priceCents: 14900,
+    pageLimit: 50,
+    attachmentLimit: 12,
+  },
+  'master-thesis': {
+    name: 'Diplomová / magisterská práca',
+    priceCents: 18900,
+    pageLimit: 70,
+    attachmentLimit: 12,
+  },
+};
+
+const DASHBOARD_ADDON_LABELS: Record<AddonId, string> = {
+  'data-analysis': 'Analýza dát',
+  'extra-20': 'Extra 20 strán',
+  'extra-40': 'Extra 40 strán',
+  'extra-60': 'Extra 60 strán',
+};
+
+const DASHBOARD_PLAN_IDS = new Set<PlanId>([
+  'free',
+  'seminar-work',
+  'bachelor-thesis',
+  'master-thesis',
+]);
+
+const DASHBOARD_ADDON_IDS = new Set<AddonId>([
+  'data-analysis',
+  'extra-20',
+  'extra-40',
+  'extra-60',
+]);
+
+function isUnknownRecord(value: unknown): value is UnknownRecord {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+function unwrapApiPayload(value: unknown): UnknownRecord | null {
+  if (!isUnknownRecord(value)) return null;
+
+  if (isUnknownRecord(value.data)) return value.data;
+  if (isUnknownRecord(value.entitlements)) return value.entitlements;
+  if (isUnknownRecord(value.quota)) return value.quota;
+
+  return value;
+}
+
+function readString(
+  record: UnknownRecord,
+  ...keys: string[]
+): string {
+  for (const key of keys) {
+    const value = record[key];
+
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return '';
+}
+
+function readNullableString(
+  record: UnknownRecord,
+  ...keys: string[]
+): string | null {
+  const value = readString(record, ...keys);
+  return value || null;
+}
+
+function readNumber(
+  record: UnknownRecord,
+  ...keys: string[]
+): number | null {
+  for (const key of keys) {
+    const value = record[key];
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
+}
+
+function readBoolean(
+  record: UnknownRecord,
+  fallback: boolean,
+  ...keys: string[]
+): boolean {
+  for (const key of keys) {
+    const value = record[key];
+
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+
+      if (['true', '1', 'yes', 'ano', 'áno'].includes(normalized)) {
+        return true;
+      }
+
+      if (['false', '0', 'no', 'nie'].includes(normalized)) {
+        return false;
+      }
+    }
+  }
+
+  return fallback;
+}
+
+function readStringArray(
+  record: UnknownRecord,
+  ...keys: string[]
+): string[] {
+  for (const key of keys) {
+    const value = record[key];
+
+    if (Array.isArray(value)) {
+      return Array.from(
+        new Set(
+          value
+            .map((item) => String(item ?? '').trim())
+            .filter(Boolean),
+        ),
+      );
+    }
+
+    if (typeof value === 'string' && value.trim()) {
+      return Array.from(
+        new Set(
+          value
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean),
+        ),
+      );
+    }
+  }
+
+  return [];
+}
+
+function normalizeDashboardPlanId(value: unknown): PlanId {
+  const candidate = String(value ?? '').trim() as PlanId;
+  return DASHBOARD_PLAN_IDS.has(candidate) ? candidate : 'free';
+}
+
+function normalizeDashboardAddonIds(values: string[]): AddonId[] {
+  return values.filter(
+    (value): value is AddonId =>
+      DASHBOARD_ADDON_IDS.has(value as AddonId),
+  );
+}
+
+function normalizeDashboardEntitlements(
+  value: unknown,
+): DashboardEntitlements | null {
+  const root = isUnknownRecord(value) ? value : null;
+  const data = unwrapApiPayload(value);
+
+  if (!data) return null;
+
+  const planId = normalizeDashboardPlanId(
+    data.planId ?? data.plan_id,
+  );
+  const planDefaults = DASHBOARD_PLAN_DEFAULTS[planId];
+
+  const addonIds = normalizeDashboardAddonIds(
+    readStringArray(data, 'addonIds', 'addon_ids'),
+  );
+
+  const explicitAddonNames = readStringArray(
+    data,
+    'addonNames',
+    'addon_names',
+  );
+
+  const addonNames = explicitAddonNames.length
+    ? explicitAddonNames
+    : addonIds.map((addonId) => DASHBOARD_ADDON_LABELS[addonId]);
+
+  const features = readStringArray(
+    data,
+    'features',
+    'featureList',
+    'feature_list',
+  ) as FeatureKey[];
+
+  const promptLimit = readNumber(
+    data,
+    'promptLimit',
+    'prompt_limit',
+  );
+
+  const promptsUsed = Math.max(
+    0,
+    readNumber(data, 'promptsUsed', 'prompts_used') ?? 0,
+  );
+
+  const promptsRemainingFromApi = readNumber(
+    data,
+    'promptsRemaining',
+    'prompts_remaining',
+  );
+
+  const promptsRemaining =
+    promptLimit === null
+      ? null
+      : Math.max(
+          0,
+          promptsRemainingFromApi ?? promptLimit - promptsUsed,
+        );
+
+  const promptLimitReached = readBoolean(
+    data,
+    promptLimit !== null && promptsUsed >= promptLimit,
+    'promptLimitReached',
+    'prompt_limit_reached',
+  );
+
+  return {
+    ok: readBoolean(root ?? data, true, 'ok', 'success'),
+    userId: readString(data, 'userId', 'user_id'),
+    email: readNullableString(data, 'email'),
+    planId,
+    planName:
+      readString(data, 'planName', 'plan_name') || planDefaults.name,
+    planPriceCents:
+      readNumber(data, 'planPriceCents', 'plan_price_cents') ??
+      planDefaults.priceCents,
+    pageLimit:
+      readNumber(data, 'pageLimit', 'page_limit') ??
+      planDefaults.pageLimit,
+    addonIds,
+    addonNames,
+    features,
+    promptLimit,
+    promptsUsed,
+    promptsRemaining,
+    promptLimitReached,
+    attachmentLimit: Math.max(
+      0,
+      readNumber(data, 'attachmentLimit', 'attachment_limit') ??
+        planDefaults.attachmentLimit,
+    ),
+    activatedAt: readNullableString(data, 'activatedAt', 'activated_at'),
+    validUntil: readNullableString(data, 'validUntil', 'valid_until'),
+    updatedAt: readNullableString(data, 'updatedAt', 'updated_at'),
+  };
+}
+
+function normalizeDashboardPageQuota(
+  value: unknown,
+): DashboardPageQuota | null {
+  const root = isUnknownRecord(value) ? value : null;
+  const data = unwrapApiPayload(value);
+
+  if (!data) return null;
+
+  const planId = readString(data, 'planId', 'plan_id') || 'free';
+  const basePageLimit = Math.max(
+    0,
+    readNumber(data, 'basePageLimit', 'base_page_limit') ?? 0,
+  );
+  const extraPageLimit = Math.max(
+    0,
+    readNumber(data, 'extraPageLimit', 'extra_page_limit') ?? 0,
+  );
+  const pageLimit = Math.max(
+    0,
+    readNumber(data, 'pageLimit', 'page_limit') ??
+      basePageLimit + extraPageLimit,
+  );
+  const pagesUsed = Math.max(
+    0,
+    readNumber(data, 'pagesUsed', 'pages_used') ?? 0,
+  );
+  const pagesRemaining = Math.max(
+    0,
+    readNumber(data, 'pagesRemaining', 'pages_remaining') ??
+      pageLimit - pagesUsed,
+  );
+
+  return {
+    ok: readBoolean(root ?? data, true, 'ok', 'success'),
+    planId,
+    basePageLimit,
+    extraPageLimit,
+    pageLimit,
+    pagesUsed,
+    pagesRemaining,
+    pageLimitReached: readBoolean(
+      data,
+      pageLimit > 0 && pagesRemaining <= 0,
+      'pageLimitReached',
+      'page_limit_reached',
+    ),
+  };
+}
 
 // ================= HELPERS =================
 
@@ -2285,6 +2720,42 @@ async function readApiErrorResponse(res: Response) {
   }
 }
 
+async function readDashboardApiError(
+  response: Response,
+): Promise<DashboardApiError> {
+  const contentType = response.headers.get('content-type') || '';
+
+  if (contentType.includes('application/json')) {
+    const data = await response.json().catch(() => null);
+
+    return new DashboardApiError({
+      status: response.status,
+      code: String(data?.code || `HTTP_${response.status}`),
+      message: String(
+        data?.message ||
+          data?.error ||
+          `Požiadavka zlyhala s HTTP stavom ${response.status}.`,
+      ),
+      detail:
+        data?.detail !== undefined
+          ? String(data.detail)
+          : data?.details !== undefined
+            ? String(data.details)
+            : undefined,
+      purchaseUrl:
+        data?.purchaseUrl !== undefined
+          ? String(data.purchaseUrl)
+          : undefined,
+    });
+  }
+
+  return new DashboardApiError({
+    status: response.status,
+    code: `HTTP_${response.status}`,
+    message: await readApiErrorResponse(response),
+  });
+}
+
 function getTodayStart() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -2796,7 +3267,205 @@ const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
 const [analysisResult, setAnalysisResult] =
   useState<AnalysisResult | null>(null);
 
+const [entitlements, setEntitlements] =
+  useState<DashboardEntitlements | null>(null);
+const [pageQuota, setPageQuota] =
+  useState<DashboardPageQuota | null>(null);
+const [billingLoading, setBillingLoading] = useState(true);
+const [billingNotice, setBillingNotice] =
+  useState<BillingNotice | null>(null);
+
 const [systemLanguage, setSystemLanguage] = useState<LanguageCode>('sk');
+
+const mergeEntitlementsFromResponse = useCallback((value: unknown) => {
+  const normalized = normalizeDashboardEntitlements(value);
+
+  if (!normalized) return;
+
+  setEntitlements((current) => ({
+    ...(current || normalized),
+    ...normalized,
+    addonIds: normalized.addonIds,
+    addonNames: normalized.addonNames,
+    features: normalized.features,
+  }));
+}, []);
+
+const mergePageQuotaFromResponse = useCallback((value: unknown) => {
+  const normalized = normalizeDashboardPageQuota(value);
+
+  if (!normalized) return;
+
+  setPageQuota((current) => ({
+    ...(current || normalized),
+    ...normalized,
+  }));
+}, []);
+
+const loadBillingState = useCallback(async () => {
+  setBillingLoading(true);
+
+  try {
+    const [entitlementResponse, pageQuotaResponse] = await Promise.all([
+      fetch('/api/entitlements/me', {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+        },
+      }),
+      fetch('/api/usage/pages', {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+        },
+      }),
+    ]);
+
+    if (
+      entitlementResponse.status === 401 ||
+      pageQuotaResponse.status === 401
+    ) {
+      router.replace('/login?returnTo=/dashboard');
+      return null;
+    }
+
+    if (!entitlementResponse.ok) {
+      throw await readDashboardApiError(entitlementResponse);
+    }
+
+    if (!pageQuotaResponse.ok) {
+      throw await readDashboardApiError(pageQuotaResponse);
+    }
+
+    const [entitlementData, pageQuotaData] = await Promise.all([
+      entitlementResponse.json(),
+      pageQuotaResponse.json(),
+    ]);
+
+    const normalizedEntitlements =
+      normalizeDashboardEntitlements(entitlementData);
+    const normalizedPageQuota =
+      normalizeDashboardPageQuota(pageQuotaData);
+
+    if (!normalizedEntitlements) {
+      throw new DashboardApiError({
+        status: 500,
+        code: 'INVALID_ENTITLEMENTS_RESPONSE',
+        message:
+          'Server vrátil neplatný formát údajov o aktívnom balíku.',
+        detail:
+          'Odpoveď /api/entitlements/me nebolo možné normalizovať.',
+        purchaseUrl: '/pricing',
+      });
+    }
+
+    if (!normalizedPageQuota) {
+      throw new DashboardApiError({
+        status: 500,
+        code: 'INVALID_PAGE_QUOTA_RESPONSE',
+        message:
+          'Server vrátil neplatný formát údajov o stránkovom limite.',
+        detail:
+          'Odpoveď /api/usage/pages nebolo možné normalizovať.',
+        purchaseUrl: '/pricing#doplnkove-sluzby',
+      });
+    }
+
+    setEntitlements(normalizedEntitlements);
+    setPageQuota(normalizedPageQuota);
+    setBillingNotice((current) => {
+      if (!current) return null;
+
+      if (
+        current.code === 'BILLING_STATE_LOAD_FAILED' ||
+        current.code === 'BILLING_STATE_UNAVAILABLE'
+      ) {
+        return null;
+      }
+
+      if (
+        current.code === 'PROMPT_LIMIT_REACHED' &&
+        !normalizedEntitlements.promptLimitReached
+      ) {
+        return null;
+      }
+
+      if (
+        current.code === 'PAGE_LIMIT_REACHED' &&
+        !normalizedPageQuota.pageLimitReached
+      ) {
+        return null;
+      }
+
+      return current;
+    });
+
+    return {
+      entitlements: normalizedEntitlements,
+      pageQuota: normalizedPageQuota,
+    };
+  } catch (error: unknown) {
+    if (process.env.NODE_ENV === 'development') {
+      console.info('DASHBOARD_BILLING_LOAD_ERROR', {
+        name: error instanceof Error ? error.name : 'UnknownError',
+        message: error instanceof Error ? error.message : String(error),
+        status:
+          error instanceof DashboardApiError
+            ? error.status
+            : undefined,
+        code:
+          error instanceof DashboardApiError
+            ? error.code
+            : undefined,
+        detail:
+          error instanceof DashboardApiError
+            ? error.detail
+            : undefined,
+      });
+    }
+
+    if (error instanceof DashboardApiError) {
+      setBillingNotice({
+        code: error.code,
+        message: error.message,
+        detail: error.detail,
+        purchaseUrl: error.purchaseUrl || '/pricing',
+      });
+    } else {
+      setBillingNotice({
+        code: 'BILLING_STATE_LOAD_FAILED',
+        message:
+          'Aktívny balík a limity sa nepodarilo načítať. Obnovte stránku alebo skúste požiadavku znova.',
+        detail: error instanceof Error ? error.message : String(error),
+        purchaseUrl: '/pricing',
+      });
+    }
+
+    return null;
+  } finally {
+    setBillingLoading(false);
+  }
+}, [router]);
+
+useEffect(() => {
+  void loadBillingState();
+
+  const refreshBillingState = () => {
+    void loadBillingState();
+  };
+
+  window.addEventListener('focus', refreshBillingState);
+  window.addEventListener('zedpera:billing-updated', refreshBillingState);
+
+  return () => {
+    window.removeEventListener('focus', refreshBillingState);
+    window.removeEventListener('zedpera:billing-updated', refreshBillingState);
+  };
+}, [loadBillingState]);
 
 useEffect(() => {
   const syncLanguage = () => {
@@ -2980,6 +3649,28 @@ const activeTranslationKey = activeModuleInfo.translationKey;
 const fixedUi = getFixedModuleUi(systemLanguage)[activeModule];
 const currentFixedModuleUi = getFixedModuleUi(systemLanguage);
 
+const hasFeature = useCallback(
+  (feature: FeatureKey) =>
+    Boolean(entitlements?.features.includes(feature)),
+  [entitlements],
+);
+
+const activeModuleFeature = MODULE_REQUIRED_FEATURE[activeModule];
+const activeModuleAllowed =
+  Boolean(entitlements) && hasFeature(activeModuleFeature);
+const effectiveAttachmentLimit = Math.max(
+  0,
+  Math.min(maxFilesCount, entitlements?.attachmentLimit ?? 1),
+);
+const generationBlocked =
+  isLoading ||
+  billingLoading ||
+  !entitlements ||
+  !pageQuota ||
+  !activeModuleAllowed ||
+  entitlements.promptLimitReached ||
+  pageQuota.pageLimitReached;
+
 const activeModuleLabel = fixedUi.label;
 
 const activeModuleButtonLabel = fixedUi.button;
@@ -3014,6 +3705,30 @@ const activeModuleCardSubtitle = fixedUi.shortLabel;
 const activeModuleCardDescription = fixedUi.intro;
 
 const activeModuleResultTitle = fixedUi.resultTitle;
+
+useEffect(() => {
+  if (billingLoading || !entitlements) return;
+
+  if (!entitlements.features.includes(activeModuleFeature)) {
+    setBillingNotice({
+      code: 'FEATURE_NOT_INCLUDED',
+      message: `Funkcia „${activeModuleLabel}“ nie je súčasťou aktivovaného balíka.`,
+      detail: activeModuleFeature,
+      purchaseUrl: '/pricing',
+    });
+    return;
+  }
+
+  setBillingNotice((current) =>
+    current?.code === 'FEATURE_NOT_INCLUDED' ? null : current,
+  );
+}, [
+  activeModuleFeature,
+  activeModuleLabel,
+  billingLoading,
+  entitlements,
+]);
+
 const exportTitle = useMemo(() => {
   return `${activeModuleLabel} - ${
     activeProfile?.title || 'output'
@@ -3262,10 +3977,18 @@ useEffect(() => {
 
     setAttachedFiles((prev) => {
       const next = [...prev];
+      const uploadLimit = effectiveAttachmentLimit;
 
       for (const file of validFiles) {
-        if (next.length >= maxFilesCount) {
-          alert(`Môžete priložiť maximálne ${maxFilesCount} súborov.`);
+        if (next.length >= uploadLimit) {
+          setBillingNotice({
+            code: 'ATTACHMENT_LIMIT_REACHED',
+            message:
+              uploadLimit === 1
+                ? 'Váš balík povoľuje maximálne 1 prílohu.'
+                : `Váš balík povoľuje maximálne ${uploadLimit} príloh.`,
+            purchaseUrl: '/pricing',
+          });
           break;
         }
 
@@ -3892,7 +4615,73 @@ function getDashboardColumnNames(rows: AnalysisRow[]): string[] {
 }
 
 const runModule = async () => {
-  if (isLoading) return;
+  if (isLoading || billingLoading) return;
+
+  setBillingNotice(null);
+
+  let currentEntitlements = entitlements;
+  let currentPageQuota = pageQuota;
+
+  if (!currentEntitlements || !currentPageQuota) {
+    const loadedBillingState = await loadBillingState();
+
+    currentEntitlements = loadedBillingState?.entitlements || null;
+    currentPageQuota = loadedBillingState?.pageQuota || null;
+  }
+
+  if (!currentEntitlements || !currentPageQuota) {
+    setBillingNotice({
+      code: 'BILLING_STATE_UNAVAILABLE',
+      message:
+        'Aktívny balík a limity nie sú dostupné. Obnovte stránku a skúste požiadavku znova.',
+      purchaseUrl: '/pricing',
+    });
+    return;
+  }
+
+  const requiredFeature = MODULE_REQUIRED_FEATURE[activeModule];
+
+  if (!currentEntitlements.features.includes(requiredFeature)) {
+    setBillingNotice({
+      code: 'FEATURE_NOT_INCLUDED',
+      message: `Funkcia „${activeModuleLabel}“ nie je súčasťou aktivovaného balíka.`,
+      detail: requiredFeature,
+      purchaseUrl: '/pricing',
+    });
+    return;
+  }
+
+  if (currentEntitlements.promptLimitReached) {
+    setBillingNotice({
+      code: 'PROMPT_LIMIT_REACHED',
+      message:
+        'Limit dostupných promptov bol vyčerpaný. Pre pokračovanie si aktivujte platený balík.',
+      purchaseUrl: '/pricing',
+    });
+    return;
+  }
+
+  if (currentPageQuota.pageLimitReached) {
+    setBillingNotice({
+      code: 'PAGE_LIMIT_REACHED',
+      message:
+        'Stránkový limit bol vyčerpaný. Pre pokračovanie si dokúpte ďalšie strany.',
+      purchaseUrl: '/pricing#doplnkove-sluzby',
+    });
+    return;
+  }
+
+  if (attachedFiles.length > currentEntitlements.attachmentLimit) {
+    setBillingNotice({
+      code: 'ATTACHMENT_LIMIT_REACHED',
+      message:
+        currentEntitlements.attachmentLimit === 1
+          ? 'Váš balík povoľuje maximálne 1 prílohu.'
+          : `Váš balík povoľuje maximálne ${currentEntitlements.attachmentLimit} príloh.`,
+      purchaseUrl: '/pricing',
+    });
+    return;
+  }
 
   const userText = input.trim();
   const secondaryText = secondaryInput.trim();
@@ -3952,7 +4741,6 @@ if (activeModule === 'data') {
 
   if (!dataFiles.length) {
     alert('Najprv nahraj Excel, CSV alebo TXT súbor s dátami.');
-    setIsLoading(false);
     return;
   }
 
@@ -3969,7 +4757,6 @@ if (activeModule === 'data') {
 
   if (!allowedDataFiles.length) {
     alert('Pre analýzu dát nahraj Excel, CSV alebo TXT súbor.');
-    setIsLoading(false);
     return;
   }
 
@@ -4047,7 +4834,7 @@ prepareFormData.append(
   });
 
   if (!prepareResponse.ok) {
-    throw new Error(await readApiErrorResponse(prepareResponse));
+    throw await readDashboardApiError(prepareResponse);
   }
 
   const prepareResult = await prepareResponse.json();
@@ -4124,6 +4911,28 @@ prepareFormData.append(
 
 const hasGroupingColumns = Boolean(groupingColumnsText.trim());
 
+const canDataDescriptive = currentEntitlements.features.includes(
+  'data-descriptive',
+);
+const canDataQuestionnaires = currentEntitlements.features.includes(
+  'data-questionnaires',
+);
+const canDataReliability = currentEntitlements.features.includes(
+  'data-reliability',
+);
+const canDataNormality = currentEntitlements.features.includes(
+  'data-normality',
+);
+const canDataCorrelations = currentEntitlements.features.includes(
+  'data-correlations',
+);
+const canDataParametric = currentEntitlements.features.includes(
+  'data-parametric-tests',
+);
+const canDataNonParametric = currentEntitlements.features.includes(
+  'data-nonparametric-tests',
+);
+
 const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
   alpha: 0.05,
   language: workLanguage,
@@ -4132,25 +4941,24 @@ const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
   source: 'prepared-raw-data',
   sheetName: 'DATA_CLEAN',
 
-  // Vždy počítať základné výstupy z DATA_CLEAN
-  includeFrequencies: true,
-  includeItemDescriptives: true,
-  includeNormality: true,
-  includeCorrelations: true,
-  includeRecommendedCorrelations: true,
+  // Každý štatistický blok sa zapne iba vtedy,
+  // keď ho obsahuje aktívny plán alebo doplnok.
+  includeFrequencies: canDataDescriptive,
+  includeItemDescriptives: canDataDescriptive,
+  includeNormality: canDataNormality,
+  includeCorrelations: canDataCorrelations,
+  includeRecommendedCorrelations: canDataCorrelations,
 
-  // Škály, subškály a reliabilita sa počítajú len vtedy,
-  // keď používateľ zadá škály alebo subškály.
-  includeScaleScores: hasManualScales,
-  includeScaleDescriptives: hasManualScales,
-  includeReliability: hasManualScales,
+  includeScaleScores: hasManualScales && canDataQuestionnaires,
+  includeScaleDescriptives: hasManualScales && canDataDescriptive,
+  includeReliability: hasManualScales && canDataReliability,
 
-  // Testy skupín sa počítajú len vtedy,
-  // keď používateľ zadá skupinové premenné.
-  includeGroupTests: hasGroupingColumns,
-  includeParametricTests: hasGroupingColumns,
-  includeNonParametricTests: hasGroupingColumns,
-  includeRecommendedGroupTests: hasGroupingColumns,
+  includeGroupTests:
+    hasGroupingColumns && (canDataParametric || canDataNonParametric),
+  includeParametricTests: hasGroupingColumns && canDataParametric,
+  includeNonParametricTests: hasGroupingColumns && canDataNonParametric,
+  includeRecommendedGroupTests:
+    hasGroupingColumns && (canDataParametric || canDataNonParametric),
 
   // Toto musí byť TRUE, inak sa pri manuálnom režime
   // nepoužijú numerické premenné z prepared raw data.
@@ -4354,7 +5162,7 @@ const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
     resultRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, 150);
 
-  setIsLoading(false);
+  await loadBillingState();
   return;
 }
 
@@ -4390,10 +5198,13 @@ const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
       });
 
       if (!response.ok) {
-        throw new Error(await readApiErrorResponse(response));
+        throw await readDashboardApiError(response);
       }
 
       const data = await response.json();
+
+      mergeEntitlementsFromResponse(data?.entitlements);
+      mergePageQuotaFromResponse(data?.pageUsage);
 
       if (data?.ok === false) {
         throw new Error(
@@ -4440,6 +5251,7 @@ const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
         resultRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 150);
 
+      await loadBillingState();
       return;
     }
 
@@ -4550,7 +5362,7 @@ const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
     });
 
     if (!response.ok) {
-      throw new Error(await readApiErrorResponse(response));
+      throw await readDashboardApiError(response);
     }
 
     const contentType = response.headers.get('content-type') || '';
@@ -4558,6 +5370,9 @@ const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
 
     if (contentType.includes('application/json')) {
       const data = await response.json();
+
+      mergeEntitlementsFromResponse(data?.entitlements);
+      mergePageQuotaFromResponse(data?.pageUsage);
 
       fullText =
         data.output ||
@@ -4657,11 +5472,42 @@ const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
       },
     });
 
+    await loadBillingState();
+
     setTimeout(() => {
       resultRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 150);
   } catch (error) {
     console.error('RUN_MODULE_ERROR:', error);
+
+    if (error instanceof DashboardApiError) {
+      if (error.status === 401) {
+        router.replace('/login?returnTo=/dashboard');
+        return;
+      }
+
+      if (
+        error.status === 402 ||
+        error.status === 403 ||
+        BILLING_ERROR_CODES.has(error.code)
+      ) {
+        setBillingNotice({
+          code: error.code,
+          message: error.message,
+          detail: error.detail,
+          purchaseUrl:
+            error.purchaseUrl ||
+            (error.code === 'PAGE_LIMIT_REACHED'
+              ? '/pricing#doplnkove-sluzby'
+              : '/pricing'),
+        });
+
+        setResult('');
+        setCanvasText('');
+        await loadBillingState();
+        return;
+      }
+    }
 
     const message =
       error instanceof Error
@@ -4679,7 +5525,25 @@ const selectDashboardModule = useCallback(
   (moduleKey: ModuleKey) => {
     if (!isModuleKey(moduleKey)) return;
 
+    const requiredFeature = MODULE_REQUIRED_FEATURE[moduleKey];
+    const moduleAllowed = Boolean(
+      entitlements?.features.includes(requiredFeature),
+    );
+
     setActiveModule(moduleKey);
+
+    if (!billingLoading && entitlements && !moduleAllowed) {
+      setBillingNotice({
+        code: 'FEATURE_NOT_INCLUDED',
+        message: `Vybraný modul nie je súčasťou balíka „${entitlements.planName}“.`,
+        detail: requiredFeature,
+        purchaseUrl: '/pricing',
+      });
+    } else {
+      setBillingNotice((current) =>
+        current?.code === 'FEATURE_NOT_INCLUDED' ? null : current,
+      );
+    }
 
     if (typeof window !== 'undefined') {
       localStorage.setItem(
@@ -4699,7 +5563,7 @@ const selectDashboardModule = useCallback(
       });
     }, 80);
   },
-  [router],
+  [billingLoading, entitlements, router],
 );
 
 const downloadPdf = () => {
@@ -5307,6 +6171,26 @@ const downloadExcel = () => {
 
 
  const downloadPpt = async () => {
+  let currentEntitlements = entitlements;
+
+  if (!currentEntitlements) {
+    const loadedBillingState = await loadBillingState();
+    currentEntitlements = loadedBillingState?.entitlements || null;
+  }
+
+  if (
+    !currentEntitlements?.features.includes('defense-presentation')
+  ) {
+    setBillingNotice({
+      code: 'FEATURE_NOT_INCLUDED',
+      message:
+        'Prezentácia na obhajobu nie je súčasťou aktivovaného balíka.',
+      detail: 'defense-presentation',
+      purchaseUrl: '/pricing',
+    });
+    return;
+  }
+
   const text = stripModuleExtraSections(canvasText || result, activeModule);
 
   if (!text.trim()) {
@@ -5518,8 +6402,7 @@ const downloadExcel = () => {
     });
 
     if (!response.ok) {
-      const errorText = await readApiErrorResponse(response);
-      throw new Error(errorText || 'PPTX prezentáciu sa nepodarilo vytvoriť.');
+      throw await readDashboardApiError(response);
     }
 
     const blob = await response.blob();
@@ -5539,8 +6422,32 @@ const downloadExcel = () => {
     link.remove();
 
     URL.revokeObjectURL(url);
+    await loadBillingState();
   } catch (error) {
     console.error('PPTX_EXPORT_ERROR:', error);
+
+    if (
+      error instanceof DashboardApiError &&
+      error.status === 401
+    ) {
+      router.replace('/login?returnTo=/dashboard');
+      return;
+    }
+
+    if (
+      error instanceof DashboardApiError &&
+      (error.status === 402 ||
+        error.status === 403 ||
+        BILLING_ERROR_CODES.has(error.code))
+    ) {
+      setBillingNotice({
+        code: error.code,
+        message: error.message,
+        detail: error.detail,
+        purchaseUrl: error.purchaseUrl || '/pricing',
+      });
+      return;
+    }
 
     alert(
       error instanceof Error
@@ -5739,6 +6646,102 @@ const downloadExcel = () => {
   onNavigate={(path) => router.push(path)}
 />
 
+<div className="px-4 pt-4 sm:px-6 xl:px-8">
+  {billingLoading ? (
+    <section className="mb-4 rounded-2xl border border-violet-400/20 bg-violet-500/10 p-4 text-sm font-bold text-violet-100">
+      <span className="inline-flex items-center gap-2">
+        <RefreshCcw className="h-4 w-4 animate-spin" />
+        Načítavam aktívny balík a dostupné limity...
+      </span>
+    </section>
+  ) : null}
+
+  {entitlements && pageQuota ? (
+    <section className="mb-4 rounded-3xl border border-white/10 bg-[#070b18] p-4 shadow-xl shadow-black/20">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-300">
+            Aktívny balík
+          </p>
+          <h2 className="mt-1 text-lg font-black text-white">
+            {entitlements.planName}
+          </h2>
+          {(entitlements.addonNames ?? []).length > 0 ? (
+            <p className="mt-1 text-xs font-bold text-slate-400">
+              Doplnky: {(entitlements.addonNames ?? []).join(', ')}
+            </p>
+          ) : null}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => router.push('/pricing')}
+          className="inline-flex min-h-[42px] items-center justify-center rounded-xl bg-violet-500 px-4 py-2 text-sm font-black text-white transition hover:bg-violet-400"
+        >
+          Zobraziť balíky
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+          <p className="text-xs font-bold text-slate-400">Strany</p>
+          <p className="mt-1 font-black text-white">
+            {pageQuota.pagesRemaining} zostáva z {pageQuota.pageLimit}
+          </p>
+          {pageQuota.extraPageLimit > 0 ? (
+            <p className="mt-1 text-xs font-bold text-emerald-300">
+              Extra strany: +{pageQuota.extraPageLimit}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+          <p className="text-xs font-bold text-slate-400">Prompty</p>
+          <p className="mt-1 font-black text-white">
+            {entitlements.promptLimit === null
+              ? 'Neobmedzené'
+              : `${entitlements.promptsRemaining ?? 0} zostáva z ${entitlements.promptLimit}`}
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+          <p className="text-xs font-bold text-slate-400">Prílohy</p>
+          <p className="mt-1 font-black text-white">
+            {attachedFiles.length} / {effectiveAttachmentLimit}
+          </p>
+        </div>
+      </div>
+    </section>
+  ) : null}
+
+  {billingNotice ? (
+    <section className="mb-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="font-black text-amber-100">
+            {billingNotice.message}
+          </p>
+          {billingNotice.detail ? (
+            <p className="mt-1 text-sm font-bold text-amber-100/70">
+              {billingNotice.detail}
+            </p>
+          ) : null}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => router.push(billingNotice.purchaseUrl)}
+          className="shrink-0 rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-slate-950 transition hover:bg-amber-300"
+        >
+          {billingNotice.code === 'PAGE_LIMIT_REACHED'
+            ? 'Dokúpiť strany'
+            : 'Vybrať balík'}
+        </button>
+      </div>
+    </section>
+  ) : null}
+</div>
+
 {activeModule === 'planning' && (
 
                   <div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
@@ -5819,6 +6822,14 @@ const downloadExcel = () => {
                     fileInputRef={fileInputRef}
                     onFiles={handleFiles}
                     onRemove={removeFile}
+                    limit={effectiveAttachmentLimit}
+                    disabled={
+                      billingLoading ||
+                      !activeModuleAllowed ||
+                      Boolean(entitlements?.promptLimitReached) ||
+                      Boolean(pageQuota?.pageLimitReached) ||
+                      attachedFiles.length >= effectiveAttachmentLimit
+                    }
                   />
                 )}
 
@@ -5835,7 +6846,7 @@ const downloadExcel = () => {
   <button
     type="button"
     onClick={runModule}
-    disabled={isLoading}
+    disabled={generationBlocked}
     className={[
       'mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2',
       'rounded-2xl px-6 py-4 sm:mr-3 sm:w-auto',
@@ -5875,7 +6886,7 @@ const downloadExcel = () => {
   <button
     type="button"
     onClick={runModule}
-    disabled={isLoading}
+    disabled={generationBlocked}
     className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-sky-900/30 transition hover:from-sky-500 hover:via-cyan-500 hover:to-blue-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
@@ -5908,7 +6919,7 @@ const downloadExcel = () => {
   <button
     type="button"
     onClick={runModule}
-    disabled={isLoading}
+    disabled={generationBlocked}
     className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
@@ -5929,7 +6940,7 @@ const downloadExcel = () => {
   <button
     type="button"
     onClick={runModule}
-    disabled={isLoading}
+    disabled={generationBlocked}
     className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl border border-violet-300 bg-violet-700 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/40 ring-2 ring-violet-400/40 transition hover:bg-violet-600 hover:ring-violet-300/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-60 disabled:shadow-none disabled:ring-0 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
@@ -6171,7 +7182,7 @@ uroven_sportu`}
       <button
         type="button"
         onClick={runModule}
-        disabled={isLoading}
+        disabled={generationBlocked}
         className="group relative inline-flex min-h-[58px] w-full items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-600 px-6 py-4 text-sm font-black text-white shadow-2xl shadow-cyan-950/50 ring-2 ring-cyan-300/50 transition hover:from-emerald-400 hover:via-cyan-400 hover:to-blue-500 hover:ring-cyan-200/80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
       >
         <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.35),transparent_38%)] opacity-70 transition group-hover:opacity-100" />
@@ -6221,7 +7232,7 @@ uroven_sportu`}
   <button
     type="button"
     onClick={runModule}
-    disabled={isLoading}
+    disabled={generationBlocked}
     className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
@@ -6242,7 +7253,7 @@ uroven_sportu`}
   <button
     type="button"
     onClick={runModule}
-    disabled={isLoading}
+    disabled={generationBlocked}
     className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
@@ -6263,7 +7274,7 @@ uroven_sportu`}
   <button
     type="button"
     onClick={runModule}
-    disabled={isLoading}
+    disabled={generationBlocked}
     className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
@@ -6284,7 +7295,7 @@ uroven_sportu`}
   <button
     type="button"
     onClick={runModule}
-    disabled={isLoading}
+    disabled={generationBlocked}
     className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
   >
     {isLoading ? (
@@ -6488,11 +7499,15 @@ function FileUploadBox({
   fileInputRef,
   onFiles,
   onRemove,
+  limit,
+  disabled,
 }: {
   files: AttachedFile[];
   fileInputRef: RefObject<HTMLInputElement | null>;
   onFiles: (files: FileList | null) => void;
   onRemove: (id: string) => void;
+  limit: number;
+  disabled: boolean;
 }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -6501,6 +7516,7 @@ function FileUploadBox({
         type="file"
         accept={allowedFileAccept}
         multiple
+        disabled={disabled}
         className="hidden"
         onChange={(event) => onFiles(event.target.files)}
       />
@@ -6516,12 +7532,16 @@ function FileUploadBox({
             Nahraj PDF, DOCX, TXT, Excel, CSV, PPT alebo obrázky. Pri analýze
             dát systém otvorí výsledky v samostatnom modálnom okne.
           </p>
+          <p className="mt-1 text-xs font-black text-violet-200">
+            Prílohy: {files.length} / {limit}
+          </p>
         </div>
 
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="inline-flex items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 text-sm font-black text-violet-100 hover:bg-violet-500/20"
+          disabled={disabled}
+          className="inline-flex items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 text-sm font-black text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Paperclip className="h-4 w-4" />
           Priložiť súbor

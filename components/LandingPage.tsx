@@ -28,25 +28,33 @@ import {
 } from 'lucide-react';
 
 type PlanId =
-  | 'week-mini'
-  | 'week-student'
-  | 'week-pro'
-  | 'monthly'
-  | 'three-months'
-  | 'year-pro'
-  | 'year-max';
-
+  | 'free'
+  | 'seminar-work'
+  | 'bachelor-thesis'
+  | 'master-thesis'
+  | 'data-analysis'
+  | 'extra-20'
+  | 'extra-40'
+  | 'extra-60';
 type AppLanguage = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
+
+type PlanKind = 'free' | 'plan' | 'addon';
 
 type Plan = {
   id: PlanId;
+  kind: PlanKind;
   label: string;
   name: string;
   price: string;
   period: string;
   description: string;
   button: string;
+  features: string[];
   highlighted?: boolean;
+  pageLimit?: number;
+  extraPages?: number;
+  attachmentLimit?: number;
+  promptLimit?: number | null;
 };
 
 type FaqItem = {
@@ -127,6 +135,7 @@ type Translation = {
     goodTitle: string;
     badItems: string[];
     goodItems: string[];
+    closing: string;
   };
   process: {
     title: string;
@@ -237,19 +246,19 @@ const translations: Record<AppLanguage, Translation> = {
       title2: 'ktorý vás prevedie',
       title3: 'od zadania až po obhajobu',
       subtitle:
-        'Zedpera spája AI písanie, odbornú spätnú väzbu, kontrolu kvality, zdroje, citácie, praktickú časť aj prípravu na obhajobu v jednom systéme.',
+        'Písanie záverečnej práce nemusí znamenať mesiace stresu. ZEDPERA vás krok za krokom prevedie celým procesom od výberu témy, cez písanie, metodiku, citácie a spracovanie dát až po úspešnú obhajobu. Ušetrite desiatky hodín práce, odhaľte chyby skôr, než ich nájde školiteľ, a majte istotu, že je vaša práca pripravená na odovzdanie.',
       primary: 'Začať',
       secondary: 'Pozrieť ukážku',
       benefits: [
-        'AI vedúci 24/7',
-        'Praktická časť vrátane výpočtov',
+        'Osobný konzultant 24/7',
+        'Praktická časť a štatistika',
         'Citácie a zdroje',
         'Príprava na obhajobu',
       ],
       stats: [
         ['20', 'rokov skúseností'],
         ['1000+', 'študentov'],
-        ['24/7', 'AI vedúci'],
+        ['24/7', 'akademická podpora'],
         ['1', 'platforma pre celý proces'],
       ],
     },
@@ -284,57 +293,61 @@ const translations: Record<AppLanguage, Translation> = {
       title: 'Všetko, čo potrebujete pre úspešnú prácu',
       items: [
         {
-          title: 'AI vedúci práce',
-          text: 'Kontroluje logiku, metodológiu a upozorňuje na slabé miesta.',
+          title: 'Osobný akademický konzultant',
+          text: 'Vedie vás počas celej práce, kontroluje logiku a metodiku a upozorňuje na slabé miesta.',
         },
         {
-          title: 'AI kritik',
-          text: 'Okamžitá spätná väzba a skóre kvality písomného výstupu.',
+          title: 'Kritik',
+          text: 'Poskytuje okamžitú spätnú väzbu, hodnotenie kvality a konkrétne odporúčania na zlepšenie.',
         },
         {
-          title: 'AI písanie',
-          text: 'Napíše kapitolu, pripraví osnovu, úvod, záver a akýkoľvek odborný text na základe požiadaviek.',
+          title: 'Písanie práce',
+          text: 'Pomáha vytvoriť osnovu, kapitoly, úvod, záver a odborný text podľa zadania a profilu práce.',
         },
         {
           title: 'Zdroje a citácie',
-          text: 'Pomoc pri rešerši, citáciách a zozname literatúry.',
+          text: 'Pomáha pri rešerši, práci so zdrojmi, citovaní a zostavení zoznamu použitej literatúry.',
         },
         {
           title: 'Analýza dát',
-          text: 'Príprava praktickej časti vrátane štatistík.',
+          text: 'Spracovanie dotazníkov, deskriptívna štatistika, testovanie normality, korelačné analýzy, frekvenčné tabuľky, tvorba škál a subškál a grafy.',
         },
         {
           title: 'Obhajoba',
-          text: 'Príprava prezentácie, otázok, odpovedí a reakcií na posudky.',
+          text: 'Pripraví prezentáciu, sprievodný text, možné otázky komisie, odpovede a reakcie na posudky.',
         },
       ],
     },
     comparison: {
-      title: 'Prečo nestačí bežná AI alebo LLM nástroj?',
+      title: 'Prečo nestačí ChatGPT alebo iná AI?',
       subtitle:
-        'Zedpera funguje inak. Namiesto univerzálnych odpovedí dostanete výstup, ktorý súvisí s vašou prácou, zdrojmi a celým procesom písania.',
+        'ChatGPT odpovedá na otázky. ZEDPERA vás dovedie až k úspešne odovzdanej práci.',
       badTitle: 'Bežná AI',
-      goodTitle: 'Zedpera',
+      goodTitle: 'ZEDPERA',
       badItems: [
-        'Píše všeobecné texty a omáčky.',
-        'Nepamätá si tvoju prácu ani dôležité informácie.',
-        'Vymýšľa si zdroje.',
-        'Text je potrebné zdĺhavo upravovať.',
-        'Nedokáže upozorniť na chyby.',
-        'Nerozumie pripomienkam od školiteľa.',
-        'Nepomôže s praktickou časťou.',
-        'Nedokáže reagovať na posudky.',
+        'Odpovedá na jednotlivé otázky.',
+        'Nepozná vašu prácu ani jej históriu.',
+        'Každý nový chat začína takmer odznova.',
+        'Vyžaduje, aby ste vedeli, čo sa opýtať.',
+        'Vytvorí text, ale neskontroluje kvalitu celej práce.',
+        'Neposkytne vám spätnú väzbu ako vedúci práce.',
+        'Nevytvorí praktickú časť.',
+        'Nepripraví vás na obhajobu.',
+        'Musíte používať viacero nástrojov.',
       ],
       goodItems: [
-        'Pozná tvoju prácu a celý kontext.',
-        'Pamätá si históriu aj komunikáciu.',
-        'Cituje presne podľa zvolenej normy a používa tvoje zdroje.',
-        'Analyzuje prácu a upozorní na problémové časti.',
-        'Spracúva kapitoly, praktickú časť aj výpočty.',
-        'Dokáže pripraviť otázky, odpovede a obhajobu.',
-        'Nahradí vedúceho práce a je k dispozícii 24/7.',
-        'Pomôže s obhajobou na základe posudkov.',
+        'Vedie vás počas celej práce od zadania až po obhajobu.',
+        'Pamätá si celý projekt, všetky kapitoly a predchádzajúce úpravy.',
+        'Celý projekt zostáva v jednom prostredí a pozná jeho kontext.',
+        'Sama upozorní na metodické chyby, slabé miesta a nelogickosti.',
+        'Priebežne hodnotí kvalitu práce a odporúča konkrétne zlepšenia.',
+        'Simuluje skúseného vedúceho práce a poskytuje metodické vedenie.',
+        'Pripraví kompletnú štatistiku, grafy aj tabuľky, ktoré vložíte priamo do práce. Nemusíte platiť štatistu.',
+        'Vytvorí prezentáciu a kompletný sprievodný text k obhajobe.',
+        'Všetko vybavíte v jednom systéme.',
       ],
+      closing:
+        'ChatGPT je výborný pomocník. ZEDPERA je kompletný systém na tvorbu záverečných prác.',
     },
     process: {
       title: 'Ako funguje Zedpera?',
@@ -373,66 +386,201 @@ const translations: Record<AppLanguage, Translation> = {
       students: '1000+ študentov',
     },
     reviews: {
-      title: 'Skúsenosti študentov so Zedperou',
+      title: 'Skúsenosti študentov so ZEDPEROU',
       items: [
         {
-          text: 'AI vedúci mi pomohol pri pripomienkach od školiteľa a smeroval ma. Zedpera mi ušetrila neskutočne veľa času a stresu.',
-          name: 'Študentka diplomovej práce',
-        },
-        {
-          text: 'Zdroje som našiel priamo v systéme a práca bola hotová za pár dní. Veľmi mi pomohla praktická časť aj citácie.',
+          text: 'Školiteľ mi vrátil bakalársku prácu s viac ako 20 pripomienkami. ZEDPERA mi ich pomohla zapracovať za jeden večer a zároveň vysvetlila, prečo sú potrebné. Ušetrila mi obrovské množstvo času.',
           name: 'Študent bakalárskej práce',
         },
         {
-          text: 'Bežné AI mi dávali len všeobecné texty. Zedpera mi po vyplnení profilu vygenerovala relevantné kapitoly za pár minút.',
-          name: 'Študentka po skúsenosti AI',
+          text: 'Najviac som sa bál praktickej časti. Nahral som dotazník a ZEDPERA pripravila tabuľky, grafy aj interpretáciu výsledkov. To, čo by mi trvalo niekoľko dní, som mal hotové za približne hodinu.',
+          name: 'Študent praktickej časti',
         },
         {
-          text: 'Študujem externe popri práci a rodine. Vďaka Zedpere stíham všetko. Seminárky mám rýchlo hotové.',
-          name: 'Externá študentka',
+          text: 'Skúšal som ChatGPT, ale pri každej otázke som musel znova vysvetľovať tému práce. V ZEDPERE AI poznala celý môj projekt, pamätala si všetky kapitoly a odporúčania na seba nadväzovali.',
+          name: 'Študent po skúsenosti s ChatGPT',
+        },
+        {
+          text: 'Najväčšou pomocou bola kontrola kvality. Pred odovzdaním mi ZEDPERA našla nelogické časti metodiky aj chýbajúce citácie. Vďaka tomu som odovzdával prácu s oveľa väčšou istotou.',
+          name: 'Študent pred odovzdaním',
+        },
+        {
+          text: 'Obhajoby som sa bál viac ako samotného písania. ZEDPERA mi pripravila prezentáciu, možné otázky komisie aj návrhy odpovedí. Na obhajobu som išiel oveľa pokojnejší.',
+          name: 'Študent pred obhajobou',
+        },
+        {
+          text: 'Popri práci a dvoch deťoch som nemal čas sedieť celé večery nad diplomovkou. ZEDPERA mi pomohla naplánovať jednotlivé kapitoly a vždy som presne vedel, čo mám robiť ďalej.',
+          name: 'Externý študent a rodič',
         },
       ],
     },
     pricing: {
-      title: 'Vyberte si program podľa rozsahu práce',
-      fullOfferText: 'Zobraziť všetky balíčky a možnosti',
-      fullOfferHint: 'Pozrite si kompletnú ponuku mesačných a ročných balíčkov.',
+      title: 'Vyberte si balík podľa typu a rozsahu práce',
+      fullOfferText: 'Zobraziť kompletný cenník',
+      fullOfferHint: 'Jednorazové balíky bez automatického mesačného obnovovania.',
       emailPrompt: 'Zadajte e-mail, na ktorý bude naviazaná platba:',
       emailRequired: 'Pre pokračovanie na platbu je potrebný e-mail.',
-      invalidPlan: 'Neplatný balík',
+      invalidPlan: 'Neplatný balík alebo doplnková služba',
       checkoutFailed: 'Platbu sa nepodarilo vytvoriť.',
       noStripeUrl: 'Stripe nevygeneroval platobnú URL.',
       plans: [
         {
-          id: 'week-mini',
-          label: 'MINI',
-          name: 'Na menšie úpravy',
-          price: '13,20 €',
-          period: '7 dní',
-          description:
-            'Vhodné na seminárnu prácu, jednu kapitolu alebo rýchlu úpravu.',
-          button: 'Kúpiť MINI',
+          id: 'free',
+          kind: 'free',
+          label: 'FREE',
+          name: 'Bezplatná verzia',
+          price: '0 €',
+          period: 'navždy',
+          description: 'Vyskúšajte základnú akademickú pomoc bez platby.',
+          button: 'Začať zadarmo',
+          pageLimit: 3,
+          attachmentLimit: 1,
+          promptLimit: 3,
+          features: [
+            '1 príloha',
+            '2–3 prompty',
+            'Základná pomoc osobného akademického konzultanta',
+          ],
         },
         {
-          id: 'week-student',
-          label: 'ŠTUDENT',
-          name: 'Na väčšiu kapitolu',
-          price: '26,50 €',
-          period: '7 dní',
-          description:
-            'Vhodné na seminárku, ročníkovú prácu alebo rozsiahlejšiu kapitolu.',
-          button: 'Kúpiť ŠTUDENT',
+          id: 'seminar-work',
+          kind: 'plan',
+          label: 'SEMINÁRNA PRÁCA',
+          name: 'Seminárna, ročníková alebo zápočtová práca',
+          price: '39 €',
+          period: 'jednorazovo',
+          description: 'Ideálne riešenie pre seminárne, ročníkové a zápočtové práce do 15 strán.',
+          button: 'Kúpiť seminárnu prácu',
+          pageLimit: 15,
+          attachmentLimit: 12,
+          promptLimit: null,
+          features: [
+            'Vytvorenie celej seminárnej práce',
+            'AI pomoc pri písaní jednotlivých kapitol',
+            'Metodické vedenie počas celej práce',
+            'Kontrola kvality a logiky textu',
+            'Humanizácia textu',
+            'Návrh štruktúry a osnovy',
+            'Pomoc s citáciami a zdrojmi',
+            'Plánovanie práce',
+            'Príprava e-mailov pre vyučujúceho',
+            'Všetko v jednom systéme',
+          ],
+        },
+        {
+          id: 'bachelor-thesis',
+          kind: 'plan',
+          label: 'BAKALÁRSKA PRÁCA',
+          name: 'Kompletné riešenie bakalárskej práce',
+          price: '149 €',
+          period: 'jednorazovo',
+          description: 'Kompletné riešenie od prvého zadania až po úspešnú obhajobu bakalárskej práce.',
+          button: 'Kúpiť bakalársku prácu',
           highlighted: true,
+          pageLimit: 50,
+          attachmentLimit: 12,
+          promptLimit: null,
+          features: [
+            'Vytvorenie celej bakalárskej práce',
+            'Metodické vedenie počas celého písania',
+            'Kontrola kvality, logiky a konzistentnosti textu',
+            'Humanizácia textu',
+            'Pomoc so správnymi citáciami a zdrojmi',
+            'Spracovanie dotazníkov a štatistiky',
+            'Tvorba grafov a tabuliek',
+            'Príprava prezentácie na obhajobu',
+            'Príprava odpovedí na otázky komisie',
+            'Plánovanie práce a termínov',
+            'Návrhy e-mailov pre školiteľa',
+            'Všetko v jednom systéme',
+          ],
         },
         {
-          id: 'week-pro',
-          label: 'PRO',
-          name: 'Intenzívna práca',
-          price: '39,90 €',
-          period: '7 dní',
-          description:
-            'Pre intenzívnu prácu tesne pred odovzdaním alebo pred obhajobou.',
-          button: 'Kúpiť PRO',
+          id: 'master-thesis',
+          kind: 'plan',
+          label: 'DIPLOMOVÁ / MAGISTERSKÁ PRÁCA',
+          name: 'Najkomplexnejší balík záverečnej práce',
+          price: '189 €',
+          period: 'jednorazovo',
+          description: 'Najkomplexnejší balík pre náročné záverečné práce s pokročilou metodikou a analýzou dát.',
+          button: 'Kúpiť diplomovú prácu',
+          pageLimit: 70,
+          attachmentLimit: 12,
+          promptLimit: null,
+          features: [
+            'Vytvorenie celej diplomovej práce',
+            'Metodické vedenie počas celého procesu',
+            'Kontrola kvality a odbornosti textu',
+            'Humanizácia textu',
+            'Pomoc so zdrojmi a citáciami',
+            'Komplexné spracovanie štatistiky',
+            'Deskriptívna štatistika',
+            'Testovanie hypotéz',
+            'Korelačné analýzy',
+            'Normalita dát',
+            'Tvorba grafov a tabuliek',
+            'Príprava prezentácie na obhajobu',
+            'Simulácia otázok komisie',
+            'Plánovanie celej práce',
+            'Komunikácia so školiteľom',
+            'Všetko v jednom systéme',
+          ],
+        },
+        {
+          id: 'data-analysis',
+          kind: 'addon',
+          label: 'DOPLNKOVÁ SLUŽBA',
+          name: 'Analýza dát',
+          price: '89 €',
+          period: 'jednorazovo',
+          description: 'Kompletné spracovanie štatistickej časti práce.',
+          button: 'Kúpiť analýzu dát',
+          features: [
+            'Spracovanie dotazníkov',
+            'Čistenie dát',
+            'Deskriptívna štatistika',
+            'Testovanie normality',
+            'Korelačné analýzy',
+            'Frekvenčné tabuľky',
+            'Tvorba škál a subškál',
+            'Grafy',
+          ],
+        },
+        {
+          id: 'extra-20',
+          kind: 'addon',
+          label: 'EXTRA ROZSAH',
+          name: 'Extra 20 strán',
+          price: '49 €',
+          period: 'jednorazovo',
+          description: 'Rozšírenie aktuálneho projektu a používateľského balíka o ďalších 20 normostrán.',
+          button: 'Dokúpiť 20 strán',
+          extraPages: 20,
+          features: ['Ďalších 20 normostrán pre aktuálny projekt'],
+        },
+        {
+          id: 'extra-40',
+          kind: 'addon',
+          label: 'EXTRA ROZSAH',
+          name: 'Extra 40 strán',
+          price: '89 €',
+          period: 'jednorazovo',
+          description: 'Rozšírenie aktuálneho projektu a používateľského balíka o ďalších 40 normostrán.',
+          button: 'Dokúpiť 40 strán',
+          extraPages: 40,
+          features: ['Ďalších 40 normostrán pre aktuálny projekt'],
+        },
+        {
+          id: 'extra-60',
+          kind: 'addon',
+          label: 'EXTRA ROZSAH',
+          name: 'Extra 60 strán',
+          price: '129 €',
+          period: 'jednorazovo',
+          description: 'Rozšírenie aktuálneho projektu a používateľského balíka o ďalších 60 normostrán.',
+          button: 'Dokúpiť 60 strán',
+          extraPages: 60,
+          features: ['Ďalších 60 normostrán pre aktuálny projekt'],
         },
       ],
     },
@@ -519,21 +667,11 @@ const translations: Record<AppLanguage, Translation> = {
       title2: 'který vás provede',
       title3: 'od zadání až po obhajobu',
       subtitle:
-        'Zedpera spojuje AI psaní, odbornou zpětnou vazbu, kontrolu kvality, zdroje, citace, praktickou část i přípravu na obhajobu v jednom systému.',
+        'Psaní závěrečné práce nemusí znamenat měsíce stresu. ZEDPERA vás krok za krokem provede celým procesem od výběru tématu přes psaní, metodiku, citace a zpracování dat až po úspěšnou obhajobu. Ušetřete desítky hodin práce, odhalte chyby dříve než školitel a mějte jistotu, že je práce připravena k odevzdání.',
       primary: 'Začít',
       secondary: 'Podívat se na ukázku',
-      benefits: [
-        'AI vedoucí 24/7',
-        'Praktická část včetně výpočtů',
-        'Citace a zdroje',
-        'Příprava na obhajobu',
-      ],
-      stats: [
-        ['20', 'let zkušeností'],
-        ['1000+', 'studentů'],
-        ['24/7', 'AI vedoucí'],
-        ['1', 'platforma pro celý proces'],
-      ],
+      benefits: ['Osobní konzultant 24/7', 'Praktická část a statistika', 'Citace a zdroje', 'Příprava na obhajobu'],
+      stats: [['20', 'let zkušeností'], ['1000+', 'studentů'], ['24/7', 'akademická podpora'], ['1', 'platforma pro celý proces']],
     },
     preview: {
       logo: 'Zedpera',
@@ -565,58 +703,22 @@ const translations: Record<AppLanguage, Translation> = {
     features: {
       title: 'Vše, co potřebujete pro úspěšnou práci',
       items: [
-        {
-          title: 'AI vedoucí práce',
-          text: 'Kontroluje logiku, metodologii a upozorňuje na slabá místa.',
-        },
-        {
-          title: 'AI kritik',
-          text: 'Okamžitá zpětná vazba a skóre kvality písemného výstupu.',
-        },
-        {
-          title: 'AI psaní',
-          text: 'Napíše kapitolu, připraví osnovu, úvod, závěr a jakýkoli odborný text podle požadavků.',
-        },
-        {
-          title: 'Zdroje a citace',
-          text: 'Pomoc s rešerší, citacemi a seznamem literatury.',
-        },
-        {
-          title: 'Analýza dat',
-          text: 'Příprava praktické části včetně statistik.',
-        },
-        {
-          title: 'Obhajoba',
-          text: 'Příprava prezentace, otázek, odpovědí a reakcí na posudky.',
-        },
+        { title: 'Osobní akademický konzultant', text: 'Provází vás celou prací, kontroluje logiku a metodiku a upozorňuje na slabá místa.' },
+        { title: 'Kritik', text: 'Poskytuje okamžitou zpětnou vazbu, hodnocení kvality a konkrétní doporučení.' },
+        { title: 'Psaní práce', text: 'Pomáhá vytvořit osnovu, kapitoly, úvod, závěr a odborný text podle zadání.' },
+        { title: 'Zdroje a citace', text: 'Pomáhá s rešerší, zdroji, citováním a seznamem literatury.' },
+        { title: 'Analýza dat', text: 'Zpracování dotazníků, deskriptivní statistika, testování normality, korelace, frekvenční tabulky, škály, subškály a grafy.' },
+        { title: 'Obhajoba', text: 'Připraví prezentaci, doprovodný text, otázky komise, odpovědi a reakce na posudky.' },
       ],
     },
     comparison: {
-      title: 'Proč nestačí běžná AI nebo LLM nástroj?',
-      subtitle:
-        'Zedpera funguje jinak. Namísto univerzálních odpovědí dostanete výstup, který souvisí s vaší prací, zdroji a celým procesem psaní.',
+      title: 'Proč nestačí ChatGPT nebo jiná AI?',
+      subtitle: 'ChatGPT odpovídá na otázky. ZEDPERA vás dovede až k úspěšně odevzdané práci.',
       badTitle: 'Běžná AI',
-      goodTitle: 'Zedpera',
-      badItems: [
-        'Píše obecné texty a omáčky.',
-        'Nepamatuje si vaši práci ani důležité informace.',
-        'Vymýšlí si zdroje.',
-        'Text je nutné zdlouhavě upravovat.',
-        'Nedokáže upozornit na chyby.',
-        'Nerozumí připomínkám od školitele.',
-        'Nepomůže s praktickou částí.',
-        'Nedokáže reagovat na posudky.',
-      ],
-      goodItems: [
-        'Zná vaši práci a celý kontext.',
-        'Pamatuje si historii i komunikaci.',
-        'Cituje podle zvolené normy a používá vaše zdroje.',
-        'Analyzuje práci a upozorňuje na problémové části.',
-        'Zpracuje kapitoly, praktickou část i výpočty.',
-        'Dokáže připravit otázky, odpovědi a obhajobu.',
-        'Nahradí vedoucího práce a je k dispozici 24/7.',
-        'Pomůže s obhajobou podle posudků.',
-      ],
+      goodTitle: 'ZEDPERA',
+      badItems: ['Odpovídá na jednotlivé otázky.', 'Nezná vaši práci ani její historii.', 'Každý nový chat začíná téměř od začátku.', 'Vyžaduje, abyste věděli, na co se zeptat.', 'Vytvoří text, ale nezkontroluje kvalitu celé práce.', 'Neposkytne zpětnou vazbu jako vedoucí práce.', 'Nevytvoří praktickou část.', 'Nepřipraví vás na obhajobu.', 'Musíte používat více nástrojů.'],
+      goodItems: ['Provází vás celou prací od zadání až po obhajobu.', 'Pamatuje si celý projekt, kapitoly a předchozí úpravy.', 'Celý projekt zůstává v jednom prostředí a zná jeho kontext.', 'Sama upozorní na metodické chyby, slabá místa a nelogičnosti.', 'Průběžně hodnotí kvalitu práce a doporučuje konkrétní zlepšení.', 'Simuluje zkušeného vedoucího práce a poskytuje metodické vedení.', 'Připraví kompletní statistiku, grafy a tabulky přímo do práce.', 'Vytvoří prezentaci a kompletní doprovodný text k obhajobě.', 'Vše vyřešíte v jednom systému.'],
+      closing: 'ChatGPT je výborný pomocník. ZEDPERA je kompletní systém pro tvorbu závěrečných prací.',
     },
     process: {
       title: 'Jak funguje Zedpera?',
@@ -655,67 +757,34 @@ const translations: Record<AppLanguage, Translation> = {
       students: '1000+ studentů',
     },
     reviews: {
-      title: 'Zkušenosti studentů se Zedperou',
+      title: 'Zkušenosti studentů se ZEDPEROU',
       items: [
-        {
-          text: 'AI vedoucí mi pomohl s připomínkami od školitele a nasměroval mě. Zedpera mi ušetřila spoustu času a stresu.',
-          name: 'Studentka diplomové práce',
-        },
-        {
-          text: 'Zdroje jsem našel přímo v systému a práce byla hotová za pár dní. Velmi mi pomohla praktická část i citace.',
-          name: 'Student bakalářské práce',
-        },
-        {
-          text: 'Běžná AI mi dávala jen obecné texty. Zedpera mi po vyplnění profilu vygenerovala relevantní kapitoly za pár minut.',
-          name: 'Studentka po zkušenosti s AI',
-        },
-        {
-          text: 'Studuji externě při práci a rodině. Díky Zedpeře vše stíhám. Seminárky mám rychle hotové.',
-          name: 'Externí studentka',
-        },
+        { text: 'Školitel mi vrátil bakalářskou práci s více než 20 připomínkami. ZEDPERA mi je pomohla zapracovat za jeden večer a vysvětlila, proč jsou potřeba.', name: 'Student bakalářské práce' },
+        { text: 'Nejvíce jsem se bál praktické části. Nahrál jsem dotazník a ZEDPERA připravila tabulky, grafy i interpretaci výsledků přibližně za hodinu.', name: 'Student praktické části' },
+        { text: 'V ChatGPT jsem musel stále znovu vysvětlovat téma. ZEDPERA znala celý projekt, pamatovala si kapitoly a doporučení na sebe navazovala.', name: 'Student po zkušenosti s ChatGPT' },
+        { text: 'Před odevzdáním mi ZEDPERA našla nelogické části metodiky i chybějící citace. Práci jsem odevzdával s mnohem větší jistotou.', name: 'Student před odevzdáním' },
+        { text: 'ZEDPERA mi připravila prezentaci, možné otázky komise i návrhy odpovědí. Na obhajobu jsem šel mnohem klidnější.', name: 'Student před obhajobou' },
+        { text: 'Při práci a péči o dvě děti mi ZEDPERA pomohla naplánovat kapitoly a vždy jsem přesně věděl, co dělat dál.', name: 'Externí student a rodič' },
       ],
     },
     pricing: {
-      title: 'Vyberte si program podle rozsahu práce',
-      fullOfferText: 'Zobrazit všechny balíčky a možnosti',
-      fullOfferHint: 'Podívejte se na kompletní nabídku měsíčních a ročních balíčků.',
-      emailPrompt: 'Zadejte e-mail, ke kterému bude navázána platba:',
+      title: 'Vyberte si balíček podle typu a rozsahu práce',
+      fullOfferText: 'Zobrazit kompletní ceník',
+      fullOfferHint: 'Jednorázové balíčky bez automatického měsíčního obnovení.',
+      emailPrompt: 'Zadejte e-mail, ke kterému bude platba přiřazena:',
       emailRequired: 'Pro pokračování k platbě je potřeba e-mail.',
-      invalidPlan: 'Neplatný balíček',
+      invalidPlan: 'Neplatný balíček nebo doplňková služba',
       checkoutFailed: 'Platbu se nepodařilo vytvořit.',
       noStripeUrl: 'Stripe nevygeneroval platební URL.',
       plans: [
-        {
-          id: 'week-mini',
-          label: 'MINI',
-          name: 'Na menší úpravy',
-          price: '13,20 €',
-          period: '7 dní',
-          description:
-            'Vhodné na seminární práci, jednu kapitolu nebo rychlou úpravu.',
-          button: 'Koupit MINI',
-        },
-        {
-          id: 'week-student',
-          label: 'STUDENT',
-          name: 'Na větší kapitolu',
-          price: '26,50 €',
-          period: '7 dní',
-          description:
-            'Vhodné na seminárku, ročníkovou práci nebo rozsáhlejší kapitolu.',
-          button: 'Koupit STUDENT',
-          highlighted: true,
-        },
-        {
-          id: 'week-pro',
-          label: 'PRO',
-          name: 'Intenzivní práce',
-          price: '39,90 €',
-          period: '7 dní',
-          description:
-            'Pro intenzivní práci těsně před odevzdáním nebo před obhajobou.',
-          button: 'Koupit PRO',
-        },
+        { id: 'free', kind: 'free', label: 'FREE', name: 'Bezplatná verze', price: '0 €', period: 'navždy', description: 'Vyzkoušejte základní akademickou pomoc bez platby.', button: 'Začít zdarma', pageLimit: 3, attachmentLimit: 1, promptLimit: 3, features: ['1 příloha', '2–3 prompty', 'Základní pomoc osobního akademického konzultanta'] },
+        { id: 'seminar-work', kind: 'plan', label: 'SEMINÁRNÍ PRÁCE', name: 'Seminární, ročníková nebo zápočtová práce', price: '39 €', period: 'jednorázově', description: 'Ideální řešení pro seminární, ročníkové a zápočtové práce do 15 stran.', button: 'Koupit seminární práci', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['Vytvoření celé seminární práce', 'Pomoc při psaní jednotlivých kapitol', 'Metodické vedení během celé práce', 'Kontrola kvality a logiky textu', 'Humanizace textu', 'Návrh struktury a osnovy', 'Pomoc s citacemi a zdroji', 'Plánování práce', 'Příprava e-mailů pro vyučujícího', 'Vše v jednom systému'] },
+        { id: 'bachelor-thesis', kind: 'plan', label: 'BAKALÁŘSKÁ PRÁCE', name: 'Kompletní řešení bakalářské práce', price: '149 €', period: 'jednorázově', description: 'Kompletní řešení od prvního zadání až po úspěšnou obhajobu bakalářské práce.', button: 'Koupit bakalářskou práci', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['Vytvoření celé bakalářské práce', 'Metodické vedení během celého psaní', 'Kontrola kvality, logiky a konzistence textu', 'Humanizace textu', 'Pomoc se správnými citacemi a zdroji', 'Zpracování dotazníků a statistiky', 'Tvorba grafů a tabulek', 'Příprava prezentace k obhajobě', 'Příprava odpovědí na otázky komise', 'Plánování práce a termínů', 'Návrhy e-mailů pro školitele', 'Vše v jednom systému'] },
+        { id: 'master-thesis', kind: 'plan', label: 'DIPLOMOVÁ / MAGISTERSKÁ PRÁCE', name: 'Nejkomplexnější balíček závěrečné práce', price: '189 €', period: 'jednorázově', description: 'Nejkomplexnější balíček pro náročné závěrečné práce s pokročilou metodikou a analýzou dat.', button: 'Koupit diplomovou práci', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['Vytvoření celé diplomové práce', 'Metodické vedení během celého procesu', 'Kontrola kvality a odbornosti textu', 'Humanizace textu', 'Pomoc se zdroji a citacemi', 'Komplexní zpracování statistiky', 'Deskriptivní statistika', 'Testování hypotéz', 'Korelační analýzy', 'Normalita dat', 'Tvorba grafů a tabulek', 'Příprava prezentace k obhajobě', 'Simulace otázek komise', 'Plánování celé práce', 'Komunikace se školitelem', 'Vše v jednom systému'] },
+        { id: 'data-analysis', kind: 'addon', label: 'DOPLŇKOVÁ SLUŽBA', name: 'Analýza dat', price: '89 €', period: 'jednorázově', description: 'Kompletní zpracování statistické části práce.', button: 'Koupit analýzu dat', features: ['Zpracování dotazníků', 'Čištění dat', 'Deskriptivní statistika', 'Testování normality', 'Korelační analýzy', 'Frekvenční tabulky', 'Tvorba škál a subškál', 'Grafy'] },
+        { id: 'extra-20', kind: 'addon', label: 'EXTRA ROZSAH', name: 'Extra 20 stran', price: '49 €', period: 'jednorázově', description: 'Rozšíření aktuálního projektu a balíčku o dalších 20 normostran.', button: 'Dokoupit 20 stran', extraPages: 20, features: ['Dalších 20 normostran pro aktuální projekt'] },
+        { id: 'extra-40', kind: 'addon', label: 'EXTRA ROZSAH', name: 'Extra 40 stran', price: '89 €', period: 'jednorázově', description: 'Rozšíření aktuálního projektu a balíčku o dalších 40 normostran.', button: 'Dokoupit 40 stran', extraPages: 40, features: ['Dalších 40 normostran pro aktuální projekt'] },
+        { id: 'extra-60', kind: 'addon', label: 'EXTRA ROZSAH', name: 'Extra 60 stran', price: '129 €', period: 'jednorázově', description: 'Rozšíření aktuálního projektu a balíčku o dalších 60 normostran.', button: 'Dokoupit 60 stran', extraPages: 60, features: ['Dalších 60 normostran pro aktuální projekt'] },
       ],
     },
     faq: {
@@ -800,22 +869,11 @@ const translations: Record<AppLanguage, Translation> = {
       title1: 'The first AI thesis supervisor,',
       title2: 'guiding you',
       title3: 'from assignment to defense',
-      subtitle:
-        'Zedpera combines AI writing, expert feedback, quality checks, sources, citations, practical work and defense preparation in one system.',
+      subtitle: 'Writing a thesis does not have to mean months of stress. ZEDPERA guides you step by step from choosing a topic through writing, methodology, citations and data processing to a successful defense. Save dozens of hours, detect problems before your supervisor does and submit your work with confidence.',
       primary: 'Start',
       secondary: 'See demo',
-      benefits: [
-        'AI supervisor 24/7',
-        'Practical part including calculations',
-        'Citations and sources',
-        'Defense preparation',
-      ],
-      stats: [
-        ['20', 'years of experience'],
-        ['1000+', 'students'],
-        ['24/7', 'AI supervisor'],
-        ['1', 'platform for the whole process'],
-      ],
+      benefits: ['Personal consultant 24/7', 'Practical section and statistics', 'Citations and sources', 'Defense preparation'],
+      stats: [['20', 'years of experience'], ['1000+', 'students'], ['24/7', 'academic support'], ['1', 'platform for the whole process']],
     },
     preview: {
       logo: 'Zedpera',
@@ -847,58 +905,22 @@ const translations: Record<AppLanguage, Translation> = {
     features: {
       title: 'Everything you need for a successful thesis',
       items: [
-        {
-          title: 'AI thesis supervisor',
-          text: 'Checks logic, methodology and highlights weak spots.',
-        },
-        {
-          title: 'AI critic',
-          text: 'Instant feedback and quality score for your written output.',
-        },
-        {
-          title: 'AI writing',
-          text: 'Writes chapters, prepares outlines, introductions, conclusions and any academic text based on requirements.',
-        },
-        {
-          title: 'Sources and citations',
-          text: 'Helps with research, citations and bibliography.',
-        },
-        {
-          title: 'Data analysis',
-          text: 'Preparation of the practical part including statistics.',
-        },
-        {
-          title: 'Defense',
-          text: 'Prepares presentation, questions, answers and reactions to reviews.',
-        },
+        { title: 'Personal academic consultant', text: 'Guides you throughout the project, checks logic and methodology and highlights weak points.' },
+        { title: 'Critic', text: 'Provides immediate feedback, quality assessment and specific recommendations.' },
+        { title: 'Thesis writing', text: 'Helps create the outline, chapters, introduction, conclusion and academic text based on your requirements.' },
+        { title: 'Sources and citations', text: 'Helps with research, sources, citation formatting and the bibliography.' },
+        { title: 'Data analysis', text: 'Questionnaire processing, descriptive statistics, normality testing, correlations, frequency tables, scales, subscales and charts.' },
+        { title: 'Defense', text: 'Prepares the presentation, speaking notes, committee questions, answers and responses to reviews.' },
       ],
     },
     comparison: {
-      title: 'Why ordinary AI or an LLM tool is not enough?',
-      subtitle:
-        'Zedpera works differently. Instead of generic answers, you get output connected to your work, sources and the entire writing process.',
+      title: 'Why are ChatGPT or other AI tools not enough?',
+      subtitle: 'ChatGPT answers questions. ZEDPERA takes you all the way to a successfully submitted thesis.',
       badTitle: 'Generic AI',
-      goodTitle: 'Zedpera',
-      badItems: [
-        'Writes generic text.',
-        'Does not remember your work or key information.',
-        'Invents sources.',
-        'Text needs lengthy editing.',
-        'Cannot reliably point out mistakes.',
-        'Does not understand supervisor feedback.',
-        'Does not help with the practical part.',
-        'Cannot react to reviews.',
-      ],
-      goodItems: [
-        'Knows your work and full context.',
-        'Remembers history and communication.',
-        'Cites according to your selected standard and uses your sources.',
-        'Analyzes the work and flags problem areas.',
-        'Processes chapters, practical parts and calculations.',
-        'Can prepare questions, answers and defense.',
-        'Replaces the thesis supervisor and is available 24/7.',
-        'Helps with defense based on reviews.',
-      ],
+      goodTitle: 'ZEDPERA',
+      badItems: ['Answers individual questions.', 'Does not know your thesis or its history.', 'Every new chat starts almost from scratch.', 'Requires you to know what to ask.', 'Creates text but does not check the quality of the whole thesis.', 'Does not provide feedback like a thesis supervisor.', 'Does not create the practical section.', 'Does not prepare you for the defense.', 'Requires several separate tools.'],
+      goodItems: ['Guides you from the assignment to the defense.', 'Remembers the entire project, all chapters and previous edits.', 'Keeps the whole project in one environment and understands its context.', 'Proactively flags methodological errors, weak points and inconsistencies.', 'Continuously assesses quality and recommends concrete improvements.', 'Simulates an experienced supervisor and provides methodological guidance.', 'Prepares complete statistics, charts and tables ready for the thesis.', 'Creates the presentation and complete defense speaking notes.', 'Everything is handled in one system.'],
+      closing: 'ChatGPT is an excellent helper. ZEDPERA is a complete system for creating final theses.',
     },
     process: {
       title: 'How Zedpera works',
@@ -937,67 +959,34 @@ const translations: Record<AppLanguage, Translation> = {
       students: '1000+ students',
     },
     reviews: {
-      title: 'Students’ experience with Zedpera',
+      title: 'Student experiences with ZEDPERA',
       items: [
-        {
-          text: 'The AI supervisor helped me with my supervisor’s comments and gave me direction. Zedpera saved me a lot of time and stress.',
-          name: 'Master thesis student',
-        },
-        {
-          text: 'I found sources directly in the system and finished the work in a few days. The practical part and citations helped me a lot.',
-          name: 'Bachelor thesis student',
-        },
-        {
-          text: 'Generic AI gave me only broad texts. After filling in the profile, Zedpera generated relevant chapters in minutes.',
-          name: 'Student after trying AI',
-        },
-        {
-          text: 'I study externally while working and taking care of family. Thanks to Zedpera, I can keep up.',
-          name: 'External student',
-        },
+        { text: 'My supervisor returned my bachelor thesis with more than 20 comments. ZEDPERA helped me address them in one evening and explained why each change was needed.', name: 'Bachelor thesis student' },
+        { text: 'I feared the practical section most. I uploaded my questionnaire and ZEDPERA prepared tables, charts and an interpretation of the results in about an hour.', name: 'Practical-section student' },
+        { text: 'With ChatGPT I had to explain the topic again for every question. ZEDPERA knew my whole project, remembered every chapter and kept its recommendations connected.', name: 'Student after using ChatGPT' },
+        { text: 'Before submission ZEDPERA found illogical parts of my methodology and missing citations. I submitted the thesis with much more confidence.', name: 'Student before submission' },
+        { text: 'ZEDPERA prepared my presentation, likely committee questions and suggested answers. I went into the defense feeling much calmer.', name: 'Student before defense' },
+        { text: 'While working and caring for two children, ZEDPERA helped me plan every chapter so I always knew exactly what to do next.', name: 'Part-time student and parent' },
       ],
     },
     pricing: {
-      title: 'Choose a program by work scope',
-      fullOfferText: 'Show all packages and options',
-      fullOfferHint: 'See the complete offer of monthly and yearly packages.',
+      title: 'Choose a package by thesis type and scope',
+      fullOfferText: 'View the complete pricing',
+      fullOfferHint: 'One-time packages without automatic monthly renewal.',
       emailPrompt: 'Enter the email address linked to the payment:',
       emailRequired: 'An email is required to continue to payment.',
-      invalidPlan: 'Invalid package',
+      invalidPlan: 'Invalid package or add-on',
       checkoutFailed: 'Payment could not be created.',
       noStripeUrl: 'Stripe did not generate a payment URL.',
       plans: [
-        {
-          id: 'week-mini',
-          label: 'MINI',
-          name: 'For smaller edits',
-          price: '13.20 €',
-          period: '7 days',
-          description:
-            'Suitable for a seminar paper, one chapter or a quick edit.',
-          button: 'Buy MINI',
-        },
-        {
-          id: 'week-student',
-          label: 'STUDENT',
-          name: 'For a larger chapter',
-          price: '26.50 €',
-          period: '7 days',
-          description:
-            'Suitable for a seminar paper, yearly paper or a larger chapter.',
-          button: 'Buy STUDENT',
-          highlighted: true,
-        },
-        {
-          id: 'week-pro',
-          label: 'PRO',
-          name: 'Intensive work',
-          price: '39.90 €',
-          period: '7 days',
-          description:
-            'For intensive work shortly before submission or defense.',
-          button: 'Buy PRO',
-        },
+        { id: 'free', kind: 'free', label: 'FREE', name: 'Free version', price: '0 €', period: 'forever', description: 'Try basic academic support without payment.', button: 'Start free', pageLimit: 3, attachmentLimit: 1, promptLimit: 3, features: ['1 attachment', '2–3 prompts', 'Basic support from a personal academic consultant'] },
+        { id: 'seminar-work', kind: 'plan', label: 'SEMINAR PAPER', name: 'Seminar, course or credit paper', price: '39 €', period: 'one-time', description: 'An ideal solution for seminar, course and credit papers up to 15 pages.', button: 'Buy seminar package', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['Creation of the complete seminar paper', 'Help with writing individual chapters', 'Methodological guidance throughout the work', 'Quality and logic checks', 'Text humanization', 'Structure and outline proposal', 'Help with citations and sources', 'Work planning', 'Draft emails for the lecturer', 'Everything in one system'] },
+        { id: 'bachelor-thesis', kind: 'plan', label: 'BACHELOR THESIS', name: 'Complete bachelor thesis solution', price: '149 €', period: 'one-time', description: 'A complete solution from the first assignment to a successful bachelor thesis defense.', button: 'Buy bachelor package', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['Creation of the complete bachelor thesis', 'Methodological guidance throughout writing', 'Quality, logic and consistency checks', 'Text humanization', 'Correct citations and sources', 'Questionnaire and statistical processing', 'Charts and tables', 'Defense presentation preparation', 'Answers to committee questions', 'Planning and deadlines', 'Draft emails for the supervisor', 'Everything in one system'] },
+        { id: 'master-thesis', kind: 'plan', label: 'MASTER THESIS', name: 'The most comprehensive final-thesis package', price: '189 €', period: 'one-time', description: 'The most comprehensive package for demanding final theses with advanced methodology and data analysis.', button: 'Buy master package', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['Creation of the complete master thesis', 'Methodological guidance throughout the process', 'Quality and academic rigor checks', 'Text humanization', 'Sources and citations', 'Comprehensive statistical processing', 'Descriptive statistics', 'Hypothesis testing', 'Correlation analyses', 'Data normality', 'Charts and tables', 'Defense presentation preparation', 'Committee-question simulation', 'Complete work planning', 'Supervisor communication', 'Everything in one system'] },
+        { id: 'data-analysis', kind: 'addon', label: 'ADD-ON SERVICE', name: 'Data analysis', price: '89 €', period: 'one-time', description: 'Complete processing of the statistical part of the thesis.', button: 'Buy data analysis', features: ['Questionnaire processing', 'Data cleaning', 'Descriptive statistics', 'Normality testing', 'Correlation analyses', 'Frequency tables', 'Scales and subscales', 'Charts'] },
+        { id: 'extra-20', kind: 'addon', label: 'EXTRA SCOPE', name: 'Extra 20 pages', price: '49 €', period: 'one-time', description: 'Extend the current project and package by another 20 standard pages.', button: 'Add 20 pages', extraPages: 20, features: ['20 additional standard pages for the current project'] },
+        { id: 'extra-40', kind: 'addon', label: 'EXTRA SCOPE', name: 'Extra 40 pages', price: '89 €', period: 'one-time', description: 'Extend the current project and package by another 40 standard pages.', button: 'Add 40 pages', extraPages: 40, features: ['40 additional standard pages for the current project'] },
+        { id: 'extra-60', kind: 'addon', label: 'EXTRA SCOPE', name: 'Extra 60 pages', price: '129 €', period: 'one-time', description: 'Extend the current project and package by another 60 standard pages.', button: 'Add 60 pages', extraPages: 60, features: ['60 additional standard pages for the current project'] },
       ],
     },
     faq: {
@@ -1082,22 +1071,11 @@ const translations: Record<AppLanguage, Translation> = {
       title1: 'Der erste KI-Betreuer,',
       title2: 'der Sie begleitet',
       title3: 'von der Aufgabenstellung bis zur Verteidigung',
-      subtitle:
-        'Zedpera verbindet KI-Schreiben, fachliches Feedback, Qualitätskontrolle, Quellen, Zitationen, praktische Teile und Verteidigungsvorbereitung in einem System.',
+      subtitle: 'Das Schreiben einer Abschlussarbeit muss nicht monatelangen Stress bedeuten. ZEDPERA begleitet Sie Schritt für Schritt von der Themenwahl über Schreiben, Methodik, Zitate und Datenverarbeitung bis zur erfolgreichen Verteidigung. Sparen Sie viele Stunden und erkennen Sie Fehler, bevor Ihr Betreuer sie findet.',
       primary: 'Starten',
       secondary: 'Demo ansehen',
-      benefits: [
-        'KI-Betreuer 24/7',
-        'Praktischer Teil inklusive Berechnungen',
-        'Zitationen und Quellen',
-        'Vorbereitung auf die Verteidigung',
-      ],
-      stats: [
-        ['20', 'Jahre Erfahrung'],
-        ['1000+', 'Studierende'],
-        ['24/7', 'KI-Betreuer'],
-        ['1', 'Plattform für den gesamten Prozess'],
-      ],
+      benefits: ['Persönlicher Berater 24/7', 'Praxisteil und Statistik', 'Zitate und Quellen', 'Vorbereitung auf die Verteidigung'],
+      stats: [['20', 'Jahre Erfahrung'], ['1000+', 'Studierende'], ['24/7', 'akademische Unterstützung'], ['1', 'Plattform für den gesamten Prozess']],
     },
     preview: {
       logo: 'Zedpera',
@@ -1129,58 +1107,22 @@ const translations: Record<AppLanguage, Translation> = {
     features: {
       title: 'Alles, was Sie für eine erfolgreiche Arbeit brauchen',
       items: [
-        {
-          title: 'KI-Betreuer',
-          text: 'Prüft Logik, Methodik und weist auf Schwachstellen hin.',
-        },
-        {
-          title: 'KI-Kritiker',
-          text: 'Sofortiges Feedback und Qualitätsbewertung des Textes.',
-        },
-        {
-          title: 'KI-Schreiben',
-          text: 'Schreibt Kapitel, erstellt Gliederungen, Einleitungen, Fazits und fachliche Texte nach Anforderungen.',
-        },
-        {
-          title: 'Quellen und Zitate',
-          text: 'Hilfe bei Recherche, Zitaten und Literaturverzeichnis.',
-        },
-        {
-          title: 'Datenanalyse',
-          text: 'Vorbereitung des praktischen Teils einschließlich Statistiken.',
-        },
-        {
-          title: 'Verteidigung',
-          text: 'Vorbereitung von Präsentation, Fragen, Antworten und Reaktionen auf Gutachten.',
-        },
+        { title: 'Persönlicher akademischer Berater', text: 'Begleitet Sie durch die gesamte Arbeit, prüft Logik und Methodik und weist auf Schwächen hin.' },
+        { title: 'Kritiker', text: 'Bietet sofortiges Feedback, Qualitätsbewertung und konkrete Empfehlungen.' },
+        { title: 'Schreiben der Arbeit', text: 'Hilft bei Gliederung, Kapiteln, Einleitung, Schluss und fachlichem Text.' },
+        { title: 'Quellen und Zitate', text: 'Unterstützt Recherche, Quellenarbeit, Zitation und Literaturverzeichnis.' },
+        { title: 'Datenanalyse', text: 'Fragebogenauswertung, deskriptive Statistik, Normalitätstests, Korrelationen, Häufigkeitstabellen, Skalen, Subskalen und Diagramme.' },
+        { title: 'Verteidigung', text: 'Erstellt Präsentation, Sprechtext, mögliche Kommissionsfragen, Antworten und Reaktionen auf Gutachten.' },
       ],
     },
     comparison: {
-      title: 'Warum reicht normale KI oder ein LLM-Tool nicht aus?',
-      subtitle:
-        'Zedpera funktioniert anders. Statt allgemeiner Antworten erhalten Sie Ergebnisse, die mit Ihrer Arbeit, Ihren Quellen und dem gesamten Schreibprozess verbunden sind.',
-      badTitle: 'Normale KI',
-      goodTitle: 'Zedpera',
-      badItems: [
-        'Schreibt allgemeine Texte.',
-        'Merkt sich Ihre Arbeit und wichtige Informationen nicht.',
-        'Erfindet Quellen.',
-        'Texte müssen lange bearbeitet werden.',
-        'Kann Fehler nicht zuverlässig anzeigen.',
-        'Versteht Kommentare des Betreuers nicht.',
-        'Hilft nicht beim praktischen Teil.',
-        'Kann nicht auf Gutachten reagieren.',
-      ],
-      goodItems: [
-        'Kennt Ihre Arbeit und den gesamten Kontext.',
-        'Merkt sich Verlauf und Kommunikation.',
-        'Zitiert nach gewähltem Standard und nutzt Ihre Quellen.',
-        'Analysiert die Arbeit und markiert Problemstellen.',
-        'Bearbeitet Kapitel, praktische Teile und Berechnungen.',
-        'Bereitet Fragen, Antworten und Verteidigung vor.',
-        'Ersetzt den Betreuer und ist 24/7 verfügbar.',
-        'Hilft bei der Verteidigung anhand von Gutachten.',
-      ],
+      title: 'Warum reichen ChatGPT oder andere KI-Tools nicht aus?',
+      subtitle: 'ChatGPT beantwortet Fragen. ZEDPERA begleitet Sie bis zur erfolgreich eingereichten Arbeit.',
+      badTitle: 'Allgemeine KI',
+      goodTitle: 'ZEDPERA',
+      badItems: ['Beantwortet einzelne Fragen.', 'Kennt Ihre Arbeit und deren Verlauf nicht.', 'Jeder neue Chat beginnt fast von vorne.', 'Sie müssen selbst wissen, was Sie fragen sollen.', 'Erstellt Text, prüft aber nicht die Qualität der gesamten Arbeit.', 'Gibt kein Feedback wie ein Betreuer.', 'Erstellt keinen praktischen Teil.', 'Bereitet Sie nicht auf die Verteidigung vor.', 'Sie benötigen mehrere Werkzeuge.'],
+      goodItems: ['Begleitet Sie von der Aufgabenstellung bis zur Verteidigung.', 'Merkt sich das gesamte Projekt, alle Kapitel und Änderungen.', 'Das Projekt bleibt in einer Umgebung und der Kontext bleibt erhalten.', 'Weist selbstständig auf methodische Fehler, Schwächen und Widersprüche hin.', 'Bewertet laufend die Qualität und empfiehlt konkrete Verbesserungen.', 'Simuliert einen erfahrenen Betreuer und bietet methodische Führung.', 'Erstellt vollständige Statistiken, Diagramme und Tabellen für die Arbeit.', 'Erstellt Präsentation und vollständigen Begleittext zur Verteidigung.', 'Alles wird in einem System erledigt.'],
+      closing: 'ChatGPT ist ein hervorragender Helfer. ZEDPERA ist ein vollständiges System zur Erstellung von Abschlussarbeiten.',
     },
     process: {
       title: 'Wie Zedpera funktioniert',
@@ -1219,67 +1161,34 @@ const translations: Record<AppLanguage, Translation> = {
       students: '1000+ Studierende',
     },
     reviews: {
-      title: 'Erfahrungen von Studierenden mit Zedpera',
+      title: 'Erfahrungen von Studierenden mit ZEDPERA',
       items: [
-        {
-          text: 'Der KI-Betreuer half mir mit Kommentaren meines Betreuers und gab mir Richtung. Zedpera sparte mir viel Zeit und Stress.',
-          name: 'Masterstudentin',
-        },
-        {
-          text: 'Ich fand Quellen direkt im System und die Arbeit war in wenigen Tagen fertig. Der praktische Teil und die Zitate halfen mir sehr.',
-          name: 'Bachelorstudent',
-        },
-        {
-          text: 'Normale KI gab mir nur allgemeine Texte. Nach dem Profil erstellte Zedpera relevante Kapitel in Minuten.',
-          name: 'Studentin nach KI-Erfahrung',
-        },
-        {
-          text: 'Ich studiere extern neben Arbeit und Familie. Dank Zedpera schaffe ich alles.',
-          name: 'Externe Studentin',
-        },
+        { text: 'Mein Betreuer gab meine Bachelorarbeit mit mehr als 20 Anmerkungen zurück. ZEDPERA half mir, sie an einem Abend einzuarbeiten und erklärte die Gründe.', name: 'Bachelorstudent' },
+        { text: 'Ich hatte am meisten Angst vor dem praktischen Teil. Nach dem Upload des Fragebogens erstellte ZEDPERA Tabellen, Diagramme und die Ergebnisinterpretation.', name: 'Student im Praxisteil' },
+        { text: 'Bei ChatGPT musste ich das Thema ständig neu erklären. ZEDPERA kannte mein gesamtes Projekt und verband alle Empfehlungen miteinander.', name: 'Student nach ChatGPT-Erfahrung' },
+        { text: 'Vor der Abgabe fand ZEDPERA unlogische Teile der Methodik und fehlende Zitate. Dadurch war ich bei der Abgabe viel sicherer.', name: 'Student vor der Abgabe' },
+        { text: 'ZEDPERA bereitete Präsentation, mögliche Kommissionsfragen und Antwortvorschläge vor. Ich ging viel ruhiger in die Verteidigung.', name: 'Student vor der Verteidigung' },
+        { text: 'Neben Arbeit und zwei Kindern half mir ZEDPERA bei der Kapitelplanung, sodass ich immer genau wusste, was als Nächstes zu tun war.', name: 'Berufsbegleitender Student und Elternteil' },
       ],
     },
     pricing: {
-      title: 'Wählen Sie ein Programm nach Umfang der Arbeit',
-      fullOfferText: 'Alle Pakete und Optionen anzeigen',
-      fullOfferHint: 'Sehen Sie das komplette Angebot monatlicher und jährlicher Pakete.',
+      title: 'Wählen Sie ein Paket nach Art und Umfang der Arbeit',
+      fullOfferText: 'Vollständige Preise anzeigen',
+      fullOfferHint: 'Einmalige Pakete ohne automatische monatliche Verlängerung.',
       emailPrompt: 'Geben Sie die E-Mail-Adresse für die Zahlung ein:',
       emailRequired: 'Für die Zahlung ist eine E-Mail-Adresse erforderlich.',
-      invalidPlan: 'Ungültiges Paket',
+      invalidPlan: 'Ungültiges Paket oder Zusatzleistung',
       checkoutFailed: 'Zahlung konnte nicht erstellt werden.',
       noStripeUrl: 'Stripe hat keine Zahlungs-URL generiert.',
       plans: [
-        {
-          id: 'week-mini',
-          label: 'MINI',
-          name: 'Für kleinere Korrekturen',
-          price: '13,20 €',
-          period: '7 Tage',
-          description:
-            'Geeignet für Seminararbeit, ein Kapitel oder schnelle Bearbeitung.',
-          button: 'MINI kaufen',
-        },
-        {
-          id: 'week-student',
-          label: 'STUDENT',
-          name: 'Für ein größeres Kapitel',
-          price: '26,50 €',
-          period: '7 Tage',
-          description:
-            'Geeignet für Seminararbeit, Jahresarbeit oder umfangreicheres Kapitel.',
-          button: 'STUDENT kaufen',
-          highlighted: true,
-        },
-        {
-          id: 'week-pro',
-          label: 'PRO',
-          name: 'Intensive Arbeit',
-          price: '39,90 €',
-          period: '7 Tage',
-          description:
-            'Für intensive Arbeit kurz vor Abgabe oder Verteidigung.',
-          button: 'PRO kaufen',
-        },
+        { id: 'free', kind: 'free', label: 'FREE', name: 'Kostenlose Version', price: '0 €', period: 'dauerhaft', description: 'Testen Sie die grundlegende akademische Unterstützung kostenlos.', button: 'Kostenlos starten', pageLimit: 3, attachmentLimit: 1, promptLimit: 3, features: ['1 Anhang', '2–3 Prompts', 'Grundlegende Unterstützung durch einen persönlichen akademischen Berater'] },
+        { id: 'seminar-work', kind: 'plan', label: 'SEMINARARBEIT', name: 'Seminar-, Jahres- oder Leistungsarbeit', price: '39 €', period: 'einmalig', description: 'Ideal für Seminar-, Jahres- und Leistungsarbeiten bis 15 Seiten.', button: 'Seminarpaket kaufen', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['Erstellung der vollständigen Seminararbeit', 'Hilfe beim Schreiben einzelner Kapitel', 'Methodische Begleitung', 'Qualitäts- und Logikprüfung', 'Humanisierung des Textes', 'Struktur- und Gliederungsvorschlag', 'Quellen und Zitate', 'Arbeitsplanung', 'E-Mail-Entwürfe für Lehrende', 'Alles in einem System'] },
+        { id: 'bachelor-thesis', kind: 'plan', label: 'BACHELORARBEIT', name: 'Komplettlösung für die Bachelorarbeit', price: '149 €', period: 'einmalig', description: 'Komplette Unterstützung von der ersten Aufgabe bis zur erfolgreichen Verteidigung.', button: 'Bachelorpaket kaufen', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['Erstellung der vollständigen Bachelorarbeit', 'Methodische Begleitung während des Schreibens', 'Qualitäts-, Logik- und Konsistenzprüfung', 'Humanisierung des Textes', 'Korrekte Zitate und Quellen', 'Fragebogen- und Statistikverarbeitung', 'Diagramme und Tabellen', 'Präsentation zur Verteidigung', 'Antworten auf Kommissionsfragen', 'Planung und Termine', 'E-Mail-Entwürfe für den Betreuer', 'Alles in einem System'] },
+        { id: 'master-thesis', kind: 'plan', label: 'MASTERARBEIT', name: 'Das umfassendste Abschlussarbeitspaket', price: '189 €', period: 'einmalig', description: 'Das umfassendste Paket für anspruchsvolle Arbeiten mit fortgeschrittener Methodik und Datenanalyse.', button: 'Masterpaket kaufen', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['Erstellung der vollständigen Masterarbeit', 'Methodische Begleitung des gesamten Prozesses', 'Qualitäts- und Fachlichkeitsprüfung', 'Humanisierung des Textes', 'Quellen und Zitate', 'Umfassende statistische Verarbeitung', 'Deskriptive Statistik', 'Hypothesentests', 'Korrelationsanalysen', 'Daten-Normalität', 'Diagramme und Tabellen', 'Präsentation zur Verteidigung', 'Simulation von Kommissionsfragen', 'Vollständige Arbeitsplanung', 'Kommunikation mit dem Betreuer', 'Alles in einem System'] },
+        { id: 'data-analysis', kind: 'addon', label: 'ZUSATZLEISTUNG', name: 'Datenanalyse', price: '89 €', period: 'einmalig', description: 'Vollständige Bearbeitung des statistischen Teils der Arbeit.', button: 'Datenanalyse kaufen', features: ['Fragebogenauswertung', 'Datenbereinigung', 'Deskriptive Statistik', 'Normalitätstests', 'Korrelationsanalysen', 'Häufigkeitstabellen', 'Skalen und Subskalen', 'Diagramme'] },
+        { id: 'extra-20', kind: 'addon', label: 'EXTRA-UMFANG', name: 'Extra 20 Seiten', price: '49 €', period: 'einmalig', description: 'Erweiterung des aktuellen Projekts um weitere 20 Normseiten.', button: '20 Seiten hinzufügen', extraPages: 20, features: ['20 zusätzliche Normseiten für das aktuelle Projekt'] },
+        { id: 'extra-40', kind: 'addon', label: 'EXTRA-UMFANG', name: 'Extra 40 Seiten', price: '89 €', period: 'einmalig', description: 'Erweiterung des aktuellen Projekts um weitere 40 Normseiten.', button: '40 Seiten hinzufügen', extraPages: 40, features: ['40 zusätzliche Normseiten für das aktuelle Projekt'] },
+        { id: 'extra-60', kind: 'addon', label: 'EXTRA-UMFANG', name: 'Extra 60 Seiten', price: '129 €', period: 'einmalig', description: 'Erweiterung des aktuellen Projekts um weitere 60 Normseiten.', button: '60 Seiten hinzufügen', extraPages: 60, features: ['60 zusätzliche Normseiten für das aktuelle Projekt'] },
       ],
     },
     faq: {
@@ -1364,22 +1273,11 @@ const translations: Record<AppLanguage, Translation> = {
       title1: 'Pierwszy opiekun pracy AI,',
       title2: 'który przeprowadzi Cię',
       title3: 'od tematu aż po obronę',
-      subtitle:
-        'Zedpera łączy pisanie AI, ekspercką informację zwrotną, kontrolę jakości, źródła, cytowania, część praktyczną i przygotowanie do obrony w jednym systemie.',
+      subtitle: 'Pisanie pracy dyplomowej nie musi oznaczać miesięcy stresu. ZEDPERA prowadzi krok po kroku od wyboru tematu przez pisanie, metodologię, cytowania i analizę danych aż po udaną obronę. Oszczędź dziesiątki godzin i wykryj błędy, zanim zrobi to promotor.',
       primary: 'Zacznij',
       secondary: 'Zobacz demo',
-      benefits: [
-        'Opiekun AI 24/7',
-        'Część praktyczna z obliczeniami',
-        'Cytowania i źródła',
-        'Przygotowanie do obrony',
-      ],
-      stats: [
-        ['20', 'lat doświadczenia'],
-        ['1000+', 'studentów'],
-        ['24/7', 'opiekun AI'],
-        ['1', 'platforma dla całego procesu'],
-      ],
+      benefits: ['Osobisty konsultant 24/7', 'Część praktyczna i statystyka', 'Cytowania i źródła', 'Przygotowanie do obrony'],
+      stats: [['20', 'lat doświadczenia'], ['1000+', 'studentów'], ['24/7', 'wsparcie akademickie'], ['1', 'platforma dla całego procesu']],
     },
     preview: {
       logo: 'Zedpera',
@@ -1411,58 +1309,22 @@ const translations: Record<AppLanguage, Translation> = {
     features: {
       title: 'Wszystko, czego potrzebujesz do udanej pracy',
       items: [
-        {
-          title: 'Opiekun pracy AI',
-          text: 'Sprawdza logikę, metodologię i wskazuje słabe miejsca.',
-        },
-        {
-          title: 'Krytyk AI',
-          text: 'Natychmiastowa informacja zwrotna i ocena jakości tekstu.',
-        },
-        {
-          title: 'Pisanie AI',
-          text: 'Pisze rozdziały, przygotowuje konspekt, wstęp, zakończenie i dowolny tekst naukowy zgodnie z wymaganiami.',
-        },
-        {
-          title: 'Źródła i cytowania',
-          text: 'Pomoc w researchu, cytowaniach i bibliografii.',
-        },
-        {
-          title: 'Analiza danych',
-          text: 'Przygotowanie części praktycznej wraz ze statystykami.',
-        },
-        {
-          title: 'Obrona',
-          text: 'Przygotowanie prezentacji, pytań, odpowiedzi i reakcji na recenzje.',
-        },
+        { title: 'Osobisty konsultant akademicki', text: 'Prowadzi przez całą pracę, sprawdza logikę i metodologię oraz wskazuje słabe miejsca.' },
+        { title: 'Krytyk', text: 'Zapewnia natychmiastową informację zwrotną, ocenę jakości i konkretne zalecenia.' },
+        { title: 'Pisanie pracy', text: 'Pomaga stworzyć plan, rozdziały, wstęp, zakończenie i tekst naukowy.' },
+        { title: 'Źródła i cytowania', text: 'Pomaga w researchu, pracy ze źródłami, cytowaniu i bibliografii.' },
+        { title: 'Analiza danych', text: 'Opracowanie ankiet, statystyka opisowa, testy normalności, korelacje, tabele częstości, skale, podskale i wykresy.' },
+        { title: 'Obrona', text: 'Przygotowuje prezentację, tekst wystąpienia, pytania komisji, odpowiedzi i reakcje na recenzje.' },
       ],
     },
     comparison: {
-      title: 'Dlaczego zwykła AI lub narzędzie LLM nie wystarczy?',
-      subtitle:
-        'Zedpera działa inaczej. Zamiast ogólnych odpowiedzi otrzymujesz wynik związany z Twoją pracą, źródłami i całym procesem pisania.',
+      title: 'Dlaczego ChatGPT lub inne AI nie wystarczą?',
+      subtitle: 'ChatGPT odpowiada na pytania. ZEDPERA prowadzi aż do pomyślnie oddanej pracy.',
       badTitle: 'Zwykła AI',
-      goodTitle: 'Zedpera',
-      badItems: [
-        'Pisze ogólne teksty.',
-        'Nie pamięta Twojej pracy ani ważnych informacji.',
-        'Wymyśla źródła.',
-        'Tekst trzeba długo poprawiać.',
-        'Nie potrafi dobrze wskazać błędów.',
-        'Nie rozumie uwag promotora.',
-        'Nie pomaga w części praktycznej.',
-        'Nie reaguje na recenzje.',
-      ],
-      goodItems: [
-        'Zna Twoją pracę i cały kontekst.',
-        'Pamięta historię i komunikację.',
-        'Cytuje według wybranej normy i korzysta z Twoich źródeł.',
-        'Analizuje pracę i wskazuje problemy.',
-        'Opracowuje rozdziały, część praktyczną i obliczenia.',
-        'Przygotowuje pytania, odpowiedzi i obronę.',
-        'Zastępuje promotora i jest dostępna 24/7.',
-        'Pomaga w obronie na podstawie recenzji.',
-      ],
+      goodTitle: 'ZEDPERA',
+      badItems: ['Odpowiada na pojedyncze pytania.', 'Nie zna Twojej pracy ani jej historii.', 'Każdy nowy czat zaczyna prawie od początku.', 'Musisz wiedzieć, o co zapytać.', 'Tworzy tekst, ale nie sprawdza jakości całej pracy.', 'Nie daje informacji zwrotnej jak promotor.', 'Nie tworzy części praktycznej.', 'Nie przygotowuje do obrony.', 'Musisz używać wielu narzędzi.'],
+      goodItems: ['Prowadzi od zadania aż po obronę.', 'Pamięta cały projekt, wszystkie rozdziały i wcześniejsze zmiany.', 'Projekt pozostaje w jednym środowisku i zachowuje kontekst.', 'Samodzielnie wskazuje błędy metodologiczne, słabe miejsca i niespójności.', 'Na bieżąco ocenia jakość i zaleca konkretne ulepszenia.', 'Symuluje doświadczonego promotora i zapewnia wsparcie metodologiczne.', 'Przygotowuje pełne statystyki, wykresy i tabele gotowe do pracy.', 'Tworzy prezentację i pełny tekst wystąpienia na obronę.', 'Wszystko załatwisz w jednym systemie.'],
+      closing: 'ChatGPT jest świetnym pomocnikiem. ZEDPERA to kompletny system do tworzenia prac dyplomowych.',
     },
     process: {
       title: 'Jak działa Zedpera?',
@@ -1501,67 +1363,34 @@ const translations: Record<AppLanguage, Translation> = {
       students: '1000+ studentów',
     },
     reviews: {
-      title: 'Doświadczenia studentów z Zedperą',
+      title: 'Doświadczenia studentów z ZEDPERĄ',
       items: [
-        {
-          text: 'Opiekun AI pomógł mi z uwagami promotora i wskazał kierunek. Zedpera oszczędziła mi dużo czasu i stresu.',
-          name: 'Studentka pracy magisterskiej',
-        },
-        {
-          text: 'Źródła znalazłem bezpośrednio w systemie, a praca była gotowa w kilka dni. Bardzo pomogła mi część praktyczna i cytowania.',
-          name: 'Student pracy licencjackiej',
-        },
-        {
-          text: 'Zwykła AI dawała mi tylko ogólne teksty. Po wypełnieniu profilu Zedpera wygenerowała trafne rozdziały w kilka minut.',
-          name: 'Studentka po doświadczeniu z AI',
-        },
-        {
-          text: 'Studiuję zaocznie, pracuję i mam rodzinę. Dzięki Zedperze nadążam ze wszystkim.',
-          name: 'Studentka zaoczna',
-        },
+        { text: 'Promotor zwrócił moją pracę licencjacką z ponad 20 uwagami. ZEDPERA pomogła mi je wdrożyć w jeden wieczór i wyjaśniła, dlaczego są potrzebne.', name: 'Student pracy licencjackiej' },
+        { text: 'Najbardziej obawiałem się części praktycznej. Po przesłaniu ankiety ZEDPERA przygotowała tabele, wykresy i interpretację wyników.', name: 'Student części praktycznej' },
+        { text: 'W ChatGPT musiałem za każdym razem ponownie tłumaczyć temat. ZEDPERA znała cały projekt i pamiętała wszystkie rozdziały.', name: 'Student po korzystaniu z ChatGPT' },
+        { text: 'Przed oddaniem ZEDPERA znalazła nielogiczne fragmenty metodologii i brakujące cytowania. Oddawałem pracę z dużo większą pewnością.', name: 'Student przed oddaniem' },
+        { text: 'ZEDPERA przygotowała prezentację, możliwe pytania komisji i propozycje odpowiedzi. Na obronę poszedłem znacznie spokojniejszy.', name: 'Student przed obroną' },
+        { text: 'Przy pracy i dwójce dzieci ZEDPERA pomogła mi zaplanować rozdziały, dzięki czemu zawsze wiedziałem, co robić dalej.', name: 'Student zaoczny i rodzic' },
       ],
     },
     pricing: {
-      title: 'Wybierz program według zakresu pracy',
-      fullOfferText: 'Pokaż wszystkie pakiety i opcje',
-      fullOfferHint: 'Zobacz pełną ofertę pakietów miesięcznych i rocznych.',
+      title: 'Wybierz pakiet według typu i zakresu pracy',
+      fullOfferText: 'Zobacz pełny cennik',
+      fullOfferHint: 'Pakiety jednorazowe bez automatycznego odnawiania co miesiąc.',
       emailPrompt: 'Podaj e-mail powiązany z płatnością:',
       emailRequired: 'E-mail jest wymagany, aby przejść do płatności.',
-      invalidPlan: 'Nieprawidłowy pakiet',
+      invalidPlan: 'Nieprawidłowy pakiet lub dodatek',
       checkoutFailed: 'Nie udało się utworzyć płatności.',
       noStripeUrl: 'Stripe nie wygenerował adresu płatności.',
       plans: [
-        {
-          id: 'week-mini',
-          label: 'MINI',
-          name: 'Do mniejszych poprawek',
-          price: '13,20 €',
-          period: '7 dni',
-          description:
-            'Odpowiedni do pracy semestralnej, jednego rozdziału lub szybkiej poprawki.',
-          button: 'Kup MINI',
-        },
-        {
-          id: 'week-student',
-          label: 'STUDENT',
-          name: 'Do większego rozdziału',
-          price: '26,50 €',
-          period: '7 dni',
-          description:
-            'Odpowiedni do pracy semestralnej, rocznej lub większego rozdziału.',
-          button: 'Kup STUDENT',
-          highlighted: true,
-        },
-        {
-          id: 'week-pro',
-          label: 'PRO',
-          name: 'Intensywna praca',
-          price: '39,90 €',
-          period: '7 dni',
-          description:
-            'Do intensywnej pracy tuż przed oddaniem lub obroną.',
-          button: 'Kup PRO',
-        },
+        { id: 'free', kind: 'free', label: 'FREE', name: 'Wersja bezpłatna', price: '0 €', period: 'na zawsze', description: 'Wypróbuj podstawowe wsparcie akademickie bez opłat.', button: 'Zacznij bezpłatnie', pageLimit: 3, attachmentLimit: 1, promptLimit: 3, features: ['1 załącznik', '2–3 prompty', 'Podstawowa pomoc osobistego konsultanta akademickiego'] },
+        { id: 'seminar-work', kind: 'plan', label: 'PRACA SEMESTRALNA', name: 'Praca semestralna, roczna lub zaliczeniowa', price: '39 €', period: 'jednorazowo', description: 'Idealne rozwiązanie dla prac semestralnych, rocznych i zaliczeniowych do 15 stron.', button: 'Kup pakiet semestralny', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['Utworzenie całej pracy semestralnej', 'Pomoc przy pisaniu rozdziałów', 'Wsparcie metodologiczne', 'Kontrola jakości i logiki', 'Humanizacja tekstu', 'Propozycja struktury i planu', 'Cytowania i źródła', 'Planowanie pracy', 'Projekty e-maili do wykładowcy', 'Wszystko w jednym systemie'] },
+        { id: 'bachelor-thesis', kind: 'plan', label: 'PRACA LICENCJACKA', name: 'Kompletne rozwiązanie pracy licencjackiej', price: '149 €', period: 'jednorazowo', description: 'Kompletna pomoc od pierwszego zadania aż po udaną obronę pracy licencjackiej.', button: 'Kup pakiet licencjacki', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['Utworzenie całej pracy licencjackiej', 'Wsparcie metodologiczne przez cały proces', 'Kontrola jakości, logiki i spójności', 'Humanizacja tekstu', 'Poprawne cytowania i źródła', 'Opracowanie ankiet i statystyki', 'Wykresy i tabele', 'Prezentacja na obronę', 'Odpowiedzi na pytania komisji', 'Planowanie i terminy', 'Projekty e-maili do promotora', 'Wszystko w jednym systemie'] },
+        { id: 'master-thesis', kind: 'plan', label: 'PRACA MAGISTERSKA', name: 'Najbardziej kompleksowy pakiet pracy dyplomowej', price: '189 €', period: 'jednorazowo', description: 'Najbardziej kompleksowy pakiet dla wymagających prac z zaawansowaną metodologią i analizą danych.', button: 'Kup pakiet magisterski', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['Utworzenie całej pracy magisterskiej', 'Wsparcie metodologiczne przez cały proces', 'Kontrola jakości i poziomu naukowego', 'Humanizacja tekstu', 'Źródła i cytowania', 'Kompleksowa analiza statystyczna', 'Statystyka opisowa', 'Testowanie hipotez', 'Analizy korelacyjne', 'Normalność danych', 'Wykresy i tabele', 'Prezentacja na obronę', 'Symulacja pytań komisji', 'Planowanie całej pracy', 'Komunikacja z promotorem', 'Wszystko w jednym systemie'] },
+        { id: 'data-analysis', kind: 'addon', label: 'USŁUGA DODATKOWA', name: 'Analiza danych', price: '89 €', period: 'jednorazowo', description: 'Kompletne opracowanie części statystycznej pracy.', button: 'Kup analizę danych', features: ['Opracowanie ankiet', 'Czyszczenie danych', 'Statystyka opisowa', 'Testowanie normalności', 'Analizy korelacyjne', 'Tabele częstości', 'Skale i podskale', 'Wykresy'] },
+        { id: 'extra-20', kind: 'addon', label: 'DODATKOWY ZAKRES', name: 'Extra 20 stron', price: '49 €', period: 'jednorazowo', description: 'Rozszerzenie aktualnego projektu o kolejne 20 stron standardowych.', button: 'Dodaj 20 stron', extraPages: 20, features: ['20 dodatkowych stron dla aktualnego projektu'] },
+        { id: 'extra-40', kind: 'addon', label: 'DODATKOWY ZAKRES', name: 'Extra 40 stron', price: '89 €', period: 'jednorazowo', description: 'Rozszerzenie aktualnego projektu o kolejne 40 stron standardowych.', button: 'Dodaj 40 stron', extraPages: 40, features: ['40 dodatkowych stron dla aktualnego projektu'] },
+        { id: 'extra-60', kind: 'addon', label: 'DODATKOWY ZAKRES', name: 'Extra 60 stron', price: '129 €', period: 'jednorazowo', description: 'Rozszerzenie aktualnego projektu o kolejne 60 stron standardowych.', button: 'Dodaj 60 stron', extraPages: 60, features: ['60 dodatkowych stron dla aktualnego projektu'] },
       ],
     },
     faq: {
@@ -1644,24 +1473,13 @@ const translations: Record<AppLanguage, Translation> = {
     hero: {
       badge: 'Új generációs akadémiai asszisztens',
       title1: 'Az első AI témavezető,',
-      title2: 'amely végigvezet',
+      title2: 'amely végigkísér',
       title3: 'a feladattól a védésig',
-      subtitle:
-        'A Zedpera egy rendszerben egyesíti az AI írást, szakmai visszajelzést, minőségellenőrzést, forrásokat, hivatkozásokat, gyakorlati részt és védésre készülést.',
+      subtitle: 'A szakdolgozatírásnak nem kell hónapokig tartó stresszt jelentenie. A ZEDPERA lépésről lépésre végigvezet a témaválasztástól az íráson, módszertanon, hivatkozásokon és adatelemzésen át a sikeres védésig. Takaríts meg több tucat munkaórát, és találd meg a hibákat még a témavezetőd előtt.',
       primary: 'Kezdés',
-      secondary: 'Demó megtekintése',
-      benefits: [
-        'AI témavezető 24/7',
-        'Gyakorlati rész számításokkal',
-        'Hivatkozások és források',
-        'Felkészülés a védésre',
-      ],
-      stats: [
-        ['20', 'év tapasztalat'],
-        ['1000+', 'hallgató'],
-        ['24/7', 'AI témavezető'],
-        ['1', 'platform az egész folyamathoz'],
-      ],
+      secondary: 'Bemutató',
+      benefits: ['Személyes tanácsadó 24/7', 'Gyakorlati rész és statisztika', 'Hivatkozások és források', 'Felkészülés a védésre'],
+      stats: [['20', 'év tapasztalat'], ['1000+', 'hallgató'], ['24/7', 'akadémiai támogatás'], ['1', 'platform a teljes folyamathoz']],
     },
     preview: {
       logo: 'Zedpera',
@@ -1691,60 +1509,24 @@ const translations: Record<AppLanguage, Translation> = {
       ],
     },
     features: {
-      title: 'Minden, amire szükséged van a sikeres munkához',
+      title: 'Minden, ami a sikeres dolgozathoz szükséges',
       items: [
-        {
-          title: 'AI témavezető',
-          text: 'Ellenőrzi a logikát, módszertant és jelzi a gyenge pontokat.',
-        },
-        {
-          title: 'AI kritikus',
-          text: 'Azonnali visszajelzés és minőségi pontszám az írott szöveghez.',
-        },
-        {
-          title: 'AI írás',
-          text: 'Fejezetet ír, vázlatot, bevezetést, lezárást és bármilyen szakmai szöveget készít a követelmények alapján.',
-        },
-        {
-          title: 'Források és hivatkozások',
-          text: 'Segít kutatásban, hivatkozásokban és bibliográfiában.',
-        },
-        {
-          title: 'Adatelemzés',
-          text: 'A gyakorlati rész előkészítése statisztikákkal együtt.',
-        },
-        {
-          title: 'Védés',
-          text: 'Prezentáció, kérdések, válaszok és bírálatokra adott reakciók előkészítése.',
-        },
+        { title: 'Személyes akadémiai tanácsadó', text: 'Végigvezet a teljes munkán, ellenőrzi a logikát és módszertant, és jelzi a gyenge pontokat.' },
+        { title: 'Kritikus', text: 'Azonnali visszajelzést, minőségi értékelést és konkrét javaslatokat ad.' },
+        { title: 'Dolgozatírás', text: 'Segít a vázlat, fejezetek, bevezetés, összegzés és szakmai szöveg elkészítésében.' },
+        { title: 'Források és hivatkozások', text: 'Segít a kutatásban, forráskezelésben, hivatkozásban és bibliográfiában.' },
+        { title: 'Adatelemzés', text: 'Kérdőívek feldolgozása, leíró statisztika, normalitásvizsgálat, korrelációk, gyakorisági táblák, skálák, alskálák és grafikonok.' },
+        { title: 'Védés', text: 'Elkészíti a prezentációt, előadói szöveget, bizottsági kérdéseket, válaszokat és bírálati reakciókat.' },
       ],
     },
     comparison: {
-      title: 'Miért nem elég egy általános AI vagy LLM eszköz?',
-      subtitle:
-        'A Zedpera másképp működik. Általános válaszok helyett a munkádhoz, forrásaidhoz és az egész írási folyamathoz kapcsolódó eredményt kapsz.',
+      title: 'Miért nem elég a ChatGPT vagy más AI?',
+      subtitle: 'A ChatGPT kérdésekre válaszol. A ZEDPERA elvezet a sikeresen beadott dolgozatig.',
       badTitle: 'Általános AI',
-      goodTitle: 'Zedpera',
-      badItems: [
-        'Általános szövegeket ír.',
-        'Nem emlékszik a munkádra és fontos információkra.',
-        'Kitalál forrásokat.',
-        'A szöveget sokáig kell javítani.',
-        'Nem jelzi megbízhatóan a hibákat.',
-        'Nem érti a témavezető megjegyzéseit.',
-        'Nem segít a gyakorlati részben.',
-        'Nem reagál bírálatokra.',
-      ],
-      goodItems: [
-        'Ismeri a munkádat és a teljes kontextust.',
-        'Megőrzi az előzményeket és kommunikációt.',
-        'A választott szabvány szerint hivatkozik és a forrásaidat használja.',
-        'Elemzi a munkát és jelzi a problémás részeket.',
-        'Fejezeteket, gyakorlati részt és számításokat dolgoz fel.',
-        'Kérdéseket, válaszokat és védést készít elő.',
-        'Helyettesíti a témavezetőt és 24/7 elérhető.',
-        'Segít a védésben a bírálatok alapján.',
-      ],
+      goodTitle: 'ZEDPERA',
+      badItems: ['Egyedi kérdésekre válaszol.', 'Nem ismeri a dolgozatodat és annak előzményeit.', 'Minden új beszélgetés majdnem elölről indul.', 'Neked kell tudnod, mit kérdezz.', 'Szöveget készít, de nem ellenőrzi a teljes dolgozat minőségét.', 'Nem ad témavezetői visszajelzést.', 'Nem készíti el a gyakorlati részt.', 'Nem készít fel a védésre.', 'Több külön eszközt kell használnod.'],
+      goodItems: ['A feladattól a védésig végigvezet.', 'Emlékszik a teljes projektre, fejezetekre és korábbi módosításokra.', 'A projekt egy környezetben marad, és ismeri a kontextust.', 'Önállóan jelzi a módszertani hibákat, gyenge pontokat és ellentmondásokat.', 'Folyamatosan értékeli a minőséget és konkrét fejlesztéseket javasol.', 'Tapasztalt témavezetőt szimulál és módszertani útmutatást ad.', 'Teljes statisztikát, grafikonokat és táblázatokat készít a dolgozathoz.', 'Elkészíti a prezentációt és a teljes védési előadói szöveget.', 'Mindent egy rendszerben intézhetsz.'],
+      closing: 'A ChatGPT kiváló segítő. A ZEDPERA teljes rendszer a szakdolgozatok elkészítéséhez.',
     },
     process: {
       title: 'Hogyan működik a Zedpera?',
@@ -1783,67 +1565,34 @@ const translations: Record<AppLanguage, Translation> = {
       students: '1000+ hallgató',
     },
     reviews: {
-      title: 'Hallgatói tapasztalatok a Zedperával',
+      title: 'Hallgatói tapasztalatok a ZEDPERÁVAL',
       items: [
-        {
-          text: 'Az AI témavezető segített a témavezetői megjegyzésekben és irányt adott. Sok időt és stresszt spóroltam.',
-          name: 'Mesterképzéses hallgató',
-        },
-        {
-          text: 'A forrásokat közvetlenül a rendszerben találtam meg, és a munka pár nap alatt kész lett. Nagyon jó.',
-          name: 'Alapképzéses hallgató',
-        },
-        {
-          text: 'Az általános AI csak általános szöveget adott. A profil után a Zedpera releváns fejezeteket készített percek alatt.',
-          name: 'Hallgató AI tapasztalattal',
-        },
-        {
-          text: 'Munka és család mellett tanulok. A Zedperának köszönhetően mindent időben teljesítek.',
-          name: 'Levelező hallgató',
-        },
+        { text: 'A témavezetőm több mint 20 megjegyzéssel küldte vissza a dolgozatomat. A ZEDPERA egy este alatt segített beépíteni őket és elmagyarázta az okokat.', name: 'Alapképzéses hallgató' },
+        { text: 'A gyakorlati résztől féltem a legjobban. A kérdőív feltöltése után a ZEDPERA táblázatokat, grafikonokat és eredményértelmezést készített.', name: 'Gyakorlati részt készítő hallgató' },
+        { text: 'A ChatGPT-ben minden kérdésnél újra el kellett magyaráznom a témát. A ZEDPERA ismerte az egész projektet és emlékezett a fejezetekre.', name: 'Hallgató ChatGPT-tapasztalattal' },
+        { text: 'Beadás előtt a ZEDPERA logikátlan módszertani részeket és hiányzó hivatkozásokat talált. Sokkal magabiztosabban adtam be.', name: 'Hallgató beadás előtt' },
+        { text: 'A ZEDPERA elkészítette a prezentációt, a lehetséges kérdéseket és válaszjavaslatokat. Sokkal nyugodtabban mentem a védésre.', name: 'Hallgató védés előtt' },
+        { text: 'Munka és két gyermek mellett a ZEDPERA segített megtervezni a fejezeteket, így mindig pontosan tudtam, mi a következő lépés.', name: 'Levelezős hallgató és szülő' },
       ],
     },
     pricing: {
-      title: 'Válassz programot a munka terjedelme szerint',
-      fullOfferText: 'Összes csomag és lehetőség megtekintése',
-      fullOfferHint: 'Tekintsd meg a havi és éves csomagok teljes kínálatát.',
-      emailPrompt: 'Add meg a fizetéshez kapcsolódó e-mail címet:',
-      emailRequired: 'A fizetés folytatásához e-mail szükséges.',
-      invalidPlan: 'Érvénytelen csomag',
-      checkoutFailed: 'A fizetést nem sikerült létrehozni.',
-      noStripeUrl: 'A Stripe nem generált fizetési URL-t.',
+      title: 'Válassz csomagot a dolgozat típusa és terjedelme szerint',
+      fullOfferText: 'Teljes árlista megtekintése',
+      fullOfferHint: 'Egyszeri csomagok automatikus havi megújítás nélkül.',
+      emailPrompt: 'Add meg a fizetéshez tartozó e-mail-címet:',
+      emailRequired: 'A fizetés folytatásához e-mail-cím szükséges.',
+      invalidPlan: 'Érvénytelen csomag vagy kiegészítő',
+      checkoutFailed: 'A fizetés létrehozása sikertelen.',
+      noStripeUrl: 'A Stripe nem hozott létre fizetési URL-t.',
       plans: [
-        {
-          id: 'week-mini',
-          label: 'MINI',
-          name: 'Kisebb javításokra',
-          price: '13,20 €',
-          period: '7 nap',
-          description:
-            'Alkalmas szemináriumi munkához, egy fejezethez vagy gyors javításhoz.',
-          button: 'MINI vásárlása',
-        },
-        {
-          id: 'week-student',
-          label: 'HALLGATÓ',
-          name: 'Nagyobb fejezethez',
-          price: '26,50 €',
-          period: '7 nap',
-          description:
-            'Alkalmas szemináriumi, évfolyamdolgozathoz vagy nagyobb fejezethez.',
-          button: 'HALLGATÓ vásárlása',
-          highlighted: true,
-        },
-        {
-          id: 'week-pro',
-          label: 'PRO',
-          name: 'Intenzív munka',
-          price: '39,90 €',
-          period: '7 nap',
-          description:
-            'Intenzív munkához közvetlenül leadás vagy védés előtt.',
-          button: 'PRO vásárlása',
-        },
+        { id: 'free', kind: 'free', label: 'FREE', name: 'Ingyenes verzió', price: '0 €', period: 'örökre', description: 'Próbáld ki az alapvető akadémiai támogatást fizetés nélkül.', button: 'Ingyenes kezdés', pageLimit: 3, attachmentLimit: 1, promptLimit: 3, features: ['1 melléklet', '2–3 prompt', 'Alapvető személyes akadémiai tanácsadás'] },
+        { id: 'seminar-work', kind: 'plan', label: 'SZEMINÁRIUMI DOLGOZAT', name: 'Szemináriumi, évfolyam- vagy beszámoló dolgozat', price: '39 €', period: 'egyszeri', description: 'Ideális megoldás legfeljebb 15 oldalas szemináriumi és évfolyamdolgozatokhoz.', button: 'Szemináriumi csomag megvásárlása', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['A teljes szemináriumi dolgozat elkészítése', 'Segítség az egyes fejezetek írásában', 'Módszertani támogatás', 'Minőség- és logikaellenőrzés', 'Szöveghumanizálás', 'Szerkezet- és vázlatjavaslat', 'Források és hivatkozások', 'Munkatervezés', 'E-mail-tervezetek az oktatónak', 'Minden egy rendszerben'] },
+        { id: 'bachelor-thesis', kind: 'plan', label: 'ALAPKÉPZÉSES SZAKDOLGOZAT', name: 'Teljes megoldás az alapképzéses szakdolgozathoz', price: '149 €', period: 'egyszeri', description: 'Teljes támogatás az első feladattól a sikeres védésig.', button: 'Alapképzéses csomag megvásárlása', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['A teljes szakdolgozat elkészítése', 'Módszertani támogatás az írás során', 'Minőség-, logika- és konzisztenciaellenőrzés', 'Szöveghumanizálás', 'Helyes hivatkozások és források', 'Kérdőívek és statisztika feldolgozása', 'Grafikonok és táblázatok', 'Védési prezentáció', 'Válaszok a bizottság kérdéseire', 'Tervezés és határidők', 'E-mail-tervezetek a témavezetőnek', 'Minden egy rendszerben'] },
+        { id: 'master-thesis', kind: 'plan', label: 'MESTERKÉPZÉSES SZAKDOLGOZAT', name: 'A legteljesebb záródolgozati csomag', price: '189 €', period: 'egyszeri', description: 'A legátfogóbb csomag fejlett módszertant és adatelemzést igénylő dolgozatokhoz.', button: 'Mesterképzéses csomag megvásárlása', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['A teljes mesterszakos dolgozat elkészítése', 'Módszertani támogatás a teljes folyamatban', 'Minőségi és szakmai ellenőrzés', 'Szöveghumanizálás', 'Források és hivatkozások', 'Komplex statisztikai feldolgozás', 'Leíró statisztika', 'Hipotézisvizsgálat', 'Korrelációelemzés', 'Adatnormalitás', 'Grafikonok és táblázatok', 'Védési prezentáció', 'Bizottsági kérdések szimulációja', 'A teljes munka megtervezése', 'Kommunikáció a témavezetővel', 'Minden egy rendszerben'] },
+        { id: 'data-analysis', kind: 'addon', label: 'KIEGÉSZÍTŐ SZOLGÁLTATÁS', name: 'Adatelemzés', price: '89 €', period: 'egyszeri', description: 'A dolgozat statisztikai részének teljes feldolgozása.', button: 'Adatelemzés megvásárlása', features: ['Kérdőívek feldolgozása', 'Adattisztítás', 'Leíró statisztika', 'Normalitásvizsgálat', 'Korrelációelemzés', 'Gyakorisági táblák', 'Skálák és alskálák', 'Grafikonok'] },
+        { id: 'extra-20', kind: 'addon', label: 'EXTRA TERJEDELEM', name: 'Extra 20 oldal', price: '49 €', period: 'egyszeri', description: 'Az aktuális projekt bővítése további 20 szabványoldallal.', button: '20 oldal hozzáadása', extraPages: 20, features: ['20 további szabványoldal az aktuális projekthez'] },
+        { id: 'extra-40', kind: 'addon', label: 'EXTRA TERJEDELEM', name: 'Extra 40 oldal', price: '89 €', period: 'egyszeri', description: 'Az aktuális projekt bővítése további 40 szabványoldallal.', button: '40 oldal hozzáadása', extraPages: 40, features: ['40 további szabványoldal az aktuális projekthez'] },
+        { id: 'extra-60', kind: 'addon', label: 'EXTRA TERJEDELEM', name: 'Extra 60 oldal', price: '129 €', period: 'egyszeri', description: 'Az aktuális projekt bővítése további 60 szabványoldallal.', button: '60 oldal hozzáadása', extraPages: 60, features: ['60 további szabványoldal az aktuális projekthez'] },
       ],
     },
     faq: {
@@ -1956,6 +1705,30 @@ const blogCopies: Record<AppLanguage, BlogCopy> = {
   },
 };
 
+
+type PricingUiCopy = {
+  badge: string;
+  intro: string;
+  mainLabel: string;
+  mainTitle: string;
+  addonLabel: string;
+  addonTitle: string;
+  addonSubtitle: string;
+  range: (pages: number) => string;
+  extra: (pages: number) => string;
+  attachments: (count: number) => string;
+  unlimitedPrompts: string;
+  prompts: (count: number) => string;
+};
+
+const pricingUiCopies: Record<AppLanguage, PricingUiCopy> = {
+  sk: { badge: 'ZEDPERA cenník', intro: 'Začnite bezplatne alebo si vyberte jednorazový balík presne podľa typu a rozsahu vašej práce.', mainLabel: 'Hlavné balíky', mainTitle: 'Kompletná podpora pre akademickú prácu', addonLabel: 'Doplnkové služby', addonTitle: 'Analýza dát a extra rozsah práce', addonSubtitle: 'Doplnky rozšíria aktuálny projekt o štatistické spracovanie alebo ďalšie normostrany.', range: (n) => `Rozsah do ${n} strán`, extra: (n) => `+${n} strán`, attachments: (n) => `${n} príloh`, unlimitedPrompts: 'Neobmedzené prompty', prompts: (n) => `${n} prompty` },
+  cs: { badge: 'Ceník ZEDPERA', intro: 'Začněte zdarma nebo si vyberte jednorázový balíček podle typu a rozsahu práce.', mainLabel: 'Hlavní balíčky', mainTitle: 'Kompletní podpora pro akademickou práci', addonLabel: 'Doplňkové služby', addonTitle: 'Analýza dat a extra rozsah práce', addonSubtitle: 'Doplňky rozšíří aktuální projekt o statistické zpracování nebo další normostrany.', range: (n) => `Rozsah do ${n} stran`, extra: (n) => `+${n} stran`, attachments: (n) => `${n} příloh`, unlimitedPrompts: 'Neomezené prompty', prompts: (n) => `${n} prompty` },
+  en: { badge: 'ZEDPERA pricing', intro: 'Start free or choose a one-time package based on your thesis type and scope.', mainLabel: 'Main packages', mainTitle: 'Complete support for academic work', addonLabel: 'Add-on services', addonTitle: 'Data analysis and extra work scope', addonSubtitle: 'Add-ons extend the current project with statistical processing or additional standard pages.', range: (n) => `Up to ${n} pages`, extra: (n) => `+${n} pages`, attachments: (n) => `${n} attachments`, unlimitedPrompts: 'Unlimited prompts', prompts: (n) => `${n} prompts` },
+  de: { badge: 'ZEDPERA Preise', intro: 'Starten Sie kostenlos oder wählen Sie ein einmaliges Paket nach Art und Umfang Ihrer Arbeit.', mainLabel: 'Hauptpakete', mainTitle: 'Komplette Unterstützung für akademische Arbeiten', addonLabel: 'Zusatzleistungen', addonTitle: 'Datenanalyse und zusätzlicher Umfang', addonSubtitle: 'Zusätze erweitern das aktuelle Projekt um Statistik oder zusätzliche Normseiten.', range: (n) => `Bis zu ${n} Seiten`, extra: (n) => `+${n} Seiten`, attachments: (n) => `${n} Anhänge`, unlimitedPrompts: 'Unbegrenzte Prompts', prompts: (n) => `${n} Prompts` },
+  pl: { badge: 'Cennik ZEDPERA', intro: 'Zacznij bezpłatnie lub wybierz pakiet jednorazowy zgodnie z typem i zakresem pracy.', mainLabel: 'Główne pakiety', mainTitle: 'Kompletne wsparcie pracy akademickiej', addonLabel: 'Usługi dodatkowe', addonTitle: 'Analiza danych i dodatkowy zakres', addonSubtitle: 'Dodatki rozszerzają projekt o analizę statystyczną lub kolejne strony.', range: (n) => `Zakres do ${n} stron`, extra: (n) => `+${n} stron`, attachments: (n) => `${n} załączników`, unlimitedPrompts: 'Nielimitowane prompty', prompts: (n) => `${n} prompty` },
+  hu: { badge: 'ZEDPERA árak', intro: 'Kezdj ingyenesen, vagy válassz egyszeri csomagot a dolgozat típusa és terjedelme szerint.', mainLabel: 'Fő csomagok', mainTitle: 'Teljes támogatás az akadémiai munkához', addonLabel: 'Kiegészítő szolgáltatások', addonTitle: 'Adatelemzés és extra terjedelem', addonSubtitle: 'A kiegészítők statisztikai feldolgozással vagy további oldalakkal bővítik a projektet.', range: (n) => `Legfeljebb ${n} oldal`, extra: (n) => `+${n} oldal`, attachments: (n) => `${n} melléklet`, unlimitedPrompts: 'Korlátlan promptok', prompts: (n) => `${n} prompt` },
+};
 
 function applyLanguageToDocument(nextLanguage: AppLanguage) {
   if (typeof document === 'undefined') return;
@@ -2498,6 +2271,119 @@ function ModernWomanHeroCard() {
     </div>
   );
 }
+
+function PricingCard({
+  plan,
+  loading,
+  redirectingLabel,
+  onBuy,
+  copy,
+}: {
+  plan: Plan;
+  loading: boolean;
+  redirectingLabel: string;
+  onBuy: (planId: PlanId) => void | Promise<void>;
+  copy: PricingUiCopy;
+}) {
+  const isFree = plan.kind === 'free';
+  const isAddon = plan.kind === 'addon';
+
+  return (
+    <article
+      className={[
+        'relative flex h-full flex-col overflow-hidden rounded-3xl border p-7 shadow-2xl transition hover:-translate-y-1',
+        plan.highlighted
+          ? 'zedpera-glow-border border-violet-400/45 bg-violet-900/25 shadow-violet-950/35'
+          : isFree
+            ? 'border-emerald-400/30 bg-emerald-500/[0.07] shadow-emerald-950/20'
+            : isAddon
+              ? 'border-blue-400/20 bg-blue-500/[0.05] shadow-blue-950/20'
+              : 'border-white/10 bg-white/[0.025] shadow-black/25',
+      ].join(' ')}
+    >
+      {plan.highlighted ? (
+        <div className="absolute right-5 top-5 rounded-full bg-violet-500 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white">
+          TOP
+        </div>
+      ) : null}
+
+      <div className="text-xs font-black uppercase tracking-[0.18em] text-violet-300">
+        {plan.label}
+      </div>
+
+      <h3 className="mt-3 pr-12 text-2xl font-black leading-tight text-white">
+        {plan.name}
+      </h3>
+
+      <div className="mt-5 flex flex-wrap items-baseline gap-2">
+        <span className="text-4xl font-black tracking-tight text-white">
+          {plan.price}
+        </span>
+        <span className="text-sm font-bold text-slate-300">/ {plan.period}</span>
+      </div>
+
+      <p className="mt-5 text-sm font-bold leading-6 text-slate-200">
+        {plan.description}
+      </p>
+
+      {plan.pageLimit || plan.extraPages || plan.attachmentLimit || plan.promptLimit !== undefined ? (
+        <div className="mt-5 flex flex-wrap gap-2">
+          {plan.pageLimit ? (
+            <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-black text-white">
+              {copy.range(plan.pageLimit)}
+            </span>
+          ) : null}
+          {plan.extraPages ? (
+            <span className="rounded-full border border-blue-400/25 bg-blue-500/10 px-3 py-1.5 text-xs font-black text-blue-100">
+              {copy.extra(plan.extraPages)}
+            </span>
+          ) : null}
+          {plan.attachmentLimit ? (
+            <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-black text-white">
+              {copy.attachments(plan.attachmentLimit)}
+            </span>
+          ) : null}
+          {plan.promptLimit === null ? (
+            <span className="rounded-full border border-violet-400/25 bg-violet-500/10 px-3 py-1.5 text-xs font-black text-violet-100">
+              {copy.unlimitedPrompts}
+            </span>
+          ) : plan.promptLimit !== undefined ? (
+            <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-black text-white">
+              {copy.prompts(plan.promptLimit)}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      <ul className="mt-6 flex-1 space-y-3">
+        {plan.features.map((feature) => (
+          <li key={feature} className="flex items-start gap-3 text-sm font-bold leading-6 text-slate-100">
+            <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-violet-400" />
+            <span>{feature}</span>
+          </li>
+        ))}
+      </ul>
+
+      <button
+        type="button"
+        onClick={() => onBuy(plan.id)}
+        disabled={loading}
+        className={[
+          'mt-7 inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-2xl px-5 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-60',
+          plan.highlighted
+            ? 'bg-violet-600 text-white shadow-xl shadow-violet-950/35 hover:bg-violet-500'
+            : isFree
+              ? 'bg-emerald-600 text-white hover:bg-emerald-500'
+              : 'border border-violet-400/30 bg-violet-500/10 text-violet-100 hover:bg-violet-500/20',
+        ].join(' ')}
+      >
+        {loading ? <Loader2 className="animate-spin" size={18} /> : null}
+        {loading ? redirectingLabel : plan.button}
+      </button>
+    </article>
+  );
+}
+
 export default function LandingPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
@@ -2508,13 +2394,14 @@ export default function LandingPage() {
 
   const allowedPlans = useMemo<PlanId[]>(
     () => [
-      'week-mini',
-      'week-student',
-      'week-pro',
-      'monthly',
-      'three-months',
-      'year-pro',
-      'year-max',
+      'free',
+      'seminar-work',
+      'bachelor-thesis',
+      'master-thesis',
+      'data-analysis',
+      'extra-20',
+      'extra-40',
+      'extra-60',
     ],
     [],
   );
@@ -2524,6 +2411,7 @@ export default function LandingPage() {
   }, [language, translationVersion]);
 
   const blogCopy = blogCopies[language] || blogCopies.sk;
+  const pricingUi = pricingUiCopies[language] || pricingUiCopies.sk;
 
 
 const mobileMenuItems = useMemo(
@@ -2700,6 +2588,11 @@ const mobileMenuItems = useMemo(
         throw new Error(`${t.pricing.invalidPlan}: ${planId}`);
       }
 
+      if (planId === 'free') {
+        window.location.href = '/login?mode=register&plan=free';
+        return;
+      }
+
       const email = await getEmailForCheckout();
 
       if (!email) {
@@ -2707,14 +2600,26 @@ const mobileMenuItems = useMemo(
       }
 
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const addonIds: PlanId[] = [
+        'data-analysis',
+        'extra-20',
+        'extra-40',
+        'extra-60',
+      ];
+      const isAddon = addonIds.includes(planId);
 
       const payload = {
-        plan: planId,
-        planId,
-        addons: [],
+        itemId: planId,
+        catalogId: planId,
+        productId: planId,
+        plan: isAddon ? undefined : planId,
+        planId: isAddon ? undefined : planId,
+        addon: isAddon ? planId : undefined,
+        addonId: isAddon ? planId : undefined,
+        addons: isAddon ? [planId] : [],
         email,
-        successUrl: `${origin}/payment/success?plan=${planId}`,
-        cancelUrl: `${origin}/pricing?payment=cancel&plan=${planId}`,
+        successUrl: `${origin}/payment/success?item=${planId}`,
+        cancelUrl: `${origin}/pricing?payment=cancel&item=${planId}`,
       };
 
       const res = await fetch('/api/payments/checkout', {
@@ -2728,9 +2633,7 @@ const mobileMenuItems = useMemo(
       const data = (await res.json().catch(() => null)) as CheckoutResponse | null;
 
       if (!res.ok) {
-        throw new Error(
-          getCheckoutError(data, t.pricing.checkoutFailed),
-        );
+        throw new Error(getCheckoutError(data, t.pricing.checkoutFailed));
       }
 
       if (data?.url) {
@@ -2741,9 +2644,7 @@ const mobileMenuItems = useMemo(
       throw new Error(t.pricing.noStripeUrl);
     } catch (error) {
       const message =
-        error instanceof Error
-          ? error.message
-          : t.pricing.checkoutFailed;
+        error instanceof Error ? error.message : t.pricing.checkoutFailed;
 
       setPaymentError(message);
 
@@ -2770,6 +2671,10 @@ const mobileMenuItems = useMemo(
     { href: '/obchodne-podmienky', label: t.footer.links.terms, icon: FileText },
     { href: '/cookies', label: t.footer.links.cookies, icon: Cookie },
   ];
+
+  const freePlan = t.pricing.plans.find((plan) => plan.kind === 'free');
+  const mainPlans = t.pricing.plans.filter((plan) => plan.kind === 'plan');
+  const addonPlans = t.pricing.plans.filter((plan) => plan.kind === 'addon');
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-black text-white">
@@ -3105,7 +3010,6 @@ const mobileMenuItems = useMemo(
         }
 
 
-
           /* =========================================================
              FIX: MOBIL NIKDY NESMIE ZBELIEŤ ANI KEĎ THEMEPROVIDER
              ALEBO LOCALSTORAGE DRŽÍ LIGHT REŽIM.
@@ -3220,8 +3124,6 @@ const mobileMenuItems = useMemo(
             gap: 1.5rem !important;
           }
         }
-
-
 
 
 /* =========================================================
@@ -4153,6 +4055,10 @@ const mobileMenuItems = useMemo(
               </ul>
             </div>
           </div>
+
+          <div className="mx-auto mt-10 max-w-4xl rounded-2xl border border-violet-400/30 bg-violet-500/10 px-6 py-5 text-center text-base font-black leading-7 text-violet-100 shadow-xl shadow-violet-950/20">
+            {t.comparison.closing}
+          </div>
         </section>
 
         <section id="process" className="relative z-10 mx-auto max-w-[1260px] px-5 py-24 lg:px-8">
@@ -4208,7 +4114,7 @@ const mobileMenuItems = useMemo(
             {t.reviews.title}
           </h2>
 
-          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-12 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
             {t.reviews.items.map((review) => (
               <div key={review.name} className="flex flex-col justify-between rounded-2xl border border-white/10 bg-white/[0.02] p-6 shadow-lg">
                 <div>
@@ -4273,58 +4179,81 @@ const mobileMenuItems = useMemo(
           </div>
         </section>
 
-        <section id="pricing" className="relative z-10 mx-auto max-w-[1260px] px-5 py-24 lg:px-8">
+        <section id="pricing" className="relative z-10 mx-auto max-w-[1460px] px-5 py-24 lg:px-8">
           <div className="text-center">
-            <h2 className="zedpera-section-title text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
+            <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-xs font-black uppercase tracking-[0.2em] text-violet-200">
+              <Crown size={16} />
+              {pricingUi.badge}
+            </div>
+            <h2 className="zedpera-section-title mt-5 text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
               {t.pricing.title}
             </h2>
+            <p className="mx-auto mt-4 max-w-3xl text-base font-bold leading-7 text-slate-300">
+              {pricingUi.intro}
+            </p>
           </div>
 
-          <div className="mx-auto mt-16 grid max-w-[1000px] gap-8 sm:grid-cols-3">
-            {t.pricing.plans.map((plan) => (
-              <div
-                key={plan.id}
-                className={`relative flex flex-col rounded-3xl p-8 ${
-                  plan.highlighted
-                    ? 'zedpera-glow-border z-10 scale-105 bg-violet-900/20'
-                    : 'border border-white/10 bg-white/[0.02]'
-                }`}
-              >
-                {plan.highlighted && (
-                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 rounded-full bg-violet-500 px-4 py-1 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-violet-500/50">
-                    TOP
-                  </div>
-                )}
+          {freePlan ? (
+            <div className="mx-auto mt-12 max-w-4xl">
+              <PricingCard
+                plan={freePlan}
+                loading={loadingPlan === freePlan.id}
+                redirectingLabel={t.common.redirecting}
+                onBuy={buy}
+                copy={pricingUi}
+              />
+            </div>
+          ) : null}
 
-                <div className="mb-2 text-sm font-black uppercase tracking-wider text-violet-400">
-                  {plan.label}
-                </div>
-                <h3 className="mb-6 text-xl font-bold text-white">
-                  {plan.name}
-                </h3>
-                <div className="mb-6 flex items-baseline gap-2">
-                  <span className="text-4xl font-black text-white">{plan.price}</span>
-                  <span className="text-sm font-semibold text-white">/ {plan.period}</span>
-                </div>
-                <p className="mb-8 min-h-[60px] text-sm font-semibold text-white">
-                  {plan.description}
-                </p>
-
-                <button
-                  type="button"
-                  onClick={() => buy(plan.id)}
-                  disabled={loadingPlan === plan.id}
-                  className={`mt-auto flex w-full items-center justify-center gap-2 rounded-xl py-4 text-sm font-black transition ${
-                    plan.highlighted
-                      ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/30 hover:bg-violet-500'
-                      : 'bg-white/10 text-white hover:bg-white/20'
-                  }`}
-                >
-                  {loadingPlan === plan.id ? <Loader2 className="animate-spin" size={18} /> : null}
-                  {loadingPlan === plan.id ? t.common.redirecting : plan.button}
-                </button>
+          <div className="mt-20">
+            <div className="text-center">
+              <div className="text-xs font-black uppercase tracking-[0.2em] text-violet-300">
+                {pricingUi.mainLabel}
               </div>
-            ))}
+              <h3 className="mt-2 text-3xl font-black text-white">
+                {pricingUi.mainTitle}
+              </h3>
+            </div>
+
+            <div className="mt-10 grid gap-7 lg:grid-cols-3">
+              {mainPlans.map((plan) => (
+                <PricingCard
+                  key={plan.id}
+                  plan={plan}
+                  loading={loadingPlan === plan.id}
+                  redirectingLabel={t.common.redirecting}
+                  onBuy={buy}
+                  copy={pricingUi}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div id="doplnkove-sluzby" className="mt-24 scroll-mt-24">
+            <div className="text-center">
+              <div className="text-xs font-black uppercase tracking-[0.2em] text-blue-300">
+                {pricingUi.addonLabel}
+              </div>
+              <h3 className="mt-2 text-3xl font-black text-white">
+                {pricingUi.addonTitle}
+              </h3>
+              <p className="mx-auto mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-300">
+                {pricingUi.addonSubtitle}
+              </p>
+            </div>
+
+            <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+              {addonPlans.map((plan) => (
+                <PricingCard
+                  key={plan.id}
+                  plan={plan}
+                  loading={loadingPlan === plan.id}
+                  redirectingLabel={t.common.redirecting}
+                  onBuy={buy}
+                  copy={pricingUi}
+                />
+              ))}
+            </div>
           </div>
 
           <div className="mt-12 text-center">
@@ -4340,14 +4269,13 @@ const mobileMenuItems = useMemo(
             <span className="flex items-center gap-2"><ShieldCheck size={16} className="text-violet-400"/> {t.common.safePayments}</span>
             <span className="flex items-center gap-2"><Zap size={16} className="text-violet-400"/> {t.common.instantAccess}</span>
             <span className="flex items-center gap-2"><CheckCircle2 size={16} className="text-violet-400"/> {t.common.satisfactionGuarantee}</span>
-            <span className="flex items-center gap-2"><X size={16} className="text-violet-400"/> {t.common.cancelAnytime}</span>
           </div>
 
-          {paymentError && (
-            <div className="mx-auto mt-8 max-w-md rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-center text-sm font-bold text-red-400">
+          {paymentError ? (
+            <div className="mx-auto mt-8 max-w-2xl rounded-2xl border border-red-500/25 bg-red-500/10 p-4 text-center text-sm font-bold text-red-200">
               {paymentError}
             </div>
-          )}
+          ) : null}
         </section>
 
         <section id="faq" className="relative z-10 mx-auto max-w-[860px] px-5 py-24 lg:px-8">

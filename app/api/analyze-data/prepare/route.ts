@@ -1,8 +1,21 @@
-import { NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
+
+import {
+  NextResponse,
+  type NextRequest,
+} from 'next/server';
 import * as XLSX from 'xlsx';
+
+import {
+  AttachmentLimitError,
+  EntitlementError,
+  entitlementErrorResponse,
+  requireDataAnalysisAction,
+} from '@/lib/entitlements';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 export const maxDuration = 120;
 
 type RowValue = string | number | boolean | null;
@@ -83,9 +96,33 @@ type JaspAnalysisResult = {
   warnings: JaspTableRow[];
 };
 
+type PrepareErrorCode =
+  | 'DATA_PREPARED'
+  | 'INVALID_CONTENT_TYPE'
+  | 'INVALID_FORM_DATA'
+  | 'FILE_REQUIRED'
+  | 'MULTIPLE_FILES_NOT_SUPPORTED'
+  | 'EMPTY_FILE'
+  | 'FILE_TOO_LARGE'
+  | 'UNSUPPORTED_FILE_TYPE'
+  | 'FILE_READ_FAILED'
+  | 'EMPTY_WORKBOOK'
+  | 'NO_DATA_ROWS'
+  | 'WORKBOOK_GENERATION_FAILED'
+  | 'UNAUTHENTICATED'
+  | 'FEATURE_NOT_INCLUDED'
+  | 'ATTACHMENT_LIMIT_REACHED'
+  | 'ENTITLEMENTS_LOAD_FAILED'
+  | 'INTERNAL_SERVER_ERROR'
+  | string;
+
 type PrepareResponse = {
   ok: boolean;
+  code?: PrepareErrorCode;
   message: string;
+  requestId?: string;
+  errorId?: string;
+  processingMs?: number;
   preparedFileName?: string;
   preparedFileBase64?: string;
   mimeType?: string;
@@ -96,7 +133,23 @@ type PrepareResponse = {
   qualityReport?: QualityReportItem[];
   questionnaireConfig?: QuestionnaireConfig;
   jaspSummary?: JaspTableRow[];
+  access?: {
+    planId: string;
+    planName: string;
+    attachmentLimit: number;
+    requiredFeature: 'data-prepare';
+  };
+
+  /**
+   * Zachované kvôli spätnej kompatibilite frontendu.
+   * V produkcii obsahuje iba bezpečnú používateľskú správu.
+   */
   error?: string;
+
+  /**
+   * Technický detail sa vracia iba mimo produkčného prostredia.
+   */
+  detail?: string;
 };
 
 const EXCEL_MIME_TYPE =
@@ -104,6 +157,56 @@ const EXCEL_MIME_TYPE =
 
 const MAX_FILE_SIZE_MB = 25;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
+const MAX_FILE_NAME_LENGTH = 255;
+const REQUIRED_DATA_FEATURE = 'data-prepare' as const;
+
+const SUPPORTED_EXTENSIONS = new Set([
+  'xlsx',
+  'xls',
+  'xlsm',
+  'csv',
+]);
+
+const NO_STORE_HEADERS = {
+  'Cache-Control':
+    'no-store, no-cache, must-revalidate, proxy-revalidate',
+  Pragma: 'no-cache',
+  Expires: '0',
+  'X-Content-Type-Options': 'nosniff',
+} as const;
+
+class PrepareRouteError extends Error {
+  readonly code: PrepareErrorCode;
+  readonly status: number;
+  readonly publicMessage: string;
+  readonly detail?: string;
+
+  constructor({
+    code,
+    status,
+    message,
+    detail,
+  }: {
+    code: PrepareErrorCode;
+    status: number;
+    message: string;
+    detail?: string;
+  }) {
+    super(detail || message);
+    this.name = 'PrepareRouteError';
+    this.code = code;
+    this.status = status;
+    this.publicMessage = message;
+    this.detail = detail;
+
+    Object.setPrototypeOf(
+      this,
+      PrepareRouteError.prototype,
+    );
+  }
+}
+
 
 const JSS_REVERSE_ITEMS = new Set<number>([
   2, 4, 6, 8, 10, 12, 14, 16, 18, 19, 21, 23, 24, 26, 29, 31, 32, 34, 36,
@@ -449,13 +552,94 @@ const STANDARD_COLUMN_MAP: Record<string, string> = {
   companytype: 'TYP_PODNIKU',
 };
 
-function createJsonResponse(payload: PrepareResponse, status = 200) {
+function createJsonResponse(
+  payload: PrepareResponse,
+  status = 200,
+  requestId?: string,
+) {
   return NextResponse.json(payload, {
     status,
     headers: {
-      'Cache-Control': 'no-store',
+      ...NO_STORE_HEADERS,
+      ...(requestId
+        ? { 'X-Request-Id': requestId }
+        : {}),
     },
   });
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message.trim() || 'UNKNOWN_ERROR';
+  }
+
+  if (typeof error === 'string') {
+    return error.trim() || 'UNKNOWN_ERROR';
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'UNKNOWN_ERROR';
+  }
+}
+
+function getDevelopmentDetail(
+  detail: string | undefined,
+): Pick<PrepareResponse, 'detail'> {
+  if (
+    process.env.NODE_ENV === 'production' ||
+    !detail
+  ) {
+    return {};
+  }
+
+  return { detail };
+}
+
+function resolveRequestId(
+  request: NextRequest,
+): string {
+  const suppliedRequestId =
+    request.headers
+      .get('x-request-id')
+      ?.trim()
+      .slice(0, 255) || '';
+
+  return suppliedRequestId || randomUUID();
+}
+
+function isMultipartRequest(
+  request: NextRequest,
+): boolean {
+  const contentType =
+    request.headers
+      .get('content-type')
+      ?.toLowerCase() || '';
+
+  return contentType.includes(
+    'multipart/form-data',
+  );
+}
+
+function sanitizeFileName(
+  fileName: string,
+): string {
+  return String(fileName || 'uploaded-file')
+    .replace(/[\\/]+/g, '_')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim()
+    .slice(0, MAX_FILE_NAME_LENGTH) || 'uploaded-file';
+}
+
+function getFileExtension(
+  fileName: string,
+): string {
+  const match = fileName
+    .toLowerCase()
+    .match(/\.([a-z0-9]+)$/);
+
+  return match?.[1] || '';
 }
 
 function removeDiacritics(value: string): string {
@@ -538,20 +722,18 @@ function isCsvFileName(fileName: string): boolean {
   return /\.csv$/i.test(fileName);
 }
 
-function getUploadedFile(formData: FormData): File | null {
-  const directFile = formData.get('file');
-
-  if (directFile instanceof File) {
-    return directFile;
-  }
+function getUploadedFiles(
+  formData: FormData,
+): File[] {
+  const files: File[] = [];
 
   for (const [, value] of formData.entries()) {
     if (value instanceof File) {
-      return value;
+      files.push(value);
     }
   }
 
-  return null;
+  return files;
 }
 
 function getWorkbookFirstSheetRows(workbook: XLSX.WorkBook): unknown[][] {
@@ -3155,186 +3337,483 @@ function createPreparedFileName(originalFileName: string): string {
   return `${safeName || 'data'}_PREPARED_${date}.xlsx`;
 }
 
-async function readWorkbookFromFile(file: File): Promise<XLSX.WorkBook> {
-  const fileName = file.name || 'uploaded-file';
+async function readWorkbookFromFile(
+  file: File,
+): Promise<XLSX.WorkBook> {
+  const fileName = sanitizeFileName(
+    file.name || 'uploaded-file',
+  );
+  const extension = getFileExtension(fileName);
 
-  if (file.size > MAX_FILE_SIZE_BYTES) {
-    throw new Error(
-      `Súbor je príliš veľký. Maximálna veľkosť je ${MAX_FILE_SIZE_MB} MB.`,
-    );
-  }
-
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-
-  if (isCsvFileName(fileName)) {
-    const text = buffer.toString('utf8');
-
-    return XLSX.read(text, {
-      type: 'string',
-      raw: false,
+  if (file.size <= 0) {
+    throw new PrepareRouteError({
+      code: 'EMPTY_FILE',
+      status: 400,
+      message:
+        'Nahratý súbor je prázdny.',
     });
   }
 
-  if (isExcelFileName(fileName)) {
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    throw new PrepareRouteError({
+      code: 'FILE_TOO_LARGE',
+      status: 413,
+      message:
+        `Súbor je príliš veľký. Maximálna veľkosť je ${MAX_FILE_SIZE_MB} MB.`,
+      detail:
+        `Veľkosť súboru: ${file.size} bajtov. Povolené maximum: ${MAX_FILE_SIZE_BYTES} bajtov.`,
+    });
+  }
+
+  if (!SUPPORTED_EXTENSIONS.has(extension)) {
+    throw new PrepareRouteError({
+      code: 'UNSUPPORTED_FILE_TYPE',
+      status: 415,
+      message:
+        'Nepodporovaný typ súboru. Nahrajte súbor .xlsx, .xls, .xlsm alebo .csv.',
+      detail:
+        `Názov súboru: ${fileName}; MIME typ: ${file.type || 'neuvedený'}.`,
+    });
+  }
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    if (isCsvFileName(fileName)) {
+      const text = buffer.toString('utf8');
+
+      return XLSX.read(text, {
+        type: 'string',
+        raw: false,
+      });
+    }
+
     return XLSX.read(buffer, {
       type: 'buffer',
       cellDates: true,
       raw: false,
     });
+  } catch (error: unknown) {
+    throw new PrepareRouteError({
+      code: 'FILE_READ_FAILED',
+      status: 422,
+      message:
+        'Súbor sa nepodarilo načítať. Skontrolujte, či nie je poškodený, zašifrovaný alebo chránený heslom.',
+      detail: getErrorMessage(error),
+    });
   }
-
-  throw new Error(
-    'Nepodporovaný typ súboru. Nahrajte súbor .xlsx, .xls, .xlsm alebo .csv.',
-  );
 }
 
-export async function POST(request: Request) {
-  try {
-    const formData = await request.formData();
-    const file = getUploadedFile(formData);
+/**
+ * POST /api/analyze-data/prepare
+ *
+ * Pripraví jeden Excel alebo CSV súbor pre ďalšiu dátovú analýzu.
+ * Route:
+ *
+ * 1. overí prihlásenie a funkciu data-prepare,
+ * 2. skontroluje limit príloh aktívneho balíka,
+ * 3. validuje formát a veľkosť súboru,
+ * 4. pripraví DATA_RAW, DATA_CLEAN, slovník premenných a scoring,
+ * 5. vytvorí JASP-like štatistické hárky,
+ * 6. vráti pripravený XLSX súbor ako Base64.
+ *
+ * Táto route nevytvára AI text, preto sama nespotrebúva prompt ani
+ * generované strany. Spotreba sa má zaznamenať až v route, ktorá
+ * úspešne vytvorí používateľský AI výstup.
+ */
+export async function POST(
+  request: NextRequest,
+): Promise<NextResponse<PrepareResponse>> {
+  const requestId = resolveRequestId(request);
+  const errorId = randomUUID();
+  const startedAt = Date.now();
 
-    if (!file) {
-      return createJsonResponse(
-        {
-          ok: false,
-          message: 'Súbor nebol nahratý.',
-          error: 'Chýba parameter file vo FormData.',
-        },
-        400,
+  try {
+    /**
+     * Oprávnenie kontrolujeme pred načítaním a spracovaním veľkého súboru,
+     * aby neoprávnená požiadavka nespotrebovala výpočtové zdroje servera.
+     */
+    const entitlements =
+      await requireDataAnalysisAction(
+        'prepare',
       );
+
+    if (!isMultipartRequest(request)) {
+      throw new PrepareRouteError({
+        code: 'INVALID_CONTENT_TYPE',
+        status: 415,
+        message:
+          'Požiadavka musí používať Content-Type multipart/form-data.',
+      });
     }
 
-    const questionnaireConfig = normalizeQuestionnaireConfig(formData);
+    let formData: FormData;
 
-    const workbook = await readWorkbookFromFile(file);
-    const rows = getWorkbookFirstSheetRows(workbook);
+    try {
+      formData = await request.formData();
+    } catch (error: unknown) {
+      throw new PrepareRouteError({
+        code: 'INVALID_FORM_DATA',
+        status: 400,
+        message:
+          'Telo požiadavky neobsahuje platné FormData.',
+        detail: getErrorMessage(error),
+      });
+    }
+
+    const uploadedFiles =
+      getUploadedFiles(formData);
+
+    if (uploadedFiles.length === 0) {
+      throw new PrepareRouteError({
+        code: 'FILE_REQUIRED',
+        status: 400,
+        message:
+          'Súbor nebol nahratý.',
+        detail:
+          'Vo FormData chýba položka typu File.',
+      });
+    }
+
+    if (
+      uploadedFiles.length >
+      entitlements.attachmentLimit
+    ) {
+      throw new AttachmentLimitError({
+        attachmentLimit:
+          entitlements.attachmentLimit,
+        receivedAttachments:
+          uploadedFiles.length,
+      });
+    }
+
+    if (uploadedFiles.length > 1) {
+      throw new PrepareRouteError({
+        code:
+          'MULTIPLE_FILES_NOT_SUPPORTED',
+        status: 400,
+        message:
+          'Príprava dát podporuje v jednej požiadavke práve jeden súbor.',
+        detail:
+          `Prijatý počet súborov: ${uploadedFiles.length}.`,
+      });
+    }
+
+    const file = uploadedFiles[0];
+    const safeFileName =
+      sanitizeFileName(
+        file.name || 'data.xlsx',
+      );
+
+    const questionnaireConfig =
+      normalizeQuestionnaireConfig(
+        formData,
+      );
+
+    const workbook =
+      await readWorkbookFromFile(file);
+
+    if (workbook.SheetNames.length === 0) {
+      throw new PrepareRouteError({
+        code: 'EMPTY_WORKBOOK',
+        status: 422,
+        message:
+          'Súbor neobsahuje žiadny čitateľný hárok.',
+      });
+    }
+
+    const rows =
+      getWorkbookFirstSheetRows(
+        workbook,
+      );
 
     if (!rows.length) {
-      return createJsonResponse(
-        {
-          ok: false,
-          message: 'Súbor neobsahuje dáta.',
-          error: 'Žiadny hárok neobsahuje čitateľnú tabuľku alebo sa dáta nepodarilo načítať.',
-        },
-        400,
-      );
+      throw new PrepareRouteError({
+        code: 'NO_DATA_ROWS',
+        status: 422,
+        message:
+          'Súbor neobsahuje čitateľné dátové riadky.',
+        detail:
+          'Žiadny hárok neobsahuje čitateľnú tabuľku alebo sa dáta nepodarilo načítať.',
+      });
     }
 
-    const converted = convertRowsToObjects(rows, questionnaireConfig);
+    const converted =
+      convertRowsToObjects(
+        rows,
+        questionnaireConfig,
+      );
 
-    const scoringResult = calculateScores(
-      converted.cleanRows,
-      converted.headers,
-      questionnaireConfig,
-    );
+    if (
+      converted.cleanRows.length === 0 ||
+      converted.headers.length === 0
+    ) {
+      throw new PrepareRouteError({
+        code: 'NO_DATA_ROWS',
+        status: 422,
+        message:
+          'Po rozpoznaní hlavičky neostali žiadne použiteľné dátové riadky.',
+      });
+    }
+
+    const scoringResult =
+      calculateScores(
+        converted.cleanRows,
+        converted.headers,
+        questionnaireConfig,
+      );
 
     const allWarnings = [
-      ...createQuestionnaireSelectionWarnings(questionnaireConfig),
+      ...createQuestionnaireSelectionWarnings(
+        questionnaireConfig,
+      ),
       ...converted.warnings,
       ...scoringResult.warnings,
     ];
 
-    const rangeControl = countInvalidRanges(
-      scoringResult.rows,
-      scoringResult.headers,
+    const rangeControl =
+      countInvalidRanges(
+        scoringResult.rows,
+        scoringResult.headers,
+      );
+
+    const finalWarnings =
+      Array.from(
+        new Set([
+          ...allWarnings,
+          ...rangeControl.warnings,
+        ]),
+      );
+
+    const variableDictionary =
+      createVariableDictionary(
+        scoringResult.headers,
+        converted.originalHeaders,
+        scoringResult.rows,
+      );
+
+    const qualityReport =
+      createQualityReport({
+        rawRows: converted.rawRows,
+        cleanRows: scoringResult.rows,
+        headers: scoringResult.headers,
+        warnings: finalWarnings,
+        scoringItems:
+          scoringResult.scoringItems,
+      });
+
+    const jaspAnalysis =
+      buildJaspAnalysis({
+        fileName: safeFileName,
+        rows: scoringResult.rows,
+        headers: scoringResult.headers,
+        scoringItems:
+          scoringResult.scoringItems,
+        questionnaireConfig,
+      });
+
+    const preparedWorkbook =
+      buildPreparedWorkbook({
+        rawRows: converted.rawRows,
+        cleanRows: scoringResult.rows,
+        variableDictionary,
+        scoringItems:
+          scoringResult.scoringItems,
+        qualityReport,
+        questionnaireConfig,
+        jaspAnalysis,
+      });
+
+    let preparedBuffer: Buffer;
+
+    try {
+      preparedBuffer = XLSX.write(
+        preparedWorkbook,
+        {
+          bookType: 'xlsx',
+          type: 'buffer',
+          compression: true,
+        },
+      ) as Buffer;
+    } catch (error: unknown) {
+      throw new PrepareRouteError({
+        code:
+          'WORKBOOK_GENERATION_FAILED',
+        status: 500,
+        message:
+          'Pripravený Excel súbor sa nepodarilo vytvoriť.',
+        detail: getErrorMessage(error),
+      });
+    }
+
+    const preparedFileName =
+      createPreparedFileName(
+        safeFileName,
+      );
+    const preparedFileBase64 =
+      preparedBuffer.toString('base64');
+    const processingMs =
+      Date.now() - startedAt;
+
+    return createJsonResponse(
+      {
+        ok: true,
+        code: 'DATA_PREPARED',
+        message:
+          'Súbor bol pripravený v JASP-like štruktúre pre ľubovoľnú databázu. Výstup obsahuje DATA_CLEAN aj samostatné hárky pre deskriptívu, frekvencie, reliabilitu, normalitu, korelácie, parametrické a neparametrické testy.',
+        requestId,
+        processingMs,
+        preparedFileName,
+        preparedFileBase64,
+        mimeType: EXCEL_MIME_TYPE,
+        rows: scoringResult.rows.length,
+        columns:
+          scoringResult.headers.length,
+        sheets: [
+          'DATA_RAW',
+          'DATA_CLEAN',
+          'VARIABLE_DICTIONARY',
+          'SCORING',
+          'QUESTIONNAIRE_SETUP',
+          'QUALITY_REPORT',
+          'JASP_SUMMARY',
+          'JASP_VARIABLES',
+          'JASP_DESCRIPTIVES',
+          'JASP_FREQUENCIES',
+          'JASP_RELIABILITY',
+          'JASP_NORMALITY',
+          'JASP_CORRELATIONS',
+          'JASP_PARAMETRIC',
+          'JASP_NONPARAMETRIC',
+          'JASP_TEST_SELECTION',
+          'JASP_WARNINGS',
+          'README',
+        ],
+        warnings: finalWarnings,
+        qualityReport,
+        questionnaireConfig,
+        jaspSummary:
+          jaspAnalysis.summary,
+        access: {
+          planId: entitlements.planId,
+          planName:
+            entitlements.planName,
+          attachmentLimit:
+            entitlements.attachmentLimit,
+          requiredFeature:
+            REQUIRED_DATA_FEATURE,
+        },
+      },
+      200,
+      requestId,
     );
+  } catch (error: unknown) {
+    const processingMs =
+      Date.now() - startedAt;
 
-    const finalWarnings = [
-      ...allWarnings,
-      ...rangeControl.warnings,
-    ];
+    if (error instanceof EntitlementError) {
+      const mapped =
+        entitlementErrorResponse(error);
 
-    const variableDictionary = createVariableDictionary(
-      scoringResult.headers,
-      converted.originalHeaders,
-      scoringResult.rows,
+      console.warn(
+        '[POST /api/analyze-data/prepare] Access rejected.',
+        {
+          requestId,
+          errorId,
+          code: mapped.body.code,
+          status: mapped.status,
+          processingMs,
+        },
+      );
+
+      return createJsonResponse(
+        {
+          ...mapped.body,
+          requestId,
+          errorId,
+          processingMs,
+          error: mapped.body.message,
+          ...getDevelopmentDetail(
+            mapped.body.detail,
+          ),
+        },
+        mapped.status,
+        requestId,
+      );
+    }
+
+    if (error instanceof PrepareRouteError) {
+      const logPayload = {
+        requestId,
+        errorId,
+        code: error.code,
+        status: error.status,
+        processingMs,
+        detail: error.detail,
+      };
+
+      if (error.status >= 500) {
+        console.error(
+          '[POST /api/analyze-data/prepare] Processing failed.',
+          logPayload,
+        );
+      } else {
+        console.warn(
+          '[POST /api/analyze-data/prepare] Invalid request.',
+          logPayload,
+        );
+      }
+
+      return createJsonResponse(
+        {
+          ok: false,
+          code: error.code,
+          message: error.publicMessage,
+          requestId,
+          errorId,
+          processingMs,
+          error: error.publicMessage,
+          ...getDevelopmentDetail(
+            error.detail || error.message,
+          ),
+        },
+        error.status,
+        requestId,
+      );
+    }
+
+    const technicalMessage =
+      getErrorMessage(error);
+
+    console.error(
+      '[POST /api/analyze-data/prepare] Unexpected server error.',
+      {
+        requestId,
+        errorId,
+        processingMs,
+        message: technicalMessage,
+        error,
+      },
     );
-
-    const qualityReport = createQualityReport({
-      rawRows: converted.rawRows,
-      cleanRows: scoringResult.rows,
-      headers: scoringResult.headers,
-      warnings: finalWarnings,
-      scoringItems: scoringResult.scoringItems,
-    });
-
-    const jaspAnalysis = buildJaspAnalysis({
-      fileName: file.name || 'data.xlsx',
-      rows: scoringResult.rows,
-      headers: scoringResult.headers,
-      scoringItems: scoringResult.scoringItems,
-      questionnaireConfig,
-    });
-
-    const preparedWorkbook = buildPreparedWorkbook({
-      rawRows: converted.rawRows,
-      cleanRows: scoringResult.rows,
-      variableDictionary,
-      scoringItems: scoringResult.scoringItems,
-      qualityReport,
-      questionnaireConfig,
-      jaspAnalysis,
-    });
-
-    const preparedBuffer = XLSX.write(preparedWorkbook, {
-      bookType: 'xlsx',
-      type: 'buffer',
-      compression: true,
-    }) as Buffer;
-
-    const preparedFileName = createPreparedFileName(file.name || 'data.xlsx');
-    const preparedFileBase64 = preparedBuffer.toString('base64');
-
-    return createJsonResponse({
-      ok: true,
-      message:
-        'Súbor bol pripravený v JASP-like štruktúre pre ľubovoľnú databázu. Výstup obsahuje DATA_CLEAN aj samostatné hárky pre deskriptívu, frekvencie, reliabilitu, normalitu, korelácie, parametrické a neparametrické testy.',
-      preparedFileName,
-      preparedFileBase64,
-      mimeType: EXCEL_MIME_TYPE,
-      rows: scoringResult.rows.length,
-      columns: scoringResult.headers.length,
-      sheets: [
-        'DATA_RAW',
-        'DATA_CLEAN',
-        'VARIABLE_DICTIONARY',
-        'SCORING',
-        'QUESTIONNAIRE_SETUP',
-        'QUALITY_REPORT',
-        'JASP_SUMMARY',
-        'JASP_VARIABLES',
-        'JASP_DESCRIPTIVES',
-        'JASP_FREQUENCIES',
-        'JASP_RELIABILITY',
-        'JASP_NORMALITY',
-        'JASP_CORRELATIONS',
-        'JASP_PARAMETRIC',
-        'JASP_NONPARAMETRIC',
-        'JASP_TEST_SELECTION',
-        'JASP_WARNINGS',
-        'README',
-      ],
-      warnings: finalWarnings,
-      qualityReport,
-      questionnaireConfig,
-      jaspSummary: jaspAnalysis.summary,
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Neznáma chyba pri príprave súboru.';
-
-    console.error('[analyze-data/prepare] Chyba prípravy súboru:', error);
 
     return createJsonResponse(
       {
         ok: false,
-        message: 'Príprava súboru zlyhala.',
-        error: message,
+        code: 'INTERNAL_SERVER_ERROR',
+        message:
+          'Pri príprave dát nastala neočakávaná chyba.',
+        requestId,
+        errorId,
+        processingMs,
+        error:
+          'Pri príprave dát nastala neočakávaná chyba.',
+        ...getDevelopmentDetail(
+          technicalMessage,
+        ),
       },
       500,
+      requestId,
     );
   }
 }

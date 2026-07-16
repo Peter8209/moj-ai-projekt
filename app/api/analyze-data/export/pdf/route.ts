@@ -5037,70 +5037,716 @@ function buildExportHtmlDocument(result: unknown, preparedDataFile: ExportPayloa
 </html>`;
 }
 
-function buildPdfBuffer(result: unknown, preparedDataFile: ExportPayload['preparedDataFile']): Buffer {
+function buildPdfBuffer(
+  result: unknown,
+  preparedDataFile: ExportPayload['preparedDataFile'],
+): Buffer {
+  /*
+   * Profesionálny viacstranový PDF export bez externého PDF balíka.
+   *
+   * Výstup obsahuje:
+   * - titulnú stranu a prehľad,
+   * - mapu všetkých výsledkových sekcií,
+   * - najviac jeden stĺpcový graf,
+   * - najviac jeden koláčový graf,
+   * - všetky tabuľkové sekcie z getTableDefinitions(),
+   * - všetky dostupné riadky bez pevného limitu,
+   * - automatické rozdelenie širokých tabuliek na bloky stĺpcov,
+   * - automatické pokračovanie dlhých tabuliek na ďalších stranách,
+   * - číslovanie strán.
+   */
+
+  const PAGE_WIDTH = 842;
+  const PAGE_HEIGHT = 595;
+  const MARGIN_X = 34;
+  const TOP_Y = 555;
+  const BOTTOM_Y = 34;
+  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN_X * 2;
+
+  const MAX_COLUMNS_PER_BLOCK = 5;
+  const MAX_CELL_CHARS = 1400;
+  const CELL_FONT_SIZE = 6.6;
+  const HEADER_FONT_SIZE = 7;
+  const LINE_HEIGHT = 8.2;
+  const CELL_PADDING_X = 4;
+  const CELL_PADDING_Y = 4;
+
+  const pages: string[] = [];
+  const definitions = getTableDefinitions(result, preparedDataFile);
   const overview = flattenOverview(result, preparedDataFile);
   const catalog = getAnalysisExportSheetCatalog();
-  const pages: string[] = [];
 
-  function textLine(x: number, y: number, size: number, text: string): string {
-    return `BT /F1 ${size} Tf ${x} ${y} Td (${pdfEscape(text)}) Tj ET\n`;
+  function pdfSafeText(value: unknown): string {
+    return String(value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[–—]/g, '-')
+      .replace(/[“”„]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .replace(/×/g, 'x')
+      .replace(/≤/g, '<=')
+      .replace(/≥/g, '>=')
+      .replace(/α/gi, 'alpha')
+      .replace(/ρ/gi, 'rho')
+      .replace(/[^\x20-\x7E]/g, '?')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
-  let first = '';
-  first += textLine(50, 790, 18, 'ZEDPERA - vysledky analyzy dat');
-  first += textLine(50, 765, 10, 'Tabulkovy export bez grafov, obrazkov a dashboardov.');
-  let y = 735;
-  overview.forEach((row) => {
-    first += textLine(50, y, 10, `${row.oblast}: ${row.hodnota}`.slice(0, 90));
-    y -= 16;
-  });
-  pages.push(first);
+  function escapePdf(value: unknown): string {
+    return pdfEscape(pdfSafeText(value));
+  }
 
-  let catalogPage = textLine(50, 790, 16, 'Mapa harkov');
-  let cy = 760;
-  catalog.slice(0, 26).forEach((item) => {
-    catalogPage += textLine(50, cy, 9, `${item.sheetName} - ${item.title}`.slice(0, 90));
-    cy -= 18;
-  });
-  pages.push(catalogPage);
+  function textLine(
+    x: number,
+    y: number,
+    size: number,
+    value: unknown,
+    font = 'F1',
+  ): string {
+    return `BT /${font} ${size} Tf ${x.toFixed(2)} ${y.toFixed(2)} Td (${escapePdf(value)}) Tj ET\n`;
+  }
 
-  const pdfChart = buildChartSections(result, preparedDataFile)[0] || null;
-  if (pdfChart) {
-    let chartPage = textLine(50, 790, 16, pdfChart.title.slice(0, 70));
-    chartPage += textLine(50, 770, 9, pdfChart.description.slice(0, 90));
-    const maxAbs = Math.max(...pdfChart.points.map((point) => Math.abs(point.value)), 1);
-    let py = 735;
-    pdfChart.points.slice(0, 14).forEach((point) => {
-      const barWidth = Math.max(2, Math.min(360, Math.round((Math.abs(point.value) / maxAbs) * 360)));
-      chartPage += textLine(50, py + 3, 8, point.label.slice(0, 32));
-      chartPage += `q 0.15 0.39 0.92 rg 180 ${py} ${barWidth} 10 re f Q\n`;
-      chartPage += textLine(545, py + 3, 8, formatExportNumber(point.value));
-      py -= 24;
+  function fillRect(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    r: number,
+    g: number,
+    b: number,
+  ): string {
+    return `q ${r} ${g} ${b} rg ${x.toFixed(2)} ${y.toFixed(2)} ${Math.max(0.1, width).toFixed(2)} ${Math.max(0.1, height).toFixed(2)} re f Q\n`;
+  }
+
+  function strokeRect(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    r = 0.78,
+    g = 0.82,
+    b = 0.88,
+    lineWidth = 0.5,
+  ): string {
+    return `q ${r} ${g} ${b} RG ${lineWidth} w ${x.toFixed(2)} ${y.toFixed(2)} ${Math.max(0.1, width).toFixed(2)} ${Math.max(0.1, height).toFixed(2)} re S Q\n`;
+  }
+
+  function line(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    r = 0.78,
+    g = 0.82,
+    b = 0.88,
+    lineWidth = 0.5,
+  ): string {
+    return `q ${r} ${g} ${b} RG ${lineWidth} w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S Q\n`;
+  }
+
+  function estimateCharsPerLine(width: number, fontSize: number): number {
+    return Math.max(5, Math.floor(width / Math.max(2.8, fontSize * 0.54)));
+  }
+
+  function wrapText(
+    value: unknown,
+    width: number,
+    fontSize: number,
+    maxChars = MAX_CELL_CHARS,
+  ): string[] {
+    const raw = pdfSafeText(value).slice(0, maxChars);
+
+    if (!raw) return ['-'];
+
+    const maxPerLine = estimateCharsPerLine(width, fontSize);
+    const words = raw.split(' ');
+    const lines: string[] = [];
+    let current = '';
+
+    words.forEach((word) => {
+      if (!word) return;
+
+      if (word.length > maxPerLine) {
+        if (current) {
+          lines.push(current);
+          current = '';
+        }
+
+        for (let index = 0; index < word.length; index += maxPerLine) {
+          lines.push(word.slice(index, index + maxPerLine));
+        }
+
+        return;
+      }
+
+      const candidate = current ? `${current} ${word}` : word;
+
+      if (candidate.length <= maxPerLine) {
+        current = candidate;
+      } else {
+        if (current) lines.push(current);
+        current = word;
+      }
     });
-    pages.push(chartPage);
+
+    if (current) lines.push(current);
+
+    return lines.length > 0 ? lines : ['-'];
   }
+
+  function chunkArray<T>(items: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+
+    for (let index = 0; index < items.length; index += size) {
+      chunks.push(items.slice(index, index + size));
+    }
+
+    return chunks.length > 0 ? chunks : [[]];
+  }
+
+  function pageTitle(
+    title: string,
+    subtitle = '',
+  ): string {
+    let content = '';
+    content += fillRect(0, PAGE_HEIGHT - 58, PAGE_WIDTH, 58, 0.055, 0.09, 0.16);
+    content += textLine(MARGIN_X, PAGE_HEIGHT - 32, 17, title, 'F2');
+
+    if (subtitle) {
+      content += textLine(MARGIN_X, PAGE_HEIGHT - 49, 7.5, subtitle);
+    }
+
+    return content;
+  }
+
+  function addCoverPage(): void {
+    let page = '';
+
+    page += fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT, 0.97, 0.98, 1);
+    page += fillRect(0, PAGE_HEIGHT - 150, PAGE_WIDTH, 150, 0.055, 0.09, 0.16);
+    page += fillRect(MARGIN_X, PAGE_HEIGHT - 176, 150, 7, 0.15, 0.39, 0.92);
+
+    page += textLine(MARGIN_X, PAGE_HEIGHT - 72, 13, 'ZEDPERA PROFESSIONAL REPORT', 'F2');
+    page += textLine(MARGIN_X, PAGE_HEIGHT - 108, 28, 'Vysledky analyzy dat', 'F2');
+    page += textLine(
+      MARGIN_X,
+      PAGE_HEIGHT - 132,
+      10,
+      'Kompletny tabulkovy a graficky PDF vystup analytickeho modulu.',
+    );
+
+    let y = PAGE_HEIGHT - 210;
+
+    overview.forEach((row, index) => {
+      const label = pdfSafeText(row.oblast);
+      const value = pdfSafeText(row.hodnota);
+      const boxHeight = 29;
+
+      page += fillRect(
+        MARGIN_X,
+        y - boxHeight + 5,
+        CONTENT_WIDTH,
+        boxHeight,
+        index % 2 === 0 ? 0.95 : 0.975,
+        index % 2 === 0 ? 0.97 : 0.98,
+        1,
+      );
+      page += strokeRect(MARGIN_X, y - boxHeight + 5, CONTENT_WIDTH, boxHeight);
+      page += textLine(MARGIN_X + 10, y - 8, 8, label, 'F2');
+
+      const valueLines = wrapText(value, CONTENT_WIDTH - 205, 8, 500).slice(0, 2);
+      valueLines.forEach((valueLine, lineIndex) => {
+        page += textLine(
+          MARGIN_X + 190,
+          y - 8 - lineIndex * 9,
+          8,
+          valueLine,
+        );
+      });
+
+      y -= boxHeight + 5;
+    });
+
+    page += textLine(
+      MARGIN_X,
+      34,
+      7,
+      `Vygenerovane: ${new Date().toISOString()}`,
+    );
+
+    pages.push(page);
+  }
+
+  function addCatalogPages(): void {
+    const rowsPerPage = 17;
+    const chunks = chunkArray(catalog, rowsPerPage);
+
+    chunks.forEach((items, pageIndex) => {
+      let page = pageTitle(
+        'Mapa vysledkovych sekcii',
+        `Cast ${pageIndex + 1} z ${chunks.length}`,
+      );
+
+      let y = TOP_Y - 25;
+
+      items.forEach((item, itemIndex) => {
+        const rowHeight = 27;
+        const absoluteIndex = pageIndex * rowsPerPage + itemIndex + 1;
+
+        page += fillRect(
+          MARGIN_X,
+          y - rowHeight + 5,
+          CONTENT_WIDTH,
+          rowHeight,
+          itemIndex % 2 === 0 ? 0.97 : 0.94,
+          itemIndex % 2 === 0 ? 0.98 : 0.96,
+          1,
+        );
+        page += strokeRect(MARGIN_X, y - rowHeight + 5, CONTENT_WIDTH, rowHeight);
+        page += textLine(MARGIN_X + 8, y - 6, 7, String(absoluteIndex).padStart(2, '0'), 'F2');
+        page += textLine(MARGIN_X + 32, y - 6, 8, `${item.sheetName} - ${item.title}`, 'F2');
+
+        const description = wrapText(item.description, CONTENT_WIDTH - 255, 6.5, 260).slice(0, 2);
+        description.forEach((lineText, lineIndex) => {
+          page += textLine(MARGIN_X + 250, y - 6 - lineIndex * 8, 6.5, lineText);
+        });
+
+        y -= rowHeight + 5;
+      });
+
+      pages.push(page);
+    });
+  }
+
+  function addBarChartPage(): void {
+    const section = buildChartSections(result, preparedDataFile)[0] || null;
+
+    if (!section || section.points.length === 0) return;
+
+    let page = pageTitle(
+      section.title || 'Graficky prehlad',
+      section.description || 'Najdolezitejsie numericke vysledky analyzy.',
+    );
+
+    const points = section.points.slice(0, 16);
+    const maxAbs = Math.max(
+      ...points.map((point) => Math.abs(point.value)),
+      1,
+    );
+
+    const labelWidth = 220;
+    const valueWidth = 72;
+    const chartWidth = CONTENT_WIDTH - labelWidth - valueWidth - 24;
+    let y = TOP_Y - 26;
+
+    points.forEach((point, index) => {
+      const height = 22;
+      const ratio = Math.abs(point.value) / maxAbs;
+      const barWidth = Math.max(3, chartWidth * ratio);
+      const isNegative = point.value < 0;
+
+      page += fillRect(
+        MARGIN_X,
+        y - height + 5,
+        CONTENT_WIDTH,
+        height,
+        index % 2 === 0 ? 0.975 : 0.95,
+        index % 2 === 0 ? 0.98 : 0.965,
+        1,
+      );
+
+      const labelLines = wrapText(point.label, labelWidth - 8, 7, 160).slice(0, 2);
+      labelLines.forEach((lineText, lineIndex) => {
+        page += textLine(
+          MARGIN_X + 7,
+          y - 5 - lineIndex * 8,
+          7,
+          lineText,
+        );
+      });
+
+      page += fillRect(
+        MARGIN_X + labelWidth,
+        y - 12,
+        chartWidth,
+        9,
+        0.88,
+        0.91,
+        0.95,
+      );
+
+      page += fillRect(
+        MARGIN_X + labelWidth,
+        y - 12,
+        barWidth,
+        9,
+        isNegative ? 0.86 : 0.15,
+        isNegative ? 0.18 : 0.39,
+        isNegative ? 0.18 : 0.92,
+      );
+
+      page += textLine(
+        MARGIN_X + labelWidth + chartWidth + 10,
+        y - 9,
+        7,
+        formatExportNumber(point.value),
+        'F2',
+      );
+
+      y -= height + 5;
+    });
+
+    pages.push(page);
+  }
+
+  function addPieChartPage(): void {
+    const section = buildPieChartSections(result)[0] || null;
+
+    if (!section || section.points.length < 2) return;
+
+    let page = pageTitle(
+      section.title || 'Kolacovy graf',
+      'Podielove zastupenie kategorii v dostupnych frekvencnych datach.',
+    );
+
+    const points = section.points
+      .map((point) => ({
+        ...point,
+        value: Math.max(0, point.value),
+      }))
+      .filter((point) => point.value > 0)
+      .slice(0, 8);
+
+    if (points.length < 2) return;
+
+    const total = points.reduce((sum, point) => sum + point.value, 0);
+    const centerX = 205;
+    const centerY = 285;
+    const radius = 120;
+    const colors = [
+      [0.49, 0.23, 0.93],
+      [0.15, 0.39, 0.92],
+      [0.04, 0.57, 0.70],
+      [0.02, 0.59, 0.41],
+      [0.85, 0.45, 0.03],
+      [0.88, 0.11, 0.29],
+      [0.58, 0.20, 0.92],
+      [0.05, 0.58, 0.53],
+    ];
+
+    let angle = 0;
+
+    points.forEach((point, index) => {
+      const portion = point.value / total;
+      const nextAngle = angle + portion * Math.PI * 2;
+      const steps = Math.max(4, Math.ceil(portion * 60));
+      const polygon: string[] = [
+        `${centerX.toFixed(2)} ${centerY.toFixed(2)} m`,
+      ];
+
+      for (let step = 0; step <= steps; step += 1) {
+        const currentAngle =
+          angle + ((nextAngle - angle) * step) / steps;
+        const x = centerX + Math.cos(currentAngle) * radius;
+        const y = centerY + Math.sin(currentAngle) * radius;
+
+        polygon.push(`${x.toFixed(2)} ${y.toFixed(2)} l`);
+      }
+
+      polygon.push('h');
+      const [r, g, b] = colors[index % colors.length];
+      page += `q ${r} ${g} ${b} rg ${polygon.join(' ')} f Q\n`;
+      angle = nextAngle;
+    });
+
+    page += fillRect(centerX - 48, centerY - 48, 96, 96, 0.055, 0.09, 0.16);
+    page += textLine(centerX - 27, centerY + 5, 8, 'TOTAL', 'F2');
+    page += textLine(centerX - 35, centerY - 15, 13, formatExportNumber(total), 'F2');
+
+    let legendY = TOP_Y - 45;
+
+    points.forEach((point, index) => {
+      const [r, g, b] = colors[index % colors.length];
+      const percentage = total > 0 ? (point.value / total) * 100 : 0;
+
+      page += fillRect(400, legendY - 5, 11, 11, r, g, b);
+
+      const labelLines = wrapText(point.label, 270, 7, 180).slice(0, 2);
+      labelLines.forEach((lineText, lineIndex) => {
+        page += textLine(420, legendY - lineIndex * 8, 7, lineText);
+      });
+
+      page += textLine(
+        700,
+        legendY,
+        7,
+        `${formatExportNumber(point.value)} (${formatExportNumber(percentage)} %)`,
+        'F2',
+      );
+
+      legendY -= Math.max(28, labelLines.length * 9 + 10);
+    });
+
+    pages.push(page);
+  }
+
+  function addTableDefinitionPages(
+    definition: ExportTableDefinition,
+    definitionIndex: number,
+  ): void {
+    const normalizedRows = normalizeRowsForExcel(definition.rows);
+    const rows =
+      normalizedRows.length > 0
+        ? normalizedRows
+        : [
+            {
+              stav: 'bez udajov',
+              poznamka:
+                'Pre tuto vysledkovu sekciu nie su dostupne ziadne data.',
+            },
+          ];
+
+    const headers = Array.from(
+      new Set(rows.flatMap((row) => Object.keys(row))),
+    );
+
+    const safeHeaders =
+      headers.length > 0 ? headers : ['stav', 'poznamka'];
+
+    const columnBlocks = chunkArray(
+      safeHeaders,
+      MAX_COLUMNS_PER_BLOCK,
+    );
+
+    columnBlocks.forEach((headerBlock, blockIndex) => {
+      const columnWidth = CONTENT_WIDTH / headerBlock.length;
+      let page = '';
+      let y = 0;
+      let currentPageRowCount = 0;
+      let pageInBlock = 0;
+
+      function beginPage(): void {
+        if (page) {
+          pages.push(page);
+        }
+
+        pageInBlock += 1;
+        currentPageRowCount = 0;
+
+        page = pageTitle(
+          `${definition.sheetName} - ${definition.title}`,
+          [
+            definition.description,
+            columnBlocks.length > 1
+              ? `Stlpce ${blockIndex + 1}/${columnBlocks.length}`
+              : '',
+            pageInBlock > 1 ? `Pokracovanie ${pageInBlock}` : '',
+          ]
+            .filter(Boolean)
+            .join(' | '),
+        );
+
+        y = TOP_Y - 35;
+
+        const headerHeight = 26;
+
+        headerBlock.forEach((header, columnIndex) => {
+          const x = MARGIN_X + columnIndex * columnWidth;
+
+          page += fillRect(
+            x,
+            y - headerHeight,
+            columnWidth,
+            headerHeight,
+            0.12,
+            0.23,
+            0.37,
+          );
+          page += strokeRect(
+            x,
+            y - headerHeight,
+            columnWidth,
+            headerHeight,
+            0.07,
+            0.15,
+            0.27,
+            0.7,
+          );
+
+          const lines = wrapText(
+            header,
+            columnWidth - CELL_PADDING_X * 2,
+            HEADER_FONT_SIZE,
+            200,
+          ).slice(0, 2);
+
+          lines.forEach((lineText, lineIndex) => {
+            page += textLine(
+              x + CELL_PADDING_X,
+              y - 10 - lineIndex * LINE_HEIGHT,
+              HEADER_FONT_SIZE,
+              lineText,
+              'F2',
+            );
+          });
+        });
+
+        y -= headerHeight;
+      }
+
+      beginPage();
+
+      rows.forEach((row, rowIndex) => {
+        const wrappedCells = headerBlock.map((header) =>
+          wrapText(
+            row[header],
+            columnWidth - CELL_PADDING_X * 2,
+            CELL_FONT_SIZE,
+          ),
+        );
+
+        const maxLines = Math.max(
+          ...wrappedCells.map((lines) => lines.length),
+          1,
+        );
+
+        const rowHeight = Math.max(
+          18,
+          maxLines * LINE_HEIGHT + CELL_PADDING_Y * 2,
+        );
+
+        if (y - rowHeight < BOTTOM_Y + 18) {
+          beginPage();
+        }
+
+        headerBlock.forEach((header, columnIndex) => {
+          const x = MARGIN_X + columnIndex * columnWidth;
+          const cellLines = wrappedCells[columnIndex];
+          const background =
+            currentPageRowCount % 2 === 0
+              ? [1, 1, 1]
+              : [0.965, 0.975, 0.99];
+
+          page += fillRect(
+            x,
+            y - rowHeight,
+            columnWidth,
+            rowHeight,
+            background[0],
+            background[1],
+            background[2],
+          );
+          page += strokeRect(
+            x,
+            y - rowHeight,
+            columnWidth,
+            rowHeight,
+          );
+
+          cellLines.forEach((lineText, lineIndex) => {
+            page += textLine(
+              x + CELL_PADDING_X,
+              y - CELL_PADDING_Y - CELL_FONT_SIZE - lineIndex * LINE_HEIGHT,
+              CELL_FONT_SIZE,
+              lineText,
+            );
+          });
+        });
+
+        y -= rowHeight;
+        currentPageRowCount += 1;
+
+        if (
+          rowIndex === rows.length - 1 &&
+          definitionIndex === definitions.length - 1 &&
+          blockIndex === columnBlocks.length - 1
+        ) {
+          page += textLine(
+            MARGIN_X,
+            18,
+            6.5,
+            'Koniec kompletneho PDF reportu.',
+            'F2',
+          );
+        }
+      });
+
+      if (page) {
+        pages.push(page);
+      }
+    });
+  }
+
+  addCoverPage();
+  addCatalogPages();
+  addBarChartPage();
+  addPieChartPage();
+
+  definitions.forEach((definition, definitionIndex) => {
+    addTableDefinitionPages(definition, definitionIndex);
+  });
+
+  const numberedPages = pages.map((page, index) => {
+    const footerY = 14;
+
+    return (
+      page +
+      line(MARGIN_X, 25, PAGE_WIDTH - MARGIN_X, 25, 0.82, 0.85, 0.9, 0.4) +
+      textLine(
+        MARGIN_X,
+        footerY,
+        6.5,
+        'ZEDPERA - profesionalny export analyzy dat',
+      ) +
+      textLine(
+        PAGE_WIDTH - 100,
+        footerY,
+        6.5,
+        `Strana ${index + 1} / ${pages.length}`,
+        'F2',
+      )
+    );
+  });
 
   const objects: string[] = [];
   objects.push('<< /Type /Catalog /Pages 2 0 R >>');
 
   const pageObjectNumbers: number[] = [];
   const contentObjectNumbers: number[] = [];
-  const fontObjectNumber = 3 + pages.length * 2;
+  const fontRegularObjectNumber = 3 + numberedPages.length * 2;
+  const fontBoldObjectNumber = fontRegularObjectNumber + 1;
 
-  pages.forEach((_, index) => {
+  numberedPages.forEach((_, index) => {
     pageObjectNumbers.push(3 + index * 2);
     contentObjectNumbers.push(4 + index * 2);
   });
 
-  objects.push(`<< /Type /Pages /Kids [${pageObjectNumbers.map((num) => `${num} 0 R`).join(' ')}] /Count ${pages.length} >>`);
+  objects.push(
+    `<< /Type /Pages /Kids [${pageObjectNumbers
+      .map((number) => `${number} 0 R`)
+      .join(' ')}] /Count ${numberedPages.length} >>`,
+  );
 
-  pages.forEach((content, index) => {
-    const stream = content;
-    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontObjectNumber} 0 R >> >> /Contents ${contentObjectNumbers[index]} 0 R >>`);
-    objects.push(`<< /Length ${Buffer.byteLength(stream, 'binary')} >>\nstream\n${stream}endstream`);
+  numberedPages.forEach((content, index) => {
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] /Resources << /Font << /F1 ${fontRegularObjectNumber} 0 R /F2 ${fontBoldObjectNumber} 0 R >> >> /Contents ${contentObjectNumbers[index]} 0 R >>`,
+    );
+
+    objects.push(
+      `<< /Length ${Buffer.byteLength(
+        content,
+        'binary',
+      )} >>\nstream\n${content}endstream`,
+    );
   });
 
-  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  objects.push(
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+  );
+  objects.push(
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>',
+  );
 
   let pdf = '%PDF-1.4\n';
   const offsets: number[] = [0];
@@ -5111,15 +5757,21 @@ function buildPdfBuffer(result: unknown, preparedDataFile: ExportPayload['prepar
   });
 
   const xrefOffset = Buffer.byteLength(pdf, 'binary');
+
   pdf += `xref\n0 ${objects.length + 1}\n`;
   pdf += '0000000000 65535 f \n';
+
   offsets.slice(1).forEach((offset) => {
     pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
   });
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+  pdf +=
+    `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n` +
+    `startxref\n${xrefOffset}\n%%EOF`;
 
   return Buffer.from(pdf, 'binary');
 }
+
 
 function addProfessionalDataAnalysisSheets(
   workbook: XLSX.WorkBook,
@@ -5219,7 +5871,7 @@ export async function GET() {
   });
 }
 
-export async function handleExportRequest(request: NextRequest, forcedFormat?: ExportFormat) {
+async function handleExportRequest(request: NextRequest, forcedFormat?: ExportFormat) {
   try {
     const payload = await readPayload(request);
     const rawResult = getAnalysisResult(payload);
@@ -5317,7 +5969,7 @@ export async function handleExportRequest(request: NextRequest, forcedFormat?: E
         ? error.message
         : 'Neznáma chyba pri exporte výsledkov analýzy dát.';
 
-    console.error('[api/analyze-data/export] Chyba exportu:', error);
+    console.error('[api/analyze-data/export/pdf] Chyba exportu:', error);
 
     return jsonResponse(
       {

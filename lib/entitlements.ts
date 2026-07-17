@@ -1,6 +1,8 @@
 import {
   ADDONS,
   PLANS,
+  getFeatureLabel as getCatalogFeatureLabel,
+  getFeaturesForEntitlements,
   type AddonId,
   type FeatureKey,
   type PlanId,
@@ -63,9 +65,18 @@ export type DataAnalysisActionKey =
 type EntitlementDatabaseRow = {
   plan_id?: unknown;
   addon_ids?: unknown;
+
+  base_page_limit?: unknown;
+  extra_page_limit?: unknown;
+  pages_used?: unknown;
+
   prompt_limit?: unknown;
   prompts_used?: unknown;
   attachment_limit?: unknown;
+
+  is_admin?: unknown;
+  billing_status?: unknown;
+
   activated_at?: unknown;
   valid_until?: unknown;
   updated_at?: unknown;
@@ -73,12 +84,25 @@ type EntitlementDatabaseRow = {
 
 /**
  * Výsledok RPC funkcie public.zedpera_consume_prompt().
+ *
+ * Podporované sú oba názvy stĺpcov:
+ * - prompt_limit / prompts_used / prompts_remaining,
+ * - current_prompt_limit / current_prompts_used /
+ *   current_prompts_remaining.
  */
 type PromptConsumptionRow = {
   prompt_limit?: unknown;
   prompts_used?: unknown;
   prompts_remaining?: unknown;
   limit_reached?: unknown;
+
+  current_prompt_limit?: unknown;
+  current_prompts_used?: unknown;
+  current_prompts_remaining?: unknown;
+  prompt_limit_reached?: unknown;
+
+  admin_access?: unknown;
+  is_admin?: unknown;
 };
 
 /**
@@ -88,6 +112,22 @@ export type CurrentEntitlements = {
   userId: string;
   email: string | null;
 
+  /**
+   * Administrátorský stav sa určuje iba na serveri:
+   * - primárne z public.zedpera_user_entitlements.is_admin,
+   * - voliteľne zo Supabase auth.users.app_metadata.
+   *
+   * Nikdy sa neurčuje podľa e-mailu vo frontende.
+   */
+  isAdmin: boolean;
+  hasUnlimitedAccess: boolean;
+
+  /**
+   * Určuje, či bol entitlement skutočne načítaný z databázy.
+   * false znamená, že bol použitý bezpečný FREE fallback.
+   */
+  hasDatabaseRecord: boolean;
+
   planId: PlanId;
   planName: string;
   planPriceCents: number;
@@ -96,8 +136,13 @@ export type CurrentEntitlements = {
    * Základný limit strán z balíka.
    *
    * Skutočný aktuálny zostatok strán spravuje lib/page-quota.ts.
+   * Pri administrátorovi sa tento údaj nesmie používať na blokovanie.
    */
   pageLimit: number;
+
+  basePageLimit: number;
+  extraPageLimit: number;
+  pagesUsed: number;
 
   addonIds: AddonId[];
   addonNames: string[];
@@ -122,6 +167,7 @@ export type CurrentEntitlements = {
 
   attachmentLimit: number;
 
+  billingStatus: string | null;
   activatedAt: string | null;
   validUntil: string | null;
   updatedAt: string | null;
@@ -144,6 +190,7 @@ export type PublicEntitlements = Omit<
  * Výsledok úspešného odpočítania promptu.
  */
 export type PromptUsageResult = {
+  isAdmin: boolean;
   promptLimit: number | null;
   promptsUsed: number;
   promptsRemaining: number | null;
@@ -199,57 +246,58 @@ const VALID_ADDON_IDS = new Set<AddonId>(
 // ============================================================
 
 /**
- * Slovenské názvy funkcií používané v chybových hláškach
- * a v odpovediach API.
+ * Slovenské názvy modulov používané v hláškach pri prepínaní.
+ *
+ * Vďaka tomuto mapovaniu sa už pri Obhajobe, Preklade, Analýze dát,
+ * Plánovaní, Emailoch alebo Humanizácii nezobrazí nesprávna hláška
+ * „Audit kvality nie je súčasťou balíka“.
  */
-export const FEATURE_LABELS: Record<
-  FeatureKey,
+export const MODULE_LABELS: Record<
+  Exclude<AppModuleKey, 'unknown'>,
   string
 > = {
-  'ai-supervisor':
-    'AI školiteľ',
-  'chapter-generation':
-    'Tvorba kapitol',
-  'outline-generation':
-    'Návrh štruktúry a osnovy',
-  'quality-audit':
-    'Audit kvality',
-  humanizer:
-    'Humanizácia textu',
-  citations:
-    'Citácie a zdroje',
-  planning:
-    'Plánovanie práce',
-  emails:
-    'Príprava e-mailov',
-  translation:
-    'Preklad',
-  originality:
-    'Kontrola originality',
-  'data-prepare':
-    'Príprava a čistenie dát',
-  'data-descriptive':
-    'Deskriptívna štatistika',
-  'data-questionnaires':
-    'Spracovanie dotazníkov',
-  'data-reliability':
-    'Reliabilita škál',
-  'data-normality':
-    'Testovanie normality',
-  'data-correlations':
-    'Korelačné analýzy',
-  'data-parametric-tests':
-    'Parametrické testy',
-  'data-nonparametric-tests':
-    'Neparametrické testy',
-  'data-charts':
-    'Grafy a tabuľky',
-  defense:
-    'Príprava na obhajobu',
-  'defense-presentation':
-    'Prezentácia na obhajobu',
-  'committee-questions':
-    'Otázky komisie',
+  supervisor: 'AI školiteľ',
+  quality: 'Audit kvality',
+  defense: 'Obhajoba',
+  translation: 'Preklad',
+  data: 'Analýza dát',
+  planning: 'Plánovanie',
+  emails: 'Emaily',
+  originality: 'Kontrola originality',
+  humanizer: 'Humanizácia textu',
+  chat: 'AI školiteľ',
+};
+
+/**
+ * Slovenské názvy funkcií používané v chybových hláškach
+ * a v odpovediach API.
+ *
+ * Primárny zdroj názvov je katalóg. Toto mapovanie sa ponecháva
+ * kvôli spätnej kompatibilite s existujúcimi importmi.
+ */
+export const FEATURE_LABELS: Record<FeatureKey, string> = {
+  'ai-supervisor': 'AI školiteľ',
+  'chapter-generation': 'Tvorba kapitol',
+  'outline-generation': 'Návrh štruktúry a osnovy',
+  'quality-audit': 'Audit kvality',
+  humanizer: 'Humanizácia textu',
+  citations: 'Citácie a zdroje',
+  planning: 'Plánovanie práce',
+  emails: 'Príprava e-mailov',
+  translation: 'Preklad',
+  originality: 'Kontrola originality',
+  'data-prepare': 'Príprava a čistenie dát',
+  'data-descriptive': 'Deskriptívna štatistika',
+  'data-questionnaires': 'Tvorba škál, subškál a grafy',
+  'data-reliability': 'Reliabilita škál',
+  'data-normality': 'Testovanie normality',
+  'data-correlations': 'Korelačné analýzy',
+  'data-parametric-tests': 'Parametrické testy',
+  'data-nonparametric-tests': 'Neparametrické testy',
+  'data-charts': 'Grafy a vizualizácie',
+  defense: 'Príprava na obhajobu',
+  'defense-presentation': 'Prezentácia na obhajobu',
+  'committee-questions': 'Otázky komisie',
 };
 
 /**
@@ -259,73 +307,48 @@ export const MODULE_FEATURE_MAP: Record<
   Exclude<AppModuleKey, 'unknown'>,
   FeatureKey
 > = {
-  supervisor:
-    'ai-supervisor',
-  quality:
-    'quality-audit',
-  defense:
-    'defense',
-  translation:
-    'translation',
-  data:
-    'data-prepare',
-  planning:
-    'planning',
-  emails:
-    'emails',
-  originality:
-    'originality',
-  humanizer:
-    'humanizer',
-  chat:
-    'ai-supervisor',
+  supervisor: 'ai-supervisor',
+  quality: 'quality-audit',
+  defense: 'defense',
+  translation: 'translation',
+  data: 'data-prepare',
+  planning: 'planning',
+  emails: 'emails',
+  originality: 'originality',
+  humanizer: 'humanizer',
+  chat: 'ai-supervisor',
 };
 
 /**
  * Podrobné oprávnenia pre operácie AI školiteľa.
  */
-export const SUPERVISOR_ACTION_FEATURE_MAP:
-  Record<
-    SupervisorActionKey,
-    FeatureKey
-  > = {
-    general:
-      'ai-supervisor',
-    chapter:
-      'chapter-generation',
-    outline:
-      'outline-generation',
-    citations:
-      'citations',
-  };
+export const SUPERVISOR_ACTION_FEATURE_MAP: Record<
+  SupervisorActionKey,
+  FeatureKey
+> = {
+  general: 'ai-supervisor',
+  chapter: 'chapter-generation',
+  outline: 'outline-generation',
+  citations: 'citations',
+};
 
 /**
  * Oprávnenia pre jednotlivé kroky analýzy dát.
  */
-export const DATA_ANALYSIS_FEATURE_MAP:
-  Record<
-    DataAnalysisActionKey,
-    FeatureKey
-  > = {
-    prepare:
-      'data-prepare',
-    descriptive:
-      'data-descriptive',
-    questionnaires:
-      'data-questionnaires',
-    reliability:
-      'data-reliability',
-    normality:
-      'data-normality',
-    correlations:
-      'data-correlations',
-    'parametric-tests':
-      'data-parametric-tests',
-    'nonparametric-tests':
-      'data-nonparametric-tests',
-    charts:
-      'data-charts',
-  };
+export const DATA_ANALYSIS_FEATURE_MAP: Record<
+  DataAnalysisActionKey,
+  FeatureKey
+> = {
+  prepare: 'data-prepare',
+  descriptive: 'data-descriptive',
+  questionnaires: 'data-questionnaires',
+  reliability: 'data-reliability',
+  normality: 'data-normality',
+  correlations: 'data-correlations',
+  'parametric-tests': 'data-parametric-tests',
+  'nonparametric-tests': 'data-nonparametric-tests',
+  charts: 'data-charts',
+};
 
 // ============================================================
 // CUSTOM ERRORS
@@ -356,109 +379,94 @@ export class EntitlementError extends Error {
   }) {
     super(message);
 
-    this.name =
-      'EntitlementError';
+    this.name = 'EntitlementError';
     this.code = code;
     this.status = status;
     this.detail = detail;
 
-    Object.setPrototypeOf(
-      this,
-      new.target.prototype,
-    );
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
 /**
  * Používateľ nemá platnú Supabase session.
  */
-export class UnauthenticatedError
-  extends EntitlementError {
-  constructor(
-    detail?: string,
-  ) {
+export class UnauthenticatedError extends EntitlementError {
+  constructor(detail?: string) {
     super({
-      code:
-        'UNAUTHENTICATED',
+      code: 'UNAUTHENTICATED',
       message:
         'Používateľ nie je prihlásený alebo jeho relácia vypršala.',
       status: 401,
       detail,
     });
 
-    this.name =
-      'UnauthenticatedError';
+    this.name = 'UnauthenticatedError';
   }
 }
 
 /**
  * Aktivovaný balík alebo doplnky neobsahujú požadovanú funkciu.
  */
-export class FeatureAccessError
-  extends EntitlementError {
+export class FeatureAccessError extends EntitlementError {
   readonly feature: FeatureKey;
+  readonly displayLabel: string;
 
   constructor(
     feature: FeatureKey,
+    displayLabel?: string,
+    scope: 'feature' | 'module' = 'feature',
   ) {
+    const safeLabel = displayLabel || getFeatureLabel(feature);
+    const subject = scope === 'module' ? 'Modul' : 'Funkcia';
+
     super({
-      code:
-        'FEATURE_NOT_INCLUDED',
+      code: 'FEATURE_NOT_INCLUDED',
       message:
-        `${getFeatureLabel(feature)} nie je súčasťou aktivovaného balíka.`,
+        `${subject} „${safeLabel}“ nie je súčasťou aktivovaného balíka.`,
       status: 403,
       detail: feature,
     });
 
-    this.name =
-      'FeatureAccessError';
+    this.name = 'FeatureAccessError';
     this.feature = feature;
+    this.displayLabel = safeLabel;
   }
 }
 
 /**
  * Používateľ vyčerpal dostupné prompty.
  */
-export class PromptLimitError
-  extends EntitlementError {
-  readonly promptLimit:
-    number | null;
+export class PromptLimitError extends EntitlementError {
+  readonly promptLimit: number | null;
   readonly promptsUsed: number;
 
   constructor({
     promptLimit,
     promptsUsed,
   }: {
-    promptLimit:
-      number | null;
+    promptLimit: number | null;
     promptsUsed: number;
   }) {
     super({
-      code:
-        'PROMPT_LIMIT_REACHED',
+      code: 'PROMPT_LIMIT_REACHED',
       message:
         'Limit dostupných promptov bol vyčerpaný. Pre pokračovanie si aktivujte platený balík.',
-      status: 402,
+      status: 429,
     });
 
-    this.name =
-      'PromptLimitError';
-    this.promptLimit =
-      promptLimit;
-    this.promptsUsed =
-      promptsUsed;
+    this.name = 'PromptLimitError';
+    this.promptLimit = promptLimit;
+    this.promptsUsed = promptsUsed;
   }
 }
 
 /**
  * Požiadavka obsahuje viac príloh než povoľuje aktívny balík.
  */
-export class AttachmentLimitError
-  extends EntitlementError {
-  readonly attachmentLimit:
-    number;
-  readonly receivedAttachments:
-    number;
+export class AttachmentLimitError extends EntitlementError {
+  readonly attachmentLimit: number;
+  readonly receivedAttachments: number;
 
   constructor({
     attachmentLimit,
@@ -467,25 +475,18 @@ export class AttachmentLimitError
     attachmentLimit: number;
     receivedAttachments: number;
   }) {
-    const safeLimit =
-      Math.max(
-        Math.trunc(
-          attachmentLimit,
-        ),
-        0,
-      );
+    const safeLimit = Math.max(
+      Math.trunc(attachmentLimit),
+      0,
+    );
 
-    const safeReceived =
-      Math.max(
-        Math.trunc(
-          receivedAttachments,
-        ),
-        0,
-      );
+    const safeReceived = Math.max(
+      Math.trunc(receivedAttachments),
+      0,
+    );
 
     super({
-      code:
-        'ATTACHMENT_LIMIT_REACHED',
+      code: 'ATTACHMENT_LIMIT_REACHED',
       message:
         safeLimit === 1
           ? 'Váš balík povoľuje maximálne 1 prílohu.'
@@ -493,12 +494,9 @@ export class AttachmentLimitError
       status: 403,
     });
 
-    this.name =
-      'AttachmentLimitError';
-    this.attachmentLimit =
-      safeLimit;
-    this.receivedAttachments =
-      safeReceived;
+    this.name = 'AttachmentLimitError';
+    this.attachmentLimit = safeLimit;
+    this.receivedAttachments = safeReceived;
   }
 }
 
@@ -506,12 +504,8 @@ export class AttachmentLimitError
 // NORMALIZATION HELPERS
 // ============================================================
 
-function normalizeString(
-  value: unknown,
-): string {
-  return typeof value === 'string'
-    ? value.trim()
-    : '';
+function normalizeString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 /**
@@ -522,34 +516,22 @@ function normalizeString(
 function toNonNegativeIntegerOrUndefined(
   value: unknown,
 ): number | undefined {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+  if (value === null || value === undefined) {
     return undefined;
   }
 
-  if (
-    typeof value === 'string' &&
-    value.trim() === ''
-  ) {
+  if (typeof value === 'string' && value.trim() === '') {
     return undefined;
   }
 
-  const parsed =
-    Number(value);
+  const parsed = Number(value);
 
-  if (
-    !Number.isFinite(parsed)
-  ) {
+  if (!Number.isFinite(parsed)) {
     return undefined;
   }
 
   return Math.min(
-    Math.max(
-      Math.trunc(parsed),
-      0,
-    ),
+    Math.max(Math.trunc(parsed), 0),
     Number.MAX_SAFE_INTEGER,
   );
 }
@@ -559,13 +541,8 @@ function toNonNegativeInteger(
   fallback = 0,
 ): number {
   return (
-    toNonNegativeIntegerOrUndefined(
-      value,
-    ) ??
-    Math.max(
-      Math.trunc(fallback),
-      0,
-    )
+    toNonNegativeIntegerOrUndefined(value) ??
+    Math.max(Math.trunc(fallback), 0)
   );
 }
 
@@ -573,30 +550,22 @@ function toSafeBoolean(
   value: unknown,
   fallback = false,
 ): boolean {
-  if (
-    typeof value === 'boolean'
-  ) {
+  if (typeof value === 'boolean') {
     return value;
   }
 
-  if (
-    typeof value === 'number'
-  ) {
+  if (typeof value === 'number') {
     return value !== 0;
   }
 
-  if (
-    typeof value === 'string'
-  ) {
-    const normalized =
-      value
-        .trim()
-        .toLowerCase();
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
 
     if (
       normalized === 'true' ||
       normalized === '1' ||
-      normalized === 'yes'
+      normalized === 'yes' ||
+      normalized === 'admin'
     ) {
       return true;
     }
@@ -613,61 +582,45 @@ function toSafeBoolean(
   return fallback;
 }
 
-function normalizeDateString(
-  value: unknown,
-): string | null {
-  const normalized =
-    normalizeString(value);
+function normalizeDateString(value: unknown): string | null {
+  const normalized = normalizeString(value);
 
   if (!normalized) {
     return null;
   }
 
-  const timestamp =
-    Date.parse(normalized);
+  const timestamp = Date.parse(normalized);
 
-  if (
-    !Number.isFinite(timestamp)
-  ) {
+  if (!Number.isFinite(timestamp)) {
     return null;
   }
 
-  return new Date(
-    timestamp,
-  ).toISOString();
+  return new Date(timestamp).toISOString();
 }
 
-function isPlanId(
-  value: unknown,
-): value is PlanId {
+function normalizeBillingStatus(value: unknown): string | null {
+  const normalized = normalizeString(value).toLowerCase();
+  return normalized || null;
+}
+
+function isPlanId(value: unknown): value is PlanId {
   return (
     typeof value === 'string' &&
-    VALID_PLAN_IDS.has(
-      value.trim() as PlanId,
-    )
+    VALID_PLAN_IDS.has(value.trim() as PlanId)
   );
 }
 
-function isAddonId(
-  value: unknown,
-): value is AddonId {
+function isAddonId(value: unknown): value is AddonId {
   return (
     typeof value === 'string' &&
-    VALID_ADDON_IDS.has(
-      value.trim() as AddonId,
-    )
+    VALID_ADDON_IDS.has(value.trim() as AddonId)
   );
 }
 
-function normalizePlanId(
-  value: unknown,
-): PlanId {
-  const candidate =
-    normalizeString(value);
+function normalizePlanId(value: unknown): PlanId {
+  const candidate = normalizeString(value);
 
-  return isPlanId(candidate)
-    ? candidate
-    : DEFAULT_PLAN_ID;
+  return isPlanId(candidate) ? candidate : DEFAULT_PLAN_ID;
 }
 
 /**
@@ -678,62 +631,43 @@ function normalizePlanId(
  * - PostgreSQL textový zápis {extra-20,data-analysis},
  * - čiarkou oddelený text.
  */
-function normalizeAddonIds(
-  value: unknown,
-): AddonId[] {
-  let rawValues:
-    unknown[] = [];
+function normalizeAddonIds(value: unknown): AddonId[] {
+  let rawValues: unknown[] = [];
 
   if (Array.isArray(value)) {
     rawValues = value;
-  } else if (
-    typeof value === 'string'
-  ) {
-    const normalized =
-      value.trim();
+  } else if (typeof value === 'string') {
+    const normalized = value.trim();
 
     if (!normalized) {
       return [];
     }
 
     try {
-      const parsed: unknown =
-        JSON.parse(normalized);
+      const parsed: unknown = JSON.parse(normalized);
 
       if (Array.isArray(parsed)) {
         rawValues = parsed;
       }
     } catch {
-      const withoutBraces =
-        normalized
-          .replace(/^\{/, '')
-          .replace(/\}$/, '');
+      const withoutBraces = normalized
+        .replace(/^\{/, '')
+        .replace(/\}$/, '');
 
-      rawValues =
-        withoutBraces
-          .split(',')
-          .map((item) =>
-            item
-              .trim()
-              .replace(
-                /^"|"$/g,
-                '',
-              ),
-          )
-          .filter(Boolean);
+      rawValues = withoutBraces
+        .split(',')
+        .map((item) =>
+          item.trim().replace(/^"|"$/g, ''),
+        )
+        .filter(Boolean);
     }
   }
 
-  const validAddonIds =
-    rawValues
-      .map(normalizeString)
-      .filter(isAddonId);
+  const validAddonIds = rawValues
+    .map(normalizeString)
+    .filter(isAddonId);
 
-  return Array.from(
-    new Set<AddonId>(
-      validAddonIds,
-    ),
-  );
+  return Array.from(new Set<AddonId>(validAddonIds));
 }
 
 /**
@@ -747,19 +681,12 @@ function normalizeAddonIds(
  */
 function resolvePromptLimit(
   databaseValue: unknown,
-  planValue:
-    | number
-    | null,
+  planValue: number | null,
 ): number | null {
   const databaseLimit =
-    toNonNegativeIntegerOrUndefined(
-      databaseValue,
-    );
+    toNonNegativeIntegerOrUndefined(databaseValue);
 
-  if (
-    databaseLimit !==
-    undefined
-  ) {
+  if (databaseLimit !== undefined) {
     return databaseLimit;
   }
 
@@ -767,10 +694,7 @@ function resolvePromptLimit(
     return null;
   }
 
-  return toNonNegativeInteger(
-    planValue,
-    0,
-  );
+  return toNonNegativeInteger(planValue, 0);
 }
 
 function resolveAttachmentLimit(
@@ -778,26 +702,16 @@ function resolveAttachmentLimit(
   planValue: unknown,
 ): number {
   const databaseLimit =
-    toNonNegativeIntegerOrUndefined(
-      databaseValue,
-    );
+    toNonNegativeIntegerOrUndefined(databaseValue);
 
-  if (
-    databaseLimit !==
-    undefined
-  ) {
+  if (databaseLimit !== undefined) {
     return databaseLimit;
   }
 
   const planLimit =
-    toNonNegativeIntegerOrUndefined(
-      planValue,
-    );
+    toNonNegativeIntegerOrUndefined(planValue);
 
-  if (
-    planLimit !==
-    undefined
-  ) {
+  if (planLimit !== undefined) {
     return planLimit;
   }
 
@@ -808,19 +722,14 @@ function calculatePromptsRemaining({
   promptLimit,
   promptsUsed,
 }: {
-  promptLimit:
-    number | null;
+  promptLimit: number | null;
   promptsUsed: number;
 }): number | null {
   if (promptLimit === null) {
     return null;
   }
 
-  return Math.max(
-    promptLimit -
-      promptsUsed,
-    0,
-  );
+  return Math.max(promptLimit - promptsUsed, 0);
 }
 
 function isEntitlementExpired(
@@ -830,100 +739,91 @@ function isEntitlementExpired(
     return false;
   }
 
-  const timestamp =
-    Date.parse(validUntil);
+  const timestamp = Date.parse(validUntil);
 
   return (
-    Number.isFinite(timestamp) &&
-    timestamp <= Date.now()
+    Number.isFinite(timestamp) && timestamp <= Date.now()
   );
 }
 
-function buildFeatureSet({
-  planId,
-  addonIds,
+function resolveAdminAccess({
+  databaseValue,
+  appMetadata,
 }: {
-  planId: PlanId;
-  addonIds: AddonId[];
-}): Set<FeatureKey> {
-  const features =
-    new Set<FeatureKey>(
-      PLANS[planId]
-        ?.features ??
-        [],
-    );
-
-  for (
-    const addonId of
-    addonIds
-  ) {
-    const addon =
-      ADDONS[addonId];
-
-    for (
-      const feature of
-      addon?.features ?? []
-    ) {
-      features.add(feature);
-    }
+  databaseValue: unknown;
+  appMetadata: Record<string, unknown> | null | undefined;
+}): boolean {
+  if (toSafeBoolean(databaseValue, false)) {
+    return true;
   }
 
-  return features;
+  if (!appMetadata) {
+    return false;
+  }
+
+  if (toSafeBoolean(appMetadata.is_admin, false)) {
+    return true;
+  }
+
+  if (toSafeBoolean(appMetadata.isAdmin, false)) {
+    return true;
+  }
+
+  const role = normalizeString(appMetadata.role).toLowerCase();
+  return role === 'admin' || role === 'administrator';
 }
 
 function getDefaultEntitlements({
   userId,
   email,
+  isAdmin,
 }: {
   userId: string;
   email: string | null;
+  isAdmin: boolean;
 }): CurrentEntitlements {
-  const plan =
-    PLANS[DEFAULT_PLAN_ID];
+  const plan = PLANS[DEFAULT_PLAN_ID];
 
-  const featureList =
-    Array.from(
-      new Set<FeatureKey>(
-        plan.features,
-      ),
-    );
+  const features = getFeaturesForEntitlements(
+    DEFAULT_PLAN_ID,
+    [],
+    { isAdmin },
+  );
 
-  const promptLimit =
-    plan.promptLimit;
+  const featureList = Array.from(features);
+  const promptLimit = isAdmin ? null : plan.promptLimit;
 
   return {
     userId,
     email,
 
-    planId:
-      DEFAULT_PLAN_ID,
-    planName:
-      plan.name,
-    planPriceCents:
-      plan.priceCents,
-    pageLimit:
-      plan.pageLimit,
+    isAdmin,
+    hasUnlimitedAccess: isAdmin,
+    hasDatabaseRecord: false,
+
+    planId: DEFAULT_PLAN_ID,
+    planName: plan.name,
+    planPriceCents: plan.priceCents,
+    pageLimit: plan.pageLimit,
+
+    basePageLimit: plan.pageLimit,
+    extraPageLimit: 0,
+    pagesUsed: 0,
 
     addonIds: [],
     addonNames: [],
 
-    features:
-      new Set<FeatureKey>(
-        featureList,
-      ),
+    features,
     featureList,
 
     promptLimit,
     promptsUsed: 0,
-    promptsRemaining:
-      promptLimit,
-    promptLimitReached:
-      promptLimit !== null &&
-      promptLimit <= 0,
+    promptsRemaining: promptLimit,
+    promptLimitReached: false,
 
-    attachmentLimit:
-      plan.attachmentLimit,
+    attachmentLimit: plan.attachmentLimit,
 
+    billingStatus: isAdmin ? 'admin' : 'active',
     activatedAt: null,
     validUntil: null,
     updatedAt: null,
@@ -934,18 +834,16 @@ function getDefaultEntitlements({
 // PUBLIC HELPERS
 // ============================================================
 
-export function getFeatureLabel(
-  feature: FeatureKey,
-): string {
+export function getFeatureLabel(feature: FeatureKey): string {
   return (
     FEATURE_LABELS[feature] ||
+    getCatalogFeatureLabel(feature) ||
     feature
   );
 }
 
 export function serializeEntitlements(
-  entitlements:
-    CurrentEntitlements,
+  entitlements: CurrentEntitlements,
 ): PublicEntitlements {
   const {
     features: _featureSet,
@@ -955,10 +853,8 @@ export function serializeEntitlements(
 
   return {
     ...rest,
-    featureList:
-      [...featureList],
-    features:
-      [...featureList],
+    featureList: [...featureList],
+    features: [...featureList],
   };
 }
 
@@ -969,8 +865,7 @@ export function serializeEntitlements(
  * 2. await hasFeature(feature) -> Promise<boolean>
  */
 export function hasFeature(
-  entitlements:
-    CurrentEntitlements,
+  entitlements: CurrentEntitlements,
   feature: FeatureKey,
 ): boolean;
 
@@ -979,73 +874,60 @@ export function hasFeature(
 ): Promise<boolean>;
 
 export function hasFeature(
-  first:
-    | CurrentEntitlements
-    | FeatureKey,
+  first: CurrentEntitlements | FeatureKey,
   second?: FeatureKey,
-):
-  | boolean
-  | Promise<boolean> {
-  if (
-    typeof first ===
-    'object'
-  ) {
+): boolean | Promise<boolean> {
+  if (typeof first === 'object') {
     if (!second) {
       return false;
     }
 
-    return first.features.has(
-      second,
-    );
+    return first.isAdmin || first.features.has(second);
   }
 
-  return getCurrentEntitlements()
-    .then((entitlements) =>
-      entitlements.features.has(
-        first,
-      ),
-    );
+  return getCurrentEntitlements().then(
+    (entitlements) =>
+      entitlements.isAdmin ||
+      entitlements.features.has(first),
+  );
 }
 
 export function hasAnyFeature(
-  entitlements:
-    CurrentEntitlements,
-  features:
-    readonly FeatureKey[],
+  entitlements: CurrentEntitlements,
+  features: readonly FeatureKey[],
 ): boolean {
-  return features.some(
-    (feature) =>
-      entitlements.features.has(
-        feature,
-      ),
+  if (entitlements.isAdmin) {
+    return true;
+  }
+
+  return features.some((feature) =>
+    entitlements.features.has(feature),
   );
 }
 
 export function hasAllFeatures(
-  entitlements:
-    CurrentEntitlements,
-  features:
-    readonly FeatureKey[],
+  entitlements: CurrentEntitlements,
+  features: readonly FeatureKey[],
 ): boolean {
-  return features.every(
-    (feature) =>
-      entitlements.features.has(
-        feature,
-      ),
+  if (entitlements.isAdmin) {
+    return true;
+  }
+
+  return features.every((feature) =>
+    entitlements.features.has(feature),
   );
 }
 
 export function getMissingFeatures(
-  entitlements:
-    CurrentEntitlements,
-  requiredFeatures:
-    readonly FeatureKey[],
+  entitlements: CurrentEntitlements,
+  requiredFeatures: readonly FeatureKey[],
 ): FeatureKey[] {
+  if (entitlements.isAdmin) {
+    return [];
+  }
+
   return requiredFeatures.filter(
-    (feature) =>
-      !entitlements.features.has(
-        feature,
-      ),
+    (feature) => !entitlements.features.has(feature),
   );
 }
 
@@ -1053,275 +935,241 @@ export function getMissingFeatures(
 // DATABASE LOADING
 // ============================================================
 
-type SupabaseServerClient =
-  Awaited<
-    ReturnType<
-      typeof createSupabaseServerClient
-    >
-  >;
+type SupabaseServerClient = Awaited<
+  ReturnType<typeof createSupabaseServerClient>
+>;
+
+function isMissingColumnError(error: {
+  code?: string | null;
+  message?: string | null;
+}): boolean {
+  const code = String(error.code || '').toUpperCase();
+  const message = String(error.message || '');
+
+  return (
+    code === '42703' ||
+    code === 'PGRST204' ||
+    /column|schema cache|does not exist|could not find/i.test(
+      message,
+    )
+  );
+}
 
 /**
  * Načíta entitlement z databázy.
  *
- * Najskôr sa skúsi rozšírený zoznam stĺpcov. Ak staršia databázová
- * schéma ešte neobsahuje activated_at, valid_until alebo updated_at,
- * funkcia automaticky použije základný kompatibilný select.
+ * Funkcia postupne skúša tri kompatibilné schémy:
+ * 1. úplnú aktuálnu schému vrátane is_admin,
+ * 2. základnú schému vrátane is_admin,
+ * 3. starú schému bez is_admin.
+ *
+ * V produkcii musí byť doplnený stĺpec is_admin. Posledný fallback je
+ * ponechaný iba preto, aby staršia databáza nespôsobila úplný pád webu.
  */
 async function loadEntitlementRow({
   supabase,
   userId,
 }: {
-  supabase:
-    SupabaseServerClient;
+  supabase: SupabaseServerClient;
   userId: string;
-}): Promise<
-  EntitlementDatabaseRow | null
-> {
-  const extendedColumns = [
-    'plan_id',
-    'addon_ids',
-    'prompt_limit',
-    'prompts_used',
-    'attachment_limit',
-    'activated_at',
-    'valid_until',
-    'updated_at',
-  ].join(', ');
+}): Promise<EntitlementDatabaseRow | null> {
+  const selectVariants = [
+    [
+      'plan_id',
+      'addon_ids',
+      'base_page_limit',
+      'extra_page_limit',
+      'pages_used',
+      'prompt_limit',
+      'prompts_used',
+      'attachment_limit',
+      'is_admin',
+      'billing_status',
+      'activated_at',
+      'valid_until',
+      'updated_at',
+    ],
+    [
+      'plan_id',
+      'addon_ids',
+      'prompt_limit',
+      'prompts_used',
+      'attachment_limit',
+      'is_admin',
+    ],
+    [
+      'plan_id',
+      'addon_ids',
+      'prompt_limit',
+      'prompts_used',
+      'attachment_limit',
+    ],
+  ] as const;
 
-  const extendedResult =
-    await supabase
-      .from(
-        'zedpera_user_entitlements',
-      )
-      .select(
-        extendedColumns,
-      )
-      .eq(
-        'user_id',
-        userId,
-      )
+  let lastMissingColumnError = '';
+
+  for (const columns of selectVariants) {
+    const result = await supabase
+      .from('zedpera_user_entitlements')
+      .select(columns.join(', '))
+      .eq('user_id', userId)
       .maybeSingle();
 
-  if (!extendedResult.error) {
-    return (
-      extendedResult.data as
-        | EntitlementDatabaseRow
-        | null
-    );
+    if (!result.error) {
+      return result.data as EntitlementDatabaseRow | null;
+    }
+
+    if (!isMissingColumnError(result.error)) {
+      throw new EntitlementError({
+        code: 'ENTITLEMENTS_LOAD_FAILED',
+        message:
+          'Oprávnenia používateľského účtu sa nepodarilo načítať.',
+        status: 500,
+        detail: result.error.message,
+      });
+    }
+
+    lastMissingColumnError = result.error.message;
   }
 
-  const extendedErrorMessage =
-    String(
-      extendedResult.error
-        .message || '',
-    );
-
-  const missingOptionalColumn =
-    /activated_at|valid_until|updated_at/i.test(
-      extendedErrorMessage,
-    ) ||
-    String(
-      extendedResult.error
-        .code || '',
-    ) === '42703';
-
-  if (!missingOptionalColumn) {
-    throw new EntitlementError({
-      code:
-        'ENTITLEMENTS_LOAD_FAILED',
-      message:
-        'Oprávnenia používateľského účtu sa nepodarilo načítať.',
-      status: 500,
-      detail:
-        extendedErrorMessage,
-    });
-  }
-
-  const basicResult =
-    await supabase
-      .from(
-        'zedpera_user_entitlements',
-      )
-      .select(
-        [
-          'plan_id',
-          'addon_ids',
-          'prompt_limit',
-          'prompts_used',
-          'attachment_limit',
-        ].join(', '),
-      )
-      .eq(
-        'user_id',
-        userId,
-      )
-      .maybeSingle();
-
-  if (basicResult.error) {
-    throw new EntitlementError({
-      code:
-        'ENTITLEMENTS_LOAD_FAILED',
-      message:
-        'Oprávnenia používateľského účtu sa nepodarilo načítať.',
-      status: 500,
-      detail:
-        basicResult.error
-          .message,
-    });
-  }
-
-  return (
-    basicResult.data as
-      | EntitlementDatabaseRow
-      | null
-  );
+  throw new EntitlementError({
+    code: 'ENTITLEMENTS_SCHEMA_INCOMPATIBLE',
+    message:
+      'Databázová schéma oprávnení nie je kompatibilná s aplikáciou.',
+    status: 500,
+    detail: lastMissingColumnError,
+  });
 }
 
 /**
  * Načíta a zostaví oprávnenia aktuálne prihláseného používateľa.
  */
-export async function getCurrentEntitlements():
-  Promise<CurrentEntitlements> {
-  const supabase =
-    await createSupabaseServerClient();
+export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
+  const supabase = await createSupabaseServerClient();
 
   const {
     data: { user },
     error: authError,
-  } =
-    await supabase.auth.getUser();
+  } = await supabase.auth.getUser();
 
-  if (
-    authError ||
-    !user?.id
-  ) {
-    throw new UnauthenticatedError(
-      authError?.message,
-    );
+  if (authError || !user?.id) {
+    throw new UnauthenticatedError(authError?.message);
   }
 
-  const data =
-    await loadEntitlementRow({
-      supabase,
-      userId: user.id,
-    });
+  const appMetadata =
+    user.app_metadata && typeof user.app_metadata === 'object'
+      ? (user.app_metadata as Record<string, unknown>)
+      : null;
+
+  const data = await loadEntitlementRow({
+    supabase,
+    userId: user.id,
+  });
+
+  const isAdmin = resolveAdminAccess({
+    databaseValue: data?.is_admin,
+    appMetadata,
+  });
 
   if (!data) {
     return getDefaultEntitlements({
-      userId:
-        user.id,
-      email:
-        user.email || null,
+      userId: user.id,
+      email: user.email || null,
+      isAdmin,
     });
   }
 
-  const storedPlanId =
-    normalizePlanId(
-      data.plan_id,
-    );
+  const storedPlanId = normalizePlanId(data.plan_id);
+  const storedAddonIds = normalizeAddonIds(data.addon_ids);
 
-  const storedAddonIds =
-    normalizeAddonIds(
-      data.addon_ids,
-    );
-
-  const activatedAt =
-    normalizeDateString(
-      data.activated_at,
-    );
-
-  const validUntil =
-    normalizeDateString(
-      data.valid_until,
-    );
-
-  const updatedAt =
-    normalizeDateString(
-      data.updated_at,
-    );
+  const activatedAt = normalizeDateString(data.activated_at);
+  const validUntil = normalizeDateString(data.valid_until);
+  const updatedAt = normalizeDateString(data.updated_at);
+  const billingStatus = normalizeBillingStatus(data.billing_status);
 
   /**
-   * Po vypršaní balíka sa oprávnenia okamžite vrátia na FREE.
-   * Pôvodný validUntil zostáva vo výstupe pre diagnostiku/UI.
+   * Administrátor nikdy nesmie stratiť prístup v dôsledku vypršania
+   * plateného balíka. Pre bežného používateľa sa po vypršaní oprávnenia
+   * bezpečne vrátia na FREE.
    */
   const expired =
-    isEntitlementExpired(
-      validUntil,
-    );
+    !isAdmin && isEntitlementExpired(validUntil);
 
-  const planId =
-    expired
-      ? DEFAULT_PLAN_ID
-      : storedPlanId;
+  const planId = expired ? DEFAULT_PLAN_ID : storedPlanId;
+  const addonIds = expired ? [] : storedAddonIds;
+  const plan = PLANS[planId];
 
-  const addonIds =
-    expired
-      ? []
-      : storedAddonIds;
+  const features = getFeaturesForEntitlements(
+    planId,
+    addonIds,
+    { isAdmin },
+  );
 
-  const plan =
-    PLANS[planId];
+  const featureList = Array.from(features);
 
-  const features =
-    buildFeatureSet({
-      planId,
-      addonIds,
-    });
-
-  const featureList =
-    Array.from(features);
-
-  const promptLimit =
-    expired
+  const promptLimit = isAdmin
+    ? null
+    : expired
       ? plan.promptLimit
       : resolvePromptLimit(
           data.prompt_limit,
           plan.promptLimit,
         );
 
-  const promptsUsed =
-    expired
-      ? 0
-      : toNonNegativeInteger(
-          data.prompts_used,
-          0,
-        );
+  const promptsUsed = expired
+    ? 0
+    : toNonNegativeInteger(data.prompts_used, 0);
 
-  const promptsRemaining =
-    calculatePromptsRemaining({
-      promptLimit,
-      promptsUsed,
-    });
+  const promptsRemaining = isAdmin
+    ? null
+    : calculatePromptsRemaining({
+        promptLimit,
+        promptsUsed,
+      });
 
-  const attachmentLimit =
-    expired
-      ? plan.attachmentLimit
-      : resolveAttachmentLimit(
-          data.attachment_limit,
-          plan.attachmentLimit,
-        );
+  const attachmentLimit = expired
+    ? plan.attachmentLimit
+    : resolveAttachmentLimit(
+        data.attachment_limit,
+        plan.attachmentLimit,
+      );
+
+  const basePageLimit = expired
+    ? plan.pageLimit
+    : toNonNegativeInteger(
+        data.base_page_limit,
+        plan.pageLimit,
+      );
+
+  const extraPageLimit = expired
+    ? 0
+    : toNonNegativeInteger(data.extra_page_limit, 0);
+
+  const pagesUsed = expired
+    ? 0
+    : toNonNegativeInteger(data.pages_used, 0);
 
   return {
-    userId:
-      user.id,
-    email:
-      user.email || null,
+    userId: user.id,
+    email: user.email || null,
+
+    isAdmin,
+    hasUnlimitedAccess: isAdmin,
+    hasDatabaseRecord: true,
 
     planId,
-    planName:
-      plan.name,
-    planPriceCents:
-      plan.priceCents,
-    pageLimit:
-      plan.pageLimit,
+    planName: plan.name,
+    planPriceCents: plan.priceCents,
+    pageLimit: plan.pageLimit,
+
+    basePageLimit,
+    extraPageLimit,
+    pagesUsed,
 
     addonIds,
-    addonNames:
-      addonIds.map(
-        (addonId) =>
-          ADDONS[addonId]
-            .name,
-      ),
+    addonNames: addonIds.map(
+      (addonId) => ADDONS[addonId].name,
+    ),
 
     features,
     featureList,
@@ -1330,16 +1178,18 @@ export async function getCurrentEntitlements():
     promptsUsed,
     promptsRemaining,
     promptLimitReached:
+      !isAdmin &&
       promptLimit !== null &&
-      promptsUsed >=
-        promptLimit,
+      promptsUsed >= promptLimit,
 
     attachmentLimit,
 
-    activatedAt:
-      expired
-        ? null
-        : activatedAt,
+    billingStatus: isAdmin
+      ? 'admin'
+      : expired
+        ? 'expired'
+        : billingStatus,
+    activatedAt: expired ? null : activatedAt,
     validUntil,
     updatedAt,
   };
@@ -1355,17 +1205,14 @@ export async function getCurrentEntitlements():
 export async function requireFeature(
   feature: FeatureKey,
 ): Promise<CurrentEntitlements> {
-  const entitlements =
-    await getCurrentEntitlements();
+  const entitlements = await getCurrentEntitlements();
 
-  if (
-    !entitlements.features.has(
-      feature,
-    )
-  ) {
-    throw new FeatureAccessError(
-      feature,
-    );
+  if (entitlements.isAdmin) {
+    return entitlements;
+  }
+
+  if (!entitlements.features.has(feature)) {
+    throw new FeatureAccessError(feature);
   }
 
   return entitlements;
@@ -1375,30 +1222,20 @@ export async function requireFeature(
  * Overí, či má používateľ aspoň jednu z požadovaných funkcií.
  */
 export async function requireAnyFeature(
-  requiredFeatures:
-    readonly FeatureKey[],
+  requiredFeatures: readonly FeatureKey[],
 ): Promise<CurrentEntitlements> {
-  const entitlements =
-    await getCurrentEntitlements();
+  const entitlements = await getCurrentEntitlements();
 
-  if (
-    requiredFeatures.length === 0
-  ) {
+  if (entitlements.isAdmin || requiredFeatures.length === 0) {
     return entitlements;
   }
 
-  const accessible =
-    requiredFeatures.some(
-      (feature) =>
-        entitlements.features.has(
-          feature,
-        ),
-    );
+  const accessible = requiredFeatures.some((feature) =>
+    entitlements.features.has(feature),
+  );
 
   if (!accessible) {
-    throw new FeatureAccessError(
-      requiredFeatures[0],
-    );
+    throw new FeatureAccessError(requiredFeatures[0]);
   }
 
   return entitlements;
@@ -1408,31 +1245,26 @@ export async function requireAnyFeature(
  * Overí, či má používateľ všetky požadované funkcie.
  */
 export async function requireAllFeatures(
-  requiredFeatures:
-    readonly FeatureKey[],
+  requiredFeatures: readonly FeatureKey[],
 ): Promise<CurrentEntitlements> {
-  const entitlements =
-    await getCurrentEntitlements();
+  const entitlements = await getCurrentEntitlements();
 
-  const missingFeatures =
-    getMissingFeatures(
-      entitlements,
-      requiredFeatures,
-    );
+  if (entitlements.isAdmin) {
+    return entitlements;
+  }
 
-  if (
-    missingFeatures.length > 0
-  ) {
+  const missingFeatures = getMissingFeatures(
+    entitlements,
+    requiredFeatures,
+  );
+
+  if (missingFeatures.length > 0) {
     throw new EntitlementError({
-      code:
-        'REQUIRED_FEATURES_MISSING',
+      code: 'REQUIRED_FEATURES_MISSING',
       message:
         'Aktivovaný balík neobsahuje všetky funkcie potrebné pre túto operáciu.',
       status: 403,
-      detail:
-        missingFeatures
-          .map(getFeatureLabel)
-          .join(', '),
+      detail: missingFeatures.map(getFeatureLabel).join(', '),
     });
   }
 
@@ -1441,41 +1273,48 @@ export async function requireAllFeatures(
 
 /**
  * Overí základnú funkciu požadovaného modulu.
+ *
+ * Hláška používa názov skutočne zvoleného modulu, nie pevný text
+ * „Audit kvality“.
  */
 export async function requireModuleAccess(
   module: AppModuleKey,
 ): Promise<CurrentEntitlements> {
-  if (
-    module === 'unknown'
-  ) {
+  if (module === 'unknown') {
     throw new EntitlementError({
-      code:
-        'UNKNOWN_MODULE',
-      message:
-        'Požadovaný modul nebol rozpoznaný.',
+      code: 'UNKNOWN_MODULE',
+      message: 'Požadovaný modul nebol rozpoznaný.',
       status: 400,
     });
   }
 
-  const feature =
-    MODULE_FEATURE_MAP[module];
+  const entitlements = await getCurrentEntitlements();
 
-  return requireFeature(
-    feature,
-  );
+  if (entitlements.isAdmin) {
+    return entitlements;
+  }
+
+  const feature = MODULE_FEATURE_MAP[module];
+
+  if (!entitlements.features.has(feature)) {
+    throw new FeatureAccessError(
+      feature,
+      MODULE_LABELS[module],
+      'module',
+    );
+  }
+
+  return entitlements;
 }
 
 /**
  * Overí konkrétnu činnosť AI školiteľa.
  */
 export async function requireSupervisorAction(
-  action:
-    SupervisorActionKey,
+  action: SupervisorActionKey,
 ): Promise<CurrentEntitlements> {
   return requireFeature(
-    SUPERVISOR_ACTION_FEATURE_MAP[
-      action
-    ],
+    SUPERVISOR_ACTION_FEATURE_MAP[action],
   );
 }
 
@@ -1486,14 +1325,9 @@ export async function requireSupervisorAction(
  * await requireDataAnalysisAction('prepare');
  */
 export async function requireDataAnalysisAction(
-  action:
-    DataAnalysisActionKey,
+  action: DataAnalysisActionKey,
 ): Promise<CurrentEntitlements> {
-  return requireFeature(
-    DATA_ANALYSIS_FEATURE_MAP[
-      action
-    ],
-  );
+  return requireFeature(DATA_ANALYSIS_FEATURE_MAP[action]);
 }
 
 // ============================================================
@@ -1503,26 +1337,20 @@ export async function requireDataAnalysisAction(
 /**
  * Overí dostupnosť promptu bez jeho spotrebovania.
  */
-export async function requirePromptAllowance():
-  Promise<CurrentEntitlements> {
-  const entitlements =
-    await getCurrentEntitlements();
+export async function requirePromptAllowance(): Promise<CurrentEntitlements> {
+  const entitlements = await getCurrentEntitlements();
+
+  if (entitlements.isAdmin) {
+    return entitlements;
+  }
 
   if (
-    entitlements
-      .promptLimit !== null &&
-    entitlements
-      .promptsUsed >=
-        entitlements
-          .promptLimit
+    entitlements.promptLimit !== null &&
+    entitlements.promptsUsed >= entitlements.promptLimit
   ) {
     throw new PromptLimitError({
-      promptLimit:
-        entitlements
-          .promptLimit,
-      promptsUsed:
-        entitlements
-          .promptsUsed,
+      promptLimit: entitlements.promptLimit,
+      promptsUsed: entitlements.promptsUsed,
     });
   }
 
@@ -1530,164 +1358,183 @@ export async function requirePromptAllowance():
 }
 
 /**
+ * Alias pre staršie alebo alternatívne API routy.
+ */
+export const assertPromptAvailable = requirePromptAllowance;
+
+/**
  * Volajte iba po úspešnom vygenerovaní AI výstupu.
  *
  * Spotreba prebieha atomicky v RPC:
  * public.zedpera_consume_prompt().
+ *
+ * Administrátorovi sa RPC vôbec nevolá a prompt sa mu neodpočíta.
  */
-export async function consumeSuccessfulPrompt():
-  Promise<PromptUsageResult> {
-  const supabase =
-    await createSupabaseServerClient();
+export async function consumeSuccessfulPrompt(): Promise<PromptUsageResult> {
+  const current = await getCurrentEntitlements();
+
+  if (current.isAdmin) {
+    return {
+      isAdmin: true,
+      promptLimit: null,
+      promptsUsed: current.promptsUsed,
+      promptsRemaining: null,
+      promptLimitReached: false,
+    };
+  }
+
+  if (!current.hasDatabaseRecord) {
+    throw new EntitlementError({
+      code: 'ENTITLEMENTS_RECORD_MISSING',
+      message:
+        'Používateľský účet nemá vytvorený databázový záznam oprávnení. Skontrolujte trigger pre vytvorenie FREE balíka.',
+      status: 500,
+    });
+  }
+
+  if (current.promptLimitReached) {
+    throw new PromptLimitError({
+      promptLimit: current.promptLimit,
+      promptsUsed: current.promptsUsed,
+    });
+  }
+
+  const supabase = await createSupabaseServerClient();
 
   const {
     data: { user },
     error: authError,
-  } =
-    await supabase.auth.getUser();
+  } = await supabase.auth.getUser();
 
-  if (
-    authError ||
-    !user?.id
-  ) {
-    throw new UnauthenticatedError(
-      authError?.message,
-    );
+  if (authError || !user?.id) {
+    throw new UnauthenticatedError(authError?.message);
   }
 
-  const {
-    data,
-    error,
-  } = await supabase.rpc(
+  const { data, error } = await supabase.rpc(
     'zedpera_consume_prompt',
   );
 
   if (error) {
-    const message =
-      String(
-        error.message || '',
-      );
+    const message = String(error.message || '');
+    const upperMessage = message.toUpperCase();
 
-    if (
-      message
-        .toUpperCase()
-        .includes(
-          'PROMPT_LIMIT_REACHED',
-        )
-    ) {
-      const current =
-        await getCurrentEntitlements();
+    if (upperMessage.includes('PROMPT_LIMIT_REACHED')) {
+      const latest = await getCurrentEntitlements();
 
       throw new PromptLimitError({
-        promptLimit:
-          current.promptLimit,
-        promptsUsed:
-          current.promptsUsed,
+        promptLimit: latest.promptLimit,
+        promptsUsed: latest.promptsUsed,
       });
     }
 
+    if (upperMessage.includes('UNAUTHENTICATED')) {
+      throw new UnauthenticatedError(message);
+    }
+
     if (
-      message
-        .toUpperCase()
-        .includes(
-          'UNAUTHENTICATED',
-        )
+      upperMessage.includes('ENTITLEMENTS_NOT_FOUND') ||
+      upperMessage.includes('ENTITLEMENT_NOT_FOUND')
     ) {
-      throw new UnauthenticatedError(
-        message,
-      );
+      throw new EntitlementError({
+        code: 'ENTITLEMENTS_RECORD_MISSING',
+        message:
+          'Používateľský účet nemá vytvorený databázový záznam oprávnení. Skontrolujte trigger pre vytvorenie FREE balíka.',
+        status: 500,
+        detail: message,
+      });
     }
 
     throw new EntitlementError({
-      code:
-        'PROMPT_CONSUMPTION_FAILED',
-      message:
-        'Použitie promptu sa nepodarilo zaznamenať.',
+      code: 'PROMPT_CONSUMPTION_FAILED',
+      message: 'Použitie promptu sa nepodarilo zaznamenať.',
       status: 500,
       detail: message,
     });
   }
 
-  const rawRow =
-    Array.isArray(data)
-      ? data[0]
-      : data;
+  const rawRow = Array.isArray(data) ? data[0] : data;
 
-  if (
-    typeof rawRow !==
-      'object' ||
-    rawRow === null
-  ) {
+  if (typeof rawRow !== 'object' || rawRow === null) {
     throw new EntitlementError({
-      code:
-        'PROMPT_CONSUMPTION_EMPTY_RESPONSE',
+      code: 'PROMPT_CONSUMPTION_EMPTY_RESPONSE',
       message:
         'Databáza nevrátila stav spotreby promptov.',
       status: 500,
     });
   }
 
-  const row =
-    rawRow as
-      PromptConsumptionRow;
+  const row = rawRow as PromptConsumptionRow;
+
+  const adminAccess =
+    toSafeBoolean(row.admin_access, false) ||
+    toSafeBoolean(row.is_admin, false);
+
+  if (adminAccess) {
+    return {
+      isAdmin: true,
+      promptLimit: null,
+      promptsUsed: toNonNegativeInteger(
+        row.current_prompts_used ?? row.prompts_used,
+        current.promptsUsed,
+      ),
+      promptsRemaining: null,
+      promptLimitReached: false,
+    };
+  }
+
+  const rawPromptLimit =
+    row.current_prompt_limit ?? row.prompt_limit;
 
   const promptLimit =
-    row.prompt_limit === null
+    rawPromptLimit === null
       ? null
-      : toNonNegativeIntegerOrUndefined(
-          row.prompt_limit,
-        ) ??
-        null;
+      : toNonNegativeIntegerOrUndefined(rawPromptLimit) ??
+        current.promptLimit;
 
-  const promptsUsed =
-    toNonNegativeInteger(
-      row.prompts_used,
-      0,
-    );
+  const promptsUsed = toNonNegativeInteger(
+    row.current_prompts_used ?? row.prompts_used,
+    current.promptsUsed + 1,
+  );
 
-  const calculatedRemaining =
-    calculatePromptsRemaining({
-      promptLimit,
-      promptsUsed,
-    });
+  const calculatedRemaining = calculatePromptsRemaining({
+    promptLimit,
+    promptsUsed,
+  });
+
+  const rawReturnedRemaining =
+    row.current_prompts_remaining ?? row.prompts_remaining;
 
   const returnedRemaining =
-    row.prompts_remaining ===
-      null
+    rawReturnedRemaining === null
       ? null
-      : toNonNegativeIntegerOrUndefined(
-          row.prompts_remaining,
-        );
+      : toNonNegativeIntegerOrUndefined(rawReturnedRemaining);
 
   const promptsRemaining =
     promptLimit === null
       ? null
       : Math.min(
-          returnedRemaining ??
-            calculatedRemaining ??
-            0,
-          calculatedRemaining ??
-            0,
+          returnedRemaining ?? calculatedRemaining ?? 0,
+          calculatedRemaining ?? 0,
         );
 
   const promptLimitReached =
-    toSafeBoolean(
-      row.limit_reached,
-      false,
-    ) ||
-    (
-      promptLimit !== null &&
-      promptsUsed >=
-        promptLimit
-    );
+    toSafeBoolean(row.limit_reached, false) ||
+    toSafeBoolean(row.prompt_limit_reached, false) ||
+    (promptLimit !== null && promptsUsed >= promptLimit);
 
   return {
+    isAdmin: false,
     promptLimit,
     promptsUsed,
     promptsRemaining,
     promptLimitReached,
   };
 }
+
+/**
+ * Alias pre názov používaný v niektorých API routach.
+ */
+export const consumeCurrentUserPrompt = consumeSuccessfulPrompt;
 
 // ============================================================
 // ATTACHMENT LIMIT CONTROL
@@ -1699,26 +1546,21 @@ export async function consumeSuccessfulPrompt():
 export async function requireAttachmentAllowance(
   receivedAttachments: number,
 ): Promise<CurrentEntitlements> {
-  const entitlements =
-    await getCurrentEntitlements();
+  const entitlements = await getCurrentEntitlements();
 
-  const safeReceivedAttachments =
-    toNonNegativeInteger(
-      receivedAttachments,
-      0,
-    );
+  if (entitlements.isAdmin) {
+    return entitlements;
+  }
 
-  if (
-    safeReceivedAttachments >
-    entitlements
-      .attachmentLimit
-  ) {
+  const safeReceivedAttachments = toNonNegativeInteger(
+    receivedAttachments,
+    0,
+  );
+
+  if (safeReceivedAttachments > entitlements.attachmentLimit) {
     throw new AttachmentLimitError({
-      attachmentLimit:
-        entitlements
-          .attachmentLimit,
-      receivedAttachments:
-        safeReceivedAttachments,
+      attachmentLimit: entitlements.attachmentLimit,
+      receivedAttachments: safeReceivedAttachments,
     });
   }
 
@@ -1743,150 +1585,91 @@ export function entitlementErrorResponse(
   status: number;
   body: EntitlementErrorBody;
 } {
-  if (
-    error instanceof
-    FeatureAccessError
-  ) {
+  if (error instanceof FeatureAccessError) {
     return {
-      status:
-        error.status,
+      status: error.status,
       body: {
         ok: false,
-        code:
-          error.code,
-        message:
-          error.message,
-        feature:
-          error.feature,
-        featureLabel:
-          getFeatureLabel(
-            error.feature,
-          ),
-        purchaseUrl:
-          PURCHASE_URL,
-        ...(process.env
-          .NODE_ENV !==
-        'production'
-          ? {
-              detail:
-                error.detail,
-            }
+        code: error.code,
+        message: error.message,
+        feature: error.feature,
+        featureLabel: error.displayLabel,
+        purchaseUrl: PURCHASE_URL,
+        ...(process.env.NODE_ENV !== 'production'
+          ? { detail: error.detail }
           : {}),
       },
     };
   }
 
-  if (
-    error instanceof
-    PromptLimitError
-  ) {
+  if (error instanceof PromptLimitError) {
     const promptsRemaining =
       error.promptLimit === null
         ? null
         : Math.max(
-            error.promptLimit -
-              error.promptsUsed,
+            error.promptLimit - error.promptsUsed,
             0,
           );
 
     return {
-      status:
-        error.status,
+      status: error.status,
       body: {
         ok: false,
-        code:
-          error.code,
-        message:
-          error.message,
-        promptLimit:
-          error.promptLimit,
-        promptsUsed:
-          error.promptsUsed,
+        code: error.code,
+        message: error.message,
+        promptLimit: error.promptLimit,
+        promptsUsed: error.promptsUsed,
         promptsRemaining,
-        purchaseUrl:
-          PURCHASE_URL,
+        purchaseUrl: PURCHASE_URL,
       },
     };
   }
 
-  if (
-    error instanceof
-    AttachmentLimitError
-  ) {
+  if (error instanceof AttachmentLimitError) {
     return {
-      status:
-        error.status,
+      status: error.status,
       body: {
         ok: false,
-        code:
-          error.code,
-        message:
-          error.message,
-        attachmentLimit:
-          error.attachmentLimit,
-        receivedAttachments:
-          error.receivedAttachments,
-        purchaseUrl:
-          PURCHASE_URL,
+        code: error.code,
+        message: error.message,
+        attachmentLimit: error.attachmentLimit,
+        receivedAttachments: error.receivedAttachments,
+        purchaseUrl: PURCHASE_URL,
       },
     };
   }
 
-  if (
-    error instanceof
-    EntitlementError
-  ) {
+  if (error instanceof EntitlementError) {
     return {
-      status:
-        error.status,
+      status: error.status,
       body: {
         ok: false,
-        code:
-          error.code,
-        message:
-          error.message,
-        ...(
-          error.status === 402 ||
-          error.status === 403
-            ? {
-                purchaseUrl:
-                  PURCHASE_URL,
-              }
-            : {}
-        ),
-        ...(process.env
-          .NODE_ENV !==
-        'production' &&
-        error.detail
-          ? {
-              detail:
-                error.detail,
-            }
+        code: error.code,
+        message: error.message,
+        ...(error.status === 402 ||
+        error.status === 403 ||
+        error.status === 429
+          ? { purchaseUrl: PURCHASE_URL }
+          : {}),
+        ...(process.env.NODE_ENV !== 'production' && error.detail
+          ? { detail: error.detail }
           : {}),
       },
     };
   }
 
   const technicalDetail =
-    error instanceof Error
-      ? error.message
-      : String(error);
+    error instanceof Error ? error.message : String(error);
 
   return {
     status: 500,
     body: {
       ok: false,
-      code:
-        'ENTITLEMENT_ERROR',
+      code: 'ENTITLEMENT_ERROR',
       message:
         'Kontrola oprávnení používateľského účtu zlyhala.',
-      ...(process.env
-        .NODE_ENV !==
-      'production'
-        ? {
-            detail:
-              technicalDetail,
-          }
+      ...(process.env.NODE_ENV !== 'production'
+        ? { detail: technicalDetail }
         : {}),
     },
   };

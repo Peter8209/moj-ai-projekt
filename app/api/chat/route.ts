@@ -56,6 +56,7 @@ type ModuleKey =
   | 'planning'
   | 'emails'
   | 'originality'
+  | 'humanizer'
   | 'chat'
   | 'unknown';
 
@@ -429,6 +430,14 @@ function cleanClientVisibleOutput(text: string, module: ModuleKey): string {
       .trim();
   }
 
+  if (module === 'humanizer') {
+    output = output
+      .replace(/^\s*Humanizácia\s+textu\s*[-–—:]*\s*/i, '')
+      .replace(/^\s*Humanizovaný\s+text\s*[-–—:]*\s*/i, '')
+      .replace(/^\s*Upravený\s+text\s*[-–—:]*\s*/i, '')
+      .trim();
+  }
+
   return output;
 }
 
@@ -599,6 +608,7 @@ function normalizeModule(value: unknown): ModuleKey {
     value === 'planning' ||
     value === 'emails' ||
     value === 'originality' ||
+    value === 'humanizer' ||
     value === 'chat'
   ) {
     return value;
@@ -3697,6 +3707,15 @@ function pageLimitErrorResponse(error?: unknown) {
 }
 
 function buildPageLimitInstruction(pageQuota: PageQuota) {
+  if (pageQuota.isUnlimited || pageQuota.isAdmin) {
+    return `
+STRÁNKOVÝ LIMIT POUŽÍVATEĽA:
+- Používateľ má neobmedzený administrátorský prístup.
+- Stránkový limit sa na túto požiadavku nevzťahuje.
+- Výstup vytvor v rozsahu primeranom požiadavke používateľa a technickému limitu modelu.
+`.trim();
+  }
+
   return `
 STRÁNKOVÝ LIMIT POUŽÍVATEĽA:
 - Celkový limit: ${pageQuota.pageLimit} normostrán.
@@ -3711,8 +3730,18 @@ STRÁNKOVÝ LIMIT POUŽÍVATEĽA:
 function limitOutputToRemainingPages(
   value: string,
   remainingPages: number,
+  isUnlimited = false,
 ): LimitedPageOutput {
   const output = String(value || '');
+
+  if (isUnlimited) {
+    return {
+      output,
+      wasTruncated: false,
+      maximumCharacters: Number.MAX_SAFE_INTEGER,
+    };
+  }
+
   const maximumCharacters =
     Math.max(remainingPages, 0) *
     CHARACTERS_PER_PAGE;
@@ -3762,10 +3791,16 @@ function createPageUsagePayload({
   requestId: string;
   outputWasTruncated: boolean;
 }) {
+  const pagesGeneratedThisRequest =
+    countGeneratedPages(output);
+
   return {
     ...quota,
+    pagesGeneratedThisRequest,
     pagesConsumedThisRequest:
-      countGeneratedPages(output),
+      quota.isUnlimited || quota.isAdmin
+        ? 0
+        : pagesGeneratedThisRequest,
     charactersGenerated:
       String(output || '').length,
     charactersPerPage:
@@ -3790,11 +3825,33 @@ function translateApiErrorToSlovak(error: unknown): SlovakApiError {
 }
 
 function jsonErrorResponse(error: SlovakApiError, status: number) {
-  return NextResponse.json({ ok: false, code: error.code, message: error.message, detail: error.detail, rawMessage: error.rawMessage }, { status });
+  return NextResponse.json(
+    {
+      ok: false,
+      code: error.code,
+      message: error.message,
+      detail: error.detail,
+      rawMessage: error.rawMessage,
+    },
+    {
+      status,
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+    },
+  );
 }
 
 function jsonSimpleErrorResponse({ code, message, detail, status }: { code: string; message: string; detail: string; status: number }) {
-  return NextResponse.json({ ok: false, code, message, detail }, { status });
+  return NextResponse.json(
+    { ok: false, code, message, detail },
+    {
+      status,
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+    },
+  );
 }
 
 // =====================================================
@@ -4010,7 +4067,11 @@ async function requireChatRequestEntitlements({
   );
 
   for (const feature of additionalFeatures) {
-    if (!entitlements.features.has(feature)) {
+    if (
+      !entitlements.isAdmin &&
+      !entitlements.hasUnlimitedAccess &&
+      !entitlements.features.has(feature)
+    ) {
       throw new FeatureAccessError(
         feature,
       );
@@ -4018,6 +4079,8 @@ async function requireChatRequestEntitlements({
   }
 
   if (
+    !entitlements.isAdmin &&
+    !entitlements.hasUnlimitedAccess &&
     entitlements.promptLimit !== null &&
     entitlements.promptsUsed >=
       entitlements.promptLimit
@@ -4031,6 +4094,8 @@ async function requireChatRequestEntitlements({
   }
 
   if (
+    !entitlements.isAdmin &&
+    !entitlements.hasUnlimitedAccess &&
     receivedAttachments >
     entitlements.attachmentLimit
   ) {
@@ -4128,6 +4193,11 @@ async function createStreamResponse({
   const effectiveOutputTokens = getOutputTokenLimit(
     pageQuota.pagesRemaining,
     streamOutputTokens,
+    {
+      isUnlimited:
+        pageQuota.isUnlimited ||
+        pageQuota.isAdmin,
+    },
   );
 
   if (effectiveOutputTokens <= 0) {
@@ -4144,8 +4214,10 @@ async function createStreamResponse({
 
   const encoder = new TextEncoder();
   const maximumCharacters =
-    pageQuota.pagesRemaining *
-    CHARACTERS_PER_PAGE;
+    pageQuota.isUnlimited || pageQuota.isAdmin
+      ? Number.POSITIVE_INFINITY
+      : pageQuota.pagesRemaining *
+        CHARACTERS_PER_PAGE;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -4265,11 +4337,21 @@ async function createStreamResponse({
       'X-Zedpera-Page-Request-Id':
         pageRequestId,
       'X-Zedpera-Page-Limit':
-        String(pageQuota.pageLimit),
+        pageQuota.isUnlimited || pageQuota.isAdmin
+          ? 'unlimited'
+          : String(pageQuota.pageLimit),
       'X-Zedpera-Pages-Used-Before':
         String(pageQuota.pagesUsed),
       'X-Zedpera-Pages-Remaining-Before':
-        String(pageQuota.pagesRemaining),
+        pageQuota.isUnlimited || pageQuota.isAdmin
+          ? 'unlimited'
+          : String(pageQuota.pagesRemaining),
+      'X-Zedpera-Is-Admin':
+        String(entitlementGuard.entitlements.isAdmin),
+      'X-Zedpera-Unlimited-Access':
+        String(
+          entitlementGuard.entitlements.hasUnlimitedAccess,
+        ),
       'X-Zedpera-Characters-Per-Page':
         String(CHARACTERS_PER_PAGE),
       'X-Zedpera-Plan-Id':
@@ -4369,6 +4451,11 @@ async function createJsonResponse({
     getOutputTokenLimit(
       pageQuota.pagesRemaining,
       requestedOutputTokens,
+      {
+        isUnlimited:
+          pageQuota.isUnlimited ||
+          pageQuota.isAdmin,
+      },
     );
 
   if (effectiveOutputTokens <= 0) {
@@ -4412,6 +4499,8 @@ const limitedPageOutput =
   limitOutputToRemainingPages(
     output,
     pageQuota.pagesRemaining,
+    pageQuota.isUnlimited ||
+      pageQuota.isAdmin,
   );
 
 output = limitedPageOutput.output;
@@ -4470,6 +4559,10 @@ await saveGeneratedHistory({
     ok: true,
     provider: providerLabel,
     output,
+    isAdmin:
+      entitlementGuard.entitlements.isAdmin,
+    hasUnlimitedAccess:
+      entitlementGuard.entitlements.hasUnlimitedAccess,
     entitlements:
       serializeEntitlementGuard(
         entitlementGuard,
@@ -4514,6 +4607,7 @@ function getHistoryType(module: ModuleKey) {
   if (module === 'planning') return 'planning';
   if (module === 'emails') return 'emails';
   if (module === 'originality') return 'originality';
+  if (module === 'humanizer') return 'humanizer';
   if (module === 'chat') return 'chat';
 
   return 'chat';
@@ -4546,6 +4640,7 @@ function getHistoryTitle({
   if (module === 'planning') return 'Plánovanie';
   if (module === 'emails') return 'Email';
   if (module === 'originality') return 'Originalita práce';
+  if (module === 'humanizer') return 'Humanizácia textu';
 
   return 'AI výstup';
 }
@@ -5144,6 +5239,10 @@ try {
           entitlementGuard.entitlementModule,
         planId:
           entitlementGuard.entitlements.planId,
+        isAdmin:
+          entitlementGuard.entitlements.isAdmin,
+        hasUnlimitedAccess:
+          entitlementGuard.entitlements.hasUnlimitedAccess,
         requiredFeatures:
           entitlementGuard.requiredFeatures,
         promptLimit:
@@ -5183,12 +5282,18 @@ try {
         requestId: pageRequestId,
         module,
         planId: pageQuota.planId,
+        isAdmin: pageQuota.isAdmin,
+        isUnlimited: pageQuota.isUnlimited,
         pageLimit:
-          pageQuota.pageLimit,
+          pageQuota.isUnlimited
+            ? 'unlimited'
+            : pageQuota.pageLimit,
         pagesUsed:
           pageQuota.pagesUsed,
         pagesRemaining:
-          pageQuota.pagesRemaining,
+          pageQuota.isUnlimited
+            ? 'unlimited'
+            : pageQuota.pagesRemaining,
         charactersPerPage:
           CHARACTERS_PER_PAGE,
       },

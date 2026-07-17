@@ -93,6 +93,7 @@ type JaspAnalysisResult = {
   parametricTests: JaspTableRow[];
   nonParametricTests: JaspTableRow[];
   testSelection: JaspTableRow[];
+  itemDescriptives: JaspTableRow[];
   warnings: JaspTableRow[];
 };
 
@@ -408,77 +409,6 @@ function normalizeQuestionnaireConfig(formData: FormData): QuestionnaireConfig {
   };
 }
 
-function getNormalizedManualQuestionnaireText(
-  questionnaireConfig: QuestionnaireConfig,
-): string {
-  return removeDiacritics(
-    [
-      questionnaireConfig.customQuestionnairesText,
-      questionnaireConfig.manualScalesText,
-      questionnaireConfig.manualSubscalesText,
-      questionnaireConfig.groupingColumnsText,
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase(),
-  );
-}
-
-function manualTextMentionsQuestionnaire(
-  questionnaireConfig: QuestionnaireConfig,
-  questionnaireId: QuestionnaireId,
-): boolean {
-  const normalizedText = getNormalizedManualQuestionnaireText(questionnaireConfig);
-
-  if (!normalizedText) return false;
-
-  if (questionnaireId === 'wemwbs') {
-    return /wem|wembs|warwick|wellbeing|pohod/.test(normalizedText);
-  }
-
-  if (questionnaireId === 'jss') {
-    return /\bjss\b|job satisfaction|pracovn.*spokoj|spokojnost.*prac/.test(
-      normalizedText,
-    );
-  }
-
-  if (questionnaireId === 'sehs_s_2020') {
-    return /sehs|social emotional health/.test(normalizedText);
-  }
-
-  if (questionnaireId === 'resilience_scale') {
-    return /rezilien|resilien|cd-risc|\brs\b/.test(normalizedText);
-  }
-
-  return false;
-}
-
-function shouldUseQuestionnaire(
-  questionnaireConfig: QuestionnaireConfig,
-  questionnaireId: QuestionnaireId,
-  autoDetected: boolean,
-): boolean {
-  if (questionnaireConfig.mode === 'none') return false;
-
-  if (questionnaireConfig.mode === 'selected') {
-    return questionnaireConfig.selectedQuestionnaires.includes(questionnaireId);
-  }
-
-  if (questionnaireConfig.mode === 'manual') {
-    return manualTextMentionsQuestionnaire(questionnaireConfig, questionnaireId);
-  }
-
-  /*
-   * Režim „Neviem / iba navrhnúť“ nesmie automaticky počítať WEMWBS/JSS.
-   * V tomto režime sa môže vypísať iba odporúčanie/upozornenie.
-   */
-  if (questionnaireConfig.mode === 'auto-suggest-only') {
-    return false;
-  }
-
-  return autoDetected;
-}
-
 function createQuestionnaireSelectionWarnings(
   questionnaireConfig: QuestionnaireConfig,
 ): string[] {
@@ -714,10 +644,6 @@ function isEmptyCell(value: unknown): boolean {
   return value === null || value === undefined || String(value).trim() === '';
 }
 
-function isExcelFileName(fileName: string): boolean {
-  return /\.(xlsx|xls|xlsm)$/i.test(fileName);
-}
-
 function isCsvFileName(fileName: string): boolean {
   return /\.csv$/i.test(fileName);
 }
@@ -910,40 +836,6 @@ function normalizeQuestionnaireHeader(header: string): {
   };
 }
 
-function getExplicitQuestionnaireColumnType(header: string): 'WEM' | 'JSS' | null {
-  const { compact } = normalizeQuestionnaireHeader(header);
-
-  if (
-    /^wem(?:wbs)?0?(\d{1,2})$/.test(compact) ||
-    /^wem(?:wbs)?_?0?(\d{1,2})$/.test(compact) ||
-    /^w0?(\d{1,2})$/.test(compact) ||
-    /wem(?:wbs)?(?:polozka|item|otazka|question)?0?(\d{1,2})/.test(compact)
-  ) {
-    return 'WEM';
-  }
-
-  if (
-    /^jss0?(\d{1,2})$/.test(compact) ||
-    /^jss_?0?(\d{1,2})$/.test(compact) ||
-    /^js0?(\d{1,2})$/.test(compact) ||
-    /jss(?:polozka|item|otazka|question)?0?(\d{1,2})/.test(compact)
-  ) {
-    return 'JSS';
-  }
-
-  const rawLower = removeDiacritics(header).toLowerCase();
-
-  if (/(wem|wemwbs|well|pohod|dusev|psychick).*?(\d{1,2})/.test(rawLower)) {
-    return 'WEM';
-  }
-
-  if (/(jss|job satisfaction|pracovn|spokoj|zamestn).*?(\d{1,2})/.test(rawLower)) {
-    return 'JSS';
-  }
-
-  return null;
-}
-
 function autoMapQuestionnaireColumnsByOrder(
   rawHeaders: unknown[],
   mappedHeaders: string[],
@@ -955,10 +847,15 @@ function autoMapQuestionnaireColumnsByOrder(
   const warnings: string[] = [];
   const nextHeaders = [...mappedHeaders];
 
-  if (questionnaireConfig.mode === 'none') {
-    warnings.push(
-      'Automatické mapovanie štandardizovaných dotazníkov bolo vypnuté, pretože používateľ zvolil analýzu bez štandardizovaného dotazníka.',
-    );
+  if (
+    questionnaireConfig.mode === 'none' ||
+    questionnaireConfig.mode === 'manual'
+  ) {
+    if (questionnaireConfig.mode === 'none') {
+      warnings.push(
+        'Automatické mapovanie štandardizovaných dotazníkov bolo vypnuté, pretože používateľ zvolil analýzu bez štandardizovaného dotazníka.',
+      );
+    }
 
     return {
       headers: nextHeaders,
@@ -1009,26 +906,29 @@ function autoMapQuestionnaireColumnsByOrder(
       if (isLikelyDemographicColumn(item.header)) return false;
 
       /*
-       * Zámerne pripúšťame aj všeobecné dotazníkové stĺpce bez kľúčových slov.
-       * Mnohé exporty z Forms / Google Forms majú v hlavičke iba plný text otázky,
-       * nie kód WEM1/JSS1. Preto sa po odfiltrovaní demografie mapuje podľa poradia.
+       * Pri starom explicitnom výbere WEMWBS/JSS môže byť názvom stĺpca celý
+       * text otázky, preto v režime selected pripúšťame všetky nedemografické
+       * stĺpce. V režime auto-suggest-only iba odhadujeme podľa hlavičky a
+       * nikdy stĺpce neprepisujeme.
        */
-      return looksLikeQuestionColumn(item.header) || true;
+      if (questionnaireConfig.mode === 'selected') return true;
+
+      return looksLikeQuestionColumn(item.header);
     })
     .map((item) => item.index);
 
   if (questionnaireConfig.mode === 'auto-suggest-only') {
     if (!hasAnyWem && !hasAnyJss && candidateIndexes.length >= 50) {
       warnings.push(
-        'Súbor pravdepodobne obsahuje WEMWBS + JSS, ale používateľ zvolil iba návrh. Položky sa neprepisujú a skóre sa automaticky nevytvára.',
+        'Súbor môže obsahovať WEMWBS + JSS, ale bol zvolený iba návrh. Položky sa neprepisujú a skóre sa automaticky nevytvára.',
       );
     } else if (!hasAnyJss && candidateIndexes.length >= 36) {
       warnings.push(
-        'Súbor pravdepodobne obsahuje JSS, ale používateľ zvolil iba návrh. Položky sa neprepisujú a JSS skóre sa automaticky nevytvára.',
+        'Súbor môže obsahovať JSS, ale bol zvolený iba návrh. Položky sa neprepisujú a JSS skóre sa automaticky nevytvára.',
       );
     } else if (!hasAnyWem && candidateIndexes.length >= 14) {
       warnings.push(
-        'Súbor pravdepodobne obsahuje WEMWBS, ale používateľ zvolil iba návrh. Položky sa neprepisujú a WEMWBS skóre sa automaticky nevytvára.',
+        'Súbor môže obsahovať WEMWBS, ale bol zvolený iba návrh. Položky sa neprepisujú a WEMWBS skóre sa automaticky nevytvára.',
       );
     }
 
@@ -1038,34 +938,25 @@ function autoMapQuestionnaireColumnsByOrder(
     };
   }
 
-  /*
-   * Ručný výber používateľa má prednosť:
-   * ak používateľ vybral WEMWBS + JSS, mapujeme presne tieto dva dotazníky podľa poradia,
-   * ale iba vtedy, keď stĺpce ešte nie sú explicitne pomenované.
-   */
   if (
-    (questionnaireConfig.mode === 'selected' || questionnaireConfig.mode === 'manual') &&
     selectedWem &&
     selectedJss &&
     !hasAnyWem &&
     !hasAnyJss &&
     candidateIndexes.length >= 50
   ) {
-    const wemIndexes = candidateIndexes.slice(0, 14);
-    const jssIndexes = candidateIndexes.slice(14, 50);
-
-    wemIndexes.forEach((columnIndex, itemIndex) => {
+    candidateIndexes.slice(0, 14).forEach((columnIndex, itemIndex) => {
       nextHeaders[columnIndex] = `WEM${itemIndex + 1}`;
       alreadyMappedIndexes.add(columnIndex);
     });
 
-    jssIndexes.forEach((columnIndex, itemIndex) => {
+    candidateIndexes.slice(14, 50).forEach((columnIndex, itemIndex) => {
       nextHeaders[columnIndex] = `JSS${itemIndex + 1}`;
       alreadyMappedIndexes.add(columnIndex);
     });
 
     warnings.push(
-      'Používateľ vybral WEMWBS + JSS. Položky WEM1–WEM14 a JSS1–JSS36 boli vytvorené podľa poradia stĺpcov, bez prepísania AI detekciou.',
+      'Používateľ v starom režime vybral WEMWBS + JSS. Položky WEM1–WEM14 a JSS1–JSS36 boli vytvorené podľa poradia nedemografických stĺpcov.',
     );
 
     return {
@@ -1074,69 +965,19 @@ function autoMapQuestionnaireColumnsByOrder(
     };
   }
 
-  /*
-   * Ak máme explicitné názvy WEM/JSS, poradie už netreba agresívne prepisovať.
-   */
-  if (hasAnyWem && hasAnyJss) {
-    return {
-      headers: nextHeaders,
-      warnings,
-    };
-  }
-
-  /*
-   * Variant 1: súbor obsahuje WEMWBS + JSS spolu.
-   * Prvých 14 dotazníkových stĺpcov po demografii = WEM1–WEM14.
-   * Ďalších 36 dotazníkových stĺpcov = JSS1–JSS36.
-   */
-  if (
-    false &&
-    !hasAnyWem &&
-    !hasAnyJss &&
-    candidateIndexes.length >= 50
-  ) {
-    const wemIndexes = candidateIndexes.slice(0, 14);
-    const jssIndexes = candidateIndexes.slice(14, 50);
-
-    wemIndexes.forEach((columnIndex, itemIndex) => {
-      nextHeaders[columnIndex] = `WEM${itemIndex + 1}`;
-      alreadyMappedIndexes.add(columnIndex);
-    });
-
-    jssIndexes.forEach((columnIndex, itemIndex) => {
-      nextHeaders[columnIndex] = `JSS${itemIndex + 1}`;
-      alreadyMappedIndexes.add(columnIndex);
-    });
-
-    warnings.push(
-      'Súbor pravdepodobne obsahuje WEMWBS + JSS. Položky WEM1–WEM14 a JSS1–JSS36 boli vytvorené automaticky podľa poradia stĺpcov.',
-    );
-
-    return {
-      headers: nextHeaders,
-      warnings,
-    };
-  }
-
-  /*
-   * Variant 2: súbor obsahuje iba JSS.
-   * Musí byť pred WEM-only vetvou, aby sa 36 položiek nemapovalo nesprávne ako WEM + zvyšok.
-   */
   if (
     selectedJss &&
-    !hasAnyJss &&
     !selectedWem &&
+    !hasAnyJss &&
     candidateIndexes.length >= 36
   ) {
-    const jssIndexes = candidateIndexes.slice(0, 36);
-
-    jssIndexes.forEach((columnIndex, itemIndex) => {
+    candidateIndexes.slice(0, 36).forEach((columnIndex, itemIndex) => {
       nextHeaders[columnIndex] = `JSS${itemIndex + 1}`;
       alreadyMappedIndexes.add(columnIndex);
     });
 
     warnings.push(
-      'Súbor pravdepodobne obsahuje iba JSS dotazník. Položky JSS1 až JSS36 boli vytvorené automaticky podľa poradia stĺpcov.',
+      'Používateľ v starom režime vybral JSS. Položky JSS1–JSS36 boli vytvorené podľa poradia nedemografických stĺpcov.',
     );
 
     return {
@@ -1145,24 +986,19 @@ function autoMapQuestionnaireColumnsByOrder(
     };
   }
 
-  /*
-   * Variant 3: súbor obsahuje iba WEMWBS.
-   */
   if (
     selectedWem &&
-    !hasAnyWem &&
     !selectedJss &&
+    !hasAnyWem &&
     candidateIndexes.length >= 14
   ) {
-    const wemIndexes = candidateIndexes.slice(0, 14);
-
-    wemIndexes.forEach((columnIndex, itemIndex) => {
+    candidateIndexes.slice(0, 14).forEach((columnIndex, itemIndex) => {
       nextHeaders[columnIndex] = `WEM${itemIndex + 1}`;
       alreadyMappedIndexes.add(columnIndex);
     });
 
     warnings.push(
-      'Súbor pravdepodobne obsahuje iba WEMWBS dotazník. Položky WEM1 až WEM14 boli vytvorené automaticky podľa poradia stĺpcov.',
+      'Používateľ v starom režime vybral WEMWBS. Položky WEM1–WEM14 boli vytvorené podľa poradia nedemografických stĺpcov.',
     );
 
     return {
@@ -1171,42 +1007,38 @@ function autoMapQuestionnaireColumnsByOrder(
     };
   }
 
-  /*
-   * Variant 4: už existuje WEM, ale JSS chýba – zvyšné dotazníkové stĺpce mapujeme na JSS.
-   */
   if (selectedJss && hasAnyWem && !hasAnyJss) {
     const remainingCandidateIndexes = candidateIndexes.filter(
       (index) => !alreadyMappedIndexes.has(index),
     );
 
     if (remainingCandidateIndexes.length >= 36) {
-      const jssIndexes = remainingCandidateIndexes.slice(0, 36);
-
-      jssIndexes.forEach((columnIndex, itemIndex) => {
+      remainingCandidateIndexes.slice(0, 36).forEach((columnIndex, itemIndex) => {
         nextHeaders[columnIndex] = `JSS${itemIndex + 1}`;
         alreadyMappedIndexes.add(columnIndex);
       });
 
       warnings.push(
-        'Položky JSS1 až JSS36 boli doplnené automaticky podľa poradia zostávajúcich dotazníkových stĺpcov.',
+        'Položky JSS1–JSS36 boli doplnené podľa poradia zostávajúcich nedemografických stĺpcov.',
       );
     }
   }
 
-  /*
-   * Variant 5: už existuje JSS, ale WEM chýba – prvých 14 zvyšných stĺpcov mapujeme na WEM.
-   */
-  if (selectedWem && hasAnyJss && !hasAnyWem && candidateIndexes.length >= 14) {
-    const wemIndexes = candidateIndexes.slice(0, 14);
-
-    wemIndexes.forEach((columnIndex, itemIndex) => {
-      nextHeaders[columnIndex] = `WEM${itemIndex + 1}`;
-      alreadyMappedIndexes.add(columnIndex);
-    });
-
-    warnings.push(
-      'Položky WEM1 až WEM14 boli doplnené automaticky podľa poradia zostávajúcich dotazníkových stĺpcov.',
+  if (selectedWem && hasAnyJss && !hasAnyWem) {
+    const remainingCandidateIndexes = candidateIndexes.filter(
+      (index) => !alreadyMappedIndexes.has(index),
     );
+
+    if (remainingCandidateIndexes.length >= 14) {
+      remainingCandidateIndexes.slice(0, 14).forEach((columnIndex, itemIndex) => {
+        nextHeaders[columnIndex] = `WEM${itemIndex + 1}`;
+        alreadyMappedIndexes.add(columnIndex);
+      });
+
+      warnings.push(
+        'Položky WEM1–WEM14 boli doplnené podľa poradia zostávajúcich nedemografických stĺpcov.',
+      );
+    }
   }
 
   return {
@@ -1661,7 +1493,7 @@ function createManualScoringRuntime(
       requestedItems,
       matchedColumns,
       missingItems,
-      minRequiredItems: Math.max(1, Math.ceil(matchedColumns.length * 0.5)),
+      minRequiredItems: Math.max(1, Math.ceil(requestedItems.length * 0.5)),
     };
   });
 }
@@ -1684,28 +1516,40 @@ function parseManualScoringLine(
       ? Math.min(...separatorCandidates)
       : -1;
 
-  const name =
-    separatorIndex >= 0
-      ? value.slice(0, separatorIndex).trim()
-      : `${kind} ${index + 1}`;
-
-  const items =
-    separatorIndex >= 0
-      ? value.slice(separatorIndex + 1).trim()
-      : value;
-
-  if (!items) {
-    return null;
+  /*
+   * Samostatný názov bez = alebo : znamená, že používateľ už má v databáze
+   * hotový stĺpec škály/subškály. Nevytvárame duplicitnú premennú – stĺpec
+   * sa iba zaradí medzi analytické premenné.
+   */
+  if (separatorIndex < 0) {
+    return {
+      skala: value,
+      polozky: value,
+      vypocet:
+        'Použije sa existujúci číselný stĺpec z DATA_CLEAN bez prepočítania.',
+      vyslednaPremenna: '',
+      poznamka:
+        kind === 'škála'
+          ? 'Existujúca škálová premenná zadaná používateľom.'
+          : 'Existujúca subškálová premenná zadaná používateľom.',
+    };
   }
 
-  const outputName = `${kind === 'škála' ? 'SCALE' : 'SUBSCALE'}_${normalizeHeaderKey(name).toUpperCase()}`;
+  const name = value.slice(0, separatorIndex).trim();
+  const items = value.slice(separatorIndex + 1).trim();
+
+  if (!items) return null;
+
+  const normalizedName =
+    normalizeHeaderKey(name || `${kind}_${index + 1}`)
+      .toUpperCase() || `${kind === 'škála' ? 'SKALA' : 'SUBSKALA'}_${index + 1}`;
 
   return {
     skala: name || `${kind} ${index + 1}`,
     polozky: items,
     vypocet:
-      'Priemer dostupných číselných položiek. Pri minimálne 50 % platných položiek sa vytvorí nová skórovacia premenná v DATA_CLEAN.',
-    vyslednaPremenna: outputName,
+      'Priemer dostupných číselných položiek. Výpočet prebehne pri minimálne 50 % platných zadaných položiek.',
+    vyslednaPremenna: `${kind === 'škála' ? 'SCALE' : 'SUBSCALE'}_${normalizedName}`,
     poznamka:
       kind === 'škála'
         ? 'Manuálne zadaná škála pred spustením analýzy dát.'
@@ -1713,16 +1557,35 @@ function parseManualScoringLine(
   };
 }
 
-function createManualScoringItems(questionnaireConfig: QuestionnaireConfig): ScoringItem[] {
-  const scaleItems = splitManualLines(questionnaireConfig.manualScalesText)
-    .map((line, index) => parseManualScoringLine(line, 'škála', index))
-    .filter((item): item is ScoringItem => Boolean(item));
+function createManualScoringItems(
+  questionnaireConfig: QuestionnaireConfig,
+): ScoringItem[] {
+  const items = [
+    ...splitManualLines(questionnaireConfig.manualScalesText)
+      .map((line, index) => parseManualScoringLine(line, 'škála', index))
+      .filter((item): item is ScoringItem => Boolean(item)),
+    ...splitManualLines(questionnaireConfig.manualSubscalesText)
+      .map((line, index) => parseManualScoringLine(line, 'subškála', index))
+      .filter((item): item is ScoringItem => Boolean(item)),
+  ];
 
-  const subscaleItems = splitManualLines(questionnaireConfig.manualSubscalesText)
-    .map((line, index) => parseManualScoringLine(line, 'subškála', index))
-    .filter((item): item is ScoringItem => Boolean(item));
+  const usedOutputNames = new Map<string, number>();
 
-  return [...scaleItems, ...subscaleItems];
+  return items.map((item) => {
+    if (!item.vyslednaPremenna) return item;
+
+    const baseName = item.vyslednaPremenna;
+    const previousCount = usedOutputNames.get(baseName) ?? 0;
+    usedOutputNames.set(baseName, previousCount + 1);
+
+    return {
+      ...item,
+      vyslednaPremenna:
+        previousCount === 0
+          ? baseName
+          : `${baseName}_${previousCount + 1}`,
+    };
+  });
 }
 
 function calculateScores(
@@ -1737,188 +1600,190 @@ function calculateScores(
 } {
   const nextHeaders = [...headers];
   const warnings: string[] = [];
-  const scoringItems: ScoringItem[] = createManualScoringItems(questionnaireConfig);
+  const manualScoringItems = createManualScoringItems(questionnaireConfig);
+  const scoringItems: ScoringItem[] = [...manualScoringItems];
 
   const wemColumns = Array.from({ length: 14 }, (_, index) => `WEM${index + 1}`);
   const jssColumns = Array.from({ length: 36 }, (_, index) => `JSS${index + 1}`);
 
+  const selectedLegacyWem =
+    questionnaireConfig.mode === 'selected' &&
+    questionnaireConfig.selectedQuestionnaires.includes('wemwbs');
+  const selectedLegacyJss =
+    questionnaireConfig.mode === 'selected' &&
+    questionnaireConfig.selectedQuestionnaires.includes('jss');
+
   const autoHasAnyWem = wemColumns.some((column) => nextHeaders.includes(column));
   const autoHasAllWem = hasColumns(nextHeaders, wemColumns);
-
   const autoHasAnyJss = jssColumns.some((column) => nextHeaders.includes(column));
   const autoHasAllJss = hasColumns(nextHeaders, jssColumns);
 
-  const hasAnyWem =
-    questionnaireConfig.mode === 'selected' &&
-    shouldUseQuestionnaire(
-      questionnaireConfig,
-      'wemwbs',
-      autoHasAnyWem,
-    );
-  const hasAllWem = hasAnyWem && autoHasAllWem;
+  const hasAnyWem = selectedLegacyWem && autoHasAnyWem;
+  const hasAnyJss = selectedLegacyJss && autoHasAnyJss;
 
-  const hasAnyJss =
-    questionnaireConfig.mode === 'selected' &&
-    shouldUseQuestionnaire(
-      questionnaireConfig,
-      'jss',
-      autoHasAnyJss,
-    );
-  const hasAllJss = hasAnyJss && autoHasAllJss;
-
-  if (hasAnyWem && !autoHasAnyWem) {
+  if (selectedLegacyWem && !autoHasAnyWem) {
     warnings.push(
-      'Používateľ vybral WEMWBS, ale v pripravených dátach sa nepodarilo nájsť alebo vytvoriť položky WEM1 až WEM14. Skontrolujte názvy stĺpcov alebo poradie položiek.',
+      'Používateľ v starom režime vybral WEMWBS, ale položky WEM1–WEM14 sa nepodarilo nájsť ani vytvoriť. Skontrolujte názvy alebo poradie stĺpcov.',
     );
   }
 
-  if (hasAnyJss && !autoHasAnyJss) {
+  if (selectedLegacyJss && !autoHasAnyJss) {
     warnings.push(
-      'Používateľ vybral JSS, ale v pripravených dátach sa nepodarilo nájsť alebo vytvoriť položky JSS1 až JSS36. Skontrolujte názvy stĺpcov alebo poradie položiek.',
+      'Používateľ v starom režime vybral JSS, ale položky JSS1–JSS36 sa nepodarilo nájsť ani vytvoriť. Skontrolujte názvy alebo poradie stĺpcov.',
     );
   }
 
   if (hasAnyWem) {
-    if (!nextHeaders.includes('WEMWBS_skore')) {
-      nextHeaders.push('WEMWBS_skore');
-    }
+    if (!nextHeaders.includes('WEMWBS_skore')) nextHeaders.push('WEMWBS_skore');
+    if (!nextHeaders.includes('WEMWBS_priemer')) nextHeaders.push('WEMWBS_priemer');
 
-    if (!nextHeaders.includes('WEMWBS_priemer')) {
-      nextHeaders.push('WEMWBS_priemer');
-    }
+    scoringItems.push(
+      {
+        skala: 'WEMWBS',
+        polozky: 'WEM1–WEM14',
+        vypocet: 'Súčet dostupných položiek WEM1 až WEM14.',
+        vyslednaPremenna: 'WEMWBS_skore',
+        poznamka: autoHasAllWem
+          ? 'Všetkých 14 položiek bolo nájdených.'
+          : 'Niektoré položky chýbajú; skóre sa počíta iba z dostupných položiek.',
+      },
+      {
+        skala: 'WEMWBS priemer',
+        polozky: 'WEM1–WEM14',
+        vypocet: 'Priemer dostupných položiek WEM1 až WEM14.',
+        vyslednaPremenna: 'WEMWBS_priemer',
+        poznamka: 'Pomocná škálová premenná pre kontrolu a deskriptívu.',
+      },
+    );
 
-    scoringItems.push({
-      skala: 'WEMWBS',
-      polozky: 'WEM1–WEM14',
-      vypocet: 'Súčet dostupných položiek WEM1 až WEM14',
-      vyslednaPremenna: 'WEMWBS_skore',
-      poznamka: hasAllWem
-        ? 'Všetkých 14 položiek bolo nájdených.'
-        : 'Niektoré položky WEMWBS chýbajú, skóre je počítané z dostupných položiek.',
-    });
-
-    scoringItems.push({
-      skala: 'WEMWBS',
-      polozky: 'WEM1–WEM14',
-      vypocet: 'Priemer dostupných položiek WEM1 až WEM14',
-      vyslednaPremenna: 'WEMWBS_priemer',
-      poznamka:
-        'Priemer slúži ako pomocná premenná pri kontrole škály.',
-    });
-
-    if (!hasAllWem) {
+    if (!autoHasAllWem) {
       warnings.push(
-        'Neboli nájdené všetky položky WEM1 až WEM14. WEMWBS_skore bolo vypočítané iba z dostupných položiek.',
+        'Neboli nájdené všetky položky WEM1–WEM14. WEMWBS skóre sa vypočíta iba z dostupných položiek.',
       );
     }
   }
 
   if (hasAnyJss) {
-    if (!nextHeaders.includes('JSS_skore')) {
-      nextHeaders.push('JSS_skore');
-    }
-
-    if (!nextHeaders.includes('JSS_priemer')) {
-      nextHeaders.push('JSS_priemer');
-    }
+    if (!nextHeaders.includes('JSS_skore')) nextHeaders.push('JSS_skore');
+    if (!nextHeaders.includes('JSS_priemer')) nextHeaders.push('JSS_priemer');
 
     Object.keys(JSS_SUBSCALES).forEach((subscaleName) => {
-      if (!nextHeaders.includes(subscaleName)) {
-        nextHeaders.push(subscaleName);
-      }
+      if (!nextHeaders.includes(subscaleName)) nextHeaders.push(subscaleName);
     });
 
-    scoringItems.push({
-      skala: 'JSS',
-      polozky: 'JSS1–JSS36',
-      vypocet:
-        'Súčet dostupných položiek JSS1 až JSS36; negatívne položky sú reverzne skórované podľa pravidla 7 - hodnota.',
-      vyslednaPremenna: 'JSS_skore',
-      poznamka: hasAllJss
-        ? 'Všetkých 36 položiek bolo nájdených.'
-        : 'Niektoré položky JSS chýbajú, skóre je počítané z dostupných položiek.',
-    });
-
-    scoringItems.push({
-      skala: 'JSS',
-      polozky: 'JSS1–JSS36',
-      vypocet:
-        'Priemer dostupných reverzne upravených položiek JSS1 až JSS36.',
-      vyslednaPremenna: 'JSS_priemer',
-      poznamka:
-        'Priemer slúži ako pomocná premenná pri kontrole pracovnej spokojnosti.',
-    });
+    scoringItems.push(
+      {
+        skala: 'JSS',
+        polozky: 'JSS1–JSS36',
+        vypocet:
+          'Súčet dostupných položiek JSS1–JSS36; reverzné položky sú prepočítané pravidlom 7 - hodnota.',
+        vyslednaPremenna: 'JSS_skore',
+        poznamka: autoHasAllJss
+          ? 'Všetkých 36 položiek bolo nájdených.'
+          : 'Niektoré položky chýbajú; skóre sa počíta iba z dostupných položiek.',
+      },
+      {
+        skala: 'JSS priemer',
+        polozky: 'JSS1–JSS36',
+        vypocet: 'Priemer dostupných reverzne upravených položiek JSS1–JSS36.',
+        vyslednaPremenna: 'JSS_priemer',
+        poznamka: 'Pomocná škálová premenná pre kontrolu a deskriptívu.',
+      },
+    );
 
     Object.entries(JSS_SUBSCALES).forEach(([subscaleName, itemNumbers]) => {
       scoringItems.push({
-        skala: 'JSS subškála',
+        skala: subscaleName,
         polozky: itemNumbers.map((itemNumber) => `JSS${itemNumber}`).join(', '),
         vypocet:
-          'Súčet dostupných položiek subškály; negatívne položky sú reverzne skórované podľa pravidla 7 - hodnota.',
+          'Súčet dostupných položiek subškály; reverzné položky sú prepočítané pravidlom 7 - hodnota.',
         vyslednaPremenna: subscaleName,
-        poznamka:
-          'Subškála pracovnej spokojnosti podľa štruktúry JSS.',
+        poznamka: 'Subškála pracovnej spokojnosti podľa štruktúry JSS.',
       });
     });
 
-    if (!hasAllJss) {
+    if (!autoHasAllJss) {
       warnings.push(
-        'Neboli nájdené všetky položky JSS1 až JSS36. JSS_skore a subškály boli vypočítané iba z dostupných položiek.',
+        'Neboli nájdené všetky položky JSS1–JSS36. JSS skóre a subškály sa vypočítajú iba z dostupných položiek.',
       );
     }
   }
 
-  const manualRuntime = createManualScoringRuntime(scoringItems, nextHeaders);
+  const manualRuntime = createManualScoringRuntime(
+    manualScoringItems,
+    nextHeaders,
+  );
 
   manualRuntime.forEach((runtime) => {
-    if (!runtime.item.vyslednaPremenna || runtime.matchedColumns.length < 2) {
+    if (!runtime.item.vyslednaPremenna) {
+      if (runtime.matchedColumns.length === 1) {
+        runtime.item.polozky = runtime.matchedColumns[0];
+        runtime.item.vypocet =
+          'Použije sa existujúci číselný stĺpec bez prepočítania.';
+        runtime.item.poznamka =
+          `Existujúca analytická premenná bola nájdená v DATA_CLEAN: ${runtime.matchedColumns[0]}.`;
+      } else {
+        warnings.push(
+          `Zadanú existujúcu škálu/subškálu „${runtime.item.skala}“ sa nepodarilo jednoznačne nájsť v DATA_CLEAN.`,
+        );
+      }
+      return;
+    }
+
+    if (runtime.matchedColumns.length === 0) {
       warnings.push(
-        `Manuálna škála/subškála "${runtime.item.skala}" nebola vypočítaná, pretože sa našlo menej ako 2 zadaných položiek v DATA_CLEAN.`,
+        `Škála/subškála „${runtime.item.skala}“ nebola vypočítaná, pretože sa nenašla žiadna zadaná položka.`,
       );
       return;
     }
 
-    if (!nextHeaders.includes(runtime.item.vyslednaPremenna)) {
-      nextHeaders.push(runtime.item.vyslednaPremenna);
+    let outputName = runtime.item.vyslednaPremenna;
+    let suffix = 2;
+
+    while (nextHeaders.includes(outputName)) {
+      outputName = `${runtime.item.vyslednaPremenna}_${suffix}`;
+      suffix += 1;
     }
+
+    runtime.item.vyslednaPremenna = outputName;
+    nextHeaders.push(outputName);
 
     runtime.item.polozky = runtime.requestedItems.join(', ');
     runtime.item.vypocet =
-      `Priemer položiek: ${runtime.matchedColumns.join(', ')}. Výpočet prebehne, ak je dostupných aspoň ${runtime.minRequiredItems} z ${runtime.matchedColumns.length} položiek.`;
+      `Priemer položiek: ${runtime.matchedColumns.join(', ')}. Výpočet prebehne pri minimálne ${runtime.minRequiredItems} z ${runtime.matchedColumns.length} nájdených položiek.`;
     runtime.item.poznamka = runtime.missingItems.length > 0
-      ? `Nájdené položky: ${runtime.matchedColumns.join(', ')}. Nenájdené položky: ${runtime.missingItems.join(', ')}.`
-      : `Všetky položky boli nájdené: ${runtime.matchedColumns.join(', ')}.`;
+      ? `Nenájdené položky: ${runtime.missingItems.join(', ')}.`
+      : 'Všetky zadané položky boli nájdené.';
   });
 
   const rows = cleanRows.map((row) => {
     const nextRow: DataRow = { ...row };
 
     if (hasAnyWem) {
-      const wemValues = wemColumns.map((column) => toNumber(nextRow[column]));
-
-      nextRow.WEMWBS_skore = sumExistingValues(wemValues);
-      nextRow.WEMWBS_priemer = averageExistingValues(wemValues);
+      const values = wemColumns.map((column) => toNumber(nextRow[column]));
+      nextRow.WEMWBS_skore = sumExistingValues(values);
+      nextRow.WEMWBS_priemer = averageExistingValues(values);
     }
 
     if (hasAnyJss) {
-      const jssValues = jssColumns.map((column, index) =>
+      const values = jssColumns.map((column, index) =>
         reverseJssValue(index + 1, nextRow[column]),
       );
 
-      nextRow.JSS_skore = sumExistingValues(jssValues);
-      nextRow.JSS_priemer = averageExistingValues(jssValues);
+      nextRow.JSS_skore = sumExistingValues(values);
+      nextRow.JSS_priemer = averageExistingValues(values);
 
       Object.entries(JSS_SUBSCALES).forEach(([subscaleName, itemNumbers]) => {
-        const values = itemNumbers.map((itemNumber) =>
-          reverseJssValue(itemNumber, nextRow[`JSS${itemNumber}`]),
+        nextRow[subscaleName] = sumExistingValues(
+          itemNumbers.map((itemNumber) =>
+            reverseJssValue(itemNumber, nextRow[`JSS${itemNumber}`]),
+          ),
         );
-
-        nextRow[subscaleName] = sumExistingValues(values);
       });
     }
 
     manualRuntime.forEach((runtime) => {
-      if (!runtime.item.vyslednaPremenna || runtime.matchedColumns.length < 2) {
+      if (!runtime.item.vyslednaPremenna || runtime.matchedColumns.length === 0) {
         return;
       }
 
@@ -1928,24 +1793,17 @@ function calculateScores(
 
       nextRow[runtime.item.vyslednaPremenna] =
         values.length >= runtime.minRequiredItems
-          ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(4))
+          ? Number(
+              (
+                values.reduce((sum, value) => sum + value, 0) /
+                values.length
+              ).toFixed(4),
+            )
           : null;
     });
 
     return nextRow;
   });
-
-  if (!hasAnyWem && questionnaireConfig.mode === 'selected' && questionnaireConfig.selectedQuestionnaires.includes('wemwbs')) {
-    warnings.push(
-      'Používateľ vybral WEMWBS, ale WEMWBS_skore nebolo vytvorené, pretože chýbajú položky WEM1 až WEM14.',
-    );
-  }
-
-  if (!hasAnyJss && questionnaireConfig.mode === 'selected' && questionnaireConfig.selectedQuestionnaires.includes('jss')) {
-    warnings.push(
-      'Používateľ vybral JSS, ale JSS_skore a JSS subškály neboli vytvorené, pretože chýbajú položky JSS1 až JSS36.',
-    );
-  }
 
   return {
     rows,
@@ -1984,6 +1842,8 @@ function getVariableType(column: string, rows: DataRow[]): string {
   if (
     column.endsWith('_skore') ||
     column.endsWith('_priemer') ||
+    column.startsWith('SCALE_') ||
+    column.startsWith('SUBSCALE_') ||
     column.startsWith('JSS_') ||
     column === 'Vek'
   ) {
@@ -2014,6 +1874,8 @@ function getVariableDescription(column: string): string {
   if (column === 'JSS_skore') return 'Celkové skóre pracovnej spokojnosti podľa JSS.';
   if (column === 'JSS_priemer') return 'Priemerné skóre položiek JSS.';
   if (column.startsWith('JSS_')) return 'Subškála pracovnej spokojnosti podľa JSS.';
+  if (column.startsWith('SCALE_')) return 'Vypočítaná celková škálová premenná podľa manuálne zadaných položiek.';
+  if (column.startsWith('SUBSCALE_')) return 'Vypočítaná subškálová premenná podľa manuálne zadaných položiek.';
 
   return 'Premenná importovaná z pôvodného dátového súboru.';
 }
@@ -2031,6 +1893,9 @@ function getVariableUsage(column: string): string {
   if (column === 'JSS_skore') return 'hlavná škálová premenná, hypotézy';
   if (column === 'JSS_priemer') return 'kontrola a deskriptívna štatistika';
   if (column.startsWith('JSS_')) return 'subškálová analýza';
+  if (column.startsWith('SCALE_') || column.startsWith('SUBSCALE_')) {
+    return 'deskriptíva, normalita, reliabilita, korelácie a rozdielové testy';
+  }
 
   return 'doplnková premenná';
 }
@@ -2059,6 +1924,8 @@ function getVariableValues(column: string): string {
   if (
     column.endsWith('_skore') ||
     column.endsWith('_priemer') ||
+    column.startsWith('SCALE_') ||
+    column.startsWith('SUBSCALE_') ||
     column.startsWith('JSS_') ||
     column === 'Vek'
   ) {
@@ -2236,7 +2103,7 @@ function createQualityReport(params: {
       stav: hasManualScoring ? 'ok' : 'warning',
       poznamka: hasManualScoring
         ? 'Používateľom zadané škály/subškály boli zapísané do SCORING a odovzdajú sa do štatistického výpočtu.'
-        : 'Neboli zadané manuálne škály ani subškály. Systém použije iba všeobecnú analýzu dostupných premenných.',
+        : 'Neboli zadané manuálne škály ani subškály. Systém nevykoná fallback na vek, ID ani jednotlivé položky.',
     },
     {
       kontrola: 'Legacy WEMWBS/JSS skóre',
@@ -2350,16 +2217,41 @@ function numericRatio(rows: DataRow[], column: string): number {
 }
 
 function isIdentifierLike(column: string, rows: DataRow[]): boolean {
-  const normalized = normalizeHeaderKey(column);
-  const values = nonEmptyValues(rows, column);
-  const unique = new Set(values.map((value) => String(value))).size;
+  const normalized = normalizeHeaderKey(column).toLowerCase();
+
+  if (
+    normalized === 'id' ||
+    normalized === 'index' ||
+    normalized === 'poradie' ||
+    normalized === 'poradove_cislo' ||
+    normalized === 'cislo_respondenta' ||
+    normalized.includes('respondent_id') ||
+    normalized.includes('identifikator') ||
+    normalized.includes('identifier') ||
+    normalized.endsWith('_id')
+  ) {
+    return true;
+  }
+
+  /*
+   * Samotná jedinečnosť číselných hodnôt nestačí na označenie premennej ako ID.
+   * Kontinuálne skóre môže mať tiež jedinečnú hodnotu v každom riadku.
+   */
+  const values = numericValues(rows, column);
+
+  if (values.length < 3 || values.some((value) => !Number.isInteger(value))) {
+    return false;
+  }
+
+  const sorted = Array.from(new Set(values)).sort((a, b) => a - b);
+  const sequential = sorted.every(
+    (value, index) => index === 0 || value - sorted[index - 1] === 1,
+  );
 
   return (
-    normalized === 'id' ||
-    normalized.includes('respondent') ||
-    normalized.includes('identifikator') ||
-    normalized.includes('poradie') ||
-    (values.length > 0 && unique === values.length && numericRatio(rows, column) >= 0.95)
+    sequential &&
+    sorted.length === values.length &&
+    /(?:^|_)(cislo|number|no|poradie|row)(?:_|$)/.test(normalized)
   );
 }
 
@@ -2393,48 +2285,136 @@ function getJaspMeasureType(column: string, rows: DataRow[]): 'Scale' | 'Ordinal
   return 'Text';
 }
 
-function getNumericAnalysisColumns(headers: string[], rows: DataRow[]): string[] {
-  const scored = headers.filter((header) => {
-    const normalized = normalizeHeaderKey(header).toLowerCase();
-    return (
-      normalized.startsWith('scale_') ||
-      normalized.startsWith('subscale_') ||
-      normalized.endsWith('_skore') ||
-      normalized.endsWith('_priemer') ||
-      normalized.includes('score')
-    ) && numericValues(rows, header).length >= 3;
-  });
+function isItemLevelColumnName(column: string): boolean {
+  const normalized = normalizeHeaderKey(column).toLowerCase();
+  const compact = normalized.replace(/_/g, '');
 
-  const scale = headers.filter((header) =>
-    getJaspMeasureType(header, rows) === 'Scale' &&
-    numericValues(rows, header).length >= 3 &&
-    !isIdentifierLike(header, rows),
+  return (
+    /^(wem|jss|sehs|rs|swls|pss|phq|gad|bdi)\d+$/.test(compact) ||
+    /^(item|polozka|otazka|question|q)\d+$/.test(compact) ||
+    /(?:^|_)(item|polozka|otazka|question)(?:_|\d|$)/.test(normalized)
   );
-
-  const ordinal = headers.filter((header) =>
-    getJaspMeasureType(header, rows) === 'Ordinal' &&
-    numericValues(rows, header).length >= 3 &&
-    !isIdentifierLike(header, rows),
-  );
-
-  return Array.from(new Set([...scored, ...scale, ...ordinal])).slice(0, 60);
 }
 
-function getGroupingColumns(headers: string[], rows: DataRow[], questionnaireConfig: QuestionnaireConfig): string[] {
+function isLikelyPrecomputedScaleColumn(
+  column: string,
+  rows: DataRow[],
+): boolean {
+  if (numericValues(rows, column).length < 3) return false;
+  if (isIdentifierLike(column, rows) || isItemLevelColumnName(column)) return false;
+
+  const normalized = normalizeHeaderKey(column).toLowerCase();
+  const compact = normalized.replace(/_/g, '');
+
+  const explicitName =
+    normalized.startsWith('scale_') ||
+    normalized.startsWith('subscale_') ||
+    /(?:^|_)(skore|score|priemer|mean|total|celkom|index|sum)(?:_|$)/.test(normalized) ||
+    /(?:_)(skore|score|priemer|mean|total|celkom|index|sum)$/.test(normalized);
+
+  const knownScaleName =
+    /(wemwbs|jssskore|sehs|rezilien|resilien|rs25|swls|pss|phq|gad|bdi|covital|sebauci|empati)/.test(compact);
+
+  return explicitName || knownScaleName;
+}
+
+function getConfiguredAnalysisColumns(
+  headers: string[],
+  rows: DataRow[],
+  scoringItems: ScoringItem[],
+): string[] {
+  const output: string[] = [];
+
+  scoringItems.forEach((item) => {
+    if (
+      item.vyslednaPremenna &&
+      headers.includes(item.vyslednaPremenna) &&
+      numericValues(rows, item.vyslednaPremenna).length >= 3
+    ) {
+      output.push(item.vyslednaPremenna);
+    }
+
+    const requestedItems = parseManualItemTokens(item.polozky);
+
+    if (requestedItems.length === 1) {
+      const existingColumn = findMatchingHeader(headers, requestedItems[0]);
+
+      if (
+        existingColumn &&
+        numericValues(rows, existingColumn).length >= 3
+      ) {
+        output.push(existingColumn);
+      }
+    }
+  });
+
+  return Array.from(new Set(output));
+}
+
+function getNumericAnalysisColumns(
+  headers: string[],
+  rows: DataRow[],
+  scoringItems: ScoringItem[] = [],
+): string[] {
+  const configuredColumns = getConfiguredAnalysisColumns(
+    headers,
+    rows,
+    scoringItems,
+  );
+
+  const precomputedColumns = headers.filter((header) =>
+    isLikelyPrecomputedScaleColumn(header, rows),
+  );
+
+  /*
+   * Zámerne nepoužívame všeobecný fallback na všetky číselné alebo ordinálne
+   * premenné. Od JASP_DESCRIPTIVES ďalej sa analyzujú iba vypočítané,
+   * používateľom zadané alebo jasne pomenované existujúce škály/subškály.
+   * Vek, ID a jednotlivé položky sa tým nemiešajú do korelácií a testov.
+   */
+  return Array.from(
+    new Set([...configuredColumns, ...precomputedColumns]),
+  ).slice(0, 60);
+}
+
+function getGroupingColumns(
+  headers: string[],
+  rows: DataRow[],
+  questionnaireConfig: QuestionnaireConfig,
+): string[] {
   const requested = parseManualItemTokens(questionnaireConfig.groupingColumnsText)
     .map((item) => findMatchingHeader(headers, item))
-    .filter((item): item is string => Boolean(item));
+    .filter((item): item is string => Boolean(item))
+    .filter((item) => !isIdentifierLike(item, rows));
 
   if (requested.length > 0) {
     return Array.from(new Set(requested));
   }
 
-  return headers.filter((header) => {
-    if (isIdentifierLike(header, rows)) return false;
-    const measure = getJaspMeasureType(header, rows);
-    const unique = uniqueValues(rows, header).length;
-    return (measure === 'Nominal' || measure === 'Ordinal') && unique >= 2 && unique <= 10;
-  }).slice(0, 12);
+  /*
+   * Manuálny workflow je striktne riadený tromi vstupnými kolónkami.
+   * Keď používateľ skupinové premenné nezadá, nevytvárame automatické testy
+   * podľa náhodne zvolených kategorizovaných stĺpcov.
+   */
+  if (
+    questionnaireConfig.mode === 'manual' ||
+    questionnaireConfig.mode === 'none'
+  ) {
+    return [];
+  }
+
+  return headers
+    .filter((header) => {
+      if (isIdentifierLike(header, rows)) return false;
+      const measure = getJaspMeasureType(header, rows);
+      const unique = uniqueValues(rows, header).length;
+      return (
+        (measure === 'Nominal' || measure === 'Ordinal') &&
+        unique >= 2 &&
+        unique <= 10
+      );
+    })
+    .slice(0, 12);
 }
 
 function createJaspSummary(params: {
@@ -2456,60 +2436,117 @@ function createJaspSummary(params: {
   ];
 }
 
-function createJaspVariables(headers: string[], rows: DataRow[]): JaspTableRow[] {
+function createJaspVariables(
+  headers: string[],
+  rows: DataRow[],
+  analysisColumns: string[],
+  groupingColumns: string[],
+): JaspTableRow[] {
+  const analysisSet = new Set(analysisColumns);
+  const groupingSet = new Set(groupingColumns);
+
   return headers.map((header) => {
     const values = nonEmptyValues(rows, header);
     const missing = rows.length - values.length;
     const unique = uniqueValues(rows, header).length;
     const numbers = numericValues(rows, header);
+
+    let useAs = 'Frequency / Supporting variable';
+    if (analysisSet.has(header)) useAs = 'Dependent / Scale variable';
+    if (groupingSet.has(header)) useAs = 'Factor / Grouping variable';
+    if (isItemLevelColumnName(header)) useAs = 'Item-level variable / 22_POLOZKY';
+
     return {
       variable: header,
       measure: getJaspMeasureType(header, rows),
-      type: numbers.length / Math.max(values.length, 1) >= 0.85 ? 'Numeric' : 'Text / Factor',
+      type:
+        numbers.length / Math.max(values.length, 1) >= 0.85
+          ? 'Numeric'
+          : 'Text / Factor',
       valid: values.length,
       missing,
-      missing_percent: rows.length > 0 ? roundStat((missing / rows.length) * 100, 2) : 0,
+      missing_percent:
+        rows.length > 0
+          ? roundStat((missing / rows.length) * 100, 2)
+          : 0,
       unique_values: unique,
-      use_as: getJaspMeasureType(header, rows) === 'Scale' ? 'Dependent / Scale variable' : 'Factor / Grouping / Frequency',
+      use_as: useAs,
     };
   });
 }
 
-function createJaspDescriptives(headers: string[], rows: DataRow[]): JaspTableRow[] {
-  return getNumericAnalysisColumns(headers, rows).map((column) => {
-    const values = numericValues(rows, column);
-    const valueMean = mean(values);
-    const sd = standardDeviation(values);
-    const q1 = quantile(values, 0.25);
-    const q3 = quantile(values, 0.75);
-    const med = median(values);
-    const min = values.length ? Math.min(...values) : null;
-    const max = values.length ? Math.max(...values) : null;
-    const variance = sampleVariance(values);
-    const se = sd !== null && values.length > 0 ? sd / Math.sqrt(values.length) : null;
-    const skewness = computeSkewness(values);
-    const kurtosis = computeKurtosisExcess(values);
+function createJaspDescriptives(
+  headers: string[],
+  rows: DataRow[],
+  scoringItems: ScoringItem[],
+): JaspTableRow[] {
+  const output = getNumericAnalysisColumns(headers, rows, scoringItems).map(
+    (column) => {
+      const values = numericValues(rows, column);
+      const valueMean = mean(values);
+      const sd = standardDeviation(values);
+      const q1 = quantile(values, 0.25);
+      const q3 = quantile(values, 0.75);
+      const med = median(values);
+      const min = values.length ? Math.min(...values) : null;
+      const max = values.length ? Math.max(...values) : null;
+      const variance = sampleVariance(values);
+      const se = sd !== null && values.length > 0
+        ? sd / Math.sqrt(values.length)
+        : null;
+      const skewness = computeSkewness(values);
+      const kurtosis = computeKurtosisExcess(values);
+      const seSkewness = values.length >= 3
+        ? Math.sqrt((6 * values.length * (values.length - 1)) / ((values.length - 2) * (values.length + 1) * (values.length + 3)))
+        : null;
+      const seKurtosis = values.length >= 4 && seSkewness !== null
+        ? 2 * seSkewness * Math.sqrt((values.length ** 2 - 1) / ((values.length - 3) * (values.length + 5)))
+        : null;
 
-    return {
-      variable: column,
-      n: values.length,
-      missing: rows.length - values.length,
-      mean: roundStat(valueMean),
-      sd: roundStat(sd),
-      se: roundStat(se),
-      median: roundStat(med),
-      variance: roundStat(variance),
-      min: roundStat(min),
-      max: roundStat(max),
-      q1: roundStat(q1),
-      q3: roundStat(q3),
-      iqr: q1 !== null && q3 !== null ? roundStat(q3 - q1) : null,
-      skewness: roundStat(skewness),
-      kurtosis: roundStat(kurtosis),
-      ci95_lower: valueMean !== null && se !== null ? roundStat(valueMean - 1.96 * se) : null,
-      ci95_upper: valueMean !== null && se !== null ? roundStat(valueMean + 1.96 * se) : null,
-    };
-  });
+      return {
+        variable: column,
+        valid: values.length,
+        missing: rows.length - values.length,
+        median: roundStat(med),
+        mean: roundStat(valueMean),
+        std_deviation: roundStat(sd),
+        std_error_mean: roundStat(se),
+        variance: roundStat(variance),
+        skewness: roundStat(skewness),
+        std_error_skewness: roundStat(seSkewness),
+        kurtosis: roundStat(kurtosis),
+        std_error_kurtosis: roundStat(seKurtosis),
+        minimum: roundStat(min),
+        maximum: roundStat(max),
+        q1: roundStat(q1),
+        q3: roundStat(q3),
+        iqr:
+          q1 !== null && q3 !== null
+            ? roundStat(q3 - q1)
+            : null,
+        ci95_lower:
+          valueMean !== null && se !== null
+            ? roundStat(valueMean - 1.96 * se)
+            : null,
+        ci95_upper:
+          valueMean !== null && se !== null
+            ? roundStat(valueMean + 1.96 * se)
+            : null,
+      };
+    },
+  );
+
+  return output.length
+    ? output
+    : [
+        {
+          variable: '',
+          valid: 0,
+          missing: rows.length,
+          note:
+            'Nebola nájdená používateľom zadaná, vypočítaná ani jasne pomenovaná škála/subškála.',
+        },
+      ];
 }
 
 function computeSkewness(values: number[]): number | null {
@@ -2565,6 +2602,50 @@ function createJaspFrequencies(headers: string[], rows: DataRow[]): JaspTableRow
   return output.length ? output : [{ variable: '', value: '', count: 0, percent: 0, valid_percent: 0 }];
 }
 
+function createJaspItemDescriptives(
+  headers: string[],
+  rows: DataRow[],
+): JaspTableRow[] {
+  const itemColumns = headers
+    .filter((header) => isItemLevelColumnName(header))
+    .filter((header) => numericValues(rows, header).length > 0)
+    .slice(0, 250);
+
+  const output = itemColumns.map((column) => {
+    const values = numericValues(rows, column);
+    const q1 = quantile(values, 0.25);
+    const q3 = quantile(values, 0.75);
+
+    return {
+      item: column,
+      valid: values.length,
+      missing: rows.length - values.length,
+      mean: roundStat(mean(values)),
+      std_deviation: roundStat(standardDeviation(values)),
+      median: roundStat(median(values)),
+      minimum: values.length ? roundStat(Math.min(...values)) : null,
+      maximum: values.length ? roundStat(Math.max(...values)) : null,
+      q1: roundStat(q1),
+      q3: roundStat(q3),
+      iqr:
+        q1 !== null && q3 !== null
+          ? roundStat(q3 - q1)
+          : null,
+    };
+  });
+
+  return output.length
+    ? output
+    : [
+        {
+          item: '',
+          valid: 0,
+          missing: rows.length,
+          note: 'Neboli rozpoznané explicitne pomenované položkové premenné.',
+        },
+      ];
+}
+
 function cronbachAlpha(rows: DataRow[], columns: string[]): {
   alpha: number | null;
   completeRows: number;
@@ -2616,11 +2697,23 @@ function interpretAlpha(alpha: number | null): string {
   return 'low';
 }
 
-function createJaspReliability(rows: DataRow[], headers: string[], scoringItems: ScoringItem[]): JaspTableRow[] {
+function createJaspReliability(
+  rows: DataRow[],
+  headers: string[],
+  scoringItems: ScoringItem[],
+): JaspTableRow[] {
   const runtime = createManualScoringRuntime(scoringItems, headers);
   const output: JaspTableRow[] = [];
+  const processedItemSets = new Set<string>();
 
   runtime.forEach((item) => {
+    const signature = [...item.matchedColumns]
+      .sort((a, b) => a.localeCompare(b))
+      .join('|');
+
+    if (signature && processedItemSets.has(signature)) return;
+    if (signature) processedItemSets.add(signature);
+
     if (item.matchedColumns.length < 2) {
       output.push({
         scale: item.item.skala,
@@ -2631,12 +2724,16 @@ function createJaspReliability(rows: DataRow[], headers: string[], scoringItems:
         n_complete: 0,
         item_count: item.matchedColumns.length,
         interpretation: 'nevypočítané',
-        note: 'Nenašli sa aspoň 2 položky. Skontrolujte názvy stĺpcov v DATA_CLEAN.',
+        note:
+          item.matchedColumns.length === 1
+            ? 'Ide o existujúcu výslednú škálovú premennú bez dostupných položiek. Cronbachovo alfa sa z jedného stĺpca nedá vypočítať.'
+            : 'Nenašli sa aspoň dve položky. Skontrolujte názvy stĺpcov v DATA_CLEAN.',
       });
       return;
     }
 
     const alpha = cronbachAlpha(rows, item.matchedColumns);
+
     output.push({
       scale: item.item.skala,
       items_requested: item.requestedItems.join(', '),
@@ -2650,7 +2747,22 @@ function createJaspReliability(rows: DataRow[], headers: string[], scoringItems:
     });
   });
 
-  return output.length ? output : [{ scale: '', items_requested: '', items_used: '', items_missing: '', cronbach_alpha: null, n_complete: 0, item_count: 0, interpretation: 'nezadané', note: 'Reliabilita sa počíta iba pre používateľom zadané škály/subškály s minimálne 2 položkami.' }];
+  return output.length
+    ? output
+    : [
+        {
+          scale: '',
+          items_requested: '',
+          items_used: '',
+          items_missing: '',
+          cronbach_alpha: null,
+          n_complete: 0,
+          item_count: 0,
+          interpretation: 'nezadané',
+          note:
+            'Reliabilita sa počíta iba pre škálu/subškálu s minimálne dvoma známymi položkami.',
+        },
+      ];
 }
 
 function normalCdf(x: number): number {
@@ -2788,29 +2900,87 @@ function chiSquarePValue(chiSquare: number, df: number): number | null {
   return 1 - gammaLowerRegularized(df / 2, chiSquare / 2);
 }
 
-function createJaspNormality(headers: string[], rows: DataRow[]): JaspTableRow[] {
-  return getNumericAnalysisColumns(headers, rows).map((column) => {
-    const values = numericValues(rows, column);
-    const skewness = computeSkewness(values);
-    const kurtosis = computeKurtosisExcess(values);
-    const n = values.length;
-    const jb = n > 0 && skewness !== null && kurtosis !== null
+function calculateNormalityScreen(values: number[]): {
+  statistic: number | null;
+  p: number | null;
+  compatible: boolean;
+  skewness: number | null;
+  kurtosis: number | null;
+} {
+  const skewness = computeSkewness(values);
+  const kurtosis = computeKurtosisExcess(values);
+  const n = values.length;
+  const statistic =
+    n >= 4 && skewness !== null && kurtosis !== null
       ? (n / 6) * (skewness ** 2 + (kurtosis ** 2) / 4)
       : null;
-    const p = jb !== null ? chiSquarePValue(jb, 2) : null;
+  const p = statistic !== null
+    ? chiSquarePValue(statistic, 2)
+    : null;
 
-    return {
-      variable: column,
-      test: 'Jarque-Bera normality screen',
-      statistic: roundStat(jb),
-      p: compactPValue(p),
-      normality_flag: p === null ? '' : p >= 0.05 ? 'compatible with normality' : 'deviation from normality',
-      n,
-      skewness: roundStat(skewness),
-      kurtosis: roundStat(kurtosis),
-      note: 'JASP-style normality table. Exact JASP Shapiro-Wilk is not used in this route; this is a server-side approximation for automated screening.',
-    };
+  return {
+    statistic,
+    p,
+    compatible: p !== null && p >= 0.05,
+    skewness,
+    kurtosis,
+  };
+}
+
+function groupsCompatibleWithNormality(
+  groups: Array<{ group: string; values: number[] }>,
+): boolean {
+  if (groups.length < 2) return false;
+
+  return groups.every((group) => {
+    if (group.values.length < 4) return false;
+    const screen = calculateNormalityScreen(group.values);
+    return screen.compatible;
   });
+}
+
+function createJaspNormality(
+  headers: string[],
+  rows: DataRow[],
+  scoringItems: ScoringItem[],
+): JaspTableRow[] {
+  const output = getNumericAnalysisColumns(headers, rows, scoringItems).map(
+    (column) => {
+      const values = numericValues(rows, column);
+      const screen = calculateNormalityScreen(values);
+
+      return {
+        variable: column,
+        test: 'Jarque-Bera normality screen',
+        statistic: roundStat(screen.statistic),
+        p: compactPValue(screen.p),
+        normality_flag: screen.compatible
+          ? 'compatible with normality'
+          : screen.p === null
+            ? 'insufficient data'
+            : 'deviation from normality',
+        n: values.length,
+        skewness: roundStat(screen.skewness),
+        kurtosis: roundStat(screen.kurtosis),
+        note:
+          'Server-side skríning normality. Výsledok sa používa na automatické odporúčanie parametrického alebo neparametrického testu; pri záverečnej akademickej interpretácii ho treba overiť v štatistickom softvéri.',
+      };
+    },
+  );
+
+  return output.length
+    ? output
+    : [
+        {
+          variable: '',
+          test: 'Jarque-Bera normality screen',
+          statistic: null,
+          p: '',
+          normality_flag: 'not available',
+          n: 0,
+          note: 'Nebola nájdená škálová ani subškálová premenná.',
+        },
+      ];
 }
 
 function pearsonCorrelation(x: number[], y: number[]): number | null {
@@ -2839,8 +3009,12 @@ function ranks(values: number[]): number[] {
   return output;
 }
 
-function createJaspCorrelations(headers: string[], rows: DataRow[]): JaspTableRow[] {
-  const columns = getNumericAnalysisColumns(headers, rows).slice(0, 30);
+function createJaspCorrelations(
+  headers: string[],
+  rows: DataRow[],
+  scoringItems: ScoringItem[],
+): JaspTableRow[] {
+  const columns = getNumericAnalysisColumns(headers, rows, scoringItems).slice(0, 30);
   const output: JaspTableRow[] = [];
 
   for (let i = 0; i < columns.length; i += 1) {
@@ -2848,34 +3022,82 @@ function createJaspCorrelations(headers: string[], rows: DataRow[]): JaspTableRo
       const a = columns[i];
       const b = columns[j];
       const pairs = rows
-        .map((row) => [toNumber(row[a]), toNumber(row[b])] as [number | null, number | null])
-        .filter((pair): pair is [number, number] => pair[0] !== null && pair[1] !== null);
+        .map(
+          (row) =>
+            [toNumber(row[a]), toNumber(row[b])] as [
+              number | null,
+              number | null,
+            ],
+        )
+        .filter(
+          (pair): pair is [number, number] =>
+            pair[0] !== null && pair[1] !== null,
+        );
+
       if (pairs.length < 3) continue;
 
       const x = pairs.map((pair) => pair[0]);
       const y = pairs.map((pair) => pair[1]);
       const r = pearsonCorrelation(x, y);
-      const t = r !== null && Math.abs(r) < 1 ? r * Math.sqrt((pairs.length - 2) / (1 - r * r)) : null;
-      const p = t !== null ? 2 * (1 - studentTCdf(Math.abs(t), pairs.length - 2)) : null;
-      const rx = ranks(x);
-      const ry = ranks(y);
-      const rho = pearsonCorrelation(rx, ry);
-      const ts = rho !== null && Math.abs(rho) < 1 ? rho * Math.sqrt((pairs.length - 2) / (1 - rho * rho)) : null;
-      const ps = ts !== null ? 2 * (1 - studentTCdf(Math.abs(ts), pairs.length - 2)) : null;
+      const t =
+        r !== null && Math.abs(r) < 1
+          ? r * Math.sqrt((pairs.length - 2) / (1 - r * r))
+          : null;
+      const p =
+        t !== null
+          ? 2 * (1 - studentTCdf(Math.abs(t), pairs.length - 2))
+          : null;
+      const rho = pearsonCorrelation(ranks(x), ranks(y));
+      const ts =
+        rho !== null && Math.abs(rho) < 1
+          ? rho * Math.sqrt((pairs.length - 2) / (1 - rho * rho))
+          : null;
+      const ps =
+        ts !== null
+          ? 2 * (1 - studentTCdf(Math.abs(ts), pairs.length - 2))
+          : null;
+      const normalA = calculateNormalityScreen(x).compatible;
+      const normalB = calculateNormalityScreen(y).compatible;
+      const recommended = normalA && normalB ? 'Pearson' : 'Spearman';
+      const fisherZ =
+        r !== null && Math.abs(r) < 1
+          ? 0.5 * Math.log((1 + r) / (1 - r))
+          : null;
+      const fisherSe = pairs.length > 3
+        ? 1 / Math.sqrt(pairs.length - 3)
+        : null;
 
       output.push({
         variable_a: a,
         variable_b: b,
         n: pairs.length,
+        recommended_method: recommended,
         pearson_r: roundStat(r),
         pearson_p: compactPValue(p),
         spearman_rho: roundStat(rho),
         spearman_p: compactPValue(ps),
+        fisher_z: roundStat(fisherZ),
+        fisher_z_se: roundStat(fisherSe),
       });
     }
   }
 
-  return output.length ? output : [{ variable_a: '', variable_b: '', n: 0, pearson_r: null, pearson_p: '', spearman_rho: null, spearman_p: '' }];
+  return output.length
+    ? output
+    : [
+        {
+          variable_a: '',
+          variable_b: '',
+          n: 0,
+          recommended_method: '',
+          pearson_r: null,
+          pearson_p: '',
+          spearman_rho: null,
+          spearman_p: '',
+          fisher_z: null,
+          fisher_z_se: null,
+        },
+      ];
 }
 
 function groupedNumericValues(rows: DataRow[], groupColumn: string, numericColumn: string): Array<{ group: string; values: number[] }> {
@@ -2936,22 +3158,47 @@ function oneWayAnova(groups: Array<{ group: string; values: number[] }>): { f: n
   return { f, df1, df2, p, eta2 };
 }
 
-function createJaspParametricTests(headers: string[], rows: DataRow[], questionnaireConfig: QuestionnaireConfig): JaspTableRow[] {
-  const numericColumns = getNumericAnalysisColumns(headers, rows).slice(0, 30);
-  const groupColumns = getGroupingColumns(headers, rows, questionnaireConfig).slice(0, 10);
+function createJaspParametricTests(
+  headers: string[],
+  rows: DataRow[],
+  questionnaireConfig: QuestionnaireConfig,
+  scoringItems: ScoringItem[],
+): JaspTableRow[] {
+  const numericColumns = getNumericAnalysisColumns(
+    headers,
+    rows,
+    scoringItems,
+  ).slice(0, 30);
+  const groupColumns = getGroupingColumns(
+    headers,
+    rows,
+    questionnaireConfig,
+  ).slice(0, 10);
   const output: JaspTableRow[] = [];
 
   groupColumns.forEach((groupColumn) => {
     numericColumns.forEach((numericColumn) => {
       if (groupColumn === numericColumn) return;
-      const groups = groupedNumericValues(rows, groupColumn, numericColumn).filter((group) => group.values.length >= 2);
+
+      const groups = groupedNumericValues(
+        rows,
+        groupColumn,
+        numericColumn,
+      ).filter((group) => group.values.length >= 2);
+
+      if (!groupsCompatibleWithNormality(groups)) return;
+
       if (groups.length === 2) {
         const test = welchTTest(groups[0].values, groups[1].values);
         output.push({
           test: 'Welch independent samples t-test',
           dependent: numericColumn,
           factor: groupColumn,
-          groups: groups.map((group) => `${group.group} (n=${group.values.length})`).join(' | '),
+          selection_reason:
+            'Parametrický test bol vybraný, pretože všetky porovnávané skupiny prešli skríningom normality.',
+          groups: groups
+            .map((group) => `${group.group} (n=${group.values.length})`)
+            .join(' | '),
           statistic: roundStat(test.t),
           df: roundStat(test.df),
           p: compactPValue(test.p),
@@ -2966,7 +3213,11 @@ function createJaspParametricTests(headers: string[], rows: DataRow[], questionn
           test: 'One-way ANOVA',
           dependent: numericColumn,
           factor: groupColumn,
-          groups: groups.map((group) => `${group.group} (n=${group.values.length})`).join(' | '),
+          selection_reason:
+            'Parametrický test bol vybraný, pretože všetky porovnávané skupiny prešli skríningom normality.',
+          groups: groups
+            .map((group) => `${group.group} (n=${group.values.length})`)
+            .join(' | '),
           statistic: roundStat(test.f),
           df: `${test.df1}, ${test.df2}`,
           p: compactPValue(test.p),
@@ -2979,7 +3230,25 @@ function createJaspParametricTests(headers: string[], rows: DataRow[], questionn
     });
   });
 
-  return output.length ? output : [{ test: '', dependent: '', factor: '', groups: '', statistic: null, df: '', p: '', effect: null, effect_name: '', mean_group_1: '', mean_group_2: '' }];
+  return output.length
+    ? output
+    : [
+        {
+          test: '',
+          dependent: '',
+          factor: '',
+          selection_reason:
+            'Nebola nájdená kombinácia škály a skupinovej premennej vhodná pre parametrický test.',
+          groups: '',
+          statistic: null,
+          df: '',
+          p: '',
+          effect: null,
+          effect_name: '',
+          mean_group_1: '',
+          mean_group_2: '',
+        },
+      ];
 }
 
 function mannWhitney(groupA: number[], groupB: number[]): { u: number | null; z: number | null; p: number | null; effect: number | null } {
@@ -3018,22 +3287,47 @@ function kruskalWallis(groups: Array<{ group: string; values: number[] }>): { h:
   return { h, df, p, effect };
 }
 
-function createJaspNonParametricTests(headers: string[], rows: DataRow[], questionnaireConfig: QuestionnaireConfig): JaspTableRow[] {
-  const numericColumns = getNumericAnalysisColumns(headers, rows).slice(0, 30);
-  const groupColumns = getGroupingColumns(headers, rows, questionnaireConfig).slice(0, 10);
+function createJaspNonParametricTests(
+  headers: string[],
+  rows: DataRow[],
+  questionnaireConfig: QuestionnaireConfig,
+  scoringItems: ScoringItem[],
+): JaspTableRow[] {
+  const numericColumns = getNumericAnalysisColumns(
+    headers,
+    rows,
+    scoringItems,
+  ).slice(0, 30);
+  const groupColumns = getGroupingColumns(
+    headers,
+    rows,
+    questionnaireConfig,
+  ).slice(0, 10);
   const output: JaspTableRow[] = [];
 
   groupColumns.forEach((groupColumn) => {
     numericColumns.forEach((numericColumn) => {
       if (groupColumn === numericColumn) return;
-      const groups = groupedNumericValues(rows, groupColumn, numericColumn).filter((group) => group.values.length >= 2);
+
+      const groups = groupedNumericValues(
+        rows,
+        groupColumn,
+        numericColumn,
+      ).filter((group) => group.values.length >= 2);
+
+      if (groups.length < 2 || groupsCompatibleWithNormality(groups)) return;
+
       if (groups.length === 2) {
         const test = mannWhitney(groups[0].values, groups[1].values);
         output.push({
           test: 'Mann-Whitney U',
           dependent: numericColumn,
           factor: groupColumn,
-          groups: groups.map((group) => `${group.group} (n=${group.values.length})`).join(' | '),
+          selection_reason:
+            'Neparametrický test bol vybraný, pretože aspoň jedna skupina neprešla skríningom normality alebo má príliš málo platných hodnôt.',
+          groups: groups
+            .map((group) => `${group.group} (n=${group.values.length})`)
+            .join(' | '),
           statistic: roundStat(test.u),
           z: roundStat(test.z),
           df: '',
@@ -3049,7 +3343,11 @@ function createJaspNonParametricTests(headers: string[], rows: DataRow[], questi
           test: 'Kruskal-Wallis H',
           dependent: numericColumn,
           factor: groupColumn,
-          groups: groups.map((group) => `${group.group} (n=${group.values.length})`).join(' | '),
+          selection_reason:
+            'Neparametrický test bol vybraný, pretože aspoň jedna skupina neprešla skríningom normality alebo má príliš málo platných hodnôt.',
+          groups: groups
+            .map((group) => `${group.group} (n=${group.values.length})`)
+            .join(' | '),
           statistic: roundStat(test.h),
           z: '',
           df: test.df,
@@ -3063,33 +3361,124 @@ function createJaspNonParametricTests(headers: string[], rows: DataRow[], questi
     });
   });
 
-  return output.length ? output : [{ test: '', dependent: '', factor: '', groups: '', statistic: null, z: '', df: '', p: '', effect: null, effect_name: '', median_group_1: '', median_group_2: '' }];
+  return output.length
+    ? output
+    : [
+        {
+          test: '',
+          dependent: '',
+          factor: '',
+          selection_reason:
+            'Nebola nájdená kombinácia škály a skupinovej premennej vhodná pre neparametrický test.',
+          groups: '',
+          statistic: null,
+          z: '',
+          df: '',
+          p: '',
+          effect: null,
+          effect_name: '',
+          median_group_1: '',
+          median_group_2: '',
+        },
+      ];
 }
 
-function createJaspTestSelection(headers: string[], rows: DataRow[], questionnaireConfig: QuestionnaireConfig): JaspTableRow[] {
-  const numericColumns = getNumericAnalysisColumns(headers, rows);
+function createJaspTestSelection(
+  headers: string[],
+  rows: DataRow[],
+  questionnaireConfig: QuestionnaireConfig,
+  scoringItems: ScoringItem[],
+): JaspTableRow[] {
+  const numericColumns = getNumericAnalysisColumns(headers, rows, scoringItems);
   const groupColumns = getGroupingColumns(headers, rows, questionnaireConfig);
   const output: JaspTableRow[] = [];
 
-  numericColumns.forEach((column) => {
-    output.push({ role: 'Dependent / Scale variable', variable: column, measure: getJaspMeasureType(column, rows), valid: numericValues(rows, column).length, note: 'Premenná použitá v deskriptíve, normalite, koreláciách a testoch rozdielov.' });
+  numericColumns.forEach((numericColumn) => {
+    if (groupColumns.length === 0) {
+      output.push({
+        dependent: numericColumn,
+        factor: '',
+        groups: 0,
+        recommended_test: 'Descriptive statistics / correlation only',
+        reason:
+          'Nebola zadaná skupinová premenná. Rozdielový test sa nevykoná.',
+      });
+      return;
+    }
+
+    groupColumns.forEach((groupColumn) => {
+      const groups = groupedNumericValues(rows, groupColumn, numericColumn);
+      const groupCount = groups.length;
+      const parametric = groupsCompatibleWithNormality(groups);
+
+      let recommendedTest = 'Not available';
+
+      if (groupCount === 2) {
+        recommendedTest = parametric
+          ? 'Welch independent samples t-test'
+          : 'Mann-Whitney U';
+      } else if (groupCount >= 3 && groupCount <= 10) {
+        recommendedTest = parametric
+          ? 'One-way ANOVA'
+          : 'Kruskal-Wallis H';
+      }
+
+      output.push({
+        dependent: numericColumn,
+        factor: groupColumn,
+        groups: groupCount,
+        recommended_test: recommendedTest,
+        reason:
+          groupCount < 2
+            ? 'Nie sú dostupné aspoň dve skupiny s minimálne dvoma platnými hodnotami.'
+            : parametric
+              ? 'Všetky skupiny prešli skríningom normality.'
+              : 'Aspoň jedna skupina neprešla skríningom normality alebo má menej ako štyri platné hodnoty.',
+      });
+    });
   });
 
-  groupColumns.forEach((column) => {
-    output.push({ role: 'Factor / Grouping variable', variable: column, measure: getJaspMeasureType(column, rows), valid: nonEmptyValues(rows, column).length, note: `Počet skupín: ${uniqueValues(rows, column).length}.` });
-  });
-
-  return output;
+  return output.length
+    ? output
+    : [
+        {
+          dependent: '',
+          factor: '',
+          groups: 0,
+          recommended_test: 'Not available',
+          reason:
+            'Nebola nájdená používateľom zadaná, vypočítaná ani jasne pomenovaná škála/subškála.',
+        },
+      ];
 }
 
-function createJaspWarnings(headers: string[], rows: DataRow[], questionnaireConfig: QuestionnaireConfig, scoringItems: ScoringItem[]): JaspTableRow[] {
+function createJaspWarnings(
+  headers: string[],
+  rows: DataRow[],
+  questionnaireConfig: QuestionnaireConfig,
+  scoringItems: ScoringItem[],
+): JaspTableRow[] {
   const warnings: string[] = [];
-  const numericColumns = getNumericAnalysisColumns(headers, rows);
+  const numericColumns = getNumericAnalysisColumns(headers, rows, scoringItems);
   const groupColumns = getGroupingColumns(headers, rows, questionnaireConfig);
 
-  if (numericColumns.length === 0) warnings.push('Neboli identifikované číselné premenné vhodné na štatistiku.');
-  if (groupColumns.length === 0) warnings.push('Neboli zadané ani automaticky nájdené skupinové premenné. Parametrické a neparametrické testy rozdielov nebudú dostupné.');
-  if (scoringItems.length === 0) warnings.push('Neboli zadané škály/subškály, preto reliabilita nebude vypočítaná.');
+  if (numericColumns.length === 0) {
+    warnings.push(
+      'Nebola identifikovaná používateľom zadaná, vypočítaná ani jasne pomenovaná škála/subškála. Vek, ID a jednotlivé položky sa zámerne nepoužívajú ako náhradné analytické premenné.',
+    );
+  }
+
+  if (groupColumns.length === 0) {
+    warnings.push(
+      'Nebola zadaná skupinová premenná. Parametrické ani neparametrické testy rozdielov sa nevykonajú.',
+    );
+  }
+
+  if (scoringItems.length === 0) {
+    warnings.push(
+      'Neboli zadané pravidlá škál/subškál. Reliabilita sa vypočíta iba vtedy, keď sú známe aspoň dve položky jednej škály.',
+    );
+  }
 
   const highMissingColumns = headers.filter((column) => {
     const missing = rows.length - nonEmptyValues(rows, column).length;
@@ -3097,12 +3486,26 @@ function createJaspWarnings(headers: string[], rows: DataRow[], questionnaireCon
   });
 
   if (highMissingColumns.length > 0) {
-    warnings.push(`Premenné s viac ako 25 % chýbajúcich hodnôt: ${highMissingColumns.slice(0, 20).join(', ')}.`);
+    warnings.push(
+      `Premenné s viac ako 25 % chýbajúcich hodnôt: ${highMissingColumns
+        .slice(0, 20)
+        .join(', ')}.`,
+    );
   }
 
   return warnings.length
-    ? warnings.map((warning, index) => ({ id: index + 1, warning, severity: 'warning' }))
-    : [{ id: 1, warning: 'Bez zásadných upozornení.', severity: 'ok' }];
+    ? warnings.map((warning, index) => ({
+        id: index + 1,
+        warning,
+        severity: 'warning',
+      }))
+    : [
+        {
+          id: 1,
+          warning: 'Bez zásadných upozornení.',
+          severity: 'ok',
+        },
+      ];
 }
 
 function buildJaspAnalysis(params: {
@@ -3112,8 +3515,16 @@ function buildJaspAnalysis(params: {
   scoringItems: ScoringItem[];
   questionnaireConfig: QuestionnaireConfig;
 }): JaspAnalysisResult {
-  const numericColumns = getNumericAnalysisColumns(params.headers, params.rows);
-  const groupingColumns = getGroupingColumns(params.headers, params.rows, params.questionnaireConfig);
+  const numericColumns = getNumericAnalysisColumns(
+    params.headers,
+    params.rows,
+    params.scoringItems,
+  );
+  const groupingColumns = getGroupingColumns(
+    params.headers,
+    params.rows,
+    params.questionnaireConfig,
+  );
 
   return {
     summary: createJaspSummary({
@@ -3124,16 +3535,61 @@ function buildJaspAnalysis(params: {
       numericColumns,
       groupingColumns,
     }),
-    variables: createJaspVariables(params.headers, params.rows),
-    descriptives: createJaspDescriptives(params.headers, params.rows),
+    variables: createJaspVariables(
+      params.headers,
+      params.rows,
+      numericColumns,
+      groupingColumns,
+    ),
+    descriptives: createJaspDescriptives(
+      params.headers,
+      params.rows,
+      params.scoringItems,
+    ),
     frequencies: createJaspFrequencies(params.headers, params.rows),
-    reliability: createJaspReliability(params.rows, params.headers, params.scoringItems),
-    normality: createJaspNormality(params.headers, params.rows),
-    correlations: createJaspCorrelations(params.headers, params.rows),
-    parametricTests: createJaspParametricTests(params.headers, params.rows, params.questionnaireConfig),
-    nonParametricTests: createJaspNonParametricTests(params.headers, params.rows, params.questionnaireConfig),
-    testSelection: createJaspTestSelection(params.headers, params.rows, params.questionnaireConfig),
-    warnings: createJaspWarnings(params.headers, params.rows, params.questionnaireConfig, params.scoringItems),
+    reliability: createJaspReliability(
+      params.rows,
+      params.headers,
+      params.scoringItems,
+    ),
+    normality: createJaspNormality(
+      params.headers,
+      params.rows,
+      params.scoringItems,
+    ),
+    correlations: createJaspCorrelations(
+      params.headers,
+      params.rows,
+      params.scoringItems,
+    ),
+    parametricTests: createJaspParametricTests(
+      params.headers,
+      params.rows,
+      params.questionnaireConfig,
+      params.scoringItems,
+    ),
+    nonParametricTests: createJaspNonParametricTests(
+      params.headers,
+      params.rows,
+      params.questionnaireConfig,
+      params.scoringItems,
+    ),
+    testSelection: createJaspTestSelection(
+      params.headers,
+      params.rows,
+      params.questionnaireConfig,
+      params.scoringItems,
+    ),
+    itemDescriptives: createJaspItemDescriptives(
+      params.headers,
+      params.rows,
+    ),
+    warnings: createJaspWarnings(
+      params.headers,
+      params.rows,
+      params.questionnaireConfig,
+      params.scoringItems,
+    ),
   };
 }
 
@@ -3147,7 +3603,7 @@ function createReadmeRows(): Array<Record<string, string>> {
     {
       cast: 'DATA_CLEAN',
       popis:
-        'Vyčistené a štandardizované dáta pripravené na štatistickú analýzu.',
+        'Vyčistené a štandardizované dáta vrátane vypočítaných manuálnych škál a subškál.',
     },
     {
       cast: 'VARIABLE_DICTIONARY',
@@ -3157,7 +3613,12 @@ function createReadmeRows(): Array<Record<string, string>> {
     {
       cast: 'SCORING',
       popis:
-        'Popis používateľom zadaných škál a subškál. Formát: Názov škály = položka1, položka2 alebo položka1 až položka10.',
+        'Pravidlá používateľom zadaných škál a subškál. Definícia môže mať tvar Názov = položka1, položka2 alebo môže obsahovať iba názov už existujúceho skórovacieho stĺpca.',
+    },
+    {
+      cast: 'QUESTIONNAIRE_SETUP',
+      popis:
+        'Presný záznam režimu, škál, subškál a skupinových premenných odoslaných z Dashboardu.',
     },
     {
       cast: 'QUALITY_REPORT',
@@ -3167,17 +3628,17 @@ function createReadmeRows(): Array<Record<string, string>> {
     {
       cast: 'JASP_SUMMARY',
       popis:
-        'Prehľad JASP-like analýzy: počet premenných, riadkov, škál, skupinových premenných a číselných premenných.',
+        'Prehľad počtu riadkov, premenných, škál/subškál a skupinových premenných.',
     },
     {
       cast: 'JASP_VARIABLES',
       popis:
-        'JASP-like prehľad premenných s meracou úrovňou Scale / Ordinal / Nominal / Text.',
+        'Prehľad všetkých premenných a ich použitia. Jednotlivé položky sú označené pre samostatný list 22_POLOZKY.',
     },
     {
       cast: 'JASP_DESCRIPTIVES',
       popis:
-        'Deskriptívna štatistika pre všetky vhodné číselné premenné: mean, SD, median, IQR, min, max, šikmosť, špicatosť a CI.',
+        'Deskriptívna štatistika výlučne pre používateľom zadané, vypočítané alebo jasne pomenované škály/subškály. Vek ani jednotlivé položky sa nepoužívajú ako fallback.',
     },
     {
       cast: 'JASP_FREQUENCIES',
@@ -3187,42 +3648,47 @@ function createReadmeRows(): Array<Record<string, string>> {
     {
       cast: 'JASP_RELIABILITY',
       popis:
-        'Reliabilita škál a subškál: Cronbachovo alfa, počet položiek, kompletné riadky a interpretácia.',
+        'Cronbachovo alfa pre škály/subškály, pri ktorých sú známe minimálne dve položky.',
     },
     {
       cast: 'JASP_NORMALITY',
       popis:
-        'Normalitné skríningové tabuľky pre číselné premenné.',
+        'Server-side skríning normality iba pre škály/subškály.',
     },
     {
       cast: 'JASP_CORRELATIONS',
       popis:
-        'Pearsonove a Spearmanove korelácie medzi číselnými premennými.',
+        'Pearsonove a Spearmanove korelácie iba medzi škálami/subškálami vrátane odporúčanej metódy, Fisherovho z a štandardnej chyby z.',
     },
     {
       cast: 'JASP_PARAMETRIC',
       popis:
-        'Parametrické testy rozdielov: Welchov t-test pre 2 skupiny a jednofaktorová ANOVA pre 3 a viac skupín.',
+        'Welchov t-test alebo jednofaktorová ANOVA iba pri skupinách kompatibilných s normalitou.',
     },
     {
       cast: 'JASP_NONPARAMETRIC',
       popis:
-        'Neparametrické testy rozdielov: Mann-Whitney U pre 2 skupiny a Kruskal-Wallis H pre 3 a viac skupín.',
+        'Mann-Whitney U alebo Kruskal-Wallis H pri odchýlke od normality alebo malom počte hodnôt v skupine.',
     },
     {
       cast: 'JASP_TEST_SELECTION',
       popis:
-        'Automatický výber závislých, škálových a skupinových premenných použitých vo výpočtoch.',
+        'Odporúčaný rozdielový test pre každú kombináciu škály/subškály a používateľom zadanej skupinovej premennej.',
+    },
+    {
+      cast: '22_POLOZKY',
+      popis:
+        'Samostatná deskriptíva explicitne pomenovaných položkových premenných. Položky sa nemiešajú do hlavných korelácií ani rozdielových testov.',
     },
     {
       cast: 'JASP_WARNINGS',
       popis:
-        'Upozornenia k dátam, chýbajúcim hodnotám, škálam, skupinám a výpočtom.',
+        'Upozornenia k chýbajúcim škálam, skupinovým premenným, reliabilite a kvalite dát.',
     },
     {
       cast: 'DÔLEŽITÉ',
       popis:
-        'Prepare route už nepracuje s pevnými kartičkami WEMWBS/JSS/SEHS/Resilience ako hlavným workflow. Používateľ zadáva vlastné škály, subškály a skupinové premenné v troch kolónkach pred analýzou.',
+        'Hlavný workflow je manuálny: používateľ zadáva škály, subškály a skupinové premenné v troch kolónkach. Pevné WEMWBS/JSS zostávajú iba ako spätná kompatibilita režimu selected.',
     },
   ];
 }
@@ -3294,6 +3760,8 @@ function buildPreparedWorkbook(params: {
 }): XLSX.WorkBook {
   const workbook = XLSX.utils.book_new();
 
+  // Pomocník musí byť prvým listom pripraveného pracovného zošita.
+  addWorksheetFromJson(workbook, 'README', createReadmeRows());
   addWorksheetFromJson(workbook, 'DATA_RAW', params.rawRows);
   addWorksheetFromJson(workbook, 'DATA_CLEAN', params.cleanRows);
   addWorksheetFromJson(
@@ -3310,16 +3778,52 @@ function buildPreparedWorkbook(params: {
   addWorksheetFromJson(workbook, 'QUALITY_REPORT', params.qualityReport);
   addWorksheetFromJson(workbook, 'JASP_SUMMARY', params.jaspAnalysis.summary);
   addWorksheetFromJson(workbook, 'JASP_VARIABLES', params.jaspAnalysis.variables);
-  addWorksheetFromJson(workbook, 'JASP_DESCRIPTIVES', params.jaspAnalysis.descriptives);
-  addWorksheetFromJson(workbook, 'JASP_FREQUENCIES', params.jaspAnalysis.frequencies);
-  addWorksheetFromJson(workbook, 'JASP_RELIABILITY', params.jaspAnalysis.reliability);
-  addWorksheetFromJson(workbook, 'JASP_NORMALITY', params.jaspAnalysis.normality);
-  addWorksheetFromJson(workbook, 'JASP_CORRELATIONS', params.jaspAnalysis.correlations);
-  addWorksheetFromJson(workbook, 'JASP_PARAMETRIC', params.jaspAnalysis.parametricTests);
-  addWorksheetFromJson(workbook, 'JASP_NONPARAMETRIC', params.jaspAnalysis.nonParametricTests);
-  addWorksheetFromJson(workbook, 'JASP_TEST_SELECTION', params.jaspAnalysis.testSelection);
+  addWorksheetFromJson(
+    workbook,
+    'JASP_DESCRIPTIVES',
+    params.jaspAnalysis.descriptives,
+  );
+  addWorksheetFromJson(
+    workbook,
+    'JASP_FREQUENCIES',
+    params.jaspAnalysis.frequencies,
+  );
+  addWorksheetFromJson(
+    workbook,
+    'JASP_RELIABILITY',
+    params.jaspAnalysis.reliability,
+  );
+  addWorksheetFromJson(
+    workbook,
+    'JASP_NORMALITY',
+    params.jaspAnalysis.normality,
+  );
+  addWorksheetFromJson(
+    workbook,
+    'JASP_CORRELATIONS',
+    params.jaspAnalysis.correlations,
+  );
+  addWorksheetFromJson(
+    workbook,
+    'JASP_PARAMETRIC',
+    params.jaspAnalysis.parametricTests,
+  );
+  addWorksheetFromJson(
+    workbook,
+    'JASP_NONPARAMETRIC',
+    params.jaspAnalysis.nonParametricTests,
+  );
+  addWorksheetFromJson(
+    workbook,
+    'JASP_TEST_SELECTION',
+    params.jaspAnalysis.testSelection,
+  );
   addWorksheetFromJson(workbook, 'JASP_WARNINGS', params.jaspAnalysis.warnings);
-  addWorksheetFromJson(workbook, 'README', createReadmeRows());
+  addWorksheetFromJson(
+    workbook,
+    '22_POLOZKY',
+    params.jaspAnalysis.itemDescriptives,
+  );
 
   return workbook;
 }
@@ -3661,7 +4165,7 @@ export async function POST(
         ok: true,
         code: 'DATA_PREPARED',
         message:
-          'Súbor bol pripravený v JASP-like štruktúre pre ľubovoľnú databázu. Výstup obsahuje DATA_CLEAN aj samostatné hárky pre deskriptívu, frekvencie, reliabilitu, normalitu, korelácie, parametrické a neparametrické testy.',
+          'Súbor bol pripravený v JASP-like štruktúre. Hlavné štatistiky používajú iba zadané, vypočítané alebo jasne pomenované škály/subškály; jednotlivé položky sú oddelené v hárku 22_POLOZKY a rozdielový test sa vyberá podľa skríningu normality.',
         requestId,
         processingMs,
         preparedFileName,
@@ -3671,6 +4175,7 @@ export async function POST(
         columns:
           scoringResult.headers.length,
         sheets: [
+          'README',
           'DATA_RAW',
           'DATA_CLEAN',
           'VARIABLE_DICTIONARY',
@@ -3688,7 +4193,7 @@ export async function POST(
           'JASP_NONPARAMETRIC',
           'JASP_TEST_SELECTION',
           'JASP_WARNINGS',
-          'README',
+          '22_POLOZKY',
         ],
         warnings: finalWarnings,
         qualityReport,

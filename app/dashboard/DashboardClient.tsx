@@ -96,6 +96,14 @@ type DashboardEntitlements = {
 type DashboardPageQuota = {
   ok?: boolean;
   planId: string;
+
+  /**
+   * Administrátorský účet môže mať neobmedzenú stránkovú kvótu.
+   * Tieto hodnoty ovplyvňujú iba počítanie a zobrazovanie strán.
+   */
+  isAdmin: boolean;
+  isUnlimited: boolean;
+
   basePageLimit: number;
   extraPageLimit: number;
   pageLimit: number;
@@ -1988,48 +1996,139 @@ function normalizeDashboardPageQuota(
   value: unknown,
 ): DashboardPageQuota | null {
   const root = isUnknownRecord(value) ? value : null;
-  const data = unwrapApiPayload(value);
+
+  /**
+   * Niektoré API route vracajú kvótu priamo, iné pod pageUsage,
+   * pageQuota, quota alebo usage. Normalizácia podporuje všetky tieto
+   * obálky bez zásahu do ostatných funkcionalít Dashboardu.
+   */
+  const pageQuotaPayload =
+    root && isUnknownRecord(root.pageUsage)
+      ? root.pageUsage
+      : root && isUnknownRecord(root.pageQuota)
+        ? root.pageQuota
+        : root && isUnknownRecord(root.quota)
+          ? root.quota
+          : root && isUnknownRecord(root.usage)
+            ? root.usage
+            : value;
+
+  const data = unwrapApiPayload(pageQuotaPayload);
 
   if (!data) return null;
 
   const planId = readString(data, 'planId', 'plan_id') || 'free';
+
+  const isAdmin = readBoolean(
+    data,
+    false,
+    'isAdmin',
+    'is_admin',
+    'adminAccess',
+    'admin_access',
+  );
+
+  const isUnlimited = readBoolean(
+    data,
+    isAdmin,
+    'isUnlimited',
+    'is_unlimited',
+    'hasUnlimitedAccess',
+    'has_unlimited_access',
+  );
+
   const basePageLimit = Math.max(
     0,
-    readNumber(data, 'basePageLimit', 'base_page_limit') ?? 0,
+    readNumber(
+      data,
+      'basePageLimit',
+      'base_page_limit',
+      'planPageLimit',
+      'plan_page_limit',
+    ) ?? 0,
   );
+
   const extraPageLimit = Math.max(
     0,
-    readNumber(data, 'extraPageLimit', 'extra_page_limit') ?? 0,
+    readNumber(
+      data,
+      'extraPageLimit',
+      'extra_page_limit',
+      'extraPages',
+      'extra_pages',
+    ) ?? 0,
   );
+
+  const calculatedPageLimit = basePageLimit + extraPageLimit;
+
   const pageLimit = Math.max(
     0,
-    readNumber(data, 'pageLimit', 'page_limit') ??
-      basePageLimit + extraPageLimit,
+    readNumber(
+      data,
+      'pageLimit',
+      'page_limit',
+      'totalPageLimit',
+      'total_page_limit',
+      'totalPages',
+      'total_pages',
+    ) ?? calculatedPageLimit,
   );
+
   const pagesUsed = Math.max(
     0,
-    readNumber(data, 'pagesUsed', 'pages_used') ?? 0,
+    readNumber(
+      data,
+      'pagesUsed',
+      'pages_used',
+      'usedPages',
+      'used_pages',
+    ) ?? 0,
   );
-  const pagesRemaining = Math.max(
-    0,
-    readNumber(data, 'pagesRemaining', 'pages_remaining') ??
-      pageLimit - pagesUsed,
+
+  const calculatedPagesRemaining = Math.max(pageLimit - pagesUsed, 0);
+
+  const pagesRemainingFromApi = readNumber(
+    data,
+    'pagesRemaining',
+    'pages_remaining',
+    'remainingPages',
+    'remaining_pages',
   );
+
+  /**
+   * Pri limitovanom účte databázová hodnota nesmie zvýšiť reálny
+   * vypočítaný zostatok. Pri neobmedzenom účte sa číselná hodnota iba
+   * zachováva kvôli kompatibilite; UI zobrazuje text „Neobmedzené“.
+   */
+  const pagesRemaining = isUnlimited
+    ? Math.max(0, pagesRemainingFromApi ?? calculatedPagesRemaining)
+    : Math.min(
+        Math.max(0, pagesRemainingFromApi ?? calculatedPagesRemaining),
+        calculatedPagesRemaining,
+      );
+
+  const pageLimitReached =
+    !isUnlimited &&
+    readBoolean(
+      data,
+      pageLimit > 0 && pagesRemaining <= 0,
+      'pageLimitReached',
+      'page_limit_reached',
+      'limitReached',
+      'limit_reached',
+    );
 
   return {
     ok: readBoolean(root ?? data, true, 'ok', 'success'),
     planId,
+    isAdmin,
+    isUnlimited,
     basePageLimit,
     extraPageLimit,
     pageLimit,
     pagesUsed,
     pagesRemaining,
-    pageLimitReached: readBoolean(
-      data,
-      pageLimit > 0 && pagesRemaining <= 0,
-      'pageLimitReached',
-      'page_limit_reached',
-    ),
+    pageLimitReached,
   };
 }
 
@@ -3396,7 +3495,8 @@ const loadBillingState = useCallback(async () => {
 
       if (
         current.code === 'PAGE_LIMIT_REACHED' &&
-        !normalizedPageQuota.pageLimitReached
+        (normalizedPageQuota.isUnlimited ||
+          !normalizedPageQuota.pageLimitReached)
       ) {
         return null;
       }
@@ -3669,7 +3769,7 @@ const generationBlocked =
   !pageQuota ||
   !activeModuleAllowed ||
   entitlements.promptLimitReached ||
-  pageQuota.pageLimitReached;
+  (!pageQuota.isUnlimited && pageQuota.pageLimitReached);
 
 const activeModuleLabel = fixedUi.label;
 
@@ -4661,7 +4761,10 @@ const runModule = async () => {
     return;
   }
 
-  if (currentPageQuota.pageLimitReached) {
+  if (
+    !currentPageQuota.isUnlimited &&
+    currentPageQuota.pageLimitReached
+  ) {
     setBillingNotice({
       code: 'PAGE_LIMIT_REACHED',
       message:
@@ -5204,7 +5307,13 @@ const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
       const data = await response.json();
 
       mergeEntitlementsFromResponse(data?.entitlements);
-      mergePageQuotaFromResponse(data?.pageUsage);
+      mergePageQuotaFromResponse(
+        data?.pageUsage ??
+          data?.pageQuota ??
+          data?.quota ??
+          data?.usage ??
+          data,
+      );
 
       if (data?.ok === false) {
         throw new Error(
@@ -5372,7 +5481,13 @@ const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
       const data = await response.json();
 
       mergeEntitlementsFromResponse(data?.entitlements);
-      mergePageQuotaFromResponse(data?.pageUsage);
+      mergePageQuotaFromResponse(
+        data?.pageUsage ??
+          data?.pageQuota ??
+          data?.quota ??
+          data?.usage ??
+          data,
+      );
 
       fullText =
         data.output ||
@@ -6686,7 +6801,9 @@ const downloadExcel = () => {
         <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
           <p className="text-xs font-bold text-slate-400">Strany</p>
           <p className="mt-1 font-black text-white">
-            {pageQuota.pagesRemaining} zostáva z {pageQuota.pageLimit}
+            {pageQuota.isUnlimited
+              ? 'Neobmedzené'
+              : `${pageQuota.pagesRemaining} zostáva z ${pageQuota.pageLimit}`}
           </p>
           {pageQuota.extraPageLimit > 0 ? (
             <p className="mt-1 text-xs font-bold text-emerald-300">
@@ -6827,7 +6944,11 @@ const downloadExcel = () => {
                       billingLoading ||
                       !activeModuleAllowed ||
                       Boolean(entitlements?.promptLimitReached) ||
-                      Boolean(pageQuota?.pageLimitReached) ||
+                      Boolean(
+                        pageQuota &&
+                          !pageQuota.isUnlimited &&
+                          pageQuota.pageLimitReached,
+                      ) ||
                       attachedFiles.length >= effectiveAttachmentLimit
                     }
                   />

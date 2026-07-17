@@ -66,9 +66,25 @@ type ConsumePagesSuccessResponse = {
   requestId: string;
 
   /**
-   * Počet strán odpočítaný touto požiadavkou.
+   * Počet strán vypočítaný zo zaslaného textu.
+   *
+   * Pri administrátorovi sa hodnota vypočíta iba informatívne,
+   * ale zo stránkovej kvóty sa neodpočíta.
+   */
+  calculatedPages: number;
+
+  /**
+   * Počet strán skutočne odpočítaný z používateľskej kvóty.
+   *
+   * Pre administrátora je vždy 0.
    */
   consumedPages: number;
+
+  /**
+   * true znamená, že spotreba bola preskočená, pretože používateľ
+   * má administrátorský alebo iný neobmedzený prístup.
+   */
+  usageBypassed: boolean;
 } & PageQuota;
 
 type ConsumePagesErrorCode =
@@ -438,6 +454,12 @@ function resolveRequestId(
  *
  * Odpočíta strany podľa skutočnej dĺžky vygenerovaného výstupu.
  *
+ * Administrátorský alebo iný neobmedzený účet:
+ * - text sa vyhodnotí a vypočíta sa calculatedPages,
+ * - databázová spotreba sa preskočí v lib/page-quota.ts,
+ * - consumedPages je 0,
+ * - usageBypassed je true.
+ *
  * Očakávané telo:
  *
  * {
@@ -595,7 +617,7 @@ export async function POST(
   const { requestId } =
     requestIdResult;
 
-  const consumedPages =
+  const calculatedPages =
     countGeneratedPages(text);
 
   try {
@@ -606,11 +628,27 @@ export async function POST(
         requestId,
       });
 
+    /**
+     * Administrátorovi ani inému neobmedzenému účtu sa stránky
+     * neodpočítavajú. Výpočet calculatedPages zostáva vo výstupe
+     * iba ako informatívny údaj pre diagnostiku a frontend.
+     */
+    const usageBypassed =
+      quota.isAdmin ||
+      quota.isUnlimited;
+
+    const consumedPages =
+      usageBypassed
+        ? 0
+        : calculatedPages;
+
     return createJsonResponse<ConsumePagesSuccessResponse>(
       {
         ok: true,
         requestId,
+        calculatedPages,
         consumedPages,
+        usageBypassed,
         ...quota,
       },
       200,
@@ -677,7 +715,7 @@ export async function POST(
           requestId,
           module,
           requestedPages:
-            consumedPages,
+            calculatedPages,
           message:
             technicalMessage,
         },
@@ -757,7 +795,7 @@ export async function POST(
           requestId,
           module,
           requestedPages:
-            consumedPages,
+            calculatedPages,
           message:
             technicalMessage,
           error,
@@ -790,7 +828,7 @@ export async function POST(
         requestId,
         module,
         requestedPages:
-          consumedPages,
+          calculatedPages,
         message:
           technicalMessage,
         error,

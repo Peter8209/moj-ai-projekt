@@ -5,6 +5,12 @@
  * - Stripe Price ID sa NEUKLADAJÚ priamo do zdrojového kódu.
  * - V katalógu je uložený iba názov environment premennej.
  * - Skutočná hodnota price_... sa načíta výhradne na serveri cez process.env.
+ * - Platené hlavné balíky sú mesačné predplatné.
+ * - Doplnky zostávajú samostatné platby, pretože predstavujú jednorazové
+ *   rozšírenie aktuálneho projektu alebo balíka.
+ * - Administrátorský prístup sa nesmie určovať podľa e-mailu vo frontende.
+ *   Hodnota isAdmin musí pochádzať zo servera/databázy a následne sa odovzdá
+ *   pomocným funkciám v tomto katalógu.
  */
 
 // =====================================================
@@ -47,10 +53,23 @@ export type FeatureKey =
   | 'defense-presentation'
   | 'committee-questions';
 
+export type FeatureModuleId =
+  | 'ai-supervisor'
+  | 'quality-audit'
+  | 'humanizer'
+  | 'citations'
+  | 'planning'
+  | 'emails'
+  | 'translation'
+  | 'originality'
+  | 'data-analysis'
+  | 'defense';
+
 export type PurchasableCatalogId = Exclude<PlanId, 'free'> | AddonId;
 
 export type CatalogItemKind = 'plan' | 'addon';
-export type CheckoutMode = 'payment';
+export type CheckoutMode = 'payment' | 'subscription';
+export type BillingInterval = 'month';
 export type CurrencyCode = 'EUR';
 
 export type StripePriceEnvironmentKey =
@@ -80,6 +99,7 @@ export type PlanDefinition = {
   features: readonly FeatureKey[];
   purchasable: boolean;
   checkoutMode: CheckoutMode | null;
+  billingInterval: BillingInterval | null;
   stripePriceEnvKey: StripePriceEnvironmentKey | null;
   sortOrder: number;
 };
@@ -96,15 +116,42 @@ export type AddonDefinition = {
   features: readonly FeatureKey[];
   purchasable: true;
   checkoutMode: CheckoutMode;
+  billingInterval: BillingInterval | null;
   stripePriceEnvKey: StripePriceEnvironmentKey;
   sortOrder: number;
 };
 
 export type CatalogDefinition = PlanDefinition | AddonDefinition;
 
+export type EntitlementAccessOptions = {
+  /**
+   * Musí byť určené na serveri podľa databázového oprávnenia používateľa.
+   * Nikdy nenastavujte túto hodnotu iba podľa e-mailu vo frontende.
+   */
+  isAdmin?: boolean;
+};
+
+export type EffectiveEntitlementLimits = {
+  isAdmin: boolean;
+  isUnlimited: boolean;
+  pageLimit: number | null;
+  promptLimit: number | null;
+  attachmentLimit: number | null;
+};
+
+export type FeatureModuleDefinition = {
+  id: FeatureModuleId;
+  label: string;
+  unavailableMessage: string;
+};
+
 // =====================================================
 // ZOZNAMY FUNKCIÍ
 // =====================================================
+
+const FREE_FEATURES = [
+  'ai-supervisor',
+] as const satisfies readonly FeatureKey[];
 
 const CORE_WRITING_FEATURES = [
   'ai-supervisor',
@@ -115,6 +162,8 @@ const CORE_WRITING_FEATURES = [
   'citations',
   'planning',
   'emails',
+  'translation',
+  'originality',
 ] as const satisfies readonly FeatureKey[];
 
 const BACHELOR_DATA_FEATURES = [
@@ -143,6 +192,31 @@ const DEFENSE_FEATURES = [
   'committee-questions',
 ] as const satisfies readonly FeatureKey[];
 
+const ALL_FEATURES = [
+  'ai-supervisor',
+  'chapter-generation',
+  'outline-generation',
+  'quality-audit',
+  'humanizer',
+  'citations',
+  'planning',
+  'emails',
+  'translation',
+  'originality',
+  'data-prepare',
+  'data-descriptive',
+  'data-questionnaires',
+  'data-reliability',
+  'data-normality',
+  'data-correlations',
+  'data-parametric-tests',
+  'data-nonparametric-tests',
+  'data-charts',
+  'defense',
+  'defense-presentation',
+  'committee-questions',
+] as const satisfies readonly FeatureKey[];
+
 // =====================================================
 // BALÍKY
 // =====================================================
@@ -154,15 +228,16 @@ export const PLANS = {
     name: 'FREE',
     shortName: 'FREE',
     description:
-      'Bezplatná verzia na základné vyskúšanie AI školiteľa s obmedzeným počtom promptov, strán a príloh.',
+      'Bezplatná verzia na základné vyskúšanie AI školiteľa s limitom 3 promptov, 3 normostrán a 1 prílohy.',
     priceCents: 0,
     currency: 'EUR',
     pageLimit: 3,
     promptLimit: 3,
     attachmentLimit: 1,
-    features: ['ai-supervisor'],
+    features: [...FREE_FEATURES],
     purchasable: false,
     checkoutMode: null,
+    billingInterval: null,
     stripePriceEnvKey: null,
     sortOrder: 0,
   },
@@ -173,7 +248,7 @@ export const PLANS = {
     name: 'Seminárna práca',
     shortName: 'Seminárna práca',
     description:
-      'Balík pre seminárne, ročníkové a zápočtové práce do 15 normostrán.',
+      'Mesačné predplatné pre seminárne, ročníkové a zápočtové práce do 15 normostrán.',
     priceCents: 3900,
     currency: 'EUR',
     pageLimit: 15,
@@ -181,7 +256,8 @@ export const PLANS = {
     attachmentLimit: 12,
     features: [...CORE_WRITING_FEATURES],
     purchasable: true,
-    checkoutMode: 'payment',
+    checkoutMode: 'subscription',
+    billingInterval: 'month',
     stripePriceEnvKey: 'STRIPE_PRICE_SEMINAR_WORK',
     sortOrder: 10,
   },
@@ -192,7 +268,7 @@ export const PLANS = {
     name: 'Bakalárska práca',
     shortName: 'Bakalárska práca',
     description:
-      'Kompletný balík pre bakalársku prácu do 50 normostrán vrátane základnej analýzy dát a prípravy na obhajobu.',
+      'Mesačné predplatné pre bakalársku prácu do 50 normostrán vrátane základnej analýzy dát a prípravy na obhajobu.',
     priceCents: 14900,
     currency: 'EUR',
     pageLimit: 50,
@@ -204,7 +280,8 @@ export const PLANS = {
       ...DEFENSE_FEATURES,
     ],
     purchasable: true,
-    checkoutMode: 'payment',
+    checkoutMode: 'subscription',
+    billingInterval: 'month',
     stripePriceEnvKey: 'STRIPE_PRICE_BACHELOR_THESIS',
     sortOrder: 20,
   },
@@ -215,7 +292,7 @@ export const PLANS = {
     name: 'Diplomová / magisterská práca',
     shortName: 'Diplomová práca',
     description:
-      'Najkomplexnejší balík pre diplomové a magisterské práce do 70 normostrán vrátane kompletnej analýzy dát a obhajoby.',
+      'Mesačné predplatné pre diplomové a magisterské práce do 70 normostrán vrátane kompletnej analýzy dát a obhajoby.',
     priceCents: 18900,
     currency: 'EUR',
     pageLimit: 70,
@@ -227,7 +304,8 @@ export const PLANS = {
       ...DEFENSE_FEATURES,
     ],
     purchasable: true,
-    checkoutMode: 'payment',
+    checkoutMode: 'subscription',
+    billingInterval: 'month',
     stripePriceEnvKey: 'STRIPE_PRICE_MASTER_THESIS',
     sortOrder: 30,
   },
@@ -244,13 +322,14 @@ export const ADDONS = {
     name: 'Analýza dát',
     shortName: 'Analýza dát',
     description:
-      'Kompletné spracovanie štatistickej časti vrátane čistenia dát, deskriptívnej štatistiky, dotazníkov, reliability, normality, korelácií, testov a grafov.',
+      'Kompletné spracovanie štatistickej časti vrátane čistenia dát, deskriptívnej štatistiky, tvorby škál, subškál, reliability, normality, korelácií, testov a grafov.',
     priceCents: 8900,
     currency: 'EUR',
     extraPages: 0,
     features: [...COMPLETE_DATA_FEATURES],
     purchasable: true,
     checkoutMode: 'payment',
+    billingInterval: null,
     stripePriceEnvKey: 'STRIPE_PRICE_DATA_ANALYSIS',
     sortOrder: 100,
   },
@@ -268,6 +347,7 @@ export const ADDONS = {
     features: [],
     purchasable: true,
     checkoutMode: 'payment',
+    billingInterval: null,
     stripePriceEnvKey: 'STRIPE_PRICE_EXTRA_20',
     sortOrder: 110,
   },
@@ -285,6 +365,7 @@ export const ADDONS = {
     features: [],
     purchasable: true,
     checkoutMode: 'payment',
+    billingInterval: null,
     stripePriceEnvKey: 'STRIPE_PRICE_EXTRA_40',
     sortOrder: 120,
   },
@@ -302,6 +383,7 @@ export const ADDONS = {
     features: [],
     purchasable: true,
     checkoutMode: 'payment',
+    billingInterval: null,
     stripePriceEnvKey: 'STRIPE_PRICE_EXTRA_60',
     sortOrder: 130,
   },
@@ -324,7 +406,7 @@ export const FEATURE_LABELS = {
   originality: 'Kontrola originality textu',
   'data-prepare': 'Príprava a čistenie dát',
   'data-descriptive': 'Deskriptívna štatistika',
-  'data-questionnaires': 'Dotazníky, škály a subškály',
+  'data-questionnaires': 'Tvorba škál, subškál a grafy',
   'data-reliability': 'Reliabilita a Cronbachovo alfa',
   'data-normality': 'Testovanie normality',
   'data-correlations': 'Korelačná analýza',
@@ -335,6 +417,94 @@ export const FEATURE_LABELS = {
   'defense-presentation': 'Prezentácia k obhajobe',
   'committee-questions': 'Otázky komisie a návrhy odpovedí',
 } as const satisfies Record<FeatureKey, string>;
+
+export const FEATURE_MODULES = {
+  'ai-supervisor': {
+    id: 'ai-supervisor',
+    label: 'AI školiteľ',
+    unavailableMessage:
+      'AI školiteľ nie je súčasťou aktuálneho balíka.',
+  },
+  'quality-audit': {
+    id: 'quality-audit',
+    label: 'Audit kvality',
+    unavailableMessage:
+      'Audit kvality nie je súčasťou aktuálneho balíka.',
+  },
+  humanizer: {
+    id: 'humanizer',
+    label: 'Humanizácia textu',
+    unavailableMessage:
+      'Humanizácia textu nie je súčasťou aktuálneho balíka.',
+  },
+  citations: {
+    id: 'citations',
+    label: 'Zdroje a citácie',
+    unavailableMessage:
+      'Zdroje a citácie nie sú súčasťou aktuálneho balíka.',
+  },
+  planning: {
+    id: 'planning',
+    label: 'Plánovanie',
+    unavailableMessage:
+      'Plánovanie nie je súčasťou aktuálneho balíka.',
+  },
+  emails: {
+    id: 'emails',
+    label: 'Emaily',
+    unavailableMessage:
+      'Emaily nie sú súčasťou aktuálneho balíka.',
+  },
+  translation: {
+    id: 'translation',
+    label: 'Preklad',
+    unavailableMessage:
+      'Preklad nie je súčasťou aktuálneho balíka.',
+  },
+  originality: {
+    id: 'originality',
+    label: 'Kontrola originality',
+    unavailableMessage:
+      'Kontrola originality nie je súčasťou aktuálneho balíka.',
+  },
+  'data-analysis': {
+    id: 'data-analysis',
+    label: 'Analýza dát',
+    unavailableMessage:
+      'Analýza dát nie je súčasťou aktuálneho balíka.',
+  },
+  defense: {
+    id: 'defense',
+    label: 'Obhajoba',
+    unavailableMessage:
+      'Obhajoba nie je súčasťou aktuálneho balíka.',
+  },
+} as const satisfies Record<FeatureModuleId, FeatureModuleDefinition>;
+
+export const FEATURE_TO_MODULE = {
+  'ai-supervisor': 'ai-supervisor',
+  'chapter-generation': 'ai-supervisor',
+  'outline-generation': 'ai-supervisor',
+  'quality-audit': 'quality-audit',
+  humanizer: 'humanizer',
+  citations: 'citations',
+  planning: 'planning',
+  emails: 'emails',
+  translation: 'translation',
+  originality: 'originality',
+  'data-prepare': 'data-analysis',
+  'data-descriptive': 'data-analysis',
+  'data-questionnaires': 'data-analysis',
+  'data-reliability': 'data-analysis',
+  'data-normality': 'data-analysis',
+  'data-correlations': 'data-analysis',
+  'data-parametric-tests': 'data-analysis',
+  'data-nonparametric-tests': 'data-analysis',
+  'data-charts': 'data-analysis',
+  defense: 'defense',
+  'defense-presentation': 'defense',
+  'committee-questions': 'defense',
+} as const satisfies Record<FeatureKey, FeatureModuleId>;
 
 // =====================================================
 // ZOZNAMY ID
@@ -390,6 +560,15 @@ export function isFeatureKey(value: unknown): value is FeatureKey {
   );
 }
 
+export function isFeatureModuleId(
+  value: unknown,
+): value is FeatureModuleId {
+  return (
+    typeof value === 'string' &&
+    hasOwnKey(FEATURE_MODULES, value)
+  );
+}
+
 export function isPurchasableCatalogId(
   value: unknown,
 ): value is PurchasableCatalogId {
@@ -435,8 +614,34 @@ export function getFeatureLabel(feature: FeatureKey): string {
   return FEATURE_LABELS[feature];
 }
 
+export function getFeatureModuleId(
+  feature: FeatureKey,
+): FeatureModuleId {
+  return FEATURE_TO_MODULE[feature];
+}
+
+export function getFeatureModuleDefinition(
+  feature: FeatureKey,
+): FeatureModuleDefinition {
+  const moduleId = getFeatureModuleId(feature);
+
+  return FEATURE_MODULES[moduleId];
+}
+
+export function getFeatureModuleLabel(
+  feature: FeatureKey,
+): string {
+  return getFeatureModuleDefinition(feature).label;
+}
+
+export function getFeatureNotIncludedMessage(
+  feature: FeatureKey,
+): string {
+  return getFeatureModuleDefinition(feature).unavailableMessage;
+}
+
 // =====================================================
-// CENY
+// CENY A FAKTURÁCIA
 // =====================================================
 
 export function formatPriceCents(
@@ -465,6 +670,38 @@ export function getCatalogPriceLabel(
   );
 }
 
+/**
+ * Použite na pricing stránke, aby sa pri platených balíkoch zobrazovalo
+ * napríklad „39 € / mesiac“ a nie text o jednorazovej platbe.
+ */
+export function getCatalogBillingPriceLabel(
+  itemId: PlanId | AddonId,
+  locale = 'sk-SK',
+): string {
+  const item = getCatalogDefinition(itemId);
+  const priceLabel = getCatalogPriceLabel(itemId, locale);
+
+  if (item.checkoutMode === 'subscription') {
+    return `${priceLabel} / mesiac`;
+  }
+
+  return priceLabel;
+}
+
+export function isSubscriptionCatalogItem(
+  itemId: PlanId | AddonId,
+): boolean {
+  return (
+    getCatalogDefinition(itemId).checkoutMode === 'subscription'
+  );
+}
+
+export function isOneTimeCatalogItem(
+  itemId: PlanId | AddonId,
+): boolean {
+  return getCatalogDefinition(itemId).checkoutMode === 'payment';
+}
+
 // =====================================================
 // STRIPE
 // =====================================================
@@ -480,6 +717,11 @@ export function getStripePriceEnvironmentKey(
 /**
  * Funkciu volajte iba na serveri, napríklad v:
  * app/api/payments/checkout/route.ts
+ *
+ * Upozornenie:
+ * - Price ID pre seminar-work, bachelor-thesis a master-thesis musí byť
+ *   v Stripe vytvorené ako recurring monthly price.
+ * - Price ID pre doplnky môže zostať jednorazové.
  */
 export function getStripePriceId(
   itemId: PurchasableCatalogId,
@@ -550,10 +792,52 @@ export function getTotalPageLimit(
   );
 }
 
+/**
+ * Vráti efektívne limity používateľa.
+ *
+ * Pri administrátorovi sú všetky hodnoty null, čo znamená neobmedzený
+ * prístup. Samotné odpočítavanie promptov, strán a príloh však musí túto
+ * hodnotu rešpektovať aj v serverových API routach.
+ */
+export function getEffectiveEntitlementLimits(
+  planId: PlanId,
+  addonIds: readonly AddonId[] = [],
+  options: EntitlementAccessOptions = {},
+): EffectiveEntitlementLimits {
+  const isAdmin = options.isAdmin === true;
+
+  if (isAdmin) {
+    return {
+      isAdmin: true,
+      isUnlimited: true,
+      pageLimit: null,
+      promptLimit: null,
+      attachmentLimit: null,
+    };
+  }
+
+  return {
+    isAdmin: false,
+    isUnlimited: false,
+    pageLimit: getTotalPageLimit(planId, addonIds),
+    promptLimit: PLANS[planId].promptLimit,
+    attachmentLimit: PLANS[planId].attachmentLimit,
+  };
+}
+
+export function getAllFeatures(): Set<FeatureKey> {
+  return new Set<FeatureKey>(ALL_FEATURES);
+}
+
 export function getFeaturesForEntitlements(
   planId: PlanId,
   addonIds: readonly AddonId[] = [],
+  options: EntitlementAccessOptions = {},
 ): Set<FeatureKey> {
+  if (options.isAdmin === true) {
+    return getAllFeatures();
+  }
+
   const features = new Set<FeatureKey>(
     PLANS[planId].features,
   );
@@ -589,7 +873,12 @@ export function entitlementsIncludeFeature(
   planId: PlanId,
   addonIds: readonly AddonId[],
   feature: FeatureKey,
+  options: EntitlementAccessOptions = {},
 ): boolean {
+  if (options.isAdmin === true) {
+    return true;
+  }
+
   if (planIncludesFeature(planId, feature)) {
     return true;
   }

@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import type { LucideIcon } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -24,7 +24,7 @@ import {
   UserCircle,
   WalletCards,
   XCircle,
-} from 'lucide-react';
+} from "lucide-react";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -48,6 +48,8 @@ type ClientProfile = {
   pagesUsed: number | null;
   pagesRemaining: number | null;
   pageLimitReached: boolean;
+  isAdmin: boolean;
+  hasUnlimitedAccess: boolean;
   maxProjects: number | null;
   projectsCount: number | null;
   activeServices: string[];
@@ -79,6 +81,10 @@ type EntitlementsSnapshot = {
   promptsRemaining: number | null;
   promptLimitReached: boolean;
   attachmentLimit: number | null;
+  isAdmin: boolean;
+  hasUnlimitedAccess: boolean;
+  hasDatabaseRecord: boolean;
+  billingStatus: string;
   activatedAt: string;
   validUntil: string;
   updatedAt: string;
@@ -91,45 +97,51 @@ type EntitlementsLoadResult = {
   error: string;
 };
 
-type LoadState = 'idle' | 'loading' | 'success' | 'error';
-type CancelState = 'idle' | 'loading' | 'success' | 'error';
+type LoadState = "idle" | "loading" | "success" | "error";
+type CancelState = "idle" | "loading" | "success" | "error";
 
-const PROFILE_ENDPOINTS = ['/api/profile/me', '/api/profile', '/api/profile/get'];
-const PAGE_USAGE_ENDPOINT = '/api/usage/pages';
-const ENTITLEMENTS_ENDPOINT = '/api/entitlements/me';
+const PROFILE_ENDPOINTS = [
+  "/api/profile/me",
+  "/api/profile",
+  "/api/profile/get",
+];
+const PAGE_USAGE_ENDPOINT = "/api/usage/pages";
+const ENTITLEMENTS_ENDPOINT = "/api/entitlements/me";
 
 const FEATURE_LABELS: Record<string, string> = {
-  'ai-supervisor': 'AI školiteľ',
-  'chapter-generation': 'Tvorba kapitol',
-  'outline-generation': 'Návrh štruktúry a osnovy',
-  'quality-audit': 'Kontrola kvality',
-  humanizer: 'Humanizácia textu',
-  citations: 'Citácie a zdroje',
-  planning: 'Plánovanie práce',
-  emails: 'Príprava e-mailov',
-  translation: 'Preklad',
-  originality: 'Kontrola originality',
-  'data-prepare': 'Príprava a čistenie dát',
-  'data-descriptive': 'Deskriptívna štatistika',
-  'data-questionnaires': 'Spracovanie dotazníkov',
-  'data-reliability': 'Reliabilita škál',
-  'data-normality': 'Testovanie normality',
-  'data-correlations': 'Korelačné analýzy',
-  'data-parametric-tests': 'Parametrické testy',
-  'data-nonparametric-tests': 'Neparametrické testy',
-  'data-charts': 'Grafy a tabuľky',
-  defense: 'Príprava na obhajobu',
-  'defense-presentation': 'Prezentácia na obhajobu',
-  'committee-questions': 'Otázky komisie',
+  "ai-supervisor": "AI školiteľ",
+  "chapter-generation": "Tvorba kapitol",
+  "outline-generation": "Návrh štruktúry a osnovy",
+  "quality-audit": "Audit kvality",
+  humanizer: "Humanizácia textu",
+  citations: "Citácie a zdroje",
+  planning: "Plánovanie práce",
+  emails: "Príprava e-mailov",
+  translation: "Preklad",
+  originality: "Kontrola originality",
+  "data-prepare": "Príprava a čistenie dát",
+  "data-descriptive": "Deskriptívna štatistika",
+  "data-questionnaires": "Tvorba škál, subškál a grafy",
+  "data-reliability": "Reliabilita škál",
+  "data-normality": "Testovanie normality",
+  "data-correlations": "Korelačné analýzy",
+  "data-parametric-tests": "Parametrické testy",
+  "data-nonparametric-tests": "Neparametrické testy",
+  "data-charts": "Grafy a tabuľky",
+  defense: "Príprava na obhajobu",
+  "defense-presentation": "Prezentácia na obhajobu",
+  "committee-questions": "Otázky komisie",
 };
 
+const ALL_FEATURE_KEYS = Object.freeze(Object.keys(FEATURE_LABELS));
+
 const CANCEL_SUBSCRIPTION_ENDPOINTS = [
-  '/api/subscription/cancel',
-  '/api/billing/cancel-subscription',
-  '/api/stripe/cancel-subscription',
+  "/api/subscription/cancel",
+  "/api/billing/cancel-subscription",
+  "/api/stripe/cancel-subscription",
 ];
 
-function cleanText(value: unknown, fallback = '') {
+function cleanText(value: unknown, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
   const text = String(value).trim();
@@ -140,7 +152,7 @@ function cleanText(value: unknown, fallback = '') {
 function asNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
 
-  if (typeof value === 'number') {
+  if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
   }
 
@@ -148,27 +160,27 @@ function asNumber(value: unknown): number | null {
 
   if (!normalized) return null;
 
-  const parsed = Number(normalized.replace(',', '.'));
+  const parsed = Number(normalized.replace(",", "."));
 
   return Number.isFinite(parsed) ? parsed : null;
 }
 
 function asBoolean(value: unknown, fallback = false): boolean {
-  if (typeof value === 'boolean') return value;
+  if (typeof value === "boolean") return value;
 
-  if (typeof value === 'number') {
+  if (typeof value === "number") {
     return value !== 0;
   }
 
-  const normalized = String(value ?? '')
+  const normalized = String(value ?? "")
     .trim()
     .toLowerCase();
 
-  if (['true', '1', 'yes', 'áno', 'ano'].includes(normalized)) {
+  if (["true", "1", "yes", "áno", "ano"].includes(normalized)) {
     return true;
   }
 
-  if (['false', '0', 'no', 'nie', ''].includes(normalized)) {
+  if (["false", "0", "no", "nie", ""].includes(normalized)) {
     return false;
   }
 
@@ -182,9 +194,9 @@ function asArray(value: unknown): string[] {
     return value.map((item) => cleanText(item)).filter(Boolean);
   }
 
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     return value
-      .split(',')
+      .split(",")
       .map((item) => item.trim())
       .filter(Boolean);
   }
@@ -193,7 +205,7 @@ function asArray(value: unknown): string[] {
 }
 
 function isRecord(value: unknown): value is JsonRecord {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function pickRecord(data: unknown): JsonRecord {
@@ -209,37 +221,40 @@ function pickRecord(data: unknown): JsonRecord {
 }
 
 function readFromLocalStorage(): Partial<ClientProfile> {
-  if (typeof window === 'undefined') return {};
+  if (typeof window === "undefined") return {};
 
   return {
     name:
-      localStorage.getItem('zedpera_user_name') ||
-      localStorage.getItem('user_name') ||
-      '',
+      localStorage.getItem("zedpera_user_name") ||
+      localStorage.getItem("user_name") ||
+      "",
     email:
-      localStorage.getItem('zedpera_user_email') ||
-      localStorage.getItem('user_email') ||
-      '',
+      localStorage.getItem("zedpera_user_email") ||
+      localStorage.getItem("user_email") ||
+      "",
     role:
-      localStorage.getItem('zedpera_user_role') ||
-      localStorage.getItem('user_role') ||
-      '',
+      localStorage.getItem("zedpera_user_role") ||
+      localStorage.getItem("user_role") ||
+      "",
     plan:
-      localStorage.getItem('zedpera_user_plan') ||
-      localStorage.getItem('zedpera_selected_plan') ||
-      '',
+      localStorage.getItem("zedpera_user_plan") ||
+      localStorage.getItem("zedpera_selected_plan") ||
+      "",
     selectedPlan:
-      localStorage.getItem('zedpera_selected_plan') ||
-      localStorage.getItem('zedpera_user_plan') ||
-      '',
+      localStorage.getItem("zedpera_selected_plan") ||
+      localStorage.getItem("zedpera_user_plan") ||
+      "",
     language:
-      localStorage.getItem('zedpera_language') ||
-      localStorage.getItem('language') ||
-      'sk',
+      localStorage.getItem("zedpera_language") ||
+      localStorage.getItem("language") ||
+      "sk",
   };
 }
 
-function normalizeClientProfile(profileData: unknown, source: string): ClientProfile {
+function normalizeClientProfile(
+  profileData: unknown,
+  source: string,
+): ClientProfile {
   const data = pickRecord(profileData);
   const local = readFromLocalStorage();
 
@@ -250,7 +265,7 @@ function normalizeClientProfile(profileData: unknown, source: string): ClientPro
     cleanText(data.packageName) ||
     cleanText(data.selectedPlan) ||
     cleanText(local.plan) ||
-    'free';
+    "free";
 
   const selectedPlan =
     cleanText(data.selectedPlan) ||
@@ -298,38 +313,38 @@ function normalizeClientProfile(profileData: unknown, source: string): ClientPro
       cleanText(data.id) ||
       cleanText(data.profile_id) ||
       cleanText(data.uuid) ||
-      'nezistené',
+      "nezistené",
     userId:
       cleanText(data.userId) ||
       cleanText(data.user_id) ||
       cleanText(data.owner_id) ||
-      'nezistené',
+      "nezistené",
     name:
       cleanText(data.name) ||
       cleanText(data.fullName) ||
       cleanText(data.full_name) ||
       cleanText(data.displayName) ||
       cleanText(local.name) ||
-      'Klient Zedpera',
+      "Klient Zedpera",
     email:
       cleanText(data.email) ||
       cleanText(data.userEmail) ||
       cleanText(data.user_email) ||
       cleanText(local.email) ||
-      'nezistené',
+      "nezistené",
     role:
       cleanText(data.role) ||
       cleanText(data.userRole) ||
       cleanText(data.user_role) ||
       cleanText(local.role) ||
-      'klient',
+      "klient",
     plan,
     selectedPlan,
     accountStatus:
       cleanText(data.accountStatus) ||
       cleanText(data.status) ||
       cleanText(data.account_status) ||
-      'aktívny',
+      "aktívny",
     packageName:
       cleanText(data.packageName) ||
       cleanText(data.package_name) ||
@@ -350,9 +365,7 @@ function normalizeClientProfile(profileData: unknown, source: string): ClientPro
       asNumber(data.total_pages) ??
       null,
     basePageLimit:
-      asNumber(data.basePageLimit) ??
-      asNumber(data.base_page_limit) ??
-      null,
+      asNumber(data.basePageLimit) ?? asNumber(data.base_page_limit) ?? null,
     extraPageLimit:
       asNumber(data.extraPageLimit) ??
       asNumber(data.extra_page_limit) ??
@@ -371,12 +384,17 @@ function normalizeClientProfile(profileData: unknown, source: string): ClientPro
       asNumber(data.remainingPages) ??
       asNumber(data.remaining_pages) ??
       null,
-    pageLimitReached:
-      asBoolean(
-        data.pageLimitReached ??
-        data.page_limit_reached ??
+    pageLimitReached: asBoolean(
+      data.pageLimitReached ?? data.page_limit_reached ?? false,
+    ),
+    isAdmin: asBoolean(data.isAdmin ?? data.is_admin ?? false),
+    hasUnlimitedAccess: asBoolean(
+      data.hasUnlimitedAccess ??
+        data.has_unlimited_access ??
+        data.isUnlimited ??
+        data.is_unlimited ??
         false,
-      ),
+    ),
     maxProjects:
       asNumber(data.maxProjects) ??
       asNumber(data.projectLimit) ??
@@ -393,56 +411,56 @@ function normalizeClientProfile(profileData: unknown, source: string): ClientPro
       cleanText(data.subscriptionStatus) ||
       cleanText(data.subscription_status) ||
       cleanText(data.billingStatus) ||
-      'nezistené',
+      "nezistené",
     subscriptionStartedAt:
       cleanText(data.subscriptionStartedAt) ||
       cleanText(data.subscription_started_at) ||
       cleanText(data.planStartedAt) ||
-      '',
+      "",
     subscriptionEndsAt:
       cleanText(data.subscriptionEndsAt) ||
       cleanText(data.subscription_ends_at) ||
       cleanText(data.planEndsAt) ||
       cleanText(data.validUntil) ||
-      '',
-    createdAt: cleanText(data.createdAt) || cleanText(data.created_at) || '',
-    updatedAt: cleanText(data.updatedAt) || cleanText(data.updated_at) || '',
+      "",
+    createdAt: cleanText(data.createdAt) || cleanText(data.created_at) || "",
+    updatedAt: cleanText(data.updatedAt) || cleanText(data.updated_at) || "",
     lastLoginAt:
-      cleanText(data.lastLoginAt) || cleanText(data.last_login_at) || '',
+      cleanText(data.lastLoginAt) || cleanText(data.last_login_at) || "",
     language:
       cleanText(data.language) ||
       cleanText(data.locale) ||
       cleanText(local.language) ||
-      'sk',
+      "sk",
     source,
     raw: data,
   };
 }
 
 function formatDate(value: string) {
-  if (!value) return 'Nezadané';
+  if (!value) return "Nezadané";
 
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) return value;
 
-  return date.toLocaleString('sk-SK', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+  return date.toLocaleString("sk-SK", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
 function formatValue(value: unknown) {
-  if (value === null || value === undefined || value === '') return 'Nezadané';
+  if (value === null || value === undefined || value === "") return "Nezadané";
 
   if (Array.isArray(value)) {
-    return value.length ? value.join(', ') : 'Nezadané';
+    return value.length ? value.join(", ") : "Nezadané";
   }
 
-  if (typeof value === 'object') {
+  if (typeof value === "object") {
     try {
       return JSON.stringify(value, null, 2);
     } catch {
@@ -456,54 +474,54 @@ function formatValue(value: unknown) {
 function labelPlan(plan: string) {
   const value = plan.toLowerCase();
 
-  if (value.includes('seminar')) return 'Seminárna práca';
-  if (value.includes('bachelor')) return 'Bakalárska práca';
-  if (value.includes('master') || value.includes('diplom')) {
-    return 'Diplomová / magisterská práca';
+  if (value.includes("seminar")) return "Seminárna práca";
+  if (value.includes("bachelor")) return "Bakalárska práca";
+  if (value.includes("master") || value.includes("diplom")) {
+    return "Diplomová / magisterská práca";
   }
-  if (value.includes('elite')) return 'Elite Academic';
-  if (value.includes('student')) return 'Študent Plus';
-  if (value.includes('thesis')) return 'Pro Thesis';
-  if (value.includes('admin')) return 'Administrátorský prístup';
-  if (value.includes('premium')) return 'Premium balíček';
-  if (value.includes('pro')) return 'Pro balíček';
-  if (value.includes('basic')) return 'Start Basic';
-  if (value.includes('free')) return 'Free balíček';
+  if (value.includes("elite")) return "Elite Academic";
+  if (value.includes("student")) return "Študent Plus";
+  if (value.includes("thesis")) return "Pro Thesis";
+  if (value.includes("admin")) return "Administrátorský prístup";
+  if (value.includes("premium")) return "Premium balíček";
+  if (value.includes("pro")) return "Pro balíček";
+  if (value.includes("basic")) return "Start Basic";
+  if (value.includes("free")) return "Free balíček";
 
-  return plan || 'Nezadaný balíček';
+  return plan || "Nezadaný balíček";
 }
 
 function normalizeSubscriptionStatus(status: string) {
   const value = status.toLowerCase();
 
   if (
-    value.includes('cancel') ||
-    value.includes('zruš') ||
-    value.includes('inactive') ||
-    value.includes('neaktív')
+    value.includes("cancel") ||
+    value.includes("zruš") ||
+    value.includes("inactive") ||
+    value.includes("neaktív")
   ) {
-    return 'zrušené';
+    return "zrušené";
   }
 
   if (
-    value.includes('active') ||
-    value.includes('aktív') ||
-    value.includes('trial') ||
-    value.includes('skúšob')
+    value.includes("active") ||
+    value.includes("aktív") ||
+    value.includes("trial") ||
+    value.includes("skúšob")
   ) {
-    return 'aktívne';
+    return "aktívne";
   }
 
-  return value || 'nezistené';
+  return value || "nezistené";
 }
 
 function humanizeIdentifier(value: string) {
   const cleaned = cleanText(value)
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 
-  if (!cleaned) return '';
+  if (!cleaned) return "";
 
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
 }
@@ -513,41 +531,37 @@ function labelFeature(feature: string) {
 }
 
 function formatCurrencyFromCents(value: number | null) {
-  if (value === null) return 'Nezadané';
-  if (value <= 0) return 'Bezplatný';
+  if (value === null) return "Nezadané";
+  if (value <= 0) return "Bezplatný";
 
-  return `${new Intl.NumberFormat('sk-SK', {
-    style: 'currency',
-    currency: 'EUR',
+  return `${new Intl.NumberFormat("sk-SK", {
+    style: "currency",
+    currency: "EUR",
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(value / 100)} / mesiac`;
 }
 
-function formatLimit(value: number | null, unit = '') {
-  if (value === null) return 'Neobmedzené';
+function formatLimit(value: number | null, unit = "") {
+  if (value === null) return "Neobmedzené";
 
-  return `${value}${unit ? ` ${unit}` : ''}`;
+  return `${value}${unit ? ` ${unit}` : ""}`;
 }
 
 function getApiErrorMessage(data: unknown, fallback: string) {
   if (!isRecord(data)) return fallback;
 
-  const directMessage =
-    cleanText(data.message) ||
-    cleanText(data.detail);
+  const directMessage = cleanText(data.message) || cleanText(data.detail);
 
   if (directMessage) return directMessage;
 
-  if (typeof data.error === 'string') {
+  if (typeof data.error === "string") {
     return cleanText(data.error, fallback);
   }
 
   if (isRecord(data.error)) {
     return (
-      cleanText(data.error.message) ||
-      cleanText(data.error.detail) ||
-      fallback
+      cleanText(data.error.message) || cleanText(data.error.detail) || fallback
     );
   }
 
@@ -570,71 +584,98 @@ function normalizeEntitlements(
 ): EntitlementsSnapshot {
   const data = pickEntitlementsRecord(payload);
 
-  const planId =
-    cleanText(data.planId) ||
-    cleanText(data.plan_id) ||
-    'free';
+  const isAdmin = asBoolean(
+    data.isAdmin ??
+      data.is_admin ??
+      data.adminAccess ??
+      data.admin_access ??
+      false,
+  );
 
-  const featureKeys = Array.from(
+  const hasUnlimitedAccess = asBoolean(
+    data.hasUnlimitedAccess ??
+      data.has_unlimited_access ??
+      data.isUnlimited ??
+      data.is_unlimited ??
+      data.unlimitedAccess ??
+      data.unlimited_access ??
+      isAdmin,
+    isAdmin,
+  );
+
+  const effectiveUnlimitedAccess = isAdmin || hasUnlimitedAccess;
+
+  const storedPlanId =
+    cleanText(data.planId) || cleanText(data.plan_id) || "free";
+
+  const planId = isAdmin ? "admin" : storedPlanId;
+
+  const rawFeatureKeys = Array.from(
     new Set([
       ...asArray(data.features),
       ...asArray(data.featureList),
       ...asArray(data.feature_list),
+      ...asArray(data.featureKeys),
+      ...asArray(data.feature_keys),
     ]),
   );
 
+  const featureKeys = effectiveUnlimitedAccess
+    ? Array.from(new Set([...ALL_FEATURE_KEYS, ...rawFeatureKeys]))
+    : rawFeatureKeys;
+
   const addonIds = Array.from(
-    new Set([
-      ...asArray(data.addonIds),
-      ...asArray(data.addon_ids),
-    ]),
+    new Set([...asArray(data.addonIds), ...asArray(data.addon_ids)]),
   );
 
   const addonNames = Array.from(
-    new Set([
-      ...asArray(data.addonNames),
-      ...asArray(data.addon_names),
-    ]),
+    new Set([...asArray(data.addonNames), ...asArray(data.addon_names)]),
   );
 
-  const promptLimit =
-    asNumber(data.promptLimit) ??
-    asNumber(data.prompt_limit);
+  const rawPromptLimit =
+    asNumber(data.promptLimit) ?? asNumber(data.prompt_limit);
 
-  const promptsUsed =
-    asNumber(data.promptsUsed) ??
-    asNumber(data.prompts_used) ??
-    0;
+  const promptsUsed = effectiveUnlimitedAccess
+    ? 0
+    : (asNumber(data.promptsUsed) ?? asNumber(data.prompts_used) ?? 0);
 
-  const promptsRemaining =
-    asNumber(data.promptsRemaining) ??
-    asNumber(data.prompts_remaining) ??
-    (
-      promptLimit !== null
-        ? Math.max(promptLimit - promptsUsed, 0)
-        : null
-    );
+  const promptLimit = effectiveUnlimitedAccess ? null : rawPromptLimit;
+
+  const promptsRemaining = effectiveUnlimitedAccess
+    ? null
+    : (asNumber(data.promptsRemaining) ??
+      asNumber(data.prompts_remaining) ??
+      (promptLimit !== null ? Math.max(promptLimit - promptsUsed, 0) : null));
 
   const normalizedAddonNames = addonNames.length
     ? addonNames
     : addonIds.map(humanizeIdentifier).filter(Boolean);
 
+  const billingStatus =
+    cleanText(data.billingStatus) ||
+    cleanText(data.billing_status) ||
+    cleanText(data.subscriptionStatus) ||
+    cleanText(data.subscription_status) ||
+    (isAdmin ? "admin" : "nezistené");
+
   return {
-    userId:
-      cleanText(data.userId) ||
-      cleanText(data.user_id),
+    userId: cleanText(data.userId) || cleanText(data.user_id),
     email: cleanText(data.email),
     planId,
-    planName:
-      cleanText(data.planName) ||
-      cleanText(data.plan_name) ||
-      labelPlan(planId),
-    planPriceCents:
-      asNumber(data.planPriceCents) ??
-      asNumber(data.plan_price_cents),
-    planPageLimit:
-      asNumber(data.pageLimit) ??
-      asNumber(data.page_limit),
+    planName: isAdmin
+      ? "Administrátorský prístup"
+      : cleanText(data.planName) ||
+        cleanText(data.plan_name) ||
+        labelPlan(storedPlanId),
+    planPriceCents: isAdmin
+      ? 0
+      : (asNumber(data.planPriceCents) ?? asNumber(data.plan_price_cents)),
+    planPageLimit: effectiveUnlimitedAccess
+      ? null
+      : (asNumber(data.pageLimit) ??
+        asNumber(data.page_limit) ??
+        asNumber(data.basePageLimit) ??
+        asNumber(data.base_page_limit)),
     addonIds,
     addonNames: normalizedAddonNames,
     featureKeys,
@@ -642,26 +683,26 @@ function normalizeEntitlements(
     promptLimit,
     promptsUsed,
     promptsRemaining,
-    promptLimitReached: asBoolean(
-      data.promptLimitReached ??
-        data.prompt_limit_reached ??
-        (
-          promptLimit !== null &&
-          promptsUsed >= promptLimit
+    promptLimitReached: effectiveUnlimitedAccess
+      ? false
+      : asBoolean(
+          data.promptLimitReached ??
+            data.prompt_limit_reached ??
+            (promptLimit !== null && promptsUsed >= promptLimit),
         ),
+    attachmentLimit: effectiveUnlimitedAccess
+      ? null
+      : (asNumber(data.attachmentLimit) ?? asNumber(data.attachment_limit)),
+    isAdmin,
+    hasUnlimitedAccess: effectiveUnlimitedAccess,
+    hasDatabaseRecord: asBoolean(
+      data.hasDatabaseRecord ?? data.has_database_record ?? true,
+      true,
     ),
-    attachmentLimit:
-      asNumber(data.attachmentLimit) ??
-      asNumber(data.attachment_limit),
-    activatedAt:
-      cleanText(data.activatedAt) ||
-      cleanText(data.activated_at),
-    validUntil:
-      cleanText(data.validUntil) ||
-      cleanText(data.valid_until),
-    updatedAt:
-      cleanText(data.updatedAt) ||
-      cleanText(data.updated_at),
+    billingStatus,
+    activatedAt: cleanText(data.activatedAt) || cleanText(data.activated_at),
+    validUntil: cleanText(data.validUntil) || cleanText(data.valid_until),
+    updatedAt: cleanText(data.updatedAt) || cleanText(data.updated_at),
     source,
     raw: data,
   };
@@ -683,27 +724,30 @@ function getProfilePlanPriceCents(profile: ClientProfile) {
     asNumber(profile.raw.package_price) ??
     asNumber(profile.raw.price);
 
-  return priceInEuros !== null
-    ? Math.round(priceInEuros * 100)
-    : null;
+  return priceInEuros !== null ? Math.round(priceInEuros * 100) : null;
 }
 
 function getPackageStatus(
   profile: ClientProfile,
   entitlements: EntitlementsSnapshot | null,
 ) {
+  if (
+    entitlements?.isAdmin ||
+    entitlements?.hasUnlimitedAccess ||
+    profile.isAdmin ||
+    profile.hasUnlimitedAccess
+  ) {
+    return "Administrátorský prístup – neobmedzený";
+  }
+
   const subscriptionStatus = normalizeSubscriptionStatus(
-    profile.subscriptionStatus,
+    entitlements?.billingStatus || profile.subscriptionStatus,
   );
 
-  const validUntil =
-    entitlements?.validUntil ||
-    profile.subscriptionEndsAt;
+  const validUntil = entitlements?.validUntil || profile.subscriptionEndsAt;
 
-  if (subscriptionStatus === 'zrušené') {
-    return validUntil
-      ? 'Zrušené – prístup do konca platnosti'
-      : 'Zrušené';
+  if (subscriptionStatus === "zrušené") {
+    return validUntil ? "Zrušené – prístup do konca platnosti" : "Zrušené";
   }
 
   if (validUntil) {
@@ -713,53 +757,55 @@ function getPackageStatus(
       !Number.isNaN(expirationDate.getTime()) &&
       expirationDate.getTime() < Date.now()
     ) {
-      return 'Platnosť skončila';
+      return "Platnosť skončila";
     }
   }
 
-  const plan = `${entitlements?.planId || ''} ${profile.plan} ${profile.selectedPlan}`.toLowerCase();
+  const plan =
+    `${entitlements?.planId || ""} ${profile.plan} ${profile.selectedPlan}`.toLowerCase();
 
-  if (plan.includes('free')) {
-    return 'Aktívny bezplatný balík';
+  if (plan.includes("free")) {
+    return "Aktívny bezplatný balík";
   }
 
   if (
-    profile.accountStatus.toLowerCase().includes('blok') ||
-    profile.accountStatus.toLowerCase().includes('suspend')
+    profile.accountStatus.toLowerCase().includes("blok") ||
+    profile.accountStatus.toLowerCase().includes("suspend")
   ) {
-    return 'Pozastavený';
+    return "Pozastavený";
   }
 
-  return 'Aktívny';
+  return "Aktívny";
 }
-
 function getPackageStatusClasses(status: string) {
   const normalized = status.toLowerCase();
 
-  if (
-    normalized.includes('skončila') ||
-    normalized.includes('zrušené')
-  ) {
-    return 'border-red-300/25 bg-red-500/10 text-red-100';
+  if (normalized.includes("administrátorský")) {
+    return "border-violet-300/35 bg-violet-500/15 text-violet-50";
+  }
+
+  if (normalized.includes("skončila") || normalized.includes("zrušené")) {
+    return "border-red-300/25 bg-red-500/10 text-red-100";
   }
 
   if (
-    normalized.includes('pozastavený') ||
-    normalized.includes('konca platnosti')
+    normalized.includes("pozastavený") ||
+    normalized.includes("konca platnosti")
   ) {
-    return 'border-amber-300/25 bg-amber-500/10 text-amber-100';
+    return "border-amber-300/25 bg-amber-500/10 text-amber-100";
   }
 
-  if (normalized.includes('aktívny')) {
-    return 'border-emerald-300/25 bg-emerald-500/10 text-emerald-100';
+  if (normalized.includes("aktívny")) {
+    return "border-emerald-300/25 bg-emerald-500/10 text-emerald-100";
   }
 
-  return 'border-slate-300/20 bg-slate-500/10 text-slate-200';
+  return "border-slate-300/20 bg-slate-500/10 text-slate-200";
 }
-
 function getPromptUsagePercent(entitlements: EntitlementsSnapshot | null) {
   if (
     !entitlements ||
+    entitlements.hasUnlimitedAccess ||
+    entitlements.isAdmin ||
     entitlements.promptLimit === null ||
     entitlements.promptLimit <= 0
   ) {
@@ -767,27 +813,41 @@ function getPromptUsagePercent(entitlements: EntitlementsSnapshot | null) {
   }
 
   return Math.min(
-    Math.round(
-      (entitlements.promptsUsed / entitlements.promptLimit) * 100,
-    ),
+    Math.round((entitlements.promptsUsed / entitlements.promptLimit) * 100),
     100,
   );
 }
-
-function canCancelSubscription(profile: ClientProfile | null) {
+function canCancelSubscription(
+  profile: ClientProfile | null,
+  entitlements: EntitlementsSnapshot | null,
+) {
   if (!profile) return false;
 
-  const status = normalizeSubscriptionStatus(profile.subscriptionStatus);
-  const plan = `${profile.plan} ${profile.selectedPlan} ${profile.packageName}`.toLowerCase();
+  if (
+    profile.isAdmin ||
+    profile.hasUnlimitedAccess ||
+    entitlements?.isAdmin ||
+    entitlements?.hasUnlimitedAccess
+  ) {
+    return false;
+  }
 
-  if (status === 'zrušené') return false;
-  if (plan.includes('free')) return false;
+  const status = normalizeSubscriptionStatus(
+    entitlements?.billingStatus || profile.subscriptionStatus,
+  );
+
+  const plan =
+    `${entitlements?.planId || ""} ${profile.plan} ${profile.selectedPlan} ${profile.packageName}`.toLowerCase();
+
+  if (status === "zrušené") return false;
+  if (plan.includes("free")) return false;
 
   return true;
 }
-
 function getUsagePercent(profile: ClientProfile) {
   if (
+    profile.hasUnlimitedAccess ||
+    profile.isAdmin ||
     profile.credits === null ||
     profile.usedCredits === null ||
     profile.credits <= 0
@@ -795,11 +855,15 @@ function getUsagePercent(profile: ClientProfile) {
     return null;
   }
 
-  return Math.min(Math.round((profile.usedCredits / profile.credits) * 100), 100);
+  return Math.min(
+    Math.round((profile.usedCredits / profile.credits) * 100),
+    100,
+  );
 }
-
 function getPageUsagePercent(profile: ClientProfile) {
   if (
+    profile.hasUnlimitedAccess ||
+    profile.isAdmin ||
     profile.pageLimit === null ||
     profile.pagesUsed === null ||
     profile.pageLimit <= 0
@@ -812,7 +876,6 @@ function getPageUsagePercent(profile: ClientProfile) {
     100,
   );
 }
-
 function pickPageUsageRecord(data: unknown): JsonRecord {
   if (!isRecord(data)) return {};
 
@@ -829,6 +892,43 @@ function mergePageUsage(
   usageData: unknown,
 ): ClientProfile {
   const usage = pickPageUsageRecord(usageData);
+
+  const usageIsAdmin = asBoolean(
+    usage.isAdmin ??
+      usage.is_admin ??
+      usage.adminAccess ??
+      usage.admin_access ??
+      profile.isAdmin,
+    profile.isAdmin,
+  );
+
+  const usageHasUnlimitedAccess = asBoolean(
+    usage.hasUnlimitedAccess ??
+      usage.has_unlimited_access ??
+      usage.isUnlimited ??
+      usage.is_unlimited ??
+      usage.unlimitedAccess ??
+      usage.unlimited_access ??
+      profile.hasUnlimitedAccess ??
+      usageIsAdmin,
+    profile.hasUnlimitedAccess || usageIsAdmin,
+  );
+
+  const effectiveUnlimitedAccess = usageIsAdmin || usageHasUnlimitedAccess;
+
+  if (effectiveUnlimitedAccess) {
+    return {
+      ...profile,
+      isAdmin: usageIsAdmin || profile.isAdmin,
+      hasUnlimitedAccess: true,
+      basePageLimit: null,
+      extraPageLimit: null,
+      pageLimit: null,
+      pagesUsed: null,
+      pagesRemaining: null,
+      pageLimitReached: false,
+    };
+  }
 
   const basePageLimit =
     asNumber(usage.basePageLimit) ??
@@ -847,11 +947,9 @@ function mergePageUsage(
     asNumber(usage.page_limit) ??
     asNumber(usage.totalPages) ??
     asNumber(usage.total_pages) ??
-    (
-      basePageLimit !== null || extraPageLimit !== null
-        ? (basePageLimit ?? 0) + (extraPageLimit ?? 0)
-        : profile.pageLimit
-    );
+    (basePageLimit !== null || extraPageLimit !== null
+      ? (basePageLimit ?? 0) + (extraPageLimit ?? 0)
+      : profile.pageLimit);
 
   const pagesUsed =
     asNumber(usage.pagesUsed) ??
@@ -865,11 +963,9 @@ function mergePageUsage(
     asNumber(usage.pages_remaining) ??
     asNumber(usage.remainingPages) ??
     asNumber(usage.remaining_pages) ??
-    (
-      pageLimit !== null && pagesUsed !== null
-        ? Math.max(pageLimit - pagesUsed, 0)
-        : profile.pagesRemaining
-    );
+    (pageLimit !== null && pagesUsed !== null
+      ? Math.max(pageLimit - pagesUsed, 0)
+      : profile.pagesRemaining);
 
   const explicitLimitReached = asBoolean(
     usage.pageLimitReached ??
@@ -881,6 +977,8 @@ function mergePageUsage(
 
   return {
     ...profile,
+    isAdmin: usageIsAdmin || profile.isAdmin,
+    hasUnlimitedAccess: false,
     basePageLimit,
     extraPageLimit,
     pageLimit,
@@ -888,25 +986,20 @@ function mergePageUsage(
     pagesRemaining,
     pageLimitReached:
       explicitLimitReached ||
-      (
-        pageLimit !== null &&
+      (pageLimit !== null &&
         pageLimit > 0 &&
         pagesRemaining !== null &&
-        pagesRemaining <= 0
-      ),
+        pagesRemaining <= 0),
   };
 }
-
-async function loadPageUsage(
-  profile: ClientProfile,
-): Promise<ClientProfile> {
+async function loadPageUsage(profile: ClientProfile): Promise<ClientProfile> {
   try {
     const response = await fetch(PAGE_USAGE_ENDPOINT, {
-      method: 'GET',
-      cache: 'no-store',
-      credentials: 'include',
+      method: "GET",
+      cache: "no-store",
+      credentials: "include",
       headers: {
-        Accept: 'application/json',
+        Accept: "application/json",
       },
     });
 
@@ -926,15 +1019,12 @@ async function loadPageUsage(
       // Nedostupný odpočet strán nesmie zablokovať celý osobný profil.
       // Chyba sa spracuje ako očakávaný stav bez console.error,
       // aby Next.js v režime vývoja nezobrazil chybový overlay.
-      if (process.env.NODE_ENV === 'development') {
-        console.info('PAGE_USAGE_UNAVAILABLE', {
+      if (process.env.NODE_ENV === "development") {
+        console.info("PAGE_USAGE_UNAVAILABLE", {
           status: response.status,
           statusText: response.statusText,
           endpoint: PAGE_USAGE_ENDPOINT,
-          response:
-            isRecord(data)
-              ? data
-              : responseText.slice(0, 500),
+          response: isRecord(data) ? data : responseText.slice(0, 500),
         });
       }
 
@@ -942,8 +1032,8 @@ async function loadPageUsage(
     }
 
     if (!data || !isRecord(data)) {
-      if (process.env.NODE_ENV === 'development') {
-        console.info('PAGE_USAGE_EMPTY_RESPONSE', {
+      if (process.env.NODE_ENV === "development") {
+        console.info("PAGE_USAGE_EMPTY_RESPONSE", {
           status: response.status,
           endpoint: PAGE_USAGE_ENDPOINT,
         });
@@ -955,13 +1045,10 @@ async function loadPageUsage(
     return mergePageUsage(profile, data);
   } catch (error) {
     // Profil zostane funkčný aj pri dočasnom výpadku API.
-    if (process.env.NODE_ENV === 'development') {
-      console.info('PAGE_USAGE_REQUEST_SKIPPED', {
+    if (process.env.NODE_ENV === "development") {
+      console.info("PAGE_USAGE_REQUEST_SKIPPED", {
         endpoint: PAGE_USAGE_ENDPOINT,
-        message:
-          error instanceof Error
-            ? error.message
-            : String(error),
+        message: error instanceof Error ? error.message : String(error),
       });
     }
 
@@ -972,11 +1059,11 @@ async function loadPageUsage(
 async function loadEntitlementsSnapshot(): Promise<EntitlementsLoadResult> {
   try {
     const response = await fetch(ENTITLEMENTS_ENDPOINT, {
-      method: 'GET',
-      cache: 'no-store',
-      credentials: 'include',
+      method: "GET",
+      cache: "no-store",
+      credentials: "include",
       headers: {
-        Accept: 'application/json',
+        Accept: "application/json",
       },
     });
 
@@ -996,7 +1083,7 @@ async function loadEntitlementsSnapshot(): Promise<EntitlementsLoadResult> {
         entitlements: null,
         error: getApiErrorMessage(
           data,
-          'Údaje o balíku a oprávneniach sa nepodarilo načítať.',
+          "Údaje o balíku a oprávneniach sa nepodarilo načítať.",
         ),
       };
     }
@@ -1004,16 +1091,13 @@ async function loadEntitlementsSnapshot(): Promise<EntitlementsLoadResult> {
     if (!data || !isRecord(data)) {
       return {
         entitlements: null,
-        error: 'API balíka vrátilo prázdnu alebo neplatnú odpoveď.',
+        error: "API balíka vrátilo prázdnu alebo neplatnú odpoveď.",
       };
     }
 
     return {
-      entitlements: normalizeEntitlements(
-        data,
-        ENTITLEMENTS_ENDPOINT,
-      ),
-      error: '',
+      entitlements: normalizeEntitlements(data, ENTITLEMENTS_ENDPOINT),
+      error: "",
     };
   } catch (error) {
     return {
@@ -1021,7 +1105,7 @@ async function loadEntitlementsSnapshot(): Promise<EntitlementsLoadResult> {
       error:
         error instanceof Error
           ? error.message
-          : 'Údaje o balíku a oprávneniach sa nepodarilo načítať.',
+          : "Údaje o balíku a oprávneniach sa nepodarilo načítať.",
     };
   }
 }
@@ -1030,70 +1114,85 @@ function mergeEntitlementsIntoProfile(
   profile: ClientProfile,
   entitlements: EntitlementsSnapshot,
 ): ClientProfile {
-  const planPageLimit = entitlements.planPageLimit;
-  const basePageLimit =
-    profile.basePageLimit ??
-    planPageLimit;
+  const effectiveUnlimitedAccess =
+    entitlements.isAdmin || entitlements.hasUnlimitedAccess;
 
-  const extraPageLimit =
-    profile.extraPageLimit ??
-    0;
+  const basePageLimit = effectiveUnlimitedAccess
+    ? null
+    : (profile.basePageLimit ?? entitlements.planPageLimit);
 
-  const pageLimit =
-    profile.pageLimit ??
-    (
-      basePageLimit !== null
-        ? basePageLimit + extraPageLimit
-        : null
-    );
+  const extraPageLimit = effectiveUnlimitedAccess
+    ? null
+    : (profile.extraPageLimit ?? 0);
+
+  const pageLimit = effectiveUnlimitedAccess
+    ? null
+    : (profile.pageLimit ??
+      (basePageLimit !== null ? basePageLimit + (extraPageLimit ?? 0) : null));
+
+  const effectivePlanId = entitlements.isAdmin
+    ? "admin"
+    : entitlements.planId || profile.plan;
+
+  const effectivePlanName = entitlements.isAdmin
+    ? "Administrátorský prístup"
+    : entitlements.planName || profile.packageName;
+
+  const effectiveFeatures = entitlements.hasUnlimitedAccess
+    ? ALL_FEATURE_KEYS.map(labelFeature)
+    : entitlements.featureLabels;
 
   return {
     ...profile,
     userId:
-      profile.userId !== 'nezistené'
+      profile.userId !== "nezistené"
         ? profile.userId
         : entitlements.userId || profile.userId,
     email:
-      profile.email !== 'nezistené'
+      profile.email !== "nezistené"
         ? profile.email
         : entitlements.email || profile.email,
-    plan: entitlements.planId || profile.plan,
-    selectedPlan:
-      entitlements.planId ||
-      profile.selectedPlan,
-    packageName:
-      entitlements.planName ||
-      profile.packageName,
-    packageLabel:
-      entitlements.planName ||
-      profile.packageLabel,
+    role: entitlements.isAdmin ? "administrátor" : profile.role,
+    isAdmin: entitlements.isAdmin,
+    hasUnlimitedAccess: effectiveUnlimitedAccess,
+    plan: effectivePlanId,
+    selectedPlan: effectivePlanId,
+    accountStatus: effectiveUnlimitedAccess
+      ? "aktívny – plný prístup"
+      : profile.accountStatus,
+    packageName: effectivePlanName,
+    packageLabel: effectivePlanName,
     basePageLimit,
     extraPageLimit,
     pageLimit,
+    pagesUsed: effectiveUnlimitedAccess ? null : profile.pagesUsed,
+    pagesRemaining: effectiveUnlimitedAccess ? null : profile.pagesRemaining,
+    pageLimitReached: effectiveUnlimitedAccess
+      ? false
+      : profile.pageLimitReached,
     activeServices: Array.from(
       new Set([
         ...profile.activeServices,
         ...entitlements.addonNames,
+        ...(effectiveUnlimitedAccess
+          ? ["Administrátorský prístup – všetky moduly"]
+          : []),
       ]),
     ),
     activatedFeatures: Array.from(
-      new Set([
-        ...profile.activatedFeatures,
-        ...entitlements.featureLabels,
-      ]),
+      new Set([...profile.activatedFeatures, ...effectiveFeatures]),
     ),
+    subscriptionStatus: effectiveUnlimitedAccess
+      ? "administrátorský účet"
+      : entitlements.billingStatus || profile.subscriptionStatus,
     subscriptionStartedAt:
-      entitlements.activatedAt ||
-      profile.subscriptionStartedAt,
-    subscriptionEndsAt:
-      entitlements.validUntil ||
-      profile.subscriptionEndsAt,
-    updatedAt:
-      entitlements.updatedAt ||
-      profile.updatedAt,
+      entitlements.activatedAt || profile.subscriptionStartedAt,
+    subscriptionEndsAt: effectiveUnlimitedAccess
+      ? ""
+      : entitlements.validUntil || profile.subscriptionEndsAt,
+    updatedAt: entitlements.updatedAt || profile.updatedAt,
   };
 }
-
 function StatCard({
   icon: Icon,
   label,
@@ -1155,45 +1254,124 @@ function Pill({ children }: { children: string }) {
   );
 }
 
+function formatPromptUsageSummary(
+  entitlements: EntitlementsSnapshot | null,
+): string {
+  if (!entitlements) {
+    return "Údaje o promptoch nie sú dostupné";
+  }
+
+  if (entitlements.isAdmin || entitlements.hasUnlimitedAccess) {
+    return "Neobmedzený administrátorský prístup";
+  }
+
+  if (entitlements.promptLimit === null) {
+    return "Neobmedzený počet promptov";
+  }
+
+  const remaining =
+    entitlements.promptsRemaining ??
+    Math.max(entitlements.promptLimit - entitlements.promptsUsed, 0);
+
+  return `${remaining} zostáva, ${entitlements.promptsUsed} použitých z ${entitlements.promptLimit}`;
+}
+
+function formatPageUsageSummary(profile: ClientProfile | null): string {
+  if (!profile) {
+    return "Údaje o stranách nie sú dostupné";
+  }
+
+  if (profile.isAdmin || profile.hasUnlimitedAccess) {
+    return "Neobmedzený administrátorský prístup";
+  }
+
+  if (profile.pageLimit === null) {
+    return "Stránkový limit nie je uvedený";
+  }
+
+  const remaining =
+    profile.pagesRemaining ??
+    Math.max(profile.pageLimit - (profile.pagesUsed ?? 0), 0);
+
+  return `${remaining} zostáva z ${profile.pageLimit}`;
+}
+
+function formatAttachmentLimit(
+  entitlements: EntitlementsSnapshot | null,
+): string {
+  if (!entitlements) {
+    return "Nezadané";
+  }
+
+  if (
+    entitlements.isAdmin ||
+    entitlements.hasUnlimitedAccess ||
+    entitlements.attachmentLimit === null
+  ) {
+    return "Neobmedzené";
+  }
+
+  return String(entitlements.attachmentLimit);
+}
+
+function formatPlanPrice(
+  priceCents: number | null,
+  entitlements: EntitlementsSnapshot | null,
+): string {
+  if (entitlements?.isAdmin || entitlements?.hasUnlimitedAccess) {
+    return "Interný účet";
+  }
+
+  return formatCurrencyFromCents(priceCents);
+}
+
+function formatDateOrUnlimited(
+  value: string,
+  hasUnlimitedAccess: boolean,
+): string {
+  if (hasUnlimitedAccess && !value) {
+    return "Bez časového obmedzenia";
+  }
+
+  return formatDate(value);
+}
+
 export default function ClientAccountProfile() {
   const router = useRouter();
 
   const [profile, setProfile] = useState<ClientProfile | null>(null);
-  const [entitlements, setEntitlements] = useState<EntitlementsSnapshot | null>(null);
-  const [entitlementsError, setEntitlementsError] = useState('');
-  const [state, setState] = useState<LoadState>('idle');
-  const [error, setError] = useState('');
-  const [lastLoadedAt, setLastLoadedAt] = useState('');
+  const [entitlements, setEntitlements] = useState<EntitlementsSnapshot | null>(
+    null,
+  );
+  const [entitlementsError, setEntitlementsError] = useState("");
+  const [state, setState] = useState<LoadState>("idle");
+  const [error, setError] = useState("");
+  const [lastLoadedAt, setLastLoadedAt] = useState("");
 
-  const [cancelState, setCancelState] = useState<CancelState>('idle');
-  const [cancelMessage, setCancelMessage] = useState('');
+  const [cancelState, setCancelState] = useState<CancelState>("idle");
+  const [cancelMessage, setCancelMessage] = useState("");
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   const loadProfile = useCallback(async () => {
-    setState('loading');
-    setError('');
-    setEntitlementsError('');
+    setState("loading");
+    setError("");
+    setEntitlementsError("");
 
-    const entitlementResult =
-      await loadEntitlementsSnapshot();
+    const entitlementResult = await loadEntitlementsSnapshot();
 
-    setEntitlements(
-      entitlementResult.entitlements,
-    );
-    setEntitlementsError(
-      entitlementResult.error,
-    );
+    setEntitlements(entitlementResult.entitlements);
+    setEntitlementsError(entitlementResult.error);
 
-    let lastError = '';
+    let lastError = "";
 
     for (const endpoint of PROFILE_ENDPOINTS) {
       try {
         const response = await fetch(endpoint, {
-          method: 'GET',
-          cache: 'no-store',
-          credentials: 'include',
+          method: "GET",
+          cache: "no-store",
+          credentials: "include",
           headers: {
-            Accept: 'application/json',
+            Accept: "application/json",
           },
         });
 
@@ -1203,68 +1381,75 @@ export default function ClientAccountProfile() {
           lastError =
             cleanText((data as JsonRecord | null)?.error) ||
             cleanText((data as JsonRecord | null)?.message) ||
-            'Klientsky profil sa nepodarilo načítať.';
+            "Klientsky profil sa nepodarilo načítať.";
           continue;
         }
 
         const normalizedProfile = normalizeClientProfile(data, endpoint);
-        const profileWithEntitlements =
-          entitlementResult.entitlements
-            ? mergeEntitlementsIntoProfile(
-                normalizedProfile,
-                entitlementResult.entitlements,
-              )
-            : normalizedProfile;
+        const profileWithEntitlements = entitlementResult.entitlements
+          ? mergeEntitlementsIntoProfile(
+              normalizedProfile,
+              entitlementResult.entitlements,
+            )
+          : normalizedProfile;
         const normalized = await loadPageUsage(profileWithEntitlements);
 
         setProfile(normalized);
         setLastLoadedAt(new Date().toISOString());
-        setState('success');
+        setState("success");
         return;
       } catch (err) {
         lastError =
           err instanceof Error
             ? err.message
-            : 'Klientsky profil sa nepodarilo načítať.';
+            : "Klientsky profil sa nepodarilo načítať.";
       }
     }
 
-    const localFallback = normalizeClientProfile({}, 'lokálne údaje');
-    const localWithEntitlements =
-      entitlementResult.entitlements
-        ? mergeEntitlementsIntoProfile(
-            localFallback,
-            entitlementResult.entitlements,
-          )
-        : localFallback;
+    const localFallback = normalizeClientProfile({}, "lokálne údaje");
+    const localWithEntitlements = entitlementResult.entitlements
+      ? mergeEntitlementsIntoProfile(
+          localFallback,
+          entitlementResult.entitlements,
+        )
+      : localFallback;
     const fallback = await loadPageUsage(localWithEntitlements);
 
     setProfile(fallback);
     setLastLoadedAt(new Date().toISOString());
     setError(
       lastError ||
-        'Klientsky profil sa nepodarilo načítať. Zobrazujem aspoň lokálne uložené údaje.',
+        "Klientsky profil sa nepodarilo načítať. Zobrazujem aspoň lokálne uložené údaje.",
     );
-    setState('error');
+    setState("error");
   }, []);
 
   const cancelSubscription = useCallback(async () => {
-    if (!profile || cancelState === 'loading') return;
+    if (
+      !profile ||
+      cancelState === "loading" ||
+      profile.isAdmin ||
+      profile.hasUnlimitedAccess ||
+      entitlements?.isAdmin ||
+      entitlements?.hasUnlimitedAccess
+    ) {
+      return;
+    }
 
-    setCancelState('loading');
-    setCancelMessage('');
+    setCancelState("loading");
+    setCancelMessage("");
 
-    let lastError = '';
+    let lastError = "";
 
     for (const endpoint of CANCEL_SUBSCRIPTION_ENDPOINTS) {
       try {
         const response = await fetch(endpoint, {
-          method: 'POST',
-          cache: 'no-store',
-          credentials: 'include',
+          method: "POST",
+          cache: "no-store",
+          credentials: "include",
           headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
+            Accept: "application/json",
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             email: profile.email,
@@ -1278,7 +1463,7 @@ export default function ClientAccountProfile() {
           lastError =
             cleanText((data as JsonRecord | null)?.error) ||
             cleanText((data as JsonRecord | null)?.message) ||
-            'Predplatné sa nepodarilo zrušiť.';
+            "Predplatné sa nepodarilo zrušiť.";
           continue;
         }
 
@@ -1286,16 +1471,16 @@ export default function ClientAccountProfile() {
           current
             ? {
                 ...current,
-                subscriptionStatus: 'zrušené',
-                accountStatus: 'aktívny do konca zaplateného obdobia',
+                subscriptionStatus: "zrušené",
+                accountStatus: "aktívny do konca zaplateného obdobia",
                 updatedAt: new Date().toISOString(),
               }
             : current,
         );
 
-        setCancelState('success');
+        setCancelState("success");
         setCancelMessage(
-          'Predplatné bolo zrušené. Prístup zostáva zachovaný do konca zaplateného obdobia.',
+          "Predplatné bolo zrušené. Prístup zostáva zachovaný do konca zaplateného obdobia.",
         );
         setShowCancelConfirm(false);
 
@@ -1306,20 +1491,26 @@ export default function ClientAccountProfile() {
         lastError =
           err instanceof Error
             ? err.message
-            : 'Predplatné sa nepodarilo zrušiť.';
+            : "Predplatné sa nepodarilo zrušiť.";
       }
     }
 
-    setCancelState('error');
+    setCancelState("error");
     setCancelMessage(
       lastError ||
-        'Predplatné sa nepodarilo zrušiť. Skúste to znova alebo kontaktujte podporu.',
+        "Predplatné sa nepodarilo zrušiť. Skúste to znova alebo kontaktujte podporu.",
     );
-  }, [cancelState, loadProfile, profile]);
+  }, [cancelState, entitlements, loadProfile, profile]);
 
   useEffect(() => {
     loadProfile();
   }, [loadProfile]);
+
+  const isAdmin = Boolean(entitlements?.isAdmin || profile?.isAdmin);
+
+  const hasUnlimitedAccess = Boolean(
+    isAdmin || entitlements?.hasUnlimitedAccess || profile?.hasUnlimitedAccess,
+  );
 
   const usagePercent = useMemo(() => {
     return profile ? getUsagePercent(profile) : null;
@@ -1334,9 +1525,7 @@ export default function ClientAccountProfile() {
   }, [entitlements]);
 
   const packageStatus = useMemo(() => {
-    return profile
-      ? getPackageStatus(profile, entitlements)
-      : 'Nezistené';
+    return profile ? getPackageStatus(profile, entitlements) : "Nezistené";
   }, [entitlements, profile]);
 
   const packageStatusClasses = useMemo(() => {
@@ -1344,48 +1533,58 @@ export default function ClientAccountProfile() {
   }, [packageStatus]);
 
   const planPriceCents = useMemo(() => {
-    if (entitlements?.planPriceCents !== null && entitlements?.planPriceCents !== undefined) {
+    if (
+      entitlements?.planPriceCents !== null &&
+      entitlements?.planPriceCents !== undefined
+    ) {
       return entitlements.planPriceCents;
     }
 
-    return profile
-      ? getProfilePlanPriceCents(profile)
-      : null;
+    return profile ? getProfilePlanPriceCents(profile) : null;
   }, [entitlements, profile]);
 
   const basePages =
-    profile?.basePageLimit ??
-    entitlements?.planPageLimit ??
-    null;
+    profile?.basePageLimit ?? entitlements?.planPageLimit ?? null;
 
-  const extraPages =
-    profile?.extraPageLimit ??
-    0;
+  const extraPages = profile?.extraPageLimit ?? 0;
 
   const activatedAddons = useMemo(() => {
+    if (hasUnlimitedAccess) {
+      return ["Administrátorský prístup – všetky moduly"];
+    }
+
     const values = entitlements?.addonNames.length
       ? entitlements.addonNames
       : profile?.activeServices || [];
 
     return Array.from(new Set(values));
-  }, [entitlements, profile]);
+  }, [entitlements, hasUnlimitedAccess, profile]);
 
   const availableFeatures = useMemo(() => {
-    const values = entitlements?.featureLabels.length
-      ? entitlements.featureLabels
-      : profile?.activatedFeatures || [];
+    const values = hasUnlimitedAccess
+      ? ALL_FEATURE_KEYS.map(labelFeature)
+      : entitlements?.featureLabels.length
+        ? entitlements.featureLabels
+        : profile?.activatedFeatures || [];
 
     return Array.from(new Set(values));
-  }, [entitlements, profile]);
+  }, [entitlements, hasUnlimitedAccess, profile]);
 
-  const subscriptionCanBeCancelled = canCancelSubscription(profile);
+  const promptUsageSummary = formatPromptUsageSummary(entitlements);
+
+  const pageUsageSummary = formatPageUsageSummary(profile);
+
+  const subscriptionCanBeCancelled = canCancelSubscription(
+    profile,
+    entitlements,
+  );
 
   function goToMenu() {
-    router.push('/dashboard');
+    router.push("/dashboard");
   }
 
   function goToBuyPages() {
-    router.push('/pricing#doplnkove-sluzby');
+    router.push("/pricing#doplnkove-sluzby");
   }
 
   return (
@@ -1407,16 +1606,19 @@ export default function ClientAccountProfile() {
               <div className="min-w-0">
                 <div className="inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/15 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-violet-100">
                   <ShieldCheck size={13} />
-                  Účet klienta
+                  {isAdmin ? "Administrátorský účet" : "Účet klienta"}
                 </div>
 
                 <h1 className="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">
-                  Klientsky účet a služby
+                  {isAdmin
+                    ? "Administrátorský účet a služby"
+                    : "Klientsky účet a služby"}
                 </h1>
 
                 <p className="mt-1 max-w-3xl text-sm font-bold leading-6 text-slate-400">
-                  Klientsky profil zobrazuje účet, balíček, stav služieb,
-                  kredity, projekty, odpočet strán, predplatné a dátumy prístupov.
+                  {hasUnlimitedAccess
+                    ? "Administrátorský profil má plný prístup ku všetkým modulom, funkciám, exportom, promptom, stranám a prílohám bez tarifných obmedzení."
+                    : "Klientsky profil zobrazuje účet, balíček, stav služieb, kredity, projekty, odpočet strán, predplatné a dátumy prístupov."}
                 </p>
               </div>
             </div>
@@ -1434,10 +1636,10 @@ export default function ClientAccountProfile() {
               <button
                 type="button"
                 onClick={loadProfile}
-                disabled={state === 'loading'}
+                disabled={state === "loading"}
                 className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-5 text-sm font-black text-white shadow-xl shadow-violet-950/40 transition hover:-translate-y-0.5 hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {state === 'loading' ? (
+                {state === "loading" ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
                   <RefreshCcw className="h-5 w-5" />
@@ -1445,18 +1647,25 @@ export default function ClientAccountProfile() {
                 Obnoviť údaje
               </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setCancelMessage('');
-                  setShowCancelConfirm(true);
-                }}
-                disabled={!subscriptionCanBeCancelled}
-                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-red-400/40 bg-red-500/10 px-5 text-sm font-black text-red-100 shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:border-red-300/70 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <XCircle size={18} />
-                Zrušiť predplatné
-              </button>
+              {hasUnlimitedAccess ? (
+                <div className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-violet-300/35 bg-violet-500/15 px-5 text-sm font-black text-violet-50 shadow-lg shadow-violet-950/20">
+                  <ShieldCheck size={18} />
+                  Plný prístup
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCancelMessage("");
+                    setShowCancelConfirm(true);
+                  }}
+                  disabled={!subscriptionCanBeCancelled}
+                  className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-red-400/40 bg-red-500/10 px-5 text-sm font-black text-red-100 shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:border-red-300/70 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <XCircle size={18} />
+                  Zrušiť predplatné
+                </button>
+              )}
             </div>
           </div>
         </section>
@@ -1475,8 +1684,30 @@ export default function ClientAccountProfile() {
             <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
               <div>
-                Sekciu balíka sa nepodarilo načítať úplne: {entitlementsError}
-                {' '}Zvyšné údaje osobného profilu zostávajú dostupné.
+                Sekciu balíka sa nepodarilo načítať úplne: {entitlementsError}{" "}
+                Zvyšné údaje osobného profilu zostávajú dostupné.
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {hasUnlimitedAccess ? (
+          <section className="mb-6 rounded-[1.6rem] border border-violet-300/30 bg-gradient-to-r from-violet-600/20 via-blue-600/15 to-fuchsia-600/15 p-5 shadow-xl shadow-black/25">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-500/20 text-violet-100">
+                <ShieldCheck size={24} />
+              </div>
+
+              <div>
+                <h2 className="text-xl font-black text-white">
+                  Administrátorský prístup je aktívny
+                </h2>
+
+                <p className="mt-1 text-sm font-bold leading-6 text-violet-100/85">
+                  Tento účet nie je obmedzený balíkom Free. Má sprístupnené
+                  všetky moduly, funkcie, exporty, prompty, strany a prílohy.
+                  Spotreba sa administrátorovi neodpočítava.
+                </p>
               </div>
             </div>
           </section>
@@ -1485,13 +1716,13 @@ export default function ClientAccountProfile() {
         {cancelMessage ? (
           <section
             className={`mb-6 rounded-[1.5rem] border p-5 text-sm font-bold leading-6 shadow-xl shadow-black/20 ${
-              cancelState === 'success'
-                ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-100'
-                : 'border-red-400/25 bg-red-500/10 text-red-100'
+              cancelState === "success"
+                ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
+                : "border-red-400/25 bg-red-500/10 text-red-100"
             }`}
           >
             <div className="flex items-start gap-3">
-              {cancelState === 'success' ? (
+              {cancelState === "success" ? (
                 <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
               ) : (
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
@@ -1502,7 +1733,7 @@ export default function ClientAccountProfile() {
           </section>
         ) : null}
 
-        {showCancelConfirm ? (
+        {showCancelConfirm && !hasUnlimitedAccess ? (
           <section className="mb-6 rounded-[1.6rem] border border-red-400/30 bg-red-500/10 p-5 shadow-xl shadow-black/25">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-start gap-3">
@@ -1527,7 +1758,7 @@ export default function ClientAccountProfile() {
                 <button
                   type="button"
                   onClick={() => setShowCancelConfirm(false)}
-                  disabled={cancelState === 'loading'}
+                  disabled={cancelState === "loading"}
                   className="inline-flex min-h-[46px] items-center justify-center rounded-2xl border border-white/10 bg-white/[0.08] px-5 text-sm font-black text-white transition hover:bg-white/[0.14] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Ponechať predplatné
@@ -1536,10 +1767,10 @@ export default function ClientAccountProfile() {
                 <button
                   type="button"
                   onClick={cancelSubscription}
-                  disabled={cancelState === 'loading'}
+                  disabled={cancelState === "loading"}
                   className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-red-600 px-5 text-sm font-black text-white shadow-xl shadow-red-950/30 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {cancelState === 'loading' ? (
+                  {cancelState === "loading" ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
                   ) : (
                     <XCircle size={18} />
@@ -1551,7 +1782,7 @@ export default function ClientAccountProfile() {
           </section>
         ) : null}
 
-        {state === 'loading' && !profile ? (
+        {state === "loading" && !profile ? (
           <section className="rounded-[2rem] border border-white/10 bg-[#0b1020]/95 p-8 shadow-xl shadow-black/30">
             <div className="flex items-center gap-4">
               <Loader2 className="h-7 w-7 animate-spin text-violet-200" />
@@ -1582,26 +1813,38 @@ export default function ClientAccountProfile() {
               <StatCard
                 icon={Crown}
                 label="Balíček"
-                value={labelPlan(profile.selectedPlan || profile.plan)}
-                helper={`Stav účtu: ${profile.accountStatus}`}
+                value={
+                  hasUnlimitedAccess
+                    ? "Administrátorský prístup"
+                    : labelPlan(profile.selectedPlan || profile.plan)
+                }
+                helper={
+                  hasUnlimitedAccess
+                    ? "Plný prístup bez tarifných obmedzení"
+                    : `Stav účtu: ${profile.accountStatus}`
+                }
               />
 
               <StatCard
                 icon={WalletCards}
                 label="Kredity"
                 value={
-                  profile.remainingCredits !== null
-                    ? `${profile.remainingCredits} zostáva`
-                    : 'Nezadané'
+                  hasUnlimitedAccess
+                    ? "Neobmedzené"
+                    : profile.remainingCredits !== null
+                      ? `${profile.remainingCredits} zostáva`
+                      : "Nezadané"
                 }
                 helper={
-                  profile.credits !== null
-                    ? `Celkom: ${profile.credits}${
-                        profile.usedCredits !== null
-                          ? ` · použité: ${profile.usedCredits}`
-                          : ''
-                      }`
-                    : 'Limit nie je uvedený'
+                  hasUnlimitedAccess
+                    ? "Administrátorovi sa spotreba neodpočítava"
+                    : profile.credits !== null
+                      ? `Celkom: ${profile.credits}${
+                          profile.usedCredits !== null
+                            ? ` · použité: ${profile.usedCredits}`
+                            : ""
+                        }`
+                      : "Limit nie je uvedený"
                 }
               />
 
@@ -1609,14 +1852,16 @@ export default function ClientAccountProfile() {
                 icon={Gauge}
                 label="Zostávajúce strany"
                 value={
-                  profile.pagesRemaining !== null
-                    ? `${profile.pagesRemaining}`
-                    : 'Nezadané'
+                  hasUnlimitedAccess
+                    ? "Neobmedzené"
+                    : profile.pagesRemaining !== null
+                      ? `${profile.pagesRemaining}`
+                      : "Nezadané"
                 }
                 helper={
-                  profile.pageLimit !== null
-                    ? `Použité: ${profile.pagesUsed ?? 0} z ${profile.pageLimit}`
-                    : 'Stránkový limit nie je uvedený'
+                  hasUnlimitedAccess
+                    ? "Administrátorovi sa strany neodpočítavajú"
+                    : pageUsageSummary
                 }
               />
 
@@ -1626,12 +1871,12 @@ export default function ClientAccountProfile() {
                 value={
                   profile.projectsCount !== null
                     ? `${profile.projectsCount}`
-                    : 'Nezadané'
+                    : "Nezadané"
                 }
                 helper={
                   profile.maxProjects !== null
                     ? `Limit: ${profile.maxProjects}`
-                    : 'Limit projektov nie je uvedený'
+                    : "Limit projektov nie je uvedený"
                 }
               />
             </section>
@@ -1654,13 +1899,16 @@ export default function ClientAccountProfile() {
                       </h2>
 
                       <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-slate-300">
-                        Kompletný prehľad aktivovaného balíka, dátumov platnosti,
-                        strán, promptov, príloh, doplnkov a dostupných funkcií.
+                        Kompletný prehľad aktivovaného balíka, dátumov
+                        platnosti, strán, promptov, príloh, doplnkov a
+                        dostupných funkcií.
                       </p>
                     </div>
                   </div>
 
-                  <div className={`inline-flex w-fit items-center gap-2 rounded-full border px-4 py-2 text-sm font-black ${packageStatusClasses}`}>
+                  <div
+                    className={`inline-flex w-fit items-center gap-2 rounded-full border px-4 py-2 text-sm font-black ${packageStatusClasses}`}
+                  >
                     <BadgeCheck size={17} />
                     {packageStatus}
                   </div>
@@ -1683,39 +1931,58 @@ export default function ClientAccountProfile() {
                   <StatCard
                     icon={WalletCards}
                     label="Cena balíka"
-                    value={formatCurrencyFromCents(planPriceCents)}
-                    helper="Cena základného balíka bez jednorazových doplnkov"
+                    value={formatPlanPrice(planPriceCents, entitlements)}
+                    helper={
+                      hasUnlimitedAccess
+                        ? "Administrátorský účet nepodlieha platobnému balíku"
+                        : "Cena základného balíka bez samostatných doplnkov"
+                    }
                   />
 
                   <StatCard
                     icon={ShieldCheck}
                     label="Stav balíka"
                     value={packageStatus}
-                    helper={`Predplatné: ${profile.subscriptionStatus}`}
+                    helper={
+                      hasUnlimitedAccess
+                        ? "Interný účet s neobmedzeným oprávnením"
+                        : `Predplatné: ${entitlements?.billingStatus || profile.subscriptionStatus}`
+                    }
                   />
 
                   <StatCard
                     icon={CalendarClock}
                     label="Dátum aktivácie"
-                    value={formatDate(
+                    value={formatDateOrUnlimited(
                       entitlements?.activatedAt ||
                         profile.subscriptionStartedAt,
+                      hasUnlimitedAccess,
                     )}
-                    helper="Začiatok platnosti aktuálneho balíka"
+                    helper={
+                      hasUnlimitedAccess
+                        ? "Administrátorské oprávnenie je aktívne bez tarifného obdobia"
+                        : "Začiatok platnosti aktuálneho balíka"
+                    }
                   />
 
                   <StatCard
                     icon={Clock3}
                     label="Platnosť balíka"
                     value={
-                      entitlements?.validUntil || profile.subscriptionEndsAt
-                        ? formatDate(
-                            entitlements?.validUntil ||
-                              profile.subscriptionEndsAt,
-                          )
-                        : 'Bez uvedeného konca'
+                      hasUnlimitedAccess
+                        ? "Bez časového obmedzenia"
+                        : entitlements?.validUntil || profile.subscriptionEndsAt
+                          ? formatDate(
+                              entitlements?.validUntil ||
+                                profile.subscriptionEndsAt,
+                            )
+                          : "Bez uvedeného konca"
                     }
-                    helper="Dátum ukončenia alebo obnovy predplatného"
+                    helper={
+                      hasUnlimitedAccess
+                        ? "Administrátorský prístup sa neriadi platnosťou balíka"
+                        : "Dátum ukončenia alebo obnovy predplatného"
+                    }
                   />
                 </div>
 
@@ -1739,10 +2006,12 @@ export default function ClientAccountProfile() {
 
                       <div className="text-right">
                         <div className="text-2xl font-black text-white">
-                          {profile.pagesRemaining ?? '—'}
+                          {hasUnlimitedAccess
+                            ? "∞"
+                            : (profile.pagesRemaining ?? "—")}
                         </div>
                         <div className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
-                          zostáva
+                          {hasUnlimitedAccess ? "neobmedzené" : "zostáva"}
                         </div>
                       </div>
                     </div>
@@ -1753,7 +2022,7 @@ export default function ClientAccountProfile() {
                           Základné strany
                         </div>
                         <div className="mt-1 text-xl font-black text-white">
-                          {basePages ?? '—'}
+                          {hasUnlimitedAccess ? "—" : (basePages ?? "—")}
                         </div>
                       </div>
 
@@ -1762,7 +2031,7 @@ export default function ClientAccountProfile() {
                           Extra strany
                         </div>
                         <div className="mt-1 text-xl font-black text-white">
-                          {extraPages}
+                          {hasUnlimitedAccess ? "—" : extraPages}
                         </div>
                       </div>
 
@@ -1771,7 +2040,9 @@ export default function ClientAccountProfile() {
                           Použité strany
                         </div>
                         <div className="mt-1 text-xl font-black text-white">
-                          {profile.pagesUsed ?? '—'}
+                          {hasUnlimitedAccess
+                            ? "—"
+                            : (profile.pagesUsed ?? "—")}
                         </div>
                       </div>
 
@@ -1780,7 +2051,9 @@ export default function ClientAccountProfile() {
                           Celkový limit
                         </div>
                         <div className="mt-1 text-xl font-black text-white">
-                          {profile.pageLimit ?? '—'}
+                          {hasUnlimitedAccess
+                            ? "Neobmedzené"
+                            : (profile.pageLimit ?? "—")}
                         </div>
                       </div>
                     </div>
@@ -1795,16 +2068,21 @@ export default function ClientAccountProfile() {
                         <div className="h-3 overflow-hidden rounded-full bg-white/10">
                           <div
                             className={[
-                              'h-full rounded-full transition-all duration-500',
+                              "h-full rounded-full transition-all duration-500",
                               pageUsagePercent >= 100
-                                ? 'bg-red-500'
+                                ? "bg-red-500"
                                 : pageUsagePercent >= 80
-                                  ? 'bg-amber-500'
-                                  : 'bg-gradient-to-r from-blue-500 to-violet-500',
-                            ].join(' ')}
+                                  ? "bg-amber-500"
+                                  : "bg-gradient-to-r from-blue-500 to-violet-500",
+                            ].join(" ")}
                             style={{ width: `${pageUsagePercent}%` }}
                           />
                         </div>
+                      </div>
+                    ) : hasUnlimitedAccess ? (
+                      <div className="mt-5 rounded-2xl border border-violet-300/25 bg-violet-500/10 p-3 text-sm font-bold leading-6 text-violet-100">
+                        Stránky sú pre administrátora neobmedzené a po úspešnom
+                        výstupe sa neodpočítavajú.
                       </div>
                     ) : null}
                   </article>
@@ -1828,12 +2106,14 @@ export default function ClientAccountProfile() {
 
                       <div className="text-right">
                         <div className="text-2xl font-black text-white">
-                          {entitlements
-                            ? formatLimit(entitlements.promptsRemaining)
-                            : '—'}
+                          {hasUnlimitedAccess
+                            ? "∞"
+                            : entitlements
+                              ? formatLimit(entitlements.promptsRemaining)
+                              : "—"}
                         </div>
                         <div className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
-                          zostáva
+                          {hasUnlimitedAccess ? "neobmedzené" : "zostáva"}
                         </div>
                       </div>
                     </div>
@@ -1842,22 +2122,34 @@ export default function ClientAccountProfile() {
                       <DetailRow
                         label="Limit promptov"
                         value={
-                          entitlements
-                            ? formatLimit(entitlements.promptLimit)
-                            : 'Nezadané'
+                          hasUnlimitedAccess
+                            ? "Neobmedzené"
+                            : entitlements
+                              ? formatLimit(entitlements.promptLimit)
+                              : "Nezadané"
                         }
                       />
                       <DetailRow
                         label="Použité prompty"
-                        value={entitlements?.promptsUsed ?? 'Nezadané'}
+                        value={
+                          hasUnlimitedAccess
+                            ? "Neodpočítavajú sa"
+                            : (entitlements?.promptsUsed ?? "Nezadané")
+                        }
                       />
                       <DetailRow
                         label="Zostávajúce prompty"
                         value={
-                          entitlements
-                            ? formatLimit(entitlements.promptsRemaining)
-                            : 'Nezadané'
+                          hasUnlimitedAccess
+                            ? "Neobmedzené"
+                            : entitlements
+                              ? formatLimit(entitlements.promptsRemaining)
+                              : "Nezadané"
                         }
+                      />
+                      <DetailRow
+                        label="Súhrn promptov"
+                        value={promptUsageSummary}
                       />
                     </div>
 
@@ -1871,22 +2163,24 @@ export default function ClientAccountProfile() {
                         <div className="h-3 overflow-hidden rounded-full bg-white/10">
                           <div
                             className={[
-                              'h-full rounded-full transition-all duration-500',
+                              "h-full rounded-full transition-all duration-500",
                               entitlements?.promptLimitReached
-                                ? 'bg-red-500'
+                                ? "bg-red-500"
                                 : promptUsagePercent >= 80
-                                  ? 'bg-amber-500'
-                                  : 'bg-gradient-to-r from-violet-500 to-fuchsia-500',
-                            ].join(' ')}
+                                  ? "bg-amber-500"
+                                  : "bg-gradient-to-r from-violet-500 to-fuchsia-500",
+                            ].join(" ")}
                             style={{ width: `${promptUsagePercent}%` }}
                           />
                         </div>
                       </div>
                     ) : (
                       <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-3 text-sm font-bold text-emerald-100">
-                        {entitlements?.promptLimit === null
-                          ? 'Balík má neobmedzený počet promptov.'
-                          : 'Údaje o čerpaní promptov nie sú dostupné.'}
+                        {hasUnlimitedAccess
+                          ? "Administrátorský účet má neobmedzený počet promptov a spotreba sa neodpočítava."
+                          : entitlements?.promptLimit === null
+                            ? "Balík má neobmedzený počet promptov."
+                            : "Údaje o čerpaní promptov nie sú dostupné."}
                       </div>
                     )}
                   </article>
@@ -1909,10 +2203,10 @@ export default function ClientAccountProfile() {
 
                     <div className="mt-6 rounded-[1.4rem] border border-emerald-300/20 bg-emerald-500/10 p-5 text-center">
                       <div className="text-5xl font-black text-white">
-                        {entitlements?.attachmentLimit ?? '—'}
+                        {formatAttachmentLimit(entitlements)}
                       </div>
                       <div className="mt-2 text-sm font-black uppercase tracking-[0.14em] text-emerald-100">
-                        príloh naraz
+                        {hasUnlimitedAccess ? "bez limitu" : "príloh naraz"}
                       </div>
                     </div>
 
@@ -1928,8 +2222,7 @@ export default function ClientAccountProfile() {
                       <DetailRow
                         label="Aktualizované"
                         value={formatDate(
-                          entitlements?.updatedAt ||
-                            profile.updatedAt,
+                          entitlements?.updatedAt || profile.updatedAt,
                         )}
                       />
                     </div>
@@ -2004,7 +2297,7 @@ export default function ClientAccountProfile() {
               </div>
             </section>
 
-            {profile.pageLimitReached ? (
+            {profile.pageLimitReached && !hasUnlimitedAccess ? (
               <section className="rounded-[1.6rem] border border-red-400/30 bg-red-500/10 p-5 shadow-xl shadow-black/25">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex items-start gap-3">
@@ -2056,7 +2349,8 @@ export default function ClientAccountProfile() {
                     </div>
 
                     <div className="mt-1 text-sm font-bold text-slate-400">
-                      {profile.pagesUsed ?? 0} použitých z {profile.pageLimit ?? 0}
+                      {profile.pagesUsed ?? 0} použitých z{" "}
+                      {profile.pageLimit ?? 0}
                     </div>
                   </div>
                 </div>
@@ -2064,13 +2358,13 @@ export default function ClientAccountProfile() {
                 <div className="h-4 overflow-hidden rounded-full bg-white/10">
                   <div
                     className={[
-                      'h-full rounded-full transition-all duration-500',
+                      "h-full rounded-full transition-all duration-500",
                       pageUsagePercent >= 100
-                        ? 'bg-red-500'
+                        ? "bg-red-500"
                         : pageUsagePercent >= 80
-                          ? 'bg-amber-500'
-                          : 'bg-gradient-to-r from-violet-500 to-blue-500',
-                    ].join(' ')}
+                          ? "bg-amber-500"
+                          : "bg-gradient-to-r from-violet-500 to-blue-500",
+                    ].join(" ")}
                     style={{ width: `${pageUsagePercent}%` }}
                   />
                 </div>
@@ -2078,8 +2372,8 @@ export default function ClientAccountProfile() {
                 <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="text-xs font-bold leading-5 text-slate-500">
                     Základný limit: {profile.basePageLimit ?? 0} · Dokúpené
-                    strany: {profile.extraPageLimit ?? 0} · Čerpanie:
-                    {' '}{pageUsagePercent} %
+                    strany: {profile.extraPageLimit ?? 0} · Čerpanie:{" "}
+                    {pageUsagePercent} %
                   </div>
 
                   <button
@@ -2142,56 +2436,123 @@ export default function ClientAccountProfile() {
                 <DetailRow label="Meno" value={profile.name} />
                 <DetailRow label="Email" value={profile.email} />
                 <DetailRow label="Rola" value={profile.role} />
+                <DetailRow
+                  label="Administrátor"
+                  value={isAdmin ? "Áno" : "Nie"}
+                />
+                <DetailRow
+                  label="Plný prístup"
+                  value={hasUnlimitedAccess ? "Áno – bez limitov" : "Nie"}
+                />
+                <DetailRow
+                  label="Záznam oprávnení"
+                  value={
+                    entitlements
+                      ? entitlements.hasDatabaseRecord
+                        ? "Existuje v databáze"
+                        : "Použitý predvolený stav"
+                      : "Nezistené"
+                  }
+                />
                 <DetailRow label="Jazyk" value={profile.language} />
                 <DetailRow label="Stav účtu" value={profile.accountStatus} />
                 <DetailRow
                   label="Balíček"
                   value={profile.packageLabel || profile.packageName}
                 />
-                <DetailRow label="Vybraný plán" value={profile.selectedPlan} />
-                <DetailRow label="Predplatné" value={profile.subscriptionStatus} />
-                <DetailRow label="Limit strán" value={profile.pageLimit} />
-                <DetailRow label="Použité strany" value={profile.pagesUsed} />
+                <DetailRow
+                  label="Vybraný plán"
+                  value={
+                    hasUnlimitedAccess
+                      ? "Administrátorský prístup"
+                      : profile.selectedPlan
+                  }
+                />
+                <DetailRow
+                  label="Predplatné"
+                  value={
+                    hasUnlimitedAccess
+                      ? "Nevzťahuje sa – interný účet"
+                      : entitlements?.billingStatus ||
+                        profile.subscriptionStatus
+                  }
+                />
+                <DetailRow
+                  label="Limit strán"
+                  value={hasUnlimitedAccess ? "Neobmedzené" : profile.pageLimit}
+                />
+                <DetailRow
+                  label="Použité strany"
+                  value={
+                    hasUnlimitedAccess ? "Neodpočítavajú sa" : profile.pagesUsed
+                  }
+                />
                 <DetailRow
                   label="Zostávajúce strany"
-                  value={profile.pagesRemaining}
+                  value={
+                    hasUnlimitedAccess ? "Neobmedzené" : profile.pagesRemaining
+                  }
                 />
                 <DetailRow
                   label="Dokúpené strany"
-                  value={profile.extraPageLimit}
+                  value={
+                    hasUnlimitedAccess
+                      ? "Nevzťahuje sa"
+                      : profile.extraPageLimit
+                  }
                 />
                 <DetailRow
                   label="Posledné načítanie"
                   value={formatDate(lastLoadedAt)}
                 />
 
-                <div className="mt-5 rounded-[1.25rem] border border-red-400/25 bg-red-500/10 p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="text-sm font-black text-white">
-                        Správa predplatného
+                {hasUnlimitedAccess ? (
+                  <div className="mt-5 rounded-[1.25rem] border border-violet-300/25 bg-violet-500/10 p-4">
+                    <div className="flex items-start gap-3">
+                      <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-violet-200" />
+
+                      <div>
+                        <div className="text-sm font-black text-white">
+                          Správa administrátorského prístupu
+                        </div>
+
+                        <p className="mt-1 text-sm font-bold leading-6 text-violet-100/85">
+                          Administrátorský prístup nie je predplatné a nemožno
+                          ho zrušiť cez klientsky profil. Oprávnenie sa spravuje
+                          serverovo v databáze.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-5 rounded-[1.25rem] border border-red-400/25 bg-red-500/10 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-sm font-black text-white">
+                          Správa predplatného
+                        </div>
+
+                        <p className="mt-1 text-sm font-bold leading-6 text-red-100/85">
+                          Predplatné môžete zrušiť. Automatické obnovenie sa
+                          vypne a prístup ostane do konca zaplateného obdobia.
+                        </p>
                       </div>
 
-                      <p className="mt-1 text-sm font-bold leading-6 text-red-100/85">
-                        Predplatné môžete zrušiť. Automatické obnovenie sa
-                        vypne a prístup ostane do konca zaplateného obdobia.
-                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCancelMessage("");
+                          setShowCancelConfirm(true);
+                        }}
+                        disabled={!subscriptionCanBeCancelled}
+                        className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 text-sm font-black text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <XCircle size={17} />
+                        Zrušiť predplatné
+                      </button>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCancelMessage('');
-                        setShowCancelConfirm(true);
-                      }}
-                      disabled={!subscriptionCanBeCancelled}
-                      className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 text-sm font-black text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <XCircle size={17} />
-                      Zrušiť predplatné
-                    </button>
                   </div>
-                </div>
+                )}
               </div>
 
               <div className="space-y-6">
@@ -2267,18 +2628,28 @@ export default function ClientAccountProfile() {
                       </h2>
 
                       <p className="text-sm font-bold text-slate-400">
-                        Dátumy predplatného a posledného prístupu.
+                        {hasUnlimitedAccess
+                          ? "Administrátorský prístup a dátumy účtu."
+                          : "Dátumy predplatného a posledného prístupu."}
                       </p>
                     </div>
                   </div>
 
                   <DetailRow
                     label="Predplatné od"
-                    value={formatDate(profile.subscriptionStartedAt)}
+                    value={
+                      hasUnlimitedAccess
+                        ? "Nevzťahuje sa"
+                        : formatDate(profile.subscriptionStartedAt)
+                    }
                   />
                   <DetailRow
                     label="Predplatné do"
-                    value={formatDate(profile.subscriptionEndsAt)}
+                    value={
+                      hasUnlimitedAccess
+                        ? "Bez časového obmedzenia"
+                        : formatDate(profile.subscriptionEndsAt)
+                    }
                   />
                   <DetailRow
                     label="Vytvorené"
@@ -2307,8 +2678,16 @@ export default function ClientAccountProfile() {
               <StatCard
                 icon={ShieldCheck}
                 label="Prístup"
-                value={profile.role}
-                helper="Rola klienta v systéme"
+                value={
+                  hasUnlimitedAccess
+                    ? "Plný administrátorský prístup"
+                    : profile.role
+                }
+                helper={
+                  hasUnlimitedAccess
+                    ? "Všetky moduly a limity sú odomknuté"
+                    : "Rola klienta v systéme"
+                }
               />
 
               <StatCard

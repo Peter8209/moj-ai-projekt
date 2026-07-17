@@ -1,3 +1,4 @@
+import { getCurrentEntitlements } from '@/lib/entitlements';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 /**
@@ -11,7 +12,7 @@ export const CHARACTERS_PER_PAGE = 1_800;
 /**
  * Orientačný maximálny počet tokenov na jednu generovanú stranu.
  *
- * Táto hodnota slúži na obmedzenie výstupu AI ešte pred samotným
+ * Hodnota sa používa na obmedzenie výstupu AI ešte pred samotným
  * vygenerovaním textu.
  */
 export const TOKENS_PER_PAGE = 650;
@@ -19,7 +20,8 @@ export const TOKENS_PER_PAGE = 650;
 /**
  * Základné stránkové limity jednotlivých balíkov.
  *
- * Názvy musia zodpovedať hodnotám plan_id uloženým v databáze.
+ * Identifikátory musia zodpovedať hodnotám plan_id uloženým
+ * v databáze a hodnotám v lib/billing/catalog.ts.
  */
 export const PLAN_PAGE_LIMITS = {
   free: 3,
@@ -29,10 +31,7 @@ export const PLAN_PAGE_LIMITS = {
 } as const;
 
 /**
- * Počet strán poskytovaný jednotlivými doplnkami.
- *
- * Názvy musia zodpovedať identifikátorom doplnkov používaným
- * v Stripe, databáze a billing katalógu.
+ * Počet strán poskytovaný jednotlivými stránkovými doplnkami.
  */
 export const ADDON_PAGE_AMOUNTS = {
   'extra-20': 20,
@@ -40,66 +39,61 @@ export const ADDON_PAGE_AMOUNTS = {
   'extra-60': 60,
 } as const;
 
-export type PagePlanId =
-  keyof typeof PLAN_PAGE_LIMITS;
+export type PagePlanId = keyof typeof PLAN_PAGE_LIMITS;
+export type PageAddonId = keyof typeof ADDON_PAGE_AMOUNTS;
 
-export type PageAddonId =
-  keyof typeof ADDON_PAGE_AMOUNTS;
-
+/**
+ * Jednotný serverový stav stránkovej kvóty.
+ *
+ * Pri administrátorovi:
+ * - isAdmin = true,
+ * - isUnlimited = true,
+ * - pageLimitReached = false,
+ * - stránky sa neodpočítavajú,
+ * - pageLimit a pagesRemaining používajú bezpečnú vysokú číselnú hodnotu,
+ *   aby zostali kompatibilné s existujúcim kódom, ktorý očakáva number.
+ *
+ * Frontend má pri isUnlimited === true zobrazovať text
+ * „Neobmedzený administrátorský prístup“ namiesto číselnej hodnoty.
+ */
 export type PageQuota = {
-  /**
-   * Aktívny identifikátor balíka používateľa.
-   */
+  /** Aktívny identifikátor balíka používateľa. */
   planId: string;
 
-  /**
-   * Počet strán zahrnutý v základnom balíku.
-   */
+  /** Používateľ má administrátorské oprávnenie. */
+  isAdmin: boolean;
+
+  /** Stránkový limit sa na používateľa nevzťahuje. */
+  isUnlimited: boolean;
+
+  /** Počet strán zahrnutý v základnom balíku. */
   basePageLimit: number;
 
-  /**
-   * Počet dodatočne zakúpených strán.
-   */
+  /** Počet dodatočne zakúpených strán. */
   extraPageLimit: number;
 
-  /**
-   * Celkový počet dostupných strán.
-   *
-   * basePageLimit + extraPageLimit
-   */
+  /** Celkový efektívny limit strán. */
   pageLimit: number;
 
-  /**
-   * Počet už spotrebovaných strán.
-   */
+  /** Počet už spotrebovaných strán. */
   pagesUsed: number;
 
-  /**
-   * Počet zostávajúcich strán.
-   */
+  /** Počet zostávajúcich strán. */
   pagesRemaining: number;
 
-  /**
-   * Informácia o tom, či bol limit vyčerpaný.
-   */
+  /** Informácia o tom, či bol limit vyčerpaný. */
   pageLimitReached: boolean;
 };
 
 export type ConsumePageQuotaInput = {
-  /**
-   * Finálny text vygenerovaný AI.
-   */
+  /** Finálny text vygenerovaný AI. */
   text: string;
 
   /**
    * Modul, v ktorom bola spotreba vytvorená.
    *
    * Napríklad:
-   * chat
-   * humanizer
-   * thesis
-   * translation
-   * defense
+   * chat, humanizer, thesis, translation, defense, data-analysis.
    */
   module: string;
 
@@ -113,19 +107,38 @@ export type ConsumePageQuotaInput = {
 };
 
 /**
+ * Voliteľné nastavenie výpočtu maximálneho počtu tokenov.
+ */
+export type OutputTokenLimitOptions = {
+  /** Pri true sa vráti celý requestedTokenLimit bez stránkového obmedzenia. */
+  isUnlimited?: boolean;
+};
+
+/**
  * Typ odpovede databázovej RPC funkcie zedpera_consume_pages.
  *
- * Hodnoty sú voliteľné, pretože databázový klient môže pri chybe
- * alebo neúplnej odpovedi vrátiť iba časť objektu.
+ * Podporované sú staršie aj novšie názvy databázových stĺpcov.
  */
 type RpcBalanceRow = {
   plan_id?: unknown;
   base_page_limit?: unknown;
   extra_page_limit?: unknown;
+
   used_pages?: unknown;
+  pages_used?: unknown;
+
   total_pages?: unknown;
+  page_limit?: unknown;
+
   remaining_pages?: unknown;
+  pages_remaining?: unknown;
+
   limit_reached?: unknown;
+  page_limit_reached?: unknown;
+
+  is_admin?: unknown;
+  admin_access?: unknown;
+  is_unlimited?: unknown;
 };
 
 type PageBalanceDatabaseRow = {
@@ -133,33 +146,31 @@ type PageBalanceDatabaseRow = {
   base_page_limit?: unknown;
   extra_page_limit?: unknown;
   used_pages?: unknown;
+  pages_used?: unknown;
 };
 
-type SupabaseServerClient =
-  Awaited<
-    ReturnType<
-      typeof createSupabaseServerClient
-    >
-  >;
+type SupabaseServerClient = Awaited<
+  ReturnType<typeof createSupabaseServerClient>
+>;
 
-const DEFAULT_PLAN_ID: PagePlanId =
-  'free';
-
+const DEFAULT_PLAN_ID: PagePlanId = 'free';
 const DEFAULT_MODULE = 'unknown';
-
 const MAX_MODULE_LENGTH = 100;
-
 const MAX_REQUEST_ID_LENGTH = 255;
 
 /**
- * Chyba vyvolaná pri vyčerpaní stránkového limitu.
+ * Vysoká bezpečná číselná hodnota používaná pre administrátora.
  *
- * HTTP status 402 umožňuje API route rozlíšiť, že používateľ
- * potrebuje vyšší balík alebo doplnkové strany.
+ * Number.MAX_SAFE_INTEGER zachová spätnú kompatibilitu s existujúcimi
+ * miestami aplikácie, ktoré očakávajú number a vykonávajú porovnania.
+ */
+const UNLIMITED_NUMERIC_PAGE_VALUE = Number.MAX_SAFE_INTEGER;
+
+/**
+ * Chyba vyvolaná pri vyčerpaní stránkového limitu.
  */
 export class PageLimitError extends Error {
   readonly code = 'PAGE_LIMIT_REACHED';
-
   readonly status = 402;
 
   constructor(
@@ -170,40 +181,23 @@ export class PageLimitError extends Error {
 
     this.name = 'PageLimitError';
 
-    Object.setPrototypeOf(
-      this,
-      PageLimitError.prototype,
-    );
+    Object.setPrototypeOf(this, PageLimitError.prototype);
   }
 }
 
 /**
  * Bezpečne prevedie ľubovoľnú hodnotu na nezáporné celé číslo.
  */
-function toSafeInteger(
-  value: unknown,
-  fallback = 0,
-): number {
-  const safeFallback = Number.isFinite(
-    fallback,
-  )
-    ? Math.max(
-        Math.trunc(fallback),
-        0,
-      )
+function toSafeInteger(value: unknown, fallback = 0): number {
+  const safeFallback = Number.isFinite(fallback)
+    ? Math.max(Math.trunc(fallback), 0)
     : 0;
 
-  if (
-    value === null ||
-    value === undefined
-  ) {
+  if (value === null || value === undefined) {
     return safeFallback;
   }
 
-  if (
-    typeof value === 'string' &&
-    value.trim() === ''
-  ) {
+  if (typeof value === 'string' && value.trim() === '') {
     return safeFallback;
   }
 
@@ -214,24 +208,15 @@ function toSafeInteger(
   }
 
   return Math.min(
-    Math.max(
-      Math.trunc(parsed),
-      0,
-    ),
+    Math.max(Math.trunc(parsed), 0),
     Number.MAX_SAFE_INTEGER,
   );
 }
 
 /**
  * Bezpečne prevedie databázovú hodnotu na boolean.
- *
- * Na rozdiel od Boolean('false') správne vyhodnotí aj textové
- * hodnoty "true" a "false".
  */
-function toSafeBoolean(
-  value: unknown,
-  fallback = false,
-): boolean {
+function toSafeBoolean(value: unknown, fallback = false): boolean {
   if (typeof value === 'boolean') {
     return value;
   }
@@ -241,8 +226,7 @@ function toSafeBoolean(
   }
 
   if (typeof value === 'string') {
-    const normalized =
-      value.trim().toLowerCase();
+    const normalized = value.trim().toLowerCase();
 
     if (
       normalized === 'true' ||
@@ -264,54 +248,34 @@ function toSafeBoolean(
   return fallback;
 }
 
-/**
- * Overí, či hodnota predstavuje známy identifikátor balíka.
- */
-function isKnownPlanId(
-  value: string,
-): value is PagePlanId {
+/** Overí, či hodnota predstavuje známy identifikátor balíka. */
+function isKnownPlanId(value: string): value is PagePlanId {
   return Object.prototype.hasOwnProperty.call(
     PLAN_PAGE_LIMITS,
     value,
   );
 }
 
-/**
- * Normalizuje plan_id z databázy.
- */
-function normalizePlanId(
-  value: unknown,
-): string {
-  const normalized =
-    String(value ?? '').trim();
+/** Normalizuje plan_id z databázy. */
+function normalizePlanId(value: unknown): string {
+  const normalized = String(value ?? '').trim();
 
   return normalized || DEFAULT_PLAN_ID;
 }
 
-/**
- * Vráti predvolený počet strán podľa plan_id.
- */
-function getDefaultBasePageLimit(
-  planId: string,
-): number {
+/** Vráti predvolený počet strán podľa plan_id. */
+function getDefaultBasePageLimit(planId: string): number {
   if (isKnownPlanId(planId)) {
     return PLAN_PAGE_LIMITS[planId];
   }
 
-  return PLAN_PAGE_LIMITS[
-    DEFAULT_PLAN_ID
-  ];
+  return PLAN_PAGE_LIMITS[DEFAULT_PLAN_ID];
 }
 
 /**
  * Normalizuje vygenerovaný text pred výpočtom strán.
- *
- * Zachováva odseky, ale odstraňuje nadbytočné medzery,
- * tabulátory a viacnásobné prázdne riadky.
  */
-function normalizeGeneratedText(
-  text: string,
-): string {
+function normalizeGeneratedText(text: string): string {
   return String(text ?? '')
     .replace(/\r\n?/g, '\n')
     .replace(/[ \t\f\v]+/g, ' ')
@@ -320,36 +284,22 @@ function normalizeGeneratedText(
     .trim();
 }
 
-/**
- * Normalizuje názov modulu ukladaný do logu spotreby.
- */
-function normalizeModule(
-  module: string,
-): string {
-  const normalized =
-    String(module ?? '').trim();
+/** Normalizuje názov modulu ukladaný do logu spotreby. */
+function normalizeModule(module: string): string {
+  const normalized = String(module ?? '').trim();
 
   if (!normalized) {
     return DEFAULT_MODULE;
   }
 
-  return normalized.slice(
-    0,
-    MAX_MODULE_LENGTH,
-  );
+  return normalized.slice(0, MAX_MODULE_LENGTH);
 }
 
 /**
  * Overí a normalizuje requestId.
- *
- * RequestId nesmie byť prázdny, pretože zabezpečuje idempotentnosť
- * databázovej RPC funkcie.
  */
-function normalizeRequestId(
-  requestId: string,
-): string {
-  const normalized =
-    String(requestId ?? '').trim();
+function normalizeRequestId(requestId: string): string {
+  const normalized = String(requestId ?? '').trim();
 
   if (!normalized) {
     throw new Error(
@@ -357,10 +307,7 @@ function normalizeRequestId(
     );
   }
 
-  if (
-    normalized.length >
-    MAX_REQUEST_ID_LENGTH
-  ) {
+  if (normalized.length > MAX_REQUEST_ID_LENGTH) {
     throw new Error(
       `INVALID_REQUEST_ID: requestId môže obsahovať najviac ${MAX_REQUEST_ID_LENGTH} znakov.`,
     );
@@ -369,12 +316,8 @@ function normalizeRequestId(
   return normalized;
 }
 
-/**
- * Overí, či je odpoveď RPC funkcie objekt.
- */
-function isRpcBalanceRow(
-  value: unknown,
-): value is RpcBalanceRow {
+/** Overí, či je odpoveď RPC funkcie objekt. */
+function isRpcBalanceRow(value: unknown): value is RpcBalanceRow {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -386,31 +329,53 @@ function isRpcBalanceRow(
  * Vytvorí predvolenú kvótu pre bezplatný balík.
  */
 function createDefaultPageQuota(): PageQuota {
-  const basePageLimit =
-    PLAN_PAGE_LIMITS[
-      DEFAULT_PLAN_ID
-    ];
+  const basePageLimit = PLAN_PAGE_LIMITS[DEFAULT_PLAN_ID];
 
   return {
     planId: DEFAULT_PLAN_ID,
+    isAdmin: false,
+    isUnlimited: false,
     basePageLimit,
     extraPageLimit: 0,
     pageLimit: basePageLimit,
     pagesUsed: 0,
     pagesRemaining: basePageLimit,
-    pageLimitReached:
-      basePageLimit <= 0,
+    pageLimitReached: basePageLimit <= 0,
+  };
+}
+
+/**
+ * Vytvorí neobmedzenú kvótu pre administrátora.
+ */
+function createUnlimitedPageQuota({
+  planId,
+  basePageLimit,
+  extraPageLimit,
+  pagesUsed,
+}: {
+  planId: string;
+  basePageLimit: number;
+  extraPageLimit: number;
+  pagesUsed: number;
+}): PageQuota {
+  return {
+    planId,
+    isAdmin: true,
+    isUnlimited: true,
+    basePageLimit: toSafeInteger(
+      basePageLimit,
+      getDefaultBasePageLimit(planId),
+    ),
+    extraPageLimit: toSafeInteger(extraPageLimit, 0),
+    pageLimit: UNLIMITED_NUMERIC_PAGE_VALUE,
+    pagesUsed: toSafeInteger(pagesUsed, 0),
+    pagesRemaining: UNLIMITED_NUMERIC_PAGE_VALUE,
+    pageLimitReached: false,
   };
 }
 
 /**
  * Prevedie databázovú odpoveď na jednotný objekt PageQuota.
- *
- * Výsledok je vždy konzistentný:
- *
- * pageLimit = základný limit + dodatočný limit
- * pagesRemaining nemôže byť záporné číslo
- * pagesRemaining nemôže byť vyššie než reálne vypočítaný zostatok
  */
 function mapBalance(
   row: RpcBalanceRow | null | undefined,
@@ -419,82 +384,79 @@ function mapBalance(
     return createDefaultPageQuota();
   }
 
-  const planId = normalizePlanId(
-    row.plan_id,
+  const databaseAdmin =
+    toSafeBoolean(row.is_admin, false) ||
+    toSafeBoolean(row.admin_access, false) ||
+    toSafeBoolean(row.is_unlimited, false);
+
+  const planId = normalizePlanId(row.plan_id);
+  const defaultBasePageLimit = getDefaultBasePageLimit(planId);
+
+  const basePageLimit = toSafeInteger(
+    row.base_page_limit,
+    defaultBasePageLimit,
   );
 
-  const defaultBasePageLimit =
-    getDefaultBasePageLimit(planId);
+  const extraPageLimit = toSafeInteger(
+    row.extra_page_limit,
+    0,
+  );
 
-  const basePageLimit =
-    toSafeInteger(
-      row.base_page_limit,
-      defaultBasePageLimit,
-    );
+  const pagesUsed = toSafeInteger(
+    row.used_pages ?? row.pages_used,
+    0,
+  );
 
-  const extraPageLimit =
-    toSafeInteger(
-      row.extra_page_limit,
-      0,
-    );
+  if (databaseAdmin) {
+    return createUnlimitedPageQuota({
+      planId,
+      basePageLimit,
+      extraPageLimit,
+      pagesUsed,
+    });
+  }
 
-  const calculatedPageLimit =
-    basePageLimit +
-    extraPageLimit;
+  const calculatedPageLimit = basePageLimit + extraPageLimit;
+
+  const rawPageLimit = row.total_pages ?? row.page_limit;
 
   const pageLimit =
-    row.total_pages === null ||
-    row.total_pages === undefined
+    rawPageLimit === null || rawPageLimit === undefined
       ? calculatedPageLimit
-      : toSafeInteger(
-          row.total_pages,
-          calculatedPageLimit,
-        );
+      : toSafeInteger(rawPageLimit, calculatedPageLimit);
 
-  const pagesUsed =
-    toSafeInteger(
-      row.used_pages,
-      0,
-    );
+  const calculatedRemaining = Math.max(
+    pageLimit - pagesUsed,
+    0,
+  );
 
-  const calculatedRemaining =
-    Math.max(
-      pageLimit - pagesUsed,
-      0,
-    );
+  const rawRemaining =
+    row.remaining_pages ?? row.pages_remaining;
 
   const databaseRemaining =
-    row.remaining_pages === null ||
-    row.remaining_pages === undefined
+    rawRemaining === null || rawRemaining === undefined
       ? calculatedRemaining
-      : toSafeInteger(
-          row.remaining_pages,
-          calculatedRemaining,
-        );
+      : toSafeInteger(rawRemaining, calculatedRemaining);
 
   /**
    * Databázová hodnota nesmie zvýšiť reálne dostupný zostatok.
-   *
-   * Ak by RPC omylom vrátila vyššiu hodnotu, použije sa bezpečnejší
-   * vypočítaný limit.
    */
-  const pagesRemaining =
-    Math.min(
-      databaseRemaining,
-      calculatedRemaining,
-    );
+  const pagesRemaining = Math.min(
+    databaseRemaining,
+    calculatedRemaining,
+  );
 
   const pageLimitReached =
-    toSafeBoolean(
-      row.limit_reached,
-      false,
-    ) ||
+    toSafeBoolean(row.limit_reached, false) ||
+    toSafeBoolean(row.page_limit_reached, false) ||
     pageLimit <= 0 ||
     pagesUsed >= pageLimit ||
     pagesRemaining <= 0;
 
   return {
     planId,
+    isAdmin: false,
+    isUnlimited: false,
     basePageLimit,
     extraPageLimit,
     pageLimit,
@@ -505,40 +467,14 @@ function mapBalance(
 }
 
 /**
- * Načíta ID aktuálne prihláseného používateľa.
- */
-async function getAuthenticatedUserId(
-  supabase: SupabaseServerClient,
-): Promise<string> {
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error) {
-    throw new Error(
-      `UNAUTHENTICATED: ${error.message}`,
-    );
-  }
-
-  if (!user?.id) {
-    throw new Error('UNAUTHENTICATED');
-  }
-
-  return user.id;
-}
-
-/**
  * Vytvorí čitateľnú správu zo Supabase/PostgreSQL chyby.
  */
-function getDatabaseErrorMessage(
-  error: {
-    message?: string | null;
-    details?: string | null;
-    hint?: string | null;
-    code?: string | null;
-  },
-): string {
+function getDatabaseErrorMessage(error: {
+  message?: string | null;
+  details?: string | null;
+  hint?: string | null;
+  code?: string | null;
+}): string {
   return [
     error.message,
     error.details,
@@ -546,9 +482,7 @@ function getDatabaseErrorMessage(
     error.code,
   ]
     .filter(
-      (
-        value,
-      ): value is string =>
+      (value): value is string =>
         typeof value === 'string' &&
         value.trim().length > 0,
     )
@@ -556,20 +490,102 @@ function getDatabaseErrorMessage(
 }
 
 /**
+ * Rozpozná chybu chýbajúcej tabuľky, view alebo stĺpca.
+ */
+function isMissingDatabaseObjectError(error: {
+  message?: string | null;
+  code?: string | null;
+}): boolean {
+  const code = String(error.code || '').toUpperCase();
+  const message = String(error.message || '');
+
+  return (
+    code === '42P01' ||
+    code === '42703' ||
+    code === 'PGRST204' ||
+    code === 'PGRST205' ||
+    /does not exist|could not find|schema cache|relation|column/i.test(
+      message,
+    )
+  );
+}
+
+/**
+ * Načíta stránkový zostatok s podporou starej aj novej databázovej schémy.
+ *
+ * Poradie:
+ * 1. public.zedpera_page_balances,
+ * 2. public.zedpera_user_entitlements.
+ */
+async function loadPageBalance({
+  supabase,
+  userId,
+}: {
+  supabase: SupabaseServerClient;
+  userId: string;
+}): Promise<PageBalanceDatabaseRow | null> {
+  const balanceResult = await supabase
+    .from('zedpera_page_balances')
+    .select(
+      [
+        'plan_id',
+        'base_page_limit',
+        'extra_page_limit',
+        'used_pages',
+      ].join(', '),
+    )
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!balanceResult.error) {
+    return balanceResult.data as PageBalanceDatabaseRow | null;
+  }
+
+  if (!isMissingDatabaseObjectError(balanceResult.error)) {
+    throw new Error(
+      `PAGE_QUOTA_LOAD_FAILED: ${
+        getDatabaseErrorMessage(balanceResult.error) ||
+        'Nepodarilo sa načítať stránkový limit.'
+      }`,
+    );
+  }
+
+  const entitlementResult = await supabase
+    .from('zedpera_user_entitlements')
+    .select(
+      [
+        'plan_id',
+        'base_page_limit',
+        'extra_page_limit',
+        'pages_used',
+      ].join(', '),
+    )
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (entitlementResult.error) {
+    throw new Error(
+      `PAGE_QUOTA_LOAD_FAILED: ${
+        getDatabaseErrorMessage(entitlementResult.error) ||
+        'Nepodarilo sa načítať stránkový limit.'
+      }`,
+    );
+  }
+
+  return entitlementResult.data as PageBalanceDatabaseRow | null;
+}
+
+/**
  * Vypočíta počet spotrebovaných strán podľa dĺžky textu.
  *
  * Príklady:
- *
  * 0 znakov      = 0 strán
  * 1 znak        = 1 strana
  * 1 800 znakov  = 1 strana
  * 1 801 znakov  = 2 strany
  */
-export function countGeneratedPages(
-  text: string,
-): number {
-  const normalizedText =
-    normalizeGeneratedText(text);
+export function countGeneratedPages(text: string): number {
+  const normalizedText = normalizeGeneratedText(text);
 
   if (!normalizedText) {
     return 0;
@@ -577,8 +593,7 @@ export function countGeneratedPages(
 
   return Math.max(
     Math.ceil(
-      normalizedText.length /
-        CHARACTERS_PER_PAGE,
+      normalizedText.length / CHARACTERS_PER_PAGE,
     ),
     1,
   );
@@ -586,39 +601,43 @@ export function countGeneratedPages(
 
 /**
  * Vypočíta maximálny povolený počet výstupných tokenov.
- *
- * Funkcia nikdy:
- *
- * - nevráti zápornú hodnotu,
- * - neprekročí požadovaný limit,
- * - neprekročí počet tokenov dostupný podľa zostávajúcich strán.
  */
 export function getOutputTokenLimit(
   remainingPages: number,
   requestedTokenLimit: number,
+  options: OutputTokenLimitOptions = {},
 ): number {
-  const safeRemainingPages =
-    toSafeInteger(
-      remainingPages,
-      0,
-    );
+  const safeRequestedTokenLimit = toSafeInteger(
+    requestedTokenLimit,
+    0,
+  );
 
-  const safeRequestedTokenLimit =
-    toSafeInteger(
-      requestedTokenLimit,
-      0,
-    );
-
-  if (
-    safeRemainingPages <= 0 ||
-    safeRequestedTokenLimit <= 0
-  ) {
+  if (safeRequestedTokenLimit <= 0) {
     return 0;
   }
 
-  const quotaTokenLimit =
-    safeRemainingPages *
-    TOKENS_PER_PAGE;
+  if (options.isUnlimited === true) {
+    return safeRequestedTokenLimit;
+  }
+
+  const safeRemainingPages = toSafeInteger(
+    remainingPages,
+    0,
+  );
+
+  if (safeRemainingPages <= 0) {
+    return 0;
+  }
+
+  /**
+   * Pri administrátorskej vysokej hodnote nie je potrebné násobiť
+   * Number.MAX_SAFE_INTEGER hodnotou TOKENS_PER_PAGE.
+   */
+  if (safeRemainingPages >= UNLIMITED_NUMERIC_PAGE_VALUE) {
+    return safeRequestedTokenLimit;
+  }
+
+  const quotaTokenLimit = safeRemainingPages * TOKENS_PER_PAGE;
 
   return Math.min(
     safeRequestedTokenLimit,
@@ -628,69 +647,73 @@ export function getOutputTokenLimit(
 
 /**
  * Načíta aktuálnu stránkovú kvótu prihláseného používateľa.
+ *
+ * Administrátor sa identifikuje cez lib/entitlements.ts a okamžite
+ * dostane neobmedzenú kvótu bez kontroly databázového zostatku.
  */
 export async function getCurrentPageQuota(): Promise<PageQuota> {
-  const supabase =
-    await createSupabaseServerClient();
+  const entitlements = await getCurrentEntitlements();
 
-  const userId =
-    await getAuthenticatedUserId(
-      supabase,
-    );
-
-  const {
-    data,
-    error,
-  } = await supabase
-    .from('zedpera_page_balances')
-    .select(
-      [
-        'plan_id',
-        'base_page_limit',
-        'extra_page_limit',
-        'used_pages',
-      ].join(','),
-    )
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (error) {
-    const message =
-      getDatabaseErrorMessage(error);
-
-    throw new Error(
-      `PAGE_QUOTA_LOAD_FAILED: ${
-        message ||
-        'Nepodarilo sa načítať stránkový limit.'
-      }`,
-    );
+  if (
+    entitlements.isAdmin ||
+    entitlements.hasUnlimitedAccess
+  ) {
+    return createUnlimitedPageQuota({
+      planId: entitlements.planId,
+      basePageLimit: entitlements.basePageLimit,
+      extraPageLimit: entitlements.extraPageLimit,
+      pagesUsed: entitlements.pagesUsed,
+    });
   }
+
+  const supabase = await createSupabaseServerClient();
+
+  const data = await loadPageBalance({
+    supabase,
+    userId: entitlements.userId,
+  });
 
   if (!data) {
-    return createDefaultPageQuota();
+    const basePageLimit = toSafeInteger(
+      entitlements.basePageLimit,
+      getDefaultBasePageLimit(entitlements.planId),
+    );
+
+    const extraPageLimit = toSafeInteger(
+      entitlements.extraPageLimit,
+      0,
+    );
+
+    const pagesUsed = toSafeInteger(
+      entitlements.pagesUsed,
+      0,
+    );
+
+    return mapBalance({
+      plan_id: entitlements.planId,
+      base_page_limit: basePageLimit,
+      extra_page_limit: extraPageLimit,
+      used_pages: pagesUsed,
+    });
   }
 
-  const row =
-    data as PageBalanceDatabaseRow;
-
   return mapBalance({
-    plan_id: row.plan_id,
-    base_page_limit:
-      row.base_page_limit,
-    extra_page_limit:
-      row.extra_page_limit,
-    used_pages: row.used_pages,
+    plan_id: data.plan_id,
+    base_page_limit: data.base_page_limit,
+    extra_page_limit: data.extra_page_limit,
+    used_pages: data.used_pages ?? data.pages_used,
   });
 }
 
 /**
  * Overí, či používateľ má k dispozícii aspoň jednu stranu.
- *
- * Funkciu je vhodné volať pred spustením drahej AI požiadavky.
  */
 export async function requireAvailablePages(): Promise<PageQuota> {
-  const quota =
-    await getCurrentPageQuota();
+  const quota = await getCurrentPageQuota();
+
+  if (quota.isUnlimited || quota.isAdmin) {
+    return quota;
+  }
 
   if (
     quota.pageLimitReached ||
@@ -705,76 +728,63 @@ export async function requireAvailablePages(): Promise<PageQuota> {
 /**
  * Odpočíta počet strán spotrebovaných vygenerovaným výstupom.
  *
- * Samotné odpočítanie musí vykonať databázová RPC funkcia
- * zedpera_consume_pages v jednej transakcii.
- *
- * Tým sa zabráni situácii, keď dve paralelné požiadavky:
- *
- * 1. načítajú rovnaký zostatok,
- * 2. obe ho považujú za dostatočný,
- * 3. obe odpočítajú strany nad povolený limit.
+ * Administrátorovi sa RPC funkcia vôbec nevolá a stránky sa
+ * neodpočítajú.
  */
 export async function consumePagesForOutput({
   text,
   module,
   requestId,
 }: ConsumePageQuotaInput): Promise<PageQuota> {
-  const normalizedText =
-    normalizeGeneratedText(text);
+  const normalizedText = normalizeGeneratedText(text);
 
-  /**
-   * Prázdny výstup nespotrebúva žiadne strany.
-   */
+  /** Prázdny výstup nespotrebúva žiadne strany. */
   if (!normalizedText) {
     return getCurrentPageQuota();
   }
 
-  const pages =
-    countGeneratedPages(
-      normalizedText,
-    );
+  const pages = countGeneratedPages(normalizedText);
 
   if (pages <= 0) {
     return getCurrentPageQuota();
   }
 
-  const safeModule =
-    normalizeModule(module);
+  const safeModule = normalizeModule(module);
+  const safeRequestId = normalizeRequestId(requestId);
 
-  const safeRequestId =
-    normalizeRequestId(requestId);
+  /**
+   * Najskôr overíme administrátorský stav. Administrátor nesmie
+   * vstúpiť do databázovej spotreby strán.
+   */
+  const entitlements = await getCurrentEntitlements();
 
-  const supabase =
-    await createSupabaseServerClient();
+  if (
+    entitlements.isAdmin ||
+    entitlements.hasUnlimitedAccess
+  ) {
+    return createUnlimitedPageQuota({
+      planId: entitlements.planId,
+      basePageLimit: entitlements.basePageLimit,
+      extraPageLimit: entitlements.extraPageLimit,
+      pagesUsed: entitlements.pagesUsed,
+    });
+  }
 
-  const userId =
-    await getAuthenticatedUserId(
-      supabase,
-    );
+  const supabase = await createSupabaseServerClient();
 
-  const {
-    data,
-    error,
-  } = await supabase.rpc(
+  const { data, error } = await supabase.rpc(
     'zedpera_consume_pages',
     {
       p_pages: pages,
       p_module: safeModule,
-      p_request_id:
-        safeRequestId,
-      p_character_count:
-        normalizedText.length,
+      p_request_id: safeRequestId,
+      p_character_count: normalizedText.length,
     },
   );
 
   if (error) {
-    const databaseMessage =
-      getDatabaseErrorMessage(
-        error,
-      );
-
-    const normalizedErrorMessage =
-      databaseMessage.toUpperCase();
+    const databaseMessage = getDatabaseErrorMessage(error);
+    const normalizedErrorMessage = databaseMessage.toUpperCase();
 
     if (
       normalizedErrorMessage.includes(
@@ -782,6 +792,16 @@ export async function consumePagesForOutput({
       )
     ) {
       throw new PageLimitError();
+    }
+
+    if (
+      normalizedErrorMessage.includes('UNAUTHENTICATED')
+    ) {
+      throw new Error(
+        `UNAUTHENTICATED: ${
+          databaseMessage || 'Používateľ nie je prihlásený.'
+        }`,
+      );
     }
 
     throw new Error(
@@ -792,9 +812,7 @@ export async function consumePagesForOutput({
     );
   }
 
-  const rawRow = Array.isArray(data)
-    ? data[0]
-    : data;
+  const rawRow = Array.isArray(data) ? data[0] : data;
 
   if (!isRpcBalanceRow(rawRow)) {
     throw new Error(
@@ -802,32 +820,28 @@ export async function consumePagesForOutput({
     );
   }
 
-  const quota =
-    mapBalance(rawRow);
+  const quota = mapBalance(rawRow);
 
   /**
-   * Dodatočná bezpečnostná kontrola.
-   *
-   * RPC funkcia by pri prekročení limitu mala vyvolať databázovú
-   * chybu PAGE_LIMIT_REACHED. Ak namiesto toho vráti stav s prekročeným
-   * limitom, aplikácia ho stále správne vyhodnotí.
+   * Ak novšia RPC funkcia sama vráti admin_access/is_admin,
+   * výsledok sa bezpečne prevedie na neobmedzenú kvótu.
    */
-  if (
-    quota.pagesUsed >
-    quota.pageLimit
-  ) {
+  if (quota.isUnlimited || quota.isAdmin) {
+    return quota;
+  }
+
+  /** Dodatočná bezpečnostná kontrola. */
+  if (quota.pagesUsed > quota.pageLimit) {
     throw new PageLimitError(
       'Požadovaný výstup prekročil dostupný stránkový limit.',
     );
   }
 
-  /**
-   * userId sa získava aj napriek tomu, že sa neposiela do RPC.
-   *
-   * Databázová funkcia musí používateľa identifikovať cez auth.uid().
-   * Táto kontrola zabezpečuje, že RPC nebude spustená bez platnej relácie.
-   */
-  void userId;
-
   return quota;
 }
+
+/**
+ * Spätné kompatibilné aliasy pre existujúce API route súbory.
+ */
+export const assertPageAvailable = requireAvailablePages;
+export const consumeCurrentUserPages = consumePagesForOutput;

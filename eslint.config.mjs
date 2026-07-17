@@ -7,24 +7,21 @@ const eslintConfig = defineConfig([
   ...nextTs,
 
   /**
-   * Dočasná kompatibilná konfigurácia pre existujúci projekt ZEDPERA.
+   * Kompatibilná konfigurácia pre existujúci projekt ZEDPERA.
    *
-   * Pravidlá zostávajú aktívne ako upozornenia tam, kde je to vhodné,
-   * ale neblokujú lint, testovanie ani produkčný build.
-   *
-   * Táto konfigurácia nemení žiadnu funkcionalitu aplikácie.
+   * Pravidlá, ktoré upozorňujú na technický dlh, zostávajú aktívne
+   * ako warnings, ale neblokujú TypeScript kontrolu ani produkčný build.
    */
   {
     rules: {
       /**
-       * Projekt obsahuje množstvo starších typov any.
-       * Zachováme upozornenie, ale lint nebude ukončený chybou.
+       * Staršie časti projektu používajú typ any.
+       * Zatiaľ sa zobrazí upozornenie bez zablokovania testovania.
        */
       '@typescript-eslint/no-explicit-any': 'warn',
 
       /**
-       * Nepoužité importy, premenné a pomocné funkcie zatiaľ iba zobrazíme
-       * ako upozornenie.
+       * Nepoužité importy, premenné, argumenty a pomocné funkcie.
        */
       '@typescript-eslint/no-unused-vars': [
         'warn',
@@ -37,28 +34,43 @@ const eslintConfig = defineConfig([
       ],
 
       /**
-       * let namiesto const nepredstavuje funkčnú chybu.
+       * Premenné, ktoré by mohli byť const.
        */
       'prefer-const': 'warn',
 
       /**
-       * Existujúci projekt načítava dáta a lokálne nastavenia v useEffect.
-       * Refaktorovanie všetkých komponentov by bolo rozsiahle a mohlo by
-       * zmeniť aktuálne správanie aplikácie.
+       * Existujúci projekt načítava lokálne nastavenia a dáta
+       * prostredníctvom useEffect.
        */
       'react-hooks/set-state-in-effect': 'off',
 
       /**
-       * Starší kód obsahuje funkcie deklarované nižšie v komponente.
-       * Kontrolu dočasne vypíname, aby sa zachovala existujúca funkcionalita.
+       * Zachovanie existujúcich operácií s objektmi prehliadača,
+       * navigáciou a pomocnými premennými.
        */
       'react-hooks/immutability': 'off',
 
       /**
-       * Niektoré API route používajú názov module ako lokálnu premennú
-       * alebo parameter. Ide o lint pravidlo Next.js, nie o TypeScript chybu.
+       * Zachovanie existujúcich memoizovaných callbackov.
+       */
+      'react-hooks/preserve-manual-memoization': 'off',
+
+      /**
+       * Niektoré route používajú názov module ako lokálnu premennú.
        */
       '@next/next/no-assign-module-variable': 'off',
+    },
+  },
+
+  /**
+   * Súbory .cjs sú zámerne CommonJS skripty.
+   * Používanie require() je v nich štandardné a funkčne správne.
+   */
+  {
+    files: ['**/*.cjs'],
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+      '@typescript-eslint/no-var-requires': 'off',
     },
   },
 

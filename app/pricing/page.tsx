@@ -15,12 +15,10 @@ import {
   CheckCircle2,
   CreditCard,
   Crown,
-  ExternalLink,
   FileText,
   Gift,
   Loader2,
   Menu,
-  Paperclip,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
@@ -31,7 +29,6 @@ import {
   type AddonId,
   type PlanId,
 } from '@/lib/billing/catalog';
-
 
 
 type PackagePlan = {
@@ -1035,81 +1032,6 @@ export default function PackagesPage() {
           </p>
         </section>
 
-        <section className="rounded-3xl border border-white/10 bg-[#0f172a] p-6 shadow-xl">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <Paperclip
-                  className="text-purple-400"
-                  size={24}
-                />
-
-                <h2 className="text-2xl font-black text-white">
-                  Akademický pracovník a individuálny mentoring
-                </h2>
-              </div>
-
-              <p className="mt-2 max-w-3xl leading-7 text-slate-300">
-                Potrebujete individuálnu pomoc od odborníka? Vyberte si krajinu
-                a pokračujte na stránku partnerskej služby.
-              </p>
-
-              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                <a
-                  href="https://www.zaverecneprace.sk"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded-2xl border border-white/10 bg-black/30 p-4 transition hover:border-green-400/50 hover:bg-green-500/10"
-                >
-                  <div className="text-sm text-slate-400">
-                    Slovensko
-                  </div>
-
-                  <div className="mt-1 font-bold text-white">
-                    www.zaverecneprace.sk
-                  </div>
-                </a>
-
-                <a
-                  href="https://www.zaverecne-prace.cz"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded-2xl border border-white/10 bg-black/30 p-4 transition hover:border-blue-400/50 hover:bg-blue-500/10"
-                >
-                  <div className="text-sm text-slate-400">
-                    Česko
-                  </div>
-
-                  <div className="mt-1 font-bold text-white">
-                    www.zaverecne-prace.cz
-                  </div>
-                </a>
-              </div>
-            </div>
-
-            <div className="flex shrink-0 flex-col gap-3 sm:flex-row lg:flex-col">
-              <a
-                href="https://www.zaverecneprace.sk"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-green-600 px-5 py-3 font-bold text-white transition hover:bg-green-500"
-              >
-                <ExternalLink size={18} />
-                Slovensko
-              </a>
-
-              <a
-                href="https://www.zaverecne-prace.cz"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white transition hover:bg-blue-500"
-              >
-                <ExternalLink size={18} />
-                Česko
-              </a>
-            </div>
-          </div>
-        </section>
       </main>
 
       <button

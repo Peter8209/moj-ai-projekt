@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -16,6 +16,7 @@ import {
   User,
 } from 'lucide-react';
 
+import { useLanguage } from '@/components/LanguageProvider';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 type AppLanguage = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
@@ -26,6 +27,9 @@ type RegisterCopy = {
   description: string;
   selectedPlan: string;
   freePlan: string;
+  seminarPlan: string;
+  bachelorPlan: string;
+  masterPlan: string;
   fullName: string;
   fullNamePlaceholder: string;
   email: string;
@@ -47,12 +51,27 @@ type RegisterCopy = {
   alreadyAccount: string;
   login: string;
   backHome: string;
+  sidebarDescription: string;
+  benefitFree: string;
+  benefitEmail: string;
+  benefitIsolation: string;
+  benefitServer: string;
   missingFields: string;
   invalidEmail: string;
   weakPassword: string;
   passwordMismatch: string;
   termsRequired: string;
   registrationFailed: string;
+  emailAlreadyRegistered: string;
+  signupDisabled: string;
+  emailProviderDisabled: string;
+  tooManyRequests: string;
+  confirmationSendFailed: string;
+  databaseError: string;
+  captchaFailed: string;
+  invalidRequest: string;
+  networkError: string;
+  serviceUnavailable: string;
   confirmationTitle: string;
   confirmationText: string;
   confirmationDetail: string;
@@ -60,275 +79,446 @@ type RegisterCopy = {
 };
 
 const REGISTER_COPY: Record<AppLanguage, RegisterCopy> = {
-  sk: {
-    title: 'Registrácia',
-    subtitle: 'Vytvorenie účtu ZEDPERA',
-    description:
-      'Vytvorte si používateľský účet. Bezplatný účet bude mať štandardné FREE oprávnenia, nie administrátorský prístup.',
-    selectedPlan: 'Vybraný balík',
-    freePlan: 'FREE verzia',
-    fullName: 'Meno a priezvisko',
-    fullNamePlaceholder: 'Zadajte meno a priezvisko',
-    email: 'E-mail',
-    emailPlaceholder: 'napr. peter@email.com',
-    password: 'Heslo',
-    passwordPlaceholder: 'Minimálne 8 znakov',
-    confirmPassword: 'Potvrdenie hesla',
-    confirmPasswordPlaceholder: 'Zadajte heslo znova',
-    showPassword: 'Zobraziť heslo',
-    hidePassword: 'Skryť heslo',
-    termsPrefix: 'Súhlasím s ',
-    termsLink: 'obchodnými podmienkami',
-    termsSuffix: ' a pravidlami používania služby.',
-    privacyPrefix: 'Potvrdzujem, že som sa oboznámil/a so ',
-    privacyLink: 'zásadami ochrany osobných údajov',
-    privacySuffix: '.',
-    submit: 'Registrovať sa',
-    submitting: 'Vytváram účet...',
-    alreadyAccount: 'Už máte účet?',
-    login: 'Prihlásiť sa',
-    backHome: 'Späť na úvodnú stránku',
-    missingFields: 'Vyplňte všetky povinné polia.',
-    invalidEmail: 'Zadajte platnú e-mailovú adresu.',
-    weakPassword: 'Heslo musí mať aspoň 8 znakov.',
-    passwordMismatch: 'Zadané heslá sa nezhodujú.',
-    termsRequired:
-      'Pre registráciu je potrebné samostatne potvrdiť obchodné podmienky aj ochranu osobných údajov.',
-    registrationFailed: 'Registrácia sa nepodarila. Skúste to znova.',
-    confirmationTitle: 'Skontrolujte si e-mail',
-    confirmationText:
-      'Na zadanú e-mailovú adresu sme odoslali potvrdzujúci odkaz. Účet sa aktivuje až po jeho otvorení.',
-    confirmationDetail:
-      'Po potvrdení e-mailu budete presmerovaný/á do nového používateľského rozhrania. Skontrolujte aj priečinok Spam alebo Nevyžiadaná pošta.',
-    confirmationDisabled:
-      'Účet bol vytvorený, ale Supabase vrátil okamžitú reláciu. Zapnite povinné potvrdenie e-mailu v Supabase Auth a registráciu zopakujte s novou adresou.',
+  "sk": {
+    "title": "Registrácia",
+    "subtitle": "Vytvorenie účtu ZEDPERA",
+    "description": "Vytvorte si používateľský účet. Bezplatný účet bude mať štandardné FREE oprávnenia, nie administrátorský prístup.",
+    "selectedPlan": "Vybraný balík",
+    "freePlan": "FREE verzia",
+    "seminarPlan": "Seminárna práca",
+    "bachelorPlan": "Bakalárska práca",
+    "masterPlan": "Diplomová / magisterská práca",
+    "fullName": "Meno a priezvisko",
+    "fullNamePlaceholder": "Zadajte meno a priezvisko",
+    "email": "E-mail",
+    "emailPlaceholder": "napr. peter@email.com",
+    "password": "Heslo",
+    "passwordPlaceholder": "Minimálne 8 znakov",
+    "confirmPassword": "Potvrdenie hesla",
+    "confirmPasswordPlaceholder": "Zadajte heslo znova",
+    "showPassword": "Zobraziť heslo",
+    "hidePassword": "Skryť heslo",
+    "termsPrefix": "Súhlasím s ",
+    "termsLink": "obchodnými podmienkami",
+    "termsSuffix": " a pravidlami používania služby.",
+    "privacyPrefix": "Potvrdzujem, že som sa oboznámil/a so ",
+    "privacyLink": "zásadami ochrany osobných údajov",
+    "privacySuffix": ".",
+    "submit": "Registrovať sa",
+    "submitting": "Vytváram účet...",
+    "alreadyAccount": "Už máte účet?",
+    "login": "Prihlásiť sa",
+    "backHome": "Späť na úvodnú stránku",
+    "sidebarDescription": "Bezpečná registrácia používateľa s potvrdením e-mailu a oddelenými oprávneniami účtu.",
+    "benefitFree": "FREE účet bez administrátorských oprávnení",
+    "benefitEmail": "Potvrdenie vlastníctva e-mailovej adresy",
+    "benefitIsolation": "Oddelené práce a história každého používateľa",
+    "benefitServer": "Serverové riadenie balíkov a limitov",
+    "missingFields": "Vyplňte všetky povinné polia.",
+    "invalidEmail": "Zadajte platnú e-mailovú adresu.",
+    "weakPassword": "Heslo musí mať aspoň 8 znakov.",
+    "passwordMismatch": "Zadané heslá sa nezhodujú.",
+    "termsRequired": "Pre registráciu je potrebné samostatne potvrdiť obchodné podmienky aj ochranu osobných údajov.",
+    "registrationFailed": "Registrácia sa nepodarila. Skúste to znova.",
+    "emailAlreadyRegistered": "Táto e-mailová adresa je už registrovaná. Prihláste sa alebo použite možnosť Zabudnuté heslo.",
+    "signupDisabled": "Vytváranie nových účtov je momentálne vypnuté. Kontaktujte podporu ZEDPERA.",
+    "emailProviderDisabled": "Registrácia e-mailom a heslom je momentálne vypnutá. Kontaktujte podporu ZEDPERA.",
+    "tooManyRequests": "Bolo odoslaných príliš veľa registračných požiadaviek. Počkajte chvíľu a skúste to znova.",
+    "confirmationSendFailed": "Účet sa nepodarilo vytvoriť, pretože potvrdzovací e-mail nebolo možné odoslať. Skúste to neskôr.",
+    "databaseError": "Registráciu sa nepodarilo uložiť. Skúste to neskôr alebo kontaktujte podporu ZEDPERA.",
+    "captchaFailed": "Bezpečnostné overenie nebolo úspešné. Obnovte stránku a skúste to znova.",
+    "invalidRequest": "Registračné údaje nie sú platné. Skontrolujte formulár a skúste to znova.",
+    "networkError": "Nepodarilo sa spojiť so serverom. Skontrolujte internetové pripojenie a skúste to znova.",
+    "serviceUnavailable": "Registračná služba je dočasne nedostupná. Skúste to neskôr.",
+    "confirmationTitle": "Skontrolujte si e-mail",
+    "confirmationText": "Na zadanú e-mailovú adresu sme odoslali potvrdzovací odkaz. Účet sa aktivuje až po jeho otvorení.",
+    "confirmationDetail": "Po potvrdení e-mailu budete presmerovaný/á na prihlasovaciu stránku. Skontrolujte aj priečinok Spam alebo Nevyžiadaná pošta.",
+    "confirmationDisabled": "Účet bol vytvorený, ale povinné potvrdenie e-mailu nie je správne nastavené. Kontaktujte podporu ZEDPERA."
   },
-  cs: {
-    title: 'Registrace',
-    subtitle: 'Vytvoření účtu ZEDPERA',
-    description:
-      'Vytvořte si uživatelský účet. Bezplatný účet bude mít standardní FREE oprávnění, nikoli administrátorský přístup.',
-    selectedPlan: 'Vybraný balíček',
-    freePlan: 'FREE verze',
-    fullName: 'Jméno a příjmení',
-    fullNamePlaceholder: 'Zadejte jméno a příjmení',
-    email: 'E-mail',
-    emailPlaceholder: 'např. peter@email.com',
-    password: 'Heslo',
-    passwordPlaceholder: 'Minimálně 8 znaků',
-    confirmPassword: 'Potvrzení hesla',
-    confirmPasswordPlaceholder: 'Zadejte heslo znovu',
-    showPassword: 'Zobrazit heslo',
-    hidePassword: 'Skrýt heslo',
-    termsPrefix: 'Souhlasím s ',
-    termsLink: 'obchodními podmínkami',
-    termsSuffix: ' a pravidly používání služby.',
-    privacyPrefix: 'Potvrzuji, že jsem se seznámil/a se ',
-    privacyLink: 'zásadami ochrany osobních údajů',
-    privacySuffix: '.',
-    submit: 'Registrovat se',
-    submitting: 'Vytvářím účet...',
-    alreadyAccount: 'Už máte účet?',
-    login: 'Přihlásit se',
-    backHome: 'Zpět na úvodní stránku',
-    missingFields: 'Vyplňte všechna povinná pole.',
-    invalidEmail: 'Zadejte platnou e-mailovou adresu.',
-    weakPassword: 'Heslo musí mít alespoň 8 znaků.',
-    passwordMismatch: 'Zadaná hesla se neshodují.',
-    termsRequired:
-      'Pro registraci je nutné samostatně potvrdit obchodní podmínky i ochranu osobních údajů.',
-    registrationFailed: 'Registrace se nezdařila. Zkuste to znovu.',
-    confirmationTitle: 'Zkontrolujte svůj e-mail',
-    confirmationText:
-      'Na zadanou e-mailovou adresu jsme odeslali potvrzovací odkaz. Účet se aktivuje až po jeho otevření.',
-    confirmationDetail:
-      'Po potvrzení e-mailu budete přesměrováni do nového uživatelského rozhraní. Zkontrolujte také složku Spam.',
-    confirmationDisabled:
-      'Účet byl vytvořen, ale Supabase vrátil okamžitou relaci. Zapněte povinné potvrzení e-mailu v Supabase Auth.',
+  "cs": {
+    "title": "Registrace",
+    "subtitle": "Vytvoření účtu ZEDPERA",
+    "description": "Vytvořte si uživatelský účet. Bezplatný účet bude mít standardní FREE oprávnění, nikoli administrátorský přístup.",
+    "selectedPlan": "Vybraný balíček",
+    "freePlan": "FREE verze",
+    "seminarPlan": "Seminární práce",
+    "bachelorPlan": "Bakalářská práce",
+    "masterPlan": "Diplomová / magisterská práce",
+    "fullName": "Jméno a příjmení",
+    "fullNamePlaceholder": "Zadejte jméno a příjmení",
+    "email": "E-mail",
+    "emailPlaceholder": "např. peter@email.com",
+    "password": "Heslo",
+    "passwordPlaceholder": "Minimálně 8 znaků",
+    "confirmPassword": "Potvrzení hesla",
+    "confirmPasswordPlaceholder": "Zadejte heslo znovu",
+    "showPassword": "Zobrazit heslo",
+    "hidePassword": "Skrýt heslo",
+    "termsPrefix": "Souhlasím s ",
+    "termsLink": "obchodními podmínkami",
+    "termsSuffix": " a pravidly používání služby.",
+    "privacyPrefix": "Potvrzuji, že jsem se seznámil/a se ",
+    "privacyLink": "zásadami ochrany osobních údajů",
+    "privacySuffix": ".",
+    "submit": "Registrovat se",
+    "submitting": "Vytvářím účet...",
+    "alreadyAccount": "Už máte účet?",
+    "login": "Přihlásit se",
+    "backHome": "Zpět na úvodní stránku",
+    "sidebarDescription": "Bezpečná registrace uživatele s potvrzením e-mailu a oddělenými oprávněními účtu.",
+    "benefitFree": "FREE účet bez administrátorských oprávnění",
+    "benefitEmail": "Potvrzení vlastnictví e-mailové adresy",
+    "benefitIsolation": "Oddělené práce a historie každého uživatele",
+    "benefitServer": "Serverové řízení balíčků a limitů",
+    "missingFields": "Vyplňte všechna povinná pole.",
+    "invalidEmail": "Zadejte platnou e-mailovou adresu.",
+    "weakPassword": "Heslo musí mít alespoň 8 znaků.",
+    "passwordMismatch": "Zadaná hesla se neshodují.",
+    "termsRequired": "Pro registraci je nutné samostatně potvrdit obchodní podmínky i ochranu osobních údajů.",
+    "registrationFailed": "Registrace se nezdařila. Zkuste to znovu.",
+    "emailAlreadyRegistered": "Tato e-mailová adresa je již registrována. Přihlaste se nebo použijte možnost Zapomenuté heslo.",
+    "signupDisabled": "Vytváření nových účtů je momentálně vypnuté. Kontaktujte podporu ZEDPERA.",
+    "emailProviderDisabled": "Registrace e-mailem a heslem je momentálně vypnutá. Kontaktujte podporu ZEDPERA.",
+    "tooManyRequests": "Bylo odesláno příliš mnoho registračních požadavků. Chvíli počkejte a zkuste to znovu.",
+    "confirmationSendFailed": "Účet se nepodařilo vytvořit, protože potvrzovací e-mail nebylo možné odeslat. Zkuste to později.",
+    "databaseError": "Registraci se nepodařilo uložit. Zkuste to později nebo kontaktujte podporu ZEDPERA.",
+    "captchaFailed": "Bezpečnostní ověření nebylo úspěšné. Obnovte stránku a zkuste to znovu.",
+    "invalidRequest": "Registrační údaje nejsou platné. Zkontrolujte formulář a zkuste to znovu.",
+    "networkError": "Nepodařilo se spojit se serverem. Zkontrolujte internetové připojení a zkuste to znovu.",
+    "serviceUnavailable": "Registrační služba je dočasně nedostupná. Zkuste to později.",
+    "confirmationTitle": "Zkontrolujte svůj e-mail",
+    "confirmationText": "Na zadanou e-mailovou adresu jsme odeslali potvrzovací odkaz. Účet se aktivuje až po jeho otevření.",
+    "confirmationDetail": "Po potvrzení e-mailu budete přesměrováni na přihlašovací stránku. Zkontrolujte také složku Spam.",
+    "confirmationDisabled": "Účet byl vytvořen, ale povinné potvrzení e-mailu není správně nastaveno. Kontaktujte podporu ZEDPERA."
   },
-  en: {
-    title: 'Registration',
-    subtitle: 'Create a ZEDPERA account',
-    description:
-      'Create a user account. A free account receives standard FREE permissions, never administrator access.',
-    selectedPlan: 'Selected plan',
-    freePlan: 'FREE plan',
-    fullName: 'Full name',
-    fullNamePlaceholder: 'Enter your full name',
-    email: 'Email',
-    emailPlaceholder: 'e.g. peter@email.com',
-    password: 'Password',
-    passwordPlaceholder: 'At least 8 characters',
-    confirmPassword: 'Confirm password',
-    confirmPasswordPlaceholder: 'Enter the password again',
-    showPassword: 'Show password',
-    hidePassword: 'Hide password',
-    termsPrefix: 'I agree to the ',
-    termsLink: 'terms and conditions',
-    termsSuffix: ' and service rules.',
-    privacyPrefix: 'I confirm that I have read the ',
-    privacyLink: 'privacy policy',
-    privacySuffix: '.',
-    submit: 'Create account',
-    submitting: 'Creating account...',
-    alreadyAccount: 'Already have an account?',
-    login: 'Sign in',
-    backHome: 'Back to the home page',
-    missingFields: 'Complete all required fields.',
-    invalidEmail: 'Enter a valid email address.',
-    weakPassword: 'The password must contain at least 8 characters.',
-    passwordMismatch: 'The passwords do not match.',
-    termsRequired:
-      'You must separately accept the terms and the privacy policy.',
-    registrationFailed: 'Registration failed. Please try again.',
-    confirmationTitle: 'Check your email',
-    confirmationText:
-      'We sent a confirmation link to your email address. Your account becomes active only after you open it.',
-    confirmationDetail:
-      'After confirming your email, you will be redirected to the new user interface. Also check your Spam folder.',
-    confirmationDisabled:
-      'The account was created, but Supabase returned an immediate session. Enable mandatory email confirmation in Supabase Auth.',
+  "en": {
+    "title": "Registration",
+    "subtitle": "Create a ZEDPERA account",
+    "description": "Create a user account. A free account receives standard FREE permissions, never administrator access.",
+    "selectedPlan": "Selected plan",
+    "freePlan": "FREE plan",
+    "seminarPlan": "Seminar paper",
+    "bachelorPlan": "Bachelor thesis",
+    "masterPlan": "Master thesis",
+    "fullName": "Full name",
+    "fullNamePlaceholder": "Enter your full name",
+    "email": "Email",
+    "emailPlaceholder": "e.g. peter@email.com",
+    "password": "Password",
+    "passwordPlaceholder": "At least 8 characters",
+    "confirmPassword": "Confirm password",
+    "confirmPasswordPlaceholder": "Enter the password again",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "termsPrefix": "I agree to the ",
+    "termsLink": "terms and conditions",
+    "termsSuffix": " and service rules.",
+    "privacyPrefix": "I confirm that I have read the ",
+    "privacyLink": "privacy policy",
+    "privacySuffix": ".",
+    "submit": "Create account",
+    "submitting": "Creating account...",
+    "alreadyAccount": "Already have an account?",
+    "login": "Sign in",
+    "backHome": "Back to the home page",
+    "sidebarDescription": "Secure user registration with email confirmation and separate account permissions.",
+    "benefitFree": "FREE account without administrator permissions",
+    "benefitEmail": "Verification of email address ownership",
+    "benefitIsolation": "Separate work and history for every user",
+    "benefitServer": "Server-side management of plans and limits",
+    "missingFields": "Complete all required fields.",
+    "invalidEmail": "Enter a valid email address.",
+    "weakPassword": "The password must contain at least 8 characters.",
+    "passwordMismatch": "The passwords do not match.",
+    "termsRequired": "You must separately accept the terms and the privacy policy.",
+    "registrationFailed": "Registration failed. Please try again.",
+    "emailAlreadyRegistered": "This email address is already registered. Sign in or use the Forgot password option.",
+    "signupDisabled": "New account creation is currently disabled. Contact ZEDPERA support.",
+    "emailProviderDisabled": "Email and password registration is currently disabled. Contact ZEDPERA support.",
+    "tooManyRequests": "Too many registration requests were sent. Wait a moment and try again.",
+    "confirmationSendFailed": "The account could not be created because the confirmation email could not be sent. Try again later.",
+    "databaseError": "The registration could not be saved. Try again later or contact ZEDPERA support.",
+    "captchaFailed": "The security check was not successful. Refresh the page and try again.",
+    "invalidRequest": "The registration details are invalid. Check the form and try again.",
+    "networkError": "Unable to connect to the server. Check your internet connection and try again.",
+    "serviceUnavailable": "The registration service is temporarily unavailable. Try again later.",
+    "confirmationTitle": "Check your email",
+    "confirmationText": "We sent a confirmation link to your email address. Your account becomes active only after you open it.",
+    "confirmationDetail": "After confirming your email, you will be redirected to the sign-in page. Also check your Spam folder.",
+    "confirmationDisabled": "The account was created, but mandatory email confirmation is not configured correctly. Contact ZEDPERA support."
   },
-  de: {
-    title: 'Registrierung',
-    subtitle: 'ZEDPERA-Konto erstellen',
-    description:
-      'Erstellen Sie ein Benutzerkonto. Ein kostenloses Konto erhält normale FREE-Rechte und niemals Administratorzugriff.',
-    selectedPlan: 'Gewähltes Paket',
-    freePlan: 'FREE-Version',
-    fullName: 'Vor- und Nachname',
-    fullNamePlaceholder: 'Vor- und Nachname eingeben',
-    email: 'E-Mail',
-    emailPlaceholder: 'z. B. peter@email.com',
-    password: 'Passwort',
-    passwordPlaceholder: 'Mindestens 8 Zeichen',
-    confirmPassword: 'Passwort bestätigen',
-    confirmPasswordPlaceholder: 'Passwort erneut eingeben',
-    showPassword: 'Passwort anzeigen',
-    hidePassword: 'Passwort ausblenden',
-    termsPrefix: 'Ich akzeptiere die ',
-    termsLink: 'Geschäftsbedingungen',
-    termsSuffix: ' und Nutzungsregeln.',
-    privacyPrefix: 'Ich bestätige, dass ich die ',
-    privacyLink: 'Datenschutzbestimmungen',
-    privacySuffix: ' gelesen habe.',
-    submit: 'Registrieren',
-    submitting: 'Konto wird erstellt...',
-    alreadyAccount: 'Sie haben bereits ein Konto?',
-    login: 'Anmelden',
-    backHome: 'Zurück zur Startseite',
-    missingFields: 'Füllen Sie alle Pflichtfelder aus.',
-    invalidEmail: 'Geben Sie eine gültige E-Mail-Adresse ein.',
-    weakPassword: 'Das Passwort muss mindestens 8 Zeichen enthalten.',
-    passwordMismatch: 'Die Passwörter stimmen nicht überein.',
-    termsRequired:
-      'Die Geschäftsbedingungen und der Datenschutz müssen separat bestätigt werden.',
-    registrationFailed: 'Die Registrierung ist fehlgeschlagen.',
-    confirmationTitle: 'Prüfen Sie Ihre E-Mail',
-    confirmationText:
-      'Wir haben einen Bestätigungslink gesendet. Das Konto wird erst nach dem Öffnen aktiviert.',
-    confirmationDetail:
-      'Nach der Bestätigung werden Sie zur neuen Benutzeroberfläche weitergeleitet. Prüfen Sie auch den Spam-Ordner.',
-    confirmationDisabled:
-      'Supabase hat sofort eine Sitzung erstellt. Aktivieren Sie die verpflichtende E-Mail-Bestätigung in Supabase Auth.',
+  "de": {
+    "title": "Registrierung",
+    "subtitle": "ZEDPERA-Konto erstellen",
+    "description": "Erstellen Sie ein Benutzerkonto. Ein kostenloses Konto erhält normale FREE-Rechte und niemals Administratorzugriff.",
+    "selectedPlan": "Gewähltes Paket",
+    "freePlan": "FREE-Version",
+    "seminarPlan": "Seminararbeit",
+    "bachelorPlan": "Bachelorarbeit",
+    "masterPlan": "Diplom- / Masterarbeit",
+    "fullName": "Vor- und Nachname",
+    "fullNamePlaceholder": "Vor- und Nachname eingeben",
+    "email": "E-Mail",
+    "emailPlaceholder": "z. B. peter@email.com",
+    "password": "Passwort",
+    "passwordPlaceholder": "Mindestens 8 Zeichen",
+    "confirmPassword": "Passwort bestätigen",
+    "confirmPasswordPlaceholder": "Passwort erneut eingeben",
+    "showPassword": "Passwort anzeigen",
+    "hidePassword": "Passwort ausblenden",
+    "termsPrefix": "Ich akzeptiere die ",
+    "termsLink": "Geschäftsbedingungen",
+    "termsSuffix": " und Nutzungsregeln.",
+    "privacyPrefix": "Ich bestätige, dass ich die ",
+    "privacyLink": "Datenschutzbestimmungen",
+    "privacySuffix": " gelesen habe.",
+    "submit": "Registrieren",
+    "submitting": "Konto wird erstellt...",
+    "alreadyAccount": "Sie haben bereits ein Konto?",
+    "login": "Anmelden",
+    "backHome": "Zurück zur Startseite",
+    "sidebarDescription": "Sichere Benutzerregistrierung mit E-Mail-Bestätigung und getrennten Kontoberechtigungen.",
+    "benefitFree": "FREE-Konto ohne Administratorrechte",
+    "benefitEmail": "Bestätigung der Inhaberschaft der E-Mail-Adresse",
+    "benefitIsolation": "Getrennte Arbeiten und Verläufe für jeden Benutzer",
+    "benefitServer": "Serverseitige Verwaltung von Paketen und Limits",
+    "missingFields": "Füllen Sie alle Pflichtfelder aus.",
+    "invalidEmail": "Geben Sie eine gültige E-Mail-Adresse ein.",
+    "weakPassword": "Das Passwort muss mindestens 8 Zeichen enthalten.",
+    "passwordMismatch": "Die Passwörter stimmen nicht überein.",
+    "termsRequired": "Die Geschäftsbedingungen und der Datenschutz müssen separat bestätigt werden.",
+    "registrationFailed": "Die Registrierung ist fehlgeschlagen. Bitte versuchen Sie es erneut.",
+    "emailAlreadyRegistered": "Diese E-Mail-Adresse ist bereits registriert. Melden Sie sich an oder verwenden Sie „Passwort vergessen“.",
+    "signupDisabled": "Das Erstellen neuer Konten ist derzeit deaktiviert. Kontaktieren Sie den ZEDPERA-Support.",
+    "emailProviderDisabled": "Die Registrierung mit E-Mail und Passwort ist derzeit deaktiviert. Kontaktieren Sie den ZEDPERA-Support.",
+    "tooManyRequests": "Es wurden zu viele Registrierungsanfragen gesendet. Warten Sie kurz und versuchen Sie es erneut.",
+    "confirmationSendFailed": "Das Konto konnte nicht erstellt werden, weil die Bestätigungs-E-Mail nicht gesendet werden konnte. Versuchen Sie es später erneut.",
+    "databaseError": "Die Registrierung konnte nicht gespeichert werden. Versuchen Sie es später erneut oder kontaktieren Sie den ZEDPERA-Support.",
+    "captchaFailed": "Die Sicherheitsprüfung war nicht erfolgreich. Laden Sie die Seite neu und versuchen Sie es erneut.",
+    "invalidRequest": "Die Registrierungsdaten sind ungültig. Prüfen Sie das Formular und versuchen Sie es erneut.",
+    "networkError": "Die Verbindung zum Server konnte nicht hergestellt werden. Prüfen Sie Ihre Internetverbindung.",
+    "serviceUnavailable": "Der Registrierungsdienst ist vorübergehend nicht verfügbar. Versuchen Sie es später erneut.",
+    "confirmationTitle": "Prüfen Sie Ihre E-Mail",
+    "confirmationText": "Wir haben einen Bestätigungslink an Ihre E-Mail-Adresse gesendet. Das Konto wird erst nach dem Öffnen aktiviert.",
+    "confirmationDetail": "Nach der E-Mail-Bestätigung werden Sie zur Anmeldeseite weitergeleitet. Prüfen Sie auch den Spam-Ordner.",
+    "confirmationDisabled": "Das Konto wurde erstellt, aber die verpflichtende E-Mail-Bestätigung ist nicht korrekt konfiguriert. Kontaktieren Sie den ZEDPERA-Support."
   },
-  pl: {
-    title: 'Rejestracja',
-    subtitle: 'Utworzenie konta ZEDPERA',
-    description:
-      'Utwórz konto użytkownika. Konto bezpłatne otrzymuje standardowe uprawnienia FREE, nigdy dostęp administratora.',
-    selectedPlan: 'Wybrany pakiet',
-    freePlan: 'Wersja FREE',
-    fullName: 'Imię i nazwisko',
-    fullNamePlaceholder: 'Wpisz imię i nazwisko',
-    email: 'E-mail',
-    emailPlaceholder: 'np. peter@email.com',
-    password: 'Hasło',
-    passwordPlaceholder: 'Co najmniej 8 znaków',
-    confirmPassword: 'Potwierdź hasło',
-    confirmPasswordPlaceholder: 'Wpisz hasło ponownie',
-    showPassword: 'Pokaż hasło',
-    hidePassword: 'Ukryj hasło',
-    termsPrefix: 'Akceptuję ',
-    termsLink: 'warunki handlowe',
-    termsSuffix: ' i zasady korzystania z usługi.',
-    privacyPrefix: 'Potwierdzam zapoznanie się z ',
-    privacyLink: 'polityką prywatności',
-    privacySuffix: '.',
-    submit: 'Zarejestruj się',
-    submitting: 'Tworzenie konta...',
-    alreadyAccount: 'Masz już konto?',
-    login: 'Zaloguj się',
-    backHome: 'Powrót do strony głównej',
-    missingFields: 'Wypełnij wszystkie wymagane pola.',
-    invalidEmail: 'Wpisz prawidłowy adres e-mail.',
-    weakPassword: 'Hasło musi mieć co najmniej 8 znaków.',
-    passwordMismatch: 'Hasła nie są zgodne.',
-    termsRequired:
-      'Warunki handlowe i polityka prywatności wymagają osobnego potwierdzenia.',
-    registrationFailed: 'Rejestracja nie powiodła się.',
-    confirmationTitle: 'Sprawdź pocztę e-mail',
-    confirmationText:
-      'Wysłaliśmy link potwierdzający. Konto zostanie aktywowane dopiero po jego otwarciu.',
-    confirmationDetail:
-      'Po potwierdzeniu nastąpi przekierowanie do nowego interfejsu. Sprawdź także folder Spam.',
-    confirmationDisabled:
-      'Supabase utworzył natychmiastową sesję. Włącz obowiązkowe potwierdzenie e-mail w Supabase Auth.',
+  "pl": {
+    "title": "Rejestracja",
+    "subtitle": "Utworzenie konta ZEDPERA",
+    "description": "Utwórz konto użytkownika. Konto bezpłatne otrzymuje standardowe uprawnienia FREE, nigdy dostęp administratora.",
+    "selectedPlan": "Wybrany pakiet",
+    "freePlan": "Wersja FREE",
+    "seminarPlan": "Praca seminaryjna",
+    "bachelorPlan": "Praca licencjacka",
+    "masterPlan": "Praca magisterska",
+    "fullName": "Imię i nazwisko",
+    "fullNamePlaceholder": "Wpisz imię i nazwisko",
+    "email": "E-mail",
+    "emailPlaceholder": "np. peter@email.com",
+    "password": "Hasło",
+    "passwordPlaceholder": "Co najmniej 8 znaków",
+    "confirmPassword": "Potwierdź hasło",
+    "confirmPasswordPlaceholder": "Wpisz hasło ponownie",
+    "showPassword": "Pokaż hasło",
+    "hidePassword": "Ukryj hasło",
+    "termsPrefix": "Akceptuję ",
+    "termsLink": "warunki handlowe",
+    "termsSuffix": " i zasady korzystania z usługi.",
+    "privacyPrefix": "Potwierdzam zapoznanie się z ",
+    "privacyLink": "polityką prywatności",
+    "privacySuffix": ".",
+    "submit": "Zarejestruj się",
+    "submitting": "Tworzenie konta...",
+    "alreadyAccount": "Masz już konto?",
+    "login": "Zaloguj się",
+    "backHome": "Powrót do strony głównej",
+    "sidebarDescription": "Bezpieczna rejestracja użytkownika z potwierdzeniem e-maila i oddzielnymi uprawnieniami konta.",
+    "benefitFree": "Konto FREE bez uprawnień administratora",
+    "benefitEmail": "Potwierdzenie własności adresu e-mail",
+    "benefitIsolation": "Oddzielne prace i historia każdego użytkownika",
+    "benefitServer": "Serwerowe zarządzanie pakietami i limitami",
+    "missingFields": "Wypełnij wszystkie wymagane pola.",
+    "invalidEmail": "Wpisz prawidłowy adres e-mail.",
+    "weakPassword": "Hasło musi mieć co najmniej 8 znaków.",
+    "passwordMismatch": "Hasła nie są zgodne.",
+    "termsRequired": "Warunki handlowe i polityka prywatności wymagają osobnego potwierdzenia.",
+    "registrationFailed": "Rejestracja nie powiodła się. Spróbuj ponownie.",
+    "emailAlreadyRegistered": "Ten adres e-mail jest już zarejestrowany. Zaloguj się lub użyj opcji Nie pamiętam hasła.",
+    "signupDisabled": "Tworzenie nowych kont jest obecnie wyłączone. Skontaktuj się z pomocą ZEDPERA.",
+    "emailProviderDisabled": "Rejestracja za pomocą e-maila i hasła jest obecnie wyłączona. Skontaktuj się z pomocą ZEDPERA.",
+    "tooManyRequests": "Wysłano zbyt wiele żądań rejestracji. Odczekaj chwilę i spróbuj ponownie.",
+    "confirmationSendFailed": "Nie udało się utworzyć konta, ponieważ nie można było wysłać wiadomości potwierdzającej. Spróbuj później.",
+    "databaseError": "Nie udało się zapisać rejestracji. Spróbuj później lub skontaktuj się z pomocą ZEDPERA.",
+    "captchaFailed": "Weryfikacja bezpieczeństwa nie powiodła się. Odśwież stronę i spróbuj ponownie.",
+    "invalidRequest": "Dane rejestracyjne są nieprawidłowe. Sprawdź formularz i spróbuj ponownie.",
+    "networkError": "Nie można połączyć się z serwerem. Sprawdź połączenie internetowe i spróbuj ponownie.",
+    "serviceUnavailable": "Usługa rejestracji jest tymczasowo niedostępna. Spróbuj później.",
+    "confirmationTitle": "Sprawdź pocztę e-mail",
+    "confirmationText": "Wysłaliśmy link potwierdzający na podany adres e-mail. Konto zostanie aktywowane dopiero po jego otwarciu.",
+    "confirmationDetail": "Po potwierdzeniu adresu e-mail nastąpi przekierowanie do strony logowania. Sprawdź także folder Spam.",
+    "confirmationDisabled": "Konto zostało utworzone, ale obowiązkowe potwierdzenie e-maila nie jest prawidłowo skonfigurowane. Skontaktuj się z pomocą ZEDPERA."
   },
-  hu: {
-    title: 'Regisztráció',
-    subtitle: 'ZEDPERA-fiók létrehozása',
-    description:
-      'Hozzon létre felhasználói fiókot. Az ingyenes fiók normál FREE jogosultságokat kap, adminisztrátori hozzáférést soha.',
-    selectedPlan: 'Kiválasztott csomag',
-    freePlan: 'FREE csomag',
-    fullName: 'Teljes név',
-    fullNamePlaceholder: 'Adja meg a teljes nevét',
-    email: 'E-mail',
-    emailPlaceholder: 'pl. peter@email.com',
-    password: 'Jelszó',
-    passwordPlaceholder: 'Legalább 8 karakter',
-    confirmPassword: 'Jelszó megerősítése',
-    confirmPasswordPlaceholder: 'Adja meg újra a jelszót',
-    showPassword: 'Jelszó megjelenítése',
-    hidePassword: 'Jelszó elrejtése',
-    termsPrefix: 'Elfogadom az ',
-    termsLink: 'üzleti feltételeket',
-    termsSuffix: ' és a szolgáltatás szabályait.',
-    privacyPrefix: 'Kijelentem, hogy elolvastam az ',
-    privacyLink: 'adatvédelmi szabályzatot',
-    privacySuffix: '.',
-    submit: 'Regisztráció',
-    submitting: 'Fiók létrehozása...',
-    alreadyAccount: 'Már van fiókja?',
-    login: 'Bejelentkezés',
-    backHome: 'Vissza a kezdőlapra',
-    missingFields: 'Töltse ki az összes kötelező mezőt.',
-    invalidEmail: 'Adjon meg érvényes e-mail-címet.',
-    weakPassword: 'A jelszónak legalább 8 karakterből kell állnia.',
-    passwordMismatch: 'A jelszavak nem egyeznek.',
-    termsRequired:
-      'Az üzleti feltételeket és az adatvédelmet külön is el kell fogadni.',
-    registrationFailed: 'A regisztráció sikertelen.',
-    confirmationTitle: 'Ellenőrizze az e-mailjét',
-    confirmationText:
-      'Megerősítő linket küldtünk. A fiók csak a link megnyitása után aktiválódik.',
-    confirmationDetail:
-      'A megerősítés után az új felületre irányítjuk. Ellenőrizze a Spam mappát is.',
-    confirmationDisabled:
-      'A Supabase azonnali munkamenetet adott vissza. Kapcsolja be a kötelező e-mail-megerősítést.',
-  },
+  "hu": {
+    "title": "Regisztráció",
+    "subtitle": "ZEDPERA-fiók létrehozása",
+    "description": "Hozzon létre felhasználói fiókot. Az ingyenes fiók normál FREE jogosultságokat kap, adminisztrátori hozzáférést soha.",
+    "selectedPlan": "Kiválasztott csomag",
+    "freePlan": "FREE csomag",
+    "seminarPlan": "Szemináriumi dolgozat",
+    "bachelorPlan": "Alapképzési szakdolgozat",
+    "masterPlan": "Mesterképzési szakdolgozat",
+    "fullName": "Teljes név",
+    "fullNamePlaceholder": "Adja meg a teljes nevét",
+    "email": "E-mail",
+    "emailPlaceholder": "pl. peter@email.com",
+    "password": "Jelszó",
+    "passwordPlaceholder": "Legalább 8 karakter",
+    "confirmPassword": "Jelszó megerősítése",
+    "confirmPasswordPlaceholder": "Adja meg újra a jelszót",
+    "showPassword": "Jelszó megjelenítése",
+    "hidePassword": "Jelszó elrejtése",
+    "termsPrefix": "Elfogadom az ",
+    "termsLink": "üzleti feltételeket",
+    "termsSuffix": " és a szolgáltatás szabályait.",
+    "privacyPrefix": "Kijelentem, hogy elolvastam az ",
+    "privacyLink": "adatvédelmi szabályzatot",
+    "privacySuffix": ".",
+    "submit": "Regisztráció",
+    "submitting": "Fiók létrehozása...",
+    "alreadyAccount": "Már van fiókja?",
+    "login": "Bejelentkezés",
+    "backHome": "Vissza a kezdőlapra",
+    "sidebarDescription": "Biztonságos felhasználói regisztráció e-mail-megerősítéssel és elkülönített fiókjogosultságokkal.",
+    "benefitFree": "FREE fiók adminisztrátori jogosultságok nélkül",
+    "benefitEmail": "Az e-mail-cím tulajdonjogának megerősítése",
+    "benefitIsolation": "Elkülönített munkák és előzmények minden felhasználónak",
+    "benefitServer": "Csomagok és korlátok szerveroldali kezelése",
+    "missingFields": "Töltse ki az összes kötelező mezőt.",
+    "invalidEmail": "Adjon meg érvényes e-mail-címet.",
+    "weakPassword": "A jelszónak legalább 8 karakterből kell állnia.",
+    "passwordMismatch": "A jelszavak nem egyeznek.",
+    "termsRequired": "Az üzleti feltételeket és az adatvédelmi szabályzatot külön is el kell fogadni.",
+    "registrationFailed": "A regisztráció sikertelen. Próbálja újra.",
+    "emailAlreadyRegistered": "Ez az e-mail-cím már regisztrálva van. Jelentkezzen be, vagy használja az Elfelejtett jelszó lehetőséget.",
+    "signupDisabled": "Az új fiókok létrehozása jelenleg ki van kapcsolva. Lépjen kapcsolatba a ZEDPERA ügyfélszolgálatával.",
+    "emailProviderDisabled": "Az e-mail-címmel és jelszóval történő regisztráció jelenleg ki van kapcsolva. Lépjen kapcsolatba a ZEDPERA ügyfélszolgálatával.",
+    "tooManyRequests": "Túl sok regisztrációs kérés érkezett. Várjon egy kicsit, majd próbálja újra.",
+    "confirmationSendFailed": "A fiókot nem sikerült létrehozni, mert a megerősítő e-mailt nem lehetett elküldeni. Próbálja meg később.",
+    "databaseError": "A regisztrációt nem sikerült menteni. Próbálja meg később, vagy lépjen kapcsolatba a ZEDPERA ügyfélszolgálatával.",
+    "captchaFailed": "A biztonsági ellenőrzés nem sikerült. Frissítse az oldalt, majd próbálja újra.",
+    "invalidRequest": "A regisztrációs adatok érvénytelenek. Ellenőrizze az űrlapot, majd próbálja újra.",
+    "networkError": "Nem sikerült kapcsolódni a kiszolgálóhoz. Ellenőrizze az internetkapcsolatot, majd próbálja újra.",
+    "serviceUnavailable": "A regisztrációs szolgáltatás átmenetileg nem érhető el. Próbálja meg később.",
+    "confirmationTitle": "Ellenőrizze az e-mailjét",
+    "confirmationText": "Megerősítő hivatkozást küldtünk a megadott e-mail-címre. A fiók csak a hivatkozás megnyitása után aktiválódik.",
+    "confirmationDetail": "Az e-mail-cím megerősítése után a bejelentkezési oldalra irányítjuk. Ellenőrizze a Spam mappát is.",
+    "confirmationDisabled": "A fiók létrejött, de a kötelező e-mail-megerősítés nincs megfelelően beállítva. Lépjen kapcsolatba a ZEDPERA ügyfélszolgálatával."
+  }
 };
 
-function normalizeLanguage(value: string | null): AppLanguage {
+const LANGUAGE_STORAGE_KEYS = [
+  'zedpera_language',
+  'zedpera_system_language',
+  'zedpera_work_language',
+  'zedpera_interface_language',
+] as const;
+
+function normalizeLanguage(value: unknown): AppLanguage {
   const normalized = String(value || '').trim().toLowerCase();
 
-  if (normalized === 'cs' || normalized === 'cz') return 'cs';
-  if (normalized === 'en') return 'en';
-  if (normalized === 'de') return 'de';
-  if (normalized === 'pl') return 'pl';
-  if (normalized === 'hu') return 'hu';
+  if (
+    normalized === 'sk' ||
+    normalized === 'slovak' ||
+    normalized === 'slovenčina' ||
+    normalized === 'slovencina'
+  ) {
+    return 'sk';
+  }
+
+  if (
+    normalized === 'cs' ||
+    normalized === 'cz' ||
+    normalized === 'czech' ||
+    normalized === 'čeština' ||
+    normalized === 'cestina'
+  ) {
+    return 'cs';
+  }
+
+  if (
+    normalized === 'en' ||
+    normalized === 'eng' ||
+    normalized === 'english'
+  ) {
+    return 'en';
+  }
+
+  if (
+    normalized === 'de' ||
+    normalized === 'ger' ||
+    normalized === 'german' ||
+    normalized === 'deutsch'
+  ) {
+    return 'de';
+  }
+
+  if (
+    normalized === 'pl' ||
+    normalized === 'polish' ||
+    normalized === 'polski'
+  ) {
+    return 'pl';
+  }
+
+  if (
+    normalized === 'hu' ||
+    normalized === 'hungarian' ||
+    normalized === 'magyar'
+  ) {
+    return 'hu';
+  }
+
   return 'sk';
+}
+
+function getSavedLanguage(): AppLanguage {
+  if (typeof window === 'undefined') return 'sk';
+
+  const params = new URLSearchParams(window.location.search);
+  const queryLanguage = params.get('lang');
+
+  if (queryLanguage) {
+    return normalizeLanguage(queryLanguage);
+  }
+
+  for (const key of LANGUAGE_STORAGE_KEYS) {
+    const saved = window.localStorage.getItem(key);
+
+    if (saved) {
+      return normalizeLanguage(saved);
+    }
+  }
+
+  return normalizeLanguage(
+    document.documentElement.getAttribute('data-language') ||
+      document.documentElement.getAttribute('data-system-language') ||
+      document.documentElement.getAttribute('data-work-language') ||
+      document.documentElement.lang,
+  );
+}
+
+function persistLanguage(language: AppLanguage) {
+  if (typeof window === 'undefined') return;
+
+  for (const key of LANGUAGE_STORAGE_KEYS) {
+    window.localStorage.setItem(key, language);
+  }
+
+  document.documentElement.lang = language;
+  document.documentElement.setAttribute('data-language', language);
+  document.documentElement.setAttribute('data-system-language', language);
+  document.documentElement.setAttribute('data-work-language', language);
 }
 
 function normalizePlan(value: string | null): string {
@@ -344,14 +534,140 @@ function normalizePlan(value: string | null): string {
 }
 
 function getPlanLabel(plan: string, copy: RegisterCopy): string {
-  if (plan === 'seminar-work') return 'Seminárna práca';
-  if (plan === 'bachelor-thesis') return 'Bakalárska práca';
-  if (plan === 'master-thesis') return 'Diplomová / magisterská práca';
+  if (plan === 'seminar-work') return copy.seminarPlan;
+  if (plan === 'bachelor-thesis') return copy.bachelorPlan;
+  if (plan === 'master-thesis') return copy.masterPlan;
   return copy.freePlan;
 }
 
 function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+type AuthErrorLike = Error & {
+  code?: string;
+  status?: number;
+  name?: string;
+};
+
+function getAuthErrorParts(error: unknown) {
+  if (!(error instanceof Error)) {
+    return {
+      code: '',
+      message: '',
+      status: 0,
+      name: '',
+    };
+  }
+
+  const authError = error as AuthErrorLike;
+
+  return {
+    code: String(authError.code || '').trim().toLowerCase(),
+    message: String(authError.message || '').trim().toLowerCase(),
+    status: Number(authError.status || 0),
+    name: String(authError.name || '').trim().toLowerCase(),
+  };
+}
+
+function isNetworkAuthError(error: unknown): boolean {
+  const { message, name } = getAuthErrorParts(error);
+
+  return (
+    name === 'authretryablefetcherror' ||
+    name === 'typeerror' ||
+    /failed to fetch|networkerror|network request failed|load failed|fetch failed/i.test(
+      message,
+    )
+  );
+}
+
+function getRegistrationErrorMessage(
+  error: unknown,
+  copy: RegisterCopy,
+): string {
+  const { code, message, status } = getAuthErrorParts(error);
+
+  if (
+    code === 'user_already_exists' ||
+    code === 'email_exists' ||
+    code === 'identity_already_exists' ||
+    /user\s+already\s+registered/i.test(message) ||
+    /email(?:\s+address)?\s+(?:is\s+)?already\s+(?:registered|exists)/i.test(
+      message,
+    ) ||
+    /already\s+exists/i.test(message)
+  ) {
+    return copy.emailAlreadyRegistered;
+  }
+
+  if (
+    code === 'weak_password' ||
+    /weak password|password.*(?:weak|short|characters)/i.test(message)
+  ) {
+    return copy.weakPassword;
+  }
+
+  if (code === 'signup_disabled') {
+    return copy.signupDisabled;
+  }
+
+  if (code === 'email_provider_disabled') {
+    return copy.emailProviderDisabled;
+  }
+
+  if (
+    status === 429 ||
+    code === 'over_request_rate_limit' ||
+    code === 'over_email_send_rate_limit' ||
+    /too many requests|rate limit/i.test(message)
+  ) {
+    return copy.tooManyRequests;
+  }
+
+  if (
+    /error sending confirmation email|failed to send.*confirmation|smtp/i.test(
+      message,
+    )
+  ) {
+    return copy.confirmationSendFailed;
+  }
+
+  if (
+    /database error saving new user|error saving new user|database error/i.test(
+      message,
+    )
+  ) {
+    return copy.databaseError;
+  }
+
+  if (
+    code === 'captcha_failed' ||
+    /captcha|security check/i.test(message)
+  ) {
+    return copy.captchaFailed;
+  }
+
+  if (
+    code === 'bad_json' ||
+    code === 'validation_failed' ||
+    status === 400
+  ) {
+    return copy.invalidRequest;
+  }
+
+  if (isNetworkAuthError(error)) {
+    return copy.networkError;
+  }
+
+  if (
+    code === 'unexpected_failure' ||
+    status >= 500
+  ) {
+    return copy.serviceUnavailable;
+  }
+
+  return copy.registrationFailed;
 }
 
 const REGISTRATION_STORAGE_KEYS = [
@@ -423,8 +739,9 @@ function clearPreviousAccountStorageAfterRegistration() {
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { setLanguage: setGlobalLanguage } = useLanguage();
 
-  const [language, setLanguage] = useState<AppLanguage>('sk');
+  const [language, setPageLanguage] = useState<AppLanguage>('sk');
   const [selectedPlan, setSelectedPlan] = useState('free');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -444,22 +761,93 @@ export default function RegisterPage() {
     [copy, selectedPlan],
   );
 
+  const applyPageLanguage = useCallback(
+    (value: unknown) => {
+      const nextLanguage = normalizeLanguage(value);
+
+      persistLanguage(nextLanguage);
+      setPageLanguage(nextLanguage);
+      setGlobalLanguage(nextLanguage);
+    },
+    [setGlobalLanguage],
+  );
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const params = new URLSearchParams(window.location.search);
-    const nextLanguage = normalizeLanguage(
-      params.get('lang') ||
-        window.localStorage.getItem('zedpera_language') ||
-        document.documentElement.lang,
+
+    applyPageLanguage(getSavedLanguage());
+    setSelectedPlan(normalizePlan(params.get('plan')));
+
+    const handleLanguageChange = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      const nextValue =
+        detail &&
+        typeof detail === 'object' &&
+        'language' in detail
+          ? (detail as { language?: unknown }).language
+          : detail;
+
+      applyPageLanguage(nextValue);
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (
+        event.key &&
+        LANGUAGE_STORAGE_KEYS.includes(
+          event.key as (typeof LANGUAGE_STORAGE_KEYS)[number],
+        ) &&
+        event.newValue
+      ) {
+        applyPageLanguage(event.newValue);
+      }
+    };
+
+    window.addEventListener(
+      'zedpera-language-change',
+      handleLanguageChange,
     );
-    const nextPlan = normalizePlan(params.get('plan'));
+    window.addEventListener('storage', handleStorage);
 
-    setLanguage(nextLanguage);
-    setSelectedPlan(nextPlan);
+    return () => {
+      window.removeEventListener(
+        'zedpera-language-change',
+        handleLanguageChange,
+      );
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [applyPageLanguage]);
 
-    document.documentElement.lang = nextLanguage;
-    window.localStorage.setItem('zedpera_language', nextLanguage);
+  /**
+   * Registračná stránka nikdy nesmie zdediť aktívnu reláciu
+   * predchádzajúceho používateľa. Inak môže middleware alebo dashboard
+   * používateľa automaticky presmerovať ešte pred dokončením registrácie.
+   */
+  useEffect(() => {
+    let active = true;
+
+    async function clearExistingSession() {
+      try {
+        const supabase = createSupabaseBrowserClient();
+        await supabase.auth.signOut();
+
+        if (active) {
+          clearPreviousAccountStorageAfterRegistration();
+        }
+      } catch (sessionError) {
+        console.warn(
+          'REGISTER_SESSION_CLEAR_SKIPPED:',
+          sessionError,
+        );
+      }
+    }
+
+    void clearExistingSession();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function registerUser() {
@@ -499,7 +887,12 @@ export default function RegisterPage() {
       const supabase = createSupabaseBrowserClient();
       await supabase.auth.signOut();
 
-      const origin = window.location.origin;
+      const configuredSiteUrl = String(
+        process.env.NEXT_PUBLIC_SITE_URL || '',
+      )
+        .trim()
+        .replace(/\/$/, '');
+      const origin = configuredSiteUrl || window.location.origin;
       const callbackNext =
         selectedPlan === 'free'
           ? `/login?registration=confirmed&lang=${language}`
@@ -531,12 +924,31 @@ export default function RegisterPage() {
         throw new Error(copy.registrationFailed);
       }
 
+      /**
+       * Pri zapnutom potvrdení e-mailu môže Supabase pri už existujúcom
+       * potvrdenom účte vrátiť zámerne neúplný používateľský objekt namiesto
+       * priamej chyby. Prázdne pole identities rozpoznáme ako existujúci účet
+       * a používateľovi zobrazíme zrozumiteľnú hlášku.
+       */
+      if (
+        Array.isArray(data.user.identities) &&
+        data.user.identities.length === 0
+      ) {
+        setError(copy.emailAlreadyRegistered);
+        return;
+      }
+
       clearPreviousAccountStorageAfterRegistration();
 
-      // Pri zapnutom potvrdení e-mailu Supabase nevráti aktívnu session.
-      // Ak ju vráti, konfigurácia projektu povoľuje okamžité prihlásenie.
+      /**
+       * Pri zapnutom Confirm email je data.session null. Ak Supabase reláciu
+       * predsa vráti, okamžite ju zrušíme. Registračná stránka používateľa
+       * nikdy nepresmeruje do dashboardu; vždy zobrazí potvrdenie odoslania
+       * e-mailu a čaká na overenie adresy.
+       */
       if (data.session) {
         await supabase.auth.signOut();
+        clearPreviousAccountStorageAfterRegistration();
         setConfigurationWarning(copy.confirmationDisabled);
       }
 
@@ -544,12 +956,10 @@ export default function RegisterPage() {
       setPassword('');
       setConfirmPassword('');
     } catch (registrationError: unknown) {
-      const message =
-        registrationError instanceof Error
-          ? registrationError.message
-          : copy.registrationFailed;
-
-      setError(message || copy.registrationFailed);
+      console.error('ZEDPERA SIGNUP ERROR:', registrationError);
+      setError(
+        getRegistrationErrorMessage(registrationError, copy),
+      );
     } finally {
       setLoading(false);
     }
@@ -627,15 +1037,15 @@ export default function RegisterPage() {
             </h2>
 
             <p className="mt-4 text-base font-bold leading-7 text-slate-300">
-              Bezpečná registrácia používateľa s potvrdením e-mailu a oddelenými oprávneniami účtu.
+              {copy.sidebarDescription}
             </p>
 
             <div className="mt-8 space-y-4">
               {[
-                'FREE účet bez administrátorských oprávnení',
-                'Potvrdenie vlastníctva e-mailovej adresy',
-                'Oddelené práce a história každého používateľa',
-                'Serverové riadenie balíkov a limitov',
+                copy.benefitFree,
+                copy.benefitEmail,
+                copy.benefitIsolation,
+                copy.benefitServer,
               ].map((item) => (
                 <div key={item} className="flex items-start gap-3 text-sm font-bold text-slate-200">
                   <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />

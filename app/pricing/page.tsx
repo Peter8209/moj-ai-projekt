@@ -1,11 +1,10 @@
-'use client';
+﻿'use client';
 
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
-  type MouseEvent,
+  type ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -15,9 +14,11 @@ import {
   CheckCircle2,
   CreditCard,
   Crown,
+  FilePlus2,
   FileText,
   Gift,
   Loader2,
+  Mail,
   Menu,
   ShieldCheck,
   Sparkles,
@@ -30,12 +31,13 @@ import {
   type PlanId,
 } from '@/lib/billing/catalog';
 
+type PaidPlanId = Exclude<PlanId, 'free'>;
+type CheckoutKind = 'plan' | 'addon';
 
-type PackagePlan = {
+type MainPlan = {
   id: PlanId;
   name: string;
-  price: string;
-  priceAmount: number;
+  priceCents: number;
   period: string;
   scope: string;
   badge?: string;
@@ -45,13 +47,14 @@ type PackagePlan = {
   highlighted?: boolean;
 };
 
-type AddonService = {
+type OneTimeAddon = {
   id: AddonId;
   name: string;
-  price: string;
-  priceAmount: number;
+  priceCents: number;
+  period: string;
   description: string;
   features: string[];
+  badge?: string;
 };
 
 type CheckoutResponse = {
@@ -66,22 +69,204 @@ type CheckoutResponse = {
   technicalCode?: string;
   displayMessage?: string;
   receivedPlan?: string;
+  receivedAddon?: string;
 };
 
-const VALID_PLAN_IDS = Object.keys(PLANS) as PlanId[];
+type PlanCheckoutPayload = {
+  checkoutType: 'plan';
+  plan: PaidPlanId;
+  planId: PaidPlanId;
+  addons: AddonId[];
+  addonIds: AddonId[];
+  email: string;
+  customerEmail: string;
+  successUrl: string;
+  cancelUrl: string;
+};
 
-const VALID_PAID_PLAN_IDS = VALID_PLAN_IDS.filter(
-  (planId): planId is Exclude<PlanId, 'free'> => planId !== 'free',
-);
+type AddonCheckoutPayload = {
+  checkoutType: 'addon';
+  addon: AddonId;
+  addonId: AddonId;
+  addons: AddonId[];
+  addonIds: AddonId[];
+  email: string;
+  customerEmail: string;
+  successUrl: string;
+  cancelUrl: string;
+};
 
-const VALID_ADDON_IDS = Object.keys(ADDONS) as AddonId[];
+type CheckoutPayload = PlanCheckoutPayload | AddonCheckoutPayload;
 
-const DEFAULT_PLAN_ID: PlanId = 'bachelor-thesis';
+const PAID_PLAN_IDS: PaidPlanId[] = [
+  'seminar-work',
+  'bachelor-thesis',
+  'master-thesis',
+];
+
+const ADDON_IDS: AddonId[] = [
+  'data-analysis',
+  'extra-20',
+  'extra-40',
+  'extra-60',
+];
 
 const STORAGE_SELECTED_PLAN = 'zedpera_selected_plan';
 const STORAGE_SELECTED_ADDONS = 'zedpera_selected_addons';
+const STORAGE_EMAIL_KEYS = [
+  'zedpera_user_email',
+  'zedpera_email',
+  'user_email',
+  'email',
+] as const;
 
-function formatCatalogPrice(priceCents: number) {
+const mainPlans: MainPlan[] = [
+  {
+    id: 'free',
+    name: 'FREE VERZIA',
+    priceCents: 0,
+    period: 'bez platby',
+    scope: `${PLANS.free.pageLimit} strany Â· ${PLANS.free.attachmentLimit} prĂ­loha Â· ${PLANS.free.promptLimit ?? 0} AI prompty`,
+    badge: 'BezplatnĂ© vyskĂşĹˇanie',
+    description:
+      'ZĂˇkladnĂˇ verzia na vyskĂşĹˇanie systĂ©mu bez platobnej karty a bez aktivĂˇcie predplatnĂ©ho.',
+    isFree: true,
+    features: [
+      `${PLANS.free.pageLimit} strany spracovanĂ©ho vĂ˝stupu`,
+      `${PLANS.free.attachmentLimit} nahranĂˇ prĂ­loha`,
+      `${PLANS.free.promptLimit ?? 0} skĂşĹˇobnĂ© AI prompty`,
+      'ZĂˇkladnĂ© vyskĂşĹˇanie AI chatu',
+      'Bez platobnej karty',
+    ],
+  },
+  {
+    id: 'seminar-work',
+    name: 'SEMINĂRNA PRĂCA',
+    priceCents: 3900,
+    period: 'mesaÄŤne',
+    scope: `Rozsah do ${PLANS['seminar-work'].pageLimit} strĂˇn`,
+    badge: 'Pre kratĹˇie akademickĂ© prĂˇce',
+    description:
+      'MesaÄŤnĂ˝ balĂ­k pre seminĂˇrne, roÄŤnĂ­kovĂ©, zĂˇpoÄŤtovĂ© a kratĹˇie odbornĂ© prĂˇce.',
+    features: [
+      'AI pomoc pri pĂ­sanĂ­ jednotlivĂ˝ch kapitol',
+      'NĂˇvrh ĹˇtruktĂşry a osnovy',
+      'MetodickĂ© vedenie poÄŤas spracovania',
+      'Kontrola kvality a logiky textu',
+      'HumanizĂˇcia textu',
+      'Pomoc s citĂˇciami a zdrojmi',
+      'PlĂˇnovanie prĂˇce a termĂ­nov',
+      'PrĂ­prava e-mailov pre vyuÄŤujĂşceho',
+    ],
+  },
+  {
+    id: 'bachelor-thesis',
+    name: 'BAKALĂRSKA PRĂCA',
+    priceCents: 14900,
+    period: 'mesaÄŤne',
+    scope: `Rozsah do ${PLANS['bachelor-thesis'].pageLimit} strĂˇn`,
+    badge: 'NajobÄľĂşbenejĹˇĂ­ balĂ­k',
+    description:
+      'KompletnĂˇ mesaÄŤnĂˇ podpora od zadania a osnovy aĹľ po prĂ­pravu na obhajobu bakalĂˇrskej prĂˇce.',
+    highlighted: true,
+    features: [
+      'Tvorba a Ăşprava jednotlivĂ˝ch kapitol',
+      'MetodickĂ© vedenie poÄŤas celĂ©ho pĂ­sania',
+      'Kontrola kvality, logiky a konzistentnosti',
+      'HumanizĂˇcia odbornĂ©ho textu',
+      'Pomoc so zdrojmi a citĂˇciami',
+      'Spracovanie dotaznĂ­kov a Ĺˇtatistiky',
+      'Tvorba grafov a tabuliek',
+      'PrĂ­prava prezentĂˇcie na obhajobu',
+      'PrĂ­prava odpovedĂ­ na otĂˇzky komisie',
+    ],
+  },
+  {
+    id: 'master-thesis',
+    name: 'DIPLOMOVĂ / MAGISTERSKĂ PRĂCA',
+    priceCents: 18900,
+    period: 'mesaÄŤne',
+    scope: `Rozsah do ${PLANS['master-thesis'].pageLimit} strĂˇn`,
+    badge: 'NajkomplexnejĹˇĂ­ balĂ­k',
+    description:
+      'NajvyĹˇĹˇĂ­ mesaÄŤnĂ˝ balĂ­k pre rozsiahle zĂˇvereÄŤnĂ© prĂˇce, pokroÄŤilĂş metodiku, analĂ˝zu dĂˇt a obhajobu.',
+    features: [
+      'Tvorba a Ăşprava celej zĂˇvereÄŤnej prĂˇce',
+      'PokroÄŤilĂ© metodickĂ© vedenie',
+      'Kontrola odbornosti a konzistentnosti',
+      'HumanizĂˇcia odbornĂ©ho textu',
+      'KomplexnĂˇ prĂˇca so zdrojmi a citĂˇciami',
+      'DeskriptĂ­vna a inferenÄŤnĂˇ Ĺˇtatistika',
+      'Testovanie hypotĂ©z a normality dĂˇt',
+      'KorelaÄŤnĂ© a neparametrickĂ© analĂ˝zy',
+      'Tvorba grafov, tabuliek a interpretĂˇciĂ­',
+      'PrĂ­prava prezentĂˇcie a simulĂˇcia obhajoby',
+    ],
+  },
+];
+
+const oneTimeAddons: OneTimeAddon[] = [
+  {
+    id: 'data-analysis',
+    name: 'ANALĂťZA DĂT',
+    priceCents: ADDONS['data-analysis'].priceCents,
+    period: 'jednorazovĂˇ platba',
+    badge: 'SamostatnĂˇ analytickĂˇ sluĹľba',
+    description:
+      'JednorazovĂ© sprĂ­stupnenie nĂˇstrojov na prĂ­pravu, ĹˇtatistickĂ© spracovanie, vizualizĂˇciu a export dĂˇt.',
+    features: [
+      'ÄŚistenie a prĂ­prava dĂˇt',
+      'Spracovanie dotaznĂ­kov',
+      'DeskriptĂ­vna Ĺˇtatistika',
+      'FrekvenÄŤnĂ© tabuÄľky',
+      'Testovanie normality',
+      'KorelaÄŤnĂ© analĂ˝zy',
+      'ParametrickĂ© a neparametrickĂ© testy',
+      'Grafy, tabuÄľky a export vĂ˝sledkov',
+    ],
+  },
+  {
+    id: 'extra-20',
+    name: 'EXTRA 20 STRĂN',
+    priceCents: ADDONS['extra-20'].priceCents,
+    period: 'jednorazovĂˇ platba',
+    description:
+      'JednorazovĂ© navĂ˝Ĺˇenie dostupnĂ©ho rozsahu aktuĂˇlneho projektu o ÄŹalĹˇĂ­ch 20 strĂˇn.',
+    features: [
+      `NavĂ˝Ĺˇenie limitu o ${ADDONS['extra-20'].extraPages} strĂˇn`,
+      'PouĹľitie v aktuĂˇlnom projekte',
+      'Bez zmeny hlavnĂ©ho mesaÄŤnĂ©ho plĂˇnu',
+    ],
+  },
+  {
+    id: 'extra-40',
+    name: 'EXTRA 40 STRĂN',
+    priceCents: ADDONS['extra-40'].priceCents,
+    period: 'jednorazovĂˇ platba',
+    description:
+      'JednorazovĂ© navĂ˝Ĺˇenie dostupnĂ©ho rozsahu aktuĂˇlneho projektu o ÄŹalĹˇĂ­ch 40 strĂˇn.',
+    features: [
+      `NavĂ˝Ĺˇenie limitu o ${ADDONS['extra-40'].extraPages} strĂˇn`,
+      'PouĹľitie v aktuĂˇlnom projekte',
+      'Bez zmeny hlavnĂ©ho mesaÄŤnĂ©ho plĂˇnu',
+    ],
+  },
+  {
+    id: 'extra-60',
+    name: 'EXTRA 60 STRĂN',
+    priceCents: ADDONS['extra-60'].priceCents,
+    period: 'jednorazovĂˇ platba',
+    description:
+      'JednorazovĂ© navĂ˝Ĺˇenie dostupnĂ©ho rozsahu aktuĂˇlneho projektu o ÄŹalĹˇĂ­ch 60 strĂˇn.',
+    features: [
+      `NavĂ˝Ĺˇenie limitu o ${ADDONS['extra-60'].extraPages} strĂˇn`,
+      'PouĹľitie v aktuĂˇlnom projekte',
+      'Bez zmeny hlavnĂ©ho mesaÄŤnĂ©ho plĂˇnu',
+    ],
+  },
+];
+
+function formatPrice(priceCents: number) {
   return new Intl.NumberFormat('sk-SK', {
     style: 'currency',
     currency: 'EUR',
@@ -90,238 +275,56 @@ function formatCatalogPrice(priceCents: number) {
   }).format(priceCents / 100);
 }
 
-const packagePlans: PackagePlan[] = [
-  {
-    id: 'free',
-    name: 'FREE VERZIA',
-    price: formatCatalogPrice(PLANS.free.priceCents),
-    priceAmount: PLANS.free.priceCents / 100,
-    period: 'bez platby',
-    scope: `${PLANS.free.pageLimit} strany · ${PLANS.free.attachmentLimit} príloha · ${PLANS.free.promptLimit ?? 0} skúšobné prompty`,
-    badge: 'Bezplatné vyskúšanie',
-    description:
-      'Základná skúšobná verzia na overenie fungovania AI chatu a práce s jednou prílohou.',
-    isFree: true,
-    features: [
-      `${PLANS.free.attachmentLimit} nahraná príloha`,
-      `${PLANS.free.promptLimit ?? 0} skúšobné AI prompty`,
-      'Základné vyskúšanie AI chatu',
-      'Bez platobnej karty',
-      'Obmedzený skúšobný režim',
-    ],
-  },
-  {
-    id: 'seminar-work',
-    name: 'SEMINÁRNA PRÁCA',
-    price: formatCatalogPrice(PLANS['seminar-work'].priceCents),
-    priceAmount: PLANS['seminar-work'].priceCents / 100,
-    period: 'jednorazovo',
-    scope: `Rozsah do ${PLANS['seminar-work'].pageLimit} strán`,
-    badge: 'Pre kratšie akademické práce',
-    description:
-      `Ideálne riešenie pre seminárne, ročníkové a zápočtové práce do ${PLANS['seminar-work'].pageLimit} strán.`,
-    features: [
-      'Vytvorenie celej seminárnej práce',
-      'AI pomoc pri písaní jednotlivých kapitol',
-      'Metodické vedenie počas celej práce',
-      'Kontrola kvality a logiky textu',
-      'Humanizácia textu',
-      'Návrh štruktúry a osnovy',
-      'Pomoc s citáciami a zdrojmi',
-      'Plánovanie práce',
-      'Príprava e-mailov pre vyučujúceho',
-      'Všetko v jednom systéme',
-    ],
-  },
-  {
-    id: 'bachelor-thesis',
-    name: 'BAKALÁRSKA PRÁCA',
-    price: formatCatalogPrice(PLANS['bachelor-thesis'].priceCents),
-    priceAmount: PLANS['bachelor-thesis'].priceCents / 100,
-    period: 'jednorazovo',
-    scope: `Rozsah do ${PLANS['bachelor-thesis'].pageLimit} strán`,
-    badge: 'Najobľúbenejší balík',
-    description:
-      'Kompletné riešenie od prvého zadania až po prípravu na úspešnú obhajobu bakalárskej práce.',
-    highlighted: true,
-    features: [
-      'Vytvorenie celej bakalárskej práce',
-      'Metodické vedenie počas celého písania',
-      'Kontrola kvality, logiky a konzistentnosti textu',
-      'Humanizácia textu',
-      'Pomoc so správnymi citáciami a zdrojmi',
-      'Spracovanie dotazníkov a štatistiky',
-      'Tvorba grafov a tabuliek',
-      'Príprava prezentácie na obhajobu',
-      'Príprava odpovedí na otázky komisie',
-      'Plánovanie práce a termínov',
-      'Návrhy e-mailov pre školiteľa',
-      'Všetko v jednom systéme',
-    ],
-  },
-  {
-    id: 'master-thesis',
-    name: 'DIPLOMOVÁ / MAGISTERSKÁ PRÁCA',
-    price: formatCatalogPrice(PLANS['master-thesis'].priceCents),
-    priceAmount: PLANS['master-thesis'].priceCents / 100,
-    period: 'jednorazovo',
-    scope: `Rozsah do ${PLANS['master-thesis'].pageLimit} strán`,
-    badge: 'Najkomplexnejší balík',
-    description:
-      'Najkomplexnejší balík pre náročné záverečné práce s pokročilou metodikou a analýzou dát.',
-    features: [
-      'Vytvorenie celej diplomovej alebo magisterskej práce',
-      'Metodické vedenie počas celého procesu',
-      'Kontrola kvality a odbornosti textu',
-      'Humanizácia textu',
-      'Pomoc so zdrojmi a citáciami',
-      'Komplexné spracovanie štatistiky',
-      'Deskriptívna štatistika',
-      'Testovanie hypotéz',
-      'Korelačné analýzy',
-      'Testovanie normality dát',
-      'Tvorba grafov a tabuliek',
-      'Príprava prezentácie na obhajobu',
-      'Simulácia otázok komisie',
-      'Plánovanie celej práce',
-      'Podklady pre komunikáciu so školiteľom',
-      'Všetko v jednom systéme',
-    ],
-  },
-];
-
-const addonServices: AddonService[] = [
-  {
-    id: 'data-analysis',
-    name: 'Analýza dát',
-    price: formatCatalogPrice(ADDONS['data-analysis'].priceCents),
-    priceAmount: ADDONS['data-analysis'].priceCents / 100,
-    description:
-      'Kompletné spracovanie štatistickej a analytickej časti práce.',
-    features: [
-      'Spracovanie dotazníkov',
-      'Čistenie a príprava dát',
-      'Deskriptívna štatistika',
-      'Testovanie normality',
-      'Korelačné analýzy',
-      'Frekvenčné tabuľky',
-      'Tvorba škál a subškál',
-      'Grafy a tabuľky',
-    ],
-  },
-  {
-    id: 'extra-20',
-    name: 'Extra 20 strán',
-    price: formatCatalogPrice(ADDONS['extra-20'].priceCents),
-    priceAmount: ADDONS['extra-20'].priceCents / 100,
-    description:
-      'Rozšírenie vybraného projektu o ďalších 20 spracovaných strán.',
-    features: [
-      `Rozšírenie rozsahu o ${ADDONS['extra-20'].extraPages} strán`,
-      'Zachovanie štýlu a štruktúry práce',
-      'Kontrola nadväznosti nového obsahu',
-    ],
-  },
-  {
-    id: 'extra-40',
-    name: 'Extra 40 strán',
-    price: formatCatalogPrice(ADDONS['extra-40'].priceCents),
-    priceAmount: ADDONS['extra-40'].priceCents / 100,
-    description:
-      'Rozšírenie vybraného projektu o ďalších 40 spracovaných strán.',
-    features: [
-      `Rozšírenie rozsahu o ${ADDONS['extra-40'].extraPages} strán`,
-      'Zachovanie štýlu a štruktúry práce',
-      'Kontrola nadväznosti nového obsahu',
-    ],
-  },
-  {
-    id: 'extra-60',
-    name: 'Extra 60 strán',
-    price: formatCatalogPrice(ADDONS['extra-60'].priceCents),
-    priceAmount: ADDONS['extra-60'].priceCents / 100,
-    description:
-      'Rozšírenie vybraného projektu o ďalších 60 spracovaných strán.',
-    features: [
-      `Rozšírenie rozsahu o ${ADDONS['extra-60'].extraPages} strán`,
-      'Zachovanie štýlu a štruktúry práce',
-      'Kontrola nadväznosti nového obsahu',
-    ],
-  },
-];
-
-function isValidPlanId(value: unknown): value is PlanId {
-  return (
-    typeof value === 'string' &&
-    VALID_PLAN_IDS.includes(value as PlanId)
-  );
+function isPaidPlanId(value: string): value is PaidPlanId {
+  return PAID_PLAN_IDS.includes(value as PaidPlanId);
 }
 
-function isValidAddonId(value: unknown): value is AddonId {
-  return (
-    typeof value === 'string' &&
-    VALID_ADDON_IDS.includes(value as AddonId)
-  );
+function isAddonId(value: string): value is AddonId {
+  return ADDON_IDS.includes(value as AddonId);
 }
 
-function parseStoredAddonIds(raw: string | null): AddonId[] {
-  if (!raw) return [];
-
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    parsed = raw.split(',').map((value) => value.trim());
-  }
-
-  if (!Array.isArray(parsed)) return [];
-
-  return Array.from(new Set(parsed.filter(isValidAddonId)));
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase();
 }
 
-function isValidPaidPlanId(
-  value: string,
-): value is Exclude<PlanId, 'free'> {
-  return VALID_PAID_PLAN_IDS.includes(
-    value as Exclude<PlanId, 'free'>,
-  );
-}
-
-function formatPrice(amount: number) {
-  return new Intl.NumberFormat('sk-SK', {
-    style: 'currency',
-    currency: 'EUR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 function getFriendlyCheckoutError(
   data: CheckoutResponse,
   fallback: string,
 ) {
-  if (data?.displayMessage) return data.displayMessage;
+  if (data.displayMessage) return data.displayMessage;
 
-  if (data?.error === 'INVALID_PLAN' || data?.code === 'INVALID_PLAN') {
+  if (data.error === 'INVALID_PLAN' || data.code === 'INVALID_PLAN') {
     return [
-      'Backend odmietol balík ako INVALID_PLAN.',
+      'PlatobnĂˇ brĂˇna odmietla identifikĂˇtor hlavnĂ©ho plĂˇnu.',
       '',
-      `Odoslaný plán: ${data.receivedPlan || 'nezistené'}`,
+      `OdoslanĂ˝ plĂˇn: ${data.receivedPlan || 'nezistenĂ©'}`,
       '',
-      'V súbore app/api/payments/checkout/route.ts musia byť povolené tieto ID platených balíkov:',
-      VALID_PAID_PLAN_IDS.join(', '),
+      `PovolenĂ© ID plĂˇnov: ${PAID_PLAN_IDS.join(', ')}`,
+    ].join('\n');
+  }
+
+  if (data.error === 'INVALID_ADDON' || data.code === 'INVALID_ADDON') {
+    return [
+      'PlatobnĂˇ brĂˇna odmietla identifikĂˇtor jednorazovĂ©ho doplnku.',
+      '',
+      `OdoslanĂ˝ doplnok: ${data.receivedAddon || 'nezistenĂ©'}`,
+      '',
+      `PovolenĂ© ID doplnkov: ${ADDON_IDS.join(', ')}`,
     ].join('\n');
   }
 
   const message = [
-    data?.error,
-    data?.message,
-    data?.detail,
-    data?.reason ? `Dôvod: ${data.reason}` : '',
-    data?.solution ? `Riešenie: ${data.solution}` : '',
-    data?.technicalCode
-      ? `Technický kód: ${data.technicalCode}`
+    data.error,
+    data.message,
+    data.detail,
+    data.reason ? `DĂ´vod: ${data.reason}` : '',
+    data.solution ? `RieĹˇenie: ${data.solution}` : '',
+    data.technicalCode
+      ? `TechnickĂ˝ kĂłd: ${data.technicalCode}`
       : '',
   ]
     .filter(Boolean)
@@ -330,20 +333,30 @@ function getFriendlyCheckoutError(
   return message || fallback;
 }
 
-async function postCheckout(payload: unknown) {
+async function postCheckout(payload: CheckoutPayload) {
   const response = await fetch('/api/payments/checkout', {
     method: 'POST',
     credentials: 'include',
     cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
+      Accept: 'application/json',
     },
     body: JSON.stringify(payload),
   });
 
-  const data = (await response
-    .json()
-    .catch(() => ({}))) as CheckoutResponse;
+  const rawBody = await response.text();
+  let data: CheckoutResponse = {};
+
+  if (rawBody) {
+    try {
+      data = JSON.parse(rawBody) as CheckoutResponse;
+    } catch {
+      data = {
+        error: rawBody,
+      };
+    }
+  }
 
   return {
     response,
@@ -351,94 +364,29 @@ async function postCheckout(payload: unknown) {
   };
 }
 
-export default function PackagesPage() {
+export default function PricingPage() {
   const router = useRouter();
   const pageRef = useRef<HTMLDivElement | null>(null);
+  const emailInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [selectedPlan, setSelectedPlan] =
-    useState<PlanId>(DEFAULT_PLAN_ID);
-
-  const [selectedAddons, setSelectedAddons] =
-    useState<AddonId[]>([]);
-
-  const [loadingPayment, setLoadingPayment] =
-    useState(false);
-
-  const [loadingPlanId, setLoadingPlanId] =
-    useState<PlanId | null>(null);
-
-  const [paymentError, setPaymentError] =
-    useState('');
-
+  const [checkoutEmail, setCheckoutEmail] = useState('');
+  const [loadingCheckout, setLoadingCheckout] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState('');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const storedPlan = window.localStorage.getItem(
-      STORAGE_SELECTED_PLAN,
-    );
+    for (const key of STORAGE_EMAIL_KEYS) {
+      const storedEmail = window.localStorage.getItem(key);
 
-    if (isValidPlanId(storedPlan)) {
-      setSelectedPlan(storedPlan);
-    } else if (storedPlan) {
-      window.localStorage.removeItem(STORAGE_SELECTED_PLAN);
+      if (storedEmail) {
+        setCheckoutEmail(storedEmail);
+        break;
+      }
     }
-
-    const storedAddons = parseStoredAddonIds(
-      window.localStorage.getItem(STORAGE_SELECTED_ADDONS),
-    );
-
-    setSelectedAddons(storedAddons);
   }, []);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    window.localStorage.setItem(
-      STORAGE_SELECTED_PLAN,
-      selectedPlan,
-    );
-
-    if (selectedPlan === 'free') {
-      if (selectedAddons.length > 0) {
-        setSelectedAddons([]);
-      }
-
-      window.localStorage.removeItem(STORAGE_SELECTED_ADDONS);
-      return;
-    }
-
-    window.localStorage.setItem(
-      STORAGE_SELECTED_ADDONS,
-      JSON.stringify(selectedAddons.filter(isValidAddonId)),
-    );
-  }, [selectedPlan, selectedAddons]);
-
-  const selectedPlanData = useMemo(() => {
-    return (
-      packagePlans.find(
-        (plan) => plan.id === selectedPlan,
-      ) || packagePlans[0]
-    );
-  }, [selectedPlan]);
-
-  const selectedAddonData = useMemo(() => {
-    return addonServices.filter((addon) =>
-      selectedAddons.includes(addon.id),
-    );
-  }, [selectedAddons]);
-
-  const addonsTotal = useMemo(() => {
-    return selectedAddonData.reduce(
-      (sum, addon) => sum + addon.priceAmount,
-      0,
-    );
-  }, [selectedAddonData]);
-
-  const totalAmount =
-    selectedPlanData.priceAmount + addonsTotal;
-
-  const goToMenu = () => {
+  const goToDashboard = () => {
     router.push('/dashboard');
   };
 
@@ -449,199 +397,180 @@ export default function PackagesPage() {
     });
   };
 
-  const activateFreePlan = () => {
-    setSelectedPlan('free');
-    setSelectedAddons([]);
-    setPaymentError('');
+  const getRequiredEmail = () => {
+    const email = normalizeEmail(checkoutEmail);
+
+    if (!email) {
+      setCheckoutError(
+        'Pred pokraÄŤovanĂ­m na platbu zadajte e-mailovĂş adresu.',
+      );
+      emailInputRef.current?.focus();
+      return null;
+    }
+
+    if (!isValidEmail(email)) {
+      setCheckoutError('Zadajte platnĂş e-mailovĂş adresu.');
+      emailInputRef.current?.focus();
+      return null;
+    }
 
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(
-        STORAGE_SELECTED_PLAN,
-        'free',
-      );
-      window.localStorage.removeItem(STORAGE_SELECTED_ADDONS);
-    }
-
-    // Serverové entitlements zostávajú jediným zdrojom oprávnení.
-    router.push('/dashboard?plan=free');
-  };
-
-  const toggleAddon = (addonId: AddonId) => {
-    if (!isValidAddonId(addonId)) {
-      setPaymentError(
-        'Vybraný doplnok nie je súčasťou aktuálneho billing katalógu.',
-      );
-      return;
-    }
-
-    if (selectedPlan === 'free') {
-      setPaymentError(
-        'Doplnkové služby je možné pridať k platenému balíku. Najskôr vyberte seminárnu, bakalársku alebo diplomovú prácu.',
-      );
-      return;
-    }
-
-    setPaymentError('');
-
-    setSelectedAddons((current) =>
-      current.includes(addonId)
-        ? current.filter((id) => id !== addonId)
-        : [...current, addonId],
-    );
-  };
-
-  const getEmailForCheckout = async () => {
-    let email = '';
-
-    if (typeof window !== 'undefined') {
-      email =
-        window.localStorage.getItem(
-          'zedpera_user_email',
-        ) ||
-        window.localStorage.getItem(
-          'zedpera_email',
-        ) ||
-        window.localStorage.getItem('user_email') ||
-        window.localStorage.getItem('email') ||
-        '';
-    }
-
-    if (!email && typeof window !== 'undefined') {
-      const enteredEmail = window.prompt(
-        'Zadajte e-mail, na ktorý bude naviazaná platba:',
-      );
-
-      email = enteredEmail?.trim() || '';
-
-      if (email) {
-        window.localStorage.setItem(
-          'zedpera_email',
-          email,
-        );
-      }
-    }
-
-    email = email.trim().toLowerCase();
-
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new Error('Zadajte platnú e-mailovú adresu.');
+      window.localStorage.setItem('zedpera_email', email);
     }
 
     return email;
   };
 
-  const handleCheckout = async (
-    planId?: PlanId,
-  ) => {
-    const checkoutPlanId =
-      planId || selectedPlan;
+  const activateFreePlan = () => {
+    setCheckoutError('');
 
-    if (checkoutPlanId === 'free') {
-      activateFreePlan();
-      return;
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(STORAGE_SELECTED_PLAN, 'free');
+      window.localStorage.removeItem(STORAGE_SELECTED_ADDONS);
     }
 
-    if (!isValidPaidPlanId(checkoutPlanId)) {
-      setPaymentError(
-        `Neplatný balík: ${checkoutPlanId}. Skontrolujte ID balíka vo frontende a na backende.`,
+    router.push('/register?plan=free&source=pricing');
+  };
+
+  const startPlanCheckout = async (planId: PaidPlanId) => {
+    if (!isPaidPlanId(planId)) {
+      setCheckoutError(
+        `NeplatnĂ˝ hlavnĂ˝ plĂˇn: ${planId}.`,
       );
       return;
     }
 
-    const checkoutPlan = packagePlans.find(
-      (plan) => plan.id === checkoutPlanId,
-    );
+    const email = getRequiredEmail();
+    if (!email) return;
 
-    if (!checkoutPlan) {
-      setPaymentError(
-        'Vybraný balík sa nenašiel v aktuálnom pricing katalógu.',
-      );
-      return;
-    }
+    const loadingKey = `plan:${planId}`;
 
     try {
-      setLoadingPayment(true);
-      setLoadingPlanId(checkoutPlanId);
-      setPaymentError('');
+      setLoadingCheckout(loadingKey);
+      setCheckoutError('');
 
-      const email = await getEmailForCheckout();
-
-      if (!email) {
-        setPaymentError(
-          'Pre pokračovanie na platbu je potrebný e-mail.',
-        );
-        return;
-      }
-
-      const origin =
-        typeof window !== 'undefined'
-          ? window.location.origin
-          : '';
-
-      const validAddonIds = selectedAddons.filter(isValidAddonId);
-
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(
-          STORAGE_SELECTED_PLAN,
-          checkoutPlan.id,
-        );
-
-        window.localStorage.setItem(
-          STORAGE_SELECTED_ADDONS,
-          JSON.stringify(validAddonIds),
+      if (typeof window === 'undefined') {
+        throw new Error(
+          'Platbu je moĹľnĂ© spustiĹĄ iba v internetovom prehliadaÄŤi.',
         );
       }
 
-      /*
-       * Klient posiela iba kanonické ID balíka a doplnkov.
-       * Backend musí cenu a Stripe Price ID načítať zo serverového katalógu.
-       */
-      const payload = {
-        plan: checkoutPlan.id,
-        planId: checkoutPlan.id,
-        addons: validAddonIds,
-        addonIds: validAddonIds,
+      window.localStorage.setItem(STORAGE_SELECTED_PLAN, planId);
+      window.localStorage.removeItem(STORAGE_SELECTED_ADDONS);
+
+      const origin = window.location.origin;
+
+      const payload: PlanCheckoutPayload = {
+        checkoutType: 'plan',
+        plan: planId,
+        planId,
+        addons: [],
+        addonIds: [],
         email,
         customerEmail: email,
-        successUrl: `${origin}/dashboard?success=1&payment=success&plan=${encodeURIComponent(
-          checkoutPlan.id,
+        successUrl: `${origin}/dashboard?payment=success&checkoutType=plan&plan=${encodeURIComponent(
+          planId,
         )}`,
-        cancelUrl: `${origin}/pricing?canceled=1&plan=${encodeURIComponent(
-          checkoutPlan.id,
+        cancelUrl: `${origin}/pricing?payment=canceled&checkoutType=plan&plan=${encodeURIComponent(
+          planId,
         )}`,
       };
 
-      const checkoutResult = await postCheckout(payload);
+      const { response, data } = await postCheckout(payload);
 
-      if (
-        checkoutResult.response.ok &&
-        checkoutResult.data?.url
-      ) {
-        window.location.assign(checkoutResult.data.url);
+      if (response.ok && data.url) {
+        window.location.assign(data.url);
         return;
       }
 
       throw new Error(
         getFriendlyCheckoutError(
-          checkoutResult.data,
-          `Platobnú bránu sa nepodarilo spustiť. HTTP ${checkoutResult.response.status}.`,
+          data,
+          `PlatobnĂş brĂˇnu sa nepodarilo spustiĹĄ. HTTP ${response.status}.`,
         ),
       );
     } catch (error: unknown) {
       const message =
         error instanceof Error
           ? error.message
-          : 'Platbu sa nepodarilo spustiť.';
+          : 'Platbu hlavnĂ©ho plĂˇnu sa nepodarilo spustiĹĄ.';
 
-      console.error(
-        'PAYMENT ERROR:',
-        error,
+      console.error('PLAN CHECKOUT ERROR:', error);
+      setCheckoutError(message);
+    } finally {
+      setLoadingCheckout(null);
+    }
+  };
+
+  const startAddonCheckout = async (addonId: AddonId) => {
+    if (!isAddonId(addonId)) {
+      setCheckoutError(
+        `NeplatnĂ˝ jednorazovĂ˝ doplnok: ${addonId}.`,
+      );
+      return;
+    }
+
+    const email = getRequiredEmail();
+    if (!email) return;
+
+    const loadingKey = `addon:${addonId}`;
+
+    try {
+      setLoadingCheckout(loadingKey);
+      setCheckoutError('');
+
+      if (typeof window === 'undefined') {
+        throw new Error(
+          'Platbu je moĹľnĂ© spustiĹĄ iba v internetovom prehliadaÄŤi.',
+        );
+      }
+
+      window.localStorage.setItem(
+        STORAGE_SELECTED_ADDONS,
+        JSON.stringify([addonId]),
       );
 
-      setPaymentError(message);
+      const origin = window.location.origin;
+
+      const payload: AddonCheckoutPayload = {
+        checkoutType: 'addon',
+        addon: addonId,
+        addonId,
+        addons: [addonId],
+        addonIds: [addonId],
+        email,
+        customerEmail: email,
+        successUrl: `${origin}/dashboard?payment=success&checkoutType=addon&addon=${encodeURIComponent(
+          addonId,
+        )}`,
+        cancelUrl: `${origin}/pricing?payment=canceled&checkoutType=addon&addon=${encodeURIComponent(
+          addonId,
+        )}`,
+      };
+
+      const { response, data } = await postCheckout(payload);
+
+      if (response.ok && data.url) {
+        window.location.assign(data.url);
+        return;
+      }
+
+      throw new Error(
+        getFriendlyCheckoutError(
+          data,
+          `PlatobnĂş brĂˇnu sa nepodarilo spustiĹĄ. HTTP ${response.status}.`,
+        ),
+      );
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Platbu jednorazovĂ©ho doplnku sa nepodarilo spustiĹĄ.';
+
+      console.error('ADDON CHECKOUT ERROR:', error);
+      setCheckoutError(message);
     } finally {
-      setLoadingPayment(false);
-      setLoadingPlanId(null);
+      setLoadingCheckout(null);
     }
   };
 
@@ -654,7 +583,7 @@ export default function PackagesPage() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-8">
           <button
             type="button"
-            onClick={goToMenu}
+            onClick={goToDashboard}
             className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20"
           >
             <Menu size={18} />
@@ -662,87 +591,128 @@ export default function PackagesPage() {
           </button>
 
           <div className="hidden text-sm font-semibold text-slate-400 sm:block">
-            Jednorazové akademické balíky
+            MesaÄŤnĂ© plĂˇny a jednorazovĂ© doplnky
           </div>
 
           <button
             type="button"
-            onClick={goToMenu}
+            onClick={goToDashboard}
             className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-purple-400/30 bg-purple-600/20 px-4 py-2 text-sm font-bold text-purple-100 transition hover:bg-purple-600/30"
           >
             <ArrowLeft size={18} />
-            Späť do menu
+            SpĂ¤ĹĄ do menu
           </button>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-10 px-4 py-10 pb-32 sm:px-6 lg:px-8">
+      <main className="mx-auto max-w-7xl space-y-12 px-4 py-10 pb-32 sm:px-6 lg:px-8">
         <section>
           <div className="mb-8">
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-sm font-semibold text-purple-200">
               <Crown size={16} />
-              Akademické balíky a doplnkové služby
+              CennĂ­k ZEDPERA
             </div>
 
             <h1 className="max-w-5xl text-4xl font-black tracking-tight text-white sm:text-5xl lg:text-6xl">
-              Vyberte si riešenie podľa typu a rozsahu práce
+              Vyberte hlavnĂ˝ mesaÄŤnĂ˝ plĂˇn alebo samostatnĂ˝ jednorazovĂ˝ doplnok
             </h1>
 
             <p className="mt-4 max-w-4xl text-base leading-7 text-slate-300 sm:text-lg">
-              Platené balíky sú jednorazové. Zahŕňajú AI podporu, metodické vedenie,
-              kontrolu kvality, prácu so zdrojmi, plánovanie a ďalšie funkcie podľa
-              zvoleného typu akademickej práce.
+              HlavnĂ© akademickĂ© plĂˇny fungujĂş ako mesaÄŤnĂ© predplatnĂ©. AnalĂ˝za dĂˇt
+              a balĂ­ky Extra 20, 40 alebo 60 strĂˇn sa nakupujĂş samostatne ako
+              jednorazovĂ© doplnky a nepridĂˇvajĂş sa do ceny mesaÄŤnĂ©ho plĂˇnu.
             </p>
 
-            <div className="mt-5 grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="mt-6 grid max-w-5xl grid-cols-1 gap-3 sm:grid-cols-3">
               <HeroInfo
                 icon={<ShieldCheck size={18} />}
-                title="Jednorazová platba"
-                text="Bez automatického mesačného predplatného."
+                title="JasnĂ© oddelenie platieb"
+                text="MesaÄŤnĂ˝ plĂˇn a jednorazovĂ˝ doplnok majĂş samostatnĂ˝ checkout."
               />
 
               <HeroInfo
                 icon={<FileText size={18} />}
-                title="Rozsah podľa balíka"
-                text="Jasne určený maximálny rozsah práce."
+                title="Rozsah podÄľa balĂ­ka"
+                text="KaĹľdĂ˝ hlavnĂ˝ plĂˇn mĂˇ vlastnĂ˝ limit spracovanĂ˝ch strĂˇn."
               />
 
               <HeroInfo
                 icon={<Sparkles size={18} />}
-                title="Všetko v jednom"
-                text="Písanie, kontrola, zdroje, plánovanie aj obhajoba."
+                title="FlexibilnĂ© rozĹˇĂ­renia"
+                text="AnalĂ˝zu dĂˇt alebo extra strany mĂ´Ĺľete kĂşpiĹĄ samostatne."
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-            {packagePlans.map((plan) => {
-              const selected =
-                selectedPlan === plan.id;
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 shadow-xl sm:p-6">
+            <label
+              htmlFor="checkout-email"
+              className="flex items-center gap-2 text-sm font-black text-white"
+            >
+              <Mail size={18} className="text-purple-300" />
+              E-mail pre platbu a aktivĂˇciu sluĹľby
+            </label>
 
-              const isLoadingThisPlan =
-                loadingPlanId === plan.id;
+            <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center">
+              <input
+                ref={emailInputRef}
+                id="checkout-email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                value={checkoutEmail}
+                onChange={(event) => {
+                  setCheckoutEmail(event.target.value);
+                  setCheckoutError('');
+                }}
+                placeholder="vas@email.sk"
+                className="min-h-[50px] w-full rounded-2xl border border-white/10 bg-[#0f172a] px-4 py-3 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-purple-400 focus:ring-2 focus:ring-purple-500/20"
+              />
+
+              <p className="text-xs leading-5 text-slate-400 lg:max-w-md">
+                Platba a nĂˇslednĂˇ aktivĂˇcia balĂ­ka alebo doplnku budĂş naviazanĂ©
+                na tĂşto e-mailovĂş adresu.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <div className="inline-flex items-center gap-2 text-purple-300">
+                <Crown size={21} />
+                <h2 className="text-2xl font-black text-white sm:text-3xl">
+                  HlavnĂ© mesaÄŤnĂ© plĂˇny
+                </h2>
+              </div>
+
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+                Vyberte jeden hlavnĂ˝ plĂˇn. PlatenĂ© balĂ­ky sa ĂşÄŤtujĂş mesaÄŤne
+                prostrednĂ­ctvom Stripe predplatnĂ©ho.
+              </p>
+            </div>
+
+            <div className="rounded-full border border-purple-400/20 bg-purple-500/10 px-4 py-2 text-xs font-bold text-purple-100">
+              SamostatnĂ˝ checkout pre kaĹľdĂ˝ plĂˇn
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
+            {mainPlans.map((plan) => {
+              const loadingKey = plan.isFree
+                ? null
+                : `plan:${plan.id}`;
+              const isLoading = loadingCheckout === loadingKey;
 
               return (
                 <article
                   key={plan.id}
-                  onClick={() => {
-                    setSelectedPlan(plan.id);
-                    setPaymentError('');
-
-                    if (plan.isFree) {
-                      setSelectedAddons([]);
-                    }
-                  }}
                   className={[
-                    'relative flex cursor-pointer flex-col rounded-3xl border p-6 text-left shadow-xl transition',
-                    'hover:-translate-y-1',
-                    selected
-                      ? 'border-purple-400 bg-purple-600/20 shadow-purple-950/40'
-                      : 'border-white/10 bg-[#0f172a] hover:border-purple-400/50 hover:bg-[#111c33]',
+                    'relative flex flex-col rounded-3xl border p-6 text-left shadow-xl transition hover:-translate-y-1',
                     plan.highlighted
-                      ? 'ring-1 ring-fuchsia-400/30'
-                      : '',
+                      ? 'border-fuchsia-400/60 bg-gradient-to-b from-purple-700/30 to-[#0f172a] ring-1 ring-fuchsia-400/30 shadow-purple-950/50'
+                      : 'border-white/10 bg-[#0f172a] hover:border-purple-400/50 hover:bg-[#111c33]',
                   ].join(' ')}
                 >
                   {plan.badge && (
@@ -752,32 +722,29 @@ export default function PackagesPage() {
                       ) : (
                         <Crown size={14} />
                       )}
-
                       {plan.badge}
                     </div>
                   )}
 
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-xl font-black leading-7 text-white">
-                        {plan.name}
-                      </h2>
+                  <h3 className="text-xl font-black leading-7 text-white">
+                    {plan.name}
+                  </h3>
 
-                      <p className="mt-2 text-sm leading-6 text-slate-300">
-                        {plan.description}
-                      </p>
-                    </div>
-
-                    {selected && (
-                      <div className="shrink-0 rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-bold text-emerald-300">
-                        Vybrané
-                      </div>
-                    )}
-                  </div>
+                  <p className="mt-2 min-h-[72px] text-sm leading-6 text-slate-300">
+                    {plan.description}
+                  </p>
 
                   <div className="mt-6">
-                    <div className="text-4xl font-black text-white">
-                      {plan.price}
+                    <div className="flex flex-wrap items-end gap-x-2 gap-y-1">
+                      <span className="text-4xl font-black text-white">
+                        {formatPrice(plan.priceCents)}
+                      </span>
+
+                      {!plan.isFree && (
+                        <span className="pb-1 text-sm font-bold text-slate-400">
+                          / mesiac
+                        </span>
+                      )}
                     </div>
 
                     <div className="mt-1 text-sm font-semibold text-slate-400">
@@ -787,7 +754,7 @@ export default function PackagesPage() {
 
                   <div className="mt-5 rounded-2xl border border-purple-400/30 bg-purple-500/10 p-4">
                     <div className="text-xs font-black uppercase tracking-wide text-purple-200">
-                      Rozsah balíka
+                      Rozsah balĂ­ka
                     </div>
 
                     <div className="mt-2 text-base font-black text-white">
@@ -796,34 +763,25 @@ export default function PackagesPage() {
                   </div>
 
                   <ul className="mt-6 flex-1 space-y-3 text-sm leading-6 text-slate-200">
-                    {plan.features.map(
-                      (feature) => (
-                        <li
-                          key={feature}
-                          className="flex gap-2"
-                        >
-                          <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-purple-400" />
-                          <span>{feature}</span>
-                        </li>
-                      ),
-                    )}
+                    {plan.features.map((feature) => (
+                      <li key={feature} className="flex gap-2">
+                        <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-purple-400" />
+                        <span>{feature}</span>
+                      </li>
+                    ))}
                   </ul>
 
                   <button
                     type="button"
-                    onClick={(event: MouseEvent<HTMLButtonElement>) => {
-                      event.stopPropagation();
-                      setSelectedPlan(plan.id);
-                      setPaymentError('');
-
+                    onClick={() => {
                       if (plan.isFree) {
                         activateFreePlan();
                         return;
                       }
 
-                      void handleCheckout(plan.id);
+                      void startPlanCheckout(plan.id as PaidPlanId);
                     }}
-                    disabled={loadingPayment}
+                    disabled={loadingCheckout !== null}
                     className={[
                       'mt-7 inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-2xl px-5 py-4',
                       'text-sm font-black text-white transition',
@@ -833,23 +791,20 @@ export default function PackagesPage() {
                         : 'bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:opacity-90',
                     ].join(' ')}
                   >
-                    {isLoadingThisPlan ? (
+                    {isLoading ? (
                       <>
-                        <Loader2
-                          className="animate-spin"
-                          size={18}
-                        />
-                        Presmerovávam...
+                        <Loader2 className="animate-spin" size={18} />
+                        PresmerovĂˇvam...
                       </>
                     ) : plan.isFree ? (
                       <>
                         <Gift size={18} />
-                        Vyskúšať zadarmo
+                        PokraÄŤovaĹĄ zadarmo
                       </>
                     ) : (
                       <>
                         <CreditCard size={18} />
-                        Vybrať a zaplatiť
+                        AktivovaĹĄ mesaÄŤnĂ˝ plĂˇn
                       </>
                     )}
                   </button>
@@ -860,185 +815,132 @@ export default function PackagesPage() {
         </section>
 
         <section className="rounded-3xl border border-white/10 bg-[#050816] p-5 shadow-xl sm:p-7">
-          <div className="mb-6">
-            <div className="inline-flex items-center gap-2 text-purple-300">
-              <BarChart3 size={21} />
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <div className="inline-flex items-center gap-2 text-purple-300">
+                <BarChart3 size={21} />
+                <h2 className="text-2xl font-black text-white sm:text-3xl">
+                  JednorazovĂ© doplnky
+                </h2>
+              </div>
 
-              <h2 className="text-2xl font-black text-white">
-                Doplnkové služby
-              </h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+                Doplnky sa nekombinujĂş s mesaÄŤnĂ˝m plĂˇnom v jednom nĂˇkupe.
+                KaĹľdĂ˝ doplnok otvorĂ­ vlastnĂş jednorazovĂş Stripe platbu.
+              </p>
             </div>
 
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
-              Doplnkové služby môžete pridať k seminárnej, bakalárskej alebo
-              diplomovej práci. Pri zvolenej FREE verzii nie sú doplnky dostupné.
-            </p>
+            <div className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-100">
+              Bez mesaÄŤnĂ©ho predplatnĂ©ho
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            {addonServices.map((addon) => {
-              const selected =
-                selectedAddons.includes(addon.id);
-
-              const disabled =
-                selectedPlan === 'free';
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            {oneTimeAddons.map((addon) => {
+              const loadingKey = `addon:${addon.id}`;
+              const isLoading = loadingCheckout === loadingKey;
 
               return (
-                <button
+                <article
                   key={addon.id}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() =>
-                    toggleAddon(addon.id)
-                  }
-                  className={[
-                    'flex min-h-[170px] flex-col justify-between gap-5 rounded-2xl border p-5 text-left transition sm:flex-row',
-                    disabled
-                      ? 'cursor-not-allowed border-white/5 bg-white/[0.03] opacity-50'
-                      : selected
-                        ? 'border-purple-400 bg-purple-600/20'
-                        : 'border-white/10 bg-[#0f172a] hover:border-purple-400/40 hover:bg-[#111c33]',
-                  ].join(' ')}
+                  className="flex flex-col rounded-3xl border border-white/10 bg-[#0f172a] p-5 transition hover:border-purple-400/40 hover:bg-[#111c33] sm:p-6"
                 >
-                  <div>
-                    <div className="text-lg font-black text-white">
-                      {addon.name}
-                    </div>
-
-                    <div className="mt-1 text-sm leading-6 text-slate-300">
-                      {addon.description}
-                    </div>
-
-                    <ul className="mt-3 space-y-1.5 text-xs leading-5 text-slate-400">
-                      {addon.features.map(
-                        (feature) => (
-                          <li
-                            key={feature}
-                            className="flex gap-2"
-                          >
-                            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-purple-400" />
-                            <span>{feature}</span>
-                          </li>
-                        ),
+                  <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      {addon.badge && (
+                        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-purple-400/20 bg-purple-500/10 px-3 py-1 text-xs font-bold text-purple-100">
+                          <Sparkles size={13} />
+                          {addon.badge}
+                        </div>
                       )}
-                    </ul>
+
+                      <h3 className="text-xl font-black text-white">
+                        {addon.name}
+                      </h3>
+
+                      <p className="mt-2 text-sm leading-6 text-slate-300">
+                        {addon.description}
+                      </p>
+                    </div>
+
+                    <div className="shrink-0 sm:text-right">
+                      <div className="text-3xl font-black text-white">
+                        {formatPrice(addon.priceCents)}
+                      </div>
+
+                      <div className="mt-1 text-xs font-bold uppercase tracking-wide text-emerald-300">
+                        {addon.period}
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="shrink-0 text-2xl font-black text-white">
-                    {addon.price}
-                  </div>
-                </button>
+                  <ul className="mt-5 flex-1 space-y-2.5 text-sm leading-6 text-slate-300">
+                    {addon.features.map((feature) => (
+                      <li key={feature} className="flex gap-2">
+                        <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-purple-400" />
+                        <span>{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <button
+                    type="button"
+                    onClick={() => void startAddonCheckout(addon.id)}
+                    disabled={loadingCheckout !== null}
+                    className="mt-6 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-purple-400/30 bg-purple-600/20 px-5 py-3 text-sm font-black text-purple-50 transition hover:bg-purple-600/30 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="animate-spin" size={18} />
+                        PresmerovĂˇvam...
+                      </>
+                    ) : (
+                      <>
+                        <FilePlus2 size={18} />
+                        KĂşpiĹĄ jednorazovo
+                      </>
+                    )}
+                  </button>
+                </article>
               );
             })}
           </div>
-
-          <div className="mt-7 rounded-3xl border border-white/10 bg-black/30 p-5 sm:p-6">
-            <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-              <div>
-                <div className="text-xs font-black uppercase tracking-wide text-purple-300">
-                  Vybraný balík
-                </div>
-
-                <div className="mt-1 text-2xl font-black text-white">
-                  {selectedPlanData.name}
-                </div>
-
-                <div className="mt-1 text-sm leading-6 text-slate-300">
-                  {selectedPlanData.price} ·{' '}
-                  {selectedPlanData.period} ·{' '}
-                  {selectedPlanData.scope}
-                </div>
-              </div>
-
-              <div className="xl:text-right">
-                <div className="text-xs font-black uppercase tracking-wide text-slate-400">
-                  Celková cena
-                </div>
-
-                <div className="mt-1 text-4xl font-black text-white">
-                  {formatPrice(totalAmount)}
-                </div>
-              </div>
-            </div>
-
-            {selectedAddonData.length > 0 && (
-              <div className="mt-5 border-t border-white/10 pt-5">
-                <div className="text-sm font-bold text-white">
-                  Vybrané doplnkové služby
-                </div>
-
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {selectedAddonData.map(
-                    (addon) => (
-                      <span
-                        key={addon.id}
-                        className="rounded-full border border-purple-400/20 bg-purple-500/10 px-3 py-1.5 text-xs font-semibold text-purple-100"
-                      >
-                        {addon.name} ({addon.price})
-                      </span>
-                    ),
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {paymentError && (
-            <div className="mt-6 whitespace-pre-wrap rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold leading-6 text-red-200">
-              {paymentError}
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={() =>
-              void handleCheckout()
-            }
-            disabled={loadingPayment}
-            className={[
-              'mt-6 flex min-h-[56px] w-full items-center justify-center gap-2 rounded-2xl px-6 py-4',
-              'text-center text-base font-black text-white transition sm:text-lg',
-              'disabled:cursor-not-allowed disabled:opacity-60',
-              selectedPlanData.isFree
-                ? 'bg-emerald-600 hover:bg-emerald-500'
-                : 'bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:opacity-90',
-            ].join(' ')}
-          >
-            {loadingPayment ? (
-              <>
-                <Loader2
-                  className="animate-spin"
-                  size={20}
-                />
-                Presmerovávam na platbu...
-              </>
-            ) : selectedPlanData.isFree ? (
-              <>
-                <Gift size={20} />
-                Pokračovať do FREE verzie
-              </>
-            ) : (
-              <>
-                <CreditCard size={20} />
-                Zaplatiť {formatPrice(totalAmount)}
-              </>
-            )}
-          </button>
-
-          <p className="mt-4 text-center text-xs leading-5 text-slate-500">
-            AI systém poskytuje odbornú podporu pri príprave akademickej práce.
-            Používateľ je zodpovedný za kontrolu, konečnú úpravu, správnosť údajov
-            a dodržanie pravidiel svojej školy.
-          </p>
         </section>
 
+        {checkoutError && (
+          <section
+            role="alert"
+            className="whitespace-pre-wrap rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold leading-6 text-red-200"
+          >
+            {checkoutError}
+          </section>
+        )}
+
+        <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 text-center sm:p-7">
+          <h2 className="text-xl font-black text-white">
+            DĂ´leĹľitĂ© informĂˇcie k platbe
+          </h2>
+
+          <p className="mx-auto mt-3 max-w-4xl text-sm leading-6 text-slate-400">
+            HlavnĂ˝ platenĂ˝ plĂˇn je mesaÄŤnĂ© predplatnĂ©. AnalĂ˝za dĂˇt a Extra
+            20/40/60 strĂˇn sĂş jednorazovĂ© poloĹľky. Cenu, Stripe Price ID a reĹľim
+            platby musĂ­ vĹľdy urÄŤiĹĄ serverovĂ˝ katalĂłg v API; klient neposiela cenu
+            ako dĂ´veryhodnĂ˝ Ăşdaj.
+          </p>
+
+          <p className="mx-auto mt-3 max-w-4xl text-xs leading-5 text-slate-500">
+            AI systĂ©m poskytuje odbornĂş podporu pri prĂ­prave akademickej prĂˇce.
+            PouĹľĂ­vateÄľ zodpovedĂˇ za kontrolu vĂ˝sledku, sprĂˇvnosĹĄ Ăşdajov, koneÄŤnĂş
+            Ăşpravu a dodrĹľanie pravidiel svojej Ĺˇkoly.
+          </p>
+        </section>
       </main>
 
       <button
         type="button"
         onClick={scrollToTop}
         className="fixed bottom-6 right-6 z-50 inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-purple-600 text-white shadow-2xl shadow-purple-950/50 transition hover:bg-purple-500"
-        aria-label="Späť hore"
+        aria-label="SpĂ¤ĹĄ hore"
       >
         <ArrowUp size={20} />
       </button>
@@ -1051,7 +953,7 @@ function HeroInfo({
   title,
   text,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   title: string;
   text: string;
 }) {
@@ -1070,3 +972,5 @@ function HeroInfo({
     </div>
   );
 }
+
+

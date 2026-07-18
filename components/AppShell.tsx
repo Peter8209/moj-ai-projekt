@@ -24,7 +24,6 @@ import {
   Library,
   LogOut,
   Mail,
-  Menu,
   Presentation,
   Sparkles,
   UserCircle,
@@ -33,6 +32,7 @@ import {
   X,
 } from 'lucide-react';
 import { useLanguage } from '@/components/LanguageProvider';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 // =====================================================
 // TYPES
@@ -54,6 +54,93 @@ type AiSectionItem = {
 };
 
 type TranslationRecord = Record<string, unknown>;
+
+type UnknownRecord = Record<string, unknown>;
+
+type EntitlementsSnapshot = {
+  isAdmin: boolean;
+};
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+function readBoolean(
+  record: UnknownRecord,
+  keys: readonly string[],
+): boolean | null {
+  for (const key of keys) {
+    const value = record[key];
+
+    if (typeof value === 'boolean') {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function normalizeEntitlementsSnapshot(
+  payload: unknown,
+): EntitlementsSnapshot {
+  if (!isRecord(payload)) {
+    return {
+      isAdmin: false,
+    };
+  }
+
+  const records: UnknownRecord[] = [payload];
+
+  for (const key of ['entitlements', 'data', 'account', 'user']) {
+    const nested = payload[key];
+
+    if (isRecord(nested)) {
+      records.push(nested);
+    }
+  }
+
+  for (const record of records) {
+    const isAdmin = readBoolean(record, [
+      'isAdmin',
+      'is_admin',
+      'admin',
+      'adminAccess',
+      'admin_access',
+    ]);
+
+    if (isAdmin !== null) {
+      return {
+        isAdmin,
+      };
+    }
+  }
+
+  return {
+    isAdmin: false,
+  };
+}
+
+function clearLegacyClientAdminState() {
+  if (typeof window === 'undefined') return;
+
+  localStorage.removeItem('zedpera_admin_free');
+
+  if (localStorage.getItem('zedpera_selected_plan') === 'admin-free') {
+    localStorage.removeItem('zedpera_selected_plan');
+  }
+
+  if (localStorage.getItem('zedpera_user_plan') === 'admin-free') {
+    localStorage.removeItem('zedpera_user_plan');
+  }
+
+  if (localStorage.getItem('zedpera_user_role') === 'admin') {
+    localStorage.removeItem('zedpera_user_role');
+  }
+}
 
 // =====================================================
 // ROUTES
@@ -308,66 +395,107 @@ function AppShellContent({ children }: { children: ReactNode }) {
   }, [dictionary]);
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [isAdminFree, setIsAdminFree] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [activeAiSection, setActiveAiSection] =
-  useState<DashboardModuleKey>('supervisor');
-
-  useEffect(() => {
-  if (typeof window === 'undefined') return;
-
-  const moduleFromUrl = normalizeDashboardModuleKey(
-    searchParams?.get('module'),
-  );
-
-  const moduleFromStorage = normalizeDashboardModuleKey(
-    localStorage.getItem('zedpera_active_dashboard_module'),
-  );
-
-  const nextModule =
-    moduleFromUrl || moduleFromStorage || 'supervisor';
-
-  setActiveAiSection(nextModule);
-  localStorage.setItem(
-    'zedpera_active_dashboard_module',
-    nextModule,
-  );
-}, [searchParams]);
+    useState<DashboardModuleKey>('supervisor');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const mode = searchParams?.get('mode');
-    const storedAdminMode = localStorage.getItem('zedpera_admin_free');
+    const moduleFromUrl = normalizeDashboardModuleKey(
+      searchParams?.get('module'),
+    );
 
-    if (mode === 'admin-free') {
-      localStorage.setItem('zedpera_admin_free', 'true');
-      localStorage.setItem('zedpera_selected_plan', 'admin-free');
-      localStorage.setItem('zedpera_user_plan', 'admin-free');
-      localStorage.setItem('zedpera_user_role', 'admin');
-      localStorage.setItem('zedpera_is_logged_in', 'true');
+    const moduleFromStorage = normalizeDashboardModuleKey(
+      localStorage.getItem('zedpera_active_dashboard_module'),
+    );
 
-      if (!localStorage.getItem('zedpera_user_name')) {
-        localStorage.setItem('zedpera_user_name', 'Admin');
-      }
+    const nextModule =
+      moduleFromUrl || moduleFromStorage || 'supervisor';
 
-      if (!localStorage.getItem('zedpera_user_email')) {
-        localStorage.setItem('zedpera_user_email', 'admin@zedpera.com');
-      }
-
-      setIsAdminFree(true);
-      return;
-    }
-
-    if (storedAdminMode === 'true') {
-      localStorage.setItem('zedpera_user_role', 'admin');
-      localStorage.setItem('zedpera_user_plan', 'admin-free');
-      localStorage.setItem('zedpera_selected_plan', 'admin-free');
-      setIsAdminFree(true);
-      return;
-    }
-
-    setIsAdminFree(false);
+    setActiveAiSection(nextModule);
+    localStorage.setItem(
+      'zedpera_active_dashboard_module',
+      nextModule,
+    );
   }, [searchParams]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    clearLegacyClientAdminState();
+
+    if (searchParams?.get('mode') !== 'admin-free') {
+      return;
+    }
+
+    const nextSearchParams = new URLSearchParams(
+      searchParams.toString(),
+    );
+
+    nextSearchParams.delete('mode');
+
+    const query = nextSearchParams.toString();
+
+    router.replace(
+      query ? `${pathname}?${query}` : pathname || '/',
+      {
+        scroll: false,
+      },
+    );
+  }, [pathname, router, searchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadServerEntitlements() {
+      try {
+        const response = await fetch('/api/entitlements/me', {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+          },
+        });
+
+        const payload: unknown = await response.json().catch(() => null);
+
+        if (cancelled) return;
+
+        if (!response.ok) {
+          setIsAdmin(false);
+          return;
+        }
+
+        const snapshot = normalizeEntitlementsSnapshot(payload);
+        setIsAdmin(snapshot.isAdmin);
+      } catch {
+        if (!cancelled) {
+          setIsAdmin(false);
+        }
+      }
+    }
+
+    function refreshEntitlements() {
+      void loadServerEntitlements();
+    }
+
+    refreshEntitlements();
+
+    window.addEventListener(
+      'zedpera-entitlements-updated',
+      refreshEntitlements,
+    );
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(
+        'zedpera-entitlements-updated',
+        refreshEntitlements,
+      );
+    };
+  }, [pathname]);
 
   const activeTitle = useMemo(() => {
     const active = navItems.find((item) =>
@@ -430,55 +558,63 @@ function AppShellContent({ children }: { children: ReactNode }) {
   }
 
   function handleAiSectionClick(moduleKey: string) {
-  const normalizedModuleKey =
-    normalizeDashboardModuleKey(moduleKey) || 'supervisor';
+    const normalizedModuleKey =
+      normalizeDashboardModuleKey(moduleKey) || 'supervisor';
 
-  setActiveAiSection(normalizedModuleKey);
+    setActiveAiSection(normalizedModuleKey);
 
-  if (typeof window !== 'undefined') {
-    localStorage.setItem(
-      'zedpera_active_dashboard_module',
-      normalizedModuleKey,
-    );
-
-    window.dispatchEvent(
-      new CustomEvent('zedpera-dashboard-module-change', {
-        detail: {
-          moduleKey: normalizedModuleKey,
-        },
-      }),
-    );
-  }
-
-  router.push(
-    `/dashboard?module=${encodeURIComponent(normalizedModuleKey)}`,
-  );
-}
-
-  function logoutAdminMode() {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('zedpera_admin_free');
-      localStorage.removeItem('zedpera_selected_plan');
-      localStorage.removeItem('zedpera_user_plan');
-      localStorage.removeItem('zedpera_user_role');
+      localStorage.setItem(
+        'zedpera_active_dashboard_module',
+        normalizedModuleKey,
+      );
+
+      window.dispatchEvent(
+        new CustomEvent('zedpera-dashboard-module-change', {
+          detail: {
+            moduleKey: normalizedModuleKey,
+          },
+        }),
+      );
     }
 
-    setIsAdminFree(false);
-    router.push('/');
+    router.push(
+      `/dashboard?module=${encodeURIComponent(normalizedModuleKey)}`,
+    );
   }
 
-  function logoutUser() {
+  async function logoutUser() {
+    setMobileMenuOpen(false);
+    setIsAdmin(false);
+
     if (typeof window !== 'undefined') {
+      clearLegacyClientAdminState();
+
       localStorage.removeItem('zedpera_is_logged_in');
       localStorage.removeItem('zedpera_user_role');
       localStorage.removeItem('zedpera_user_plan');
       localStorage.removeItem('zedpera_selected_plan');
-      localStorage.removeItem('zedpera_admin_free');
+      localStorage.removeItem('zedpera_user_email');
+      localStorage.removeItem('zedpera_email');
+      localStorage.removeItem('user_email');
+      localStorage.removeItem('zedpera_user_name');
+
+      document.cookie =
+        'sub_active=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
     }
 
-    setIsAdminFree(false);
-    setMobileMenuOpen(false);
-    router.push('/');
+    try {
+      const supabase = createSupabaseBrowserClient();
+
+      await supabase.auth.signOut({
+        scope: 'local',
+      });
+    } catch (error) {
+      console.error('Odhlásenie zo Supabase zlyhalo:', error);
+    } finally {
+      router.replace('/login');
+      router.refresh();
+    }
   }
 
   return (
@@ -533,7 +669,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         </nav>
 
         <div className="shrink-0 border-t border-white/10 pt-4">
-          {isAdminFree && (
+          {isAdmin && (
             <div className="mb-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3">
               <div className="flex items-center gap-3 text-sm font-black text-emerald-200">
                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
@@ -556,29 +692,18 @@ function AppShellContent({ children }: { children: ReactNode }) {
             </div>
           )}
 
-          {isAdminFree ? (
-            <button
-              type="button"
-              onClick={logoutAdminMode}
-              className="mb-3 flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold text-rose-300 transition hover:bg-rose-500/10 hover:text-rose-200"
-            >
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-500/10">
-                <LogOut size={17} />
-              </span>
-              {text(dictionary, 'exitAdminMode', 'Ukončiť admin režim')}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={logoutUser}
-              className="mb-3 flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold text-slate-400 transition hover:bg-rose-500/10 hover:text-rose-200"
-            >
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/5">
-                <LogOut size={17} />
-              </span>
-              {text(dictionary, 'logout', 'Odhlásiť sa')}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => {
+              void logoutUser();
+            }}
+            className="mb-3 flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold text-slate-400 transition hover:bg-rose-500/10 hover:text-rose-200"
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/5">
+              <LogOut size={17} />
+            </span>
+            {text(dictionary, 'logout', 'Odhlásiť sa')}
+          </button>
 
           <div className="px-4 text-xs text-slate-500">
             © {new Date().getFullYear()} Zedpera
@@ -591,13 +716,11 @@ function AppShellContent({ children }: { children: ReactNode }) {
       ===================================================== */}
 
       <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
-        
-
         {/* =====================================================
             MAIN CONTENT
         ===================================================== */}
 
-<main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#020617] p-3 pb-24 sm:p-4 sm:pb-24 md:p-6 md:pb-24 lg:pb-6 lg:pt-6">
+        <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#020617] p-3 pb-24 sm:p-4 sm:pb-24 md:p-6 md:pb-24 lg:pb-6 lg:pt-6">
           {!isDashboard && (
             <div className="sticky top-0 z-30 mb-5 rounded-3xl border border-white/10 bg-[#020617]/95 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -774,34 +897,25 @@ function AppShellContent({ children }: { children: ReactNode }) {
             </div>
 
             <div className="grid grid-cols-1 gap-2 border-t border-white/10 pt-4">
-              {isAdminFree ? (
-                <>
-                  <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-4 text-sm font-black text-emerald-200">
-                    <div className="flex items-center justify-center gap-2">
-                      <Crown size={18} />
-                      {text(dictionary, 'adminAccount', 'Admin účet')}
-                    </div>
+              {isAdmin && (
+                <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-4 text-sm font-black text-emerald-200">
+                  <div className="flex items-center justify-center gap-2">
+                    <Crown size={18} />
+                    {text(dictionary, 'adminAccount', 'Admin účet')}
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={logoutAdminMode}
-                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-4 text-sm font-black text-rose-200"
-                  >
-                    <LogOut size={18} />
-                    {text(dictionary, 'exitAdminMode', 'Ukončiť admin režim')}
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={logoutUser}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-4 text-sm font-black text-rose-200"
-                >
-                  <LogOut size={18} />
-                  {text(dictionary, 'logout', 'Odhlásiť sa')}
-                </button>
+                </div>
               )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  void logoutUser();
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-4 text-sm font-black text-rose-200"
+              >
+                <LogOut size={18} />
+                {text(dictionary, 'logout', 'Odhlásiť sa')}
+              </button>
             </div>
           </div>
         </div>

@@ -197,16 +197,6 @@ type Translation = {
 };
 
 const LANGUAGE_STORAGE_KEY = 'zedpera_language';
-const LANGUAGE_STORAGE_KEYS = [
-  LANGUAGE_STORAGE_KEY,
-  'zedpera_system_language',
-  'zedpera_work_language',
-  'zedpera_interface_language',
-  'app_language',
-] as const;
-const LANGUAGE_COOKIE_KEY = 'zedpera_language';
-const LANGUAGE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
-const CHECKOUT_LANGUAGE_STORAGE_KEY = 'zedpera_checkout_language';
 
 const MODERN_WOMAN_IMAGE_URL = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=2400&q=100&dpr=2';
 
@@ -320,7 +310,7 @@ const translations: Record<AppLanguage, Translation> = {
         },
         {
           title: 'Analýza dát',
-          text: 'Spracovanie dotazníkov, deskriptívna štatistika, testovanie normality, korelačné analýzy, frekvenčné tabuľky, tvorba škál a subškál a grafy.',
+          text: 'Spracovanie dotazníkov, deskriptívna štatistika, testovanie normality, korelačné analýzy, frekvenčné tabuľky, tvorba škál, subškál a grafy.',
         },
         {
           title: 'Obhajoba',
@@ -427,7 +417,7 @@ const translations: Record<AppLanguage, Translation> = {
     pricing: {
       title: 'Vyberte si balík podľa typu a rozsahu práce',
       fullOfferText: 'Zobraziť kompletný cenník',
-      fullOfferHint: 'Jednorazové balíky bez automatického mesačného obnovovania.',
+      fullOfferHint: 'Hlavné balíky sú mesačné predplatné. Analýza dát a Extra 20/40/60 strán sú jednorazové doplnkové služby.',
       emailPrompt: 'Zadajte e-mail, na ktorý bude naviazaná platba:',
       emailRequired: 'Pre pokračovanie na platbu je potrebný e-mail.',
       invalidPlan: 'Neplatný balík alebo doplnková služba',
@@ -458,7 +448,7 @@ const translations: Record<AppLanguage, Translation> = {
           label: 'SEMINÁRNA PRÁCA',
           name: 'Seminárna, ročníková alebo zápočtová práca',
           price: '39 €',
-          period: 'jednorazovo',
+          period: 'mesačne',
           description: 'Ideálne riešenie pre seminárne, ročníkové a zápočtové práce do 15 strán.',
           button: 'Kúpiť seminárnu prácu',
           pageLimit: 15,
@@ -483,7 +473,7 @@ const translations: Record<AppLanguage, Translation> = {
           label: 'BAKALÁRSKA PRÁCA',
           name: 'Kompletné riešenie bakalárskej práce',
           price: '149 €',
-          period: 'jednorazovo',
+          period: 'mesačne',
           description: 'Kompletné riešenie od prvého zadania až po úspešnú obhajobu bakalárskej práce.',
           button: 'Kúpiť bakalársku prácu',
           highlighted: true,
@@ -511,7 +501,7 @@ const translations: Record<AppLanguage, Translation> = {
           label: 'DIPLOMOVÁ / MAGISTERSKÁ PRÁCA',
           name: 'Najkomplexnejší balík záverečnej práce',
           price: '189 €',
-          period: 'jednorazovo',
+          period: 'mesačne',
           description: 'Najkomplexnejší balík pre náročné záverečné práce s pokročilou metodikou a analýzou dát.',
           button: 'Kúpiť diplomovú prácu',
           pageLimit: 70,
@@ -552,8 +542,7 @@ const translations: Record<AppLanguage, Translation> = {
             'Testovanie normality',
             'Korelačné analýzy',
             'Frekvenčné tabuľky',
-            'Tvorba škál a subškál',
-            'Grafy',
+            'Tvorba škál, subškál a grafy',
           ],
         },
         {
@@ -780,7 +769,7 @@ const translations: Record<AppLanguage, Translation> = {
     pricing: {
       title: 'Vyberte si balíček podle typu a rozsahu práce',
       fullOfferText: 'Zobrazit kompletní ceník',
-      fullOfferHint: 'Jednorázové balíčky bez automatického měsíčního obnovení.',
+      fullOfferHint: 'Hlavní balíčky jsou měsíční předplatné. Analýza dat a Extra 20/40/60 stran jsou jednorázové doplňkové služby.',
       emailPrompt: 'Zadejte e-mail, ke kterému bude platba přiřazena:',
       emailRequired: 'Pro pokračování k platbě je potřeba e-mail.',
       invalidPlan: 'Neplatný balíček nebo doplňková služba',
@@ -788,10 +777,10 @@ const translations: Record<AppLanguage, Translation> = {
       noStripeUrl: 'Stripe nevygeneroval platební URL.',
       plans: [
         { id: 'free', kind: 'free', label: 'FREE', name: 'Bezplatná verze', price: '0 €', period: 'navždy', description: 'Vyzkoušejte základní akademickou pomoc bez platby.', button: 'Začít zdarma', pageLimit: 3, attachmentLimit: 1, promptLimit: 3, features: ['1 příloha', '2–3 prompty', 'Základní pomoc osobního akademického konzultanta'] },
-        { id: 'seminar-work', kind: 'plan', label: 'SEMINÁRNÍ PRÁCE', name: 'Seminární, ročníková nebo zápočtová práce', price: '39 €', period: 'jednorázově', description: 'Ideální řešení pro seminární, ročníkové a zápočtové práce do 15 stran.', button: 'Koupit seminární práci', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['Vytvoření celé seminární práce', 'Pomoc při psaní jednotlivých kapitol', 'Metodické vedení během celé práce', 'Kontrola kvality a logiky textu', 'Humanizace textu', 'Návrh struktury a osnovy', 'Pomoc s citacemi a zdroji', 'Plánování práce', 'Příprava e-mailů pro vyučujícího', 'Vše v jednom systému'] },
-        { id: 'bachelor-thesis', kind: 'plan', label: 'BAKALÁŘSKÁ PRÁCE', name: 'Kompletní řešení bakalářské práce', price: '149 €', period: 'jednorázově', description: 'Kompletní řešení od prvního zadání až po úspěšnou obhajobu bakalářské práce.', button: 'Koupit bakalářskou práci', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['Vytvoření celé bakalářské práce', 'Metodické vedení během celého psaní', 'Kontrola kvality, logiky a konzistence textu', 'Humanizace textu', 'Pomoc se správnými citacemi a zdroji', 'Zpracování dotazníků a statistiky', 'Tvorba grafů a tabulek', 'Příprava prezentace k obhajobě', 'Příprava odpovědí na otázky komise', 'Plánování práce a termínů', 'Návrhy e-mailů pro školitele', 'Vše v jednom systému'] },
-        { id: 'master-thesis', kind: 'plan', label: 'DIPLOMOVÁ / MAGISTERSKÁ PRÁCE', name: 'Nejkomplexnější balíček závěrečné práce', price: '189 €', period: 'jednorázově', description: 'Nejkomplexnější balíček pro náročné závěrečné práce s pokročilou metodikou a analýzou dat.', button: 'Koupit diplomovou práci', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['Vytvoření celé diplomové práce', 'Metodické vedení během celého procesu', 'Kontrola kvality a odbornosti textu', 'Humanizace textu', 'Pomoc se zdroji a citacemi', 'Komplexní zpracování statistiky', 'Deskriptivní statistika', 'Testování hypotéz', 'Korelační analýzy', 'Normalita dat', 'Tvorba grafů a tabulek', 'Příprava prezentace k obhajobě', 'Simulace otázek komise', 'Plánování celé práce', 'Komunikace se školitelem', 'Vše v jednom systému'] },
-        { id: 'data-analysis', kind: 'addon', label: 'DOPLŇKOVÁ SLUŽBA', name: 'Analýza dat', price: '89 €', period: 'jednorázově', description: 'Kompletní zpracování statistické části práce.', button: 'Koupit analýzu dat', features: ['Zpracování dotazníků', 'Čištění dat', 'Deskriptivní statistika', 'Testování normality', 'Korelační analýzy', 'Frekvenční tabulky', 'Tvorba škál a subškál', 'Grafy'] },
+        { id: 'seminar-work', kind: 'plan', label: 'SEMINÁRNÍ PRÁCE', name: 'Seminární, ročníková nebo zápočtová práce', price: '39 €', period: 'měsíčně', description: 'Ideální řešení pro seminární, ročníkové a zápočtové práce do 15 stran.', button: 'Koupit seminární práci', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['Vytvoření celé seminární práce', 'Pomoc při psaní jednotlivých kapitol', 'Metodické vedení během celé práce', 'Kontrola kvality a logiky textu', 'Humanizace textu', 'Návrh struktury a osnovy', 'Pomoc s citacemi a zdroji', 'Plánování práce', 'Příprava e-mailů pro vyučujícího', 'Vše v jednom systému'] },
+        { id: 'bachelor-thesis', kind: 'plan', label: 'BAKALÁŘSKÁ PRÁCE', name: 'Kompletní řešení bakalářské práce', price: '149 €', period: 'měsíčně', description: 'Kompletní řešení od prvního zadání až po úspěšnou obhajobu bakalářské práce.', button: 'Koupit bakalářskou práci', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['Vytvoření celé bakalářské práce', 'Metodické vedení během celého psaní', 'Kontrola kvality, logiky a konzistence textu', 'Humanizace textu', 'Pomoc se správnými citacemi a zdroji', 'Zpracování dotazníků a statistiky', 'Tvorba grafů a tabulek', 'Příprava prezentace k obhajobě', 'Příprava odpovědí na otázky komise', 'Plánování práce a termínů', 'Návrhy e-mailů pro školitele', 'Vše v jednom systému'] },
+        { id: 'master-thesis', kind: 'plan', label: 'DIPLOMOVÁ / MAGISTERSKÁ PRÁCE', name: 'Nejkomplexnější balíček závěrečné práce', price: '189 €', period: 'měsíčně', description: 'Nejkomplexnější balíček pro náročné závěrečné práce s pokročilou metodikou a analýzou dat.', button: 'Koupit diplomovou práci', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['Vytvoření celé diplomové práce', 'Metodické vedení během celého procesu', 'Kontrola kvality a odbornosti textu', 'Humanizace textu', 'Pomoc se zdroji a citacemi', 'Komplexní zpracování statistiky', 'Deskriptivní statistika', 'Testování hypotéz', 'Korelační analýzy', 'Normalita dat', 'Tvorba grafů a tabulek', 'Příprava prezentace k obhajobě', 'Simulace otázek komise', 'Plánování celé práce', 'Komunikace se školitelem', 'Vše v jednom systému'] },
+        { id: 'data-analysis', kind: 'addon', label: 'DOPLŇKOVÁ SLUŽBA', name: 'Analýza dat', price: '89 €', period: 'jednorázově', description: 'Kompletní zpracování statistické části práce.', button: 'Koupit analýzu dat', features: ['Zpracování dotazníků', 'Čištění dat', 'Deskriptivní statistika', 'Testování normality', 'Korelační analýzy', 'Frekvenční tabulky', 'Tvorba škál, subškál a grafů'] },
         { id: 'extra-20', kind: 'addon', label: 'EXTRA ROZSAH', name: 'Extra 20 stran', price: '49 €', period: 'jednorázově', description: 'Rozšíření aktuálního projektu a balíčku o dalších 20 normostran.', button: 'Dokoupit 20 stran', extraPages: 20, features: ['Dalších 20 normostran pro aktuální projekt'] },
         { id: 'extra-40', kind: 'addon', label: 'EXTRA ROZSAH', name: 'Extra 40 stran', price: '89 €', period: 'jednorázově', description: 'Rozšíření aktuálního projektu a balíčku o dalších 40 normostran.', button: 'Dokoupit 40 stran', extraPages: 40, features: ['Dalších 40 normostran pro aktuální projekt'] },
         { id: 'extra-60', kind: 'addon', label: 'EXTRA ROZSAH', name: 'Extra 60 stran', price: '129 €', period: 'jednorázově', description: 'Rozšíření aktuálního projektu a balíčku o dalších 60 normostran.', button: 'Dokoupit 60 stran', extraPages: 60, features: ['Dalších 60 normostran pro aktuální projekt'] },
@@ -982,7 +971,7 @@ const translations: Record<AppLanguage, Translation> = {
     pricing: {
       title: 'Choose a package by thesis type and scope',
       fullOfferText: 'View the complete pricing',
-      fullOfferHint: 'One-time packages without automatic monthly renewal.',
+      fullOfferHint: 'Main packages are monthly subscriptions. Data analysis and Extra 20/40/60 pages are one-time add-ons.',
       emailPrompt: 'Enter the email address linked to the payment:',
       emailRequired: 'An email is required to continue to payment.',
       invalidPlan: 'Invalid package or add-on',
@@ -990,10 +979,10 @@ const translations: Record<AppLanguage, Translation> = {
       noStripeUrl: 'Stripe did not generate a payment URL.',
       plans: [
         { id: 'free', kind: 'free', label: 'FREE', name: 'Free version', price: '0 €', period: 'forever', description: 'Try basic academic support without payment.', button: 'Start free', pageLimit: 3, attachmentLimit: 1, promptLimit: 3, features: ['1 attachment', '2–3 prompts', 'Basic support from a personal academic consultant'] },
-        { id: 'seminar-work', kind: 'plan', label: 'SEMINAR PAPER', name: 'Seminar, course or credit paper', price: '39 €', period: 'one-time', description: 'An ideal solution for seminar, course and credit papers up to 15 pages.', button: 'Buy seminar package', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['Creation of the complete seminar paper', 'Help with writing individual chapters', 'Methodological guidance throughout the work', 'Quality and logic checks', 'Text humanization', 'Structure and outline proposal', 'Help with citations and sources', 'Work planning', 'Draft emails for the lecturer', 'Everything in one system'] },
-        { id: 'bachelor-thesis', kind: 'plan', label: 'BACHELOR THESIS', name: 'Complete bachelor thesis solution', price: '149 €', period: 'one-time', description: 'A complete solution from the first assignment to a successful bachelor thesis defense.', button: 'Buy bachelor package', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['Creation of the complete bachelor thesis', 'Methodological guidance throughout writing', 'Quality, logic and consistency checks', 'Text humanization', 'Correct citations and sources', 'Questionnaire and statistical processing', 'Charts and tables', 'Defense presentation preparation', 'Answers to committee questions', 'Planning and deadlines', 'Draft emails for the supervisor', 'Everything in one system'] },
-        { id: 'master-thesis', kind: 'plan', label: 'MASTER THESIS', name: 'The most comprehensive final-thesis package', price: '189 €', period: 'one-time', description: 'The most comprehensive package for demanding final theses with advanced methodology and data analysis.', button: 'Buy master package', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['Creation of the complete master thesis', 'Methodological guidance throughout the process', 'Quality and academic rigor checks', 'Text humanization', 'Sources and citations', 'Comprehensive statistical processing', 'Descriptive statistics', 'Hypothesis testing', 'Correlation analyses', 'Data normality', 'Charts and tables', 'Defense presentation preparation', 'Committee-question simulation', 'Complete work planning', 'Supervisor communication', 'Everything in one system'] },
-        { id: 'data-analysis', kind: 'addon', label: 'ADD-ON SERVICE', name: 'Data analysis', price: '89 €', period: 'one-time', description: 'Complete processing of the statistical part of the thesis.', button: 'Buy data analysis', features: ['Questionnaire processing', 'Data cleaning', 'Descriptive statistics', 'Normality testing', 'Correlation analyses', 'Frequency tables', 'Scales and subscales', 'Charts'] },
+        { id: 'seminar-work', kind: 'plan', label: 'SEMINAR PAPER', name: 'Seminar, course or credit paper', price: '39 €', period: 'monthly', description: 'An ideal solution for seminar, course and credit papers up to 15 pages.', button: 'Buy seminar package', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['Creation of the complete seminar paper', 'Help with writing individual chapters', 'Methodological guidance throughout the work', 'Quality and logic checks', 'Text humanization', 'Structure and outline proposal', 'Help with citations and sources', 'Work planning', 'Draft emails for the lecturer', 'Everything in one system'] },
+        { id: 'bachelor-thesis', kind: 'plan', label: 'BACHELOR THESIS', name: 'Complete bachelor thesis solution', price: '149 €', period: 'monthly', description: 'A complete solution from the first assignment to a successful bachelor thesis defense.', button: 'Buy bachelor package', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['Creation of the complete bachelor thesis', 'Methodological guidance throughout writing', 'Quality, logic and consistency checks', 'Text humanization', 'Correct citations and sources', 'Questionnaire and statistical processing', 'Charts and tables', 'Defense presentation preparation', 'Answers to committee questions', 'Planning and deadlines', 'Draft emails for the supervisor', 'Everything in one system'] },
+        { id: 'master-thesis', kind: 'plan', label: 'MASTER THESIS', name: 'The most comprehensive final-thesis package', price: '189 €', period: 'monthly', description: 'The most comprehensive package for demanding final theses with advanced methodology and data analysis.', button: 'Buy master package', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['Creation of the complete master thesis', 'Methodological guidance throughout the process', 'Quality and academic rigor checks', 'Text humanization', 'Sources and citations', 'Comprehensive statistical processing', 'Descriptive statistics', 'Hypothesis testing', 'Correlation analyses', 'Data normality', 'Charts and tables', 'Defense presentation preparation', 'Committee-question simulation', 'Complete work planning', 'Supervisor communication', 'Everything in one system'] },
+        { id: 'data-analysis', kind: 'addon', label: 'ADD-ON SERVICE', name: 'Data analysis', price: '89 €', period: 'one-time', description: 'Complete processing of the statistical part of the thesis.', button: 'Buy data analysis', features: ['Questionnaire processing', 'Data cleaning', 'Descriptive statistics', 'Normality testing', 'Correlation analyses', 'Frequency tables', 'Scales, subscales and charts'] },
         { id: 'extra-20', kind: 'addon', label: 'EXTRA SCOPE', name: 'Extra 20 pages', price: '49 €', period: 'one-time', description: 'Extend the current project and package by another 20 standard pages.', button: 'Add 20 pages', extraPages: 20, features: ['20 additional standard pages for the current project'] },
         { id: 'extra-40', kind: 'addon', label: 'EXTRA SCOPE', name: 'Extra 40 pages', price: '89 €', period: 'one-time', description: 'Extend the current project and package by another 40 standard pages.', button: 'Add 40 pages', extraPages: 40, features: ['40 additional standard pages for the current project'] },
         { id: 'extra-60', kind: 'addon', label: 'EXTRA SCOPE', name: 'Extra 60 pages', price: '129 €', period: 'one-time', description: 'Extend the current project and package by another 60 standard pages.', button: 'Add 60 pages', extraPages: 60, features: ['60 additional standard pages for the current project'] },
@@ -1184,7 +1173,7 @@ const translations: Record<AppLanguage, Translation> = {
     pricing: {
       title: 'Wählen Sie ein Paket nach Art und Umfang der Arbeit',
       fullOfferText: 'Vollständige Preise anzeigen',
-      fullOfferHint: 'Einmalige Pakete ohne automatische monatliche Verlängerung.',
+      fullOfferHint: 'Die Hauptpakete sind monatliche Abonnements. Datenanalyse und Extra 20/40/60 Seiten sind einmalige Zusatzleistungen.',
       emailPrompt: 'Geben Sie die E-Mail-Adresse für die Zahlung ein:',
       emailRequired: 'Für die Zahlung ist eine E-Mail-Adresse erforderlich.',
       invalidPlan: 'Ungültiges Paket oder Zusatzleistung',
@@ -1192,10 +1181,10 @@ const translations: Record<AppLanguage, Translation> = {
       noStripeUrl: 'Stripe hat keine Zahlungs-URL generiert.',
       plans: [
         { id: 'free', kind: 'free', label: 'FREE', name: 'Kostenlose Version', price: '0 €', period: 'dauerhaft', description: 'Testen Sie die grundlegende akademische Unterstützung kostenlos.', button: 'Kostenlos starten', pageLimit: 3, attachmentLimit: 1, promptLimit: 3, features: ['1 Anhang', '2–3 Prompts', 'Grundlegende Unterstützung durch einen persönlichen akademischen Berater'] },
-        { id: 'seminar-work', kind: 'plan', label: 'SEMINARARBEIT', name: 'Seminar-, Jahres- oder Leistungsarbeit', price: '39 €', period: 'einmalig', description: 'Ideal für Seminar-, Jahres- und Leistungsarbeiten bis 15 Seiten.', button: 'Seminarpaket kaufen', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['Erstellung der vollständigen Seminararbeit', 'Hilfe beim Schreiben einzelner Kapitel', 'Methodische Begleitung', 'Qualitäts- und Logikprüfung', 'Humanisierung des Textes', 'Struktur- und Gliederungsvorschlag', 'Quellen und Zitate', 'Arbeitsplanung', 'E-Mail-Entwürfe für Lehrende', 'Alles in einem System'] },
-        { id: 'bachelor-thesis', kind: 'plan', label: 'BACHELORARBEIT', name: 'Komplettlösung für die Bachelorarbeit', price: '149 €', period: 'einmalig', description: 'Komplette Unterstützung von der ersten Aufgabe bis zur erfolgreichen Verteidigung.', button: 'Bachelorpaket kaufen', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['Erstellung der vollständigen Bachelorarbeit', 'Methodische Begleitung während des Schreibens', 'Qualitäts-, Logik- und Konsistenzprüfung', 'Humanisierung des Textes', 'Korrekte Zitate und Quellen', 'Fragebogen- und Statistikverarbeitung', 'Diagramme und Tabellen', 'Präsentation zur Verteidigung', 'Antworten auf Kommissionsfragen', 'Planung und Termine', 'E-Mail-Entwürfe für den Betreuer', 'Alles in einem System'] },
-        { id: 'master-thesis', kind: 'plan', label: 'MASTERARBEIT', name: 'Das umfassendste Abschlussarbeitspaket', price: '189 €', period: 'einmalig', description: 'Das umfassendste Paket für anspruchsvolle Arbeiten mit fortgeschrittener Methodik und Datenanalyse.', button: 'Masterpaket kaufen', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['Erstellung der vollständigen Masterarbeit', 'Methodische Begleitung des gesamten Prozesses', 'Qualitäts- und Fachlichkeitsprüfung', 'Humanisierung des Textes', 'Quellen und Zitate', 'Umfassende statistische Verarbeitung', 'Deskriptive Statistik', 'Hypothesentests', 'Korrelationsanalysen', 'Daten-Normalität', 'Diagramme und Tabellen', 'Präsentation zur Verteidigung', 'Simulation von Kommissionsfragen', 'Vollständige Arbeitsplanung', 'Kommunikation mit dem Betreuer', 'Alles in einem System'] },
-        { id: 'data-analysis', kind: 'addon', label: 'ZUSATZLEISTUNG', name: 'Datenanalyse', price: '89 €', period: 'einmalig', description: 'Vollständige Bearbeitung des statistischen Teils der Arbeit.', button: 'Datenanalyse kaufen', features: ['Fragebogenauswertung', 'Datenbereinigung', 'Deskriptive Statistik', 'Normalitätstests', 'Korrelationsanalysen', 'Häufigkeitstabellen', 'Skalen und Subskalen', 'Diagramme'] },
+        { id: 'seminar-work', kind: 'plan', label: 'SEMINARARBEIT', name: 'Seminar-, Jahres- oder Leistungsarbeit', price: '39 €', period: 'monatlich', description: 'Ideal für Seminar-, Jahres- und Leistungsarbeiten bis 15 Seiten.', button: 'Seminarpaket kaufen', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['Erstellung der vollständigen Seminararbeit', 'Hilfe beim Schreiben einzelner Kapitel', 'Methodische Begleitung', 'Qualitäts- und Logikprüfung', 'Humanisierung des Textes', 'Struktur- und Gliederungsvorschlag', 'Quellen und Zitate', 'Arbeitsplanung', 'E-Mail-Entwürfe für Lehrende', 'Alles in einem System'] },
+        { id: 'bachelor-thesis', kind: 'plan', label: 'BACHELORARBEIT', name: 'Komplettlösung für die Bachelorarbeit', price: '149 €', period: 'monatlich', description: 'Komplette Unterstützung von der ersten Aufgabe bis zur erfolgreichen Verteidigung.', button: 'Bachelorpaket kaufen', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['Erstellung der vollständigen Bachelorarbeit', 'Methodische Begleitung während des Schreibens', 'Qualitäts-, Logik- und Konsistenzprüfung', 'Humanisierung des Textes', 'Korrekte Zitate und Quellen', 'Fragebogen- und Statistikverarbeitung', 'Diagramme und Tabellen', 'Präsentation zur Verteidigung', 'Antworten auf Kommissionsfragen', 'Planung und Termine', 'E-Mail-Entwürfe für den Betreuer', 'Alles in einem System'] },
+        { id: 'master-thesis', kind: 'plan', label: 'MASTERARBEIT', name: 'Das umfassendste Abschlussarbeitspaket', price: '189 €', period: 'monatlich', description: 'Das umfassendste Paket für anspruchsvolle Arbeiten mit fortgeschrittener Methodik und Datenanalyse.', button: 'Masterpaket kaufen', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['Erstellung der vollständigen Masterarbeit', 'Methodische Begleitung des gesamten Prozesses', 'Qualitäts- und Fachlichkeitsprüfung', 'Humanisierung des Textes', 'Quellen und Zitate', 'Umfassende statistische Verarbeitung', 'Deskriptive Statistik', 'Hypothesentests', 'Korrelationsanalysen', 'Daten-Normalität', 'Diagramme und Tabellen', 'Präsentation zur Verteidigung', 'Simulation von Kommissionsfragen', 'Vollständige Arbeitsplanung', 'Kommunikation mit dem Betreuer', 'Alles in einem System'] },
+        { id: 'data-analysis', kind: 'addon', label: 'ZUSATZLEISTUNG', name: 'Datenanalyse', price: '89 €', period: 'einmalig', description: 'Vollständige Bearbeitung des statistischen Teils der Arbeit.', button: 'Datenanalyse kaufen', features: ['Fragebogenauswertung', 'Datenbereinigung', 'Deskriptive Statistik', 'Normalitätstests', 'Korrelationsanalysen', 'Häufigkeitstabellen', 'Skalen, Subskalen und Diagramme'] },
         { id: 'extra-20', kind: 'addon', label: 'EXTRA-UMFANG', name: 'Extra 20 Seiten', price: '49 €', period: 'einmalig', description: 'Erweiterung des aktuellen Projekts um weitere 20 Normseiten.', button: '20 Seiten hinzufügen', extraPages: 20, features: ['20 zusätzliche Normseiten für das aktuelle Projekt'] },
         { id: 'extra-40', kind: 'addon', label: 'EXTRA-UMFANG', name: 'Extra 40 Seiten', price: '89 €', period: 'einmalig', description: 'Erweiterung des aktuellen Projekts um weitere 40 Normseiten.', button: '40 Seiten hinzufügen', extraPages: 40, features: ['40 zusätzliche Normseiten für das aktuelle Projekt'] },
         { id: 'extra-60', kind: 'addon', label: 'EXTRA-UMFANG', name: 'Extra 60 Seiten', price: '129 €', period: 'einmalig', description: 'Erweiterung des aktuellen Projekts um weitere 60 Normseiten.', button: '60 Seiten hinzufügen', extraPages: 60, features: ['60 zusätzliche Normseiten für das aktuelle Projekt'] },
@@ -1386,7 +1375,7 @@ const translations: Record<AppLanguage, Translation> = {
     pricing: {
       title: 'Wybierz pakiet według typu i zakresu pracy',
       fullOfferText: 'Zobacz pełny cennik',
-      fullOfferHint: 'Pakiety jednorazowe bez automatycznego odnawiania co miesiąc.',
+      fullOfferHint: 'Główne pakiety są miesięcznymi subskrypcjami. Analiza danych oraz Extra 20/40/60 stron to dodatki jednorazowe.',
       emailPrompt: 'Podaj e-mail powiązany z płatnością:',
       emailRequired: 'E-mail jest wymagany, aby przejść do płatności.',
       invalidPlan: 'Nieprawidłowy pakiet lub dodatek',
@@ -1394,10 +1383,10 @@ const translations: Record<AppLanguage, Translation> = {
       noStripeUrl: 'Stripe nie wygenerował adresu płatności.',
       plans: [
         { id: 'free', kind: 'free', label: 'FREE', name: 'Wersja bezpłatna', price: '0 €', period: 'na zawsze', description: 'Wypróbuj podstawowe wsparcie akademickie bez opłat.', button: 'Zacznij bezpłatnie', pageLimit: 3, attachmentLimit: 1, promptLimit: 3, features: ['1 załącznik', '2–3 prompty', 'Podstawowa pomoc osobistego konsultanta akademickiego'] },
-        { id: 'seminar-work', kind: 'plan', label: 'PRACA SEMESTRALNA', name: 'Praca semestralna, roczna lub zaliczeniowa', price: '39 €', period: 'jednorazowo', description: 'Idealne rozwiązanie dla prac semestralnych, rocznych i zaliczeniowych do 15 stron.', button: 'Kup pakiet semestralny', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['Utworzenie całej pracy semestralnej', 'Pomoc przy pisaniu rozdziałów', 'Wsparcie metodologiczne', 'Kontrola jakości i logiki', 'Humanizacja tekstu', 'Propozycja struktury i planu', 'Cytowania i źródła', 'Planowanie pracy', 'Projekty e-maili do wykładowcy', 'Wszystko w jednym systemie'] },
-        { id: 'bachelor-thesis', kind: 'plan', label: 'PRACA LICENCJACKA', name: 'Kompletne rozwiązanie pracy licencjackiej', price: '149 €', period: 'jednorazowo', description: 'Kompletna pomoc od pierwszego zadania aż po udaną obronę pracy licencjackiej.', button: 'Kup pakiet licencjacki', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['Utworzenie całej pracy licencjackiej', 'Wsparcie metodologiczne przez cały proces', 'Kontrola jakości, logiki i spójności', 'Humanizacja tekstu', 'Poprawne cytowania i źródła', 'Opracowanie ankiet i statystyki', 'Wykresy i tabele', 'Prezentacja na obronę', 'Odpowiedzi na pytania komisji', 'Planowanie i terminy', 'Projekty e-maili do promotora', 'Wszystko w jednym systemie'] },
-        { id: 'master-thesis', kind: 'plan', label: 'PRACA MAGISTERSKA', name: 'Najbardziej kompleksowy pakiet pracy dyplomowej', price: '189 €', period: 'jednorazowo', description: 'Najbardziej kompleksowy pakiet dla wymagających prac z zaawansowaną metodologią i analizą danych.', button: 'Kup pakiet magisterski', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['Utworzenie całej pracy magisterskiej', 'Wsparcie metodologiczne przez cały proces', 'Kontrola jakości i poziomu naukowego', 'Humanizacja tekstu', 'Źródła i cytowania', 'Kompleksowa analiza statystyczna', 'Statystyka opisowa', 'Testowanie hipotez', 'Analizy korelacyjne', 'Normalność danych', 'Wykresy i tabele', 'Prezentacja na obronę', 'Symulacja pytań komisji', 'Planowanie całej pracy', 'Komunikacja z promotorem', 'Wszystko w jednym systemie'] },
-        { id: 'data-analysis', kind: 'addon', label: 'USŁUGA DODATKOWA', name: 'Analiza danych', price: '89 €', period: 'jednorazowo', description: 'Kompletne opracowanie części statystycznej pracy.', button: 'Kup analizę danych', features: ['Opracowanie ankiet', 'Czyszczenie danych', 'Statystyka opisowa', 'Testowanie normalności', 'Analizy korelacyjne', 'Tabele częstości', 'Skale i podskale', 'Wykresy'] },
+        { id: 'seminar-work', kind: 'plan', label: 'PRACA SEMESTRALNA', name: 'Praca semestralna, roczna lub zaliczeniowa', price: '39 €', period: 'miesięcznie', description: 'Idealne rozwiązanie dla prac semestralnych, rocznych i zaliczeniowych do 15 stron.', button: 'Kup pakiet semestralny', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['Utworzenie całej pracy semestralnej', 'Pomoc przy pisaniu rozdziałów', 'Wsparcie metodologiczne', 'Kontrola jakości i logiki', 'Humanizacja tekstu', 'Propozycja struktury i planu', 'Cytowania i źródła', 'Planowanie pracy', 'Projekty e-maili do wykładowcy', 'Wszystko w jednym systemie'] },
+        { id: 'bachelor-thesis', kind: 'plan', label: 'PRACA LICENCJACKA', name: 'Kompletne rozwiązanie pracy licencjackiej', price: '149 €', period: 'miesięcznie', description: 'Kompletna pomoc od pierwszego zadania aż po udaną obronę pracy licencjackiej.', button: 'Kup pakiet licencjacki', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['Utworzenie całej pracy licencjackiej', 'Wsparcie metodologiczne przez cały proces', 'Kontrola jakości, logiki i spójności', 'Humanizacja tekstu', 'Poprawne cytowania i źródła', 'Opracowanie ankiet i statystyki', 'Wykresy i tabele', 'Prezentacja na obronę', 'Odpowiedzi na pytania komisji', 'Planowanie i terminy', 'Projekty e-maili do promotora', 'Wszystko w jednym systemie'] },
+        { id: 'master-thesis', kind: 'plan', label: 'PRACA MAGISTERSKA', name: 'Najbardziej kompleksowy pakiet pracy dyplomowej', price: '189 €', period: 'miesięcznie', description: 'Najbardziej kompleksowy pakiet dla wymagających prac z zaawansowaną metodologią i analizą danych.', button: 'Kup pakiet magisterski', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['Utworzenie całej pracy magisterskiej', 'Wsparcie metodologiczne przez cały proces', 'Kontrola jakości i poziomu naukowego', 'Humanizacja tekstu', 'Źródła i cytowania', 'Kompleksowa analiza statystyczna', 'Statystyka opisowa', 'Testowanie hipotez', 'Analizy korelacyjne', 'Normalność danych', 'Wykresy i tabele', 'Prezentacja na obronę', 'Symulacja pytań komisji', 'Planowanie całej pracy', 'Komunikacja z promotorem', 'Wszystko w jednym systemie'] },
+        { id: 'data-analysis', kind: 'addon', label: 'USŁUGA DODATKOWA', name: 'Analiza danych', price: '89 €', period: 'jednorazowo', description: 'Kompletne opracowanie części statystycznej pracy.', button: 'Kup analizę danych', features: ['Opracowanie ankiet', 'Czyszczenie danych', 'Statystyka opisowa', 'Testowanie normalności', 'Analizy korelacyjne', 'Tabele częstości', 'Tworzenie skal, podskal i wykresów'] },
         { id: 'extra-20', kind: 'addon', label: 'DODATKOWY ZAKRES', name: 'Extra 20 stron', price: '49 €', period: 'jednorazowo', description: 'Rozszerzenie aktualnego projektu o kolejne 20 stron standardowych.', button: 'Dodaj 20 stron', extraPages: 20, features: ['20 dodatkowych stron dla aktualnego projektu'] },
         { id: 'extra-40', kind: 'addon', label: 'DODATKOWY ZAKRES', name: 'Extra 40 stron', price: '89 €', period: 'jednorazowo', description: 'Rozszerzenie aktualnego projektu o kolejne 40 stron standardowych.', button: 'Dodaj 40 stron', extraPages: 40, features: ['40 dodatkowych stron dla aktualnego projektu'] },
         { id: 'extra-60', kind: 'addon', label: 'DODATKOWY ZAKRES', name: 'Extra 60 stron', price: '129 €', period: 'jednorazowo', description: 'Rozszerzenie aktualnego projektu o kolejne 60 stron standardowych.', button: 'Dodaj 60 stron', extraPages: 60, features: ['60 dodatkowych stron dla aktualnego projektu'] },
@@ -1588,7 +1577,7 @@ const translations: Record<AppLanguage, Translation> = {
     pricing: {
       title: 'Válassz csomagot a dolgozat típusa és terjedelme szerint',
       fullOfferText: 'Teljes árlista megtekintése',
-      fullOfferHint: 'Egyszeri csomagok automatikus havi megújítás nélkül.',
+      fullOfferHint: 'A fő csomagok havi előfizetések. Az adatelemzés és az Extra 20/40/60 oldal egyszeri kiegészítő szolgáltatás.',
       emailPrompt: 'Add meg a fizetéshez tartozó e-mail-címet:',
       emailRequired: 'A fizetés folytatásához e-mail-cím szükséges.',
       invalidPlan: 'Érvénytelen csomag vagy kiegészítő',
@@ -1596,9 +1585,9 @@ const translations: Record<AppLanguage, Translation> = {
       noStripeUrl: 'A Stripe nem hozott létre fizetési URL-t.',
       plans: [
         { id: 'free', kind: 'free', label: 'FREE', name: 'Ingyenes verzió', price: '0 €', period: 'örökre', description: 'Próbáld ki az alapvető akadémiai támogatást fizetés nélkül.', button: 'Ingyenes kezdés', pageLimit: 3, attachmentLimit: 1, promptLimit: 3, features: ['1 melléklet', '2–3 prompt', 'Alapvető személyes akadémiai tanácsadás'] },
-        { id: 'seminar-work', kind: 'plan', label: 'SZEMINÁRIUMI DOLGOZAT', name: 'Szemináriumi, évfolyam- vagy beszámoló dolgozat', price: '39 €', period: 'egyszeri', description: 'Ideális megoldás legfeljebb 15 oldalas szemináriumi és évfolyamdolgozatokhoz.', button: 'Szemináriumi csomag megvásárlása', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['A teljes szemináriumi dolgozat elkészítése', 'Segítség az egyes fejezetek írásában', 'Módszertani támogatás', 'Minőség- és logikaellenőrzés', 'Szöveghumanizálás', 'Szerkezet- és vázlatjavaslat', 'Források és hivatkozások', 'Munkatervezés', 'E-mail-tervezetek az oktatónak', 'Minden egy rendszerben'] },
-        { id: 'bachelor-thesis', kind: 'plan', label: 'ALAPKÉPZÉSES SZAKDOLGOZAT', name: 'Teljes megoldás az alapképzéses szakdolgozathoz', price: '149 €', period: 'egyszeri', description: 'Teljes támogatás az első feladattól a sikeres védésig.', button: 'Alapképzéses csomag megvásárlása', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['A teljes szakdolgozat elkészítése', 'Módszertani támogatás az írás során', 'Minőség-, logika- és konzisztenciaellenőrzés', 'Szöveghumanizálás', 'Helyes hivatkozások és források', 'Kérdőívek és statisztika feldolgozása', 'Grafikonok és táblázatok', 'Védési prezentáció', 'Válaszok a bizottság kérdéseire', 'Tervezés és határidők', 'E-mail-tervezetek a témavezetőnek', 'Minden egy rendszerben'] },
-        { id: 'master-thesis', kind: 'plan', label: 'MESTERKÉPZÉSES SZAKDOLGOZAT', name: 'A legteljesebb záródolgozati csomag', price: '189 €', period: 'egyszeri', description: 'A legátfogóbb csomag fejlett módszertant és adatelemzést igénylő dolgozatokhoz.', button: 'Mesterképzéses csomag megvásárlása', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['A teljes mesterszakos dolgozat elkészítése', 'Módszertani támogatás a teljes folyamatban', 'Minőségi és szakmai ellenőrzés', 'Szöveghumanizálás', 'Források és hivatkozások', 'Komplex statisztikai feldolgozás', 'Leíró statisztika', 'Hipotézisvizsgálat', 'Korrelációelemzés', 'Adatnormalitás', 'Grafikonok és táblázatok', 'Védési prezentáció', 'Bizottsági kérdések szimulációja', 'A teljes munka megtervezése', 'Kommunikáció a témavezetővel', 'Minden egy rendszerben'] },
+        { id: 'seminar-work', kind: 'plan', label: 'SZEMINÁRIUMI DOLGOZAT', name: 'Szemináriumi, évfolyam- vagy beszámoló dolgozat', price: '39 €', period: 'havonta', description: 'Ideális megoldás legfeljebb 15 oldalas szemináriumi és évfolyamdolgozatokhoz.', button: 'Szemináriumi csomag megvásárlása', pageLimit: 15, attachmentLimit: 12, promptLimit: null, features: ['A teljes szemináriumi dolgozat elkészítése', 'Segítség az egyes fejezetek írásában', 'Módszertani támogatás', 'Minőség- és logikaellenőrzés', 'Szöveghumanizálás', 'Szerkezet- és vázlatjavaslat', 'Források és hivatkozások', 'Munkatervezés', 'E-mail-tervezetek az oktatónak', 'Minden egy rendszerben'] },
+        { id: 'bachelor-thesis', kind: 'plan', label: 'ALAPKÉPZÉSES SZAKDOLGOZAT', name: 'Teljes megoldás az alapképzéses szakdolgozathoz', price: '149 €', period: 'havonta', description: 'Teljes támogatás az első feladattól a sikeres védésig.', button: 'Alapképzéses csomag megvásárlása', highlighted: true, pageLimit: 50, attachmentLimit: 12, promptLimit: null, features: ['A teljes szakdolgozat elkészítése', 'Módszertani támogatás az írás során', 'Minőség-, logika- és konzisztenciaellenőrzés', 'Szöveghumanizálás', 'Helyes hivatkozások és források', 'Kérdőívek és statisztika feldolgozása', 'Grafikonok és táblázatok', 'Védési prezentáció', 'Válaszok a bizottság kérdéseire', 'Tervezés és határidők', 'E-mail-tervezetek a témavezetőnek', 'Minden egy rendszerben'] },
+        { id: 'master-thesis', kind: 'plan', label: 'MESTERKÉPZÉSES SZAKDOLGOZAT', name: 'A legteljesebb záródolgozati csomag', price: '189 €', period: 'havonta', description: 'A legátfogóbb csomag fejlett módszertant és adatelemzést igénylő dolgozatokhoz.', button: 'Mesterképzéses csomag megvásárlása', pageLimit: 70, attachmentLimit: 12, promptLimit: null, features: ['A teljes mesterszakos dolgozat elkészítése', 'Módszertani támogatás a teljes folyamatban', 'Minőségi és szakmai ellenőrzés', 'Szöveghumanizálás', 'Források és hivatkozások', 'Komplex statisztikai feldolgozás', 'Leíró statisztika', 'Hipotézisvizsgálat', 'Korrelációelemzés', 'Adatnormalitás', 'Grafikonok és táblázatok', 'Védési prezentáció', 'Bizottsági kérdések szimulációja', 'A teljes munka megtervezése', 'Kommunikáció a témavezetővel', 'Minden egy rendszerben'] },
         { id: 'data-analysis', kind: 'addon', label: 'KIEGÉSZÍTŐ SZOLGÁLTATÁS', name: 'Adatelemzés', price: '89 €', period: 'egyszeri', description: 'A dolgozat statisztikai részének teljes feldolgozása.', button: 'Adatelemzés megvásárlása', features: ['Kérdőívek feldolgozása', 'Adattisztítás', 'Leíró statisztika', 'Normalitásvizsgálat', 'Korrelációelemzés', 'Gyakorisági táblák', 'Skálák és alskálák', 'Grafikonok'] },
         { id: 'extra-20', kind: 'addon', label: 'EXTRA TERJEDELEM', name: 'Extra 20 oldal', price: '49 €', period: 'egyszeri', description: 'Az aktuális projekt bővítése további 20 szabványoldallal.', button: '20 oldal hozzáadása', extraPages: 20, features: ['20 további szabványoldal az aktuális projekthez'] },
         { id: 'extra-40', kind: 'addon', label: 'EXTRA TERJEDELEM', name: 'Extra 40 oldal', price: '89 €', period: 'egyszeri', description: 'Az aktuális projekt bővítése további 40 szabványoldallal.', button: '40 oldal hozzáadása', extraPages: 40, features: ['40 további szabványoldal az aktuális projekthez'] },
@@ -1732,12 +1721,12 @@ type PricingUiCopy = {
 };
 
 const pricingUiCopies: Record<AppLanguage, PricingUiCopy> = {
-  sk: { badge: 'ZEDPERA cenník', intro: 'Začnite bezplatne alebo si vyberte jednorazový balík presne podľa typu a rozsahu vašej práce.', mainLabel: 'Hlavné balíky', mainTitle: 'Kompletná podpora pre akademickú prácu', addonLabel: 'Doplnkové služby', addonTitle: 'Analýza dát a extra rozsah práce', addonSubtitle: 'Doplnky rozšírenia aktuálneho projektu a štatistické spracovanie.', range: (n) => `Rozsah do ${n} strán`, extra: (n) => `+${n} strán`, attachments: (n) => `${n} príloh`, unlimitedPrompts: 'Neobmedzené prompty', prompts: (n) => `${n} prompty` },
-  cs: { badge: 'Ceník ZEDPERA', intro: 'Začněte zdarma nebo si vyberte jednorázový balíček podle typu a rozsahu práce.', mainLabel: 'Hlavní balíčky', mainTitle: 'Kompletní podpora pro akademickou práci', addonLabel: 'Doplňkové služby', addonTitle: 'Analýza dat a extra rozsah práce', addonSubtitle: 'Doplňky rozšíří aktuální projekt o statistické zpracování nebo další normostrany.', range: (n) => `Rozsah do ${n} stran`, extra: (n) => `+${n} stran`, attachments: (n) => `${n} příloh`, unlimitedPrompts: 'Neomezené prompty', prompts: (n) => `${n} prompty` },
-  en: { badge: 'ZEDPERA pricing', intro: 'Start free or choose a one-time package based on your thesis type and scope.', mainLabel: 'Main packages', mainTitle: 'Complete support for academic work', addonLabel: 'Add-on services', addonTitle: 'Data analysis and extra work scope', addonSubtitle: 'Add-ons extend the current project with statistical processing or additional standard pages.', range: (n) => `Up to ${n} pages`, extra: (n) => `+${n} pages`, attachments: (n) => `${n} attachments`, unlimitedPrompts: 'Unlimited prompts', prompts: (n) => `${n} prompts` },
-  de: { badge: 'ZEDPERA Preise', intro: 'Starten Sie kostenlos oder wählen Sie ein einmaliges Paket nach Art und Umfang Ihrer Arbeit.', mainLabel: 'Hauptpakete', mainTitle: 'Komplette Unterstützung für akademische Arbeiten', addonLabel: 'Zusatzleistungen', addonTitle: 'Datenanalyse und zusätzlicher Umfang', addonSubtitle: 'Zusätze erweitern das aktuelle Projekt um Statistik oder zusätzliche Normseiten.', range: (n) => `Bis zu ${n} Seiten`, extra: (n) => `+${n} Seiten`, attachments: (n) => `${n} Anhänge`, unlimitedPrompts: 'Unbegrenzte Prompts', prompts: (n) => `${n} Prompts` },
-  pl: { badge: 'Cennik ZEDPERA', intro: 'Zacznij bezpłatnie lub wybierz pakiet jednorazowy zgodnie z typem i zakresem pracy.', mainLabel: 'Główne pakiety', mainTitle: 'Kompletne wsparcie pracy akademickiej', addonLabel: 'Usługi dodatkowe', addonTitle: 'Analiza danych i dodatkowy zakres', addonSubtitle: 'Dodatki rozszerzają projekt o analizę statystyczną lub kolejne strony.', range: (n) => `Zakres do ${n} stron`, extra: (n) => `+${n} stron`, attachments: (n) => `${n} załączników`, unlimitedPrompts: 'Nielimitowane prompty', prompts: (n) => `${n} prompty` },
-  hu: { badge: 'ZEDPERA árak', intro: 'Kezdj ingyenesen, vagy válassz egyszeri csomagot a dolgozat típusa és terjedelme szerint.', mainLabel: 'Fő csomagok', mainTitle: 'Teljes támogatás az akadémiai munkához', addonLabel: 'Kiegészítő szolgáltatások', addonTitle: 'Adatelemzés és extra terjedelem', addonSubtitle: 'A kiegészítők statisztikai feldolgozással vagy további oldalakkal bővítik a projektet.', range: (n) => `Legfeljebb ${n} oldal`, extra: (n) => `+${n} oldal`, attachments: (n) => `${n} melléklet`, unlimitedPrompts: 'Korlátlan promptok', prompts: (n) => `${n} prompt` },
+  sk: { badge: 'ZEDPERA cenník', intro: 'Začnite bezplatne alebo si vyberte mesačný program podľa typu a rozsahu práce. Analýzu dát a extra strany je možné dokúpiť jednorazovo.', mainLabel: 'Hlavné balíky', mainTitle: 'Kompletná podpora pre akademickú prácu', addonLabel: 'Doplnkové služby', addonTitle: 'Analýza dát a extra rozsah práce', addonSubtitle: 'Doplnky rozšírenia aktuálneho projektu a štatistické spracovanie.', range: (n) => `Rozsah do ${n} strán`, extra: (n) => `+${n} strán`, attachments: (n) => `${n} príloh`, unlimitedPrompts: 'Neobmedzené prompty', prompts: (n) => `${n} prompty` },
+  cs: { badge: 'Ceník ZEDPERA', intro: 'Začněte zdarma nebo si vyberte měsíční program podle typu a rozsahu práce. Analýzu dat a extra strany lze dokoupit jednorázově.', mainLabel: 'Hlavní balíčky', mainTitle: 'Kompletní podpora pro akademickou práci', addonLabel: 'Doplňkové služby', addonTitle: 'Analýza dat a extra rozsah práce', addonSubtitle: 'Doplňky rozšíří aktuální projekt o statistické zpracování nebo další normostrany.', range: (n) => `Rozsah do ${n} stran`, extra: (n) => `+${n} stran`, attachments: (n) => `${n} příloh`, unlimitedPrompts: 'Neomezené prompty', prompts: (n) => `${n} prompty` },
+  en: { badge: 'ZEDPERA pricing', intro: 'Start free or choose a monthly program based on your thesis type and scope. Data analysis and extra pages can be purchased as one-time add-ons.', mainLabel: 'Main packages', mainTitle: 'Complete support for academic work', addonLabel: 'Add-on services', addonTitle: 'Data analysis and extra work scope', addonSubtitle: 'Add-ons extend the current project with statistical processing or additional standard pages.', range: (n) => `Up to ${n} pages`, extra: (n) => `+${n} pages`, attachments: (n) => `${n} attachments`, unlimitedPrompts: 'Unlimited prompts', prompts: (n) => `${n} prompts` },
+  de: { badge: 'ZEDPERA Preise', intro: 'Starten Sie kostenlos oder wählen Sie ein monatliches Programm nach Art und Umfang Ihrer Arbeit. Datenanalyse und zusätzliche Seiten können einmalig hinzugekauft werden.', mainLabel: 'Hauptpakete', mainTitle: 'Komplette Unterstützung für akademische Arbeiten', addonLabel: 'Zusatzleistungen', addonTitle: 'Datenanalyse und zusätzlicher Umfang', addonSubtitle: 'Zusätze erweitern das aktuelle Projekt um Statistik oder zusätzliche Normseiten.', range: (n) => `Bis zu ${n} Seiten`, extra: (n) => `+${n} Seiten`, attachments: (n) => `${n} Anhänge`, unlimitedPrompts: 'Unbegrenzte Prompts', prompts: (n) => `${n} Prompts` },
+  pl: { badge: 'Cennik ZEDPERA', intro: 'Zacznij bezpłatnie lub wybierz miesięczny program zgodnie z typem i zakresem pracy. Analizę danych i dodatkowe strony można dokupić jednorazowo.', mainLabel: 'Główne pakiety', mainTitle: 'Kompletne wsparcie pracy akademickiej', addonLabel: 'Usługi dodatkowe', addonTitle: 'Analiza danych i dodatkowy zakres', addonSubtitle: 'Dodatki rozszerzają projekt o analizę statystyczną lub kolejne strony.', range: (n) => `Zakres do ${n} stron`, extra: (n) => `+${n} stron`, attachments: (n) => `${n} załączników`, unlimitedPrompts: 'Nielimitowane prompty', prompts: (n) => `${n} prompty` },
+  hu: { badge: 'ZEDPERA árak', intro: 'Kezdj ingyenesen, vagy válassz havi programot a dolgozat típusa és terjedelme szerint. Az adatelemzés és az extra oldalak egyszeri kiegészítőként vásárolhatók meg.', mainLabel: 'Fő csomagok', mainTitle: 'Teljes támogatás az akadémiai munkához', addonLabel: 'Kiegészítő szolgáltatások', addonTitle: 'Adatelemzés és extra terjedelem', addonSubtitle: 'A kiegészítők statisztikai feldolgozással vagy további oldalakkal bővítik a projektet.', range: (n) => `Legfeljebb ${n} oldal`, extra: (n) => `+${n} oldal`, attachments: (n) => `${n} melléklet`, unlimitedPrompts: 'Korlátlan promptok', prompts: (n) => `${n} prompt` },
 };
 
 function applyLanguageToDocument(nextLanguage: AppLanguage) {
@@ -1752,177 +1741,25 @@ function applyLanguageToDocument(nextLanguage: AppLanguage) {
   document.body.setAttribute('data-language', nextLanguage);
 }
 
-function readLanguageFromCookie(): string | null {
-  if (typeof document === 'undefined') return null;
-
-  const cookiePrefix = `${LANGUAGE_COOKIE_KEY}=`;
-  const languageCookie = document.cookie
-    .split(';')
-    .map((cookie) => cookie.trim())
-    .find((cookie) => cookie.startsWith(cookiePrefix));
-
-  if (!languageCookie) return null;
-
-  const rawValue = languageCookie.slice(cookiePrefix.length);
-
-  try {
-    return decodeURIComponent(rawValue);
-  } catch {
-    return rawValue;
-  }
-}
-
-function normalizeLanguage(value: unknown): AppLanguage {
-  const language = String(value || '').trim().toLowerCase();
-
-  if (
-    language === 'sk' ||
-    language === 'slovak' ||
-    language === 'slovenčina' ||
-    language === 'slovencina'
-  ) {
-    return 'sk';
-  }
-
-  if (
-    language === 'cs' ||
-    language === 'cz' ||
-    language === 'czech' ||
-    language === 'čeština' ||
-    language === 'cestina'
-  ) {
-    return 'cs';
-  }
-
-  if (language === 'en' || language === 'eng' || language === 'english') {
-    return 'en';
-  }
-
-  if (
-    language === 'de' ||
-    language === 'ger' ||
-    language === 'german' ||
-    language === 'deutsch'
-  ) {
-    return 'de';
-  }
-
-  if (language === 'pl' || language === 'polish' || language === 'polski') {
-    return 'pl';
-  }
-
-  if (
-    language === 'hu' ||
-    language === 'hungarian' ||
-    language === 'magyar'
-  ) {
-    return 'hu';
-  }
-
-  return 'sk';
-}
-
-function getLanguageFromEventDetail(detail: unknown): AppLanguage {
-  if (detail && typeof detail === 'object' && 'language' in detail) {
-    return normalizeLanguage((detail as { language?: unknown }).language);
-  }
-
-  return normalizeLanguage(detail);
-}
-
-function getInitialLanguage(): AppLanguage {
-  if (typeof window === 'undefined') return 'sk';
-
-  const params = new URLSearchParams(window.location.search);
-  const queryLanguage = params.get('lang');
-
-  if (queryLanguage) {
-    return normalizeLanguage(queryLanguage);
-  }
-
-  for (const key of LANGUAGE_STORAGE_KEYS) {
-    const storedLanguage = window.localStorage.getItem(key);
-
-    if (storedLanguage) {
-      return normalizeLanguage(storedLanguage);
-    }
-  }
-
-  const cookieLanguage = readLanguageFromCookie();
-
-  if (cookieLanguage) {
-    return normalizeLanguage(cookieLanguage);
-  }
-
-  return normalizeLanguage(
-    document.documentElement.getAttribute('data-language') ||
-      document.documentElement.getAttribute('data-system-language') ||
-      document.documentElement.getAttribute('data-work-language') ||
-      document.documentElement.lang,
-  );
-}
-
 function saveLanguageToStorage(nextLanguage: AppLanguage) {
   if (typeof window === 'undefined') return;
 
-  for (const key of LANGUAGE_STORAGE_KEYS) {
-    window.localStorage.setItem(key, nextLanguage);
-  }
-
-  window.localStorage.setItem(
-    CHECKOUT_LANGUAGE_STORAGE_KEY,
-    nextLanguage,
-  );
-
-  const secureAttribute =
-    window.location.protocol === 'https:' ? '; Secure' : '';
-
-  document.cookie =
-    `${LANGUAGE_COOKIE_KEY}=${encodeURIComponent(nextLanguage)}; ` +
-    `Path=/; Max-Age=${LANGUAGE_COOKIE_MAX_AGE}; ` +
-    `SameSite=Lax${secureAttribute}`;
+  localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
+  localStorage.setItem('zedpera_system_language', nextLanguage);
+  localStorage.setItem('zedpera_work_language', nextLanguage);
+  localStorage.setItem('app_language', nextLanguage);
 }
 
-function synchronizeLanguageInUrl(nextLanguage: AppLanguage) {
-  if (typeof window === 'undefined') return;
+function normalizeLanguage(value: string | null): AppLanguage {
+  const language = String(value || '').toLowerCase();
 
-  const url = new URL(window.location.href);
-  url.searchParams.set('lang', nextLanguage);
-  window.history.replaceState(window.history.state, '', url.toString());
-}
+  if (language === 'cs' || language === 'cz') return 'cs';
+  if (language === 'en') return 'en';
+  if (language === 'de') return 'de';
+  if (language === 'pl') return 'pl';
+  if (language === 'hu') return 'hu';
 
-function addLanguageToInternalHref(
-  href: string,
-  language: AppLanguage,
-  additionalParams: Record<string, string> = {},
-): string {
-  if (href.startsWith('#')) return href;
-
-  const url = new URL(href, 'https://zedpera.local');
-  url.searchParams.set('lang', language);
-
-  for (const [key, value] of Object.entries(additionalParams)) {
-    url.searchParams.set(key, value);
-  }
-
-  return `${url.pathname}${url.search}${url.hash}`;
-}
-
-function getLocalizedHomeHref(language: AppLanguage) {
-  return addLanguageToInternalHref('/', language);
-}
-
-function getLocalizedLoginHref(language: AppLanguage) {
-  return addLanguageToInternalHref('/login', language);
-}
-
-function getLocalizedRegisterHref(
-  language: AppLanguage,
-  planId: PlanId | 'free' = 'free',
-) {
-  return addLanguageToInternalHref('/register', language, {
-    plan: planId,
-  });
+  return 'sk';
 }
 
 function getCheckoutError(data: CheckoutResponse | null, fallback: string) {
@@ -2453,7 +2290,7 @@ function PricingCard({
   return (
     <article
       className={[
-        'relative flex h-full flex-col overflow-hidden rounded-3xl border p-7 shadow-2xl transition hover:-translate-y-1',
+        'relative flex h-full min-w-0 flex-col overflow-hidden rounded-3xl border p-7 shadow-2xl transition hover:-translate-y-1',
         plan.highlighted
           ? 'zedpera-glow-border border-violet-400/45 bg-violet-900/25 shadow-violet-950/35'
           : isFree
@@ -2477,11 +2314,11 @@ function PricingCard({
         {plan.name}
       </h3>
 
-      <div className="mt-5 flex flex-wrap items-baseline gap-2">
+      <div className="mt-5 flex min-w-0 flex-wrap items-baseline gap-2">
         <span className="text-4xl font-black tracking-tight text-white">
           {plan.price}
         </span>
-        <span className="text-sm font-bold text-slate-300">/ {plan.period}</span>
+        <span className="max-w-full break-words text-sm font-bold leading-5 text-slate-300">/ {plan.period}</span>
       </div>
 
       <p className="mt-5 text-sm font-bold leading-6 text-slate-200">
@@ -2489,7 +2326,7 @@ function PricingCard({
       </p>
 
       {plan.pageLimit || plan.extraPages || plan.attachmentLimit || plan.promptLimit !== undefined ? (
-        <div className="mt-5 flex flex-wrap gap-2">
+        <div className="mt-5 flex min-w-0 flex-wrap gap-2">
           {plan.pageLimit ? (
             <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-black text-white">
               {copy.range(plan.pageLimit)}
@@ -2506,7 +2343,7 @@ function PricingCard({
             </span>
           ) : null}
           {plan.promptLimit === null ? (
-            <span className="rounded-full border border-violet-400/25 bg-violet-500/10 px-3 py-1.5 text-xs font-black text-violet-100">
+            <span className="max-w-full whitespace-normal break-words rounded-full border border-violet-400/25 bg-violet-500/10 px-3 py-1.5 text-center text-xs font-black leading-5 text-violet-100">
               {copy.unlimitedPrompts}
             </span>
           ) : plan.promptLimit !== undefined ? (
@@ -2604,13 +2441,12 @@ const mobileMenuItems = useMemo(
       icon: HelpCircle,
     },
     {
-      href: addLanguageToInternalHref('/blog', language),
+      href: '/blog',
       label: t.footer.links.blog || 'Blog',
       icon: BookOpen,
     },
   ],
   [
-    language,
     t.nav.features,
     t.nav.comparison,
     t.nav.pricing,
@@ -2623,30 +2459,32 @@ const mobileMenuItems = useMemo(
   useEffect(() => {
     document.documentElement.style.scrollBehavior = 'smooth';
 
-    const nextLanguage = getInitialLanguage();
+    const storedLanguage =
+      localStorage.getItem(LANGUAGE_STORAGE_KEY) ||
+      localStorage.getItem('zedpera_system_language') ||
+      localStorage.getItem('zedpera_work_language') ||
+      localStorage.getItem('app_language');
+
+    const nextLanguage = normalizeLanguage(storedLanguage);
 
     setLanguage(nextLanguage);
-    saveLanguageToStorage(nextLanguage);
     applyLanguageToDocument(nextLanguage);
-    synchronizeLanguageInUrl(nextLanguage);
 
     const handleExternalLanguageChange = (event: Event) => {
-      const customEvent = event as CustomEvent<unknown>;
-      const next = getLanguageFromEventDetail(customEvent.detail);
+      const customEvent = event as CustomEvent<AppLanguage>;
+      const next = normalizeLanguage(String(customEvent.detail || ''));
 
       setLanguage(next);
       setTranslationVersion((version) => version + 1);
-      saveLanguageToStorage(next);
       applyLanguageToDocument(next);
-      synchronizeLanguageInUrl(next);
     };
 
     const handleStorageLanguageChange = (event: StorageEvent) => {
       if (
-        !event.key ||
-        !LANGUAGE_STORAGE_KEYS.includes(
-          event.key as (typeof LANGUAGE_STORAGE_KEYS)[number],
-        )
+        event.key !== LANGUAGE_STORAGE_KEY &&
+        event.key !== 'zedpera_system_language' &&
+        event.key !== 'zedpera_work_language' &&
+        event.key !== 'app_language'
       ) {
         return;
       }
@@ -2655,9 +2493,7 @@ const mobileMenuItems = useMemo(
 
       setLanguage(next);
       setTranslationVersion((version) => version + 1);
-      saveLanguageToStorage(next);
       applyLanguageToDocument(next);
-      synchronizeLanguageInUrl(next);
     };
 
     window.addEventListener('zedpera-language-change', handleExternalLanguageChange as EventListener);
@@ -2706,47 +2542,21 @@ const mobileMenuItems = useMemo(
     setTranslationVersion((version) => version + 1);
     saveLanguageToStorage(normalizedLanguage);
     applyLanguageToDocument(normalizedLanguage);
-    synchronizeLanguageInUrl(normalizedLanguage);
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
         new CustomEvent('zedpera-language-change', {
-          detail: {
-            language: normalizedLanguage,
-            source: 'landing-page',
-          },
+          detail: normalizedLanguage,
         }),
       );
     }
   }
 
-  async function getEmailForCheckout() {
-    let email = '';
-
-    if (typeof window !== 'undefined') {
-      email =
-        localStorage.getItem('zedpera_user_email') ||
-        localStorage.getItem('zedpera_email') ||
-        localStorage.getItem('user_email') ||
-        localStorage.getItem('email') ||
-        '';
-    }
-
-    if (!email && typeof window !== 'undefined') {
-      const enteredEmail = window.prompt(t.pricing.emailPrompt);
-
-      email = enteredEmail?.trim() || '';
-
-      if (email) {
-        localStorage.setItem('zedpera_user_email', email);
-        localStorage.setItem('zedpera_email', email);
-      }
-    }
-
-    return email.trim().toLowerCase();
-  }
-
   async function buy(planId: PlanId) {
+    if (loadingPlan !== null) {
+      return;
+    }
+
     try {
       setLoadingPlan(planId);
       setPaymentError('');
@@ -2755,25 +2565,11 @@ const mobileMenuItems = useMemo(
         throw new Error(`${t.pricing.invalidPlan}: ${planId}`);
       }
 
-      const checkoutLanguage = normalizeLanguage(language);
-      saveLanguageToStorage(checkoutLanguage);
-      applyLanguageToDocument(checkoutLanguage);
-
       if (planId === 'free') {
-        window.location.href = getLocalizedRegisterHref(
-          checkoutLanguage,
-          'free',
-        );
+        window.location.assign('/login?mode=register&plan=free');
         return;
       }
 
-      const email = await getEmailForCheckout();
-
-      if (!email) {
-        throw new Error(t.pricing.emailRequired);
-      }
-
-      const origin = typeof window !== 'undefined' ? window.location.origin : '';
       const addonIds: PlanId[] = [
         'data-analysis',
         'extra-20',
@@ -2782,52 +2578,66 @@ const mobileMenuItems = useMemo(
       ];
       const isAddon = addonIds.includes(planId);
 
+      const requestId =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `landing-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
       const payload = {
-        itemId: planId,
-        catalogId: planId,
-        productId: planId,
-        plan: isAddon ? undefined : planId,
         planId: isAddon ? undefined : planId,
-        addon: isAddon ? planId : undefined,
-        addonId: isAddon ? planId : undefined,
-        addons: isAddon ? [planId] : [],
-        email,
-        language: checkoutLanguage,
-        locale: checkoutLanguage,
-        uiLanguage: checkoutLanguage,
-        successUrl:
-          `${origin}/payment/success?item=${encodeURIComponent(planId)}` +
-          `&lang=${encodeURIComponent(checkoutLanguage)}`,
-        cancelUrl:
-          `${origin}/pricing?payment=cancel` +
-          `&item=${encodeURIComponent(planId)}` +
-          `&lang=${encodeURIComponent(checkoutLanguage)}`,
+        addonIds: isAddon ? [planId] : [],
+        locale: language,
+        requestId,
       };
 
       const res = await fetch('/api/payments/checkout', {
         method: 'POST',
+        credentials: 'include',
+        cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': requestId,
         },
         body: JSON.stringify(payload),
       });
 
-      const data = (await res.json().catch(() => null)) as CheckoutResponse | null;
+      const data = (await res.json().catch(() => null)) as
+        | (CheckoutResponse & {
+            code?: string;
+            loginUrl?: string;
+            redirectUrl?: string;
+          })
+        | null;
+
+      if (
+        res.status === 401 &&
+        data?.code === 'ADDON_AUTHENTICATION_REQUIRED'
+      ) {
+        const loginUrl =
+          data.loginUrl ||
+          `/login?next=${encodeURIComponent('/pricing#doplnkove-sluzby')}`;
+
+        window.location.assign(loginUrl);
+        return;
+      }
 
       if (!res.ok) {
         throw new Error(getCheckoutError(data, t.pricing.checkoutFailed));
       }
 
-      if (data?.url) {
-        window.location.href = data.url;
-        return;
+      const checkoutUrl = data?.url || data?.redirectUrl;
+
+      if (!checkoutUrl) {
+        throw new Error(t.pricing.noStripeUrl);
       }
 
-      throw new Error(t.pricing.noStripeUrl);
+      // Priamy prechod na Stripe bez mailto odkazu a bez lokálneho e-mailového okna.
+      window.location.assign(checkoutUrl);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : t.pricing.checkoutFailed;
 
+      console.error('LANDING_CHECKOUT_ERROR:', error);
       setPaymentError(message);
 
       if (typeof window !== 'undefined') {
@@ -2848,29 +2658,10 @@ const mobileMenuItems = useMemo(
   ];
 
   const footerLinks = [
-    {
-      href: addLanguageToInternalHref('/blog', language),
-      label: t.footer.links.blog,
-      icon: PenTool,
-    },
-    {
-      href: addLanguageToInternalHref('/gdpr', language),
-      label: t.footer.links.gdpr,
-      icon: ShieldCheck,
-    },
-    {
-      href: addLanguageToInternalHref(
-        '/obchodne-podmienky',
-        language,
-      ),
-      label: t.footer.links.terms,
-      icon: FileText,
-    },
-    {
-      href: addLanguageToInternalHref('/cookies', language),
-      label: t.footer.links.cookies,
-      icon: Cookie,
-    },
+    { href: '/blog', label: t.footer.links.blog, icon: PenTool },
+    { href: '/gdpr', label: t.footer.links.gdpr, icon: ShieldCheck },
+    { href: '/obchodne-podmienky', label: t.footer.links.terms, icon: FileText },
+    { href: '/cookies', label: t.footer.links.cookies, icon: Cookie },
   ];
 
   const freePlan = t.pricing.plans.find((plan) => plan.kind === 'free');
@@ -3857,7 +3648,7 @@ const mobileMenuItems = useMemo(
 
         <header className="sticky top-0 z-50 border-b border-white/10 bg-black/92 backdrop-blur-2xl">
   <div className="mx-auto flex h-[72px] max-w-[1920px] items-center px-8">
-    <Link href={getLocalizedHomeHref(language)} className="flex shrink-0 items-center gap-3">
+    <Link href="/" className="flex shrink-0 items-center gap-3">
       <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 via-violet-600 to-fuchsia-500 text-2xl font-black text-white shadow-[0_0_28px_rgba(80,90,255,0.55)]">
         Z
       </div>
@@ -3900,7 +3691,7 @@ const mobileMenuItems = useMemo(
       />
 
       <Link
-        href={getLocalizedLoginHref(language)}
+        href="/login"
         className="inline-flex h-[42px] min-w-[138px] items-center justify-center rounded-md border border-white/10 bg-[#080816] px-5 text-[14px] font-black text-white transition hover:border-violet-500/70 hover:bg-[#101026]"
       >
         {t.common.login}
@@ -4058,7 +3849,7 @@ const mobileMenuItems = useMemo(
 
       <div className="mt-2 grid gap-2">
         <Link
-          href={getLocalizedLoginHref(language)}
+          href="/login"
           role="menuitem"
           onClick={() => setMobileMenuOpen(false)}
           className="inline-flex min-h-[50px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-4 text-[13px] font-black text-white transition hover:bg-white/[0.12]"

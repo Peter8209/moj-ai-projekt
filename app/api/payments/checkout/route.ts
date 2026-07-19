@@ -37,6 +37,10 @@ type CheckoutBody = {
   addOns?: unknown;
   selectedAddons?: unknown;
 
+  locale?: unknown;
+  language?: unknown;
+  lang?: unknown;
+
   requestId?: unknown;
   checkoutRequestId?: unknown;
 
@@ -52,7 +56,7 @@ type CheckoutBody = {
   userEmail?: unknown;
 };
 
-type PaidPlanId = Exclude<PlanId, 'free'>;
+type PaidPlanId = Exclude<PlanId, 'free' | 'admin'>;
 
 type PurchaseType = 'plan' | 'addon' | 'plan_with_addons';
 
@@ -60,6 +64,7 @@ type CurrentEntitlementRow = {
   plan_id: string | null;
   addon_ids: string[] | null;
   billing_status: string | null;
+  stripe_customer_id: string | null;
 };
 
 type StripeMetadata = Record<string, string>;
@@ -101,6 +106,17 @@ const MAX_REQUEST_ID_LENGTH = 180;
 const CHECKOUT_SOURCE = 'zedpera';
 const CHECKOUT_CATALOG_VERSION = '2026-07';
 
+const SUPPORTED_LOCALES = [
+  'sk',
+  'cs',
+  'en',
+  'de',
+  'pl',
+  'hu',
+] as const;
+
+type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
+
 const VALID_PLAN_IDS = new Set<PlanId>(
   Object.keys(PLANS) as PlanId[],
 );
@@ -112,7 +128,8 @@ const VALID_ADDON_IDS = new Set<AddonId>(
 const PURCHASABLE_PLAN_IDS = (
   Object.keys(PLANS) as PlanId[]
 ).filter(
-  (planId): planId is PaidPlanId => planId !== 'free',
+  (planId): planId is PaidPlanId =>
+    planId !== 'free' && planId !== 'admin',
 );
 
 // ============================================================
@@ -133,6 +150,14 @@ function normalizeString(value: unknown): string {
 
 function normalizeEmail(value: unknown): string {
   return normalizeString(value).toLowerCase();
+}
+
+function normalizeLocale(value: unknown): SupportedLocale {
+  const normalized = normalizeString(value).toLowerCase();
+
+  return SUPPORTED_LOCALES.includes(normalized as SupportedLocale)
+    ? (normalized as SupportedLocale)
+    : 'sk';
 }
 
 function uniqueValues<T>(values: T[]): T[] {
@@ -211,12 +236,26 @@ function getBaseUrl(): string {
   return withProtocol.replace(/\/+$/, '');
 }
 
-function getSuccessUrl(baseUrl: string): string {
-  return `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`;
+function getSuccessUrl(
+  baseUrl: string,
+  locale: SupportedLocale,
+): string {
+  return (
+    `${baseUrl}/payment/success` +
+    `?session_id={CHECKOUT_SESSION_ID}` +
+    `&lang=${encodeURIComponent(locale)}`
+  );
 }
 
-function getCancelUrl(baseUrl: string): string {
-  return `${baseUrl}/pricing?canceled=1`;
+function getCancelUrl(
+  baseUrl: string,
+  locale: SupportedLocale,
+): string {
+  return (
+    `${baseUrl}/pricing` +
+    `?payment=cancelled` +
+    `&lang=${encodeURIComponent(locale)}`
+  );
 }
 
 function getFreeDashboardUrl(baseUrl: string): string {
@@ -529,12 +568,14 @@ function buildMetadata({
   planId,
   addonIds,
   requestId,
+  locale,
 }: {
   userId: string;
   email: string;
   planId: PlanId | null;
   addonIds: AddonId[];
   requestId: string;
+  locale: SupportedLocale;
 }): StripeMetadata {
   const purchaseType = getPurchaseType(planId, addonIds);
   const basePages = getPurchasedBasePages(planId);
@@ -553,6 +594,8 @@ function buildMetadata({
     catalog_total_cents: String(totalCents),
     checkout_request_id: requestId,
     catalog_version: CHECKOUT_CATALOG_VERSION,
+    locale,
+    guest_checkout: userId ? 'false' : 'true',
     source: CHECKOUT_SOURCE,
   };
 }
@@ -569,7 +612,7 @@ function createIdempotencyKey({
   requestId: string;
 }): string {
   const source = [
-    userId,
+    userId || 'guest',
     planId || 'addon-only',
     [...addonIds].sort().join(','),
     requestId,
@@ -593,7 +636,9 @@ async function loadCurrentEntitlement({
 }): Promise<CurrentEntitlementRow | null> {
   const { data, error } = await supabase
     .from('zedpera_user_entitlements')
-    .select('plan_id, addon_ids, billing_status')
+    .select(
+      'plan_id, addon_ids, billing_status, stripe_customer_id',
+    )
     .eq('user_id', userId)
     .maybeSingle();
 
@@ -715,15 +760,17 @@ export async function GET() {
     freeRedirect: '/dashboard?plan=free',
     successRedirect: '/payment/success?session_id={CHECKOUT_SESSION_ID}',
     cancelRedirect: '/pricing?canceled=1',
-    plans: (Object.keys(PLANS) as PlanId[]).map((planId) => ({
-      id: planId,
-      name: PLANS[planId].name,
-      priceCents: PLANS[planId].priceCents,
-      pageLimit: PLANS[planId].pageLimit,
-      promptLimit: PLANS[planId].promptLimit,
-      attachmentLimit: PLANS[planId].attachmentLimit,
-      checkoutRequired: planId !== 'free',
-    })),
+    plans: (Object.keys(PLANS) as PlanId[])
+      .filter((planId) => planId !== 'admin')
+      .map((planId) => ({
+        id: planId,
+        name: PLANS[planId].name,
+        priceCents: PLANS[planId].priceCents,
+        pageLimit: PLANS[planId].pageLimit,
+        promptLimit: PLANS[planId].promptLimit,
+        attachmentLimit: PLANS[planId].attachmentLimit,
+        checkoutRequired: planId !== 'free',
+      })),
     addons: (Object.keys(ADDONS) as AddonId[]).map((addonId) => ({
       id: addonId,
       name: ADDONS[addonId].name,
@@ -788,6 +835,21 @@ export async function POST(request: Request) {
     const rawAddons = getRawAddons(body);
     const normalizedRequestedPlan = normalizeString(rawPlan);
 
+    // ADMIN je interný systémový balík. Nesmie sa vytvoriť Stripe Checkout
+    // ani Stripe metadata, ktoré by ho mohli priradiť používateľovi nákupom.
+    if (normalizedRequestedPlan === 'admin') {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'ADMIN_PLAN_NOT_PURCHASABLE',
+          code: 'ADMIN_PLAN_NOT_PURCHASABLE',
+          message: 'Administrátorský balík nie je možné zakúpiť.',
+          errorId,
+        },
+        { status: 403 },
+      );
+    }
+
     const {
       planId,
       invalidValue: invalidPlan,
@@ -804,7 +866,7 @@ export async function POST(request: Request) {
           message:
             'Neplatné ID balíka. Checkout prijíma iba balíky z lib/billing/catalog.ts.',
           received: invalidPlan,
-          allowedPlans: Object.keys(PLANS),
+          allowedPlans: PURCHASABLE_PLAN_IDS,
         },
         { status: 400 },
       );
@@ -869,7 +931,12 @@ export async function POST(request: Request) {
       );
     }
 
-    // Až platená objednávka alebo nákup doplnku vyžaduje prihlásenie.
+    /*
+     * Hlavný platený balík môže kúpiť aj neprihlásený návštevník.
+     * Stripe si v takom prípade vyžiada e-mail priamo na platobnej stránke.
+     * Doplnok bez základného balíka naďalej vyžaduje prihlásený účet,
+     * pretože sa musí pripojiť ku konkrétnemu existujúcemu entitlementu.
+     */
     const supabase = await createSupabaseServerClient();
 
     const {
@@ -877,42 +944,40 @@ export async function POST(request: Request) {
       error: authError,
     } = await supabase.auth.getUser();
 
-    if (authError || !user?.id) {
+    if (authError && user?.id) {
+      throw new Error(`AUTH_CHECK_FAILED: ${authError.message}`);
+    }
+
+    const userId = normalizeString(user?.id);
+    const email = normalizeEmail(user?.email);
+    const isAuthenticated = Boolean(userId && email);
+
+    requestId = resolveCheckoutRequestId(request, body);
+
+    let currentEntitlement: CurrentEntitlementRow | null = null;
+
+    if (isAuthenticated) {
+      currentEntitlement = await loadCurrentEntitlement({
+        supabase,
+        userId,
+      });
+    }
+
+    if (!planId && addonIds.length > 0 && !isAuthenticated) {
       return createJsonResponse(
         {
           ok: false,
-          error: 'UNAUTHENTICATED',
-          code: 'UNAUTHENTICATED',
+          error: 'ADDON_AUTHENTICATION_REQUIRED',
+          code: 'ADDON_AUTHENTICATION_REQUIRED',
           errorId,
-          message: 'Pre pokračovanie na platbu sa musíte prihlásiť.',
-          ...getSafeErrorDetail(authError?.message || 'UNAUTHENTICATED'),
+          requestId,
+          message:
+            'Samostatný doplnok je možné pripojiť iba k prihlásenému účtu s aktívnym plateným balíkom.',
+          loginUrl: `/login?next=${encodeURIComponent('/pricing#doplnkove-sluzby')}`,
         },
         { status: 401 },
       );
     }
-
-    const email = normalizeEmail(user.email);
-
-    if (!email) {
-      return createJsonResponse(
-        {
-          ok: false,
-          error: 'ACCOUNT_EMAIL_MISSING',
-          code: 'ACCOUNT_EMAIL_MISSING',
-          errorId,
-          message:
-            'Pri používateľskom účte chýba e-mailová adresa potrebná pre Stripe Checkout.',
-        },
-        { status: 400 },
-      );
-    }
-
-    requestId = resolveCheckoutRequestId(request, body);
-
-    const currentEntitlement = await loadCurrentEntitlement({
-      supabase,
-      userId: user.id,
-    });
 
     requirePaidPlanForAddonOnlyCheckout({
       planId,
@@ -921,12 +986,23 @@ export async function POST(request: Request) {
     });
 
     const stripe = getStripe();
+    const locale = normalizeLocale(
+      firstDefined(body.locale, body.language, body.lang),
+    );
 
-    const customer = await getOrCreateStripeCustomer({
-      stripe,
-      userId: user.id,
-      email,
-    });
+    let stripeCustomerId = normalizeString(
+      currentEntitlement?.stripe_customer_id,
+    );
+
+    if (isAuthenticated && !stripeCustomerId) {
+      const customer = await getOrCreateStripeCustomer({
+        stripe,
+        userId,
+        email,
+      });
+
+      stripeCustomerId = customer.id;
+    }
 
     const lineItems: CheckoutLineItem[] = [
       ...(planId ? [createPlanLineItem(planId)] : []),
@@ -934,50 +1010,58 @@ export async function POST(request: Request) {
     ];
 
     const metadata = buildMetadata({
-      userId: user.id,
+      userId,
       email,
       planId,
       addonIds,
       requestId,
+      locale,
     });
 
-    const successUrl = getSuccessUrl(baseUrl);
-    const cancelUrl = getCancelUrl(baseUrl);
+    const successUrl = getSuccessUrl(baseUrl, locale);
+    const cancelUrl = getCancelUrl(baseUrl, locale);
 
     const sessionParams: CheckoutSessionCreateParams = {
       mode: 'payment',
-      customer: customer.id,
-      client_reference_id: user.id,
       line_items: lineItems,
-
       success_url: successUrl,
       cancel_url: cancelUrl,
-
       metadata,
       payment_intent_data: {
         metadata,
-        receipt_email: email,
+        ...(email ? { receipt_email: email } : {}),
       },
-
       allow_promotion_codes: true,
       billing_address_collection: 'auto',
-      customer_update: {
-        address: 'auto',
-        name: 'auto',
-      },
       automatic_tax: {
         enabled: false,
       },
       locale: 'auto',
       submit_type: 'pay',
-      // Stripe povoľuje minimálne 30 minút. Používame 31 minút,
-      // aby oneskorenie medzi výpočtom a prijatím požiadavky v Stripe
-      // nespôsobilo chybu „expires_at must be at least 30 minutes“.
       expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
     };
 
+    if (userId) {
+      sessionParams.client_reference_id = userId;
+    }
+
+    if (stripeCustomerId) {
+      sessionParams.customer = stripeCustomerId;
+      sessionParams.customer_update = {
+        address: 'auto',
+        name: 'auto',
+      };
+    } else {
+      // Bez zákazníka Stripe zobrazí e-mailové pole priamo v Checkout.
+      sessionParams.customer_creation = 'always';
+
+      if (email) {
+        sessionParams.customer_email = email;
+      }
+    }
+
     const idempotencyKey = createIdempotencyKey({
-      userId: user.id,
+      userId,
       planId,
       addonIds,
       requestId,
@@ -1031,6 +1115,8 @@ export async function POST(request: Request) {
 
       successUrl,
       cancelUrl,
+      locale,
+      authenticated: isAuthenticated,
     });
   } catch (error: unknown) {
     const detail = getErrorMessage(error);
@@ -1099,6 +1185,21 @@ export async function POST(request: Request) {
           code: 'ENTITLEMENT_LOAD_FAILED',
           message:
             'Nepodarilo sa overiť aktuálny používateľský balík.',
+          errorId,
+          ...(requestId ? { requestId } : {}),
+          ...getSafeErrorDetail(detail),
+        },
+        { status: 500 },
+      );
+    }
+
+    if (detail.includes('AUTH_CHECK_FAILED')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'AUTH_CHECK_FAILED',
+          code: 'AUTH_CHECK_FAILED',
+          message: 'Nepodarilo sa bezpečne overiť aktuálne prihlásenie.',
           errorId,
           ...(requestId ? { requestId } : {}),
           ...getSafeErrorDetail(detail),

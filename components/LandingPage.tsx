@@ -27,15 +27,18 @@ import {
   Zap,
 } from 'lucide-react';
 
-type PlanId =
-  | 'free'
+type PaidPlanId =
   | 'seminar-work'
   | 'bachelor-thesis'
-  | 'master-thesis'
+  | 'master-thesis';
+
+type AddonId =
   | 'data-analysis'
   | 'extra-20'
   | 'extra-40'
   | 'extra-60';
+
+type PlanId = 'free' | PaidPlanId | AddonId;
 type AppLanguage = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
 
 type PlanKind = 'free' | 'plan' | 'addon';
@@ -65,10 +68,14 @@ type FaqItem = {
 type CheckoutResponse = {
   ok?: boolean;
   url?: string;
+  redirectUrl?: string;
   error?: string;
+  code?: string;
   message?: string;
   detail?: string;
   displayMessage?: string;
+  loginUrl?: string;
+  solution?: string;
 };
 
 type Translation = {
@@ -198,7 +205,30 @@ type Translation = {
 
 const LANGUAGE_STORAGE_KEY = 'zedpera_language';
 
-const MODERN_WOMAN_IMAGE_URL = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=2400&q=100&dpr=2';
+const ALLOWED_PLAN_IDS: readonly PlanId[] = [
+  'free',
+  'seminar-work',
+  'bachelor-thesis',
+  'master-thesis',
+  'data-analysis',
+  'extra-20',
+  'extra-40',
+  'extra-60',
+];
+
+const ADDON_IDS: readonly AddonId[] = [
+  'data-analysis',
+  'extra-20',
+  'extra-40',
+  'extra-60',
+];
+
+const CHECKOUT_EMAIL_STORAGE_KEYS = [
+  'zedpera_user_email',
+  'zedpera_email',
+  'user_email',
+  'email',
+] as const;
 
 const FOUNDER_MARTINA_IMAGE_URL = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=1800&q=100&dpr=2';
 
@@ -1762,11 +1792,34 @@ function normalizeLanguage(value: string | null): AppLanguage {
   return 'sk';
 }
 
+function normalizeEmail(value: unknown): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function isAddonId(value: PlanId): value is AddonId {
+  return ADDON_IDS.includes(value as AddonId);
+}
+
 function getCheckoutError(data: CheckoutResponse | null, fallback: string) {
+  if (
+    data?.code === 'ADDON_AUTHENTICATION_REQUIRED' ||
+    data?.error === 'ADDON_AUTHENTICATION_REQUIRED'
+  ) {
+    return (
+      'Server stále používa starú checkout route, ktorá posiela doplnkové služby na prihlásenie. ' +
+      'Nahraďte app/api/payments/checkout/route.ts verziou, ktorá povoľuje anonymný Stripe Checkout.'
+    );
+  }
+
   return (
     data?.displayMessage ||
     data?.message ||
     data?.detail ||
+    data?.solution ||
     data?.error ||
     fallback
   );
@@ -1873,63 +1926,6 @@ function LanguageDropdown({
           })}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function MobileLanguageDropdown({
-  language,
-  labels,
-  onChange,
-  onClose,
-}: {
-  language: AppLanguage;
-  labels: Translation['common'];
-  onChange: (language: AppLanguage) => void;
-  onClose?: () => void;
-}) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-[#080d1c] p-3">
-      <div className="mb-3 flex items-center gap-2 px-1 text-[11px] font-black uppercase tracking-[0.20em] text-slate-300">
-        <Languages size={15} className="text-violet-300" />
-        {labels.language}
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        {languages.map((item) => {
-          const active = item.code === language;
-
-          return (
-            <button
-              key={item.code}
-              type="button"
-              onClick={() => {
-                onChange(item.code);
-                onClose?.();
-              }}
-              className={`flex min-h-[48px] items-center gap-3 rounded-xl border px-3 py-2 text-left text-sm font-black transition ${
-                active
-                  ? 'border-violet-400 bg-violet-600 text-white shadow-lg shadow-violet-950/40'
-                  : 'border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]'
-              }`}
-            >
-              <span
-                className={`flex h-8 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-black ${
-                  active
-                    ? 'bg-white/20 text-white'
-                    : 'bg-slate-800 text-slate-200'
-                }`}
-              >
-                {item.short}
-              </span>
-
-              <span className="min-w-0 truncate">
-                {item.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
 }
@@ -2223,54 +2219,6 @@ function FounderPortrait({ t }: { t: Translation }) {
 }
 
 
-function ModernWomanHeroCard() {
-  return (
-    <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.07] p-6 shadow-2xl shadow-violet-950/40 backdrop-blur-xl">
-      <div className="absolute inset-0 bg-gradient-to-br from-violet-500/20 via-fuchsia-500/10 to-indigo-500/20" />
-
-      <div className="relative rounded-[1.7rem] border border-white/10 bg-[#0b1020]/95 p-6 shadow-2xl shadow-black/40 sm:p-8">
-        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-violet-400/35 bg-violet-600/20 px-4 py-2 text-xs font-black uppercase tracking-[0.22em] text-violet-100">
-          <Sparkles size={15} className="text-violet-200" />
-          Zedpera
-        </div>
-
-        <h3 className="text-3xl font-black leading-tight text-white sm:text-4xl">
-          Akademická podpora
-        </h3>
-
-        <p className="mt-3 text-base font-black leading-7 text-violet-100 sm:text-lg">
-          Podpora pri písaní od zadania až po obhajobu
-        </p>
-
-        <p className="mt-5 text-sm font-bold leading-7 text-slate-200 sm:text-base">
-          Zedpera spája praktické skúsenosti, odbornú spätnú väzbu a AI podporu do jedného prehľadného systému.
-        </p>
-
-        <div className="mt-7 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-black/35 p-5">
-            
-            <div className="mt-1 text-xs font-black uppercase tracking-[0.16em] text-slate-400">
-              rokov skúseností
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-black/35 p-5">
-            <div className="text-3xl font-black text-white">1000+</div>
-          
-          </div>
-        </div>
-
-        <div className="mt-7 rounded-[1.4rem] border border-violet-400/25 bg-violet-600/15 p-5">
-          <p className="text-sm font-bold leading-7 text-slate-100">
-            Skúsenosti z praxe sú spojené s AI technológiou, aby študent získal
-            odbornú podporu pri písaní práce od zadania až po obhajobu.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function PricingCard({
   plan,
   loading,
@@ -2390,20 +2338,6 @@ export default function LandingPage() {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
   const [language, setLanguage] = useState<AppLanguage>('sk');
   const [translationVersion, setTranslationVersion] = useState(0);
-
-  const allowedPlans = useMemo<PlanId[]>(
-    () => [
-      'free',
-      'seminar-work',
-      'bachelor-thesis',
-      'master-thesis',
-      'data-analysis',
-      'extra-20',
-      'extra-40',
-      'extra-60',
-    ],
-    [],
-  );
 
   const t = useMemo(() => {
     return translations[language] || translations.sk;
@@ -2552,6 +2486,37 @@ const mobileMenuItems = useMemo(
     }
   }
 
+  function getEmailForCheckout(): string {
+    if (typeof window === 'undefined') {
+      return '';
+    }
+
+    let email = '';
+
+    for (const storageKey of CHECKOUT_EMAIL_STORAGE_KEYS) {
+      const storedEmail = normalizeEmail(window.localStorage.getItem(storageKey));
+
+      if (storedEmail && isValidEmail(storedEmail)) {
+        email = storedEmail;
+        break;
+      }
+    }
+
+    if (!email) {
+      const enteredEmail = window.prompt(t.pricing.emailPrompt);
+      email = normalizeEmail(enteredEmail);
+    }
+
+    if (!email || !isValidEmail(email)) {
+      throw new Error(t.pricing.emailRequired);
+    }
+
+    window.localStorage.setItem('zedpera_user_email', email);
+    window.localStorage.setItem('zedpera_email', email);
+
+    return email;
+  }
+
   async function buy(planId: PlanId) {
     if (loadingPlan !== null) {
       return;
@@ -2561,22 +2526,18 @@ const mobileMenuItems = useMemo(
       setLoadingPlan(planId);
       setPaymentError('');
 
-      if (!allowedPlans.includes(planId)) {
+      if (!ALLOWED_PLAN_IDS.includes(planId)) {
         throw new Error(`${t.pricing.invalidPlan}: ${planId}`);
       }
 
       if (planId === 'free') {
-        window.location.assign('/login?mode=register&plan=free');
+        window.location.assign('/dashboard?plan=free&source=landing');
         return;
       }
 
-      const addonIds: PlanId[] = [
-        'data-analysis',
-        'extra-20',
-        'extra-40',
-        'extra-60',
-      ];
-      const isAddon = addonIds.includes(planId);
+      const email = getEmailForCheckout();
+      const isAddon = isAddonId(planId);
+      const checkoutMode = isAddon ? 'payment' : 'subscription';
 
       const requestId =
         typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -2584,10 +2545,31 @@ const mobileMenuItems = useMemo(
           : `landing-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
       const payload = {
+        checkoutType: isAddon ? 'addon' : 'plan',
+        itemId: planId,
+        catalogId: planId,
+        productId: planId,
+        checkoutMode,
+        mode: checkoutMode,
+
+        plan: isAddon ? undefined : planId,
         planId: isAddon ? undefined : planId,
+
+        addon: isAddon ? planId : undefined,
+        addonId: isAddon ? planId : undefined,
+        addons: isAddon ? [planId] : [],
         addonIds: isAddon ? [planId] : [],
+
+        email,
+        customerEmail: email,
+        userEmail: email,
+
         locale: language,
+        language,
+        lang: language,
+
         requestId,
+        checkoutRequestId: requestId,
       };
 
       const res = await fetch('/api/payments/checkout', {
@@ -2596,30 +2578,13 @@ const mobileMenuItems = useMemo(
         cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
+          Accept: 'application/json',
           'Idempotency-Key': requestId,
         },
         body: JSON.stringify(payload),
       });
 
-      const data = (await res.json().catch(() => null)) as
-        | (CheckoutResponse & {
-            code?: string;
-            loginUrl?: string;
-            redirectUrl?: string;
-          })
-        | null;
-
-      if (
-        res.status === 401 &&
-        data?.code === 'ADDON_AUTHENTICATION_REQUIRED'
-      ) {
-        const loginUrl =
-          data.loginUrl ||
-          `/login?next=${encodeURIComponent('/pricing#doplnkove-sluzby')}`;
-
-        window.location.assign(loginUrl);
-        return;
-      }
+      const data = (await res.json().catch(() => null)) as CheckoutResponse | null;
 
       if (!res.ok) {
         throw new Error(getCheckoutError(data, t.pricing.checkoutFailed));

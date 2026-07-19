@@ -552,7 +552,15 @@ function getCatalogTotalCents(
 }
 
 function getPurchasedBasePages(planId: PlanId | null): number {
-  return planId ? PLANS[planId].pageLimit : 0;
+  if (!planId) {
+    return 0;
+  }
+
+  const pageLimit = PLANS[planId].pageLimit;
+
+  return typeof pageLimit === 'number' && Number.isFinite(pageLimit)
+    ? Math.max(0, Math.trunc(pageLimit))
+    : 0;
 }
 
 function getPurchasedExtraPages(addonIds: AddonId[]): number {

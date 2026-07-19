@@ -8,7 +8,8 @@ import {
   type PlanId,
 } from "@/lib/billing/catalog";
 import { applySuccessfulPagePurchase } from "@/lib/page-plan-activation";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { sendOrderConfirmationEmail } from "@/lib/email/order-confirmation";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,22 +24,14 @@ let stripeClient: Stripe | null = null;
 
 type MetadataRecord = Record<string, string>;
 
-type PurchasablePlanId = Exclude<PlanId, "free" | "admin">;
-
-class AdminEntitlementProtectedError extends Error {
-  readonly code = "ADMIN_ENTITLEMENT_PROTECTED";
-  readonly userId: string;
-
-  constructor(userId: string) {
-    super("ADMIN_ENTITLEMENT_PROTECTED");
-    this.name = "AdminEntitlementProtectedError";
-    this.userId = userId;
-  }
-}
+/**
+ * Balíky, ktoré je možné reálne zakúpiť cez Stripe.
+ * Free sa neplatí a admin je iba interný systémový balík.
+ */
+type PaidPlanId = Exclude<PlanId, "free" | "admin">;
 
 type EntitlementRow = {
   plan_id: string | null;
-  is_admin: boolean | null;
   addon_ids: string[] | null;
   prompts_used: number | null;
   activated_at: string | null;
@@ -48,7 +41,7 @@ type EntitlementRow = {
 
 type ResolvedPurchase = {
   userId: string;
-  planId: PurchasablePlanId | null;
+  planId: PaidPlanId | null;
   purchasedAddonIds: AddonId[];
   persistentAddonIds: AddonId[];
   extraPageAddonIds: AddonId[];
@@ -74,7 +67,18 @@ type EventProcessingResult = {
   activeAddonIds?: AddonId[];
   extraPages?: number;
   billingStatus?: string;
+  orderEmailSent?: boolean;
+  orderEmailSkipped?: boolean;
+  orderEmailId?: string | null;
+  orderEmailReason?: string | null;
   detail?: string;
+};
+
+type OrderEmailDeliveryResult = {
+  sent: boolean;
+  skipped: boolean;
+  emailId: string | null;
+  reason: string | null;
 };
 
 type InvoiceParentShape = {
@@ -121,6 +125,11 @@ const EXPECTED_CURRENCY = "eur";
 const FULFILLED_MARKER_KEY = "zedpera_fulfilled";
 const FULFILLED_EVENT_KEY = "zedpera_fulfilled_event_id";
 const FULFILLED_AT_KEY = "zedpera_fulfilled_at";
+
+const ORDER_EMAIL_STATUS_KEY = "zedpera_order_email_status";
+const ORDER_EMAIL_ID_KEY = "zedpera_order_email_id";
+const ORDER_EMAIL_REASON_KEY = "zedpera_order_email_reason";
+const ORDER_EMAIL_AT_KEY = "zedpera_order_email_at";
 
 const PROCESSED_EVENTS_KEY = "zedpera_processed_event_ids";
 const MAX_STORED_EVENT_IDS = 8;
@@ -275,7 +284,7 @@ function normalizePlanId(value: unknown): PlanId | null {
   return candidate;
 }
 
-function normalizePaidPlanId(value: unknown): PurchasablePlanId | null {
+function normalizePaidPlanId(value: unknown): PaidPlanId | null {
   const planId = normalizePlanId(value);
 
   if (!planId || planId === "free" || planId === "admin") {
@@ -453,7 +462,7 @@ function isPermanentMetadataError(error: unknown): boolean {
     "MISSING_OR_INVALID_USER_ID",
     "UNSUPPORTED_PLAN_ID:",
     "PAID_CHECKOUT_CANNOT_ACTIVATE_FREE_PLAN",
-    "ADMIN_PLAN_NOT_PURCHASABLE",
+    "PAID_CHECKOUT_CANNOT_ACTIVATE_ADMIN_PLAN",
     "MISSING_PURCHASE_METADATA",
   ].some((code) => message.includes(code));
 }
@@ -519,6 +528,53 @@ function metadataWithFulfilledMarker(
     [FULFILLED_EVENT_KEY]: eventId,
     [FULFILLED_AT_KEY]: new Date().toISOString(),
   };
+}
+
+function truncateMetadataValue(value: string, maxLength = 450): string {
+  const normalized = value.trim();
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(maxLength - 3, 0))}...`;
+}
+
+function getOrderEmailStatus(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+): string {
+  return normalizeMetadata(metadata)[ORDER_EMAIL_STATUS_KEY] || "";
+}
+
+function isOrderEmailFinalized(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+): boolean {
+  const status = getOrderEmailStatus(metadata);
+
+  return status === "sent" || status === "skipped";
+}
+
+function metadataWithOrderEmailResult(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+  result: OrderEmailDeliveryResult,
+): MetadataRecord {
+  const currentMetadata = normalizeMetadata(metadata);
+
+  const nextMetadata: MetadataRecord = {
+    ...currentMetadata,
+    [ORDER_EMAIL_STATUS_KEY]: result.sent ? "sent" : "skipped",
+    [ORDER_EMAIL_AT_KEY]: new Date().toISOString(),
+  };
+
+  if (result.emailId) {
+    nextMetadata[ORDER_EMAIL_ID_KEY] = truncateMetadataValue(result.emailId);
+  }
+
+  if (result.reason) {
+    nextMetadata[ORDER_EMAIL_REASON_KEY] = truncateMetadataValue(result.reason);
+  }
+
+  return nextMetadata;
 }
 
 // ============================================================
@@ -704,7 +760,7 @@ function resolvePurchaseFromMetadata({
   }
 
   if (normalizedPlanId === "admin") {
-    throw new Error("ADMIN_PLAN_NOT_PURCHASABLE");
+    throw new Error("PAID_CHECKOUT_CANNOT_ACTIVATE_ADMIN_PLAN");
   }
 
   const planId = normalizePaidPlanId(normalizedPlanId);
@@ -797,14 +853,13 @@ async function resolveSubscriptionPurchase({
 async function loadCurrentEntitlement(
   userId: string,
 ): Promise<EntitlementRow | null> {
-  const admin = createAdminClient();
+  const admin = createSupabaseAdminClient();
 
   const { data, error } = await admin
     .from("zedpera_user_entitlements")
     .select(
       [
         "plan_id",
-        "is_admin",
         "addon_ids",
         "prompts_used",
         "activated_at",
@@ -822,32 +877,6 @@ async function loadCurrentEntitlement(
   return data as EntitlementRow | null;
 }
 
-function isProtectedAdminEntitlement(
-  entitlement: EntitlementRow | null,
-): boolean {
-  return (
-    entitlement?.is_admin === true ||
-    entitlement?.plan_id === "admin"
-  );
-}
-
-async function loadMutableEntitlement(
-  userId: string,
-): Promise<EntitlementRow | null> {
-  const existingEntitlement = await loadCurrentEntitlement(userId);
-
-  if (isProtectedAdminEntitlement(existingEntitlement)) {
-    console.info(
-      "STRIPE_WEBHOOK_ADMIN_ENTITLEMENT_PROTECTED:",
-      userId,
-    );
-
-    throw new AdminEntitlementProtectedError(userId);
-  }
-
-  return existingEntitlement;
-}
-
 async function upsertEntitlementAfterPurchase({
   userId,
   planId,
@@ -857,7 +886,7 @@ async function upsertEntitlementAfterPurchase({
   resetPrompts,
 }: {
   userId: string;
-  planId: PurchasablePlanId | null;
+  planId: PaidPlanId | null;
   persistentAddonIds: AddonId[];
   billingStatus: string;
   validUntil: string | null;
@@ -866,8 +895,8 @@ async function upsertEntitlementAfterPurchase({
   effectivePlanId: PlanId;
   activeAddonIds: AddonId[];
 }> {
-  const admin = createAdminClient();
-  const current = await loadMutableEntitlement(userId);
+  const admin = createSupabaseAdminClient();
+  const current = await loadCurrentEntitlement(userId);
 
   const effectivePlanId = planId || normalizeExistingPlanId(current?.plan_id);
   const plan = PLANS[effectivePlanId];
@@ -936,7 +965,7 @@ async function applySuccessfulPurchase({
     resetPrompts,
   });
 
-  const admin = createAdminClient();
+  const admin = createSupabaseAdminClient();
 
   const pageActivation = await applySuccessfulPagePurchase({
     admin,
@@ -965,7 +994,7 @@ async function updateBillingStatus({
   billingStatus: string;
   validUntil?: string | null;
 }): Promise<void> {
-  const current = await loadMutableEntitlement(userId);
+  const current = await loadCurrentEntitlement(userId);
 
   if (!current) {
     await downgradeUserToFree({
@@ -975,7 +1004,7 @@ async function updateBillingStatus({
     return;
   }
 
-  const admin = createAdminClient();
+  const admin = createSupabaseAdminClient();
   const now = new Date().toISOString();
 
   const updatePayload: Record<string, unknown> = {
@@ -1004,9 +1033,7 @@ async function downgradeUserToFree({
   userId: string;
   billingStatus: string;
 }): Promise<void> {
-  await loadMutableEntitlement(userId);
-
-  const admin = createAdminClient();
+  const admin = createSupabaseAdminClient();
   const freePlan = PLANS.free;
   const freePageLimit = getPlanPageLimit("free");
   const now = new Date().toISOString();
@@ -1149,8 +1176,15 @@ async function markCheckoutEvent({
   eventId: string;
   fulfilled: boolean;
 }): Promise<void> {
-  const operations: Array<Promise<unknown>> = [];
+  // Checkout Session marker je kritický. Ak ho Stripe nezapíše, route musí
+  // vrátiť chybu, aby sa udalosť zopakovala a nedošlo k strate idempotencie.
+  await stripe.checkout.sessions.update(session.id, {
+    metadata: fulfilled
+      ? metadataWithFulfilledMarker(session.metadata, eventId)
+      : metadataWithProcessedEvent(session.metadata, eventId),
+  });
 
+  const operations: Array<Promise<unknown>> = [];
   const paymentIntentId = getObjectId(session.payment_intent);
   const customerId = getObjectId(session.customer);
 
@@ -1193,6 +1227,24 @@ async function markCheckoutEvent({
   }
 
   await settleMarkerOperations("CHECKOUT", eventId, operations);
+}
+
+async function markCheckoutOrderEmailResult({
+  stripe,
+  session,
+  result,
+}: {
+  stripe: Stripe;
+  session: Stripe.Checkout.Session;
+  result: OrderEmailDeliveryResult;
+}): Promise<void> {
+  // Po fulfillment markeri znovu načítame aktuálne metadata, aby sme pri
+  // zápise výsledku e-mailu neprepísali novšie Stripe metadata starou kópiou.
+  const currentSession = await stripe.checkout.sessions.retrieve(session.id);
+
+  await stripe.checkout.sessions.update(session.id, {
+    metadata: metadataWithOrderEmailResult(currentSession.metadata, result),
+  });
 }
 
 async function markInvoiceEvent({
@@ -1299,7 +1351,13 @@ async function retrieveCheckoutSession(
   sessionId: string,
 ): Promise<Stripe.Checkout.Session> {
   return stripe.checkout.sessions.retrieve(sessionId, {
-    expand: ["payment_intent", "customer", "subscription", "invoice"],
+    expand: [
+      "payment_intent",
+      "customer",
+      "subscription",
+      "invoice",
+      "line_items.data.price.product",
+    ],
   });
 }
 
@@ -1329,6 +1387,112 @@ function isCheckoutAlreadyFulfilled({
     hasProcessedEvent(subscription?.metadata, eventId) ||
     hasProcessedEvent(customerMetadata, eventId)
   );
+}
+
+function getRecordedOrderEmailResult(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+): OrderEmailDeliveryResult | null {
+  const normalizedMetadata = normalizeMetadata(metadata);
+  const status = normalizedMetadata[ORDER_EMAIL_STATUS_KEY];
+
+  if (status !== "sent" && status !== "skipped") {
+    return null;
+  }
+
+  return {
+    sent: status === "sent",
+    skipped: status === "skipped",
+    emailId: normalizedMetadata[ORDER_EMAIL_ID_KEY] || null,
+    reason: normalizedMetadata[ORDER_EMAIL_REASON_KEY] || null,
+  };
+}
+
+async function sendAndRecordOrderConfirmationEmail({
+  stripe,
+  session,
+  planId,
+  addonIds,
+  paymentReference,
+  locale,
+}: {
+  stripe: Stripe;
+  session: Stripe.Checkout.Session;
+  planId: PaidPlanId | null;
+  addonIds: AddonId[];
+  paymentReference: string;
+  locale: string;
+}): Promise<OrderEmailDeliveryResult> {
+  const recordedResult = getRecordedOrderEmailResult(session.metadata);
+
+  if (recordedResult) {
+    return recordedResult;
+  }
+
+  const result = await sendOrderConfirmationEmail({
+    session,
+    planId,
+    addonIds,
+    paymentReference,
+    locale,
+  });
+
+  const normalizedResult: OrderEmailDeliveryResult = {
+    sent: Boolean(result.sent),
+    skipped: Boolean(result.skipped),
+    emailId: result.emailId || null,
+    reason: result.reason || null,
+  };
+
+  if (!normalizedResult.sent && !normalizedResult.skipped) {
+    throw new Error(
+      normalizedResult.reason || "ORDER_CONFIRMATION_EMAIL_NOT_DELIVERED",
+    );
+  }
+
+  await markCheckoutOrderEmailResult({
+    stripe,
+    session,
+    result: normalizedResult,
+  });
+
+  return normalizedResult;
+}
+
+async function resolveOrderEmailContextForProcessedCheckout({
+  stripe,
+  session,
+}: {
+  stripe: Stripe;
+  session: Stripe.Checkout.Session;
+}): Promise<{
+  planId: PaidPlanId | null;
+  addonIds: AddonId[];
+  locale: string;
+}> {
+  try {
+    const purchase = await resolveCheckoutPurchase({ stripe, session });
+
+    return {
+      planId: purchase.planId,
+      addonIds: purchase.purchasedAddonIds,
+      locale:
+        purchase.metadata.locale ||
+        purchase.metadata.language ||
+        purchase.metadata.lang ||
+        "sk",
+    };
+  } catch (error) {
+    console.warn("ZEDPERA_ORDER_EMAIL_CONTEXT_FALLBACK:", {
+      sessionId: session.id,
+      message: getErrorMessage(error),
+    });
+
+    return {
+      planId: null,
+      addonIds: [],
+      locale: "sk",
+    };
+  }
 }
 
 async function handleCheckoutSucceeded({
@@ -1365,10 +1529,51 @@ async function handleCheckoutSucceeded({
   }
 
   if (isCheckoutAlreadyFulfilled({ session, subscription, eventId })) {
+    const recordedEmailResult = getRecordedOrderEmailResult(session.metadata);
+
+    if (recordedEmailResult) {
+      return {
+        processed: false,
+        reason: "already_processed",
+        objectId: session.id,
+        orderEmailSent: recordedEmailResult.sent,
+        orderEmailSkipped: recordedEmailResult.skipped,
+        orderEmailId: recordedEmailResult.emailId,
+        orderEmailReason: recordedEmailResult.reason,
+      };
+    }
+
+    const emailContext = await resolveOrderEmailContextForProcessedCheckout({
+      stripe,
+      session,
+    });
+
+    const recoveredEmailResult = await sendAndRecordOrderConfirmationEmail({
+      stripe,
+      session,
+      planId: emailContext.planId,
+      addonIds: emailContext.addonIds,
+      paymentReference: getObjectId(session.invoice) || session.id,
+      locale: emailContext.locale,
+    });
+
+    console.info("ZEDPERA_ORDER_CONFIRMATION_EMAIL_RECOVERED:", {
+      eventId,
+      sessionId: session.id,
+      sent: recoveredEmailResult.sent,
+      skipped: recoveredEmailResult.skipped,
+      emailId: recoveredEmailResult.emailId,
+      reason: recoveredEmailResult.reason,
+    });
+
     return {
       processed: false,
-      reason: "already_processed",
+      reason: "already_processed_email_recovered",
       objectId: session.id,
+      orderEmailSent: recoveredEmailResult.sent,
+      orderEmailSkipped: recoveredEmailResult.skipped,
+      orderEmailId: recoveredEmailResult.emailId,
+      orderEmailReason: recoveredEmailResult.reason,
     };
   }
 
@@ -1428,6 +1633,49 @@ async function handleCheckoutSucceeded({
     fulfilled: true,
   });
 
+  /*
+   * Potvrdzujúci e-mail sa posiela až po úspešnom aktivovaní balíka
+   * a po zapísaní idempotentného fulfillment markeru do Stripe.
+   *
+   * Ak Resend zlyhá, vyhodíme chybu a Stripe webhook zopakuje. Pri opakovaní
+   * sa nákup už znovu neaktivuje; route iba dokončí chýbajúci e-mail.
+   * Resend zároveň používa Idempotency-Key odvodený od Checkout Session ID.
+   */
+  let orderEmailResult: OrderEmailDeliveryResult;
+
+  try {
+    orderEmailResult = await sendAndRecordOrderConfirmationEmail({
+      stripe,
+      session,
+      planId: purchase.planId,
+      addonIds: result.purchasedAddonIds,
+      paymentReference,
+      locale:
+        purchase.metadata.locale ||
+        purchase.metadata.language ||
+        purchase.metadata.lang ||
+        "sk",
+    });
+  } catch (emailError) {
+    const emailErrorMessage = getErrorMessage(emailError);
+
+    console.error("ZEDPERA_ORDER_CONFIRMATION_EMAIL_ERROR:", {
+      eventId,
+      sessionId: session.id,
+      message: emailErrorMessage,
+    });
+
+    throw new Error(`ORDER_CONFIRMATION_EMAIL_FAILED: ${emailErrorMessage}`);
+  }
+
+  if (orderEmailResult.skipped) {
+    console.warn("ZEDPERA_ORDER_CONFIRMATION_EMAIL_SKIPPED:", {
+      eventId,
+      sessionId: session.id,
+      reason: orderEmailResult.reason,
+    });
+  }
+
   console.info("STRIPE_WEBHOOK_CHECKOUT_FULFILLED:", {
     eventId,
     sessionId: session.id,
@@ -1438,6 +1686,10 @@ async function handleCheckoutSucceeded({
     purchasedAddonIds: result.purchasedAddonIds,
     activeAddonIds: result.activeAddonIds,
     extraPages: result.extraPages,
+    orderEmailSent: orderEmailResult.sent,
+    orderEmailSkipped: orderEmailResult.skipped,
+    orderEmailId: orderEmailResult.emailId,
+    orderEmailReason: orderEmailResult.reason,
   });
 
   return {
@@ -1450,6 +1702,10 @@ async function handleCheckoutSucceeded({
     activeAddonIds: result.activeAddonIds,
     extraPages: result.extraPages,
     billingStatus,
+    orderEmailSent: orderEmailResult.sent,
+    orderEmailSkipped: orderEmailResult.skipped,
+    orderEmailId: orderEmailResult.emailId,
+    orderEmailReason: orderEmailResult.reason,
   };
 }
 
@@ -2014,6 +2270,20 @@ export async function GET() {
       configured: {
         stripeSecret: Boolean(process.env.STRIPE_SECRET_KEY),
         webhookSecret: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+        resendApiKey: Boolean(process.env.RESEND_API_KEY),
+        emailFrom: Boolean(process.env.EMAIL_FROM),
+        emailReplyTo: Boolean(process.env.EMAIL_REPLY_TO),
+        emailLogoUrl: Boolean(process.env.EMAIL_LOGO_URL),
+        appUrl: Boolean(
+          process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL,
+        ),
+        orderNotificationEmail: Boolean(process.env.ORDER_NOTIFICATION_EMAIL),
+        orderEmailReady: Boolean(
+          process.env.RESEND_API_KEY &&
+          process.env.EMAIL_FROM &&
+          process.env.EMAIL_LOGO_URL &&
+          (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL),
+        ),
       },
       supportedEvents: SUPPORTED_EVENTS,
     },
@@ -2195,25 +2465,6 @@ export async function POST(request: Request) {
       },
     );
   } catch (error) {
-    if (error instanceof AdminEntitlementProtectedError) {
-      return NextResponse.json(
-        {
-          received: true,
-          skipped: true,
-          reason: "ADMIN_ENTITLEMENT_PROTECTED",
-          userId: error.userId,
-          eventId: event.id,
-          eventType: event.type,
-        },
-        {
-          status: 200,
-          headers: {
-            "Cache-Control": "no-store",
-          },
-        },
-      );
-    }
-
     // Pri databázovej alebo sieťovej chybe vraciame HTTP 500.
     // Stripe tak udalosť automaticky zopakuje.
     console.error("STRIPE_WEBHOOK_PROCESSING_ERROR:", {

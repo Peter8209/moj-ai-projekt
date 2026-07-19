@@ -32,7 +32,11 @@ import {
 } from '@/lib/billing/catalog';
 
 type PaidPlanId = Exclude<PlanId, 'free' | 'admin'>;
-type CheckoutKind = 'plan' | 'addon';
+
+type PlanVisibility = {
+  isPublic?: boolean;
+  isPurchasable?: boolean;
+};
 
 type MainPlan = {
   id: PlanId;
@@ -98,12 +102,21 @@ type AddonCheckoutPayload = {
 
 type CheckoutPayload = PlanCheckoutPayload | AddonCheckoutPayload;
 
-const publicPlans = Object.values(PLANS).filter(
-  (plan) =>
+const publicPlans = Object.values(PLANS).filter((plan) => {
+  /*
+   * Hodnoty v PLANS sú deklarované pomocou `as const`, preto TypeScript
+   * pri verejných plánoch odvodzuje isPublic/isPurchasable ako literál `true`.
+   * Rozšírenie iba týchto dvoch príznakov na voliteľný boolean zachováva
+   * podporu budúcich skrytých plánov bez neplatného porovnania true !== false.
+   */
+  const visibility = plan as PlanVisibility;
+
+  return (
     plan.id !== 'admin' &&
-    plan.isPublic !== false &&
-    plan.isPurchasable !== false,
-);
+    visibility.isPublic !== false &&
+    visibility.isPurchasable !== false
+  );
+});
 
 const PAID_PLAN_IDS: PaidPlanId[] = publicPlans
   .map((plan) => plan.id)

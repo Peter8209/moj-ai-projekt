@@ -65,7 +65,8 @@ export type FeatureModuleId =
   | 'data-analysis'
   | 'defense';
 
-export type PurchasableCatalogId = Exclude<PlanId, 'free'> | AddonId;
+export type PaidPlanId = Exclude<PlanId, 'free'>;
+export type PurchasableCatalogId = PaidPlanId | AddonId;
 
 export type CatalogItemKind = 'plan' | 'addon';
 export type CheckoutMode = 'payment' | 'subscription';
@@ -85,8 +86,7 @@ export type StripePriceEnvironmentKey =
 // DEFINÍCIE
 // =====================================================
 
-export type PlanDefinition = {
-  id: PlanId;
+type PlanDefinitionBase = {
   kind: 'plan';
   name: string;
   shortName: string;
@@ -97,12 +97,29 @@ export type PlanDefinition = {
   promptLimit: number | null;
   attachmentLimit: number;
   features: readonly FeatureKey[];
-  purchasable: boolean;
-  checkoutMode: CheckoutMode | null;
-  billingInterval: BillingInterval | null;
-  stripePriceEnvKey: StripePriceEnvironmentKey | null;
   sortOrder: number;
 };
+
+export type FreePlanDefinition = PlanDefinitionBase & {
+  id: 'free';
+  priceCents: 0;
+  purchasable: false;
+  checkoutMode: null;
+  billingInterval: null;
+  stripePriceEnvKey: null;
+};
+
+export type PaidPlanDefinition = PlanDefinitionBase & {
+  id: PaidPlanId;
+  purchasable: true;
+  checkoutMode: 'subscription';
+  billingInterval: 'month';
+  stripePriceEnvKey: StripePriceEnvironmentKey;
+};
+
+export type PlanDefinition =
+  | FreePlanDefinition
+  | PaidPlanDefinition;
 
 export type AddonDefinition = {
   id: AddonId;
@@ -115,8 +132,8 @@ export type AddonDefinition = {
   extraPages: number;
   features: readonly FeatureKey[];
   purchasable: true;
-  checkoutMode: CheckoutMode;
-  billingInterval: BillingInterval | null;
+  checkoutMode: 'payment';
+  billingInterval: null;
   stripePriceEnvKey: StripePriceEnvironmentKey;
   sortOrder: number;
 };
@@ -524,8 +541,7 @@ export const FEATURE_KEYS = Object.freeze(
 
 export const PURCHASABLE_PLAN_IDS = Object.freeze(
   PLAN_IDS.filter(
-    (planId): planId is Exclude<PlanId, 'free'> =>
-      planId !== 'free',
+    (planId): planId is PaidPlanId => planId !== 'free',
   ),
 );
 
@@ -547,6 +563,10 @@ function hasOwnKey<TObject extends object>(
 
 export function isPlanId(value: unknown): value is PlanId {
   return typeof value === 'string' && hasOwnKey(PLANS, value);
+}
+
+export function isPaidPlanId(value: unknown): value is PaidPlanId {
+  return isPlanId(value) && value !== 'free';
 }
 
 export function isAddonId(value: unknown): value is AddonId {
@@ -573,7 +593,7 @@ export function isPurchasableCatalogId(
   value: unknown,
 ): value is PurchasableCatalogId {
   return (
-    (isPlanId(value) && value !== 'free') ||
+    isPaidPlanId(value) ||
     isAddonId(value)
   );
 }
@@ -602,7 +622,7 @@ export function getCatalogDefinition(
 
 export function getPurchasableCatalogDefinition(
   itemId: PurchasableCatalogId,
-) {
+): PaidPlanDefinition | AddonDefinition {
   if (isAddonId(itemId)) {
     return ADDONS[itemId];
   }

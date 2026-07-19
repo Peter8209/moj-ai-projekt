@@ -64,6 +64,15 @@ type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
 };
+
+/**
+ * Súbor prijatý cez Request.formData(). Nepoužívame instanceof File,
+ * pretože v serverless runtime môže objekt pochádzať z iného JS realm-u.
+ */
+type UploadedFile = Blob & {
+  name: string;
+  lastModified?: number;
+};
 type SavedProfile = {
   id?: string;
   title?: string;
@@ -193,6 +202,13 @@ type PreparedFileMetadata = {
   detectedAuthors?: string[];
   formattedSources?: string;
   warning?: string;
+
+  // Text môže prísť z /api/extract-text alebo z klientského fallbacku.
+  extractedText?: string;
+  extracted_text?: string;
+  text?: string;
+  content?: string;
+  rawText?: string;
 };
 
 type ExtractedAttachment = {
@@ -629,6 +645,134 @@ function asBoolean(value: FormDataEntryValue | null, fallback: boolean) {
 
 function isStrictNoAcademicTailModule(module: ModuleKey) {
   return module === 'translation' || module === 'emails' || module === 'planning';
+}
+
+
+// =====================================================
+// ROBUST REQUEST / ATTACHMENT HELPERS
+// =====================================================
+
+function isUploadedFile(value: unknown): value is UploadedFile {
+  if (!value || typeof value === 'string' || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<UploadedFile> & {
+    arrayBuffer?: unknown;
+  };
+
+  return (
+    typeof candidate.arrayBuffer === 'function' &&
+    typeof candidate.size === 'number' &&
+    candidate.size >= 0 &&
+    typeof candidate.type === 'string' &&
+    typeof candidate.name === 'string'
+  );
+}
+
+function collectUploadedFiles(formData: FormData): UploadedFile[] {
+  const uniqueFiles = new Map<string, UploadedFile>();
+
+  // Prechádzame všetky polia, nie iba files/file/attachments.
+  // Frontend môže používať aj attachments[], uploadedFiles, document_0 a pod.
+  for (const [, value] of formData.entries()) {
+    if (!isUploadedFile(value)) continue;
+    if (value.size <= 0 || !value.name.trim()) continue;
+
+    const key = [
+      value.name,
+      value.size,
+      value.type,
+      value.lastModified || 0,
+    ].join('|');
+
+    if (!uniqueFiles.has(key)) {
+      uniqueFiles.set(key, value);
+    }
+  }
+
+  return Array.from(uniqueFiles.values());
+}
+
+function collectTextFragments(value: unknown, depth = 0): string[] {
+  if (depth > 5 || value === null || value === undefined) return [];
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
+    // Niektoré klienty pošlú pole alebo objekt serializovaný ako JSON.
+    if (
+      (trimmed.startsWith('[') && trimmed.endsWith(']')) ||
+      (trimmed.startsWith('{') && trimmed.endsWith('}'))
+    ) {
+      try {
+        return collectTextFragments(JSON.parse(trimmed), depth + 1);
+      } catch {
+        // Nie každý text začínajúci { alebo [ je JSON; ponecháme ho ako text.
+      }
+    }
+
+    return [trimmed];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectTextFragments(item, depth + 1));
+  }
+
+  if (typeof value === 'object') {
+    const objectValue = value as Record<string, unknown>;
+    const textKeys = [
+      'clientExtractedText',
+      'extractedText',
+      'extracted_text',
+      'attachmentText',
+      'attachmentTexts',
+      'text',
+      'content',
+      'rawText',
+      'documentText',
+      'fileText',
+      'parsedText',
+      'ocrText',
+    ];
+
+    return textKeys.flatMap((key) =>
+      collectTextFragments(objectValue[key], depth + 1),
+    );
+  }
+
+  return [];
+}
+
+function mergeExtractedTextPayloads(...values: unknown[]): string {
+  const fragments = uniqueArray(
+    values
+      .flatMap((value) => collectTextFragments(value))
+      .map((value) => normalizeText(value))
+      .filter(Boolean),
+  );
+
+  if (!fragments.length) return '';
+
+  return limitMiddle(
+    fragments.join('\n\n-----------------\n\n'),
+    maxClientExtractedChars,
+  );
+}
+
+function getPreparedMetadataExtractedText(
+  metadata: PreparedFileMetadata | null | undefined,
+): string {
+  if (!metadata) return '';
+
+  return mergeExtractedTextPayloads(
+    metadata.extractedText,
+    metadata.extracted_text,
+    metadata.text,
+    metadata.content,
+    metadata.rawText,
+  );
 }
 
 // =====================================================
@@ -2502,11 +2646,11 @@ async function buildVerifiedSourcePack({
 const allowedAttachmentExtensions = ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt', '.md', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.xls', '.xlsx', '.csv', '.ppt', '.pptx', '.gz'];
 const extractableAttachmentExtensions = ['.pdf', '.docx', '.txt', '.md', '.csv', '.rtf'];
 
-function isGzipFile(file: File) {
+function isGzipFile(file: UploadedFile) {
   return (file.name || '').toLowerCase().endsWith('.gz') || file.type === 'application/gzip' || file.type === 'application/x-gzip';
 }
 
-function isAllowedAttachment(file: File) {
+function isAllowedAttachment(file: UploadedFile) {
   const extension = getFileExtension(file.name);
   const effectiveExtension = getEffectiveExtension(file.name);
   return allowedAttachmentExtensions.includes(extension) || allowedAttachmentExtensions.includes(effectiveExtension);
@@ -2543,7 +2687,7 @@ function safeGunzip(buffer: Buffer) {
   }
 }
 
-async function getUsableFileBuffer(file: File) {
+async function getUsableFileBuffer(file: UploadedFile) {
   const originalBuffer = Buffer.from(await file.arrayBuffer());
   const gzip = isGzipFile(file);
 
@@ -2587,17 +2731,28 @@ async function getUsableFileBuffer(file: File) {
 }
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  const pdfParseModule: any = await import('pdf-parse');
+  const importedModule: any = await import('pdf-parse');
 
-  // pdf-parse v2 používa triedu PDFParse.
-  if (typeof pdfParseModule?.PDFParse === 'function') {
-    const parser = new pdfParseModule.PDFParse({
+  const moduleCandidates = [
+    importedModule,
+    importedModule?.default,
+    importedModule?.default?.default,
+  ].filter(Boolean);
+
+  // pdf-parse v2: class PDFParse môže byť named export alebo vnorená v default exporte.
+  for (const candidate of moduleCandidates) {
+    const PDFParseConstructor = candidate?.PDFParse;
+
+    if (typeof PDFParseConstructor !== 'function') continue;
+
+    const parser = new PDFParseConstructor({
       data: new Uint8Array(buffer),
     });
 
     try {
       const result = await parser.getText();
-      return normalizeText(result?.text || '');
+      const extracted = normalizeText(result?.text || result || '');
+      if (extracted) return extracted;
     } finally {
       if (typeof parser.destroy === 'function') {
         await parser.destroy().catch(() => undefined);
@@ -2605,21 +2760,17 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
     }
   }
 
-  // Spätná kompatibilita s pdf-parse v1.
-  const legacyPdfParse =
-    typeof pdfParseModule?.default === 'function'
-      ? pdfParseModule.default
-      : typeof pdfParseModule === 'function'
-        ? pdfParseModule
-        : null;
+  // pdf-parse v1: export je priamo funkcia alebo default funkcia.
+  for (const candidate of moduleCandidates) {
+    if (typeof candidate !== 'function') continue;
 
-  if (legacyPdfParse) {
-    const result = await legacyPdfParse(buffer);
-    return normalizeText(result?.text || '');
+    const result = await candidate(buffer);
+    const extracted = normalizeText(result?.text || result || '');
+    if (extracted) return extracted;
   }
 
   throw new Error(
-    'PDF_PARSER_NOT_AVAILABLE: Nainštalovaná verzia pdf-parse neposkytuje podporované API.',
+    'PDF_PARSER_NOT_AVAILABLE: Nainštalovaná verzia pdf-parse neposkytuje podporované API alebo PDF neobsahuje textovú vrstvu.',
   );
 }
 
@@ -2628,12 +2779,12 @@ async function extractDocxText(buffer: Buffer): Promise<string> {
   return normalizeText(result.value || '');
 }
 
-function getPreparedMetadataForFile(file: File, preparedFilesMetadata: PreparedFileMetadata[]) {
+function getPreparedMetadataForFile(file: UploadedFile, preparedFilesMetadata: PreparedFileMetadata[]) {
   const fileName = file.name || '';
   return preparedFilesMetadata.find((item) => item.preparedName === fileName) || preparedFilesMetadata.find((item) => item.originalName === fileName) || null;
 }
 
-async function extractTextFromSingleFile(file: File, preparedFilesMetadata: PreparedFileMetadata[]): Promise<ExtractedAttachment> {
+async function extractTextFromSingleFile(file: UploadedFile, preparedFilesMetadata: PreparedFileMetadata[]): Promise<ExtractedAttachment> {
   const preparedMetadata = getPreparedMetadataForFile(file, preparedFilesMetadata);
   const preparedName = file.name || 'neznamy-subor';
   const originalName = preparedMetadata?.originalName || removeGzipSuffix(preparedName) || preparedName;
@@ -2649,6 +2800,7 @@ async function extractTextFromSingleFile(file: File, preparedFilesMetadata: Prep
   const metadataCitationSources = buildLiteratureFromInTextCitations(metadataInTextCitations, 'citation');
   const metadataAuthors = Array.isArray(preparedMetadata?.detectedAuthors) ? cleanValidAuthors(preparedMetadata.detectedAuthors) : [];
   const metadataFormattedSources = preparedMetadata?.formattedSources || '';
+  const metadataExtractedText = getPreparedMetadataExtractedText(preparedMetadata);
 
   const base = {
     name: originalName,
@@ -2687,6 +2839,24 @@ async function extractTextFromSingleFile(file: File, preparedFilesMetadata: Prep
     const bufferInfo = await getUsableFileBuffer(file);
 
     if (!extractableAttachmentExtensions.includes(effectiveExtension)) {
+      const fallbackText = normalizeText(metadataExtractedText);
+      const fallbackCitations = fallbackText
+        ? extractInTextCitations(fallbackText)
+        : [];
+      const fallbackCandidates = fallbackText
+        ? extractBibliographicCandidates(fallbackText, 'attachment')
+        : [];
+      const bibliographicCandidates = mergeBibliographicCandidates(
+        metadataCandidates,
+        metadataCitationSources,
+        fallbackCandidates,
+        buildLiteratureFromInTextCitations(fallbackCitations, 'citation'),
+      ).map((source) => ({
+        ...source,
+        sourceDocumentName: source.sourceDocumentName || originalName,
+        citedAccordingTo: source.citedAccordingTo || originalName,
+      }));
+
       return {
         ...base,
         compressedSize: bufferInfo.compressedSize,
@@ -2694,14 +2864,24 @@ async function extractTextFromSingleFile(file: File, preparedFilesMetadata: Prep
         wasDecompressed: bufferInfo.wasDecompressed,
         compressionWithinLimit: bufferInfo.compressionWithinLimit,
         compressionStatus: bufferInfo.compressionStatus,
-        extractedText: '',
-        extractedChars: 0,
-        extractedPreview: '',
-        status: 'Súbor bol priložený, ale z tohto typu sa v tejto API trase neextrahuje text.',
+        extractedText: limitText(fallbackText, maxExtractedCharsPerAttachment),
+        extractedChars: fallbackText.length,
+        extractedPreview: fallbackText.slice(0, 1200),
+        status: fallbackText
+          ? 'Text bol prevzatý z klientského alebo predspracovaného fallbacku.'
+          : 'Súbor bol priložený, ale z tohto typu sa v tejto API trase neextrahuje text.',
         error: null,
-        bibliographicCandidates: mergeBibliographicCandidates(metadataCandidates, metadataCitationSources),
-        inTextCitations: metadataInTextCitations,
-        detectedAuthors: metadataAuthors,
+        bibliographicCandidates,
+        inTextCitations: uniqueArray(
+          [...metadataInTextCitations, ...fallbackCitations].map((item) =>
+            JSON.stringify(item),
+          ),
+        ).map((item) => JSON.parse(item) as InTextCitation),
+        detectedAuthors: cleanValidAuthors([
+          ...metadataAuthors,
+          ...fallbackCitations.flatMap((citation) => citation.authors || []),
+          ...extractAuthorsFromCandidates(bibliographicCandidates),
+        ]),
       };
     }
 
@@ -2710,6 +2890,8 @@ async function extractTextFromSingleFile(file: File, preparedFilesMetadata: Prep
     else if (effectiveExtension === '.rtf') extractedText = normalizeText(stripRtf(bufferInfo.usableBuffer.toString('utf8')));
     else if (effectiveExtension === '.docx') extractedText = await extractDocxText(bufferInfo.usableBuffer);
     else if (effectiveExtension === '.pdf') extractedText = await extractPdfText(bufferInfo.usableBuffer);
+
+    extractedText = normalizeText(extractedText) || normalizeText(metadataExtractedText);
 
     const detectedInTextCitations = extractInTextCitations(extractedText);
     const detectedCandidates = extractBibliographicCandidates(extractedText, 'attachment');
@@ -2740,6 +2922,48 @@ async function extractTextFromSingleFile(file: File, preparedFilesMetadata: Prep
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Nepodarilo sa extrahovať text zo súboru.';
+    const fallbackText = normalizeText(metadataExtractedText);
+
+    if (fallbackText) {
+      const fallbackCitations = extractInTextCitations(fallbackText);
+      const fallbackCandidates = mergeBibliographicCandidates(
+        metadataCandidates,
+        metadataCitationSources,
+        extractBibliographicCandidates(fallbackText, 'attachment'),
+        buildLiteratureFromInTextCitations(fallbackCitations, 'citation'),
+      ).map((source) => ({
+        ...source,
+        sourceDocumentName: source.sourceDocumentName || originalName,
+        citedAccordingTo: source.citedAccordingTo || originalName,
+      }));
+
+      return {
+        ...base,
+        compressedSize: size,
+        decompressedSize: size,
+        wasDecompressed: false,
+        compressionWithinLimit: size <= maxCompressedFileSizeBytes,
+        compressionStatus: 'Serverová extrakcia zlyhala; použitý bol text z klientského alebo predspracovaného fallbacku.',
+        extractedText: limitText(fallbackText, maxExtractedCharsPerAttachment),
+        extractedChars: fallbackText.length,
+        extractedPreview: fallbackText.slice(0, 1200),
+        status: 'Text bol úspešne načítaný z fallbacku po zlyhaní serverovej extrakcie.',
+        error: null,
+        warning: [base.warning, message].filter(Boolean).join(' | '),
+        bibliographicCandidates: fallbackCandidates,
+        inTextCitations: uniqueArray(
+          [...metadataInTextCitations, ...fallbackCitations].map((item) =>
+            JSON.stringify(item),
+          ),
+        ).map((item) => JSON.parse(item) as InTextCitation),
+        detectedAuthors: cleanValidAuthors([
+          ...metadataAuthors,
+          ...fallbackCitations.flatMap((citation) => citation.authors || []),
+          ...extractAuthorsFromCandidates(fallbackCandidates),
+        ]),
+      };
+    }
+
     return {
       ...base,
       compressedSize: size,
@@ -2801,7 +3025,7 @@ async function extractAttachmentTexts({
   clientDetectedSourcesSummary,
   clientDetectedSources,
 }: {
-  files: File[];
+  files: UploadedFile[];
   preparedFilesMetadata: PreparedFileMetadata[];
   clientExtractedText: string;
   preparedFilesSummary: string;
@@ -2847,9 +3071,15 @@ async function extractAttachmentTexts({
     attachmentTexts.push(`PRILOŽENÝ SÚBOR\nNázov pôvodného súboru: ${file.originalName}\nNázov prijatého súboru: ${file.preparedName}\nTyp: ${file.label}\nStav extrakcie: ${file.status}\nPočet extrahovaných znakov: ${file.extractedChars}\nPočet citácií v texte: ${file.inTextCitations.length}\nPočet detegovaných bibliografických kandidátov: ${file.bibliographicCandidates.length}\nAutori: ${file.detectedAuthors.length ? file.detectedAuthors.join(', ') : 'neuvedené alebo potrebné overiť'}\nChyba: ${file.error || 'bez chyby'}\n\nCITÁCIE V TEXTE:\n${file.inTextCitations.map((citation, index) => `${index + 1}. ${citation.raw}`).join('\n') || 'neuvedené'}\n\nDETEGOVANÉ ZDROJE:\n${formatBibliographicCandidates(file.bibliographicCandidates)}\n\nEXTRAHOVANÝ TEXT:\n${file.extractedText || '[Text nebol extrahovaný alebo nie je dostupný.]'}`);
   }
 
+  const combinedAttachmentText = attachmentTexts
+    .join('\n\n-----------------\n\n')
+    .trim();
+
   return {
     extractedFiles,
-    attachmentTexts: [limitText(attachmentTexts.join('\n\n-----------------\n\n'), maxAttachmentContextChars)],
+    attachmentTexts: combinedAttachmentText
+      ? [limitText(combinedAttachmentText, maxAttachmentContextChars)]
+      : [],
     compactSources,
   };
 }
@@ -2956,7 +3186,22 @@ function detectAttachmentProfileRelevance({
   const attachmentTokenSet = new Set(attachmentTokens);
   const matchedTokens = profileTokens.filter((token) => attachmentTokenSet.has(token));
   const relevanceRatio = matchedTokens.length / Math.max(profileTokens.length, 1);
-  const isRelevant = matchedTokens.length >= 5 || relevanceRatio >= 0.08;
+
+  // Aktuálne nahratá príloha je explicitná voľba používateľa.
+  // Automatická tokenová kontrola je preto iba informatívna a nesmie zablokovať
+  // načítanie dokumentu pri agentoch s krátkym alebo všeobecným profilom.
+  const hasExplicitCurrentUpload =
+    extractedFiles.some(
+      (file) => file.extractedText.trim().length > 0 && !file.error,
+    ) ||
+    attachmentTexts.some((item) =>
+      /EXTRAHOVANÝ TEXT Z \/api\/extract-text|PRILOŽENÝ SÚBOR/i.test(item),
+    );
+
+  const isRelevant =
+    hasExplicitCurrentUpload ||
+    matchedTokens.length >= 3 ||
+    relevanceRatio >= 0.04;
 
   return { hasAttachmentContent, isRelevant, matchedTokens, profileTokens, attachmentTokens, relevanceRatio };
 }
@@ -3176,22 +3421,41 @@ POVINNÉ PRAVIDLO:
 Odpovedaj v jazyku: ${getLanguageName(outputLanguage)}.
 Toto nastavenie má prednosť pred jazykom profilu práce, pokiaľ používateľ výslovne nepožiada o iný jazyk.`;
 
+  const attachmentBlock = buildAttachmentBlock(attachmentTexts);
+  const strictAttachmentRules = `PRAVIDLÁ PRE PRÁCU S PRÍLOHAMI:
+- Ak blok PRILOŽENÉ SÚBORY A PODKLADY obsahuje extrahovaný text, musíš ho skutočne prečítať a použiť pri odpovedi.
+- Nikdy netvrď, že nemáš prístup k prílohe, ak je jej text uvedený v systémovom kontexte.
+- Názvy súborov, osoby, dátumy, sumy a odborné údaje preberaj presne z prílohy; nevymýšľaj chýbajúce údaje.
+- Ak text prílohy chýba alebo extrakcia zlyhala, oznám konkrétne, že obsah súboru nebol dostupný, nie všeobecne, že prílohy nepodporuješ.`;
+
   if (module === 'translation') {
     return `${buildStrictTranslationPrompt()}
 
-${languageInstruction}`;
+${languageInstruction}
+
+${strictAttachmentRules}
+
+${attachmentBlock}`;
   }
 
   if (module === 'emails') {
     return `${buildStrictEmailPrompt()}
 
-${languageInstruction}`;
+${languageInstruction}
+
+${strictAttachmentRules}
+
+${attachmentBlock}`;
   }
 
   if (module === 'planning') {
     return `${buildStrictPlanningPrompt(profile)}
 
-${languageInstruction}`;
+${languageInstruction}
+
+${strictAttachmentRules}
+
+${attachmentBlock}`;
   }
 
 
@@ -3281,6 +3545,12 @@ KOMPLETNÝ ULOŽENÝ PROFIL PRÁCE:
 ${buildProfileSummary(profile)}
 
 ${buildAttachmentBlock(attachmentTexts)}
+
+POVINNÉ SPRACOVANIE PRÍLOH:
+- Ak je vyššie uvedený extrahovaný text prílohy, považuj ho za priamo dostupný obsah dokumentu.
+- Pri odpovedi z neho vychádzaj prednostne a nikdy netvrď, že súbor nevieš otvoriť alebo že k nemu nemáš prístup.
+- Ak používateľ žiada analýzu, audit, obhajobu, humanizáciu, originalitu, preklad, email alebo plánovanie podľa prílohy, spracuj presne obsah prílohy.
+- Chýbajúce alebo nečitateľné údaje označ ako nedostupné; nevymýšľaj ich.
 
 PRAVIDLÁ PRE ZDROJE:
 1. Primárne zdroje = názov dokumentu alebo názvy dokumentov, z ktorých výstup čerpá, vrátane autora/autorov samotnej prílohy, ak sa dajú bezpečne zistiť z titulnej/úvodnej časti.
@@ -3984,7 +4254,7 @@ function countReceivedAttachments({
   preparedFilesMetadata,
   clientExtractedText,
 }: {
-  files: File[];
+  files: UploadedFile[];
   preparedFilesMetadata: PreparedFileMetadata[];
   clientExtractedText: string;
 }): number {
@@ -4816,7 +5086,7 @@ export async function POST(req: Request) {
     let module: ModuleKey = 'unknown';
     let messages: ChatMessage[] = [];
     let profile: SavedProfile | null = null;
-    let files: File[] = [];
+    let files: UploadedFile[] = [];
     let projectId: string | null = null;
     let outputLanguage: AppLanguage = 'sk';
     let clientRequestId =
@@ -4824,7 +5094,7 @@ export async function POST(req: Request) {
         .get('x-request-id')
         ?.trim() || '';
 
-    let validateAttachmentsAgainstProfile = true;
+    let validateAttachmentsAgainstProfile = false;
     let requireSourceList = true;
     let allowAiKnowledgeFallback = true;
     let useExternalAcademicSources = true;
@@ -4910,7 +5180,7 @@ if (profile) {
 
       validateAttachmentsAgainstProfile = asBoolean(
         formData.get('validateAttachmentsAgainstProfile'),
-        true,
+        false,
       );
 
       requireSourceList = asBoolean(
@@ -4933,16 +5203,32 @@ if (profile) {
         false,
       );
 
-      clientExtractedText = toCleanString(
-        formData.get('clientExtractedText'),
+      preparedFilesMetadata = parseJson<PreparedFileMetadata[]>(
+        formData.get('preparedFilesMetadata'),
+        [],
       );
 
-      preparedFilesSummary = toCleanString(
-        formData.get('preparedFilesSummary'),
+      clientExtractedText = mergeExtractedTextPayloads(
+        formData.getAll('clientExtractedText'),
+        formData.getAll('extractedText'),
+        formData.getAll('extractedTexts'),
+        formData.getAll('attachmentText'),
+        formData.getAll('attachmentTexts'),
+        formData.getAll('documentText'),
+        formData.getAll('fileText'),
+        formData.getAll('parsedText'),
+        preparedFilesMetadata,
       );
 
-      clientDetectedSourcesSummary = toCleanString(
-        formData.get('clientDetectedSourcesSummary'),
+      preparedFilesSummary = mergeExtractedTextPayloads(
+        formData.getAll('preparedFilesSummary'),
+        formData.getAll('filesSummary'),
+        formData.getAll('attachmentSummary'),
+      );
+
+      clientDetectedSourcesSummary = mergeExtractedTextPayloads(
+        formData.getAll('clientDetectedSourcesSummary'),
+        formData.getAll('detectedSourcesSummary'),
       );
 
       clientDetectedSources = normalizeBibliographicCandidates(
@@ -4952,42 +5238,12 @@ if (profile) {
         ),
       );
 
-      preparedFilesMetadata = parseJson<PreparedFileMetadata[]>(
-        formData.get('preparedFilesMetadata'),
-        [],
-      );
-
-      const receivedFileEntries = [
-        ...formData.getAll('files'),
-        ...formData.getAll('file'),
-        ...formData.getAll('attachments'),
-      ];
-
-      const receivedFiles = receivedFileEntries.filter(
-        (item): item is File =>
-          item instanceof File &&
-          item.size > 0 &&
-          Boolean(item.name?.trim()),
-      );
-
-      const uniqueReceivedFiles = new Map<string, File>();
-
-      for (const file of receivedFiles) {
-        const key = [
-          file.name,
-          file.size,
-          file.type,
-          file.lastModified,
-        ].join('|');
-
-        if (!uniqueReceivedFiles.has(key)) {
-          uniqueReceivedFiles.set(key, file);
-        }
-      }
-
-      files = Array.from(uniqueReceivedFiles.values());
+      files = collectUploadedFiles(formData);
 
       console.log('CHAT_ATTACHMENT_UPLOAD_DEBUG:', {
+        formKeys: Array.from(new Set(Array.from(formData.keys()))),
+        clientExtractedChars: clientExtractedText.length,
+        preparedMetadataCount: preparedFilesMetadata.length,
         count: files.length,
         files: files.map((file) => ({
           name: file.name,
@@ -5065,21 +5321,36 @@ outputLanguage = normalizeAppLanguage(interfaceLanguageFromRequest, 'sk');
   };
 }
 
-      clientExtractedText =
-        toCleanString(body?.clientExtractedText) ||
-        toCleanString(body?.attachmentText) ||
-        toCleanString(body?.attachmentTexts);
+      clientExtractedText = mergeExtractedTextPayloads(
+        body?.clientExtractedText,
+        body?.extractedText,
+        body?.extractedTexts,
+        body?.attachmentText,
+        body?.attachmentTexts,
+        body?.documentText,
+        body?.fileText,
+        body?.parsedText,
+        body?.attachments,
+        body?.files,
+        body?.preparedFilesMetadata,
+        body?.filesMetadata,
+      );
 
-      preparedFilesSummary = toCleanString(body?.preparedFilesSummary);
+      preparedFilesSummary = mergeExtractedTextPayloads(
+        body?.preparedFilesSummary,
+        body?.filesSummary,
+        body?.attachmentSummary,
+      );
 
-      clientDetectedSourcesSummary = toCleanString(
+      clientDetectedSourcesSummary = mergeExtractedTextPayloads(
         body?.clientDetectedSourcesSummary,
+        body?.detectedSourcesSummary,
       );
 
       validateAttachmentsAgainstProfile =
         typeof body?.validateAttachmentsAgainstProfile === 'boolean'
           ? body.validateAttachmentsAgainstProfile
-          : true;
+          : false;
 
       requireSourceList =
         typeof body?.requireSourceList === 'boolean'
@@ -5343,7 +5614,7 @@ try {
     });
 
     if (
-      extractableUploadedFiles.length > 0 &&
+      files.length > 0 &&
       successfullyExtractedFiles.length === 0 &&
       !clientExtractedText.trim()
     ) {
@@ -5354,7 +5625,7 @@ try {
           message:
             'Príloha bola prijatá, ale nepodarilo sa z nej načítať text.',
           detail:
-            'Skontrolujte formát a obsah súboru. Podporované textové formáty v AI chate sú PDF, DOCX, TXT, MD, CSV a RTF.',
+            'Súbor bol doručený do /api/chat, ale server ani klient neposkytli použiteľný text. Podporované serverové textové formáty sú PDF, DOCX, TXT, MD, CSV a RTF. Pri skenovanom PDF alebo obrázku musí frontend odoslať OCR text v poli clientExtractedText alebo extractedText.',
           extractedFiles: extractedFiles.map((file) => ({
             name: file.originalName,
             preparedName: file.preparedName,
@@ -5387,9 +5658,7 @@ try {
     // =====================================================
     // PROJEKTOVÉ DOKUMENTY
     // =====================================================
-    const projectDocuments = isStrictNoAcademicTailModule(module)
-      ? []
-      : await loadProjectDocuments(projectId);
+    const projectDocuments = await loadProjectDocuments(projectId);
 
     const projectDocumentSources: BibliographicCandidate[] = [];
 
@@ -5428,9 +5697,10 @@ ${
 }`;
     });
 
-    const attachmentTexts = isStrictNoAcademicTailModule(module)
-      ? uploadedAttachmentTexts
-      : [...uploadedAttachmentTexts, ...projectDocumentTexts];
+    const attachmentTexts = [
+      ...uploadedAttachmentTexts,
+      ...projectDocumentTexts,
+    ];
 
     // =====================================================
     // ZDROJE

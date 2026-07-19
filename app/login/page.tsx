@@ -1,8 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useState,
+} from 'react';
 
 import { useLanguage } from '@/components/LanguageProvider';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -400,6 +404,45 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+const SESSION_VERIFY_ATTEMPTS = 6;
+const SESSION_VERIFY_DELAY_MS = 120;
+
+function wait(milliseconds: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
+}
+
+/**
+ * Po úspešnom signInWithPassword čaká, kým Supabase browser klient
+ * sprístupní rovnakú reláciu aj cez getSession(). Tým sa odstráni stav,
+ * keď sa dashboard otvorí skôr, než sa session zapíše do úložiska/cookies.
+ */
+async function getVerifiedSession(
+  supabase: ReturnType<typeof createSupabaseBrowserClient>,
+  expectedUserId: string,
+) {
+  for (let attempt = 0; attempt < SESSION_VERIFY_ATTEMPTS; attempt += 1) {
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error) {
+      throw error;
+    }
+
+    const session = data.session;
+
+    if (session?.access_token && session.user?.id === expectedUserId) {
+      return session;
+    }
+
+    if (attempt < SESSION_VERIFY_ATTEMPTS - 1) {
+      await wait(SESSION_VERIFY_DELAY_MS);
+    }
+  }
+
+  return null;
+}
+
 type AuthErrorLike = Error & {
   code?: string;
   status?: number;
@@ -407,7 +450,7 @@ type AuthErrorLike = Error & {
 };
 
 function getAuthErrorParts(error: unknown) {
-  if (!(error instanceof Error)) {
+  if (!error || typeof error !== 'object') {
     return {
       code: '',
       message: '',
@@ -416,7 +459,7 @@ function getAuthErrorParts(error: unknown) {
     };
   }
 
-  const authError = error as AuthErrorLike;
+  const authError = error as Partial<AuthErrorLike>;
 
   return {
     code: String(authError.code || '').trim().toLowerCase(),
@@ -628,7 +671,6 @@ function prepareClientStorageForUser(userId: string) {
   const normalizedUserId = String(userId || '').trim();
 
   if (!normalizedUserId) {
-    removeClientStorageKeys(ACCOUNT_SCOPED_KEYS);
     clearClientIdentityState();
     return;
   }
@@ -670,7 +712,6 @@ function saveClientIdentity({
 }
 
 export default function LoginPage() {
-  const router = useRouter();
   const { setLanguage } = useLanguage();
 
   const [currentLanguage, setCurrentLanguage] = useState<AppLanguage>('sk');
@@ -735,13 +776,23 @@ export default function LoginPage() {
   }, [triggerAutoTranslate]);
 
   const redirectToDashboard = (query: string) => {
-    triggerAutoTranslate();
+    if (typeof window === 'undefined') return;
 
-    router.refresh();
-    router.push(`/dashboard${query}`);
+    persistLanguage(currentLanguage);
+
+    const separator = query.includes('?') ? '&' : '?';
+    const destination = `/dashboard${query}${separator}lang=${currentLanguage}`;
+
+    /**
+     * Tvrdé presmerovanie zabezpečí, že middleware a serverové komponenty
+     * načítajú už uloženú Supabase session. replace zároveň zabráni návratu
+     * používateľa späť na prihlasovací formulár tlačidlom Späť.
+     */
+    window.location.replace(destination);
   };
 
   const loginUser = async () => {
+    if (loading) return;
     const cleanEmail = normalizeEmail(email);
     const cleanPassword = normalizePassword(password);
 
@@ -784,9 +835,12 @@ export default function LoginPage() {
         });
 
       if (loginError) {
+        /**
+         * Nesprávne prihlasovacie údaje sú očakávaný stav formulára.
+         * Preto sa chyba nevypisuje cez console.error(), pretože Next.js
+         * development overlay by ju zobrazil ako červenú aplikačnú chybu.
+         */
         clearClientIdentityState();
-
-        console.error('ZEDPERA LOGIN ERROR:', loginError);
         setError(getLoginErrorMessage(loginError, copy));
 
         window.setTimeout(triggerAutoTranslate, 50);
@@ -795,13 +849,27 @@ export default function LoginPage() {
         return;
       }
 
-      const authenticatedUser = data.user;
+      const signedInUser = data.user;
 
-      if (!authenticatedUser?.id) {
+      if (!signedInUser?.id || !data.session?.access_token) {
         clearClientIdentityState();
         setError(copy.loginFailed);
         return;
       }
+
+      const verifiedSession = await getVerifiedSession(
+        supabase,
+        signedInUser.id,
+      );
+
+      if (!verifiedSession) {
+        await supabase.auth.signOut();
+        clearClientIdentityState();
+        setError(copy.sessionExpired);
+        return;
+      }
+
+      const authenticatedUser = verifiedSession.user;
 
       /**
        * Dodatočná ochrana proti otvoreniu dashboardu nepotvrdeným účtom.
@@ -834,9 +902,12 @@ export default function LoginPage() {
        */
       redirectToDashboard('?login=success');
     } catch (err: unknown) {
+      /**
+       * Aj neočakávanú chybu zobrazíme používateľovi vo formulári.
+       * console.error() sa tu zámerne nepoužíva, aby Next.js v režime
+       * vývoja neprekryl formulár development overlayom.
+       */
       clearClientIdentityState();
-
-      console.error('ZEDPERA LOGIN UNEXPECTED ERROR:', err);
       setError(getLoginErrorMessage(err, copy));
 
       window.setTimeout(triggerAutoTranslate, 50);
@@ -846,6 +917,11 @@ export default function LoginPage() {
 
       window.setTimeout(triggerAutoTranslate, 100);
     }
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void loginUser();
   };
 
   return (
@@ -876,7 +952,11 @@ export default function LoginPage() {
           </p>
 
           {notice ? (
-            <div className="mt-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm font-semibold text-emerald-700 dark:text-emerald-200">
+            <div
+              role="status"
+              aria-live="polite"
+              className="mt-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm font-semibold text-emerald-700 dark:text-emerald-200"
+            >
               <div className="flex items-start gap-2">
                 <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{notice}</span>
@@ -885,12 +965,20 @@ export default function LoginPage() {
           ) : null}
 
           {error ? (
-            <div className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold text-red-700 dark:text-red-200">
+            <div
+              role="alert"
+              aria-live="assertive"
+              className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold text-red-700 dark:text-red-200"
+            >
               {error}
             </div>
           ) : null}
 
-          <div className="mt-7 space-y-4">
+          <form
+            className="mt-7 space-y-4"
+            onSubmit={handleSubmit}
+            aria-busy={loading}
+          >
             <label className="block">
               <span className="mb-2 block text-sm font-bold text-slate-700 dark:text-slate-300">
                 {copy.email}
@@ -902,14 +990,10 @@ export default function LoginPage() {
                 <input
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      void loginUser();
-                    }
-                  }}
                   placeholder={copy.emailPlaceholder}
                   type="email"
                   autoComplete="email"
+                  disabled={loading}
                   className="w-full bg-transparent text-slate-950 outline-none placeholder:text-slate-400 dark:text-white dark:placeholder:text-slate-600"
                 />
               </div>
@@ -926,14 +1010,10 @@ export default function LoginPage() {
                 <input
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      void loginUser();
-                    }
-                  }}
                   placeholder={copy.passwordPlaceholder}
                   type={showPassword ? 'text' : 'password'}
                   autoComplete="current-password"
+                  disabled={loading}
                   className="w-full bg-transparent text-slate-950 outline-none placeholder:text-slate-400 dark:text-white dark:placeholder:text-slate-600"
                 />
 
@@ -960,8 +1040,7 @@ export default function LoginPage() {
             </div>
 
             <button
-              type="button"
-              onClick={() => void loginUser()}
+              type="submit"
               disabled={loading}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-700 px-5 py-4 font-black text-white shadow-xl shadow-purple-950/30 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -977,7 +1056,7 @@ export default function LoginPage() {
                 </>
               )}
             </button>
-          </div>
+          </form>
 
           <div className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
             {copy.noAccount}{' '}

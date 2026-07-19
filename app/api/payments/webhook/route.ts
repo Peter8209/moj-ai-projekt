@@ -14,8 +14,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Stripe neinicializujeme na top-level. Build tak nespadne,
-// keď počas zostavenia projektu nie sú dostupné ENV premenné.
+/**
+ * Stripe klient sa zámerne nevytvára na top-level.
+ * Build tak nespadne v prostredí, v ktorom ešte nie sú dostupné ENV premenné.
+ */
 let stripeClient: Stripe | null = null;
 
 // ============================================================
@@ -24,17 +26,20 @@ let stripeClient: Stripe | null = null;
 
 type MetadataRecord = Record<string, string>;
 
+type PaidPlanId = Exclude<PlanId, "free">;
+
 type EntitlementRow = {
   plan_id: string | null;
   addon_ids: string[] | null;
   prompts_used: number | null;
   activated_at: string | null;
   valid_until: string | null;
+  billing_status: string | null;
 };
 
 type ResolvedPurchase = {
   userId: string;
-  planId: Exclude<PlanId, "free"> | null;
+  planId: PaidPlanId | null;
   purchasedAddonIds: AddonId[];
   persistentAddonIds: AddonId[];
   extraPageAddonIds: AddonId[];
@@ -50,21 +55,61 @@ type AppliedPurchase = {
   extraPages: number;
 };
 
-type CheckoutProcessingResult = {
+type WebhookProcessingResult = {
   processed: boolean;
-  reason:
-    | "fulfilled"
-    | "already_fulfilled"
-    | "payment_not_completed"
-    | "unsupported_checkout_mode"
+  action:
+    | "checkout_fulfilled"
+    | "checkout_already_fulfilled"
+    | "checkout_payment_pending"
+    | "checkout_payment_failed"
+    | "invoice_paid"
+    | "invoice_already_processed"
+    | "invoice_payment_failed"
+    | "subscription_updated"
+    | "subscription_deleted"
+    | "subscription_delete_ignored"
+    | "ignored"
     | "unsupported_metadata";
-  sessionId: string;
+  reason?: string;
+  objectId?: string;
   userId?: string;
   planId?: PlanId | null;
   purchasedAddonIds?: AddonId[];
   activeAddonIds?: AddonId[];
   extraPages?: number;
-  detail?: string;
+  billingStatus?: string;
+  validUntil?: string | null;
+};
+
+type StripeInvoiceCompatibility = Stripe.Invoice & {
+  subscription?: string | Stripe.Subscription | null;
+  subscription_details?: {
+    metadata?: Stripe.Metadata | null;
+  } | null;
+  parent?: {
+    type?: string | null;
+    subscription_details?: {
+      subscription?: string | Stripe.Subscription | null;
+      metadata?: Stripe.Metadata | null;
+    } | null;
+  } | null;
+};
+
+type StripeSubscriptionCompatibility = Stripe.Subscription & {
+  current_period_start?: number | null;
+  current_period_end?: number | null;
+  cancel_at?: number | null;
+  cancel_at_period_end?: boolean;
+  ended_at?: number | null;
+  latest_invoice?: string | Stripe.Invoice | null;
+  items: Stripe.Subscription["items"] & {
+    data: Array<
+      Stripe.SubscriptionItem & {
+        current_period_start?: number | null;
+        current_period_end?: number | null;
+      }
+    >;
+  };
 };
 
 // ============================================================
@@ -72,7 +117,6 @@ type CheckoutProcessingResult = {
 // ============================================================
 
 const VALID_PLAN_IDS = new Set<PlanId>(Object.keys(PLANS) as PlanId[]);
-
 const VALID_ADDON_IDS = new Set<AddonId>(Object.keys(ADDONS) as AddonId[]);
 
 const UUID_PATTERN =
@@ -80,9 +124,25 @@ const UUID_PATTERN =
 
 const EXPECTED_CURRENCY = "eur";
 
-const FULFILLED_MARKER_KEY = "zedpera_fulfilled";
-const FULFILLED_EVENT_KEY = "zedpera_fulfilled_event_id";
-const FULFILLED_AT_KEY = "zedpera_fulfilled_at";
+/** Úspešná platba už bola použitá na aktiváciu oprávnení. */
+const PAYMENT_APPLIED_KEY = "zedpera_payment_applied";
+const PAYMENT_APPLIED_EVENT_KEY = "zedpera_payment_event_id";
+const PAYMENT_APPLIED_REFERENCE_KEY = "zedpera_payment_reference";
+const PAYMENT_APPLIED_AT_KEY = "zedpera_payment_applied_at";
+
+/** Neúspešná platba už bola zaevidovaná pre konkrétnu Stripe udalosť. */
+const PAYMENT_FAILED_EVENT_KEY = "zedpera_payment_failed_event_id";
+const PAYMENT_FAILED_AT_KEY = "zedpera_payment_failed_at";
+
+const SUPPORTED_EVENTS = [
+  "checkout.session.completed",
+  "checkout.session.async_payment_succeeded",
+  "checkout.session.async_payment_failed",
+  "invoice.paid",
+  "invoice.payment_failed",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+] as const;
 
 // ============================================================
 // STRIPE INITIALIZATION
@@ -196,7 +256,7 @@ function normalizePlanId(value: unknown): PlanId | null {
   return candidate;
 }
 
-function normalizePaidPlanId(value: unknown): Exclude<PlanId, "free"> | null {
+function normalizePaidPlanId(value: unknown): PaidPlanId | null {
   const planId = normalizePlanId(value);
 
   if (!planId || planId === "free") {
@@ -236,7 +296,8 @@ function parseAddonMetadata(value: unknown): AddonId[] {
       return normalizeAddonIds(parsed);
     }
   } catch {
-    // Staršie metadata môžu byť uložené ako zoznam oddelený čiarkou.
+    // Spätná kompatibilita: addon ID môžu byť oddelené čiarkou,
+    // bodkočiarkou alebo zvislou čiarou.
   }
 
   return normalizeAddonIds(
@@ -255,6 +316,16 @@ function toSafeInteger(value: unknown, fallback = 0): number {
   }
 
   return Math.max(Math.floor(numberValue), 0);
+}
+
+function unixToIso(value: unknown): string | null {
+  const seconds = Number(value);
+
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return null;
+  }
+
+  return new Date(seconds * 1_000).toISOString();
 }
 
 function isPersistentAddon(addonId: AddonId): boolean {
@@ -276,9 +347,199 @@ function normalizeExistingPlanId(value: unknown): PlanId {
   return normalizePlanId(value) || "free";
 }
 
+function isPermanentMetadataError(error: unknown): boolean {
+  const message = getErrorMessage(error);
+
+  return [
+    "USER_ID_METADATA_MISMATCH",
+    "MISSING_OR_INVALID_USER_ID",
+    "UNSUPPORTED_PLAN_ID:",
+    "PAID_CHECKOUT_CANNOT_ACTIVATE_FREE_PLAN",
+    "MISSING_PURCHASE_METADATA",
+    "MISSING_PAID_PLAN_ID",
+  ].some((code) => message.includes(code));
+}
+
+function getSubscriptionBillingStatus(
+  subscription: Stripe.Subscription,
+): string {
+  const compatible = subscription as StripeSubscriptionCompatibility;
+
+  if (
+    compatible.cancel_at_period_end &&
+    (subscription.status === "active" || subscription.status === "trialing")
+  ) {
+    return "canceling";
+  }
+
+  return subscription.status;
+}
+
+function getSubscriptionPeriodEndUnix(
+  subscription: Stripe.Subscription,
+): number | null {
+  const compatible = subscription as StripeSubscriptionCompatibility;
+
+  if (
+    compatible.cancel_at_period_end &&
+    Number.isFinite(Number(compatible.cancel_at)) &&
+    Number(compatible.cancel_at) > 0
+  ) {
+    return Number(compatible.cancel_at);
+  }
+
+  if (
+    Number.isFinite(Number(compatible.current_period_end)) &&
+    Number(compatible.current_period_end) > 0
+  ) {
+    return Number(compatible.current_period_end);
+  }
+
+  const itemPeriodEnds = compatible.items.data
+    .map((item) => Number(item.current_period_end))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  if (itemPeriodEnds.length > 0) {
+    return Math.max(...itemPeriodEnds);
+  }
+
+  if (
+    Number.isFinite(Number(compatible.ended_at)) &&
+    Number(compatible.ended_at) > 0
+  ) {
+    return Number(compatible.ended_at);
+  }
+
+  return null;
+}
+
+function getSubscriptionValidUntil(
+  subscription: Stripe.Subscription,
+): string | null {
+  return unixToIso(getSubscriptionPeriodEndUnix(subscription));
+}
+
+function getInvoiceSubscriptionId(invoice: Stripe.Invoice): string {
+  const compatible = invoice as StripeInvoiceCompatibility;
+
+  const parentSubscription =
+    compatible.parent?.type === "subscription_details"
+      ? compatible.parent.subscription_details?.subscription
+      : null;
+
+  return (
+    getObjectId(parentSubscription) || getObjectId(compatible.subscription)
+  );
+}
+
+function getInvoiceSubscriptionMetadata(
+  invoice: Stripe.Invoice,
+): MetadataRecord {
+  const compatible = invoice as StripeInvoiceCompatibility;
+
+  return mergeMetadata(
+    compatible.subscription_details?.metadata,
+    compatible.parent?.type === "subscription_details"
+      ? compatible.parent.subscription_details?.metadata
+      : null,
+  );
+}
+
+function getSubscriptionLatestInvoiceId(
+  subscription: Stripe.Subscription,
+): string {
+  const compatible = subscription as StripeSubscriptionCompatibility;
+
+  return getObjectId(compatible.latest_invoice);
+}
+
+function getExpandedLatestInvoice(
+  subscription: Stripe.Subscription,
+): Stripe.Invoice | null {
+  const compatible = subscription as StripeSubscriptionCompatibility;
+  const latestInvoice = compatible.latest_invoice;
+
+  if (latestInvoice && typeof latestInvoice !== "string") {
+    return latestInvoice;
+  }
+
+  return null;
+}
+
+function isPaymentApplied(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+): boolean {
+  return normalizeMetadata(metadata)[PAYMENT_APPLIED_KEY] === "true";
+}
+
+function isFailureEventAlreadyRecorded(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+  eventId: string,
+): boolean {
+  return normalizeMetadata(metadata)[PAYMENT_FAILED_EVENT_KEY] === eventId;
+}
+
+function isCheckoutPaymentCompleted(session: Stripe.Checkout.Session): boolean {
+  return (
+    session.payment_status === "paid" ||
+    session.payment_status === "no_payment_required"
+  );
+}
+
+function isSubscriptionProvisionable(
+  subscription: Stripe.Subscription,
+): boolean {
+  return subscription.status === "active" || subscription.status === "trialing";
+}
+
+function isSubscriptionDefinitivelyEnded(
+  subscription: Stripe.Subscription,
+): boolean {
+  return (
+    subscription.status === "canceled" ||
+    subscription.status === "incomplete_expired"
+  );
+}
+
 // ============================================================
-// STRIPE METADATA HELPERS
+// STRIPE OBJECT RETRIEVAL AND METADATA
 // ============================================================
+
+async function retrieveCustomerMetadata(
+  stripe: Stripe,
+  customerValue: string | Stripe.Customer | Stripe.DeletedCustomer | null,
+): Promise<MetadataRecord> {
+  const customerId = getObjectId(customerValue);
+
+  if (!customerId) {
+    return {};
+  }
+
+  try {
+    if (typeof customerValue !== "string" && customerValue) {
+      if ("deleted" in customerValue && customerValue.deleted) {
+        return {};
+      }
+
+      return normalizeMetadata((customerValue as Stripe.Customer).metadata);
+    }
+
+    const customer = await stripe.customers.retrieve(customerId);
+
+    if ("deleted" in customer && customer.deleted) {
+      return {};
+    }
+
+    return normalizeMetadata((customer as Stripe.Customer).metadata);
+  } catch (error) {
+    console.warn("STRIPE_WEBHOOK_CUSTOMER_METADATA_WARNING:", {
+      customerId,
+      message: getErrorMessage(error),
+    });
+
+    return {};
+  }
+}
 
 async function getPaymentIntentMetadata(
   stripe: Stripe,
@@ -308,59 +569,83 @@ async function getPaymentIntentMetadata(
   }
 }
 
-async function getCustomerMetadata(
+async function retrieveSubscription(
   stripe: Stripe,
-  session: Stripe.Checkout.Session,
-): Promise<MetadataRecord> {
-  const customerId = getObjectId(session.customer);
-
-  if (!customerId) {
-    return {};
+  subscriptionValue: string | Stripe.Subscription | null,
+): Promise<Stripe.Subscription | null> {
+  if (!subscriptionValue) {
+    return null;
   }
 
-  try {
-    if (typeof session.customer !== "string" && session.customer) {
-      if ("deleted" in session.customer && session.customer.deleted) {
-        return {};
-      }
-
-      return normalizeMetadata((session.customer as Stripe.Customer).metadata);
-    }
-
-    const customer = await stripe.customers.retrieve(customerId);
-
-    if ("deleted" in customer && customer.deleted) {
-      return {};
-    }
-
-    return normalizeMetadata((customer as Stripe.Customer).metadata);
-  } catch (error) {
-    console.warn("STRIPE_WEBHOOK_CUSTOMER_METADATA_WARNING:", {
-      customerId,
-      message: getErrorMessage(error),
-    });
-
-    return {};
+  if (typeof subscriptionValue !== "string") {
+    return subscriptionValue;
   }
+
+  return stripe.subscriptions.retrieve(subscriptionValue, {
+    expand: ["latest_invoice"],
+  });
+}
+
+async function retrieveCheckoutSession(
+  stripe: Stripe,
+  sessionId: string,
+): Promise<Stripe.Checkout.Session> {
+  return stripe.checkout.sessions.retrieve(sessionId, {
+    expand: [
+      "customer",
+      "payment_intent",
+      "subscription",
+      "subscription.latest_invoice",
+    ],
+  });
+}
+
+async function retrieveInvoiceIfNeeded(
+  stripe: Stripe,
+  invoice: Stripe.Invoice,
+): Promise<Stripe.Invoice> {
+  if (invoice.metadata) {
+    return invoice;
+  }
+
+  return stripe.invoices.retrieve(invoice.id);
 }
 
 async function resolvePurchaseMetadata({
   stripe,
   session,
+  subscription,
+  invoice,
+  requirePurchaseMetadata = true,
 }: {
   stripe: Stripe;
-  session: Stripe.Checkout.Session;
+  session?: Stripe.Checkout.Session | null;
+  subscription?: Stripe.Subscription | null;
+  invoice?: Stripe.Invoice | null;
+  requirePurchaseMetadata?: boolean;
 }): Promise<ResolvedPurchase> {
   const [customerMetadata, paymentIntentMetadata] = await Promise.all([
-    getCustomerMetadata(stripe, session),
-    getPaymentIntentMetadata(stripe, session),
+    retrieveCustomerMetadata(
+      stripe,
+      (session?.customer ||
+        subscription?.customer ||
+        invoice?.customer ||
+        null) as string | Stripe.Customer | Stripe.DeletedCustomer | null,
+    ),
+    session ? getPaymentIntentMetadata(stripe, session) : Promise.resolve({}),
   ]);
 
-  // Session metadata majú najvyššiu prioritu, preto sú posledné.
+  /**
+   * Priorita metadata od najvšeobecnejších po najkonkrétnejšie:
+   * Customer -> PaymentIntent -> Subscription -> Invoice snapshot -> Invoice -> Session.
+   */
   const metadata = mergeMetadata(
     customerMetadata,
     paymentIntentMetadata,
-    session.metadata,
+    subscription?.metadata,
+    invoice ? getInvoiceSubscriptionMetadata(invoice) : null,
+    invoice?.metadata,
+    session?.metadata,
   );
 
   const metadataUserId = normalizeUserId(
@@ -372,7 +657,7 @@ async function resolvePurchaseMetadata({
     ]),
   );
 
-  const referenceUserId = normalizeUserId(session.client_reference_id);
+  const referenceUserId = normalizeUserId(session?.client_reference_id);
 
   if (metadataUserId && referenceUserId && metadataUserId !== referenceUserId) {
     throw new Error("USER_ID_METADATA_MISMATCH");
@@ -413,7 +698,7 @@ async function resolvePurchaseMetadata({
 
   const purchasedAddonIds = parseAddonMetadata(rawAddons);
 
-  if (!planId && purchasedAddonIds.length === 0) {
+  if (requirePurchaseMetadata && !planId && purchasedAddonIds.length === 0) {
     throw new Error("MISSING_PURCHASE_METADATA");
   }
 
@@ -449,6 +734,7 @@ async function loadCurrentEntitlement(
         "prompts_used",
         "activated_at",
         "valid_until",
+        "billing_status",
       ].join(", "),
     )
     .eq("user_id", userId)
@@ -461,14 +747,20 @@ async function loadCurrentEntitlement(
   return data as EntitlementRow | null;
 }
 
-async function upsertEntitlementAfterPurchase({
+async function upsertPaidEntitlement({
   userId,
   planId,
   persistentAddonIds,
+  billingStatus,
+  validUntil,
+  resetPrompts,
 }: {
   userId: string;
-  planId: Exclude<PlanId, "free"> | null;
+  planId: PaidPlanId | null;
   persistentAddonIds: AddonId[];
+  billingStatus: string;
+  validUntil: string | null;
+  resetPrompts: boolean;
 }): Promise<{
   effectivePlanId: PlanId;
   activeAddonIds: AddonId[];
@@ -477,11 +769,12 @@ async function upsertEntitlementAfterPurchase({
   const current = await loadCurrentEntitlement(userId);
 
   const effectivePlanId = planId || normalizeExistingPlanId(current?.plan_id);
-
   const plan = PLANS[effectivePlanId];
 
-  // Staré extra-20/40/60 záznamy z addon_ids vyčistíme.
-  // Extra strany sú kredit, nie trvalé funkčné oprávnenie.
+  /**
+   * Extra stránky nie sú trvalé funkčné oprávnenie.
+   * V addon_ids ponechávame iba addony, ktoré sprístupňujú funkcie.
+   */
   const currentPersistentAddonIds = normalizeAddonIds(
     current?.addon_ids || [],
   ).filter(isPersistentAddon);
@@ -490,8 +783,8 @@ async function upsertEntitlementAfterPurchase({
     new Set([...currentPersistentAddonIds, ...persistentAddonIds]),
   );
 
-  const isNewPlanPurchase = planId !== null;
   const now = new Date().toISOString();
+  const isNewPlanPurchase = planId !== null;
 
   const { error } = await admin.from("zedpera_user_entitlements").upsert(
     {
@@ -499,12 +792,11 @@ async function upsertEntitlementAfterPurchase({
       plan_id: effectivePlanId,
       addon_ids: activeAddonIds,
       prompt_limit: plan.promptLimit,
-      prompts_used: isNewPlanPurchase
-        ? 0
-        : toSafeInteger(current?.prompts_used, 0),
+      prompts_used: resetPrompts ? 0 : toSafeInteger(current?.prompts_used, 0),
       attachment_limit: plan.attachmentLimit,
       activated_at: isNewPlanPurchase ? now : current?.activated_at || now,
-      valid_until: isNewPlanPurchase ? null : current?.valid_until || null,
+      valid_until: validUntil,
+      billing_status: billingStatus,
       updated_at: now,
     },
     {
@@ -522,30 +814,101 @@ async function upsertEntitlementAfterPurchase({
   };
 }
 
+async function updateBillingStatus({
+  userId,
+  billingStatus,
+  validUntil,
+}: {
+  userId: string;
+  billingStatus: string;
+  validUntil: string | null;
+}): Promise<void> {
+  const admin = createAdminClient();
+  const current = await loadCurrentEntitlement(userId);
+  const now = new Date().toISOString();
+
+  if (!current) {
+    const freePlan = PLANS.free;
+
+    const { error } = await admin.from("zedpera_user_entitlements").upsert(
+      {
+        user_id: userId,
+        plan_id: "free",
+        addon_ids: [],
+        prompt_limit: freePlan.promptLimit,
+        prompts_used: 0,
+        attachment_limit: freePlan.attachmentLimit,
+        activated_at: now,
+        valid_until: validUntil,
+        billing_status: billingStatus,
+        updated_at: now,
+      },
+      {
+        onConflict: "user_id",
+      },
+    );
+
+    if (error) {
+      throw new Error(`BILLING_STATUS_UPSERT_FAILED: ${error.message}`);
+    }
+
+    return;
+  }
+
+  const { error } = await admin
+    .from("zedpera_user_entitlements")
+    .update({
+      billing_status: billingStatus,
+      valid_until: validUntil,
+      updated_at: now,
+    })
+    .eq("user_id", userId);
+
+  if (error) {
+    throw new Error(`BILLING_STATUS_UPDATE_FAILED: ${error.message}`);
+  }
+}
+
 async function applySuccessfulPurchase({
   purchase,
   paymentReference,
+  billingStatus,
+  validUntil,
+  resetPlan,
+  resetPrompts,
+  addonIdsForPageActivation,
 }: {
   purchase: ResolvedPurchase;
   paymentReference: string;
+  billingStatus: string;
+  validUntil: string | null;
+  resetPlan: boolean;
+  resetPrompts: boolean;
+  addonIdsForPageActivation?: AddonId[];
 }): Promise<AppliedPurchase> {
-  // Najprv zapíšeme oprávnenia. Ak následne zlyhá page RPC,
-  // Stripe webhook sa zopakuje a upsert zostane bezpečne opakovateľný.
-  const entitlement = await upsertEntitlementAfterPurchase({
+  const entitlement = await upsertPaidEntitlement({
     userId: purchase.userId,
     planId: purchase.planId,
     persistentAddonIds: purchase.persistentAddonIds,
+    billingStatus,
+    validUntil,
+    resetPrompts,
   });
 
   const admin = createAdminClient();
 
+  /**
+   * page-plan-activation musí používať paymentReference ako idempotency kľúč.
+   * Pre predplatné je týmto kľúčom ID Stripe faktúry, takže checkout webhook
+   * a invoice.paid nemôžu tú istú platbu započítať dvakrát.
+   */
   const pageActivation = await applySuccessfulPagePurchase({
     admin,
     userId: purchase.userId,
     planId: purchase.planId,
-    addonIds: purchase.purchasedAddonIds,
+    addonIds: addonIdsForPageActivation || purchase.purchasedAddonIds,
     paymentReference,
-    resetPlan: purchase.planId !== null,
+    resetPlan,
   });
 
   return {
@@ -557,53 +920,103 @@ async function applySuccessfulPurchase({
   };
 }
 
-// ============================================================
-// FULFILLMENT MARKERS
-// ============================================================
+async function downgradeUserToFree({
+  userId,
+  paymentReference,
+}: {
+  userId: string;
+  paymentReference: string;
+}): Promise<boolean> {
+  const current = await loadCurrentEntitlement(userId);
 
-function hasFulfilledMarker(
-  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
-): boolean {
-  return normalizeMetadata(metadata)[FULFILLED_MARKER_KEY] === "true";
-}
-
-function isCheckoutAlreadyFulfilled(session: Stripe.Checkout.Session): boolean {
-  if (hasFulfilledMarker(session.metadata)) {
-    return true;
-  }
-
+  /** Opakovaná deleted udalosť už používateľa na Free znovu neresetuje. */
   if (
-    typeof session.payment_intent !== "string" &&
-    session.payment_intent &&
-    hasFulfilledMarker(session.payment_intent.metadata)
+    normalizeExistingPlanId(current?.plan_id) === "free" &&
+    current?.billing_status === "canceled"
   ) {
-    return true;
+    return false;
   }
 
-  return false;
+  const admin = createAdminClient();
+  const freePlan = PLANS.free;
+  const now = new Date().toISOString();
+
+  const { error } = await admin.from("zedpera_user_entitlements").upsert(
+    {
+      user_id: userId,
+      plan_id: "free",
+      addon_ids: [],
+      prompt_limit: freePlan.promptLimit,
+      prompts_used: 0,
+      attachment_limit: freePlan.attachmentLimit,
+      activated_at: now,
+      valid_until: null,
+      billing_status: "canceled",
+      updated_at: now,
+    },
+    {
+      onConflict: "user_id",
+    },
+  );
+
+  if (error) {
+    throw new Error(`FREE_PLAN_UPSERT_FAILED: ${error.message}`);
+  }
+
+  await applySuccessfulPagePurchase({
+    admin,
+    userId,
+    planId: "free",
+    addonIds: [],
+    paymentReference,
+    resetPlan: true,
+  });
+
+  return true;
 }
 
-async function markCheckoutFulfilled({
+// ============================================================
+// STRIPE MARKERS / IDEMPOTENCY
+// ============================================================
+
+function buildPaymentAppliedMetadata({
+  existingMetadata,
+  eventId,
+  paymentReference,
+}: {
+  existingMetadata: Stripe.Metadata | MetadataRecord | null | undefined;
+  eventId: string;
+  paymentReference: string;
+}): MetadataRecord {
+  return {
+    ...normalizeMetadata(existingMetadata),
+    [PAYMENT_APPLIED_KEY]: "true",
+    [PAYMENT_APPLIED_EVENT_KEY]: eventId,
+    [PAYMENT_APPLIED_REFERENCE_KEY]: paymentReference,
+    [PAYMENT_APPLIED_AT_KEY]: new Date().toISOString(),
+  };
+}
+
+async function markCheckoutPaymentApplied({
   stripe,
   session,
   eventId,
+  paymentReference,
 }: {
   stripe: Stripe;
   session: Stripe.Checkout.Session;
   eventId: string;
+  paymentReference: string;
 }): Promise<void> {
-  const fulfilledMetadata: MetadataRecord = {
-    [FULFILLED_MARKER_KEY]: "true",
-    [FULFILLED_EVENT_KEY]: eventId,
-    [FULFILLED_AT_KEY]: new Date().toISOString(),
-  };
+  const markerMetadata = buildPaymentAppliedMetadata({
+    existingMetadata: session.metadata,
+    eventId,
+    paymentReference,
+  });
 
   const operations: Array<Promise<unknown>> = [
     stripe.checkout.sessions.update(session.id, {
-      metadata: {
-        ...normalizeMetadata(session.metadata),
-        ...fulfilledMetadata,
-      },
+      metadata: markerMetadata,
     }),
   ];
 
@@ -612,26 +1025,27 @@ async function markCheckoutFulfilled({
   if (paymentIntentId) {
     const paymentIntentMetadata =
       typeof session.payment_intent !== "string" && session.payment_intent
-        ? normalizeMetadata(session.payment_intent.metadata)
-        : {};
+        ? session.payment_intent.metadata
+        : null;
 
     operations.push(
       stripe.paymentIntents.update(paymentIntentId, {
-        metadata: {
-          ...paymentIntentMetadata,
-          ...fulfilledMetadata,
-        },
+        metadata: buildPaymentAppliedMetadata({
+          existingMetadata: paymentIntentMetadata,
+          eventId,
+          paymentReference,
+        }),
       }),
     );
   }
 
   const results = await Promise.allSettled(operations);
-  const successfulMarkers = results.filter(
+  const successCount = results.filter(
     (result) => result.status === "fulfilled",
   ).length;
 
-  if (successfulMarkers === 0) {
-    console.error("STRIPE_WEBHOOK_FULFILLMENT_MARKER_ERROR:", {
+  if (successCount === 0) {
+    console.error("STRIPE_WEBHOOK_CHECKOUT_MARKER_ERROR:", {
       sessionId: session.id,
       eventId,
       errors: results.map((result) =>
@@ -641,28 +1055,123 @@ async function markCheckoutFulfilled({
   }
 }
 
+async function markInvoicePaymentApplied({
+  stripe,
+  invoice,
+  eventId,
+  paymentReference,
+}: {
+  stripe: Stripe;
+  invoice: Stripe.Invoice;
+  eventId: string;
+  paymentReference: string;
+}): Promise<void> {
+  try {
+    await stripe.invoices.update(invoice.id, {
+      metadata: buildPaymentAppliedMetadata({
+        existingMetadata: invoice.metadata,
+        eventId,
+        paymentReference,
+      }),
+    });
+  } catch (error) {
+    /**
+     * Databázová aktivácia už prebehla. Marker je sekundárna ochrana;
+     * hlavná ochrana je paymentReference v page-plan-activation.
+     */
+    console.error("STRIPE_WEBHOOK_INVOICE_MARKER_ERROR:", {
+      invoiceId: invoice.id,
+      eventId,
+      message: getErrorMessage(error),
+    });
+  }
+}
+
+async function markCheckoutFailureRecorded({
+  stripe,
+  session,
+  eventId,
+}: {
+  stripe: Stripe;
+  session: Stripe.Checkout.Session;
+  eventId: string;
+}): Promise<void> {
+  try {
+    await stripe.checkout.sessions.update(session.id, {
+      metadata: {
+        ...normalizeMetadata(session.metadata),
+        [PAYMENT_FAILED_EVENT_KEY]: eventId,
+        [PAYMENT_FAILED_AT_KEY]: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.warn("STRIPE_WEBHOOK_CHECKOUT_FAILURE_MARKER_WARNING:", {
+      sessionId: session.id,
+      eventId,
+      message: getErrorMessage(error),
+    });
+  }
+}
+
+async function markInvoiceFailureRecorded({
+  stripe,
+  invoice,
+  eventId,
+}: {
+  stripe: Stripe;
+  invoice: Stripe.Invoice;
+  eventId: string;
+}): Promise<void> {
+  try {
+    await stripe.invoices.update(invoice.id, {
+      metadata: {
+        ...normalizeMetadata(invoice.metadata),
+        [PAYMENT_FAILED_EVENT_KEY]: eventId,
+        [PAYMENT_FAILED_AT_KEY]: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.warn("STRIPE_WEBHOOK_INVOICE_FAILURE_MARKER_WARNING:", {
+      invoiceId: invoice.id,
+      eventId,
+      message: getErrorMessage(error),
+    });
+  }
+}
+
 // ============================================================
-// CHECKOUT PROCESSING
+// SUBSCRIPTION SAFETY
 // ============================================================
 
-function isCheckoutPaymentCompleted(session: Stripe.Checkout.Session): boolean {
-  return (
-    session.payment_status === "paid" ||
-    session.payment_status === "no_payment_required"
+async function customerHasAnotherActiveSubscription({
+  stripe,
+  deletedSubscription,
+}: {
+  stripe: Stripe;
+  deletedSubscription: Stripe.Subscription;
+}): Promise<boolean> {
+  const customerId = getObjectId(deletedSubscription.customer);
+
+  if (!customerId) {
+    return false;
+  }
+
+  const subscriptions = await stripe.subscriptions.list({
+    customer: customerId,
+    status: "all",
+    limit: 100,
+  });
+
+  return subscriptions.data.some(
+    (subscription) =>
+      subscription.id !== deletedSubscription.id &&
+      isSubscriptionProvisionable(subscription),
   );
 }
 
-function isPermanentMetadataError(error: unknown): boolean {
-  const message = getErrorMessage(error);
-
-  return [
-    "USER_ID_METADATA_MISMATCH",
-    "MISSING_OR_INVALID_USER_ID",
-    "UNSUPPORTED_PLAN_ID:",
-    "PAID_CHECKOUT_CANNOT_ACTIVATE_FREE_PLAN",
-    "MISSING_PURCHASE_METADATA",
-  ].some((code) => message.includes(code));
-}
+// ============================================================
+// EVENT HANDLERS
+// ============================================================
 
 async function handleCheckoutCompleted({
   stripe,
@@ -672,23 +1181,14 @@ async function handleCheckoutCompleted({
   stripe: Stripe;
   eventId: string;
   eventSession: Stripe.Checkout.Session;
-}): Promise<CheckoutProcessingResult> {
-  const session = await stripe.checkout.sessions.retrieve(eventSession.id, {
-    expand: ["payment_intent", "customer"],
-  });
+}): Promise<WebhookProcessingResult> {
+  const session = await retrieveCheckoutSession(stripe, eventSession.id);
 
-  if (session.mode !== "payment") {
-    console.warn("STRIPE_WEBHOOK_UNSUPPORTED_CHECKOUT_MODE:", {
-      eventId,
-      sessionId: session.id,
-      mode: session.mode,
-    });
-
+  if (isPaymentApplied(session.metadata)) {
     return {
       processed: false,
-      reason: "unsupported_checkout_mode",
-      sessionId: session.id,
-      detail: `Unsupported checkout mode: ${session.mode || "unknown"}`,
+      action: "checkout_already_fulfilled",
+      objectId: session.id,
     };
   }
 
@@ -696,109 +1196,676 @@ async function handleCheckoutCompleted({
     session.currency &&
     session.currency.toLowerCase() !== EXPECTED_CURRENCY
   ) {
-    console.warn("STRIPE_WEBHOOK_UNSUPPORTED_CURRENCY:", {
-      eventId,
-      sessionId: session.id,
-      currency: session.currency,
-    });
-
     return {
       processed: false,
-      reason: "unsupported_metadata",
-      sessionId: session.id,
-      detail: `Unsupported currency: ${session.currency}`,
-    };
-  }
-
-  if (isCheckoutAlreadyFulfilled(session)) {
-    console.info("STRIPE_WEBHOOK_CHECKOUT_ALREADY_FULFILLED:", {
-      eventId,
-      sessionId: session.id,
-    });
-
-    return {
-      processed: false,
-      reason: "already_fulfilled",
-      sessionId: session.id,
+      action: "unsupported_metadata",
+      objectId: session.id,
+      reason: `Unsupported currency: ${session.currency}`,
     };
   }
 
   if (!isCheckoutPaymentCompleted(session)) {
-    console.info("STRIPE_WEBHOOK_CHECKOUT_PAYMENT_PENDING:", {
-      eventId,
-      sessionId: session.id,
-      paymentStatus: session.payment_status,
-    });
-
     return {
       processed: false,
-      reason: "payment_not_completed",
-      sessionId: session.id,
+      action: "checkout_payment_pending",
+      objectId: session.id,
+      reason: `Payment status: ${session.payment_status}`,
     };
   }
 
-  let purchase: ResolvedPurchase;
-
-  try {
-    purchase = await resolvePurchaseMetadata({
+  if (session.mode === "payment") {
+    const purchase = await resolvePurchaseMetadata({
       stripe,
       session,
+    });
+
+    const result = await applySuccessfulPurchase({
+      purchase,
+      paymentReference: session.id,
+      billingStatus: "active",
+      validUntil: null,
+      resetPlan: purchase.planId !== null,
+      resetPrompts: purchase.planId !== null,
+    });
+
+    await markCheckoutPaymentApplied({
+      stripe,
+      session,
+      eventId,
+      paymentReference: session.id,
+    });
+
+    console.info("STRIPE_WEBHOOK_PAYMENT_CHECKOUT_FULFILLED:", {
+      eventId,
+      sessionId: session.id,
+      userId: result.userId,
+      planId: result.effectivePlanId,
+      purchasedAddonIds: result.purchasedAddonIds,
+      extraPages: result.extraPages,
+    });
+
+    return {
+      processed: true,
+      action: "checkout_fulfilled",
+      objectId: session.id,
+      userId: result.userId,
+      planId: result.effectivePlanId,
+      purchasedAddonIds: result.purchasedAddonIds,
+      activeAddonIds: result.activeAddonIds,
+      extraPages: result.extraPages,
+      billingStatus: "active",
+      validUntil: null,
+    };
+  }
+
+  if (session.mode === "subscription") {
+    const subscription = await retrieveSubscription(
+      stripe,
+      session.subscription as string | Stripe.Subscription | null,
+    );
+
+    if (!subscription) {
+      throw new Error("CHECKOUT_SUBSCRIPTION_NOT_FOUND");
+    }
+
+    const latestInvoiceId = getSubscriptionLatestInvoiceId(subscription);
+    const latestInvoice =
+      getExpandedLatestInvoice(subscription) ||
+      (latestInvoiceId
+        ? await stripe.invoices.retrieve(latestInvoiceId)
+        : null);
+
+    /**
+     * invoice.paid mohol prísť pred checkout.session.completed.
+     * V takom prípade už mesačný limit znovu neobnovujeme.
+     */
+    if (latestInvoice && isPaymentApplied(latestInvoice.metadata)) {
+      await markCheckoutPaymentApplied({
+        stripe,
+        session,
+        eventId,
+        paymentReference: latestInvoice.id,
+      });
+
+      return {
+        processed: false,
+        action: "checkout_already_fulfilled",
+        objectId: session.id,
+        reason: `Invoice ${latestInvoice.id} was already applied.`,
+      };
+    }
+
+    if (!isSubscriptionProvisionable(subscription)) {
+      const unresolvedPurchase = await resolvePurchaseMetadata({
+        stripe,
+        session,
+        subscription,
+        invoice: latestInvoice,
+        requirePurchaseMetadata: false,
+      });
+      const billingStatus = getSubscriptionBillingStatus(subscription);
+      const validUntil = getSubscriptionValidUntil(subscription);
+
+      await updateBillingStatus({
+        userId: unresolvedPurchase.userId,
+        billingStatus,
+        validUntil,
+      });
+
+      return {
+        processed: false,
+        action: "checkout_payment_pending",
+        objectId: session.id,
+        userId: unresolvedPurchase.userId,
+        planId: unresolvedPurchase.planId,
+        billingStatus,
+        validUntil,
+        reason: `Subscription status: ${subscription.status}`,
+      };
+    }
+
+    const purchase = await resolvePurchaseMetadata({
+      stripe,
+      session,
+      subscription,
+      invoice: latestInvoice,
+    });
+
+    if (!purchase.planId) {
+      throw new Error("MISSING_PAID_PLAN_ID");
+    }
+
+    const billingStatus = getSubscriptionBillingStatus(subscription);
+    const validUntil = getSubscriptionValidUntil(subscription);
+    const paymentReference = latestInvoice?.id || session.id;
+
+    const result = await applySuccessfulPurchase({
+      purchase,
+      paymentReference,
+      billingStatus,
+      validUntil,
+      resetPlan: true,
+      resetPrompts: true,
+    });
+
+    if (latestInvoice) {
+      await markInvoicePaymentApplied({
+        stripe,
+        invoice: latestInvoice,
+        eventId,
+        paymentReference,
+      });
+    }
+
+    await markCheckoutPaymentApplied({
+      stripe,
+      session,
+      eventId,
+      paymentReference,
+    });
+
+    console.info("STRIPE_WEBHOOK_SUBSCRIPTION_CHECKOUT_FULFILLED:", {
+      eventId,
+      sessionId: session.id,
+      subscriptionId: subscription.id,
+      invoiceId: latestInvoice?.id || null,
+      userId: result.userId,
+      planId: result.effectivePlanId,
+      billingStatus,
+      validUntil,
+    });
+
+    return {
+      processed: true,
+      action: "checkout_fulfilled",
+      objectId: session.id,
+      userId: result.userId,
+      planId: result.effectivePlanId,
+      purchasedAddonIds: result.purchasedAddonIds,
+      activeAddonIds: result.activeAddonIds,
+      extraPages: result.extraPages,
+      billingStatus,
+      validUntil,
+    };
+  }
+
+  return {
+    processed: false,
+    action: "ignored",
+    objectId: session.id,
+    reason: `Unsupported checkout mode: ${session.mode || "unknown"}`,
+  };
+}
+
+async function handleCheckoutAsyncPaymentFailed({
+  stripe,
+  eventId,
+  eventSession,
+}: {
+  stripe: Stripe;
+  eventId: string;
+  eventSession: Stripe.Checkout.Session;
+}): Promise<WebhookProcessingResult> {
+  const session = await retrieveCheckoutSession(stripe, eventSession.id);
+
+  if (isFailureEventAlreadyRecorded(session.metadata, eventId)) {
+    return {
+      processed: false,
+      action: "checkout_payment_failed",
+      objectId: session.id,
+      reason: "Failure event already recorded.",
+    };
+  }
+
+  let userId = "";
+
+  try {
+    const purchase = await resolvePurchaseMetadata({
+      stripe,
+      session,
+      requirePurchaseMetadata: false,
+    });
+
+    userId = purchase.userId;
+
+    await updateBillingStatus({
+      userId,
+      billingStatus: "payment_failed",
+      validUntil: null,
     });
   } catch (error) {
     if (!isPermanentMetadataError(error)) {
       throw error;
     }
 
-    const detail = getErrorMessage(error);
-
-    // Staré alebo poškodené metadata nie je možné opraviť retry mechanizmom.
-    // Udalosť preto prijmeme HTTP 200 a zaznamenáme ju do logu.
-    console.error("STRIPE_WEBHOOK_UNSUPPORTED_METADATA:", {
+    console.error("STRIPE_WEBHOOK_ASYNC_PAYMENT_FAILED_METADATA_ERROR:", {
       eventId,
       sessionId: session.id,
-      detail,
-      metadata: normalizeMetadata(session.metadata),
+      message: getErrorMessage(error),
     });
-
-    return {
-      processed: false,
-      reason: "unsupported_metadata",
-      sessionId: session.id,
-      detail,
-    };
   }
 
-  const result = await applySuccessfulPurchase({
-    purchase,
-    paymentReference: session.id,
-  });
-
-  // Marker zapisujeme až po úspešnej aktivácii databázy.
-  await markCheckoutFulfilled({
+  await markCheckoutFailureRecorded({
     stripe,
     session,
     eventId,
   });
 
-  console.info("STRIPE_WEBHOOK_CHECKOUT_FULFILLED:", {
+  console.warn("STRIPE_WEBHOOK_ASYNC_PAYMENT_FAILED:", {
     eventId,
     sessionId: session.id,
+    userId: userId || null,
+    paymentStatus: session.payment_status,
+  });
+
+  return {
+    processed: Boolean(userId),
+    action: "checkout_payment_failed",
+    objectId: session.id,
+    userId: userId || undefined,
+    billingStatus: "payment_failed",
+  };
+}
+
+async function handleInvoicePaid({
+  stripe,
+  eventId,
+  eventInvoice,
+}: {
+  stripe: Stripe;
+  eventId: string;
+  eventInvoice: Stripe.Invoice;
+}): Promise<WebhookProcessingResult> {
+  const invoice = await retrieveInvoiceIfNeeded(stripe, eventInvoice);
+
+  if (isPaymentApplied(invoice.metadata)) {
+    return {
+      processed: false,
+      action: "invoice_already_processed",
+      objectId: invoice.id,
+    };
+  }
+
+  if (invoice.currency.toLowerCase() !== EXPECTED_CURRENCY) {
+    return {
+      processed: false,
+      action: "unsupported_metadata",
+      objectId: invoice.id,
+      reason: `Unsupported currency: ${invoice.currency}`,
+    };
+  }
+
+  const subscriptionId = getInvoiceSubscriptionId(invoice);
+
+  /** Jednorazové Stripe faktúry nemenia plán; rieši ich Checkout Session. */
+  if (!subscriptionId) {
+    return {
+      processed: false,
+      action: "ignored",
+      objectId: invoice.id,
+      reason: "Invoice is not linked to a subscription.",
+    };
+  }
+
+  const subscription = await retrieveSubscription(stripe, subscriptionId);
+
+  if (!subscription) {
+    throw new Error(`SUBSCRIPTION_NOT_FOUND: ${subscriptionId}`);
+  }
+
+  if (!isSubscriptionProvisionable(subscription)) {
+    await updateBillingStatus({
+      userId: (
+        await resolvePurchaseMetadata({
+          stripe,
+          subscription,
+          invoice,
+        })
+      ).userId,
+      billingStatus: getSubscriptionBillingStatus(subscription),
+      validUntil: getSubscriptionValidUntil(subscription),
+    });
+
+    return {
+      processed: false,
+      action: "ignored",
+      objectId: invoice.id,
+      billingStatus: getSubscriptionBillingStatus(subscription),
+      reason: `Subscription status is ${subscription.status}.`,
+    };
+  }
+
+  const purchase = await resolvePurchaseMetadata({
+    stripe,
+    subscription,
+    invoice,
+  });
+
+  if (!purchase.planId) {
+    throw new Error("MISSING_PAID_PLAN_ID");
+  }
+
+  const billingStatus = getSubscriptionBillingStatus(subscription);
+  const validUntil = getSubscriptionValidUntil(subscription);
+
+  /**
+   * Extra stránky sa pri bežnej mesačnej obnove nepridávajú znova.
+   * Pri prvej faktúre subscription_create môžu byť súčasťou úvodného checkoutu.
+   */
+  const isInitialSubscriptionInvoice =
+    invoice.billing_reason === "subscription_create";
+
+  const addonIdsForPageActivation = isInitialSubscriptionInvoice
+    ? purchase.purchasedAddonIds
+    : purchase.persistentAddonIds;
+
+  const result = await applySuccessfulPurchase({
+    purchase,
+    paymentReference: invoice.id,
+    billingStatus,
+    validUntil,
+    resetPlan: true,
+    resetPrompts: true,
+    addonIdsForPageActivation,
+  });
+
+  await markInvoicePaymentApplied({
+    stripe,
+    invoice,
+    eventId,
+    paymentReference: invoice.id,
+  });
+
+  console.info("STRIPE_WEBHOOK_INVOICE_PAID:", {
+    eventId,
+    invoiceId: invoice.id,
+    subscriptionId: subscription.id,
+    billingReason: invoice.billing_reason,
     userId: result.userId,
     planId: result.effectivePlanId,
-    purchasedAddonIds: result.purchasedAddonIds,
-    activeAddonIds: result.activeAddonIds,
+    billingStatus,
+    validUntil,
     extraPages: result.extraPages,
   });
 
   return {
     processed: true,
-    reason: "fulfilled",
-    sessionId: session.id,
+    action: "invoice_paid",
+    objectId: invoice.id,
     userId: result.userId,
     planId: result.effectivePlanId,
     purchasedAddonIds: result.purchasedAddonIds,
     activeAddonIds: result.activeAddonIds,
     extraPages: result.extraPages,
+    billingStatus,
+    validUntil,
+  };
+}
+
+async function handleInvoicePaymentFailed({
+  stripe,
+  eventId,
+  eventInvoice,
+}: {
+  stripe: Stripe;
+  eventId: string;
+  eventInvoice: Stripe.Invoice;
+}): Promise<WebhookProcessingResult> {
+  const invoice = await retrieveInvoiceIfNeeded(stripe, eventInvoice);
+
+  if (isFailureEventAlreadyRecorded(invoice.metadata, eventId)) {
+    return {
+      processed: false,
+      action: "invoice_payment_failed",
+      objectId: invoice.id,
+      reason: "Failure event already recorded.",
+    };
+  }
+
+  const subscriptionId = getInvoiceSubscriptionId(invoice);
+
+  if (!subscriptionId) {
+    await markInvoiceFailureRecorded({
+      stripe,
+      invoice,
+      eventId,
+    });
+
+    return {
+      processed: false,
+      action: "invoice_payment_failed",
+      objectId: invoice.id,
+      reason: "Failed invoice is not linked to a subscription.",
+    };
+  }
+
+  const subscription = await retrieveSubscription(stripe, subscriptionId);
+
+  if (!subscription) {
+    throw new Error(`SUBSCRIPTION_NOT_FOUND: ${subscriptionId}`);
+  }
+
+  const purchase = await resolvePurchaseMetadata({
+    stripe,
+    subscription,
+    invoice,
+    requirePurchaseMetadata: false,
+  });
+
+  const billingStatus =
+    subscription.status === "active"
+      ? "payment_failed"
+      : getSubscriptionBillingStatus(subscription);
+  const validUntil = getSubscriptionValidUntil(subscription);
+
+  await updateBillingStatus({
+    userId: purchase.userId,
+    billingStatus,
+    validUntil,
+  });
+
+  await markInvoiceFailureRecorded({
+    stripe,
+    invoice,
+    eventId,
+  });
+
+  console.warn("STRIPE_WEBHOOK_INVOICE_PAYMENT_FAILED:", {
+    eventId,
+    invoiceId: invoice.id,
+    subscriptionId: subscription.id,
+    userId: purchase.userId,
+    attemptCount: invoice.attempt_count,
+    nextPaymentAttempt: invoice.next_payment_attempt,
+    billingStatus,
+    validUntil,
+  });
+
+  return {
+    processed: true,
+    action: "invoice_payment_failed",
+    objectId: invoice.id,
+    userId: purchase.userId,
+    planId: purchase.planId,
+    billingStatus,
+    validUntil,
+  };
+}
+
+async function handleSubscriptionUpdated({
+  stripe,
+  eventId,
+  eventSubscription,
+}: {
+  stripe: Stripe;
+  eventId: string;
+  eventSubscription: Stripe.Subscription;
+}): Promise<WebhookProcessingResult> {
+  const subscription = await retrieveSubscription(stripe, eventSubscription);
+
+  if (!subscription) {
+    throw new Error("SUBSCRIPTION_NOT_FOUND");
+  }
+
+  const purchase = await resolvePurchaseMetadata({
+    stripe,
+    subscription,
+    requirePurchaseMetadata: false,
+  });
+
+  const billingStatus = getSubscriptionBillingStatus(subscription);
+  const validUntil = getSubscriptionValidUntil(subscription);
+
+  if (isSubscriptionDefinitivelyEnded(subscription)) {
+    const hasReplacementSubscription =
+      await customerHasAnotherActiveSubscription({
+        stripe,
+        deletedSubscription: subscription,
+      });
+
+    if (hasReplacementSubscription) {
+      return {
+        processed: false,
+        action: "subscription_delete_ignored",
+        objectId: subscription.id,
+        userId: purchase.userId,
+        reason: "Customer has another active subscription.",
+      };
+    }
+
+    const downgraded = await downgradeUserToFree({
+      userId: purchase.userId,
+      paymentReference: `subscription-ended:${subscription.id}`,
+    });
+
+    return {
+      processed: downgraded,
+      action: "subscription_deleted",
+      objectId: subscription.id,
+      userId: purchase.userId,
+      planId: "free",
+      billingStatus: "canceled",
+      validUntil: null,
+    };
+  }
+
+  /**
+   * Plán aktivujeme alebo meníme iba pri stave active/trialing.
+   * Stavy incomplete, past_due, unpaid alebo paused iba evidujeme;
+   * nesmú pred úspešnou platbou sprístupniť platený plán.
+   */
+  if (isSubscriptionProvisionable(subscription) && purchase.planId) {
+    const entitlement = await upsertPaidEntitlement({
+      userId: purchase.userId,
+      planId: purchase.planId,
+      persistentAddonIds: purchase.persistentAddonIds,
+      billingStatus,
+      validUntil,
+      resetPrompts: false,
+    });
+
+    console.info("STRIPE_WEBHOOK_SUBSCRIPTION_UPDATED:", {
+      eventId,
+      subscriptionId: subscription.id,
+      userId: purchase.userId,
+      planId: entitlement.effectivePlanId,
+      status: subscription.status,
+      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      validUntil,
+    });
+
+    return {
+      processed: true,
+      action: "subscription_updated",
+      objectId: subscription.id,
+      userId: purchase.userId,
+      planId: entitlement.effectivePlanId,
+      activeAddonIds: entitlement.activeAddonIds,
+      billingStatus,
+      validUntil,
+    };
+  }
+
+  await updateBillingStatus({
+    userId: purchase.userId,
+    billingStatus,
+    validUntil,
+  });
+
+  return {
+    processed: true,
+    action: "subscription_updated",
+    objectId: subscription.id,
+    userId: purchase.userId,
+    planId: purchase.planId,
+    billingStatus,
+    validUntil,
+  };
+}
+
+async function handleSubscriptionDeleted({
+  stripe,
+  eventId,
+  eventSubscription,
+}: {
+  stripe: Stripe;
+  eventId: string;
+  eventSubscription: Stripe.Subscription;
+}): Promise<WebhookProcessingResult> {
+  const subscription = eventSubscription;
+  const purchase = await resolvePurchaseMetadata({
+    stripe,
+    subscription,
+    requirePurchaseMetadata: false,
+  });
+
+  /**
+   * Ochrana pred starou oneskorenou deleted udalosťou:
+   * ak má zákazník už iné aktívne predplatné, na Free ho nevraciame.
+   */
+  if (
+    await customerHasAnotherActiveSubscription({
+      stripe,
+      deletedSubscription: subscription,
+    })
+  ) {
+    console.warn("STRIPE_WEBHOOK_SUBSCRIPTION_DELETE_IGNORED:", {
+      eventId,
+      subscriptionId: subscription.id,
+      userId: purchase.userId,
+      reason: "Customer has another active subscription.",
+    });
+
+    return {
+      processed: false,
+      action: "subscription_delete_ignored",
+      objectId: subscription.id,
+      userId: purchase.userId,
+      reason: "Customer has another active subscription.",
+    };
+  }
+
+  const downgraded = await downgradeUserToFree({
+    userId: purchase.userId,
+    paymentReference: `subscription-deleted:${subscription.id}`,
+  });
+
+  console.info("STRIPE_WEBHOOK_SUBSCRIPTION_DELETED:", {
+    eventId,
+    subscriptionId: subscription.id,
+    userId: purchase.userId,
+    downgraded,
+  });
+
+  return {
+    processed: downgraded,
+    action: "subscription_deleted",
+    objectId: subscription.id,
+    userId: purchase.userId,
+    planId: "free",
+    activeAddonIds: [],
+    billingStatus: "canceled",
+    validUntil: null,
   };
 }
 
@@ -812,16 +1879,11 @@ export async function GET() {
       ok: true,
       route: "/api/payments/webhook",
       runtime,
-      checkoutMode: "payment",
       configured: {
         stripeSecret: Boolean(process.env.STRIPE_SECRET_KEY),
         webhookSecret: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
       },
-      supportedEvents: [
-        "checkout.session.completed",
-        "checkout.session.async_payment_succeeded",
-        "checkout.session.async_payment_failed",
-      ],
+      supportedEvents: SUPPORTED_EVENTS,
     },
     {
       headers: {
@@ -875,8 +1937,7 @@ export async function POST(request: Request) {
   let rawBody: string;
 
   try {
-    // Webhook podpis sa musí overovať nad pôvodným raw telom.
-    // Nepoužívajte request.json().
+    /** Podpis sa musí overovať nad pôvodným raw telom. */
     rawBody = await request.text();
   } catch (error) {
     console.error("STRIPE_WEBHOOK_BODY_READ_ERROR:", {
@@ -918,41 +1979,75 @@ export async function POST(request: Request) {
   }
 
   try {
-    let result: CheckoutProcessingResult | null = null;
+    let result: WebhookProcessingResult;
 
     switch (event.type) {
       case "checkout.session.completed":
       case "checkout.session.async_payment_succeeded": {
-        const session = event.data.object as Stripe.Checkout.Session;
-
         result = await handleCheckoutCompleted({
           stripe,
           eventId: event.id,
-          eventSession: session,
+          eventSession: event.data.object as Stripe.Checkout.Session,
         });
-
         break;
       }
 
       case "checkout.session.async_payment_failed": {
-        const session = event.data.object as Stripe.Checkout.Session;
-
-        console.warn("STRIPE_WEBHOOK_ASYNC_PAYMENT_FAILED:", {
+        result = await handleCheckoutAsyncPaymentFailed({
+          stripe,
           eventId: event.id,
-          sessionId: session.id,
-          paymentStatus: session.payment_status,
+          eventSession: event.data.object as Stripe.Checkout.Session,
         });
+        break;
+      }
 
+      case "invoice.paid": {
+        result = await handleInvoicePaid({
+          stripe,
+          eventId: event.id,
+          eventInvoice: event.data.object as Stripe.Invoice,
+        });
+        break;
+      }
+
+      case "invoice.payment_failed": {
+        result = await handleInvoicePaymentFailed({
+          stripe,
+          eventId: event.id,
+          eventInvoice: event.data.object as Stripe.Invoice,
+        });
+        break;
+      }
+
+      case "customer.subscription.updated": {
+        result = await handleSubscriptionUpdated({
+          stripe,
+          eventId: event.id,
+          eventSubscription: event.data.object as Stripe.Subscription,
+        });
+        break;
+      }
+
+      case "customer.subscription.deleted": {
+        result = await handleSubscriptionDeleted({
+          stripe,
+          eventId: event.id,
+          eventSubscription: event.data.object as Stripe.Subscription,
+        });
         break;
       }
 
       default: {
-        // Nový katalóg používa výhradne jednorazový checkout mode=payment.
-        // Subscription a invoice udalosti preto zámerne nemenia oprávnenia.
         console.info("STRIPE_WEBHOOK_EVENT_IGNORED:", {
           eventId: event.id,
           eventType: event.type,
         });
+
+        result = {
+          processed: false,
+          action: "ignored",
+          reason: `Unsupported event type: ${event.type}`,
+        };
       }
     }
 
@@ -967,11 +2062,48 @@ export async function POST(request: Request) {
       },
       {
         status: 200,
+        headers: {
+          "Cache-Control": "no-store",
+        },
       },
     );
   } catch (error) {
-    // Databázové alebo sieťové chyby vracajú HTTP 500.
-    // Stripe tak môže udalosť bezpečne zopakovať.
+    if (isPermanentMetadataError(error)) {
+      /**
+       * Opakovaný Stripe retry nedokáže opraviť chýbajúce alebo neplatné metadata.
+       * Udalosť preto prijmeme HTTP 200 a chybu detailne zapíšeme do logu.
+       */
+      console.error("STRIPE_WEBHOOK_UNSUPPORTED_METADATA:", {
+        eventId: event.id,
+        eventType: event.type,
+        message: getErrorMessage(error),
+      });
+
+      return NextResponse.json(
+        {
+          ok: true,
+          received: true,
+          eventId: event.id,
+          eventType: event.type,
+          result: {
+            processed: false,
+            action: "unsupported_metadata",
+            reason: getErrorMessage(error),
+          } satisfies WebhookProcessingResult,
+        },
+        {
+          status: 200,
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }
+
+    /**
+     * Databázové, Stripe API alebo sieťové chyby vracajú HTTP 500.
+     * Stripe tak udalosť bezpečne zopakuje.
+     */
     console.error("STRIPE_WEBHOOK_PROCESSING_ERROR:", {
       eventId: event.id,
       eventType: event.type,
@@ -990,6 +2122,9 @@ export async function POST(request: Request) {
       },
       {
         status: 500,
+        headers: {
+          "Cache-Control": "no-store",
+        },
       },
     );
   }

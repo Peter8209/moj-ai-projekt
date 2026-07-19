@@ -59,7 +59,7 @@ type PurchaseType = 'plan' | 'addon' | 'plan_with_addons';
 type CurrentEntitlementRow = {
   plan_id: string | null;
   addon_ids: string[] | null;
-  valid_until: string | null;
+  billing_status: string | null;
 };
 
 type StripeMetadata = Record<string, string>;
@@ -163,14 +163,25 @@ function getSafeErrorDetail(message: string): Record<string, string> {
   return isProduction() ? {} : { detail: message };
 }
 
-function isActiveEntitlement(validUntil: string | null): boolean {
-  if (!validUntil) {
+function isActiveEntitlement(billingStatus: string | null): boolean {
+  const normalizedStatus = normalizeString(billingStatus).toLowerCase();
+
+  // Pri starších záznamoch môže byť billing_status prázdny. Ak je používateľovi
+  // uložený platený plan_id, prázdny stav neblokujeme iba kvôli migrácii dát.
+  if (!normalizedStatus) {
     return true;
   }
 
-  const timestamp = Date.parse(validUntil);
-
-  return Number.isFinite(timestamp) && timestamp > Date.now();
+  return !new Set([
+    'canceled',
+    'cancelled',
+    'expired',
+    'failed',
+    'inactive',
+    'past_due',
+    'revoked',
+    'unpaid',
+  ]).has(normalizedStatus);
 }
 
 function normalizeCurrentPlanId(value: unknown): PlanId {
@@ -206,6 +217,10 @@ function getSuccessUrl(baseUrl: string): string {
 
 function getCancelUrl(baseUrl: string): string {
   return `${baseUrl}/pricing?canceled=1`;
+}
+
+function getFreeDashboardUrl(baseUrl: string): string {
+  return `${baseUrl}/dashboard?plan=free`;
 }
 
 function getStripe(): Stripe {
@@ -578,7 +593,7 @@ async function loadCurrentEntitlement({
 }): Promise<CurrentEntitlementRow | null> {
   const { data, error } = await supabase
     .from('zedpera_user_entitlements')
-    .select('plan_id, addon_ids, valid_until')
+    .select('plan_id, addon_ids, billing_status')
     .eq('user_id', userId)
     .maybeSingle();
 
@@ -608,7 +623,7 @@ function requirePaidPlanForAddonOnlyCheckout({
 
   if (
     currentPlanId === 'free' ||
-    !isActiveEntitlement(currentEntitlement?.valid_until ?? null)
+    !isActiveEntitlement(currentEntitlement?.billing_status ?? null)
   ) {
     throw new Error('PAID_PLAN_REQUIRED');
   }
@@ -695,17 +710,19 @@ export async function GET() {
   return createJsonResponse({
     ok: true,
     route: '/api/payments/checkout',
-    message: 'ZEDPERA Stripe Checkout endpoint is running.',
+    message: 'ZEDPERA checkout endpoint is running.',
     mode: 'payment',
+    freeRedirect: '/dashboard?plan=free',
     successRedirect: '/payment/success?session_id={CHECKOUT_SESSION_ID}',
     cancelRedirect: '/pricing?canceled=1',
-    plans: PURCHASABLE_PLAN_IDS.map((planId) => ({
+    plans: (Object.keys(PLANS) as PlanId[]).map((planId) => ({
       id: planId,
       name: PLANS[planId].name,
       priceCents: PLANS[planId].priceCents,
       pageLimit: PLANS[planId].pageLimit,
       promptLimit: PLANS[planId].promptLimit,
       attachmentLimit: PLANS[planId].attachmentLimit,
+      checkoutRequired: planId !== 'free',
     })),
     addons: (Object.keys(ADDONS) as AddonId[]).map((addonId) => ({
       id: addonId,
@@ -735,6 +752,124 @@ export async function POST(request: Request) {
         { status: 415 },
       );
     }
+
+    let parsedBody: unknown;
+
+    try {
+      parsedBody = await request.json();
+    } catch {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_JSON',
+          code: 'INVALID_JSON',
+          message: 'Telo požiadavky neobsahuje platný JSON.',
+          errorId,
+        },
+        { status: 400 },
+      );
+    }
+
+    if (!isRecord(parsedBody)) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_JSON',
+          code: 'INVALID_JSON',
+          message: 'Telo požiadavky musí byť JSON objekt.',
+          errorId,
+        },
+        { status: 400 },
+      );
+    }
+
+    const body = parsedBody as CheckoutBody;
+    const rawPlan = getRawPlan(body);
+    const rawAddons = getRawAddons(body);
+    const normalizedRequestedPlan = normalizeString(rawPlan);
+
+    const {
+      planId,
+      invalidValue: invalidPlan,
+    } = resolvePlanId(rawPlan);
+
+    if (invalidPlan !== null) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_PLAN',
+          code: 'INVALID_PLAN',
+          errorId,
+          receivedPlan: invalidPlan,
+          message:
+            'Neplatné ID balíka. Checkout prijíma iba balíky z lib/billing/catalog.ts.',
+          received: invalidPlan,
+          allowedPlans: Object.keys(PLANS),
+        },
+        { status: 400 },
+      );
+    }
+
+    const {
+      addonIds,
+      invalidAddons,
+    } = resolveAddonIds(rawAddons);
+
+    if (invalidAddons.length > 0) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_ADDON',
+          code: 'INVALID_ADDON',
+          errorId,
+          message:
+            'Niektorý doplnok nemá platné ID podľa lib/billing/catalog.ts.',
+          invalidAddons,
+          allowedAddons: Object.keys(ADDONS),
+        },
+        { status: 400 },
+      );
+    }
+
+    const baseUrl = getBaseUrl();
+    const isFreeSelection = normalizedRequestedPlan === 'free';
+
+    // Free balík nevytvára Stripe Checkout a nevyžaduje prihlásenie.
+    // Samotný dashboard musí pre anonymného používateľa uplatniť free limity.
+    if (isFreeSelection && addonIds.length === 0) {
+      const redirectUrl = getFreeDashboardUrl(baseUrl);
+
+      return createJsonResponse({
+        ok: true,
+        action: 'redirect',
+        checkoutRequired: false,
+        mode: 'free',
+        planId: 'free' as const,
+        url: redirectUrl,
+        redirectUrl,
+        redirectPath: '/dashboard?plan=free',
+        message:
+          'Free balík nevyžaduje Stripe platbu. Používateľ môže pokračovať priamo do dashboardu.',
+      });
+    }
+
+    if (!planId && addonIds.length === 0) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'EMPTY_CHECKOUT',
+          code: 'EMPTY_CHECKOUT',
+          errorId,
+          message:
+            'Vyberte platený balík alebo aspoň jeden doplnok.',
+          allowedPlans: PURCHASABLE_PLAN_IDS,
+          allowedAddons: Object.keys(ADDONS),
+        },
+        { status: 400 },
+      );
+    }
+
+    // Až platená objednávka alebo nákup doplnku vyžaduje prihlásenie.
     const supabase = await createSupabaseServerClient();
 
     const {
@@ -772,100 +907,6 @@ export async function POST(request: Request) {
       );
     }
 
-    let parsedBody: unknown;
-
-    try {
-      parsedBody = await request.json();
-    } catch {
-      return createJsonResponse(
-        {
-          ok: false,
-          error: 'INVALID_JSON',
-          code: 'INVALID_JSON',
-          message: 'Telo požiadavky neobsahuje platný JSON.',
-          errorId,
-        },
-        { status: 400 },
-      );
-    }
-
-    if (!isRecord(parsedBody)) {
-      return createJsonResponse(
-        {
-          ok: false,
-          error: 'INVALID_JSON',
-          code: 'INVALID_JSON',
-          message: 'Telo požiadavky musí byť JSON objekt.',
-          errorId,
-        },
-        { status: 400 },
-      );
-    }
-
-    const body = parsedBody as CheckoutBody;
-
-    const rawPlan = getRawPlan(body);
-    const rawAddons = getRawAddons(body);
-
-    const {
-      planId,
-      invalidValue: invalidPlan,
-    } = resolvePlanId(rawPlan);
-
-    if (invalidPlan !== null) {
-      return createJsonResponse(
-        {
-          ok: false,
-          error: 'INVALID_PLAN',
-          code: 'INVALID_PLAN',
-          errorId,
-          receivedPlan: invalidPlan,
-          message:
-            'Neplatné ID balíka. Checkout prijíma iba balíky z lib/billing/catalog.ts.',
-          received: invalidPlan,
-          allowedPlans: PURCHASABLE_PLAN_IDS,
-        },
-        { status: 400 },
-      );
-    }
-
-    const {
-      addonIds,
-      invalidAddons,
-    } = resolveAddonIds(rawAddons);
-
-    if (invalidAddons.length > 0) {
-      return createJsonResponse(
-        {
-          ok: false,
-          error: 'INVALID_ADDON',
-          code: 'INVALID_ADDON',
-          errorId,
-          message:
-            'Niektorý doplnok nemá platné ID podľa lib/billing/catalog.ts.',
-          invalidAddons,
-          allowedAddons: Object.keys(ADDONS),
-        },
-        { status: 400 },
-      );
-    }
-
-    if (!planId && addonIds.length === 0) {
-      return createJsonResponse(
-        {
-          ok: false,
-          error: 'EMPTY_CHECKOUT',
-          code: 'EMPTY_CHECKOUT',
-          errorId,
-          message:
-            'Vyberte platený balík alebo aspoň jeden doplnok.',
-          allowedPlans: PURCHASABLE_PLAN_IDS,
-          allowedAddons: Object.keys(ADDONS),
-        },
-        { status: 400 },
-      );
-    }
-
     requestId = resolveCheckoutRequestId(request, body);
 
     const currentEntitlement = await loadCurrentEntitlement({
@@ -880,7 +921,6 @@ export async function POST(request: Request) {
     });
 
     const stripe = getStripe();
-    const baseUrl = getBaseUrl();
 
     const customer = await getOrCreateStripeCustomer({
       stripe,
@@ -970,7 +1010,10 @@ export async function POST(request: Request) {
 
     return createJsonResponse({
       ok: true,
+      action: 'redirect',
+      checkoutRequired: true,
       url: session.url,
+      redirectUrl: session.url,
       sessionId: session.id,
       requestId,
       mode: 'payment',

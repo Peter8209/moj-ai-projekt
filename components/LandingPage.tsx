@@ -197,6 +197,16 @@ type Translation = {
 };
 
 const LANGUAGE_STORAGE_KEY = 'zedpera_language';
+const LANGUAGE_STORAGE_KEYS = [
+  LANGUAGE_STORAGE_KEY,
+  'zedpera_system_language',
+  'zedpera_work_language',
+  'zedpera_interface_language',
+  'app_language',
+] as const;
+const LANGUAGE_COOKIE_KEY = 'zedpera_language';
+const LANGUAGE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+const CHECKOUT_LANGUAGE_STORAGE_KEY = 'zedpera_checkout_language';
 
 const MODERN_WOMAN_IMAGE_URL = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=2400&q=100&dpr=2';
 
@@ -1742,25 +1752,177 @@ function applyLanguageToDocument(nextLanguage: AppLanguage) {
   document.body.setAttribute('data-language', nextLanguage);
 }
 
+function readLanguageFromCookie(): string | null {
+  if (typeof document === 'undefined') return null;
+
+  const cookiePrefix = `${LANGUAGE_COOKIE_KEY}=`;
+  const languageCookie = document.cookie
+    .split(';')
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(cookiePrefix));
+
+  if (!languageCookie) return null;
+
+  const rawValue = languageCookie.slice(cookiePrefix.length);
+
+  try {
+    return decodeURIComponent(rawValue);
+  } catch {
+    return rawValue;
+  }
+}
+
+function normalizeLanguage(value: unknown): AppLanguage {
+  const language = String(value || '').trim().toLowerCase();
+
+  if (
+    language === 'sk' ||
+    language === 'slovak' ||
+    language === 'slovenčina' ||
+    language === 'slovencina'
+  ) {
+    return 'sk';
+  }
+
+  if (
+    language === 'cs' ||
+    language === 'cz' ||
+    language === 'czech' ||
+    language === 'čeština' ||
+    language === 'cestina'
+  ) {
+    return 'cs';
+  }
+
+  if (language === 'en' || language === 'eng' || language === 'english') {
+    return 'en';
+  }
+
+  if (
+    language === 'de' ||
+    language === 'ger' ||
+    language === 'german' ||
+    language === 'deutsch'
+  ) {
+    return 'de';
+  }
+
+  if (language === 'pl' || language === 'polish' || language === 'polski') {
+    return 'pl';
+  }
+
+  if (
+    language === 'hu' ||
+    language === 'hungarian' ||
+    language === 'magyar'
+  ) {
+    return 'hu';
+  }
+
+  return 'sk';
+}
+
+function getLanguageFromEventDetail(detail: unknown): AppLanguage {
+  if (detail && typeof detail === 'object' && 'language' in detail) {
+    return normalizeLanguage((detail as { language?: unknown }).language);
+  }
+
+  return normalizeLanguage(detail);
+}
+
+function getInitialLanguage(): AppLanguage {
+  if (typeof window === 'undefined') return 'sk';
+
+  const params = new URLSearchParams(window.location.search);
+  const queryLanguage = params.get('lang');
+
+  if (queryLanguage) {
+    return normalizeLanguage(queryLanguage);
+  }
+
+  for (const key of LANGUAGE_STORAGE_KEYS) {
+    const storedLanguage = window.localStorage.getItem(key);
+
+    if (storedLanguage) {
+      return normalizeLanguage(storedLanguage);
+    }
+  }
+
+  const cookieLanguage = readLanguageFromCookie();
+
+  if (cookieLanguage) {
+    return normalizeLanguage(cookieLanguage);
+  }
+
+  return normalizeLanguage(
+    document.documentElement.getAttribute('data-language') ||
+      document.documentElement.getAttribute('data-system-language') ||
+      document.documentElement.getAttribute('data-work-language') ||
+      document.documentElement.lang,
+  );
+}
+
 function saveLanguageToStorage(nextLanguage: AppLanguage) {
   if (typeof window === 'undefined') return;
 
-  localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
-  localStorage.setItem('zedpera_system_language', nextLanguage);
-  localStorage.setItem('zedpera_work_language', nextLanguage);
-  localStorage.setItem('app_language', nextLanguage);
+  for (const key of LANGUAGE_STORAGE_KEYS) {
+    window.localStorage.setItem(key, nextLanguage);
+  }
+
+  window.localStorage.setItem(
+    CHECKOUT_LANGUAGE_STORAGE_KEY,
+    nextLanguage,
+  );
+
+  const secureAttribute =
+    window.location.protocol === 'https:' ? '; Secure' : '';
+
+  document.cookie =
+    `${LANGUAGE_COOKIE_KEY}=${encodeURIComponent(nextLanguage)}; ` +
+    `Path=/; Max-Age=${LANGUAGE_COOKIE_MAX_AGE}; ` +
+    `SameSite=Lax${secureAttribute}`;
 }
 
-function normalizeLanguage(value: string | null): AppLanguage {
-  const language = String(value || '').toLowerCase();
+function synchronizeLanguageInUrl(nextLanguage: AppLanguage) {
+  if (typeof window === 'undefined') return;
 
-  if (language === 'cs' || language === 'cz') return 'cs';
-  if (language === 'en') return 'en';
-  if (language === 'de') return 'de';
-  if (language === 'pl') return 'pl';
-  if (language === 'hu') return 'hu';
+  const url = new URL(window.location.href);
+  url.searchParams.set('lang', nextLanguage);
+  window.history.replaceState(window.history.state, '', url.toString());
+}
 
-  return 'sk';
+function addLanguageToInternalHref(
+  href: string,
+  language: AppLanguage,
+  additionalParams: Record<string, string> = {},
+): string {
+  if (href.startsWith('#')) return href;
+
+  const url = new URL(href, 'https://zedpera.local');
+  url.searchParams.set('lang', language);
+
+  for (const [key, value] of Object.entries(additionalParams)) {
+    url.searchParams.set(key, value);
+  }
+
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function getLocalizedHomeHref(language: AppLanguage) {
+  return addLanguageToInternalHref('/', language);
+}
+
+function getLocalizedLoginHref(language: AppLanguage) {
+  return addLanguageToInternalHref('/login', language);
+}
+
+function getLocalizedRegisterHref(
+  language: AppLanguage,
+  planId: PlanId | 'free' = 'free',
+) {
+  return addLanguageToInternalHref('/register', language, {
+    plan: planId,
+  });
 }
 
 function getCheckoutError(data: CheckoutResponse | null, fallback: string) {
@@ -2442,12 +2604,13 @@ const mobileMenuItems = useMemo(
       icon: HelpCircle,
     },
     {
-      href: '/blog',
+      href: addLanguageToInternalHref('/blog', language),
       label: t.footer.links.blog || 'Blog',
       icon: BookOpen,
     },
   ],
   [
+    language,
     t.nav.features,
     t.nav.comparison,
     t.nav.pricing,
@@ -2460,32 +2623,30 @@ const mobileMenuItems = useMemo(
   useEffect(() => {
     document.documentElement.style.scrollBehavior = 'smooth';
 
-    const storedLanguage =
-      localStorage.getItem(LANGUAGE_STORAGE_KEY) ||
-      localStorage.getItem('zedpera_system_language') ||
-      localStorage.getItem('zedpera_work_language') ||
-      localStorage.getItem('app_language');
-
-    const nextLanguage = normalizeLanguage(storedLanguage);
+    const nextLanguage = getInitialLanguage();
 
     setLanguage(nextLanguage);
+    saveLanguageToStorage(nextLanguage);
     applyLanguageToDocument(nextLanguage);
+    synchronizeLanguageInUrl(nextLanguage);
 
     const handleExternalLanguageChange = (event: Event) => {
-      const customEvent = event as CustomEvent<AppLanguage>;
-      const next = normalizeLanguage(String(customEvent.detail || ''));
+      const customEvent = event as CustomEvent<unknown>;
+      const next = getLanguageFromEventDetail(customEvent.detail);
 
       setLanguage(next);
       setTranslationVersion((version) => version + 1);
+      saveLanguageToStorage(next);
       applyLanguageToDocument(next);
+      synchronizeLanguageInUrl(next);
     };
 
     const handleStorageLanguageChange = (event: StorageEvent) => {
       if (
-        event.key !== LANGUAGE_STORAGE_KEY &&
-        event.key !== 'zedpera_system_language' &&
-        event.key !== 'zedpera_work_language' &&
-        event.key !== 'app_language'
+        !event.key ||
+        !LANGUAGE_STORAGE_KEYS.includes(
+          event.key as (typeof LANGUAGE_STORAGE_KEYS)[number],
+        )
       ) {
         return;
       }
@@ -2494,7 +2655,9 @@ const mobileMenuItems = useMemo(
 
       setLanguage(next);
       setTranslationVersion((version) => version + 1);
+      saveLanguageToStorage(next);
       applyLanguageToDocument(next);
+      synchronizeLanguageInUrl(next);
     };
 
     window.addEventListener('zedpera-language-change', handleExternalLanguageChange as EventListener);
@@ -2543,11 +2706,15 @@ const mobileMenuItems = useMemo(
     setTranslationVersion((version) => version + 1);
     saveLanguageToStorage(normalizedLanguage);
     applyLanguageToDocument(normalizedLanguage);
+    synchronizeLanguageInUrl(normalizedLanguage);
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
         new CustomEvent('zedpera-language-change', {
-          detail: normalizedLanguage,
+          detail: {
+            language: normalizedLanguage,
+            source: 'landing-page',
+          },
         }),
       );
     }
@@ -2588,8 +2755,15 @@ const mobileMenuItems = useMemo(
         throw new Error(`${t.pricing.invalidPlan}: ${planId}`);
       }
 
+      const checkoutLanguage = normalizeLanguage(language);
+      saveLanguageToStorage(checkoutLanguage);
+      applyLanguageToDocument(checkoutLanguage);
+
       if (planId === 'free') {
-        window.location.href = '/login?mode=register&plan=free';
+        window.location.href = getLocalizedRegisterHref(
+          checkoutLanguage,
+          'free',
+        );
         return;
       }
 
@@ -2618,8 +2792,16 @@ const mobileMenuItems = useMemo(
         addonId: isAddon ? planId : undefined,
         addons: isAddon ? [planId] : [],
         email,
-        successUrl: `${origin}/payment/success?item=${planId}`,
-        cancelUrl: `${origin}/pricing?payment=cancel&item=${planId}`,
+        language: checkoutLanguage,
+        locale: checkoutLanguage,
+        uiLanguage: checkoutLanguage,
+        successUrl:
+          `${origin}/payment/success?item=${encodeURIComponent(planId)}` +
+          `&lang=${encodeURIComponent(checkoutLanguage)}`,
+        cancelUrl:
+          `${origin}/pricing?payment=cancel` +
+          `&item=${encodeURIComponent(planId)}` +
+          `&lang=${encodeURIComponent(checkoutLanguage)}`,
       };
 
       const res = await fetch('/api/payments/checkout', {
@@ -2666,10 +2848,29 @@ const mobileMenuItems = useMemo(
   ];
 
   const footerLinks = [
-    { href: '/blog', label: t.footer.links.blog, icon: PenTool },
-    { href: '/gdpr', label: t.footer.links.gdpr, icon: ShieldCheck },
-    { href: '/obchodne-podmienky', label: t.footer.links.terms, icon: FileText },
-    { href: '/cookies', label: t.footer.links.cookies, icon: Cookie },
+    {
+      href: addLanguageToInternalHref('/blog', language),
+      label: t.footer.links.blog,
+      icon: PenTool,
+    },
+    {
+      href: addLanguageToInternalHref('/gdpr', language),
+      label: t.footer.links.gdpr,
+      icon: ShieldCheck,
+    },
+    {
+      href: addLanguageToInternalHref(
+        '/obchodne-podmienky',
+        language,
+      ),
+      label: t.footer.links.terms,
+      icon: FileText,
+    },
+    {
+      href: addLanguageToInternalHref('/cookies', language),
+      label: t.footer.links.cookies,
+      icon: Cookie,
+    },
   ];
 
   const freePlan = t.pricing.plans.find((plan) => plan.kind === 'free');
@@ -3656,7 +3857,7 @@ const mobileMenuItems = useMemo(
 
         <header className="sticky top-0 z-50 border-b border-white/10 bg-black/92 backdrop-blur-2xl">
   <div className="mx-auto flex h-[72px] max-w-[1920px] items-center px-8">
-    <Link href="/" className="flex shrink-0 items-center gap-3">
+    <Link href={getLocalizedHomeHref(language)} className="flex shrink-0 items-center gap-3">
       <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 via-violet-600 to-fuchsia-500 text-2xl font-black text-white shadow-[0_0_28px_rgba(80,90,255,0.55)]">
         Z
       </div>
@@ -3699,7 +3900,7 @@ const mobileMenuItems = useMemo(
       />
 
       <Link
-        href="/login"
+        href={getLocalizedLoginHref(language)}
         className="inline-flex h-[42px] min-w-[138px] items-center justify-center rounded-md border border-white/10 bg-[#080816] px-5 text-[14px] font-black text-white transition hover:border-violet-500/70 hover:bg-[#101026]"
       >
         {t.common.login}
@@ -3857,7 +4058,7 @@ const mobileMenuItems = useMemo(
 
       <div className="mt-2 grid gap-2">
         <Link
-          href="/login"
+          href={getLocalizedLoginHref(language)}
           role="menuitem"
           onClick={() => setMobileMenuOpen(false)}
           className="inline-flex min-h-[50px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-4 text-[13px] font-black text-white transition hover:bg-white/[0.12]"

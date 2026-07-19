@@ -1,176 +1,267 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
+
+import {
+  NextResponse,
+  type NextRequest,
+} from 'next/server';
 
 import { getCurrentEntitlements } from '@/lib/entitlements';
 
 /**
- * Endpoint pracuje s používateľskou reláciou a Supabase klientom,
- * preto nesmie byť staticky generovaný ani cacheovaný.
+ * Endpoint pracuje s aktuálnou Supabase reláciou používateľa.
+ *
+ * Oprávnenia sa vždy načítavajú na serveri. Hodnoty z localStorage,
+ * query parametrov alebo tela požiadavky sa pri rozhodovaní nepoužívajú.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 
-/**
- * Výstup funkcie getCurrentEntitlements().
- *
- * Typ sa odvodzuje automaticky, takže route zostane synchronizovaná
- * s lib/entitlements.ts aj po doplnení ďalších entitlement polí.
- */
-type CurrentEntitlementsResult = Awaited<
-  ReturnType<typeof getCurrentEntitlements>
->;
+const DEFAULT_ENTITLEMENTS = {
+  planId: 'free',
+  isAdmin: false,
+  hasUnlimitedAccess: false,
+  promptLimit: 3,
+  promptsUsed: 0,
+  attachmentLimit: 1,
+  basePageLimit: 3,
+  extraPageLimit: 0,
+  pagesUsed: 0,
+} as const;
 
-/**
- * Objekt Set nie je možné priamo serializovať do JSON.
- * Preto sa pole features mení na klasické zoradené pole.
- */
-type SerializedEntitlements = Omit<
-  CurrentEntitlementsResult,
-  'features' | 'addonIds'
-> & {
-  addonIds: CurrentEntitlementsResult['addonIds'];
-  features: Array<
-    CurrentEntitlementsResult['features'] extends Set<infer T>
-      ? T
-      : never
-  >;
-};
-
-type SuccessResponse = SerializedEntitlements & {
-  success: true;
-  meta: {
-    requestId: string;
-    generatedAt: string;
-  };
+type EntitlementsResponse = {
+  planId: string;
+  isAdmin: boolean;
+  hasUnlimitedAccess: boolean;
+  promptLimit: number;
+  promptsUsed: number;
+  attachmentLimit: number;
+  basePageLimit: number;
+  extraPageLimit: number;
+  pagesUsed: number;
 };
 
 type ErrorCode =
   | 'UNAUTHENTICATED'
   | 'ENTITLEMENTS_LOAD_FAILED'
-  | 'INTERNAL_SERVER_ERROR';
+  | 'INVALID_ENTITLEMENTS_RESPONSE';
 
 type ErrorResponse = {
-  success: false;
-  error: {
-    code: ErrorCode;
-    message: string;
-    requestId: string;
-    details?: string;
-  };
+  error: ErrorCode;
+  message: string;
+  requestId: string;
+  details?: string;
 };
 
-type ErrorDescriptor = {
-  status: number;
-  code: ErrorCode;
-  message: string;
+type ErrorWithMetadata = {
+  code?: unknown;
+  status?: unknown;
+  message?: unknown;
+  name?: unknown;
 };
 
 /**
- * Overenie, či je hodnota objekt.
+ * Overí, či je neznáma hodnota obyčajný objekt.
  */
 function isRecord(
   value: unknown,
 ): value is Record<string, unknown> {
   return (
     typeof value === 'object' &&
-    value !== null
+    value !== null &&
+    !Array.isArray(value)
   );
 }
 
 /**
- * Bezpečné načítanie textovej vlastnosti z neznámeho objektu.
- */
-function getStringProperty(
-  value: unknown,
-  property: string,
-): string | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const propertyValue = value[property];
-
-  return typeof propertyValue === 'string'
-    ? propertyValue
-    : undefined;
-}
-
-/**
- * Bezpečné načítanie číselnej vlastnosti z neznámeho objektu.
- */
-function getNumberProperty(
-  value: unknown,
-  property: string,
-): number | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const propertyValue = value[property];
-
-  return typeof propertyValue === 'number' &&
-    Number.isFinite(propertyValue)
-    ? propertyValue
-    : undefined;
-}
-
-/**
- * Vytvorenie alebo prevzatie identifikátora požiadavky.
+ * Prevedie hodnotu na nezáporné celé číslo.
  *
- * Request ID umožňuje:
- * - dohľadať chybu v serverových logoch,
- * - prepojiť frontendovú chybu so serverovou chybou,
- * - jednoduchšie diagnostikovať produkčné problémy.
+ * Databázové číselné hodnoty môžu byť v niektorých prípadoch
+ * vrátené aj ako reťazec, preto podporujeme oba formáty.
+ */
+function toNonNegativeInteger(
+  value: unknown,
+  fallback: number,
+): number {
+  const parsedValue =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' &&
+          value.trim().length > 0
+        ? Number(value)
+        : Number.NaN;
+
+  if (!Number.isFinite(parsedValue)) {
+    return fallback;
+  }
+
+  return Math.max(
+    0,
+    Math.trunc(parsedValue),
+  );
+}
+
+/**
+ * Prevedie hodnotu na boolean bez použitia truthy/falsy skratiek.
+ */
+function toBoolean(
+  value: unknown,
+  fallback: boolean,
+): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (value === 'true' || value === 1) {
+    return true;
+  }
+
+  if (value === 'false' || value === 0) {
+    return false;
+  }
+
+  return fallback;
+}
+
+/**
+ * Bezpečne načíta identifikátor balíka.
+ */
+function toPlanId(
+  value: unknown,
+): string {
+  if (
+    typeof value === 'string' &&
+    value.trim().length > 0
+  ) {
+    return value.trim();
+  }
+
+  return DEFAULT_ENTITLEMENTS.planId;
+}
+
+/**
+ * Prevedie výsledok z lib/entitlements.ts na presný verejný kontrakt API.
+ *
+ * Frontend dostane iba polia, ktoré potrebuje na rozhodovanie o prístupe.
+ * Interné polia, Set objekt s funkciami ani databázové údaje sa nevracajú.
+ */
+function serializeEntitlements(
+  value: unknown,
+): EntitlementsResponse {
+  if (!isRecord(value)) {
+    throw new Error(
+      'INVALID_ENTITLEMENTS_RESPONSE',
+    );
+  }
+
+  const isAdmin = toBoolean(
+    value.isAdmin,
+    DEFAULT_ENTITLEMENTS.isAdmin,
+  );
+
+  /*
+   * hasUnlimitedAccess má prednosť, ak ho lib/entitlements.ts vracia.
+   * Fallback na isAdmin zachová administrátorovi neobmedzený prístup
+   * aj počas postupnej migrácie staršej verzie entitlement služby.
+   */
+  const hasUnlimitedAccess = toBoolean(
+    value.hasUnlimitedAccess,
+    isAdmin,
+  );
+
+  return {
+    planId: toPlanId(
+      value.planId,
+    ),
+    isAdmin,
+    hasUnlimitedAccess,
+    promptLimit: toNonNegativeInteger(
+      value.promptLimit,
+      DEFAULT_ENTITLEMENTS.promptLimit,
+    ),
+    promptsUsed: toNonNegativeInteger(
+      value.promptsUsed,
+      DEFAULT_ENTITLEMENTS.promptsUsed,
+    ),
+    attachmentLimit: toNonNegativeInteger(
+      value.attachmentLimit,
+      DEFAULT_ENTITLEMENTS.attachmentLimit,
+    ),
+    basePageLimit: toNonNegativeInteger(
+      value.basePageLimit,
+      DEFAULT_ENTITLEMENTS.basePageLimit,
+    ),
+    extraPageLimit: toNonNegativeInteger(
+      value.extraPageLimit,
+      DEFAULT_ENTITLEMENTS.extraPageLimit,
+    ),
+    pagesUsed: toNonNegativeInteger(
+      value.pagesUsed,
+      DEFAULT_ENTITLEMENTS.pagesUsed,
+    ),
+  };
+}
+
+/**
+ * Vytvorí alebo prevezme bezpečný identifikátor požiadavky.
  */
 function resolveRequestId(
   request: NextRequest,
 ): string {
   const incomingRequestId =
-    request.headers.get('x-request-id');
+    request.headers
+      .get('x-request-id')
+      ?.trim()
+      .replace(
+        /[^a-zA-Z0-9._:-]/g,
+        '',
+      )
+      .slice(0, 128);
 
-  if (incomingRequestId) {
-    const sanitizedRequestId =
-      incomingRequestId
-        .trim()
-        .replace(
-          /[^a-zA-Z0-9._:-]/g,
-          '',
-        )
-        .slice(0, 128);
-
-    if (sanitizedRequestId.length > 0) {
-      return sanitizedRequestId;
-    }
-  }
-
-  return crypto.randomUUID();
+  return incomingRequestId || randomUUID();
 }
 
 /**
- * Hlavičky zabraňujúce uloženiu používateľských oprávnení
- * do cache prehliadača, CDN alebo proxy servera.
+ * Používateľské limity ani oprávnenia sa nesmú cacheovať
+ * v prehliadači, CDN, Verceli ani proxy vrstve.
  */
-function createResponseHeaders(
+function createNoStoreHeaders(
   requestId: string,
 ): Headers {
   const headers = new Headers();
 
   headers.set(
     'Cache-Control',
-    [
-      'private',
-      'no-store',
-      'no-cache',
-      'max-age=0',
-      'must-revalidate',
-    ].join(', '),
+    'private, no-store, no-cache, max-age=0, must-revalidate',
   );
-
-  headers.set('Pragma', 'no-cache');
-  headers.set('Expires', '0');
+  headers.set(
+    'CDN-Cache-Control',
+    'no-store',
+  );
+  headers.set(
+    'Vercel-CDN-Cache-Control',
+    'no-store',
+  );
+  headers.set(
+    'Surrogate-Control',
+    'no-store',
+  );
+  headers.set(
+    'Pragma',
+    'no-cache',
+  );
+  headers.set(
+    'Expires',
+    '0',
+  );
   headers.set(
     'Vary',
     'Cookie, Authorization',
+  );
+  headers.set(
+    'X-Content-Type-Options',
+    'nosniff',
   );
   headers.set(
     'X-Request-Id',
@@ -180,72 +271,60 @@ function createResponseHeaders(
   return headers;
 }
 
-/**
- * Prevedenie entitlement objektu na JSON kompatibilnú štruktúru.
- *
- * Set<FeatureKey> sa prevedie na zoradené pole.
- */
-function serializeEntitlements(
-  entitlements: CurrentEntitlementsResult,
-): SerializedEntitlements {
-  const {
-    features,
-    addonIds,
-    ...remainingEntitlements
-  } = entitlements;
+function getErrorMetadata(
+  error: unknown,
+): ErrorWithMetadata {
+  if (!isRecord(error)) {
+    return {};
+  }
 
   return {
-    ...remainingEntitlements,
-    addonIds: [...addonIds],
-    features: Array.from(features).sort(
-      (firstFeature, secondFeature) =>
-        String(firstFeature).localeCompare(
-          String(secondFeature),
-        ),
-    ),
+    code: error.code,
+    status: error.status,
+    message: error.message,
+    name: error.name,
   };
 }
 
 /**
- * Overenie, či chyba súvisí s neprihláseným používateľom.
- *
- * Podporuje:
- * - UnauthenticatedError z lib/entitlements.ts,
- * - pôvodnú chybu Error('UNAUTHENTICATED'),
- * - bežné Supabase autentifikačné chyby.
+ * Rozpozná chyby chýbajúcej alebo neplatnej používateľskej relácie.
  */
 function isUnauthenticatedError(
   error: unknown,
 ): boolean {
-  const errorCode =
-    getStringProperty(error, 'code');
+  const metadata =
+    getErrorMetadata(error);
 
-  const errorMessage =
+  const code =
+    typeof metadata.code === 'string'
+      ? metadata.code.toUpperCase()
+      : '';
+
+  const status =
+    typeof metadata.status === 'number'
+      ? metadata.status
+      : Number.NaN;
+
+  const name =
+    typeof metadata.name === 'string'
+      ? metadata.name.toLowerCase()
+      : '';
+
+  const message =
     error instanceof Error
-      ? error.message
-      : getStringProperty(
-          error,
-          'message',
-        );
-
-  const errorStatus =
-    getNumberProperty(error, 'status');
+      ? error.message.toLowerCase()
+      : typeof metadata.message === 'string'
+        ? metadata.message.toLowerCase()
+        : '';
 
   if (
-    errorCode === 'UNAUTHENTICATED' ||
-    errorStatus === 401
+    code === 'UNAUTHENTICATED' ||
+    code === 'AUTH_SESSION_MISSING' ||
+    status === 401 ||
+    name.includes('unauthenticated')
   ) {
     return true;
   }
-
-  if (!errorMessage) {
-    return false;
-  }
-
-  const normalizedMessage =
-    errorMessage
-      .trim()
-      .toLowerCase();
 
   return [
     'unauthenticated',
@@ -256,51 +335,11 @@ function isUnauthenticatedError(
     'invalid token',
     'user not found',
   ].some((knownMessage) =>
-    normalizedMessage.includes(
-      knownMessage,
-    ),
+    message.includes(knownMessage),
   );
 }
 
-/**
- * Prevod chyby na bezpečnú HTTP odpoveď.
- */
-function describeError(
-  error: unknown,
-): ErrorDescriptor {
-  if (isUnauthenticatedError(error)) {
-    return {
-      status: 401,
-      code: 'UNAUTHENTICATED',
-      message:
-        'Pre načítanie oprávnení sa musíte prihlásiť.',
-    };
-  }
-
-  if (error instanceof Error) {
-    return {
-      status: 500,
-      code: 'ENTITLEMENTS_LOAD_FAILED',
-      message:
-        'Používateľské oprávnenia sa nepodarilo načítať.',
-    };
-  }
-
-  return {
-    status: 500,
-    code: 'INTERNAL_SERVER_ERROR',
-    message:
-      'Pri spracovaní požiadavky nastala neočakávaná chyba.',
-  };
-}
-
-/**
- * Detail chyby sa vracia klientovi iba vo vývojovom prostredí.
- *
- * V produkcii sa interné databázové a autentifikačné správy
- * nesmú zobrazovať používateľovi.
- */
-function getDevelopmentErrorDetails(
+function getDevelopmentDetails(
   error: unknown,
 ): string | undefined {
   if (
@@ -321,44 +360,33 @@ function getDevelopmentErrorDetails(
   }
 }
 
-/**
- * Bezpečné zapísanie chyby do serverových logov.
- */
 function logRouteError(
   error: unknown,
   requestId: string,
 ): void {
-  if (error instanceof Error) {
-    console.error(
-      '[GET /api/entitlements/me] Načítanie oprávnení zlyhalo.',
-      {
-        requestId,
-        name: error.name,
-        message: error.message,
-        code: getStringProperty(
-          error,
-          'code',
-        ),
-        status: getNumberProperty(
-          error,
-          'status',
-        ),
-        stack:
-          process.env.NODE_ENV ===
-          'development'
-            ? error.stack
-            : undefined,
-      },
-    );
-
-    return;
-  }
+  const metadata =
+    getErrorMetadata(error);
 
   console.error(
-    '[GET /api/entitlements/me] Nastala neznáma chyba.',
+    '[GET /api/entitlements/me] Načítanie oprávnení zlyhalo.',
     {
       requestId,
-      error,
+      name:
+        error instanceof Error
+          ? error.name
+          : metadata.name,
+      message:
+        error instanceof Error
+          ? error.message
+          : metadata.message,
+      code: metadata.code,
+      status: metadata.status,
+      stack:
+        process.env.NODE_ENV ===
+          'development' &&
+        error instanceof Error
+          ? error.stack
+          : undefined,
     },
   );
 }
@@ -366,46 +394,48 @@ function logRouteError(
 /**
  * GET /api/entitlements/me
  *
- * Vráti oprávnenia aktuálne prihláseného používateľa:
+ * Autoritatívny serverový zdroj aktuálneho stavu používateľa.
  *
- * - identifikátor používateľa,
- * - aktivovaný balík,
- * - aktivované doplnky,
- * - dostupné funkcie,
- * - limit promptov,
- * - spotrebované prompty,
- * - zostávajúce prompty,
- * - limit príloh.
+ * Úspešná odpoveď:
+ * {
+ *   "planId": "free",
+ *   "isAdmin": false,
+ *   "hasUnlimitedAccess": false,
+ *   "promptLimit": 3,
+ *   "promptsUsed": 0,
+ *   "attachmentLimit": 1,
+ *   "basePageLimit": 3,
+ *   "extraPageLimit": 0,
+ *   "pagesUsed": 0
+ * }
  */
 export async function GET(
   request: NextRequest,
-): Promise<NextResponse<
-  SuccessResponse | ErrorResponse
->> {
+): Promise<
+  NextResponse<
+    EntitlementsResponse | ErrorResponse
+  >
+> {
   const requestId =
     resolveRequestId(request);
 
   const headers =
-    createResponseHeaders(requestId);
+    createNoStoreHeaders(requestId);
 
   try {
-    const entitlements =
+    /*
+     * getCurrentEntitlements() musí načítať používateľa zo serverovej
+     * Supabase relácie a následne overiť jeho údaje v databáze.
+     *
+     * Endpoint úmyselne neprijíma planId, admin flag ani limity z klienta.
+     */
+    const currentEntitlements =
       await getCurrentEntitlements();
 
-    const serializedEntitlements =
+    const response =
       serializeEntitlements(
-        entitlements,
+        currentEntitlements,
       );
-
-    const response: SuccessResponse = {
-      success: true,
-      ...serializedEntitlements,
-      meta: {
-        requestId,
-        generatedAt:
-          new Date().toISOString(),
-      },
-    };
 
     return NextResponse.json(
       response,
@@ -420,35 +450,50 @@ export async function GET(
       requestId,
     );
 
-    const errorDescriptor =
-      describeError(error);
+    if (isUnauthenticatedError(error)) {
+      const response: ErrorResponse = {
+        error: 'UNAUTHENTICATED',
+        message:
+          'Pre načítanie používateľských oprávnení sa musíte prihlásiť a mať potvrdený účet.',
+        requestId,
+      };
+
+      return NextResponse.json(
+        response,
+        {
+          status: 401,
+          headers,
+        },
+      );
+    }
+
+    const isInvalidResponse =
+      error instanceof Error &&
+      error.message ===
+        'INVALID_ENTITLEMENTS_RESPONSE';
 
     const details =
-      getDevelopmentErrorDetails(
-        error,
-      );
+      getDevelopmentDetails(error);
 
     const response: ErrorResponse = {
-      success: false,
-      error: {
-        code:
-          errorDescriptor.code,
-        message:
-          errorDescriptor.message,
-        requestId,
-        ...(details
-          ? {
-              details,
-            }
-          : {}),
-      },
+      error: isInvalidResponse
+        ? 'INVALID_ENTITLEMENTS_RESPONSE'
+        : 'ENTITLEMENTS_LOAD_FAILED',
+      message: isInvalidResponse
+        ? 'Server vrátil neplatný formát používateľských oprávnení.'
+        : 'Používateľské oprávnenia sa nepodarilo načítať.',
+      requestId,
+      ...(details
+        ? {
+            details,
+          }
+        : {}),
     };
 
     return NextResponse.json(
       response,
       {
-        status:
-          errorDescriptor.status,
+        status: 500,
         headers,
       },
     );

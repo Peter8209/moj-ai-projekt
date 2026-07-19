@@ -34,8 +34,13 @@ type EntitlementsResponse = {
   planId: string;
   isAdmin: boolean;
   hasUnlimitedAccess: boolean;
-  promptLimit: number;
+
+  /** null = neobmedzený počet promptov */
+  promptLimit: number | null;
   promptsUsed: number;
+  promptsRemaining: number | null;
+  promptLimitReached: boolean;
+
   attachmentLimit: number;
   basePageLimit: number;
   extraPageLimit: number;
@@ -155,35 +160,72 @@ function serializeEntitlements(
     );
   }
 
-  const isAdmin = toBoolean(
-    value.isAdmin,
-    DEFAULT_ENTITLEMENTS.isAdmin,
-  );
+  const sourcePlanId = toPlanId(value.planId);
 
   /*
-   * hasUnlimitedAccess má prednosť, ak ho lib/entitlements.ts vracia.
-   * Fallback na isAdmin zachová administrátorovi neobmedzený prístup
-   * aj počas postupnej migrácie staršej verzie entitlement služby.
+   * ADMIN sa musí rozpoznať tromi kompatibilnými spôsobmi:
+   * - isAdmin z lib/entitlements.ts,
+   * - hasUnlimitedAccess zo serverovej entitlement služby,
+   * - interný planId === 'admin'.
+   *
+   * Frontend ani starší fallback už potom nemôžu zmeniť null limit
+   * späť na FREE hodnotu 3.
    */
-  const hasUnlimitedAccess = toBoolean(
-    value.hasUnlimitedAccess,
-    isAdmin,
+  const sourceIsAdmin = toBoolean(
+    value.isAdmin,
+    sourcePlanId === 'admin',
   );
 
+  const sourceHasUnlimitedAccess = toBoolean(
+    value.hasUnlimitedAccess,
+    sourceIsAdmin,
+  );
+
+  const isAdmin =
+    sourceIsAdmin ||
+    sourceHasUnlimitedAccess ||
+    sourcePlanId === 'admin';
+
+  const hasUnlimitedAccess =
+    isAdmin || sourceHasUnlimitedAccess;
+
+  const promptsUsed = hasUnlimitedAccess
+    ? 0
+    : toNonNegativeInteger(
+        value.promptsUsed,
+        DEFAULT_ENTITLEMENTS.promptsUsed,
+      );
+
+  /*
+   * null je platná obchodná hodnota a znamená neobmedzené prompty.
+   * Nesmie sa poslať do toNonNegativeInteger(), pretože tá by null
+   * zmenila na FREE fallback 3.
+   */
+  const promptLimit = hasUnlimitedAccess
+    ? null
+    : value.promptLimit === null
+      ? null
+      : toNonNegativeInteger(
+          value.promptLimit,
+          DEFAULT_ENTITLEMENTS.promptLimit,
+        );
+
+  const promptsRemaining =
+    promptLimit === null
+      ? null
+      : Math.max(promptLimit - promptsUsed, 0);
+
   return {
-    planId: toPlanId(
-      value.planId,
-    ),
+    planId: isAdmin ? 'admin' : sourcePlanId,
     isAdmin,
     hasUnlimitedAccess,
-    promptLimit: toNonNegativeInteger(
-      value.promptLimit,
-      DEFAULT_ENTITLEMENTS.promptLimit,
-    ),
-    promptsUsed: toNonNegativeInteger(
-      value.promptsUsed,
-      DEFAULT_ENTITLEMENTS.promptsUsed,
-    ),
+
+    promptLimit,
+    promptsUsed,
+    promptsRemaining,
+    promptLimitReached:
+      promptLimit !== null && promptsUsed >= promptLimit,
+
     attachmentLimit: toNonNegativeInteger(
       value.attachmentLimit,
       DEFAULT_ENTITLEMENTS.attachmentLimit,
@@ -401,8 +443,10 @@ function logRouteError(
  *   "planId": "free",
  *   "isAdmin": false,
  *   "hasUnlimitedAccess": false,
- *   "promptLimit": 3,
+ *   "promptLimit": null,
  *   "promptsUsed": 0,
+ *   "promptsRemaining": null,
+ *   "promptLimitReached": false,
  *   "attachmentLimit": 1,
  *   "basePageLimit": 3,
  *   "extraPageLimit": 0,

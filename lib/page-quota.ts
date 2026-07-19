@@ -46,15 +46,13 @@ export type PageAddonId = keyof typeof ADDON_PAGE_AMOUNTS;
  * Jednotný serverový stav stránkovej kvóty.
  *
  * Pri administrátorovi:
+ * - planId = 'admin',
  * - isAdmin = true,
  * - isUnlimited = true,
+ * - hasUnlimitedAccess = true,
+ * - všetky číselné hodnoty kvóty sú 0,
  * - pageLimitReached = false,
- * - stránky sa neodpočítavajú,
- * - pageLimit a pagesRemaining používajú bezpečnú vysokú číselnú hodnotu,
- *   aby zostali kompatibilné s existujúcim kódom, ktorý očakáva number.
- *
- * Frontend má pri isUnlimited === true zobrazovať text
- * „Neobmedzený administrátorský prístup“ namiesto číselnej hodnoty.
+ * - stránky sa neodpočítavajú ani nezapisujú do logu spotreby.
  */
 export type PageQuota = {
   /** Aktívny identifikátor balíka používateľa. */
@@ -65,6 +63,9 @@ export type PageQuota = {
 
   /** Stránkový limit sa na používateľa nevzťahuje. */
   isUnlimited: boolean;
+
+  /** Používateľ má neobmedzený administrátorský prístup. */
+  hasUnlimitedAccess: boolean;
 
   /** Počet strán zahrnutý v základnom balíku. */
   basePageLimit: number;
@@ -137,8 +138,6 @@ type RpcBalanceRow = {
   page_limit_reached?: unknown;
 
   is_admin?: unknown;
-  admin_access?: unknown;
-  is_unlimited?: unknown;
 };
 
 type PageBalanceDatabaseRow = {
@@ -147,6 +146,12 @@ type PageBalanceDatabaseRow = {
   extra_page_limit?: unknown;
   used_pages?: unknown;
   pages_used?: unknown;
+  is_admin?: unknown;
+};
+
+type AdminEntitlement = {
+  is_admin?: unknown;
+  plan_id?: unknown;
 };
 
 type SupabaseServerClient = Awaited<
@@ -157,14 +162,6 @@ const DEFAULT_PLAN_ID: PagePlanId = 'free';
 const DEFAULT_MODULE = 'unknown';
 const MAX_MODULE_LENGTH = 100;
 const MAX_REQUEST_ID_LENGTH = 255;
-
-/**
- * Vysoká bezpečná číselná hodnota používaná pre administrátora.
- *
- * Number.MAX_SAFE_INTEGER zachová spätnú kompatibilitu s existujúcimi
- * miestami aplikácie, ktoré očakávajú number a vykonávajú porovnania.
- */
-const UNLIMITED_NUMERIC_PAGE_VALUE = Number.MAX_SAFE_INTEGER;
 
 /**
  * Chyba vyvolaná pri vyčerpaní stránkového limitu.
@@ -263,6 +260,19 @@ function normalizePlanId(value: unknown): string {
   return normalized || DEFAULT_PLAN_ID;
 }
 
+/**
+ * Administrátora určuje explicitný databázový príznak alebo plán admin.
+ */
+function isAdminEntitlement(
+  entitlement: AdminEntitlement | null | undefined,
+): boolean {
+  const isAdmin =
+    entitlement?.is_admin === true ||
+    entitlement?.plan_id === 'admin';
+
+  return isAdmin;
+}
+
 /** Vráti predvolený počet strán podľa plan_id. */
 function getDefaultBasePageLimit(planId: string): number {
   if (isKnownPlanId(planId)) {
@@ -335,6 +345,7 @@ function createDefaultPageQuota(): PageQuota {
     planId: DEFAULT_PLAN_ID,
     isAdmin: false,
     isUnlimited: false,
+    hasUnlimitedAccess: false,
     basePageLimit,
     extraPageLimit: 0,
     pageLimit: basePageLimit,
@@ -345,31 +356,26 @@ function createDefaultPageQuota(): PageQuota {
 }
 
 /**
- * Vytvorí neobmedzenú kvótu pre administrátora.
+ * Vytvorí administrátorskú kvótu bez číselného limitu a spotreby.
+ *
+ * Nulové číselné hodnoty sú zámerné. Frontend a API majú stav
+ * administrátora určovať cez isAdmin/isUnlimited/hasUnlimitedAccess,
+ * nie cez porovnávanie pageLimit alebo pagesRemaining.
  */
-function createUnlimitedPageQuota({
-  planId,
-  basePageLimit,
-  extraPageLimit,
-  pagesUsed,
-}: {
-  planId: string;
-  basePageLimit: number;
-  extraPageLimit: number;
-  pagesUsed: number;
-}): PageQuota {
+function createAdminPageQuota(): PageQuota {
   return {
-    planId,
+    planId: 'admin',
+
     isAdmin: true,
     isUnlimited: true,
-    basePageLimit: toSafeInteger(
-      basePageLimit,
-      getDefaultBasePageLimit(planId),
-    ),
-    extraPageLimit: toSafeInteger(extraPageLimit, 0),
-    pageLimit: UNLIMITED_NUMERIC_PAGE_VALUE,
-    pagesUsed: toSafeInteger(pagesUsed, 0),
-    pagesRemaining: UNLIMITED_NUMERIC_PAGE_VALUE,
+    hasUnlimitedAccess: true,
+
+    basePageLimit: 0,
+    extraPageLimit: 0,
+    pageLimit: 0,
+
+    pagesUsed: 0,
+    pagesRemaining: 0,
     pageLimitReached: false,
   };
 }
@@ -384,12 +390,17 @@ function mapBalance(
     return createDefaultPageQuota();
   }
 
-  const databaseAdmin =
-    toSafeBoolean(row.is_admin, false) ||
-    toSafeBoolean(row.admin_access, false) ||
-    toSafeBoolean(row.is_unlimited, false);
-
   const planId = normalizePlanId(row.plan_id);
+
+  const isAdmin = isAdminEntitlement({
+    is_admin: row.is_admin,
+    plan_id: planId,
+  });
+
+  if (isAdmin) {
+    return createAdminPageQuota();
+  }
+
   const defaultBasePageLimit = getDefaultBasePageLimit(planId);
 
   const basePageLimit = toSafeInteger(
@@ -406,15 +417,6 @@ function mapBalance(
     row.used_pages ?? row.pages_used,
     0,
   );
-
-  if (databaseAdmin) {
-    return createUnlimitedPageQuota({
-      planId,
-      basePageLimit,
-      extraPageLimit,
-      pagesUsed,
-    });
-  }
 
   const calculatedPageLimit = basePageLimit + extraPageLimit;
 
@@ -457,6 +459,7 @@ function mapBalance(
     planId,
     isAdmin: false,
     isUnlimited: false,
+    hasUnlimitedAccess: false,
     basePageLimit,
     extraPageLimit,
     pageLimit,
@@ -532,6 +535,7 @@ async function loadPageBalance({
         'base_page_limit',
         'extra_page_limit',
         'used_pages',
+        'is_admin',
       ].join(', '),
     )
     .eq('user_id', userId)
@@ -558,6 +562,7 @@ async function loadPageBalance({
         'base_page_limit',
         'extra_page_limit',
         'pages_used',
+        'is_admin',
       ].join(', '),
     )
     .eq('user_id', userId)
@@ -629,14 +634,6 @@ export function getOutputTokenLimit(
     return 0;
   }
 
-  /**
-   * Pri administrátorskej vysokej hodnote nie je potrebné násobiť
-   * Number.MAX_SAFE_INTEGER hodnotou TOKENS_PER_PAGE.
-   */
-  if (safeRemainingPages >= UNLIMITED_NUMERIC_PAGE_VALUE) {
-    return safeRequestedTokenLimit;
-  }
-
   const quotaTokenLimit = safeRemainingPages * TOKENS_PER_PAGE;
 
   return Math.min(
@@ -648,22 +645,19 @@ export function getOutputTokenLimit(
 /**
  * Načíta aktuálnu stránkovú kvótu prihláseného používateľa.
  *
- * Administrátor sa identifikuje cez lib/entitlements.ts a okamžite
- * dostane neobmedzenú kvótu bez kontroly databázového zostatku.
+ * Administrátor sa identifikuje cez is_admin === true alebo
+ * plan_id === 'admin' a okamžite dostane bypass bez výpočtu kvóty.
  */
 export async function getCurrentPageQuota(): Promise<PageQuota> {
   const entitlements = await getCurrentEntitlements();
 
-  if (
-    entitlements.isAdmin ||
-    entitlements.hasUnlimitedAccess
-  ) {
-    return createUnlimitedPageQuota({
-      planId: entitlements.planId,
-      basePageLimit: entitlements.basePageLimit,
-      extraPageLimit: entitlements.extraPageLimit,
-      pagesUsed: entitlements.pagesUsed,
-    });
+  const isAdmin = isAdminEntitlement({
+    is_admin: entitlements.isAdmin,
+    plan_id: entitlements.planId,
+  });
+
+  if (isAdmin) {
+    return createAdminPageQuota();
   }
 
   const supabase = await createSupabaseServerClient();
@@ -694,6 +688,7 @@ export async function getCurrentPageQuota(): Promise<PageQuota> {
       base_page_limit: basePageLimit,
       extra_page_limit: extraPageLimit,
       used_pages: pagesUsed,
+      is_admin: entitlements.isAdmin,
     });
   }
 
@@ -702,6 +697,7 @@ export async function getCurrentPageQuota(): Promise<PageQuota> {
     base_page_limit: data.base_page_limit,
     extra_page_limit: data.extra_page_limit,
     used_pages: data.used_pages ?? data.pages_used,
+    is_admin: data.is_admin,
   });
 }
 
@@ -711,7 +707,7 @@ export async function getCurrentPageQuota(): Promise<PageQuota> {
 export async function requireAvailablePages(): Promise<PageQuota> {
   const quota = await getCurrentPageQuota();
 
-  if (quota.isUnlimited || quota.isAdmin) {
+  if (quota.isAdmin || quota.isUnlimited) {
     return quota;
   }
 
@@ -749,26 +745,23 @@ export async function consumePagesForOutput({
     return getCurrentPageQuota();
   }
 
+  /**
+   * Administrátorský bypass musí prebehnúť pred normalizáciou údajov
+   * pre zápis aj pred volaním RPC funkcie.
+   */
+  const currentQuota = await getCurrentPageQuota();
+
+  if (currentQuota.isAdmin || currentQuota.isUnlimited) {
+    return {
+      ...currentQuota,
+      pagesUsed: 0,
+      pagesRemaining: 0,
+      pageLimitReached: false,
+    };
+  }
+
   const safeModule = normalizeModule(module);
   const safeRequestId = normalizeRequestId(requestId);
-
-  /**
-   * Najskôr overíme administrátorský stav. Administrátor nesmie
-   * vstúpiť do databázovej spotreby strán.
-   */
-  const entitlements = await getCurrentEntitlements();
-
-  if (
-    entitlements.isAdmin ||
-    entitlements.hasUnlimitedAccess
-  ) {
-    return createUnlimitedPageQuota({
-      planId: entitlements.planId,
-      basePageLimit: entitlements.basePageLimit,
-      extraPageLimit: entitlements.extraPageLimit,
-      pagesUsed: entitlements.pagesUsed,
-    });
-  }
 
   const supabase = await createSupabaseServerClient();
 
@@ -823,11 +816,16 @@ export async function consumePagesForOutput({
   const quota = mapBalance(rawRow);
 
   /**
-   * Ak novšia RPC funkcia sama vráti admin_access/is_admin,
-   * výsledok sa bezpečne prevedie na neobmedzenú kvótu.
+   * Ak RPC funkcia vráti is_admin === true alebo plan_id === 'admin',
+   * výsledok sa bezpečne prevedie na administrátorský bypass.
    */
-  if (quota.isUnlimited || quota.isAdmin) {
-    return quota;
+  if (quota.isAdmin || quota.isUnlimited) {
+    return {
+      ...quota,
+      pagesUsed: 0,
+      pagesRemaining: 0,
+      pageLimitReached: false,
+    };
   }
 
   /** Dodatočná bezpečnostná kontrola. */

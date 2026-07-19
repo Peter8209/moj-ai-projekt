@@ -1,68 +1,111 @@
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import 'server-only';
+
+import {
+  createClient as createSupabaseClient,
+  type SupabaseClient,
+} from '@supabase/supabase-js';
 
 /**
- * Supabase ADMIN klient pre serverové operácie.
+ * Jediná zdieľaná inštancia administrátorského Supabase klienta.
  *
- * Tento klient používa SUPABASE_SERVICE_ROLE_KEY.
+ * Klient sa vytvorí až pri prvom použití a následne sa opakovane
+ * používa počas životnosti serverovej inštancie.
+ */
+let adminClient: SupabaseClient | null = null;
+
+/**
+ * Vytvorí alebo vráti existujúceho Supabase ADMIN klienta.
  *
- * Používaj ho iba na serveri:
+ * Tento klient používa SUPABASE_SERVICE_ROLE_KEY a obchádza RLS.
+ *
+ * Používajte ho iba v serverovom prostredí:
  * - app/api/.../route.ts
  * - server actions
  * - Stripe webhooky
  * - interné administrátorské operácie
- * - mazanie účtov
+ * - aktivácia zakúpených balíkov
+ * - aktualizácia používateľských oprávnení
+ * - mazanie používateľských účtov
  * - mazanie dokumentov
  * - zápis do tabuliek mimo RLS obmedzení
  *
- * Nikdy ho nepoužívaj v klientskych komponentoch s 'use client',
- * pretože service role key má plné oprávnenia k databáze.
+ * Nikdy ho nepoužívajte v klientskych komponentoch označených
+ * direktívou 'use client'. Service role key poskytuje plný prístup
+ * k databáze a nesmie sa dostať do prehliadača.
  */
-export function createAdminClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+export function createAdminClient(): SupabaseClient {
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl) {
     throw new Error(
-      'Missing NEXT_PUBLIC_SUPABASE_URL. Skontroluj .env.local alebo premenné vo Verceli.',
+      'Chýba NEXT_PUBLIC_SUPABASE_URL. Skontrolujte súbor .env.local alebo environment premenné vo Verceli.',
     );
   }
 
   if (!serviceRoleKey) {
     throw new Error(
-      'Missing SUPABASE_SERVICE_ROLE_KEY. Skontroluj .env.local alebo premenné vo Verceli.',
+      'Chýba SUPABASE_SERVICE_ROLE_KEY. Skontrolujte súbor .env.local alebo environment premenné vo Verceli.',
     );
   }
 
-  return createSupabaseClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      detectSessionInUrl: false,
-    },
-    global: {
-      headers: {
-        'X-Client-Info': 'zedpera-admin-server',
+  if (!adminClient) {
+    adminClient = createSupabaseClient(
+      supabaseUrl,
+      serviceRoleKey,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
+
+        global: {
+          headers: {
+            'X-Client-Info': 'zedpera-admin-server',
+          },
+        },
       },
-    },
-  });
+    );
+  }
+
+  return adminClient;
 }
 
 /**
- * Alias pre existujúce API routes.
+ * Alias zachovávajúci kompatibilitu so súbormi, ktoré importujú:
  *
- * Použitie:
  * import { createClient } from '@/lib/supabase/admin';
  */
-export function createClient() {
+export function createClient(): SupabaseClient {
   return createAdminClient();
 }
 
 /**
- * Explicitný názov pre nové serverové súbory.
+ * Odporúčaný explicitný názov pre nové serverové súbory.
  *
- * Odporúčané použitie:
- * import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+ * Použitie:
+ *
+ * import {
+ *   createSupabaseAdminClient,
+ * } from '@/lib/supabase/admin';
  */
-export function createSupabaseAdminClient() {
+export function createSupabaseAdminClient(): SupabaseClient {
   return createAdminClient();
 }
+
+/**
+ * Typ administrátorského Supabase klienta.
+ *
+ * Môže sa použiť napríklad v pomocných funkciách:
+ *
+ * async function activatePlan(
+ *   supabase: AdminSupabaseClient,
+ * ) {
+ *   // ...
+ * }
+ */
+export type AdminSupabaseClient = SupabaseClient;

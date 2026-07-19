@@ -12,12 +12,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export const maxDuration = 60;
 
-/**
- * Stripe klient sa zámerne nevytvára na top-level.
- * Build tak nespadne v prostredí, v ktorom ešte nie sú dostupné ENV premenné.
- */
 let stripeClient: Stripe | null = null;
 
 // ============================================================
@@ -26,10 +23,22 @@ let stripeClient: Stripe | null = null;
 
 type MetadataRecord = Record<string, string>;
 
-type PaidPlanId = Exclude<PlanId, "free">;
+type PurchasablePlanId = Exclude<PlanId, "free" | "admin">;
+
+class AdminEntitlementProtectedError extends Error {
+  readonly code = "ADMIN_ENTITLEMENT_PROTECTED";
+  readonly userId: string;
+
+  constructor(userId: string) {
+    super("ADMIN_ENTITLEMENT_PROTECTED");
+    this.name = "AdminEntitlementProtectedError";
+    this.userId = userId;
+  }
+}
 
 type EntitlementRow = {
   plan_id: string | null;
+  is_admin: boolean | null;
   addon_ids: string[] | null;
   prompts_used: number | null;
   activated_at: string | null;
@@ -39,7 +48,7 @@ type EntitlementRow = {
 
 type ResolvedPurchase = {
   userId: string;
-  planId: PaidPlanId | null;
+  planId: PurchasablePlanId | null;
   purchasedAddonIds: AddonId[];
   persistentAddonIds: AddonId[];
   extraPageAddonIds: AddonId[];
@@ -55,22 +64,9 @@ type AppliedPurchase = {
   extraPages: number;
 };
 
-type WebhookProcessingResult = {
+type EventProcessingResult = {
   processed: boolean;
-  action:
-    | "checkout_fulfilled"
-    | "checkout_already_fulfilled"
-    | "checkout_payment_pending"
-    | "checkout_payment_failed"
-    | "invoice_paid"
-    | "invoice_already_processed"
-    | "invoice_payment_failed"
-    | "subscription_updated"
-    | "subscription_deleted"
-    | "subscription_delete_ignored"
-    | "ignored"
-    | "unsupported_metadata";
-  reason?: string;
+  reason: string;
   objectId?: string;
   userId?: string;
   planId?: PlanId | null;
@@ -78,38 +74,36 @@ type WebhookProcessingResult = {
   activeAddonIds?: AddonId[];
   extraPages?: number;
   billingStatus?: string;
-  validUntil?: string | null;
+  detail?: string;
 };
 
-type StripeInvoiceCompatibility = Stripe.Invoice & {
-  subscription?: string | Stripe.Subscription | null;
-  subscription_details?: {
-    metadata?: Stripe.Metadata | null;
-  } | null;
+type InvoiceParentShape = {
   parent?: {
     type?: string | null;
     subscription_details?: {
-      subscription?: string | Stripe.Subscription | null;
+      subscription?: string | { id?: string | null } | null;
       metadata?: Stripe.Metadata | null;
     } | null;
   } | null;
 };
 
-type StripeSubscriptionCompatibility = Stripe.Subscription & {
-  current_period_start?: number | null;
+type LegacyInvoiceShape = {
+  subscription?: string | { id?: string | null } | null;
+  subscription_details?: {
+    metadata?: Stripe.Metadata | null;
+  } | null;
+};
+
+type SubscriptionPeriodShape = {
   current_period_end?: number | null;
-  cancel_at?: number | null;
-  cancel_at_period_end?: boolean;
-  ended_at?: number | null;
-  latest_invoice?: string | Stripe.Invoice | null;
-  items: Stripe.Subscription["items"] & {
-    data: Array<
-      Stripe.SubscriptionItem & {
-        current_period_start?: number | null;
-        current_period_end?: number | null;
-      }
-    >;
-  };
+};
+
+type SubscriptionItemPeriodShape = {
+  current_period_end?: number | null;
+};
+
+type LegacyInvoicePaidShape = {
+  paid?: boolean | null;
 };
 
 // ============================================================
@@ -124,15 +118,21 @@ const UUID_PATTERN =
 
 const EXPECTED_CURRENCY = "eur";
 
-/** Úspešná platba už bola použitá na aktiváciu oprávnení. */
-const PAYMENT_APPLIED_KEY = "zedpera_payment_applied";
-const PAYMENT_APPLIED_EVENT_KEY = "zedpera_payment_event_id";
-const PAYMENT_APPLIED_REFERENCE_KEY = "zedpera_payment_reference";
-const PAYMENT_APPLIED_AT_KEY = "zedpera_payment_applied_at";
+const FULFILLED_MARKER_KEY = "zedpera_fulfilled";
+const FULFILLED_EVENT_KEY = "zedpera_fulfilled_event_id";
+const FULFILLED_AT_KEY = "zedpera_fulfilled_at";
 
-/** Neúspešná platba už bola zaevidovaná pre konkrétnu Stripe udalosť. */
-const PAYMENT_FAILED_EVENT_KEY = "zedpera_payment_failed_event_id";
-const PAYMENT_FAILED_AT_KEY = "zedpera_payment_failed_at";
+const PROCESSED_EVENTS_KEY = "zedpera_processed_event_ids";
+const MAX_STORED_EVENT_IDS = 8;
+
+const CANONICAL_USER_ID_KEY = "user_id";
+const CANONICAL_PLAN_ID_KEY = "plan_id";
+const CANONICAL_ADDON_IDS_KEY = "addon_ids";
+
+const TERMINAL_SUBSCRIPTION_STATUSES = new Set<Stripe.Subscription.Status>([
+  "canceled",
+  "incomplete_expired",
+]);
 
 const SUPPORTED_EVENTS = [
   "checkout.session.completed",
@@ -240,6 +240,25 @@ function getObjectId(
   return "";
 }
 
+function requireObjectId(
+  value:
+    | string
+    | {
+        id?: string | null;
+      }
+    | null
+    | undefined,
+  label: string,
+): string {
+  const objectId = getObjectId(value);
+
+  if (!objectId) {
+    throw new Error(`MISSING_${label}_ID`);
+  }
+
+  return objectId;
+}
+
 function normalizeUserId(value: unknown): string {
   const candidate = String(value || "").trim();
 
@@ -256,10 +275,10 @@ function normalizePlanId(value: unknown): PlanId | null {
   return candidate;
 }
 
-function normalizePaidPlanId(value: unknown): PaidPlanId | null {
+function normalizePaidPlanId(value: unknown): PurchasablePlanId | null {
   const planId = normalizePlanId(value);
 
-  if (!planId || planId === "free") {
+  if (!planId || planId === "free" || planId === "admin") {
     return null;
   }
 
@@ -296,8 +315,7 @@ function parseAddonMetadata(value: unknown): AddonId[] {
       return normalizeAddonIds(parsed);
     }
   } catch {
-    // Spätná kompatibilita: addon ID môžu byť oddelené čiarkou,
-    // bodkočiarkou alebo zvislou čiarou.
+    // Staršie metadata môžu byť uložené ako zoznam oddelený čiarkou.
   }
 
   return normalizeAddonIds(
@@ -319,13 +337,13 @@ function toSafeInteger(value: unknown, fallback = 0): number {
 }
 
 function unixToIso(value: unknown): string | null {
-  const seconds = Number(value);
+  const unixSeconds = Number(value);
 
-  if (!Number.isFinite(seconds) || seconds <= 0) {
+  if (!Number.isFinite(unixSeconds) || unixSeconds <= 0) {
     return null;
   }
 
-  return new Date(seconds * 1_000).toISOString();
+  return new Date(unixSeconds * 1_000).toISOString();
 }
 
 function isPersistentAddon(addonId: AddonId): boolean {
@@ -347,26 +365,65 @@ function normalizeExistingPlanId(value: unknown): PlanId {
   return normalizePlanId(value) || "free";
 }
 
-function isPermanentMetadataError(error: unknown): boolean {
-  const message = getErrorMessage(error);
+function getPlanPageLimit(planId: PlanId): number | null {
+  const plan = PLANS[planId] as unknown as Record<string, unknown>;
+  const candidates = [
+    plan.pageLimit,
+    plan.basePageLimit,
+    plan.pages,
+    plan.maxPages,
+  ];
 
-  return [
-    "USER_ID_METADATA_MISMATCH",
-    "MISSING_OR_INVALID_USER_ID",
-    "UNSUPPORTED_PLAN_ID:",
-    "PAID_CHECKOUT_CANNOT_ACTIVATE_FREE_PLAN",
-    "MISSING_PURCHASE_METADATA",
-    "MISSING_PAID_PLAN_ID",
-  ].some((code) => message.includes(code));
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+
+    if (Number.isFinite(value) && value >= 0) {
+      return Math.floor(value);
+    }
+  }
+
+  return null;
+}
+
+function getSubscriptionPeriodEnd(
+  subscription: Stripe.Subscription | null | undefined,
+): string | null {
+  if (!subscription) {
+    return null;
+  }
+
+  const legacyPeriodEnd = (subscription as unknown as SubscriptionPeriodShape)
+    .current_period_end;
+
+  const itemPeriodEnds = subscription.items.data
+    .map(
+      (item) =>
+        (item as unknown as SubscriptionItemPeriodShape).current_period_end,
+    )
+    .filter(
+      (value): value is number =>
+        typeof value === "number" && Number.isFinite(value) && value > 0,
+    );
+
+  const naturalPeriodEnd = Math.max(
+    typeof legacyPeriodEnd === "number" ? legacyPeriodEnd : 0,
+    ...itemPeriodEnds,
+  );
+
+  const effectivePeriodEnd =
+    subscription.cancel_at &&
+    (naturalPeriodEnd <= 0 || subscription.cancel_at < naturalPeriodEnd)
+      ? subscription.cancel_at
+      : naturalPeriodEnd;
+
+  return unixToIso(effectivePeriodEnd);
 }
 
 function getSubscriptionBillingStatus(
   subscription: Stripe.Subscription,
 ): string {
-  const compatible = subscription as StripeSubscriptionCompatibility;
-
   if (
-    compatible.cancel_at_period_end &&
+    subscription.cancel_at_period_end &&
     (subscription.status === "active" || subscription.status === "trialing")
   ) {
     return "canceling";
@@ -375,108 +432,10 @@ function getSubscriptionBillingStatus(
   return subscription.status;
 }
 
-function getSubscriptionPeriodEndUnix(
-  subscription: Stripe.Subscription,
-): number | null {
-  const compatible = subscription as StripeSubscriptionCompatibility;
+function isInvoicePaid(invoice: Stripe.Invoice): boolean {
+  const legacyPaid = (invoice as unknown as LegacyInvoicePaidShape).paid;
 
-  if (
-    compatible.cancel_at_period_end &&
-    Number.isFinite(Number(compatible.cancel_at)) &&
-    Number(compatible.cancel_at) > 0
-  ) {
-    return Number(compatible.cancel_at);
-  }
-
-  if (
-    Number.isFinite(Number(compatible.current_period_end)) &&
-    Number(compatible.current_period_end) > 0
-  ) {
-    return Number(compatible.current_period_end);
-  }
-
-  const itemPeriodEnds = compatible.items.data
-    .map((item) => Number(item.current_period_end))
-    .filter((value) => Number.isFinite(value) && value > 0);
-
-  if (itemPeriodEnds.length > 0) {
-    return Math.max(...itemPeriodEnds);
-  }
-
-  if (
-    Number.isFinite(Number(compatible.ended_at)) &&
-    Number(compatible.ended_at) > 0
-  ) {
-    return Number(compatible.ended_at);
-  }
-
-  return null;
-}
-
-function getSubscriptionValidUntil(
-  subscription: Stripe.Subscription,
-): string | null {
-  return unixToIso(getSubscriptionPeriodEndUnix(subscription));
-}
-
-function getInvoiceSubscriptionId(invoice: Stripe.Invoice): string {
-  const compatible = invoice as StripeInvoiceCompatibility;
-
-  const parentSubscription =
-    compatible.parent?.type === "subscription_details"
-      ? compatible.parent.subscription_details?.subscription
-      : null;
-
-  return (
-    getObjectId(parentSubscription) || getObjectId(compatible.subscription)
-  );
-}
-
-function getInvoiceSubscriptionMetadata(
-  invoice: Stripe.Invoice,
-): MetadataRecord {
-  const compatible = invoice as StripeInvoiceCompatibility;
-
-  return mergeMetadata(
-    compatible.subscription_details?.metadata,
-    compatible.parent?.type === "subscription_details"
-      ? compatible.parent.subscription_details?.metadata
-      : null,
-  );
-}
-
-function getSubscriptionLatestInvoiceId(
-  subscription: Stripe.Subscription,
-): string {
-  const compatible = subscription as StripeSubscriptionCompatibility;
-
-  return getObjectId(compatible.latest_invoice);
-}
-
-function getExpandedLatestInvoice(
-  subscription: Stripe.Subscription,
-): Stripe.Invoice | null {
-  const compatible = subscription as StripeSubscriptionCompatibility;
-  const latestInvoice = compatible.latest_invoice;
-
-  if (latestInvoice && typeof latestInvoice !== "string") {
-    return latestInvoice;
-  }
-
-  return null;
-}
-
-function isPaymentApplied(
-  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
-): boolean {
-  return normalizeMetadata(metadata)[PAYMENT_APPLIED_KEY] === "true";
-}
-
-function isFailureEventAlreadyRecorded(
-  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
-  eventId: string,
-): boolean {
-  return normalizeMetadata(metadata)[PAYMENT_FAILED_EVENT_KEY] === eventId;
+  return invoice.status === "paid" || legacyPaid === true;
 }
 
 function isCheckoutPaymentCompleted(session: Stripe.Checkout.Session): boolean {
@@ -486,59 +445,136 @@ function isCheckoutPaymentCompleted(session: Stripe.Checkout.Session): boolean {
   );
 }
 
-function isSubscriptionProvisionable(
-  subscription: Stripe.Subscription,
-): boolean {
-  return subscription.status === "active" || subscription.status === "trialing";
+function isPermanentMetadataError(error: unknown): boolean {
+  const message = getErrorMessage(error);
+
+  return [
+    "USER_ID_METADATA_MISMATCH",
+    "MISSING_OR_INVALID_USER_ID",
+    "UNSUPPORTED_PLAN_ID:",
+    "PAID_CHECKOUT_CANNOT_ACTIVATE_FREE_PLAN",
+    "ADMIN_PLAN_NOT_PURCHASABLE",
+    "MISSING_PURCHASE_METADATA",
+  ].some((code) => message.includes(code));
 }
 
-function isSubscriptionDefinitivelyEnded(
-  subscription: Stripe.Subscription,
-): boolean {
-  return (
-    subscription.status === "canceled" ||
-    subscription.status === "incomplete_expired"
+// ============================================================
+// IDEMPOTENCY METADATA
+// ============================================================
+
+function parseProcessedEventIds(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+): string[] {
+  const rawValue = normalizeMetadata(metadata)[PROCESSED_EVENTS_KEY];
+
+  if (!rawValue) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      rawValue
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
   );
 }
 
+function hasProcessedEvent(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+  eventId: string,
+): boolean {
+  return parseProcessedEventIds(metadata).includes(eventId);
+}
+
+function metadataWithProcessedEvent(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+  eventId: string,
+): MetadataRecord {
+  const currentMetadata = normalizeMetadata(metadata);
+  const eventIds = Array.from(
+    new Set([...parseProcessedEventIds(currentMetadata), eventId]),
+  ).slice(-MAX_STORED_EVENT_IDS);
+
+  return {
+    ...currentMetadata,
+    [PROCESSED_EVENTS_KEY]: eventIds.join(","),
+  };
+}
+
+function hasFulfilledMarker(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+): boolean {
+  return normalizeMetadata(metadata)[FULFILLED_MARKER_KEY] === "true";
+}
+
+function metadataWithFulfilledMarker(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+  eventId: string,
+): MetadataRecord {
+  return {
+    ...metadataWithProcessedEvent(metadata, eventId),
+    [FULFILLED_MARKER_KEY]: "true",
+    [FULFILLED_EVENT_KEY]: eventId,
+    [FULFILLED_AT_KEY]: new Date().toISOString(),
+  };
+}
+
 // ============================================================
-// STRIPE OBJECT RETRIEVAL AND METADATA
+// STRIPE OBJECT HELPERS
 // ============================================================
 
-async function retrieveCustomerMetadata(
+async function retrieveCustomer(
   stripe: Stripe,
-  customerValue: string | Stripe.Customer | Stripe.DeletedCustomer | null,
-): Promise<MetadataRecord> {
-  const customerId = getObjectId(customerValue);
-
+  customerId: string,
+): Promise<Stripe.Customer | null> {
   if (!customerId) {
-    return {};
+    return null;
   }
 
-  try {
-    if (typeof customerValue !== "string" && customerValue) {
-      if ("deleted" in customerValue && customerValue.deleted) {
-        return {};
-      }
+  const customer = await stripe.customers.retrieve(customerId);
 
-      return normalizeMetadata((customerValue as Stripe.Customer).metadata);
-    }
-
-    const customer = await stripe.customers.retrieve(customerId);
-
-    if ("deleted" in customer && customer.deleted) {
-      return {};
-    }
-
-    return normalizeMetadata((customer as Stripe.Customer).metadata);
-  } catch (error) {
-    console.warn("STRIPE_WEBHOOK_CUSTOMER_METADATA_WARNING:", {
-      customerId,
-      message: getErrorMessage(error),
-    });
-
-    return {};
+  if ("deleted" in customer && customer.deleted) {
+    return null;
   }
+
+  return customer as Stripe.Customer;
+}
+
+async function retrieveSubscription(
+  stripe: Stripe,
+  subscriptionId: string,
+): Promise<Stripe.Subscription | null> {
+  if (!subscriptionId) {
+    return null;
+  }
+
+  return stripe.subscriptions.retrieve(subscriptionId, {
+    expand: ["customer"],
+  });
+}
+
+function getInvoiceSubscriptionId(invoice: Stripe.Invoice): string {
+  const legacyInvoice = invoice as unknown as LegacyInvoiceShape;
+  const parentInvoice = invoice as unknown as InvoiceParentShape;
+
+  return (
+    getObjectId(legacyInvoice.subscription) ||
+    getObjectId(parentInvoice.parent?.subscription_details?.subscription)
+  );
+}
+
+function getInvoiceSubscriptionMetadata(
+  invoice: Stripe.Invoice,
+): MetadataRecord {
+  const legacyInvoice = invoice as unknown as LegacyInvoiceShape;
+  const parentInvoice = invoice as unknown as InvoiceParentShape;
+
+  return mergeMetadata(
+    legacyInvoice.subscription_details?.metadata,
+    parentInvoice.parent?.subscription_details?.metadata,
+  );
 }
 
 async function getPaymentIntentMetadata(
@@ -569,85 +605,66 @@ async function getPaymentIntentMetadata(
   }
 }
 
-async function retrieveSubscription(
+async function getCustomerMetadataFromSession(
   stripe: Stripe,
-  subscriptionValue: string | Stripe.Subscription | null,
+  session: Stripe.Checkout.Session,
+): Promise<MetadataRecord> {
+  const customerId = getObjectId(session.customer);
+
+  if (!customerId) {
+    return {};
+  }
+
+  try {
+    if (typeof session.customer !== "string" && session.customer) {
+      if ("deleted" in session.customer && session.customer.deleted) {
+        return {};
+      }
+
+      return normalizeMetadata((session.customer as Stripe.Customer).metadata);
+    }
+
+    const customer = await retrieveCustomer(stripe, customerId);
+
+    return normalizeMetadata(customer?.metadata);
+  } catch (error) {
+    console.warn("STRIPE_WEBHOOK_CUSTOMER_METADATA_WARNING:", {
+      customerId,
+      message: getErrorMessage(error),
+    });
+
+    return {};
+  }
+}
+
+async function getSubscriptionFromSession(
+  stripe: Stripe,
+  session: Stripe.Checkout.Session,
 ): Promise<Stripe.Subscription | null> {
-  if (!subscriptionValue) {
+  const subscriptionId = getObjectId(session.subscription);
+
+  if (!subscriptionId) {
     return null;
   }
 
-  if (typeof subscriptionValue !== "string") {
-    return subscriptionValue;
+  if (typeof session.subscription !== "string" && session.subscription) {
+    return session.subscription;
   }
 
-  return stripe.subscriptions.retrieve(subscriptionValue, {
-    expand: ["latest_invoice"],
-  });
+  return retrieveSubscription(stripe, subscriptionId);
 }
 
-async function retrieveCheckoutSession(
-  stripe: Stripe,
-  sessionId: string,
-): Promise<Stripe.Checkout.Session> {
-  return stripe.checkout.sessions.retrieve(sessionId, {
-    expand: [
-      "customer",
-      "payment_intent",
-      "subscription",
-      "subscription.latest_invoice",
-    ],
-  });
-}
+// ============================================================
+// PURCHASE METADATA
+// ============================================================
 
-async function retrieveInvoiceIfNeeded(
-  stripe: Stripe,
-  invoice: Stripe.Invoice,
-): Promise<Stripe.Invoice> {
-  if (invoice.metadata) {
-    return invoice;
-  }
-
-  return stripe.invoices.retrieve(invoice.id);
-}
-
-async function resolvePurchaseMetadata({
-  stripe,
-  session,
-  subscription,
-  invoice,
-  requirePurchaseMetadata = true,
+function resolvePurchaseFromMetadata({
+  metadata,
+  fallbackUserId,
 }: {
-  stripe: Stripe;
-  session?: Stripe.Checkout.Session | null;
-  subscription?: Stripe.Subscription | null;
-  invoice?: Stripe.Invoice | null;
-  requirePurchaseMetadata?: boolean;
-}): Promise<ResolvedPurchase> {
-  const [customerMetadata, paymentIntentMetadata] = await Promise.all([
-    retrieveCustomerMetadata(
-      stripe,
-      (session?.customer ||
-        subscription?.customer ||
-        invoice?.customer ||
-        null) as string | Stripe.Customer | Stripe.DeletedCustomer | null,
-    ),
-    session ? getPaymentIntentMetadata(stripe, session) : Promise.resolve({}),
-  ]);
-
-  /**
-   * Priorita metadata od najvšeobecnejších po najkonkrétnejšie:
-   * Customer -> PaymentIntent -> Subscription -> Invoice snapshot -> Invoice -> Session.
-   */
-  const metadata = mergeMetadata(
-    customerMetadata,
-    paymentIntentMetadata,
-    subscription?.metadata,
-    invoice ? getInvoiceSubscriptionMetadata(invoice) : null,
-    invoice?.metadata,
-    session?.metadata,
-  );
-
+  metadata: MetadataRecord;
+  fallbackUserId?: string | null;
+}): ResolvedPurchase {
   const metadataUserId = normalizeUserId(
     readMetadataValue(metadata, [
       "user_id",
@@ -657,7 +674,7 @@ async function resolvePurchaseMetadata({
     ]),
   );
 
-  const referenceUserId = normalizeUserId(session?.client_reference_id);
+  const referenceUserId = normalizeUserId(fallbackUserId);
 
   if (metadataUserId && referenceUserId && metadataUserId !== referenceUserId) {
     throw new Error("USER_ID_METADATA_MISMATCH");
@@ -686,6 +703,10 @@ async function resolvePurchaseMetadata({
     throw new Error("PAID_CHECKOUT_CANNOT_ACTIVATE_FREE_PLAN");
   }
 
+  if (normalizedPlanId === "admin") {
+    throw new Error("ADMIN_PLAN_NOT_PURCHASABLE");
+  }
+
   const planId = normalizePaidPlanId(normalizedPlanId);
 
   const rawAddons = readMetadataValue(metadata, [
@@ -698,7 +719,7 @@ async function resolvePurchaseMetadata({
 
   const purchasedAddonIds = parseAddonMetadata(rawAddons);
 
-  if (requirePurchaseMetadata && !planId && purchasedAddonIds.length === 0) {
+  if (!planId && purchasedAddonIds.length === 0) {
     throw new Error("MISSING_PURCHASE_METADATA");
   }
 
@@ -716,6 +737,59 @@ async function resolvePurchaseMetadata({
   };
 }
 
+async function resolveCheckoutPurchase({
+  stripe,
+  session,
+}: {
+  stripe: Stripe;
+  session: Stripe.Checkout.Session;
+}): Promise<ResolvedPurchase> {
+  const [customerMetadata, paymentIntentMetadata, subscription] =
+    await Promise.all([
+      getCustomerMetadataFromSession(stripe, session),
+      getPaymentIntentMetadata(stripe, session),
+      getSubscriptionFromSession(stripe, session),
+    ]);
+
+  const metadata = mergeMetadata(
+    customerMetadata,
+    subscription?.metadata,
+    paymentIntentMetadata,
+    session.metadata,
+  );
+
+  return resolvePurchaseFromMetadata({
+    metadata,
+    fallbackUserId: session.client_reference_id,
+  });
+}
+
+async function resolveSubscriptionPurchase({
+  stripe,
+  subscription,
+  additionalMetadata,
+}: {
+  stripe: Stripe;
+  subscription: Stripe.Subscription;
+  additionalMetadata?: MetadataRecord;
+}): Promise<ResolvedPurchase> {
+  const customerId = getObjectId(subscription.customer);
+  const customer =
+    typeof subscription.customer !== "string" && subscription.customer
+      ? "deleted" in subscription.customer && subscription.customer.deleted
+        ? null
+        : (subscription.customer as Stripe.Customer)
+      : await retrieveCustomer(stripe, customerId);
+
+  const metadata = mergeMetadata(
+    customer?.metadata,
+    subscription.metadata,
+    additionalMetadata,
+  );
+
+  return resolvePurchaseFromMetadata({ metadata });
+}
+
 // ============================================================
 // ENTITLEMENTS
 // ============================================================
@@ -730,6 +804,7 @@ async function loadCurrentEntitlement(
     .select(
       [
         "plan_id",
+        "is_admin",
         "addon_ids",
         "prompts_used",
         "activated_at",
@@ -747,7 +822,33 @@ async function loadCurrentEntitlement(
   return data as EntitlementRow | null;
 }
 
-async function upsertPaidEntitlement({
+function isProtectedAdminEntitlement(
+  entitlement: EntitlementRow | null,
+): boolean {
+  return (
+    entitlement?.is_admin === true ||
+    entitlement?.plan_id === "admin"
+  );
+}
+
+async function loadMutableEntitlement(
+  userId: string,
+): Promise<EntitlementRow | null> {
+  const existingEntitlement = await loadCurrentEntitlement(userId);
+
+  if (isProtectedAdminEntitlement(existingEntitlement)) {
+    console.info(
+      "STRIPE_WEBHOOK_ADMIN_ENTITLEMENT_PROTECTED:",
+      userId,
+    );
+
+    throw new AdminEntitlementProtectedError(userId);
+  }
+
+  return existingEntitlement;
+}
+
+async function upsertEntitlementAfterPurchase({
   userId,
   planId,
   persistentAddonIds,
@@ -756,7 +857,7 @@ async function upsertPaidEntitlement({
   resetPrompts,
 }: {
   userId: string;
-  planId: PaidPlanId | null;
+  planId: PurchasablePlanId | null;
   persistentAddonIds: AddonId[];
   billingStatus: string;
   validUntil: string | null;
@@ -766,15 +867,11 @@ async function upsertPaidEntitlement({
   activeAddonIds: AddonId[];
 }> {
   const admin = createAdminClient();
-  const current = await loadCurrentEntitlement(userId);
+  const current = await loadMutableEntitlement(userId);
 
   const effectivePlanId = planId || normalizeExistingPlanId(current?.plan_id);
   const plan = PLANS[effectivePlanId];
 
-  /**
-   * Extra stránky nie sú trvalé funkčné oprávnenie.
-   * V addon_ids ponechávame iba addony, ktoré sprístupňujú funkcie.
-   */
   const currentPersistentAddonIds = normalizeAddonIds(
     current?.addon_ids || [],
   ).filter(isPersistentAddon);
@@ -792,11 +889,14 @@ async function upsertPaidEntitlement({
       plan_id: effectivePlanId,
       addon_ids: activeAddonIds,
       prompt_limit: plan.promptLimit,
-      prompts_used: resetPrompts ? 0 : toSafeInteger(current?.prompts_used, 0),
+      prompts_used:
+        isNewPlanPurchase && resetPrompts
+          ? 0
+          : toSafeInteger(current?.prompts_used, 0),
       attachment_limit: plan.attachmentLimit,
-      activated_at: isNewPlanPurchase ? now : current?.activated_at || now,
-      valid_until: validUntil,
       billing_status: billingStatus,
+      activated_at: isNewPlanPurchase ? now : current?.activated_at || now,
+      valid_until: validUntil ?? current?.valid_until ?? null,
       updated_at: now,
     },
     {
@@ -814,79 +914,20 @@ async function upsertPaidEntitlement({
   };
 }
 
-async function updateBillingStatus({
-  userId,
-  billingStatus,
-  validUntil,
-}: {
-  userId: string;
-  billingStatus: string;
-  validUntil: string | null;
-}): Promise<void> {
-  const admin = createAdminClient();
-  const current = await loadCurrentEntitlement(userId);
-  const now = new Date().toISOString();
-
-  if (!current) {
-    const freePlan = PLANS.free;
-
-    const { error } = await admin.from("zedpera_user_entitlements").upsert(
-      {
-        user_id: userId,
-        plan_id: "free",
-        addon_ids: [],
-        prompt_limit: freePlan.promptLimit,
-        prompts_used: 0,
-        attachment_limit: freePlan.attachmentLimit,
-        activated_at: now,
-        valid_until: validUntil,
-        billing_status: billingStatus,
-        updated_at: now,
-      },
-      {
-        onConflict: "user_id",
-      },
-    );
-
-    if (error) {
-      throw new Error(`BILLING_STATUS_UPSERT_FAILED: ${error.message}`);
-    }
-
-    return;
-  }
-
-  const { error } = await admin
-    .from("zedpera_user_entitlements")
-    .update({
-      billing_status: billingStatus,
-      valid_until: validUntil,
-      updated_at: now,
-    })
-    .eq("user_id", userId);
-
-  if (error) {
-    throw new Error(`BILLING_STATUS_UPDATE_FAILED: ${error.message}`);
-  }
-}
-
 async function applySuccessfulPurchase({
   purchase,
   paymentReference,
   billingStatus,
   validUntil,
-  resetPlan,
   resetPrompts,
-  addonIdsForPageActivation,
 }: {
   purchase: ResolvedPurchase;
   paymentReference: string;
   billingStatus: string;
   validUntil: string | null;
-  resetPlan: boolean;
   resetPrompts: boolean;
-  addonIdsForPageActivation?: AddonId[];
 }): Promise<AppliedPurchase> {
-  const entitlement = await upsertPaidEntitlement({
+  const entitlement = await upsertEntitlementAfterPurchase({
     userId: purchase.userId,
     planId: purchase.planId,
     persistentAddonIds: purchase.persistentAddonIds,
@@ -897,18 +938,13 @@ async function applySuccessfulPurchase({
 
   const admin = createAdminClient();
 
-  /**
-   * page-plan-activation musí používať paymentReference ako idempotency kľúč.
-   * Pre predplatné je týmto kľúčom ID Stripe faktúry, takže checkout webhook
-   * a invoice.paid nemôžu tú istú platbu započítať dvakrát.
-   */
   const pageActivation = await applySuccessfulPagePurchase({
     admin,
     userId: purchase.userId,
     planId: purchase.planId,
-    addonIds: addonIdsForPageActivation || purchase.purchasedAddonIds,
+    addonIds: purchase.purchasedAddonIds,
     paymentReference,
-    resetPlan,
+    resetPlan: purchase.planId !== null,
   });
 
   return {
@@ -920,260 +956,382 @@ async function applySuccessfulPurchase({
   };
 }
 
-async function downgradeUserToFree({
+async function updateBillingStatus({
   userId,
-  paymentReference,
+  billingStatus,
+  validUntil,
 }: {
   userId: string;
-  paymentReference: string;
-}): Promise<boolean> {
-  const current = await loadCurrentEntitlement(userId);
+  billingStatus: string;
+  validUntil?: string | null;
+}): Promise<void> {
+  const current = await loadMutableEntitlement(userId);
 
-  /** Opakovaná deleted udalosť už používateľa na Free znovu neresetuje. */
-  if (
-    normalizeExistingPlanId(current?.plan_id) === "free" &&
-    current?.billing_status === "canceled"
-  ) {
-    return false;
+  if (!current) {
+    await downgradeUserToFree({
+      userId,
+      billingStatus,
+    });
+    return;
   }
 
   const admin = createAdminClient();
-  const freePlan = PLANS.free;
   const now = new Date().toISOString();
 
-  const { error } = await admin.from("zedpera_user_entitlements").upsert(
-    {
-      user_id: userId,
-      plan_id: "free",
-      addon_ids: [],
-      prompt_limit: freePlan.promptLimit,
-      prompts_used: 0,
-      attachment_limit: freePlan.attachmentLimit,
-      activated_at: now,
-      valid_until: null,
-      billing_status: "canceled",
-      updated_at: now,
-    },
-    {
-      onConflict: "user_id",
-    },
-  );
+  const updatePayload: Record<string, unknown> = {
+    billing_status: billingStatus,
+    updated_at: now,
+  };
 
-  if (error) {
-    throw new Error(`FREE_PLAN_UPSERT_FAILED: ${error.message}`);
+  if (validUntil !== undefined) {
+    updatePayload.valid_until = validUntil;
   }
 
-  await applySuccessfulPagePurchase({
-    admin,
-    userId,
-    planId: "free",
-    addonIds: [],
-    paymentReference,
-    resetPlan: true,
-  });
+  const { error } = await admin
+    .from("zedpera_user_entitlements")
+    .update(updatePayload)
+    .eq("user_id", userId);
 
-  return true;
+  if (error) {
+    throw new Error(`BILLING_STATUS_UPDATE_FAILED: ${error.message}`);
+  }
 }
 
-// ============================================================
-// STRIPE MARKERS / IDEMPOTENCY
-// ============================================================
-
-function buildPaymentAppliedMetadata({
-  existingMetadata,
-  eventId,
-  paymentReference,
+async function downgradeUserToFree({
+  userId,
+  billingStatus,
 }: {
-  existingMetadata: Stripe.Metadata | MetadataRecord | null | undefined;
-  eventId: string;
-  paymentReference: string;
-}): MetadataRecord {
-  return {
-    ...normalizeMetadata(existingMetadata),
-    [PAYMENT_APPLIED_KEY]: "true",
-    [PAYMENT_APPLIED_EVENT_KEY]: eventId,
-    [PAYMENT_APPLIED_REFERENCE_KEY]: paymentReference,
-    [PAYMENT_APPLIED_AT_KEY]: new Date().toISOString(),
+  userId: string;
+  billingStatus: string;
+}): Promise<void> {
+  await loadMutableEntitlement(userId);
+
+  const admin = createAdminClient();
+  const freePlan = PLANS.free;
+  const freePageLimit = getPlanPageLimit("free");
+  const now = new Date().toISOString();
+
+  const payload: Record<string, unknown> = {
+    user_id: userId,
+    plan_id: "free",
+    addon_ids: [],
+    prompt_limit: freePlan.promptLimit,
+    prompts_used: 0,
+    attachment_limit: freePlan.attachmentLimit,
+    extra_page_limit: 0,
+    pages_used: 0,
+    billing_status: billingStatus,
+    activated_at: now,
+    valid_until: null,
+    updated_at: now,
   };
+
+  if (freePageLimit !== null) {
+    payload.base_page_limit = freePageLimit;
+  }
+
+  const { error } = await admin
+    .from("zedpera_user_entitlements")
+    .upsert(payload, {
+      onConflict: "user_id",
+    });
+
+  if (error) {
+    throw new Error(`FREE_PLAN_DOWNGRADE_FAILED: ${error.message}`);
+  }
 }
 
-async function markCheckoutPaymentApplied({
+// ============================================================
+// CANONICAL STRIPE METADATA
+// ============================================================
+
+function canonicalPurchaseMetadata(purchase: ResolvedPurchase): MetadataRecord {
+  const metadata: MetadataRecord = {
+    [CANONICAL_USER_ID_KEY]: purchase.userId,
+    [CANONICAL_ADDON_IDS_KEY]: JSON.stringify(purchase.purchasedAddonIds),
+  };
+
+  if (purchase.planId) {
+    metadata[CANONICAL_PLAN_ID_KEY] = purchase.planId;
+  }
+
+  return metadata;
+}
+
+async function persistCanonicalCheckoutMetadata({
   stripe,
   session,
-  eventId,
-  paymentReference,
+  subscription,
+  purchase,
 }: {
   stripe: Stripe;
   session: Stripe.Checkout.Session;
-  eventId: string;
-  paymentReference: string;
+  subscription: Stripe.Subscription | null;
+  purchase: ResolvedPurchase;
 }): Promise<void> {
-  const markerMetadata = buildPaymentAppliedMetadata({
-    existingMetadata: session.metadata,
-    eventId,
-    paymentReference,
-  });
-
-  const operations: Array<Promise<unknown>> = [
-    stripe.checkout.sessions.update(session.id, {
-      metadata: markerMetadata,
-    }),
-  ];
-
+  const canonicalMetadata = canonicalPurchaseMetadata(purchase);
+  const customerId = getObjectId(session.customer);
   const paymentIntentId = getObjectId(session.payment_intent);
 
-  if (paymentIntentId) {
-    const paymentIntentMetadata =
-      typeof session.payment_intent !== "string" && session.payment_intent
-        ? session.payment_intent.metadata
-        : null;
+  // Pri predplatnom sú metadata na Subscription objekte kritické, pretože
+  // z nich nasledujúce invoice.* udalosti obnovujú plán a kvóty.
+  if (subscription) {
+    await stripe.subscriptions.update(subscription.id, {
+      metadata: {
+        ...normalizeMetadata(subscription.metadata),
+        ...canonicalMetadata,
+      },
+    });
+  }
 
-    operations.push(
-      stripe.paymentIntents.update(paymentIntentId, {
-        metadata: buildPaymentAppliedMetadata({
-          existingMetadata: paymentIntentMetadata,
-          eventId,
-          paymentReference,
-        }),
+  const optionalOperations: Array<Promise<unknown>> = [];
+
+  if (customerId) {
+    const currentCustomerMetadata =
+      typeof session.customer !== "string" && session.customer
+        ? "deleted" in session.customer && session.customer.deleted
+          ? {}
+          : normalizeMetadata((session.customer as Stripe.Customer).metadata)
+        : {};
+
+    optionalOperations.push(
+      stripe.customers.update(customerId, {
+        metadata: {
+          ...currentCustomerMetadata,
+          ...canonicalMetadata,
+        },
       }),
     );
   }
 
-  const results = await Promise.allSettled(operations);
-  const successCount = results.filter(
-    (result) => result.status === "fulfilled",
-  ).length;
+  if (paymentIntentId) {
+    const currentPaymentIntentMetadata =
+      typeof session.payment_intent !== "string" && session.payment_intent
+        ? normalizeMetadata(session.payment_intent.metadata)
+        : {};
 
-  if (successCount === 0) {
-    console.error("STRIPE_WEBHOOK_CHECKOUT_MARKER_ERROR:", {
-      sessionId: session.id,
-      eventId,
-      errors: results.map((result) =>
-        result.status === "rejected" ? getErrorMessage(result.reason) : null,
-      ),
-    });
-  }
-}
-
-async function markInvoicePaymentApplied({
-  stripe,
-  invoice,
-  eventId,
-  paymentReference,
-}: {
-  stripe: Stripe;
-  invoice: Stripe.Invoice;
-  eventId: string;
-  paymentReference: string;
-}): Promise<void> {
-  try {
-    await stripe.invoices.update(invoice.id, {
-      metadata: buildPaymentAppliedMetadata({
-        existingMetadata: invoice.metadata,
-        eventId,
-        paymentReference,
+    optionalOperations.push(
+      stripe.paymentIntents.update(paymentIntentId, {
+        metadata: {
+          ...currentPaymentIntentMetadata,
+          ...canonicalMetadata,
+        },
       }),
-    });
-  } catch (error) {
-    /**
-     * Databázová aktivácia už prebehla. Marker je sekundárna ochrana;
-     * hlavná ochrana je paymentReference v page-plan-activation.
-     */
-    console.error("STRIPE_WEBHOOK_INVOICE_MARKER_ERROR:", {
-      invoiceId: invoice.id,
-      eventId,
-      message: getErrorMessage(error),
-    });
+    );
+  }
+
+  const results = await Promise.allSettled(optionalOperations);
+
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.warn("STRIPE_WEBHOOK_CANONICAL_METADATA_WARNING:", {
+        sessionId: session.id,
+        message: getErrorMessage(result.reason),
+      });
+    }
   }
 }
 
-async function markCheckoutFailureRecorded({
+// ============================================================
+// EVENT MARKERS
+// ============================================================
+
+async function markCheckoutEvent({
   stripe,
   session,
+  subscription,
   eventId,
+  fulfilled,
 }: {
   stripe: Stripe;
   session: Stripe.Checkout.Session;
+  subscription: Stripe.Subscription | null;
   eventId: string;
+  fulfilled: boolean;
 }): Promise<void> {
-  try {
-    await stripe.checkout.sessions.update(session.id, {
-      metadata: {
-        ...normalizeMetadata(session.metadata),
-        [PAYMENT_FAILED_EVENT_KEY]: eventId,
-        [PAYMENT_FAILED_AT_KEY]: new Date().toISOString(),
-      },
-    });
-  } catch (error) {
-    console.warn("STRIPE_WEBHOOK_CHECKOUT_FAILURE_MARKER_WARNING:", {
-      sessionId: session.id,
-      eventId,
-      message: getErrorMessage(error),
-    });
+  const operations: Array<Promise<unknown>> = [];
+
+  const paymentIntentId = getObjectId(session.payment_intent);
+  const customerId = getObjectId(session.customer);
+
+  if (paymentIntentId) {
+    const metadata =
+      typeof session.payment_intent !== "string" && session.payment_intent
+        ? session.payment_intent.metadata
+        : undefined;
+
+    operations.push(
+      stripe.paymentIntents.update(paymentIntentId, {
+        metadata: fulfilled
+          ? metadataWithFulfilledMarker(metadata, eventId)
+          : metadataWithProcessedEvent(metadata, eventId),
+      }),
+    );
   }
+
+  if (subscription) {
+    operations.push(
+      stripe.subscriptions.update(subscription.id, {
+        metadata: metadataWithProcessedEvent(subscription.metadata, eventId),
+      }),
+    );
+  }
+
+  if (customerId) {
+    const metadata =
+      typeof session.customer !== "string" && session.customer
+        ? "deleted" in session.customer && session.customer.deleted
+          ? undefined
+          : (session.customer as Stripe.Customer).metadata
+        : undefined;
+
+    operations.push(
+      stripe.customers.update(customerId, {
+        metadata: metadataWithProcessedEvent(metadata, eventId),
+      }),
+    );
+  }
+
+  await settleMarkerOperations("CHECKOUT", eventId, operations);
 }
 
-async function markInvoiceFailureRecorded({
+async function markInvoiceEvent({
   stripe,
   invoice,
+  subscription,
+  customer,
   eventId,
 }: {
   stripe: Stripe;
   invoice: Stripe.Invoice;
+  subscription: Stripe.Subscription | null;
+  customer: Stripe.Customer | null;
   eventId: string;
 }): Promise<void> {
-  try {
-    await stripe.invoices.update(invoice.id, {
-      metadata: {
-        ...normalizeMetadata(invoice.metadata),
-        [PAYMENT_FAILED_EVENT_KEY]: eventId,
-        [PAYMENT_FAILED_AT_KEY]: new Date().toISOString(),
-      },
-    });
-  } catch (error) {
-    console.warn("STRIPE_WEBHOOK_INVOICE_FAILURE_MARKER_WARNING:", {
-      invoiceId: invoice.id,
-      eventId,
-      message: getErrorMessage(error),
-    });
+  const invoiceId = requireObjectId(invoice, "INVOICE");
+  const operations: Array<Promise<unknown>> = [
+    stripe.invoices.update(invoiceId, {
+      metadata: metadataWithProcessedEvent(invoice.metadata, eventId),
+    }),
+  ];
+
+  if (subscription) {
+    operations.push(
+      stripe.subscriptions.update(subscription.id, {
+        metadata: metadataWithProcessedEvent(subscription.metadata, eventId),
+      }),
+    );
+  }
+
+  if (customer) {
+    operations.push(
+      stripe.customers.update(customer.id, {
+        metadata: metadataWithProcessedEvent(customer.metadata, eventId),
+      }),
+    );
+  }
+
+  await settleMarkerOperations("INVOICE", eventId, operations);
+}
+
+async function markSubscriptionEvent({
+  stripe,
+  subscription,
+  customer,
+  eventId,
+  updateSubscription,
+}: {
+  stripe: Stripe;
+  subscription: Stripe.Subscription;
+  customer: Stripe.Customer | null;
+  eventId: string;
+  updateSubscription: boolean;
+}): Promise<void> {
+  const operations: Array<Promise<unknown>> = [];
+
+  if (updateSubscription) {
+    operations.push(
+      stripe.subscriptions.update(subscription.id, {
+        metadata: metadataWithProcessedEvent(subscription.metadata, eventId),
+      }),
+    );
+  }
+
+  if (customer) {
+    operations.push(
+      stripe.customers.update(customer.id, {
+        metadata: metadataWithProcessedEvent(customer.metadata, eventId),
+      }),
+    );
+  }
+
+  await settleMarkerOperations("SUBSCRIPTION", eventId, operations);
+}
+
+async function settleMarkerOperations(
+  source: string,
+  eventId: string,
+  operations: Array<Promise<unknown>>,
+): Promise<void> {
+  if (operations.length === 0) {
+    return;
+  }
+
+  const results = await Promise.allSettled(operations);
+
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.warn("STRIPE_WEBHOOK_EVENT_MARKER_WARNING:", {
+        source,
+        eventId,
+        message: getErrorMessage(result.reason),
+      });
+    }
   }
 }
 
 // ============================================================
-// SUBSCRIPTION SAFETY
+// CHECKOUT EVENTS
 // ============================================================
 
-async function customerHasAnotherActiveSubscription({
-  stripe,
-  deletedSubscription,
-}: {
-  stripe: Stripe;
-  deletedSubscription: Stripe.Subscription;
-}): Promise<boolean> {
-  const customerId = getObjectId(deletedSubscription.customer);
-
-  if (!customerId) {
-    return false;
-  }
-
-  const subscriptions = await stripe.subscriptions.list({
-    customer: customerId,
-    status: "all",
-    limit: 100,
+async function retrieveCheckoutSession(
+  stripe: Stripe,
+  sessionId: string,
+): Promise<Stripe.Checkout.Session> {
+  return stripe.checkout.sessions.retrieve(sessionId, {
+    expand: ["payment_intent", "customer", "subscription", "invoice"],
   });
+}
 
-  return subscriptions.data.some(
-    (subscription) =>
-      subscription.id !== deletedSubscription.id &&
-      isSubscriptionProvisionable(subscription),
+function isCheckoutAlreadyFulfilled({
+  session,
+  subscription,
+  eventId,
+}: {
+  session: Stripe.Checkout.Session;
+  subscription: Stripe.Subscription | null;
+  eventId: string;
+}): boolean {
+  const customerMetadata =
+    typeof session.customer !== "string" && session.customer
+      ? "deleted" in session.customer && session.customer.deleted
+        ? undefined
+        : (session.customer as Stripe.Customer).metadata
+      : undefined;
+
+  return (
+    hasFulfilledMarker(session.metadata) ||
+    hasProcessedEvent(session.metadata, eventId) ||
+    (typeof session.payment_intent !== "string" &&
+      session.payment_intent &&
+      (hasFulfilledMarker(session.payment_intent.metadata) ||
+        hasProcessedEvent(session.payment_intent.metadata, eventId))) ||
+    hasProcessedEvent(subscription?.metadata, eventId) ||
+    hasProcessedEvent(customerMetadata, eventId)
   );
 }
 
-// ============================================================
-// EVENT HANDLERS
-// ============================================================
-
-async function handleCheckoutCompleted({
+async function handleCheckoutSucceeded({
   stripe,
   eventId,
   eventSession,
@@ -1181,14 +1339,16 @@ async function handleCheckoutCompleted({
   stripe: Stripe;
   eventId: string;
   eventSession: Stripe.Checkout.Session;
-}): Promise<WebhookProcessingResult> {
+}): Promise<EventProcessingResult> {
   const session = await retrieveCheckoutSession(stripe, eventSession.id);
+  const subscription = await getSubscriptionFromSession(stripe, session);
 
-  if (isPaymentApplied(session.metadata)) {
+  if (session.mode !== "payment" && session.mode !== "subscription") {
     return {
       processed: false,
-      action: "checkout_already_fulfilled",
+      reason: "unsupported_checkout_mode",
       objectId: session.id,
+      detail: `Unsupported checkout mode: ${session.mode || "unknown"}`,
     };
   }
 
@@ -1198,202 +1358,98 @@ async function handleCheckoutCompleted({
   ) {
     return {
       processed: false,
-      action: "unsupported_metadata",
+      reason: "unsupported_currency",
       objectId: session.id,
-      reason: `Unsupported currency: ${session.currency}`,
+      detail: `Unsupported currency: ${session.currency}`,
+    };
+  }
+
+  if (isCheckoutAlreadyFulfilled({ session, subscription, eventId })) {
+    return {
+      processed: false,
+      reason: "already_processed",
+      objectId: session.id,
     };
   }
 
   if (!isCheckoutPaymentCompleted(session)) {
     return {
       processed: false,
-      action: "checkout_payment_pending",
+      reason: "payment_not_completed",
       objectId: session.id,
-      reason: `Payment status: ${session.payment_status}`,
+      detail: `Payment status: ${session.payment_status}`,
     };
   }
 
-  if (session.mode === "payment") {
-    const purchase = await resolvePurchaseMetadata({
-      stripe,
-      session,
-    });
+  let purchase: ResolvedPurchase;
 
-    const result = await applySuccessfulPurchase({
-      purchase,
-      paymentReference: session.id,
-      billingStatus: "active",
-      validUntil: null,
-      resetPlan: purchase.planId !== null,
-      resetPrompts: purchase.planId !== null,
-    });
-
-    await markCheckoutPaymentApplied({
-      stripe,
-      session,
-      eventId,
-      paymentReference: session.id,
-    });
-
-    console.info("STRIPE_WEBHOOK_PAYMENT_CHECKOUT_FULFILLED:", {
-      eventId,
-      sessionId: session.id,
-      userId: result.userId,
-      planId: result.effectivePlanId,
-      purchasedAddonIds: result.purchasedAddonIds,
-      extraPages: result.extraPages,
-    });
+  try {
+    purchase = await resolveCheckoutPurchase({ stripe, session });
+  } catch (error) {
+    if (!isPermanentMetadataError(error)) {
+      throw error;
+    }
 
     return {
-      processed: true,
-      action: "checkout_fulfilled",
+      processed: false,
+      reason: "unsupported_metadata",
       objectId: session.id,
-      userId: result.userId,
-      planId: result.effectivePlanId,
-      purchasedAddonIds: result.purchasedAddonIds,
-      activeAddonIds: result.activeAddonIds,
-      extraPages: result.extraPages,
-      billingStatus: "active",
-      validUntil: null,
+      detail: getErrorMessage(error),
     };
   }
 
-  if (session.mode === "subscription") {
-    const subscription = await retrieveSubscription(
-      stripe,
-      session.subscription as string | Stripe.Subscription | null,
-    );
+  await persistCanonicalCheckoutMetadata({
+    stripe,
+    session,
+    subscription,
+    purchase,
+  });
 
-    if (!subscription) {
-      throw new Error("CHECKOUT_SUBSCRIPTION_NOT_FOUND");
-    }
+  const invoiceId = getObjectId(session.invoice);
+  const paymentReference = invoiceId || session.id;
+  const billingStatus = subscription
+    ? getSubscriptionBillingStatus(subscription)
+    : "active";
+  const validUntil = getSubscriptionPeriodEnd(subscription);
 
-    const latestInvoiceId = getSubscriptionLatestInvoiceId(subscription);
-    const latestInvoice =
-      getExpandedLatestInvoice(subscription) ||
-      (latestInvoiceId
-        ? await stripe.invoices.retrieve(latestInvoiceId)
-        : null);
+  const result = await applySuccessfulPurchase({
+    purchase,
+    paymentReference,
+    billingStatus,
+    validUntil,
+    resetPrompts: purchase.planId !== null,
+  });
 
-    /**
-     * invoice.paid mohol prísť pred checkout.session.completed.
-     * V takom prípade už mesačný limit znovu neobnovujeme.
-     */
-    if (latestInvoice && isPaymentApplied(latestInvoice.metadata)) {
-      await markCheckoutPaymentApplied({
-        stripe,
-        session,
-        eventId,
-        paymentReference: latestInvoice.id,
-      });
+  await markCheckoutEvent({
+    stripe,
+    session,
+    subscription,
+    eventId,
+    fulfilled: true,
+  });
 
-      return {
-        processed: false,
-        action: "checkout_already_fulfilled",
-        objectId: session.id,
-        reason: `Invoice ${latestInvoice.id} was already applied.`,
-      };
-    }
-
-    if (!isSubscriptionProvisionable(subscription)) {
-      const unresolvedPurchase = await resolvePurchaseMetadata({
-        stripe,
-        session,
-        subscription,
-        invoice: latestInvoice,
-        requirePurchaseMetadata: false,
-      });
-      const billingStatus = getSubscriptionBillingStatus(subscription);
-      const validUntil = getSubscriptionValidUntil(subscription);
-
-      await updateBillingStatus({
-        userId: unresolvedPurchase.userId,
-        billingStatus,
-        validUntil,
-      });
-
-      return {
-        processed: false,
-        action: "checkout_payment_pending",
-        objectId: session.id,
-        userId: unresolvedPurchase.userId,
-        planId: unresolvedPurchase.planId,
-        billingStatus,
-        validUntil,
-        reason: `Subscription status: ${subscription.status}`,
-      };
-    }
-
-    const purchase = await resolvePurchaseMetadata({
-      stripe,
-      session,
-      subscription,
-      invoice: latestInvoice,
-    });
-
-    if (!purchase.planId) {
-      throw new Error("MISSING_PAID_PLAN_ID");
-    }
-
-    const billingStatus = getSubscriptionBillingStatus(subscription);
-    const validUntil = getSubscriptionValidUntil(subscription);
-    const paymentReference = latestInvoice?.id || session.id;
-
-    const result = await applySuccessfulPurchase({
-      purchase,
-      paymentReference,
-      billingStatus,
-      validUntil,
-      resetPlan: true,
-      resetPrompts: true,
-    });
-
-    if (latestInvoice) {
-      await markInvoicePaymentApplied({
-        stripe,
-        invoice: latestInvoice,
-        eventId,
-        paymentReference,
-      });
-    }
-
-    await markCheckoutPaymentApplied({
-      stripe,
-      session,
-      eventId,
-      paymentReference,
-    });
-
-    console.info("STRIPE_WEBHOOK_SUBSCRIPTION_CHECKOUT_FULFILLED:", {
-      eventId,
-      sessionId: session.id,
-      subscriptionId: subscription.id,
-      invoiceId: latestInvoice?.id || null,
-      userId: result.userId,
-      planId: result.effectivePlanId,
-      billingStatus,
-      validUntil,
-    });
-
-    return {
-      processed: true,
-      action: "checkout_fulfilled",
-      objectId: session.id,
-      userId: result.userId,
-      planId: result.effectivePlanId,
-      purchasedAddonIds: result.purchasedAddonIds,
-      activeAddonIds: result.activeAddonIds,
-      extraPages: result.extraPages,
-      billingStatus,
-      validUntil,
-    };
-  }
+  console.info("STRIPE_WEBHOOK_CHECKOUT_FULFILLED:", {
+    eventId,
+    sessionId: session.id,
+    checkoutMode: session.mode,
+    paymentReference,
+    userId: result.userId,
+    planId: result.effectivePlanId,
+    purchasedAddonIds: result.purchasedAddonIds,
+    activeAddonIds: result.activeAddonIds,
+    extraPages: result.extraPages,
+  });
 
   return {
-    processed: false,
-    action: "ignored",
+    processed: true,
+    reason: "fulfilled",
     objectId: session.id,
-    reason: `Unsupported checkout mode: ${session.mode || "unknown"}`,
+    userId: result.userId,
+    planId: result.effectivePlanId,
+    purchasedAddonIds: result.purchasedAddonIds,
+    activeAddonIds: result.activeAddonIds,
+    extraPages: result.extraPages,
+    billingStatus,
   };
 }
 
@@ -1405,66 +1461,128 @@ async function handleCheckoutAsyncPaymentFailed({
   stripe: Stripe;
   eventId: string;
   eventSession: Stripe.Checkout.Session;
-}): Promise<WebhookProcessingResult> {
+}): Promise<EventProcessingResult> {
   const session = await retrieveCheckoutSession(stripe, eventSession.id);
+  const subscription = await getSubscriptionFromSession(stripe, session);
 
-  if (isFailureEventAlreadyRecorded(session.metadata, eventId)) {
+  if (isCheckoutAlreadyFulfilled({ session, subscription, eventId })) {
     return {
       processed: false,
-      action: "checkout_payment_failed",
+      reason: "already_processed",
       objectId: session.id,
-      reason: "Failure event already recorded.",
     };
   }
 
-  let userId = "";
-
   try {
-    const purchase = await resolvePurchaseMetadata({
-      stripe,
-      session,
-      requirePurchaseMetadata: false,
-    });
-
-    userId = purchase.userId;
+    const purchase = await resolveCheckoutPurchase({ stripe, session });
 
     await updateBillingStatus({
-      userId,
+      userId: purchase.userId,
       billingStatus: "payment_failed",
-      validUntil: null,
+      validUntil: getSubscriptionPeriodEnd(subscription),
     });
+
+    await markCheckoutEvent({
+      stripe,
+      session,
+      subscription,
+      eventId,
+      fulfilled: false,
+    });
+
+    console.warn("STRIPE_WEBHOOK_ASYNC_PAYMENT_FAILED:", {
+      eventId,
+      sessionId: session.id,
+      userId: purchase.userId,
+      paymentStatus: session.payment_status,
+    });
+
+    return {
+      processed: true,
+      reason: "payment_failure_recorded",
+      objectId: session.id,
+      userId: purchase.userId,
+      billingStatus: "payment_failed",
+    };
   } catch (error) {
     if (!isPermanentMetadataError(error)) {
       throw error;
     }
 
-    console.error("STRIPE_WEBHOOK_ASYNC_PAYMENT_FAILED_METADATA_ERROR:", {
-      eventId,
-      sessionId: session.id,
-      message: getErrorMessage(error),
-    });
+    return {
+      processed: false,
+      reason: "unsupported_metadata",
+      objectId: session.id,
+      detail: getErrorMessage(error),
+    };
   }
+}
 
-  await markCheckoutFailureRecorded({
-    stripe,
-    session,
-    eventId,
-  });
+// ============================================================
+// INVOICE EVENTS
+// ============================================================
 
-  console.warn("STRIPE_WEBHOOK_ASYNC_PAYMENT_FAILED:", {
-    eventId,
-    sessionId: session.id,
-    userId: userId || null,
-    paymentStatus: session.payment_status,
+async function retrieveInvoice(
+  stripe: Stripe,
+  invoiceId: string,
+): Promise<Stripe.Invoice> {
+  return stripe.invoices.retrieve(invoiceId, {
+    expand: ["customer"],
   });
+}
+
+async function getInvoiceContext({
+  stripe,
+  invoice,
+}: {
+  stripe: Stripe;
+  invoice: Stripe.Invoice;
+}): Promise<{
+  subscription: Stripe.Subscription | null;
+  customer: Stripe.Customer | null;
+  metadata: MetadataRecord;
+}> {
+  const subscriptionId = getInvoiceSubscriptionId(invoice);
+  const subscription = await retrieveSubscription(stripe, subscriptionId);
+
+  const customerId = getObjectId(invoice.customer);
+  const customer =
+    typeof invoice.customer !== "string" && invoice.customer
+      ? "deleted" in invoice.customer && invoice.customer.deleted
+        ? null
+        : (invoice.customer as Stripe.Customer)
+      : await retrieveCustomer(stripe, customerId);
+
+  const metadata = mergeMetadata(
+    customer?.metadata,
+    getInvoiceSubscriptionMetadata(invoice),
+    subscription?.metadata,
+    invoice.metadata,
+  );
 
   return {
-    processed: Boolean(userId),
-    action: "checkout_payment_failed",
-    objectId: session.id,
-    userId: userId || undefined,
-    billingStatus: "payment_failed",
+    subscription,
+    customer,
+    metadata,
   };
+}
+
+function isInvoiceEventAlreadyProcessed({
+  invoice,
+  subscription,
+  customer,
+  eventId,
+}: {
+  invoice: Stripe.Invoice;
+  subscription: Stripe.Subscription | null;
+  customer: Stripe.Customer | null;
+  eventId: string;
+}): boolean {
+  return (
+    hasProcessedEvent(invoice.metadata, eventId) ||
+    hasProcessedEvent(subscription?.metadata, eventId) ||
+    hasProcessedEvent(customer?.metadata, eventId)
+  );
 }
 
 async function handleInvoicePaid({
@@ -1475,122 +1593,111 @@ async function handleInvoicePaid({
   stripe: Stripe;
   eventId: string;
   eventInvoice: Stripe.Invoice;
-}): Promise<WebhookProcessingResult> {
-  const invoice = await retrieveInvoiceIfNeeded(stripe, eventInvoice);
+}): Promise<EventProcessingResult> {
+  const eventInvoiceId = requireObjectId(eventInvoice, "INVOICE");
+  const invoice = await retrieveInvoice(stripe, eventInvoiceId);
+  const invoiceId = requireObjectId(invoice, "INVOICE");
+  const context = await getInvoiceContext({ stripe, invoice });
 
-  if (isPaymentApplied(invoice.metadata)) {
+  if (!context.subscription) {
     return {
       processed: false,
-      action: "invoice_already_processed",
+      reason: "non_subscription_invoice_ignored",
       objectId: invoice.id,
     };
   }
 
-  if (invoice.currency.toLowerCase() !== EXPECTED_CURRENCY) {
+  if (
+    isInvoiceEventAlreadyProcessed({
+      invoice,
+      subscription: context.subscription,
+      customer: context.customer,
+      eventId,
+    })
+  ) {
     return {
       processed: false,
-      action: "unsupported_metadata",
+      reason: "already_processed",
       objectId: invoice.id,
-      reason: `Unsupported currency: ${invoice.currency}`,
     };
   }
 
-  const subscriptionId = getInvoiceSubscriptionId(invoice);
-
-  /** Jednorazové Stripe faktúry nemenia plán; rieši ich Checkout Session. */
-  if (!subscriptionId) {
+  if (!isInvoicePaid(invoice)) {
     return {
       processed: false,
-      action: "ignored",
+      reason: "invoice_not_paid",
       objectId: invoice.id,
-      reason: "Invoice is not linked to a subscription.",
+      detail: `Invoice status: ${invoice.status || "unknown"}`,
     };
   }
 
-  const subscription = await retrieveSubscription(stripe, subscriptionId);
+  let purchase: ResolvedPurchase;
 
-  if (!subscription) {
-    throw new Error(`SUBSCRIPTION_NOT_FOUND: ${subscriptionId}`);
-  }
-
-  if (!isSubscriptionProvisionable(subscription)) {
-    await updateBillingStatus({
-      userId: (
-        await resolvePurchaseMetadata({
-          stripe,
-          subscription,
-          invoice,
-        })
-      ).userId,
-      billingStatus: getSubscriptionBillingStatus(subscription),
-      validUntil: getSubscriptionValidUntil(subscription),
+  try {
+    purchase = resolvePurchaseFromMetadata({
+      metadata: context.metadata,
     });
+  } catch (error) {
+    if (!isPermanentMetadataError(error)) {
+      throw error;
+    }
 
     return {
       processed: false,
-      action: "ignored",
+      reason: "unsupported_metadata",
       objectId: invoice.id,
-      billingStatus: getSubscriptionBillingStatus(subscription),
-      reason: `Subscription status is ${subscription.status}.`,
+      detail: getErrorMessage(error),
     };
   }
 
-  const purchase = await resolvePurchaseMetadata({
-    stripe,
-    subscription,
-    invoice,
-  });
+  const isRecurringCycle = invoice.billing_reason === "subscription_cycle";
 
-  if (!purchase.planId) {
-    throw new Error("MISSING_PAID_PLAN_ID");
+  if (isRecurringCycle) {
+    const recurringAddonIds =
+      purchase.purchasedAddonIds.filter(isPersistentAddon);
+
+    purchase = {
+      ...purchase,
+      purchasedAddonIds: recurringAddonIds,
+      persistentAddonIds: recurringAddonIds,
+      extraPageAddonIds: [],
+      extraPages: 0,
+    };
   }
 
-  const billingStatus = getSubscriptionBillingStatus(subscription);
-  const validUntil = getSubscriptionValidUntil(subscription);
-
-  /**
-   * Extra stránky sa pri bežnej mesačnej obnove nepridávajú znova.
-   * Pri prvej faktúre subscription_create môžu byť súčasťou úvodného checkoutu.
-   */
-  const isInitialSubscriptionInvoice =
-    invoice.billing_reason === "subscription_create";
-
-  const addonIdsForPageActivation = isInitialSubscriptionInvoice
-    ? purchase.purchasedAddonIds
-    : purchase.persistentAddonIds;
+  const billingStatus = getSubscriptionBillingStatus(context.subscription);
+  const validUntil = getSubscriptionPeriodEnd(context.subscription);
 
   const result = await applySuccessfulPurchase({
     purchase,
-    paymentReference: invoice.id,
+    paymentReference: invoiceId,
     billingStatus,
     validUntil,
-    resetPlan: true,
-    resetPrompts: true,
-    addonIdsForPageActivation,
+    resetPrompts: purchase.planId !== null,
   });
 
-  await markInvoicePaymentApplied({
+  await markInvoiceEvent({
     stripe,
     invoice,
+    subscription: context.subscription,
+    customer: context.customer,
     eventId,
-    paymentReference: invoice.id,
   });
 
   console.info("STRIPE_WEBHOOK_INVOICE_PAID:", {
     eventId,
     invoiceId: invoice.id,
-    subscriptionId: subscription.id,
     billingReason: invoice.billing_reason,
     userId: result.userId,
     planId: result.effectivePlanId,
-    billingStatus,
-    validUntil,
+    purchasedAddonIds: result.purchasedAddonIds,
     extraPages: result.extraPages,
+    validUntil,
   });
 
   return {
     processed: true,
-    action: "invoice_paid",
+    reason: isRecurringCycle ? "subscription_renewed" : "invoice_fulfilled",
     objectId: invoice.id,
     userId: result.userId,
     planId: result.effectivePlanId,
@@ -1598,7 +1705,6 @@ async function handleInvoicePaid({
     activeAddonIds: result.activeAddonIds,
     extraPages: result.extraPages,
     billingStatus,
-    validUntil,
   };
 }
 
@@ -1610,86 +1716,111 @@ async function handleInvoicePaymentFailed({
   stripe: Stripe;
   eventId: string;
   eventInvoice: Stripe.Invoice;
-}): Promise<WebhookProcessingResult> {
-  const invoice = await retrieveInvoiceIfNeeded(stripe, eventInvoice);
+}): Promise<EventProcessingResult> {
+  const eventInvoiceId = requireObjectId(eventInvoice, "INVOICE");
+  const invoice = await retrieveInvoice(stripe, eventInvoiceId);
+  const context = await getInvoiceContext({ stripe, invoice });
 
-  if (isFailureEventAlreadyRecorded(invoice.metadata, eventId)) {
-    return {
-      processed: false,
-      action: "invoice_payment_failed",
-      objectId: invoice.id,
-      reason: "Failure event already recorded.",
-    };
-  }
-
-  const subscriptionId = getInvoiceSubscriptionId(invoice);
-
-  if (!subscriptionId) {
-    await markInvoiceFailureRecorded({
-      stripe,
+  if (
+    isInvoiceEventAlreadyProcessed({
       invoice,
+      subscription: context.subscription,
+      customer: context.customer,
       eventId,
-    });
-
+    })
+  ) {
     return {
       processed: false,
-      action: "invoice_payment_failed",
+      reason: "already_processed",
       objectId: invoice.id,
-      reason: "Failed invoice is not linked to a subscription.",
     };
   }
 
-  const subscription = await retrieveSubscription(stripe, subscriptionId);
+  let purchase: ResolvedPurchase;
 
-  if (!subscription) {
-    throw new Error(`SUBSCRIPTION_NOT_FOUND: ${subscriptionId}`);
+  try {
+    purchase = resolvePurchaseFromMetadata({
+      metadata: context.metadata,
+    });
+  } catch (error) {
+    if (!isPermanentMetadataError(error)) {
+      throw error;
+    }
+
+    return {
+      processed: false,
+      reason: "unsupported_metadata",
+      objectId: invoice.id,
+      detail: getErrorMessage(error),
+    };
   }
 
-  const purchase = await resolvePurchaseMetadata({
-    stripe,
-    subscription,
-    invoice,
-    requirePurchaseMetadata: false,
-  });
-
-  const billingStatus =
-    subscription.status === "active"
-      ? "payment_failed"
-      : getSubscriptionBillingStatus(subscription);
-  const validUntil = getSubscriptionValidUntil(subscription);
+  const validUntil = getSubscriptionPeriodEnd(context.subscription);
 
   await updateBillingStatus({
     userId: purchase.userId,
-    billingStatus,
+    billingStatus: "past_due",
     validUntil,
   });
 
-  await markInvoiceFailureRecorded({
+  await markInvoiceEvent({
     stripe,
     invoice,
+    subscription: context.subscription,
+    customer: context.customer,
     eventId,
   });
 
   console.warn("STRIPE_WEBHOOK_INVOICE_PAYMENT_FAILED:", {
     eventId,
     invoiceId: invoice.id,
-    subscriptionId: subscription.id,
     userId: purchase.userId,
     attemptCount: invoice.attempt_count,
     nextPaymentAttempt: invoice.next_payment_attempt,
-    billingStatus,
-    validUntil,
   });
 
   return {
     processed: true,
-    action: "invoice_payment_failed",
+    reason: "payment_failure_recorded",
     objectId: invoice.id,
     userId: purchase.userId,
     planId: purchase.planId,
-    billingStatus,
-    validUntil,
+    billingStatus: "past_due",
   };
+}
+
+// ============================================================
+// SUBSCRIPTION EVENTS
+// ============================================================
+
+async function getSubscriptionCustomer(
+  stripe: Stripe,
+  subscription: Stripe.Subscription,
+): Promise<Stripe.Customer | null> {
+  if (typeof subscription.customer !== "string" && subscription.customer) {
+    if ("deleted" in subscription.customer && subscription.customer.deleted) {
+      return null;
+    }
+
+    return subscription.customer as Stripe.Customer;
+  }
+
+  return retrieveCustomer(stripe, getObjectId(subscription.customer));
+}
+
+function isSubscriptionEventAlreadyProcessed({
+  subscription,
+  customer,
+  eventId,
+}: {
+  subscription: Stripe.Subscription;
+  customer: Stripe.Customer | null;
+  eventId: string;
+}): boolean {
+  return (
+    hasProcessedEvent(subscription.metadata, eventId) ||
+    hasProcessedEvent(customer?.metadata, eventId)
+  );
 }
 
 async function handleSubscriptionUpdated({
@@ -1700,172 +1831,173 @@ async function handleSubscriptionUpdated({
   stripe: Stripe;
   eventId: string;
   eventSubscription: Stripe.Subscription;
-}): Promise<WebhookProcessingResult> {
-  const subscription = await retrieveSubscription(stripe, eventSubscription);
+}): Promise<EventProcessingResult> {
+  const subscription = await retrieveSubscription(stripe, eventSubscription.id);
 
   if (!subscription) {
-    throw new Error("SUBSCRIPTION_NOT_FOUND");
+    return {
+      processed: false,
+      reason: "subscription_not_found",
+      objectId: eventSubscription.id,
+    };
   }
 
-  const purchase = await resolvePurchaseMetadata({
-    stripe,
-    subscription,
-    requirePurchaseMetadata: false,
-  });
+  const customer = await getSubscriptionCustomer(stripe, subscription);
 
-  const billingStatus = getSubscriptionBillingStatus(subscription);
-  const validUntil = getSubscriptionValidUntil(subscription);
+  if (
+    isSubscriptionEventAlreadyProcessed({
+      subscription,
+      customer,
+      eventId,
+    })
+  ) {
+    return {
+      processed: false,
+      reason: "already_processed",
+      objectId: subscription.id,
+    };
+  }
 
-  if (isSubscriptionDefinitivelyEnded(subscription)) {
-    const hasReplacementSubscription =
-      await customerHasAnotherActiveSubscription({
-        stripe,
-        deletedSubscription: subscription,
-      });
+  let purchase: ResolvedPurchase;
 
-    if (hasReplacementSubscription) {
-      return {
-        processed: false,
-        action: "subscription_delete_ignored",
-        objectId: subscription.id,
-        userId: purchase.userId,
-        reason: "Customer has another active subscription.",
-      };
+  try {
+    purchase = await resolveSubscriptionPurchase({
+      stripe,
+      subscription,
+    });
+  } catch (error) {
+    if (!isPermanentMetadataError(error)) {
+      throw error;
     }
 
-    const downgraded = await downgradeUserToFree({
-      userId: purchase.userId,
-      paymentReference: `subscription-ended:${subscription.id}`,
-    });
-
     return {
-      processed: downgraded,
-      action: "subscription_deleted",
+      processed: false,
+      reason: "unsupported_metadata",
       objectId: subscription.id,
-      userId: purchase.userId,
-      planId: "free",
-      billingStatus: "canceled",
-      validUntil: null,
+      detail: getErrorMessage(error),
     };
   }
 
-  /**
-   * Plán aktivujeme alebo meníme iba pri stave active/trialing.
-   * Stavy incomplete, past_due, unpaid alebo paused iba evidujeme;
-   * nesmú pred úspešnou platbou sprístupniť platený plán.
-   */
-  if (isSubscriptionProvisionable(subscription) && purchase.planId) {
-    const entitlement = await upsertPaidEntitlement({
+  const billingStatus = getSubscriptionBillingStatus(subscription);
+  const validUntil = getSubscriptionPeriodEnd(subscription);
+
+  if (TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)) {
+    await downgradeUserToFree({
       userId: purchase.userId,
-      planId: purchase.planId,
-      persistentAddonIds: purchase.persistentAddonIds,
+      billingStatus: subscription.status,
+    });
+  } else {
+    await updateBillingStatus({
+      userId: purchase.userId,
       billingStatus,
       validUntil,
-      resetPrompts: false,
     });
-
-    console.info("STRIPE_WEBHOOK_SUBSCRIPTION_UPDATED:", {
-      eventId,
-      subscriptionId: subscription.id,
-      userId: purchase.userId,
-      planId: entitlement.effectivePlanId,
-      status: subscription.status,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
-      validUntil,
-    });
-
-    return {
-      processed: true,
-      action: "subscription_updated",
-      objectId: subscription.id,
-      userId: purchase.userId,
-      planId: entitlement.effectivePlanId,
-      activeAddonIds: entitlement.activeAddonIds,
-      billingStatus,
-      validUntil,
-    };
   }
 
-  await updateBillingStatus({
+  await markSubscriptionEvent({
+    stripe,
+    subscription,
+    customer,
+    eventId,
+    updateSubscription: true,
+  });
+
+  console.info("STRIPE_WEBHOOK_SUBSCRIPTION_UPDATED:", {
+    eventId,
+    subscriptionId: subscription.id,
     userId: purchase.userId,
-    billingStatus,
+    status: subscription.status,
+    cancelAtPeriodEnd: subscription.cancel_at_period_end,
     validUntil,
   });
 
   return {
     processed: true,
-    action: "subscription_updated",
+    reason: TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)
+      ? "downgraded_to_free"
+      : "subscription_status_updated",
     objectId: subscription.id,
     userId: purchase.userId,
-    planId: purchase.planId,
+    planId: TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)
+      ? "free"
+      : purchase.planId,
     billingStatus,
-    validUntil,
   };
 }
 
 async function handleSubscriptionDeleted({
   stripe,
   eventId,
-  eventSubscription,
+  subscription,
 }: {
   stripe: Stripe;
   eventId: string;
-  eventSubscription: Stripe.Subscription;
-}): Promise<WebhookProcessingResult> {
-  const subscription = eventSubscription;
-  const purchase = await resolvePurchaseMetadata({
-    stripe,
-    subscription,
-    requirePurchaseMetadata: false,
-  });
+  subscription: Stripe.Subscription;
+}): Promise<EventProcessingResult> {
+  const customer = await getSubscriptionCustomer(stripe, subscription);
 
-  /**
-   * Ochrana pred starou oneskorenou deleted udalosťou:
-   * ak má zákazník už iné aktívne predplatné, na Free ho nevraciame.
-   */
   if (
-    await customerHasAnotherActiveSubscription({
-      stripe,
-      deletedSubscription: subscription,
+    isSubscriptionEventAlreadyProcessed({
+      subscription,
+      customer,
+      eventId,
     })
   ) {
-    console.warn("STRIPE_WEBHOOK_SUBSCRIPTION_DELETE_IGNORED:", {
-      eventId,
-      subscriptionId: subscription.id,
-      userId: purchase.userId,
-      reason: "Customer has another active subscription.",
-    });
-
     return {
       processed: false,
-      action: "subscription_delete_ignored",
+      reason: "already_processed",
       objectId: subscription.id,
-      userId: purchase.userId,
-      reason: "Customer has another active subscription.",
     };
   }
 
-  const downgraded = await downgradeUserToFree({
+  let purchase: ResolvedPurchase;
+
+  try {
+    purchase = await resolveSubscriptionPurchase({
+      stripe,
+      subscription,
+    });
+  } catch (error) {
+    if (!isPermanentMetadataError(error)) {
+      throw error;
+    }
+
+    return {
+      processed: false,
+      reason: "unsupported_metadata",
+      objectId: subscription.id,
+      detail: getErrorMessage(error),
+    };
+  }
+
+  await downgradeUserToFree({
     userId: purchase.userId,
-    paymentReference: `subscription-deleted:${subscription.id}`,
+    billingStatus: "canceled",
+  });
+
+  // Zmazané predplatné už nemusí byť možné aktualizovať. Marker preto
+  // zapisujeme minimálne na Customer objekt, ktorý zostáva dostupný.
+  await markSubscriptionEvent({
+    stripe,
+    subscription,
+    customer,
+    eventId,
+    updateSubscription: false,
   });
 
   console.info("STRIPE_WEBHOOK_SUBSCRIPTION_DELETED:", {
     eventId,
     subscriptionId: subscription.id,
     userId: purchase.userId,
-    downgraded,
   });
 
   return {
-    processed: downgraded,
-    action: "subscription_deleted",
+    processed: true,
+    reason: "downgraded_to_free",
     objectId: subscription.id,
     userId: purchase.userId,
     planId: "free",
-    activeAddonIds: [],
     billingStatus: "canceled",
-    validUntil: null,
   };
 }
 
@@ -1937,7 +2069,8 @@ export async function POST(request: Request) {
   let rawBody: string;
 
   try {
-    /** Podpis sa musí overovať nad pôvodným raw telom. */
+    // Podpis sa musí overovať nad pôvodným raw telom požiadavky.
+    // Nepoužívajte request.json().
     rawBody = await request.text();
   } catch (error) {
     console.error("STRIPE_WEBHOOK_BODY_READ_ERROR:", {
@@ -1979,12 +2112,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    let result: WebhookProcessingResult;
+    let result: EventProcessingResult | null = null;
 
     switch (event.type) {
       case "checkout.session.completed":
       case "checkout.session.async_payment_succeeded": {
-        result = await handleCheckoutCompleted({
+        result = await handleCheckoutSucceeded({
           stripe,
           eventId: event.id,
           eventSession: event.data.object as Stripe.Checkout.Session,
@@ -2032,7 +2165,7 @@ export async function POST(request: Request) {
         result = await handleSubscriptionDeleted({
           stripe,
           eventId: event.id,
-          eventSubscription: event.data.object as Stripe.Subscription,
+          subscription: event.data.object as Stripe.Subscription,
         });
         break;
       }
@@ -2042,12 +2175,6 @@ export async function POST(request: Request) {
           eventId: event.id,
           eventType: event.type,
         });
-
-        result = {
-          processed: false,
-          action: "ignored",
-          reason: `Unsupported event type: ${event.type}`,
-        };
       }
     }
 
@@ -2068,28 +2195,15 @@ export async function POST(request: Request) {
       },
     );
   } catch (error) {
-    if (isPermanentMetadataError(error)) {
-      /**
-       * Opakovaný Stripe retry nedokáže opraviť chýbajúce alebo neplatné metadata.
-       * Udalosť preto prijmeme HTTP 200 a chybu detailne zapíšeme do logu.
-       */
-      console.error("STRIPE_WEBHOOK_UNSUPPORTED_METADATA:", {
-        eventId: event.id,
-        eventType: event.type,
-        message: getErrorMessage(error),
-      });
-
+    if (error instanceof AdminEntitlementProtectedError) {
       return NextResponse.json(
         {
-          ok: true,
           received: true,
+          skipped: true,
+          reason: "ADMIN_ENTITLEMENT_PROTECTED",
+          userId: error.userId,
           eventId: event.id,
           eventType: event.type,
-          result: {
-            processed: false,
-            action: "unsupported_metadata",
-            reason: getErrorMessage(error),
-          } satisfies WebhookProcessingResult,
         },
         {
           status: 200,
@@ -2100,10 +2214,8 @@ export async function POST(request: Request) {
       );
     }
 
-    /**
-     * Databázové, Stripe API alebo sieťové chyby vracajú HTTP 500.
-     * Stripe tak udalosť bezpečne zopakuje.
-     */
+    // Pri databázovej alebo sieťovej chybe vraciame HTTP 500.
+    // Stripe tak udalosť automaticky zopakuje.
     console.error("STRIPE_WEBHOOK_PROCESSING_ERROR:", {
       eventId: event.id,
       eventType: event.type,

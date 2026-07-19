@@ -21,7 +21,8 @@ export type PlanId =
   | 'free'
   | 'seminar-work'
   | 'bachelor-thesis'
-  | 'master-thesis';
+  | 'master-thesis'
+  | 'admin';
 
 export type AddonId =
   | 'data-analysis'
@@ -65,7 +66,7 @@ export type FeatureModuleId =
   | 'data-analysis'
   | 'defense';
 
-export type PaidPlanId = Exclude<PlanId, 'free'>;
+export type PaidPlanId = Exclude<PlanId, 'free' | 'admin'>;
 export type PurchasableCatalogId = PaidPlanId | AddonId;
 
 export type CatalogItemKind = 'plan' | 'addon';
@@ -93,11 +94,23 @@ type PlanDefinitionBase = {
   description: string;
   priceCents: number;
   currency: CurrencyCode;
-  pageLimit: number;
+  pageLimit: number | null;
   promptLimit: number | null;
-  attachmentLimit: number;
+  attachmentLimit: number | null;
   features: readonly FeatureKey[];
   sortOrder: number;
+
+  /**
+   * Určuje, či sa má plán zobrazovať vo verejnom cenníku.
+   * Ak hodnota nie je uvedená, plán sa považuje za verejný.
+   */
+  isPublic?: boolean;
+
+  /**
+   * Doplnkový explicitný príznak nákupu pre UI.
+   * Autoritatívnym serverovým príznakom zostáva `purchasable`.
+   */
+  isPurchasable?: boolean;
 };
 
 export type FreePlanDefinition = PlanDefinitionBase & {
@@ -117,9 +130,24 @@ export type PaidPlanDefinition = PlanDefinitionBase & {
   stripePriceEnvKey: StripePriceEnvironmentKey;
 };
 
+export type AdminPlanDefinition = PlanDefinitionBase & {
+  id: 'admin';
+  priceCents: 0;
+  pageLimit: null;
+  promptLimit: null;
+  attachmentLimit: null;
+  purchasable: false;
+  checkoutMode: null;
+  billingInterval: null;
+  stripePriceEnvKey: null;
+  isPublic: false;
+  isPurchasable: false;
+};
+
 export type PlanDefinition =
   | FreePlanDefinition
-  | PaidPlanDefinition;
+  | PaidPlanDefinition
+  | AdminPlanDefinition;
 
 export type AddonDefinition = {
   id: AddonId;
@@ -209,7 +237,7 @@ const DEFENSE_FEATURES = [
   'committee-questions',
 ] as const satisfies readonly FeatureKey[];
 
-const ALL_FEATURES = [
+export const ALL_FEATURES: FeatureKey[] = [
   'ai-supervisor',
   'chapter-generation',
   'outline-generation',
@@ -232,7 +260,7 @@ const ALL_FEATURES = [
   'defense',
   'defense-presentation',
   'committee-questions',
-] as const satisfies readonly FeatureKey[];
+];
 
 // =====================================================
 // BALÍKY
@@ -252,6 +280,8 @@ export const PLANS = {
     promptLimit: 3,
     attachmentLimit: 1,
     features: [...FREE_FEATURES],
+    isPublic: true,
+    isPurchasable: false,
     purchasable: false,
     checkoutMode: null,
     billingInterval: null,
@@ -272,6 +302,8 @@ export const PLANS = {
     promptLimit: null,
     attachmentLimit: 12,
     features: [...CORE_WRITING_FEATURES],
+    isPublic: true,
+    isPurchasable: true,
     purchasable: true,
     checkoutMode: 'subscription',
     billingInterval: 'month',
@@ -296,6 +328,8 @@ export const PLANS = {
       ...BACHELOR_DATA_FEATURES,
       ...DEFENSE_FEATURES,
     ],
+    isPublic: true,
+    isPurchasable: true,
     purchasable: true,
     checkoutMode: 'subscription',
     billingInterval: 'month',
@@ -320,11 +354,41 @@ export const PLANS = {
       ...COMPLETE_DATA_FEATURES,
       ...DEFENSE_FEATURES,
     ],
+    isPublic: true,
+    isPurchasable: true,
     purchasable: true,
     checkoutMode: 'subscription',
     billingInterval: 'month',
     stripePriceEnvKey: 'STRIPE_PRICE_MASTER_THESIS',
     sortOrder: 30,
+  },
+
+  admin: {
+    id: 'admin',
+    kind: 'plan',
+    name: 'ADMIN',
+    shortName: 'ADMIN',
+    description:
+      'Interný administrátorský balík s neobmedzeným prístupom ku všetkým funkciám.',
+    priceCents: 0,
+    currency: 'EUR',
+
+    pageLimit: null,
+    promptLimit: null,
+    attachmentLimit: null,
+
+    features: [...ALL_FEATURES],
+
+    // Nezobrazovať vo verejnom cenníku.
+    isPublic: false,
+
+    // Nesmie sa dať kúpiť cez Stripe.
+    isPurchasable: false,
+    purchasable: false,
+    checkoutMode: null,
+    billingInterval: null,
+    stripePriceEnvKey: null,
+    sortOrder: 999,
   },
 } as const satisfies Record<PlanId, PlanDefinition>;
 
@@ -527,8 +591,21 @@ export const FEATURE_TO_MODULE = {
 // ZOZNAMY ID
 // =====================================================
 
-export const PLAN_IDS = Object.freeze(
+/**
+ * Všetky identifikátory vrátane interných plánov.
+ */
+export const ALL_PLAN_IDS = Object.freeze(
   Object.keys(PLANS) as PlanId[],
+);
+
+/**
+ * Verejné plány určené pre pricing a výber balíka.
+ * ADMIN sa sem zámerne nedostane.
+ */
+export const PLAN_IDS = Object.freeze(
+  ALL_PLAN_IDS.filter(
+    (planId) => PLANS[planId].isPublic !== false,
+  ),
 );
 
 export const ADDON_IDS = Object.freeze(
@@ -540,8 +617,9 @@ export const FEATURE_KEYS = Object.freeze(
 );
 
 export const PURCHASABLE_PLAN_IDS = Object.freeze(
-  PLAN_IDS.filter(
-    (planId): planId is PaidPlanId => planId !== 'free',
+  ALL_PLAN_IDS.filter(
+    (planId): planId is PaidPlanId =>
+      PLANS[planId].purchasable === true,
   ),
 );
 
@@ -566,7 +644,10 @@ export function isPlanId(value: unknown): value is PlanId {
 }
 
 export function isPaidPlanId(value: unknown): value is PaidPlanId {
-  return isPlanId(value) && value !== 'free';
+  return (
+    isPlanId(value) &&
+    PLANS[value].purchasable === true
+  );
 }
 
 export function isAddonId(value: unknown): value is AddonId {
@@ -805,11 +886,14 @@ export function getExtraPagesForAddons(
 export function getTotalPageLimit(
   planId: PlanId,
   addonIds: readonly AddonId[] = [],
-): number {
-  return (
-    PLANS[planId].pageLimit +
-    getExtraPagesForAddons(addonIds)
-  );
+): number | null {
+  const basePageLimit = PLANS[planId].pageLimit;
+
+  if (basePageLimit === null) {
+    return null;
+  }
+
+  return basePageLimit + getExtraPagesForAddons(addonIds);
 }
 
 /**
@@ -824,7 +908,9 @@ export function getEffectiveEntitlementLimits(
   addonIds: readonly AddonId[] = [],
   options: EntitlementAccessOptions = {},
 ): EffectiveEntitlementLimits {
-  const isAdmin = options.isAdmin === true;
+  const isAdmin =
+    options.isAdmin === true ||
+    planId === 'admin';
 
   if (isAdmin) {
     return {
@@ -854,7 +940,10 @@ export function getFeaturesForEntitlements(
   addonIds: readonly AddonId[] = [],
   options: EntitlementAccessOptions = {},
 ): Set<FeatureKey> {
-  if (options.isAdmin === true) {
+  if (
+    options.isAdmin === true ||
+    planId === 'admin'
+  ) {
     return getAllFeatures();
   }
 
@@ -895,7 +984,10 @@ export function entitlementsIncludeFeature(
   feature: FeatureKey,
   options: EntitlementAccessOptions = {},
 ): boolean {
-  if (options.isAdmin === true) {
+  if (
+    options.isAdmin === true ||
+    planId === 'admin'
+  ) {
     return true;
   }
 

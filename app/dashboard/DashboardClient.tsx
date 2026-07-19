@@ -74,20 +74,30 @@ type LanguageCode = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
 
 type DashboardEntitlements = {
   ok?: boolean;
+
   userId: string;
   email: string | null;
+
   planId: PlanId;
   planName: string;
   planPriceCents: number;
+
+  isAdmin: boolean;
+  hasUnlimitedAccess: boolean;
+
   pageLimit: number;
+
   addonIds: AddonId[];
   addonNames: string[];
   features: FeatureKey[];
+
   promptLimit: number | null;
   promptsUsed: number;
   promptsRemaining: number | null;
   promptLimitReached: boolean;
-  attachmentLimit: number;
+
+  attachmentLimit: number | null;
+
   activatedAt: string | null;
   validUntil: string | null;
   updatedAt: string | null;
@@ -937,7 +947,8 @@ const allowedFileExtensions = [
 
 const allowedFileAccept = allowedFileExtensions.join(',');
 
-const maxFilesCount = 12;
+const maxStandardFilesCount = 12;
+const maxAdminFilesPerRequest = 50;
 const maxFileSizeMb = 30;
 const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 
@@ -1677,6 +1688,79 @@ const MODULE_REQUIRED_FEATURE: Record<ModuleKey, FeatureKey> = {
   humanizer: 'humanizer',
 };
 
+type ModuleAccessNoticeCopy = {
+  message: (moduleLabel: string, planName: string) => string;
+  detail: (moduleLabel: string) => string;
+};
+
+const MODULE_ACCESS_NOTICE_COPY: Record<
+  LanguageCode,
+  ModuleAccessNoticeCopy
+> = {
+  sk: {
+    message: (moduleLabel, planName) =>
+      `Sekcia „${moduleLabel}“ nie je súčasťou aktívneho balíka „${planName}“.`,
+    detail: (moduleLabel) =>
+      `Na používanie sekcie „${moduleLabel}“ si vyberte balík, ktorý túto sekciu obsahuje.`,
+  },
+  cs: {
+    message: (moduleLabel, planName) =>
+      `Sekce „${moduleLabel}“ není součástí aktivního balíčku „${planName}“.`,
+    detail: (moduleLabel) =>
+      `Pro používání sekce „${moduleLabel}“ vyberte balíček, který tuto sekci obsahuje.`,
+  },
+  en: {
+    message: (moduleLabel, planName) =>
+      `The “${moduleLabel}” section is not included in the active “${planName}” plan.`,
+    detail: (moduleLabel) =>
+      `Choose a plan that includes the “${moduleLabel}” section to continue.`,
+  },
+  de: {
+    message: (moduleLabel, planName) =>
+      `Der Bereich „${moduleLabel}“ ist im aktiven Paket „${planName}“ nicht enthalten.`,
+    detail: (moduleLabel) =>
+      `Wählen Sie ein Paket, das den Bereich „${moduleLabel}“ enthält.`,
+  },
+  pl: {
+    message: (moduleLabel, planName) =>
+      `Sekcja „${moduleLabel}“ nie jest dostępna w aktywnym pakiecie „${planName}“.`,
+    detail: (moduleLabel) =>
+      `Aby korzystać z sekcji „${moduleLabel}“, wybierz pakiet, który ją zawiera.`,
+  },
+  hu: {
+    message: (moduleLabel, planName) =>
+      `A(z) „${moduleLabel}“ szakasz nem része az aktív „${planName}“ csomagnak.`,
+    detail: (moduleLabel) =>
+      `A(z) „${moduleLabel}“ használatához válasszon olyan csomagot, amely tartalmazza ezt a szakaszt.`,
+  },
+};
+
+function createModuleAccessNotice({
+  language,
+  moduleLabel,
+  planName,
+}: {
+  language: LanguageCode;
+  moduleLabel: string;
+  planName: string;
+}): BillingNotice {
+  const copy =
+    MODULE_ACCESS_NOTICE_COPY[language] || MODULE_ACCESS_NOTICE_COPY.sk;
+
+  return {
+    code: 'FEATURE_NOT_INCLUDED',
+    message: copy.message(moduleLabel, planName),
+    detail: copy.detail(moduleLabel),
+    purchaseUrl: '/pricing',
+  };
+}
+
+const MODULE_ACCESS_ERROR_CODES = new Set([
+  'FEATURE_NOT_INCLUDED',
+  'REQUIRED_FEATURES_MISSING',
+  'NO_REQUIRED_FEATURE_INCLUDED',
+]);
+
 const BILLING_ERROR_CODES = new Set([
   'PAGE_LIMIT_REACHED',
   'PROMPT_LIMIT_REACHED',
@@ -1737,6 +1821,12 @@ const DASHBOARD_PLAN_DEFAULTS: Record<
     pageLimit: 70,
     attachmentLimit: 12,
   },
+  admin: {
+    name: 'ADMIN',
+    priceCents: 0,
+    pageLimit: 0,
+    attachmentLimit: 0,
+  },
 };
 
 const DASHBOARD_ADDON_LABELS: Record<AddonId, string> = {
@@ -1751,6 +1841,7 @@ const DASHBOARD_PLAN_IDS = new Set<PlanId>([
   'seminar-work',
   'bachelor-thesis',
   'master-thesis',
+  'admin',
 ]);
 
 const DASHBOARD_ADDON_IDS = new Set<AddonId>([
@@ -1961,34 +2052,82 @@ function normalizeDashboardEntitlements(
     'prompt_limit_reached',
   );
 
+  const isAdmin = readBoolean(
+    data,
+    planId === 'admin',
+    'isAdmin',
+    'is_admin',
+  );
+
+  const hasUnlimitedAccess = readBoolean(
+    data,
+    isAdmin,
+    'hasUnlimitedAccess',
+    'has_unlimited_access',
+    'isUnlimited',
+    'is_unlimited',
+  );
+
   return {
     ok: readBoolean(root ?? data, true, 'ok', 'success'),
+
     userId: readString(data, 'userId', 'user_id'),
     email: readNullableString(data, 'email'),
+
     planId,
     planName:
-      readString(data, 'planName', 'plan_name') || planDefaults.name,
+      readString(data, 'planName', 'plan_name') ||
+      planDefaults.name,
+
     planPriceCents:
       readNumber(data, 'planPriceCents', 'plan_price_cents') ??
       planDefaults.priceCents,
+
+    isAdmin,
+    hasUnlimitedAccess,
+
     pageLimit:
       readNumber(data, 'pageLimit', 'page_limit') ??
       planDefaults.pageLimit,
+
     addonIds,
     addonNames,
     features,
-    promptLimit,
-    promptsUsed,
-    promptsRemaining,
-    promptLimitReached,
-    attachmentLimit: Math.max(
-      0,
-      readNumber(data, 'attachmentLimit', 'attachment_limit') ??
-        planDefaults.attachmentLimit,
+
+    promptLimit: hasUnlimitedAccess ? null : promptLimit,
+    promptsUsed: hasUnlimitedAccess ? 0 : promptsUsed,
+    promptsRemaining: hasUnlimitedAccess ? null : promptsRemaining,
+    promptLimitReached:
+      hasUnlimitedAccess ? false : promptLimitReached,
+
+    attachmentLimit: hasUnlimitedAccess
+      ? null
+      : Math.max(
+          0,
+          readNumber(
+            data,
+            'attachmentLimit',
+            'attachment_limit',
+          ) ?? planDefaults.attachmentLimit,
+        ),
+
+    activatedAt: readNullableString(
+      data,
+      'activatedAt',
+      'activated_at',
     ),
-    activatedAt: readNullableString(data, 'activatedAt', 'activated_at'),
-    validUntil: readNullableString(data, 'validUntil', 'valid_until'),
-    updatedAt: readNullableString(data, 'updatedAt', 'updated_at'),
+
+    validUntil: readNullableString(
+      data,
+      'validUntil',
+      'valid_until',
+    ),
+
+    updatedAt: readNullableString(
+      data,
+      'updatedAt',
+      'updated_at',
+    ),
   };
 }
 
@@ -3750,26 +3889,44 @@ const fixedUi = getFixedModuleUi(systemLanguage)[activeModule];
 const currentFixedModuleUi = getFixedModuleUi(systemLanguage);
 
 const hasFeature = useCallback(
-  (feature: FeatureKey) =>
-    Boolean(entitlements?.features.includes(feature)),
+  (feature: FeatureKey) => {
+    if (entitlements?.hasUnlimitedAccess || entitlements?.isAdmin) {
+      return true;
+    }
+
+    return Boolean(entitlements?.features.includes(feature));
+  },
   [entitlements],
 );
 
 const activeModuleFeature = MODULE_REQUIRED_FEATURE[activeModule];
 const activeModuleAllowed =
   Boolean(entitlements) && hasFeature(activeModuleFeature);
-const effectiveAttachmentLimit = Math.max(
-  0,
-  Math.min(maxFilesCount, entitlements?.attachmentLimit ?? 1),
-);
+
+const hasUnlimitedAccess =
+  Boolean(entitlements?.hasUnlimitedAccess) ||
+  Boolean(entitlements?.isAdmin) ||
+  Boolean(pageQuota?.isUnlimited);
+
+const effectiveAttachmentLimit = hasUnlimitedAccess
+  ? maxAdminFilesPerRequest
+  : Math.max(
+      0,
+      Math.min(
+        maxStandardFilesCount,
+        entitlements?.attachmentLimit ?? 1,
+      ),
+    );
 const generationBlocked =
   isLoading ||
   billingLoading ||
   !entitlements ||
   !pageQuota ||
   !activeModuleAllowed ||
-  entitlements.promptLimitReached ||
-  (!pageQuota.isUnlimited && pageQuota.pageLimitReached);
+  (!hasUnlimitedAccess && entitlements.promptLimitReached) ||
+  (!hasUnlimitedAccess &&
+    !pageQuota.isUnlimited &&
+    pageQuota.pageLimitReached);
 
 const activeModuleLabel = fixedUi.label;
 
@@ -3806,28 +3963,43 @@ const activeModuleCardDescription = fixedUi.intro;
 
 const activeModuleResultTitle = fixedUi.resultTitle;
 
-useEffect(() => {
-  if (billingLoading || !entitlements) return;
-
-  if (!entitlements.features.includes(activeModuleFeature)) {
-    setBillingNotice({
-      code: 'FEATURE_NOT_INCLUDED',
-      message: `Funkcia „${activeModuleLabel}“ nie je súčasťou aktivovaného balíka.`,
-      detail: activeModuleFeature,
-      purchaseUrl: '/pricing',
-    });
-    return;
+const activeModuleAccessNotice = useMemo<BillingNotice | null>(() => {
+  if (billingLoading || !entitlements || activeModuleAllowed) {
+    return null;
   }
 
-  setBillingNotice((current) =>
-    current?.code === 'FEATURE_NOT_INCLUDED' ? null : current,
-  );
+  return createModuleAccessNotice({
+    language: systemLanguage,
+    moduleLabel: activeModuleLabel,
+    planName: entitlements.planName,
+  });
 }, [
-  activeModuleFeature,
+  activeModuleAllowed,
   activeModuleLabel,
   billingLoading,
   entitlements,
+  systemLanguage,
 ]);
+
+/**
+ * Modulová hláška sa vždy odvodzuje priamo z aktuálne zvolenej sekcie.
+ * Tým sa zabráni tomu, aby po prepnutí napríklad na Preklad zostala
+ * zobrazená stará hláška pre AI školiteľa alebo Obhajobu.
+ */
+const visibleBillingNotice = useMemo<BillingNotice | null>(() => {
+  if (activeModuleAccessNotice) {
+    return activeModuleAccessNotice;
+  }
+
+  if (
+    billingNotice &&
+    MODULE_ACCESS_ERROR_CODES.has(billingNotice.code)
+  ) {
+    return null;
+  }
+
+  return billingNotice;
+}, [activeModuleAccessNotice, billingNotice]);
 
 const exportTitle = useMemo(() => {
   return `${activeModuleLabel} - ${
@@ -4740,8 +4912,15 @@ const runModule = async () => {
   }
 
   const requiredFeature = MODULE_REQUIRED_FEATURE[activeModule];
+  const currentHasUnlimitedAccess =
+    currentEntitlements.hasUnlimitedAccess ||
+    currentEntitlements.isAdmin ||
+    currentPageQuota.isUnlimited;
 
-  if (!currentEntitlements.features.includes(requiredFeature)) {
+  if (
+    !currentHasUnlimitedAccess &&
+    !currentEntitlements.features.includes(requiredFeature)
+  ) {
     setBillingNotice({
       code: 'FEATURE_NOT_INCLUDED',
       message: `Funkcia „${activeModuleLabel}“ nie je súčasťou aktivovaného balíka.`,
@@ -4751,7 +4930,10 @@ const runModule = async () => {
     return;
   }
 
-  if (currentEntitlements.promptLimitReached) {
+  if (
+    !currentHasUnlimitedAccess &&
+    currentEntitlements.promptLimitReached
+  ) {
     setBillingNotice({
       code: 'PROMPT_LIMIT_REACHED',
       message:
@@ -4762,6 +4944,7 @@ const runModule = async () => {
   }
 
   if (
+    !currentHasUnlimitedAccess &&
     !currentPageQuota.isUnlimited &&
     currentPageQuota.pageLimitReached
   ) {
@@ -4774,15 +4957,31 @@ const runModule = async () => {
     return;
   }
 
-  if (attachedFiles.length > currentEntitlements.attachmentLimit) {
+  if (
+    !currentEntitlements.hasUnlimitedAccess &&
+    !currentEntitlements.isAdmin &&
+    currentEntitlements.attachmentLimit !== null &&
+    attachedFiles.length > currentEntitlements.attachmentLimit
+  ) {
     setBillingNotice({
       code: 'ATTACHMENT_LIMIT_REACHED',
-      message:
-        currentEntitlements.attachmentLimit === 1
-          ? 'Váš balík povoľuje maximálne 1 prílohu.'
-          : `Váš balík povoľuje maximálne ${currentEntitlements.attachmentLimit} príloh.`,
+      message: `Váš balík povoľuje maximálne ${currentEntitlements.attachmentLimit} príloh.`,
       purchaseUrl: '/pricing',
     });
+
+    return;
+  }
+
+  if (
+    currentHasUnlimitedAccess &&
+    attachedFiles.length > maxAdminFilesPerRequest
+  ) {
+    setBillingNotice({
+      code: 'ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED',
+      message: `V jednej požiadavke je možné odoslať maximálne ${maxAdminFilesPerRequest} príloh.`,
+      purchaseUrl: '/pricing',
+    });
+
     return;
   }
 
@@ -5014,27 +5213,27 @@ prepareFormData.append(
 
 const hasGroupingColumns = Boolean(groupingColumnsText.trim());
 
-const canDataDescriptive = currentEntitlements.features.includes(
-  'data-descriptive',
-);
-const canDataQuestionnaires = currentEntitlements.features.includes(
-  'data-questionnaires',
-);
-const canDataReliability = currentEntitlements.features.includes(
-  'data-reliability',
-);
-const canDataNormality = currentEntitlements.features.includes(
-  'data-normality',
-);
-const canDataCorrelations = currentEntitlements.features.includes(
-  'data-correlations',
-);
-const canDataParametric = currentEntitlements.features.includes(
-  'data-parametric-tests',
-);
-const canDataNonParametric = currentEntitlements.features.includes(
-  'data-nonparametric-tests',
-);
+const canDataDescriptive =
+  currentHasUnlimitedAccess ||
+  currentEntitlements.features.includes('data-descriptive');
+const canDataQuestionnaires =
+  currentHasUnlimitedAccess ||
+  currentEntitlements.features.includes('data-questionnaires');
+const canDataReliability =
+  currentHasUnlimitedAccess ||
+  currentEntitlements.features.includes('data-reliability');
+const canDataNormality =
+  currentHasUnlimitedAccess ||
+  currentEntitlements.features.includes('data-normality');
+const canDataCorrelations =
+  currentHasUnlimitedAccess ||
+  currentEntitlements.features.includes('data-correlations');
+const canDataParametric =
+  currentHasUnlimitedAccess ||
+  currentEntitlements.features.includes('data-parametric-tests');
+const canDataNonParametric =
+  currentHasUnlimitedAccess ||
+  currentEntitlements.features.includes('data-nonparametric-tests');
 
 const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
   alpha: 0.05,
@@ -5640,25 +5839,14 @@ const selectDashboardModule = useCallback(
   (moduleKey: ModuleKey) => {
     if (!isModuleKey(moduleKey)) return;
 
-    const requiredFeature = MODULE_REQUIRED_FEATURE[moduleKey];
-    const moduleAllowed = Boolean(
-      entitlements?.features.includes(requiredFeature),
+    // Najskôr odstránime starú modulovú hlášku. Nová hláška sa následne
+    // bezpečne vypočíta z novej hodnoty activeModule a aktuálnych oprávnení.
+    setBillingNotice((current) =>
+      current && MODULE_ACCESS_ERROR_CODES.has(current.code)
+        ? null
+        : current,
     );
-
     setActiveModule(moduleKey);
-
-    if (!billingLoading && entitlements && !moduleAllowed) {
-      setBillingNotice({
-        code: 'FEATURE_NOT_INCLUDED',
-        message: `Vybraný modul nie je súčasťou balíka „${entitlements.planName}“.`,
-        detail: requiredFeature,
-        purchaseUrl: '/pricing',
-      });
-    } else {
-      setBillingNotice((current) =>
-        current?.code === 'FEATURE_NOT_INCLUDED' ? null : current,
-      );
-    }
 
     if (typeof window !== 'undefined') {
       localStorage.setItem(
@@ -5678,7 +5866,7 @@ const selectDashboardModule = useCallback(
       });
     }, 80);
   },
-  [billingLoading, entitlements, router],
+  [router],
 );
 
 const downloadPdf = () => {
@@ -6294,6 +6482,8 @@ const downloadExcel = () => {
   }
 
   if (
+    !currentEntitlements?.hasUnlimitedAccess &&
+    !currentEntitlements?.isAdmin &&
     !currentEntitlements?.features.includes('defense-presentation')
   ) {
     setBillingNotice({
@@ -6801,7 +6991,7 @@ const downloadExcel = () => {
         <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
           <p className="text-xs font-bold text-slate-400">Strany</p>
           <p className="mt-1 font-black text-white">
-            {pageQuota.isUnlimited
+            {hasUnlimitedAccess
               ? 'Neobmedzené'
               : `${pageQuota.pagesRemaining} zostáva z ${pageQuota.pageLimit}`}
           </p>
@@ -6815,42 +7005,57 @@ const downloadExcel = () => {
         <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
           <p className="text-xs font-bold text-slate-400">Prompty</p>
           <p className="mt-1 font-black text-white">
-            {entitlements.promptLimit === null
+            {hasUnlimitedAccess || entitlements.promptLimit === null
               ? 'Neobmedzené'
               : `${entitlements.promptsRemaining ?? 0} zostáva z ${entitlements.promptLimit}`}
           </p>
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-          <p className="text-xs font-bold text-slate-400">Prílohy</p>
-          <p className="mt-1 font-black text-white">
-            {attachedFiles.length} / {effectiveAttachmentLimit}
+          <p className="text-xs font-bold text-slate-400">
+            Prílohy
           </p>
+
+          <p className="mt-1 font-black text-white">
+            {hasUnlimitedAccess
+              ? 'Neobmedzené'
+              : `${attachedFiles.length} / ${effectiveAttachmentLimit}`}
+          </p>
+
+          {hasUnlimitedAccess ? (
+            <p className="mt-1 text-xs font-semibold text-slate-400">
+              Aktuálne nahrané: {attachedFiles.length}
+            </p>
+          ) : null}
         </div>
       </div>
     </section>
   ) : null}
 
-  {billingNotice ? (
-    <section className="mb-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4">
+  {visibleBillingNotice ? (
+    <section
+      key={`${activeModule}:${visibleBillingNotice.code}`}
+      className="mb-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4"
+      aria-live="polite"
+    >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="font-black text-amber-100">
-            {billingNotice.message}
+            {visibleBillingNotice.message}
           </p>
-          {billingNotice.detail ? (
+          {visibleBillingNotice.detail ? (
             <p className="mt-1 text-sm font-bold text-amber-100/70">
-              {billingNotice.detail}
+              {visibleBillingNotice.detail}
             </p>
           ) : null}
         </div>
 
         <button
           type="button"
-          onClick={() => router.push(billingNotice.purchaseUrl)}
+          onClick={() => router.push(visibleBillingNotice.purchaseUrl)}
           className="shrink-0 rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-slate-950 transition hover:bg-amber-300"
         >
-          {billingNotice.code === 'PAGE_LIMIT_REACHED'
+          {visibleBillingNotice.code === 'PAGE_LIMIT_REACHED'
             ? 'Dokúpiť strany'
             : 'Vybrať balík'}
         </button>
@@ -6943,9 +7148,13 @@ const downloadExcel = () => {
                     disabled={
                       billingLoading ||
                       !activeModuleAllowed ||
-                      Boolean(entitlements?.promptLimitReached) ||
+                      Boolean(
+                        !hasUnlimitedAccess &&
+                          entitlements?.promptLimitReached,
+                      ) ||
                       Boolean(
                         pageQuota &&
+                          !hasUnlimitedAccess &&
                           !pageQuota.isUnlimited &&
                           pageQuota.pageLimitReached,
                       ) ||

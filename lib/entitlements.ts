@@ -222,7 +222,11 @@ export type EntitlementErrorBody = {
 
 const DEFAULT_PLAN_ID: PlanId = "free";
 
-const DEFAULT_ATTACHMENT_LIMIT = PLANS.free.attachmentLimit || 1;
+const DEFAULT_ATTACHMENT_LIMIT =
+  typeof PLANS.free.attachmentLimit === "number" &&
+  Number.isFinite(PLANS.free.attachmentLimit)
+    ? Math.max(Math.trunc(PLANS.free.attachmentLimit), 0)
+    : 1;
 
 const PURCHASE_URL = "/pricing";
 
@@ -515,6 +519,29 @@ function toNonNegativeInteger(value: unknown, fallback = 0): number {
   );
 }
 
+/**
+ * Prevedie katalógový limit strán na bezpečné nezáporné celé číslo.
+ *
+ * PlanDefinition.pageLimit môže byť null pri internom administrátorskom
+ * balíku. Administrátor má neobmedzený prístup cez isAdmin a
+ * hasUnlimitedAccess, preto sa hodnota 0 používa iba ako bezpečná
+ * serializovateľná hodnota pre číselné polia CurrentEntitlements.
+ */
+function resolveCatalogPageLimit(value: unknown): number {
+  return toNonNegativeInteger(value, 0);
+}
+
+/**
+ * Prevedie katalógový limit príloh na bezpečné nezáporné celé číslo.
+ *
+ * PlanDefinition.attachmentLimit môže byť null pri internom administrátorskom
+ * balíku. Administrátor má kontrolu príloh obídenú cez isAdmin, preto sa táto
+ * hodnota používa iba ako bezpečný číselný údaj pre API a serializáciu.
+ */
+function resolveCatalogAttachmentLimit(value: unknown): number {
+  return toNonNegativeInteger(value, DEFAULT_ATTACHMENT_LIMIT);
+}
+
 function toSafeBoolean(value: unknown, fallback = false): boolean {
   if (typeof value === "boolean") {
     return value;
@@ -652,7 +679,7 @@ function resolvePromptLimit(
 
 function resolveAttachmentLimit(
   databaseValue: unknown,
-  planValue: unknown,
+  planValue: number,
 ): number {
   const databaseLimit = toNonNegativeIntegerOrUndefined(databaseValue);
 
@@ -711,6 +738,10 @@ function getDefaultEntitlements({
 
   const featureList = Array.from(features);
   const promptLimit = plan.promptLimit;
+  const pageLimit = resolveCatalogPageLimit(plan.pageLimit);
+  const attachmentLimit = resolveCatalogAttachmentLimit(
+    plan.attachmentLimit,
+  );
 
   return {
     userId,
@@ -723,9 +754,9 @@ function getDefaultEntitlements({
     planId: DEFAULT_PLAN_ID,
     planName: plan.name,
     planPriceCents: plan.priceCents,
-    pageLimit: plan.pageLimit,
+    pageLimit,
 
-    basePageLimit: plan.pageLimit,
+    basePageLimit: pageLimit,
     extraPageLimit: 0,
     pagesUsed: 0,
 
@@ -740,7 +771,7 @@ function getDefaultEntitlements({
     promptsRemaining: promptLimit,
     promptLimitReached: false,
 
-    attachmentLimit: plan.attachmentLimit,
+    attachmentLimit,
 
     billingStatus: isAdmin ? "admin" : "active",
     activatedAt: null,
@@ -975,6 +1006,10 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
   const planId = expired ? DEFAULT_PLAN_ID : storedPlanId;
   const addonIds = expired ? [] : storedAddonIds;
   const plan = PLANS[planId];
+  const catalogPageLimit = resolveCatalogPageLimit(plan.pageLimit);
+  const catalogAttachmentLimit = resolveCatalogAttachmentLimit(
+    plan.attachmentLimit,
+  );
 
   const features = getFeaturesForEntitlements(planId, addonIds, { isAdmin });
 
@@ -996,12 +1031,15 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
       });
 
   const attachmentLimit = expired
-    ? plan.attachmentLimit
-    : resolveAttachmentLimit(data.attachment_limit, plan.attachmentLimit);
+    ? catalogAttachmentLimit
+    : resolveAttachmentLimit(
+        data.attachment_limit,
+        catalogAttachmentLimit,
+      );
 
   const basePageLimit = expired
-    ? plan.pageLimit
-    : toNonNegativeInteger(data.base_page_limit, plan.pageLimit);
+    ? catalogPageLimit
+    : toNonNegativeInteger(data.base_page_limit, catalogPageLimit);
 
   const extraPageLimit = expired
     ? 0
@@ -1020,7 +1058,7 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
     planId,
     planName: plan.name,
     planPriceCents: plan.priceCents,
-    pageLimit: plan.pageLimit,
+    pageLimit: catalogPageLimit,
 
     basePageLimit,
     extraPageLimit,

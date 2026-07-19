@@ -31,7 +31,7 @@ import {
   type PlanId,
 } from '@/lib/billing/catalog';
 
-type PaidPlanId = Exclude<PlanId, 'free'>;
+type PaidPlanId = Exclude<PlanId, 'free' | 'admin'>;
 type CheckoutKind = 'plan' | 'addon';
 
 type MainPlan = {
@@ -98,11 +98,19 @@ type AddonCheckoutPayload = {
 
 type CheckoutPayload = PlanCheckoutPayload | AddonCheckoutPayload;
 
-const PAID_PLAN_IDS: PaidPlanId[] = [
-  'seminar-work',
-  'bachelor-thesis',
-  'master-thesis',
-];
+const publicPlans = Object.values(PLANS).filter(
+  (plan) =>
+    plan.id !== 'admin' &&
+    plan.isPublic !== false &&
+    plan.isPurchasable !== false,
+);
+
+const PAID_PLAN_IDS: PaidPlanId[] = publicPlans
+  .map((plan) => plan.id)
+  .filter(
+    (planId): planId is PaidPlanId =>
+      planId !== 'free' && planId !== 'admin',
+  );
 
 const ADDON_IDS: AddonId[] = [
   'data-analysis',
@@ -126,81 +134,81 @@ const mainPlans: MainPlan[] = [
     name: 'FREE VERZIA',
     priceCents: 0,
     period: 'bez platby',
-    scope: `${PLANS.free.pageLimit} strany Â· ${PLANS.free.attachmentLimit} prĂ­loha Â· ${PLANS.free.promptLimit ?? 0} AI prompty`,
-    badge: 'BezplatnĂ© vyskĂşĹˇanie',
+    scope: `${PLANS.free.pageLimit} strany · ${PLANS.free.attachmentLimit} príloha · ${PLANS.free.promptLimit ?? 0} AI prompty`,
+    badge: 'Bezplatné vyskúšanie',
     description:
-      'ZĂˇkladnĂˇ verzia na vyskĂşĹˇanie systĂ©mu bez platobnej karty a bez aktivĂˇcie predplatnĂ©ho.',
+      'Základná verzia na vyskúšanie systému bez platobnej karty a bez aktivácie predplatného.',
     isFree: true,
     features: [
-      `${PLANS.free.pageLimit} strany spracovanĂ©ho vĂ˝stupu`,
-      `${PLANS.free.attachmentLimit} nahranĂˇ prĂ­loha`,
-      `${PLANS.free.promptLimit ?? 0} skĂşĹˇobnĂ© AI prompty`,
-      'ZĂˇkladnĂ© vyskĂşĹˇanie AI chatu',
+      `${PLANS.free.pageLimit} strany spracovaného výstupu`,
+      `${PLANS.free.attachmentLimit} nahraná príloha`,
+      `${PLANS.free.promptLimit ?? 0} skúšobné AI prompty`,
+      'Základné vyskúšanie AI chatu',
       'Bez platobnej karty',
     ],
   },
   {
     id: 'seminar-work',
-    name: 'SEMINĂRNA PRĂCA',
+    name: 'SEMINÁRNA PRÁCA',
     priceCents: 3900,
-    period: 'mesaÄŤne',
-    scope: `Rozsah do ${PLANS['seminar-work'].pageLimit} strĂˇn`,
-    badge: 'Pre kratĹˇie akademickĂ© prĂˇce',
+    period: 'mesačne',
+    scope: `Rozsah do ${PLANS['seminar-work'].pageLimit} strán`,
+    badge: 'Pre kratšie akademické práce',
     description:
-      'MesaÄŤnĂ˝ balĂ­k pre seminĂˇrne, roÄŤnĂ­kovĂ©, zĂˇpoÄŤtovĂ© a kratĹˇie odbornĂ© prĂˇce.',
+      'Mesačný balík pre seminárne, ročníkové, zápočtové a kratšie odborné práce.',
     features: [
-      'AI pomoc pri pĂ­sanĂ­ jednotlivĂ˝ch kapitol',
-      'NĂˇvrh ĹˇtruktĂşry a osnovy',
-      'MetodickĂ© vedenie poÄŤas spracovania',
+      'AI pomoc pri písaní jednotlivých kapitol',
+      'Návrh štruktúry a osnovy',
+      'Metodické vedenie počas spracovania',
       'Kontrola kvality a logiky textu',
-      'HumanizĂˇcia textu',
-      'Pomoc s citĂˇciami a zdrojmi',
-      'PlĂˇnovanie prĂˇce a termĂ­nov',
-      'PrĂ­prava e-mailov pre vyuÄŤujĂşceho',
+      'Humanizácia textu',
+      'Pomoc s citáciami a zdrojmi',
+      'Plánovanie práce a termínov',
+      'Príprava e-mailov pre vyučujúceho',
     ],
   },
   {
     id: 'bachelor-thesis',
-    name: 'BAKALĂRSKA PRĂCA',
+    name: 'BAKALÁRSKA PRÁCA',
     priceCents: 14900,
-    period: 'mesaÄŤne',
-    scope: `Rozsah do ${PLANS['bachelor-thesis'].pageLimit} strĂˇn`,
-    badge: 'NajobÄľĂşbenejĹˇĂ­ balĂ­k',
+    period: 'mesačne',
+    scope: `Rozsah do ${PLANS['bachelor-thesis'].pageLimit} strán`,
+    badge: 'Najobľúbenejší balík',
     description:
-      'KompletnĂˇ mesaÄŤnĂˇ podpora od zadania a osnovy aĹľ po prĂ­pravu na obhajobu bakalĂˇrskej prĂˇce.',
+      'Kompletná mesačná podpora od zadania a osnovy až po prípravu na obhajobu bakalárskej práce.',
     highlighted: true,
     features: [
-      'Tvorba a Ăşprava jednotlivĂ˝ch kapitol',
-      'MetodickĂ© vedenie poÄŤas celĂ©ho pĂ­sania',
+      'Tvorba a úprava jednotlivých kapitol',
+      'Metodické vedenie počas celého písania',
       'Kontrola kvality, logiky a konzistentnosti',
-      'HumanizĂˇcia odbornĂ©ho textu',
-      'Pomoc so zdrojmi a citĂˇciami',
-      'Spracovanie dotaznĂ­kov a Ĺˇtatistiky',
+      'Humanizácia odborného textu',
+      'Pomoc so zdrojmi a citáciami',
+      'Spracovanie dotazníkov a štatistiky',
       'Tvorba grafov a tabuliek',
-      'PrĂ­prava prezentĂˇcie na obhajobu',
-      'PrĂ­prava odpovedĂ­ na otĂˇzky komisie',
+      'Príprava prezentácie na obhajobu',
+      'Príprava odpovedí na otázky komisie',
     ],
   },
   {
     id: 'master-thesis',
-    name: 'DIPLOMOVĂ / MAGISTERSKĂ PRĂCA',
+    name: 'DIPLOMOVÁ / MAGISTERSKÁ PRÁCA',
     priceCents: 18900,
-    period: 'mesaÄŤne',
-    scope: `Rozsah do ${PLANS['master-thesis'].pageLimit} strĂˇn`,
-    badge: 'NajkomplexnejĹˇĂ­ balĂ­k',
+    period: 'mesačne',
+    scope: `Rozsah do ${PLANS['master-thesis'].pageLimit} strán`,
+    badge: 'Najkomplexnejší balík',
     description:
-      'NajvyĹˇĹˇĂ­ mesaÄŤnĂ˝ balĂ­k pre rozsiahle zĂˇvereÄŤnĂ© prĂˇce, pokroÄŤilĂş metodiku, analĂ˝zu dĂˇt a obhajobu.',
+      'Najvyšší mesačný balík pre rozsiahle záverečné práce, pokročilú metodiku, analýzu dát a obhajobu.',
     features: [
-      'Tvorba a Ăşprava celej zĂˇvereÄŤnej prĂˇce',
-      'PokroÄŤilĂ© metodickĂ© vedenie',
+      'Tvorba a úprava celej záverečnej práce',
+      'Pokročilé metodické vedenie',
       'Kontrola odbornosti a konzistentnosti',
-      'HumanizĂˇcia odbornĂ©ho textu',
-      'KomplexnĂˇ prĂˇca so zdrojmi a citĂˇciami',
-      'DeskriptĂ­vna a inferenÄŤnĂˇ Ĺˇtatistika',
-      'Testovanie hypotĂ©z a normality dĂˇt',
-      'KorelaÄŤnĂ© a neparametrickĂ© analĂ˝zy',
-      'Tvorba grafov, tabuliek a interpretĂˇciĂ­',
-      'PrĂ­prava prezentĂˇcie a simulĂˇcia obhajoby',
+      'Humanizácia odborného textu',
+      'Komplexná práca so zdrojmi a citáciami',
+      'Deskriptívna a inferenčná štatistika',
+      'Testovanie hypotéz a normality dát',
+      'Korelačné a neparametrické analýzy',
+      'Tvorba grafov, tabuliek a interpretácií',
+      'Príprava prezentácie a simulácia obhajoby',
     ],
   },
 ];
@@ -208,63 +216,69 @@ const mainPlans: MainPlan[] = [
 const oneTimeAddons: OneTimeAddon[] = [
   {
     id: 'data-analysis',
-    name: 'ANALĂťZA DĂT',
+    name: 'ANALÝZA DÁT',
     priceCents: ADDONS['data-analysis'].priceCents,
-    period: 'jednorazovĂˇ platba',
-    badge: 'SamostatnĂˇ analytickĂˇ sluĹľba',
+    period: 'jednorazová platba',
+    badge: 'Samostatná analytická služba',
     description:
-      'JednorazovĂ© sprĂ­stupnenie nĂˇstrojov na prĂ­pravu, ĹˇtatistickĂ© spracovanie, vizualizĂˇciu a export dĂˇt.',
+      'Jednorazové sprístupnenie nástrojov na prípravu, štatistické spracovanie, vizualizáciu a export dát.',
     features: [
-      'ÄŚistenie a prĂ­prava dĂˇt',
-      'Spracovanie dotaznĂ­kov',
-      'DeskriptĂ­vna Ĺˇtatistika',
-      'FrekvenÄŤnĂ© tabuÄľky',
+      'Čistenie a príprava dát',
+      'Spracovanie dotazníkov',
+      'Deskriptívna štatistika',
+      'Frekvenčné tabuľky',
       'Testovanie normality',
-      'KorelaÄŤnĂ© analĂ˝zy',
-      'ParametrickĂ© a neparametrickĂ© testy',
-      'Grafy, tabuÄľky a export vĂ˝sledkov',
+      'Korelačné analýzy',
+      'Parametrické a neparametrické testy',
+      'Grafy, tabuľky a export výsledkov',
     ],
   },
   {
     id: 'extra-20',
-    name: 'EXTRA 20 STRĂN',
+    name: 'EXTRA 20 STRÁN',
     priceCents: ADDONS['extra-20'].priceCents,
-    period: 'jednorazovĂˇ platba',
+    period: 'jednorazová platba',
     description:
-      'JednorazovĂ© navĂ˝Ĺˇenie dostupnĂ©ho rozsahu aktuĂˇlneho projektu o ÄŹalĹˇĂ­ch 20 strĂˇn.',
+      'Jednorazové navýšenie dostupného rozsahu aktuálneho projektu o ďalších 20 strán.',
     features: [
-      `NavĂ˝Ĺˇenie limitu o ${ADDONS['extra-20'].extraPages} strĂˇn`,
-      'PouĹľitie v aktuĂˇlnom projekte',
-      'Bez zmeny hlavnĂ©ho mesaÄŤnĂ©ho plĂˇnu',
+      `Navýšenie limitu o ${ADDONS['extra-20'].extraPages} strán`,
+      'Použitie v aktuálnom projekte',
+      'Bez zmeny hlavného mesačného plánu',
     ],
   },
   {
     id: 'extra-40',
-    name: 'EXTRA 40 STRĂN',
+    name: 'EXTRA 40 STRÁN',
     priceCents: ADDONS['extra-40'].priceCents,
-    period: 'jednorazovĂˇ platba',
+    period: 'jednorazová platba',
     description:
-      'JednorazovĂ© navĂ˝Ĺˇenie dostupnĂ©ho rozsahu aktuĂˇlneho projektu o ÄŹalĹˇĂ­ch 40 strĂˇn.',
+      'Jednorazové navýšenie dostupného rozsahu aktuálneho projektu o ďalších 40 strán.',
     features: [
-      `NavĂ˝Ĺˇenie limitu o ${ADDONS['extra-40'].extraPages} strĂˇn`,
-      'PouĹľitie v aktuĂˇlnom projekte',
-      'Bez zmeny hlavnĂ©ho mesaÄŤnĂ©ho plĂˇnu',
+      `Navýšenie limitu o ${ADDONS['extra-40'].extraPages} strán`,
+      'Použitie v aktuálnom projekte',
+      'Bez zmeny hlavného mesačného plánu',
     ],
   },
   {
     id: 'extra-60',
-    name: 'EXTRA 60 STRĂN',
+    name: 'EXTRA 60 STRÁN',
     priceCents: ADDONS['extra-60'].priceCents,
-    period: 'jednorazovĂˇ platba',
+    period: 'jednorazová platba',
     description:
-      'JednorazovĂ© navĂ˝Ĺˇenie dostupnĂ©ho rozsahu aktuĂˇlneho projektu o ÄŹalĹˇĂ­ch 60 strĂˇn.',
+      'Jednorazové navýšenie dostupného rozsahu aktuálneho projektu o ďalších 60 strán.',
     features: [
-      `NavĂ˝Ĺˇenie limitu o ${ADDONS['extra-60'].extraPages} strĂˇn`,
-      'PouĹľitie v aktuĂˇlnom projekte',
-      'Bez zmeny hlavnĂ©ho mesaÄŤnĂ©ho plĂˇnu',
+      `Navýšenie limitu o ${ADDONS['extra-60'].extraPages} strán`,
+      'Použitie v aktuálnom projekte',
+      'Bez zmeny hlavného mesačného plánu',
     ],
   },
 ];
+
+const visibleMainPlans = mainPlans.filter(
+  (plan) =>
+    plan.isFree ||
+    publicPlans.some((publicPlan) => publicPlan.id === plan.id),
+);
 
 function formatPrice(priceCents: number) {
   return new Intl.NumberFormat('sk-SK', {
@@ -299,21 +313,21 @@ function getFriendlyCheckoutError(
 
   if (data.error === 'INVALID_PLAN' || data.code === 'INVALID_PLAN') {
     return [
-      'PlatobnĂˇ brĂˇna odmietla identifikĂˇtor hlavnĂ©ho plĂˇnu.',
+      'Platobná brána odmietla identifikátor hlavného plánu.',
       '',
-      `OdoslanĂ˝ plĂˇn: ${data.receivedPlan || 'nezistenĂ©'}`,
+      `Odoslaný plán: ${data.receivedPlan || 'nezistené'}`,
       '',
-      `PovolenĂ© ID plĂˇnov: ${PAID_PLAN_IDS.join(', ')}`,
+      `Povolené ID plánov: ${PAID_PLAN_IDS.join(', ')}`,
     ].join('\n');
   }
 
   if (data.error === 'INVALID_ADDON' || data.code === 'INVALID_ADDON') {
     return [
-      'PlatobnĂˇ brĂˇna odmietla identifikĂˇtor jednorazovĂ©ho doplnku.',
+      'Platobná brána odmietla identifikátor jednorazového doplnku.',
       '',
-      `OdoslanĂ˝ doplnok: ${data.receivedAddon || 'nezistenĂ©'}`,
+      `Odoslaný doplnok: ${data.receivedAddon || 'nezistené'}`,
       '',
-      `PovolenĂ© ID doplnkov: ${ADDON_IDS.join(', ')}`,
+      `Povolené ID doplnkov: ${ADDON_IDS.join(', ')}`,
     ].join('\n');
   }
 
@@ -321,10 +335,10 @@ function getFriendlyCheckoutError(
     data.error,
     data.message,
     data.detail,
-    data.reason ? `DĂ´vod: ${data.reason}` : '',
-    data.solution ? `RieĹˇenie: ${data.solution}` : '',
+    data.reason ? `Dôvod: ${data.reason}` : '',
+    data.solution ? `Riešenie: ${data.solution}` : '',
     data.technicalCode
-      ? `TechnickĂ˝ kĂłd: ${data.technicalCode}`
+      ? `Technický kód: ${data.technicalCode}`
       : '',
   ]
     .filter(Boolean)
@@ -402,14 +416,14 @@ export default function PricingPage() {
 
     if (!email) {
       setCheckoutError(
-        'Pred pokraÄŤovanĂ­m na platbu zadajte e-mailovĂş adresu.',
+        'Pred pokračovaním na platbu zadajte e-mailovú adresu.',
       );
       emailInputRef.current?.focus();
       return null;
     }
 
     if (!isValidEmail(email)) {
-      setCheckoutError('Zadajte platnĂş e-mailovĂş adresu.');
+      setCheckoutError('Zadajte platnú e-mailovú adresu.');
       emailInputRef.current?.focus();
       return null;
     }
@@ -429,13 +443,13 @@ export default function PricingPage() {
       window.localStorage.removeItem(STORAGE_SELECTED_ADDONS);
     }
 
-    router.push('/register?plan=free&source=pricing');
+    router.push('/dashboard?plan=free&source=pricing');
   };
 
   const startPlanCheckout = async (planId: PaidPlanId) => {
     if (!isPaidPlanId(planId)) {
       setCheckoutError(
-        `NeplatnĂ˝ hlavnĂ˝ plĂˇn: ${planId}.`,
+        `Neplatný hlavný plán: ${planId}.`,
       );
       return;
     }
@@ -451,7 +465,7 @@ export default function PricingPage() {
 
       if (typeof window === 'undefined') {
         throw new Error(
-          'Platbu je moĹľnĂ© spustiĹĄ iba v internetovom prehliadaÄŤi.',
+          'Platbu je možné spustiť iba v internetovom prehliadači.',
         );
       }
 
@@ -486,14 +500,14 @@ export default function PricingPage() {
       throw new Error(
         getFriendlyCheckoutError(
           data,
-          `PlatobnĂş brĂˇnu sa nepodarilo spustiĹĄ. HTTP ${response.status}.`,
+          `Platobnú bránu sa nepodarilo spustiť. HTTP ${response.status}.`,
         ),
       );
     } catch (error: unknown) {
       const message =
         error instanceof Error
           ? error.message
-          : 'Platbu hlavnĂ©ho plĂˇnu sa nepodarilo spustiĹĄ.';
+          : 'Platbu hlavného plánu sa nepodarilo spustiť.';
 
       console.error('PLAN CHECKOUT ERROR:', error);
       setCheckoutError(message);
@@ -505,7 +519,7 @@ export default function PricingPage() {
   const startAddonCheckout = async (addonId: AddonId) => {
     if (!isAddonId(addonId)) {
       setCheckoutError(
-        `NeplatnĂ˝ jednorazovĂ˝ doplnok: ${addonId}.`,
+        `Neplatný jednorazový doplnok: ${addonId}.`,
       );
       return;
     }
@@ -521,7 +535,7 @@ export default function PricingPage() {
 
       if (typeof window === 'undefined') {
         throw new Error(
-          'Platbu je moĹľnĂ© spustiĹĄ iba v internetovom prehliadaÄŤi.',
+          'Platbu je možné spustiť iba v internetovom prehliadači.',
         );
       }
 
@@ -558,14 +572,14 @@ export default function PricingPage() {
       throw new Error(
         getFriendlyCheckoutError(
           data,
-          `PlatobnĂş brĂˇnu sa nepodarilo spustiĹĄ. HTTP ${response.status}.`,
+          `Platobnú bránu sa nepodarilo spustiť. HTTP ${response.status}.`,
         ),
       );
     } catch (error: unknown) {
       const message =
         error instanceof Error
           ? error.message
-          : 'Platbu jednorazovĂ©ho doplnku sa nepodarilo spustiĹĄ.';
+          : 'Platbu jednorazového doplnku sa nepodarilo spustiť.';
 
       console.error('ADDON CHECKOUT ERROR:', error);
       setCheckoutError(message);
@@ -591,7 +605,7 @@ export default function PricingPage() {
           </button>
 
           <div className="hidden text-sm font-semibold text-slate-400 sm:block">
-            MesaÄŤnĂ© plĂˇny a jednorazovĂ© doplnky
+            Mesačné plány a jednorazové doplnky
           </div>
 
           <button
@@ -600,7 +614,7 @@ export default function PricingPage() {
             className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-purple-400/30 bg-purple-600/20 px-4 py-2 text-sm font-bold text-purple-100 transition hover:bg-purple-600/30"
           >
             <ArrowLeft size={18} />
-            SpĂ¤ĹĄ do menu
+            Späť do menu
           </button>
         </div>
       </header>
@@ -610,36 +624,36 @@ export default function PricingPage() {
           <div className="mb-8">
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-sm font-semibold text-purple-200">
               <Crown size={16} />
-              CennĂ­k ZEDPERA
+              Cenník ZEDPERA
             </div>
 
             <h1 className="max-w-5xl text-4xl font-black tracking-tight text-white sm:text-5xl lg:text-6xl">
-              Vyberte hlavnĂ˝ mesaÄŤnĂ˝ plĂˇn alebo samostatnĂ˝ jednorazovĂ˝ doplnok
+              Vyberte hlavný mesačný plán alebo samostatný jednorazový doplnok
             </h1>
 
             <p className="mt-4 max-w-4xl text-base leading-7 text-slate-300 sm:text-lg">
-              HlavnĂ© akademickĂ© plĂˇny fungujĂş ako mesaÄŤnĂ© predplatnĂ©. AnalĂ˝za dĂˇt
-              a balĂ­ky Extra 20, 40 alebo 60 strĂˇn sa nakupujĂş samostatne ako
-              jednorazovĂ© doplnky a nepridĂˇvajĂş sa do ceny mesaÄŤnĂ©ho plĂˇnu.
+              Hlavné akademické plány fungujú ako mesačné predplatné. Analýza dát
+              a balíky Extra 20, 40 alebo 60 strán sa nakupujú samostatne ako
+              jednorazové doplnky a nepridávajú sa do ceny mesačného plánu.
             </p>
 
             <div className="mt-6 grid max-w-5xl grid-cols-1 gap-3 sm:grid-cols-3">
               <HeroInfo
                 icon={<ShieldCheck size={18} />}
-                title="JasnĂ© oddelenie platieb"
-                text="MesaÄŤnĂ˝ plĂˇn a jednorazovĂ˝ doplnok majĂş samostatnĂ˝ checkout."
+                title="Jasné oddelenie platieb"
+                text="Mesačný plán a jednorazový doplnok majú samostatný checkout."
               />
 
               <HeroInfo
                 icon={<FileText size={18} />}
-                title="Rozsah podÄľa balĂ­ka"
-                text="KaĹľdĂ˝ hlavnĂ˝ plĂˇn mĂˇ vlastnĂ˝ limit spracovanĂ˝ch strĂˇn."
+                title="Rozsah podľa balíka"
+                text="Každý hlavný plán má vlastný limit spracovaných strán."
               />
 
               <HeroInfo
                 icon={<Sparkles size={18} />}
-                title="FlexibilnĂ© rozĹˇĂ­renia"
-                text="AnalĂ˝zu dĂˇt alebo extra strany mĂ´Ĺľete kĂşpiĹĄ samostatne."
+                title="Flexibilné rozšírenia"
+                text="Analýzu dát alebo extra strany môžete kúpiť samostatne."
               />
             </div>
           </div>
@@ -650,7 +664,7 @@ export default function PricingPage() {
               className="flex items-center gap-2 text-sm font-black text-white"
             >
               <Mail size={18} className="text-purple-300" />
-              E-mail pre platbu a aktivĂˇciu sluĹľby
+              E-mail pre platbu a aktiváciu služby
             </label>
 
             <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -670,8 +684,8 @@ export default function PricingPage() {
               />
 
               <p className="text-xs leading-5 text-slate-400 lg:max-w-md">
-                Platba a nĂˇslednĂˇ aktivĂˇcia balĂ­ka alebo doplnku budĂş naviazanĂ©
-                na tĂşto e-mailovĂş adresu.
+                Platba a následná aktivácia balíka alebo doplnku budú naviazané
+                na túto e-mailovú adresu.
               </p>
             </div>
           </div>
@@ -683,23 +697,23 @@ export default function PricingPage() {
               <div className="inline-flex items-center gap-2 text-purple-300">
                 <Crown size={21} />
                 <h2 className="text-2xl font-black text-white sm:text-3xl">
-                  HlavnĂ© mesaÄŤnĂ© plĂˇny
+                  Hlavné mesačné plány
                 </h2>
               </div>
 
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
-                Vyberte jeden hlavnĂ˝ plĂˇn. PlatenĂ© balĂ­ky sa ĂşÄŤtujĂş mesaÄŤne
-                prostrednĂ­ctvom Stripe predplatnĂ©ho.
+                Vyberte jeden hlavný plán. Platené balíky sa účtujú mesačne
+                prostredníctvom Stripe predplatného.
               </p>
             </div>
 
             <div className="rounded-full border border-purple-400/20 bg-purple-500/10 px-4 py-2 text-xs font-bold text-purple-100">
-              SamostatnĂ˝ checkout pre kaĹľdĂ˝ plĂˇn
+              Samostatný checkout pre každý plán
             </div>
           </div>
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-            {mainPlans.map((plan) => {
+            {visibleMainPlans.map((plan) => {
               const loadingKey = plan.isFree
                 ? null
                 : `plan:${plan.id}`;
@@ -754,7 +768,7 @@ export default function PricingPage() {
 
                   <div className="mt-5 rounded-2xl border border-purple-400/30 bg-purple-500/10 p-4">
                     <div className="text-xs font-black uppercase tracking-wide text-purple-200">
-                      Rozsah balĂ­ka
+                      Rozsah balíka
                     </div>
 
                     <div className="mt-2 text-base font-black text-white">
@@ -794,17 +808,17 @@ export default function PricingPage() {
                     {isLoading ? (
                       <>
                         <Loader2 className="animate-spin" size={18} />
-                        PresmerovĂˇvam...
+                        Presmerovávam...
                       </>
                     ) : plan.isFree ? (
                       <>
                         <Gift size={18} />
-                        PokraÄŤovaĹĄ zadarmo
+                        Pokračovať zadarmo
                       </>
                     ) : (
                       <>
                         <CreditCard size={18} />
-                        AktivovaĹĄ mesaÄŤnĂ˝ plĂˇn
+                        Aktivovať mesačný plán
                       </>
                     )}
                   </button>
@@ -820,18 +834,18 @@ export default function PricingPage() {
               <div className="inline-flex items-center gap-2 text-purple-300">
                 <BarChart3 size={21} />
                 <h2 className="text-2xl font-black text-white sm:text-3xl">
-                  JednorazovĂ© doplnky
+                  Jednorazové doplnky
                 </h2>
               </div>
 
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
-                Doplnky sa nekombinujĂş s mesaÄŤnĂ˝m plĂˇnom v jednom nĂˇkupe.
-                KaĹľdĂ˝ doplnok otvorĂ­ vlastnĂş jednorazovĂş Stripe platbu.
+                Doplnky sa nekombinujú s mesačným plánom v jednom nákupe.
+                Každý doplnok otvorí vlastnú jednorazovú Stripe platbu.
               </p>
             </div>
 
             <div className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-100">
-              Bez mesaÄŤnĂ©ho predplatnĂ©ho
+              Bez mesačného predplatného
             </div>
           </div>
 
@@ -892,12 +906,12 @@ export default function PricingPage() {
                     {isLoading ? (
                       <>
                         <Loader2 className="animate-spin" size={18} />
-                        PresmerovĂˇvam...
+                        Presmerovávam...
                       </>
                     ) : (
                       <>
                         <FilePlus2 size={18} />
-                        KĂşpiĹĄ jednorazovo
+                        Kúpiť jednorazovo
                       </>
                     )}
                   </button>
@@ -918,20 +932,20 @@ export default function PricingPage() {
 
         <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 text-center sm:p-7">
           <h2 className="text-xl font-black text-white">
-            DĂ´leĹľitĂ© informĂˇcie k platbe
+            Dôležité informácie k platbe
           </h2>
 
           <p className="mx-auto mt-3 max-w-4xl text-sm leading-6 text-slate-400">
-            HlavnĂ˝ platenĂ˝ plĂˇn je mesaÄŤnĂ© predplatnĂ©. AnalĂ˝za dĂˇt a Extra
-            20/40/60 strĂˇn sĂş jednorazovĂ© poloĹľky. Cenu, Stripe Price ID a reĹľim
-            platby musĂ­ vĹľdy urÄŤiĹĄ serverovĂ˝ katalĂłg v API; klient neposiela cenu
-            ako dĂ´veryhodnĂ˝ Ăşdaj.
+            Hlavný platený plán je mesačné predplatné. Analýza dát a Extra
+            20/40/60 strán sú jednorazové položky. Cenu, Stripe Price ID a režim
+            platby musí vždy určiť serverový katalóg v API; klient neposiela cenu
+            ako dôveryhodný údaj.
           </p>
 
           <p className="mx-auto mt-3 max-w-4xl text-xs leading-5 text-slate-500">
-            AI systĂ©m poskytuje odbornĂş podporu pri prĂ­prave akademickej prĂˇce.
-            PouĹľĂ­vateÄľ zodpovedĂˇ za kontrolu vĂ˝sledku, sprĂˇvnosĹĄ Ăşdajov, koneÄŤnĂş
-            Ăşpravu a dodrĹľanie pravidiel svojej Ĺˇkoly.
+            AI systém poskytuje odbornú podporu pri príprave akademickej práce.
+            Používateľ zodpovedá za kontrolu výsledku, správnosť údajov, konečnú
+            úpravu a dodržanie pravidiel svojej školy.
           </p>
         </section>
       </main>
@@ -940,7 +954,7 @@ export default function PricingPage() {
         type="button"
         onClick={scrollToTop}
         className="fixed bottom-6 right-6 z-50 inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-purple-600 text-white shadow-2xl shadow-purple-950/50 transition hover:bg-purple-500"
-        aria-label="SpĂ¤ĹĄ hore"
+        aria-label="Späť hore"
       >
         <ArrowUp size={20} />
       </button>
@@ -972,5 +986,3 @@ function HeroInfo({
     </div>
   );
 }
-
-

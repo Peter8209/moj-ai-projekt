@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import {
   useCallback,
@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
   type RefObject,
-} from 'react';
+} from "react";
 
 import {
   BarChart3,
@@ -35,42 +35,38 @@ import {
   UploadCloud,
   User,
   X,
-} from 'lucide-react';
+} from "lucide-react";
 
-import AnalysisResultsModal from '@/components/analysis/AnalysisResultsModal';
-import type { AnalysisResult } from '@/components/analysis/analysisTypes';
+import AnalysisResultsModal from "@/components/analysis/AnalysisResultsModal";
+import type { AnalysisResult } from "@/components/analysis/analysisTypes";
 
 import {
   runFullStatisticalAnalysis,
   type AnalysisRow,
-} from '@/components/analysis/analysisStats';
+} from "@/components/analysis/analysisStats";
 
-import type {
-  AddonId,
-  FeatureKey,
-  PlanId,
-} from '@/lib/billing/catalog';
+import type { AddonId, FeatureKey, PlanId } from "@/lib/billing/catalog";
 
-import { useLanguage } from '@/components/LanguageProvider';
-import ImprovementBox from '@/components/ImprovementBox';
-import MobileDashboardNavigation from '@/components/dashboard/MobileDashboardNavigation';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useLanguage } from "@/components/LanguageProvider";
+import ImprovementBox from "@/components/ImprovementBox";
+import MobileDashboardNavigation from "@/components/dashboard/MobileDashboardNavigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 // ================= TYPES =================
 
 type ModuleKey =
-  | 'supervisor'
-  | 'quality'
-  | 'defense'
-  | 'translation'
-  | 'data'
-  | 'planning'
-  | 'emails'
-  | 'originality'
-  | 'humanizer';
+  | "supervisor"
+  | "quality"
+  | "defense"
+  | "translation"
+  | "data"
+  | "planning"
+  | "emails"
+  | "originality"
+  | "humanizer";
 
-type Agent = 'openai' | 'claude' | 'gemini' | 'grok' | 'mistral';
-type LanguageCode = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
+type Agent = "openai" | "claude" | "gemini" | "grok" | "mistral";
+type LanguageCode = "sk" | "cs" | "en" | "de" | "pl" | "hu";
 
 type DashboardEntitlements = {
   ok?: boolean;
@@ -127,6 +123,15 @@ type BillingNotice = {
   message: string;
   detail?: string;
   purchaseUrl: string;
+
+  /**
+   * Modulové chyby musia byť naviazané na modul, v ktorom vznikli.
+   * Bez tohto údaja by sa po prepnutí mohla zobraziť stará hláška
+   * napríklad pre Obhajobu v sekcii AI školiteľ.
+   */
+  scope?: "global" | "module";
+  moduleKey?: ModuleKey;
+  feature?: FeatureKey;
 };
 
 type DashboardApiErrorParams = {
@@ -151,7 +156,7 @@ class DashboardApiError extends Error {
     purchaseUrl,
   }: DashboardApiErrorParams) {
     super(message);
-    this.name = 'DashboardApiError';
+    this.name = "DashboardApiError";
     this.status = status;
     this.code = code;
     this.detail = detail;
@@ -159,40 +164,24 @@ class DashboardApiError extends Error {
   }
 }
 
-type TranslationStyle =
-  | 'academic'
-  | 'formal'
-  | 'natural'
-  | 'simple';
+type TranslationStyle = "academic" | "formal" | "natural" | "simple";
 
 type EmailType =
-  | 'supervisor'
-  | 'teacher'
-  | 'consultation'
-  | 'deadline'
-  | 'request'
-  | 'apology'
-  | 'business'
-  | 'other';
+  | "supervisor"
+  | "teacher"
+  | "consultation"
+  | "deadline"
+  | "request"
+  | "apology"
+  | "business"
+  | "other";
 
 type EmailTone =
-  | 'professional'
-  | 'formal'
-  | 'friendly'
-  | 'polite'
-  | 'urgent'
-  | 'short';
+  "professional" | "formal" | "friendly" | "polite" | "urgent" | "short";
 
-type QuestionnaireMode =
-  | 'none'
-  | 'selected'
-  | 'manual'
-  | 'auto-suggest-only';
+type QuestionnaireMode = "none" | "selected" | "manual" | "auto-suggest-only";
 
-type QuestionnaireOptionId =
-  | ''
-  | 'none'
-  | 'custom';
+type QuestionnaireOptionId = "" | "none" | "custom";
 
 type ManualScaleDefinition = {
   id: string;
@@ -201,7 +190,7 @@ type ManualScaleDefinition = {
   reverseItemsText: string;
   min: number;
   max: number;
-  scoring: 'sum' | 'mean';
+  scoring: "sum" | "mean";
 };
 
 type ManualSubscaleDefinition = {
@@ -212,7 +201,7 @@ type ManualSubscaleDefinition = {
   reverseItemsText: string;
   min: number;
   max: number;
-  scoring: 'sum' | 'mean';
+  scoring: "sum" | "mean";
 };
 
 type QuestionnaireConfig = {
@@ -231,7 +220,7 @@ type QuestionnaireOption = {
   description: string;
 };
 
-type QuestionnaireLanguage = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
+type QuestionnaireLanguage = "sk" | "cs" | "en" | "de" | "pl" | "hu";
 
 type QuestionnaireText = {
   eyebrow: string;
@@ -260,308 +249,299 @@ type QuestionnaireText = {
 };
 
 function normalizeQuestionnaireLanguage(value: unknown): QuestionnaireLanguage {
-  const normalized = String(value || '').trim().toLowerCase();
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
 
-  if (normalized === 'cz') return 'cs';
+  if (normalized === "cz") return "cs";
 
   if (
-    normalized === 'sk' ||
-    normalized === 'cs' ||
-    normalized === 'en' ||
-    normalized === 'de' ||
-    normalized === 'pl' ||
-    normalized === 'hu'
+    normalized === "sk" ||
+    normalized === "cs" ||
+    normalized === "en" ||
+    normalized === "de" ||
+    normalized === "pl" ||
+    normalized === "hu"
   ) {
     return normalized;
   }
 
-  return 'sk';
+  return "sk";
 }
 
 const QUESTIONNAIRE_TEXTS: Record<QuestionnaireLanguage, QuestionnaireText> = {
   sk: {
-    eyebrow: 'Manuálne škály a subškály',
-    title: 'Zadajte škály, subškály a skupinové premenné',
+    eyebrow: "Manuálne škály a subškály",
+    title: "Zadajte škály, subškály a skupinové premenné",
     description:
-      'Štandardizovaných dotazníkov je veľa, preto nepoužívame pevné kartičky dotazníkov. Zadajte vlastné škály, subškály a skupinové premenné nižšie.',
-    options: [
-  
+      "Štandardizovaných dotazníkov je veľa, preto nepoužívame pevné kartičky dotazníkov. Zadajte vlastné škály, subškály a skupinové premenné nižšie.",
+    options: [],
 
-],
-
-    customLabel: 'Vlastná metodika / poznámka k škálam',
+    customLabel: "Vlastná metodika / poznámka k škálam",
     customDescription:
-      'Voliteľne vpíšte krátky popis metodiky, názvy škál alebo poznámku k položkám.',
+      "Voliteľne vpíšte krátky popis metodiky, názvy škál alebo poznámku k položkám.",
     customPlaceholder:
-      'Príklad: V práci používam vlastné škály a subškály. Presné položky sú uvedené v troch kolónkach nižšie.',
-    manualScalesLabel: 'Manuálne škály',
+      "Príklad: V práci používam vlastné škály a subškály. Presné položky sú uvedené v troch kolónkach nižšie.",
+    manualScalesLabel: "Manuálne škály",
     manualScalesDescription:
-      'Sem napíšte celkové škály, ktoré sa majú vypočítať.',
+      "Sem napíšte celkové škály, ktoré sa majú vypočítať.",
     manualScalesPlaceholder:
-      'Príklad: celkové skóre_skore = WEM1 + WEM2 + ... + WEM14; pracovná spokojnosť_skore = pracovná spokojnosť1 až pracovná spokojnosť36.',
-    manualSubscalesLabel: 'Manuálne subškály',
-    manualSubscalesDescription:
-      'Sem napíšte subškály a položky.',
+      "Príklad: celkové skóre_skore = WEM1 + WEM2 + ... + WEM14; pracovná spokojnosť_skore = pracovná spokojnosť1 až pracovná spokojnosť36.",
+    manualSubscalesLabel: "Manuálne subškály",
+    manualSubscalesDescription: "Sem napíšte subškály a položky.",
     manualSubscalesPlaceholder:
-      'Príklad: Mzda = pracovná spokojnosť1, pracovná spokojnosť10, pracovná spokojnosť19, pracovná spokojnosť28; Povýšenie = pracovná spokojnosť2, pracovná spokojnosť11, pracovná spokojnosť20, pracovná spokojnosť33.',
-    groupingColumnsLabel: 'Skupinové premenné',
+      "Príklad: Mzda = pracovná spokojnosť1, pracovná spokojnosť10, pracovná spokojnosť19, pracovná spokojnosť28; Povýšenie = pracovná spokojnosť2, pracovná spokojnosť11, pracovná spokojnosť20, pracovná spokojnosť33.",
+    groupingColumnsLabel: "Skupinové premenné",
     groupingColumnsDescription:
-      'Sem napíšte premenné pre t-test, ANOVA, Mann-Whitney alebo Kruskal-Wallis.',
+      "Sem napíšte premenné pre t-test, ANOVA, Mann-Whitney alebo Kruskal-Wallis.",
     groupingColumnsPlaceholder:
-      'Príklad: pohlavie, typ školy, ročník, rodinný stav, typ podniku.',
-    outputTitle: 'Výstup analýzy',
+      "Príklad: pohlavie, typ školy, ročník, rodinný stav, typ podniku.",
+    outputTitle: "Výstup analýzy",
     outputDescription:
-      'Výsledok sa zobrazí v prehľadnom modálnom okne a následne ho bude možné exportovať do Word, PDF alebo Excel.',
+      "Výsledok sa zobrazí v prehľadnom modálnom okne a následne ho bude možné exportovať do Word, PDF alebo Excel.",
   },
 
   en: {
-    eyebrow: 'Standardized questionnaire',
-    title: 'Which questionnaire does the work use?',
+    eyebrow: "Standardized questionnaire",
+    title: "Which questionnaire does the work use?",
     description:
-      'Select one or more manual scales only if the dataset truly contains them. Without confirmation, celkové skóre and pracovná spokojnosť will not be calculated automatically.',
+      "Select one or more manual scales only if the dataset truly contains them. Without confirmation, celkové skóre and pracovná spokojnosť will not be calculated automatically.",
     options: [
       {
-        value: '',
+        value: "",
         label: "I don't know / Suggest only",
         description:
-          'The system can suggest a similar questionnaire, but it will not calculate it automatically.',
+          "The system can suggest a similar questionnaire, but it will not calculate it automatically.",
       },
       {
-        value: 'none',
-        label: 'Without a manual scale',
+        value: "none",
+        label: "Without a manual scale",
         description:
-          'Only item frequency analysis and general statistics will be used, without questionnaire scales.',
+          "Only item frequency analysis and general statistics will be used, without questionnaire scales.",
       },
       {
-        value: 'custom',
-        label: 'Custom questionnaire / custom scales',
+        value: "custom",
+        label: "Custom questionnaire / custom scales",
         description:
-          'Use this when the work contains another questionnaire or manually defined scales.',
+          "Use this when the work contains another questionnaire or manually defined scales.",
       },
     ],
-    customLabel: 'Custom manual scales / subscales',
+    customLabel: "Custom manual scales / subscales",
     customDescription:
-      'If the student uses another questionnaire, enter its name, items, scales, and subscales.',
+      "If the student uses another questionnaire, enter its name, items, scales, and subscales.",
     customPlaceholder:
-      'Example: I use pracovná spokojnosť – 36 items, 9 subscales: pay, promotion, supervision, benefits, rewards, operating conditions, coworkers, nature of work, communication. Second questionnaire: celkové skóre – total score.',
-    manualScalesLabel: 'Manual scales',
+      "Example: I use pracovná spokojnosť – 36 items, 9 subscales: pay, promotion, supervision, benefits, rewards, operating conditions, coworkers, nature of work, communication. Second questionnaire: celkové skóre – total score.",
+    manualScalesLabel: "Manual scales",
     manualScalesDescription:
-      'Enter the total scales that should be calculated.',
+      "Enter the total scales that should be calculated.",
     manualScalesPlaceholder:
-      'Example: celkové skóre_score = WEM1 + WEM2 + ... + WEM14; pracovná spokojnosť_score = pracovná spokojnosť1 to pracovná spokojnosť36.',
-    manualSubscalesLabel: 'Manual subscales',
-    manualSubscalesDescription:
-      'Enter subscales and their items.',
+      "Example: celkové skóre_score = WEM1 + WEM2 + ... + WEM14; pracovná spokojnosť_score = pracovná spokojnosť1 to pracovná spokojnosť36.",
+    manualSubscalesLabel: "Manual subscales",
+    manualSubscalesDescription: "Enter subscales and their items.",
     manualSubscalesPlaceholder:
-      'Example: Pay = pracovná spokojnosť1, pracovná spokojnosť10, pracovná spokojnosť19, pracovná spokojnosť28; Promotion = pracovná spokojnosť2, pracovná spokojnosť11, pracovná spokojnosť20, pracovná spokojnosť33.',
-    groupingColumnsLabel: 'Grouping variables',
+      "Example: Pay = pracovná spokojnosť1, pracovná spokojnosť10, pracovná spokojnosť19, pracovná spokojnosť28; Promotion = pracovná spokojnosť2, pracovná spokojnosť11, pracovná spokojnosť20, pracovná spokojnosť33.",
+    groupingColumnsLabel: "Grouping variables",
     groupingColumnsDescription:
-      'Enter variables for t-test, ANOVA, Mann-Whitney, or Kruskal-Wallis.',
+      "Enter variables for t-test, ANOVA, Mann-Whitney, or Kruskal-Wallis.",
     groupingColumnsPlaceholder:
-      'Example: gender, school type, grade, marital status, company type.',
-    outputTitle: 'Analysis output',
+      "Example: gender, school type, grade, marital status, company type.",
+    outputTitle: "Analysis output",
     outputDescription:
-      'The result will be displayed in a clear modal window and can then be exported to Word, PDF, or Excel.',
+      "The result will be displayed in a clear modal window and can then be exported to Word, PDF, or Excel.",
   },
 
   cs: {
-    eyebrow: 'Standardizovaný dotazník',
-    title: 'Jaký dotazník práce používá?',
+    eyebrow: "Standardizovaný dotazník",
+    title: "Jaký dotazník práce používá?",
     description:
-      'Vyberte jeden nebo více manuálních škál pouze tehdy, pokud je datový soubor skutečně obsahuje. Bez potvrzení se celkové skóre ani pracovná spokojnosť nebudou počítat automaticky.',
+      "Vyberte jeden nebo více manuálních škál pouze tehdy, pokud je datový soubor skutečně obsahuje. Bez potvrzení se celkové skóre ani pracovná spokojnosť nebudou počítat automaticky.",
     options: [
       {
-        value: '',
-        label: 'Nevím / pouze navrhnout',
+        value: "",
+        label: "Nevím / pouze navrhnout",
         description:
-          'Systém může navrhnout podobný dotazník, ale nebude ho automaticky počítat.',
+          "Systém může navrhnout podobný dotazník, ale nebude ho automaticky počítat.",
       },
       {
-        value: 'none',
-        label: 'Bez standardizovaného dotazníku',
+        value: "none",
+        label: "Bez standardizovaného dotazníku",
         description:
-          'Použije se pouze frekvenční analýza položek a obecná statistika bez dotazníkových škál.',
+          "Použije se pouze frekvenční analýza položek a obecná statistika bez dotazníkových škál.",
       },
       {
-        value: 'custom',
-        label: 'Vlastní dotazník / vlastní škály',
+        value: "custom",
+        label: "Vlastní dotazník / vlastní škály",
         description:
-          'Použijte u jiného dotazníku nebo u ručně definovaných škál.',
+          "Použijte u jiného dotazníku nebo u ručně definovaných škál.",
       },
     ],
-    customLabel: 'Vlastní manuální škály / subškály',
+    customLabel: "Vlastní manuální škály / subškály",
     customDescription:
-      'Pokud student používá jiný dotazník, zadejte jeho název, položky, škály a subškály.',
+      "Pokud student používá jiný dotazník, zadejte jeho název, položky, škály a subškály.",
     customPlaceholder:
-      'Příklad: Používám pracovná spokojnosť – 36 položek, 9 subškál: mzda, povýšení, vedení, benefity, odměny, pracovní podmínky, spolupracovníci, povaha práce, komunikace.',
-    manualScalesLabel: 'Manuální škály',
-    manualScalesDescription:
-      'Zadejte celkové škály, které se mají vypočítat.',
+      "Příklad: Používám pracovná spokojnosť – 36 položek, 9 subškál: mzda, povýšení, vedení, benefity, odměny, pracovní podmínky, spolupracovníci, povaha práce, komunikace.",
+    manualScalesLabel: "Manuální škály",
+    manualScalesDescription: "Zadejte celkové škály, které se mají vypočítat.",
     manualScalesPlaceholder:
-      'Příklad: celkové skóre_score = WEM1 + WEM2 + ... + WEM14; pracovná spokojnosť_score = pracovná spokojnosť1 až pracovná spokojnosť36.',
-    manualSubscalesLabel: 'Manuální subškály',
-    manualSubscalesDescription:
-      'Zadejte subškály a jejich položky.',
+      "Příklad: celkové skóre_score = WEM1 + WEM2 + ... + WEM14; pracovná spokojnosť_score = pracovná spokojnosť1 až pracovná spokojnosť36.",
+    manualSubscalesLabel: "Manuální subškály",
+    manualSubscalesDescription: "Zadejte subškály a jejich položky.",
     manualSubscalesPlaceholder:
-      'Příklad: Mzda = pracovná spokojnosť1, pracovná spokojnosť10, pracovná spokojnosť19, pracovná spokojnosť28; Povýšení = pracovná spokojnosť2, pracovná spokojnosť11, pracovná spokojnosť20, pracovná spokojnosť33.',
-    groupingColumnsLabel: 'Skupinové proměnné',
+      "Příklad: Mzda = pracovná spokojnosť1, pracovná spokojnosť10, pracovná spokojnosť19, pracovná spokojnosť28; Povýšení = pracovná spokojnosť2, pracovná spokojnosť11, pracovná spokojnosť20, pracovná spokojnosť33.",
+    groupingColumnsLabel: "Skupinové proměnné",
     groupingColumnsDescription:
-      'Zadejte proměnné pro t-test, ANOVA, Mann-Whitney nebo Kruskal-Wallis.',
+      "Zadejte proměnné pro t-test, ANOVA, Mann-Whitney nebo Kruskal-Wallis.",
     groupingColumnsPlaceholder:
-      'Příklad: pohlaví, typ školy, ročník, rodinný stav, typ podniku.',
-    outputTitle: 'Výstup analýzy',
+      "Příklad: pohlaví, typ školy, ročník, rodinný stav, typ podniku.",
+    outputTitle: "Výstup analýzy",
     outputDescription:
-      'Výsledek se zobrazí v přehledném modálním okně a následně jej bude možné exportovat do Wordu, PDF nebo Excelu.',
+      "Výsledek se zobrazí v přehledném modálním okně a následně jej bude možné exportovat do Wordu, PDF nebo Excelu.",
   },
 
   de: {
-    eyebrow: 'Standardisierter Fragebogen',
-    title: 'Welchen Fragebogen verwendet die Arbeit?',
+    eyebrow: "Standardisierter Fragebogen",
+    title: "Welchen Fragebogen verwendet die Arbeit?",
     description:
-      'Wählen Sie einen oder mehrere standardisierte Fragebögen nur dann aus, wenn der Datensatz sie tatsächlich enthält. Ohne Bestätigung werden celkové skóre und pracovná spokojnosť nicht automatisch berechnet.',
+      "Wählen Sie einen oder mehrere standardisierte Fragebögen nur dann aus, wenn der Datensatz sie tatsächlich enthält. Ohne Bestätigung werden celkové skóre und pracovná spokojnosť nicht automatisch berechnet.",
     options: [
       {
-        value: '',
-        label: 'Ich weiß es nicht / nur vorschlagen',
+        value: "",
+        label: "Ich weiß es nicht / nur vorschlagen",
         description:
-          'Das System kann einen ähnlichen Fragebogen vorschlagen, berechnet ihn aber nicht automatisch.',
+          "Das System kann einen ähnlichen Fragebogen vorschlagen, berechnet ihn aber nicht automatisch.",
       },
       {
-        value: 'none',
-        label: 'Ohne manuelle Skala',
+        value: "none",
+        label: "Ohne manuelle Skala",
         description:
-          'Es werden nur Häufigkeitsanalysen der Items und allgemeine Statistiken ohne Fragebogenskalen verwendet.',
+          "Es werden nur Häufigkeitsanalysen der Items und allgemeine Statistiken ohne Fragebogenskalen verwendet.",
       },
       {
-        value: 'custom',
-        label: 'Eigener Fragebogen / eigene Skalen',
+        value: "custom",
+        label: "Eigener Fragebogen / eigene Skalen",
         description:
-          'Verwenden, wenn die Arbeit einen anderen Fragebogen oder manuell definierte Skalen enthält.',
+          "Verwenden, wenn die Arbeit einen anderen Fragebogen oder manuell definierte Skalen enthält.",
       },
     ],
-    customLabel: 'Eigene standardisierte Fragebögen / Subskalen',
+    customLabel: "Eigene standardisierte Fragebögen / Subskalen",
     customDescription:
-      'Wenn ein anderer Fragebogen verwendet wird, geben Sie Namen, Items, Skalen und Subskalen ein.',
+      "Wenn ein anderer Fragebogen verwendet wird, geben Sie Namen, Items, Skalen und Subskalen ein.",
     customPlaceholder:
-      'Beispiel: pracovná spokojnosť – 36 Items, 9 Subskalen: Gehalt, Beförderung, Führung, Zusatzleistungen, Belohnungen, Arbeitsbedingungen, Kollegen, Art der Arbeit, Kommunikation.',
-    manualScalesLabel: 'Manuelle Skalen',
+      "Beispiel: pracovná spokojnosť – 36 Items, 9 Subskalen: Gehalt, Beförderung, Führung, Zusatzleistungen, Belohnungen, Arbeitsbedingungen, Kollegen, Art der Arbeit, Kommunikation.",
+    manualScalesLabel: "Manuelle Skalen",
     manualScalesDescription:
-      'Geben Sie die Gesamtskalen ein, die berechnet werden sollen.',
+      "Geben Sie die Gesamtskalen ein, die berechnet werden sollen.",
     manualScalesPlaceholder:
-      'Beispiel: celkové skóre_score = WEM1 + WEM2 + ... + WEM14; pracovná spokojnosť_score = pracovná spokojnosť1 bis pracovná spokojnosť36.',
-    manualSubscalesLabel: 'Manuelle Subskalen',
-    manualSubscalesDescription:
-      'Geben Sie Subskalen und deren Items ein.',
+      "Beispiel: celkové skóre_score = WEM1 + WEM2 + ... + WEM14; pracovná spokojnosť_score = pracovná spokojnosť1 bis pracovná spokojnosť36.",
+    manualSubscalesLabel: "Manuelle Subskalen",
+    manualSubscalesDescription: "Geben Sie Subskalen und deren Items ein.",
     manualSubscalesPlaceholder:
-      'Beispiel: Gehalt = pracovná spokojnosť1, pracovná spokojnosť10, pracovná spokojnosť19, pracovná spokojnosť28; Beförderung = pracovná spokojnosť2, pracovná spokojnosť11, pracovná spokojnosť20, pracovná spokojnosť33.',
-    groupingColumnsLabel: 'Gruppierungsvariablen',
+      "Beispiel: Gehalt = pracovná spokojnosť1, pracovná spokojnosť10, pracovná spokojnosť19, pracovná spokojnosť28; Beförderung = pracovná spokojnosť2, pracovná spokojnosť11, pracovná spokojnosť20, pracovná spokojnosť33.",
+    groupingColumnsLabel: "Gruppierungsvariablen",
     groupingColumnsDescription:
-      'Geben Sie Variablen für t-Test, ANOVA, Mann-Whitney oder Kruskal-Wallis ein.',
+      "Geben Sie Variablen für t-Test, ANOVA, Mann-Whitney oder Kruskal-Wallis ein.",
     groupingColumnsPlaceholder:
-      'Beispiel: Geschlecht, Schultyp, Jahrgang, Familienstand, Unternehmenstyp.',
-    outputTitle: 'Analyseausgabe',
+      "Beispiel: Geschlecht, Schultyp, Jahrgang, Familienstand, Unternehmenstyp.",
+    outputTitle: "Analyseausgabe",
     outputDescription:
-      'Das Ergebnis wird in einem übersichtlichen modalen Fenster angezeigt und kann anschließend nach Word, PDF oder Excel exportiert werden.',
+      "Das Ergebnis wird in einem übersichtlichen modalen Fenster angezeigt und kann anschließend nach Word, PDF oder Excel exportiert werden.",
   },
 
   pl: {
-    eyebrow: 'Standaryzowany kwestionariusz',
-    title: 'Jakiego kwestionariusza używa praca?',
+    eyebrow: "Standaryzowany kwestionariusz",
+    title: "Jakiego kwestionariusza używa praca?",
     description:
-      'Wybierz jeden lub więcej ręcznych skal tylko wtedy, gdy zestaw danych faktycznie je zawiera. Bez potwierdzenia celkové skóre i pracovná spokojnosť nie będą obliczane automatycznie.',
+      "Wybierz jeden lub więcej ręcznych skal tylko wtedy, gdy zestaw danych faktycznie je zawiera. Bez potwierdzenia celkové skóre i pracovná spokojnosť nie będą obliczane automatycznie.",
     options: [
       {
-        value: '',
-        label: 'Nie wiem / tylko zasugeruj',
+        value: "",
+        label: "Nie wiem / tylko zasugeruj",
         description:
-          'System może zasugerować podobny kwestionariusz, ale nie obliczy go automatycznie.',
+          "System może zasugerować podobny kwestionariusz, ale nie obliczy go automatycznie.",
       },
       {
-        value: 'none',
-        label: 'Bez standaryzowanego kwestionariusza',
+        value: "none",
+        label: "Bez standaryzowanego kwestionariusza",
         description:
-          'Zostanie użyta tylko analiza częstości pozycji i ogólne statystyki bez skal kwestionariusza.',
+          "Zostanie użyta tylko analiza częstości pozycji i ogólne statystyki bez skal kwestionariusza.",
       },
       {
-        value: 'custom',
-        label: 'Własny kwestionariusz / własne skale',
+        value: "custom",
+        label: "Własny kwestionariusz / własne skale",
         description:
-          'Użyj, gdy praca zawiera inny kwestionariusz lub ręcznie zdefiniowane skale.',
+          "Użyj, gdy praca zawiera inny kwestionariusz lub ręcznie zdefiniowane skale.",
       },
     ],
-    customLabel: 'Własne standaryzowane kwestionariusze / podskale',
+    customLabel: "Własne standaryzowane kwestionariusze / podskale",
     customDescription:
-      'Jeśli student używa innego kwestionariusza, wpisz jego nazwę, pozycje, skale i podskale.',
+      "Jeśli student używa innego kwestionariusza, wpisz jego nazwę, pozycje, skale i podskale.",
     customPlaceholder:
-      'Przykład: pracovná spokojnosť – 36 pozycji, 9 podskal: wynagrodzenie, awans, nadzór, benefity, nagrody, warunki pracy, współpracownicy, charakter pracy, komunikacja.',
-    manualScalesLabel: 'Skale ręczne',
+      "Przykład: pracovná spokojnosť – 36 pozycji, 9 podskal: wynagrodzenie, awans, nadzór, benefity, nagrody, warunki pracy, współpracownicy, charakter pracy, komunikacja.",
+    manualScalesLabel: "Skale ręczne",
     manualScalesDescription:
-      'Wpisz skale całkowite, które mają zostać obliczone.',
+      "Wpisz skale całkowite, które mają zostać obliczone.",
     manualScalesPlaceholder:
-      'Przykład: celkové skóre_score = WEM1 + WEM2 + ... + WEM14; pracovná spokojnosť_score = pracovná spokojnosť1 do pracovná spokojnosť36.',
-    manualSubscalesLabel: 'Podskale ręczne',
-    manualSubscalesDescription:
-      'Wpisz podskale i ich pozycje.',
+      "Przykład: celkové skóre_score = WEM1 + WEM2 + ... + WEM14; pracovná spokojnosť_score = pracovná spokojnosť1 do pracovná spokojnosť36.",
+    manualSubscalesLabel: "Podskale ręczne",
+    manualSubscalesDescription: "Wpisz podskale i ich pozycje.",
     manualSubscalesPlaceholder:
-      'Przykład: Wynagrodzenie = pracovná spokojnosť1, pracovná spokojnosť10, pracovná spokojnosť19, pracovná spokojnosť28; Awans = pracovná spokojnosť2, pracovná spokojnosť11, pracovná spokojnosť20, pracovná spokojnosť33.',
-    groupingColumnsLabel: 'Zmienne grupujące',
+      "Przykład: Wynagrodzenie = pracovná spokojnosť1, pracovná spokojnosť10, pracovná spokojnosť19, pracovná spokojnosť28; Awans = pracovná spokojnosť2, pracovná spokojnosť11, pracovná spokojnosť20, pracovná spokojnosť33.",
+    groupingColumnsLabel: "Zmienne grupujące",
     groupingColumnsDescription:
-      'Wpisz zmienne dla testu t, ANOVA, Mann-Whitney lub Kruskal-Wallis.',
+      "Wpisz zmienne dla testu t, ANOVA, Mann-Whitney lub Kruskal-Wallis.",
     groupingColumnsPlaceholder:
-      'Przykład: płeć, typ szkoły, rok, stan cywilny, typ firmy.',
-    outputTitle: 'Wynik analizy',
+      "Przykład: płeć, typ szkoły, rok, stan cywilny, typ firmy.",
+    outputTitle: "Wynik analizy",
     outputDescription:
-      'Wynik zostanie wyświetlony w przejrzystym oknie modalnym, a następnie będzie można go wyeksportować do Word, PDF lub Excel.',
+      "Wynik zostanie wyświetlony w przejrzystym oknie modalnym, a następnie będzie można go wyeksportować do Word, PDF lub Excel.",
   },
 
   hu: {
-    eyebrow: 'Standardizált kérdőív',
-    title: 'Milyen kérdőívet használ a munka?',
+    eyebrow: "Standardizált kérdőív",
+    title: "Milyen kérdőívet használ a munka?",
     description:
-      'Csak akkor válasszon ki egy vagy több manuális skálát, ha az adatkészlet valóban tartalmazza azokat. Megerősítés nélkül a celkové skóre és a pracovná spokojnosť nem kerül automatikus kiszámításra.',
+      "Csak akkor válasszon ki egy vagy több manuális skálát, ha az adatkészlet valóban tartalmazza azokat. Megerősítés nélkül a celkové skóre és a pracovná spokojnosť nem kerül automatikus kiszámításra.",
     options: [
       {
-        value: '',
-        label: 'Nem tudom / csak javaslat',
+        value: "",
+        label: "Nem tudom / csak javaslat",
         description:
-          'A rendszer javasolhat hasonló kérdőívet, de nem számítja ki automatikusan.',
+          "A rendszer javasolhat hasonló kérdőívet, de nem számítja ki automatikusan.",
       },
       {
-        value: 'none',
-        label: 'Standardizált kérdőív nélkül',
+        value: "none",
+        label: "Standardizált kérdőív nélkül",
         description:
-          'Csak tételgyakorisági elemzés és általános statisztika készül kérdőívskálák nélkül.',
+          "Csak tételgyakorisági elemzés és általános statisztika készül kérdőívskálák nélkül.",
       },
       {
-        value: 'custom',
-        label: 'Saját kérdőív / saját skálák',
+        value: "custom",
+        label: "Saját kérdőív / saját skálák",
         description:
-          'Akkor használja, ha a munka más kérdőívet vagy manuálisan megadott skálákat tartalmaz.',
+          "Akkor használja, ha a munka más kérdőívet vagy manuálisan megadott skálákat tartalmaz.",
       },
     ],
-    customLabel: 'Saját manuális skálaek / alskálák',
+    customLabel: "Saját manuális skálaek / alskálák",
     customDescription:
-      'Ha a hallgató más kérdőívet használ, adja meg annak nevét, tételeit, skáláit és alskáláit.',
+      "Ha a hallgató más kérdőívet használ, adja meg annak nevét, tételeit, skáláit és alskáláit.",
     customPlaceholder:
-      'Példa: pracovná spokojnosť – 36 tétel, 9 alskála: fizetés, előléptetés, vezetés, juttatások, jutalmak, munkakörülmények, munkatársak, munka jellege, kommunikáció.',
-    manualScalesLabel: 'Manuális skálák',
-    manualScalesDescription:
-      'Adja meg a kiszámítandó összskálákat.',
+      "Példa: pracovná spokojnosť – 36 tétel, 9 alskála: fizetés, előléptetés, vezetés, juttatások, jutalmak, munkakörülmények, munkatársak, munka jellege, kommunikáció.",
+    manualScalesLabel: "Manuális skálák",
+    manualScalesDescription: "Adja meg a kiszámítandó összskálákat.",
     manualScalesPlaceholder:
-      'Példa: celkové skóre_score = WEM1 + WEM2 + ... + WEM14; pracovná spokojnosť_score = pracovná spokojnosť1–pracovná spokojnosť36.',
-    manualSubscalesLabel: 'Manuális alskálák',
-    manualSubscalesDescription:
-      'Adja meg az alskálákat és azok tételeit.',
+      "Példa: celkové skóre_score = WEM1 + WEM2 + ... + WEM14; pracovná spokojnosť_score = pracovná spokojnosť1–pracovná spokojnosť36.",
+    manualSubscalesLabel: "Manuális alskálák",
+    manualSubscalesDescription: "Adja meg az alskálákat és azok tételeit.",
     manualSubscalesPlaceholder:
-      'Példa: Fizetés = pracovná spokojnosť1, pracovná spokojnosť10, pracovná spokojnosť19, pracovná spokojnosť28; Előléptetés = pracovná spokojnosť2, pracovná spokojnosť11, pracovná spokojnosť20, pracovná spokojnosť33.',
-    groupingColumnsLabel: 'Csoportosító változók',
+      "Példa: Fizetés = pracovná spokojnosť1, pracovná spokojnosť10, pracovná spokojnosť19, pracovná spokojnosť28; Előléptetés = pracovná spokojnosť2, pracovná spokojnosť11, pracovná spokojnosť20, pracovná spokojnosť33.",
+    groupingColumnsLabel: "Csoportosító változók",
     groupingColumnsDescription:
-      'Adja meg a t-próbához, ANOVA-hoz, Mann-Whitney vagy Kruskal-Wallis teszthez használt változókat.',
+      "Adja meg a t-próbához, ANOVA-hoz, Mann-Whitney vagy Kruskal-Wallis teszthez használt változókat.",
     groupingColumnsPlaceholder:
-      'Példa: nem, iskola típusa, évfolyam, családi állapot, vállalattípus.',
-    outputTitle: 'Elemzési kimenet',
+      "Példa: nem, iskola típusa, évfolyam, családi állapot, vállalattípus.",
+    outputTitle: "Elemzési kimenet",
     outputDescription:
-      'Az eredmény áttekinthető modális ablakban jelenik meg, majd Word, PDF vagy Excel formátumba exportálható.',
+      "Az eredmény áttekinthető modális ablakban jelenik meg, majd Word, PDF vagy Excel formátumba exportálható.",
   },
 };
 
@@ -625,48 +605,50 @@ type DashboardSelectorTranslations = {
   };
 };
 
-function getDashboardSelectorTranslations(t: any): DashboardSelectorTranslations {
+function getDashboardSelectorTranslations(
+  t: any,
+): DashboardSelectorTranslations {
   const fallback: DashboardSelectorTranslations = {
-    translationFrom: 'Preložiť z jazyka',
-    translationTo: 'Preložiť do jazyka',
-    translationStyle: 'Štýl prekladu',
-    emailType: 'Typ emailu',
-    emailTone: 'Tón emailu',
+    translationFrom: "Preložiť z jazyka",
+    translationTo: "Preložiť do jazyka",
+    translationStyle: "Štýl prekladu",
+    emailType: "Typ emailu",
+    emailTone: "Tón emailu",
 
     languages: {
-      slovak: 'Slovenčina',
-      czech: 'Čeština',
-      english: 'Angličtina',
-      german: 'Nemčina',
-      polish: 'Poľština',
-      hungarian: 'Maďarčina',
+      slovak: "Slovenčina",
+      czech: "Čeština",
+      english: "Angličtina",
+      german: "Nemčina",
+      polish: "Poľština",
+      hungarian: "Maďarčina",
     },
 
     translationStyles: {
-      academic: 'Akademický',
-      formal: 'Formálny',
-      natural: 'Prirodzený',
-      simple: 'Jednoduchý',
+      academic: "Akademický",
+      formal: "Formálny",
+      natural: "Prirodzený",
+      simple: "Jednoduchý",
     },
 
     emailTypes: {
-      supervisor: 'Email vedúcemu práce',
-      teacher: 'Email vyučujúcemu',
-      consultation: 'Žiadosť o konzultáciu',
-      deadline: 'Termín / odovzdanie',
-      request: 'Žiadosť',
-      apology: 'Ospravedlnenie',
-      business: 'Obchodný email',
-      other: 'Iný email',
+      supervisor: "Email vedúcemu práce",
+      teacher: "Email vyučujúcemu",
+      consultation: "Žiadosť o konzultáciu",
+      deadline: "Termín / odovzdanie",
+      request: "Žiadosť",
+      apology: "Ospravedlnenie",
+      business: "Obchodný email",
+      other: "Iný email",
     },
 
     emailTones: {
-      professional: 'Profesionálny',
-      formal: 'Formálny',
-      friendly: 'Priateľský',
-      polite: 'Zdvorilý',
-      urgent: 'Urgentný',
-      short: 'Krátky a vecný',
+      professional: "Profesionálny",
+      formal: "Formálny",
+      friendly: "Priateľský",
+      polite: "Zdvorilý",
+      urgent: "Urgentný",
+      short: "Krátky a vecný",
     },
   };
 
@@ -701,34 +683,34 @@ function createLanguageSelectOptions(
 ): Array<ClickableChoice<LanguageCode>> {
   return [
     {
-      value: 'sk',
+      value: "sk",
       label: selectorTranslations.languages.slovak,
-      description: 'Slovak',
+      description: "Slovak",
     },
     {
-      value: 'cs',
+      value: "cs",
       label: selectorTranslations.languages.czech,
-      description: 'Czech',
+      description: "Czech",
     },
     {
-      value: 'en',
+      value: "en",
       label: selectorTranslations.languages.english,
-      description: 'English',
+      description: "English",
     },
     {
-      value: 'de',
+      value: "de",
       label: selectorTranslations.languages.german,
-      description: 'German',
+      description: "German",
     },
     {
-      value: 'pl',
+      value: "pl",
       label: selectorTranslations.languages.polish,
-      description: 'Polish',
+      description: "Polish",
     },
     {
-      value: 'hu',
+      value: "hu",
       label: selectorTranslations.languages.hungarian,
-      description: 'Hungarian',
+      description: "Hungarian",
     },
   ];
 }
@@ -738,24 +720,24 @@ function createTranslationStyleOptions(
 ): Array<ClickableChoice<TranslationStyle>> {
   return [
     {
-      value: 'academic',
+      value: "academic",
       label: selectorTranslations.translationStyles.academic,
-      description: 'Odborný štýl pre akademické práce',
+      description: "Odborný štýl pre akademické práce",
     },
     {
-      value: 'formal',
+      value: "formal",
       label: selectorTranslations.translationStyles.formal,
-      description: 'Oficiálny a profesionálny štýl',
+      description: "Oficiálny a profesionálny štýl",
     },
     {
-      value: 'natural',
+      value: "natural",
       label: selectorTranslations.translationStyles.natural,
-      description: 'Plynulý a prirodzený jazyk',
+      description: "Plynulý a prirodzený jazyk",
     },
     {
-      value: 'simple',
+      value: "simple",
       label: selectorTranslations.translationStyles.simple,
-      description: 'Jednoduchý a zrozumiteľný text',
+      description: "Jednoduchý a zrozumiteľný text",
     },
   ];
 }
@@ -765,44 +747,44 @@ function createEmailTypeOptions(
 ): Array<ClickableChoice<EmailType>> {
   return [
     {
-      value: 'supervisor',
+      value: "supervisor",
       label: selectorTranslations.emailTypes.supervisor,
-      description: 'Správa pre školiteľa alebo konzultanta',
+      description: "Správa pre školiteľa alebo konzultanta",
     },
     {
-      value: 'teacher',
+      value: "teacher",
       label: selectorTranslations.emailTypes.teacher,
-      description: 'Formálna správa pre pedagóga',
+      description: "Formálna správa pre pedagóga",
     },
     {
-      value: 'consultation',
+      value: "consultation",
       label: selectorTranslations.emailTypes.consultation,
-      description: 'Dohodnutie termínu konzultácie',
+      description: "Dohodnutie termínu konzultácie",
     },
     {
-      value: 'deadline',
+      value: "deadline",
       label: selectorTranslations.emailTypes.deadline,
-      description: 'Komunikácia k termínu práce',
+      description: "Komunikácia k termínu práce",
     },
     {
-      value: 'request',
+      value: "request",
       label: selectorTranslations.emailTypes.request,
-      description: 'Formálna alebo administratívna žiadosť',
+      description: "Formálna alebo administratívna žiadosť",
     },
     {
-      value: 'apology',
+      value: "apology",
       label: selectorTranslations.emailTypes.apology,
-      description: 'Slušné a profesionálne ospravedlnenie',
+      description: "Slušné a profesionálne ospravedlnenie",
     },
     {
-      value: 'business',
+      value: "business",
       label: selectorTranslations.emailTypes.business,
-      description: 'Profesionálna obchodná komunikácia',
+      description: "Profesionálna obchodná komunikácia",
     },
     {
-      value: 'other',
+      value: "other",
       label: selectorTranslations.emailTypes.other,
-      description: 'Vlastný typ emailovej správy',
+      description: "Vlastný typ emailovej správy",
     },
   ];
 }
@@ -812,34 +794,34 @@ function createEmailToneOptions(
 ): Array<ClickableChoice<EmailTone>> {
   return [
     {
-      value: 'professional',
+      value: "professional",
       label: selectorTranslations.emailTones.professional,
-      description: 'Vecný a reprezentatívny tón',
+      description: "Vecný a reprezentatívny tón",
     },
     {
-      value: 'formal',
+      value: "formal",
       label: selectorTranslations.emailTones.formal,
-      description: 'Úradný a presný tón komunikácie',
+      description: "Úradný a presný tón komunikácie",
     },
     {
-      value: 'friendly',
+      value: "friendly",
       label: selectorTranslations.emailTones.friendly,
-      description: 'Milý, ale stále slušný prejav',
+      description: "Milý, ale stále slušný prejav",
     },
     {
-      value: 'polite',
+      value: "polite",
       label: selectorTranslations.emailTones.polite,
-      description: 'Rešpektujúci a kultivovaný tón',
+      description: "Rešpektujúci a kultivovaný tón",
     },
     {
-      value: 'urgent',
+      value: "urgent",
       label: selectorTranslations.emailTones.urgent,
-      description: 'Dôrazný email s jasnou prioritou',
+      description: "Dôrazný email s jasnou prioritou",
     },
     {
-      value: 'short',
+      value: "short",
       label: selectorTranslations.emailTones.short,
-      description: 'Stručná správa bez zbytočností',
+      description: "Stručná správa bez zbytočností",
     },
   ];
 }
@@ -909,8 +891,6 @@ type SlideContent = {
   body: string[];
 };
 
-
-
 declare global {
   interface Window {
     webkitSpeechRecognition?: any;
@@ -920,32 +900,31 @@ declare global {
 
 // ================= CONFIG =================
 
-const defaultAgent: Agent = 'openai';
+const defaultAgent: Agent = "openai";
 
-const ORIGINALITY_PROTOCOL_STORAGE_KEY =
-  'zedpera_originality_protocol_result';
+const ORIGINALITY_PROTOCOL_STORAGE_KEY = "zedpera_originality_protocol_result";
 
 const allowedFileExtensions = [
-  '.pdf',
-  '.doc',
-  '.docx',
-  '.txt',
-  '.rtf',
-  '.odt',
-  '.md',
-  '.jpg',
-  '.jpeg',
-  '.png',
-  '.webp',
-  '.gif',
-  '.xls',
-  '.xlsx',
-  '.csv',
-  '.ppt',
-  '.pptx',
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".txt",
+  ".rtf",
+  ".odt",
+  ".md",
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".gif",
+  ".xls",
+  ".xlsx",
+  ".csv",
+  ".ppt",
+  ".pptx",
 ];
 
-const allowedFileAccept = allowedFileExtensions.join(',');
+const allowedFileAccept = allowedFileExtensions.join(",");
 
 const maxStandardFilesCount = 12;
 const maxAdminFilesPerRequest = 50;
@@ -955,75 +934,74 @@ const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 const moduleInfos: {
   key: ModuleKey;
   translationKey:
-    | 'aiSupervisor'
-    | 'qualityAudit'
-    | 'defense'
-    | 'translation'
-    | 'dataAnalysis'
-    | 'planning'
-    | 'emails'
-    | 'originalityCheck'
-    | 'textHumanization';
+    | "aiSupervisor"
+    | "qualityAudit"
+    | "defense"
+    | "translation"
+    | "dataAnalysis"
+    | "planning"
+    | "emails"
+    | "originalityCheck"
+    | "textHumanization";
   infoClassName: string;
 }[] = [
   {
-    key: 'supervisor',
-    translationKey: 'aiSupervisor',
+    key: "supervisor",
+    translationKey: "aiSupervisor",
     infoClassName:
-      'mb-4 rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-3 text-sm text-violet-100',
+      "mb-4 rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-3 text-sm text-violet-100",
   },
   {
-    key: 'quality',
-    translationKey: 'qualityAudit',
+    key: "quality",
+    translationKey: "qualityAudit",
     infoClassName:
-      'mb-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100',
+      "mb-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100",
   },
   {
-    key: 'defense',
-    translationKey: 'defense',
+    key: "defense",
+    translationKey: "defense",
     infoClassName:
-      'mb-4 rounded-2xl border border-purple-400/20 bg-purple-500/10 px-4 py-3 text-sm text-purple-100',
+      "mb-4 rounded-2xl border border-purple-400/20 bg-purple-500/10 px-4 py-3 text-sm text-purple-100",
   },
   {
-    key: 'translation',
-    translationKey: 'translation',
+    key: "translation",
+    translationKey: "translation",
     infoClassName:
-      'mb-4 rounded-2xl border border-sky-400/20 bg-sky-500/10 px-4 py-3 text-sm text-sky-100',
+      "mb-4 rounded-2xl border border-sky-400/20 bg-sky-500/10 px-4 py-3 text-sm text-sky-100",
   },
   {
-    key: 'data',
-    translationKey: 'dataAnalysis',
+    key: "data",
+    translationKey: "dataAnalysis",
     infoClassName:
-      'mb-4 rounded-2xl border border-blue-400/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-100',
+      "mb-4 rounded-2xl border border-blue-400/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-100",
   },
   {
-    key: 'planning',
-    translationKey: 'planning',
+    key: "planning",
+    translationKey: "planning",
     infoClassName:
-      'mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100',
+      "mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100",
   },
   {
-    key: 'emails',
-    translationKey: 'emails',
+    key: "emails",
+    translationKey: "emails",
     infoClassName:
-      'mb-4 rounded-2xl border border-pink-400/20 bg-pink-500/10 px-4 py-3 text-sm text-pink-100',
+      "mb-4 rounded-2xl border border-pink-400/20 bg-pink-500/10 px-4 py-3 text-sm text-pink-100",
   },
 
   // {
-//   key: 'originality',
-//   translationKey: 'originalityCheck',
-//   infoClassName:
-//     'mb-4 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-100',
-// },
+  //   key: 'originality',
+  //   translationKey: 'originalityCheck',
+  //   infoClassName:
+  //     'mb-4 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-100',
+  // },
 
   {
-    key: 'humanizer',
-    translationKey: 'textHumanization',
+    key: "humanizer",
+    translationKey: "textHumanization",
     infoClassName:
-      'mb-4 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-4 py-3 text-sm text-fuchsia-100',
+      "mb-4 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-4 py-3 text-sm text-fuchsia-100",
   },
 ];
-
 
 type ModuleUiText = {
   label: string;
@@ -1040,652 +1018,652 @@ type ModuleUiTranslations = Record<ModuleKey, ModuleUiText>;
 const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
   sk: {
     supervisor: {
-      label: 'AI školiteľ',
-      shortLabel: 'AI školiteľ',
-      button: 'Spustiť AI školiteľa',
-      inputLabel: 'Text alebo zadanie pre AI školiteľa',
+      label: "AI školiteľ",
+      shortLabel: "AI školiteľ",
+      button: "Spustiť AI školiteľa",
+      inputLabel: "Text alebo zadanie pre AI školiteľa",
       placeholder:
-        'Vložte text práce, kapitolu, zadanie, otázku alebo časť, ktorú má AI školiteľ skontrolovať.',
+        "Vložte text práce, kapitolu, zadanie, otázku alebo časť, ktorú má AI školiteľ skontrolovať.",
       intro:
-        'AI školiteľ skontroluje štruktúru, logiku, cieľ, metodológiu, argumentáciu a odbornú kvalitu práce.',
-      resultTitle: 'Výstup AI školiteľa',
+        "AI školiteľ skontroluje štruktúru, logiku, cieľ, metodológiu, argumentáciu a odbornú kvalitu práce.",
+      resultTitle: "Výstup AI školiteľa",
     },
     quality: {
-      label: 'Audit kvality',
-      shortLabel: 'Audit kvality',
-      button: 'Spustiť audit kvality',
-      inputLabel: 'Text alebo zadanie pre audit kvality',
+      label: "Audit kvality",
+      shortLabel: "Audit kvality",
+      button: "Spustiť audit kvality",
+      inputLabel: "Text alebo zadanie pre audit kvality",
       placeholder:
-        'Vložte text práce, kapitolu, úvod, záver alebo časť, ktorú chcete odborne skontrolovať.',
+        "Vložte text práce, kapitolu, úvod, záver alebo časť, ktorú chcete odborne skontrolovať.",
       intro:
-        'Audit kvality overí štylistiku, logiku, citácie, nadväznosť kapitol, metodológiu a celkovú kvalitu textu.',
-      resultTitle: 'Výstup auditu kvality',
+        "Audit kvality overí štylistiku, logiku, citácie, nadväznosť kapitol, metodológiu a celkovú kvalitu textu.",
+      resultTitle: "Výstup auditu kvality",
     },
     defense: {
-      label: 'Obhajoba',
-      shortLabel: 'Obhajoba',
-      button: 'Pripraviť obhajobu',
-      inputLabel: 'Text alebo podklady k obhajobe',
+      label: "Obhajoba",
+      shortLabel: "Obhajoba",
+      button: "Pripraviť obhajobu",
+      inputLabel: "Text alebo podklady k obhajobe",
       placeholder:
-        'Vložte text práce, abstrakt, záver, otázky komisie alebo požiadavky k obhajobe.',
+        "Vložte text práce, abstrakt, záver, otázky komisie alebo požiadavky k obhajobe.",
       intro:
-        'Obhajoba pripraví otázky, odpovede, osnovu prezentácie a podklady pre profesionálne vystúpenie.',
-      resultTitle: 'Výstup k obhajobe',
+        "Obhajoba pripraví otázky, odpovede, osnovu prezentácie a podklady pre profesionálne vystúpenie.",
+      resultTitle: "Výstup k obhajobe",
     },
     translation: {
-      label: 'Preklad',
-      shortLabel: 'Preklad',
-      button: 'Preložiť text',
-      inputLabel: 'Text na preklad',
+      label: "Preklad",
+      shortLabel: "Preklad",
+      button: "Preložiť text",
+      inputLabel: "Text na preklad",
       placeholder:
-        'Vložte text, ktorý chcete preložiť do zvoleného cieľového jazyka.',
+        "Vložte text, ktorý chcete preložiť do zvoleného cieľového jazyka.",
       intro:
-        'Preklad preloží odborný text do zvoleného jazyka so zachovaním významu, štýlu a terminológie.',
-      resultTitle: 'Výstup prekladu',
+        "Preklad preloží odborný text do zvoleného jazyka so zachovaním významu, štýlu a terminológie.",
+      resultTitle: "Výstup prekladu",
     },
     data: {
-      label: 'Analýza dát',
-      shortLabel: 'Analýza dát',
-      button: 'Spustiť analýzu dát',
-      inputLabel: 'Zadanie k analýze dát',
+      label: "Analýza dát",
+      shortLabel: "Analýza dát",
+      button: "Spustiť analýzu dát",
+      inputLabel: "Zadanie k analýze dát",
       placeholder:
-        'Popíšte, čo má systém spraviť s dátami. Napríklad frekvenčná analýza, deskriptívna štatistika, grafy, korelácie, testy a interpretácia.',
+        "Popíšte, čo má systém spraviť s dátami. Napríklad frekvenčná analýza, deskriptívna štatistika, grafy, korelácie, testy a interpretácia.",
       intro:
-        'Analýza dát pripraví tabuľky, grafy, testy, interpretáciu a odporúčania pre praktickú časť práce.',
-      resultTitle: 'Výsledky analýzy dát',
+        "Analýza dát pripraví tabuľky, grafy, testy, interpretáciu a odporúčania pre praktickú časť práce.",
+      resultTitle: "Výsledky analýzy dát",
     },
     planning: {
-      label: 'Plánovanie',
-      shortLabel: 'Plánovanie',
-      button: 'Spustiť plánovanie',
-      inputLabel: 'Zadanie pre plánovanie',
+      label: "Plánovanie",
+      shortLabel: "Plánovanie",
+      button: "Spustiť plánovanie",
+      inputLabel: "Zadanie pre plánovanie",
       placeholder:
-        'Napíšte termín odovzdania, aktuálny stav práce a požadovaný plán. Termín nesmie byť v minulosti.',
+        "Napíšte termín odovzdania, aktuálny stav práce a požadovaný plán. Termín nesmie byť v minulosti.",
       intro:
-        'Plánovanie rozdelí prácu na kroky, termíny a priority podľa dátumu odovzdania a aktuálneho stavu.',
-      resultTitle: 'Výstup plánovania',
+        "Plánovanie rozdelí prácu na kroky, termíny a priority podľa dátumu odovzdania a aktuálneho stavu.",
+      resultTitle: "Výstup plánovania",
     },
     emails: {
-      label: 'Emaily',
-      shortLabel: 'Emaily',
-      button: 'Vygenerovať email',
-      inputLabel: 'Zadanie pre email',
+      label: "Emaily",
+      shortLabel: "Emaily",
+      button: "Vygenerovať email",
+      inputLabel: "Zadanie pre email",
       placeholder:
-        'Napíšte, komu má byť email určený a čo má obsahovať. Stačí stručne.',
+        "Napíšte, komu má byť email určený a čo má obsahovať. Stačí stručne.",
       intro:
-        'Emaily pripravia profesionálnu správu pre školiteľa, školu, vyučujúceho alebo konzultanta.',
-      resultTitle: 'Vygenerovaný email',
+        "Emaily pripravia profesionálnu správu pre školiteľa, školu, vyučujúceho alebo konzultanta.",
+      resultTitle: "Vygenerovaný email",
     },
     originality: {
-      label: 'Kontrola originality',
-      shortLabel: 'Originalita',
-      button: 'Spustiť kontrolu originality',
-      inputLabel: 'Text na kontrolu originality',
+      label: "Kontrola originality",
+      shortLabel: "Originalita",
+      button: "Spustiť kontrolu originality",
+      inputLabel: "Text na kontrolu originality",
       placeholder:
-        'Vložte alebo nahrajte text práce na orientačnú kontrolu originality.',
+        "Vložte alebo nahrajte text práce na orientačnú kontrolu originality.",
       intro:
-        'Kontrola originality pripraví orientačný protokol rizikových alebo nedostatočne odcitovaných pasáží.',
-      resultTitle: 'Výstup kontroly originality',
+        "Kontrola originality pripraví orientačný protokol rizikových alebo nedostatočne odcitovaných pasáží.",
+      resultTitle: "Výstup kontroly originality",
     },
     humanizer: {
-      label: 'Humanizátor',
-      shortLabel: 'Humanizátor',
-      button: 'Spustiť humanizáciu textu',
-      inputLabel: 'Text na humanizáciu',
+      label: "Humanizátor",
+      shortLabel: "Humanizátor",
+      button: "Spustiť humanizáciu textu",
+      inputLabel: "Text na humanizáciu",
       placeholder:
-        'Vložte text, ktorý chcete upraviť do prirodzenejšej, plynulejšej a menej strojovej podoby.',
+        "Vložte text, ktorý chcete upraviť do prirodzenejšej, plynulejšej a menej strojovej podoby.",
       intro:
-        'Humanizátor upraví text tak, aby pôsobil prirodzenejšie, plynulejšie a akademicky.',
-      resultTitle: 'Humanizovaný text',
+        "Humanizátor upraví text tak, aby pôsobil prirodzenejšie, plynulejšie a akademicky.",
+      resultTitle: "Humanizovaný text",
     },
   },
 
   en: {
     supervisor: {
-      label: 'AI Supervisor',
-      shortLabel: 'AI Supervisor',
-      button: 'Run AI Supervisor',
-      inputLabel: 'Text or prompt for AI Supervisor',
+      label: "AI Supervisor",
+      shortLabel: "AI Supervisor",
+      button: "Run AI Supervisor",
+      inputLabel: "Text or prompt for AI Supervisor",
       placeholder:
-        'Insert your paper text, chapter, assignment, question, or section that the AI Supervisor should review.',
+        "Insert your paper text, chapter, assignment, question, or section that the AI Supervisor should review.",
       intro:
-        'The AI Supervisor checks structure, logic, objective, methodology, argumentation, and academic quality.',
-      resultTitle: 'AI Supervisor output',
+        "The AI Supervisor checks structure, logic, objective, methodology, argumentation, and academic quality.",
+      resultTitle: "AI Supervisor output",
     },
     quality: {
-      label: 'Quality Audit',
-      shortLabel: 'Quality Audit',
-      button: 'Run quality audit',
-      inputLabel: 'Text or prompt for quality audit',
+      label: "Quality Audit",
+      shortLabel: "Quality Audit",
+      button: "Run quality audit",
+      inputLabel: "Text or prompt for quality audit",
       placeholder:
-        'Insert a chapter, introduction, conclusion, or full paper section you want to review.',
+        "Insert a chapter, introduction, conclusion, or full paper section you want to review.",
       intro:
-        'The quality audit checks style, logic, citations, chapter continuity, methodology, and overall text quality.',
-      resultTitle: 'Quality audit output',
+        "The quality audit checks style, logic, citations, chapter continuity, methodology, and overall text quality.",
+      resultTitle: "Quality audit output",
     },
     defense: {
-      label: 'Defense',
-      shortLabel: 'Defense',
-      button: 'Prepare defense',
-      inputLabel: 'Text or materials for defense',
+      label: "Defense",
+      shortLabel: "Defense",
+      button: "Prepare defense",
+      inputLabel: "Text or materials for defense",
       placeholder:
-        'Insert your thesis text, abstract, conclusion, committee questions, or defense requirements.',
+        "Insert your thesis text, abstract, conclusion, committee questions, or defense requirements.",
       intro:
-        'The defense module prepares questions, answers, presentation outline, and professional speaking materials.',
-      resultTitle: 'Defense output',
+        "The defense module prepares questions, answers, presentation outline, and professional speaking materials.",
+      resultTitle: "Defense output",
     },
     translation: {
-      label: 'Translation',
-      shortLabel: 'Translation',
-      button: 'Translate text',
-      inputLabel: 'Text for translation',
+      label: "Translation",
+      shortLabel: "Translation",
+      button: "Translate text",
+      inputLabel: "Text for translation",
       placeholder:
-        'Insert the text you want to translate into the selected target language.',
+        "Insert the text you want to translate into the selected target language.",
       intro:
-        'Translation converts academic text into the selected language while preserving meaning, style, and terminology.',
-      resultTitle: 'Translation output',
+        "Translation converts academic text into the selected language while preserving meaning, style, and terminology.",
+      resultTitle: "Translation output",
     },
     data: {
-      label: 'Data Analysis',
-      shortLabel: 'Data Analysis',
-      button: 'Run data analysis',
-      inputLabel: 'Data analysis assignment',
+      label: "Data Analysis",
+      shortLabel: "Data Analysis",
+      button: "Run data analysis",
+      inputLabel: "Data analysis assignment",
       placeholder:
-        'Describe what the system should do with the data, such as frequency analysis, descriptive statistics, charts, correlations, tests, and interpretation.',
+        "Describe what the system should do with the data, such as frequency analysis, descriptive statistics, charts, correlations, tests, and interpretation.",
       intro:
-        'Data analysis prepares tables, charts, tests, interpretation, and recommendations for the practical part of the paper.',
-      resultTitle: 'Data analysis results',
+        "Data analysis prepares tables, charts, tests, interpretation, and recommendations for the practical part of the paper.",
+      resultTitle: "Data analysis results",
     },
     planning: {
-      label: 'Planning',
-      shortLabel: 'Planning',
-      button: 'Run planning',
-      inputLabel: 'Planning assignment',
+      label: "Planning",
+      shortLabel: "Planning",
+      button: "Run planning",
+      inputLabel: "Planning assignment",
       placeholder:
-        'Enter the submission deadline, current progress, and requested plan. The deadline must not be in the past.',
+        "Enter the submission deadline, current progress, and requested plan. The deadline must not be in the past.",
       intro:
-        'Planning divides the work into steps, deadlines, and priorities according to the submission date and current progress.',
-      resultTitle: 'Planning output',
+        "Planning divides the work into steps, deadlines, and priorities according to the submission date and current progress.",
+      resultTitle: "Planning output",
     },
     emails: {
-      label: 'Emails',
-      shortLabel: 'Emails',
-      button: 'Generate email',
-      inputLabel: 'Email assignment',
+      label: "Emails",
+      shortLabel: "Emails",
+      button: "Generate email",
+      inputLabel: "Email assignment",
       placeholder:
-        'Write who the email is for and what it should contain. A short description is enough.',
+        "Write who the email is for and what it should contain. A short description is enough.",
       intro:
-        'Emails prepare professional messages for a supervisor, school, teacher, or consultant.',
-      resultTitle: 'Generated email',
+        "Emails prepare professional messages for a supervisor, school, teacher, or consultant.",
+      resultTitle: "Generated email",
     },
     originality: {
-      label: 'Originality Check',
-      shortLabel: 'Originality',
-      button: 'Run originality check',
-      inputLabel: 'Text for originality check',
+      label: "Originality Check",
+      shortLabel: "Originality",
+      button: "Run originality check",
+      inputLabel: "Text for originality check",
       placeholder:
-        'Insert or upload the text of your paper for an indicative originality check.',
+        "Insert or upload the text of your paper for an indicative originality check.",
       intro:
-        'The originality check prepares an indicative protocol of risky or insufficiently cited passages.',
-      resultTitle: 'Originality check output',
+        "The originality check prepares an indicative protocol of risky or insufficiently cited passages.",
+      resultTitle: "Originality check output",
     },
     humanizer: {
-      label: 'Text Humanization',
-      shortLabel: 'Humanization',
-      button: 'Humanize text',
-      inputLabel: 'Text for humanization',
+      label: "Text Humanization",
+      shortLabel: "Humanization",
+      button: "Humanize text",
+      inputLabel: "Text for humanization",
       placeholder:
-        'Insert text that you want to make more natural, fluent, and less machine-like.',
+        "Insert text that you want to make more natural, fluent, and less machine-like.",
       intro:
-        'Text humanization rewrites the text so it sounds more natural, fluent, and academic.',
-      resultTitle: 'Humanized text',
+        "Text humanization rewrites the text so it sounds more natural, fluent, and academic.",
+      resultTitle: "Humanized text",
     },
   },
 
   cs: {
     supervisor: {
-      label: 'AI vedoucí',
-      shortLabel: 'AI vedoucí',
-      button: 'Spustit AI vedoucího',
-      inputLabel: 'Text nebo zadání pro AI vedoucího',
+      label: "AI vedoucí",
+      shortLabel: "AI vedoucí",
+      button: "Spustit AI vedoucího",
+      inputLabel: "Text nebo zadání pro AI vedoucího",
       placeholder:
-        'Vložte text práce, kapitolu, zadání, otázku nebo část, kterou má AI vedoucí zkontrolovat.',
+        "Vložte text práce, kapitolu, zadání, otázku nebo část, kterou má AI vedoucí zkontrolovat.",
       intro:
-        'AI vedoucí zkontroluje strukturu, logiku, cíl, metodologii, argumentaci a odbornou kvalitu práce.',
-      resultTitle: 'Výstup AI vedoucího',
+        "AI vedoucí zkontroluje strukturu, logiku, cíl, metodologii, argumentaci a odbornou kvalitu práce.",
+      resultTitle: "Výstup AI vedoucího",
     },
     quality: {
-      label: 'Audit kvality',
-      shortLabel: 'Audit kvality',
-      button: 'Spustit audit kvality',
-      inputLabel: 'Text nebo zadání pro audit kvality',
+      label: "Audit kvality",
+      shortLabel: "Audit kvality",
+      button: "Spustit audit kvality",
+      inputLabel: "Text nebo zadání pro audit kvality",
       placeholder:
-        'Vložte text práce, kapitolu, úvod, závěr nebo část, kterou chcete odborně zkontrolovat.',
+        "Vložte text práce, kapitolu, úvod, závěr nebo část, kterou chcete odborně zkontrolovat.",
       intro:
-        'Audit kvality ověří stylistiku, logiku, citace, návaznost kapitol, metodologii a celkovou kvalitu textu.',
-      resultTitle: 'Výstup auditu kvality',
+        "Audit kvality ověří stylistiku, logiku, citace, návaznost kapitol, metodologii a celkovou kvalitu textu.",
+      resultTitle: "Výstup auditu kvality",
     },
     defense: {
-      label: 'Obhajoba',
-      shortLabel: 'Obhajoba',
-      button: 'Připravit obhajobu',
-      inputLabel: 'Text nebo podklady k obhajobě',
+      label: "Obhajoba",
+      shortLabel: "Obhajoba",
+      button: "Připravit obhajobu",
+      inputLabel: "Text nebo podklady k obhajobě",
       placeholder:
-        'Vložte text práce, abstrakt, závěr, otázky komise nebo požadavky k obhajobě.',
+        "Vložte text práce, abstrakt, závěr, otázky komise nebo požadavky k obhajobě.",
       intro:
-        'Obhajoba připraví otázky, odpovědi, osnovu prezentace a podklady pro profesionální vystoupení.',
-      resultTitle: 'Výstup k obhajobě',
+        "Obhajoba připraví otázky, odpovědi, osnovu prezentace a podklady pro profesionální vystoupení.",
+      resultTitle: "Výstup k obhajobě",
     },
     translation: {
-      label: 'Překlad',
-      shortLabel: 'Překlad',
-      button: 'Přeložit text',
-      inputLabel: 'Text k překladu',
+      label: "Překlad",
+      shortLabel: "Překlad",
+      button: "Přeložit text",
+      inputLabel: "Text k překladu",
       placeholder:
-        'Vložte text, který chcete přeložit do zvoleného cílového jazyka.',
+        "Vložte text, který chcete přeložit do zvoleného cílového jazyka.",
       intro:
-        'Překlad převede odborný text do zvoleného jazyka se zachováním významu, stylu a terminologie.',
-      resultTitle: 'Výstup překladu',
+        "Překlad převede odborný text do zvoleného jazyka se zachováním významu, stylu a terminologie.",
+      resultTitle: "Výstup překladu",
     },
     data: {
-      label: 'Analýza dat',
-      shortLabel: 'Analýza dat',
-      button: 'Spustit analýzu dat',
-      inputLabel: 'Zadání k analýze dat',
+      label: "Analýza dat",
+      shortLabel: "Analýza dat",
+      button: "Spustit analýzu dat",
+      inputLabel: "Zadání k analýze dat",
       placeholder:
-        'Popište, co má systém s daty udělat. Například frekvenční analýzu, deskriptivní statistiku, grafy, korelace, testy a interpretaci.',
+        "Popište, co má systém s daty udělat. Například frekvenční analýzu, deskriptivní statistiku, grafy, korelace, testy a interpretaci.",
       intro:
-        'Analýza dat připraví tabulky, grafy, testy, interpretaci a doporučení pro praktickou část práce.',
-      resultTitle: 'Výsledky analýzy dat',
+        "Analýza dat připraví tabulky, grafy, testy, interpretaci a doporučení pro praktickou část práce.",
+      resultTitle: "Výsledky analýzy dat",
     },
     planning: {
-      label: 'Plánování',
-      shortLabel: 'Plánování',
-      button: 'Spustit plánování',
-      inputLabel: 'Zadání pro plánování',
+      label: "Plánování",
+      shortLabel: "Plánování",
+      button: "Spustit plánování",
+      inputLabel: "Zadání pro plánování",
       placeholder:
-        'Napište termín odevzdání, aktuální stav práce a požadovaný plán. Termín nesmí být v minulosti.',
+        "Napište termín odevzdání, aktuální stav práce a požadovaný plán. Termín nesmí být v minulosti.",
       intro:
-        'Plánování rozdělí práci na kroky, termíny a priority podle data odevzdání a aktuálního stavu.',
-      resultTitle: 'Výstup plánování',
+        "Plánování rozdělí práci na kroky, termíny a priority podle data odevzdání a aktuálního stavu.",
+      resultTitle: "Výstup plánování",
     },
     emails: {
-      label: 'Emaily',
-      shortLabel: 'Emaily',
-      button: 'Vygenerovat email',
-      inputLabel: 'Zadání pro email',
+      label: "Emaily",
+      shortLabel: "Emaily",
+      button: "Vygenerovat email",
+      inputLabel: "Zadání pro email",
       placeholder:
-        'Napište, komu má být email určen a co má obsahovat. Stačí stručně.',
+        "Napište, komu má být email určen a co má obsahovat. Stačí stručně.",
       intro:
-        'Emaily připraví profesionální zprávu pro vedoucího, školu, vyučujícího nebo konzultanta.',
-      resultTitle: 'Vygenerovaný email',
+        "Emaily připraví profesionální zprávu pro vedoucího, školu, vyučujícího nebo konzultanta.",
+      resultTitle: "Vygenerovaný email",
     },
     originality: {
-      label: 'Kontrola originality',
-      shortLabel: 'Originalita',
-      button: 'Spustit kontrolu originality',
-      inputLabel: 'Text ke kontrole originality',
+      label: "Kontrola originality",
+      shortLabel: "Originalita",
+      button: "Spustit kontrolu originality",
+      inputLabel: "Text ke kontrole originality",
       placeholder:
-        'Vložte nebo nahrajte text práce pro orientační kontrolu originality.',
+        "Vložte nebo nahrajte text práce pro orientační kontrolu originality.",
       intro:
-        'Kontrola originality připraví orientační protokol rizikových nebo nedostatečně citovaných pasáží.',
-      resultTitle: 'Výstup kontroly originality',
+        "Kontrola originality připraví orientační protokol rizikových nebo nedostatečně citovaných pasáží.",
+      resultTitle: "Výstup kontroly originality",
     },
     humanizer: {
-      label: 'Humanizátor',
-      shortLabel: 'Humanizátor',
-      button: 'Spustit humanizaci textu',
-      inputLabel: 'Text k humanizaci',
+      label: "Humanizátor",
+      shortLabel: "Humanizátor",
+      button: "Spustit humanizaci textu",
+      inputLabel: "Text k humanizaci",
       placeholder:
-        'Vložte text, který chcete upravit do přirozenější, plynulejší a méně strojové podoby.',
+        "Vložte text, který chcete upravit do přirozenější, plynulejší a méně strojové podoby.",
       intro:
-        'Humanizátor upraví text tak, aby působil přirozeněji, plynuleji a akademicky.',
-      resultTitle: 'Humanizovaný text',
+        "Humanizátor upraví text tak, aby působil přirozeněji, plynuleji a akademicky.",
+      resultTitle: "Humanizovaný text",
     },
   },
 
   de: {
     supervisor: {
-      label: 'KI-Betreuer',
-      shortLabel: 'KI-Betreuer',
-      button: 'KI-Betreuer starten',
-      inputLabel: 'Text oder Aufgabe für den KI-Betreuer',
+      label: "KI-Betreuer",
+      shortLabel: "KI-Betreuer",
+      button: "KI-Betreuer starten",
+      inputLabel: "Text oder Aufgabe für den KI-Betreuer",
       placeholder:
-        'Fügen Sie den Text der Arbeit, ein Kapitel, eine Aufgabe, eine Frage oder einen Abschnitt ein, den der KI-Betreuer prüfen soll.',
+        "Fügen Sie den Text der Arbeit, ein Kapitel, eine Aufgabe, eine Frage oder einen Abschnitt ein, den der KI-Betreuer prüfen soll.",
       intro:
-        'Der KI-Betreuer prüft Struktur, Logik, Ziel, Methodik, Argumentation und fachliche Qualität der Arbeit.',
-      resultTitle: 'Ausgabe des KI-Betreuers',
+        "Der KI-Betreuer prüft Struktur, Logik, Ziel, Methodik, Argumentation und fachliche Qualität der Arbeit.",
+      resultTitle: "Ausgabe des KI-Betreuers",
     },
     quality: {
-      label: 'Qualitätsaudit',
-      shortLabel: 'Qualitätsaudit',
-      button: 'Qualitätsaudit starten',
-      inputLabel: 'Text oder Aufgabe für das Qualitätsaudit',
+      label: "Qualitätsaudit",
+      shortLabel: "Qualitätsaudit",
+      button: "Qualitätsaudit starten",
+      inputLabel: "Text oder Aufgabe für das Qualitätsaudit",
       placeholder:
-        'Fügen Sie den Text der Arbeit, ein Kapitel, die Einleitung, den Schluss oder einen Abschnitt ein, den Sie fachlich prüfen möchten.',
+        "Fügen Sie den Text der Arbeit, ein Kapitel, die Einleitung, den Schluss oder einen Abschnitt ein, den Sie fachlich prüfen möchten.",
       intro:
-        'Das Qualitätsaudit prüft Stil, Logik, Zitationen, Kapitelanschlüsse, Methodik und die Gesamtqualität des Textes.',
-      resultTitle: 'Ausgabe des Qualitätsaudits',
+        "Das Qualitätsaudit prüft Stil, Logik, Zitationen, Kapitelanschlüsse, Methodik und die Gesamtqualität des Textes.",
+      resultTitle: "Ausgabe des Qualitätsaudits",
     },
     defense: {
-      label: 'Verteidigung',
-      shortLabel: 'Verteidigung',
-      button: 'Verteidigung vorbereiten',
-      inputLabel: 'Text oder Unterlagen zur Verteidigung',
+      label: "Verteidigung",
+      shortLabel: "Verteidigung",
+      button: "Verteidigung vorbereiten",
+      inputLabel: "Text oder Unterlagen zur Verteidigung",
       placeholder:
-        'Fügen Sie den Text der Arbeit, Abstract, Schluss, Fragen der Kommission oder Anforderungen zur Verteidigung ein.',
+        "Fügen Sie den Text der Arbeit, Abstract, Schluss, Fragen der Kommission oder Anforderungen zur Verteidigung ein.",
       intro:
-        'Die Verteidigung bereitet Fragen, Antworten, Präsentationsstruktur und Unterlagen für einen professionellen Auftritt vor.',
-      resultTitle: 'Ausgabe zur Verteidigung',
+        "Die Verteidigung bereitet Fragen, Antworten, Präsentationsstruktur und Unterlagen für einen professionellen Auftritt vor.",
+      resultTitle: "Ausgabe zur Verteidigung",
     },
     translation: {
-      label: 'Übersetzung',
-      shortLabel: 'Übersetzung',
-      button: 'Text übersetzen',
-      inputLabel: 'Text zur Übersetzung',
+      label: "Übersetzung",
+      shortLabel: "Übersetzung",
+      button: "Text übersetzen",
+      inputLabel: "Text zur Übersetzung",
       placeholder:
-        'Fügen Sie den Text ein, den Sie in die ausgewählte Zielsprache übersetzen möchten.',
+        "Fügen Sie den Text ein, den Sie in die ausgewählte Zielsprache übersetzen möchten.",
       intro:
-        'Die Übersetzung überträgt fachlichen Text in die ausgewählte Sprache und bewahrt Bedeutung, Stil und Terminologie.',
-      resultTitle: 'Übersetzungsausgabe',
+        "Die Übersetzung überträgt fachlichen Text in die ausgewählte Sprache und bewahrt Bedeutung, Stil und Terminologie.",
+      resultTitle: "Übersetzungsausgabe",
     },
     data: {
-      label: 'Datenanalyse',
-      shortLabel: 'Datenanalyse',
-      button: 'Datenanalyse starten',
-      inputLabel: 'Aufgabe zur Datenanalyse',
+      label: "Datenanalyse",
+      shortLabel: "Datenanalyse",
+      button: "Datenanalyse starten",
+      inputLabel: "Aufgabe zur Datenanalyse",
       placeholder:
-        'Beschreiben Sie, was das System mit den Daten tun soll, z. B. Häufigkeitsanalyse, deskriptive Statistik, Diagramme, Korrelationen, Tests und Interpretation.',
+        "Beschreiben Sie, was das System mit den Daten tun soll, z. B. Häufigkeitsanalyse, deskriptive Statistik, Diagramme, Korrelationen, Tests und Interpretation.",
       intro:
-        'Die Datenanalyse erstellt Tabellen, Diagramme, Tests, Interpretationen und Empfehlungen für den praktischen Teil der Arbeit.',
-      resultTitle: 'Ergebnisse der Datenanalyse',
+        "Die Datenanalyse erstellt Tabellen, Diagramme, Tests, Interpretationen und Empfehlungen für den praktischen Teil der Arbeit.",
+      resultTitle: "Ergebnisse der Datenanalyse",
     },
     planning: {
-      label: 'Planung',
-      shortLabel: 'Planung',
-      button: 'Planung starten',
-      inputLabel: 'Aufgabe für die Planung',
+      label: "Planung",
+      shortLabel: "Planung",
+      button: "Planung starten",
+      inputLabel: "Aufgabe für die Planung",
       placeholder:
-        'Geben Sie Abgabefrist, aktuellen Stand und gewünschten Plan ein. Die Frist darf nicht in der Vergangenheit liegen.',
+        "Geben Sie Abgabefrist, aktuellen Stand und gewünschten Plan ein. Die Frist darf nicht in der Vergangenheit liegen.",
       intro:
-        'Die Planung teilt die Arbeit in Schritte, Termine und Prioritäten nach Abgabedatum und aktuellem Stand ein.',
-      resultTitle: 'Planungsausgabe',
+        "Die Planung teilt die Arbeit in Schritte, Termine und Prioritäten nach Abgabedatum und aktuellem Stand ein.",
+      resultTitle: "Planungsausgabe",
     },
     emails: {
-      label: 'E-Mails',
-      shortLabel: 'E-Mails',
-      button: 'E-Mail generieren',
-      inputLabel: 'Aufgabe für die E-Mail',
+      label: "E-Mails",
+      shortLabel: "E-Mails",
+      button: "E-Mail generieren",
+      inputLabel: "Aufgabe für die E-Mail",
       placeholder:
-        'Schreiben Sie, an wen die E-Mail gerichtet ist und was sie enthalten soll. Eine kurze Beschreibung reicht.',
+        "Schreiben Sie, an wen die E-Mail gerichtet ist und was sie enthalten soll. Eine kurze Beschreibung reicht.",
       intro:
-        'E-Mails erstellen professionelle Nachrichten an Betreuer, Schule, Lehrende oder Berater.',
-      resultTitle: 'Generierte E-Mail',
+        "E-Mails erstellen professionelle Nachrichten an Betreuer, Schule, Lehrende oder Berater.",
+      resultTitle: "Generierte E-Mail",
     },
     originality: {
-      label: 'Originalitätsprüfung',
-      shortLabel: 'Originalität',
-      button: 'Originalitätsprüfung starten',
-      inputLabel: 'Text zur Originalitätsprüfung',
+      label: "Originalitätsprüfung",
+      shortLabel: "Originalität",
+      button: "Originalitätsprüfung starten",
+      inputLabel: "Text zur Originalitätsprüfung",
       placeholder:
-        'Fügen Sie den Text der Arbeit ein oder laden Sie ihn hoch, um eine orientierende Originalitätsprüfung durchzuführen.',
+        "Fügen Sie den Text der Arbeit ein oder laden Sie ihn hoch, um eine orientierende Originalitätsprüfung durchzuführen.",
       intro:
-        'Die Originalitätsprüfung erstellt ein orientierendes Protokoll riskanter oder unzureichend zitierter Passagen.',
-      resultTitle: 'Ausgabe der Originalitätsprüfung',
+        "Die Originalitätsprüfung erstellt ein orientierendes Protokoll riskanter oder unzureichend zitierter Passagen.",
+      resultTitle: "Ausgabe der Originalitätsprüfung",
     },
     humanizer: {
-      label: 'Text-Humanisierung',
-      shortLabel: 'Humanisierung',
-      button: 'Text humanisieren',
-      inputLabel: 'Text zur Humanisierung',
+      label: "Text-Humanisierung",
+      shortLabel: "Humanisierung",
+      button: "Text humanisieren",
+      inputLabel: "Text zur Humanisierung",
       placeholder:
-        'Fügen Sie Text ein, der natürlicher, flüssiger und weniger maschinell wirken soll.',
+        "Fügen Sie Text ein, der natürlicher, flüssiger und weniger maschinell wirken soll.",
       intro:
-        'Die Humanisierung überarbeitet den Text, damit er natürlicher, flüssiger und akademischer wirkt.',
-      resultTitle: 'Humanisierter Text',
+        "Die Humanisierung überarbeitet den Text, damit er natürlicher, flüssiger und akademischer wirkt.",
+      resultTitle: "Humanisierter Text",
     },
   },
 
   pl: {
     supervisor: {
-      label: 'Opiekun AI',
-      shortLabel: 'Opiekun AI',
-      button: 'Uruchom opiekuna AI',
-      inputLabel: 'Tekst lub zadanie dla opiekuna AI',
+      label: "Opiekun AI",
+      shortLabel: "Opiekun AI",
+      button: "Uruchom opiekuna AI",
+      inputLabel: "Tekst lub zadanie dla opiekuna AI",
       placeholder:
-        'Wklej tekst pracy, rozdział, zadanie, pytanie lub fragment, który opiekun AI ma sprawdzić.',
+        "Wklej tekst pracy, rozdział, zadanie, pytanie lub fragment, który opiekun AI ma sprawdzić.",
       intro:
-        'Opiekun AI sprawdza strukturę, logikę, cel, metodologię, argumentację i jakość merytoryczną pracy.',
-      resultTitle: 'Wynik opiekuna AI',
+        "Opiekun AI sprawdza strukturę, logikę, cel, metodologię, argumentację i jakość merytoryczną pracy.",
+      resultTitle: "Wynik opiekuna AI",
     },
     quality: {
-      label: 'Audyt jakości',
-      shortLabel: 'Audyt jakości',
-      button: 'Uruchom audyt jakości',
-      inputLabel: 'Tekst lub zadanie do audytu jakości',
+      label: "Audyt jakości",
+      shortLabel: "Audyt jakości",
+      button: "Uruchom audyt jakości",
+      inputLabel: "Tekst lub zadanie do audytu jakości",
       placeholder:
-        'Wklej tekst pracy, rozdział, wstęp, zakończenie lub fragment, który chcesz profesjonalnie sprawdzić.',
+        "Wklej tekst pracy, rozdział, wstęp, zakończenie lub fragment, który chcesz profesjonalnie sprawdzić.",
       intro:
-        'Audyt jakości sprawdza styl, logikę, cytowania, spójność rozdziałów, metodologię i ogólną jakość tekstu.',
-      resultTitle: 'Wynik audytu jakości',
+        "Audyt jakości sprawdza styl, logikę, cytowania, spójność rozdziałów, metodologię i ogólną jakość tekstu.",
+      resultTitle: "Wynik audytu jakości",
     },
     defense: {
-      label: 'Obrona',
-      shortLabel: 'Obrona',
-      button: 'Przygotuj obronę',
-      inputLabel: 'Tekst lub materiały do obrony',
+      label: "Obrona",
+      shortLabel: "Obrona",
+      button: "Przygotuj obronę",
+      inputLabel: "Tekst lub materiały do obrony",
       placeholder:
-        'Wklej tekst pracy, abstrakt, zakończenie, pytania komisji lub wymagania dotyczące obrony.',
+        "Wklej tekst pracy, abstrakt, zakończenie, pytania komisji lub wymagania dotyczące obrony.",
       intro:
-        'Moduł obrony przygotowuje pytania, odpowiedzi, konspekt prezentacji i materiały do profesjonalnego wystąpienia.',
-      resultTitle: 'Wynik przygotowania do obrony',
+        "Moduł obrony przygotowuje pytania, odpowiedzi, konspekt prezentacji i materiały do profesjonalnego wystąpienia.",
+      resultTitle: "Wynik przygotowania do obrony",
     },
     translation: {
-      label: 'Tłumaczenie',
-      shortLabel: 'Tłumaczenie',
-      button: 'Przetłumacz tekst',
-      inputLabel: 'Tekst do tłumaczenia',
+      label: "Tłumaczenie",
+      shortLabel: "Tłumaczenie",
+      button: "Przetłumacz tekst",
+      inputLabel: "Tekst do tłumaczenia",
       placeholder:
-        'Wklej tekst, który chcesz przetłumaczyć na wybrany język docelowy.',
+        "Wklej tekst, który chcesz przetłumaczyć na wybrany język docelowy.",
       intro:
-        'Tłumaczenie przekłada tekst specjalistyczny na wybrany język, zachowując znaczenie, styl i terminologię.',
-      resultTitle: 'Wynik tłumaczenia',
+        "Tłumaczenie przekłada tekst specjalistyczny na wybrany język, zachowując znaczenie, styl i terminologię.",
+      resultTitle: "Wynik tłumaczenia",
     },
     data: {
-      label: 'Analiza danych',
-      shortLabel: 'Analiza danych',
-      button: 'Uruchom analizę danych',
-      inputLabel: 'Zadanie do analizy danych',
+      label: "Analiza danych",
+      shortLabel: "Analiza danych",
+      button: "Uruchom analizę danych",
+      inputLabel: "Zadanie do analizy danych",
       placeholder:
-        'Opisz, co system ma zrobić z danymi, np. analizę częstości, statystykę opisową, wykresy, korelacje, testy i interpretację.',
+        "Opisz, co system ma zrobić z danymi, np. analizę częstości, statystykę opisową, wykresy, korelacje, testy i interpretację.",
       intro:
-        'Analiza danych przygotuje tabele, wykresy, testy, interpretację i rekomendacje do części praktycznej pracy.',
-      resultTitle: 'Wyniki analizy danych',
+        "Analiza danych przygotuje tabele, wykresy, testy, interpretację i rekomendacje do części praktycznej pracy.",
+      resultTitle: "Wyniki analizy danych",
     },
     planning: {
-      label: 'Planowanie',
-      shortLabel: 'Planowanie',
-      button: 'Uruchom planowanie',
-      inputLabel: 'Zadanie do planowania',
+      label: "Planowanie",
+      shortLabel: "Planowanie",
+      button: "Uruchom planowanie",
+      inputLabel: "Zadanie do planowania",
       placeholder:
-        'Podaj termin oddania, aktualny stan pracy i oczekiwany plan. Termin nie może być w przeszłości.',
+        "Podaj termin oddania, aktualny stan pracy i oczekiwany plan. Termin nie może być w przeszłości.",
       intro:
-        'Planowanie dzieli pracę na kroki, terminy i priorytety zgodnie z datą oddania i aktualnym stanem.',
-      resultTitle: 'Wynik planowania',
+        "Planowanie dzieli pracę na kroki, terminy i priorytety zgodnie z datą oddania i aktualnym stanem.",
+      resultTitle: "Wynik planowania",
     },
     emails: {
-      label: 'E-maile',
-      shortLabel: 'E-maile',
-      button: 'Wygeneruj e-mail',
-      inputLabel: 'Zadanie do e-maila',
+      label: "E-maile",
+      shortLabel: "E-maile",
+      button: "Wygeneruj e-mail",
+      inputLabel: "Zadanie do e-maila",
       placeholder:
-        'Napisz, do kogo ma być skierowany e-mail i co ma zawierać. Wystarczy krótki opis.',
+        "Napisz, do kogo ma być skierowany e-mail i co ma zawierać. Wystarczy krótki opis.",
       intro:
-        'E-maile przygotowują profesjonalne wiadomości do promotora, szkoły, wykładowcy lub konsultanta.',
-      resultTitle: 'Wygenerowany e-mail',
+        "E-maile przygotowują profesjonalne wiadomości do promotora, szkoły, wykładowcy lub konsultanta.",
+      resultTitle: "Wygenerowany e-mail",
     },
     originality: {
-      label: 'Kontrola oryginalności',
-      shortLabel: 'Oryginalność',
-      button: 'Uruchom kontrolę oryginalności',
-      inputLabel: 'Tekst do kontroli oryginalności',
+      label: "Kontrola oryginalności",
+      shortLabel: "Oryginalność",
+      button: "Uruchom kontrolę oryginalności",
+      inputLabel: "Tekst do kontroli oryginalności",
       placeholder:
-        'Wklej lub prześlij tekst pracy do orientacyjnej kontroli oryginalności.',
+        "Wklej lub prześlij tekst pracy do orientacyjnej kontroli oryginalności.",
       intro:
-        'Kontrola oryginalności przygotuje orientacyjny protokół ryzykownych lub niedostatecznie cytowanych fragmentów.',
-      resultTitle: 'Wynik kontroli oryginalności',
+        "Kontrola oryginalności przygotuje orientacyjny protokół ryzykownych lub niedostatecznie cytowanych fragmentów.",
+      resultTitle: "Wynik kontroli oryginalności",
     },
     humanizer: {
-      label: 'Humanizator',
-      shortLabel: 'Humanizator',
-      button: 'Humanizuj tekst',
-      inputLabel: 'Tekst do humanizacji',
+      label: "Humanizator",
+      shortLabel: "Humanizator",
+      button: "Humanizuj tekst",
+      inputLabel: "Tekst do humanizacji",
       placeholder:
-        'Wklej tekst, który chcesz przeredagować na bardziej naturalny, płynny i mniej maszynowy.',
+        "Wklej tekst, który chcesz przeredagować na bardziej naturalny, płynny i mniej maszynowy.",
       intro:
-        'Humanizator przerabia tekst tak, aby brzmiał bardziej naturalnie, płynnie i akademicko.',
-      resultTitle: 'Zhumanizowany tekst',
+        "Humanizator przerabia tekst tak, aby brzmiał bardziej naturalnie, płynnie i akademicko.",
+      resultTitle: "Zhumanizowany tekst",
     },
   },
 
   hu: {
     supervisor: {
-      label: 'AI témavezető',
-      shortLabel: 'AI témavezető',
-      button: 'AI témavezető indítása',
-      inputLabel: 'Szöveg vagy feladat az AI témavezetőnek',
+      label: "AI témavezető",
+      shortLabel: "AI témavezető",
+      button: "AI témavezető indítása",
+      inputLabel: "Szöveg vagy feladat az AI témavezetőnek",
       placeholder:
-        'Illeszd be a dolgozat szövegét, fejezetet, feladatot, kérdést vagy részt, amelyet az AI témavezető ellenőrizzen.',
+        "Illeszd be a dolgozat szövegét, fejezetet, feladatot, kérdést vagy részt, amelyet az AI témavezető ellenőrizzen.",
       intro:
-        'Az AI témavezető ellenőrzi a struktúrát, logikát, célt, módszertant, érvelést és szakmai minőséget.',
-      resultTitle: 'AI témavezető eredménye',
+        "Az AI témavezető ellenőrzi a struktúrát, logikát, célt, módszertant, érvelést és szakmai minőséget.",
+      resultTitle: "AI témavezető eredménye",
     },
     quality: {
-      label: 'Minőségi audit',
-      shortLabel: 'Minőségi audit',
-      button: 'Minőségi audit indítása',
-      inputLabel: 'Szöveg vagy feladat minőségi audithoz',
+      label: "Minőségi audit",
+      shortLabel: "Minőségi audit",
+      button: "Minőségi audit indítása",
+      inputLabel: "Szöveg vagy feladat minőségi audithoz",
       placeholder:
-        'Illeszd be a dolgozat szövegét, fejezetet, bevezetést, lezárást vagy részt, amelyet szakmailag ellenőrizni szeretnél.',
+        "Illeszd be a dolgozat szövegét, fejezetet, bevezetést, lezárást vagy részt, amelyet szakmailag ellenőrizni szeretnél.",
       intro:
-        'A minőségi audit ellenőrzi a stílust, logikát, hivatkozásokat, fejezetek kapcsolódását, módszertant és az általános minőséget.',
-      resultTitle: 'Minőségi audit eredménye',
+        "A minőségi audit ellenőrzi a stílust, logikát, hivatkozásokat, fejezetek kapcsolódását, módszertant és az általános minőséget.",
+      resultTitle: "Minőségi audit eredménye",
     },
     defense: {
-      label: 'Védés',
-      shortLabel: 'Védés',
-      button: 'Védés előkészítése',
-      inputLabel: 'Szöveg vagy anyag a védéshez',
+      label: "Védés",
+      shortLabel: "Védés",
+      button: "Védés előkészítése",
+      inputLabel: "Szöveg vagy anyag a védéshez",
       placeholder:
-        'Illeszd be a dolgozat szövegét, absztraktot, lezárást, bizottsági kérdéseket vagy védési követelményeket.',
+        "Illeszd be a dolgozat szövegét, absztraktot, lezárást, bizottsági kérdéseket vagy védési követelményeket.",
       intro:
-        'A védési modul kérdéseket, válaszokat, prezentációs vázlatot és professzionális előadási anyagokat készít.',
-      resultTitle: 'Védési eredmény',
+        "A védési modul kérdéseket, válaszokat, prezentációs vázlatot és professzionális előadási anyagokat készít.",
+      resultTitle: "Védési eredmény",
     },
     translation: {
-      label: 'Fordítás',
-      shortLabel: 'Fordítás',
-      button: 'Szöveg fordítása',
-      inputLabel: 'Fordítandó szöveg',
+      label: "Fordítás",
+      shortLabel: "Fordítás",
+      button: "Szöveg fordítása",
+      inputLabel: "Fordítandó szöveg",
       placeholder:
-        'Illeszd be a szöveget, amelyet a kiválasztott célnyelvre szeretnél fordítani.',
+        "Illeszd be a szöveget, amelyet a kiválasztott célnyelvre szeretnél fordítani.",
       intro:
-        'A fordítás a szakmai szöveget a kiválasztott nyelvre fordítja, megőrizve a jelentést, stílust és terminológiát.',
-      resultTitle: 'Fordítás eredménye',
+        "A fordítás a szakmai szöveget a kiválasztott nyelvre fordítja, megőrizve a jelentést, stílust és terminológiát.",
+      resultTitle: "Fordítás eredménye",
     },
     data: {
-      label: 'Adatelemzés',
-      shortLabel: 'Adatelemzés',
-      button: 'Adatelemzés indítása',
-      inputLabel: 'Adatelemzési feladat',
+      label: "Adatelemzés",
+      shortLabel: "Adatelemzés",
+      button: "Adatelemzés indítása",
+      inputLabel: "Adatelemzési feladat",
       placeholder:
-        'Írd le, mit végezzen a rendszer az adatokkal, például gyakorisági elemzést, leíró statisztikát, grafikonokat, korrelációkat, teszteket és értelmezést.',
+        "Írd le, mit végezzen a rendszer az adatokkal, például gyakorisági elemzést, leíró statisztikát, grafikonokat, korrelációkat, teszteket és értelmezést.",
       intro:
-        'Az adatelemzés táblákat, grafikonokat, teszteket, értelmezést és ajánlásokat készít a gyakorlati részhez.',
-      resultTitle: 'Adatelemzés eredményei',
+        "Az adatelemzés táblákat, grafikonokat, teszteket, értelmezést és ajánlásokat készít a gyakorlati részhez.",
+      resultTitle: "Adatelemzés eredményei",
     },
     planning: {
-      label: 'Tervezés',
-      shortLabel: 'Tervezés',
-      button: 'Tervezés indítása',
-      inputLabel: 'Tervezési feladat',
+      label: "Tervezés",
+      shortLabel: "Tervezés",
+      button: "Tervezés indítása",
+      inputLabel: "Tervezési feladat",
       placeholder:
-        'Add meg a leadási határidőt, az aktuális állapotot és a kért tervet. A határidő nem lehet múltbeli.',
+        "Add meg a leadási határidőt, az aktuális állapotot és a kért tervet. A határidő nem lehet múltbeli.",
       intro:
-        'A tervezés lépésekre, határidőkre és prioritásokra bontja a munkát a leadási dátum és aktuális állapot alapján.',
-      resultTitle: 'Tervezési eredmény',
+        "A tervezés lépésekre, határidőkre és prioritásokra bontja a munkát a leadási dátum és aktuális állapot alapján.",
+      resultTitle: "Tervezési eredmény",
     },
     emails: {
-      label: 'E-mailek',
-      shortLabel: 'E-mailek',
-      button: 'E-mail generálása',
-      inputLabel: 'E-mail feladat',
+      label: "E-mailek",
+      shortLabel: "E-mailek",
+      button: "E-mail generálása",
+      inputLabel: "E-mail feladat",
       placeholder:
-        'Írd le, kinek szól az e-mail és mit tartalmazzon. Rövid leírás is elég.',
+        "Írd le, kinek szól az e-mail és mit tartalmazzon. Rövid leírás is elég.",
       intro:
-        'Az e-mail modul professzionális üzenetet készít témavezetőnek, iskolának, oktatónak vagy konzultánsnak.',
-      resultTitle: 'Generált e-mail',
+        "Az e-mail modul professzionális üzenetet készít témavezetőnek, iskolának, oktatónak vagy konzultánsnak.",
+      resultTitle: "Generált e-mail",
     },
     originality: {
-      label: 'Eredetiség-ellenőrzés',
-      shortLabel: 'Eredetiség',
-      button: 'Eredetiség ellenőrzése',
-      inputLabel: 'Szöveg eredetiség-ellenőrzéshez',
+      label: "Eredetiség-ellenőrzés",
+      shortLabel: "Eredetiség",
+      button: "Eredetiség ellenőrzése",
+      inputLabel: "Szöveg eredetiség-ellenőrzéshez",
       placeholder:
-        'Illeszd be vagy töltsd fel a dolgozat szövegét tájékoztató eredetiség-ellenőrzéshez.',
+        "Illeszd be vagy töltsd fel a dolgozat szövegét tájékoztató eredetiség-ellenőrzéshez.",
       intro:
-        'Az eredetiség-ellenőrzés tájékoztató protokollt készít kockázatos vagy nem megfelelően hivatkozott részekről.',
-      resultTitle: 'Eredetiség-ellenőrzés eredménye',
+        "Az eredetiség-ellenőrzés tájékoztató protokollt készít kockázatos vagy nem megfelelően hivatkozott részekről.",
+      resultTitle: "Eredetiség-ellenőrzés eredménye",
     },
     humanizer: {
-      label: 'Humanizátor',
-      shortLabel: 'Humanizátor',
-      button: 'Szöveg humanizálása',
-      inputLabel: 'Humanizálandó szöveg',
+      label: "Humanizátor",
+      shortLabel: "Humanizátor",
+      button: "Szöveg humanizálása",
+      inputLabel: "Humanizálandó szöveg",
       placeholder:
-        'Illeszd be a szöveget, amelyet természetesebbé, gördülékenyebbé és kevésbé gépi hangzásúvá szeretnél alakítani.',
+        "Illeszd be a szöveget, amelyet természetesebbé, gördülékenyebbé és kevésbé gépi hangzásúvá szeretnél alakítani.",
       intro:
-        'A humanizátor természetesebb, gördülékenyebb és akadémikusabb szöveggé alakítja az anyagot.',
-      resultTitle: 'Humanizált szöveg',
+        "A humanizátor természetesebb, gördülékenyebb és akadémikusabb szöveggé alakítja az anyagot.",
+      resultTitle: "Humanizált szöveg",
     },
   },
 };
 
 function getFixedModuleUi(language?: string): ModuleUiTranslations {
   const safeLanguage: LanguageCode =
-    language === 'cs' ||
-    language === 'en' ||
-    language === 'de' ||
-    language === 'pl' ||
-    language === 'hu' ||
-    language === 'sk'
+    language === "cs" ||
+    language === "en" ||
+    language === "de" ||
+    language === "pl" ||
+    language === "hu" ||
+    language === "sk"
       ? language
-      : 'sk';
+      : "sk";
 
   return fixedModuleUiByLanguage[safeLanguage] || fixedModuleUiByLanguage.sk;
 }
 
 const dashboardModuleOrder: ModuleKey[] = [
-  'supervisor',
-  'quality',
-  'defense',
-  'translation',
-  'data',
-  'planning',
-  'emails',
-  'humanizer',
+  "supervisor",
+  "quality",
+  "defense",
+  "translation",
+  "data",
+  "planning",
+  "emails",
+  "humanizer",
 ];
 
 const MODULE_REQUIRED_FEATURE: Record<ModuleKey, FeatureKey> = {
-  supervisor: 'ai-supervisor',
-  quality: 'quality-audit',
-  defense: 'defense',
-  translation: 'translation',
-  data: 'data-prepare',
-  planning: 'planning',
-  emails: 'emails',
-  originality: 'originality',
-  humanizer: 'humanizer',
+  supervisor: "ai-supervisor",
+  quality: "quality-audit",
+  defense: "defense",
+  translation: "translation",
+  data: "data-prepare",
+  planning: "planning",
+  emails: "emails",
+  originality: "originality",
+  humanizer: "humanizer",
 };
 
 type ModuleAccessNoticeCopy = {
@@ -1693,95 +1671,111 @@ type ModuleAccessNoticeCopy = {
   detail: (moduleLabel: string) => string;
 };
 
-const MODULE_ACCESS_NOTICE_COPY: Record<
-  LanguageCode,
-  ModuleAccessNoticeCopy
-> = {
-  sk: {
-    message: (moduleLabel, planName) =>
-      `Sekcia „${moduleLabel}“ nie je súčasťou aktívneho balíka „${planName}“.`,
-    detail: (moduleLabel) =>
-      `Na používanie sekcie „${moduleLabel}“ si vyberte balík, ktorý túto sekciu obsahuje.`,
-  },
-  cs: {
-    message: (moduleLabel, planName) =>
-      `Sekce „${moduleLabel}“ není součástí aktivního balíčku „${planName}“.`,
-    detail: (moduleLabel) =>
-      `Pro používání sekce „${moduleLabel}“ vyberte balíček, který tuto sekci obsahuje.`,
-  },
-  en: {
-    message: (moduleLabel, planName) =>
-      `The “${moduleLabel}” section is not included in the active “${planName}” plan.`,
-    detail: (moduleLabel) =>
-      `Choose a plan that includes the “${moduleLabel}” section to continue.`,
-  },
-  de: {
-    message: (moduleLabel, planName) =>
-      `Der Bereich „${moduleLabel}“ ist im aktiven Paket „${planName}“ nicht enthalten.`,
-    detail: (moduleLabel) =>
-      `Wählen Sie ein Paket, das den Bereich „${moduleLabel}“ enthält.`,
-  },
-  pl: {
-    message: (moduleLabel, planName) =>
-      `Sekcja „${moduleLabel}“ nie jest dostępna w aktywnym pakiecie „${planName}“.`,
-    detail: (moduleLabel) =>
-      `Aby korzystać z sekcji „${moduleLabel}“, wybierz pakiet, który ją zawiera.`,
-  },
-  hu: {
-    message: (moduleLabel, planName) =>
-      `A(z) „${moduleLabel}“ szakasz nem része az aktív „${planName}“ csomagnak.`,
-    detail: (moduleLabel) =>
-      `A(z) „${moduleLabel}“ használatához válasszon olyan csomagot, amely tartalmazza ezt a szakaszt.`,
-  },
-};
+const MODULE_ACCESS_NOTICE_COPY: Record<LanguageCode, ModuleAccessNoticeCopy> =
+  {
+    sk: {
+      message: (moduleLabel, planName) =>
+        `Sekcia „${moduleLabel}“ nie je súčasťou aktívneho balíka „${planName}“.`,
+      detail: (moduleLabel) =>
+        `Na používanie sekcie „${moduleLabel}“ si vyberte balík, ktorý túto sekciu obsahuje.`,
+    },
+    cs: {
+      message: (moduleLabel, planName) =>
+        `Sekce „${moduleLabel}“ není součástí aktivního balíčku „${planName}“.`,
+      detail: (moduleLabel) =>
+        `Pro používání sekce „${moduleLabel}“ vyberte balíček, který tuto sekci obsahuje.`,
+    },
+    en: {
+      message: (moduleLabel, planName) =>
+        `The “${moduleLabel}” section is not included in the active “${planName}” plan.`,
+      detail: (moduleLabel) =>
+        `Choose a plan that includes the “${moduleLabel}” section to continue.`,
+    },
+    de: {
+      message: (moduleLabel, planName) =>
+        `Der Bereich „${moduleLabel}“ ist im aktiven Paket „${planName}“ nicht enthalten.`,
+      detail: (moduleLabel) =>
+        `Wählen Sie ein Paket, das den Bereich „${moduleLabel}“ enthält.`,
+    },
+    pl: {
+      message: (moduleLabel, planName) =>
+        `Sekcja „${moduleLabel}“ nie jest dostępna w aktywnym pakiecie „${planName}“.`,
+      detail: (moduleLabel) =>
+        `Aby korzystać z sekcji „${moduleLabel}“, wybierz pakiet, który ją zawiera.`,
+    },
+    hu: {
+      message: (moduleLabel, planName) =>
+        `A(z) „${moduleLabel}“ szakasz nem része az aktív „${planName}“ csomagnak.`,
+      detail: (moduleLabel) =>
+        `A(z) „${moduleLabel}“ használatához válasszon olyan csomagot, amely tartalmazza ezt a szakaszt.`,
+    },
+  };
 
 function createModuleAccessNotice({
   language,
+  moduleKey,
   moduleLabel,
   planName,
+  feature,
 }: {
   language: LanguageCode;
+  moduleKey: ModuleKey;
   moduleLabel: string;
   planName: string;
+  feature: FeatureKey;
 }): BillingNotice {
   const copy =
     MODULE_ACCESS_NOTICE_COPY[language] || MODULE_ACCESS_NOTICE_COPY.sk;
 
   return {
-    code: 'FEATURE_NOT_INCLUDED',
+    code: "FEATURE_NOT_INCLUDED",
     message: copy.message(moduleLabel, planName),
     detail: copy.detail(moduleLabel),
-    purchaseUrl: '/pricing',
+    purchaseUrl: "/pricing",
+    scope: "module",
+    moduleKey,
+    feature,
   };
 }
 
 const MODULE_ACCESS_ERROR_CODES = new Set([
-  'FEATURE_NOT_INCLUDED',
-  'REQUIRED_FEATURES_MISSING',
-  'NO_REQUIRED_FEATURE_INCLUDED',
+  "FEATURE_NOT_INCLUDED",
+  "REQUIRED_FEATURES_MISSING",
+  "NO_REQUIRED_FEATURE_INCLUDED",
 ]);
 
 const BILLING_ERROR_CODES = new Set([
-  'PAGE_LIMIT_REACHED',
-  'PROMPT_LIMIT_REACHED',
-  'FEATURE_NOT_INCLUDED',
-  'REQUIRED_FEATURES_MISSING',
-  'NO_REQUIRED_FEATURE_INCLUDED',
-  'ATTACHMENT_LIMIT_REACHED',
+  "PAGE_LIMIT_REACHED",
+  "PROMPT_LIMIT_REACHED",
+  "FEATURE_NOT_INCLUDED",
+  "REQUIRED_FEATURES_MISSING",
+  "NO_REQUIRED_FEATURE_INCLUDED",
+  "ATTACHMENT_LIMIT_REACHED",
 ]);
 
 function isModuleKey(value: string): value is ModuleKey {
   return (
-    value === 'supervisor' ||
-    value === 'quality' ||
-    value === 'defense' ||
-    value === 'translation' ||
-    value === 'data' ||
-    value === 'planning' ||
-    value === 'emails' ||
-    value === 'originality' ||
-    value === 'humanizer'
+    value === "supervisor" ||
+    value === "quality" ||
+    value === "defense" ||
+    value === "translation" ||
+    value === "data" ||
+    value === "planning" ||
+    value === "emails" ||
+    value === "originality" ||
+    value === "humanizer"
   );
+}
+
+function normalizeDashboardModuleKey(value: unknown): ModuleKey | null {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  if (normalized === "coach") return "supervisor";
+  if (normalized === "audit") return "quality";
+
+  return isModuleKey(normalized) ? normalized : null;
 }
 
 // ================= BILLING NORMALIZATION =================
@@ -1798,31 +1792,31 @@ const DASHBOARD_PLAN_DEFAULTS: Record<
   }
 > = {
   free: {
-    name: 'FREE',
+    name: "FREE",
     priceCents: 0,
     pageLimit: 3,
     attachmentLimit: 1,
   },
-  'seminar-work': {
-    name: 'Seminárna práca',
+  "seminar-work": {
+    name: "Seminárna práca",
     priceCents: 3900,
     pageLimit: 15,
     attachmentLimit: 12,
   },
-  'bachelor-thesis': {
-    name: 'Bakalárska práca',
+  "bachelor-thesis": {
+    name: "Bakalárska práca",
     priceCents: 14900,
     pageLimit: 50,
     attachmentLimit: 12,
   },
-  'master-thesis': {
-    name: 'Diplomová / magisterská práca',
+  "master-thesis": {
+    name: "Diplomová / magisterská práca",
     priceCents: 18900,
     pageLimit: 70,
     attachmentLimit: 12,
   },
   admin: {
-    name: 'ADMIN',
+    name: "ADMIN",
     priceCents: 0,
     pageLimit: 0,
     attachmentLimit: 0,
@@ -1830,33 +1824,29 @@ const DASHBOARD_PLAN_DEFAULTS: Record<
 };
 
 const DASHBOARD_ADDON_LABELS: Record<AddonId, string> = {
-  'data-analysis': 'Analýza dát',
-  'extra-20': 'Extra 20 strán',
-  'extra-40': 'Extra 40 strán',
-  'extra-60': 'Extra 60 strán',
+  "data-analysis": "Analýza dát",
+  "extra-20": "Extra 20 strán",
+  "extra-40": "Extra 40 strán",
+  "extra-60": "Extra 60 strán",
 };
 
 const DASHBOARD_PLAN_IDS = new Set<PlanId>([
-  'free',
-  'seminar-work',
-  'bachelor-thesis',
-  'master-thesis',
-  'admin',
+  "free",
+  "seminar-work",
+  "bachelor-thesis",
+  "master-thesis",
+  "admin",
 ]);
 
 const DASHBOARD_ADDON_IDS = new Set<AddonId>([
-  'data-analysis',
-  'extra-20',
-  'extra-40',
-  'extra-60',
+  "data-analysis",
+  "extra-20",
+  "extra-40",
+  "extra-60",
 ]);
 
 function isUnknownRecord(value: unknown): value is UnknownRecord {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value)
-  );
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function unwrapApiPayload(value: unknown): UnknownRecord | null {
@@ -1869,19 +1859,16 @@ function unwrapApiPayload(value: unknown): UnknownRecord | null {
   return value;
 }
 
-function readString(
-  record: UnknownRecord,
-  ...keys: string[]
-): string {
+function readString(record: UnknownRecord, ...keys: string[]): string {
   for (const key of keys) {
     const value = record[key];
 
-    if (typeof value === 'string' && value.trim()) {
+    if (typeof value === "string" && value.trim()) {
       return value.trim();
     }
   }
 
-  return '';
+  return "";
 }
 
 function readNullableString(
@@ -1892,18 +1879,15 @@ function readNullableString(
   return value || null;
 }
 
-function readNumber(
-  record: UnknownRecord,
-  ...keys: string[]
-): number | null {
+function readNumber(record: UnknownRecord, ...keys: string[]): number | null {
   for (const key of keys) {
     const value = record[key];
 
-    if (typeof value === 'number' && Number.isFinite(value)) {
+    if (typeof value === "number" && Number.isFinite(value)) {
       return value;
     }
 
-    if (typeof value === 'string' && value.trim()) {
+    if (typeof value === "string" && value.trim()) {
       const parsed = Number(value);
 
       if (Number.isFinite(parsed)) {
@@ -1923,17 +1907,17 @@ function readBoolean(
   for (const key of keys) {
     const value = record[key];
 
-    if (typeof value === 'boolean') return value;
-    if (typeof value === 'number') return value !== 0;
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
 
-    if (typeof value === 'string') {
+    if (typeof value === "string") {
       const normalized = value.trim().toLowerCase();
 
-      if (['true', '1', 'yes', 'ano', 'áno'].includes(normalized)) {
+      if (["true", "1", "yes", "ano", "áno"].includes(normalized)) {
         return true;
       }
 
-      if (['false', '0', 'no', 'nie'].includes(normalized)) {
+      if (["false", "0", "no", "nie"].includes(normalized)) {
         return false;
       }
     }
@@ -1942,28 +1926,21 @@ function readBoolean(
   return fallback;
 }
 
-function readStringArray(
-  record: UnknownRecord,
-  ...keys: string[]
-): string[] {
+function readStringArray(record: UnknownRecord, ...keys: string[]): string[] {
   for (const key of keys) {
     const value = record[key];
 
     if (Array.isArray(value)) {
       return Array.from(
-        new Set(
-          value
-            .map((item) => String(item ?? '').trim())
-            .filter(Boolean),
-        ),
+        new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean)),
       );
     }
 
-    if (typeof value === 'string' && value.trim()) {
+    if (typeof value === "string" && value.trim()) {
       return Array.from(
         new Set(
           value
-            .split(',')
+            .split(",")
             .map((item) => item.trim())
             .filter(Boolean),
         ),
@@ -1975,14 +1952,13 @@ function readStringArray(
 }
 
 function normalizeDashboardPlanId(value: unknown): PlanId {
-  const candidate = String(value ?? '').trim() as PlanId;
-  return DASHBOARD_PLAN_IDS.has(candidate) ? candidate : 'free';
+  const candidate = String(value ?? "").trim() as PlanId;
+  return DASHBOARD_PLAN_IDS.has(candidate) ? candidate : "free";
 }
 
 function normalizeDashboardAddonIds(values: string[]): AddonId[] {
-  return values.filter(
-    (value): value is AddonId =>
-      DASHBOARD_ADDON_IDS.has(value as AddonId),
+  return values.filter((value): value is AddonId =>
+    DASHBOARD_ADDON_IDS.has(value as AddonId),
   );
 }
 
@@ -1994,20 +1970,14 @@ function normalizeDashboardEntitlements(
 
   if (!data) return null;
 
-  const planId = normalizeDashboardPlanId(
-    data.planId ?? data.plan_id,
-  );
+  const planId = normalizeDashboardPlanId(data.planId ?? data.plan_id);
   const planDefaults = DASHBOARD_PLAN_DEFAULTS[planId];
 
   const addonIds = normalizeDashboardAddonIds(
-    readStringArray(data, 'addonIds', 'addon_ids'),
+    readStringArray(data, "addonIds", "addon_ids"),
   );
 
-  const explicitAddonNames = readStringArray(
-    data,
-    'addonNames',
-    'addon_names',
-  );
+  const explicitAddonNames = readStringArray(data, "addonNames", "addon_names");
 
   const addonNames = explicitAddonNames.length
     ? explicitAddonNames
@@ -2015,80 +1985,65 @@ function normalizeDashboardEntitlements(
 
   const features = readStringArray(
     data,
-    'features',
-    'featureList',
-    'feature_list',
+    "features",
+    "featureList",
+    "feature_list",
   ) as FeatureKey[];
 
-  const promptLimit = readNumber(
-    data,
-    'promptLimit',
-    'prompt_limit',
-  );
+  const promptLimit = readNumber(data, "promptLimit", "prompt_limit");
 
   const promptsUsed = Math.max(
     0,
-    readNumber(data, 'promptsUsed', 'prompts_used') ?? 0,
+    readNumber(data, "promptsUsed", "prompts_used") ?? 0,
   );
 
   const promptsRemainingFromApi = readNumber(
     data,
-    'promptsRemaining',
-    'prompts_remaining',
+    "promptsRemaining",
+    "prompts_remaining",
   );
 
   const promptsRemaining =
     promptLimit === null
       ? null
-      : Math.max(
-          0,
-          promptsRemainingFromApi ?? promptLimit - promptsUsed,
-        );
+      : Math.max(0, promptsRemainingFromApi ?? promptLimit - promptsUsed);
 
   const promptLimitReached = readBoolean(
     data,
     promptLimit !== null && promptsUsed >= promptLimit,
-    'promptLimitReached',
-    'prompt_limit_reached',
+    "promptLimitReached",
+    "prompt_limit_reached",
   );
 
-  const isAdmin = readBoolean(
-    data,
-    planId === 'admin',
-    'isAdmin',
-    'is_admin',
-  );
+  const isAdmin = readBoolean(data, planId === "admin", "isAdmin", "is_admin");
 
   const hasUnlimitedAccess = readBoolean(
     data,
     isAdmin,
-    'hasUnlimitedAccess',
-    'has_unlimited_access',
-    'isUnlimited',
-    'is_unlimited',
+    "hasUnlimitedAccess",
+    "has_unlimited_access",
+    "isUnlimited",
+    "is_unlimited",
   );
 
   return {
-    ok: readBoolean(root ?? data, true, 'ok', 'success'),
+    ok: readBoolean(root ?? data, true, "ok", "success"),
 
-    userId: readString(data, 'userId', 'user_id'),
-    email: readNullableString(data, 'email'),
+    userId: readString(data, "userId", "user_id"),
+    email: readNullableString(data, "email"),
 
     planId,
-    planName:
-      readString(data, 'planName', 'plan_name') ||
-      planDefaults.name,
+    planName: readString(data, "planName", "plan_name") || planDefaults.name,
 
     planPriceCents:
-      readNumber(data, 'planPriceCents', 'plan_price_cents') ??
+      readNumber(data, "planPriceCents", "plan_price_cents") ??
       planDefaults.priceCents,
 
     isAdmin,
     hasUnlimitedAccess,
 
     pageLimit:
-      readNumber(data, 'pageLimit', 'page_limit') ??
-      planDefaults.pageLimit,
+      readNumber(data, "pageLimit", "page_limit") ?? planDefaults.pageLimit,
 
     addonIds,
     addonNames,
@@ -2097,37 +2052,21 @@ function normalizeDashboardEntitlements(
     promptLimit: hasUnlimitedAccess ? null : promptLimit,
     promptsUsed: hasUnlimitedAccess ? 0 : promptsUsed,
     promptsRemaining: hasUnlimitedAccess ? null : promptsRemaining,
-    promptLimitReached:
-      hasUnlimitedAccess ? false : promptLimitReached,
+    promptLimitReached: hasUnlimitedAccess ? false : promptLimitReached,
 
     attachmentLimit: hasUnlimitedAccess
       ? null
       : Math.max(
           0,
-          readNumber(
-            data,
-            'attachmentLimit',
-            'attachment_limit',
-          ) ?? planDefaults.attachmentLimit,
+          readNumber(data, "attachmentLimit", "attachment_limit") ??
+            planDefaults.attachmentLimit,
         ),
 
-    activatedAt: readNullableString(
-      data,
-      'activatedAt',
-      'activated_at',
-    ),
+    activatedAt: readNullableString(data, "activatedAt", "activated_at"),
 
-    validUntil: readNullableString(
-      data,
-      'validUntil',
-      'valid_until',
-    ),
+    validUntil: readNullableString(data, "validUntil", "valid_until"),
 
-    updatedAt: readNullableString(
-      data,
-      'updatedAt',
-      'updated_at',
-    ),
+    updatedAt: readNullableString(data, "updatedAt", "updated_at"),
   };
 }
 
@@ -2156,34 +2095,34 @@ function normalizeDashboardPageQuota(
 
   if (!data) return null;
 
-  const planId = readString(data, 'planId', 'plan_id') || 'free';
+  const planId = readString(data, "planId", "plan_id") || "free";
 
   const isAdmin = readBoolean(
     data,
     false,
-    'isAdmin',
-    'is_admin',
-    'adminAccess',
-    'admin_access',
+    "isAdmin",
+    "is_admin",
+    "adminAccess",
+    "admin_access",
   );
 
   const isUnlimited = readBoolean(
     data,
     isAdmin,
-    'isUnlimited',
-    'is_unlimited',
-    'hasUnlimitedAccess',
-    'has_unlimited_access',
+    "isUnlimited",
+    "is_unlimited",
+    "hasUnlimitedAccess",
+    "has_unlimited_access",
   );
 
   const basePageLimit = Math.max(
     0,
     readNumber(
       data,
-      'basePageLimit',
-      'base_page_limit',
-      'planPageLimit',
-      'plan_page_limit',
+      "basePageLimit",
+      "base_page_limit",
+      "planPageLimit",
+      "plan_page_limit",
     ) ?? 0,
   );
 
@@ -2191,10 +2130,10 @@ function normalizeDashboardPageQuota(
     0,
     readNumber(
       data,
-      'extraPageLimit',
-      'extra_page_limit',
-      'extraPages',
-      'extra_pages',
+      "extraPageLimit",
+      "extra_page_limit",
+      "extraPages",
+      "extra_pages",
     ) ?? 0,
   );
 
@@ -2204,34 +2143,28 @@ function normalizeDashboardPageQuota(
     0,
     readNumber(
       data,
-      'pageLimit',
-      'page_limit',
-      'totalPageLimit',
-      'total_page_limit',
-      'totalPages',
-      'total_pages',
+      "pageLimit",
+      "page_limit",
+      "totalPageLimit",
+      "total_page_limit",
+      "totalPages",
+      "total_pages",
     ) ?? calculatedPageLimit,
   );
 
   const pagesUsed = Math.max(
     0,
-    readNumber(
-      data,
-      'pagesUsed',
-      'pages_used',
-      'usedPages',
-      'used_pages',
-    ) ?? 0,
+    readNumber(data, "pagesUsed", "pages_used", "usedPages", "used_pages") ?? 0,
   );
 
   const calculatedPagesRemaining = Math.max(pageLimit - pagesUsed, 0);
 
   const pagesRemainingFromApi = readNumber(
     data,
-    'pagesRemaining',
-    'pages_remaining',
-    'remainingPages',
-    'remaining_pages',
+    "pagesRemaining",
+    "pages_remaining",
+    "remainingPages",
+    "remaining_pages",
   );
 
   /**
@@ -2251,14 +2184,14 @@ function normalizeDashboardPageQuota(
     readBoolean(
       data,
       pageLimit > 0 && pagesRemaining <= 0,
-      'pageLimitReached',
-      'page_limit_reached',
-      'limitReached',
-      'limit_reached',
+      "pageLimitReached",
+      "page_limit_reached",
+      "limitReached",
+      "limit_reached",
     );
 
   return {
-    ok: readBoolean(root ?? data, true, 'ok', 'success'),
+    ok: readBoolean(root ?? data, true, "ok", "success"),
     planId,
     isAdmin,
     isUnlimited,
@@ -2274,9 +2207,9 @@ function normalizeDashboardPageQuota(
 // ================= HELPERS =================
 
 function base64ToBlob(base64: string, mimeType: string): Blob {
-  const cleanedBase64 = String(base64 || '')
-    .replace(/^data:.*?;base64,/i, '')
-    .replace(/\s/g, '');
+  const cleanedBase64 = String(base64 || "")
+    .replace(/^data:.*?;base64,/i, "")
+    .replace(/\s/g, "");
 
   if (!cleanedBase64) {
     return new Blob([], { type: mimeType });
@@ -2315,17 +2248,19 @@ function downloadBase64File(
   const blob = base64ToBlob(base64, mimeType);
 
   if (blob.size === 0) {
-    console.error('Súbor sa nepodarilo stiahnuť, pretože base64 obsah je prázdny.');
-    alert('Súbor sa nepodarilo stiahnuť, pretože export je prázdny.');
+    console.error(
+      "Súbor sa nepodarilo stiahnuť, pretože base64 obsah je prázdny.",
+    );
+    alert("Súbor sa nepodarilo stiahnuť, pretože export je prázdny.");
     return;
   }
 
   const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
+  const link = document.createElement("a");
 
   link.href = url;
   link.download = fileName;
-  link.rel = 'noopener';
+  link.rel = "noopener";
 
   document.body.appendChild(link);
   link.click();
@@ -2336,10 +2271,9 @@ function downloadBase64File(
   }, 1000);
 }
 
-
 function getFileExtension(fileName: string) {
-  const index = fileName.lastIndexOf('.');
-  if (index === -1) return '';
+  const index = fileName.lastIndexOf(".");
+  if (index === -1) return "";
   return fileName.slice(index).toLowerCase();
 }
 
@@ -2352,9 +2286,9 @@ function createFileId() {
 }
 
 function formatBytes(bytes: number) {
-  if (!bytes) return '0 B';
+  if (!bytes) return "0 B";
 
-  const units = ['B', 'KB', 'MB', 'GB'];
+  const units = ["B", "KB", "MB", "GB"];
   const index = Math.min(
     Math.floor(Math.log(bytes) / Math.log(1024)),
     units.length - 1,
@@ -2373,28 +2307,28 @@ function safeJsonParse<T>(value: string | null): T | null {
   }
 }
 
-type SystemLanguage = 'sk' | 'cs' | 'en' | 'de' | 'pl' | 'hu';
+type SystemLanguage = "sk" | "cs" | "en" | "de" | "pl" | "hu";
 
 function isValidSystemLanguage(value: unknown): value is SystemLanguage {
   return (
-    value === 'sk' ||
-    value === 'cs' ||
-    value === 'en' ||
-    value === 'de' ||
-    value === 'pl' ||
-    value === 'hu'
+    value === "sk" ||
+    value === "cs" ||
+    value === "en" ||
+    value === "de" ||
+    value === "pl" ||
+    value === "hu"
   );
 }
 
 function getStoredSystemLanguage(): SystemLanguage {
-  if (typeof window === 'undefined') return 'sk';
+  if (typeof window === "undefined") return "sk";
 
   const stored =
-    localStorage.getItem('zedpera_language') ||
-    localStorage.getItem('zedpera_system_language') ||
-    'sk';
+    localStorage.getItem("zedpera_language") ||
+    localStorage.getItem("zedpera_system_language") ||
+    "sk";
 
-  return isValidSystemLanguage(stored) ? stored : 'sk';
+  return isValidSystemLanguage(stored) ? stored : "sk";
 }
 
 function withSystemLanguageProfile(
@@ -2419,10 +2353,7 @@ function withSystemLanguageProfile(
     interfaceLanguage: systemLanguage,
 
     // workLanguage NESMIE prepísať jazyk rozhrania
-    workLanguage:
-      profile.workLanguage ||
-      profile.language ||
-      systemLanguage,
+    workLanguage: profile.workLanguage || profile.language || systemLanguage,
   };
 }
 
@@ -2436,136 +2367,134 @@ function prepareProfileForApi(
     ...profile,
     language: profile.language || systemLanguage,
     interfaceLanguage: systemLanguage,
-    workLanguage:
-      profile.workLanguage ||
-      profile.language ||
-      systemLanguage,
+    workLanguage: profile.workLanguage || profile.language || systemLanguage,
   };
 }
 
 function persistSystemLanguage(systemLanguage: SystemLanguage) {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
 
-  localStorage.setItem('zedpera_language', systemLanguage);
-  localStorage.setItem('zedpera_system_language', systemLanguage);
-  
+  localStorage.setItem("zedpera_language", systemLanguage);
+  localStorage.setItem("zedpera_system_language", systemLanguage);
 
   document.documentElement.lang = systemLanguage;
-  document.documentElement.setAttribute('data-language', systemLanguage);
-  document.documentElement.setAttribute('data-system-language', systemLanguage);
-  document.documentElement.setAttribute('data-work-language', systemLanguage);
+  document.documentElement.setAttribute("data-language", systemLanguage);
+  document.documentElement.setAttribute("data-system-language", systemLanguage);
+  document.documentElement.setAttribute("data-work-language", systemLanguage);
 }
 
 function normalizeProfile(raw: any): SavedProfile | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== "object") return null;
 
-  if (raw.profile && typeof raw.profile === 'object') {
+  if (raw.profile && typeof raw.profile === "object") {
     return {
-  ...raw.profile,
-  schema: raw.schema || raw.profile.schema,
-  language: raw.language || raw.profile.language,
-  interfaceLanguage: raw.interfaceLanguage || raw.profile.interfaceLanguage,
-  workLanguage: raw.workLanguage || raw.profile.workLanguage,
-  savedAt: raw.savedAt || raw.generatedAt || raw.profile.savedAt,
-};
+      ...raw.profile,
+      schema: raw.schema || raw.profile.schema,
+      language: raw.language || raw.profile.language,
+      interfaceLanguage: raw.interfaceLanguage || raw.profile.interfaceLanguage,
+      workLanguage: raw.workLanguage || raw.profile.workLanguage,
+      savedAt: raw.savedAt || raw.generatedAt || raw.profile.savedAt,
+    };
   }
 
   return raw as SavedProfile;
 }
 
 function fixEncodingArtifacts(text: string) {
-  return String(text || '')
-    .replace(/\uFFFD/g, '')
-    .replace(/Â/g, '')
-    .replace(/Ã¡/g, 'á')
-    .replace(/Ã¤/g, 'ä')
-    .replace(/Ã©/g, 'é')
-    .replace(/Ã­/g, 'í')
-    .replace(/Ã³/g, 'ó')
-    .replace(/Ãº/g, 'ú')
-    .replace(/Ã½/g, 'ý')
-    .replace(/Ã´/g, 'ô')
-    .replace(/Ã„/g, 'Ä')
-    .replace(/Ã‰/g, 'É')
-    .replace(/Ã/g, 'Á')
-    .replace(/Ä/g, 'č')
-    .replace(/Ä/g, 'ď')
-    .replace(/Ä¾/g, 'ľ')
-    .replace(/Ä˝/g, 'Ľ')
-    .replace(/Äº/g, 'ĺ')
-    .replace(/Å¡/g, 'š')
-    .replace(/Å /g, 'Š')
-    .replace(/Å¾/g, 'ž')
-    .replace(/Å½/g, 'Ž')
-    .replace(/Å¥/g, 'ť')
-    .replace(/Å¤/g, 'Ť')
-    .replace(/Åˆ/g, 'ň')
-    .replace(/Å‡/g, 'Ň')
-    .replace(/Å•/g, 'ŕ')
-    .replace(/Å”/g, 'Ŕ')
-    .replace(/Å/g, '')
+  return String(text || "")
+    .replace(/\uFFFD/g, "")
+    .replace(/Â/g, "")
+    .replace(/Ã¡/g, "á")
+    .replace(/Ã¤/g, "ä")
+    .replace(/Ã©/g, "é")
+    .replace(/Ã­/g, "í")
+    .replace(/Ã³/g, "ó")
+    .replace(/Ãº/g, "ú")
+    .replace(/Ã½/g, "ý")
+    .replace(/Ã´/g, "ô")
+    .replace(/Ã„/g, "Ä")
+    .replace(/Ã‰/g, "É")
+    .replace(/Ã/g, "Á")
+    .replace(/Ä/g, "č")
+    .replace(/Ä/g, "ď")
+    .replace(/Ä¾/g, "ľ")
+    .replace(/Ä˝/g, "Ľ")
+    .replace(/Äº/g, "ĺ")
+    .replace(/Å¡/g, "š")
+    .replace(/Å /g, "Š")
+    .replace(/Å¾/g, "ž")
+    .replace(/Å½/g, "Ž")
+    .replace(/Å¥/g, "ť")
+    .replace(/Å¤/g, "Ť")
+    .replace(/Åˆ/g, "ň")
+    .replace(/Å‡/g, "Ň")
+    .replace(/Å•/g, "ŕ")
+    .replace(/Å”/g, "Ŕ")
+    .replace(/Å/g, "")
     .replace(/â€™/g, "'")
     .replace(/â€˜/g, "'")
     .replace(/â€œ/g, '"')
     .replace(/â€/g, '"')
-    .replace(/â€“/g, '–')
-    .replace(/â€”/g, '—')
-    .replace(/â€¦/g, '...')
-    .replace(/â€˘/g, '•')
-    .replace(/ðŸ“„/g, '')
-    .replace(/ðŸ“Š/g, '')
-    .replace(/ðŸ“š/g, '')
-    .replace(/ðŸ¤–/g, '')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+    .replace(/â€“/g, "–")
+    .replace(/â€”/g, "—")
+    .replace(/â€¦/g, "...")
+    .replace(/â€˘/g, "•")
+    .replace(/ðŸ“„/g, "")
+    .replace(/ðŸ“Š/g, "")
+    .replace(/ðŸ“š/g, "")
+    .replace(/ðŸ¤–/g, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
 }
 
 function removeBadGeneratedPrefix(text: string) {
-  return String(text || '')
-    .replace(/^\s*AI\s+vedúci\s+práce\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*AI\s+vedúci\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*AI\s+veduci\s+prace\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*AI\s+veduci\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Ako\s+AI\s+vedúci\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Ako\s+AI\s+veduci\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Výstup\s+nebude\s+začínať\s+textom\s+AI\s*Vedúci\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Toto\s+je\s+systémová\s+informácia\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Systémová\s+inštrukcia\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Interná\s+poznámka\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Audit\s+kvality\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Obhajoba\s*[-–—:]*\s*/i, '')
-    .replace(/^\s*Výstup\s*[-–—:]*\s*/i, '')
+  return String(text || "")
+    .replace(/^\s*AI\s+vedúci\s+práce\s*[-–—:]*\s*/i, "")
+    .replace(/^\s*AI\s+vedúci\s*[-–—:]*\s*/i, "")
+    .replace(/^\s*AI\s+veduci\s+prace\s*[-–—:]*\s*/i, "")
+    .replace(/^\s*AI\s+veduci\s*[-–—:]*\s*/i, "")
+    .replace(/^\s*Ako\s+AI\s+vedúci\s*[-–—:]*\s*/i, "")
+    .replace(/^\s*Ako\s+AI\s+veduci\s*[-–—:]*\s*/i, "")
+    .replace(
+      /^\s*Výstup\s+nebude\s+začínať\s+textom\s+AI\s*Vedúci\s*[-–—:]*\s*/i,
+      "",
+    )
+    .replace(/^\s*Toto\s+je\s+systémová\s+informácia\s*[-–—:]*\s*/i, "")
+    .replace(/^\s*Systémová\s+inštrukcia\s*[-–—:]*\s*/i, "")
+    .replace(/^\s*Interná\s+poznámka\s*[-–—:]*\s*/i, "")
+    .replace(/^\s*Audit\s+kvality\s*[-–—:]*\s*/i, "")
+    .replace(/^\s*Obhajoba\s*[-–—:]*\s*/i, "")
+    .replace(/^\s*Výstup\s*[-–—:]*\s*/i, "")
     .replace(
       /^\s*Prezentácia\s*[-–—:]*\s*(?=Názov práce|Cieľ práce|Úvod|Slide|Snímka)/i,
-      '',
+      "",
     );
-
 }
 
 function cleanAiOutput(text: string) {
-  return fixEncodingArtifacts(String(text || ''))
-    .replace(/\uFEFF/g, '')
-    .replace(/\u200B/g, '')
-    .replace(/\u200C/g, '')
-    .replace(/\u200D/g, '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/\*(.*?)\*/g, '$1')
-    .replace(/__(.*?)__/g, '$1')
-    .replace(/_(.*?)_/g, '$1')
-    .replace(/```[a-zA-Z]*\n?/g, '')
-    .replace(/```/g, '')
-    .replace(/^\s*[-*_]{3,}\s*$/gm, '')
+  return fixEncodingArtifacts(String(text || ""))
+    .replace(/\uFEFF/g, "")
+    .replace(/\u200B/g, "")
+    .replace(/\u200C/g, "")
+    .replace(/\u200D/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\*(.*?)\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/_(.*?)_/g, "$1")
+    .replace(/```[a-zA-Z]*\n?/g, "")
+    .replace(/```/g, "")
+    .replace(/^\s*[-*_]{3,}\s*$/gm, "")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
-    .replace(/\n{4,}/g, '\n\n\n')
+    .replace(/\n{4,}/g, "\n\n\n")
     .trim();
 }
 
 function cleanFinalOutput(text: string) {
   return removeBadGeneratedPrefix(cleanAiOutput(text))
-    .replace(/\n\s*\n\s*\n/g, '\n\n')
+    .replace(/\n\s*\n\s*\n/g, "\n\n")
     .trim();
 }
 
@@ -2576,82 +2505,82 @@ function stripModuleExtraSections(text: string, moduleKey: ModuleKey) {
 
   // Spoločné čistenie pre všetky moduly
   cleaned = cleaned
-    .replace(/\n*\s*Interná poznámka\s*:?[\s\S]*$/i, '')
-    .replace(/\n*\s*Systémová inštrukcia\s*:?[\s\S]*$/i, '')
-    .replace(/\n*\s*Toto je systémová informácia\s*:?[\s\S]*$/i, '')
-    .replace(/\bprimárny zdroj\b/gi, '')
-    .replace(/\bsekundárny zdroj\b/gi, '')
-    .replace(/\binterný zdroj\b/gi, '')
-    .replace(/\banalyzovaný zdroj\b/gi, '')
-    .replace(/\bpodľa nahratého súboru\b/gi, '')
-    .replace(/\bpodľa prílohy\b/gi, '')
-    .replace(/\bpoužívateľ nahral súbor\b/gi, '')
-    .replace(/\bdokument obsahuje\b/gi, '')
-    .replace(/\bprompt\b/gi, '')
-    .replace(/\bmodel\b/gi, '')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\n*\s*Interná poznámka\s*:?[\s\S]*$/i, "")
+    .replace(/\n*\s*Systémová inštrukcia\s*:?[\s\S]*$/i, "")
+    .replace(/\n*\s*Toto je systémová informácia\s*:?[\s\S]*$/i, "")
+    .replace(/\bprimárny zdroj\b/gi, "")
+    .replace(/\bsekundárny zdroj\b/gi, "")
+    .replace(/\binterný zdroj\b/gi, "")
+    .replace(/\banalyzovaný zdroj\b/gi, "")
+    .replace(/\bpodľa nahratého súboru\b/gi, "")
+    .replace(/\bpodľa prílohy\b/gi, "")
+    .replace(/\bpoužívateľ nahral súbor\b/gi, "")
+    .replace(/\bdokument obsahuje\b/gi, "")
+    .replace(/\bprompt\b/gi, "")
+    .replace(/\bmodel\b/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 
   // AI vedúci, Audit kvality, Obhajoba
-  if (['supervisor', 'quality', 'audit', 'defense'].includes(moduleName)) {
+  if (["supervisor", "quality", "audit", "defense"].includes(moduleName)) {
     cleaned = cleaned
-      .replace(/^\s*AI\s+vedúci\s*[-–—:]*\s*/i, '')
-      .replace(/^\s*AI\s+veduci\s*[-–—:]*\s*/i, '')
-      .replace(/^\s*Ako\s+AI\s+vedúci\s*[-–—:]*\s*/i, '')
-      .replace(/^\s*Ako\s+AI\s+veduci\s*[-–—:]*\s*/i, '')
-      .replace(/^\s*Audit\s+kvality\s*[-–—:]*\s*/i, '')
-      .replace(/^\s*Obhajoba\s*[-–—:]*\s*/i, '')
-      .replace(/^\s*Výstup\s*[-–—:]*\s*/i, '')
-      .replace(/^\s*Výsledok\s*[-–—:]*\s*/i, '')
-      .replace(/^\s*Tu je výstup\s*[-–—:]*\s*/i, '')
-      .replace(/^\s*Tu je výsledok\s*[-–—:]*\s*/i, '')
-      .replace(/[ \t]{2,}/g, ' ')
-      .replace(/\n{3,}/g, '\n\n')
+      .replace(/^\s*AI\s+vedúci\s*[-–—:]*\s*/i, "")
+      .replace(/^\s*AI\s+veduci\s*[-–—:]*\s*/i, "")
+      .replace(/^\s*Ako\s+AI\s+vedúci\s*[-–—:]*\s*/i, "")
+      .replace(/^\s*Ako\s+AI\s+veduci\s*[-–—:]*\s*/i, "")
+      .replace(/^\s*Audit\s+kvality\s*[-–—:]*\s*/i, "")
+      .replace(/^\s*Obhajoba\s*[-–—:]*\s*/i, "")
+      .replace(/^\s*Výstup\s*[-–—:]*\s*/i, "")
+      .replace(/^\s*Výsledok\s*[-–—:]*\s*/i, "")
+      .replace(/^\s*Tu je výstup\s*[-–—:]*\s*/i, "")
+      .replace(/^\s*Tu je výsledok\s*[-–—:]*\s*/i, "")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
       .trim();
 
     return cleaned;
   }
 
   // Preklad
-  if (moduleName === 'translation') {
+  if (moduleName === "translation") {
     cleaned = cleaned
-      .replace(/\n*\s*={2,}\s*ANAL[ÝY]ZA\s*={2,}[\s\S]*$/i, '')
-      .replace(/\n*\s*={2,}\s*SK[ÓO]RE\s*={2,}[\s\S]*$/i, '')
-      .replace(/\n*\s*={2,}\s*ODPOR[ÚU]ČANIE\s*={2,}[\s\S]*$/i, '')
-      .replace(/\n*\s*ANAL[ÝY]ZA\s*:?[\s\S]*$/i, '')
-      .replace(/\n*\s*SK[ÓO]RE\s*:?[\s\S]*$/i, '')
-      .replace(/\n*\s*ODPOR[ÚU]ČANIE\s*:?[\s\S]*$/i, '')
-      .replace(/\n*\s*Koment[áa]r\s*:?[\s\S]*$/i, '')
-      .replace(/\n*\s*Vysvetlenie\s*:?[\s\S]*$/i, '')
-      .replace(/^\s*Preložený text\s*[:\-–—]*\s*/i, '')
-      .replace(/^\s*Preklad\s*[:\-–—]*\s*/i, '')
-      .replace(/^\s*Tu je preklad\s*[:\-–—]*\s*/i, '')
-      .replace(/^\s*Výsledok prekladu\s*[:\-–—]*\s*/i, '')
-      .replace(/[ \t]{2,}/g, ' ')
-      .replace(/\n{3,}/g, '\n\n')
+      .replace(/\n*\s*={2,}\s*ANAL[ÝY]ZA\s*={2,}[\s\S]*$/i, "")
+      .replace(/\n*\s*={2,}\s*SK[ÓO]RE\s*={2,}[\s\S]*$/i, "")
+      .replace(/\n*\s*={2,}\s*ODPOR[ÚU]ČANIE\s*={2,}[\s\S]*$/i, "")
+      .replace(/\n*\s*ANAL[ÝY]ZA\s*:?[\s\S]*$/i, "")
+      .replace(/\n*\s*SK[ÓO]RE\s*:?[\s\S]*$/i, "")
+      .replace(/\n*\s*ODPOR[ÚU]ČANIE\s*:?[\s\S]*$/i, "")
+      .replace(/\n*\s*Koment[áa]r\s*:?[\s\S]*$/i, "")
+      .replace(/\n*\s*Vysvetlenie\s*:?[\s\S]*$/i, "")
+      .replace(/^\s*Preložený text\s*[:\-–—]*\s*/i, "")
+      .replace(/^\s*Preklad\s*[:\-–—]*\s*/i, "")
+      .replace(/^\s*Tu je preklad\s*[:\-–—]*\s*/i, "")
+      .replace(/^\s*Výsledok prekladu\s*[:\-–—]*\s*/i, "")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
       .trim();
 
     return cleaned;
   }
 
   // Emailový modul
-  if (moduleName === 'emails') {
+  if (moduleName === "emails") {
     cleaned = cleaned
-      .replace(/\n*\s*={2,}\s*ANAL[ÝY]ZA\s*={2,}[\s\S]*$/i, '')
-      .replace(/\n*\s*={2,}\s*SK[ÓO]RE\s*={2,}[\s\S]*$/i, '')
-      .replace(/\n*\s*={2,}\s*ODPOR[ÚU]ČANIE\s*={2,}[\s\S]*$/i, '')
-      .replace(/\n*\s*ANAL[ÝY]ZA\s*:?[\s\S]*$/i, '')
-      .replace(/\n*\s*SK[ÓO]RE\s*:?[\s\S]*$/i, '')
-      .replace(/\n*\s*ODPOR[ÚU]ČANIE\s*:?[\s\S]*$/i, '')
-      .replace(/\n*\s*Koment[áa]r\s*:?[\s\S]*$/i, '')
-      .replace(/\n*\s*Vysvetlenie\s*:?[\s\S]*$/i, '')
-      .replace(/^\s*Vytvorený email\s*[:\-–—]*\s*/i, '')
-      .replace(/^\s*Email\s*[:\-–—]*\s*/i, '')
-      .replace(/^\s*Tu je profesionálny email\s*[:\-–—]*\s*/i, '')
-      .replace(/^\s*Tu je návrh emailu\s*[:\-–—]*\s*/i, '')
-      .replace(/[ \t]{2,}/g, ' ')
-      .replace(/\n{3,}/g, '\n\n')
+      .replace(/\n*\s*={2,}\s*ANAL[ÝY]ZA\s*={2,}[\s\S]*$/i, "")
+      .replace(/\n*\s*={2,}\s*SK[ÓO]RE\s*={2,}[\s\S]*$/i, "")
+      .replace(/\n*\s*={2,}\s*ODPOR[ÚU]ČANIE\s*={2,}[\s\S]*$/i, "")
+      .replace(/\n*\s*ANAL[ÝY]ZA\s*:?[\s\S]*$/i, "")
+      .replace(/\n*\s*SK[ÓO]RE\s*:?[\s\S]*$/i, "")
+      .replace(/\n*\s*ODPOR[ÚU]ČANIE\s*:?[\s\S]*$/i, "")
+      .replace(/\n*\s*Koment[áa]r\s*:?[\s\S]*$/i, "")
+      .replace(/\n*\s*Vysvetlenie\s*:?[\s\S]*$/i, "")
+      .replace(/^\s*Vytvorený email\s*[:\-–—]*\s*/i, "")
+      .replace(/^\s*Email\s*[:\-–—]*\s*/i, "")
+      .replace(/^\s*Tu je profesionálny email\s*[:\-–—]*\s*/i, "")
+      .replace(/^\s*Tu je návrh emailu\s*[:\-–—]*\s*/i, "")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
       .trim();
 
     const subjectIndex = cleaned.search(/(^|\n)\s*Predmet\s*:/i);
@@ -2669,32 +2598,32 @@ function stripModuleExtraSections(text: string, moduleKey: ModuleKey) {
 function sanitizeFileName(value: string) {
   return (
     value
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9-_]+/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '')
-      .toLowerCase() || 'zedpera-vystup'
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9-_]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .toLowerCase() || "zedpera-vystup"
   );
 }
 
 function htmlEscape(value: string) {
-  return String(value || '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function createDocHtml(title: string, text: string) {
   const paragraphs = cleanFinalOutput(text)
-    .split('\n')
+    .split("\n")
     .map((line) => {
-      if (!line.trim()) return '<p>&nbsp;</p>';
+      if (!line.trim()) return "<p>&nbsp;</p>";
       return `<p>${htmlEscape(line)}</p>`;
     })
-    .join('');
+    .join("");
 
   return `
 <!doctype html>
@@ -2733,12 +2662,12 @@ function splitTextToSlides(text: string): SlideContent[] {
   if (!cleaned.trim()) return [];
 
   const lines = cleaned
-    .split('\n')
+    .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
 
   const slides: SlideContent[] = [];
-  let currentTitle = '';
+  let currentTitle = "";
   let currentBody: string[] = [];
 
   for (const line of lines) {
@@ -2751,7 +2680,7 @@ function splitTextToSlides(text: string): SlideContent[] {
     if (isSlideTitle) {
       if (currentTitle || currentBody.length) {
         slides.push({
-          title: currentTitle || 'Snímka',
+          title: currentTitle || "Snímka",
           body: currentBody,
         });
       }
@@ -2765,7 +2694,7 @@ function splitTextToSlides(text: string): SlideContent[] {
 
   if (currentTitle || currentBody.length) {
     slides.push({
-      title: currentTitle || 'Prezentácia',
+      title: currentTitle || "Prezentácia",
       body: currentBody,
     });
   }
@@ -2773,7 +2702,7 @@ function splitTextToSlides(text: string): SlideContent[] {
   if (slides.length === 0) {
     return [
       {
-        title: 'Prezentácia',
+        title: "Prezentácia",
         body: lines,
       },
     ];
@@ -2783,7 +2712,7 @@ function splitTextToSlides(text: string): SlideContent[] {
 }
 
 function splitLongTextLine(line: string, maxLength = 180) {
-  const value = String(line || '').trim();
+  const value = String(line || "").trim();
 
   if (value.length <= maxLength) return [value];
 
@@ -2791,7 +2720,7 @@ function splitLongTextLine(line: string, maxLength = 180) {
   let rest = value;
 
   while (rest.length > maxLength) {
-    let cutIndex = rest.lastIndexOf(' ', maxLength);
+    let cutIndex = rest.lastIndexOf(" ", maxLength);
 
     if (cutIndex < 80) {
       cutIndex = maxLength;
@@ -2843,7 +2772,7 @@ function downloadBlob({
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
 
-  const link = document.createElement('a');
+  const link = document.createElement("a");
   link.href = url;
   link.download = fileName;
   document.body.appendChild(link);
@@ -2854,33 +2783,30 @@ function downloadBlob({
 }
 
 function getWorkType(profile: SavedProfile | null) {
-  return profile?.type || profile?.schema?.label || 'Neuvedené';
+  return profile?.type || profile?.schema?.label || "Neuvedené";
 }
-
 
 function getExpertise(profile: SavedProfile | null) {
   return (
     profile?.expertise ||
     profile?.workExpertise ||
     profile?.specializationLevel ||
-    'Neuvedené'
+    "Neuvedené"
   );
 }
 function getCitationStyle(profile: SavedProfile | null) {
-  return profile?.citation || 'ISO 690';
+  return profile?.citation || "ISO 690";
 }
 
 function getWorkLanguage(profile: SavedProfile | null) {
   return (
-    profile?.workLanguage ||
-    profile?.language ||
-    getStoredSystemLanguage()
+    profile?.workLanguage || profile?.language || getStoredSystemLanguage()
   );
 }
 
 function buildProfileBlock(profile: SavedProfile | null) {
   if (!profile) {
-    return 'Profil práce nebol vybraný.';
+    return "Profil práce nebol vybraný.";
   }
 
   const keywords =
@@ -2889,45 +2815,45 @@ function buildProfileBlock(profile: SavedProfile | null) {
       : profile.keywords || [];
 
   return `
-Názov práce: ${profile.title || 'Neuvedené'}
-Téma práce: ${profile.topic || 'Neuvedené'}
+Názov práce: ${profile.title || "Neuvedené"}
+Téma práce: ${profile.topic || "Neuvedené"}
 Typ práce: ${getWorkType(profile)}
 Odbornosť výstupu: ${getExpertise(profile)}
-Odbor: ${profile.field || 'Neuvedené'}
-Vedúci práce: ${profile.supervisor || 'Neuvedené'}
+Odbor: ${profile.field || "Neuvedené"}
+Vedúci práce: ${profile.supervisor || "Neuvedené"}
 Citačná norma: ${getCitationStyle(profile)}
 Jazyk práce: ${getWorkLanguage(profile)}
-Cieľ práce: ${profile.goal || 'Neuvedené'}
-Výskumný problém: ${profile.problem || 'Neuvedené'}
-Metodológia: ${profile.methodology || 'Neuvedené'}
-Výskumné otázky: ${profile.researchQuestions || 'Neuvedené'}
-Hypotézy: ${profile.hypotheses || 'Neuvedené'}
-Praktická časť: ${profile.practicalPart || 'Neuvedené'}
-Vedecký prínos: ${profile.scientificContribution || 'Neuvedené'}
-Požiadavky na zdroje: ${profile.sourcesRequirement || 'Neuvedené'}
-Kľúčové slová: ${keywords.length ? keywords.join(', ') : 'Neuvedené'}
+Cieľ práce: ${profile.goal || "Neuvedené"}
+Výskumný problém: ${profile.problem || "Neuvedené"}
+Metodológia: ${profile.methodology || "Neuvedené"}
+Výskumné otázky: ${profile.researchQuestions || "Neuvedené"}
+Hypotézy: ${profile.hypotheses || "Neuvedené"}
+Praktická časť: ${profile.practicalPart || "Neuvedené"}
+Vedecký prínos: ${profile.scientificContribution || "Neuvedené"}
+Požiadavky na zdroje: ${profile.sourcesRequirement || "Neuvedené"}
+Kľúčové slová: ${keywords.length ? keywords.join(", ") : "Neuvedené"}
 `.trim();
 }
 
 function buildAttachmentBlock(files: AttachedFile[]) {
   if (!files.length) {
-    return 'Používateľ nepriložil žiadne súbory.';
+    return "Používateľ nepriložil žiadne súbory.";
   }
 
   return files
     .map((file, index) => {
-      return `${index + 1}. ${file.name} (${file.type || 'neznámy typ'}, ${formatBytes(
+      return `${index + 1}. ${file.name} (${file.type || "neznámy typ"}, ${formatBytes(
         file.size,
       )})`;
     })
-    .join('\n');
+    .join("\n");
 }
 
 async function readApiErrorResponse(res: Response) {
-  const contentType = res.headers.get('content-type') || '';
+  const contentType = res.headers.get("content-type") || "";
 
   try {
-    if (contentType.includes('application/json')) {
+    if (contentType.includes("application/json")) {
       const data = await res.json();
 
       return String(
@@ -2945,9 +2871,9 @@ async function readApiErrorResponse(res: Response) {
     if (!cleaned) return `API error ${res.status}`;
 
     if (
-      cleaned.startsWith('<!DOCTYPE') ||
-      cleaned.startsWith('<html') ||
-      cleaned.includes('__next_error__')
+      cleaned.startsWith("<!DOCTYPE") ||
+      cleaned.startsWith("<html") ||
+      cleaned.includes("__next_error__")
     ) {
       return `Server vrátil chybu ${res.status}. Detail pozri v termináli.`;
     }
@@ -2961,9 +2887,9 @@ async function readApiErrorResponse(res: Response) {
 async function readDashboardApiError(
   response: Response,
 ): Promise<DashboardApiError> {
-  const contentType = response.headers.get('content-type') || '';
+  const contentType = response.headers.get("content-type") || "";
 
-  if (contentType.includes('application/json')) {
+  if (contentType.includes("application/json")) {
     const data = await response.json().catch(() => null);
 
     return new DashboardApiError({
@@ -2981,9 +2907,7 @@ async function readDashboardApiError(
             ? String(data.details)
             : undefined,
       purchaseUrl:
-        data?.purchaseUrl !== undefined
-          ? String(data.purchaseUrl)
-          : undefined,
+        data?.purchaseUrl !== undefined ? String(data.purchaseUrl) : undefined,
     });
   }
 
@@ -3002,10 +2926,10 @@ function getTodayStart() {
 
 function getTodaySkDate() {
   const today = new Date();
-  return today.toLocaleDateString('sk-SK', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
+  return today.toLocaleDateString("sk-SK", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
   });
 }
 
@@ -3019,7 +2943,7 @@ function normalizeYear(year: string) {
 }
 
 function extractDatesFromText(text: string) {
-  const value = String(text || '');
+  const value = String(text || "");
   const dates: Date[] = [];
 
   const dotRegex = /\b(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{2,4})\b/g;
@@ -3073,17 +2997,17 @@ function validatePlanningDatesNoPast(text: string) {
   if (pastDates.length === 0) {
     return {
       ok: true,
-      message: '',
+      message: "",
     };
   }
 
   const uniquePastDates = Array.from(
     new Set(
       pastDates.map((date) =>
-        date.toLocaleDateString('sk-SK', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
+        date.toLocaleDateString("sk-SK", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
         }),
       ),
     ),
@@ -3092,7 +3016,7 @@ function validatePlanningDatesNoPast(text: string) {
   return {
     ok: false,
     message: `Plánovanie nemôže obsahovať dátum v minulosti. Dnes je ${getTodaySkDate()}. Uprav tieto dátumy: ${uniquePastDates.join(
-      ', ',
+      ", ",
     )}.`,
   };
 }
@@ -3100,11 +3024,10 @@ function validatePlanningDatesNoPast(text: string) {
 function createTextFileFromInput(text: string) {
   const cleaned = cleanFinalOutput(text);
 
-  return new File([cleaned], 'vlozene-data-alebo-vysledky.txt', {
-    type: 'text/plain;charset=utf-8',
+  return new File([cleaned], "vlozene-data-alebo-vysledky.txt", {
+    type: "text/plain;charset=utf-8",
   });
 }
-
 
 function createAnalysisSummary({
   variablesCount,
@@ -3123,239 +3046,227 @@ function createAnalysisSummary({
     `Vytvorených frekvenčných tabuliek: ${frequenciesCount}.`,
     warningsCount > 0
       ? `Počas spracovania vzniklo ${warningsCount} upozornení.`
-      : 'Spracovanie prebehlo bez zásadných upozornení.',
-  ].join('\n');
+      : "Spracovanie prebehlo bez zásadných upozornení.",
+  ].join("\n");
 }
 
 function createAnalysisOutputText(data: AnalysisResult) {
   const warningItems = Array.isArray(data.warnings)
-  ? data.warnings.map((item) => {
-      if (typeof item === 'string') return item;
+    ? data.warnings.map((item) => {
+        if (typeof item === "string") return item;
 
-      if (item && typeof item === 'object') {
-        const record = item as Record<string, unknown>;
+        if (item && typeof item === "object") {
+          const record = item as Record<string, unknown>;
 
-        return String(
-          record.message ||
-            record.text ||
-            record.warning ||
-            record.title ||
-            JSON.stringify(record),
-        );
-      }
+          return String(
+            record.message ||
+              record.text ||
+              record.warning ||
+              record.title ||
+              JSON.stringify(record),
+          );
+        }
 
-      return String(item);
-    })
-  : typeof data.warnings === 'string' && data.warnings.trim()
-    ? [data.warnings.trim()]
-    : [];
+        return String(item);
+      })
+    : typeof data.warnings === "string" && data.warnings.trim()
+      ? [data.warnings.trim()]
+      : [];
 
-const warningsBlock =
-  warningItems.length > 0
-    ? `Upozornenia:\n${warningItems.map((item) => `- ${item}`).join('\n')}`
-    : '';
+  const warningsBlock =
+    warningItems.length > 0
+      ? `Upozornenia:\n${warningItems.map((item) => `- ${item}`).join("\n")}`
+      : "";
 
   const variablesBlock =
     data.variables && data.variables.length > 0
       ? `Identifikované premenné:\n${data.variables
           .map((item: any) => {
-            const name = item.name || item.variable || 'Premenná';
-            const valid = item.valid ?? 'neuvedené';
-            const mean = item.mean ?? 'neuvedené';
-            const sd = item.stdDeviation ?? item.std ?? 'neuvedené';
+            const name = item.name || item.variable || "Premenná";
+            const valid = item.valid ?? "neuvedené";
+            const mean = item.mean ?? "neuvedené";
+            const sd = item.stdDeviation ?? item.std ?? "neuvedené";
 
             return `- ${name}: validné hodnoty ${valid}, priemer ${mean}, SD ${sd}`;
           })
-          .join('\n')}`
-      : '';
+          .join("\n")}`
+      : "";
 
+  const descriptiveStatisticsItems = Array.isArray(data.descriptiveStatistics)
+    ? data.descriptiveStatistics
+    : Array.isArray((data as any).descriptives)
+      ? (data as any).descriptives
+      : Array.isArray((data as any).statistics)
+        ? (data as any).statistics
+        : [];
 
-const descriptiveStatisticsItems = Array.isArray(data.descriptiveStatistics)
-  ? data.descriptiveStatistics
-  : Array.isArray((data as any).descriptives)
-    ? (data as any).descriptives
-    : Array.isArray((data as any).statistics)
-      ? (data as any).statistics
-      : [];
+  const descriptiveBlock =
+    descriptiveStatisticsItems.length > 0
+      ? `Deskriptívna štatistika:\n${descriptiveStatisticsItems
+          .map((item: unknown) => {
+            if (!item || typeof item !== "object") {
+              return `- ${String(item)}`;
+            }
 
-const descriptiveBlock =
-  descriptiveStatisticsItems.length > 0
-    ? `Deskriptívna štatistika:\n${descriptiveStatisticsItems
-        .map((item: unknown) => {
-          if (!item || typeof item !== 'object') {
-            return `- ${String(item)}`;
-          }
+            const record = item as Record<string, unknown>;
 
-          const record = item as Record<string, unknown>;
+            const name =
+              record.name ||
+              record.variable ||
+              record.premenna ||
+              record.label ||
+              "Premenná";
 
-          const name =
-            record.name ||
-            record.variable ||
-            record.premenna ||
-            record.label ||
-            'Premenná';
+            const mean =
+              record.mean ??
+              record.priemer ??
+              record.M ??
+              record.average ??
+              "—";
 
-          const mean =
-            record.mean ??
-            record.priemer ??
-            record.M ??
-            record.average ??
-            '—';
+            const sd =
+              record.sd ??
+              record.standardDeviation ??
+              record.stdDeviation ??
+              record.SD ??
+              "—";
 
-          const sd =
-            record.sd ??
-            record.standardDeviation ??
-            record.stdDeviation ??
-            record.SD ??
-            '—';
+            const n =
+              record.n ?? record.N ?? record.valid ?? record.validN ?? "—";
 
-          const n =
-            record.n ??
-            record.N ??
-            record.valid ??
-            record.validN ??
-            '—';
+            return `- ${String(name)}: N=${String(n)}, M=${String(mean)}, SD=${String(sd)}`;
+          })
+          .join("\n")}`
+      : "";
 
-          return `- ${String(name)}: N=${String(n)}, M=${String(mean)}, SD=${String(sd)}`;
-        })
-        .join('\n')}`
-    : '';
+  const hypothesisTestItems = Array.isArray(data.hypothesisTests)
+    ? data.hypothesisTests
+    : Array.isArray((data as any).hypothesis_tests)
+      ? (data as any).hypothesis_tests
+      : Array.isArray((data as any).statisticalTests)
+        ? (data as any).statisticalTests
+        : Array.isArray((data as any).statistical_tests)
+          ? (data as any).statistical_tests
+          : Array.isArray((data as any).testResults)
+            ? (data as any).testResults
+            : Array.isArray((data as any).tTests)
+              ? (data as any).tTests
+              : [];
 
+  const hypothesisTestsBlock =
+    hypothesisTestItems.length > 0
+      ? `Výsledky štatistických testov:\n${hypothesisTestItems
+          .map((item: unknown) => {
+            if (!item || typeof item !== "object") {
+              return `- ${String(item)}`;
+            }
 
-const hypothesisTestItems = Array.isArray(data.hypothesisTests)
-  ? data.hypothesisTests
-  : Array.isArray((data as any).hypothesis_tests)
-    ? (data as any).hypothesis_tests
-    : Array.isArray((data as any).statisticalTests)
-      ? (data as any).statisticalTests
-      : Array.isArray((data as any).statistical_tests)
-        ? (data as any).statistical_tests
-        : Array.isArray((data as any).testResults)
-          ? (data as any).testResults
-          : Array.isArray((data as any).tTests)
-            ? (data as any).tTests
-            : [];
+            const record = item as Record<string, unknown>;
 
-const hypothesisTestsBlock =
-  hypothesisTestItems.length > 0
-    ? `Výsledky štatistických testov:\n${hypothesisTestItems
-        .map((item: unknown) => {
-          if (!item || typeof item !== 'object') {
-            return `- ${String(item)}`;
-          }
+            const test =
+              record.test ||
+              record.testType ||
+              record.name ||
+              record.title ||
+              "Štatistický test";
 
-          const record = item as Record<string, unknown>;
+            const p = record.p ?? record.pValue ?? record.p_hodnota ?? "—";
 
-          const test =
-            record.test ||
-            record.testType ||
-            record.name ||
-            record.title ||
-            'Štatistický test';
+            const statistic =
+              record.statistic ??
+              record.t ??
+              record.f ??
+              record.u ??
+              record.h ??
+              "";
 
-          const p =
-            record.p ??
-            record.pValue ??
-            record.p_hodnota ??
-            '—';
+            const result =
+              record.result ||
+              record.interpretation ||
+              record.description ||
+              record.recommendation ||
+              "";
 
-          const statistic =
-            record.statistic ??
-            record.t ??
-            record.f ??
-            record.u ??
-            record.h ??
-            '';
+            const statisticText =
+              statistic !== null &&
+              statistic !== undefined &&
+              String(statistic) !== ""
+                ? `, štatistika=${String(statistic)}`
+                : "";
 
-          const result =
-            record.result ||
-            record.interpretation ||
-            record.description ||
-            record.recommendation ||
-            '';
+            const resultText = result ? `, ${String(result)}` : "";
 
-          const statisticText =
-            statistic !== null && statistic !== undefined && String(statistic) !== ''
-              ? `, štatistika=${String(statistic)}`
-              : '';
-
-          const resultText = result ? `, ${String(result)}` : '';
-
-          return `- ${String(test)}: p=${String(p)}${statisticText}${resultText}`;
-        })
-        .join('\n')}`
-    : '';
-
+            return `- ${String(test)}: p=${String(p)}${statisticText}${resultText}`;
+          })
+          .join("\n")}`
+      : "";
 
   const chartsBlock =
     data.recommendedCharts && data.recommendedCharts.length > 0
       ? `Odporúčané grafy:\n${data.recommendedCharts
           .map(
             (item: any) =>
-              `- ${item.title || 'Graf'} (${item.type || 'typ neuvedený'}): ${
-                item.reason || 'vhodné na vizualizáciu výsledkov'
+              `- ${item.title || "Graf"} (${item.type || "typ neuvedený"}): ${
+                item.reason || "vhodné na vizualizáciu výsledkov"
               }`,
           )
-          .join('\n')}`
-      : '';
+          .join("\n")}`
+      : "";
 
   const testsBlock =
     data.recommendedTests && data.recommendedTests.length > 0
       ? `Odporúčané štatistické testy:\n${data.recommendedTests
           .map(
             (item: any) =>
-              `- ${item.test || 'Test'}: ${
-                item.hypothesis || item.reason || 'overenie hypotézy'
+              `- ${item.test || "Test"}: ${
+                item.hypothesis || item.reason || "overenie hypotézy"
               }`,
           )
-          .join('\n')}`
-      : '';
+          .join("\n")}`
+      : "";
 
   const tablesBlock =
     data.excelTables && data.excelTables.length > 0
       ? `Odporúčané tabuľky do práce:\n${data.excelTables
           .map((item) => `- ${item}`)
-          .join('\n')}`
-      : '';
+          .join("\n")}`
+      : "";
 
   return cleanFinalOutput(
-  [
-    data.title || 'Výsledky analýzy',
-    '',
-    data.summary || '',
-    '',
-    warningsBlock,
-    '',
-    variablesBlock,
-    '',
-    descriptiveBlock,
-    '',
-    chartsBlock,
-    '',
-    testsBlock,
-    '',
-    hypothesisTestsBlock,
-    '',
-    tablesBlock,
-    '',
-    data.practicalText || '',
-    '',
-    data.fullText || '',
-  ]
-    .filter(Boolean)
-    .join('\n'),
-);
+    [
+      data.title || "Výsledky analýzy",
+      "",
+      data.summary || "",
+      "",
+      warningsBlock,
+      "",
+      variablesBlock,
+      "",
+      descriptiveBlock,
+      "",
+      chartsBlock,
+      "",
+      testsBlock,
+      "",
+      hypothesisTestsBlock,
+      "",
+      tablesBlock,
+      "",
+      data.practicalText || "",
+      "",
+      data.fullText || "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
 }
-
-
-
 
 type ClickableOptionGroupProps<T extends string> = {
   label: string;
   value: T;
   options: ClickableChoice<T>[];
   onChange: (value: T) => void;
-  columns?: 'languages' | 'styles' | 'emails';
+  columns?: "languages" | "styles" | "emails";
 };
 
 function ClickableOptionGroup<T extends string>({
@@ -3363,14 +3274,14 @@ function ClickableOptionGroup<T extends string>({
   value,
   options,
   onChange,
-  columns = 'languages',
+  columns = "languages",
 }: ClickableOptionGroupProps<T>) {
   const gridClass =
-    columns === 'styles'
-      ? 'grid-cols-1 sm:grid-cols-2'
-      : columns === 'emails'
-        ? 'grid-cols-1 sm:grid-cols-2'
-        : 'grid-cols-1 sm:grid-cols-2';
+    columns === "styles"
+      ? "grid-cols-1 sm:grid-cols-2"
+      : columns === "emails"
+        ? "grid-cols-1 sm:grid-cols-2"
+        : "grid-cols-1 sm:grid-cols-2";
 
   return (
     <div className="rounded-[1.75rem] border border-white/10 bg-[#03111f]/95 p-5 shadow-inner shadow-black/40">
@@ -3394,20 +3305,20 @@ function ClickableOptionGroup<T extends string>({
               aria-pressed={isActive}
               title={option.label}
               className={[
-                'group relative min-h-[74px] w-full overflow-hidden rounded-2xl border px-4 py-3 text-left transition-all duration-200',
-                'focus:outline-none focus:ring-2 focus:ring-violet-400 focus:ring-offset-2 focus:ring-offset-[#020617]',
+                "group relative min-h-[74px] w-full overflow-hidden rounded-2xl border px-4 py-3 text-left transition-all duration-200",
+                "focus:outline-none focus:ring-2 focus:ring-violet-400 focus:ring-offset-2 focus:ring-offset-[#020617]",
                 isActive
-                  ? 'border-violet-300 bg-gradient-to-br from-violet-600 via-purple-600 to-fuchsia-600 text-white shadow-xl shadow-violet-950/60'
-                  : 'border-white/10 bg-[#050b16] text-white shadow-lg shadow-black/25 hover:-translate-y-0.5 hover:border-violet-300/60 hover:bg-[#0b1224]',
-              ].join(' ')}
+                  ? "border-violet-300 bg-gradient-to-br from-violet-600 via-purple-600 to-fuchsia-600 text-white shadow-xl shadow-violet-950/60"
+                  : "border-white/10 bg-[#050b16] text-white shadow-lg shadow-black/25 hover:-translate-y-0.5 hover:border-violet-300/60 hover:bg-[#0b1224]",
+              ].join(" ")}
             >
               <span
                 className={[
-                  'pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-200',
+                  "pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-200",
                   isActive
-                    ? 'bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.32),transparent_38%)] opacity-100'
-                    : 'group-hover:bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.25),transparent_40%)] group-hover:opacity-100',
-                ].join(' ')}
+                    ? "bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.32),transparent_38%)] opacity-100"
+                    : "group-hover:bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.25),transparent_40%)] group-hover:opacity-100",
+                ].join(" ")}
               />
 
               <span className="relative z-10 flex min-w-0 items-center justify-between gap-4">
@@ -3419,9 +3330,9 @@ function ClickableOptionGroup<T extends string>({
                   {option.description ? (
                     <span
                       className={[
-                        'mt-1 block whitespace-normal break-words text-xs font-bold leading-5',
-                        isActive ? 'text-violet-50' : 'text-slate-400',
-                      ].join(' ')}
+                        "mt-1 block whitespace-normal break-words text-xs font-bold leading-5",
+                        isActive ? "text-violet-50" : "text-slate-400",
+                      ].join(" ")}
                     >
                       {option.description}
                     </span>
@@ -3430,11 +3341,11 @@ function ClickableOptionGroup<T extends string>({
 
                 <span
                   className={[
-                    'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border transition',
+                    "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border transition",
                     isActive
-                      ? 'border-white bg-white'
-                      : 'border-white/20 bg-white/5 group-hover:border-violet-300',
-                  ].join(' ')}
+                      ? "border-white bg-white"
+                      : "border-white/20 bg-white/5 group-hover:border-violet-300",
+                  ].join(" ")}
                 >
                   {isActive ? (
                     <span className="h-3 w-3 rounded-full bg-violet-600" />
@@ -3452,759 +3363,809 @@ function ClickableOptionGroup<T extends string>({
 // ================= PAGE =================
 
 export default function DashboardPage() {
- const router = useRouter();
-const searchParams = useSearchParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const agent = defaultAgent;
   const { t } = useLanguage();
 
- const [activeModule, setActiveModule] = useState<ModuleKey>(() => {
-  if (typeof window === 'undefined') {
-    return 'supervisor';
-  }
+  const [activeModule, setActiveModule] = useState<ModuleKey>(() => {
+    if (typeof window === "undefined") {
+      return "supervisor";
+    }
 
-  const urlParams = new URLSearchParams(window.location.search);
-  const moduleFromUrl = urlParams.get('module');
+    const urlParams = new URLSearchParams(window.location.search);
+    const moduleFromUrl = normalizeDashboardModuleKey(urlParams.get("module"));
 
-  if (moduleFromUrl === 'coach') return 'supervisor';
-  if (moduleFromUrl === 'audit') return 'quality';
+    if (moduleFromUrl) {
+      return moduleFromUrl;
+    }
 
-  if (moduleFromUrl && isModuleKey(moduleFromUrl)) {
-    return moduleFromUrl;
-  }
+    const storedModule = normalizeDashboardModuleKey(
+      localStorage.getItem("zedpera_active_dashboard_module"),
+    );
 
-  const storedModule = localStorage.getItem(
-    'zedpera_active_dashboard_module',
-  );
+    return storedModule || "supervisor";
+  });
 
-  if (storedModule === 'coach') return 'supervisor';
-  if (storedModule === 'audit') return 'quality';
-
-  if (storedModule && isModuleKey(storedModule)) {
-    return storedModule;
-  }
-
-  return 'supervisor';
-});
+  /**
+   * Ref sa aktualizuje okamžite pri kliknutí. Asynchrónna požiadavka tak
+   * zostane naviazaná na modul, z ktorého bola spustená, aj keď používateľ
+   * počas spracovania prepne na inú sekciu.
+   */
+  const activeModuleRef = useRef<ModuleKey>(activeModule);
 
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
-  const [input, setInput] = useState('');
-const [secondaryInput, setSecondaryInput] = useState('');
-const [result, setResult] = useState('');
-const [isLoading, setIsLoading] = useState(false);
+  const [input, setInput] = useState("");
+  const [secondaryInput, setSecondaryInput] = useState("");
+  const [result, setResult] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
-const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-const [activeAttachmentText, setActiveAttachmentText] = useState('');
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [activeAttachmentText, setActiveAttachmentText] = useState("");
 
-const [isListening, setIsListening] = useState(false);
+  const [isListening, setIsListening] = useState(false);
 
-const [canvasOpen, setCanvasOpen] = useState(false);
-const [canvasText, setCanvasText] = useState('');
+  const [canvasOpen, setCanvasOpen] = useState(false);
+  const [canvasText, setCanvasText] = useState("");
 
-const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
-const [analysisResult, setAnalysisResult] =
-  useState<AnalysisResult | null>(null);
+  const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(
+    null,
+  );
 
-const [entitlements, setEntitlements] =
-  useState<DashboardEntitlements | null>(null);
-const [pageQuota, setPageQuota] =
-  useState<DashboardPageQuota | null>(null);
-const [billingLoading, setBillingLoading] = useState(true);
-const [billingNotice, setBillingNotice] =
-  useState<BillingNotice | null>(null);
+  const [entitlements, setEntitlements] =
+    useState<DashboardEntitlements | null>(null);
+  const [pageQuota, setPageQuota] = useState<DashboardPageQuota | null>(null);
+  const [billingLoading, setBillingLoading] = useState(true);
+  const [billingNotice, setBillingNotice] = useState<BillingNotice | null>(
+    null,
+  );
 
-const [systemLanguage, setSystemLanguage] = useState<LanguageCode>('sk');
+  const [systemLanguage, setSystemLanguage] = useState<LanguageCode>("sk");
 
-const mergeEntitlementsFromResponse = useCallback((value: unknown) => {
-  const normalized = normalizeDashboardEntitlements(value);
+  const mergeEntitlementsFromResponse = useCallback((value: unknown) => {
+    const normalized = normalizeDashboardEntitlements(value);
 
-  if (!normalized) return;
+    if (!normalized) return;
 
-  setEntitlements((current) => ({
-    ...(current || normalized),
-    ...normalized,
-    addonIds: normalized.addonIds,
-    addonNames: normalized.addonNames,
-    features: normalized.features,
-  }));
-}, []);
+    setEntitlements((current) => ({
+      ...(current || normalized),
+      ...normalized,
+      addonIds: normalized.addonIds,
+      addonNames: normalized.addonNames,
+      features: normalized.features,
+    }));
+  }, []);
 
-const mergePageQuotaFromResponse = useCallback((value: unknown) => {
-  const normalized = normalizeDashboardPageQuota(value);
+  const mergePageQuotaFromResponse = useCallback((value: unknown) => {
+    const normalized = normalizeDashboardPageQuota(value);
 
-  if (!normalized) return;
+    if (!normalized) return;
 
-  setPageQuota((current) => ({
-    ...(current || normalized),
-    ...normalized,
-  }));
-}, []);
+    setPageQuota((current) => ({
+      ...(current || normalized),
+      ...normalized,
+    }));
+  }, []);
 
-const loadBillingState = useCallback(async () => {
-  setBillingLoading(true);
+  const loadBillingState = useCallback(async () => {
+    setBillingLoading(true);
 
-  try {
-    const [entitlementResponse, pageQuotaResponse] = await Promise.all([
-      fetch('/api/entitlements/me', {
-        method: 'GET',
-        cache: 'no-store',
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-        },
-      }),
-      fetch('/api/usage/pages', {
-        method: 'GET',
-        cache: 'no-store',
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-        },
-      }),
-    ]);
+    try {
+      const [entitlementResponse, pageQuotaResponse] = await Promise.all([
+        fetch("/api/entitlements/me", {
+          method: "GET",
+          cache: "no-store",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+          },
+        }),
+        fetch("/api/usage/pages", {
+          method: "GET",
+          cache: "no-store",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+          },
+        }),
+      ]);
 
-    if (
-      entitlementResponse.status === 401 ||
-      pageQuotaResponse.status === 401
-    ) {
-      router.replace('/login?returnTo=/dashboard');
+      if (
+        entitlementResponse.status === 401 ||
+        pageQuotaResponse.status === 401
+      ) {
+        router.replace("/login?returnTo=/dashboard");
+        return null;
+      }
+
+      if (!entitlementResponse.ok) {
+        throw await readDashboardApiError(entitlementResponse);
+      }
+
+      if (!pageQuotaResponse.ok) {
+        throw await readDashboardApiError(pageQuotaResponse);
+      }
+
+      const [entitlementData, pageQuotaData] = await Promise.all([
+        entitlementResponse.json(),
+        pageQuotaResponse.json(),
+      ]);
+
+      const normalizedEntitlements =
+        normalizeDashboardEntitlements(entitlementData);
+      const normalizedPageQuota = normalizeDashboardPageQuota(pageQuotaData);
+
+      if (!normalizedEntitlements) {
+        throw new DashboardApiError({
+          status: 500,
+          code: "INVALID_ENTITLEMENTS_RESPONSE",
+          message: "Server vrátil neplatný formát údajov o aktívnom balíku.",
+          detail: "Odpoveď /api/entitlements/me nebolo možné normalizovať.",
+          purchaseUrl: "/pricing",
+        });
+      }
+
+      if (!normalizedPageQuota) {
+        throw new DashboardApiError({
+          status: 500,
+          code: "INVALID_PAGE_QUOTA_RESPONSE",
+          message: "Server vrátil neplatný formát údajov o stránkovom limite.",
+          detail: "Odpoveď /api/usage/pages nebolo možné normalizovať.",
+          purchaseUrl: "/pricing#doplnkove-sluzby",
+        });
+      }
+
+      setEntitlements(normalizedEntitlements);
+      setPageQuota(normalizedPageQuota);
+      setBillingNotice((current) => {
+        if (!current) return null;
+
+        if (
+          current.scope === "module" ||
+          MODULE_ACCESS_ERROR_CODES.has(current.code)
+        ) {
+          return null;
+        }
+
+        if (
+          current.code === "BILLING_STATE_LOAD_FAILED" ||
+          current.code === "BILLING_STATE_UNAVAILABLE"
+        ) {
+          return null;
+        }
+
+        if (
+          current.code === "PROMPT_LIMIT_REACHED" &&
+          !normalizedEntitlements.promptLimitReached
+        ) {
+          return null;
+        }
+
+        if (
+          current.code === "PAGE_LIMIT_REACHED" &&
+          (normalizedPageQuota.isUnlimited ||
+            !normalizedPageQuota.pageLimitReached)
+        ) {
+          return null;
+        }
+
+        return current;
+      });
+
+      return {
+        entitlements: normalizedEntitlements,
+        pageQuota: normalizedPageQuota,
+      };
+    } catch (error: unknown) {
+      if (process.env.NODE_ENV === "development") {
+        console.info("DASHBOARD_BILLING_LOAD_ERROR", {
+          name: error instanceof Error ? error.name : "UnknownError",
+          message: error instanceof Error ? error.message : String(error),
+          status: error instanceof DashboardApiError ? error.status : undefined,
+          code: error instanceof DashboardApiError ? error.code : undefined,
+          detail: error instanceof DashboardApiError ? error.detail : undefined,
+        });
+      }
+
+      if (error instanceof DashboardApiError) {
+        setBillingNotice({
+          code: error.code,
+          message: error.message,
+          detail: error.detail,
+          purchaseUrl: error.purchaseUrl || "/pricing",
+        });
+      } else {
+        setBillingNotice({
+          code: "BILLING_STATE_LOAD_FAILED",
+          message:
+            "Aktívny balík a limity sa nepodarilo načítať. Obnovte stránku alebo skúste požiadavku znova.",
+          detail: error instanceof Error ? error.message : String(error),
+          purchaseUrl: "/pricing",
+        });
+      }
+
       return null;
+    } finally {
+      setBillingLoading(false);
     }
+  }, [router]);
 
-    if (!entitlementResponse.ok) {
-      throw await readDashboardApiError(entitlementResponse);
-    }
+  useEffect(() => {
+    void loadBillingState();
 
-    if (!pageQuotaResponse.ok) {
-      throw await readDashboardApiError(pageQuotaResponse);
-    }
+    const refreshBillingState = () => {
+      void loadBillingState();
+    };
 
-    const [entitlementData, pageQuotaData] = await Promise.all([
-      entitlementResponse.json(),
-      pageQuotaResponse.json(),
-    ]);
+    window.addEventListener("focus", refreshBillingState);
+    window.addEventListener("zedpera:billing-updated", refreshBillingState);
 
-    const normalizedEntitlements =
-      normalizeDashboardEntitlements(entitlementData);
-    const normalizedPageQuota =
-      normalizeDashboardPageQuota(pageQuotaData);
+    return () => {
+      window.removeEventListener("focus", refreshBillingState);
+      window.removeEventListener(
+        "zedpera:billing-updated",
+        refreshBillingState,
+      );
+    };
+  }, [loadBillingState]);
 
-    if (!normalizedEntitlements) {
-      throw new DashboardApiError({
-        status: 500,
-        code: 'INVALID_ENTITLEMENTS_RESPONSE',
-        message:
-          'Server vrátil neplatný formát údajov o aktívnom balíku.',
-        detail:
-          'Odpoveď /api/entitlements/me nebolo možné normalizovať.',
-        purchaseUrl: '/pricing',
-      });
-    }
+  useEffect(() => {
+    const syncLanguage = () => {
+      const stored =
+        localStorage.getItem("zedpera_language") ||
+        localStorage.getItem("zedpera_system_language") ||
+        "sk";
 
-    if (!normalizedPageQuota) {
-      throw new DashboardApiError({
-        status: 500,
-        code: 'INVALID_PAGE_QUOTA_RESPONSE',
-        message:
-          'Server vrátil neplatný formát údajov o stránkovom limite.',
-        detail:
-          'Odpoveď /api/usage/pages nebolo možné normalizovať.',
-        purchaseUrl: '/pricing#doplnkove-sluzby',
-      });
-    }
+      const safeLanguage: LanguageCode =
+        stored === "cs" ||
+        stored === "en" ||
+        stored === "de" ||
+        stored === "pl" ||
+        stored === "hu" ||
+        stored === "sk"
+          ? stored
+          : "sk";
 
-    setEntitlements(normalizedEntitlements);
-    setPageQuota(normalizedPageQuota);
+      setSystemLanguage(safeLanguage);
+    };
+
+    syncLanguage();
+
+    window.addEventListener("storage", syncLanguage);
+    window.addEventListener("zedpera:language-changed", syncLanguage);
+    window.addEventListener("zedpera:system-language-changed", syncLanguage);
+
+    return () => {
+      window.removeEventListener("storage", syncLanguage);
+      window.removeEventListener("zedpera:language-changed", syncLanguage);
+      window.removeEventListener(
+        "zedpera:system-language-changed",
+        syncLanguage,
+      );
+    };
+  }, []);
+
+  /**
+   * Udržuje ref synchronizovaný aj pri zmene modulu cez históriu prehliadača.
+   * Zároveň odstráni iba starú modulovú hlášku; globálne limity ostávajú.
+   */
+  useEffect(() => {
+    activeModuleRef.current = activeModule;
+
     setBillingNotice((current) => {
       if (!current) return null;
 
-      if (
-        current.code === 'BILLING_STATE_LOAD_FAILED' ||
-        current.code === 'BILLING_STATE_UNAVAILABLE'
-      ) {
-        return null;
-      }
-
-      if (
-        current.code === 'PROMPT_LIMIT_REACHED' &&
-        !normalizedEntitlements.promptLimitReached
-      ) {
-        return null;
-      }
-
-      if (
-        current.code === 'PAGE_LIMIT_REACHED' &&
-        (normalizedPageQuota.isUnlimited ||
-          !normalizedPageQuota.pageLimitReached)
-      ) {
-        return null;
-      }
-
-      return current;
+      return current.scope === "module" ||
+        MODULE_ACCESS_ERROR_CODES.has(current.code)
+        ? null
+        : current;
     });
+  }, [activeModule]);
+
+  /**
+   * URL je zdrojom pravdy pri tlačidlách späť/dopredu a pri priamom odkaze.
+   * Kliknutie na AI školiteľa preto vždy nastaví supervisor a nemôže ponechať
+   * aktívnu Obhajobu iba v internom stave.
+   */
+  useEffect(() => {
+    const moduleFromUrl = normalizeDashboardModuleKey(
+      searchParams.get("module"),
+    );
+
+    if (!moduleFromUrl || moduleFromUrl === activeModuleRef.current) {
+      return;
+    }
+
+    activeModuleRef.current = moduleFromUrl;
+    setActiveModule(moduleFromUrl);
+
+    try {
+      localStorage.setItem("zedpera_active_dashboard_module", moduleFromUrl);
+    } catch {
+      // localStorage nemusí byť dostupný
+    }
+  }, [searchParams]);
+
+  const [questionnaireMode, setQuestionnaireMode] =
+    useState<QuestionnaireMode>("manual");
+
+  const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<
+    string[]
+  >([]);
+
+  const questionnaireText = useMemo(
+    () => getQuestionnaireText(systemLanguage),
+    [systemLanguage],
+  );
+
+  const questionnaireOptions = questionnaireText.options;
+
+  const [customQuestionnairesText, setCustomQuestionnairesText] = useState("");
+
+  const [manualScalesText, setManualScalesText] = useState("");
+  const [manualSubscalesText, setManualSubscalesText] = useState("");
+  const [groupingColumnsText, setGroupingColumnsText] = useState("");
+
+  const questionnaireConfig = useMemo<QuestionnaireConfig>(() => {
+    const hasManualSetup =
+      manualScalesText.trim().length > 0 ||
+      manualSubscalesText.trim().length > 0 ||
+      groupingColumnsText.trim().length > 0 ||
+      customQuestionnairesText.trim().length > 0;
 
     return {
-      entitlements: normalizedEntitlements,
-      pageQuota: normalizedPageQuota,
+      mode: hasManualSetup ? "manual" : questionnaireMode,
+      selectedQuestionnaires: [],
+      customQuestionnairesText,
+      manualScalesText,
+      manualSubscalesText,
+      groupingColumnsText,
     };
-  } catch (error: unknown) {
-    if (process.env.NODE_ENV === 'development') {
-      console.info('DASHBOARD_BILLING_LOAD_ERROR', {
-        name: error instanceof Error ? error.name : 'UnknownError',
-        message: error instanceof Error ? error.message : String(error),
-        status:
-          error instanceof DashboardApiError
-            ? error.status
-            : undefined,
-        code:
-          error instanceof DashboardApiError
-            ? error.code
-            : undefined,
-        detail:
-          error instanceof DashboardApiError
-            ? error.detail
-            : undefined,
-      });
-    }
-
-    if (error instanceof DashboardApiError) {
-      setBillingNotice({
-        code: error.code,
-        message: error.message,
-        detail: error.detail,
-        purchaseUrl: error.purchaseUrl || '/pricing',
-      });
-    } else {
-      setBillingNotice({
-        code: 'BILLING_STATE_LOAD_FAILED',
-        message:
-          'Aktívny balík a limity sa nepodarilo načítať. Obnovte stránku alebo skúste požiadavku znova.',
-        detail: error instanceof Error ? error.message : String(error),
-        purchaseUrl: '/pricing',
-      });
-    }
-
-    return null;
-  } finally {
-    setBillingLoading(false);
-  }
-}, [router]);
-
-useEffect(() => {
-  void loadBillingState();
-
-  const refreshBillingState = () => {
-    void loadBillingState();
-  };
-
-  window.addEventListener('focus', refreshBillingState);
-  window.addEventListener('zedpera:billing-updated', refreshBillingState);
-
-  return () => {
-    window.removeEventListener('focus', refreshBillingState);
-    window.removeEventListener('zedpera:billing-updated', refreshBillingState);
-  };
-}, [loadBillingState]);
-
-useEffect(() => {
-  const syncLanguage = () => {
-    const stored =
-      localStorage.getItem('zedpera_language') ||
-      localStorage.getItem('zedpera_system_language') ||
-      'sk';
-
-    const safeLanguage: LanguageCode =
-      stored === 'cs' ||
-      stored === 'en' ||
-      stored === 'de' ||
-      stored === 'pl' ||
-      stored === 'hu' ||
-      stored === 'sk'
-        ? stored
-        : 'sk';
-
-    setSystemLanguage(safeLanguage);
-  };
-
-  syncLanguage();
-
-  window.addEventListener('storage', syncLanguage);
-  window.addEventListener('zedpera:language-changed', syncLanguage);
-  window.addEventListener('zedpera:system-language-changed', syncLanguage);
-
-  return () => {
-    window.removeEventListener('storage', syncLanguage);
-    window.removeEventListener('zedpera:language-changed', syncLanguage);
-    window.removeEventListener('zedpera:system-language-changed', syncLanguage);
-  };
-}, []);
-
-const [questionnaireMode, setQuestionnaireMode] =
-  useState<QuestionnaireMode>('manual');
-
-const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<string[]>(
-  [],
-);
-
-const questionnaireText = useMemo(
-  () => getQuestionnaireText(systemLanguage),
-  [systemLanguage],
-);
-
-const questionnaireOptions = questionnaireText.options;
-
-const [customQuestionnairesText, setCustomQuestionnairesText] = useState('');
-
-const [manualScalesText, setManualScalesText] = useState('');
-const [manualSubscalesText, setManualSubscalesText] = useState('');
-const [groupingColumnsText, setGroupingColumnsText] = useState('');
-
-
-const questionnaireConfig = useMemo<QuestionnaireConfig>(() => {
-  const hasManualSetup =
-    manualScalesText.trim().length > 0 ||
-    manualSubscalesText.trim().length > 0 ||
-    groupingColumnsText.trim().length > 0 ||
-    customQuestionnairesText.trim().length > 0;
-
-  return {
-    mode: hasManualSetup ? 'manual' : questionnaireMode,
-    selectedQuestionnaires: [],
+  }, [
+    questionnaireMode,
     customQuestionnairesText,
     manualScalesText,
     manualSubscalesText,
     groupingColumnsText,
-  };
-}, [
-  questionnaireMode,
-  customQuestionnairesText,
-  manualScalesText,
-  manualSubscalesText,
-  groupingColumnsText,
-]);
+  ]);
 
-function handleQuestionnaireChange(value: QuestionnaireOptionId) {
-  if (!value) {
-    setQuestionnaireMode('auto-suggest-only');
-    setSelectedQuestionnaires([]);
-    setCustomQuestionnairesText('');
-    setManualScalesText('');
-    setManualSubscalesText('');
-    setGroupingColumnsText('');
-    return;
-  }
+  function handleQuestionnaireChange(value: QuestionnaireOptionId) {
+    if (!value) {
+      setQuestionnaireMode("auto-suggest-only");
+      setSelectedQuestionnaires([]);
+      setCustomQuestionnairesText("");
+      setManualScalesText("");
+      setManualSubscalesText("");
+      setGroupingColumnsText("");
+      return;
+    }
 
-  if (value === 'none') {
-    setQuestionnaireMode('none');
-    setSelectedQuestionnaires([]);
-    setCustomQuestionnairesText('');
-    setManualScalesText('');
-    setManualSubscalesText('');
-    setGroupingColumnsText('');
-    return;
-  }
+    if (value === "none") {
+      setQuestionnaireMode("none");
+      setSelectedQuestionnaires([]);
+      setCustomQuestionnairesText("");
+      setManualScalesText("");
+      setManualSubscalesText("");
+      setGroupingColumnsText("");
+      return;
+    }
 
-  if (value === 'custom') {
-    setQuestionnaireMode('manual');
-    setSelectedQuestionnaires([]);
-    return;
-  }
+    if (value === "custom") {
+      setQuestionnaireMode("manual");
+      setSelectedQuestionnaires([]);
+      return;
+    }
 
-  setQuestionnaireMode('selected');
-  setCustomQuestionnairesText('');
+    setQuestionnaireMode("selected");
+    setCustomQuestionnairesText("");
 
-  setSelectedQuestionnaires((current) => {
-    const alreadySelected = current.includes(value);
+    setSelectedQuestionnaires((current) => {
+      const alreadySelected = current.includes(value);
 
-    if (alreadySelected) {
-      const next = current.filter((item) => item !== value);
+      if (alreadySelected) {
+        const next = current.filter((item) => item !== value);
 
-      if (next.length === 0) {
-        setQuestionnaireMode('auto-suggest-only');
+        if (next.length === 0) {
+          setQuestionnaireMode("auto-suggest-only");
+        }
+
+        return next;
       }
 
-      return next;
-    }
+      return [...current, value];
+    });
+  }
 
-    return [...current, value];
-  });
-}
+  /**
+   * Pripravený Excel súbor pre modul Analýza dát.
+   *
+   * Tento stav sa naplní až po úspešnom volaní:
+   * /api/analyze-data/prepare
+   *
+   * Obsahuje nový Excel súbor podľa vzoru:
+   * - DATA_RAW
+   * - DATA_CLEAN
+   * - VARIABLE_DICTIONARY
+   * - SCORING
+   * - QUALITY_REPORT
+   * - README
+   *
+   * Tento súbor sa dá následne stiahnuť a zároveň sa z neho spúšťa štatistika.
+   */
+  const [preparedDataFile, setPreparedDataFile] = useState<{
+    fileName: string;
+    base64: string;
+    mimeType: string;
+    rows?: number;
+    columns?: number;
+    warnings?: string[];
+    sheets?: string[];
+    qualityReport?: Array<{
+      kontrola?: string;
+      vysledok?: string | number;
+      stav?: "ok" | "warning" | "error";
+      poznamka?: string;
+    }>;
+  } | null>(null);
 
-/**
- * Pripravený Excel súbor pre modul Analýza dát.
- *
- * Tento stav sa naplní až po úspešnom volaní:
- * /api/analyze-data/prepare
- *
- * Obsahuje nový Excel súbor podľa vzoru:
- * - DATA_RAW
- * - DATA_CLEAN
- * - VARIABLE_DICTIONARY
- * - SCORING
- * - QUALITY_REPORT
- * - README
- *
- * Tento súbor sa dá následne stiahnuť a zároveň sa z neho spúšťa štatistika.
- */
-const [preparedDataFile, setPreparedDataFile] = useState<{
-  fileName: string;
-  base64: string;
-  mimeType: string;
-  rows?: number;
-  columns?: number;
-  warnings?: string[];
-  sheets?: string[];
-  qualityReport?: Array<{
-    kontrola?: string;
-    vysledok?: string | number;
-    stav?: 'ok' | 'warning' | 'error';
-    poznamka?: string;
-  }>;
-} | null>(null);
+  const [qualityMode, setQualityMode] = useState("style");
+  const [outputMode, setOutputMode] = useState("detailed");
+  const [translationFrom, setTranslationFrom] = useState<LanguageCode>("sk");
+  const [translationTo, setTranslationTo] = useState<LanguageCode>("hu");
+  const [translationStyle, setTranslationStyle] =
+    useState<TranslationStyle>("academic");
 
-  const [qualityMode, setQualityMode] = useState('style');
-  const [outputMode, setOutputMode] = useState('detailed');
-  const [translationFrom, setTranslationFrom] = useState<LanguageCode>('sk');
-const [translationTo, setTranslationTo] = useState<LanguageCode>('hu');
-const [translationStyle, setTranslationStyle] =
-  useState<TranslationStyle>('academic');
-
-const [emailType, setEmailType] = useState<EmailType>('supervisor');
-const [emailTone, setEmailTone] = useState<EmailTone>('professional');
+  const [emailType, setEmailType] = useState<EmailType>("supervisor");
+  const [emailTone, setEmailTone] = useState<EmailTone>("professional");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-const resultRef = useRef<HTMLDivElement | null>(null);
-const mobileToolPanelRef = useRef<HTMLDivElement | null>(null);
+  const resultRef = useRef<HTMLDivElement | null>(null);
+  const mobileToolPanelRef = useRef<HTMLDivElement | null>(null);
 
   const activeModuleInfo = useMemo(() => {
-  return (
-    moduleInfos.find((item) => item.key === activeModule) || moduleInfos[0]
+    return (
+      moduleInfos.find((item) => item.key === activeModule) || moduleInfos[0]
+    );
+  }, [activeModule]);
+  const activeTranslationKey = activeModuleInfo.translationKey;
+
+  const currentFixedModuleUi = getFixedModuleUi(systemLanguage);
+  const fixedUi = currentFixedModuleUi[activeModule];
+
+  const desktopModuleItems = dashboardModuleOrder.filter(
+    (moduleKey) => moduleKey !== "originality",
   );
-}, [activeModule]);
-const activeTranslationKey = activeModuleInfo.translationKey;
+  const desktopModuleSplitIndex = Math.ceil(desktopModuleItems.length / 2);
 
+  const hasFeature = useCallback(
+    (feature: FeatureKey) => {
+      if (entitlements?.hasUnlimitedAccess || entitlements?.isAdmin) {
+        return true;
+      }
 
+      return Boolean(entitlements?.features.includes(feature));
+    },
+    [entitlements],
+  );
 
-const fixedUi = getFixedModuleUi(systemLanguage)[activeModule];
-const currentFixedModuleUi = getFixedModuleUi(systemLanguage);
+  const activeModuleFeature = MODULE_REQUIRED_FEATURE[activeModule];
+  const activeModuleAllowed =
+    Boolean(entitlements) && hasFeature(activeModuleFeature);
 
-const hasFeature = useCallback(
-  (feature: FeatureKey) => {
-    if (entitlements?.hasUnlimitedAccess || entitlements?.isAdmin) {
-      return true;
+  const hasUnlimitedAccess =
+    Boolean(entitlements?.hasUnlimitedAccess) ||
+    Boolean(entitlements?.isAdmin) ||
+    Boolean(pageQuota?.isUnlimited);
+
+  const effectiveAttachmentLimit = hasUnlimitedAccess
+    ? maxAdminFilesPerRequest
+    : Math.max(
+        0,
+        Math.min(maxStandardFilesCount, entitlements?.attachmentLimit ?? 1),
+      );
+  const generationBlocked =
+    isLoading ||
+    billingLoading ||
+    !entitlements ||
+    !pageQuota ||
+    !activeModuleAllowed ||
+    (!hasUnlimitedAccess && entitlements.promptLimitReached) ||
+    (!hasUnlimitedAccess &&
+      !pageQuota.isUnlimited &&
+      pageQuota.pageLimitReached);
+
+  const activeModuleLabel = fixedUi.label;
+
+  const activeModuleButtonLabel = fixedUi.button;
+
+  const fixedActiveModuleUi = fixedUi;
+
+  const activeModuleInputLabel = fixedUi.inputLabel;
+
+  const activeModulePlaceholder = fixedUi.placeholder;
+
+  const activeModuleCard = t?.dashboardTools?.cards?.[activeTranslationKey];
+
+  const activeDashboardModuleTexts =
+    t?.dashboardTools?.modules?.[activeTranslationKey];
+
+  const activeModuleIntro = fixedUi.intro;
+
+  const activeModuleInputHelp = "";
+
+  const activeModuleResultHelp = activeDashboardModuleTexts?.resultHelp || "";
+
+  const activeModuleEmptyState =
+    activeDashboardModuleTexts?.emptyState ||
+    "Zatiaľ nie je vložený žiadny text.";
+
+  const activeModuleCardTitle = fixedUi.label;
+
+  const activeModuleCardSubtitle = fixedUi.shortLabel;
+
+  const activeModuleCardDescription = fixedUi.intro;
+
+  const activeModuleResultTitle = fixedUi.resultTitle;
+
+  const activeModuleAccessNotice = useMemo<BillingNotice | null>(() => {
+    if (billingLoading || !entitlements || activeModuleAllowed) {
+      return null;
     }
 
-    return Boolean(entitlements?.features.includes(feature));
-  },
-  [entitlements],
-);
-
-const activeModuleFeature = MODULE_REQUIRED_FEATURE[activeModule];
-const activeModuleAllowed =
-  Boolean(entitlements) && hasFeature(activeModuleFeature);
-
-const hasUnlimitedAccess =
-  Boolean(entitlements?.hasUnlimitedAccess) ||
-  Boolean(entitlements?.isAdmin) ||
-  Boolean(pageQuota?.isUnlimited);
-
-const effectiveAttachmentLimit = hasUnlimitedAccess
-  ? maxAdminFilesPerRequest
-  : Math.max(
-      0,
-      Math.min(
-        maxStandardFilesCount,
-        entitlements?.attachmentLimit ?? 1,
-      ),
-    );
-const generationBlocked =
-  isLoading ||
-  billingLoading ||
-  !entitlements ||
-  !pageQuota ||
-  !activeModuleAllowed ||
-  (!hasUnlimitedAccess && entitlements.promptLimitReached) ||
-  (!hasUnlimitedAccess &&
-    !pageQuota.isUnlimited &&
-    pageQuota.pageLimitReached);
-
-const activeModuleLabel = fixedUi.label;
-
-const activeModuleButtonLabel = fixedUi.button;
-
-const fixedActiveModuleUi = fixedUi;
-
-const activeModuleInputLabel = fixedUi.inputLabel;
-
-const activeModulePlaceholder = fixedUi.placeholder;
-
-const activeModuleCard =
-  t?.dashboardTools?.cards?.[activeTranslationKey];
-
-const activeDashboardModuleTexts =
-  t?.dashboardTools?.modules?.[activeTranslationKey];
-
-const activeModuleIntro = fixedUi.intro;
-
-const activeModuleInputHelp = '';
-
-const activeModuleResultHelp =
-  activeDashboardModuleTexts?.resultHelp || '';
-
-const activeModuleEmptyState =
-  activeDashboardModuleTexts?.emptyState ||
-  'Zatiaľ nie je vložený žiadny text.';
-
-const activeModuleCardTitle = fixedUi.label;
-
-const activeModuleCardSubtitle = fixedUi.shortLabel;
-
-const activeModuleCardDescription = fixedUi.intro;
-
-const activeModuleResultTitle = fixedUi.resultTitle;
-
-const activeModuleAccessNotice = useMemo<BillingNotice | null>(() => {
-  if (billingLoading || !entitlements || activeModuleAllowed) {
-    return null;
-  }
-
-  return createModuleAccessNotice({
-    language: systemLanguage,
-    moduleLabel: activeModuleLabel,
-    planName: entitlements.planName,
-  });
-}, [
-  activeModuleAllowed,
-  activeModuleLabel,
-  billingLoading,
-  entitlements,
-  systemLanguage,
-]);
-
-/**
- * Modulová hláška sa vždy odvodzuje priamo z aktuálne zvolenej sekcie.
- * Tým sa zabráni tomu, aby po prepnutí napríklad na Preklad zostala
- * zobrazená stará hláška pre AI školiteľa alebo Obhajobu.
- */
-const visibleBillingNotice = useMemo<BillingNotice | null>(() => {
-  if (activeModuleAccessNotice) {
-    return activeModuleAccessNotice;
-  }
-
-  if (
-    billingNotice &&
-    MODULE_ACCESS_ERROR_CODES.has(billingNotice.code)
-  ) {
-    return null;
-  }
-
-  return billingNotice;
-}, [activeModuleAccessNotice, billingNotice]);
-
-const exportTitle = useMemo(() => {
-  return `${activeModuleLabel} - ${
-    activeProfile?.title || 'output'
-  }`.trim();
-}, [activeModuleLabel, activeProfile]);
-
-const selectorTranslations = getDashboardSelectorTranslations(t);
-
-const languageSelectOptions =
-  createLanguageSelectOptions(selectorTranslations);
-
-const translationStyleOptions =
-  createTranslationStyleOptions(selectorTranslations);
-
-const emailTypeOptions =
-  createEmailTypeOptions(selectorTranslations);
-
-const emailToneOptions =
-  createEmailToneOptions(selectorTranslations);
-
-const getLanguageLabel = (value: LanguageCode): string => {
-  const option = languageSelectOptions.find(
-    (languageOption) => languageOption.value === value,
-  );
-
-  return option?.label ?? value;
-};
-
-const getTranslationStyleLabel = (value: TranslationStyle): string => {
-  const option = translationStyleOptions.find(
-    (styleOption) => styleOption.value === value,
-  );
-
-  return option?.label ?? value;
-};
-
-const getEmailTypeLabel = (value: EmailType): string => {
-  const option = emailTypeOptions.find(
-    (emailTypeOption) => emailTypeOption.value === value,
-  );
-
-  return option?.label ?? value;
-};
-
-const getEmailToneLabel = (value: EmailTone): string => {
-  const option = emailToneOptions.find(
-    (emailToneOption) => emailToneOption.value === value,
-  );
-
-  return option?.label ?? value;
-};
-
-const startNewWork = useCallback(() => {
-  setActiveProfile(null);
-  setActiveModule('supervisor');
-  setInput('');
-  setSecondaryInput('');
-  setResult('');
-  setCanvasText('');
-  setAttachedFiles([]);
-  setAnalysisResult(null);
-  setAnalysisModalOpen(false);
-
-  try {
-    localStorage.removeItem('active_profile');
-    localStorage.removeItem('profile');
-    localStorage.removeItem('latest_generated_work_text');
-    localStorage.removeItem('last_ai_output');
-  } catch {
-    // localStorage nemusí byť dostupný
-  }
-
-  window.dispatchEvent(
-    new CustomEvent('zedpera:active-profile-changed', {
-      detail: null,
-    }),
-  );
-
-  setTimeout(() => {
-    mobileToolPanelRef.current?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
+    return createModuleAccessNotice({
+      language: systemLanguage,
+      moduleKey: activeModule,
+      moduleLabel: activeModuleLabel,
+      planName: entitlements.planName,
+      feature: activeModuleFeature,
     });
-  }, 120);
-}, []);
+  }, [
+    activeModule,
+    activeModuleAllowed,
+    activeModuleFeature,
+    activeModuleLabel,
+    billingLoading,
+    entitlements,
+    systemLanguage,
+  ]);
 
+  /**
+   * Modulová hláška sa nikdy nezobrazuje zo starého textu uloženého v stave.
+   * Vždy sa vytvorí nanovo z activeModule, jeho fixného názvu a jeho funkcie.
+   */
+  const visibleBillingNotice = useMemo<BillingNotice | null>(() => {
+    if (activeModuleAccessNotice) {
+      return activeModuleAccessNotice;
+    }
 
+    if (!billingNotice) {
+      return null;
+    }
 
-function SelectField<T extends string>({
-  label,
-  value,
-  options,
-  labels,
-  onChange,
-}: {
-  label: string;
-  value: T;
-  options: SelectOption<T>[];
-  labels: Record<string, string>;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-2 block text-sm font-black text-white">
-        {label}
-      </span>
+    const isModuleNotice =
+      billingNotice.scope === "module" ||
+      MODULE_ACCESS_ERROR_CODES.has(billingNotice.code);
 
-      <div className="relative">
-        <select
-          value={value}
-          onChange={(event) => onChange(event.target.value as T)}
-          className="w-full cursor-pointer appearance-none rounded-2xl border border-white/15 bg-black px-4 py-3 pr-11 text-sm font-bold text-white outline-none transition hover:border-white/30 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/30"
-        >
-          {options.map((option) => (
-            <option
-              key={option.value}
-              value={option.value}
-              className="bg-black text-white"
-            >
-              {labels?.[option.labelKey] || option.value}
-            </option>
-          ))}
-        </select>
+    if (isModuleNotice) {
+      return null;
+    }
 
-        <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/70" />
-      </div>
-    </label>
-  );
-}
+    return billingNotice;
+  }, [activeModuleAccessNotice, billingNotice]);
 
+  const exportTitle = useMemo(() => {
+    return `${activeModuleLabel} - ${activeProfile?.title || "output"}`.trim();
+  }, [activeModuleLabel, activeProfile]);
 
+  const selectorTranslations = getDashboardSelectorTranslations(t);
 
+  const languageSelectOptions =
+    createLanguageSelectOptions(selectorTranslations);
 
+  const translationStyleOptions =
+    createTranslationStyleOptions(selectorTranslations);
 
-useEffect(() => {
-  function handleActiveProfileChanged(event: Event) {
-    const customEvent = event as CustomEvent<SavedProfile>;
+  const emailTypeOptions = createEmailTypeOptions(selectorTranslations);
 
-    if (!customEvent.detail) return;
+  const emailToneOptions = createEmailToneOptions(selectorTranslations);
 
-    const systemLanguage = getStoredSystemLanguage();
-
-    const normalizedProfile = prepareProfileForApi(
-      customEvent.detail,
-      systemLanguage,
+  const getLanguageLabel = (value: LanguageCode): string => {
+    const option = languageSelectOptions.find(
+      (languageOption) => languageOption.value === value,
     );
 
-    if (!normalizedProfile) return;
+    return option?.label ?? value;
+  };
 
-    setActiveProfile(normalizedProfile);
+  const getTranslationStyleLabel = (value: TranslationStyle): string => {
+    const option = translationStyleOptions.find(
+      (styleOption) => styleOption.value === value,
+    );
+
+    return option?.label ?? value;
+  };
+
+  const getEmailTypeLabel = (value: EmailType): string => {
+    const option = emailTypeOptions.find(
+      (emailTypeOption) => emailTypeOption.value === value,
+    );
+
+    return option?.label ?? value;
+  };
+
+  const getEmailToneLabel = (value: EmailTone): string => {
+    const option = emailToneOptions.find(
+      (emailToneOption) => emailToneOption.value === value,
+    );
+
+    return option?.label ?? value;
+  };
+
+  const startNewWork = useCallback(() => {
+    activeModuleRef.current = "supervisor";
+    setActiveProfile(null);
+    setActiveModule("supervisor");
+    setBillingNotice((current) =>
+      current &&
+      (current.scope === "module" ||
+        MODULE_ACCESS_ERROR_CODES.has(current.code))
+        ? null
+        : current,
+    );
+    setInput("");
+    setSecondaryInput("");
+    setResult("");
+    setCanvasText("");
+    setAttachedFiles([]);
+    setAnalysisResult(null);
+    setAnalysisModalOpen(false);
 
     try {
-      localStorage.setItem('active_profile', JSON.stringify(normalizedProfile));
-      localStorage.setItem('profile', JSON.stringify(normalizedProfile));
+      localStorage.removeItem("active_profile");
+      localStorage.removeItem("profile");
+      localStorage.removeItem("latest_generated_work_text");
+      localStorage.removeItem("last_ai_output");
+      localStorage.setItem("zedpera_active_dashboard_module", "supervisor");
     } catch {
       // localStorage nemusí byť dostupný
     }
-  }
 
-  window.addEventListener(
-    'zedpera:active-profile-changed',
-    handleActiveProfileChanged,
-  );
-
-  return () => {
-    window.removeEventListener(
-      'zedpera:active-profile-changed',
-      handleActiveProfileChanged,
+    window.dispatchEvent(
+      new CustomEvent("zedpera:active-profile-changed", {
+        detail: null,
+      }),
     );
-  };
-}, []);
 
+    router.replace("/dashboard?module=supervisor", {
+      scroll: false,
+    });
 
+    setTimeout(() => {
+      mobileToolPanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 120);
+  }, [router]);
 
- useEffect(() => {
-  const systemLanguage = getStoredSystemLanguage();
-  persistSystemLanguage(systemLanguage);
+  function SelectField<T extends string>({
+    label,
+    value,
+    options,
+    labels,
+    onChange,
+  }: {
+    label: string;
+    value: T;
+    options: SelectOption<T>[];
+    labels: Record<string, string>;
+    onChange: (value: T) => void;
+  }) {
+    return (
+      <label className="block">
+        <span className="mb-2 block text-sm font-black text-white">
+          {label}
+        </span>
 
-  const activeRaw = localStorage.getItem('active_profile');
-  const profileRaw = localStorage.getItem('profile');
-  const active = normalizeProfile(safeJsonParse<any>(activeRaw));
-  const profile = normalizeProfile(safeJsonParse<any>(profileRaw));
+        <div className="relative">
+          <select
+            value={value}
+            onChange={(event) => onChange(event.target.value as T)}
+            className="w-full cursor-pointer appearance-none rounded-2xl border border-white/15 bg-black px-4 py-3 pr-11 text-sm font-bold text-white outline-none transition hover:border-white/30 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/30"
+          >
+            {options.map((option) => (
+              <option
+                key={option.value}
+                value={option.value}
+                className="bg-black text-white"
+              >
+                {labels?.[option.labelKey] || option.value}
+              </option>
+            ))}
+          </select>
 
-  const selectedProfile = active || profile || null;
-
-  const profileWithLanguage = prepareProfileForApi(
-    selectedProfile,
-    systemLanguage,
-  );
-
-  setActiveProfile(profileWithLanguage);
-
-  if (profileWithLanguage) {
-    localStorage.setItem('active_profile', JSON.stringify(profileWithLanguage));
-    localStorage.setItem('profile', JSON.stringify(profileWithLanguage));
+          <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/70" />
+        </div>
+      </label>
+    );
   }
-}, []);
 
   useEffect(() => {
-    setInput('');
-    setSecondaryInput('');
-    setResult('');
+    function handleActiveProfileChanged(event: Event) {
+      const customEvent = event as CustomEvent<SavedProfile>;
+
+      if (!customEvent.detail) return;
+
+      const systemLanguage = getStoredSystemLanguage();
+
+      const normalizedProfile = prepareProfileForApi(
+        customEvent.detail,
+        systemLanguage,
+      );
+
+      if (!normalizedProfile) return;
+
+      setActiveProfile(normalizedProfile);
+
+      try {
+        localStorage.setItem(
+          "active_profile",
+          JSON.stringify(normalizedProfile),
+        );
+        localStorage.setItem("profile", JSON.stringify(normalizedProfile));
+      } catch {
+        // localStorage nemusí byť dostupný
+      }
+    }
+
+    window.addEventListener(
+      "zedpera:active-profile-changed",
+      handleActiveProfileChanged,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "zedpera:active-profile-changed",
+        handleActiveProfileChanged,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    const systemLanguage = getStoredSystemLanguage();
+    persistSystemLanguage(systemLanguage);
+
+    const activeRaw = localStorage.getItem("active_profile");
+    const profileRaw = localStorage.getItem("profile");
+    const active = normalizeProfile(safeJsonParse<any>(activeRaw));
+    const profile = normalizeProfile(safeJsonParse<any>(profileRaw));
+
+    const selectedProfile = active || profile || null;
+
+    const profileWithLanguage = prepareProfileForApi(
+      selectedProfile,
+      systemLanguage,
+    );
+
+    setActiveProfile(profileWithLanguage);
+
+    if (profileWithLanguage) {
+      localStorage.setItem(
+        "active_profile",
+        JSON.stringify(profileWithLanguage),
+      );
+      localStorage.setItem("profile", JSON.stringify(profileWithLanguage));
+    }
+  }, []);
+
+  useEffect(() => {
+    setInput("");
+    setSecondaryInput("");
+    setResult("");
     setAttachedFiles([]);
-    setCanvasText('');
+    setCanvasText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
   }, [activeModule]);
@@ -4236,13 +4197,13 @@ useEffect(() => {
         continue;
       }
 
-    validFiles.push({
-  id: createFileId(),
-  name: file.name,
-  size: file.size,
-  type: file.type || 'application/octet-stream',
-  file,
-});
+      validFiles.push({
+        id: createFileId(),
+        name: file.name,
+        size: file.size,
+        type: file.type || "application/octet-stream",
+        file,
+      });
     }
 
     if (validFiles.length === 0) return;
@@ -4254,12 +4215,12 @@ useEffect(() => {
       for (const file of validFiles) {
         if (next.length >= uploadLimit) {
           setBillingNotice({
-            code: 'ATTACHMENT_LIMIT_REACHED',
+            code: "ATTACHMENT_LIMIT_REACHED",
             message:
               uploadLimit === 1
-                ? 'Váš balík povoľuje maximálne 1 prílohu.'
+                ? "Váš balík povoľuje maximálne 1 prílohu."
                 : `Váš balík povoľuje maximálne ${uploadLimit} príloh.`,
-            purchaseUrl: '/pricing',
+            purchaseUrl: "/pricing",
           });
           break;
         }
@@ -4275,7 +4236,7 @@ useEffect(() => {
     });
 
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = "";
     }
   };
 
@@ -4284,183 +4245,173 @@ useEffect(() => {
   };
 
   const resetCurrentModule = () => {
-    setInput('');
-    setSecondaryInput('');
-    setResult('');
-    setCanvasText('');
+    setInput("");
+    setSecondaryInput("");
+    setResult("");
+    setCanvasText("");
     setAttachedFiles([]);
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
   };
 
-useEffect(() => {
-  if (searchParams.get('newWork') === '1') {
-    startNewWork();
-  }
-}, [searchParams, startNewWork]);
+  useEffect(() => {
+    if (searchParams.get("newWork") === "1") {
+      startNewWork();
+    }
+  }, [searchParams, startNewWork]);
 
+  async function saveHistoryItem(inputData: {
+    module: ModuleKey;
+    title: string;
+    userMessage: string;
+    assistantMessage: string;
+    result?: Record<string, unknown>;
+  }) {
+    if (!inputData.assistantMessage.trim()) return;
 
-
-
-async function saveHistoryItem(inputData: {
-  module: ModuleKey;
-  title: string;
-  userMessage: string;
-  assistantMessage: string;
-  result?: Record<string, unknown>;
-}) {
-  if (!inputData.assistantMessage.trim()) return;
-
-  const localItem = {
-    id:
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : `history_${Date.now()}`,
-    profile_id: activeProfile?.id || null,
-    module: inputData.module,
-    title: inputData.title,
-    user_message: inputData.userMessage,
-    assistant_message: inputData.assistantMessage,
-    result: inputData.result || {},
-    created_at: new Date().toISOString(),
-  };
-
-  try {
-  const raw = localStorage.getItem('chat_history');
-  const existing = raw ? JSON.parse(raw) : [];
-  const list = Array.isArray(existing) ? existing : [];
-
-  /**
-   * Do localStorage neukladáme celý result analýzy.
-   * Kompletný výsledok sa ďalej uloží cez /api/history.
-   */
-  const localItemForStorage = {
-    ...localItem,
-
-    user_message: String(inputData.userMessage || '').slice(0, 10_000),
-
-    assistant_message: String(
-      inputData.assistantMessage || '',
-    ).slice(0, 40_000),
-
-    result: {
+    const localItem = {
+      id:
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `history_${Date.now()}`,
+      profile_id: activeProfile?.id || null,
       module: inputData.module,
       title: inputData.title,
-      hasResult: Boolean(inputData.result),
-    },
-  };
+      user_message: inputData.userMessage,
+      assistant_message: inputData.assistantMessage,
+      result: inputData.result || {},
+      created_at: new Date().toISOString(),
+    };
 
-  /**
-   * Pôvodne sa ukladalo 300 záznamov.
-   * V localStorage ponecháme maximálne 40 ľahkých záznamov.
-   */
-  let nextItems = [
-    localItemForStorage,
-    ...list,
-  ].slice(0, 40);
-
-  let saved = false;
-
-  while (nextItems.length > 0 && !saved) {
     try {
-      localStorage.setItem(
-        'chat_history',
-        JSON.stringify(nextItems),
-      );
+      const raw = localStorage.getItem("chat_history");
+      const existing = raw ? JSON.parse(raw) : [];
+      const list = Array.isArray(existing) ? existing : [];
 
-      saved = true;
-    } catch (storageError) {
-      const quotaExceeded =
-        storageError instanceof DOMException &&
-        (
-          storageError.name === 'QuotaExceededError' ||
-          storageError.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
-          storageError.code === 22 ||
-          storageError.code === 1014
-        );
+      /**
+       * Do localStorage neukladáme celý result analýzy.
+       * Kompletný výsledok sa ďalej uloží cez /api/history.
+       */
+      const localItemForStorage = {
+        ...localItem,
 
-      if (!quotaExceeded) {
-        throw storageError;
+        user_message: String(inputData.userMessage || "").slice(0, 10_000),
+
+        assistant_message: String(inputData.assistantMessage || "").slice(
+          0,
+          40_000,
+        ),
+
+        result: {
+          module: inputData.module,
+          title: inputData.title,
+          hasResult: Boolean(inputData.result),
+        },
+      };
+
+      /**
+       * Pôvodne sa ukladalo 300 záznamov.
+       * V localStorage ponecháme maximálne 40 ľahkých záznamov.
+       */
+      let nextItems = [localItemForStorage, ...list].slice(0, 40);
+
+      let saved = false;
+
+      while (nextItems.length > 0 && !saved) {
+        try {
+          localStorage.setItem("chat_history", JSON.stringify(nextItems));
+
+          saved = true;
+        } catch (storageError) {
+          const quotaExceeded =
+            storageError instanceof DOMException &&
+            (storageError.name === "QuotaExceededError" ||
+              storageError.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+              storageError.code === 22 ||
+              storageError.code === 1014);
+
+          if (!quotaExceeded) {
+            throw storageError;
+          }
+
+          // Pri plnom úložisku odstránime najstarší záznam.
+          nextItems = nextItems.slice(0, -1);
+        }
       }
 
-      // Pri plnom úložisku odstránime najstarší záznam.
-      nextItems = nextItems.slice(0, -1);
-    }
-  }
-
-  if (!saved) {
-    localStorage.removeItem('chat_history');
-  }
-} catch (error) {
-  console.warn(
-    'Lokálna história sa neuložila:',
-    error instanceof Error ? error.message : String(error),
-  );
-}
-
-  try {
-    const res = await fetch('/api/history', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify({
-        profileId: activeProfile?.id || null,
-        module: inputData.module,
-        title: inputData.title,
-        userMessage: inputData.userMessage,
-        assistantMessage: inputData.assistantMessage,
-        result: inputData.result || {},
-      }),
-    });
-
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok || !data?.ok) {
+      if (!saved) {
+        localStorage.removeItem("chat_history");
+      }
+    } catch (error) {
       console.warn(
-        'História sa neuložila do databázy:',
-        data?.error || `HTTP ${res.status}`,
+        "Lokálna história sa neuložila:",
+        error instanceof Error ? error.message : String(error),
       );
     }
-  } catch (error) {
-    console.warn('História sa neuložila do databázy:', error);
+
+    try {
+      const res = await fetch("/api/history", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          profileId: activeProfile?.id || null,
+          module: inputData.module,
+          title: inputData.title,
+          userMessage: inputData.userMessage,
+          assistantMessage: inputData.assistantMessage,
+          result: inputData.result || {},
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok || !data?.ok) {
+        console.warn(
+          "História sa neuložila do databázy:",
+          data?.error || `HTTP ${res.status}`,
+        );
+      }
+    } catch (error) {
+      console.warn("História sa neuložila do databázy:", error);
+    }
   }
-}
 
   const startDictation = () => {
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert('Diktovanie nie je podporované. Skús Google Chrome.');
+      alert("Diktovanie nie je podporované. Skús Google Chrome.");
       return;
     }
 
     const recognition = new SpeechRecognition();
 
-   const systemLanguage = getStoredSystemLanguage();
+    const systemLanguage = getStoredSystemLanguage();
 
-const speechLanguageMap: Record<SystemLanguage, string> = {
-  sk: 'sk-SK',
-  cs: 'cs-CZ',
-  en: 'en-US',
-  de: 'de-DE',
-  pl: 'pl-PL',
-  hu: 'hu-HU',
-};
+    const speechLanguageMap: Record<SystemLanguage, string> = {
+      sk: "sk-SK",
+      cs: "cs-CZ",
+      en: "en-US",
+      de: "de-DE",
+      pl: "pl-PL",
+      hu: "hu-HU",
+    };
 
-recognition.lang = speechLanguageMap[systemLanguage] || 'sk-SK';
+    recognition.lang = speechLanguageMap[systemLanguage] || "sk-SK";
     recognition.interimResults = false;
     recognition.continuous = false;
 
     recognition.onstart = () => setIsListening(true);
 
     recognition.onresult = (event: any) => {
-      const transcript = event.results?.[0]?.[0]?.transcript || '';
+      const transcript = event.results?.[0]?.[0]?.transcript || "";
 
       if (transcript) {
-        setInput((prev) => `${prev}${prev.trim() ? ' ' : ''}${transcript}`);
+        setInput((prev) => `${prev}${prev.trim() ? " " : ""}${transcript}`);
       }
     };
 
@@ -4470,17 +4421,17 @@ recognition.lang = speechLanguageMap[systemLanguage] || 'sk-SK';
     recognition.start();
   };
 
-  const buildModulePrompt = () => {
-const moduleKey  = String(activeModule);
-  const systemLanguage = getStoredSystemLanguage();
-const profileForPrompt = prepareProfileForApi(
-  activeProfile,
-  systemLanguage,
-);
-  const profileBlock = buildProfileBlock(profileForPrompt);
-  const citationStyle = getCitationStyle(profileForPrompt);
-  const workLanguage = getWorkLanguage(profileForPrompt);
-  const attachmentBlock = buildAttachmentBlock(attachedFiles);
+  const buildModulePrompt = (moduleOverride: ModuleKey = activeModule) => {
+    const moduleKey = String(moduleOverride);
+    const systemLanguage = getStoredSystemLanguage();
+    const profileForPrompt = prepareProfileForApi(
+      activeProfile,
+      systemLanguage,
+    );
+    const profileBlock = buildProfileBlock(profileForPrompt);
+    const citationStyle = getCitationStyle(profileForPrompt);
+    const workLanguage = getWorkLanguage(profileForPrompt);
+    const attachmentBlock = buildAttachmentBlock(attachedFiles);
 
     const baseRules = `
 PROFIL PRÁCE:
@@ -4506,7 +4457,7 @@ DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
 - Citačná norma: ${citationStyle}.
 `.trim();
 
-    if (moduleKey  === 'supervisor') {
+    if (moduleKey === "supervisor") {
       return `
 ${baseRules}
 
@@ -4514,11 +4465,11 @@ ${baseRules}
 Správaj sa ako odborný vedúci akademickej práce. Skontroluj logiku, cieľ, výskumný problém, metodológiu, štruktúru, argumentáciu a nadväznosť práce.
 
 TEXT NA KONTROLU:
-${input || 'Použi text z priložených dokumentov, ak je dostupný.'}
+${input || "Použi text z priložených dokumentov, ak je dostupný."}
 
 ZAČIATOK ODPOVEDE:
 Začni priamo nadpisom:
-Hodnotenie práce: ${activeProfile?.title || 'bez názvu'}
+Hodnotenie práce: ${activeProfile?.title || "bez názvu"}
 
 POVINNÁ ŠTRUKTÚRA:
 1. Celkové hodnotenie práce
@@ -4534,33 +4485,33 @@ POVINNÁ ŠTRUKTÚRA:
 `.trim();
     }
 
-    if (moduleKey  === 'quality') {
-  const modeInstruction =
-    qualityMode === 'style'
-      ? `
+    if (moduleKey === "quality") {
+      const modeInstruction =
+        qualityMode === "style"
+          ? `
 Kontroluj výhradne štylistiku, jazyk, akademickosť, plynulosť viet, nevhodné formulácie, zrozumiteľnosť a formálnosť textu.
 Nehodnoť obsah práce ako celok.
 Pri každej slabej alebo neakademickej formulácii uveď aj konkrétnu prepísanú verziu.
 `.trim()
-      : qualityMode === 'citations'
-        ? `
+          : qualityMode === "citations"
+            ? `
 Kontroluj výhradne citácie, odkazy v texte, zoznam literatúry, úplnosť bibliografických údajov a súlad s citačnou normou.
 Nehodnoť celú prácu obsahovo.
 Ak zistíš problém s citáciou, uveď aj návrh, ako má byť citácia alebo odkaz opravený.
 Nevymýšľaj neexistujúce zdroje, autorov, DOI, URL ani vydavateľov.
 `.trim()
-        : qualityMode === 'logic'
-          ? `
+            : qualityMode === "logic"
+              ? `
 Kontroluj logiku, nadväznosť, argumentáciu, duplicity, vnútornú súdržnosť textu a prepojenie cieľa, problému, metodológie a záverov.
 Pri každom logickom probléme uveď aj návrh opravy alebo odporúčanú preformulovanú verziu.
 `.trim()
-          : `
+              : `
 Urob celkový audit kvality akademickej práce.
 Jasne oddeľ štylistiku, logiku, citácie, metodológiu, odbornú presnosť a praktické odporúčania.
 Výstup nesmie byť iba kritika. Musí obsahovať aj konkrétne prepísané vety a zapracovanú upravenú verziu textu.
 `.trim();
 
-  return `
+      return `
 ${baseRules}
 
 ÚLOHA:
@@ -4575,11 +4526,11 @@ PRESNÁ INŠTRUKCIA:
 ${modeInstruction}
 
 TEXT NA KONTROLU:
-${input || 'Použi text z priložených dokumentov, ak je dostupný.'}
+${input || "Použi text z priložených dokumentov, ak je dostupný."}
 
 ZAČIATOK ODPOVEDE:
 Začni priamo nadpisom:
-${activeProfile?.title || 'Audit kontrolovaného textu'}
+${activeProfile?.title || "Audit kontrolovaného textu"}
 
 POVINNÁ ŠTRUKTÚRA:
 
@@ -4645,9 +4596,9 @@ DÔLEŽITÉ PRAVIDLÁ:
 - Nepíš technický úvod.
 - Nezačínaj odpoveď slovami „Audit kvality“ ani „Tu je audit“.
 `.trim();
-}
+    }
 
-    if (moduleKey  === 'defense') {
+    if (moduleKey === "defense") {
       return `
 ${baseRules}
 
@@ -4655,11 +4606,11 @@ ${baseRules}
 Priprav kompletnú obhajobu práce. Musí vzniknúť aj prezentácia, aj sprievodný text, aj otázky a odpovede.
 
 TEXT / PODKLAD:
-${input || 'Použi aktívny profil práce a priložené dokumenty.'}
+${input || "Použi aktívny profil práce a priložené dokumenty."}
 
 ZAČIATOK ODPOVEDE:
 Začni priamo názvom práce:
-${activeProfile?.title || 'Prezentácia k obhajobe práce'}
+${activeProfile?.title || "Prezentácia k obhajobe práce"}
 
 POVINNÁ ŠTRUKTÚRA VÝSTUPU:
 ČASŤ A: PREZENTÁCIA – OBSAH SNÍMOK
@@ -4677,8 +4628,8 @@ DÔLEŽITÉ:
 `.trim();
     }
 
- if (moduleKey === 'translation') {
-  return `
+    if (moduleKey === "translation") {
+      return `
 ${baseRules}
 
 ÚLOHA:
@@ -4705,10 +4656,10 @@ PRÍSNE PRAVIDLÁ PRE VÝSTUP:
 - Neuvádzaj, že text bol preložený.
 - Začni priamo prvým slovom preloženého textu.
 `.trim();
-}
+    }
 
-    if (moduleKey === 'data') {
-  return `
+    if (moduleKey === "data") {
+      return `
 ${baseRules}
 
 ÚLOHA:
@@ -4723,7 +4674,7 @@ Správny tok analýzy:
 6. export výsledkov robí AnalysisResultsModal.tsx.
 
 ZADANIE POUŽÍVATEĽA:
-${input || 'Použi priložené dátové súbory, ak sú dostupné.'}
+${input || "Použi priložené dátové súbory, ak sú dostupné."}
 
 PRAVIDLÁ:
 - Nevymýšľaj štatistické výsledky.
@@ -4734,10 +4685,9 @@ PRAVIDLÁ:
 - Export výsledkov patrí do AnalysisResultsModal.tsx.
 - Hlavný app/api/analyze-data/route.ts sa nepoužíva.
 `.trim();
-}
+    }
 
-
-    if (moduleKey  === 'planning') {
+    if (moduleKey === "planning") {
       return `
 ${baseRules}
 
@@ -4769,8 +4719,8 @@ VÝSTUP:
 `.trim();
     }
 
-    if (moduleKey === 'emails') {
-  return `
+    if (moduleKey === "emails") {
+      return `
 ${baseRules}
 
 ÚLOHA:
@@ -4803,1104 +4753,1136 @@ Predmet: ...
 Text emailu:
 ...
 `.trim();
-}
+    }
 
     return input;
   };
 
-function normalizeDashboardCellValue(value: unknown): string | number | null {
-  if (value === null || value === undefined) return null;
+  function normalizeDashboardCellValue(value: unknown): string | number | null {
+    if (value === null || value === undefined) return null;
 
-  const text = String(value).trim();
+    const text = String(value).trim();
 
-  if (!text) return null;
+    if (!text) return null;
 
-  const numeric = Number(
-    text
-      .replace(/\s/g, '')
-      .replace(',', '.')
-      .replace('%', ''),
-  );
+    const numeric = Number(
+      text.replace(/\s/g, "").replace(",", ".").replace("%", ""),
+    );
 
-  if (Number.isFinite(numeric)) {
-    return numeric;
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+
+    return text;
   }
 
-  return text;
-}
+  async function readPreparedExcelCleanRows(
+    file: File,
+  ): Promise<AnalysisRow[]> {
+    const XLSX = await import("xlsx");
+    const buffer = await file.arrayBuffer();
 
-async function readPreparedExcelCleanRows(file: File): Promise<AnalysisRow[]> {
-  const XLSX = await import('xlsx');
-  const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, {
+      type: "array",
+      cellDates: true,
+      cellNF: false,
+      cellText: false,
+    });
 
-  const workbook = XLSX.read(buffer, {
-    type: 'array',
-    cellDates: true,
-    cellNF: false,
-    cellText: false,
-  });
+    const preferredSheetName = workbook.SheetNames.find(
+      (sheetName) => sheetName.toUpperCase() === "DATA_CLEAN",
+    );
 
-  const preferredSheetName = workbook.SheetNames.find(
-    (sheetName) => sheetName.toUpperCase() === 'DATA_CLEAN',
-  );
+    const sheetName = preferredSheetName || workbook.SheetNames[0];
 
-  const sheetName = preferredSheetName || workbook.SheetNames[0];
+    if (!sheetName) {
+      throw new Error("Prepared Excel neobsahuje žiadny hárok.");
+    }
 
-  if (!sheetName) {
-    throw new Error('Prepared Excel neobsahuje žiadny hárok.');
+    const sheet = workbook.Sheets[sheetName];
+
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+      defval: "",
+      raw: false,
+    });
+
+    return rows
+      .map((row) => {
+        const normalizedRow: AnalysisRow = {};
+
+        Object.entries(row).forEach(([key, value]) => {
+          const header = String(key || "").trim();
+
+          if (!header || header.startsWith("__EMPTY")) return;
+
+          normalizedRow[header] = normalizeDashboardCellValue(value);
+        });
+
+        return normalizedRow;
+      })
+      .filter((row) => Object.keys(row).length > 0);
   }
 
-  const sheet = workbook.Sheets[sheetName];
+  function getDashboardColumnNames(rows: AnalysisRow[]): string[] {
+    const columns = new Set<string>();
 
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-    defval: '',
-    raw: false,
-  });
+    rows.forEach((row) => {
+      Object.keys(row || {}).forEach((key) => {
+        if (key.trim()) columns.add(key);
+      });
+    });
 
-  return rows
-    .map((row) => {
-      const normalizedRow: AnalysisRow = {};
+    return Array.from(columns);
+  }
 
-      Object.entries(row).forEach(([key, value]) => {
-        const header = String(key || '').trim();
+  const runModule = async () => {
+    if (isLoading || billingLoading) return;
 
-        if (!header || header.startsWith('__EMPTY')) return;
+    const requestedModule = activeModuleRef.current;
+    const requestedModuleUi = getFixedModuleUi(systemLanguage)[requestedModule];
+    const requestedModuleLabel = requestedModuleUi.label;
+    const requestedModuleResultTitle = requestedModuleUi.resultTitle;
 
-        normalizedRow[header] = normalizeDashboardCellValue(value);
+    setBillingNotice(null);
+
+    let currentEntitlements = entitlements;
+    let currentPageQuota = pageQuota;
+
+    if (!currentEntitlements || !currentPageQuota) {
+      const loadedBillingState = await loadBillingState();
+
+      currentEntitlements = loadedBillingState?.entitlements || null;
+      currentPageQuota = loadedBillingState?.pageQuota || null;
+    }
+
+    if (!currentEntitlements || !currentPageQuota) {
+      setBillingNotice({
+        code: "BILLING_STATE_UNAVAILABLE",
+        message:
+          "Aktívny balík a limity nie sú dostupné. Obnovte stránku a skúste požiadavku znova.",
+        purchaseUrl: "/pricing",
+      });
+      return;
+    }
+
+    const requiredFeature = MODULE_REQUIRED_FEATURE[requestedModule];
+    const currentHasUnlimitedAccess =
+      currentEntitlements.hasUnlimitedAccess ||
+      currentEntitlements.isAdmin ||
+      currentPageQuota.isUnlimited;
+
+    if (
+      !currentHasUnlimitedAccess &&
+      !currentEntitlements.features.includes(requiredFeature)
+    ) {
+      setBillingNotice({
+        code: "FEATURE_NOT_INCLUDED",
+        message: `Funkcia „${requestedModuleLabel}“ nie je súčasťou aktivovaného balíka.`,
+        detail: requiredFeature,
+        purchaseUrl: "/pricing",
+        scope: "module",
+        moduleKey: requestedModule,
+        feature: requiredFeature,
+      });
+      return;
+    }
+
+    if (!currentHasUnlimitedAccess && currentEntitlements.promptLimitReached) {
+      setBillingNotice({
+        code: "PROMPT_LIMIT_REACHED",
+        message:
+          "Limit dostupných promptov bol vyčerpaný. Pre pokračovanie si aktivujte platený balík.",
+        purchaseUrl: "/pricing",
+      });
+      return;
+    }
+
+    if (
+      !currentHasUnlimitedAccess &&
+      !currentPageQuota.isUnlimited &&
+      currentPageQuota.pageLimitReached
+    ) {
+      setBillingNotice({
+        code: "PAGE_LIMIT_REACHED",
+        message:
+          "Stránkový limit bol vyčerpaný. Pre pokračovanie si dokúpte ďalšie strany.",
+        purchaseUrl: "/pricing#doplnkove-sluzby",
+      });
+      return;
+    }
+
+    if (
+      !currentEntitlements.hasUnlimitedAccess &&
+      !currentEntitlements.isAdmin &&
+      currentEntitlements.attachmentLimit !== null &&
+      attachedFiles.length > currentEntitlements.attachmentLimit
+    ) {
+      setBillingNotice({
+        code: "ATTACHMENT_LIMIT_REACHED",
+        message: `Váš balík povoľuje maximálne ${currentEntitlements.attachmentLimit} príloh.`,
+        purchaseUrl: "/pricing",
       });
 
-      return normalizedRow;
-    })
-    .filter((row) => Object.keys(row).length > 0);
-}
+      return;
+    }
 
-function getDashboardColumnNames(rows: AnalysisRow[]): string[] {
-  const columns = new Set<string>();
+    if (
+      currentHasUnlimitedAccess &&
+      attachedFiles.length > maxAdminFilesPerRequest
+    ) {
+      setBillingNotice({
+        code: "ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED",
+        message: `V jednej požiadavke je možné odoslať maximálne ${maxAdminFilesPerRequest} príloh.`,
+        purchaseUrl: "/pricing",
+      });
 
-  rows.forEach((row) => {
-    Object.keys(row || {}).forEach((key) => {
-      if (key.trim()) columns.add(key);
-    });
-  });
+      return;
+    }
 
-  return Array.from(columns);
-}
+    const userText = input.trim();
+    const secondaryText = secondaryInput.trim();
 
-const runModule = async () => {
-  if (isLoading || billingLoading) return;
-
-  setBillingNotice(null);
-
-  let currentEntitlements = entitlements;
-  let currentPageQuota = pageQuota;
-
-  if (!currentEntitlements || !currentPageQuota) {
-    const loadedBillingState = await loadBillingState();
-
-    currentEntitlements = loadedBillingState?.entitlements || null;
-    currentPageQuota = loadedBillingState?.pageQuota || null;
-  }
-
-  if (!currentEntitlements || !currentPageQuota) {
-    setBillingNotice({
-      code: 'BILLING_STATE_UNAVAILABLE',
-      message:
-        'Aktívny balík a limity nie sú dostupné. Obnovte stránku a skúste požiadavku znova.',
-      purchaseUrl: '/pricing',
-    });
-    return;
-  }
-
-  const requiredFeature = MODULE_REQUIRED_FEATURE[activeModule];
-  const currentHasUnlimitedAccess =
-    currentEntitlements.hasUnlimitedAccess ||
-    currentEntitlements.isAdmin ||
-    currentPageQuota.isUnlimited;
-
-  if (
-    !currentHasUnlimitedAccess &&
-    !currentEntitlements.features.includes(requiredFeature)
-  ) {
-    setBillingNotice({
-      code: 'FEATURE_NOT_INCLUDED',
-      message: `Funkcia „${activeModuleLabel}“ nie je súčasťou aktivovaného balíka.`,
-      detail: requiredFeature,
-      purchaseUrl: '/pricing',
-    });
-    return;
-  }
-
-  if (
-    !currentHasUnlimitedAccess &&
-    currentEntitlements.promptLimitReached
-  ) {
-    setBillingNotice({
-      code: 'PROMPT_LIMIT_REACHED',
-      message:
-        'Limit dostupných promptov bol vyčerpaný. Pre pokračovanie si aktivujte platený balík.',
-      purchaseUrl: '/pricing',
-    });
-    return;
-  }
-
-  if (
-    !currentHasUnlimitedAccess &&
-    !currentPageQuota.isUnlimited &&
-    currentPageQuota.pageLimitReached
-  ) {
-    setBillingNotice({
-      code: 'PAGE_LIMIT_REACHED',
-      message:
-        'Stránkový limit bol vyčerpaný. Pre pokračovanie si dokúpte ďalšie strany.',
-      purchaseUrl: '/pricing#doplnkove-sluzby',
-    });
-    return;
-  }
-
-  if (
-    !currentEntitlements.hasUnlimitedAccess &&
-    !currentEntitlements.isAdmin &&
-    currentEntitlements.attachmentLimit !== null &&
-    attachedFiles.length > currentEntitlements.attachmentLimit
-  ) {
-    setBillingNotice({
-      code: 'ATTACHMENT_LIMIT_REACHED',
-      message: `Váš balík povoľuje maximálne ${currentEntitlements.attachmentLimit} príloh.`,
-      purchaseUrl: '/pricing',
-    });
-
-    return;
-  }
-
-  if (
-    currentHasUnlimitedAccess &&
-    attachedFiles.length > maxAdminFilesPerRequest
-  ) {
-    setBillingNotice({
-      code: 'ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED',
-      message: `V jednej požiadavke je možné odoslať maximálne ${maxAdminFilesPerRequest} príloh.`,
-      purchaseUrl: '/pricing',
-    });
-
-    return;
-  }
-
-  const userText = input.trim();
-  const secondaryText = secondaryInput.trim();
-
-  const hasUsableProfile = Boolean(
-    activeProfile &&
-      (
-        activeProfile.id ||
+    const hasUsableProfile = Boolean(
+      activeProfile &&
+      (activeProfile.id ||
         activeProfile.title ||
         activeProfile.topic ||
         activeProfile.type ||
-        activeProfile.schema?.label
-      ),
-  );
+        activeProfile.schema?.label),
+    );
 
-  const hasAnyInput = Boolean(
-    userText ||
-      secondaryText ||
-      attachedFiles.length > 0 ||
-      hasUsableProfile,
-  );
+    const hasAnyInput = Boolean(
+      userText || secondaryText || attachedFiles.length > 0 || hasUsableProfile,
+    );
 
-  if (!hasAnyInput) {
-    alert('Najskôr vložte zadanie, text, prílohu alebo vyberte profil práce.');
-    return;
-  }
-
-  if (activeModule === 'planning') {
-    const validation = validatePlanningDatesNoPast(userText || secondaryText);
-
-    if (!validation.ok) {
-      alert(validation.message);
+    if (!hasAnyInput) {
+      alert(
+        "Najskôr vložte zadanie, text, prílohu alebo vyberte profil práce.",
+      );
       return;
     }
-  }
 
-  setIsLoading(true);
-  setResult('');
-  setCanvasText('');
-  setAnalysisResult(null);
-  setAnalysisModalOpen(false);
+    if (requestedModule === "planning") {
+      const validation = validatePlanningDatesNoPast(userText || secondaryText);
 
-  try {
-    const systemLanguage = getStoredSystemLanguage();
-    persistSystemLanguage(systemLanguage);
-
-    const profileForApi = prepareProfileForApi(
-      activeProfile,
-      systemLanguage,
-    );
-
-    const finalWorkLanguage = getWorkLanguage(profileForApi);
-    const prompt = buildModulePrompt();
-
-if (activeModule === 'data') {
-  const dataFiles = attachedFiles.filter((item) => item.file instanceof File);
-
-  if (!dataFiles.length) {
-    alert('Najprv nahraj Excel, CSV alebo TXT súbor s dátami.');
-    return;
-  }
-
-  const allowedDataFiles = dataFiles.filter((item) => {
-    const extension = getFileExtension(item.name || item.file?.name || '');
-
-    return (
-      extension === '.xlsx' ||
-      extension === '.xls' ||
-      extension === '.csv' ||
-      extension === '.txt'
-    );
-  });
-
-  if (!allowedDataFiles.length) {
-    alert('Pre analýzu dát nahraj Excel, CSV alebo TXT súbor.');
-    return;
-  }
-
-  const workLanguage =
-    finalWorkLanguage ||
-    profileForApi?.workLanguage ||
-    profileForApi?.language ||
-    systemLanguage;
-
-  const promptText =
-    prompt ||
-    userText ||
-    'Priprav raw dáta a vykonaj štatistickú analýzu.';
-
-  const prepareFormData = new FormData();
-
-  prepareFormData.append('module', 'data');
-  prepareFormData.append('prompt', promptText);
-  prepareFormData.append('assignment', userText || '');
-  prepareFormData.append('analysisGoal', userText || '');
-  prepareFormData.append('dataDescription', userText || '');
-
-  prepareFormData.append('language', workLanguage);
-  prepareFormData.append('outputLanguage', workLanguage);
-  prepareFormData.append('systemLanguage', systemLanguage);
-  prepareFormData.append('interfaceLanguage', systemLanguage);
-  prepareFormData.append('workLanguage', workLanguage);
-
-  prepareFormData.append('profile', JSON.stringify(profileForApi || {}));
-  prepareFormData.append('activeProfile', JSON.stringify(profileForApi || {}));
-  prepareFormData.append('profileContext', buildProfileBlock(profileForApi));
-
-prepareFormData.append(
-  'questionnaireConfig',
-  JSON.stringify(questionnaireConfig),
-);
-
-prepareFormData.append('questionnaireMode', questionnaireConfig.mode);
-
-prepareFormData.append(
-  'selectedQuestionnaires',
-  JSON.stringify(questionnaireConfig.selectedQuestionnaires),
-);
-
-prepareFormData.append('manualScalesText', manualScalesText);
-prepareFormData.append('manualSubscalesText', manualSubscalesText);
-prepareFormData.append('groupingColumnsText', groupingColumnsText);
-
-prepareFormData.append(
-  'manualAnalysisConfig',
-  JSON.stringify({
-    questionnaireMode,
-    selectedQuestionnaires,
-    customQuestionnairesText,
-    manualScalesText,
-    manualSubscalesText,
-    groupingColumnsText,
-  }),
-);
-
-  if (profileForApi?.id) {
-    prepareFormData.append('projectId', profileForApi.id);
-  }
-
-  allowedDataFiles.forEach((item) => {
-    if (item.file instanceof File) {
-      prepareFormData.append('file', item.file, item.name || item.file.name);
-      prepareFormData.append('files', item.file, item.name || item.file.name);
+      if (!validation.ok) {
+        alert(validation.message);
+        return;
+      }
     }
-  });
 
-  const prepareResponse = await fetch('/api/analyze-data/prepare', {
-    method: 'POST',
-    body: prepareFormData,
-  });
+    setIsLoading(true);
+    setResult("");
+    setCanvasText("");
+    setAnalysisResult(null);
+    setAnalysisModalOpen(false);
 
-  if (!prepareResponse.ok) {
-    throw await readDashboardApiError(prepareResponse);
-  }
+    try {
+      const systemLanguage = getStoredSystemLanguage();
+      persistSystemLanguage(systemLanguage);
 
-  const prepareResult = await prepareResponse.json();
+      const profileForApi = prepareProfileForApi(activeProfile, systemLanguage);
 
-  if (prepareResult?.ok === false) {
-    throw new Error(
-      prepareResult?.error ||
-        prepareResult?.message ||
-        'Príprava raw dát zlyhala.',
-    );
-  }
+      const finalWorkLanguage = getWorkLanguage(profileForApi);
+      const prompt = buildModulePrompt(requestedModule);
 
-  const preparedFileBase64 = String(prepareResult?.preparedFileBase64 || '');
+      if (requestedModule === "data") {
+        const dataFiles = attachedFiles.filter(
+          (item) => item.file instanceof File,
+        );
 
-  const preparedFileName = String(
-    prepareResult?.preparedFileName ||
-      prepareResult?.fileName ||
-      'prepared-raw-data.xlsx',
-  );
+        if (!dataFiles.length) {
+          alert("Najprv nahraj Excel, CSV alebo TXT súbor s dátami.");
+          return;
+        }
 
-  const preparedMimeType = String(
-    prepareResult?.mimeType ||
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  );
+        const allowedDataFiles = dataFiles.filter((item) => {
+          const extension = getFileExtension(
+            item.name || item.file?.name || "",
+          );
 
-  if (!preparedFileBase64) {
-    throw new Error(
-      'Prepare endpoint nevrátil preparedFileBase64. Skontroluj app/api/analyze-data/prepare/route.ts.',
-    );
-  }
+          return (
+            extension === ".xlsx" ||
+            extension === ".xls" ||
+            extension === ".csv" ||
+            extension === ".txt"
+          );
+        });
 
-  setPreparedDataFile({
-    fileName: preparedFileName,
-    base64: preparedFileBase64,
-    mimeType: preparedMimeType,
-    rows:
-      typeof prepareResult?.rows === 'number'
-        ? prepareResult.rows
-        : undefined,
-    columns:
-      typeof prepareResult?.columns === 'number'
-        ? prepareResult.columns
-        : undefined,
-    sheets: Array.isArray(prepareResult?.sheets)
-      ? prepareResult.sheets
-      : [],
-    warnings: Array.isArray(prepareResult?.warnings)
-      ? prepareResult.warnings
-      : [],
-    qualityReport: Array.isArray(prepareResult?.qualityReport)
-      ? prepareResult.qualityReport
-      : [],
-  });
+        if (!allowedDataFiles.length) {
+          alert("Pre analýzu dát nahraj Excel, CSV alebo TXT súbor.");
+          return;
+        }
 
-  const preparedBlob = base64ToBlob(preparedFileBase64, preparedMimeType);
+        const workLanguage =
+          finalWorkLanguage ||
+          profileForApi?.workLanguage ||
+          profileForApi?.language ||
+          systemLanguage;
 
-  const preparedFile = new File([preparedBlob], preparedFileName, {
-    type: preparedMimeType,
-  });
+        const promptText =
+          prompt ||
+          userText ||
+          "Priprav raw dáta a vykonaj štatistickú analýzu.";
 
-  const cleanRows = await readPreparedExcelCleanRows(preparedFile);
+        const prepareFormData = new FormData();
 
-  if (!cleanRows.length) {
-    throw new Error(
-      'Z pripraveného súboru sa nepodarilo načítať hárok DATA_CLEAN alebo hárok neobsahuje žiadne riadky.',
-    );
-  }
+        prepareFormData.append("module", "data");
+        prepareFormData.append("prompt", promptText);
+        prepareFormData.append("assignment", userText || "");
+        prepareFormData.append("analysisGoal", userText || "");
+        prepareFormData.append("dataDescription", userText || "");
 
-  const columns = getDashboardColumnNames(cleanRows);
+        prepareFormData.append("language", workLanguage);
+        prepareFormData.append("outputLanguage", workLanguage);
+        prepareFormData.append("systemLanguage", systemLanguage);
+        prepareFormData.append("interfaceLanguage", systemLanguage);
+        prepareFormData.append("workLanguage", workLanguage);
 
-  const hasManualScales =
-  Boolean(manualScalesText.trim()) ||
-  Boolean(manualSubscalesText.trim());
+        prepareFormData.append("profile", JSON.stringify(profileForApi || {}));
+        prepareFormData.append(
+          "activeProfile",
+          JSON.stringify(profileForApi || {}),
+        );
+        prepareFormData.append(
+          "profileContext",
+          buildProfileBlock(profileForApi),
+        );
 
-const hasGroupingColumns = Boolean(groupingColumnsText.trim());
+        prepareFormData.append(
+          "questionnaireConfig",
+          JSON.stringify(questionnaireConfig),
+        );
 
-const canDataDescriptive =
-  currentHasUnlimitedAccess ||
-  currentEntitlements.features.includes('data-descriptive');
-const canDataQuestionnaires =
-  currentHasUnlimitedAccess ||
-  currentEntitlements.features.includes('data-questionnaires');
-const canDataReliability =
-  currentHasUnlimitedAccess ||
-  currentEntitlements.features.includes('data-reliability');
-const canDataNormality =
-  currentHasUnlimitedAccess ||
-  currentEntitlements.features.includes('data-normality');
-const canDataCorrelations =
-  currentHasUnlimitedAccess ||
-  currentEntitlements.features.includes('data-correlations');
-const canDataParametric =
-  currentHasUnlimitedAccess ||
-  currentEntitlements.features.includes('data-parametric-tests');
-const canDataNonParametric =
-  currentHasUnlimitedAccess ||
-  currentEntitlements.features.includes('data-nonparametric-tests');
+        prepareFormData.append("questionnaireMode", questionnaireConfig.mode);
 
-const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
-  alpha: 0.05,
-  language: workLanguage,
-  profile: profileForApi || {},
-  assignment: userText || '',
-  source: 'prepared-raw-data',
-  sheetName: 'DATA_CLEAN',
+        prepareFormData.append(
+          "selectedQuestionnaires",
+          JSON.stringify(questionnaireConfig.selectedQuestionnaires),
+        );
 
-  // Každý štatistický blok sa zapne iba vtedy,
-  // keď ho obsahuje aktívny plán alebo doplnok.
-  includeFrequencies: canDataDescriptive,
-  includeItemDescriptives: canDataDescriptive,
-  includeNormality: canDataNormality,
-  includeCorrelations: canDataCorrelations,
-  includeRecommendedCorrelations: canDataCorrelations,
+        prepareFormData.append("manualScalesText", manualScalesText);
+        prepareFormData.append("manualSubscalesText", manualSubscalesText);
+        prepareFormData.append("groupingColumnsText", groupingColumnsText);
 
-  includeScaleScores: hasManualScales && canDataQuestionnaires,
-  includeScaleDescriptives: hasManualScales && canDataDescriptive,
-  includeReliability: hasManualScales && canDataReliability,
+        prepareFormData.append(
+          "manualAnalysisConfig",
+          JSON.stringify({
+            questionnaireMode,
+            selectedQuestionnaires,
+            customQuestionnairesText,
+            manualScalesText,
+            manualSubscalesText,
+            groupingColumnsText,
+          }),
+        );
 
-  includeGroupTests:
-    hasGroupingColumns && (canDataParametric || canDataNonParametric),
-  includeParametricTests: hasGroupingColumns && canDataParametric,
-  includeNonParametricTests: hasGroupingColumns && canDataNonParametric,
-  includeRecommendedGroupTests:
-    hasGroupingColumns && (canDataParametric || canDataNonParametric),
+        if (profileForApi?.id) {
+          prepareFormData.append("projectId", profileForApi.id);
+        }
 
-  // Toto musí byť TRUE, inak sa pri manuálnom režime
-  // nepoužijú numerické premenné z prepared raw data.
-  fallbackToNumericVariables: true,
+        allowedDataFiles.forEach((item) => {
+          if (item.file instanceof File) {
+            prepareFormData.append(
+              "file",
+              item.file,
+              item.name || item.file.name,
+            );
+            prepareFormData.append(
+              "files",
+              item.file,
+              item.name || item.file.name,
+            );
+          }
+        });
 
-  // Manuálne škály sa rozpoznávajú iba vtedy,
-  // keď sú naozaj zadané.
-  autoDetectScales: hasManualScales,
+        const prepareResponse = await fetch("/api/analyze-data/prepare", {
+          method: "POST",
+          body: prepareFormData,
+        });
 
-  questionnaireConfig,
-  selectedQuestionnaires: questionnaireConfig.selectedQuestionnaires,
-  customQuestionnaires: [],
+        if (!prepareResponse.ok) {
+          throw await readDashboardApiError(prepareResponse);
+        }
 
-  manualScalesText,
-  manualSubscalesText,
-  groupingColumnsText,
+        const prepareResult = await prepareResponse.json();
 
-  manualAnalysisConfig: {
-    questionnaireMode,
-    selectedQuestionnaires,
-    customQuestionnairesText,
-    manualScalesText,
-    manualSubscalesText,
-    groupingColumnsText,
-  },
+        if (prepareResult?.ok === false) {
+          throw new Error(
+            prepareResult?.error ||
+              prepareResult?.message ||
+              "Príprava raw dát zlyhala.",
+          );
+        }
 
-  strictQuestionnaireMode: true,
-  allowUnconfirmedStandardizedQuestionnaires: false,
-} as any);
+        const preparedFileBase64 = String(
+          prepareResult?.preparedFileBase64 || "",
+        );
 
+        const preparedFileName = String(
+          prepareResult?.preparedFileName ||
+            prepareResult?.fileName ||
+            "prepared-raw-data.xlsx",
+        );
 
-  const normalized = {
-    ok: true,
-    title: 'Výsledky analýzy dát',
+        const preparedMimeType = String(
+          prepareResult?.mimeType ||
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        );
 
-    summary: [
-      `Raw dáta boli najprv pripravené do súboru: ${preparedFileName}.`,
-      'Štatistika bola vypočítaná z hárku DATA_CLEAN.',
-      `Počet riadkov: ${cleanRows.length}.`,
-      `Počet premenných/stĺpcov: ${columns.length}.`,
-      `Frekvenčné tabuľky: ${
-        Array.isArray((statisticalAnalysis as any)?.frequencies)
-          ? (statisticalAnalysis as any).frequencies.length
-          : 0
-      }.`,
-      `Reliabilita: ${
-        Array.isArray((statisticalAnalysis as any)?.reliability)
-          ? (statisticalAnalysis as any).reliability.length
-          : 0
-      }.`,
-      `Spearmanove korelácie: ${
-        Array.isArray((statisticalAnalysis as any)?.correlations?.spearman)
-          ? (statisticalAnalysis as any).correlations.spearman.length
-          : 0
-      }.`,
-    ].join('\n'),
+        if (!preparedFileBase64) {
+          throw new Error(
+            "Prepare endpoint nevrátil preparedFileBase64. Skontroluj app/api/analyze-data/prepare/route.ts.",
+          );
+        }
 
-    dataDescription: `Pripravený dátový súbor obsahuje ${cleanRows.length} riadkov a ${columns.length} stĺpcov.`,
+        setPreparedDataFile({
+          fileName: preparedFileName,
+          base64: preparedFileBase64,
+          mimeType: preparedMimeType,
+          rows:
+            typeof prepareResult?.rows === "number"
+              ? prepareResult.rows
+              : undefined,
+          columns:
+            typeof prepareResult?.columns === "number"
+              ? prepareResult.columns
+              : undefined,
+          sheets: Array.isArray(prepareResult?.sheets)
+            ? prepareResult.sheets
+            : [],
+          warnings: Array.isArray(prepareResult?.warnings)
+            ? prepareResult.warnings
+            : [],
+          qualityReport: Array.isArray(prepareResult?.qualityReport)
+            ? prepareResult.qualityReport
+            : [],
+        });
 
-    variables: columns.map((column) => ({
-      name: column,
-      variable: column,
-    })),
+        const preparedBlob = base64ToBlob(preparedFileBase64, preparedMimeType);
 
-    frequencies: (statisticalAnalysis as any)?.frequencies || [],
-    frequencyTables: (statisticalAnalysis as any)?.frequencies || [],
+        const preparedFile = new File([preparedBlob], preparedFileName, {
+          type: preparedMimeType,
+        });
 
-    itemDescriptives: (statisticalAnalysis as any)?.itemDescriptives || [],
-    scaleScores: (statisticalAnalysis as any)?.scaleScores || [],
-    scaleDescriptives: (statisticalAnalysis as any)?.scaleDescriptives || [],
-    normality: (statisticalAnalysis as any)?.normality || [],
-    reliability: (statisticalAnalysis as any)?.reliability || [],
+        const cleanRows = await readPreparedExcelCleanRows(preparedFile);
 
-    pearsonCorrelations:
-      (statisticalAnalysis as any)?.correlations?.pearson || [],
-    spearmanCorrelations:
-      (statisticalAnalysis as any)?.correlations?.spearman || [],
-    recommendedCorrelations:
-      (statisticalAnalysis as any)?.correlations?.recommended || [],
+        if (!cleanRows.length) {
+          throw new Error(
+            "Z pripraveného súboru sa nepodarilo načítať hárok DATA_CLEAN alebo hárok neobsahuje žiadne riadky.",
+          );
+        }
 
-    parametricGroupTests:
-      (statisticalAnalysis as any)?.groupTests?.parametric || [],
-    nonParametricGroupTests:
-      (statisticalAnalysis as any)?.groupTests?.nonParametric || [],
-    recommendedGroupTests:
-      (statisticalAnalysis as any)?.groupTests?.recommended || [],
+        const columns = getDashboardColumnNames(cleanRows);
 
-    statisticalAnalysis,
+        const hasManualScales =
+          Boolean(manualScalesText.trim()) ||
+          Boolean(manualSubscalesText.trim());
 
-    practicalText: [
-      'Raw dáta boli najprv pripravené a vyčistené do samostatného Excel súboru.',
-      'Štatistická analýza bola následne vypočítaná až z pripraveného hárku DATA_CLEAN.',
-      `Analyzované súbory: ${allowedDataFiles.map((file) => file.name).join(', ')}.`,
-      `Počet riadkov v pripravených dátach: ${cleanRows.length}.`,
-      `Počet premenných: ${columns.length}.`,
-    ].join('\n'),
+        const hasGroupingColumns = Boolean(groupingColumnsText.trim());
 
-    interpretation: [
-      'Výsledky analýzy vychádzajú z pripravených raw dát.',
-      'Do praktickej časti je vhodné vložiť frekvenčné tabuľky, deskriptívnu štatistiku, reliabilitu škál, korelačnú analýzu a skupinové testy podľa charakteru premenných.',
-    ].join('\n'),
+        const canDataDescriptive =
+          currentHasUnlimitedAccess ||
+          currentEntitlements.features.includes("data-descriptive");
+        const canDataQuestionnaires =
+          currentHasUnlimitedAccess ||
+          currentEntitlements.features.includes("data-questionnaires");
+        const canDataReliability =
+          currentHasUnlimitedAccess ||
+          currentEntitlements.features.includes("data-reliability");
+        const canDataNormality =
+          currentHasUnlimitedAccess ||
+          currentEntitlements.features.includes("data-normality");
+        const canDataCorrelations =
+          currentHasUnlimitedAccess ||
+          currentEntitlements.features.includes("data-correlations");
+        const canDataParametric =
+          currentHasUnlimitedAccess ||
+          currentEntitlements.features.includes("data-parametric-tests");
+        const canDataNonParametric =
+          currentHasUnlimitedAccess ||
+          currentEntitlements.features.includes("data-nonparametric-tests");
 
-    warnings: [
-      ...(Array.isArray(prepareResult?.warnings)
-        ? prepareResult.warnings
-        : []),
-      ...(Array.isArray((statisticalAnalysis as any)?.warnings)
-        ? (statisticalAnalysis as any).warnings
-        : []),
-    ],
+        const statisticalAnalysis = runFullStatisticalAnalysis(cleanRows, {
+          alpha: 0.05,
+          language: workLanguage,
+          profile: profileForApi || {},
+          assignment: userText || "",
+          source: "prepared-raw-data",
+          sheetName: "DATA_CLEAN",
 
-    preparedFile: {
-      fileName: preparedFileName,
-      base64: preparedFileBase64,
-      mimeType: preparedMimeType,
-      rows: prepareResult?.rows || cleanRows.length,
-      columns: prepareResult?.columns || columns.length,
-      sheets: prepareResult?.sheets || [],
-      qualityReport: prepareResult?.qualityReport || [],
-      warnings: prepareResult?.warnings || [],
-    },
+          // Každý štatistický blok sa zapne iba vtedy,
+          // keď ho obsahuje aktívny plán alebo doplnok.
+          includeFrequencies: canDataDescriptive,
+          includeItemDescriptives: canDataDescriptive,
+          includeNormality: canDataNormality,
+          includeCorrelations: canDataCorrelations,
+          includeRecommendedCorrelations: canDataCorrelations,
 
-    files: allowedDataFiles.map((file) => ({
-      fileName: file.name,
-      size: file.size,
-      type: file.type,
-    })),
+          includeScaleScores: hasManualScales && canDataQuestionnaires,
+          includeScaleDescriptives: hasManualScales && canDataDescriptive,
+          includeReliability: hasManualScales && canDataReliability,
 
-    extractedFiles: allowedDataFiles.map((file) => file.name),
+          includeGroupTests:
+            hasGroupingColumns && (canDataParametric || canDataNonParametric),
+          includeParametricTests: hasGroupingColumns && canDataParametric,
+          includeNonParametricTests: hasGroupingColumns && canDataNonParametric,
+          includeRecommendedGroupTests:
+            hasGroupingColumns && (canDataParametric || canDataNonParametric),
 
-    meta: {
-      rows: cleanRows.length,
-      columns: columns.length,
-      source: 'prepared-raw-data',
-      preparedFileName,
-      preparedSheetName: 'DATA_CLEAN',
-      generatedAt: new Date().toISOString(),
-      profileTitle: profileForApi?.title || '',
-      profileId: profileForApi?.id || null,
-    },
-  } as unknown as AnalysisResult;
+          // Toto musí byť TRUE, inak sa pri manuálnom režime
+          // nepoužijú numerické premenné z prepared raw data.
+          fallbackToNumericVariables: true,
 
-  const outputText = createAnalysisOutputText(normalized);
+          // Manuálne škály sa rozpoznávajú iba vtedy,
+          // keď sú naozaj zadané.
+          autoDetectScales: hasManualScales,
 
-  if (!outputText.trim()) {
-    throw new Error('Analýza dát nevrátila žiadny výstup.');
-  }
+          questionnaireConfig,
+          selectedQuestionnaires: questionnaireConfig.selectedQuestionnaires,
+          customQuestionnaires: [],
 
-  setAnalysisResult(normalized);
-  setAnalysisModalOpen(true);
-  setResult(outputText);
-  setCanvasText(outputText);
-  setCanvasOpen(true);
+          manualScalesText,
+          manualSubscalesText,
+          groupingColumnsText,
 
-  try {
-    localStorage.setItem('latest_generated_work_text', outputText);
-    localStorage.setItem('last_ai_output', outputText);
-    localStorage.setItem(
-      'zedpera_last_prepared_data',
-      JSON.stringify({
-        fileName: preparedFileName,
-        mimeType: preparedMimeType,
-        rows: cleanRows.length,
-        columns: columns.length,
-        sheets: prepareResult?.sheets || [],
-        warnings: prepareResult?.warnings || [],
-        qualityReport: prepareResult?.qualityReport || [],
-      }),
-    );
-  } catch {
-    // localStorage nemusí byť dostupný
-  }
+          manualAnalysisConfig: {
+            questionnaireMode,
+            selectedQuestionnaires,
+            customQuestionnairesText,
+            manualScalesText,
+            manualSubscalesText,
+            groupingColumnsText,
+          },
 
-  await saveHistoryItem({
-    module: activeModule,
-    title: 'Výsledky analýzy dát',
-    userMessage: userText || 'Analýza priložených dát.',
-    assistantMessage: outputText,
-    result: {
-      analysis: normalized as unknown as Record<string, unknown>,
-      preparedFile: {
-        fileName: preparedFileName,
-        mimeType: preparedMimeType,
-        rows: cleanRows.length,
-        columns: columns.length,
-        sheets: prepareResult?.sheets || [],
-        warnings: prepareResult?.warnings || [],
-        qualityReport: prepareResult?.qualityReport || [],
-      },
-      profileTitle: profileForApi?.title || '',
-      profileId: profileForApi?.id || null,
-      attachedFiles: allowedDataFiles.map((file) => ({
-        name: file.name,
-        size: file.size,
-        type: file.type,
-      })),
-    },
-  });
+          strictQuestionnaireMode: true,
+          allowUnconfirmedStandardizedQuestionnaires: false,
+        } as any);
 
-  setTimeout(() => {
-    resultRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, 150);
+        const normalized = {
+          ok: true,
+          title: "Výsledky analýzy dát",
 
-  await loadBillingState();
-  return;
-}
+          summary: [
+            `Raw dáta boli najprv pripravené do súboru: ${preparedFileName}.`,
+            "Štatistika bola vypočítaná z hárku DATA_CLEAN.",
+            `Počet riadkov: ${cleanRows.length}.`,
+            `Počet premenných/stĺpcov: ${columns.length}.`,
+            `Frekvenčné tabuľky: ${
+              Array.isArray((statisticalAnalysis as any)?.frequencies)
+                ? (statisticalAnalysis as any).frequencies.length
+                : 0
+            }.`,
+            `Reliabilita: ${
+              Array.isArray((statisticalAnalysis as any)?.reliability)
+                ? (statisticalAnalysis as any).reliability.length
+                : 0
+            }.`,
+            `Spearmanove korelácie: ${
+              Array.isArray(
+                (statisticalAnalysis as any)?.correlations?.spearman,
+              )
+                ? (statisticalAnalysis as any).correlations.spearman.length
+                : 0
+            }.`,
+          ].join("\n"),
 
-    // =====================================================
-    // HUMANIZÁTOR
-    // =====================================================
-    if (activeModule === 'humanizer') {
-      if (!userText) {
-        alert('Najprv vlož text, ktorý chceš humanizovať.');
+          dataDescription: `Pripravený dátový súbor obsahuje ${cleanRows.length} riadkov a ${columns.length} stĺpcov.`,
+
+          variables: columns.map((column) => ({
+            name: column,
+            variable: column,
+          })),
+
+          frequencies: (statisticalAnalysis as any)?.frequencies || [],
+          frequencyTables: (statisticalAnalysis as any)?.frequencies || [],
+
+          itemDescriptives:
+            (statisticalAnalysis as any)?.itemDescriptives || [],
+          scaleScores: (statisticalAnalysis as any)?.scaleScores || [],
+          scaleDescriptives:
+            (statisticalAnalysis as any)?.scaleDescriptives || [],
+          normality: (statisticalAnalysis as any)?.normality || [],
+          reliability: (statisticalAnalysis as any)?.reliability || [],
+
+          pearsonCorrelations:
+            (statisticalAnalysis as any)?.correlations?.pearson || [],
+          spearmanCorrelations:
+            (statisticalAnalysis as any)?.correlations?.spearman || [],
+          recommendedCorrelations:
+            (statisticalAnalysis as any)?.correlations?.recommended || [],
+
+          parametricGroupTests:
+            (statisticalAnalysis as any)?.groupTests?.parametric || [],
+          nonParametricGroupTests:
+            (statisticalAnalysis as any)?.groupTests?.nonParametric || [],
+          recommendedGroupTests:
+            (statisticalAnalysis as any)?.groupTests?.recommended || [],
+
+          statisticalAnalysis,
+
+          practicalText: [
+            "Raw dáta boli najprv pripravené a vyčistené do samostatného Excel súboru.",
+            "Štatistická analýza bola následne vypočítaná až z pripraveného hárku DATA_CLEAN.",
+            `Analyzované súbory: ${allowedDataFiles.map((file) => file.name).join(", ")}.`,
+            `Počet riadkov v pripravených dátach: ${cleanRows.length}.`,
+            `Počet premenných: ${columns.length}.`,
+          ].join("\n"),
+
+          interpretation: [
+            "Výsledky analýzy vychádzajú z pripravených raw dát.",
+            "Do praktickej časti je vhodné vložiť frekvenčné tabuľky, deskriptívnu štatistiku, reliabilitu škál, korelačnú analýzu a skupinové testy podľa charakteru premenných.",
+          ].join("\n"),
+
+          warnings: [
+            ...(Array.isArray(prepareResult?.warnings)
+              ? prepareResult.warnings
+              : []),
+            ...(Array.isArray((statisticalAnalysis as any)?.warnings)
+              ? (statisticalAnalysis as any).warnings
+              : []),
+          ],
+
+          preparedFile: {
+            fileName: preparedFileName,
+            base64: preparedFileBase64,
+            mimeType: preparedMimeType,
+            rows: prepareResult?.rows || cleanRows.length,
+            columns: prepareResult?.columns || columns.length,
+            sheets: prepareResult?.sheets || [],
+            qualityReport: prepareResult?.qualityReport || [],
+            warnings: prepareResult?.warnings || [],
+          },
+
+          files: allowedDataFiles.map((file) => ({
+            fileName: file.name,
+            size: file.size,
+            type: file.type,
+          })),
+
+          extractedFiles: allowedDataFiles.map((file) => file.name),
+
+          meta: {
+            rows: cleanRows.length,
+            columns: columns.length,
+            source: "prepared-raw-data",
+            preparedFileName,
+            preparedSheetName: "DATA_CLEAN",
+            generatedAt: new Date().toISOString(),
+            profileTitle: profileForApi?.title || "",
+            profileId: profileForApi?.id || null,
+          },
+        } as unknown as AnalysisResult;
+
+        const outputText = createAnalysisOutputText(normalized);
+
+        if (!outputText.trim()) {
+          throw new Error("Analýza dát nevrátila žiadny výstup.");
+        }
+
+        setAnalysisResult(normalized);
+        setAnalysisModalOpen(true);
+        setResult(outputText);
+        setCanvasText(outputText);
+        setCanvasOpen(true);
+
+        try {
+          localStorage.setItem("latest_generated_work_text", outputText);
+          localStorage.setItem("last_ai_output", outputText);
+          localStorage.setItem(
+            "zedpera_last_prepared_data",
+            JSON.stringify({
+              fileName: preparedFileName,
+              mimeType: preparedMimeType,
+              rows: cleanRows.length,
+              columns: columns.length,
+              sheets: prepareResult?.sheets || [],
+              warnings: prepareResult?.warnings || [],
+              qualityReport: prepareResult?.qualityReport || [],
+            }),
+          );
+        } catch {
+          // localStorage nemusí byť dostupný
+        }
+
+        await saveHistoryItem({
+          module: requestedModule,
+          title: "Výsledky analýzy dát",
+          userMessage: userText || "Analýza priložených dát.",
+          assistantMessage: outputText,
+          result: {
+            analysis: normalized as unknown as Record<string, unknown>,
+            preparedFile: {
+              fileName: preparedFileName,
+              mimeType: preparedMimeType,
+              rows: cleanRows.length,
+              columns: columns.length,
+              sheets: prepareResult?.sheets || [],
+              warnings: prepareResult?.warnings || [],
+              qualityReport: prepareResult?.qualityReport || [],
+            },
+            profileTitle: profileForApi?.title || "",
+            profileId: profileForApi?.id || null,
+            attachedFiles: allowedDataFiles.map((file) => ({
+              name: file.name,
+              size: file.size,
+              type: file.type,
+            })),
+          },
+        });
+
+        setTimeout(() => {
+          resultRef.current?.scrollIntoView({ behavior: "smooth" });
+        }, 150);
+
+        await loadBillingState();
         return;
       }
 
-      if (userText.length < 20) {
-        alert('Text na humanizáciu musí mať aspoň 20 znakov.');
+      // =====================================================
+      // HUMANIZÁTOR
+      // =====================================================
+      if (requestedModule === "humanizer") {
+        if (!userText) {
+          alert("Najprv vlož text, ktorý chceš humanizovať.");
+          return;
+        }
+
+        if (userText.length < 20) {
+          alert("Text na humanizáciu musí mať aspoň 20 znakov.");
+          return;
+        }
+
+        const response = await fetch("/api/humanizer", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          credentials: "include",
+          cache: "no-store",
+          body: JSON.stringify({
+            text: userText,
+            language: finalWorkLanguage,
+            outputLanguage: finalWorkLanguage,
+            systemLanguage,
+            profile: profileForApi || null,
+          }),
+        });
+
+        if (!response.ok) {
+          throw await readDashboardApiError(response);
+        }
+
+        const data = await response.json();
+
+        mergeEntitlementsFromResponse(data?.entitlements);
+        mergePageQuotaFromResponse(
+          data?.pageUsage ??
+            data?.pageQuota ??
+            data?.quota ??
+            data?.usage ??
+            data,
+        );
+
+        if (data?.ok === false) {
+          throw new Error(
+            data?.message || data?.error || "Humanizácia textu zlyhala.",
+          );
+        }
+
+        const output = cleanFinalOutput(
+          data.humanizedText ||
+            data.output ||
+            data.result ||
+            data.text ||
+            data.message ||
+            "",
+        );
+
+        if (!output.trim()) {
+          throw new Error("Humanizátor nevrátil žiadny text.");
+        }
+
+        setResult(output);
+        setCanvasText(output);
+        setCanvasOpen(true);
+
+        try {
+          localStorage.setItem("latest_generated_work_text", output);
+          localStorage.setItem("last_ai_output", output);
+        } catch {
+          // localStorage nemusí byť dostupný
+        }
+
+        await saveHistoryItem({
+          module: "humanizer",
+          title: requestedModuleResultTitle,
+          userMessage: userText,
+          assistantMessage: output,
+          result: {
+            profileTitle: profileForApi?.title || "",
+            profileId: profileForApi?.id || null,
+          },
+        });
+
+        setTimeout(() => {
+          resultRef.current?.scrollIntoView({ behavior: "smooth" });
+        }, 150);
+
+        await loadBillingState();
         return;
       }
 
-      const response = await fetch('/api/humanizer', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        credentials: 'include',
-        cache: 'no-store',
-        body: JSON.stringify({
-          text: userText,
-          language: finalWorkLanguage,
-          outputLanguage: finalWorkLanguage,
-          systemLanguage,
-          profile: profileForApi || null,
+      // =====================================================
+      // BEŽNÉ AI MODULY:
+      // AI školiteľ, Audit, Obhajoba, Preklad, Plánovanie, Emaily
+      // =====================================================
+      const formData = new FormData();
+
+      formData.append("agent", agent);
+      formData.append("model", agent);
+      formData.append("module", requestedModule);
+
+      formData.append("language", finalWorkLanguage);
+      formData.append("outputLanguage", finalWorkLanguage);
+      formData.append("systemLanguage", systemLanguage);
+      formData.append("interfaceLanguage", systemLanguage);
+      formData.append("workLanguage", finalWorkLanguage);
+
+      formData.append("message", userText || secondaryText || prompt);
+      formData.append("prompt", prompt);
+      formData.append("input", userText);
+      formData.append("secondaryInput", secondaryText);
+
+      formData.append("profile", JSON.stringify(profileForApi || {}));
+      formData.append("activeProfile", JSON.stringify(profileForApi || {}));
+      formData.append("profileContext", buildProfileBlock(profileForApi));
+      formData.append(
+        "attachmentsContext",
+        buildAttachmentBlock(attachedFiles),
+      );
+
+      formData.append(
+        "messages",
+        JSON.stringify([
+          {
+            role: "user",
+            content: prompt,
+          },
+        ]),
+      );
+
+      formData.append(
+        "moduleSettings",
+        JSON.stringify({
+          activeModule: requestedModule,
+          qualityMode,
+          outputMode,
+          translationFrom,
+          translationTo,
+          translationStyle,
+          emailType,
+          emailTone,
+          translationFromLabel: getLanguageLabel(translationFrom),
+          translationToLabel: getLanguageLabel(translationTo),
+          translationStyleLabel: getTranslationStyleLabel(translationStyle),
+          emailTypeLabel: getEmailTypeLabel(emailType),
+          emailToneLabel: getEmailToneLabel(emailTone),
         }),
+      );
+
+      formData.append(
+        "profileSnapshot",
+        JSON.stringify({
+          id: profileForApi?.id || null,
+          title: profileForApi?.title || "",
+          topic: profileForApi?.topic || "",
+          type: getWorkType(profileForApi),
+          expertise: getExpertise(profileForApi),
+          workLanguage: finalWorkLanguage,
+          citation: getCitationStyle(profileForApi),
+        }),
+      );
+
+      formData.append("citation", getCitationStyle(profileForApi));
+      formData.append("useSemanticScholar", "false");
+      formData.append("sourceMode", "uploaded_documents_first");
+      formData.append("validateAttachmentsAgainstProfile", "true");
+      formData.append("requireSourceList", "true");
+      formData.append("allowAiKnowledgeFallback", "true");
+      formData.append("extractUploadedText", "true");
+      formData.append("useExtractedTextFirst", "true");
+      formData.append("returnExtractedFilesInfo", "true");
+      formData.append("contextaCitationFormat", "false");
+
+      formData.append(
+        "filesMetadata",
+        JSON.stringify(
+          attachedFiles.map((item) => ({
+            name: item.name,
+            size: item.size,
+            type: item.type,
+            extension: getFileExtension(item.name),
+          })),
+        ),
+      );
+
+      if (profileForApi?.id) {
+        formData.append("projectId", profileForApi.id);
+      }
+
+      attachedFiles.forEach((item) => {
+        if (item.file instanceof File) {
+          formData.append("files", item.file, item.name || item.file.name);
+        }
+      });
+
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        body: formData,
       });
 
       if (!response.ok) {
         throw await readDashboardApiError(response);
       }
 
-      const data = await response.json();
+      const contentType = response.headers.get("content-type") || "";
+      let fullText = "";
 
-      mergeEntitlementsFromResponse(data?.entitlements);
-      mergePageQuotaFromResponse(
-        data?.pageUsage ??
-          data?.pageQuota ??
-          data?.quota ??
-          data?.usage ??
-          data,
+      if (contentType.includes("application/json")) {
+        const data = await response.json();
+
+        mergeEntitlementsFromResponse(data?.entitlements);
+        mergePageQuotaFromResponse(
+          data?.pageUsage ??
+            data?.pageQuota ??
+            data?.quota ??
+            data?.usage ??
+            data,
+        );
+
+        fullText =
+          data.output ||
+          data.result ||
+          data.message ||
+          data.text ||
+          data.answer ||
+          data.content ||
+          data.response ||
+          data?.choices?.[0]?.message?.content ||
+          "";
+
+        if (!fullText && data.ok === false) {
+          throw new Error(
+            data.message || data.error || "API nevrátilo výstup.",
+          );
+        }
+      } else {
+        if (!response.body) {
+          throw new Error("API nevrátilo odpoveď.");
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          fullText += chunk;
+
+          const liveCleaned = stripModuleExtraSections(
+            fullText.replace(/^data:\s*/gm, "").replace(/\[DONE\]/g, ""),
+            requestedModule,
+          );
+
+          if (liveCleaned.trim()) {
+            setResult(liveCleaned);
+          }
+        }
+      }
+
+      let cleaned = stripModuleExtraSections(
+        fullText.replace(/^data:\s*/gm, "").replace(/\[DONE\]/g, ""),
+        requestedModule,
       );
 
-      if (data?.ok === false) {
+      if (!cleaned.trim()) {
         throw new Error(
-          data?.message || data?.error || 'Humanizácia textu zlyhala.',
+          "API odpovedalo, ale výstup bol prázdny. Skontrolujte /api/chat a vrátené polia output/result/message/text.",
         );
       }
 
-      const output = cleanFinalOutput(
-        data.humanizedText ||
-          data.output ||
-          data.result ||
-          data.text ||
-          data.message ||
-          '',
-      );
-
-      if (!output.trim()) {
-        throw new Error('Humanizátor nevrátil žiadny text.');
+      if (requestedModule === "planning") {
+        cleaned = cleanFinalOutput(
+          [
+            "Predbežný orientačný harmonogram",
+            "",
+            "Upozornenie: Tento plán je len predbežný a orientačný. Nejde o záväzný termínový plán. Termíny je potrebné priebežne upravovať podľa reálneho stavu práce.",
+            "",
+            cleaned,
+          ].join("\n"),
+        );
       }
 
-      setResult(output);
-      setCanvasText(output);
+      cleaned = stripModuleExtraSections(cleaned, requestedModule);
+
+      setResult(cleaned);
+      setCanvasText(cleaned);
       setCanvasOpen(true);
 
       try {
-        localStorage.setItem('latest_generated_work_text', output);
-        localStorage.setItem('last_ai_output', output);
+        localStorage.setItem("latest_generated_work_text", cleaned);
+        localStorage.setItem("last_ai_output", cleaned);
       } catch {
         // localStorage nemusí byť dostupný
       }
 
       await saveHistoryItem({
-        module: 'humanizer',
-        title: activeModuleResultTitle,
-        userMessage: userText,
-        assistantMessage: output,
+        module: requestedModule,
+        title: requestedModuleResultTitle,
+        userMessage: userText || secondaryText || "Bez textového zadania.",
+        assistantMessage: cleaned,
         result: {
-          profileTitle: profileForApi?.title || '',
+          profileTitle: profileForApi?.title || "",
           profileId: profileForApi?.id || null,
+          activeModule: requestedModule,
+          attachedFiles: attachedFiles.map((file) => ({
+            name: file.name,
+            size: file.size,
+            type: file.type,
+          })),
         },
       });
 
-      setTimeout(() => {
-        resultRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 150);
-
       await loadBillingState();
+
+      setTimeout(() => {
+        resultRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 150);
+    } catch (error) {
+      console.error("RUN_MODULE_ERROR:", error);
+
+      if (error instanceof DashboardApiError) {
+        if (error.status === 401) {
+          router.replace("/login?returnTo=/dashboard");
+          return;
+        }
+
+        if (
+          error.status === 402 ||
+          error.status === 403 ||
+          BILLING_ERROR_CODES.has(error.code)
+        ) {
+          setBillingNotice({
+            code: error.code,
+            message: error.message,
+            detail: error.detail,
+            purchaseUrl:
+              error.purchaseUrl ||
+              (error.code === "PAGE_LIMIT_REACHED"
+                ? "/pricing#doplnkove-sluzby"
+                : "/pricing"),
+            ...(MODULE_ACCESS_ERROR_CODES.has(error.code)
+              ? {
+                  scope: "module" as const,
+                  moduleKey: requestedModule,
+                  feature: MODULE_REQUIRED_FEATURE[requestedModule],
+                }
+              : {}),
+          });
+
+          setResult("");
+          setCanvasText("");
+          await loadBillingState();
+          return;
+        }
+      }
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Nastala chyba pri spracovaní požiadavky.";
+
+      setResult(`Chyba:\n${cleanFinalOutput(message)}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const selectDashboardModule = useCallback(
+    (moduleKey: ModuleKey) => {
+      if (!isModuleKey(moduleKey)) return;
+
+      // Ref sa prepne ešte pred React renderom. Všetky ďalšie kontroly tak
+      // používajú presne modul, na ktorý používateľ práve klikol.
+      activeModuleRef.current = moduleKey;
+
+      setBillingNotice((current) => {
+        if (!current) return null;
+
+        return current.scope === "module" ||
+          MODULE_ACCESS_ERROR_CODES.has(current.code)
+          ? null
+          : current;
+      });
+
+      setActiveModule(moduleKey);
+
+      if (typeof window !== "undefined") {
+        localStorage.setItem("zedpera_active_dashboard_module", moduleKey);
+      }
+
+      router.replace(`/dashboard?module=${moduleKey}`, {
+        scroll: false,
+      });
+
+      window.setTimeout(() => {
+        mobileToolPanelRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 80);
+    },
+    [router],
+  );
+
+  const downloadPdf = () => {
+    const text = stripModuleExtraSections(canvasText || result, activeModule);
+
+    if (!text.trim()) {
+      alert("Najprv vygenerujte výstup, až potom je možné vytvoriť PDF.");
       return;
     }
 
-    // =====================================================
-    // BEŽNÉ AI MODULY:
-    // AI školiteľ, Audit, Obhajoba, Preklad, Plánovanie, Emaily
-    // =====================================================
-    const formData = new FormData();
+    const title =
+      activeModule === "defense"
+        ? "Prezentácia, sprievodný text a obhajoba"
+        : exportTitle || "ZEDPERA výstup";
 
-    formData.append('agent', agent);
-    formData.append('model', agent);
-    formData.append('module', activeModule);
+    const html = createDocHtml(title, text);
 
-    formData.append('language', finalWorkLanguage);
-    formData.append('outputLanguage', finalWorkLanguage);
-    formData.append('systemLanguage', systemLanguage);
-    formData.append('interfaceLanguage', systemLanguage);
-    formData.append('workLanguage', finalWorkLanguage);
+    const printWindow = window.open("", "_blank");
 
-    formData.append('message', userText || secondaryText || prompt);
-    formData.append('prompt', prompt);
-    formData.append('input', userText);
-    formData.append('secondaryInput', secondaryText);
-
-    formData.append('profile', JSON.stringify(profileForApi || {}));
-    formData.append('activeProfile', JSON.stringify(profileForApi || {}));
-    formData.append('profileContext', buildProfileBlock(profileForApi));
-    formData.append('attachmentsContext', buildAttachmentBlock(attachedFiles));
-
-    formData.append(
-      'messages',
-      JSON.stringify([
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ]),
-    );
-
-    formData.append(
-      'moduleSettings',
-      JSON.stringify({
-        activeModule,
-        qualityMode,
-        outputMode,
-        translationFrom,
-        translationTo,
-        translationStyle,
-        emailType,
-        emailTone,
-        translationFromLabel: getLanguageLabel(translationFrom),
-        translationToLabel: getLanguageLabel(translationTo),
-        translationStyleLabel: getTranslationStyleLabel(translationStyle),
-        emailTypeLabel: getEmailTypeLabel(emailType),
-        emailToneLabel: getEmailToneLabel(emailTone),
-      }),
-    );
-
-    formData.append(
-      'profileSnapshot',
-      JSON.stringify({
-        id: profileForApi?.id || null,
-        title: profileForApi?.title || '',
-        topic: profileForApi?.topic || '',
-        type: getWorkType(profileForApi),
-        expertise: getExpertise(profileForApi),
-        workLanguage: finalWorkLanguage,
-        citation: getCitationStyle(profileForApi),
-      }),
-    );
-
-    formData.append('citation', getCitationStyle(profileForApi));
-    formData.append('useSemanticScholar', 'false');
-    formData.append('sourceMode', 'uploaded_documents_first');
-    formData.append('validateAttachmentsAgainstProfile', 'true');
-    formData.append('requireSourceList', 'true');
-    formData.append('allowAiKnowledgeFallback', 'true');
-    formData.append('extractUploadedText', 'true');
-    formData.append('useExtractedTextFirst', 'true');
-    formData.append('returnExtractedFilesInfo', 'true');
-    formData.append('contextaCitationFormat', 'false');
-
-    formData.append(
-      'filesMetadata',
-      JSON.stringify(
-        attachedFiles.map((item) => ({
-          name: item.name,
-          size: item.size,
-          type: item.type,
-          extension: getFileExtension(item.name),
-        })),
-      ),
-    );
-
-    if (profileForApi?.id) {
-      formData.append('projectId', profileForApi.id);
-    }
-
-    attachedFiles.forEach((item) => {
-      if (item.file instanceof File) {
-        formData.append('files', item.file, item.name || item.file.name);
-      }
-    });
-
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw await readDashboardApiError(response);
-    }
-
-    const contentType = response.headers.get('content-type') || '';
-    let fullText = '';
-
-    if (contentType.includes('application/json')) {
-      const data = await response.json();
-
-      mergeEntitlementsFromResponse(data?.entitlements);
-      mergePageQuotaFromResponse(
-        data?.pageUsage ??
-          data?.pageQuota ??
-          data?.quota ??
-          data?.usage ??
-          data,
+    if (!printWindow) {
+      alert(
+        "Prehliadač zablokoval otvorenie PDF okna. Povoľte vyskakovacie okná.",
       );
-
-      fullText =
-        data.output ||
-        data.result ||
-        data.message ||
-        data.text ||
-        data.answer ||
-        data.content ||
-        data.response ||
-        data?.choices?.[0]?.message?.content ||
-        '';
-
-      if (!fullText && data.ok === false) {
-        throw new Error(data.message || data.error || 'API nevrátilo výstup.');
-      }
-    } else {
-      if (!response.body) {
-        throw new Error('API nevrátilo odpoveď.');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        fullText += chunk;
-
-        const liveCleaned = stripModuleExtraSections(
-          fullText
-            .replace(/^data:\s*/gm, '')
-            .replace(/\[DONE\]/g, ''),
-          activeModule,
-        );
-
-        if (liveCleaned.trim()) {
-          setResult(liveCleaned);
-        }
-      }
+      return;
     }
 
-    let cleaned = stripModuleExtraSections(
-      fullText
-        .replace(/^data:\s*/gm, '')
-        .replace(/\[DONE\]/g, ''),
-      activeModule,
-    );
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
 
-    if (!cleaned.trim()) {
-      throw new Error(
-        'API odpovedalo, ale výstup bol prázdny. Skontrolujte /api/chat a vrátené polia output/result/message/text.',
-      );
-    }
-
-    if (activeModule === 'planning') {
-      cleaned = cleanFinalOutput(
-        [
-          'Predbežný orientačný harmonogram',
-          '',
-          'Upozornenie: Tento plán je len predbežný a orientačný. Nejde o záväzný termínový plán. Termíny je potrebné priebežne upravovať podľa reálneho stavu práce.',
-          '',
-          cleaned,
-        ].join('\n'),
-      );
-    }
-
-    cleaned = stripModuleExtraSections(cleaned, activeModule);
-
-    setResult(cleaned);
-    setCanvasText(cleaned);
-    setCanvasOpen(true);
-
-    try {
-      localStorage.setItem('latest_generated_work_text', cleaned);
-      localStorage.setItem('last_ai_output', cleaned);
-    } catch {
-      // localStorage nemusí byť dostupný
-    }
-
-    await saveHistoryItem({
-      module: activeModule,
-      title: activeModuleResultTitle,
-      userMessage: userText || secondaryText || 'Bez textového zadania.',
-      assistantMessage: cleaned,
-      result: {
-        profileTitle: profileForApi?.title || '',
-        profileId: profileForApi?.id || null,
-        activeModule,
-        attachedFiles: attachedFiles.map((file) => ({
-          name: file.name,
-          size: file.size,
-          type: file.type,
-        })),
-      },
-    });
-
-    await loadBillingState();
-
-    setTimeout(() => {
-      resultRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 150);
-  } catch (error) {
-    console.error('RUN_MODULE_ERROR:', error);
-
-    if (error instanceof DashboardApiError) {
-      if (error.status === 401) {
-        router.replace('/login?returnTo=/dashboard');
-        return;
-      }
-
-      if (
-        error.status === 402 ||
-        error.status === 403 ||
-        BILLING_ERROR_CODES.has(error.code)
-      ) {
-        setBillingNotice({
-          code: error.code,
-          message: error.message,
-          detail: error.detail,
-          purchaseUrl:
-            error.purchaseUrl ||
-            (error.code === 'PAGE_LIMIT_REACHED'
-              ? '/pricing#doplnkove-sluzby'
-              : '/pricing'),
-        });
-
-        setResult('');
-        setCanvasText('');
-        await loadBillingState();
-        return;
-      }
-    }
-
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Nastala chyba pri spracovaní požiadavky.';
-
-    setResult(`Chyba:\n${cleanFinalOutput(message)}`);
-  } finally {
-    setIsLoading(false);
-  }
-};
-
-
-const selectDashboardModule = useCallback(
-  (moduleKey: ModuleKey) => {
-    if (!isModuleKey(moduleKey)) return;
-
-    // Najskôr odstránime starú modulovú hlášku. Nová hláška sa následne
-    // bezpečne vypočíta z novej hodnoty activeModule a aktuálnych oprávnení.
-    setBillingNotice((current) =>
-      current && MODULE_ACCESS_ERROR_CODES.has(current.code)
-        ? null
-        : current,
-    );
-    setActiveModule(moduleKey);
-
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(
-        'zedpera_active_dashboard_module',
-        moduleKey,
-      );
-    }
-
-    router.replace(`/dashboard?module=${moduleKey}`, {
-      scroll: false,
-    });
-
-    window.setTimeout(() => {
-      mobileToolPanelRef.current?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      });
-    }, 80);
-  },
-  [router],
-);
-
-const downloadPdf = () => {
-  const text = stripModuleExtraSections(canvasText || result, activeModule);
-
-  if (!text.trim()) {
-    alert('Najprv vygenerujte výstup, až potom je možné vytvoriť PDF.');
-    return;
-  }
-
-  const title =
-    activeModule === 'defense'
-      ? 'Prezentácia, sprievodný text a obhajoba'
-      : exportTitle || 'ZEDPERA výstup';
-
-  const html = createDocHtml(title, text);
-
-  const printWindow = window.open('', '_blank');
-
-  if (!printWindow) {
-    alert('Prehliadač zablokoval otvorenie PDF okna. Povoľte vyskakovacie okná.');
-    return;
-  }
-
-  printWindow.document.open();
-  printWindow.document.write(html);
-  printWindow.document.close();
-
-  printWindow.onload = () => {
-    printWindow.focus();
-    printWindow.print();
+    printWindow.onload = () => {
+      printWindow.focus();
+      printWindow.print();
+    };
   };
-};
-
 
   const downloadDoc = () => {
     const text = stripModuleExtraSections(canvasText || result, activeModule);
@@ -5913,199 +5895,205 @@ const downloadPdf = () => {
     downloadBlob({
       content: html,
       fileName: `${fileBase}.doc`,
-      mimeType: 'application/msword;charset=utf-8',
+      mimeType: "application/msword;charset=utf-8",
     });
   };
 
-const downloadAnalysisExport = async (format: 'word' | 'pdf' | 'xlsx') => {
-  if (!analysisResult) {
-    alert('Najskôr musí byť vytvorený výsledok analýzy.');
-    return;
-  }
-
-  const safeText = (value: unknown): string => {
-    if (value === null || value === undefined) return '';
-
-    if (typeof value === 'string') return value;
-
-    if (typeof value === 'number' || typeof value === 'boolean') {
-      return String(value);
+  const downloadAnalysisExport = async (format: "word" | "pdf" | "xlsx") => {
+    if (!analysisResult) {
+      alert("Najskôr musí byť vytvorený výsledok analýzy.");
+      return;
     }
 
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  };
+    const safeText = (value: unknown): string => {
+      if (value === null || value === undefined) return "";
 
-  const escapeHtml = (value: unknown): string => {
-    return safeText(value)
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#039;');
-  };
+      if (typeof value === "string") return value;
 
-  const normalizeRows = (value: unknown): Array<Record<string, unknown>> => {
-    if (!Array.isArray(value)) return [];
+      if (typeof value === "number" || typeof value === "boolean") {
+        return String(value);
+      }
 
-    return value
-      .map((item) => {
-        if (item && typeof item === 'object' && !Array.isArray(item)) {
-          return item as Record<string, unknown>;
-        }
-
-        return {
-          hodnota: item,
-        };
-      })
-      .filter((row) => Object.keys(row).length > 0);
-  };
-
-  const collectExportTables = (): Array<{
-    title: string;
-    rows: Array<Record<string, unknown>>;
-  }> => {
-    const result = analysisResult as any;
-
-    const tables: Array<{
-      title: string;
-      rows: Array<Record<string, unknown>>;
-    }> = [];
-
-    const pushTable = (title: string, rowsValue: unknown) => {
-      const rows = normalizeRows(rowsValue);
-
-      if (rows.length > 0) {
-        tables.push({
-          title,
-          rows,
-        });
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
       }
     };
 
-    pushTable('Premenné', result.variables);
-    pushTable('Frekvenčné tabuľky', result.frequencies || result.frequencyTables);
-    pushTable('Deskriptívna štatistika položiek', result.itemDescriptives);
-    pushTable('Skóre škál a subškál', result.scaleScores);
-    pushTable('Deskriptívna štatistika škál', result.scaleDescriptives);
-    pushTable('Normalita dát', result.normality);
-    pushTable('Reliabilita škál', result.reliability);
-    pushTable('Pearsonove korelácie', result.pearsonCorrelations);
-    pushTable('Spearmanove korelácie', result.spearmanCorrelations);
-    pushTable('Odporúčané korelácie', result.recommendedCorrelations);
-    pushTable('Parametrické skupinové testy', result.parametricGroupTests);
-    pushTable('Neparametrické skupinové testy', result.nonParametricGroupTests);
-    pushTable('Odporúčané skupinové testy', result.recommendedGroupTests);
-    pushTable('Štatistické testy', result.statisticalTests || result.hypothesisTests);
-    pushTable('Upozornenia', result.warnings);
+    const escapeHtml = (value: unknown): string => {
+      return safeText(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    };
 
-    if (result.statisticalAnalysis) {
+    const normalizeRows = (value: unknown): Array<Record<string, unknown>> => {
+      if (!Array.isArray(value)) return [];
+
+      return value
+        .map((item) => {
+          if (item && typeof item === "object" && !Array.isArray(item)) {
+            return item as Record<string, unknown>;
+          }
+
+          return {
+            hodnota: item,
+          };
+        })
+        .filter((row) => Object.keys(row).length > 0);
+    };
+
+    const collectExportTables = (): Array<{
+      title: string;
+      rows: Array<Record<string, unknown>>;
+    }> => {
+      const result = analysisResult as any;
+
+      const tables: Array<{
+        title: string;
+        rows: Array<Record<string, unknown>>;
+      }> = [];
+
+      const pushTable = (title: string, rowsValue: unknown) => {
+        const rows = normalizeRows(rowsValue);
+
+        if (rows.length > 0) {
+          tables.push({
+            title,
+            rows,
+          });
+        }
+      };
+
+      pushTable("Premenné", result.variables);
       pushTable(
-        'Statistical Analysis - Frequencies',
-        result.statisticalAnalysis.frequencies,
+        "Frekvenčné tabuľky",
+        result.frequencies || result.frequencyTables,
+      );
+      pushTable("Deskriptívna štatistika položiek", result.itemDescriptives);
+      pushTable("Skóre škál a subškál", result.scaleScores);
+      pushTable("Deskriptívna štatistika škál", result.scaleDescriptives);
+      pushTable("Normalita dát", result.normality);
+      pushTable("Reliabilita škál", result.reliability);
+      pushTable("Pearsonove korelácie", result.pearsonCorrelations);
+      pushTable("Spearmanove korelácie", result.spearmanCorrelations);
+      pushTable("Odporúčané korelácie", result.recommendedCorrelations);
+      pushTable("Parametrické skupinové testy", result.parametricGroupTests);
+      pushTable(
+        "Neparametrické skupinové testy",
+        result.nonParametricGroupTests,
+      );
+      pushTable("Odporúčané skupinové testy", result.recommendedGroupTests);
+      pushTable(
+        "Štatistické testy",
+        result.statisticalTests || result.hypothesisTests,
+      );
+      pushTable("Upozornenia", result.warnings);
+
+      if (result.statisticalAnalysis) {
+        pushTable(
+          "Statistical Analysis - Frequencies",
+          result.statisticalAnalysis.frequencies,
+        );
+
+        pushTable(
+          "Statistical Analysis - Item Descriptives",
+          result.statisticalAnalysis.itemDescriptives,
+        );
+
+        pushTable(
+          "Statistical Analysis - Scale Scores",
+          result.statisticalAnalysis.scaleScores,
+        );
+
+        pushTable(
+          "Statistical Analysis - Scale Descriptives",
+          result.statisticalAnalysis.scaleDescriptives,
+        );
+
+        pushTable(
+          "Statistical Analysis - Normality",
+          result.statisticalAnalysis.normality,
+        );
+
+        pushTable(
+          "Statistical Analysis - Reliability",
+          result.statisticalAnalysis.reliability,
+        );
+
+        pushTable(
+          "Statistical Analysis - Pearson",
+          result.statisticalAnalysis.correlations?.pearson,
+        );
+
+        pushTable(
+          "Statistical Analysis - Spearman",
+          result.statisticalAnalysis.correlations?.spearman,
+        );
+
+        pushTable(
+          "Statistical Analysis - Recommended Correlations",
+          result.statisticalAnalysis.correlations?.recommended,
+        );
+
+        pushTable(
+          "Statistical Analysis - Parametric Tests",
+          result.statisticalAnalysis.groupTests?.parametric,
+        );
+
+        pushTable(
+          "Statistical Analysis - Nonparametric Tests",
+          result.statisticalAnalysis.groupTests?.nonParametric,
+        );
+
+        pushTable(
+          "Statistical Analysis - Recommended Tests",
+          result.statisticalAnalysis.groupTests?.recommended,
+        );
+      }
+
+      const seen = new Set<string>();
+
+      return tables.filter((table) => {
+        const signature = `${table.title}-${table.rows.length}-${Object.keys(
+          table.rows[0] || {},
+        ).join("|")}`;
+
+        if (seen.has(signature)) return false;
+
+        seen.add(signature);
+        return true;
+      });
+    };
+
+    const createHtmlTable = (
+      title: string,
+      rows: Array<Record<string, unknown>>,
+    ): string => {
+      if (!rows.length) return "";
+
+      const columns = Array.from(
+        new Set(rows.flatMap((row) => Object.keys(row))),
       );
 
-      pushTable(
-        'Statistical Analysis - Item Descriptives',
-        result.statisticalAnalysis.itemDescriptives,
-      );
+      const headerHtml = columns
+        .map((column) => `<th>${escapeHtml(column)}</th>`)
+        .join("");
 
-      pushTable(
-        'Statistical Analysis - Scale Scores',
-        result.statisticalAnalysis.scaleScores,
-      );
+      const rowsHtml = rows
+        .map((row) => {
+          const cellsHtml = columns
+            .map((column) => `<td>${escapeHtml(row[column])}</td>`)
+            .join("");
 
-      pushTable(
-        'Statistical Analysis - Scale Descriptives',
-        result.statisticalAnalysis.scaleDescriptives,
-      );
+          return `<tr>${cellsHtml}</tr>`;
+        })
+        .join("");
 
-      pushTable(
-        'Statistical Analysis - Normality',
-        result.statisticalAnalysis.normality,
-      );
-
-      pushTable(
-        'Statistical Analysis - Reliability',
-        result.statisticalAnalysis.reliability,
-      );
-
-      pushTable(
-        'Statistical Analysis - Pearson',
-        result.statisticalAnalysis.correlations?.pearson,
-      );
-
-      pushTable(
-        'Statistical Analysis - Spearman',
-        result.statisticalAnalysis.correlations?.spearman,
-      );
-
-      pushTable(
-        'Statistical Analysis - Recommended Correlations',
-        result.statisticalAnalysis.correlations?.recommended,
-      );
-
-      pushTable(
-        'Statistical Analysis - Parametric Tests',
-        result.statisticalAnalysis.groupTests?.parametric,
-      );
-
-      pushTable(
-        'Statistical Analysis - Nonparametric Tests',
-        result.statisticalAnalysis.groupTests?.nonParametric,
-      );
-
-      pushTable(
-        'Statistical Analysis - Recommended Tests',
-        result.statisticalAnalysis.groupTests?.recommended,
-      );
-    }
-
-    const seen = new Set<string>();
-
-    return tables.filter((table) => {
-      const signature = `${table.title}-${table.rows.length}-${Object.keys(
-        table.rows[0] || {},
-      ).join('|')}`;
-
-      if (seen.has(signature)) return false;
-
-      seen.add(signature);
-      return true;
-    });
-  };
-
-  const createHtmlTable = (
-    title: string,
-    rows: Array<Record<string, unknown>>,
-  ): string => {
-    if (!rows.length) return '';
-
-    const columns = Array.from(
-      new Set(rows.flatMap((row) => Object.keys(row))),
-    );
-
-    const headerHtml = columns
-      .map(
-        (column) =>
-          `<th>${escapeHtml(column)}</th>`,
-      )
-      .join('');
-
-    const rowsHtml = rows
-      .map((row) => {
-        const cellsHtml = columns
-          .map((column) => `<td>${escapeHtml(row[column])}</td>`)
-          .join('');
-
-        return `<tr>${cellsHtml}</tr>`;
-      })
-      .join('');
-
-    return `
+      return `
       <h2>${escapeHtml(title)}</h2>
       <table>
         <thead>
@@ -6116,28 +6104,28 @@ const downloadAnalysisExport = async (format: 'word' | 'pdf' | 'xlsx') => {
         </tbody>
       </table>
     `;
-  };
+    };
 
-  const createFullHtml = (): string => {
-    const result = analysisResult as any;
-    const tables = collectExportTables();
+    const createFullHtml = (): string => {
+      const result = analysisResult as any;
+      const tables = collectExportTables();
 
-    const summary = safeText(result.summary);
-    const dataDescription = safeText(result.dataDescription);
-    const practicalText = safeText(result.practicalText);
-    const interpretation = safeText(result.interpretation);
-    const fullText = safeText(result.fullText);
+      const summary = safeText(result.summary);
+      const dataDescription = safeText(result.dataDescription);
+      const practicalText = safeText(result.practicalText);
+      const interpretation = safeText(result.interpretation);
+      const fullText = safeText(result.fullText);
 
-    const tablesHtml = tables
-      .map((table) => createHtmlTable(table.title, table.rows))
-      .join('\n');
+      const tablesHtml = tables
+        .map((table) => createHtmlTable(table.title, table.rows))
+        .join("\n");
 
-    return `
+      return `
 <!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>${escapeHtml(result.title || 'Výsledky analýzy dát')}</title>
+  <title>${escapeHtml(result.title || "Výsledky analýzy dát")}</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -6230,10 +6218,10 @@ const downloadAnalysisExport = async (format: 'word' | 'pdf' | 'xlsx') => {
   </style>
 </head>
 <body>
-  <h1>${escapeHtml(result.title || 'Výsledky analýzy dát')}</h1>
+  <h1>${escapeHtml(result.title || "Výsledky analýzy dát")}</h1>
 
   <h2>Súhrn</h2>
-  <div class="box">${escapeHtml(summary || 'Súhrn nie je dostupný.')}</div>
+  <div class="box">${escapeHtml(summary || "Súhrn nie je dostupný.")}</div>
 
   ${
     dataDescription
@@ -6241,7 +6229,7 @@ const downloadAnalysisExport = async (format: 'word' | 'pdf' | 'xlsx') => {
   <h2>Opis dát</h2>
   <div class="box">${escapeHtml(dataDescription)}</div>
   `
-      : ''
+      : ""
   }
 
   ${
@@ -6250,7 +6238,7 @@ const downloadAnalysisExport = async (format: 'word' | 'pdf' | 'xlsx') => {
   <h2>Text do praktickej časti</h2>
   <div class="box">${escapeHtml(practicalText)}</div>
   `
-      : ''
+      : ""
   }
 
   ${
@@ -6259,7 +6247,7 @@ const downloadAnalysisExport = async (format: 'word' | 'pdf' | 'xlsx') => {
   <h2>Interpretácia</h2>
   <div class="box">${escapeHtml(interpretation)}</div>
   `
-      : ''
+      : ""
   }
 
   ${tablesHtml}
@@ -6270,1525 +6258,1486 @@ const downloadAnalysisExport = async (format: 'word' | 'pdf' | 'xlsx') => {
   <h2>Kompletný textový výstup</h2>
   <div class="box">${escapeHtml(fullText)}</div>
   `
-      : ''
+      : ""
   }
 </body>
 </html>
 `;
-  };
+    };
 
-  const triggerDownload = (blob: Blob, fileName: string) => {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
+    const triggerDownload = (blob: Blob, fileName: string) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
 
-    link.href = url;
-    link.download = fileName;
-    link.rel = 'noopener';
+      link.href = url;
+      link.download = fileName;
+      link.rel = "noopener";
 
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
 
-    window.setTimeout(() => {
-      URL.revokeObjectURL(url);
-    }, 1000);
-  };
+      window.setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 1000);
+    };
 
-  try {
-    const fileBase = 'vysledky-analyzy-dat';
+    try {
+      const fileBase = "vysledky-analyzy-dat";
 
-    if (format === 'word') {
-      const html = createFullHtml();
+      if (format === "word") {
+        const html = createFullHtml();
 
-      const blob = new Blob([html], {
-        type: 'application/msword;charset=utf-8',
-      });
+        const blob = new Blob([html], {
+          type: "application/msword;charset=utf-8",
+        });
 
-      triggerDownload(blob, `${fileBase}.doc`);
-      return;
-    }
-
-    if (format === 'pdf') {
-      const html = createFullHtml();
-      const printWindow = window.open('', '_blank');
-
-      if (!printWindow) {
-        alert(
-          'Prehliadač zablokoval otvorenie PDF okna. Povoľte vyskakovacie okná.',
-        );
+        triggerDownload(blob, `${fileBase}.doc`);
         return;
       }
 
-      printWindow.document.open();
-      printWindow.document.write(html);
-      printWindow.document.close();
+      if (format === "pdf") {
+        const html = createFullHtml();
+        const printWindow = window.open("", "_blank");
 
-      printWindow.onload = () => {
-        printWindow.focus();
-        printWindow.print();
-      };
+        if (!printWindow) {
+          alert(
+            "Prehliadač zablokoval otvorenie PDF okna. Povoľte vyskakovacie okná.",
+          );
+          return;
+        }
 
-      return;
+        printWindow.document.open();
+        printWindow.document.write(html);
+        printWindow.document.close();
+
+        printWindow.onload = () => {
+          printWindow.focus();
+          printWindow.print();
+        };
+
+        return;
+      }
+
+      if (format === "xlsx") {
+        const XLSX = await import("xlsx");
+
+        const workbook = XLSX.utils.book_new();
+        const result = analysisResult as any;
+        const tables = collectExportTables();
+
+        const summaryRows = [
+          {
+            položka: "Názov",
+            hodnota: result.title || "Výsledky analýzy dát",
+          },
+          {
+            položka: "Súhrn",
+            hodnota: safeText(result.summary),
+          },
+          {
+            položka: "Opis dát",
+            hodnota: safeText(result.dataDescription),
+          },
+          {
+            položka: "Text do praktickej časti",
+            hodnota: safeText(result.practicalText),
+          },
+          {
+            položka: "Interpretácia",
+            hodnota: safeText(result.interpretation),
+          },
+          {
+            položka: "Vygenerované",
+            hodnota: new Date().toLocaleString("sk-SK"),
+          },
+        ];
+
+        const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+        XLSX.utils.book_append_sheet(workbook, summarySheet, "Súhrn");
+
+        tables.forEach((table, index) => {
+          const sheetNameBase =
+            table.title
+              .replace(/[\\/?*[\]:]/g, " ")
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, 28) || `Tabuľka ${index + 1}`;
+
+          const safeSheetName =
+            sheetNameBase.length > 0 ? sheetNameBase : `Tabuľka ${index + 1}`;
+
+          const worksheet = XLSX.utils.json_to_sheet(table.rows);
+
+          XLSX.utils.book_append_sheet(
+            workbook,
+            worksheet,
+            `${safeSheetName}`.slice(0, 31),
+          );
+        });
+
+        const excelBuffer = XLSX.write(workbook, {
+          bookType: "xlsx",
+          type: "array",
+        });
+
+        const blob = new Blob([excelBuffer], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+
+        triggerDownload(blob, `${fileBase}.xlsx`);
+      }
+    } catch (error) {
+      console.error("ANALYSIS_EXPORT_ERROR:", error);
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Export analýzy sa nepodarilo vytvoriť.",
+      );
     }
-
-    if (format === 'xlsx') {
-      const XLSX = await import('xlsx');
-
-      const workbook = XLSX.utils.book_new();
-      const result = analysisResult as any;
-      const tables = collectExportTables();
-
-      const summaryRows = [
-        {
-          položka: 'Názov',
-          hodnota: result.title || 'Výsledky analýzy dát',
-        },
-        {
-          položka: 'Súhrn',
-          hodnota: safeText(result.summary),
-        },
-        {
-          položka: 'Opis dát',
-          hodnota: safeText(result.dataDescription),
-        },
-        {
-          položka: 'Text do praktickej časti',
-          hodnota: safeText(result.practicalText),
-        },
-        {
-          položka: 'Interpretácia',
-          hodnota: safeText(result.interpretation),
-        },
-        {
-          položka: 'Vygenerované',
-          hodnota: new Date().toLocaleString('sk-SK'),
-        },
-      ];
-
-      const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
-      XLSX.utils.book_append_sheet(workbook, summarySheet, 'Súhrn');
-
-      tables.forEach((table, index) => {
-        const sheetNameBase =
-          table.title
-            .replace(/[\\/?*[\]:]/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .slice(0, 28) || `Tabuľka ${index + 1}`;
-
-        const safeSheetName =
-          sheetNameBase.length > 0
-            ? sheetNameBase
-            : `Tabuľka ${index + 1}`;
-
-        const worksheet = XLSX.utils.json_to_sheet(table.rows);
-
-        XLSX.utils.book_append_sheet(
-          workbook,
-          worksheet,
-          `${safeSheetName}`.slice(0, 31),
-        );
-      });
-
-      const excelBuffer = XLSX.write(workbook, {
-        bookType: 'xlsx',
-        type: 'array',
-      });
-
-      const blob = new Blob([excelBuffer], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-
-      triggerDownload(blob, `${fileBase}.xlsx`);
-    }
-  } catch (error) {
-    console.error('ANALYSIS_EXPORT_ERROR:', error);
-
-    alert(
-      error instanceof Error
-        ? error.message
-        : 'Export analýzy sa nepodarilo vytvoriť.',
-    );
-  }
-};
-
-function downloadPreparedDataFile(): void {
-  if (!preparedDataFile?.base64) {
-    alert('Prepared raw data ešte neboli vytvorené. Najprv spusti analýzu dát.');
-    return;
-  }
-
-  downloadBase64File(
-    preparedDataFile.base64,
-    preparedDataFile.fileName || 'prepared-data.xlsx',
-    preparedDataFile.mimeType ||
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  );
-}
-
-
-const downloadExcel = () => {
-  const text = stripModuleExtraSections(canvasText || result || '', activeModule);
-
-  if (!text.trim()) {
-    alert('Nie je čo exportovať do Excelu.');
-    return;
-  }
-
-  const rows = text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => ({
-      poradie: index + 1,
-      text: line,
-    }));
-
-  const escapeCell = (value: string | number) => {
-    const stringValue = String(value ?? '');
-    return `"${stringValue.replace(/"/g, '""')}"`;
   };
 
-  const csv = [
-  ['Poradie', 'Text'].map(escapeCell).join(';'),
-  ...rows.map((row) =>
-    [row.poradie, row.text].map(escapeCell).join(';'),
-  ),
-].join('\n');
-
-  const blob = new Blob([`\uFEFF${csv}`], {
-    type: 'text/csv;charset=utf-8;',
-  });
-
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-
-  link.href = url;
-  link.download = `${activeModule || 'zedpera'}-vystup.csv`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-
-  URL.revokeObjectURL(url);
-};
-
-
- const downloadPpt = async () => {
-  let currentEntitlements = entitlements;
-
-  if (!currentEntitlements) {
-    const loadedBillingState = await loadBillingState();
-    currentEntitlements = loadedBillingState?.entitlements || null;
-  }
-
-  if (
-    !currentEntitlements?.hasUnlimitedAccess &&
-    !currentEntitlements?.isAdmin &&
-    !currentEntitlements?.features.includes('defense-presentation')
-  ) {
-    setBillingNotice({
-      code: 'FEATURE_NOT_INCLUDED',
-      message:
-        'Prezentácia na obhajobu nie je súčasťou aktivovaného balíka.',
-      detail: 'defense-presentation',
-      purchaseUrl: '/pricing',
-    });
-    return;
-  }
-
-  const text = stripModuleExtraSections(canvasText || result, activeModule);
-
-  if (!text.trim()) {
-    alert('Najprv vygenerujte obhajobu alebo výstup, až potom je možné stiahnuť PPTX.');
-    return;
-  }
-
-  const pptTitle =
-    activeProfile?.title ||
-    activeProfile?.topic ||
-    'Obhajoba záverečnej práce';
-
-  const defenseType =
-    activeProfile?.type ||
-    activeProfile?.schema?.label ||
-    'Obhajoba záverečnej práce';
-
-  const slides = [
-    {
-      title: pptTitle,
-      layout: 'section',
-      bullets: [
-        defenseType,
-        activeProfile?.field || 'Odbor je potrebné doplniť',
-        activeProfile?.topic || 'Téma práce je potrebné doplniť',
-      ],
-      speakerNotes:
-        'Na úvod stručne predstavte názov práce, odbor, typ práce a dôvod výberu témy.',
-      visualSuggestion:
-        'Titulný slide s názvom práce a moderným akademickým pozadím.',
-    },
-    {
-      title: 'Význam a aktuálnosť témy',
-      layout: 'bullets',
-      bullets: [
-        activeProfile?.annotation ||
-          'Téma je významná z odborného alebo praktického hľadiska.',
-        'Práca reaguje na konkrétny problém v danej oblasti.',
-        'Zvolená téma má priamu väzbu na odbor a prax.',
-      ],
-      speakerNotes:
-        'Vysvetlite, prečo je téma dôležitá a aký problém práca rieši.',
-      visualSuggestion: 'Schéma kontextu témy alebo karta s problémom.',
-    },
-    {
-      title: 'Cieľ práce',
-      layout: 'quote',
-      bullets: [
-        activeProfile?.goal ||
-          'Cieľ práce je potrebné doplniť podľa finálneho zadania.',
-      ],
-      speakerNotes:
-        'Cieľ povedzte jasne, jednou až dvomi vetami.',
-      visualSuggestion: 'Veľká karta s hlavným cieľom práce.',
-    },
-    {
-      title: 'Výskumný problém, otázky a hypotézy',
-      layout: 'split',
-      bullets: [
-        activeProfile?.problem ||
-          activeProfile?.researchQuestions ||
-          'Výskumný problém alebo výskumné otázky je potrebné doplniť.',
-        activeProfile?.hypotheses ||
-          'Hypotézy je potrebné doplniť, ak boli súčasťou práce.',
-        'Otázky a hypotézy majú byť prepojené s cieľom práce.',
-      ],
-      speakerNotes:
-        'Ukážte, čo práca skúmala, overovala alebo analyzovala.',
-      visualSuggestion: 'Dvojstĺpcové rozloženie: otázky a hypotézy.',
-    },
-    {
-      title: 'Teoretické východiská',
-      layout: 'bullets',
-      bullets: [
-        'Teoretická časť vysvetľuje hlavné pojmy a odborné súvislosti.',
-        'Použité zdroje vytvárajú základ pre praktickú alebo analytickú časť.',
-        'Teória je prepojená s cieľom a riešeným problémom práce.',
-      ],
-      speakerNotes:
-        'Nevymenúvajte celú teóriu. Vyberte iba pojmy dôležité pre cieľ práce.',
-      visualSuggestion: 'Schéma hlavných pojmov alebo konceptov.',
-    },
-    {
-      title: 'Metodológia práce',
-      layout: 'bullets',
-      bullets: [
-        activeProfile?.methodology ||
-          'Metodologický postup je potrebné doplniť podľa finálnej práce.',
-        'Metódy boli zvolené podľa cieľa a charakteru skúmanej témy.',
-        'Postup spracovania má umožniť zodpovedať výskumné otázky alebo overiť hypotézy.',
-      ],
-      speakerNotes:
-        'Vysvetlite, ako bola práca spracovaná a prečo boli zvolené dané metódy.',
-      visualSuggestion: 'Procesná schéma krokov metodiky.',
-    },
-    {
-      title: 'Praktická časť práce',
-      layout: 'bullets',
-      bullets: [
-        activeProfile?.practicalPart ||
-          'Praktická časť je potrebné doplniť podľa obsahu práce.',
-        'Táto časť prepája teoretické poznatky s vlastným spracovaním témy.',
-        'Dôležité je vysvetliť zdroj dát, postup a spôsob vyhodnotenia.',
-      ],
-      speakerNotes:
-        'Stručne predstavte, čo tvorilo praktickú časť práce.',
-      visualSuggestion: 'Karta s dátami, vzorkou alebo postupom.',
-    },
-    {
-      title: 'Hlavné výsledky práce',
-      layout: 'chart',
-      bullets: [
-        'Výsledky je potrebné predstaviť vecne a priamo vo vzťahu k cieľu práce.',
-        'Najdôležitejšie zistenia majú byť podložené údajmi alebo argumentáciou.',
-        'Výsledky tvoria základ pre diskusiu a odporúčania.',
-      ],
-      speakerNotes:
-        'Pri výsledkoch hovorte konkrétne. Vyberte iba najdôležitejšie zistenia.',
-      visualSuggestion: 'Graf alebo tabuľka s najdôležitejšími výsledkami.',
-    },
-    {
-      title: 'Interpretácia výsledkov',
-      layout: 'split',
-      bullets: [
-        'Výsledky je potrebné interpretovať vo vzťahu k cieľu práce.',
-        'Diskusia ukazuje, čo zistenia znamenajú pre riešený problém.',
-        'Interpretácia prepája výsledky s teoretickými východiskami.',
-      ],
-      speakerNotes:
-        'Neopakujte iba výsledky. Vysvetlite ich význam a dopad.',
-      visualSuggestion: 'Porovnanie: výsledok a význam pre prácu.',
-    },
-    {
-      title: 'Prínos práce',
-      layout: 'quote',
-      bullets: [
-        activeProfile?.scientificContribution ||
-          'Prínos práce je potrebné pomenovať podľa výsledkov a cieľa práce.',
-        'Práca môže byť využiteľná v odbornej praxi alebo ďalšom výskume.',
-        'Vlastný prínos autora spočíva v spracovaní, analýze a vyhodnotení témy.',
-      ],
-      speakerNotes:
-        'Zdôraznite, čo práca prináša a komu môžu byť výsledky užitočné.',
-      visualSuggestion: 'Dve karty: prínos pre prax a prínos pre odbor.',
-    },
-    {
-      title: 'Limity práce',
-      layout: 'bullets',
-      bullets: [
-        'Každá práca má obmedzenia, ktoré je vhodné pomenovať vecne a odborne.',
-        'Limity môžu súvisieť s rozsahom, dátami, vzorkou, metódou alebo dostupnosťou zdrojov.',
-        'Ich pomenovanie ukazuje odbornú zrelosť autora.',
-      ],
-      speakerNotes:
-        'Limity nepôsobia negatívne, ak ich vysvetlíte pokojne a odborne.',
-      visualSuggestion: 'Tri krátke karty s limitmi práce.',
-    },
-    {
-      title: 'Otázky komisie a pripravené odpovede',
-      layout: 'bullets',
-      bullets: [
-        'Prečo ste si vybrali túto tému?',
-        'Ako cieľ práce súvisí s použitou metodológiou?',
-        'Aký je hlavný prínos práce?',
-        'Aké boli najväčšie limity spracovania?',
-        'Ako by bolo možné vo výskume pokračovať?',
-      ],
-      speakerNotes:
-        'Na otázky odpovedajte stručne, priamo a odborne.',
-      visualSuggestion: 'Slide s ikonou otázok a odpovedí.',
-    },
-    {
-      title: 'Záver obhajoby',
-      layout: 'closing',
-      bullets: [
-        'Práca sa zamerala na riešenie stanovenej témy a cieľa.',
-        'Výsledky poskytujú podklad pre odborné zhodnotenie a odporúčania.',
-        'Ďakujem za pozornosť a som pripravený/pripravená odpovedať na otázky.',
-      ],
-      speakerNotes:
-        'Záver má byť krátky, sebavedomý a vecný.',
-      visualSuggestion: 'Čistý záverečný slide s poďakovaním.',
-    },
-  ];
-
-  try {
-    const response = await fetch('/api/defense/pptx', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        title: pptTitle,
-        workTitle: pptTitle,
-        defenseType,
-        theme: 'academic',
-        slides,
-        sourceText: [
-          activeProfile ? buildProfileBlock(activeProfile) : '',
-          '',
-          text,
-        ]
-          .filter(Boolean)
-          .join('\n\n'),
-        extractedWorkText: text,
-        attachmentText: activeAttachmentText || '',
-        text,
-      }),
-    });
-
-    if (!response.ok) {
-      throw await readDashboardApiError(response);
-    }
-
-    const blob = await response.blob();
-
-    if (!blob || blob.size === 0) {
-      throw new Error('Server vrátil prázdny PPTX súbor.');
-    }
-
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-
-    link.href = url;
-    link.download = `${sanitizeFileName(pptTitle)}.pptx`;
-
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-
-    URL.revokeObjectURL(url);
-    await loadBillingState();
-  } catch (error) {
-    console.error('PPTX_EXPORT_ERROR:', error);
-
-    if (
-      error instanceof DashboardApiError &&
-      error.status === 401
-    ) {
-      router.replace('/login?returnTo=/dashboard');
+  function downloadPreparedDataFile(): void {
+    if (!preparedDataFile?.base64) {
+      alert(
+        "Prepared raw data ešte neboli vytvorené. Najprv spusti analýzu dát.",
+      );
       return;
     }
 
+    downloadBase64File(
+      preparedDataFile.base64,
+      preparedDataFile.fileName || "prepared-data.xlsx",
+      preparedDataFile.mimeType ||
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+  }
+
+  const downloadExcel = () => {
+    const text = stripModuleExtraSections(
+      canvasText || result || "",
+      activeModule,
+    );
+
+    if (!text.trim()) {
+      alert("Nie je čo exportovať do Excelu.");
+      return;
+    }
+
+    const rows = text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line, index) => ({
+        poradie: index + 1,
+        text: line,
+      }));
+
+    const escapeCell = (value: string | number) => {
+      const stringValue = String(value ?? "");
+      return `"${stringValue.replace(/"/g, '""')}"`;
+    };
+
+    const csv = [
+      ["Poradie", "Text"].map(escapeCell).join(";"),
+      ...rows.map((row) => [row.poradie, row.text].map(escapeCell).join(";")),
+    ].join("\n");
+
+    const blob = new Blob([`\uFEFF${csv}`], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `${activeModule || "zedpera"}-vystup.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadPpt = async () => {
+    let currentEntitlements = entitlements;
+
+    if (!currentEntitlements) {
+      const loadedBillingState = await loadBillingState();
+      currentEntitlements = loadedBillingState?.entitlements || null;
+    }
+
     if (
-      error instanceof DashboardApiError &&
-      (error.status === 402 ||
-        error.status === 403 ||
-        BILLING_ERROR_CODES.has(error.code))
+      !currentEntitlements?.hasUnlimitedAccess &&
+      !currentEntitlements?.isAdmin &&
+      !currentEntitlements?.features.includes("defense-presentation")
     ) {
       setBillingNotice({
-        code: error.code,
-        message: error.message,
-        detail: error.detail,
-        purchaseUrl: error.purchaseUrl || '/pricing',
+        code: "FEATURE_NOT_INCLUDED",
+        message: "Prezentácia na obhajobu nie je súčasťou aktivovaného balíka.",
+        detail: "defense-presentation",
+        purchaseUrl: "/pricing",
       });
       return;
     }
 
-    alert(
-      error instanceof Error
-        ? error.message
-        : 'Prezentáciu sa nepodarilo vytvoriť.',
-    );
-  }
-};
+    const text = stripModuleExtraSections(canvasText || result, activeModule);
 
+    if (!text.trim()) {
+      alert(
+        "Najprv vygenerujte obhajobu alebo výstup, až potom je možné stiahnuť PPTX.",
+      );
+      return;
+    }
 
+    const pptTitle =
+      activeProfile?.title ||
+      activeProfile?.topic ||
+      "Obhajoba záverečnej práce";
+
+    const defenseType =
+      activeProfile?.type ||
+      activeProfile?.schema?.label ||
+      "Obhajoba záverečnej práce";
+
+    const slides = [
+      {
+        title: pptTitle,
+        layout: "section",
+        bullets: [
+          defenseType,
+          activeProfile?.field || "Odbor je potrebné doplniť",
+          activeProfile?.topic || "Téma práce je potrebné doplniť",
+        ],
+        speakerNotes:
+          "Na úvod stručne predstavte názov práce, odbor, typ práce a dôvod výberu témy.",
+        visualSuggestion:
+          "Titulný slide s názvom práce a moderným akademickým pozadím.",
+      },
+      {
+        title: "Význam a aktuálnosť témy",
+        layout: "bullets",
+        bullets: [
+          activeProfile?.annotation ||
+            "Téma je významná z odborného alebo praktického hľadiska.",
+          "Práca reaguje na konkrétny problém v danej oblasti.",
+          "Zvolená téma má priamu väzbu na odbor a prax.",
+        ],
+        speakerNotes:
+          "Vysvetlite, prečo je téma dôležitá a aký problém práca rieši.",
+        visualSuggestion: "Schéma kontextu témy alebo karta s problémom.",
+      },
+      {
+        title: "Cieľ práce",
+        layout: "quote",
+        bullets: [
+          activeProfile?.goal ||
+            "Cieľ práce je potrebné doplniť podľa finálneho zadania.",
+        ],
+        speakerNotes: "Cieľ povedzte jasne, jednou až dvomi vetami.",
+        visualSuggestion: "Veľká karta s hlavným cieľom práce.",
+      },
+      {
+        title: "Výskumný problém, otázky a hypotézy",
+        layout: "split",
+        bullets: [
+          activeProfile?.problem ||
+            activeProfile?.researchQuestions ||
+            "Výskumný problém alebo výskumné otázky je potrebné doplniť.",
+          activeProfile?.hypotheses ||
+            "Hypotézy je potrebné doplniť, ak boli súčasťou práce.",
+          "Otázky a hypotézy majú byť prepojené s cieľom práce.",
+        ],
+        speakerNotes: "Ukážte, čo práca skúmala, overovala alebo analyzovala.",
+        visualSuggestion: "Dvojstĺpcové rozloženie: otázky a hypotézy.",
+      },
+      {
+        title: "Teoretické východiská",
+        layout: "bullets",
+        bullets: [
+          "Teoretická časť vysvetľuje hlavné pojmy a odborné súvislosti.",
+          "Použité zdroje vytvárajú základ pre praktickú alebo analytickú časť.",
+          "Teória je prepojená s cieľom a riešeným problémom práce.",
+        ],
+        speakerNotes:
+          "Nevymenúvajte celú teóriu. Vyberte iba pojmy dôležité pre cieľ práce.",
+        visualSuggestion: "Schéma hlavných pojmov alebo konceptov.",
+      },
+      {
+        title: "Metodológia práce",
+        layout: "bullets",
+        bullets: [
+          activeProfile?.methodology ||
+            "Metodologický postup je potrebné doplniť podľa finálnej práce.",
+          "Metódy boli zvolené podľa cieľa a charakteru skúmanej témy.",
+          "Postup spracovania má umožniť zodpovedať výskumné otázky alebo overiť hypotézy.",
+        ],
+        speakerNotes:
+          "Vysvetlite, ako bola práca spracovaná a prečo boli zvolené dané metódy.",
+        visualSuggestion: "Procesná schéma krokov metodiky.",
+      },
+      {
+        title: "Praktická časť práce",
+        layout: "bullets",
+        bullets: [
+          activeProfile?.practicalPart ||
+            "Praktická časť je potrebné doplniť podľa obsahu práce.",
+          "Táto časť prepája teoretické poznatky s vlastným spracovaním témy.",
+          "Dôležité je vysvetliť zdroj dát, postup a spôsob vyhodnotenia.",
+        ],
+        speakerNotes: "Stručne predstavte, čo tvorilo praktickú časť práce.",
+        visualSuggestion: "Karta s dátami, vzorkou alebo postupom.",
+      },
+      {
+        title: "Hlavné výsledky práce",
+        layout: "chart",
+        bullets: [
+          "Výsledky je potrebné predstaviť vecne a priamo vo vzťahu k cieľu práce.",
+          "Najdôležitejšie zistenia majú byť podložené údajmi alebo argumentáciou.",
+          "Výsledky tvoria základ pre diskusiu a odporúčania.",
+        ],
+        speakerNotes:
+          "Pri výsledkoch hovorte konkrétne. Vyberte iba najdôležitejšie zistenia.",
+        visualSuggestion: "Graf alebo tabuľka s najdôležitejšími výsledkami.",
+      },
+      {
+        title: "Interpretácia výsledkov",
+        layout: "split",
+        bullets: [
+          "Výsledky je potrebné interpretovať vo vzťahu k cieľu práce.",
+          "Diskusia ukazuje, čo zistenia znamenajú pre riešený problém.",
+          "Interpretácia prepája výsledky s teoretickými východiskami.",
+        ],
+        speakerNotes: "Neopakujte iba výsledky. Vysvetlite ich význam a dopad.",
+        visualSuggestion: "Porovnanie: výsledok a význam pre prácu.",
+      },
+      {
+        title: "Prínos práce",
+        layout: "quote",
+        bullets: [
+          activeProfile?.scientificContribution ||
+            "Prínos práce je potrebné pomenovať podľa výsledkov a cieľa práce.",
+          "Práca môže byť využiteľná v odbornej praxi alebo ďalšom výskume.",
+          "Vlastný prínos autora spočíva v spracovaní, analýze a vyhodnotení témy.",
+        ],
+        speakerNotes:
+          "Zdôraznite, čo práca prináša a komu môžu byť výsledky užitočné.",
+        visualSuggestion: "Dve karty: prínos pre prax a prínos pre odbor.",
+      },
+      {
+        title: "Limity práce",
+        layout: "bullets",
+        bullets: [
+          "Každá práca má obmedzenia, ktoré je vhodné pomenovať vecne a odborne.",
+          "Limity môžu súvisieť s rozsahom, dátami, vzorkou, metódou alebo dostupnosťou zdrojov.",
+          "Ich pomenovanie ukazuje odbornú zrelosť autora.",
+        ],
+        speakerNotes:
+          "Limity nepôsobia negatívne, ak ich vysvetlíte pokojne a odborne.",
+        visualSuggestion: "Tri krátke karty s limitmi práce.",
+      },
+      {
+        title: "Otázky komisie a pripravené odpovede",
+        layout: "bullets",
+        bullets: [
+          "Prečo ste si vybrali túto tému?",
+          "Ako cieľ práce súvisí s použitou metodológiou?",
+          "Aký je hlavný prínos práce?",
+          "Aké boli najväčšie limity spracovania?",
+          "Ako by bolo možné vo výskume pokračovať?",
+        ],
+        speakerNotes: "Na otázky odpovedajte stručne, priamo a odborne.",
+        visualSuggestion: "Slide s ikonou otázok a odpovedí.",
+      },
+      {
+        title: "Záver obhajoby",
+        layout: "closing",
+        bullets: [
+          "Práca sa zamerala na riešenie stanovenej témy a cieľa.",
+          "Výsledky poskytujú podklad pre odborné zhodnotenie a odporúčania.",
+          "Ďakujem za pozornosť a som pripravený/pripravená odpovedať na otázky.",
+        ],
+        speakerNotes: "Záver má byť krátky, sebavedomý a vecný.",
+        visualSuggestion: "Čistý záverečný slide s poďakovaním.",
+      },
+    ];
+
+    try {
+      const response = await fetch("/api/defense/pptx", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: pptTitle,
+          workTitle: pptTitle,
+          defenseType,
+          theme: "academic",
+          slides,
+          sourceText: [
+            activeProfile ? buildProfileBlock(activeProfile) : "",
+            "",
+            text,
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+          extractedWorkText: text,
+          attachmentText: activeAttachmentText || "",
+          text,
+        }),
+      });
+
+      if (!response.ok) {
+        throw await readDashboardApiError(response);
+      }
+
+      const blob = await response.blob();
+
+      if (!blob || blob.size === 0) {
+        throw new Error("Server vrátil prázdny PPTX súbor.");
+      }
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = `${sanitizeFileName(pptTitle)}.pptx`;
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      URL.revokeObjectURL(url);
+      await loadBillingState();
+    } catch (error) {
+      console.error("PPTX_EXPORT_ERROR:", error);
+
+      if (error instanceof DashboardApiError && error.status === 401) {
+        router.replace("/login?returnTo=/dashboard");
+        return;
+      }
+
+      if (
+        error instanceof DashboardApiError &&
+        (error.status === 402 ||
+          error.status === 403 ||
+          BILLING_ERROR_CODES.has(error.code))
+      ) {
+        setBillingNotice({
+          code: error.code,
+          message: error.message,
+          detail: error.detail,
+          purchaseUrl: error.purchaseUrl || "/pricing",
+        });
+        return;
+      }
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Prezentáciu sa nepodarilo vytvoriť.",
+      );
+    }
+  };
 
   return (
     <>
-    <style jsx global>{`
-  html,
-  body {
-    min-height: 100%;
-    overflow-x: hidden;
-    overflow-y: auto;
-  }
+      <style jsx global>{`
+        html,
+        body {
+          min-height: 100%;
+          overflow-x: hidden;
+          overflow-y: auto;
+        }
 
-  html {
-    background: #f8fafc;
-  }
+        html {
+          background: #f8fafc;
+        }
 
-  html.dark {
-    background: #050711;
-  }
+        html.dark {
+          background: #050711;
+        }
 
-  body {
-    background: #f8fafc;
-  }
+        body {
+          background: #f8fafc;
+        }
 
-  html.dark body {
-    background: #050711;
-  }
+        html.dark body {
+          background: #050711;
+        }
 
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(139, 92, 246, 0.7)
-      rgba(15, 23, 42, 0.12);
-  }
+        * {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(139, 92, 246, 0.7) rgba(15, 23, 42, 0.12);
+        }
 
-  html.dark * {
-    scrollbar-color: rgba(139, 92, 246, 0.7)
-      rgba(255, 255, 255, 0.06);
-  }
+        html.dark * {
+          scrollbar-color: rgba(139, 92, 246, 0.7) rgba(255, 255, 255, 0.06);
+        }
 
-  *::-webkit-scrollbar {
-    width: 10px;
-    height: 8px;
-  }
+        *::-webkit-scrollbar {
+          width: 10px;
+          height: 8px;
+        }
 
-  *::-webkit-scrollbar-track {
-    background: rgba(15, 23, 42, 0.08);
-    border-radius: 999px;
-  }
+        *::-webkit-scrollbar-track {
+          background: rgba(15, 23, 42, 0.08);
+          border-radius: 999px;
+        }
 
-  html.dark *::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.06);
-  }
+        html.dark *::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.06);
+        }
 
-  *::-webkit-scrollbar-thumb {
-    background: rgba(139, 92, 246, 0.75);
-    border-radius: 999px;
-  }
+        *::-webkit-scrollbar-thumb {
+          background: rgba(139, 92, 246, 0.75);
+          border-radius: 999px;
+        }
 
-  *::-webkit-scrollbar-thumb:hover {
-    background: rgba(168, 85, 247, 0.95);
-  }
+        *::-webkit-scrollbar-thumb:hover {
+          background: rgba(168, 85, 247, 0.95);
+        }
 
-  .no-scrollbar {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
+        .no-scrollbar {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
 
-  .no-scrollbar::-webkit-scrollbar {
-    width: 0 !important;
-    height: 0 !important;
-    display: none !important;
-  }
-`}</style>
+        .no-scrollbar::-webkit-scrollbar {
+          width: 0 !important;
+          height: 0 !important;
+          display: none !important;
+        }
+      `}</style>
 
-<main className="flex min-h-screen w-full bg-slate-50 text-slate-950 transition-colors duration-300 dark:bg-[#050711] dark:text-white">
-  <section className="flex min-h-screen min-w-0 flex-1 flex-col pb-24 xl:pb-0">
-    {/* DESKTOP AI LIŠTA - zobrazuje sa iba na počítači */}
-    <header className="sticky top-0 z-40 hidden shrink-0 border-b border-white/10 bg-[#050711]/95 px-4 py-3 backdrop-blur-xl xl:block">
-      <div className="flex w-full flex-col gap-3">
-        {/* AI MODULY - 2 stĺpce, rovnomerne rozdelené */}
-        <nav
-          aria-label="AI moduly dashboardu"
-          className="grid w-full grid-cols-2 gap-3 rounded-[1.75rem] border border-white/10 bg-white/[0.025] p-2 shadow-inner shadow-black/30"
-        >
-          {/* ĽAVÝ STĹPEC */}
-          <div className="flex min-w-0 flex-col gap-2">
-            {moduleInfos
-              .filter((item) => item.key !== 'originality')
-              .slice(
-                0,
-                Math.ceil(
-                  moduleInfos.filter((item) => item.key !== 'originality')
-                    .length / 2,
-                ),
-              )
-              .map((item) => {
-                const active = activeModule === item.key;
+      <main className="flex min-h-screen w-full bg-slate-50 text-slate-950 transition-colors duration-300 dark:bg-[#050711] dark:text-white">
+        <section className="flex min-h-screen min-w-0 flex-1 flex-col pb-24 xl:pb-0">
+          {/* DESKTOP AI LIŠTA - zobrazuje sa iba na počítači */}
+          <header className="sticky top-0 z-40 hidden shrink-0 border-b border-white/10 bg-[#050711]/95 px-4 py-3 backdrop-blur-xl xl:block">
+            <div className="flex w-full flex-col gap-3">
+              {/* AI MODULY - 2 stĺpce, rovnomerne rozdelené */}
+              <nav
+                aria-label="AI moduly dashboardu"
+                className="grid w-full grid-cols-2 gap-3 rounded-[1.75rem] border border-white/10 bg-white/[0.025] p-2 shadow-inner shadow-black/30"
+              >
+                {/* ĽAVÝ STĹPEC */}
+                <div className="flex min-w-0 flex-col gap-2">
+                  {desktopModuleItems
+                    .slice(0, desktopModuleSplitIndex)
+                    .map((moduleKey) => {
+                      const active = activeModule === moduleKey;
+                      const label = currentFixedModuleUi[moduleKey].shortLabel;
 
-                const label =
-  t.dashboardTools?.tools?.[item.translationKey] ||
-  getFixedModuleUi(systemLanguage)[item.key]?.shortLabel ||
-  item.key;
+                      return (
+                        <button
+                          key={moduleKey}
+                          type="button"
+                          onClick={() => selectDashboardModule(moduleKey)}
+                          title={label}
+                          aria-pressed={active}
+                          className={[
+                            "inline-flex h-[36px] w-full min-w-0 items-center justify-center rounded-2xl border px-4 text-[13px] font-black tracking-tight transition-all duration-200",
+                            "focus:outline-none focus:ring-2 focus:ring-violet-400/80 focus:ring-offset-2 focus:ring-offset-[#050711]",
+                            active
+                              ? "border-violet-300/70 bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white shadow-lg shadow-violet-950/50"
+                              : "border-white/10 bg-white/[0.055] text-slate-200 hover:-translate-y-0.5 hover:border-violet-300/50 hover:bg-white/[0.10] hover:text-white",
+                          ].join(" ")}
+                        >
+                          <span className="block w-full truncate text-center">
+                            {label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
 
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => selectDashboardModule(item.key)}
-                    title={label}
-                    aria-pressed={active}
-                    className={[
-                      'inline-flex h-[36px] w-full min-w-0 items-center justify-center rounded-2xl border px-4 text-[13px] font-black tracking-tight transition-all duration-200',
-                      'focus:outline-none focus:ring-2 focus:ring-violet-400/80 focus:ring-offset-2 focus:ring-offset-[#050711]',
-                      active
-                        ? 'border-violet-300/70 bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white shadow-lg shadow-violet-950/50'
-                        : 'border-white/10 bg-white/[0.055] text-slate-200 hover:-translate-y-0.5 hover:border-violet-300/50 hover:bg-white/[0.10] hover:text-white',
-                    ].join(' ')}
-                  >
-                    <span className="block w-full truncate text-center">
-                      {label}
-                    </span>
-                  </button>
-                );
-              })}
-          </div>
+                {/* PRAVÝ STĹPEC */}
+                <div className="flex min-w-0 flex-col gap-2">
+                  {desktopModuleItems
+                    .slice(desktopModuleSplitIndex)
+                    .map((moduleKey) => {
+                      const active = activeModule === moduleKey;
+                      const label = currentFixedModuleUi[moduleKey].shortLabel;
 
-          {/* PRAVÝ STĹPEC */}
-          <div className="flex min-w-0 flex-col gap-2">
-            {moduleInfos
-              .filter((item) => item.key !== 'originality')
-              .slice(
-                Math.ceil(
-                  moduleInfos.filter((item) => item.key !== 'originality')
-                    .length / 2,
-                ),
-              )
-              .map((item) => {
-                const active = activeModule === item.key;
+                      return (
+                        <button
+                          key={moduleKey}
+                          type="button"
+                          onClick={() => selectDashboardModule(moduleKey)}
+                          title={label}
+                          aria-pressed={active}
+                          className={[
+                            "inline-flex h-[36px] w-full min-w-0 items-center justify-center rounded-2xl border px-4 text-[13px] font-black tracking-tight transition-all duration-200",
+                            "focus:outline-none focus:ring-2 focus:ring-violet-400/80 focus:ring-offset-2 focus:ring-offset-[#050711]",
+                            active
+                              ? "border-violet-300/70 bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white shadow-lg shadow-violet-950/50"
+                              : "border-white/10 bg-white/[0.055] text-slate-200 hover:-translate-y-0.5 hover:border-violet-300/50 hover:bg-white/[0.10] hover:text-white",
+                          ].join(" ")}
+                        >
+                          <span className="block w-full truncate text-center">
+                            {label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
+              </nav>
+            </div>
+          </header>
 
-                const label =
-                  t.dashboardTools?.tools?.[item.translationKey] ||
-                  getFixedModuleUi(systemLanguage)[item.key]?.shortLabel ||
-                  item.key;
+          {/* MOBILNÁ AI LIŠTA - zobrazuje sa iba na mobile ako spodná fixná lišta */}
+          <MobileDashboardNavigation
+            activeModule={activeModule}
+            activeModuleLabel={activeModuleLabel}
+            activeModuleSubtitle={activeModuleCardSubtitle}
+            activeProfileTitle={activeProfile?.title || "Profil práce"}
+            activeProfileSubtitle={
+              activeProfile?.field || activeProfile?.level || ""
+            }
+            activeProfileType={activeProfile?.type || ""}
+            moduleInfos={moduleInfos}
+            t={t}
+            onSelectModule={(moduleKey: string) => {
+              if (isModuleKey(moduleKey)) {
+                selectDashboardModule(moduleKey);
+              }
+            }}
+            onNavigate={(path) => router.push(path)}
+          />
 
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => selectDashboardModule(item.key)}
-                    title={label}
-                    aria-pressed={active}
-                    className={[
-                      'inline-flex h-[36px] w-full min-w-0 items-center justify-center rounded-2xl border px-4 text-[13px] font-black tracking-tight transition-all duration-200',
-                      'focus:outline-none focus:ring-2 focus:ring-violet-400/80 focus:ring-offset-2 focus:ring-offset-[#050711]',
-                      active
-                        ? 'border-violet-300/70 bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white shadow-lg shadow-violet-950/50'
-                        : 'border-white/10 bg-white/[0.055] text-slate-200 hover:-translate-y-0.5 hover:border-violet-300/50 hover:bg-white/[0.10] hover:text-white',
-                    ].join(' ')}
-                  >
-                    <span className="block w-full truncate text-center">
-                      {label}
-                    </span>
-                  </button>
-                );
-              })}
-          </div>
-        </nav>
+          <div className="px-4 pt-4 sm:px-6 xl:px-8">
+            {billingLoading ? (
+              <section className="mb-4 rounded-2xl border border-violet-400/20 bg-violet-500/10 p-4 text-sm font-bold text-violet-100">
+                <span className="inline-flex items-center gap-2">
+                  <RefreshCcw className="h-4 w-4 animate-spin" />
+                  Načítavam aktívny balík a dostupné limity...
+                </span>
+              </section>
+            ) : null}
 
-      </div>
-    </header>
-
-        {/* MOBILNÁ AI LIŠTA - zobrazuje sa iba na mobile ako spodná fixná lišta */}
-        <MobileDashboardNavigation
-  activeModule={activeModule}
-  activeModuleLabel={activeModuleLabel}
-  activeModuleSubtitle={activeModuleCardSubtitle}
-  activeProfileTitle={activeProfile?.title || 'Profil práce'}
-  activeProfileSubtitle={activeProfile?.field || activeProfile?.level || ''}
-  activeProfileType={activeProfile?.type || ''}
-  moduleInfos={moduleInfos}
-  t={t}
-  onSelectModule={(moduleKey: string) => {
-    if (isModuleKey(moduleKey)) {
-      selectDashboardModule(moduleKey);
-    }
-  }}
-  onNavigate={(path) => router.push(path)}
-/>
-
-<div className="px-4 pt-4 sm:px-6 xl:px-8">
-  {billingLoading ? (
-    <section className="mb-4 rounded-2xl border border-violet-400/20 bg-violet-500/10 p-4 text-sm font-bold text-violet-100">
-      <span className="inline-flex items-center gap-2">
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Načítavam aktívny balík a dostupné limity...
-      </span>
-    </section>
-  ) : null}
-
-  {entitlements && pageQuota ? (
-    <section className="mb-4 rounded-3xl border border-white/10 bg-[#070b18] p-4 shadow-xl shadow-black/20">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-300">
-            Aktívny balík
-          </p>
-          <h2 className="mt-1 text-lg font-black text-white">
-            {entitlements.planName}
-          </h2>
-          {(entitlements.addonNames ?? []).length > 0 ? (
-            <p className="mt-1 text-xs font-bold text-slate-400">
-              Doplnky: {(entitlements.addonNames ?? []).join(', ')}
-            </p>
-          ) : null}
-        </div>
-
-        <button
-          type="button"
-          onClick={() => router.push('/pricing')}
-          className="inline-flex min-h-[42px] items-center justify-center rounded-xl bg-violet-500 px-4 py-2 text-sm font-black text-white transition hover:bg-violet-400"
-        >
-          Zobraziť balíky
-        </button>
-      </div>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-          <p className="text-xs font-bold text-slate-400">Strany</p>
-          <p className="mt-1 font-black text-white">
-            {hasUnlimitedAccess
-              ? 'Neobmedzené'
-              : `${pageQuota.pagesRemaining} zostáva z ${pageQuota.pageLimit}`}
-          </p>
-          {pageQuota.extraPageLimit > 0 ? (
-            <p className="mt-1 text-xs font-bold text-emerald-300">
-              Extra strany: +{pageQuota.extraPageLimit}
-            </p>
-          ) : null}
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-          <p className="text-xs font-bold text-slate-400">Prompty</p>
-          <p className="mt-1 font-black text-white">
-            {hasUnlimitedAccess || entitlements.promptLimit === null
-              ? 'Neobmedzené'
-              : `${entitlements.promptsRemaining ?? 0} zostáva z ${entitlements.promptLimit}`}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-          <p className="text-xs font-bold text-slate-400">
-            Prílohy
-          </p>
-
-          <p className="mt-1 font-black text-white">
-            {hasUnlimitedAccess
-              ? 'Neobmedzené'
-              : `${attachedFiles.length} / ${effectiveAttachmentLimit}`}
-          </p>
-
-          {hasUnlimitedAccess ? (
-            <p className="mt-1 text-xs font-semibold text-slate-400">
-              Aktuálne nahrané: {attachedFiles.length}
-            </p>
-          ) : null}
-        </div>
-      </div>
-    </section>
-  ) : null}
-
-  {visibleBillingNotice ? (
-    <section
-      key={`${activeModule}:${visibleBillingNotice.code}`}
-      className="mb-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4"
-      aria-live="polite"
-    >
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="font-black text-amber-100">
-            {visibleBillingNotice.message}
-          </p>
-          {visibleBillingNotice.detail ? (
-            <p className="mt-1 text-sm font-bold text-amber-100/70">
-              {visibleBillingNotice.detail}
-            </p>
-          ) : null}
-        </div>
-
-        <button
-          type="button"
-          onClick={() => router.push(visibleBillingNotice.purchaseUrl)}
-          className="shrink-0 rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-slate-950 transition hover:bg-amber-300"
-        >
-          {visibleBillingNotice.code === 'PAGE_LIMIT_REACHED'
-            ? 'Dokúpiť strany'
-            : 'Vybrať balík'}
-        </button>
-      </div>
-    </section>
-  ) : null}
-</div>
-
-{activeModule === 'planning' && (
-
-                  <div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                    Dnešný dátum: {getTodaySkDate()}.
+            {entitlements && pageQuota ? (
+              <section className="mb-4 rounded-3xl border border-white/10 bg-[#070b18] p-4 shadow-xl shadow-black/20">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-300">
+                      Aktívny balík
+                    </p>
+                    <h2 className="mt-1 text-lg font-black text-white">
+                      {entitlements.planName}
+                    </h2>
+                    {(entitlements.addonNames ?? []).length > 0 ? (
+                      <p className="mt-1 text-xs font-bold text-slate-400">
+                        Doplnky: {(entitlements.addonNames ?? []).join(", ")}
+                      </p>
+                    ) : null}
                   </div>
-                )}
 
+                  <button
+                    type="button"
+                    onClick={() => router.push("/pricing")}
+                    className="inline-flex min-h-[42px] items-center justify-center rounded-xl bg-violet-500 px-4 py-2 text-sm font-black text-white transition hover:bg-violet-400"
+                  >
+                    Zobraziť balíky
+                  </button>
+                </div>
 
-{activeModule === 'translation' && (
-  <div className="mb-5 rounded-3xl border border-sky-400/20 bg-sky-500/10 p-4">
-    <div className="mb-4 flex items-center gap-2">
-      <Languages className="h-5 w-5 text-sky-200" />
-      <h3 className="text-lg font-black text-white">
-        {activeModuleLabel}
-      </h3>
-    </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                    <p className="text-xs font-bold text-slate-400">Strany</p>
+                    <p className="mt-1 font-black text-white">
+                      {hasUnlimitedAccess
+                        ? "Neobmedzené"
+                        : `${pageQuota.pagesRemaining} zostáva z ${pageQuota.pageLimit}`}
+                    </p>
+                    {pageQuota.extraPageLimit > 0 ? (
+                      <p className="mt-1 text-xs font-bold text-emerald-300">
+                        Extra strany: +{pageQuota.extraPageLimit}
+                      </p>
+                    ) : null}
+                  </div>
 
-    <div className="grid grid-cols-1 gap-5">
-  <ClickableOptionGroup<LanguageCode>
-    label={selectorTranslations.translationFrom || 'Source language'}
-    value={translationFrom}
-    options={languageSelectOptions}
-    onChange={setTranslationFrom}
-  />
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                    <p className="text-xs font-bold text-slate-400">Prompty</p>
+                    <p className="mt-1 font-black text-white">
+                      {hasUnlimitedAccess || entitlements.promptLimit === null
+                        ? "Neobmedzené"
+                        : `${entitlements.promptsRemaining ?? 0} zostáva z ${entitlements.promptLimit}`}
+                    </p>
+                  </div>
 
-  <ClickableOptionGroup<LanguageCode>
-    label={selectorTranslations.translationTo || 'Target language'}
-    value={translationTo}
-    options={languageSelectOptions}
-    onChange={setTranslationTo}
-  />
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                    <p className="text-xs font-bold text-slate-400">Prílohy</p>
 
-  <ClickableOptionGroup<TranslationStyle>
-    label={selectorTranslations.translationStyle || 'Translation style'}
-    value={translationStyle}
-    options={translationStyleOptions}
-    onChange={setTranslationStyle}
-  />
-</div>
+                    <p className="mt-1 font-black text-white">
+                      {hasUnlimitedAccess
+                        ? "Neobmedzené"
+                        : `${attachedFiles.length} / ${effectiveAttachmentLimit}`}
+                    </p>
 
-  </div>
-)}
+                    {hasUnlimitedAccess ? (
+                      <p className="mt-1 text-xs font-semibold text-slate-400">
+                        Aktuálne nahrané: {attachedFiles.length}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </section>
+            ) : null}
 
-{activeModule === 'emails' && (
-  <div className="mb-5 rounded-3xl border border-pink-400/20 bg-pink-500/10 p-4">
-    <div className="mb-4 flex items-center gap-2">
-      <Mail className="h-5 w-5 text-pink-200" />
-      <h3 className="text-lg font-black text-white">
-        {activeModuleLabel}
-      </h3>
-    </div>
+            {visibleBillingNotice ? (
+              <section
+                key={`${activeModule}:${visibleBillingNotice.code}`}
+                className="mb-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4"
+                aria-live="polite"
+              >
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-black text-amber-100">
+                      {visibleBillingNotice.message}
+                    </p>
+                    {visibleBillingNotice.detail ? (
+                      <p className="mt-1 text-sm font-bold text-amber-100/70">
+                        {visibleBillingNotice.detail}
+                      </p>
+                    ) : null}
+                  </div>
 
-   <div className="grid grid-cols-1 gap-5">
-  <ClickableOptionGroup<EmailType>
-    label={selectorTranslations.emailType || 'Email type'}
-    value={emailType}
-    options={emailTypeOptions}
-    onChange={setEmailType}
-  />
-
-  <ClickableOptionGroup<EmailTone>
-    label={selectorTranslations.emailTone || 'Email tone'}
-    value={emailTone}
-    options={emailToneOptions}
-    onChange={setEmailTone}
-  />
-</div>
-  </div>
-)}
-
-                {(activeModule === 'supervisor' ||
-                  activeModule === 'quality' ||
-                  activeModule === 'defense' ||
-                  activeModule === 'data' ||
-                  activeModule === 'originality') && (
-                  <FileUploadBox
-                    files={attachedFiles}
-                    fileInputRef={fileInputRef}
-                    onFiles={handleFiles}
-                    onRemove={removeFile}
-                    limit={effectiveAttachmentLimit}
-                    disabled={
-                      billingLoading ||
-                      !activeModuleAllowed ||
-                      Boolean(
-                        !hasUnlimitedAccess &&
-                          entitlements?.promptLimitReached,
-                      ) ||
-                      Boolean(
-                        pageQuota &&
-                          !hasUnlimitedAccess &&
-                          !pageQuota.isUnlimited &&
-                          pageQuota.pageLimitReached,
-                      ) ||
-                      attachedFiles.length >= effectiveAttachmentLimit
+                  <button
+                    type="button"
+                    onClick={() =>
+                      router.push(visibleBillingNotice.purchaseUrl)
                     }
-                  />
+                    className="shrink-0 rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-slate-950 transition hover:bg-amber-300"
+                  >
+                    {visibleBillingNotice.code === "PAGE_LIMIT_REACHED"
+                      ? "Dokúpiť strany"
+                      : "Vybrať balík"}
+                  </button>
+                </div>
+              </section>
+            ) : null}
+          </div>
+
+          {activeModule === "planning" && (
+            <div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+              Dnešný dátum: {getTodaySkDate()}.
+            </div>
+          )}
+
+          {activeModule === "translation" && (
+            <div className="mb-5 rounded-3xl border border-sky-400/20 bg-sky-500/10 p-4">
+              <div className="mb-4 flex items-center gap-2">
+                <Languages className="h-5 w-5 text-sky-200" />
+                <h3 className="text-lg font-black text-white">
+                  {activeModuleLabel}
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 gap-5">
+                <ClickableOptionGroup<LanguageCode>
+                  label={
+                    selectorTranslations.translationFrom || "Source language"
+                  }
+                  value={translationFrom}
+                  options={languageSelectOptions}
+                  onChange={setTranslationFrom}
+                />
+
+                <ClickableOptionGroup<LanguageCode>
+                  label={
+                    selectorTranslations.translationTo || "Target language"
+                  }
+                  value={translationTo}
+                  options={languageSelectOptions}
+                  onChange={setTranslationTo}
+                />
+
+                <ClickableOptionGroup<TranslationStyle>
+                  label={
+                    selectorTranslations.translationStyle || "Translation style"
+                  }
+                  value={translationStyle}
+                  options={translationStyleOptions}
+                  onChange={setTranslationStyle}
+                />
+              </div>
+            </div>
+          )}
+
+          {activeModule === "emails" && (
+            <div className="mb-5 rounded-3xl border border-pink-400/20 bg-pink-500/10 p-4">
+              <div className="mb-4 flex items-center gap-2">
+                <Mail className="h-5 w-5 text-pink-200" />
+                <h3 className="text-lg font-black text-white">
+                  {activeModuleLabel}
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 gap-5">
+                <ClickableOptionGroup<EmailType>
+                  label={selectorTranslations.emailType || "Email type"}
+                  value={emailType}
+                  options={emailTypeOptions}
+                  onChange={setEmailType}
+                />
+
+                <ClickableOptionGroup<EmailTone>
+                  label={selectorTranslations.emailTone || "Email tone"}
+                  value={emailTone}
+                  options={emailToneOptions}
+                  onChange={setEmailTone}
+                />
+              </div>
+            </div>
+          )}
+
+          {(activeModule === "supervisor" ||
+            activeModule === "quality" ||
+            activeModule === "defense" ||
+            activeModule === "data" ||
+            activeModule === "originality") && (
+            <FileUploadBox
+              files={attachedFiles}
+              fileInputRef={fileInputRef}
+              onFiles={handleFiles}
+              onRemove={removeFile}
+              limit={effectiveAttachmentLimit}
+              disabled={
+                billingLoading ||
+                !activeModuleAllowed ||
+                Boolean(
+                  !hasUnlimitedAccess && entitlements?.promptLimitReached,
+                ) ||
+                Boolean(
+                  pageQuota &&
+                  !hasUnlimitedAccess &&
+                  !pageQuota.isUnlimited &&
+                  pageQuota.pageLimitReached,
+                ) ||
+                attachedFiles.length >= effectiveAttachmentLimit
+              }
+            />
+          )}
+
+          <div className="mt-4 pb-28 lg:pb-0">
+            <textarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder={activeModulePlaceholder}
+              className="min-h-[240px] w-full resize-y rounded-3xl border border-white/10 bg-[#070b18] px-5 py-5 text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/10"
+            />
+
+            {activeModule === "supervisor" && (
+              <button
+                type="button"
+                onClick={runModule}
+                disabled={generationBlocked}
+                className={[
+                  "mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2",
+                  "rounded-2xl px-6 py-4 sm:mr-3 sm:w-auto",
+                  "bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600",
+                  "text-sm font-black text-white",
+                  "shadow-lg shadow-violet-900/30",
+                  "transition",
+                  "hover:from-violet-500 hover:via-purple-500 hover:to-fuchsia-500",
+                  "active:scale-[0.98]",
+                  "disabled:cursor-not-allowed disabled:opacity-60",
+                ].join(" ")}
+              >
+                {isLoading ? (
+                  <>
+                    <RefreshCcw
+                      className="h-4 w-4 animate-spin"
+                      aria-hidden="true"
+                    />
+                    <span>Kontrolujem dokument...</span>
+                  </>
+                ) : (
+                  <>
+                    <GraduationCap className="h-4 w-4" aria-hidden="true" />
+                    <span>
+                      {activeModuleButtonLabel || "Spustiť AI školiteľa"}
+                    </span>
+                  </>
                 )}
+              </button>
+            )}
 
-<div className="mt-4 pb-28 lg:pb-0">
-  <textarea
-  value={input}
-  onChange={(event) => setInput(event.target.value)}
-  placeholder={activeModulePlaceholder}
-  className="min-h-[240px] w-full resize-y rounded-3xl border border-white/10 bg-[#070b18] px-5 py-5 text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/10"
-/>
+            {activeModule === "translation" && (
+              <button
+                type="button"
+                onClick={runModule}
+                disabled={generationBlocked}
+                className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-sky-900/30 transition hover:from-sky-500 hover:via-cyan-500 hover:to-blue-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
+              >
+                {isLoading ? (
+                  <>
+                    <RefreshCcw className="h-4 w-4 animate-spin" />
+                    Prekladám...
+                  </>
+                ) : (
+                  <>
+                    <Languages className="h-4 w-4" />
+                    {activeModuleButtonLabel || "Preložiť text"}
+                  </>
+                )}
+              </button>
+            )}
 
+            {preparedDataFile ? (
+              <button
+                type="button"
+                onClick={downloadPreparedDataFile}
+                className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center rounded-xl border border-emerald-400/60 bg-emerald-500/10 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20 sm:mr-3 sm:w-auto"
+              >
+                Stiahnuť raw-data.xlsx
+              </button>
+            ) : null}
 
-{activeModule === 'supervisor' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={generationBlocked}
-    className={[
-      'mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2',
-      'rounded-2xl px-6 py-4 sm:mr-3 sm:w-auto',
-      'bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600',
-      'text-sm font-black text-white',
-      'shadow-lg shadow-violet-900/30',
-      'transition',
-      'hover:from-violet-500 hover:via-purple-500 hover:to-fuchsia-500',
-      'active:scale-[0.98]',
-      'disabled:cursor-not-allowed disabled:opacity-60',
-    ].join(' ')}
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw
-          className="h-4 w-4 animate-spin"
-          aria-hidden="true"
-        />
-        <span>Kontrolujem dokument...</span>
-      </>
-    ) : (
-      <>
-        <GraduationCap
-          className="h-4 w-4"
-          aria-hidden="true"
-        />
-        <span>
-          {activeModuleButtonLabel ||
-            'Spustiť AI školiteľa'}
-        </span>
-      </>
-    )}
-  </button>
-)}
+            {activeModule === "quality" && (
+              <button
+                type="button"
+                onClick={runModule}
+                disabled={generationBlocked}
+                className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
+              >
+                {isLoading ? (
+                  <>
+                    <RefreshCcw className="h-4 w-4 animate-spin" />
+                    Spracúvam...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" />
+                    Spustiť audit kvality
+                  </>
+                )}
+              </button>
+            )}
 
-{activeModule === 'translation' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={generationBlocked}
-    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-sky-900/30 transition hover:from-sky-500 hover:via-cyan-500 hover:to-blue-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Prekladám...
-      </>
-    ) : (
-      <>
-        <Languages className="h-4 w-4" />
-        {activeModuleButtonLabel || 'Preložiť text'}
-      </>
-    )}
-  </button>
-)}
+            {activeModule === "defense" && (
+              <button
+                type="button"
+                onClick={runModule}
+                disabled={generationBlocked}
+                className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl border border-violet-300 bg-violet-700 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/40 ring-2 ring-violet-400/40 transition hover:bg-violet-600 hover:ring-violet-300/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-60 disabled:shadow-none disabled:ring-0 sm:mr-3 sm:w-auto"
+              >
+                {isLoading ? (
+                  <>
+                    <RefreshCcw className="h-4 w-4 animate-spin" />
+                    Generujem obhajobu...
+                  </>
+                ) : (
+                  <>
+                    <Presentation className="h-4 w-4" />
+                    Vygenerovať sprievodný text prezentácie
+                  </>
+                )}
+              </button>
+            )}
 
+            {activeModule === "data" && (
+              <div className="mt-4 rounded-3xl border border-cyan-300/30 bg-gradient-to-br from-cyan-500/10 via-blue-500/10 to-violet-500/10 p-4 shadow-2xl shadow-cyan-950/30">
+                <div className="mb-3 flex items-start gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-cyan-500/20 text-cyan-100 ring-1 ring-cyan-300/30">
+                    <BarChart3 className="h-5 w-5" />
+                  </div>
 
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-black text-white sm:text-base">
+                      Analýza dát
+                    </h3>
 
-{preparedDataFile ? (
-  <button
-    type="button"
-    onClick={downloadPreparedDataFile}
-    className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center rounded-xl border border-emerald-400/60 bg-emerald-500/10 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20 sm:mr-3 sm:w-auto"
-  >
-    Stiahnuť raw-data.xlsx
-  </button>
-) : null}
+                    <p className="mt-1 text-xs font-semibold leading-5 text-slate-300 sm:text-sm">
+                      Spustí spracovanie tabuľky, premenných, štatistík, grafov
+                      a otvorí výsledky v samostatnom okne.
+                    </p>
+                  </div>
+                </div>
 
-{activeModule === 'quality' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={generationBlocked}
-    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť audit kvality
-      </>
-    )}
-  </button>
-)}
+                <div className="rounded-[28px] border border-blue-300/20 bg-blue-500/10 p-5 shadow-2xl shadow-blue-950/20">
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-200">
+                      Manuálne škály a subškály
+                    </p>
 
-{activeModule === 'defense' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={generationBlocked}
-    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl border border-violet-300 bg-violet-700 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/40 ring-2 ring-violet-400/40 transition hover:bg-violet-600 hover:ring-violet-300/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-60 disabled:shadow-none disabled:ring-0 sm:mr-3 sm:w-auto"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Generujem obhajobu...
-      </>
-    ) : (
-      <>
-        <Presentation className="h-4 w-4" />
-        Vygenerovať sprievodný text prezentácie
-      </>
-    )}
-  </button>
-)}
+                    <h3 className="text-lg font-black text-white">
+                      Zadajte škály, subškály a skupinové premenné
+                    </h3>
+                  </div>
 
+                  <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {questionnaireOptions.map((option) => {
+                      const isActive =
+                        option.value === ""
+                          ? questionnaireMode === "auto-suggest-only"
+                          : option.value === "none"
+                            ? questionnaireMode === "none"
+                            : option.value === "custom"
+                              ? questionnaireMode === "manual"
+                              : selectedQuestionnaires.includes(option.value);
 
-{activeModule === 'data' && (
-  <div className="mt-4 rounded-3xl border border-cyan-300/30 bg-gradient-to-br from-cyan-500/10 via-blue-500/10 to-violet-500/10 p-4 shadow-2xl shadow-cyan-950/30">
-    <div className="mb-3 flex items-start gap-3">
-      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-cyan-500/20 text-cyan-100 ring-1 ring-cyan-300/30">
-        <BarChart3 className="h-5 w-5" />
-      </div>
+                      return (
+                        <button
+                          key={option.value || "auto-suggest-only"}
+                          type="button"
+                          onClick={() =>
+                            handleQuestionnaireChange(option.value)
+                          }
+                          className={[
+                            "rounded-2xl border p-4 text-left transition",
+                            isActive
+                              ? "border-blue-300 bg-blue-500/20 shadow-lg shadow-blue-950/30"
+                              : "border-white/10 bg-white/5 hover:border-blue-300/50 hover:bg-white/10",
+                          ].join(" ")}
+                        >
+                          <span className="flex items-center gap-2 text-sm font-black text-white">
+                            <span
+                              className={[
+                                "flex h-5 w-5 items-center justify-center rounded-md border text-[10px]",
+                                isActive
+                                  ? "border-blue-200 bg-blue-400 text-slate-950"
+                                  : "border-white/20 bg-white/5 text-transparent",
+                              ].join(" ")}
+                            >
+                              ✓
+                            </span>
 
-      <div className="min-w-0">
-        <h3 className="text-sm font-black text-white sm:text-base">
-          Analýza dát
-        </h3>
+                            {option.label}
+                          </span>
 
-        <p className="mt-1 text-xs font-semibold leading-5 text-slate-300 sm:text-sm">
-          Spustí spracovanie tabuľky, premenných, štatistík, grafov a otvorí výsledky v samostatnom okne.
-        </p>
-      </div>
-    </div>
+                          <span className="mt-2 block text-xs font-bold leading-5 text-slate-300">
+                            {option.description}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
 
-    <div className="rounded-[28px] border border-blue-300/20 bg-blue-500/10 p-5 shadow-2xl shadow-blue-950/20">
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-200">
-          Manuálne škály a subškály
-        </p>
+                  <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <label className="block text-sm font-black text-white">
+                      Vlastná metodika / poznámka k škálam
+                    </label>
 
-        <h3 className="text-lg font-black text-white">
-          Zadajte škály, subškály a skupinové premenné
-        </h3>
+                    <p className="mt-1 text-xs font-bold leading-5 text-slate-300">
+                      Voliteľne vpíšte krátky popis metodiky, názvy škál alebo
+                      poznámku k položkám.
+                    </p>
 
-      
-      </div>
+                    <textarea
+                      value={customQuestionnairesText}
+                      onChange={(event) => {
+                        setQuestionnaireMode("manual");
+                        setSelectedQuestionnaires([]);
+                        setCustomQuestionnairesText(event.target.value);
+                      }}
+                      rows={4}
+                      placeholder="Príklad: V práci používam vlastné škály a subškály. Presné položky sú uvedené v troch kolónkach nižšie."
+                      className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
+                    />
+                  </div>
+                </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-  {questionnaireOptions.map((option) => {
-    const isActive =
-      option.value === ''
-        ? questionnaireMode === 'auto-suggest-only'
-        : option.value === 'none'
-          ? questionnaireMode === 'none'
-          : option.value === 'custom'
-            ? questionnaireMode === 'manual'
-            : selectedQuestionnaires.includes(option.value);
+                <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-200">
+                    Výstup analýzy
+                  </p>
 
-    return (
-      <button
-        key={option.value || 'auto-suggest-only'}
-        type="button"
-        onClick={() => handleQuestionnaireChange(option.value)}
-        className={[
-          'rounded-2xl border p-4 text-left transition',
-          isActive
-            ? 'border-blue-300 bg-blue-500/20 shadow-lg shadow-blue-950/30'
-            : 'border-white/10 bg-white/5 hover:border-blue-300/50 hover:bg-white/10',
-        ].join(' ')}
-      >
-        <span className="flex items-center gap-2 text-sm font-black text-white">
-          <span
-            className={[
-              'flex h-5 w-5 items-center justify-center rounded-md border text-[10px]',
-              isActive
-                ? 'border-blue-200 bg-blue-400 text-slate-950'
-                : 'border-white/20 bg-white/5 text-transparent',
-            ].join(' ')}
-          >
-            ✓
-          </span>
+                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">
+                    Výsledok sa zobrazí v prehľadnom modálnom okne a následne ho
+                    bude možné exportovať do Word, PDF alebo Excel.
+                  </p>
+                </div>
 
-          {option.label}
-        </span>
+                <div className="mt-5 rounded-3xl border border-blue-300/20 bg-blue-500/10 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 rounded-2xl bg-blue-400/20 p-2 text-blue-100">
+                      <BarChart3 className="h-5 w-5" />
+                    </div>
 
-        <span className="mt-2 block text-xs font-bold leading-5 text-slate-300">
-          {option.description}
-        </span>
-      </button>
-    );
-  })}
-</div>
+                    <div>
+                      <h4 className="text-sm font-black text-white">
+                        Manuálne zadanie škál a subškál pred analýzou
+                      </h4>
 
-      <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
-        <label className="block text-sm font-black text-white">
-          Vlastná metodika / poznámka k škálam
-        </label>
+                      <p className="mt-1 text-xs font-semibold leading-5 text-blue-100/80">
+                        Používateľ pred spustením analýzy presne zadá, ktoré
+                        stĺpce patria do škál, subškál a podľa ktorých
+                        premenných sa majú robiť testy rozdielov.
+                      </p>
+                    </div>
+                  </div>
 
-        <p className="mt-1 text-xs font-bold leading-5 text-slate-300">
-          Voliteľne vpíšte krátky popis metodiky, názvy škál alebo poznámku k položkám.
-        </p>
+                  <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                    <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+                      <label className="block text-sm font-black text-white">
+                        Škály
+                      </label>
 
-        <textarea
-          value={customQuestionnairesText}
-          onChange={(event) => {
-            setQuestionnaireMode('manual');
-            setSelectedQuestionnaires([]);
-            setCustomQuestionnairesText(event.target.value);
-          }}
-          rows={4}
-          placeholder="Príklad: V práci používam vlastné škály a subškály. Presné položky sú uvedené v troch kolónkach nižšie."
-          className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
-        />
-      </div>
-    </div>
+                      <p className="mt-1 text-xs font-bold leading-5 text-slate-400">
+                        Každú škálu zadajte na nový riadok vo formáte: názov
+                        škály = položka1, položka2 alebo položka1 až položka10
+                      </p>
 
-    <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-      <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-200">
-        Výstup analýzy
-      </p>
-
-      <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">
-        Výsledok sa zobrazí v prehľadnom modálnom okne a následne ho bude možné exportovať do Word, PDF alebo Excel.
-      </p>
-    </div>
-
-
-<div className="mt-5 rounded-3xl border border-blue-300/20 bg-blue-500/10 p-4">
-  <div className="flex items-start gap-3">
-    <div className="mt-1 rounded-2xl bg-blue-400/20 p-2 text-blue-100">
-      <BarChart3 className="h-5 w-5" />
-    </div>
-
-    <div>
-      <h4 className="text-sm font-black text-white">
-        Manuálne zadanie škál a subškál pred analýzou
-      </h4>
-
-      <p className="mt-1 text-xs font-semibold leading-5 text-blue-100/80">
-        Používateľ pred spustením analýzy presne zadá, ktoré stĺpce patria do škál,
-        subškál a podľa ktorých premenných sa majú robiť testy rozdielov.
-      </p>
-    </div>
-  </div>
-
-  <div className="mt-5 grid gap-4 lg:grid-cols-3">
-    <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-      <label className="block text-sm font-black text-white">
-        Škály
-      </label>
-
-      <p className="mt-1 text-xs font-bold leading-5 text-slate-400">
-        Každú škálu zadajte na nový riadok vo formáte:
-        názov škály = položka1, položka2 alebo položka1 až položka10
-      </p>
-
-      <textarea
-        value={manualScalesText}
-        onChange={(event) => {
-          setQuestionnaireMode('manual');
-          setSelectedQuestionnaires([]);
-          setManualScalesText(event.target.value);
-        }}
-        rows={9}
-        placeholder={`Príklad:
+                      <textarea
+                        value={manualScalesText}
+                        onChange={(event) => {
+                          setQuestionnaireMode("manual");
+                          setSelectedQuestionnaires([]);
+                          setManualScalesText(event.target.value);
+                        }}
+                        rows={9}
+                        placeholder={`Príklad:
 Celkové skóre = P1 až P25
 Psychická pohoda = W1 až W14
 Pracovná spokojnosť = J1 až J36`}
-        className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
-      />
-    </div>
+                        className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
+                      />
+                    </div>
 
-    <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-      <label className="block text-sm font-black text-white">
-        Subškály
-      </label>
+                    <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+                      <label className="block text-sm font-black text-white">
+                        Subškály
+                      </label>
 
-      <p className="mt-1 text-xs font-bold leading-5 text-slate-400">
-        Každú subškálu zadajte na nový riadok vo formáte:
-        názov subškály = položka1, položka2 alebo položka1 až položka10
-      </p>
+                      <p className="mt-1 text-xs font-bold leading-5 text-slate-400">
+                        Každú subškálu zadajte na nový riadok vo formáte: názov
+                        subškály = položka1, položka2 alebo položka1 až
+                        položka10
+                      </p>
 
-      <textarea
-        value={manualSubscalesText}
-        onChange={(event) => {
-          setQuestionnaireMode('manual');
-          setSelectedQuestionnaires([]);
-          setManualSubscalesText(event.target.value);
-        }}
-        rows={9}
-        placeholder={`Príklad:
+                      <textarea
+                        value={manualSubscalesText}
+                        onChange={(event) => {
+                          setQuestionnaireMode("manual");
+                          setSelectedQuestionnaires([]);
+                          setManualSubscalesText(event.target.value);
+                        }}
+                        rows={9}
+                        placeholder={`Príklad:
 Vyrovnanosť = P1, P2, P3, P4
 Sebestačnosť = P5, P6, P7, P8
 Mzda = J1, J10, J19, J28
 Povýšenie = J2, J11, J20, J33`}
-        className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
-      />
-    </div>
+                        className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
+                      />
+                    </div>
 
-    <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-      <label className="block text-sm font-black text-white">
-        Skupinové premenné
-      </label>
+                    <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+                      <label className="block text-sm font-black text-white">
+                        Skupinové premenné
+                      </label>
 
-      <p className="mt-1 text-xs font-bold leading-5 text-slate-400">
-        Zadajte premenné, podľa ktorých sa majú robiť t-testy, ANOVA,
-        Mann-Whitney alebo Kruskal-Wallis.
-      </p>
+                      <p className="mt-1 text-xs font-bold leading-5 text-slate-400">
+                        Zadajte premenné, podľa ktorých sa majú robiť t-testy,
+                        ANOVA, Mann-Whitney alebo Kruskal-Wallis.
+                      </p>
 
-      <textarea
-        value={groupingColumnsText}
-        onChange={(event) => {
-          setQuestionnaireMode('manual');
-          setSelectedQuestionnaires([]);
-          setGroupingColumnsText(event.target.value);
-        }}
-        rows={9}
-        placeholder={`Príklad:
+                      <textarea
+                        value={groupingColumnsText}
+                        onChange={(event) => {
+                          setQuestionnaireMode("manual");
+                          setSelectedQuestionnaires([]);
+                          setGroupingColumnsText(event.target.value);
+                        }}
+                        rows={9}
+                        placeholder={`Príklad:
 pohlavie
 typ_skoly
 rocnik
 druh_sportu
 uroven_sportu`}
-        className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
-      />
-    </div>
-  </div>
-
-  <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-xs font-bold leading-5 text-amber-50">
-    Dôležité: Ak používateľ nezadá škály a subškály, systém má spraviť iba
-    základnú frekvenčnú a deskriptívnu analýzu položiek. Reliabilita,
-    korelácie a testovanie rozdielov sa majú počítať až zo zadaných škál
-    a subškál.
-  </div>
-</div>
-
-    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-      <button
-        type="button"
-        onClick={runModule}
-        disabled={generationBlocked}
-        className="group relative inline-flex min-h-[58px] w-full items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-600 px-6 py-4 text-sm font-black text-white shadow-2xl shadow-cyan-950/50 ring-2 ring-cyan-300/50 transition hover:from-emerald-400 hover:via-cyan-400 hover:to-blue-500 hover:ring-cyan-200/80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-      >
-        <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.35),transparent_38%)] opacity-70 transition group-hover:opacity-100" />
-
-        <span className="relative z-10 flex items-center justify-center gap-2">
-          {isLoading ? (
-            <>
-              <RefreshCcw className="h-5 w-5 animate-spin" />
-              <span>Spracúvam analýzu dát...</span>
-            </>
-          ) : (
-            <>
-              <Send className="h-5 w-5" />
-              <span>Spustiť analýzu dát a otvoriť výsledky</span>
-            </>
-          )}
-        </span>
-      </button>
-
-      {preparedDataFile ? (
-        <button
-          type="button"
-          onClick={downloadPreparedDataFile}
-          className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-2xl border border-blue-300/30 bg-blue-500/10 px-4 py-3 text-sm font-black text-blue-100 transition hover:bg-blue-500/20 sm:w-auto"
-        >
-          <FileSpreadsheet className="h-4 w-4" />
-          <span>Stiahnuť prepared raw data</span>
-        </button>
-      ) : null}
-
-      {analysisResult ? (
-        <button
-          type="button"
-          onClick={() => setAnalysisModalOpen(true)}
-          className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15 sm:w-auto"
-        >
-          <BarChart3 className="h-4 w-4" />
-          <span>Otvoriť výsledky analýzy</span>
-        </button>
-      ) : null}
-    </div>
-  </div>
-)}
-
-
-{activeModule === 'planning' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={generationBlocked}
-    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť plánovanie
-      </>
-    )}
-  </button>
-)}
-
-{activeModule === 'emails' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={generationBlocked}
-    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť email
-      </>
-    )}
-  </button>
-)}
-
-{activeModule === 'originality' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={generationBlocked}
-    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť kontrolu originality
-      </>
-    )}
-  </button>
-)}
-
-{activeModule === 'humanizer' && (
-  <button
-    type="button"
-    onClick={runModule}
-    disabled={generationBlocked}
-    className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
-  >
-    {isLoading ? (
-      <>
-        <RefreshCcw className="h-4 w-4 animate-spin" />
-        Spracúvam...
-      </>
-    ) : (
-      <>
-        <Send className="h-4 w-4" />
-        Spustiť humanizáciu textu
-      </>
-    )}
-  </button>
-)}
-
-                  <button
-                    type="button"
-                    onClick={startDictation}
-                    className={`mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-black transition sm:mr-3 sm:w-auto ${
-                      isListening
-                        ? 'border-red-400/50 bg-red-500 text-white'
-                        : 'border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1]'
-                    }`}
-                  >
-                    <Mic className="h-4 w-4" />
-                    Diktovať
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setCanvasOpen(true)}
-                    className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] sm:mr-3 sm:w-auto"
-                  >
-                    <Paintbrush className="h-4 w-4" />
-                    Canvas
-                  </button>
-
-                  {(result || canvasText) && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={downloadPdf}
-                        className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] sm:mr-3 sm:w-auto"
-                      >
-                        <FileDown className="h-4 w-4" />
-                        PDF
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={downloadDoc}
-                        className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] sm:mr-3 sm:w-auto"
-                      >
-                        <Download className="h-4 w-4" />
-                        Word
-                      </button>
-                    </>
-                  )}
-
-
-                  <button
-                    type="button"
-                    onClick={resetCurrentModule}
-                    className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm font-black text-red-200 transition hover:bg-red-500/20 sm:mr-3 sm:w-auto"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Vyčistiť
-                  </button>
-
-                 {activeModule === 'data' && analysisResult ? (
-  <button
-    type="button"
-    onClick={() => setAnalysisModalOpen(true)}
-    className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-blue-400/30 bg-blue-500/10 px-4 py-3 text-sm font-black text-blue-100 transition hover:bg-blue-500/20 sm:mr-3 sm:w-auto"
-  >
-    <Search className="h-4 w-4" />
-    <span>Otvoriť výsledky analýzy</span>
-  </button>
-) : null}
-
-                            </div>
-          </section>
-        </main>
-
-        {canvasOpen ? (
-            <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">
-              <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
-                <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
-                  <div>
-                    <h2 className="text-lg font-black text-white">Canvas</h2>
-                    <p className="text-sm font-semibold text-slate-400">
-                      Upravte alebo skopírujte výsledný text.
-                    </p>
+                        className="mt-3 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-blue-300"
+                      />
+                    </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setCanvasOpen(false)}
-                    className="rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-white transition hover:bg-white/[0.12]"
-                    aria-label="Zavrieť canvas"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
+                  <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-xs font-bold leading-5 text-amber-50">
+                    Dôležité: Ak používateľ nezadá škály a subškály, systém má
+                    spraviť iba základnú frekvenčnú a deskriptívnu analýzu
+                    položiek. Reliabilita, korelácie a testovanie rozdielov sa
+                    majú počítať až zo zadaných škál a subškál.
+                  </div>
                 </div>
 
-                <textarea
-                  value={canvasText}
-                  onChange={(event) => setCanvasText(event.target.value)}
-                  className="min-h-0 flex-1 resize-none border-0 bg-[#050814] p-6 text-sm font-semibold leading-7 text-white outline-none"
-                />
-
-                <div className="flex flex-wrap items-center justify-end gap-3 border-t border-white/10 px-6 py-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                   <button
                     type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(canvasText || '');
-                    }}
-                    className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+                    onClick={runModule}
+                    disabled={generationBlocked}
+                    className="group relative inline-flex min-h-[58px] w-full items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-600 px-6 py-4 text-sm font-black text-white shadow-2xl shadow-cyan-950/50 ring-2 ring-cyan-300/50 transition hover:from-emerald-400 hover:via-cyan-400 hover:to-blue-500 hover:ring-cyan-200/80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                   >
-                    Kopírovať
+                    <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.35),transparent_38%)] opacity-70 transition group-hover:opacity-100" />
+
+                    <span className="relative z-10 flex items-center justify-center gap-2">
+                      {isLoading ? (
+                        <>
+                          <RefreshCcw className="h-5 w-5 animate-spin" />
+                          <span>Spracúvam analýzu dát...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="h-5 w-5" />
+                          <span>Spustiť analýzu dát a otvoriť výsledky</span>
+                        </>
+                      )}
+                    </span>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={downloadPdf}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
-                  >
-                    <FileDown className="h-4 w-4" />
-                    <span>PDF</span>
-                  </button>
+                  {preparedDataFile ? (
+                    <button
+                      type="button"
+                      onClick={downloadPreparedDataFile}
+                      className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-2xl border border-blue-300/30 bg-blue-500/10 px-4 py-3 text-sm font-black text-blue-100 transition hover:bg-blue-500/20 sm:w-auto"
+                    >
+                      <FileSpreadsheet className="h-4 w-4" />
+                      <span>Stiahnuť prepared raw data</span>
+                    </button>
+                  ) : null}
 
-                  <button
-                    type="button"
-                    onClick={downloadDoc}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
-                  >
-                    <Download className="h-4 w-4" />
-                    <span>Word</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setCanvasOpen(false)}
-                    className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white transition hover:bg-violet-500"
-                  >
-                    Zavrieť
-                  </button>
+                  {analysisResult ? (
+                    <button
+                      type="button"
+                      onClick={() => setAnalysisModalOpen(true)}
+                      className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15 sm:w-auto"
+                    >
+                      <BarChart3 className="h-4 w-4" />
+                      <span>Otvoriť výsledky analýzy</span>
+                    </button>
+                  ) : null}
                 </div>
               </div>
+            )}
+
+            {activeModule === "planning" && (
+              <button
+                type="button"
+                onClick={runModule}
+                disabled={generationBlocked}
+                className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
+              >
+                {isLoading ? (
+                  <>
+                    <RefreshCcw className="h-4 w-4 animate-spin" />
+                    Spracúvam...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" />
+                    Spustiť plánovanie
+                  </>
+                )}
+              </button>
+            )}
+
+            {activeModule === "emails" && (
+              <button
+                type="button"
+                onClick={runModule}
+                disabled={generationBlocked}
+                className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
+              >
+                {isLoading ? (
+                  <>
+                    <RefreshCcw className="h-4 w-4 animate-spin" />
+                    Spracúvam...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" />
+                    Spustiť email
+                  </>
+                )}
+              </button>
+            )}
+
+            {activeModule === "originality" && (
+              <button
+                type="button"
+                onClick={runModule}
+                disabled={generationBlocked}
+                className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
+              >
+                {isLoading ? (
+                  <>
+                    <RefreshCcw className="h-4 w-4 animate-spin" />
+                    Spracúvam...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" />
+                    Spustiť kontrolu originality
+                  </>
+                )}
+              </button>
+            )}
+
+            {activeModule === "humanizer" && (
+              <button
+                type="button"
+                onClick={runModule}
+                disabled={generationBlocked}
+                className="mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-violet-900/30 transition hover:from-violet-500 hover:to-fuchsia-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto"
+              >
+                {isLoading ? (
+                  <>
+                    <RefreshCcw className="h-4 w-4 animate-spin" />
+                    Spracúvam...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" />
+                    Spustiť humanizáciu textu
+                  </>
+                )}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={startDictation}
+              className={`mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-black transition sm:mr-3 sm:w-auto ${
+                isListening
+                  ? "border-red-400/50 bg-red-500 text-white"
+                  : "border-white/10 bg-white/[0.06] text-slate-300 hover:bg-white/[0.1]"
+              }`}
+            >
+              <Mic className="h-4 w-4" />
+              Diktovať
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCanvasOpen(true)}
+              className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] sm:mr-3 sm:w-auto"
+            >
+              <Paintbrush className="h-4 w-4" />
+              Canvas
+            </button>
+
+            {(result || canvasText) && (
+              <>
+                <button
+                  type="button"
+                  onClick={downloadPdf}
+                  className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] sm:mr-3 sm:w-auto"
+                >
+                  <FileDown className="h-4 w-4" />
+                  PDF
+                </button>
+
+                <button
+                  type="button"
+                  onClick={downloadDoc}
+                  className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] sm:mr-3 sm:w-auto"
+                >
+                  <Download className="h-4 w-4" />
+                  Word
+                </button>
+              </>
+            )}
+
+            <button
+              type="button"
+              onClick={resetCurrentModule}
+              className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm font-black text-red-200 transition hover:bg-red-500/20 sm:mr-3 sm:w-auto"
+            >
+              <Trash2 className="h-4 w-4" />
+              Vyčistiť
+            </button>
+
+            {activeModule === "data" && analysisResult ? (
+              <button
+                type="button"
+                onClick={() => setAnalysisModalOpen(true)}
+                className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-blue-400/30 bg-blue-500/10 px-4 py-3 text-sm font-black text-blue-100 transition hover:bg-blue-500/20 sm:mr-3 sm:w-auto"
+              >
+                <Search className="h-4 w-4" />
+                <span>Otvoriť výsledky analýzy</span>
+              </button>
+            ) : null}
+          </div>
+        </section>
+      </main>
+
+      {canvasOpen ? (
+        <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">
+          <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+              <div>
+                <h2 className="text-lg font-black text-white">Canvas</h2>
+                <p className="text-sm font-semibold text-slate-400">
+                  Upravte alebo skopírujte výsledný text.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setCanvasOpen(false)}
+                className="rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-white transition hover:bg-white/[0.12]"
+                aria-label="Zavrieť canvas"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
-          ) : null}
 
-          <AnalysisResultsModal
-  open={analysisModalOpen}
-  result={analysisResult}
-  preparedDataFile={preparedDataFile}
-  onClose={() => setAnalysisModalOpen(false)}
-/>
-        </>
-      );
-    }
+            <textarea
+              value={canvasText}
+              onChange={(event) => setCanvasText(event.target.value)}
+              className="min-h-0 flex-1 resize-none border-0 bg-[#050814] p-6 text-sm font-semibold leading-7 text-white outline-none"
+            />
 
+            <div className="flex flex-wrap items-center justify-end gap-3 border-t border-white/10 px-6 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(canvasText || "");
+                }}
+                className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+              >
+                Kopírovať
+              </button>
+
+              <button
+                type="button"
+                onClick={downloadPdf}
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+              >
+                <FileDown className="h-4 w-4" />
+                <span>PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={downloadDoc}
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+              >
+                <Download className="h-4 w-4" />
+                <span>Word</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCanvasOpen(false)}
+                className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white transition hover:bg-violet-500"
+              >
+                Zavrieť
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <AnalysisResultsModal
+        open={analysisModalOpen}
+        result={analysisResult}
+        preparedDataFile={preparedDataFile}
+        onClose={() => setAnalysisModalOpen(false)}
+      />
+    </>
+  );
+}
 
 // ================= COMPONENTS =================
 
@@ -7815,7 +7764,11 @@ function FieldSelect({
         className="w-full rounded-2xl border border-white/10 bg-white/[0.055] px-4 py-3 text-sm font-bold text-white outline-none focus:border-violet-500"
       >
         {options.map(([optionValue, optionLabel]) => (
-          <option key={optionValue} value={optionValue} className="bg-[#070a16]">
+          <option
+            key={optionValue}
+            value={optionValue}
+            className="bg-[#070a16]"
+          >
             {optionLabel}
           </option>
         ))}
@@ -7908,8 +7861,5 @@ function FileUploadBox({
         </div>
       )}
     </div>
-  )
+  );
 }
-
-
-

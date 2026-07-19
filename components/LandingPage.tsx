@@ -176,8 +176,6 @@ type Translation = {
     title: string;
     fullOfferText: string;
     fullOfferHint: string;
-    emailPrompt: string;
-    emailRequired: string;
     invalidPlan: string;
     checkoutFailed: string;
     noStripeUrl: string;
@@ -223,12 +221,6 @@ const ADDON_IDS: readonly AddonId[] = [
   'extra-60',
 ];
 
-const CHECKOUT_EMAIL_STORAGE_KEYS = [
-  'zedpera_user_email',
-  'zedpera_email',
-  'user_email',
-  'email',
-] as const;
 
 const FOUNDER_MARTINA_IMAGE_URL = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=1800&q=100&dpr=2';
 
@@ -448,8 +440,6 @@ const translations: Record<AppLanguage, Translation> = {
       title: 'Vyberte si balík podľa typu a rozsahu práce',
       fullOfferText: 'Zobraziť kompletný cenník',
       fullOfferHint: 'Hlavné balíky sú mesačné predplatné. Analýza dát a Extra 20/40/60 strán sú jednorazové doplnkové služby.',
-      emailPrompt: 'Zadajte e-mail, na ktorý bude naviazaná platba:',
-      emailRequired: 'Pre pokračovanie na platbu je potrebný e-mail.',
       invalidPlan: 'Neplatný balík alebo doplnková služba',
       checkoutFailed: 'Platbu sa nepodarilo vytvoriť.',
       noStripeUrl: 'Stripe nevygeneroval platobnú URL.',
@@ -800,8 +790,6 @@ const translations: Record<AppLanguage, Translation> = {
       title: 'Vyberte si balíček podle typu a rozsahu práce',
       fullOfferText: 'Zobrazit kompletní ceník',
       fullOfferHint: 'Hlavní balíčky jsou měsíční předplatné. Analýza dat a Extra 20/40/60 stran jsou jednorázové doplňkové služby.',
-      emailPrompt: 'Zadejte e-mail, ke kterému bude platba přiřazena:',
-      emailRequired: 'Pro pokračování k platbě je potřeba e-mail.',
       invalidPlan: 'Neplatný balíček nebo doplňková služba',
       checkoutFailed: 'Platbu se nepodařilo vytvořit.',
       noStripeUrl: 'Stripe nevygeneroval platební URL.',
@@ -1002,8 +990,6 @@ const translations: Record<AppLanguage, Translation> = {
       title: 'Choose a package by thesis type and scope',
       fullOfferText: 'View the complete pricing',
       fullOfferHint: 'Main packages are monthly subscriptions. Data analysis and Extra 20/40/60 pages are one-time add-ons.',
-      emailPrompt: 'Enter the email address linked to the payment:',
-      emailRequired: 'An email is required to continue to payment.',
       invalidPlan: 'Invalid package or add-on',
       checkoutFailed: 'Payment could not be created.',
       noStripeUrl: 'Stripe did not generate a payment URL.',
@@ -1204,8 +1190,6 @@ const translations: Record<AppLanguage, Translation> = {
       title: 'Wählen Sie ein Paket nach Art und Umfang der Arbeit',
       fullOfferText: 'Vollständige Preise anzeigen',
       fullOfferHint: 'Die Hauptpakete sind monatliche Abonnements. Datenanalyse und Extra 20/40/60 Seiten sind einmalige Zusatzleistungen.',
-      emailPrompt: 'Geben Sie die E-Mail-Adresse für die Zahlung ein:',
-      emailRequired: 'Für die Zahlung ist eine E-Mail-Adresse erforderlich.',
       invalidPlan: 'Ungültiges Paket oder Zusatzleistung',
       checkoutFailed: 'Zahlung konnte nicht erstellt werden.',
       noStripeUrl: 'Stripe hat keine Zahlungs-URL generiert.',
@@ -1406,8 +1390,6 @@ const translations: Record<AppLanguage, Translation> = {
       title: 'Wybierz pakiet według typu i zakresu pracy',
       fullOfferText: 'Zobacz pełny cennik',
       fullOfferHint: 'Główne pakiety są miesięcznymi subskrypcjami. Analiza danych oraz Extra 20/40/60 stron to dodatki jednorazowe.',
-      emailPrompt: 'Podaj e-mail powiązany z płatnością:',
-      emailRequired: 'E-mail jest wymagany, aby przejść do płatności.',
       invalidPlan: 'Nieprawidłowy pakiet lub dodatek',
       checkoutFailed: 'Nie udało się utworzyć płatności.',
       noStripeUrl: 'Stripe nie wygenerował adresu płatności.',
@@ -1608,8 +1590,6 @@ const translations: Record<AppLanguage, Translation> = {
       title: 'Válassz csomagot a dolgozat típusa és terjedelme szerint',
       fullOfferText: 'Teljes árlista megtekintése',
       fullOfferHint: 'A fő csomagok havi előfizetések. Az adatelemzés és az Extra 20/40/60 oldal egyszeri kiegészítő szolgáltatás.',
-      emailPrompt: 'Add meg a fizetéshez tartozó e-mail-címet:',
-      emailRequired: 'A fizetés folytatásához e-mail-cím szükséges.',
       invalidPlan: 'Érvénytelen csomag vagy kiegészítő',
       checkoutFailed: 'A fizetés létrehozása sikertelen.',
       noStripeUrl: 'A Stripe nem hozott létre fizetési URL-t.',
@@ -1792,13 +1772,6 @@ function normalizeLanguage(value: string | null): AppLanguage {
   return 'sk';
 }
 
-function normalizeEmail(value: unknown): string {
-  return String(value || '').trim().toLowerCase();
-}
-
-function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
 
 function isAddonId(value: PlanId): value is AddonId {
   return ADDON_IDS.includes(value as AddonId);
@@ -2486,37 +2459,6 @@ const mobileMenuItems = useMemo(
     }
   }
 
-  function getEmailForCheckout(): string {
-    if (typeof window === 'undefined') {
-      return '';
-    }
-
-    let email = '';
-
-    for (const storageKey of CHECKOUT_EMAIL_STORAGE_KEYS) {
-      const storedEmail = normalizeEmail(window.localStorage.getItem(storageKey));
-
-      if (storedEmail && isValidEmail(storedEmail)) {
-        email = storedEmail;
-        break;
-      }
-    }
-
-    if (!email) {
-      const enteredEmail = window.prompt(t.pricing.emailPrompt);
-      email = normalizeEmail(enteredEmail);
-    }
-
-    if (!email || !isValidEmail(email)) {
-      throw new Error(t.pricing.emailRequired);
-    }
-
-    window.localStorage.setItem('zedpera_user_email', email);
-    window.localStorage.setItem('zedpera_email', email);
-
-    return email;
-  }
-
   async function buy(planId: PlanId) {
     if (loadingPlan !== null) {
       return;
@@ -2535,7 +2477,6 @@ const mobileMenuItems = useMemo(
         return;
       }
 
-      const email = getEmailForCheckout();
       const isAddon = isAddonId(planId);
       const checkoutMode = isAddon ? 'payment' : 'subscription';
 
@@ -2559,10 +2500,6 @@ const mobileMenuItems = useMemo(
         addonId: isAddon ? planId : undefined,
         addons: isAddon ? [planId] : [],
         addonIds: isAddon ? [planId] : [],
-
-        email,
-        customerEmail: email,
-        userEmail: email,
 
         locale: language,
         language,
@@ -2596,7 +2533,7 @@ const mobileMenuItems = useMemo(
         throw new Error(t.pricing.noStripeUrl);
       }
 
-      // Priamy prechod na Stripe bez mailto odkazu a bez lokálneho e-mailového okna.
+      // Priamy prechod na Stripe. E-mail zadáva zákazník až na Stripe Checkout.
       window.location.assign(checkoutUrl);
     } catch (error) {
       const message =

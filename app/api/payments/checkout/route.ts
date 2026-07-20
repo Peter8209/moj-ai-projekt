@@ -657,31 +657,6 @@ async function loadCurrentEntitlement({
   return data as CurrentEntitlementRow | null;
 }
 
-function requirePaidPlanForAddonOnlyCheckout({
-  planId,
-  addonIds,
-  currentEntitlement,
-}: {
-  planId: PlanId | null;
-  addonIds: AddonId[];
-  currentEntitlement: CurrentEntitlementRow | null;
-}): void {
-  if (planId || addonIds.length === 0) {
-    return;
-  }
-
-  const currentPlanId = normalizeCurrentPlanId(
-    currentEntitlement?.plan_id,
-  );
-
-  if (
-    currentPlanId === 'free' ||
-    !isActiveEntitlement(currentEntitlement?.billing_status ?? null)
-  ) {
-    throw new Error('PAID_PLAN_REQUIRED');
-  }
-}
-
 // ============================================================
 // CUSTOMER HELPERS
 // ============================================================
@@ -940,10 +915,12 @@ export async function POST(request: Request) {
     }
 
     /*
-     * Hlavný platený balík môže kúpiť aj neprihlásený návštevník.
-     * Stripe si v takom prípade vyžiada e-mail priamo na platobnej stránke.
-     * Doplnok bez základného balíka naďalej vyžaduje prihlásený účet,
-     * pretože sa musí pripojiť ku konkrétnemu existujúcemu entitlementu.
+     * Všetky platené položky môžu otvoriť Stripe Checkout aj bez aktívnej
+     * prihlasovacej relácie. Stripe si pri anonymnom nákupe vyžiada e-mail
+     * priamo na svojej zabezpečenej platobnej stránke.
+     *
+     * Webhook následne priradí objednávku k existujúcemu ZEDPERA účtu podľa
+     * Supabase user_id alebo podľa e-mailu z Stripe Checkout Session.
      */
     const supabase = await createSupabaseServerClient();
 
@@ -970,28 +947,6 @@ export async function POST(request: Request) {
         userId,
       });
     }
-
-    if (!planId && addonIds.length > 0 && !isAuthenticated) {
-      return createJsonResponse(
-        {
-          ok: false,
-          error: 'ADDON_AUTHENTICATION_REQUIRED',
-          code: 'ADDON_AUTHENTICATION_REQUIRED',
-          errorId,
-          requestId,
-          message:
-            'Samostatný doplnok je možné pripojiť iba k prihlásenému účtu s aktívnym plateným balíkom.',
-          loginUrl: `/login?next=${encodeURIComponent('/pricing#doplnkove-sluzby')}`,
-        },
-        { status: 401 },
-      );
-    }
-
-    requirePaidPlanForAddonOnlyCheckout({
-      planId,
-      addonIds,
-      currentEntitlement,
-    });
 
     const stripe = getStripe();
     const locale = normalizeLocale(

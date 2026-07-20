@@ -1778,16 +1778,6 @@ function isAddonId(value: PlanId): value is AddonId {
 }
 
 function getCheckoutError(data: CheckoutResponse | null, fallback: string) {
-  if (
-    data?.code === 'ADDON_AUTHENTICATION_REQUIRED' ||
-    data?.error === 'ADDON_AUTHENTICATION_REQUIRED'
-  ) {
-    return (
-      'Server stále používa starú checkout route, ktorá posiela doplnkové služby na prihlásenie. ' +
-      'Nahraďte app/api/payments/checkout/route.ts verziou, ktorá povoľuje anonymný Stripe Checkout.'
-    );
-  }
-
   return (
     data?.displayMessage ||
     data?.message ||
@@ -2524,7 +2514,14 @@ const mobileMenuItems = useMemo(
       const data = (await res.json().catch(() => null)) as CheckoutResponse | null;
 
       if (!res.ok) {
-        throw new Error(getCheckoutError(data, t.pricing.checkoutFailed));
+        const message = getCheckoutError(data, t.pricing.checkoutFailed);
+        setPaymentError(message);
+
+        if (typeof window !== 'undefined') {
+          window.alert(message);
+        }
+
+        return;
       }
 
       const checkoutUrl = data?.url || data?.redirectUrl;
@@ -2539,7 +2536,7 @@ const mobileMenuItems = useMemo(
       const message =
         error instanceof Error ? error.message : t.pricing.checkoutFailed;
 
-      console.error('LANDING_CHECKOUT_ERROR:', error);
+      console.warn('LANDING_CHECKOUT_WARNING:', error);
       setPaymentError(message);
 
       if (typeof window !== 'undefined') {

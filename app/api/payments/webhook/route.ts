@@ -9,7 +9,7 @@ import {
 } from "@/lib/billing/catalog";
 import { applySuccessfulPagePurchase } from "@/lib/page-plan-activation";
 import { sendOrderConfirmationEmail } from "@/lib/email/order-confirmation";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,10 +24,6 @@ let stripeClient: Stripe | null = null;
 
 type MetadataRecord = Record<string, string>;
 
-/**
- * Balíky, ktoré je možné reálne zakúpiť cez Stripe.
- * Free sa neplatí a admin je iba interný systémový balík.
- */
 type PaidPlanId = Exclude<PlanId, "free" | "admin">;
 
 type EntitlementRow = {
@@ -67,18 +63,7 @@ type EventProcessingResult = {
   activeAddonIds?: AddonId[];
   extraPages?: number;
   billingStatus?: string;
-  orderEmailSent?: boolean;
-  orderEmailSkipped?: boolean;
-  orderEmailId?: string | null;
-  orderEmailReason?: string | null;
   detail?: string;
-};
-
-type OrderEmailDeliveryResult = {
-  sent: boolean;
-  skipped: boolean;
-  emailId: string | null;
-  reason: string | null;
 };
 
 type InvoiceParentShape = {
@@ -125,11 +110,6 @@ const EXPECTED_CURRENCY = "eur";
 const FULFILLED_MARKER_KEY = "zedpera_fulfilled";
 const FULFILLED_EVENT_KEY = "zedpera_fulfilled_event_id";
 const FULFILLED_AT_KEY = "zedpera_fulfilled_at";
-
-const ORDER_EMAIL_STATUS_KEY = "zedpera_order_email_status";
-const ORDER_EMAIL_ID_KEY = "zedpera_order_email_id";
-const ORDER_EMAIL_REASON_KEY = "zedpera_order_email_reason";
-const ORDER_EMAIL_AT_KEY = "zedpera_order_email_at";
 
 const PROCESSED_EVENTS_KEY = "zedpera_processed_event_ids";
 const MAX_STORED_EVENT_IDS = 8;
@@ -272,6 +252,66 @@ function normalizeUserId(value: unknown): string {
   const candidate = String(value || "").trim();
 
   return UUID_PATTERN.test(candidate) ? candidate : "";
+}
+
+function normalizeEmail(value: unknown): string {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getCheckoutCustomerEmail(
+  session: Stripe.Checkout.Session,
+): string {
+  const expandedCustomer =
+    typeof session.customer !== "string" && session.customer
+      ? "deleted" in session.customer && session.customer.deleted
+        ? null
+        : (session.customer as Stripe.Customer)
+      : null;
+
+  return normalizeEmail(
+    session.customer_details?.email ||
+      session.customer_email ||
+      expandedCustomer?.email ||
+      session.metadata?.user_email ||
+      session.metadata?.email,
+  );
+}
+
+async function findSupabaseUserIdByEmail(email: string): Promise<string> {
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!normalizedEmail) {
+    return "";
+  }
+
+  const admin = createAdminClient();
+  const perPage = 1000;
+
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+
+    if (error) {
+      throw new Error(`AUTH_USER_LOOKUP_FAILED: ${error.message}`);
+    }
+
+    const users = data?.users || [];
+    const matchingUser = users.find(
+      (user) => normalizeEmail(user.email) === normalizedEmail,
+    );
+
+    if (matchingUser?.id) {
+      return normalizeUserId(matchingUser.id);
+    }
+
+    if (users.length < perPage) {
+      break;
+    }
+  }
+
+  return "";
 }
 
 function normalizePlanId(value: unknown): PlanId | null {
@@ -530,53 +570,6 @@ function metadataWithFulfilledMarker(
   };
 }
 
-function truncateMetadataValue(value: string, maxLength = 450): string {
-  const normalized = value.trim();
-
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, Math.max(maxLength - 3, 0))}...`;
-}
-
-function getOrderEmailStatus(
-  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
-): string {
-  return normalizeMetadata(metadata)[ORDER_EMAIL_STATUS_KEY] || "";
-}
-
-function isOrderEmailFinalized(
-  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
-): boolean {
-  const status = getOrderEmailStatus(metadata);
-
-  return status === "sent" || status === "skipped";
-}
-
-function metadataWithOrderEmailResult(
-  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
-  result: OrderEmailDeliveryResult,
-): MetadataRecord {
-  const currentMetadata = normalizeMetadata(metadata);
-
-  const nextMetadata: MetadataRecord = {
-    ...currentMetadata,
-    [ORDER_EMAIL_STATUS_KEY]: result.sent ? "sent" : "skipped",
-    [ORDER_EMAIL_AT_KEY]: new Date().toISOString(),
-  };
-
-  if (result.emailId) {
-    nextMetadata[ORDER_EMAIL_ID_KEY] = truncateMetadataValue(result.emailId);
-  }
-
-  if (result.reason) {
-    nextMetadata[ORDER_EMAIL_REASON_KEY] = truncateMetadataValue(result.reason);
-  }
-
-  return nextMetadata;
-}
-
 // ============================================================
 // STRIPE OBJECT HELPERS
 // ============================================================
@@ -807,16 +800,50 @@ async function resolveCheckoutPurchase({
       getSubscriptionFromSession(stripe, session),
     ]);
 
-  const metadata = mergeMetadata(
+  let metadata = mergeMetadata(
     customerMetadata,
     subscription?.metadata,
     paymentIntentMetadata,
     session.metadata,
   );
 
+  let resolvedUserId =
+    normalizeUserId(session.client_reference_id) ||
+    normalizeUserId(
+      readMetadataValue(metadata, [
+        "user_id",
+        "userId",
+        "userid",
+        "supabase_user_id",
+      ]),
+    );
+
+  /*
+   * Pri priamom anonymnom Stripe Checkoute nie je v session dostupná
+   * Supabase relácia. Doplnok preto priradíme k existujúcemu ZEDPERA účtu
+   * podľa e-mailu, ktorý zákazník zadal priamo na Stripe platobnej stránke.
+   */
+  if (!resolvedUserId) {
+    const checkoutEmail = getCheckoutCustomerEmail(session);
+
+    if (checkoutEmail) {
+      resolvedUserId = await findSupabaseUserIdByEmail(checkoutEmail);
+
+      if (resolvedUserId) {
+        metadata = {
+          ...metadata,
+          user_id: resolvedUserId,
+          supabase_user_id: resolvedUserId,
+          user_email: checkoutEmail,
+          guest_checkout: "true",
+        };
+      }
+    }
+  }
+
   return resolvePurchaseFromMetadata({
     metadata,
-    fallbackUserId: session.client_reference_id,
+    fallbackUserId: resolvedUserId || session.client_reference_id,
   });
 }
 
@@ -853,7 +880,7 @@ async function resolveSubscriptionPurchase({
 async function loadCurrentEntitlement(
   userId: string,
 ): Promise<EntitlementRow | null> {
-  const admin = createSupabaseAdminClient();
+  const admin = createAdminClient();
 
   const { data, error } = await admin
     .from("zedpera_user_entitlements")
@@ -895,7 +922,7 @@ async function upsertEntitlementAfterPurchase({
   effectivePlanId: PlanId;
   activeAddonIds: AddonId[];
 }> {
-  const admin = createSupabaseAdminClient();
+  const admin = createAdminClient();
   const current = await loadCurrentEntitlement(userId);
 
   const effectivePlanId = planId || normalizeExistingPlanId(current?.plan_id);
@@ -965,7 +992,7 @@ async function applySuccessfulPurchase({
     resetPrompts,
   });
 
-  const admin = createSupabaseAdminClient();
+  const admin = createAdminClient();
 
   const pageActivation = await applySuccessfulPagePurchase({
     admin,
@@ -1004,7 +1031,7 @@ async function updateBillingStatus({
     return;
   }
 
-  const admin = createSupabaseAdminClient();
+  const admin = createAdminClient();
   const now = new Date().toISOString();
 
   const updatePayload: Record<string, unknown> = {
@@ -1033,7 +1060,7 @@ async function downgradeUserToFree({
   userId: string;
   billingStatus: string;
 }): Promise<void> {
-  const admin = createSupabaseAdminClient();
+  const admin = createAdminClient();
   const freePlan = PLANS.free;
   const freePageLimit = getPlanPageLimit("free");
   const now = new Date().toISOString();
@@ -1176,15 +1203,8 @@ async function markCheckoutEvent({
   eventId: string;
   fulfilled: boolean;
 }): Promise<void> {
-  // Checkout Session marker je kritický. Ak ho Stripe nezapíše, route musí
-  // vrátiť chybu, aby sa udalosť zopakovala a nedošlo k strate idempotencie.
-  await stripe.checkout.sessions.update(session.id, {
-    metadata: fulfilled
-      ? metadataWithFulfilledMarker(session.metadata, eventId)
-      : metadataWithProcessedEvent(session.metadata, eventId),
-  });
-
   const operations: Array<Promise<unknown>> = [];
+
   const paymentIntentId = getObjectId(session.payment_intent);
   const customerId = getObjectId(session.customer);
 
@@ -1227,24 +1247,6 @@ async function markCheckoutEvent({
   }
 
   await settleMarkerOperations("CHECKOUT", eventId, operations);
-}
-
-async function markCheckoutOrderEmailResult({
-  stripe,
-  session,
-  result,
-}: {
-  stripe: Stripe;
-  session: Stripe.Checkout.Session;
-  result: OrderEmailDeliveryResult;
-}): Promise<void> {
-  // Po fulfillment markeri znovu načítame aktuálne metadata, aby sme pri
-  // zápise výsledku e-mailu neprepísali novšie Stripe metadata starou kópiou.
-  const currentSession = await stripe.checkout.sessions.retrieve(session.id);
-
-  await stripe.checkout.sessions.update(session.id, {
-    metadata: metadataWithOrderEmailResult(currentSession.metadata, result),
-  });
 }
 
 async function markInvoiceEvent({
@@ -1351,13 +1353,7 @@ async function retrieveCheckoutSession(
   sessionId: string,
 ): Promise<Stripe.Checkout.Session> {
   return stripe.checkout.sessions.retrieve(sessionId, {
-    expand: [
-      "payment_intent",
-      "customer",
-      "subscription",
-      "invoice",
-      "line_items.data.price.product",
-    ],
+    expand: ["payment_intent", "customer", "subscription", "invoice"],
   });
 }
 
@@ -1387,112 +1383,6 @@ function isCheckoutAlreadyFulfilled({
     hasProcessedEvent(subscription?.metadata, eventId) ||
     hasProcessedEvent(customerMetadata, eventId)
   );
-}
-
-function getRecordedOrderEmailResult(
-  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
-): OrderEmailDeliveryResult | null {
-  const normalizedMetadata = normalizeMetadata(metadata);
-  const status = normalizedMetadata[ORDER_EMAIL_STATUS_KEY];
-
-  if (status !== "sent" && status !== "skipped") {
-    return null;
-  }
-
-  return {
-    sent: status === "sent",
-    skipped: status === "skipped",
-    emailId: normalizedMetadata[ORDER_EMAIL_ID_KEY] || null,
-    reason: normalizedMetadata[ORDER_EMAIL_REASON_KEY] || null,
-  };
-}
-
-async function sendAndRecordOrderConfirmationEmail({
-  stripe,
-  session,
-  planId,
-  addonIds,
-  paymentReference,
-  locale,
-}: {
-  stripe: Stripe;
-  session: Stripe.Checkout.Session;
-  planId: PaidPlanId | null;
-  addonIds: AddonId[];
-  paymentReference: string;
-  locale: string;
-}): Promise<OrderEmailDeliveryResult> {
-  const recordedResult = getRecordedOrderEmailResult(session.metadata);
-
-  if (recordedResult) {
-    return recordedResult;
-  }
-
-  const result = await sendOrderConfirmationEmail({
-    session,
-    planId,
-    addonIds,
-    paymentReference,
-    locale,
-  });
-
-  const normalizedResult: OrderEmailDeliveryResult = {
-    sent: Boolean(result.sent),
-    skipped: Boolean(result.skipped),
-    emailId: result.emailId || null,
-    reason: result.reason || null,
-  };
-
-  if (!normalizedResult.sent && !normalizedResult.skipped) {
-    throw new Error(
-      normalizedResult.reason || "ORDER_CONFIRMATION_EMAIL_NOT_DELIVERED",
-    );
-  }
-
-  await markCheckoutOrderEmailResult({
-    stripe,
-    session,
-    result: normalizedResult,
-  });
-
-  return normalizedResult;
-}
-
-async function resolveOrderEmailContextForProcessedCheckout({
-  stripe,
-  session,
-}: {
-  stripe: Stripe;
-  session: Stripe.Checkout.Session;
-}): Promise<{
-  planId: PaidPlanId | null;
-  addonIds: AddonId[];
-  locale: string;
-}> {
-  try {
-    const purchase = await resolveCheckoutPurchase({ stripe, session });
-
-    return {
-      planId: purchase.planId,
-      addonIds: purchase.purchasedAddonIds,
-      locale:
-        purchase.metadata.locale ||
-        purchase.metadata.language ||
-        purchase.metadata.lang ||
-        "sk",
-    };
-  } catch (error) {
-    console.warn("ZEDPERA_ORDER_EMAIL_CONTEXT_FALLBACK:", {
-      sessionId: session.id,
-      message: getErrorMessage(error),
-    });
-
-    return {
-      planId: null,
-      addonIds: [],
-      locale: "sk",
-    };
-  }
 }
 
 async function handleCheckoutSucceeded({
@@ -1529,51 +1419,10 @@ async function handleCheckoutSucceeded({
   }
 
   if (isCheckoutAlreadyFulfilled({ session, subscription, eventId })) {
-    const recordedEmailResult = getRecordedOrderEmailResult(session.metadata);
-
-    if (recordedEmailResult) {
-      return {
-        processed: false,
-        reason: "already_processed",
-        objectId: session.id,
-        orderEmailSent: recordedEmailResult.sent,
-        orderEmailSkipped: recordedEmailResult.skipped,
-        orderEmailId: recordedEmailResult.emailId,
-        orderEmailReason: recordedEmailResult.reason,
-      };
-    }
-
-    const emailContext = await resolveOrderEmailContextForProcessedCheckout({
-      stripe,
-      session,
-    });
-
-    const recoveredEmailResult = await sendAndRecordOrderConfirmationEmail({
-      stripe,
-      session,
-      planId: emailContext.planId,
-      addonIds: emailContext.addonIds,
-      paymentReference: getObjectId(session.invoice) || session.id,
-      locale: emailContext.locale,
-    });
-
-    console.info("ZEDPERA_ORDER_CONFIRMATION_EMAIL_RECOVERED:", {
-      eventId,
-      sessionId: session.id,
-      sent: recoveredEmailResult.sent,
-      skipped: recoveredEmailResult.skipped,
-      emailId: recoveredEmailResult.emailId,
-      reason: recoveredEmailResult.reason,
-    });
-
     return {
       processed: false,
-      reason: "already_processed_email_recovered",
+      reason: "already_processed",
       objectId: session.id,
-      orderEmailSent: recoveredEmailResult.sent,
-      orderEmailSkipped: recoveredEmailResult.skipped,
-      orderEmailId: recoveredEmailResult.emailId,
-      orderEmailReason: recoveredEmailResult.reason,
     };
   }
 
@@ -1634,18 +1483,20 @@ async function handleCheckoutSucceeded({
   });
 
   /*
-   * Potvrdzujúci e-mail sa posiela až po úspešnom aktivovaní balíka
-   * a po zapísaní idempotentného fulfillment markeru do Stripe.
+   * Potvrdzujúci e-mail posielame až po úspešnom aktivovaní balíka
+   * a označení Stripe udalosti ako spracovanej.
    *
-   * Ak Resend zlyhá, vyhodíme chybu a Stripe webhook zopakuje. Pri opakovaní
-   * sa nákup už znovu neaktivuje; route iba dokončí chýbajúci e-mail.
-   * Resend zároveň používa Idempotency-Key odvodený od Checkout Session ID.
+   * Chyba e-mailovej služby nesmie zneplatniť už prijatú platbu ani
+   * spôsobiť opakované pripočítanie strán. Resend navyše používa
+   * idempotency key odvodený od Checkout Session ID, takže opakované
+   * doručenie rovnakého webhooku nevytvorí duplicitný e-mail.
    */
-  let orderEmailResult: OrderEmailDeliveryResult;
+  let orderEmailSent = false;
+  let orderEmailId: string | null = null;
+  let orderEmailReason: string | null = null;
 
   try {
-    orderEmailResult = await sendAndRecordOrderConfirmationEmail({
-      stripe,
+    const orderEmailResult = await sendOrderConfirmationEmail({
       session,
       planId: purchase.planId,
       addonIds: result.purchasedAddonIds,
@@ -1656,23 +1507,25 @@ async function handleCheckoutSucceeded({
         purchase.metadata.lang ||
         "sk",
     });
+
+    orderEmailSent = orderEmailResult.sent;
+    orderEmailId = orderEmailResult.emailId;
+    orderEmailReason = orderEmailResult.reason;
+
+    if (orderEmailResult.skipped) {
+      console.warn("ZEDPERA_ORDER_CONFIRMATION_EMAIL_SKIPPED:", {
+        eventId,
+        sessionId: session.id,
+        reason: orderEmailResult.reason,
+      });
+    }
   } catch (emailError) {
-    const emailErrorMessage = getErrorMessage(emailError);
+    orderEmailReason = getErrorMessage(emailError);
 
     console.error("ZEDPERA_ORDER_CONFIRMATION_EMAIL_ERROR:", {
       eventId,
       sessionId: session.id,
-      message: emailErrorMessage,
-    });
-
-    throw new Error(`ORDER_CONFIRMATION_EMAIL_FAILED: ${emailErrorMessage}`);
-  }
-
-  if (orderEmailResult.skipped) {
-    console.warn("ZEDPERA_ORDER_CONFIRMATION_EMAIL_SKIPPED:", {
-      eventId,
-      sessionId: session.id,
-      reason: orderEmailResult.reason,
+      message: orderEmailReason,
     });
   }
 
@@ -1686,10 +1539,9 @@ async function handleCheckoutSucceeded({
     purchasedAddonIds: result.purchasedAddonIds,
     activeAddonIds: result.activeAddonIds,
     extraPages: result.extraPages,
-    orderEmailSent: orderEmailResult.sent,
-    orderEmailSkipped: orderEmailResult.skipped,
-    orderEmailId: orderEmailResult.emailId,
-    orderEmailReason: orderEmailResult.reason,
+    orderEmailSent,
+    orderEmailId,
+    orderEmailReason,
   });
 
   return {
@@ -1702,10 +1554,6 @@ async function handleCheckoutSucceeded({
     activeAddonIds: result.activeAddonIds,
     extraPages: result.extraPages,
     billingStatus,
-    orderEmailSent: orderEmailResult.sent,
-    orderEmailSkipped: orderEmailResult.skipped,
-    orderEmailId: orderEmailResult.emailId,
-    orderEmailReason: orderEmailResult.reason,
   };
 }
 
@@ -2272,18 +2120,7 @@ export async function GET() {
         webhookSecret: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
         resendApiKey: Boolean(process.env.RESEND_API_KEY),
         emailFrom: Boolean(process.env.EMAIL_FROM),
-        emailReplyTo: Boolean(process.env.EMAIL_REPLY_TO),
         emailLogoUrl: Boolean(process.env.EMAIL_LOGO_URL),
-        appUrl: Boolean(
-          process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL,
-        ),
-        orderNotificationEmail: Boolean(process.env.ORDER_NOTIFICATION_EMAIL),
-        orderEmailReady: Boolean(
-          process.env.RESEND_API_KEY &&
-          process.env.EMAIL_FROM &&
-          process.env.EMAIL_LOGO_URL &&
-          (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL),
-        ),
       },
       supportedEvents: SUPPORTED_EVENTS,
     },

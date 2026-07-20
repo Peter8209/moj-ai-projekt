@@ -1,7 +1,6 @@
 ﻿'use client';
 
 import {
-  useEffect,
   useRef,
   useState,
   type ReactNode,
@@ -18,7 +17,6 @@ import {
   FileText,
   Gift,
   Loader2,
-  Mail,
   Menu,
   ShieldCheck,
   Sparkles,
@@ -82,10 +80,9 @@ type PlanCheckoutPayload = {
   planId: PaidPlanId;
   addons: AddonId[];
   addonIds: AddonId[];
-  email: string;
-  customerEmail: string;
-  successUrl: string;
-  cancelUrl: string;
+  locale: 'sk';
+  requestId: string;
+  checkoutRequestId: string;
 };
 
 type AddonCheckoutPayload = {
@@ -94,10 +91,9 @@ type AddonCheckoutPayload = {
   addonId: AddonId;
   addons: AddonId[];
   addonIds: AddonId[];
-  email: string;
-  customerEmail: string;
-  successUrl: string;
-  cancelUrl: string;
+  locale: 'sk';
+  requestId: string;
+  checkoutRequestId: string;
 };
 
 type CheckoutPayload = PlanCheckoutPayload | AddonCheckoutPayload;
@@ -134,12 +130,7 @@ const ADDON_IDS: AddonId[] = [
 
 const STORAGE_SELECTED_PLAN = 'zedpera_selected_plan';
 const STORAGE_SELECTED_ADDONS = 'zedpera_selected_addons';
-const STORAGE_EMAIL_KEYS = [
-  'zedpera_user_email',
-  'zedpera_email',
-  'user_email',
-  'email',
-] as const;
+
 
 const mainPlans: MainPlan[] = [
   {
@@ -310,14 +301,6 @@ function isAddonId(value: string): value is AddonId {
   return ADDON_IDS.includes(value as AddonId);
 }
 
-function normalizeEmail(value: string) {
-  return value.trim().toLowerCase();
-}
-
-function isValidEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
 function getFriendlyCheckoutError(
   data: CheckoutResponse,
   fallback: string,
@@ -368,6 +351,7 @@ async function postCheckout(payload: CheckoutPayload) {
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      'Idempotency-Key': payload.requestId,
     },
     body: JSON.stringify(payload),
   });
@@ -394,24 +378,8 @@ async function postCheckout(payload: CheckoutPayload) {
 export default function PricingPage() {
   const router = useRouter();
   const pageRef = useRef<HTMLDivElement | null>(null);
-  const emailInputRef = useRef<HTMLInputElement | null>(null);
-
-  const [checkoutEmail, setCheckoutEmail] = useState('');
   const [loadingCheckout, setLoadingCheckout] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState('');
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    for (const key of STORAGE_EMAIL_KEYS) {
-      const storedEmail = window.localStorage.getItem(key);
-
-      if (storedEmail) {
-        setCheckoutEmail(storedEmail);
-        break;
-      }
-    }
-  }, []);
 
   const goToDashboard = () => {
     router.push('/dashboard');
@@ -422,30 +390,6 @@ export default function PricingPage() {
       top: 0,
       behavior: 'smooth',
     });
-  };
-
-  const getRequiredEmail = () => {
-    const email = normalizeEmail(checkoutEmail);
-
-    if (!email) {
-      setCheckoutError(
-        'Pred pokračovaním na platbu zadajte e-mailovú adresu.',
-      );
-      emailInputRef.current?.focus();
-      return null;
-    }
-
-    if (!isValidEmail(email)) {
-      setCheckoutError('Zadajte platnú e-mailovú adresu.');
-      emailInputRef.current?.focus();
-      return null;
-    }
-
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('zedpera_email', email);
-    }
-
-    return email;
   };
 
   const activateFreePlan = () => {
@@ -467,9 +411,6 @@ export default function PricingPage() {
       return;
     }
 
-    const email = getRequiredEmail();
-    if (!email) return;
-
     const loadingKey = `plan:${planId}`;
 
     try {
@@ -485,7 +426,10 @@ export default function PricingPage() {
       window.localStorage.setItem(STORAGE_SELECTED_PLAN, planId);
       window.localStorage.removeItem(STORAGE_SELECTED_ADDONS);
 
-      const origin = window.location.origin;
+      const requestId =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `pricing-plan-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
       const payload: PlanCheckoutPayload = {
         checkoutType: 'plan',
@@ -493,14 +437,9 @@ export default function PricingPage() {
         planId,
         addons: [],
         addonIds: [],
-        email,
-        customerEmail: email,
-        successUrl: `${origin}/dashboard?payment=success&checkoutType=plan&plan=${encodeURIComponent(
-          planId,
-        )}`,
-        cancelUrl: `${origin}/pricing?payment=canceled&checkoutType=plan&plan=${encodeURIComponent(
-          planId,
-        )}`,
+        locale: 'sk',
+        requestId,
+        checkoutRequestId: requestId,
       };
 
       const { response, data } = await postCheckout(payload);
@@ -537,9 +476,6 @@ export default function PricingPage() {
       return;
     }
 
-    const email = getRequiredEmail();
-    if (!email) return;
-
     const loadingKey = `addon:${addonId}`;
 
     try {
@@ -557,7 +493,10 @@ export default function PricingPage() {
         JSON.stringify([addonId]),
       );
 
-      const origin = window.location.origin;
+      const requestId =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `pricing-addon-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
       const payload: AddonCheckoutPayload = {
         checkoutType: 'addon',
@@ -565,14 +504,9 @@ export default function PricingPage() {
         addonId,
         addons: [addonId],
         addonIds: [addonId],
-        email,
-        customerEmail: email,
-        successUrl: `${origin}/dashboard?payment=success&checkoutType=addon&addon=${encodeURIComponent(
-          addonId,
-        )}`,
-        cancelUrl: `${origin}/pricing?payment=canceled&checkoutType=addon&addon=${encodeURIComponent(
-          addonId,
-        )}`,
+        locale: 'sk',
+        requestId,
+        checkoutRequestId: requestId,
       };
 
       const { response, data } = await postCheckout(payload);
@@ -671,36 +605,10 @@ export default function PricingPage() {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 shadow-xl sm:p-6">
-            <label
-              htmlFor="checkout-email"
-              className="flex items-center gap-2 text-sm font-black text-white"
-            >
-              <Mail size={18} className="text-purple-300" />
-              E-mail pre platbu a aktiváciu služby
-            </label>
-
-            <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center">
-              <input
-                ref={emailInputRef}
-                id="checkout-email"
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                value={checkoutEmail}
-                onChange={(event) => {
-                  setCheckoutEmail(event.target.value);
-                  setCheckoutError('');
-                }}
-                placeholder="vas@email.sk"
-                className="min-h-[50px] w-full rounded-2xl border border-white/10 bg-[#0f172a] px-4 py-3 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-purple-400 focus:ring-2 focus:ring-purple-500/20"
-              />
-
-              <p className="text-xs leading-5 text-slate-400 lg:max-w-md">
-                Platba a následná aktivácia balíka alebo doplnku budú naviazané
-                na túto e-mailovú adresu.
-              </p>
-            </div>
+          <div className="rounded-3xl border border-purple-400/20 bg-purple-500/10 p-5 text-sm font-semibold leading-6 text-purple-100 shadow-xl sm:p-6">
+            Po kliknutí na platený balík alebo doplnok budete okamžite
+            presmerovaný na zabezpečenú platobnú stránku Stripe. E-mail zadáte
+            priamo v Stripe Checkout.
           </div>
         </section>
 

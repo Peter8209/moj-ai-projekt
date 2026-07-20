@@ -1,3 +1,5 @@
+import "server-only";
+
 import {
   ADDONS,
   PLANS,
@@ -111,10 +113,12 @@ export type CurrentEntitlements = {
 
   /**
    * Administrátorský stav sa určuje výhradne na serveri podľa:
-   * public.zedpera_user_entitlements.is_admin.
+   * - bezpečného zoznamu administrátorských e-mailov v tomto súbore,
+   * - voliteľnej premennej ZEDPERA_ADMIN_EMAILS,
+   * - public.zedpera_user_entitlements.is_admin.
    *
-   * E-mail, údaje z frontendu ani Supabase app_metadata nesmú
-   * administrátorské oprávnenie vytvoriť alebo rozšíriť.
+   * Údaje z frontendu, localStorage, query parametrov ani tela požiadavky
+   * administrátorské oprávnenie nikdy nevytvárajú ani nerozširujú.
    */
   isAdmin: boolean;
   hasUnlimitedAccess: boolean;
@@ -222,6 +226,23 @@ export type EntitlementErrorBody = {
 
 const DEFAULT_PLAN_ID: PlanId = "free";
 
+/**
+ * Dva samostatné administrátorské účty s rovnakými právami.
+ *
+ * Každý e-mail musí existovať ako samostatný používateľ v Supabase Auth.
+ * Heslá sa nikdy neukladajú do zdrojového kódu; overuje ich Supabase Auth.
+ */
+const BUILT_IN_ADMIN_EMAILS = [
+  "admin@zedpera.com",
+  "admin1@zedpera.com",
+] as const;
+
+/**
+ * Číselná serializovateľná hodnota používaná pri administrátorovi.
+ * Skutočné blokovanie sa pri isAdmin === true vždy obchádza.
+ */
+const ADMIN_NUMERIC_LIMIT = Number.MAX_SAFE_INTEGER;
+
 const DEFAULT_ATTACHMENT_LIMIT =
   typeof PLANS.free.attachmentLimit === "number" &&
   Number.isFinite(PLANS.free.attachmentLimit)
@@ -232,7 +253,50 @@ const PURCHASE_URL = "/pricing";
 
 const VALID_PLAN_IDS = new Set<PlanId>(Object.keys(PLANS) as PlanId[]);
 
+const ADMIN_PLAN_ID: PlanId = VALID_PLAN_IDS.has("admin" as PlanId)
+  ? ("admin" as PlanId)
+  : DEFAULT_PLAN_ID;
+
 const VALID_ADDON_IDS = new Set<AddonId>(Object.keys(ADDONS) as AddonId[]);
+
+function normalizeEmailAddress(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+/**
+ * Zostaví serverový zoznam administrátorov.
+ *
+ * Zabudované účty:
+ * - admin@zedpera.com
+ * - admin1@zedpera.com
+ *
+ * Ďalšie účty možno doplniť vo Verceli alebo v .env.local:
+ * ZEDPERA_ADMIN_EMAILS=admin2@zedpera.com,admin3@zedpera.com
+ */
+function getConfiguredAdminEmails(): Set<string> {
+  const environmentEmails = String(
+    process.env.ZEDPERA_ADMIN_EMAILS || "",
+  )
+    .split(",")
+    .map(normalizeEmailAddress)
+    .filter(Boolean);
+
+  return new Set<string>([
+    ...BUILT_IN_ADMIN_EMAILS.map(normalizeEmailAddress),
+    ...environmentEmails,
+  ]);
+}
+
+const CONFIGURED_ADMIN_EMAILS = getConfiguredAdminEmails();
+
+/**
+ * Overí administrátorský e-mail výhradne na serveri.
+ */
+export function isAdminEmail(email: string | null | undefined): boolean {
+  const normalizedEmail = normalizeEmailAddress(email);
+
+  return Boolean(normalizedEmail) && CONFIGURED_ADMIN_EMAILS.has(normalizedEmail);
+}
 
 // ============================================================
 // LABELS AND FEATURE MAPS
@@ -731,27 +795,31 @@ function getDefaultEntitlements({
   userId: string;
   email: string | null;
 }): CurrentEntitlements {
-  const plan = PLANS[DEFAULT_PLAN_ID];
-  const isAdmin = false;
+  const normalizedEmail = normalizeEmailAddress(email) || null;
+  const isAdmin = isAdminEmail(normalizedEmail);
+  const planId = isAdmin ? ADMIN_PLAN_ID : DEFAULT_PLAN_ID;
+  const plan = PLANS[planId];
 
-  const features = getFeaturesForEntitlements(DEFAULT_PLAN_ID, [], { isAdmin });
-
+  const features = getFeaturesForEntitlements(planId, [], { isAdmin });
   const featureList = Array.from(features);
-  const promptLimit = plan.promptLimit;
-  const pageLimit = resolveCatalogPageLimit(plan.pageLimit);
-  const attachmentLimit = resolveCatalogAttachmentLimit(
-    plan.attachmentLimit,
-  );
+
+  const promptLimit = isAdmin ? null : plan.promptLimit;
+  const pageLimit = isAdmin
+    ? ADMIN_NUMERIC_LIMIT
+    : resolveCatalogPageLimit(plan.pageLimit);
+  const attachmentLimit = isAdmin
+    ? ADMIN_NUMERIC_LIMIT
+    : resolveCatalogAttachmentLimit(plan.attachmentLimit);
 
   return {
     userId,
-    email,
+    email: normalizedEmail,
 
     isAdmin,
     hasUnlimitedAccess: isAdmin,
     hasDatabaseRecord: false,
 
-    planId: DEFAULT_PLAN_ID,
+    planId,
     planName: plan.name,
     planPriceCents: plan.priceCents,
     pageLimit,
@@ -975,6 +1043,20 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
     throw new UnauthenticatedError(authError?.message);
   }
 
+  const userEmail = normalizeEmailAddress(user.email) || null;
+
+  /**
+   * Zabudovaní administrátori sa overia bezprostredne po overení Supabase
+   * session. Vďaka tomu majú admin@zedpera.com a admin1@zedpera.com rovnaké
+   * práva aj vtedy, keď pre nich ešte neexistuje entitlement riadok.
+   */
+  if (isAdminEmail(userEmail)) {
+    return getDefaultEntitlements({
+      userId: user.id,
+      email: userEmail,
+    });
+  }
+
   const data = await loadEntitlementRow({
     supabase,
     userId: user.id,
@@ -983,7 +1065,7 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
   if (!data) {
     return getDefaultEntitlements({
       userId: user.id,
-      email: user.email || null,
+      email: userEmail,
     });
   }
 
@@ -1003,16 +1085,24 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
    */
   const expired = !isAdmin && isEntitlementExpired(validUntil);
 
-  const planId = expired ? DEFAULT_PLAN_ID : storedPlanId;
-  const addonIds = expired ? [] : storedAddonIds;
+  const planId = isAdmin
+    ? ADMIN_PLAN_ID
+    : expired
+      ? DEFAULT_PLAN_ID
+      : storedPlanId;
+
+  const addonIds = isAdmin || expired ? [] : storedAddonIds;
   const plan = PLANS[planId];
-  const catalogPageLimit = resolveCatalogPageLimit(plan.pageLimit);
-  const catalogAttachmentLimit = resolveCatalogAttachmentLimit(
-    plan.attachmentLimit,
-  );
+
+  const catalogPageLimit = isAdmin
+    ? ADMIN_NUMERIC_LIMIT
+    : resolveCatalogPageLimit(plan.pageLimit);
+
+  const catalogAttachmentLimit = isAdmin
+    ? ADMIN_NUMERIC_LIMIT
+    : resolveCatalogAttachmentLimit(plan.attachmentLimit);
 
   const features = getFeaturesForEntitlements(planId, addonIds, { isAdmin });
-
   const featureList = Array.from(features);
 
   const promptLimit = isAdmin
@@ -1021,7 +1111,9 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
       ? plan.promptLimit
       : resolvePromptLimit(data.prompt_limit, plan.promptLimit);
 
-  const promptsUsed = expired ? 0 : toNonNegativeInteger(data.prompts_used, 0);
+  const promptsUsed = isAdmin || expired
+    ? 0
+    : toNonNegativeInteger(data.prompts_used, 0);
 
   const promptsRemaining = isAdmin
     ? null
@@ -1030,26 +1122,32 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
         promptsUsed,
       });
 
-  const attachmentLimit = expired
-    ? catalogAttachmentLimit
-    : resolveAttachmentLimit(
-        data.attachment_limit,
-        catalogAttachmentLimit,
-      );
+  const attachmentLimit = isAdmin
+    ? ADMIN_NUMERIC_LIMIT
+    : expired
+      ? catalogAttachmentLimit
+      : resolveAttachmentLimit(
+          data.attachment_limit,
+          catalogAttachmentLimit,
+        );
 
-  const basePageLimit = expired
-    ? catalogPageLimit
-    : toNonNegativeInteger(data.base_page_limit, catalogPageLimit);
+  const basePageLimit = isAdmin
+    ? ADMIN_NUMERIC_LIMIT
+    : expired
+      ? catalogPageLimit
+      : toNonNegativeInteger(data.base_page_limit, catalogPageLimit);
 
-  const extraPageLimit = expired
+  const extraPageLimit = isAdmin || expired
     ? 0
     : toNonNegativeInteger(data.extra_page_limit, 0);
 
-  const pagesUsed = expired ? 0 : toNonNegativeInteger(data.pages_used, 0);
+  const pagesUsed = isAdmin || expired
+    ? 0
+    : toNonNegativeInteger(data.pages_used, 0);
 
   return {
     userId: user.id,
-    email: user.email || null,
+    email: userEmail,
 
     isAdmin,
     hasUnlimitedAccess: isAdmin,
@@ -1079,8 +1177,8 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
     attachmentLimit,
 
     billingStatus: isAdmin ? "admin" : expired ? "expired" : billingStatus,
-    activatedAt: expired ? null : activatedAt,
-    validUntil,
+    activatedAt: isAdmin || expired ? null : activatedAt,
+    validUntil: isAdmin ? null : validUntil,
     updatedAt,
   };
 }
@@ -1350,8 +1448,8 @@ export async function consumeSuccessfulPrompt(): Promise<PromptUsageResult> {
   if (rpcReportsAdmin) {
     /**
      * RPC výstup nesmie sám udeliť administrátorské oprávnenie.
-     * Stav sa vždy znovu overí cez getCurrentEntitlements(), ktorý číta
-     * výhradne z zedpera_user_entitlements.is_admin.
+     * Stav sa vždy znovu overí cez getCurrentEntitlements(), ktorý kontroluje
+     * serverový zoznam admin e-mailov aj zedpera_user_entitlements.is_admin.
      */
     const latest = await getCurrentEntitlements();
 

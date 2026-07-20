@@ -143,11 +143,11 @@ const REGISTER_COPY: Record<AppLanguage, RegisterCopy> = {
       "Nepodarilo sa spojiť so serverom. Skontrolujte internetové pripojenie a skúste to znova.",
     serviceUnavailable:
       "Registračná služba je dočasne nedostupná. Skúste to neskôr.",
-    confirmationTitle: "Skontrolujte si e-mail",
+    confirmationTitle: "Registrácia prebehla úspešne",
     confirmationText:
-      "Na zadanú e-mailovú adresu sme odoslali potvrdzovací odkaz. Účet sa aktivuje až po jeho otvorení.",
+      "Práve prebehla úspešná registrácia vášho účtu. Na zadanú e-mailovú adresu sme odoslali potvrdzovací odkaz. Skontrolujte si, prosím, e-mailovú schránku.",
     confirmationDetail:
-      "Po potvrdení e-mailu budete presmerovaný/á na prihlasovaciu stránku. Skontrolujte aj priečinok Spam alebo Nevyžiadaná pošta.",
+      "Pre dokončenie registrácie kliknite na potvrdzovací odkaz v e-maile. Ak správu nevidíte, skontrolujte aj priečinok Spam alebo Nevyžiadaná pošta.",
     confirmationDisabled:
       "Účet bol vytvorený, ale povinné potvrdenie e-mailu nie je správne nastavené. Kontaktujte podporu ZEDPERA.",
   },
@@ -215,11 +215,11 @@ const REGISTER_COPY: Record<AppLanguage, RegisterCopy> = {
       "Nepodařilo se spojit se serverem. Zkontrolujte internetové připojení a zkuste to znovu.",
     serviceUnavailable:
       "Registrační služba je dočasně nedostupná. Zkuste to později.",
-    confirmationTitle: "Zkontrolujte svůj e-mail",
+    confirmationTitle: "Registrace proběhla úspěšně",
     confirmationText:
-      "Na zadanou e-mailovou adresu jsme odeslali potvrzovací odkaz. Účet se aktivuje až po jeho otevření.",
+      "Právě proběhla úspěšná registrace vašeho účtu. Na zadanou e-mailovou adresu jsme odeslali potvrzovací odkaz. Zkontrolujte si prosím e-mailovou schránku.",
     confirmationDetail:
-      "Po potvrzení e-mailu budete přesměrováni na přihlašovací stránku. Zkontrolujte také složku Spam.",
+      "Pro dokončení registrace klikněte na potvrzovací odkaz v e-mailu. Pokud zprávu nevidíte, zkontrolujte také složku Spam.",
     confirmationDisabled:
       "Účet byl vytvořen, ale povinné potvrzení e-mailu není správně nastaveno. Kontaktujte podporu ZEDPERA.",
   },
@@ -287,11 +287,11 @@ const REGISTER_COPY: Record<AppLanguage, RegisterCopy> = {
       "Unable to connect to the server. Check your internet connection and try again.",
     serviceUnavailable:
       "The registration service is temporarily unavailable. Try again later.",
-    confirmationTitle: "Check your email",
+    confirmationTitle: "Registration successful",
     confirmationText:
-      "We sent a confirmation link to your email address. Your account becomes active only after you open it.",
+      "Your account registration has been completed successfully. We sent a confirmation link to your email address. Please check your inbox.",
     confirmationDetail:
-      "After confirming your email, you will be redirected to the sign-in page. Also check your Spam folder.",
+      "To complete the registration, open the confirmation link in the email. If you cannot find the message, also check your Spam folder.",
     confirmationDisabled:
       "The account was created, but mandatory email confirmation is not configured correctly. Contact ZEDPERA support.",
   },
@@ -360,11 +360,11 @@ const REGISTER_COPY: Record<AppLanguage, RegisterCopy> = {
       "Die Verbindung zum Server konnte nicht hergestellt werden. Prüfen Sie Ihre Internetverbindung.",
     serviceUnavailable:
       "Der Registrierungsdienst ist vorübergehend nicht verfügbar. Versuchen Sie es später erneut.",
-    confirmationTitle: "Prüfen Sie Ihre E-Mail",
+    confirmationTitle: "Registrierung erfolgreich",
     confirmationText:
-      "Wir haben einen Bestätigungslink an Ihre E-Mail-Adresse gesendet. Das Konto wird erst nach dem Öffnen aktiviert.",
+      "Die Registrierung Ihres Kontos wurde erfolgreich abgeschlossen. Wir haben einen Bestätigungslink an Ihre E-Mail-Adresse gesendet. Bitte prüfen Sie Ihr Postfach.",
     confirmationDetail:
-      "Nach der E-Mail-Bestätigung werden Sie zur Anmeldeseite weitergeleitet. Prüfen Sie auch den Spam-Ordner.",
+      "Öffnen Sie den Bestätigungslink in der E-Mail, um die Registrierung abzuschließen. Prüfen Sie auch den Spam-Ordner, falls die Nachricht nicht sichtbar ist.",
     confirmationDisabled:
       "Das Konto wurde erstellt, aber die verpflichtende E-Mail-Bestätigung ist nicht korrekt konfiguriert. Kontaktieren Sie den ZEDPERA-Support.",
   },
@@ -432,11 +432,11 @@ const REGISTER_COPY: Record<AppLanguage, RegisterCopy> = {
       "Nie można połączyć się z serwerem. Sprawdź połączenie internetowe i spróbuj ponownie.",
     serviceUnavailable:
       "Usługa rejestracji jest tymczasowo niedostępna. Spróbuj później.",
-    confirmationTitle: "Sprawdź pocztę e-mail",
+    confirmationTitle: "Rejestracja zakończona pomyślnie",
     confirmationText:
-      "Wysłaliśmy link potwierdzający na podany adres e-mail. Konto zostanie aktywowane dopiero po jego otwarciu.",
+      "Rejestracja konta zakończyła się pomyślnie. Wysłaliśmy link potwierdzający na podany adres e-mail. Sprawdź swoją skrzynkę odbiorczą.",
     confirmationDetail:
-      "Po potwierdzeniu adresu e-mail nastąpi przekierowanie do strony logowania. Sprawdź także folder Spam.",
+      "Aby dokończyć rejestrację, otwórz link potwierdzający w wiadomości. Jeśli jej nie widzisz, sprawdź także folder Spam.",
     confirmationDisabled:
       "Konto zostało utworzone, ale obowiązkowe potwierdzenie e-maila nie jest prawidłowo skonfigurowane. Skontaktuj się z pomocą ZEDPERA.",
   },
@@ -504,11 +504,11 @@ const REGISTER_COPY: Record<AppLanguage, RegisterCopy> = {
       "Nem sikerült kapcsolódni a kiszolgálóhoz. Ellenőrizze az internetkapcsolatot, majd próbálja újra.",
     serviceUnavailable:
       "A regisztrációs szolgáltatás átmenetileg nem érhető el. Próbálja meg később.",
-    confirmationTitle: "Ellenőrizze az e-mailjét",
+    confirmationTitle: "Sikeres regisztráció",
     confirmationText:
-      "Megerősítő hivatkozást küldtünk a megadott e-mail-címre. A fiók csak a hivatkozás megnyitása után aktiválódik.",
+      "A fiók regisztrációja sikeresen megtörtént. Megerősítő hivatkozást küldtünk a megadott e-mail-címre. Kérjük, ellenőrizze a beérkező leveleit.",
     confirmationDetail:
-      "Az e-mail-cím megerősítése után a bejelentkezési oldalra irányítjuk. Ellenőrizze a Spam mappát is.",
+      "A regisztráció befejezéséhez nyissa meg az e-mailben található megerősítő hivatkozást. Ha nem látja az üzenetet, ellenőrizze a Spam mappát is.",
     confirmationDisabled:
       "A fiók létrejött, de a kötelező e-mail-megerősítés nincs megfelelően beállítva. Lépjen kapcsolatba a ZEDPERA ügyfélszolgálatával.",
   },
@@ -1066,50 +1066,13 @@ export default function RegisterPage() {
         return;
       }
 
-      let registeredUser = data.user;
-
       /**
-       * Obranná obnova používateľa pre prípad, že poskytovateľ vráti reláciu,
-       * ale objekt user v registračnej odpovedi chýba. Pri zapnutom povinnom
-       * potvrdení e-mailu je session štandardne null a tento blok sa nespustí.
+       * Ak Supabase nevrátil chybu, registračná požiadavka bola prijatá.
+       * Pri zapnutom potvrdzovaní e-mailu môže Supabase z bezpečnostných dôvodov
+       * vrátiť obfuskovaný objekt používateľa alebo prázdne pole identities.
+       * Tieto hodnoty preto nepoužívame na zobrazenie hlášky „už registrovaný“.
+       * Používateľ vždy dostane neutrálne potvrdenie a pokyn skontrolovať e-mail.
        */
-      if (!registeredUser && data.session) {
-        const { data: recoveredUserData, error: recoveredUserError } =
-          await supabase.auth.getUser();
-
-        if (recoveredUserError) {
-          warnAboutRegistrationIssue(
-            "recover-user-from-session",
-            recoveredUserError,
-          );
-        } else {
-          registeredUser = recoveredUserData.user;
-        }
-      }
-
-      /**
-       * Supabase môže pri už existujúcej e-mailovej adrese a zapnutom
-       * potvrdzovaní e-mailu zámerne nevrátiť priamu chybu. Podľa konfigurácie
-       * môže byť user prázdny alebo môže obsahovať prázdne pole identities.
-       * V oboch prípadoch zobrazíme používateľovi jednoznačnú informáciu,
-       * že e-mail je už registrovaný, namiesto všeobecnej hlášky o službe.
-       */
-      if (!registeredUser?.id) {
-        setError(copy.emailAlreadyRegistered);
-        return;
-      }
-
-      /**
-       * Niektoré konfigurácie Supabase pri existujúcom účte vracajú
-       * obfuskovaný objekt bez identity namiesto priamej AuthError.
-       */
-      if (
-        Array.isArray(registeredUser.identities) &&
-        registeredUser.identities.length === 0
-      ) {
-        setError(copy.emailAlreadyRegistered);
-        return;
-      }
 
       clearPreviousAccountStorageAfterRegistration();
 
@@ -1136,8 +1099,13 @@ export default function RegisterPage() {
       }
 
       setConfirmationEmail(cleanEmail);
+      setFullName("");
+      setEmail("");
       setPassword("");
       setConfirmPassword("");
+      setShowPassword(false);
+      setTermsAccepted(false);
+      setPrivacyAccepted(false);
     } catch (registrationError: unknown) {
       warnAboutRegistrationIssue(
         "sign-up-unexpected-exception",

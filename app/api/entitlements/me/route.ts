@@ -4,19 +4,41 @@ import {
   NextResponse,
   type NextRequest,
 } from 'next/server';
+import type { User } from '@supabase/supabase-js';
 
 import { getCurrentEntitlements } from '@/lib/entitlements';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 /**
- * Endpoint pracuje s aktuálnou Supabase reláciou používateľa.
+ * Autoritatívny endpoint oprávnení aktuálne prihláseného používateľa.
  *
- * Oprávnenia sa vždy načítavajú na serveri. Hodnoty z localStorage,
- * query parametrov alebo tela požiadavky sa pri rozhodovaní nepoužívajú.
+ * Podporované spôsoby pridelenia administrátorského prístupu:
+ * 1. používateľ je označený ako admin v lib/entitlements.ts / databáze,
+ * 2. používateľ má serverové app_metadata.role === 'admin',
+ * 3. jeho e-mail je uvedený v serverovej premennej ZEDPERA_ADMIN_EMAILS.
+ *
+ * Heslo sa v tomto súbore nikdy nekontroluje ani neukladá. Heslo overuje
+ * výhradne Supabase Auth pri signInWithPassword(). Tento endpoint pracuje
+ * až s už vytvorenou a serverom overenou používateľskou reláciou.
+ *
+ * Príklad premennej vo Verceli:
+ * ZEDPERA_ADMIN_EMAILS=admin@zedpera.com,druhy.admin@zedpera.com
+ *
+ * Viaceré zariadenia môžu používať aj ten istý administrátorský účet.
+ * Tento endpoint nevytvára žiadny globálny zámok ani obmedzenie na jednu
+ * aktívnu reláciu.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
+
+/**
+ * Číselný fallback pre staršie časti frontendu, ktoré ešte nevedia pracovať
+ * s null pri prílohách alebo stranách. Autoritatívnym údajom pre admina je
+ * hasUnlimitedAccess === true.
+ */
+const ADMIN_UNLIMITED_NUMERIC_LIMIT = 2_147_483_647;
 
 const DEFAULT_ENTITLEMENTS = {
   planId: 'free',
@@ -29,6 +51,12 @@ const DEFAULT_ENTITLEMENTS = {
   extraPageLimit: 0,
   pagesUsed: 0,
 } as const;
+
+const ADMIN_EMAIL_ENV_KEYS = [
+  'ZEDPERA_ADMIN_EMAILS',
+  'ADMIN_EMAILS',
+  'ADMIN_EMAIL',
+] as const;
 
 type EntitlementsResponse = {
   planId: string;
@@ -66,6 +94,8 @@ type ErrorWithMetadata = {
   name?: unknown;
 };
 
+type AppMetadata = Record<string, unknown>;
+
 /**
  * Overí, či je neznáma hodnota obyčajný objekt.
  */
@@ -80,10 +110,141 @@ function isRecord(
 }
 
 /**
+ * Normalizuje e-mail na porovnanie bez ohľadu na veľkosť písmen.
+ */
+function normalizeEmail(value: unknown): string {
+  return typeof value === 'string'
+    ? value.trim().toLowerCase()
+    : '';
+}
+
+/**
+ * Načíta všetky administrátorské e-maily zo serverových premenných.
+ * Podporuje oddelenie čiarkou, bodkočiarkou, medzerou alebo novým riadkom.
+ */
+function getConfiguredAdminEmails(): Set<string> {
+  const result = new Set<string>();
+
+  for (const envKey of ADMIN_EMAIL_ENV_KEYS) {
+    const rawValue = process.env[envKey];
+
+    if (!rawValue) {
+      continue;
+    }
+
+    for (const value of rawValue.split(/[\s,;]+/g)) {
+      const email = normalizeEmail(value);
+
+      if (email) {
+        result.add(email);
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Overí administrátorský e-mail výhradne oproti serverovej konfigurácii.
+ * E-mail z query parametra, localStorage ani request body sa nepoužíva.
+ */
+function isConfiguredAdminEmail(
+  email: string | null | undefined,
+): boolean {
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!normalizedEmail) {
+    return false;
+  }
+
+  return getConfiguredAdminEmails().has(
+    normalizedEmail,
+  );
+}
+
+/**
+ * app_metadata je možné bezpečne nastavovať iba zo servera/service-role.
+ * user_metadata sa zámerne nepoužíva, pretože používateľ si ju môže meniť.
+ */
+function isAdminFromAppMetadata(
+  user: User,
+): boolean {
+  const metadata: AppMetadata = isRecord(
+    user.app_metadata,
+  )
+    ? user.app_metadata
+    : {};
+
+  const role =
+    typeof metadata.role === 'string'
+      ? metadata.role.trim().toLowerCase()
+      : '';
+
+  const roles = Array.isArray(metadata.roles)
+    ? metadata.roles
+        .filter(
+          (value): value is string =>
+            typeof value === 'string',
+        )
+        .map((value) =>
+          value.trim().toLowerCase(),
+        )
+    : [];
+
+  return (
+    role === 'admin' ||
+    roles.includes('admin') ||
+    metadata.is_admin === true ||
+    metadata.isAdmin === true
+  );
+}
+
+/**
+ * Vytvorí štandardizovanú chybu neprihláseného používateľa.
+ */
+function createUnauthenticatedError(
+  message: string,
+): Error & {
+  code: 'UNAUTHENTICATED';
+  status: 401;
+} {
+  const error = new Error(message) as Error & {
+    code: 'UNAUTHENTICATED';
+    status: 401;
+  };
+
+  error.code = 'UNAUTHENTICATED';
+  error.status = 401;
+
+  return error;
+}
+
+/**
+ * Načíta a serverovo overí aktuálneho používateľa zo Supabase cookies.
+ * getUser() overuje token proti Supabase Auth serveru a nespolieha sa iba
+ * na lokálne dekódovanie session.
+ */
+async function getAuthenticatedUser(): Promise<User> {
+  const supabase =
+    await createSupabaseServerClient();
+
+  const {
+    data,
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !data.user) {
+    throw createUnauthenticatedError(
+      error?.message ||
+        'Používateľská relácia neexistuje alebo už nie je platná.',
+    );
+  }
+
+  return data.user;
+}
+
+/**
  * Prevedie hodnotu na nezáporné celé číslo.
- *
- * Databázové číselné hodnoty môžu byť v niektorých prípadoch
- * vrátené aj ako reťazec, preto podporujeme oba formáty.
  */
 function toNonNegativeInteger(
   value: unknown,
@@ -108,7 +269,7 @@ function toNonNegativeInteger(
 }
 
 /**
- * Prevedie hodnotu na boolean bez použitia truthy/falsy skratiek.
+ * Prevedie hodnotu na boolean bez použitia nejednoznačného truthy/falsy.
  */
 function toBoolean(
   value: unknown,
@@ -132,9 +293,7 @@ function toBoolean(
 /**
  * Bezpečne načíta identifikátor balíka.
  */
-function toPlanId(
-  value: unknown,
-): string {
+function toPlanId(value: unknown): string {
   if (
     typeof value === 'string' &&
     value.trim().length > 0
@@ -146,10 +305,31 @@ function toPlanId(
 }
 
 /**
- * Prevedie výsledok z lib/entitlements.ts na presný verejný kontrakt API.
- *
- * Frontend dostane iba polia, ktoré potrebuje na rozhodovanie o prístupe.
- * Interné polia, Set objekt s funkciami ani databázové údaje sa nevracajú.
+ * Kompletná odpoveď pre administrátora. Každá platná session rovnakého
+ * administrátorského účtu dostane rovnaký neobmedzený prístup.
+ */
+function createAdminEntitlementsResponse(): EntitlementsResponse {
+  return {
+    planId: 'admin',
+    isAdmin: true,
+    hasUnlimitedAccess: true,
+
+    promptLimit: null,
+    promptsUsed: 0,
+    promptsRemaining: null,
+    promptLimitReached: false,
+
+    attachmentLimit:
+      ADMIN_UNLIMITED_NUMERIC_LIMIT,
+    basePageLimit:
+      ADMIN_UNLIMITED_NUMERIC_LIMIT,
+    extraPageLimit: 0,
+    pagesUsed: 0,
+  };
+}
+
+/**
+ * Prevedie výsledok z lib/entitlements.ts na verejný kontrakt API.
  */
 function serializeEntitlements(
   value: unknown,
@@ -160,50 +340,38 @@ function serializeEntitlements(
     );
   }
 
-  const sourcePlanId = toPlanId(value.planId);
+  const sourcePlanId = toPlanId(
+    value.planId,
+  );
 
-  /*
-   * ADMIN sa musí rozpoznať tromi kompatibilnými spôsobmi:
-   * - isAdmin z lib/entitlements.ts,
-   * - hasUnlimitedAccess zo serverovej entitlement služby,
-   * - interný planId === 'admin'.
-   *
-   * Frontend ani starší fallback už potom nemôžu zmeniť null limit
-   * späť na FREE hodnotu 3.
-   */
   const sourceIsAdmin = toBoolean(
     value.isAdmin,
     sourcePlanId === 'admin',
   );
 
-  const sourceHasUnlimitedAccess = toBoolean(
-    value.hasUnlimitedAccess,
-    sourceIsAdmin,
-  );
+  const sourceHasUnlimitedAccess =
+    toBoolean(
+      value.hasUnlimitedAccess,
+      sourceIsAdmin,
+    );
 
   const isAdmin =
     sourceIsAdmin ||
     sourceHasUnlimitedAccess ||
     sourcePlanId === 'admin';
 
-  const hasUnlimitedAccess =
-    isAdmin || sourceHasUnlimitedAccess;
+  if (isAdmin) {
+    return createAdminEntitlementsResponse();
+  }
 
-  const promptsUsed = hasUnlimitedAccess
-    ? 0
-    : toNonNegativeInteger(
-        value.promptsUsed,
-        DEFAULT_ENTITLEMENTS.promptsUsed,
-      );
+  const promptsUsed =
+    toNonNegativeInteger(
+      value.promptsUsed,
+      DEFAULT_ENTITLEMENTS.promptsUsed,
+    );
 
-  /*
-   * null je platná obchodná hodnota a znamená neobmedzené prompty.
-   * Nesmie sa poslať do toNonNegativeInteger(), pretože tá by null
-   * zmenila na FREE fallback 3.
-   */
-  const promptLimit = hasUnlimitedAccess
-    ? null
-    : value.promptLimit === null
+  const promptLimit =
+    value.promptLimit === null
       ? null
       : toNonNegativeInteger(
           value.promptLimit,
@@ -213,35 +381,43 @@ function serializeEntitlements(
   const promptsRemaining =
     promptLimit === null
       ? null
-      : Math.max(promptLimit - promptsUsed, 0);
+      : Math.max(
+          promptLimit - promptsUsed,
+          0,
+        );
 
   return {
-    planId: isAdmin ? 'admin' : sourcePlanId,
-    isAdmin,
-    hasUnlimitedAccess,
+    planId: sourcePlanId,
+    isAdmin: false,
+    hasUnlimitedAccess: false,
 
     promptLimit,
     promptsUsed,
     promptsRemaining,
     promptLimitReached:
-      promptLimit !== null && promptsUsed >= promptLimit,
+      promptLimit !== null &&
+      promptsUsed >= promptLimit,
 
-    attachmentLimit: toNonNegativeInteger(
-      value.attachmentLimit,
-      DEFAULT_ENTITLEMENTS.attachmentLimit,
-    ),
-    basePageLimit: toNonNegativeInteger(
-      value.basePageLimit,
-      DEFAULT_ENTITLEMENTS.basePageLimit,
-    ),
-    extraPageLimit: toNonNegativeInteger(
-      value.extraPageLimit,
-      DEFAULT_ENTITLEMENTS.extraPageLimit,
-    ),
-    pagesUsed: toNonNegativeInteger(
-      value.pagesUsed,
-      DEFAULT_ENTITLEMENTS.pagesUsed,
-    ),
+    attachmentLimit:
+      toNonNegativeInteger(
+        value.attachmentLimit,
+        DEFAULT_ENTITLEMENTS.attachmentLimit,
+      ),
+    basePageLimit:
+      toNonNegativeInteger(
+        value.basePageLimit,
+        DEFAULT_ENTITLEMENTS.basePageLimit,
+      ),
+    extraPageLimit:
+      toNonNegativeInteger(
+        value.extraPageLimit,
+        DEFAULT_ENTITLEMENTS.extraPageLimit,
+      ),
+    pagesUsed:
+      toNonNegativeInteger(
+        value.pagesUsed,
+        DEFAULT_ENTITLEMENTS.pagesUsed,
+      ),
   };
 }
 
@@ -265,8 +441,7 @@ function resolveRequestId(
 }
 
 /**
- * Používateľské limity ani oprávnenia sa nesmú cacheovať
- * v prehliadači, CDN, Verceli ani proxy vrstve.
+ * Používateľské limity ani oprávnenia sa nesmú cacheovať.
  */
 function createNoStoreHeaders(
   requestId: string,
@@ -334,8 +509,7 @@ function getErrorMetadata(
 function isUnauthenticatedError(
   error: unknown,
 ): boolean {
-  const metadata =
-    getErrorMetadata(error);
+  const metadata = getErrorMetadata(error);
 
   const code =
     typeof metadata.code === 'string'
@@ -406,8 +580,7 @@ function logRouteError(
   error: unknown,
   requestId: string,
 ): void {
-  const metadata =
-    getErrorMetadata(error);
+  const metadata = getErrorMetadata(error);
 
   console.error(
     '[GET /api/entitlements/me] Načítanie oprávnení zlyhalo.',
@@ -436,22 +609,11 @@ function logRouteError(
 /**
  * GET /api/entitlements/me
  *
- * Autoritatívny serverový zdroj aktuálneho stavu používateľa.
- *
- * Úspešná odpoveď:
- * {
- *   "planId": "free",
- *   "isAdmin": false,
- *   "hasUnlimitedAccess": false,
- *   "promptLimit": null,
- *   "promptsUsed": 0,
- *   "promptsRemaining": null,
- *   "promptLimitReached": false,
- *   "attachmentLimit": 1,
- *   "basePageLimit": 3,
- *   "extraPageLimit": 0,
- *   "pagesUsed": 0
- * }
+ * Postup:
+ * 1. overí aktuálnu Supabase session cez auth.getUser(),
+ * 2. ak je e-mail v ZEDPERA_ADMIN_EMAILS, vráti admin prístup okamžite,
+ * 3. ak má používateľ admin app_metadata, vráti admin prístup,
+ * 4. inak načíta jeho balík a rolu z lib/entitlements.ts.
  */
 export async function GET(
   request: NextRequest,
@@ -460,26 +622,47 @@ export async function GET(
     EntitlementsResponse | ErrorResponse
   >
 > {
-  const requestId =
-    resolveRequestId(request);
+  const requestId = resolveRequestId(
+    request,
+  );
 
-  const headers =
-    createNoStoreHeaders(requestId);
+  const headers = createNoStoreHeaders(
+    requestId,
+  );
 
   try {
+    const authenticatedUser =
+      await getAuthenticatedUser();
+
+    const isExplicitAdmin =
+      isConfiguredAdminEmail(
+        authenticatedUser.email,
+      ) ||
+      isAdminFromAppMetadata(
+        authenticatedUser,
+      );
+
     /*
-     * getCurrentEntitlements() musí načítať používateľa zo serverovej
-     * Supabase relácie a následne overiť jeho údaje v databáze.
-     *
-     * Endpoint úmyselne neprijíma planId, admin flag ani limity z klienta.
+     * Administrátor uvedený v serverovej konfigurácii nesmie byť zablokovaný
+     * chýbajúcim alebo starým riadkom v entitlement tabuľke. Po úspešnom
+     * overení Supabase session dostane administrátorskú odpoveď priamo.
      */
+    if (isExplicitAdmin) {
+      return NextResponse.json(
+        createAdminEntitlementsResponse(),
+        {
+          status: 200,
+          headers,
+        },
+      );
+    }
+
     const currentEntitlements =
       await getCurrentEntitlements();
 
-    const response =
-      serializeEntitlements(
-        currentEntitlements,
-      );
+    const response = serializeEntitlements(
+      currentEntitlements,
+    );
 
     return NextResponse.json(
       response,
@@ -498,7 +681,7 @@ export async function GET(
       const response: ErrorResponse = {
         error: 'UNAUTHENTICATED',
         message:
-          'Pre načítanie používateľských oprávnení sa musíte prihlásiť a mať potvrdený účet.',
+          'Pre načítanie používateľských oprávnení sa musíte prihlásiť platným e-mailom a heslom.',
         requestId,
       };
 

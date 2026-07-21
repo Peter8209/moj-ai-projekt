@@ -15,41 +15,33 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 
 /**
  * Maximálna povolená dĺžka textu odoslaného na odpočítanie strán.
  *
- * Hodnota predstavuje ochranu API pred neprimerane veľkými vstupmi.
- * Pri 1 800 znakoch na stranu ide približne o viac než 2 700 strán.
+ * Pri 1 800 znakoch na normostranu ide približne o 2 778 strán.
+ * Limit chráni endpoint pred neprimerane veľkým JSON telom.
  */
 const MAX_TEXT_LENGTH = 5_000_000;
 
 /**
  * Maximálna dĺžka názvu modulu.
  *
- * Musí zodpovedať limitu použitému v lib/page-quota.ts.
+ * Hodnota musí zostať kompatibilná s lib/page-quota.ts.
  */
 const MAX_MODULE_LENGTH = 100;
 
 /**
- * Maximálna dĺžka requestId.
+ * Maximálna dĺžka idempotentného identifikátora požiadavky.
  *
- * Identifikátor sa používa na zabezpečenie idempotentnosti spotreby.
+ * Hodnota musí zostať kompatibilná s lib/page-quota.ts a databázovou
+ * funkciou public.zedpera_consume_pages().
  */
 const MAX_REQUEST_ID_LENGTH = 255;
 
-/**
- * Hlavičky zakazujúce ukladanie odpovede do cache.
- *
- * Stav kvóty sa môže meniť po každej požiadavke, preto odpoveď
- * nesmie byť uložená v prehliadači, proxy ani CDN.
- */
-const NO_STORE_HEADERS = {
-  'Cache-Control':
-    'no-store, no-cache, must-revalidate, proxy-revalidate',
-  Pragma: 'no-cache',
-  Expires: '0',
-} as const;
+const PAGE_ADDON_PURCHASE_URL =
+  '/pricing#doplnkove-sluzby';
 
 type ConsumePagesRequestBody = {
   text?: unknown;
@@ -57,35 +49,68 @@ type ConsumePagesRequestBody = {
   requestId?: unknown;
 };
 
-type ConsumePagesSuccessResponse = {
-  ok: true;
+type PublicPageQuota = {
+  planId: string;
 
-  /**
-   * Jedinečný identifikátor spotreby.
-   */
-  requestId: string;
+  isAdmin: boolean;
+  isUnlimited: boolean;
+  hasUnlimitedAccess: boolean;
 
-  /**
-   * Počet strán vypočítaný zo zaslaného textu.
-   *
-   * Pri administrátorovi sa hodnota vypočíta iba informatívne,
-   * ale zo stránkovej kvóty sa neodpočíta.
-   */
-  calculatedPages: number;
+  basePageLimit: number | null;
+  extraPageLimit: number;
+  pageLimit: number | null;
 
-  /**
-   * Počet strán skutočne odpočítaný z používateľskej kvóty.
-   *
-   * Pre administrátora je vždy 0.
-   */
-  consumedPages: number;
+  pagesUsed: number;
+  pagesRemaining: number | null;
+  pageLimitReached: boolean;
+};
 
-  /**
-   * true znamená, že spotreba bola preskočená, pretože používateľ
-   * má administrátorský alebo iný neobmedzený prístup.
-   */
-  usageBypassed: boolean;
-} & PageQuota;
+type ConsumePagesSuccessResponse =
+  PublicPageQuota & {
+    ok: true;
+    success: true;
+
+    /**
+     * Idempotentný identifikátor spotreby.
+     */
+    requestId: string;
+
+    /**
+     * Počet normostrán vypočítaný zo zaslaného textu.
+     *
+     * Pri ADMIN účte je informatívny a nič sa neodpočítava.
+     */
+    calculatedPages: number;
+
+    /**
+     * Počet strán považovaný za spotrebovaný touto operáciou.
+     *
+     * Pri neobmedzenom účte je vždy 0.
+     */
+    consumedPages: number;
+
+    /**
+     * Nový názov príznaku obídenia spotreby.
+     */
+    bypassed: boolean;
+
+    /**
+     * Starší názov zostáva kvôli spätnej kompatibilite frontendu.
+     */
+    usageBypassed: boolean;
+
+    /**
+     * Vnorená kvóta zostáva k dispozícii pre nový frontend.
+     *
+     * Rovnaké polia sú súčasne aj na najvyššej úrovni odpovede.
+     */
+    quota: PublicPageQuota;
+
+    meta: {
+      generatedAt: string;
+      cache: 'no-store';
+    };
+  };
 
 type ConsumePagesErrorCode =
   | 'INVALID_CONTENT_TYPE'
@@ -100,53 +125,85 @@ type ConsumePagesErrorCode =
   | 'REQUEST_ID_MISMATCH'
   | 'UNAUTHENTICATED'
   | 'PAGE_LIMIT_REACHED'
+  | 'INVALID_PAGE_QUOTA_RESPONSE'
   | 'PAGE_QUOTA_CONSUME_FAILED'
   | 'INTERNAL_SERVER_ERROR';
 
 type ConsumePagesErrorResponse = {
   ok: false;
+  success: false;
+
   code: ConsumePagesErrorCode;
   message: string;
 
   /**
-   * Identifikátor konkrétnej serverovej chyby.
-   *
-   * Používateľ ho môže poskytnúť podpore bez toho, aby API
-   * sprístupnilo citlivé databázové informácie.
+   * Jedinečný identifikátor konkrétnej serverovej operácie.
    */
   errorId: string;
 
   /**
-   * Technický detail sa vracia iba vo vývojovom prostredí.
+   * requestId je dostupný po úspešnom spracovaní idempotentného kľúča.
+   */
+  requestId?: string;
+
+  retryable: boolean;
+  purchaseUrl?: string;
+  pageLimitReached?: boolean;
+
+  /**
+   * Technický detail sa vracia iba mimo produkcie.
    */
   detail?: string;
+
+  /**
+   * Vnorený objekt zostáva kvôli kompatibilite so spoločným API readerom.
+   */
+  error: {
+    code: ConsumePagesErrorCode;
+    message: string;
+    errorId: string;
+    requestId?: string;
+    detail?: string;
+  };
 };
 
 type ConsumePagesApiResponse =
   | ConsumePagesSuccessResponse
   | ConsumePagesErrorResponse;
 
-type ErrorWithCode = {
+type ParsedJsonBodyResult =
+  | {
+      ok: true;
+      body: Record<string, unknown>;
+    }
+  | {
+      ok: false;
+      code: 'INVALID_JSON' | 'INVALID_REQUEST';
+      message: string;
+    };
+
+type RequestIdResolution =
+  | {
+      ok: true;
+      requestId: string;
+    }
+  | {
+      ok: false;
+      code:
+        | 'REQUEST_ID_REQUIRED'
+        | 'INVALID_REQUEST_ID'
+        | 'REQUEST_ID_MISMATCH';
+      message: string;
+    };
+
+type ErrorMetadata = {
   code?: unknown;
   status?: unknown;
   message?: unknown;
 };
 
 /**
- * Vytvorí JSON odpoveď s jednotnými no-cache hlavičkami.
- */
-function createJsonResponse<T>(
-  body: T,
-  status = 200,
-): NextResponse<T> {
-  return NextResponse.json(body, {
-    status,
-    headers: NO_STORE_HEADERS,
-  });
-}
-
-/**
- * Overí, či je hodnota obyčajný objekt.
+ * Overí, či hodnota predstavuje obyčajný objekt.
  */
 function isRecord(
   value: unknown,
@@ -164,42 +221,52 @@ function isRecord(
 function toTrimmedString(
   value: unknown,
 ): string {
-  if (typeof value !== 'string') {
-    return '';
-  }
-
-  return value.trim();
+  return typeof value === 'string'
+    ? value.trim()
+    : '';
 }
 
 /**
- * Bezpečne prevedie neznámu chybu na text.
+ * Bezpečne prevedie neznámu hodnotu na nezáporné celé číslo.
+ */
+function toNonNegativeIntegerOrNull(
+  value: unknown,
+): number | null {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value)
+  ) {
+    return null;
+  }
+
+  return Math.min(
+    Math.max(Math.trunc(value), 0),
+    Number.MAX_SAFE_INTEGER,
+  );
+}
+
+/**
+ * Bezpečne prevedie neznámu chybu na diagnostickú správu.
  */
 function getErrorMessage(
   error: unknown,
 ): string {
   if (error instanceof Error) {
-    return (
-      error.message.trim() ||
-      'UNKNOWN_ERROR'
-    );
+    return error.message.trim() || 'UNKNOWN_ERROR';
   }
 
   if (typeof error === 'string') {
-    return (
-      error.trim() ||
-      'UNKNOWN_ERROR'
-    );
+    return error.trim() || 'UNKNOWN_ERROR';
   }
 
   if (isRecord(error)) {
-    const message =
-      error.message;
+    const message = error.message;
 
-    if (typeof message === 'string') {
-      return (
-        message.trim() ||
-        'UNKNOWN_ERROR'
-      );
+    if (
+      typeof message === 'string' &&
+      message.trim()
+    ) {
+      return message.trim();
     }
 
     try {
@@ -213,7 +280,7 @@ function getErrorMessage(
 }
 
 /**
- * Bezpečne získa aplikačný kód chyby.
+ * Bezpečne načíta aplikačný kód chyby.
  */
 function getErrorCode(
   error: unknown,
@@ -223,12 +290,33 @@ function getErrorCode(
   }
 
   return toTrimmedString(
-    (error as ErrorWithCode).code,
+    (error as ErrorMetadata).code,
   ).toUpperCase();
 }
 
 /**
- * Overí, či technická správa obsahuje konkrétny aplikačný kód.
+ * Bezpečne načíta HTTP status z neznámej chyby.
+ */
+function getErrorStatus(
+  error: unknown,
+): number | null {
+  if (!isRecord(error)) {
+    return null;
+  }
+
+  const status =
+    (error as ErrorMetadata).status;
+
+  return (
+    typeof status === 'number' &&
+    Number.isFinite(status)
+      ? Math.trunc(status)
+      : null
+  );
+}
+
+/**
+ * Overí, či technická správa začína konkrétnym aplikačným kódom.
  */
 function hasErrorPrefix(
   message: string,
@@ -241,8 +329,7 @@ function hasErrorPrefix(
     prefix.trim().toUpperCase();
 
   return (
-    normalizedMessage ===
-      normalizedPrefix ||
+    normalizedMessage === normalizedPrefix ||
     normalizedMessage.startsWith(
       `${normalizedPrefix}:`,
     )
@@ -256,21 +343,25 @@ function isUnauthenticatedError(
   error: unknown,
   message: string,
 ): boolean {
+  const code = getErrorCode(error);
+  const status = getErrorStatus(error);
+
   return (
-    getErrorCode(error) ===
-      'UNAUTHENTICATED' ||
+    code === 'UNAUTHENTICATED' ||
+    code === 'AUTH_SESSION_MISSING' ||
+    status === 401 ||
     hasErrorPrefix(
       message,
       'UNAUTHENTICATED',
+    ) ||
+    /auth session missing|jwt expired|invalid jwt|invalid token/i.test(
+      message,
     )
   );
 }
 
 /**
  * Overí chybu vyčerpaného stránkového limitu.
- *
- * Kontroluje instanceof aj aplikačný kód pre prípad, že chyba prešla
- * cez inú serverovú vrstvu a stratila pôvodný prototyp.
  */
 function isPageLimitError(
   error: unknown,
@@ -288,43 +379,209 @@ function isPageLimitError(
 }
 
 /**
- * Technické detaily sa klientovi zobrazia iba mimo produkcie.
+ * Overí chybu neplatného výsledku stránkovej kvóty.
  */
-function getDevelopmentDetail(
+function isInvalidQuotaError(
+  error: unknown,
   message: string,
-): Pick<
-  ConsumePagesErrorResponse,
-  'detail'
-> {
-  if (
-    process.env.NODE_ENV ===
-    'production'
-  ) {
-    return {};
-  }
-
-  return {
-    detail: message,
-  };
+): boolean {
+  return (
+    getErrorCode(error) ===
+      'INVALID_PAGE_QUOTA_RESPONSE' ||
+    hasErrorPrefix(
+      message,
+      'INVALID_PAGE_QUOTA_RESPONSE',
+    ) ||
+    hasErrorPrefix(
+      message,
+      'PAGE_QUOTA_ADMIN_STATE_MISMATCH',
+    )
+  );
 }
 
 /**
- * Vráti jednotnú validačnú chybu.
+ * Overí databázovú chybu pri spotrebovaní strán.
  */
-function createValidationError(
-  code: ConsumePagesErrorCode,
+function isQuotaConsumptionError(
+  error: unknown,
   message: string,
-  errorId: string,
-  status = 400,
-): NextResponse<ConsumePagesErrorResponse> {
-  return createJsonResponse(
-    {
-      ok: false,
+): boolean {
+  const code = getErrorCode(error);
+
+  return (
+    code === 'PAGE_QUOTA_CONSUME_FAILED' ||
+    code ===
+      'PAGE_QUOTA_CONSUME_EMPTY_RESPONSE' ||
+    hasErrorPrefix(
+      message,
+      'PAGE_QUOTA_CONSUME_FAILED',
+    ) ||
+    hasErrorPrefix(
+      message,
+      'PAGE_QUOTA_CONSUME_EMPTY_RESPONSE',
+    )
+  );
+}
+
+/**
+ * Technické detaily sa klientovi neposielajú v produkcii.
+ */
+function getDevelopmentDetail(
+  message: string,
+): string | undefined {
+  return process.env.NODE_ENV === 'production'
+    ? undefined
+    : message;
+}
+
+/**
+ * Vyčistí request ID pred vložením do hlavičky.
+ */
+function sanitizeHeaderValue(
+  value: string,
+): string {
+  return value
+    .replace(/[\r\n]/g, '')
+    .slice(0, MAX_REQUEST_ID_LENGTH);
+}
+
+/**
+ * Vytvorí hlavičky zakazujúce cache.
+ */
+function createResponseHeaders(
+  traceId: string,
+): Headers {
+  const headers = new Headers();
+
+  headers.set(
+    'Cache-Control',
+    [
+      'private',
+      'no-store',
+      'no-cache',
+      'max-age=0',
+      'must-revalidate',
+      'proxy-revalidate',
+    ].join(', '),
+  );
+
+  headers.set('Pragma', 'no-cache');
+  headers.set('Expires', '0');
+  headers.set(
+    'Vary',
+    'Cookie, Authorization',
+  );
+  headers.set(
+    'X-Request-Id',
+    sanitizeHeaderValue(traceId),
+  );
+  headers.set(
+    'X-Content-Type-Options',
+    'nosniff',
+  );
+
+  return headers;
+}
+
+/**
+ * Vytvorí JSON odpoveď s jednotnými bezpečnými hlavičkami.
+ */
+function createJsonResponse<T>(
+  body: T,
+  status: number,
+  traceId: string,
+): NextResponse<T> {
+  return NextResponse.json(body, {
+    status,
+    headers: createResponseHeaders(traceId),
+  });
+}
+
+/**
+ * Vytvorí jednotnú chybovú odpoveď.
+ */
+function createErrorResponse({
+  code,
+  message,
+  status,
+  errorId,
+  requestId,
+  retryable,
+  purchaseUrl,
+  pageLimitReached,
+  detail,
+}: {
+  code: ConsumePagesErrorCode;
+  message: string;
+  status: number;
+  errorId: string;
+  requestId?: string;
+  retryable: boolean;
+  purchaseUrl?: string;
+  pageLimitReached?: boolean;
+  detail?: string;
+}): NextResponse<ConsumePagesErrorResponse> {
+  const publicDetail =
+    detail &&
+    process.env.NODE_ENV !== 'production'
+      ? detail
+      : undefined;
+
+  const body: ConsumePagesErrorResponse = {
+    ok: false,
+    success: false,
+
+    code,
+    message,
+
+    errorId,
+    ...(requestId
+      ? {
+          requestId,
+        }
+      : {}),
+
+    retryable,
+
+    ...(purchaseUrl
+      ? {
+          purchaseUrl,
+        }
+      : {}),
+
+    ...(typeof pageLimitReached === 'boolean'
+      ? {
+          pageLimitReached,
+        }
+      : {}),
+
+    ...(publicDetail
+      ? {
+          detail: publicDetail,
+        }
+      : {}),
+
+    error: {
       code,
       message,
       errorId,
+      ...(requestId
+        ? {
+            requestId,
+          }
+        : {}),
+      ...(publicDetail
+        ? {
+            detail: publicDetail,
+          }
+        : {}),
     },
+  };
+
+  return createJsonResponse(
+    body,
     status,
+    requestId || errorId,
   );
 }
 
@@ -333,66 +590,46 @@ function createValidationError(
  */
 async function readJsonBody(
   request: NextRequest,
-): Promise<
-  | {
-      ok: true;
-      body: ConsumePagesRequestBody;
-    }
-  | {
-      ok: false;
-      reason: 'INVALID_JSON';
-    }
-> {
+): Promise<ParsedJsonBodyResult> {
+  let parsed: unknown;
+
   try {
-    const parsed: unknown =
-      await request.json();
-
-    if (!isRecord(parsed)) {
-      return {
-        ok: true,
-        body: {},
-      };
-    }
-
-    return {
-      ok: true,
-      body:
-        parsed as ConsumePagesRequestBody,
-    };
+    parsed = await request.json();
   } catch {
     return {
       ok: false,
-      reason: 'INVALID_JSON',
+      code: 'INVALID_JSON',
+      message:
+        'Telo požiadavky neobsahuje platný JSON.',
     };
   }
+
+  if (!isRecord(parsed)) {
+    return {
+      ok: false,
+      code: 'INVALID_REQUEST',
+      message:
+        'Telo požiadavky musí byť JSON objekt.',
+    };
+  }
+
+  return {
+    ok: true,
+    body: parsed,
+  };
 }
 
 /**
- * Získa requestId z tela požiadavky alebo z hlavičky Idempotency-Key.
+ * Overí requestId a hlavičku Idempotency-Key.
  *
- * Uprednostňuje sa requestId v tele. Ak sú prítomné obe hodnoty,
- * musia byť rovnaké.
+ * Hodnota z tela a hodnota hlavičky musia byť pri súčasnom použití rovnaké.
  */
 function resolveRequestId(
   request: NextRequest,
   bodyRequestId: unknown,
-):
-  | {
-      ok: true;
-      requestId: string;
-    }
-  | {
-      ok: false;
-      code:
-        | 'REQUEST_ID_REQUIRED'
-        | 'INVALID_REQUEST_ID'
-        | 'REQUEST_ID_MISMATCH';
-      message: string;
-    } {
+): RequestIdResolution {
   const requestIdFromBody =
-    toTrimmedString(
-      bodyRequestId,
-    );
+    toTrimmedString(bodyRequestId);
 
   const requestIdFromHeader =
     toTrimmedString(
@@ -409,8 +646,7 @@ function resolveRequestId(
   ) {
     return {
       ok: false,
-      code:
-        'REQUEST_ID_MISMATCH',
+      code: 'REQUEST_ID_MISMATCH',
       message:
         'Hodnota requestId sa nezhoduje s hlavičkou Idempotency-Key.',
     };
@@ -423,8 +659,7 @@ function resolveRequestId(
   if (!requestId) {
     return {
       ok: false,
-      code:
-        'REQUEST_ID_REQUIRED',
+      code: 'REQUEST_ID_REQUIRED',
       message:
         'Pole requestId alebo hlavička Idempotency-Key je povinná.',
     };
@@ -436,10 +671,18 @@ function resolveRequestId(
   ) {
     return {
       ok: false,
-      code:
-        'INVALID_REQUEST_ID',
+      code: 'INVALID_REQUEST_ID',
       message:
         `requestId môže obsahovať najviac ${MAX_REQUEST_ID_LENGTH} znakov.`,
+    };
+  }
+
+  if (/[\u0000-\u001F\u007F]/.test(requestId)) {
+    return {
+      ok: false,
+      code: 'INVALID_REQUEST_ID',
+      message:
+        'requestId obsahuje nepovolené riadiace znaky.',
     };
   }
 
@@ -450,15 +693,177 @@ function resolveRequestId(
 }
 
 /**
+ * Určí, či serverová kvóta predstavuje neobmedzený účet.
+ */
+function isUnlimitedQuota(
+  quota: PageQuota,
+): boolean {
+  return (
+    quota.isAdmin === true ||
+    quota.isUnlimited === true ||
+    quota.hasUnlimitedAccess === true ||
+    quota.planId === 'admin'
+  );
+}
+
+/**
+ * Prevedie autoritatívnu kvótu z lib/page-quota.ts na bezpečnú
+ * verejnú JSON štruktúru.
+ *
+ * ADMIN vždy dostane null limity. Route nevytvára administrátorské
+ * oprávnenie; iba kanonizuje už potvrdený neobmedzený stav.
+ */
+function normalizeQuotaForResponse(
+  quota: PageQuota,
+): PublicPageQuota {
+  if (isUnlimitedQuota(quota)) {
+    return {
+      planId: 'admin',
+
+      isAdmin: true,
+      isUnlimited: true,
+      hasUnlimitedAccess: true,
+
+      basePageLimit: null,
+      extraPageLimit: 0,
+      pageLimit: null,
+
+      pagesUsed: 0,
+      pagesRemaining: null,
+      pageLimitReached: false,
+    };
+  }
+
+  const basePageLimit =
+    toNonNegativeIntegerOrNull(
+      quota.basePageLimit,
+    );
+
+  const extraPageLimit =
+    toNonNegativeIntegerOrNull(
+      quota.extraPageLimit,
+    );
+
+  const pageLimit =
+    toNonNegativeIntegerOrNull(
+      quota.pageLimit,
+    );
+
+  const pagesUsed =
+    toNonNegativeIntegerOrNull(
+      quota.pagesUsed,
+    );
+
+  const pagesRemaining =
+    toNonNegativeIntegerOrNull(
+      quota.pagesRemaining,
+    );
+
+  if (
+    !quota.planId ||
+    basePageLimit === null ||
+    extraPageLimit === null ||
+    pageLimit === null ||
+    pagesUsed === null ||
+    pagesRemaining === null
+  ) {
+    throw new Error(
+      'INVALID_PAGE_QUOTA_RESPONSE: Server vrátil neúplnú alebo neplatnú stránkovú kvótu.',
+    );
+  }
+
+  const calculatedRemaining = Math.max(
+    pageLimit - pagesUsed,
+    0,
+  );
+
+  const safeRemaining = Math.min(
+    pagesRemaining,
+    calculatedRemaining,
+  );
+
+  return {
+    planId: String(quota.planId),
+
+    isAdmin: false,
+    isUnlimited: false,
+    hasUnlimitedAccess: false,
+
+    basePageLimit,
+    extraPageLimit,
+    pageLimit,
+
+    pagesUsed,
+    pagesRemaining: safeRemaining,
+
+    pageLimitReached:
+      quota.pageLimitReached === true ||
+      pageLimit <= 0 ||
+      pagesUsed >= pageLimit ||
+      safeRemaining <= 0,
+  };
+}
+
+/**
+ * Zapíše chybu do serverového logu bez vystavenia technických údajov klientovi.
+ */
+function logConsumeError({
+  level,
+  code,
+  error,
+  errorId,
+  requestId,
+  moduleName,
+  calculatedPages,
+}: {
+  level: 'warn' | 'error';
+  code: ConsumePagesErrorCode;
+  error: unknown;
+  errorId: string;
+  requestId?: string;
+  moduleName?: string;
+  calculatedPages?: number;
+}): void {
+  const payload = {
+    code,
+    errorId,
+    requestId,
+    moduleName,
+    calculatedPages,
+    message: getErrorMessage(error),
+    stack:
+      process.env.NODE_ENV === 'development' &&
+      error instanceof Error
+        ? error.stack
+        : undefined,
+  };
+
+  if (level === 'warn') {
+    console.warn(
+      '[POST /api/usage/pages/consume]',
+      payload,
+    );
+
+    return;
+  }
+
+  console.error(
+    '[POST /api/usage/pages/consume]',
+    payload,
+  );
+}
+
+/**
  * POST /api/usage/pages/consume
  *
- * Odpočíta strany podľa skutočnej dĺžky vygenerovaného výstupu.
+ * Odpočíta stránky podľa skutočnej dĺžky úspešne vygenerovaného výstupu.
  *
- * Administrátorský alebo iný neobmedzený účet:
- * - text sa vyhodnotí a vypočíta sa calculatedPages,
- * - databázová spotreba sa preskočí v lib/page-quota.ts,
- * - consumedPages je 0,
- * - usageBypassed je true.
+ * Dôležité:
+ * - endpoint musí byť volaný až po úspešnom vytvorení finálneho textu,
+ * - requestId musí byť jedinečný pre jednu AI operáciu,
+ * - databázová RPC funkcia zabezpečuje atómovosť a idempotentnosť,
+ * - ADMIN nikdy nevstúpi do databázového odpočítania,
+ * - FREE a platené účty sa kontrolujú výhradne na serveri.
  *
  * Očakávané telo:
  *
@@ -468,7 +873,7 @@ function resolveRequestId(
  *   "requestId": "jedinečný-identifikátor"
  * }
  *
- * requestId možno poslať aj cez hlavičku:
+ * requestId možno poslať aj cez:
  *
  * Idempotency-Key: jedinečný-identifikátor
  */
@@ -479,9 +884,6 @@ export async function POST(
 > {
   const errorId = randomUUID();
 
-  /**
-   * Endpoint prijíma iba JSON požiadavky.
-   */
   const contentType =
     request.headers.get(
       'content-type',
@@ -490,116 +892,126 @@ export async function POST(
   if (
     !contentType
       .toLowerCase()
-      .includes(
-        'application/json',
-      )
+      .includes('application/json')
   ) {
-    return createValidationError(
-      'INVALID_CONTENT_TYPE',
-      'Požiadavka musí používať Content-Type application/json.',
+    return createErrorResponse({
+      code: 'INVALID_CONTENT_TYPE',
+      message:
+        'Požiadavka musí používať Content-Type application/json.',
+      status: 415,
       errorId,
-      415,
-    );
+      retryable: false,
+    });
   }
 
   const parsedBody =
     await readJsonBody(request);
 
   if (!parsedBody.ok) {
-    return createValidationError(
-      'INVALID_JSON',
-      'Telo požiadavky neobsahuje platný JSON.',
+    return createErrorResponse({
+      code: parsedBody.code,
+      message: parsedBody.message,
+      status: 400,
       errorId,
-    );
+      retryable: false,
+    });
   }
 
   const { body } = parsedBody;
 
-  if (!isRecord(body)) {
-    return createValidationError(
-      'INVALID_REQUEST',
-      'Telo požiadavky musí byť JSON objekt.',
+  if (typeof body.text !== 'string') {
+    return createErrorResponse({
+      code: 'TEXT_REQUIRED',
+      message:
+        'Pole text je povinné a musí obsahovať textovú hodnotu.',
+      status: 400,
       errorId,
-    );
+      retryable: false,
+    });
   }
 
-  /**
-   * Validácia textu.
-   */
-  if (
-    typeof body.text !==
-    'string'
-  ) {
-    return createValidationError(
-      'TEXT_REQUIRED',
-      'Pole text je povinné a musí obsahovať textovú hodnotu.',
-      errorId,
-    );
-  }
+  const outputText = body.text;
 
-  const text = body.text;
-
-  if (!text.trim()) {
-    return createValidationError(
-      'TEXT_REQUIRED',
-      'Nie je možné odpočítať strany za prázdny text.',
+  if (!outputText.trim()) {
+    return createErrorResponse({
+      code: 'TEXT_REQUIRED',
+      message:
+        'Nie je možné odpočítať stránky za prázdny text.',
+      status: 400,
       errorId,
-    );
+      retryable: false,
+    });
   }
 
   if (
-    text.length >
+    outputText.length >
     MAX_TEXT_LENGTH
   ) {
-    return createValidationError(
-      'TEXT_TOO_LARGE',
-      `Text môže obsahovať najviac ${MAX_TEXT_LENGTH.toLocaleString(
-        'sk-SK',
-      )} znakov.`,
+    return createErrorResponse({
+      code: 'TEXT_TOO_LARGE',
+      message:
+        `Text môže obsahovať najviac ${MAX_TEXT_LENGTH.toLocaleString(
+          'sk-SK',
+        )} znakov.`,
+      status: 413,
       errorId,
-      413,
-    );
+      retryable: false,
+    });
   }
 
-  /**
-   * Validácia modulu.
+  if (typeof body.module !== 'string') {
+    return createErrorResponse({
+      code: 'MODULE_REQUIRED',
+      message:
+        'Pole module je povinné a musí obsahovať názov modulu.',
+      status: 400,
+      errorId,
+      retryable: false,
+    });
+  }
+
+  /*
+   * Názov module nepoužívame ako názov lokálnej premennej.
+   * Next.js ESLint zakazuje priraďovanie do premennej `module`.
    */
-  if (
-    typeof body.module !==
-    'string'
-  ) {
-    return createValidationError(
-      'MODULE_REQUIRED',
-      'Pole module je povinné a musí obsahovať názov modulu.',
-      errorId,
-    );
-  }
+  const moduleName = body.module.trim();
 
-  const module =
-    body.module.trim();
-
-  if (!module) {
-    return createValidationError(
-      'MODULE_REQUIRED',
-      'Názov modulu nesmie byť prázdny.',
+  if (!moduleName) {
+    return createErrorResponse({
+      code: 'MODULE_REQUIRED',
+      message:
+        'Názov modulu nesmie byť prázdny.',
+      status: 400,
       errorId,
-    );
+      retryable: false,
+    });
   }
 
   if (
-    module.length >
+    moduleName.length >
     MAX_MODULE_LENGTH
   ) {
-    return createValidationError(
-      'INVALID_MODULE',
-      `Názov modulu môže obsahovať najviac ${MAX_MODULE_LENGTH} znakov.`,
+    return createErrorResponse({
+      code: 'INVALID_MODULE',
+      message:
+        `Názov modulu môže obsahovať najviac ${MAX_MODULE_LENGTH} znakov.`,
+      status: 400,
       errorId,
-    );
+      retryable: false,
+    });
   }
 
-  /**
-   * Validácia requestId a hlavičky Idempotency-Key.
-   */
+  if (/[\u0000-\u001F\u007F]/.test(moduleName)) {
+    return createErrorResponse({
+      code: 'INVALID_MODULE',
+      message:
+        'Názov modulu obsahuje nepovolené riadiace znaky.',
+      status: 400,
+      errorId,
+      retryable: false,
+    });
+  }
+
   const requestIdResult =
     resolveRequestId(
       request,
@@ -607,95 +1019,107 @@ export async function POST(
     );
 
   if (!requestIdResult.ok) {
-    return createValidationError(
-      requestIdResult.code,
-      requestIdResult.message,
+    return createErrorResponse({
+      code: requestIdResult.code,
+      message: requestIdResult.message,
+      status: 400,
       errorId,
-    );
+      retryable: false,
+    });
   }
 
   const { requestId } =
     requestIdResult;
 
   const calculatedPages =
-    countGeneratedPages(text);
+    countGeneratedPages(outputText);
 
   try {
-    const quota =
+    const rawQuota =
       await consumePagesForOutput({
-        text,
-        module,
+        text: outputText,
+        module: moduleName,
         requestId,
       });
 
-    /**
-     * Administrátorovi ani inému neobmedzenému účtu sa stránky
-     * neodpočítavajú. Výpočet calculatedPages zostáva vo výstupe
-     * iba ako informatívny údaj pre diagnostiku a frontend.
-     */
-    const usageBypassed =
+    const quota =
+      normalizeQuotaForResponse(
+        rawQuota,
+      );
+
+    const bypassed =
       quota.isAdmin ||
-      quota.isUnlimited;
+      quota.isUnlimited ||
+      quota.hasUnlimitedAccess;
 
     const consumedPages =
-      usageBypassed
+      bypassed
         ? 0
         : calculatedPages;
 
-    return createJsonResponse<ConsumePagesSuccessResponse>(
-      {
-        ok: true,
-        requestId,
-        calculatedPages,
-        consumedPages,
-        usageBypassed,
+    const response: ConsumePagesSuccessResponse = {
+      ok: true,
+      success: true,
+
+      requestId,
+      calculatedPages,
+      consumedPages,
+
+      bypassed,
+      usageBypassed: bypassed,
+
+      ...quota,
+      quota: {
         ...quota,
       },
+
+      meta: {
+        generatedAt:
+          new Date().toISOString(),
+        cache: 'no-store',
+      },
+    };
+
+    return createJsonResponse(
+      response,
       200,
+      requestId,
     );
   } catch (error: unknown) {
     const technicalMessage =
       getErrorMessage(error);
 
-    /**
-     * Používateľ nie je prihlásený alebo jeho relácia vypršala.
-     */
     if (
       isUnauthenticatedError(
         error,
         technicalMessage,
       )
     ) {
-      console.warn(
-        '[POST /api/usage/pages/consume] Unauthenticated request.',
-        {
-          errorId,
-          requestId,
-          module,
-          message:
-            technicalMessage,
-        },
-      );
+      logConsumeError({
+        level: 'warn',
+        code: 'UNAUTHENTICATED',
+        error,
+        errorId,
+        requestId,
+        moduleName,
+        calculatedPages,
+      });
 
-      return createJsonResponse<ConsumePagesErrorResponse>(
-        {
-          ok: false,
-          code:
-            'UNAUTHENTICATED',
-          message:
-            'Používateľ nie je prihlásený alebo jeho relácia vypršala.',
-          errorId,
-          ...getDevelopmentDetail(
+      return createErrorResponse({
+        code: 'UNAUTHENTICATED',
+        message:
+          'Používateľ nie je prihlásený alebo jeho relácia vypršala.',
+        status: 401,
+        errorId,
+        requestId,
+        retryable: false,
+        detail:
+          getDevelopmentDetail(
             technicalMessage,
           ),
-        },
-        401,
-      );
+      });
     }
 
-    /**
-     * Používateľ nemá dostatok strán.
-     */
     if (
       isPageLimitError(
         error,
@@ -703,151 +1127,158 @@ export async function POST(
       )
     ) {
       const message =
-        error instanceof
-        PageLimitError
+        error instanceof PageLimitError
           ? error.message
           : 'Stránkový limit bol vyčerpaný. Pre pokračovanie si dokúpte ďalšie strany alebo aktivujte vyšší balík.';
 
-      console.warn(
-        '[POST /api/usage/pages/consume] Page limit reached.',
-        {
-          errorId,
-          requestId,
-          module,
-          requestedPages:
-            calculatedPages,
-          message:
-            technicalMessage,
-        },
-      );
+      logConsumeError({
+        level: 'warn',
+        code: 'PAGE_LIMIT_REACHED',
+        error,
+        errorId,
+        requestId,
+        moduleName,
+        calculatedPages,
+      });
 
-      return createJsonResponse<ConsumePagesErrorResponse>(
-        {
-          ok: false,
-          code:
-            'PAGE_LIMIT_REACHED',
-          message,
-          errorId,
-          ...getDevelopmentDetail(
+      return createErrorResponse({
+        code: 'PAGE_LIMIT_REACHED',
+        message,
+        status: 402,
+        errorId,
+        requestId,
+        retryable: false,
+        purchaseUrl:
+          PAGE_ADDON_PURCHASE_URL,
+        pageLimitReached: true,
+        detail:
+          getDevelopmentDetail(
             technicalMessage,
           ),
-        },
-        402,
-      );
+      });
     }
 
-    /**
-     * Neplatný requestId zachytený v knižnici.
-     *
-     * Bežne by k tejto chybe nemalo dôjsť, pretože requestId
-     * sa kontroluje ešte pred volaním consumePagesForOutput.
-     */
     if (
       hasErrorPrefix(
         technicalMessage,
         'INVALID_REQUEST_ID',
       )
     ) {
-      console.warn(
-        '[POST /api/usage/pages/consume] Invalid request ID.',
-        {
-          errorId,
-          requestId,
-          module,
-          message:
-            technicalMessage,
-        },
-      );
-
-      return createJsonResponse<ConsumePagesErrorResponse>(
-        {
-          ok: false,
-          code:
-            'INVALID_REQUEST_ID',
-          message:
-            'Identifikátor požiadavky nie je platný.',
-          errorId,
-          ...getDevelopmentDetail(
-            technicalMessage,
-          ),
-        },
-        400,
-      );
-    }
-
-    /**
-     * Databázová chyba pri odpočítaní strán.
-     */
-    if (
-      hasErrorPrefix(
-        technicalMessage,
-        'PAGE_QUOTA_CONSUME_FAILED',
-      ) ||
-      hasErrorPrefix(
-        technicalMessage,
-        'PAGE_QUOTA_CONSUME_EMPTY_RESPONSE',
-      )
-    ) {
-      console.error(
-        '[POST /api/usage/pages/consume] Page quota consumption failed.',
-        {
-          errorId,
-          requestId,
-          module,
-          requestedPages:
-            calculatedPages,
-          message:
-            technicalMessage,
-          error,
-        },
-      );
-
-      return createJsonResponse<ConsumePagesErrorResponse>(
-        {
-          ok: false,
-          code:
-            'PAGE_QUOTA_CONSUME_FAILED',
-          message:
-            'Spotrebu strán sa nepodarilo zaznamenať. Skúste požiadavku zopakovať.',
-          errorId,
-          ...getDevelopmentDetail(
-            technicalMessage,
-          ),
-        },
-        500,
-      );
-    }
-
-    /**
-     * Neočakávaná serverová chyba.
-     */
-    console.error(
-      '[POST /api/usage/pages/consume] Unexpected server error.',
-      {
+      logConsumeError({
+        level: 'warn',
+        code: 'INVALID_REQUEST_ID',
+        error,
         errorId,
         requestId,
-        module,
-        requestedPages:
-          calculatedPages,
-        message:
-          technicalMessage,
-        error,
-      },
-    );
+        moduleName,
+        calculatedPages,
+      });
 
-    return createJsonResponse<ConsumePagesErrorResponse>(
-      {
-        ok: false,
-        code:
-          'INTERNAL_SERVER_ERROR',
+      return createErrorResponse({
+        code: 'INVALID_REQUEST_ID',
         message:
-          'Pri zaznamenávaní spotreby strán nastala neočakávaná chyba.',
+          'Identifikátor požiadavky nie je platný.',
+        status: 400,
         errorId,
-        ...getDevelopmentDetail(
+        requestId,
+        retryable: false,
+        detail:
+          getDevelopmentDetail(
+            technicalMessage,
+          ),
+      });
+    }
+
+    if (
+      isInvalidQuotaError(
+        error,
+        technicalMessage,
+      )
+    ) {
+      logConsumeError({
+        level: 'error',
+        code:
+          'INVALID_PAGE_QUOTA_RESPONSE',
+        error,
+        errorId,
+        requestId,
+        moduleName,
+        calculatedPages,
+      });
+
+      return createErrorResponse({
+        code:
+          'INVALID_PAGE_QUOTA_RESPONSE',
+        message:
+          'Server vrátil neplatný stav stránkovej kvóty.',
+        status: 500,
+        errorId,
+        requestId,
+        retryable: true,
+        detail:
+          getDevelopmentDetail(
+            technicalMessage,
+          ),
+      });
+    }
+
+    if (
+      isQuotaConsumptionError(
+        error,
+        technicalMessage,
+      )
+    ) {
+      logConsumeError({
+        level: 'error',
+        code:
+          'PAGE_QUOTA_CONSUME_FAILED',
+        error,
+        errorId,
+        requestId,
+        moduleName,
+        calculatedPages,
+      });
+
+      return createErrorResponse({
+        code:
+          'PAGE_QUOTA_CONSUME_FAILED',
+        message:
+          'Spotrebu strán sa nepodarilo zaznamenať. Skúste požiadavku zopakovať.',
+        status: 500,
+        errorId,
+        requestId,
+        retryable: true,
+        detail:
+          getDevelopmentDetail(
+            technicalMessage,
+          ),
+      });
+    }
+
+    logConsumeError({
+      level: 'error',
+      code:
+        'INTERNAL_SERVER_ERROR',
+      error,
+      errorId,
+      requestId,
+      moduleName,
+      calculatedPages,
+    });
+
+    return createErrorResponse({
+      code:
+        'INTERNAL_SERVER_ERROR',
+      message:
+        'Pri zaznamenávaní spotreby strán nastala neočakávaná chyba.',
+      status: 500,
+      errorId,
+      requestId,
+      retryable: true,
+      detail:
+        getDevelopmentDetail(
           technicalMessage,
         ),
-      },
-      500,
-    );
+    });
   }
 }

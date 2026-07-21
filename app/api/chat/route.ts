@@ -6,7 +6,6 @@ import { google } from '@ai-sdk/google';
 import { mistral } from '@ai-sdk/mistral';
 import { xai } from '@ai-sdk/xai';
 import { NextResponse } from 'next/server';
-import mammoth from 'mammoth';
 import { gunzipSync } from 'zlib';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
@@ -72,6 +71,24 @@ type ChatMessage = {
 type UploadedFile = Blob & {
   name: string;
   lastModified?: number;
+};
+
+type NativeAttachmentPart =
+  | {
+      type: 'image';
+      image: Uint8Array;
+      mediaType: string;
+    }
+  | {
+      type: 'file';
+      data: Uint8Array;
+      mediaType: string;
+      filename?: string;
+    };
+
+type NativeAttachmentBundle = {
+  parts: NativeAttachmentPart[];
+  fileNames: string[];
 };
 type SavedProfile = {
   id?: string;
@@ -209,6 +226,14 @@ type PreparedFileMetadata = {
   text?: string;
   content?: string;
   rawText?: string;
+
+  // Voliteľný binárny fallback. Používa sa iba vtedy, ak frontend odošle
+  // skutočný obsah súboru ako base64/data URL namiesto multipart File objektu.
+  base64?: string;
+  fileBase64?: string;
+  bytesBase64?: string;
+  dataUrl?: string;
+  mimeType?: string;
 };
 
 type ExtractedAttachment = {
@@ -280,11 +305,13 @@ type SlovakApiError = {
 
 const maxCompressedFileSizeBytes = 30 * 1024 * 1024;
 const maxDecompressedFileSizeBytes = 60 * 1024 * 1024;
-const maxExtractedCharsPerAttachment = 18_000;
-const maxClientExtractedChars = 45_000;
-const maxProjectDocumentChars = 18_000;
-const maxAttachmentContextChars = 80_000;
-const maxSystemPromptChars = 110_000;
+const maxExtractedCharsPerAttachment = 40_000;
+const maxClientExtractedChars = 60_000;
+const maxProjectDocumentChars = 24_000;
+const maxAttachmentContextChars = 96_000;
+const maxPriorityAttachmentContextChars = 84_000;
+const maxSystemPromptChars = 150_000;
+const MAX_ATTACHMENTS_TO_PROCESS = 24;
 const maxSingleMessageChars = 10_000;
 const maxTotalMessagesChars = 30_000;
 const maxDetectedSourcesPerAttachment = 300;
@@ -402,6 +429,36 @@ function normalizeText(value: string): string {
     .trim();
 }
 
+
+const REQUIRED_VERIFICATION_NOTICE = 'Údaje sú potrebné overiť.';
+
+/**
+ * Zjednotí nesprávne alebo staršie formulácie upozornenia na overenie údajov.
+ * Klient nikdy nemá dostať vetu „údaje nie sú potrebné overiť“ ani nejednotné
+ * tvary „údaj je potrebné overiť“ alebo „údaje je potrebné overiť“.
+ */
+function normalizeVerificationNotices(value: string): string {
+  return String(value || '')
+    .replace(
+      /\búdaj(?:e)?\s+nie\s+sú\s+potrebné\s+overiť\.?/gi,
+      REQUIRED_VERIFICATION_NOTICE,
+    )
+    .replace(
+      /\búdaj(?:e)?\s+(?:je|sú)\s+potrebné\s+overiť\.?/gi,
+      REQUIRED_VERIFICATION_NOTICE,
+    )
+    .replace(
+      /\búdaj(?:e)?\s+treba\s+overiť\.?/gi,
+      REQUIRED_VERIFICATION_NOTICE,
+    )
+    .replace(
+      /\bautor(?:i)?\s+(?:je|sú)\s+potrebné\s+overiť\.?/gi,
+      REQUIRED_VERIFICATION_NOTICE,
+    )
+    .replace(/(?:Údaje sú potrebné overiť\.\s*){2,}/g, REQUIRED_VERIFICATION_NOTICE)
+    .trim();
+}
+
 function cleanClientVisibleOutput(text: string, module: ModuleKey): string {
   let output = normalizeText(text || '');
 
@@ -454,7 +511,7 @@ function cleanClientVisibleOutput(text: string, module: ModuleKey): string {
       .trim();
   }
 
-  return output;
+  return normalizeVerificationNotices(output);
 }
 
 
@@ -688,6 +745,147 @@ function collectUploadedFiles(formData: FormData): UploadedFile[] {
 
     if (!uniqueFiles.has(key)) {
       uniqueFiles.set(key, value);
+    }
+  }
+
+  return Array.from(uniqueFiles.values());
+}
+
+function normalizeBase64Payload(value: unknown): {
+  base64: string;
+  mimeType: string;
+} | null {
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const dataUrlMatch = trimmed.match(
+    /^data:([^;,]+)?(?:;charset=[^;,]+)?;base64,([A-Za-z0-9+/=\s]+)$/i,
+  );
+
+  if (dataUrlMatch) {
+    return {
+      mimeType: dataUrlMatch[1] || 'application/octet-stream',
+      base64: dataUrlMatch[2].replace(/\s+/g, ''),
+    };
+  }
+
+  const compact = trimmed.replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) return null;
+
+  return {
+    mimeType: 'application/octet-stream',
+    base64: compact,
+  };
+}
+
+function createUploadedFileFromBase64({
+  payload,
+  fileName,
+  mimeType,
+}: {
+  payload: unknown;
+  fileName: string;
+  mimeType?: string;
+}): UploadedFile | null {
+  const normalized = normalizeBase64Payload(payload);
+  if (!normalized) return null;
+
+  try {
+    const buffer = Buffer.from(normalized.base64, 'base64');
+
+    if (
+      buffer.length <= 0 ||
+      buffer.length > maxCompressedFileSizeBytes
+    ) {
+      return null;
+    }
+
+    const blob = new Blob([buffer], {
+      type:
+        mimeType ||
+        normalized.mimeType ||
+        'application/octet-stream',
+    });
+
+    return Object.assign(blob, {
+      name: fileName || 'priloha.bin',
+      lastModified: Date.now(),
+    }) as UploadedFile;
+  } catch {
+    return null;
+  }
+}
+
+function collectBase64UploadedFiles(
+  value: unknown,
+  depth = 0,
+): UploadedFile[] {
+  if (depth > 5 || value === null || value === undefined) return [];
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) =>
+      collectBase64UploadedFiles(item, depth + 1),
+    );
+  }
+
+  if (typeof value !== 'object') return [];
+
+  const item = value as Record<string, unknown>;
+  const fileName =
+    toCleanString(item.originalName) ||
+    toCleanString(item.preparedName) ||
+    toCleanString(item.fileName) ||
+    toCleanString(item.name) ||
+    'priloha.bin';
+
+  const mimeType =
+    toCleanString(item.mimeType) ||
+    toCleanString(item.originalType) ||
+    toCleanString(item.preparedType) ||
+    toCleanString(item.type) ||
+    'application/octet-stream';
+
+  const directFile = createUploadedFileFromBase64({
+    payload:
+      item.dataUrl ??
+      item.fileBase64 ??
+      item.bytesBase64 ??
+      item.base64,
+    fileName,
+    mimeType,
+  });
+
+  const nested = [
+    item.attachments,
+    item.files,
+    item.preparedFilesMetadata,
+    item.filesMetadata,
+  ].flatMap((nestedValue) =>
+    collectBase64UploadedFiles(nestedValue, depth + 1),
+  );
+
+  return directFile ? [directFile, ...nested] : nested;
+}
+
+function mergeUploadedFiles(
+  ...groups: UploadedFile[][]
+): UploadedFile[] {
+  const uniqueFiles = new Map<string, UploadedFile>();
+
+  for (const file of groups.flat()) {
+    if (!isUploadedFile(file) || file.size <= 0) continue;
+
+    const key = [
+      file.name,
+      file.size,
+      file.type,
+      file.lastModified || 0,
+    ].join('|');
+
+    if (!uniqueFiles.has(key)) {
+      uniqueFiles.set(key, file);
     }
   }
 
@@ -1111,7 +1309,7 @@ function isSourceCompleteEnoughForSecondary(source: BibliographicCandidate) {
   const title = normalizeText(source.title || '').trim();
   const year = normalizeText(source.year || '').trim();
   if (!authors.length || !year || !title) return false;
-  if (/údaj je potrebné overiť|neuvedené|pôvodný záznam|autori:|citácie v texte|doi:|url:/i.test(title)) return false;
+  if (/údaj(?:e)? (?:je|sú) potrebné overiť|neuvedené|pôvodný záznam|autori:|citácie v texte|doi:|url:/i.test(title)) return false;
   if (/biotechnologica/i.test(authors.join(' ')) && authors.length === 1) return false;
   if (looksLikeRawOcrPage(source.raw || '')) return false;
   if (looksLikeIncompleteInitialCitation(source.raw || '')) return false;
@@ -1408,7 +1606,7 @@ function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
         ? `\nCitácie v texte: ${item.inTextCitations.map((citation) => citation.raw).join('; ')}\nPočet výskytov v texte: ${item.occurrenceCount || item.inTextCitations.length}`
         : '';
 
-      return `${index + 1}. Pôvodný záznam:\n${item.raw || 'neuvedené'}\n\nAutori: ${cleanValidAuthors(item.authors || []).join(', ') || 'neuvedené alebo potrebné overiť'}\nRok: ${item.year || 'údaj je potrebné overiť'}\nNázov publikácie / zdroja: ${item.title || 'údaj je potrebné overiť'}\nČasopis / zdroj: ${item.journal || 'neuvedené'}\nTyp zdroja: ${item.sourceType}\nDOI: ${item.doi || 'neuvedené'}\nURL: ${item.url || 'neuvedené'}${citationInfo}`;
+      return `${index + 1}. Pôvodný záznam:\n${item.raw || 'neuvedené'}\n\nAutori: ${cleanValidAuthors(item.authors || []).join(', ') || 'Údaje sú potrebné overiť.'}\nRok: ${item.year || REQUIRED_VERIFICATION_NOTICE}\nNázov publikácie / zdroja: ${item.title || REQUIRED_VERIFICATION_NOTICE}\nČasopis / zdroj: ${item.journal || 'neuvedené'}\nTyp zdroja: ${item.sourceType}\nDOI: ${item.doi || 'neuvedené'}\nURL: ${item.url || 'neuvedené'}${citationInfo}`;
     })
     .join('\n\n');
 }
@@ -1601,7 +1799,7 @@ const authors = cleanValidAuthors(source.authors || []);
     raw.length >= 20 &&
     raw.length <= 900 &&
     looksLikeCompleteApaBibliography(raw) &&
-    !raw.toLowerCase().includes('údaj je potrebné overiť') &&
+    !raw.toLowerCase().includes(REQUIRED_VERIFICATION_NOTICE.toLowerCase()) &&
     !raw.toLowerCase().includes('neuvedené') &&
     !raw.toLowerCase().includes('autor je potrebné overiť') &&
     !raw.toLowerCase().includes('rok chýba');
@@ -1620,7 +1818,7 @@ function removeIncompleteSourceLines(text: string) {
       if (containsForbiddenInternalSource(current)) return false;
 
       if (/^\d+\.\s*[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]\.?\s*\((18|19|20)\d{2}/i.test(current)) return false;
-      if (/údaj je potrebné overiť|Autor je potrebné overiť|Rok chýba|Neúplná citácia/i.test(current)) return false;
+      if (/údaj(?:e)? (?:je|sú) potrebné overiť|Autor(?:i)? (?:je|sú) potrebné overiť|Rok chýba|Neúplná citácia/i.test(current)) return false;
 
       return true;
     })
@@ -2627,7 +2825,7 @@ async function buildVerifiedSourcePack({
 
   const sources = Array.from(merged.values())
     .filter((source) => source.citationText && source.bibliographyText)
-    .filter((source) => !source.bibliographyText.toLowerCase().includes('údaj je potrebné overiť'))
+    .filter((source) => !source.bibliographyText.toLowerCase().includes(REQUIRED_VERIFICATION_NOTICE.toLowerCase()))
     .filter((source) => !looksLikeIncompleteInitialCitation(source.bibliographyText))
     .slice(0, maxExternalVerifiedSources);
 
@@ -2731,52 +2929,503 @@ async function getUsableFileBuffer(file: UploadedFile) {
 }
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  const importedModule: any = await import('pdf-parse');
+  type PdfTextResult = {
+    text?: unknown;
+  };
 
-  const moduleCandidates = [
+  type PdfParserInstance = {
+    getText: () => Promise<PdfTextResult | string>;
+    destroy?: () => Promise<void> | void;
+  };
+
+  type PdfParserConstructor = {
+    new (options: Record<string, unknown>): PdfParserInstance;
+    setWorker?: (workerSource: string) => void;
+  };
+
+  type LegacyPdfParser = (
+    input: Buffer,
+  ) => Promise<PdfTextResult | string>;
+
+  let workerModule: Record<string, unknown> = {};
+
+  try {
+    workerModule = (await import(
+      'pdf-parse/worker'
+    )) as Record<string, unknown>;
+  } catch (workerImportError) {
+    console.warn('PDF_PARSE_WORKER_IMPORT_WARNING:', {
+      message:
+        workerImportError instanceof Error
+          ? workerImportError.message
+          : String(workerImportError),
+    });
+  }
+
+  const importedModule = (await import(
+    'pdf-parse'
+  )) as Record<string, unknown>;
+
+  const defaultExport = importedModule.default;
+  const nestedDefault =
+    defaultExport && typeof defaultExport === 'object'
+      ? (defaultExport as Record<string, unknown>).default
+      : undefined;
+
+  const moduleCandidates: unknown[] = [
     importedModule,
-    importedModule?.default,
-    importedModule?.default?.default,
+    defaultExport,
+    nestedDefault,
   ].filter(Boolean);
 
-  // pdf-parse v2: class PDFParse môže byť named export alebo vnorená v default exporte.
   for (const candidate of moduleCandidates) {
-    const PDFParseConstructor = candidate?.PDFParse;
+    if (!candidate || typeof candidate !== 'object') continue;
 
-    if (typeof PDFParseConstructor !== 'function') continue;
+    const candidateRecord = candidate as Record<string, unknown>;
+    const constructorCandidate =
+      candidateRecord.PDFParse;
 
-    const parser = new PDFParseConstructor({
+    if (typeof constructorCandidate !== 'function') continue;
+
+    const PDFParseConstructor =
+      constructorCandidate as PdfParserConstructor;
+
+    const getWorkerData = workerModule.getData;
+    const getWorkerPath = workerModule.getPath;
+
+    if (typeof PDFParseConstructor.setWorker === 'function') {
+      try {
+        if (typeof getWorkerData === 'function') {
+          const workerData = String(
+            (getWorkerData as () => unknown)() || '',
+          );
+
+          if (workerData) {
+            PDFParseConstructor.setWorker(workerData);
+          }
+        } else if (typeof getWorkerPath === 'function') {
+          const workerPath = String(
+            (getWorkerPath as () => unknown)() || '',
+          );
+
+          if (workerPath) {
+            PDFParseConstructor.setWorker(workerPath);
+          }
+        }
+      } catch (workerSetupError) {
+        console.warn('PDF_PARSE_WORKER_SETUP_WARNING:', {
+          message:
+            workerSetupError instanceof Error
+              ? workerSetupError.message
+              : String(workerSetupError),
+        });
+      }
+    }
+
+    const options: Record<string, unknown> = {
       data: new Uint8Array(buffer),
-    });
+    };
+
+    if (typeof workerModule.CanvasFactory === 'function') {
+      options.CanvasFactory = workerModule.CanvasFactory;
+    }
+
+    const parser = new PDFParseConstructor(options);
 
     try {
       const result = await parser.getText();
-      const extracted = normalizeText(result?.text || result || '');
+      const extracted = normalizeText(
+        typeof result === 'string'
+          ? result
+          : String(result?.text || ''),
+      );
+
       if (extracted) return extracted;
     } finally {
       if (typeof parser.destroy === 'function') {
-        await parser.destroy().catch(() => undefined);
+        await Promise.resolve(parser.destroy()).catch(
+          () => undefined,
+        );
       }
     }
   }
 
-  // pdf-parse v1: export je priamo funkcia alebo default funkcia.
+  // Spätná kompatibilita s pdf-parse v1.
   for (const candidate of moduleCandidates) {
     if (typeof candidate !== 'function') continue;
 
-    const result = await candidate(buffer);
-    const extracted = normalizeText(result?.text || result || '');
+    const result = await (
+      candidate as LegacyPdfParser
+    )(buffer);
+
+    const extracted = normalizeText(
+      typeof result === 'string'
+        ? result
+        : String(result?.text || ''),
+    );
+
     if (extracted) return extracted;
   }
 
   throw new Error(
-    'PDF_PARSER_NOT_AVAILABLE: Nainštalovaná verzia pdf-parse neposkytuje podporované API alebo PDF neobsahuje textovú vrstvu.',
+    'PDF_PARSER_NOT_AVAILABLE: PDF sa nepodarilo spracovať na serveri. Skontrolujte pdf-parse/worker, serverExternalPackages a textovú vrstvu dokumentu.',
   );
 }
 
 async function extractDocxText(buffer: Buffer): Promise<string> {
-  const result = await mammoth.extractRawText({ buffer });
-  return normalizeText(result.value || '');
+  type MammothApi = {
+    extractRawText: (
+      input: { buffer: Buffer },
+    ) => Promise<{ value?: unknown }>;
+  };
+
+  const importedModule = (await import(
+    'mammoth'
+  )) as Record<string, unknown>;
+
+  const defaultExport =
+    importedModule.default &&
+    typeof importedModule.default === 'object'
+      ? importedModule.default as Record<string, unknown>
+      : importedModule.default;
+
+  const candidates: unknown[] = [
+    importedModule,
+    defaultExport,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (
+      !candidate ||
+      (typeof candidate !== 'object' &&
+        typeof candidate !== 'function')
+    ) {
+      continue;
+    }
+
+    const candidateRecord =
+      candidate as Record<string, unknown>;
+
+    const extractRawText =
+      candidateRecord.extractRawText;
+
+    if (typeof extractRawText !== 'function') {
+      continue;
+    }
+
+    const result = await (
+      extractRawText as MammothApi['extractRawText']
+    )({ buffer });
+
+    const extracted = normalizeText(
+      String(result?.value || ''),
+    );
+
+    if (extracted) {
+      return extracted;
+    }
+  }
+
+  throw new Error(
+    'DOCX_PARSER_NOT_AVAILABLE: Balík Mammoth sa načítal, ale neposkytol funkciu extractRawText alebo dokument neobsahuje čitateľný text.',
+  );
+}
+
+
+function getNativeAttachmentMediaType(
+  file: UploadedFile,
+): string | null {
+  const extension =
+    getEffectiveExtension(file.name);
+
+  const explicitType =
+    String(file.type || '')
+      .trim()
+      .toLowerCase();
+
+  if (
+    explicitType.startsWith('image/')
+  ) {
+    return explicitType;
+  }
+
+  if (explicitType === 'application/pdf') {
+    return explicitType;
+  }
+
+  const byExtension: Record<string, string> = {
+    '.pdf': 'application/pdf',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+  };
+
+  return byExtension[extension] || null;
+}
+
+async function buildNativeAttachmentBundle({
+  files,
+  extractedFiles,
+}: {
+  files: UploadedFile[];
+  extractedFiles: ExtractedAttachment[];
+}): Promise<NativeAttachmentBundle> {
+  const unreadNames = new Set(
+    extractedFiles
+      .filter(
+        (file) =>
+          file.extractedChars <= 0 ||
+          !file.extractedText.trim(),
+      )
+      .flatMap((file) => [
+        file.preparedName,
+        file.originalName,
+        file.name,
+      ])
+      .filter(Boolean),
+  );
+
+  const parts: NativeAttachmentPart[] = [];
+  const fileNames: string[] = [];
+
+  for (
+    const file of files.slice(
+      0,
+      MAX_ATTACHMENTS_TO_PROCESS,
+    )
+  ) {
+    if (
+      unreadNames.size > 0 &&
+      !unreadNames.has(file.name)
+    ) {
+      continue;
+    }
+
+    const mediaType =
+      getNativeAttachmentMediaType(file);
+
+    if (!mediaType) {
+      continue;
+    }
+
+    const bufferInfo =
+      await getUsableFileBuffer(file);
+
+    const data = new Uint8Array(
+      bufferInfo.usableBuffer,
+    );
+
+    if (mediaType.startsWith('image/')) {
+      parts.push({
+        type: 'image',
+        image: data,
+        mediaType,
+      });
+    } else {
+      parts.push({
+        type: 'file',
+        data,
+        mediaType,
+        filename: file.name,
+      });
+    }
+
+    fileNames.push(file.name);
+  }
+
+  return {
+    parts,
+    fileNames,
+  };
+}
+
+function appendNativeAttachmentPartsToMessages(
+  normalizedMessages: ChatMessage[],
+  nativeAttachmentParts: NativeAttachmentPart[],
+): any[] {
+  if (nativeAttachmentParts.length === 0) {
+    return normalizedMessages;
+  }
+
+  const messages = normalizedMessages.map(
+    (message) => ({
+      ...message,
+    }),
+  ) as any[];
+
+  let userIndex = -1;
+
+  for (
+    let index = messages.length - 1;
+    index >= 0;
+    index -= 1
+  ) {
+    if (messages[index]?.role === 'user') {
+      userIndex = index;
+      break;
+    }
+  }
+
+  const instruction = [
+    'Prečítaj všetky priložené súbory, ktoré sú súčasťou tejto správy.',
+    'Pri PDF alebo obrázku použi priamo vizuálny a dokumentový obsah.',
+    'Nevyhlasuj, že príloha nie je dostupná, pokiaľ je súčasťou správy.',
+  ].join(' ');
+
+  if (userIndex < 0) {
+    messages.push({
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: instruction,
+        },
+        ...nativeAttachmentParts,
+      ],
+    });
+
+    return messages;
+  }
+
+  const originalText = String(
+    messages[userIndex]?.content || '',
+  );
+
+  messages[userIndex] = {
+    role: 'user',
+    content: [
+      {
+        type: 'text',
+        text: `${originalText}\n\n${instruction}`.trim(),
+      },
+      ...nativeAttachmentParts,
+    ],
+  };
+
+  return messages;
+}
+
+function getNativeAttachmentReaderModel():
+  | ModelResult
+  | null {
+  if (
+    process.env
+      .GOOGLE_GENERATIVE_AI_API_KEY
+  ) {
+    return {
+      model: google(
+        process.env
+          .GOOGLE_ATTACHMENT_MODEL ||
+          process.env.GOOGLE_MODEL ||
+          'gemini-2.5-flash',
+      ) as any,
+      providerLabel:
+        'Gemini attachment reader',
+    };
+  }
+
+  if (process.env.OPENAI_API_KEY) {
+    return {
+      model: openai(
+        process.env
+          .OPENAI_ATTACHMENT_MODEL ||
+          process.env.OPENAI_MODEL ||
+          'gpt-4o-mini',
+      ),
+      providerLabel:
+        'OpenAI attachment reader',
+    };
+  }
+
+  if (process.env.ANTHROPIC_API_KEY) {
+    return {
+      model: anthropic(
+        process.env
+          .ANTHROPIC_ATTACHMENT_MODEL ||
+          process.env.ANTHROPIC_MODEL ||
+          'claude-sonnet-4-6',
+      ) as any,
+      providerLabel:
+        'Claude attachment reader',
+    };
+  }
+
+  return null;
+}
+
+async function extractTextWithNativeAttachmentReader({
+  parts,
+  fileNames,
+}: NativeAttachmentBundle): Promise<string> {
+  if (parts.length === 0) {
+    return '';
+  }
+
+  const reader =
+    getNativeAttachmentReaderModel();
+
+  if (!reader) {
+    return '';
+  }
+
+  try {
+    const result = await generateText({
+      model: reader.model,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: [
+                'Extrahuj a prepíš všetok čitateľný text z priložených dokumentov alebo obrázkov.',
+                'Zachovaj nadpisy, odseky, tabuľkové hodnoty a poradie.',
+                'Nevytváraj súhrn ani komentár.',
+                `Súbory: ${fileNames.join(', ') || 'neuvedené'}.`,
+              ].join(' '),
+            },
+            ...parts,
+          ],
+        },
+      ] as any,
+      temperature: 0,
+      maxOutputTokens: 12_000,
+    });
+
+    const extracted = normalizeText(
+      result.text || '',
+    );
+
+    console.log(
+      'CHAT_NATIVE_ATTACHMENT_READER:',
+      {
+        provider:
+          reader.providerLabel,
+        files: fileNames,
+        extractedCharacters:
+          extracted.length,
+      },
+    );
+
+    return extracted;
+  } catch (error) {
+    console.warn(
+      'CHAT_NATIVE_ATTACHMENT_READER_WARNING:',
+      {
+        provider:
+          reader.providerLabel,
+        files: fileNames,
+        message:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      },
+    );
+
+    return '';
+  }
 }
 
 function getPreparedMetadataForFile(file: UploadedFile, preparedFilesMetadata: PreparedFileMetadata[]) {
@@ -3034,7 +3683,7 @@ async function extractAttachmentTexts({
 }) {
   const extractedFiles: ExtractedAttachment[] = [];
 
-  for (const file of files.slice(0, 8)) {
+  for (const file of files.slice(0, MAX_ATTACHMENTS_TO_PROCESS)) {
     extractedFiles.push(await extractTextFromSingleFile(file, preparedFilesMetadata));
   }
 
@@ -3068,7 +3717,7 @@ async function extractAttachmentTexts({
   }
 
   for (const file of extractedFiles) {
-    attachmentTexts.push(`PRILOŽENÝ SÚBOR\nNázov pôvodného súboru: ${file.originalName}\nNázov prijatého súboru: ${file.preparedName}\nTyp: ${file.label}\nStav extrakcie: ${file.status}\nPočet extrahovaných znakov: ${file.extractedChars}\nPočet citácií v texte: ${file.inTextCitations.length}\nPočet detegovaných bibliografických kandidátov: ${file.bibliographicCandidates.length}\nAutori: ${file.detectedAuthors.length ? file.detectedAuthors.join(', ') : 'neuvedené alebo potrebné overiť'}\nChyba: ${file.error || 'bez chyby'}\n\nCITÁCIE V TEXTE:\n${file.inTextCitations.map((citation, index) => `${index + 1}. ${citation.raw}`).join('\n') || 'neuvedené'}\n\nDETEGOVANÉ ZDROJE:\n${formatBibliographicCandidates(file.bibliographicCandidates)}\n\nEXTRAHOVANÝ TEXT:\n${file.extractedText || '[Text nebol extrahovaný alebo nie je dostupný.]'}`);
+    attachmentTexts.push(`PRILOŽENÝ SÚBOR\nNázov pôvodného súboru: ${file.originalName}\nNázov prijatého súboru: ${file.preparedName}\nTyp: ${file.label}\nStav extrakcie: ${file.status}\nPočet extrahovaných znakov: ${file.extractedChars}\nPočet citácií v texte: ${file.inTextCitations.length}\nPočet detegovaných bibliografických kandidátov: ${file.bibliographicCandidates.length}\nAutori: ${file.detectedAuthors.length ? file.detectedAuthors.join(', ') : 'Údaje sú potrebné overiť.'}\nChyba: ${file.error || 'bez chyby'}\n\nCITÁCIE V TEXTE:\n${file.inTextCitations.map((citation, index) => `${index + 1}. ${citation.raw}`).join('\n') || 'neuvedené'}\n\nDETEGOVANÉ ZDROJE:\n${formatBibliographicCandidates(file.bibliographicCandidates)}\n\nEXTRAHOVANÝ TEXT:\n${file.extractedText || '[Text nebol extrahovaný alebo nie je dostupný.]'}`);
   }
 
   const combinedAttachmentText = attachmentTexts
@@ -3329,7 +3978,7 @@ POVINNÉ PRAVIDLÁ PRE AI:
 - Citačný štýl musí byť presne: ${citationStyle}.
 - Ak používateľ zmenil profil, pracuj s najnovšou verziou profilu.
 - Nevymýšľaj autorov, DOI, URL, ISBN ani neexistujúce publikácie.
-- Ak údaj nie je dostupný, napíš: údaj je potrebné overiť.
+- Ak údaj nie je dostupný, napíš presne: Údaje sú potrebné overiť.
 - Ak sú dostupné prílohy alebo extrahovaný text, čerpaj primárne z nich.
 - Ak prílohy nie sú dostupné, generuj podľa profilu práce.
 - Pri akademických výstupoch rozlišuj primárne a sekundárne zdroje, ak sú dostupné.
@@ -3379,7 +4028,7 @@ Kiening, M., et al. (2005). Sandwich immunoassays for the determination of peanu
 Osman, A. A., et al. (2001). A monoclonal antibody that recognizes a potential coeliac-toxic repetitive epitope in gliadins. European Journal of Gastroenterology & Hepatology, 13(10), 1189–1193. Cit. podľa Sathe et al. (2005).
 13. Ak je sekundárny zdroj citovaný sprostredkovane cez priložený dokument alebo článok, dopíš na koniec záznamu: Cit. podľa Autor et al. (rok). Ak autor článku nie je spoľahlivo zistený, až potom použi názov dokumentu.
 14. Ak priložený dokument obsahovo nesúvisí s aktívnym profilom práce, nevkladaj ho ako odborný použitý zdroj do tela kapitoly. Do finálneho výstupu však vlož stručnú profesionálnu poznámku pred sekciu Primárne zdroje: „Poznámka k použitým zdrojom: Priložený dokument bol analyzovaný, ale obsahovo nesúvisel s aktívnym profilom práce, preto nebol použitý ako odborný obsahový podklad kapitoly. Výstup bol zostavený z profilu práce a z overených akademických zdrojov použitých pri generovaní textu.“
-15. Do literatúry nikdy nevkladaj surový OCR text, STRANA, PAGE, technické bloky, názvy extrakčných sekcií, B. (2019), H. (2020), R. (2017), „údaj je potrebné overiť“, „Autor je potrebné overiť“ alebo „Rok chýba“.
+15. Do literatúry nikdy nevkladaj surový OCR text, STRANA, PAGE, technické bloky, názvy extrakčných sekcií, B. (2019), H. (2020), R. (2017), „Údaje sú potrebné overiť.“, „Autor je potrebné overiť“ alebo „Rok chýba“.
 16. Na konci kapitoly musí byť iba jedna dvojica sekcií: Primárne zdroje a Sekundárne zdroje.
 17. Ak príloha nebola dodaná alebo nebola použitá, nikdy nepíš, že zdroj bol rozpoznaný z prílohy.
 18. Ak sú použité externé zdroje zo Semantic Scholar alebo Crossref, označ ich ako overené externé akademické zdroje.
@@ -3389,6 +4038,104 @@ Osman, A. A., et al. (2001). A monoclonal antibody that recognizes a potential c
 
 function buildAttachmentBlock(attachmentTexts: string[]) {
   return attachmentTexts.length ? `\nPRILOŽENÉ SÚBORY A PODKLADY:\n${attachmentTexts.join('\n\n-----------------\n\n')}\n` : '\nPRILOŽENÉ SÚBORY A PODKLADY: Žiadne.\n';
+}
+
+
+function buildPriorityAttachmentContext({
+  extractedFiles,
+  clientExtractedText,
+  projectDocumentTexts,
+}: {
+  extractedFiles: ExtractedAttachment[];
+  clientExtractedText: string;
+  projectDocumentTexts: string[];
+}): string {
+  const blocks: string[] = [];
+
+  for (const file of extractedFiles) {
+    const extractedText = normalizeText(file.extractedText || '');
+    if (!extractedText) continue;
+
+    blocks.push(
+      `PRÍLOHA: ${file.originalName}\nStav: ${file.status}\nObsah:\n${limitMiddle(
+        extractedText,
+        32_000,
+      )}`,
+    );
+  }
+
+  const normalizedClientText = normalizeText(clientExtractedText);
+  if (normalizedClientText) {
+    blocks.push(
+      `TEXT PRÍLOH EXTRAHOVANÝ KLIENTOM ALEBO /api/extract-text:\n${limitMiddle(
+        normalizedClientText,
+        40_000,
+      )}`,
+    );
+  }
+
+  for (const projectText of projectDocumentTexts) {
+    const normalizedProjectText = normalizeText(projectText);
+    if (!normalizedProjectText) continue;
+
+    blocks.push(
+      limitMiddle(normalizedProjectText, 28_000),
+    );
+  }
+
+  const uniqueBlocks = uniqueArray(blocks);
+  if (!uniqueBlocks.length) return '';
+
+  return limitMiddle(
+    uniqueBlocks.join('\n\n==============================\n\n'),
+    maxPriorityAttachmentContextChars,
+  );
+}
+
+function buildFinalSystemPrompt({
+  baseSystemPrompt,
+  priorityAttachmentContext,
+  profileCitationStyle,
+  pageQuota,
+}: {
+  baseSystemPrompt: string;
+  priorityAttachmentContext: string;
+  profileCitationStyle: string;
+  pageQuota: PageQuota;
+}): string {
+  const attachmentPrefix = priorityAttachmentContext
+    ? `KRITICKÝ KONTEXT PRÍLOH – PREČÍTAJ PRED ODPOVEĎOU:\nPoužívateľ priložil dokumenty a ich text bol extrahovaný na serveri alebo doručený ako bezpečný fallback. Pri odpovedi musíš vychádzať z nasledujúceho obsahu. Nikdy netvrď, že prílohu nevidíš alebo nevieš čítať, keď je jej text uvedený nižšie.\n\n${priorityAttachmentContext}`
+    : `KRITICKÝ KONTEXT PRÍLOH:\nV tejto požiadavke nebol dostupný žiadny použiteľný extrahovaný text prílohy.`;
+
+  const citationAndQuotaRules = `AKTUÁLNY CITAČNÝ ŠTÝL Z PROFILU:\n${profileCitationStyle}\n\nPRESNÉ PRAVIDLÁ PRE TENTO CITAČNÝ ŠTÝL:\n${getCitationInstruction(
+    profileCitationStyle,
+  )}\n\nPOVINNÉ PRAVIDLÁ:\n- Všetky citácie v texte aj bibliografiu generuj výhradne podľa citačného štýlu z profilu: ${profileCitationStyle}.\n- Ak je v profile APA 7, nepoužívaj číselné citácie [1].\n- Ak je v profile ISO 690 alebo STN ISO 690, nepoužívaj APA formát (Autor, rok), pokiaľ to používateľ výslovne nežiada.\n- Ak je v profile Chicago, používaj poznámkový štýl alebo chicago bibliografický zápis.\n- Nevymýšľaj autorov, DOI, URL ani zdroje.\n- Ak bibliografické údaje nie je možné bezpečne určiť, použi presnú vetu: ${REQUIRED_VERIFICATION_NOTICE}\n\n${buildPageLimitInstruction(
+    pageQuota,
+  )}`;
+
+  const reservedCharacters =
+    attachmentPrefix.length +
+    citationAndQuotaRules.length +
+    12;
+
+  const availableForBase = Math.max(
+    maxSystemPromptChars - reservedCharacters,
+    20_000,
+  );
+
+  const safeBaseSystemPrompt = limitMiddle(
+    baseSystemPrompt,
+    availableForBase,
+  );
+
+  return limitMiddle(
+    [
+      attachmentPrefix,
+      safeBaseSystemPrompt,
+      citationAndQuotaRules,
+    ].join('\n\n========================================\n\n'),
+    maxSystemPromptChars,
+  );
 }
 
 function buildSystemPrompt({
@@ -3556,7 +4303,7 @@ PRAVIDLÁ PRE ZDROJE:
 1. Primárne zdroje = názov dokumentu alebo názvy dokumentov, z ktorých výstup čerpá, vrátane autora/autorov samotnej prílohy, ak sa dajú bezpečne zistiť z titulnej/úvodnej časti.
 2. Sekundárne zdroje = úplné bibliografické zdroje, ktoré sú citované alebo uvedené priamo v texte výstupu. Každý sekundárny zdroj musí mať aspoň autora, rok, názov, zdroj/časopis alebo strany/DOI/URL.
 3. Ak článok obsahuje zoznam literatúry, nikdy ho nepremiestňuj do primárnych zdrojov; do sekundárnych zdrojov uveď iba tie záznamy, ktoré sú v texte výstupu skutočne citované alebo použité.
-4. Do výstupu nevkladaj neúplné zdroje typu B. (2019), H. (2020), R. (2017), „údaj je potrebné overiť“, „Autor je potrebné overiť“ alebo „Rok chýba“.
+4. Do výstupu nevkladaj neúplné zdroje typu B. (2019), H. (2020), R. (2017), „Údaje sú potrebné overiť.“, „Autor je potrebné overiť“ alebo „Rok chýba“.
 5. Názvy zdrojov, mená autorov, DOI, URL, názvy časopisov a bibliografické údaje ponechaj v pôvodnom tvare. Neprekladaj ich len preto, že používateľ prepne jazyk aplikácie.
 6. Ak je odpoveď v inom jazyku ako jazyk zdroja, prelož iba vysvetľujúci text, nie samotný bibliografický záznam.
 7. Sekcie „Primárne zdroje“ a „Sekundárne zdroje“ prelož do zvoleného jazyka odpovede iba vtedy, ak nejde o požiadavku na presný slovenský formát. Ak používateľ pracuje so slovenským profilom alebo citačným výstupom, ponechaj tieto názvy v slovenčine.
@@ -3977,7 +4724,11 @@ function pageLimitErrorResponse(error?: unknown) {
 }
 
 function buildPageLimitInstruction(pageQuota: PageQuota) {
-  if (pageQuota.isUnlimited || pageQuota.isAdmin) {
+  if (
+    pageQuota.isUnlimited ||
+    pageQuota.isAdmin ||
+    pageQuota.hasUnlimitedAccess
+  ) {
     return `
 STRÁNKOVÝ LIMIT POUŽÍVATEĽA:
 - Používateľ má neobmedzený administrátorský prístup.
@@ -3999,7 +4750,7 @@ STRÁNKOVÝ LIMIT POUŽÍVATEĽA:
 
 function limitOutputToRemainingPages(
   value: string,
-  remainingPages: number,
+  remainingPages: number | null | undefined,
   isUnlimited = false,
 ): LimitedPageOutput {
   const output = String(value || '');
@@ -4012,8 +4763,14 @@ function limitOutputToRemainingPages(
     };
   }
 
+  const safeRemainingPages =
+    typeof remainingPages === 'number' &&
+    Number.isFinite(remainingPages)
+      ? Math.max(remainingPages, 0)
+      : 0;
+
   const maximumCharacters =
-    Math.max(remainingPages, 0) *
+    safeRemainingPages *
     CHARACTERS_PER_PAGE;
 
   if (maximumCharacters <= 0) {
@@ -4068,7 +4825,9 @@ function createPageUsagePayload({
     ...quota,
     pagesGeneratedThisRequest,
     pagesConsumedThisRequest:
-      quota.isUnlimited || quota.isAdmin
+      quota.isUnlimited ||
+      quota.isAdmin ||
+      quota.hasUnlimitedAccess
         ? 0
         : pagesGeneratedThisRequest,
     charactersGenerated:
@@ -4451,6 +5210,7 @@ async function createStreamResponse({
   pageQuota,
   pageRequestId,
   entitlementGuard,
+  nativeAttachmentParts = [],
 }: {
   model: ModelResult['model'];
   systemPrompt: string;
@@ -4459,6 +5219,7 @@ async function createStreamResponse({
   pageQuota: PageQuota;
   pageRequestId: string;
   entitlementGuard: EntitlementGuardResult;
+  nativeAttachmentParts?: NativeAttachmentPart[];
 }) {
   const effectiveOutputTokens = getOutputTokenLimit(
     pageQuota.pagesRemaining,
@@ -4466,7 +5227,8 @@ async function createStreamResponse({
     {
       isUnlimited:
         pageQuota.isUnlimited ||
-        pageQuota.isAdmin,
+        pageQuota.isAdmin ||
+        pageQuota.hasUnlimitedAccess,
     },
   );
 
@@ -4474,20 +5236,30 @@ async function createStreamResponse({
     throw new PageLimitError();
   }
 
+  const modelMessages =
+    appendNativeAttachmentPartsToMessages(
+      normalizedMessages,
+      nativeAttachmentParts,
+    );
+
   const result = streamText({
     model,
     system: systemPrompt,
-    messages: normalizedMessages,
+    messages: modelMessages as any,
     temperature: 0.2,
     maxOutputTokens: effectiveOutputTokens,
   });
 
   const encoder = new TextEncoder();
   const maximumCharacters =
-    pageQuota.isUnlimited || pageQuota.isAdmin
+    pageQuota.isUnlimited ||
+    pageQuota.isAdmin ||
+    pageQuota.hasUnlimitedAccess
       ? Number.POSITIVE_INFINITY
-      : pageQuota.pagesRemaining *
-        CHARACTERS_PER_PAGE;
+      : Math.max(
+          pageQuota.pagesRemaining ?? 0,
+          0,
+        ) * CHARACTERS_PER_PAGE;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -4607,13 +5379,17 @@ async function createStreamResponse({
       'X-Zedpera-Page-Request-Id':
         pageRequestId,
       'X-Zedpera-Page-Limit':
-        pageQuota.isUnlimited || pageQuota.isAdmin
+        pageQuota.isUnlimited ||
+        pageQuota.isAdmin ||
+        pageQuota.hasUnlimitedAccess
           ? 'unlimited'
           : String(pageQuota.pageLimit),
       'X-Zedpera-Pages-Used-Before':
         String(pageQuota.pagesUsed),
       'X-Zedpera-Pages-Remaining-Before':
-        pageQuota.isUnlimited || pageQuota.isAdmin
+        pageQuota.isUnlimited ||
+        pageQuota.isAdmin ||
+        pageQuota.hasUnlimitedAccess
           ? 'unlimited'
           : String(pageQuota.pagesRemaining),
       'X-Zedpera-Is-Admin':
@@ -4667,6 +5443,8 @@ async function createJsonResponse({
   pageQuota,
   pageRequestId,
   entitlementGuard,
+  nativeAttachmentParts = [],
+  nativeAttachmentFileNames = [],
 }: {
   model: any;
   systemPrompt: string;
@@ -4685,6 +5463,8 @@ async function createJsonResponse({
   pageQuota: PageQuota;
   pageRequestId: string;
   entitlementGuard: EntitlementGuardResult;
+  nativeAttachmentParts?: NativeAttachmentPart[];
+  nativeAttachmentFileNames?: string[];
 }) {
   const extractedFilesPayload = extractedFiles.map((file) => ({
     name: file.name,
@@ -4724,7 +5504,8 @@ async function createJsonResponse({
       {
         isUnlimited:
           pageQuota.isUnlimited ||
-          pageQuota.isAdmin,
+          pageQuota.isAdmin ||
+          pageQuota.hasUnlimitedAccess,
       },
     );
 
@@ -4732,10 +5513,16 @@ async function createJsonResponse({
     throw new PageLimitError();
   }
 
+  const modelMessages =
+    appendNativeAttachmentPartsToMessages(
+      normalizedMessages,
+      nativeAttachmentParts,
+    );
+
   const result = await generateText({
     model,
     system: systemPrompt,
-    messages: normalizedMessages,
+    messages: modelMessages as any,
     temperature: 0.2,
     maxOutputTokens: effectiveOutputTokens,
   });
@@ -4765,12 +5552,15 @@ if (isChapterRequest || sourcesOnly || module === 'chat') {
   output = removeForbiddenInternalSourcesFromOutput(output);
 }
 
+output = normalizeVerificationNotices(output);
+
 const limitedPageOutput =
   limitOutputToRemainingPages(
     output,
     pageQuota.pagesRemaining,
     pageQuota.isUnlimited ||
-      pageQuota.isAdmin,
+      pageQuota.isAdmin ||
+      pageQuota.hasUnlimitedAccess,
   );
 
 output = limitedPageOutput.output;
@@ -4842,6 +5632,42 @@ await saveGeneratedHistory({
     profileRelevance: relevance,
     externalResearch,
     extractedFiles: extractedFilesPayload,
+    attachmentProcessing: {
+      receivedFiles: extractedFilesPayload.length,
+      successfullyReadFiles:
+        new Set([
+          ...extractedFilesPayload
+            .filter(
+              (file) =>
+                file.extractedChars > 0 &&
+                !file.error,
+            )
+            .map(
+              (file) =>
+                file.preparedName ||
+                file.originalName ||
+                file.name,
+            ),
+          ...nativeAttachmentFileNames,
+        ]).size,
+      extractedCharacters:
+        extractedFilesPayload.reduce(
+          (sum, file) =>
+            sum + file.extractedChars,
+          0,
+        ),
+      nativeAttachmentFiles:
+        nativeAttachmentFileNames,
+      nativeAttachmentRead:
+        nativeAttachmentFileNames.length > 0,
+      serverReadAttachments:
+        extractedFilesPayload.some(
+          (file) =>
+            file.extractedChars > 0 &&
+            !file.error,
+        ) ||
+        nativeAttachmentFileNames.length > 0,
+    },
     pageUsage,
     extractedFilesInfo: extractedFilesPayload.map((file) => ({
       fileName: file.originalName || file.name,
@@ -4849,10 +5675,34 @@ await saveGeneratedHistory({
       extension: file.effectiveExtension,
       characters: file.extractedChars,
       ok:
-        file.extractedChars > 0 &&
-        !file.error,
-      status: file.status,
-      error: file.error || null,
+        (
+          file.extractedChars > 0 &&
+          !file.error
+        ) ||
+        nativeAttachmentFileNames.includes(
+          file.preparedName,
+        ) ||
+        nativeAttachmentFileNames.includes(
+          file.originalName,
+        ),
+      status:
+        nativeAttachmentFileNames.includes(
+          file.preparedName,
+        ) ||
+        nativeAttachmentFileNames.includes(
+          file.originalName,
+        )
+          ? 'Súbor bol odovzdaný priamo multimodálnemu modelu.'
+          : file.status,
+      error:
+        nativeAttachmentFileNames.includes(
+          file.preparedName,
+        ) ||
+        nativeAttachmentFileNames.includes(
+          file.originalName,
+        )
+          ? null
+          : file.error || null,
     })),
     sourcePolicy: {
       sourceConstruction: 'model_generated',
@@ -5238,7 +6088,10 @@ if (profile) {
         ),
       );
 
-      files = collectUploadedFiles(formData);
+      files = mergeUploadedFiles(
+        collectUploadedFiles(formData),
+        collectBase64UploadedFiles(preparedFilesMetadata),
+      );
 
       console.log('CHAT_ATTACHMENT_UPLOAD_DEBUG:', {
         formKeys: Array.from(new Set(Array.from(formData.keys()))),
@@ -5384,7 +6237,11 @@ outputLanguage = normalizeAppLanguage(interfaceLanguageFromRequest, 'sk');
           : [],
       );
 
-      files = [];
+      files = mergeUploadedFiles(
+        collectBase64UploadedFiles(preparedFilesMetadata),
+        collectBase64UploadedFiles(body?.attachments),
+        collectBase64UploadedFiles(body?.files),
+      );
     }
 
     // =====================================================
@@ -5556,13 +6413,17 @@ try {
         isAdmin: pageQuota.isAdmin,
         isUnlimited: pageQuota.isUnlimited,
         pageLimit:
-          pageQuota.isUnlimited
+          pageQuota.isUnlimited ||
+          pageQuota.isAdmin ||
+          pageQuota.hasUnlimitedAccess
             ? 'unlimited'
             : pageQuota.pageLimit,
         pagesUsed:
           pageQuota.pagesUsed,
         pagesRemaining:
-          pageQuota.isUnlimited
+          pageQuota.isUnlimited ||
+          pageQuota.isAdmin ||
+          pageQuota.hasUnlimitedAccess
             ? 'unlimited'
             : pageQuota.pagesRemaining,
         charactersPerPage:
@@ -5573,18 +6434,78 @@ try {
     // =====================================================
     // PRÍLOHY
     // =====================================================
+    let attachmentExtraction =
+      await extractAttachmentTexts({
+        files,
+        preparedFilesMetadata,
+        clientExtractedText,
+        preparedFilesSummary,
+        clientDetectedSourcesSummary,
+        clientDetectedSources,
+      });
+
+    let nativeAttachmentBundle =
+      await buildNativeAttachmentBundle({
+        files,
+        extractedFiles:
+          attachmentExtraction.extractedFiles,
+      });
+
+    let successfullyExtractedFiles =
+      attachmentExtraction.extractedFiles.filter(
+        (file) =>
+          file.extractedChars > 0 &&
+          file.extractedText.trim().length > 0 &&
+          !file.error,
+      );
+
+    if (
+      files.length > 0 &&
+      successfullyExtractedFiles.length === 0 &&
+      !clientExtractedText.trim() &&
+      nativeAttachmentBundle.parts.length > 0
+    ) {
+      const nativeExtractedText =
+        await extractTextWithNativeAttachmentReader(
+          nativeAttachmentBundle,
+        );
+
+      if (nativeExtractedText) {
+        clientExtractedText =
+          nativeExtractedText;
+
+        attachmentExtraction =
+          await extractAttachmentTexts({
+            files,
+            preparedFilesMetadata,
+            clientExtractedText,
+            preparedFilesSummary,
+            clientDetectedSourcesSummary,
+            clientDetectedSources,
+          });
+
+        successfullyExtractedFiles =
+          attachmentExtraction.extractedFiles.filter(
+            (file) =>
+              file.extractedChars > 0 &&
+              file.extractedText.trim().length > 0 &&
+              !file.error,
+          );
+      }
+    }
+
     const {
       extractedFiles,
-      attachmentTexts: uploadedAttachmentTexts,
+      attachmentTexts:
+        uploadedAttachmentTexts,
       compactSources,
-    } = await extractAttachmentTexts({
-      files,
-      preparedFilesMetadata,
-      clientExtractedText,
-      preparedFilesSummary,
-      clientDetectedSourcesSummary,
-      clientDetectedSources,
-    });
+    } = attachmentExtraction;
+
+    nativeAttachmentBundle =
+      await buildNativeAttachmentBundle({
+        files,
+        extractedFiles,
+      });
 
     const extractableUploadedFiles = files.filter((file) =>
       extractableAttachmentExtensions.includes(
@@ -5592,17 +6513,12 @@ try {
       ),
     );
 
-    const successfullyExtractedFiles = extractedFiles.filter(
-      (file) =>
-        file.extractedChars > 0 &&
-        file.extractedText.trim().length > 0 &&
-        !file.error,
-    );
-
     console.log('CHAT_ATTACHMENT_EXTRACTION_DEBUG:', {
       receivedFiles: files.length,
       extractableFiles: extractableUploadedFiles.length,
       successfullyExtractedFiles: successfullyExtractedFiles.length,
+      nativeAttachmentFiles:
+        nativeAttachmentBundle.fileNames,
       details: extractedFiles.map((file) => ({
         name: file.originalName,
         preparedName: file.preparedName,
@@ -5616,7 +6532,8 @@ try {
     if (
       files.length > 0 &&
       successfullyExtractedFiles.length === 0 &&
-      !clientExtractedText.trim()
+      !clientExtractedText.trim() &&
+      nativeAttachmentBundle.parts.length === 0
     ) {
       return NextResponse.json(
         {
@@ -5625,7 +6542,7 @@ try {
           message:
             'Príloha bola prijatá, ale nepodarilo sa z nej načítať text.',
           detail:
-            'Súbor bol doručený do /api/chat, ale server ani klient neposkytli použiteľný text. Podporované serverové textové formáty sú PDF, DOCX, TXT, MD, CSV a RTF. Pri skenovanom PDF alebo obrázku musí frontend odoslať OCR text v poli clientExtractedText alebo extractedText.',
+            'Súbor bol doručený do /api/chat, ale neobsahoval použiteľnú textovú vrstvu a nebol doručený ani OCR text. Server sa pokúsil spracovať PDF cez pdf-parse/worker a DOCX cez Mammoth. Pri skenovanom PDF alebo obrázku musí frontend odoslať OCR text v poli clientExtractedText alebo extractedText, prípadne binárny obsah súboru v multipart/form-data.',
           extractedFiles: extractedFiles.map((file) => ({
             name: file.originalName,
             preparedName: file.preparedName,
@@ -5701,6 +6618,25 @@ ${
       ...uploadedAttachmentTexts,
       ...projectDocumentTexts,
     ];
+
+    const priorityAttachmentContext =
+      buildPriorityAttachmentContext({
+        extractedFiles,
+        clientExtractedText,
+        projectDocumentTexts,
+      });
+
+    console.log('CHAT_ATTACHMENT_CONTEXT_READY:', {
+      uploadedFiles: files.length,
+      extractedFiles: successfullyExtractedFiles.length,
+      extractedCharacters: extractedFiles.reduce(
+        (sum, file) => sum + file.extractedChars,
+        0,
+      ),
+      clientExtractedCharacters: clientExtractedText.length,
+      projectDocuments: projectDocuments.length,
+      priorityContextCharacters: priorityAttachmentContext.length,
+    });
 
     // =====================================================
     // ZDROJE
@@ -5787,27 +6723,24 @@ ${
 
     const profileCitationStyle = getCitationStyle(profile);
 
-    const finalSystemPrompt = limitText(
-      `${systemPrompt}
+    const nativeAttachmentInstruction =
+      nativeAttachmentBundle.parts.length > 0
+        ? [
+            '',
+            'PRIAMO PRILOŽENÉ MULTIMODÁLNE SÚBORY:',
+            `Súbory: ${nativeAttachmentBundle.fileNames.join(', ')}.`,
+            'Tieto súbory sú priamo súčasťou poslednej používateľskej správy.',
+            'Model ich musí prečítať vizuálne alebo ako dokument a nesmie tvrdiť, že príloha nie je dostupná.',
+          ].join('\n')
+        : '';
 
-AKTUÁLNY CITAČNÝ ŠTÝL Z PROFILU:
-${profileCitationStyle}
-
-PRESNÉ PRAVIDLÁ PRE TENTO CITAČNÝ ŠTÝL:
-${getCitationInstruction(profileCitationStyle)}
-
-POVINNÉ PRAVIDLO:
-- Všetky citácie v texte aj bibliografiu generuj výhradne podľa citačného štýlu z profilu: ${profileCitationStyle}.
-- Ak je v profile APA 7, nepoužívaj číselné citácie [1].
-- Ak je v profile ISO 690 alebo STN ISO 690, nepoužívaj APA formát (Autor, rok), pokiaľ to používateľ výslovne nežiada.
-- Ak je v profile Chicago, používaj poznámkový štýl alebo chicago bibliografický zápis.
-- Nevymýšľaj autorov, DOI, URL ani zdroje.
-- Ak bibliografický údaj chýba, napíš: údaj je potrebné overiť.
-
-${buildPageLimitInstruction(pageQuota)}
-`.trim(),
-      maxSystemPromptChars,
-    );
+    const finalSystemPrompt = buildFinalSystemPrompt({
+      baseSystemPrompt:
+        `${systemPrompt}${nativeAttachmentInstruction}`,
+      priorityAttachmentContext,
+      profileCitationStyle,
+      pageQuota,
+    });
 
     // =====================================================
     // MODEL
@@ -5839,6 +6772,10 @@ ${buildPageLimitInstruction(pageQuota)}
           pageQuota,
           pageRequestId,
           entitlementGuard,
+          nativeAttachmentParts:
+            nativeAttachmentBundle.parts,
+          nativeAttachmentFileNames:
+            nativeAttachmentBundle.fileNames,
         });
       }
 
@@ -5850,6 +6787,8 @@ ${buildPageLimitInstruction(pageQuota)}
         pageQuota,
         pageRequestId,
         entitlementGuard,
+        nativeAttachmentParts:
+          nativeAttachmentBundle.parts,
       });
     } catch (primaryError) {
       console.error('PRIMARY_MODEL_ERROR:', primaryError);
@@ -5916,6 +6855,10 @@ Dodrž:
           pageQuota,
           pageRequestId,
           entitlementGuard,
+          nativeAttachmentParts:
+            nativeAttachmentBundle.parts,
+          nativeAttachmentFileNames:
+            nativeAttachmentBundle.fileNames,
         });
       }
 
@@ -5927,6 +6870,8 @@ Dodrž:
         pageQuota,
         pageRequestId,
         entitlementGuard,
+        nativeAttachmentParts:
+          nativeAttachmentBundle.parts,
       });
     }
   } catch (error) {

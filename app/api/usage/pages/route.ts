@@ -11,84 +11,139 @@ import {
   type PageQuota,
 } from '@/lib/page-quota';
 
+/**
+ * Endpoint používa používateľskú Supabase session a aktuálne databázové údaje.
+ * Preto sa musí vykonať dynamicky pri každej požiadavke a jeho odpoveď sa
+ * nesmie ukladať do cache prehliadača, proxy ani Vercel CDN.
+ */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 
-// =====================================================
-// TYPES
-// =====================================================
-
-type JsonRecord = Record<string, unknown>;
-
-type PageQuotaSuccessResponse = {
-  ok: true;
-} & PageQuota;
-
-type PageQuotaErrorCode =
-  | 'UNAUTHENTICATED'
-  | 'PAGE_LIMIT_REACHED'
-  | 'PAGE_QUOTA_LOAD_FAILED'
-  | 'INTERNAL_SERVER_ERROR';
-
-type PageQuotaErrorResponse = {
-  ok: false;
-  code: PageQuotaErrorCode;
-  message: string;
-
-  /**
-   * Jedinečný identifikátor požiadavky/chyby.
-   *
-   * Rovnaká hodnota sa posiela aj v hlavičke X-Request-Id,
-   * aby bolo možné chybu dohľadať v serverových logoch.
-   */
-  errorId: string;
-
-  /**
-   * Určuje, či má zmysel požiadavku zopakovať.
-   */
-  retryable: boolean;
-
-  /**
-   * Informácia pre frontend, že bol vyčerpaný stránkový limit.
-   */
-  pageLimitReached?: boolean;
-
-  /**
-   * Odkaz na dokúpenie strán alebo výber balíka.
-   */
-  purchaseUrl?: string;
-
-  /**
-   * Technický detail sa vracia iba vo vývojovom prostredí.
-   */
-  detail?: string;
-};
-
-type PageQuotaApiResponse =
-  | PageQuotaSuccessResponse
-  | PageQuotaErrorResponse;
-
-type ErrorMetadata = {
-  name: string;
-  message: string;
-  code?: string;
-  status?: number;
-  stack?: string;
-};
-
-// =====================================================
-// RESPONSE HEADERS
-// =====================================================
+const PURCHASE_URL = '/pricing#doplnkove-sluzby';
 
 /**
- * Vytvorí hlavičky, ktoré zabránia uloženiu používateľskej
- * kvóty do cache prehliadača, CDN alebo proxy servera.
+ * Verejný kontrakt úspešnej odpovede endpointu.
  *
- * Kvóta sa môže zmeniť po každom úspešnom výstupe,
- * preto sa musí vždy načítať nanovo.
+ * null pri limitoch znamená neobmedzený administrátorský prístup.
  */
-function createNoStoreHeaders(
+type SuccessResponse = PageQuota & {
+  ok: true;
+  success: true;
+
+  meta: {
+    requestId: string;
+    generatedAt: string;
+    cache: 'no-store';
+  };
+};
+
+type ErrorCode =
+  | 'UNAUTHENTICATED'
+  | 'PAGE_LIMIT_REACHED'
+  | 'INVALID_PAGE_QUOTA_RESPONSE'
+  | 'PAGE_QUOTA_LOAD_FAILED';
+
+type ErrorResponse = {
+  ok: false;
+  success: false;
+
+  code: ErrorCode;
+  message: string;
+  requestId: string;
+
+  purchaseUrl?: string;
+  detail?: string;
+
+  /**
+   * Vnorený objekt je zachovaný pre staršie časti frontendu.
+   */
+  error: {
+    code: ErrorCode;
+    message: string;
+    requestId: string;
+    detail?: string;
+  };
+};
+
+type ErrorMetadata = {
+  code?: string;
+  status?: number;
+  message?: string;
+  name?: string;
+};
+
+function isRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+function getErrorMetadata(
+  error: unknown,
+): ErrorMetadata {
+  if (!isRecord(error)) {
+    return {};
+  }
+
+  const code =
+    typeof error.code === 'string'
+      ? error.code
+      : undefined;
+
+  const status =
+    typeof error.status === 'number' &&
+    Number.isFinite(error.status)
+      ? error.status
+      : undefined;
+
+  const message =
+    typeof error.message === 'string'
+      ? error.message
+      : undefined;
+
+  const name =
+    typeof error.name === 'string'
+      ? error.name
+      : undefined;
+
+  return {
+    code,
+    status,
+    message,
+    name,
+  };
+}
+
+/**
+ * Prevezme bezpečné request ID alebo vytvorí nové UUID.
+ */
+function resolveRequestId(
+  request: NextRequest,
+): string {
+  const incomingRequestId =
+    request.headers
+      .get('x-request-id')
+      ?.trim() || '';
+
+  const sanitizedRequestId =
+    incomingRequestId
+      .replace(/[^a-zA-Z0-9._:-]/g, '')
+      .slice(0, 128);
+
+  return sanitizedRequestId || randomUUID();
+}
+
+/**
+ * Hlavičky zabraňujú použitiu starého FREE alebo starého plateného limitu
+ * po platbe, aktivácii doplnku alebo pridelení administrátorského prístupu.
+ */
+function createResponseHeaders(
   requestId: string,
 ): Headers {
   const headers = new Headers();
@@ -107,563 +162,440 @@ function createNoStoreHeaders(
 
   headers.set('Pragma', 'no-cache');
   headers.set('Expires', '0');
-
-  /**
-   * Odpoveď závisí od prihlasovacej relácie používateľa.
-   */
-  headers.set(
-    'Vary',
-    'Cookie, Authorization',
-  );
-
-  headers.set(
-    'X-Request-Id',
-    requestId,
-  );
-
-  headers.set(
-    'X-Content-Type-Options',
-    'nosniff',
-  );
+  headers.set('Vary', 'Cookie, Authorization');
+  headers.set('X-Request-Id', requestId);
+  headers.set('X-Content-Type-Options', 'nosniff');
 
   return headers;
 }
 
-/**
- * Vytvorí JSON odpoveď s jednotnými bezpečnostnými hlavičkami.
- */
-function createJsonResponse<T>(
-  body: T,
-  status: number,
-  requestId: string,
-): NextResponse<T> {
-  return NextResponse.json(body, {
-    status,
-    headers:
-      createNoStoreHeaders(requestId),
-  });
-}
+function toNonNegativeInteger(
+  value: unknown,
+  fallback = 0,
+): number {
+  const safeFallback =
+    Number.isFinite(fallback)
+      ? Math.max(Math.trunc(fallback), 0)
+      : 0;
 
-// =====================================================
-// REQUEST ID
-// =====================================================
-
-/**
- * Prevezme existujúce X-Request-Id alebo vytvorí nové.
- *
- * Hodnota sa očistí, aby sa do logov nedostali nežiaduce znaky.
- */
-function resolveRequestId(
-  request: NextRequest,
-): string {
-  const incomingRequestId =
-    request.headers.get('x-request-id');
-
-  if (incomingRequestId) {
-    const sanitizedRequestId =
-      incomingRequestId
-        .trim()
-        .replace(
-          /[^a-zA-Z0-9._:-]/g,
-          '',
-        )
-        .slice(0, 128);
-
-    if (sanitizedRequestId) {
-      return sanitizedRequestId;
-    }
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === 'string' &&
+      value.trim().length === 0)
+  ) {
+    return safeFallback;
   }
 
-  return randomUUID();
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return safeFallback;
+  }
+
+  return Math.min(
+    Math.max(Math.trunc(parsed), 0),
+    Number.MAX_SAFE_INTEGER,
+  );
 }
 
-// =====================================================
-// ERROR HELPERS
-// =====================================================
-
-function isRecord(
-  value: unknown,
-): value is JsonRecord {
+/**
+ * Rozpozná kanonický neobmedzený stav, ktorý už autoritatívne pripravil
+ * lib/page-quota.ts na základe serverových entitlementov.
+ */
+function isUnlimitedQuota(
+  quota: PageQuota,
+): boolean {
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value)
-  );
-}
-
-function getStringProperty(
-  value: unknown,
-  property: string,
-): string | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const propertyValue =
-    value[property];
-
-  if (
-    typeof propertyValue !== 'string'
-  ) {
-    return undefined;
-  }
-
-  const normalized =
-    propertyValue.trim();
-
-  return normalized || undefined;
-}
-
-function getNumberProperty(
-  value: unknown,
-  property: string,
-): number | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const propertyValue =
-    value[property];
-
-  if (
-    typeof propertyValue === 'number' &&
-    Number.isFinite(propertyValue)
-  ) {
-    return propertyValue;
-  }
-
-  if (
-    typeof propertyValue === 'string' &&
-    propertyValue.trim()
-  ) {
-    const parsed =
-      Number(propertyValue);
-
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * Bezpečne prevedie neznámu chybu na text.
- */
-function getErrorMessage(
-  error: unknown,
-): string {
-  if (error instanceof Error) {
-    return (
-      error.message.trim() ||
-      'UNKNOWN_ERROR'
-    );
-  }
-
-  if (typeof error === 'string') {
-    return (
-      error.trim() ||
-      'UNKNOWN_ERROR'
-    );
-  }
-
-  const objectMessage =
-    getStringProperty(
-      error,
-      'message',
-    );
-
-  if (objectMessage) {
-    return objectMessage;
-  }
-
-  try {
-    const serialized =
-      JSON.stringify(error);
-
-    return (
-      serialized &&
-      serialized !== '{}'
-        ? serialized
-        : 'UNKNOWN_ERROR'
-    );
-  } catch {
-    return 'UNKNOWN_ERROR';
-  }
-}
-
-/**
- * Bezpečne načíta kód chyby.
- */
-function getErrorCode(
-  error: unknown,
-): string | undefined {
-  return getStringProperty(
-    error,
-    'code',
+    quota.isAdmin === true ||
+    quota.isUnlimited === true ||
+    quota.hasUnlimitedAccess === true ||
+    quota.planId === 'admin'
   );
 }
 
 /**
- * Bezpečne načíta HTTP stav chyby.
- */
-function getErrorStatus(
-  error: unknown,
-): number | undefined {
-  return getNumberProperty(
-    error,
-    'status',
-  );
-}
-
-/**
- * Vytvorí bezpečné metadáta pre serverové logovanie.
+ * Vytvorí konzistentnú administrátorskú odpoveď.
  *
- * Do logu neposielame celý Error objekt. V Next.js development režime
- * môže console.error s Error objektom vyvolať rušivý červený overlay.
+ * ADMIN sa nikdy nesmie serializovať ako FREE ani s limitom 0. Hodnota null
+ * je verejným kontraktom pre neobmedzený limit.
  */
-function createErrorMetadata(
-  error: unknown,
-): ErrorMetadata {
-  const message =
-    getErrorMessage(error);
+function createAdminQuota(): PageQuota {
+  return {
+    planId: 'admin',
 
-  const metadata: ErrorMetadata = {
-    name:
-      error instanceof Error
-        ? error.name
-        : getStringProperty(
-            error,
-            'name',
-          ) || 'UnknownError',
-    message,
-    code: getErrorCode(error),
-    status: getErrorStatus(error),
+    isAdmin: true,
+    isUnlimited: true,
+    hasUnlimitedAccess: true,
+
+    basePageLimit: null,
+    extraPageLimit: 0,
+    pageLimit: null,
+
+    pagesUsed: 0,
+    pagesRemaining: null,
+    pageLimitReached: false,
   };
-
-  if (
-    process.env.NODE_ENV ===
-      'development' &&
-    error instanceof Error &&
-    error.stack
-  ) {
-    metadata.stack = error.stack;
-  }
-
-  return metadata;
 }
 
 /**
- * Zapíše chybu bez odovzdania pôvodného Error objektu.
+ * Obranná normalizácia verejnej odpovede.
  *
- * V development režime používame console.info, aby očakávaná
- * API chyba nespôsobila Next.js konzolový overlay.
+ * Funkcia neudeľuje administrátorské práva. Iba zachová a kanonizuje stav,
+ * ktorý vrátil autoritatívny serverový modul lib/page-quota.ts.
  */
-function logHandledError(
-  label: string,
-  requestId: string,
-  error: unknown,
-): void {
-  const metadata =
-    createErrorMetadata(error);
+function normalizePageQuotaForApi(
+  quota: PageQuota,
+): PageQuota {
+  if (isUnlimitedQuota(quota)) {
+    return createAdminQuota();
+  }
 
-  const logPayload = {
-    requestId,
-    ...metadata,
-  };
+  const planId = String(
+    quota.planId ?? '',
+  ).trim();
+
+  if (!planId || planId === 'admin') {
+    throw new Error(
+      'INVALID_PAGE_QUOTA_RESPONSE: Chýba platný planId.',
+    );
+  }
 
   if (
-    process.env.NODE_ENV ===
-    'development'
+    quota.basePageLimit === null ||
+    quota.pageLimit === null ||
+    quota.pagesRemaining === null
   ) {
-    console.info(
-      label,
-      logPayload,
+    throw new Error(
+      'INVALID_PAGE_QUOTA_RESPONSE: Bežný používateľ nemôže mať null stránkový limit.',
+    );
+  }
+
+  const basePageLimit =
+    toNonNegativeInteger(
+      quota.basePageLimit,
+      0,
     );
 
-    return;
-  }
+  const extraPageLimit =
+    toNonNegativeInteger(
+      quota.extraPageLimit,
+      0,
+    );
 
-  console.error(
-    label,
-    logPayload,
-  );
+  const calculatedPageLimit =
+    Math.min(
+      basePageLimit + extraPageLimit,
+      Number.MAX_SAFE_INTEGER,
+    );
+
+  const pageLimit =
+    toNonNegativeInteger(
+      quota.pageLimit,
+      calculatedPageLimit,
+    );
+
+  const pagesUsed =
+    toNonNegativeInteger(
+      quota.pagesUsed,
+      0,
+    );
+
+  const calculatedRemaining =
+    Math.max(pageLimit - pagesUsed, 0);
+
+  const pagesRemaining =
+    Math.min(
+      toNonNegativeInteger(
+        quota.pagesRemaining,
+        calculatedRemaining,
+      ),
+      calculatedRemaining,
+    );
+
+  const pageLimitReached =
+    quota.pageLimitReached === true ||
+    pageLimit <= 0 ||
+    pagesUsed >= pageLimit ||
+    pagesRemaining <= 0;
+
+  return {
+    planId,
+
+    isAdmin: false,
+    isUnlimited: false,
+    hasUnlimitedAccess: false,
+
+    basePageLimit,
+    extraPageLimit,
+    pageLimit,
+
+    pagesUsed,
+    pagesRemaining,
+    pageLimitReached,
+  };
 }
 
-/**
- * Overí, či chyba vznikla z dôvodu chýbajúcej,
- * neplatnej alebo expirovanej relácie.
- */
 function isUnauthenticatedError(
   error: unknown,
-  message: string,
 ): boolean {
+  const metadata = getErrorMetadata(error);
+
   const code =
-    getErrorCode(error)
-      ?.trim()
-      .toUpperCase();
-
-  const status =
-    getErrorStatus(error);
-
-  const normalizedMessage =
-    message
+    String(metadata.code || '')
       .trim()
       .toUpperCase();
 
+  const name =
+    String(metadata.name || '')
+      .trim()
+      .toLowerCase();
+
+  const message =
+    error instanceof Error
+      ? error.message.toLowerCase()
+      : String(metadata.message || '')
+          .toLowerCase();
+
   if (
-    status === 401 ||
     code === 'UNAUTHENTICATED' ||
     code === 'AUTH_SESSION_MISSING' ||
-    code === 'SESSION_EXPIRED'
+    metadata.status === 401 ||
+    name.includes('unauthenticated')
   ) {
     return true;
   }
 
-  return (
-    normalizedMessage ===
-      'UNAUTHENTICATED' ||
-    normalizedMessage.startsWith(
-      'UNAUTHENTICATED:',
-    ) ||
-    normalizedMessage.includes(
-      'AUTH SESSION MISSING',
-    ) ||
-    normalizedMessage.includes(
-      'SESSION MISSING',
-    ) ||
-    normalizedMessage.includes(
-      'JWT EXPIRED',
-    ) ||
-    normalizedMessage.includes(
-      'INVALID JWT',
-    ) ||
-    normalizedMessage.includes(
-      'INVALID TOKEN',
-    )
+  return [
+    'unauthenticated',
+    'auth session missing',
+    'session missing',
+    'jwt expired',
+    'invalid jwt',
+    'invalid token',
+    'user not found',
+  ].some((knownMessage) =>
+    message.includes(knownMessage),
   );
 }
 
-/**
- * Overí, či chyba vznikla počas načítania stránkovej kvóty.
- */
-function isPageQuotaLoadError(
+function isInvalidQuotaError(
   error: unknown,
-  message: string,
 ): boolean {
-  const code =
-    getErrorCode(error)
-      ?.trim()
-      .toUpperCase();
+  const message =
+    error instanceof Error
+      ? error.message
+      : getErrorMetadata(error).message || '';
 
-  const normalizedMessage =
-    message
-      .trim()
-      .toUpperCase();
-
-  return (
-    code ===
-      'PAGE_QUOTA_LOAD_FAILED' ||
-    normalizedMessage.startsWith(
-      'PAGE_QUOTA_LOAD_FAILED',
-    ) ||
-    normalizedMessage.includes(
-      'ZEDPERA_PAGE_BALANCES',
-    ) ||
-    normalizedMessage.includes(
-      'BASE_PAGE_LIMIT',
-    ) ||
-    normalizedMessage.includes(
-      'EXTRA_PAGE_LIMIT',
-    ) ||
-    normalizedMessage.includes(
-      'USED_PAGES',
-    )
+  return message.includes(
+    'INVALID_PAGE_QUOTA_RESPONSE',
   );
 }
 
-/**
- * Technický detail sa neposiela do produkčného prostredia.
- */
 function getDevelopmentDetail(
-  message: string,
-): Pick<
-  PageQuotaErrorResponse,
-  'detail'
-> {
+  error: unknown,
+): string | undefined {
   if (
-    process.env.NODE_ENV ===
-    'production'
+    process.env.NODE_ENV !== 'development'
   ) {
-    return {};
+    return undefined;
   }
 
-  return {
-    detail: message,
-  };
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
 }
 
-// =====================================================
-// ROUTE
-// =====================================================
+function logRouteError(
+  error: unknown,
+  requestId: string,
+): void {
+  const metadata = getErrorMetadata(error);
+
+  console.error(
+    '[GET /api/usage/pages] Načítanie stránkovej kvóty zlyhalo.',
+    {
+      requestId,
+      name:
+        error instanceof Error
+          ? error.name
+          : metadata.name,
+      message:
+        error instanceof Error
+          ? error.message
+          : metadata.message,
+      code: metadata.code,
+      status: metadata.status,
+      stack:
+        process.env.NODE_ENV ===
+          'development' &&
+        error instanceof Error
+          ? error.stack
+          : undefined,
+    },
+  );
+}
+
+function createErrorResponse({
+  code,
+  message,
+  requestId,
+  purchaseUrl,
+  detail,
+}: {
+  code: ErrorCode;
+  message: string;
+  requestId: string;
+  purchaseUrl?: string;
+  detail?: string;
+}): ErrorResponse {
+  return {
+    ok: false,
+    success: false,
+
+    code,
+    message,
+    requestId,
+
+    ...(purchaseUrl
+      ? { purchaseUrl }
+      : {}),
+
+    ...(detail
+      ? { detail }
+      : {}),
+
+    error: {
+      code,
+      message,
+      requestId,
+      ...(detail
+        ? { detail }
+        : {}),
+    },
+  };
+}
 
 /**
  * GET /api/usage/pages
  *
  * Vráti aktuálnu stránkovú kvótu prihláseného používateľa.
- *
- * Úspešná odpoveď:
- *
- * {
- *   ok: true,
- *   planId: "bachelor-thesis",
- *   basePageLimit: 50,
- *   extraPageLimit: 20,
- *   pageLimit: 70,
- *   pagesUsed: 15,
- *   pagesRemaining: 55,
- *   pageLimitReached: false
- * }
+ * Endpoint neprijíma planId, admin flag, spotrebu ani limity z klienta.
+ * Všetky údaje pochádzajú zo serverovej session a databázy.
  */
 export async function GET(
   request: NextRequest,
-): Promise<
-  NextResponse<PageQuotaApiResponse>
-> {
-  const requestId =
-    resolveRequestId(request);
+): Promise<NextResponse> {
+  const requestId = resolveRequestId(request);
+  const headers = createResponseHeaders(requestId);
 
   try {
     const quota =
       await getCurrentPageQuota();
 
-    return createJsonResponse<PageQuotaSuccessResponse>(
-      {
-        ok: true,
-        ...quota,
+    const publicQuota =
+      normalizePageQuotaForApi(quota);
+
+    const response: SuccessResponse = {
+      ok: true,
+      success: true,
+      ...publicQuota,
+
+      meta: {
+        requestId,
+        generatedAt:
+          new Date().toISOString(),
+        cache: 'no-store',
       },
-      200,
-      requestId,
+    };
+
+    return NextResponse.json(
+      response,
+      {
+        status: 200,
+        headers,
+      },
     );
   } catch (error: unknown) {
-    const technicalMessage =
-      getErrorMessage(error);
+    logRouteError(error, requestId);
 
-    /**
-     * PageLimitError sa pri obyčajnom načítaní kvóty
-     * zvyčajne neočakáva.
-     *
-     * Spracovanie zostáva zachované pre konzistentnosť
-     * s ostatnými billing endpointmi.
-     */
     if (error instanceof PageLimitError) {
-      logHandledError(
-        '[GET /api/usage/pages] Stránkový limit bol vyčerpaný.',
+      const response = createErrorResponse({
+        code: 'PAGE_LIMIT_REACHED',
+        message: error.message,
         requestId,
-        error,
-      );
+        purchaseUrl:
+          error.purchaseUrl || PURCHASE_URL,
+      });
 
-      return createJsonResponse<PageQuotaErrorResponse>(
+      return NextResponse.json(
+        response,
         {
-          ok: false,
-          code: 'PAGE_LIMIT_REACHED',
-          message:
-            error.message ||
-            'Stránkový limit bol vyčerpaný.',
-          errorId: requestId,
-          retryable: false,
-          pageLimitReached: true,
-          purchaseUrl:
-            '/pricing#doplnkove-sluzby',
-          ...getDevelopmentDetail(
-            technicalMessage,
-          ),
+          status: error.status,
+          headers,
         },
-        error.status,
-        requestId,
       );
     }
 
-    if (
-      isUnauthenticatedError(
-        error,
-        technicalMessage,
-      )
-    ) {
-      logHandledError(
-        '[GET /api/usage/pages] Neprihlásená požiadavka.',
-        requestId,
-        error,
-      );
-
-      return createJsonResponse<PageQuotaErrorResponse>(
-        {
-          ok: false,
-          code: 'UNAUTHENTICATED',
-          message:
-            'Používateľ nie je prihlásený alebo jeho relácia vypršala.',
-          errorId: requestId,
-          retryable: false,
-          ...getDevelopmentDetail(
-            technicalMessage,
-          ),
-        },
-        401,
-        requestId,
-      );
-    }
-
-    if (
-      isPageQuotaLoadError(
-        error,
-        technicalMessage,
-      )
-    ) {
-      logHandledError(
-        '[GET /api/usage/pages] Načítanie stránkovej kvóty zlyhalo.',
-        requestId,
-        error,
-      );
-
-      return createJsonResponse<PageQuotaErrorResponse>(
-        {
-          ok: false,
-          code:
-            'PAGE_QUOTA_LOAD_FAILED',
-          message:
-            'Stránkový limit sa nepodarilo načítať. Skúste požiadavku zopakovať.',
-          errorId: requestId,
-          retryable: true,
-          ...getDevelopmentDetail(
-            technicalMessage,
-          ),
-        },
-        500,
-        requestId,
-      );
-    }
-
-    logHandledError(
-      '[GET /api/usage/pages] Neočakávaná serverová chyba.',
-      requestId,
-      error,
-    );
-
-    return createJsonResponse<PageQuotaErrorResponse>(
-      {
-        ok: false,
-        code:
-          'INTERNAL_SERVER_ERROR',
+    if (isUnauthenticatedError(error)) {
+      const response = createErrorResponse({
+        code: 'UNAUTHENTICATED',
         message:
-          'Pri načítavaní stránkového limitu nastala neočakávaná chyba.',
-        errorId: requestId,
-        retryable: true,
-        ...getDevelopmentDetail(
-          technicalMessage,
-        ),
-      },
-      500,
+          'Pre načítanie stránkového limitu sa musíte prihlásiť platným používateľským účtom.',
+        requestId,
+        detail:
+          getDevelopmentDetail(error),
+      });
+
+      return NextResponse.json(
+        response,
+        {
+          status: 401,
+          headers,
+        },
+      );
+    }
+
+    if (isInvalidQuotaError(error)) {
+      const response = createErrorResponse({
+        code: 'INVALID_PAGE_QUOTA_RESPONSE',
+        message:
+          'Server vrátil neplatný formát údajov o stránkovom limite.',
+        requestId,
+        detail:
+          getDevelopmentDetail(error),
+      });
+
+      return NextResponse.json(
+        response,
+        {
+          status: 500,
+          headers,
+        },
+      );
+    }
+
+    const response = createErrorResponse({
+      code: 'PAGE_QUOTA_LOAD_FAILED',
+      message:
+        'Aktuálny stránkový limit sa nepodarilo načítať.',
       requestId,
+      detail:
+        getDevelopmentDetail(error),
+    });
+
+    return NextResponse.json(
+      response,
+      {
+        status: 500,
+        headers,
+      },
     );
   }
 }

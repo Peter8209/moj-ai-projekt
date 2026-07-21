@@ -8,9 +8,12 @@
  * - Platené hlavné balíky sú mesačné predplatné.
  * - Doplnky zostávajú samostatné platby, pretože predstavujú jednorazové
  *   rozšírenie aktuálneho projektu alebo balíka.
- * - Administrátorský prístup sa nesmie určovať podľa e-mailu vo frontende.
- *   Hodnota isAdmin musí pochádzať zo servera/databázy a následne sa odovzdá
- *   pomocným funkciám v tomto katalógu.
+ * - Administrátorský prístup sa nesmie určovať podľa e-mailu, display name
+ *   ani iného klientského údaja.
+ * - Hodnoty isAdmin a hasUnlimitedAccess musia pochádzať zo servera/databázy
+ *   a následne sa odovzdajú pomocným funkciám v tomto katalógu.
+ * - FREE zostáva verejným balíkom pre bežných používateľov. ADMIN sa nikdy
+ *   nesmie prepnúť na FREE, zobrazovať vo verejnom cenníku ani poslať do Stripe.
  */
 
 // =====================================================
@@ -97,6 +100,15 @@ type PlanDefinitionBase = {
   pageLimit: number | null;
   promptLimit: number | null;
   attachmentLimit: number | null;
+
+  /**
+   * Autoritatívny katalógový príznak neobmedzeného prístupu.
+   *
+   * Pri bežných a platených balíkoch musí byť false.
+   * Iba interný ADMIN plán má hodnotu true.
+   */
+  hasUnlimitedAccess: boolean;
+
   features: readonly FeatureKey[];
   sortOrder: number;
 
@@ -174,10 +186,22 @@ export type EntitlementAccessOptions = {
    * Nikdy nenastavujte túto hodnotu iba podľa e-mailu vo frontende.
    */
   isAdmin?: boolean;
+
+  /**
+   * Serverový bypass limitov. Použite ho iba vtedy, keď bol neobmedzený
+   * prístup bezpečne určený z databázy alebo serverovej entitlement logiky.
+   */
+  hasUnlimitedAccess?: boolean;
 };
 
 export type EffectiveEntitlementLimits = {
   isAdmin: boolean;
+  hasUnlimitedAccess: boolean;
+
+  /**
+   * Alias zachovaný kvôli spätnej kompatibilite existujúcich komponentov.
+   * Má rovnakú hodnotu ako hasUnlimitedAccess.
+   */
   isUnlimited: boolean;
   pageLimit: number | null;
   promptLimit: number | null;
@@ -279,6 +303,7 @@ export const PLANS = {
     pageLimit: 3,
     promptLimit: 3,
     attachmentLimit: 1,
+    hasUnlimitedAccess: false,
     features: [...FREE_FEATURES],
     isPublic: true,
     isPurchasable: false,
@@ -301,6 +326,7 @@ export const PLANS = {
     pageLimit: 15,
     promptLimit: null,
     attachmentLimit: 12,
+    hasUnlimitedAccess: false,
     features: [...CORE_WRITING_FEATURES],
     isPublic: true,
     isPurchasable: true,
@@ -323,6 +349,7 @@ export const PLANS = {
     pageLimit: 50,
     promptLimit: null,
     attachmentLimit: 12,
+    hasUnlimitedAccess: false,
     features: [
       ...CORE_WRITING_FEATURES,
       ...BACHELOR_DATA_FEATURES,
@@ -349,6 +376,7 @@ export const PLANS = {
     pageLimit: 70,
     promptLimit: null,
     attachmentLimit: 12,
+    hasUnlimitedAccess: false,
     features: [
       ...CORE_WRITING_FEATURES,
       ...COMPLETE_DATA_FEATURES,
@@ -376,6 +404,7 @@ export const PLANS = {
     pageLimit: null,
     promptLimit: null,
     attachmentLimit: null,
+    hasUnlimitedAccess: true,
 
     features: [...ALL_FEATURES],
 
@@ -602,11 +631,12 @@ export const ALL_PLAN_IDS = Object.freeze(
  * Verejné plány určené pre pricing a výber balíka.
  * ADMIN sa sem zámerne nedostane.
  */
-export const PLAN_IDS = Object.freeze(
-  ALL_PLAN_IDS.filter(
-    (planId) => PLANS[planId].isPublic !== false,
-  ),
-);
+export const PLAN_IDS = Object.freeze([
+  'free',
+  'seminar-work',
+  'bachelor-thesis',
+  'master-thesis',
+] as const satisfies readonly Exclude<PlanId, 'admin'>[]);
 
 export const ADDON_IDS = Object.freeze(
   Object.keys(ADDONS) as AddonId[],
@@ -641,6 +671,16 @@ function hasOwnKey<TObject extends object>(
 
 export function isPlanId(value: unknown): value is PlanId {
   return typeof value === 'string' && hasOwnKey(PLANS, value);
+}
+
+export function isAdminPlanId(value: unknown): value is 'admin' {
+  return value === 'admin';
+}
+
+export function isPublicPlanId(
+  value: unknown,
+): value is Exclude<PlanId, 'admin'> {
+  return isPlanId(value) && value !== 'admin';
 }
 
 export function isPaidPlanId(value: unknown): value is PaidPlanId {
@@ -684,7 +724,7 @@ export function isPurchasableCatalogId(
 // =====================================================
 
 export function getPlanDefinition(planId: PlanId): PlanDefinition {
-  return PLANS[planId];
+  return PLANS[planId] as PlanDefinition;
 }
 
 export function getAddonDefinition(addonId: AddonId): AddonDefinition {
@@ -695,7 +735,7 @@ export function getCatalogDefinition(
   itemId: PlanId | AddonId,
 ): CatalogDefinition {
   if (isPlanId(itemId)) {
-    return PLANS[itemId];
+    return PLANS[itemId] as PlanDefinition;
   }
 
   return ADDONS[itemId];
@@ -873,6 +913,24 @@ export function getConfiguredStripePrices(): Partial<
 // LIMITY A OPRÁVNENIA
 // =====================================================
 
+/**
+ * Vráti true iba pre bezpečne určený administrátorský alebo neobmedzený
+ * prístup. E-mail, display name ani údaje z klienta sa tu nepoužívajú.
+ */
+export function hasUnlimitedPlanAccess(
+  planId: PlanId,
+  options: EntitlementAccessOptions = {},
+): boolean {
+  const plan = getPlanDefinition(planId);
+
+  return (
+    options.isAdmin === true ||
+    options.hasUnlimitedAccess === true ||
+    planId === 'admin' ||
+    plan.hasUnlimitedAccess
+  );
+}
+
 export function getExtraPagesForAddons(
   addonIds: readonly AddonId[],
 ): number {
@@ -912,9 +970,15 @@ export function getEffectiveEntitlementLimits(
     options.isAdmin === true ||
     planId === 'admin';
 
-  if (isAdmin) {
+  const hasUnlimitedAccess = hasUnlimitedPlanAccess(
+    planId,
+    options,
+  );
+
+  if (hasUnlimitedAccess) {
     return {
-      isAdmin: true,
+      isAdmin,
+      hasUnlimitedAccess: true,
       isUnlimited: true,
       pageLimit: null,
       promptLimit: null,
@@ -924,6 +988,7 @@ export function getEffectiveEntitlementLimits(
 
   return {
     isAdmin: false,
+    hasUnlimitedAccess: false,
     isUnlimited: false,
     pageLimit: getTotalPageLimit(planId, addonIds),
     promptLimit: PLANS[planId].promptLimit,
@@ -940,10 +1005,7 @@ export function getFeaturesForEntitlements(
   addonIds: readonly AddonId[] = [],
   options: EntitlementAccessOptions = {},
 ): Set<FeatureKey> {
-  if (
-    options.isAdmin === true ||
-    planId === 'admin'
-  ) {
+  if (hasUnlimitedPlanAccess(planId, options)) {
     return getAllFeatures();
   }
 
@@ -984,10 +1046,7 @@ export function entitlementsIncludeFeature(
   feature: FeatureKey,
   options: EntitlementAccessOptions = {},
 ): boolean {
-  if (
-    options.isAdmin === true ||
-    planId === 'admin'
-  ) {
+  if (hasUnlimitedPlanAccess(planId, options)) {
     return true;
   }
 
@@ -1000,11 +1059,29 @@ export function entitlementsIncludeFeature(
   );
 }
 
+/**
+ * Bezpečná normalizácia bez automatického downgrade na FREE.
+ *
+ * Túto funkciu používajte pri načítaní databázového entitlementu, aby sa
+ * chýbajúca alebo neplatná hodnota dala odlíšiť od skutočného FREE balíka.
+ */
+export function normalizePlanIdOrNull(
+  value: unknown,
+): PlanId | null {
+  return isPlanId(value) ? value : null;
+}
+
+/**
+ * Spätne kompatibilná normalizácia s fallbackom.
+ *
+ * V serverovej entitlement logike najskôr použite normalizePlanIdOrNull()
+ * a ADMIN vyhodnoťte pred fallbackom na FREE.
+ */
 export function normalizePlanId(
   value: unknown,
   fallback: PlanId = 'free',
 ): PlanId {
-  return isPlanId(value) ? value : fallback;
+  return normalizePlanIdOrNull(value) ?? fallback;
 }
 
 export function normalizeAddonIds(

@@ -1,0 +1,7663 @@
+﻿ZEDPERA – AKTUÁLNE SÚBORY PRE OBJEDNÁVKY
+Vytvorené: 2026-07-21 07:07:50
+Git branch: main
+
+
+============================================================
+SÚBOR: package.json
+============================================================
+{
+  "name": "zedpera",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.74",
+    "@ai-sdk/cohere": "^3.0.32",
+    "@ai-sdk/google": "^3.0.67",
+    "@ai-sdk/groq": "^3.0.38",
+    "@ai-sdk/mistral": "^3.0.33",
+    "@ai-sdk/openai": "^3.0.64",
+    "@ai-sdk/perplexity": "^3.0.31",
+    "@ai-sdk/react": "^3.0.172",
+    "@ai-sdk/xai": "^3.0.87",
+    "@google/generative-ai": "^0.24.1",
+    "@napi-rs/canvas": "^1.0.0",
+    "@supabase/ssr": "^0.10.3",
+    "@supabase/supabase-js": "^2.106.1",
+    "@vercel/blob": "^2.6.1",
+    "ai": "^6.0.184",
+    "axios": "^1.15.2",
+    "bcryptjs": "^3.0.3",
+    "exceljs": "^4.4.0",
+    "html2pdf.js": "^0.14.0",
+    "jszip": "^3.10.1",
+    "lucide-react": "^1.14.0",
+    "mammoth": "^1.12.0",
+    "next": "16.2.4",
+    "openai": "^6.35.0",
+    "pdf-parse": "^1.1.4",
+    "pdfjs-dist": "^5.7.284",
+    "pdfkit": "^0.18.0",
+    "pptxgenjs": "^4.0.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-hook-form": "^7.73.1",
+    "resend": "^6.12.3",
+    "stripe": "^22.1.1",
+    "swr": "^2.4.1",
+    "xlsx": "^0.18.5",
+    "zod": "^3.25.76",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.19.41",
+    "@types/pdf-parse": "^1.1.5",
+    "@types/pdfkit": "^0.17.6",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "autoprefixer": "^10.5.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.2.4",
+    "postcss": "^8.5.10",
+    "tailwindcss": "^4.2.4",
+    "typescript": "^5"
+  }
+}
+
+
+============================================================
+SÚBOR: app\api\payments\checkout\route.ts
+============================================================
+import {
+  createHash,
+  randomUUID,
+} from 'node:crypto';
+
+import Stripe from 'stripe';
+import { NextResponse } from 'next/server';
+
+import {
+  ADDONS,
+  PLANS,
+  type AddonId,
+  type PlanId,
+} from '@/lib/billing/catalog';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const maxDuration = 60;
+
+// Stripe klient sa neinicializuje na top-level, aby build nespadol
+// pri chĂ˝bajĂşcej STRIPE_SECRET_KEY poÄŤas zostavovania aplikĂˇcie.
+let stripeClient: Stripe | null = null;
+
+// ============================================================
+// TYPES
+// ============================================================
+
+type CheckoutBody = {
+  plan?: unknown;
+  planId?: unknown;
+  selectedPlan?: unknown;
+
+  addons?: unknown;
+  addonIds?: unknown;
+  addOns?: unknown;
+  selectedAddons?: unknown;
+
+  locale?: unknown;
+  language?: unknown;
+  lang?: unknown;
+
+  requestId?: unknown;
+  checkoutRequestId?: unknown;
+
+  // ZostĂˇvajĂş iba kvĂ´li spĂ¤tnej kompatibilite vstupnĂ©ho JSON.
+  // Server ich zĂˇmerne nepouĹľĂ­va, aby nevznikol open redirect.
+  successUrl?: unknown;
+  cancelUrl?: unknown;
+
+  // userId ani e-mail sa nesmĂş preberaĹĄ z klienta.
+  userId?: unknown;
+  email?: unknown;
+  customerEmail?: unknown;
+  userEmail?: unknown;
+};
+
+type PaidPlanId = Exclude<PlanId, 'free' | 'admin'>;
+
+type PurchaseType = 'plan' | 'addon' | 'plan_with_addons';
+
+type CurrentEntitlementRow = {
+  plan_id: string | null;
+  addon_ids: string[] | null;
+  billing_status: string | null;
+  stripe_customer_id: string | null;
+};
+
+type StripeMetadata = Record<string, string>;
+
+/**
+ * stripe-node v22 prestal spoÄľahlivo re-exportovaĹĄ vstupnĂ© typy
+ * cez pĂ´vodnĂ˝ namespacovĂ˝ typ parametrov Checkout Session.
+ *
+ * Typ parametrov preto odvodzujeme priamo zo skutoÄŤnej metĂłdy
+ * stripe.checkout.sessions.create(). Takto zostane route typovo
+ * bezpeÄŤnĂˇ aj pri novĹˇĂ­ch verziĂˇch stripe-node.
+ */
+type CheckoutSessionCreateMethod =
+  Stripe['checkout']['sessions']['create'];
+
+type CheckoutSessionCreateParams = NonNullable<
+  Parameters<CheckoutSessionCreateMethod>[0]
+>;
+
+type CheckoutLineItem = NonNullable<
+  CheckoutSessionCreateParams['line_items']
+>[number];
+
+// ============================================================
+// CATALOG CONSTANTS
+// ============================================================
+
+const CURRENCY = 'eur' as const;
+
+const NO_STORE_HEADERS = {
+  'Cache-Control':
+    'no-store, no-cache, must-revalidate, proxy-revalidate',
+  Pragma: 'no-cache',
+  Expires: '0',
+} as const;
+
+const REQUEST_ID_PATTERN = /^[a-zA-Z0-9_.:-]+$/;
+const MAX_REQUEST_ID_LENGTH = 180;
+const CHECKOUT_SOURCE = 'zedpera';
+const CHECKOUT_CATALOG_VERSION = '2026-07';
+
+const SUPPORTED_LOCALES = [
+  'sk',
+  'cs',
+  'en',
+  'de',
+  'pl',
+  'hu',
+] as const;
+
+type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
+
+const VALID_PLAN_IDS = new Set<PlanId>(
+  Object.keys(PLANS) as PlanId[],
+);
+
+const VALID_ADDON_IDS = new Set<AddonId>(
+  Object.keys(ADDONS) as AddonId[],
+);
+
+const PURCHASABLE_PLAN_IDS = (
+  Object.keys(PLANS) as PlanId[]
+).filter(
+  (planId): planId is PaidPlanId =>
+    planId !== 'free' && planId !== 'admin',
+);
+
+// ============================================================
+// GENERIC HELPERS
+// ============================================================
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function firstDefined(...values: unknown[]): unknown {
+  return values.find((value) => value !== undefined && value !== null);
+}
+
+function normalizeString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeEmail(value: unknown): string {
+  return normalizeString(value).toLowerCase();
+}
+
+function normalizeLocale(value: unknown): SupportedLocale {
+  const normalized = normalizeString(value).toLowerCase();
+
+  return SUPPORTED_LOCALES.includes(normalized as SupportedLocale)
+    ? (normalized as SupportedLocale)
+    : 'sk';
+}
+
+function uniqueValues<T>(values: T[]): T[] {
+  return Array.from(new Set(values));
+}
+
+function createJsonResponse<T>(
+  payload: T,
+  init?: ResponseInit,
+) {
+  const headers = new Headers(init?.headers);
+
+  Object.entries(NO_STORE_HEADERS).forEach(([key, value]) => {
+    headers.set(key, value);
+  });
+
+  return NextResponse.json(payload, {
+    ...init,
+    headers,
+  });
+}
+
+function isProduction(): boolean {
+  return process.env.NODE_ENV === 'production';
+}
+
+function getSafeErrorDetail(message: string): Record<string, string> {
+  return isProduction() ? {} : { detail: message };
+}
+
+function isActiveEntitlement(billingStatus: string | null): boolean {
+  const normalizedStatus = normalizeString(billingStatus).toLowerCase();
+
+  // Pri starĹˇĂ­ch zĂˇznamoch mĂ´Ĺľe byĹĄ billing_status prĂˇzdny. Ak je pouĹľĂ­vateÄľovi
+  // uloĹľenĂ˝ platenĂ˝ plan_id, prĂˇzdny stav neblokujeme iba kvĂ´li migrĂˇcii dĂˇt.
+  if (!normalizedStatus) {
+    return true;
+  }
+
+  return !new Set([
+    'canceled',
+    'cancelled',
+    'expired',
+    'failed',
+    'inactive',
+    'past_due',
+    'revoked',
+    'unpaid',
+  ]).has(normalizedStatus);
+}
+
+function normalizeCurrentPlanId(value: unknown): PlanId {
+  const normalized = normalizeString(value);
+
+  if (isKnownPlanId(normalized)) {
+    return normalized;
+  }
+
+  return 'free';
+}
+
+function getBaseUrl(): string {
+  const rawBaseUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+    process.env.VERCEL_URL ||
+    'http://localhost:3000';
+
+  const withProtocol =
+    rawBaseUrl.startsWith('http://') || rawBaseUrl.startsWith('https://')
+      ? rawBaseUrl
+      : `https://${rawBaseUrl}`;
+
+  return withProtocol.replace(/\/+$/, '');
+}
+
+function getSuccessUrl(
+  baseUrl: string,
+  locale: SupportedLocale,
+): string {
+  return (
+    `${baseUrl}/payment/success` +
+    `?session_id={CHECKOUT_SESSION_ID}` +
+    `&lang=${encodeURIComponent(locale)}`
+  );
+}
+
+function getCancelUrl(
+  baseUrl: string,
+  locale: SupportedLocale,
+): string {
+  return (
+    `${baseUrl}/pricing` +
+    `?payment=cancelled` +
+    `&lang=${encodeURIComponent(locale)}`
+  );
+}
+
+function getFreeDashboardUrl(baseUrl: string): string {
+  return `${baseUrl}/dashboard?plan=free`;
+}
+
+function getStripe(): Stripe {
+  const secretKey = normalizeString(process.env.STRIPE_SECRET_KEY);
+
+  if (!secretKey) {
+    throw new Error('STRIPE_CONFIG_MISSING: Missing STRIPE_SECRET_KEY');
+  }
+
+  if (!stripeClient) {
+    stripeClient = new Stripe(secretKey, {
+      maxNetworkRetries: 2,
+      timeout: 20_000,
+    });
+  }
+
+  return stripeClient;
+}
+
+// ============================================================
+// INPUT NORMALIZATION
+// ============================================================
+
+function getRawPlan(body: CheckoutBody): unknown {
+  return firstDefined(body.plan, body.planId, body.selectedPlan);
+}
+
+function getRawAddons(body: CheckoutBody): unknown[] {
+  const rawAddons = firstDefined(
+    body.addonIds,
+    body.addons,
+    body.addOns,
+    body.selectedAddons,
+  );
+
+  if (
+    rawAddons === undefined ||
+    rawAddons === null ||
+    rawAddons === ''
+  ) {
+    return [];
+  }
+
+  if (Array.isArray(rawAddons)) {
+    return rawAddons;
+  }
+
+  if (typeof rawAddons === 'string') {
+    const normalized = rawAddons.trim();
+
+    if (!normalized) {
+      return [];
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(normalized);
+
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // SpĂ¤tnĂˇ kompatibilita so zoznamom oddelenĂ˝m ÄŤiarkou.
+    }
+
+    return normalized
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }
+
+  // NeplatnĂ˝ objekt/typ sa nĂˇsledne zobrazĂ­ medzi invalidAddons.
+  return [rawAddons];
+}
+
+function isKnownPlanId(value: unknown): value is PlanId {
+  return (
+    typeof value === 'string' &&
+    VALID_PLAN_IDS.has(value.trim() as PlanId)
+  );
+}
+
+function isKnownAddonId(value: unknown): value is AddonId {
+  return (
+    typeof value === 'string' &&
+    VALID_ADDON_IDS.has(value.trim() as AddonId)
+  );
+}
+
+function resolvePlanId(rawPlan: unknown): {
+  planId: PlanId | null;
+  invalidValue: unknown | null;
+} {
+  const normalized = normalizeString(rawPlan);
+
+  if (!normalized) {
+    return {
+      planId: null,
+      invalidValue: null,
+    };
+  }
+
+  if (!isKnownPlanId(normalized)) {
+    return {
+      planId: null,
+      invalidValue: rawPlan,
+    };
+  }
+
+  // FREE nie je platenĂˇ poloĹľka. Pri nĂˇkupe doplnku ho povaĹľujeme
+  // za nĂˇkup bez zmeny zĂˇkladnĂ©ho balĂ­ka.
+  if (normalized === 'free') {
+    return {
+      planId: null,
+      invalidValue: null,
+    };
+  }
+
+  return {
+    planId: normalized,
+    invalidValue: null,
+  };
+}
+
+function resolveAddonIds(rawAddons: unknown[]): {
+  addonIds: AddonId[];
+  invalidAddons: unknown[];
+} {
+  const invalidAddons = rawAddons.filter(
+    (value) => !isKnownAddonId(normalizeString(value)),
+  );
+
+  const addonIds = uniqueValues(
+    rawAddons
+      .map((value) => normalizeString(value))
+      .filter(isKnownAddonId),
+  );
+
+  return {
+    addonIds,
+    invalidAddons,
+  };
+}
+
+function resolveCheckoutRequestId(
+  request: Request,
+  body: CheckoutBody,
+): string {
+  const bodyRequestId = normalizeString(
+    firstDefined(body.requestId, body.checkoutRequestId),
+  );
+
+  const headerRequestId = normalizeString(
+    request.headers.get('idempotency-key'),
+  );
+
+  if (
+    bodyRequestId &&
+    headerRequestId &&
+    bodyRequestId !== headerRequestId
+  ) {
+    throw new Error('REQUEST_ID_MISMATCH');
+  }
+
+  const requestId =
+    bodyRequestId ||
+    headerRequestId ||
+    `auto-${Math.floor(Date.now() / 60_000)}`;
+
+  if (
+    requestId.length > MAX_REQUEST_ID_LENGTH ||
+    !REQUEST_ID_PATTERN.test(requestId)
+  ) {
+    throw new Error('INVALID_REQUEST_ID');
+  }
+
+  return requestId;
+}
+
+// ============================================================
+// STRIPE PRICE HELPERS
+// ============================================================
+
+function toEnvironmentSuffix(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+}
+
+function getStripePriceIdForPlan(planId: PlanId): string {
+  const key = `STRIPE_PLAN_PRICE_${toEnvironmentSuffix(planId)}`;
+  return normalizeString(process.env[key]);
+}
+
+function getStripePriceIdForAddon(addonId: AddonId): string {
+  const key = `STRIPE_ADDON_PRICE_${toEnvironmentSuffix(addonId)}`;
+  return normalizeString(process.env[key]);
+}
+
+function createPlanLineItem(
+  planId: PlanId,
+): CheckoutLineItem {
+  const plan = PLANS[planId];
+  const stripePriceId = getStripePriceIdForPlan(planId);
+
+  if (stripePriceId) {
+    return {
+      price: stripePriceId,
+      quantity: 1,
+    };
+  }
+
+  return {
+    quantity: 1,
+    price_data: {
+      currency: CURRENCY,
+      unit_amount: plan.priceCents,
+      product_data: {
+        name: `ZEDPERA â€“ ${plan.name}`,
+        description: [
+          `${plan.pageLimit} strĂˇn`,
+          plan.promptLimit === null
+            ? 'neobmedzenĂ© prompty'
+            : `${plan.promptLimit} prompty`,
+          `${plan.attachmentLimit} prĂ­loh`,
+        ].join(' â€˘ '),
+        metadata: {
+          item_type: 'plan',
+          catalog_id: plan.id,
+        },
+      },
+    },
+  };
+}
+
+function createAddonLineItem(
+  addonId: AddonId,
+): CheckoutLineItem {
+  const addon = ADDONS[addonId];
+  const stripePriceId = getStripePriceIdForAddon(addonId);
+
+  if (stripePriceId) {
+    return {
+      price: stripePriceId,
+      quantity: 1,
+    };
+  }
+
+  const description =
+    addon.extraPages > 0
+      ? `NavĂ˝Ĺˇenie limitu o ${addon.extraPages} strĂˇn`
+      : 'RozĹˇĂ­renie funkciĂ­ ĂşÄŤtu ZEDPERA';
+
+  return {
+    quantity: 1,
+    price_data: {
+      currency: CURRENCY,
+      unit_amount: addon.priceCents,
+      product_data: {
+        name: `ZEDPERA â€“ ${addon.name}`,
+        description,
+        metadata: {
+          item_type: 'addon',
+          catalog_id: addon.id,
+        },
+      },
+    },
+  };
+}
+
+function getPurchaseType(
+  planId: PlanId | null,
+  addonIds: AddonId[],
+): PurchaseType {
+  if (planId && addonIds.length > 0) {
+    return 'plan_with_addons';
+  }
+
+  return planId ? 'plan' : 'addon';
+}
+
+function getCatalogTotalCents(
+  planId: PlanId | null,
+  addonIds: AddonId[],
+): number {
+  const planPrice = planId ? PLANS[planId].priceCents : 0;
+  const addonsPrice = addonIds.reduce(
+    (total, addonId) => total + ADDONS[addonId].priceCents,
+    0,
+  );
+
+  return planPrice + addonsPrice;
+}
+
+function getPurchasedBasePages(planId: PlanId | null): number {
+  if (!planId) {
+    return 0;
+  }
+
+  const pageLimit = PLANS[planId].pageLimit;
+
+  return typeof pageLimit === 'number' && Number.isFinite(pageLimit)
+    ? Math.max(0, Math.trunc(pageLimit))
+    : 0;
+}
+
+function getPurchasedExtraPages(addonIds: AddonId[]): number {
+  return addonIds.reduce(
+    (total, addonId) => total + ADDONS[addonId].extraPages,
+    0,
+  );
+}
+
+function buildMetadata({
+  userId,
+  email,
+  planId,
+  addonIds,
+  requestId,
+  locale,
+}: {
+  userId: string;
+  email: string;
+  planId: PlanId | null;
+  addonIds: AddonId[];
+  requestId: string;
+  locale: SupportedLocale;
+}): StripeMetadata {
+  const purchaseType = getPurchaseType(planId, addonIds);
+  const basePages = getPurchasedBasePages(planId);
+  const extraPages = getPurchasedExtraPages(addonIds);
+  const totalCents = getCatalogTotalCents(planId, addonIds);
+
+  return {
+    user_id: userId,
+    user_email: email,
+    plan_id: planId || '',
+    addons: JSON.stringify(addonIds),
+    addon_ids: JSON.stringify(addonIds),
+    purchase_type: purchaseType,
+    base_pages: String(basePages),
+    extra_pages: String(extraPages),
+    catalog_total_cents: String(totalCents),
+    checkout_request_id: requestId,
+    catalog_version: CHECKOUT_CATALOG_VERSION,
+    locale,
+    guest_checkout: userId ? 'false' : 'true',
+    source: CHECKOUT_SOURCE,
+  };
+}
+
+function createIdempotencyKey({
+  userId,
+  planId,
+  addonIds,
+  requestId,
+}: {
+  userId: string;
+  planId: PlanId | null;
+  addonIds: AddonId[];
+  requestId: string;
+}): string {
+  const source = [
+    userId || 'guest',
+    planId || 'addon-only',
+    [...addonIds].sort().join(','),
+    requestId,
+  ].join('|');
+
+  const digest = createHash('sha256').update(source).digest('hex');
+
+  return `zedpera_checkout_${digest}`;
+}
+
+// ============================================================
+// ENTITLEMENT HELPERS
+// ============================================================
+
+async function loadCurrentEntitlement({
+  supabase,
+  userId,
+}: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  userId: string;
+}): Promise<CurrentEntitlementRow | null> {
+  const { data, error } = await supabase
+    .from('zedpera_user_entitlements')
+    .select(
+      'plan_id, addon_ids, billing_status, stripe_customer_id',
+    )
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`ENTITLEMENT_LOAD_FAILED: ${error.message}`);
+  }
+
+  return data as CurrentEntitlementRow | null;
+}
+
+// ============================================================
+// CUSTOMER HELPERS
+// ============================================================
+
+async function getOrCreateStripeCustomer({
+  stripe,
+  userId,
+  email,
+}: {
+  stripe: Stripe;
+  userId: string;
+  email: string;
+}): Promise<Stripe.Customer> {
+  const customers = await stripe.customers.list({
+    email,
+    limit: 100,
+  });
+
+  const matchingCustomer = customers.data.find(
+    (customer) => customer.metadata?.user_id === userId,
+  );
+
+  if (matchingCustomer) {
+    return matchingCustomer;
+  }
+
+  return stripe.customers.create(
+    {
+      email,
+      metadata: {
+        user_id: userId,
+        supabase_user_id: userId,
+        source: CHECKOUT_SOURCE,
+      },
+    },
+    {
+      idempotencyKey: `zedpera_customer_${userId}`,
+    },
+  );
+}
+
+// ============================================================
+// ERROR HELPERS
+// ============================================================
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (isRecord(error) && typeof error.message === 'string') {
+    return error.message;
+  }
+
+  return 'Unknown checkout error';
+}
+
+function getStripeErrorCode(error: unknown): string | null {
+  if (!isRecord(error)) {
+    return null;
+  }
+
+  if (typeof error.code === 'string') {
+    return error.code;
+  }
+
+  if (typeof error.type === 'string') {
+    return error.type;
+  }
+
+  return null;
+}
+
+// ============================================================
+// ROUTES
+// ============================================================
+
+export async function GET() {
+  return createJsonResponse({
+    ok: true,
+    route: '/api/payments/checkout',
+    message: 'ZEDPERA checkout endpoint is running.',
+    mode: 'payment',
+    freeRedirect: '/dashboard?plan=free',
+    successRedirect: '/payment/success?session_id={CHECKOUT_SESSION_ID}',
+    cancelRedirect: '/pricing?canceled=1',
+    plans: (Object.keys(PLANS) as PlanId[])
+      .filter((planId) => planId !== 'admin')
+      .map((planId) => ({
+        id: planId,
+        name: PLANS[planId].name,
+        priceCents: PLANS[planId].priceCents,
+        pageLimit: PLANS[planId].pageLimit,
+        promptLimit: PLANS[planId].promptLimit,
+        attachmentLimit: PLANS[planId].attachmentLimit,
+        checkoutRequired: planId !== 'free',
+      })),
+    addons: (Object.keys(ADDONS) as AddonId[]).map((addonId) => ({
+      id: addonId,
+      name: ADDONS[addonId].name,
+      priceCents: ADDONS[addonId].priceCents,
+      extraPages: ADDONS[addonId].extraPages,
+    })),
+  });
+}
+
+export async function POST(request: Request) {
+  const errorId = randomUUID();
+  let requestId = '';
+
+  try {
+    const contentType = request.headers.get('content-type') || '';
+
+    if (!contentType.toLowerCase().includes('application/json')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_CONTENT_TYPE',
+          code: 'INVALID_CONTENT_TYPE',
+          message: 'PoĹľiadavka musĂ­ pouĹľĂ­vaĹĄ Content-Type application/json.',
+          errorId,
+        },
+        { status: 415 },
+      );
+    }
+
+    let parsedBody: unknown;
+
+    try {
+      parsedBody = await request.json();
+    } catch {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_JSON',
+          code: 'INVALID_JSON',
+          message: 'Telo poĹľiadavky neobsahuje platnĂ˝ JSON.',
+          errorId,
+        },
+        { status: 400 },
+      );
+    }
+
+    if (!isRecord(parsedBody)) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_JSON',
+          code: 'INVALID_JSON',
+          message: 'Telo poĹľiadavky musĂ­ byĹĄ JSON objekt.',
+          errorId,
+        },
+        { status: 400 },
+      );
+    }
+
+    const body = parsedBody as CheckoutBody;
+    const rawPlan = getRawPlan(body);
+    const rawAddons = getRawAddons(body);
+    const normalizedRequestedPlan = normalizeString(rawPlan);
+
+    // ADMIN je internĂ˝ systĂ©movĂ˝ balĂ­k. Nesmie sa vytvoriĹĄ Stripe Checkout
+    // ani Stripe metadata, ktorĂ© by ho mohli priradiĹĄ pouĹľĂ­vateÄľovi nĂˇkupom.
+    if (normalizedRequestedPlan === 'admin') {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'ADMIN_PLAN_NOT_PURCHASABLE',
+          code: 'ADMIN_PLAN_NOT_PURCHASABLE',
+          message: 'AdministrĂˇtorskĂ˝ balĂ­k nie je moĹľnĂ© zakĂşpiĹĄ.',
+          errorId,
+        },
+        { status: 403 },
+      );
+    }
+
+    const {
+      planId,
+      invalidValue: invalidPlan,
+    } = resolvePlanId(rawPlan);
+
+    if (invalidPlan !== null) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_PLAN',
+          code: 'INVALID_PLAN',
+          errorId,
+          receivedPlan: invalidPlan,
+          message:
+            'NeplatnĂ© ID balĂ­ka. Checkout prijĂ­ma iba balĂ­ky z lib/billing/catalog.ts.',
+          received: invalidPlan,
+          allowedPlans: PURCHASABLE_PLAN_IDS,
+        },
+        { status: 400 },
+      );
+    }
+
+    const {
+      addonIds,
+      invalidAddons,
+    } = resolveAddonIds(rawAddons);
+
+    if (invalidAddons.length > 0) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_ADDON',
+          code: 'INVALID_ADDON',
+          errorId,
+          message:
+            'NiektorĂ˝ doplnok nemĂˇ platnĂ© ID podÄľa lib/billing/catalog.ts.',
+          invalidAddons,
+          allowedAddons: Object.keys(ADDONS),
+        },
+        { status: 400 },
+      );
+    }
+
+    const baseUrl = getBaseUrl();
+    const isFreeSelection = normalizedRequestedPlan === 'free';
+
+    // Free balĂ­k nevytvĂˇra Stripe Checkout a nevyĹľaduje prihlĂˇsenie.
+    // SamotnĂ˝ dashboard musĂ­ pre anonymnĂ©ho pouĹľĂ­vateÄľa uplatniĹĄ free limity.
+    if (isFreeSelection && addonIds.length === 0) {
+      const redirectUrl = getFreeDashboardUrl(baseUrl);
+
+      return createJsonResponse({
+        ok: true,
+        action: 'redirect',
+        checkoutRequired: false,
+        mode: 'free',
+        planId: 'free' as const,
+        url: redirectUrl,
+        redirectUrl,
+        redirectPath: '/dashboard?plan=free',
+        message:
+          'Free balĂ­k nevyĹľaduje Stripe platbu. PouĹľĂ­vateÄľ mĂ´Ĺľe pokraÄŤovaĹĄ priamo do dashboardu.',
+      });
+    }
+
+    if (!planId && addonIds.length === 0) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'EMPTY_CHECKOUT',
+          code: 'EMPTY_CHECKOUT',
+          errorId,
+          message:
+            'Vyberte platenĂ˝ balĂ­k alebo aspoĹ jeden doplnok.',
+          allowedPlans: PURCHASABLE_PLAN_IDS,
+          allowedAddons: Object.keys(ADDONS),
+        },
+        { status: 400 },
+      );
+    }
+
+    /*
+     * VĹˇetky platenĂ© poloĹľky mĂ´Ĺľu otvoriĹĄ Stripe Checkout aj bez aktĂ­vnej
+     * prihlasovacej relĂˇcie. Stripe si pri anonymnom nĂˇkupe vyĹľiada e-mail
+     * priamo na svojej zabezpeÄŤenej platobnej strĂˇnke.
+     *
+     * Webhook nĂˇsledne priradĂ­ objednĂˇvku k existujĂşcemu ZEDPERA ĂşÄŤtu podÄľa
+     * Supabase user_id alebo podÄľa e-mailu z Stripe Checkout Session.
+     */
+    const supabase = await createSupabaseServerClient();
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError && user?.id) {
+      throw new Error(`AUTH_CHECK_FAILED: ${authError.message}`);
+    }
+
+    const userId = normalizeString(user?.id);
+    const email = normalizeEmail(user?.email);
+    const isAuthenticated = Boolean(userId && email);
+
+    requestId = resolveCheckoutRequestId(request, body);
+
+    let currentEntitlement: CurrentEntitlementRow | null = null;
+
+    if (isAuthenticated) {
+      currentEntitlement = await loadCurrentEntitlement({
+        supabase,
+        userId,
+      });
+    }
+
+    const stripe = getStripe();
+    const locale = normalizeLocale(
+      firstDefined(body.locale, body.language, body.lang),
+    );
+
+    let stripeCustomerId = normalizeString(
+      currentEntitlement?.stripe_customer_id,
+    );
+
+    if (isAuthenticated && !stripeCustomerId) {
+      const customer = await getOrCreateStripeCustomer({
+        stripe,
+        userId,
+        email,
+      });
+
+      stripeCustomerId = customer.id;
+    }
+
+    const lineItems: CheckoutLineItem[] = [
+      ...(planId ? [createPlanLineItem(planId)] : []),
+      ...addonIds.map(createAddonLineItem),
+    ];
+
+    const metadata = buildMetadata({
+      userId,
+      email,
+      planId,
+      addonIds,
+      requestId,
+      locale,
+    });
+
+    const successUrl = getSuccessUrl(baseUrl, locale);
+    const cancelUrl = getCancelUrl(baseUrl, locale);
+
+    const sessionParams: CheckoutSessionCreateParams = {
+      mode: 'payment',
+      line_items: lineItems,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata,
+      payment_intent_data: {
+        metadata,
+        ...(email ? { receipt_email: email } : {}),
+      },
+      allow_promotion_codes: true,
+      billing_address_collection: 'auto',
+      automatic_tax: {
+        enabled: false,
+      },
+      locale: 'auto',
+      submit_type: 'pay',
+      expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
+    };
+
+    if (userId) {
+      sessionParams.client_reference_id = userId;
+    }
+
+    if (stripeCustomerId) {
+      sessionParams.customer = stripeCustomerId;
+      sessionParams.customer_update = {
+        address: 'auto',
+        name: 'auto',
+      };
+    } else {
+      // Bez zĂˇkaznĂ­ka Stripe zobrazĂ­ e-mailovĂ© pole priamo v Checkout.
+      sessionParams.customer_creation = 'always';
+
+      if (email) {
+        sessionParams.customer_email = email;
+      }
+    }
+
+    const idempotencyKey = createIdempotencyKey({
+      userId,
+      planId,
+      addonIds,
+      requestId,
+    });
+
+    const session = await stripe.checkout.sessions.create(
+      sessionParams,
+      {
+        idempotencyKey,
+      },
+    );
+
+    if (!session.url) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'CHECKOUT_SESSION_URL_MISSING',
+          code: 'CHECKOUT_SESSION_URL_MISSING',
+          errorId,
+          requestId,
+          message: 'Stripe nevygeneroval URL platobnej strĂˇnky.',
+          sessionId: session.id,
+        },
+        { status: 502 },
+      );
+    }
+
+    const purchaseType = getPurchaseType(planId, addonIds);
+    const totalCents = getCatalogTotalCents(planId, addonIds);
+
+    return createJsonResponse({
+      ok: true,
+      action: 'redirect',
+      checkoutRequired: true,
+      url: session.url,
+      redirectUrl: session.url,
+      sessionId: session.id,
+      requestId,
+      mode: 'payment',
+      purchaseType,
+
+      planId,
+      planName: planId ? PLANS[planId].name : null,
+      addonIds,
+      addonNames: addonIds.map((addonId) => ADDONS[addonId].name),
+
+      currency: CURRENCY.toUpperCase(),
+      catalogTotalCents: totalCents,
+      basePages: getPurchasedBasePages(planId),
+      extraPages: getPurchasedExtraPages(addonIds),
+
+      successUrl,
+      cancelUrl,
+      locale,
+      authenticated: isAuthenticated,
+    });
+  } catch (error: unknown) {
+    const detail = getErrorMessage(error);
+    const stripeCode = getStripeErrorCode(error);
+
+    console.error('ZEDPERA_CHECKOUT_ERROR', {
+      errorId,
+      requestId: requestId || null,
+      detail,
+      stripeCode,
+      error,
+    });
+
+    if (detail.includes('REQUEST_ID_MISMATCH')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'REQUEST_ID_MISMATCH',
+          code: 'REQUEST_ID_MISMATCH',
+          message:
+            'requestId sa nezhoduje s hlaviÄŤkou Idempotency-Key.',
+          errorId,
+          ...(requestId ? { requestId } : {}),
+        },
+        { status: 400 },
+      );
+    }
+
+    if (detail.includes('INVALID_REQUEST_ID')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_REQUEST_ID',
+          code: 'INVALID_REQUEST_ID',
+          message:
+            'requestId obsahuje nepovolenĂ© znaky alebo je prĂ­liĹˇ dlhĂ˝.',
+          errorId,
+          ...(requestId ? { requestId } : {}),
+        },
+        { status: 400 },
+      );
+    }
+
+    if (detail.includes('PAID_PLAN_REQUIRED')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'PAID_PLAN_REQUIRED',
+          code: 'PAID_PLAN_REQUIRED',
+          message:
+            'Doplnok je moĹľnĂ© kĂşpiĹĄ iba spolu s platenĂ˝m balĂ­kom alebo k aktĂ­vnemu platenĂ©mu balĂ­ku.',
+          errorId,
+          allowedPlans: PURCHASABLE_PLAN_IDS,
+          allowedAddons: Object.keys(ADDONS),
+          ...(requestId ? { requestId } : {}),
+        },
+        { status: 400 },
+      );
+    }
+
+    if (detail.includes('ENTITLEMENT_LOAD_FAILED')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'ENTITLEMENT_LOAD_FAILED',
+          code: 'ENTITLEMENT_LOAD_FAILED',
+          message:
+            'Nepodarilo sa overiĹĄ aktuĂˇlny pouĹľĂ­vateÄľskĂ˝ balĂ­k.',
+          errorId,
+          ...(requestId ? { requestId } : {}),
+          ...getSafeErrorDetail(detail),
+        },
+        { status: 500 },
+      );
+    }
+
+    if (detail.includes('AUTH_CHECK_FAILED')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'AUTH_CHECK_FAILED',
+          code: 'AUTH_CHECK_FAILED',
+          message: 'Nepodarilo sa bezpeÄŤne overiĹĄ aktuĂˇlne prihlĂˇsenie.',
+          errorId,
+          ...(requestId ? { requestId } : {}),
+          ...getSafeErrorDetail(detail),
+        },
+        { status: 500 },
+      );
+    }
+
+    if (detail.includes('STRIPE_CONFIG_MISSING')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'STRIPE_CONFIG_MISSING',
+          code: 'STRIPE_CONFIG_MISSING',
+          message:
+            'PlatobnĂˇ brĂˇna nie je sprĂˇvne nakonfigurovanĂˇ.',
+          errorId,
+          ...(requestId ? { requestId } : {}),
+          ...getSafeErrorDetail(detail),
+        },
+        { status: 500 },
+      );
+    }
+
+    const unavailable =
+      stripeCode === 'StripeConnectionError' ||
+      stripeCode === 'StripeAPIError' ||
+      stripeCode === 'StripeRateLimitError';
+
+    return createJsonResponse(
+      {
+        ok: false,
+        error: unavailable ? 'STRIPE_UNAVAILABLE' : 'CHECKOUT_FAILED',
+        code: unavailable ? 'STRIPE_UNAVAILABLE' : 'CHECKOUT_FAILED',
+        message: unavailable
+          ? 'PlatobnĂˇ brĂˇna je doÄŤasne nedostupnĂˇ. SkĂşste poĹľiadavku zopakovaĹĄ.'
+          : 'Stripe Checkout sa nepodarilo vytvoriĹĄ.',
+        errorId,
+        ...(requestId ? { requestId } : {}),
+        ...getSafeErrorDetail(detail),
+        ...(!isProduction() && stripeCode ? { stripeCode } : {}),
+      },
+      { status: unavailable ? 503 : 500 },
+    );
+  }
+}
+
+
+============================================================
+SÚBOR: app\api\payments\webhook\route.ts
+============================================================
+import Stripe from "stripe";
+import { NextResponse } from "next/server";
+
+import {
+  ADDONS,
+  PLANS,
+  type AddonId,
+  type PlanId,
+} from "@/lib/billing/catalog";
+import { applySuccessfulPagePurchase } from "@/lib/page-plan-activation";
+import { sendOrderConfirmationEmail } from "@/lib/email/order-confirmation";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const maxDuration = 60;
+
+let stripeClient: Stripe | null = null;
+
+// ============================================================
+// TYPES
+// ============================================================
+
+type MetadataRecord = Record<string, string>;
+
+type PaidPlanId = Exclude<PlanId, "free" | "admin">;
+
+type EntitlementRow = {
+  plan_id: string | null;
+  addon_ids: string[] | null;
+  prompts_used: number | null;
+  activated_at: string | null;
+  valid_until: string | null;
+  billing_status: string | null;
+};
+
+type ResolvedPurchase = {
+  userId: string;
+  planId: PaidPlanId | null;
+  purchasedAddonIds: AddonId[];
+  persistentAddonIds: AddonId[];
+  extraPageAddonIds: AddonId[];
+  extraPages: number;
+  metadata: MetadataRecord;
+};
+
+type AppliedPurchase = {
+  userId: string;
+  effectivePlanId: PlanId;
+  purchasedAddonIds: AddonId[];
+  activeAddonIds: AddonId[];
+  extraPages: number;
+};
+
+type EventProcessingResult = {
+  processed: boolean;
+  reason: string;
+  objectId?: string;
+  userId?: string;
+  planId?: PlanId | null;
+  purchasedAddonIds?: AddonId[];
+  activeAddonIds?: AddonId[];
+  extraPages?: number;
+  billingStatus?: string;
+  detail?: string;
+};
+
+type InvoiceParentShape = {
+  parent?: {
+    type?: string | null;
+    subscription_details?: {
+      subscription?: string | { id?: string | null } | null;
+      metadata?: Stripe.Metadata | null;
+    } | null;
+  } | null;
+};
+
+type LegacyInvoiceShape = {
+  subscription?: string | { id?: string | null } | null;
+  subscription_details?: {
+    metadata?: Stripe.Metadata | null;
+  } | null;
+};
+
+type SubscriptionPeriodShape = {
+  current_period_end?: number | null;
+};
+
+type SubscriptionItemPeriodShape = {
+  current_period_end?: number | null;
+};
+
+type LegacyInvoicePaidShape = {
+  paid?: boolean | null;
+};
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+
+const VALID_PLAN_IDS = new Set<PlanId>(Object.keys(PLANS) as PlanId[]);
+const VALID_ADDON_IDS = new Set<AddonId>(Object.keys(ADDONS) as AddonId[]);
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const EXPECTED_CURRENCY = "eur";
+
+const FULFILLED_MARKER_KEY = "zedpera_fulfilled";
+const FULFILLED_EVENT_KEY = "zedpera_fulfilled_event_id";
+const FULFILLED_AT_KEY = "zedpera_fulfilled_at";
+
+const PROCESSED_EVENTS_KEY = "zedpera_processed_event_ids";
+const MAX_STORED_EVENT_IDS = 8;
+
+const CANONICAL_USER_ID_KEY = "user_id";
+const CANONICAL_PLAN_ID_KEY = "plan_id";
+const CANONICAL_ADDON_IDS_KEY = "addon_ids";
+
+const TERMINAL_SUBSCRIPTION_STATUSES = new Set<Stripe.Subscription.Status>([
+  "canceled",
+  "incomplete_expired",
+]);
+
+const SUPPORTED_EVENTS = [
+  "checkout.session.completed",
+  "checkout.session.async_payment_succeeded",
+  "checkout.session.async_payment_failed",
+  "invoice.paid",
+  "invoice.payment_failed",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+] as const;
+
+// ============================================================
+// STRIPE INITIALIZATION
+// ============================================================
+
+function getStripeClient(secretKey: string): Stripe {
+  if (!stripeClient) {
+    stripeClient = new Stripe(secretKey, {
+      maxNetworkRetries: 2,
+      timeout: 20_000,
+      typescript: true,
+    });
+  }
+
+  return stripeClient;
+}
+
+// ============================================================
+// GENERIC HELPERS
+// ============================================================
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
+function normalizeMetadata(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+): MetadataRecord {
+  if (!metadata) {
+    return {};
+  }
+
+  const result: MetadataRecord = {};
+
+  for (const [key, value] of Object.entries(metadata)) {
+    if (typeof value !== "string") {
+      continue;
+    }
+
+    const normalizedValue = value.trim();
+
+    if (normalizedValue) {
+      result[key] = normalizedValue;
+    }
+  }
+
+  return result;
+}
+
+function mergeMetadata(
+  ...sources: Array<Stripe.Metadata | MetadataRecord | null | undefined>
+): MetadataRecord {
+  return sources.reduce<MetadataRecord>(
+    (result, source) => ({
+      ...result,
+      ...normalizeMetadata(source),
+    }),
+    {},
+  );
+}
+
+function readMetadataValue(metadata: MetadataRecord, keys: string[]): string {
+  for (const key of keys) {
+    const value = metadata[key];
+
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function getObjectId(
+  value:
+    | string
+    | {
+        id?: string | null;
+      }
+    | null
+    | undefined,
+): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value && typeof value.id === "string") {
+    return value.id;
+  }
+
+  return "";
+}
+
+function requireObjectId(
+  value:
+    | string
+    | {
+        id?: string | null;
+      }
+    | null
+    | undefined,
+  label: string,
+): string {
+  const objectId = getObjectId(value);
+
+  if (!objectId) {
+    throw new Error(`MISSING_${label}_ID`);
+  }
+
+  return objectId;
+}
+
+function normalizeUserId(value: unknown): string {
+  const candidate = String(value || "").trim();
+
+  return UUID_PATTERN.test(candidate) ? candidate : "";
+}
+
+function normalizeEmail(value: unknown): string {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getCheckoutCustomerEmail(
+  session: Stripe.Checkout.Session,
+): string {
+  const expandedCustomer =
+    typeof session.customer !== "string" && session.customer
+      ? "deleted" in session.customer && session.customer.deleted
+        ? null
+        : (session.customer as Stripe.Customer)
+      : null;
+
+  return normalizeEmail(
+    session.customer_details?.email ||
+      session.customer_email ||
+      expandedCustomer?.email ||
+      session.metadata?.user_email ||
+      session.metadata?.email,
+  );
+}
+
+async function findSupabaseUserIdByEmail(email: string): Promise<string> {
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!normalizedEmail) {
+    return "";
+  }
+
+  const admin = createAdminClient();
+  const perPage = 1000;
+
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+
+    if (error) {
+      throw new Error(`AUTH_USER_LOOKUP_FAILED: ${error.message}`);
+    }
+
+    const users = data?.users || [];
+    const matchingUser = users.find(
+      (user) => normalizeEmail(user.email) === normalizedEmail,
+    );
+
+    if (matchingUser?.id) {
+      return normalizeUserId(matchingUser.id);
+    }
+
+    if (users.length < perPage) {
+      break;
+    }
+  }
+
+  return "";
+}
+
+function normalizePlanId(value: unknown): PlanId | null {
+  const candidate = String(value || "").trim() as PlanId;
+
+  if (!candidate || !VALID_PLAN_IDS.has(candidate)) {
+    return null;
+  }
+
+  return candidate;
+}
+
+function normalizePaidPlanId(value: unknown): PaidPlanId | null {
+  const planId = normalizePlanId(value);
+
+  if (!planId || planId === "free" || planId === "admin") {
+    return null;
+  }
+
+  return planId;
+}
+
+function normalizeAddonIds(values: unknown[]): AddonId[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value || "").trim())
+        .filter((value): value is AddonId =>
+          VALID_ADDON_IDS.has(value as AddonId),
+        ),
+    ),
+  );
+}
+
+function parseAddonMetadata(value: unknown): AddonId[] {
+  if (Array.isArray(value)) {
+    return normalizeAddonIds(value);
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+
+  const normalizedValue = value.trim();
+
+  try {
+    const parsed = JSON.parse(normalizedValue);
+
+    if (Array.isArray(parsed)) {
+      return normalizeAddonIds(parsed);
+    }
+  } catch {
+    // StarĹˇie metadata mĂ´Ĺľu byĹĄ uloĹľenĂ© ako zoznam oddelenĂ˝ ÄŤiarkou.
+  }
+
+  return normalizeAddonIds(
+    normalizedValue
+      .split(/[;,|]/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+}
+
+function toSafeInteger(value: unknown, fallback = 0): number {
+  const numberValue = Number(value);
+
+  if (!Number.isFinite(numberValue)) {
+    return fallback;
+  }
+
+  return Math.max(Math.floor(numberValue), 0);
+}
+
+function unixToIso(value: unknown): string | null {
+  const unixSeconds = Number(value);
+
+  if (!Number.isFinite(unixSeconds) || unixSeconds <= 0) {
+    return null;
+  }
+
+  return new Date(unixSeconds * 1_000).toISOString();
+}
+
+function isPersistentAddon(addonId: AddonId): boolean {
+  return ADDONS[addonId].features.length > 0;
+}
+
+function isExtraPageAddon(addonId: AddonId): boolean {
+  return ADDONS[addonId].extraPages > 0;
+}
+
+function getExtraPages(addonIds: AddonId[]): number {
+  return addonIds.reduce(
+    (total, addonId) => total + ADDONS[addonId].extraPages,
+    0,
+  );
+}
+
+function normalizeExistingPlanId(value: unknown): PlanId {
+  return normalizePlanId(value) || "free";
+}
+
+function getPlanPageLimit(planId: PlanId): number | null {
+  const plan = PLANS[planId] as unknown as Record<string, unknown>;
+  const candidates = [
+    plan.pageLimit,
+    plan.basePageLimit,
+    plan.pages,
+    plan.maxPages,
+  ];
+
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+
+    if (Number.isFinite(value) && value >= 0) {
+      return Math.floor(value);
+    }
+  }
+
+  return null;
+}
+
+function getSubscriptionPeriodEnd(
+  subscription: Stripe.Subscription | null | undefined,
+): string | null {
+  if (!subscription) {
+    return null;
+  }
+
+  const legacyPeriodEnd = (subscription as unknown as SubscriptionPeriodShape)
+    .current_period_end;
+
+  const itemPeriodEnds = subscription.items.data
+    .map(
+      (item) =>
+        (item as unknown as SubscriptionItemPeriodShape).current_period_end,
+    )
+    .filter(
+      (value): value is number =>
+        typeof value === "number" && Number.isFinite(value) && value > 0,
+    );
+
+  const naturalPeriodEnd = Math.max(
+    typeof legacyPeriodEnd === "number" ? legacyPeriodEnd : 0,
+    ...itemPeriodEnds,
+  );
+
+  const effectivePeriodEnd =
+    subscription.cancel_at &&
+    (naturalPeriodEnd <= 0 || subscription.cancel_at < naturalPeriodEnd)
+      ? subscription.cancel_at
+      : naturalPeriodEnd;
+
+  return unixToIso(effectivePeriodEnd);
+}
+
+function getSubscriptionBillingStatus(
+  subscription: Stripe.Subscription,
+): string {
+  if (
+    subscription.cancel_at_period_end &&
+    (subscription.status === "active" || subscription.status === "trialing")
+  ) {
+    return "canceling";
+  }
+
+  return subscription.status;
+}
+
+function isInvoicePaid(invoice: Stripe.Invoice): boolean {
+  const legacyPaid = (invoice as unknown as LegacyInvoicePaidShape).paid;
+
+  return invoice.status === "paid" || legacyPaid === true;
+}
+
+function isCheckoutPaymentCompleted(session: Stripe.Checkout.Session): boolean {
+  return (
+    session.payment_status === "paid" ||
+    session.payment_status === "no_payment_required"
+  );
+}
+
+function isPermanentMetadataError(error: unknown): boolean {
+  const message = getErrorMessage(error);
+
+  return [
+    "USER_ID_METADATA_MISMATCH",
+    "MISSING_OR_INVALID_USER_ID",
+    "UNSUPPORTED_PLAN_ID:",
+    "PAID_CHECKOUT_CANNOT_ACTIVATE_FREE_PLAN",
+    "PAID_CHECKOUT_CANNOT_ACTIVATE_ADMIN_PLAN",
+    "MISSING_PURCHASE_METADATA",
+  ].some((code) => message.includes(code));
+}
+
+// ============================================================
+// IDEMPOTENCY METADATA
+// ============================================================
+
+function parseProcessedEventIds(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+): string[] {
+  const rawValue = normalizeMetadata(metadata)[PROCESSED_EVENTS_KEY];
+
+  if (!rawValue) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      rawValue
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function hasProcessedEvent(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+  eventId: string,
+): boolean {
+  return parseProcessedEventIds(metadata).includes(eventId);
+}
+
+function metadataWithProcessedEvent(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+  eventId: string,
+): MetadataRecord {
+  const currentMetadata = normalizeMetadata(metadata);
+  const eventIds = Array.from(
+    new Set([...parseProcessedEventIds(currentMetadata), eventId]),
+  ).slice(-MAX_STORED_EVENT_IDS);
+
+  return {
+    ...currentMetadata,
+    [PROCESSED_EVENTS_KEY]: eventIds.join(","),
+  };
+}
+
+function hasFulfilledMarker(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+): boolean {
+  return normalizeMetadata(metadata)[FULFILLED_MARKER_KEY] === "true";
+}
+
+function metadataWithFulfilledMarker(
+  metadata: Stripe.Metadata | MetadataRecord | null | undefined,
+  eventId: string,
+): MetadataRecord {
+  return {
+    ...metadataWithProcessedEvent(metadata, eventId),
+    [FULFILLED_MARKER_KEY]: "true",
+    [FULFILLED_EVENT_KEY]: eventId,
+    [FULFILLED_AT_KEY]: new Date().toISOString(),
+  };
+}
+
+// ============================================================
+// STRIPE OBJECT HELPERS
+// ============================================================
+
+async function retrieveCustomer(
+  stripe: Stripe,
+  customerId: string,
+): Promise<Stripe.Customer | null> {
+  if (!customerId) {
+    return null;
+  }
+
+  const customer = await stripe.customers.retrieve(customerId);
+
+  if ("deleted" in customer && customer.deleted) {
+    return null;
+  }
+
+  return customer as Stripe.Customer;
+}
+
+async function retrieveSubscription(
+  stripe: Stripe,
+  subscriptionId: string,
+): Promise<Stripe.Subscription | null> {
+  if (!subscriptionId) {
+    return null;
+  }
+
+  return stripe.subscriptions.retrieve(subscriptionId, {
+    expand: ["customer"],
+  });
+}
+
+function getInvoiceSubscriptionId(invoice: Stripe.Invoice): string {
+  const legacyInvoice = invoice as unknown as LegacyInvoiceShape;
+  const parentInvoice = invoice as unknown as InvoiceParentShape;
+
+  return (
+    getObjectId(legacyInvoice.subscription) ||
+    getObjectId(parentInvoice.parent?.subscription_details?.subscription)
+  );
+}
+
+function getInvoiceSubscriptionMetadata(
+  invoice: Stripe.Invoice,
+): MetadataRecord {
+  const legacyInvoice = invoice as unknown as LegacyInvoiceShape;
+  const parentInvoice = invoice as unknown as InvoiceParentShape;
+
+  return mergeMetadata(
+    legacyInvoice.subscription_details?.metadata,
+    parentInvoice.parent?.subscription_details?.metadata,
+  );
+}
+
+async function getPaymentIntentMetadata(
+  stripe: Stripe,
+  session: Stripe.Checkout.Session,
+): Promise<MetadataRecord> {
+  const paymentIntentId = getObjectId(session.payment_intent);
+
+  if (!paymentIntentId) {
+    return {};
+  }
+
+  try {
+    if (typeof session.payment_intent !== "string" && session.payment_intent) {
+      return normalizeMetadata(session.payment_intent.metadata);
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    return normalizeMetadata(paymentIntent.metadata);
+  } catch (error) {
+    console.warn("STRIPE_WEBHOOK_PAYMENT_INTENT_METADATA_WARNING:", {
+      paymentIntentId,
+      message: getErrorMessage(error),
+    });
+
+    return {};
+  }
+}
+
+async function getCustomerMetadataFromSession(
+  stripe: Stripe,
+  session: Stripe.Checkout.Session,
+): Promise<MetadataRecord> {
+  const customerId = getObjectId(session.customer);
+
+  if (!customerId) {
+    return {};
+  }
+
+  try {
+    if (typeof session.customer !== "string" && session.customer) {
+      if ("deleted" in session.customer && session.customer.deleted) {
+        return {};
+      }
+
+      return normalizeMetadata((session.customer as Stripe.Customer).metadata);
+    }
+
+    const customer = await retrieveCustomer(stripe, customerId);
+
+    return normalizeMetadata(customer?.metadata);
+  } catch (error) {
+    console.warn("STRIPE_WEBHOOK_CUSTOMER_METADATA_WARNING:", {
+      customerId,
+      message: getErrorMessage(error),
+    });
+
+    return {};
+  }
+}
+
+async function getSubscriptionFromSession(
+  stripe: Stripe,
+  session: Stripe.Checkout.Session,
+): Promise<Stripe.Subscription | null> {
+  const subscriptionId = getObjectId(session.subscription);
+
+  if (!subscriptionId) {
+    return null;
+  }
+
+  if (typeof session.subscription !== "string" && session.subscription) {
+    return session.subscription;
+  }
+
+  return retrieveSubscription(stripe, subscriptionId);
+}
+
+// ============================================================
+// PURCHASE METADATA
+// ============================================================
+
+function resolvePurchaseFromMetadata({
+  metadata,
+  fallbackUserId,
+}: {
+  metadata: MetadataRecord;
+  fallbackUserId?: string | null;
+}): ResolvedPurchase {
+  const metadataUserId = normalizeUserId(
+    readMetadataValue(metadata, [
+      "user_id",
+      "userId",
+      "userid",
+      "supabase_user_id",
+    ]),
+  );
+
+  const referenceUserId = normalizeUserId(fallbackUserId);
+
+  if (metadataUserId && referenceUserId && metadataUserId !== referenceUserId) {
+    throw new Error("USER_ID_METADATA_MISMATCH");
+  }
+
+  const userId = metadataUserId || referenceUserId;
+
+  if (!userId) {
+    throw new Error("MISSING_OR_INVALID_USER_ID");
+  }
+
+  const rawPlanId = readMetadataValue(metadata, [
+    "plan_id",
+    "planId",
+    "plan",
+    "selectedPlan",
+  ]);
+
+  const normalizedPlanId = normalizePlanId(rawPlanId);
+
+  if (rawPlanId && !normalizedPlanId) {
+    throw new Error(`UNSUPPORTED_PLAN_ID: ${rawPlanId}`);
+  }
+
+  if (normalizedPlanId === "free") {
+    throw new Error("PAID_CHECKOUT_CANNOT_ACTIVATE_FREE_PLAN");
+  }
+
+  if (normalizedPlanId === "admin") {
+    throw new Error("PAID_CHECKOUT_CANNOT_ACTIVATE_ADMIN_PLAN");
+  }
+
+  const planId = normalizePaidPlanId(normalizedPlanId);
+
+  const rawAddons = readMetadataValue(metadata, [
+    "addons",
+    "addon_ids",
+    "addonIds",
+    "selectedAddons",
+    "addOns",
+  ]);
+
+  const purchasedAddonIds = parseAddonMetadata(rawAddons);
+
+  if (!planId && purchasedAddonIds.length === 0) {
+    throw new Error("MISSING_PURCHASE_METADATA");
+  }
+
+  const persistentAddonIds = purchasedAddonIds.filter(isPersistentAddon);
+  const extraPageAddonIds = purchasedAddonIds.filter(isExtraPageAddon);
+
+  return {
+    userId,
+    planId,
+    purchasedAddonIds,
+    persistentAddonIds,
+    extraPageAddonIds,
+    extraPages: getExtraPages(extraPageAddonIds),
+    metadata,
+  };
+}
+
+async function resolveCheckoutPurchase({
+  stripe,
+  session,
+}: {
+  stripe: Stripe;
+  session: Stripe.Checkout.Session;
+}): Promise<ResolvedPurchase> {
+  const [customerMetadata, paymentIntentMetadata, subscription] =
+    await Promise.all([
+      getCustomerMetadataFromSession(stripe, session),
+      getPaymentIntentMetadata(stripe, session),
+      getSubscriptionFromSession(stripe, session),
+    ]);
+
+  let metadata = mergeMetadata(
+    customerMetadata,
+    subscription?.metadata,
+    paymentIntentMetadata,
+    session.metadata,
+  );
+
+  let resolvedUserId =
+    normalizeUserId(session.client_reference_id) ||
+    normalizeUserId(
+      readMetadataValue(metadata, [
+        "user_id",
+        "userId",
+        "userid",
+        "supabase_user_id",
+      ]),
+    );
+
+  /*
+   * Pri priamom anonymnom Stripe Checkoute nie je v session dostupnĂˇ
+   * Supabase relĂˇcia. Doplnok preto priradĂ­me k existujĂşcemu ZEDPERA ĂşÄŤtu
+   * podÄľa e-mailu, ktorĂ˝ zĂˇkaznĂ­k zadal priamo na Stripe platobnej strĂˇnke.
+   */
+  if (!resolvedUserId) {
+    const checkoutEmail = getCheckoutCustomerEmail(session);
+
+    if (checkoutEmail) {
+      resolvedUserId = await findSupabaseUserIdByEmail(checkoutEmail);
+
+      if (resolvedUserId) {
+        metadata = {
+          ...metadata,
+          user_id: resolvedUserId,
+          supabase_user_id: resolvedUserId,
+          user_email: checkoutEmail,
+          guest_checkout: "true",
+        };
+      }
+    }
+  }
+
+  return resolvePurchaseFromMetadata({
+    metadata,
+    fallbackUserId: resolvedUserId || session.client_reference_id,
+  });
+}
+
+async function resolveSubscriptionPurchase({
+  stripe,
+  subscription,
+  additionalMetadata,
+}: {
+  stripe: Stripe;
+  subscription: Stripe.Subscription;
+  additionalMetadata?: MetadataRecord;
+}): Promise<ResolvedPurchase> {
+  const customerId = getObjectId(subscription.customer);
+  const customer =
+    typeof subscription.customer !== "string" && subscription.customer
+      ? "deleted" in subscription.customer && subscription.customer.deleted
+        ? null
+        : (subscription.customer as Stripe.Customer)
+      : await retrieveCustomer(stripe, customerId);
+
+  const metadata = mergeMetadata(
+    customer?.metadata,
+    subscription.metadata,
+    additionalMetadata,
+  );
+
+  return resolvePurchaseFromMetadata({ metadata });
+}
+
+// ============================================================
+// ENTITLEMENTS
+// ============================================================
+
+async function loadCurrentEntitlement(
+  userId: string,
+): Promise<EntitlementRow | null> {
+  const admin = createAdminClient();
+
+  const { data, error } = await admin
+    .from("zedpera_user_entitlements")
+    .select(
+      [
+        "plan_id",
+        "addon_ids",
+        "prompts_used",
+        "activated_at",
+        "valid_until",
+        "billing_status",
+      ].join(", "),
+    )
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`ENTITLEMENT_LOAD_FAILED: ${error.message}`);
+  }
+
+  return data as EntitlementRow | null;
+}
+
+async function upsertEntitlementAfterPurchase({
+  userId,
+  planId,
+  persistentAddonIds,
+  billingStatus,
+  validUntil,
+  resetPrompts,
+}: {
+  userId: string;
+  planId: PaidPlanId | null;
+  persistentAddonIds: AddonId[];
+  billingStatus: string;
+  validUntil: string | null;
+  resetPrompts: boolean;
+}): Promise<{
+  effectivePlanId: PlanId;
+  activeAddonIds: AddonId[];
+}> {
+  const admin = createAdminClient();
+  const current = await loadCurrentEntitlement(userId);
+
+  const effectivePlanId = planId || normalizeExistingPlanId(current?.plan_id);
+  const plan = PLANS[effectivePlanId];
+
+  const currentPersistentAddonIds = normalizeAddonIds(
+    current?.addon_ids || [],
+  ).filter(isPersistentAddon);
+
+  const activeAddonIds = Array.from(
+    new Set([...currentPersistentAddonIds, ...persistentAddonIds]),
+  );
+
+  const now = new Date().toISOString();
+  const isNewPlanPurchase = planId !== null;
+
+  const { error } = await admin.from("zedpera_user_entitlements").upsert(
+    {
+      user_id: userId,
+      plan_id: effectivePlanId,
+      addon_ids: activeAddonIds,
+      prompt_limit: plan.promptLimit,
+      prompts_used:
+        isNewPlanPurchase && resetPrompts
+          ? 0
+          : toSafeInteger(current?.prompts_used, 0),
+      attachment_limit: plan.attachmentLimit,
+      billing_status: billingStatus,
+      activated_at: isNewPlanPurchase ? now : current?.activated_at || now,
+      valid_until: validUntil ?? current?.valid_until ?? null,
+      updated_at: now,
+    },
+    {
+      onConflict: "user_id",
+    },
+  );
+
+  if (error) {
+    throw new Error(`ENTITLEMENT_UPSERT_FAILED: ${error.message}`);
+  }
+
+  return {
+    effectivePlanId,
+    activeAddonIds,
+  };
+}
+
+async function applySuccessfulPurchase({
+  purchase,
+  paymentReference,
+  billingStatus,
+  validUntil,
+  resetPrompts,
+}: {
+  purchase: ResolvedPurchase;
+  paymentReference: string;
+  billingStatus: string;
+  validUntil: string | null;
+  resetPrompts: boolean;
+}): Promise<AppliedPurchase> {
+  const entitlement = await upsertEntitlementAfterPurchase({
+    userId: purchase.userId,
+    planId: purchase.planId,
+    persistentAddonIds: purchase.persistentAddonIds,
+    billingStatus,
+    validUntil,
+    resetPrompts,
+  });
+
+  const admin = createAdminClient();
+
+  const pageActivation = await applySuccessfulPagePurchase({
+    admin,
+    userId: purchase.userId,
+    planId: purchase.planId,
+    addonIds: purchase.purchasedAddonIds,
+    paymentReference,
+    resetPlan: purchase.planId !== null,
+  });
+
+  return {
+    userId: purchase.userId,
+    effectivePlanId: entitlement.effectivePlanId,
+    purchasedAddonIds: purchase.purchasedAddonIds,
+    activeAddonIds: entitlement.activeAddonIds,
+    extraPages: pageActivation.extraPages,
+  };
+}
+
+async function updateBillingStatus({
+  userId,
+  billingStatus,
+  validUntil,
+}: {
+  userId: string;
+  billingStatus: string;
+  validUntil?: string | null;
+}): Promise<void> {
+  const current = await loadCurrentEntitlement(userId);
+
+  if (!current) {
+    await downgradeUserToFree({
+      userId,
+      billingStatus,
+    });
+    return;
+  }
+
+  const admin = createAdminClient();
+  const now = new Date().toISOString();
+
+  const updatePayload: Record<string, unknown> = {
+    billing_status: billingStatus,
+    updated_at: now,
+  };
+
+  if (validUntil !== undefined) {
+    updatePayload.valid_until = validUntil;
+  }
+
+  const { error } = await admin
+    .from("zedpera_user_entitlements")
+    .update(updatePayload)
+    .eq("user_id", userId);
+
+  if (error) {
+    throw new Error(`BILLING_STATUS_UPDATE_FAILED: ${error.message}`);
+  }
+}
+
+async function downgradeUserToFree({
+  userId,
+  billingStatus,
+}: {
+  userId: string;
+  billingStatus: string;
+}): Promise<void> {
+  const admin = createAdminClient();
+  const freePlan = PLANS.free;
+  const freePageLimit = getPlanPageLimit("free");
+  const now = new Date().toISOString();
+
+  const payload: Record<string, unknown> = {
+    user_id: userId,
+    plan_id: "free",
+    addon_ids: [],
+    prompt_limit: freePlan.promptLimit,
+    prompts_used: 0,
+    attachment_limit: freePlan.attachmentLimit,
+    extra_page_limit: 0,
+    pages_used: 0,
+    billing_status: billingStatus,
+    activated_at: now,
+    valid_until: null,
+    updated_at: now,
+  };
+
+  if (freePageLimit !== null) {
+    payload.base_page_limit = freePageLimit;
+  }
+
+  const { error } = await admin
+    .from("zedpera_user_entitlements")
+    .upsert(payload, {
+      onConflict: "user_id",
+    });
+
+  if (error) {
+    throw new Error(`FREE_PLAN_DOWNGRADE_FAILED: ${error.message}`);
+  }
+}
+
+// ============================================================
+// CANONICAL STRIPE METADATA
+// ============================================================
+
+function canonicalPurchaseMetadata(purchase: ResolvedPurchase): MetadataRecord {
+  const metadata: MetadataRecord = {
+    [CANONICAL_USER_ID_KEY]: purchase.userId,
+    [CANONICAL_ADDON_IDS_KEY]: JSON.stringify(purchase.purchasedAddonIds),
+  };
+
+  if (purchase.planId) {
+    metadata[CANONICAL_PLAN_ID_KEY] = purchase.planId;
+  }
+
+  return metadata;
+}
+
+async function persistCanonicalCheckoutMetadata({
+  stripe,
+  session,
+  subscription,
+  purchase,
+}: {
+  stripe: Stripe;
+  session: Stripe.Checkout.Session;
+  subscription: Stripe.Subscription | null;
+  purchase: ResolvedPurchase;
+}): Promise<void> {
+  const canonicalMetadata = canonicalPurchaseMetadata(purchase);
+  const customerId = getObjectId(session.customer);
+  const paymentIntentId = getObjectId(session.payment_intent);
+
+  // Pri predplatnom sĂş metadata na Subscription objekte kritickĂ©, pretoĹľe
+  // z nich nasledujĂşce invoice.* udalosti obnovujĂş plĂˇn a kvĂłty.
+  if (subscription) {
+    await stripe.subscriptions.update(subscription.id, {
+      metadata: {
+        ...normalizeMetadata(subscription.metadata),
+        ...canonicalMetadata,
+      },
+    });
+  }
+
+  const optionalOperations: Array<Promise<unknown>> = [];
+
+  if (customerId) {
+    const currentCustomerMetadata =
+      typeof session.customer !== "string" && session.customer
+        ? "deleted" in session.customer && session.customer.deleted
+          ? {}
+          : normalizeMetadata((session.customer as Stripe.Customer).metadata)
+        : {};
+
+    optionalOperations.push(
+      stripe.customers.update(customerId, {
+        metadata: {
+          ...currentCustomerMetadata,
+          ...canonicalMetadata,
+        },
+      }),
+    );
+  }
+
+  if (paymentIntentId) {
+    const currentPaymentIntentMetadata =
+      typeof session.payment_intent !== "string" && session.payment_intent
+        ? normalizeMetadata(session.payment_intent.metadata)
+        : {};
+
+    optionalOperations.push(
+      stripe.paymentIntents.update(paymentIntentId, {
+        metadata: {
+          ...currentPaymentIntentMetadata,
+          ...canonicalMetadata,
+        },
+      }),
+    );
+  }
+
+  const results = await Promise.allSettled(optionalOperations);
+
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.warn("STRIPE_WEBHOOK_CANONICAL_METADATA_WARNING:", {
+        sessionId: session.id,
+        message: getErrorMessage(result.reason),
+      });
+    }
+  }
+}
+
+// ============================================================
+// EVENT MARKERS
+// ============================================================
+
+async function markCheckoutEvent({
+  stripe,
+  session,
+  subscription,
+  eventId,
+  fulfilled,
+}: {
+  stripe: Stripe;
+  session: Stripe.Checkout.Session;
+  subscription: Stripe.Subscription | null;
+  eventId: string;
+  fulfilled: boolean;
+}): Promise<void> {
+  const operations: Array<Promise<unknown>> = [];
+
+  const paymentIntentId = getObjectId(session.payment_intent);
+  const customerId = getObjectId(session.customer);
+
+  if (paymentIntentId) {
+    const metadata =
+      typeof session.payment_intent !== "string" && session.payment_intent
+        ? session.payment_intent.metadata
+        : undefined;
+
+    operations.push(
+      stripe.paymentIntents.update(paymentIntentId, {
+        metadata: fulfilled
+          ? metadataWithFulfilledMarker(metadata, eventId)
+          : metadataWithProcessedEvent(metadata, eventId),
+      }),
+    );
+  }
+
+  if (subscription) {
+    operations.push(
+      stripe.subscriptions.update(subscription.id, {
+        metadata: metadataWithProcessedEvent(subscription.metadata, eventId),
+      }),
+    );
+  }
+
+  if (customerId) {
+    const metadata =
+      typeof session.customer !== "string" && session.customer
+        ? "deleted" in session.customer && session.customer.deleted
+          ? undefined
+          : (session.customer as Stripe.Customer).metadata
+        : undefined;
+
+    operations.push(
+      stripe.customers.update(customerId, {
+        metadata: metadataWithProcessedEvent(metadata, eventId),
+      }),
+    );
+  }
+
+  await settleMarkerOperations("CHECKOUT", eventId, operations);
+}
+
+async function markInvoiceEvent({
+  stripe,
+  invoice,
+  subscription,
+  customer,
+  eventId,
+}: {
+  stripe: Stripe;
+  invoice: Stripe.Invoice;
+  subscription: Stripe.Subscription | null;
+  customer: Stripe.Customer | null;
+  eventId: string;
+}): Promise<void> {
+  const invoiceId = requireObjectId(invoice, "INVOICE");
+  const operations: Array<Promise<unknown>> = [
+    stripe.invoices.update(invoiceId, {
+      metadata: metadataWithProcessedEvent(invoice.metadata, eventId),
+    }),
+  ];
+
+  if (subscription) {
+    operations.push(
+      stripe.subscriptions.update(subscription.id, {
+        metadata: metadataWithProcessedEvent(subscription.metadata, eventId),
+      }),
+    );
+  }
+
+  if (customer) {
+    operations.push(
+      stripe.customers.update(customer.id, {
+        metadata: metadataWithProcessedEvent(customer.metadata, eventId),
+      }),
+    );
+  }
+
+  await settleMarkerOperations("INVOICE", eventId, operations);
+}
+
+async function markSubscriptionEvent({
+  stripe,
+  subscription,
+  customer,
+  eventId,
+  updateSubscription,
+}: {
+  stripe: Stripe;
+  subscription: Stripe.Subscription;
+  customer: Stripe.Customer | null;
+  eventId: string;
+  updateSubscription: boolean;
+}): Promise<void> {
+  const operations: Array<Promise<unknown>> = [];
+
+  if (updateSubscription) {
+    operations.push(
+      stripe.subscriptions.update(subscription.id, {
+        metadata: metadataWithProcessedEvent(subscription.metadata, eventId),
+      }),
+    );
+  }
+
+  if (customer) {
+    operations.push(
+      stripe.customers.update(customer.id, {
+        metadata: metadataWithProcessedEvent(customer.metadata, eventId),
+      }),
+    );
+  }
+
+  await settleMarkerOperations("SUBSCRIPTION", eventId, operations);
+}
+
+async function settleMarkerOperations(
+  source: string,
+  eventId: string,
+  operations: Array<Promise<unknown>>,
+): Promise<void> {
+  if (operations.length === 0) {
+    return;
+  }
+
+  const results = await Promise.allSettled(operations);
+
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.warn("STRIPE_WEBHOOK_EVENT_MARKER_WARNING:", {
+        source,
+        eventId,
+        message: getErrorMessage(result.reason),
+      });
+    }
+  }
+}
+
+// ============================================================
+// CHECKOUT EVENTS
+// ============================================================
+
+async function retrieveCheckoutSession(
+  stripe: Stripe,
+  sessionId: string,
+): Promise<Stripe.Checkout.Session> {
+  return stripe.checkout.sessions.retrieve(sessionId, {
+    expand: ["payment_intent", "customer", "subscription", "invoice"],
+  });
+}
+
+function isCheckoutAlreadyFulfilled({
+  session,
+  subscription,
+  eventId,
+}: {
+  session: Stripe.Checkout.Session;
+  subscription: Stripe.Subscription | null;
+  eventId: string;
+}): boolean {
+  const customerMetadata =
+    typeof session.customer !== "string" && session.customer
+      ? "deleted" in session.customer && session.customer.deleted
+        ? undefined
+        : (session.customer as Stripe.Customer).metadata
+      : undefined;
+
+  return (
+    hasFulfilledMarker(session.metadata) ||
+    hasProcessedEvent(session.metadata, eventId) ||
+    (typeof session.payment_intent !== "string" &&
+      session.payment_intent &&
+      (hasFulfilledMarker(session.payment_intent.metadata) ||
+        hasProcessedEvent(session.payment_intent.metadata, eventId))) ||
+    hasProcessedEvent(subscription?.metadata, eventId) ||
+    hasProcessedEvent(customerMetadata, eventId)
+  );
+}
+
+async function handleCheckoutSucceeded({
+  stripe,
+  eventId,
+  eventSession,
+}: {
+  stripe: Stripe;
+  eventId: string;
+  eventSession: Stripe.Checkout.Session;
+}): Promise<EventProcessingResult> {
+  const session = await retrieveCheckoutSession(stripe, eventSession.id);
+  const subscription = await getSubscriptionFromSession(stripe, session);
+
+  if (session.mode !== "payment" && session.mode !== "subscription") {
+    return {
+      processed: false,
+      reason: "unsupported_checkout_mode",
+      objectId: session.id,
+      detail: `Unsupported checkout mode: ${session.mode || "unknown"}`,
+    };
+  }
+
+  if (
+    session.currency &&
+    session.currency.toLowerCase() !== EXPECTED_CURRENCY
+  ) {
+    return {
+      processed: false,
+      reason: "unsupported_currency",
+      objectId: session.id,
+      detail: `Unsupported currency: ${session.currency}`,
+    };
+  }
+
+  if (isCheckoutAlreadyFulfilled({ session, subscription, eventId })) {
+    return {
+      processed: false,
+      reason: "already_processed",
+      objectId: session.id,
+    };
+  }
+
+  if (!isCheckoutPaymentCompleted(session)) {
+    return {
+      processed: false,
+      reason: "payment_not_completed",
+      objectId: session.id,
+      detail: `Payment status: ${session.payment_status}`,
+    };
+  }
+
+  let purchase: ResolvedPurchase;
+
+  try {
+    purchase = await resolveCheckoutPurchase({ stripe, session });
+  } catch (error) {
+    if (!isPermanentMetadataError(error)) {
+      throw error;
+    }
+
+    return {
+      processed: false,
+      reason: "unsupported_metadata",
+      objectId: session.id,
+      detail: getErrorMessage(error),
+    };
+  }
+
+  await persistCanonicalCheckoutMetadata({
+    stripe,
+    session,
+    subscription,
+    purchase,
+  });
+
+  const invoiceId = getObjectId(session.invoice);
+  const paymentReference = invoiceId || session.id;
+  const billingStatus = subscription
+    ? getSubscriptionBillingStatus(subscription)
+    : "active";
+  const validUntil = getSubscriptionPeriodEnd(subscription);
+
+  const result = await applySuccessfulPurchase({
+    purchase,
+    paymentReference,
+    billingStatus,
+    validUntil,
+    resetPrompts: purchase.planId !== null,
+  });
+
+  await markCheckoutEvent({
+    stripe,
+    session,
+    subscription,
+    eventId,
+    fulfilled: true,
+  });
+
+  /*
+   * PotvrdzujĂşci e-mail posielame aĹľ po ĂşspeĹˇnom aktivovanĂ­ balĂ­ka
+   * a oznaÄŤenĂ­ Stripe udalosti ako spracovanej.
+   *
+   * Chyba e-mailovej sluĹľby nesmie zneplatniĹĄ uĹľ prijatĂş platbu ani
+   * spĂ´sobiĹĄ opakovanĂ© pripoÄŤĂ­tanie strĂˇn. Resend navyĹˇe pouĹľĂ­va
+   * idempotency key odvodenĂ˝ od Checkout Session ID, takĹľe opakovanĂ©
+   * doruÄŤenie rovnakĂ©ho webhooku nevytvorĂ­ duplicitnĂ˝ e-mail.
+   */
+  let orderEmailSent = false;
+  let orderEmailId: string | null = null;
+  let orderEmailReason: string | null = null;
+
+  try {
+    const orderEmailResult = await sendOrderConfirmationEmail({
+      session,
+      planId: purchase.planId,
+      addonIds: result.purchasedAddonIds,
+      paymentReference,
+      locale:
+        purchase.metadata.locale ||
+        purchase.metadata.language ||
+        purchase.metadata.lang ||
+        "sk",
+    });
+
+    orderEmailSent = orderEmailResult.sent;
+    orderEmailId = orderEmailResult.emailId;
+    orderEmailReason = orderEmailResult.reason;
+
+    if (orderEmailResult.skipped) {
+      console.warn("ZEDPERA_ORDER_CONFIRMATION_EMAIL_SKIPPED:", {
+        eventId,
+        sessionId: session.id,
+        reason: orderEmailResult.reason,
+      });
+    }
+  } catch (emailError) {
+    orderEmailReason = getErrorMessage(emailError);
+
+    console.error("ZEDPERA_ORDER_CONFIRMATION_EMAIL_ERROR:", {
+      eventId,
+      sessionId: session.id,
+      message: orderEmailReason,
+    });
+  }
+
+  console.info("STRIPE_WEBHOOK_CHECKOUT_FULFILLED:", {
+    eventId,
+    sessionId: session.id,
+    checkoutMode: session.mode,
+    paymentReference,
+    userId: result.userId,
+    planId: result.effectivePlanId,
+    purchasedAddonIds: result.purchasedAddonIds,
+    activeAddonIds: result.activeAddonIds,
+    extraPages: result.extraPages,
+    orderEmailSent,
+    orderEmailId,
+    orderEmailReason,
+  });
+
+  return {
+    processed: true,
+    reason: "fulfilled",
+    objectId: session.id,
+    userId: result.userId,
+    planId: result.effectivePlanId,
+    purchasedAddonIds: result.purchasedAddonIds,
+    activeAddonIds: result.activeAddonIds,
+    extraPages: result.extraPages,
+    billingStatus,
+  };
+}
+
+async function handleCheckoutAsyncPaymentFailed({
+  stripe,
+  eventId,
+  eventSession,
+}: {
+  stripe: Stripe;
+  eventId: string;
+  eventSession: Stripe.Checkout.Session;
+}): Promise<EventProcessingResult> {
+  const session = await retrieveCheckoutSession(stripe, eventSession.id);
+  const subscription = await getSubscriptionFromSession(stripe, session);
+
+  if (isCheckoutAlreadyFulfilled({ session, subscription, eventId })) {
+    return {
+      processed: false,
+      reason: "already_processed",
+      objectId: session.id,
+    };
+  }
+
+  try {
+    const purchase = await resolveCheckoutPurchase({ stripe, session });
+
+    await updateBillingStatus({
+      userId: purchase.userId,
+      billingStatus: "payment_failed",
+      validUntil: getSubscriptionPeriodEnd(subscription),
+    });
+
+    await markCheckoutEvent({
+      stripe,
+      session,
+      subscription,
+      eventId,
+      fulfilled: false,
+    });
+
+    console.warn("STRIPE_WEBHOOK_ASYNC_PAYMENT_FAILED:", {
+      eventId,
+      sessionId: session.id,
+      userId: purchase.userId,
+      paymentStatus: session.payment_status,
+    });
+
+    return {
+      processed: true,
+      reason: "payment_failure_recorded",
+      objectId: session.id,
+      userId: purchase.userId,
+      billingStatus: "payment_failed",
+    };
+  } catch (error) {
+    if (!isPermanentMetadataError(error)) {
+      throw error;
+    }
+
+    return {
+      processed: false,
+      reason: "unsupported_metadata",
+      objectId: session.id,
+      detail: getErrorMessage(error),
+    };
+  }
+}
+
+// ============================================================
+// INVOICE EVENTS
+// ============================================================
+
+async function retrieveInvoice(
+  stripe: Stripe,
+  invoiceId: string,
+): Promise<Stripe.Invoice> {
+  return stripe.invoices.retrieve(invoiceId, {
+    expand: ["customer"],
+  });
+}
+
+async function getInvoiceContext({
+  stripe,
+  invoice,
+}: {
+  stripe: Stripe;
+  invoice: Stripe.Invoice;
+}): Promise<{
+  subscription: Stripe.Subscription | null;
+  customer: Stripe.Customer | null;
+  metadata: MetadataRecord;
+}> {
+  const subscriptionId = getInvoiceSubscriptionId(invoice);
+  const subscription = await retrieveSubscription(stripe, subscriptionId);
+
+  const customerId = getObjectId(invoice.customer);
+  const customer =
+    typeof invoice.customer !== "string" && invoice.customer
+      ? "deleted" in invoice.customer && invoice.customer.deleted
+        ? null
+        : (invoice.customer as Stripe.Customer)
+      : await retrieveCustomer(stripe, customerId);
+
+  const metadata = mergeMetadata(
+    customer?.metadata,
+    getInvoiceSubscriptionMetadata(invoice),
+    subscription?.metadata,
+    invoice.metadata,
+  );
+
+  return {
+    subscription,
+    customer,
+    metadata,
+  };
+}
+
+function isInvoiceEventAlreadyProcessed({
+  invoice,
+  subscription,
+  customer,
+  eventId,
+}: {
+  invoice: Stripe.Invoice;
+  subscription: Stripe.Subscription | null;
+  customer: Stripe.Customer | null;
+  eventId: string;
+}): boolean {
+  return (
+    hasProcessedEvent(invoice.metadata, eventId) ||
+    hasProcessedEvent(subscription?.metadata, eventId) ||
+    hasProcessedEvent(customer?.metadata, eventId)
+  );
+}
+
+async function handleInvoicePaid({
+  stripe,
+  eventId,
+  eventInvoice,
+}: {
+  stripe: Stripe;
+  eventId: string;
+  eventInvoice: Stripe.Invoice;
+}): Promise<EventProcessingResult> {
+  const eventInvoiceId = requireObjectId(eventInvoice, "INVOICE");
+  const invoice = await retrieveInvoice(stripe, eventInvoiceId);
+  const invoiceId = requireObjectId(invoice, "INVOICE");
+  const context = await getInvoiceContext({ stripe, invoice });
+
+  if (!context.subscription) {
+    return {
+      processed: false,
+      reason: "non_subscription_invoice_ignored",
+      objectId: invoice.id,
+    };
+  }
+
+  if (
+    isInvoiceEventAlreadyProcessed({
+      invoice,
+      subscription: context.subscription,
+      customer: context.customer,
+      eventId,
+    })
+  ) {
+    return {
+      processed: false,
+      reason: "already_processed",
+      objectId: invoice.id,
+    };
+  }
+
+  if (!isInvoicePaid(invoice)) {
+    return {
+      processed: false,
+      reason: "invoice_not_paid",
+      objectId: invoice.id,
+      detail: `Invoice status: ${invoice.status || "unknown"}`,
+    };
+  }
+
+  let purchase: ResolvedPurchase;
+
+  try {
+    purchase = resolvePurchaseFromMetadata({
+      metadata: context.metadata,
+    });
+  } catch (error) {
+    if (!isPermanentMetadataError(error)) {
+      throw error;
+    }
+
+    return {
+      processed: false,
+      reason: "unsupported_metadata",
+      objectId: invoice.id,
+      detail: getErrorMessage(error),
+    };
+  }
+
+  const isRecurringCycle = invoice.billing_reason === "subscription_cycle";
+
+  if (isRecurringCycle) {
+    const recurringAddonIds =
+      purchase.purchasedAddonIds.filter(isPersistentAddon);
+
+    purchase = {
+      ...purchase,
+      purchasedAddonIds: recurringAddonIds,
+      persistentAddonIds: recurringAddonIds,
+      extraPageAddonIds: [],
+      extraPages: 0,
+    };
+  }
+
+  const billingStatus = getSubscriptionBillingStatus(context.subscription);
+  const validUntil = getSubscriptionPeriodEnd(context.subscription);
+
+  const result = await applySuccessfulPurchase({
+    purchase,
+    paymentReference: invoiceId,
+    billingStatus,
+    validUntil,
+    resetPrompts: purchase.planId !== null,
+  });
+
+  await markInvoiceEvent({
+    stripe,
+    invoice,
+    subscription: context.subscription,
+    customer: context.customer,
+    eventId,
+  });
+
+  console.info("STRIPE_WEBHOOK_INVOICE_PAID:", {
+    eventId,
+    invoiceId: invoice.id,
+    billingReason: invoice.billing_reason,
+    userId: result.userId,
+    planId: result.effectivePlanId,
+    purchasedAddonIds: result.purchasedAddonIds,
+    extraPages: result.extraPages,
+    validUntil,
+  });
+
+  return {
+    processed: true,
+    reason: isRecurringCycle ? "subscription_renewed" : "invoice_fulfilled",
+    objectId: invoice.id,
+    userId: result.userId,
+    planId: result.effectivePlanId,
+    purchasedAddonIds: result.purchasedAddonIds,
+    activeAddonIds: result.activeAddonIds,
+    extraPages: result.extraPages,
+    billingStatus,
+  };
+}
+
+async function handleInvoicePaymentFailed({
+  stripe,
+  eventId,
+  eventInvoice,
+}: {
+  stripe: Stripe;
+  eventId: string;
+  eventInvoice: Stripe.Invoice;
+}): Promise<EventProcessingResult> {
+  const eventInvoiceId = requireObjectId(eventInvoice, "INVOICE");
+  const invoice = await retrieveInvoice(stripe, eventInvoiceId);
+  const context = await getInvoiceContext({ stripe, invoice });
+
+  if (
+    isInvoiceEventAlreadyProcessed({
+      invoice,
+      subscription: context.subscription,
+      customer: context.customer,
+      eventId,
+    })
+  ) {
+    return {
+      processed: false,
+      reason: "already_processed",
+      objectId: invoice.id,
+    };
+  }
+
+  let purchase: ResolvedPurchase;
+
+  try {
+    purchase = resolvePurchaseFromMetadata({
+      metadata: context.metadata,
+    });
+  } catch (error) {
+    if (!isPermanentMetadataError(error)) {
+      throw error;
+    }
+
+    return {
+      processed: false,
+      reason: "unsupported_metadata",
+      objectId: invoice.id,
+      detail: getErrorMessage(error),
+    };
+  }
+
+  const validUntil = getSubscriptionPeriodEnd(context.subscription);
+
+  await updateBillingStatus({
+    userId: purchase.userId,
+    billingStatus: "past_due",
+    validUntil,
+  });
+
+  await markInvoiceEvent({
+    stripe,
+    invoice,
+    subscription: context.subscription,
+    customer: context.customer,
+    eventId,
+  });
+
+  console.warn("STRIPE_WEBHOOK_INVOICE_PAYMENT_FAILED:", {
+    eventId,
+    invoiceId: invoice.id,
+    userId: purchase.userId,
+    attemptCount: invoice.attempt_count,
+    nextPaymentAttempt: invoice.next_payment_attempt,
+  });
+
+  return {
+    processed: true,
+    reason: "payment_failure_recorded",
+    objectId: invoice.id,
+    userId: purchase.userId,
+    planId: purchase.planId,
+    billingStatus: "past_due",
+  };
+}
+
+// ============================================================
+// SUBSCRIPTION EVENTS
+// ============================================================
+
+async function getSubscriptionCustomer(
+  stripe: Stripe,
+  subscription: Stripe.Subscription,
+): Promise<Stripe.Customer | null> {
+  if (typeof subscription.customer !== "string" && subscription.customer) {
+    if ("deleted" in subscription.customer && subscription.customer.deleted) {
+      return null;
+    }
+
+    return subscription.customer as Stripe.Customer;
+  }
+
+  return retrieveCustomer(stripe, getObjectId(subscription.customer));
+}
+
+function isSubscriptionEventAlreadyProcessed({
+  subscription,
+  customer,
+  eventId,
+}: {
+  subscription: Stripe.Subscription;
+  customer: Stripe.Customer | null;
+  eventId: string;
+}): boolean {
+  return (
+    hasProcessedEvent(subscription.metadata, eventId) ||
+    hasProcessedEvent(customer?.metadata, eventId)
+  );
+}
+
+async function handleSubscriptionUpdated({
+  stripe,
+  eventId,
+  eventSubscription,
+}: {
+  stripe: Stripe;
+  eventId: string;
+  eventSubscription: Stripe.Subscription;
+}): Promise<EventProcessingResult> {
+  const subscription = await retrieveSubscription(stripe, eventSubscription.id);
+
+  if (!subscription) {
+    return {
+      processed: false,
+      reason: "subscription_not_found",
+      objectId: eventSubscription.id,
+    };
+  }
+
+  const customer = await getSubscriptionCustomer(stripe, subscription);
+
+  if (
+    isSubscriptionEventAlreadyProcessed({
+      subscription,
+      customer,
+      eventId,
+    })
+  ) {
+    return {
+      processed: false,
+      reason: "already_processed",
+      objectId: subscription.id,
+    };
+  }
+
+  let purchase: ResolvedPurchase;
+
+  try {
+    purchase = await resolveSubscriptionPurchase({
+      stripe,
+      subscription,
+    });
+  } catch (error) {
+    if (!isPermanentMetadataError(error)) {
+      throw error;
+    }
+
+    return {
+      processed: false,
+      reason: "unsupported_metadata",
+      objectId: subscription.id,
+      detail: getErrorMessage(error),
+    };
+  }
+
+  const billingStatus = getSubscriptionBillingStatus(subscription);
+  const validUntil = getSubscriptionPeriodEnd(subscription);
+
+  if (TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)) {
+    await downgradeUserToFree({
+      userId: purchase.userId,
+      billingStatus: subscription.status,
+    });
+  } else {
+    await updateBillingStatus({
+      userId: purchase.userId,
+      billingStatus,
+      validUntil,
+    });
+  }
+
+  await markSubscriptionEvent({
+    stripe,
+    subscription,
+    customer,
+    eventId,
+    updateSubscription: true,
+  });
+
+  console.info("STRIPE_WEBHOOK_SUBSCRIPTION_UPDATED:", {
+    eventId,
+    subscriptionId: subscription.id,
+    userId: purchase.userId,
+    status: subscription.status,
+    cancelAtPeriodEnd: subscription.cancel_at_period_end,
+    validUntil,
+  });
+
+  return {
+    processed: true,
+    reason: TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)
+      ? "downgraded_to_free"
+      : "subscription_status_updated",
+    objectId: subscription.id,
+    userId: purchase.userId,
+    planId: TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)
+      ? "free"
+      : purchase.planId,
+    billingStatus,
+  };
+}
+
+async function handleSubscriptionDeleted({
+  stripe,
+  eventId,
+  subscription,
+}: {
+  stripe: Stripe;
+  eventId: string;
+  subscription: Stripe.Subscription;
+}): Promise<EventProcessingResult> {
+  const customer = await getSubscriptionCustomer(stripe, subscription);
+
+  if (
+    isSubscriptionEventAlreadyProcessed({
+      subscription,
+      customer,
+      eventId,
+    })
+  ) {
+    return {
+      processed: false,
+      reason: "already_processed",
+      objectId: subscription.id,
+    };
+  }
+
+  let purchase: ResolvedPurchase;
+
+  try {
+    purchase = await resolveSubscriptionPurchase({
+      stripe,
+      subscription,
+    });
+  } catch (error) {
+    if (!isPermanentMetadataError(error)) {
+      throw error;
+    }
+
+    return {
+      processed: false,
+      reason: "unsupported_metadata",
+      objectId: subscription.id,
+      detail: getErrorMessage(error),
+    };
+  }
+
+  await downgradeUserToFree({
+    userId: purchase.userId,
+    billingStatus: "canceled",
+  });
+
+  // ZmazanĂ© predplatnĂ© uĹľ nemusĂ­ byĹĄ moĹľnĂ© aktualizovaĹĄ. Marker preto
+  // zapisujeme minimĂˇlne na Customer objekt, ktorĂ˝ zostĂˇva dostupnĂ˝.
+  await markSubscriptionEvent({
+    stripe,
+    subscription,
+    customer,
+    eventId,
+    updateSubscription: false,
+  });
+
+  console.info("STRIPE_WEBHOOK_SUBSCRIPTION_DELETED:", {
+    eventId,
+    subscriptionId: subscription.id,
+    userId: purchase.userId,
+  });
+
+  return {
+    processed: true,
+    reason: "downgraded_to_free",
+    objectId: subscription.id,
+    userId: purchase.userId,
+    planId: "free",
+    billingStatus: "canceled",
+  };
+}
+
+// ============================================================
+// HEALTH CHECK
+// ============================================================
+
+export async function GET() {
+  return NextResponse.json(
+    {
+      ok: true,
+      route: "/api/payments/webhook",
+      runtime,
+      configured: {
+        stripeSecret: Boolean(process.env.STRIPE_SECRET_KEY),
+        webhookSecret: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+        resendApiKey: Boolean(process.env.RESEND_API_KEY),
+        emailFrom: Boolean(process.env.EMAIL_FROM),
+        emailLogoUrl: Boolean(process.env.EMAIL_LOGO_URL),
+      },
+      supportedEvents: SUPPORTED_EVENTS,
+    },
+    {
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    },
+  );
+}
+
+// ============================================================
+// WEBHOOK ROUTE
+// ============================================================
+
+export async function POST(request: Request) {
+  const stripeSecret = process.env.STRIPE_SECRET_KEY?.trim();
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
+
+  if (!stripeSecret || !webhookSecret) {
+    console.error("STRIPE_WEBHOOK_CONFIG_MISSING:", {
+      hasStripeSecret: Boolean(stripeSecret),
+      hasWebhookSecret: Boolean(webhookSecret),
+    });
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "MISSING_STRIPE_WEBHOOK_CONFIG",
+        message: "ChĂ˝ba STRIPE_SECRET_KEY alebo STRIPE_WEBHOOK_SECRET.",
+      },
+      {
+        status: 500,
+      },
+    );
+  }
+
+  const signature = request.headers.get("stripe-signature");
+
+  if (!signature) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "MISSING_STRIPE_SIGNATURE",
+        message: "ChĂ˝ba hlaviÄŤka stripe-signature.",
+      },
+      {
+        status: 400,
+      },
+    );
+  }
+
+  let rawBody: string;
+
+  try {
+    // Podpis sa musĂ­ overovaĹĄ nad pĂ´vodnĂ˝m raw telom poĹľiadavky.
+    // NepouĹľĂ­vajte request.json().
+    rawBody = await request.text();
+  } catch (error) {
+    console.error("STRIPE_WEBHOOK_BODY_READ_ERROR:", {
+      message: getErrorMessage(error),
+    });
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "WEBHOOK_BODY_READ_FAILED",
+      },
+      {
+        status: 400,
+      },
+    );
+  }
+
+  const stripe = getStripeClient(stripeSecret);
+
+  let event: Stripe.Event;
+
+  try {
+    event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+  } catch (error) {
+    console.error("STRIPE_WEBHOOK_SIGNATURE_ERROR:", {
+      message: getErrorMessage(error),
+    });
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "INVALID_STRIPE_SIGNATURE",
+        message: "Stripe podpis webhooku nie je platnĂ˝.",
+      },
+      {
+        status: 400,
+      },
+    );
+  }
+
+  try {
+    let result: EventProcessingResult | null = null;
+
+    switch (event.type) {
+      case "checkout.session.completed":
+      case "checkout.session.async_payment_succeeded": {
+        result = await handleCheckoutSucceeded({
+          stripe,
+          eventId: event.id,
+          eventSession: event.data.object as Stripe.Checkout.Session,
+        });
+        break;
+      }
+
+      case "checkout.session.async_payment_failed": {
+        result = await handleCheckoutAsyncPaymentFailed({
+          stripe,
+          eventId: event.id,
+          eventSession: event.data.object as Stripe.Checkout.Session,
+        });
+        break;
+      }
+
+      case "invoice.paid": {
+        result = await handleInvoicePaid({
+          stripe,
+          eventId: event.id,
+          eventInvoice: event.data.object as Stripe.Invoice,
+        });
+        break;
+      }
+
+      case "invoice.payment_failed": {
+        result = await handleInvoicePaymentFailed({
+          stripe,
+          eventId: event.id,
+          eventInvoice: event.data.object as Stripe.Invoice,
+        });
+        break;
+      }
+
+      case "customer.subscription.updated": {
+        result = await handleSubscriptionUpdated({
+          stripe,
+          eventId: event.id,
+          eventSubscription: event.data.object as Stripe.Subscription,
+        });
+        break;
+      }
+
+      case "customer.subscription.deleted": {
+        result = await handleSubscriptionDeleted({
+          stripe,
+          eventId: event.id,
+          subscription: event.data.object as Stripe.Subscription,
+        });
+        break;
+      }
+
+      default: {
+        console.info("STRIPE_WEBHOOK_EVENT_IGNORED:", {
+          eventId: event.id,
+          eventType: event.type,
+        });
+      }
+    }
+
+    return NextResponse.json(
+      {
+        ok: true,
+        received: true,
+        eventId: event.id,
+        eventType: event.type,
+        livemode: event.livemode,
+        result,
+      },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      },
+    );
+  } catch (error) {
+    // Pri databĂˇzovej alebo sieĹĄovej chybe vraciame HTTP 500.
+    // Stripe tak udalosĹĄ automaticky zopakuje.
+    console.error("STRIPE_WEBHOOK_PROCESSING_ERROR:", {
+      eventId: event.id,
+      eventType: event.type,
+      message: getErrorMessage(error),
+      error,
+    });
+
+    return NextResponse.json(
+      {
+        ok: false,
+        received: true,
+        error: "STRIPE_WEBHOOK_PROCESSING_FAILED",
+        eventId: event.id,
+        eventType: event.type,
+        detail: getErrorMessage(error),
+      },
+      {
+        status: 500,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      },
+    );
+  }
+}
+
+
+============================================================
+SÚBOR: lib\billing\catalog.ts
+============================================================
+/**
+ * CentrĂˇlna definĂ­cia balĂ­kov, doplnkov, cien, limitov a dostupnĂ˝ch funkciĂ­.
+ *
+ * DĂ´leĹľitĂ©:
+ * - Stripe Price ID sa NEUKLADAJĂš priamo do zdrojovĂ©ho kĂłdu.
+ * - V katalĂłgu je uloĹľenĂ˝ iba nĂˇzov environment premennej.
+ * - SkutoÄŤnĂˇ hodnota price_... sa naÄŤĂ­ta vĂ˝hradne na serveri cez process.env.
+ * - PlatenĂ© hlavnĂ© balĂ­ky sĂş mesaÄŤnĂ© predplatnĂ©.
+ * - Doplnky zostĂˇvajĂş samostatnĂ© platby, pretoĹľe predstavujĂş jednorazovĂ©
+ *   rozĹˇĂ­renie aktuĂˇlneho projektu alebo balĂ­ka.
+ * - AdministrĂˇtorskĂ˝ prĂ­stup sa nesmie urÄŤovaĹĄ podÄľa e-mailu, display name
+ *   ani inĂ©ho klientskĂ©ho Ăşdaja.
+ * - Hodnoty isAdmin a hasUnlimitedAccess musia pochĂˇdzaĹĄ zo servera/databĂˇzy
+ *   a nĂˇsledne sa odovzdajĂş pomocnĂ˝m funkciĂˇm v tomto katalĂłgu.
+ * - FREE zostĂˇva verejnĂ˝m balĂ­kom pre beĹľnĂ˝ch pouĹľĂ­vateÄľov. ADMIN sa nikdy
+ *   nesmie prepnĂşĹĄ na FREE, zobrazovaĹĄ vo verejnom cennĂ­ku ani poslaĹĄ do Stripe.
+ */
+
+// =====================================================
+// IDENTIFIKĂTORY
+// =====================================================
+
+export type PlanId =
+  | 'free'
+  | 'seminar-work'
+  | 'bachelor-thesis'
+  | 'master-thesis'
+  | 'admin';
+
+export type AddonId =
+  | 'data-analysis'
+  | 'extra-20'
+  | 'extra-40'
+  | 'extra-60';
+
+export type FeatureKey =
+  | 'ai-supervisor'
+  | 'chapter-generation'
+  | 'outline-generation'
+  | 'quality-audit'
+  | 'humanizer'
+  | 'citations'
+  | 'planning'
+  | 'emails'
+  | 'translation'
+  | 'originality'
+  | 'data-prepare'
+  | 'data-descriptive'
+  | 'data-questionnaires'
+  | 'data-reliability'
+  | 'data-normality'
+  | 'data-correlations'
+  | 'data-parametric-tests'
+  | 'data-nonparametric-tests'
+  | 'data-charts'
+  | 'defense'
+  | 'defense-presentation'
+  | 'committee-questions';
+
+export type FeatureModuleId =
+  | 'ai-supervisor'
+  | 'quality-audit'
+  | 'humanizer'
+  | 'citations'
+  | 'planning'
+  | 'emails'
+  | 'translation'
+  | 'originality'
+  | 'data-analysis'
+  | 'defense';
+
+export type PaidPlanId = Exclude<PlanId, 'free' | 'admin'>;
+export type PurchasableCatalogId = PaidPlanId | AddonId;
+
+export type CatalogItemKind = 'plan' | 'addon';
+export type CheckoutMode = 'payment' | 'subscription';
+export type BillingInterval = 'month';
+export type CurrencyCode = 'EUR';
+
+export type StripePriceEnvironmentKey =
+  | 'STRIPE_PRICE_SEMINAR_WORK'
+  | 'STRIPE_PRICE_BACHELOR_THESIS'
+  | 'STRIPE_PRICE_MASTER_THESIS'
+  | 'STRIPE_PRICE_DATA_ANALYSIS'
+  | 'STRIPE_PRICE_EXTRA_20'
+  | 'STRIPE_PRICE_EXTRA_40'
+  | 'STRIPE_PRICE_EXTRA_60';
+
+// =====================================================
+// DEFINĂŤCIE
+// =====================================================
+
+type PlanDefinitionBase = {
+  kind: 'plan';
+  name: string;
+  shortName: string;
+  description: string;
+  priceCents: number;
+  currency: CurrencyCode;
+  pageLimit: number | null;
+  promptLimit: number | null;
+  attachmentLimit: number | null;
+
+  /**
+   * AutoritatĂ­vny katalĂłgovĂ˝ prĂ­znak neobmedzenĂ©ho prĂ­stupu.
+   *
+   * Pri beĹľnĂ˝ch a platenĂ˝ch balĂ­koch musĂ­ byĹĄ false.
+   * Iba internĂ˝ ADMIN plĂˇn mĂˇ hodnotu true.
+   */
+  hasUnlimitedAccess: boolean;
+
+  features: readonly FeatureKey[];
+  sortOrder: number;
+
+  /**
+   * UrÄŤuje, ÄŤi sa mĂˇ plĂˇn zobrazovaĹĄ vo verejnom cennĂ­ku.
+   * Ak hodnota nie je uvedenĂˇ, plĂˇn sa povaĹľuje za verejnĂ˝.
+   */
+  isPublic?: boolean;
+
+  /**
+   * DoplnkovĂ˝ explicitnĂ˝ prĂ­znak nĂˇkupu pre UI.
+   * AutoritatĂ­vnym serverovĂ˝m prĂ­znakom zostĂˇva `purchasable`.
+   */
+  isPurchasable?: boolean;
+};
+
+export type FreePlanDefinition = PlanDefinitionBase & {
+  id: 'free';
+  priceCents: 0;
+  purchasable: false;
+  checkoutMode: null;
+  billingInterval: null;
+  stripePriceEnvKey: null;
+};
+
+export type PaidPlanDefinition = PlanDefinitionBase & {
+  id: PaidPlanId;
+  purchasable: true;
+  checkoutMode: 'subscription';
+  billingInterval: 'month';
+  stripePriceEnvKey: StripePriceEnvironmentKey;
+};
+
+export type AdminPlanDefinition = PlanDefinitionBase & {
+  id: 'admin';
+  priceCents: 0;
+  pageLimit: null;
+  promptLimit: null;
+  attachmentLimit: null;
+  purchasable: false;
+  checkoutMode: null;
+  billingInterval: null;
+  stripePriceEnvKey: null;
+  isPublic: false;
+  isPurchasable: false;
+};
+
+export type PlanDefinition =
+  | FreePlanDefinition
+  | PaidPlanDefinition
+  | AdminPlanDefinition;
+
+export type AddonDefinition = {
+  id: AddonId;
+  kind: 'addon';
+  name: string;
+  shortName: string;
+  description: string;
+  priceCents: number;
+  currency: CurrencyCode;
+  extraPages: number;
+  features: readonly FeatureKey[];
+  purchasable: true;
+  checkoutMode: 'payment';
+  billingInterval: null;
+  stripePriceEnvKey: StripePriceEnvironmentKey;
+  sortOrder: number;
+};
+
+export type CatalogDefinition = PlanDefinition | AddonDefinition;
+
+export type EntitlementAccessOptions = {
+  /**
+   * MusĂ­ byĹĄ urÄŤenĂ© na serveri podÄľa databĂˇzovĂ©ho oprĂˇvnenia pouĹľĂ­vateÄľa.
+   * Nikdy nenastavujte tĂşto hodnotu iba podÄľa e-mailu vo frontende.
+   */
+  isAdmin?: boolean;
+
+  /**
+   * ServerovĂ˝ bypass limitov. PouĹľite ho iba vtedy, keÄŹ bol neobmedzenĂ˝
+   * prĂ­stup bezpeÄŤne urÄŤenĂ˝ z databĂˇzy alebo serverovej entitlement logiky.
+   */
+  hasUnlimitedAccess?: boolean;
+};
+
+export type EffectiveEntitlementLimits = {
+  isAdmin: boolean;
+  hasUnlimitedAccess: boolean;
+
+  /**
+   * Alias zachovanĂ˝ kvĂ´li spĂ¤tnej kompatibilite existujĂşcich komponentov.
+   * MĂˇ rovnakĂş hodnotu ako hasUnlimitedAccess.
+   */
+  isUnlimited: boolean;
+  pageLimit: number | null;
+  promptLimit: number | null;
+  attachmentLimit: number | null;
+};
+
+export type FeatureModuleDefinition = {
+  id: FeatureModuleId;
+  label: string;
+  unavailableMessage: string;
+};
+
+// =====================================================
+// ZOZNAMY FUNKCIĂŤ
+// =====================================================
+
+const FREE_FEATURES = [
+  'ai-supervisor',
+] as const satisfies readonly FeatureKey[];
+
+const CORE_WRITING_FEATURES = [
+  'ai-supervisor',
+  'chapter-generation',
+  'outline-generation',
+  'quality-audit',
+  'humanizer',
+  'citations',
+  'planning',
+  'emails',
+  'translation',
+  'originality',
+] as const satisfies readonly FeatureKey[];
+
+const BACHELOR_DATA_FEATURES = [
+  'data-prepare',
+  'data-descriptive',
+  'data-questionnaires',
+  'data-reliability',
+  'data-charts',
+] as const satisfies readonly FeatureKey[];
+
+const COMPLETE_DATA_FEATURES = [
+  'data-prepare',
+  'data-descriptive',
+  'data-questionnaires',
+  'data-reliability',
+  'data-normality',
+  'data-correlations',
+  'data-parametric-tests',
+  'data-nonparametric-tests',
+  'data-charts',
+] as const satisfies readonly FeatureKey[];
+
+const DEFENSE_FEATURES = [
+  'defense',
+  'defense-presentation',
+  'committee-questions',
+] as const satisfies readonly FeatureKey[];
+
+export const ALL_FEATURES: FeatureKey[] = [
+  'ai-supervisor',
+  'chapter-generation',
+  'outline-generation',
+  'quality-audit',
+  'humanizer',
+  'citations',
+  'planning',
+  'emails',
+  'translation',
+  'originality',
+  'data-prepare',
+  'data-descriptive',
+  'data-questionnaires',
+  'data-reliability',
+  'data-normality',
+  'data-correlations',
+  'data-parametric-tests',
+  'data-nonparametric-tests',
+  'data-charts',
+  'defense',
+  'defense-presentation',
+  'committee-questions',
+];
+
+// =====================================================
+// BALĂŤKY
+// =====================================================
+
+export const PLANS = {
+  free: {
+    id: 'free',
+    kind: 'plan',
+    name: 'FREE',
+    shortName: 'FREE',
+    description:
+      'BezplatnĂˇ verzia na zĂˇkladnĂ© vyskĂşĹˇanie AI ĹˇkoliteÄľa s limitom 3 promptov, 3 normostrĂˇn a 1 prĂ­lohy.',
+    priceCents: 0,
+    currency: 'EUR',
+    pageLimit: 3,
+    promptLimit: 3,
+    attachmentLimit: 1,
+    hasUnlimitedAccess: false,
+    features: [...FREE_FEATURES],
+    isPublic: true,
+    isPurchasable: false,
+    purchasable: false,
+    checkoutMode: null,
+    billingInterval: null,
+    stripePriceEnvKey: null,
+    sortOrder: 0,
+  },
+
+  'seminar-work': {
+    id: 'seminar-work',
+    kind: 'plan',
+    name: 'SeminĂˇrna prĂˇca',
+    shortName: 'SeminĂˇrna prĂˇca',
+    description:
+      'MesaÄŤnĂ© predplatnĂ© pre seminĂˇrne, roÄŤnĂ­kovĂ© a zĂˇpoÄŤtovĂ© prĂˇce do 15 normostrĂˇn.',
+    priceCents: 3900,
+    currency: 'EUR',
+    pageLimit: 15,
+    promptLimit: null,
+    attachmentLimit: 12,
+    hasUnlimitedAccess: false,
+    features: [...CORE_WRITING_FEATURES],
+    isPublic: true,
+    isPurchasable: true,
+    purchasable: true,
+    checkoutMode: 'subscription',
+    billingInterval: 'month',
+    stripePriceEnvKey: 'STRIPE_PRICE_SEMINAR_WORK',
+    sortOrder: 10,
+  },
+
+  'bachelor-thesis': {
+    id: 'bachelor-thesis',
+    kind: 'plan',
+    name: 'BakalĂˇrska prĂˇca',
+    shortName: 'BakalĂˇrska prĂˇca',
+    description:
+      'MesaÄŤnĂ© predplatnĂ© pre bakalĂˇrsku prĂˇcu do 50 normostrĂˇn vrĂˇtane zĂˇkladnej analĂ˝zy dĂˇt a prĂ­pravy na obhajobu.',
+    priceCents: 14900,
+    currency: 'EUR',
+    pageLimit: 50,
+    promptLimit: null,
+    attachmentLimit: 12,
+    hasUnlimitedAccess: false,
+    features: [
+      ...CORE_WRITING_FEATURES,
+      ...BACHELOR_DATA_FEATURES,
+      ...DEFENSE_FEATURES,
+    ],
+    isPublic: true,
+    isPurchasable: true,
+    purchasable: true,
+    checkoutMode: 'subscription',
+    billingInterval: 'month',
+    stripePriceEnvKey: 'STRIPE_PRICE_BACHELOR_THESIS',
+    sortOrder: 20,
+  },
+
+  'master-thesis': {
+    id: 'master-thesis',
+    kind: 'plan',
+    name: 'DiplomovĂˇ / magisterskĂˇ prĂˇca',
+    shortName: 'DiplomovĂˇ prĂˇca',
+    description:
+      'MesaÄŤnĂ© predplatnĂ© pre diplomovĂ© a magisterskĂ© prĂˇce do 70 normostrĂˇn vrĂˇtane kompletnej analĂ˝zy dĂˇt a obhajoby.',
+    priceCents: 18900,
+    currency: 'EUR',
+    pageLimit: 70,
+    promptLimit: null,
+    attachmentLimit: 12,
+    hasUnlimitedAccess: false,
+    features: [
+      ...CORE_WRITING_FEATURES,
+      ...COMPLETE_DATA_FEATURES,
+      ...DEFENSE_FEATURES,
+    ],
+    isPublic: true,
+    isPurchasable: true,
+    purchasable: true,
+    checkoutMode: 'subscription',
+    billingInterval: 'month',
+    stripePriceEnvKey: 'STRIPE_PRICE_MASTER_THESIS',
+    sortOrder: 30,
+  },
+
+  admin: {
+    id: 'admin',
+    kind: 'plan',
+    name: 'ADMIN',
+    shortName: 'ADMIN',
+    description:
+      'InternĂ˝ administrĂˇtorskĂ˝ balĂ­k s neobmedzenĂ˝m prĂ­stupom ku vĹˇetkĂ˝m funkciĂˇm.',
+    priceCents: 0,
+    currency: 'EUR',
+
+    pageLimit: null,
+    promptLimit: null,
+    attachmentLimit: null,
+    hasUnlimitedAccess: true,
+
+    features: [...ALL_FEATURES],
+
+    // NezobrazovaĹĄ vo verejnom cennĂ­ku.
+    isPublic: false,
+
+    // Nesmie sa daĹĄ kĂşpiĹĄ cez Stripe.
+    isPurchasable: false,
+    purchasable: false,
+    checkoutMode: null,
+    billingInterval: null,
+    stripePriceEnvKey: null,
+    sortOrder: 999,
+  },
+} as const satisfies Record<PlanId, PlanDefinition>;
+
+// =====================================================
+// DOPLNKY
+// =====================================================
+
+export const ADDONS = {
+  'data-analysis': {
+    id: 'data-analysis',
+    kind: 'addon',
+    name: 'AnalĂ˝za dĂˇt',
+    shortName: 'AnalĂ˝za dĂˇt',
+    description:
+      'KompletnĂ© spracovanie Ĺˇtatistickej ÄŤasti vrĂˇtane ÄŤistenia dĂˇt, deskriptĂ­vnej Ĺˇtatistiky, tvorby ĹˇkĂˇl, subĹˇkĂˇl, reliability, normality, korelĂˇciĂ­, testov a grafov.',
+    priceCents: 8900,
+    currency: 'EUR',
+    extraPages: 0,
+    features: [...COMPLETE_DATA_FEATURES],
+    purchasable: true,
+    checkoutMode: 'payment',
+    billingInterval: null,
+    stripePriceEnvKey: 'STRIPE_PRICE_DATA_ANALYSIS',
+    sortOrder: 100,
+  },
+
+  'extra-20': {
+    id: 'extra-20',
+    kind: 'addon',
+    name: 'Extra 20 strĂˇn',
+    shortName: '+20 strĂˇn',
+    description:
+      'RozĹˇĂ­renie aktuĂˇlneho projektu a pouĹľĂ­vateÄľskĂ©ho balĂ­ka o ÄŹalĹˇĂ­ch 20 normostrĂˇn.',
+    priceCents: 4900,
+    currency: 'EUR',
+    extraPages: 20,
+    features: [],
+    purchasable: true,
+    checkoutMode: 'payment',
+    billingInterval: null,
+    stripePriceEnvKey: 'STRIPE_PRICE_EXTRA_20',
+    sortOrder: 110,
+  },
+
+  'extra-40': {
+    id: 'extra-40',
+    kind: 'addon',
+    name: 'Extra 40 strĂˇn',
+    shortName: '+40 strĂˇn',
+    description:
+      'RozĹˇĂ­renie aktuĂˇlneho projektu a pouĹľĂ­vateÄľskĂ©ho balĂ­ka o ÄŹalĹˇĂ­ch 40 normostrĂˇn.',
+    priceCents: 8900,
+    currency: 'EUR',
+    extraPages: 40,
+    features: [],
+    purchasable: true,
+    checkoutMode: 'payment',
+    billingInterval: null,
+    stripePriceEnvKey: 'STRIPE_PRICE_EXTRA_40',
+    sortOrder: 120,
+  },
+
+  'extra-60': {
+    id: 'extra-60',
+    kind: 'addon',
+    name: 'Extra 60 strĂˇn',
+    shortName: '+60 strĂˇn',
+    description:
+      'RozĹˇĂ­renie aktuĂˇlneho projektu a pouĹľĂ­vateÄľskĂ©ho balĂ­ka o ÄŹalĹˇĂ­ch 60 normostrĂˇn.',
+    priceCents: 12900,
+    currency: 'EUR',
+    extraPages: 60,
+    features: [],
+    purchasable: true,
+    checkoutMode: 'payment',
+    billingInterval: null,
+    stripePriceEnvKey: 'STRIPE_PRICE_EXTRA_60',
+    sortOrder: 130,
+  },
+} as const satisfies Record<AddonId, AddonDefinition>;
+
+// =====================================================
+// POPISY FUNKCIĂŤ PRE UI
+// =====================================================
+
+export const FEATURE_LABELS = {
+  'ai-supervisor': 'AI ĹˇkoliteÄľ a metodickĂ© vedenie',
+  'chapter-generation': 'Tvorba jednotlivĂ˝ch kapitol',
+  'outline-generation': 'NĂˇvrh osnovy a ĹˇtruktĂşry prĂˇce',
+  'quality-audit': 'Audit kvality a logiky textu',
+  humanizer: 'HumanizĂˇcia textu',
+  citations: 'CitĂˇcie, zdroje a bibliografia',
+  planning: 'PlĂˇnovanie spracovania prĂˇce',
+  emails: 'PrĂ­prava profesionĂˇlnych e-mailov',
+  translation: 'Preklad odbornĂ©ho textu',
+  originality: 'Kontrola originality textu',
+  'data-prepare': 'PrĂ­prava a ÄŤistenie dĂˇt',
+  'data-descriptive': 'DeskriptĂ­vna Ĺˇtatistika',
+  'data-questionnaires': 'Tvorba ĹˇkĂˇl, subĹˇkĂˇl a grafy',
+  'data-reliability': 'Reliabilita a Cronbachovo alfa',
+  'data-normality': 'Testovanie normality',
+  'data-correlations': 'KorelaÄŤnĂˇ analĂ˝za',
+  'data-parametric-tests': 'ParametrickĂ© testy',
+  'data-nonparametric-tests': 'NeparametrickĂ© testy',
+  'data-charts': 'Grafy a vizualizĂˇcie',
+  defense: 'PrĂ­prava na obhajobu',
+  'defense-presentation': 'PrezentĂˇcia k obhajobe',
+  'committee-questions': 'OtĂˇzky komisie a nĂˇvrhy odpovedĂ­',
+} as const satisfies Record<FeatureKey, string>;
+
+export const FEATURE_MODULES = {
+  'ai-supervisor': {
+    id: 'ai-supervisor',
+    label: 'AI ĹˇkoliteÄľ',
+    unavailableMessage:
+      'AI ĹˇkoliteÄľ nie je sĂşÄŤasĹĄou aktuĂˇlneho balĂ­ka.',
+  },
+  'quality-audit': {
+    id: 'quality-audit',
+    label: 'Audit kvality',
+    unavailableMessage:
+      'Audit kvality nie je sĂşÄŤasĹĄou aktuĂˇlneho balĂ­ka.',
+  },
+  humanizer: {
+    id: 'humanizer',
+    label: 'HumanizĂˇcia textu',
+    unavailableMessage:
+      'HumanizĂˇcia textu nie je sĂşÄŤasĹĄou aktuĂˇlneho balĂ­ka.',
+  },
+  citations: {
+    id: 'citations',
+    label: 'Zdroje a citĂˇcie',
+    unavailableMessage:
+      'Zdroje a citĂˇcie nie sĂş sĂşÄŤasĹĄou aktuĂˇlneho balĂ­ka.',
+  },
+  planning: {
+    id: 'planning',
+    label: 'PlĂˇnovanie',
+    unavailableMessage:
+      'PlĂˇnovanie nie je sĂşÄŤasĹĄou aktuĂˇlneho balĂ­ka.',
+  },
+  emails: {
+    id: 'emails',
+    label: 'Emaily',
+    unavailableMessage:
+      'Emaily nie sĂş sĂşÄŤasĹĄou aktuĂˇlneho balĂ­ka.',
+  },
+  translation: {
+    id: 'translation',
+    label: 'Preklad',
+    unavailableMessage:
+      'Preklad nie je sĂşÄŤasĹĄou aktuĂˇlneho balĂ­ka.',
+  },
+  originality: {
+    id: 'originality',
+    label: 'Kontrola originality',
+    unavailableMessage:
+      'Kontrola originality nie je sĂşÄŤasĹĄou aktuĂˇlneho balĂ­ka.',
+  },
+  'data-analysis': {
+    id: 'data-analysis',
+    label: 'AnalĂ˝za dĂˇt',
+    unavailableMessage:
+      'AnalĂ˝za dĂˇt nie je sĂşÄŤasĹĄou aktuĂˇlneho balĂ­ka.',
+  },
+  defense: {
+    id: 'defense',
+    label: 'Obhajoba',
+    unavailableMessage:
+      'Obhajoba nie je sĂşÄŤasĹĄou aktuĂˇlneho balĂ­ka.',
+  },
+} as const satisfies Record<FeatureModuleId, FeatureModuleDefinition>;
+
+export const FEATURE_TO_MODULE = {
+  'ai-supervisor': 'ai-supervisor',
+  'chapter-generation': 'ai-supervisor',
+  'outline-generation': 'ai-supervisor',
+  'quality-audit': 'quality-audit',
+  humanizer: 'humanizer',
+  citations: 'citations',
+  planning: 'planning',
+  emails: 'emails',
+  translation: 'translation',
+  originality: 'originality',
+  'data-prepare': 'data-analysis',
+  'data-descriptive': 'data-analysis',
+  'data-questionnaires': 'data-analysis',
+  'data-reliability': 'data-analysis',
+  'data-normality': 'data-analysis',
+  'data-correlations': 'data-analysis',
+  'data-parametric-tests': 'data-analysis',
+  'data-nonparametric-tests': 'data-analysis',
+  'data-charts': 'data-analysis',
+  defense: 'defense',
+  'defense-presentation': 'defense',
+  'committee-questions': 'defense',
+} as const satisfies Record<FeatureKey, FeatureModuleId>;
+
+// =====================================================
+// ZOZNAMY ID
+// =====================================================
+
+/**
+ * VĹˇetky identifikĂˇtory vrĂˇtane internĂ˝ch plĂˇnov.
+ */
+export const ALL_PLAN_IDS = Object.freeze(
+  Object.keys(PLANS) as PlanId[],
+);
+
+/**
+ * VerejnĂ© plĂˇny urÄŤenĂ© pre pricing a vĂ˝ber balĂ­ka.
+ * ADMIN sa sem zĂˇmerne nedostane.
+ */
+export const PLAN_IDS = Object.freeze([
+  'free',
+  'seminar-work',
+  'bachelor-thesis',
+  'master-thesis',
+] as const satisfies readonly Exclude<PlanId, 'admin'>[]);
+
+export const ADDON_IDS = Object.freeze(
+  Object.keys(ADDONS) as AddonId[],
+);
+
+export const FEATURE_KEYS = Object.freeze(
+  Object.keys(FEATURE_LABELS) as FeatureKey[],
+);
+
+export const PURCHASABLE_PLAN_IDS = Object.freeze(
+  ALL_PLAN_IDS.filter(
+    (planId): planId is PaidPlanId =>
+      PLANS[planId].purchasable === true,
+  ),
+);
+
+export const PURCHASABLE_CATALOG_IDS = Object.freeze([
+  ...PURCHASABLE_PLAN_IDS,
+  ...ADDON_IDS,
+] as PurchasableCatalogId[]);
+
+// =====================================================
+// TYPE GUARDS
+// =====================================================
+
+function hasOwnKey<TObject extends object>(
+  object: TObject,
+  key: PropertyKey,
+): key is keyof TObject {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+export function isPlanId(value: unknown): value is PlanId {
+  return typeof value === 'string' && hasOwnKey(PLANS, value);
+}
+
+export function isAdminPlanId(value: unknown): value is 'admin' {
+  return value === 'admin';
+}
+
+export function isPublicPlanId(
+  value: unknown,
+): value is Exclude<PlanId, 'admin'> {
+  return isPlanId(value) && value !== 'admin';
+}
+
+export function isPaidPlanId(value: unknown): value is PaidPlanId {
+  return (
+    isPlanId(value) &&
+    PLANS[value].purchasable === true
+  );
+}
+
+export function isAddonId(value: unknown): value is AddonId {
+  return typeof value === 'string' && hasOwnKey(ADDONS, value);
+}
+
+export function isFeatureKey(value: unknown): value is FeatureKey {
+  return (
+    typeof value === 'string' &&
+    hasOwnKey(FEATURE_LABELS, value)
+  );
+}
+
+export function isFeatureModuleId(
+  value: unknown,
+): value is FeatureModuleId {
+  return (
+    typeof value === 'string' &&
+    hasOwnKey(FEATURE_MODULES, value)
+  );
+}
+
+export function isPurchasableCatalogId(
+  value: unknown,
+): value is PurchasableCatalogId {
+  return (
+    isPaidPlanId(value) ||
+    isAddonId(value)
+  );
+}
+
+// =====================================================
+// GETTERY KATALĂ“GU
+// =====================================================
+
+export function getPlanDefinition(planId: PlanId): PlanDefinition {
+  return PLANS[planId] as PlanDefinition;
+}
+
+export function getAddonDefinition(addonId: AddonId): AddonDefinition {
+  return ADDONS[addonId];
+}
+
+export function getCatalogDefinition(
+  itemId: PlanId | AddonId,
+): CatalogDefinition {
+  if (isPlanId(itemId)) {
+    return PLANS[itemId] as PlanDefinition;
+  }
+
+  return ADDONS[itemId];
+}
+
+export function getPurchasableCatalogDefinition(
+  itemId: PurchasableCatalogId,
+): PaidPlanDefinition | AddonDefinition {
+  if (isAddonId(itemId)) {
+    return ADDONS[itemId];
+  }
+
+  return PLANS[itemId];
+}
+
+export function getFeatureLabel(feature: FeatureKey): string {
+  return FEATURE_LABELS[feature];
+}
+
+export function getFeatureModuleId(
+  feature: FeatureKey,
+): FeatureModuleId {
+  return FEATURE_TO_MODULE[feature];
+}
+
+export function getFeatureModuleDefinition(
+  feature: FeatureKey,
+): FeatureModuleDefinition {
+  const moduleId = getFeatureModuleId(feature);
+
+  return FEATURE_MODULES[moduleId];
+}
+
+export function getFeatureModuleLabel(
+  feature: FeatureKey,
+): string {
+  return getFeatureModuleDefinition(feature).label;
+}
+
+export function getFeatureNotIncludedMessage(
+  feature: FeatureKey,
+): string {
+  return getFeatureModuleDefinition(feature).unavailableMessage;
+}
+
+// =====================================================
+// CENY A FAKTURĂCIA
+// =====================================================
+
+export function formatPriceCents(
+  priceCents: number,
+  locale = 'sk-SK',
+  currency: CurrencyCode = 'EUR',
+): string {
+  return new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(priceCents / 100);
+}
+
+export function getCatalogPriceLabel(
+  itemId: PlanId | AddonId,
+  locale = 'sk-SK',
+): string {
+  const item = getCatalogDefinition(itemId);
+
+  return formatPriceCents(
+    item.priceCents,
+    locale,
+    item.currency,
+  );
+}
+
+/**
+ * PouĹľite na pricing strĂˇnke, aby sa pri platenĂ˝ch balĂ­koch zobrazovalo
+ * naprĂ­klad â€ž39 â‚¬ / mesiacâ€ś a nie text o jednorazovej platbe.
+ */
+export function getCatalogBillingPriceLabel(
+  itemId: PlanId | AddonId,
+  locale = 'sk-SK',
+): string {
+  const item = getCatalogDefinition(itemId);
+  const priceLabel = getCatalogPriceLabel(itemId, locale);
+
+  if (item.checkoutMode === 'subscription') {
+    return `${priceLabel} / mesiac`;
+  }
+
+  return priceLabel;
+}
+
+export function isSubscriptionCatalogItem(
+  itemId: PlanId | AddonId,
+): boolean {
+  return (
+    getCatalogDefinition(itemId).checkoutMode === 'subscription'
+  );
+}
+
+export function isOneTimeCatalogItem(
+  itemId: PlanId | AddonId,
+): boolean {
+  return getCatalogDefinition(itemId).checkoutMode === 'payment';
+}
+
+// =====================================================
+// STRIPE
+// =====================================================
+
+export function getStripePriceEnvironmentKey(
+  itemId: PurchasableCatalogId,
+): StripePriceEnvironmentKey {
+  const item = getPurchasableCatalogDefinition(itemId);
+
+  return item.stripePriceEnvKey;
+}
+
+/**
+ * Funkciu volajte iba na serveri, naprĂ­klad v:
+ * app/api/payments/checkout/route.ts
+ *
+ * Upozornenie:
+ * - Price ID pre seminar-work, bachelor-thesis a master-thesis musĂ­ byĹĄ
+ *   v Stripe vytvorenĂ© ako recurring monthly price.
+ * - Price ID pre doplnky mĂ´Ĺľe zostaĹĄ jednorazovĂ©.
+ */
+export function getStripePriceId(
+  itemId: PurchasableCatalogId,
+): string {
+  const environmentKey =
+    getStripePriceEnvironmentKey(itemId);
+
+  const stripePriceId =
+    process.env[environmentKey]?.trim();
+
+  if (!stripePriceId) {
+    throw new Error(
+      `ChĂ˝ba Stripe Price ID. DoplĹte environment premennĂş ${environmentKey}.`,
+    );
+  }
+
+  if (!stripePriceId.startsWith('price_')) {
+    throw new Error(
+      `Environment premennĂˇ ${environmentKey} musĂ­ obsahovaĹĄ Stripe Price ID zaÄŤĂ­najĂşce na "price_".`,
+    );
+  }
+
+  return stripePriceId;
+}
+
+export function getConfiguredStripePrices(): Partial<
+  Record<PurchasableCatalogId, string>
+> {
+  const configuredPrices: Partial<
+    Record<PurchasableCatalogId, string>
+  > = {};
+
+  for (const itemId of PURCHASABLE_CATALOG_IDS) {
+    const environmentKey =
+      getStripePriceEnvironmentKey(itemId);
+
+    const value = process.env[environmentKey]?.trim();
+
+    if (value?.startsWith('price_')) {
+      configuredPrices[itemId] = value;
+    }
+  }
+
+  return configuredPrices;
+}
+
+// =====================================================
+// LIMITY A OPRĂVNENIA
+// =====================================================
+
+/**
+ * VrĂˇti true iba pre bezpeÄŤne urÄŤenĂ˝ administrĂˇtorskĂ˝ alebo neobmedzenĂ˝
+ * prĂ­stup. E-mail, display name ani Ăşdaje z klienta sa tu nepouĹľĂ­vajĂş.
+ */
+export function hasUnlimitedPlanAccess(
+  planId: PlanId,
+  options: EntitlementAccessOptions = {},
+): boolean {
+  const plan = getPlanDefinition(planId);
+
+  return (
+    options.isAdmin === true ||
+    options.hasUnlimitedAccess === true ||
+    planId === 'admin' ||
+    plan.hasUnlimitedAccess
+  );
+}
+
+export function getExtraPagesForAddons(
+  addonIds: readonly AddonId[],
+): number {
+  return addonIds.reduce(
+    (total, addonId) =>
+      total + ADDONS[addonId].extraPages,
+    0,
+  );
+}
+
+export function getTotalPageLimit(
+  planId: PlanId,
+  addonIds: readonly AddonId[] = [],
+): number | null {
+  const basePageLimit = PLANS[planId].pageLimit;
+
+  if (basePageLimit === null) {
+    return null;
+  }
+
+  return basePageLimit + getExtraPagesForAddons(addonIds);
+}
+
+/**
+ * VrĂˇti efektĂ­vne limity pouĹľĂ­vateÄľa.
+ *
+ * Pri administrĂˇtorovi sĂş vĹˇetky hodnoty null, ÄŤo znamenĂˇ neobmedzenĂ˝
+ * prĂ­stup. SamotnĂ© odpoÄŤĂ­tavanie promptov, strĂˇn a prĂ­loh vĹˇak musĂ­ tĂşto
+ * hodnotu reĹˇpektovaĹĄ aj v serverovĂ˝ch API routach.
+ */
+export function getEffectiveEntitlementLimits(
+  planId: PlanId,
+  addonIds: readonly AddonId[] = [],
+  options: EntitlementAccessOptions = {},
+): EffectiveEntitlementLimits {
+  const isAdmin =
+    options.isAdmin === true ||
+    planId === 'admin';
+
+  const hasUnlimitedAccess = hasUnlimitedPlanAccess(
+    planId,
+    options,
+  );
+
+  if (hasUnlimitedAccess) {
+    return {
+      isAdmin,
+      hasUnlimitedAccess: true,
+      isUnlimited: true,
+      pageLimit: null,
+      promptLimit: null,
+      attachmentLimit: null,
+    };
+  }
+
+  return {
+    isAdmin: false,
+    hasUnlimitedAccess: false,
+    isUnlimited: false,
+    pageLimit: getTotalPageLimit(planId, addonIds),
+    promptLimit: PLANS[planId].promptLimit,
+    attachmentLimit: PLANS[planId].attachmentLimit,
+  };
+}
+
+export function getAllFeatures(): Set<FeatureKey> {
+  return new Set<FeatureKey>(ALL_FEATURES);
+}
+
+export function getFeaturesForEntitlements(
+  planId: PlanId,
+  addonIds: readonly AddonId[] = [],
+  options: EntitlementAccessOptions = {},
+): Set<FeatureKey> {
+  if (hasUnlimitedPlanAccess(planId, options)) {
+    return getAllFeatures();
+  }
+
+  const features = new Set<FeatureKey>(
+    PLANS[planId].features,
+  );
+
+  for (const addonId of addonIds) {
+    for (const feature of ADDONS[addonId].features) {
+      features.add(feature);
+    }
+  }
+
+  return features;
+}
+
+export function planIncludesFeature(
+  planId: PlanId,
+  feature: FeatureKey,
+): boolean {
+  return (PLANS[planId].features as readonly FeatureKey[]).includes(
+    feature,
+  );
+}
+
+export function addonIncludesFeature(
+  addonId: AddonId,
+  feature: FeatureKey,
+): boolean {
+  return (ADDONS[addonId].features as readonly FeatureKey[]).includes(
+    feature,
+  );
+}
+
+export function entitlementsIncludeFeature(
+  planId: PlanId,
+  addonIds: readonly AddonId[],
+  feature: FeatureKey,
+  options: EntitlementAccessOptions = {},
+): boolean {
+  if (hasUnlimitedPlanAccess(planId, options)) {
+    return true;
+  }
+
+  if (planIncludesFeature(planId, feature)) {
+    return true;
+  }
+
+  return addonIds.some((addonId) =>
+    addonIncludesFeature(addonId, feature),
+  );
+}
+
+/**
+ * BezpeÄŤnĂˇ normalizĂˇcia bez automatickĂ©ho downgrade na FREE.
+ *
+ * TĂşto funkciu pouĹľĂ­vajte pri naÄŤĂ­tanĂ­ databĂˇzovĂ©ho entitlementu, aby sa
+ * chĂ˝bajĂşca alebo neplatnĂˇ hodnota dala odlĂ­ĹˇiĹĄ od skutoÄŤnĂ©ho FREE balĂ­ka.
+ */
+export function normalizePlanIdOrNull(
+  value: unknown,
+): PlanId | null {
+  return isPlanId(value) ? value : null;
+}
+
+/**
+ * SpĂ¤tne kompatibilnĂˇ normalizĂˇcia s fallbackom.
+ *
+ * V serverovej entitlement logike najskĂ´r pouĹľite normalizePlanIdOrNull()
+ * a ADMIN vyhodnoĹĄte pred fallbackom na FREE.
+ */
+export function normalizePlanId(
+  value: unknown,
+  fallback: PlanId = 'free',
+): PlanId {
+  return normalizePlanIdOrNull(value) ?? fallback;
+}
+
+export function normalizeAddonIds(
+  value: unknown,
+): AddonId[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(value.filter(isAddonId)),
+  );
+}
+
+
+============================================================
+SÚBOR: lib\entitlements.ts
+============================================================
+import {
+  ADDONS,
+  PLANS,
+  getFeatureLabel as getCatalogFeatureLabel,
+  getFeaturesForEntitlements,
+  type AddonId,
+  type FeatureKey,
+  type PlanId,
+} from "@/lib/billing/catalog";
+
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+// ============================================================
+// TYPES
+// ============================================================
+
+/**
+ * Moduly pouĹľĂ­vanĂ© v hlavnej chat API route.
+ *
+ * Hodnoty musia zodpovedaĹĄ mapovaniu pouĹľĂ­vanĂ©mu v
+ * app/api/chat/route.ts.
+ */
+export type AppModuleKey =
+  | "supervisor"
+  | "quality"
+  | "defense"
+  | "translation"
+  | "data"
+  | "planning"
+  | "emails"
+  | "originality"
+  | "humanizer"
+  | "chat"
+  | "unknown";
+
+/**
+ * PodrobnejĹˇie operĂˇcie AI ĹˇkoliteÄľa.
+ */
+export type SupervisorActionKey =
+  "general" | "chapter" | "outline" | "citations";
+
+/**
+ * JednotlivĂ© ÄŤasti analĂ˝zy dĂˇt.
+ */
+export type DataAnalysisActionKey =
+  | "prepare"
+  | "descriptive"
+  | "questionnaires"
+  | "reliability"
+  | "normality"
+  | "correlations"
+  | "parametric-tests"
+  | "nonparametric-tests"
+  | "charts";
+
+/**
+ * DatabĂˇzovĂ˝ zĂˇznam z public.zedpera_user_entitlements.
+ *
+ * Hodnoty sĂş unknown, pretoĹľe databĂˇza je externĂ˝ vstup a kaĹľdĂˇ
+ * hodnota sa pred pouĹľitĂ­m bezpeÄŤne normalizuje.
+ */
+type EntitlementDatabaseRow = {
+  plan_id?: unknown;
+  addon_ids?: unknown;
+
+  base_page_limit?: unknown;
+  extra_page_limit?: unknown;
+  pages_used?: unknown;
+
+  prompt_limit?: unknown;
+  prompts_used?: unknown;
+  attachment_limit?: unknown;
+
+  is_admin?: unknown;
+  billing_status?: unknown;
+
+  activated_at?: unknown;
+  valid_until?: unknown;
+  updated_at?: unknown;
+};
+
+/**
+ * VĂ˝sledok RPC funkcie public.zedpera_consume_prompt().
+ *
+ * PodporovanĂ© sĂş oba nĂˇzvy stÄşpcov:
+ * - prompt_limit / prompts_used / prompts_remaining,
+ * - current_prompt_limit / current_prompts_used /
+ *   current_prompts_remaining.
+ */
+type PromptConsumptionRow = {
+  prompt_limit?: unknown;
+  prompts_used?: unknown;
+  prompts_remaining?: unknown;
+  limit_reached?: unknown;
+
+  current_prompt_limit?: unknown;
+  current_prompts_used?: unknown;
+  current_prompts_remaining?: unknown;
+  prompt_limit_reached?: unknown;
+
+  admin_access?: unknown;
+  is_admin?: unknown;
+};
+
+/**
+ * KompletnĂ© serverovĂ© oprĂˇvnenia aktuĂˇlneho pouĹľĂ­vateÄľa.
+ */
+export type CurrentEntitlements = {
+  userId: string;
+  email: string | null;
+
+  /**
+   * AdministrĂˇtorskĂ˝ stav sa urÄŤuje vĂ˝hradne na serveri podÄľa:
+   * public.zedpera_user_entitlements.is_admin.
+   *
+   * E-mail, Ăşdaje z frontendu ani Supabase app_metadata nesmĂş
+   * administrĂˇtorskĂ© oprĂˇvnenie vytvoriĹĄ alebo rozĹˇĂ­riĹĄ.
+   */
+  isAdmin: boolean;
+  hasUnlimitedAccess: boolean;
+
+  /**
+   * UrÄŤuje, ÄŤi bol entitlement skutoÄŤne naÄŤĂ­tanĂ˝ z databĂˇzy.
+   * false znamenĂˇ, Ĺľe bol pouĹľitĂ˝ bezpeÄŤnĂ˝ FREE fallback.
+   */
+  hasDatabaseRecord: boolean;
+
+  planId: PlanId;
+  planName: string;
+  planPriceCents: number;
+
+  /**
+   * ZĂˇkladnĂ˝ limit strĂˇn z balĂ­ka.
+   *
+   * SkutoÄŤnĂ˝ aktuĂˇlny zostatok strĂˇn spravuje lib/page-quota.ts.
+   * Pri administrĂˇtorovi sa tento Ăşdaj nesmie pouĹľĂ­vaĹĄ na blokovanie.
+   */
+  pageLimit: number;
+
+  basePageLimit: number;
+  extraPageLimit: number;
+  pagesUsed: number;
+
+  addonIds: AddonId[];
+  addonNames: string[];
+
+  /**
+   * Set sa pouĹľĂ­va na rĂ˝chle serverovĂ© kontroly.
+   */
+  features: Set<FeatureKey>;
+
+  /**
+   * Pole sa pouĹľĂ­va pri serializĂˇcii do JSON.
+   */
+  featureList: FeatureKey[];
+
+  /**
+   * null znamenĂˇ neobmedzenĂ˝ poÄŤet promptov.
+   */
+  promptLimit: number | null;
+  promptsUsed: number;
+  promptsRemaining: number | null;
+  promptLimitReached: boolean;
+
+  attachmentLimit: number;
+
+  billingStatus: string | null;
+  activatedAt: string | null;
+  validUntil: string | null;
+  updatedAt: string | null;
+};
+
+/**
+ * JSON bezpeÄŤnĂˇ verzia CurrentEntitlements.
+ *
+ * Set nie je vhodnĂ˝ na priame odoslanie cez NextResponse.json,
+ * preto sa features menĂ­ na pole.
+ */
+export type PublicEntitlements = Omit<CurrentEntitlements, "features"> & {
+  features: FeatureKey[];
+};
+
+/**
+ * VĂ˝sledok ĂşspeĹˇnĂ©ho odpoÄŤĂ­tania promptu.
+ */
+export type PromptUsageResult = {
+  isAdmin: boolean;
+  promptLimit: number | null;
+  promptsUsed: number;
+  promptsRemaining: number | null;
+  promptLimitReached: boolean;
+};
+
+/**
+ * Telo jednotnej API chyby pre oprĂˇvnenia.
+ */
+export type EntitlementErrorBody = {
+  ok: false;
+  code: string;
+  message: string;
+  purchaseUrl?: string;
+
+  /**
+   * TechnickĂ˝ detail sa v produkcii neposiela.
+   */
+  detail?: string;
+
+  feature?: FeatureKey;
+  featureLabel?: string;
+
+  promptLimit?: number | null;
+  promptsUsed?: number;
+  promptsRemaining?: number | null;
+
+  attachmentLimit?: number;
+  receivedAttachments?: number;
+};
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+
+const DEFAULT_PLAN_ID: PlanId = "free";
+
+const DEFAULT_ATTACHMENT_LIMIT = PLANS.free.attachmentLimit || 1;
+
+const PURCHASE_URL = "/pricing";
+
+const VALID_PLAN_IDS = new Set<PlanId>(Object.keys(PLANS) as PlanId[]);
+
+const VALID_ADDON_IDS = new Set<AddonId>(Object.keys(ADDONS) as AddonId[]);
+
+// ============================================================
+// LABELS AND FEATURE MAPS
+// ============================================================
+
+/**
+ * SlovenskĂ© nĂˇzvy modulov pouĹľĂ­vanĂ© v hlĂˇĹˇkach pri prepĂ­nanĂ­.
+ *
+ * VÄŹaka tomuto mapovaniu sa uĹľ pri Obhajobe, Preklade, AnalĂ˝ze dĂˇt,
+ * PlĂˇnovanĂ­, Emailoch alebo HumanizĂˇcii nezobrazĂ­ nesprĂˇvna hlĂˇĹˇka
+ * â€žAudit kvality nie je sĂşÄŤasĹĄou balĂ­kaâ€ś.
+ */
+export const MODULE_LABELS: Record<Exclude<AppModuleKey, "unknown">, string> = {
+  supervisor: "AI ĹˇkoliteÄľ",
+  quality: "Audit kvality",
+  defense: "Obhajoba",
+  translation: "Preklad",
+  data: "AnalĂ˝za dĂˇt",
+  planning: "PlĂˇnovanie",
+  emails: "Emaily",
+  originality: "Kontrola originality",
+  humanizer: "HumanizĂˇcia textu",
+  chat: "AI ĹˇkoliteÄľ",
+};
+
+/**
+ * SlovenskĂ© nĂˇzvy funkciĂ­ pouĹľĂ­vanĂ© v chybovĂ˝ch hlĂˇĹˇkach
+ * a v odpovediach API.
+ *
+ * PrimĂˇrny zdroj nĂˇzvov je katalĂłg. Toto mapovanie sa ponechĂˇva
+ * kvĂ´li spĂ¤tnej kompatibilite s existujĂşcimi importmi.
+ */
+export const FEATURE_LABELS: Record<FeatureKey, string> = {
+  "ai-supervisor": "AI ĹˇkoliteÄľ",
+  "chapter-generation": "Tvorba kapitol",
+  "outline-generation": "NĂˇvrh ĹˇtruktĂşry a osnovy",
+  "quality-audit": "Audit kvality",
+  humanizer: "HumanizĂˇcia textu",
+  citations: "CitĂˇcie a zdroje",
+  planning: "PlĂˇnovanie prĂˇce",
+  emails: "PrĂ­prava e-mailov",
+  translation: "Preklad",
+  originality: "Kontrola originality",
+  "data-prepare": "PrĂ­prava a ÄŤistenie dĂˇt",
+  "data-descriptive": "DeskriptĂ­vna Ĺˇtatistika",
+  "data-questionnaires": "Tvorba ĹˇkĂˇl, subĹˇkĂˇl a grafy",
+  "data-reliability": "Reliabilita ĹˇkĂˇl",
+  "data-normality": "Testovanie normality",
+  "data-correlations": "KorelaÄŤnĂ© analĂ˝zy",
+  "data-parametric-tests": "ParametrickĂ© testy",
+  "data-nonparametric-tests": "NeparametrickĂ© testy",
+  "data-charts": "Grafy a vizualizĂˇcie",
+  defense: "PrĂ­prava na obhajobu",
+  "defense-presentation": "PrezentĂˇcia na obhajobu",
+  "committee-questions": "OtĂˇzky komisie",
+};
+
+/**
+ * ZĂˇkladnĂˇ funkcia vyĹľadovanĂˇ jednotlivĂ˝mi modulmi aplikĂˇcie.
+ */
+export const MODULE_FEATURE_MAP: Record<
+  Exclude<AppModuleKey, "unknown">,
+  FeatureKey
+> = {
+  supervisor: "ai-supervisor",
+  quality: "quality-audit",
+  defense: "defense",
+  translation: "translation",
+  data: "data-prepare",
+  planning: "planning",
+  emails: "emails",
+  originality: "originality",
+  humanizer: "humanizer",
+  chat: "ai-supervisor",
+};
+
+/**
+ * PodrobnĂ© oprĂˇvnenia pre operĂˇcie AI ĹˇkoliteÄľa.
+ */
+export const SUPERVISOR_ACTION_FEATURE_MAP: Record<
+  SupervisorActionKey,
+  FeatureKey
+> = {
+  general: "ai-supervisor",
+  chapter: "chapter-generation",
+  outline: "outline-generation",
+  citations: "citations",
+};
+
+/**
+ * OprĂˇvnenia pre jednotlivĂ© kroky analĂ˝zy dĂˇt.
+ */
+export const DATA_ANALYSIS_FEATURE_MAP: Record<
+  DataAnalysisActionKey,
+  FeatureKey
+> = {
+  prepare: "data-prepare",
+  descriptive: "data-descriptive",
+  questionnaires: "data-questionnaires",
+  reliability: "data-reliability",
+  normality: "data-normality",
+  correlations: "data-correlations",
+  "parametric-tests": "data-parametric-tests",
+  "nonparametric-tests": "data-nonparametric-tests",
+  charts: "data-charts",
+};
+
+// ============================================================
+// CUSTOM ERRORS
+// ============================================================
+
+/**
+ * ZĂˇkladnĂˇ chyba vĹˇetkĂ˝ch kontrol oprĂˇvnenĂ­.
+ *
+ * API routes mĂ´Ĺľu vĹˇetky odvodenĂ© chyby spracovaĹĄ jednou kontrolou:
+ *
+ * if (error instanceof EntitlementError) { ... }
+ */
+export class EntitlementError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly detail?: string;
+
+  constructor({
+    code,
+    message,
+    status,
+    detail,
+  }: {
+    code: string;
+    message: string;
+    status: number;
+    detail?: string;
+  }) {
+    super(message);
+
+    this.name = "EntitlementError";
+    this.code = code;
+    this.status = status;
+    this.detail = detail;
+
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+/**
+ * PouĹľĂ­vateÄľ nemĂˇ platnĂş Supabase session.
+ */
+export class UnauthenticatedError extends EntitlementError {
+  constructor(detail?: string) {
+    super({
+      code: "UNAUTHENTICATED",
+      message: "PouĹľĂ­vateÄľ nie je prihlĂˇsenĂ˝ alebo jeho relĂˇcia vyprĹˇala.",
+      status: 401,
+      detail,
+    });
+
+    this.name = "UnauthenticatedError";
+  }
+}
+
+/**
+ * AktivovanĂ˝ balĂ­k alebo doplnky neobsahujĂş poĹľadovanĂş funkciu.
+ */
+export class FeatureAccessError extends EntitlementError {
+  readonly feature: FeatureKey;
+  readonly displayLabel: string;
+
+  constructor(
+    feature: FeatureKey,
+    displayLabel?: string,
+    scope: "feature" | "module" = "feature",
+  ) {
+    const safeLabel = displayLabel || getFeatureLabel(feature);
+    const subject = scope === "module" ? "Modul" : "Funkcia";
+
+    super({
+      code: "FEATURE_NOT_INCLUDED",
+      message: `${subject} â€ž${safeLabel}â€ś nie je sĂşÄŤasĹĄou aktivovanĂ©ho balĂ­ka.`,
+      status: 403,
+      detail: feature,
+    });
+
+    this.name = "FeatureAccessError";
+    this.feature = feature;
+    this.displayLabel = safeLabel;
+  }
+}
+
+/**
+ * PouĹľĂ­vateÄľ vyÄŤerpal dostupnĂ© prompty.
+ */
+export class PromptLimitError extends EntitlementError {
+  readonly promptLimit: number | null;
+  readonly promptsUsed: number;
+
+  constructor({
+    promptLimit,
+    promptsUsed,
+  }: {
+    promptLimit: number | null;
+    promptsUsed: number;
+  }) {
+    super({
+      code: "PROMPT_LIMIT_REACHED",
+      message:
+        "Limit dostupnĂ˝ch promptov bol vyÄŤerpanĂ˝. Pre pokraÄŤovanie si aktivujte platenĂ˝ balĂ­k.",
+      status: 429,
+    });
+
+    this.name = "PromptLimitError";
+    this.promptLimit = promptLimit;
+    this.promptsUsed = promptsUsed;
+  }
+}
+
+/**
+ * PoĹľiadavka obsahuje viac prĂ­loh neĹľ povoÄľuje aktĂ­vny balĂ­k.
+ */
+export class AttachmentLimitError extends EntitlementError {
+  readonly attachmentLimit: number;
+  readonly receivedAttachments: number;
+
+  constructor({
+    attachmentLimit,
+    receivedAttachments,
+  }: {
+    attachmentLimit: number;
+    receivedAttachments: number;
+  }) {
+    const safeLimit = Math.max(Math.trunc(attachmentLimit), 0);
+
+    const safeReceived = Math.max(Math.trunc(receivedAttachments), 0);
+
+    super({
+      code: "ATTACHMENT_LIMIT_REACHED",
+      message:
+        safeLimit === 1
+          ? "VĂˇĹˇ balĂ­k povoÄľuje maximĂˇlne 1 prĂ­lohu."
+          : `VĂˇĹˇ balĂ­k povoÄľuje maximĂˇlne ${safeLimit} prĂ­loh.`,
+      status: 403,
+    });
+
+    this.name = "AttachmentLimitError";
+    this.attachmentLimit = safeLimit;
+    this.receivedAttachments = safeReceived;
+  }
+}
+
+// ============================================================
+// NORMALIZATION HELPERS
+// ============================================================
+
+function normalizeString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * BezpeÄŤne prevedie hodnotu na nezĂˇpornĂ© celĂ© ÄŤĂ­slo.
+ *
+ * Pri neplatnej hodnote vrĂˇti undefined.
+ */
+function toNonNegativeIntegerOrUndefined(value: unknown): number | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value === "string" && value.trim() === "") {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  return Math.min(Math.max(Math.trunc(parsed), 0), Number.MAX_SAFE_INTEGER);
+}
+
+function toNonNegativeInteger(value: unknown, fallback = 0): number {
+  return (
+    toNonNegativeIntegerOrUndefined(value) ?? Math.max(Math.trunc(fallback), 0)
+  );
+}
+
+/**
+ * Prevedie katalĂłgovĂ˝ limit strĂˇn na bezpeÄŤnĂ© nezĂˇpornĂ© celĂ© ÄŤĂ­slo.
+ *
+ * PlanDefinition.pageLimit mĂ´Ĺľe byĹĄ null pri internom administrĂˇtorskom
+ * balĂ­ku. AdministrĂˇtor mĂˇ neobmedzenĂ˝ prĂ­stup cez isAdmin a
+ * hasUnlimitedAccess, preto sa hodnota 0 pouĹľĂ­va iba ako bezpeÄŤnĂˇ
+ * serializovateÄľnĂˇ hodnota pre ÄŤĂ­selnĂ© polia CurrentEntitlements.
+ */
+function resolveCatalogPageLimit(value: unknown): number {
+  return toNonNegativeInteger(value, 0);
+}
+
+function toSafeBoolean(value: unknown, fallback = false): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+
+    if (
+      normalized === "true" ||
+      normalized === "1" ||
+      normalized === "yes" ||
+      normalized === "admin"
+    ) {
+      return true;
+    }
+
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+      return false;
+    }
+  }
+
+  return fallback;
+}
+
+function normalizeDateString(value: unknown): string | null {
+  const normalized = normalizeString(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const timestamp = Date.parse(normalized);
+
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  return new Date(timestamp).toISOString();
+}
+
+function normalizeBillingStatus(value: unknown): string | null {
+  const normalized = normalizeString(value).toLowerCase();
+  return normalized || null;
+}
+
+function isPlanId(value: unknown): value is PlanId {
+  return (
+    typeof value === "string" && VALID_PLAN_IDS.has(value.trim() as PlanId)
+  );
+}
+
+function isAddonId(value: unknown): value is AddonId {
+  return (
+    typeof value === "string" && VALID_ADDON_IDS.has(value.trim() as AddonId)
+  );
+}
+
+function normalizePlanId(value: unknown): PlanId {
+  const candidate = normalizeString(value);
+
+  return isPlanId(candidate) ? candidate : DEFAULT_PLAN_ID;
+}
+
+/**
+ * Podporuje:
+ * - PostgreSQL text[],
+ * - beĹľnĂ© JavaScript pole,
+ * - JSON string,
+ * - PostgreSQL textovĂ˝ zĂˇpis {extra-20,data-analysis},
+ * - ÄŤiarkou oddelenĂ˝ text.
+ */
+function normalizeAddonIds(value: unknown): AddonId[] {
+  let rawValues: unknown[] = [];
+
+  if (Array.isArray(value)) {
+    rawValues = value;
+  } else if (typeof value === "string") {
+    const normalized = value.trim();
+
+    if (!normalized) {
+      return [];
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(normalized);
+
+      if (Array.isArray(parsed)) {
+        rawValues = parsed;
+      }
+    } catch {
+      const withoutBraces = normalized.replace(/^\{/, "").replace(/\}$/, "");
+
+      rawValues = withoutBraces
+        .split(",")
+        .map((item) => item.trim().replace(/^"|"$/g, ""))
+        .filter(Boolean);
+    }
+  }
+
+  const validAddonIds = rawValues.map(normalizeString).filter(isAddonId);
+
+  return Array.from(new Set<AddonId>(validAddonIds));
+}
+
+/**
+ * DatabĂˇzovĂ˝ prompt_limit mĂˇ prednosĹĄ, ak obsahuje ÄŤĂ­slo.
+ *
+ * Pri balĂ­ku s neobmedzenĂ˝mi promptmi je planValue null a chĂ˝bajĂşca
+ * databĂˇzovĂˇ hodnota sa preto vyhodnotĂ­ ako neobmedzenĂ˝ limit.
+ *
+ * Pri FREE balĂ­ku je planValue ÄŤĂ­slo. Ak by databĂˇza omylom obsahovala
+ * null, pouĹľije sa bezpeÄŤnĂ˝ limit z katalĂłgu a nie neobmedzenĂ© prompty.
+ */
+function resolvePromptLimit(
+  databaseValue: unknown,
+  planValue: number | null,
+): number | null {
+  const databaseLimit = toNonNegativeIntegerOrUndefined(databaseValue);
+
+  if (databaseLimit !== undefined) {
+    return databaseLimit;
+  }
+
+  if (planValue === null) {
+    return null;
+  }
+
+  return toNonNegativeInteger(planValue, 0);
+}
+
+function resolveAttachmentLimit(
+  databaseValue: unknown,
+  planValue: unknown,
+): number {
+  const databaseLimit = toNonNegativeIntegerOrUndefined(databaseValue);
+
+  if (databaseLimit !== undefined) {
+    return databaseLimit;
+  }
+
+  const planLimit = toNonNegativeIntegerOrUndefined(planValue);
+
+  if (planLimit !== undefined) {
+    return planLimit;
+  }
+
+  return DEFAULT_ATTACHMENT_LIMIT;
+}
+
+function calculatePromptsRemaining({
+  promptLimit,
+  promptsUsed,
+}: {
+  promptLimit: number | null;
+  promptsUsed: number;
+}): number | null {
+  if (promptLimit === null) {
+    return null;
+  }
+
+  return Math.max(promptLimit - promptsUsed, 0);
+}
+
+function isEntitlementExpired(validUntil: string | null): boolean {
+  if (!validUntil) {
+    return false;
+  }
+
+  const timestamp = Date.parse(validUntil);
+
+  return Number.isFinite(timestamp) && timestamp <= Date.now();
+}
+
+function resolveAdminAccess(databaseValue: unknown): boolean {
+  return toSafeBoolean(databaseValue, false);
+}
+
+function getDefaultEntitlements({
+  userId,
+  email,
+}: {
+  userId: string;
+  email: string | null;
+}): CurrentEntitlements {
+  const plan = PLANS[DEFAULT_PLAN_ID];
+  const isAdmin = false;
+
+  const features = getFeaturesForEntitlements(DEFAULT_PLAN_ID, [], { isAdmin });
+
+  const featureList = Array.from(features);
+  const promptLimit = plan.promptLimit;
+  const pageLimit = resolveCatalogPageLimit(plan.pageLimit);
+
+  return {
+    userId,
+    email,
+
+    isAdmin,
+    hasUnlimitedAccess: isAdmin,
+    hasDatabaseRecord: false,
+
+    planId: DEFAULT_PLAN_ID,
+    planName: plan.name,
+    planPriceCents: plan.priceCents,
+    pageLimit,
+
+    basePageLimit: pageLimit,
+    extraPageLimit: 0,
+    pagesUsed: 0,
+
+    addonIds: [],
+    addonNames: [],
+
+    features,
+    featureList,
+
+    promptLimit,
+    promptsUsed: 0,
+    promptsRemaining: promptLimit,
+    promptLimitReached: false,
+
+    attachmentLimit: plan.attachmentLimit,
+
+    billingStatus: isAdmin ? "admin" : "active",
+    activatedAt: null,
+    validUntil: null,
+    updatedAt: null,
+  };
+}
+
+// ============================================================
+// PUBLIC HELPERS
+// ============================================================
+
+export function getFeatureLabel(feature: FeatureKey): string {
+  return FEATURE_LABELS[feature] || getCatalogFeatureLabel(feature) || feature;
+}
+
+export function serializeEntitlements(
+  entitlements: CurrentEntitlements,
+): PublicEntitlements {
+  const { features: _featureSet, featureList, ...rest } = entitlements;
+
+  return {
+    ...rest,
+    featureList: [...featureList],
+    features: [...featureList],
+  };
+}
+
+/**
+ * SpĂ¤tnĂˇ kompatibilita:
+ *
+ * 1. hasFeature(entitlements, feature) -> boolean
+ * 2. await hasFeature(feature) -> Promise<boolean>
+ */
+export function hasFeature(
+  entitlements: CurrentEntitlements,
+  feature: FeatureKey,
+): boolean;
+
+export function hasFeature(feature: FeatureKey): Promise<boolean>;
+
+export function hasFeature(
+  first: CurrentEntitlements | FeatureKey,
+  second?: FeatureKey,
+): boolean | Promise<boolean> {
+  if (typeof first === "object") {
+    if (!second) {
+      return false;
+    }
+
+    return first.isAdmin || first.features.has(second);
+  }
+
+  return getCurrentEntitlements().then(
+    (entitlements) => entitlements.isAdmin || entitlements.features.has(first),
+  );
+}
+
+export function hasAnyFeature(
+  entitlements: CurrentEntitlements,
+  features: readonly FeatureKey[],
+): boolean {
+  if (entitlements.isAdmin) {
+    return true;
+  }
+
+  return features.some((feature) => entitlements.features.has(feature));
+}
+
+export function hasAllFeatures(
+  entitlements: CurrentEntitlements,
+  features: readonly FeatureKey[],
+): boolean {
+  if (entitlements.isAdmin) {
+    return true;
+  }
+
+  return features.every((feature) => entitlements.features.has(feature));
+}
+
+export function getMissingFeatures(
+  entitlements: CurrentEntitlements,
+  requiredFeatures: readonly FeatureKey[],
+): FeatureKey[] {
+  if (entitlements.isAdmin) {
+    return [];
+  }
+
+  return requiredFeatures.filter(
+    (feature) => !entitlements.features.has(feature),
+  );
+}
+
+// ============================================================
+// DATABASE LOADING
+// ============================================================
+
+type SupabaseServerClient = Awaited<
+  ReturnType<typeof createSupabaseServerClient>
+>;
+
+function isMissingColumnError(error: {
+  code?: string | null;
+  message?: string | null;
+}): boolean {
+  const code = String(error.code || "").toUpperCase();
+  const message = String(error.message || "");
+
+  return (
+    code === "42703" ||
+    code === "PGRST204" ||
+    /column|schema cache|does not exist|could not find/i.test(message)
+  );
+}
+
+/**
+ * NaÄŤĂ­ta entitlement z databĂˇzy.
+ *
+ * Funkcia podporuje ĂşplnĂş aj zĂˇkladnĂş schĂ©mu, ale kaĹľdĂˇ podporovanĂˇ
+ * schĂ©ma musĂ­ obsahovaĹĄ stÄşpec is_admin. Bez neho aplikĂˇcia nesmie
+ * administrĂˇtorskĂ© oprĂˇvnenie odvodzovaĹĄ z inĂ©ho zdroja.
+ */
+async function loadEntitlementRow({
+  supabase,
+  userId,
+}: {
+  supabase: SupabaseServerClient;
+  userId: string;
+}): Promise<EntitlementDatabaseRow | null> {
+  const selectVariants = [
+    [
+      "plan_id",
+      "addon_ids",
+      "base_page_limit",
+      "extra_page_limit",
+      "pages_used",
+      "prompt_limit",
+      "prompts_used",
+      "attachment_limit",
+      "is_admin",
+      "billing_status",
+      "activated_at",
+      "valid_until",
+      "updated_at",
+    ],
+    [
+      "plan_id",
+      "addon_ids",
+      "prompt_limit",
+      "prompts_used",
+      "attachment_limit",
+      "is_admin",
+    ],
+  ] as const;
+
+  let lastMissingColumnError = "";
+
+  for (const columns of selectVariants) {
+    const result = await supabase
+      .from("zedpera_user_entitlements")
+      .select(columns.join(", "))
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (!result.error) {
+      return result.data as EntitlementDatabaseRow | null;
+    }
+
+    if (!isMissingColumnError(result.error)) {
+      throw new EntitlementError({
+        code: "ENTITLEMENTS_LOAD_FAILED",
+        message: "OprĂˇvnenia pouĹľĂ­vateÄľskĂ©ho ĂşÄŤtu sa nepodarilo naÄŤĂ­taĹĄ.",
+        status: 500,
+        detail: result.error.message,
+      });
+    }
+
+    lastMissingColumnError = result.error.message;
+  }
+
+  throw new EntitlementError({
+    code: "ENTITLEMENTS_SCHEMA_INCOMPATIBLE",
+    message: "DatabĂˇzovĂˇ schĂ©ma oprĂˇvnenĂ­ nie je kompatibilnĂˇ s aplikĂˇciou.",
+    status: 500,
+    detail: lastMissingColumnError,
+  });
+}
+
+/**
+ * NaÄŤĂ­ta a zostavĂ­ oprĂˇvnenia aktuĂˇlne prihlĂˇsenĂ©ho pouĹľĂ­vateÄľa.
+ */
+export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user?.id) {
+    throw new UnauthenticatedError(authError?.message);
+  }
+
+  const data = await loadEntitlementRow({
+    supabase,
+    userId: user.id,
+  });
+
+  if (!data) {
+    return getDefaultEntitlements({
+      userId: user.id,
+      email: user.email || null,
+    });
+  }
+
+  const isAdmin = resolveAdminAccess(data.is_admin);
+  const storedPlanId = normalizePlanId(data.plan_id);
+  const storedAddonIds = normalizeAddonIds(data.addon_ids);
+
+  const activatedAt = normalizeDateString(data.activated_at);
+  const validUntil = normalizeDateString(data.valid_until);
+  const updatedAt = normalizeDateString(data.updated_at);
+  const billingStatus = normalizeBillingStatus(data.billing_status);
+
+  /**
+   * AdministrĂˇtor nikdy nesmie stratiĹĄ prĂ­stup v dĂ´sledku vyprĹˇania
+   * platenĂ©ho balĂ­ka. Pre beĹľnĂ©ho pouĹľĂ­vateÄľa sa po vyprĹˇanĂ­ oprĂˇvnenia
+   * bezpeÄŤne vrĂˇtia na FREE.
+   */
+  const expired = !isAdmin && isEntitlementExpired(validUntil);
+
+  const planId = expired ? DEFAULT_PLAN_ID : storedPlanId;
+  const addonIds = expired ? [] : storedAddonIds;
+  const plan = PLANS[planId];
+  const catalogPageLimit = resolveCatalogPageLimit(plan.pageLimit);
+
+  const features = getFeaturesForEntitlements(planId, addonIds, { isAdmin });
+
+  const featureList = Array.from(features);
+
+  const promptLimit = isAdmin
+    ? null
+    : expired
+      ? plan.promptLimit
+      : resolvePromptLimit(data.prompt_limit, plan.promptLimit);
+
+  const promptsUsed = expired ? 0 : toNonNegativeInteger(data.prompts_used, 0);
+
+  const promptsRemaining = isAdmin
+    ? null
+    : calculatePromptsRemaining({
+        promptLimit,
+        promptsUsed,
+      });
+
+  const attachmentLimit = expired
+    ? plan.attachmentLimit
+    : resolveAttachmentLimit(data.attachment_limit, plan.attachmentLimit);
+
+  const basePageLimit = expired
+    ? catalogPageLimit
+    : toNonNegativeInteger(data.base_page_limit, catalogPageLimit);
+
+  const extraPageLimit = expired
+    ? 0
+    : toNonNegativeInteger(data.extra_page_limit, 0);
+
+  const pagesUsed = expired ? 0 : toNonNegativeInteger(data.pages_used, 0);
+
+  return {
+    userId: user.id,
+    email: user.email || null,
+
+    isAdmin,
+    hasUnlimitedAccess: isAdmin,
+    hasDatabaseRecord: true,
+
+    planId,
+    planName: plan.name,
+    planPriceCents: plan.priceCents,
+    pageLimit: catalogPageLimit,
+
+    basePageLimit,
+    extraPageLimit,
+    pagesUsed,
+
+    addonIds,
+    addonNames: addonIds.map((addonId) => ADDONS[addonId].name),
+
+    features,
+    featureList,
+
+    promptLimit,
+    promptsUsed,
+    promptsRemaining,
+    promptLimitReached:
+      !isAdmin && promptLimit !== null && promptsUsed >= promptLimit,
+
+    attachmentLimit,
+
+    billingStatus: isAdmin ? "admin" : expired ? "expired" : billingStatus,
+    activatedAt: expired ? null : activatedAt,
+    validUntil,
+    updatedAt,
+  };
+}
+
+// ============================================================
+// FEATURE GUARDS
+// ============================================================
+
+/**
+ * OverĂ­ jednu konkrĂ©tnu funkciu.
+ */
+export async function requireFeature(
+  feature: FeatureKey,
+): Promise<CurrentEntitlements> {
+  const entitlements = await getCurrentEntitlements();
+
+  if (entitlements.isAdmin) {
+    return entitlements;
+  }
+
+  if (!entitlements.features.has(feature)) {
+    throw new FeatureAccessError(feature);
+  }
+
+  return entitlements;
+}
+
+/**
+ * OverĂ­, ÄŤi mĂˇ pouĹľĂ­vateÄľ aspoĹ jednu z poĹľadovanĂ˝ch funkciĂ­.
+ */
+export async function requireAnyFeature(
+  requiredFeatures: readonly FeatureKey[],
+): Promise<CurrentEntitlements> {
+  const entitlements = await getCurrentEntitlements();
+
+  if (entitlements.isAdmin || requiredFeatures.length === 0) {
+    return entitlements;
+  }
+
+  const accessible = requiredFeatures.some((feature) =>
+    entitlements.features.has(feature),
+  );
+
+  if (!accessible) {
+    throw new FeatureAccessError(requiredFeatures[0]);
+  }
+
+  return entitlements;
+}
+
+/**
+ * OverĂ­, ÄŤi mĂˇ pouĹľĂ­vateÄľ vĹˇetky poĹľadovanĂ© funkcie.
+ */
+export async function requireAllFeatures(
+  requiredFeatures: readonly FeatureKey[],
+): Promise<CurrentEntitlements> {
+  const entitlements = await getCurrentEntitlements();
+
+  if (entitlements.isAdmin) {
+    return entitlements;
+  }
+
+  const missingFeatures = getMissingFeatures(entitlements, requiredFeatures);
+
+  if (missingFeatures.length > 0) {
+    throw new EntitlementError({
+      code: "REQUIRED_FEATURES_MISSING",
+      message:
+        "AktivovanĂ˝ balĂ­k neobsahuje vĹˇetky funkcie potrebnĂ© pre tĂşto operĂˇciu.",
+      status: 403,
+      detail: missingFeatures.map(getFeatureLabel).join(", "),
+    });
+  }
+
+  return entitlements;
+}
+
+/**
+ * OverĂ­ zĂˇkladnĂş funkciu poĹľadovanĂ©ho modulu.
+ *
+ * HlĂˇĹˇka pouĹľĂ­va nĂˇzov skutoÄŤne zvolenĂ©ho modulu, nie pevnĂ˝ text
+ * â€žAudit kvalityâ€ś.
+ */
+export async function requireModuleAccess(
+  module: AppModuleKey,
+): Promise<CurrentEntitlements> {
+  if (module === "unknown") {
+    throw new EntitlementError({
+      code: "UNKNOWN_MODULE",
+      message: "PoĹľadovanĂ˝ modul nebol rozpoznanĂ˝.",
+      status: 400,
+    });
+  }
+
+  const entitlements = await getCurrentEntitlements();
+
+  if (entitlements.isAdmin) {
+    return entitlements;
+  }
+
+  const feature = MODULE_FEATURE_MAP[module];
+
+  if (!entitlements.features.has(feature)) {
+    throw new FeatureAccessError(feature, MODULE_LABELS[module], "module");
+  }
+
+  return entitlements;
+}
+
+/**
+ * OverĂ­ konkrĂ©tnu ÄŤinnosĹĄ AI ĹˇkoliteÄľa.
+ */
+export async function requireSupervisorAction(
+  action: SupervisorActionKey,
+): Promise<CurrentEntitlements> {
+  return requireFeature(SUPERVISOR_ACTION_FEATURE_MAP[action]);
+}
+
+/**
+ * OverĂ­ konkrĂ©tnu ÄŤasĹĄ analĂ˝zy dĂˇt.
+ *
+ * PrĂ­klad:
+ * await requireDataAnalysisAction('prepare');
+ */
+export async function requireDataAnalysisAction(
+  action: DataAnalysisActionKey,
+): Promise<CurrentEntitlements> {
+  return requireFeature(DATA_ANALYSIS_FEATURE_MAP[action]);
+}
+
+// ============================================================
+// PROMPT LIMIT CONTROL
+// ============================================================
+
+/**
+ * OverĂ­ dostupnosĹĄ promptu bez jeho spotrebovania.
+ */
+export async function requirePromptAllowance(): Promise<CurrentEntitlements> {
+  const entitlements = await getCurrentEntitlements();
+
+  if (entitlements.isAdmin) {
+    return entitlements;
+  }
+
+  if (
+    entitlements.promptLimit !== null &&
+    entitlements.promptsUsed >= entitlements.promptLimit
+  ) {
+    throw new PromptLimitError({
+      promptLimit: entitlements.promptLimit,
+      promptsUsed: entitlements.promptsUsed,
+    });
+  }
+
+  return entitlements;
+}
+
+/**
+ * Alias pre starĹˇie alebo alternatĂ­vne API routy.
+ */
+export const assertPromptAvailable = requirePromptAllowance;
+
+/**
+ * Volajte iba po ĂşspeĹˇnom vygenerovanĂ­ AI vĂ˝stupu.
+ *
+ * Spotreba prebieha atomicky v RPC:
+ * public.zedpera_consume_prompt().
+ *
+ * AdministrĂˇtorovi sa RPC vĂ´bec nevolĂˇ a prompt sa mu neodpoÄŤĂ­ta.
+ */
+export async function consumeSuccessfulPrompt(): Promise<PromptUsageResult> {
+  const current = await getCurrentEntitlements();
+
+  if (current.isAdmin) {
+    return {
+      isAdmin: true,
+      promptLimit: null,
+      promptsUsed: current.promptsUsed,
+      promptsRemaining: null,
+      promptLimitReached: false,
+    };
+  }
+
+  if (!current.hasDatabaseRecord) {
+    throw new EntitlementError({
+      code: "ENTITLEMENTS_RECORD_MISSING",
+      message:
+        "PouĹľĂ­vateÄľskĂ˝ ĂşÄŤet nemĂˇ vytvorenĂ˝ databĂˇzovĂ˝ zĂˇznam oprĂˇvnenĂ­. Skontrolujte trigger pre vytvorenie FREE balĂ­ka.",
+      status: 500,
+    });
+  }
+
+  if (current.promptLimitReached) {
+    throw new PromptLimitError({
+      promptLimit: current.promptLimit,
+      promptsUsed: current.promptsUsed,
+    });
+  }
+
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user?.id) {
+    throw new UnauthenticatedError(authError?.message);
+  }
+
+  const { data, error } = await supabase.rpc("zedpera_consume_prompt");
+
+  if (error) {
+    const message = String(error.message || "");
+    const upperMessage = message.toUpperCase();
+
+    if (upperMessage.includes("PROMPT_LIMIT_REACHED")) {
+      const latest = await getCurrentEntitlements();
+
+      throw new PromptLimitError({
+        promptLimit: latest.promptLimit,
+        promptsUsed: latest.promptsUsed,
+      });
+    }
+
+    if (upperMessage.includes("UNAUTHENTICATED")) {
+      throw new UnauthenticatedError(message);
+    }
+
+    if (
+      upperMessage.includes("ENTITLEMENTS_NOT_FOUND") ||
+      upperMessage.includes("ENTITLEMENT_NOT_FOUND")
+    ) {
+      throw new EntitlementError({
+        code: "ENTITLEMENTS_RECORD_MISSING",
+        message:
+          "PouĹľĂ­vateÄľskĂ˝ ĂşÄŤet nemĂˇ vytvorenĂ˝ databĂˇzovĂ˝ zĂˇznam oprĂˇvnenĂ­. Skontrolujte trigger pre vytvorenie FREE balĂ­ka.",
+        status: 500,
+        detail: message,
+      });
+    }
+
+    throw new EntitlementError({
+      code: "PROMPT_CONSUMPTION_FAILED",
+      message: "PouĹľitie promptu sa nepodarilo zaznamenaĹĄ.",
+      status: 500,
+      detail: message,
+    });
+  }
+
+  const rawRow = Array.isArray(data) ? data[0] : data;
+
+  if (typeof rawRow !== "object" || rawRow === null) {
+    throw new EntitlementError({
+      code: "PROMPT_CONSUMPTION_EMPTY_RESPONSE",
+      message: "DatabĂˇza nevrĂˇtila stav spotreby promptov.",
+      status: 500,
+    });
+  }
+
+  const row = rawRow as PromptConsumptionRow;
+
+  const rpcReportsAdmin =
+    toSafeBoolean(row.admin_access, false) ||
+    toSafeBoolean(row.is_admin, false);
+
+  if (rpcReportsAdmin) {
+    /**
+     * RPC vĂ˝stup nesmie sĂˇm udeliĹĄ administrĂˇtorskĂ© oprĂˇvnenie.
+     * Stav sa vĹľdy znovu overĂ­ cez getCurrentEntitlements(), ktorĂ˝ ÄŤĂ­ta
+     * vĂ˝hradne z zedpera_user_entitlements.is_admin.
+     */
+    const latest = await getCurrentEntitlements();
+
+    if (latest.isAdmin) {
+      return {
+        isAdmin: true,
+        promptLimit: null,
+        promptsUsed: latest.promptsUsed,
+        promptsRemaining: null,
+        promptLimitReached: false,
+      };
+    }
+
+    throw new EntitlementError({
+      code: "PROMPT_RPC_ADMIN_STATE_MISMATCH",
+      message:
+        "DatabĂˇza vrĂˇtila nekonzistentnĂ˝ administrĂˇtorskĂ˝ stav pri spotrebe promptu.",
+      status: 500,
+    });
+  }
+
+  const rawPromptLimit = row.current_prompt_limit ?? row.prompt_limit;
+
+  const promptLimit =
+    rawPromptLimit === null
+      ? null
+      : (toNonNegativeIntegerOrUndefined(rawPromptLimit) ??
+        current.promptLimit);
+
+  const promptsUsed = toNonNegativeInteger(
+    row.current_prompts_used ?? row.prompts_used,
+    current.promptsUsed + 1,
+  );
+
+  const calculatedRemaining = calculatePromptsRemaining({
+    promptLimit,
+    promptsUsed,
+  });
+
+  const rawReturnedRemaining =
+    row.current_prompts_remaining ?? row.prompts_remaining;
+
+  const returnedRemaining =
+    rawReturnedRemaining === null
+      ? null
+      : toNonNegativeIntegerOrUndefined(rawReturnedRemaining);
+
+  const promptsRemaining =
+    promptLimit === null
+      ? null
+      : Math.min(
+          returnedRemaining ?? calculatedRemaining ?? 0,
+          calculatedRemaining ?? 0,
+        );
+
+  const promptLimitReached =
+    toSafeBoolean(row.limit_reached, false) ||
+    toSafeBoolean(row.prompt_limit_reached, false) ||
+    (promptLimit !== null && promptsUsed >= promptLimit);
+
+  return {
+    isAdmin: false,
+    promptLimit,
+    promptsUsed,
+    promptsRemaining,
+    promptLimitReached,
+  };
+}
+
+/**
+ * Alias pre nĂˇzov pouĹľĂ­vanĂ˝ v niektorĂ˝ch API routach.
+ */
+export const consumeCurrentUserPrompt = consumeSuccessfulPrompt;
+
+// ============================================================
+// ATTACHMENT LIMIT CONTROL
+// ============================================================
+
+/**
+ * OverĂ­ poÄŤet prĂ­loh podÄľa aktĂ­vneho balĂ­ka.
+ */
+export async function requireAttachmentAllowance(
+  receivedAttachments: number,
+): Promise<CurrentEntitlements> {
+  const entitlements = await getCurrentEntitlements();
+
+  if (entitlements.isAdmin) {
+    return entitlements;
+  }
+
+  const safeReceivedAttachments = toNonNegativeInteger(receivedAttachments, 0);
+
+  if (safeReceivedAttachments > entitlements.attachmentLimit) {
+    throw new AttachmentLimitError({
+      attachmentLimit: entitlements.attachmentLimit,
+      receivedAttachments: safeReceivedAttachments,
+    });
+  }
+
+  return entitlements;
+}
+
+// ============================================================
+// ERROR SERIALIZATION FOR API ROUTES
+// ============================================================
+
+/**
+ * Prevedie EntitlementError na jednotnĂş API odpoveÄŹ.
+ *
+ * PouĹľitie:
+ *
+ * const result = entitlementErrorResponse(error);
+ * return NextResponse.json(result.body, { status: result.status });
+ */
+export function entitlementErrorResponse(error: unknown): {
+  status: number;
+  body: EntitlementErrorBody;
+} {
+  if (error instanceof FeatureAccessError) {
+    return {
+      status: error.status,
+      body: {
+        ok: false,
+        code: error.code,
+        message: error.message,
+        feature: error.feature,
+        featureLabel: error.displayLabel,
+        purchaseUrl: PURCHASE_URL,
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: error.detail }
+          : {}),
+      },
+    };
+  }
+
+  if (error instanceof PromptLimitError) {
+    const promptsRemaining =
+      error.promptLimit === null
+        ? null
+        : Math.max(error.promptLimit - error.promptsUsed, 0);
+
+    return {
+      status: error.status,
+      body: {
+        ok: false,
+        code: error.code,
+        message: error.message,
+        promptLimit: error.promptLimit,
+        promptsUsed: error.promptsUsed,
+        promptsRemaining,
+        purchaseUrl: PURCHASE_URL,
+      },
+    };
+  }
+
+  if (error instanceof AttachmentLimitError) {
+    return {
+      status: error.status,
+      body: {
+        ok: false,
+        code: error.code,
+        message: error.message,
+        attachmentLimit: error.attachmentLimit,
+        receivedAttachments: error.receivedAttachments,
+        purchaseUrl: PURCHASE_URL,
+      },
+    };
+  }
+
+  if (error instanceof EntitlementError) {
+    return {
+      status: error.status,
+      body: {
+        ok: false,
+        code: error.code,
+        message: error.message,
+        ...(error.status === 402 || error.status === 403 || error.status === 429
+          ? { purchaseUrl: PURCHASE_URL }
+          : {}),
+        ...(process.env.NODE_ENV !== "production" && error.detail
+          ? { detail: error.detail }
+          : {}),
+      },
+    };
+  }
+
+  const technicalDetail =
+    error instanceof Error ? error.message : String(error);
+
+  return {
+    status: 500,
+    body: {
+      ok: false,
+      code: "ENTITLEMENT_ERROR",
+      message: "Kontrola oprĂˇvnenĂ­ pouĹľĂ­vateÄľskĂ©ho ĂşÄŤtu zlyhala.",
+      ...(process.env.NODE_ENV !== "production"
+        ? { detail: technicalDetail }
+        : {}),
+    },
+  };
+}
+
+
+============================================================
+SÚBOR: lib\page-quota.ts
+============================================================
+import 'server-only';
+
+import { getCurrentEntitlements } from '@/lib/entitlements';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+
+/**
+ * PriemernĂ˝ poÄŤet znakov na jednu normostranu.
+ *
+ * Hodnota 1 800 znakov zodpovedĂˇ beĹľnej normostrane:
+ * 30 riadkov Ă— 60 znakov.
+ */
+export const CHARACTERS_PER_PAGE = 1_800;
+
+/**
+ * OrientaÄŤnĂ˝ poÄŤet vĂ˝stupnĂ˝ch tokenov na jednu generovanĂş normostranu.
+ *
+ * Hodnota sa pouĹľĂ­va iba na predbeĹľnĂ© obmedzenie maximĂˇlneho vĂ˝stupu AI.
+ * SkutoÄŤnĂˇ spotreba strĂˇn sa po ĂşspeĹˇnom vygenerovanĂ­ urÄŤuje podÄľa poÄŤtu
+ * znakov vo finĂˇlnom texte.
+ */
+export const TOKENS_PER_PAGE = 650;
+
+/**
+ * ZĂˇkladnĂ© strĂˇnkovĂ© limity verejnĂ˝ch balĂ­kov.
+ *
+ * InternĂ˝ plĂˇn admin tu zĂˇmerne nie je. AdministrĂˇtor nemĂˇ ÄŤĂ­selnĂ˝ limit;
+ * jeho neobmedzenĂ˝ stav sa vyjadruje hodnotou null v PageQuota.
+ */
+export const PLAN_PAGE_LIMITS = {
+  free: 3,
+  'seminar-work': 15,
+  'bachelor-thesis': 50,
+  'master-thesis': 70,
+} as const;
+
+/**
+ * PoÄŤet strĂˇn poskytovanĂ˝ jednotlivĂ˝mi strĂˇnkovĂ˝mi doplnkami.
+ */
+export const ADDON_PAGE_AMOUNTS = {
+  'extra-20': 20,
+  'extra-40': 40,
+  'extra-60': 60,
+} as const;
+
+export type PagePlanId = keyof typeof PLAN_PAGE_LIMITS;
+export type PageAddonId = keyof typeof ADDON_PAGE_AMOUNTS;
+export type PageQuotaPlanId = PagePlanId | 'admin' | string;
+
+/**
+ * JednotnĂ˝ serverovĂ˝ stav strĂˇnkovej kvĂłty.
+ *
+ * VĂ˝znam hodnoty null:
+ * - basePageLimit: pouĹľĂ­vateÄľ nemĂˇ zĂˇkladnĂ˝ ÄŤĂ­selnĂ˝ limit,
+ * - pageLimit: pouĹľĂ­vateÄľ nemĂˇ celkovĂ˝ ÄŤĂ­selnĂ˝ limit,
+ * - pagesRemaining: zostatok sa nepoÄŤĂ­ta, pretoĹľe je neobmedzenĂ˝.
+ *
+ * Pri administrĂˇtorovi musĂ­ vĹľdy platiĹĄ:
+ * - planId = 'admin',
+ * - isAdmin = true,
+ * - isUnlimited = true,
+ * - hasUnlimitedAccess = true,
+ * - basePageLimit = null,
+ * - pageLimit = null,
+ * - pagesRemaining = null,
+ * - pageLimitReached = false,
+ * - strĂˇnky sa neodpoÄŤĂ­tavajĂş a RPC zedpera_consume_pages sa nevolĂˇ.
+ */
+export type PageQuota = {
+  /** AktĂ­vny identifikĂˇtor balĂ­ka pouĹľĂ­vateÄľa. */
+  planId: PageQuotaPlanId;
+
+  /** PouĹľĂ­vateÄľ mĂˇ administrĂˇtorskĂ© oprĂˇvnenie. */
+  isAdmin: boolean;
+
+  /** StrĂˇnkovĂ˝ limit sa na pouĹľĂ­vateÄľa nevzĹĄahuje. */
+  isUnlimited: boolean;
+
+  /** PouĹľĂ­vateÄľ mĂˇ neobmedzenĂ˝ serverovĂ˝ prĂ­stup. */
+  hasUnlimitedAccess: boolean;
+
+  /** PoÄŤet strĂˇn zahrnutĂ˝ v zĂˇkladnom balĂ­ku; null = neobmedzenĂ©. */
+  basePageLimit: number | null;
+
+  /** PoÄŤet dodatoÄŤne zakĂşpenĂ˝ch strĂˇn. */
+  extraPageLimit: number;
+
+  /** CelkovĂ˝ efektĂ­vny limit strĂˇn; null = neobmedzenĂ©. */
+  pageLimit: number | null;
+
+  /** PoÄŤet uĹľ spotrebovanĂ˝ch strĂˇn. Adminovi sa vrĂˇti 0. */
+  pagesUsed: number;
+
+  /** PoÄŤet zostĂˇvajĂşcich strĂˇn; null = neobmedzenĂ©. */
+  pagesRemaining: number | null;
+
+  /** InformĂˇcia o tom, ÄŤi bol limit vyÄŤerpanĂ˝. */
+  pageLimitReached: boolean;
+};
+
+export type ConsumePageQuotaInput = {
+  /** FinĂˇlny text vygenerovanĂ˝ AI. */
+  text: string;
+
+  /**
+   * Modul, v ktorom bola spotreba vytvorenĂˇ.
+   *
+   * PrĂ­klady:
+   * chat, humanizer, thesis, translation, defense, data-analysis.
+   */
+  module: string;
+
+  /**
+   * JedineÄŤnĂ˝ identifikĂˇtor poĹľiadavky.
+   *
+   * PouĹľĂ­va sa na ochranu proti dvojitĂ©mu odpoÄŤĂ­taniu strĂˇn pri opakovanom
+   * odoslanĂ­ rovnakej poĹľiadavky.
+   */
+  requestId: string;
+};
+
+/**
+ * VoliteÄľnĂ© nastavenie vĂ˝poÄŤtu maximĂˇlneho poÄŤtu tokenov.
+ */
+export type OutputTokenLimitOptions = {
+  /** Pri true sa vrĂˇti celĂ˝ requestedTokenLimit bez strĂˇnkovĂ©ho obmedzenia. */
+  isUnlimited?: boolean;
+
+  /** AlternatĂ­vny nĂˇzov pouĹľĂ­vanĂ˝ v niektorĂ˝ch starĹˇĂ­ch API routach. */
+  hasUnlimitedAccess?: boolean;
+};
+
+/**
+ * Typ odpovede databĂˇzovej RPC funkcie zedpera_consume_pages.
+ *
+ * PodporovanĂ© sĂş starĹˇie aj novĹˇie nĂˇzvy databĂˇzovĂ˝ch stÄşpcov.
+ */
+type RpcBalanceRow = {
+  plan_id?: unknown;
+  base_page_limit?: unknown;
+  extra_page_limit?: unknown;
+
+  used_pages?: unknown;
+  pages_used?: unknown;
+
+  total_pages?: unknown;
+  page_limit?: unknown;
+
+  remaining_pages?: unknown;
+  pages_remaining?: unknown;
+
+  limit_reached?: unknown;
+  page_limit_reached?: unknown;
+
+  is_admin?: unknown;
+  admin_access?: unknown;
+  has_unlimited_access?: unknown;
+};
+
+type PageBalanceDatabaseRow = {
+  plan_id?: unknown;
+  base_page_limit?: unknown;
+  extra_page_limit?: unknown;
+  used_pages?: unknown;
+  pages_used?: unknown;
+  is_admin?: unknown;
+  has_unlimited_access?: unknown;
+};
+
+type SupabaseServerClient = Awaited<
+  ReturnType<typeof createSupabaseServerClient>
+>;
+
+const DEFAULT_PLAN_ID: PagePlanId = 'free';
+const DEFAULT_MODULE = 'unknown';
+const MAX_MODULE_LENGTH = 100;
+const MAX_REQUEST_ID_LENGTH = 255;
+
+/**
+ * Chyba vyvolanĂˇ pri vyÄŤerpanĂ­ strĂˇnkovĂ©ho limitu.
+ */
+export class PageLimitError extends Error {
+  readonly code = 'PAGE_LIMIT_REACHED';
+  readonly status = 402;
+  readonly purchaseUrl = '/pricing';
+
+  constructor(
+    message =
+      'StrĂˇnkovĂ˝ limit bol vyÄŤerpanĂ˝. Pre pokraÄŤovanie si dokĂşpte ÄŹalĹˇie strany alebo aktivujte vyĹˇĹˇĂ­ balĂ­k.',
+  ) {
+    super(message);
+
+    this.name = 'PageLimitError';
+
+    Object.setPrototypeOf(this, PageLimitError.prototype);
+  }
+}
+
+/**
+ * BezpeÄŤne prevedie ÄľubovoÄľnĂş hodnotu na nezĂˇpornĂ© celĂ© ÄŤĂ­slo.
+ */
+function toSafeInteger(value: unknown, fallback = 0): number {
+  const safeFallback = Number.isFinite(fallback)
+    ? Math.max(Math.trunc(fallback), 0)
+    : 0;
+
+  if (value === null || value === undefined) {
+    return safeFallback;
+  }
+
+  if (typeof value === 'string' && value.trim() === '') {
+    return safeFallback;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return safeFallback;
+  }
+
+  return Math.min(
+    Math.max(Math.trunc(parsed), 0),
+    Number.MAX_SAFE_INTEGER,
+  );
+}
+
+/**
+ * BezpeÄŤne prevedie databĂˇzovĂş hodnotu na boolean.
+ */
+function toSafeBoolean(value: unknown, fallback = false): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+
+    if (
+      normalized === 'true' ||
+      normalized === '1' ||
+      normalized === 'yes' ||
+      normalized === 'admin'
+    ) {
+      return true;
+    }
+
+    if (
+      normalized === 'false' ||
+      normalized === '0' ||
+      normalized === 'no'
+    ) {
+      return false;
+    }
+  }
+
+  return fallback;
+}
+
+/** OverĂ­, ÄŤi hodnota predstavuje znĂˇmy verejnĂ˝ identifikĂˇtor balĂ­ka. */
+function isKnownPlanId(value: string): value is PagePlanId {
+  return Object.prototype.hasOwnProperty.call(
+    PLAN_PAGE_LIMITS,
+    value,
+  );
+}
+
+/** Normalizuje plan_id z databĂˇzy. */
+function normalizePlanId(value: unknown): string {
+  const normalized = String(value ?? '').trim();
+
+  return normalized || DEFAULT_PLAN_ID;
+}
+
+/**
+ * AdministrĂˇtorskĂ˝ bypass sa odvodzuje iba z autoritatĂ­vnych entitlementov.
+ *
+ * DatabĂˇzovĂ˝ view alebo RPC vĂ˝sledok nesmie sĂˇm udeliĹĄ administrĂˇtorskĂ©
+ * oprĂˇvnenie pouĹľĂ­vateÄľovi, ktorĂ©ho getCurrentEntitlements() neoznaÄŤil ako
+ * administrĂˇtora alebo pouĹľĂ­vateÄľa s neobmedzenĂ˝m prĂ­stupom.
+ */
+function hasAuthoritativeUnlimitedAccess(entitlements: {
+  isAdmin?: unknown;
+  hasUnlimitedAccess?: unknown;
+  isUnlimited?: unknown;
+  planId?: unknown;
+}): boolean {
+  return (
+    toSafeBoolean(entitlements.isAdmin, false) ||
+    toSafeBoolean(entitlements.hasUnlimitedAccess, false) ||
+    toSafeBoolean(entitlements.isUnlimited, false) ||
+    normalizePlanId(entitlements.planId) === 'admin'
+  );
+}
+
+/** VrĂˇti predvolenĂ˝ poÄŤet strĂˇn podÄľa plan_id. */
+function getDefaultBasePageLimit(planId: string): number {
+  if (isKnownPlanId(planId)) {
+    return PLAN_PAGE_LIMITS[planId];
+  }
+
+  return PLAN_PAGE_LIMITS[DEFAULT_PLAN_ID];
+}
+
+/**
+ * Normalizuje vygenerovanĂ˝ text pred vĂ˝poÄŤtom strĂˇn.
+ *
+ * ZachovĂˇva odseky, ale zjednotĂ­ konce riadkov a nadbytoÄŤnĂ© technickĂ©
+ * medzery, aby rovnakĂ˝ text nemal rozdielnu spotrebu podÄľa operaÄŤnĂ©ho systĂ©mu.
+ */
+function normalizeGeneratedText(text: string): string {
+  return String(text ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t\f\v]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** Normalizuje nĂˇzov modulu ukladanĂ˝ do logu spotreby. */
+function normalizeModule(module: string): string {
+  const normalized = String(module ?? '').trim();
+
+  if (!normalized) {
+    return DEFAULT_MODULE;
+  }
+
+  return normalized.slice(0, MAX_MODULE_LENGTH);
+}
+
+/**
+ * OverĂ­ a normalizuje requestId.
+ */
+function normalizeRequestId(requestId: string): string {
+  const normalized = String(requestId ?? '')
+    .trim()
+    .replace(/[^a-zA-Z0-9._:-]/g, '')
+    .slice(0, MAX_REQUEST_ID_LENGTH);
+
+  if (!normalized) {
+    throw new Error(
+      'INVALID_REQUEST_ID: requestId je povinnĂ˝ a musĂ­ obsahovaĹĄ platnĂ© znaky.',
+    );
+  }
+
+  return normalized;
+}
+
+/** OverĂ­, ÄŤi je odpoveÄŹ RPC funkcie objekt. */
+function isRpcBalanceRow(value: unknown): value is RpcBalanceRow {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+/**
+ * VytvorĂ­ predvolenĂş kvĂłtu pre bezplatnĂ˝ balĂ­k.
+ */
+function createDefaultPageQuota(): PageQuota {
+  const basePageLimit = PLAN_PAGE_LIMITS[DEFAULT_PLAN_ID];
+
+  return {
+    planId: DEFAULT_PLAN_ID,
+    isAdmin: false,
+    isUnlimited: false,
+    hasUnlimitedAccess: false,
+    basePageLimit,
+    extraPageLimit: 0,
+    pageLimit: basePageLimit,
+    pagesUsed: 0,
+    pagesRemaining: basePageLimit,
+    pageLimitReached: basePageLimit <= 0,
+  };
+}
+
+/**
+ * VytvorĂ­ administrĂˇtorskĂş kvĂłtu bez ÄŤĂ­selnĂ©ho limitu a bez spotreby.
+ */
+function createAdminPageQuota(): PageQuota {
+  return {
+    planId: 'admin',
+
+    isAdmin: true,
+    isUnlimited: true,
+    hasUnlimitedAccess: true,
+
+    basePageLimit: null,
+    extraPageLimit: 0,
+    pageLimit: null,
+
+    pagesUsed: 0,
+    pagesRemaining: null,
+    pageLimitReached: false,
+  };
+}
+
+/**
+ * Prevedie databĂˇzovĂş odpoveÄŹ na jednotnĂ˝ objekt PageQuota.
+ *
+ * Parameter authoritativeUnlimited je jedinĂ˝ spĂ´sob, ktorĂ˝m tĂˇto funkcia
+ * vytvorĂ­ administrĂˇtorskĂ˝ vĂ˝sledok. Hodnota is_admin z databĂˇzovĂ©ho view
+ * alebo RPC sa pouĹľĂ­va iba na overenie konzistencie, nie na udelenie prĂˇv.
+ */
+function mapBalance(
+  row: RpcBalanceRow | null | undefined,
+  options: {
+    authoritativeUnlimited?: boolean;
+    fallbackPlanId?: string;
+    fallbackBasePageLimit?: number;
+    fallbackExtraPageLimit?: number;
+    fallbackPagesUsed?: number;
+  } = {},
+): PageQuota {
+  if (options.authoritativeUnlimited === true) {
+    return createAdminPageQuota();
+  }
+
+  if (!row) {
+    const fallbackPlanId = normalizePlanId(
+      options.fallbackPlanId,
+    );
+
+    const basePageLimit = toSafeInteger(
+      options.fallbackBasePageLimit,
+      getDefaultBasePageLimit(fallbackPlanId),
+    );
+
+    const extraPageLimit = toSafeInteger(
+      options.fallbackExtraPageLimit,
+      0,
+    );
+
+    const pagesUsed = toSafeInteger(
+      options.fallbackPagesUsed,
+      0,
+    );
+
+    const pageLimit = basePageLimit + extraPageLimit;
+    const pagesRemaining = Math.max(
+      pageLimit - pagesUsed,
+      0,
+    );
+
+    return {
+      planId: fallbackPlanId,
+      isAdmin: false,
+      isUnlimited: false,
+      hasUnlimitedAccess: false,
+      basePageLimit,
+      extraPageLimit,
+      pageLimit,
+      pagesUsed,
+      pagesRemaining,
+      pageLimitReached:
+        pageLimit <= 0 ||
+        pagesUsed >= pageLimit ||
+        pagesRemaining <= 0,
+    };
+  }
+
+  const planId = normalizePlanId(
+    row.plan_id ?? options.fallbackPlanId,
+  );
+
+  const defaultBasePageLimit = toSafeInteger(
+    options.fallbackBasePageLimit,
+    getDefaultBasePageLimit(planId),
+  );
+
+  const basePageLimit = toSafeInteger(
+    row.base_page_limit,
+    defaultBasePageLimit,
+  );
+
+  const extraPageLimit = toSafeInteger(
+    row.extra_page_limit,
+    toSafeInteger(options.fallbackExtraPageLimit, 0),
+  );
+
+  const pagesUsed = toSafeInteger(
+    row.used_pages ?? row.pages_used,
+    toSafeInteger(options.fallbackPagesUsed, 0),
+  );
+
+  const calculatedPageLimit = basePageLimit + extraPageLimit;
+  const rawPageLimit = row.total_pages ?? row.page_limit;
+
+  const databasePageLimit =
+    rawPageLimit === null || rawPageLimit === undefined
+      ? calculatedPageLimit
+      : toSafeInteger(rawPageLimit, calculatedPageLimit);
+
+  /**
+   * DatabĂˇzovĂ˝ view alebo RPC nesmie znĂ­ĹľiĹĄ sĂşÄŤet platnĂ©ho zĂˇkladnĂ©ho a
+   * doplnkovĂ©ho limitu. TakĂˇ situĂˇcia mĂ´Ĺľe vzniknĂşĹĄ pri oneskorenom refreshi
+   * view po Stripe webhooku.
+   */
+  const pageLimit = Math.max(
+    calculatedPageLimit,
+    databasePageLimit,
+  );
+
+  const calculatedRemaining = Math.max(
+    pageLimit - pagesUsed,
+    0,
+  );
+
+  const rawRemaining =
+    row.remaining_pages ?? row.pages_remaining;
+
+  const databaseRemaining =
+    rawRemaining === null || rawRemaining === undefined
+      ? calculatedRemaining
+      : toSafeInteger(rawRemaining, calculatedRemaining);
+
+  /**
+   * DatabĂˇzovĂˇ hodnota zostĂˇvajĂşcich strĂˇn nesmie zvĂ˝ĹˇiĹĄ matematicky
+   * vypoÄŤĂ­tanĂ˝ zostatok.
+   */
+  const pagesRemaining = Math.min(
+    databaseRemaining,
+    calculatedRemaining,
+  );
+
+  const pageLimitReached =
+    toSafeBoolean(row.limit_reached, false) ||
+    toSafeBoolean(row.page_limit_reached, false) ||
+    pageLimit <= 0 ||
+    pagesUsed >= pageLimit ||
+    pagesRemaining <= 0;
+
+  return {
+    planId,
+    isAdmin: false,
+    isUnlimited: false,
+    hasUnlimitedAccess: false,
+    basePageLimit,
+    extraPageLimit,
+    pageLimit,
+    pagesUsed,
+    pagesRemaining,
+    pageLimitReached,
+  };
+}
+
+/**
+ * VytvorĂ­ ÄŤitateÄľnĂş sprĂˇvu zo Supabase/PostgreSQL chyby.
+ */
+function getDatabaseErrorMessage(error: {
+  message?: string | null;
+  details?: string | null;
+  hint?: string | null;
+  code?: string | null;
+}): string {
+  return [
+    error.message,
+    error.details,
+    error.hint,
+    error.code,
+  ]
+    .filter(
+      (value): value is string =>
+        typeof value === 'string' &&
+        value.trim().length > 0,
+    )
+    .join(' | ');
+}
+
+/**
+ * RozpoznĂˇ chybu chĂ˝bajĂşcej tabuÄľky, view alebo stÄşpca.
+ */
+function isMissingDatabaseObjectError(error: {
+  message?: string | null;
+  code?: string | null;
+}): boolean {
+  const code = String(error.code || '').toUpperCase();
+  const message = String(error.message || '');
+
+  return (
+    code === '42P01' ||
+    code === '42703' ||
+    code === 'PGRST204' ||
+    code === 'PGRST205' ||
+    /does not exist|could not find|schema cache|relation|column/i.test(
+      message,
+    )
+  );
+}
+
+/**
+ * NaÄŤĂ­ta strĂˇnkovĂ˝ zostatok s podporou starej aj novej databĂˇzovej schĂ©my.
+ *
+ * Poradie:
+ * 1. public.zedpera_page_balances,
+ * 2. public.zedpera_user_entitlements.
+ *
+ * AdministrĂˇtorskĂ˝ stav sa z tĂ˝chto tabuliek v tejto funkcii neurÄŤuje.
+ * AutoritatĂ­vnym zdrojom je getCurrentEntitlements().
+ */
+async function loadPageBalance({
+  supabase,
+  userId,
+}: {
+  supabase: SupabaseServerClient;
+  userId: string;
+}): Promise<PageBalanceDatabaseRow | null> {
+  const balanceSelectVariants = [
+    [
+      'plan_id',
+      'base_page_limit',
+      'extra_page_limit',
+      'used_pages',
+      'is_admin',
+      'has_unlimited_access',
+    ],
+    [
+      'plan_id',
+      'base_page_limit',
+      'extra_page_limit',
+      'used_pages',
+      'is_admin',
+    ],
+    [
+      'plan_id',
+      'base_page_limit',
+      'extra_page_limit',
+      'used_pages',
+    ],
+  ] as const;
+
+  let balanceObjectMissing = false;
+
+  for (const columns of balanceSelectVariants) {
+    const balanceResult = await supabase
+      .from('zedpera_page_balances')
+      .select(columns.join(', '))
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (!balanceResult.error) {
+      return balanceResult.data as PageBalanceDatabaseRow | null;
+    }
+
+    if (!isMissingDatabaseObjectError(balanceResult.error)) {
+      throw new Error(
+        `PAGE_QUOTA_LOAD_FAILED: ${
+          getDatabaseErrorMessage(balanceResult.error) ||
+          'Nepodarilo sa naÄŤĂ­taĹĄ strĂˇnkovĂ˝ limit.'
+        }`,
+      );
+    }
+
+    const code = String(balanceResult.error.code || '').toUpperCase();
+
+    if (code === '42P01' || code === 'PGRST205') {
+      balanceObjectMissing = true;
+      break;
+    }
+  }
+
+  /**
+   * Aj keÄŹ view existuje, ale nepodarilo sa naÄŤĂ­taĹĄ kompatibilnĂ˝ variant,
+   * pokraÄŤujeme na autoritatĂ­vnu entitlement tabuÄľku.
+   */
+  void balanceObjectMissing;
+
+  const entitlementSelectVariants = [
+    [
+      'plan_id',
+      'base_page_limit',
+      'extra_page_limit',
+      'pages_used',
+      'is_admin',
+    ],
+    [
+      'plan_id',
+      'base_page_limit',
+      'extra_page_limit',
+      'pages_used',
+    ],
+  ] as const;
+
+  let lastMissingObjectMessage = '';
+
+  for (const columns of entitlementSelectVariants) {
+    const entitlementResult = await supabase
+      .from('zedpera_user_entitlements')
+      .select(columns.join(', '))
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (!entitlementResult.error) {
+      return entitlementResult.data as PageBalanceDatabaseRow | null;
+    }
+
+    if (!isMissingDatabaseObjectError(entitlementResult.error)) {
+      throw new Error(
+        `PAGE_QUOTA_LOAD_FAILED: ${
+          getDatabaseErrorMessage(entitlementResult.error) ||
+          'Nepodarilo sa naÄŤĂ­taĹĄ strĂˇnkovĂ˝ limit.'
+        }`,
+      );
+    }
+
+    lastMissingObjectMessage = getDatabaseErrorMessage(
+      entitlementResult.error,
+    );
+  }
+
+  throw new Error(
+    `PAGE_QUOTA_SCHEMA_INCOMPATIBLE: ${
+      lastMissingObjectMessage ||
+      'TabuÄľka zedpera_user_entitlements nemĂˇ oÄŤakĂˇvanĂ© stÄşpce.'
+    }`,
+  );
+}
+
+/**
+ * VypoÄŤĂ­ta poÄŤet spotrebovanĂ˝ch strĂˇn podÄľa dÄşĹľky finĂˇlneho textu.
+ *
+ * PrĂ­klady:
+ * 0 znakov      = 0 strĂˇn
+ * 1 znak        = 1 strana
+ * 1 800 znakov  = 1 strana
+ * 1 801 znakov  = 2 strany
+ */
+export function countGeneratedPages(text: string): number {
+  const normalizedText = normalizeGeneratedText(text);
+
+  if (!normalizedText) {
+    return 0;
+  }
+
+  return Math.max(
+    Math.ceil(
+      normalizedText.length / CHARACTERS_PER_PAGE,
+    ),
+    1,
+  );
+}
+
+/**
+ * VypoÄŤĂ­ta maximĂˇlny povolenĂ˝ poÄŤet vĂ˝stupnĂ˝ch tokenov.
+ *
+ * remainingPages === null znamenĂˇ neobmedzenĂ˝ stav a preto sa vrĂˇti celĂ˝
+ * requestedTokenLimit. RovnakĂ© sprĂˇvanie sa pouĹľije pri explicitnom
+ * options.isUnlimited alebo options.hasUnlimitedAccess.
+ */
+export function getOutputTokenLimit(
+  remainingPages: number | null | undefined,
+  requestedTokenLimit: number,
+  options: OutputTokenLimitOptions = {},
+): number {
+  const safeRequestedTokenLimit = toSafeInteger(
+    requestedTokenLimit,
+    0,
+  );
+
+  if (safeRequestedTokenLimit <= 0) {
+    return 0;
+  }
+
+  if (
+    options.isUnlimited === true ||
+    options.hasUnlimitedAccess === true ||
+    remainingPages === null
+  ) {
+    return safeRequestedTokenLimit;
+  }
+
+  const safeRemainingPages = toSafeInteger(
+    remainingPages,
+    0,
+  );
+
+  if (safeRemainingPages <= 0) {
+    return 0;
+  }
+
+  const quotaTokenLimit = Math.min(
+    safeRemainingPages * TOKENS_PER_PAGE,
+    Number.MAX_SAFE_INTEGER,
+  );
+
+  return Math.min(
+    safeRequestedTokenLimit,
+    quotaTokenLimit,
+  );
+}
+
+/**
+ * OverĂ­, ÄŤi kvĂłta predstavuje neobmedzenĂ˝ administrĂˇtorskĂ˝ stav.
+ */
+export function isUnlimitedPageQuota(
+  quota: Pick<
+    PageQuota,
+    | 'planId'
+    | 'isAdmin'
+    | 'isUnlimited'
+    | 'hasUnlimitedAccess'
+  >,
+): boolean {
+  return (
+    quota.isAdmin === true ||
+    quota.isUnlimited === true ||
+    quota.hasUnlimitedAccess === true ||
+    quota.planId === 'admin'
+  );
+}
+
+/**
+ * NaÄŤĂ­ta aktuĂˇlnu strĂˇnkovĂş kvĂłtu prihlĂˇsenĂ©ho pouĹľĂ­vateÄľa.
+ *
+ * AdministrĂˇtorskĂ˝ bypass sa vykonĂˇ bezprostredne po naÄŤĂ­tanĂ­ entitlementov,
+ * eĹˇte pred databĂˇzovĂ˝m view, vĂ˝poÄŤtom limitu alebo volanĂ­m RPC.
+ */
+export async function getCurrentPageQuota(): Promise<PageQuota> {
+  const entitlements = await getCurrentEntitlements();
+
+  const authoritativeUnlimited =
+    hasAuthoritativeUnlimitedAccess(entitlements);
+
+  if (authoritativeUnlimited) {
+    return createAdminPageQuota();
+  }
+
+  const fallbackPlanId = normalizePlanId(
+    entitlements.planId,
+  );
+
+  const fallbackBasePageLimit = toSafeInteger(
+    entitlements.basePageLimit,
+    getDefaultBasePageLimit(fallbackPlanId),
+  );
+
+  const fallbackExtraPageLimit = toSafeInteger(
+    entitlements.extraPageLimit,
+    0,
+  );
+
+  const fallbackPagesUsed = toSafeInteger(
+    entitlements.pagesUsed,
+    0,
+  );
+
+  const supabase = await createSupabaseServerClient();
+
+  const data = await loadPageBalance({
+    supabase,
+    userId: entitlements.userId,
+  });
+
+  return mapBalance(
+    data
+      ? {
+          plan_id: data.plan_id,
+          base_page_limit: data.base_page_limit,
+          extra_page_limit: data.extra_page_limit,
+          used_pages:
+            data.used_pages ?? data.pages_used,
+          is_admin: data.is_admin,
+          has_unlimited_access:
+            data.has_unlimited_access,
+        }
+      : null,
+    {
+      authoritativeUnlimited: false,
+      fallbackPlanId,
+      fallbackBasePageLimit,
+      fallbackExtraPageLimit,
+      fallbackPagesUsed,
+    },
+  );
+}
+
+/**
+ * OverĂ­, ÄŤi pouĹľĂ­vateÄľ mĂˇ k dispozĂ­cii aspoĹ jednu stranu.
+ */
+export async function requireAvailablePages(): Promise<PageQuota> {
+  const quota = await getCurrentPageQuota();
+
+  if (isUnlimitedPageQuota(quota)) {
+    return quota;
+  }
+
+  if (
+    quota.pageLimitReached ||
+    quota.pagesRemaining === null ||
+    quota.pagesRemaining <= 0
+  ) {
+    throw new PageLimitError();
+  }
+
+  return quota;
+}
+
+/**
+ * OdpoÄŤĂ­ta poÄŤet strĂˇn spotrebovanĂ˝ch vygenerovanĂ˝m vĂ˝stupom.
+ *
+ * AdministrĂˇtorovi sa RPC funkcia vĂ´bec nevolĂˇ a strĂˇnky sa mu
+ * neodpoÄŤĂ­tajĂş ani nezapĂ­Ĺˇu do logu spotreby.
+ */
+export async function consumePagesForOutput({
+  text,
+  module,
+  requestId,
+}: ConsumePageQuotaInput): Promise<PageQuota> {
+  const normalizedText = normalizeGeneratedText(text);
+
+  /** PrĂˇzdny vĂ˝stup nespotrebĂşva Ĺľiadne strany. */
+  if (!normalizedText) {
+    return getCurrentPageQuota();
+  }
+
+  const pages = countGeneratedPages(normalizedText);
+
+  if (pages <= 0) {
+    return getCurrentPageQuota();
+  }
+
+  /**
+   * AdministrĂˇtorskĂ˝ bypass musĂ­ prebehnĂşĹĄ pred normalizĂˇciou Ăşdajov pre
+   * zĂˇpis a pred volanĂ­m RPC funkcie.
+   */
+  const currentQuota = await getCurrentPageQuota();
+
+  if (isUnlimitedPageQuota(currentQuota)) {
+    return createAdminPageQuota();
+  }
+
+  if (
+    currentQuota.pagesRemaining === null ||
+    currentQuota.pageLimit === null
+  ) {
+    throw new Error(
+      'PAGE_QUOTA_STATE_INVALID: BeĹľnĂ˝ pouĹľĂ­vateÄľ mĂˇ neplatnĂ˝ nullable strĂˇnkovĂ˝ limit.',
+    );
+  }
+
+  if (
+    currentQuota.pageLimitReached ||
+    pages > currentQuota.pagesRemaining
+  ) {
+    throw new PageLimitError(
+      'PoĹľadovanĂ˝ vĂ˝stup prekraÄŤuje poÄŤet zostĂˇvajĂşcich strĂˇn.',
+    );
+  }
+
+  const safeModule = normalizeModule(module);
+  const safeRequestId = normalizeRequestId(requestId);
+
+  const supabase = await createSupabaseServerClient();
+
+  const { data, error } = await supabase.rpc(
+    'zedpera_consume_pages',
+    {
+      p_pages: pages,
+      p_module: safeModule,
+      p_request_id: safeRequestId,
+      p_character_count: normalizedText.length,
+    },
+  );
+
+  if (error) {
+    const databaseMessage = getDatabaseErrorMessage(error);
+    const normalizedErrorMessage = databaseMessage.toUpperCase();
+
+    if (
+      normalizedErrorMessage.includes(
+        'PAGE_LIMIT_REACHED',
+      )
+    ) {
+      throw new PageLimitError();
+    }
+
+    if (
+      normalizedErrorMessage.includes('UNAUTHENTICATED')
+    ) {
+      throw new Error(
+        `UNAUTHENTICATED: ${
+          databaseMessage || 'PouĹľĂ­vateÄľ nie je prihlĂˇsenĂ˝.'
+        }`,
+      );
+    }
+
+    if (
+      normalizedErrorMessage.includes(
+        'ENTITLEMENTS_NOT_FOUND',
+      ) ||
+      normalizedErrorMessage.includes(
+        'ENTITLEMENT_NOT_FOUND',
+      )
+    ) {
+      throw new Error(
+        `PAGE_QUOTA_RECORD_MISSING: ${
+          databaseMessage ||
+          'PouĹľĂ­vateÄľ nemĂˇ vytvorenĂ˝ zĂˇznam strĂˇnkovej kvĂłty.'
+        }`,
+      );
+    }
+
+    throw new Error(
+      `PAGE_QUOTA_CONSUME_FAILED: ${
+        databaseMessage ||
+        'Nepodarilo sa odpoÄŤĂ­taĹĄ spotrebovanĂ© strany.'
+      }`,
+    );
+  }
+
+  const rawRow = Array.isArray(data) ? data[0] : data;
+
+  if (!isRpcBalanceRow(rawRow)) {
+    throw new Error(
+      'PAGE_QUOTA_CONSUME_EMPTY_RESPONSE: Funkcia zedpera_consume_pages nevrĂˇtila platnĂ˝ stav kvĂłty.',
+    );
+  }
+
+  /**
+   * RPC nesmie samostatne udeliĹĄ administrĂˇtorskĂ© oprĂˇvnenie. Ak tvrdĂ­, Ĺľe
+   * pouĹľĂ­vateÄľ je admin, stav sa znovu overĂ­ cez getCurrentEntitlements().
+   */
+  const rpcClaimsUnlimited =
+    toSafeBoolean(rawRow.is_admin, false) ||
+    toSafeBoolean(rawRow.admin_access, false) ||
+    toSafeBoolean(
+      rawRow.has_unlimited_access,
+      false,
+    ) ||
+    normalizePlanId(rawRow.plan_id) === 'admin';
+
+  if (rpcClaimsUnlimited) {
+    const latestEntitlements =
+      await getCurrentEntitlements();
+
+    if (
+      hasAuthoritativeUnlimitedAccess(
+        latestEntitlements,
+      )
+    ) {
+      return createAdminPageQuota();
+    }
+
+    throw new Error(
+      'PAGE_QUOTA_ADMIN_STATE_MISMATCH: RPC vrĂˇtila administrĂˇtorskĂ˝ stav, ktorĂ˝ nepotvrdili serverovĂ© entitlementy.',
+    );
+  }
+
+  const quota = mapBalance(rawRow, {
+    authoritativeUnlimited: false,
+    fallbackPlanId: currentQuota.planId,
+    fallbackBasePageLimit:
+      currentQuota.basePageLimit ?? 0,
+    fallbackExtraPageLimit:
+      currentQuota.extraPageLimit,
+    fallbackPagesUsed:
+      currentQuota.pagesUsed + pages,
+  });
+
+  if (isUnlimitedPageQuota(quota)) {
+    throw new Error(
+      'PAGE_QUOTA_ADMIN_STATE_MISMATCH: VĂ˝sledok kvĂłty sa neoÄŤakĂˇvane zmenil na neobmedzenĂ˝.',
+    );
+  }
+
+  /** DodatoÄŤnĂˇ bezpeÄŤnostnĂˇ kontrola. */
+  if (
+    quota.pageLimit === null ||
+    quota.pagesRemaining === null ||
+    quota.pagesUsed > quota.pageLimit
+  ) {
+    throw new PageLimitError(
+      'PoĹľadovanĂ˝ vĂ˝stup prekroÄŤil dostupnĂ˝ strĂˇnkovĂ˝ limit.',
+    );
+  }
+
+  return quota;
+}
+
+/**
+ * SpĂ¤tnĂ© kompatibilnĂ© aliasy pre existujĂşce API route sĂşbory.
+ */
+export const assertPageAvailable = requireAvailablePages;
+export const consumeCurrentUserPages = consumePagesForOutput;
+
+
+============================================================
+SÚBOR: lib\supabase\admin.ts
+============================================================
+import 'server-only';
+
+import {
+  createClient as createSupabaseClient,
+  type SupabaseClient,
+} from '@supabase/supabase-js';
+
+/**
+ * JedinĂˇ zdieÄľanĂˇ inĹˇtancia administrĂˇtorskĂ©ho Supabase klienta.
+ *
+ * Klient sa vytvorĂ­ aĹľ pri prvom pouĹľitĂ­ a nĂˇsledne sa opakovane
+ * pouĹľĂ­va poÄŤas Ĺľivotnosti serverovej inĹˇtancie.
+ */
+let adminClient: SupabaseClient | null = null;
+
+/**
+ * VytvorĂ­ alebo vrĂˇti existujĂşceho Supabase ADMIN klienta.
+ *
+ * Tento klient pouĹľĂ­va SUPABASE_SERVICE_ROLE_KEY a obchĂˇdza RLS.
+ *
+ * PouĹľĂ­vajte ho iba v serverovom prostredĂ­:
+ * - app/api/.../route.ts
+ * - server actions
+ * - Stripe webhooky
+ * - internĂ© administrĂˇtorskĂ© operĂˇcie
+ * - aktivĂˇcia zakĂşpenĂ˝ch balĂ­kov
+ * - aktualizĂˇcia pouĹľĂ­vateÄľskĂ˝ch oprĂˇvnenĂ­
+ * - mazanie pouĹľĂ­vateÄľskĂ˝ch ĂşÄŤtov
+ * - mazanie dokumentov
+ * - zĂˇpis do tabuliek mimo RLS obmedzenĂ­
+ *
+ * Nikdy ho nepouĹľĂ­vajte v klientskych komponentoch oznaÄŤenĂ˝ch
+ * direktĂ­vou 'use client'. Service role key poskytuje plnĂ˝ prĂ­stup
+ * k databĂˇze a nesmie sa dostaĹĄ do prehliadaÄŤa.
+ */
+export function createAdminClient(): SupabaseClient {
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl) {
+    throw new Error(
+      'ChĂ˝ba NEXT_PUBLIC_SUPABASE_URL. Skontrolujte sĂşbor .env.local alebo environment premennĂ© vo Verceli.',
+    );
+  }
+
+  if (!serviceRoleKey) {
+    throw new Error(
+      'ChĂ˝ba SUPABASE_SERVICE_ROLE_KEY. Skontrolujte sĂşbor .env.local alebo environment premennĂ© vo Verceli.',
+    );
+  }
+
+  if (!adminClient) {
+    adminClient = createSupabaseClient(
+      supabaseUrl,
+      serviceRoleKey,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
+
+        global: {
+          headers: {
+            'X-Client-Info': 'zedpera-admin-server',
+          },
+        },
+      },
+    );
+  }
+
+  return adminClient;
+}
+
+/**
+ * Alias zachovĂˇvajĂşci kompatibilitu so sĂşbormi, ktorĂ© importujĂş:
+ *
+ * import { createClient } from '@/lib/supabase/admin';
+ */
+export function createClient(): SupabaseClient {
+  return createAdminClient();
+}
+
+/**
+ * OdporĂşÄŤanĂ˝ explicitnĂ˝ nĂˇzov pre novĂ© serverovĂ© sĂşbory.
+ *
+ * PouĹľitie:
+ *
+ * import {
+ *   createSupabaseAdminClient,
+ * } from '@/lib/supabase/admin';
+ */
+export function createSupabaseAdminClient(): SupabaseClient {
+  return createAdminClient();
+}
+
+/**
+ * Typ administrĂˇtorskĂ©ho Supabase klienta.
+ *
+ * MĂ´Ĺľe sa pouĹľiĹĄ naprĂ­klad v pomocnĂ˝ch funkciĂˇch:
+ *
+ * async function activatePlan(
+ *   supabase: AdminSupabaseClient,
+ * ) {
+ *   // ...
+ * }
+ */
+export type AdminSupabaseClient = SupabaseClient;
+
+============================================================
+SÚBOR: lib\supabase\server.ts
+============================================================
+import { cookies } from 'next/headers';
+import { createServerClient as createSupabaseServerClientBase } from '@supabase/ssr';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+
+// ======================================================
+// SERVER CLIENT - USER SESSION
+// ======================================================
+// PouĹľĂ­va sa v API routĂˇch a serverovĂ˝ch ÄŤastiach,
+// kde potrebujeĹˇ pracovaĹĄ s aktuĂˇlne prihlĂˇsenĂ˝m pouĹľĂ­vateÄľom.
+//
+// Tento klient pouĹľĂ­va:
+// - NEXT_PUBLIC_SUPABASE_URL
+// - NEXT_PUBLIC_SUPABASE_ANON_KEY
+// - session cookies z Next.js
+//
+// DĂ”LEĹ˝ITĂ‰:
+// TĂˇto funkcia je async.
+// V API routĂˇch ju pouĹľĂ­vaj vĹľdy takto:
+//
+// const supabase = await createSupabaseServerClient();
+//
+// Nie takto:
+//
+// const supabase = createSupabaseServerClient();
+//
+// Inak dostaneĹˇ chybu:
+// Property 'from' does not exist on type 'Promise<...>'
+// ======================================================
+
+export async function createSupabaseServerClient() {
+  const cookieStore = await cookies();
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl) {
+    throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL.');
+  }
+
+  if (!supabaseAnonKey) {
+    throw new Error('Missing NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+  }
+
+  return createSupabaseServerClientBase(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // NiektorĂ© serverovĂ© kontexty neumoĹľĹujĂş zĂˇpis cookies.
+          // NaprĂ­klad Server Component mimo Route Handler kontextu.
+          // V API route to fungovaĹĄ mĂˇ.
+        }
+      },
+    },
+  });
+}
+
+// ======================================================
+// ADMIN CLIENT - SERVICE ROLE
+// ======================================================
+// PouĹľĂ­va sa iba na serveri v API routĂˇch.
+// Tento klient pouĹľĂ­va SUPABASE_SERVICE_ROLE_KEY.
+// ObchĂˇdza RLS pravidlĂˇ.
+//
+// Nikdy ho nepouĹľĂ­vaj:
+// - v klientskom komponente,
+// - v sĂşbore s 'use client',
+// - na frontende.
+// ======================================================
+
+export function createAdminClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl) {
+    throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL.');
+  }
+
+  if (!supabaseServiceRoleKey) {
+    throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY.');
+  }
+
+  return createSupabaseClient(supabaseUrl, supabaseServiceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
+
+// ======================================================
+// CURRENT USER HELPER
+// ======================================================
+// PomocnĂˇ funkcia na zistenie aktuĂˇlne prihlĂˇsenĂ©ho pouĹľĂ­vateÄľa.
+// Ak pouĹľĂ­vateÄľ nie je prihlĂˇsenĂ˝, vrĂˇti null.
+// ======================================================
+
+export async function getCurrentUser() {
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    return null;
+  }
+
+  return user;
+}
+
+// ======================================================
+// REQUIRE USER HELPER
+// ======================================================
+// PomocnĂˇ funkcia pre API routy, kde je login povinnĂ˝.
+// Ak pouĹľĂ­vateÄľ nie je prihlĂˇsenĂ˝, vyhodĂ­ chybu NOT_AUTHENTICATED.
+// ======================================================
+
+export async function requireCurrentUser() {
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    throw new Error('NOT_AUTHENTICATED');
+  }
+
+  return {
+    supabase,
+    user,
+  };
+}
+
+// ======================================================
+// ALIASES - kompatibilita so starĹˇĂ­mi importami
+// ======================================================
+// Tieto aliasy nechĂˇvame kvĂ´li starĹˇĂ­m sĂşborom v projekte.
+//
+// Pozor:
+// - createClient() je async
+// - createServerSupabaseClient() je async
+// - createAdminClient() nie je async
+// - createSupabaseAdminClient() nie je async
+// ======================================================
+
+export async function createClient() {
+  return createSupabaseServerClient();
+}
+
+export async function createServerSupabaseClient() {
+  return createSupabaseServerClient();
+}
+
+export function createSupabaseAdminClient() {
+  return createAdminClient();
+}
+
+// ======================================================
+// DEFAULT EXPORT NEPOUĹ˝ĂŤVAĹ¤
+// ======================================================
+// Tento sĂşbor exportuje iba named exporty.
+// Importuj naprĂ­klad takto:
+//
+// import { createSupabaseServerClient } from '@/lib/supabase/server';
+// import { createAdminClient } from '@/lib/supabase/server';
+// ======================================================
+
+============================================================
+SÚBOR: lib\resend\orders.ts
+============================================================
+[SÚBOR NEEXISTUJE]
+
+============================================================
+SÚBOR: lib\email\send-order-confirmation.ts
+============================================================
+[SÚBOR NEEXISTUJE]

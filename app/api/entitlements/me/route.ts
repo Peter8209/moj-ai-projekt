@@ -1,728 +1,1256 @@
-import { randomUUID } from 'node:crypto';
+import {
+  createHash,
+  randomUUID,
+} from 'node:crypto';
+
+import Stripe from 'stripe';
+import { NextResponse } from 'next/server';
 
 import {
-  NextResponse,
-  type NextRequest,
-} from 'next/server';
-import type { User } from '@supabase/supabase-js';
-
-import { getCurrentEntitlements } from '@/lib/entitlements';
+  ADDONS,
+  PLANS,
+  type AddonId,
+  type PlanId,
+} from '@/lib/billing/catalog';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
-/**
- * Autoritatívny endpoint oprávnení aktuálne prihláseného používateľa.
- *
- * Podporované spôsoby pridelenia administrátorského prístupu:
- * 1. používateľ je označený ako admin v lib/entitlements.ts / databáze,
- * 2. používateľ má serverové app_metadata.role === 'admin',
- * 3. jeho e-mail je uvedený v serverovej premennej ZEDPERA_ADMIN_EMAILS.
- *
- * Heslo sa v tomto súbore nikdy nekontroluje ani neukladá. Heslo overuje
- * výhradne Supabase Auth pri signInWithPassword(). Tento endpoint pracuje
- * až s už vytvorenou a serverom overenou používateľskou reláciou.
- *
- * Príklad premennej vo Verceli:
- * ZEDPERA_ADMIN_EMAILS=admin@zedpera.com,druhy.admin@zedpera.com
- *
- * Viaceré zariadenia môžu používať aj ten istý administrátorský účet.
- * Tento endpoint nevytvára žiadny globálny zámok ani obmedzenie na jednu
- * aktívnu reláciu.
- */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-export const fetchCache = 'force-no-store';
+export const maxDuration = 60;
+
+// Stripe klient sa neinicializuje na top-level, aby build nespadol
+// pri chýbajúcej STRIPE_SECRET_KEY počas zostavovania aplikácie.
+let stripeClient: Stripe | null = null;
+
+// ============================================================
+// TYPES
+// ============================================================
+
+type CheckoutBody = {
+  plan?: unknown;
+  planId?: unknown;
+  selectedPlan?: unknown;
+
+  addons?: unknown;
+  addonIds?: unknown;
+  addOns?: unknown;
+  selectedAddons?: unknown;
+
+  locale?: unknown;
+  language?: unknown;
+  lang?: unknown;
+
+  requestId?: unknown;
+  checkoutRequestId?: unknown;
+
+  // Zostávajú iba kvôli spätnej kompatibilite vstupného JSON.
+  // Server ich zámerne nepoužíva, aby nevznikol open redirect.
+  successUrl?: unknown;
+  cancelUrl?: unknown;
+
+  // userId ani e-mail sa nesmú preberať z klienta.
+  userId?: unknown;
+  email?: unknown;
+  customerEmail?: unknown;
+  userEmail?: unknown;
+};
+
+type PaidPlanId = Exclude<PlanId, 'free' | 'admin'>;
+
+type PurchaseType = 'plan' | 'addon' | 'plan_with_addons';
+
+type CurrentEntitlementRow = {
+  plan_id: string | null;
+  addon_ids: string[] | null;
+  billing_status: string | null;
+  stripe_customer_id: string | null;
+};
+
+type StripeMetadata = Record<string, string>;
 
 /**
- * Číselný fallback pre staršie časti frontendu, ktoré ešte nevedia pracovať
- * s null pri prílohách alebo stranách. Autoritatívnym údajom pre admina je
- * hasUnlimitedAccess === true.
+ * stripe-node v22 prestal spoľahlivo re-exportovať vstupné typy
+ * cez pôvodný namespacový typ parametrov Checkout Session.
+ *
+ * Typ parametrov preto odvodzujeme priamo zo skutočnej metódy
+ * stripe.checkout.sessions.create(). Takto zostane route typovo
+ * bezpečná aj pri novších verziách stripe-node.
  */
-const ADMIN_UNLIMITED_NUMERIC_LIMIT = 2_147_483_647;
+type CheckoutSessionCreateMethod =
+  Stripe['checkout']['sessions']['create'];
 
-const DEFAULT_ENTITLEMENTS = {
-  planId: 'free',
-  isAdmin: false,
-  hasUnlimitedAccess: false,
-  promptLimit: 3,
-  promptsUsed: 0,
-  attachmentLimit: 1,
-  basePageLimit: 3,
-  extraPageLimit: 0,
-  pagesUsed: 0,
+type CheckoutSessionCreateParams = NonNullable<
+  Parameters<CheckoutSessionCreateMethod>[0]
+>;
+
+type CheckoutLineItem = NonNullable<
+  CheckoutSessionCreateParams['line_items']
+>[number];
+
+// ============================================================
+// CATALOG CONSTANTS
+// ============================================================
+
+const CURRENCY = 'eur' as const;
+
+const NO_STORE_HEADERS = {
+  'Cache-Control':
+    'no-store, no-cache, must-revalidate, proxy-revalidate',
+  Pragma: 'no-cache',
+  Expires: '0',
 } as const;
 
-const ADMIN_EMAIL_ENV_KEYS = [
-  'ZEDPERA_ADMIN_EMAILS',
-  'ADMIN_EMAILS',
-  'ADMIN_EMAIL',
+const REQUEST_ID_PATTERN = /^[a-zA-Z0-9_.:-]+$/;
+const MAX_REQUEST_ID_LENGTH = 180;
+const CHECKOUT_SOURCE = 'zedpera';
+const CHECKOUT_CATALOG_VERSION = '2026-07';
+
+const SUPPORTED_LOCALES = [
+  'sk',
+  'cs',
+  'en',
+  'de',
+  'pl',
+  'hu',
 ] as const;
 
-type EntitlementsResponse = {
-  planId: string;
-  isAdmin: boolean;
-  hasUnlimitedAccess: boolean;
+type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
-  /** null = neobmedzený počet promptov */
-  promptLimit: number | null;
-  promptsUsed: number;
-  promptsRemaining: number | null;
-  promptLimitReached: boolean;
+const VALID_PLAN_IDS = new Set<PlanId>(
+  Object.keys(PLANS) as PlanId[],
+);
 
-  attachmentLimit: number;
-  basePageLimit: number;
-  extraPageLimit: number;
-  pagesUsed: number;
-};
+const VALID_ADDON_IDS = new Set<AddonId>(
+  Object.keys(ADDONS) as AddonId[],
+);
 
-type ErrorCode =
-  | 'UNAUTHENTICATED'
-  | 'ENTITLEMENTS_LOAD_FAILED'
-  | 'INVALID_ENTITLEMENTS_RESPONSE';
+const PURCHASABLE_PLAN_IDS = (
+  Object.keys(PLANS) as PlanId[]
+).filter(
+  (planId): planId is PaidPlanId =>
+    planId !== 'free' && planId !== 'admin',
+);
 
-type ErrorResponse = {
-  error: ErrorCode;
-  message: string;
-  requestId: string;
-  details?: string;
-};
+// ============================================================
+// GENERIC HELPERS
+// ============================================================
 
-type ErrorWithMetadata = {
-  code?: unknown;
-  status?: unknown;
-  message?: unknown;
-  name?: unknown;
-};
-
-type AppMetadata = Record<string, unknown>;
-
-/**
- * Overí, či je neznáma hodnota obyčajný objekt.
- */
-function isRecord(
-  value: unknown,
-): value is Record<string, unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value)
-  );
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-/**
- * Normalizuje e-mail na porovnanie bez ohľadu na veľkosť písmen.
- */
+function firstDefined(...values: unknown[]): unknown {
+  return values.find((value) => value !== undefined && value !== null);
+}
+
+function normalizeString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 function normalizeEmail(value: unknown): string {
-  return typeof value === 'string'
-    ? value.trim().toLowerCase()
-    : '';
+  return normalizeString(value).toLowerCase();
 }
 
-/**
- * Načíta všetky administrátorské e-maily zo serverových premenných.
- * Podporuje oddelenie čiarkou, bodkočiarkou, medzerou alebo novým riadkom.
- */
-function getConfiguredAdminEmails(): Set<string> {
-  const result = new Set<string>();
+function normalizeLocale(value: unknown): SupportedLocale {
+  const normalized = normalizeString(value).toLowerCase();
 
-  for (const envKey of ADMIN_EMAIL_ENV_KEYS) {
-    const rawValue = process.env[envKey];
-
-    if (!rawValue) {
-      continue;
-    }
-
-    for (const value of rawValue.split(/[\s,;]+/g)) {
-      const email = normalizeEmail(value);
-
-      if (email) {
-        result.add(email);
-      }
-    }
-  }
-
-  return result;
+  return SUPPORTED_LOCALES.includes(normalized as SupportedLocale)
+    ? (normalized as SupportedLocale)
+    : 'sk';
 }
 
-/**
- * Overí administrátorský e-mail výhradne oproti serverovej konfigurácii.
- * E-mail z query parametra, localStorage ani request body sa nepoužíva.
- */
-function isConfiguredAdminEmail(
-  email: string | null | undefined,
-): boolean {
-  const normalizedEmail = normalizeEmail(email);
-
-  if (!normalizedEmail) {
-    return false;
-  }
-
-  return getConfiguredAdminEmails().has(
-    normalizedEmail,
-  );
+function uniqueValues<T>(values: T[]): T[] {
+  return Array.from(new Set(values));
 }
 
-/**
- * app_metadata je možné bezpečne nastavovať iba zo servera/service-role.
- * user_metadata sa zámerne nepoužíva, pretože používateľ si ju môže meniť.
- */
-function isAdminFromAppMetadata(
-  user: User,
-): boolean {
-  const metadata: AppMetadata = isRecord(
-    user.app_metadata,
-  )
-    ? user.app_metadata
-    : {};
+function createJsonResponse<T>(
+  payload: T,
+  init?: ResponseInit,
+) {
+  const headers = new Headers(init?.headers);
 
-  const role =
-    typeof metadata.role === 'string'
-      ? metadata.role.trim().toLowerCase()
-      : '';
+  Object.entries(NO_STORE_HEADERS).forEach(([key, value]) => {
+    headers.set(key, value);
+  });
 
-  const roles = Array.isArray(metadata.roles)
-    ? metadata.roles
-        .filter(
-          (value): value is string =>
-            typeof value === 'string',
-        )
-        .map((value) =>
-          value.trim().toLowerCase(),
-        )
-    : [];
-
-  return (
-    role === 'admin' ||
-    roles.includes('admin') ||
-    metadata.is_admin === true ||
-    metadata.isAdmin === true
-  );
+  return NextResponse.json(payload, {
+    ...init,
+    headers,
+  });
 }
 
-/**
- * Vytvorí štandardizovanú chybu neprihláseného používateľa.
- */
-function createUnauthenticatedError(
-  message: string,
-): Error & {
-  code: 'UNAUTHENTICATED';
-  status: 401;
-} {
-  const error = new Error(message) as Error & {
-    code: 'UNAUTHENTICATED';
-    status: 401;
-  };
-
-  error.code = 'UNAUTHENTICATED';
-  error.status = 401;
-
-  return error;
+function isProduction(): boolean {
+  return process.env.NODE_ENV === 'production';
 }
 
-/**
- * Načíta a serverovo overí aktuálneho používateľa zo Supabase cookies.
- * getUser() overuje token proti Supabase Auth serveru a nespolieha sa iba
- * na lokálne dekódovanie session.
- */
-async function getAuthenticatedUser(): Promise<User> {
-  const supabase =
-    await createSupabaseServerClient();
-
-  const {
-    data,
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error || !data.user) {
-    throw createUnauthenticatedError(
-      error?.message ||
-        'Používateľská relácia neexistuje alebo už nie je platná.',
-    );
-  }
-
-  return data.user;
+function getSafeErrorDetail(message: string): Record<string, string> {
+  return isProduction() ? {} : { detail: message };
 }
 
-/**
- * Prevedie hodnotu na nezáporné celé číslo.
- */
-function toNonNegativeInteger(
-  value: unknown,
-  fallback: number,
-): number {
-  const parsedValue =
-    typeof value === 'number'
-      ? value
-      : typeof value === 'string' &&
-          value.trim().length > 0
-        ? Number(value)
-        : Number.NaN;
+function isActiveEntitlement(billingStatus: string | null): boolean {
+  const normalizedStatus = normalizeString(billingStatus).toLowerCase();
 
-  if (!Number.isFinite(parsedValue)) {
-    return fallback;
-  }
-
-  return Math.max(
-    0,
-    Math.trunc(parsedValue),
-  );
-}
-
-/**
- * Prevedie hodnotu na boolean bez použitia nejednoznačného truthy/falsy.
- */
-function toBoolean(
-  value: unknown,
-  fallback: boolean,
-): boolean {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-
-  if (value === 'true' || value === 1) {
+  // Pri starších záznamoch môže byť billing_status prázdny. Ak je používateľovi
+  // uložený platený plan_id, prázdny stav neblokujeme iba kvôli migrácii dát.
+  if (!normalizedStatus) {
     return true;
   }
 
-  if (value === 'false' || value === 0) {
-    return false;
-  }
-
-  return fallback;
+  return !new Set([
+    'canceled',
+    'cancelled',
+    'expired',
+    'failed',
+    'inactive',
+    'past_due',
+    'revoked',
+    'unpaid',
+  ]).has(normalizedStatus);
 }
 
-/**
- * Bezpečne načíta identifikátor balíka.
- */
-function toPlanId(value: unknown): string {
-  if (
-    typeof value === 'string' &&
-    value.trim().length > 0
-  ) {
-    return value.trim();
+function normalizeCurrentPlanId(value: unknown): PlanId {
+  const normalized = normalizeString(value);
+
+  if (isKnownPlanId(normalized)) {
+    return normalized;
   }
 
-  return DEFAULT_ENTITLEMENTS.planId;
+  return 'free';
 }
 
-/**
- * Kompletná odpoveď pre administrátora. Každá platná session rovnakého
- * administrátorského účtu dostane rovnaký neobmedzený prístup.
- */
-function createAdminEntitlementsResponse(): EntitlementsResponse {
-  return {
-    planId: 'admin',
-    isAdmin: true,
-    hasUnlimitedAccess: true,
+function getBaseUrl(): string {
+  const rawBaseUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+    process.env.VERCEL_URL ||
+    'http://localhost:3000';
 
-    promptLimit: null,
-    promptsUsed: 0,
-    promptsRemaining: null,
-    promptLimitReached: false,
+  const withProtocol =
+    rawBaseUrl.startsWith('http://') || rawBaseUrl.startsWith('https://')
+      ? rawBaseUrl
+      : `https://${rawBaseUrl}`;
 
-    attachmentLimit:
-      ADMIN_UNLIMITED_NUMERIC_LIMIT,
-    basePageLimit:
-      ADMIN_UNLIMITED_NUMERIC_LIMIT,
-    extraPageLimit: 0,
-    pagesUsed: 0,
-  };
+  return withProtocol.replace(/\/+$/, '');
 }
 
-/**
- * Prevedie výsledok z lib/entitlements.ts na verejný kontrakt API.
- */
-function serializeEntitlements(
-  value: unknown,
-): EntitlementsResponse {
-  if (!isRecord(value)) {
-    throw new Error(
-      'INVALID_ENTITLEMENTS_RESPONSE',
-    );
-  }
-
-  const sourcePlanId = toPlanId(
-    value.planId,
-  );
-
-  const sourceIsAdmin = toBoolean(
-    value.isAdmin,
-    sourcePlanId === 'admin',
-  );
-
-  const sourceHasUnlimitedAccess =
-    toBoolean(
-      value.hasUnlimitedAccess,
-      sourceIsAdmin,
-    );
-
-  const isAdmin =
-    sourceIsAdmin ||
-    sourceHasUnlimitedAccess ||
-    sourcePlanId === 'admin';
-
-  if (isAdmin) {
-    return createAdminEntitlementsResponse();
-  }
-
-  const promptsUsed =
-    toNonNegativeInteger(
-      value.promptsUsed,
-      DEFAULT_ENTITLEMENTS.promptsUsed,
-    );
-
-  const promptLimit =
-    value.promptLimit === null
-      ? null
-      : toNonNegativeInteger(
-          value.promptLimit,
-          DEFAULT_ENTITLEMENTS.promptLimit,
-        );
-
-  const promptsRemaining =
-    promptLimit === null
-      ? null
-      : Math.max(
-          promptLimit - promptsUsed,
-          0,
-        );
-
-  return {
-    planId: sourcePlanId,
-    isAdmin: false,
-    hasUnlimitedAccess: false,
-
-    promptLimit,
-    promptsUsed,
-    promptsRemaining,
-    promptLimitReached:
-      promptLimit !== null &&
-      promptsUsed >= promptLimit,
-
-    attachmentLimit:
-      toNonNegativeInteger(
-        value.attachmentLimit,
-        DEFAULT_ENTITLEMENTS.attachmentLimit,
-      ),
-    basePageLimit:
-      toNonNegativeInteger(
-        value.basePageLimit,
-        DEFAULT_ENTITLEMENTS.basePageLimit,
-      ),
-    extraPageLimit:
-      toNonNegativeInteger(
-        value.extraPageLimit,
-        DEFAULT_ENTITLEMENTS.extraPageLimit,
-      ),
-    pagesUsed:
-      toNonNegativeInteger(
-        value.pagesUsed,
-        DEFAULT_ENTITLEMENTS.pagesUsed,
-      ),
-  };
-}
-
-/**
- * Vytvorí alebo prevezme bezpečný identifikátor požiadavky.
- */
-function resolveRequestId(
-  request: NextRequest,
+function getSuccessUrl(
+  baseUrl: string,
+  locale: SupportedLocale,
 ): string {
-  const incomingRequestId =
-    request.headers
-      .get('x-request-id')
-      ?.trim()
-      .replace(
-        /[^a-zA-Z0-9._:-]/g,
-        '',
-      )
-      .slice(0, 128);
-
-  return incomingRequestId || randomUUID();
+  return (
+    `${baseUrl}/payment/success` +
+    `?session_id={CHECKOUT_SESSION_ID}` +
+    `&lang=${encodeURIComponent(locale)}`
+  );
 }
 
-/**
- * Používateľské limity ani oprávnenia sa nesmú cacheovať.
- */
-function createNoStoreHeaders(
-  requestId: string,
-): Headers {
-  const headers = new Headers();
-
-  headers.set(
-    'Cache-Control',
-    'private, no-store, no-cache, max-age=0, must-revalidate',
+function getCancelUrl(
+  baseUrl: string,
+  locale: SupportedLocale,
+): string {
+  return (
+    `${baseUrl}/pricing` +
+    `?payment=cancelled` +
+    `&lang=${encodeURIComponent(locale)}`
   );
-  headers.set(
-    'CDN-Cache-Control',
-    'no-store',
-  );
-  headers.set(
-    'Vercel-CDN-Cache-Control',
-    'no-store',
-  );
-  headers.set(
-    'Surrogate-Control',
-    'no-store',
-  );
-  headers.set(
-    'Pragma',
-    'no-cache',
-  );
-  headers.set(
-    'Expires',
-    '0',
-  );
-  headers.set(
-    'Vary',
-    'Cookie, Authorization',
-  );
-  headers.set(
-    'X-Content-Type-Options',
-    'nosniff',
-  );
-  headers.set(
-    'X-Request-Id',
-    requestId,
-  );
-
-  return headers;
 }
 
-function getErrorMetadata(
-  error: unknown,
-): ErrorWithMetadata {
-  if (!isRecord(error)) {
-    return {};
+function getFreeDashboardUrl(baseUrl: string): string {
+  return `${baseUrl}/dashboard?plan=free`;
+}
+
+function getStripe(): Stripe {
+  const secretKey = normalizeString(process.env.STRIPE_SECRET_KEY);
+
+  if (!secretKey) {
+    throw new Error('STRIPE_CONFIG_MISSING: Missing STRIPE_SECRET_KEY');
+  }
+
+  if (!stripeClient) {
+    stripeClient = new Stripe(secretKey, {
+      maxNetworkRetries: 2,
+      timeout: 20_000,
+    });
+  }
+
+  return stripeClient;
+}
+
+// ============================================================
+// INPUT NORMALIZATION
+// ============================================================
+
+function getRawPlan(body: CheckoutBody): unknown {
+  return firstDefined(body.plan, body.planId, body.selectedPlan);
+}
+
+function getRawAddons(body: CheckoutBody): unknown[] {
+  const rawAddons = firstDefined(
+    body.addonIds,
+    body.addons,
+    body.addOns,
+    body.selectedAddons,
+  );
+
+  if (
+    rawAddons === undefined ||
+    rawAddons === null ||
+    rawAddons === ''
+  ) {
+    return [];
+  }
+
+  if (Array.isArray(rawAddons)) {
+    return rawAddons;
+  }
+
+  if (typeof rawAddons === 'string') {
+    const normalized = rawAddons.trim();
+
+    if (!normalized) {
+      return [];
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(normalized);
+
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // Spätná kompatibilita so zoznamom oddeleným čiarkou.
+    }
+
+    return normalized
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }
+
+  // Neplatný objekt/typ sa následne zobrazí medzi invalidAddons.
+  return [rawAddons];
+}
+
+function isKnownPlanId(value: unknown): value is PlanId {
+  return (
+    typeof value === 'string' &&
+    VALID_PLAN_IDS.has(value.trim() as PlanId)
+  );
+}
+
+function isKnownAddonId(value: unknown): value is AddonId {
+  return (
+    typeof value === 'string' &&
+    VALID_ADDON_IDS.has(value.trim() as AddonId)
+  );
+}
+
+function resolvePlanId(rawPlan: unknown): {
+  planId: PlanId | null;
+  invalidValue: unknown | null;
+} {
+  const normalized = normalizeString(rawPlan);
+
+  if (!normalized) {
+    return {
+      planId: null,
+      invalidValue: null,
+    };
+  }
+
+  if (!isKnownPlanId(normalized)) {
+    return {
+      planId: null,
+      invalidValue: rawPlan,
+    };
+  }
+
+  // FREE nie je platená položka. Pri nákupe doplnku ho považujeme
+  // za nákup bez zmeny základného balíka.
+  if (normalized === 'free') {
+    return {
+      planId: null,
+      invalidValue: null,
+    };
   }
 
   return {
-    code: error.code,
-    status: error.status,
-    message: error.message,
-    name: error.name,
+    planId: normalized,
+    invalidValue: null,
   };
 }
 
-/**
- * Rozpozná chyby chýbajúcej alebo neplatnej používateľskej relácie.
- */
-function isUnauthenticatedError(
-  error: unknown,
-): boolean {
-  const metadata = getErrorMetadata(error);
+function resolveAddonIds(rawAddons: unknown[]): {
+  addonIds: AddonId[];
+  invalidAddons: unknown[];
+} {
+  const invalidAddons = rawAddons.filter(
+    (value) => !isKnownAddonId(normalizeString(value)),
+  );
 
-  const code =
-    typeof metadata.code === 'string'
-      ? metadata.code.toUpperCase()
-      : '';
+  const addonIds = uniqueValues(
+    rawAddons
+      .map((value) => normalizeString(value))
+      .filter(isKnownAddonId),
+  );
 
-  const status =
-    typeof metadata.status === 'number'
-      ? metadata.status
-      : Number.NaN;
+  return {
+    addonIds,
+    invalidAddons,
+  };
+}
 
-  const name =
-    typeof metadata.name === 'string'
-      ? metadata.name.toLowerCase()
-      : '';
+function resolveCheckoutRequestId(
+  request: Request,
+  body: CheckoutBody,
+): string {
+  const bodyRequestId = normalizeString(
+    firstDefined(body.requestId, body.checkoutRequestId),
+  );
 
-  const message =
-    error instanceof Error
-      ? error.message.toLowerCase()
-      : typeof metadata.message === 'string'
-        ? metadata.message.toLowerCase()
-        : '';
+  const headerRequestId = normalizeString(
+    request.headers.get('idempotency-key'),
+  );
 
   if (
-    code === 'UNAUTHENTICATED' ||
-    code === 'AUTH_SESSION_MISSING' ||
-    status === 401 ||
-    name.includes('unauthenticated')
+    bodyRequestId &&
+    headerRequestId &&
+    bodyRequestId !== headerRequestId
   ) {
-    return true;
+    throw new Error('REQUEST_ID_MISMATCH');
   }
 
-  return [
-    'unauthenticated',
-    'auth session missing',
-    'session missing',
-    'jwt expired',
-    'invalid jwt',
-    'invalid token',
-    'user not found',
-  ].some((knownMessage) =>
-    message.includes(knownMessage),
+  const requestId =
+    bodyRequestId ||
+    headerRequestId ||
+    `auto-${Math.floor(Date.now() / 60_000)}`;
+
+  if (
+    requestId.length > MAX_REQUEST_ID_LENGTH ||
+    !REQUEST_ID_PATTERN.test(requestId)
+  ) {
+    throw new Error('INVALID_REQUEST_ID');
+  }
+
+  return requestId;
+}
+
+// ============================================================
+// STRIPE PRICE HELPERS
+// ============================================================
+
+function toEnvironmentSuffix(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+}
+
+function getStripePriceIdForPlan(planId: PlanId): string {
+  const key = `STRIPE_PLAN_PRICE_${toEnvironmentSuffix(planId)}`;
+  return normalizeString(process.env[key]);
+}
+
+function getStripePriceIdForAddon(addonId: AddonId): string {
+  const key = `STRIPE_ADDON_PRICE_${toEnvironmentSuffix(addonId)}`;
+  return normalizeString(process.env[key]);
+}
+
+function createPlanLineItem(
+  planId: PlanId,
+): CheckoutLineItem {
+  const plan = PLANS[planId];
+  const stripePriceId = getStripePriceIdForPlan(planId);
+
+  if (stripePriceId) {
+    return {
+      price: stripePriceId,
+      quantity: 1,
+    };
+  }
+
+  return {
+    quantity: 1,
+    price_data: {
+      currency: CURRENCY,
+      unit_amount: plan.priceCents,
+      product_data: {
+        name: `ZEDPERA – ${plan.name}`,
+        description: [
+          `${plan.pageLimit} strán`,
+          plan.promptLimit === null
+            ? 'neobmedzené prompty'
+            : `${plan.promptLimit} prompty`,
+          `${plan.attachmentLimit} príloh`,
+        ].join(' • '),
+        metadata: {
+          item_type: 'plan',
+          catalog_id: plan.id,
+        },
+      },
+    },
+  };
+}
+
+function createAddonLineItem(
+  addonId: AddonId,
+): CheckoutLineItem {
+  const addon = ADDONS[addonId];
+  const stripePriceId = getStripePriceIdForAddon(addonId);
+
+  if (stripePriceId) {
+    return {
+      price: stripePriceId,
+      quantity: 1,
+    };
+  }
+
+  const description =
+    addon.extraPages > 0
+      ? `Navýšenie limitu o ${addon.extraPages} strán`
+      : 'Rozšírenie funkcií účtu ZEDPERA';
+
+  return {
+    quantity: 1,
+    price_data: {
+      currency: CURRENCY,
+      unit_amount: addon.priceCents,
+      product_data: {
+        name: `ZEDPERA – ${addon.name}`,
+        description,
+        metadata: {
+          item_type: 'addon',
+          catalog_id: addon.id,
+        },
+      },
+    },
+  };
+}
+
+function getPurchaseType(
+  planId: PlanId | null,
+  addonIds: AddonId[],
+): PurchaseType {
+  if (planId && addonIds.length > 0) {
+    return 'plan_with_addons';
+  }
+
+  return planId ? 'plan' : 'addon';
+}
+
+function getCatalogTotalCents(
+  planId: PlanId | null,
+  addonIds: AddonId[],
+): number {
+  const planPrice = planId ? PLANS[planId].priceCents : 0;
+  const addonsPrice = addonIds.reduce(
+    (total, addonId) => total + ADDONS[addonId].priceCents,
+    0,
+  );
+
+  return planPrice + addonsPrice;
+}
+
+function getPurchasedBasePages(planId: PlanId | null): number {
+  if (!planId) {
+    return 0;
+  }
+
+  const pageLimit = PLANS[planId].pageLimit;
+
+  return typeof pageLimit === 'number' && Number.isFinite(pageLimit)
+    ? Math.max(0, Math.trunc(pageLimit))
+    : 0;
+}
+
+function getPurchasedExtraPages(addonIds: AddonId[]): number {
+  return addonIds.reduce(
+    (total, addonId) => total + ADDONS[addonId].extraPages,
+    0,
   );
 }
 
-function getDevelopmentDetails(
-  error: unknown,
-): string | undefined {
+function buildMetadata({
+  userId,
+  email,
+  planId,
+  addonIds,
+  requestId,
+  locale,
+}: {
+  userId: string;
+  email: string;
+  planId: PlanId | null;
+  addonIds: AddonId[];
+  requestId: string;
+  locale: SupportedLocale;
+}): StripeMetadata {
+  const purchaseType = getPurchaseType(planId, addonIds);
+  const basePages = getPurchasedBasePages(planId);
+  const extraPages = getPurchasedExtraPages(addonIds);
+  const totalCents = getCatalogTotalCents(planId, addonIds);
+
+  return {
+    user_id: userId,
+    user_email: email,
+    plan_id: planId || '',
+    addons: JSON.stringify(addonIds),
+    addon_ids: JSON.stringify(addonIds),
+    purchase_type: purchaseType,
+    base_pages: String(basePages),
+    extra_pages: String(extraPages),
+    catalog_total_cents: String(totalCents),
+    checkout_request_id: requestId,
+    catalog_version: CHECKOUT_CATALOG_VERSION,
+    locale,
+    guest_checkout: userId ? 'false' : 'true',
+    source: CHECKOUT_SOURCE,
+  };
+}
+
+function createIdempotencyKey({
+  userId,
+  planId,
+  addonIds,
+  requestId,
+}: {
+  userId: string;
+  planId: PlanId | null;
+  addonIds: AddonId[];
+  requestId: string;
+}): string {
+  const source = [
+    userId || 'guest',
+    planId || 'addon-only',
+    [...addonIds].sort().join(','),
+    requestId,
+  ].join('|');
+
+  const digest = createHash('sha256').update(source).digest('hex');
+
+  return `zedpera_checkout_${digest}`;
+}
+
+// ============================================================
+// ENTITLEMENT HELPERS
+// ============================================================
+
+async function loadCurrentEntitlement({
+  supabase,
+  userId,
+}: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  userId: string;
+}): Promise<CurrentEntitlementRow | null> {
+  const { data, error } = await supabase
+    .from('zedpera_user_entitlements')
+    .select(
+      'plan_id, addon_ids, billing_status, stripe_customer_id',
+    )
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`ENTITLEMENT_LOAD_FAILED: ${error.message}`);
+  }
+
+  return data as CurrentEntitlementRow | null;
+}
+
+function requirePaidPlanForAddonOnlyCheckout({
+  planId,
+  addonIds,
+  currentEntitlement,
+}: {
+  planId: PlanId | null;
+  addonIds: AddonId[];
+  currentEntitlement: CurrentEntitlementRow | null;
+}): void {
+  if (planId || addonIds.length === 0) {
+    return;
+  }
+
+  const currentPlanId = normalizeCurrentPlanId(
+    currentEntitlement?.plan_id,
+  );
+
   if (
-    process.env.NODE_ENV !==
-    'development'
+    currentPlanId === 'free' ||
+    !isActiveEntitlement(currentEntitlement?.billing_status ?? null)
   ) {
-    return undefined;
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
+    throw new Error('PAID_PLAN_REQUIRED');
   }
 }
 
-function logRouteError(
-  error: unknown,
-  requestId: string,
-): void {
-  const metadata = getErrorMetadata(error);
+// ============================================================
+// CUSTOMER HELPERS
+// ============================================================
 
-  console.error(
-    '[GET /api/entitlements/me] Načítanie oprávnení zlyhalo.',
+async function getOrCreateStripeCustomer({
+  stripe,
+  userId,
+  email,
+}: {
+  stripe: Stripe;
+  userId: string;
+  email: string;
+}): Promise<Stripe.Customer> {
+  const customers = await stripe.customers.list({
+    email,
+    limit: 100,
+  });
+
+  const matchingCustomer = customers.data.find(
+    (customer) => customer.metadata?.user_id === userId,
+  );
+
+  if (matchingCustomer) {
+    return matchingCustomer;
+  }
+
+  return stripe.customers.create(
     {
-      requestId,
-      name:
-        error instanceof Error
-          ? error.name
-          : metadata.name,
-      message:
-        error instanceof Error
-          ? error.message
-          : metadata.message,
-      code: metadata.code,
-      status: metadata.status,
-      stack:
-        process.env.NODE_ENV ===
-          'development' &&
-        error instanceof Error
-          ? error.stack
-          : undefined,
+      email,
+      metadata: {
+        user_id: userId,
+        supabase_user_id: userId,
+        source: CHECKOUT_SOURCE,
+      },
+    },
+    {
+      idempotencyKey: `zedpera_customer_${userId}`,
     },
   );
 }
 
-/**
- * GET /api/entitlements/me
- *
- * Postup:
- * 1. overí aktuálnu Supabase session cez auth.getUser(),
- * 2. ak je e-mail v ZEDPERA_ADMIN_EMAILS, vráti admin prístup okamžite,
- * 3. ak má používateľ admin app_metadata, vráti admin prístup,
- * 4. inak načíta jeho balík a rolu z lib/entitlements.ts.
- */
-export async function GET(
-  request: NextRequest,
-): Promise<
-  NextResponse<
-    EntitlementsResponse | ErrorResponse
-  >
-> {
-  const requestId = resolveRequestId(
-    request,
-  );
+// ============================================================
+// ERROR HELPERS
+// ============================================================
 
-  const headers = createNoStoreHeaders(
-    requestId,
-  );
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (isRecord(error) && typeof error.message === 'string') {
+    return error.message;
+  }
+
+  return 'Unknown checkout error';
+}
+
+function getStripeErrorCode(error: unknown): string | null {
+  if (!isRecord(error)) {
+    return null;
+  }
+
+  if (typeof error.code === 'string') {
+    return error.code;
+  }
+
+  if (typeof error.type === 'string') {
+    return error.type;
+  }
+
+  return null;
+}
+
+// ============================================================
+// ROUTES
+// ============================================================
+
+export async function GET() {
+  return createJsonResponse({
+    ok: true,
+    route: '/api/payments/checkout',
+    message: 'ZEDPERA checkout endpoint is running.',
+    mode: 'payment',
+    freeRedirect: '/dashboard?plan=free',
+    successRedirect: '/payment/success?session_id={CHECKOUT_SESSION_ID}',
+    cancelRedirect: '/pricing?canceled=1',
+    plans: (Object.keys(PLANS) as PlanId[])
+      .filter((planId) => planId !== 'admin')
+      .map((planId) => ({
+        id: planId,
+        name: PLANS[planId].name,
+        priceCents: PLANS[planId].priceCents,
+        pageLimit: PLANS[planId].pageLimit,
+        promptLimit: PLANS[planId].promptLimit,
+        attachmentLimit: PLANS[planId].attachmentLimit,
+        checkoutRequired: planId !== 'free',
+      })),
+    addons: (Object.keys(ADDONS) as AddonId[]).map((addonId) => ({
+      id: addonId,
+      name: ADDONS[addonId].name,
+      priceCents: ADDONS[addonId].priceCents,
+      extraPages: ADDONS[addonId].extraPages,
+    })),
+  });
+}
+
+export async function POST(request: Request) {
+  const errorId = randomUUID();
+  let requestId = '';
 
   try {
-    const authenticatedUser =
-      await getAuthenticatedUser();
+    const contentType = request.headers.get('content-type') || '';
 
-    const isExplicitAdmin =
-      isConfiguredAdminEmail(
-        authenticatedUser.email,
-      ) ||
-      isAdminFromAppMetadata(
-        authenticatedUser,
+    if (!contentType.toLowerCase().includes('application/json')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_CONTENT_TYPE',
+          code: 'INVALID_CONTENT_TYPE',
+          message: 'Požiadavka musí používať Content-Type application/json.',
+          errorId,
+        },
+        { status: 415 },
       );
+    }
+
+    let parsedBody: unknown;
+
+    try {
+      parsedBody = await request.json();
+    } catch {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_JSON',
+          code: 'INVALID_JSON',
+          message: 'Telo požiadavky neobsahuje platný JSON.',
+          errorId,
+        },
+        { status: 400 },
+      );
+    }
+
+    if (!isRecord(parsedBody)) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_JSON',
+          code: 'INVALID_JSON',
+          message: 'Telo požiadavky musí byť JSON objekt.',
+          errorId,
+        },
+        { status: 400 },
+      );
+    }
+
+    const body = parsedBody as CheckoutBody;
+    const rawPlan = getRawPlan(body);
+    const rawAddons = getRawAddons(body);
+    const normalizedRequestedPlan = normalizeString(rawPlan);
+
+    // ADMIN je interný systémový balík. Nesmie sa vytvoriť Stripe Checkout
+    // ani Stripe metadata, ktoré by ho mohli priradiť používateľovi nákupom.
+    if (normalizedRequestedPlan === 'admin') {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'ADMIN_PLAN_NOT_PURCHASABLE',
+          code: 'ADMIN_PLAN_NOT_PURCHASABLE',
+          message: 'Administrátorský balík nie je možné zakúpiť.',
+          errorId,
+        },
+        { status: 403 },
+      );
+    }
+
+    const {
+      planId,
+      invalidValue: invalidPlan,
+    } = resolvePlanId(rawPlan);
+
+    if (invalidPlan !== null) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_PLAN',
+          code: 'INVALID_PLAN',
+          errorId,
+          receivedPlan: invalidPlan,
+          message:
+            'Neplatné ID balíka. Checkout prijíma iba balíky z lib/billing/catalog.ts.',
+          received: invalidPlan,
+          allowedPlans: PURCHASABLE_PLAN_IDS,
+        },
+        { status: 400 },
+      );
+    }
+
+    const {
+      addonIds,
+      invalidAddons,
+    } = resolveAddonIds(rawAddons);
+
+    if (invalidAddons.length > 0) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_ADDON',
+          code: 'INVALID_ADDON',
+          errorId,
+          message:
+            'Niektorý doplnok nemá platné ID podľa lib/billing/catalog.ts.',
+          invalidAddons,
+          allowedAddons: Object.keys(ADDONS),
+        },
+        { status: 400 },
+      );
+    }
+
+    const baseUrl = getBaseUrl();
+    const isFreeSelection = normalizedRequestedPlan === 'free';
+
+    // Free balík nevytvára Stripe Checkout a nevyžaduje prihlásenie.
+    // Samotný dashboard musí pre anonymného používateľa uplatniť free limity.
+    if (isFreeSelection && addonIds.length === 0) {
+      const redirectUrl = getFreeDashboardUrl(baseUrl);
+
+      return createJsonResponse({
+        ok: true,
+        action: 'redirect',
+        checkoutRequired: false,
+        mode: 'free',
+        planId: 'free' as const,
+        url: redirectUrl,
+        redirectUrl,
+        redirectPath: '/dashboard?plan=free',
+        message:
+          'Free balík nevyžaduje Stripe platbu. Používateľ môže pokračovať priamo do dashboardu.',
+      });
+    }
+
+    if (!planId && addonIds.length === 0) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'EMPTY_CHECKOUT',
+          code: 'EMPTY_CHECKOUT',
+          errorId,
+          message:
+            'Vyberte platený balík alebo aspoň jeden doplnok.',
+          allowedPlans: PURCHASABLE_PLAN_IDS,
+          allowedAddons: Object.keys(ADDONS),
+        },
+        { status: 400 },
+      );
+    }
 
     /*
-     * Administrátor uvedený v serverovej konfigurácii nesmie byť zablokovaný
-     * chýbajúcim alebo starým riadkom v entitlement tabuľke. Po úspešnom
-     * overení Supabase session dostane administrátorskú odpoveď priamo.
+     * Hlavný platený balík môže kúpiť aj neprihlásený návštevník.
+     * Stripe si v takom prípade vyžiada e-mail priamo na platobnej stránke.
+     * Doplnok bez základného balíka naďalej vyžaduje prihlásený účet,
+     * pretože sa musí pripojiť ku konkrétnemu existujúcemu entitlementu.
      */
-    if (isExplicitAdmin) {
-      return NextResponse.json(
-        createAdminEntitlementsResponse(),
+    const supabase = await createSupabaseServerClient();
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError && user?.id) {
+      throw new Error(`AUTH_CHECK_FAILED: ${authError.message}`);
+    }
+
+    const userId = normalizeString(user?.id);
+    const email = normalizeEmail(user?.email);
+    const isAuthenticated = Boolean(userId && email);
+
+    requestId = resolveCheckoutRequestId(request, body);
+
+    let currentEntitlement: CurrentEntitlementRow | null = null;
+
+    if (isAuthenticated) {
+      currentEntitlement = await loadCurrentEntitlement({
+        supabase,
+        userId,
+      });
+    }
+
+    if (!planId && addonIds.length > 0 && !isAuthenticated) {
+      return createJsonResponse(
         {
-          status: 200,
-          headers,
+          ok: false,
+          error: 'ADDON_AUTHENTICATION_REQUIRED',
+          code: 'ADDON_AUTHENTICATION_REQUIRED',
+          errorId,
+          requestId,
+          message:
+            'Samostatný doplnok je možné pripojiť iba k prihlásenému účtu s aktívnym plateným balíkom.',
+          loginUrl: `/login?next=${encodeURIComponent('/pricing#doplnkove-sluzby')}`,
         },
+        { status: 401 },
       );
     }
 
-    const currentEntitlements =
-      await getCurrentEntitlements();
+    requirePaidPlanForAddonOnlyCheckout({
+      planId,
+      addonIds,
+      currentEntitlement,
+    });
 
-    const response = serializeEntitlements(
-      currentEntitlements,
+    const stripe = getStripe();
+    const locale = normalizeLocale(
+      firstDefined(body.locale, body.language, body.lang),
     );
 
-    return NextResponse.json(
-      response,
-      {
-        status: 200,
-        headers,
+    let stripeCustomerId = normalizeString(
+      currentEntitlement?.stripe_customer_id,
+    );
+
+    if (isAuthenticated && !stripeCustomerId) {
+      const customer = await getOrCreateStripeCustomer({
+        stripe,
+        userId,
+        email,
+      });
+
+      stripeCustomerId = customer.id;
+    }
+
+    const lineItems: CheckoutLineItem[] = [
+      ...(planId ? [createPlanLineItem(planId)] : []),
+      ...addonIds.map(createAddonLineItem),
+    ];
+
+    const metadata = buildMetadata({
+      userId,
+      email,
+      planId,
+      addonIds,
+      requestId,
+      locale,
+    });
+
+    const successUrl = getSuccessUrl(baseUrl, locale);
+    const cancelUrl = getCancelUrl(baseUrl, locale);
+
+    const sessionParams: CheckoutSessionCreateParams = {
+      mode: 'payment',
+      line_items: lineItems,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata,
+      payment_intent_data: {
+        metadata,
+        ...(email ? { receipt_email: email } : {}),
       },
-    );
-  } catch (error: unknown) {
-    logRouteError(
-      error,
-      requestId,
-    );
-
-    if (isUnauthenticatedError(error)) {
-      const response: ErrorResponse = {
-        error: 'UNAUTHENTICATED',
-        message:
-          'Pre načítanie používateľských oprávnení sa musíte prihlásiť platným e-mailom a heslom.',
-        requestId,
-      };
-
-      return NextResponse.json(
-        response,
-        {
-          status: 401,
-          headers,
-        },
-      );
-    }
-
-    const isInvalidResponse =
-      error instanceof Error &&
-      error.message ===
-        'INVALID_ENTITLEMENTS_RESPONSE';
-
-    const details =
-      getDevelopmentDetails(error);
-
-    const response: ErrorResponse = {
-      error: isInvalidResponse
-        ? 'INVALID_ENTITLEMENTS_RESPONSE'
-        : 'ENTITLEMENTS_LOAD_FAILED',
-      message: isInvalidResponse
-        ? 'Server vrátil neplatný formát používateľských oprávnení.'
-        : 'Používateľské oprávnenia sa nepodarilo načítať.',
-      requestId,
-      ...(details
-        ? {
-            details,
-          }
-        : {}),
+      allow_promotion_codes: true,
+      billing_address_collection: 'auto',
+      automatic_tax: {
+        enabled: false,
+      },
+      locale: 'auto',
+      submit_type: 'pay',
+      expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
     };
 
-    return NextResponse.json(
-      response,
+    if (userId) {
+      sessionParams.client_reference_id = userId;
+    }
+
+    if (stripeCustomerId) {
+      sessionParams.customer = stripeCustomerId;
+      sessionParams.customer_update = {
+        address: 'auto',
+        name: 'auto',
+      };
+    } else {
+      // Bez zákazníka Stripe zobrazí e-mailové pole priamo v Checkout.
+      sessionParams.customer_creation = 'always';
+
+      if (email) {
+        sessionParams.customer_email = email;
+      }
+    }
+
+    const idempotencyKey = createIdempotencyKey({
+      userId,
+      planId,
+      addonIds,
+      requestId,
+    });
+
+    const session = await stripe.checkout.sessions.create(
+      sessionParams,
       {
-        status: 500,
-        headers,
+        idempotencyKey,
       },
+    );
+
+    if (!session.url) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'CHECKOUT_SESSION_URL_MISSING',
+          code: 'CHECKOUT_SESSION_URL_MISSING',
+          errorId,
+          requestId,
+          message: 'Stripe nevygeneroval URL platobnej stránky.',
+          sessionId: session.id,
+        },
+        { status: 502 },
+      );
+    }
+
+    const purchaseType = getPurchaseType(planId, addonIds);
+    const totalCents = getCatalogTotalCents(planId, addonIds);
+
+    return createJsonResponse({
+      ok: true,
+      action: 'redirect',
+      checkoutRequired: true,
+      url: session.url,
+      redirectUrl: session.url,
+      sessionId: session.id,
+      requestId,
+      mode: 'payment',
+      purchaseType,
+
+      planId,
+      planName: planId ? PLANS[planId].name : null,
+      addonIds,
+      addonNames: addonIds.map((addonId) => ADDONS[addonId].name),
+
+      currency: CURRENCY.toUpperCase(),
+      catalogTotalCents: totalCents,
+      basePages: getPurchasedBasePages(planId),
+      extraPages: getPurchasedExtraPages(addonIds),
+
+      successUrl,
+      cancelUrl,
+      locale,
+      authenticated: isAuthenticated,
+    });
+  } catch (error: unknown) {
+    const detail = getErrorMessage(error);
+    const stripeCode = getStripeErrorCode(error);
+
+    console.error('ZEDPERA_CHECKOUT_ERROR', {
+      errorId,
+      requestId: requestId || null,
+      detail,
+      stripeCode,
+      error,
+    });
+
+    if (detail.includes('REQUEST_ID_MISMATCH')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'REQUEST_ID_MISMATCH',
+          code: 'REQUEST_ID_MISMATCH',
+          message:
+            'requestId sa nezhoduje s hlavičkou Idempotency-Key.',
+          errorId,
+          ...(requestId ? { requestId } : {}),
+        },
+        { status: 400 },
+      );
+    }
+
+    if (detail.includes('INVALID_REQUEST_ID')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'INVALID_REQUEST_ID',
+          code: 'INVALID_REQUEST_ID',
+          message:
+            'requestId obsahuje nepovolené znaky alebo je príliš dlhý.',
+          errorId,
+          ...(requestId ? { requestId } : {}),
+        },
+        { status: 400 },
+      );
+    }
+
+    if (detail.includes('PAID_PLAN_REQUIRED')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'PAID_PLAN_REQUIRED',
+          code: 'PAID_PLAN_REQUIRED',
+          message:
+            'Doplnok je možné kúpiť iba spolu s plateným balíkom alebo k aktívnemu platenému balíku.',
+          errorId,
+          allowedPlans: PURCHASABLE_PLAN_IDS,
+          allowedAddons: Object.keys(ADDONS),
+          ...(requestId ? { requestId } : {}),
+        },
+        { status: 400 },
+      );
+    }
+
+    if (detail.includes('ENTITLEMENT_LOAD_FAILED')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'ENTITLEMENT_LOAD_FAILED',
+          code: 'ENTITLEMENT_LOAD_FAILED',
+          message:
+            'Nepodarilo sa overiť aktuálny používateľský balík.',
+          errorId,
+          ...(requestId ? { requestId } : {}),
+          ...getSafeErrorDetail(detail),
+        },
+        { status: 500 },
+      );
+    }
+
+    if (detail.includes('AUTH_CHECK_FAILED')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'AUTH_CHECK_FAILED',
+          code: 'AUTH_CHECK_FAILED',
+          message: 'Nepodarilo sa bezpečne overiť aktuálne prihlásenie.',
+          errorId,
+          ...(requestId ? { requestId } : {}),
+          ...getSafeErrorDetail(detail),
+        },
+        { status: 500 },
+      );
+    }
+
+    if (detail.includes('STRIPE_CONFIG_MISSING')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'STRIPE_CONFIG_MISSING',
+          code: 'STRIPE_CONFIG_MISSING',
+          message:
+            'Platobná brána nie je správne nakonfigurovaná.',
+          errorId,
+          ...(requestId ? { requestId } : {}),
+          ...getSafeErrorDetail(detail),
+        },
+        { status: 500 },
+      );
+    }
+
+    const unavailable =
+      stripeCode === 'StripeConnectionError' ||
+      stripeCode === 'StripeAPIError' ||
+      stripeCode === 'StripeRateLimitError';
+
+    return createJsonResponse(
+      {
+        ok: false,
+        error: unavailable ? 'STRIPE_UNAVAILABLE' : 'CHECKOUT_FAILED',
+        code: unavailable ? 'STRIPE_UNAVAILABLE' : 'CHECKOUT_FAILED',
+        message: unavailable
+          ? 'Platobná brána je dočasne nedostupná. Skúste požiadavku zopakovať.'
+          : 'Stripe Checkout sa nepodarilo vytvoriť.',
+        errorId,
+        ...(requestId ? { requestId } : {}),
+        ...getSafeErrorDetail(detail),
+        ...(!isProduction() && stripeCode ? { stripeCode } : {}),
+      },
+      { status: unavailable ? 503 : 500 },
     );
   }
 }

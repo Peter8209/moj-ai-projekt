@@ -22,6 +22,45 @@ type RowValue = string | number | boolean | null;
 
 type DataRow = Record<string, RowValue>;
 
+/**
+ * Súbor prijatý cez Request.formData().
+ *
+ * Nepoužívame `instanceof File`, pretože v Node.js/serverless runtime môže
+ * objekt súboru pochádzať z iného JavaScript realm-u. Kontrolujeme preto
+ * bezpečne jeho vlastnosti a metódu arrayBuffer().
+ */
+type UploadedDataFile = Blob & {
+  name: string;
+  lastModified?: number;
+};
+
+/**
+ * Verejný a JSON-bezpečný prehľad oprávnení použitý v odpovedi route.
+ *
+ * `null` pri limitoch znamená neobmedzený ADMIN prístup.
+ */
+type PrepareAccess = {
+  planId: string;
+  planName: string;
+  isAdmin: boolean;
+  isUnlimited: boolean;
+  hasUnlimitedAccess: boolean;
+  hasDatabaseRecord: boolean;
+  pageLimit: number | null;
+  basePageLimit: number | null;
+  extraPageLimit: number;
+  pagesUsed: number;
+  promptLimit: number | null;
+  promptsUsed: number;
+  promptsRemaining: number | null;
+  attachmentLimit: number | null;
+  billingStatus: string | null;
+  addonIds: string[];
+  addonNames: string[];
+  features: string[];
+  requiredFeature: 'data-prepare';
+};
+
 type QualityStatus = 'ok' | 'warning' | 'error';
 
 type QuestionnaireMode =
@@ -119,14 +158,26 @@ type PrepareErrorCode =
 
 type PrepareResponse = {
   ok: boolean;
+  success?: boolean;
   code?: PrepareErrorCode;
   message: string;
   requestId?: string;
   errorId?: string;
   processingMs?: number;
+
   preparedFileName?: string;
   preparedFileBase64?: string;
+  preparedFileSizeBytes?: number;
+  preparedFileBase64Length?: number;
   mimeType?: string;
+
+  sourceFile?: {
+    name: string;
+    size: number;
+    type: string;
+    extension: string;
+  };
+
   rows?: number;
   columns?: number;
   sheets?: string[];
@@ -134,12 +185,7 @@ type PrepareResponse = {
   qualityReport?: QualityReportItem[];
   questionnaireConfig?: QuestionnaireConfig;
   jaspSummary?: JaspTableRow[];
-  access?: {
-    planId: string;
-    planName: string;
-    attachmentLimit: number;
-    requiredFeature: 'data-prepare';
-  };
+  access?: PrepareAccess;
 
   /**
    * Zachované kvôli spätnej kompatibilite frontendu.
@@ -171,9 +217,10 @@ const SUPPORTED_EXTENSIONS = new Set([
 
 const NO_STORE_HEADERS = {
   'Cache-Control':
-    'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'private, no-store, no-cache, max-age=0, must-revalidate, proxy-revalidate',
   Pragma: 'no-cache',
   Expires: '0',
+  Vary: 'Cookie, Authorization',
   'X-Content-Type-Options': 'nosniff',
 } as const;
 
@@ -527,6 +574,165 @@ function getDevelopmentDetail(
   return { detail };
 }
 
+function toNonNegativeInteger(
+  value: unknown,
+  fallback = 0,
+): number {
+  const numericValue =
+    typeof value === 'number'
+      ? value
+      : Number(value);
+
+  if (
+    !Number.isFinite(numericValue) ||
+    numericValue < 0
+  ) {
+    return Math.max(
+      0,
+      Math.trunc(fallback),
+    );
+  }
+
+  return Math.trunc(numericValue);
+}
+
+function toNullableNonNegativeInteger(
+  value: unknown,
+): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const numericValue =
+    typeof value === 'number'
+      ? value
+      : Number(value);
+
+  if (
+    !Number.isFinite(numericValue) ||
+    numericValue < 0
+  ) {
+    return null;
+  }
+
+  return Math.trunc(numericValue);
+}
+
+/**
+ * Vytvorí jednotný ADMIN/plan snapshot bez toho, aby route dôverovala
+ * údajom odoslaným klientom.
+ */
+function createPrepareAccess(
+  entitlements: Awaited<
+    ReturnType<typeof requireDataAnalysisAction>
+  >,
+): PrepareAccess {
+  const isAdmin =
+    entitlements.isAdmin === true ||
+    entitlements.planId === 'admin';
+
+  const hasUnlimitedAccess =
+    isAdmin ||
+    entitlements.hasUnlimitedAccess === true;
+
+  const attachmentLimit =
+    hasUnlimitedAccess
+      ? null
+      : toNullableNonNegativeInteger(
+          entitlements.attachmentLimit,
+        );
+
+  const features = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(
+          entitlements.featureList,
+        )
+          ? entitlements.featureList
+          : []),
+        ...(entitlements.features instanceof Set
+          ? Array.from(entitlements.features)
+          : []),
+      ].map((feature) => String(feature)),
+    ),
+  ).sort();
+
+  return {
+    planId: isAdmin
+      ? 'admin'
+      : String(entitlements.planId),
+    planName: isAdmin
+      ? 'ADMIN'
+      : String(
+          entitlements.planName ||
+            entitlements.planId,
+        ),
+    isAdmin,
+    isUnlimited: hasUnlimitedAccess,
+    hasUnlimitedAccess,
+    hasDatabaseRecord:
+      entitlements.hasDatabaseRecord !== false,
+
+    pageLimit: hasUnlimitedAccess
+      ? null
+      : toNullableNonNegativeInteger(
+          entitlements.pageLimit,
+        ),
+    basePageLimit: hasUnlimitedAccess
+      ? null
+      : toNullableNonNegativeInteger(
+          entitlements.basePageLimit,
+        ),
+    extraPageLimit: hasUnlimitedAccess
+      ? 0
+      : toNonNegativeInteger(
+          entitlements.extraPageLimit,
+          0,
+        ),
+    pagesUsed: hasUnlimitedAccess
+      ? 0
+      : toNonNegativeInteger(
+          entitlements.pagesUsed,
+          0,
+        ),
+
+    promptLimit: hasUnlimitedAccess
+      ? null
+      : toNullableNonNegativeInteger(
+          entitlements.promptLimit,
+        ),
+    promptsUsed: hasUnlimitedAccess
+      ? 0
+      : toNonNegativeInteger(
+          entitlements.promptsUsed,
+          0,
+        ),
+    promptsRemaining: hasUnlimitedAccess
+      ? null
+      : toNullableNonNegativeInteger(
+          entitlements.promptsRemaining,
+        ),
+
+    attachmentLimit,
+    billingStatus: isAdmin
+      ? 'admin'
+      : entitlements.billingStatus ?? null,
+    addonIds: Array.isArray(
+      entitlements.addonIds,
+    )
+      ? entitlements.addonIds.map(String)
+      : [],
+    addonNames: Array.isArray(
+      entitlements.addonNames,
+    )
+      ? entitlements.addonNames.map(String)
+      : [],
+    features,
+    requiredFeature:
+      REQUIRED_DATA_FEATURE,
+  };
+}
+
 function resolveRequestId(
   request: NextRequest,
 ): string {
@@ -648,18 +854,64 @@ function isCsvFileName(fileName: string): boolean {
   return /\.csv$/i.test(fileName);
 }
 
+function isUploadedDataFile(
+  value: unknown,
+): value is UploadedDataFile {
+  if (
+    !value ||
+    typeof value === 'string' ||
+    typeof value !== 'object'
+  ) {
+    return false;
+  }
+
+  const candidate =
+    value as Partial<UploadedDataFile> & {
+      arrayBuffer?: unknown;
+    };
+
+  return (
+    typeof candidate.arrayBuffer === 'function' &&
+    typeof candidate.name === 'string' &&
+    candidate.name.trim().length > 0 &&
+    typeof candidate.size === 'number' &&
+    Number.isFinite(candidate.size) &&
+    candidate.size >= 0 &&
+    typeof candidate.type === 'string'
+  );
+}
+
+/**
+ * Načíta všetky reálne súbory z FormData a odstráni duplicity.
+ *
+ * Dashboard kvôli spätnej kompatibilite posiela ten istý súbor pod poľami
+ * `file` aj `files`. Bez deduplikácie route videla dva súbory a vracala
+ * MULTIPLE_FILES_NOT_SUPPORTED, hoci používateľ nahral iba jeden dataset.
+ */
 function getUploadedFiles(
   formData: FormData,
-): File[] {
-  const files: File[] = [];
+): UploadedDataFile[] {
+  const uniqueFiles =
+    new Map<string, UploadedDataFile>();
 
   for (const [, value] of formData.entries()) {
-    if (value instanceof File) {
-      files.push(value);
+    if (!isUploadedDataFile(value)) {
+      continue;
+    }
+
+    const key = [
+      value.name.trim().toLowerCase(),
+      value.size,
+      value.type.trim().toLowerCase(),
+      value.lastModified ?? 0,
+    ].join('|');
+
+    if (!uniqueFiles.has(key)) {
+      uniqueFiles.set(key, value);
     }
   }
 
-  return files;
+  return Array.from(uniqueFiles.values());
 }
 
 function getWorkbookFirstSheetRows(workbook: XLSX.WorkBook): unknown[][] {
@@ -3842,7 +4094,7 @@ function createPreparedFileName(originalFileName: string): string {
 }
 
 async function readWorkbookFromFile(
-  file: File,
+  file: UploadedDataFile,
 ): Promise<XLSX.WorkBook> {
   const fileName = sanitizeFileName(
     file.name || 'uploaded-file',
@@ -3943,6 +4195,9 @@ export async function POST(
         'prepare',
       );
 
+    const access =
+      createPrepareAccess(entitlements);
+
     if (!isMultipartRequest(request)) {
       throw new PrepareRouteError({
         code: 'INVALID_CONTENT_TYPE',
@@ -3980,16 +4235,35 @@ export async function POST(
       });
     }
 
-    if (
-      uploadedFiles.length >
-      entitlements.attachmentLimit
-    ) {
-      throw new AttachmentLimitError({
-        attachmentLimit:
-          entitlements.attachmentLimit,
-        receivedAttachments:
-          uploadedFiles.length,
-      });
+    /**
+     * ADMIN a iný autoritatívne neobmedzený účet nemá balíkový limit
+     * príloh. Technické pravidlo tejto route však zostáva jeden unikátny
+     * dataset na jednu požiadavku.
+     */
+    if (!access.hasUnlimitedAccess) {
+      if (access.attachmentLimit === null) {
+        throw new PrepareRouteError({
+          code:
+            'ENTITLEMENTS_LOAD_FAILED',
+          status: 500,
+          message:
+            'Limit príloh sa nepodarilo bezpečne načítať.',
+          detail:
+            'Bežný používateľ dostal neplatnú hodnotu attachmentLimit=null.',
+        });
+      }
+
+      if (
+        uploadedFiles.length >
+        access.attachmentLimit
+      ) {
+        throw new AttachmentLimitError({
+          attachmentLimit:
+            access.attachmentLimit,
+          receivedAttachments:
+            uploadedFiles.length,
+        });
+      }
     }
 
     if (uploadedFiles.length > 1) {
@@ -4009,6 +4283,16 @@ export async function POST(
       sanitizeFileName(
         file.name || 'data.xlsx',
       );
+
+    const sourceFile = {
+      name: safeFileName,
+      size: file.size,
+      type:
+        file.type ||
+        'application/octet-stream',
+      extension:
+        getFileExtension(safeFileName),
+    };
 
     const questionnaireConfig =
       normalizeQuestionnaireConfig(
@@ -4163,14 +4447,20 @@ export async function POST(
     return createJsonResponse(
       {
         ok: true,
+        success: true,
         code: 'DATA_PREPARED',
         message:
-          'Súbor bol pripravený v JASP-like štruktúre. Hlavné štatistiky používajú iba zadané, vypočítané alebo jasne pomenované škály/subškály; jednotlivé položky sú oddelené v hárku 22_POLOZKY a rozdielový test sa vyberá podľa skríningu normality.',
+          'Dáta boli úspešne načítané, vyčistené a pripravené na štatistickú analýzu. Použité boli iba manuálne zadané, vypočítané alebo jednoznačne pomenované škály a subškály.',
         requestId,
         processingMs,
         preparedFileName,
         preparedFileBase64,
+        preparedFileSizeBytes:
+          preparedBuffer.length,
+        preparedFileBase64Length:
+          preparedFileBase64.length,
         mimeType: EXCEL_MIME_TYPE,
+        sourceFile,
         rows: scoringResult.rows.length,
         columns:
           scoringResult.headers.length,
@@ -4200,15 +4490,7 @@ export async function POST(
         questionnaireConfig,
         jaspSummary:
           jaspAnalysis.summary,
-        access: {
-          planId: entitlements.planId,
-          planName:
-            entitlements.planName,
-          attachmentLimit:
-            entitlements.attachmentLimit,
-          requiredFeature:
-            REQUIRED_DATA_FEATURE,
-        },
+        access,
       },
       200,
       requestId,
@@ -4273,6 +4555,7 @@ export async function POST(
       return createJsonResponse(
         {
           ok: false,
+          success: false,
           code: error.code,
           message: error.publicMessage,
           requestId,
@@ -4305,6 +4588,7 @@ export async function POST(
     return createJsonResponse(
       {
         ok: false,
+        success: false,
         code: 'INTERNAL_SERVER_ERROR',
         message:
           'Pri príprave dát nastala neočakávaná chyba.',

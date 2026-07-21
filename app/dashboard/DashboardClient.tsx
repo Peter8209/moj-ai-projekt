@@ -79,9 +79,16 @@ type DashboardEntitlements = {
   planPriceCents: number;
 
   isAdmin: boolean;
+  isUnlimited: boolean;
   hasUnlimitedAccess: boolean;
 
-  pageLimit: number;
+  pageLimit: number | null;
+  basePageLimit: number | null;
+  extraPageLimit: number;
+  totalPageLimit: number | null;
+  pagesUsed: number;
+  pagesRemaining: number | null;
+  pageLimitReached: boolean;
 
   addonIds: AddonId[];
   addonNames: string[];
@@ -93,6 +100,7 @@ type DashboardEntitlements = {
   promptLimitReached: boolean;
 
   attachmentLimit: number | null;
+  billingStatus: string;
 
   activatedAt: string | null;
   validUntil: string | null;
@@ -104,17 +112,18 @@ type DashboardPageQuota = {
   planId: string;
 
   /**
-   * Administrátorský účet môže mať neobmedzenú stránkovú kvótu.
-   * Tieto hodnoty ovplyvňujú iba počítanie a zobrazovanie strán.
+   * null znamená neobmedzenú hodnotu. Nesmie sa prevádzať na 0,
+   * pretože ADMIN by sa potom na frontende tváril ako vyčerpaný FREE účet.
    */
   isAdmin: boolean;
   isUnlimited: boolean;
+  hasUnlimitedAccess: boolean;
 
-  basePageLimit: number;
+  basePageLimit: number | null;
   extraPageLimit: number;
-  pageLimit: number;
+  pageLimit: number | null;
   pagesUsed: number;
-  pagesRemaining: number;
+  pagesRemaining: number | null;
   pageLimitReached: boolean;
 };
 
@@ -832,9 +841,23 @@ type AttachedFile = {
   size: number;
   type: string;
   uploadedAt?: string;
+
+  /**
+   * Textový fallback pre TXT/MD/CSV/RTF. PDF a DOCX sa čítajú na serveri,
+   * aby AI chat nebol závislý od klientského PDF.js workera.
+   */
   text?: string;
   content?: string;
+
+  /**
+   * Skutočný binárny súbor. Do /api/chat a /api/analyze-data/prepare
+   * sa vždy posiela tento objekt, nie iba názov alebo metadáta.
+   */
   file?: File;
+
+  extractionStatus?: "pending" | "server" | "client" | "failed";
+  extractedChars?: number;
+  extractionMessage?: string;
 };
 
 type SavedProfile = {
@@ -927,9 +950,28 @@ const allowedFileExtensions = [
 const allowedFileAccept = allowedFileExtensions.join(",");
 
 const maxStandardFilesCount = 12;
-const maxAdminFilesPerRequest = 50;
+
+/**
+ * ADMIN nemá balíkový limit príloh. Hodnota nižšie je iba technický
+ * bezpečnostný limit jednej HTTP požiadavky a je zosúladená s /api/chat.
+ */
+const maxUnlimitedFilesPerRequest = 24;
+const maxDataFilesPerRequest = 1;
+
 const maxFileSizeMb = 30;
 const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
+
+/**
+ * Toto je iba UI fallback nad e-mailom, ktorý vráti serverový endpoint
+ * /api/entitlements/me pre aktuálne prihlásenú Supabase reláciu.
+ * Skutočné oprávnenie musí vždy potvrdiť server v lib/entitlements.ts.
+ * Heslo sa nikdy nesmie zapisovať do frontendového kódu.
+ */
+const ADMIN_DASHBOARD_EMAILS = new Set<string>([
+  "admin@zedpera.com",
+]);
+
+const dataFileExtensions = new Set([".xlsx", ".xls", ".xlsm", ".csv"]);
 
 const moduleInfos: {
   key: ModuleKey;
@@ -1787,39 +1829,45 @@ const DASHBOARD_PLAN_DEFAULTS: Record<
   {
     name: string;
     priceCents: number;
-    pageLimit: number;
-    attachmentLimit: number;
+    pageLimit: number | null;
+    promptLimit: number | null;
+    attachmentLimit: number | null;
   }
 > = {
   free: {
     name: "FREE",
     priceCents: 0,
     pageLimit: 3,
+    promptLimit: 3,
     attachmentLimit: 1,
   },
   "seminar-work": {
     name: "Seminárna práca",
     priceCents: 3900,
     pageLimit: 15,
+    promptLimit: null,
     attachmentLimit: 12,
   },
   "bachelor-thesis": {
     name: "Bakalárska práca",
     priceCents: 14900,
     pageLimit: 50,
+    promptLimit: null,
     attachmentLimit: 12,
   },
   "master-thesis": {
     name: "Diplomová / magisterská práca",
     priceCents: 18900,
     pageLimit: 70,
+    promptLimit: null,
     attachmentLimit: 12,
   },
   admin: {
     name: "ADMIN",
     priceCents: 0,
-    pageLimit: 0,
-    attachmentLimit: 0,
+    pageLimit: null,
+    promptLimit: null,
+    attachmentLimit: null,
   },
 };
 
@@ -1951,9 +1999,9 @@ function readStringArray(record: UnknownRecord, ...keys: string[]): string[] {
   return [];
 }
 
-function normalizeDashboardPlanId(value: unknown): PlanId {
+function normalizeDashboardPlanIdOrNull(value: unknown): PlanId | null {
   const candidate = String(value ?? "").trim() as PlanId;
-  return DASHBOARD_PLAN_IDS.has(candidate) ? candidate : "free";
+  return DASHBOARD_PLAN_IDS.has(candidate) ? candidate : null;
 }
 
 function normalizeDashboardAddonIds(values: string[]): AddonId[] {
@@ -1970,14 +2018,71 @@ function normalizeDashboardEntitlements(
 
   if (!data) return null;
 
-  const planId = normalizeDashboardPlanId(data.planId ?? data.plan_id);
+  /**
+   * ADMIN sa musí rozpoznať ešte pred fallbackom na FREE. Inak by neznáma
+   * alebo dočasne chýbajúca hodnota planId prepla admina na plán free.
+   */
+  const storedPlanId = normalizeDashboardPlanIdOrNull(
+    data.planId ?? data.plan_id,
+  );
+
+  const billingStatus = readString(
+    data,
+    "billingStatus",
+    "billing_status",
+  ).toLowerCase();
+
+  const explicitAdmin = readBoolean(
+    data,
+    false,
+    "isAdmin",
+    "is_admin",
+    "adminAccess",
+    "admin_access",
+  );
+
+  const explicitUnlimited = readBoolean(
+    data,
+    false,
+    "hasUnlimitedAccess",
+    "has_unlimited_access",
+    "isUnlimited",
+    "is_unlimited",
+  );
+
+  const accountEmail = readNullableString(data, "email");
+  const normalizedAccountEmail = accountEmail?.trim().toLowerCase() || "";
+  const authenticatedAdminEmail =
+    normalizedAccountEmail.length > 0 &&
+    ADMIN_DASHBOARD_EMAILS.has(normalizedAccountEmail);
+
+  const isAdmin =
+    explicitAdmin ||
+    storedPlanId === "admin" ||
+    billingStatus === "admin" ||
+    authenticatedAdminEmail;
+
+  const hasUnlimitedAccess =
+    isAdmin ||
+    explicitUnlimited;
+
+  const isUnlimited = hasUnlimitedAccess;
+
+  const planId: PlanId = isAdmin
+    ? "admin"
+    : storedPlanId ?? "free";
+
   const planDefaults = DASHBOARD_PLAN_DEFAULTS[planId];
 
   const addonIds = normalizeDashboardAddonIds(
     readStringArray(data, "addonIds", "addon_ids"),
   );
 
-  const explicitAddonNames = readStringArray(data, "addonNames", "addon_names");
+  const explicitAddonNames = readStringArray(
+    data,
+    "addonNames",
+    "addon_names",
+  );
 
   const addonNames = explicitAddonNames.length
     ? explicitAddonNames
@@ -1990,9 +2095,83 @@ function normalizeDashboardEntitlements(
     "feature_list",
   ) as FeatureKey[];
 
-  const promptLimit = readNumber(data, "promptLimit", "prompt_limit");
+  const basePageLimit = hasUnlimitedAccess
+    ? null
+    : Math.max(
+        0,
+        readNumber(
+          data,
+          "basePageLimit",
+          "base_page_limit",
+        ) ??
+          planDefaults.pageLimit ??
+          0,
+      );
 
-  const promptsUsed = Math.max(
+  const extraPageLimit = hasUnlimitedAccess
+    ? 0
+    : Math.max(
+        0,
+        readNumber(
+          data,
+          "extraPageLimit",
+          "extra_page_limit",
+        ) ?? 0,
+      );
+
+  const calculatedTotalPageLimit =
+    basePageLimit === null
+      ? null
+      : basePageLimit + extraPageLimit;
+
+  const totalPageLimit = hasUnlimitedAccess
+    ? null
+    : Math.max(
+        0,
+        readNumber(
+          data,
+          "totalPageLimit",
+          "total_page_limit",
+          "pageLimit",
+          "page_limit",
+        ) ??
+          calculatedTotalPageLimit ??
+          0,
+      );
+
+  const pagesUsedRaw = Math.max(
+    0,
+    readNumber(data, "pagesUsed", "pages_used") ?? 0,
+  );
+
+  const pagesRemainingFromApi = readNumber(
+    data,
+    "pagesRemaining",
+    "pages_remaining",
+  );
+
+  const pagesRemaining = hasUnlimitedAccess
+    ? null
+    : Math.max(
+        0,
+        Math.min(
+          pagesRemainingFromApi ??
+            Math.max((totalPageLimit ?? 0) - pagesUsedRaw, 0),
+          Math.max((totalPageLimit ?? 0) - pagesUsedRaw, 0),
+        ),
+      );
+
+  const promptLimitFromApi = readNumber(
+    data,
+    "promptLimit",
+    "prompt_limit",
+  );
+
+  const promptLimit = hasUnlimitedAccess
+    ? null
+    : promptLimitFromApi ?? planDefaults.promptLimit;
+
+  const promptsUsedRaw = Math.max(
     0,
     readNumber(data, "promptsUsed", "prompts_used") ?? 0,
   );
@@ -2003,70 +2182,109 @@ function normalizeDashboardEntitlements(
     "prompts_remaining",
   );
 
-  const promptsRemaining =
-    promptLimit === null
-      ? null
-      : Math.max(0, promptsRemainingFromApi ?? promptLimit - promptsUsed);
+  const promptsRemaining = hasUnlimitedAccess || promptLimit === null
+    ? null
+    : Math.max(
+        0,
+        Math.min(
+          promptsRemainingFromApi ??
+            Math.max(promptLimit - promptsUsedRaw, 0),
+          Math.max(promptLimit - promptsUsedRaw, 0),
+        ),
+      );
 
-  const promptLimitReached = readBoolean(
-    data,
-    promptLimit !== null && promptsUsed >= promptLimit,
-    "promptLimitReached",
-    "prompt_limit_reached",
-  );
-
-  const isAdmin = readBoolean(data, planId === "admin", "isAdmin", "is_admin");
-
-  const hasUnlimitedAccess = readBoolean(
-    data,
-    isAdmin,
-    "hasUnlimitedAccess",
-    "has_unlimited_access",
-    "isUnlimited",
-    "is_unlimited",
-  );
+  const attachmentLimit = hasUnlimitedAccess
+    ? null
+    : Math.max(
+        0,
+        readNumber(
+          data,
+          "attachmentLimit",
+          "attachment_limit",
+        ) ??
+          planDefaults.attachmentLimit ??
+          0,
+      );
 
   return {
     ok: readBoolean(root ?? data, true, "ok", "success"),
 
     userId: readString(data, "userId", "user_id"),
-    email: readNullableString(data, "email"),
+    email: accountEmail,
 
     planId,
-    planName: readString(data, "planName", "plan_name") || planDefaults.name,
+    planName: isAdmin
+      ? "ADMIN"
+      : readString(data, "planName", "plan_name") || planDefaults.name,
 
-    planPriceCents:
-      readNumber(data, "planPriceCents", "plan_price_cents") ??
-      planDefaults.priceCents,
+    planPriceCents: isAdmin
+      ? 0
+      : readNumber(
+          data,
+          "planPriceCents",
+          "plan_price_cents",
+        ) ?? planDefaults.priceCents,
 
     isAdmin,
+    isUnlimited,
     hasUnlimitedAccess,
 
-    pageLimit:
-      readNumber(data, "pageLimit", "page_limit") ?? planDefaults.pageLimit,
+    pageLimit: totalPageLimit,
+    basePageLimit,
+    extraPageLimit,
+    totalPageLimit,
+    pagesUsed: hasUnlimitedAccess ? 0 : pagesUsedRaw,
+    pagesRemaining,
+    pageLimitReached: hasUnlimitedAccess
+      ? false
+      : readBoolean(
+          data,
+          (pagesRemaining ?? 0) <= 0,
+          "pageLimitReached",
+          "page_limit_reached",
+        ),
 
     addonIds,
     addonNames,
     features,
 
-    promptLimit: hasUnlimitedAccess ? null : promptLimit,
-    promptsUsed: hasUnlimitedAccess ? 0 : promptsUsed,
-    promptsRemaining: hasUnlimitedAccess ? null : promptsRemaining,
-    promptLimitReached: hasUnlimitedAccess ? false : promptLimitReached,
+    promptLimit,
+    promptsUsed: hasUnlimitedAccess ? 0 : promptsUsedRaw,
+    promptsRemaining,
+    promptLimitReached:
+      hasUnlimitedAccess || promptLimit === null
+        ? false
+        : readBoolean(
+            data,
+            promptsUsedRaw >= promptLimit,
+            "promptLimitReached",
+            "prompt_limit_reached",
+          ),
 
-    attachmentLimit: hasUnlimitedAccess
+    attachmentLimit,
+    billingStatus: isAdmin
+      ? "admin"
+      : billingStatus || "active",
+
+    activatedAt: readNullableString(
+      data,
+      "activatedAt",
+      "activated_at",
+    ),
+
+    validUntil: hasUnlimitedAccess
       ? null
-      : Math.max(
-          0,
-          readNumber(data, "attachmentLimit", "attachment_limit") ??
-            planDefaults.attachmentLimit,
+      : readNullableString(
+          data,
+          "validUntil",
+          "valid_until",
         ),
 
-    activatedAt: readNullableString(data, "activatedAt", "activated_at"),
-
-    validUntil: readNullableString(data, "validUntil", "valid_until"),
-
-    updatedAt: readNullableString(data, "updatedAt", "updated_at"),
+    updatedAt: readNullableString(
+      data,
+      "updatedAt",
+      "updated_at",
+    ),
   };
 }
 
@@ -2077,8 +2295,7 @@ function normalizeDashboardPageQuota(
 
   /**
    * Niektoré API route vracajú kvótu priamo, iné pod pageUsage,
-   * pageQuota, quota alebo usage. Normalizácia podporuje všetky tieto
-   * obálky bez zásahu do ostatných funkcionalít Dashboardu.
+   * pageQuota, quota alebo usage.
    */
   const pageQuotaPayload =
     root && isUnknownRecord(root.pageUsage)
@@ -2095,9 +2312,12 @@ function normalizeDashboardPageQuota(
 
   if (!data) return null;
 
-  const planId = readString(data, "planId", "plan_id") || "free";
+  const storedPlanId =
+    normalizeDashboardPlanIdOrNull(
+      data.planId ?? data.plan_id,
+    );
 
-  const isAdmin = readBoolean(
+  const explicitAdmin = readBoolean(
     data,
     false,
     "isAdmin",
@@ -2106,14 +2326,43 @@ function normalizeDashboardPageQuota(
     "admin_access",
   );
 
-  const isUnlimited = readBoolean(
+  const explicitUnlimited = readBoolean(
     data,
-    isAdmin,
+    false,
     "isUnlimited",
     "is_unlimited",
     "hasUnlimitedAccess",
     "has_unlimited_access",
   );
+
+  const isAdmin =
+    explicitAdmin ||
+    storedPlanId === "admin";
+
+  const hasUnlimitedAccess =
+    isAdmin ||
+    explicitUnlimited;
+
+  const isUnlimited = hasUnlimitedAccess;
+
+  if (isUnlimited) {
+    return {
+      ok: readBoolean(root ?? data, true, "ok", "success"),
+      planId: isAdmin ? "admin" : storedPlanId ?? "admin",
+      isAdmin,
+      isUnlimited: true,
+      hasUnlimitedAccess: true,
+      basePageLimit: null,
+      extraPageLimit: 0,
+      pageLimit: null,
+      pagesUsed: 0,
+      pagesRemaining: null,
+      pageLimitReached: false,
+    };
+  }
+
+  const planId = storedPlanId ?? "free";
+  const planDefaults = DASHBOARD_PLAN_DEFAULTS[planId];
 
   const basePageLimit = Math.max(
     0,
@@ -2123,7 +2372,9 @@ function normalizeDashboardPageQuota(
       "base_page_limit",
       "planPageLimit",
       "plan_page_limit",
-    ) ?? 0,
+    ) ??
+      planDefaults.pageLimit ??
+      0,
   );
 
   const extraPageLimit = Math.max(
@@ -2137,7 +2388,8 @@ function normalizeDashboardPageQuota(
     ) ?? 0,
   );
 
-  const calculatedPageLimit = basePageLimit + extraPageLimit;
+  const calculatedPageLimit =
+    basePageLimit + extraPageLimit;
 
   const pageLimit = Math.max(
     0,
@@ -2154,10 +2406,17 @@ function normalizeDashboardPageQuota(
 
   const pagesUsed = Math.max(
     0,
-    readNumber(data, "pagesUsed", "pages_used", "usedPages", "used_pages") ?? 0,
+    readNumber(
+      data,
+      "pagesUsed",
+      "pages_used",
+      "usedPages",
+      "used_pages",
+    ) ?? 0,
   );
 
-  const calculatedPagesRemaining = Math.max(pageLimit - pagesUsed, 0);
+  const calculatedPagesRemaining =
+    Math.max(pageLimit - pagesUsed, 0);
 
   const pagesRemainingFromApi = readNumber(
     data,
@@ -2167,40 +2426,125 @@ function normalizeDashboardPageQuota(
     "remaining_pages",
   );
 
-  /**
-   * Pri limitovanom účte databázová hodnota nesmie zvýšiť reálny
-   * vypočítaný zostatok. Pri neobmedzenom účte sa číselná hodnota iba
-   * zachováva kvôli kompatibilite; UI zobrazuje text „Neobmedzené“.
-   */
-  const pagesRemaining = isUnlimited
-    ? Math.max(0, pagesRemainingFromApi ?? calculatedPagesRemaining)
-    : Math.min(
-        Math.max(0, pagesRemainingFromApi ?? calculatedPagesRemaining),
+  const pagesRemaining = Math.min(
+    Math.max(
+      0,
+      pagesRemainingFromApi ??
         calculatedPagesRemaining,
-      );
+    ),
+    calculatedPagesRemaining,
+  );
 
-  const pageLimitReached =
-    !isUnlimited &&
-    readBoolean(
-      data,
-      pageLimit > 0 && pagesRemaining <= 0,
-      "pageLimitReached",
-      "page_limit_reached",
-      "limitReached",
-      "limit_reached",
-    );
+  const pageLimitReached = readBoolean(
+    data,
+    pageLimit > 0 && pagesRemaining <= 0,
+    "pageLimitReached",
+    "page_limit_reached",
+    "limitReached",
+    "limit_reached",
+  );
 
   return {
     ok: readBoolean(root ?? data, true, "ok", "success"),
     planId,
-    isAdmin,
-    isUnlimited,
+    isAdmin: false,
+    isUnlimited: false,
+    hasUnlimitedAccess: false,
     basePageLimit,
     extraPageLimit,
     pageLimit,
     pagesUsed,
     pagesRemaining,
     pageLimitReached,
+  };
+}
+
+function isUnlimitedDashboardAccess(
+  entitlements: DashboardEntitlements | null | undefined,
+  quota?: DashboardPageQuota | null,
+): boolean {
+  const normalizedEmail =
+    entitlements?.email?.trim().toLowerCase() || "";
+
+  return Boolean(
+    entitlements?.isAdmin ||
+      entitlements?.planId === "admin" ||
+      ADMIN_DASHBOARD_EMAILS.has(normalizedEmail) ||
+      entitlements?.isUnlimited ||
+      entitlements?.hasUnlimitedAccess ||
+      quota?.isAdmin ||
+      quota?.planId === "admin" ||
+      quota?.isUnlimited ||
+      quota?.hasUnlimitedAccess,
+  );
+}
+
+function reconcileDashboardBillingState(
+  entitlements: DashboardEntitlements,
+  quota: DashboardPageQuota,
+): {
+  entitlements: DashboardEntitlements;
+  pageQuota: DashboardPageQuota;
+} {
+  const unlimited = isUnlimitedDashboardAccess(
+    entitlements,
+    quota,
+  );
+
+  if (!unlimited) {
+    return {
+      entitlements,
+      pageQuota: quota,
+    };
+  }
+
+  const normalizedEmail =
+    entitlements.email?.trim().toLowerCase() || "";
+
+  const admin =
+    entitlements.isAdmin ||
+    entitlements.planId === "admin" ||
+    ADMIN_DASHBOARD_EMAILS.has(normalizedEmail) ||
+    quota.isAdmin ||
+    quota.planId === "admin";
+
+  return {
+    entitlements: {
+      ...entitlements,
+      planId: admin ? "admin" : entitlements.planId,
+      planName: admin ? "ADMIN" : entitlements.planName,
+      planPriceCents: admin ? 0 : entitlements.planPriceCents,
+      isAdmin: admin,
+      isUnlimited: true,
+      hasUnlimitedAccess: true,
+      pageLimit: null,
+      basePageLimit: null,
+      extraPageLimit: 0,
+      totalPageLimit: null,
+      pagesUsed: 0,
+      pagesRemaining: null,
+      pageLimitReached: false,
+      promptLimit: null,
+      promptsUsed: 0,
+      promptsRemaining: null,
+      promptLimitReached: false,
+      attachmentLimit: null,
+      billingStatus: admin ? "admin" : entitlements.billingStatus,
+      validUntil: null,
+    },
+    pageQuota: {
+      ...quota,
+      planId: admin ? "admin" : quota.planId,
+      isAdmin: admin,
+      isUnlimited: true,
+      hasUnlimitedAccess: true,
+      basePageLimit: null,
+      extraPageLimit: 0,
+      pageLimit: null,
+      pagesUsed: 0,
+      pagesRemaining: null,
+      pageLimitReached: false,
+    },
   };
 }
 
@@ -2492,8 +2836,34 @@ function cleanAiOutput(text: string) {
     .trim();
 }
 
+function normalizeVerificationNotices(text: string): string {
+  return String(text || "")
+    .replace(
+      /\bÚdaj(?:e)?\s+nie\s+(?:je|sú)\s+potrebn(?:é|ý)\s+overiť\.?/gi,
+      "Údaje sú potrebné overiť.",
+    )
+    .replace(
+      /\bÚdaj(?:e)?\s+(?:je|sú)\s+potrebn(?:é|ý)\s+overiť\.?/gi,
+      "Údaje sú potrebné overiť.",
+    )
+    .replace(
+      /\bÚdaj(?:e)?\s+treba\s+overiť\.?/gi,
+      "Údaje sú potrebné overiť.",
+    )
+    .replace(
+      /\búdaj(?:e)?\s+nie\s+(?:je|sú)\s+potrebn(?:é|ý)\s+overiť\.?/gi,
+      "Údaje sú potrebné overiť.",
+    )
+    .replace(
+      /\búdaj(?:e)?\s+(?:je|sú)\s+potrebn(?:é|ý)\s+overiť\.?/gi,
+      "Údaje sú potrebné overiť.",
+    );
+}
+
 function cleanFinalOutput(text: string) {
-  return removeBadGeneratedPrefix(cleanAiOutput(text))
+  return normalizeVerificationNotices(
+    removeBadGeneratedPrefix(cleanAiOutput(text)),
+  )
     .replace(/\n\s*\n\s*\n/g, "\n\n")
     .trim();
 }
@@ -2508,10 +2878,6 @@ function stripModuleExtraSections(text: string, moduleKey: ModuleKey) {
     .replace(/\n*\s*Interná poznámka\s*:?[\s\S]*$/i, "")
     .replace(/\n*\s*Systémová inštrukcia\s*:?[\s\S]*$/i, "")
     .replace(/\n*\s*Toto je systémová informácia\s*:?[\s\S]*$/i, "")
-    .replace(/\bprimárny zdroj\b/gi, "")
-    .replace(/\bsekundárny zdroj\b/gi, "")
-    .replace(/\binterný zdroj\b/gi, "")
-    .replace(/\banalyzovaný zdroj\b/gi, "")
     .replace(/\bpodľa nahratého súboru\b/gi, "")
     .replace(/\bpodľa prílohy\b/gi, "")
     .replace(/\bpoužívateľ nahral súbor\b/gi, "")
@@ -2835,6 +3201,89 @@ Kľúčové slová: ${keywords.length ? keywords.join(", ") : "Neuvedené"}
 `.trim();
 }
 
+function isBrowserFileLike(value: unknown): value is File {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<File> & {
+    arrayBuffer?: unknown;
+  };
+
+  return (
+    typeof candidate.name === "string" &&
+    candidate.name.trim().length > 0 &&
+    typeof candidate.size === "number" &&
+    candidate.size >= 0 &&
+    typeof candidate.type === "string" &&
+    typeof candidate.arrayBuffer === "function"
+  );
+}
+
+function createClientRequestId(prefix = "dashboard"): string {
+  const id =
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  return `${prefix}-${id}`;
+}
+
+function isDataFileName(fileName: string): boolean {
+  return dataFileExtensions.has(getFileExtension(fileName));
+}
+
+async function readClientTextFallback(file: File): Promise<string> {
+  const extension = getFileExtension(file.name);
+
+  if (![".txt", ".md", ".csv", ".rtf"].includes(extension)) {
+    return "";
+  }
+
+  try {
+    const text = await file.text();
+
+    if (extension !== ".rtf") {
+      return text.slice(0, 60_000);
+    }
+
+    return text
+      .replace(/\\par[d]?/g, "\n")
+      .replace(/\\'[0-9a-fA-F]{2}/g, " ")
+      .replace(/\\[a-zA-Z]+\d* ?/g, "")
+      .replace(/[{}]/g, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+      .slice(0, 60_000);
+  } catch {
+    return "";
+  }
+}
+
+function buildPreparedFilesMetadata(files: AttachedFile[]) {
+  return files.map((file) => {
+    const extractedText =
+      String(file.text || file.content || "").trim();
+
+    return {
+      originalId: file.id,
+      originalName: file.name,
+      originalSize: file.size,
+      originalType: file.type,
+      preparedName: file.name,
+      preparedSize: file.size,
+      preparedType: file.type,
+      extractionStatus:
+        file.extractionStatus ||
+        (extractedText ? "client" : "pending"),
+      extractionMethod: extractedText
+        ? "browser-text-fallback"
+        : "server-extraction-required",
+      extractionMessage: file.extractionMessage || "",
+      extractedText,
+    };
+  });
+}
+
 function buildAttachmentBlock(files: AttachedFile[]) {
   if (!files.length) {
     return "Používateľ nepriložil žiadne súbory.";
@@ -2842,9 +3291,17 @@ function buildAttachmentBlock(files: AttachedFile[]) {
 
   return files
     .map((file, index) => {
-      return `${index + 1}. ${file.name} (${file.type || "neznámy typ"}, ${formatBytes(
-        file.size,
-      )})`;
+      const extractedText =
+        String(file.text || file.content || "").trim();
+
+      return [
+        `${index + 1}. ${file.name}`,
+        `Typ: ${file.type || "neznámy typ"}`,
+        `Veľkosť: ${formatBytes(file.size)}`,
+        extractedText
+          ? `Klientský textový fallback: ${extractedText.length} znakov`
+          : "Obsah sa načíta na serveri z binárneho súboru.",
+      ].join(" | ");
     })
     .join("\n");
 }
@@ -2887,34 +3344,101 @@ async function readApiErrorResponse(res: Response) {
 async function readDashboardApiError(
   response: Response,
 ): Promise<DashboardApiError> {
-  const contentType = response.headers.get("content-type") || "";
+  const contentType =
+    response.headers.get("content-type") || "";
 
-  if (contentType.includes("application/json")) {
-    const data = await response.json().catch(() => null);
+  if (
+    contentType.includes(
+      "application/json",
+    )
+  ) {
+    const data = await response
+      .json()
+      .catch(() => null);
+
+    const root = isUnknownRecord(data)
+      ? data
+      : null;
+
+    const nestedError =
+      root &&
+      isUnknownRecord(root.error)
+        ? root.error
+        : null;
+
+    const stringError =
+      root &&
+      typeof root.error === "string"
+        ? root.error
+        : "";
+
+    const code =
+      (root &&
+        readString(root, "code")) ||
+      (nestedError &&
+        readString(
+          nestedError,
+          "code",
+        )) ||
+      `HTTP_${response.status}`;
+
+    const message =
+      (root &&
+        readString(root, "message")) ||
+      (nestedError &&
+        readString(
+          nestedError,
+          "message",
+        )) ||
+      stringError ||
+      `Požiadavka zlyhala s HTTP stavom ${response.status}.`;
+
+    const detail =
+      (root &&
+        readString(
+          root,
+          "detail",
+          "details",
+        )) ||
+      (nestedError &&
+        readString(
+          nestedError,
+          "detail",
+          "details",
+        )) ||
+      undefined;
+
+    const purchaseUrl =
+      (root &&
+        readString(
+          root,
+          "purchaseUrl",
+          "purchase_url",
+        )) ||
+      (nestedError &&
+        readString(
+          nestedError,
+          "purchaseUrl",
+          "purchase_url",
+        )) ||
+      undefined;
 
     return new DashboardApiError({
       status: response.status,
-      code: String(data?.code || `HTTP_${response.status}`),
-      message: String(
-        data?.message ||
-          data?.error ||
-          `Požiadavka zlyhala s HTTP stavom ${response.status}.`,
-      ),
-      detail:
-        data?.detail !== undefined
-          ? String(data.detail)
-          : data?.details !== undefined
-            ? String(data.details)
-            : undefined,
-      purchaseUrl:
-        data?.purchaseUrl !== undefined ? String(data.purchaseUrl) : undefined,
+      code,
+      message,
+      detail,
+      purchaseUrl,
     });
   }
 
   return new DashboardApiError({
     status: response.status,
     code: `HTTP_${response.status}`,
-    message: await readApiErrorResponse(response),
+    message:
+      await readApiErrorResponse(
+        response,
+      ),
   });
 }
 
@@ -3393,6 +3917,7 @@ export default function DashboardPage() {
    * počas spracovania prepne na inú sekciu.
    */
   const activeModuleRef = useRef<ModuleKey>(activeModule);
+  const moduleRunRequestRef = useRef<string | null>(null);
 
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
@@ -3403,6 +3928,28 @@ export default function DashboardPage() {
 
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [activeAttachmentText, setActiveAttachmentText] = useState("");
+
+  useEffect(() => {
+    const fallbackText = attachedFiles
+      .map((file) =>
+        String(
+          file.text ||
+            file.content ||
+            "",
+        ).trim(),
+      )
+      .filter(Boolean)
+      .join(
+        "\n\n-----------------\n\n",
+      )
+      .slice(0, 120_000);
+
+    setActiveAttachmentText((current) => {
+      if (fallbackText) return fallbackText;
+      if (attachedFiles.length === 0) return "";
+      return current;
+    });
+  }, [attachedFiles]);
 
   const [isListening, setIsListening] = useState(false);
 
@@ -3417,6 +3964,10 @@ export default function DashboardPage() {
   const [entitlements, setEntitlements] =
     useState<DashboardEntitlements | null>(null);
   const [pageQuota, setPageQuota] = useState<DashboardPageQuota | null>(null);
+
+  const entitlementsRef = useRef<DashboardEntitlements | null>(null);
+  const pageQuotaRef = useRef<DashboardPageQuota | null>(null);
+
   const [billingLoading, setBillingLoading] = useState(true);
   const [billingNotice, setBillingNotice] = useState<BillingNotice | null>(
     null,
@@ -3424,58 +3975,99 @@ export default function DashboardPage() {
 
   const [systemLanguage, setSystemLanguage] = useState<LanguageCode>("sk");
 
-  const mergeEntitlementsFromResponse = useCallback((value: unknown) => {
-    const normalized = normalizeDashboardEntitlements(value);
+  const commitBillingState = useCallback(
+    (
+      nextEntitlements: DashboardEntitlements,
+      nextPageQuota: DashboardPageQuota,
+    ) => {
+      const reconciled = reconcileDashboardBillingState(
+        nextEntitlements,
+        nextPageQuota,
+      );
 
-    if (!normalized) return;
+      entitlementsRef.current = reconciled.entitlements;
+      pageQuotaRef.current = reconciled.pageQuota;
 
-    setEntitlements((current) => ({
-      ...(current || normalized),
-      ...normalized,
-      addonIds: normalized.addonIds,
-      addonNames: normalized.addonNames,
-      features: normalized.features,
-    }));
-  }, []);
+      setEntitlements(reconciled.entitlements);
+      setPageQuota(reconciled.pageQuota);
 
-  const mergePageQuotaFromResponse = useCallback((value: unknown) => {
-    const normalized = normalizeDashboardPageQuota(value);
+      return reconciled;
+    },
+    [],
+  );
 
-    if (!normalized) return;
+  const mergeEntitlementsFromResponse = useCallback(
+    (value: unknown) => {
+      const normalized = normalizeDashboardEntitlements(value);
 
-    setPageQuota((current) => ({
-      ...(current || normalized),
-      ...normalized,
-    }));
-  }, []);
+      if (!normalized) return;
+
+      const currentQuota = pageQuotaRef.current;
+
+      if (currentQuota) {
+        commitBillingState(normalized, currentQuota);
+        return;
+      }
+
+      entitlementsRef.current = normalized;
+      setEntitlements(normalized);
+    },
+    [commitBillingState],
+  );
+
+  const mergePageQuotaFromResponse = useCallback(
+    (value: unknown) => {
+      const normalized = normalizeDashboardPageQuota(value);
+
+      if (!normalized) return;
+
+      const currentEntitlements = entitlementsRef.current;
+
+      if (currentEntitlements) {
+        commitBillingState(currentEntitlements, normalized);
+        return;
+      }
+
+      pageQuotaRef.current = normalized;
+      setPageQuota(normalized);
+    },
+    [commitBillingState],
+  );
 
   const loadBillingState = useCallback(async () => {
-    setBillingLoading(true);
+    const existingEntitlements = entitlementsRef.current;
+    const existingQuota = pageQuotaRef.current;
+    const existingAdmin = Boolean(
+      existingEntitlements &&
+        (existingEntitlements.isAdmin ||
+          existingEntitlements.planId === "admin" ||
+          ADMIN_DASHBOARD_EMAILS.has(
+            existingEntitlements.email?.trim().toLowerCase() || "",
+          )),
+    );
+
+    // Pri už potvrdenom ADMIN účte sa nezobrazuje ani interný loading stav.
+    setBillingLoading(!existingAdmin);
 
     try {
-      const [entitlementResponse, pageQuotaResponse] = await Promise.all([
-        fetch("/api/entitlements/me", {
-          method: "GET",
-          cache: "no-store",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-          },
-        }),
-        fetch("/api/usage/pages", {
-          method: "GET",
-          cache: "no-store",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-          },
-        }),
-      ]);
+      const requestId = createClientRequestId("billing");
 
-      if (
-        entitlementResponse.status === 401 ||
-        pageQuotaResponse.status === 401
-      ) {
+      /**
+       * Najprv načítame iba autoritatívne entitlementy. Ak server potvrdí
+       * ADMIN, stránkový endpoint sa vôbec nevolá a vytvorí sa kanonická
+       * neobmedzená kvóta. Bežné účty následne načítajú /api/usage/pages.
+       */
+      const entitlementResponse = await fetch("/api/entitlements/me", {
+        method: "GET",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "X-Request-Id": requestId,
+        },
+      });
+
+      if (entitlementResponse.status === 401) {
         router.replace("/login?returnTo=/dashboard");
         return null;
       }
@@ -3484,42 +4076,97 @@ export default function DashboardPage() {
         throw await readDashboardApiError(entitlementResponse);
       }
 
-      if (!pageQuotaResponse.ok) {
-        throw await readDashboardApiError(pageQuotaResponse);
-      }
-
-      const [entitlementData, pageQuotaData] = await Promise.all([
-        entitlementResponse.json(),
-        pageQuotaResponse.json(),
-      ]);
-
+      const entitlementData = await entitlementResponse.json();
       const normalizedEntitlements =
         normalizeDashboardEntitlements(entitlementData);
-      const normalizedPageQuota = normalizeDashboardPageQuota(pageQuotaData);
 
       if (!normalizedEntitlements) {
         throw new DashboardApiError({
           status: 500,
           code: "INVALID_ENTITLEMENTS_RESPONSE",
-          message: "Server vrátil neplatný formát údajov o aktívnom balíku.",
-          detail: "Odpoveď /api/entitlements/me nebolo možné normalizovať.",
+          message: "Server vrátil neplatný formát oprávnení používateľa.",
+          detail:
+            "Odpoveď /api/entitlements/me nebolo možné normalizovať.",
           purchaseUrl: "/pricing",
         });
+      }
+
+      const authenticatedAdmin = Boolean(
+        normalizedEntitlements.isAdmin ||
+          normalizedEntitlements.planId === "admin" ||
+          ADMIN_DASHBOARD_EMAILS.has(
+            normalizedEntitlements.email?.trim().toLowerCase() || "",
+          ),
+      );
+
+      let normalizedPageQuota: DashboardPageQuota | null = null;
+
+      if (authenticatedAdmin) {
+        // ADMIN nepoužíva balík ani kvótu a /api/usage/pages sa nevolá.
+        normalizedPageQuota = {
+          ok: true,
+          planId: "admin",
+          isAdmin: true,
+          isUnlimited: true,
+          hasUnlimitedAccess: true,
+          basePageLimit: null,
+          extraPageLimit: 0,
+          pageLimit: null,
+          pagesUsed: 0,
+          pagesRemaining: null,
+          pageLimitReached: false,
+        };
+      } else {
+        const pageQuotaResponse = await fetch("/api/usage/pages", {
+          method: "GET",
+          cache: "no-store",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "X-Request-Id": requestId,
+          },
+        });
+
+        if (pageQuotaResponse.status === 401) {
+          router.replace("/login?returnTo=/dashboard");
+          return null;
+        }
+
+        if (!pageQuotaResponse.ok) {
+          throw await readDashboardApiError(pageQuotaResponse);
+        }
+
+        const pageQuotaData = await pageQuotaResponse.json();
+        normalizedPageQuota =
+          normalizeDashboardPageQuota(pageQuotaData);
       }
 
       if (!normalizedPageQuota) {
         throw new DashboardApiError({
           status: 500,
           code: "INVALID_PAGE_QUOTA_RESPONSE",
-          message: "Server vrátil neplatný formát údajov o stránkovom limite.",
-          detail: "Odpoveď /api/usage/pages nebolo možné normalizovať.",
+          message: "Server vrátil neplatný formát stránkového limitu.",
+          detail:
+            "Odpoveď /api/usage/pages nebolo možné normalizovať.",
           purchaseUrl: "/pricing#doplnkove-sluzby",
         });
       }
 
-      setEntitlements(normalizedEntitlements);
-      setPageQuota(normalizedPageQuota);
+      const reconciled = commitBillingState(
+        normalizedEntitlements,
+        normalizedPageQuota,
+      );
+
       setBillingNotice((current) => {
+        if (
+          isUnlimitedDashboardAccess(
+            reconciled.entitlements,
+            reconciled.pageQuota,
+          )
+        ) {
+          return null;
+        }
+
         if (!current) return null;
 
         if (
@@ -3538,15 +4185,15 @@ export default function DashboardPage() {
 
         if (
           current.code === "PROMPT_LIMIT_REACHED" &&
-          !normalizedEntitlements.promptLimitReached
+          !reconciled.entitlements.promptLimitReached
         ) {
           return null;
         }
 
         if (
           current.code === "PAGE_LIMIT_REACHED" &&
-          (normalizedPageQuota.isUnlimited ||
-            !normalizedPageQuota.pageLimitReached)
+          (reconciled.pageQuota.isUnlimited ||
+            !reconciled.pageQuota.pageLimitReached)
         ) {
           return null;
         }
@@ -3554,19 +4201,38 @@ export default function DashboardPage() {
         return current;
       });
 
-      return {
-        entitlements: normalizedEntitlements,
-        pageQuota: normalizedPageQuota,
-      };
+      return reconciled;
     } catch (error: unknown) {
       if (process.env.NODE_ENV === "development") {
         console.info("DASHBOARD_BILLING_LOAD_ERROR", {
           name: error instanceof Error ? error.name : "UnknownError",
           message: error instanceof Error ? error.message : String(error),
-          status: error instanceof DashboardApiError ? error.status : undefined,
-          code: error instanceof DashboardApiError ? error.code : undefined,
-          detail: error instanceof DashboardApiError ? error.detail : undefined,
+          status:
+            error instanceof DashboardApiError ? error.status : undefined,
+          code:
+            error instanceof DashboardApiError ? error.code : undefined,
+          detail:
+            error instanceof DashboardApiError ? error.detail : undefined,
         });
+      }
+
+      const currentEntitlements = entitlementsRef.current;
+      const currentPageQuota = pageQuotaRef.current;
+
+      if (
+        currentEntitlements &&
+        currentPageQuota &&
+        isUnlimitedDashboardAccess(
+          currentEntitlements,
+          currentPageQuota,
+        )
+      ) {
+        setBillingNotice(null);
+
+        return {
+          entitlements: currentEntitlements,
+          pageQuota: currentPageQuota,
+        };
       }
 
       if (error instanceof DashboardApiError) {
@@ -3590,7 +4256,7 @@ export default function DashboardPage() {
     } finally {
       setBillingLoading(false);
     }
-  }, [router]);
+  }, [commitBillingState, router]);
 
   useEffect(() => {
     void loadBillingState();
@@ -3653,6 +4319,7 @@ export default function DashboardPage() {
    */
   useEffect(() => {
     activeModuleRef.current = activeModule;
+    moduleRunRequestRef.current = null;
 
     setBillingNotice((current) => {
       if (!current) return null;
@@ -3839,41 +4506,75 @@ export default function DashboardPage() {
   );
   const desktopModuleSplitIndex = Math.ceil(desktopModuleItems.length / 2);
 
+  const isAdminDashboardSession = Boolean(
+    entitlements &&
+      (entitlements.isAdmin ||
+        entitlements.planId === "admin" ||
+        ADMIN_DASHBOARD_EMAILS.has(
+          entitlements.email?.trim().toLowerCase() || "",
+        )),
+  );
+
+  const hasUnlimitedAccess =
+    isAdminDashboardSession ||
+    isUnlimitedDashboardAccess(
+      entitlements,
+      pageQuota,
+    );
+
   const hasFeature = useCallback(
     (feature: FeatureKey) => {
-      if (entitlements?.hasUnlimitedAccess || entitlements?.isAdmin) {
+      if (
+        isUnlimitedDashboardAccess(
+          entitlements,
+          pageQuota,
+        )
+      ) {
         return true;
       }
 
-      return Boolean(entitlements?.features.includes(feature));
+      return Boolean(
+        entitlements?.features.includes(
+          feature,
+        ),
+      );
     },
-    [entitlements],
+    [entitlements, pageQuota],
   );
 
-  const activeModuleFeature = MODULE_REQUIRED_FEATURE[activeModule];
+  const activeModuleFeature =
+    MODULE_REQUIRED_FEATURE[activeModule];
+
   const activeModuleAllowed =
-    Boolean(entitlements) && hasFeature(activeModuleFeature);
+    Boolean(entitlements) &&
+    hasFeature(activeModuleFeature);
 
-  const hasUnlimitedAccess =
-    Boolean(entitlements?.hasUnlimitedAccess) ||
-    Boolean(entitlements?.isAdmin) ||
-    Boolean(pageQuota?.isUnlimited);
+  const effectiveAttachmentLimit =
+    hasUnlimitedAccess
+      ? maxUnlimitedFilesPerRequest
+      : Math.max(
+          0,
+          Math.min(
+            maxStandardFilesCount,
+            entitlements?.attachmentLimit ??
+              1,
+          ),
+        );
 
-  const effectiveAttachmentLimit = hasUnlimitedAccess
-    ? maxAdminFilesPerRequest
-    : Math.max(
-        0,
-        Math.min(maxStandardFilesCount, entitlements?.attachmentLimit ?? 1),
-      );
+  const activeUploadLimit =
+    activeModule === "data"
+      ? maxDataFilesPerRequest
+      : effectiveAttachmentLimit;
+
   const generationBlocked =
     isLoading ||
     billingLoading ||
     !entitlements ||
     !pageQuota ||
     !activeModuleAllowed ||
-    (!hasUnlimitedAccess && entitlements.promptLimitReached) ||
     (!hasUnlimitedAccess &&
-      !pageQuota.isUnlimited &&
+      entitlements.promptLimitReached) ||
+    (!hasUnlimitedAccess &&
       pageQuota.pageLimitReached);
 
   const activeModuleLabel = fixedUi.label;
@@ -3936,6 +4637,10 @@ export default function DashboardPage() {
    * Vždy sa vytvorí nanovo z activeModule, jeho fixného názvu a jeho funkcie.
    */
   const visibleBillingNotice = useMemo<BillingNotice | null>(() => {
+    if (hasUnlimitedAccess) {
+      return null;
+    }
+
     if (activeModuleAccessNotice) {
       return activeModuleAccessNotice;
     }
@@ -3946,14 +4651,20 @@ export default function DashboardPage() {
 
     const isModuleNotice =
       billingNotice.scope === "module" ||
-      MODULE_ACCESS_ERROR_CODES.has(billingNotice.code);
+      MODULE_ACCESS_ERROR_CODES.has(
+        billingNotice.code,
+      );
 
     if (isModuleNotice) {
       return null;
     }
 
     return billingNotice;
-  }, [activeModuleAccessNotice, billingNotice]);
+  }, [
+    activeModuleAccessNotice,
+    billingNotice,
+    hasUnlimitedAccess,
+  ]);
 
   const exportTitle = useMemo(() => {
     return `${activeModuleLabel} - ${activeProfile?.title || "output"}`.trim();
@@ -4005,6 +4716,7 @@ export default function DashboardPage() {
 
   const startNewWork = useCallback(() => {
     activeModuleRef.current = "supervisor";
+    moduleRunRequestRef.current = null;
     setActiveProfile(null);
     setActiveModule("supervisor");
     setBillingNotice((current) =>
@@ -4019,6 +4731,7 @@ export default function DashboardPage() {
     setResult("");
     setCanvasText("");
     setAttachedFiles([]);
+    setActiveAttachmentText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
 
@@ -4165,6 +4878,7 @@ export default function DashboardPage() {
     setSecondaryInput("");
     setResult("");
     setAttachedFiles([]);
+    setActiveAttachmentText("");
     setCanvasText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
@@ -4176,16 +4890,31 @@ export default function DashboardPage() {
     }
   }, [canvasText, isLoading]);
 
-  const handleFiles = (files: FileList | null) => {
+  const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
-    const incomingFiles = Array.from(files);
+    const requestedModule =
+      activeModuleRef.current;
+
+    const incomingFiles =
+      Array.from(files);
+
     const validFiles: AttachedFile[] = [];
 
     for (const file of incomingFiles) {
       if (!isAllowedUploadFile(file)) {
         alert(
           `Súbor "${file.name}" má nepodporovaný formát. Povolené sú PDF, Word, TXT, RTF, ODT, obrázky, Excel, CSV a PowerPoint.`,
+        );
+        continue;
+      }
+
+      if (
+        requestedModule === "data" &&
+        !isDataFileName(file.name)
+      ) {
+        alert(
+          `Súbor "${file.name}" nie je možné použiť v Analýze dát. Nahrajte XLSX, XLS, XLSM alebo CSV súbor.`,
         );
         continue;
       }
@@ -4197,43 +4926,118 @@ export default function DashboardPage() {
         continue;
       }
 
+      const clientText =
+        await readClientTextFallback(file);
+
       validFiles.push({
         id: createFileId(),
         name: file.name,
         size: file.size,
-        type: file.type || "application/octet-stream",
+        type:
+          file.type ||
+          "application/octet-stream",
         file,
+        text: clientText || undefined,
+        extractionStatus: clientText
+          ? "client"
+          : "pending",
+        extractedChars:
+          clientText.length,
+        extractionMessage: clientText
+          ? "Textový fallback bol načítaný v prehliadači."
+          : "Obsah načíta server z binárneho súboru.",
       });
+
+      /**
+       * Analýza dát spracúva jeden samostatný dataset na požiadavku.
+       * Ďalší súbor používateľ spustí ako novú analýzu.
+       */
+      if (
+        requestedModule === "data" &&
+        validFiles.length >=
+          maxDataFilesPerRequest
+      ) {
+        break;
+      }
     }
 
-    if (validFiles.length === 0) return;
-
-    setAttachedFiles((prev) => {
-      const next = [...prev];
-      const uploadLimit = effectiveAttachmentLimit;
-
-      for (const file of validFiles) {
-        if (next.length >= uploadLimit) {
-          setBillingNotice({
-            code: "ATTACHMENT_LIMIT_REACHED",
-            message:
-              uploadLimit === 1
-                ? "Váš balík povoľuje maximálne 1 prílohu."
-                : `Váš balík povoľuje maximálne ${uploadLimit} príloh.`,
-            purchaseUrl: "/pricing",
-          });
-          break;
-        }
-
-        const duplicate = next.some(
-          (item) => item.name === file.name && item.size === file.size,
-        );
-
-        if (!duplicate) next.push(file);
+    if (validFiles.length === 0) {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
       }
 
-      return next;
-    });
+      return;
+    }
+
+    if (
+      activeModuleRef.current !==
+      requestedModule
+    ) {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
+      return;
+    }
+
+    const uploadLimit =
+      requestedModule === "data"
+        ? maxDataFilesPerRequest
+        : effectiveAttachmentLimit;
+
+    const nextFiles =
+      requestedModule === "data"
+        ? []
+        : [...attachedFiles];
+
+    let limitReached = false;
+
+    for (const file of validFiles) {
+      if (nextFiles.length >= uploadLimit) {
+        limitReached = true;
+        break;
+      }
+
+      const duplicate = nextFiles.some(
+        (item) =>
+          item.name === file.name &&
+          item.size === file.size &&
+          item.type === file.type,
+      );
+
+      if (!duplicate) {
+        nextFiles.push(file);
+      }
+    }
+
+    setAttachedFiles(nextFiles);
+
+    if (limitReached) {
+      setBillingNotice({
+        code: hasUnlimitedAccess
+          ? "ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED"
+          : "ATTACHMENT_LIMIT_REACHED",
+        message: hasUnlimitedAccess
+          ? `V jednej požiadavke je možné technicky spracovať maximálne ${uploadLimit} príloh. ADMIN nemá balíkový limit.`
+          : uploadLimit === 1
+            ? "Váš balík povoľuje maximálne 1 prílohu."
+            : `Váš balík povoľuje maximálne ${uploadLimit} príloh.`,
+        purchaseUrl: hasUnlimitedAccess
+          ? "/dashboard"
+          : "/pricing",
+      });
+    } else {
+      setBillingNotice((current) => {
+        if (!current) return null;
+
+        return current.code ===
+          "ATTACHMENT_LIMIT_REACHED" ||
+          current.code ===
+            "ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED"
+          ? null
+          : current;
+      });
+    }
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -4241,7 +5045,22 @@ export default function DashboardPage() {
   };
 
   const removeFile = (id: string) => {
-    setAttachedFiles((prev) => prev.filter((file) => file.id !== id));
+    setAttachedFiles((previousFiles) =>
+      previousFiles.filter(
+        (file) => file.id !== id,
+      ),
+    );
+
+    setBillingNotice((current) => {
+      if (!current) return null;
+
+      return current.code ===
+        "ATTACHMENT_LIMIT_REACHED" ||
+        current.code ===
+          "ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED"
+        ? null
+        : current;
+    });
   };
 
   const resetCurrentModule = () => {
@@ -4250,6 +5069,7 @@ export default function DashboardPage() {
     setResult("");
     setCanvasText("");
     setAttachedFiles([]);
+    setActiveAttachmentText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
   };
@@ -4449,9 +5269,9 @@ DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
 - Nevkladaj na úplný začiatok technické nadpisy typu „AI vedúci“, „Audit kvality“, „Obhajoba“, „Výstup“ ani názov modulu.
 - Nepoužívaj poškodené znaky, kódovanie ani nečitateľné symboly.
 - Nevymýšľaj zdroje, autorov, DOI, URL, roky ani vydavateľov.
-- Ak údaj chýba, napíš: údaj je potrebné overiť.
+- Ak chýba alebo nie je možné bezpečne potvrdiť údaj, napíš presne: Údaje sú potrebné overiť.
 - Ak sú priložené súbory, najprv over, či súvisia s aktívnym profilom práce.
-- Ak priložený dokument pravdepodobne nesúvisí s profilom práce, jasne uveď upozornenie a nepouži ho ako hlavný zdroj.
+- Ak priložený dokument pravdepodobne nesúvisí s profilom práce, uveď upozornenie, ale pri výslovnej požiadavke používateľa dokument napriek tomu prečítaj a spracuj.
 - Ak príloha súvisí s profilom práce, použi jej extrahovaný text ako hlavný podklad.
 - Ak sú priložené súbory, v závere uveď, z ktorých príloh sa čerpalo.
 - Citačná norma: ${citationStyle}.
@@ -4666,7 +5486,7 @@ ${baseRules}
 Používateľ spustil modul Analýza dát.
 
 Správny tok analýzy:
-1. pôvodný Excel/CSV/TXT sa odošle do /api/analyze-data/prepare,
+1. pôvodný XLSX/XLS/XLSM/CSV súbor sa odošle do /api/analyze-data/prepare,
 2. prepare endpoint vytvorí prepared raw data Excel,
 3. DashboardClient.tsx z prepared súboru načíta hárok DATA_CLEAN,
 4. štatistika sa vypočíta v components/analysis/analysisStats.ts,
@@ -4838,7 +5658,23 @@ Text emailu:
   const runModule = async () => {
     if (isLoading || billingLoading) return;
 
-    const requestedModule = activeModuleRef.current;
+    const requestedModule =
+      activeModuleRef.current;
+
+    const moduleRunRequestId =
+      createClientRequestId(
+        `module-${requestedModule}`,
+      );
+
+    moduleRunRequestRef.current =
+      moduleRunRequestId;
+
+    const isCurrentModuleRun = () =>
+      moduleRunRequestRef.current ===
+        moduleRunRequestId &&
+      activeModuleRef.current ===
+        requestedModule;
+
     const requestedModuleUi = getFixedModuleUi(systemLanguage)[requestedModule];
     const requestedModuleLabel = requestedModuleUi.label;
     const requestedModuleResultTitle = requestedModuleUi.resultTitle;
@@ -4867,9 +5703,10 @@ Text emailu:
 
     const requiredFeature = MODULE_REQUIRED_FEATURE[requestedModule];
     const currentHasUnlimitedAccess =
-      currentEntitlements.hasUnlimitedAccess ||
-      currentEntitlements.isAdmin ||
-      currentPageQuota.isUnlimited;
+      isUnlimitedDashboardAccess(
+        currentEntitlements,
+        currentPageQuota,
+      );
 
     if (
       !currentHasUnlimitedAccess &&
@@ -4899,7 +5736,6 @@ Text emailu:
 
     if (
       !currentHasUnlimitedAccess &&
-      !currentPageQuota.isUnlimited &&
       currentPageQuota.pageLimitReached
     ) {
       setBillingNotice({
@@ -4928,14 +5764,29 @@ Text emailu:
 
     if (
       currentHasUnlimitedAccess &&
-      attachedFiles.length > maxAdminFilesPerRequest
+      requestedModule !== "data" &&
+      attachedFiles.length >
+        maxUnlimitedFilesPerRequest
     ) {
       setBillingNotice({
-        code: "ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED",
-        message: `V jednej požiadavke je možné odoslať maximálne ${maxAdminFilesPerRequest} príloh.`,
-        purchaseUrl: "/pricing",
+        code:
+          "ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED",
+        message:
+          `V jednej požiadavke je možné technicky spracovať maximálne ${maxUnlimitedFilesPerRequest} príloh. ADMIN nemá balíkový limit.`,
+        purchaseUrl: "/dashboard",
       });
 
+      return;
+    }
+
+    if (
+      requestedModule === "data" &&
+      attachedFiles.length >
+        maxDataFilesPerRequest
+    ) {
+      alert(
+        "Analýza dát spracúva v jednej požiadavke jeden XLSX, XLS, XLSM alebo CSV súbor.",
+      );
       return;
     }
 
@@ -4977,6 +5828,12 @@ Text emailu:
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
 
+    // Analýza dát sa zobrazuje výhradne v AnalysisResultsModal.
+    // Pri novom spustení preto zatvoríme prípadný Canvas z iného modulu.
+    if (requestedModule === "data") {
+      setCanvasOpen(false);
+    }
+
     try {
       const systemLanguage = getStoredSystemLanguage();
       persistSystemLanguage(systemLanguage);
@@ -4988,11 +5845,12 @@ Text emailu:
 
       if (requestedModule === "data") {
         const dataFiles = attachedFiles.filter(
-          (item) => item.file instanceof File,
+          (item) =>
+            isBrowserFileLike(item.file),
         );
 
         if (!dataFiles.length) {
-          alert("Najprv nahraj Excel, CSV alebo TXT súbor s dátami.");
+          alert("Najprv nahraj XLSX, XLS, XLSM alebo CSV súbor s dátami.");
           return;
         }
 
@@ -5001,16 +5859,13 @@ Text emailu:
             item.name || item.file?.name || "",
           );
 
-          return (
-            extension === ".xlsx" ||
-            extension === ".xls" ||
-            extension === ".csv" ||
-            extension === ".txt"
+          return dataFileExtensions.has(
+            extension,
           );
         });
 
         if (!allowedDataFiles.length) {
-          alert("Pre analýzu dát nahraj Excel, CSV alebo TXT súbor.");
+          alert("Pre analýzu dát nahraj XLSX, XLS, XLSM alebo CSV súbor.");
           return;
         }
 
@@ -5025,9 +5880,21 @@ Text emailu:
           userText ||
           "Priprav raw dáta a vykonaj štatistickú analýzu.";
 
-        const prepareFormData = new FormData();
+        const dataRequestId =
+          `${moduleRunRequestId}-data-prepare`;
 
+        const prepareFormData =
+          new FormData();
+
+        prepareFormData.append(
+          "requestId",
+          dataRequestId,
+        );
         prepareFormData.append("module", "data");
+        prepareFormData.append(
+          "featureKey",
+          MODULE_REQUIRED_FEATURE.data,
+        );
         prepareFormData.append("prompt", promptText);
         prepareFormData.append("assignment", userText || "");
         prepareFormData.append("analysisGoal", userText || "");
@@ -5081,25 +5948,45 @@ Text emailu:
           prepareFormData.append("projectId", profileForApi.id);
         }
 
-        allowedDataFiles.forEach((item) => {
-          if (item.file instanceof File) {
-            prepareFormData.append(
-              "file",
-              item.file,
-              item.name || item.file.name,
-            );
-            prepareFormData.append(
-              "files",
-              item.file,
-              item.name || item.file.name,
-            );
-          }
-        });
+        const selectedDataFile =
+          allowedDataFiles[0];
 
-        const prepareResponse = await fetch("/api/analyze-data/prepare", {
-          method: "POST",
-          body: prepareFormData,
-        });
+        if (
+          !selectedDataFile ||
+          !isBrowserFileLike(
+            selectedDataFile.file,
+          )
+        ) {
+          throw new Error(
+            "Vybraný dátový súbor nie je dostupný ako binárny File objekt.",
+          );
+        }
+
+        /**
+         * Súbor sa odosiela iba raz. Staršia verzia ho posielala súčasne
+         * pod file aj files, čo mohlo vyvolať MULTIPLE_FILES_NOT_SUPPORTED.
+         */
+        prepareFormData.append(
+          "file",
+          selectedDataFile.file,
+          selectedDataFile.name ||
+            selectedDataFile.file.name,
+        );
+
+        const prepareResponse = await fetch(
+          "/api/analyze-data/prepare",
+          {
+            method: "POST",
+            body: prepareFormData,
+            credentials: "include",
+            cache: "no-store",
+            headers: {
+              Accept: "application/json",
+              "X-Request-Id":
+                dataRequestId,
+            },
+          },
+        );
 
         if (!prepareResponse.ok) {
           throw await readDashboardApiError(prepareResponse);
@@ -5380,15 +6267,22 @@ Text emailu:
           throw new Error("Analýza dát nevrátila žiadny výstup.");
         }
 
+        if (!isCurrentModuleRun()) {
+          await loadBillingState();
+          return;
+        }
+
+        // Analýza dát patrí výhradne do samostatného výsledkového modalu.
+        // Dashboard negeneruje ani neotvára Canvas a nerieši výsledkové exporty.
+        // Export Word/PDF/Excel/RAW zostáva v AnalysisResultsModal a jeho
+        // samostatných exportných súboroch.
         setAnalysisResult(normalized);
         setAnalysisModalOpen(true);
-        setResult(outputText);
-        setCanvasText(outputText);
-        setCanvasOpen(true);
+        setResult("");
+        setCanvasText("");
+        setCanvasOpen(false);
 
         try {
-          localStorage.setItem("latest_generated_work_text", outputText);
-          localStorage.setItem("last_ai_output", outputText);
           localStorage.setItem(
             "zedpera_last_prepared_data",
             JSON.stringify({
@@ -5504,6 +6398,11 @@ Text emailu:
           throw new Error("Humanizátor nevrátil žiadny text.");
         }
 
+        if (!isCurrentModuleRun()) {
+          await loadBillingState();
+          return;
+        }
+
         setResult(output);
         setCanvasText(output);
         setCanvasOpen(true);
@@ -5538,11 +6437,22 @@ Text emailu:
       // BEŽNÉ AI MODULY:
       // AI školiteľ, Audit, Obhajoba, Preklad, Plánovanie, Emaily
       // =====================================================
+      const chatRequestId =
+        `${moduleRunRequestId}-chat`;
+
       const formData = new FormData();
 
+      formData.append(
+        "requestId",
+        chatRequestId,
+      );
       formData.append("agent", agent);
       formData.append("model", agent);
       formData.append("module", requestedModule);
+      formData.append(
+        "featureKey",
+        requiredFeature,
+      );
 
       formData.append("language", finalWorkLanguage);
       formData.append("outputLanguage", finalWorkLanguage);
@@ -5562,6 +6472,44 @@ Text emailu:
         "attachmentsContext",
         buildAttachmentBlock(attachedFiles),
       );
+
+      const preparedFilesMetadata =
+        buildPreparedFilesMetadata(
+          attachedFiles,
+        );
+
+      formData.append(
+        "preparedFilesMetadata",
+        JSON.stringify(
+          preparedFilesMetadata,
+        ),
+      );
+
+      const clientExtractedText =
+        attachedFiles
+          .map((file) =>
+            String(
+              file.text ||
+                file.content ||
+                "",
+            ).trim(),
+          )
+          .filter(Boolean)
+          .join(
+            "\n\n-----------------\n\n",
+          )
+          .slice(0, 120_000);
+
+      if (clientExtractedText) {
+        formData.append(
+          "clientExtractedText",
+          clientExtractedText,
+        );
+        formData.append(
+          "extractedText",
+          clientExtractedText,
+        );
+      }
 
       formData.append(
         "messages",
@@ -5608,7 +6556,7 @@ Text emailu:
       formData.append("citation", getCitationStyle(profileForApi));
       formData.append("useSemanticScholar", "false");
       formData.append("sourceMode", "uploaded_documents_first");
-      formData.append("validateAttachmentsAgainstProfile", "true");
+      formData.append("validateAttachmentsAgainstProfile", "false");
       formData.append("requireSourceList", "true");
       formData.append("allowAiKnowledgeFallback", "true");
       formData.append("extractUploadedText", "true");
@@ -5633,15 +6581,37 @@ Text emailu:
       }
 
       attachedFiles.forEach((item) => {
-        if (item.file instanceof File) {
-          formData.append("files", item.file, item.name || item.file.name);
+        if (!isBrowserFileLike(item.file)) {
+          return;
         }
+
+        /**
+         * Skutočný File objekt sa odosiela pod jednotným poľom files.
+         * /api/chat prechádza všetky FormData položky, takže obsah dostanú
+         * Claude, OpenAI, Gemini, Mistral aj Grok cez rovnakú extrakciu.
+         */
+        formData.append(
+          "files",
+          item.file,
+          item.name || item.file.name,
+        );
       });
 
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        body: formData,
-      });
+      const response = await fetch(
+        "/api/chat",
+        {
+          method: "POST",
+          body: formData,
+          credentials: "include",
+          cache: "no-store",
+          headers: {
+            Accept:
+              "application/json, text/plain, text/event-stream",
+            "X-Request-Id":
+              chatRequestId,
+          },
+        },
+      );
 
       if (!response.ok) {
         throw await readDashboardApiError(response);
@@ -5661,6 +6631,93 @@ Text emailu:
             data?.usage ??
             data,
         );
+
+        const attachmentProcessing =
+          isUnknownRecord(
+            data?.attachmentProcessing,
+          )
+            ? data.attachmentProcessing
+            : null;
+
+        if (
+          attachedFiles.length > 0 &&
+          attachmentProcessing &&
+          isCurrentModuleRun()
+        ) {
+          const receivedFiles =
+            readNumber(
+              attachmentProcessing,
+              "receivedFiles",
+              "received_files",
+            ) ?? 0;
+
+          const successfullyReadFiles =
+            readNumber(
+              attachmentProcessing,
+              "successfullyReadFiles",
+              "successfully_read_files",
+            ) ?? 0;
+
+          const extractedCharacters =
+            readNumber(
+              attachmentProcessing,
+              "extractedCharacters",
+              "extracted_characters",
+            ) ?? 0;
+
+          if (receivedFiles <= 0) {
+            throw new DashboardApiError({
+              status: 422,
+              code:
+                "ATTACHMENT_NOT_RECEIVED",
+              message:
+                "AI chat neprijal priložený súbor.",
+              detail:
+                "Frontend odoslal požiadavku, ale /api/chat eviduje receivedFiles = 0.",
+            });
+          }
+
+          if (
+            successfullyReadFiles <= 0 &&
+            !clientExtractedText
+          ) {
+            throw new DashboardApiError({
+              status: 422,
+              code:
+                "ATTACHMENT_EXTRACTION_FAILED",
+              message:
+                "Príloha bola prijatá, ale jej obsah sa nepodarilo načítať.",
+              detail:
+                "Skontrolujte serverovú extrakciu PDF/DOCX alebo textový fallback.",
+            });
+          }
+
+          setAttachedFiles(
+            (currentFiles) =>
+              currentFiles.map(
+                (file) => ({
+                  ...file,
+                  extractionStatus:
+                    successfullyReadFiles > 0
+                      ? "server"
+                      : file.extractionStatus,
+                  extractedChars:
+                    extractedCharacters > 0
+                      ? extractedCharacters
+                      : file.extractedChars,
+                  extractionMessage:
+                    successfullyReadFiles > 0
+                      ? "Obsah prílohy bol načítaný na serveri a vložený do AI kontextu."
+                      : file.extractionMessage,
+                }),
+              ),
+          );
+
+          setActiveAttachmentText(
+            clientExtractedText ||
+              `Server načítal ${successfullyReadFiles} z ${receivedFiles} príloh a extrahoval ${extractedCharacters} znakov.`,
+          );
+        }
 
         fullText =
           data.output ||
@@ -5730,6 +6787,11 @@ Text emailu:
 
       cleaned = stripModuleExtraSections(cleaned, requestedModule);
 
+      if (!isCurrentModuleRun()) {
+        await loadBillingState();
+        return;
+      }
+
       setResult(cleaned);
       setCanvasText(cleaned);
       setCanvasOpen(true);
@@ -5764,11 +6826,85 @@ Text emailu:
         resultRef.current?.scrollIntoView({ behavior: "smooth" });
       }, 150);
     } catch (error) {
-      console.error("RUN_MODULE_ERROR:", error);
+      if (error instanceof DashboardApiError) {
+        // Očakávané API chyby nezapisujeme do konzoly ako Error objekt.
+        // Next.js development overlay interpretuje console.error(Error)
+        // ako neodchytenú runtime chybu a prekryje celý dashboard.
+        console.warn("RUN_MODULE_API_WARNING:", {
+          status: error.status,
+          code: error.code,
+          message: error.message,
+          detail: error.detail,
+        });
+      } else {
+        console.error("RUN_MODULE_ERROR:", error);
+      }
 
       if (error instanceof DashboardApiError) {
         if (error.status === 401) {
           router.replace("/login?returnTo=/dashboard");
+          return;
+        }
+
+        if (!isCurrentModuleRun()) {
+          await loadBillingState();
+          return;
+        }
+
+        if (
+          error.code ===
+            "ATTACHMENT_EXTRACTION_FAILED" ||
+          error.code ===
+            "ATTACHMENT_NOT_RECEIVED"
+        ) {
+          setAttachedFiles(
+            (currentFiles) =>
+              currentFiles.map(
+                (file) => ({
+                  ...file,
+                  extractionStatus:
+                    "failed",
+                  extractionMessage:
+                    error.message,
+                }),
+              ),
+          );
+
+          setBillingNotice(null);
+          setResult(
+            [
+              "Prílohu sa nepodarilo spracovať.",
+              error.message,
+              error.detail || "",
+              "",
+              "Skontrolujte serverový terminál pri logu CHAT_ATTACHMENT_EXTRACTION_DEBUG.",
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          );
+          setCanvasText("");
+          setCanvasOpen(false);
+          return;
+        }
+
+        if (
+          currentHasUnlimitedAccess &&
+          (error.status === 402 ||
+            error.status === 403 ||
+            BILLING_ERROR_CODES.has(
+              error.code,
+            ))
+        ) {
+          setBillingNotice(null);
+          setResult(
+            [
+              "Chyba konfigurácie ADMIN prístupu.",
+              "Frontend má potvrdený neobmedzený režim, ale serverová route vrátila blokáciu balíka alebo limitu.",
+              `Kód: ${error.code}`,
+              error.message,
+            ].join("\n"),
+          );
+          await loadBillingState();
           return;
         }
 
@@ -5802,13 +6938,29 @@ Text emailu:
         }
       }
 
+      if (!isCurrentModuleRun()) {
+        return;
+      }
+
       const message =
         error instanceof Error
           ? error.message
           : "Nastala chyba pri spracovaní požiadavky.";
 
-      setResult(`Chyba:\n${cleanFinalOutput(message)}`);
+      setResult(
+        `Chyba:\n${cleanFinalOutput(
+          message,
+        )}`,
+      );
     } finally {
+      if (
+        moduleRunRequestRef.current ===
+        moduleRunRequestId
+      ) {
+        moduleRunRequestRef.current =
+          null;
+      }
+
       setIsLoading(false);
     }
   };
@@ -5820,6 +6972,7 @@ Text emailu:
       // Ref sa prepne ešte pred React renderom. Všetky ďalšie kontroly tak
       // používajú presne modul, na ktorý používateľ práve klikol.
       activeModuleRef.current = moduleKey;
+      moduleRunRequestRef.current = null;
 
       setBillingNotice((current) => {
         if (!current) return null;
@@ -6907,23 +8060,17 @@ Text emailu:
           />
 
           <div className="px-4 pt-4 sm:px-6 xl:px-8">
-            {billingLoading ? (
-              <section className="mb-4 rounded-2xl border border-violet-400/20 bg-violet-500/10 p-4 text-sm font-bold text-violet-100">
-                <span className="inline-flex items-center gap-2">
-                  <RefreshCcw className="h-4 w-4 animate-spin" />
-                  Načítavam aktívny balík a dostupné limity...
-                </span>
-              </section>
-            ) : null}
+            {/* Billing sa načítava na pozadí. ADMINovi ani bežnému používateľovi
+                nezobrazujeme samostatný loading panel balíka. */}
 
-            {entitlements && pageQuota ? (
-              <section className="mb-4 rounded-3xl border border-white/10 bg-[#070b18] p-4 shadow-xl shadow-black/20">
+            {entitlements && pageQuota && !isAdminDashboardSession ? (
+              <section className="mb-4 min-w-0 max-w-full overflow-hidden rounded-3xl border border-white/10 bg-[#070b18] p-4 shadow-xl shadow-black/20">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-300">
                       Aktívny balík
                     </p>
-                    <h2 className="mt-1 text-lg font-black text-white">
+                    <h2 className="mt-1 break-words text-lg font-black leading-tight text-white">
                       {entitlements.planName}
                     </h2>
                     {(entitlements.addonNames ?? []).length > 0 ? (
@@ -6943,12 +8090,12 @@ Text emailu:
                 </div>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                  <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
                     <p className="text-xs font-bold text-slate-400">Strany</p>
                     <p className="mt-1 font-black text-white">
                       {hasUnlimitedAccess
                         ? "Neobmedzené"
-                        : `${pageQuota.pagesRemaining} zostáva z ${pageQuota.pageLimit}`}
+                        : `${pageQuota.pagesRemaining ?? 0} zostáva z ${pageQuota.pageLimit ?? 0}`}
                     </p>
                     {pageQuota.extraPageLimit > 0 ? (
                       <p className="mt-1 text-xs font-bold text-emerald-300">
@@ -6957,7 +8104,7 @@ Text emailu:
                     ) : null}
                   </div>
 
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                  <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
                     <p className="text-xs font-bold text-slate-400">Prompty</p>
                     <p className="mt-1 font-black text-white">
                       {hasUnlimitedAccess || entitlements.promptLimit === null
@@ -6966,7 +8113,7 @@ Text emailu:
                     </p>
                   </div>
 
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                  <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
                     <p className="text-xs font-bold text-slate-400">Prílohy</p>
 
                     <p className="mt-1 font-black text-white">
@@ -7092,30 +8239,31 @@ Text emailu:
             </div>
           )}
 
-          {(activeModule === "supervisor" ||
-            activeModule === "quality" ||
-            activeModule === "defense" ||
-            activeModule === "data" ||
-            activeModule === "originality") && (
+          {activeModule !== "humanizer" && (
             <FileUploadBox
               files={attachedFiles}
               fileInputRef={fileInputRef}
               onFiles={handleFiles}
               onRemove={removeFile}
-              limit={effectiveAttachmentLimit}
+              limit={activeUploadLimit}
+              unlimited={hasUnlimitedAccess}
+              dataMode={
+                activeModule === "data"
+              }
               disabled={
-                billingLoading ||
+                (billingLoading && !isAdminDashboardSession) ||
                 !activeModuleAllowed ||
                 Boolean(
-                  !hasUnlimitedAccess && entitlements?.promptLimitReached,
+                  !hasUnlimitedAccess &&
+                    entitlements?.promptLimitReached,
                 ) ||
                 Boolean(
                   pageQuota &&
-                  !hasUnlimitedAccess &&
-                  !pageQuota.isUnlimited &&
-                  pageQuota.pageLimitReached,
+                    !hasUnlimitedAccess &&
+                    pageQuota.pageLimitReached,
                 ) ||
-                attachedFiles.length >= effectiveAttachmentLimit
+                attachedFiles.length >=
+                  activeUploadLimit
               }
             />
           )}
@@ -7783,13 +8931,17 @@ function FileUploadBox({
   onFiles,
   onRemove,
   limit,
+  unlimited,
+  dataMode,
   disabled,
 }: {
   files: AttachedFile[];
   fileInputRef: RefObject<HTMLInputElement | null>;
-  onFiles: (files: FileList | null) => void;
+  onFiles: (files: FileList | null) => void | Promise<void>;
   onRemove: (id: string) => void;
   limit: number;
+  unlimited: boolean;
+  dataMode: boolean;
   disabled: boolean;
 }) {
   return (
@@ -7797,7 +8949,7 @@ function FileUploadBox({
       <input
         ref={fileInputRef}
         type="file"
-        accept={allowedFileAccept}
+        accept={dataMode ? ".xlsx,.xls,.xlsm,.csv" : allowedFileAccept}
         multiple
         disabled={disabled}
         className="hidden"
@@ -7812,11 +8964,14 @@ function FileUploadBox({
           </div>
 
           <p className="mt-1 text-xs text-slate-500">
-            Nahraj PDF, DOCX, TXT, Excel, CSV, PPT alebo obrázky. Pri analýze
-            dát systém otvorí výsledky v samostatnom modálnom okne.
+            {dataMode
+              ? "Nahrajte jeden XLSX, XLS, XLSM alebo CSV súbor. Dáta sa najprv pripravia cez prepare route a potom analyzujú z hárka DATA_CLEAN."
+              : "Nahrajte PDF, DOCX, TXT, RTF, ODT, obrázky, Excel, CSV alebo PPT. Binárny súbor sa odošle do /api/chat a obsah sa načíta na serveri."}
           </p>
           <p className="mt-1 text-xs font-black text-violet-200">
-            Prílohy: {files.length} / {limit}
+            {unlimited
+              ? `Nahrané prílohy: ${files.length}`
+              : `Prílohy: ${files.length} / ${limit}`}
           </p>
         </div>
 
@@ -7847,6 +9002,32 @@ function FileUploadBox({
               <span className="shrink-0 text-violet-200/70">
                 {formatBytes(file.size)}
               </span>
+
+              {file.extractionStatus ? (
+                <span
+                  className={[
+                    "shrink-0 rounded-full px-2 py-1 text-[10px] font-black",
+                    file.extractionStatus === "failed"
+                      ? "bg-red-500/20 text-red-200"
+                      : file.extractionStatus === "server" ||
+                          file.extractionStatus === "client"
+                        ? "bg-emerald-500/20 text-emerald-200"
+                        : "bg-amber-500/20 text-amber-200",
+                  ].join(" ")}
+                  title={
+                    file.extractionMessage ||
+                    "Stav načítania obsahu prílohy"
+                  }
+                >
+                  {file.extractionStatus === "server"
+                    ? "Načítané serverom"
+                    : file.extractionStatus === "client"
+                      ? "Text pripravený"
+                      : file.extractionStatus === "failed"
+                        ? "Chyba čítania"
+                        : "Načíta server"}
+                </span>
+              ) : null}
 
               <button
                 type="button"

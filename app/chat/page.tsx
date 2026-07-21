@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   languages,
   type AppLanguage,
@@ -29,33 +29,149 @@ import {
 } from 'lucide-react';
 
 // =====================================================
-// DÔLEŽITÉ
+// ARCHITEKTÚRA CHATU
 // =====================================================
-// Tento CLIENT súbor už neobsahuje systémové prompty pre AI.
-// Úloha klienta je iba:
-// 1. UI
-// 2. prílohy
-// 3. extrakcia textu a bibliografických kandidátov
-// 4. odoslanie dát do /api/chat
+// Chat stránka je jediný vstupný bod pre AI prácu používateľa:
+// 1. prijme prílohy,
+// 2. extrahuje text, autorov, citácie a bibliografické kandidáty,
+// 3. vytvorí jednotný chatPayload a hlavný pracovný prompt,
+// 4. odošle štruktúrovaný kontext do /api/chat.
 //
-// Všetky pravidlá typu:
-// - ako má písať kapitolu,
-// - ako má citovať,
-// - že má použiť Semantic Scholar / Crossref,
-// - že nesmie vymýšľať zdroje,
-// - že primárne zdroje musia byť citované v texte,
-// majú byť výhradne v /api/chat.
+// /api/chat naďalej drží bezpečnostné pravidlá, limity, overovanie zdrojov,
+// výber modelu a finálne systémové inštrukcie. Prompt z chat-page je doplnková
+// pracovná inštrukcia a nemôže prepísať serverové bezpečnostné pravidlá.
 // =====================================================
 
 // ================= TYPES =================
 
 type Agent = 'openai' | 'claude' | 'gemini' | 'grok' | 'mistral';
 
+type ChatRouteContext = {
+  projectId: string;
+  profileId: string;
+  agent: Agent | null;
+  language: AppLanguage | null;
+  interfaceLanguage: AppLanguage | null;
+  workLanguage: AppLanguage | null;
+  from: string;
+};
+
+function isAgent(value: unknown): value is Agent {
+  return (
+    value === 'openai' ||
+    value === 'claude' ||
+    value === 'gemini' ||
+    value === 'grok' ||
+    value === 'mistral'
+  );
+}
+
+function readChatRouteContext(): ChatRouteContext {
+  if (typeof window === 'undefined') {
+    return {
+      projectId: '',
+      profileId: '',
+      agent: null,
+      language: null,
+      interfaceLanguage: null,
+      workLanguage: null,
+      from: '',
+    };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const projectId = String(
+    params.get('projectId') || params.get('profileId') || '',
+  ).trim();
+  const profileId = String(
+    params.get('profileId') || params.get('projectId') || '',
+  ).trim();
+
+  const rawAgent = params.get('agent');
+  const rawLanguage = params.get('language');
+  const rawInterfaceLanguage = params.get('interfaceLanguage');
+  const rawWorkLanguage = params.get('workLanguage');
+
+  return {
+    projectId,
+    profileId,
+    agent: isAgent(rawAgent) ? rawAgent : null,
+    language: isValidAppLanguage(rawLanguage) ? rawLanguage : null,
+    interfaceLanguage: isValidAppLanguage(rawInterfaceLanguage)
+      ? rawInterfaceLanguage
+      : null,
+    workLanguage: isValidAppLanguage(rawWorkLanguage)
+      ? rawWorkLanguage
+      : null,
+    from: String(params.get('from') || '').trim(),
+  };
+}
+
+function findProfileById(
+  candidates: Array<SavedProfile | null>,
+  projectId: string,
+): SavedProfile | null {
+  const normalizedId = String(projectId || '').trim();
+
+  if (!normalizedId) {
+    return candidates.find(Boolean) || null;
+  }
+
+  return (
+    candidates.find(
+      (candidate) =>
+        candidate && String(candidate.id || '').trim() === normalizedId,
+    ) || null
+  );
+}
+
 type ChatRole = 'user' | 'assistant';
 
 type ChatMessage = {
   role: ChatRole;
   content: string;
+};
+
+type AttachmentUsageState = {
+  attachmentsUsed: number;
+  attachmentsAdded: number;
+  lastUploadedAt: string | null;
+  trackingAvailable: boolean;
+};
+
+type ChatApiPayload = {
+  version: '2026-07-21';
+  requestId: string;
+  module: 'chat';
+  agent: Agent;
+  projectId: string | null;
+  routeContext: ChatRouteContext;
+  userInstruction: string;
+  mainPrompt: string;
+  profile: SavedProfile | null;
+  language: AppLanguage;
+  citationStyle: string;
+  attachments: Array<{
+    id: string;
+    name: string;
+    size: number;
+    type: string;
+    uploadedAt: string;
+    preparedName: string;
+    extractionStatus: PreparedFile['extractionStatus'];
+    extractedCharacters: number;
+    detectedSourcesCount: number;
+    detectedAuthorsCount: number;
+    inTextCitationsCount: number;
+  }>;
+  sourceContext: {
+    mode: 'uploaded_documents_first';
+    extractedText: string;
+    detectedSourcesSummary: string;
+    detectedSources: BibliographicCandidate[];
+    detectedAuthors: string[];
+    inTextCitations: InTextCitation[];
+  };
 };
 
 type FileProcessingStatus =
@@ -1885,6 +2001,39 @@ ${truncateByChars(item.extractedText, maxClientExtractedCharsPerFile)}
   return truncateByChars(full, maxTotalExtractedContextChars);
 }
 
+function createChatRequestId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `chat-${crypto.randomUUID()}`;
+  }
+
+  return `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function buildMainChatPrompt({
+  profile,
+  userInstruction,
+  attachmentCount,
+}: {
+  profile: SavedProfile | null;
+  userInstruction: string;
+  attachmentCount: number;
+}) {
+  const profileTitle = profile?.title || profile?.topic || 'neuvedená téma práce';
+  const citationStyle = profile?.citationStyle || profile?.citation || 'STN ISO 690';
+
+  return [
+    'HLAVNÁ PRACOVNÁ INŠTRUKCIA Z CHAT-PAGE:',
+    `Spracuj požiadavku používateľa pre aktívny profil „${profileTitle}“.`,
+    `Používateľská požiadavka: ${userInstruction || 'Spracuj priložené dokumenty.'}`,
+    `Počet odosielaných príloh: ${attachmentCount}.`,
+    'Najprv vyťaž údaje, tvrdenia, mená, dátumy, tabuľky, citácie a zdroje z príloh.',
+    'Potom doplň iba chýbajúce odborné údaje pomocou overiteľných akademických zdrojov.',
+    `Citácie a bibliografiu vytvor podľa normy ${citationStyle}.`,
+    'Nevymýšľaj zdroje, DOI, URL, autorov ani fakty. Neisté údaje jasne označ na overenie.',
+    'Výsledok musí nadväzovať na aktívny profil, používateľský príkaz a spracovaný obsah príloh.',
+  ].join('\n');
+}
+
 // ================= PAGE =================
 
 export default function ChatPage() {
@@ -1925,6 +2074,9 @@ export default function ChatPage() {
   const [agent, setAgent] = useState<Agent>('gemini');
   const [agentsOrder, setAgentsOrder] = useState(defaultAgents);
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
+  const [routeContext, setRouteContext] = useState<ChatRouteContext>(() =>
+    readChatRouteContext(),
+  );
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -1936,6 +2088,13 @@ export default function ChatPage() {
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [processingLog, setProcessingLog] = useState<ProcessingLogItem[]>([]);
   const [isListening, setIsListening] = useState(false);
+  const [attachmentUsage, setAttachmentUsage] = useState<AttachmentUsageState>({
+    attachmentsUsed: 0,
+    attachmentsAdded: 0,
+    lastUploadedAt: null,
+    trackingAvailable: true,
+  });
+  const [isAttachmentUsageLoading, setIsAttachmentUsageLoading] = useState(true);
 
   // ================= CANVAS =================
 
@@ -1971,9 +2130,141 @@ export default function ChatPage() {
     return base.trim() || 'Zedpera výstup';
   }, [activeProfile]);
 
+  const effectiveProjectId = useMemo(
+    () =>
+      String(
+        activeProfile?.id ||
+          routeContext.projectId ||
+          routeContext.profileId ||
+          '',
+      ).trim(),
+    [activeProfile?.id, routeContext.profileId, routeContext.projectId],
+  );
+
   const canSubmit =
   !isLoading &&
   (input.trim().length > 0 || attachedFiles.length > 0);
+
+
+  const refreshAttachmentUsage = useCallback(async () => {
+    setIsAttachmentUsageLoading(true);
+
+    try {
+      const response = await fetch('/api/attachments/usage', {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        if (response.status !== 401) {
+          setAttachmentUsage((current) => ({
+            ...current,
+            trackingAvailable: false,
+          }));
+        }
+        return;
+      }
+
+      const data = await response.json();
+
+      setAttachmentUsage({
+        attachmentsUsed: Number(data?.attachmentsUsed || 0),
+        attachmentsAdded: Number(data?.attachmentsAdded || 0),
+        lastUploadedAt: data?.lastUploadedAt || null,
+        trackingAvailable: data?.trackingAvailable !== false,
+      });
+    } catch (error) {
+      console.error('LOAD_ATTACHMENT_USAGE_ERROR:', error);
+    } finally {
+      setIsAttachmentUsageLoading(false);
+    }
+  }, []);
+
+  const recordNewAttachmentUploads = useCallback(
+    async (items: AttachedFile[]) => {
+      if (!items.length) return;
+
+      const requestId = `attachment-upload-${createChatRequestId()}`;
+      setIsAttachmentUsageLoading(true);
+
+      try {
+        const response = await fetch('/api/attachments/usage', {
+          method: 'POST',
+          credentials: 'include',
+          cache: 'no-store',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-request-id': requestId,
+          },
+          body: JSON.stringify({
+            requestId,
+            projectId: effectiveProjectId || null,
+            module: 'chat',
+            items: items.map((item) => ({
+              id: item.id,
+              name: item.name,
+              size: item.size,
+              type: item.type,
+              uploadedAt: item.uploadedAt,
+            })),
+          }),
+        });
+
+        if (!response.ok) {
+          if (response.status !== 401) {
+            console.error(
+              'ATTACHMENT_USAGE_UPLOAD_HTTP_ERROR:',
+              response.status,
+            );
+          }
+          return;
+        }
+
+        const data = await response.json();
+
+        setAttachmentUsage({
+          attachmentsUsed: Number(data?.attachmentsUsed || 0),
+          attachmentsAdded: Number(data?.attachmentsAdded || 0),
+          lastUploadedAt: data?.lastUploadedAt || null,
+          trackingAvailable: data?.trackingAvailable !== false,
+        });
+      } catch (error) {
+        console.error('ATTACHMENT_USAGE_UPLOAD_ERROR:', error);
+      } finally {
+        setIsAttachmentUsageLoading(false);
+      }
+    },
+    [effectiveProjectId],
+  );
+
+  const applyAttachmentUsageFromResponse = useCallback((response: Response) => {
+    const usedHeader = response.headers.get('X-Zedpera-Attachments-Used');
+    const addedHeader = response.headers.get('X-Zedpera-Attachments-Added');
+    const trackingHeader = response.headers.get('X-Zedpera-Attachment-Tracking');
+
+    if (usedHeader === null && addedHeader === null && trackingHeader === null) return;
+
+    setAttachmentUsage((current) => ({
+      ...current,
+      attachmentsUsed:
+        usedHeader !== null && Number.isFinite(Number(usedHeader))
+          ? Number(usedHeader)
+          : current.attachmentsUsed,
+      attachmentsAdded:
+        addedHeader !== null && Number.isFinite(Number(addedHeader))
+          ? Number(addedHeader)
+          : current.attachmentsAdded,
+      trackingAvailable:
+        trackingHeader === null
+          ? current.trackingAvailable
+          : trackingHeader === 'enabled',
+    }));
+  }, []);
+
+  useEffect(() => {
+    void refreshAttachmentUsage();
+  }, [refreshAttachmentUsage]);
 
 
 const saveChatToHistory = async ({
@@ -2093,17 +2384,56 @@ useEffect(() => {
 
 
 useEffect(() => {
+  let cancelled = false;
+
+  const persistProfile = (
+    profileValue: SavedProfile | null,
+    systemLanguage: AppLanguage,
+  ) => {
+    if (!profileValue || cancelled) return;
+
+    const withLanguage = withSystemLanguageProfile(
+      profileValue,
+      systemLanguage,
+    );
+
+    if (!withLanguage) return;
+
+    setActiveProfile(withLanguage);
+    localStorage.setItem('active_profile', JSON.stringify(withLanguage));
+    localStorage.setItem('profile', JSON.stringify(withLanguage));
+  };
+
   const loadProfile = async () => {
-    const systemLanguage = getStoredSystemLanguage();
+    const route = readChatRouteContext();
+    setRouteContext(route);
+
+    if (route.agent) {
+      handleSelectAgent(route.agent);
+    }
+
+    const systemLanguage =
+      route.workLanguage ||
+      route.interfaceLanguage ||
+      route.language ||
+      getStoredSystemLanguage();
 
     setLanguage(systemLanguage);
 
     localStorage.setItem('zedpera_language', systemLanguage);
     localStorage.setItem('zedpera_system_language', systemLanguage);
+    localStorage.setItem('zedpera_work_language', systemLanguage);
 
     document.documentElement.lang = systemLanguage;
     document.documentElement.setAttribute('data-language', systemLanguage);
-    document.documentElement.setAttribute('data-system-language', systemLanguage);
+    document.documentElement.setAttribute(
+      'data-system-language',
+      systemLanguage,
+    );
+    document.documentElement.setAttribute(
+      'data-work-language',
+      systemLanguage,
+    );
 
     const activeRaw = localStorage.getItem('active_profile');
     const profileRaw = localStorage.getItem('profile');
@@ -2112,64 +2442,96 @@ useEffect(() => {
     const active = normalizeProfile(safeJsonParse<any>(activeRaw));
     const profile = normalizeProfile(safeJsonParse<any>(profileRaw));
     const profiles = safeJsonParse<any[]>(profilesRaw);
+    const normalizedProfiles = Array.isArray(profiles)
+      ? profiles.map((item) => normalizeProfile(item)).filter(Boolean)
+      : [];
 
-    const localSelectedProfile =
-      active ||
-      profile ||
-      (Array.isArray(profiles) && profiles.length > 0
-        ? normalizeProfile(profiles[0])
-        : null);
+    const requestedProjectId = route.projectId || route.profileId;
+    const localSelectedProfile = findProfileById(
+      [active, profile, ...normalizedProfiles],
+      requestedProjectId,
+    );
 
     if (localSelectedProfile) {
-      const profileWithLanguage = withSystemLanguageProfile(
-        localSelectedProfile,
-        systemLanguage,
-      );
-
-      setActiveProfile(profileWithLanguage);
-
-      if (profileWithLanguage) {
-        localStorage.setItem(
-          'active_profile',
-          JSON.stringify(profileWithLanguage),
-        );
-        localStorage.setItem('profile', JSON.stringify(profileWithLanguage));
-      }
-
-      // DÔLEŽITÉ:
-      // Ak už existuje aktívny profil z Moje práce,
-      // nesmie ho prepísať /api/profile/get.
+      persistProfile(localSelectedProfile, systemLanguage);
       return;
     }
 
     try {
-      const res = await fetch('/api/profile/get', {
+      const query = new URLSearchParams();
+
+      if (requestedProjectId) {
+        query.set('projectId', requestedProjectId);
+        query.set('profileId', requestedProjectId);
+      }
+
+      const profileUrl = query.size
+        ? `/api/profile/get?${query.toString()}`
+        : '/api/profile/get';
+
+      const res = await fetch(profileUrl, {
         method: 'GET',
+        credentials: 'include',
         cache: 'no-store',
+        headers: {
+          Accept: 'application/json',
+        },
       });
 
-      const data = await res.json();
-
-      if (data?.ok && data?.profile) {
-        const dbProfile = normalizeProfile(data.profile);
-
-        const finalProfile = withSystemLanguageProfile(
-          dbProfile,
-          systemLanguage,
+      if (res.status === 401) {
+        const returnTo = encodeURIComponent(
+          `${window.location.pathname}${window.location.search}`,
         );
+        router.replace(`/login?returnTo=${returnTo}`);
+        return;
+      }
 
-        setActiveProfile(finalProfile);
+      if (res.ok) {
+        const data = await res.json();
+        const rawDbProfile =
+          data?.profile ||
+          data?.activeProfile ||
+          data?.data?.profile ||
+          null;
+        const dbProfile = normalizeProfile(rawDbProfile);
 
-        if (finalProfile) {
-          localStorage.setItem(
-            'active_profile',
-            JSON.stringify(finalProfile),
+        const profileMatchesRequest =
+          !requestedProjectId ||
+          !dbProfile?.id ||
+          String(dbProfile.id).trim() === requestedProjectId;
+
+        if (dbProfile && profileMatchesRequest) {
+          persistProfile(
+            {
+              ...dbProfile,
+              id: dbProfile.id || requestedProjectId || undefined,
+            },
+            systemLanguage,
           );
-          localStorage.setItem('profile', JSON.stringify(finalProfile));
+          return;
         }
       }
     } catch (error) {
       console.error('LOAD_PROFILE_FROM_DB_ERROR:', error);
+    }
+
+    // /api/chat vie načítať úplný profil priamo zo Supabase podľa projectId.
+    // Preto frontend pri príchode z dashboardu vytvorí bezpečný minimálny
+    // kontext a neblokuje používateľa len preto, že localStorage ešte profil nemá.
+    if (requestedProjectId && !cancelled) {
+      persistProfile(
+        {
+          id: requestedProjectId,
+          title: 'Načítaný projekt',
+          topic: '',
+          language: systemLanguage,
+          interfaceLanguage: systemLanguage,
+          workLanguage: systemLanguage,
+          citation: 'STN ISO 690',
+          citationStyle: 'STN ISO 690',
+        },
+        systemLanguage,
+      );
     }
   };
 
@@ -2178,29 +2540,31 @@ useEffect(() => {
   const onProfileUpdated = (event: Event) => {
     const custom = event as CustomEvent;
 
-    if (custom.detail) {
-      const systemLanguage = getStoredSystemLanguage();
-      const normalized = normalizeProfile(custom.detail);
-      const finalProfile = withSystemLanguageProfile(
-        normalized,
-        systemLanguage,
-      );
+    if (!custom.detail) return;
 
-      setActiveProfile(finalProfile);
+    const route = readChatRouteContext();
+    const systemLanguage =
+      route.workLanguage ||
+      route.interfaceLanguage ||
+      route.language ||
+      getStoredSystemLanguage();
+    const normalized = normalizeProfile(custom.detail);
 
-      if (finalProfile) {
-        localStorage.setItem('active_profile', JSON.stringify(finalProfile));
-        localStorage.setItem('profile', JSON.stringify(finalProfile));
-      }
-    }
+    persistProfile(normalized, systemLanguage);
   };
 
   window.addEventListener('zedpera-profile-updated', onProfileUpdated);
+  window.addEventListener('zedpera:active-profile-changed', onProfileUpdated);
 
   return () => {
+    cancelled = true;
     window.removeEventListener('zedpera-profile-updated', onProfileUpdated);
+    window.removeEventListener(
+      'zedpera:active-profile-changed',
+      onProfileUpdated,
+    );
   };
-}, []);
+}, [router]);
 
 
 
@@ -2292,6 +2656,11 @@ ${textToTranslate}`,
 
     const res = await fetch('/api/chat', {
       method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/json, text/plain, text/event-stream',
+      },
       body: formData,
     });
 
@@ -2657,26 +3026,37 @@ CHYBA: ${message}
 
     if (validFiles.length === 0) return;
 
-    setAttachedFiles((prev) => {
-      const next = [...prev];
+    const nextFiles = [...attachedFiles];
+    const newlyAcceptedFiles: AttachedFile[] = [];
 
-      for (const file of validFiles) {
-        const alreadyExists = next.some(
-          (item) => item.name === file.name && item.size === file.size && item.type === file.type,
+    for (const file of validFiles) {
+      const alreadyExists = nextFiles.some(
+        (item) =>
+          item.name === file.name &&
+          item.size === file.size &&
+          item.type === file.type,
+      );
+
+      if (alreadyExists) continue;
+
+      if (nextFiles.length >= maxFilesCount) {
+        alert(
+          `Dosiahnutý limit príloh.\n\nMaximálny počet súborov je ${maxFilesCount}.`,
         );
-
-        if (alreadyExists) continue;
-
-        if (next.length >= maxFilesCount) {
-          alert(`Dosiahnutý limit príloh.\n\nMaximálny počet súborov je ${maxFilesCount}.`);
-          break;
-        }
-
-        next.push(file);
+        break;
       }
 
-      return next;
-    });
+      nextFiles.push(file);
+      newlyAcceptedFiles.push(file);
+    }
+
+    setAttachedFiles(nextFiles);
+
+    // Počíta sa každá skutočne prijatá príloha už pri nahratí do chatu.
+    // Rovnaké klientské ID sa pri následnom /api/chat nezapočíta druhýkrát.
+    if (newlyAcceptedFiles.length > 0) {
+      void recordNewAttachmentUploads(newlyAcceptedFiles);
+    }
 
     setProcessingLog([]);
     setResult('');
@@ -2686,6 +3066,7 @@ CHYBA: ${message}
 
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
+
 
   const removeFile = (id: string) => {
     setAttachedFiles((prev) => prev.filter((file) => file.id !== id));
@@ -2798,12 +3179,12 @@ CHYBA: ${message}
 
   const appendAssistantMessage = (content: string) => {
     setMessages((prev) => [
-  ...prev,
-  {
-    role: 'assistant',
-    content: '',
-  },
-]);
+      ...prev,
+      {
+        role: 'assistant',
+        content: cleanAiOutput(content),
+      },
+    ]);
   };
 
   const sendPromptToApi = async ({
@@ -2853,14 +3234,40 @@ CHYBA: ${message}
         },
       ];
 
+      const requestId = createChatRequestId();
+      const mainPrompt = buildMainChatPrompt({
+        profile: activeProfile,
+        userInstruction: apiMessages[0]?.content || '',
+        attachmentCount: attachedFiles.length,
+      });
+
       const formData = new FormData();
 
 const systemLanguage = getStoredSystemLanguage();
 
-const profileForApi = withSystemLanguageProfile(
+const normalizedProfileForApi = withSystemLanguageProfile(
   activeProfile,
   systemLanguage,
 );
+
+const profileForApi: SavedProfile | null = normalizedProfileForApi
+  ? {
+      ...normalizedProfileForApi,
+      id: normalizedProfileForApi.id || effectiveProjectId || undefined,
+    }
+  : effectiveProjectId
+    ? withSystemLanguageProfile(
+        {
+          id: effectiveProjectId,
+          language: systemLanguage,
+          interfaceLanguage: systemLanguage,
+          workLanguage: systemLanguage,
+          citation: 'STN ISO 690',
+          citationStyle: 'STN ISO 690',
+        },
+        systemLanguage,
+      )
+    : null;
 
 const outputLanguage =
   profileForApi?.workLanguage ||
@@ -2875,8 +3282,10 @@ if (profileForApi) {
   localStorage.setItem('profile', JSON.stringify(profileForApi));
 }
 
+formData.append('requestId', requestId);
 formData.append('agent', agent);
 formData.append('module', 'chat');
+formData.append('mainPrompt', mainPrompt);
 
 formData.append('language', systemLanguage);
 formData.append('interfaceLanguage', systemLanguage);
@@ -2891,7 +3300,10 @@ formData.append('citation', profileForApi?.citationStyle || profileForApi?.citat
 formData.append('messages', JSON.stringify(apiMessages));
 formData.append('profile', JSON.stringify(profileForApi || null));
 
-    if (profileForApi?.id) formData.append('projectId', profileForApi.id);
+    if (effectiveProjectId) {
+      formData.append('projectId', effectiveProjectId);
+      formData.append('profileId', effectiveProjectId);
+    }
 
       formData.append('sourceMode', 'uploaded_documents_first');
       formData.append('validateAttachmentsAgainstProfile', 'true');
@@ -2903,6 +3315,7 @@ formData.append('profile', JSON.stringify(profileForApi || null));
       // Konfiguračné prepínače pre /api/chat.
       // Nie sú to prompty. Pravidlá spracovania musia byť implementované v /api/chat.
       formData.append('enableExternalResearch', 'true');
+      formData.append('useExternalAcademicSources', 'true');
       formData.append('useSemanticScholar', 'true');
       formData.append('useCrossref', 'true');
       formData.append('requireVerifiedSources', 'true');
@@ -2962,6 +3375,54 @@ formData.append('profile', JSON.stringify(profileForApi || null));
         ),
       );
 
+      const preparedByOriginalId = new Map(
+        preparedFiles.map((item) => [item.originalId, item]),
+      );
+
+      const chatPayload: ChatApiPayload = {
+        version: '2026-07-21',
+        requestId,
+        module: 'chat',
+        agent,
+        projectId: effectiveProjectId || null,
+        routeContext,
+        userInstruction: apiMessages[0]?.content || '',
+        mainPrompt,
+        profile: profileForApi,
+        language: outputLanguage as AppLanguage,
+        citationStyle:
+          profileForApi?.citationStyle ||
+          profileForApi?.citation ||
+          'STN ISO 690',
+        attachments: attachedFiles.map((item) => {
+          const prepared = preparedByOriginalId.get(item.id);
+
+          return {
+            id: item.id,
+            name: item.name,
+            size: item.size,
+            type: item.type,
+            uploadedAt: item.uploadedAt,
+            preparedName: prepared?.preparedName || item.name,
+            extractionStatus: prepared?.extractionStatus || 'not_extractable',
+            extractedCharacters: prepared?.extractedText?.length || 0,
+            detectedSourcesCount: prepared?.detectedSources?.length || 0,
+            detectedAuthorsCount: prepared?.detectedAuthors?.length || 0,
+            inTextCitationsCount: prepared?.inTextCitations?.length || 0,
+          };
+        }),
+        sourceContext: {
+          mode: 'uploaded_documents_first',
+          extractedText: extractedContext,
+          detectedSourcesSummary: detectedSourcesSummary || '',
+          detectedSources,
+          detectedAuthors,
+          inTextCitations,
+        },
+      };
+
+      formData.append('chatPayload', JSON.stringify(chatPayload));
+
       setProcessingLog((prev) =>
         prev.map((item) =>
           item.status === 'ready' || item.status === 'extracted' || item.status === 'metadata_only'
@@ -2976,8 +3437,16 @@ formData.append('profile', JSON.stringify(profileForApi || null));
 
       const res = await fetch('/api/chat', {
         method: 'POST',
+        credentials: 'include',
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/json, text/plain, text/event-stream',
+          'x-request-id': requestId,
+        },
         body: formData,
       });
+
+      applyAttachmentUsageFromResponse(res);
 
       if (!res.ok) {
         const errorMessage = await readApiErrorResponse(res);
@@ -3011,6 +3480,15 @@ formData.append('profile', JSON.stringify(profileForApi || null));
 
       if (contentType.includes('application/json')) {
         const data = await res.json();
+
+        if (data?.attachmentUsage) {
+          setAttachmentUsage({
+            attachmentsUsed: Number(data.attachmentUsage.attachmentsUsed || 0),
+            attachmentsAdded: Number(data.attachmentUsage.attachmentsAdded || 0),
+            lastUploadedAt: data.attachmentUsage.lastUploadedAt || null,
+            trackingAvailable: data.attachmentUsage.trackingAvailable !== false,
+          });
+        }
 
         fullText =
           String(data.output || data.result || data.message || data.text || data.answer || '').trim() || '';
@@ -3108,6 +3586,7 @@ await saveChatToHistory({
       setIsLoading(false);
       setAttachedFiles([]);
       setProcessingLog([]);
+      void refreshAttachmentUsage();
 
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -3284,6 +3763,11 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
 
     const res = await fetch('/api/chat', {
       method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/json, text/plain, text/event-stream',
+      },
       body: formData,
     });
 
@@ -3554,6 +4038,31 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
 
             <div className="shrink-0 border-t border-white/10 bg-[#070a16]/95 px-4 py-3 backdrop-blur md:px-8">
               <div className="mx-auto max-w-6xl rounded-[28px] border border-violet-500/40 bg-violet-950/30 p-3 shadow-2xl shadow-violet-950/40">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-violet-400/20 bg-black/20 px-3 py-2 text-xs">
+                  <div className="flex items-center gap-2 font-bold text-violet-100">
+                    <Paperclip className="h-4 w-4 text-violet-300" />
+                    <span>
+                      Nahrané prílohy celkom:{' '}
+                      <strong>
+                        {isAttachmentUsageLoading
+                          ? '…'
+                          : attachmentUsage.attachmentsUsed}
+                      </strong>
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-slate-300">
+                    <span className="rounded-xl bg-white/5 px-2 py-1">
+                      V tejto správe: {attachedFiles.length}/{maxFilesCount}
+                    </span>
+                    {!attachmentUsage.trackingAvailable ? (
+                      <span className="rounded-xl bg-amber-500/15 px-2 py-1 text-amber-200">
+                        Spustite SQL migráciu počítadla
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+
                 {attachedFiles.length > 0 && (
                   <div className="mb-3 max-h-[110px] overflow-y-auto rounded-2xl border border-white/10 bg-black/20 p-2">
                     <div className="mb-2 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.15em] text-slate-400">

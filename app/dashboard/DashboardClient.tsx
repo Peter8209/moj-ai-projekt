@@ -6965,6 +6965,35 @@ Text emailu:
     }
   };
 
+  /**
+   * Otvorí samostatný frontend AI chatu.
+   *
+   * Dashboard zostáva zachovaný so všetkými pôvodnými modulmi. Do /chat sa
+   * prenesie iba kontext aktuálneho profilu, jazyk rozhrania a zvolený agent.
+   * Samotný frontend chatu následne komunikuje výhradne s /api/chat.
+   */
+  const openAiChat = useCallback(() => {
+    const params = new URLSearchParams();
+
+    if (activeProfile?.id) {
+      params.set("projectId", activeProfile.id);
+      params.set("profileId", activeProfile.id);
+    }
+
+    params.set("agent", agent);
+    params.set("language", systemLanguage);
+    params.set("interfaceLanguage", systemLanguage);
+    params.set("workLanguage",
+      activeProfile?.workLanguage ||
+        activeProfile?.language ||
+        systemLanguage,
+    );
+    params.set("from", "dashboard");
+
+    const query = params.toString();
+    router.push(query ? `/chat?${query}` : "/chat");
+  }, [activeProfile, agent, router, systemLanguage]);
+
   const selectDashboardModule = useCallback(
     (moduleKey: ModuleKey) => {
       if (!isModuleKey(moduleKey)) return;
@@ -7966,9 +7995,9 @@ Text emailu:
 
       <main className="flex min-h-screen w-full bg-slate-50 text-slate-950 transition-colors duration-300 dark:bg-[#050711] dark:text-white">
         <section className="flex min-h-screen min-w-0 flex-1 flex-col pb-24 xl:pb-0">
-          {/* DESKTOP AI LIŠTA - zobrazuje sa iba na počítači */}
+          {/* DESKTOP AI MODULY - zobrazuje sa iba na počítači */}
           <header className="sticky top-0 z-40 hidden shrink-0 border-b border-white/10 bg-[#050711]/95 px-4 py-3 backdrop-blur-xl xl:block">
-            <div className="flex w-full flex-col gap-3">
+            <div className="w-full">
               {/* AI MODULY - 2 stĺpce, rovnomerne rozdelené */}
               <nav
                 aria-label="AI moduly dashboardu"
@@ -8060,6 +8089,16 @@ Text emailu:
           />
 
           <div className="px-4 pt-4 sm:px-6 xl:px-8">
+            <button
+              type="button"
+              onClick={openAiChat}
+              className="mb-4 inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl border border-violet-300/60 bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-violet-950/30 transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-violet-300 xl:hidden"
+              title="Otvoriť samostatný AI chat"
+            >
+              <Sparkles className="h-4 w-4" aria-hidden="true" />
+              <span>Otvoriť AI Chat</span>
+            </button>
+
             {/* Billing sa načítava na pozadí. ADMINovi ani bežnému používateľovi
                 nezobrazujeme samostatný loading panel balíka. */}
 

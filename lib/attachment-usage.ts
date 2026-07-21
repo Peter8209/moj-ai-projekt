@@ -18,12 +18,13 @@ export type AttachmentUsageSnapshot = {
   trackingAvailable: boolean;
 };
 
-export type AuthenticatedAttachmentUsageSnapshot = AttachmentUsageSnapshot & {
-  authenticated: boolean;
-};
+export type AuthenticatedAttachmentUsageSnapshot =
+  AttachmentUsageSnapshot & {
+    authenticated: boolean;
+  };
 
 function emptySnapshot(
-  trackingAvailable = true,
+  trackingAvailable = false,
 ): AttachmentUsageSnapshot {
   return {
     attachmentsUsed: 0,
@@ -38,9 +39,26 @@ function cleanText(value: unknown): string {
 }
 
 function safeInteger(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? Math.max(0, Math.round(value))
+  const numeric = Number(value);
+  return Number.isFinite(numeric)
+    ? Math.max(0, Math.round(numeric))
     : 0;
+}
+
+function logTrackingError(label: string, error: unknown) {
+  const candidate = error as {
+    code?: unknown;
+    message?: unknown;
+    details?: unknown;
+    hint?: unknown;
+  } | null;
+
+  console.error(label, {
+    code: cleanText(candidate?.code),
+    message: cleanText(candidate?.message),
+    details: cleanText(candidate?.details),
+    hint: cleanText(candidate?.hint),
+  });
 }
 
 async function getCurrentUserId(): Promise<string | null> {
@@ -52,13 +70,13 @@ async function getCurrentUserId(): Promise<string | null> {
     } = await supabase.auth.getUser();
 
     if (error) {
-      console.error('ATTACHMENT_USAGE_AUTH_ERROR:', error);
+      logTrackingError('ATTACHMENT_USAGE_AUTH_ERROR:', error);
       return null;
     }
 
     return user?.id || null;
   } catch (error) {
-    console.error('ATTACHMENT_USAGE_AUTH_FATAL_ERROR:', error);
+    logTrackingError('ATTACHMENT_USAGE_AUTH_FATAL_ERROR:', error);
     return null;
   }
 }
@@ -69,27 +87,32 @@ async function getUsageForUser(
   try {
     const admin = createAdminClient();
 
-    const [countResult, latestResult] = await Promise.all([
-      admin
-        .from(ATTACHMENT_USAGE_TABLE)
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', userId),
-      admin
-        .from(ATTACHMENT_USAGE_TABLE)
-        .select('created_at')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
+    const countResult = await admin
+      .from(ATTACHMENT_USAGE_TABLE)
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId);
 
-    if (countResult.error || latestResult.error) {
-      console.error(
-        'ATTACHMENT_USAGE_READ_ERROR:',
-        countResult.error || latestResult.error,
+    if (countResult.error) {
+      logTrackingError(
+        'ATTACHMENT_USAGE_COUNT_ERROR:',
+        countResult.error,
       );
-
       return emptySnapshot(false);
+    }
+
+    const latestResult = await admin
+      .from(ATTACHMENT_USAGE_TABLE)
+      .select('created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestResult.error) {
+      logTrackingError(
+        'ATTACHMENT_USAGE_LATEST_ERROR:',
+        latestResult.error,
+      );
     }
 
     return {
@@ -100,7 +123,7 @@ async function getUsageForUser(
       trackingAvailable: true,
     };
   } catch (error) {
-    console.error('ATTACHMENT_USAGE_READ_FATAL_ERROR:', error);
+    logTrackingError('ATTACHMENT_USAGE_READ_FATAL_ERROR:', error);
     return emptySnapshot(false);
   }
 }
@@ -110,15 +133,23 @@ export async function getCurrentUserAttachmentUsage(): Promise<AuthenticatedAtta
 
   if (!userId) {
     return {
-      ...emptySnapshot(true),
+      ...emptySnapshot(false),
       authenticated: false,
     };
   }
 
-  return {
-    ...(await getUsageForUser(userId)),
-    authenticated: true,
-  };
+  try {
+    return {
+      ...(await getUsageForUser(userId)),
+      authenticated: true,
+    };
+  } catch (error) {
+    logTrackingError('ATTACHMENT_USAGE_GET_FATAL_ERROR:', error);
+    return {
+      ...emptySnapshot(false),
+      authenticated: true,
+    };
+  }
 }
 
 export async function recordCurrentUserAttachmentUsage({
@@ -138,80 +169,62 @@ export async function recordCurrentUserAttachmentUsage({
 
   if (!userId) {
     return {
-      ...emptySnapshot(true),
+      ...emptySnapshot(false),
       authenticated: false,
     };
   }
 
-  const safeRequestId = cleanText(requestId);
-  const safeItems = Array.isArray(items) ? items : [];
-  const uniqueItems = new Map<string, AttachmentUsageItem>();
-
-  safeItems.forEach((item, index) => {
-    const name = cleanText(item?.name) || `priloha-${index + 1}`;
-    const size = safeInteger(item?.size);
-    const suppliedId = cleanText(item?.id);
-
-    // Stabilné klientské ID zabezpečí, že rovnaká príloha sa pri výbere
-    // a následnom odoslaní do /api/chat nezapočíta dvakrát.
-    const attachmentKey =
-      suppliedId ||
-      `${safeRequestId || 'request'}|${name}|${size}|${index}`;
-
-    if (!uniqueItems.has(attachmentKey)) {
-      uniqueItems.set(attachmentKey, {
-        id: suppliedId || null,
-        name,
-        size,
-        type: cleanText(item?.type) || null,
-        uploadedAt: cleanText(item?.uploadedAt) || null,
-      });
-    }
-  });
-
-  const expectedCount = Math.max(
-    uniqueItems.size,
-    safeInteger(fallbackCount),
-  );
-
-  for (
-    let index = uniqueItems.size;
-    index < expectedCount;
-    index += 1
-  ) {
-    uniqueItems.set(
-      `${safeRequestId || 'request'}|fallback-${index}`,
-      {
-        id: null,
-        name: `priloha-${index + 1}`,
-        size: 0,
-        type: null,
-        uploadedAt: null,
-      },
-    );
-  }
-
-  if (!safeRequestId || uniqueItems.size === 0) {
-    return {
-      ...(await getUsageForUser(userId)),
-      authenticated: true,
-    };
-  }
-
   try {
-    const admin = createAdminClient();
+    const safeRequestId = cleanText(requestId);
+    const safeItems = Array.isArray(items) ? items : [];
+    const uniqueItems = new Map<string, AttachmentUsageItem>();
 
-    const beforeResult = await admin
-      .from(ATTACHMENT_USAGE_TABLE)
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId);
+    safeItems.forEach((item, index) => {
+      const name = cleanText(item?.name) || `priloha-${index + 1}`;
+      const size = safeInteger(item?.size);
+      const suppliedId = cleanText(item?.id);
+      const attachmentKey =
+        suppliedId ||
+        `${safeRequestId || 'request'}|${name}|${size}|${index}`;
 
-    if (beforeResult.error) {
-      console.error(
-        'ATTACHMENT_USAGE_BEFORE_COUNT_ERROR:',
-        beforeResult.error,
+      if (!uniqueItems.has(attachmentKey)) {
+        uniqueItems.set(attachmentKey, {
+          id: suppliedId || null,
+          name,
+          size,
+          type: cleanText(item?.type) || null,
+          uploadedAt: cleanText(item?.uploadedAt) || null,
+        });
+      }
+    });
+
+    const expectedCount = Math.max(
+      uniqueItems.size,
+      safeInteger(fallbackCount),
+    );
+
+    for (let index = uniqueItems.size; index < expectedCount; index += 1) {
+      uniqueItems.set(
+        `${safeRequestId || 'request'}|fallback-${index}`,
+        {
+          id: null,
+          name: `priloha-${index + 1}`,
+          size: 0,
+          type: null,
+          uploadedAt: null,
+        },
       );
     }
+
+    if (!safeRequestId || uniqueItems.size === 0) {
+      return {
+        ...(await getUsageForUser(userId)),
+        authenticated: true,
+      };
+    }
+
+    const admin = createAdminClient();
+    const before = await getUsageForUser(userId);
 
     const rows = Array.from(uniqueItems.entries()).map(
       ([attachmentKey, item], index) => ({
@@ -237,51 +250,34 @@ export async function recordCurrentUserAttachmentUsage({
       });
 
     if (insertResult.error) {
-      console.error(
-        'ATTACHMENT_USAGE_INSERT_ERROR:',
+      logTrackingError(
+        'ATTACHMENT_USAGE_UPSERT_ERROR:',
         insertResult.error,
       );
 
       return {
-        ...(await getUsageForUser(userId)),
+        ...before,
         authenticated: true,
         trackingAvailable: false,
       };
     }
 
-    const afterResult = await admin
-      .from(ATTACHMENT_USAGE_TABLE)
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId);
-
-    if (afterResult.error) {
-      console.error(
-        'ATTACHMENT_USAGE_AFTER_COUNT_ERROR:',
-        afterResult.error,
-      );
-    }
-
-    const snapshot = await getUsageForUser(userId);
+    const after = await getUsageForUser(userId);
 
     return {
-      ...snapshot,
+      ...after,
       attachmentsAdded: Math.max(
-        (afterResult.count || 0) -
-          (beforeResult.count || 0),
+        after.attachmentsUsed - before.attachmentsUsed,
         0,
       ),
       authenticated: true,
     };
   } catch (error) {
-    console.error(
-      'ATTACHMENT_USAGE_RECORD_FATAL_ERROR:',
-      error,
-    );
+    logTrackingError('ATTACHMENT_USAGE_RECORD_FATAL_ERROR:', error);
 
     return {
-      ...(await getUsageForUser(userId)),
+      ...emptySnapshot(false),
       authenticated: true,
-      trackingAvailable: false,
     };
   }
 }

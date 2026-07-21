@@ -20,85 +20,22 @@ function noStoreJson(
   });
 }
 
-export async function GET() {
-  const usage = await getCurrentUserAttachmentUsage();
-
-  if (!usage.authenticated) {
-    return noStoreJson(
-      {
-        ok: false,
-        code: 'UNAUTHENTICATED',
-        message: 'Používateľ nie je prihlásený.',
-        ...usage,
-      },
-      401,
-    );
-  }
-
+function degradedResponse(message: string) {
   return noStoreJson({
     ok: true,
-    ...usage,
+    degraded: true,
+    code: 'ATTACHMENT_TRACKING_UNAVAILABLE',
+    message,
+    attachmentsUsed: 0,
+    attachmentsAdded: 0,
+    lastUploadedAt: null,
+    trackingAvailable: false,
   });
 }
 
-/**
- * Zapíše prílohy hneď po ich výbere v AI chate.
- * /api/chat rovnaké klientské ID iba idempotentne potvrdí,
- * preto sa jedna príloha nezapočíta dvakrát.
- */
-export async function POST(request: Request) {
+export async function GET() {
   try {
-    const body = await request.json();
-    const requestId = String(
-      body?.requestId ||
-        request.headers.get('x-request-id') ||
-        '',
-    ).trim();
-
-    const items: AttachmentUsageItem[] = Array.isArray(
-      body?.items,
-    )
-      ? body.items
-      : [];
-
-    if (!requestId) {
-      return noStoreJson(
-        {
-          ok: false,
-          code: 'MISSING_REQUEST_ID',
-          message:
-            'Chýba identifikátor nahratia príloh.',
-        },
-        400,
-      );
-    }
-
-    if (!items.length) {
-      return noStoreJson(
-        {
-          ok: false,
-          code: 'MISSING_ATTACHMENTS',
-          message:
-            'Neboli odoslané žiadne prílohy na započítanie.',
-        },
-        400,
-      );
-    }
-
-    const usage =
-      await recordCurrentUserAttachmentUsage({
-        requestId,
-        projectId:
-          typeof body?.projectId === 'string'
-            ? body.projectId
-            : null,
-        module:
-          typeof body?.module === 'string'
-            ? body.module
-            : 'chat',
-        items,
-        fallbackCount: items.length,
-      });
+    const usage = await getCurrentUserAttachmentUsage();
 
     if (!usage.authenticated) {
       return noStoreJson(
@@ -117,19 +54,84 @@ export async function POST(request: Request) {
       ...usage,
     });
   } catch (error) {
-    console.error(
-      'ATTACHMENT_USAGE_POST_ERROR:',
-      error,
+    console.error('ATTACHMENT_USAGE_GET_ROUTE_ERROR:', error);
+    return degradedResponse(
+      'Evidencia príloh je dočasne nedostupná. AI chat pokračuje bez blokovania.',
     );
+  }
+}
 
-    return noStoreJson(
-      {
-        ok: false,
-        code: 'ATTACHMENT_USAGE_WRITE_FAILED',
-        message:
-          'Počítadlo príloh sa nepodarilo aktualizovať.',
-      },
-      500,
+/**
+ * Počítadlo je pomocná telemetria. Aj keď zápis zlyhá, endpoint vráti
+ * neblokujúcu odpoveď a frontend môže pokračovať v práci s AI chatom.
+ */
+export async function POST(request: Request) {
+  try {
+    const body = await request.json().catch(() => null);
+
+    if (!body || typeof body !== 'object') {
+      return degradedResponse(
+        'Požiadavku počítadla nebolo možné prečítať. AI chat pokračuje.',
+      );
+    }
+
+    const requestId = String(
+      (body as any)?.requestId ||
+        request.headers.get('x-request-id') ||
+        '',
+    ).trim();
+
+    const items: AttachmentUsageItem[] = Array.isArray(
+      (body as any)?.items,
+    )
+      ? (body as any).items
+      : [];
+
+    if (!requestId || !items.length) {
+      const current = await getCurrentUserAttachmentUsage();
+
+      return noStoreJson({
+        ok: true,
+        skipped: true,
+        ...current,
+      });
+    }
+
+    const usage = await recordCurrentUserAttachmentUsage({
+      requestId,
+      projectId:
+        typeof (body as any)?.projectId === 'string'
+          ? (body as any).projectId
+          : null,
+      module:
+        typeof (body as any)?.module === 'string'
+          ? (body as any).module
+          : 'chat',
+      items,
+      fallbackCount: items.length,
+    });
+
+    if (!usage.authenticated) {
+      return noStoreJson(
+        {
+          ok: false,
+          code: 'UNAUTHENTICATED',
+          message: 'Používateľ nie je prihlásený.',
+          ...usage,
+        },
+        401,
+      );
+    }
+
+    return noStoreJson({
+      ok: true,
+      ...usage,
+    });
+  } catch (error) {
+    console.error('ATTACHMENT_USAGE_POST_ROUTE_ERROR:', error);
+
+    return degradedResponse(
+      'Počítadlo príloh sa nepodarilo aktualizovať, ale AI chat pokračuje bez obmedzenia.',
     );
   }
 }

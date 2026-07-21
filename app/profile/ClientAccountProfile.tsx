@@ -1205,8 +1205,8 @@ function StatCard({
   helper?: string;
 }) {
   return (
-    <div className="group rounded-[1.6rem] border border-white/10 bg-white/[0.065] p-5 shadow-xl shadow-black/20 transition hover:-translate-y-0.5 hover:border-violet-300/35 hover:bg-white/[0.09]">
-      <div className="flex items-start gap-4">
+    <div className="group min-w-0 overflow-hidden rounded-[1.6rem] border border-white/10 bg-white/[0.065] p-4 shadow-xl shadow-black/20 transition hover:-translate-y-0.5 hover:border-violet-300/35 hover:bg-white/[0.09] sm:p-5">
+      <div className="flex min-w-0 items-start gap-3 sm:gap-4">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-600/20 text-violet-100 transition group-hover:bg-violet-600/30">
           <Icon size={22} />
         </div>
@@ -1216,12 +1216,12 @@ function StatCard({
             {label}
           </div>
 
-          <div className="mt-2 break-words text-xl font-black text-white">
+          <div className="mt-2 max-w-full break-words text-lg font-black leading-tight text-white [overflow-wrap:anywhere] sm:text-xl">
             {value}
           </div>
 
           {helper ? (
-            <div className="mt-1 text-sm font-bold leading-5 text-slate-400">
+            <div className="mt-1 max-w-full break-words text-sm font-bold leading-5 text-slate-400 [overflow-wrap:anywhere]">
               {helper}
             </div>
           ) : null}
@@ -1233,12 +1233,12 @@ function StatCard({
 
 function DetailRow({ label, value }: { label: string; value: unknown }) {
   return (
-    <div className="grid gap-2 border-b border-white/10 py-3 last:border-b-0 sm:grid-cols-[230px_minmax(0,1fr)]">
-      <div className="text-sm font-black uppercase tracking-[0.12em] text-slate-400">
+    <div className="grid min-w-0 grid-cols-1 gap-1.5 border-b border-white/10 py-3 last:border-b-0">
+      <div className="max-w-full break-words text-xs font-black uppercase tracking-[0.1em] text-slate-400 [overflow-wrap:anywhere]">
         {label}
       </div>
 
-      <div className="min-w-0 whitespace-pre-wrap break-words text-sm font-bold leading-6 text-slate-100">
+      <div className="min-w-0 max-w-full whitespace-pre-wrap break-words text-sm font-bold leading-6 text-slate-100 [overflow-wrap:anywhere]">
         {formatValue(value)}
       </div>
     </div>
@@ -1247,7 +1247,7 @@ function DetailRow({ label, value }: { label: string; value: unknown }) {
 
 function Pill({ children }: { children: string }) {
   return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/15 px-3 py-1.5 text-xs font-black text-violet-100 transition hover:border-violet-300/60 hover:bg-violet-500/25">
+    <span className="inline-flex max-w-full min-w-0 items-start gap-2 whitespace-normal rounded-2xl border border-violet-400/30 bg-violet-500/15 px-3 py-1.5 text-xs font-black leading-5 text-violet-100 transition [overflow-wrap:anywhere] hover:border-violet-300/60 hover:bg-violet-500/25">
       <CheckCircle2 size={14} />
       {children}
     </span>
@@ -1588,23 +1588,23 @@ export default function ClientAccountProfile() {
   }
 
   return (
-    <main className="client-account-profile min-h-screen bg-[#050816] text-white">
+    <main className="client-account-profile min-h-screen w-full min-w-0 overflow-x-hidden bg-[#050816] text-white">
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute left-1/2 top-[-180px] h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-violet-700/25 blur-3xl" />
         <div className="absolute right-[-140px] top-40 h-[440px] w-[440px] rounded-full bg-blue-700/20 blur-3xl" />
         <div className="absolute bottom-[-180px] left-[-120px] h-[460px] w-[460px] rounded-full bg-fuchsia-700/15 blur-3xl" />
       </div>
 
-      <div className="relative mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      <div className="relative mx-auto w-full min-w-0 max-w-7xl px-3 py-5 sm:px-5 sm:py-6 lg:px-6">
         <section className="mb-6 rounded-[2rem] border border-white/10 bg-[#0b1020]/95 p-5 shadow-2xl shadow-black/35 backdrop-blur-xl sm:p-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
             <div className="flex min-w-0 items-center gap-4">
               <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-blue-600 text-white shadow-xl shadow-violet-950/40">
                 <UserCircle size={30} />
               </div>
 
               <div className="min-w-0">
-                <div className="inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/15 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-violet-100">
+                <div className="inline-flex max-w-full flex-wrap items-center gap-2 whitespace-normal rounded-2xl border border-violet-400/30 bg-violet-500/15 px-3 py-1 text-[11px] font-black uppercase leading-5 tracking-[0.14em] text-violet-100 [overflow-wrap:anywhere]">
                   <ShieldCheck size={13} />
                   {isAdmin ? "Administrátorský účet" : "Účet klienta"}
                 </div>
@@ -1623,11 +1623,11 @@ export default function ClientAccountProfile() {
               </div>
             </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row lg:shrink-0">
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap lg:shrink-0">
               <button
                 type="button"
                 onClick={goToMenu}
-                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.08] px-5 text-sm font-black text-white shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:border-violet-300/50 hover:bg-white/[0.14]"
+                className="inline-flex min-h-[48px] min-w-0 max-w-full items-center justify-center whitespace-normal text-center [overflow-wrap:anywhere] gap-2 rounded-2xl border border-white/10 bg-white/[0.08] px-5 text-sm font-black text-white shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:border-violet-300/50 hover:bg-white/[0.14]"
               >
                 <ArrowLeft size={18} />
                 Návrat do menu
@@ -1637,7 +1637,7 @@ export default function ClientAccountProfile() {
                 type="button"
                 onClick={loadProfile}
                 disabled={state === "loading"}
-                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-5 text-sm font-black text-white shadow-xl shadow-violet-950/40 transition hover:-translate-y-0.5 hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex min-h-[48px] min-w-0 max-w-full items-center justify-center whitespace-normal text-center [overflow-wrap:anywhere] gap-2 rounded-2xl bg-violet-600 px-5 text-sm font-black text-white shadow-xl shadow-violet-950/40 transition hover:-translate-y-0.5 hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {state === "loading" ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
@@ -1648,7 +1648,7 @@ export default function ClientAccountProfile() {
               </button>
 
               {hasUnlimitedAccess ? (
-                <div className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-violet-300/35 bg-violet-500/15 px-5 text-sm font-black text-violet-50 shadow-lg shadow-violet-950/20">
+                <div className="inline-flex min-h-[48px] min-w-0 max-w-full items-center justify-center whitespace-normal text-center [overflow-wrap:anywhere] gap-2 rounded-2xl border border-violet-300/35 bg-violet-500/15 px-5 text-sm font-black text-violet-50 shadow-lg shadow-violet-950/20">
                   <ShieldCheck size={18} />
                   Plný prístup
                 </div>
@@ -1660,7 +1660,7 @@ export default function ClientAccountProfile() {
                     setShowCancelConfirm(true);
                   }}
                   disabled={!subscriptionCanBeCancelled}
-                  className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-red-400/40 bg-red-500/10 px-5 text-sm font-black text-red-100 shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:border-red-300/70 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex min-h-[48px] min-w-0 max-w-full items-center justify-center whitespace-normal text-center [overflow-wrap:anywhere] gap-2 rounded-2xl border border-red-400/40 bg-red-500/10 px-5 text-sm font-black text-red-100 shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:border-red-300/70 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <XCircle size={18} />
                   Zrušiť predplatné
@@ -1693,7 +1693,7 @@ export default function ClientAccountProfile() {
 
         {hasUnlimitedAccess ? (
           <section className="mb-6 rounded-[1.6rem] border border-violet-300/30 bg-gradient-to-r from-violet-600/20 via-blue-600/15 to-fuchsia-600/15 p-5 shadow-xl shadow-black/25">
-            <div className="flex items-start gap-4">
+            <div className="flex min-w-0 items-start gap-3 sm:gap-4">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-500/20 text-violet-100">
                 <ShieldCheck size={24} />
               </div>
@@ -1735,7 +1735,7 @@ export default function ClientAccountProfile() {
 
         {showCancelConfirm && !hasUnlimitedAccess ? (
           <section className="mb-6 rounded-[1.6rem] border border-red-400/30 bg-red-500/10 p-5 shadow-xl shadow-black/25">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
               <div className="flex items-start gap-3">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-500/15 text-red-100">
                   <XCircle size={23} />
@@ -1754,12 +1754,12 @@ export default function ClientAccountProfile() {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row lg:shrink-0">
+              <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap lg:shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowCancelConfirm(false)}
                   disabled={cancelState === "loading"}
-                  className="inline-flex min-h-[46px] items-center justify-center rounded-2xl border border-white/10 bg-white/[0.08] px-5 text-sm font-black text-white transition hover:bg-white/[0.14] disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex min-h-[46px] min-w-0 max-w-full items-center justify-center whitespace-normal text-center [overflow-wrap:anywhere] rounded-2xl border border-white/10 bg-white/[0.08] px-5 text-sm font-black text-white transition hover:bg-white/[0.14] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Ponechať predplatné
                 </button>
@@ -1768,7 +1768,7 @@ export default function ClientAccountProfile() {
                   type="button"
                   onClick={cancelSubscription}
                   disabled={cancelState === "loading"}
-                  className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-red-600 px-5 text-sm font-black text-white shadow-xl shadow-red-950/30 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex min-h-[46px] min-w-0 max-w-full items-center justify-center whitespace-normal text-center [overflow-wrap:anywhere] gap-2 rounded-2xl bg-red-600 px-5 text-sm font-black text-white shadow-xl shadow-red-950/30 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {cancelState === "loading" ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
@@ -1801,8 +1801,8 @@ export default function ClientAccountProfile() {
         ) : null}
 
         {profile ? (
-          <div className="space-y-6">
-            <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-5">
+          <div className="min-w-0 space-y-6">
+            <section className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-4 sm:gap-5">
               <StatCard
                 icon={UserCircle}
                 label="Klient"
@@ -1881,10 +1881,10 @@ export default function ClientAccountProfile() {
               />
             </section>
 
-            <section className="overflow-hidden rounded-[1.8rem] border border-violet-300/20 bg-[#0b1020]/95 shadow-2xl shadow-black/30">
+            <section className="min-w-0 overflow-hidden rounded-[1.8rem] border border-violet-300/20 bg-[#0b1020]/95 shadow-2xl shadow-black/30">
               <div className="border-b border-white/10 bg-gradient-to-r from-violet-600/25 via-blue-600/15 to-fuchsia-600/15 p-5 sm:p-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="flex items-start gap-4">
+                <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
+                  <div className="flex min-w-0 items-start gap-3 sm:gap-4">
                     <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-500/20 text-violet-100 shadow-lg shadow-violet-950/30">
                       <Crown size={26} />
                     </div>
@@ -1907,7 +1907,7 @@ export default function ClientAccountProfile() {
                   </div>
 
                   <div
-                    className={`inline-flex w-fit items-center gap-2 rounded-full border px-4 py-2 text-sm font-black ${packageStatusClasses}`}
+                    className={`inline-flex max-w-full flex-wrap items-center gap-2 whitespace-normal rounded-2xl border px-4 py-2 text-sm font-black leading-5 [overflow-wrap:anywhere] ${packageStatusClasses}`}
                   >
                     <BadgeCheck size={17} />
                     {packageStatus}
@@ -1915,8 +1915,8 @@ export default function ClientAccountProfile() {
                 </div>
               </div>
 
-              <div className="space-y-6 p-5 sm:p-6">
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+              <div className="min-w-0 space-y-6 p-4 sm:p-6">
+                <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,13.5rem),1fr))] gap-4">
                   <StatCard
                     icon={Crown}
                     label="Názov balíka"
@@ -1986,16 +1986,16 @@ export default function ClientAccountProfile() {
                   />
                 </div>
 
-                <div className="grid gap-5 xl:grid-cols-3">
-                  <article className="rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-100">
+                <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,19rem),1fr))] gap-5">
+                  <article className="min-w-0 overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-4 sm:p-5">
+                    <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-100">
                           <Gauge size={22} />
                         </div>
 
-                        <div>
-                          <h3 className="text-lg font-black text-white">
+                        <div className="min-w-0">
+                          <h3 className="break-words text-lg font-black text-white [overflow-wrap:anywhere]">
                             Strany
                           </h3>
                           <p className="text-sm font-bold text-slate-400">
@@ -2016,12 +2016,12 @@ export default function ClientAccountProfile() {
                       </div>
                     </div>
 
-                    <div className="mt-5 grid grid-cols-2 gap-3">
+                    <div className="mt-5 grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-3">
                       <div className="rounded-2xl border border-white/10 bg-black/15 p-3">
                         <div className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">
                           Základné strany
                         </div>
-                        <div className="mt-1 text-xl font-black text-white">
+                        <div className="mt-1 max-w-full break-words text-lg font-black leading-tight text-white [overflow-wrap:anywhere] sm:text-xl">
                           {hasUnlimitedAccess ? "—" : (basePages ?? "—")}
                         </div>
                       </div>
@@ -2030,7 +2030,7 @@ export default function ClientAccountProfile() {
                         <div className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">
                           Extra strany
                         </div>
-                        <div className="mt-1 text-xl font-black text-white">
+                        <div className="mt-1 max-w-full break-words text-lg font-black leading-tight text-white [overflow-wrap:anywhere] sm:text-xl">
                           {hasUnlimitedAccess ? "—" : extraPages}
                         </div>
                       </div>
@@ -2039,7 +2039,7 @@ export default function ClientAccountProfile() {
                         <div className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">
                           Použité strany
                         </div>
-                        <div className="mt-1 text-xl font-black text-white">
+                        <div className="mt-1 max-w-full break-words text-lg font-black leading-tight text-white [overflow-wrap:anywhere] sm:text-xl">
                           {hasUnlimitedAccess
                             ? "—"
                             : (profile.pagesUsed ?? "—")}
@@ -2050,7 +2050,7 @@ export default function ClientAccountProfile() {
                         <div className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">
                           Celkový limit
                         </div>
-                        <div className="mt-1 text-xl font-black text-white">
+                        <div className="mt-1 max-w-full break-words text-lg font-black leading-tight text-white [overflow-wrap:anywhere] sm:text-xl">
                           {hasUnlimitedAccess
                             ? "Neobmedzené"
                             : (profile.pageLimit ?? "—")}
@@ -2087,15 +2087,15 @@ export default function ClientAccountProfile() {
                     ) : null}
                   </article>
 
-                  <article className="rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-100">
+                  <article className="min-w-0 overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-4 sm:p-5">
+                    <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-100">
                           <Sparkles size={22} />
                         </div>
 
-                        <div>
-                          <h3 className="text-lg font-black text-white">
+                        <div className="min-w-0">
+                          <h3 className="break-words text-lg font-black text-white [overflow-wrap:anywhere]">
                             Prompty
                           </h3>
                           <p className="text-sm font-bold text-slate-400">
@@ -2185,14 +2185,14 @@ export default function ClientAccountProfile() {
                     )}
                   </article>
 
-                  <article className="rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-5">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-100">
+                  <article className="min-w-0 overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-4 sm:p-5">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-100">
                         <FileText size={22} />
                       </div>
 
-                      <div>
-                        <h3 className="text-lg font-black text-white">
+                      <div className="min-w-0">
+                        <h3 className="break-words text-lg font-black text-white [overflow-wrap:anywhere]">
                           Prílohy
                         </h3>
                         <p className="text-sm font-bold text-slate-400">
@@ -2202,7 +2202,7 @@ export default function ClientAccountProfile() {
                     </div>
 
                     <div className="mt-6 rounded-[1.4rem] border border-emerald-300/20 bg-emerald-500/10 p-5 text-center">
-                      <div className="text-5xl font-black text-white">
+                      <div className="max-w-full break-words text-2xl font-black leading-tight text-white [overflow-wrap:anywhere] sm:text-3xl">
                         {formatAttachmentLimit(entitlements)}
                       </div>
                       <div className="mt-2 text-sm font-black uppercase tracking-[0.14em] text-emerald-100">
@@ -2229,15 +2229,15 @@ export default function ClientAccountProfile() {
                   </article>
                 </div>
 
-                <div className="grid gap-5 xl:grid-cols-2">
-                  <article className="rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-5">
-                    <div className="mb-5 flex items-center gap-3">
-                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-100">
+                <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))] gap-5">
+                  <article className="min-w-0 overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-4 sm:p-5">
+                    <div className="mb-5 flex min-w-0 items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-100">
                         <PlusCircle size={22} />
                       </div>
 
-                      <div>
-                        <h3 className="text-lg font-black text-white">
+                      <div className="min-w-0">
+                        <h3 className="break-words text-lg font-black text-white [overflow-wrap:anywhere]">
                           Aktivované doplnky
                         </h3>
                         <p className="text-sm font-bold text-slate-400">
@@ -2259,14 +2259,14 @@ export default function ClientAccountProfile() {
                     </div>
                   </article>
 
-                  <article className="rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-5">
-                    <div className="mb-5 flex items-center gap-3">
-                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-100">
+                  <article className="min-w-0 overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-4 sm:p-5">
+                    <div className="mb-5 flex min-w-0 items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-100">
                         <BadgeCheck size={22} />
                       </div>
 
-                      <div>
-                        <h3 className="text-lg font-black text-white">
+                      <div className="min-w-0">
+                        <h3 className="break-words text-lg font-black text-white [overflow-wrap:anywhere]">
                           Dostupné funkcie
                         </h3>
                         <p className="text-sm font-bold text-slate-400">
@@ -2275,7 +2275,7 @@ export default function ClientAccountProfile() {
                       </div>
                     </div>
 
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-2">
                       {availableFeatures.length ? (
                         availableFeatures.map((feature) => (
                           <div
@@ -2283,7 +2283,7 @@ export default function ClientAccountProfile() {
                             className="flex items-start gap-2 rounded-2xl border border-violet-300/15 bg-violet-500/10 px-3 py-3 text-sm font-black text-violet-50"
                           >
                             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
-                            <span>{feature}</span>
+                            <span className="min-w-0 break-words [overflow-wrap:anywhere]">{feature}</span>
                           </div>
                         ))
                       ) : (
@@ -2299,7 +2299,7 @@ export default function ClientAccountProfile() {
 
             {profile.pageLimitReached && !hasUnlimitedAccess ? (
               <section className="rounded-[1.6rem] border border-red-400/30 bg-red-500/10 p-5 shadow-xl shadow-black/25">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
                   <div className="flex items-start gap-3">
                     <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-500/20 text-red-100">
                       <LockKeyhole size={23} />
@@ -2320,7 +2320,7 @@ export default function ClientAccountProfile() {
                   <button
                     type="button"
                     onClick={goToBuyPages}
-                    className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-red-600 px-5 text-sm font-black text-white transition hover:-translate-y-0.5 hover:bg-red-500"
+                    className="inline-flex min-h-[48px] min-w-0 max-w-full items-center justify-center whitespace-normal text-center [overflow-wrap:anywhere] gap-2 rounded-2xl bg-red-600 px-5 text-sm font-black text-white transition hover:-translate-y-0.5 hover:bg-red-500"
                   >
                     <PlusCircle size={18} />
                     Dokúpiť ďalšie strany
@@ -2379,7 +2379,7 @@ export default function ClientAccountProfile() {
                   <button
                     type="button"
                     onClick={goToBuyPages}
-                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 text-sm font-black text-violet-100 transition hover:-translate-y-0.5 hover:bg-violet-500/20"
+                    className="inline-flex min-h-[44px] min-w-0 max-w-full items-center justify-center whitespace-normal text-center [overflow-wrap:anywhere] gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 text-sm font-black text-violet-100 transition hover:-translate-y-0.5 hover:bg-violet-500/20"
                   >
                     <PlusCircle size={17} />
                     Dokúpiť strany
@@ -2415,10 +2415,10 @@ export default function ClientAccountProfile() {
               </section>
             ) : null}
 
-            <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+            <section className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,24rem),1fr))] gap-6">
               <div className="rounded-[1.6rem] border border-white/10 bg-[#0b1020]/95 p-5 shadow-xl shadow-black/25">
-                <div className="mb-5 flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-100">
+                <div className="mb-5 flex min-w-0 items-center gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-100">
                     <BriefcaseBusiness size={22} />
                   </div>
 
@@ -2545,7 +2545,7 @@ export default function ClientAccountProfile() {
                           setShowCancelConfirm(true);
                         }}
                         disabled={!subscriptionCanBeCancelled}
-                        className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 text-sm font-black text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex min-h-[44px] min-w-0 max-w-full items-center justify-center whitespace-normal text-center [overflow-wrap:anywhere] gap-2 rounded-2xl bg-red-600 px-4 text-sm font-black text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <XCircle size={17} />
                         Zrušiť predplatné
@@ -2555,10 +2555,10 @@ export default function ClientAccountProfile() {
                 )}
               </div>
 
-              <div className="space-y-6">
+              <div className="min-w-0 space-y-6">
                 <section className="rounded-[1.6rem] border border-white/10 bg-[#0b1020]/95 p-5 shadow-xl shadow-black/25">
-                  <div className="mb-5 flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-100">
+                  <div className="mb-5 flex min-w-0 items-center gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-100">
                       <BadgeCheck size={22} />
                     </div>
 
@@ -2587,8 +2587,8 @@ export default function ClientAccountProfile() {
                 </section>
 
                 <section className="rounded-[1.6rem] border border-white/10 bg-[#0b1020]/95 p-5 shadow-xl shadow-black/25">
-                  <div className="mb-5 flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-100">
+                  <div className="mb-5 flex min-w-0 items-center gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-100">
                       <Sparkles size={22} />
                     </div>
 
@@ -2617,8 +2617,8 @@ export default function ClientAccountProfile() {
                 </section>
 
                 <section className="rounded-[1.6rem] border border-white/10 bg-[#0b1020]/95 p-5 shadow-xl shadow-black/25">
-                  <div className="mb-5 flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-100">
+                  <div className="mb-5 flex min-w-0 items-center gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-100">
                       <CalendarClock size={22} />
                     </div>
 
@@ -2667,7 +2667,7 @@ export default function ClientAccountProfile() {
               </div>
             </section>
 
-            <section className="grid gap-5 md:grid-cols-3">
+            <section className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-5">
               <StatCard
                 icon={Mail}
                 label="Kontakt"

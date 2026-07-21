@@ -2938,30 +2938,23 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
     destroy?: () => Promise<void> | void;
   };
 
-  type PdfParserConstructor = {
-    new (options: Record<string, unknown>): PdfParserInstance;
-    setWorker?: (workerSource: string) => void;
-  };
+  type PdfParserConstructor = new (
+    options: Record<string, unknown>,
+  ) => PdfParserInstance;
 
   type LegacyPdfParser = (
     input: Buffer,
   ) => Promise<PdfTextResult | string>;
 
-  let workerModule: Record<string, unknown> = {};
-
-  try {
-    workerModule = (await import(
-      'pdf-parse/worker'
-    )) as Record<string, unknown>;
-  } catch (workerImportError) {
-    console.warn('PDF_PARSE_WORKER_IMPORT_WARNING:', {
-      message:
-        workerImportError instanceof Error
-          ? workerImportError.message
-          : String(workerImportError),
-    });
-  }
-
+  /**
+   * Dôležité pre Next.js/Node.js:
+   *
+   * Nepoužívame import `pdf-parse/worker`. Tento subpath nie je dostupný
+   * vo všetkých publikovaných verziách balíka pdf-parse a Turbopack ho preto
+   * nedokáže pri builde bezpečne vyriešiť. Serverový Node.js variant používa
+   * priamo hlavný export `pdf-parse`; explicitný worker je určený najmä pre
+   * browser build.
+   */
   const importedModule = (await import(
     'pdf-parse'
   )) as Record<string, unknown>;
@@ -2978,59 +2971,32 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
     nestedDefault,
   ].filter(Boolean);
 
-  for (const candidate of moduleCandidates) {
-    if (!candidate || typeof candidate !== 'object') continue;
+  const parserErrors: string[] = [];
 
-    const candidateRecord = candidate as Record<string, unknown>;
+  // pdf-parse v2/v3: import { PDFParse } from 'pdf-parse'
+  for (const candidate of moduleCandidates) {
+    if (
+      !candidate ||
+      (typeof candidate !== 'object' &&
+        typeof candidate !== 'function')
+    ) {
+      continue;
+    }
+
+    const candidateRecord =
+      candidate as Record<string, unknown>;
     const constructorCandidate =
       candidateRecord.PDFParse;
 
-    if (typeof constructorCandidate !== 'function') continue;
+    if (typeof constructorCandidate !== 'function') {
+      continue;
+    }
 
     const PDFParseConstructor =
       constructorCandidate as PdfParserConstructor;
-
-    const getWorkerData = workerModule.getData;
-    const getWorkerPath = workerModule.getPath;
-
-    if (typeof PDFParseConstructor.setWorker === 'function') {
-      try {
-        if (typeof getWorkerData === 'function') {
-          const workerData = String(
-            (getWorkerData as () => unknown)() || '',
-          );
-
-          if (workerData) {
-            PDFParseConstructor.setWorker(workerData);
-          }
-        } else if (typeof getWorkerPath === 'function') {
-          const workerPath = String(
-            (getWorkerPath as () => unknown)() || '',
-          );
-
-          if (workerPath) {
-            PDFParseConstructor.setWorker(workerPath);
-          }
-        }
-      } catch (workerSetupError) {
-        console.warn('PDF_PARSE_WORKER_SETUP_WARNING:', {
-          message:
-            workerSetupError instanceof Error
-              ? workerSetupError.message
-              : String(workerSetupError),
-        });
-      }
-    }
-
-    const options: Record<string, unknown> = {
+    const parser = new PDFParseConstructor({
       data: new Uint8Array(buffer),
-    };
-
-    if (typeof workerModule.CanvasFactory === 'function') {
-      options.CanvasFactory = workerModule.CanvasFactory;
-    }
-
-    const parser = new PDFParseConstructor(options);
+    });
 
     try {
       const result = await parser.getText();
@@ -3041,6 +3007,12 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
       );
 
       if (extracted) return extracted;
+    } catch (error) {
+      parserErrors.push(
+        error instanceof Error
+          ? error.message
+          : String(error),
+      );
     } finally {
       if (typeof parser.destroy === 'function') {
         await Promise.resolve(parser.destroy()).catch(
@@ -3050,25 +3022,45 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
     }
   }
 
-  // Spätná kompatibilita s pdf-parse v1.
+  // pdf-parse v1: default export je funkcia pdfParse(buffer).
   for (const candidate of moduleCandidates) {
     if (typeof candidate !== 'function') continue;
 
-    const result = await (
-      candidate as LegacyPdfParser
-    )(buffer);
+    try {
+      const result = await (
+        candidate as LegacyPdfParser
+      )(buffer);
 
-    const extracted = normalizeText(
-      typeof result === 'string'
-        ? result
-        : String(result?.text || ''),
-    );
+      const extracted = normalizeText(
+        typeof result === 'string'
+          ? result
+          : String(result?.text || ''),
+      );
 
-    if (extracted) return extracted;
+      if (extracted) return extracted;
+    } catch (error) {
+      parserErrors.push(
+        error instanceof Error
+          ? error.message
+          : String(error),
+      );
+    }
   }
 
+  const technicalDetail = Array.from(
+    new Set(parserErrors.map((value) => value.trim()).filter(Boolean)),
+  )
+    .slice(0, 3)
+    .join(' | ');
+
   throw new Error(
-    'PDF_PARSER_NOT_AVAILABLE: PDF sa nepodarilo spracovať na serveri. Skontrolujte pdf-parse/worker, serverExternalPackages a textovú vrstvu dokumentu.',
+    [
+      'PDF_PARSER_NOT_AVAILABLE: PDF sa nepodarilo spracovať na serveri.',
+      'Skontrolujte nainštalovaný balík pdf-parse a textovú vrstvu dokumentu.',
+      technicalDetail ? `Technický detail: ${technicalDetail}` : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
   );
 }
 
@@ -5122,15 +5114,17 @@ async function requireChatRequestEntitlements({
     });
   }
 
+  const attachmentLimit =
+    entitlements.attachmentLimit;
+
   if (
     !entitlements.isAdmin &&
     !entitlements.hasUnlimitedAccess &&
-    receivedAttachments >
-    entitlements.attachmentLimit
+    attachmentLimit !== null &&
+    receivedAttachments > attachmentLimit
   ) {
     throw new AttachmentLimitError({
-      attachmentLimit:
-        entitlements.attachmentLimit,
+      attachmentLimit,
       receivedAttachments,
     });
   }
@@ -5417,9 +5411,11 @@ async function createStreamResponse({
           entitlementGuard.entitlements.promptsUsed,
         ),
       'X-Zedpera-Attachment-Limit':
-        String(
-          entitlementGuard.entitlements.attachmentLimit,
-        ),
+        entitlementGuard.entitlements.attachmentLimit === null
+          ? 'unlimited'
+          : String(
+              entitlementGuard.entitlements.attachmentLimit,
+            ),
       'X-Zedpera-Required-Features':
         entitlementGuard.requiredFeatures.join(','),
     },
@@ -6542,7 +6538,7 @@ try {
           message:
             'Príloha bola prijatá, ale nepodarilo sa z nej načítať text.',
           detail:
-            'Súbor bol doručený do /api/chat, ale neobsahoval použiteľnú textovú vrstvu a nebol doručený ani OCR text. Server sa pokúsil spracovať PDF cez pdf-parse/worker a DOCX cez Mammoth. Pri skenovanom PDF alebo obrázku musí frontend odoslať OCR text v poli clientExtractedText alebo extractedText, prípadne binárny obsah súboru v multipart/form-data.',
+            'Súbor bol doručený do /api/chat, ale neobsahoval použiteľnú textovú vrstvu a nebol doručený ani OCR text. Server sa pokúsil spracovať PDF cez pdf-parse a DOCX cez Mammoth. Pri skenovanom PDF alebo obrázku musí frontend odoslať OCR text v poli clientExtractedText alebo extractedText, prípadne binárny obsah súboru v multipart/form-data.',
           extractedFiles: extractedFiles.map((file) => ({
             name: file.originalName,
             preparedName: file.preparedName,

@@ -135,9 +135,9 @@ export type CurrentEntitlements = {
    * Skutočný aktuálny zostatok strán spravuje lib/page-quota.ts.
    * Pri administrátorovi sa tento údaj nesmie používať na blokovanie.
    */
-  pageLimit: number;
+  pageLimit: number | null;
 
-  basePageLimit: number;
+  basePageLimit: number | null;
   extraPageLimit: number;
   pagesUsed: number;
 
@@ -162,7 +162,7 @@ export type CurrentEntitlements = {
   promptsRemaining: number | null;
   promptLimitReached: boolean;
 
-  attachmentLimit: number;
+  attachmentLimit: number | null;
 
   billingStatus: string | null;
   activatedAt: string | null;
@@ -212,7 +212,7 @@ export type EntitlementErrorBody = {
   promptsUsed?: number;
   promptsRemaining?: number | null;
 
-  attachmentLimit?: number;
+  attachmentLimit?: number | null;
   receivedAttachments?: number;
 };
 
@@ -222,7 +222,7 @@ export type EntitlementErrorBody = {
 
 const DEFAULT_PLAN_ID: PlanId = "free";
 
-const DEFAULT_ATTACHMENT_LIMIT = PLANS.free.attachmentLimit || 1;
+const DEFAULT_ATTACHMENT_LIMIT = PLANS.free.attachmentLimit ?? 1;
 
 const PURCHASE_URL = "/pricing";
 
@@ -516,14 +516,16 @@ function toNonNegativeInteger(value: unknown, fallback = 0): number {
 }
 
 /**
- * Prevedie katalógový limit strán na bezpečné nezáporné celé číslo.
+ * Prevedie katalógový limit strán na bezpečný limit.
  *
- * PlanDefinition.pageLimit môže byť null pri internom administrátorskom
- * balíku. Administrátor má neobmedzený prístup cez isAdmin a
- * hasUnlimitedAccess, preto sa hodnota 0 používa iba ako bezpečná
- * serializovateľná hodnota pre číselné polia CurrentEntitlements.
+ * null sa zachováva výhradne pre neobmedzený ADMIN režim.
+ * Bežné plány sa ďalej normalizujú na nezáporné celé číslo.
  */
-function resolveCatalogPageLimit(value: unknown): number {
+function resolveCatalogPageLimit(value: unknown): number | null {
+  if (value === null) {
+    return null;
+  }
+
   return toNonNegativeInteger(value, 0);
 }
 
@@ -723,14 +725,14 @@ function getDefaultEntitlements({
 
   const featureList = Array.from(features);
   const promptLimit = plan.promptLimit;
-  const pageLimit = resolveCatalogPageLimit(plan.pageLimit);
+  const pageLimit = resolveCatalogPageLimit(plan.pageLimit) ?? 0;
 
   return {
     userId,
     email,
 
-    isAdmin,
-    hasUnlimitedAccess: isAdmin,
+    isAdmin: false,
+    hasUnlimitedAccess: false,
     hasDatabaseRecord: false,
 
     planId: DEFAULT_PLAN_ID,
@@ -753,12 +755,69 @@ function getDefaultEntitlements({
     promptsRemaining: promptLimit,
     promptLimitReached: false,
 
-    attachmentLimit: plan.attachmentLimit,
+    attachmentLimit: resolveAttachmentLimit(
+      undefined,
+      plan.attachmentLimit,
+    ),
 
-    billingStatus: isAdmin ? "admin" : "active",
+    billingStatus: "active",
     activatedAt: null,
     validUntil: null,
     updatedAt: null,
+  };
+}
+
+function createAdminEntitlements({
+  userId,
+  email,
+  hasDatabaseRecord,
+  updatedAt,
+}: {
+  userId: string;
+  email: string | null;
+  hasDatabaseRecord: boolean;
+  updatedAt: string | null;
+}): CurrentEntitlements {
+  const plan = PLANS.admin;
+  const features = getFeaturesForEntitlements("admin", [], {
+    isAdmin: true,
+  });
+  const featureList = Array.from(features);
+
+  return {
+    userId,
+    email,
+
+    isAdmin: true,
+    hasUnlimitedAccess: true,
+    hasDatabaseRecord,
+
+    planId: "admin",
+    planName: plan.name,
+    planPriceCents: plan.priceCents,
+
+    pageLimit: null,
+    basePageLimit: null,
+    extraPageLimit: 0,
+    pagesUsed: 0,
+
+    addonIds: [],
+    addonNames: [],
+
+    features,
+    featureList,
+
+    promptLimit: null,
+    promptsUsed: 0,
+    promptsRemaining: null,
+    promptLimitReached: false,
+
+    attachmentLimit: null,
+
+    billingStatus: "admin",
+    activatedAt: null,
+    validUntil: null,
+    updatedAt,
   };
 }
 
@@ -804,11 +863,18 @@ export function hasFeature(
       return false;
     }
 
-    return first.isAdmin || first.features.has(second);
+    return (
+      first.isAdmin ||
+      first.hasUnlimitedAccess ||
+      first.features.has(second)
+    );
   }
 
   return getCurrentEntitlements().then(
-    (entitlements) => entitlements.isAdmin || entitlements.features.has(first),
+    (entitlements) =>
+      entitlements.isAdmin ||
+      entitlements.hasUnlimitedAccess ||
+      entitlements.features.has(first),
   );
 }
 
@@ -816,7 +882,7 @@ export function hasAnyFeature(
   entitlements: CurrentEntitlements,
   features: readonly FeatureKey[],
 ): boolean {
-  if (entitlements.isAdmin) {
+  if (entitlements.isAdmin || entitlements.hasUnlimitedAccess) {
     return true;
   }
 
@@ -827,7 +893,7 @@ export function hasAllFeatures(
   entitlements: CurrentEntitlements,
   features: readonly FeatureKey[],
 ): boolean {
-  if (entitlements.isAdmin) {
+  if (entitlements.isAdmin || entitlements.hasUnlimitedAccess) {
     return true;
   }
 
@@ -838,7 +904,7 @@ export function getMissingFeatures(
   entitlements: CurrentEntitlements,
   requiredFeatures: readonly FeatureKey[],
 ): FeatureKey[] {
-  if (entitlements.isAdmin) {
+  if (entitlements.isAdmin || entitlements.hasUnlimitedAccess) {
     return [];
   }
 
@@ -979,38 +1045,52 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
   const billingStatus = normalizeBillingStatus(data.billing_status);
 
   /**
-   * Administrátor nikdy nesmie stratiť prístup v dôsledku vypršania
-   * plateného balíka. Pre bežného používateľa sa po vypršaní oprávnenia
-   * bezpečne vrátia na FREE.
+   * ADMIN sa normalizuje ešte pred kontrolou expirácie, FREE fallbackom
+   * a výpočtom limitov. Vďaka tomu sa v API ani vo frontende nikdy
+   * nezobrazí ako FREE a všetky limity ostávajú null.
    */
-  const expired = !isAdmin && isEntitlementExpired(validUntil);
+  if (isAdmin) {
+    return createAdminEntitlements({
+      userId: user.id,
+      email: user.email || null,
+      hasDatabaseRecord: true,
+      updatedAt,
+    });
+  }
 
-  const planId = expired ? DEFAULT_PLAN_ID : storedPlanId;
+  /**
+   * Samotná hodnota plan_id = admin bez is_admin nesmie udeliť
+   * administrátorské práva. Taký záznam sa bezpečne vyhodnotí ako FREE.
+   */
+  const safeStoredPlanId: PlanId =
+    storedPlanId === "admin" ? DEFAULT_PLAN_ID : storedPlanId;
+
+  const expired = isEntitlementExpired(validUntil);
+
+  const planId = expired ? DEFAULT_PLAN_ID : safeStoredPlanId;
   const addonIds = expired ? [] : storedAddonIds;
   const plan = PLANS[planId];
-  const catalogPageLimit = resolveCatalogPageLimit(plan.pageLimit);
+  const catalogPageLimit = resolveCatalogPageLimit(plan.pageLimit) ?? 0;
 
-  const features = getFeaturesForEntitlements(planId, addonIds, { isAdmin });
+  const features = getFeaturesForEntitlements(planId, addonIds, {
+    isAdmin: false,
+  });
 
   const featureList = Array.from(features);
 
-  const promptLimit = isAdmin
-    ? null
-    : expired
-      ? plan.promptLimit
-      : resolvePromptLimit(data.prompt_limit, plan.promptLimit);
+  const promptLimit = expired
+    ? plan.promptLimit
+    : resolvePromptLimit(data.prompt_limit, plan.promptLimit);
 
   const promptsUsed = expired ? 0 : toNonNegativeInteger(data.prompts_used, 0);
 
-  const promptsRemaining = isAdmin
-    ? null
-    : calculatePromptsRemaining({
-        promptLimit,
-        promptsUsed,
-      });
+  const promptsRemaining = calculatePromptsRemaining({
+    promptLimit,
+    promptsUsed,
+  });
 
   const attachmentLimit = expired
-    ? plan.attachmentLimit
+    ? resolveAttachmentLimit(undefined, plan.attachmentLimit)
     : resolveAttachmentLimit(data.attachment_limit, plan.attachmentLimit);
 
   const basePageLimit = expired
@@ -1027,8 +1107,8 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
     userId: user.id,
     email: user.email || null,
 
-    isAdmin,
-    hasUnlimitedAccess: isAdmin,
+    isAdmin: false,
+    hasUnlimitedAccess: false,
     hasDatabaseRecord: true,
 
     planId,
@@ -1050,11 +1130,11 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
     promptsUsed,
     promptsRemaining,
     promptLimitReached:
-      !isAdmin && promptLimit !== null && promptsUsed >= promptLimit,
+      promptLimit !== null && promptsUsed >= promptLimit,
 
     attachmentLimit,
 
-    billingStatus: isAdmin ? "admin" : expired ? "expired" : billingStatus,
+    billingStatus: expired ? "expired" : billingStatus,
     activatedAt: expired ? null : activatedAt,
     validUntil,
     updatedAt,
@@ -1073,7 +1153,7 @@ export async function requireFeature(
 ): Promise<CurrentEntitlements> {
   const entitlements = await getCurrentEntitlements();
 
-  if (entitlements.isAdmin) {
+  if (entitlements.isAdmin || entitlements.hasUnlimitedAccess) {
     return entitlements;
   }
 
@@ -1092,7 +1172,11 @@ export async function requireAnyFeature(
 ): Promise<CurrentEntitlements> {
   const entitlements = await getCurrentEntitlements();
 
-  if (entitlements.isAdmin || requiredFeatures.length === 0) {
+  if (
+    entitlements.isAdmin ||
+    entitlements.hasUnlimitedAccess ||
+    requiredFeatures.length === 0
+  ) {
     return entitlements;
   }
 
@@ -1115,7 +1199,7 @@ export async function requireAllFeatures(
 ): Promise<CurrentEntitlements> {
   const entitlements = await getCurrentEntitlements();
 
-  if (entitlements.isAdmin) {
+  if (entitlements.isAdmin || entitlements.hasUnlimitedAccess) {
     return entitlements;
   }
 
@@ -1153,7 +1237,7 @@ export async function requireModuleAccess(
 
   const entitlements = await getCurrentEntitlements();
 
-  if (entitlements.isAdmin) {
+  if (entitlements.isAdmin || entitlements.hasUnlimitedAccess) {
     return entitlements;
   }
 
@@ -1197,7 +1281,7 @@ export async function requireDataAnalysisAction(
 export async function requirePromptAllowance(): Promise<CurrentEntitlements> {
   const entitlements = await getCurrentEntitlements();
 
-  if (entitlements.isAdmin) {
+  if (entitlements.isAdmin || entitlements.hasUnlimitedAccess) {
     return entitlements;
   }
 
@@ -1230,7 +1314,7 @@ export const assertPromptAvailable = requirePromptAllowance;
 export async function consumeSuccessfulPrompt(): Promise<PromptUsageResult> {
   const current = await getCurrentEntitlements();
 
-  if (current.isAdmin) {
+  if (current.isAdmin || current.hasUnlimitedAccess) {
     return {
       isAdmin: true,
       promptLimit: null,
@@ -1331,7 +1415,7 @@ export async function consumeSuccessfulPrompt(): Promise<PromptUsageResult> {
      */
     const latest = await getCurrentEntitlements();
 
-    if (latest.isAdmin) {
+    if (latest.isAdmin || latest.hasUnlimitedAccess) {
       return {
         isAdmin: true,
         promptLimit: null,
@@ -1414,7 +1498,11 @@ export async function requireAttachmentAllowance(
 ): Promise<CurrentEntitlements> {
   const entitlements = await getCurrentEntitlements();
 
-  if (entitlements.isAdmin) {
+  if (
+    entitlements.isAdmin ||
+    entitlements.hasUnlimitedAccess ||
+    entitlements.attachmentLimit === null
+  ) {
     return entitlements;
   }
 

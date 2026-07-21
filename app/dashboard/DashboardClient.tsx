@@ -8930,8 +8930,6 @@ function FileUploadBox({
   fileInputRef,
   onFiles,
   onRemove,
-  limit,
-  unlimited,
   dataMode,
   disabled,
 }: {
@@ -8963,15 +8961,14 @@ function FileUploadBox({
             Prílohy
           </div>
 
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs font-semibold leading-relaxed text-slate-400">
             {dataMode
-              ? "Nahrajte jeden XLSX, XLS, XLSM alebo CSV súbor. Dáta sa najprv pripravia cez prepare route a potom analyzujú z hárka DATA_CLEAN."
-              : "Nahrajte PDF, DOCX, TXT, RTF, ODT, obrázky, Excel, CSV alebo PPT. Binárny súbor sa odošle do /api/chat a obsah sa načíta na serveri."}
+              ? "Načítavané súbory: XLSX, XLS, XLSM a CSV."
+              : "Načítavané súbory: PDF, DOCX, TXT, RTF, ODT, JPG, JPEG, PNG, WEBP, GIF, XLS, XLSX, CSV, PPT a PPTX."}
           </p>
+
           <p className="mt-1 text-xs font-black text-violet-200">
-            {unlimited
-              ? `Nahrané prílohy: ${files.length}`
-              : `Prílohy: ${files.length} / ${limit}`}
+            Počet nahraných príloh: {files.length}
           </p>
         </div>
 

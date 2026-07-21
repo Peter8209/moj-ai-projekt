@@ -173,7 +173,7 @@ type AppDialogVariant = 'info' | 'success' | 'warning' | 'danger' | 'error';
 type AppNoticeState = {
   label?: string;
   title: string;
-  message: string;
+  message?: string;
   detail?: string;
   detailLabel?: string;
   closeLabel?: string;
@@ -711,7 +711,7 @@ async function translateNoticeByAi(notice: NonNullable<AppNoticeState>) {
   const fallback = {
     label: notice.label || 'Systémová správa',
     title: notice.title,
-    message: notice.message,
+    message: notice.message || '',
     detail: notice.detail || '',
     detailLabel: notice.detailLabel || 'Technický detail',
     closeLabel: notice.closeLabel || 'Rozumiem',
@@ -727,7 +727,9 @@ async function translateNoticeByAi(notice: NonNullable<AppNoticeState>) {
     ...notice,
     label: translated.label || fallback.label,
     title: translated.title || fallback.title,
-    message: translated.message || fallback.message,
+    message: notice.message
+      ? translated.message || notice.message
+      : undefined,
     detail: notice.detail ? translated.detail || notice.detail : notice.detail,
     detailLabel: translated.detailLabel || fallback.detailLabel,
     closeLabel: translated.closeLabel || fallback.closeLabel,
@@ -1306,9 +1308,7 @@ export default function ProjectsPage() {
 
       if (!user?.id) {
         await showNotice({
-          title: 'Profil práce je uložený lokálne',
-          message:
-            'Profil práce bol uložený v tomto prehliadači. Po prihlásení používateľa sa bude môcť synchronizovať aj so serverovou databázou.',
+          title: 'Profil práce je uložený',
           variant: 'success',
         });
         return;
@@ -1350,8 +1350,6 @@ export default function ProjectsPage() {
 
       await showNotice({
         title: 'Profil práce je uložený',
-        message:
-          'Profil práce bol úspešne uložený. AI chat a všetky moduly budú odteraz používať aktuálne nastavenia tejto práce.',
         variant: 'success',
       });
     } catch (error) {
@@ -1588,7 +1586,7 @@ export default function ProjectsPage() {
                     </button>
 
                     <div className="mt-5 flex flex-wrap items-center gap-3">
-                      <button type="button" onClick={() => selectProfileForGeneration(profile)} className={`rounded-xl px-4 py-2 text-sm font-black text-white transition ${isActive ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-violet-600 hover:bg-violet-500'}`}>{isActive ? 'Táto práca je vybratá' : 'Vybrať na generovanie'}</button>
+                      <button type="button" onClick={() => selectProfileForGeneration(profile)} className={`rounded-xl px-4 py-2 text-sm font-black text-white transition ${isActive ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-violet-600 hover:bg-violet-500'}`}>{isActive ? 'Zvolená práca' : 'Vybrať na generovanie'}</button>
                       <button type="button" onClick={() => goToChatWithProfile(profile)} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white transition hover:bg-blue-500">Pokračovať v práci</button>
                       <button type="button" onClick={() => openProfile(profile)} className="rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-bold text-white transition hover:bg-white/[0.1]">Otvoriť</button>
                       <button type="button" onClick={() => openEditProfile(profile)} className="rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm font-bold text-violet-100 transition hover:bg-violet-500/20">Upraviť</button>
@@ -1686,9 +1684,11 @@ function ProfessionalNoticeDialog({
               <h2 className="mt-1 text-2xl font-black text-white">
                 {notice.title}
               </h2>
-              <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
-                {notice.message}
-              </p>
+              {notice.message?.trim() ? (
+                <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
+                  {notice.message}
+                </p>
+              ) : null}
 
               {notice.detail && (
                 <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.05] p-4 text-xs leading-6 text-slate-400">
@@ -2850,7 +2850,7 @@ function ProjectDetail({ profile, activeProfileId, onBack, onDelete, onEdit, onS
     <div className="p-5 md:p-8">
       <div className="mb-6 flex flex-wrap gap-3">
         <button type="button" onClick={onBack} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 font-bold text-white transition hover:bg-white/[0.1]"><ArrowLeft className="h-5 w-5" />Späť</button>
-        <button type="button" onClick={onSelect} className={`inline-flex items-center gap-2 rounded-2xl px-4 py-3 font-black text-white transition ${isActive ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-violet-600 hover:bg-violet-500'}`}>{isActive ? <CheckCircle2 className="h-5 w-5" /> : <Sparkles className="h-5 w-5" />}{isActive ? 'Táto práca je vybratá' : 'Vybrať na generovanie'}</button>
+        <button type="button" onClick={onSelect} className={`inline-flex items-center gap-2 rounded-2xl px-4 py-3 font-black text-white transition ${isActive ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-violet-600 hover:bg-violet-500'}`}>{isActive ? <CheckCircle2 className="h-5 w-5" /> : <Sparkles className="h-5 w-5" />}{isActive ? 'Zvolená práca' : 'Vybrať na generovanie'}</button>
         <button type="button" onClick={onContinue} className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-black text-white transition hover:bg-blue-500"><Sparkles className="h-5 w-5" />Pokračovať v práci</button>
         <button type="button" onClick={onEdit} className="inline-flex items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 font-bold text-violet-100 transition hover:bg-violet-500/20"><FileText className="h-5 w-5" />Upraviť</button>
         <button type="button" onClick={onDelete} className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 font-bold text-red-200 transition hover:bg-red-500/20"><Trash2 className="h-5 w-5" />Odstrániť</button>

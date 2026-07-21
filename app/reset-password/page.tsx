@@ -1462,10 +1462,13 @@ function ResetPasswordContent() {
                   <button
                     type="button"
                     onClick={goToLogin}
-                    className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3.5 text-sm font-black text-slate-950 transition hover:bg-slate-100"
+                    className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-black !text-black shadow-lg shadow-black/20 transition hover:bg-slate-100 hover:!text-black focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/30"
+                    style={{ color: "#000000" }}
                   >
-                    <ArrowLeft className="h-4 w-4" />
-                    {t.goToLogin}
+                    <ArrowLeft className="h-4 w-4 !text-black" aria-hidden="true" />
+                    <span className="!text-black" style={{ color: "#000000" }}>
+                      {t.goToLogin}
+                    </span>
                   </button>
                 </div>
               ) : null}

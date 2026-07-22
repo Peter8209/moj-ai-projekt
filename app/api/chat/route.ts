@@ -4705,52 +4705,42 @@ function appendNativeAttachmentPartsToMessages(
   return messages;
 }
 
-function getNativeAttachmentReaderModel():
-  | ModelResult
-  | null {
-  if (
-    process.env
-      .GOOGLE_GENERATIVE_AI_API_KEY
-  ) {
-    return {
+function getNativeAttachmentReaderModels(): ModelResult[] {
+  const readers: ModelResult[] = [];
+
+  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    readers.push({
       model: google(
-        process.env
-          .GOOGLE_ATTACHMENT_MODEL ||
+        process.env.GOOGLE_ATTACHMENT_MODEL ||
           process.env.GOOGLE_MODEL ||
           'gemini-2.5-flash',
       ) as any,
-      providerLabel:
-        'Gemini attachment reader',
-    };
+      providerLabel: 'Gemini attachment reader',
+    });
   }
 
   if (process.env.OPENAI_API_KEY) {
-    return {
+    readers.push({
       model: openai(
-        process.env
-          .OPENAI_ATTACHMENT_MODEL ||
-          process.env.OPENAI_MODEL ||
-          'gpt-4o-mini',
+        process.env.OPENAI_ATTACHMENT_MODEL ||
+          'gpt-4o',
       ),
-      providerLabel:
-        'OpenAI attachment reader',
-    };
+      providerLabel: 'OpenAI attachment reader',
+    });
   }
 
   if (process.env.ANTHROPIC_API_KEY) {
-    return {
+    readers.push({
       model: anthropic(
-        process.env
-          .ANTHROPIC_ATTACHMENT_MODEL ||
+        process.env.ANTHROPIC_ATTACHMENT_MODEL ||
           process.env.ANTHROPIC_MODEL ||
           'claude-sonnet-4-6',
       ) as any,
-      providerLabel:
-        'Claude attachment reader',
-    };
+      providerLabel: 'Claude attachment reader',
+    });
   }
 
-  return null;
+  return readers;
 }
 
 async function extractTextWithNativeAttachmentReader({
@@ -4761,69 +4751,80 @@ async function extractTextWithNativeAttachmentReader({
     return '';
   }
 
-  const reader =
-    getNativeAttachmentReaderModel();
+  const readers = getNativeAttachmentReaderModels();
 
-  if (!reader) {
-    return '';
-  }
-
-  try {
-    const result = await generateText({
-      model: reader.model,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: [
-                'Extrahuj a prepíš všetok čitateľný text z priložených dokumentov alebo obrázkov.',
-                'Zachovaj nadpisy, odseky, tabuľkové hodnoty a poradie.',
-                'Nevytváraj súhrn ani komentár.',
-                `Súbory: ${fileNames.join(', ') || 'neuvedené'}.`,
-              ].join(' '),
-            },
-            ...parts,
-          ],
-        },
-      ] as any,
-      temperature: 0,
-      maxOutputTokens: 12_000,
+  if (!readers.length) {
+    console.warn('CHAT_NATIVE_ATTACHMENT_READER_UNAVAILABLE:', {
+      files: fileNames,
+      message:
+        'Nie je nastavený žiadny multimodálny model pre PDF alebo obrázky.',
     });
-
-    const extracted = normalizeText(
-      result.text || '',
-    );
-
-    console.log(
-      'CHAT_NATIVE_ATTACHMENT_READER:',
-      {
-        provider:
-          reader.providerLabel,
-        files: fileNames,
-        extractedCharacters:
-          extracted.length,
-      },
-    );
-
-    return extracted;
-  } catch (error) {
-    console.warn(
-      'CHAT_NATIVE_ATTACHMENT_READER_WARNING:',
-      {
-        provider:
-          reader.providerLabel,
-        files: fileNames,
-        message:
-          error instanceof Error
-            ? error.message
-            : String(error),
-      },
-    );
-
     return '';
   }
+
+  const errors: string[] = [];
+
+  for (const reader of readers) {
+    try {
+      const result = await generateText({
+        model: reader.model,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: [
+                  'Extrahuj a prepíš všetok čitateľný text z každého priloženého dokumentu alebo obrázka.',
+                  'Zachovaj nadpisy, odseky, tabuľkové hodnoty, citácie, zoznam literatúry a poradie strán.',
+                  'Nevytváraj súhrn, interpretáciu ani komentár.',
+                  'Nevynechávaj odborné termíny, mená autorov, roky, DOI ani URL.',
+                  `Súbory: ${fileNames.join(', ') || 'neuvedené'}.`,
+                ].join(' '),
+              },
+              ...parts,
+            ],
+          },
+        ] as any,
+        temperature: 0,
+        maxOutputTokens: 16_000,
+      });
+
+      const extracted = normalizeText(result.text || '');
+
+      console.log('CHAT_NATIVE_ATTACHMENT_READER:', {
+        provider: reader.providerLabel,
+        files: fileNames,
+        extractedCharacters: extracted.length,
+      });
+
+      if (extracted.length >= 40) {
+        return extracted;
+      }
+
+      errors.push(
+        `${reader.providerLabel}: model vrátil prázdny alebo príliš krátky text.`,
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+
+      errors.push(`${reader.providerLabel}: ${message}`);
+
+      console.warn('CHAT_NATIVE_ATTACHMENT_READER_WARNING:', {
+        provider: reader.providerLabel,
+        files: fileNames,
+        message,
+      });
+    }
+  }
+
+  console.error('CHAT_NATIVE_ATTACHMENT_READER_FAILED:', {
+    files: fileNames,
+    errors,
+  });
+
+  return '';
 }
 
 function getPreparedMetadataForFile(file: UploadedFile, preparedFilesMetadata: PreparedFileMetadata[]) {
@@ -4886,7 +4887,26 @@ async function extractTextFromSingleFile(file: UploadedFile, preparedFilesMetada
     const bufferInfo = await getUsableFileBuffer(file);
 
     if (!extractableAttachmentExtensions.includes(effectiveExtension)) {
-      const fallbackText = normalizeText(metadataExtractedText);
+      let fallbackText = normalizeText(metadataExtractedText);
+      let fallbackMethod = fallbackText
+        ? 'client_or_preprocessed_fallback'
+        : '';
+
+      if (!fallbackText && getNativeAttachmentMediaType(file)) {
+        const nativeBundle = await buildNativeAttachmentBundle({
+          files: [file],
+          extractedFiles: [],
+        });
+
+        fallbackText = normalizeText(
+          await extractTextWithNativeAttachmentReader(nativeBundle),
+        );
+
+        if (fallbackText) {
+          fallbackMethod = 'native_multimodal_reader';
+        }
+      }
+
       const fallbackCitations = fallbackText
         ? extractInTextCitations(fallbackText)
         : [];
@@ -4915,8 +4935,10 @@ async function extractTextFromSingleFile(file: UploadedFile, preparedFilesMetada
         extractedChars: fallbackText.length,
         extractedPreview: fallbackText.slice(0, 1200),
         status: fallbackText
-          ? 'Text bol prevzatý z klientského alebo predspracovaného fallbacku.'
-          : 'Súbor bol priložený, ale z tohto typu sa v tejto API trase neextrahuje text.',
+          ? fallbackMethod === 'native_multimodal_reader'
+            ? 'Text bol úspešne extrahovaný multimodálnym čítačom.'
+            : 'Text bol prevzatý z klientského alebo predspracovaného fallbacku.'
+          : 'Súbor bol priložený, ale z tohto typu sa nepodarilo extrahovať text.',
         error: null,
         bibliographicCandidates,
         inTextCitations: uniqueArray(
@@ -5009,6 +5031,114 @@ async function extractTextFromSingleFile(file: UploadedFile, preparedFilesMetada
           ...extractAuthorsFromCandidates(fallbackCandidates),
         ]),
       };
+    }
+
+    // Posledný serverový fallback pre PDF a obrázky:
+    // súbor sa odošle priamo multimodálnemu modelu ako FilePart.
+    // Týmto sa spracujú aj skenované PDF bez textovej vrstvy.
+    if (getNativeAttachmentMediaType(file)) {
+      try {
+        const nativeBundle = await buildNativeAttachmentBundle({
+          files: [file],
+          extractedFiles: [],
+        });
+
+        const nativeText = normalizeText(
+          await extractTextWithNativeAttachmentReader(nativeBundle),
+        );
+
+        if (nativeText) {
+          const nativeCitations =
+            extractInTextCitations(nativeText);
+          const nativeCandidates =
+            mergeBibliographicCandidates(
+              metadataCandidates,
+              metadataCitationSources,
+              extractBibliographicCandidates(
+                nativeText,
+                'attachment',
+              ),
+              buildLiteratureFromInTextCitations(
+                nativeCitations,
+                'citation',
+              ),
+            ).map((source) => ({
+              ...source,
+              sourceDocumentName:
+                source.sourceDocumentName ||
+                originalName,
+              citedAccordingTo:
+                source.citedAccordingTo ||
+                originalName,
+            }));
+
+          const inTextCitations =
+            uniqueArray(
+              [
+                ...metadataInTextCitations,
+                ...nativeCitations,
+              ].map((item) =>
+                JSON.stringify(item),
+              ),
+            ).map(
+              (item) =>
+                JSON.parse(item) as InTextCitation,
+            );
+
+          return {
+            ...base,
+            compressedSize: size,
+            decompressedSize: size,
+            wasDecompressed: false,
+            compressionWithinLimit:
+              size <= maxCompressedFileSizeBytes,
+            compressionStatus:
+              'Klasická extrakcia zlyhala; súbor bol úspešne spracovaný multimodálnym čítačom.',
+            extractedText: limitText(
+              nativeText,
+              maxExtractedCharsPerAttachment,
+            ),
+            extractedChars: nativeText.length,
+            extractedPreview:
+              nativeText.slice(0, 1200),
+            status:
+              'Text bol úspešne extrahovaný multimodálnym čítačom PDF/OCR.',
+            error: null,
+            warning: [
+              base.warning,
+              `Klasický parser: ${message}`,
+            ]
+              .filter(Boolean)
+              .join(' | '),
+            bibliographicCandidates:
+              nativeCandidates,
+            inTextCitations,
+            detectedAuthors:
+              cleanValidAuthors([
+                ...metadataAuthors,
+                ...inTextCitations.flatMap(
+                  (citation) =>
+                    citation.authors || [],
+                ),
+                ...extractAuthorsFromCandidates(
+                  nativeCandidates,
+                ),
+              ]),
+          };
+        }
+      } catch (nativeError) {
+        console.error(
+          'CHAT_NATIVE_SINGLE_FILE_EXTRACTION_FAILED:',
+          {
+            file: originalName,
+            parserError: message,
+            nativeError:
+              nativeError instanceof Error
+                ? nativeError.message
+                : String(nativeError),
+          },
+        );
+      }
     }
 
     return {
@@ -5371,15 +5501,16 @@ ${requiredSections}
 ${profile.schema?.aiInstruction || 'Neuvedené'}
 
 POVINNÉ PRAVIDLÁ PRE AI:
-- Vždy rešpektuj aktuálny profil práce.
+- Aktuálny profil určuje tému, cieľ, odbor, jazyk a citačnú normu.
+- Ak sú v aktuálnej požiadavke dostupné prílohy alebo extrahovaný text, ich odborný obsah má prednosť pred všeobecnými údajmi profilu.
+- Profil nesmie nahradiť ani prehlušiť konkrétne údaje z príloh; slúži iba na zasadenie príloh do témy práce.
 - Výstup generuj v jazyku práce: ${workLanguage}.
 - Citačný štýl musí byť presne: ${citationStyle}.
 - Ak používateľ zmenil profil, pracuj s najnovšou verziou profilu.
 - Nevymýšľaj autorov, DOI, URL, ISBN ani neexistujúce publikácie.
 - Ak údaj nie je dostupný, napíš presne: Údaje sú potrebné overiť.
-- Ak sú dostupné prílohy alebo extrahovaný text, čerpaj primárne z nich.
 - Ak prílohy nie sú dostupné, generuj podľa profilu práce.
-- Pri akademických výstupoch rozlišuj primárne a sekundárne zdroje, ak sú dostupné.
+- Pri akademických výstupoch rozlišuj primárne a sekundárne zdroje.
 `.trim();
 }
 function buildStrictTranslationPrompt() {
@@ -5409,7 +5540,7 @@ function buildAcademicChapterRules() {
   return `ŠPECIÁLNY REŽIM PRE AKADEMICKÉ KAPITOLY MÁ NAJVYŠŠIU PRIORITU.
 
 ABSOLÚTNE PRAVIDLÁ:
-1. Výstup musí vychádzať z aktívneho profilu práce: názov práce, téma, cieľ, metodológia, výskumný problém, odbor, jazyk a citačná norma.
+1. Aktívny profil určuje rámec práce (názov, téma, cieľ, metodológia, odbor, jazyk a citačná norma), ale ak sú priložené dokumenty, odborné tvrdenia a konkrétne údaje musia vychádzať prednostne z ich extrahovaného obsahu.
 2. Ak používateľ žiada prvú kapitolu alebo úvod, nevytváraj abstrakt namiesto úvodu.
 3. Ak používateľ žiada kapitolu, vytvor plnohodnotný akademický text v rozsahu primeranom požiadavke a dostupnému limitu.
 4. Text musí mať logickú štruktúru, odborné odseky a vecnú nadväznosť.
@@ -5641,7 +5772,7 @@ const lockedProfileTitle =
   'nezadaná hlavná téma';
 
 const strictProfileLock = `
-UZAMKNUTÝ AKTÍVNY PROFIL PRÁCE:
+AKTÍVNY PROFIL PRÁCE – TEMATICKÝ A FORMÁLNY RÁMEC:
 ID profilu / projektu: ${profile?.id || 'neuvedené'}
 Hlavná téma / názov práce: ${lockedProfileTitle}
 Typ práce: ${profile?.type || 'neuvedené'}
@@ -5656,15 +5787,14 @@ Kľúčové slová: ${getKeywords(profile).join(', ') || 'neuvedené'}
 Citačná norma: ${getCitationStyle(profile)}
 Jazyk práce: ${getWorkLanguage(profile)}
 
-TVRDÉ PRAVIDLÁ UZAMKNUTIA PROFILU:
-1. Každá odpoveď musí vychádzať výlučne z tohto aktívneho profilu práce.
-2. Nesmieš zmeniť tému práce na inú tému.
-3. Nesmieš použiť predchádzajúcu tému z histórie chatu.
-4. Nesmieš použiť najnovší profil používateľa, ak sa líši od tohto aktívneho profilu.
-5. Ak je hlavná téma alebo názov práce „Immanuel Kant“, celý výstup musí byť o Immanuelovi Kantovi.
-6. Ak používateľ napíše všeobecne „napíš úvod“, „napíš abstrakt“, „navrhni kapitolu“, „spracuj zdroje“ alebo „pokračuj“, vždy to znamená: spracuj to pre tento aktívny profil práce.
-7. Ak používateľ výslovne žiada inú tému, upozorni ho, že aktuálne je aktívny profil inej práce, a najprv sa riaď aktívnym profilom.
-8. Ak je konflikt medzi históriou chatu a aktívnym profilom, aktívny profil má absolútnu prioritu.
+PRAVIDLÁ PROFILU A PRÍLOH:
+1. Profil určuje tému, cieľ, odbor, jazyk a citačnú normu výstupu.
+2. Ak používateľ v aktuálnej požiadavke priložil dokumenty, ich extrahovaný odborný obsah je hlavný vecný podklad odpovede.
+3. Profil nesmie nahradiť konkrétne fakty, pojmy, výsledky, tabuľky, citácie ani bibliografiu z príloh.
+4. Pri konflikte medzi všeobecným údajom profilu a konkrétnym údajom v relevantnej prílohe použi údaj z prílohy a zasadíš ho do rámca profilu.
+5. História starších chatov nesmie prepísať aktuálny profil ani aktuálne prílohy.
+6. Všeobecné požiadavky ako „napíš úvod“, „spracuj kapitolu“ alebo „spracuj zdroje“ aplikuj na aktívny profil a na obsah práve priložených dokumentov.
+7. Ak príloha tematicky nesúvisí s profilom, uveď tento nesúlad jasne; napriek tomu prílohu prečítaj a nepredstieraj, že jej obsah nebol dostupný.
 `;
 
 
@@ -5672,7 +5802,7 @@ TVRDÉ PRAVIDLÁ UZAMKNUTIA PROFILU:
 
 ${languageInstruction}
 
-KOMPLETNÝ PROFIL PRÁCE JE HLAVNÝ ZDROJ KONTEXTU. Každá odpoveď musí vychádzať z profilu práce.
+AKTÍVNY PROFIL PRÁCE URČUJE TEMATICKÝ A FORMÁLNY RÁMEC. AK SÚ PRILOŽENÉ DOKUMENTY, ICH EXTRAHOVANÝ OBSAH JE HLAVNÝ VECNÝ ZDROJ ODPOVEDE.
 
 ${strictProfileLock}
 
@@ -5765,6 +5895,40 @@ Ak nejde o kapitolu, použi sekcie === VÝSTUP ===, === ANALÝZA ===, === SKÓRE
 // =====================================================
 // OUTPUT CLEANING
 // =====================================================
+
+
+function removeFalseAttachmentFailureNotices(
+  value: string,
+  extractedFiles: ExtractedAttachment[],
+): string {
+  const hasReadableAttachment =
+    extractedFiles.some(
+      (file) =>
+        file.extractedChars > 0 &&
+        file.extractedText.trim().length > 0 &&
+        !file.error,
+    );
+
+  if (!hasReadableAttachment) {
+    return normalizeText(value);
+  }
+
+  return normalizeText(value)
+    .replace(
+      /Pozn[aá]mka\s+k\s+použit[ýy]m\s+zdrojom\s*:\s*Priložen[ýy]\s+dokument[\s\S]{0,900}?(?:nebol\s+použit[ýy][^.\n]*\.|technickej\s+chyby[^.\n]*\.)/gi,
+      '',
+    )
+    .replace(
+      /Priložen[ýy]\s+dokument[\s\S]{0,500}?obsah\s+nebolo\s+možn[eé]\s+extrahovať[\s\S]{0,500}?(?:\.|\n)/gi,
+      '',
+    )
+    .replace(
+      /Výstup\s+bol\s+zostaven[ýy]\s+z\s+profilu\s+práce[\s\S]{0,350}?(?:\.|\n)/gi,
+      '',
+    )
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
 
 function buildInTextCitationFromSource(source: BibliographicCandidate) {
   const authors = cleanValidAuthors(source.authors || []);
@@ -6208,6 +6372,192 @@ function limitOutputToRemainingPages(
     output: limitedOutput,
     wasTruncated: true,
     maximumCharacters,
+  };
+}
+
+
+function splitOutputBodyAndSourceTail(value: string): {
+  body: string;
+  sourceTail: string;
+} {
+  const cleaned = normalizeText(value);
+  const positions = getPrimarySecondaryHeadingPositions(cleaned);
+  const firstPrimary = positions.find(
+    (item) => item.heading === 'primary',
+  );
+
+  if (!firstPrimary) {
+    return {
+      body: cleaned,
+      sourceTail: '',
+    };
+  }
+
+  return {
+    body: cleaned.slice(0, firstPrimary.lineStart).trim(),
+    sourceTail: cleaned.slice(firstPrimary.lineStart).trim(),
+  };
+}
+
+function limitOutputPreservingSourceTail(
+  value: string,
+  remainingPages: number | null | undefined,
+  isUnlimited = false,
+): LimitedPageOutput {
+  if (isUnlimited) {
+    return {
+      output: String(value || ''),
+      wasTruncated: false,
+      maximumCharacters: Number.MAX_SAFE_INTEGER,
+    };
+  }
+
+  const safeRemainingPages =
+    typeof remainingPages === 'number' &&
+    Number.isFinite(remainingPages)
+      ? Math.max(remainingPages, 0)
+      : 0;
+
+  const maximumCharacters =
+    safeRemainingPages * CHARACTERS_PER_PAGE;
+
+  if (maximumCharacters <= 0) {
+    throw new PageLimitError();
+  }
+
+  const cleaned = normalizeText(value);
+  if (cleaned.length <= maximumCharacters) {
+    return {
+      output: cleaned,
+      wasTruncated: false,
+      maximumCharacters,
+    };
+  }
+
+  const { body, sourceTail } =
+    splitOutputBodyAndSourceTail(cleaned);
+
+  // Ak zdrojový blok neexistuje, použije sa pôvodné obmedzenie.
+  if (!sourceTail) {
+    return limitOutputToRemainingPages(
+      cleaned,
+      remainingPages,
+      false,
+    );
+  }
+
+  const truncationNotice =
+    '[Hlavný text bol skrátený po dosiahnutí zostávajúceho stránkového limitu.]';
+
+  // Zdroje majú byť zachované vždy. Pri extrémne malom zostatku
+  // sa skráti ich diagnostická časť, nie však nadpisy oboch sekcií.
+  const minimumSourceTail = [
+    'Primárne zdroje',
+    '',
+    'Zdrojový zoznam sa nezmestil do zostávajúceho stránkového limitu.',
+    '',
+    'Sekundárne zdroje',
+    '',
+    'Zdrojový zoznam sa nezmestil do zostávajúceho stránkového limitu.',
+  ].join('\n');
+
+  let safeSourceTail = sourceTail;
+  const sourceBudget = Math.max(
+    Math.floor(maximumCharacters * 0.35),
+    Math.min(sourceTail.length, 2400),
+  );
+
+  if (safeSourceTail.length > sourceBudget) {
+    safeSourceTail = `${safeSourceTail
+      .slice(0, Math.max(sourceBudget - 80, 0))
+      .trimEnd()}
+
+[Zoznam zdrojov bol skrátený podľa zostávajúceho stránkového limitu.]`;
+  }
+
+  if (safeSourceTail.length >= maximumCharacters) {
+    safeSourceTail = minimumSourceTail.slice(
+      0,
+      maximumCharacters,
+    );
+  }
+
+  const separatorLength = 2;
+  const noticeBlock = `\n\n${truncationNotice}`;
+  const availableForBody = Math.max(
+    maximumCharacters -
+      safeSourceTail.length -
+      noticeBlock.length -
+      separatorLength,
+    0,
+  );
+
+  const limitedBody =
+    body.length > availableForBody
+      ? body.slice(0, availableForBody).trimEnd()
+      : body;
+
+  const output = [
+    limitedBody,
+    body.length > availableForBody
+      ? truncationNotice
+      : '',
+    safeSourceTail,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(0, maximumCharacters);
+
+  return {
+    output,
+    wasTruncated: true,
+    maximumCharacters,
+  };
+}
+
+function extractSourceSectionsForResponse(value: string): {
+  sources: string;
+  primarySources: string;
+  secondarySources: string;
+} {
+  const cleaned = normalizeText(value);
+  const positions = getPrimarySecondaryHeadingPositions(cleaned);
+  const primary = positions.find(
+    (item) => item.heading === 'primary',
+  );
+  const secondary = positions.find(
+    (item) =>
+      item.heading === 'secondary' &&
+      (!primary || item.index > primary.index),
+  );
+
+  if (!primary || !secondary) {
+    return {
+      sources: '',
+      primarySources: '',
+      secondarySources: '',
+    };
+  }
+
+  const primarySources = cleaned
+    .slice(
+      primary.index +
+        'Primárne zdroje'.length,
+      secondary.lineStart,
+    )
+    .trim();
+
+  const secondarySources = cleaned
+    .slice(
+      secondary.index +
+        'Sekundárne zdroje'.length,
+    )
+    .trim();
+
+  return {
+    sources: cleaned.slice(primary.lineStart).trim(),
+    primarySources,
+    secondarySources,
   };
 }
 
@@ -6919,11 +7269,11 @@ async function createJsonResponse({
     throw new PageLimitError();
   }
 
-  const modelMessages =
-    appendNativeAttachmentPartsToMessages(
-      normalizedMessages,
-      nativeAttachmentParts,
-    );
+  // Finálny zvolený model dostáva jednotný textový kontext.
+  // PDF a obrázky sa čítajú v samostatnej extrakčnej vrstve vyššie.
+  // Týmto sa zabezpečí rovnaké správanie aj pre Mistral a Grok,
+  // ktoré nemusia podporovať PDF FilePart priamo.
+  const modelMessages = normalizedMessages;
 
   const result = await generateText({
     model,
@@ -6962,6 +7312,18 @@ if (isChapterRequest || sourcesOnly || module === 'chat') {
       output,
     );
 
+  // Najprv zabezpečíme reálne citácie z príloh a overeného externého balíka.
+  // Citácia sa doplní iba z kandidáta, ktorý má použiteľného autora a rok.
+  output = ensureChapterHasInTextCitations({
+    text: output,
+    sources: detectedSourcesForOutput,
+  });
+
+  output = ensureParagraphCitationsFromVerifiedSources(
+    output,
+    externalResearch.sources,
+  );
+
   // Zdroje sa zostavia deterministicky až po vygenerovaní hlavného textu.
   // Poradie je vždy: primárny dokument a jeho presná citácia, sekundárne
   // zdroje použité v texte a napokon počet spracovaných príloh.
@@ -6971,17 +7333,27 @@ if (isChapterRequest || sourcesOnly || module === 'chat') {
       externalResearch.sources,
     extractedFiles,
     attachmentWasRelevant:
-      extractedFiles.length > 0,
+      extractedFiles.some(
+        (file) =>
+          file.extractedChars > 0 &&
+          file.extractedText.trim().length > 0 &&
+          !file.error,
+      ),
     detectedSourcesForOutput,
     citationStyle:
       activeCitationStyle,
   });
+
+  output = removeFalseAttachmentFailureNotices(
+    output,
+    extractedFiles,
+  );
 }
 
 output = normalizeVerificationNotices(output);
 
 const limitedPageOutput =
-  limitOutputToRemainingPages(
+  limitOutputPreservingSourceTail(
     output,
     pageQuota.pagesRemaining,
     pageQuota.isUnlimited ||
@@ -6990,6 +7362,9 @@ const limitedPageOutput =
   );
 
 output = limitedPageOutput.output;
+
+const responseSourceSections =
+  extractSourceSectionsForResponse(output);
 
 // Prompt sa odpočíta iba po úspešnom vygenerovaní a vyčistení výstupu.
 const promptUsage =
@@ -7045,6 +7420,12 @@ await saveGeneratedHistory({
     ok: true,
     provider: providerLabel,
     output,
+    sources:
+      responseSourceSections.sources,
+    primarySources:
+      responseSourceSections.primarySources,
+    secondarySources:
+      responseSourceSections.secondarySources,
     isAdmin:
       entitlementGuard.entitlements.isAdmin,
     hasUnlimitedAccess:
@@ -7131,15 +7512,31 @@ await saveGeneratedHistory({
           : file.error || null,
     })),
     sourcePolicy: {
-      sourceConstruction: 'model_generated',
-      backendDidNotAppendSources: true,
-      backendOnlyCleanedOutput: true,
-      attachmentWasRelevant: relevance.hasAttachmentContent && relevance.isRelevant,
-      usedAttachmentAsSource: relevance.hasAttachmentContent && relevance.isRelevant,
+      sourceConstruction:
+        'backend_enforced_from_attachments_and_verified_sources',
+      backendDidNotAppendSources: false,
+      backendOnlyCleanedOutput: false,
+      backendAppendedOrRebuiltSources: true,
+      attachmentWasRelevant:
+        relevance.hasAttachmentContent &&
+        relevance.isRelevant,
+      usedAttachmentAsSource:
+        extractedFilesPayload.some(
+          (file) =>
+            file.extractedChars > 0 &&
+            !file.error,
+        ),
       usedAiKnowledgeFallback:
-        settings.allowAiKnowledgeFallback && (!relevance.hasAttachmentContent || !relevance.isRelevant),
-      usedSemanticScholarOrCrossref: externalResearch.sources.length > 0,
-      detectedSourcesCount: detectedSourcesForOutput.length,
+        settings.allowAiKnowledgeFallback &&
+        externalResearch.sources.length > 0,
+      usedSemanticScholarOrCrossref:
+        externalResearch.sources.length > 0,
+      detectedSourcesCount:
+        detectedSourcesForOutput.length,
+      returnedSourceSections:
+        Boolean(
+          responseSourceSections.sources,
+        ),
     },
   });
 }
@@ -8130,20 +8527,51 @@ ${
     };
 
     const shouldSearchExternalSources =
-      !hasSuccessfullyExtractedUpload &&
       settings.useExternalAcademicSources &&
       settings.allowAiKnowledgeFallback &&
       (isChapterRequest || sourcesOnly || module === 'chat') &&
       (
+        !hasSuccessfullyExtractedUpload ||
         !relevance.hasAttachmentContent ||
         !relevance.isRelevant ||
         detectedSourcesForOutput.length < 3
       );
 
+    const externalResearchSeed = [
+      lastUserMessage,
+      ...extractedFiles
+        .filter(
+          (file) =>
+            file.extractedChars > 0 &&
+            file.extractedText.trim().length > 0,
+        )
+        .map((file) =>
+          [
+            file.originalName,
+            file.extractedPreview,
+          ].join(' '),
+        ),
+      ...detectedSourcesForOutput
+        .slice(0, 8)
+        .map((source) =>
+          [
+            source.title,
+            source.authors?.join(' '),
+            source.year,
+          ]
+            .filter(Boolean)
+            .join(' '),
+        ),
+    ]
+      .filter(Boolean)
+      .join(' ');
+
     const externalResearch = await buildVerifiedSourcePack({
       profile,
-      userMessage: lastUserMessage,
-      shouldSearch: shouldSearchExternalSources,
+      userMessage:
+        externalResearchSeed,
+      shouldSearch:
+        shouldSearchExternalSources,
     });
 
     const finalDetectedSourcesForOutput = mergeBibliographicCandidates(

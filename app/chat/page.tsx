@@ -2775,62 +2775,22 @@ ${message}`);
   };
 
   const prepareBackendFile = async (item: AttachedFile): Promise<PreparedFile> => {
-    const pdfFile = isPdfFile(item.name);
-
     updateProcessingLog(item.id, {
       status: 'extracting',
-      message: 'Extrahujem obsah prílohy.',
+      message:
+        'Načítavam obsah prílohy. Pôvodný súbor zostane zachovaný pre /api/chat.',
       originalSize: item.size,
     });
 
-    let extraction;
-    let fileForChat = item.file;
-    let preparedName = item.name;
-    let preparedType = item.type || 'application/octet-stream';
-    let preparedSize = item.size;
-    let compressionMode: PreparedFile['compressionMode'] = 'raw_small_text';
-
     try {
-      // PDF sa posiela v pôvodnom binárnom tvare. Klientsky pdfjs worker
-      // sa nepoužíva; extrakciu vykoná serverová route.
-      if (pdfFile) {
-        extraction = await callExtractTextApi({
-          file: item.file,
-          fileName: item.name,
-          originalName: item.name,
-          compressed: false,
-        });
-      } else {
-        const gzipBlobResult = await gzipBlob(item.file);
-        const compressedName = `${item.name}.gz`;
-        const compressedFile = new File([gzipBlobResult], compressedName, {
-          type: window.CompressionStream
-            ? 'application/gzip'
-            : item.type || 'application/octet-stream',
-        });
-
-        try {
-          extraction = await callExtractTextApi({
-            file: compressedFile,
-            fileName: compressedName,
-            originalName: item.name,
-            compressed: true,
-          });
-
-          fileForChat = compressedFile;
-          preparedName = compressedName;
-          preparedType = compressedFile.type;
-          preparedSize = compressedFile.size;
-          compressionMode = 'gzip_original';
-        } catch {
-          extraction = await callExtractTextApi({
-            file: item.file,
-            fileName: item.name,
-            originalName: item.name,
-            compressed: false,
-          });
-        }
-      }
+      // Pomocná extrakcia slúži iba na rýchle získanie textu a zdrojov.
+      // Do /api/chat sa vždy odošle pôvodný binárny File objekt.
+      const extraction = await callExtractTextApi({
+        file: item.file,
+        fileName: item.name,
+        originalName: item.name,
+        compressed: false,
+      });
 
       const extractedText = truncateByChars(
         extraction.extractedText,
@@ -2839,52 +2799,16 @@ ${message}`);
 
       updateProcessingLog(item.id, {
         status: 'extracted',
-        message: 'Obsah prílohy bol úspešne extrahovaný.',
-        preparedSize,
+        message:
+          'Obsah prílohy bol načítaný. Pôvodný súbor sa odošle aj na serverovú kontrolu.',
+        preparedSize: item.size,
         extractedChars: extractedText.length,
-        detectedSourcesCount: extraction.detectedSources.length,
-        detectedAuthorsCount: extraction.detectedAuthors.length,
-        detectedInTextCitationsCount: extraction.inTextCitations.length,
-      });
-
-      return {
-        originalId: item.id,
-        originalName: item.name,
-        originalSize: item.size,
-        originalType: item.type,
-        preparedName,
-        preparedSize,
-        preparedType,
-        compressionMode,
-        file: fileForChat,
-        extractedText,
-        extractionMethod: extraction.method || 'server',
-        extractionMessage: 'Obsah prílohy bol extrahovaný na serveri.',
-        detectedSources: extraction.detectedSources,
-        inTextCitations: extraction.inTextCitations,
-        detectedAuthors: extraction.detectedAuthors,
-        formattedSources:
-          extraction.formattedSources ||
-          formatAllDetectedSources({
-            citations: extraction.inTextCitations,
-            sources: extraction.detectedSources,
-            files: [],
-          }),
-        extractionStatus: 'client_extracted',
-        warning: undefined,
-      };
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Extrakciu prílohy sa nepodarilo dokončiť pred odoslaním.';
-
-      // Pôvodný súbor sa napriek zlyhaniu pomocnej extrakcie odošle do
-      // /api/chat, kde sa vykoná hlavná serverová extrakcia.
-      updateProcessingLog(item.id, {
-        status: 'ready',
-        message: 'Príloha bola odoslaná na serverové spracovanie.',
-        warning: undefined,
+        detectedSourcesCount:
+          extraction.detectedSources.length,
+        detectedAuthorsCount:
+          extraction.detectedAuthors.length,
+        detectedInTextCitationsCount:
+          extraction.inTextCitations.length,
       });
 
       return {
@@ -2894,18 +2818,71 @@ ${message}`);
         originalType: item.type,
         preparedName: item.name,
         preparedSize: item.size,
-        preparedType: item.type || 'application/octet-stream',
+        preparedType:
+          item.type || 'application/octet-stream',
+        compressionMode: 'raw_small_text',
+        file: item.file,
+        extractedText,
+        extractionMethod:
+          extraction.method || 'extract-text',
+        extractionMessage:
+          extraction.message ||
+          'Obsah prílohy bol extrahovaný pomocným endpointom.',
+        detectedSources:
+          extraction.detectedSources,
+        inTextCitations:
+          extraction.inTextCitations,
+        detectedAuthors:
+          extraction.detectedAuthors,
+        formattedSources:
+          extraction.formattedSources ||
+          formatAllDetectedSources({
+            citations:
+              extraction.inTextCitations,
+            sources:
+              extraction.detectedSources,
+            files: [],
+          }),
+        extractionStatus: 'client_extracted',
+        warning: undefined,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Pomocná extrakcia prílohy zlyhala.';
+
+      // Toto nie je finálne zlyhanie. Pôvodný PDF/DOCX/obrázok sa odošle
+      // do /api/chat, kde sa vykoná parser a multimodálny PDF/OCR fallback.
+      updateProcessingLog(item.id, {
+        status: 'ready',
+        message:
+          'Príloha je pripravená na hlavné serverové PDF/OCR spracovanie.',
+        preparedSize: item.size,
+        warning: message,
+      });
+
+      return {
+        originalId: item.id,
+        originalName: item.name,
+        originalSize: item.size,
+        originalType: item.type,
+        preparedName: item.name,
+        preparedSize: item.size,
+        preparedType:
+          item.type || 'application/octet-stream',
         compressionMode: 'raw_small_text',
         file: item.file,
         extractedText: '',
-        extractionMethod: 'server_fallback',
+        extractionMethod:
+          'server_parser_and_multimodal_fallback',
         extractionMessage: message,
         detectedSources: [],
         inTextCitations: [],
         detectedAuthors: [],
         formattedSources: '',
         extractionStatus: 'backend_required',
-        warning: undefined,
+        warning: message,
       };
     }
   };
@@ -2991,11 +2968,8 @@ ${message}`);
 
     setAttachedFiles(nextFiles);
 
-    // Počíta sa každá skutočne prijatá príloha už pri nahratí do chatu.
-    // Rovnaké klientské ID sa pri následnom /api/chat nezapočíta druhýkrát.
-    if (newlyAcceptedFiles.length > 0) {
-      void recordNewAttachmentUploads(newlyAcceptedFiles);
-    }
+    // Prílohy sa zatiaľ iba pripravia v UI.
+    // Do spotreby sa zapíšu až po úspešnom serverovom prečítaní v /api/chat.
 
     setProcessingLog([]);
     setResult('');
@@ -3151,6 +3125,8 @@ ${message}`);
    setInput('');
     setIsLoading(true);
     setPopupData(null);
+
+    let requestSucceeded = false;
 
     try {
       const preparedFiles = await prepareFilesBeforeSend(attachedFiles);
@@ -3320,6 +3296,8 @@ formData.append('profile', JSON.stringify(profileForApi || null));
             extractionStatus: item.extractionStatus,
             extractionMethod: item.extractionMethod,
             extractionMessage: item.extractionMessage,
+            extractedText: item.extractedText || '',
+            extracted_text: item.extractedText || '',
             detectedSourcesCount: item.detectedSources?.length || 0,
             detectedSources: item.detectedSources || [],
             inTextCitations: item.inTextCitations || [],
@@ -3439,15 +3417,89 @@ formData.append('profile', JSON.stringify(profileForApi || null));
 
         if (data?.attachmentUsage) {
           setAttachmentUsage({
-            attachmentsUsed: Number(data.attachmentUsage.attachmentsUsed || 0),
-            attachmentsAdded: Number(data.attachmentUsage.attachmentsAdded || 0),
-            lastUploadedAt: data.attachmentUsage.lastUploadedAt || null,
-            trackingAvailable: data.attachmentUsage.trackingAvailable !== false,
+            attachmentsUsed: Number(
+              data.attachmentUsage.attachmentsUsed || 0,
+            ),
+            attachmentsAdded: Number(
+              data.attachmentUsage.attachmentsAdded || 0,
+            ),
+            lastUploadedAt:
+              data.attachmentUsage.lastUploadedAt || null,
+            trackingAvailable:
+              data.attachmentUsage.trackingAvailable !== false,
           });
         }
 
+        if (attachedFiles.length > 0) {
+          const attachmentProcessing =
+            data?.attachmentProcessing || {};
+          const receivedFiles = Number(
+            attachmentProcessing.receivedFiles || 0,
+          );
+          const successfullyReadFiles = Number(
+            attachmentProcessing.successfullyReadFiles || 0,
+          );
+          const serverReadAttachments =
+            attachmentProcessing.serverReadAttachments === true;
+
+          if (receivedFiles < attachedFiles.length) {
+            throw new Error(
+              `Server prijal iba ${receivedFiles} z ${attachedFiles.length} príloh. Prílohy neboli odpočítané ani považované za spracované.`,
+            );
+          }
+
+          if (
+            successfullyReadFiles < attachedFiles.length ||
+            !serverReadAttachments
+          ) {
+            const fileDiagnostics = Array.isArray(
+              data?.extractedFilesInfo,
+            )
+              ? data.extractedFilesInfo
+                  .map(
+                    (item: any) =>
+                      `${item.fileName || item.preparedName || 'Súbor'}: ${
+                        item.status ||
+                        item.error ||
+                        'neznámy stav'
+                      }`,
+                  )
+                  .join('\n')
+              : '';
+
+            throw new Error(
+              [
+                `Server neprečítal všetky prílohy. Úspešne prečítané: ${successfullyReadFiles}/${attachedFiles.length}.`,
+                fileDiagnostics,
+              ]
+                .filter(Boolean)
+                .join('\n\n'),
+            );
+          }
+        }
+
         fullText =
-          String(data.output || data.result || data.message || data.text || data.answer || '').trim() || '';
+          String(
+            data.output ||
+              data.result ||
+              data.message ||
+              data.text ||
+              data.answer ||
+              '',
+          ).trim() || '';
+
+        const apiSources = String(
+          data.sources || '',
+        ).trim();
+
+        if (
+          apiSources &&
+          !/(^|\n)\s*Prim[aá]rne\s+zdroje\s*(\n|$)/i.test(
+            fullText,
+          )
+        ) {
+          fullText = `${fullText}\n\n${apiSources}`.trim();
+        }
 
         if (!fullText && data.ok === false) {
           appendAssistantMessage(
@@ -3456,7 +3508,10 @@ formData.append('profile', JSON.stringify(profileForApi || null));
           return;
         }
 
-        if (!fullText) fullText = 'API odpovedalo úspešne, ale nevrátilo žiadny textový výstup.';
+        if (!fullText) {
+          fullText =
+            'API odpovedalo úspešne, ale nevrátilo žiadny textový výstup.';
+        }
       } else {
         if (!res.body) {
           appendAssistantMessage('❌ API nevrátilo stream odpovede.');
@@ -3530,6 +3585,17 @@ await saveChatToHistory({
       ) {
         setPopupData(finalParsed);
       }
+
+      requestSucceeded = !looksLikeError;
+
+      if (
+        requestSucceeded &&
+        attachedFiles.length > 0
+      ) {
+        await recordNewAttachmentUploads(
+          attachedFiles,
+        );
+      }
     } catch (error) {
       console.error('CHAT SEND ERROR:', error);
 
@@ -3540,11 +3606,17 @@ await saveChatToHistory({
       );
     } finally {
       setIsLoading(false);
-      setAttachedFiles([]);
-      setProcessingLog([]);
-      void refreshAttachmentUsage();
 
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (requestSucceeded) {
+        setAttachedFiles([]);
+        setProcessingLog([]);
+
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      }
+
+      void refreshAttachmentUsage();
     }
   };
 

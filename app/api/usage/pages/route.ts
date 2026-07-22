@@ -7,58 +7,59 @@ import {
 
 import {
   getCurrentPageQuota,
-  PageLimitError,
   type PageQuota,
 } from '@/lib/page-quota';
 
 /**
- * Endpoint používa používateľskú Supabase session a aktuálne databázové údaje.
- * Preto sa musí vykonať dynamicky pri každej požiadavke a jeho odpoveď sa
- * nesmie ukladať do cache prehliadača, proxy ani Vercel CDN.
+ * Endpoint musí vždy načítať aktuálnu používateľskú session,
+ * entitlementy a spotrebu strán zo servera/databázy.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 
-const PURCHASE_URL = '/pricing#doplnkove-sluzby';
-
 /**
- * Verejný kontrakt úspešnej odpovede endpointu.
+ * Presný verejný kontrakt úspešnej odpovede:
  *
- * null pri limitoch znamená neobmedzený administrátorský prístup.
+ * Bežný používateľ:
+ * {
+ *   pageLimit: 70,
+ *   pagesUsed: 21,
+ *   pagesRemaining: 49,
+ *   pageLimitReached: false,
+ *   isUnlimited: false
+ * }
+ *
+ * ADMIN:
+ * {
+ *   pageLimit: null,
+ *   pagesUsed: null,
+ *   pagesRemaining: null,
+ *   pageLimitReached: false,
+ *   isUnlimited: true
+ * }
  */
-type SuccessResponse = PageQuota & {
-  ok: true;
-  success: true;
-
-  meta: {
-    requestId: string;
-    generatedAt: string;
-    cache: 'no-store';
-  };
+type PageUsageResponse = {
+  pageLimit: number | null;
+  pagesUsed: number | null;
+  pagesRemaining: number | null;
+  pageLimitReached: boolean;
+  isUnlimited: boolean;
 };
 
 type ErrorCode =
   | 'UNAUTHENTICATED'
-  | 'PAGE_LIMIT_REACHED'
   | 'INVALID_PAGE_QUOTA_RESPONSE'
   | 'PAGE_QUOTA_LOAD_FAILED';
 
 type ErrorResponse = {
   ok: false;
   success: false;
-
   code: ErrorCode;
   message: string;
   requestId: string;
-
-  purchaseUrl?: string;
   detail?: string;
-
-  /**
-   * Vnorený objekt je zachovaný pre staršie časti frontendu.
-   */
   error: {
     code: ErrorCode;
     message: string;
@@ -91,38 +92,27 @@ function getErrorMetadata(
     return {};
   }
 
-  const code =
-    typeof error.code === 'string'
-      ? error.code
-      : undefined;
-
-  const status =
-    typeof error.status === 'number' &&
-    Number.isFinite(error.status)
-      ? error.status
-      : undefined;
-
-  const message =
-    typeof error.message === 'string'
-      ? error.message
-      : undefined;
-
-  const name =
-    typeof error.name === 'string'
-      ? error.name
-      : undefined;
-
   return {
-    code,
-    status,
-    message,
-    name,
+    code:
+      typeof error.code === 'string'
+        ? error.code
+        : undefined,
+    status:
+      typeof error.status === 'number' &&
+      Number.isFinite(error.status)
+        ? error.status
+        : undefined,
+    message:
+      typeof error.message === 'string'
+        ? error.message
+        : undefined,
+    name:
+      typeof error.name === 'string'
+        ? error.name
+        : undefined,
   };
 }
 
-/**
- * Prevezme bezpečné request ID alebo vytvorí nové UUID.
- */
 function resolveRequestId(
   request: NextRequest,
 ): string {
@@ -140,8 +130,8 @@ function resolveRequestId(
 }
 
 /**
- * Hlavičky zabraňujú použitiu starého FREE alebo starého plateného limitu
- * po platbe, aktivácii doplnku alebo pridelení administrátorského prístupu.
+ * Zabráni vráteniu starej kvóty po platbe, aktivácii doplnku,
+ * zmene plánu alebo pridelení administrátorského prístupu.
  */
 function createResponseHeaders(
   requestId: string,
@@ -171,37 +161,36 @@ function createResponseHeaders(
 
 function toNonNegativeInteger(
   value: unknown,
-  fallback = 0,
+  fieldName: string,
 ): number {
-  const safeFallback =
-    Number.isFinite(fallback)
-      ? Math.max(Math.trunc(fallback), 0)
-      : 0;
-
   if (
     value === null ||
     value === undefined ||
     (typeof value === 'string' &&
       value.trim().length === 0)
   ) {
-    return safeFallback;
+    throw new Error(
+      `INVALID_PAGE_QUOTA_RESPONSE: Pole ${fieldName} nemá číselnú hodnotu.`,
+    );
   }
 
-  const parsed = Number(value);
+  const parsedValue = Number(value);
 
-  if (!Number.isFinite(parsed)) {
-    return safeFallback;
+  if (!Number.isFinite(parsedValue)) {
+    throw new Error(
+      `INVALID_PAGE_QUOTA_RESPONSE: Pole ${fieldName} nie je platné číslo.`,
+    );
   }
 
   return Math.min(
-    Math.max(Math.trunc(parsed), 0),
+    Math.max(Math.trunc(parsedValue), 0),
     Number.MAX_SAFE_INTEGER,
   );
 }
 
 /**
- * Rozpozná kanonický neobmedzený stav, ktorý už autoritatívne pripravil
- * lib/page-quota.ts na základe serverových entitlementov.
+ * Administrátorský stav sa smie prevziať iba z autoritatívnej
+ * serverovej kvóty. Endpoint nikdy neprijíma admin flag z klienta.
  */
 function isUnlimitedQuota(
   quota: PageQuota,
@@ -214,126 +203,66 @@ function isUnlimitedQuota(
   );
 }
 
-/**
- * Vytvorí konzistentnú administrátorskú odpoveď.
- *
- * ADMIN sa nikdy nesmie serializovať ako FREE ani s limitom 0. Hodnota null
- * je verejným kontraktom pre neobmedzený limit.
- */
-function createAdminQuota(): PageQuota {
+function createUnlimitedResponse(): PageUsageResponse {
   return {
-    planId: 'admin',
-
-    isAdmin: true,
-    isUnlimited: true,
-    hasUnlimitedAccess: true,
-
-    basePageLimit: null,
-    extraPageLimit: 0,
     pageLimit: null,
-
-    pagesUsed: 0,
+    pagesUsed: null,
     pagesRemaining: null,
     pageLimitReached: false,
+    isUnlimited: true,
   };
 }
 
 /**
- * Obranná normalizácia verejnej odpovede.
- *
- * Funkcia neudeľuje administrátorské práva. Iba zachová a kanonizuje stav,
- * ktorý vrátil autoritatívny serverový modul lib/page-quota.ts.
+ * Pre bežného používateľa sa zostávajúci počet strán počíta priamo
+ * z pageLimit - pagesUsed. Klient preto nedostane nekonzistentné alebo
+ * zastarané pagesRemaining.
  */
-function normalizePageQuotaForApi(
+function createLimitedResponse(
   quota: PageQuota,
-): PageQuota {
-  if (isUnlimitedQuota(quota)) {
-    return createAdminQuota();
-  }
-
-  const planId = String(
-    quota.planId ?? '',
-  ).trim();
-
-  if (!planId || planId === 'admin') {
+): PageUsageResponse {
+  if (quota.pageLimit === null) {
     throw new Error(
-      'INVALID_PAGE_QUOTA_RESPONSE: Chýba platný planId.',
+      'INVALID_PAGE_QUOTA_RESPONSE: Bežný používateľ nemôže mať pageLimit null.',
     );
   }
 
-  if (
-    quota.basePageLimit === null ||
-    quota.pageLimit === null ||
-    quota.pagesRemaining === null
-  ) {
-    throw new Error(
-      'INVALID_PAGE_QUOTA_RESPONSE: Bežný používateľ nemôže mať null stránkový limit.',
-    );
-  }
+  const pageLimit = toNonNegativeInteger(
+    quota.pageLimit,
+    'pageLimit',
+  );
 
-  const basePageLimit =
-    toNonNegativeInteger(
-      quota.basePageLimit,
-      0,
-    );
+  const pagesUsed = toNonNegativeInteger(
+    quota.pagesUsed,
+    'pagesUsed',
+  );
 
-  const extraPageLimit =
-    toNonNegativeInteger(
-      quota.extraPageLimit,
-      0,
-    );
-
-  const calculatedPageLimit =
-    Math.min(
-      basePageLimit + extraPageLimit,
-      Number.MAX_SAFE_INTEGER,
-    );
-
-  const pageLimit =
-    toNonNegativeInteger(
-      quota.pageLimit,
-      calculatedPageLimit,
-    );
-
-  const pagesUsed =
-    toNonNegativeInteger(
-      quota.pagesUsed,
-      0,
-    );
-
-  const calculatedRemaining =
-    Math.max(pageLimit - pagesUsed, 0);
-
-  const pagesRemaining =
-    Math.min(
-      toNonNegativeInteger(
-        quota.pagesRemaining,
-        calculatedRemaining,
-      ),
-      calculatedRemaining,
-    );
+  const pagesRemaining = Math.max(
+    pageLimit - pagesUsed,
+    0,
+  );
 
   const pageLimitReached =
-    quota.pageLimitReached === true ||
     pageLimit <= 0 ||
-    pagesUsed >= pageLimit ||
-    pagesRemaining <= 0;
+    pagesUsed >= pageLimit;
 
   return {
-    planId,
-
-    isAdmin: false,
-    isUnlimited: false,
-    hasUnlimitedAccess: false,
-
-    basePageLimit,
-    extraPageLimit,
     pageLimit,
-
     pagesUsed,
     pagesRemaining,
     pageLimitReached,
+    isUnlimited: false,
   };
+}
+
+function normalizePageUsageForApi(
+  quota: PageQuota,
+): PageUsageResponse {
+  if (isUnlimitedQuota(quota)) {
+    return createUnlimitedResponse();
+  }
+
+  return createLimitedResponse(quota);
 }
 
 function isUnauthenticatedError(
@@ -341,15 +270,13 @@ function isUnauthenticatedError(
 ): boolean {
   const metadata = getErrorMetadata(error);
 
-  const code =
-    String(metadata.code || '')
-      .trim()
-      .toUpperCase();
+  const code = String(metadata.code || '')
+    .trim()
+    .toUpperCase();
 
-  const name =
-    String(metadata.name || '')
-      .trim()
-      .toLowerCase();
+  const name = String(metadata.name || '')
+    .trim()
+    .toLowerCase();
 
   const message =
     error instanceof Error
@@ -395,9 +322,7 @@ function isInvalidQuotaError(
 function getDevelopmentDetail(
   error: unknown,
 ): string | undefined {
-  if (
-    process.env.NODE_ENV !== 'development'
-  ) {
+  if (process.env.NODE_ENV !== 'development') {
     return undefined;
   }
 
@@ -433,8 +358,7 @@ function logRouteError(
       code: metadata.code,
       status: metadata.status,
       stack:
-        process.env.NODE_ENV ===
-          'development' &&
+        process.env.NODE_ENV === 'development' &&
         error instanceof Error
           ? error.stack
           : undefined,
@@ -446,38 +370,25 @@ function createErrorResponse({
   code,
   message,
   requestId,
-  purchaseUrl,
   detail,
 }: {
   code: ErrorCode;
   message: string;
   requestId: string;
-  purchaseUrl?: string;
   detail?: string;
 }): ErrorResponse {
   return {
     ok: false,
     success: false,
-
     code,
     message,
     requestId,
-
-    ...(purchaseUrl
-      ? { purchaseUrl }
-      : {}),
-
-    ...(detail
-      ? { detail }
-      : {}),
-
+    ...(detail ? { detail } : {}),
     error: {
       code,
       message,
       requestId,
-      ...(detail
-        ? { detail }
-        : {}),
+      ...(detail ? { detail } : {}),
     },
   };
 }
@@ -486,8 +397,12 @@ function createErrorResponse({
  * GET /api/usage/pages
  *
  * Vráti aktuálnu stránkovú kvótu prihláseného používateľa.
- * Endpoint neprijíma planId, admin flag, spotrebu ani limity z klienta.
- * Všetky údaje pochádzajú zo serverovej session a databázy.
+ * Úspešná odpoveď obsahuje presne iba:
+ * - pageLimit
+ * - pagesUsed
+ * - pagesRemaining
+ * - pageLimitReached
+ * - isUnlimited
  */
 export async function GET(
   request: NextRequest,
@@ -496,52 +411,17 @@ export async function GET(
   const headers = createResponseHeaders(requestId);
 
   try {
-    const quota =
-      await getCurrentPageQuota();
+    const quota = await getCurrentPageQuota();
 
-    const publicQuota =
-      normalizePageQuotaForApi(quota);
+    const response =
+      normalizePageUsageForApi(quota);
 
-    const response: SuccessResponse = {
-      ok: true,
-      success: true,
-      ...publicQuota,
-
-      meta: {
-        requestId,
-        generatedAt:
-          new Date().toISOString(),
-        cache: 'no-store',
-      },
-    };
-
-    return NextResponse.json(
-      response,
-      {
-        status: 200,
-        headers,
-      },
-    );
+    return NextResponse.json(response, {
+      status: 200,
+      headers,
+    });
   } catch (error: unknown) {
     logRouteError(error, requestId);
-
-    if (error instanceof PageLimitError) {
-      const response = createErrorResponse({
-        code: 'PAGE_LIMIT_REACHED',
-        message: error.message,
-        requestId,
-        purchaseUrl:
-          error.purchaseUrl || PURCHASE_URL,
-      });
-
-      return NextResponse.json(
-        response,
-        {
-          status: error.status,
-          headers,
-        },
-      );
-    }
 
     if (isUnauthenticatedError(error)) {
       const response = createErrorResponse({
@@ -549,36 +429,28 @@ export async function GET(
         message:
           'Pre načítanie stránkového limitu sa musíte prihlásiť platným používateľským účtom.',
         requestId,
-        detail:
-          getDevelopmentDetail(error),
+        detail: getDevelopmentDetail(error),
       });
 
-      return NextResponse.json(
-        response,
-        {
-          status: 401,
-          headers,
-        },
-      );
+      return NextResponse.json(response, {
+        status: 401,
+        headers,
+      });
     }
 
     if (isInvalidQuotaError(error)) {
       const response = createErrorResponse({
         code: 'INVALID_PAGE_QUOTA_RESPONSE',
         message:
-          'Server vrátil neplatný formát údajov o stránkovom limite.',
+          'Server vrátil neplatné údaje o stránkovom limite.',
         requestId,
-        detail:
-          getDevelopmentDetail(error),
+        detail: getDevelopmentDetail(error),
       });
 
-      return NextResponse.json(
-        response,
-        {
-          status: 500,
-          headers,
-        },
-      );
+      return NextResponse.json(response, {
+        status: 500,
+        headers,
+      });
     }
 
     const response = createErrorResponse({
@@ -586,16 +458,12 @@ export async function GET(
       message:
         'Aktuálny stránkový limit sa nepodarilo načítať.',
       requestId,
-      detail:
-        getDevelopmentDetail(error),
+      detail: getDevelopmentDetail(error),
     });
 
-    return NextResponse.json(
-      response,
-      {
-        status: 500,
-        headers,
-      },
-    );
+    return NextResponse.json(response, {
+      status: 500,
+      headers,
+    });
   }
 }

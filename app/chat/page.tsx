@@ -4295,22 +4295,7 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
                     className="min-h-[45vh] resize-none rounded-3xl border border-white/10 bg-black/20 p-4 text-sm leading-7 text-slate-100 outline-none focus:border-violet-400/60 md:min-h-[60vh] md:p-6 md:leading-8"
                   />
 
-                  <div className="space-y-4 overflow-y-auto">
-                    <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
-                      <h3 className="mb-2 font-black">📊 Skóre</h3>
-                      <div className="text-2xl font-black text-emerald-400">{popupData?.score || '—'}</div>
-                    </div>
-
-                    <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
-                      <h3 className="mb-2 font-black">⚠️ Analýza</h3>
-                      <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">{popupData?.analysis || 'Bez analýzy.'}</div>
-                    </div>
-
-                    <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5">
-                      <h3 className="mb-2 font-black">✏️ Odporúčania</h3>
-                      <div className="whitespace-pre-wrap text-sm leading-6 text-slate-300">{popupData?.tips || 'Bez odporúčaní.'}</div>
-                    </div>
-
+                  <div className="overflow-y-auto">
                     <div className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5">
                       <h3 className="mb-2 font-black text-emerald-200">📚 Zdroje</h3>
                       <div className="whitespace-pre-wrap text-sm leading-6 text-emerald-50/90">

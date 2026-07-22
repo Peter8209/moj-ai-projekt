@@ -1,9 +1,13 @@
 import {
   ADDONS,
+  ATTACHMENT_QUOTA_VERSION,
   PLANS,
+  getAttachmentQuotaDefinition,
+  getExtraPagesForAddons,
   getFeatureLabel as getCatalogFeatureLabel,
   getFeaturesForEntitlements,
   type AddonId,
+  type AttachmentQuotaMode,
   type FeatureKey,
   type PlanId,
 } from "@/lib/billing/catalog";
@@ -69,6 +73,10 @@ type EntitlementDatabaseRow = {
 
   prompt_limit?: unknown;
   prompts_used?: unknown;
+  /**
+   * Legacy stĺpec. Od tejto verzie nie je autoritatívny.
+   * Celkový limit príloh sa vždy odvodí z celkového limitu strán.
+   */
   attachment_limit?: unknown;
 
   is_admin?: unknown;
@@ -135,11 +143,17 @@ export type CurrentEntitlements = {
    * Skutočný aktuálny zostatok strán spravuje lib/page-quota.ts.
    * Pri administrátorovi sa tento údaj nesmie používať na blokovanie.
    */
+  /**
+   * Celkový efektívny limit strán:
+   * základ plánu + zakúpené Extra 20/40/60.
+   */
   pageLimit: number | null;
 
   basePageLimit: number | null;
   extraPageLimit: number;
   pagesUsed: number;
+  pagesRemaining: number | null;
+  pageLimitReached: boolean;
 
   addonIds: AddonId[];
   addonNames: string[];
@@ -162,7 +176,17 @@ export type CurrentEntitlements = {
   promptsRemaining: number | null;
   promptLimitReached: boolean;
 
+  /**
+   * Celkový efektívny limit príloh.
+   *
+   * Pri každom neadministrátorskom účte musí platiť:
+   * attachmentLimit === pageLimit.
+   */
   attachmentLimit: number | null;
+  baseAttachmentLimit: number | null;
+  extraAttachmentLimit: number;
+  attachmentQuotaMode: AttachmentQuotaMode;
+  attachmentQuotaVersion: typeof ATTACHMENT_QUOTA_VERSION;
 
   billingStatus: string | null;
   activatedAt: string | null;
@@ -191,6 +215,10 @@ export type PromptUsageResult = {
   promptLimitReached: boolean;
 };
 
+export type ProjectQuotaResource =
+  | "pages"
+  | "attachments";
+
 /**
  * Telo jednotnej API chyby pre oprávnenia.
  */
@@ -214,6 +242,15 @@ export type EntitlementErrorBody = {
 
   attachmentLimit?: number | null;
   receivedAttachments?: number;
+
+  pageLimit?: number | null;
+  pagesUsed?: number;
+  pagesRemaining?: number | null;
+
+  attachmentsUsed?: number;
+  attachmentsRemaining?: number | null;
+
+  quotaResource?: ProjectQuotaResource;
 };
 
 // ============================================================
@@ -222,9 +259,19 @@ export type EntitlementErrorBody = {
 
 const DEFAULT_PLAN_ID: PlanId = "free";
 
-const DEFAULT_ATTACHMENT_LIMIT = PLANS.free.attachmentLimit ?? 1;
+/**
+ * Technický bezpečnostný limit jednej HTTP požiadavky.
+ * Nejde o obchodný limit príloh používateľa.
+ */
+export const DEFAULT_TECHNICAL_ATTACHMENT_REQUEST_LIMIT = 24;
 
 const PURCHASE_URL = "/pricing";
+
+export const EXTRA_PAGES_PURCHASE_URL =
+  "/pricing#doplnkove-sluzby";
+
+export const PROJECT_QUOTA_PURCHASE_MESSAGE =
+  "Limit projektu bol vyčerpaný. Na pokračovanie si dokúpte Extra 20, Extra 40 alebo Extra 60 strán. Každá dokúpená strana zároveň pridá jednu ďalšiu prílohu.";
 
 const VALID_PLAN_IDS = new Set<PlanId>(Object.keys(PLANS) as PlanId[]);
 
@@ -446,7 +493,58 @@ export class PromptLimitError extends EntitlementError {
 }
 
 /**
- * Požiadavka obsahuje viac príloh než povoľuje aktívny balík.
+ * Jednotná obchodná chyba pre vyčerpanie strán alebo príloh.
+ *
+ * Skutočný počet použitých strán/príloh doplnia serverové quota moduly.
+ */
+export class ProjectQuotaExhaustedError extends EntitlementError {
+  readonly quotaResource: ProjectQuotaResource;
+  readonly limit: number;
+  readonly used: number;
+  readonly remaining: number;
+
+  constructor({
+    quotaResource,
+    limit,
+    used,
+    remaining = 0,
+  }: {
+    quotaResource: ProjectQuotaResource;
+    limit: number;
+    used: number;
+    remaining?: number;
+  }) {
+    const safeLimit = Math.max(Math.trunc(limit), 0);
+    const safeUsed = Math.max(Math.trunc(used), 0);
+    const safeRemaining = Math.max(Math.trunc(remaining), 0);
+
+    const resourceLabel =
+      quotaResource === "pages"
+        ? "strán"
+        : "príloh";
+
+    super({
+      code: "PROJECT_QUOTA_EXHAUSTED",
+      message:
+        `Limit dostupných ${resourceLabel} bol vyčerpaný. ` +
+        "Na pokračovanie si dokúpte Extra 20, Extra 40 alebo Extra 60 strán. " +
+        "Každá dokúpená strana zároveň pridá jednu ďalšiu prílohu.",
+      status: 402,
+    });
+
+    this.name = "ProjectQuotaExhaustedError";
+    this.quotaResource = quotaResource;
+    this.limit = safeLimit;
+    this.used = safeUsed;
+    this.remaining = safeRemaining;
+  }
+}
+
+/**
+ * Technická ochrana jednej HTTP požiadavky.
+ *
+ * Táto chyba NEZNAMENÁ vyčerpanie balíkovej kvóty. Cumulative quota
+ * kontroluje lib/attachment-usage.ts.
  */
 export class AttachmentLimitError extends EntitlementError {
   readonly attachmentLimit: number;
@@ -460,16 +558,15 @@ export class AttachmentLimitError extends EntitlementError {
     receivedAttachments: number;
   }) {
     const safeLimit = Math.max(Math.trunc(attachmentLimit), 0);
-
     const safeReceived = Math.max(Math.trunc(receivedAttachments), 0);
 
     super({
-      code: "ATTACHMENT_LIMIT_REACHED",
+      code: "ATTACHMENT_REQUEST_LIMIT_EXCEEDED",
       message:
         safeLimit === 1
-          ? "Váš balík povoľuje maximálne 1 prílohu."
-          : `Váš balík povoľuje maximálne ${safeLimit} príloh.`,
-      status: 403,
+          ? "V jednej požiadavke je možné technicky spracovať maximálne 1 prílohu."
+          : `V jednej požiadavke je možné technicky spracovať maximálne ${safeLimit} príloh.`,
+      status: 413,
     });
 
     this.name = "AttachmentLimitError";
@@ -639,24 +736,16 @@ function normalizeAddonIds(value: unknown): AddonId[] {
 }
 
 /**
- * Databázový prompt_limit má prednosť, ak obsahuje číslo.
+ * Autoritatívnym zdrojom prompt limitu je katalóg.
  *
- * Pri balíku s neobmedzenými promptmi je planValue null a chýbajúca
- * databázová hodnota sa preto vyhodnotí ako neobmedzený limit.
- *
- * Pri FREE balíku je planValue číslo. Ak by databáza omylom obsahovala
- * null, použije sa bezpečný limit z katalógu a nie neobmedzené prompty.
+ * Databázový prompt_limit sa načítava iba kvôli spätnej kompatibilite,
+ * ale nesmie zmeniť platený plán s neobmedzenými promptmi späť na starý
+ * číselný limit.
  */
 function resolvePromptLimit(
-  databaseValue: unknown,
+  _databaseValue: unknown,
   planValue: number | null,
 ): number | null {
-  const databaseLimit = toNonNegativeIntegerOrUndefined(databaseValue);
-
-  if (databaseLimit !== undefined) {
-    return databaseLimit;
-  }
-
   if (planValue === null) {
     return null;
   }
@@ -664,23 +753,34 @@ function resolvePromptLimit(
   return toNonNegativeInteger(planValue, 0);
 }
 
-function resolveAttachmentLimit(
-  databaseValue: unknown,
-  planValue: unknown,
-): number {
-  const databaseLimit = toNonNegativeIntegerOrUndefined(databaseValue);
-
-  if (databaseLimit !== undefined) {
-    return databaseLimit;
+/**
+ * Limit príloh sa nikdy nečíta zo starého attachment_limit.
+ *
+ * Základ aj doplnky sa odvodzujú z rovnakých stránkových hodnôt:
+ * 1 dostupná strana = 1 dostupná príloha.
+ */
+function resolveAttachmentLimitFromPages(
+  pageLimit: number | null,
+): number | null {
+  if (pageLimit === null) {
+    return null;
   }
 
-  const planLimit = toNonNegativeIntegerOrUndefined(planValue);
+  return toNonNegativeInteger(pageLimit, 0);
+}
 
-  if (planLimit !== undefined) {
-    return planLimit;
+function calculatePagesRemaining({
+  pageLimit,
+  pagesUsed,
+}: {
+  pageLimit: number | null;
+  pagesUsed: number;
+}): number | null {
+  if (pageLimit === null) {
+    return null;
   }
 
-  return DEFAULT_ATTACHMENT_LIMIT;
+  return Math.max(pageLimit - pagesUsed, 0);
 }
 
 function calculatePromptsRemaining({
@@ -725,7 +825,24 @@ function getDefaultEntitlements({
 
   const featureList = Array.from(features);
   const promptLimit = plan.promptLimit;
-  const pageLimit = resolveCatalogPageLimit(plan.pageLimit) ?? 0;
+  const basePageLimit =
+    resolveCatalogPageLimit(plan.pageLimit) ?? 0;
+  const extraPageLimit = 0;
+  const pageLimit =
+    basePageLimit + extraPageLimit;
+  const pagesUsed = 0;
+  const pagesRemaining =
+    calculatePagesRemaining({
+      pageLimit,
+      pagesUsed,
+    });
+
+  const attachmentQuota =
+    getAttachmentQuotaDefinition(
+      DEFAULT_PLAN_ID,
+      [],
+      { isAdmin },
+    );
 
   return {
     userId,
@@ -740,9 +857,11 @@ function getDefaultEntitlements({
     planPriceCents: plan.priceCents,
     pageLimit,
 
-    basePageLimit: pageLimit,
-    extraPageLimit: 0,
-    pagesUsed: 0,
+    basePageLimit,
+    extraPageLimit,
+    pagesUsed,
+    pagesRemaining,
+    pageLimitReached: false,
 
     addonIds: [],
     addonNames: [],
@@ -755,10 +874,16 @@ function getDefaultEntitlements({
     promptsRemaining: promptLimit,
     promptLimitReached: false,
 
-    attachmentLimit: resolveAttachmentLimit(
-      undefined,
-      plan.attachmentLimit,
-    ),
+    attachmentLimit:
+      resolveAttachmentLimitFromPages(
+        pageLimit,
+      ),
+    baseAttachmentLimit: basePageLimit,
+    extraAttachmentLimit: extraPageLimit,
+    attachmentQuotaMode:
+      attachmentQuota.attachmentQuotaMode,
+    attachmentQuotaVersion:
+      attachmentQuota.attachmentQuotaVersion,
 
     billingStatus: "active",
     activatedAt: null,
@@ -800,6 +925,8 @@ function createAdminEntitlements({
     basePageLimit: null,
     extraPageLimit: 0,
     pagesUsed: 0,
+    pagesRemaining: null,
+    pageLimitReached: false,
 
     addonIds: [],
     addonNames: [],
@@ -813,6 +940,11 @@ function createAdminEntitlements({
     promptLimitReached: false,
 
     attachmentLimit: null,
+    baseAttachmentLimit: null,
+    extraAttachmentLimit: 0,
+    attachmentQuotaMode: "unlimited",
+    attachmentQuotaVersion:
+      ATTACHMENT_QUOTA_VERSION,
 
     billingStatus: "admin",
     activatedAt: null,
@@ -1070,7 +1202,32 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
   const planId = expired ? DEFAULT_PLAN_ID : safeStoredPlanId;
   const addonIds = expired ? [] : storedAddonIds;
   const plan = PLANS[planId];
-  const catalogPageLimit = resolveCatalogPageLimit(plan.pageLimit) ?? 0;
+
+  /**
+   * Autoritatívny základ pochádza z katalógu.
+   * Databázový base_page_limit je legacy údaj a nesmie prepísať
+   * obchodné limity 3 / 15 / 50 / 70.
+   */
+  const basePageLimit =
+    resolveCatalogPageLimit(plan.pageLimit) ?? 0;
+
+  /**
+   * extra_page_limit je autoritatívny kumulatívny údaj z nákupov.
+   * Ak stĺpec v staršej schéme chýba, použijú sa doplnky z addon_ids.
+   */
+  const catalogExtraPageLimit =
+    getExtraPagesForAddons(addonIds);
+
+  const extraPageLimit = expired
+    ? 0
+    : (
+        toNonNegativeIntegerOrUndefined(
+          data.extra_page_limit,
+        ) ?? catalogExtraPageLimit
+      );
+
+  const pageLimit =
+    basePageLimit + extraPageLimit;
 
   const features = getFeaturesForEntitlements(planId, addonIds, {
     isAdmin: false,
@@ -1089,19 +1246,52 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
     promptsUsed,
   });
 
-  const attachmentLimit = expired
-    ? resolveAttachmentLimit(undefined, plan.attachmentLimit)
-    : resolveAttachmentLimit(data.attachment_limit, plan.attachmentLimit);
-
-  const basePageLimit = expired
-    ? catalogPageLimit
-    : toNonNegativeInteger(data.base_page_limit, catalogPageLimit);
-
-  const extraPageLimit = expired
+  const pagesUsed = expired
     ? 0
-    : toNonNegativeInteger(data.extra_page_limit, 0);
+    : toNonNegativeInteger(
+        data.pages_used,
+        0,
+      );
 
-  const pagesUsed = expired ? 0 : toNonNegativeInteger(data.pages_used, 0);
+  const pagesRemaining =
+    calculatePagesRemaining({
+      pageLimit,
+      pagesUsed,
+    });
+
+  const attachmentQuota =
+    getAttachmentQuotaDefinition(
+      planId,
+      addonIds,
+      { isAdmin: false },
+    );
+
+  const attachmentLimit =
+    resolveAttachmentLimitFromPages(
+      pageLimit,
+    );
+
+  /**
+   * Bezpečnostná kontrola katalógu:
+   * efektívny limit príloh sa musí rovnať efektívnemu limitu strán.
+   */
+  if (
+    attachmentQuota.attachmentLimit !==
+    attachmentLimit
+  ) {
+    throw new EntitlementError({
+      code: "PAGE_ATTACHMENT_LIMIT_MISMATCH",
+      message:
+        "Nastavenie limitov strán a príloh nie je konzistentné.",
+      status: 500,
+      detail:
+        `plan=${planId}; pages=${String(
+          pageLimit,
+        )}; attachments=${String(
+          attachmentQuota.attachmentLimit,
+        )}`,
+    });
+  }
 
   return {
     userId: user.id,
@@ -1114,11 +1304,15 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
     planId,
     planName: plan.name,
     planPriceCents: plan.priceCents,
-    pageLimit: catalogPageLimit,
+    pageLimit,
 
     basePageLimit,
     extraPageLimit,
     pagesUsed,
+    pagesRemaining,
+    pageLimitReached:
+      pagesRemaining !== null &&
+      pagesRemaining <= 0,
 
     addonIds,
     addonNames: addonIds.map((addonId) => ADDONS[addonId].name),
@@ -1133,6 +1327,12 @@ export async function getCurrentEntitlements(): Promise<CurrentEntitlements> {
       promptLimit !== null && promptsUsed >= promptLimit,
 
     attachmentLimit,
+    baseAttachmentLimit: basePageLimit,
+    extraAttachmentLimit: extraPageLimit,
+    attachmentQuotaMode:
+      attachmentQuota.attachmentQuotaMode,
+    attachmentQuotaVersion:
+      attachmentQuota.attachmentQuotaVersion,
 
     billingStatus: expired ? "expired" : billingStatus,
     activatedAt: expired ? null : activatedAt,
@@ -1491,32 +1691,54 @@ export const consumeCurrentUserPrompt = consumeSuccessfulPrompt;
 // ============================================================
 
 /**
- * Overí počet príloh podľa aktívneho balíka.
+ * Overí iba technický počet súborov v jednej HTTP požiadavke.
+ *
+ * Táto funkcia neodpočítava používateľskú kvótu. Skutočný kumulatívny
+ * zostatok príloh musí kontrolovať serverový modul lib/attachment-usage.ts.
  */
 export async function requireAttachmentAllowance(
   receivedAttachments: number,
+  technicalRequestLimit =
+    DEFAULT_TECHNICAL_ATTACHMENT_REQUEST_LIMIT,
 ): Promise<CurrentEntitlements> {
-  const entitlements = await getCurrentEntitlements();
+  const entitlements =
+    await getCurrentEntitlements();
+
+  const safeReceivedAttachments =
+    toNonNegativeInteger(
+      receivedAttachments,
+      0,
+    );
+
+  const safeTechnicalLimit =
+    Math.max(
+      toNonNegativeInteger(
+        technicalRequestLimit,
+        DEFAULT_TECHNICAL_ATTACHMENT_REQUEST_LIMIT,
+      ),
+      1,
+    );
 
   if (
-    entitlements.isAdmin ||
-    entitlements.hasUnlimitedAccess ||
-    entitlements.attachmentLimit === null
+    safeReceivedAttachments >
+    safeTechnicalLimit
   ) {
-    return entitlements;
-  }
-
-  const safeReceivedAttachments = toNonNegativeInteger(receivedAttachments, 0);
-
-  if (safeReceivedAttachments > entitlements.attachmentLimit) {
     throw new AttachmentLimitError({
-      attachmentLimit: entitlements.attachmentLimit,
-      receivedAttachments: safeReceivedAttachments,
+      attachmentLimit:
+        safeTechnicalLimit,
+      receivedAttachments:
+        safeReceivedAttachments,
     });
   }
 
   return entitlements;
 }
+
+/**
+ * Výstižnejší alias pre nové API routy.
+ */
+export const requireTechnicalAttachmentAllowance =
+  requireAttachmentAllowance;
 
 // ============================================================
 // ERROR SERIALIZATION FOR API ROUTES
@@ -1571,6 +1793,36 @@ export function entitlementErrorResponse(error: unknown): {
     };
   }
 
+  if (error instanceof ProjectQuotaExhaustedError) {
+    return {
+      status: error.status,
+      body: {
+        ok: false,
+        code: error.code,
+        message: error.message,
+        quotaResource:
+          error.quotaResource,
+        ...(error.quotaResource === "pages"
+          ? {
+              pageLimit: error.limit,
+              pagesUsed: error.used,
+              pagesRemaining:
+                error.remaining,
+            }
+          : {
+              attachmentLimit:
+                error.limit,
+              attachmentsUsed:
+                error.used,
+              attachmentsRemaining:
+                error.remaining,
+            }),
+        purchaseUrl:
+          EXTRA_PAGES_PURCHASE_URL,
+      },
+    };
+  }
+
   if (error instanceof AttachmentLimitError) {
     return {
       status: error.status,
@@ -1580,7 +1832,6 @@ export function entitlementErrorResponse(error: unknown): {
         message: error.message,
         attachmentLimit: error.attachmentLimit,
         receivedAttachments: error.receivedAttachments,
-        purchaseUrl: PURCHASE_URL,
       },
     };
   }

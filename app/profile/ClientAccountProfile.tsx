@@ -97,6 +97,20 @@ type EntitlementsLoadResult = {
   error: string;
 };
 
+/**
+ * Presný verejný kontrakt endpointu GET /api/usage/pages.
+ *
+ * Bežný používateľ dostane číselné hodnoty.
+ * Administrátor dostane pri limitoch a spotrebe null a isUnlimited: true.
+ */
+type PageUsageSnapshot = {
+  pageLimit: number | null;
+  pagesUsed: number | null;
+  pagesRemaining: number | null;
+  pageLimitReached: boolean;
+  isUnlimited: boolean;
+};
+
 type LoadState = "idle" | "loading" | "success" | "error";
 type CancelState = "idle" | "loading" | "success" | "error";
 
@@ -879,6 +893,8 @@ function getPageUsagePercent(profile: ClientProfile) {
 function pickPageUsageRecord(data: unknown): JsonRecord {
   if (!isRecord(data)) return {};
 
+  // Aktuálny endpoint vracia údaje priamo v koreňovom objekte.
+  // Vnorené varianty ponechávame iba ako bezpečnú spätnú kompatibilitu.
   if (isRecord(data.usage)) return data.usage;
   if (isRecord(data.pageUsage)) return data.pageUsage;
   if (isRecord(data.quota)) return data.quota;
@@ -887,40 +903,137 @@ function pickPageUsageRecord(data: unknown): JsonRecord {
   return data;
 }
 
+function asNonNegativeInteger(value: unknown): number | null {
+  const parsed = asNumber(value);
+
+  if (parsed === null) return null;
+
+  return Math.min(
+    Math.max(Math.trunc(parsed), 0),
+    Number.MAX_SAFE_INTEGER,
+  );
+}
+
+/**
+ * Normalizuje presný kontrakt GET /api/usage/pages:
+ *
+ * Používateľ:
+ * {
+ *   pageLimit: 70,
+ *   pagesUsed: 21,
+ *   pagesRemaining: 49,
+ *   pageLimitReached: false,
+ *   isUnlimited: false
+ * }
+ *
+ * ADMIN:
+ * {
+ *   pageLimit: null,
+ *   pagesUsed: null,
+ *   pagesRemaining: null,
+ *   pageLimitReached: false,
+ *   isUnlimited: true
+ * }
+ */
+function normalizePageUsageSnapshot(
+  payload: unknown,
+): PageUsageSnapshot | null {
+  const usage = pickPageUsageRecord(payload);
+
+  if (!Object.keys(usage).length) {
+    return null;
+  }
+
+  const isUnlimited = asBoolean(
+    usage.isUnlimited ?? usage.is_unlimited ?? false,
+  );
+
+  if (isUnlimited) {
+    return {
+      pageLimit: null,
+      pagesUsed: null,
+      pagesRemaining: null,
+      pageLimitReached: false,
+      isUnlimited: true,
+    };
+  }
+
+  const pageLimit = asNonNegativeInteger(
+    usage.pageLimit ?? usage.page_limit,
+  );
+
+  const pagesUsed = asNonNegativeInteger(
+    usage.pagesUsed ?? usage.pages_used,
+  );
+
+  const receivedPagesRemaining = asNonNegativeInteger(
+    usage.pagesRemaining ?? usage.pages_remaining,
+  );
+
+  if (
+    pageLimit === null ||
+    pagesUsed === null ||
+    receivedPagesRemaining === null
+  ) {
+    return null;
+  }
+
+  const calculatedPagesRemaining = Math.max(
+    pageLimit - pagesUsed,
+    0,
+  );
+
+  // Serverový údaj rešpektujeme, ale nedovolíme zobraziť viac zostávajúcich
+  // strán, než vyplýva z celkového limitu a už použitej spotreby.
+  const pagesRemaining = Math.min(
+    receivedPagesRemaining,
+    calculatedPagesRemaining,
+  );
+
+  const pageLimitReached =
+    asBoolean(
+      usage.pageLimitReached ??
+        usage.page_limit_reached ??
+        false,
+    ) ||
+    pageLimit <= 0 ||
+    pagesUsed >= pageLimit ||
+    pagesRemaining <= 0;
+
+  return {
+    pageLimit,
+    pagesUsed,
+    pagesRemaining,
+    pageLimitReached,
+    isUnlimited: false,
+  };
+}
+
 function mergePageUsage(
   profile: ClientProfile,
   usageData: unknown,
 ): ClientProfile {
-  const usage = pickPageUsageRecord(usageData);
+  const usage = normalizePageUsageSnapshot(usageData);
 
-  const usageIsAdmin = asBoolean(
-    usage.isAdmin ??
-      usage.is_admin ??
-      usage.adminAccess ??
-      usage.admin_access ??
-      profile.isAdmin,
-    profile.isAdmin,
-  );
+  if (!usage) {
+    return profile;
+  }
 
-  const usageHasUnlimitedAccess = asBoolean(
-    usage.hasUnlimitedAccess ??
-      usage.has_unlimited_access ??
-      usage.isUnlimited ??
-      usage.is_unlimited ??
-      usage.unlimitedAccess ??
-      usage.unlimited_access ??
-      profile.hasUnlimitedAccess ??
-      usageIsAdmin,
-    profile.hasUnlimitedAccess || usageIsAdmin,
-  );
-
-  const effectiveUnlimitedAccess = usageIsAdmin || usageHasUnlimitedAccess;
-
-  if (effectiveUnlimitedAccess) {
+  if (usage.isUnlimited) {
     return {
       ...profile,
-      isAdmin: usageIsAdmin || profile.isAdmin,
+
+      // Verejný kontrakt endpointu používa isUnlimited ako jednoznačný
+      // indikátor administrátorského stránkového prístupu.
+      isAdmin: true,
       hasUnlimitedAccess: true,
+      role: "administrátor",
+      plan: "admin",
+      selectedPlan: "admin",
+      accountStatus: "aktívny – plný prístup",
+      packageName: "Administrátorský prístup",
+      packageLabel: "Administrátorský prístup",
+
       basePageLimit: null,
       extraPageLimit: null,
       pageLimit: null,
@@ -930,68 +1043,24 @@ function mergePageUsage(
     };
   }
 
-  const basePageLimit =
-    asNumber(usage.basePageLimit) ??
-    asNumber(usage.base_page_limit) ??
-    profile.basePageLimit;
-
-  const extraPageLimit =
-    asNumber(usage.extraPageLimit) ??
-    asNumber(usage.extra_page_limit) ??
-    asNumber(usage.extraPages) ??
-    asNumber(usage.extra_pages) ??
-    profile.extraPageLimit;
-
-  const pageLimit =
-    asNumber(usage.pageLimit) ??
-    asNumber(usage.page_limit) ??
-    asNumber(usage.totalPages) ??
-    asNumber(usage.total_pages) ??
-    (basePageLimit !== null || extraPageLimit !== null
-      ? (basePageLimit ?? 0) + (extraPageLimit ?? 0)
-      : profile.pageLimit);
-
-  const pagesUsed =
-    asNumber(usage.pagesUsed) ??
-    asNumber(usage.pages_used) ??
-    asNumber(usage.usedPages) ??
-    asNumber(usage.used_pages) ??
-    profile.pagesUsed;
-
-  const pagesRemaining =
-    asNumber(usage.pagesRemaining) ??
-    asNumber(usage.pages_remaining) ??
-    asNumber(usage.remainingPages) ??
-    asNumber(usage.remaining_pages) ??
-    (pageLimit !== null && pagesUsed !== null
-      ? Math.max(pageLimit - pagesUsed, 0)
-      : profile.pagesRemaining);
-
-  const explicitLimitReached = asBoolean(
-    usage.pageLimitReached ??
-      usage.page_limit_reached ??
-      usage.limitReached ??
-      usage.limit_reached ??
-      false,
-  );
-
   return {
     ...profile,
-    isAdmin: usageIsAdmin || profile.isAdmin,
     hasUnlimitedAccess: false,
-    basePageLimit,
-    extraPageLimit,
-    pageLimit,
-    pagesUsed,
-    pagesRemaining,
-    pageLimitReached:
-      explicitLimitReached ||
-      (pageLimit !== null &&
-        pageLimit > 0 &&
-        pagesRemaining !== null &&
-        pagesRemaining <= 0),
+
+    // Endpoint /api/usage/pages je autoritatívny pre aktuálny celkový limit,
+    // spotrebu, zostávajúce strany a stav vyčerpania.
+    pageLimit: usage.pageLimit,
+    pagesUsed: usage.pagesUsed,
+    pagesRemaining: usage.pagesRemaining,
+    pageLimitReached: usage.pageLimitReached,
+
+    // basePageLimit a extraPageLimit sa v novom verejnom kontrakte neposielajú.
+    // Ponechávajú sa preto z profilu/entitlementov načítaných pred týmto volaním.
+    basePageLimit: profile.basePageLimit,
+    extraPageLimit: profile.extraPageLimit,
   };
 }
+
 async function loadPageUsage(profile: ClientProfile): Promise<ClientProfile> {
   try {
     const response = await fetch(PAGE_USAGE_ENDPOINT, {

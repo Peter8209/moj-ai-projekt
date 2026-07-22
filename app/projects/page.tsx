@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
@@ -1575,7 +1575,7 @@ export default function ProjectsPage() {
                         <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${isActive ? 'bg-emerald-500/15 text-emerald-200' : 'bg-violet-500/15 text-violet-200'}`}>
                           {isActive ? <CheckCircle2 className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
                         </div>
-                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${isActive ? 'bg-emerald-500/20 text-emerald-200' : 'bg-violet-600/20 text-violet-200'}`}>{isActive ? 'Vybratá práca' : profile.schema?.label || formatWorkType(profile.type)}</span>
+                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${isActive ? 'bg-emerald-500/20 text-emerald-200' : 'bg-violet-600/20 text-violet-200'}`}>{isActive ? 'Zvolená práca' : profile.schema?.label || formatWorkType(profile.type)}</span>
                       </div>
                       <h2 className="line-clamp-2 text-xl font-black text-white">{profile.title || 'Bez názvu'}</h2>
                       <div className="mt-4 space-y-2 text-sm text-slate-400">
@@ -1985,28 +1985,40 @@ function ProfileWizardModal({
       };
 
       const draftProfile = buildSavedProfileFromWizard(normalizedWizardProfile);
+      const isEditingCurrentProfile =
+        Boolean(initialProfile?.id) &&
+        normalizedWizardProfile.id === initialProfile?.id;
 
-      localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(normalizedWizardProfile));
-      localStorage.setItem('profile', JSON.stringify(draftProfile));
-      localStorage.setItem('active_profile', JSON.stringify(draftProfile));
       localStorage.setItem(
-        'zedpera_work_language',
-        draftProfile.workLanguage || draftProfile.language || 'sk',
+        WIZARD_DRAFT_KEY,
+        JSON.stringify(normalizedWizardProfile),
       );
 
-      upsertProfileIntoLocalStorage(draftProfile);
+      // Nový, ešte neuložený profil nesmie prepísať aktívnu prácu.
+      // Tým sa pri otvorení sprievodcu zbytočne nemení kontext chatu
+      // ani používateľské počítadlá naviazané na účet.
+      if (isEditingCurrentProfile) {
+        localStorage.setItem('profile', JSON.stringify(draftProfile));
+        localStorage.setItem('active_profile', JSON.stringify(draftProfile));
+        localStorage.setItem(
+          'zedpera_work_language',
+          draftProfile.workLanguage || draftProfile.language || 'sk',
+        );
 
-      window.dispatchEvent(
-        new CustomEvent('zedpera-profile-updated', {
-          detail: draftProfile,
-        }),
-      );
-      window.dispatchEvent(new CustomEvent('zedpera-profile-change'));
-      window.dispatchEvent(
-        new CustomEvent('zedpera:active-profile-changed', {
-          detail: draftProfile,
-        }),
-      );
+        upsertProfileIntoLocalStorage(draftProfile);
+
+        window.dispatchEvent(
+          new CustomEvent('zedpera-profile-updated', {
+            detail: draftProfile,
+          }),
+        );
+        window.dispatchEvent(new CustomEvent('zedpera-profile-change'));
+        window.dispatchEvent(
+          new CustomEvent('zedpera:active-profile-changed', {
+            detail: draftProfile,
+          }),
+        );
+      }
     } catch (error) {
       console.warn('PROFILE WIZARD IMMEDIATE SAVE WARNING:', error);
     }
@@ -2113,6 +2125,11 @@ function ProfileWizardModal({
     try {
       localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(profile));
 
+      const isEditingCurrentProfile =
+        Boolean(initialProfile?.id) && profile.id === initialProfile?.id;
+
+      if (!isEditingCurrentProfile) return;
+
       const draftProfile = buildSavedProfileFromWizard(profile);
       localStorage.setItem('profile', JSON.stringify(draftProfile));
       localStorage.setItem('active_profile', JSON.stringify(draftProfile));
@@ -2131,7 +2148,7 @@ function ProfileWizardModal({
     } catch (error) {
       console.warn('PROFILE WIZARD AUTOSAVE WARNING:', error);
     }
-  }, [profile]);
+  }, [initialProfile?.id, profile]);
 
   const canGoBack = activeStep > 1;
   const canGoNext = activeStep < 5;
@@ -2547,16 +2564,6 @@ function ProfileWizardModal({
                     />
                   </div>
 
-                  <div className="xl:col-span-3">
-                    <div className="rounded-3xl border border-blue-400/20 bg-blue-500/10 p-4">
-                      <div className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
-                        AI inštrukcia
-                      </div>
-                      <p className="mt-2 line-clamp-4 text-sm leading-6 text-blue-100">
-                        {profile.aiInstruction}
-                      </p>
-                    </div>
-                  </div>
                 </div>
               </WizardPanel>
             )}
@@ -2857,7 +2864,7 @@ function ProjectDetail({ profile, activeProfileId, onBack, onDelete, onEdit, onS
       </div>
       <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 md:p-8">
         <div className="mb-8 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div><div className={`mb-4 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold ${isActive ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200' : 'border-violet-400/30 bg-violet-500/10 text-violet-200'}`}>{isActive ? <><CheckCircle2 className="h-4 w-4" />Práca vybratá na generovanie</> : <><FileText className="h-4 w-4" />Detail práce</>}</div><h1 className="max-w-4xl text-4xl font-black tracking-tight">{profile.title || 'Bez názvu'}</h1><p className="mt-3 text-slate-400">Uložené: {formatDate(profile.savedAt)}</p></div>
+          <div><div className={`mb-4 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold ${isActive ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200' : 'border-violet-400/30 bg-violet-500/10 text-violet-200'}`}>{isActive ? <><CheckCircle2 className="h-4 w-4" />Zvolená práca</> : <><FileText className="h-4 w-4" />Detail práce</>}</div><h1 className="max-w-4xl text-4xl font-black tracking-tight">{profile.title || 'Bez názvu'}</h1><p className="mt-3 text-slate-400">Uložené: {formatDate(profile.savedAt)}</p></div>
           <div className="rounded-3xl border border-white/10 bg-[#111525] p-5"><p className="text-xs uppercase tracking-[0.2em] text-slate-500">Typ práce</p><p className="mt-2 text-xl font-black">{profile.schema?.label || formatWorkType(profile.type)}</p>{profile.schema?.recommendedLength && <p className="mt-1 text-sm text-slate-400">{profile.schema.recommendedLength}</p>}</div>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><InfoCard label="Názov práce" value={profile.title} /><InfoCard label="Typ práce" value={profile.schema?.label || profile.type} /><InfoCard label="Odbornosť" value={profile.level} /><InfoCard label="Jazyk rozhrania" value={profile.language} /><InfoCard label="Jazyk práce" value={profile.workLanguage} /><InfoCard label="Citovanie" value={profile.citation} /><InfoCard label="Odbor / predmet / oblasť" value={profile.field} /><InfoCard label="Vedúci práce / školiteľ" value={profile.supervisor} /></div>

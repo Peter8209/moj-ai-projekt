@@ -1,10 +1,6 @@
 ﻿'use client';
 
-import {
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
@@ -14,11 +10,9 @@ import {
   CreditCard,
   Crown,
   FilePlus2,
-  FileText,
   Gift,
   Loader2,
   Menu,
-  ShieldCheck,
   Sparkles,
 } from 'lucide-react';
 
@@ -64,14 +58,7 @@ type CheckoutResponse = {
   url?: string;
   code?: string;
   error?: string;
-  message?: string;
-  detail?: string;
-  reason?: string;
-  solution?: string;
-  technicalCode?: string;
   displayMessage?: string;
-  receivedPlan?: string;
-  receivedAddon?: string;
 };
 
 type PlanCheckoutPayload = {
@@ -308,39 +295,20 @@ function getFriendlyCheckoutError(
   if (data.displayMessage) return data.displayMessage;
 
   if (data.error === 'INVALID_PLAN' || data.code === 'INVALID_PLAN') {
-    return [
-      'Platobná brána odmietla identifikátor hlavného plánu.',
-      '',
-      `Odoslaný plán: ${data.receivedPlan || 'nezistené'}`,
-      '',
-      `Povolené ID plánov: ${PAID_PLAN_IDS.join(', ')}`,
-    ].join('\n');
+    return (
+      'Vybraný mesačný plán sa momentálne nepodarilo aktivovať. ' +
+      'Obnovte stránku a skúste to znova.'
+    );
   }
 
   if (data.error === 'INVALID_ADDON' || data.code === 'INVALID_ADDON') {
-    return [
-      'Platobná brána odmietla identifikátor jednorazového doplnku.',
-      '',
-      `Odoslaný doplnok: ${data.receivedAddon || 'nezistené'}`,
-      '',
-      `Povolené ID doplnkov: ${ADDON_IDS.join(', ')}`,
-    ].join('\n');
+    return (
+      'Vybraný jednorazový doplnok sa momentálne nepodarilo aktivovať. ' +
+      'Obnovte stránku a skúste to znova.'
+    );
   }
 
-  const message = [
-    data.error,
-    data.message,
-    data.detail,
-    data.reason ? `Dôvod: ${data.reason}` : '',
-    data.solution ? `Riešenie: ${data.solution}` : '',
-    data.technicalCode
-      ? `Technický kód: ${data.technicalCode}`
-      : '',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-
-  return message || fallback;
+  return fallback;
 }
 
 async function postCheckout(payload: CheckoutPayload) {
@@ -400,7 +368,7 @@ export default function PricingPage() {
       window.localStorage.removeItem(STORAGE_SELECTED_ADDONS);
     }
 
-    router.push('/dashboard?plan=free&source=pricing');
+    router.push('/register?plan=free&source=pricing');
   };
 
   const startPlanCheckout = async (planId: PaidPlanId) => {
@@ -579,36 +547,11 @@ export default function PricingPage() {
             </h1>
 
             <p className="mt-4 max-w-4xl text-base leading-7 text-slate-300 sm:text-lg">
-              Hlavné akademické plány fungujú ako mesačné predplatné. Analýza dát
-              a balíky Extra 20, 40 alebo 60 strán sa nakupujú samostatne ako
-              jednorazové doplnky a nepridávajú sa do ceny mesačného plánu.
+              Vyberte si balík podľa typu akademickej práce a požadovaného
+              rozsahu. K dispozícii sú aj jednorazové doplnky na analýzu dát
+              alebo rozšírenie aktuálneho projektu o ďalšie strany.
             </p>
 
-            <div className="mt-6 grid max-w-5xl grid-cols-1 gap-3 sm:grid-cols-3">
-              <HeroInfo
-                icon={<ShieldCheck size={18} />}
-                title="Jasné oddelenie platieb"
-                text="Mesačný plán a jednorazový doplnok majú samostatný checkout."
-              />
-
-              <HeroInfo
-                icon={<FileText size={18} />}
-                title="Rozsah podľa balíka"
-                text="Každý hlavný plán má vlastný limit spracovaných strán."
-              />
-
-              <HeroInfo
-                icon={<Sparkles size={18} />}
-                title="Flexibilné rozšírenia"
-                text="Analýzu dát alebo extra strany môžete kúpiť samostatne."
-              />
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-purple-400/20 bg-purple-500/10 p-5 text-sm font-semibold leading-6 text-purple-100 shadow-xl sm:p-6">
-            Po kliknutí na platený balík alebo doplnok budete okamžite
-            presmerovaný na zabezpečenú platobnú stránku Stripe. E-mail zadáte
-            priamo v Stripe Checkout.
           </div>
         </section>
 
@@ -623,14 +566,11 @@ export default function PricingPage() {
               </div>
 
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
-                Vyberte jeden hlavný plán. Platené balíky sa účtujú mesačne
-                prostredníctvom Stripe predplatného.
+                Vyberte si plán podľa typu a rozsahu pripravovanej akademickej
+                práce.
               </p>
             </div>
 
-            <div className="rounded-full border border-purple-400/20 bg-purple-500/10 px-4 py-2 text-xs font-bold text-purple-100">
-              Samostatný checkout pre každý plán
-            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
@@ -758,11 +698,6 @@ export default function PricingPage() {
                   Jednorazové doplnky
                 </h2>
               </div>
-
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
-                Doplnky sa nekombinujú s mesačným plánom v jednom nákupe.
-                Každý doplnok otvorí vlastnú jednorazovú Stripe platbu.
-              </p>
             </div>
 
             <div className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-100">
@@ -850,25 +785,6 @@ export default function PricingPage() {
             {checkoutError}
           </section>
         )}
-
-        <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 text-center sm:p-7">
-          <h2 className="text-xl font-black text-white">
-            Dôležité informácie k platbe
-          </h2>
-
-          <p className="mx-auto mt-3 max-w-4xl text-sm leading-6 text-slate-400">
-            Hlavný platený plán je mesačné predplatné. Analýza dát a Extra
-            20/40/60 strán sú jednorazové položky. Cenu, Stripe Price ID a režim
-            platby musí vždy určiť serverový katalóg v API; klient neposiela cenu
-            ako dôveryhodný údaj.
-          </p>
-
-          <p className="mx-auto mt-3 max-w-4xl text-xs leading-5 text-slate-500">
-            AI systém poskytuje odbornú podporu pri príprave akademickej práce.
-            Používateľ zodpovedá za kontrolu výsledku, správnosť údajov, konečnú
-            úpravu a dodržanie pravidiel svojej školy.
-          </p>
-        </section>
       </main>
 
       <button
@@ -883,27 +799,3 @@ export default function PricingPage() {
   );
 }
 
-function HeroInfo({
-  icon,
-  title,
-  text,
-}: {
-  icon: ReactNode;
-  title: string;
-  text: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-      <div className="flex items-center gap-2 text-purple-300">
-        {icon}
-        <div className="text-sm font-black text-white">
-          {title}
-        </div>
-      </div>
-
-      <p className="mt-2 text-xs leading-5 text-slate-400">
-        {text}
-      </p>
-    </div>
-  );
-}

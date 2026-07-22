@@ -464,6 +464,99 @@ Ak príloha súvisí s témou, cieľom, odborom alebo metodológiou práce, upoz
 `.trim();
 }
 
+
+const FORBIDDEN_SOURCE_SECTION_HEADING_PATTERN =
+  /^(?:\d+[.)]\s*)?(?:primárne zdroje|primarne zdroje|sekundárne zdroje|sekundarne zdroje|použité zdroje|pouzite zdroje|zoznam zdrojov|zoznam použitých zdrojov|zoznam pouzitych zdrojov|zoznam použitej literatúry|zoznam pouzitej literatury|zoznam literatúry|zoznam literatury|bibliografia|bibliographic references|referencie|references|primary sources|secondary sources|used sources|bibliography)\s*:?\s*$/i;
+
+const FORBIDDEN_SOURCE_DETAIL_LINE_PATTERN =
+  /^(?:[-*•]\s*)?(?:názov prílohy|nazov prilohy|autor prílohy|autor prilohy|citácia v texte|citacia v texte|bibliografická citácia|bibliograficka citacia|primárny zdroj|primarny zdroj|sekundárny zdroj|sekundarny zdroj|počet spracovaných príloh|pocet spracovanych priloh)\s*:/i;
+
+function normalizeOutputLineForPolicy(value: string): string {
+  return String(value || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/^\s*(?:[-*•]\s*)+/, '')
+    .replace(/^\s*>\s*/, '')
+    .replace(/^\s*["'„“”]+/, '')
+    .replace(/["'„“”]+\s*$/, '')
+    .replace(/^\*\*(.*?)\*\*$/, '$1')
+    .replace(/^__(.*?)__$/, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * AI školiteľ nesmie vytvárať žiadny bibliografický výstup.
+ *
+ * Pri prvom samostatnom nadpise zdrojovej sekcie sa odpoveď definitívne
+ * ukončí. Všetko od nadpisu „Primárne zdroje“, „Sekundárne zdroje“,
+ * „Bibliografia“, „Referencie“ a podobných variantov sa odstráni.
+ *
+ * Toto pravidlo je úmyselne prísne. Zdrojové bloky sa v odpovedi AI
+ * školiteľa nesmú zobraziť ani vtedy, keď ich model pridá na úplný koniec,
+ * vloží ich do HTML/Markdown značiek alebo ich uvedie s odrážkou.
+ */
+function removeForbiddenSourceSections(value: string): string {
+  const normalizedValue = String(value || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+
+  const lines = normalizedValue.split('\n');
+  const output: string[] = [];
+
+  for (const rawLine of lines) {
+    const normalizedLine =
+      normalizeOutputLineForPolicy(rawLine);
+
+    if (
+      FORBIDDEN_SOURCE_SECTION_HEADING_PATTERN.test(
+        normalizedLine,
+      )
+    ) {
+      break;
+    }
+
+    /*
+     * Druhá poistka pre prípad, že model vynechá nadpis a začne priamo
+     * údajmi typu „Názov prílohy“, „Autor prílohy“ alebo
+     * „Bibliografická citácia“. Aj vtedy sa celý zvyšok odpovede zahodí.
+     */
+    if (
+      FORBIDDEN_SOURCE_DETAIL_LINE_PATTERN.test(
+        normalizedLine,
+      )
+    ) {
+      break;
+    }
+
+    output.push(rawLine);
+  }
+
+  return output
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function assertNoForbiddenSourceOutput(value: string): string {
+  const cleaned = removeForbiddenSourceSections(value);
+
+  const forbiddenLeakDetected = cleaned
+    .split('\n')
+    .map(normalizeOutputLineForPolicy)
+    .some(
+      (line) =>
+        FORBIDDEN_SOURCE_SECTION_HEADING_PATTERN.test(line) ||
+        FORBIDDEN_SOURCE_DETAIL_LINE_PATTERN.test(line),
+    );
+
+  if (forbiddenLeakDetected) {
+    return removeForbiddenSourceSections(cleaned);
+  }
+
+  return cleaned;
+}
+
 function cleanAssistantOutput(text: string): string {
   if (!text) return '';
 
@@ -501,6 +594,8 @@ function cleanAssistantOutput(text: string): string {
     .replace(/__([^_]+)__/g, '$1')
     .replace(/\n{4,}/g, '\n\n\n')
     .trim();
+
+  cleaned = assertNoForbiddenSourceOutput(cleaned);
 
   return cleaned;
 }
@@ -740,14 +835,28 @@ Nepíš, že si umelá inteligencia.
 Nepíš markdown znaky ako #, ##, **, --- ani kódové bloky.
 Nevymýšľaj autorov, DOI, URL, roky, vydavateľov ani citácie.
 Ak niektorý údaj chýba, napíš "údaj je potrebné overiť" alebo "údaj je potrebné doplniť".
+
+PRÍSNY ZÁKAZ ZDROJOVÝCH SEKCIÍ:
+- nevytváraj sekciu "Primárne zdroje",
+- nevytváraj sekciu "Sekundárne zdroje",
+- nevytváraj sekcie "Použité zdroje", "Zoznam zdrojov", "Bibliografia", "Referencie" ani "Zoznam literatúry",
+- nevypisuj bibliografické záznamy, DOI, URL, referenčné čísla ani samostatný zoznam citácií,
+- nevypisuj autora prílohy, citáciu prílohy ani počet spracovaných príloh ako samostatný zdrojový blok,
+- citačnú normu z profilu používaj iba na posúdenie správnosti citovania v hodnotenom texte,
+- nedopĺňaj ani negeneruj nové zdroje.
+
+Môžeš slovne upozorniť na chyby citovania, napríklad na chýbajúcu citáciu, nejednotný citačný štýl alebo neúplný bibliografický údaj. Samotné zdroje však nevypisuj.
+
 Negeneruj nič určené pre Excel.
 Výstup je určený iba pre Word alebo PDF.
 
 Jazyk výstupu:
 ${workLanguage}
 
-Citačná norma:
+Citačná norma na kontrolu správnosti citovania:
 ${citationStyle}
+
+Citačná norma slúži iba na odborné posúdenie citácií v texte. Nevytváraj podľa nej zoznam zdrojov ani bibliografiu.
 
 Názov práce:
 ${title}
@@ -766,7 +875,9 @@ Tvoja úloha:
 - navrhnúť konkrétne úpravy,
 - pridať praktické odporúčania,
 - pri slabých formuláciách navrhnúť lepšie akademické znenie,
-- ak príloha nesúvisí s profilom práce, upozorniť klienta.
+- posúdiť kvalitu citovania iba slovným komentárom bez vypisovania zdrojov,
+- ak príloha nesúvisí s profilom práce, upozorniť klienta,
+- nevytvárať primárne ani sekundárne zdroje a nepridávať bibliografiu.
 `.trim();
 
   const requiredOutputWithoutQuestion = `
@@ -804,6 +915,9 @@ Priprav otázky, ktoré by sa mali riešiť s vedúcim práce.
 
 11. Skóre kvality 0–100
 Uveď skóre a stručné zdôvodnenie.
+
+Po bode 11 odpoveď ukonči.
+Nepridávaj zaň primárne zdroje, sekundárne zdroje, bibliografiu, zoznam literatúry, referencie ani počet spracovaných príloh.
 `.trim();
 
   const requiredOutputWithQuestion = `
@@ -821,8 +935,11 @@ Odpovedz:
 - bez nadpisu "AI Vedúci".
 
 Ak používateľ žiada "zhodnoť prácu", "ako profesor", "dobrá spätná väzba" alebo podobný pokyn, vytvor hodnotenie práce podľa extrahovaného textu príloh.
-Ak otázka súvisí s prílohou, použi extrahovaný text príloh ako hlavný zdroj hodnotenia.
+Ak otázka súvisí s prílohou, použi extrahovaný text príloh ako hlavný podklad hodnotenia.
 Ak otázka nesúvisí s profilom práce alebo prílohami, jasne to uveď.
+
+Odpoveď ukonči po odbornom hodnotení alebo priamej odpovedi.
+Nevytváraj primárne zdroje, sekundárne zdroje, zoznam zdrojov, bibliografiu, referencie ani zoznam literatúry.
 `.trim();
 
   return `
@@ -878,6 +995,11 @@ Nikdy nevkladaj informácie o tom, ako bol prompt nastavený.
 Nikdy nepíš technické poznámky o kompresii, API alebo modeli.
 Ak je k dispozícii extrahovaný text prílohy, musíš ho reálne použiť pri hodnotení.
 Nepredpokladaj obsah dokumentu bez prečítania dostupného extrahovaného textu.
+Nevytváraj sekcie Primárne zdroje, Sekundárne zdroje, Použité zdroje, Bibliografia, Referencie ani Zoznam literatúry.
+Nevypisuj bibliografické záznamy, DOI, URL, autora prílohy ani počet spracovaných príloh.
+Citácie a zdroje iba odborne skontroluj a opíš chyby bez ich samostatného zoznamu.
+Po poslednej odbornej pripomienke odpoveď okamžite ukonči.
+Nikdy nepridávaj na koniec odpovede názov prílohy, autora prílohy, citáciu prílohy, bibliografický záznam ani počet príloh.
 Výstup musí byť čistý text pre klienta.
 `.trim(),
         },
@@ -1065,7 +1187,15 @@ export async function POST(req: Request) {
     });
 
     const generatedText = await callOpenAI(prompt);
-    const output = cleanAssistantOutput(generatedText);
+
+    /*
+     * Finálna serverová brána. Rovnaká politika sa vykoná ešte raz tesne
+     * pred serializáciou odpovede, aby sa zdrojový blok nemohol dostať ani
+     * do poľa output, ani do kompatibilného poľa text.
+     */
+    const output = assertNoForbiddenSourceOutput(
+      cleanAssistantOutput(generatedText),
+    );
 
     return NextResponse.json({
       ok: true,
@@ -1077,6 +1207,13 @@ export async function POST(req: Request) {
         pdfAllowed: true,
         pptxAllowed: false,
         allowedFormats: ['doc', 'docx', 'pdf'],
+      },
+      sourceOutputPolicy: {
+        primarySourcesAllowed: false,
+        secondarySourcesAllowed: false,
+        bibliographyAllowed: false,
+        referencesAllowed: false,
+        citationReviewAllowed: true,
       },
       meta: {
         module: 'supervisor',

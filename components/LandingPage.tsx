@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import Image from 'next/image';
 import Link from 'next/link';
@@ -3546,19 +3546,19 @@ const mobileMenuItems = useMemo(
         <div className="pointer-events-none fixed left-1/2 top-0 z-0 h-[420px] w-[760px] -translate-x-1/2 rounded-full bg-violet-700/20 blur-[120px]" />
 
         <header className="sticky top-0 z-50 border-b border-white/10 bg-black/92 backdrop-blur-2xl">
-  <div className="mx-auto flex h-[72px] max-w-[1920px] items-center px-8">
+  <div className="mx-auto flex h-[64px] max-w-[1840px] items-center px-6">
     <Link href="/" className="flex shrink-0 items-center gap-3">
-      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 via-violet-600 to-fuchsia-500 text-2xl font-black text-white shadow-[0_0_28px_rgba(80,90,255,0.55)]">
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 via-violet-600 to-fuchsia-500 text-2xl font-black text-white shadow-[0_0_28px_rgba(80,90,255,0.55)]">
         Z
       </div>
 
-      <div className="hidden text-[21px] font-black uppercase tracking-[0.12em] text-white sm:block">
+      <div className="hidden text-[19px] font-black uppercase tracking-[0.12em] text-white sm:block">
         Zedpera
       </div>
     </Link>
 
     {/* DESKTOP MENU */}
-    <nav className="ml-10 hidden items-center gap-6 text-[15px] font-black text-white xl:flex">
+    <nav className="ml-8 hidden items-center gap-4 text-[13px] font-black text-white xl:flex">
       {navItems.map((item) => {
         const Icon = item.icon;
 
@@ -3591,7 +3591,7 @@ const mobileMenuItems = useMemo(
 
       <Link
         href="/login"
-        className="inline-flex h-[42px] min-w-[138px] items-center justify-center rounded-md border border-white/10 bg-[#080816] px-5 text-[14px] font-black text-white transition hover:border-violet-500/70 hover:bg-[#101026]"
+        className="inline-flex h-[40px] min-w-[118px] items-center justify-center rounded-md border border-white/10 bg-[#080816] px-4 text-[13px] font-black text-white transition hover:border-violet-500/70 hover:bg-[#101026]"
       >
         {t.common.login}
       </Link>
@@ -3602,7 +3602,7 @@ const mobileMenuItems = useMemo(
           event.preventDefault();
           scrollToHash('#pricing');
         }}
-        className="inline-flex h-[42px] min-w-[158px] items-center justify-center rounded-md bg-violet-600 px-6 text-[14px] font-black text-white shadow-lg shadow-violet-700/40 transition hover:bg-violet-500"
+        className="inline-flex h-[40px] min-w-[142px] items-center justify-center rounded-md bg-violet-600 px-5 text-[13px] font-black text-white shadow-lg shadow-violet-700/40 transition hover:bg-violet-500"
       >
         {t.common.startFree}
       </a>
@@ -3780,14 +3780,14 @@ const mobileMenuItems = useMemo(
 </div>
 </header>
 
-        <section className="relative z-10 mx-auto max-w-[1860px] px-5 pb-8 pt-8 lg:px-10">
-          <div className="grid min-h-[560px] items-center gap-10 xl:grid-cols-[0.36fr_0.64fr]">
+        <section className="relative z-10 mx-auto max-w-[1780px] px-5 pb-6 pt-6 lg:px-8">
+          <div className="grid min-h-[500px] items-center gap-8 xl:grid-cols-[0.37fr_0.63fr]">
             <div className="relative z-20 max-w-[720px] pt-1">
-              <div className="mb-8 inline-flex items-center rounded-full border border-violet-500/35 bg-violet-500/10 px-5 py-2 text-[13px] font-black uppercase tracking-[0.22em] text-violet-100">
+              <div className="mb-5 inline-flex items-center rounded-full border border-violet-500/35 bg-violet-500/10 px-4 py-1.5 text-[11px] font-black uppercase tracking-[0.22em] text-violet-100">
                 {t.hero.badge}
               </div>
 
-              <h1 className="text-[34px] font-black leading-[1.15] tracking-[-0.035em] text-white sm:text-[42px] lg:text-[48px] xl:text-[54px]">
+              <h1 className="text-[32px] font-black leading-[1.13] tracking-[-0.035em] text-white sm:text-[38px] lg:text-[44px] xl:text-[48px]">
                 {t.hero.title1}
                 <br />
                 {t.hero.title2}
@@ -3797,18 +3797,18 @@ const mobileMenuItems = useMemo(
                 </span>
               </h1>
 
-              <p className="mt-9 max-w-2xl text-[17px] font-bold leading-8 text-white">
+              <p className="mt-6 max-w-2xl text-[15px] font-bold leading-7 text-white">
                 {t.hero.subtitle}
               </p>
 
-              <div className="mt-10 flex flex-col gap-5 sm:flex-row">
+              <div className="mt-7 flex flex-col gap-4 sm:flex-row">
                 <a
                   href="#pricing"
                   onClick={(event) => {
                     event.preventDefault();
                     scrollToHash('#pricing');
                   }}
-                  className="inline-flex min-h-[64px] min-w-[225px] items-center justify-center gap-4 rounded-xl bg-violet-600 px-9 text-[17px] font-black text-white shadow-2xl shadow-violet-700/35 transition hover:-translate-y-0.5 hover:bg-violet-500"
+                  className="inline-flex min-h-[56px] min-w-[205px] items-center justify-center gap-3 rounded-xl bg-violet-600 px-7 text-[16px] font-black text-white shadow-2xl shadow-violet-700/35 transition hover:-translate-y-0.5 hover:bg-violet-500"
                 >
                   {t.hero.primary}
                   <ArrowRight size={23} />
@@ -4284,3 +4284,5 @@ const mobileMenuItems = useMemo(
     </main>
   );
 }
+
+

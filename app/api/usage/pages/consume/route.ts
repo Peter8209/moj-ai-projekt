@@ -7,7 +7,7 @@ import {
 
 import {
   consumePagesForOutput,
-  countGeneratedPages,
+  countGeneratedPages as calculateGeneratedPages,
   PageLimitError,
   type PageQuota,
 } from '@/lib/page-quota';
@@ -33,6 +33,11 @@ const MAX_TEXT_LENGTH = 5_000_000;
 const MAX_MODULE_LENGTH = 100;
 
 /**
+ * Maximálna dĺžka identifikátora projektu/profilu.
+ */
+const MAX_PROJECT_ID_LENGTH = 255;
+
+/**
  * Maximálna dĺžka idempotentného identifikátora požiadavky.
  *
  * Hodnota musí zostať kompatibilná s lib/page-quota.ts a databázovou
@@ -44,9 +49,10 @@ const PAGE_ADDON_PURCHASE_URL =
   '/pricing#doplnkove-sluzby';
 
 type ConsumePagesRequestBody = {
-  text?: unknown;
-  module?: unknown;
   requestId?: unknown;
+  module?: unknown;
+  projectId?: unknown;
+  generatedText?: unknown;
 };
 
 type PublicPageQuota = {
@@ -74,6 +80,12 @@ type ConsumePagesSuccessResponse =
      * Idempotentný identifikátor spotreby.
      */
     requestId: string;
+
+    /** Modul, ktorý vytvoril účtovaný výstup. */
+    module: string;
+
+    /** Projekt alebo profil, ku ktorému spotreba patrí. */
+    projectId: string;
 
     /**
      * Počet normostrán vypočítaný zo zaslaného textu.
@@ -116,10 +128,13 @@ type ConsumePagesErrorCode =
   | 'INVALID_CONTENT_TYPE'
   | 'INVALID_JSON'
   | 'INVALID_REQUEST'
+  | 'CLIENT_PAGE_COUNT_NOT_ALLOWED'
   | 'TEXT_REQUIRED'
   | 'TEXT_TOO_LARGE'
   | 'MODULE_REQUIRED'
   | 'INVALID_MODULE'
+  | 'PROJECT_ID_REQUIRED'
+  | 'INVALID_PROJECT_ID'
   | 'REQUEST_ID_REQUIRED'
   | 'INVALID_REQUEST_ID'
   | 'REQUEST_ID_MISMATCH'
@@ -814,6 +829,7 @@ function logConsumeError({
   errorId,
   requestId,
   moduleName,
+  projectId,
   calculatedPages,
 }: {
   level: 'warn' | 'error';
@@ -822,6 +838,7 @@ function logConsumeError({
   errorId: string;
   requestId?: string;
   moduleName?: string;
+  projectId?: string;
   calculatedPages?: number;
 }): void {
   const payload = {
@@ -829,6 +846,7 @@ function logConsumeError({
     errorId,
     requestId,
     moduleName,
+    projectId,
     calculatedPages,
     message: getErrorMessage(error),
     stack:
@@ -868,10 +886,14 @@ function logConsumeError({
  * Očakávané telo:
  *
  * {
- *   "text": "Vygenerovaný text...",
- *   "module": "chat",
- *   "requestId": "jedinečný-identifikátor"
+ *   "requestId": "unique-generation-id",
+ *   "module": "supervisor",
+ *   "projectId": "profile-id",
+ *   "generatedText": "Celý vygenerovaný text..."
  * }
+ *
+ * Pole `pages` sa nesmie posielať. Počet strán je vždy vypočítaný
+ * serverom z hodnoty `generatedText`.
  *
  * requestId možno poslať aj cez:
  *
@@ -919,24 +941,44 @@ export async function POST(
 
   const { body } = parsedBody;
 
-  if (typeof body.text !== 'string') {
+  /*
+   * Bezpečnostné pravidlo: klient nesmie určovať počet spotrebovaných strán.
+   * Aj keby hodnotu `pages` poslal, server ju nesmie použiť ani akceptovať.
+   */
+  if (
+    Object.prototype.hasOwnProperty.call(
+      body,
+      'pages',
+    )
+  ) {
     return createErrorResponse({
-      code: 'TEXT_REQUIRED',
+      code: 'CLIENT_PAGE_COUNT_NOT_ALLOWED',
       message:
-        'Pole text je povinné a musí obsahovať textovú hodnotu.',
+        'Pole pages nie je povolené. Počet strán vypočíta server z generatedText.',
       status: 400,
       errorId,
       retryable: false,
     });
   }
 
-  const outputText = body.text;
-
-  if (!outputText.trim()) {
+  if (typeof body.generatedText !== 'string') {
     return createErrorResponse({
       code: 'TEXT_REQUIRED',
       message:
-        'Nie je možné odpočítať stránky za prázdny text.',
+        'Pole generatedText je povinné a musí obsahovať celý vygenerovaný text.',
+      status: 400,
+      errorId,
+      retryable: false,
+    });
+  }
+
+  const generatedText = body.generatedText;
+
+  if (!generatedText.trim()) {
+    return createErrorResponse({
+      code: 'TEXT_REQUIRED',
+      message:
+        'Nie je možné odpočítať stránky za prázdny generatedText.',
       status: 400,
       errorId,
       retryable: false,
@@ -944,13 +986,13 @@ export async function POST(
   }
 
   if (
-    outputText.length >
+    generatedText.length >
     MAX_TEXT_LENGTH
   ) {
     return createErrorResponse({
       code: 'TEXT_TOO_LARGE',
       message:
-        `Text môže obsahovať najviac ${MAX_TEXT_LENGTH.toLocaleString(
+        `generatedText môže obsahovať najviac ${MAX_TEXT_LENGTH.toLocaleString(
           'sk-SK',
         )} znakov.`,
       status: 413,
@@ -1012,6 +1054,52 @@ export async function POST(
     });
   }
 
+  if (typeof body.projectId !== 'string') {
+    return createErrorResponse({
+      code: 'PROJECT_ID_REQUIRED',
+      message:
+        'Pole projectId je povinné a musí obsahovať identifikátor projektu alebo profilu.',
+      status: 400,
+      errorId,
+      retryable: false,
+    });
+  }
+
+  const projectId = body.projectId.trim();
+
+  if (!projectId) {
+    return createErrorResponse({
+      code: 'PROJECT_ID_REQUIRED',
+      message:
+        'Identifikátor projectId nesmie byť prázdny.',
+      status: 400,
+      errorId,
+      retryable: false,
+    });
+  }
+
+  if (projectId.length > MAX_PROJECT_ID_LENGTH) {
+    return createErrorResponse({
+      code: 'INVALID_PROJECT_ID',
+      message:
+        `projectId môže obsahovať najviac ${MAX_PROJECT_ID_LENGTH} znakov.`,
+      status: 400,
+      errorId,
+      retryable: false,
+    });
+  }
+
+  if (/[\u0000-\u001F\u007F]/.test(projectId)) {
+    return createErrorResponse({
+      code: 'INVALID_PROJECT_ID',
+      message:
+        'projectId obsahuje nepovolené riadiace znaky.',
+      status: 400,
+      errorId,
+      retryable: false,
+    });
+  }
+
   const requestIdResult =
     resolveRequestId(
       request,
@@ -1031,16 +1119,28 @@ export async function POST(
   const { requestId } =
     requestIdResult;
 
-  const calculatedPages =
-    countGeneratedPages(outputText);
+  const pagesToConsume =
+    calculateGeneratedPages(generatedText);
 
   try {
+    /*
+     * Premenná umožní poslať projectId aj vtedy, keď staršia verzia
+     * consumePagesForOutput zatiaľ typovo pozná iba text/module/requestId.
+     * Extra vlastnosť je za behu dostupná novšej implementácii a staršia ju
+     * bezpečne ignoruje.
+     */
+    const consumeInput = {
+      text: generatedText,
+      generatedText,
+      module: moduleName,
+      projectId,
+      requestId,
+    };
+
     const rawQuota =
-      await consumePagesForOutput({
-        text: outputText,
-        module: moduleName,
-        requestId,
-      });
+      await consumePagesForOutput(
+        consumeInput,
+      );
 
     const quota =
       normalizeQuotaForResponse(
@@ -1055,14 +1155,16 @@ export async function POST(
     const consumedPages =
       bypassed
         ? 0
-        : calculatedPages;
+        : pagesToConsume;
 
     const response: ConsumePagesSuccessResponse = {
       ok: true,
       success: true,
 
       requestId,
-      calculatedPages,
+      module: moduleName,
+      projectId,
+      calculatedPages: pagesToConsume,
       consumedPages,
 
       bypassed,
@@ -1102,7 +1204,8 @@ export async function POST(
         errorId,
         requestId,
         moduleName,
-        calculatedPages,
+        projectId,
+        calculatedPages: pagesToConsume,
       });
 
       return createErrorResponse({
@@ -1138,7 +1241,8 @@ export async function POST(
         errorId,
         requestId,
         moduleName,
-        calculatedPages,
+        projectId,
+        calculatedPages: pagesToConsume,
       });
 
       return createErrorResponse({
@@ -1171,7 +1275,8 @@ export async function POST(
         errorId,
         requestId,
         moduleName,
-        calculatedPages,
+        projectId,
+        calculatedPages: pagesToConsume,
       });
 
       return createErrorResponse({
@@ -1203,7 +1308,8 @@ export async function POST(
         errorId,
         requestId,
         moduleName,
-        calculatedPages,
+        projectId,
+        calculatedPages: pagesToConsume,
       });
 
       return createErrorResponse({
@@ -1236,7 +1342,8 @@ export async function POST(
         errorId,
         requestId,
         moduleName,
-        calculatedPages,
+        projectId,
+        calculatedPages: pagesToConsume,
       });
 
       return createErrorResponse({
@@ -1263,7 +1370,8 @@ export async function POST(
       errorId,
       requestId,
       moduleName,
-      calculatedPages,
+      projectId,
+      calculatedPages: pagesToConsume,
     });
 
     return createErrorResponse({

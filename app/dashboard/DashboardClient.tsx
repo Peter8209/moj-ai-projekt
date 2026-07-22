@@ -4501,8 +4501,14 @@ export default function DashboardPage() {
   const currentFixedModuleUi = getFixedModuleUi(systemLanguage);
   const fixedUi = currentFixedModuleUi[activeModule];
 
+  /**
+   * Plánovanie je v desktopovej navigácii zámerne oddelené ako samostatný
+   * modul. Ostatné moduly ostávajú v pôvodnom dvojstĺpcovom rozložení.
+   */
   const desktopModuleItems = dashboardModuleOrder.filter(
-    (moduleKey) => moduleKey !== "originality",
+    (moduleKey) =>
+      moduleKey !== "originality" &&
+      moduleKey !== "planning",
   );
   const desktopModuleSplitIndex = Math.ceil(desktopModuleItems.length / 2);
 
@@ -4945,7 +4951,7 @@ export default function DashboardPage() {
           clientText.length,
         extractionMessage: clientText
           ? "Textový fallback bol načítaný v prehliadači."
-          : "Obsah načíta server z binárneho súboru.",
+          : "Obsah prílohy sa načítava.",
       });
 
       /**
@@ -7998,7 +8004,7 @@ Text emailu:
           {/* DESKTOP AI MODULY - zobrazuje sa iba na počítači */}
           <header className="sticky top-0 z-40 hidden shrink-0 border-b border-white/10 bg-[#050711]/95 px-4 py-3 backdrop-blur-xl xl:block">
             <div className="w-full">
-              {/* AI MODULY - 2 stĺpce, rovnomerne rozdelené */}
+              {/* AI MODULY - hlavná dvojstĺpcová skupina + samostatné Plánovanie */}
               <nav
                 aria-label="AI moduly dashboardu"
                 className="grid w-full grid-cols-2 gap-3 rounded-[1.75rem] border border-white/10 bg-white/[0.025] p-2 shadow-inner shadow-black/30"
@@ -8063,6 +8069,28 @@ Text emailu:
                         </button>
                       );
                     })}
+                </div>
+
+                {/* PLÁNOVANIE - samostatný modul mimo dvojstĺpcovej skupiny */}
+                <div className="col-span-2 border-t border-white/10 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => selectDashboardModule("planning")}
+                    title={currentFixedModuleUi.planning.shortLabel}
+                    aria-pressed={activeModule === "planning"}
+                    className={[
+                      "inline-flex h-[40px] w-full min-w-0 items-center justify-center gap-2 rounded-2xl border px-4 text-[13px] font-black tracking-tight transition-all duration-200",
+                      "focus:outline-none focus:ring-2 focus:ring-amber-300/80 focus:ring-offset-2 focus:ring-offset-[#050711]",
+                      activeModule === "planning"
+                        ? "border-amber-200/80 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-slate-950 shadow-lg shadow-amber-950/40"
+                        : "border-amber-300/25 bg-amber-500/[0.08] text-amber-100 hover:-translate-y-0.5 hover:border-amber-300/60 hover:bg-amber-500/[0.16] hover:text-white",
+                    ].join(" ")}
+                  >
+                    <ClipboardCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span className="truncate text-center">
+                      {currentFixedModuleUi.planning.shortLabel}
+                    </span>
+                  </button>
                 </div>
               </nav>
             </div>
@@ -8371,16 +8399,6 @@ Text emailu:
                 )}
               </button>
             )}
-
-            {preparedDataFile ? (
-              <button
-                type="button"
-                onClick={downloadPreparedDataFile}
-                className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center rounded-xl border border-emerald-400/60 bg-emerald-500/10 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20 sm:mr-3 sm:w-auto"
-              >
-                Stiahnuť raw-data.xlsx
-              </button>
-            ) : null}
 
             {activeModule === "quality" && (
               <button
@@ -9061,7 +9079,7 @@ function FileUploadBox({
                       ? "Text pripravený"
                       : file.extractionStatus === "failed"
                         ? "Chyba čítania"
-                        : "Načíta server"}
+                        : "Načítava"}
                 </span>
               ) : null}
 

@@ -418,7 +418,6 @@ const maxDetectedSourcesForChat = 120;
 const maxDetectedAuthorsForChat = 120;
 const maxInTextCitationsForChat = 200;
 
-const pdfWorkerSrc = '/pdfjs/pdf.worker.min.mjs';
 
 const defaultAgents: { key: Agent; label: string }[] = [
   { key: 'gemini', label: 'Gemini' },
@@ -769,8 +768,8 @@ function withSystemLanguageProfile(
           language: systemLanguage,
           interfaceLanguage: systemLanguage,
           workLanguage: systemLanguage,
-          citation: 'STN ISO 690',
-          citationStyle: 'STN ISO 690',
+          citation: 'ISO',
+          citationStyle: 'ISO',
         };
 
   const normalized = normalizeProfile(baseProfile);
@@ -780,8 +779,8 @@ function withSystemLanguageProfile(
       language: systemLanguage,
       interfaceLanguage: systemLanguage,
       workLanguage: systemLanguage,
-      citation: 'STN ISO 690',
-      citationStyle: 'STN ISO 690',
+      citation: 'ISO',
+      citationStyle: 'ISO',
     };
   }
 
@@ -808,29 +807,99 @@ function withSystemLanguageProfile(
 
   
 
-function normalizeCitationStyle(value?: string | null): string {
-  const raw = String(value || '').trim().toLowerCase();
+type CitationStyleMode =
+  | 'APA'
+  | 'HARVARD'
+  | 'ISO'
+  | 'FOOTNOTE_REFERENCES';
 
-  if (!raw) return 'STN ISO 690';
+/**
+ * Zjednotí všetky historické a lokalizované hodnoty citačnej normy
+ * na štyri režimy, ktoré ZEDPERA podporuje v AI chate.
+ *
+ * Profil práce zostáva jediným zdrojom pravdy. Frontend neposiela vlastnú
+ * voľbu mimo profilu, iba bezpečne normalizuje staršie uložené hodnoty.
+ */
+function getCitationStyleMode(
+  value?: string | null,
+): CitationStyleMode {
+  const normalized = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  if (raw.includes('apa')) return 'APA 7';
-  if (raw.includes('chicago')) return 'Chicago';
-  if (raw.includes('stn') && raw.includes('iso')) return 'STN ISO 690';
-  if (raw.includes('iso')) return 'ISO 690';
-
-  if (raw === 'stn_iso690' || raw === 'stn_iso_690' || raw === 'stn-iso-690') {
-    return 'STN ISO 690';
+  if (
+    normalized.includes('referencie pod ciarou') ||
+    normalized.includes('poznamky pod ciarou') ||
+    normalized.includes('pod ciarou') ||
+    normalized.includes('footnote') ||
+    normalized.includes('numeric') ||
+    normalized.includes('vancouver') ||
+    normalized.includes('chicago')
+  ) {
+    return 'FOOTNOTE_REFERENCES';
   }
 
-  if (raw === 'iso690' || raw === 'iso_690' || raw === 'iso-690') {
-    return 'ISO 690';
+  if (
+    normalized.includes('harvard') ||
+    normalized.includes('harvad')
+  ) {
+    return 'HARVARD';
   }
 
-  if (raw === 'apa7' || raw === 'apa_7' || raw === 'apa-7') {
-    return 'APA 7';
+  if (normalized.includes('apa')) {
+    return 'APA';
   }
 
-  return 'STN ISO 690';
+  return 'ISO';
+}
+
+function normalizeCitationStyle(
+  value?: string | null,
+): string {
+  const mode = getCitationStyleMode(value);
+
+  if (mode === 'APA') return 'APA';
+  if (mode === 'HARVARD') return 'HARVARD';
+  if (mode === 'FOOTNOTE_REFERENCES') {
+    return 'REFERENCIE POD ČIAROU';
+  }
+
+  return 'ISO';
+}
+
+function buildCitationStyleInstructions(
+  citationStyle: string,
+): string {
+  const mode = getCitationStyleMode(citationStyle);
+
+  if (mode === 'FOOTNOTE_REFERENCES') {
+    return [
+      'CITAČNÝ REŽIM: REFERENCIE POD ČIAROU.',
+      'V texte používaj iba malé referenčné čísla v hranatých zátvorkách: [1], [2], [3].',
+      'Každé číslo použité v texte musí označovať presne tú istú položku v záverečnom zozname zdrojov.',
+      'Číslovanie musí byť spoločné a priebežné: najprv primárne zdroje, potom sekundárne zdroje.',
+      'Nevytváraj autor–rok citácie v okrúhlych zátvorkách.',
+    ].join('\n');
+  }
+
+  const modeLabel =
+    mode === 'APA'
+      ? 'APA'
+      : mode === 'HARVARD'
+        ? 'HARVARD'
+        : 'ISO';
+
+  return [
+    `CITAČNÝ REŽIM: ${modeLabel}.`,
+    'V texte používaj výhradne citačný tvar (Priezvisko, rok).',
+    'V texte nepoužívaj referenčné čísla [1], [2], [3].',
+    'V záverečných sekciách Primárne zdroje a Sekundárne zdroje nepoužívaj poradové ani referenčné čísla.',
+    'Bibliografické záznamy formátuj podľa normy uloženej v profile práce.',
+  ].join('\n');
 }
 
 
@@ -850,7 +919,7 @@ function normalizeProfile(raw: any): SavedProfile | null {
     source.citationStyle ||
       source.citation ||
       source.citation_style ||
-      'STN ISO 690',
+      'ISO',
   );
 
   return {
@@ -1139,42 +1208,6 @@ async function createGzipTextFile({
   return new File([finalGz], fileName, {
     type: window.CompressionStream ? 'application/gzip' : 'text/plain;charset=utf-8',
   });
-}
-
-// ================= PDF FRONTEND EXTRACTION =================
-
-async function extractPdfTextInBrowser(file: File) {
-  const pdfjsLib: any = await import('pdfjs-dist/legacy/build/pdf.mjs');
-
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
-
-  const arrayBuffer = await file.arrayBuffer();
-
-  const loadingTask = pdfjsLib.getDocument({
-    data: arrayBuffer,
-    useWorkerFetch: false,
-    isEvalSupported: false,
-    disableFontFace: true,
-  });
-
-  const pdf = await loadingTask.promise;
-  const pages: string[] = [];
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const textContent = await page.getTextContent();
-
-    const pageText = textContent.items
-      .map((item: any) => String(item?.str || '').trim())
-      .filter(Boolean)
-      .join(' ');
-
-    if (pageText.trim()) {
-      pages.push(`STRANA ${pageNumber}\n${pageText}`);
-    }
-  }
-
-  return cleanAiOutput(pages.join('\n\n------------------------------\n\n'));
 }
 
 // ================= SOURCE DETECTION =================
@@ -2018,8 +2051,15 @@ function buildMainChatPrompt({
   userInstruction: string;
   attachmentCount: number;
 }) {
-  const profileTitle = profile?.title || profile?.topic || 'neuvedená téma práce';
-  const citationStyle = profile?.citationStyle || profile?.citation || 'STN ISO 690';
+  const profileTitle =
+    profile?.title ||
+    profile?.topic ||
+    'neuvedená téma práce';
+  const citationStyle = normalizeCitationStyle(
+    profile?.citationStyle ||
+      profile?.citation ||
+      'ISO',
+  );
 
   return [
     'HLAVNÁ PRACOVNÁ INŠTRUKCIA Z CHAT-PAGE:',
@@ -2028,7 +2068,9 @@ function buildMainChatPrompt({
     `Počet odosielaných príloh: ${attachmentCount}.`,
     'Najprv vyťaž údaje, tvrdenia, mená, dátumy, tabuľky, citácie a zdroje z príloh.',
     'Potom doplň iba chýbajúce odborné údaje pomocou overiteľných akademických zdrojov.',
-    `Citácie a bibliografiu vytvor podľa normy ${citationStyle}.`,
+    `Citačná norma z profilu práce: ${citationStyle}.`,
+    buildCitationStyleInstructions(citationStyle),
+    'Na konci vždy zachovaj samostatné sekcie Primárne zdroje a Sekundárne zdroje.',
     'Nevymýšľaj zdroje, DOI, URL, autorov ani fakty. Neisté údaje jasne označ na overenie.',
     'Výsledok musí nadväzovať na aktívny profil, používateľský príkaz a spracovaný obsah príloh.',
   ].join('\n');
@@ -2527,8 +2569,8 @@ useEffect(() => {
           language: systemLanguage,
           interfaceLanguage: systemLanguage,
           workLanguage: systemLanguage,
-          citation: 'STN ISO 690',
-          citationStyle: 'STN ISO 690',
+          citation: 'ISO',
+          citationStyle: 'ISO',
         },
         systemLanguage,
       );
@@ -2732,191 +2774,140 @@ ${message}`);
     setProcessingLog((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   };
 
-  const preparePdfInBrowser = async (item: AttachedFile): Promise<PreparedFile> => {
-    updateProcessingLog(item.id, {
-      status: 'extracting',
-      message: 'PDF extrahujem priamo v prehliadači cez pdfjs-dist. Následne detegujem citácie v texte a literatúru.',
-      originalSize: item.size,
-    });
-
-    const rawText = await extractPdfTextInBrowser(item.file);
-
-    if (!rawText.trim()) {
-      throw new Error('PDF neobsahuje čitateľný text alebo ide o skenované PDF. Na skenované PDF treba OCR.');
-    }
-
-    const inTextCitations = extractInTextCitations(rawText);
-    const bibliographySources = extractBibliographicCandidates(rawText);
-
-    const detectedSources = pairInTextCitationsWithBibliography({
-      citations: inTextCitations,
-      bibliography: bibliographySources,
-    });
-
-    const detectedAuthors = uniqueArray([
-      ...inTextCitations.flatMap((citation) => citation.authors),
-      ...detectedSources.flatMap((source) => source.authors || []),
-    ]);
-
-    const extractedText = truncateByChars(rawText, maxClientExtractedCharsPerFile);
-
-    const textPackage = `
-NÁZOV SÚBORU: ${item.name}
-PÔVODNÁ VEĽKOSŤ: ${formatBytes(item.size)}
-REŽIM: PDF bolo extrahované priamo v prehliadači cez pdfjs-dist.
-
-CITÁCIE NÁJDENÉ PRIAMO V TEXTE:
-${formatInTextCitations(inTextCitations)}
-
-AUTORI NÁJDENÍ V DOKUMENTE:
-${detectedAuthors.length ? detectedAuthors.join(', ') : 'neuvedené'}
-
-DETEGOVANÉ ZDROJE, AUTORI A PUBLIKÁCIE:
-${formatBibliographicCandidates(detectedSources)}
-
-TEXT:
-${extractedText}
-`.trim();
-
-    const textGzipFile = await createGzipTextFile({
-      text: textPackage,
-      fileName: `${item.name}.extracted.txt.gz`,
-    });
-
-    updateProcessingLog(item.id, {
-      status: 'extracted',
-      message: `Znaky: ${extractedText.length}. Citácie v texte: ${inTextCitations.length}. Zdroje: ${detectedSources.length}. Autori: ${detectedAuthors.length}.`,
-      originalSize: item.size,
-      preparedSize: textGzipFile.size,
-      extractedChars: extractedText.length,
-      detectedSourcesCount: detectedSources.length,
-      detectedAuthorsCount: detectedAuthors.length,
-      detectedInTextCitationsCount: inTextCitations.length,
-    });
-
-    return {
-      originalId: item.id,
-      originalName: item.name,
-      originalSize: item.size,
-      originalType: item.type,
-      preparedName: textGzipFile.name,
-      preparedSize: textGzipFile.size,
-      preparedType: textGzipFile.type,
-      compressionMode: 'gzip_extracted_text',
-      file: textGzipFile,
-      extractedText,
-      extractionMethod: 'pdfjs-browser',
-      extractionMessage: 'PDF bolo extrahované priamo v prehliadači cez pdfjs-dist.',
-      detectedSources,
-      inTextCitations,
-      detectedAuthors,
-      formattedSources: formatAllDetectedSources({
-        citations: inTextCitations,
-        sources: detectedSources,
-        files: [],
-      }),
-      extractionStatus: 'client_extracted',
-      warning: undefined,
-    };
-  };
-
   const prepareBackendFile = async (item: AttachedFile): Promise<PreparedFile> => {
-    updateProcessingLog(item.id, {
-      status: 'compressing',
-      message: 'Komprimujem súbor na pozadí pred extrakciou.',
-    });
-
-    const gzipBlobResult = await gzipBlob(item.file);
-
-    const preparedName = `${item.name}.gz`;
-    const preparedFile = new File([gzipBlobResult], preparedName, {
-      type: window.CompressionStream ? 'application/gzip' : item.type || 'application/octet-stream',
-    });
-
-    updateProcessingLog(item.id, {
-      status: 'compressed',
-      message: `Súbor bol komprimovaný na ${formatBytes(preparedFile.size)}. Spúšťam extrakciu cez /api/extract-text.`,
-      preparedSize: preparedFile.size,
-      warning:
-        preparedFile.size > maxCompressedFileSizeBytes
-          ? `Kompresia má ${formatBytes(preparedFile.size)}, čo je viac ako 1 MB. Napriek tomu sa súbor posiela na /api/extract-text.`
-          : undefined,
-    });
+    const pdfFile = isPdfFile(item.name);
 
     updateProcessingLog(item.id, {
       status: 'extracting',
-      message: 'Volám /api/extract-text.',
-      preparedSize: preparedFile.size,
+      message: 'Extrahujem obsah prílohy.',
+      originalSize: item.size,
     });
 
     let extraction;
-    let usedCompressed = false;
+    let fileForChat = item.file;
+    let preparedName = item.name;
+    let preparedType = item.type || 'application/octet-stream';
+    let preparedSize = item.size;
+    let compressionMode: PreparedFile['compressionMode'] = 'raw_small_text';
 
     try {
-      extraction = await callExtractTextApi({
-        file: preparedFile,
-        fileName: preparedName,
-        originalName: item.name,
-        compressed: true,
-      });
-      usedCompressed = true;
-    } catch (compressedError) {
+      // PDF sa posiela v pôvodnom binárnom tvare. Klientsky pdfjs worker
+      // sa nepoužíva; extrakciu vykoná serverová route.
+      if (pdfFile) {
+        extraction = await callExtractTextApi({
+          file: item.file,
+          fileName: item.name,
+          originalName: item.name,
+          compressed: false,
+        });
+      } else {
+        const gzipBlobResult = await gzipBlob(item.file);
+        const compressedName = `${item.name}.gz`;
+        const compressedFile = new File([gzipBlobResult], compressedName, {
+          type: window.CompressionStream
+            ? 'application/gzip'
+            : item.type || 'application/octet-stream',
+        });
+
+        try {
+          extraction = await callExtractTextApi({
+            file: compressedFile,
+            fileName: compressedName,
+            originalName: item.name,
+            compressed: true,
+          });
+
+          fileForChat = compressedFile;
+          preparedName = compressedName;
+          preparedType = compressedFile.type;
+          preparedSize = compressedFile.size;
+          compressionMode = 'gzip_original';
+        } catch {
+          extraction = await callExtractTextApi({
+            file: item.file,
+            fileName: item.name,
+            originalName: item.name,
+            compressed: false,
+          });
+        }
+      }
+
+      const extractedText = truncateByChars(
+        extraction.extractedText,
+        maxClientExtractedCharsPerFile,
+      );
+
       updateProcessingLog(item.id, {
-        status: 'extracting',
-        message: 'Extrakcia z komprimovaného súboru zlyhala. Skúšam odoslať pôvodný súbor do /api/extract-text.',
-        warning: compressedError instanceof Error ? compressedError.message : 'Extrakcia z komprimovaného súboru zlyhala.',
+        status: 'extracted',
+        message: 'Obsah prílohy bol úspešne extrahovaný.',
+        preparedSize,
+        extractedChars: extractedText.length,
+        detectedSourcesCount: extraction.detectedSources.length,
+        detectedAuthorsCount: extraction.detectedAuthors.length,
+        detectedInTextCitationsCount: extraction.inTextCitations.length,
       });
 
-      extraction = await callExtractTextApi({
-        file: item.file,
-        fileName: item.name,
+      return {
+        originalId: item.id,
         originalName: item.name,
-        compressed: false,
+        originalSize: item.size,
+        originalType: item.type,
+        preparedName,
+        preparedSize,
+        preparedType,
+        compressionMode,
+        file: fileForChat,
+        extractedText,
+        extractionMethod: extraction.method || 'server',
+        extractionMessage: 'Obsah prílohy bol extrahovaný na serveri.',
+        detectedSources: extraction.detectedSources,
+        inTextCitations: extraction.inTextCitations,
+        detectedAuthors: extraction.detectedAuthors,
+        formattedSources:
+          extraction.formattedSources ||
+          formatAllDetectedSources({
+            citations: extraction.inTextCitations,
+            sources: extraction.detectedSources,
+            files: [],
+          }),
+        extractionStatus: 'client_extracted',
+        warning: undefined,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Extrakciu prílohy sa nepodarilo dokončiť pred odoslaním.';
+
+      // Pôvodný súbor sa napriek zlyhaniu pomocnej extrakcie odošle do
+      // /api/chat, kde sa vykoná hlavná serverová extrakcia.
+      updateProcessingLog(item.id, {
+        status: 'ready',
+        message: 'Príloha bola odoslaná na serverové spracovanie.',
+        warning: undefined,
       });
-      usedCompressed = false;
+
+      return {
+        originalId: item.id,
+        originalName: item.name,
+        originalSize: item.size,
+        originalType: item.type,
+        preparedName: item.name,
+        preparedSize: item.size,
+        preparedType: item.type || 'application/octet-stream',
+        compressionMode: 'raw_small_text',
+        file: item.file,
+        extractedText: '',
+        extractionMethod: 'server_fallback',
+        extractionMessage: message,
+        detectedSources: [],
+        inTextCitations: [],
+        detectedAuthors: [],
+        formattedSources: '',
+        extractionStatus: 'backend_required',
+        warning: undefined,
+      };
     }
-
-    const extractedText = truncateByChars(extraction.extractedText, maxClientExtractedCharsPerFile);
-
-    updateProcessingLog(item.id, {
-      status: 'extracted',
-      message: `Znaky: ${extractedText.length}. Citácie v texte: ${extraction.inTextCitations.length}. Zdroje: ${extraction.detectedSources.length}. Autori: ${extraction.detectedAuthors.length}.`,
-      preparedSize: usedCompressed ? preparedFile.size : item.size,
-      extractedChars: extractedText.length,
-      detectedSourcesCount: extraction.detectedSources.length,
-      detectedAuthorsCount: extraction.detectedAuthors.length,
-      detectedInTextCitationsCount: extraction.inTextCitations.length,
-    });
-
-    return {
-      originalId: item.id,
-      originalName: item.name,
-      originalSize: item.size,
-      originalType: item.type,
-      preparedName: usedCompressed ? preparedName : item.name,
-      preparedSize: usedCompressed ? preparedFile.size : item.size,
-      preparedType: usedCompressed ? preparedFile.type : item.type || 'application/octet-stream',
-      compressionMode: usedCompressed ? 'gzip_original' : 'raw_small_text',
-      file: usedCompressed ? preparedFile : item.file,
-      extractedText,
-      extractionMethod: extraction.method,
-      extractionMessage: extraction.message,
-      detectedSources: extraction.detectedSources,
-      inTextCitations: extraction.inTextCitations,
-      detectedAuthors: extraction.detectedAuthors,
-      formattedSources:
-        extraction.formattedSources ||
-        formatAllDetectedSources({
-          citations: extraction.inTextCitations,
-          sources: extraction.detectedSources,
-          files: [],
-        }),
-      extractionStatus: 'client_extracted',
-      warning:
-        usedCompressed && preparedFile.size > maxCompressedFileSizeBytes
-          ? 'Súbor bol komprimovaný, ale po kompresii má viac ako 1 MB. Extrakcia sa napriek tomu podarila cez /api/extract-text.'
-          : undefined,
-    };
   };
 
   const prepareFilesBeforeSend = async (files: AttachedFile[]) => {
@@ -2927,9 +2918,7 @@ ${extractedText}
         id: file.id,
         name: file.name,
         status: 'waiting',
-        message: isPdfFile(file.name)
-          ? 'PDF čaká na extrakciu priamo v prehliadači cez pdfjs-dist.'
-          : 'Čaká na kompresiu a extrakciu cez /api/extract-text.',
+        message: 'Čaká na extrakciu obsahu prílohy.',
         originalSize: file.size,
       })),
     );
@@ -2937,57 +2926,7 @@ ${extractedText}
     const preparedFiles: PreparedFile[] = [];
 
     for (const item of files) {
-      try {
-        if (isPdfFile(item.name)) {
-          preparedFiles.push(await preparePdfInBrowser(item));
-          continue;
-        }
-
-        preparedFiles.push(await prepareBackendFile(item));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Nepodarilo sa pripraviť alebo extrahovať súbor.';
-
-        updateProcessingLog(item.id, {
-          status: 'error',
-          message,
-          warning: message,
-        });
-
-        const metadataText = `
-NÁZOV SÚBORU: ${item.name}
-TYP: ${item.type || 'nezistený'}
-DRUH: ${getFileKindLabel(item.name)}
-PÔVODNÁ VEĽKOSŤ: ${formatBytes(item.size)}
-STAV EXTRAKCIE: Extrakcia zlyhala.
-CHYBA: ${message}
-`.trim();
-
-        const fallbackFile = await createGzipTextFile({
-          text: metadataText,
-          fileName: `${item.name}.failed-metadata.txt.gz`,
-        });
-
-        preparedFiles.push({
-          originalId: item.id,
-          originalName: item.name,
-          originalSize: item.size,
-          originalType: item.type,
-          preparedName: fallbackFile.name,
-          preparedSize: fallbackFile.size,
-          preparedType: fallbackFile.type,
-          compressionMode: 'gzip_metadata_only',
-          file: fallbackFile,
-          extractedText: metadataText,
-          extractionMethod: 'failed',
-          extractionMessage: message,
-          detectedSources: [],
-          inTextCitations: [],
-          detectedAuthors: [],
-          formattedSources: '',
-          extractionStatus: 'failed',
-          warning: message,
-        });
-      }
+      preparedFiles.push(await prepareBackendFile(item));
     }
 
     return preparedFiles;
@@ -3262,8 +3201,8 @@ const profileForApi: SavedProfile | null = normalizedProfileForApi
           language: systemLanguage,
           interfaceLanguage: systemLanguage,
           workLanguage: systemLanguage,
-          citation: 'STN ISO 690',
-          citationStyle: 'STN ISO 690',
+          citation: 'ISO',
+          citationStyle: 'ISO',
         },
         systemLanguage,
       )
@@ -3273,6 +3212,13 @@ const outputLanguage =
   profileForApi?.workLanguage ||
   profileForApi?.language ||
   systemLanguage;
+
+const effectiveCitationStyle =
+  normalizeCitationStyle(
+    profileForApi?.citationStyle ||
+      profileForApi?.citation ||
+      'ISO',
+  );
 
 setLanguage(systemLanguage);
 setActiveProfile(profileForApi);
@@ -3294,8 +3240,18 @@ formData.append('systemLanguage', systemLanguage);
 formData.append('outputLanguage', outputLanguage);
 formData.append('workLanguage', outputLanguage);
 
-formData.append('citationStyle', profileForApi?.citationStyle || profileForApi?.citation || 'STN ISO 690');
-formData.append('citation', profileForApi?.citationStyle || profileForApi?.citation || 'STN ISO 690');
+formData.append(
+  'citationStyle',
+  effectiveCitationStyle,
+);
+formData.append(
+  'citation',
+  effectiveCitationStyle,
+);
+formData.append(
+  'citationMode',
+  getCitationStyleMode(effectiveCitationStyle),
+);
 
 formData.append('messages', JSON.stringify(apiMessages));
 formData.append('profile', JSON.stringify(profileForApi || null));
@@ -3306,7 +3262,7 @@ formData.append('profile', JSON.stringify(profileForApi || null));
     }
 
       formData.append('sourceMode', 'uploaded_documents_first');
-      formData.append('validateAttachmentsAgainstProfile', 'true');
+      formData.append('validateAttachmentsAgainstProfile', 'false');
       formData.append('requireSourceList', 'true');
       formData.append('allowAiKnowledgeFallback', 'true');
       formData.append('returnExtractedFilesInfo', 'true');
@@ -3343,7 +3299,7 @@ formData.append('profile', JSON.stringify(profileForApi || null));
             type: item.type,
             kind: getFileKindLabel(item.name),
             extractable: isTextExtractableFile(item.name),
-            pdfExtractedInBrowser: isPdfFile(item.name),
+            pdfExtractedInBrowser: false,
             uploadedAt: item.uploadedAt,
           })),
         ),
@@ -3391,9 +3347,7 @@ formData.append('profile', JSON.stringify(profileForApi || null));
         profile: profileForApi,
         language: outputLanguage as AppLanguage,
         citationStyle:
-          profileForApi?.citationStyle ||
-          profileForApi?.citation ||
-          'STN ISO 690',
+          effectiveCitationStyle,
         attachments: attachedFiles.map((item) => {
           const prepared = preparedByOriginalId.get(item.id);
 
@@ -3425,11 +3379,13 @@ formData.append('profile', JSON.stringify(profileForApi || null));
 
       setProcessingLog((prev) =>
         prev.map((item) =>
-          item.status === 'ready' || item.status === 'extracted' || item.status === 'metadata_only'
+          item.status === 'ready' ||
+          item.status === 'extracted' ||
+          item.status === 'metadata_only'
             ? {
                 ...item,
                 status: 'ready',
-                message: `${item.message} Text sa spracováva...`,
+                message: 'Extrakcia prílohy bola dokončená.',
               }
             : item,
         ),
@@ -3580,7 +3536,7 @@ await saveChatToHistory({
       const message = error instanceof Error ? error.message : 'Nastala chyba pri komunikácii s API.';
 
       appendAssistantMessage(
-        `❌ Nepodarilo sa spracovať požiadavku.\n\n${message}\n\nSkontroluj terminál pri /api/extract-text a /api/chat.`,
+        `❌ Nepodarilo sa spracovať požiadavku.\n\n${message}`,
       );
     } finally {
       setIsLoading(false);
@@ -3977,56 +3933,21 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
                     <div className="rounded-3xl border border-violet-400/20 bg-violet-500/10 p-4">
                       <div className="mb-3 flex items-center gap-2 text-sm font-black text-violet-100">
                         <UploadCloud className="h-4 w-4" />
-                        Spracovanie príloh, citácií v texte a zdrojov
+                        Extrakcia príloh
                       </div>
 
                       <div className="space-y-2">
                         {processingLog.map((item) => (
-                          <div key={item.id} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-slate-300">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="font-black text-white">{item.name}</div>
-
-                              <div
-                                className={`rounded-xl px-3 py-1 text-[10px] font-black uppercase ${
-                                  item.status === 'error'
-                                    ? 'bg-red-500/20 text-red-100'
-                                    : item.status === 'extracted' || item.status === 'ready'
-                                      ? 'bg-emerald-500/20 text-emerald-100'
-                                      : item.status === 'metadata_only'
-                                        ? 'bg-amber-500/20 text-amber-100'
-                                        : 'bg-violet-500/20 text-violet-100'
-                                }`}
-                              >
-                                {item.status}
-                              </div>
+                          <div
+                            key={item.id}
+                            className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-slate-300"
+                          >
+                            <div className="font-black text-white">{item.name}</div>
+                            <div className="mt-1 leading-5 text-slate-300">
+                              {item.message}
                             </div>
-
-                            <div className="mt-1 leading-5 text-slate-400">{item.message}</div>
-
-                            <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
-                              {item.originalSize ? <span>pôvodne: {formatBytes(item.originalSize)}</span> : null}
-                              {item.preparedSize ? <span>po príprave: {formatBytes(item.preparedSize)}</span> : null}
-                              {typeof item.extractedChars === 'number' ? <span>extrahované znaky: {item.extractedChars}</span> : null}
-                              {typeof item.detectedInTextCitationsCount === 'number' ? <span>citácie v texte: {item.detectedInTextCitationsCount}</span> : null}
-                              {typeof item.detectedSourcesCount === 'number' ? <span>detegované zdroje: {item.detectedSourcesCount}</span> : null}
-                              {typeof item.detectedAuthorsCount === 'number' ? <span>autori: {item.detectedAuthorsCount}</span> : null}
-                            </div>
-
-                            {item.warning ? (
-                              <div className="mt-2 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
-                                {item.warning}
-                              </div>
-                            ) : null}
                           </div>
                         ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {isLoading && (
-                    <div className="flex justify-start">
-                      <div className="rounded-3xl border border-white/10 bg-white/[0.065] px-5 py-4 text-sm font-bold text-violet-200">
-                        🤖  Analyzujem...
                       </div>
                     </div>
                   )}
@@ -4042,24 +3963,8 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
                   <div className="flex items-center gap-2 font-bold text-violet-100">
                     <Paperclip className="h-4 w-4 text-violet-300" />
                     <span>
-                      Nahrané prílohy celkom:{' '}
-                      <strong>
-                        {isAttachmentUsageLoading
-                          ? '…'
-                          : attachmentUsage.attachmentsUsed}
-                      </strong>
+                      Počet nahraných príloh: <strong>{attachedFiles.length}</strong>
                     </span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-slate-300">
-                    <span className="rounded-xl bg-white/5 px-2 py-1">
-                      V tejto správe: {attachedFiles.length}/{maxFilesCount}
-                    </span>
-                    {!attachmentUsage.trackingAvailable ? (
-                      <span className="rounded-xl bg-amber-500/15 px-2 py-1 text-amber-200">
-                        Spustite SQL migráciu počítadla
-                      </span>
-                    ) : null}
                   </div>
                 </div>
 
@@ -4067,7 +3972,7 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
                   <div className="mb-3 max-h-[110px] overflow-y-auto rounded-2xl border border-white/10 bg-black/20 p-2">
                     <div className="mb-2 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.15em] text-slate-400">
                       <UploadCloud className="h-4 w-4 text-violet-300" />
-                      Pripojené podklady ({attachedFiles.length}/{maxFilesCount})
+                      Pripojené podklady ({attachedFiles.length})
                     </div>
 
                     <div className="flex flex-wrap gap-2">

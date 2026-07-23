@@ -1,6 +1,7 @@
 import { generateText, streamText } from 'ai';
 import { randomUUID } from 'node:crypto';
-import { openai } from '@ai-sdk/openai';
+import OpenAI from 'openai';
+import { openai as aiSdkOpenAi } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
 import { mistral } from '@ai-sdk/mistral';
@@ -21,7 +22,6 @@ import {
   type PageQuota,
 } from '@/lib/page-quota';
 import {
-  AttachmentLimitError,
   EntitlementError,
   FeatureAccessError,
   MODULE_FEATURE_MAP,
@@ -43,9 +43,25 @@ import {
   zedperaErrorJson,
   zedperaUnknownErrorJson,
 } from '@/lib/zedpera-api-errors.server';
+import {
+  AI_DEFAULT_MAX_OUTPUT_TOKENS,
+  AI_DEFAULT_MODEL,
+  AI_HARD_MAX_ATTACHMENTS,
+  AI_SERVER_MAX_DURATION_SECONDS,
+  createOpenAiInclude,
+  createWebSearchTools,
+  isAttachmentSizeAllowed,
+  isSupportedAttachment,
+  resolveAiSourceMode,
+  type AiSourceMode,
+} from '@/lib/ai/config';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 90;
+export const revalidate = 0;
+
+export const maxDuration =
+  AI_SERVER_MAX_DURATION_SECONDS;
 
 // =====================================================
 // TYPES
@@ -282,7 +298,7 @@ type ProfileRelevanceResult = {
 };
 
 type SourceSettings = {
-  sourceMode: 'uploaded_documents_first';
+  sourceMode: AiSourceMode;
   validateAttachmentsAgainstProfile: boolean;
   requireSourceList: boolean;
   allowAiKnowledgeFallback: boolean;
@@ -299,6 +315,7 @@ type ExternalResearchResult = {
 type ModelResult = {
   model: any;
   providerLabel: string;
+  agent?: Agent;
 };
 
 type SlovakApiError = {
@@ -320,7 +337,6 @@ const maxProjectDocumentChars = 24_000;
 const maxAttachmentContextChars = 96_000;
 const maxPriorityAttachmentContextChars = 84_000;
 const maxSystemPromptChars = 150_000;
-const MAX_ATTACHMENTS_TO_PROCESS = 24;
 const maxSingleMessageChars = 10_000;
 const maxTotalMessagesChars = 30_000;
 const maxDetectedSourcesPerAttachment = 300;
@@ -328,7 +344,7 @@ const maxFinalSourcesInOutput = 300;
 const maxExternalVerifiedSources = 12;
 const maxExternalResearchQueryLength = 260;
 
-const defaultOutputTokens = 5000;
+const defaultOutputTokens = AI_DEFAULT_MAX_OUTPUT_TOKENS;
 const streamOutputTokens = 7000;
 const chapterOutputTokens = 9000;
 
@@ -4256,17 +4272,10 @@ async function buildVerifiedSourcePack({
 // FILE EXTRACTION
 // =====================================================
 
-const allowedAttachmentExtensions = ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt', '.md', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.xls', '.xlsx', '.csv', '.ppt', '.pptx', '.gz'];
 const extractableAttachmentExtensions = ['.pdf', '.docx', '.txt', '.md', '.csv', '.rtf'];
 
 function isGzipFile(file: UploadedFile) {
   return (file.name || '').toLowerCase().endsWith('.gz') || file.type === 'application/gzip' || file.type === 'application/x-gzip';
-}
-
-function isAllowedAttachment(file: UploadedFile) {
-  const extension = getFileExtension(file.name);
-  const effectiveExtension = getEffectiveExtension(file.name);
-  return allowedAttachmentExtensions.includes(extension) || allowedAttachmentExtensions.includes(effectiveExtension);
 }
 
 function getAttachmentLabel(fileName: string) {
@@ -4600,7 +4609,7 @@ async function buildNativeAttachmentBundle({
   for (
     const file of files.slice(
       0,
-      MAX_ATTACHMENTS_TO_PROCESS,
+      AI_HARD_MAX_ATTACHMENTS,
     )
   ) {
     if (
@@ -4730,7 +4739,7 @@ function getNativeAttachmentReaderModels(): ModelResult[] {
 
   if (process.env.OPENAI_API_KEY) {
     readers.push({
-      model: openai(
+      model: aiSdkOpenAi(
         process.env.OPENAI_ATTACHMENT_MODEL ||
           'gpt-4o',
       ),
@@ -4873,7 +4882,7 @@ async function extractTextFromSingleFile(file: UploadedFile, preparedFilesMetada
     formattedSources: metadataFormattedSources,
   };
 
-  if (!isAllowedAttachment(file)) {
+  if (!isSupportedAttachment(file)) {
     return {
       ...base,
       compressedSize: size,
@@ -5220,7 +5229,7 @@ async function extractAttachmentTexts({
 }) {
   const extractedFiles: ExtractedAttachment[] = [];
 
-  for (const file of files.slice(0, MAX_ATTACHMENTS_TO_PROCESS)) {
+  for (const file of files.slice(0, AI_HARD_MAX_ATTACHMENTS)) {
     extractedFiles.push(await extractTextFromSingleFile(file, preparedFilesMetadata));
   }
 
@@ -6200,40 +6209,303 @@ function appendVerifiedBibliography({
 
 function getModelByAgent(agent: Agent): ModelResult {
   if (agent === 'openai') {
-    if (!process.env.OPENAI_API_KEY) throw new Error('Chýba OPENAI_API_KEY pre GPT.');
-    return { model: openai(process.env.OPENAI_MODEL || 'gpt-4o-mini'), providerLabel: 'GPT' };
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('Chýba OPENAI_API_KEY pre GPT.');
+    }
+
+    return {
+      model: aiSdkOpenAi(
+        process.env.OPENAI_MODEL ||
+          AI_DEFAULT_MODEL,
+      ),
+      providerLabel: 'GPT',
+      agent: 'openai',
+    };
   }
 
   if (agent === 'claude') {
-    if (!process.env.ANTHROPIC_API_KEY) throw new Error('Chýba ANTHROPIC_API_KEY pre Claude.');
-    return { model: anthropic(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6') as any, providerLabel: 'Claude' };
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error('Chýba ANTHROPIC_API_KEY pre Claude.');
+    }
+
+    return {
+      model: anthropic(
+        process.env.ANTHROPIC_MODEL ||
+          'claude-sonnet-4-6',
+      ) as any,
+      providerLabel: 'Claude',
+      agent: 'claude',
+    };
   }
 
   if (agent === 'gemini') {
-    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) throw new Error('Chýba GOOGLE_GENERATIVE_AI_API_KEY pre Gemini.');
-    return { model: google(process.env.GOOGLE_MODEL || 'gemini-2.5-flash') as any, providerLabel: 'Gemini' };
+    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+      throw new Error(
+        'Chýba GOOGLE_GENERATIVE_AI_API_KEY pre Gemini.',
+      );
+    }
+
+    return {
+      model: google(
+        process.env.GOOGLE_MODEL ||
+          'gemini-2.5-flash',
+      ) as any,
+      providerLabel: 'Gemini',
+      agent: 'gemini',
+    };
   }
 
   if (agent === 'grok') {
-    if (!process.env.XAI_API_KEY) throw new Error('Chýba XAI_API_KEY pre Grok.');
-    return { model: xai(process.env.XAI_MODEL || 'grok-3') as any, providerLabel: 'Grok' };
+    if (!process.env.XAI_API_KEY) {
+      throw new Error('Chýba XAI_API_KEY pre Grok.');
+    }
+
+    return {
+      model: xai(
+        process.env.XAI_MODEL ||
+          'grok-3',
+      ) as any,
+      providerLabel: 'Grok',
+      agent: 'grok',
+    };
   }
 
   if (agent === 'mistral') {
-    if (!process.env.MISTRAL_API_KEY) throw new Error('Chýba MISTRAL_API_KEY pre Mistral.');
-    return { model: mistral(process.env.MISTRAL_MODEL || 'mistral-small-latest') as any, providerLabel: 'Mistral' };
+    if (!process.env.MISTRAL_API_KEY) {
+      throw new Error('Chýba MISTRAL_API_KEY pre Mistral.');
+    }
+
+    return {
+      model: mistral(
+        process.env.MISTRAL_MODEL ||
+          'mistral-small-latest',
+      ) as any,
+      providerLabel: 'Mistral',
+      agent: 'mistral',
+    };
   }
 
   throw new Error(`Neznámy AI agent: ${agent}`);
 }
 
 function getFallbackModel(): ModelResult {
-  if (process.env.OPENAI_API_KEY) return { model: openai(process.env.OPENAI_MODEL || 'gpt-4o-mini'), providerLabel: 'GPT fallback' };
-  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) return { model: google(process.env.GOOGLE_MODEL || 'gemini-2.5-flash') as any, providerLabel: 'Gemini fallback' };
-  if (process.env.ANTHROPIC_API_KEY) return { model: anthropic(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6') as any, providerLabel: 'Claude fallback' };
-  if (process.env.MISTRAL_API_KEY) return { model: mistral(process.env.MISTRAL_MODEL || 'mistral-small-latest') as any, providerLabel: 'Mistral fallback' };
-  if (process.env.XAI_API_KEY) return { model: xai(process.env.XAI_MODEL || 'grok-3') as any, providerLabel: 'Grok fallback' };
-  throw new Error('Nie je nastavený žiadny AI provider. Doplň aspoň jeden API kľúč.');
+  if (process.env.OPENAI_API_KEY) {
+    return {
+      model: aiSdkOpenAi(
+        process.env.OPENAI_MODEL ||
+          AI_DEFAULT_MODEL,
+      ),
+      providerLabel: 'GPT fallback',
+      agent: 'openai',
+    };
+  }
+
+  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    return {
+      model: google(
+        process.env.GOOGLE_MODEL ||
+          'gemini-2.5-flash',
+      ) as any,
+      providerLabel: 'Gemini fallback',
+      agent: 'gemini',
+    };
+  }
+
+  if (process.env.ANTHROPIC_API_KEY) {
+    return {
+      model: anthropic(
+        process.env.ANTHROPIC_MODEL ||
+          'claude-sonnet-4-6',
+      ) as any,
+      providerLabel: 'Claude fallback',
+      agent: 'claude',
+    };
+  }
+
+  if (process.env.MISTRAL_API_KEY) {
+    return {
+      model: mistral(
+        process.env.MISTRAL_MODEL ||
+          'mistral-small-latest',
+      ) as any,
+      providerLabel: 'Mistral fallback',
+      agent: 'mistral',
+    };
+  }
+
+  if (process.env.XAI_API_KEY) {
+    return {
+      model: xai(
+        process.env.XAI_MODEL ||
+          'grok-3',
+      ) as any,
+      providerLabel: 'Grok fallback',
+      agent: 'grok',
+    };
+  }
+
+  throw new Error(
+    'Nie je nastavený žiadny AI provider. Doplň aspoň jeden API kľúč.',
+  );
+}
+
+let openAiResponsesClient: OpenAI | null =
+  null;
+
+function getOpenAiResponsesClient() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error(
+      'Chýba OPENAI_API_KEY pre OpenAI Responses API.',
+    );
+  }
+
+  if (!openAiResponsesClient) {
+    openAiResponsesClient = new OpenAI({
+      apiKey:
+        process.env.OPENAI_API_KEY,
+    });
+  }
+
+  return openAiResponsesClient;
+}
+
+function buildOpenAiResponsesInput(
+  messages: ChatMessage[],
+) {
+  return messages
+    .map((message) => {
+      const roleLabel =
+        message.role === 'assistant'
+          ? 'ASISTENT'
+          : 'POUŽÍVATEĽ';
+
+      return `${roleLabel}:\n${message.content}`;
+    })
+    .join('\n\n');
+}
+
+function extractOpenAiResponseText(
+  response: any,
+): string {
+  const directText =
+    typeof response?.output_text === 'string'
+      ? response.output_text.trim()
+      : '';
+
+  if (directText) {
+    return directText;
+  }
+
+  const outputItems =
+    Array.isArray(response?.output)
+      ? response.output
+      : [];
+
+  const fragments = outputItems.flatMap(
+    (item: any) =>
+      Array.isArray(item?.content)
+        ? item.content
+            .map((contentItem: any) => {
+              if (
+                typeof contentItem?.text ===
+                'string'
+              ) {
+                return contentItem.text;
+              }
+
+              if (
+                typeof contentItem?.output_text ===
+                'string'
+              ) {
+                return contentItem.output_text;
+              }
+
+              return '';
+            })
+            .filter(Boolean)
+        : [],
+  );
+
+  return fragments.join('\n').trim();
+}
+
+async function generateOpenAiResponsesText({
+  systemPrompt,
+  normalizedMessages,
+  maxOutputTokens,
+  tools,
+  include,
+}: {
+  systemPrompt: string;
+  normalizedMessages: ChatMessage[];
+  maxOutputTokens: number;
+  tools: ReturnType<
+    typeof createWebSearchTools
+  >;
+  include: ReturnType<
+    typeof createOpenAiInclude
+  >;
+}) {
+  const openAiClient =
+    getOpenAiResponsesClient();
+
+  const response =
+    await openAiClient.responses.create({
+      model: AI_DEFAULT_MODEL,
+
+      instructions: systemPrompt,
+
+      input:
+        buildOpenAiResponsesInput(
+          normalizedMessages,
+        ),
+
+      max_output_tokens:
+        Math.min(
+          maxOutputTokens,
+          AI_DEFAULT_MAX_OUTPUT_TOKENS,
+        ),
+
+      tools:
+        tools.length > 0
+          ? (tools as any)
+          : undefined,
+
+      include:
+        include.length > 0
+          ? (include as any)
+          : undefined,
+
+      tool_choice:
+        tools.length > 0
+          ? 'auto'
+          : undefined,
+    });
+
+  const output =
+    extractOpenAiResponseText(
+      response,
+    );
+
+  if (!output) {
+    throw new Error(
+      'OPENAI_EMPTY_RESPONSE: OpenAI Responses API nevrátilo použiteľný text.',
+    );
+  }
+
+  return output;
+}
+
+function createSingleChunkTextStream(
+  text: string,
+): AsyncIterable<string> {
+  return {
+    async *[Symbol.asyncIterator]() {
+      if (text) {
+        yield text;
+      }
+    },
+  };
 }
 
 function getErrorMessage(error: unknown) {
@@ -6987,21 +7259,6 @@ async function requireChatRequestEntitlements({
     });
   }
 
-  const attachmentLimit =
-    entitlements.attachmentLimit;
-
-  if (
-    !entitlements.isAdmin &&
-    !entitlements.hasUnlimitedAccess &&
-    attachmentLimit !== null &&
-    receivedAttachments > attachmentLimit
-  ) {
-    throw new AttachmentLimitError({
-      attachmentLimit,
-      receivedAttachments,
-    });
-  }
-
   return {
     entitlements,
     entitlementModule,
@@ -7068,6 +7325,7 @@ function entitlementApiErrorResponse(
 
 async function createStreamResponse({
   model,
+  providerAgent,
   systemPrompt,
   normalizedMessages,
   module,
@@ -7075,9 +7333,13 @@ async function createStreamResponse({
   pageRequestId,
   entitlementGuard,
   attachmentUsage,
+  sourceMode,
+  tools,
+  include,
   nativeAttachmentParts = [],
 }: {
   model: ModelResult['model'];
+  providerAgent?: Agent;
   systemPrompt: string;
   normalizedMessages: ReturnType<typeof normalizeMessages>;
   module: ModuleKey;
@@ -7085,6 +7347,9 @@ async function createStreamResponse({
   pageRequestId: string;
   entitlementGuard: EntitlementGuardResult;
   attachmentUsage: AttachmentUsageSnapshot;
+  sourceMode: AiSourceMode;
+  tools: ReturnType<typeof createWebSearchTools>;
+  include: ReturnType<typeof createOpenAiInclude>;
   nativeAttachmentParts?: NativeAttachmentPart[];
 }) {
   const effectiveOutputTokens = getOutputTokenLimit(
@@ -7108,13 +7373,44 @@ async function createStreamResponse({
       nativeAttachmentParts,
     );
 
-  const result = streamText({
-    model,
-    system: systemPrompt,
-    messages: modelMessages as any,
-    temperature: 0.2,
-    maxOutputTokens: effectiveOutputTokens,
-  });
+  const result =
+    providerAgent === 'openai'
+      ? {
+          textStream:
+            createSingleChunkTextStream(
+              await generateOpenAiResponsesText({
+                systemPrompt,
+                normalizedMessages,
+                maxOutputTokens:
+                  effectiveOutputTokens,
+                tools,
+                include,
+              }),
+            ),
+        }
+      : streamText({
+          model,
+          system: systemPrompt,
+          messages:
+            modelMessages as any,
+          temperature: 0.2,
+          maxOutputTokens:
+            effectiveOutputTokens,
+        });
+
+  console.log(
+    'CHAT_AI_SOURCE_MODE:',
+    {
+      module,
+      providerAgent:
+        providerAgent || 'unknown',
+      sourceMode,
+      webSearchEnabled:
+        tools.length > 0,
+      includeCount:
+        include.length,
+    },
+  );
 
   const encoder = new TextEncoder();
   const maximumCharacters =
@@ -7317,6 +7613,7 @@ async function createStreamResponse({
 }
 async function createJsonResponse({
   model,
+  providerAgent,
   systemPrompt,
   normalizedMessages,
   extractedFiles,
@@ -7334,10 +7631,14 @@ async function createJsonResponse({
   pageRequestId,
   entitlementGuard,
   attachmentUsage,
+  sourceMode,
+  tools,
+  include,
   nativeAttachmentParts = [],
   nativeAttachmentFileNames = [],
 }: {
   model: any;
+  providerAgent?: Agent;
   systemPrompt: string;
   normalizedMessages: ChatMessage[];
   extractedFiles: ExtractedAttachment[];
@@ -7355,6 +7656,9 @@ async function createJsonResponse({
   pageRequestId: string;
   entitlementGuard: EntitlementGuardResult;
   attachmentUsage: AttachmentUsageSnapshot;
+  sourceMode: AiSourceMode;
+  tools: ReturnType<typeof createWebSearchTools>;
+  include: ReturnType<typeof createOpenAiInclude>;
   nativeAttachmentParts?: NativeAttachmentPart[];
   nativeAttachmentFileNames?: string[];
 }) {
@@ -7411,17 +7715,45 @@ async function createJsonResponse({
   // ktoré nemusia podporovať PDF FilePart priamo.
   const modelMessages = normalizedMessages;
 
-  const result = await generateText({
-    model,
-    system: systemPrompt,
-    messages: modelMessages as any,
-    temperature: 0.2,
-    maxOutputTokens: effectiveOutputTokens,
-  });
+  const generatedText =
+    providerAgent === 'openai'
+      ? await generateOpenAiResponsesText({
+          systemPrompt,
+          normalizedMessages,
+          maxOutputTokens:
+            effectiveOutputTokens,
+          tools,
+          include,
+        })
+      : (
+          await generateText({
+            model,
+            system: systemPrompt,
+            messages:
+              modelMessages as any,
+            temperature: 0.2,
+            maxOutputTokens:
+              effectiveOutputTokens,
+          })
+        ).text || '';
+
+  console.log(
+    'CHAT_AI_SOURCE_MODE:',
+    {
+      module,
+      providerAgent:
+        providerAgent || 'unknown',
+      sourceMode,
+      webSearchEnabled:
+        tools.length > 0,
+      includeCount:
+        include.length,
+    },
+  );
 
   let output = isStrictNoAcademicTailModule(module)
-  ? cleanStrictOutput(result.text || '', module)
-  : result.text || '';
+  ? cleanStrictOutput(generatedText, module)
+  : generatedText;
 
 output = cleanClientVisibleOutput(output, module);
 output = removeForbiddenInternalSourcesFromOutput(output);
@@ -7573,6 +7905,9 @@ await saveGeneratedHistory({
       ),
     promptUsage,
     attachmentUsage,
+    sourceMode,
+    webSearchEnabled:
+      tools.length > 0,
     profileRelevance: relevance,
     externalResearch,
     extractedFiles: extractedFilesPayload,
@@ -8336,6 +8671,88 @@ try {
       clientRequestId ||
       randomUUID();
 
+    if (
+      files.length >
+      AI_HARD_MAX_ATTACHMENTS
+    ) {
+      return zedperaErrorJson(
+        'ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED',
+        {
+          requestId:
+            pageRequestId,
+          endpoint:
+            '/api/chat',
+          module,
+          attachmentLimit:
+            AI_HARD_MAX_ATTACHMENTS,
+          receivedAttachments:
+            files.length,
+          serverMessage:
+            'Bol prekročený maximálny počet príloh v jednej požiadavke.',
+        },
+        {
+          request: req,
+          status: 400,
+        },
+      );
+    }
+
+    for (const file of files) {
+      if (
+        !isSupportedAttachment(
+          file,
+        )
+      ) {
+        return zedperaErrorJson(
+          'ATTACHMENT_UNSUPPORTED_TYPE',
+          {
+            requestId:
+              pageRequestId,
+            endpoint:
+              '/api/chat',
+            module,
+            fileName:
+              file.name,
+            receivedAttachments:
+              files.length,
+            serverMessage:
+              `Súbor ${file.name} má nepodporovaný formát.`,
+          },
+          {
+            request: req,
+            status: 400,
+          },
+        );
+      }
+
+      if (
+        !isAttachmentSizeAllowed(
+          file.size,
+        )
+      ) {
+        return zedperaErrorJson(
+          'ATTACHMENT_FILE_TOO_LARGE',
+          {
+            requestId:
+              pageRequestId,
+            endpoint:
+              '/api/chat',
+            module,
+            fileName:
+              file.name,
+            receivedAttachments:
+              files.length,
+            serverMessage:
+              `Súbor ${file.name} prekračuje povolenú veľkosť.`,
+          },
+          {
+            request: req,
+            status: 413,
+          },
+        );
+      }
+    }
+
     const attachmentItems =
       buildAttachmentUsageItems({
         files,
@@ -8398,6 +8815,49 @@ try {
         lastUserMessage,
         receivedAttachments,
       });
+
+    const userAttachmentLimit =
+      entitlementGuard.entitlements.isAdmin ||
+      entitlementGuard.entitlements
+        .hasUnlimitedAccess
+        ? Number.MAX_SAFE_INTEGER
+        : (
+            entitlementGuard.entitlements
+              .attachmentLimit ??
+            0
+          );
+
+    if (
+      files.length >
+      userAttachmentLimit
+    ) {
+      return zedperaErrorJson(
+        'ATTACHMENT_LIMIT_REACHED',
+        {
+          requestId:
+            pageRequestId,
+          endpoint:
+            '/api/chat',
+          module,
+          attachmentLimit:
+            userAttachmentLimit,
+          receivedAttachments:
+            files.length,
+          attachmentsUsed:
+            attachmentUsage.attachmentsUsed,
+          attachmentsRemaining:
+            attachmentUsage.attachmentsRemaining,
+          purchaseUrl:
+            '/pricing#doplnkove-sluzby',
+          serverMessage:
+            `Váš balík povoľuje maximálne ${userAttachmentLimit} príloh v jednej požiadavke.`,
+        },
+        {
+          request: req,
+          status: 402,
+        },
+      );
+    }
 
     console.log(
       'CHAT_ENTITLEMENTS_GRANTED:',
@@ -8703,8 +9163,23 @@ ${
       relevanceRatio: relevance.relevanceRatio,
     });
 
+    const sourceMode =
+      resolveAiSourceMode(
+        extractedFiles,
+      );
+
+    const tools =
+      createWebSearchTools(
+        sourceMode,
+      );
+
+    const include =
+      createOpenAiInclude(
+        sourceMode,
+      );
+
     const settings: SourceSettings = {
-      sourceMode: 'uploaded_documents_first',
+      sourceMode,
       validateAttachmentsAgainstProfile,
       requireSourceList: isStrictNoAcademicTailModule(module)
         ? false
@@ -8832,6 +9307,8 @@ ${
       ) {
         return await createJsonResponse({
           model: primary.model,
+          providerAgent:
+            primary.agent,
           systemPrompt: finalSystemPrompt,
           normalizedMessages,
           extractedFiles,
@@ -8849,6 +9326,9 @@ ${
           pageRequestId,
           entitlementGuard,
           attachmentUsage,
+          sourceMode,
+          tools,
+          include,
           nativeAttachmentParts:
             nativeAttachmentBundle.parts,
           nativeAttachmentFileNames:
@@ -8858,6 +9338,8 @@ ${
 
       return await createStreamResponse({
         model: primary.model,
+        providerAgent:
+          primary.agent,
         systemPrompt: finalSystemPrompt,
         normalizedMessages,
         module,
@@ -8865,6 +9347,9 @@ ${
         pageRequestId,
         entitlementGuard,
         attachmentUsage,
+        sourceMode,
+        tools,
+        include,
         nativeAttachmentParts:
           nativeAttachmentBundle.parts,
       });
@@ -8922,6 +9407,8 @@ Dodrž:
       ) {
         return await createJsonResponse({
           model: fallback.model,
+          providerAgent:
+            fallback.agent,
           systemPrompt: fallbackSystemPrompt,
           normalizedMessages,
           extractedFiles,
@@ -8939,6 +9426,9 @@ Dodrž:
           pageRequestId,
           entitlementGuard,
           attachmentUsage,
+          sourceMode,
+          tools,
+          include,
           nativeAttachmentParts:
             nativeAttachmentBundle.parts,
           nativeAttachmentFileNames:
@@ -8948,6 +9438,8 @@ Dodrž:
 
       return await createStreamResponse({
         model: fallback.model,
+        providerAgent:
+          fallback.agent,
         systemPrompt: fallbackSystemPrompt,
         normalizedMessages,
         module,
@@ -8955,6 +9447,9 @@ Dodrž:
         pageRequestId,
         entitlementGuard,
         attachmentUsage,
+        sourceMode,
+        tools,
+        include,
         nativeAttachmentParts:
           nativeAttachmentBundle.parts,
       });

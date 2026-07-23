@@ -2057,6 +2057,7 @@ export default function ChatPage() {
   const {
     error: systemError,
     showError: showSystemError,
+    clearError: clearSystemError,
   } = useZedperaErrorCenter();
 
   const systemBlocked =
@@ -2643,6 +2644,10 @@ window.dispatchEvent(new CustomEvent('zedpera-profile-change'));
     return;
   }
 
+  // Nová AI operácia ruší starú čakajúcu hlášku.
+  // Globálny provider zobrazí novú chybu až po 30 sekundách nečinnosti.
+  clearSystemError();
+
   try {
     setIsLoading(true);
 
@@ -2691,6 +2696,7 @@ ${textToTranslate}`,
       headers: {
         Accept: 'application/json, text/plain, text/event-stream',
         'x-request-id': requestId,
+        'x-zedpera-error-delay-ms': '30000',
       },
       body: formData,
     });
@@ -3165,6 +3171,10 @@ ${textToTranslate}`,
       return;
     }
 
+    // Každé nové generovanie začína čisté 30-sekundové okno.
+    // Tým sa zabráni tomu, aby po úspešnom opakovaní vyskočila stará chyba.
+    clearSystemError();
+
     const visibleMessage: ChatMessage = {
       role: 'user',
       content: visibleUserText.trim() || `Spracuj priložené dokumenty (${attachedFiles.length})`,
@@ -3431,6 +3441,7 @@ formData.append('profile', JSON.stringify(profileForApi || null));
         headers: {
           Accept: 'application/json, text/plain, text/event-stream',
           'x-request-id': requestId,
+          'x-zedpera-error-delay-ms': '30000',
         },
         body: formData,
       });
@@ -3865,6 +3876,9 @@ const editSelectedText = async (
     return;
   }
 
+  // Úprava označeného textu je nová AI operácia.
+  // Staré čakajúce hlášky sa zrušia a nová sa môže zobraziť až po 30 sekundách.
+  clearSystemError();
   setIsEditingSelection(true);
 
   try {
@@ -3913,6 +3927,7 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
       headers: {
         Accept: 'application/json, text/plain, text/event-stream',
         'x-request-id': requestId,
+        'x-zedpera-error-delay-ms': '30000',
       },
       body: formData,
     });

@@ -6,6 +6,18 @@ import { LanguageProvider } from '@/components/LanguageProvider';
 import AutoTranslateProvider from '@/components/AutoTranslateProvider';
 import ZedperaProviders from '@/components/system/ZedperaProviders';
 
+/**
+ * Maximálny čas serverového vykonávania pre koreňový route segment.
+ *
+ * Hodnota je uvedená priamo ako číselný literál, pretože Next.js vyžaduje,
+ * aby route-segment konfigurácia bola staticky analyzovateľná počas buildu.
+ *
+ * Klientské AI požiadavky a minimálne 30-sekundové oneskorenie chybovej
+ * hlášky riadi centrálne lib/ai/config.ts cez ai-fetch.ts.
+ */
+export const runtime = 'nodejs';
+export const maxDuration = 30;
+
 export const metadata: Metadata = {
   title: 'Zedpera',
   description: 'AI platforma pre akademické písanie a analýzu',

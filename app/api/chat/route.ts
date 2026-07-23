@@ -46,7 +46,6 @@ import {
 import {
   AI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_DEFAULT_MODEL,
-  AI_HARD_MAX_ATTACHMENTS,
   createOpenAiInclude,
   createWebSearchTools,
   isAttachmentSizeAllowed,
@@ -326,6 +325,8 @@ type SlovakApiError = {
 // =====================================================
 // LIMITS
 // =====================================================
+
+const MAX_ATTACHMENTS_PER_REQUEST = 20;
 
 const maxCompressedFileSizeBytes = 30 * 1024 * 1024;
 const maxDecompressedFileSizeBytes = 60 * 1024 * 1024;
@@ -4607,7 +4608,7 @@ async function buildNativeAttachmentBundle({
   for (
     const file of files.slice(
       0,
-      AI_HARD_MAX_ATTACHMENTS,
+      MAX_ATTACHMENTS_PER_REQUEST,
     )
   ) {
     if (
@@ -5227,7 +5228,7 @@ async function extractAttachmentTexts({
 }) {
   const extractedFiles: ExtractedAttachment[] = [];
 
-  for (const file of files.slice(0, AI_HARD_MAX_ATTACHMENTS)) {
+  for (const file of files.slice(0, MAX_ATTACHMENTS_PER_REQUEST)) {
     extractedFiles.push(await extractTextFromSingleFile(file, preparedFilesMetadata));
   }
 
@@ -8670,8 +8671,8 @@ try {
       randomUUID();
 
     if (
-      files.length >
-      AI_HARD_MAX_ATTACHMENTS
+      receivedAttachments >
+      MAX_ATTACHMENTS_PER_REQUEST
     ) {
       return zedperaErrorJson(
         'ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED',
@@ -8682,11 +8683,10 @@ try {
             '/api/chat',
           module,
           attachmentLimit:
-            AI_HARD_MAX_ATTACHMENTS,
-          receivedAttachments:
-            files.length,
+            MAX_ATTACHMENTS_PER_REQUEST,
+          receivedAttachments,
           serverMessage:
-            'Bol prekročený maximálny počet príloh v jednej požiadavke.',
+            `Nahrali ste viac ako ${MAX_ATTACHMENTS_PER_REQUEST} príloh. Maximálny povolený počet príloh je ${MAX_ATTACHMENTS_PER_REQUEST}. Odstráňte nadbytočné prílohy a skúste znova.`,
         },
         {
           request: req,

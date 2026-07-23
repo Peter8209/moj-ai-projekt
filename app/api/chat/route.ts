@@ -47,7 +47,6 @@ import {
   AI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_DEFAULT_MODEL,
   AI_HARD_MAX_ATTACHMENTS,
-  AI_SERVER_MAX_DURATION_SECONDS,
   createOpenAiInclude,
   createWebSearchTools,
   isAttachmentSizeAllowed,
@@ -60,8 +59,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export const maxDuration =
-  AI_SERVER_MAX_DURATION_SECONDS;
+export const maxDuration = 120;
 
 // =====================================================
 // TYPES

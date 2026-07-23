@@ -12,12 +12,16 @@ import {
 import {
   BarChart3,
   BookOpen,
+  CalendarDays,
+  CheckCircle2,
   ChevronDown,
+  Clock3,
   Download,
   FileDown,
   FileSpreadsheet,
   FileText,
   Languages,
+  ListChecks,
   Mail,
   Menu,
   Mic,
@@ -27,6 +31,7 @@ import {
   Search,
   Send,
   Sparkles,
+  Target,
   Trash2,
   UploadCloud,
   User,
@@ -5034,6 +5039,22 @@ export default function PlanningFrontend(
     const requestedModule =
       activeModuleRef.current;
 
+    /**
+     * Plánovanie, Emaily a Humanizátor neprijímajú prílohy.
+     * Kontrola chráni aj pred programovým otvorením skrytého file inputu.
+     */
+    if (
+      requestedModule === "planning" ||
+      requestedModule === "emails" ||
+      requestedModule === "humanizer"
+    ) {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
+      return;
+    }
+
     const incomingFiles =
       Array.from(files);
 
@@ -5389,15 +5410,43 @@ export default function PlanningFrontend(
     const profileBlock = buildProfileBlock(profileForPrompt);
     const citationStyle = getCitationStyle(profileForPrompt);
     const workLanguage = getWorkLanguage(profileForPrompt);
-    const attachmentBlock = buildAttachmentBlock(attachedFiles);
+
+    /**
+     * Plánovanie, Emaily a Humanizátor sú čisto textové moduly.
+     * Prílohy sa v nich nezobrazujú, neprenášajú do promptu ani neposielajú
+     * do samostatného API endpointu.
+     */
+    const moduleSupportsAttachments =
+      moduleOverride !== "planning" &&
+      moduleOverride !== "emails" &&
+      moduleOverride !== "humanizer";
+
+    const promptAttachedFiles =
+      moduleSupportsAttachments
+        ? attachedFiles
+        : [];
+
+    const attachmentSection =
+      moduleSupportsAttachments
+        ? `
+PRILOŽENÉ SÚBORY:
+${buildAttachmentBlock(promptAttachedFiles)}
+`
+        : "";
+
+    const attachmentRules =
+      moduleSupportsAttachments
+        ? `
+- Ak sú priložené súbory, najprv over, či súvisia s aktívnym profilom práce.
+- Ak priložený dokument pravdepodobne nesúvisí s profilom práce, uveď upozornenie, ale pri výslovnej požiadavke používateľa dokument napriek tomu prečítaj a spracuj.
+- Ak príloha súvisí s profilom práce, použi jej extrahovaný text ako hlavný podklad.
+- Ak sú priložené súbory, v závere uveď, z ktorých príloh sa čerpalo.`
+        : "";
 
     const baseRules = `
 PROFIL PRÁCE:
 ${profileBlock}
-
-PRILOŽENÉ SÚBORY:
-${attachmentBlock}
-
+${attachmentSection}
 DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
 - Hlavný jazyk celého systému je: ${workLanguage}.
 - Výstup musí byť v jazyku práce: ${workLanguage}.
@@ -5407,11 +5456,7 @@ DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
 - Nevkladaj na úplný začiatok technické nadpisy typu „AI vedúci“, „Audit kvality“, „Obhajoba“, „Výstup“ ani názov modulu.
 - Nepoužívaj poškodené znaky, kódovanie ani nečitateľné symboly.
 - Nevymýšľaj zdroje, autorov, DOI, URL, roky ani vydavateľov.
-- Ak chýba alebo nie je možné bezpečne potvrdiť údaj, napíš presne: Údaje sú potrebné overiť.
-- Ak sú priložené súbory, najprv over, či súvisia s aktívnym profilom práce.
-- Ak priložený dokument pravdepodobne nesúvisí s profilom práce, uveď upozornenie, ale pri výslovnej požiadavke používateľa dokument napriek tomu prečítaj a spracuj.
-- Ak príloha súvisí s profilom práce, použi jej extrahovaný text ako hlavný podklad.
-- Ak sú priložené súbory, v závere uveď, z ktorých príloh sa čerpalo.
+- Ak chýba alebo nie je možné bezpečne potvrdiť údaj, napíš presne: Údaje sú potrebné overiť.${attachmentRules}
 - Citačná norma: ${citationStyle}.
 `.trim();
 
@@ -5659,6 +5704,8 @@ ZADANIE:
 ${input}
 
 PRAVIDLÁ PRE PLÁNOVANIE:
+- Plán vytvor výhradne z textového zadania používateľa a údajov aktívneho profilu práce.
+- Neodkazuj na prílohy, nahrané súbory ani dokumenty.
 - Plánovanie nesmie obsahovať termíny v minulosti.
 - Všetky dátumy musia byť od dnešného dátumu alebo v budúcnosti.
 - Harmonogram musí byť označený ako predbežný / orientačný.
@@ -5799,6 +5846,26 @@ Text emailu:
     const requestedModule =
       activeModuleRef.current;
 
+    /**
+     * Plánovanie, Emaily a Humanizátor sú textové moduly.
+     * Aj keby v stave zostali súbory z iného modulu, do requestu sa
+     * neprenesie ich obsah, metadata ani binárny File objekt.
+     */
+    const requestedModuleSupportsAttachments =
+      requestedModule !== "planning" &&
+      requestedModule !== "emails" &&
+      requestedModule !== "humanizer";
+
+    const requestAttachedFiles =
+      requestedModuleSupportsAttachments
+        ? attachedFiles
+        : [];
+
+    const requestActiveAttachmentText =
+      requestedModuleSupportsAttachments
+        ? activeAttachmentText
+        : "";
+
     const moduleRunRequestId =
       createClientRequestId(
         `module-${requestedModule}`,
@@ -5889,7 +5956,7 @@ Text emailu:
       !currentEntitlements.hasUnlimitedAccess &&
       !currentEntitlements.isAdmin &&
       currentEntitlements.attachmentLimit !== null &&
-      attachedFiles.length > currentEntitlements.attachmentLimit
+      requestAttachedFiles.length > currentEntitlements.attachmentLimit
     ) {
       setBillingNotice({
         code: "ATTACHMENT_LIMIT_REACHED",
@@ -5903,7 +5970,7 @@ Text emailu:
     if (
       currentHasUnlimitedAccess &&
       requestedModule !== "data" &&
-      attachedFiles.length >
+      requestAttachedFiles.length >
         maxUnlimitedFilesPerRequest
     ) {
       setBillingNotice({
@@ -5919,7 +5986,7 @@ Text emailu:
 
     if (
       requestedModule === "data" &&
-      attachedFiles.length >
+      requestAttachedFiles.length >
         maxDataFilesPerRequest
     ) {
       alert(
@@ -5941,12 +6008,16 @@ Text emailu:
     );
 
     const hasAnyInput = Boolean(
-      userText || secondaryText || attachedFiles.length > 0 || hasUsableProfile,
+      userText || secondaryText || requestAttachedFiles.length > 0 || hasUsableProfile,
     );
 
     if (!hasAnyInput) {
       alert(
-        "Najskôr vložte zadanie, text, prílohu alebo vyberte profil práce.",
+        requestedModule === "planning"
+          ? "Najskôr zadajte termín odovzdania, aktuálny stav práce a požadovaný plán alebo vyberte profil práce."
+          : requestedModule === "emails"
+            ? "Najskôr vložte zadanie pre email alebo vyberte profil práce."
+            : "Najskôr vložte zadanie, text, prílohu alebo vyberte profil práce.",
       );
       return;
     }
@@ -5982,7 +6053,7 @@ Text emailu:
       const prompt = buildModulePrompt(requestedModule);
 
       if (requestedModule === "data") {
-        const dataFiles = attachedFiles.filter(
+        const dataFiles = requestAttachedFiles.filter(
           (item) =>
             isBrowserFileLike(item.file),
         );
@@ -6455,7 +6526,7 @@ Text emailu:
             },
             profileTitle: profileForApi?.title || "",
             profileId: profileForApi?.id || null,
-            attachedFiles: allowedDataFiles.map((file) => ({
+            requestAttachedFiles: allowedDataFiles.map((file) => ({
               name: file.name,
               size: file.size,
               type: file.type,
@@ -6608,12 +6679,12 @@ Text emailu:
       formData.append("profileContext", buildProfileBlock(profileForApi));
       formData.append(
         "attachmentsContext",
-        buildAttachmentBlock(attachedFiles),
+        buildAttachmentBlock(requestAttachedFiles),
       );
 
       const preparedFilesMetadata =
         buildPreparedFilesMetadata(
-          attachedFiles,
+          requestAttachedFiles,
         );
 
       formData.append(
@@ -6624,7 +6695,7 @@ Text emailu:
       );
 
       const clientExtractedText =
-        attachedFiles
+        requestAttachedFiles
           .map((file) =>
             String(
               file.text ||
@@ -6712,7 +6783,7 @@ Text emailu:
       formData.append(
         "filesMetadata",
         JSON.stringify(
-          attachedFiles.map((item) => ({
+          requestAttachedFiles.map((item) => ({
             name: item.name,
             size: item.size,
             type: item.type,
@@ -6725,7 +6796,7 @@ Text emailu:
         formData.append("projectId", profileForApi.id);
       }
 
-      attachedFiles.forEach((item) => {
+      requestAttachedFiles.forEach((item) => {
         if (!isBrowserFileLike(item.file)) {
           return;
         }
@@ -6789,9 +6860,9 @@ Text emailu:
         workType: getWorkType(profileForApi),
         citation: getCitationStyle(profileForApi),
         citationStyle: getCitationStyle(profileForApi),
-        attachmentText: clientExtractedText || activeAttachmentText || "",
-        extractedText: clientExtractedText || activeAttachmentText || "",
-        clientExtractedText: clientExtractedText || activeAttachmentText || "",
+        attachmentText: clientExtractedText || requestActiveAttachmentText || "",
+        extractedText: clientExtractedText || requestActiveAttachmentText || "",
+        clientExtractedText: clientExtractedText || requestActiveAttachmentText || "",
         qualityMode,
         outputMode,
         translationFrom,
@@ -6875,7 +6946,7 @@ Text emailu:
             : null;
 
         if (
-          attachedFiles.length > 0 &&
+          requestAttachedFiles.length > 0 &&
           attachmentProcessing &&
           isCurrentModuleRun()
         ) {
@@ -7047,7 +7118,7 @@ Text emailu:
           profileTitle: profileForApi?.title || "",
           profileId: profileForApi?.id || null,
           activeModule: requestedModule,
-          attachedFiles: attachedFiles.map((file) => ({
+          requestAttachedFiles: requestAttachedFiles.map((file) => ({
             name: file.name,
             size: file.size,
             type: file.type,
@@ -8388,7 +8459,14 @@ Text emailu:
                   </button>
                 </div>
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div
+                  className={[
+                    "mt-4 grid gap-3",
+                    activeModule === "planning" || activeModule === "emails"
+                      ? "sm:grid-cols-2"
+                      : "sm:grid-cols-3",
+                  ].join(" ")}
+                >
                   <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
                     <p className="text-xs font-bold text-slate-400">Strany</p>
                     <p className="mt-1 font-black text-white">
@@ -8412,21 +8490,26 @@ Text emailu:
                     </p>
                   </div>
 
-                  <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
-                    <p className="text-xs font-bold text-slate-400">Prílohy</p>
-
-                    <p className="mt-1 font-black text-white">
-                      {hasUnlimitedAccess
-                        ? "Neobmedzené"
-                        : `${visibleAttachmentCount} / ${effectiveAttachmentLimit}`}
-                    </p>
-
-                    {hasUnlimitedAccess ? (
-                      <p className="mt-1 text-xs font-semibold text-slate-400">
-                        Aktuálne nahrané: {visibleAttachmentCount}
+                  {activeModule !== "planning" &&
+                  activeModule !== "emails" ? (
+                    <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
+                      <p className="text-xs font-bold text-slate-400">
+                        Prílohy
                       </p>
-                    ) : null}
-                  </div>
+
+                      <p className="mt-1 font-black text-white">
+                        {hasUnlimitedAccess
+                          ? "Neobmedzené"
+                          : `${visibleAttachmentCount} / ${effectiveAttachmentLimit}`}
+                      </p>
+
+                      {hasUnlimitedAccess ? (
+                        <p className="mt-1 text-xs font-semibold text-slate-400">
+                          Aktuálne nahrané: {visibleAttachmentCount}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </section>
             ) : null}
@@ -8466,9 +8549,93 @@ Text emailu:
           </div>
 
           {activeModule === "planning" && (
-            <div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-              Dnešný dátum: {getTodaySkDate()}.
-            </div>
+            <section className="relative mb-6 overflow-hidden rounded-[32px] border border-amber-300/20 bg-gradient-to-br from-[#24180b] via-[#15120f] to-[#090b12] shadow-2xl shadow-amber-950/20">
+              <div
+                className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-amber-400/10 blur-3xl"
+                aria-hidden="true"
+              />
+              <div
+                className="pointer-events-none absolute -bottom-28 left-1/4 h-64 w-64 rounded-full bg-orange-500/10 blur-3xl"
+                aria-hidden="true"
+              />
+
+              <div className="relative p-5 sm:p-7">
+                <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="flex min-w-0 items-start gap-4">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-amber-200/20 bg-amber-400/10 text-amber-100 shadow-lg shadow-amber-950/30">
+                      <CalendarDays className="h-7 w-7" aria-hidden="true" />
+                    </div>
+
+                    <div className="min-w-0">
+                      <p className="text-xs font-black uppercase tracking-[0.24em] text-amber-300">
+                        Inteligentný plán práce
+                      </p>
+                      <h2 className="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">
+                        Od dneška až po úspešné odovzdanie
+                      </h2>
+                      <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-300 sm:text-base">
+                        Zadajte termín, aktuálny stav a dostupný čas. Zedpera
+                        pripraví realistický harmonogram, kontrolné body,
+                        priority a odporúčaný postup bez termínov v minulosti.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="inline-flex shrink-0 items-center gap-3 self-start rounded-2xl border border-amber-200/20 bg-black/25 px-4 py-3 text-amber-50 backdrop-blur">
+                    <CalendarDays className="h-5 w-5 text-amber-300" aria-hidden="true" />
+                    <div>
+                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-amber-300/80">
+                        Dnešný dátum
+                      </p>
+                      <p className="mt-0.5 text-sm font-black">
+                        {getTodaySkDate()}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 grid gap-3 md:grid-cols-3">
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 backdrop-blur">
+                    <div className="flex items-center gap-3">
+                      <Target className="h-5 w-5 text-amber-300" aria-hidden="true" />
+                      <p className="text-sm font-black text-white">
+                        Jasný cieľ
+                      </p>
+                    </div>
+                    <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">
+                      Definujte termín odovzdania a čo musí byť do daného
+                      dátumu dokončené.
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 backdrop-blur">
+                    <div className="flex items-center gap-3">
+                      <Clock3 className="h-5 w-5 text-amber-300" aria-hidden="true" />
+                      <p className="text-sm font-black text-white">
+                        Reálny harmonogram
+                      </p>
+                    </div>
+                    <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">
+                      Plán rešpektuje dnešný dátum, dostupný čas a aktuálnu
+                      rozpracovanosť práce.
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 backdrop-blur">
+                    <div className="flex items-center gap-3">
+                      <ListChecks className="h-5 w-5 text-amber-300" aria-hidden="true" />
+                      <p className="text-sm font-black text-white">
+                        Kontrolné body
+                      </p>
+                    </div>
+                    <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">
+                      Výstup obsahuje etapy, priority, míľniky, riziká a
+                      odporúčaný ďalší krok.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
           )}
 
           {activeModule === "translation" && (
@@ -8538,7 +8705,9 @@ Text emailu:
             </div>
           )}
 
-          {activeModule !== "humanizer" && (
+          {activeModule !== "humanizer" &&
+          activeModule !== "emails" &&
+          activeModule !== "planning" ? (
             <FileUploadBox
               files={attachedFiles}
               fileInputRef={fileInputRef}
@@ -8565,7 +8734,7 @@ Text emailu:
                   activeUploadLimit
               }
             />
-          )}
+          ) : null}
 
           <div
             ref={mobileToolPanelRef}
@@ -8573,40 +8742,155 @@ Text emailu:
             data-active-module={activeModule}
             className="mt-4 pb-28 lg:pb-0"
           >
-            <section
-              className={activeModuleInfo.infoClassName}
-              aria-labelledby={`dashboard-module-title-${activeModule}`}
-              data-module-heading={activeModule}
-            >
-              <p
-                id={`dashboard-module-title-${activeModule}`}
-                className="text-base font-black text-white sm:text-lg"
+            {activeModule === "planning" ? (
+              <section
+                className="overflow-hidden rounded-[32px] border border-amber-300/20 bg-[#080b14] shadow-2xl shadow-black/30"
+                aria-labelledby={`dashboard-module-title-${activeModule}`}
+                data-module-heading={activeModule}
               >
-                {activeModuleLabel}
-              </p>
-              <p className="mt-1 font-semibold leading-6">
-                {activeModuleIntro}
-              </p>
-            </section>
+                <div className="border-b border-white/10 bg-gradient-to-r from-amber-500/10 via-orange-500/[0.06] to-transparent px-5 py-5 sm:px-7">
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-200/20 bg-amber-400/10 text-amber-200">
+                      <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
+                    </div>
 
-            <label
-              htmlFor={dashboardInputId}
-              className="mb-2 block text-sm font-black text-slate-200"
-            >
-              {activeModuleInputLabel}
-            </label>
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-[0.22em] text-amber-300">
+                        Vstupné údaje
+                      </p>
+                      <h3
+                        id={`dashboard-module-title-${activeModule}`}
+                        className="mt-1 text-xl font-black text-white"
+                      >
+                        Pripravte zadanie pre plánovanie
+                      </h3>
+                      <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-400">
+                        Čím presnejšie uvediete termín, aktuálny stav,
+                        dostupný čas a priority, tým realistickejší bude
+                        výsledný harmonogram.
+                      </p>
+                    </div>
+                  </div>
+                </div>
 
-            <textarea
-              key={`dashboard-textarea-${activeModule}`}
-              id={dashboardInputId}
-              name={dashboardInputId}
-              data-module-input={activeModule}
-              aria-label={activeModuleInputLabel}
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder={activeModulePlaceholder}
-              className="min-h-[240px] w-full resize-y rounded-3xl border border-white/10 bg-[#070b18] px-5 py-5 text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/10"
-            />
+                <div className="p-5 sm:p-7">
+                  <label
+                    htmlFor={dashboardInputId}
+                    className="mb-3 block text-sm font-black text-slate-100"
+                  >
+                    Zadanie pre plánovanie
+                  </label>
+
+                  <div className="relative">
+                    <textarea
+                      key={`dashboard-textarea-${activeModule}`}
+                      id={dashboardInputId}
+                      name={dashboardInputId}
+                      data-module-input={activeModule}
+                      aria-label={activeModuleInputLabel}
+                      value={input}
+                      onChange={(event) => setInput(event.target.value)}
+                      placeholder={
+                        "Príklad: Prácu odovzdávam 30. 9. 2026. Mám hotovú osnovu a teoretickú časť na 40 %. Chýba metodika, zber dát, analýza, záver a prezentácia. Pracovať môžem 2 hodiny cez pracovné dni a 5 hodín cez víkend. Priprav týždenný harmonogram s míľnikmi a rezervou."
+                      }
+                      className="min-h-[300px] w-full resize-y rounded-[26px] border border-amber-200/15 bg-[#050812] px-5 py-5 text-sm font-semibold leading-7 text-white shadow-inner shadow-black/30 outline-none transition placeholder:text-slate-500 focus:border-amber-300/60 focus:ring-4 focus:ring-amber-400/10"
+                    />
+
+                    <div className="pointer-events-none absolute bottom-4 right-4 rounded-xl border border-white/10 bg-black/30 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.14em] text-slate-500 backdrop-blur">
+                      bez príloh
+                    </div>
+                  </div>
+
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    {[
+                      {
+                        step: "01",
+                        title: "Termín",
+                        text: "Presný dátum odovzdania alebo obhajoby.",
+                      },
+                      {
+                        step: "02",
+                        title: "Aktuálny stav",
+                        text: "Čo je hotové a ktoré časti ešte chýbajú.",
+                      },
+                      {
+                        step: "03",
+                        title: "Kapacita",
+                        text: "Koľko času viete venovať práci denne alebo týždenne.",
+                      },
+                      {
+                        step: "04",
+                        title: "Priority",
+                        text: "Najdôležitejšie míľniky, riziká a pevné termíny.",
+                      },
+                    ].map((item) => (
+                      <div
+                        key={item.step}
+                        className="rounded-2xl border border-white/10 bg-white/[0.035] p-4"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-400/10 text-xs font-black text-amber-300 ring-1 ring-amber-300/20">
+                            {item.step}
+                          </span>
+                          <p className="text-sm font-black text-white">
+                            {item.title}
+                          </p>
+                        </div>
+                        <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">
+                          {item.text}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-5 flex items-start gap-3 rounded-2xl border border-emerald-300/15 bg-emerald-500/[0.06] px-4 py-3">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />
+                    <p className="text-xs font-semibold leading-5 text-emerald-100/80">
+                      Plánovanie používa iba textové zadanie a profil práce.
+                      Prílohy sa v tomto module nezobrazujú, neposielajú ani
+                      nezapočítavajú.
+                    </p>
+                  </div>
+                </div>
+              </section>
+            ) : (
+              <>
+                <section
+                  className={activeModuleInfo.infoClassName}
+                  aria-labelledby={`dashboard-module-title-${activeModule}`}
+                  data-module-heading={activeModule}
+                >
+                  <p
+                    id={`dashboard-module-title-${activeModule}`}
+                    className="text-base font-black text-white sm:text-lg"
+                  >
+                    {activeModuleLabel}
+                  </p>
+                  <p className="mt-1 font-semibold leading-6">
+                    {activeModuleIntro}
+                  </p>
+                </section>
+
+                <label
+                  htmlFor={dashboardInputId}
+                  className="mb-2 block text-sm font-black text-slate-200"
+                >
+                  {activeModuleInputLabel}
+                </label>
+
+                <textarea
+                  key={`dashboard-textarea-${activeModule}`}
+                  id={dashboardInputId}
+                  name={dashboardInputId}
+                  data-module-input={activeModule}
+                  aria-label={activeModuleInputLabel}
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  placeholder={activeModulePlaceholder}
+                  className="min-h-[240px] w-full resize-y rounded-3xl border border-white/10 bg-[#070b18] px-5 py-5 text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/10"
+                />
+              </>
+            )}
 
             {activeModule !== "data" && (
               <button
@@ -8617,7 +8901,7 @@ Text emailu:
                 aria-label={activeModuleButtonLabel}
                 data-module-action={activeModule}
                 className={[
-                  "mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl px-6 py-4 text-sm font-black text-white shadow-lg transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto",
+                  "mt-5 inline-flex min-h-[56px] w-full items-center justify-center gap-2 rounded-2xl px-7 py-4 text-sm font-black text-white shadow-lg transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto",
                   activeModuleActionClassName,
                 ].join(" ")}
               >

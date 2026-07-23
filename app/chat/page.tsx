@@ -28,6 +28,17 @@ import {
   X,
 } from 'lucide-react';
 
+import {
+  useZedperaErrorCenter,
+} from '@/components/system/ZedperaErrorProvider';
+import {
+  createZedperaError,
+  createZedperaErrorFromUnknown,
+} from '@/lib/zedpera-errors';
+import {
+  readZedperaApiError,
+} from '@/lib/zedpera-fetch';
+
 // =====================================================
 // ARCHITEKTÚRA CHATU
 // =====================================================
@@ -1115,43 +1126,6 @@ function downloadBlob({
   URL.revokeObjectURL(url);
 }
 
-async function readApiErrorResponse(res: Response) {
-  const contentType = res.headers.get('content-type') || '';
-
-  try {
-    if (contentType.includes('application/json')) {
-      const data = await res.json();
-
-      return String(
-        data?.message ||
-          data?.error ||
-          data?.detail ||
-          data?.details ||
-          data?.reason ||
-          data?.code ||
-          `API error ${res.status}`,
-      );
-    }
-
-    const text = await res.text();
-    const cleaned = text.trim();
-
-    if (!cleaned) return `API error ${res.status}`;
-
-    if (
-      cleaned.startsWith('<!DOCTYPE') ||
-      cleaned.startsWith('<html') ||
-      cleaned.includes('__next_error__')
-    ) {
-      return `Server vrátil chybu ${res.status}. Detail pozri v termináli.`;
-    }
-
-    return cleaned.length > 1200 ? `${cleaned.slice(0, 1200)}...` : cleaned;
-  } catch {
-    return `API error ${res.status}`;
-  }
-}
-
 async function gzipBlob(blob: Blob): Promise<Blob> {
   const CompressionStreamConstructor = window.CompressionStream;
 
@@ -2080,6 +2054,13 @@ function buildMainChatPrompt({
 
 export default function ChatPage() {
   const router = useRouter();
+  const {
+    error: systemError,
+    showError: showSystemError,
+  } = useZedperaErrorCenter();
+
+  const systemBlocked =
+    systemError?.blocking === true;
 
   // ================= THEME / LIGHT-DARK MODE =================
 
@@ -2184,6 +2165,7 @@ export default function ChatPage() {
   );
 
   const canSubmit =
+  !systemBlocked &&
   !isLoading &&
   (input.trim().length > 0 || attachedFiles.length > 0);
 
@@ -2664,8 +2646,14 @@ window.dispatchEvent(new CustomEvent('zedpera-profile-change'));
   try {
     setIsLoading(true);
 
+    const requestId =
+      createChatRequestId();
     const formData = new FormData();
 
+    formData.append(
+      'requestId',
+      requestId,
+    );
     formData.append('agent', agent);
     formData.append('module', 'translation');
     formData.append('language', nextLanguage);
@@ -2702,13 +2690,34 @@ ${textToTranslate}`,
       cache: 'no-store',
       headers: {
         Accept: 'application/json, text/plain, text/event-stream',
+        'x-request-id': requestId,
       },
       body: formData,
     });
 
     if (!res.ok) {
-      const errorMessage = await readApiErrorResponse(res);
-      throw new Error(errorMessage);
+      const apiError =
+        await readZedperaApiError(
+          res,
+          {
+            language,
+            endpoint: '/api/chat',
+            module: 'translation',
+            requestId,
+          },
+        );
+
+      showSystemError(
+        apiError.descriptor,
+      );
+
+      if (apiError.status === 401) {
+        router.replace(
+          '/login?returnTo=/chat',
+        );
+      }
+
+      return;
     }
 
     const contentType = res.headers.get('content-type') || '';
@@ -2727,7 +2736,20 @@ ${textToTranslate}`,
       ).trim();
     } else {
       if (!res.body) {
-        throw new Error('API nevrátilo odpoveď.');
+        showSystemError(
+          createZedperaError(
+            'API_UNAVAILABLE',
+            {
+              endpoint: '/api/chat',
+              module: 'translation',
+              requestId,
+            },
+            {
+              language,
+            },
+          ),
+        );
+        return;
       }
 
       const reader = res.body.getReader();
@@ -2745,7 +2767,20 @@ ${textToTranslate}`,
     const cleanedTranslatedText = cleanAiOutput(translatedText);
 
     if (!cleanedTranslatedText) {
-      throw new Error('Preklad nevrátil žiadny text.');
+      showSystemError(
+        createZedperaError(
+          'API_UNAVAILABLE',
+          {
+            endpoint: '/api/chat',
+            module: 'translation',
+            requestId,
+          },
+          {
+            language,
+          },
+        ),
+      );
+      return;
     }
 
     setResult(cleanedTranslatedText);
@@ -2755,16 +2790,21 @@ ${textToTranslate}`,
       setPopupData(parseSections(cleanedTranslatedText));
     }
   } catch (error) {
-    console.error('LANGUAGE_TRANSLATION_ERROR:', error);
+    console.error(
+      'LANGUAGE_TRANSLATION_ERROR:',
+      error,
+    );
 
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Nepodarilo sa preložiť aktuálny výstup.';
-
-    alert(`Jazyk bol prepnutý, ale aktuálny výstup sa nepodarilo preložiť.
-
-${message}`);
+    showSystemError(
+      createZedperaErrorFromUnknown(
+        error,
+        {
+          language,
+          endpoint: '/api/chat',
+          module: 'translation',
+        },
+      ),
+    );
   } finally {
     setIsLoading(false);
   }
@@ -2910,7 +2950,13 @@ ${message}`);
   };
 
   const handleFiles = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
+    if (
+      systemBlocked ||
+      !files ||
+      files.length === 0
+    ) {
+      return;
+    }
 
     const incomingFiles = Array.from(files);
     const validFiles: AttachedFile[] = [];
@@ -2987,6 +3033,8 @@ ${message}`);
   };
 
   const startDictation = () => {
+    if (systemBlocked) return;
+
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
@@ -3107,6 +3155,7 @@ ${message}`);
     visibleUserText: string;
     apiUserText: string;
   }) => {
+    if (systemBlocked) return;
    if (isLoading) return;;
 
     if (!activeProfile) {
@@ -3289,6 +3338,12 @@ formData.append('profile', JSON.stringify(profileForApi || null));
             originalName: item.originalName,
             originalSize: item.originalSize,
             originalType: item.originalType,
+            uploadedAt:
+              attachedFiles.find(
+                (file) =>
+                  file.id ===
+                  item.originalId,
+              )?.uploadedAt || null,
             preparedName: item.preparedName,
             preparedSize: item.preparedSize,
             preparedType: item.preparedType,
@@ -3383,20 +3438,26 @@ formData.append('profile', JSON.stringify(profileForApi || null));
       applyAttachmentUsageFromResponse(res);
 
       if (!res.ok) {
-        const errorMessage = await readApiErrorResponse(res);
+        const apiError =
+          await readZedperaApiError(
+            res,
+            {
+              language,
+              endpoint: '/api/chat',
+              module: 'chat',
+              requestId,
+            },
+          );
 
-        const modelHelp =
-          agent === 'claude'
-            ? '\n\nClaude API chyba znamená najčastejšie zlý ANTHROPIC_API_KEY, zlý názov modelu, context window limit alebo nenastavený billing v Anthropic konzole.'
-            : agent === 'grok'
-              ? '\n\nGrok API chyba znamená najčastejšie, že xAI účet nemá kredity alebo licenciu.'
-              : agent === 'mistral'
-                ? '\n\nMistral API chyba znamená najčastejšie zlý MISTRAL_API_KEY alebo nesprávny názov modelu.'
-                : '';
-
-        appendAssistantMessage(
-          `❌ API chyba ${res.status}\n\n${errorMessage}${modelHelp}\n\nSkús dočasne prepnúť model na Gemini alebo OPEN AI a pozri terminál pri /api/chat.`,
+        showSystemError(
+          apiError.descriptor,
         );
+
+        if (apiError.status === 401) {
+          router.replace(
+            '/login?returnTo=/chat',
+          );
+        }
 
         return;
       }
@@ -3502,19 +3563,61 @@ formData.append('profile', JSON.stringify(profileForApi || null));
         }
 
         if (!fullText && data.ok === false) {
-          appendAssistantMessage(
-            `❌ API nevrátilo výstup.\n\n${data.message || data.error || 'Neznáma chyba API.'}`,
+          showSystemError(
+            createZedperaError(
+              String(
+                data.code ||
+                  'API_UNAVAILABLE',
+              ),
+              {
+                endpoint: '/api/chat',
+                module: 'chat',
+                requestId,
+                serverMessage:
+                  data.message ||
+                  data.error,
+                serverDetail:
+                  data.detail,
+              },
+              {
+                language,
+              },
+            ),
           );
           return;
         }
 
         if (!fullText) {
-          fullText =
-            'API odpovedalo úspešne, ale nevrátilo žiadny textový výstup.';
+          showSystemError(
+            createZedperaError(
+              'API_UNAVAILABLE',
+              {
+                endpoint: '/api/chat',
+                module: 'chat',
+                requestId,
+              },
+              {
+                language,
+              },
+            ),
+          );
+          return;
         }
       } else {
         if (!res.body) {
-          appendAssistantMessage('❌ API nevrátilo stream odpovede.');
+          showSystemError(
+            createZedperaError(
+              'API_UNAVAILABLE',
+              {
+                endpoint: '/api/chat',
+                module: 'chat',
+                requestId,
+              },
+              {
+                language,
+              },
+            ),
+          );
           return;
         }
 
@@ -3597,12 +3700,20 @@ await saveChatToHistory({
         );
       }
     } catch (error) {
-      console.error('CHAT SEND ERROR:', error);
+      console.error(
+        'CHAT_SEND_ERROR:',
+        error,
+      );
 
-      const message = error instanceof Error ? error.message : 'Nastala chyba pri komunikácii s API.';
-
-      appendAssistantMessage(
-        `❌ Nepodarilo sa spracovať požiadavku.\n\n${message}`,
+      showSystemError(
+        createZedperaErrorFromUnknown(
+          error,
+          {
+            language,
+            endpoint: '/api/chat',
+            module: 'chat',
+          },
+        ),
       );
     } finally {
       setIsLoading(false);
@@ -3758,9 +3869,15 @@ const editSelectedText = async (
 
   try {
     const instruction = getEditInstruction(mode);
+    const requestId =
+      createChatRequestId();
 
     const formData = new FormData();
 
+    formData.append(
+      'requestId',
+      requestId,
+    );
     formData.append('agent', agent);
     formData.append('module', 'chat');
     formData.append('profile', JSON.stringify(activeProfile || null));
@@ -3795,13 +3912,34 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
       cache: 'no-store',
       headers: {
         Accept: 'application/json, text/plain, text/event-stream',
+        'x-request-id': requestId,
       },
       body: formData,
     });
 
     if (!res.ok) {
-      const errorMessage = await readApiErrorResponse(res);
-      throw new Error(errorMessage);
+      const apiError =
+        await readZedperaApiError(
+          res,
+          {
+            language,
+            endpoint: '/api/chat',
+            module: 'chat',
+            requestId,
+          },
+        );
+
+      showSystemError(
+        apiError.descriptor,
+      );
+
+      if (apiError.status === 401) {
+        router.replace(
+          '/login?returnTo=/chat',
+        );
+      }
+
+      return;
     }
 
     const contentType = res.headers.get('content-type') || '';
@@ -3820,7 +3958,20 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
       ).trim();
     } else {
       if (!res.body) {
-        throw new Error('API nevrátilo odpoveď.');
+        showSystemError(
+          createZedperaError(
+            'API_UNAVAILABLE',
+            {
+              endpoint: '/api/chat',
+              module: 'chat',
+              requestId,
+            },
+            {
+              language,
+            },
+          ),
+        );
+        return;
       }
 
       const reader = res.body.getReader();
@@ -3838,24 +3989,38 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
     const cleanedEditedText = cleanAiOutput(editedText);
 
     if (!cleanedEditedText) {
-      throw new Error('AI nevrátila upravený text.');
+      showSystemError(
+        createZedperaError(
+          'API_UNAVAILABLE',
+          {
+            endpoint: '/api/chat',
+            module: 'chat',
+            requestId,
+          },
+          {
+            language,
+          },
+        ),
+      );
+      return;
     }
 
     replaceSelectedText(cleanedEditedText, selection);
   } catch (error) {
-    console.error('EDIT_SELECTED_TEXT_ERROR:', error);
+    console.error(
+      'EDIT_SELECTED_TEXT_ERROR:',
+      error,
+    );
 
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Označený text sa nepodarilo upraviť.';
-
-    alert(
-      `Označený text sa nepodarilo upraviť.
-
-${message}
-
-Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
+    showSystemError(
+      createZedperaErrorFromUnknown(
+        error,
+        {
+          language,
+          endpoint: '/api/chat',
+          module: 'chat',
+        },
+      ),
     );
   } finally {
     setIsEditingSelection(false);
@@ -4079,7 +4244,7 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
       key={item.key}
       type="button"
       onClick={() => handleSelectAgent(item.key)}
-     disabled={isLoading}
+     disabled={isLoading || systemBlocked}
       className={`rounded-2xl px-4 py-2 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
         active
           ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-800/40'
@@ -4115,7 +4280,7 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                   disabled={isLoading}
+                   disabled={isLoading || systemBlocked}
                     className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.055] text-slate-300 transition hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                     title={`Priložiť súbory, max. ${maxFilesCount} súborov, max. ${maxFileSizeMb} MB na súbor`}
                   >
@@ -4125,6 +4290,7 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
                   <textarea
                     value={input}
                     rows={2}
+                    disabled={systemBlocked}
                     onChange={(event) => setInput(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !event.shiftKey) {
@@ -4139,7 +4305,7 @@ Skúste požiadavku zopakovať alebo dočasne prepnúť na iný AI model.`,
                   <button
                     type="button"
                     onClick={startDictation}
-                    disabled={isLoading}
+                    disabled={isLoading || systemBlocked}
                     className={`mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border transition disabled:cursor-not-allowed disabled:opacity-50 ${
                       isListening
                         ? 'border-red-400/50 bg-red-500 text-white shadow-lg shadow-red-700/30'

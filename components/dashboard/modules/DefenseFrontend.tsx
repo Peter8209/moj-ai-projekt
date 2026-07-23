@@ -880,6 +880,28 @@ type AttachedFile = {
   extractionMessage?: string;
 };
 
+type DefenseSlide = {
+  title: string;
+  bullets: string[];
+  speakerNotes?: string;
+  visualSuggestion?: string;
+  estimatedMinutes?: number;
+  layout?:
+    | "title"
+    | "cover"
+    | "agenda"
+    | "section"
+    | "content"
+    | "bullets"
+    | "two-column"
+    | "split"
+    | "quote"
+    | "chart"
+    | "table"
+    | "image"
+    | "closing";
+};
+
 type SavedProfile = {
   id?: string;
   type?: string;
@@ -2075,6 +2097,105 @@ function readStringArray(record: UnknownRecord, ...keys: string[]): string[] {
   }
 
   return [];
+}
+
+function normalizeDefenseSlides(value: unknown): DefenseSlide[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item): DefenseSlide | null => {
+      if (!isUnknownRecord(item)) return null;
+
+      const title = readString(item, "title", "heading", "name");
+      const rawBullets =
+        item.bullets ??
+        item.points ??
+        item.items ??
+        item.content;
+
+      const bullets = Array.isArray(rawBullets)
+        ? rawBullets
+            .map((bullet) => String(bullet ?? "").trim())
+            .filter(Boolean)
+            .slice(0, 8)
+        : typeof rawBullets === "string"
+          ? rawBullets
+              .split(/\n|•|;/)
+              .map((bullet) =>
+                bullet
+                  .replace(/^[-–—*•]\s*/, "")
+                  .trim(),
+              )
+              .filter(Boolean)
+              .slice(0, 8)
+          : [];
+
+      if (!title || bullets.length === 0) {
+        return null;
+      }
+
+      const layoutValue = readString(
+        item,
+        "layout",
+      ) as DefenseSlide["layout"];
+
+      return {
+        title,
+        bullets,
+        speakerNotes:
+          readNullableString(
+            item,
+            "speakerNotes",
+            "speaker_notes",
+            "notes",
+          ) || undefined,
+        visualSuggestion:
+          readNullableString(
+            item,
+            "visualSuggestion",
+            "visual_suggestion",
+            "visual",
+          ) || undefined,
+        estimatedMinutes:
+          readNumber(
+            item,
+            "estimatedMinutes",
+            "estimated_minutes",
+            "minutes",
+          ) || undefined,
+        layout: layoutValue || "bullets",
+      };
+    })
+    .filter(
+      (slide): slide is DefenseSlide =>
+        Boolean(slide),
+    )
+    .slice(0, 30);
+}
+
+function defenseSlidesToText(
+  slides: DefenseSlide[],
+): string {
+  return slides
+    .map((slide, index) => {
+      const bulletText = slide.bullets
+        .map((bullet) => `- ${bullet}`)
+        .join("\n");
+
+      return [
+        `${index + 1}. ${slide.title}`,
+        bulletText,
+        slide.visualSuggestion
+          ? `Vizuálne odporúčanie: ${slide.visualSuggestion}`
+          : "",
+        slide.speakerNotes
+          ? `Poznámky k vystúpeniu: ${slide.speakerNotes}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
 }
 
 function normalizeDashboardPlanIdOrNull(value: unknown): PlanId | null {
@@ -4013,6 +4134,8 @@ export default function DefenseFrontend(
   const [secondaryInput, setSecondaryInput] = useState("");
   const [result, setResult] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isPptxLoading, setIsPptxLoading] = useState(false);
+  const [defenseSlides, setDefenseSlides] = useState<DefenseSlide[]>([]);
 
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [activeAttachmentText, setActiveAttachmentText] = useState("");
@@ -4872,6 +4995,7 @@ export default function DefenseFrontend(
     setActiveAttachmentText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
+    setDefenseSlides([]);
 
     try {
       localStorage.removeItem("active_profile");
@@ -5020,6 +5144,7 @@ export default function DefenseFrontend(
     setCanvasText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
+    setDefenseSlides([]);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -5214,6 +5339,7 @@ export default function DefenseFrontend(
     setActiveAttachmentText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
+    setDefenseSlides([]);
   };
 
   useEffect(() => {
@@ -5969,6 +6095,10 @@ Text emailu:
     setCanvasText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
+
+    if (requestedModule === "defense") {
+      setDefenseSlides([]);
+    }
 
     // Analýza dát sa zobrazuje výhradne v AnalysisResultsModal.
     // Pri novom spustení preto zatvoríme prípadný Canvas z iného modulu.
@@ -6958,8 +7088,21 @@ Text emailu:
           );
         }
 
+        const returnedDefenseSlides =
+          requestedModule === "defense"
+            ? normalizeDefenseSlides(data?.slides)
+            : [];
+
+        if (
+          requestedModule === "defense" &&
+          isCurrentModuleRun()
+        ) {
+          setDefenseSlides(returnedDefenseSlides);
+        }
+
         fullText =
           data.output ||
+          data.textOutput ||
           data.result ||
           data.message ||
           data.text ||
@@ -6967,7 +7110,13 @@ Text emailu:
           data.content ||
           data.response ||
           data?.choices?.[0]?.message?.content ||
-          "";
+          (
+            returnedDefenseSlides.length > 0
+              ? defenseSlidesToText(
+                  returnedDefenseSlides,
+                )
+              : ""
+          );
 
         if (!fullText && data.ok === false) {
           throw new Error(
@@ -7076,7 +7225,12 @@ Text emailu:
           detail: error.detail,
         });
       } else {
-        console.error("RUN_MODULE_ERROR:", error);
+        console.warn("RUN_MODULE_WARNING:", {
+          message:
+            error instanceof Error
+              ? error.message
+              : String(error),
+        });
       }
 
       if (error instanceof DashboardApiError) {
@@ -7931,7 +8085,7 @@ Text emailu:
       activeProfile?.schema?.label ||
       "Obhajoba záverečnej práce";
 
-    const slides = [
+    const fallbackSlides: DefenseSlide[] = [
       {
         title: pptTitle,
         layout: "section",
@@ -8093,6 +8247,13 @@ Text emailu:
       },
     ];
 
+    const slides =
+      defenseSlides.length > 0
+        ? defenseSlides
+        : fallbackSlides;
+
+    setIsPptxLoading(true);
+
     try {
       const response = await fetch("/api/defense/pptx", {
         method: "POST",
@@ -8105,6 +8266,9 @@ Text emailu:
           defenseType,
           theme: "academic",
           slides,
+          profile: activeProfile || null,
+          activeProfile: activeProfile || null,
+          aiGenerate: false,
           sourceText: [
             activeProfile ? buildProfileBlock(activeProfile) : "",
             "",
@@ -8168,6 +8332,8 @@ Text emailu:
           ? error.message
           : "Prezentáciu sa nepodarilo vytvoriť.",
       );
+    } finally {
+      setIsPptxLoading(false);
     }
   };
 
@@ -8959,6 +9125,24 @@ uroven_sportu`}
                   <Download className="h-4 w-4" />
                   Word
                 </button>
+
+                {activeModule === "defense" ? (
+                  <button
+                    type="button"
+                    onClick={downloadPpt}
+                    disabled={isPptxLoading}
+                    className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-orange-300/30 bg-orange-500/10 px-4 py-3 text-sm font-black text-orange-100 transition hover:bg-orange-500/20 disabled:cursor-wait disabled:opacity-60 sm:mr-3 sm:w-auto"
+                  >
+                    {isPptxLoading ? (
+                      <RefreshCcw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <FileDown className="h-4 w-4" />
+                    )}
+                    {isPptxLoading
+                      ? "Vytváram PowerPoint..."
+                      : "PowerPoint (.pptx)"}
+                  </button>
+                ) : null}
               </>
             )}
 
@@ -9040,6 +9224,26 @@ uroven_sportu`}
                 <Download className="h-4 w-4" />
                 <span>Word</span>
               </button>
+
+              {activeModule === "defense" ? (
+                <button
+                  type="button"
+                  onClick={downloadPpt}
+                  disabled={isPptxLoading}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-orange-300/30 bg-orange-500/10 px-5 py-3 text-sm font-black text-orange-100 transition hover:bg-orange-500/20 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {isPptxLoading ? (
+                    <RefreshCcw className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileDown className="h-4 w-4" />
+                  )}
+                  <span>
+                    {isPptxLoading
+                      ? "Vytváram PowerPoint..."
+                      : "PowerPoint"}
+                  </span>
+                </button>
+              ) : null}
 
               <button
                 type="button"

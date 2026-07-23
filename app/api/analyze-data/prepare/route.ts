@@ -7,11 +7,22 @@ import {
 import * as XLSX from 'xlsx';
 
 import {
-  AttachmentLimitError,
   EntitlementError,
-  entitlementErrorResponse,
   requireDataAnalysisAction,
 } from '@/lib/entitlements';
+import {
+  recordCurrentUserAttachmentUsage,
+  type AttachmentUsageItem,
+  type AuthenticatedAttachmentUsageSnapshot,
+} from '@/lib/attachment-usage';
+import {
+  zedperaErrorJson,
+  zedperaUnknownErrorJson,
+} from '@/lib/zedpera-api-errors.server';
+import type {
+  ZedperaErrorCode,
+  ZedperaErrorContext,
+} from '@/lib/api-error-messages';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -229,17 +240,20 @@ class PrepareRouteError extends Error {
   readonly status: number;
   readonly publicMessage: string;
   readonly detail?: string;
+  readonly context: ZedperaErrorContext;
 
   constructor({
     code,
     status,
     message,
     detail,
+    context = {},
   }: {
     code: PrepareErrorCode;
     status: number;
     message: string;
     detail?: string;
+    context?: ZedperaErrorContext;
   }) {
     super(detail || message);
     this.name = 'PrepareRouteError';
@@ -247,6 +261,7 @@ class PrepareRouteError extends Error {
     this.status = status;
     this.publicMessage = message;
     this.detail = detail;
+    this.context = context;
 
     Object.setPrototypeOf(
       this,
@@ -534,12 +549,29 @@ function createJsonResponse(
   status = 200,
   requestId?: string,
 ) {
+  const processingMs =
+    typeof payload.processingMs === 'number' &&
+    Number.isFinite(payload.processingMs)
+      ? Math.max(0, Math.trunc(payload.processingMs))
+      : null;
+
   return NextResponse.json(payload, {
     status,
     headers: {
       ...NO_STORE_HEADERS,
       ...(requestId
-        ? { 'X-Request-Id': requestId }
+        ? {
+            'X-Request-Id': requestId,
+            'X-Zedpera-Request-Id': requestId,
+          }
+        : {}),
+      ...(processingMs !== null
+        ? {
+            'X-Processing-Time-Ms':
+              String(processingMs),
+            'Server-Timing':
+              `zedpera;dur=${processingMs}`,
+          }
         : {}),
     },
   });
@@ -573,6 +605,7 @@ function getDevelopmentDetail(
 
   return { detail };
 }
+
 
 function toNonNegativeInteger(
   value: unknown,
@@ -635,11 +668,26 @@ function createPrepareAccess(
     isAdmin ||
     entitlements.hasUnlimitedAccess === true;
 
+  /**
+   * Obchodný limit príloh je totožný s celkovým limitom strán.
+   * Frontendový alebo starý databázový attachmentLimit nie je zdroj pravdy.
+   */
+  const entitlementRecord =
+    entitlements as unknown as Record<
+      string,
+      unknown
+    >;
+
+  const authoritativeTotalPageLimit =
+    entitlementRecord.totalPageLimit ??
+    entitlementRecord.pageLimit ??
+    entitlements.pageLimit;
+
   const attachmentLimit =
     hasUnlimitedAccess
       ? null
       : toNullableNonNegativeInteger(
-          entitlements.attachmentLimit,
+          authoritativeTotalPageLimit,
         );
 
   const features = Array.from(
@@ -739,10 +787,21 @@ function resolveRequestId(
   const suppliedRequestId =
     request.headers
       .get('x-request-id')
-      ?.trim()
-      .slice(0, 255) || '';
+      ?.trim() || '';
 
-  return suppliedRequestId || randomUUID();
+  /**
+   * Request ID sa zapisuje do hlavičiek aj serverových logov.
+   * Povolená je iba bezpečná množina znakov a maximálne 128 znakov.
+   */
+  const safeRequestId =
+    suppliedRequestId
+      .replace(
+        /[^a-zA-Z0-9._:~-]+/g,
+        '',
+      )
+      .slice(0, 128);
+
+  return safeRequestId || randomUUID();
 }
 
 function isMultipartRequest(
@@ -4107,6 +4166,9 @@ async function readWorkbookFromFile(
       status: 400,
       message:
         'Nahratý súbor je prázdny.',
+      context: {
+        fileName,
+      },
     });
   }
 
@@ -4118,6 +4180,11 @@ async function readWorkbookFromFile(
         `Súbor je príliš veľký. Maximálna veľkosť je ${MAX_FILE_SIZE_MB} MB.`,
       detail:
         `Veľkosť súboru: ${file.size} bajtov. Povolené maximum: ${MAX_FILE_SIZE_BYTES} bajtov.`,
+      context: {
+        fileName,
+        maxFileSizeMb:
+          MAX_FILE_SIZE_MB,
+      },
     });
   }
 
@@ -4129,6 +4196,15 @@ async function readWorkbookFromFile(
         'Nepodporovaný typ súboru. Nahrajte súbor .xlsx, .xls, .xlsm alebo .csv.',
       detail:
         `Názov súboru: ${fileName}; MIME typ: ${file.type || 'neuvedený'}.`,
+      context: {
+        fileName,
+        allowedTypes: [
+          'XLSX',
+          'XLS',
+          'XLSM',
+          'CSV',
+        ],
+      },
     });
   }
 
@@ -4157,8 +4233,399 @@ async function readWorkbookFromFile(
       message:
         'Súbor sa nepodarilo načítať. Skontrolujte, či nie je poškodený, zašifrovaný alebo chránený heslom.',
       detail: getErrorMessage(error),
+      context: {
+        fileName,
+      },
     });
   }
+}
+
+
+const PREPARE_ERROR_CODE_MAP: Record<
+  string,
+  ZedperaErrorCode
+> = {
+  INVALID_CONTENT_TYPE:
+    'INVALID_REQUEST',
+  INVALID_FORM_DATA:
+    'INVALID_REQUEST',
+  FILE_REQUIRED:
+    'DATA_FILE_REQUIRED',
+  MULTIPLE_FILES_NOT_SUPPORTED:
+    'INVALID_REQUEST',
+  EMPTY_FILE:
+    'DATA_FILE_INVALID',
+  FILE_TOO_LARGE:
+    'ATTACHMENT_FILE_TOO_LARGE',
+  UNSUPPORTED_FILE_TYPE:
+    'ATTACHMENT_UNSUPPORTED_TYPE',
+  FILE_READ_FAILED:
+    'DATA_FILE_INVALID',
+  EMPTY_WORKBOOK:
+    'DATA_FILE_INVALID',
+  NO_DATA_ROWS:
+    'DATA_FILE_INVALID',
+  WORKBOOK_GENERATION_FAILED:
+    'DATA_PREPARATION_FAILED',
+  UNAUTHENTICATED:
+    'AUTH_REQUIRED',
+  FEATURE_NOT_INCLUDED:
+    'FEATURE_NOT_INCLUDED',
+  ATTACHMENT_LIMIT_REACHED:
+    'ATTACHMENT_LIMIT_REACHED',
+  ENTITLEMENTS_LOAD_FAILED:
+    'INTERNAL_SERVER_ERROR',
+  INTERNAL_SERVER_ERROR:
+    'INTERNAL_SERVER_ERROR',
+};
+
+function mapPrepareErrorCode(
+  code: PrepareErrorCode,
+): ZedperaErrorCode {
+  return (
+    PREPARE_ERROR_CODE_MAP[
+      String(code || '')
+        .trim()
+        .toUpperCase()
+    ] ||
+    String(code || 'UNKNOWN_ERROR')
+  );
+}
+
+function cleanOptionalText(
+  value: unknown,
+): string | null {
+  return typeof value === 'string' &&
+    value.trim()
+    ? value.trim()
+    : null;
+}
+
+function readOptionalInteger(
+  value: unknown,
+): number | null {
+  const numeric = Number(value);
+
+  return Number.isFinite(numeric)
+    ? Math.max(
+        0,
+        Math.trunc(numeric),
+      )
+    : null;
+}
+
+/**
+ * Frontend posiela attachmentItems a samostatné fallback polia.
+ * Server ich vždy zosúladí so skutočne prijatými binárnymi súbormi.
+ */
+function parseAttachmentUsageItems(
+  formData: FormData,
+  uploadedFiles: UploadedDataFile[],
+): AttachmentUsageItem[] {
+  const serialized =
+    formData.get('attachmentItems');
+
+  let parsedItems:
+    | Record<string, unknown>[]
+    | null = null;
+
+  if (
+    typeof serialized === 'string' &&
+    serialized.trim()
+  ) {
+    try {
+      const parsed =
+        JSON.parse(serialized) as unknown;
+
+      if (Array.isArray(parsed)) {
+        parsedItems = parsed.filter(
+          (
+            item,
+          ): item is Record<
+            string,
+            unknown
+          > =>
+            Boolean(
+              item &&
+                typeof item ===
+                  'object' &&
+                !Array.isArray(item),
+            ),
+        );
+      }
+    } catch {
+      parsedItems = null;
+    }
+  }
+
+  const fallbackId =
+    cleanOptionalText(
+      formData.get('attachmentId'),
+    );
+  const fallbackName =
+    cleanOptionalText(
+      formData.get('attachmentName'),
+    );
+  const fallbackSize =
+    readOptionalInteger(
+      formData.get('attachmentSize'),
+    );
+  const fallbackType =
+    cleanOptionalText(
+      formData.get('attachmentType'),
+    );
+  const fallbackUploadedAt =
+    cleanOptionalText(
+      formData.get(
+        'attachmentUploadedAt',
+      ),
+    );
+
+  return uploadedFiles.map(
+    (file, index) => {
+      const metadata =
+        parsedItems?.[index] || {};
+
+      const metadataName =
+        cleanOptionalText(
+          metadata.name,
+        );
+      const metadataType =
+        cleanOptionalText(
+          metadata.type,
+        );
+      const metadataUploadedAt =
+        cleanOptionalText(
+          metadata.uploadedAt,
+        );
+      const metadataId =
+        cleanOptionalText(
+          metadata.id,
+        );
+      const metadataSize =
+        readOptionalInteger(
+          metadata.size,
+        );
+
+      /**
+       * Názov, veľkosť a MIME typ sa odvodzujú prioritne zo skutočného
+       * binárneho súboru. Klient dodáva iba stabilné ID a čas uploadu.
+       */
+      return {
+        id:
+          metadataId ||
+          fallbackId,
+        name:
+          file.name ||
+          metadataName ||
+          fallbackName ||
+          `data-${index + 1}`,
+        size:
+          file.size ||
+          metadataSize ||
+          fallbackSize ||
+          0,
+        type:
+          file.type ||
+          metadataType ||
+          fallbackType ||
+          'application/octet-stream',
+        uploadedAt:
+          metadataUploadedAt ||
+          fallbackUploadedAt,
+      };
+    },
+  );
+}
+
+function readProjectId(
+  formData: FormData,
+): string | null {
+  return cleanOptionalText(
+    formData.get('projectId'),
+  );
+}
+
+function createErrorHeaders({
+  requestId,
+  errorId,
+  processingMs,
+}: {
+  requestId: string;
+  errorId: string;
+  processingMs: number;
+}): HeadersInit {
+  return {
+    ...NO_STORE_HEADERS,
+    'X-Request-Id':
+      requestId,
+    'X-Zedpera-Request-Id':
+      requestId,
+    'X-Error-Id':
+      errorId,
+    'X-Processing-Time-Ms':
+      String(processingMs),
+    'Server-Timing':
+      `zedpera;dur=${processingMs}`,
+  };
+}
+
+function entitlementErrorContext(
+  error: EntitlementError,
+): {
+  code: ZedperaErrorCode;
+  status: number;
+  context: ZedperaErrorContext;
+} {
+  const record =
+    error as unknown as Record<
+      string,
+      unknown
+    >;
+
+  const rawCode =
+    cleanOptionalText(
+      record.code,
+    ) ||
+    'ACCESS_DENIED';
+
+  const status =
+    readOptionalInteger(
+      record.status,
+    ) ||
+    403;
+
+  return {
+    code: rawCode,
+    status,
+    context: {
+      serverCode:
+        rawCode,
+      serverMessage:
+        error.message,
+      serverDetail:
+        cleanOptionalText(
+          record.detail,
+        ) ||
+        cleanOptionalText(
+          record.details,
+        ),
+      purchaseUrl:
+        cleanOptionalText(
+          record.purchaseUrl,
+        ) ||
+        cleanOptionalText(
+          record.purchase_url,
+        ),
+      attachmentLimit:
+        readOptionalInteger(
+          record.attachmentLimit,
+        ),
+      receivedAttachments:
+        readOptionalInteger(
+          record.receivedAttachments,
+        ),
+      promptLimit:
+        readOptionalInteger(
+          record.promptLimit,
+        ),
+      promptsUsed:
+        readOptionalInteger(
+          record.promptsUsed,
+        ),
+      promptsRemaining:
+        readOptionalInteger(
+          record.promptsRemaining,
+        ),
+      pageLimit:
+        readOptionalInteger(
+          record.pageLimit,
+        ),
+      pagesUsed:
+        readOptionalInteger(
+          record.pagesUsed,
+        ),
+      pagesRemaining:
+        readOptionalInteger(
+          record.pagesRemaining,
+        ),
+      featureLabel:
+        cleanOptionalText(
+          record.featureLabel,
+        ),
+      planName:
+        cleanOptionalText(
+          record.planName,
+        ),
+    },
+  };
+}
+
+function assertAttachmentTrackingAvailable({
+  usage,
+  request,
+  requestId,
+  errorId,
+  processingMs,
+}: {
+  usage:
+    AuthenticatedAttachmentUsageSnapshot;
+  request: NextRequest;
+  requestId: string;
+  errorId: string;
+  processingMs: number;
+}): NextResponse | null {
+  if (!usage.authenticated) {
+    return zedperaErrorJson(
+      'AUTH_REQUIRED',
+      {
+        endpoint:
+          '/api/analyze-data/prepare',
+        module: 'data',
+        requestId,
+        errorId,
+      },
+      {
+        request,
+        status: 401,
+        headers:
+          createErrorHeaders({
+            requestId,
+            errorId,
+            processingMs,
+          }),
+      },
+    );
+  }
+
+  if (
+    !usage.trackingAvailable ||
+    (!usage.limitAvailable &&
+      !usage.isUnlimited)
+  ) {
+    return zedperaErrorJson(
+      'ATTACHMENT_TRACKING_UNAVAILABLE',
+      {
+        endpoint:
+          '/api/analyze-data/prepare',
+        module: 'data',
+        requestId,
+        errorId,
+      },
+      {
+        request,
+        status: 503,
+        headers:
+          createErrorHeaders({
+            requestId,
+            errorId,
+            processingMs,
+          }),
+      },
+    );
+  }
+
+  return null;
 }
 
 /**
@@ -4180,7 +4647,7 @@ async function readWorkbookFromFile(
  */
 export async function POST(
   request: NextRequest,
-): Promise<NextResponse<PrepareResponse>> {
+): Promise<NextResponse> {
   const requestId = resolveRequestId(request);
   const errorId = randomUUID();
   const startedAt = Date.now();
@@ -4204,6 +4671,10 @@ export async function POST(
         status: 415,
         message:
           'Požiadavka musí používať Content-Type multipart/form-data.',
+        context: {
+          field:
+            'content-type',
+        },
       });
     }
 
@@ -4218,6 +4689,10 @@ export async function POST(
         message:
           'Telo požiadavky neobsahuje platné FormData.',
         detail: getErrorMessage(error),
+        context: {
+          field:
+            'formData',
+        },
       });
     }
 
@@ -4232,39 +4707,108 @@ export async function POST(
           'Súbor nebol nahratý.',
         detail:
           'Vo FormData chýba položka typu File.',
+        context: {
+          field: 'file',
+          allowedTypes: [
+            'XLSX',
+            'XLS',
+            'XLSM',
+            'CSV',
+          ],
+        },
       });
     }
 
     /**
-     * ADMIN a iný autoritatívne neobmedzený účet nemá balíkový limit
-     * príloh. Technické pravidlo tejto route však zostáva jeden unikátny
-     * dataset na jednu požiadavku.
+     * Analýza dát obchádza /api/chat, preto musí každý prijatý súbor
+     * zaevidovať vo vlastnej serverovej route. Zápis prebehne ešte pred
+     * dátovým spracovaním. Odstránenie súboru z formulára kredit nevracia.
      */
-    if (!access.hasUnlimitedAccess) {
-      if (access.attachmentLimit === null) {
-        throw new PrepareRouteError({
-          code:
-            'ENTITLEMENTS_LOAD_FAILED',
-          status: 500,
-          message:
-            'Limit príloh sa nepodarilo bezpečne načítať.',
-          detail:
-            'Bežný používateľ dostal neplatnú hodnotu attachmentLimit=null.',
-        });
-      }
+    const attachmentUsage =
+      await recordCurrentUserAttachmentUsage({
+        requestId,
+        projectId:
+          readProjectId(formData),
+        module: 'data',
+        items:
+          parseAttachmentUsageItems(
+            formData,
+            uploadedFiles,
+          ),
+        fallbackCount:
+          uploadedFiles.length,
+      });
 
-      if (
-        uploadedFiles.length >
-        access.attachmentLimit
-      ) {
-        throw new AttachmentLimitError({
+    const attachmentTrackingError =
+      assertAttachmentTrackingAvailable({
+        usage: attachmentUsage,
+        request,
+        requestId,
+        errorId,
+        processingMs:
+          Date.now() - startedAt,
+      });
+
+    if (attachmentTrackingError) {
+      return attachmentTrackingError;
+    }
+
+    /**
+     * Presný limit je ešte povolený. Blokovanie nastane až po prijatí
+     * ďalšieho jedinečného súboru nad limit. Takýto súbor už zostáva
+     * zaevidovaný a po navýšení kapacity sa pri retry nezapočíta druhýkrát.
+     */
+    if (
+      !attachmentUsage.isUnlimited &&
+      attachmentUsage.attachmentLimit !==
+        null &&
+      attachmentUsage.attachmentsUsed >
+        attachmentUsage.attachmentLimit
+    ) {
+      const processingMs =
+        Date.now() - startedAt;
+
+      return zedperaErrorJson(
+        'ATTACHMENT_LIMIT_REACHED',
+        {
+          endpoint:
+            '/api/analyze-data/prepare',
+          module: 'data',
+          requestId,
+          errorId,
           attachmentLimit:
-            access.attachmentLimit,
+            attachmentUsage.attachmentLimit,
+          attachmentsUsed:
+            attachmentUsage.attachmentsUsed,
+          attachmentsRemaining:
+            attachmentUsage.attachmentsRemaining,
           receivedAttachments:
             uploadedFiles.length,
-        });
-      }
+          purchaseUrl:
+            '/pricing#doplnkove-sluzby',
+        },
+        {
+          request,
+          status: 402,
+          headers:
+            createErrorHeaders({
+              requestId,
+              errorId,
+              processingMs,
+            }),
+        },
+      );
     }
+
+    /**
+     * Snapshot v úspešnej odpovedi používa rovnaký autoritatívny limit
+     * ako serverová evidencia príloh.
+     */
+    const effectiveAccess: PrepareAccess = {
+      ...access,
+      attachmentLimit:
+        attachmentUsage.attachmentLimit,
+    };
 
     if (uploadedFiles.length > 1) {
       throw new PrepareRouteError({
@@ -4275,6 +4819,11 @@ export async function POST(
           'Príprava dát podporuje v jednej požiadavke práve jeden súbor.',
         detail:
           `Prijatý počet súborov: ${uploadedFiles.length}.`,
+        context: {
+          receivedAttachments:
+            uploadedFiles.length,
+          maxRequestAttachments: 1,
+        },
       });
     }
 
@@ -4308,6 +4857,10 @@ export async function POST(
         status: 422,
         message:
           'Súbor neobsahuje žiadny čitateľný hárok.',
+        context: {
+          fileName:
+            safeFileName,
+        },
       });
     }
 
@@ -4324,6 +4877,10 @@ export async function POST(
           'Súbor neobsahuje čitateľné dátové riadky.',
         detail:
           'Žiadny hárok neobsahuje čitateľnú tabuľku alebo sa dáta nepodarilo načítať.',
+        context: {
+          fileName:
+            safeFileName,
+        },
       });
     }
 
@@ -4342,6 +4899,10 @@ export async function POST(
         status: 422,
         message:
           'Po rozpoznaní hlavičky neostali žiadne použiteľné dátové riadky.',
+        context: {
+          fileName:
+            safeFileName,
+        },
       });
     }
 
@@ -4432,6 +4993,10 @@ export async function POST(
         message:
           'Pripravený Excel súbor sa nepodarilo vytvoriť.',
         detail: getErrorMessage(error),
+        context: {
+          fileName:
+            safeFileName,
+        },
       });
     }
 
@@ -4490,7 +5055,7 @@ export async function POST(
         questionnaireConfig,
         jaspSummary:
           jaspAnalysis.summary,
-        access,
+        access: effectiveAccess,
       },
       200,
       requestId,
@@ -4501,43 +5066,61 @@ export async function POST(
 
     if (error instanceof EntitlementError) {
       const mapped =
-        entitlementErrorResponse(error);
+        entitlementErrorContext(error);
 
       console.warn(
         '[POST /api/analyze-data/prepare] Access rejected.',
         {
           requestId,
           errorId,
-          code: mapped.body.code,
+          code: mapped.code,
           status: mapped.status,
           processingMs,
         },
       );
 
-      return createJsonResponse(
+      return zedperaErrorJson(
+        mapped.code,
         {
-          ...mapped.body,
+          ...mapped.context,
+          endpoint:
+            '/api/analyze-data/prepare',
+          module: 'data',
           requestId,
           errorId,
-          processingMs,
-          error: mapped.body.message,
-          ...getDevelopmentDetail(
-            mapped.body.detail,
-          ),
         },
-        mapped.status,
-        requestId,
+        {
+          request,
+          status: mapped.status,
+          headers:
+            createErrorHeaders({
+              requestId,
+              errorId,
+              processingMs,
+            }),
+        },
       );
     }
 
     if (error instanceof PrepareRouteError) {
+      const centralCode =
+        mapPrepareErrorCode(
+          error.code,
+        );
+
       const logPayload = {
         requestId,
         errorId,
-        code: error.code,
-        status: error.status,
+        originalCode:
+          error.code,
+        centralCode,
+        status:
+          error.status,
         processingMs,
-        detail: error.detail,
+        detail:
+          error.detail,
+        context:
+          error.context,
       };
 
       if (error.status >= 500) {
@@ -4552,22 +5135,39 @@ export async function POST(
         );
       }
 
-      return createJsonResponse(
+      const developmentDetail =
+        getDevelopmentDetail(
+          error.detail ||
+            error.message,
+        ).detail;
+
+      return zedperaErrorJson(
+        centralCode,
         {
-          ok: false,
-          success: false,
-          code: error.code,
-          message: error.publicMessage,
+          ...error.context,
+          endpoint:
+            '/api/analyze-data/prepare',
+          module: 'data',
           requestId,
           errorId,
-          processingMs,
-          error: error.publicMessage,
-          ...getDevelopmentDetail(
-            error.detail || error.message,
-          ),
+          serverCode:
+            String(error.code),
+          serverMessage:
+            error.publicMessage,
+          serverDetail:
+            developmentDetail,
         },
-        error.status,
-        requestId,
+        {
+          request,
+          status:
+            error.status,
+          headers:
+            createErrorHeaders({
+              requestId,
+              errorId,
+              processingMs,
+            }),
+        },
       );
     }
 
@@ -4580,29 +5180,29 @@ export async function POST(
         requestId,
         errorId,
         processingMs,
-        message: technicalMessage,
+        message:
+          technicalMessage,
         error,
       },
     );
 
-    return createJsonResponse(
+    return zedperaUnknownErrorJson(
+      error,
       {
-        ok: false,
-        success: false,
-        code: 'INTERNAL_SERVER_ERROR',
-        message:
-          'Pri príprave dát nastala neočakávaná chyba.',
+        request,
+        endpoint:
+          '/api/analyze-data/prepare',
+        module: 'data',
         requestId,
-        errorId,
-        processingMs,
-        error:
-          'Pri príprave dát nastala neočakávaná chyba.',
-        ...getDevelopmentDetail(
-          technicalMessage,
-        ),
+        status: 500,
+        headers:
+          createErrorHeaders({
+            requestId,
+            errorId,
+            processingMs,
+          }),
       },
-      500,
-      requestId,
     );
+
   }
 }

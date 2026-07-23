@@ -1,6 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { extractTextFromFiles } from '@/lib/extractFileText';
+
+import { GLOBAL_ACADEMIC_SYSTEM_PROMPT } from '@/lib/ai-system-prompt';
+import {
+  EntitlementError,
+  consumeSuccessfulPrompt,
+  entitlementErrorResponse,
+  requireModuleAccess,
+  requirePromptAllowance,
+  type CurrentEntitlements,
+} from '@/lib/entitlements';
+import {
+  PageLimitError,
+  PageQuotaUnavailableError,
+  consumePagesForOutput,
+  getOutputTokenLimitForQuota,
+  pageQuotaErrorResponse,
+  requireAvailablePages,
+  type PageQuota,
+} from '@/lib/page-quota';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,323 +27,764 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ================= TYPES =================
+type EmailType =
+  | 'supervisor'
+  | 'teacher'
+  | 'consultation'
+  | 'deadline'
+  | 'request'
+  | 'apology'
+  | 'business'
+  | 'other';
 
-type ExtractedFileLike = Awaited<ReturnType<typeof extractTextFromFiles>>[number] & {
-  text?: string | null;
-  content?: string | null;
-  extractedText?: string | null;
-  output?: string | null;
-  name?: string | null;
-  fileName?: string | null;
-  file_name?: string | null;
-  type?: string | null;
-  mimeType?: string | null;
-  mime_type?: string | null;
-  size?: number | null;
-  fileSize?: number | null;
-  file_size?: number | null;
-  error?: string | null;
-  warning?: string | null;
-  ok?: boolean | null;
+type EmailTone =
+  | 'professional'
+  | 'formal'
+  | 'friendly'
+  | 'polite'
+  | 'urgent'
+  | 'short';
+
+type SavedProfile = {
+  id?: string;
+  type?: string;
+  level?: string;
+  title?: string;
+  topic?: string;
+  field?: string;
+  expertise?: string;
+  workExpertise?: string;
+  specializationLevel?: string;
+  supervisor?: string;
+  citation?: string;
+  language?: string;
+  workLanguage?: string;
+  annotation?: string;
+  goal?: string;
+  problem?: string;
+  methodology?: string;
+  hypotheses?: string;
+  researchQuestions?: string;
+  keywords?: string[];
+  keywordsList?: string[];
 };
 
-// ================= HELPERS =================
+type EmailRequest = {
+  requestId?: string;
 
-function cleanText(value: unknown): string {
-  return String(value || '').trim();
+  input?: string;
+  text?: string;
+  message?: string;
+  question?: string;
+  prompt?: string;
+  instruction?: string;
+  secondaryInput?: string;
+
+  emailType?: string;
+  emailTone?: string;
+  emailTypeLabel?: string;
+  emailToneLabel?: string;
+
+  language?: string;
+  outputLanguage?: string;
+  workLanguage?: string;
+  systemLanguage?: string;
+  interfaceLanguage?: string;
+
+  profile?: SavedProfile | null;
+  activeProfile?: SavedProfile | null;
+  profileSnapshot?: SavedProfile | null;
+
+  projectId?: string;
+  profileId?: string;
+
+  moduleSettings?: {
+    emailType?: string;
+    emailTone?: string;
+  };
+};
+
+const EMAIL_TYPE_LABELS: Record<EmailType, string> = {
+  supervisor: 'email vedúcemu práce alebo školiteľovi',
+  teacher: 'email vyučujúcemu',
+  consultation: 'žiadosť o konzultáciu',
+  deadline: 'email k termínu alebo odovzdaniu práce',
+  request: 'formálna žiadosť',
+  apology: 'profesionálne ospravedlnenie',
+  business: 'obchodný email',
+  other: 'iný profesionálny email',
+};
+
+const EMAIL_TONE_LABELS: Record<EmailTone, string> = {
+  professional: 'profesionálny a reprezentatívny',
+  formal: 'formálny a úradný',
+  friendly: 'priateľský, ale stále slušný',
+  polite: 'zdvorilý a rešpektujúci',
+  urgent: 'dôrazný a urgentný, bez nevhodného nátlaku',
+  short: 'krátky, vecný a bez zbytočností',
+};
+
+function noStoreJson(
+  body: Record<string, unknown>,
+  status = 200,
+) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      'Cache-Control': 'no-store',
+    },
+  });
 }
 
-function normalizeText(value: unknown): string {
-  return String(value || '')
-    .replace(/\u0000/g, '')
+function cleanText(value: unknown): string {
+  return String(value ?? '')
     .replace(/\uFEFF/g, '')
     .replace(/\u200B/g, '')
     .replace(/\u200C/g, '')
     .replace(/\u200D/g, '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n{4,}/g, '\n\n\n')
+    .replace(/\r\n?/g, '\n')
     .trim();
 }
 
-function limitText(value: string, maxLength = 60000): string {
-  const cleaned = normalizeText(value);
+function normalizeRequestId(
+  value: unknown,
+): string {
+  const normalized = cleanText(value)
+    .replace(/[^a-zA-Z0-9._:-]/g, '')
+    .slice(0, 255);
 
-  if (cleaned.length <= maxLength) {
-    return cleaned;
+  return normalized ||
+    `emails-${crypto.randomUUID()}`;
+}
+
+function normalizeEmailType(
+  value: unknown,
+): EmailType {
+  const normalized = cleanText(value)
+    .toLowerCase();
+
+  if (
+    normalized === 'teacher' ||
+    normalized === 'consultation' ||
+    normalized === 'deadline' ||
+    normalized === 'request' ||
+    normalized === 'apology' ||
+    normalized === 'business' ||
+    normalized === 'other'
+  ) {
+    return normalized;
   }
 
-  return `${cleaned.slice(0, maxLength)}
-
-[TEXT BOL SKRÁTENÝ PRE TECHNICKÝ LIMIT.]`;
+  return 'supervisor';
 }
 
-function getExtractedText(file: ExtractedFileLike): string {
-  return normalizeText(
-    file.extractedText ||
-      file.content ||
-      file.text ||
-      file.output ||
-      ''
-  );
-}
+function normalizeEmailTone(
+  value: unknown,
+): EmailTone {
+  const normalized = cleanText(value)
+    .toLowerCase();
 
-function getFileName(file: ExtractedFileLike, index: number): string {
-  return cleanText(
-    file.name ||
-      file.fileName ||
-      file.file_name ||
-      `Priložený dokument ${index + 1}`
-  );
-}
-
-function getFileType(file: ExtractedFileLike): string {
-  return cleanText(file.type || file.mimeType || file.mime_type || 'nezadaný');
-}
-
-function getFileSize(file: ExtractedFileLike): number {
-  const size = file.size ?? file.fileSize ?? file.file_size ?? 0;
-  return Number(size || 0);
-}
-
-function getFileStatus(file: ExtractedFileLike): string {
-  const text = getExtractedText(file);
-
-  if (text.length > 0) {
-    return 'Text bol úspešne extrahovaný.';
+  if (
+    normalized === 'formal' ||
+    normalized === 'friendly' ||
+    normalized === 'polite' ||
+    normalized === 'urgent' ||
+    normalized === 'short'
+  ) {
+    return normalized;
   }
 
-  if (file.error) {
-    return `Extrakcia zlyhala: ${file.error}`;
-  }
-
-  if (file.warning) {
-    return `Upozornenie: ${file.warning}`;
-  }
-
-  return 'Z tohto súboru sa nepodarilo extrahovať text.';
+  return 'professional';
 }
 
-function buildSourcesBlock(files: Awaited<ReturnType<typeof extractTextFromFiles>>) {
-  if (!files.length) {
-    return 'Používateľ nepriložil žiadne dokumenty.';
+function normalizeOutputLanguage(
+  value: unknown,
+): string {
+  const normalized = cleanText(value)
+    .toLowerCase();
+
+  const aliases: Record<string, string> = {
+    sk: 'slovenčina',
+    slovak: 'slovenčina',
+    slovencina: 'slovenčina',
+    slovenčina: 'slovenčina',
+
+    cs: 'čeština',
+    cz: 'čeština',
+    czech: 'čeština',
+    cestina: 'čeština',
+    čeština: 'čeština',
+
+    en: 'angličtina',
+    english: 'angličtina',
+    anglictina: 'angličtina',
+    angličtina: 'angličtina',
+
+    de: 'nemčina',
+    german: 'nemčina',
+    nemcina: 'nemčina',
+    nemčina: 'nemčina',
+
+    pl: 'poľština',
+    polish: 'poľština',
+    polstina: 'poľština',
+    poľština: 'poľština',
+
+    hu: 'maďarčina',
+    hungarian: 'maďarčina',
+    madarcina: 'maďarčina',
+    maďarčina: 'maďarčina',
+  };
+
+  return aliases[normalized] ||
+    cleanText(value) ||
+    'slovenčina';
+}
+
+function getEmailAssignment(
+  body: EmailRequest,
+): string {
+  const directInput = cleanText(body.input);
+
+  if (directInput) {
+    return directInput;
   }
 
-  return files
-    .map((rawFile, index) => {
-      const file = rawFile as ExtractedFileLike;
+  const secondaryInput =
+    cleanText(body.secondaryInput);
 
-      const fileName = getFileName(file, index);
-      const fileType = getFileType(file);
-      const fileSize = getFileSize(file);
-      const extractedText = getExtractedText(file);
-      const status = getFileStatus(file);
+  if (secondaryInput) {
+    return secondaryInput;
+  }
 
-      const text = extractedText
-        ? limitText(extractedText, 25000)
-        : '[Z tohto súboru sa nepodarilo extrahovať text.]';
+  const prompt = cleanText(body.prompt);
 
-      return `
-ZDROJ ${index + 1}
-Názov súboru: ${fileName}
-Typ: ${fileType}
-Veľkosť: ${fileSize} bajtov
-Stav extrakcie: ${status}
-Počet extrahovaných znakov: ${extractedText.length}
+  for (const candidate of [
+    body.message,
+    body.question,
+    body.text,
+    body.instruction,
+  ]) {
+    const value = cleanText(candidate);
 
-EXTRAHOVANÝ TEXT:
-"""
-${text}
-"""
+    if (value && value !== prompt) {
+      return value;
+    }
+  }
+
+  /**
+   * Posledný fallback je prompt vytvorený frontendovým modulom.
+   * Použije sa iba vtedy, keď používateľ neposlal samostatné input pole.
+   */
+  return prompt;
+}
+
+function getKeywords(
+  profile?: SavedProfile | null,
+): string {
+  const values = Array.isArray(profile?.keywords)
+    ? profile.keywords
+    : Array.isArray(profile?.keywordsList)
+      ? profile.keywordsList
+      : [];
+
+  return values
+    .map((value) => cleanText(value))
+    .filter(Boolean)
+    .join(', ');
+}
+
+function buildProfileContext(
+  profile?: SavedProfile | null,
+): string {
+  if (!profile) {
+    return 'Profil práce nie je zadaný.';
+  }
+
+  return [
+    `Názov práce: ${cleanText(profile.title) || 'nezadané'}`,
+    `Téma: ${cleanText(profile.topic) || 'nezadané'}`,
+    `Typ práce: ${cleanText(profile.type) || 'nezadané'}`,
+    `Úroveň: ${cleanText(profile.level) || 'nezadané'}`,
+    `Odbor: ${cleanText(profile.field) || 'nezadané'}`,
+    `Vedúci/školiteľ: ${cleanText(profile.supervisor) || 'nezadané'}`,
+    `Cieľ práce: ${cleanText(profile.goal) || 'nezadané'}`,
+    `Metodológia: ${cleanText(profile.methodology) || 'nezadané'}`,
+    `Kľúčové slová: ${getKeywords(profile) || 'nezadané'}`,
+  ].join('\n');
+}
+
+function buildEmailPrompt({
+  assignment,
+  emailType,
+  emailTone,
+  outputLanguage,
+  profile,
+}: {
+  assignment: string;
+  emailType: EmailType;
+  emailTone: EmailTone;
+  outputLanguage: string;
+  profile?: SavedProfile | null;
+}): string {
+  return `
+ÚLOHA
+Vytvor hotový profesionálny email podľa zadania používateľa.
+
+JAZYK EMAILU
+${outputLanguage}
+
+TYP EMAILU
+${EMAIL_TYPE_LABELS[emailType]}
+
+TÓN EMAILU
+${EMAIL_TONE_LABELS[emailTone]}
+
+KONTEXT AKTÍVNEJ PRÁCE
+${buildProfileContext(profile)}
+
+ZADANIE POUŽÍVATEĽA
+<<<START_ASSIGNMENT>>>
+${assignment}
+<<<END_ASSIGNMENT>>>
+
+PRÍSNE PRAVIDLÁ
+- Vráť iba hotový email.
+- Výstup musí byť v jazyku: ${outputLanguage}.
+- Nepridávaj analýzu, vysvetlenie postupu, skóre ani odporúčania.
+- Nepíš úvod typu „Tu je návrh emailu“.
+- Nevymýšľaj mená, termíny, čísla, prílohy ani fakty, ktoré používateľ nezadal.
+- Ak chýba konkrétny údaj, použi prirodzenú neutrálnu formuláciu alebo
+  vhodnú hranatú zástupnú hodnotu, napríklad [meno], [termín], [názov práce].
+- Nepíš, že bol priložený súbor. Emailový modul prílohy nepoužíva.
+- Zachovaj profesionálnu, zdvorilú a prakticky použiteľnú komunikáciu.
+- Nepoužívaj markdownové nadpisy, hviezdičky ani kódové bloky.
+
+POVINNÝ FORMÁT
+Predmet: stručný a konkrétny predmet
+
+Text emailu:
+oslovenie
+
+jadro emailu v primeraných odsekoch
+
+záver a pozdrav
 `.trim();
-    })
-    .join('\n\n---\n\n');
 }
 
-function parseJsonSafe<T>(value: string, fallback: T): T {
-  if (!value) {
-    return fallback;
-  }
+function normalizeGeneratedEmail(
+  value: unknown,
+): string {
+  const cleaned = cleanText(value)
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/```[a-zA-Z]*\n?/g, '')
+    .replace(/```/g, '')
+    .replace(
+      /^\s*(?:Tu je|Nižšie je)\s+(?:návrh\s+)?(?:profesionálneho\s+)?emailu\s*[:\-–—]*\s*/i,
+      '',
+    )
+    .trim();
 
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return fallback;
-  }
+  return cleaned;
 }
 
-// ================= API ROUTE =================
+function serializeEntitlements(
+  entitlements: CurrentEntitlements,
+): Record<string, unknown> {
+  return {
+    userId: entitlements.userId,
+    email: entitlements.email,
 
-export async function POST(req: NextRequest) {
+    planId: entitlements.planId,
+    planName: entitlements.planName,
+    planPriceCents:
+      entitlements.planPriceCents,
+
+    isAdmin: entitlements.isAdmin,
+    isUnlimited:
+      entitlements.isAdmin ||
+      entitlements.hasUnlimitedAccess,
+    hasUnlimitedAccess:
+      entitlements.hasUnlimitedAccess,
+
+    pageLimit: entitlements.pageLimit,
+    basePageLimit:
+      entitlements.basePageLimit,
+    extraPageLimit:
+      entitlements.extraPageLimit,
+    totalPageLimit:
+      entitlements.pageLimit,
+    pagesUsed: entitlements.pagesUsed,
+    pagesRemaining:
+      entitlements.pagesRemaining,
+    pageLimitReached:
+      entitlements.pageLimitReached,
+
+    promptLimit:
+      entitlements.promptLimit,
+    promptsUsed:
+      entitlements.promptsUsed,
+    promptsRemaining:
+      entitlements.promptsRemaining,
+    promptLimitReached:
+      entitlements.promptLimitReached,
+
+    attachmentLimit:
+      entitlements.attachmentLimit,
+
+    addonIds: entitlements.addonIds,
+    addonNames: entitlements.addonNames,
+    features: Array.from(
+      entitlements.features,
+    ),
+
+    billingStatus:
+      entitlements.billingStatus,
+    activatedAt:
+      entitlements.activatedAt,
+    validUntil:
+      entitlements.validUntil,
+    updatedAt:
+      entitlements.updatedAt,
+  };
+}
+
+function serializePageQuota(
+  quota: PageQuota,
+): Record<string, unknown> {
+  return {
+    planId: quota.planId,
+    planName: quota.planName,
+
+    isAdmin: quota.isAdmin,
+    isUnlimited: quota.isUnlimited,
+    hasUnlimitedAccess:
+      quota.hasUnlimitedAccess,
+
+    basePageLimit:
+      quota.basePageLimit,
+    extraPageLimit:
+      quota.extraPageLimit,
+    pageLimit: quota.pageLimit,
+    pagesUsed: quota.pagesUsed,
+    pagesRemaining:
+      quota.pagesRemaining,
+    pageLimitReached:
+      quota.pageLimitReached,
+
+    attachmentLimit:
+      quota.attachmentLimit,
+    extraAttachmentLimit:
+      quota.extraAttachmentLimit,
+
+    trackingAvailable:
+      quota.trackingAvailable,
+  };
+}
+
+export async function POST(
+  request: NextRequest,
+) {
   try {
     if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
+      return noStoreJson(
         {
           ok: false,
-          error: 'Chýba OPENAI_API_KEY.',
+          code: 'OPENAI_API_KEY_MISSING',
+          message:
+            'Na serveri chýba OPENAI_API_KEY.',
         },
-        { status: 500 }
+        500,
       );
     }
 
-    const formData = await req.formData();
+    const body =
+      (await request
+        .json()
+        .catch(() => null)) as
+        | EmailRequest
+        | null;
 
-    const title = cleanText(formData.get('title'));
-    const task = cleanText(formData.get('task'));
-    const activeProfileRaw = cleanText(formData.get('activeProfile'));
-
-    const files = formData
-      .getAll('files')
-      .filter((item): item is File => item instanceof File);
-
-    const extractedFiles = await extractTextFromFiles(files);
-
-    const normalizedExtractedFiles = extractedFiles.map(
-      (file) => file as ExtractedFileLike
-    );
-
-    const extractedTextTotal = normalizedExtractedFiles
-      .map((file) => getExtractedText(file))
-      .filter(Boolean)
-      .join('\n\n')
-      .trim();
-
-    if (!task && !title && !extractedTextTotal) {
-      return NextResponse.json(
+    if (!body) {
+      return noStoreJson(
         {
           ok: false,
-          error: 'Chýba zadanie alebo extrahovaný text zo súborov.',
+          code: 'INVALID_JSON',
+          message:
+            'Požiadavku emailového modulu nebolo možné prečítať.',
         },
-        { status: 400 }
+        400,
       );
     }
 
-    const activeProfile = parseJsonSafe<any>(activeProfileRaw, null);
-    const sourcesBlock = buildSourcesBlock(extractedFiles);
+    const requestId =
+      normalizeRequestId(
+        body.requestId ||
+        request.headers.get(
+          'x-request-id',
+        ),
+      );
 
-    const prompt = `
-Si akademický AI asistent platformy ZEDPERA.
+    const assignment =
+      getEmailAssignment(body);
 
-Tvojou úlohou je vytvoriť akademický text podľa profilu práce a podľa priložených dokumentov.
-
-DÔLEŽITÉ PRAVIDLÁ:
-1. Najprv používaj informácie z priložených dokumentov.
-2. Ak sú priložené dokumenty a text bol extrahovaný, nesmieš písať všeobecne bez ich využitia.
-3. Ak dokument obsahuje autorov, názvy diel, roky, bibliografické údaje alebo citácie, vypíš ich v časti „Použité zdroje a autori“.
-4. Ak dokument obsahuje neúplné bibliografické údaje, jasne napíš, čo chýba.
-5. Nevymýšľaj autorov, roky, názvy publikácií, DOI, URL ani vydavateľov.
-6. Ak sa text zo súboru extrahoval, nikdy nepíš, že obsah nebol extrahovaný.
-7. Ak sa bibliografické údaje v dokumentoch nenachádzajú, napíš:
-„V priložených dokumentoch sa nenašli úplné bibliografické údaje.“
-8. Ak používateľ žiada citácie, bibliografiu alebo zdroje, odpovedaj ako citačná špecialistka.
-9. Ak sú v dokumente výstupy zo softvéru JASP, SPSS, Jamovi, R alebo Excel, uveď softvér ako zdroj, ak je to relevantné.
-10. Ak chýba verzia softvéru, napíš, že údaj je potrebné overiť.
-
-PROFIL PRÁCE:
-${activeProfile ? JSON.stringify(activeProfile, null, 2) : 'Profil práce nebol dodaný.'}
-
-ZADANIE:
-${task || title || 'Vytvor akademický text podľa priložených dokumentov.'}
-
-PRILOŽENÉ DOKUMENTY A EXTRAHOVANÝ TEXT:
-${sourcesBlock}
-
-VÝSTUP MUSÍ MAŤ TÚTO ŠTRUKTÚRU:
-
-# Vygenerovaný akademický text
-
-Napíš kvalitný akademický text podľa zadania.
-Použi najmä informácie z extrahovaných dokumentov.
-Nepíš vymyslené zdroje.
-Ak v texte chýbajú bibliografické údaje, napíš to otvorene.
-
-# Použité zdroje a autori
-
-## A. Zdroje nájdené v priložených dokumentoch
-Vypíš všetkých identifikovaných autorov, názvy publikácií, článkov, kníh, rokov, inštitúcií, URL alebo citačných údajov, ktoré sa nachádzajú v extrahovanom texte.
-
-## B. Formátované bibliografické záznamy
-Ak sú dostupné bibliografické údaje, uprav ich podľa citačného štýlu z profilu práce.
-Ak profil citačný štýl neobsahuje, použi všeobecný akademický formát.
-Ak používateľ výslovne žiada APA 7 alebo ISO 690, použi požadovaný štýl.
-
-## C. Varianty odkazov v texte
-Pri každom identifikovanom zdroji priprav:
-- parentetický odkaz,
-- naratívny odkaz,
-- krátku ukážku použitia vo vete.
-
-## D. Použité časti dokumentov
-Ku každému zdroju alebo tvrdeniu napíš, z ktorého priloženého súboru pochádza.
-
-## E. Chýbajúce alebo neúplné zdroje
-Ak dokument obsahuje neúplné citácie alebo chýbajú autor, rok, názov, vydavateľ, DOI, URL alebo verzia softvéru, uveď ich ako:
-„údaj je potrebné overiť“.
-
-## F. Odporúčaná veta do metodológie
-Ak dokument obsahuje štatistické výstupy alebo analýzu dát, priprav vetu do metodológie práce.
-
-PRAVIDLÁ:
-- Nevymýšľaj autorov.
-- Nevymýšľaj roky.
-- Nevymýšľaj názvy publikácií.
-- Nevymýšľaj DOI ani URL.
-- Ak v dokumentoch zdroje nie sú, napíš: „V priložených dokumentoch sa nenašli úplné bibliografické údaje.“
-- Ak sa text extrahoval, nikdy nepíš, že obsah nebol extrahovaný.
-`.trim();
-
-    const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      temperature: 0.25,
-      max_tokens: 4500,
-      messages: [
+    if (!assignment) {
+      return noStoreJson(
         {
-          role: 'system',
-          content:
-            'Si akademický asistent a citačný špecialista platformy ZEDPERA. Pracuješ primárne s textom extrahovaným z priložených dokumentov a nevymýšľaš zdroje.',
+          ok: false,
+          code: 'EMAIL_ASSIGNMENT_REQUIRED',
+          message:
+            'Najprv napíšte, komu má byť email určený a čo má obsahovať.',
         },
+        400,
+      );
+    }
+
+    if (assignment.length < 3) {
+      return noStoreJson(
         {
-          role: 'user',
-          content: prompt,
+          ok: false,
+          code: 'EMAIL_ASSIGNMENT_TOO_SHORT',
+          message:
+            'Zadanie pre email je príliš krátke.',
         },
-      ],
-    });
+        400,
+      );
+    }
 
-    const output = completion.choices[0]?.message?.content?.trim() || '';
+    const emailType =
+      normalizeEmailType(
+        body.emailType ||
+        body.moduleSettings?.emailType,
+      );
 
-    return NextResponse.json({
+    const emailTone =
+      normalizeEmailTone(
+        body.emailTone ||
+        body.moduleSettings?.emailTone,
+      );
+
+    const profile =
+      body.activeProfile ||
+      body.profile ||
+      body.profileSnapshot ||
+      null;
+
+    const outputLanguage =
+      normalizeOutputLanguage(
+        body.outputLanguage ||
+        body.workLanguage ||
+        body.language ||
+        profile?.workLanguage ||
+        profile?.language ||
+        body.systemLanguage,
+      );
+
+    const entitlements =
+      await requireModuleAccess(
+        'emails',
+      );
+
+    await requirePromptAllowance();
+
+    const pageQuota =
+      await requireAvailablePages();
+
+    const requestedTokenLimit = 1_600;
+
+    const maxOutputTokens =
+      getOutputTokenLimitForQuota(
+        pageQuota,
+        requestedTokenLimit,
+      );
+
+    if (maxOutputTokens <= 0) {
+      throw new PageLimitError({
+        pageLimit:
+          pageQuota.pageLimit,
+        pagesUsed:
+          pageQuota.pagesUsed,
+        pagesRemaining:
+          pageQuota.pagesRemaining,
+        requestedPages: 1,
+      });
+    }
+
+    const prompt =
+      buildEmailPrompt({
+        assignment,
+        emailType,
+        emailTone,
+        outputLanguage,
+        profile,
+      });
+
+    const completion =
+      await openai.chat.completions.create({
+        model: 'gpt-4.1-mini',
+        temperature:
+          emailTone === 'formal' ||
+          emailTone === 'professional'
+            ? 0.25
+            : 0.35,
+        max_tokens: maxOutputTokens,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              String(
+                GLOBAL_ACADEMIC_SYSTEM_PROMPT ||
+                '',
+              ).trim(),
+              'Si profesionálny autor akademickej, administratívnej a obchodnej emailovej komunikácie.',
+              'Vytváraš iba hotový email bez vysvetľovania postupu.',
+              'Emailový modul nepoužíva prílohy a nesmie tvrdiť, že niečo prikladá.',
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      });
+
+    const generatedEmail =
+      normalizeGeneratedEmail(
+        completion.choices[0]
+          ?.message?.content,
+      );
+
+    if (!generatedEmail) {
+      return noStoreJson(
+        {
+          ok: false,
+          code: 'EMPTY_EMAIL_OUTPUT',
+          message:
+            'AI nevrátila vygenerovaný email.',
+        },
+        502,
+      );
+    }
+
+    const pageUsage =
+      await consumePagesForOutput({
+        text: generatedEmail,
+        module: 'emails',
+        requestId,
+      });
+
+    const promptUsage =
+      await consumeSuccessfulPrompt();
+
+    const latestEntitlements =
+      await requireModuleAccess(
+        'emails',
+      );
+
+    return noStoreJson({
       ok: true,
-      output,
-      extractedFiles: normalizedExtractedFiles.map((file, index) => {
-        const extractedText = getExtractedText(file);
 
-        return {
-          name: getFileName(file, index),
-          type: getFileType(file),
-          size: getFileSize(file),
-          extractedChars: extractedText.length,
-          extractedPreview: extractedText.slice(0, 600),
-          status: getFileStatus(file),
-          error: file.error || null,
-          warning: file.warning || null,
-        };
-      }),
-      extractedTextAvailable: extractedTextTotal.length > 0,
+      /**
+       * emailText je autoritatívne pole.
+       * Ostatné názvy sú kompatibilné aliasy pre staršie frontendy.
+       */
+      emailText: generatedEmail,
+      email_text: generatedEmail,
+      generatedEmail,
+      generated_email:
+        generatedEmail,
+      email: generatedEmail,
+
+      output: generatedEmail,
+      result: generatedEmail,
+      text: generatedEmail,
+      message: generatedEmail,
+      content: generatedEmail,
+
+      entitlements:
+        serializeEntitlements(
+          latestEntitlements,
+        ),
+
+      pageUsage,
+      pageQuota:
+        serializePageQuota(
+          pageUsage,
+        ),
+
+      promptUsage,
+
+      meta: {
+        requestId,
+        model: 'gpt-4.1-mini',
+        emailType,
+        emailTone,
+        outputLanguage,
+        inputCharacters:
+          assignment.length,
+        outputCharacters:
+          generatedEmail.length,
+        pagesConsumed:
+          pageUsage.consumption
+            .pagesConsumed,
+        projectId:
+          cleanText(
+            body.projectId ||
+            body.profileId ||
+            profile?.id,
+          ) || null,
+        attachmentsAccepted: 0,
+      },
     });
   } catch (error) {
-    console.error('WRITE_WITH_FILES_ERROR:', error);
+    if (
+      error instanceof
+      EntitlementError
+    ) {
+      const serialized =
+        entitlementErrorResponse(error);
 
-    return NextResponse.json(
+      return noStoreJson(
+        serialized.body as
+          Record<string, unknown>,
+        serialized.status,
+      );
+    }
+
+    if (
+      error instanceof
+        PageLimitError ||
+      error instanceof
+        PageQuotaUnavailableError
+    ) {
+      const serialized =
+        pageQuotaErrorResponse(error);
+
+      return noStoreJson(
+        serialized.body,
+        serialized.status,
+      );
+    }
+
+    console.error(
+      'EMAIL_WRITE_API_ERROR:',
+      error,
+    );
+
+    return noStoreJson(
       {
         ok: false,
-        error:
+        code: 'EMAIL_GENERATION_FAILED',
+        message:
           error instanceof Error
             ? error.message
-            : 'Nepodarilo sa spracovať dokumenty.',
+            : 'Email sa nepodarilo vygenerovať.',
       },
-      { status: 500 }
+      500,
     );
   }
 }

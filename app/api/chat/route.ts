@@ -27,7 +27,6 @@ import {
   MODULE_FEATURE_MAP,
   PromptLimitError,
   consumeSuccessfulPrompt,
-  entitlementErrorResponse,
   getFeatureLabel,
   requireModuleAccess,
   serializeEntitlements,
@@ -35,6 +34,15 @@ import {
   type CurrentEntitlements,
 } from '@/lib/entitlements';
 import type { FeatureKey } from '@/lib/billing/catalog';
+import {
+  recordCurrentUserAttachmentUsage,
+  type AttachmentUsageItem,
+  type AttachmentUsageSnapshot,
+} from '@/lib/attachment-usage';
+import {
+  zedperaErrorJson,
+  zedperaUnknownErrorJson,
+} from '@/lib/zedpera-api-errors.server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 90;
@@ -205,6 +213,7 @@ type PreparedFileMetadata = {
   originalName?: string;
   originalSize?: number;
   originalType?: string;
+  uploadedAt?: string;
   preparedName?: string;
   preparedSize?: number;
   preparedType?: string;
@@ -6265,28 +6274,25 @@ function isPageLimitError(error: unknown) {
   return message.includes('PAGE_LIMIT_REACHED');
 }
 
-function pageLimitErrorResponse(error?: unknown) {
-  const message =
-    error instanceof Error &&
-    error.message.trim()
-      ? error.message
-      : 'Stránkový limit bol vyčerpaný. Pre pokračovanie si dokúpte ďalšie strany.';
-
-  return NextResponse.json(
+function pageLimitErrorResponse(
+  error?: unknown,
+  request?: Request,
+) {
+  return zedperaErrorJson(
+    'PAGE_LIMIT_REACHED',
     {
-      ok: false,
-      code: 'PAGE_LIMIT_REACHED',
-      message,
-      detail:
-        'Používateľ už nemá k dispozícii žiadne voľné strany. Po úspešnom dokúpení extra strán sa generovanie automaticky odblokuje.',
-      pageLimitReached: true,
-      purchaseUrl: '/pricing#doplnkove-sluzby',
+      endpoint: '/api/chat',
+      module: 'chat',
+      purchaseUrl:
+        '/pricing#doplnkove-sluzby',
+      rawMessage:
+        error instanceof Error
+          ? error.message
+          : '',
     },
     {
+      request,
       status: 402,
-      headers: {
-        'Cache-Control': 'no-store',
-      },
     },
   );
 }
@@ -6607,32 +6613,53 @@ function translateApiErrorToSlovak(error: unknown): SlovakApiError {
   return { code: 'AI_API_ERROR', message: 'AI služba vrátila chybu pri spracovaní požiadavky.', detail: 'Skontroluj /api/chat vo Verceli alebo lokálny terminál.', rawMessage };
 }
 
-function jsonErrorResponse(error: SlovakApiError, status: number) {
-  return NextResponse.json(
+function jsonErrorResponse(
+  error: SlovakApiError,
+  status: number,
+  request?: Request,
+) {
+  return zedperaErrorJson(
+    error.code,
     {
-      ok: false,
-      code: error.code,
-      message: error.message,
-      detail: error.detail,
+      status,
+      endpoint: '/api/chat',
+      module: 'chat',
+      serverMessage: error.message,
+      serverDetail: error.detail,
       rawMessage: error.rawMessage,
     },
     {
+      request,
       status,
-      headers: {
-        'Cache-Control': 'no-store',
-      },
     },
   );
 }
 
-function jsonSimpleErrorResponse({ code, message, detail, status }: { code: string; message: string; detail: string; status: number }) {
-  return NextResponse.json(
-    { ok: false, code, message, detail },
+function jsonSimpleErrorResponse({
+  code,
+  message,
+  detail,
+  status,
+  request,
+}: {
+  code: string;
+  message: string;
+  detail: string;
+  status: number;
+  request?: Request;
+}) {
+  return zedperaErrorJson(
+    code,
     {
       status,
-      headers: {
-        'Cache-Control': 'no-store',
-      },
+      endpoint: '/api/chat',
+      module: 'chat',
+      serverMessage: message,
+      serverDetail: detail,
+    },
+    {
+      request,
+      status,
     },
   );
 }
@@ -6804,6 +6831,90 @@ function countReceivedAttachments({
   );
 }
 
+/**
+ * Vytvorí jednotný zoznam príloh pre serverovú evidenciu.
+ * Stabilné originalId z frontendu zabezpečí idempotentný zápis:
+ * rovnaký súbor sa pri opakovanom potvrdení nezapočíta dvakrát.
+ */
+function buildAttachmentUsageItems({
+  files,
+  preparedFilesMetadata,
+}: {
+  files: UploadedFile[];
+  preparedFilesMetadata: PreparedFileMetadata[];
+}): AttachmentUsageItem[] {
+  const items = new Map<string, AttachmentUsageItem>();
+  const representedFiles = new Set<string>();
+
+  preparedFilesMetadata.forEach((item, index) => {
+    const name =
+      toCleanString(item.originalName) ||
+      toCleanString(item.preparedName) ||
+      `priloha-${index + 1}`;
+    const size =
+      typeof item.originalSize === 'number' &&
+      Number.isFinite(item.originalSize)
+        ? Math.max(0, Math.round(item.originalSize))
+        : typeof item.preparedSize === 'number' &&
+            Number.isFinite(item.preparedSize)
+          ? Math.max(0, Math.round(item.preparedSize))
+          : 0;
+    const id = toCleanString(item.originalId);
+    const key =
+      id ||
+      `${name}|${size}|prepared-${index}`;
+
+    representedFiles.add(
+      `${name}|${size}`,
+    );
+
+    items.set(key, {
+      id: id || null,
+      name,
+      size,
+      type:
+        toCleanString(item.originalType) ||
+        toCleanString(item.preparedType) ||
+        toCleanString(item.mimeType) ||
+        null,
+      uploadedAt:
+        toCleanString(item.uploadedAt) ||
+        null,
+    });
+  });
+
+  files.forEach((file, index) => {
+    const name =
+      toCleanString(file.name) ||
+      `priloha-${index + 1}`;
+    const size =
+      typeof file.size === 'number' &&
+      Number.isFinite(file.size)
+        ? Math.max(0, Math.round(file.size))
+        : 0;
+    const fingerprint = `${name}|${size}`;
+
+    if (representedFiles.has(fingerprint)) {
+      return;
+    }
+
+    items.set(
+      `${fingerprint}|binary-${index}`,
+      {
+        id: null,
+        name,
+        size,
+        type:
+          toCleanString(file.type) ||
+          null,
+        uploadedAt: null,
+      },
+    );
+  });
+
+  return Array.from(items.values());
+}
+
 async function requireChatRequestEntitlements({
   module,
   isChapterRequest,
@@ -6939,17 +7050,14 @@ function serializeEntitlementGuard(
 
 function entitlementApiErrorResponse(
   error: unknown,
+  request?: Request,
 ) {
-  const serialized =
-    entitlementErrorResponse(error);
-
-  return NextResponse.json(
-    serialized.body,
+  return zedperaUnknownErrorJson(
+    error,
     {
-      status: serialized.status,
-      headers: {
-        'Cache-Control': 'no-store',
-      },
+      request,
+      endpoint: '/api/chat',
+      module: 'chat',
     },
   );
 }
@@ -6966,6 +7074,7 @@ async function createStreamResponse({
   pageQuota,
   pageRequestId,
   entitlementGuard,
+  attachmentUsage,
   nativeAttachmentParts = [],
 }: {
   model: ModelResult['model'];
@@ -6975,6 +7084,7 @@ async function createStreamResponse({
   pageQuota: PageQuota;
   pageRequestId: string;
   entitlementGuard: EntitlementGuardResult;
+  attachmentUsage: AttachmentUsageSnapshot;
   nativeAttachmentParts?: NativeAttachmentPart[];
 }) {
   const effectiveOutputTokens = getOutputTokenLimit(
@@ -7173,9 +7283,33 @@ async function createStreamResponse({
           entitlementGuard.entitlements.promptsUsed,
         ),
       'X-Zedpera-Attachment-Limit':
-        entitlementGuard.entitlements.attachmentLimit === null
+        attachmentUsage.isUnlimited
           ? 'unlimited'
-          : String(entitlementGuard.entitlements.attachmentLimit),
+          : attachmentUsage.attachmentLimit === null
+            ? 'unavailable'
+            : String(
+                attachmentUsage.attachmentLimit,
+              ),
+      'X-Zedpera-Attachments-Used':
+        String(
+          attachmentUsage.attachmentsUsed,
+        ),
+      'X-Zedpera-Attachments-Added':
+        String(
+          attachmentUsage.attachmentsAdded,
+        ),
+      'X-Zedpera-Attachments-Remaining':
+        attachmentUsage.isUnlimited
+          ? 'unlimited'
+          : attachmentUsage.attachmentsRemaining === null
+            ? 'unavailable'
+            : String(
+                attachmentUsage.attachmentsRemaining,
+              ),
+      'X-Zedpera-Attachment-Tracking':
+        attachmentUsage.trackingAvailable
+          ? 'enabled'
+          : 'disabled',
       'X-Zedpera-Required-Features':
         entitlementGuard.requiredFeatures.join(','),
     },
@@ -7199,6 +7333,7 @@ async function createJsonResponse({
   pageQuota,
   pageRequestId,
   entitlementGuard,
+  attachmentUsage,
   nativeAttachmentParts = [],
   nativeAttachmentFileNames = [],
 }: {
@@ -7219,6 +7354,7 @@ async function createJsonResponse({
   pageQuota: PageQuota;
   pageRequestId: string;
   entitlementGuard: EntitlementGuardResult;
+  attachmentUsage: AttachmentUsageSnapshot;
   nativeAttachmentParts?: NativeAttachmentPart[];
   nativeAttachmentFileNames?: string[];
 }) {
@@ -7436,6 +7572,7 @@ await saveGeneratedHistory({
         promptUsage,
       ),
     promptUsage,
+    attachmentUsage,
     profileRelevance: relevance,
     externalResearch,
     extractedFiles: extractedFilesPayload,
@@ -8165,6 +8302,7 @@ try {
         detail:
           'Použi jeden z podporovaných agentov: openai, claude, gemini, grok alebo mistral.',
         status: 400,
+        request: req,
       });
     }
 
@@ -8178,6 +8316,7 @@ try {
         detail:
           'Frontend musí odoslať aspoň jednu používateľskú správu v poli messages.',
         status: 400,
+        request: req,
       });
     }
 
@@ -8192,6 +8331,64 @@ try {
         preparedFilesMetadata,
         clientExtractedText,
       });
+
+    const pageRequestId =
+      clientRequestId ||
+      randomUUID();
+
+    const attachmentItems =
+      buildAttachmentUsageItems({
+        files,
+        preparedFilesMetadata,
+      });
+
+    const attachmentUsage =
+      await recordCurrentUserAttachmentUsage({
+        requestId: pageRequestId,
+        projectId,
+        module,
+        items: attachmentItems,
+        fallbackCount:
+          attachmentItems.length,
+      });
+
+    /**
+     * Historický limit sa kontroluje po serverovom prijatí a evidencii
+     * jedinečných príloh. Presné dosiahnutie limitu je ešte povolené;
+     * blokovanie nastane až pri jeho prekročení.
+     */
+    if (
+      attachmentUsage.trackingAvailable &&
+      !attachmentUsage.isUnlimited &&
+      attachmentUsage.attachmentLimit !==
+        null &&
+      attachmentUsage.attachmentsUsed >
+        attachmentUsage.attachmentLimit
+    ) {
+      return zedperaErrorJson(
+        'ATTACHMENT_LIMIT_REACHED',
+        {
+          requestId: pageRequestId,
+          endpoint: '/api/chat',
+          module,
+          projectId,
+          attachmentLimit:
+            attachmentUsage.attachmentLimit,
+          attachmentsUsed:
+            attachmentUsage.attachmentsUsed,
+          attachmentsRemaining:
+            attachmentUsage.attachmentsRemaining,
+          receivedAttachments:
+            attachmentItems.length,
+          purchaseUrl:
+            '/pricing#doplnkove-sluzby',
+        },
+        {
+          request: req,
+          status: 402,
+        },
+      );
+    }
 
     const entitlementGuard =
       await requireChatRequestEntitlements({
@@ -8225,12 +8422,16 @@ try {
         attachmentLimit:
           entitlementGuard.entitlements.attachmentLimit,
         receivedAttachments,
+        attachmentsUsed:
+          attachmentUsage.attachmentsUsed,
+        attachmentsAdded:
+          attachmentUsage.attachmentsAdded,
+        attachmentsRemaining:
+          attachmentUsage.attachmentsRemaining,
+        attachmentTrackingAvailable:
+          attachmentUsage.trackingAvailable,
       },
     );
-
-    const pageRequestId =
-      clientRequestId ||
-      randomUUID();
 
     let pageQuota: PageQuota;
 
@@ -8241,6 +8442,7 @@ try {
       if (isPageLimitError(quotaError)) {
         return pageLimitErrorResponse(
           quotaError,
+          req,
         );
       }
 
@@ -8378,36 +8580,23 @@ try {
       !clientExtractedText.trim() &&
       nativeAttachmentBundle.parts.length === 0
     ) {
-      return NextResponse.json(
+      return zedperaErrorJson(
+        'ATTACHMENT_EXTRACTION_FAILED',
         {
-          ok: false,
-          code: 'ATTACHMENT_EXTRACTION_FAILED',
-          message:
+          requestId: pageRequestId,
+          endpoint: '/api/chat',
+          module,
+          receivedAttachments:
+            attachmentItems.length,
+          serverMessage:
             'Príloha bola prijatá, ale nepodarilo sa z nej načítať text.',
-          detail:
-            'Súbor bol doručený do /api/chat, ale neobsahoval použiteľnú textovú vrstvu a nebol doručený ani OCR text. Server sa pokúsil spracovať PDF cez pdf-parse a DOCX cez Mammoth. Pri skenovanom PDF alebo obrázku musí frontend odoslať OCR text v poli clientExtractedText alebo extractedText, prípadne binárny obsah súboru v multipart/form-data.',
-          extractedFiles: extractedFiles.map((file) => ({
-            name: file.originalName,
-            preparedName: file.preparedName,
-            extension: file.effectiveExtension,
-            extractedChars: file.extractedChars,
-            status: file.status,
-            error: file.error || null,
-          })),
-          extractedFilesInfo: extractedFiles.map((file) => ({
-            fileName: file.originalName,
-            preparedName: file.preparedName,
-            extension: file.effectiveExtension,
-            characters: file.extractedChars,
-            ok:
-              file.extractedChars > 0 &&
-              file.extractedText.trim().length > 0 &&
-              !file.error,
-            status: file.status,
-            error: file.error || null,
-          })),
+          serverDetail:
+            'Súbor neobsahoval použiteľnú textovú vrstvu ani OCR text. Pri skenovanom PDF alebo obrázku odošlite OCR text v poli clientExtractedText alebo extractedText.',
         },
-        { status: 422 },
+        {
+          request: req,
+          status: 422,
+        },
       );
     }
 
@@ -8659,6 +8848,7 @@ ${
           pageQuota,
           pageRequestId,
           entitlementGuard,
+          attachmentUsage,
           nativeAttachmentParts:
             nativeAttachmentBundle.parts,
           nativeAttachmentFileNames:
@@ -8674,6 +8864,7 @@ ${
         pageQuota,
         pageRequestId,
         entitlementGuard,
+        attachmentUsage,
         nativeAttachmentParts:
           nativeAttachmentBundle.parts,
       });
@@ -8683,11 +8874,16 @@ ${
       if (isPageLimitError(primaryError)) {
         return pageLimitErrorResponse(
           primaryError,
+          req,
         );
       }
 
       if (isContextWindowError(primaryError)) {
-        return jsonErrorResponse(translateApiErrorToSlovak(primaryError), 413);
+        return jsonErrorResponse(
+          translateApiErrorToSlovak(primaryError),
+          413,
+          req,
+        );
       }
 
       if (!isModelNotFoundError(primaryError)) {
@@ -8742,6 +8938,7 @@ Dodrž:
           pageQuota,
           pageRequestId,
           entitlementGuard,
+          attachmentUsage,
           nativeAttachmentParts:
             nativeAttachmentBundle.parts,
           nativeAttachmentFileNames:
@@ -8757,6 +8954,7 @@ Dodrž:
         pageQuota,
         pageRequestId,
         entitlementGuard,
+        attachmentUsage,
         nativeAttachmentParts:
           nativeAttachmentBundle.parts,
       });
@@ -8767,16 +8965,22 @@ Dodrž:
     if (error instanceof EntitlementError) {
       return entitlementApiErrorResponse(
         error,
+        req,
       );
     }
 
     if (isPageLimitError(error)) {
-      return pageLimitErrorResponse(error);
+      return pageLimitErrorResponse(error, req);
     }
 
-    return jsonErrorResponse(
-      translateApiErrorToSlovak(error),
-      500,
+    return zedperaUnknownErrorJson(
+      error,
+      {
+        request: req,
+        endpoint: '/api/chat',
+        module: 'chat',
+        status: 500,
+      },
     );
   }
 }

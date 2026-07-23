@@ -1586,7 +1586,7 @@ export default function ProjectsPage() {
                     </button>
 
                     <div className="mt-5 flex flex-wrap items-center gap-3">
-                      <button type="button" onClick={() => selectProfileForGeneration(profile)} className={`rounded-xl px-4 py-2 text-sm font-black text-white transition ${isActive ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-violet-600 hover:bg-violet-500'}`}>{isActive ? 'Zvolená práca' : 'Vybrať na generovanie'}</button>
+                      <button type="button" onClick={() => selectProfileForGeneration(profile)} className={`rounded-xl px-4 py-2 text-sm font-black text-white transition ${isActive ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-violet-600 hover:bg-violet-500'}`}>{isActive ? 'Zvolená práca' : 'Zvolená práca'}</button>
                       <button type="button" onClick={() => goToChatWithProfile(profile)} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white transition hover:bg-blue-500">Pokračovať v práci</button>
                       <button type="button" onClick={() => openProfile(profile)} className="rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-bold text-white transition hover:bg-white/[0.1]">Otvoriť</button>
                       <button type="button" onClick={() => openEditProfile(profile)} className="rounded-xl border border-violet-400/30 bg-violet-500/10 px-4 py-2 text-sm font-bold text-violet-100 transition hover:bg-violet-500/20">Upraviť</button>
@@ -1608,7 +1608,7 @@ export default function ProjectsPage() {
               <div>
                 <div className="mb-1 text-xs font-black uppercase tracking-[0.2em] text-violet-300">Detail práce</div>
                 <h2 className="text-2xl font-black text-white">{selectedProfile.title || 'Bez názvu'}</h2>
-                <p className="mt-1 text-sm text-slate-400">Tu môžeš prácu otvoriť, upraviť alebo vybrať na generovanie textu.</p>
+                <p className="mt-1 text-sm text-slate-400">Tu môžeš prácu otvoriť, upraviť alebo nastaviť ako zvolenú prácu.</p>
               </div>
               <button type="button" onClick={closeProfile} className="rounded-2xl bg-red-500/90 p-3 text-white transition hover:bg-red-400" aria-label="Zavrieť profil"><X size={20} /></button>
             </div>
@@ -2247,7 +2247,7 @@ function ProfileWizardModal({
                   key={step.id}
                   type="button"
                   onClick={() => setActiveStep(step.id)}
-                  className={`flex min-h-[78px] items-center gap-3 rounded-3xl border p-4 text-left transition ${
+                  className={`flex min-h-[92px] items-center gap-4 rounded-3xl border p-4 text-left transition ${
                     active
                       ? 'border-violet-400/50 bg-violet-600/20 text-white shadow-xl shadow-violet-950/30'
                       : done
@@ -2272,10 +2272,13 @@ function ProfileWizardModal({
                   </span>
 
                   <span className="min-w-0">
-                    <span className="block text-sm font-black">
-                      {step.id}. {step.title}
+                    <span className="block text-[10px] font-black uppercase tracking-[0.18em] text-violet-300">
+                      Krok {step.id}
                     </span>
-                    <span className="mt-0.5 block truncate text-xs font-semibold text-slate-400">
+                    <span className="mt-1 block text-sm font-black">
+                      {step.title}
+                    </span>
+                    <span className="mt-1 block truncate text-xs font-semibold text-slate-400">
                       {step.subtitle}
                     </span>
                   </span>
@@ -2286,19 +2289,19 @@ function ProfileWizardModal({
         </aside>
 
         <main className="zedpera-wizard-no-scrollbar min-h-0 overflow-y-auto overflow-x-hidden bg-[#020617] p-3 pb-6 xl:p-5 xl:pb-8">
-          <div className="zedpera-wizard-no-scrollbar mb-3 flex gap-2 overflow-x-auto overflow-y-hidden xl:hidden">
+          <div className="zedpera-wizard-no-scrollbar mb-5 flex gap-3 overflow-x-auto overflow-y-hidden pb-1 xl:hidden">
             {STEPS.map((step) => (
               <button
                 key={step.id}
                 type="button"
                 onClick={() => setActiveStep(step.id)}
-                className={`h-10 flex-1 rounded-2xl text-xs font-black ${
+                className={`h-11 min-w-[92px] flex-1 rounded-2xl px-3 text-xs font-black ${
                   activeStep === step.id
                     ? 'bg-violet-600 text-white'
                     : 'border border-white/10 bg-white/[0.06] text-slate-300'
                 }`}
               >
-                {step.id}
+                Krok {step.id}
               </button>
             ))}
           </div>
@@ -2306,6 +2309,7 @@ function ProfileWizardModal({
           <div className="min-h-full rounded-[2rem] border border-white/10 bg-[#070a16] p-4 shadow-2xl shadow-black/30 xl:p-5">
             {activeStep === 1 && (
               <WizardPanel
+                step={1}
                 title="Typ práce"
                 subtitle="Vyber šablónu. Po kliknutí sa automaticky nastaví typ práce, odporúčaný rozsah, štruktúra a citačná norma."
               >
@@ -2343,6 +2347,7 @@ function ProfileWizardModal({
 
             {activeStep === 2 && (
               <WizardPanel
+                step={2}
                 title="Identita práce"
                 subtitle="Tému, odbor, jazyk, kľúčové slová a anotáciu vyplň priamo v poliach. Zmeny sa priebežne zapisujú do profilu."
               >
@@ -2405,6 +2410,7 @@ function ProfileWizardModal({
 
             {activeStep === 3 && (
               <WizardPanel
+                step={3}
                 title="Výskumné nastavenie"
                 subtitle="Text vypĺňaj priamo v poliach. Zmeny sa priebežne zapisujú do profilu a ostanú zachované pri ďalšom kroku."
               >
@@ -2471,6 +2477,7 @@ function ProfileWizardModal({
 
             {activeStep === 4 && (
               <WizardPanel
+                step={4}
                 title="Norma a štruktúra"
                 subtitle="Klikateľná citačná norma, odporúčaný rozsah a štruktúra práce."
               >
@@ -2529,6 +2536,7 @@ function ProfileWizardModal({
 
             {activeStep === 5 && (
               <WizardPanel
+                step={5}
                 title="Kontrola a uloženie"
                 subtitle="Skontroluj finálny profil. Po uložení sa nastaví ako aktívny profil pre generovanie."
               >
@@ -2622,21 +2630,23 @@ function ProfileWizardModal({
 }
 
 function WizardPanel({
+  step,
   title,
   subtitle,
   children,
 }: {
+  step: number;
   title: string;
   subtitle: string;
   children: ReactNode;
 }) {
   return (
     <section className="flex min-h-full flex-col">
-      <div className="shrink-0 pb-4">
-        <div className="text-xs font-black uppercase tracking-[0.24em] text-violet-300">
-          Wizard profil práce
+      <div className="shrink-0 pb-6">
+        <div className="inline-flex min-h-[30px] items-center rounded-full border border-violet-400/30 bg-violet-500/10 px-3 text-xs font-black uppercase tracking-[0.2em] text-violet-200">
+          Krok {step}
         </div>
-        <h2 className="mt-2 text-2xl font-black text-white xl:text-3xl">
+        <h2 className="mt-4 text-2xl font-black text-white xl:text-3xl">
           {title}
         </h2>
         <p className="mt-2 max-w-5xl text-sm font-semibold leading-6 text-slate-400">
@@ -2766,9 +2776,6 @@ function ClickEditField({
         />
       )}
 
-      <div className="mt-2 text-[11px] font-semibold text-slate-500">
-        Hodnota sa zapisuje priamo do profilu. Pred odchodom pokračuj cez Ďalší krok alebo Uložiť profil práce.
-      </div>
     </label>
   );
 }
@@ -2857,7 +2864,7 @@ function ProjectDetail({ profile, activeProfileId, onBack, onDelete, onEdit, onS
     <div className="p-5 md:p-8">
       <div className="mb-6 flex flex-wrap gap-3">
         <button type="button" onClick={onBack} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 font-bold text-white transition hover:bg-white/[0.1]"><ArrowLeft className="h-5 w-5" />Späť</button>
-        <button type="button" onClick={onSelect} className={`inline-flex items-center gap-2 rounded-2xl px-4 py-3 font-black text-white transition ${isActive ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-violet-600 hover:bg-violet-500'}`}>{isActive ? <CheckCircle2 className="h-5 w-5" /> : <Sparkles className="h-5 w-5" />}{isActive ? 'Zvolená práca' : 'Vybrať na generovanie'}</button>
+        <button type="button" onClick={onSelect} className={`inline-flex items-center gap-2 rounded-2xl px-4 py-3 font-black text-white transition ${isActive ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-violet-600 hover:bg-violet-500'}`}>{isActive ? <CheckCircle2 className="h-5 w-5" /> : <Sparkles className="h-5 w-5" />}{isActive ? 'Zvolená práca' : 'Zvolená práca'}</button>
         <button type="button" onClick={onContinue} className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-black text-white transition hover:bg-blue-500"><Sparkles className="h-5 w-5" />Pokračovať v práci</button>
         <button type="button" onClick={onEdit} className="inline-flex items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 font-bold text-violet-100 transition hover:bg-violet-500/20"><FileText className="h-5 w-5" />Upraviť</button>
         <button type="button" onClick={onDelete} className="inline-flex items-center gap-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 font-bold text-red-200 transition hover:bg-red-500/20"><Trash2 className="h-5 w-5" />Odstrániť</button>

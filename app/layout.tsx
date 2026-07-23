@@ -4,6 +4,7 @@ import './globals.css';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { LanguageProvider } from '@/components/LanguageProvider';
 import AutoTranslateProvider from '@/components/AutoTranslateProvider';
+import ZedperaProviders from '@/components/system/ZedperaProviders';
 
 export const metadata: Metadata = {
   title: 'Zedpera',
@@ -53,9 +54,11 @@ export default function RootLayout({
       <body className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-950 antialiased transition-colors duration-300 dark:bg-[#020617] dark:text-white">
         <ThemeProvider>
           <LanguageProvider>
-            <AutoTranslateProvider>
-              {children}
-            </AutoTranslateProvider>
+            <ZedperaProviders>
+              <AutoTranslateProvider>
+                {children}
+              </AutoTranslateProvider>
+            </ZedperaProviders>
           </LanguageProvider>
         </ThemeProvider>
       </body>

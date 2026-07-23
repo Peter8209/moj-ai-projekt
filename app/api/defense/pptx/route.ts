@@ -1125,7 +1125,13 @@ function addClosingSlide(
 }
 
 async function buildPresentation(work: NormalizedWork): Promise<GeneratedPptxFile> {
-  const shouldAiGenerate = true;
+  /**
+   * Ak frontend poslal štruktúrované slidy z /api/defense, použijú sa priamo.
+   * Tým sa PowerPoint nevytvára druhým pomalým AI volaním a presne zodpovedá
+   * výsledku, ktorý používateľ videl v module Obhajoba.
+   */
+  const shouldAiGenerate =
+    work.slides.length === 0;
 
   let slides = work.slides;
 
@@ -1208,11 +1214,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const files: GeneratedPptxFile[] = [];
-
-    for (const work of works) {
-      files.push(await buildPresentation(work));
-    }
+    const files: GeneratedPptxFile[] =
+      await Promise.all(
+        works.map((work) =>
+          buildPresentation(work),
+        ),
+      );
 
     if (files.length === 1) {
       const file = files[0];

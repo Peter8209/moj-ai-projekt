@@ -7,13 +7,15 @@ export const maxDuration = 90;
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  timeout: 75_000,
+  maxRetries: 1,
 });
 
 const MODEL = process.env.OPENAI_DEFENSE_MODEL || 'gpt-4.1-mini';
 
-const MAX_TEXT_CHARS_PER_FILE = 120_000;
-const MAX_TOTAL_ATTACHMENT_CHARS = 350_000;
-const MAX_WORK_TEXT_CHARS = 380_000;
+const MAX_TEXT_CHARS_PER_FILE = 80_000;
+const MAX_TOTAL_ATTACHMENT_CHARS = 180_000;
+const MAX_WORK_TEXT_CHARS = 180_000;
 const LARGE_FILE_LIMIT_BYTES = 8 * 1024 * 1024;
 const MIN_SLIDES_WITH_WORK_TEXT = 10;
 const TARGET_SLIDES_WITH_WORK_TEXT = 13;
@@ -75,6 +77,16 @@ type DefenseResponse = {
   ok: boolean;
   slides?: DefenseSlide[];
   textOutput?: string;
+
+  /**
+   * Kompatibilné textové aliasy pre spoločné frontendy modulov.
+   * Všetky obsahujú rovnaký vyčistený výsledok.
+   */
+  output?: string;
+  result?: string;
+  message?: string;
+  text?: string;
+
   reviewsCount?: number;
   reviews?: Array<{
     name: string;
@@ -85,8 +97,9 @@ type DefenseResponse = {
     warning?: string;
     detectedKind?: string;
   }>;
-  allowedExports?: Array<'docx' | 'pdf'>;
-  disallowedExports?: Array<'pptx' | 'xlsx'>;
+  allowedExports?: Array<'docx' | 'pdf' | 'pptx'>;
+  disallowedExports?: Array<'xlsx'>;
+  pptxEndpoint?: string;
   warning?: string;
   error?: string;
   meta?: {
@@ -974,6 +987,10 @@ function buildFallbackDefenseResponse({
     ok: true,
     slides,
     textOutput,
+    output: textOutput,
+    result: textOutput,
+    message: textOutput,
+    text: textOutput,
     reviewsCount: reviewFiles.length,
     reviews: reviewFiles.map((file) => ({
       name: file.name,
@@ -984,8 +1001,9 @@ function buildFallbackDefenseResponse({
       warning: file.warning,
       detectedKind: file.detectedKind,
     })),
-    allowedExports: ['docx', 'pdf'],
-    disallowedExports: ['pptx', 'xlsx'],
+    allowedExports: ['docx', 'pdf', 'pptx'],
+    disallowedExports: ['xlsx'],
+    pptxEndpoint: '/api/defense/pptx',
     warning,
     meta: {
       model,
@@ -1086,12 +1104,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json<DefenseResponse>(fallback);
     }
 
-    const reviewFiles: ReviewFileInfo[] = [];
-
-    for (const file of uploadedReviewFiles) {
-      const extracted = await extractTextFromUploadedFile(file);
-      reviewFiles.push(extracted);
-    }
+    const reviewFiles: ReviewFileInfo[] =
+      await Promise.all(
+        uploadedReviewFiles.map((file) =>
+          extractTextFromUploadedFile(file),
+        ),
+      );
 
     const clientExtractedText = cleanClientVisibleText(
       String(
@@ -1148,6 +1166,7 @@ export async function POST(req: NextRequest) {
       const completion = await openai.chat.completions.create({
         model: MODEL,
         temperature: 0.22,
+        max_tokens: 6_500,
         response_format: { type: 'json_object' },
         messages: [
           {
@@ -1223,6 +1242,10 @@ export async function POST(req: NextRequest) {
       ok: true,
       slides,
       textOutput,
+      output: textOutput,
+      result: textOutput,
+      message: textOutput,
+      text: textOutput,
       reviewsCount: reviewFiles.length,
       reviews: reviewFiles.map((file) => ({
         name: file.name,
@@ -1233,8 +1256,9 @@ export async function POST(req: NextRequest) {
         warning: file.warning,
         detectedKind: file.detectedKind,
       })),
-      allowedExports: ['docx', 'pdf'],
-      disallowedExports: ['pptx', 'xlsx'],
+      allowedExports: ['docx', 'pdf', 'pptx'],
+      disallowedExports: ['xlsx'],
+      pptxEndpoint: '/api/defense/pptx',
       warning,
       meta: {
         model: MODEL,

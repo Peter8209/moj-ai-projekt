@@ -1973,6 +1973,204 @@ function readString(record: UnknownRecord, ...keys: string[]): string {
   return "";
 }
 
+
+function formatEmailOutputObject(value: unknown): string {
+  if (!isUnknownRecord(value)) return "";
+
+  const direct = readString(
+    value,
+    "emailText",
+    "email_text",
+    "generatedEmail",
+    "generated_email",
+    "output",
+    "text",
+    "message",
+    "content",
+    "answer",
+  );
+
+  if (direct) {
+    return direct;
+  }
+
+  const subject = readString(
+    value,
+    "subject",
+    "emailSubject",
+    "email_subject",
+    "predmet",
+  );
+
+  const body = readString(
+    value,
+    "body",
+    "emailBody",
+    "email_body",
+    "messageBody",
+    "message_body",
+    "content",
+    "text",
+    "message",
+  );
+
+  if (subject && body) {
+    return [
+      `Predmet: ${subject}`,
+      "",
+      "Text emailu:",
+      body,
+    ].join("\n");
+  }
+
+  return body || subject;
+}
+
+function extractDirectModuleOutput(
+  payload: unknown,
+  moduleKey: ModuleKey,
+): string {
+  if (typeof payload === "string") {
+    return payload.trim();
+  }
+
+  if (!isUnknownRecord(payload)) {
+    return "";
+  }
+
+  const records: UnknownRecord[] = [];
+  const seen = new Set<UnknownRecord>();
+
+  const pushRecord = (value: unknown) => {
+    if (!isUnknownRecord(value) || seen.has(value)) {
+      return;
+    }
+
+    seen.add(value);
+    records.push(value);
+  };
+
+  pushRecord(payload);
+  pushRecord(payload.data);
+  pushRecord(payload.payload);
+  pushRecord(payload.body);
+  pushRecord(payload.result);
+  pushRecord(payload.response);
+
+  const moduleKeys: string[] =
+    moduleKey === "emails"
+      ? [
+          "emailText",
+          "email_text",
+          "generatedEmail",
+          "generated_email",
+          "emailOutput",
+          "email_output",
+          "email",
+          "draft",
+        ]
+      : moduleKey === "translation"
+        ? [
+            "translatedText",
+            "translated_text",
+            "translation",
+            "translated",
+            "translationText",
+          ]
+        : moduleKey === "planning"
+          ? ["plan", "planning", "schedule"]
+          : moduleKey === "quality"
+            ? ["audit", "qualityAudit", "quality_audit"]
+            : moduleKey === "defense"
+              ? ["defense", "presentation", "defenseText"]
+              : moduleKey === "supervisor"
+                ? ["supervisor", "supervisorOutput", "feedback"]
+                : [];
+
+  const genericKeys = [
+    "output",
+    "result",
+    "message",
+    "text",
+    "answer",
+    "content",
+    "response",
+  ];
+
+  for (const record of records) {
+    const direct = readString(
+      record,
+      ...moduleKeys,
+      ...genericKeys,
+    );
+
+    if (direct) {
+      return direct;
+    }
+
+    if (moduleKey === "emails") {
+      const formattedSelf =
+        formatEmailOutputObject(record);
+
+      if (formattedSelf) {
+        return formattedSelf;
+      }
+
+      for (const key of [
+        "email",
+        "generatedEmail",
+        "generated_email",
+        "draft",
+        "result",
+        "data",
+      ]) {
+        const formatted =
+          formatEmailOutputObject(record[key]);
+
+        if (formatted) {
+          return formatted;
+        }
+      }
+    }
+
+    const choices = record.choices;
+
+    if (Array.isArray(choices)) {
+      const firstChoice = choices[0];
+
+      if (isUnknownRecord(firstChoice)) {
+        const choiceMessage = firstChoice.message;
+
+        if (isUnknownRecord(choiceMessage)) {
+          const choiceContent = readString(
+            choiceMessage,
+            "content",
+            "text",
+            "message",
+          );
+
+          if (choiceContent) {
+            return choiceContent;
+          }
+        }
+
+        const choiceText = readString(
+          firstChoice,
+          "text",
+          "content",
+          "message",
+        );
+
+        if (choiceText) {
+          return choiceText;
+        }
+      }
+    }
+  }
+
+  return "";
+}
+
 function readNullableString(
   record: UnknownRecord,
   ...keys: string[]
@@ -4661,14 +4859,26 @@ export default function EmailsFrontend(
    * DashboardClient súbore. Tým nevzniká závislosť od voliteľných komponentov
    * v components/dashboard/modules, ktoré v projekte nemusia existovať.
    *
-   * Všetky moduly používajú rovnaké:
-   * - prílohy,
+   * Moduly okrem Emailov a Humanizátora používajú rovnaké prílohy.
+   * Všetky moduly používajú rovnaký:
    * - aktívny profil práce,
    * - serverové entitlementy,
    * - stránkové a promptové limity,
    * - volanie /api/chat cez runModule().
    */
-  const visibleAttachmentCount = attachedFiles.length;
+  /**
+   * Modul Emaily pracuje výhradne s textovým zadaním a nastavením typu/tónu.
+   * Nesmie zobrazovať, prijímať ani odosielať prílohy.
+   * Humanizátor už prílohy nepoužíval ani v pôvodnej implementácii.
+   */
+  const activeModuleSupportsAttachments =
+    activeModule !== "emails" &&
+    activeModule !== "humanizer";
+
+  const visibleAttachmentCount =
+    activeModuleSupportsAttachments
+      ? attachedFiles.length
+      : 0;
 
   const activeModuleLabel = fixedUi.label;
 
@@ -5034,6 +5244,18 @@ export default function EmailsFrontend(
     const requestedModule =
       activeModuleRef.current;
 
+    /**
+     * Emaily nesmú prijímať prílohy ani pri programovom vyvolaní inputu.
+     * UI je skryté, ale táto kontrola predstavuje druhú ochrannú vrstvu.
+     */
+    if (requestedModule === "emails") {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
+      return;
+    }
+
     const incomingFiles =
       Array.from(files);
 
@@ -5389,15 +5611,37 @@ export default function EmailsFrontend(
     const profileBlock = buildProfileBlock(profileForPrompt);
     const citationStyle = getCitationStyle(profileForPrompt);
     const workLanguage = getWorkLanguage(profileForPrompt);
-    const attachmentBlock = buildAttachmentBlock(attachedFiles);
+
+    const moduleSupportsAttachments =
+      moduleOverride !== "emails" &&
+      moduleOverride !== "humanizer";
+
+    const promptAttachedFiles =
+      moduleSupportsAttachments
+        ? attachedFiles
+        : [];
+
+    const attachmentSection =
+      moduleSupportsAttachments
+        ? `
+PRILOŽENÉ SÚBORY:
+${buildAttachmentBlock(promptAttachedFiles)}
+`
+        : "";
+
+    const attachmentRules =
+      moduleSupportsAttachments
+        ? `
+- Ak sú priložené súbory, najprv over, či súvisia s aktívnym profilom práce.
+- Ak priložený dokument pravdepodobne nesúvisí s profilom práce, uveď upozornenie, ale pri výslovnej požiadavke používateľa dokument napriek tomu prečítaj a spracuj.
+- Ak príloha súvisí s profilom práce, použi jej extrahovaný text ako hlavný podklad.
+- Ak sú priložené súbory, v závere uveď, z ktorých príloh sa čerpalo.`
+        : "";
 
     const baseRules = `
 PROFIL PRÁCE:
 ${profileBlock}
-
-PRILOŽENÉ SÚBORY:
-${attachmentBlock}
-
+${attachmentSection}
 DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
 - Hlavný jazyk celého systému je: ${workLanguage}.
 - Výstup musí byť v jazyku práce: ${workLanguage}.
@@ -5407,11 +5651,7 @@ DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
 - Nevkladaj na úplný začiatok technické nadpisy typu „AI vedúci“, „Audit kvality“, „Obhajoba“, „Výstup“ ani názov modulu.
 - Nepoužívaj poškodené znaky, kódovanie ani nečitateľné symboly.
 - Nevymýšľaj zdroje, autorov, DOI, URL, roky ani vydavateľov.
-- Ak chýba alebo nie je možné bezpečne potvrdiť údaj, napíš presne: Údaje sú potrebné overiť.
-- Ak sú priložené súbory, najprv over, či súvisia s aktívnym profilom práce.
-- Ak priložený dokument pravdepodobne nesúvisí s profilom práce, uveď upozornenie, ale pri výslovnej požiadavke používateľa dokument napriek tomu prečítaj a spracuj.
-- Ak príloha súvisí s profilom práce, použi jej extrahovaný text ako hlavný podklad.
-- Ak sú priložené súbory, v závere uveď, z ktorých príloh sa čerpalo.
+- Ak chýba alebo nie je možné bezpečne potvrdiť údaj, napíš presne: Údaje sú potrebné overiť.${attachmentRules}
 - Citačná norma: ${citationStyle}.
 `.trim();
 
@@ -5799,6 +6039,24 @@ Text emailu:
     const requestedModule =
       activeModuleRef.current;
 
+    /**
+     * Emaily a Humanizátor neposielajú prílohy. Aj keby v stave zostali
+     * súbory z predchádzajúceho modulu, do requestu sa nikdy nedostanú.
+     */
+    const requestedModuleSupportsAttachments =
+      requestedModule !== "emails" &&
+      requestedModule !== "humanizer";
+
+    const requestAttachedFiles =
+      requestedModuleSupportsAttachments
+        ? attachedFiles
+        : [];
+
+    const requestActiveAttachmentText =
+      requestedModuleSupportsAttachments
+        ? activeAttachmentText
+        : "";
+
     const moduleRunRequestId =
       createClientRequestId(
         `module-${requestedModule}`,
@@ -5889,7 +6147,7 @@ Text emailu:
       !currentEntitlements.hasUnlimitedAccess &&
       !currentEntitlements.isAdmin &&
       currentEntitlements.attachmentLimit !== null &&
-      attachedFiles.length > currentEntitlements.attachmentLimit
+      requestAttachedFiles.length > currentEntitlements.attachmentLimit
     ) {
       setBillingNotice({
         code: "ATTACHMENT_LIMIT_REACHED",
@@ -5903,7 +6161,7 @@ Text emailu:
     if (
       currentHasUnlimitedAccess &&
       requestedModule !== "data" &&
-      attachedFiles.length >
+      requestAttachedFiles.length >
         maxUnlimitedFilesPerRequest
     ) {
       setBillingNotice({
@@ -5919,7 +6177,7 @@ Text emailu:
 
     if (
       requestedModule === "data" &&
-      attachedFiles.length >
+      requestAttachedFiles.length >
         maxDataFilesPerRequest
     ) {
       alert(
@@ -5941,12 +6199,14 @@ Text emailu:
     );
 
     const hasAnyInput = Boolean(
-      userText || secondaryText || attachedFiles.length > 0 || hasUsableProfile,
+      userText || secondaryText || requestAttachedFiles.length > 0 || hasUsableProfile,
     );
 
     if (!hasAnyInput) {
       alert(
-        "Najskôr vložte zadanie, text, prílohu alebo vyberte profil práce.",
+        requestedModule === "emails"
+          ? "Najskôr vložte zadanie pre email alebo vyberte profil práce."
+          : "Najskôr vložte zadanie, text, prílohu alebo vyberte profil práce.",
       );
       return;
     }
@@ -5982,7 +6242,7 @@ Text emailu:
       const prompt = buildModulePrompt(requestedModule);
 
       if (requestedModule === "data") {
-        const dataFiles = attachedFiles.filter(
+        const dataFiles = requestAttachedFiles.filter(
           (item) =>
             isBrowserFileLike(item.file),
         );
@@ -6455,7 +6715,7 @@ Text emailu:
             },
             profileTitle: profileForApi?.title || "",
             profileId: profileForApi?.id || null,
-            attachedFiles: allowedDataFiles.map((file) => ({
+            requestAttachedFiles: allowedDataFiles.map((file) => ({
               name: file.name,
               size: file.size,
               type: file.type,
@@ -6608,12 +6868,12 @@ Text emailu:
       formData.append("profileContext", buildProfileBlock(profileForApi));
       formData.append(
         "attachmentsContext",
-        buildAttachmentBlock(attachedFiles),
+        buildAttachmentBlock(requestAttachedFiles),
       );
 
       const preparedFilesMetadata =
         buildPreparedFilesMetadata(
-          attachedFiles,
+          requestAttachedFiles,
         );
 
       formData.append(
@@ -6624,7 +6884,7 @@ Text emailu:
       );
 
       const clientExtractedText =
-        attachedFiles
+        requestAttachedFiles
           .map((file) =>
             String(
               file.text ||
@@ -6697,9 +6957,18 @@ Text emailu:
       formData.append("validateAttachmentsAgainstProfile", "false");
       formData.append("requireSourceList", "false");
       formData.append("allowAiKnowledgeFallback", "true");
-      formData.append("extractUploadedText", "true");
-      formData.append("useExtractedTextFirst", "true");
-      formData.append("returnExtractedFilesInfo", "true");
+      formData.append(
+        "extractUploadedText",
+        requestedModuleSupportsAttachments ? "true" : "false",
+      );
+      formData.append(
+        "useExtractedTextFirst",
+        requestedModuleSupportsAttachments ? "true" : "false",
+      );
+      formData.append(
+        "returnExtractedFilesInfo",
+        requestedModuleSupportsAttachments ? "true" : "false",
+      );
       formData.append("contextaCitationFormat", "false");
       formData.append("includeSources", "false");
       formData.append("includePrimarySources", "false");
@@ -6712,7 +6981,7 @@ Text emailu:
       formData.append(
         "filesMetadata",
         JSON.stringify(
-          attachedFiles.map((item) => ({
+          requestAttachedFiles.map((item) => ({
             name: item.name,
             size: item.size,
             type: item.type,
@@ -6725,7 +6994,7 @@ Text emailu:
         formData.append("projectId", profileForApi.id);
       }
 
-      attachedFiles.forEach((item) => {
+      requestAttachedFiles.forEach((item) => {
         if (!isBrowserFileLike(item.file)) {
           return;
         }
@@ -6789,9 +7058,22 @@ Text emailu:
         workType: getWorkType(profileForApi),
         citation: getCitationStyle(profileForApi),
         citationStyle: getCitationStyle(profileForApi),
-        attachmentText: clientExtractedText || activeAttachmentText || "",
-        extractedText: clientExtractedText || activeAttachmentText || "",
-        clientExtractedText: clientExtractedText || activeAttachmentText || "",
+        ...(requestedModuleSupportsAttachments
+          ? {
+              attachmentText:
+                clientExtractedText ||
+                requestActiveAttachmentText ||
+                "",
+              extractedText:
+                clientExtractedText ||
+                requestActiveAttachmentText ||
+                "",
+              clientExtractedText:
+                clientExtractedText ||
+                requestActiveAttachmentText ||
+                "",
+            }
+          : {}),
         qualityMode,
         outputMode,
         translationFrom,
@@ -6816,9 +7098,13 @@ Text emailu:
         returnSources: false,
         validateAttachmentsAgainstProfile: false,
         allowAiKnowledgeFallback: true,
-        extractUploadedText: true,
-        useExtractedTextFirst: true,
-        returnExtractedFilesInfo: true,
+        ...(requestedModuleSupportsAttachments
+          ? {
+              extractUploadedText: true,
+              useExtractedTextFirst: true,
+              returnExtractedFilesInfo: true,
+            }
+          : {}),
         moduleSettings: {
           activeModule: requestedModule,
           qualityMode,
@@ -6875,7 +7161,7 @@ Text emailu:
             : null;
 
         if (
-          attachedFiles.length > 0 &&
+          requestAttachedFiles.length > 0 &&
           attachmentProcessing &&
           isCurrentModuleRun()
         ) {
@@ -6955,15 +7241,10 @@ Text emailu:
         }
 
         fullText =
-          data.output ||
-          data.result ||
-          data.message ||
-          data.text ||
-          data.answer ||
-          data.content ||
-          data.response ||
-          data?.choices?.[0]?.message?.content ||
-          "";
+          extractDirectModuleOutput(
+            data,
+            requestedModule,
+          );
 
         if (!fullText && data.ok === false) {
           throw new Error(
@@ -7003,9 +7284,21 @@ Text emailu:
       );
 
       if (!cleaned.trim()) {
-        throw new Error(
-          "API odpovedalo, ale výstup bol prázdny. Skontrolujte samostatný endpoint modulu a polia output/result/message/text.",
-        );
+        throw new DashboardApiError({
+          status: 502,
+          code:
+            requestedModule === "emails"
+              ? "EMPTY_EMAIL_OUTPUT"
+              : "EMPTY_MODULE_OUTPUT",
+          message:
+            requestedModule === "emails"
+              ? "Emailové API nevrátilo vygenerovaný email."
+              : "API odpovedalo, ale výstup bol prázdny.",
+          detail:
+            requestedModule === "emails"
+              ? "Skontrolujte app/api/write/route.ts. Endpoint musí vracať neprázdne pole emailText, generatedEmail, email, output, result alebo text."
+              : `Skontrolujte endpoint ${directApi.endpoint} a jeho výstupné polia.`,
+        });
       }
 
       if (requestedModule === "planning") {
@@ -7047,7 +7340,7 @@ Text emailu:
           profileTitle: profileForApi?.title || "",
           profileId: profileForApi?.id || null,
           activeModule: requestedModule,
-          attachedFiles: attachedFiles.map((file) => ({
+          attachedFiles: requestAttachedFiles.map((file) => ({
             name: file.name,
             size: file.size,
             type: file.type,
@@ -8412,21 +8705,23 @@ Text emailu:
                     </p>
                   </div>
 
-                  <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
-                    <p className="text-xs font-bold text-slate-400">Prílohy</p>
+                  {activeModuleSupportsAttachments ? (
+                    <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
+                      <p className="text-xs font-bold text-slate-400">Prílohy</p>
 
-                    <p className="mt-1 font-black text-white">
-                      {hasUnlimitedAccess
-                        ? "Neobmedzené"
-                        : `${visibleAttachmentCount} / ${effectiveAttachmentLimit}`}
-                    </p>
-
-                    {hasUnlimitedAccess ? (
-                      <p className="mt-1 text-xs font-semibold text-slate-400">
-                        Aktuálne nahrané: {visibleAttachmentCount}
+                      <p className="mt-1 font-black text-white">
+                        {hasUnlimitedAccess
+                          ? "Neobmedzené"
+                          : `${visibleAttachmentCount} / ${effectiveAttachmentLimit}`}
                       </p>
-                    ) : null}
-                  </div>
+
+                      {hasUnlimitedAccess ? (
+                        <p className="mt-1 text-xs font-semibold text-slate-400">
+                          Aktuálne nahrané: {visibleAttachmentCount}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </section>
             ) : null}
@@ -8512,6 +8807,10 @@ Text emailu:
           )}
 
           {activeModule === "emails" && (
+            /**
+             * Modul Emaily zámerne neobsahuje FileUploadBox.
+             * Používateľ zadáva iba text, typ emailu a tón komunikácie.
+             */
             <div className="mb-5 rounded-3xl border border-pink-400/20 bg-pink-500/10 p-4">
               <div className="mb-4 flex items-center gap-2">
                 <Mail className="h-5 w-5 text-pink-200" />
@@ -8538,7 +8837,7 @@ Text emailu:
             </div>
           )}
 
-          {activeModule !== "humanizer" && (
+          {activeModuleSupportsAttachments && (
             <FileUploadBox
               files={attachedFiles}
               fileInputRef={fileInputRef}

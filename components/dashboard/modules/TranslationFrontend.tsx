@@ -1973,6 +1973,173 @@ function readString(record: UnknownRecord, ...keys: string[]): string {
   return "";
 }
 
+/**
+ * Zjednotí rozdielne odpovede samostatných API modulov.
+ *
+ * Prekladové endpointy často vracajú translatedText, translation alebo
+ * translated_text. Staršia verzia frontendu kontrolovala iba všeobecné
+ * output/result/message/text, a preto správna odpoveď z /api/translate
+ * skončila ako falošne prázdny výstup.
+ */
+function extractDirectModuleOutput(
+  payload: unknown,
+  moduleKey: ModuleKey,
+): string {
+  if (typeof payload === "string") {
+    return payload.trim();
+  }
+
+  if (!isUnknownRecord(payload)) {
+    return "";
+  }
+
+  const moduleSpecificKeys: Record<ModuleKey, string[]> = {
+    supervisor: [
+      "supervisorOutput",
+      "supervisorResult",
+      "review",
+      "feedback",
+    ],
+    quality: [
+      "audit",
+      "auditOutput",
+      "qualityAudit",
+      "qualityResult",
+    ],
+    defense: [
+      "defense",
+      "defenseOutput",
+      "presentation",
+      "defenseText",
+    ],
+    translation: [
+      "translatedText",
+      "translated_text",
+      "translation",
+      "translated",
+      "translationText",
+    ],
+    data: [
+      "analysis",
+      "analysisText",
+      "interpretation",
+      "practicalText",
+      "summary",
+    ],
+    planning: [
+      "plan",
+      "planning",
+      "planningOutput",
+      "schedule",
+    ],
+    emails: [
+      "email",
+      "emailText",
+      "generatedEmail",
+      "mail",
+    ],
+    originality: [
+      "originality",
+      "originalityResult",
+      "protocol",
+    ],
+    humanizer: [
+      "humanizedText",
+      "humanized_text",
+      "humanized",
+    ],
+  };
+
+  const commonKeys = [
+    "output",
+    "result",
+    "message",
+    "text",
+    "answer",
+    "content",
+    "response",
+  ];
+
+  const records: UnknownRecord[] = [payload];
+
+  const nestedCandidates = [
+    payload.data,
+    payload.payload,
+    payload.body,
+    payload.value,
+    payload.response,
+    payload.result,
+  ];
+
+  nestedCandidates.forEach((candidate) => {
+    if (
+      isUnknownRecord(candidate) &&
+      !records.includes(candidate)
+    ) {
+      records.push(candidate);
+    }
+  });
+
+  const keys = [
+    ...moduleSpecificKeys[moduleKey],
+    ...commonKeys,
+  ];
+
+  for (const record of records) {
+    const direct = readString(record, ...keys);
+
+    if (direct) {
+      return direct;
+    }
+
+    const choices = record.choices;
+
+    if (Array.isArray(choices)) {
+      for (const choice of choices) {
+        if (!isUnknownRecord(choice)) continue;
+
+        const choiceText = readString(
+          choice,
+          "text",
+          "content",
+          "output",
+          "result",
+        );
+
+        if (choiceText) {
+          return choiceText;
+        }
+
+        if (isUnknownRecord(choice.message)) {
+          const messageText = readString(
+            choice.message,
+            "content",
+            "text",
+          );
+
+          if (messageText) {
+            return messageText;
+          }
+        }
+
+        if (isUnknownRecord(choice.delta)) {
+          const deltaText = readString(
+            choice.delta,
+            "content",
+            "text",
+          );
+
+          if (deltaText) {
+            return deltaText;
+          }
+        }
+      }
+    }
+  }
+
+  return "";
+}
+
 function readNullableString(
   record: UnknownRecord,
   ...keys: string[]
@@ -6954,16 +7121,10 @@ Text emailu:
           );
         }
 
-        fullText =
-          data.output ||
-          data.result ||
-          data.message ||
-          data.text ||
-          data.answer ||
-          data.content ||
-          data.response ||
-          data?.choices?.[0]?.message?.content ||
-          "";
+        fullText = extractDirectModuleOutput(
+          data,
+          requestedModule,
+        );
 
         if (!fullText && data.ok === false) {
           throw new Error(
@@ -7003,9 +7164,18 @@ Text emailu:
       );
 
       if (!cleaned.trim()) {
-        throw new Error(
-          "API odpovedalo, ale výstup bol prázdny. Skontrolujte samostatný endpoint modulu a polia output/result/message/text.",
-        );
+        throw new DashboardApiError({
+          status: 502,
+          code: "EMPTY_MODULE_OUTPUT",
+          message:
+            requestedModule === "translation"
+              ? "Prekladové API nevrátilo preložený text."
+              : "Samostatné API modulu nevrátilo použiteľný výstup.",
+          detail:
+            requestedModule === "translation"
+              ? "Skontrolujte app/api/translate/route.ts. Úspešná JSON odpoveď musí obsahovať translatedText, translation, output, result alebo text."
+              : `Endpoint ${directApi.endpoint} nevrátil podporované výstupné pole.`,
+        });
       }
 
       if (requestedModule === "planning") {

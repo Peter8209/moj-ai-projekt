@@ -2,7 +2,7 @@ import { generateText, streamText } from 'ai';
 import { randomUUID } from 'node:crypto';
 import OpenAI from 'openai';
 import { openai as aiSdkOpenAi } from '@ai-sdk/openai';
-import { anthropic } from '@ai-sdk/anthropic';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
 import { mistral } from '@ai-sdk/mistral';
 import { xai } from '@ai-sdk/xai';
@@ -58,7 +58,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 // =====================================================
 // TYPES
@@ -326,7 +326,13 @@ type SlovakApiError = {
 // LIMITS
 // =====================================================
 
-const MAX_ATTACHMENTS_PER_REQUEST = 20;
+const MAX_ATTACHMENTS_PER_REQUEST = 10;
+const EXTERNAL_SOURCE_SEARCH_TIMEOUT_MS = 8_000;
+const PROVIDER_PRIMARY_TIMEOUT_MS = 75_000;
+const PROVIDER_RETRY_TIMEOUT_MS = 25_000;
+const STREAM_PROVIDER_TIMEOUT_MS = 105_000;
+const STREAM_HEARTBEAT_INTERVAL_MS = 10_000;
+const STREAMED_API_ERROR_PREFIX = '__ZEDPERA_STREAM_ERROR__:';
 
 const maxCompressedFileSizeBytes = 30 * 1024 * 1024;
 const maxDecompressedFileSizeBytes = 60 * 1024 * 1024;
@@ -791,22 +797,45 @@ function isAllowedAgent(value: unknown): value is Agent {
 }
 
 function normalizeModule(value: unknown): ModuleKey {
-  if (
-    value === 'supervisor' ||
-    value === 'quality' ||
-    value === 'defense' ||
-    value === 'translation' ||
-    value === 'data' ||
-    value === 'planning' ||
-    value === 'emails' ||
-    value === 'originality' ||
-    value === 'humanizer' ||
-    value === 'chat'
-  ) {
-    return value;
-  }
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\s_-]+/g, '-');
 
-  return 'unknown';
+  const aliases: Record<string, ModuleKey> = {
+    supervisor: 'supervisor',
+    skolitel: 'supervisor',
+    veduci: 'supervisor',
+    quality: 'quality',
+    audit: 'quality',
+    defense: 'defense',
+    obhajoba: 'defense',
+    translation: 'translation',
+    translator: 'translation',
+    translate: 'translation',
+    preklad: 'translation',
+    prekladac: 'translation',
+    data: 'data',
+    analysis: 'data',
+    analyza: 'data',
+    planning: 'planning',
+    planner: 'planning',
+    plan: 'planning',
+    planovanie: 'planning',
+    harmonogram: 'planning',
+    emails: 'emails',
+    email: 'emails',
+    originality: 'originality',
+    originalita: 'originality',
+    humanizer: 'humanizer',
+    humanizator: 'humanizer',
+    chat: 'chat',
+    'ai-chat': 'chat',
+  };
+
+  return aliases[normalized] || 'unknown';
 }
 
 function asBoolean(value: FormDataEntryValue | null, fallback: boolean) {
@@ -2810,82 +2839,32 @@ function formatCitationAsSecondaryFallback({
   detectedSourcesForOutput: BibliographicCandidate[];
   citationStyle?: string;
 }) {
-  const matched = findAnySourceForCitation({ citation, sources: detectedSourcesForOutput });
+  const matched = findAnySourceForCitation({
+    citation,
+    sources: detectedSourcesForOutput.filter(
+      isSourceCompleteEnoughForSecondary,
+    ),
+  });
 
-  if (matched) {
-    const formatted =
-      formatCandidateForFinalLiterature(
-        {
-          ...matched,
-          matchedFromText: true,
-          inTextCitations: [
-            ...(matched.inTextCitations || []),
-            citation,
-          ],
-          citedAccordingTo:
-            matched.citedAccordingTo ||
-            matched.sourceDocumentName ||
-            null,
-        },
-        citationStyle,
-      );
-
-    if (formatted) return formatted;
+  if (!matched) {
+    // Neúplný autor–rok záznam sa nesmie zobraziť používateľovi.
+    // Citácia bez úplného overeného zdroja sa odstráni z textu nižšie.
+    return '';
   }
 
-  const authors = cleanValidAuthors(citation.authors || []);
-  const authorText = authors.length
-    ? authors.join(', ')
-    : normalizeText(citation.authorText || 'Autor neuvedený');
-
-  const usedAs = citation.raw || `(${citation.authorText}, ${citation.year})`;
-
-  const hasAttachmentSource = detectedSourcesForOutput.some(
-    (source) =>
-      source.origin === 'attachment' ||
-      Boolean(source.sourceDocumentName) ||
-      Boolean(source.citedAccordingTo),
+  return (
+    formatCandidateForFinalLiterature(
+      {
+        ...matched,
+        matchedFromText: true,
+        inTextCitations: [
+          ...(matched.inTextCitations || []),
+          citation,
+        ],
+      },
+      citationStyle,
+    ) || ''
   );
-
-  const hasProjectSource = detectedSourcesForOutput.some((source) => source.origin === 'project');
-
-  const hasExternalSource = detectedSourcesForOutput.some(
-    (source) => source.origin === 'semantic_scholar' || source.origin === 'crossref',
-  );
-
-  if (matched?.sourceDocumentName || matched?.citedAccordingTo || matched?.origin === 'attachment') {
-    const accordingTo = matched.citedAccordingTo || matched.sourceDocumentName || '';
-
-    const base = `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Záznam bol rozpoznaný z použitej prílohy, ale úplný bibliografický riadok sa z extrahovaného textu nepodarilo bezpečne zostaviť.`;
-
-    return accordingTo ? `${base} Cit. podľa ${accordingTo}.` : base;
-  }
-
-  if (matched?.origin === 'project') {
-    const accordingTo = matched.citedAccordingTo || matched.sourceDocumentName || '';
-
-    const base = `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Záznam bol rozpoznaný z projektového dokumentu, ale úplný bibliografický riadok sa z uloženého textu nepodarilo bezpečne zostaviť.`;
-
-    return accordingTo ? `${base} Cit. podľa ${accordingTo}.` : base;
-  }
-
-  if (matched?.origin === 'semantic_scholar' || matched?.origin === 'crossref') {
-    return `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Záznam bol rozpoznaný z overených externých akademických zdrojov, ale úplný bibliografický riadok sa nepodarilo bezpečne zostaviť.`;
-  }
-
-  if (hasAttachmentSource) {
-    return `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Záznam bol rozpoznaný zo zdrojov súvisiacich s prílohou, ale úplný bibliografický riadok sa z extrahovaného textu nepodarilo bezpečne zostaviť.`;
-  }
-
-  if (hasProjectSource) {
-    return `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Záznam bol rozpoznaný z projektových dokumentov, ale úplný bibliografický riadok sa nepodarilo bezpečne zostaviť.`;
-  }
-
-  if (hasExternalSource) {
-    return `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Záznam bol rozpoznaný z overených externých akademických zdrojov, ale úplný bibliografický riadok sa nepodarilo bezpečne zostaviť.`;
-  }
-
-  return `${authorText} (${citation.year}). Citácia použitá priamo v texte: ${usedAs}. Úplný bibliografický riadok sa nepodarilo bezpečne zostaviť z dostupných údajov.`;
 }
 
 function completeSecondarySourcesWithEveryInTextCitation({
@@ -2915,6 +2894,62 @@ function completeSecondarySourcesWithEveryInTextCitation({
   }
 
   return completed;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    '\\$&',
+  );
+}
+
+function removeUnsupportedAuthorYearCitations({
+  text,
+  allowedSources,
+}: {
+  text: string;
+  allowedSources: BibliographicCandidate[];
+}) {
+  const completeSources =
+    mergeBibliographicCandidates(
+      allowedSources,
+    )
+      .filter(
+        isSourceCompleteEnoughForSecondary,
+      );
+
+  if (!text.trim()) return text;
+
+  let output = text;
+
+  for (const citation of extractInTextCitations(text)) {
+    const supported = completeSources.some(
+      (source) =>
+        citationMatchesSource(
+          citation,
+          source,
+        ),
+    );
+
+    if (supported || !citation.raw) {
+      continue;
+    }
+
+    output = output.replace(
+      new RegExp(
+        escapeRegExp(citation.raw),
+        'g',
+      ),
+      '',
+    );
+  }
+
+  return output
+    .replace(/\(\s*\)/g, '')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
 }
 
 function buildSecondaryLiteratureFromUsedCitations({
@@ -2967,10 +3002,13 @@ function buildSecondaryLiteratureFromUsedCitations({
     }
 
     const externalMatched =
-      externalSources.find(
-        (source) =>
-          source.citationText ===
-          citation.raw,
+      externalSources.find((source) =>
+        citationMatchesSource(
+          citation,
+          verifiedSourceToBibliographicCandidate(
+            source,
+          ),
+        ),
       );
 
     if (externalMatched) {
@@ -4093,7 +4131,14 @@ async function searchSemanticScholarVerifiedSources(query: string): Promise<Veri
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (process.env.SEMANTIC_SCHOLAR_API_KEY) headers['x-api-key'] = process.env.SEMANTIC_SCHOLAR_API_KEY;
 
-    const res = await fetch(url.toString(), { method: 'GET', headers, cache: 'no-store' });
+    const res = await fetch(url.toString(), {
+      method: 'GET',
+      headers,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(
+        EXTERNAL_SOURCE_SEARCH_TIMEOUT_MS,
+      ),
+    });
     if (!res.ok) {
       console.error('SEMANTIC_SCHOLAR_SEARCH_ERROR:', res.status);
       return [];
@@ -4153,6 +4198,9 @@ async function searchCrossrefVerifiedSources(query: string): Promise<VerifiedSou
       method: 'GET',
       headers: { Accept: 'application/json', 'User-Agent': 'Zedpera/1.0 (mailto:tutka.peter@gmail.com)' },
       cache: 'no-store',
+      signal: AbortSignal.timeout(
+        EXTERNAL_SOURCE_SEARCH_TIMEOUT_MS,
+      ),
     });
 
     if (!res.ok) {
@@ -4746,13 +4794,19 @@ function getNativeAttachmentReaderModels(): ModelResult[] {
     });
   }
 
-  if (process.env.ANTHROPIC_API_KEY) {
+  if (
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.CLAUDE_API_KEY ||
+    process.env.ANTHROPIC_AUTH_TOKEN
+  ) {
     readers.push({
-      model: anthropic(
-        process.env.ANTHROPIC_ATTACHMENT_MODEL ||
-          process.env.ANTHROPIC_MODEL ||
-          'claude-sonnet-4-6',
-      ) as any,
+      model:
+        getAnthropicProvider()(
+          process.env.ANTHROPIC_ATTACHMENT_MODEL ||
+            process.env.ANTHROPIC_MODEL ||
+            process.env.CLAUDE_MODEL ||
+            'claude-sonnet-4-6',
+        ) as any,
       providerLabel: 'Claude attachment reader',
     });
   }
@@ -5531,7 +5585,7 @@ POVINNÉ PRAVIDLÁ PRE AI:
 `.trim();
 }
 function buildStrictTranslationPrompt() {
-  return `Si profesionálny prekladač. Vráť iba samotný preložený text. Nepíš zdroje, analýzu ani vysvetlenie.`;
+  return `Si profesionálny prekladač dokumentov.\n\nPOVINNÉ PRAVIDLÁ:\n1. Prelož celý text z používateľskej správy aj celý extrahovaný obsah každej prílohy.\n2. Ak je príloh viac, prelož všetky v pôvodnom poradí a pred každou ponechaj riadok „Súbor: pôvodný názov“.\n3. Zachovaj nadpisy, odseky, tabuľkové hodnoty, číslovanie, citácie a odborný význam.\n4. Nevykonávaj súhrn, nič nevynechávaj a neodpovedaj iba na ručne napísaný text.\n5. Mená autorov, DOI, URL, názvy publikácií a citačné značky ponechaj v pôvodnom tvare.\n6. Vráť iba kompletný preložený obsah. Nepíš analýzu, skóre, odporúčania ani zdroje navyše.`;
 }
 
 function buildStrictEmailPrompt() {
@@ -5542,7 +5596,7 @@ function buildStrictPlanningPrompt(profile: SavedProfile | null) {
   const today = new Date();
   const date = `${String(today.getDate()).padStart(2, '0')}.${String(today.getMonth() + 1).padStart(2, '0')}.${today.getFullYear()}`;
 
-  return `Si plánovač akademickej práce.\n\nDNEŠNÝ DÁTUM:\n${date}\n\nKOMPLETNÝ PROFIL PRÁCE:\n${buildProfileSummary(profile)}\n\nVytvor realistický harmonogram podľa profilu. Ak používateľ nezadal termín, napíš presne: Termín odovzdania nebol zadaný.`;
+  return `Si profesionálny plánovač akademickej práce. Na každú platnú požiadavku musíš vrátiť konkrétny použiteľný plán; nikdy nezostaň bez odpovede.\n\nDNEŠNÝ DÁTUM:\n${date}\n\nKOMPLETNÝ PROFIL PRÁCE:\n${buildProfileSummary(profile)}\n\nPOVINNÝ POSTUP:\n1. Zohľadni presný príkaz používateľa, profil práce a všetky dostupné prílohy.\n2. Ak používateľ zadal termín, rozplánuj úlohy spätne od tohto dátumu.\n3. Ak termín nezadal, uveď transparentný predpoklad a vytvor relatívny plán po týždňoch od dnešného dátumu; samotná veta o chýbajúcom termíne nesmie byť celou odpoveďou.\n4. Každá etapa musí obsahovať cieľ, konkrétne úlohy, odhad trvania, výstup a kontrolný bod.\n5. Zahrň prácu so zdrojmi, osnovu, teoretickú časť, praktickú alebo výskumnú časť, revíziu, citácie, formátovanie a prípravu na odovzdanie.\n\nPOVINNÝ FORMÁT:\nCieľ plánu\nPredpoklady\nHarmonogram\nKontrolné body\nRiziká a rezervy\nNajbližší konkrétny krok`;
 }
 
 function buildVerifiedSourcePackPrompt(externalResearch: ExternalResearchResult) {
@@ -6206,6 +6260,74 @@ function appendVerifiedBibliography({
 // MODELS + ERRORS
 // =====================================================
 
+let cachedAnthropicProvider:
+  ReturnType<typeof createAnthropic> | null = null;
+
+function getAnthropicProvider() {
+  if (cachedAnthropicProvider) {
+    return cachedAnthropicProvider;
+  }
+
+  const apiKey =
+    toCleanString(
+      process.env.ANTHROPIC_API_KEY,
+    ) ||
+    toCleanString(
+      process.env.CLAUDE_API_KEY,
+    );
+  const authToken = toCleanString(
+    process.env.ANTHROPIC_AUTH_TOKEN,
+  );
+
+  if (!apiKey && !authToken) {
+    throw new Error(
+      'Chýba ANTHROPIC_API_KEY, CLAUDE_API_KEY alebo ANTHROPIC_AUTH_TOKEN pre Claude.',
+    );
+  }
+
+  cachedAnthropicProvider = createAnthropic(
+    apiKey
+      ? { apiKey }
+      : { authToken },
+  );
+
+  return cachedAnthropicProvider;
+}
+
+function getAnthropicPrimaryModelId() {
+  return (
+    toCleanString(
+      process.env.ANTHROPIC_MODEL,
+    ) ||
+    toCleanString(
+      process.env.CLAUDE_MODEL,
+    ) ||
+    'claude-sonnet-4-6'
+  );
+}
+
+function getClaudeRetryModel(): ModelResult {
+  const primaryModel =
+    getAnthropicPrimaryModelId();
+  const fallbackModel =
+    toCleanString(
+      process.env.ANTHROPIC_FALLBACK_MODEL,
+    ) ||
+    (primaryModel === 'claude-haiku-4-5'
+      ? 'claude-sonnet-4-6'
+      : 'claude-haiku-4-5');
+
+  return {
+    model:
+      getAnthropicProvider()(
+        fallbackModel,
+      ) as any,
+    providerLabel:
+      `Claude fallback (${fallbackModel})`,
+    agent: 'claude',
+  };
+}
+
 function getModelByAgent(agent: Agent): ModelResult {
   if (agent === 'openai') {
     if (!process.env.OPENAI_API_KEY) {
@@ -6223,15 +6345,11 @@ function getModelByAgent(agent: Agent): ModelResult {
   }
 
   if (agent === 'claude') {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      throw new Error('Chýba ANTHROPIC_API_KEY pre Claude.');
-    }
-
     return {
-      model: anthropic(
-        process.env.ANTHROPIC_MODEL ||
-          'claude-sonnet-4-6',
-      ) as any,
+      model:
+        getAnthropicProvider()(
+          getAnthropicPrimaryModelId(),
+        ) as any,
       providerLabel: 'Claude',
       agent: 'claude',
     };
@@ -6310,12 +6428,16 @@ function getFallbackModel(): ModelResult {
     };
   }
 
-  if (process.env.ANTHROPIC_API_KEY) {
+  if (
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.CLAUDE_API_KEY ||
+    process.env.ANTHROPIC_AUTH_TOKEN
+  ) {
     return {
-      model: anthropic(
-        process.env.ANTHROPIC_MODEL ||
-          'claude-sonnet-4-6',
-      ) as any,
+      model:
+        getAnthropicProvider()(
+          getAnthropicPrimaryModelId(),
+        ) as any,
       providerLabel: 'Claude fallback',
       agent: 'claude',
     };
@@ -6479,6 +6601,10 @@ async function generateOpenAiResponsesText({
         tools.length > 0
           ? 'auto'
           : undefined,
+    }, {
+      timeout:
+        PROVIDER_PRIMARY_TIMEOUT_MS,
+      maxRetries: 0,
     });
 
   const output =
@@ -6520,6 +6646,38 @@ function getErrorMessage(error: unknown) {
 function isModelNotFoundError(error: unknown) {
   const message = getErrorMessage(error).toLowerCase();
   return message.includes('model') && (message.includes('not found') || message.includes('404') || message.includes('not supported') || message.includes('invalid model') || message.includes('not found for api version'));
+}
+
+function isRetryableProviderError(error: unknown) {
+  const message =
+    getErrorMessage(error).toLowerCase();
+
+  if (
+    message.includes('invalid api key') ||
+    message.includes('authentication') ||
+    message.includes('unauthorized') ||
+    message.includes('forbidden') ||
+    message.includes('insufficient credit') ||
+    message.includes('billing')
+  ) {
+    return false;
+  }
+
+  return (
+    isModelNotFoundError(error) ||
+    message.includes('timeout') ||
+    message.includes('timed out') ||
+    message.includes('abort') ||
+    message.includes('overloaded') ||
+    message.includes('529') ||
+    message.includes('429') ||
+    message.includes('rate limit') ||
+    message.includes('temporarily unavailable') ||
+    message.includes('fetch failed') ||
+    message.includes('network') ||
+    message.includes('connection reset') ||
+    message.includes('socket')
+  );
 }
 
 function isContextWindowError(error: unknown) {
@@ -7395,6 +7553,12 @@ async function createStreamResponse({
           temperature: 0.2,
           maxOutputTokens:
             effectiveOutputTokens,
+          maxRetries: 0,
+          timeout: {
+            totalMs:
+              STREAM_PROVIDER_TIMEOUT_MS,
+            chunkMs: 30_000,
+          },
         });
 
   console.log(
@@ -7635,6 +7799,8 @@ async function createJsonResponse({
   include,
   nativeAttachmentParts = [],
   nativeAttachmentFileNames = [],
+  retryModel,
+  retryProviderLabel,
 }: {
   model: any;
   providerAgent?: Agent;
@@ -7660,6 +7826,8 @@ async function createJsonResponse({
   include: ReturnType<typeof createOpenAiInclude>;
   nativeAttachmentParts?: NativeAttachmentPart[];
   nativeAttachmentFileNames?: string[];
+  retryModel?: ModelResult['model'];
+  retryProviderLabel?: string;
 }) {
   const extractedFilesPayload = extractedFiles.map((file) => ({
     name: file.name,
@@ -7688,7 +7856,9 @@ async function createJsonResponse({
   }));
 
   const requestedOutputTokens =
-    isChapterRequest || sourcesOnly
+    isChapterRequest ||
+    sourcesOnly ||
+    module === 'translation'
       ? chapterOutputTokens
       : defaultOutputTokens;
 
@@ -7714,27 +7884,82 @@ async function createJsonResponse({
   // ktoré nemusia podporovať PDF FilePart priamo.
   const modelMessages = normalizedMessages;
 
-  const generatedText =
-    providerAgent === 'openai'
-      ? await generateOpenAiResponsesText({
-          systemPrompt,
-          normalizedMessages,
-          maxOutputTokens:
-            effectiveOutputTokens,
-          tools,
-          include,
-        })
-      : (
-          await generateText({
-            model,
-            system: systemPrompt,
-            messages:
-              modelMessages as any,
-            temperature: 0.2,
-            maxOutputTokens:
-              effectiveOutputTokens,
-          })
-        ).text || '';
+  let resolvedProviderLabel =
+    providerLabel;
+
+  const generateWithModel = async (
+    selectedModel: ModelResult['model'],
+    timeoutMs: number,
+  ) => {
+    if (providerAgent === 'openai') {
+      return await generateOpenAiResponsesText({
+        systemPrompt,
+        normalizedMessages,
+        maxOutputTokens:
+          effectiveOutputTokens,
+        tools,
+        include,
+      });
+    }
+
+    return (
+      await generateText({
+        model: selectedModel,
+        system: systemPrompt,
+        messages:
+          modelMessages as any,
+        temperature: 0.2,
+        maxOutputTokens:
+          effectiveOutputTokens,
+        maxRetries: 0,
+        timeout: {
+          totalMs: timeoutMs,
+          stepMs: timeoutMs,
+        },
+      })
+    ).text || '';
+  };
+
+  let generatedText: string;
+
+  try {
+    generatedText =
+      await generateWithModel(
+        model,
+        PROVIDER_PRIMARY_TIMEOUT_MS,
+      );
+  } catch (primaryGenerationError) {
+    if (
+      !retryModel ||
+      !isRetryableProviderError(
+        primaryGenerationError,
+      )
+    ) {
+      throw primaryGenerationError;
+    }
+
+    console.warn(
+      'CHAT_PROVIDER_RETRY:',
+      {
+        providerAgent,
+        providerLabel,
+        retryProviderLabel,
+        reason:
+          getErrorMessage(
+            primaryGenerationError,
+          ),
+      },
+    );
+
+    generatedText =
+      await generateWithModel(
+        retryModel,
+        PROVIDER_RETRY_TIMEOUT_MS,
+      );
+    resolvedProviderLabel =
+      retryProviderLabel ||
+      providerLabel;
+  }
 
   console.log(
     'CHAT_AI_SOURCE_MODE:',
@@ -7779,11 +8004,32 @@ if (isChapterRequest || sourcesOnly || module === 'chat') {
       output,
     );
 
+  // Bez aktuálnej prílohy smú v texte zostať iba citácie, ku ktorým
+  // existuje úplný overený internetový záznam. Tým sa odstránia neúplné
+  // položky typu „Andrews (1965) – bibliografický riadok sa nepodarilo...“.
+  const hasCurrentRequestAttachments =
+    extractedFiles.length > 0 ||
+    nativeAttachmentFileNames.length > 0;
+  const completeCitationSources =
+    hasCurrentRequestAttachments
+      ? detectedSourcesForOutput.filter(
+          isSourceCompleteEnoughForSecondary,
+        )
+      : externalResearch.sources.map(
+          verifiedSourceToBibliographicCandidate,
+        );
+
+  output =
+    removeUnsupportedAuthorYearCitations({
+      text: output,
+      allowedSources:
+        completeCitationSources,
+    });
+
   // Najprv zabezpečíme reálne citácie z príloh a overeného externého balíka.
-  // Citácia sa doplní iba z kandidáta, ktorý má použiteľného autora a rok.
   output = ensureChapterHasInTextCitations({
     text: output,
-    sources: detectedSourcesForOutput,
+    sources: completeCitationSources,
   });
 
   output = ensureParagraphCitationsFromVerifiedSources(
@@ -7873,7 +8119,7 @@ await saveGeneratedHistory({
   projectId,
   input: getLastUserMessage(normalizedMessages),
   output,
-  provider: providerLabel,
+  provider: resolvedProviderLabel,
   files: extractedFilesPayload.map((file) => ({
     name: file.name,
     originalName: file.originalName,
@@ -7885,7 +8131,7 @@ await saveGeneratedHistory({
 
   return NextResponse.json({
     ok: true,
-    provider: providerLabel,
+    provider: resolvedProviderLabel,
     output,
     sources:
       responseSourceSections.sources,
@@ -8008,6 +8254,192 @@ await saveGeneratedHistory({
         Boolean(
           responseSourceSections.sources,
         ),
+    },
+  });
+}
+
+function createDeferredJsonTextResponse({
+  execute,
+  pageRequestId,
+  attachmentUsage,
+  entitlementGuard,
+}: {
+  execute: () => Promise<Response>;
+  pageRequestId: string;
+  attachmentUsage: AttachmentUsageSnapshot;
+  entitlementGuard: EntitlementGuardResult;
+}) {
+  const encoder = new TextEncoder();
+  let heartbeatTimer:
+    ReturnType<typeof setInterval> | null = null;
+
+  const clearHeartbeat = () => {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  };
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      // Prvý bajt sa odošle okamžite. Proxy preto nevyhodnotí dlhšie
+      // generovanie Claude alebo spracovanie desiatich príloh ako nečinné.
+      controller.enqueue(
+        encoder.encode(' '),
+      );
+
+      heartbeatTimer = setInterval(() => {
+        try {
+          controller.enqueue(
+            encoder.encode('\n'),
+          );
+        } catch {
+          clearHeartbeat();
+        }
+      }, STREAM_HEARTBEAT_INTERVAL_MS);
+
+      void execute()
+        .then(async (response) => {
+          clearHeartbeat();
+
+          const data = await response
+            .clone()
+            .json()
+            .catch(async () => ({
+              output:
+                await response.text(),
+            }));
+
+          if (
+            !response.ok ||
+            data?.ok === false
+          ) {
+            controller.enqueue(
+              encoder.encode(
+                `${STREAMED_API_ERROR_PREFIX}${JSON.stringify({
+                  ...data,
+                  status: response.status,
+                  requestId:
+                    data?.requestId ||
+                    pageRequestId,
+                })}`,
+              ),
+            );
+            controller.close();
+            return;
+          }
+
+          const output = normalizeText(
+            data?.output ||
+              data?.result ||
+              data?.message ||
+              data?.text ||
+              '',
+          );
+
+          if (!output) {
+            throw new Error(
+              'AI_EMPTY_RESPONSE: AI model nevrátil použiteľný text.',
+            );
+          }
+
+          controller.enqueue(
+            encoder.encode(output),
+          );
+          controller.close();
+        })
+        .catch((error) => {
+          clearHeartbeat();
+
+          const translated =
+            translateApiErrorToSlovak(
+              error,
+            );
+
+          controller.enqueue(
+            encoder.encode(
+              `${STREAMED_API_ERROR_PREFIX}${JSON.stringify({
+                ok: false,
+                code: translated.code,
+                message:
+                  translated.message,
+                detail:
+                  translated.detail,
+                rawMessage:
+                  translated.rawMessage,
+                status:
+                  translated.code ===
+                  'REQUEST_TIMEOUT'
+                    ? 504
+                    : 502,
+                requestId:
+                  pageRequestId,
+              })}`,
+            ),
+          );
+          controller.close();
+        });
+    },
+    cancel() {
+      clearHeartbeat();
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      'Content-Type':
+        'text/plain; charset=utf-8',
+      'Cache-Control':
+        'no-store, no-cache, must-revalidate',
+      'X-Accel-Buffering': 'no',
+      'X-Zedpera-Page-Request-Id':
+        pageRequestId,
+      'X-Zedpera-Is-Admin': String(
+        entitlementGuard.entitlements
+          .isAdmin,
+      ),
+      'X-Zedpera-Unlimited-Access':
+        String(
+          entitlementGuard.entitlements
+            .hasUnlimitedAccess,
+        ),
+      'X-Zedpera-Attachment-Limit':
+        attachmentUsage.isUnlimited
+          ? 'unlimited'
+          : attachmentUsage
+                .attachmentLimit === null
+            ? 'unavailable'
+            : String(
+                attachmentUsage
+                  .attachmentLimit,
+              ),
+      'X-Zedpera-Attachments-Used':
+        String(
+          attachmentUsage
+            .attachmentsUsed,
+        ),
+      'X-Zedpera-Attachments-Added':
+        String(
+          attachmentUsage
+            .attachmentsAdded,
+        ),
+      'X-Zedpera-Attachments-Remaining':
+        attachmentUsage.isUnlimited
+          ? 'unlimited'
+          : attachmentUsage
+                .attachmentsRemaining ===
+              null
+            ? 'unavailable'
+            : String(
+                attachmentUsage
+                  .attachmentsRemaining,
+              ),
+      'X-Zedpera-Attachment-Tracking':
+        attachmentUsage
+          .trackingAvailable
+          ? 'enabled'
+          : 'disabled',
     },
   });
 }
@@ -8274,6 +8706,37 @@ export async function POST(req: Request) {
       rawAgent = formData.get('agent')?.toString() || 'gemini';
       module = normalizeModule(formData.get('module')?.toString());
       messages = parseJson<ChatMessage[]>(formData.get('messages'), []);
+
+      if (!messages.length) {
+        const fallbackMessage = [
+          'mainPrompt',
+          'prompt',
+          'userPrompt',
+          'instruction',
+          'planningPrompt',
+          'task',
+          'text',
+          'question',
+          'message',
+        ]
+          .map((key) =>
+            toCleanString(
+              formData.get(key)?.toString(),
+            ),
+          )
+          .filter(Boolean)
+          .join('\n\n');
+
+        if (fallbackMessage) {
+          messages = [
+            {
+              role: 'user',
+              content: fallbackMessage,
+            },
+          ];
+        }
+      }
+
       const rawProfileFromForm = parseJson<SavedProfile | null>(
   formData.get('profile'),
   null,
@@ -8428,15 +8891,29 @@ if (profile) {
       rawAgent = body?.agent || 'gemini';
       module = normalizeModule(body?.module);
 
+      const jsonFallbackMessage = [
+        body?.mainPrompt,
+        body?.prompt,
+        body?.userPrompt,
+        body?.instruction,
+        body?.planningPrompt,
+        body?.task,
+        body?.text,
+        body?.question,
+        body?.message,
+      ]
+        .map(toCleanString)
+        .filter(Boolean)
+        .join('\n\n');
+
       messages = Array.isArray(body?.messages)
         ? body.messages
-        : body?.message || body?.text || body?.question
+        : jsonFallbackMessage
           ? [
               {
                 role: 'user',
-                content: [body?.text, body?.question, body?.message]
-                  .filter(Boolean)
-                  .join('\n\n'),
+                content:
+                  jsonFallbackMessage,
               },
             ]
           : [];
@@ -8528,7 +9005,7 @@ outputLanguage = normalizeAppLanguage(interfaceLanguageFromRequest, 'sk');
       useExternalAcademicSources =
         typeof body?.useExternalAcademicSources === 'boolean'
           ? body.useExternalAcademicSources
-          : false;
+          : true;
 
       returnExtractedFilesInfo =
         typeof body?.returnExtractedFilesInfo === 'boolean'
@@ -9032,6 +9509,66 @@ try {
       })),
     });
 
+    const readablePreparedNames = new Set([
+      ...extractedFiles
+        .filter(
+          (file) =>
+            file.extractedChars > 0 &&
+            file.extractedText.trim().length > 0 &&
+            !file.error,
+        )
+        .flatMap((file) => [
+          file.name,
+          file.originalName,
+          file.preparedName,
+        ])
+        .filter(Boolean),
+      ...nativeAttachmentBundle.fileNames,
+    ]);
+
+    const unreadFiles = files.filter(
+      (file) => {
+        const metadata =
+          getPreparedMetadataForFile(
+            file,
+            preparedFilesMetadata,
+          );
+
+        return ![
+          file.name,
+          metadata?.originalName,
+          metadata?.preparedName,
+        ]
+          .filter(Boolean)
+          .some((name) =>
+            readablePreparedNames.has(
+              String(name),
+            ),
+          );
+      },
+    );
+
+    if (unreadFiles.length > 0) {
+      return zedperaErrorJson(
+        'ATTACHMENT_EXTRACTION_FAILED',
+        {
+          requestId: pageRequestId,
+          endpoint: '/api/chat',
+          module,
+          receivedAttachments:
+            files.length,
+          serverMessage:
+            `Server neprečítal všetky prílohy. Úspešne prečítané: ${files.length - unreadFiles.length}/${files.length}.`,
+          serverDetail:
+            `Neprečítané súbory: ${unreadFiles.map((file) => file.name).join(', ')}. Požiadavka bola zastavená, aby model neodpovedal iba z časti podkladov.`,
+        },
+        {
+          request: req,
+          status: 422,
+        },
+      );
+    }
+
     if (
       files.length > 0 &&
       successfullyExtractedFiles.length === 0 &&
@@ -9188,11 +9725,15 @@ ${
         !isStrictNoAcademicTailModule(module) && useExternalAcademicSources,
     };
 
+    const hasCurrentRequestAttachments =
+      files.length > 0;
+
     const shouldSearchExternalSources =
       settings.useExternalAcademicSources &&
       settings.allowAiKnowledgeFallback &&
       (isChapterRequest || sourcesOnly || module === 'chat') &&
       (
+        !hasCurrentRequestAttachments ||
         !hasSuccessfullyExtractedUpload ||
         !relevance.hasAttachmentContent ||
         !relevance.isRelevant ||
@@ -9301,37 +9842,64 @@ ${
         returnExtractedFilesInfo ||
         isChapterRequest ||
         sourcesOnly ||
-        module === 'chat'
+        module === 'chat' ||
+        module === 'translation' ||
+        module === 'planning' ||
+        module === 'emails'
       ) {
-        return await createJsonResponse({
-          model: primary.model,
-          providerAgent:
-            primary.agent,
-          systemPrompt: finalSystemPrompt,
-          normalizedMessages,
-          extractedFiles,
-          providerLabel: primary.providerLabel,
-          module,
-          profile,
-          projectId,
-          isChapterRequest,
-          sourcesOnly,
-          settings,
-          relevance,
-          detectedSourcesForOutput: finalDetectedSourcesForOutput,
-          externalResearch,
-          pageQuota,
-          pageRequestId,
-          entitlementGuard,
-          attachmentUsage,
-          sourceMode,
-          tools,
-          include,
-          nativeAttachmentParts:
-            nativeAttachmentBundle.parts,
-          nativeAttachmentFileNames:
-            nativeAttachmentBundle.fileNames,
-        });
+        const claudeRetry =
+          agent === 'claude'
+            ? getClaudeRetryModel()
+            : null;
+
+        const executeStructuredResponse = () =>
+          createJsonResponse({
+            model: primary.model,
+            providerAgent:
+              primary.agent,
+            systemPrompt: finalSystemPrompt,
+            normalizedMessages,
+            extractedFiles,
+            providerLabel:
+              primary.providerLabel,
+            module,
+            profile,
+            projectId,
+            isChapterRequest,
+            sourcesOnly,
+            settings,
+            relevance,
+            detectedSourcesForOutput:
+              finalDetectedSourcesForOutput,
+            externalResearch,
+            pageQuota,
+            pageRequestId,
+            entitlementGuard,
+            attachmentUsage,
+            sourceMode,
+            tools,
+            include,
+            nativeAttachmentParts:
+              nativeAttachmentBundle.parts,
+            nativeAttachmentFileNames:
+              nativeAttachmentBundle.fileNames,
+            retryModel:
+              claudeRetry?.model,
+            retryProviderLabel:
+              claudeRetry?.providerLabel,
+          });
+
+        if (module === 'chat') {
+          return createDeferredJsonTextResponse({
+            execute:
+              executeStructuredResponse,
+            pageRequestId,
+            attachmentUsage,
+            entitlementGuard,
+          });
+        }
+
+        return await executeStructuredResponse();
       }
 
       return await createStreamResponse({
@@ -9369,7 +9937,15 @@ ${
         );
       }
 
-      if (!isModelNotFoundError(primaryError)) {
+      if (
+        !isModelNotFoundError(primaryError) &&
+        !(
+          agent === 'claude' &&
+          isRetryableProviderError(
+            primaryError,
+          )
+        )
+      ) {
         throw primaryError;
       }
 
@@ -9401,7 +9977,10 @@ Dodrž:
         returnExtractedFilesInfo ||
         isChapterRequest ||
         sourcesOnly ||
-        module === 'chat'
+        module === 'chat' ||
+        module === 'translation' ||
+        module === 'planning' ||
+        module === 'emails'
       ) {
         return await createJsonResponse({
           model: fallback.model,

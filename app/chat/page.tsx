@@ -176,7 +176,7 @@ type ChatApiPayload = {
     inTextCitationsCount: number;
   }>;
   sourceContext: {
-    mode: 'uploaded_documents_first';
+    mode: 'uploaded_documents_first' | 'verified_web_sources';
     extractedText: string;
     detectedSourcesSummary: string;
     detectedSources: BibliographicCandidate[];
@@ -416,18 +416,29 @@ const backendExtractableExtensions = [
 
 const allowedFileAccept = allowedFileExtensions.join(',');
 
-const maxFilesCount = 20;
+const maxFilesCount = 10;
 const maxFileSizeMb = 50;
 const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
+
+// Do /api/chat neposielame desať veľkých originálov naraz. Každá príloha
+// sa najprv prečíta a do hlavného chatu sa odošle kompaktná textová
+// reprezentácia. Pôvodný vstupný limit 50 MB na jeden súbor zostáva.
+const maxPreparedMultipartBytes = 3_200_000;
+const minPreparedFileTargetBytes = 160 * 1024;
+const maxPreparedFileTargetBytes = 640 * 1024;
+const maxDirectFallbackFileBytes = 3_200_000;
 
 const maxCompressedFileSizeBytes = 1 * 1024 * 1024;
 const safeCompressedTargetBytes = 950 * 1024;
 
 const maxClientExtractedCharsPerFile = 25_000;
-const maxTotalExtractedContextChars = 60_000;
+const maxTotalExtractedContextChars = 100_000;
 const maxDetectedSourcesForChat = 120;
 const maxDetectedAuthorsForChat = 120;
 const maxInTextCitationsForChat = 200;
+
+const streamedApiErrorPrefix =
+  '__ZEDPERA_STREAM_ERROR__:';
 
 
 const defaultAgents: { key: Agent; label: string }[] = [
@@ -744,6 +755,88 @@ function safeJsonParse<T>(value: string | null): T | null {
   } catch {
     return null;
   }
+}
+
+
+type StreamedApiErrorPayload = {
+  code?: string;
+  message?: string;
+  error?: string;
+  detail?: string;
+  status?: number;
+  requestId?: string;
+};
+
+function readStreamedApiError(
+  value: string,
+): StreamedApiErrorPayload | null {
+  const markerIndex = value.indexOf(
+    streamedApiErrorPrefix,
+  );
+
+  if (markerIndex < 0) return null;
+
+  const rawPayload = value
+    .slice(
+      markerIndex +
+        streamedApiErrorPrefix.length,
+    )
+    .trim();
+
+  if (!rawPayload) {
+    return {
+      code: 'API_UNAVAILABLE',
+      message:
+        'AI služba ukončila spracovanie bez použiteľnej odpovede.',
+    };
+  }
+
+  try {
+    return JSON.parse(
+      rawPayload,
+    ) as StreamedApiErrorPayload;
+  } catch {
+    return {
+      code: 'API_UNAVAILABLE',
+      message: rawPayload,
+    };
+  }
+}
+
+function getCompactPreparedFileName(
+  originalName: string,
+): string {
+  const baseName = originalName.replace(
+    /\.[^.]+$/,
+    '',
+  );
+
+  return `${sanitizeFileName(
+    baseName || originalName,
+  )}.extracted.txt`;
+}
+
+async function readLocalTextFallback(
+  file: File,
+): Promise<string> {
+  const extension = getFileExtension(
+    file.name,
+  );
+
+  if (
+    ![
+      '.txt',
+      '.md',
+      '.csv',
+      '.rtf',
+    ].includes(extension)
+  ) {
+    return '';
+  }
+
+  return cleanAiOutput(
+    await file.text(),
+  );
 }
 function isValidAppLanguage(value: unknown): value is AppLanguage {
   return (
@@ -1972,16 +2065,38 @@ async function callExtractTextApi({
 // ================= CONTEXT BUILDERS =================
 
 function buildExtractedContext(preparedFiles: PreparedFile[]) {
-  const blocks: string[] = [];
+  const readableFiles = preparedFiles.filter(
+    (item) => item.extractedText?.trim(),
+  );
 
-  for (const item of preparedFiles) {
-    if (!item.extractedText?.trim()) continue;
+  if (!readableFiles.length) return '';
 
-    blocks.push(`
-=== EXTRAHOVANÝ TEXT Z PRÍLOHY ===
+  // Každá z desiatich príloh dostane vlastný spravodlivý kontextový rozpočet.
+  // Posledné súbory sa preto neodrežú iba preto, že prvá príloha bola dlhá.
+  const perFileBudget = Math.max(
+    7_000,
+    Math.floor(
+      maxTotalExtractedContextChars /
+        readableFiles.length,
+    ),
+  );
+
+  const metadataBudget = Math.max(
+    1_800,
+    Math.floor(perFileBudget * 0.28),
+  );
+
+  const textBudget = Math.max(
+    4_500,
+    perFileBudget - metadataBudget,
+  );
+
+  return readableFiles
+    .map((item) => {
+      const metadata = `
 Súbor: ${item.originalName}
 Pôvodná veľkosť: ${formatBytes(item.originalSize)}
-Komprimovaná veľkosť: ${formatBytes(item.preparedSize)}
+Prenosová veľkosť: ${formatBytes(item.preparedSize)}
 Stav extrakcie: ${item.extractionStatus}
 Metóda extrakcie: ${item.extractionMethod || 'neuvedené'}
 Správa extrakcie: ${item.extractionMessage || 'neuvedené'}
@@ -1989,23 +2104,35 @@ Počet citácií nájdených priamo v texte: ${item.inTextCitations?.length || 0
 Počet detegovaných zdrojov: ${item.detectedSources?.length || 0}
 Autori nájdení v dokumente: ${item.detectedAuthors.length ? item.detectedAuthors.join(', ') : 'neuvedené'}
 
-CITÁCIE NÁJDENÉ PRIAMO V TEXTE:
-${formatInTextCitations(item.inTextCitations || [])}
+CITÁCIE A ZDROJE Z PRÍLOHY:
+${truncateByChars(
+  [
+    formatInTextCitations(item.inTextCitations || []),
+    item.formattedSources || '',
+    formatBibliographicCandidates(item.detectedSources || []),
+  ]
+    .filter(Boolean)
+    .join('\n\n'),
+  metadataBudget,
+)}`.trim();
 
-FORMÁTOVANÉ ZDROJE:
-${item.formattedSources || 'neuvedené'}
+      const attachmentText = truncateByChars(
+        item.extractedText,
+        Math.min(
+          maxClientExtractedCharsPerFile,
+          textBudget,
+        ),
+      );
 
-ZDROJE, AUTORI A PUBLIKÁCIE:
-${formatBibliographicCandidates(item.detectedSources || [])}
+      return `=== EXTRAHOVANÝ TEXT Z PRÍLOHY ===
+${metadata}
 
 TEXT PRÍLOHY:
-${truncateByChars(item.extractedText, maxClientExtractedCharsPerFile)}
-`.trim());
-  }
-
-  const full = blocks.join('\n\n');
-
-  return truncateByChars(full, maxTotalExtractedContextChars);
+${attachmentText}`;
+    })
+    .join(
+      '\n\n========================================\n\n',
+    );
 }
 
 function createChatRequestId() {
@@ -2599,94 +2726,202 @@ useEffect(() => {
 const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
   setLanguage(nextLanguage);
 
-localStorage.setItem('zedpera_language', nextLanguage);
-localStorage.setItem('zedpera_system_language', nextLanguage);
+  localStorage.setItem('zedpera_language', nextLanguage);
+  localStorage.setItem('zedpera_system_language', nextLanguage);
 
-document.documentElement.lang = nextLanguage;
-document.documentElement.setAttribute('data-language', nextLanguage);
-document.documentElement.setAttribute('data-system-language', nextLanguage);
-document.documentElement.setAttribute(
-  'data-work-language',
-  activeProfile?.workLanguage || nextLanguage,
-);
+  document.documentElement.lang = nextLanguage;
+  document.documentElement.setAttribute('data-language', nextLanguage);
+  document.documentElement.setAttribute('data-system-language', nextLanguage);
+  document.documentElement.setAttribute(
+    'data-work-language',
+    activeProfile?.workLanguage || nextLanguage,
+  );
 
-const updatedProfile = withSystemLanguageProfile(activeProfile, nextLanguage);
-setActiveProfile(updatedProfile);
+  const updatedProfile = withSystemLanguageProfile(
+    activeProfile,
+    nextLanguage,
+  );
+  setActiveProfile(updatedProfile);
 
-if (updatedProfile) {
-  localStorage.setItem('active_profile', JSON.stringify(updatedProfile));
-  localStorage.setItem('profile', JSON.stringify(updatedProfile));
-}
+  if (updatedProfile) {
+    localStorage.setItem(
+      'active_profile',
+      JSON.stringify(updatedProfile),
+    );
+    localStorage.setItem(
+      'profile',
+      JSON.stringify(updatedProfile),
+    );
+  }
 
-window.dispatchEvent(
-  new CustomEvent<AppLanguage>('zedpera-language-change', {
-    detail: nextLanguage,
-  }),
-);
+  window.dispatchEvent(
+    new CustomEvent<AppLanguage>('zedpera-language-change', {
+      detail: nextLanguage,
+    }),
+  );
+  window.dispatchEvent(
+    new CustomEvent<AppLanguage>('zedpera-system-language-change', {
+      detail: nextLanguage,
+    }),
+  );
+  window.dispatchEvent(
+    new CustomEvent<AppLanguage>('zedpera-work-language-change', {
+      detail: nextLanguage,
+    }),
+  );
+  window.dispatchEvent(
+    new CustomEvent('zedpera-profile-change'),
+  );
 
-window.dispatchEvent(
-  new CustomEvent<AppLanguage>('zedpera-system-language-change', {
-    detail: nextLanguage,
-  }),
-);
+  const textToTranslate =
+    result.trim() || canvasText.trim();
+  const hasAttachments =
+    attachedFiles.length > 0;
 
-window.dispatchEvent(
-  new CustomEvent<AppLanguage>('zedpera-work-language-change', {
-    detail: nextLanguage,
-  }),
-);
-
-window.dispatchEvent(new CustomEvent('zedpera-profile-change'));
-
-  const textToTranslate = result.trim() || canvasText.trim();
-
-  if (!textToTranslate || isLoading || isEditingSelection) {
+  if (
+    (!textToTranslate && !hasAttachments) ||
+    isLoading ||
+    isEditingSelection
+  ) {
     return;
   }
 
-  // Nová AI operácia ruší starú čakajúcu hlášku.
-  // Globálny provider zobrazí novú chybu až po 30 sekundách nečinnosti.
   clearSystemError();
 
   try {
     setIsLoading(true);
 
-    const requestId =
-      createChatRequestId();
+    const preparedFiles =
+      await prepareFilesBeforeSend(
+        attachedFiles,
+      );
+    const extractedContext =
+      buildExtractedContext(preparedFiles);
+    const detectedSources =
+      flattenDetectedSources(preparedFiles).slice(
+        0,
+        maxDetectedSourcesForChat,
+      );
+    const detectedAuthors =
+      flattenDetectedAuthors(preparedFiles).slice(
+        0,
+        maxDetectedAuthorsForChat,
+      );
+    const inTextCitations =
+      flattenInTextCitations(preparedFiles).slice(
+        0,
+        maxInTextCitationsForChat,
+      );
+
+    const requestId = createChatRequestId();
     const formData = new FormData();
 
-    formData.append(
-      'requestId',
-      requestId,
-    );
+    formData.append('requestId', requestId);
     formData.append('agent', agent);
     formData.append('module', 'translation');
     formData.append('language', nextLanguage);
-formData.append('outputLanguage', nextLanguage);
-formData.append('systemLanguage', nextLanguage);
-formData.append('workLanguage', nextLanguage);
-formData.append('profile', JSON.stringify(updatedProfile || null));
+    formData.append('outputLanguage', nextLanguage);
+    formData.append('systemLanguage', nextLanguage);
+    formData.append('workLanguage', nextLanguage);
+    formData.append(
+      'profile',
+      JSON.stringify(updatedProfile || null),
+    );
+    formData.append(
+      'requireSourceList',
+      'false',
+    );
+    formData.append(
+      'allowAiKnowledgeFallback',
+      'false',
+    );
+    formData.append(
+      'useExternalAcademicSources',
+      'false',
+    );
+    formData.append(
+      'returnExtractedFilesInfo',
+      hasAttachments ? 'true' : 'false',
+    );
+
+    const translationInstruction = [
+      `Prelož celý dostupný obsah do jazyka: ${nextLanguage}.`,
+      textToTranslate
+        ? `TEXT Z EDITORA:\n${textToTranslate}`
+        : '',
+      hasAttachments
+        ? [
+            `PRILOŽENÉ DOKUMENTY: ${attachedFiles.length}.`,
+            'Prelož celý text každej prílohy, nie iba text napísaný v editore.',
+            'Zachovaj poradie dokumentov, nadpisy, odseky, tabuľkové hodnoty a členenie.',
+            'Pred obsahom každej prílohy ponechaj samostatný riadok „Súbor: pôvodný názov“.',
+          ].join('\n')
+        : '',
+      'Neprekladaj mená autorov, citácie, DOI, URL ani bibliografické identifikátory.',
+      'Nevytváraj súhrn a nič nevynechávaj. Vráť iba kompletný preklad.',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
 
     formData.append(
       'messages',
       JSON.stringify([
         {
           role: 'user',
-          content: `Prelož celý nasledujúci text do jazyka: ${nextLanguage}.
-
-Dôležité:
-- Prelož celý hlavný text.
-- Zachovaj odborný význam.
-- Zachovaj štruktúru odsekov a nadpisov.
-- Neprekladaj mená autorov.
-- Neprekladaj DOI, URL a bibliografické identifikátory.
-- Citácie v texte ponechaj v rovnakom tvare, napr. (Autor, rok).
-- Vráť iba preložený text.
-
-TEXT:
-${textToTranslate}`,
+          content: translationInstruction,
         },
       ]),
+    );
+
+    formData.append(
+      'clientExtractedText',
+      extractedContext,
+    );
+    formData.append(
+      'clientDetectedSources',
+      JSON.stringify(detectedSources),
+    );
+    formData.append(
+      'clientDetectedAuthors',
+      JSON.stringify(detectedAuthors),
+    );
+    formData.append(
+      'clientInTextCitations',
+      JSON.stringify(inTextCitations),
+    );
+
+    for (const preparedFile of preparedFiles) {
+      formData.append(
+        'files',
+        preparedFile.file,
+        preparedFile.preparedName,
+      );
+    }
+
+    formData.append(
+      'preparedFilesMetadata',
+      JSON.stringify(
+        preparedFiles.map((item) => ({
+          originalId: item.originalId,
+          originalName: item.originalName,
+          originalSize: item.originalSize,
+          originalType: item.originalType,
+          preparedName: item.preparedName,
+          preparedSize: item.preparedSize,
+          preparedType: item.preparedType,
+          compressionMode: item.compressionMode,
+          extractionStatus: item.extractionStatus,
+          extractionMethod: item.extractionMethod,
+          extractionMessage: item.extractionMessage,
+          extractedText: item.extractedText || '',
+          extracted_text: item.extractedText || '',
+          detectedSources: item.detectedSources || [],
+          inTextCitations: item.inTextCitations || [],
+          detectedAuthors: item.detectedAuthors || [],
+          formattedSources: item.formattedSources || '',
+          warning: item.warning || '',
+        })),
+      ),
     );
 
     const res = await fetch('/api/chat', {
@@ -2694,7 +2929,8 @@ ${textToTranslate}`,
       credentials: 'include',
       cache: 'no-store',
       headers: {
-        Accept: 'application/json, text/plain, text/event-stream',
+        Accept:
+          'application/json, text/plain, text/event-stream',
         'x-request-id': requestId,
         'x-zedpera-error-delay-ms': '30000',
       },
@@ -2702,35 +2938,55 @@ ${textToTranslate}`,
     });
 
     if (!res.ok) {
-      const apiError =
-        await readZedperaApiError(
-          res,
-          {
-            language,
-            endpoint: '/api/chat',
-            module: 'translation',
-            requestId,
-          },
-        );
-
-      showSystemError(
-        apiError.descriptor,
+      const apiError = await readZedperaApiError(
+        res,
+        {
+          language,
+          endpoint: '/api/chat',
+          module: 'translation',
+          requestId,
+        },
       );
 
+      showSystemError(apiError.descriptor);
+
       if (apiError.status === 401) {
-        router.replace(
-          '/login?returnTo=/chat',
-        );
+        router.replace('/login?returnTo=/chat');
       }
 
       return;
     }
 
-    const contentType = res.headers.get('content-type') || '';
+    const responseContentType =
+      res.headers.get('content-type') || '';
     let translatedText = '';
 
-    if (contentType.includes('application/json')) {
+    if (
+      responseContentType.includes(
+        'application/json',
+      )
+    ) {
       const data = await res.json();
+
+      if (hasAttachments) {
+        const processing =
+          data?.attachmentProcessing || {};
+        const receivedFiles = Number(
+          processing.receivedFiles || 0,
+        );
+        const successfullyReadFiles = Number(
+          processing.successfullyReadFiles || 0,
+        );
+
+        if (
+          receivedFiles < attachedFiles.length ||
+          successfullyReadFiles < attachedFiles.length
+        ) {
+          throw new Error(
+            `Prekladač neprečítal všetky prílohy. Prečítané: ${successfullyReadFiles}/${attachedFiles.length}.`,
+          );
+        }
+      }
 
       translatedText = String(
         data.output ||
@@ -2742,58 +2998,71 @@ ${textToTranslate}`,
       ).trim();
     } else {
       if (!res.body) {
-        showSystemError(
-          createZedperaError(
-            'API_UNAVAILABLE',
-            {
-              endpoint: '/api/chat',
-              module: 'translation',
-              requestId,
-            },
-            {
-              language,
-            },
-          ),
+        throw new Error(
+          'Prekladač nevrátil použiteľnú odpoveď.',
         );
-        return;
       }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
 
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } =
+          await reader.read();
 
         if (done) break;
 
-        translatedText += decoder.decode(value, { stream: true });
+        translatedText += decoder.decode(
+          value,
+          { stream: true },
+        );
       }
     }
 
-    const cleanedTranslatedText = cleanAiOutput(translatedText);
+    const streamedError =
+      readStreamedApiError(translatedText);
 
-    if (!cleanedTranslatedText) {
+    if (streamedError) {
       showSystemError(
         createZedperaError(
-          'API_UNAVAILABLE',
+          String(
+            streamedError.code ||
+              'API_UNAVAILABLE',
+          ),
           {
             endpoint: '/api/chat',
             module: 'translation',
-            requestId,
+            requestId:
+              streamedError.requestId ||
+              requestId,
+            serverMessage:
+              streamedError.message ||
+              streamedError.error,
+            serverDetail:
+              streamedError.detail,
           },
-          {
-            language,
-          },
+          { language },
         ),
       );
       return;
+    }
+
+    const cleanedTranslatedText =
+      cleanAiOutput(translatedText);
+
+    if (!cleanedTranslatedText) {
+      throw new Error(
+        'Prekladač nevrátil žiadny preložený text.',
+      );
     }
 
     setResult(cleanedTranslatedText);
     setCanvasText(cleanedTranslatedText);
 
     if (popupData) {
-      setPopupData(parseSections(cleanedTranslatedText));
+      setPopupData(
+        parseSections(cleanedTranslatedText),
+      );
     }
   } catch (error) {
     console.error(
@@ -2820,41 +3089,136 @@ ${textToTranslate}`,
     setProcessingLog((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   };
 
-  const prepareBackendFile = async (item: AttachedFile): Promise<PreparedFile> => {
+  const prepareBackendFile = async (
+    item: AttachedFile,
+    options: {
+      targetBytes: number;
+      extractedCharLimit: number;
+      sourceLimit: number;
+      authorLimit: number;
+      citationLimit: number;
+    },
+  ): Promise<PreparedFile> => {
     updateProcessingLog(item.id, {
       status: 'extracting',
       message:
-        'Načítavam obsah prílohy. Pôvodný súbor zostane zachovaný pre /api/chat.',
+        'Načítavam obsah prílohy a pripravujem kompaktný prenos pre /api/chat.',
       originalSize: item.size,
     });
 
     try {
-      // Pomocná extrakcia slúži iba na rýchle získanie textu a zdrojov.
-      // Do /api/chat sa vždy odošle pôvodný binárny File objekt.
-      const extraction = await callExtractTextApi({
-        file: item.file,
-        fileName: item.name,
-        originalName: item.name,
-        compressed: false,
-      });
+      let extraction: Awaited<
+        ReturnType<
+          typeof callExtractTextApi
+        >
+      >;
+
+      try {
+        extraction = await callExtractTextApi({
+          file: item.file,
+          fileName: item.name,
+          originalName: item.name,
+          compressed: false,
+        });
+      } catch (apiError) {
+        const localText =
+          await readLocalTextFallback(
+            item.file,
+          );
+
+        if (!localText) throw apiError;
+
+        const localCitations =
+          extractInTextCitations(localText);
+        const localSources =
+          pairInTextCitationsWithBibliography({
+            citations: localCitations,
+            bibliography:
+              extractBibliographicCandidates(
+                localText,
+              ),
+          });
+
+        extraction = {
+          extractedText: localText,
+          method: 'browser-file-text',
+          message:
+            'Text bol načítaný priamo v prehliadači.',
+          detectedSources: localSources,
+          inTextCitations: localCitations,
+          detectedAuthors: uniqueArray([
+            ...localCitations.flatMap(
+              (citation) => citation.authors,
+            ),
+            ...localSources.flatMap(
+              (source) => source.authors,
+            ),
+          ]),
+          formattedSources:
+            formatBibliographicCandidates(
+              localSources,
+            ),
+          meta: {},
+        };
+      }
 
       const extractedText = truncateByChars(
         extraction.extractedText,
-        maxClientExtractedCharsPerFile,
+        options.extractedCharLimit,
       );
+
+      const preparedName =
+        getCompactPreparedFileName(
+          item.name,
+        );
+      const preparedFile = new File(
+        [extractedText],
+        preparedName,
+        {
+          type: 'text/plain;charset=utf-8',
+        },
+      );
+
+      const detectedSources =
+        extraction.detectedSources.slice(
+          0,
+          options.sourceLimit,
+        );
+      const inTextCitations =
+        extraction.inTextCitations.slice(
+          0,
+          options.citationLimit,
+        );
+      const detectedAuthors =
+        extraction.detectedAuthors.slice(
+          0,
+          options.authorLimit,
+        );
+      const formattedSources =
+        truncateByChars(
+          extraction.formattedSources ||
+            formatAllDetectedSources({
+              citations: inTextCitations,
+              sources: detectedSources,
+              files: [],
+            }),
+          8_000,
+        );
 
       updateProcessingLog(item.id, {
         status: 'extracted',
         message:
-          'Obsah prílohy bol načítaný. Pôvodný súbor sa odošle aj na serverovú kontrolu.',
-        preparedSize: item.size,
-        extractedChars: extractedText.length,
+          'Príloha bola prečítaná a pripravená ako kompaktný text pre spoločné spracovanie až 10 dokumentov.',
+        preparedSize:
+          preparedFile.size,
+        extractedChars:
+          extractedText.length,
         detectedSourcesCount:
-          extraction.detectedSources.length,
+          detectedSources.length,
         detectedAuthorsCount:
-          extraction.detectedAuthors.length,
+          detectedAuthors.length,
         detectedInTextCitationsCount:
-          extraction.inTextCitations.length,
+          inTextCitations.length,
       });
 
       return {
@@ -2862,94 +3226,217 @@ ${textToTranslate}`,
         originalName: item.name,
         originalSize: item.size,
         originalType: item.type,
-        preparedName: item.name,
-        preparedSize: item.size,
+        preparedName,
+        preparedSize:
+          preparedFile.size,
         preparedType:
-          item.type || 'application/octet-stream',
-        compressionMode: 'raw_small_text',
-        file: item.file,
+          preparedFile.type ||
+          'text/plain;charset=utf-8',
+        compressionMode:
+          'raw_small_text',
+        file: preparedFile,
         extractedText,
         extractionMethod:
-          extraction.method || 'extract-text',
+          extraction.method ||
+          'extract-text',
         extractionMessage:
           extraction.message ||
-          'Obsah prílohy bol extrahovaný pomocným endpointom.',
-        detectedSources:
-          extraction.detectedSources,
-        inTextCitations:
-          extraction.inTextCitations,
-        detectedAuthors:
-          extraction.detectedAuthors,
-        formattedSources:
-          extraction.formattedSources ||
-          formatAllDetectedSources({
-            citations:
-              extraction.inTextCitations,
-            sources:
-              extraction.detectedSources,
-            files: [],
-          }),
-        extractionStatus: 'client_extracted',
+          'Obsah prílohy bol extrahovaný a skomprimovaný.',
+        detectedSources,
+        inTextCitations,
+        detectedAuthors,
+        formattedSources,
+        extractionStatus:
+          'client_extracted',
         warning: undefined,
       };
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
-          : 'Pomocná extrakcia prílohy zlyhala.';
+          : 'Extrakcia prílohy zlyhala.';
 
-      // Toto nie je finálne zlyhanie. Pôvodný PDF/DOCX/obrázok sa odošle
-      // do /api/chat, kde sa vykoná parser a multimodálny PDF/OCR fallback.
+      // Malý súbor môže ešte bezpečne spracovať serverový parser/OCR.
+      // Veľký nečitateľný originál neposielame naslepo, pretože by prekročil
+      // 4,5 MB limit Vercel Function a zablokoval aj ostatných deväť príloh.
+      if (
+        item.size <=
+        Math.min(
+          options.targetBytes,
+          maxDirectFallbackFileBytes,
+        )
+      ) {
+        updateProcessingLog(item.id, {
+          status: 'ready',
+          message:
+            'Pomocná extrakcia zlyhala; malý originál spracuje serverový parser alebo OCR.',
+          preparedSize: item.size,
+          warning: message,
+        });
+
+        return {
+          originalId: item.id,
+          originalName: item.name,
+          originalSize: item.size,
+          originalType: item.type,
+          preparedName: item.name,
+          preparedSize: item.size,
+          preparedType:
+            item.type ||
+            'application/octet-stream',
+          compressionMode:
+            'raw_small_text',
+          file: item.file,
+          extractedText: '',
+          extractionMethod:
+            'server_parser_and_multimodal_fallback',
+          extractionMessage: message,
+          detectedSources: [],
+          inTextCitations: [],
+          detectedAuthors: [],
+          formattedSources: '',
+          extractionStatus:
+            'backend_required',
+          warning: message,
+        };
+      }
+
       updateProcessingLog(item.id, {
-        status: 'ready',
+        status: 'error',
         message:
-          'Príloha je pripravená na hlavné serverové PDF/OCR spracovanie.',
-        preparedSize: item.size,
+          'Obsah prílohy sa nepodarilo prečítať. Súbor nebol odoslaný naslepo.',
         warning: message,
       });
 
-      return {
-        originalId: item.id,
-        originalName: item.name,
-        originalSize: item.size,
-        originalType: item.type,
-        preparedName: item.name,
-        preparedSize: item.size,
-        preparedType:
-          item.type || 'application/octet-stream',
-        compressionMode: 'raw_small_text',
-        file: item.file,
-        extractedText: '',
-        extractionMethod:
-          'server_parser_and_multimodal_fallback',
-        extractionMessage: message,
-        detectedSources: [],
-        inTextCitations: [],
-        detectedAuthors: [],
-        formattedSources: '',
-        extractionStatus: 'backend_required',
-        warning: message,
-      };
+      throw new Error(
+        `Súbor „${item.name}“ sa nepodarilo extrahovať a jeho veľkosť ${formatBytes(item.size)} nie je bezpečné odoslať priamo. Skontrolujte, či dokument obsahuje textovú vrstvu alebo OCR. Technický detail: ${message}`,
+      );
     }
   };
 
-  const prepareFilesBeforeSend = async (files: AttachedFile[]) => {
+  const prepareFilesBeforeSend = async (
+    files: AttachedFile[],
+  ) => {
     if (!files.length) return [];
+
+    if (files.length > maxFilesCount) {
+      throw new Error(
+        `V jednej požiadavke možno spracovať maximálne ${maxFilesCount} príloh.`,
+      );
+    }
 
     setProcessingLog(
       files.map((file) => ({
         id: file.id,
         name: file.name,
         status: 'waiting',
-        message: 'Čaká na extrakciu obsahu prílohy.',
+        message:
+          'Čaká na extrakciu obsahu prílohy.',
         originalSize: file.size,
       })),
     );
 
-    const preparedFiles: PreparedFile[] = [];
+    const fileCount = Math.max(
+      files.length,
+      1,
+    );
+    const targetBytes = Math.max(
+      minPreparedFileTargetBytes,
+      Math.min(
+        maxPreparedFileTargetBytes,
+        Math.floor(
+          maxPreparedMultipartBytes /
+            fileCount,
+        ),
+      ),
+    );
+    const extractedCharLimit = Math.max(
+      7_000,
+      Math.min(
+        maxClientExtractedCharsPerFile,
+        Math.floor(
+          maxTotalExtractedContextChars /
+            fileCount,
+        ),
+      ),
+    );
+    const sourceLimit = Math.max(
+      8,
+      Math.floor(
+        maxDetectedSourcesForChat /
+          fileCount,
+      ),
+    );
+    const authorLimit = Math.max(
+      8,
+      Math.floor(
+        maxDetectedAuthorsForChat /
+          fileCount,
+      ),
+    );
+    const citationLimit = Math.max(
+      10,
+      Math.floor(
+        maxInTextCitationsForChat /
+          fileCount,
+      ),
+    );
 
-    for (const item of files) {
-      preparedFiles.push(await prepareBackendFile(item));
+    const preparedFiles = new Array<PreparedFile>(
+      files.length,
+    );
+    let nextFileIndex = 0;
+
+    const prepareWorker = async () => {
+      while (true) {
+        const currentIndex =
+          nextFileIndex;
+        nextFileIndex += 1;
+
+        if (currentIndex >= files.length) {
+          return;
+        }
+
+        preparedFiles[currentIndex] =
+          await prepareBackendFile(
+            files[currentIndex],
+            {
+              targetBytes,
+              extractedCharLimit,
+              sourceLimit,
+              authorLimit,
+              citationLimit,
+            },
+          );
+      }
+    };
+
+    await Promise.all(
+      Array.from(
+        {
+          length: Math.min(
+            2,
+            files.length,
+          ),
+        },
+        () => prepareWorker(),
+      ),
+    );
+
+    const preparedBytes =
+      preparedFiles.reduce(
+        (sum, file) =>
+          sum + file.preparedSize,
+        0,
+      );
+
+    if (
+      preparedBytes >
+      maxPreparedMultipartBytes
+    ) {
+      throw new Error(
+        `Pripravené prílohy majú spolu ${formatBytes(preparedBytes)}. Bezpečný prenosový limit je ${formatBytes(maxPreparedMultipartBytes)}. Znížte rozsah alebo počet dokumentov.`,
+      );
     }
 
     return preparedFiles;
@@ -3296,7 +3783,12 @@ formData.append('profile', JSON.stringify(profileForApi || null));
       formData.append('profileId', effectiveProjectId);
     }
 
-      formData.append('sourceMode', 'uploaded_documents_first');
+      formData.append(
+        'sourceMode',
+        attachedFiles.length > 0
+          ? 'uploaded_documents_first'
+          : 'verified_web_sources',
+      );
       formData.append('validateAttachmentsAgainstProfile', 'false');
       formData.append('requireSourceList', 'true');
       formData.append('allowAiKnowledgeFallback', 'true');
@@ -3409,7 +3901,10 @@ formData.append('profile', JSON.stringify(profileForApi || null));
           };
         }),
         sourceContext: {
-          mode: 'uploaded_documents_first',
+          mode:
+            attachedFiles.length > 0
+              ? 'uploaded_documents_first'
+              : 'verified_web_sources',
           extractedText: extractedContext,
           detectedSourcesSummary: detectedSourcesSummary || '',
           detectedSources,
@@ -3653,6 +4148,34 @@ formData.append('profile', JSON.stringify(profileForApi || null));
             return updated;
           });
         }
+      }
+
+      const streamedError =
+        readStreamedApiError(fullText);
+
+      if (streamedError) {
+        showSystemError(
+          createZedperaError(
+            String(
+              streamedError.code ||
+                'API_UNAVAILABLE',
+            ),
+            {
+              endpoint: '/api/chat',
+              module: 'chat',
+              requestId:
+                streamedError.requestId ||
+                requestId,
+              serverMessage:
+                streamedError.message ||
+                streamedError.error,
+              serverDetail:
+                streamedError.detail,
+            },
+            { language },
+          ),
+        );
+        return;
       }
 
       const finalTextFromApi = cleanAiOutput(fullText);
@@ -4212,10 +4735,17 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
             <div className="shrink-0 border-t border-white/10 bg-[#070a16]/95 px-4 py-3 backdrop-blur md:px-8">
               <div className="mx-auto max-w-6xl rounded-[28px] border border-violet-500/40 bg-violet-950/30 p-3 shadow-2xl shadow-violet-950/40">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-violet-400/20 bg-black/20 px-3 py-2 text-xs">
-                  <div className="flex items-center gap-2 font-bold text-violet-100">
-                    <Paperclip className="h-4 w-4 text-violet-300" />
-                    <span>
-                      Počet nahraných príloh: <strong>{attachedFiles.length}</strong>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-bold text-violet-100">
+                    <span className="inline-flex items-center gap-2">
+                      <Paperclip className="h-4 w-4 text-violet-300" />
+                      Počet nahraných príloh:{' '}
+                      <strong>
+                        {attachedFiles.length}/{maxFilesCount}
+                      </strong>
+                    </span>
+                    <span className="text-[11px] font-semibold text-violet-200/75">
+                      Kapacita: maximálne {maxFilesCount} príloh,
+                      max. {maxFileSizeMb} MB na jednu prílohu
                     </span>
                   </div>
                 </div>
@@ -4297,7 +4827,7 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
                     onClick={() => fileInputRef.current?.click()}
                    disabled={isLoading || systemBlocked}
                     className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.055] text-slate-300 transition hover:border-violet-400/50 hover:bg-violet-500/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                    title={`Priložiť súbory, max. ${maxFilesCount} súborov, max. ${maxFileSizeMb} MB na súbor`}
+                    title={`Priložiť súbory: maximálne ${maxFilesCount} príloh, kapacita ${maxFileSizeMb} MB na jeden súbor`}
                   >
                     <Paperclip className="h-6 w-6" />
                   </button>

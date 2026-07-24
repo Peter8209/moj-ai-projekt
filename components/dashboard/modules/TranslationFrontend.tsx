@@ -856,6 +856,20 @@ type AttachedFile = {
   extractionMessage?: string;
 };
 
+type TranslationSourceSummary = {
+  fileNames: string[];
+  sourceCharacters: number;
+  includesTypedText: boolean;
+};
+
+type TranslationExtractionResult = {
+  text: string;
+  fileNames: string[];
+  receivedFiles: number;
+  successfullyReadFiles: number;
+  extractedCharacters: number;
+};
+
 type SavedProfile = {
   id?: string;
   type?: string;
@@ -971,7 +985,7 @@ const maxStandardFilesCount = 12;
  * ADMIN nemá balíkový limit príloh. Hodnota nižšie je iba technický
  * bezpečnostný limit jednej HTTP požiadavky a je zosúladená s /api/chat.
  */
-const maxUnlimitedFilesPerRequest = 24;
+const maxUnlimitedFilesPerRequest = 20;
 const maxDataFilesPerRequest = 1;
 
 const maxFileSizeMb = 30;
@@ -1700,6 +1714,134 @@ function getFixedModuleUi(language?: string): ModuleUiTranslations {
 
   return fixedModuleUiByLanguage[safeLanguage] || fixedModuleUiByLanguage.sk;
 }
+
+type TranslationModalUiText = {
+  subtitle: string;
+  sourceFiles: string;
+  sourceCharacters: string;
+  editableHint: string;
+  copy: string;
+  close: string;
+  openResult: string;
+  attachmentReady: string;
+  attachmentReadyDetail: string;
+  supplementalInputLabel: string;
+  supplementalInputPlaceholder: string;
+  translateFile: string;
+  translateFileAndText: string;
+  processingFile: string;
+};
+
+const TRANSLATION_MODAL_UI: Record<LanguageCode, TranslationModalUiText> = {
+  sk: {
+    subtitle: "Preložený obsah v samostatnom profesionálnom okne",
+    sourceFiles: "Zdrojové súbory",
+    sourceCharacters: "Počet znakov zdroja",
+    editableHint: "Výsledok môžete upraviť, skopírovať alebo exportovať do PDF a Wordu.",
+    copy: "Kopírovať",
+    close: "Zavrieť",
+    openResult: "Otvoriť preklad",
+    attachmentReady: "Súbor je pripravený na preklad",
+    attachmentReadyDetail:
+      "Po spustení sa obsah dokumentu najprv bezpečne extrahuje a následne sa preloží celý dokument. Textové pole nižšie je voliteľné.",
+    supplementalInputLabel: "Doplňujúci text na preklad (voliteľné)",
+    supplementalInputPlaceholder:
+      "Voliteľne doplňte ďalší text, ktorý sa má preložiť spolu s obsahom priloženého súboru.",
+    translateFile: "Preložiť súbor",
+    translateFileAndText: "Preložiť súbor a text",
+    processingFile: "Načítavam a prekladám súbor...",
+  },
+  cs: {
+    subtitle: "Přeložený obsah v samostatném profesionálním okně",
+    sourceFiles: "Zdrojové soubory",
+    sourceCharacters: "Počet znaků zdroje",
+    editableHint: "Výsledek můžete upravit, zkopírovat nebo exportovat do PDF a Wordu.",
+    copy: "Kopírovat",
+    close: "Zavřít",
+    openResult: "Otevřít překlad",
+    attachmentReady: "Soubor je připraven k překladu",
+    attachmentReadyDetail:
+      "Po spuštění se obsah dokumentu nejprve bezpečně extrahuje a následně se přeloží celý dokument. Textové pole níže je volitelné.",
+    supplementalInputLabel: "Doplňující text k překladu (volitelné)",
+    supplementalInputPlaceholder:
+      "Volitelně doplňte další text, který se má přeložit spolu s obsahem přiloženého souboru.",
+    translateFile: "Přeložit soubor",
+    translateFileAndText: "Přeložit soubor a text",
+    processingFile: "Načítám a překládám soubor...",
+  },
+  en: {
+    subtitle: "Translated content in a dedicated professional window",
+    sourceFiles: "Source files",
+    sourceCharacters: "Source characters",
+    editableHint: "You can edit, copy, or export the result to PDF and Word.",
+    copy: "Copy",
+    close: "Close",
+    openResult: "Open translation",
+    attachmentReady: "The file is ready for translation",
+    attachmentReadyDetail:
+      "When started, the document content is securely extracted first and then the entire document is translated. The text field below is optional.",
+    supplementalInputLabel: "Additional text to translate (optional)",
+    supplementalInputPlaceholder:
+      "Optionally add more text to translate together with the attached file.",
+    translateFile: "Translate file",
+    translateFileAndText: "Translate file and text",
+    processingFile: "Reading and translating file...",
+  },
+  de: {
+    subtitle: "Übersetzter Inhalt in einem separaten professionellen Fenster",
+    sourceFiles: "Quelldateien",
+    sourceCharacters: "Zeichen im Ausgangstext",
+    editableHint: "Das Ergebnis kann bearbeitet, kopiert oder als PDF und Word exportiert werden.",
+    copy: "Kopieren",
+    close: "Schließen",
+    openResult: "Übersetzung öffnen",
+    attachmentReady: "Die Datei ist zur Übersetzung bereit",
+    attachmentReadyDetail:
+      "Beim Start wird der Dokumentinhalt zuerst sicher extrahiert und anschließend das gesamte Dokument übersetzt. Das Textfeld darunter ist optional.",
+    supplementalInputLabel: "Zusätzlicher Übersetzungstext (optional)",
+    supplementalInputPlaceholder:
+      "Optional können Sie weiteren Text ergänzen, der zusammen mit der angehängten Datei übersetzt werden soll.",
+    translateFile: "Datei übersetzen",
+    translateFileAndText: "Datei und Text übersetzen",
+    processingFile: "Datei wird gelesen und übersetzt...",
+  },
+  pl: {
+    subtitle: "Przetłumaczona treść w osobnym profesjonalnym oknie",
+    sourceFiles: "Pliki źródłowe",
+    sourceCharacters: "Liczba znaków źródła",
+    editableHint: "Wynik można edytować, kopiować lub eksportować do PDF i Word.",
+    copy: "Kopiuj",
+    close: "Zamknij",
+    openResult: "Otwórz tłumaczenie",
+    attachmentReady: "Plik jest gotowy do tłumaczenia",
+    attachmentReadyDetail:
+      "Po uruchomieniu treść dokumentu zostanie najpierw bezpiecznie wyodrębniona, a następnie cały dokument zostanie przetłumaczony. Pole tekstowe poniżej jest opcjonalne.",
+    supplementalInputLabel: "Dodatkowy tekst do tłumaczenia (opcjonalnie)",
+    supplementalInputPlaceholder:
+      "Opcjonalnie dodaj tekst, który ma zostać przetłumaczony razem z załączonym plikiem.",
+    translateFile: "Przetłumacz plik",
+    translateFileAndText: "Przetłumacz plik i tekst",
+    processingFile: "Odczytuję i tłumaczę plik...",
+  },
+  hu: {
+    subtitle: "A lefordított tartalom külön professzionális ablakban",
+    sourceFiles: "Forrásfájlok",
+    sourceCharacters: "Forrásszöveg karakterei",
+    editableHint: "Az eredmény szerkeszthető, másolható, illetve PDF- és Word-formátumba exportálható.",
+    copy: "Másolás",
+    close: "Bezárás",
+    openResult: "Fordítás megnyitása",
+    attachmentReady: "A fájl készen áll a fordításra",
+    attachmentReadyDetail:
+      "Indításkor a dokumentum tartalma először biztonságosan kinyerésre kerül, majd a teljes dokumentum lefordításra kerül. Az alábbi szövegmező opcionális.",
+    supplementalInputLabel: "További fordítandó szöveg (opcionális)",
+    supplementalInputPlaceholder:
+      "Opcionálisan adjon meg további szöveget, amelyet a csatolt fájllal együtt kell lefordítani.",
+    translateFile: "Fájl fordítása",
+    translateFileAndText: "Fájl és szöveg fordítása",
+    processingFile: "Fájl beolvasása és fordítása...",
+  },
+};
 
 const dashboardModuleOrder: ModuleKey[] = [
   "supervisor",
@@ -3663,6 +3805,267 @@ async function readDashboardApiError(
   });
 }
 
+function extractTranslationTextFromPayload(payload: unknown): string {
+  const readPreferredText = (
+    value: unknown,
+    depth = 0,
+  ): string => {
+    if (depth > 4 || !isUnknownRecord(value)) return "";
+
+    for (const key of [
+      "combinedText",
+      "combined_text",
+      "extractedText",
+      "extracted_text",
+      "plainText",
+      "plain_text",
+      "documentText",
+      "document_text",
+      "text",
+      "content",
+    ]) {
+      const candidate = value[key];
+
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim().slice(0, 180_000);
+      }
+    }
+
+    for (const key of ["data", "result", "extraction"]) {
+      const nested = readPreferredText(value[key], depth + 1);
+
+      if (nested) return nested;
+    }
+
+    return "";
+  };
+
+  const preferredText = readPreferredText(payload);
+
+  if (preferredText) return preferredText;
+
+  const collected: string[] = [];
+  const unique = new Set<string>();
+
+  const visitItems = (value: unknown, depth = 0) => {
+    if (depth > 5 || value === null || value === undefined) return;
+
+    if (Array.isArray(value)) {
+      value.forEach((item) => visitItems(item, depth + 1));
+      return;
+    }
+
+    if (!isUnknownRecord(value)) return;
+
+    for (const key of [
+      "extractedText",
+      "extracted_text",
+      "plainText",
+      "plain_text",
+      "documentText",
+      "document_text",
+      "text",
+      "content",
+    ]) {
+      const candidate = value[key];
+
+      if (typeof candidate !== "string") continue;
+
+      const cleaned = candidate.trim();
+
+      if (!cleaned || unique.has(cleaned)) continue;
+
+      unique.add(cleaned);
+      collected.push(cleaned);
+    }
+
+    [
+      "files",
+      "documents",
+      "attachments",
+      "extractedFiles",
+      "extracted_files",
+      "results",
+      "items",
+    ].forEach((key) => visitItems(value[key], depth + 1));
+  };
+
+  visitItems(payload);
+
+  return collected.join("\n\n-----------------\n\n").slice(0, 180_000);
+}
+
+async function extractTranslationAttachments(
+  files: AttachedFile[],
+  requestId: string,
+  sourceLanguage: LanguageCode,
+  targetLanguage: LanguageCode,
+): Promise<TranslationExtractionResult> {
+  const browserText = files
+    .map((file) => String(file.text || file.content || "").trim())
+    .filter(Boolean)
+    .join("\n\n-----------------\n\n")
+    .slice(0, 180_000);
+
+  const binaryFiles = files.filter((file) => isBrowserFileLike(file.file));
+
+  if (!binaryFiles.length) {
+    if (!browserText) {
+      throw new DashboardApiError({
+        status: 422,
+        code: "ATTACHMENT_BINARY_MISSING",
+        message: "Priložený súbor nie je dostupný na načítanie.",
+        detail:
+          "Frontend eviduje prílohu, ale nemá k dispozícii binárny File objekt ani klientský textový fallback.",
+      });
+    }
+
+    return {
+      text: browserText,
+      fileNames: files.map((file) => file.name),
+      receivedFiles: files.length,
+      successfullyReadFiles: files.length,
+      extractedCharacters: browserText.length,
+    };
+  }
+
+  const formData = new FormData();
+
+  formData.append("requestId", requestId);
+  formData.append("module", "translation");
+  formData.append("purpose", "translation");
+  formData.append("sourceLanguage", sourceLanguage);
+  formData.append("targetLanguage", targetLanguage);
+  formData.append("extractUploadedText", "true");
+  formData.append("combineText", "true");
+
+  binaryFiles.forEach((item) => {
+    if (!isBrowserFileLike(item.file)) return;
+
+    formData.append(
+      "files",
+      item.file,
+      item.name || item.file.name,
+    );
+  });
+
+  const response = await fetch("/api/extract-text", {
+    method: "POST",
+    body: formData,
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json, text/plain",
+      "X-Request-Id": requestId,
+    },
+  });
+
+  if (!response.ok) {
+    if (browserText) {
+      return {
+        text: browserText,
+        fileNames: files.map((file) => file.name),
+        receivedFiles: binaryFiles.length,
+        successfullyReadFiles: files.filter((file) =>
+          Boolean(String(file.text || file.content || "").trim()),
+        ).length,
+        extractedCharacters: browserText.length,
+      };
+    }
+
+    throw await readDashboardApiError(response);
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json")
+    ? await response.json().catch(() => null)
+    : await response.text();
+
+  if (
+    isUnknownRecord(payload) &&
+    payload.ok === false
+  ) {
+    throw new DashboardApiError({
+      status: 422,
+      code:
+        readString(payload, "code") ||
+        "ATTACHMENT_EXTRACTION_FAILED",
+      message:
+        readString(payload, "message", "error") ||
+        "Obsah priloženého súboru sa nepodarilo načítať.",
+      detail:
+        readString(payload, "detail", "details") ||
+        undefined,
+    });
+  }
+
+  const serverText = extractTranslationTextFromPayload(payload);
+  const combinedParts = [serverText, browserText]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index);
+
+  const combinedText = combinedParts
+    .join("\n\n-----------------\n\n")
+    .slice(0, 180_000);
+
+  if (!combinedText) {
+    throw new DashboardApiError({
+      status: 422,
+      code: "ATTACHMENT_EXTRACTION_FAILED",
+      message:
+        "Príloha bola prijatá, ale jej text sa nepodarilo extrahovať.",
+      detail:
+        "Skontrolujte /api/extract-text a podporu formátu PDF, DOC, DOCX, RTF, ODT, PPT alebo PPTX.",
+    });
+  }
+
+  const root = isUnknownRecord(payload) ? payload : null;
+  const processing =
+    root && isUnknownRecord(root.attachmentProcessing)
+      ? root.attachmentProcessing
+      : root;
+
+  const receivedFiles =
+    (processing &&
+      readNumber(
+        processing,
+        "receivedFiles",
+        "received_files",
+        "filesReceived",
+      )) ??
+    binaryFiles.length;
+
+  const successfullyReadFiles =
+    (processing &&
+      readNumber(
+        processing,
+        "successfullyReadFiles",
+        "successfully_read_files",
+        "processedFiles",
+        "filesProcessed",
+      )) ??
+    binaryFiles.length;
+
+  const extractedCharacters =
+    (processing &&
+      readNumber(
+        processing,
+        "extractedCharacters",
+        "extracted_characters",
+        "characters",
+      )) ??
+    combinedText.length;
+
+  return {
+    text: combinedText,
+    fileNames: files.map((file) => file.name),
+    receivedFiles,
+    successfullyReadFiles,
+    extractedCharacters,
+  };
+}
+
 function getTodayStart() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -4212,10 +4615,38 @@ export default function TranslationFrontend(
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [canvasText, setCanvasText] = useState("");
 
+  const [translationModalOpen, setTranslationModalOpen] = useState(false);
+  const [translationSourceSummary, setTranslationSourceSummary] =
+    useState<TranslationSourceSummary>({
+      fileNames: [],
+      sourceCharacters: 0,
+      includesTypedText: false,
+    });
+
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(
     null,
   );
+
+  useEffect(() => {
+    if (!translationModalOpen || typeof document === "undefined") return;
+
+    const previousOverflow = document.body.style.overflow;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setTranslationModalOpen(false);
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [translationModalOpen]);
 
   const [entitlements, setEntitlements] =
     useState<DashboardEntitlements | null>(null);
@@ -4847,6 +5278,27 @@ export default function TranslationFrontend(
 
   const activeModulePlaceholder = fixedUi.placeholder;
 
+  const translationModalUi =
+    TRANSLATION_MODAL_UI[systemLanguage] || TRANSLATION_MODAL_UI.sk;
+
+  const translationHasAttachments =
+    activeModule === "translation" && attachedFiles.length > 0;
+
+  const displayedInputLabel = translationHasAttachments
+    ? translationModalUi.supplementalInputLabel
+    : activeModuleInputLabel;
+
+  const displayedInputPlaceholder = translationHasAttachments
+    ? translationModalUi.supplementalInputPlaceholder
+    : activeModulePlaceholder;
+
+  const displayedActionLabel =
+    translationHasAttachments
+      ? input.trim()
+        ? translationModalUi.translateFileAndText
+        : translationModalUi.translateFile
+      : activeModuleButtonLabel;
+
   const activeModuleCard = t?.dashboardTools?.cards?.[activeTranslationKey];
 
   const activeDashboardModuleTexts =
@@ -4876,9 +5328,11 @@ export default function TranslationFrontend(
    * uloženú v inom stave alebo prekladovej karte.
    */
   const dashboardInputId = `dashboard-module-input-${activeModule}`;
-  const activeModuleLoadingLabel = `${
-    MODULE_PROCESSING_PREFIX[systemLanguage] || MODULE_PROCESSING_PREFIX.sk
-  }: ${activeModuleLabel}...`;
+  const activeModuleLoadingLabel = translationHasAttachments
+    ? translationModalUi.processingFile
+    : `${
+        MODULE_PROCESSING_PREFIX[systemLanguage] || MODULE_PROCESSING_PREFIX.sk
+      }: ${activeModuleLabel}...`;
   const activeModuleActionClassName =
     MODULE_ACTION_CLASS_NAMES[activeModule] ||
     MODULE_ACTION_CLASS_NAMES.supervisor;
@@ -5035,6 +5489,12 @@ export default function TranslationFrontend(
     setActiveAttachmentText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
+    setTranslationModalOpen(false);
+    setTranslationSourceSummary({
+      fileNames: [],
+      sourceCharacters: 0,
+      includesTypedText: false,
+    });
 
     try {
       localStorage.removeItem("active_profile");
@@ -5183,6 +5643,12 @@ export default function TranslationFrontend(
     setCanvasText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
+    setTranslationModalOpen(false);
+    setTranslationSourceSummary({
+      fileNames: [],
+      sourceCharacters: 0,
+      includesTypedText: false,
+    });
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -5190,10 +5656,14 @@ export default function TranslationFrontend(
   }, [activeModule]);
 
   useEffect(() => {
-    if (!isLoading && canvasText.trim().length > 0) {
+    if (
+      activeModule !== "translation" &&
+      !isLoading &&
+      canvasText.trim().length > 0
+    ) {
       setCanvasOpen(true);
     }
-  }, [canvasText, isLoading]);
+  }, [activeModule, canvasText, isLoading]);
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -5377,6 +5847,12 @@ export default function TranslationFrontend(
     setActiveAttachmentText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
+    setTranslationModalOpen(false);
+    setTranslationSourceSummary({
+      fileNames: [],
+      sourceCharacters: 0,
+      includesTypedText: false,
+    });
   };
 
   useEffect(() => {
@@ -5546,7 +6022,10 @@ export default function TranslationFrontend(
     recognition.start();
   };
 
-  const buildModulePrompt = (moduleOverride: ModuleKey = activeModule) => {
+  const buildModulePrompt = (
+    moduleOverride: ModuleKey = activeModule,
+    sourceTextOverride?: string,
+  ) => {
     const moduleKey = String(moduleOverride);
     const systemLanguage = getStoredSystemLanguage();
     const profileForPrompt = prepareProfileForApi(
@@ -5556,6 +6035,13 @@ export default function TranslationFrontend(
     const profileBlock = buildProfileBlock(profileForPrompt);
     const citationStyle = getCitationStyle(profileForPrompt);
     const workLanguage = getWorkLanguage(profileForPrompt);
+    const requestedOutputLanguage =
+      moduleKey === "translation"
+        ? getLanguageLabel(translationTo)
+        : workLanguage;
+    const translationSourceText = String(
+      sourceTextOverride ?? input,
+    ).trim();
     const attachmentBlock = buildAttachmentBlock(attachedFiles);
 
     const baseRules = `
@@ -5566,8 +6052,8 @@ PRILOŽENÉ SÚBORY:
 ${attachmentBlock}
 
 DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
-- Hlavný jazyk celého systému je: ${workLanguage}.
-- Výstup musí byť v jazyku práce: ${workLanguage}.
+- Hlavný jazyk požadovaného výstupu je: ${requestedOutputLanguage}.
+- Výstup musí byť v požadovanom jazyku: ${requestedOutputLanguage}.
 - Všetky odpovede, nadpisy, vysvetlenia, tabuľky, odporúčania a texty musia byť v tomto jazyku.
 - Výstup píš ako čistý text vhodný do Wordu.
 - Nepíš Markdown znaky ako #, ##, ###, **, *, --- ani kódové bloky.
@@ -5765,7 +6251,7 @@ Do jazyka: ${getLanguageLabel(translationTo)}
 Štýl prekladu: ${getTranslationStyleLabel(translationStyle)}
 
 TEXT NA PREKLAD:
-${input}
+${translationSourceText || "Použi celý extrahovaný text z priloženého dokumentu."}
 
 PRÍSNE PRAVIDLÁ PRE VÝSTUP:
 - Vráť iba samotný preložený text.
@@ -6132,6 +6618,7 @@ Text emailu:
     setCanvasText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
+    setTranslationModalOpen(false);
 
     // Analýza dát sa zobrazuje výhradne v AnalysisResultsModal.
     // Pri novom spustení preto zatvoríme prípadný Canvas z iného modulu.
@@ -6146,7 +6633,93 @@ Text emailu:
       const profileForApi = prepareProfileForApi(activeProfile, systemLanguage);
 
       const finalWorkLanguage = getWorkLanguage(profileForApi);
-      const prompt = buildModulePrompt(requestedModule);
+
+      let translationAttachmentText = attachedFiles
+        .map((file) => String(file.text || file.content || "").trim())
+        .filter(Boolean)
+        .join("\n\n-----------------\n\n")
+        .slice(0, 180_000);
+
+      let translationExtraction: TranslationExtractionResult | null = null;
+
+      if (requestedModule === "translation" && attachedFiles.length > 0) {
+        translationExtraction = await extractTranslationAttachments(
+          attachedFiles,
+          `${moduleRunRequestId}-extract`,
+          translationFrom,
+          translationTo,
+        );
+
+        translationAttachmentText = translationExtraction.text;
+
+        if (!isCurrentModuleRun()) {
+          await loadBillingState();
+          return;
+        }
+
+        setActiveAttachmentText(translationAttachmentText);
+        setAttachedFiles((currentFiles) =>
+          currentFiles.map((file) => ({
+            ...file,
+            extractionStatus: "server",
+            extractedChars:
+              translationExtraction?.extractedCharacters ||
+              translationAttachmentText.length,
+            extractionMessage:
+              "Obsah prílohy bol načítaný a pripravený na kompletný preklad.",
+          })),
+        );
+      }
+
+      const translationSourceText =
+        requestedModule === "translation"
+          ? [translationAttachmentText, userText]
+              .map((value) => value.trim())
+              .filter(Boolean)
+              .join("\n\n")
+              .slice(0, 180_000)
+          : userText;
+
+      if (
+        requestedModule === "translation" &&
+        !translationSourceText.trim()
+      ) {
+        throw new DashboardApiError({
+          status: 422,
+          code: "TRANSLATION_SOURCE_EMPTY",
+          message:
+            "Nebolo možné získať text, ktorý sa má preložiť.",
+          detail:
+            "Vložte text alebo nahrajte dokument s čitateľným textovým obsahom.",
+        });
+      }
+
+      const effectiveUserText =
+        requestedModule === "translation"
+          ? translationSourceText
+          : userText;
+
+      const requestOutputLanguage =
+        requestedModule === "translation"
+          ? translationTo
+          : finalWorkLanguage;
+
+      const prompt = buildModulePrompt(
+        requestedModule,
+        requestedModule === "translation"
+          ? translationSourceText
+          : undefined,
+      );
+
+      if (requestedModule === "translation") {
+        setTranslationSourceSummary({
+          fileNames:
+            translationExtraction?.fileNames ||
+            attachedFiles.map((file) => file.name),
+          sourceCharacters: translationSourceText.length,
+          includesTypedText: Boolean(userText),
+        });
+      }
 
       if (requestedModule === "data") {
         const dataFiles = attachedFiles.filter(
@@ -6759,15 +7332,22 @@ Text emailu:
         requiredFeature,
       );
 
-      formData.append("language", finalWorkLanguage);
-      formData.append("outputLanguage", finalWorkLanguage);
+      formData.append("language", requestOutputLanguage);
+      formData.append("outputLanguage", requestOutputLanguage);
       formData.append("systemLanguage", systemLanguage);
       formData.append("interfaceLanguage", systemLanguage);
       formData.append("workLanguage", finalWorkLanguage);
+      formData.append("sourceLanguage", translationFrom);
+      formData.append("targetLanguage", translationTo);
+      formData.append("translationStyle", translationStyle);
 
-      formData.append("message", userText || secondaryText || prompt);
+      formData.append(
+        "message",
+        effectiveUserText || secondaryText || prompt,
+      );
       formData.append("prompt", prompt);
-      formData.append("input", userText);
+      formData.append("input", effectiveUserText);
+      formData.append("text", effectiveUserText);
       formData.append("secondaryInput", secondaryText);
 
       formData.append("profile", JSON.stringify(profileForApi || {}));
@@ -6805,14 +7385,23 @@ Text emailu:
           )
           .slice(0, 120_000);
 
-      if (clientExtractedText) {
+      const effectiveAttachmentText =
+        requestedModule === "translation"
+          ? translationAttachmentText
+          : clientExtractedText || activeAttachmentText || "";
+
+      if (effectiveAttachmentText) {
         formData.append(
           "clientExtractedText",
-          clientExtractedText,
+          effectiveAttachmentText,
         );
         formData.append(
           "extractedText",
-          clientExtractedText,
+          effectiveAttachmentText,
+        );
+        formData.append(
+          "attachmentText",
+          effectiveAttachmentText,
         );
       }
 
@@ -6927,14 +7516,19 @@ Text emailu:
         model: agent,
         prompt,
         instruction: prompt,
-        input: userText,
-        text: userText || clientExtractedText || prompt,
-        message: userText || secondaryText || prompt,
-        question: userText || secondaryText || prompt,
+        input: effectiveUserText,
+        text: effectiveUserText || prompt,
+        message: effectiveUserText || secondaryText || prompt,
+        question: effectiveUserText || secondaryText || prompt,
         secondaryInput: secondaryText,
         messages: [{ role: "user", content: prompt }],
-        language: finalWorkLanguage,
-        outputLanguage: finalWorkLanguage,
+        language: requestOutputLanguage,
+        outputLanguage: requestOutputLanguage,
+        sourceLanguage: translationFrom,
+        targetLanguage: translationTo,
+        fromLanguage: translationFrom,
+        toLanguage: translationTo,
+        style: translationStyle,
         systemLanguage,
         interfaceLanguage: systemLanguage,
         workLanguage: finalWorkLanguage,
@@ -6956,9 +7550,9 @@ Text emailu:
         workType: getWorkType(profileForApi),
         citation: getCitationStyle(profileForApi),
         citationStyle: getCitationStyle(profileForApi),
-        attachmentText: clientExtractedText || activeAttachmentText || "",
-        extractedText: clientExtractedText || activeAttachmentText || "",
-        clientExtractedText: clientExtractedText || activeAttachmentText || "",
+        attachmentText: effectiveAttachmentText,
+        extractedText: effectiveAttachmentText,
+        clientExtractedText: effectiveAttachmentText,
         qualityMode,
         outputMode,
         translationFrom,
@@ -7199,7 +7793,13 @@ Text emailu:
 
       setResult(cleaned);
       setCanvasText(cleaned);
-      setCanvasOpen(true);
+
+      if (requestedModule === "translation") {
+        setCanvasOpen(false);
+        setTranslationModalOpen(true);
+      } else {
+        setCanvasOpen(true);
+      }
 
       try {
         localStorage.setItem("latest_generated_work_text", cleaned);
@@ -7211,7 +7811,10 @@ Text emailu:
       await saveHistoryItem({
         module: requestedModule,
         title: requestedModuleResultTitle,
-        userMessage: userText || secondaryText || "Bez textového zadania.",
+        userMessage:
+          effectiveUserText ||
+          secondaryText ||
+          "Bez textového zadania.",
         assistantMessage: cleaned,
         result: {
           profileTitle: profileForApi?.title || "",
@@ -8737,6 +9340,25 @@ Text emailu:
             />
           )}
 
+          {translationHasAttachments ? (
+            <section className="mt-4 rounded-3xl border border-sky-300/25 bg-gradient-to-br from-sky-500/15 via-cyan-500/10 to-blue-500/10 p-4 shadow-xl shadow-sky-950/20">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-sky-300/25 bg-sky-400/15 text-sky-100">
+                  <Paperclip className="h-5 w-5" />
+                </div>
+
+                <div className="min-w-0">
+                  <h3 className="text-sm font-black text-white sm:text-base">
+                    {translationModalUi.attachmentReady}
+                  </h3>
+                  <p className="mt-1 text-xs font-semibold leading-5 text-slate-300 sm:text-sm">
+                    {translationModalUi.attachmentReadyDetail}
+                  </p>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
           <div
             ref={mobileToolPanelRef}
             key={`dashboard-workspace-${activeModule}-${systemLanguage}`}
@@ -8763,7 +9385,7 @@ Text emailu:
               htmlFor={dashboardInputId}
               className="mb-2 block text-sm font-black text-slate-200"
             >
-              {activeModuleInputLabel}
+              {displayedInputLabel}
             </label>
 
             <textarea
@@ -8771,10 +9393,10 @@ Text emailu:
               id={dashboardInputId}
               name={dashboardInputId}
               data-module-input={activeModule}
-              aria-label={activeModuleInputLabel}
+              aria-label={displayedInputLabel}
               value={input}
               onChange={(event) => setInput(event.target.value)}
-              placeholder={activeModulePlaceholder}
+              placeholder={displayedInputPlaceholder}
               className="min-h-[240px] w-full resize-y rounded-3xl border border-white/10 bg-[#070b18] px-5 py-5 text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/10"
             />
 
@@ -8799,7 +9421,7 @@ Text emailu:
                 ) : (
                   <>
                     <ActiveModuleActionIcon className="h-4 w-4" />
-                    <span>{activeModuleButtonLabel}</span>
+                    <span>{displayedActionLabel}</span>
                   </>
                 )}
               </button>
@@ -9099,11 +9721,28 @@ uroven_sportu`}
 
             <button
               type="button"
-              onClick={() => setCanvasOpen(true)}
-              className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] sm:mr-3 sm:w-auto"
+              onClick={() => {
+                if (activeModule === "translation") {
+                  setTranslationModalOpen(true);
+                  return;
+                }
+
+                setCanvasOpen(true);
+              }}
+              disabled={
+                activeModule === "translation" &&
+                !(result || canvasText)
+              }
+              className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50 sm:mr-3 sm:w-auto"
             >
-              <Paintbrush className="h-4 w-4" />
-              Canvas
+              {activeModule === "translation" ? (
+                <Languages className="h-4 w-4" />
+              ) : (
+                <Paintbrush className="h-4 w-4" />
+              )}
+              {activeModule === "translation"
+                ? translationModalUi.openResult
+                : "Canvas"}
             </button>
 
             {(result || canvasText) && (
@@ -9150,6 +9789,158 @@ uroven_sportu`}
           </div>
         </section>
       </main>
+
+      {translationModalOpen ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-slate-950/90 p-3 backdrop-blur-xl sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="translation-result-title"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setTranslationModalOpen(false);
+            }
+          }}
+        >
+          <section className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-sky-300/20 bg-[#060b17] shadow-2xl shadow-sky-950/60">
+            <header className="border-b border-white/10 bg-gradient-to-r from-sky-500/15 via-cyan-500/10 to-blue-500/10 px-5 py-5 sm:px-7">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-sky-300/25 bg-sky-400/15 text-sky-100">
+                    <Languages className="h-6 w-6" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <h2
+                      id="translation-result-title"
+                      className="text-xl font-black text-white sm:text-2xl"
+                    >
+                      {activeModuleResultTitle}
+                    </h2>
+                    <p className="mt-1 text-sm font-semibold leading-6 text-slate-300">
+                      {translationModalUi.subtitle}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setTranslationModalOpen(false)}
+                  className="shrink-0 rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-white transition hover:bg-white/[0.12]"
+                  aria-label={translationModalUi.close}
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">
+                    {selectorTranslations.translationFrom}
+                  </p>
+                  <p className="mt-1 font-black text-white">
+                    {getLanguageLabel(translationFrom)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">
+                    {selectorTranslations.translationTo}
+                  </p>
+                  <p className="mt-1 font-black text-white">
+                    {getLanguageLabel(translationTo)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">
+                    {selectorTranslations.translationStyle}
+                  </p>
+                  <p className="mt-1 font-black text-white">
+                    {getTranslationStyleLabel(translationStyle)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">
+                    {translationModalUi.sourceCharacters}
+                  </p>
+                  <p className="mt-1 font-black text-white">
+                    {translationSourceSummary.sourceCharacters.toLocaleString()}
+                  </p>
+                </div>
+              </div>
+
+              {translationSourceSummary.fileNames.length > 0 ? (
+                <div className="mt-3 rounded-2xl border border-sky-300/15 bg-sky-400/5 px-4 py-3">
+                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-sky-200">
+                    {translationModalUi.sourceFiles}
+                  </p>
+                  <p className="mt-1 break-words text-sm font-bold text-slate-200">
+                    {translationSourceSummary.fileNames.join(", ")}
+                  </p>
+                </div>
+              ) : null}
+            </header>
+
+            <div className="min-h-0 flex-1 p-4 sm:p-6">
+              <textarea
+                value={canvasText}
+                onChange={(event) => {
+                  setCanvasText(event.target.value);
+                  setResult(event.target.value);
+                }}
+                spellCheck
+                className="h-[52vh] min-h-[320px] w-full resize-none rounded-[26px] border border-white/10 bg-[#030711] px-5 py-5 text-sm font-semibold leading-7 text-white shadow-inner shadow-black/40 outline-none transition focus:border-sky-300/50 focus:ring-4 focus:ring-sky-400/10"
+                aria-label={activeModuleResultTitle}
+              />
+
+              <p className="mt-3 text-xs font-semibold leading-5 text-slate-400">
+                {translationModalUi.editableHint}
+              </p>
+            </div>
+
+            <footer className="flex flex-col gap-3 border-t border-white/10 px-5 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:px-7">
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard.writeText(canvasText || result || "");
+                }}
+                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+              >
+                <FileText className="h-4 w-4" />
+                <span>{translationModalUi.copy}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={downloadPdf}
+                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+              >
+                <FileDown className="h-4 w-4" />
+                <span>PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={downloadDoc}
+                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+              >
+                <Download className="h-4 w-4" />
+                <span>Word</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTranslationModalOpen(false)}
+                className="inline-flex min-h-[46px] items-center justify-center rounded-2xl bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 px-6 py-3 text-sm font-black text-white shadow-lg shadow-sky-950/30 transition hover:brightness-110"
+              >
+                {translationModalUi.close}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
 
       {canvasOpen ? (
         <div className="fixed inset-0 z-50 bg-black/80 p-4 backdrop-blur-sm">

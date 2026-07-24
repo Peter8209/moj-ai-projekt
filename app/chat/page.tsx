@@ -216,6 +216,8 @@ type BibliographicCandidate = {
   inTextCitations?: InTextCitation[];
   occurrenceCount?: number;
   matchedFromText?: boolean;
+  sourceDocumentName?: string | null;
+  citedAccordingTo?: string | null;
 };
 
 type ExtractTextApiResponse = {
@@ -427,12 +429,13 @@ const maxPreparedMultipartBytes = 3_200_000;
 const minPreparedFileTargetBytes = 160 * 1024;
 const maxPreparedFileTargetBytes = 640 * 1024;
 const maxDirectFallbackFileBytes = 3_200_000;
+const attachmentExtractionTimeoutMs = 60_000;
 
 const maxCompressedFileSizeBytes = 1 * 1024 * 1024;
 const safeCompressedTargetBytes = 950 * 1024;
 
-const maxClientExtractedCharsPerFile = 25_000;
-const maxTotalExtractedContextChars = 100_000;
+const maxClientExtractedCharsPerFile = 60_000;
+const maxTotalExtractedContextChars = 240_000;
 const maxDetectedSourcesForChat = 120;
 const maxDetectedAuthorsForChat = 120;
 const maxInTextCitationsForChat = 200;
@@ -2005,10 +2008,36 @@ async function callExtractTextApi({
   formData.append('detectBibliographicSources', 'true');
   formData.append('requireAuthorsAndPublications', 'true');
 
-  const res = await fetch('/api/extract-text', {
-    method: 'POST',
-    body: formData,
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(
+    () => controller.abort(),
+    attachmentExtractionTimeoutMs,
+  );
+
+  let res: Response;
+
+  try {
+    res = await fetch('/api/extract-text', {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (
+      error instanceof DOMException &&
+      error.name === 'AbortError'
+    ) {
+      throw new Error(
+        `Extrakcia súboru „${originalName}“ prekročila ${Math.round(
+          attachmentExtractionTimeoutMs / 1000,
+        )} sekúnd. Súbor bude vynechaný a ostatné prílohy sa spracujú ďalej.`,
+      );
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 
   const contentType = res.headers.get('content-type') || '';
 
@@ -2071,7 +2100,7 @@ function buildExtractedContext(preparedFiles: PreparedFile[]) {
 
   if (!readableFiles.length) return '';
 
-  // Každá z desiatich príloh dostane vlastný spravodlivý kontextový rozpočet.
+  // Každá príloha dostane vlastný spravodlivý kontextový rozpočet.
   // Posledné súbory sa preto neodrežú iba preto, že prvá príloha bola dlhá.
   const perFileBudget = Math.max(
     7_000,
@@ -2979,11 +3008,25 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
         );
 
         if (
+          successfullyReadFiles <= 0
+        ) {
+          throw new Error(
+            'Prekladač neprečítal ani jednu použiteľnú prílohu.',
+          );
+        }
+
+        if (
           receivedFiles < attachedFiles.length ||
           successfullyReadFiles < attachedFiles.length
         ) {
-          throw new Error(
-            `Prekladač neprečítal všetky prílohy. Prečítané: ${successfullyReadFiles}/${attachedFiles.length}.`,
+          console.warn(
+            'TRANSLATION_PARTIAL_ATTACHMENTS:',
+            {
+              receivedFiles,
+              successfullyReadFiles,
+              requestedFiles:
+                attachedFiles.length,
+            },
           );
         }
       }
@@ -3258,7 +3301,7 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
 
       // Malý súbor môže ešte bezpečne spracovať serverový parser/OCR.
       // Veľký nečitateľný originál neposielame naslepo, pretože by prekročil
-      // 4,5 MB limit Vercel Function a zablokoval aj ostatných deväť príloh.
+      // bezpečný limit požiadavky a zablokoval aj ostatné použiteľné prílohy.
       if (
         item.size <=
         Math.min(
@@ -3382,7 +3425,7 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
       ),
     );
 
-    const preparedFiles = new Array<PreparedFile>(
+    const preparedFiles = new Array<PreparedFile | null>(
       files.length,
     );
     let nextFileIndex = 0;
@@ -3397,17 +3440,59 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
           return;
         }
 
-        preparedFiles[currentIndex] =
-          await prepareBackendFile(
-            files[currentIndex],
+        const currentFile =
+          files[currentIndex];
+
+        try {
+          const prepared =
+            await prepareBackendFile(
+              currentFile,
+              {
+                targetBytes,
+                extractedCharLimit,
+                sourceLimit,
+                authorLimit,
+                citationLimit,
+              },
+            );
+
+          preparedFiles[currentIndex] = {
+            ...prepared,
+            detectedSources: (prepared.detectedSources || []).map((source) => ({
+              ...source,
+              sourceDocumentName:
+                source.sourceDocumentName || prepared.originalName,
+              citedAccordingTo:
+                source.citedAccordingTo || prepared.originalName,
+            })),
+          };
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Prílohu sa nepodarilo pripraviť.';
+
+          preparedFiles[currentIndex] = null;
+
+          updateProcessingLog(
+            currentFile.id,
             {
-              targetBytes,
-              extractedCharLimit,
-              sourceLimit,
-              authorLimit,
-              citationLimit,
+              status: 'error',
+              message:
+                'Táto príloha bola vynechaná. Ostatné prílohy sa spracujú ďalej.',
+              warning: message,
             },
           );
+
+          console.warn(
+            'CHAT_ATTACHMENT_PREPARATION_SKIPPED:',
+            {
+              fileName:
+                currentFile.name,
+              message,
+            },
+          );
+        }
       }
     };
 
@@ -3423,8 +3508,24 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
       ),
     );
 
+    const successfulPreparedFiles =
+      preparedFiles.filter(
+        (
+          file,
+        ): file is PreparedFile =>
+          Boolean(file),
+      );
+
+    if (
+      successfulPreparedFiles.length === 0
+    ) {
+      throw new Error(
+        'Nepodarilo sa pripraviť ani jednu použiteľnú prílohu. Skontrolujte textovú vrstvu PDF alebo OCR.',
+      );
+    }
+
     const preparedBytes =
-      preparedFiles.reduce(
+      successfulPreparedFiles.reduce(
         (sum, file) =>
           sum + file.preparedSize,
         0,
@@ -3439,7 +3540,7 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
       );
     }
 
-    return preparedFiles;
+    return successfulPreparedFiles;
   };
 
   const handleFiles = (files: FileList | null) => {
@@ -3649,7 +3750,7 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
     apiUserText: string;
   }) => {
     if (systemBlocked) return;
-   if (isLoading) return;;
+    if (isLoading) return;
 
     if (!activeProfile) {
       appendAssistantMessage(
@@ -3789,7 +3890,7 @@ formData.append('profile', JSON.stringify(profileForApi || null));
           ? 'uploaded_documents_first'
           : 'verified_web_sources',
       );
-      formData.append('validateAttachmentsAgainstProfile', 'false');
+      formData.append('validateAttachmentsAgainstProfile', 'true');
       formData.append('requireSourceList', 'true');
       formData.append('allowAiKnowledgeFallback', 'true');
       formData.append('returnExtractedFilesInfo', 'true');
@@ -3970,6 +4071,7 @@ formData.append('profile', JSON.stringify(profileForApi || null));
 
       const contentType = res.headers.get('content-type') || '';
       let fullText = '';
+      let attachmentWarningText = '';
 
       setMessages((prev) => [
         ...prev,
@@ -4009,39 +4111,61 @@ formData.append('profile', JSON.stringify(profileForApi || null));
           const serverReadAttachments =
             attachmentProcessing.serverReadAttachments === true;
 
-          if (receivedFiles < attachedFiles.length) {
-            throw new Error(
-              `Server prijal iba ${receivedFiles} z ${attachedFiles.length} príloh. Prílohy neboli odpočítané ani považované za spracované.`,
-            );
-          }
+          const fileDiagnostics = Array.isArray(
+            data?.extractedFilesInfo,
+          )
+            ? data.extractedFilesInfo
+                .filter((item: any) => item?.ok !== true)
+                .map(
+                  (item: any) =>
+                    `${item.fileName || item.preparedName || 'Súbor'}: ${
+                      item.status ||
+                      item.error ||
+                      'neznámy stav'
+                    }`,
+                )
+                .join('\n')
+            : '';
+
+          const serverWarnings = Array.isArray(
+            attachmentProcessing.warnings,
+          )
+            ? attachmentProcessing.warnings
+                .map((item: unknown) => String(item || '').trim())
+                .filter(Boolean)
+            : [];
 
           if (
-            successfullyReadFiles < attachedFiles.length ||
+            successfullyReadFiles <= 0 ||
             !serverReadAttachments
           ) {
-            const fileDiagnostics = Array.isArray(
-              data?.extractedFilesInfo,
-            )
-              ? data.extractedFilesInfo
-                  .map(
-                    (item: any) =>
-                      `${item.fileName || item.preparedName || 'Súbor'}: ${
-                        item.status ||
-                        item.error ||
-                        'neznámy stav'
-                      }`,
-                  )
-                  .join('\n')
-              : '';
-
             throw new Error(
               [
-                `Server neprečítal všetky prílohy. Úspešne prečítané: ${successfullyReadFiles}/${attachedFiles.length}.`,
+                'Server neprečítal žiadnu použiteľnú prílohu.',
                 fileDiagnostics,
               ]
                 .filter(Boolean)
                 .join('\n\n'),
             );
+          }
+
+          if (
+            receivedFiles < attachedFiles.length ||
+            successfullyReadFiles < attachedFiles.length ||
+            serverWarnings.length > 0
+          ) {
+            attachmentWarningText = [
+              ...serverWarnings,
+              receivedFiles < attachedFiles.length
+                ? `Server prijal ${receivedFiles} z ${attachedFiles.length} príloh.`
+                : '',
+              successfullyReadFiles < attachedFiles.length
+                ? `Použiteľne prečítané prílohy: ${successfullyReadFiles}/${attachedFiles.length}.`
+                : '',
+              fileDiagnostics,
+            ]
+              .filter(Boolean)
+              .join('\n');
           }
         }
 
@@ -4066,6 +4190,16 @@ formData.append('profile', JSON.stringify(profileForApi || null));
           )
         ) {
           fullText = `${fullText}\n\n${apiSources}`.trim();
+        }
+
+        if (
+          attachmentWarningText &&
+          !fullText.includes('Upozornenie k prílohám')
+        ) {
+          fullText = `${fullText}
+
+Upozornenie k prílohám
+${attachmentWarningText}`.trim();
         }
 
         if (!fullText && data.ok === false) {
@@ -4734,17 +4868,24 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
 
             <div className="shrink-0 border-t border-white/10 bg-[#070a16]/95 px-4 py-3 backdrop-blur md:px-8">
               <div className="mx-auto max-w-6xl rounded-[28px] border border-violet-500/40 bg-violet-950/30 p-3 shadow-2xl shadow-violet-950/40">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-violet-400/20 bg-black/20 px-3 py-2 text-xs">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-bold text-violet-100">
-                    <span className="inline-flex items-center gap-2">
-                      <Paperclip className="h-4 w-4 text-violet-300" />
-                      Počet nahraných príloh:{' '}
-                      <strong>
-                        {attachedFiles.length}/{maxFilesCount}
+                <div className="mb-3 rounded-2xl border border-violet-400/20 bg-black/20 px-3 py-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 font-bold text-violet-100">
+                    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                      <Paperclip className="h-4 w-4 shrink-0 text-violet-300" />
+                      <span>Počet nahraných príloh:</span>
+                      <strong className="rounded-md bg-violet-500/20 px-2 py-0.5">
+                        {attachedFiles.length} / {maxFilesCount}
                       </strong>
                     </span>
-                    <span className="text-[11px] font-semibold text-violet-200/75">
-                      Kapacita: maximálne {maxFilesCount} príloh,
+
+                    <span
+                      aria-hidden="true"
+                      className="hidden h-4 w-px bg-violet-300/25 sm:block"
+                    />
+
+                    <span className="text-[11px] font-semibold leading-5 text-violet-200/75">
+                      Kapacita: maximálne {maxFilesCount} príloh
+                      <span className="mx-2 text-violet-300/50">•</span>
                       max. {maxFileSizeMb} MB na jednu prílohu
                     </span>
                   </div>

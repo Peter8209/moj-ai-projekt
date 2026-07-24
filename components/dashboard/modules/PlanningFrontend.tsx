@@ -189,6 +189,842 @@ type EmailType =
 type EmailTone =
   "professional" | "formal" | "friendly" | "polite" | "urgent" | "short";
 
+
+type PlanningTaskStatus =
+  | "not-started"
+  | "in-progress"
+  | "completed"
+  | "not-applicable";
+
+type PlanningWorkType =
+  | "seminar"
+  | "bachelor"
+  | "master"
+  | "project"
+  | "other";
+
+type PlanningPreferredTime =
+  | "morning"
+  | "afternoon"
+  | "evening"
+  | "custom";
+
+type PlanningStatusKey =
+  | "topicApproval"
+  | "assignmentApproval"
+  | "outline"
+  | "sources"
+  | "theoreticalPart"
+  | "practicalPart"
+  | "research"
+  | "dataAnalysis"
+  | "discussion"
+  | "conclusion"
+  | "citations"
+  | "formatting"
+  | "proofreading";
+
+type PlanningPriorityLevel =
+  | "low"
+  | "medium"
+  | "high"
+  | "critical";
+
+type PlanningPlan = {
+  summary: {
+    availableDays: number;
+    productiveDays: number;
+    availableHours: number;
+    productiveHours: number;
+    requiredHours: number;
+    remainingPages: number;
+    reserveDays: number;
+    pagesPerDay: number;
+    progressPercent?: number;
+    feasibility: "realistic" | "intensive" | "high-risk" | "unrealistic";
+    riskLevel: PlanningPriorityLevel;
+    explanation: string;
+  };
+  phases: Array<{
+    id: string;
+    title: string;
+    startDate: string;
+    endDate: string;
+    estimatedHours: number;
+    expectedOutput: string;
+    priority: PlanningPriorityLevel;
+    dependencies: string[];
+    status: PlanningTaskStatus;
+  }>;
+  dailySchedule: Array<{
+    date: string;
+    dayGoal: string;
+    targetPages: number;
+    tasks: Array<{
+      id: string;
+      time: string;
+      title: string;
+      deliverable: string;
+      checkpoint: string;
+    }>;
+  }>;
+  milestones: Array<{
+    id: string;
+    title: string;
+    date: string;
+    acceptanceCriteria: string;
+  }>;
+  risks: Array<{
+    id: string;
+    level: PlanningPriorityLevel;
+    title: string;
+    description: string;
+    mitigation: string;
+  }>;
+  recommendations: string[];
+};
+
+type PlanningApiMeta = {
+  generationMode?: "ai" | "deterministic-fallback";
+  fallbackReason?: string | null;
+  model?: string;
+  generatedAt?: string;
+  calculation?: Record<string, unknown>;
+};
+
+type PlanningView = "gantt" | "milestones" | "daily" | "risks";
+
+const PLANNING_STATUS_KEYS: PlanningStatusKey[] = [
+  "topicApproval",
+  "assignmentApproval",
+  "outline",
+  "sources",
+  "theoreticalPart",
+  "practicalPart",
+  "research",
+  "dataAnalysis",
+  "discussion",
+  "conclusion",
+  "citations",
+  "formatting",
+  "proofreading",
+];
+
+
+const PLANNING_STATUS_OPTIONS: Array<{
+  value: PlanningTaskStatus;
+  label: string;
+}> = [
+  { value: "not-started", label: "Nezačaté" },
+  { value: "in-progress", label: "Rozpracované" },
+  { value: "completed", label: "Dokončené" },
+  { value: "not-applicable", label: "Nevzťahuje sa" },
+];
+
+type PlanningWorkPreset = {
+  label: string;
+  shortLabel: string;
+  description: string;
+  targetPages: number;
+  hoursPerDay: number;
+  daysPerWeek: number;
+  maxBlockHours: number;
+  preferredTime: PlanningPreferredTime;
+  availableWeekdays: number[];
+  priorities: string[];
+  accentClassName: string;
+};
+
+const PLANNING_WORK_PRESETS: Record<
+  PlanningWorkType,
+  PlanningWorkPreset
+> = {
+  seminar: {
+    label: "Seminárna práca",
+    shortLabel: "Seminárna",
+    description:
+      "Kompaktný plán spracovania témy, zdrojov, textu, citácií a finálnej kontroly.",
+    targetPages: 15,
+    hoursPerDay: 1.5,
+    daysPerWeek: 5,
+    maxBlockHours: 1.5,
+    preferredTime: "evening",
+    availableWeekdays: [1, 2, 3, 4, 5],
+    priorities: [
+      "Dodržať termín odovzdania",
+      "Zachovať odbornú kvalitu",
+      "Skontrolovať citácie a bibliografiu",
+      "Vytvoriť rezervu pred odovzdaním",
+    ],
+    accentClassName:
+      "from-cyan-500/20 via-sky-500/10 to-transparent border-cyan-300/30",
+  },
+  bachelor: {
+    label: "Bakalárska práca",
+    shortLabel: "Bakalárska",
+    description:
+      "Kompletný harmonogram teoretickej a praktickej časti vrátane výskumu a odovzdania.",
+    targetPages: 50,
+    hoursPerDay: 2,
+    daysPerWeek: 5,
+    maxBlockHours: 1.5,
+    preferredTime: "evening",
+    availableWeekdays: [1, 2, 3, 4, 5],
+    priorities: [
+      "Dodržať termín odovzdania",
+      "Zachovať odbornú kvalitu",
+      "Dokončiť praktickú časť",
+      "Dokončiť výskum a analýzu",
+      "Skontrolovať citácie a bibliografiu",
+      "Vytvoriť rezervu pred odovzdaním",
+    ],
+    accentClassName:
+      "from-violet-500/20 via-purple-500/10 to-transparent border-violet-300/30",
+  },
+  master: {
+    label: "Diplomová / magisterská práca",
+    shortLabel: "Diplomová",
+    description:
+      "Rozšírený odborný plán pre výskum, analýzu, diskusiu, finalizáciu a prípravu odovzdania.",
+    targetPages: 70,
+    hoursPerDay: 2.5,
+    daysPerWeek: 6,
+    maxBlockHours: 2,
+    preferredTime: "evening",
+    availableWeekdays: [1, 2, 3, 4, 5, 6],
+    priorities: [
+      "Dodržať termín odovzdania",
+      "Zachovať odbornú kvalitu",
+      "Dokončiť praktickú časť",
+      "Dokončiť výskum a analýzu",
+      "Skontrolovať citácie a bibliografiu",
+      "Vytvoriť rezervu pred odovzdaním",
+    ],
+    accentClassName:
+      "from-fuchsia-500/20 via-violet-500/10 to-transparent border-fuchsia-300/30",
+  },
+  project: {
+    label: "Projektová práca",
+    shortLabel: "Projekt",
+    description:
+      "Projektový harmonogram s fázami návrhu, realizácie, testovania, dokumentácie a odovzdania.",
+    targetPages: 35,
+    hoursPerDay: 2,
+    daysPerWeek: 5,
+    maxBlockHours: 2,
+    preferredTime: "afternoon",
+    availableWeekdays: [1, 2, 3, 4, 5],
+    priorities: [
+      "Dodržať termín odovzdania",
+      "Zachovať odbornú kvalitu",
+      "Dokončiť praktickú časť",
+      "Vytvoriť rezervu pred odovzdaním",
+    ],
+    accentClassName:
+      "from-emerald-500/20 via-teal-500/10 to-transparent border-emerald-300/30",
+  },
+  other: {
+    label: "Iná akademická práca",
+    shortLabel: "Iná práca",
+    description:
+      "Univerzálny harmonogram pre odbornú, vedeckú alebo školskú prácu.",
+    targetPages: 30,
+    hoursPerDay: 2,
+    daysPerWeek: 5,
+    maxBlockHours: 1.5,
+    preferredTime: "evening",
+    availableWeekdays: [1, 2, 3, 4, 5],
+    priorities: [
+      "Dodržať termín odovzdania",
+      "Zachovať odbornú kvalitu",
+      "Vytvoriť rezervu pred odovzdaním",
+    ],
+    accentClassName:
+      "from-amber-500/20 via-orange-500/10 to-transparent border-amber-300/30",
+  },
+};
+
+const PLANNING_WORK_TYPE_OPTIONS: PlanningWorkType[] = [
+  "seminar",
+  "bachelor",
+  "master",
+  "project",
+  "other",
+];
+
+function getPlanningWorkPreset(
+  workType: PlanningWorkType,
+): PlanningWorkPreset {
+  return PLANNING_WORK_PRESETS[workType] || PLANNING_WORK_PRESETS.other;
+}
+
+function createDefaultPlanningStatus(): Record<
+  PlanningStatusKey,
+  PlanningTaskStatus
+> {
+  return {
+    topicApproval: "completed",
+    assignmentApproval: "completed",
+    outline: "in-progress",
+    sources: "in-progress",
+    theoreticalPart: "not-started",
+    practicalPart: "not-started",
+    research: "not-started",
+    dataAnalysis: "not-started",
+    discussion: "not-started",
+    conclusion: "not-started",
+    citations: "not-started",
+    formatting: "not-started",
+    proofreading: "not-started",
+  };
+}
+
+function parsePlanningDate(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+
+  const date = new Date(`${value}T00:00:00`);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatPlanningDate(value: string): string {
+  const date = parsePlanningDate(value);
+
+  return date
+    ? new Intl.DateTimeFormat("sk-SK", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      }).format(date)
+    : value;
+}
+
+function planningDayDifference(from: string, to: string): number {
+  const start = parsePlanningDate(from);
+  const end = parsePlanningDate(to);
+
+  if (!start || !end) return 0;
+
+  return Math.round((end.getTime() - start.getTime()) / 86_400_000);
+}
+
+function planningPriorityClasses(priority: PlanningPriorityLevel): string {
+  if (priority === "critical") {
+    return "from-rose-500 via-red-500 to-orange-500 shadow-rose-950/40";
+  }
+
+  if (priority === "high") {
+    return "from-orange-400 via-amber-400 to-yellow-300 shadow-amber-950/40";
+  }
+
+  if (priority === "low") {
+    return "from-emerald-400 via-teal-400 to-cyan-400 shadow-emerald-950/40";
+  }
+
+  return "from-violet-500 via-purple-500 to-fuchsia-500 shadow-violet-950/40";
+}
+
+function planningRiskClasses(priority: PlanningPriorityLevel): string {
+  if (priority === "critical") {
+    return "border-rose-400/30 bg-rose-500/10 text-rose-100";
+  }
+
+  if (priority === "high") {
+    return "border-orange-300/30 bg-orange-500/10 text-orange-100";
+  }
+
+  if (priority === "low") {
+    return "border-emerald-300/30 bg-emerald-500/10 text-emerald-100";
+  }
+
+  return "border-amber-300/30 bg-amber-500/10 text-amber-100";
+}
+
+function planningStatusLabel(status: PlanningTaskStatus): string {
+  return (
+    PLANNING_STATUS_OPTIONS.find((item) => item.value === status)?.label ||
+    status
+  );
+}
+
+function planningFeasibilityLabel(
+  value: PlanningPlan["summary"]["feasibility"],
+): string {
+  const labels: Record<PlanningPlan["summary"]["feasibility"], string> = {
+    realistic: "Realistický",
+    intensive: "Intenzívny",
+    "high-risk": "Vysoké riziko",
+    unrealistic: "Nerealistický",
+  };
+
+  return labels[value];
+}
+
+function PlanningGantt({ plan }: { plan: PlanningPlan }) {
+  const phaseDates = plan.phases.flatMap((phase) => [
+    phase.startDate,
+    phase.endDate,
+  ]);
+  const milestoneDates = plan.milestones.map((milestone) => milestone.date);
+  const allDates = [...phaseDates, ...milestoneDates]
+    .filter(Boolean)
+    .sort();
+
+  const timelineStart = allDates[0] || new Date().toISOString().slice(0, 10);
+  const timelineEnd =
+    allDates[allDates.length - 1] || timelineStart;
+  const totalDays = Math.max(
+    1,
+    planningDayDifference(timelineStart, timelineEnd) + 1,
+  );
+
+  const tickCount = Math.min(8, Math.max(2, totalDays));
+  const ticks = Array.from({ length: tickCount }, (_, index) => {
+    const offset = Math.round(
+      (index / Math.max(1, tickCount - 1)) * Math.max(0, totalDays - 1),
+    );
+    const base = parsePlanningDate(timelineStart) || new Date();
+    const date = new Date(base);
+    date.setDate(date.getDate() + offset);
+
+    return {
+      offset,
+      label: new Intl.DateTimeFormat("sk-SK", {
+        day: "2-digit",
+        month: "2-digit",
+      }).format(date),
+    };
+  });
+
+  return (
+    <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[#050812] shadow-2xl shadow-black/30">
+      <div className="flex flex-col gap-3 border-b border-white/10 bg-gradient-to-r from-violet-500/10 via-cyan-500/[0.06] to-transparent px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-[0.24em] text-violet-300">
+            Interaktívna časová os
+          </p>
+          <h3 className="mt-1 text-xl font-black text-white">
+            Ganttov harmonogram projektu
+          </h3>
+          <p className="mt-1 text-xs font-semibold text-slate-400">
+            {formatPlanningDate(timelineStart)} –{" "}
+            {formatPlanningDate(timelineEnd)} · {totalDays} kalendárnych dní
+          </p>
+        </div>
+
+        <div className="inline-flex items-center gap-2 self-start rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100">
+          <CheckCircle2 className="h-4 w-4" />
+          {plan.phases.length} riadených etáp
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <div className="min-w-[980px]">
+          <div className="grid grid-cols-[270px_minmax(680px,1fr)] border-b border-white/10 bg-white/[0.025]">
+            <div className="border-r border-white/10 px-5 py-4 text-xs font-black uppercase tracking-[0.18em] text-slate-400">
+              Etapa a výstup
+            </div>
+            <div className="relative h-16">
+              {ticks.map((tick) => {
+                const left =
+                  totalDays <= 1 ? 0 : (tick.offset / (totalDays - 1)) * 100;
+
+                return (
+                  <div
+                    key={`${tick.offset}-${tick.label}`}
+                    className="absolute inset-y-0 border-l border-white/10"
+                    style={{ left: `${left}%` }}
+                  >
+                    <span className="absolute left-2 top-3 whitespace-nowrap text-[11px] font-black text-slate-400">
+                      {tick.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {plan.phases.map((phase, index) => {
+            const startOffset = Math.max(
+              0,
+              planningDayDifference(timelineStart, phase.startDate),
+            );
+            const phaseDays = Math.max(
+              1,
+              planningDayDifference(phase.startDate, phase.endDate) + 1,
+            );
+            const left = (startOffset / totalDays) * 100;
+            const width = Math.max(1.5, (phaseDays / totalDays) * 100);
+
+            return (
+              <div
+                key={phase.id}
+                className="grid grid-cols-[270px_minmax(680px,1fr)] border-b border-white/[0.07] last:border-b-0"
+              >
+                <div className="border-r border-white/10 px-5 py-4">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05] text-xs font-black text-white">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-black text-white">
+                        {phase.title}
+                      </p>
+                      <p className="mt-1 line-clamp-2 text-[11px] font-semibold leading-4 text-slate-400">
+                        {phase.expectedOutput}
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-[0.12em]">
+                        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-300">
+                          {phase.estimatedHours} h
+                        </span>
+                        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-300">
+                          {planningStatusLabel(phase.status)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="relative min-h-[96px] overflow-hidden bg-[linear-gradient(to_right,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[length:4%_100%]">
+                  <div
+                    className={[
+                      "absolute top-1/2 -translate-y-1/2 overflow-hidden rounded-2xl bg-gradient-to-r px-4 py-3 text-white shadow-xl ring-1 ring-white/20",
+                      planningPriorityClasses(phase.priority),
+                    ].join(" ")}
+                    style={{
+                      left: `${left}%`,
+                      width: `${Math.min(100 - left, width)}%`,
+                      minWidth: "92px",
+                    }}
+                    title={`${phase.title}: ${phase.startDate} – ${phase.endDate}`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="truncate text-xs font-black">
+                        {phase.title}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-black/20 px-2 py-0.5 text-[9px] font-black">
+                        {phaseDays} d.
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate text-[10px] font-bold text-white/80">
+                      {formatPlanningDate(phase.startDate)} –{" "}
+                      {formatPlanningDate(phase.endDate)}
+                    </p>
+                  </div>
+
+                  {plan.milestones
+                    .filter(
+                      (milestone) =>
+                        milestone.date >= phase.startDate &&
+                        milestone.date <= phase.endDate,
+                    )
+                    .map((milestone) => {
+                      const markerOffset = Math.max(
+                        0,
+                        planningDayDifference(timelineStart, milestone.date),
+                      );
+                      const markerLeft = (markerOffset / totalDays) * 100;
+
+                      return (
+                        <div
+                          key={`${phase.id}-${milestone.id}`}
+                          className="absolute bottom-2 h-3 w-3 -translate-x-1/2 rotate-45 border border-white/50 bg-white shadow-lg"
+                          style={{ left: `${markerLeft}%` }}
+                          title={`${milestone.title} · ${milestone.date}`}
+                        />
+                      );
+                    })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlanningResultDashboard({
+  plan,
+  meta,
+  view,
+  onViewChange,
+}: {
+  plan: PlanningPlan;
+  meta: PlanningApiMeta | null;
+  view: PlanningView;
+  onViewChange: (view: PlanningView) => void;
+}) {
+  const summaryCards = [
+    {
+      label: "Dostupné dni",
+      value: plan.summary.availableDays,
+      suffix: "dní",
+      icon: CalendarDays,
+    },
+    {
+      label: "Produktívny čas",
+      value: plan.summary.productiveHours,
+      suffix: "h",
+      icon: Clock3,
+    },
+    {
+      label: "Zostávajúce strany",
+      value: plan.summary.remainingPages,
+      suffix: "str.",
+      icon: FileText,
+    },
+    {
+      label: "Rezerva",
+      value: plan.summary.reserveDays,
+      suffix: "dní",
+      icon: CheckCircle2,
+    },
+  ];
+
+  return (
+    <section
+      className="mt-8 overflow-hidden rounded-[34px] border border-violet-300/20 bg-gradient-to-br from-[#0b1020] via-[#080b15] to-[#05070d] shadow-2xl shadow-violet-950/30"
+    >
+      <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.18),transparent_42%)] px-5 py-6 sm:px-7">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-violet-300/20 bg-violet-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-violet-200">
+                Projektový plán pripravený
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-300">
+                {meta?.generationMode === "deterministic-fallback"
+                  ? "Garantovaný výpočtový režim"
+                  : "AI + výpočtový model"}
+              </span>
+            </div>
+
+            <h2 className="mt-3 text-2xl font-black tracking-tight text-white sm:text-3xl">
+              Realizačný plán akademickej práce
+            </h2>
+            <p className="mt-2 max-w-4xl text-sm font-semibold leading-6 text-slate-300">
+              {plan.summary.explanation}
+            </p>
+          </div>
+
+          <div
+            className={[
+              "min-w-[220px] rounded-3xl border p-4",
+              planningRiskClasses(plan.summary.riskLevel),
+            ].join(" ")}
+          >
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-70">
+              Realizovateľnosť
+            </p>
+            <p className="mt-1 text-xl font-black">
+              {planningFeasibilityLabel(plan.summary.feasibility)}
+            </p>
+            <p className="mt-2 text-xs font-bold opacity-80">
+              Potrebných {plan.summary.requiredHours} h z{" "}
+              {plan.summary.productiveHours} produktívnych hodín.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {summaryCards.map((card) => {
+            const Icon = card.icon;
+
+            return (
+              <div
+                key={card.label}
+                className="rounded-3xl border border-white/10 bg-white/[0.045] p-4 backdrop-blur"
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
+                      {card.label}
+                    </p>
+                    <p className="mt-1 text-2xl font-black text-white">
+                      {card.value}{" "}
+                      <span className="text-sm text-slate-400">
+                        {card.suffix}
+                      </span>
+                    </p>
+                  </div>
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-violet-300/15 bg-violet-500/10 text-violet-200">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="p-5 sm:p-7">
+        <div className="mb-5 flex flex-wrap gap-2 rounded-2xl border border-white/10 bg-black/20 p-2">
+          {(
+            [
+              ["gantt", "Ganttov graf"],
+              ["milestones", "Míľniky"],
+              ["daily", "Denný plán"],
+              ["risks", "Riziká a odporúčania"],
+            ] as Array<[PlanningView, string]>
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => onViewChange(value)}
+              className={[
+                "rounded-xl px-4 py-2.5 text-xs font-black transition",
+                view === value
+                  ? "bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-950/40"
+                  : "text-slate-400 hover:bg-white/[0.06] hover:text-white",
+              ].join(" ")}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {view === "gantt" ? <PlanningGantt plan={plan} /> : null}
+
+        {view === "milestones" ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            {plan.milestones.map((milestone, index) => (
+              <article
+                key={milestone.id}
+                className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.035] p-5"
+              >
+                <div className="absolute right-0 top-0 h-24 w-24 rounded-full bg-violet-500/10 blur-2xl" />
+                <div className="relative flex items-start gap-4">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-violet-300/20 bg-violet-500/10 text-sm font-black text-violet-200">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-violet-300">
+                      {formatPlanningDate(milestone.date)}
+                    </p>
+                    <h4 className="mt-1 text-lg font-black text-white">
+                      {milestone.title}
+                    </h4>
+                    <p className="mt-2 text-sm font-semibold leading-6 text-slate-400">
+                      {milestone.acceptanceCriteria}
+                    </p>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : null}
+
+        {view === "daily" ? (
+          <div className="max-h-[720px] space-y-3 overflow-y-auto pr-1">
+            {plan.dailySchedule.map((day) => (
+              <article
+                key={day.date}
+                className="rounded-3xl border border-white/10 bg-white/[0.035] p-5"
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-300">
+                      {formatPlanningDate(day.date)}
+                    </p>
+                    <h4 className="mt-1 text-base font-black text-white">
+                      {day.dayGoal}
+                    </h4>
+                  </div>
+                  <span className="self-start rounded-full border border-cyan-300/20 bg-cyan-500/10 px-3 py-1 text-xs font-black text-cyan-100">
+                    cieľ {day.targetPages} str.
+                  </span>
+                </div>
+
+                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                  {day.tasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                    >
+                      <div className="flex items-center gap-2 text-xs font-black text-violet-200">
+                        <Clock3 className="h-4 w-4" />
+                        {task.time}
+                      </div>
+                      <p className="mt-2 text-sm font-black text-white">
+                        {task.title}
+                      </p>
+                      <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">
+                        Výstup: {task.deliverable}
+                      </p>
+                      <p className="mt-2 text-xs font-semibold leading-5 text-emerald-200/80">
+                        Kontrola: {task.checkpoint}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : null}
+
+        {view === "risks" ? (
+          <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+            <div className="space-y-3">
+              {plan.risks.map((risk) => (
+                <article
+                  key={risk.id}
+                  className={[
+                    "rounded-3xl border p-5",
+                    planningRiskClasses(risk.level),
+                  ].join(" ")}
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <h4 className="text-base font-black">{risk.title}</h4>
+                    <span className="rounded-full border border-current/20 bg-black/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em]">
+                      {risk.level}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm font-semibold leading-6 opacity-80">
+                    {risk.description}
+                  </p>
+                  <p className="mt-3 text-xs font-black leading-5">
+                    Opatrenie: {risk.mitigation}
+                  </p>
+                </article>
+              ))}
+            </div>
+
+            <div className="rounded-3xl border border-emerald-300/20 bg-emerald-500/[0.07] p-5">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-300">
+                Odporúčané riadenie
+              </p>
+              <div className="mt-4 space-y-3">
+                {plan.recommendations.map((recommendation, index) => (
+                  <div
+                    key={`${index}-${recommendation}`}
+                    className="flex items-start gap-3 rounded-2xl border border-white/10 bg-black/15 p-4"
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-emerald-400/15 text-xs font-black text-emerald-200">
+                      {index + 1}
+                    </span>
+                    <p className="text-sm font-semibold leading-6 text-emerald-50/80">
+                      {recommendation}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {meta?.fallbackReason ? (
+          <div className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-500/[0.07] px-4 py-3 text-xs font-semibold leading-5 text-amber-100/80">
+            Plán bol bezpečne vytvorený výpočtovým plánovačom. Technická
+            poznámka: {meta.fallbackReason}
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+
 type QuestionnaireMode = "none" | "selected" | "manual" | "auto-suggest-only";
 
 type QuestionnaireOptionId = "" | "none" | "custom";
@@ -1139,9 +1975,9 @@ const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
       label: "Plánovanie",
       shortLabel: "Plánovanie",
       button: "Spustiť plánovanie",
-      inputLabel: "Zadanie pre plánovanie",
+      inputLabel: "Druh práce a termín odovzdania",
       placeholder:
-        "Napíšte termín odovzdania, aktuálny stav práce a požadovaný plán. Termín nesmie byť v minulosti.",
+        "Vyberte druh akademickej práce a budúci termín odovzdania.",
       intro:
         "Plánovanie rozdelí prácu na kroky, termíny a priority podľa dátumu odovzdania a aktuálneho stavu.",
       resultTitle: "Výstup plánovania",
@@ -4562,9 +5398,186 @@ export default function PlanningFrontend(
   const [emailType, setEmailType] = useState<EmailType>("supervisor");
   const [emailTone, setEmailTone] = useState<EmailTone>("professional");
 
+  const [planningTitle, setPlanningTitle] = useState("");
+  const [planningWorkType, setPlanningWorkType] =
+    useState<PlanningWorkType>("bachelor");
+  const [planningDeadline, setPlanningDeadline] = useState("");
+  const [planningDeadlineTime, setPlanningDeadlineTime] = useState("23:59");
+  const [planningTargetPages, setPlanningTargetPages] = useState(50);
+  const [planningCompletedPages, setPlanningCompletedPages] = useState(0);
+  const [planningHoursPerDay, setPlanningHoursPerDay] = useState(2);
+  const [planningDaysPerWeek, setPlanningDaysPerWeek] = useState(5);
+  const [planningAvailableWeekdays, setPlanningAvailableWeekdays] = useState<
+    number[]
+  >([1, 2, 3, 4, 5]);
+  const [planningUnavailableDates, setPlanningUnavailableDates] = useState("");
+  const [planningPreferredTime, setPlanningPreferredTime] =
+    useState<PlanningPreferredTime>("evening");
+  const [planningMaxBlockHours, setPlanningMaxBlockHours] = useState(1.5);
+  const [planningPriorities, setPlanningPriorities] = useState<string[]>([
+    "Dodržať termín odovzdania",
+    "Zachovať odbornú kvalitu",
+    "Vytvoriť rezervu pred odovzdaním",
+  ]);
+  const [planningConstraints, setPlanningConstraints] = useState("");
+  const [planningCurrentStatus, setPlanningCurrentStatus] = useState<
+    Record<PlanningStatusKey, PlanningTaskStatus>
+  >(() => createDefaultPlanningStatus());
+  const [planningPlan, setPlanningPlan] = useState<PlanningPlan | null>(null);
+  const [planningMeta, setPlanningMeta] = useState<PlanningApiMeta | null>(null);
+  const [planningView, setPlanningView] = useState<PlanningView>("gantt");
+
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const resultRef = useRef<HTMLDivElement | null>(null);
   const mobileToolPanelRef = useRef<HTMLDivElement | null>(null);
+
+
+  useEffect(() => {
+    if (!activeProfile) return;
+
+    setPlanningTitle((current) => {
+      if (current.trim()) return current;
+
+      return activeProfile.title || activeProfile.topic || "";
+    });
+
+    setPlanningWorkType((current) => {
+      const rawType = String(
+        activeProfile.type || activeProfile.level || "",
+      ).toLowerCase();
+
+      if (rawType.includes("semin")) return "seminar";
+      if (rawType.includes("bak") || rawType.includes("bachelor")) {
+        return "bachelor";
+      }
+      if (
+        rawType.includes("dipl") ||
+        rawType.includes("mag") ||
+        rawType.includes("master")
+      ) {
+        return "master";
+      }
+      if (rawType.includes("projekt") || rawType.includes("project")) {
+        return "project";
+      }
+
+      return current;
+    });
+  }, [activeProfile]);
+
+  /**
+   * Používateľ pri plánovaní vyberá iba druh práce a termín odovzdania.
+   * Všetky ostatné parametre sú odborné systémové predvoľby podľa typu práce.
+   * Tým sa odstráni nejednoznačné voľné textové zadanie a endpoint vždy dostane
+   * úplný, konzistentný a validovateľný plánovací objekt.
+   */
+  useEffect(() => {
+    const preset = getPlanningWorkPreset(planningWorkType);
+
+    setPlanningTargetPages(preset.targetPages);
+    setPlanningCompletedPages(0);
+    setPlanningHoursPerDay(preset.hoursPerDay);
+    setPlanningDaysPerWeek(preset.daysPerWeek);
+    setPlanningAvailableWeekdays([...preset.availableWeekdays]);
+    setPlanningUnavailableDates("");
+    setPlanningPreferredTime(preset.preferredTime);
+    setPlanningMaxBlockHours(preset.maxBlockHours);
+    setPlanningPriorities([...preset.priorities]);
+    setPlanningConstraints("");
+    setPlanningCurrentStatus(createDefaultPlanningStatus());
+
+    // Plánovanie už nepoužíva všeobecný textový vstup modulu.
+    setInput("");
+    setSecondaryInput("");
+  }, [planningWorkType]);
+
+  const planningPreset = useMemo(
+    () => getPlanningWorkPreset(planningWorkType),
+    [planningWorkType],
+  );
+
+  const planningPreview = useMemo(() => {
+    const deadline = parsePlanningDate(planningDeadline);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (!deadline || deadline.getTime() <= today.getTime()) {
+      return {
+        calendarDays: 0,
+        estimatedWorkingDays: 0,
+        availableHours: 0,
+        remainingPages: Math.max(
+          0,
+          planningTargetPages - planningCompletedPages,
+        ),
+        pagesPerDay: 0,
+      };
+    }
+
+    const weekdaySet = new Set(planningAvailableWeekdays);
+    const unavailableSet = new Set(
+      planningUnavailableDates
+        .split(/[\s,;]+/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    );
+
+    let estimatedWorkingDays = 0;
+    const cursor = new Date(today);
+
+    while (cursor.getTime() <= deadline.getTime()) {
+      const iso = [
+        cursor.getFullYear(),
+        String(cursor.getMonth() + 1).padStart(2, "0"),
+        String(cursor.getDate()).padStart(2, "0"),
+      ].join("-");
+
+      if (weekdaySet.has(cursor.getDay()) && !unavailableSet.has(iso)) {
+        estimatedWorkingDays += 1;
+      }
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    const calendarDays =
+      Math.max(
+        0,
+        Math.round(
+          (deadline.getTime() - today.getTime()) / 86_400_000,
+        ) + 1,
+      );
+    const remainingPages = Math.max(
+      0,
+      planningTargetPages - planningCompletedPages,
+    );
+    const reserveDays = Math.min(
+      Math.max(1, Math.ceil(estimatedWorkingDays * 0.1)),
+      Math.max(0, estimatedWorkingDays - 1),
+    );
+    const productiveDays = Math.max(
+      1,
+      estimatedWorkingDays - reserveDays,
+    );
+
+    return {
+      calendarDays,
+      estimatedWorkingDays,
+      availableHours:
+        Math.round(estimatedWorkingDays * planningHoursPerDay * 10) / 10,
+      remainingPages,
+      pagesPerDay:
+        Math.round((remainingPages / productiveDays) * 10) / 10,
+    };
+  }, [
+    planningAvailableWeekdays,
+    planningCompletedPages,
+    planningDeadline,
+    planningHoursPerDay,
+    planningTargetPages,
+    planningUnavailableDates,
+  ]);
+
 
   const activeModuleInfo = useMemo(() => {
     return (
@@ -5231,6 +6244,28 @@ export default function PlanningFrontend(
     setActiveAttachmentText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
+
+    if (activeModuleRef.current === "planning") {
+      const defaultPreset = getPlanningWorkPreset("bachelor");
+      setPlanningTitle(activeProfile?.title || activeProfile?.topic || "");
+      setPlanningWorkType("bachelor");
+      setPlanningDeadline("");
+      setPlanningDeadlineTime("23:59");
+      setPlanningTargetPages(defaultPreset.targetPages);
+      setPlanningCompletedPages(0);
+      setPlanningHoursPerDay(defaultPreset.hoursPerDay);
+      setPlanningDaysPerWeek(defaultPreset.daysPerWeek);
+      setPlanningAvailableWeekdays([...defaultPreset.availableWeekdays]);
+      setPlanningUnavailableDates("");
+      setPlanningPreferredTime(defaultPreset.preferredTime);
+      setPlanningMaxBlockHours(defaultPreset.maxBlockHours);
+      setPlanningPriorities([...defaultPreset.priorities]);
+      setPlanningConstraints("");
+      setPlanningCurrentStatus(createDefaultPlanningStatus());
+      setPlanningPlan(null);
+      setPlanningMeta(null);
+      setPlanningView("gantt");
+    }
   };
 
   useEffect(() => {
@@ -5806,10 +6841,10 @@ Text emailu:
 
     const sheet = workbook.Sheets[sheetName];
 
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    const rows = XLSX.utils.sheet_to_json(sheet, {
       defval: "",
       raw: false,
-    });
+    }) as Array<Record<string, unknown>>;
 
     return rows
       .map((row) => {
@@ -6007,28 +7042,25 @@ Text emailu:
         activeProfile.schema?.label),
     );
 
-    const hasAnyInput = Boolean(
-      userText || secondaryText || requestAttachedFiles.length > 0 || hasUsableProfile,
-    );
+    const hasAnyInput =
+      requestedModule === "planning"
+        ? Boolean(planningDeadline && planningWorkType)
+        : Boolean(
+            userText ||
+              secondaryText ||
+              requestAttachedFiles.length > 0 ||
+              hasUsableProfile,
+          );
 
     if (!hasAnyInput) {
       alert(
         requestedModule === "planning"
-          ? "Najskôr zadajte termín odovzdania, aktuálny stav práce a požadovaný plán alebo vyberte profil práce."
+          ? "Vyberte druh práce a termín odovzdania. Zedpera ostatné parametre nastaví automaticky."
           : requestedModule === "emails"
             ? "Najskôr vložte zadanie pre email alebo vyberte profil práce."
             : "Najskôr vložte zadanie, text, prílohu alebo vyberte profil práce.",
       );
       return;
-    }
-
-    if (requestedModule === "planning") {
-      const validation = validatePlanningDatesNoPast(userText || secondaryText);
-
-      if (!validation.ok) {
-        alert(validation.message);
-        return;
-      }
     }
 
     setIsLoading(true);
@@ -6539,6 +7571,156 @@ Text emailu:
         }, 150);
 
         await loadBillingState();
+        return;
+      }
+
+
+      // =====================================================
+      // PLÁNOVANIE – DRUH PRÁCE + TERMÍN, OSTATNÉ AUTOMATICKY
+      // =====================================================
+      if (requestedModule === "planning") {
+        const preset = getPlanningWorkPreset(planningWorkType);
+        const resolvedPlanningTitle =
+          profileForApi?.title ||
+          profileForApi?.topic ||
+          preset.label;
+
+        const parsedDeadline = parsePlanningDate(planningDeadline);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        if (!parsedDeadline) {
+          throw new DashboardApiError({
+            status: 400,
+            code: "PLANNING_DEADLINE_REQUIRED",
+            message: "Vyberte termín odovzdania práce.",
+            detail:
+              "Plánovanie sa spustí po výbere druhu práce a platného budúceho dátumu.",
+          });
+        }
+
+        if (parsedDeadline.getTime() <= today.getTime()) {
+          throw new DashboardApiError({
+            status: 400,
+            code: "PLANNING_DEADLINE_INVALID",
+            message: "Termín odovzdania musí byť neskorší ako dnešný dátum.",
+          });
+        }
+
+        const planningPayload = {
+          action: "generate-plan" as const,
+          requestId: `${moduleRunRequestId}-planning`,
+          projectId: profileForApi?.id || undefined,
+          title: resolvedPlanningTitle,
+          workType: planningWorkType,
+          language: finalWorkLanguage || systemLanguage,
+          workLanguage: finalWorkLanguage || systemLanguage,
+          deadline: planningDeadline,
+          deadlineTime: "23:59",
+          targetPages: preset.targetPages,
+          completedPages: 0,
+          currentStatus: createDefaultPlanningStatus(),
+          capacity: {
+            hoursPerDay: preset.hoursPerDay,
+            daysPerWeek: preset.daysPerWeek,
+            availableWeekdays: [...preset.availableWeekdays],
+            unavailableDates: [],
+            preferredTime: preset.preferredTime,
+            maxBlockHours: preset.maxBlockHours,
+          },
+          priorities: [...preset.priorities],
+          activeProfile: profileForApi || null,
+          attachmentIds: [],
+          attachmentMetadata: [],
+          interfaceMode: "work-type-and-deadline-only",
+        };
+
+        const response = await fetch("/api/planning", {
+          method: "POST",
+          credentials: "include",
+          cache: "no-store",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json; charset=utf-8",
+            "X-Request-Id": planningPayload.requestId,
+          },
+          body: JSON.stringify(planningPayload),
+        });
+
+        if (!response.ok) {
+          throw await readDashboardApiError(response);
+        }
+
+        const data = await response.json();
+
+        mergeEntitlementsFromResponse(data?.entitlements);
+        mergePageQuotaFromResponse(
+          data?.pageUsage ??
+            data?.pageQuota ??
+            data?.quota ??
+            data?.usage ??
+            data,
+        );
+
+        if (!data?.plan || typeof data.plan !== "object") {
+          throw new DashboardApiError({
+            status: 502,
+            code: "PLANNING_RESPONSE_INVALID",
+            message: "Server nevrátil štruktúrovaný projektový plán.",
+            detail:
+              "Očakávané pole plan chýba alebo nemá objektový formát.",
+          });
+        }
+
+        const plan = data.plan as PlanningPlan;
+        const output = cleanFinalOutput(
+          data.output ||
+            data.result ||
+            "Profesionálny harmonogram bol vytvorený. Ganttov graf a detailný plán sú zobrazené nižšie.",
+        );
+
+        if (!isCurrentModuleRun()) {
+          await loadBillingState();
+          return;
+        }
+
+        setPlanningPlan(plan);
+        setPlanningMeta(
+          data?.meta && typeof data.meta === "object"
+            ? (data.meta as PlanningApiMeta)
+            : null,
+        );
+        setPlanningView("gantt");
+        setResult(output);
+        setCanvasText(output);
+        setCanvasOpen(false);
+
+        await saveHistoryItem({
+          module: "planning",
+          title: requestedModuleResultTitle,
+          userMessage: `${preset.label} · termín ${formatPlanningDate(
+            planningDeadline,
+          )}`,
+          assistantMessage: output,
+          result: {
+            plan,
+            planningMeta: data?.meta || null,
+            planningWorkType,
+            planningDeadline,
+            profileTitle: profileForApi?.title || "",
+            profileId: profileForApi?.id || null,
+          },
+        });
+
+        await loadBillingState();
+
+        window.setTimeout(() => {
+          resultRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        }, 120);
+
         return;
       }
 
@@ -7076,18 +8258,6 @@ Text emailu:
       if (!cleaned.trim()) {
         throw new Error(
           "API odpovedalo, ale výstup bol prázdny. Skontrolujte samostatný endpoint modulu a polia output/result/message/text.",
-        );
-      }
-
-      if (requestedModule === "planning") {
-        cleaned = cleanFinalOutput(
-          [
-            "Predbežný orientačný harmonogram",
-            "",
-            "Upozornenie: Tento plán je len predbežný a orientačný. Nejde o záväzný termínový plán. Termíny je potrebné priebežne upravovať podľa reálneho stavu práce.",
-            "",
-            cleaned,
-          ].join("\n"),
         );
       }
 
@@ -8548,96 +9718,6 @@ Text emailu:
             ) : null}
           </div>
 
-          {activeModule === "planning" && (
-            <section className="relative mb-6 overflow-hidden rounded-[32px] border border-amber-300/20 bg-gradient-to-br from-[#24180b] via-[#15120f] to-[#090b12] shadow-2xl shadow-amber-950/20">
-              <div
-                className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-amber-400/10 blur-3xl"
-                aria-hidden="true"
-              />
-              <div
-                className="pointer-events-none absolute -bottom-28 left-1/4 h-64 w-64 rounded-full bg-orange-500/10 blur-3xl"
-                aria-hidden="true"
-              />
-
-              <div className="relative p-5 sm:p-7">
-                <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                  <div className="flex min-w-0 items-start gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-amber-200/20 bg-amber-400/10 text-amber-100 shadow-lg shadow-amber-950/30">
-                      <CalendarDays className="h-7 w-7" aria-hidden="true" />
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="text-xs font-black uppercase tracking-[0.24em] text-amber-300">
-                        Inteligentný plán práce
-                      </p>
-                      <h2 className="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">
-                        Od dneška až po úspešné odovzdanie
-                      </h2>
-                      <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-300 sm:text-base">
-                        Zadajte termín, aktuálny stav a dostupný čas. Zedpera
-                        pripraví realistický harmonogram, kontrolné body,
-                        priority a odporúčaný postup bez termínov v minulosti.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="inline-flex shrink-0 items-center gap-3 self-start rounded-2xl border border-amber-200/20 bg-black/25 px-4 py-3 text-amber-50 backdrop-blur">
-                    <CalendarDays className="h-5 w-5 text-amber-300" aria-hidden="true" />
-                    <div>
-                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-amber-300/80">
-                        Dnešný dátum
-                      </p>
-                      <p className="mt-0.5 text-sm font-black">
-                        {getTodaySkDate()}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-6 grid gap-3 md:grid-cols-3">
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 backdrop-blur">
-                    <div className="flex items-center gap-3">
-                      <Target className="h-5 w-5 text-amber-300" aria-hidden="true" />
-                      <p className="text-sm font-black text-white">
-                        Jasný cieľ
-                      </p>
-                    </div>
-                    <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">
-                      Definujte termín odovzdania a čo musí byť do daného
-                      dátumu dokončené.
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 backdrop-blur">
-                    <div className="flex items-center gap-3">
-                      <Clock3 className="h-5 w-5 text-amber-300" aria-hidden="true" />
-                      <p className="text-sm font-black text-white">
-                        Reálny harmonogram
-                      </p>
-                    </div>
-                    <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">
-                      Plán rešpektuje dnešný dátum, dostupný čas a aktuálnu
-                      rozpracovanosť práce.
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 backdrop-blur">
-                    <div className="flex items-center gap-3">
-                      <ListChecks className="h-5 w-5 text-amber-300" aria-hidden="true" />
-                      <p className="text-sm font-black text-white">
-                        Kontrolné body
-                      </p>
-                    </div>
-                    <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">
-                      Výstup obsahuje etapy, priority, míľniky, riziká a
-                      odporúčaný ďalší krok.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </section>
-          )}
-
           {activeModule === "translation" && (
             <div className="mb-5 rounded-3xl border border-sky-400/20 bg-sky-500/10 p-4">
               <div className="mb-4 flex items-center gap-2">
@@ -8744,112 +9824,259 @@ Text emailu:
           >
             {activeModule === "planning" ? (
               <section
-                className="overflow-hidden rounded-[32px] border border-amber-300/20 bg-[#080b14] shadow-2xl shadow-black/30"
+                className="overflow-hidden rounded-[34px] border border-violet-300/20 bg-gradient-to-br from-[#0b1020] via-[#080b15] to-[#05070c] shadow-2xl shadow-violet-950/30"
                 aria-labelledby={`dashboard-module-title-${activeModule}`}
                 data-module-heading={activeModule}
               >
-                <div className="border-b border-white/10 bg-gradient-to-r from-amber-500/10 via-orange-500/[0.06] to-transparent px-5 py-5 sm:px-7">
-                  <div className="flex items-start gap-4">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-200/20 bg-amber-400/10 text-amber-200">
-                      <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
+                <div className="relative overflow-hidden border-b border-white/10 px-5 py-6 sm:px-7 lg:px-9">
+                  <div
+                    className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.22),transparent_42%),radial-gradient(circle_at_top_right,rgba(34,211,238,0.12),transparent_38%)]"
+                    aria-hidden="true"
+                  />
+
+                  <div className="relative flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex min-w-0 items-start gap-4">
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-violet-300/25 bg-violet-500/15 text-violet-100 shadow-xl shadow-violet-950/30">
+                        <CalendarDays className="h-7 w-7" aria-hidden="true" />
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-black uppercase tracking-[0.24em] text-violet-300">
+                          Academic Project Planner
+                        </p>
+                        <h3
+                          id={`dashboard-module-title-${activeModule}`}
+                          className="mt-1 text-2xl font-black tracking-tight text-white sm:text-3xl"
+                        >
+                          Profesionálny plán akademickej práce
+                        </h3>
+                        <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-400">
+                          Vyberte iba druh práce a termín odovzdania. Zedpera
+                          automaticky nastaví rozsah, pracovnú kapacitu, etapy,
+                          rezervu, míľniky a vytvorí interaktívny Ganttov graf.
+                        </p>
+                      </div>
                     </div>
 
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-[0.22em] text-amber-300">
-                        Vstupné údaje
-                      </p>
-                      <h3
-                        id={`dashboard-module-title-${activeModule}`}
-                        className="mt-1 text-xl font-black text-white"
-                      >
-                        Pripravte zadanie pre plánovanie
-                      </h3>
-                      <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-400">
-                        Čím presnejšie uvediete termín, aktuálny stav,
-                        dostupný čas a priority, tým realistickejší bude
-                        výsledný harmonogram.
-                      </p>
+                    <div className="grid min-w-[270px] grid-cols-2 gap-2 rounded-3xl border border-white/10 bg-black/25 p-3 backdrop-blur">
+                      <div className="rounded-2xl bg-white/[0.045] p-3">
+                        <p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">
+                          Automatický rozsah
+                        </p>
+                        <p className="mt-1 text-lg font-black text-white">
+                          {planningPreset.targetPages}
+                          <span className="ml-1 text-xs text-slate-400">
+                            strán
+                          </span>
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-white/[0.045] p-3">
+                        <p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">
+                          Kapacita
+                        </p>
+                        <p className="mt-1 text-lg font-black text-white">
+                          {planningPreset.hoursPerDay}
+                          <span className="ml-1 text-xs text-slate-400">
+                            h/deň
+                          </span>
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="p-5 sm:p-7">
-                  <label
-                    htmlFor={dashboardInputId}
-                    className="mb-3 block text-sm font-black text-slate-100"
-                  >
-                    Zadanie pre plánovanie
-                  </label>
-
-                  <div className="relative">
-                    <textarea
-                      key={`dashboard-textarea-${activeModule}`}
-                      id={dashboardInputId}
-                      name={dashboardInputId}
-                      data-module-input={activeModule}
-                      aria-label={activeModuleInputLabel}
-                      value={input}
-                      onChange={(event) => setInput(event.target.value)}
-                      placeholder={
-                        "Príklad: Prácu odovzdávam 30. 9. 2026. Mám hotovú osnovu a teoretickú časť na 40 %. Chýba metodika, zber dát, analýza, záver a prezentácia. Pracovať môžem 2 hodiny cez pracovné dni a 5 hodín cez víkend. Priprav týždenný harmonogram s míľnikmi a rezervou."
-                      }
-                      className="min-h-[300px] w-full resize-y rounded-[26px] border border-amber-200/15 bg-[#050812] px-5 py-5 text-sm font-semibold leading-7 text-white shadow-inner shadow-black/30 outline-none transition placeholder:text-slate-500 focus:border-amber-300/60 focus:ring-4 focus:ring-amber-400/10"
-                    />
-
-                    <div className="pointer-events-none absolute bottom-4 right-4 rounded-xl border border-white/10 bg-black/30 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.14em] text-slate-500 backdrop-blur">
-                      bez príloh
-                    </div>
-                  </div>
-
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    {[
-                      {
-                        step: "01",
-                        title: "Termín",
-                        text: "Presný dátum odovzdania alebo obhajoby.",
-                      },
-                      {
-                        step: "02",
-                        title: "Aktuálny stav",
-                        text: "Čo je hotové a ktoré časti ešte chýbajú.",
-                      },
-                      {
-                        step: "03",
-                        title: "Kapacita",
-                        text: "Koľko času viete venovať práci denne alebo týždenne.",
-                      },
-                      {
-                        step: "04",
-                        title: "Priority",
-                        text: "Najdôležitejšie míľniky, riziká a pevné termíny.",
-                      },
-                    ].map((item) => (
-                      <div
-                        key={item.step}
-                        className="rounded-2xl border border-white/10 bg-white/[0.035] p-4"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-400/10 text-xs font-black text-amber-300 ring-1 ring-amber-300/20">
-                            {item.step}
+                <div className="p-5 sm:p-7 lg:p-9">
+                  <div className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_390px]">
+                    <div className="space-y-7">
+                      <div>
+                        <div className="mb-4 flex items-center justify-between gap-4">
+                          <div>
+                            <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+                              Krok 1
+                            </p>
+                            <h4 className="mt-1 text-lg font-black text-white">
+                              Vyberte druh práce
+                            </h4>
+                          </div>
+                          <span className="rounded-full border border-emerald-300/20 bg-emerald-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-200">
+                            Bez textového zadania
                           </span>
-                          <p className="text-sm font-black text-white">
-                            {item.title}
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                          {PLANNING_WORK_TYPE_OPTIONS.map((workType) => {
+                            const preset = getPlanningWorkPreset(workType);
+                            const selected = planningWorkType === workType;
+
+                            return (
+                              <button
+                                key={workType}
+                                type="button"
+                                onClick={() => setPlanningWorkType(workType)}
+                                aria-pressed={selected}
+                                className={[
+                                  "group relative overflow-hidden rounded-[24px] border p-4 text-left transition duration-300",
+                                  selected
+                                    ? `bg-gradient-to-br ${preset.accentClassName} shadow-xl shadow-violet-950/25 ring-1 ring-violet-300/20`
+                                    : "border-white/10 bg-white/[0.035] hover:-translate-y-0.5 hover:border-violet-300/30 hover:bg-white/[0.06]",
+                                ].join(" ")}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div
+                                    className={[
+                                      "flex h-11 w-11 items-center justify-center rounded-2xl border transition",
+                                      selected
+                                        ? "border-white/20 bg-white/10 text-white"
+                                        : "border-white/10 bg-black/20 text-slate-400 group-hover:text-violet-200",
+                                    ].join(" ")}
+                                  >
+                                    {workType === "project" ? (
+                                      <Target className="h-5 w-5" />
+                                    ) : workType === "seminar" ? (
+                                      <FileText className="h-5 w-5" />
+                                    ) : (
+                                      <BookOpen className="h-5 w-5" />
+                                    )}
+                                  </div>
+
+                                  <span
+                                    className={[
+                                      "flex h-6 w-6 items-center justify-center rounded-full border text-xs font-black transition",
+                                      selected
+                                        ? "border-emerald-300/30 bg-emerald-400 text-slate-950"
+                                        : "border-white/15 bg-white/5 text-transparent",
+                                    ].join(" ")}
+                                  >
+                                    ✓
+                                  </span>
+                                </div>
+
+                                <h5 className="mt-4 text-sm font-black text-white">
+                                  {preset.label}
+                                </h5>
+                                <p className="mt-2 min-h-[60px] text-xs font-semibold leading-5 text-slate-400">
+                                  {preset.description}
+                                </p>
+
+                                <div className="mt-4 flex flex-wrap gap-2">
+                                  <span className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1 text-[10px] font-black text-slate-300">
+                                    {preset.targetPages} strán
+                                  </span>
+                                  <span className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1 text-[10px] font-black text-slate-300">
+                                    {preset.daysPerWeek} dní/týždeň
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="rounded-[28px] border border-white/10 bg-white/[0.035] p-5 sm:p-6">
+                        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-center">
+                          <div>
+                            <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-300">
+                              Krok 2
+                            </p>
+                            <h4 className="mt-1 text-lg font-black text-white">
+                              Vyberte termín odovzdania
+                            </h4>
+                            <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-slate-400">
+                              Dátum je jediný povinný vstup. Plán sa vytvorí od
+                              dnešného dňa po zvolený termín a automaticky
+                              zahrnie bezpečnostnú rezervu pred odovzdaním.
+                            </p>
+                          </div>
+
+                          <label className="block">
+                            <span className="sr-only">Termín odovzdania</span>
+                            <div className="relative">
+                              <CalendarDays className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-violet-300" />
+                              <input
+                                type="date"
+                                value={planningDeadline}
+                                min={new Date(Date.now() + 86_400_000)
+                                  .toISOString()
+                                  .slice(0, 10)}
+                                onChange={(event) => {
+                                  setPlanningDeadline(event.target.value);
+                                  setPlanningPlan(null);
+                                  setPlanningMeta(null);
+                                }}
+                                className="min-h-[58px] w-full rounded-2xl border border-violet-300/25 bg-[#050812] pl-12 pr-4 text-base font-black text-white outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-500/15 [color-scheme:dark]"
+                              />
+                            </div>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    <aside className="space-y-4">
+                      <div className="rounded-[28px] border border-cyan-300/20 bg-gradient-to-br from-cyan-500/10 via-violet-500/[0.07] to-transparent p-5 shadow-xl shadow-cyan-950/20">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-500/10 text-cyan-200">
+                            <Sparkles className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">
+                              Automatická konfigurácia
+                            </p>
+                            <h4 className="text-base font-black text-white">
+                              {planningPreset.label}
+                            </h4>
+                          </div>
+                        </div>
+
+                        <div className="mt-5 space-y-3">
+                          {[
+                            [
+                              "Téma z profilu",
+                              activeProfile?.title ||
+                                activeProfile?.topic ||
+                                planningPreset.shortLabel,
+                            ],
+                            [
+                              "Cieľový rozsah",
+                              `${planningPreset.targetPages} strán`,
+                            ],
+                            [
+                              "Pracovný režim",
+                              `${planningPreset.hoursPerDay} h/deň · ${planningPreset.daysPerWeek} dní/týždeň`,
+                            ],
+                            [
+                              "Termín",
+                              planningDeadline
+                                ? formatPlanningDate(planningDeadline)
+                                : "Vyberte dátum",
+                            ],
+                          ].map(([label, value]) => (
+                            <div
+                              key={String(label)}
+                              className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3"
+                            >
+                              <p className="text-[9px] font-black uppercase tracking-[0.14em] text-slate-500">
+                                {label}
+                              </p>
+                              <p className="mt-1 break-words text-sm font-black text-white">
+                                {value}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="mt-5 rounded-2xl border border-emerald-300/20 bg-emerald-500/[0.08] p-4">
+                          <div className="flex items-center gap-2 text-xs font-black text-emerald-200">
+                            <CheckCircle2 className="h-4 w-4" />
+                            Plán sa vždy vytvorí
+                          </div>
+                          <p className="mt-2 text-xs font-semibold leading-5 text-emerald-50/70">
+                            Server najprv vypočíta garantovaný harmonogram. AI
+                            ho následne odborne rozšíri. Pri nedostupnom modeli
+                            zostane plne funkčný výpočtový plán aj Ganttov graf.
                           </p>
                         </div>
-                        <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">
-                          {item.text}
-                        </p>
                       </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-5 flex items-start gap-3 rounded-2xl border border-emerald-300/15 bg-emerald-500/[0.06] px-4 py-3">
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />
-                    <p className="text-xs font-semibold leading-5 text-emerald-100/80">
-                      Plánovanie používa iba textové zadanie a profil práce.
-                      Prílohy sa v tomto module nezobrazujú, neposielajú ani
-                      nezapočítavajú.
-                    </p>
+                    </aside>
                   </div>
                 </div>
               </section>
@@ -8918,6 +10145,17 @@ Text emailu:
                 )}
               </button>
             )}
+
+            {activeModule === "planning" && planningPlan ? (
+              <div ref={resultRef}>
+                <PlanningResultDashboard
+                  plan={planningPlan}
+                  meta={planningMeta}
+                  view={planningView}
+                  onViewChange={setPlanningView}
+                />
+              </div>
+            ) : null}
 
             {activeModule === "data" && (
               <div className="mt-4 rounded-3xl border border-cyan-300/30 bg-gradient-to-br from-cyan-500/10 via-blue-500/10 to-violet-500/10 p-4 shadow-2xl shadow-cyan-950/30">

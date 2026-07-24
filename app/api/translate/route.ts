@@ -22,6 +22,7 @@ import {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -111,6 +112,55 @@ const STYLE_LABELS: Record<TranslationStyle, string> = {
   natural: 'prirodzený a plynulý',
   simple: 'jednoduchý a zrozumiteľný',
 };
+
+const TRANSLATION_MODEL =
+  process.env.OPENAI_TRANSLATION_MODEL ||
+  process.env.OPENAI_MODEL ||
+  'gpt-4.1-mini';
+
+const MAX_SOURCE_CHARACTERS = 750_000;
+const TARGET_CHUNK_CHARACTERS = 10_000;
+const MAX_CHUNK_CHARACTERS = 12_000;
+const MAX_TRANSLATION_CHUNKS = 80;
+const CONTINUITY_CONTEXT_CHARACTERS = 1_200;
+const CHARACTERS_PER_QUOTA_PAGE = 1_800;
+const MIN_CHUNK_OUTPUT_TOKENS = 1_200;
+const MAX_CHUNK_OUTPUT_TOKENS = 7_000;
+
+type TranslationChunk = {
+  index: number;
+  text: string;
+};
+
+type TranslationChunkResult = {
+  text: string;
+  completionTokens: number;
+  finishReason: string | null;
+};
+
+class TranslationProcessingError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly detail?: string;
+
+  constructor({
+    status,
+    code,
+    message,
+    detail,
+  }: {
+    status: number;
+    code: string;
+    message: string;
+    detail?: string;
+  }) {
+    super(message);
+    this.name = 'TranslationProcessingError';
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+  }
+}
 
 function noStoreJson(
   body: Record<string, unknown>,
@@ -202,42 +252,53 @@ function getKeywords(
     .join(', ');
 }
 
+function combineUniqueTextParts(values: unknown[]): string {
+  const parts: string[] = [];
+
+  for (const value of values) {
+    const cleaned = cleanText(value);
+
+    if (!cleaned) continue;
+
+    const duplicate = parts.some(
+      (part) =>
+        part === cleaned ||
+        part.includes(cleaned) ||
+        cleaned.includes(part),
+    );
+
+    if (!duplicate) {
+      parts.push(cleaned);
+    }
+  }
+
+  return parts.join('\n\n');
+}
+
 function getTranslationSource(
   body: TranslationRequest,
 ): string {
+  const attachmentInput = combineUniqueTextParts([
+    body.clientExtractedText,
+    body.extractedText,
+    body.attachmentText,
+  ]);
+
   const directInput = cleanText(body.input);
-
-  if (directInput) {
-    return directInput;
-  }
-
-  const attachmentInput =
-    cleanText(body.clientExtractedText) ||
-    cleanText(body.extractedText) ||
-    cleanText(body.attachmentText);
-
-  if (attachmentInput) {
-    return attachmentInput;
-  }
-
   const text = cleanText(body.text);
+  const message = cleanText(body.message);
+  const question = cleanText(body.question);
   const prompt = cleanText(body.prompt);
 
-  /**
-   * Frontend pri chýbajúcom texte môže do poľa text vložiť celý technický
-   * prompt. Ten sa nesmie omylom prekladať ako používateľský obsah.
-   */
-  if (text && text !== prompt) {
-    return text;
-  }
+  const safeFallbacks = [text, message, question].filter(
+    (value) => value && value !== prompt,
+  );
 
-  const message = cleanText(body.message);
-
-  if (message && message !== prompt) {
-    return message;
-  }
-
-  return '';
+  return combineUniqueTextParts([
+    attachmentInput,
+    directInput,
+    ...safeFallbacks,
+  ]);
 }
 
 function buildProfileContext(
@@ -263,21 +324,181 @@ function buildProfileContext(
   ].join('\n');
 }
 
+function tail(value: string, maxCharacters: number): string {
+  const cleaned = cleanText(value);
+
+  if (cleaned.length <= maxCharacters) {
+    return cleaned;
+  }
+
+  return cleaned.slice(-maxCharacters);
+}
+
+function findLastBoundary(
+  value: string,
+  minimumIndex: number,
+): number {
+  const candidates = [
+    value.lastIndexOf('\n\n'),
+    value.lastIndexOf('\n'),
+    value.lastIndexOf('. '),
+    value.lastIndexOf('! '),
+    value.lastIndexOf('? '),
+    value.lastIndexOf('; '),
+    value.lastIndexOf(': '),
+    value.lastIndexOf(' '),
+  ].filter((index) => index >= minimumIndex);
+
+  if (candidates.length === 0) {
+    return -1;
+  }
+
+  return Math.max(...candidates);
+}
+
+function splitTranslationSource(
+  sourceText: string,
+): TranslationChunk[] {
+  const normalized = cleanText(sourceText);
+  const chunks: TranslationChunk[] = [];
+
+  let cursor = 0;
+
+  while (cursor < normalized.length) {
+    const remaining = normalized.length - cursor;
+
+    if (remaining <= MAX_CHUNK_CHARACTERS) {
+      const finalText = normalized.slice(cursor).trim();
+
+      if (finalText) {
+        chunks.push({
+          index: chunks.length,
+          text: finalText,
+        });
+      }
+
+      break;
+    }
+
+    const idealEnd = Math.min(
+      normalized.length,
+      cursor + TARGET_CHUNK_CHARACTERS,
+    );
+    const maximumEnd = Math.min(
+      normalized.length,
+      cursor + MAX_CHUNK_CHARACTERS,
+    );
+    const minimumBoundary = Math.max(
+      cursor + Math.floor(TARGET_CHUNK_CHARACTERS * 0.65),
+      cursor + 1,
+    );
+
+    const window = normalized.slice(cursor, maximumEnd);
+    const localMinimum = Math.max(0, minimumBoundary - cursor);
+    const localIdeal = Math.max(0, idealEnd - cursor);
+    const preferredWindow = window.slice(0, Math.max(localIdeal, 1));
+
+    let localBoundary = findLastBoundary(
+      preferredWindow,
+      Math.min(localMinimum, preferredWindow.length - 1),
+    );
+
+    if (localBoundary < 0) {
+      localBoundary = findLastBoundary(
+        window,
+        Math.min(localMinimum, window.length - 1),
+      );
+    }
+
+    const splitAt =
+      localBoundary >= 0
+        ? cursor + localBoundary + 1
+        : maximumEnd;
+
+    const chunkText = normalized.slice(cursor, splitAt).trim();
+
+    if (chunkText) {
+      chunks.push({
+        index: chunks.length,
+        text: chunkText,
+      });
+    }
+
+    cursor = Math.max(splitAt, cursor + 1);
+
+    while (cursor < normalized.length && /\s/.test(normalized[cursor])) {
+      cursor += 1;
+    }
+
+    if (chunks.length > MAX_TRANSLATION_CHUNKS) {
+      throw new TranslationProcessingError({
+        status: 413,
+        code: 'TRANSLATION_TOO_MANY_CHUNKS',
+        message: 'Dokument je príliš rozsiahly na jednu prekladovú požiadavku.',
+        detail: `Maximálny počet častí je ${MAX_TRANSLATION_CHUNKS}.`,
+      });
+    }
+  }
+
+  return chunks;
+}
+
+function estimateSourcePages(sourceText: string): number {
+  return Math.max(
+    1,
+    Math.ceil(sourceText.length / CHARACTERS_PER_QUOTA_PAGE),
+  );
+}
+
+function getRequestedChunkTokenLimit(chunkText: string): number {
+  return Math.min(
+    Math.max(
+      Math.ceil(chunkText.length / 2.2),
+      MIN_CHUNK_OUTPUT_TOKENS,
+    ),
+    MAX_CHUNK_OUTPUT_TOKENS,
+  );
+}
+
 function buildTranslationPrompt({
   sourceText,
   from,
   to,
   style,
   profile,
+  chunkIndex,
+  totalChunks,
+  previousSourceContext,
+  previousTranslationContext,
 }: {
   sourceText: string;
   from: LanguageCode;
   to: LanguageCode;
   style: TranslationStyle;
   profile?: SavedProfile | null;
+  chunkIndex: number;
+  totalChunks: number;
+  previousSourceContext?: string;
+  previousTranslationContext?: string;
 }): string {
+  const continuityBlock =
+    previousSourceContext || previousTranslationContext
+      ? `
+KONTEXT NADVÄZNOSTI – LEN PRE TERMINOLÓGIU, TENTO KONTEXT NEOPAKUJ VO VÝSTUPE
+Predchádzajúci zdrojový kontext:
+<<<PREVIOUS_SOURCE>>>
+${previousSourceContext || 'nie je k dispozícii'}
+<<<END_PREVIOUS_SOURCE>>>
+
+Predchádzajúci preložený kontext:
+<<<PREVIOUS_TRANSLATION>>>
+${previousTranslationContext || 'nie je k dispozícii'}
+<<<END_PREVIOUS_TRANSLATION>>>
+`
+      : '';
+
   return `
-PREKLADOVÁ ÚLOHA
+PREKLADOVÁ ÚLOHA – ČASŤ ${chunkIndex + 1} Z ${totalChunks}
 
 Zdrojový jazyk: ${LANGUAGE_LABELS[from]}
 Cieľový jazyk: ${LANGUAGE_LABELS[to]}
@@ -285,25 +506,156 @@ Požadovaný štýl: ${STYLE_LABELS[style]}
 
 KONTEXT PRÁCE
 ${buildProfileContext(profile)}
-
-TEXT NA PREKLAD
+${continuityBlock}
+AKTUÁLNA ČASŤ TEXTU NA PREKLAD
 <<<START_TEXT>>>
 ${sourceText}
 <<<END_TEXT>>>
 
 PRÍSNE PRAVIDLÁ
-- Prelož celý obsah medzi značkami START_TEXT a END_TEXT.
-- Vráť iba samotný preložený text.
-- Nepridávaj nadpis „Preklad“ ani „Preložený text“.
+- Prelož celý obsah medzi značkami START_TEXT a END_TEXT bez vynechania viet alebo odsekov.
+- Ide o časť jedného väčšieho dokumentu. Zachovaj terminológiu konzistentnú s predchádzajúcou časťou.
+- Vráť iba preklad aktuálnej časti. Kontext nadväznosti neopakuj.
+- Nepridávaj nadpis „Preklad“, „Preložený text“, „Časť“ ani technické poznámky.
 - Nepridávaj vysvetlenie, komentár, hodnotenie, analýzu ani odporúčania.
-- Zachovaj význam, členenie odsekov, číslovanie, citácie, odkazy, DOI, URL,
-  názvy premenných, skratky a odborné označenia.
+- Zachovaj členenie odsekov, nadpisy, číslovanie, zoznamy, citácie, odkazy, DOI, URL,
+  názvy premenných, skratky, tabuľkové označenia a odborné termíny.
 - Mená osôb, názvy organizácií a bibliografické údaje neupravuj, pokiaľ
   nemajú zaužívaný ekvivalent v cieľovom jazyku.
-- Nevymýšľaj žiadne nové údaje.
+- Nevymýšľaj žiadne nové údaje a nič neskracuj.
 - Nepoužívaj markdownové nadpisy ani kódové bloky.
-- Začni priamo prvým slovom preloženého textu.
+- Začni priamo prvým slovom preloženej aktuálnej časti.
 `.trim();
+}
+
+async function translateChunk({
+  chunk,
+  totalChunks,
+  from,
+  to,
+  style,
+  profile,
+  pageQuota,
+  previousSourceContext,
+  previousTranslationContext,
+}: {
+  chunk: TranslationChunk;
+  totalChunks: number;
+  from: LanguageCode;
+  to: LanguageCode;
+  style: TranslationStyle;
+  profile?: SavedProfile | null;
+  pageQuota: PageQuota;
+  previousSourceContext?: string;
+  previousTranslationContext?: string;
+}): Promise<TranslationChunkResult> {
+  const requestedTokenLimit = getRequestedChunkTokenLimit(chunk.text);
+  const maxOutputTokens = getOutputTokenLimitForQuota(
+    pageQuota,
+    requestedTokenLimit,
+  );
+
+  if (maxOutputTokens <= 0) {
+    throw new PageLimitError({
+      pageLimit: pageQuota.pageLimit,
+      pagesUsed: pageQuota.pagesUsed,
+      pagesRemaining: pageQuota.pagesRemaining,
+      requestedPages: 1,
+    });
+  }
+
+  const prompt = buildTranslationPrompt({
+    sourceText: chunk.text,
+    from,
+    to,
+    style,
+    profile,
+    chunkIndex: chunk.index,
+    totalChunks,
+    previousSourceContext,
+    previousTranslationContext,
+  });
+
+  let completion: Awaited<
+    ReturnType<typeof openai.chat.completions.create>
+  >;
+
+  try {
+    completion = await openai.chat.completions.create({
+      model: TRANSLATION_MODEL,
+      temperature: 0.1,
+      max_tokens: maxOutputTokens,
+      messages: [
+        {
+          role: 'system',
+          content: [
+            String(
+              GLOBAL_ACADEMIC_SYSTEM_PROMPT ||
+              '',
+            ).trim(),
+            'Si profesionálny akademický prekladateľ.',
+            'Prekladaj úplne, bez skracovania, a zachovávaj terminologickú konzistenciu medzi časťami dokumentu.',
+            'V odpovedi vráť výhradne preložený text aktuálnej časti.',
+          ]
+            .filter(Boolean)
+            .join('\n\n'),
+        },
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+    });
+  } catch (error) {
+    throw new TranslationProcessingError({
+      status: 502,
+      code: 'TRANSLATION_CHUNK_FAILED',
+      message: `Preklad časti ${chunk.index + 1} z ${totalChunks} zlyhal.`,
+      detail:
+        error instanceof Error
+          ? error.message
+          : 'OpenAI nevrátilo použiteľnú odpoveď.',
+    });
+  }
+
+  const finishReason =
+    completion.choices[0]
+      ?.finish_reason ||
+    null;
+
+  const translatedText = cleanText(
+    completion.choices[0]
+      ?.message?.content,
+  );
+
+  if (!translatedText) {
+    throw new TranslationProcessingError({
+      status: 502,
+      code: 'EMPTY_TRANSLATION_CHUNK',
+      message: `AI nevrátila text pre časť ${chunk.index + 1} z ${totalChunks}.`,
+    });
+  }
+
+  if (finishReason === 'length') {
+    throw new TranslationProcessingError({
+      status: 502,
+      code: 'TRANSLATION_CHUNK_TRUNCATED',
+      message: `Preklad časti ${chunk.index + 1} z ${totalChunks} bol skrátený limitom modelu.`,
+      detail:
+        'Znížte veľkosť jednej časti alebo zvýšte povolený výstupný tokenový limit modelu.',
+    });
+  }
+
+  return {
+    text: translatedText,
+    completionTokens:
+      completion.usage
+        ?.completion_tokens ||
+      Math.ceil(
+        translatedText.length / 4,
+      ),
+    finishReason,
+  };
 }
 
 function serializeEntitlements(
@@ -435,23 +787,20 @@ export async function POST(
       );
     }
 
-    const requestId =
-      normalizeRequestId(
-        body.requestId ||
+    const requestId = normalizeRequestId(
+      body.requestId ||
         request.headers.get(
           'x-request-id',
         ),
-      );
+    );
 
-    const sourceText =
-      getTranslationSource(body);
+    const sourceText = getTranslationSource(body);
 
     if (!sourceText) {
       return noStoreJson(
         {
           ok: false,
-          code:
-            'TRANSLATION_TEXT_REQUIRED',
+          code: 'TRANSLATION_TEXT_REQUIRED',
           message:
             'Najprv vložte text alebo prílohu, ktorú chcete preložiť.',
         },
@@ -463,8 +812,7 @@ export async function POST(
       return noStoreJson(
         {
           ok: false,
-          code:
-            'TRANSLATION_TEXT_TOO_SHORT',
+          code: 'TRANSLATION_TEXT_TOO_SHORT',
           message:
             'Text na preklad je príliš krátky.',
         },
@@ -472,29 +820,41 @@ export async function POST(
       );
     }
 
-    const translationFrom =
-      normalizeLanguage(
-        body.translationFrom,
-        'sk',
-      );
-
-    const translationTo =
-      normalizeLanguage(
-        body.translationTo ||
-        body.outputLanguage ||
-        body.workLanguage,
-        'en',
-      );
-
-    if (
-      translationFrom ===
-      translationTo
-    ) {
+    if (sourceText.length > MAX_SOURCE_CHARACTERS) {
       return noStoreJson(
         {
           ok: false,
-          code:
-            'TRANSLATION_LANGUAGES_EQUAL',
+          code: 'TRANSLATION_SOURCE_TOO_LARGE',
+          message:
+            'Dokument je príliš rozsiahly na jednu prekladovú požiadavku.',
+          detail:
+            `Maximálny podporovaný rozsah je ${MAX_SOURCE_CHARACTERS.toLocaleString('sk-SK')} znakov.`,
+          maxSourceCharacters:
+            MAX_SOURCE_CHARACTERS,
+          sourceCharacters:
+            sourceText.length,
+        },
+        413,
+      );
+    }
+
+    const translationFrom = normalizeLanguage(
+      body.translationFrom,
+      'sk',
+    );
+
+    const translationTo = normalizeLanguage(
+      body.translationTo ||
+        body.outputLanguage ||
+        body.workLanguage,
+      'en',
+    );
+
+    if (translationFrom === translationTo) {
+      return noStoreJson(
+        {
+          ok: false,
+          code: 'TRANSLATION_LANGUAGES_EQUAL',
           message:
             'Zdrojový a cieľový jazyk musia byť rozdielne.',
         },
@@ -502,10 +862,9 @@ export async function POST(
       );
     }
 
-    const translationStyle =
-      normalizeStyle(
-        body.translationStyle,
-      );
+    const translationStyle = normalizeStyle(
+      body.translationStyle,
+    );
 
     const profile =
       body.activeProfile ||
@@ -513,93 +872,86 @@ export async function POST(
       body.profileSnapshot ||
       null;
 
-    const entitlements =
-      await requireModuleAccess(
-        'translation',
-      );
+    await requireModuleAccess(
+      'translation',
+    );
 
     await requirePromptAllowance();
 
-    const pageQuota =
-      await requireAvailablePages();
+    const pageQuota = await requireAvailablePages();
+    const estimatedSourcePages = estimateSourcePages(
+      sourceText,
+    );
 
-    const requestedTokenLimit =
-      Math.min(
-        Math.max(
-          Math.ceil(
-            sourceText.length / 3,
-          ),
-          700,
-        ),
-        12_000,
-      );
-
-    const maxOutputTokens =
-      getOutputTokenLimitForQuota(
-        pageQuota,
-        requestedTokenLimit,
-      );
-
-    if (maxOutputTokens <= 0) {
+    if (
+      !pageQuota.isUnlimited &&
+      pageQuota.pagesRemaining !== null &&
+      estimatedSourcePages > pageQuota.pagesRemaining
+    ) {
       throw new PageLimitError({
-        pageLimit:
-          pageQuota.pageLimit,
-        pagesUsed:
-          pageQuota.pagesUsed,
-        pagesRemaining:
-          pageQuota.pagesRemaining,
-        requestedPages: 1,
+        pageLimit: pageQuota.pageLimit,
+        pagesUsed: pageQuota.pagesUsed,
+        pagesRemaining: pageQuota.pagesRemaining,
+        requestedPages: estimatedSourcePages,
       });
     }
 
-    const prompt =
-      buildTranslationPrompt({
-        sourceText,
+    const chunks = splitTranslationSource(sourceText);
+
+    if (chunks.length === 0) {
+      return noStoreJson(
+        {
+          ok: false,
+          code: 'TRANSLATION_TEXT_REQUIRED',
+          message:
+            'Text na preklad neobsahuje použiteľný obsah.',
+        },
+        400,
+      );
+    }
+
+    const translatedChunks: string[] = [];
+    const finishReasons: Array<string | null> = [];
+    let completionTokens = 0;
+    let previousSourceContext = '';
+    let previousTranslationContext = '';
+
+    for (const chunk of chunks) {
+      const translatedChunk = await translateChunk({
+        chunk,
+        totalChunks: chunks.length,
         from: translationFrom,
         to: translationTo,
         style: translationStyle,
         profile,
+        pageQuota,
+        previousSourceContext,
+        previousTranslationContext,
       });
 
-    const completion =
-      await openai.chat.completions.create({
-        model: 'gpt-4.1-mini',
-        temperature: 0.1,
-        max_tokens: maxOutputTokens,
-        messages: [
-          {
-            role: 'system',
-            content: [
-              String(
-                GLOBAL_ACADEMIC_SYSTEM_PROMPT ||
-                '',
-              ).trim(),
-              'Si profesionálny akademický prekladateľ.',
-              'Dodržiavaj cieľový jazyk, odbornú terminológiu a formát pôvodného textu.',
-              'V odpovedi vráť výhradne preložený text.',
-            ]
-              .filter(Boolean)
-              .join('\n\n'),
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-      });
+      translatedChunks.push(translatedChunk.text);
+      completionTokens += translatedChunk.completionTokens;
+      finishReasons.push(translatedChunk.finishReason);
 
-    const translatedText =
-      cleanText(
-        completion.choices[0]
-          ?.message?.content,
+      previousSourceContext = tail(
+        chunk.text,
+        CONTINUITY_CONTEXT_CHARACTERS,
       );
+      previousTranslationContext = tail(
+        translatedChunk.text,
+        CONTINUITY_CONTEXT_CHARACTERS,
+      );
+    }
+
+    const translatedText = cleanText(
+      translatedChunks.join('\n\n'),
+    );
 
     if (!translatedText) {
       return noStoreJson(
         {
           ok: false,
-          code:
-            'EMPTY_TRANSLATION_OUTPUT',
+          code: 'EMPTY_TRANSLATION_OUTPUT',
           message:
             'AI nevrátila preložený text.',
         },
@@ -607,59 +959,42 @@ export async function POST(
       );
     }
 
-    /**
-     * Strany aj prompt sa odpočítajú až po úspešnom vygenerovaní.
-     * requestId musí pri retry zostať rovnaký, aby stránková RPC funkcia
-     * nezapočítala tú istú generáciu dvakrát.
-     */
-    const pageUsage =
-      await consumePagesForOutput({
-        text: translatedText,
-        module: 'translation',
-        requestId,
-      });
+    const pageUsage = await consumePagesForOutput({
+      text: translatedText,
+      module: 'translation',
+      requestId,
+    });
 
-    const promptUsage =
-      await consumeSuccessfulPrompt();
+    const promptUsage = await consumeSuccessfulPrompt();
 
-    const latestEntitlements =
-      await requireModuleAccess(
-        'translation',
-      );
+    const latestEntitlements = await requireModuleAccess(
+      'translation',
+    );
 
     return noStoreJson({
       ok: true,
-
-      /**
-       * Frontend podporuje všetky tieto názvy. Autoritatívne pole je
-       * translatedText; ostatné sú kompatibilné aliasy.
-       */
       translatedText,
-      translated_text:
-        translatedText,
-      translation:
-        translatedText,
+      translated_text: translatedText,
+      translation: translatedText,
       output: translatedText,
       result: translatedText,
       text: translatedText,
       message: translatedText,
 
-      entitlements:
-        serializeEntitlements(
-          latestEntitlements,
-        ),
+      entitlements: serializeEntitlements(
+        latestEntitlements,
+      ),
 
       pageUsage,
-      pageQuota:
-        serializePageQuota(
-          pageUsage,
-        ),
+      pageQuota: serializePageQuota(
+        pageUsage,
+      ),
 
       promptUsage,
 
       meta: {
         requestId,
-        model: 'gpt-4.1-mini',
+        model: TRANSLATION_MODEL,
         translationFrom,
         translationTo,
         translationStyle,
@@ -667,9 +1002,24 @@ export async function POST(
           sourceText.length,
         outputCharacters:
           translatedText.length,
+        estimatedSourcePages,
         pagesConsumed:
           pageUsage.consumption
             .pagesConsumed,
+        processingStrategy:
+          chunks.length > 1
+            ? 'chunked-sequential-with-continuity-context'
+            : 'single-chunk',
+        chunks: {
+          count: chunks.length,
+          completed: translatedChunks.length,
+          targetCharacters:
+            TARGET_CHUNK_CHARACTERS,
+          maximumCharacters:
+            MAX_CHUNK_CHARACTERS,
+          completionTokens,
+          finishReasons,
+        },
         projectId:
           cleanText(
             body.projectId ||
@@ -679,28 +1029,32 @@ export async function POST(
       },
     });
   } catch (error) {
-    if (
-      error instanceof
-      EntitlementError
-    ) {
-      const serialized =
-        entitlementErrorResponse(error);
+    if (error instanceof TranslationProcessingError) {
+      return noStoreJson(
+        {
+          ok: false,
+          code: error.code,
+          message: error.message,
+          detail: error.detail,
+        },
+        error.status,
+      );
+    }
+
+    if (error instanceof EntitlementError) {
+      const serialized = entitlementErrorResponse(error);
 
       return noStoreJson(
-        serialized.body as
-          Record<string, unknown>,
+        serialized.body as Record<string, unknown>,
         serialized.status,
       );
     }
 
     if (
-      error instanceof
-        PageLimitError ||
-      error instanceof
-        PageQuotaUnavailableError
+      error instanceof PageLimitError ||
+      error instanceof PageQuotaUnavailableError
     ) {
-      const serialized =
-        pageQuotaErrorResponse(error);
+      const serialized = pageQuotaErrorResponse(error);
 
       return noStoreJson(
         serialized.body,

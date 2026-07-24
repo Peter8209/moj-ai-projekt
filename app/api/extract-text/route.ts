@@ -14,9 +14,9 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const maxDuration = 120;
 
-const MAX_ATTACHMENTS_PER_REQUEST = 20;
-const MAX_EXTRACTED_CHARS_PER_ATTACHMENT = 40_000;
-const MAX_COMBINED_EXTRACTED_CHARS = 600_000;
+const MAX_ATTACHMENTS_PER_REQUEST = 10;
+const MAX_EXTRACTED_CHARS_PER_ATTACHMENT = 180_000;
+const MAX_COMBINED_EXTRACTED_CHARS = 1_200_000;
 
 // Nepoužívame instanceof File. Vo Vercel/Next.js runtime môže File pochádzať
 // z iného JS realm-u a instanceof potom nespoľahlivo zlyhá.
@@ -501,8 +501,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Sekvenčné spracovanie je zámerné: pri 20 PDF súboroch nevyrobíme
-    // naraz 20 náročných parserov a znížime riziko pádu serverless funkcie.
+    // Sekvenčné spracovanie je zámerné: pri 10 PDF súboroch nevyrobíme
+    // naraz 10 náročných parserov a znížime riziko pádu serverless funkcie.
     const results: ExtractedFileResult[] = [];
 
     for (const file of files) {

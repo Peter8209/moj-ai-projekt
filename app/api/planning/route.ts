@@ -4,10 +4,15 @@ import OpenAI from "openai";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const maxDuration = 120;
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      timeout: 20_000,
+      maxRetries: 0,
+    })
+  : null;
 
 const MODEL = process.env.OPENAI_PLANNING_MODEL || "gpt-4.1-mini";
 const MAX_ATTACHMENT_BYTES = 30 * 1024 * 1024;
@@ -144,6 +149,7 @@ type PlanningResponse = {
     remainingPages: number;
     reserveDays: number;
     pagesPerDay: number;
+    progressPercent: number;
     feasibility: PlanningCalculation["feasibility"];
     riskLevel: PlanningCalculation["riskLevel"];
     explanation: string;
@@ -272,6 +278,152 @@ const STATUS_LABELS_SK: Record<PlanningStatusKey, string> = {
   formatting: "formátovanie",
   proofreading: "jazyková korektúra",
 };
+
+type PlanningDefaults = {
+  title: string;
+  targetPages: number;
+  hoursPerDay: number;
+  daysPerWeek: number;
+  availableWeekdays: number[];
+  preferredTime: PreferredTime;
+  maxBlockHours: number;
+  priorities: string[];
+};
+
+const PLANNING_DEFAULTS: Record<PlanningWorkType, PlanningDefaults> = {
+  seminar: {
+    title: "Seminar paper",
+    targetPages: 15,
+    hoursPerDay: 1.5,
+    daysPerWeek: 5,
+    availableWeekdays: [1, 2, 3, 4, 5],
+    preferredTime: "evening",
+    maxBlockHours: 1.5,
+    priorities: [
+      "Meet the submission deadline",
+      "Maintain academic quality",
+      "Verify citations and bibliography",
+      "Create a reserve before submission",
+    ],
+  },
+  bachelor: {
+    title: "Bachelor thesis",
+    targetPages: 50,
+    hoursPerDay: 2,
+    daysPerWeek: 5,
+    availableWeekdays: [1, 2, 3, 4, 5],
+    preferredTime: "evening",
+    maxBlockHours: 1.5,
+    priorities: [
+      "Meet the submission deadline",
+      "Maintain academic quality",
+      "Complete the practical part",
+      "Complete research and analysis",
+      "Verify citations and bibliography",
+      "Create a reserve before submission",
+    ],
+  },
+  master: {
+    title: "Master thesis",
+    targetPages: 70,
+    hoursPerDay: 2.5,
+    daysPerWeek: 6,
+    availableWeekdays: [1, 2, 3, 4, 5, 6],
+    preferredTime: "evening",
+    maxBlockHours: 2,
+    priorities: [
+      "Meet the submission deadline",
+      "Maintain academic quality",
+      "Complete the practical part",
+      "Complete research and analysis",
+      "Verify citations and bibliography",
+      "Create a reserve before submission",
+    ],
+  },
+  project: {
+    title: "Academic project",
+    targetPages: 35,
+    hoursPerDay: 2,
+    daysPerWeek: 5,
+    availableWeekdays: [1, 2, 3, 4, 5],
+    preferredTime: "afternoon",
+    maxBlockHours: 2,
+    priorities: [
+      "Meet the submission deadline",
+      "Maintain academic quality",
+      "Complete implementation and documentation",
+      "Create a reserve before submission",
+    ],
+  },
+  other: {
+    title: "Academic work",
+    targetPages: 30,
+    hoursPerDay: 2,
+    daysPerWeek: 5,
+    availableWeekdays: [1, 2, 3, 4, 5],
+    preferredTime: "evening",
+    maxBlockHours: 1.5,
+    priorities: [
+      "Meet the submission deadline",
+      "Maintain academic quality",
+      "Create a reserve before submission",
+    ],
+  },
+};
+
+function inferPlanningWorkType(
+  value: unknown,
+  profile?: SavedProfile | null,
+): PlanningWorkType {
+  const candidate = cleanText(value, 60).toLowerCase();
+
+  if (WORK_TYPES.has(candidate as PlanningWorkType)) {
+    return candidate as PlanningWorkType;
+  }
+
+  const profileType = cleanText(
+    profile?.type || profile?.level,
+    100,
+  ).toLowerCase();
+
+  if (profileType.includes("semin")) return "seminar";
+  if (profileType.includes("bak") || profileType.includes("bachelor")) {
+    return "bachelor";
+  }
+  if (
+    profileType.includes("dipl") ||
+    profileType.includes("mag") ||
+    profileType.includes("master")
+  ) {
+    return "master";
+  }
+  if (profileType.includes("projekt") || profileType.includes("project")) {
+    return "project";
+  }
+
+  return "other";
+}
+
+function createAutomaticPlanningStatus(): Record<
+  PlanningStatusKey,
+  PlanningTaskStatus
+> {
+  return {
+    topicApproval: "completed",
+    assignmentApproval: "completed",
+    outline: "in-progress",
+    sources: "in-progress",
+    theoreticalPart: "not-started",
+    practicalPart: "not-started",
+    research: "not-started",
+    dataAnalysis: "not-started",
+    discussion: "not-started",
+    conclusion: "not-started",
+    citations: "not-started",
+    formatting: "not-started",
+    proofreading: "not-started",
+  };
+}
 
 const RESPONSE_SCHEMA = {
   name: "academic_planning_response",
@@ -560,26 +712,34 @@ function normalizeStatus(value: unknown): PlanningTaskStatus {
 
 function normalizePlanningRequest(value: unknown): PlanningRequest {
   const root = isRecord(value) ? value : {};
+  const activeProfile = isRecord(root.activeProfile)
+    ? (root.activeProfile as SavedProfile)
+    : isRecord(root.profile)
+      ? (root.profile as SavedProfile)
+      : null;
+
+  const workType = inferPlanningWorkType(root.workType, activeProfile);
+  const defaults = PLANNING_DEFAULTS[workType];
   const currentStatusSource = isRecord(root.currentStatus)
     ? root.currentStatus
     : {};
   const capacitySource = isRecord(root.capacity) ? root.capacity : {};
-  const activeProfile = isRecord(root.activeProfile)
-    ? (root.activeProfile as SavedProfile)
-    : null;
+  const automaticStatus = createAutomaticPlanningStatus();
 
   const currentStatus = {} as Record<PlanningStatusKey, PlanningTaskStatus>;
   STATUS_KEYS.forEach((key) => {
-    currentStatus[key] = normalizeStatus(currentStatusSource[key]);
+    currentStatus[key] =
+      key in currentStatusSource
+        ? normalizeStatus(currentStatusSource[key])
+        : automaticStatus[key];
   });
 
-  const workTypeCandidate = cleanText(root.workType, 30) as PlanningWorkType;
   const preferredTimeCandidate = cleanText(
     capacitySource.preferredTime,
     30,
   ) as PreferredTime;
 
-  const availableWeekdays = Array.isArray(capacitySource.availableWeekdays)
+  const requestedWeekdays = Array.isArray(capacitySource.availableWeekdays)
     ? Array.from(
         new Set(
           capacitySource.availableWeekdays
@@ -587,7 +747,12 @@ function normalizePlanningRequest(value: unknown): PlanningRequest {
             .filter((day) => day >= 0 && day <= 6),
         ),
       ).sort((a, b) => a - b)
-    : [1, 2, 3, 4, 5];
+    : [];
+
+  const availableWeekdays =
+    requestedWeekdays.length > 0
+      ? requestedWeekdays
+      : [...defaults.availableWeekdays];
 
   const unavailableDates = Array.isArray(capacitySource.unavailableDates)
     ? capacitySource.unavailableDates
@@ -595,40 +760,106 @@ function normalizePlanningRequest(value: unknown): PlanningRequest {
         .filter((date) => Boolean(parseIsoDateUtc(date)))
     : [];
 
+  const requestedTargetPages = Math.trunc(safeNumber(root.targetPages, 0));
+  const targetPages =
+    requestedTargetPages > 0
+      ? requestedTargetPages
+      : defaults.targetPages;
+
+  const requestedCompletedPages = Math.trunc(
+    safeNumber(root.completedPages, 0),
+  );
+  const completedPages = clamp(
+    requestedCompletedPages,
+    0,
+    targetPages,
+  );
+
+  const requestedHoursPerDay = safeNumber(capacitySource.hoursPerDay, 0);
+  const hoursPerDay =
+    requestedHoursPerDay > 0
+      ? clamp(requestedHoursPerDay, 0.5, 16)
+      : defaults.hoursPerDay;
+
+  const requestedDaysPerWeek = Math.trunc(
+    safeNumber(capacitySource.daysPerWeek, 0),
+  );
+  const daysPerWeek = clamp(
+    requestedDaysPerWeek > 0
+      ? requestedDaysPerWeek
+      : defaults.daysPerWeek,
+    1,
+    availableWeekdays.length,
+  );
+
+  const requestedMaxBlockHours = safeNumber(
+    capacitySource.maxBlockHours,
+    0,
+  );
+  const maxBlockHours = clamp(
+    requestedMaxBlockHours > 0
+      ? requestedMaxBlockHours
+      : defaults.maxBlockHours,
+    0.5,
+    hoursPerDay,
+  );
+
+  const priorities = cleanStringArray(root.priorities, 12);
+
   return {
-    action: root.action === "regenerate-task" ? "regenerate-task" : "generate-plan",
+    action:
+      root.action === "regenerate-task"
+        ? "regenerate-task"
+        : "generate-plan",
     requestId: cleanText(root.requestId, 200) || undefined,
-    projectId: cleanText(root.projectId, 200) || activeProfile?.id || undefined,
+    projectId:
+      cleanText(root.projectId, 200) ||
+      cleanText(root.profileId, 200) ||
+      activeProfile?.id ||
+      undefined,
     title:
       cleanText(root.title, 500) ||
       cleanText(activeProfile?.title, 500) ||
-      cleanText(activeProfile?.topic, 500),
-    workType: WORK_TYPES.has(workTypeCandidate) ? workTypeCandidate : "other",
+      cleanText(activeProfile?.topic, 500) ||
+      defaults.title,
+    workType,
     language: normalizeLanguage(
       root.language ||
         root.workLanguage ||
         activeProfile?.workLanguage ||
         activeProfile?.language,
     ),
-    deadline: cleanText(root.deadline, 20),
-    deadlineTime: cleanText(root.deadlineTime, 10) || undefined,
-    targetPages: Math.trunc(safeNumber(root.targetPages, 0)),
-    completedPages: Math.trunc(safeNumber(root.completedPages, 0)),
+    deadline: cleanText(
+      root.deadline || root.submissionDate || root.dueDate,
+      20,
+    ),
+    deadlineTime: cleanText(root.deadlineTime, 10) || "23:59",
+    targetPages,
+    completedPages,
     currentStatus,
     capacity: {
-      hoursPerDay: safeNumber(capacitySource.hoursPerDay, 0),
-      daysPerWeek: Math.trunc(safeNumber(capacitySource.daysPerWeek, 0)),
+      hoursPerDay,
+      daysPerWeek,
       availableWeekdays,
       unavailableDates,
       preferredTime: PREFERRED_TIMES.has(preferredTimeCandidate)
         ? preferredTimeCandidate
-        : "evening",
-      maxBlockHours: safeNumber(capacitySource.maxBlockHours, 1.5),
+        : defaults.preferredTime,
+      maxBlockHours,
     },
-    priorities: cleanStringArray(root.priorities, 12),
+    priorities:
+      priorities.length > 0
+        ? priorities
+        : [...defaults.priorities],
     constraints: cleanText(root.constraints, 5_000) || undefined,
     additionalInstructions:
-      cleanText(root.additionalInstructions, 10_000) || undefined,
+      cleanText(
+        root.additionalInstructions ||
+          root.currentState ||
+          root.input ||
+          root.message,
+        10_000,
+      ) || undefined,
     activeProfile,
     attachmentIds: cleanStringArray(root.attachmentIds, 24),
     attachmentMetadata: Array.isArray(root.attachmentMetadata)
@@ -688,17 +919,17 @@ function validatePlanningRequest(request: PlanningRequest): string[] {
   const deadline = parseIsoDateUtc(request.deadline);
 
   if (!request.title || request.title.length < 3) {
-    errors.push("Enter the title of the academic work.");
+    errors.push("Chýba názov akademickej práce alebo profil práce.");
   }
 
   if (!WORK_TYPES.has(request.workType)) {
-    errors.push("Select a valid type of academic work.");
+    errors.push("Vyberte platný druh akademickej práce.");
   }
 
   if (!deadline) {
-    errors.push("Enter a valid submission deadline in YYYY-MM-DD format.");
+    errors.push("Vyberte platný termín odovzdania.");
   } else if (deadline.getTime() <= today.getTime()) {
-    errors.push("The submission deadline must be later than the current date.");
+    errors.push("Termín odovzdania musí byť neskorší ako dnešný dátum.");
   }
 
   if (!Number.isInteger(request.targetPages) || request.targetPages < 1) {
@@ -1025,10 +1256,10 @@ async function parseRequest(
     };
   }
 
-  const structured =
-    isRecord(body.currentStatus) && isRecord(body.capacity)
-      ? normalizePlanningRequest(body)
-      : createLegacyPlanningRequest(body);
+  // Všetky plánovacie požiadavky používajú jednu normalizačnú vrstvu.
+  // Minimalistický frontend môže poslať iba workType, deadline a profil;
+  // server doplní odborné predvoľby pre rozsah, kapacitu, etapy a priority.
+  const structured = normalizePlanningRequest(body);
 
   return { payload: structured, attachments: [] };
 }
@@ -1295,6 +1526,14 @@ function normalizePlan(
       remainingPages: calculation.remainingPages,
       reserveDays: calculation.reserveDays,
       pagesPerDay: calculation.pagesPerDay,
+      progressPercent:
+        request.targetPages > 0
+          ? Math.round(
+              (Math.min(request.completedPages, request.targetPages) /
+                request.targetPages) *
+                100,
+            )
+          : 0,
       feasibility: calculation.feasibility,
       riskLevel: calculation.riskLevel,
       explanation:
@@ -1316,64 +1555,663 @@ function normalizePlan(
   };
 }
 
+
+type PlanningPhaseDefinition = {
+  key: string;
+  title: string;
+  expectedOutput: string;
+  keys: PlanningStatusKey[];
+  priority: "low" | "medium" | "high" | "critical";
+};
+
+function getFallbackPlanningCopy(languageValue: string) {
+  const language = normalizeLanguage(languageValue);
+  const slovak = language === "sk";
+  const czech = language === "cs";
+
+  if (slovak || czech) {
+    const sk = slovak;
+
+    return {
+      summaryRealistic: sk
+        ? "Plán vychádza z reálnej kapacity, zostávajúceho rozsahu a aktuálneho stavu práce. Produktívne dni sú oddelené od rezervy na kontrolu a odovzdanie."
+        : "Plán vychází z reálné kapacity, zbývajícího rozsahu a aktuálního stavu práce. Produktivní dny jsou odděleny od rezervy na kontrolu a odevzdání.",
+      summaryIntensive: sk
+        ? "Plán je realizovateľný iba pri disciplinovanom využití dostupnej kapacity. Každý pracovný blok musí skončiť merateľným výstupom."
+        : "Plán je proveditelný pouze při disciplinovaném využití dostupné kapacity. Každý pracovní blok musí skončit měřitelným výstupem.",
+      summaryRisk: sk
+        ? "Plán má vysoké časové riziko. Odporúča sa zvýšiť dennú kapacitu, znížiť rozsah alebo posunúť termín."
+        : "Plán má vysoké časové riziko. Doporučuje se zvýšit denní kapacitu, snížit rozsah nebo posunout termín.",
+      summaryUnrealistic: sk
+        ? "Aktuálny rozsah nie je pri zadanej kapacite realisticky dokončiteľný. Bez zmeny termínu, kapacity alebo rozsahu hrozí nedokončenie práce."
+        : "Aktuální rozsah není při zadané kapacitě realisticky dokončitelný. Bez změny termínu, kapacity nebo rozsahu hrozí nedokončení práce.",
+      phases: {
+        setup: sk
+          ? "Zadanie, osnova a odborné zdroje"
+          : "Zadání, osnova a odborné zdroje",
+        theory: sk ? "Teoretická časť" : "Teoretická část",
+        research: sk
+          ? "Praktická časť, výskum a analýza"
+          : "Praktická část, výzkum a analýza",
+        synthesis: sk
+          ? "Diskusia, záver a odborná syntéza"
+          : "Diskuse, závěr a odborná syntéza",
+        finalization: sk
+          ? "Citácie, formátovanie a korektúra"
+          : "Citace, formátování a korektura",
+      },
+      outputs: {
+        setup: sk
+          ? "Schválená a logicky usporiadaná osnova s pripraveným zoznamom relevantných odborných zdrojov."
+          : "Schválená a logicky uspořádaná osnova s připraveným seznamem relevantních odborných zdrojů.",
+        theory: sk
+          ? "Ucelená teoretická časť s odbornou argumentáciou a priebežnými citáciami."
+          : "Ucelená teoretická část s odbornou argumentací a průběžnými citacemi.",
+        research: sk
+          ? "Dokončená metodika, praktická časť, zber alebo spracovanie dát a overiteľné analytické výstupy."
+          : "Dokončená metodika, praktická část, sběr nebo zpracování dat a ověřitelné analytické výstupy.",
+        synthesis: sk
+          ? "Diskusia výsledkov, odpovede na ciele alebo výskumné otázky a vecne formulovaný záver."
+          : "Diskuse výsledků, odpovědi na cíle nebo výzkumné otázky a věcně formulovaný závěr.",
+        finalization: sk
+          ? "Kompletný dokument s jednotnými citáciami, bibliografiou, formátovaním a jazykovou korektúrou."
+          : "Kompletní dokument s jednotnými citacemi, bibliografií, formátováním a jazykovou korekturou.",
+      },
+      milestone: sk ? "Kontrolný bod" : "Kontrolní bod",
+      accepted: sk
+        ? "Výstup je dokončený, skontrolovaný a pripravený na nadväzujúcu etapu."
+        : "Výstup je dokončený, zkontrolovaný a připravený na navazující etapu.",
+      dayGoal: sk
+        ? "Dokončiť plánovaný merateľný výstup etapy"
+        : "Dokončit plánovaný měřitelný výstup etapy",
+      writingTask: sk
+        ? "Spracovať prioritnú časť akademického textu"
+        : "Zpracovat prioritní část akademického textu",
+      writingDeliverable: sk
+        ? "Hotový a uložený text v plánovanom rozsahu"
+        : "Hotový a uložený text v plánovaném rozsahu",
+      writingCheckpoint: sk
+        ? "Text je odborne súvislý, neobsahuje zjavné duplicity a nadväzuje na osnovu"
+        : "Text je odborně souvislý, neobsahuje zjevné duplicity a navazuje na osnovu",
+      reviewTask: sk
+        ? "Skontrolovať formátovanie, citácie, súbory a pripravenosť odovzdania"
+        : "Zkontrolovat formátování, citace, soubory a připravenost odevzdání",
+      reviewDeliverable: sk
+        ? "Verzia akademickej práce pripravená na odovzdanie"
+        : "Verze akademické práce připravená k odevzdání",
+      reviewCheckpoint: sk
+        ? "Všetky povinné súbory sa správne otvárajú a finálna verzia je pripravená na odovzdanie"
+        : "Všechny povinné soubory se správně otevírají a finální verze je připravena k odevzdání",
+      reserveGoal: sk
+        ? "Finálna kontrola, export a príprava odovzdania"
+        : "Finální kontrola, export a příprava odevzdání",
+      submission: sk
+        ? "Finálna kontrola a odovzdanie"
+        : "Finální kontrola a odevzdání",
+      risks: {
+        capacityTitle: sk
+          ? "Nedostatočná časová kapacita"
+          : "Nedostatečná časová kapacita",
+        capacityDescription: sk
+          ? "Požadovaný rozsah práce presahuje produktívny čas dostupný do termínu."
+          : "Požadovaný rozsah práce přesahuje produktivní čas dostupný do termínu.",
+        capacityMitigation: sk
+          ? "Zvýšte dennú kapacitu, znížte rozsah alebo posuňte termín odovzdania."
+          : "Zvyšte denní kapacitu, snižte rozsah nebo posuňte termín odevzdání.",
+        delayTitle: sk ? "Posun kľúčovej etapy" : "Posun klíčové etapy",
+        delayDescription: sk
+          ? "Oneskorenie výskumu, analýzy alebo teoretickej časti skráti rezervu na kontrolu."
+          : "Zpoždění výzkumu, analýzy nebo teoretické části zkrátí rezervu na kontrolu.",
+        delayMitigation: sk
+          ? "Po každom pracovnom dni aktualizujte stav etáp a rizikovú etapu riešte ako prvú."
+          : "Po každém pracovním dni aktualizujte stav etap a rizikovou etapu řešte jako první.",
+        qualityTitle: sk
+          ? "Pokles odbornej kvality pri zrýchlení"
+          : "Pokles odborné kvality při zrychlení",
+        qualityDescription: sk
+          ? "Pri časovom tlaku môže vzniknúť nejednotná argumentácia, slabé citácie alebo formálne chyby."
+          : "Při časovém tlaku může vzniknout nejednotná argumentace, slabé citace nebo formální chyby.",
+        qualityMitigation: sk
+          ? "Dodržte kontrolné body, priebežne kontrolujte citácie a rezervné dni nepoužívajte na nové písanie."
+          : "Dodržte kontrolní body, průběžně kontrolujte citace a rezervní dny nepoužívejte na nové psaní.",
+      },
+      recommendations: sk
+        ? [
+            "Na konci každého pracovného bloku zapíšte hotový výstup a aktualizujte stav etapy.",
+            "Najrizikovejšiu alebo závislú etapu začnite skôr, než je uvedené v minimálnom harmonograme.",
+            "Rezervné dni ponechajte iba na korektúru, formátovanie, export a technické odovzdanie.",
+            "Nejasné metodické otázky konzultujte skôr, ako zablokujú zber dát alebo analýzu.",
+          ]
+        : [
+            "Po každém pracovním bloku zapište hotový výstup a aktualizujte stav etapy.",
+            "Nejrizikovější nebo závislou etapu začněte co nejdříve.",
+            "Rezervní dny ponechte pouze na korekturu, formátování, export a odevzdání.",
+            "Nejasné metodické otázky konzultujte dříve, než zablokují výzkum nebo analýzu.",
+          ],
+    };
+  }
+
+  return {
+    summaryRealistic:
+      "The plan is based on the available capacity, remaining scope and current progress. Productive days are separated from the final review reserve.",
+    summaryIntensive:
+      "The plan is achievable only with disciplined use of the available capacity.",
+    summaryRisk:
+      "The plan carries a high schedule risk. Increase capacity, reduce scope or move the deadline.",
+    summaryUnrealistic:
+      "The current scope cannot realistically be completed with the stated capacity.",
+    phases: {
+      setup: "Assignment, outline and academic sources",
+      theory: "Theoretical part",
+      research: "Practical part, research and analysis",
+      synthesis: "Discussion, conclusion and synthesis",
+      finalization: "Citations, formatting and proofreading",
+    },
+    outputs: {
+      setup: "Approved outline and a prepared list of relevant academic sources.",
+      theory: "Complete theoretical section with coherent structure and citations.",
+      research: "Completed methodology, practical work and verifiable analytical outputs.",
+      synthesis: "Discussion of results and a clear evidence-based conclusion.",
+      finalization: "Submission-ready document with citations, bibliography and proofreading.",
+    },
+    milestone: "Milestone",
+    accepted: "The output is complete, quality-checked and ready for the next phase.",
+    dayGoal: "Complete the measurable output planned for the phase",
+    writingTask: "Complete the priority academic writing block",
+    writingDeliverable: "Saved academic text in the planned scope",
+    writingCheckpoint: "The text is coherent, evidence-based and follows the outline",
+    reviewTask: "Review formatting, citations, files and submission readiness",
+    reviewDeliverable: "Submission-ready version of the academic work",
+    reviewCheckpoint: "All mandatory files are ready for submission",
+    reserveGoal: "Final review, export and submission preparation",
+    submission: "Final review and submission",
+    risks: {
+      capacityTitle: "Insufficient time capacity",
+      capacityDescription: "The required scope exceeds the productive time available.",
+      capacityMitigation: "Increase capacity, reduce scope or move the deadline.",
+      delayTitle: "Delay of a critical phase",
+      delayDescription: "A delay in a dependent phase reduces the final review reserve.",
+      delayMitigation: "Update progress daily and prioritize the at-risk phase.",
+      qualityTitle: "Quality loss under time pressure",
+      qualityDescription: "Time pressure can create citation, logic and formatting defects.",
+      qualityMitigation: "Use checkpoints and preserve reserve days for quality control.",
+    },
+    recommendations: [
+      "Update the phase status after every work block.",
+      "Start the highest-risk dependent phase as early as possible.",
+      "Keep reserve days for review, export and submission only.",
+      "Resolve methodological questions before they block research or analysis.",
+    ],
+  };
+}
+
+function calculatePhaseStatus(
+  request: PlanningRequest,
+  keys: PlanningStatusKey[],
+): PlanningTaskStatus {
+  const statuses = keys.map((key) => request.currentStatus[key]);
+
+  if (
+    statuses.every(
+      (status) => status === "completed" || status === "not-applicable",
+    )
+  ) {
+    return "completed";
+  }
+
+  if (statuses.some((status) => status === "in-progress")) {
+    return "in-progress";
+  }
+
+  return "not-started";
+}
+
+function calculatePhaseHours(
+  request: PlanningRequest,
+  keys: PlanningStatusKey[],
+): number {
+  return Math.max(
+    1,
+    Math.round(
+      keys.reduce((total, key) => {
+        const status = request.currentStatus[key];
+        const weight = STATUS_HOUR_WEIGHTS[key];
+
+        if (status === "completed" || status === "not-applicable") {
+          return total;
+        }
+
+        if (status === "in-progress") {
+          return total + weight * 0.45;
+        }
+
+        return total + weight;
+      }, 0) * 10,
+    ) / 10,
+  );
+}
+
+function createDeterministicPlan(
+  request: PlanningRequest,
+  calculation: PlanningCalculation,
+): PlanningResponse {
+  const copy = getFallbackPlanningCopy(request.language);
+  const definitions: PlanningPhaseDefinition[] = [
+    {
+      key: "setup",
+      title: copy.phases.setup,
+      expectedOutput: copy.outputs.setup,
+      keys: ["topicApproval", "assignmentApproval", "outline", "sources"],
+      priority: "high",
+    },
+    {
+      key: "theory",
+      title: copy.phases.theory,
+      expectedOutput: copy.outputs.theory,
+      keys: ["theoreticalPart"],
+      priority: "high",
+    },
+    {
+      key: "research",
+      title: copy.phases.research,
+      expectedOutput: copy.outputs.research,
+      keys: ["practicalPart", "research", "dataAnalysis"],
+      priority: "critical",
+    },
+    {
+      key: "synthesis",
+      title: copy.phases.synthesis,
+      expectedOutput: copy.outputs.synthesis,
+      keys: ["discussion", "conclusion"],
+      priority: "high",
+    },
+    {
+      key: "finalization",
+      title: copy.phases.finalization,
+      expectedOutput: copy.outputs.finalization,
+      keys: ["citations", "formatting", "proofreading"],
+      priority: "medium",
+    },
+  ];
+
+  let activeDefinitions = definitions.filter(
+    (definition) =>
+      calculatePhaseStatus(request, definition.keys) !== "completed",
+  );
+
+  if (activeDefinitions.length < 3) {
+    activeDefinitions = definitions.slice(-3);
+  }
+
+  const productiveDates =
+    calculation.productiveDates.length > 0
+      ? calculation.productiveDates
+      : calculation.availableDates;
+  const phaseWeights = activeDefinitions.map((definition) =>
+    calculatePhaseHours(request, definition.keys),
+  );
+  const totalWeight = Math.max(
+    1,
+    phaseWeights.reduce((total, value) => total + value, 0),
+  );
+
+  let dateCursor = 0;
+  const phases = activeDefinitions.map((definition, index) => {
+    const remainingPhases = activeDefinitions.length - index;
+    const remainingDates = Math.max(1, productiveDates.length - dateCursor);
+    const proportionalCount =
+      index === activeDefinitions.length - 1
+        ? remainingDates
+        : Math.max(
+            1,
+            Math.round(
+              (productiveDates.length * phaseWeights[index]) / totalWeight,
+            ),
+          );
+    const maximumForThisPhase = Math.max(
+      1,
+      remainingDates - Math.max(0, remainingPhases - 1),
+    );
+    const phaseDateCount = Math.min(proportionalCount, maximumForThisPhase);
+    const startDate =
+      productiveDates[Math.min(dateCursor, productiveDates.length - 1)] ||
+      calculation.today;
+    const endIndex = Math.min(
+      productiveDates.length - 1,
+      dateCursor + phaseDateCount - 1,
+    );
+    const endDate = productiveDates[endIndex] || startDate;
+
+    dateCursor = Math.min(productiveDates.length, endIndex + 1);
+
+    return {
+      id: `phase-${index + 1}`,
+      title: definition.title,
+      startDate,
+      endDate,
+      estimatedHours: phaseWeights[index],
+      expectedOutput: definition.expectedOutput,
+      priority: definition.priority,
+      dependencies:
+        index > 0 ? [activeDefinitions[index - 1].title] : [],
+      status: calculatePhaseStatus(request, definition.keys),
+    };
+  });
+
+  const remainingPages = calculation.remainingPages;
+  const productiveDayCount = Math.max(1, productiveDates.length);
+  let assignedPages = 0;
+
+  const dailySchedule = calculation.availableDates.map((date, dayIndex) => {
+    const isReserve = calculation.reserveDates.includes(date);
+
+    if (isReserve) {
+      return {
+        date,
+        dayGoal: copy.reserveGoal,
+        targetPages: 0,
+        tasks: [
+          {
+            id: `task-${date}-1`,
+            time: request.capacity.preferredTime,
+            title: copy.reviewTask,
+            deliverable: copy.reviewDeliverable,
+            checkpoint: copy.reviewCheckpoint,
+          },
+        ],
+      };
+    }
+
+    const phase =
+      phases.find(
+        (item) => date >= item.startDate && date <= item.endDate,
+      ) || phases[Math.min(dayIndex, phases.length - 1)];
+    const productiveIndex = productiveDates.indexOf(date);
+    const isLastProductiveDay =
+      productiveIndex === productiveDates.length - 1;
+    const targetPages =
+      remainingPages > 0
+        ? isLastProductiveDay
+          ? Math.max(0, Math.round((remainingPages - assignedPages) * 10) / 10)
+          : Math.max(
+              0,
+              Math.round((remainingPages / productiveDayCount) * 10) / 10,
+            )
+        : 0;
+
+    assignedPages = Math.round((assignedPages + targetPages) * 10) / 10;
+
+    const blockCount = Math.max(
+      1,
+      Math.ceil(
+        request.capacity.hoursPerDay /
+          Math.max(0.5, request.capacity.maxBlockHours),
+      ),
+    );
+    const tasks: PlanningTask[] = Array.from(
+      { length: Math.min(3, blockCount) },
+      (_, taskIndex) => ({
+        id: `task-${date}-${taskIndex + 1}`,
+        time:
+          request.capacity.preferredTime === "custom"
+            ? `Block ${taskIndex + 1}`
+            : `${request.capacity.preferredTime} · block ${taskIndex + 1}`,
+        title:
+          taskIndex === 0
+            ? `${copy.writingTask}: ${phase.title}`
+            : taskIndex === 1
+              ? `${copy.milestone}: ${phase.title}`
+              : copy.reviewTask,
+        deliverable:
+          taskIndex === 0
+            ? `${copy.writingDeliverable}${
+                targetPages > 0 ? ` (${targetPages} pages)` : ""
+              }`
+            : taskIndex === 1
+              ? phase.expectedOutput
+              : copy.reviewDeliverable,
+        checkpoint:
+          taskIndex === 0
+            ? copy.writingCheckpoint
+            : taskIndex === 1
+              ? copy.accepted
+              : copy.reviewCheckpoint,
+      }),
+    );
+
+    return {
+      date,
+      dayGoal: `${copy.dayGoal}: ${phase.title}`,
+      targetPages,
+      tasks,
+    };
+  });
+
+  const milestones = phases.map((phase, index) => ({
+    id: `milestone-${index + 1}`,
+    title: `${copy.milestone} ${index + 1}: ${phase.title}`,
+    date: phase.endDate,
+    acceptanceCriteria: copy.accepted,
+  }));
+
+  if (
+    milestones.length === 0 ||
+    milestones[milestones.length - 1].date !== calculation.deadline
+  ) {
+    milestones.push({
+      id: `milestone-${milestones.length + 1}`,
+      title: copy.submission,
+      date: calculation.deadline,
+      acceptanceCriteria: copy.reviewCheckpoint,
+    });
+  }
+
+  const risks: PlanningResponse["risks"] = [
+    {
+      id: "risk-capacity",
+      level:
+        calculation.riskLevel === "critical"
+          ? "critical"
+          : calculation.riskLevel === "high"
+            ? "high"
+            : "medium",
+      title: copy.risks.capacityTitle,
+      description: copy.risks.capacityDescription,
+      mitigation: copy.risks.capacityMitigation,
+    },
+    {
+      id: "risk-delay",
+      level: calculation.productiveDays < 7 ? "high" : "medium",
+      title: copy.risks.delayTitle,
+      description: copy.risks.delayDescription,
+      mitigation: copy.risks.delayMitigation,
+    },
+    {
+      id: "risk-quality",
+      level:
+        calculation.feasibility === "unrealistic" ||
+        calculation.feasibility === "high-risk"
+          ? "high"
+          : "medium",
+      title: copy.risks.qualityTitle,
+      description: copy.risks.qualityDescription,
+      mitigation: copy.risks.qualityMitigation,
+    },
+  ];
+
+  const explanation =
+    calculation.feasibility === "realistic"
+      ? copy.summaryRealistic
+      : calculation.feasibility === "intensive"
+        ? copy.summaryIntensive
+        : calculation.feasibility === "high-risk"
+          ? copy.summaryRisk
+          : copy.summaryUnrealistic;
+
+  return {
+    summary: {
+      availableDays: calculation.availableDays,
+      productiveDays: calculation.productiveDays,
+      availableHours: calculation.availableHours,
+      productiveHours: calculation.productiveHours,
+      requiredHours: calculation.requiredHours,
+      remainingPages: calculation.remainingPages,
+      reserveDays: calculation.reserveDays,
+      pagesPerDay: calculation.pagesPerDay,
+      progressPercent:
+        request.targetPages > 0
+          ? Math.round(
+              (Math.min(request.completedPages, request.targetPages) /
+                request.targetPages) *
+                100,
+            )
+          : 0,
+      feasibility: calculation.feasibility,
+      riskLevel: calculation.riskLevel,
+      explanation,
+    },
+    phases,
+    dailySchedule,
+    milestones,
+    risks,
+    recommendations: copy.recommendations,
+  };
+}
+
+function getSerializationLabels(languageValue: string) {
+  const language = normalizeLanguage(languageValue);
+
+  if (language === "sk") {
+    return {
+      feasibility: "Realizovateľnosť",
+      risk: "Úroveň rizika",
+      availableDays: "Dostupné dni",
+      availableHours: "Dostupné hodiny",
+      requiredHours: "Potrebné hodiny",
+      remainingPages: "Zostávajúce strany",
+      reserveDays: "Rezervné dni",
+      phases: "ETAPY",
+      output: "Výstup",
+      dependencies: "Závislosti",
+      none: "žiadne",
+      daily: "DENNÝ HARMONOGRAM",
+      deliverable: "Výstup",
+      checkpoint: "Kontrola",
+      milestones: "MÍĽNIKY",
+      acceptance: "Akceptačné kritérium",
+      risks: "RIZIKÁ",
+      mitigation: "Opatrenie",
+      recommendations: "ODPORÚČANIA",
+    };
+  }
+
+  if (language === "cs") {
+    return {
+      feasibility: "Realizovatelnost",
+      risk: "Úroveň rizika",
+      availableDays: "Dostupné dny",
+      availableHours: "Dostupné hodiny",
+      requiredHours: "Potřebné hodiny",
+      remainingPages: "Zbývající strany",
+      reserveDays: "Rezervní dny",
+      phases: "ETAPY",
+      output: "Výstup",
+      dependencies: "Závislosti",
+      none: "žádné",
+      daily: "DENNÍ HARMONOGRAM",
+      deliverable: "Výstup",
+      checkpoint: "Kontrola",
+      milestones: "MILNÍKY",
+      acceptance: "Akceptační kritérium",
+      risks: "RIZIKA",
+      mitigation: "Opatření",
+      recommendations: "DOPORUČENÍ",
+    };
+  }
+
+  return {
+    feasibility: "Feasibility",
+    risk: "Risk level",
+    availableDays: "Available days",
+    availableHours: "Available hours",
+    requiredHours: "Required hours",
+    remainingPages: "Remaining pages",
+    reserveDays: "Reserve days",
+    phases: "PHASES",
+    output: "Output",
+    dependencies: "Dependencies",
+    none: "none",
+    daily: "DAILY SCHEDULE",
+    deliverable: "Deliverable",
+    checkpoint: "Checkpoint",
+    milestones: "MILESTONES",
+    acceptance: "Acceptance criteria",
+    risks: "RISKS",
+    mitigation: "Mitigation",
+    recommendations: "RECOMMENDATIONS",
+  };
+}
+
+
 function serializePlan(plan: PlanningResponse, request: PlanningRequest): string {
+  const labels = getSerializationLabels(request.language);
   const lines: string[] = [
     request.title,
     "",
-    `Feasibility: ${plan.summary.feasibility}`,
-    `Risk level: ${plan.summary.riskLevel}`,
-    `Available days: ${plan.summary.availableDays}`,
-    `Available hours: ${plan.summary.availableHours}`,
-    `Required hours: ${plan.summary.requiredHours}`,
-    `Remaining pages: ${plan.summary.remainingPages}`,
-    `Reserve days: ${plan.summary.reserveDays}`,
+    `${labels.feasibility}: ${plan.summary.feasibility}`,
+    `${labels.risk}: ${plan.summary.riskLevel}`,
+    `${labels.availableDays}: ${plan.summary.availableDays}`,
+    `${labels.availableHours}: ${plan.summary.availableHours}`,
+    `${labels.requiredHours}: ${plan.summary.requiredHours}`,
+    `${labels.remainingPages}: ${plan.summary.remainingPages}`,
+    `${labels.reserveDays}: ${plan.summary.reserveDays}`,
     "",
     plan.summary.explanation,
     "",
-    "PHASES",
+    labels.phases,
   ];
 
   plan.phases.forEach((phase, index) => {
     lines.push(
       `${index + 1}. ${phase.title}`,
       `${phase.startDate} – ${phase.endDate} | ${phase.estimatedHours} h | ${phase.priority}`,
-      `Output: ${phase.expectedOutput}`,
-      `Dependencies: ${phase.dependencies.join(", ") || "none"}`,
+      `${labels.output}: ${phase.expectedOutput}`,
+      `${labels.dependencies}: ${phase.dependencies.join(", ") || labels.none}`,
       "",
     );
   });
 
-  lines.push("DAILY SCHEDULE");
+  lines.push(labels.daily);
   plan.dailySchedule.forEach((day) => {
     lines.push(`${day.date} — ${day.dayGoal}`);
     day.tasks.forEach((task) => {
       lines.push(
         `- ${task.time}: ${task.title}`,
-        `  Deliverable: ${task.deliverable}`,
-        `  Checkpoint: ${task.checkpoint}`,
+        `  ${labels.deliverable}: ${task.deliverable}`,
+        `  ${labels.checkpoint}: ${task.checkpoint}`,
       );
     });
     lines.push("");
   });
 
-  lines.push("MILESTONES");
+  lines.push(labels.milestones);
   plan.milestones.forEach((milestone) => {
     lines.push(
       `- ${milestone.date}: ${milestone.title}`,
-      `  Acceptance criteria: ${milestone.acceptanceCriteria}`,
+      `  ${labels.acceptance}: ${milestone.acceptanceCriteria}`,
     );
   });
 
-  lines.push("", "RISKS");
+  lines.push("", labels.risks);
   plan.risks.forEach((risk) => {
     lines.push(
       `- ${risk.level.toUpperCase()}: ${risk.title}`,
       `  ${risk.description}`,
-      `  Mitigation: ${risk.mitigation}`,
+      `  ${labels.mitigation}: ${risk.mitigation}`,
     );
   });
 
-  lines.push("", "RECOMMENDATIONS");
+  lines.push("", labels.recommendations);
   plan.recommendations.forEach((recommendation, index) => {
     lines.push(`${index + 1}. ${recommendation}`);
   });
@@ -1386,6 +2224,22 @@ async function regenerateTask(
 ): Promise<PlanningTask> {
   const languageName = getLanguageName(request.language || "sk");
   const task = request.task || {};
+
+  if (!openai) {
+    return {
+      id: cleanText(task.id, 200) || `task-${Date.now()}`,
+      time: cleanText(task.time, 100) || "Flexible block",
+      title:
+        cleanText(task.title, 1_000) ||
+        "Complete the planned academic work block",
+      deliverable:
+        cleanText(task.deliverable, 1_500) ||
+        "A measurable and saved academic output",
+      checkpoint:
+        cleanText(task.checkpoint, 1_500) ||
+        "Verify completeness, academic quality and alignment with the plan",
+    };
+  }
 
   const completion = await openai.chat.completions.create({
     model: MODEL,
@@ -1463,15 +2317,6 @@ export async function POST(req: NextRequest) {
     cleanText(req.headers.get("x-request-id"), 200) || `planning-${Date.now()}`;
 
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      return errorResponse(
-        500,
-        "OPENAI_API_KEY_MISSING",
-        "The planning service is not configured.",
-        "OPENAI_API_KEY is missing on the server.",
-      );
-    }
-
     const { payload, attachments } = await parseRequest(req);
 
     if (payload.action === "regenerate-task") {
@@ -1491,7 +2336,7 @@ export async function POST(req: NextRequest) {
       return errorResponse(
         400,
         "PLANNING_VALIDATION_FAILED",
-        "The academic plan cannot be created because required data are missing or invalid.",
+        "Plán nie je možné vytvoriť, pretože chýba platný druh práce alebo termín odovzdania.",
         validationErrors.join(" "),
       );
     }
@@ -1504,7 +2349,7 @@ export async function POST(req: NextRequest) {
       return errorResponse(
         400,
         "PLANNING_CAPACITY_INVALID",
-        "The selected deadline and availability do not provide a usable planning window.",
+        "Zvolený termín neposkytuje použiteľné obdobie na vytvorenie harmonogramu.",
         error instanceof Error ? error.message : undefined,
       );
     }
@@ -1515,60 +2360,62 @@ export async function POST(req: NextRequest) {
       attachments,
     );
 
-    const completion = await openai.chat.completions.create({
-      model: MODEL,
-      temperature: 0.2,
-      response_format: {
-        type: "json_schema",
-        json_schema: RESPONSE_SCHEMA,
-      },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a senior academic planner and thesis supervisor. Follow the server calculations exactly. Return only valid JSON matching the schema.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    });
+    let plan = createDeterministicPlan(
+      planningRequest,
+      calculation,
+    );
+    let generationMode: "ai" | "deterministic-fallback" =
+      "deterministic-fallback";
+    let fallbackReason: string | null = openai
+      ? null
+      : "OPENAI_API_KEY is not configured; the guaranteed calculation planner was used.";
 
-    const content = completion.choices[0]?.message?.content;
+    if (openai) {
+      try {
+        const completion = await openai.chat.completions.create({
+          model: MODEL,
+          temperature: 0.2,
+          response_format: {
+            type: "json_schema",
+            json_schema: RESPONSE_SCHEMA,
+          },
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a senior academic planner and thesis supervisor. Follow the server calculations exactly. Return only valid JSON matching the schema.",
+            },
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+        });
 
-    if (!content) {
-      return errorResponse(
-        502,
-        "PLANNING_AI_EMPTY_RESPONSE",
-        "The AI service did not return an academic plan.",
-      );
-    }
+        const content = completion.choices[0]?.message?.content;
 
-    let parsed: unknown;
+        if (!content) {
+          throw new Error(
+            "The AI service returned an empty planning response.",
+          );
+        }
 
-    try {
-      parsed = parseModelJson(content);
-    } catch (error) {
-      return errorResponse(
-        502,
-        "PLANNING_AI_INVALID_JSON",
-        "The AI service returned an invalid planning format.",
-        error instanceof Error ? error.message : undefined,
-      );
-    }
+        const parsed = parseModelJson(content);
+        plan = normalizePlan(parsed, planningRequest, calculation);
+        generationMode = "ai";
+        fallbackReason = null;
+      } catch (error) {
+        fallbackReason =
+          error instanceof Error
+            ? error.message
+            : "The AI planning response failed and the guaranteed calculation planner was used.";
 
-    let plan: PlanningResponse;
-
-    try {
-      plan = normalizePlan(parsed, planningRequest, calculation);
-    } catch (error) {
-      return errorResponse(
-        502,
-        "PLANNING_AI_RESPONSE_VALIDATION_FAILED",
-        "The generated plan is incomplete or structurally invalid.",
-        error instanceof Error ? error.message : undefined,
-      );
+        console.warn("PLANNING_AI_FALLBACK", {
+          requestId,
+          model: MODEL,
+          reason: fallbackReason,
+        });
+      }
     }
 
     const output = serializePlan(plan, planningRequest);
@@ -1583,11 +2430,33 @@ export async function POST(req: NextRequest) {
       output,
       result: output,
       meta: {
-        model: MODEL,
+        model:
+          generationMode === "ai"
+            ? MODEL
+            : "zedpera-deterministic-planner-v2",
+        generationMode,
+        fallbackReason,
+        generatedAt: new Date().toISOString(),
         title: planningRequest.title,
         deadline: planningRequest.deadline,
         language: planningRequest.language,
+        interfaceMode: "work-type-and-deadline-only",
+        automaticDefaultsApplied: true,
         calculation,
+        gantt: {
+          startDate: calculation.today,
+          endDate: calculation.deadline,
+          totalDays: calculation.calendarDays,
+          phases: plan.phases.map((phase) => ({
+            id: phase.id,
+            title: phase.title,
+            startDate: phase.startDate,
+            endDate: phase.endDate,
+            priority: phase.priority,
+            status: phase.status,
+          })),
+          milestones: plan.milestones,
+        },
         attachmentProcessing: {
           receivedFiles: attachments.length,
           successfullyReadFiles: attachments.filter(

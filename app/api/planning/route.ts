@@ -375,17 +375,13 @@ function inferPlanningWorkType(
   value: unknown,
   profile?: SavedProfile | null,
 ): PlanningWorkType {
-  const candidate = cleanText(value, 60).toLowerCase();
+  const profileType = [profile?.type, profile?.level]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 
-  if (WORK_TYPES.has(candidate as PlanningWorkType)) {
-    return candidate as PlanningWorkType;
-  }
-
-  const profileType = cleanText(
-    profile?.type || profile?.level,
-    100,
-  ).toLowerCase();
-
+  // Aktívny profil je autoritatívny. Frontend nesmie zmeniť druh práce
+  // samostatným prepínačom, ak je v profile uložený konkrétny typ práce.
   if (profileType.includes("semin")) return "seminar";
   if (profileType.includes("bak") || profileType.includes("bachelor")) {
     return "bachelor";
@@ -399,6 +395,11 @@ function inferPlanningWorkType(
   }
   if (profileType.includes("projekt") || profileType.includes("project")) {
     return "project";
+  }
+
+  const candidate = cleanText(value, 60).toLowerCase();
+  if (WORK_TYPES.has(candidate as PlanningWorkType)) {
+    return candidate as PlanningWorkType;
   }
 
   return "other";
@@ -1012,54 +1013,69 @@ function calculatePlanning(request: PlanningRequest): PlanningCalculation {
   }
 
   const unavailable = new Set(request.capacity.unavailableDates);
-  const availableWeekdays = new Set(request.capacity.availableWeekdays);
-  const availableDates: string[] = [];
+  const allCalendarDates: string[] = [];
 
-  for (let current = today; current.getTime() <= deadline.getTime(); current = addUtcDays(current, 1)) {
+  // Termín má prednosť pred pôvodnými kapacitnými predvoľbami. Do plánu sa
+  // zahrnie každý kalendárny deň až do odovzdania, aby vznikol harmonogram
+  // aj pri termíne o jeden, dva alebo tri dni.
+  for (
+    let current = today;
+    current.getTime() <= deadline.getTime();
+    current = addUtcDays(current, 1)
+  ) {
     const iso = toIsoDateUtc(current);
-    const weekday = current.getUTCDay();
-
-    if (availableWeekdays.has(weekday) && !unavailable.has(iso)) {
-      availableDates.push(iso);
-    }
+    if (!unavailable.has(iso)) allCalendarDates.push(iso);
   }
+
+  const availableDates =
+    allCalendarDates.length > 0
+      ? allCalendarDates
+      : Array.from(
+          {
+            length: differenceInCalendarDays(today, deadline) + 1,
+          },
+          (_, index) => toIsoDateUtc(addUtcDays(today, index)),
+        );
 
   if (availableDates.length === 0) {
-    throw new Error(
-      "No available working day remains before the selected deadline.",
-    );
+    throw new Error("No calendar day remains before the selected deadline.");
   }
 
-  const reserveDays = Math.min(
-    Math.max(1, Math.ceil(availableDates.length * 0.1)),
-    Math.max(1, availableDates.length - 1),
-  );
+  // Pri veľmi krátkom termíne sa nevytvára samostatný rezervný deň. Kontrola
+  // a odovzdanie sa zaradia do posledného pracovného bloku posledného dňa.
+  const reserveDays =
+    availableDates.length <= 3
+      ? 0
+      : availableDates.length <= 7
+        ? 1
+        : Math.min(
+            Math.max(1, Math.ceil(availableDates.length * 0.08)),
+            Math.max(1, availableDates.length - 2),
+          );
   const productiveDays = Math.max(1, availableDates.length - reserveDays);
   const productiveDates = availableDates.slice(0, productiveDays);
   const reserveDates = availableDates.slice(productiveDays);
-  const availableHours = availableDates.length * request.capacity.hoursPerDay;
-  const productiveHours = productiveDays * request.capacity.hoursPerDay;
-  const remainingPages = Math.max(0, request.targetPages - request.completedPages);
+  const remainingPages = Math.max(
+    0,
+    request.targetPages - request.completedPages,
+  );
   const requiredHours = calculateRequiredHours(request);
-  const workloadRatio = productiveHours > 0 ? requiredHours / productiveHours : 99;
-  const pagesPerDay = productiveDays > 0 ? remainingPages / productiveDays : remainingPages;
+  const pagesPerDay =
+    productiveDays > 0 ? remainingPages / productiveDays : remainingPages;
 
-  let feasibility: PlanningCalculation["feasibility"];
-  let riskLevel: PlanningCalculation["riskLevel"];
+  // Hodiny nie sú blokovacím kritériom. Ide iba o interný odhad úsilia,
+  // ktorý sa adaptívne rozdelí medzi dostupné dni.
+  const adaptiveHoursPerDay =
+    productiveDays > 0
+      ? Math.max(1, requiredHours / productiveDays)
+      : Math.max(1, requiredHours);
+  const productiveHours = Math.max(requiredHours, adaptiveHoursPerDay);
+  const availableHours = productiveHours;
 
-  if (workloadRatio <= 0.75 && productiveDays >= 7) {
-    feasibility = "realistic";
-    riskLevel = "low";
-  } else if (workloadRatio <= 1) {
-    feasibility = "intensive";
-    riskLevel = productiveDays < 5 ? "high" : "medium";
-  } else if (workloadRatio <= 1.25) {
-    feasibility = "high-risk";
-    riskLevel = "high";
-  } else {
-    feasibility = "unrealistic";
-    riskLevel = "critical";
-  }
+  const feasibility: PlanningCalculation["feasibility"] =
+    availableDates.length <= 7 ? "intensive" : "realistic";
+  const riskLevel: PlanningCalculation["riskLevel"] =
+    availableDates.length <= 3 ? "medium" : "low";
 
   return {
     today: toIsoDateUtc(today),
@@ -1075,9 +1091,9 @@ function calculatePlanning(request: PlanningRequest): PlanningCalculation {
     productiveHours: Math.round(productiveHours * 10) / 10,
     remainingPages,
     requiredHours,
-    hoursPerDay: request.capacity.hoursPerDay,
+    hoursPerDay: Math.round(adaptiveHoursPerDay * 10) / 10,
     pagesPerDay: Math.round(pagesPerDay * 10) / 10,
-    workloadRatio: Math.round(workloadRatio * 100) / 100,
+    workloadRatio: 1,
     feasibility,
     riskLevel,
   };
@@ -1304,40 +1320,32 @@ function buildPlanningPrompt(
 
   return `
 You are a senior academic project planner, thesis supervisor and project manager.
-Create a concrete, mathematically feasible academic work plan.
+Create a concrete deadline-first academic work plan that always reaches the selected submission date.
 
 OUTPUT LANGUAGE
 Write every user-facing sentence in ${languageName}.
 Keep ISO dates in YYYY-MM-DD format.
 Return JSON only and follow the supplied JSON schema exactly.
 
-NON-NEGOTIABLE CALCULATION
-The following figures were calculated by the server. Do not alter, recalculate or contradict them:
+NON-NEGOTIABLE DEADLINE CALCULATION
+The server has already created the complete date range. Do not remove dates, reject the deadline or replace it with another date:
 - Today: ${calculation.today}
 - Submission deadline: ${calculation.deadline}
 - Calendar days including today and deadline: ${calculation.calendarDays}
-- Available working dates: ${calculation.availableDates.join(", ")}
-- Productive working dates: ${calculation.productiveDates.join(", ")}
-- Reserve dates: ${calculation.reserveDates.join(", ") || "none"}
-- Available working days: ${calculation.availableDays}
-- Productive days before reserve: ${calculation.productiveDays}
-- Reserve days: ${calculation.reserveDays}
-- Total available hours: ${calculation.availableHours}
-- Productive hours before reserve: ${calculation.productiveHours}
-- Estimated required hours: ${calculation.requiredHours}
+- Available planning dates: ${calculation.availableDates.join(", ")}
+- Main production dates: ${calculation.productiveDates.join(", ")}
+- Final review dates: ${calculation.reserveDates.join(", ") || "included in the final day"}
+- Available days: ${calculation.availableDays}
+- Main production days: ${calculation.productiveDays}
 - Remaining pages: ${calculation.remainingPages}
-- Required average pages per productive day: ${calculation.pagesPerDay}
-- Workload ratio: ${calculation.workloadRatio}
-- Feasibility: ${calculation.feasibility}
-- Risk level: ${calculation.riskLevel}
+- Required average pages per production day: ${calculation.pagesPerDay}
+- Planning mode: ${calculation.feasibility}
 
 ACADEMIC WORK
 - Title: ${request.title}
-- Work type: ${request.workType}
+- Work type from the active profile: ${request.workType}
 - Target pages: ${request.targetPages}
 - Completed pages: ${request.completedPages}
-- Preferred work time: ${request.capacity.preferredTime}
-- Maximum work block: ${request.capacity.maxBlockHours} hours
 - Priorities: ${request.priorities.join("; ")}
 - Constraints: ${request.constraints || "none stated"}
 - Additional instructions: ${request.additionalInstructions || "none stated"}
@@ -1351,24 +1359,24 @@ ${buildProfileBlock(request.activeProfile)}
 ATTACHMENTS
 ${buildAttachmentContext(attachments)}
 
-PLANNING RULES
-1. Use only productive working dates for writing, research and analysis tasks.
-2. Use reserve dates for final review, citation control, formatting, export, technical problems and submission.
-3. Do not create any date before ${calculation.today} or after ${calculation.deadline}.
-4. The final day must not be dedicated entirely to new writing.
-5. Each phase must have a measurable expected output and realistic dependency.
-6. Daily tasks must fit within ${request.capacity.hoursPerDay} hours and individual blocks should normally not exceed ${request.capacity.maxBlockHours} hours.
-7. Daily target pages must be realistic and sum approximately to the remaining page count where writing is still needed.
-8. If feasibility is high-risk or unrealistic, state this clearly and recommend a concrete adjustment: increase capacity, reduce scope, move deadline, obtain help or remove non-essential work.
-9. Include milestones for outline, theory, practical/research work, results, discussion, citations, proofreading, formatting and submission only when relevant to the current status.
-10. Do not invent sources, research results, supervisor approvals or completed work.
-11. Make the plan operational: every task needs a deliverable and checkpoint.
-12. Provide at least three phases, at least three milestones, at least two risks and at least three recommendations.
-13. Create one daily schedule entry for every productive working date. Create reserve-day entries as well, but only for review, correction, export and submission activities.
+DEADLINE-FIRST PLANNING RULES
+1. Always create a complete schedule through ${calculation.deadline}, even when only one, two or three days are available.
+2. Capacity values are soft internal defaults only. They must never block plan generation and must never be used to say that the work cannot be completed.
+3. Create one daily schedule entry for every available planning date.
+4. Distribute the full remaining page count across the production dates; daily target pages must sum to approximately ${calculation.remainingPages} pages.
+5. For a short deadline, compress multiple phases into the same day and use ordered focused blocks.
+6. The final date must include completion of any remaining work, citation and formatting control, final export and submission.
+7. Do not create any date before ${calculation.today} or after ${calculation.deadline}.
+8. Each phase and task must have a concrete deliverable and checkpoint.
+9. Include relevant milestones for outline, theory, practical/research work, results, discussion, citations, proofreading, formatting and submission.
+10. Do not invent sources, research results, supervisor approvals or already completed work.
+11. Provide at least three phases, at least three milestones, at least two practical execution risks and at least three action-oriented recommendations.
+12. Never use wording that the deadline is unrealistic, mathematically impossible or not achievable. Never recommend changing the deadline, reducing the scope, increasing capacity or obtaining outside help.
+13. The summary must be constructive and action-oriented: explain how the work is divided so that it is completed by the selected deadline.
 14. If the date range is long, keep each day concise while preserving a complete schedule.
 
 SUMMARY EXPLANATION
-The summary explanation must accurately explain the fixed feasibility and risk values. It may not claim that the plan is realistic when the fixed feasibility is high-risk or unrealistic.
+State that the plan has been fitted to the selected deadline. For a short date range, describe it as an accelerated or intensive plan, not as an impossible or failed plan.
 `.trim();
 }
 
@@ -1407,6 +1415,44 @@ function ensureAllowedDate(
   return date;
 }
 
+function getDeadlineFirstSummary(
+  languageValue: string,
+  calculation: PlanningCalculation,
+): string {
+  const language = normalizeLanguage(languageValue);
+  const accelerated = calculation.calendarDays <= 7;
+  const pages = calculation.pagesPerDay;
+
+  if (language === "sk") {
+    return accelerated
+      ? `Harmonogram je prispôsobený zvolenému termínu v zrýchlenom režime. Všetky zostávajúce etapy sú rozdelené do ${calculation.availableDays} dostupných dní s cieľom približne ${pages} strán denne; posledný deň zahŕňa dokončenie, kontrolu, export a odovzdanie.`
+      : `Harmonogram rozdeľuje všetky zostávajúce etapy do ${calculation.availableDays} dní až po zvolený termín. Každý deň má konkrétny výstup, kontrolný bod a cieľový rozsah približne ${pages} strán.`;
+  }
+
+  if (language === "cs") {
+    return accelerated
+      ? `Harmonogram je přizpůsoben zvolenému termínu ve zrychleném režimu. Všechny zbývající etapy jsou rozděleny do ${calculation.availableDays} dostupných dnů s cílem přibližně ${pages} stran denně; poslední den zahrnuje dokončení, kontrolu, export a odevzdání.`
+      : `Harmonogram rozděluje všechny zbývající etapy do ${calculation.availableDays} dnů až po zvolený termín. Každý den má konkrétní výstup, kontrolní bod a cílový rozsah přibližně ${pages} strán.`;
+  }
+
+  return accelerated
+    ? `The schedule has been fitted to the selected deadline in accelerated mode. All remaining phases are distributed across ${calculation.availableDays} available days with a target of about ${pages} pages per day; the final day includes completion, review, export and submission.`
+    : `The schedule distributes all remaining phases across ${calculation.availableDays} days through the selected deadline. Every day has a concrete deliverable, checkpoint and a target of about ${pages} pages.`;
+}
+
+const DEADLINE_BLOCKING_LANGUAGE =
+  /nerealist|nereáln|nedokončen|matematick|zmeniť\s+termín|posunúť\s+termín|znížiť\s+rozsah|zvýšiť[^.]{0,40}kapacit|unrealistic|mathematically impossible|cannot[^.]{0,60}complete|move[^.]{0,30}deadline|reduce[^.]{0,30}scope|increase[^.]{0,30}capacity|obtain[^.]{0,30}help/i;
+
+function sanitizeDeadlineFirstText(
+  value: unknown,
+  fallback: string,
+  maxLength = 1_500,
+): string {
+  const text = cleanText(value, maxLength);
+  if (!text || DEADLINE_BLOCKING_LANGUAGE.test(text)) return fallback;
+  return text;
+}
+
 function normalizePlan(
   raw: unknown,
   request: PlanningRequest,
@@ -1416,7 +1462,6 @@ function normalizePlan(
     throw new Error("The AI response is not a JSON object.");
   }
 
-  const rawSummary = isRecord(raw.summary) ? raw.summary : {};
   const phaseSource = Array.isArray(raw.phases) ? raw.phases : [];
   const daySource = Array.isArray(raw.dailySchedule) ? raw.dailySchedule : [];
   const milestoneSource = Array.isArray(raw.milestones) ? raw.milestones : [];
@@ -1496,19 +1541,93 @@ function normalizePlan(
     }))
     .slice(0, 20);
 
+  const safeCopy = getFallbackPlanningCopy(request.language);
+  const fallbackRisks = [
+    {
+      title: safeCopy.risks.capacityTitle,
+      description: safeCopy.risks.capacityDescription,
+      mitigation: safeCopy.risks.capacityMitigation,
+    },
+    {
+      title: safeCopy.risks.delayTitle,
+      description: safeCopy.risks.delayDescription,
+      mitigation: safeCopy.risks.delayMitigation,
+    },
+    {
+      title: safeCopy.risks.qualityTitle,
+      description: safeCopy.risks.qualityDescription,
+      mitigation: safeCopy.risks.qualityMitigation,
+    },
+  ];
+
   const risks = riskSource
     .filter(isRecord)
-    .map((risk, index) => ({
-      id: `risk-${index + 1}`,
-      level: safePriority(risk.level),
-      title: cleanText(risk.title, 500) || `Risk ${index + 1}`,
-      description: cleanText(risk.description, 1_500) || "Planning risk.",
-      mitigation:
-        cleanText(risk.mitigation, 1_500) || "Review capacity and update the plan.",
-    }))
+    .map((risk, index) => {
+      const fallbackRisk =
+        fallbackRisks[index % fallbackRisks.length] ||
+        fallbackRisks[0] || {
+          title: "Riadenie harmonogramu",
+          description: "Dodržujte poradie naplánovaných pracovných blokov.",
+          mitigation: "Na konci dňa potvrďte dokončenie merateľného výstupu.",
+        };
+
+      return {
+        id: `risk-${index + 1}`,
+        level:
+          safePriority(risk.level) === "critical" ||
+          safePriority(risk.level) === "high"
+            ? "medium"
+            : safePriority(risk.level),
+        title: sanitizeDeadlineFirstText(
+          risk.title,
+          fallbackRisk.title,
+          500,
+        ),
+        description: sanitizeDeadlineFirstText(
+          risk.description,
+          fallbackRisk.description,
+        ),
+        mitigation: sanitizeDeadlineFirstText(
+          risk.mitigation,
+          fallbackRisk.mitigation,
+        ),
+      };
+    })
     .slice(0, 12);
 
-  const recommendations = cleanStringArray(raw.recommendations, 20);
+  const recommendations = cleanStringArray(raw.recommendations, 20)
+    .map((recommendation, index) =>
+      sanitizeDeadlineFirstText(
+        recommendation,
+        safeCopy.recommendations[index % safeCopy.recommendations.length] ||
+          safeCopy.recommendations[0] ||
+          "Dodržujte denný harmonogram a priebežne potvrdzujte dokončené výstupy.",
+        1_000,
+      ),
+    )
+    .filter(Boolean);
+
+  const returnedDates = new Set(dailySchedule.map((day) => day.date));
+  const missingDates = calculation.availableDates.filter(
+    (date) => !returnedDates.has(date),
+  );
+  const scheduledPages = dailySchedule.reduce(
+    (total, day) => total + Math.max(0, day.targetPages),
+    0,
+  );
+  const pageDifference = Math.abs(
+    scheduledPages - calculation.remainingPages,
+  );
+
+  if (
+    missingDates.length > 0 ||
+    dailySchedule.some((day) => day.tasks.length === 0) ||
+    pageDifference > Math.max(1, calculation.remainingPages * 0.05)
+  ) {
+    throw new Error(
+      "The AI schedule did not cover every available date or the full remaining page count.",
+    );
+  }
 
   if (phases.length < 1 || dailySchedule.length < 1 || milestones.length < 1) {
     throw new Error(
@@ -1536,9 +1655,7 @@ function normalizePlan(
           : 0,
       feasibility: calculation.feasibility,
       riskLevel: calculation.riskLevel,
-      explanation:
-        cleanText(rawSummary.explanation, 3_000) ||
-        "The feasibility assessment is based on the calculated workload and available capacity.",
+      explanation: getDeadlineFirstSummary(request.language, calculation),
     },
     phases,
     dailySchedule,
@@ -1580,11 +1697,11 @@ function getFallbackPlanningCopy(languageValue: string) {
         ? "Plán je realizovateľný iba pri disciplinovanom využití dostupnej kapacity. Každý pracovný blok musí skončiť merateľným výstupom."
         : "Plán je proveditelný pouze při disciplinovaném využití dostupné kapacity. Každý pracovní blok musí skončit měřitelným výstupem.",
       summaryRisk: sk
-        ? "Plán má vysoké časové riziko. Odporúča sa zvýšiť dennú kapacitu, znížiť rozsah alebo posunúť termín."
-        : "Plán má vysoké časové riziko. Doporučuje se zvýšit denní kapacitu, snížit rozsah nebo posunout termín.",
+        ? "Harmonogram je nastavený v zrýchlenom režime a rozdeľuje všetky zostávajúce činnosti do dostupných dní."
+        : "Harmonogram je nastaven ve zrychleném režimu a rozděluje všechny zbývající činnosti do dostupných dnů.",
       summaryUnrealistic: sk
-        ? "Aktuálny rozsah nie je pri zadanej kapacite realisticky dokončiteľný. Bez zmeny termínu, kapacity alebo rozsahu hrozí nedokončenie práce."
-        : "Aktuální rozsah není při zadané kapacitě realisticky dokončitelný. Bez změny termínu, kapacity nebo rozsahu hrozí nedokončení práce.",
+        ? "Harmonogram bol stlačený do zvoleného termínu. Každý dostupný deň obsahuje presný výstup a posledný deň zahŕňa dokončenie aj odovzdanie."
+        : "Harmonogram byl zhuštěn do zvoleného termínu. Každý dostupný den obsahuje přesný výstup a poslední den zahrnuje dokončení i odevzdání.",
       phases: {
         setup: sk
           ? "Zadanie, osnova a odborné zdroje"
@@ -1650,14 +1767,14 @@ function getFallbackPlanningCopy(languageValue: string) {
         : "Finální kontrola a odevzdání",
       risks: {
         capacityTitle: sk
-          ? "Nedostatočná časová kapacita"
-          : "Nedostatečná časová kapacita",
+          ? "Udržanie plánovaného tempa"
+          : "Udržení plánovaného tempa",
         capacityDescription: sk
-          ? "Požadovaný rozsah práce presahuje produktívny čas dostupný do termínu."
-          : "Požadovaný rozsah práce přesahuje produktivní čas dostupný do termínu.",
+          ? "Krátky harmonogram vyžaduje, aby každý deň skončil presne určeným a uloženým výstupom."
+          : "Krátký harmonogram vyžaduje, aby každý den skončil přesně určeným a uloženým výstupem.",
         capacityMitigation: sk
-          ? "Zvýšte dennú kapacitu, znížte rozsah alebo posuňte termín odovzdania."
-          : "Zvyšte denní kapacitu, snižte rozsah nebo posuňte termín odevzdání.",
+          ? "Postupujte podľa poradia blokov a na konci dňa potvrďte splnenie cieľového rozsahu."
+          : "Postupujte podle pořadí bloků a na konci dne potvrďte splnění cílového rozsahu.",
         delayTitle: sk ? "Posun kľúčovej etapy" : "Posun klíčové etapy",
         delayDescription: sk
           ? "Oneskorenie výskumu, analýzy alebo teoretickej časti skráti rezervu na kontrolu."
@@ -1672,20 +1789,20 @@ function getFallbackPlanningCopy(languageValue: string) {
           ? "Pri časovom tlaku môže vzniknúť nejednotná argumentácia, slabé citácie alebo formálne chyby."
           : "Při časovém tlaku může vzniknout nejednotná argumentace, slabé citace nebo formální chyby.",
         qualityMitigation: sk
-          ? "Dodržte kontrolné body, priebežne kontrolujte citácie a rezervné dni nepoužívajte na nové písanie."
-          : "Dodržte kontrolní body, průběžně kontrolujte citace a rezervní dny nepoužívejte na nové psaní.",
+          ? "Dodržte kontrolné body, priebežne kontrolujte citácie a posledný blok ponechajte na finálnu kontrolu."
+          : "Dodržte kontrolní body, průběžně kontrolujte citace a poslední blok ponechte na finální kontrolu.",
       },
       recommendations: sk
         ? [
             "Na konci každého pracovného bloku zapíšte hotový výstup a aktualizujte stav etapy.",
             "Najrizikovejšiu alebo závislú etapu začnite skôr, než je uvedené v minimálnom harmonograme.",
-            "Rezervné dni ponechajte iba na korektúru, formátovanie, export a technické odovzdanie.",
+            "Posledný naplánovaný blok ponechajte na korektúru, formátovanie, export a technické odovzdanie.",
             "Nejasné metodické otázky konzultujte skôr, ako zablokujú zber dát alebo analýzu.",
           ]
         : [
             "Po každém pracovním bloku zapište hotový výstup a aktualizujte stav etapy.",
             "Nejrizikovější nebo závislou etapu začněte co nejdříve.",
-            "Rezervní dny ponechte pouze na korekturu, formátování, export a odevzdání.",
+            "Poslední naplánovaný blok ponechte na korekturu, formátování, export a odevzdání.",
             "Nejasné metodické otázky konzultujte dříve, než zablokují výzkum nebo analýzu.",
           ],
     };
@@ -1693,13 +1810,13 @@ function getFallbackPlanningCopy(languageValue: string) {
 
   return {
     summaryRealistic:
-      "The plan is based on the available capacity, remaining scope and current progress. Productive days are separated from the final review reserve.",
+      "The plan distributes every remaining phase across the available dates through the selected deadline.",
     summaryIntensive:
-      "The plan is achievable only with disciplined use of the available capacity.",
+      "The plan uses an accelerated sequence of focused blocks so that all work is completed by the selected deadline.",
     summaryRisk:
-      "The plan carries a high schedule risk. Increase capacity, reduce scope or move the deadline.",
+      "The schedule is running in accelerated mode and distributes every remaining activity across the available dates.",
     summaryUnrealistic:
-      "The current scope cannot realistically be completed with the stated capacity.",
+      "The schedule has been compressed into the selected deadline with a precise output for every available day.",
     phases: {
       setup: "Assignment, outline and academic sources",
       theory: "Theoretical part",
@@ -1726,20 +1843,20 @@ function getFallbackPlanningCopy(languageValue: string) {
     reserveGoal: "Final review, export and submission preparation",
     submission: "Final review and submission",
     risks: {
-      capacityTitle: "Insufficient time capacity",
-      capacityDescription: "The required scope exceeds the productive time available.",
-      capacityMitigation: "Increase capacity, reduce scope or move the deadline.",
+      capacityTitle: "Maintain the planned pace",
+      capacityDescription: "A short schedule requires every day to end with a precise saved deliverable.",
+      capacityMitigation: "Follow the block order and confirm the daily target at the end of each day.",
       delayTitle: "Delay of a critical phase",
       delayDescription: "A delay in a dependent phase reduces the final review reserve.",
       delayMitigation: "Update progress daily and prioritize the at-risk phase.",
       qualityTitle: "Quality loss under time pressure",
       qualityDescription: "Time pressure can create citation, logic and formatting defects.",
-      qualityMitigation: "Use checkpoints and preserve reserve days for quality control.",
+      qualityMitigation: "Use checkpoints and keep the final block for quality control.",
     },
     recommendations: [
       "Update the phase status after every work block.",
       "Start the highest-risk dependent phase as early as possible.",
-      "Keep reserve days for review, export and submission only.",
+      "Keep the final scheduled block for review, export and submission.",
       "Resolve methodological questions before they block research or analysis.",
     ],
   };
@@ -1789,6 +1906,38 @@ function calculatePhaseHours(
       }, 0) * 10,
     ) / 10,
   );
+}
+
+function getPlanningBlockLabel(
+  languageValue: string,
+  index: number,
+): string {
+  const language = normalizeLanguage(languageValue);
+  const labels: Record<string, string[]> = {
+    sk: ["Dopoludňajší blok", "Popoludňajší blok", "Večerný blok"],
+    cs: ["Dopolední blok", "Odpolední blok", "Večerní blok"],
+    de: ["Vormittagsblock", "Nachmittagsblock", "Abendblock"],
+    pl: ["Blok poranny", "Blok popołudniowy", "Blok wieczorny"],
+    hu: ["Délelőtti blokk", "Délutáni blokk", "Esti blokk"],
+    en: ["Morning block", "Afternoon block", "Evening block"],
+  };
+
+  const selected = labels[language] || labels.en;
+  return selected[Math.min(index, selected.length - 1)] || `Block ${index + 1}`;
+}
+
+function getPlanningPageUnit(languageValue: string): string {
+  const language = normalizeLanguage(languageValue);
+  const units: Record<string, string> = {
+    sk: "strán",
+    cs: "stran",
+    de: "Seiten",
+    pl: "stron",
+    hu: "oldal",
+    en: "pages",
+  };
+
+  return units[language] || units.en;
 }
 
 function createDeterministicPlan(
@@ -1904,6 +2053,7 @@ function createDeterministicPlan(
 
   const dailySchedule = calculation.availableDates.map((date, dayIndex) => {
     const isReserve = calculation.reserveDates.includes(date);
+    const isDeadline = date === calculation.deadline;
 
     if (isReserve) {
       return {
@@ -1913,7 +2063,7 @@ function createDeterministicPlan(
         tasks: [
           {
             id: `task-${date}-1`,
-            time: request.capacity.preferredTime,
+            time: getPlanningBlockLabel(request.language, 0),
             title: copy.reviewTask,
             deliverable: copy.reviewDeliverable,
             checkpoint: copy.reviewCheckpoint,
@@ -1922,10 +2072,19 @@ function createDeterministicPlan(
       };
     }
 
-    const phase =
-      phases.find(
-        (item) => date >= item.startDate && date <= item.endDate,
-      ) || phases[Math.min(dayIndex, phases.length - 1)];
+    const matchingPhases = phases.filter(
+      (item) => date >= item.startDate && date <= item.endDate,
+    );
+    const fallbackPhase =
+      phases[Math.min(dayIndex, phases.length - 1)] || phases[0];
+    const dayPhases =
+      matchingPhases.length > 0
+        ? matchingPhases
+        : fallbackPhase
+          ? [fallbackPhase]
+          : [];
+    const primaryPhase = dayPhases[0] || fallbackPhase;
+    const secondaryPhase = dayPhases[1] || primaryPhase;
     const productiveIndex = productiveDates.indexOf(date);
     const isLastProductiveDay =
       productiveIndex === productiveDates.length - 1;
@@ -1941,49 +2100,58 @@ function createDeterministicPlan(
 
     assignedPages = Math.round((assignedPages + targetPages) * 10) / 10;
 
-    const blockCount = Math.max(
-      1,
-      Math.ceil(
-        request.capacity.hoursPerDay /
-          Math.max(0.5, request.capacity.maxBlockHours),
-      ),
-    );
-    const tasks: PlanningTask[] = Array.from(
-      { length: Math.min(3, blockCount) },
-      (_, taskIndex) => ({
-        id: `task-${date}-${taskIndex + 1}`,
-        time:
-          request.capacity.preferredTime === "custom"
-            ? `Block ${taskIndex + 1}`
-            : `${request.capacity.preferredTime} · block ${taskIndex + 1}`,
-        title:
-          taskIndex === 0
-            ? `${copy.writingTask}: ${phase.title}`
-            : taskIndex === 1
-              ? `${copy.milestone}: ${phase.title}`
-              : copy.reviewTask,
-        deliverable:
-          taskIndex === 0
-            ? `${copy.writingDeliverable}${
-                targetPages > 0 ? ` (${targetPages} pages)` : ""
-              }`
-            : taskIndex === 1
-              ? phase.expectedOutput
-              : copy.reviewDeliverable,
-        checkpoint:
-          taskIndex === 0
-            ? copy.writingCheckpoint
-            : taskIndex === 1
-              ? copy.accepted
-              : copy.reviewCheckpoint,
-      }),
-    );
+    const tasks: PlanningTask[] = [];
+
+    if (primaryPhase) {
+      tasks.push({
+        id: `task-${date}-1`,
+        time: getPlanningBlockLabel(request.language, 0),
+        title: `${copy.writingTask}: ${primaryPhase.title}`,
+        deliverable: `${copy.writingDeliverable}${
+          targetPages > 0
+            ? ` (${targetPages} ${getPlanningPageUnit(request.language)})`
+            : ""
+        }`,
+        checkpoint: copy.writingCheckpoint,
+      });
+    }
+
+    if (secondaryPhase) {
+      tasks.push({
+        id: `task-${date}-2`,
+        time: getPlanningBlockLabel(request.language, 1),
+        title: `${copy.milestone}: ${secondaryPhase.title}`,
+        deliverable: secondaryPhase.expectedOutput,
+        checkpoint: copy.accepted,
+      });
+    }
+
+    const thirdPhase = dayPhases[2];
+    if (thirdPhase && !isDeadline) {
+      tasks.push({
+        id: `task-${date}-3`,
+        time: getPlanningBlockLabel(request.language, 2),
+        title: `${copy.milestone}: ${thirdPhase.title}`,
+        deliverable: thirdPhase.expectedOutput,
+        checkpoint: copy.accepted,
+      });
+    }
+
+    if (isDeadline) {
+      tasks.push({
+        id: `task-${date}-${tasks.length + 1}`,
+        time: getPlanningBlockLabel(request.language, 2),
+        title: copy.reviewTask,
+        deliverable: copy.reviewDeliverable,
+        checkpoint: copy.reviewCheckpoint,
+      });
+    }
 
     return {
       date,
-      dayGoal: `${copy.dayGoal}: ${phase.title}`,
+      dayGoal: `${copy.dayGoal}: ${primaryPhase?.title || copy.submission}`,
       targetPages,
-      tasks,
+      tasks: tasks.slice(0, 3),
     };
   });
 
@@ -2006,47 +2174,35 @@ function createDeterministicPlan(
     });
   }
 
+  const accelerated = calculation.calendarDays <= 7;
   const risks: PlanningResponse["risks"] = [
     {
-      id: "risk-capacity",
-      level:
-        calculation.riskLevel === "critical"
-          ? "critical"
-          : calculation.riskLevel === "high"
-            ? "high"
-            : "medium",
+      id: "risk-focus",
+      level: accelerated ? "medium" : "low",
       title: copy.risks.capacityTitle,
       description: copy.risks.capacityDescription,
       mitigation: copy.risks.capacityMitigation,
     },
     {
       id: "risk-delay",
-      level: calculation.productiveDays < 7 ? "high" : "medium",
+      level: accelerated ? "medium" : "low",
       title: copy.risks.delayTitle,
       description: copy.risks.delayDescription,
       mitigation: copy.risks.delayMitigation,
     },
     {
       id: "risk-quality",
-      level:
-        calculation.feasibility === "unrealistic" ||
-        calculation.feasibility === "high-risk"
-          ? "high"
-          : "medium",
+      level: "medium",
       title: copy.risks.qualityTitle,
       description: copy.risks.qualityDescription,
       mitigation: copy.risks.qualityMitigation,
     },
   ];
 
-  const explanation =
-    calculation.feasibility === "realistic"
-      ? copy.summaryRealistic
-      : calculation.feasibility === "intensive"
-        ? copy.summaryIntensive
-        : calculation.feasibility === "high-risk"
-          ? copy.summaryRisk
-          : copy.summaryUnrealistic;
+  const explanation = getDeadlineFirstSummary(
+    request.language,
+    calculation,
+  );
 
   return {
     summary: {
@@ -2161,8 +2317,6 @@ function serializePlan(plan: PlanningResponse, request: PlanningRequest): string
     `${labels.feasibility}: ${plan.summary.feasibility}`,
     `${labels.risk}: ${plan.summary.riskLevel}`,
     `${labels.availableDays}: ${plan.summary.availableDays}`,
-    `${labels.availableHours}: ${plan.summary.availableHours}`,
-    `${labels.requiredHours}: ${plan.summary.requiredHours}`,
     `${labels.remainingPages}: ${plan.summary.remainingPages}`,
     `${labels.reserveDays}: ${plan.summary.reserveDays}`,
     "",
@@ -2174,7 +2328,7 @@ function serializePlan(plan: PlanningResponse, request: PlanningRequest): string
   plan.phases.forEach((phase, index) => {
     lines.push(
       `${index + 1}. ${phase.title}`,
-      `${phase.startDate} – ${phase.endDate} | ${phase.estimatedHours} h | ${phase.priority}`,
+      `${phase.startDate} – ${phase.endDate} | ${phase.priority}`,
       `${labels.output}: ${phase.expectedOutput}`,
       `${labels.dependencies}: ${phase.dependencies.join(", ") || labels.none}`,
       "",
@@ -2383,7 +2537,7 @@ export async function POST(req: NextRequest) {
             {
               role: "system",
               content:
-                "You are a senior academic planner and thesis supervisor. Follow the server calculations exactly. Return only valid JSON matching the schema.",
+                "You are a senior academic planner and thesis supervisor. Always fit the complete plan to the selected deadline, including very short deadlines. Return only valid JSON matching the schema.",
             },
             {
               role: "user",
@@ -2440,7 +2594,7 @@ export async function POST(req: NextRequest) {
         title: planningRequest.title,
         deadline: planningRequest.deadline,
         language: planningRequest.language,
-        interfaceMode: "work-type-and-deadline-only",
+        interfaceMode: "profile-and-deadline-only",
         automaticDefaultsApplied: true,
         calculation,
         gantt: {

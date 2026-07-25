@@ -5422,8 +5422,14 @@ ${baseRules}
 ÚLOHA:
 Správaj sa ako odborný vedúci akademickej práce. Skontroluj logiku, cieľ, výskumný problém, metodológiu, štruktúru, argumentáciu a nadväznosť práce.
 
-TEXT NA KONTROLU:
+POKYN POUŽÍVATEĽA ALEBO TEXT NA KONTROLU:
 ${input || "Použi text z priložených dokumentov, ak je dostupný."}
+
+PRAVIDLÁ PRE ČIASTKOVÚ KONTROLU:
+- Ak používateľ žiada skontrolovať iba konkrétnu kapitolu, podkapitolu alebo odsek, hodnotenie obmedz iba na túto časť.
+- Ak je v textovom poli krátky príkaz a samotný text kapitoly nie je dostupný, požiadaj o vloženie textu alebo nahratie dokumentu.
+- Nehodnoť celú prácu, keď používateľ výslovne žiada iba jednu časť.
+- Nepredstieraj kontrolu kapitoly, ktorej obsah nebol vložený ani načítaný z prílohy.
 
 ZAČIATOK ODPOVEDE:
 Začni priamo nadpisom:
@@ -6598,10 +6604,23 @@ Text emailu:
       formData.append("interfaceLanguage", systemLanguage);
       formData.append("workLanguage", finalWorkLanguage);
 
-      formData.append("message", userText || secondaryText || prompt);
+      const directUserInput = userText || secondaryText;
+
+      formData.append("message", directUserInput || prompt);
       formData.append("prompt", prompt);
       formData.append("input", userText);
+      formData.append("text", directUserInput);
       formData.append("secondaryInput", secondaryText);
+
+      /**
+       * AI školiteľ potrebuje rozlíšiť krátky pokyn od samotného textu práce.
+       * Rovnaký vstup posielame aj ako question; backend ho následne bezpečne
+       * rozdelí na pokyn a hodnotený text. Vďaka tomu funguje aj požiadavka
+       * „skontroluj iba 1. kapitolu“ bez povinnej prílohy.
+       */
+      if (requestedModule === "supervisor" && directUserInput) {
+        formData.append("question", directUserInput);
+      }
 
       formData.append("profile", JSON.stringify(profileForApi || {}));
       formData.append("activeProfile", JSON.stringify(profileForApi || {}));

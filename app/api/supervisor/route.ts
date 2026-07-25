@@ -58,11 +58,15 @@ type UploadedFileInfo = {
 
 type SupervisorRequestBody = {
   text?: string;
+  input?: string;
   message?: string;
   question?: string;
+  prompt?: string;
+  instruction?: string;
   activeProfile?: SavedProfile | null;
   profile?: SavedProfile | null;
   clientExtractedText?: string;
+  extractedText?: string;
   attachmentText?: string;
   attachmentTexts?: string;
   files?: UploadedFileInfo[];
@@ -245,7 +249,7 @@ function isLikelyUserInstruction(value: string): boolean {
 
   if (!text) return false;
 
-  if (text.length > 700) return false;
+  if (text.length > 1_200) return false;
 
   const instructionPatterns = [
     'zhodnoť',
@@ -262,13 +266,157 @@ function isLikelyUserInstruction(value: string): boolean {
     'ako veduci',
     'navrhni',
     'oprav',
+    'uprav',
     'vypíš chyby',
     'vypis chyby',
     'dobrá spätná väzba',
     'dobra spatna vazba',
+    'skontrolovať',
+    'skontrolovat',
+    'pozri kapitolu',
+    'prever kapitolu',
+    'zhodnoť kapitolu',
+    'zhodnot kapitolu',
+    'skontroluj kapitolu',
+    'skontroluj časť',
+    'skontroluj cast',
+    'review',
+    'check this chapter',
+    'check the chapter',
+    'evaluate this chapter',
+    'kontrolliere',
+    'prüfe',
+    'pruefe',
+    'sprawdź',
+    'sprawdz',
+    'ellenőrizd',
+    'ellenorizd',
   ];
 
   return instructionPatterns.some((pattern) => text.includes(pattern));
+}
+
+function hasSubstantiveAcademicText(value: string): boolean {
+  const text = normalizeText(value);
+
+  if (!text) return false;
+
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  const sentenceCount = (text.match(/[.!?](?:\s|$)/g) || []).length;
+  const paragraphCount = text.split(/\n{2,}/).filter(Boolean).length;
+
+  return (
+    text.length >= 600 ||
+    wordCount >= 90 ||
+    sentenceCount >= 5 ||
+    paragraphCount >= 3
+  );
+}
+
+function hasReviewableTextFragment(value: string): boolean {
+  const text = normalizeText(value);
+
+  if (!text) return false;
+
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  const sentenceCount = (text.match(/[.!?](?:\s|$)/g) || []).length;
+
+  return (
+    text.length >= 120 ||
+    wordCount >= 20 ||
+    sentenceCount >= 2
+  );
+}
+
+function splitInstructionAndText(value: string): {
+  text: string;
+  question: string;
+} {
+  const normalized = normalizeText(value);
+
+  if (!normalized) {
+    return {
+      text: '',
+      question: '',
+    };
+  }
+
+  const separatorIndexes = [
+    normalized.indexOf('\n'),
+    normalized.indexOf(':'),
+  ].filter((index) => index > 0 && index <= 350);
+
+  const firstSeparator =
+    separatorIndexes.length > 0
+      ? Math.min(...separatorIndexes)
+      : -1;
+
+  if (firstSeparator > 0) {
+    const possibleInstruction = normalizeText(
+      normalized.slice(0, firstSeparator),
+    );
+    const possibleText = normalizeText(
+      normalized.slice(firstSeparator + 1),
+    );
+
+    if (
+      isLikelyUserInstruction(possibleInstruction) &&
+      hasReviewableTextFragment(possibleText)
+    ) {
+      return {
+        text: possibleText,
+        question: possibleInstruction,
+      };
+    }
+  }
+
+  if (
+    isLikelyUserInstruction(normalized) &&
+    !hasSubstantiveAcademicText(normalized)
+  ) {
+    return {
+      text: '',
+      question: normalized,
+    };
+  }
+
+  return {
+    text: normalized,
+    question: '',
+  };
+}
+
+function resolveSupervisorInput(
+  rawText: string,
+  rawQuestion: string,
+): {
+  text: string;
+  question: string;
+} {
+  const text = normalizeText(rawText);
+  const question = normalizeText(rawQuestion);
+
+  if (!question) {
+    return splitInstructionAndText(text);
+  }
+
+  if (!text || text === question) {
+    const split = splitInstructionAndText(question);
+
+    if (split.question) {
+      return split;
+    }
+
+    return {
+      text: split.text || question,
+      question: '',
+    };
+  }
+
+  return {
+    text,
+    question,
+  };
 }
 
 function buildProfileContext(profile?: SavedProfile | null): string {
@@ -819,7 +967,9 @@ function buildSupervisorPrompt({
   fileWarnings: string[];
 }): string {
   const hasQuestion = question.trim().length > 0;
+  const hasMainText = text.trim().length > 0;
   const hasAttachmentText = attachmentText.trim().length > 0;
+  const hasReviewMaterial = hasMainText || hasAttachmentText;
   const workLanguage = getWorkLanguage(profile);
   const citationStyle = getCitationStyle(profile);
   const title = getProfileTitle(profile);
@@ -866,6 +1016,13 @@ Ak je dostupný TEXT EXTRAHOVANÝ Z PRÍLOH, považuj ho za hlavný hodnotený d
 Nepredpokladaj, že "výsledky práce" už existujú len preto, že používateľ položil krátku otázku.
 Najprv si prečítaj extrahovaný text prílohy a spätnú väzbu postav na jeho obsahu.
 Ak text prílohy nie je dostupný, jasne napíš, že dokument sa nepodarilo prečítať a že hodnotenie je možné len podľa dostupného textu/metadát.
+
+PRAVIDLO PRE KONTROLU KONKRÉTNEJ ČASTI:
+Ak používateľ žiada skontrolovať iba konkrétnu kapitolu, podkapitolu, odsek alebo inú časť, hodnotenie striktne obmedz na túto časť.
+Nehodnoť automaticky celú prácu.
+Konkrétnu časť vyhľadaj podľa čísla kapitoly, názvu nadpisu alebo vloženého textu.
+Ak sa požadovanú časť nedá v dostupnom texte jednoznačne nájsť, povedz to priamo a požiadaj o vloženie textu danej časti alebo o presný názov kapitoly.
+Nikdy nepredstieraj, že si kapitolu skontroloval, ak jej text nebol dostupný.
 
 Tvoja úloha:
 - hodnotiť priloženú prácu alebo vložený text podľa aktuálneho profilu práce,
@@ -934,12 +1091,26 @@ Odpovedz:
 - bez technických poznámok,
 - bez nadpisu "AI Vedúci".
 
-Ak používateľ žiada "zhodnoť prácu", "ako profesor", "dobrá spätná väzba" alebo podobný pokyn, vytvor hodnotenie práce podľa extrahovaného textu príloh.
+Ak používateľ žiada "zhodnoť prácu", "ako profesor", "dobrá spätná väzba" alebo podobný pokyn, vytvor hodnotenie práce podľa dostupného vloženého textu alebo extrahovaného textu príloh.
+Ak používateľ určí konkrétnu kapitolu alebo časť, skontroluj iba túto kapitolu alebo časť.
 Ak otázka súvisí s prílohou, použi extrahovaný text príloh ako hlavný podklad hodnotenia.
+Ak pokyn vyžaduje kontrolu konkrétneho textu, ale nebol dostupný žiadny vložený text ani čitateľná príloha, nepredstieraj vykonanú kontrolu. Stručne požiadaj používateľa, aby vložil text kapitoly alebo nahral dokument.
 Ak otázka nesúvisí s profilom práce alebo prílohami, jasne to uveď.
 
 Odpoveď ukonči po odbornom hodnotení alebo priamej odpovedi.
 Nevytváraj primárne zdroje, sekundárne zdroje, zoznam zdrojov, bibliografiu, referencie ani zoznam literatúry.
+`.trim();
+
+  const requiredOutputWithoutMaterial = `
+Používateľ neposlal text kapitoly ani čitateľnú prílohu.
+
+Nevytváraj fiktívne hodnotenie.
+Stručne vysvetli, že na odbornú kontrolu je potrebné:
+- vložiť text konkrétnej kapitoly do textového poľa, alebo
+- nahrať dokument, alebo
+- uviesť presný názov a číslo kapitoly, ak je dokument už priložený.
+
+Môžeš jednou až dvoma vetami uviesť, čo bude pri kontrole kapitoly posudzované, ale nehodnoť neexistujúci obsah.
 `.trim();
 
   return `
@@ -964,7 +1135,13 @@ ${attachmentText || 'Text z príloh nie je dostupný alebo nebol extrahovaný.'}
 OTÁZKA ALEBO POKYN POUŽÍVATEĽA
 ${question || 'Používateľ nepoložil samostatnú otázku.'}
 
-${hasQuestion || hasAttachmentText ? requiredOutputWithQuestion : requiredOutputWithoutQuestion}
+${
+  hasQuestion
+    ? requiredOutputWithQuestion
+    : hasReviewMaterial
+      ? requiredOutputWithoutQuestion
+      : requiredOutputWithoutMaterial
+}
 `.trim();
 }
 
@@ -1044,11 +1221,17 @@ async function parseRequest(req: Request): Promise<ParsedRequest> {
   if (contentType.includes('multipart/form-data')) {
     const formData = await req.formData();
 
-    let text =
+    const rawText =
       safeString(formData.get('text')) ||
+      safeString(formData.get('input')) ||
       safeString(formData.get('message'));
 
-    let question = safeString(formData.get('question'));
+    const rawQuestion = safeString(formData.get('question'));
+
+    const {
+      text,
+      question,
+    } = resolveSupervisorInput(rawText, rawQuestion);
 
     const activeProfile =
       parseJson<SavedProfile | null>(
@@ -1077,6 +1260,7 @@ async function parseRequest(req: Request): Promise<ParsedRequest> {
 
     const clientAttachmentText =
       safeString(formData.get('clientExtractedText')) ||
+      safeString(formData.get('extractedText')) ||
       safeString(formData.get('attachmentText')) ||
       safeString(formData.get('attachmentTexts')) ||
       buildAttachmentTextFromFiles(filesMetadata);
@@ -1088,11 +1272,6 @@ async function parseRequest(req: Request): Promise<ParsedRequest> {
         .filter(Boolean)
         .join('\n\n'),
     );
-
-    if (!question && attachmentText && isLikelyUserInstruction(text)) {
-      question = text;
-      text = '';
-    }
 
     const files = [
       ...filesMetadata,
@@ -1112,11 +1291,17 @@ async function parseRequest(req: Request): Promise<ParsedRequest> {
 
   const body = (await req.json()) as SupervisorRequestBody;
 
-  let text =
+  const rawText =
     safeString(body.text) ||
+    safeString(body.input) ||
     safeString(body.message);
 
-  let question = safeString(body.question);
+  const rawQuestion = safeString(body.question);
+
+  const {
+    text,
+    question,
+  } = resolveSupervisorInput(rawText, rawQuestion);
 
   const activeProfile = body.activeProfile || body.profile || null;
 
@@ -1126,16 +1311,13 @@ async function parseRequest(req: Request): Promise<ParsedRequest> {
     body.filesMetadata ||
     [];
 
-  const attachmentText =
+  const attachmentText = normalizeText(
     safeString(body.clientExtractedText) ||
-    safeString(body.attachmentText) ||
-    safeString(body.attachmentTexts) ||
-    buildAttachmentTextFromFiles(files);
-
-  if (!question && attachmentText && isLikelyUserInstruction(text)) {
-    question = text;
-    text = '';
-  }
+      safeString(body.extractedText) ||
+      safeString(body.attachmentText) ||
+      safeString(body.attachmentTexts) ||
+      buildAttachmentTextFromFiles(files),
+  );
 
   return {
     text,

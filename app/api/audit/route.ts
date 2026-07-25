@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { GLOBAL_ACADEMIC_SYSTEM_PROMPT } from '@/lib/ai-system-prompt';
@@ -5,6 +6,8 @@ import { getZedperaErrorMessage } from '@/lib/api-error-messages';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const maxDuration = 120;
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -12,10 +15,19 @@ const openai = new OpenAI({
 
 const AUDIT_END_MARKER = 'KONIEC AUDITU';
 
-const MIN_TEXT_LENGTH = 300;
+/**
+ * Audit musí prijať aj krátky pokyn alebo krátky úsek textu. Pôvodná
+ * hranica 300 znakov spôsobovala HTTP 400 pri pokynoch ako
+ * „Skontroluj mi 1. kapitolu“ a globálny error provider ich následne
+ * zobrazil ako UNKNOWN_ERROR.
+ */
+const MIN_TEXT_LENGTH = 1;
+const MIN_EXTRACTED_ATTACHMENT_LENGTH = 50;
+const MAX_AUDIT_ATTACHMENTS = 20;
 const MAX_MANUAL_TEXT_LENGTH = 30000;
 const MAX_ATTACHMENT_TEXT_LENGTH = 30000;
 const MAX_TOTAL_SOURCE_LENGTH = 50000;
+const MAX_USER_INSTRUCTION_LENGTH = 2000;
 
 type SavedProfile = {
   id?: string;
@@ -69,9 +81,23 @@ type UploadedAttachment = {
 
 type AuditRequest = {
   text?: string;
+  input?: string;
+  message?: string;
+  question?: string;
+  prompt?: string;
+  instruction?: string;
+  userInstruction?: string;
+  sourceText?: string;
+  clientExtractedText?: string;
+  extractedText?: string;
+  attachmentText?: string;
+
   checkType?: string;
+  qualityMode?: string;
   outputType?: string;
+  outputMode?: string;
   citationStyle?: string;
+  requestId?: string;
 
   activeProfile?: SavedProfile | null;
   profile?: SavedProfile | null;
@@ -82,8 +108,6 @@ type AuditRequest = {
   workType?: string;
   language?: string;
 
-  prompt?: string;
-  instruction?: string;
   cleanOutput?: boolean;
   removeBrokenEncoding?: boolean;
   outputFormat?: string;
@@ -227,6 +251,179 @@ function cleanText(value: unknown): string {
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{4,}/g, '\n\n\n')
     .trim();
+}
+
+
+type AuditInputParts = {
+  instruction: string;
+  sourceText: string;
+  instructionOnly: boolean;
+};
+
+function firstNonEmptyText(...values: unknown[]): string {
+  for (const value of values) {
+    const cleaned = cleanText(value);
+    if (cleaned) return cleaned;
+  }
+
+  return '';
+}
+
+function normalizeForInstructionDetection(value: string): string {
+  return cleanText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function looksLikeAuditInstruction(value: string): boolean {
+  const normalized = normalizeForInstructionDetection(value);
+
+  if (!normalized || normalized.length > 700) return false;
+
+  return /^(skontroluj|prever|posud|zhodnot|analyzuj|audituj|oprav|pozri|precitaj|check|review|audit|analyse|analyze|evaluate|kontrollier|pruf|prüf|sprawd|ocen|oceń|ellenoriz|ellenőriz|vizsgald|vizsgáld)\b/i.test(
+    normalized,
+  );
+}
+
+/**
+ * Podporuje tri bežné vstupy:
+ * 1. samotný text kapitoly,
+ * 2. krátky pokyn bez textu,
+ * 3. prvý riadok ako pokyn a ďalšie riadky ako kontrolovaný text.
+ */
+function splitAuditInput(value: string): AuditInputParts {
+  const cleaned = cleanText(value);
+
+  if (!cleaned) {
+    return {
+      instruction: '',
+      sourceText: '',
+      instructionOnly: false,
+    };
+  }
+
+  const lines = cleaned
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const firstLine = lines[0] || '';
+  const remainingText = lines.slice(1).join('\n').trim();
+
+  if (looksLikeAuditInstruction(firstLine)) {
+    return {
+      instruction: firstLine.slice(0, MAX_USER_INSTRUCTION_LENGTH),
+      sourceText: remainingText,
+      instructionOnly: !remainingText,
+    };
+  }
+
+  if (looksLikeAuditInstruction(cleaned)) {
+    return {
+      instruction: cleaned.slice(0, MAX_USER_INSTRUCTION_LENGTH),
+      sourceText: '',
+      instructionOnly: true,
+    };
+  }
+
+  return {
+    instruction: '',
+    sourceText: cleaned,
+    instructionOnly: false,
+  };
+}
+
+function resolveAuditCheckType(body: AuditRequest): string {
+  const explicit = cleanText(body.checkType);
+  if (explicit) return explicit;
+
+  const mode = cleanText(body.qualityMode).toLowerCase();
+
+  if (mode === 'style') return 'Štylistika a akademický jazyk';
+  if (mode === 'citations') return 'Citácie a citačná norma';
+  if (mode === 'logic') return 'Logika, nadväznosť a argumentácia';
+
+  return 'Všetko';
+}
+
+function resolveAuditOutputType(body: AuditRequest): string {
+  return cleanText(body.outputType) || cleanText(body.outputMode) || 'Detailná správa';
+}
+
+function createAuditErrorResponse({
+  requestId,
+  code,
+  message,
+  detail,
+  status,
+  extra,
+}: {
+  requestId: string;
+  code: string;
+  message: string;
+  detail?: string;
+  status: number;
+  extra?: Record<string, unknown>;
+}) {
+  return NextResponse.json(
+    {
+      ok: false,
+      code,
+      message,
+      error: message,
+      detail: detail || '',
+      requestId,
+      endpoint: '/api/audit',
+      module: 'quality',
+      ...(extra || {}),
+    },
+    { status },
+  );
+}
+
+
+function normalizeAuditErrorDetail(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+
+  if (value && typeof value === 'object') {
+    const errorInfo = value as Record<string, unknown>;
+    const candidate =
+      errorInfo.detail ||
+      errorInfo.message ||
+      errorInfo.error ||
+      errorInfo.rawMessage;
+
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return fallback;
+}
+
+function buildMissingSourceGuidance(instruction: string, language: string): string {
+  const normalizedLanguage = normalizePlainText(language);
+
+  if (normalizedLanguage.includes('english') || normalizedLanguage === 'en') {
+    return [
+      'I can review only the selected chapter or section.',
+      `Your instruction was received: ${instruction}`,
+      'Paste the chapter text into the field or upload the document. You can keep the instruction above the text, for example: “Review the logic and academic quality of Chapter 1.”',
+      'No quality score was generated because the chapter content was not included.',
+    ].join('\n\n');
+  }
+
+  return [
+    'Môžem skontrolovať iba vybranú kapitolu alebo konkrétnu časť práce.',
+    `Pokyn bol prijatý: ${instruction}`,
+    'Do textového poľa vložte obsah kapitoly alebo nahrajte dokument. Pokyn môžete ponechať v prvom riadku, napríklad: „Skontroluj logiku a odbornú úroveň 1. kapitoly.“',
+    'Hodnotenie ani skóre nebolo vytvorené, pretože obsah kapitoly nebol priložený.',
+  ].join('\n\n');
 }
 
 function normalizePlainText(value: unknown): string {
@@ -775,6 +972,7 @@ function buildProfileBlock(
 
 function buildAuditPrompt({
   text,
+  userInstruction,
   attachmentsBlock,
   checkType,
   outputType,
@@ -790,6 +988,7 @@ function buildAuditPrompt({
   dateInfo,
 }: {
   text: string;
+  userInstruction: string;
   attachmentsBlock: string;
   checkType: string;
   outputType: string;
@@ -813,7 +1012,9 @@ function buildAuditPrompt({
   return `
 Si odborný akademický hodnotiteľ, metodológ, školiteľ a odborný korektor.
 
-Tvojou úlohou je vykonať KOMPLETNÝ AUDIT KVALITY AKADEMICKEJ PRÁCE podľa aktuálneho profilu práce.
+Tvojou úlohou je vykonať CIELENÝ ALEBO KOMPLETNÝ AUDIT KVALITY AKADEMICKEJ PRÁCE podľa pokynu používateľa a aktuálneho profilu práce.
+
+Ak používateľ žiada skontrolovať iba jednu kapitolu, podkapitolu, úvod, záver, metodiku alebo inú vybranú časť, hodnotíš výhradne túto časť. Nesimuluj audit celej práce a nevyvodzuj závery o častiach, ktoré neboli poskytnuté.
 
 KRITICKÉ PRAVIDLÁ:
 1. Výstup musí byť dokončený a musí sa skončiť presnou vetou: ${AUDIT_END_MARKER}
@@ -845,6 +1046,14 @@ ${profileBlock}
 NASTAVENIE AUDITU:
 - Typ kontroly: ${checkType}
 - Typ výstupu: ${outputType}
+
+POKYN POUŽÍVATEĽA:
+${userInstruction || 'Používateľ nezadal samostatný pokyn. Vykonaj audit vloženého textu alebo príloh.'}
+
+PRAVIDLO ROZSAHU:
+- Rešpektuj presný pokyn používateľa.
+- Ak žiada kontrolu jednej kapitoly alebo jednej časti, neposudzuj celú prácu ako hotový dokument.
+- Ak je dostupný iba krátky úsek textu, vykonaj primerane cielenú kontrolu tohto úseku.
 
 ZDROJ TEXTU:
 ${
@@ -1014,74 +1223,185 @@ function buildClientCleanResult(value: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const requestId =
+    req.headers.get('x-request-id')?.trim() ||
+    randomUUID();
+
   try {
     if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'Chýba OPENAI_API_KEY v prostredí aplikácie. Nastav ju vo Verceli alebo v .env.local.',
-        },
-        { status: 500 },
-      );
+      return createAuditErrorResponse({
+        requestId,
+        code: 'AI_PROVIDER_NOT_CONFIGURED',
+        message: 'Audit kvality momentálne nie je dostupný.',
+        detail:
+          'Chýba OPENAI_API_KEY v prostredí aplikácie. Nastavte ho vo Verceli alebo v .env.local.',
+        status: 500,
+      });
     }
 
-    const body = (await req.json()) as AuditRequest;
+    let body: AuditRequest;
+
+    try {
+      body = (await req.json()) as AuditRequest;
+    } catch {
+      return createAuditErrorResponse({
+        requestId,
+        code: 'INVALID_JSON_BODY',
+        message: 'Požiadavku auditu sa nepodarilo načítať.',
+        detail: 'Endpoint /api/audit očakáva JSON požiadavku.',
+        status: 400,
+      });
+    }
 
     const dateInfo = getAuditDateInfo(body);
-
     const profile = body.activeProfile || body.profile || null;
 
-    const rawText = cleanText(body.text);
-    const limitedManualText = limitText(rawText, MAX_MANUAL_TEXT_LENGTH);
+    const rawUserInput = firstNonEmptyText(
+      body.input,
+      body.question,
+      body.message,
+      body.text,
+    );
+
+    const splitInput = splitAuditInput(rawUserInput);
+
+    const userInstruction = firstNonEmptyText(
+      body.userInstruction,
+      splitInput.instruction,
+      body.question,
+      looksLikeAuditInstruction(body.message || '') ? body.message : '',
+      looksLikeAuditInstruction(body.text || '') ? body.text : '',
+    ).slice(0, MAX_USER_INSTRUCTION_LENGTH);
+
+    const topLevelAttachmentText = firstNonEmptyText(
+      body.sourceText,
+      body.clientExtractedText,
+      body.extractedText,
+      body.attachmentText,
+    );
+
+    let attachments = normalizeAttachments(body.attachments);
+
+    if (
+      topLevelAttachmentText &&
+      !attachments.some(
+        (attachment) =>
+          getAttachmentText(attachment) === topLevelAttachmentText,
+      )
+    ) {
+      attachments = [
+        ...attachments,
+        {
+          name: 'Extrahovaný text priložených dokumentov',
+          type: 'text/plain',
+          size: topLevelAttachmentText.length,
+          extractedText: topLevelAttachmentText,
+        },
+      ];
+    }
+
+    if (attachments.length > MAX_AUDIT_ATTACHMENTS) {
+      return createAuditErrorResponse({
+        requestId,
+        code: 'ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED',
+        message: 'Nahrali ste viac ako 20 príloh.',
+        detail:
+          'Audit kvality dokáže v jednej požiadavke spracovať maximálne 20 príloh. Odstráňte nadbytočné prílohy a odošlite požiadavku znova.',
+        status: 400,
+        extra: {
+          attachmentLimit: MAX_AUDIT_ATTACHMENTS,
+          receivedAttachments: attachments.length,
+        },
+      });
+    }
+
+    const manualSourceText =
+      splitInput.sourceText ||
+      (!looksLikeAuditInstruction(rawUserInput) ? rawUserInput : '');
+
+    const limitedManualText = limitText(
+      manualSourceText,
+      MAX_MANUAL_TEXT_LENGTH,
+    );
 
     const text = limitedManualText.text;
-    const checkType = cleanText(body.checkType) || 'Všetko';
-    const outputType = cleanText(body.outputType) || 'Detailná správa';
+    const checkType = resolveAuditCheckType(body);
+    const outputType = resolveAuditOutputType(body);
 
     const title = resolveTitle(body, profile);
     const workType = resolveWorkType(body, profile);
     const language = resolveLanguage(body, profile);
     const citationStyle = resolveCitationStyle(body, profile);
 
-    const attachments = normalizeAttachments(body.attachments);
     const attachmentsBlock = buildAttachmentsBlock(attachments);
+    const extractedAttachmentTextLength =
+      getTotalAttachmentTextLength(attachments);
 
     const hasText = text.length >= MIN_TEXT_LENGTH;
     const hasAttachments = attachments.length > 0;
-    const extractedAttachmentTextLength = getTotalAttachmentTextLength(attachments);
+    const hasUsableAttachmentText =
+      extractedAttachmentTextLength >=
+      MIN_EXTRACTED_ATTACHMENT_LENGTH;
+    const hasInstruction = Boolean(userInstruction);
 
-    if (!profile || (!cleanText(profile.title) && !cleanText(profile.topic))) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'Audit kvality vyžaduje aktívny profil práce. Najskôr vyberte alebo doplňte profil práce.',
-        },
-        { status: 400 },
-      );
+    if (!hasText && !hasAttachments && !hasInstruction) {
+      return createAuditErrorResponse({
+        requestId,
+        code: 'AUDIT_INPUT_REQUIRED',
+        message:
+          'Vložte text, krátky pokyn alebo nahrajte prílohu na audit kvality.',
+        detail:
+          'Je možné skontrolovať aj jednu vetu, odsek, kapitolu alebo konkrétnu časť práce. Minimálny limit 300 znakov sa už neuplatňuje.',
+        status: 400,
+      });
     }
 
-    if (!hasText && !hasAttachments) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'Vlož aspoň 300 znakov textu alebo nahraj prílohu na audit kvality.',
-        },
-        { status: 400 },
-      );
+    if (!hasText && hasAttachments && !hasUsableAttachmentText) {
+      return createAuditErrorResponse({
+        requestId,
+        code: 'ATTACHMENT_EXTRACTION_FAILED',
+        message:
+          'Príloha bola nahratá, ale jej text sa nepodarilo načítať.',
+        detail:
+          'Skontrolujte extrakciu PDF/DOCX. Endpoint musí vrátiť text v poli text, content, extractedText, clientExtractedText alebo attachmentText.',
+        status: 422,
+      });
     }
 
-    if (!hasText && hasAttachments && extractedAttachmentTextLength < 50) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'Príloha bola nahratá, ale neobsahuje dostupný extrahovaný text. Skontroluj /api/uploads, aby pri PDF/DOCX vracalo text v poli text, content alebo extractedText.',
-        },
-        { status: 400 },
+    /**
+     * Samotný príkaz bez obsahu nie je technická chyba. Endpoint vráti
+     * používateľovi normálnu odpoveď HTTP 200 a vysvetlí, ako má priložiť
+     * konkrétnu kapitolu. Tým sa nespustí globálny UNKNOWN_ERROR modal.
+     */
+    if (
+      hasInstruction &&
+      !hasText &&
+      !hasUsableAttachmentText
+    ) {
+      const guidance = buildMissingSourceGuidance(
+        userInstruction,
+        language,
       );
+
+      return NextResponse.json({
+        ok: true,
+        code: 'AUDIT_SOURCE_TEXT_REQUIRED',
+        requestId,
+        output: guidance,
+        result: guidance,
+        text: guidance,
+        message: guidance,
+        completed: true,
+        requiresSourceText: true,
+        meta: {
+          module: 'quality',
+          instructionOnly: true,
+          hasProfile: Boolean(profile),
+          title,
+          workType,
+          language,
+        },
+      });
     }
 
     const combinedTextForChecks = [
@@ -1091,14 +1411,23 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join('\n\n');
 
-    const citationAudit = auditCitationStyle(combinedTextForChecks, citationStyle);
+    const citationAudit = auditCitationStyle(
+      combinedTextForChecks,
+      citationStyle,
+    );
 
-    const attachmentRelevanceResults = attachments.map((attachment, index) =>
-      checkAttachmentProfileRelevance(attachment, index, profile),
+    const attachmentRelevanceResults = attachments.map(
+      (attachment, index) =>
+        checkAttachmentProfileRelevance(
+          attachment,
+          index,
+          profile,
+        ),
     );
 
     const prompt = buildAuditPrompt({
       text,
+      userInstruction,
       attachmentsBlock,
       checkType,
       outputType,
@@ -1115,9 +1444,13 @@ export async function POST(req: NextRequest) {
     });
 
     const maxCompletionTokens = resolveMaxOutputTokens(body);
+    const auditModel =
+      process.env.OPENAI_AUDIT_MODEL?.trim() ||
+      process.env.OPENAI_MODEL?.trim() ||
+      'gpt-4.1-mini';
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4.1-mini',
+      model: auditModel,
       temperature: 0.2,
       max_tokens: maxCompletionTokens,
       presence_penalty: 0,
@@ -1138,37 +1471,38 @@ export async function POST(req: NextRequest) {
     const cleanedResult = buildClientCleanResult(rawResult);
 
     if (!cleanedResult.trim()) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'AI nevrátila výsledok auditu.',
-        },
-        { status: 500 },
-      );
+      return createAuditErrorResponse({
+        requestId,
+        code: 'EMPTY_AUDIT_OUTPUT',
+        message: 'Audit bol spracovaný, ale AI nevrátila použiteľný výsledok.',
+        detail:
+          'Skontrolujte model OPENAI_AUDIT_MODEL/OPENAI_MODEL a serverové logy.',
+        status: 502,
+      });
     }
 
     const completed = hasEndMarker(rawResult);
-
     const visibleWarnings = buildVisibleWarnings(
       citationAudit,
       attachmentRelevanceResults,
     );
 
-    const finalResult = [
-      visibleWarnings,
-      cleanedResult,
-    ]
+    const finalResult = [visibleWarnings, cleanedResult]
       .filter(Boolean)
       .join('\n\n')
       .trim();
 
     return NextResponse.json({
       ok: true,
+      requestId,
+      output: finalResult,
       result: finalResult,
+      text: finalResult,
+      message: finalResult,
       completed,
       warning: completed
         ? ''
-        : 'Audit sa pravdepodobne neukončil úplne. Zvýš maxOutputTokens alebo audituj kratší text po kapitolách.',
+        : 'Audit sa pravdepodobne neukončil úplne. Auditujte kratší úsek alebo zvýšte maxOutputTokens.',
       exportTypes: ['docx', 'pdf'],
       citationAudit,
       attachmentRelevanceResults,
@@ -1179,42 +1513,53 @@ export async function POST(req: NextRequest) {
         futureYearRule: `Ako budúcnosť sa označia iba roky väčšie ako ${dateInfo.currentYear}.`,
       },
       meta: {
+        module: 'quality',
         checkType,
         outputType,
         citationStyle,
         title,
         workType,
         language,
+        hasProfile: Boolean(profile),
+        instruction: userInstruction,
+        focusedAudit: Boolean(userInstruction),
         auditDate: dateInfo.auditDate,
         auditIsoDate: dateInfo.auditIsoDate,
         currentYear: dateInfo.currentYear,
-        textLength: rawText.length,
+        textLength: manualSourceText.length,
         usedTextLength: text.length,
         manualTextWasTruncated: limitedManualText.truncated,
         attachmentsCount: attachments.length,
         extractedAttachmentTextLength,
         maxCompletionTokens,
+        model: auditModel,
         finishReason: completion.choices[0]?.finish_reason || null,
         completed,
       },
     });
   } catch (error) {
-    console.error('AUDIT_ERROR:', error);
+    console.error('AUDIT_ERROR:', {
+      requestId,
+      error,
+    });
 
     const fallbackMessage =
       error instanceof Error
         ? error.message
         : 'Nepodarilo sa vykonať audit kvality práce.';
 
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          getZedperaErrorMessage?.(fallbackMessage) ||
-          fallbackMessage ||
-          'Nepodarilo sa vykonať audit kvality práce.',
-      },
-      { status: 500 },
+    const mappedError = getZedperaErrorMessage(fallbackMessage);
+    const safeMessage = normalizeAuditErrorDetail(
+      mappedError,
+      fallbackMessage || 'Nepodarilo sa vykonať audit kvality práce.',
     );
+
+    return createAuditErrorResponse({
+      requestId,
+      code: 'AUDIT_GENERATION_FAILED',
+      message: 'Audit kvality sa nepodarilo dokončiť.',
+      detail: safeMessage,
+      status: 500,
+    });
   }
 }

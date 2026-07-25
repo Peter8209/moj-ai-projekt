@@ -453,6 +453,51 @@ const defaultAgents: { key: Agent; label: string }[] = [
   { key: 'grok', label: 'Grok' },
 ];
 
+const analyzingLabels: Record<AppLanguage, string> = {
+  sk: 'Analyzujem',
+  cs: 'Analyzuji',
+  en: 'Analyzing',
+  de: 'Analysiere',
+  pl: 'Analizuję',
+  hu: 'Elemzek',
+};
+
+function getAnalyzingLabel(language: AppLanguage): string {
+  return analyzingLabels[language] || analyzingLabels.sk;
+}
+
+function ThinkingRobot({
+  language,
+}: {
+  language: AppLanguage;
+}) {
+  const label = getAnalyzingLabel(language);
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={label}
+      className="inline-flex items-center gap-3"
+    >
+      <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-violet-400/30 bg-violet-500/15 text-violet-100 shadow-lg shadow-violet-950/30">
+        <Bot className="h-6 w-6 animate-pulse" />
+        <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full border border-violet-300/40 bg-[#17102b] text-violet-200">
+          <Brain className="h-3 w-3 animate-pulse" />
+        </span>
+      </span>
+
+      <span className="font-black text-slate-100">{label}</span>
+
+      <span aria-hidden="true" className="inline-flex items-end gap-1">
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-violet-300 [animation-delay:-0.30s]" />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-violet-300 [animation-delay:-0.15s]" />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-violet-300" />
+      </span>
+    </div>
+  );
+}
+
 const suggestions: {
   title: string;
   action: string;
@@ -770,6 +815,25 @@ type StreamedApiErrorPayload = {
   status?: number;
   requestId?: string;
 };
+
+function stripInternalStreamPayload(value: string): string {
+  const text = String(value || '');
+  const completeMarkerIndex = text.indexOf(streamedApiErrorPrefix);
+
+  if (completeMarkerIndex >= 0) {
+    return text.slice(0, completeMarkerIndex);
+  }
+
+  // Marker môže byť rozdelený medzi dva streamované chunky. Už prvú časť
+  // interného technického prefixu preto skryjeme pred používateľom.
+  const partialMarkerIndex = text.lastIndexOf('__ZEDPERA_');
+
+  if (partialMarkerIndex >= 0) {
+    return text.slice(0, partialMarkerIndex);
+  }
+
+  return text;
+}
 
 function readStreamedApiError(
   value: string,
@@ -3743,6 +3807,22 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
     ]);
   };
 
+
+  const removePendingAssistantMessage = () => {
+    setMessages((prev) => {
+      const lastMessage = prev[prev.length - 1];
+
+      if (
+        lastMessage?.role === 'assistant' &&
+        !lastMessage.content.trim()
+      ) {
+        return prev.slice(0, -1);
+      }
+
+      return prev;
+    });
+  };
+
   const sendPromptToApi = async ({
     visibleUserText,
     apiUserText,
@@ -4204,6 +4284,7 @@ ${attachmentWarningText}`.trim();
         }
 
         if (!fullText && data.ok === false) {
+          removePendingAssistantMessage();
           showSystemError(
             createZedperaError(
               String(
@@ -4229,6 +4310,7 @@ ${attachmentWarningText}`.trim();
         }
 
         if (!fullText) {
+          removePendingAssistantMessage();
           showSystemError(
             createZedperaError(
               'API_UNAVAILABLE',
@@ -4246,6 +4328,7 @@ ${attachmentWarningText}`.trim();
         }
       } else {
         if (!res.body) {
+          removePendingAssistantMessage();
           showSystemError(
             createZedperaError(
               'API_UNAVAILABLE',
@@ -4272,16 +4355,23 @@ ${attachmentWarningText}`.trim();
           const chunk = decoder.decode(value, { stream: true });
           fullText += chunk;
 
-          const visibleText = cleanAiOutput(fullText);
+          const visibleText = cleanAiOutput(
+            stripInternalStreamPayload(fullText),
+          );
 
-          setMessages((prev) => {
-            const updated = [...prev];
-            updated[updated.length - 1] = {
-              role: 'assistant',
-              content: visibleText,
-            };
-            return updated;
-          });
+          // Heartbeat medzery a interné chybové payloady sa nesmú zobraziť
+          // ako prázdna alebo technická správa. Kým nie je dostupný reálny
+          // text, v bubline ostáva lokalizovaný stav „Analyzujem“.
+          if (visibleText) {
+            setMessages((prev) => {
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                role: 'assistant',
+                content: visibleText,
+              };
+              return updated;
+            });
+          }
         }
       }
 
@@ -4289,6 +4379,7 @@ ${attachmentWarningText}`.trim();
         readStreamedApiError(fullText);
 
       if (streamedError) {
+        removePendingAssistantMessage();
         showSystemError(
           createZedperaError(
             String(
@@ -4374,6 +4465,7 @@ await saveChatToHistory({
         error,
       );
 
+      removePendingAssistantMessage();
       showSystemError(
         createZedperaErrorFromUnknown(
           error,
@@ -4825,19 +4917,47 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
                 </div>
               ) : (
                 <div className="mx-auto w-full max-w-5xl space-y-4 pb-2">
-                  {messages.map((message, index) => (
-                    <div key={`${message.role}-${index}`} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  {messages.map((message, index) => {
+                    const isPendingAssistant =
+                      message.role === 'assistant' &&
+                      isLoading &&
+                      index === messages.length - 1 &&
+                      !message.content.trim();
+
+                    return (
                       <div
-                        className={`max-w-[92%] break-words whitespace-pre-wrap rounded-3xl px-4 py-3 text-sm leading-7 shadow-lg md:max-w-[85%] md:px-5 md:py-4 ${
+                        key={`${message.role}-${index}`}
+                        className={`flex ${
                           message.role === 'user'
-                            ? 'bg-violet-600 text-white shadow-violet-700/20'
-                            : 'border border-white/10 bg-white/[0.065] text-slate-200 shadow-black/20'
+                            ? 'justify-end'
+                            : 'justify-start'
                         }`}
                       >
-                        {message.content}
+                        <div
+                          className={`max-w-[92%] break-words whitespace-pre-wrap rounded-3xl px-4 py-3 text-sm leading-7 shadow-lg md:max-w-[85%] md:px-5 md:py-4 ${
+                            message.role === 'user'
+                              ? 'bg-violet-600 text-white shadow-violet-700/20'
+                              : 'border border-white/10 bg-white/[0.065] text-slate-200 shadow-black/20'
+                          }`}
+                        >
+                          {isPendingAssistant ? (
+                            <ThinkingRobot language={language} />
+                          ) : (
+                            message.content
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
+
+                  {isLoading &&
+                    messages[messages.length - 1]?.role !== 'assistant' && (
+                      <div className="flex justify-start">
+                        <div className="max-w-[92%] rounded-3xl border border-violet-400/20 bg-white/[0.065] px-4 py-3 text-sm leading-7 text-slate-200 shadow-lg shadow-black/20 md:max-w-[85%] md:px-5 md:py-4">
+                          <ThinkingRobot language={language} />
+                        </div>
+                      </div>
+                    )}
 
                   {processingLog.length > 0 && isLoading && (
                     <div className="rounded-3xl border border-violet-400/20 bg-violet-500/10 p-4">
@@ -5022,17 +5142,28 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
                     type="submit"
                     disabled={!canSubmit || !activeProfile}
                     aria-live="polite"
-                    aria-label={isLoading ? 'AI analyzuje zadanie' : 'Odoslať správu'}
+                    aria-label={
+                      isLoading
+                        ? `${activeAgentLabel}: ${getAnalyzingLabel(language)}`
+                        : 'Odoslať správu'
+                    }
                     className={`mb-1 flex h-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-700/40 transition-all duration-300 hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-70 ${
                       isLoading ? 'min-w-[148px] gap-2 px-4' : 'w-12'
                     }`}
-                    title={isLoading ? 'AI analyzuje zadanie' : 'Odoslať'}
+                    title={
+                      isLoading
+                        ? `${activeAgentLabel}: ${getAnalyzingLabel(language)}`
+                        : 'Odoslať'
+                    }
                   >
                     {isLoading ? (
                       <>
-                        <Bot className="h-5 w-5 animate-pulse" />
+                        <span className="relative flex h-6 w-6 items-center justify-center">
+                          <Bot className="h-5 w-5 animate-pulse" />
+                          <Brain className="absolute -right-1 -top-1 h-3 w-3 animate-pulse" />
+                        </span>
                         <span className="whitespace-nowrap text-xs font-black">
-                          Analyzujem...
+                          {getAnalyzingLabel(language)}
                         </span>
                       </>
                     ) : (

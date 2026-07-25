@@ -988,6 +988,12 @@ const maxStandardFilesCount = 12;
 const maxUnlimitedFilesPerRequest = 20;
 const maxDataFilesPerRequest = 1;
 
+/**
+ * Musí zostať zosúladené s MAX_SOURCE_CHARACTERS v app/api/translate/route.ts.
+ * Text sa už neskracuje potichu na 120 000 alebo 180 000 znakov.
+ */
+const MAX_TRANSLATION_SOURCE_CHARACTERS = 750_000;
+
 const maxFileSizeMb = 30;
 const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 
@@ -3827,7 +3833,7 @@ function extractTranslationTextFromPayload(payload: unknown): string {
       const candidate = value[key];
 
       if (typeof candidate === "string" && candidate.trim()) {
-        return candidate.trim().slice(0, 180_000);
+        return candidate.trim().slice(0, MAX_TRANSLATION_SOURCE_CHARACTERS + 1);
       }
     }
 
@@ -3892,7 +3898,7 @@ function extractTranslationTextFromPayload(payload: unknown): string {
 
   visitItems(payload);
 
-  return collected.join("\n\n-----------------\n\n").slice(0, 180_000);
+  return collected.join("\n\n-----------------\n\n").slice(0, MAX_TRANSLATION_SOURCE_CHARACTERS + 1);
 }
 
 async function extractTranslationAttachments(
@@ -3905,7 +3911,7 @@ async function extractTranslationAttachments(
     .map((file) => String(file.text || file.content || "").trim())
     .filter(Boolean)
     .join("\n\n-----------------\n\n")
-    .slice(0, 180_000);
+    .slice(0, MAX_TRANSLATION_SOURCE_CHARACTERS + 1);
 
   const binaryFiles = files.filter((file) => isBrowserFileLike(file.file));
 
@@ -4007,7 +4013,7 @@ async function extractTranslationAttachments(
 
   const combinedText = combinedParts
     .join("\n\n-----------------\n\n")
-    .slice(0, 180_000);
+    .slice(0, MAX_TRANSLATION_SOURCE_CHARACTERS + 1);
 
   if (!combinedText) {
     throw new DashboardApiError({
@@ -4579,6 +4585,8 @@ export default function TranslationFrontend(
   const [secondaryInput, setSecondaryInput] = useState("");
   const [result, setResult] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [translationElapsedSeconds, setTranslationElapsedSeconds] =
+    useState(0);
 
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [activeAttachmentText, setActiveAttachmentText] = useState("");
@@ -4601,7 +4609,7 @@ export default function TranslationFrontend(
       .join(
         "\n\n-----------------\n\n",
       )
-      .slice(0, 120_000);
+      .slice(0, MAX_TRANSLATION_SOURCE_CHARACTERS + 1);
 
     setActiveAttachmentText((current) => {
       if (fallbackText) return fallbackText;
@@ -4647,6 +4655,25 @@ export default function TranslationFrontend(
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [translationModalOpen]);
+
+  useEffect(() => {
+    if (!isLoading || activeModuleRef.current !== "translation") {
+      setTranslationElapsedSeconds(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const updateElapsed = () => {
+      setTranslationElapsedSeconds(
+        Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
+      );
+    };
+
+    updateElapsed();
+    const intervalId = window.setInterval(updateElapsed, 1_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [isLoading]);
 
   const [entitlements, setEntitlements] =
     useState<DashboardEntitlements | null>(null);
@@ -6638,7 +6665,7 @@ Text emailu:
         .map((file) => String(file.text || file.content || "").trim())
         .filter(Boolean)
         .join("\n\n-----------------\n\n")
-        .slice(0, 180_000);
+        .slice(0, MAX_TRANSLATION_SOURCE_CHARACTERS + 1);
 
       let translationExtraction: TranslationExtractionResult | null = null;
 
@@ -6677,8 +6704,24 @@ Text emailu:
               .map((value) => value.trim())
               .filter(Boolean)
               .join("\n\n")
-              .slice(0, 180_000)
           : userText;
+
+      if (
+        requestedModule === "translation" &&
+        translationSourceText.length > MAX_TRANSLATION_SOURCE_CHARACTERS
+      ) {
+        throw new DashboardApiError({
+          status: 413,
+          code: "TRANSLATION_SOURCE_TOO_LARGE",
+          message:
+            "Dokument je príliš rozsiahly na jednu prekladovú požiadavku.",
+          detail: `Maximálny podporovaný rozsah je ${MAX_TRANSLATION_SOURCE_CHARACTERS.toLocaleString(
+            "sk-SK",
+          )} znakov. Dokument má ${translationSourceText.length.toLocaleString(
+            "sk-SK",
+          )} znakov.`,
+        });
+      }
 
       if (
         requestedModule === "translation" &&
@@ -6707,7 +6750,7 @@ Text emailu:
       const prompt = buildModulePrompt(
         requestedModule,
         requestedModule === "translation"
-          ? translationSourceText
+          ? ""
           : undefined,
       );
 
@@ -7383,7 +7426,7 @@ Text emailu:
           .join(
             "\n\n-----------------\n\n",
           )
-          .slice(0, 120_000);
+          .slice(0, MAX_TRANSLATION_SOURCE_CHARACTERS + 1);
 
       const effectiveAttachmentText =
         requestedModule === "translation"
@@ -7506,6 +7549,8 @@ Text emailu:
         );
       }
 
+      const isTranslationDirectRequest = requestedModule === "translation";
+
       const directJsonPayload: Record<string, unknown> = {
         requestId: chatRequestId,
         module: requestedModule,
@@ -7516,10 +7561,18 @@ Text emailu:
         model: agent,
         prompt,
         instruction: prompt,
+        // Pri preklade sa celý zdroj posiela iba raz. Staršia verzia ho
+        // opakovala v input/text/message/question/prompt/messages a v troch
+        // attachment poliach, čím pri dlhých dokumentoch zbytočne zväčšovala
+        // JSON request a mohla prekročiť limit platformy.
         input: effectiveUserText,
-        text: effectiveUserText || prompt,
-        message: effectiveUserText || secondaryText || prompt,
-        question: effectiveUserText || secondaryText || prompt,
+        text: isTranslationDirectRequest ? "" : effectiveUserText || prompt,
+        message: isTranslationDirectRequest
+          ? ""
+          : effectiveUserText || secondaryText || prompt,
+        question: isTranslationDirectRequest
+          ? ""
+          : effectiveUserText || secondaryText || prompt,
         secondaryInput: secondaryText,
         messages: [{ role: "user", content: prompt }],
         language: requestOutputLanguage,
@@ -7550,9 +7603,15 @@ Text emailu:
         workType: getWorkType(profileForApi),
         citation: getCitationStyle(profileForApi),
         citationStyle: getCitationStyle(profileForApi),
-        attachmentText: effectiveAttachmentText,
-        extractedText: effectiveAttachmentText,
-        clientExtractedText: effectiveAttachmentText,
+        attachmentText: isTranslationDirectRequest
+          ? ""
+          : effectiveAttachmentText,
+        extractedText: isTranslationDirectRequest
+          ? ""
+          : effectiveAttachmentText,
+        clientExtractedText: isTranslationDirectRequest
+          ? ""
+          : effectiveAttachmentText,
         qualityMode,
         outputMode,
         translationFrom,
@@ -9427,6 +9486,29 @@ Text emailu:
               </button>
             )}
 
+            {isLoading && activeModule === "translation" ? (
+              <div
+                className="mt-3 rounded-2xl border border-sky-300/20 bg-sky-500/10 px-4 py-3"
+                role="status"
+                aria-live="polite"
+              >
+                <div className="flex items-start gap-3">
+                  <RefreshCcw className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-sky-200" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-sky-50">
+                      Preklad dlhšieho dokumentu prebieha po častiach.
+                    </p>
+                    <p className="mt-1 text-xs font-semibold leading-5 text-slate-300">
+                      Kartu nezatvárajte. Aplikácia spracúva celý extrahovaný
+                      obsah a po dokončení automaticky otvorí výsledok. Uplynulo:
+                      {" "}
+                      {translationElapsedSeconds} s.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {activeModule === "data" && (
               <div className="mt-4 rounded-3xl border border-cyan-300/30 bg-gradient-to-br from-cyan-500/10 via-blue-500/10 to-violet-500/10 p-4 shadow-2xl shadow-cyan-950/30">
                 <div className="mb-3 flex items-start gap-3">
@@ -9802,8 +9884,8 @@ uroven_sportu`}
             }
           }}
         >
-          <section className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-sky-300/20 bg-[#060b17] shadow-2xl shadow-sky-950/60">
-            <header className="border-b border-white/10 bg-gradient-to-r from-sky-500/15 via-cyan-500/10 to-blue-500/10 px-5 py-5 sm:px-7">
+          <section className="flex h-[94vh] max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-sky-300/20 bg-[#060b17] shadow-2xl shadow-sky-950/60">
+            <header className="shrink-0 border-b border-white/10 bg-gradient-to-r from-sky-500/15 via-cyan-500/10 to-blue-500/10 px-5 py-5 sm:px-7">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex min-w-0 items-start gap-3">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-sky-300/25 bg-sky-400/15 text-sky-100">
@@ -9883,7 +9965,7 @@ uroven_sportu`}
               ) : null}
             </header>
 
-            <div className="min-h-0 flex-1 p-4 sm:p-6">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4 sm:p-6">
               <textarea
                 value={canvasText}
                 onChange={(event) => {
@@ -9891,7 +9973,7 @@ uroven_sportu`}
                   setResult(event.target.value);
                 }}
                 spellCheck
-                className="h-[52vh] min-h-[320px] w-full resize-none rounded-[26px] border border-white/10 bg-[#030711] px-5 py-5 text-sm font-semibold leading-7 text-white shadow-inner shadow-black/40 outline-none transition focus:border-sky-300/50 focus:ring-4 focus:ring-sky-400/10"
+                className="min-h-[220px] flex-1 resize-none rounded-[26px] border border-white/10 bg-[#030711] px-5 py-5 text-sm font-semibold leading-7 text-white shadow-inner shadow-black/40 outline-none transition focus:border-sky-300/50 focus:ring-4 focus:ring-sky-400/10"
                 aria-label={activeModuleResultTitle}
               />
 
@@ -9900,13 +9982,13 @@ uroven_sportu`}
               </p>
             </div>
 
-            <footer className="flex flex-col gap-3 border-t border-white/10 px-5 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:px-7">
+            <footer className="grid shrink-0 grid-cols-2 gap-2 border-t border-white/10 bg-[#060b17]/95 px-5 py-4 backdrop-blur sm:flex sm:flex-wrap sm:items-center sm:justify-end sm:gap-3 sm:px-7">
               <button
                 type="button"
                 onClick={() => {
                   void navigator.clipboard.writeText(canvasText || result || "");
                 }}
-                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+                className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-white transition hover:bg-white/[0.12] sm:w-auto sm:px-5"
               >
                 <FileText className="h-4 w-4" />
                 <span>{translationModalUi.copy}</span>
@@ -9915,7 +9997,7 @@ uroven_sportu`}
               <button
                 type="button"
                 onClick={downloadPdf}
-                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+                className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-white transition hover:bg-white/[0.12] sm:w-auto sm:px-5"
               >
                 <FileDown className="h-4 w-4" />
                 <span>PDF</span>
@@ -9924,7 +10006,7 @@ uroven_sportu`}
               <button
                 type="button"
                 onClick={downloadDoc}
-                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
+                className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-white transition hover:bg-white/[0.12] sm:w-auto sm:px-5"
               >
                 <Download className="h-4 w-4" />
                 <span>Word</span>
@@ -9933,7 +10015,7 @@ uroven_sportu`}
               <button
                 type="button"
                 onClick={() => setTranslationModalOpen(false)}
-                className="inline-flex min-h-[46px] items-center justify-center rounded-2xl bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 px-6 py-3 text-sm font-black text-white shadow-lg shadow-sky-950/30 transition hover:brightness-110"
+                className="col-span-2 inline-flex min-h-[46px] w-full items-center justify-center rounded-2xl bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 px-6 py-3 text-sm font-black text-white shadow-lg shadow-sky-950/30 transition hover:brightness-110 sm:col-span-1 sm:w-auto"
               >
                 {translationModalUi.close}
               </button>

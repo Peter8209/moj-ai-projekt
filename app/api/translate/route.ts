@@ -26,6 +26,8 @@ export const maxDuration = 300;
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  maxRetries: 0,
+  timeout: 90_000,
 });
 
 type LanguageCode =
@@ -126,6 +128,24 @@ const CONTINUITY_CONTEXT_CHARACTERS = 1_200;
 const CHARACTERS_PER_QUOTA_PAGE = 1_800;
 const MIN_CHUNK_OUTPUT_TOKENS = 1_200;
 const MAX_CHUNK_OUTPUT_TOKENS = 7_000;
+
+/**
+ * Sekvenčný preklad 15 až 80 častí mohol prekročiť čas serverovej funkcie.
+ * Obmedzená paralelizácia výrazne skráti spracovanie a zároveň chráni API
+ * pred nekontrolovaným počtom súbežných požiadaviek.
+ */
+const configuredTranslationConcurrency = Number.parseInt(
+  process.env.OPENAI_TRANSLATION_CONCURRENCY || '4',
+  10,
+);
+
+const TRANSLATION_CONCURRENCY = Number.isFinite(
+  configuredTranslationConcurrency,
+)
+  ? Math.min(6, Math.max(1, configuredTranslationConcurrency))
+  : 4;
+const TRANSLATION_CHUNK_RETRIES = 2;
+const TRANSLATION_RETRY_DELAY_MS = 900;
 
 type TranslationChunk = {
   index: number;
@@ -528,6 +548,12 @@ PRÍSNE PRAVIDLÁ
 `.trim();
 }
 
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
 async function translateChunk({
   chunk,
   totalChunks,
@@ -578,42 +604,60 @@ async function translateChunk({
 
   let completion: Awaited<
     ReturnType<typeof openai.chat.completions.create>
-  >;
+  > | null = null;
+  let lastError: unknown = null;
 
-  try {
-    completion = await openai.chat.completions.create({
-      model: TRANSLATION_MODEL,
-      temperature: 0.1,
-      max_tokens: maxOutputTokens,
-      messages: [
-        {
-          role: 'system',
-          content: [
-            String(
-              GLOBAL_ACADEMIC_SYSTEM_PROMPT ||
-              '',
-            ).trim(),
-            'Si profesionálny akademický prekladateľ.',
-            'Prekladaj úplne, bez skracovania, a zachovávaj terminologickú konzistenciu medzi časťami dokumentu.',
-            'V odpovedi vráť výhradne preložený text aktuálnej časti.',
-          ]
-            .filter(Boolean)
-            .join('\n\n'),
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    });
-  } catch (error) {
+  for (let attempt = 0; attempt <= TRANSLATION_CHUNK_RETRIES; attempt += 1) {
+    try {
+      completion = await openai.chat.completions.create({
+        model: TRANSLATION_MODEL,
+        temperature: 0.1,
+        max_tokens: maxOutputTokens,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              String(
+                GLOBAL_ACADEMIC_SYSTEM_PROMPT ||
+                '',
+              ).trim(),
+              'Si profesionálny akademický prekladateľ.',
+              'Prekladaj úplne, bez skracovania, a zachovávaj terminologickú konzistenciu medzi časťami dokumentu.',
+              'V odpovedi vráť výhradne preložený text aktuálnej časti.',
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      });
+
+      break;
+    } catch (error) {
+      lastError = error;
+
+      if (attempt >= TRANSLATION_CHUNK_RETRIES) {
+        break;
+      }
+
+      await wait(
+        TRANSLATION_RETRY_DELAY_MS *
+          Math.pow(2, attempt),
+      );
+    }
+  }
+
+  if (!completion) {
     throw new TranslationProcessingError({
       status: 502,
       code: 'TRANSLATION_CHUNK_FAILED',
       message: `Preklad časti ${chunk.index + 1} z ${totalChunks} zlyhal.`,
       detail:
-        error instanceof Error
-          ? error.message
+        lastError instanceof Error
+          ? lastError.message
           : 'OpenAI nevrátilo použiteľnú odpoveď.',
     });
   }
@@ -910,37 +954,62 @@ export async function POST(
       );
     }
 
-    const translatedChunks: string[] = [];
-    const finishReasons: Array<string | null> = [];
+    const translatedChunks: string[] = new Array(chunks.length);
+    const finishReasons: Array<string | null> = new Array(chunks.length).fill(
+      null,
+    );
     let completionTokens = 0;
-    let previousSourceContext = '';
-    let previousTranslationContext = '';
 
-    for (const chunk of chunks) {
-      const translatedChunk = await translateChunk({
-        chunk,
-        totalChunks: chunks.length,
-        from: translationFrom,
-        to: translationTo,
-        style: translationStyle,
-        profile,
-        pageQuota,
-        previousSourceContext,
-        previousTranslationContext,
+    for (
+      let batchStart = 0;
+      batchStart < chunks.length;
+      batchStart += TRANSLATION_CONCURRENCY
+    ) {
+      const batch = chunks.slice(
+        batchStart,
+        batchStart + TRANSLATION_CONCURRENCY,
+      );
+
+      const previousBatchTranslationContext =
+        batchStart > 0
+          ? tail(
+              translatedChunks[batchStart - 1] || '',
+              CONTINUITY_CONTEXT_CHARACTERS,
+            )
+          : '';
+
+      const batchResults = await Promise.all(
+        batch.map((chunk, batchIndex) =>
+          translateChunk({
+            chunk,
+            totalChunks: chunks.length,
+            from: translationFrom,
+            to: translationTo,
+            style: translationStyle,
+            profile,
+            pageQuota,
+            previousSourceContext:
+              chunk.index > 0
+                ? tail(
+                    chunks[chunk.index - 1]?.text || '',
+                    CONTINUITY_CONTEXT_CHARACTERS,
+                  )
+                : '',
+            previousTranslationContext:
+              batchIndex === 0
+                ? previousBatchTranslationContext
+                : '',
+          }),
+        ),
+      );
+
+      batchResults.forEach((translatedChunk, batchIndex) => {
+        const targetIndex = batchStart + batchIndex;
+
+        translatedChunks[targetIndex] = translatedChunk.text;
+        finishReasons[targetIndex] = translatedChunk.finishReason;
+        completionTokens += translatedChunk.completionTokens;
       });
-
-      translatedChunks.push(translatedChunk.text);
-      completionTokens += translatedChunk.completionTokens;
-      finishReasons.push(translatedChunk.finishReason);
-
-      previousSourceContext = tail(
-        chunk.text,
-        CONTINUITY_CONTEXT_CHARACTERS,
-      );
-      previousTranslationContext = tail(
-        translatedChunk.text,
-        CONTINUITY_CONTEXT_CHARACTERS,
-      );
     }
 
     const translatedText = cleanText(
@@ -1008,11 +1077,12 @@ export async function POST(
             .pagesConsumed,
         processingStrategy:
           chunks.length > 1
-            ? 'chunked-sequential-with-continuity-context'
+            ? 'chunked-batched-with-source-continuity'
             : 'single-chunk',
         chunks: {
           count: chunks.length,
-          completed: translatedChunks.length,
+          completed: translatedChunks.filter(Boolean).length,
+          concurrency: TRANSLATION_CONCURRENCY,
           targetCharacters:
             TARGET_CHUNK_CHARACTERS,
           maximumCharacters:

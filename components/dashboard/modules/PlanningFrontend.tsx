@@ -31,7 +31,6 @@ import {
   Search,
   Send,
   Sparkles,
-  Target,
   Trash2,
   UploadCloud,
   User,
@@ -444,18 +443,40 @@ const PLANNING_WORK_PRESETS: Record<
   },
 };
 
-const PLANNING_WORK_TYPE_OPTIONS: PlanningWorkType[] = [
-  "seminar",
-  "bachelor",
-  "master",
-  "project",
-  "other",
-];
-
 function getPlanningWorkPreset(
   workType: PlanningWorkType,
 ): PlanningWorkPreset {
   return PLANNING_WORK_PRESETS[workType] || PLANNING_WORK_PRESETS.other;
+}
+
+function inferPlanningWorkTypeFromProfile(
+  profile?: SavedProfile | null,
+): PlanningWorkType {
+  const profileType = [
+    profile?.type,
+    profile?.level,
+    profile?.schema?.label,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (profileType.includes("semin")) return "seminar";
+  if (profileType.includes("bak") || profileType.includes("bachelor")) {
+    return "bachelor";
+  }
+  if (
+    profileType.includes("dipl") ||
+    profileType.includes("mag") ||
+    profileType.includes("master")
+  ) {
+    return "master";
+  }
+  if (profileType.includes("projekt") || profileType.includes("project")) {
+    return "project";
+  }
+
+  return "other";
 }
 
 function createDefaultPlanningStatus(): Record<
@@ -497,6 +518,221 @@ function formatPlanningDate(value: string): string {
         year: "numeric",
       }).format(date)
     : value;
+}
+
+const PLANNING_DATE_LOCALES: Record<LanguageCode, string> = {
+  sk: "sk-SK",
+  cs: "cs-CZ",
+  en: "en-GB",
+  de: "de-DE",
+  pl: "pl-PL",
+  hu: "hu-HU",
+};
+
+function toPlanningIsoDate(date: Date): string {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function getTomorrowPlanningDate(): string {
+  const tomorrow = new Date();
+  tomorrow.setHours(0, 0, 0, 0);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return toPlanningIsoDate(tomorrow);
+}
+
+function PlanningDatePicker({
+  value,
+  min,
+  language,
+  onChange,
+}: {
+  value: string;
+  min: string;
+  language: LanguageCode;
+  onChange: (value: string) => void;
+}) {
+  const locale = PLANNING_DATE_LOCALES[language] || PLANNING_DATE_LOCALES.sk;
+  const selectedDate = parsePlanningDate(value);
+  const minimumDate = parsePlanningDate(min);
+  const initialDate = selectedDate || minimumDate || new Date();
+  const [open, setOpen] = useState(false);
+  const [visibleMonth, setVisibleMonth] = useState(
+    () => new Date(initialDate.getFullYear(), initialDate.getMonth(), 1),
+  );
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const nextDate = parsePlanningDate(value) || parsePlanningDate(min);
+    if (!nextDate) return;
+
+    setVisibleMonth(
+      new Date(nextDate.getFullYear(), nextDate.getMonth(), 1),
+    );
+  }, [min, value]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  const year = visibleMonth.getFullYear();
+  const month = visibleMonth.getMonth();
+  const firstDayOffset = (new Date(year, month, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthLabel = new Intl.DateTimeFormat(locale, {
+    month: "long",
+    year: "numeric",
+  }).format(visibleMonth);
+  const weekdayLabels = Array.from({ length: 7 }, (_, index) => {
+    const monday = new Date(2024, 0, 1 + index);
+    return new Intl.DateTimeFormat(locale, { weekday: "short" })
+      .format(monday)
+      .replace(".", "");
+  });
+  const displayValue = selectedDate
+    ? new Intl.DateTimeFormat(locale, {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      }).format(selectedDate)
+    : language === "sk"
+      ? "Vyberte dátum"
+      : language === "cs"
+        ? "Vyberte datum"
+        : "Select date";
+
+  return (
+    <div ref={pickerRef} className="relative">
+      <button
+        type="button"
+        lang={locale}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={language === "sk" ? "Termín odovzdania" : "Submission date"}
+        onClick={() => setOpen((current) => !current)}
+        className="flex min-h-[58px] w-full items-center gap-3 rounded-2xl border border-violet-300/25 bg-[#050812] px-4 text-left text-base font-black text-white outline-none transition hover:border-violet-300/50 focus:border-violet-300 focus:ring-4 focus:ring-violet-500/15"
+      >
+        <CalendarDays className="h-5 w-5 shrink-0 text-violet-300" />
+        <span className={value ? "text-white" : "text-slate-400"}>
+          {displayValue}
+        </span>
+        <ChevronDown
+          className={[
+            "ml-auto h-4 w-4 text-slate-400 transition",
+            open ? "rotate-180" : "",
+          ].join(" ")}
+        />
+      </button>
+
+      {open ? (
+        <div
+          role="dialog"
+          aria-label={language === "sk" ? "Slovenský kalendár" : "Calendar"}
+          className="absolute right-0 z-50 mt-2 w-[320px] max-w-[calc(100vw-2rem)] rounded-3xl border border-violet-300/20 bg-[#080b15] p-4 shadow-2xl shadow-black/60"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              aria-label="Predchádzajúci mesiac"
+              onClick={() =>
+                setVisibleMonth((current) =>
+                  new Date(current.getFullYear(), current.getMonth() - 1, 1),
+                )
+              }
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-xl font-black text-slate-200 hover:bg-white/[0.08]"
+            >
+              ‹
+            </button>
+            <p className="capitalize text-sm font-black text-white">
+              {monthLabel}
+            </p>
+            <button
+              type="button"
+              aria-label="Nasledujúci mesiac"
+              onClick={() =>
+                setVisibleMonth((current) =>
+                  new Date(current.getFullYear(), current.getMonth() + 1, 1),
+                )
+              }
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-xl font-black text-slate-200 hover:bg-white/[0.08]"
+            >
+              ›
+            </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-7 gap-1 text-center">
+            {weekdayLabels.map((weekday) => (
+              <div
+                key={weekday}
+                className="py-1 text-[10px] font-black uppercase tracking-[0.08em] text-slate-500"
+              >
+                {weekday}
+              </div>
+            ))}
+
+            {Array.from({ length: 42 }, (_, index) => {
+              const day = index - firstDayOffset + 1;
+              if (day < 1 || day > daysInMonth) {
+                return <div key={`empty-${index}`} className="h-10" />;
+              }
+
+              const date = new Date(year, month, day);
+              const isoDate = toPlanningIsoDate(date);
+              const disabled = Boolean(minimumDate && date < minimumDate);
+              const selected = isoDate === value;
+              const today = isoDate === toPlanningIsoDate(new Date());
+
+              return (
+                <button
+                  key={isoDate}
+                  type="button"
+                  disabled={disabled}
+                  aria-pressed={selected}
+                  onClick={() => {
+                    onChange(isoDate);
+                    setOpen(false);
+                  }}
+                  className={[
+                    "flex h-10 items-center justify-center rounded-xl text-sm font-black transition",
+                    selected
+                      ? "bg-violet-500 text-white shadow-lg shadow-violet-950/40"
+                      : today
+                        ? "border border-cyan-300/30 bg-cyan-500/10 text-cyan-100"
+                        : "text-slate-200 hover:bg-white/[0.08]",
+                    disabled
+                      ? "cursor-not-allowed opacity-25 hover:bg-transparent"
+                      : "",
+                  ].join(" ")}
+                >
+                  {day}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function planningDayDifference(from: string, to: string): number {
@@ -763,9 +999,9 @@ function PlanningResultDashboard({
       icon: CalendarDays,
     },
     {
-      label: "Produktívny čas",
-      value: plan.summary.productiveHours,
-      suffix: "h",
+      label: "Denný plán",
+      value: plan.summary.pagesPerDay,
+      suffix: "str./deň",
       icon: Clock3,
     },
     {
@@ -1013,12 +1249,6 @@ function PlanningResultDashboard({
           </div>
         ) : null}
 
-        {meta?.fallbackReason ? (
-          <div className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-500/[0.07] px-4 py-3 text-xs font-semibold leading-5 text-amber-100/80">
-            Plán bol bezpečne vytvorený výpočtovým plánovačom. Technická
-            poznámka: {meta.fallbackReason}
-          </div>
-        ) : null}
       </div>
     </section>
   );
@@ -1975,9 +2205,9 @@ const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
       label: "Plánovanie",
       shortLabel: "Plánovanie",
       button: "Spustiť plánovanie",
-      inputLabel: "Druh práce a termín odovzdania",
+      inputLabel: "Aktívny profil a termín odovzdania",
       placeholder:
-        "Vyberte druh akademickej práce a budúci termín odovzdania.",
+        "Vyberte aktívny profil práce a budúci termín odovzdania.",
       intro:
         "Plánovanie rozdelí prácu na kroky, termíny a priority podľa dátumu odovzdania a aktuálneho stavu.",
       resultTitle: "Výstup plánovania",
@@ -5400,7 +5630,7 @@ export default function PlanningFrontend(
 
   const [planningTitle, setPlanningTitle] = useState("");
   const [planningWorkType, setPlanningWorkType] =
-    useState<PlanningWorkType>("bachelor");
+    useState<PlanningWorkType>("other");
   const [planningDeadline, setPlanningDeadline] = useState("");
   const [planningDeadlineTime, setPlanningDeadlineTime] = useState("23:59");
   const [planningTargetPages, setPlanningTargetPages] = useState(50);
@@ -5434,43 +5664,20 @@ export default function PlanningFrontend(
 
 
   useEffect(() => {
-    if (!activeProfile) return;
+    if (!activeProfile) {
+      setPlanningTitle("");
+      setPlanningWorkType("other");
+      return;
+    }
 
-    setPlanningTitle((current) => {
-      if (current.trim()) return current;
-
-      return activeProfile.title || activeProfile.topic || "";
-    });
-
-    setPlanningWorkType((current) => {
-      const rawType = String(
-        activeProfile.type || activeProfile.level || "",
-      ).toLowerCase();
-
-      if (rawType.includes("semin")) return "seminar";
-      if (rawType.includes("bak") || rawType.includes("bachelor")) {
-        return "bachelor";
-      }
-      if (
-        rawType.includes("dipl") ||
-        rawType.includes("mag") ||
-        rawType.includes("master")
-      ) {
-        return "master";
-      }
-      if (rawType.includes("projekt") || rawType.includes("project")) {
-        return "project";
-      }
-
-      return current;
-    });
+    setPlanningTitle(activeProfile.title || activeProfile.topic || "");
+    setPlanningWorkType(inferPlanningWorkTypeFromProfile(activeProfile));
   }, [activeProfile]);
 
   /**
-   * Používateľ pri plánovaní vyberá iba druh práce a termín odovzdania.
-   * Všetky ostatné parametre sú odborné systémové predvoľby podľa typu práce.
-   * Tým sa odstráni nejednoznačné voľné textové zadanie a endpoint vždy dostane
-   * úplný, konzistentný a validovateľný plánovací objekt.
+   * Druh práce a cieľový rozsah sa načítajú výhradne z aktívneho profilu.
+   * Používateľ zadáva iba termín odovzdania; server následne vytvorí
+   * harmonogram pre celý dostupný interval bez blokovania podľa dennej kapacity.
    */
   useEffect(() => {
     const preset = getPlanningWorkPreset(planningWorkType);
@@ -6246,9 +6453,10 @@ export default function PlanningFrontend(
     setAnalysisModalOpen(false);
 
     if (activeModuleRef.current === "planning") {
-      const defaultPreset = getPlanningWorkPreset("bachelor");
+      const profileWorkType = inferPlanningWorkTypeFromProfile(activeProfile);
+      const defaultPreset = getPlanningWorkPreset(profileWorkType);
       setPlanningTitle(activeProfile?.title || activeProfile?.topic || "");
-      setPlanningWorkType("bachelor");
+      setPlanningWorkType(profileWorkType);
       setPlanningDeadline("");
       setPlanningDeadlineTime("23:59");
       setPlanningTargetPages(defaultPreset.targetPages);
@@ -7044,7 +7252,7 @@ Text emailu:
 
     const hasAnyInput =
       requestedModule === "planning"
-        ? Boolean(planningDeadline && planningWorkType)
+        ? Boolean(planningDeadline && hasUsableProfile)
         : Boolean(
             userText ||
               secondaryText ||
@@ -7055,7 +7263,7 @@ Text emailu:
     if (!hasAnyInput) {
       alert(
         requestedModule === "planning"
-          ? "Vyberte druh práce a termín odovzdania. Zedpera ostatné parametre nastaví automaticky."
+          ? "Najskôr vyberte aktívny profil práce a termín odovzdania. Druh práce sa načíta automaticky z profilu."
           : requestedModule === "emails"
             ? "Najskôr vložte zadanie pre email alebo vyberte profil práce."
             : "Najskôr vložte zadanie, text, prílohu alebo vyberte profil práce.",
@@ -7576,10 +7784,11 @@ Text emailu:
 
 
       // =====================================================
-      // PLÁNOVANIE – DRUH PRÁCE + TERMÍN, OSTATNÉ AUTOMATICKY
+      // PLÁNOVANIE – PROFIL PRÁCE + TERMÍN, OSTATNÉ AUTOMATICKY
       // =====================================================
       if (requestedModule === "planning") {
-        const preset = getPlanningWorkPreset(planningWorkType);
+        const profileWorkType = inferPlanningWorkTypeFromProfile(profileForApi);
+        const preset = getPlanningWorkPreset(profileWorkType);
         const resolvedPlanningTitle =
           profileForApi?.title ||
           profileForApi?.topic ||
@@ -7595,7 +7804,7 @@ Text emailu:
             code: "PLANNING_DEADLINE_REQUIRED",
             message: "Vyberte termín odovzdania práce.",
             detail:
-              "Plánovanie sa spustí po výbere druhu práce a platného budúceho dátumu.",
+              "Plánovanie sa spustí po výbere aktívneho profilu práce a platného budúceho dátumu.",
           });
         }
 
@@ -7612,7 +7821,7 @@ Text emailu:
           requestId: `${moduleRunRequestId}-planning`,
           projectId: profileForApi?.id || undefined,
           title: resolvedPlanningTitle,
-          workType: planningWorkType,
+          workType: profileWorkType,
           language: finalWorkLanguage || systemLanguage,
           workLanguage: finalWorkLanguage || systemLanguage,
           deadline: planningDeadline,
@@ -7632,7 +7841,7 @@ Text emailu:
           activeProfile: profileForApi || null,
           attachmentIds: [],
           attachmentMetadata: [],
-          interfaceMode: "work-type-and-deadline-only",
+          interfaceMode: "profile-and-deadline-only",
         };
 
         const response = await fetch("/api/planning", {
@@ -7705,7 +7914,7 @@ Text emailu:
           result: {
             plan,
             planningMeta: data?.meta || null,
-            planningWorkType,
+            planningWorkType: profileWorkType,
             planningDeadline,
             profileTitle: profileForApi?.title || "",
             profileId: profileForApi?.id || null,
@@ -9824,7 +10033,7 @@ Text emailu:
           >
             {activeModule === "planning" ? (
               <section
-                className="overflow-hidden rounded-[34px] border border-violet-300/20 bg-gradient-to-br from-[#0b1020] via-[#080b15] to-[#05070c] shadow-2xl shadow-violet-950/30"
+                className="overflow-visible rounded-[34px] border border-violet-300/20 bg-gradient-to-br from-[#0b1020] via-[#080b15] to-[#05070c] shadow-2xl shadow-violet-950/30"
                 aria-labelledby={`dashboard-module-title-${activeModule}`}
                 data-module-heading={activeModule}
               >
@@ -9851,9 +10060,10 @@ Text emailu:
                           Profesionálny plán akademickej práce
                         </h3>
                         <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-400">
-                          Vyberte iba druh práce a termín odovzdania. Zedpera
-                          automaticky nastaví rozsah, pracovnú kapacitu, etapy,
-                          rezervu, míľniky a vytvorí interaktívny Ganttov graf.
+                          Druh práce, cieľový rozsah a odborné nastavenia sa
+                          automaticky načítajú z aktívneho profilu. Vyberte iba
+                          termín odovzdania a Zedpera rozloží všetky etapy až do
+                          zvoleného dátumu vrátane zrýchleného krátkeho plánu.
                         </p>
                       </div>
                     </div>
@@ -9861,23 +10071,22 @@ Text emailu:
                     <div className="grid min-w-[270px] grid-cols-2 gap-2 rounded-3xl border border-white/10 bg-black/25 p-3 backdrop-blur">
                       <div className="rounded-2xl bg-white/[0.045] p-3">
                         <p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">
-                          Automatický rozsah
+                          Druh práce
                         </p>
                         <p className="mt-1 text-lg font-black text-white">
-                          {planningPreset.targetPages}
-                          <span className="ml-1 text-xs text-slate-400">
-                            strán
+                          <span className="text-sm">
+                            {planningPreset.shortLabel}
                           </span>
                         </p>
                       </div>
                       <div className="rounded-2xl bg-white/[0.045] p-3">
                         <p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">
-                          Kapacita
+                          Cieľový rozsah
                         </p>
                         <p className="mt-1 text-lg font-black text-white">
-                          {planningPreset.hoursPerDay}
+                          {planningPreset.targetPages}
                           <span className="ml-1 text-xs text-slate-400">
-                            h/deň
+                            strán
                           </span>
                         </p>
                       </div>
@@ -9888,87 +10097,35 @@ Text emailu:
                 <div className="p-5 sm:p-7 lg:p-9">
                   <div className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_390px]">
                     <div className="space-y-7">
-                      <div>
-                        <div className="mb-4 flex items-center justify-between gap-4">
+                      <div className="rounded-[28px] border border-white/10 bg-white/[0.035] p-5 sm:p-6">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                           <div>
                             <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
                               Krok 1
                             </p>
                             <h4 className="mt-1 text-lg font-black text-white">
-                              Vyberte druh práce
+                              Aktívny profil práce
                             </h4>
+                            <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-slate-400">
+                              Druh práce sa nemení v plánovaní. Zedpera ho načíta
+                              priamo z profilu, aby bol harmonogram zhodný s
+                              nastaveným rozsahom a témou práce.
+                            </p>
                           </div>
-                          <span className="rounded-full border border-emerald-300/20 bg-emerald-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-200">
-                            Bez textového zadania
-                          </span>
-                        </div>
 
-                        <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-                          {PLANNING_WORK_TYPE_OPTIONS.map((workType) => {
-                            const preset = getPlanningWorkPreset(workType);
-                            const selected = planningWorkType === workType;
-
-                            return (
-                              <button
-                                key={workType}
-                                type="button"
-                                onClick={() => setPlanningWorkType(workType)}
-                                aria-pressed={selected}
-                                className={[
-                                  "group relative overflow-hidden rounded-[24px] border p-4 text-left transition duration-300",
-                                  selected
-                                    ? `bg-gradient-to-br ${preset.accentClassName} shadow-xl shadow-violet-950/25 ring-1 ring-violet-300/20`
-                                    : "border-white/10 bg-white/[0.035] hover:-translate-y-0.5 hover:border-violet-300/30 hover:bg-white/[0.06]",
-                                ].join(" ")}
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  <div
-                                    className={[
-                                      "flex h-11 w-11 items-center justify-center rounded-2xl border transition",
-                                      selected
-                                        ? "border-white/20 bg-white/10 text-white"
-                                        : "border-white/10 bg-black/20 text-slate-400 group-hover:text-violet-200",
-                                    ].join(" ")}
-                                  >
-                                    {workType === "project" ? (
-                                      <Target className="h-5 w-5" />
-                                    ) : workType === "seminar" ? (
-                                      <FileText className="h-5 w-5" />
-                                    ) : (
-                                      <BookOpen className="h-5 w-5" />
-                                    )}
-                                  </div>
-
-                                  <span
-                                    className={[
-                                      "flex h-6 w-6 items-center justify-center rounded-full border text-xs font-black transition",
-                                      selected
-                                        ? "border-emerald-300/30 bg-emerald-400 text-slate-950"
-                                        : "border-white/15 bg-white/5 text-transparent",
-                                    ].join(" ")}
-                                  >
-                                    ✓
-                                  </span>
-                                </div>
-
-                                <h5 className="mt-4 text-sm font-black text-white">
-                                  {preset.label}
-                                </h5>
-                                <p className="mt-2 min-h-[60px] text-xs font-semibold leading-5 text-slate-400">
-                                  {preset.description}
-                                </p>
-
-                                <div className="mt-4 flex flex-wrap gap-2">
-                                  <span className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1 text-[10px] font-black text-slate-300">
-                                    {preset.targetPages} strán
-                                  </span>
-                                  <span className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1 text-[10px] font-black text-slate-300">
-                                    {preset.daysPerWeek} dní/týždeň
-                                  </span>
-                                </div>
-                              </button>
-                            );
-                          })}
+                          <div className="min-w-[230px] rounded-2xl border border-violet-300/20 bg-violet-500/10 px-4 py-3">
+                            <p className="text-[9px] font-black uppercase tracking-[0.14em] text-violet-300">
+                              Načítané z profilu
+                            </p>
+                            <p className="mt-1 text-sm font-black text-white">
+                              {planningPreset.label}
+                            </p>
+                            <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-400">
+                              {activeProfile?.title ||
+                                activeProfile?.topic ||
+                                "Najskôr vyberte profil práce"}
+                            </p>
+                          </div>
                         </div>
                       </div>
 
@@ -9983,30 +10140,23 @@ Text emailu:
                             </h4>
                             <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-slate-400">
                               Dátum je jediný povinný vstup. Plán sa vytvorí od
-                              dnešného dňa po zvolený termín a automaticky
-                              zahrnie bezpečnostnú rezervu pred odovzdaním.
+                              dnešného dňa po zvolený termín. Aj pri veľmi krátkom
+                              termíne sa všetky činnosti rozdelia do dostupných dní.
                             </p>
                           </div>
 
-                          <label className="block">
-                            <span className="sr-only">Termín odovzdania</span>
-                            <div className="relative">
-                              <CalendarDays className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-violet-300" />
-                              <input
-                                type="date"
-                                value={planningDeadline}
-                                min={new Date(Date.now() + 86_400_000)
-                                  .toISOString()
-                                  .slice(0, 10)}
-                                onChange={(event) => {
-                                  setPlanningDeadline(event.target.value);
-                                  setPlanningPlan(null);
-                                  setPlanningMeta(null);
-                                }}
-                                className="min-h-[58px] w-full rounded-2xl border border-violet-300/25 bg-[#050812] pl-12 pr-4 text-base font-black text-white outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-500/15 [color-scheme:dark]"
-                              />
-                            </div>
-                          </label>
+                          <div className="block">
+                            <PlanningDatePicker
+                              value={planningDeadline}
+                              min={getTomorrowPlanningDate()}
+                              language={systemLanguage}
+                              onChange={(nextDate) => {
+                                setPlanningDeadline(nextDate);
+                                setPlanningPlan(null);
+                                setPlanningMeta(null);
+                              }}
+                            />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -10036,12 +10186,12 @@ Text emailu:
                                 planningPreset.shortLabel,
                             ],
                             [
-                              "Cieľový rozsah",
-                              `${planningPreset.targetPages} strán`,
+                              "Druh práce",
+                              planningPreset.label,
                             ],
                             [
-                              "Pracovný režim",
-                              `${planningPreset.hoursPerDay} h/deň · ${planningPreset.daysPerWeek} dní/týždeň`,
+                              "Cieľový rozsah",
+                              `${planningPreset.targetPages} strán`,
                             ],
                             [
                               "Termín",
@@ -10062,18 +10212,6 @@ Text emailu:
                               </p>
                             </div>
                           ))}
-                        </div>
-
-                        <div className="mt-5 rounded-2xl border border-emerald-300/20 bg-emerald-500/[0.08] p-4">
-                          <div className="flex items-center gap-2 text-xs font-black text-emerald-200">
-                            <CheckCircle2 className="h-4 w-4" />
-                            Plán sa vždy vytvorí
-                          </div>
-                          <p className="mt-2 text-xs font-semibold leading-5 text-emerald-50/70">
-                            Server najprv vypočíta garantovaný harmonogram. AI
-                            ho následne odborne rozšíri. Pri nedostupnom modeli
-                            zostane plne funkčný výpočtový plán aj Ganttov graf.
-                          </p>
                         </div>
                       </div>
                     </aside>

@@ -342,10 +342,10 @@ type SlovakApiError = {
 // =====================================================
 
 const MAX_ATTACHMENTS_PER_REQUEST = 10;
-const EXTERNAL_SOURCE_SEARCH_TIMEOUT_MS = 8_000;
-const PROVIDER_PRIMARY_TIMEOUT_MS = 75_000;
-const PROVIDER_RETRY_TIMEOUT_MS = 25_000;
-const STREAM_PROVIDER_TIMEOUT_MS = 105_000;
+const EXTERNAL_SOURCE_SEARCH_TIMEOUT_MS = 12_000;
+const PROVIDER_PRIMARY_TIMEOUT_MS = 120_000;
+const PROVIDER_RETRY_TIMEOUT_MS = 45_000;
+const STREAM_PROVIDER_TIMEOUT_MS = 150_000;
 const STREAM_HEARTBEAT_INTERVAL_MS = 10_000;
 const STREAMED_API_ERROR_PREFIX = '__ZEDPERA_STREAM_ERROR__:';
 
@@ -4248,28 +4248,33 @@ const semanticStopWords = new Set([
 
 function buildResearchQuery({ profile, userMessage }: { profile: SavedProfile | null; userMessage: string }) {
   const keywords = getKeywords(profile);
+  // Aktuálne zadanie musí mať pri vyhľadávaní prednosť. V pôvodnej
+  // verzii bolo až na konci dlhého profilu a po skrátení sa často vôbec
+  // nedostalo do dopytu pre Semantic Scholar/Crossref.
   const raw = [
+    userMessage,
     profile?.title,
     profile?.topic,
+    keywords.join(' '),
     profile?.field,
     profile?.goal,
     profile?.problem,
-    profile?.methodology,
     profile?.researchQuestions,
+    profile?.methodology,
     profile?.practicalPart,
     profile?.scientificContribution,
     profile?.sourcesRequirement,
-    keywords.join(' '),
-    userMessage,
   ].filter(Boolean).join(' ');
 
   return limitText(
-    normalizeForSemanticMatch(raw)
-      .split(/\s+/)
-      .filter((token) => token.length >= 4)
-      .filter((token) => !semanticStopWords.has(token))
-      .filter((token) => !/^\d+$/.test(token))
-      .slice(0, 28)
+    uniqueArray(
+      normalizeForSemanticMatch(raw)
+        .split(/\s+/)
+        .filter((token) => token.length >= 4)
+        .filter((token) => !semanticStopWords.has(token))
+        .filter((token) => !/^\d+$/.test(token)),
+    )
+      .slice(0, 18)
       .join(' '),
     maxExternalResearchQueryLength,
   );
@@ -4528,6 +4533,7 @@ async function buildVerifiedSourcePack({
 
   const sources = Array.from(merged.values())
     .filter((source) => source.citationText && source.bibliographyText)
+    .filter((source) => Boolean(source.doi || source.url))
     .filter((source) => !source.bibliographyText.toLowerCase().includes(REQUIRED_VERIFICATION_NOTICE.toLowerCase()))
     .filter((source) => !looksLikeIncompleteInitialCitation(source.bibliographyText))
     .slice(0, maxExternalVerifiedSources);
@@ -6785,28 +6791,6 @@ function getAnthropicPrimaryModelId() {
   );
 }
 
-function getClaudeRetryModel(): ModelResult {
-  const primaryModel =
-    getAnthropicPrimaryModelId();
-  const fallbackModel =
-    toCleanString(
-      process.env.ANTHROPIC_FALLBACK_MODEL,
-    ) ||
-    (primaryModel === 'claude-haiku-4-5'
-      ? 'claude-sonnet-4-6'
-      : 'claude-haiku-4-5');
-
-  return {
-    model:
-      getAnthropicProvider()(
-        fallbackModel,
-      ) as any,
-    providerLabel:
-      `Claude fallback (${fallbackModel})`,
-    agent: 'claude',
-  };
-}
-
 function getModelByAgent(agent: Agent): ModelResult {
   if (agent === 'openai') {
     if (!process.env.OPENAI_API_KEY) {
@@ -6884,69 +6868,101 @@ function getModelByAgent(agent: Agent): ModelResult {
   throw new Error(`Neznámy AI agent: ${agent}`);
 }
 
-function getFallbackModel(): ModelResult {
-  if (process.env.OPENAI_API_KEY) {
-    return {
-      model: aiSdkOpenAi(
-        process.env.OPENAI_MODEL ||
-          AI_DEFAULT_MODEL,
-      ),
-      providerLabel: 'GPT fallback',
-      agent: 'openai',
-    };
-  }
+function getAvailableFallbackModels(
+  excludedAgent?: Agent,
+): ModelResult[] {
+  const candidates: ModelResult[] = [];
 
-  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-    return {
-      model: google(
-        process.env.GOOGLE_MODEL ||
-          'gemini-2.5-flash',
-      ) as any,
-      providerLabel: 'Gemini fallback',
-      agent: 'gemini',
-    };
-  }
-
-  if (
-    process.env.ANTHROPIC_API_KEY ||
-    process.env.CLAUDE_API_KEY ||
-    process.env.ANTHROPIC_AUTH_TOKEN
-  ) {
-    return {
-      model:
-        getAnthropicProvider()(
-          getAnthropicPrimaryModelId(),
-        ) as any,
-      providerLabel: 'Claude fallback',
-      agent: 'claude',
-    };
-  }
-
-  if (process.env.MISTRAL_API_KEY) {
-    return {
-      model: mistral(
-        process.env.MISTRAL_MODEL ||
-          'mistral-small-latest',
-      ) as any,
-      providerLabel: 'Mistral fallback',
-      agent: 'mistral',
-    };
-  }
-
-  if (process.env.XAI_API_KEY) {
-    return {
-      model: xai(
-        process.env.XAI_MODEL ||
-          'grok-3',
-      ) as any,
-      providerLabel: 'Grok fallback',
-      agent: 'grok',
-    };
-  }
-
-  throw new Error(
-    'Nie je nastavený žiadny AI provider. Doplň aspoň jeden API kľúč.',
+  // Predvolené poradie uprednostňuje poskytovateľov, ktorí sú vhodní ako
+  // rýchla technická záloha pri 429/503, preťažení alebo timeoute.
+  // Poradie je možné zmeniť cez AI_FALLBACK_ORDER, napr.:
+  // AI_FALLBACK_ORDER=mistral,grok,openai,gemini,claude
+  const requestedOrder = uniqueArray(
+    String(
+      process.env.AI_FALLBACK_ORDER ||
+        'mistral,grok,openai,gemini,claude',
+    )
+      .split(',')
+      .map((value) => value.trim().toLowerCase()),
+  ).filter((value): value is Agent =>
+    ['openai', 'claude', 'gemini', 'grok', 'mistral'].includes(value),
   );
+
+  const factories: Record<Agent, () => ModelResult | null> = {
+    openai: () =>
+      process.env.OPENAI_API_KEY
+        ? {
+            model: aiSdkOpenAi(
+              process.env.OPENAI_MODEL ||
+                AI_DEFAULT_MODEL,
+            ),
+            providerLabel: 'GPT fallback',
+            agent: 'openai',
+          }
+        : null,
+    gemini: () =>
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY
+        ? {
+            model: google(
+              process.env.GOOGLE_MODEL ||
+                'gemini-2.5-flash',
+            ) as any,
+            providerLabel: 'Gemini fallback',
+            agent: 'gemini',
+          }
+        : null,
+    claude: () =>
+      process.env.ANTHROPIC_API_KEY ||
+      process.env.CLAUDE_API_KEY ||
+      process.env.ANTHROPIC_AUTH_TOKEN
+        ? {
+            model:
+              getAnthropicProvider()(
+                getAnthropicPrimaryModelId(),
+              ) as any,
+            providerLabel: 'Claude fallback',
+            agent: 'claude',
+          }
+        : null,
+    mistral: () =>
+      process.env.MISTRAL_API_KEY
+        ? {
+            model: mistral(
+              process.env.MISTRAL_MODEL ||
+                'mistral-small-latest',
+            ) as any,
+            providerLabel: 'Mistral fallback',
+            agent: 'mistral',
+          }
+        : null,
+    grok: () =>
+      process.env.XAI_API_KEY
+        ? {
+            model: xai(
+              process.env.XAI_MODEL ||
+                'grok-3',
+            ) as any,
+            providerLabel: 'Grok fallback',
+            agent: 'grok',
+          }
+        : null,
+  };
+
+  for (const candidateAgent of requestedOrder) {
+    if (candidateAgent === excludedAgent) continue;
+
+    try {
+      const candidate = factories[candidateAgent]();
+      if (candidate) candidates.push(candidate);
+    } catch (error) {
+      console.warn('CHAT_FALLBACK_MODEL_INIT_ERROR:', {
+        candidateAgent,
+        reason: getErrorMessage(error),
+      });
+    }
+  }
+
+  return candidates;
 }
 
 let openAiResponsesClient: OpenAI | null =
@@ -7148,6 +7164,9 @@ function isRetryableProviderError(error: unknown) {
     message.includes('timed out') ||
     message.includes('abort') ||
     message.includes('overloaded') ||
+    message.includes('high demand') ||
+    message.includes('503') ||
+    message.includes('service unavailable') ||
     message.includes('529') ||
     message.includes('429') ||
     message.includes('rate limit') ||
@@ -8385,6 +8404,7 @@ async function createJsonResponse({
   nativeAttachmentFileNames = [],
   retryModel,
   retryProviderLabel,
+  retryProviderAgent,
   attachmentWarnings = [],
   ignoredAttachmentNames = [],
   unreadAttachmentNames = [],
@@ -8416,6 +8436,7 @@ async function createJsonResponse({
   nativeAttachmentFileNames?: string[];
   retryModel?: ModelResult['model'];
   retryProviderLabel?: string;
+  retryProviderAgent?: Agent;
   attachmentWarnings?: string[];
   ignoredAttachmentNames?: string[];
   unreadAttachmentNames?: string[];
@@ -8482,8 +8503,9 @@ async function createJsonResponse({
   const generateWithModel = async (
     selectedModel: ModelResult['model'],
     timeoutMs: number,
+    selectedAgent: Agent | undefined = providerAgent,
   ) => {
-    if (providerAgent === 'openai') {
+    if (selectedAgent === 'openai') {
       return await generateOpenAiResponsesText({
         systemPrompt,
         normalizedMessages,
@@ -8515,6 +8537,7 @@ async function createJsonResponse({
   const generateLongTranslation = async (
     selectedModel: ModelResult['model'],
     timeoutMs: number,
+    selectedAgent: Agent | undefined = providerAgent,
   ) => {
     const units = buildTranslationUnits({
       extractedFiles,
@@ -8559,7 +8582,7 @@ async function createJsonResponse({
           },
         ];
 
-        if (providerAgent === 'openai') {
+        if (selectedAgent === 'openai') {
           translated[index] = await generateOpenAiResponsesText({
             systemPrompt: chunkSystemPrompt,
             normalizedMessages: chunkMessage,
@@ -8620,10 +8643,12 @@ async function createJsonResponse({
         ? await generateLongTranslation(
             model,
             PROVIDER_PRIMARY_TIMEOUT_MS,
+            providerAgent,
           )
         : await generateWithModel(
             model,
             PROVIDER_PRIMARY_TIMEOUT_MS,
+            providerAgent,
           );
   } catch (primaryGenerationError) {
     if (
@@ -8653,10 +8678,12 @@ async function createJsonResponse({
         ? await generateLongTranslation(
             retryModel,
             PROVIDER_RETRY_TIMEOUT_MS,
+            retryProviderAgent,
           )
         : await generateWithModel(
             retryModel,
             PROVIDER_RETRY_TIMEOUT_MS,
+            retryProviderAgent,
           );
     resolvedProviderLabel =
       retryProviderLabel ||
@@ -10610,6 +10637,8 @@ ${
     // =====================================================
     // MODEL
     // =====================================================
+    let structuredRetryWasConfigured = false;
+
     try {
       const primary = getModelByAgent(agent);
 
@@ -10622,10 +10651,13 @@ ${
         module === 'planning' ||
         module === 'emails'
       ) {
-        const claudeRetry =
-          agent === 'claude'
-            ? getClaudeRetryModel()
-            : null;
+        const providerRetry =
+          getAvailableFallbackModels(
+            agent,
+          )[0] || null;
+
+        structuredRetryWasConfigured =
+          Boolean(providerRetry);
 
         const executeStructuredResponse = () =>
           createJsonResponse({
@@ -10659,9 +10691,11 @@ ${
             nativeAttachmentFileNames:
               nativeAttachmentBundle.fileNames,
             retryModel:
-              claudeRetry?.model,
+              providerRetry?.model,
             retryProviderLabel:
-              claudeRetry?.providerLabel,
+              providerRetry?.providerLabel,
+            retryProviderAgent:
+              providerRetry?.agent,
             attachmentWarnings,
             ignoredAttachmentNames,
             unreadAttachmentNames,
@@ -10718,18 +10752,22 @@ ${
       }
 
       if (
-        !isModelNotFoundError(primaryError) &&
-        !(
-          agent === 'claude' &&
-          isRetryableProviderError(
-            primaryError,
-          )
+        structuredRetryWasConfigured ||
+        !isRetryableProviderError(
+          primaryError,
         )
       ) {
         throw primaryError;
       }
 
-      const fallback = getFallbackModel();
+      const fallback =
+        getAvailableFallbackModels(
+          agent,
+        )[0];
+
+      if (!fallback) {
+        throw primaryError;
+      }
 
       const fallbackSystemPrompt = isStrictNoAcademicTailModule(module)
         ? finalSystemPrompt

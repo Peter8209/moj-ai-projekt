@@ -26,6 +26,7 @@ type PlanningTaskStatus =
   | "not-applicable";
 
 type PlanningWorkType =
+  | "short"
   | "seminar"
   | "bachelor"
   | "master"
@@ -73,8 +74,28 @@ type SavedProfile = {
   practicalPart?: string;
   scientificContribution?: string;
   sourcesRequirement?: string;
+
+  targetPages?: number | string;
+  pageCount?: number | string;
+  pages?: number | string;
+  minPages?: number | string;
+  maxPages?: number | string;
+  recommendedLength?: string;
+  pageRange?: string;
+
   keywords?: string[];
   keywordsList?: string[];
+  schema?: {
+    label?: string;
+    description?: string;
+    recommendedLength?: string;
+    pageRange?: string;
+    targetPages?: number | string;
+    pageCount?: number | string;
+    pages?: number | string;
+    minPages?: number | string;
+    maxPages?: number | string;
+  };
 };
 
 type PlanningRequest = {
@@ -233,6 +254,7 @@ const STATUS_VALUES = new Set<PlanningTaskStatus>([
 ]);
 
 const WORK_TYPES = new Set<PlanningWorkType>([
+  "short",
   "seminar",
   "bachelor",
   "master",
@@ -291,6 +313,21 @@ type PlanningDefaults = {
 };
 
 const PLANNING_DEFAULTS: Record<PlanningWorkType, PlanningDefaults> = {
+  short: {
+    title: "Short academic paper",
+    targetPages: 6,
+    hoursPerDay: 1,
+    daysPerWeek: 4,
+    availableWeekdays: [1, 2, 3, 4, 5],
+    preferredTime: "evening",
+    maxBlockHours: 1,
+    priorities: [
+      "Meet the submission deadline",
+      "Complete all required sections",
+      "Verify citations and formatting",
+      "Create a reserve before submission",
+    ],
+  },
   seminar: {
     title: "Seminar paper",
     targetPages: 15,
@@ -371,17 +408,111 @@ const PLANNING_DEFAULTS: Record<PlanningWorkType, PlanningDefaults> = {
   },
 };
 
+function parsePositivePlanningInteger(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const parsed = Math.trunc(value);
+    return parsed > 0 ? Math.min(parsed, 2_000) : null;
+  }
+
+  if (typeof value !== "string") return null;
+
+  const normalized = value.trim();
+  if (!/^\d{1,4}$/.test(normalized)) return null;
+
+  const parsed = Number(normalized);
+  return parsed > 0 ? Math.min(parsed, 2_000) : null;
+}
+
+function parsePlanningPagesFromText(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+
+  const normalized = value
+    .replace(/\u00a0/g, " ")
+    .replace(/[—−]/g, "–")
+    .trim();
+
+  const rangeMatch = normalized.match(
+    /(\d{1,4})\s*(?:-|–|až|az|to)\s*(\d{1,4})\s*(?:str(?:ana|any|án|ánok)?\.?|page(?:s)?|s\.)/i,
+  );
+
+  if (rangeMatch) {
+    const maximum = Math.max(Number(rangeMatch[1]), Number(rangeMatch[2]));
+    return maximum > 0 ? Math.min(maximum, 2_000) : null;
+  }
+
+  const singleMatch = normalized.match(
+    /(\d{1,4})\s*(?:str(?:ana|any|án|ánok)?\.?|page(?:s)?|s\.)/i,
+  );
+
+  if (!singleMatch) return null;
+
+  const parsed = Number(singleMatch[1]);
+  return parsed > 0 ? Math.min(parsed, 2_000) : null;
+}
+
+function getProfileTargetPages(profile?: SavedProfile | null): number | null {
+  if (!profile) return null;
+
+  const directCandidates: unknown[] = [
+    profile.targetPages,
+    profile.pageCount,
+    profile.pages,
+    profile.maxPages,
+    profile.minPages,
+    profile.schema?.targetPages,
+    profile.schema?.pageCount,
+    profile.schema?.pages,
+    profile.schema?.maxPages,
+    profile.schema?.minPages,
+  ];
+
+  for (const candidate of directCandidates) {
+    const parsed = parsePositivePlanningInteger(candidate);
+    if (parsed) return parsed;
+  }
+
+  const descriptiveCandidates: unknown[] = [
+    profile.recommendedLength,
+    profile.pageRange,
+    profile.schema?.recommendedLength,
+    profile.schema?.pageRange,
+  ];
+
+  for (const candidate of descriptiveCandidates) {
+    const parsed = parsePlanningPagesFromText(candidate);
+    if (parsed) return parsed;
+  }
+
+  return null;
+}
+
 function inferPlanningWorkType(
   value: unknown,
   profile?: SavedProfile | null,
 ): PlanningWorkType {
-  const profileType = [profile?.type, profile?.level]
+  const profileType = [
+    profile?.schema?.label,
+    profile?.type,
+    profile?.level,
+  ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
 
-  // Aktívny profil je autoritatívny. Frontend nesmie zmeniť druh práce
-  // samostatným prepínačom, ak je v profile uložený konkrétny typ práce.
+  const profileTargetPages = getProfileTargetPages(profile);
+  const isShortWork =
+    profileTargetPages !== null && profileTargetPages <= 10;
+
+  // Aktívny profil je autoritatívny. Krátka práca a rozsah uložený v profile
+  // musia mať prednosť aj vtedy, keď pole level obsahuje všeobecnú úroveň
+  // napríklad "bakalárska".
+  if (
+    isShortWork ||
+    /krát|krat|short|brief|kurz|krót|krot|rövid|rovid/.test(profileType)
+  ) {
+    return "short";
+  }
+
   if (profileType.includes("semin")) return "seminar";
   if (profileType.includes("bak") || profileType.includes("bachelor")) {
     return "bachelor";
@@ -761,11 +892,13 @@ function normalizePlanningRequest(value: unknown): PlanningRequest {
         .filter((date) => Boolean(parseIsoDateUtc(date)))
     : [];
 
+  const profileTargetPages = getProfileTargetPages(activeProfile);
   const requestedTargetPages = Math.trunc(safeNumber(root.targetPages, 0));
   const targetPages =
-    requestedTargetPages > 0
+    profileTargetPages ??
+    (requestedTargetPages > 0
       ? requestedTargetPages
-      : defaults.targetPages;
+      : defaults.targetPages);
 
   const requestedCompletedPages = Math.trunc(
     safeNumber(root.completedPages, 0),
@@ -896,7 +1029,7 @@ function createLegacyPlanningRequest(value: unknown): PlanningRequest {
     workType: "other",
     language: profile?.workLanguage || profile?.language || "sk",
     deadline,
-    targetPages: 30,
+    targetPages: getProfileTargetPages(profile) ?? 30,
     completedPages: 0,
     currentStatus: statuses,
     capacity: {
@@ -1112,7 +1245,20 @@ function buildProfileBlock(profile?: SavedProfile | null): string {
   return [
     `Title: ${profile.title || "not specified"}`,
     `Topic: ${profile.topic || "not specified"}`,
-    `Type: ${profile.type || profile.level || "not specified"}`,
+    `Type: ${
+      profile.schema?.label ||
+      profile.type ||
+      profile.level ||
+      "not specified"
+    }`,
+    `Recommended length: ${
+      profile.schema?.recommendedLength ||
+      profile.recommendedLength ||
+      profile.schema?.pageRange ||
+      profile.pageRange ||
+      getProfileTargetPages(profile) ||
+      "not specified"
+    }`,
     `Field: ${profile.field || "not specified"}`,
     `Expertise: ${
       profile.expertise ||

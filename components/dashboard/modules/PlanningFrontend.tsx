@@ -196,6 +196,7 @@ type PlanningTaskStatus =
   | "not-applicable";
 
 type PlanningWorkType =
+  | "short"
   | "seminar"
   | "bachelor"
   | "master"
@@ -338,6 +339,26 @@ const PLANNING_WORK_PRESETS: Record<
   PlanningWorkType,
   PlanningWorkPreset
 > = {
+  short: {
+    label: "Krátka práca",
+    shortLabel: "Krátka práca",
+    description:
+      "Stručný harmonogram pre odbornú krátku prácu, esej alebo zadanie s rozsahom načítaným priamo z profilu.",
+    targetPages: 6,
+    hoursPerDay: 1,
+    daysPerWeek: 4,
+    maxBlockHours: 1,
+    preferredTime: "evening",
+    availableWeekdays: [1, 2, 3, 4, 5],
+    priorities: [
+      "Dodržať termín odovzdania",
+      "Spracovať všetky povinné časti",
+      "Skontrolovať citácie a formátovanie",
+      "Vytvoriť rezervu pred odovzdaním",
+    ],
+    accentClassName:
+      "from-cyan-500/20 via-violet-500/10 to-transparent border-cyan-300/30",
+  },
   seminar: {
     label: "Seminárna práca",
     shortLabel: "Seminárna",
@@ -449,17 +470,150 @@ function getPlanningWorkPreset(
   return PLANNING_WORK_PRESETS[workType] || PLANNING_WORK_PRESETS.other;
 }
 
+function parsePlanningPositiveInteger(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const parsed = Math.trunc(value);
+    return parsed > 0 ? Math.min(parsed, 2_000) : null;
+  }
+
+  if (typeof value !== "string") return null;
+
+  const normalized = value.trim();
+  if (!/^\d{1,4}$/.test(normalized)) return null;
+
+  const parsed = Number(normalized);
+  return parsed > 0 ? Math.min(parsed, 2_000) : null;
+}
+
+function parsePlanningPagesFromText(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+
+  const normalized = value
+    .replace(/\u00a0/g, " ")
+    .replace(/[—−]/g, "–")
+    .trim();
+
+  const rangeMatch = normalized.match(
+    /(\d{1,4})\s*(?:-|–|až|az|to)\s*(\d{1,4})\s*(?:str(?:ana|any|án|ánok)?\.?|page(?:s)?|s\.)/i,
+  );
+
+  if (rangeMatch) {
+    const first = Number(rangeMatch[1]);
+    const second = Number(rangeMatch[2]);
+    const maximum = Math.max(first, second);
+
+    return maximum > 0 ? Math.min(maximum, 2_000) : null;
+  }
+
+  const singleMatch = normalized.match(
+    /(\d{1,4})\s*(?:str(?:ana|any|án|ánok)?\.?|page(?:s)?|s\.)/i,
+  );
+
+  if (!singleMatch) return null;
+
+  const parsed = Number(singleMatch[1]);
+  return parsed > 0 ? Math.min(parsed, 2_000) : null;
+}
+
+function getPlanningTargetPagesFromProfile(
+  profile?: SavedProfile | null,
+): number | null {
+  if (!profile) return null;
+
+  const directCandidates: unknown[] = [
+    profile.targetPages,
+    profile.pageCount,
+    profile.pages,
+    profile.maxPages,
+    profile.minPages,
+    profile.schema?.targetPages,
+    profile.schema?.pageCount,
+    profile.schema?.pages,
+    profile.schema?.maxPages,
+    profile.schema?.minPages,
+  ];
+
+  for (const candidate of directCandidates) {
+    const parsed = parsePlanningPositiveInteger(candidate);
+    if (parsed) return parsed;
+  }
+
+  const descriptiveCandidates: unknown[] = [
+    profile.recommendedLength,
+    profile.pageRange,
+    profile.schema?.recommendedLength,
+    profile.schema?.pageRange,
+  ];
+
+  for (const candidate of descriptiveCandidates) {
+    const parsed = parsePlanningPagesFromText(candidate);
+    if (parsed) return parsed;
+  }
+
+  return null;
+}
+
+function getPlanningProfileRangeLabel(
+  profile: SavedProfile | null,
+  fallbackPages: number,
+): string {
+  const candidates = [
+    profile?.recommendedLength,
+    profile?.pageRange,
+    profile?.schema?.recommendedLength,
+    profile?.schema?.pageRange,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+
+    const normalized = candidate
+      .replace(/\u00a0/g, " ")
+      .replace(/[—−]/g, "–")
+      .trim();
+
+    const rangeMatch = normalized.match(
+      /(\d{1,4})\s*(?:-|–|až|az|to)\s*(\d{1,4})\s*(?:str(?:ana|any|án|ánok)?\.?|page(?:s)?|s\.)/i,
+    );
+
+    if (rangeMatch) {
+      return `${rangeMatch[1]}–${rangeMatch[2]} strán`;
+    }
+
+    const singleMatch = normalized.match(
+      /(\d{1,4})\s*(?:str(?:ana|any|án|ánok)?\.?|page(?:s)?|s\.)/i,
+    );
+
+    if (singleMatch) {
+      return `${singleMatch[1]} strán`;
+    }
+  }
+
+  return `${fallbackPages} strán`;
+}
+
 function inferPlanningWorkTypeFromProfile(
   profile?: SavedProfile | null,
 ): PlanningWorkType {
   const profileType = [
+    profile?.schema?.label,
     profile?.type,
     profile?.level,
-    profile?.schema?.label,
   ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+
+  const profileTargetPages = getPlanningTargetPagesFromProfile(profile);
+  const isShortWork =
+    profileTargetPages !== null && profileTargetPages <= 10;
+
+  if (
+    isShortWork ||
+    /krát|krat|short|brief|kurz|krót|krot|rövid|rovid/.test(profileType)
+  ) {
+    return "short";
+  }
 
   if (profileType.includes("semin")) return "seminar";
   if (profileType.includes("bak") || profileType.includes("bachelor")) {
@@ -1963,6 +2117,20 @@ type SavedProfile = {
   caseStudy?: string;
   reflection?: string;
   sourcesRequirement?: string;
+
+  /**
+   * Rozsah práce môže byť v profile uložený ako číslo alebo textový interval,
+   * napríklad 6 alebo "4–6 strán". Plánovanie používa hornú hranicu intervalu
+   * ako cieľový počet strán a v rozhraní zachová pôvodný rozsah.
+   */
+  targetPages?: number | string;
+  pageCount?: number | string;
+  pages?: number | string;
+  minPages?: number | string;
+  maxPages?: number | string;
+  recommendedLength?: string;
+  pageRange?: string;
+
   keywordsList?: string[];
   keywords?: string[];
   savedAt?: string;
@@ -1970,6 +2138,12 @@ type SavedProfile = {
     label?: string;
     description?: string;
     recommendedLength?: string;
+    pageRange?: string;
+    targetPages?: number | string;
+    pageCount?: number | string;
+    pages?: number | string;
+    minPages?: number | string;
+    maxPages?: number | string;
     structure?: string[];
     requiredSections?: string[];
     aiInstruction?: string;
@@ -5633,7 +5807,7 @@ export default function PlanningFrontend(
     useState<PlanningWorkType>("other");
   const [planningDeadline, setPlanningDeadline] = useState("");
   const [planningDeadlineTime, setPlanningDeadlineTime] = useState("23:59");
-  const [planningTargetPages, setPlanningTargetPages] = useState(50);
+  const [planningTargetPages, setPlanningTargetPages] = useState(6);
   const [planningCompletedPages, setPlanningCompletedPages] = useState(0);
   const [planningHoursPerDay, setPlanningHoursPerDay] = useState(2);
   const [planningDaysPerWeek, setPlanningDaysPerWeek] = useState(5);
@@ -5681,8 +5855,10 @@ export default function PlanningFrontend(
    */
   useEffect(() => {
     const preset = getPlanningWorkPreset(planningWorkType);
+    const profileTargetPages =
+      getPlanningTargetPagesFromProfile(activeProfile) ?? preset.targetPages;
 
-    setPlanningTargetPages(preset.targetPages);
+    setPlanningTargetPages(profileTargetPages);
     setPlanningCompletedPages(0);
     setPlanningHoursPerDay(preset.hoursPerDay);
     setPlanningDaysPerWeek(preset.daysPerWeek);
@@ -5697,11 +5873,21 @@ export default function PlanningFrontend(
     // Plánovanie už nepoužíva všeobecný textový vstup modulu.
     setInput("");
     setSecondaryInput("");
-  }, [planningWorkType]);
+  }, [activeProfile, planningWorkType]);
 
   const planningPreset = useMemo(
     () => getPlanningWorkPreset(planningWorkType),
     [planningWorkType],
+  );
+
+  const planningProfileWorkLabel = useMemo(
+    () => activeProfile?.schema?.label?.trim() || planningPreset.label,
+    [activeProfile, planningPreset.label],
+  );
+
+  const planningProfileRangeLabel = useMemo(
+    () => getPlanningProfileRangeLabel(activeProfile, planningTargetPages),
+    [activeProfile, planningTargetPages],
   );
 
   const planningPreview = useMemo(() => {
@@ -6459,7 +6645,10 @@ export default function PlanningFrontend(
       setPlanningWorkType(profileWorkType);
       setPlanningDeadline("");
       setPlanningDeadlineTime("23:59");
-      setPlanningTargetPages(defaultPreset.targetPages);
+      setPlanningTargetPages(
+        getPlanningTargetPagesFromProfile(activeProfile) ??
+          defaultPreset.targetPages,
+      );
       setPlanningCompletedPages(0);
       setPlanningHoursPerDay(defaultPreset.hoursPerDay);
       setPlanningDaysPerWeek(defaultPreset.daysPerWeek);
@@ -7789,6 +7978,10 @@ Text emailu:
       if (requestedModule === "planning") {
         const profileWorkType = inferPlanningWorkTypeFromProfile(profileForApi);
         const preset = getPlanningWorkPreset(profileWorkType);
+        const resolvedTargetPages =
+          getPlanningTargetPagesFromProfile(profileForApi) ??
+          planningTargetPages ??
+          preset.targetPages;
         const resolvedPlanningTitle =
           profileForApi?.title ||
           profileForApi?.topic ||
@@ -7826,7 +8019,7 @@ Text emailu:
           workLanguage: finalWorkLanguage || systemLanguage,
           deadline: planningDeadline,
           deadlineTime: "23:59",
-          targetPages: preset.targetPages,
+          targetPages: resolvedTargetPages,
           completedPages: 0,
           currentStatus: createDefaultPlanningStatus(),
           capacity: {
@@ -10034,66 +10227,9 @@ Text emailu:
             {activeModule === "planning" ? (
               <section
                 className="overflow-visible rounded-[34px] border border-violet-300/20 bg-gradient-to-br from-[#0b1020] via-[#080b15] to-[#05070c] shadow-2xl shadow-violet-950/30"
-                aria-labelledby={`dashboard-module-title-${activeModule}`}
+                aria-label="Plánovanie akademickej práce"
                 data-module-heading={activeModule}
               >
-                <div className="relative overflow-hidden border-b border-white/10 px-5 py-6 sm:px-7 lg:px-9">
-                  <div
-                    className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.22),transparent_42%),radial-gradient(circle_at_top_right,rgba(34,211,238,0.12),transparent_38%)]"
-                    aria-hidden="true"
-                  />
-
-                  <div className="relative flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-                    <div className="flex min-w-0 items-start gap-4">
-                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-violet-300/25 bg-violet-500/15 text-violet-100 shadow-xl shadow-violet-950/30">
-                        <CalendarDays className="h-7 w-7" aria-hidden="true" />
-                      </div>
-
-                      <div className="min-w-0">
-                        <p className="text-[11px] font-black uppercase tracking-[0.24em] text-violet-300">
-                          Academic Project Planner
-                        </p>
-                        <h3
-                          id={`dashboard-module-title-${activeModule}`}
-                          className="mt-1 text-2xl font-black tracking-tight text-white sm:text-3xl"
-                        >
-                          Profesionálny plán akademickej práce
-                        </h3>
-                        <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-400">
-                          Druh práce, cieľový rozsah a odborné nastavenia sa
-                          automaticky načítajú z aktívneho profilu. Vyberte iba
-                          termín odovzdania a Zedpera rozloží všetky etapy až do
-                          zvoleného dátumu vrátane zrýchleného krátkeho plánu.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="grid min-w-[270px] grid-cols-2 gap-2 rounded-3xl border border-white/10 bg-black/25 p-3 backdrop-blur">
-                      <div className="rounded-2xl bg-white/[0.045] p-3">
-                        <p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">
-                          Druh práce
-                        </p>
-                        <p className="mt-1 text-lg font-black text-white">
-                          <span className="text-sm">
-                            {planningPreset.shortLabel}
-                          </span>
-                        </p>
-                      </div>
-                      <div className="rounded-2xl bg-white/[0.045] p-3">
-                        <p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">
-                          Cieľový rozsah
-                        </p>
-                        <p className="mt-1 text-lg font-black text-white">
-                          {planningPreset.targetPages}
-                          <span className="ml-1 text-xs text-slate-400">
-                            strán
-                          </span>
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
                 <div className="p-5 sm:p-7 lg:p-9">
                   <div className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_390px]">
                     <div className="space-y-7">
@@ -10118,7 +10254,7 @@ Text emailu:
                               Načítané z profilu
                             </p>
                             <p className="mt-1 text-sm font-black text-white">
-                              {planningPreset.label}
+                              {planningProfileWorkLabel}
                             </p>
                             <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-400">
                               {activeProfile?.title ||
@@ -10172,7 +10308,7 @@ Text emailu:
                               Automatická konfigurácia
                             </p>
                             <h4 className="text-base font-black text-white">
-                              {planningPreset.label}
+                              {planningProfileWorkLabel}
                             </h4>
                           </div>
                         </div>
@@ -10191,7 +10327,7 @@ Text emailu:
                             ],
                             [
                               "Cieľový rozsah",
-                              `${planningPreset.targetPages} strán`,
+                              planningProfileRangeLabel,
                             ],
                             [
                               "Termín",

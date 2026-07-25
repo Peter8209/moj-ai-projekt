@@ -4579,6 +4579,19 @@ const replaceSelectedText = (
       setCanvasText(next);
       return next;
     });
+
+    setPopupData((current) =>
+      current
+        ? {
+            ...current,
+            output:
+              current.output.slice(0, selection.start) +
+              cleaned +
+              current.output.slice(selection.end),
+            sources: current.sources,
+          }
+        : current,
+    );
   } else {
     setCanvasText((prev) => {
       const next =
@@ -4593,6 +4606,78 @@ const replaceSelectedText = (
   selectedTextStateRef.current = null;
   setSelectedTextState(null);
 };
+
+
+type ProtectedSelectedCitation = {
+  placeholder: string;
+  value: string;
+};
+
+function protectSelectedTextCitations(value: string) {
+  const citations: ProtectedSelectedCitation[] = [];
+
+  const citationPattern =
+    /\b[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'-]+(?:\s+(?:et\s+al\.?|a\s+kol\.?))?\s*\((?:18|19|20)\d{2}[a-z]?\)|\((?=[^()\n]{0,240}\b(?:18|19|20)\d{2}[a-z]?\b)[^()\n]{2,260}\)|\[(?:\d{1,3})(?:\s*[,;–-]\s*\d{1,3})*\]/gi;
+
+  const protectedText = String(value || '').replace(
+    citationPattern,
+    (citation) => {
+      const placeholder = `[[ZEDPERA_CITATION_${citations.length + 1}]]`;
+
+      citations.push({
+        placeholder,
+        value: citation,
+      });
+
+      return placeholder;
+    },
+  );
+
+  return {
+    protectedText,
+    citations,
+  };
+}
+
+function stripSourceSectionsFromSelectedEdit(value: string) {
+  const cleaned = cleanAiOutput(value)
+    .replace(/^\s*={0,3}\s*VÝSTUP\s*={0,3}\s*:?[\s\n]*/i, '')
+    .replace(/^\s*VÝSTUP\s*:\s*/i, '')
+    .trim();
+
+  const sourceHeadingPattern =
+    /(?:^|\n)\s*(?:={0,3}\s*)?(?:Prim[aá]rne\s+zdroje|Sekund[aá]rne\s+zdroje|Použit[eé]\s+zdroje(?:\s+a\s+autori)?|Zdroje(?:\s+a\s+autori)?|ANALÝZA|SKÓRE|ODPORÚČANIA)(?:\s*={0,3})?\s*:?(?:\n|$)/i;
+
+  const sourceMatch = sourceHeadingPattern.exec(cleaned);
+
+  return cleanAiOutput(
+    sourceMatch && typeof sourceMatch.index === 'number'
+      ? cleaned.slice(0, sourceMatch.index)
+      : cleaned,
+  );
+}
+
+function restoreSelectedTextCitations(
+  value: string,
+  citations: ProtectedSelectedCitation[],
+) {
+  let restored = stripSourceSectionsFromSelectedEdit(value);
+  const missingCitations: string[] = [];
+
+  for (const citation of citations) {
+    if (restored.includes(citation.placeholder)) {
+      restored = restored.split(citation.placeholder).join(citation.value);
+    } else if (!restored.includes(citation.value)) {
+      missingCitations.push(citation.value);
+    }
+  }
+
+  if (missingCitations.length > 0) {
+    restored = `${restored.trim()} ${missingCitations.join(' ')}`.trim();
+  }
+
+  return cleanAiOutput(restored);
+}
 
 const getEditInstruction = (
   mode: 'academic' | 'shorten' | 'expand' | 'grammar',
@@ -4626,6 +4711,11 @@ const editSelectedText = async (
     return;
   }
 
+  const {
+    protectedText: protectedSelectedText,
+    citations: protectedCitations,
+  } = protectSelectedTextCitations(selectedText);
+
   // Úprava označeného textu je nová AI operácia.
   // Staré čakajúce hlášky sa zrušia a nová sa môže zobraziť až po 30 sekundách.
   clearSystemError();
@@ -4648,7 +4738,7 @@ const editSelectedText = async (
 
     formData.append('editSelectedTextOnly', 'true');
     formData.append('editMode', mode);
-    formData.append('selectedText', selectedText);
+    formData.append('selectedText', protectedSelectedText);
 
     formData.append('requireSourceList', 'false');
     formData.append('allowAiKnowledgeFallback', 'true');
@@ -4663,9 +4753,13 @@ const editSelectedText = async (
           content: `${instruction}
 
 OZNAČENÝ TEXT:
-${selectedText}
+${protectedSelectedText}
 
-Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odporúčania ani zdroje.`,
+ZÁVÄZNÉ PRAVIDLÁ:
+- Vráť iba finálny upravený text.
+- Nevypisuj Primárne zdroje, Sekundárne zdroje, použitú literatúru, analýzu, skóre ani odporúčania.
+- Všetky značky vo formáte [[ZEDPERA_CITATION_N]] zachovaj presne a na logicky rovnakom mieste.
+- Značky neprepisuj, neodstraňuj ani nepridávaj.`,
         },
       ]),
     );
@@ -4751,7 +4845,10 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
       }
     }
 
-    const cleanedEditedText = cleanAiOutput(editedText);
+    const cleanedEditedText = restoreSelectedTextCitations(
+      editedText,
+      protectedCitations,
+    );
 
     if (!cleanedEditedText) {
       showSystemError(
@@ -4974,7 +5071,9 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
                           >
                             <div className="font-black text-white">{item.name}</div>
                             <div className="mt-1 leading-5 text-slate-300">
-                              {item.message}
+                              {item.status === 'waiting'
+                                ? 'Čaká sa na extrakciu obsahu prílohy.'
+                                : 'Načítavam obsah prílohy.'}
                             </div>
                           </div>
                         ))}

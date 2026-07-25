@@ -908,6 +908,88 @@ function isStrictNoAcademicTailModule(module: ModuleKey) {
   return module === 'translation' || module === 'emails' || module === 'planning';
 }
 
+type SelectedTextEditMode =
+  | 'academic'
+  | 'shorten'
+  | 'expand'
+  | 'grammar';
+
+function normalizeSelectedTextEditMode(
+  value: unknown,
+): SelectedTextEditMode {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
+
+  if (
+    normalized === 'shorten' ||
+    normalized === 'expand' ||
+    normalized === 'grammar'
+  ) {
+    return normalized;
+  }
+
+  return 'academic';
+}
+
+function buildSelectedTextEditSystemPrompt({
+  mode,
+  outputLanguage,
+}: {
+  mode: SelectedTextEditMode;
+  outputLanguage: AppLanguage;
+}) {
+  const modeInstruction: Record<
+    SelectedTextEditMode,
+    string
+  > = {
+    academic:
+      'Uprav text akademicky, odborne, plynulo a štylisticky vhodne. Zachovaj pôvodný význam.',
+    shorten:
+      'Skráť text bez straty hlavného významu, odbornej logiky a podstatných informácií.',
+    expand:
+      'Rozšír text odborne a akademicky, ale nepridávaj neoverené fakty ani nové zdroje.',
+    grammar:
+      'Oprav iba gramatiku, štylistiku, interpunkciu a plynulosť textu. Zachovaj pôvodný význam.',
+  };
+
+  return [
+    'Vykonávaš iba lokálnu úpravu označenej časti už existujúceho textu.',
+    modeInstruction[mode],
+    `Výstup vytvor v jazyku: ${getLanguageName(outputLanguage)}.`,
+    '',
+    'ZÁVÄZNÉ PRAVIDLÁ:',
+    '- Vráť iba upravený text bez úvodu, komentára alebo vysvetlenia.',
+    '- Nevytváraj sekcie Primárne zdroje, Sekundárne zdroje, Použité zdroje, Analýza, Skóre ani Odporúčania.',
+    '- Nepridávaj, neodstraňuj ani neprepisuj bibliografické zdroje.',
+    '- Nepridávaj nové citácie ani nové faktické tvrdenia.',
+    '- Všetky značky vo formáte [[ZEDPERA_CITATION_N]] zachovaj presne, bez zmeny a na logicky rovnakom mieste.',
+    '- Nevracaj názvy príloh, technické údaje, počet spracovaných príloh ani informácie o extrakcii.',
+  ].join('\n');
+}
+
+function cleanSelectedTextEditOutput(value: string) {
+  let output = normalizeText(value || '')
+    .replace(/```[a-zA-Z]*\n?/g, '')
+    .replace(/```/g, '')
+    .replace(/^\s*={0,3}\s*VÝSTUP\s*={0,3}\s*:?[\s\n]*/i, '')
+    .replace(/^\s*VÝSTUP\s*:\s*/i, '')
+    .trim();
+
+  const forbiddenTail =
+    /(?:^|\n)\s*(?:={0,3}\s*)?(?:Prim[aá]rne\s+zdroje|Sekund[aá]rne\s+zdroje|Použit[eé]\s+zdroje(?:\s+a\s+autori)?|Zdroje(?:\s+a\s+autori)?|ANALÝZA|SKÓRE|ODPORÚČANIA)(?:\s*={0,3})?\s*:?(?:\n|$)/i;
+  const tailMatch = forbiddenTail.exec(output);
+
+  if (
+    tailMatch &&
+    typeof tailMatch.index === 'number'
+  ) {
+    output = output.slice(0, tailMatch.index);
+  }
+
+  return normalizeText(output);
+}
+
 
 // =====================================================
 // ROBUST REQUEST / ATTACHMENT HELPERS
@@ -5036,7 +5118,7 @@ function getNativeAttachmentReaderModels(): ModelResult[] {
           process.env.ANTHROPIC_ATTACHMENT_MODEL ||
             process.env.ANTHROPIC_MODEL ||
             process.env.CLAUDE_MODEL ||
-            'claude-sonnet-4-6',
+            getAnthropicPrimaryModelId(),
         ) as any,
       providerLabel: 'Claude attachment reader',
     });
@@ -6779,16 +6861,58 @@ function getAnthropicProvider() {
   return cachedAnthropicProvider;
 }
 
+function getOpenAiPrimaryModelId() {
+  const explicitlyConfigured =
+    toCleanString(
+      process.env.OPENAI_RESPONSES_MODEL,
+    ) ||
+    toCleanString(
+      process.env.OPENAI_MODEL,
+    );
+
+  if (
+    explicitlyConfigured &&
+    explicitlyConfigured.toLowerCase() !==
+      'gpt-5.6'
+  ) {
+    return explicitlyConfigured;
+  }
+
+  const configuredDefault =
+    toCleanString(AI_DEFAULT_MODEL);
+
+  // Staršia lokálna konfigurácia používala neplatný názov gpt-5.6.
+  // Pri absencii explicitnej env premennej použijeme verejne dostupný
+  // model podporujúci Responses API.
+  if (
+    configuredDefault &&
+    configuredDefault.toLowerCase() !==
+      'gpt-5.6'
+  ) {
+    return configuredDefault;
+  }
+
+  return 'gpt-5.1';
+}
+
 function getAnthropicPrimaryModelId() {
-  return (
+  const configuredModel =
     toCleanString(
       process.env.ANTHROPIC_MODEL,
     ) ||
     toCleanString(
       process.env.CLAUDE_MODEL,
-    ) ||
-    'claude-sonnet-4-6'
-  );
+    );
+
+  if (
+    configuredModel &&
+    configuredModel.toLowerCase() !==
+      'claude-sonnet-4-6'
+  ) {
+    return configuredModel;
+  }
+
+  return 'claude-sonnet-4-20250514';
 }
 
 function getModelByAgent(agent: Agent): ModelResult {
@@ -6799,8 +6923,7 @@ function getModelByAgent(agent: Agent): ModelResult {
 
     return {
       model: aiSdkOpenAi(
-        process.env.OPENAI_MODEL ||
-          AI_DEFAULT_MODEL,
+        getOpenAiPrimaryModelId(),
       ),
       providerLabel: 'GPT',
       agent: 'openai',
@@ -6893,8 +7016,7 @@ function getAvailableFallbackModels(
       process.env.OPENAI_API_KEY
         ? {
             model: aiSdkOpenAi(
-              process.env.OPENAI_MODEL ||
-                AI_DEFAULT_MODEL,
+              getOpenAiPrimaryModelId(),
             ),
             providerLabel: 'GPT fallback',
             agent: 'openai',
@@ -7067,7 +7189,7 @@ async function generateOpenAiResponsesText({
 
   const response =
     await openAiClient.responses.create({
-      model: AI_DEFAULT_MODEL,
+      model: getOpenAiPrimaryModelId(),
 
       instructions: systemPrompt,
 
@@ -9429,6 +9551,10 @@ export async function POST(req: Request) {
     let useExternalAcademicSources = true;
     let returnExtractedFilesInfo = false;
 
+    let editSelectedTextOnly = false;
+    let editMode: SelectedTextEditMode = 'academic';
+    let selectedText = '';
+
     let clientExtractedText = '';
     let preparedFilesSummary = '';
     let clientDetectedSourcesSummary = '';
@@ -9567,6 +9693,17 @@ if (profile) {
       returnExtractedFilesInfo = asBoolean(
         formData.get('returnExtractedFilesInfo'),
         false,
+      );
+
+      editSelectedTextOnly = asBoolean(
+        formData.get('editSelectedTextOnly'),
+        false,
+      );
+      editMode = normalizeSelectedTextEditMode(
+        formData.get('editMode'),
+      );
+      selectedText = toCleanString(
+        formData.get('selectedText')?.toString(),
       );
 
       preparedFilesMetadata = parseJson<PreparedFileMetadata[]>(
@@ -9756,6 +9893,15 @@ outputLanguage = normalizeAppLanguage(interfaceLanguageFromRequest, 'sk');
         typeof body?.returnExtractedFilesInfo === 'boolean'
           ? body.returnExtractedFilesInfo
           : false;
+
+      editSelectedTextOnly =
+        body?.editSelectedTextOnly === true;
+      editMode = normalizeSelectedTextEditMode(
+        body?.editMode,
+      );
+      selectedText = toCleanString(
+        body?.selectedText,
+      );
 
       preparedFilesMetadata = Array.isArray(body?.preparedFilesMetadata)
         ? body.preparedFilesMetadata
@@ -10155,6 +10301,186 @@ try {
           CHARACTERS_PER_PAGE,
       },
     );
+
+    if (editSelectedTextOnly) {
+      const selectedEditInput = normalizeText(
+        selectedText || lastUserMessage,
+      );
+
+      if (!selectedEditInput) {
+        return jsonSimpleErrorResponse({
+          code: 'MISSING_SELECTED_TEXT',
+          message:
+            'Chýba označený text na úpravu.',
+          detail:
+            'Frontend musí pri lokálnej úprave odoslať pole selectedText.',
+          status: 400,
+          request: req,
+        });
+      }
+
+      const selectedEditSystemPrompt =
+        buildSelectedTextEditSystemPrompt({
+          mode: editMode,
+          outputLanguage,
+        });
+      const selectedEditMessages: ChatMessage[] = [
+        {
+          role: 'user',
+          content: selectedEditInput,
+        },
+      ];
+      const selectedEditOutputTokens =
+        getOutputTokenLimit(
+          pageQuota.pagesRemaining,
+          3000,
+          {
+            isUnlimited:
+              pageQuota.isUnlimited ||
+              pageQuota.isAdmin ||
+              pageQuota.hasUnlimitedAccess,
+          },
+        );
+
+      if (selectedEditOutputTokens <= 0) {
+        throw new PageLimitError();
+      }
+
+      const generateSelectedEdit = async (
+        provider: ModelResult,
+        timeoutMs: number,
+      ) => {
+        if (provider.agent === 'openai') {
+          return await generateOpenAiResponsesText({
+            systemPrompt:
+              selectedEditSystemPrompt,
+            normalizedMessages:
+              selectedEditMessages,
+            maxOutputTokens:
+              selectedEditOutputTokens,
+            tools: [],
+            include: [],
+          });
+        }
+
+        return (
+          await generateText({
+            model: provider.model,
+            system:
+              selectedEditSystemPrompt,
+            messages:
+              selectedEditMessages as any,
+            temperature: 0.1,
+            maxOutputTokens:
+              selectedEditOutputTokens,
+            maxRetries: 0,
+            timeout: {
+              totalMs: timeoutMs,
+              stepMs: timeoutMs,
+            },
+          })
+        ).text || '';
+      };
+
+      const primaryProvider =
+        getModelByAgent(agent);
+      let usedProvider =
+        primaryProvider;
+      let selectedEditOutput = '';
+
+      try {
+        selectedEditOutput =
+          await generateSelectedEdit(
+            primaryProvider,
+            PROVIDER_PRIMARY_TIMEOUT_MS,
+          );
+      } catch (primaryEditError) {
+        const fallbackProvider =
+          getAvailableFallbackModels(
+            agent,
+          )[0];
+
+        if (
+          !fallbackProvider ||
+          !isRetryableProviderError(
+            primaryEditError,
+          )
+        ) {
+          throw primaryEditError;
+        }
+
+        selectedEditOutput =
+          await generateSelectedEdit(
+            fallbackProvider,
+            PROVIDER_RETRY_TIMEOUT_MS,
+          );
+        usedProvider = fallbackProvider;
+      }
+
+      const output =
+        cleanSelectedTextEditOutput(
+          selectedEditOutput,
+        );
+
+      if (!output) {
+        throw new Error(
+          'AI_EMPTY_RESPONSE: AI model nevrátil upravený označený text.',
+        );
+      }
+
+      const promptUsage =
+        await consumeSuccessfulPrompt();
+      const updatedPageQuota =
+        await consumePagesForOutput({
+          text: output,
+          module,
+          requestId: pageRequestId,
+        });
+      const pageUsage =
+        createPageUsagePayload({
+          quota: updatedPageQuota,
+          output,
+          requestId: pageRequestId,
+          outputWasTruncated: false,
+        });
+
+      return NextResponse.json({
+        ok: true,
+        requestId: pageRequestId,
+        provider:
+          usedProvider.providerLabel,
+        editSelectedTextOnly: true,
+        editMode,
+        output,
+        result: output,
+        text: output,
+        answer: output,
+        sources: '',
+        primarySources: '',
+        secondarySources: '',
+        attachmentUsage,
+        promptUsage,
+        pageUsage,
+        isAdmin:
+          entitlementGuard.entitlements
+            .isAdmin,
+        hasUnlimitedAccess:
+          entitlementGuard.entitlements
+            .hasUnlimitedAccess,
+        entitlements:
+          serializeEntitlementGuard(
+            entitlementGuard,
+            promptUsage,
+          ),
+      }, {
+        status: 200,
+        headers: {
+          'Cache-Control':
+            'no-store, no-cache, must-revalidate',
+          'X-Request-Id': pageRequestId,
+        },
+      });
+    }
 
     // =====================================================
     // PRÍLOHY

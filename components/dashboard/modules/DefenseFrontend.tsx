@@ -6737,6 +6737,25 @@ Text emailu:
       formData.append("input", userText);
       formData.append("secondaryInput", secondaryText);
 
+      /**
+       * Obhajoba musí dostať text z editora ako samostatný používateľský pokyn.
+       * API ho nesmie zameniť za extrahovaný text prílohy ani za celý interný
+       * prompt vytvorený na frontende.
+       */
+      if (requestedModule === "defense") {
+        const defenseUserInstruction = userText || secondaryText;
+
+        formData.append("userInstruction", defenseUserInstruction);
+        formData.append("instruction", defenseUserInstruction);
+        formData.append("question", defenseUserInstruction);
+        formData.append("summary", userText);
+        formData.append("text", userText);
+        formData.append("content", userText);
+        formData.append("title", profileForApi?.title || "");
+        formData.append("defenseType", getWorkType(profileForApi));
+        formData.append("workType", getWorkType(profileForApi));
+      }
+
       formData.append("profile", JSON.stringify(profileForApi || {}));
       formData.append("activeProfile", JSON.stringify(profileForApi || {}));
       formData.append("profileContext", buildProfileBlock(profileForApi));
@@ -6893,7 +6912,15 @@ Text emailu:
         agent,
         model: agent,
         prompt,
-        instruction: prompt,
+        generatedPrompt: prompt,
+        instruction:
+          requestedModule === "defense"
+            ? userText || secondaryText
+            : prompt,
+        userInstruction:
+          requestedModule === "defense"
+            ? userText || secondaryText
+            : userText,
         input: userText,
         text: userText || clientExtractedText || prompt,
         message: userText || secondaryText || prompt,

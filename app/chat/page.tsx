@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
   BookOpen,
+  Bot,
   Brain,
   CheckCircle2,
   Copy,
@@ -3364,7 +3365,7 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
 
     if (files.length > maxFilesCount) {
       throw new Error(
-        `V jednej požiadavke možno spracovať maximálne ${maxFilesCount} príloh.`,
+        `V jednej požiadavke možno spracovať maximálne  ${maxFilesCount}  príloh.`,
       );
     }
 
@@ -4883,10 +4884,25 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
                       className="hidden h-4 w-px bg-violet-300/25 sm:block"
                     />
 
-                    <span className="text-[11px] font-semibold leading-5 text-violet-200/75">
-                      Kapacita: maximálne {maxFilesCount} príloh
-                      <span className="mx-2 text-violet-300/50">•</span>
-                      max. {maxFileSizeMb} MB na jednu prílohu
+                    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-semibold leading-5 text-violet-200/75">
+                      <span>Kapacita:</span>
+                      <span className="inline-flex items-center gap-1">
+                        <span>maximálne</span>
+                        <strong className="font-black text-violet-100">
+                          {maxFilesCount}
+                        </strong>
+                        <span>príloh</span>
+                      </span>
+                      <span aria-hidden="true" className="text-violet-300/50">
+                        •
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span>max.</span>
+                        <strong className="font-black text-violet-100">
+                          {maxFileSizeMb}
+                        </strong>
+                        <span>MB na jednu prílohu</span>
+                      </span>
                     </span>
                   </div>
                 </div>
@@ -5005,10 +5021,23 @@ Vráť iba finálny upravený text. Nepíš vysvetlenie, analýzu, skóre, odpor
                   <button
                     type="submit"
                     disabled={!canSubmit || !activeProfile}
-                    className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-700/40 transition hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-50"
-                    title="Odoslať"
+                    aria-live="polite"
+                    aria-label={isLoading ? 'AI analyzuje zadanie' : 'Odoslať správu'}
+                    className={`mb-1 flex h-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-700/40 transition-all duration-300 hover:from-violet-500 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-70 ${
+                      isLoading ? 'min-w-[148px] gap-2 px-4' : 'w-12'
+                    }`}
+                    title={isLoading ? 'AI analyzuje zadanie' : 'Odoslať'}
                   >
-                    <Send className="h-5 w-5" />
+                    {isLoading ? (
+                      <>
+                        <Bot className="h-5 w-5 animate-pulse" />
+                        <span className="whitespace-nowrap text-xs font-black">
+                          Analyzujem...
+                        </span>
+                      </>
+                    ) : (
+                      <Send className="h-5 w-5" />
+                    )}
                   </button>
                 </form>
               </div>

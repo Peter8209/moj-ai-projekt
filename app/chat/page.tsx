@@ -68,6 +68,16 @@ type ChatRouteContext = {
   from: string;
 };
 
+const EMPTY_CHAT_ROUTE_CONTEXT: ChatRouteContext = {
+  projectId: '',
+  profileId: '',
+  agent: null,
+  language: null,
+  interfaceLanguage: null,
+  workLanguage: null,
+  from: '',
+};
+
 function isAgent(value: unknown): value is Agent {
   return (
     value === 'openai' ||
@@ -426,17 +436,19 @@ const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
 // Do /api/chat neposielame desať veľkých originálov naraz. Každá príloha
 // sa najprv prečíta a do hlavného chatu sa odošle kompaktná textová
 // reprezentácia. Pôvodný vstupný limit 50 MB na jeden súbor zostáva.
-const maxPreparedMultipartBytes = 3_200_000;
-const minPreparedFileTargetBytes = 160 * 1024;
-const maxPreparedFileTargetBytes = 640 * 1024;
-const maxDirectFallbackFileBytes = 3_200_000;
+// Prenosový rozpočet musí počítať aj s multipart hlavičkami a JSON metadátami.
+// Extrahovaný text sa neposiela duplicitne v preparedFilesMetadata/chatPayload.
+const maxPreparedMultipartBytes = 2_200_000;
+const minPreparedFileTargetBytes = 128 * 1024;
+const maxPreparedFileTargetBytes = 384 * 1024;
+const maxDirectFallbackFileBytes = 1_200_000;
 const attachmentExtractionTimeoutMs = 60_000;
 
 const maxCompressedFileSizeBytes = 1 * 1024 * 1024;
 const safeCompressedTargetBytes = 950 * 1024;
 
 const maxClientExtractedCharsPerFile = 60_000;
-const maxTotalExtractedContextChars = 240_000;
+const maxTotalExtractedContextChars = 160_000;
 const maxDetectedSourcesForChat = 120;
 const maxDetectedAuthorsForChat = 120;
 const maxInTextCitationsForChat = 200;
@@ -2262,7 +2274,9 @@ function buildMainChatPrompt({
     `Používateľská požiadavka: ${userInstruction || 'Spracuj priložené dokumenty.'}`,
     `Počet odosielaných príloh: ${attachmentCount}.`,
     'Najprv vyťaž údaje, tvrdenia, mená, dátumy, tabuľky, citácie a zdroje z príloh.',
-    'Potom doplň iba chýbajúce odborné údaje pomocou overiteľných akademických zdrojov.',
+    attachmentCount > 0
+      ? 'Ak sú priložené dokumenty, nevytváraj ani automaticky nedopĺňaj nové zdroje z všeobecných znalostí AI alebo webu. Použi iba obsah príloh a bibliografiu, ktorá sa v nich reálne nachádza; externé zdroje patria do odpovede iba pri výslovnej požiadavke používateľa.'
+      : 'Ak prílohy nie sú priložené, odborné tvrdenia opieraj iba o overiteľné akademické zdroje a nevymýšľaj bibliografické údaje.',
     `Citačná norma z profilu práce: ${citationStyle}.`,
     buildCitationStyleInstructions(citationStyle),
     'Na konci vždy zachovaj samostatné sekcie Primárne zdroje a Sekundárne zdroje.',
@@ -2319,9 +2333,11 @@ export default function ChatPage() {
   const [agent, setAgent] = useState<Agent>('gemini');
   const [agentsOrder, setAgentsOrder] = useState(defaultAgents);
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
-  const [routeContext, setRouteContext] = useState<ChatRouteContext>(() =>
-    readChatRouteContext(),
-  );
+  // Dôležité pre hydratáciu Next.js:
+  // prvý serverový aj klientsky render musia mať identický stav.
+  // URL parametre načítame až v existujúcom useEffecte nižšie.
+  const [routeContext, setRouteContext] =
+    useState<ChatRouteContext>(EMPTY_CHAT_ROUTE_CONTEXT);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -3973,16 +3989,37 @@ formData.append('profile', JSON.stringify(profileForApi || null));
       );
       formData.append('validateAttachmentsAgainstProfile', 'true');
       formData.append('requireSourceList', 'true');
-      formData.append('allowAiKnowledgeFallback', 'true');
+
+      // Pri aktuálne nahratých dokumentoch je zdrojovým základom výhradne ich obsah.
+      // Tým sa zabráni tomu, aby sa ku konkrétnej prílohe primiešali zdroje z pamäte modelu
+      // alebo z externého vyhľadávania a tvárili sa ako zdroje dokumentu.
+      const allowExternalSourcesForThisRequest =
+        attachedFiles.length === 0;
+
+      formData.append(
+        'allowAiKnowledgeFallback',
+        allowExternalSourcesForThisRequest ? 'true' : 'false',
+      );
       formData.append('returnExtractedFilesInfo', 'true');
       formData.append('isChapterRequest', isChapterRequest ? 'true' : 'false');
 
-      // Konfiguračné prepínače pre /api/chat.
-      // Nie sú to prompty. Pravidlá spracovania musia byť implementované v /api/chat.
-      formData.append('enableExternalResearch', 'true');
-      formData.append('useExternalAcademicSources', 'true');
-      formData.append('useSemanticScholar', 'true');
-      formData.append('useCrossref', 'true');
+      // Externé akademické zdroje sa zapínajú automaticky iba bez príloh.
+      formData.append(
+        'enableExternalResearch',
+        allowExternalSourcesForThisRequest ? 'true' : 'false',
+      );
+      formData.append(
+        'useExternalAcademicSources',
+        allowExternalSourcesForThisRequest ? 'true' : 'false',
+      );
+      formData.append(
+        'useSemanticScholar',
+        allowExternalSourcesForThisRequest ? 'true' : 'false',
+      );
+      formData.append(
+        'useCrossref',
+        allowExternalSourcesForThisRequest ? 'true' : 'false',
+      );
       formData.append('requireVerifiedSources', 'true');
       formData.append('requireInlineCitations', 'true');
       formData.append('requirePrimarySecondarySources', 'true');
@@ -4035,8 +4072,8 @@ formData.append('profile', JSON.stringify(profileForApi || null));
             extractionStatus: item.extractionStatus,
             extractionMethod: item.extractionMethod,
             extractionMessage: item.extractionMessage,
-            extractedText: item.extractedText || '',
-            extracted_text: item.extractedText || '',
+            // Plný text už ide v clientExtractedText a v pripravenom súbore.
+            // Nezdvojujeme ho v JSON metadátach, aby multipart požiadavka zbytočne nerástla.
             detectedSourcesCount: item.detectedSources?.length || 0,
             detectedSources: item.detectedSources || [],
             inTextCitations: item.inTextCitations || [],
@@ -4087,11 +4124,13 @@ formData.append('profile', JSON.stringify(profileForApi || null));
             attachedFiles.length > 0
               ? 'uploaded_documents_first'
               : 'verified_web_sources',
-          extractedText: extractedContext,
-          detectedSourcesSummary: detectedSourcesSummary || '',
-          detectedSources,
-          detectedAuthors,
-          inTextCitations,
+          // Detailný obsah je už odoslaný samostatnými poľami FormData.
+          // chatPayload slúži iba ako ľahký diagnostický obal a nesmie duplikovať payload.
+          extractedText: '',
+          detectedSourcesSummary: '',
+          detectedSources: [],
+          detectedAuthors: [],
+          inTextCitations: [],
         },
       };
 
@@ -4377,8 +4416,14 @@ ${attachmentWarningText}`.trim();
 
       const streamedError =
         readStreamedApiError(fullText);
+      const usableStreamOutput = cleanAiOutput(
+        stripInternalStreamPayload(fullText),
+      );
 
-      if (streamedError) {
+      // Poskytovateľ môže výnimočne poslať použiteľný text a až potom technický
+      // koncový marker (napr. pri oneskorenom fallbacku/proxy chybe). Používateľ
+      // nesmie dostať súčasne hotový výsledok aj chybové okno.
+      if (streamedError && !usableStreamOutput) {
         removePendingAssistantMessage();
         showSystemError(
           createZedperaError(
@@ -4404,7 +4449,17 @@ ${attachmentWarningText}`.trim();
         return;
       }
 
-      const finalTextFromApi = cleanAiOutput(fullText);
+      if (streamedError && usableStreamOutput) {
+        console.warn(
+          'CHAT_STREAM_LATE_ERROR_SUPPRESSED:',
+          streamedError,
+        );
+        clearSystemError();
+      }
+
+      const finalTextFromApi =
+        usableStreamOutput ||
+        cleanAiOutput(stripInternalStreamPayload(fullText));
       const parsed = parseSections(finalTextFromApi);
 
       setMessages((prev) => {
@@ -4608,39 +4663,60 @@ const replaceSelectedText = (
 };
 
 
-type ProtectedSelectedCitation = {
-  placeholder: string;
+type OriginalSelectedCitation = {
   value: string;
 };
 
-function protectSelectedTextCitations(value: string) {
-  const citations: ProtectedSelectedCitation[] = [];
+function extractOriginalSelectedTextCitations(
+  value: string,
+): OriginalSelectedCitation[] {
+  const text = String(value || '');
+  const found: string[] = [];
 
-  const citationPattern =
-    /\b[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'-]+(?:\s+(?:et\s+al\.?|a\s+kol\.?))?\s*\((?:18|19|20)\d{2}[a-z]?\)|\((?=[^()\n]{0,240}\b(?:18|19|20)\d{2}[a-z]?\b)[^()\n]{2,260}\)|\[(?:\d{1,3})(?:\s*[,;–-]\s*\d{1,3})*\]/gi;
+  // Zachytí celé vyvážené zátvorky obsahujúce rok, vrátane prípadov
+  // typu „(Wrigley C. W.: Cereal Chem. 78, 6. (2001))“.
+  let depth = 0;
+  let start = -1;
 
-  const protectedText = String(value || '').replace(
-    citationPattern,
-    (citation) => {
-      const placeholder = `[[ZEDPERA_CITATION_${citations.length + 1}]]`;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
 
-      citations.push({
-        placeholder,
-        value: citation,
-      });
+    if (char === '(') {
+      if (depth === 0) start = index;
+      depth += 1;
+      continue;
+    }
 
-      return placeholder;
-    },
-  );
+    if (char === ')' && depth > 0) {
+      depth -= 1;
 
-  return {
-    protectedText,
-    citations,
-  };
+      if (depth === 0 && start >= 0) {
+        const candidate = text.slice(start, index + 1);
+
+        if (/\b(?:18|19|20)\d{2}[a-z]?\b/i.test(candidate)) {
+          found.push(candidate);
+        }
+
+        start = -1;
+      }
+    }
+  }
+
+  for (const match of text.matchAll(
+    /\[(?:\d{1,3})(?:\s*[,;–-]\s*\d{1,3})*\]/g,
+  )) {
+    if (match[0]) found.push(match[0]);
+  }
+
+  return uniqueArray(found).map((citation) => ({
+    value: citation,
+  }));
 }
 
 function stripSourceSectionsFromSelectedEdit(value: string) {
-  const cleaned = cleanAiOutput(value)
+  const cleaned = cleanAiOutput(
+    stripInternalStreamPayload(value),
+  )
     .replace(/^\s*={0,3}\s*VÝSTUP\s*={0,3}\s*:?[\s\n]*/i, '')
     .replace(/^\s*VÝSTUP\s*:\s*/i, '')
     .trim();
@@ -4654,29 +4730,43 @@ function stripSourceSectionsFromSelectedEdit(value: string) {
     sourceMatch && typeof sourceMatch.index === 'number'
       ? cleaned.slice(0, sourceMatch.index)
       : cleaned,
-  );
+  )
+    // Bezpečnostná poistka pre staršie odpovede. Interný token sa nikdy
+    // nesmie zobraziť používateľovi.
+    .replace(
+      /\[?\[?\s*ZEDPERA[\s_-]*CITATION[\s_-]*\d+\s*\]?\]?/gi,
+      '',
+    )
+    .replace(
+      /ZXQ[\s_-]*CITATION[\s_-]*\d+[\s_-]*QXZ/gi,
+      '',
+    )
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 }
 
-function restoreSelectedTextCitations(
+function validateSelectedTextCitations(
   value: string,
-  citations: ProtectedSelectedCitation[],
+  citations: OriginalSelectedCitation[],
 ) {
-  let restored = stripSourceSectionsFromSelectedEdit(value);
-  const missingCitations: string[] = [];
+  const cleaned = stripSourceSectionsFromSelectedEdit(value);
 
-  for (const citation of citations) {
-    if (restored.includes(citation.placeholder)) {
-      restored = restored.split(citation.placeholder).join(citation.value);
-    } else if (!restored.includes(citation.value)) {
-      missingCitations.push(citation.value);
-    }
+  // Server vracia pôvodné citácie deterministicky. Klient ich už neprenáša
+  // cez viditeľné placeholdery. Ak by starší backend citáciu vynechal,
+  // radšej necháme čistý text a zalogujeme diagnostiku, než aby sme vložili
+  // internú značku ZEDPERA do akademického textu.
+  const missing = citations
+    .map((item) => item.value)
+    .filter((citation) => !cleaned.includes(citation));
+
+  if (missing.length > 0) {
+    console.warn(
+      'EDIT_SELECTED_TEXT_CITATION_MISMATCH:',
+      missing,
+    );
   }
 
-  if (missingCitations.length > 0) {
-    restored = `${restored.trim()} ${missingCitations.join(' ')}`.trim();
-  }
-
-  return cleanAiOutput(restored);
+  return cleaned;
 }
 
 const getEditInstruction = (
@@ -4711,10 +4801,10 @@ const editSelectedText = async (
     return;
   }
 
-  const {
-    protectedText: protectedSelectedText,
-    citations: protectedCitations,
-  } = protectSelectedTextCitations(selectedText);
+  const originalCitations =
+    extractOriginalSelectedTextCitations(
+      selectedText,
+    );
 
   // Úprava označeného textu je nová AI operácia.
   // Staré čakajúce hlášky sa zrušia a nová sa môže zobraziť až po 30 sekundách.
@@ -4738,7 +4828,7 @@ const editSelectedText = async (
 
     formData.append('editSelectedTextOnly', 'true');
     formData.append('editMode', mode);
-    formData.append('selectedText', protectedSelectedText);
+    formData.append('selectedText', selectedText);
 
     formData.append('requireSourceList', 'false');
     formData.append('allowAiKnowledgeFallback', 'true');
@@ -4753,13 +4843,13 @@ const editSelectedText = async (
           content: `${instruction}
 
 OZNAČENÝ TEXT:
-${protectedSelectedText}
+${selectedText}
 
 ZÁVÄZNÉ PRAVIDLÁ:
 - Vráť iba finálny upravený text.
 - Nevypisuj Primárne zdroje, Sekundárne zdroje, použitú literatúru, analýzu, skóre ani odporúčania.
-- Všetky značky vo formáte [[ZEDPERA_CITATION_N]] zachovaj presne a na logicky rovnakom mieste.
-- Značky neprepisuj, neodstraňuj ani nepridávaj.`,
+- Pôvodné citácie, bibliografické odkazy, DOI a URL ponechaj presne v pôvodnom tvare a na logicky rovnakom mieste.
+- Nevytváraj interné značky ani placeholdery.`,
         },
       ]),
     );
@@ -4845,10 +4935,57 @@ ZÁVÄZNÉ PRAVIDLÁ:
       }
     }
 
-    const cleanedEditedText = restoreSelectedTextCitations(
-      editedText,
-      protectedCitations,
-    );
+    const streamedEditError =
+      readStreamedApiError(editedText);
+    const visibleEditedText =
+      stripInternalStreamPayload(editedText);
+
+    if (
+      streamedEditError &&
+      !cleanAiOutput(visibleEditedText)
+    ) {
+      showSystemError(
+        createZedperaError(
+          String(
+            streamedEditError.code ||
+              'API_UNAVAILABLE',
+          ),
+          {
+            endpoint: '/api/chat',
+            module: 'chat',
+            requestId:
+              streamedEditError.requestId ||
+              requestId,
+            serverMessage:
+              streamedEditError.message ||
+              streamedEditError.error,
+            serverDetail:
+              streamedEditError.detail,
+          },
+          {
+            language,
+          },
+        ),
+      );
+      return;
+    }
+
+    if (
+      streamedEditError &&
+      cleanAiOutput(visibleEditedText)
+    ) {
+      console.warn(
+        'EDIT_STREAM_LATE_ERROR_SUPPRESSED:',
+        streamedEditError,
+      );
+      clearSystemError();
+    }
+
+    const cleanedEditedText =
+      validateSelectedTextCitations(
+        visibleEditedText,
+        originalCitations,
+      );
 
     if (!cleanedEditedText) {
       showSystemError(

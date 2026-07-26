@@ -851,7 +851,7 @@ type AttachedFile = {
    */
   file?: File;
 
-  extractionStatus?: "pending" | "server" | "client" | "failed";
+  extractionStatus?: "ready" | "pending" | "server" | "client" | "failed";
   extractedChars?: number;
   extractionMessage?: string;
 };
@@ -934,7 +934,7 @@ type DirectModuleApiConfig = {
  */
 const DIRECT_MODULE_API: Partial<Record<ModuleKey, DirectModuleApiConfig>> = {
   supervisor: { endpoint: "/api/supervisor", mode: "formData" },
-  quality: { endpoint: "/api/audit", mode: "json" },
+  quality: { endpoint: "/api/audit", mode: "formData" },
   defense: { endpoint: "/api/defense", mode: "formData" },
   translation: { endpoint: "/api/translate", mode: "json" },
   planning: { endpoint: "/api/planning", mode: "json" },
@@ -3496,6 +3496,37 @@ async function readDashboardApiError(
   });
 }
 
+async function fetchDashboardRequest(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs = 110_000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new DashboardApiError({
+        status: 504,
+        code: "MODULE_REQUEST_TIMEOUT",
+        message:
+          "Spracovanie trvalo príliš dlho a požiadavka bola bezpečne ukončená.",
+        detail:
+          "Skúste menší dokument alebo audit jednej kapitoly. Stav načítania sa po chybe vždy uvoľní.",
+      });
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 function getTodayStart() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -4002,6 +4033,30 @@ export default function QualityAuditFrontend(
       // Modul funguje aj pri zablokovanom localStorage.
     }
   }, [activeModule, moduleKey]);
+
+  useEffect(() => {
+    /**
+     * ThemeProvider môže mať po SSR dočasne data-theme-ready="false".
+     * Samotný modul je už v tomto efekte hydratovaný, preto stale flag opravíme
+     * a zabránime tomu, aby CSS/parent shell držal hotový dashboard skrytý.
+     */
+    const frameId = window.requestAnimationFrame(() => {
+      const themeRoot = document.querySelector<HTMLElement>(
+        ".theme-root[data-theme-ready]",
+      );
+
+      if (!themeRoot) return;
+
+      const currentTheme = document.documentElement.classList.contains("dark")
+        ? "dark"
+        : "light";
+
+      themeRoot.setAttribute("data-theme-ready", "true");
+      themeRoot.setAttribute("data-current-theme", currentTheme);
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
 
   const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
 
@@ -5078,12 +5133,12 @@ export default function QualityAuditFrontend(
         text: clientText || undefined,
         extractionStatus: clientText
           ? "client"
-          : "pending",
+          : "ready",
         extractedChars:
           clientText.length,
         extractionMessage: clientText
           ? "Textový fallback bol načítaný v prehliadači."
-          : "Obsah prílohy sa načítava.",
+          : "Súbor je pripravený. Binárny obsah PDF/DOCX sa odošle na server po spustení auditu.",
       });
 
       /**
@@ -5961,6 +6016,21 @@ Text emailu:
     }
 
     setIsLoading(true);
+
+    if (requestedModule === "quality" && attachedFiles.length > 0) {
+      setAttachedFiles((currentFiles) =>
+        currentFiles.map((file) => ({
+          ...file,
+          extractionStatus:
+            file.extractionStatus === "client" ? "client" : "pending",
+          extractionMessage:
+            file.extractionStatus === "client"
+              ? file.extractionMessage
+              : "Súbor bol odoslaný na server a audit načítava jeho obsah.",
+        })),
+      );
+    }
+
     setResult("");
     setCanvasText("");
     setAnalysisResult(null);
@@ -6598,10 +6668,21 @@ Text emailu:
       formData.append("interfaceLanguage", systemLanguage);
       formData.append("workLanguage", finalWorkLanguage);
 
-      formData.append("message", userText || secondaryText || prompt);
+      formData.append(
+        "message",
+        requestedModule === "quality"
+          ? userText || secondaryText
+          : userText || secondaryText || prompt,
+      );
       formData.append("prompt", prompt);
       formData.append("input", userText);
+      formData.append("text", userText);
       formData.append("secondaryInput", secondaryText);
+      formData.append("qualityMode", qualityMode);
+      formData.append("outputMode", outputMode);
+      formData.append("citationStyle", getCitationStyle(profileForApi));
+      formData.append("title", profileForApi?.title || "");
+      formData.append("workType", getWorkType(profileForApi));
 
       formData.append("profile", JSON.stringify(profileForApi || {}));
       formData.append("activeProfile", JSON.stringify(profileForApi || {}));
@@ -6620,6 +6701,20 @@ Text emailu:
         "preparedFilesMetadata",
         JSON.stringify(
           preparedFilesMetadata,
+        ),
+      );
+
+      formData.append(
+        "attachments",
+        JSON.stringify(
+          attachedFiles.map((file) => ({
+            id: file.id,
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            text: file.text || file.content || "",
+            extractedText: file.text || file.content || "",
+          })),
         ),
       );
 
@@ -6761,7 +6856,7 @@ Text emailu:
         prompt,
         instruction: prompt,
         input: userText,
-        text: userText || clientExtractedText || prompt,
+        text: userText || clientExtractedText || "",
         message: userText || secondaryText || prompt,
         question: userText || secondaryText || prompt,
         secondaryInput: secondaryText,
@@ -6831,7 +6926,7 @@ Text emailu:
         },
       };
 
-      const response = await fetch(directApi.endpoint, {
+      const response = await fetchDashboardRequest(directApi.endpoint, {
         method: "POST",
         body:
           directApi.mode === "json"
@@ -7175,6 +7270,25 @@ Text emailu:
 
       if (!isCurrentModuleRun()) {
         return;
+      }
+
+      if (requestedModule === "quality" && attachedFiles.length > 0) {
+        const attachmentErrorMessage =
+          error instanceof Error
+            ? error.message
+            : "Obsah prílohy sa nepodarilo spracovať.";
+
+        setAttachedFiles((currentFiles) =>
+          currentFiles.map((file) =>
+            file.extractionStatus === "pending"
+              ? {
+                  ...file,
+                  extractionStatus: "failed",
+                  extractionMessage: attachmentErrorMessage,
+                }
+              : file,
+          ),
+        );
       }
 
       const message =
@@ -9192,9 +9306,11 @@ function FileUploadBox({
                     ? "Načítané serverom"
                     : file.extractionStatus === "client"
                       ? "Text pripravený"
-                      : file.extractionStatus === "failed"
-                        ? "Chyba čítania"
-                        : "Načítava"}
+                      : file.extractionStatus === "ready"
+                        ? "Pripravené"
+                        : file.extractionStatus === "failed"
+                          ? "Chyba čítania"
+                          : "Spracúva sa"}
                 </span>
               ) : null}
 

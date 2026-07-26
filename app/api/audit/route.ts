@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
@@ -28,6 +29,9 @@ const MAX_MANUAL_TEXT_LENGTH = 30000;
 const MAX_ATTACHMENT_TEXT_LENGTH = 30000;
 const MAX_TOTAL_SOURCE_LENGTH = 50000;
 const MAX_USER_INSTRUCTION_LENGTH = 2000;
+const MAX_BINARY_ATTACHMENT_SIZE_BYTES = 30 * 1024 * 1024;
+const MAX_TOTAL_BINARY_ATTACHMENT_BYTES = 60 * 1024 * 1024;
+const OPENAI_REQUEST_TIMEOUT_MS = 105_000;
 
 type SavedProfile = {
   id?: string;
@@ -77,7 +81,35 @@ type UploadedAttachment = {
   wasCompressed?: boolean;
   originalSize?: number;
   finalSize?: number;
+  binaryAvailable?: boolean;
 };
+
+type BinaryAuditFile = {
+  name: string;
+  type: string;
+  size: number;
+  bytes: Buffer;
+};
+
+type ParsedAuditRequest = {
+  body: AuditRequest;
+  binaryFiles: BinaryAuditFile[];
+  requestMode: 'json' | 'multipart';
+};
+
+class AuditRequestValidationError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly detail: string;
+
+  constructor(code: string, message: string, detail: string, status: number) {
+    super(message);
+    this.name = 'AuditRequestValidationError';
+    this.code = code;
+    this.status = status;
+    this.detail = detail;
+  }
+}
 
 type AuditRequest = {
   text?: string;
@@ -821,21 +853,38 @@ function checkAttachmentProfileRelevance(
     .filter(Boolean)
     .join(' ');
 
-  const attachmentText = [
-    name,
-    getAttachmentText(attachment),
-  ]
+  const extractedAttachmentText = getAttachmentText(attachment);
+  const attachmentText = [name, extractedAttachmentText]
     .filter(Boolean)
     .join(' ');
 
-  if (!cleanText(profileText) || !cleanText(attachmentText)) {
+  if (!cleanText(profileText)) {
     return {
       name,
       score: 0,
       related: true,
       matchedKeywords: [],
-      warning:
-        'Súlad prílohy s profilom práce nebolo možné úplne vyhodnotiť, pretože chýba profil alebo extrahovaný text prílohy.',
+      warning: undefined,
+    };
+  }
+
+  if (!cleanText(extractedAttachmentText) && attachment.binaryAvailable) {
+    return {
+      name,
+      score: 0,
+      related: true,
+      matchedKeywords: [],
+      warning: undefined,
+    };
+  }
+
+  if (!cleanText(attachmentText)) {
+    return {
+      name,
+      score: 0,
+      related: true,
+      matchedKeywords: [],
+      warning: undefined,
     };
   }
 
@@ -910,7 +959,9 @@ OBSAH PRÍLOHY:
 """
 ${
   limitedFileText.text ||
-  'Text z prílohy nebol dostupný. Ak ide o PDF/DOCX, skontroluj, či /api/uploads extrahuje text zo súboru a vracia ho v poli text, content alebo extractedText.'
+  (file.binaryAvailable
+    ? 'Binárny obsah prílohy je priložený priamo k požiadavke modelu. Prečítaj ho ako primárny podklad auditu.'
+    : 'Text z prílohy nebol dostupný. Príloha neobsahuje použiteľný extrahovaný text ani binárny obsah.')
 }
 """
 `;
@@ -1222,6 +1273,285 @@ function buildClientCleanResult(value: string): string {
     .trim();
 }
 
+function formString(formData: FormData, key: string): string {
+  const value = formData.get(key);
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function parseJsonValue<T>(value: string, fallback: T): T {
+  if (!value) return fallback;
+
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function isBinaryFormEntry(value: FormDataEntryValue): value is File {
+  if (!value || typeof value !== 'object') return false;
+
+  const candidate = value as File;
+  return (
+    typeof candidate.name === 'string' &&
+    typeof candidate.size === 'number' &&
+    typeof candidate.arrayBuffer === 'function'
+  );
+}
+
+async function parseAuditRequest(req: NextRequest): Promise<ParsedAuditRequest> {
+  const contentType = req.headers.get('content-type') || '';
+
+  if (!contentType.toLowerCase().includes('multipart/form-data')) {
+    const body = (await req.json()) as AuditRequest;
+    return {
+      body,
+      binaryFiles: [],
+      requestMode: 'json',
+    };
+  }
+
+  const formData = await req.formData();
+  const profile = parseJsonValue<SavedProfile | null>(
+    formString(formData, 'profile'),
+    null,
+  );
+  const activeProfile = parseJsonValue<SavedProfile | null>(
+    formString(formData, 'activeProfile'),
+    profile,
+  );
+
+  const preparedMetadata = parseJsonValue<UploadedAttachment[]>(
+    formString(formData, 'preparedFilesMetadata'),
+    [],
+  );
+  const explicitAttachments = parseJsonValue<UploadedAttachment[]>(
+    formString(formData, 'attachments'),
+    [],
+  );
+
+  const body: AuditRequest = {
+    requestId: formString(formData, 'requestId') || undefined,
+    input: formString(formData, 'input') || undefined,
+    text: formString(formData, 'text') || undefined,
+    message: formString(formData, 'message') || undefined,
+    question: formString(formData, 'question') || undefined,
+    prompt: formString(formData, 'prompt') || undefined,
+    instruction: formString(formData, 'instruction') || undefined,
+    userInstruction: formString(formData, 'userInstruction') || undefined,
+    sourceText: formString(formData, 'sourceText') || undefined,
+    clientExtractedText:
+      formString(formData, 'clientExtractedText') || undefined,
+    extractedText: formString(formData, 'extractedText') || undefined,
+    attachmentText: formString(formData, 'attachmentText') || undefined,
+    checkType: formString(formData, 'checkType') || undefined,
+    qualityMode: formString(formData, 'qualityMode') || undefined,
+    outputType: formString(formData, 'outputType') || undefined,
+    outputMode: formString(formData, 'outputMode') || undefined,
+    citationStyle:
+      formString(formData, 'citationStyle') ||
+      formString(formData, 'citation') ||
+      undefined,
+    title: formString(formData, 'title') || undefined,
+    workType: formString(formData, 'workType') || undefined,
+    language:
+      formString(formData, 'language') ||
+      formString(formData, 'workLanguage') ||
+      undefined,
+    profile,
+    activeProfile,
+    attachments: explicitAttachments.length
+      ? explicitAttachments
+      : preparedMetadata,
+  };
+
+  const rawFiles = formData
+    .getAll('files')
+    .filter(isBinaryFormEntry)
+    .filter((file) => file.size > 0);
+
+  if (rawFiles.length > MAX_AUDIT_ATTACHMENTS) {
+    throw new AuditRequestValidationError(
+      'ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED',
+      'Nahrali ste viac ako 20 príloh.',
+      'Audit kvality dokáže v jednej požiadavke spracovať maximálne 20 príloh.',
+      400,
+    );
+  }
+
+  let totalBytes = 0;
+  const binaryFiles: BinaryAuditFile[] = [];
+
+  for (const file of rawFiles) {
+    if (file.size > MAX_BINARY_ATTACHMENT_SIZE_BYTES) {
+      throw new AuditRequestValidationError(
+        'ATTACHMENT_TOO_LARGE',
+        `Súbor "${file.name}" je príliš veľký.`,
+        'Maximálna veľkosť jednej prílohy pre Audit kvality je 30 MB.',
+        413,
+      );
+    }
+
+    totalBytes += file.size;
+
+    if (totalBytes > MAX_TOTAL_BINARY_ATTACHMENT_BYTES) {
+      throw new AuditRequestValidationError(
+        'ATTACHMENTS_TOTAL_SIZE_TOO_LARGE',
+        'Celková veľkosť príloh je príliš veľká.',
+        'V jednej požiadavke auditu odošlite maximálne 60 MB binárnych príloh.',
+        413,
+      );
+    }
+
+    binaryFiles.push({
+      name: file.name || 'priloha',
+      type: file.type || 'application/octet-stream',
+      size: file.size,
+      bytes: Buffer.from(await file.arrayBuffer()),
+    });
+  }
+
+  return {
+    body,
+    binaryFiles,
+    requestMode: 'multipart',
+  };
+}
+
+function getResponsesOutputText(response: any): string {
+  if (typeof response?.output_text === 'string' && response.output_text.trim()) {
+    return response.output_text;
+  }
+
+  if (!Array.isArray(response?.output)) return '';
+
+  return response.output
+    .flatMap((item: any) => (Array.isArray(item?.content) ? item.content : []))
+    .map((content: any) =>
+      typeof content?.text === 'string'
+        ? content.text
+        : typeof content?.output_text === 'string'
+          ? content.output_text
+          : '',
+    )
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
+function buildBinaryModelInputs(binaryFiles: BinaryAuditFile[]): any[] {
+  return binaryFiles.map((file) => {
+    const base64 = file.bytes.toString('base64');
+
+    if (file.type.startsWith('image/')) {
+      return {
+        type: 'input_image',
+        image_url: `data:${file.type};base64,${base64}`,
+        detail: 'auto',
+      };
+    }
+
+    return {
+      type: 'input_file',
+      filename: file.name,
+      file_data: base64,
+    };
+  });
+}
+
+async function runAuditModel({
+  auditModel,
+  prompt,
+  maxCompletionTokens,
+  dateInfo,
+  binaryFiles,
+}: {
+  auditModel: string;
+  prompt: string;
+  maxCompletionTokens: number;
+  dateInfo: AuditDateInfo;
+  binaryFiles: BinaryAuditFile[];
+}): Promise<{
+  rawResult: string;
+  finishReason: string | null;
+  providerMode: 'chat-completions' | 'responses-file-input';
+}> {
+  if (binaryFiles.length === 0) {
+    const completion = await openai.chat.completions.create(
+      {
+        model: auditModel,
+        temperature: 0.2,
+        max_tokens: maxCompletionTokens,
+        presence_penalty: 0,
+        frequency_penalty: 0.1,
+        messages: [
+          {
+            role: 'system',
+            content: buildSystemMessage(dateInfo),
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      },
+      { timeout: OPENAI_REQUEST_TIMEOUT_MS },
+    );
+
+    return {
+      rawResult: completion.choices[0]?.message?.content || '',
+      finishReason: completion.choices[0]?.finish_reason || null,
+      providerMode: 'chat-completions',
+    };
+  }
+
+  const responsesApi = (openai as any).responses;
+
+  if (!responsesApi || typeof responsesApi.create !== 'function') {
+    throw new Error(
+      'Nainštalovaná verzia balíka openai nepodporuje Responses API s input_file. Aktualizujte balík openai na aktuálnu verziu.',
+    );
+  }
+
+  const promptWithFileRule = `${prompt}\n\nPRAVIDLO PRE PRIAMO PRILOŽENÉ SÚBORY:\nBinárne súbory sú súčasťou tejto istej požiadavky. Ich obsah je primárny zdroj auditu. Nežiadaj používateľa, aby dokument nahral znova, a netvrď, že obsah nebol priložený.`;
+
+  const response = await responsesApi.create(
+    {
+      model: auditModel,
+      max_output_tokens: maxCompletionTokens,
+      input: [
+        {
+          role: 'system',
+          content: [
+            {
+              type: 'input_text',
+              text: buildSystemMessage(dateInfo),
+            },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: promptWithFileRule,
+            },
+            ...buildBinaryModelInputs(binaryFiles),
+          ],
+        },
+      ],
+    },
+    { timeout: OPENAI_REQUEST_TIMEOUT_MS },
+  );
+
+  return {
+    rawResult: getResponsesOutputText(response),
+    finishReason:
+      typeof response?.status === 'string' ? response.status : null,
+    providerMode: 'responses-file-input',
+  };
+}
+
 export async function POST(req: NextRequest) {
   const requestId =
     req.headers.get('x-request-id')?.trim() ||
@@ -1239,27 +1569,46 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    let body: AuditRequest;
+    let parsedRequest: ParsedAuditRequest;
 
     try {
-      body = (await req.json()) as AuditRequest;
-    } catch {
+      parsedRequest = await parseAuditRequest(req);
+    } catch (error) {
+      if (error instanceof AuditRequestValidationError) {
+        return createAuditErrorResponse({
+          requestId,
+          code: error.code,
+          message: error.message,
+          detail: error.detail,
+          status: error.status,
+        });
+      }
+
       return createAuditErrorResponse({
         requestId,
-        code: 'INVALID_JSON_BODY',
+        code: 'INVALID_AUDIT_REQUEST_BODY',
         message: 'Požiadavku auditu sa nepodarilo načítať.',
-        detail: 'Endpoint /api/audit očakáva JSON požiadavku.',
+        detail:
+          'Endpoint /api/audit prijíma JSON aj multipart/form-data s binárnymi prílohami v poli files.',
         status: 400,
       });
     }
 
+    const { body, binaryFiles, requestMode } = parsedRequest;
     const dateInfo = getAuditDateInfo(body);
     const profile = body.activeProfile || body.profile || null;
+
+    const messageCandidate = cleanText(body.message);
+    const promptCandidate = cleanText(body.prompt);
+    const safeMessageCandidate =
+      messageCandidate && messageCandidate !== promptCandidate
+        ? messageCandidate
+        : '';
 
     const rawUserInput = firstNonEmptyText(
       body.input,
       body.question,
-      body.message,
+      safeMessageCandidate,
       body.text,
     );
 
@@ -1281,6 +1630,29 @@ export async function POST(req: NextRequest) {
     );
 
     let attachments = normalizeAttachments(body.attachments);
+
+    for (const binaryFile of binaryFiles) {
+      const alreadyPresent = attachments.some((attachment) => {
+        const name = getAttachmentName(attachment, 0);
+        return name === binaryFile.name && Number(attachment.size || 0) === binaryFile.size;
+      });
+
+      if (!alreadyPresent) {
+        attachments.push({
+          name: binaryFile.name,
+          type: binaryFile.type,
+          size: binaryFile.size,
+          binaryAvailable: true,
+        });
+      } else {
+        attachments = attachments.map((attachment) =>
+          getAttachmentName(attachment, 0) === binaryFile.name &&
+          Number(attachment.size || 0) === binaryFile.size
+            ? { ...attachment, binaryAvailable: true }
+            : attachment,
+        );
+      }
+    }
 
     if (
       topLevelAttachmentText &&
@@ -1342,6 +1714,9 @@ export async function POST(req: NextRequest) {
     const hasUsableAttachmentText =
       extractedAttachmentTextLength >=
       MIN_EXTRACTED_ATTACHMENT_LENGTH;
+    const hasBinaryAttachmentInput = binaryFiles.length > 0;
+    const hasUsableAttachmentInput =
+      hasUsableAttachmentText || hasBinaryAttachmentInput;
     const hasInstruction = Boolean(userInstruction);
 
     if (!hasText && !hasAttachments && !hasInstruction) {
@@ -1356,7 +1731,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (!hasText && hasAttachments && !hasUsableAttachmentText) {
+    if (!hasText && hasAttachments && !hasUsableAttachmentInput) {
       return createAuditErrorResponse({
         requestId,
         code: 'ATTACHMENT_EXTRACTION_FAILED',
@@ -1376,7 +1751,7 @@ export async function POST(req: NextRequest) {
     if (
       hasInstruction &&
       !hasText &&
-      !hasUsableAttachmentText
+      !hasUsableAttachmentInput
     ) {
       const guidance = buildMissingSourceGuidance(
         userInstruction,
@@ -1411,10 +1786,18 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join('\n\n');
 
-    const citationAudit = auditCitationStyle(
-      combinedTextForChecks,
-      citationStyle,
-    );
+    const citationAudit =
+      binaryFiles.length > 0 && !cleanText(combinedTextForChecks)
+        ? {
+            expectedStyle: normalizeCitationStyle(citationStyle),
+            detectedStyles: [],
+            hasMismatch: false,
+            warnings: [],
+          }
+        : auditCitationStyle(
+            combinedTextForChecks,
+            citationStyle,
+          );
 
     const attachmentRelevanceResults = attachments.map(
       (attachment, index) =>
@@ -1449,25 +1832,15 @@ export async function POST(req: NextRequest) {
       process.env.OPENAI_MODEL?.trim() ||
       'gpt-4.1-mini';
 
-    const completion = await openai.chat.completions.create({
-      model: auditModel,
-      temperature: 0.2,
-      max_tokens: maxCompletionTokens,
-      presence_penalty: 0,
-      frequency_penalty: 0.1,
-      messages: [
-        {
-          role: 'system',
-          content: buildSystemMessage(dateInfo),
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
+    const modelResult = await runAuditModel({
+      auditModel,
+      prompt,
+      maxCompletionTokens,
+      dateInfo,
+      binaryFiles,
     });
 
-    const rawResult = completion.choices[0]?.message?.content || '';
+    const rawResult = modelResult.rawResult;
     const cleanedResult = buildClientCleanResult(rawResult);
 
     if (!cleanedResult.trim()) {
@@ -1504,6 +1877,17 @@ export async function POST(req: NextRequest) {
         ? ''
         : 'Audit sa pravdepodobne neukončil úplne. Auditujte kratší úsek alebo zvýšte maxOutputTokens.',
       exportTypes: ['docx', 'pdf'],
+      attachmentProcessing: {
+        receivedFiles: binaryFiles.length || attachments.length,
+        successfullyReadFiles:
+          binaryFiles.length ||
+          attachments.filter((attachment) => Boolean(getAttachmentText(attachment))).length,
+        extractedCharacters: extractedAttachmentTextLength,
+        mode:
+          binaryFiles.length > 0
+            ? 'direct-model-file-input'
+            : 'extracted-text',
+      },
       citationAudit,
       attachmentRelevanceResults,
       dateAudit: {
@@ -1530,10 +1914,13 @@ export async function POST(req: NextRequest) {
         usedTextLength: text.length,
         manualTextWasTruncated: limitedManualText.truncated,
         attachmentsCount: attachments.length,
+        binaryAttachmentsCount: binaryFiles.length,
         extractedAttachmentTextLength,
         maxCompletionTokens,
         model: auditModel,
-        finishReason: completion.choices[0]?.finish_reason || null,
+        requestMode,
+        providerMode: modelResult.providerMode,
+        finishReason: modelResult.finishReason,
         completed,
       },
     });

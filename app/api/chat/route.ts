@@ -932,6 +932,354 @@ function normalizeSelectedTextEditMode(
   return 'academic';
 }
 
+
+type ProtectedSelectedEditCitation = {
+  token: string;
+  value: string;
+  relativePosition: number;
+};
+
+type SelectedEditCitationSpan = {
+  start: number;
+  end: number;
+  value: string;
+};
+
+function mergeSelectedEditCitationSpans(
+  spans: SelectedEditCitationSpan[],
+): SelectedEditCitationSpan[] {
+  const sorted = spans
+    .filter(
+      (span) =>
+        span.start >= 0 &&
+        span.end > span.start &&
+        Boolean(span.value),
+    )
+    .sort((a, b) => a.start - b.start);
+
+  const merged: SelectedEditCitationSpan[] = [];
+
+  for (const span of sorted) {
+    const previous = merged[merged.length - 1];
+
+    if (!previous || span.start >= previous.end) {
+      merged.push({ ...span });
+      continue;
+    }
+
+    // Ak sa prekrýva autor–rok s celou zátvorkovou citáciou,
+    // zachováme väčší pôvodný úsek.
+    if (span.end > previous.end) {
+      previous.end = span.end;
+      previous.value =
+        previous.value.length >= span.value.length
+          ? previous.value
+          : span.value;
+    }
+  }
+
+  return merged;
+}
+
+function findSelectedEditCitationSpans(
+  value: string,
+): SelectedEditCitationSpan[] {
+  const text = String(value || '');
+  const spans: SelectedEditCitationSpan[] = [];
+
+  // 1. Vyvážené zátvorky s rokom. Funguje aj pri vnorenom roku:
+  // (Wrigley C. W.: Cereal Chem. 78, 6. (2001)).
+  let depth = 0;
+  let start = -1;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (char === '(') {
+      if (depth === 0) start = index;
+      depth += 1;
+      continue;
+    }
+
+    if (char === ')' && depth > 0) {
+      depth -= 1;
+
+      if (depth === 0 && start >= 0) {
+        const candidate =
+          text.slice(start, index + 1);
+
+        if (
+          /\b(?:18|19|20)\d{2}[a-z]?\b/i.test(
+            candidate,
+          )
+        ) {
+          spans.push({
+            start,
+            end: index + 1,
+            value: candidate,
+          });
+        }
+
+        start = -1;
+      }
+    }
+  }
+
+  // 2. Autor (rok) – ochránime aj autora, nie iba samotný rok.
+  for (const match of text.matchAll(
+    /\b[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'-]+(?:\s+(?:et\s+al\.?|a\s+kol\.?))?\s*\((?:18|19|20)\d{2}[a-z]?\)/gi,
+  )) {
+    if (
+      typeof match.index === 'number' &&
+      match[0]
+    ) {
+      spans.push({
+        start: match.index,
+        end:
+          match.index +
+          match[0].length,
+        value: match[0],
+      });
+    }
+  }
+
+  // 3. Referenčné čísla.
+  for (const match of text.matchAll(
+    /\[(?:\d{1,3})(?:\s*[,;–-]\s*\d{1,3})*\]/g,
+  )) {
+    if (
+      typeof match.index === 'number' &&
+      match[0]
+    ) {
+      spans.push({
+        start: match.index,
+        end:
+          match.index +
+          match[0].length,
+        value: match[0],
+      });
+    }
+  }
+
+  return mergeSelectedEditCitationSpans(
+    spans,
+  );
+}
+
+function protectSelectedEditCitations(
+  value: string,
+) {
+  const text = String(value || '');
+  const spans =
+    findSelectedEditCitationSpans(text);
+
+  if (!spans.length) {
+    return {
+      protectedText: text,
+      citations:
+        [] as ProtectedSelectedEditCitation[],
+    };
+  }
+
+  const citations =
+    spans.map((span, index) => ({
+      token:
+        `ZXQCITATION${String(
+          index + 1,
+        ).padStart(4, '0')}QXZ`,
+      value: span.value,
+      relativePosition:
+        text.length > 0
+          ? span.start / text.length
+          : 0,
+    }));
+
+  let protectedText = text;
+
+  for (
+    let index = spans.length - 1;
+    index >= 0;
+    index -= 1
+  ) {
+    const span = spans[index];
+    protectedText =
+      `${protectedText.slice(
+        0,
+        span.start,
+      )}${citations[index].token}${protectedText.slice(
+        span.end,
+      )}`;
+  }
+
+  return {
+    protectedText,
+    citations,
+  };
+}
+
+function insertCitationNearRelativePosition({
+  text,
+  citation,
+  relativePosition,
+}: {
+  text: string;
+  citation: string;
+  relativePosition: number;
+}) {
+  const cleaned = normalizeText(text);
+  if (!cleaned) return citation;
+
+  const target = Math.max(
+    0,
+    Math.min(
+      cleaned.length,
+      Math.round(
+        cleaned.length *
+          relativePosition,
+      ),
+    ),
+  );
+
+  const sentenceBoundaries = [
+    ...cleaned.matchAll(/[.!?](?:\s+|$)/g),
+  ]
+    .map((match) =>
+      typeof match.index === 'number'
+        ? match.index + 1
+        : -1,
+    )
+    .filter(
+      (index) =>
+        index >= 0,
+    );
+
+  const insertionPoint =
+    sentenceBoundaries.length > 0
+      ? sentenceBoundaries.reduce(
+          (best, current) =>
+            Math.abs(
+              current - target,
+            ) <
+            Math.abs(
+              best - target,
+            )
+              ? current
+              : best,
+          sentenceBoundaries[0],
+        )
+      : target;
+
+  return normalizeText(
+    `${cleaned.slice(
+      0,
+      insertionPoint,
+    )} ${citation} ${cleaned.slice(
+      insertionPoint,
+    )}`,
+  );
+}
+
+function restoreSelectedEditCitations({
+  value,
+  citations,
+}: {
+  value: string;
+  citations: ProtectedSelectedEditCitation[];
+}) {
+  let output =
+    cleanSelectedTextEditOutput(value);
+
+  for (
+    let index = 0;
+    index < citations.length;
+    index += 1
+  ) {
+    const citation =
+      citations[index];
+    const ordinal =
+      String(index + 1);
+    const paddedOrdinal =
+      String(index + 1).padStart(
+        4,
+        '0',
+      );
+
+    const tokenPatterns = [
+      new RegExp(
+        escapeRegExp(
+          citation.token,
+        ),
+        'gi',
+      ),
+      new RegExp(
+        `ZXQ[\\s_\\-\\[\\]]*CITATION[\\s_\\-\\[\\]]*0*${ordinal}[\\s_\\-\\[\\]]*QXZ`,
+        'gi',
+      ),
+      // Kompatibilita so starším frontendovým tokenom.
+      new RegExp(
+        `\\[?\\[?\\s*ZEDPERA[\\s_\\-]*CITATION[\\s_\\-]*0*${ordinal}\\s*\\]?\\]?`,
+        'gi',
+      ),
+      new RegExp(
+        `\\[?\\[?\\s*ZEDPERACITATION0*${ordinal}\\s*\\]?\\]?`,
+        'gi',
+      ),
+      new RegExp(
+        `ZXQCITATION${paddedOrdinal}QXZ`,
+        'gi',
+      ),
+    ];
+
+    let restored = false;
+
+    for (const pattern of tokenPatterns) {
+      if (pattern.test(output)) {
+        pattern.lastIndex = 0;
+        output = output.replace(
+          pattern,
+          citation.value,
+        );
+        restored = true;
+      }
+    }
+
+    if (
+      !restored &&
+      !output.includes(
+        citation.value,
+      )
+    ) {
+      output =
+        insertCitationNearRelativePosition({
+          text: output,
+          citation:
+            citation.value,
+          relativePosition:
+            citation.relativePosition,
+        });
+    }
+  }
+
+  // Interné tokeny sa za žiadnych okolností nesmú dostať do odpovede.
+  output = output
+    .replace(
+      /ZXQ[\s_\-\[\]]*CITATION[\s_\-\[\]]*\d+[\s_\-\[\]]*QXZ/gi,
+      '',
+    )
+    .replace(
+      /\[?\[?\s*ZEDPERA[\s_-]*CITATION[\s_-]*\d+\s*\]?\]?/gi,
+      '',
+    )
+    .replace(
+      /\[?\[?\s*ZEDPERACITATION\d+\s*\]?\]?/gi,
+      '',
+    )
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+
+  return normalizeText(output);
+}
+
 function buildSelectedTextEditSystemPrompt({
   mode,
   outputLanguage,
@@ -963,7 +1311,7 @@ function buildSelectedTextEditSystemPrompt({
     '- Nevytváraj sekcie Primárne zdroje, Sekundárne zdroje, Použité zdroje, Analýza, Skóre ani Odporúčania.',
     '- Nepridávaj, neodstraňuj ani neprepisuj bibliografické zdroje.',
     '- Nepridávaj nové citácie ani nové faktické tvrdenia.',
-    '- Všetky značky vo formáte [[ZEDPERA_CITATION_N]] zachovaj presne, bez zmeny a na logicky rovnakom mieste.',
+    '- Ak sa v texte nachádzajú technické ochranné tokeny ZXQCITATION0001QXZ, ZXQCITATION0002QXZ atď., zachovaj každý presne, bez zmeny a na logicky rovnakom mieste.',
     '- Nevracaj názvy príloh, technické údaje, počet spracovaných príloh ani informácie o extrakcii.',
   ].join('\n');
 }
@@ -2481,8 +2829,176 @@ function normalizeAttachmentTitleFromFileName(value: string) {
     .trim();
 }
 
+function extractAttachmentTitleFromFirstPages(
+  file: ExtractedAttachment,
+) {
+  const fallbackTitle =
+    normalizeAttachmentTitleFromFileName(
+      file.originalName ||
+        file.name ||
+        file.preparedName ||
+        '',
+    );
+
+  const text = normalizeText(
+    file.extractedText ||
+      file.extractedPreview ||
+      '',
+  );
+
+  if (!text.trim()) {
+    return fallbackTitle;
+  }
+
+  const headerText = text
+    .split(
+      /\n\s*(Literatúra|Literatura|References|Bibliografia|Zoznam použitej literatúry)\s*\n/i,
+    )[0]
+    .split(
+      /\n\s*(Abstract|Abstrakt|Súhrn|Summary|Keywords|Kľúčové slová|Úvod|Introduction)\s*\n/i,
+    )[0]
+    .slice(0, 7000);
+
+  const lines = headerText
+    .split('\n')
+    .map((line) =>
+      normalizeText(line)
+        .replace(/\s+/g, ' ')
+        .trim(),
+    )
+    .filter(Boolean)
+    .filter(
+      (line) =>
+        !/^STRANA\s+\d+$/i.test(
+          line,
+        ),
+    )
+    .filter(
+      (line) =>
+        !/^PAGE\s+\d+$/i.test(
+          line,
+        ),
+    )
+    .slice(0, 35);
+
+  const scored = lines
+    .map((line, index) => {
+      if (
+        line.length < 12 ||
+        line.length > 260
+      ) {
+        return null;
+      }
+
+      if (
+        /\b(?:university|univerzita|fakulta|faculty|department|katedra|ústav|ustav|institute|email|e-mail|doi|http|www\.|issn|isbn|abstract|abstrakt|summary|keywords|kľúčové slová)\b/i.test(
+          line,
+        )
+      ) {
+        return null;
+      }
+
+      if (
+        looksLikeAuthorHeaderLine(
+          line,
+        )
+      ) {
+        return null;
+      }
+
+      const letters =
+        line.match(
+          /[A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž]/g,
+        ) || [];
+      const uppercaseLetters =
+        line.match(
+          /[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]/g,
+        ) || [];
+      const words = line
+        .split(/\s+/)
+        .filter(Boolean);
+      const uppercaseRatio =
+        letters.length > 0
+          ? uppercaseLetters.length /
+            letters.length
+          : 0;
+
+      let score = 0;
+
+      if (
+        words.length >= 3 &&
+        words.length <= 24
+      ) {
+        score += 4;
+      }
+
+      if (
+        line.length >= 20 &&
+        line.length <= 190
+      ) {
+        score += 3;
+      }
+
+      if (uppercaseRatio >= 0.58) {
+        score += 5;
+      }
+
+      if (index <= 10) {
+        score += 3;
+      }
+
+      if (
+        /\b(?:18|19|20)\d{2}\b/.test(
+          line,
+        )
+      ) {
+        score -= 5;
+      }
+
+      if (
+        /\b(?:vol\.?|volume|roč\.?|ročník|issue|číslo|pages|pp\.|s\.)\b/i.test(
+          line,
+        )
+      ) {
+        score -= 4;
+      }
+
+      return {
+        line,
+        score,
+        index,
+      };
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        line: string;
+        score: number;
+        index: number;
+      } => Boolean(item),
+    )
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        a.index - b.index,
+    );
+
+  const best =
+    scored.find(
+      (item) =>
+        item.score >= 6,
+    )?.line || '';
+
+  return best || fallbackTitle;
+}
+
 function cleanupPossibleAttachmentAuthor(value: string) {
   let output = normalizeText(value || '')
+    // PDF extrakcia často prilepí superscript afiliácie k priezvisku:
+    // „MACHOVIČa, JANEČEKa,b“. Odstránime iba bezpečný koncový marker a/b/c.
+    .replace(/\b([A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]{3,})[abc](?=\s|,|;|$)/g, '$1')
+    .replace(/,\s*[abc](?:\s*,\s*[abc])?(?=\s|$)/gi, ' ')
     .replace(/\bSTRANA\s+\d+\b/gi, ' ')
     .replace(/\bPAGE\s+\d+\b/gi, ' ')
     .replace(/\bDETEGOVANÉ\s+ZDROJE[\s\S]*$/gi, ' ')
@@ -2514,14 +3030,44 @@ function looksLikeAuthorHeaderLine(line: string) {
   if (!cleaned) return false;
   if (cleaned.length < 4 || cleaned.length > 260) return false;
   if (/\b(?:abstract|abstrakt|súhrn|summary|keywords|kľúčové slová|úvod|introduction|literatúra|literatura|references|bibliografia)\b/i.test(cleaned)) return false;
-  if (/\b(?:journal|volume|issue|pages|doi|url|publisher|university|press)\b/i.test(cleaned)) return false;
+  if (/\b(?:journal|volume|issue|pages|doi|url|publisher|university|press|fakulta|faculty|katedra|department|ústav|ustav|institute|akadémia|akademia|academy|dúbravská|dubravska|cesta|námestie|namestie)\b/i.test(cleaned)) return false;
   if (/\b(?:18|19|20)\d{2}\b/.test(cleaned) && cleaned.length > 80) return false;
 
-  const surnameInitials = /\b[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'-]{2,},\s*(?:[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]\.\s*){1,4}\b/.test(cleaned);
-  const initialsSurname = /\b(?:[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]\.\s*){1,4}[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'-]{2,}\b/.test(cleaned);
-  const multipleNames = cleaned.split(/\s*,\s*|\s+&\s+|\s+and\s+/i).filter((part) => /[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záäčďéíĺľňóôŕšťúýž]{2,}/.test(part)).length >= 1;
+  // Najprv odstránime superscript afiliácie prilepené PDF extrakciou
+  // (napr. MACHOVIČa, JANEČEKa,b), až potom rozhodujeme, či ide o autorov.
+  const authorCleaned =
+    cleanupPossibleAttachmentAuthor(
+      cleaned,
+    ) || cleaned;
 
-  return surnameInitials || initialsSurname || multipleNames;
+  const surnameInitials = /\b[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'-]{2,},\s*(?:[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]\.\s*){1,4}\b/.test(authorCleaned);
+  const initialsSurname = /\b(?:[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]\.\s*){1,4}[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'-]{2,}\b/.test(authorCleaned);
+  const titleCaseAuthorParts = authorCleaned
+    .split(/\s*,\s*|\s*;\s*|\s+&\s+|\s+and\s+/i)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const multipleNames =
+    /[,;]|\s+&\s+|\s+and\s+/i.test(authorCleaned) &&
+    titleCaseAuthorParts.length >= 2 &&
+    titleCaseAuthorParts.filter((part) =>
+      /^(?:[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záäčďéíĺľňóôŕšťúýž.'-]{1,}\s+){1,3}[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'-]{1,}$/.test(
+        part,
+      ),
+    ).length >= 2;
+  const uppercaseAuthorParts = authorCleaned
+    .split(/\s*,\s*|\s*;\s*|\s+&\s+|\s+and\s+/i)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const uppercaseFullNames =
+    /[,;]|\s+&\s+|\s+and\s+/i.test(authorCleaned) &&
+    uppercaseAuthorParts.length >= 2 &&
+    uppercaseAuthorParts.every((part) =>
+      /^(?:[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]{2,}\s+){1,3}[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]{2,}$/.test(
+        part,
+      ),
+    );
+
+  return surnameInitials || initialsSurname || multipleNames || uppercaseFullNames;
 }
 
 function extractAttachmentAuthorsFromFirstPages(file: ExtractedAttachment) {
@@ -2570,7 +3116,11 @@ function extractAttachmentAuthorsFromFirstPages(file: ExtractedAttachment) {
   return uniqueArray(
     candidates
       .map((candidate) => cleanupPossibleAttachmentAuthor(candidate))
-      .flatMap((candidate) => candidate.split(/\s*,\s*(?=[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záäčďéíĺľňóôŕšťúýž])/))
+      .flatMap((candidate) =>
+        candidate.split(
+          /\s*,\s*(?=[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]{2,}(?:\s|$))/,
+        ),
+      )
       .map((candidate) => cleanupPossibleAttachmentAuthor(candidate))
       .filter(Boolean)
       .filter((candidate) => candidate.length >= 3 && candidate.length <= 120),
@@ -2667,27 +3217,35 @@ function formatPrimaryBibliographicCitation({
     year || REQUIRED_VERIFICATION_NOTICE;
 
   if (!safeAuthors.length) {
-    return `${REQUIRED_VERIFICATION_NOTICE} ${title}. ${yearText}.`;
+    return year
+      ? `${title}. [Priložený dokument]. ${yearText}.`
+      : `${title}. [Priložený dokument].`;
   }
 
   if (mode === 'APA') {
     const authorText =
       formatAuthorsApa(safeAuthors);
 
-    return `${authorText} (${yearText}). ${title} [PDF].`;
+    return year
+      ? `${authorText} (${yearText}). ${title}. [Priložený dokument].`
+      : `${authorText}. ${title}. [Priložený dokument].`;
   }
 
   if (mode === 'HARVARD') {
     const authorText =
       formatAuthorsApa(safeAuthors);
 
-    return `${authorText} (${yearText}) '${title}' [PDF].`;
+    return year
+      ? `${authorText} (${yearText}) '${title}'. [Priložený dokument].`
+      : `${authorText} '${title}'. [Priložený dokument].`;
   }
 
   const authorText =
     safeAuthors.join('; ');
 
-  return `${authorText}. ${title} [PDF]. ${yearText}.`;
+  return year
+    ? `${authorText}. ${title}. [Priložený dokument]. ${yearText}.`
+    : `${authorText}. ${title}. [Priložený dokument].`;
 }
 
 type PrimaryCitationRecord = {
@@ -2880,85 +3438,86 @@ function buildPrimaryCitationRecords({
 }): PrimaryCitationRecord[] {
   if (!attachmentWasRelevant) return [];
 
-  void extractedFiles;
+  // Primárny zdroj je samotný nahraný dokument, nie jeho zoznam literatúry.
+  // Bibliografické položky z dokumentu sa spracujú nižšie ako sekundárne zdroje.
+  void detectedSourcesForOutput;
+  void generatedText;
 
   const normalizedCitationStyle =
-    normalizeCitationStyle(citationStyle);
-  const citations =
-    generatedText.trim()
-      ? extractInTextCitations(
-          generatedText,
-        )
-      : [];
+    normalizeCitationStyle(
+      citationStyle,
+    );
 
-  const candidates =
-    mergeBibliographicCandidates(
-      detectedSourcesForOutput,
+  return extractedFiles
+    .filter(
+      (file) =>
+        Boolean(
+          file.extractedText.trim() ||
+            file.originalName,
+        ),
     )
-      .filter(candidateHasUsableData)
-      .filter(
-        isSourceCompleteEnoughForSecondary,
-      )
-      .filter(
-        sourceIsFromUploadedMaterial,
-      )
-      .filter(
-        (source) =>
-          !looksLikeRawOcrPage(
-            source.raw || '',
-          ),
-      )
-      .filter(
-        (source) =>
-          !looksLikeIncompleteInitialCitation(
-            source.raw || '',
-          ),
-      )
-      .filter(
-        (source) =>
-          !looksLikeAttachmentMetadataCandidate(
-            source,
-          ),
-      )
-      .filter((source) =>
-        generatedText.trim()
-          ? sourceWasUsedInGeneratedText({
-              source,
-              generatedText,
-              citations,
-            })
-          : true,
-      );
-
-  return candidates
-    .map((source) => {
-      const bibliography =
-        formatCandidateForFinalLiterature(
-          source,
-          normalizedCitationStyle,
+    .map((file) => {
+      const documentName =
+        extractAttachmentTitleFromFirstPages(
+          file,
+        ) ||
+        normalizeAttachmentTitleFromFileName(
+          file.originalName ||
+            file.name ||
+            file.preparedName ||
+            '',
         );
 
-      if (!bibliography) return null;
+      const authors =
+        extractAttachmentAuthorsFromFirstPages(
+          file,
+        );
+      const year =
+        extractAttachmentYearFromFirstPages(
+          file,
+        );
 
-      const title = normalizeText(
-        source.title ||
-          source.raw ||
-          '',
-      );
+      const bibliography =
+        formatPrimaryBibliographicCitation({
+          documentName,
+          authors,
+          year,
+          citationStyle:
+            normalizedCitationStyle,
+        });
+
+      const originalFileName =
+        normalizeAttachmentDocumentName(
+          file.originalName ||
+            file.name ||
+            file.preparedName ||
+            '',
+        );
+
+      const displayText =
+        originalFileName &&
+        normalizeForSemanticMatch(
+          originalFileName,
+        ) !==
+          normalizeForSemanticMatch(
+            documentName,
+          )
+          ? `${bibliography} Zdrojový súbor: ${originalFileName}.`
+          : bibliography;
 
       return {
-        documentName: title,
-        authors: cleanValidAuthors(
-          source.authors || [],
-        ),
-        year: source.year || null,
+        documentName,
+        authors,
+        year,
         bibliography,
-        displayText: bibliography,
+        displayText,
       } satisfies PrimaryCitationRecord;
     })
     .filter(
-      (item): item is PrimaryCitationRecord =>
-        Boolean(item),
+      (record) =>
+        Boolean(
+          record.documentName,
+        ),
     )
     .slice(
       0,
@@ -4011,17 +4570,23 @@ function buildCitationAwareFinalOutput({
       number: index + 1,
     }));
 
+  // Bibliografia a citácie nájdené vo vnútri nahraného dokumentu patria
+  // medzi sekundárne zdroje. Primárny zdroj je samotný dokument.
   const secondarySourceCandidates =
     detectedSourcesForOutput.filter(
       (source) =>
-        !sourceIsFromUploadedMaterial(
+        candidateHasUsableData(
           source,
-        ) ||
-        source.origin ===
-          'semantic_scholar' ||
-        source.origin ===
-          'crossref' ||
-        source.origin === 'ai',
+        ) &&
+        !looksLikeRawOcrPage(
+          source.raw || '',
+        ) &&
+        !looksLikeIncompleteInitialCitation(
+          source.raw || '',
+        ) &&
+        !looksLikeAttachmentMetadataCandidate(
+          source,
+        ),
     );
 
   const allSecondaryRecords =
@@ -4189,8 +4754,6 @@ function buildCitationAwareFinalOutput({
     'Sekundárne zdroje',
     '',
     secondaryBlock,
-    '',
-    `Počet spracovaných príloh: ${extractedFiles.length}`,
   ].join('\n');
 
   return finalizeSourceSections(
@@ -6171,7 +6734,7 @@ function buildVerifiedSourcePackPrompt(externalResearch: ExternalResearchResult)
     return `POVOLENÉ OVERENÉ EXTERNÉ AKADEMICKÉ ZDROJE:\nNeboli nájdené použiteľné overené externé zdroje.\n\nKRITICKÉ PRAVIDLO:\nAk nie sú nájdené overené externé zdroje a nie sú dostupné úplné zdroje z príloh, nepíš fiktívne citácie. Zakázané sú všeobecné vymyslené citácie typu Smith & Jones, Johnson & Williams, Brown & Davis, Green & White, Taylor & Anderson, Roberts & Hall, Miller & Wilson.`;
   }
 
-  return `POVOLENÉ OVERENÉ EXTERNÉ AKADEMICKÉ ZDROJE:\nTieto zdroje boli nájdené cez Semantic Scholar alebo Crossref. Pri tvorbe akademického textu používaj iba citácie uvedené nižšie alebo úplné zdroje extrahované z relevantných príloh.\n\n${externalResearch.sources.map((source) => `- Citácia autor–rok: ${source.citationText}\n  Bibliografický záznam: ${source.bibliographyText}`).join('\n\n')}\n\nKRITICKÉ PRAVIDLÁ:\n1. V texte používaj iba citácie uvedené vyššie alebo citácie jednoznačne zistené z relevantných príloh.\n2. Nevytváraj fiktívnych autorov, roky, DOI, URL ani vydavateľské údaje.\n3. Ak zdroj nie je úplný, nepouži ho ako primárny citovaný zdroj.`;
+  return `POVOLENÉ OVERENÉ EXTERNÉ AKADEMICKÉ ZDROJE:\nTieto zdroje boli nájdené cez Semantic Scholar alebo Crossref. Pri tvorbe akademického textu používaj iba citácie uvedené nižšie alebo úplné zdroje extrahované z relevantných príloh.\n\n${externalResearch.sources.map((source) => `- Citácia autor–rok: ${source.citationText}\n  Bibliografický záznam: ${source.bibliographyText}`).join('\n\n')}\n\nKRITICKÉ PRAVIDLÁ:\n1. V texte používaj iba citácie uvedené vyššie alebo citácie jednoznačne zistené z relevantných príloh.\n2. Nevytváraj fiktívnych autorov, roky, DOI, URL ani vydavateľské údaje.\n3. Ak externý alebo bibliografický zdroj nie je úplný, nepouži ho ako sekundárny citovaný zdroj.`;
 }
 
 function buildAcademicChapterRules() {
@@ -6298,7 +6861,8 @@ V tejto požiadavke nebol dostupný žiadny použiteľný extrahovaný text prí
     'ZÁVÄZNÉ PRAVIDLÁ PRE ZDROJE:',
     '- Norma a forma citovania sa vždy preberajú z aktívneho profilu práce.',
     '- Na konci zachovaj samostatné sekcie Primárne zdroje a Sekundárne zdroje.',
-    '- Primárne zdroje sú iba úplné bibliografické záznamy z nahraných dokumentov, ktoré boli skutočne citované vo vygenerovanom texte. Názov súboru ani názov prílohy nie je zdroj.',
+    '- Primárny zdroj je samotný relevantný nahraný dokument alebo projektový dokument. Uveď jeho skutočný názov z hlavičky dokumentu; názov súboru použi iba ako transparentný fallback identifikátor, ak titul z obsahu nemožno bezpečne určiť.',
+    '- Bibliografické položky a citácie obsiahnuté vo vnútri primárneho dokumentu patria medzi sekundárne zdroje, nie medzi primárne.',
     '- Nevymýšľaj autorov, rok, DOI, URL ani bibliografické údaje.',
     `- Ak údaj nie je možné bezpečne určiť, použi presnú vetu: ${REQUIRED_VERIFICATION_NOTICE}`,
     '',
@@ -6497,8 +7061,8 @@ POVINNÉ SPRACOVANIE PRÍLOH:
 - Chýbajúce alebo nečitateľné údaje označ ako nedostupné; nevymýšľaj ich.
 
 PRAVIDLÁ PRE ZDROJE:
-1. Primárne zdroje = úplné bibliografické záznamy skutočne identifikované v texte relevantných príloh a použité pri tvorbe výstupu. Samotný názov nahraného súboru nikdy nie je bibliografickým zdrojom.
-2. Sekundárne zdroje = úplné bibliografické zdroje, ktoré sú citované alebo uvedené priamo v texte výstupu. Každý sekundárny zdroj musí mať aspoň autora, rok, názov, zdroj/časopis alebo strany/DOI/URL.
+1. Primárne zdroje = samotné relevantné nahrané dokumenty alebo projektové dokumenty, z ktorých výstup čerpá. Ako názov primárneho zdroja použi titul identifikovaný v obsahu dokumentu; názov súboru je iba fallback identifikátor, keď titul nemožno bezpečne zistiť.
+2. Sekundárne zdroje = úplné bibliografické zdroje citované v texte primárneho dokumentu alebo priamo použité vo vygenerovanom texte. Každý sekundárny zdroj musí mať aspoň autora, rok a dostatok bibliografických údajov na jednoznačnú identifikáciu.
 3. Ak článok obsahuje zoznam literatúry, nikdy ho nepremiestňuj do primárnych zdrojov; do sekundárnych zdrojov uveď iba tie záznamy, ktoré sú v texte výstupu skutočne citované alebo použité.
 4. Do výstupu nevkladaj neúplné zdroje typu B. (2019), H. (2020), R. (2017), „Údaje sú potrebné overiť.“, „Autor je potrebné overiť“ alebo „Rok chýba“.
 5. Názvy zdrojov, mená autorov, DOI, URL, názvy časopisov a bibliografické údaje ponechaj v pôvodnom tvare. Neprekladaj ich len preto, že používateľ prepne jazyk aplikácie.
@@ -8861,18 +9425,49 @@ if (isChapterRequest || sourcesOnly || module === 'chat') {
   const hasCurrentRequestAttachments =
     extractedFiles.length > 0 ||
     nativeAttachmentFileNames.length > 0;
+  const primaryCitationValidationSources: BibliographicCandidate[] =
+    hasCurrentRequestAttachments
+      ? buildPrimaryCitationRecords({
+          detectedSourcesForOutput,
+          extractedFiles,
+          attachmentWasRelevant: true,
+          citationStyle: activeCitationStyle,
+          generatedText: output,
+        })
+          .filter(
+            (record) =>
+              record.authors.length > 0 &&
+              Boolean(record.year),
+          )
+          .map((record) => ({
+            raw: record.bibliography,
+            authors: record.authors,
+            year: record.year,
+            title: record.documentName,
+            doi: null,
+            url: null,
+            sourceType: 'unknown' as const,
+            origin: 'attachment' as const,
+            sourceDocumentName: record.documentName,
+            citedAccordingTo: record.documentName,
+          }))
+      : [];
+
   const completeCitationSources =
     hasCurrentRequestAttachments
-      ? detectedSourcesForOutput
-          .filter(
-            isSourceCompleteEnoughForSecondary,
-          )
-          .filter(
-            (source) =>
-              !looksLikeAttachmentMetadataCandidate(
-                source,
-              ),
-          )
+      ? mergeBibliographicCandidates(
+          detectedSourcesForOutput
+            .filter(
+              isSourceCompleteEnoughForSecondary,
+            )
+            .filter(
+              (source) =>
+                !looksLikeAttachmentMetadataCandidate(
+                  source,
+                ),
+            ),
+          primaryCitationValidationSources,
+        )
       : externalResearch.sources.map(
           verifiedSourceToBibliographicCandidate,
         );
@@ -10319,6 +10914,16 @@ try {
         });
       }
 
+      const {
+        protectedText:
+          protectedSelectedEditInput,
+        citations:
+          protectedSelectedEditCitations,
+      } =
+        protectSelectedEditCitations(
+          selectedEditInput,
+        );
+
       const selectedEditSystemPrompt =
         buildSelectedTextEditSystemPrompt({
           mode: editMode,
@@ -10327,7 +10932,8 @@ try {
       const selectedEditMessages: ChatMessage[] = [
         {
           role: 'user',
-          content: selectedEditInput,
+          content:
+            protectedSelectedEditInput,
         },
       ];
       const selectedEditOutputTokens =
@@ -10418,9 +11024,12 @@ try {
       }
 
       const output =
-        cleanSelectedTextEditOutput(
-          selectedEditOutput,
-        );
+        restoreSelectedEditCitations({
+          value:
+            selectedEditOutput,
+          citations:
+            protectedSelectedEditCitations,
+        });
 
       if (!output) {
         throw new Error(
@@ -10853,14 +11462,18 @@ ${
     };
 
     const hasCurrentRequestAttachments =
+      receivedAttachments > 0 ||
       relevantExtractedFiles.length > 0;
 
     const shouldSearchExternalSources =
       settings.useExternalAcademicSources &&
       settings.allowAiKnowledgeFallback &&
       (isChapterRequest || sourcesOnly || module === 'chat') &&
+      // Ak používateľ práve priložil dokument, neprimiešavame k nemu
+      // automaticky webové zdroje. Inak by sa externá bibliografia mohla
+      // nesprávne tváriť ako zdroj z prílohy.
+      !hasCurrentRequestAttachments &&
       (
-        !hasCurrentRequestAttachments ||
         !hasSuccessfullyExtractedUpload ||
         !relevance.hasAttachmentContent ||
         !relevance.isRelevant ||
@@ -11110,8 +11723,8 @@ Dodrž:
 - nepoužívaj fiktívne citácie,
 - citácie musia byť priamo v texte,
 - na konci uveď iba jednu dvojicu sekcií: Primárne zdroje a Sekundárne zdroje,
-- primárne zdroje musia byť úplné bibliografické záznamy identifikované v texte relevantných príloh; samotné názvy nahraných súborov sa nesmú uvádzať ako zdroje,
-- sekundárne zdroje musia obsahovať úplné bibliografické záznamy všetkých citácií použitých priamo v texte,
+- primárne zdroje sú samotné relevantné nahrané alebo projektové dokumenty; ich názov preber z hlavičky dokumentu a názov súboru použi iba ako fallback identifikátor,
+- bibliografické záznamy a citácie z vnútra primárneho dokumentu patria medzi sekundárne zdroje; vypíš iba tie, ktoré sú bezpečne identifikované a použité priamo v texte,
 - ak príloha nebola použitá alebo nebola relevantná, nikdy nepíš, že zdroj bol rozpoznaný z prílohy,
 - nepoužívaj iniciály typu H., R., S. ako mená autorov.`,
             maxSystemPromptChars,

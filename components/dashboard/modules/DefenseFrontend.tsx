@@ -5285,7 +5285,7 @@ export default function DefenseFrontend(
           ? "ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED"
           : "ATTACHMENT_LIMIT_REACHED",
         message: hasUnlimitedAccess
-          ? `V jednej požiadavke je možné technicky spracovať maximálne ${uploadLimit} príloh. ADMIN nemá balíkový limit.`
+          ? `V jednej požiadavke je možné technicky spracovať maximálne ${uploadLimit} príloh. Ide o technický limit jednej požiadavky.`
           : uploadLimit === 1
             ? "Váš balík povoľuje maximálne 1 prílohu."
             : `Váš balík povoľuje maximálne ${uploadLimit} príloh.`,
@@ -5693,8 +5693,20 @@ ${baseRules}
 ÚLOHA:
 Priprav kompletnú obhajobu práce. Musí vzniknúť aj prezentácia, aj sprievodný text, aj otázky a odpovede.
 
-TEXT / PODKLAD:
-${input || "Použi aktívny profil práce a priložené dokumenty."}
+AKTÍVNY PROFIL PRÁCE JE HLAVNÁ KOTVA:
+- názov, téma, typ práce, odbor, cieľ, metodológia a jazyk sa vždy riadia aktívnym profilom práce,
+- príloha nesmie zmeniť tému ani názov práce,
+- nesúvisiacu prílohu ignoruj,
+- posudok alebo otázky komisie používaj iba ako doplnkový podklad k aktívnej práci.
+
+POKYN POUŽÍVATEĽA:
+${input || "Priprav obhajobu podľa aktívneho profilu práce."}
+
+POVINNÉ SPRACOVANIE POKYNU:
+- ak používateľ žiada doplniť otázku z posudku, pripomienku, odpoveď alebo konkrétnu úpravu obhajoby, túto požiadavku musíš zapracovať,
+- negeneruj iba všeobecnú prezentáciu a neignoruj text z chatového poľa,
+- otázku z posudku vlož do časti otázok komisie a priprav k nej vecnú odpoveď naviazanú na profil práce a dostupný text práce,
+- ak pokyn používateľa odporuje nesúvisiacej prílohe, uprednostni aktívny profil práce a samotný pokyn.
 
 ZAČIATOK ODPOVEDE:
 Začni priamo názvom práce:
@@ -6040,7 +6052,7 @@ Text emailu:
         code:
           "ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED",
         message:
-          `V jednej požiadavke je možné technicky spracovať maximálne ${maxUnlimitedFilesPerRequest} príloh. ADMIN nemá balíkový limit.`,
+          `V jednej požiadavke je možné technicky spracovať maximálne ${maxUnlimitedFilesPerRequest} príloh. Ide o technický limit jednej požiadavky.`,
         purchaseUrl: "/dashboard",
       });
 
@@ -6791,7 +6803,13 @@ Text emailu:
           )
           .slice(0, 120_000);
 
-      if (clientExtractedText) {
+      /**
+       * Pri Obhajobe neposielame zlúčený text všetkých príloh ako anonymný
+       * "clientExtractedText". Server musí zachovať identitu jednotlivých
+       * súborov, rozlíšiť prácu od posudku a overiť ich voči aktívnemu profilu.
+       * Inak by jediná nesúvisiaca príloha mohla prepísať tému obhajoby.
+       */
+      if (clientExtractedText && requestedModule !== "defense") {
         formData.append(
           "clientExtractedText",
           clientExtractedText,
@@ -6847,12 +6865,26 @@ Text emailu:
       formData.append("citation", getCitationStyle(profileForApi));
       formData.append("useSemanticScholar", "false");
       formData.append("sourceMode", "none");
-      formData.append("validateAttachmentsAgainstProfile", "false");
+      formData.append(
+        "validateAttachmentsAgainstProfile",
+        requestedModule === "defense" ? "true" : "false",
+      );
       formData.append("requireSourceList", "false");
-      formData.append("allowAiKnowledgeFallback", "true");
+      formData.append(
+        "allowAiKnowledgeFallback",
+        requestedModule === "defense" ? "false" : "true",
+      );
       formData.append("extractUploadedText", "true");
-      formData.append("useExtractedTextFirst", "true");
+      formData.append(
+        "useExtractedTextFirst",
+        requestedModule === "defense" ? "false" : "true",
+      );
       formData.append("returnExtractedFilesInfo", "true");
+
+      if (requestedModule === "defense") {
+        formData.append("profileIsAuthoritative", "true");
+        formData.append("attachmentRole", "supplemental");
+      }
       formData.append("contextaCitationFormat", "false");
       formData.append("includeSources", "false");
       formData.append("includePrimarySources", "false");
@@ -6975,11 +7007,14 @@ Text emailu:
         useCrossref: false,
         appendBibliography: false,
         returnSources: false,
-        validateAttachmentsAgainstProfile: false,
-        allowAiKnowledgeFallback: true,
+        validateAttachmentsAgainstProfile: requestedModule === "defense",
+        allowAiKnowledgeFallback: requestedModule !== "defense",
         extractUploadedText: true,
-        useExtractedTextFirst: true,
+        useExtractedTextFirst: requestedModule !== "defense",
         returnExtractedFilesInfo: true,
+        profileIsAuthoritative: requestedModule === "defense",
+        attachmentRole:
+          requestedModule === "defense" ? "supplemental" : "context",
         moduleSettings: {
           activeModule: requestedModule,
           qualityMode,
@@ -8663,8 +8698,8 @@ Text emailu:
           </div>
 
           {activeModule === "planning" && (
-            <div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-              Dnešný dátum: {getTodaySkDate()}.
+            <div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm font-black text-amber-100">
+              Aktívny profil práce
             </div>
           )}
 

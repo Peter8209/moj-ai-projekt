@@ -5880,10 +5880,17 @@ export default function PlanningFrontend(
     [planningWorkType],
   );
 
-  const planningProfileWorkLabel = useMemo(
-    () => activeProfile?.schema?.label?.trim() || planningPreset.label,
-    [activeProfile, planningPreset.label],
-  );
+  const planningProfileWorkLabel = useMemo(() => {
+    const profileLabel = activeProfile?.schema?.label?.trim();
+
+    // Interné označenie účtu ADMIN nesmie byť používateľsky viditeľné
+    // v plánovaní. Zobrazuje sa iba reálny druh práce z profilu/presetu.
+    if (!profileLabel || /^admin(?:istrator|istrátor)?$/i.test(profileLabel)) {
+      return planningPreset.label;
+    }
+
+    return profileLabel;
+  }, [activeProfile, planningPreset.label]);
 
   const planningProfileRangeLabel = useMemo(
     () => getPlanningProfileRangeLabel(activeProfile, planningTargetPages),
@@ -10234,35 +10241,9 @@ Text emailu:
                   <div className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_390px]">
                     <div className="space-y-7">
                       <div className="rounded-[28px] border border-white/10 bg-white/[0.035] p-5 sm:p-6">
-                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
-                              Krok 1
-                            </p>
-                            <h4 className="mt-1 text-lg font-black text-white">
-                              Aktívny profil práce
-                            </h4>
-                            <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-slate-400">
-                              Druh práce sa nemení v plánovaní. Zedpera ho načíta
-                              priamo z profilu, aby bol harmonogram zhodný s
-                              nastaveným rozsahom a témou práce.
-                            </p>
-                          </div>
-
-                          <div className="min-w-[230px] rounded-2xl border border-violet-300/20 bg-violet-500/10 px-4 py-3">
-                            <p className="text-[9px] font-black uppercase tracking-[0.14em] text-violet-300">
-                              Načítané z profilu
-                            </p>
-                            <p className="mt-1 text-sm font-black text-white">
-                              {planningProfileWorkLabel}
-                            </p>
-                            <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-400">
-                              {activeProfile?.title ||
-                                activeProfile?.topic ||
-                                "Najskôr vyberte profil práce"}
-                            </p>
-                          </div>
-                        </div>
+                        <h4 className="text-lg font-black text-white">
+                          Aktívny profil práce
+                        </h4>
                       </div>
 
                       <div className="rounded-[28px] border border-white/10 bg-white/[0.035] p-5 sm:p-6">

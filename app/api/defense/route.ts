@@ -789,14 +789,20 @@ Tvojou úlohou je vytvoriť čistý výstup pre klienta:
 - návrhy vizuálneho rozloženia slidov,
 - reakcie na otázky a pripomienky komisie.
 
-Musíš vychádzať z:
-- aktuálneho profilu práce,
-- názvu práce,
-- textu práce,
-- priložených podkladov,
-- cieľa, metodológie, hypotéz, výskumných otázok a prínosu práce.
+PRÍSNA HIERARCHIA KONTEXTU:
+1. Aktuálny profil práce je autoritatívna kotva identity práce. Určuje názov, tému, typ práce, odbor, cieľ, metodológiu a jazyk.
+2. Explicitný pokyn používateľa z chatového poľa je povinná požiadavka na aktuálnu obhajobu a nesmie byť ignorovaný.
+3. Text práce sa môže použiť iba ako obsah patriaci k tej istej práci.
+4. Posudky, otázky komisie a ostatné prílohy sú iba doplnkové podklady. Nesmú zmeniť názov, tému ani profil práce.
+5. Nesúvisiacu prílohu ignoruj a nikdy podľa nej nevytváraj novú tému obhajoby.
 
-Ak je dostupný text práce z nahraného Word/PDF/TXT/RTF/CSV/XLSX súboru alebo clientExtractedText, považuj ho za hlavný obsah práce.
+Ak používateľ žiada zakomponovať otázku alebo pripomienku z posudku:
+- zapracuj ju do slidu s otázkami komisie alebo vytvor samostatný slide,
+- priprav stručnú odbornú odpoveď do speakerNotes,
+- odpoveď ukotvi v profile práce, metodológii, výsledkoch a dostupnom texte tej istej práce,
+- nevygeneruj iba všeobecnú prezentáciu bez vykonania požadovanej úpravy.
+
+Ak je dostupný profilovo zhodný text práce z nahraného Word/PDF/TXT/RTF/CSV/XLSX súboru alebo clientExtractedText, používaj ho ako obsah práce.
 Krátku vetu používateľa typu „priprav prezentáciu podľa priloženej práce“ považuj iba za pokyn, nie za obsah práce.
 Nikdy nevytvor iba 2 slidy, ak je dostupný text práce alebo dlhší extrahovaný obsah.
 
@@ -861,20 +867,26 @@ ${title}
 TYP OBHAJOBY:
 ${defenseType}
 
-AKTUÁLNY PROFIL PRÁCE:
+AKTUÁLNY PROFIL PRÁCE – AUTORITATÍVNA KOTVA:
 ${buildProfilePromptBlock(profile, defenseType)}
 
-POKYN POUŽÍVATEĽA:
-${instruction || 'Používateľ neposlal samostatný pokyn.'}
+POKYN POUŽÍVATEĽA – POVINNÉ VYKONAŤ:
+${instruction || 'Používateľ neposlal samostatný pokyn. Priprav obhajobu podľa aktívneho profilu práce.'}
 
-HLAVNÝ TEXT PRÁCE ALEBO EXTRAHOVANÝ OBSAH:
-${workText || 'Text práce nie je dostupný. Vychádzaj z profilu práce a uveď, kde treba doplniť údaje.'}
+HLAVNÝ TEXT TEJ ISTEJ PRÁCE:
+${workText || 'Text práce nie je dostupný alebo nebol overený ako zhodný s profilom. Vychádzaj z profilu práce a nevymýšľaj chýbajúce údaje.'}
 
-PRILOŽENÉ PODKLADY:
+DOPLNKOVÉ PODKLADY – POSUDKY, OTÁZKY, TABUĽKY A VIZUÁLY:
 ${reviewsBlock}
 
 HLAVNÁ ÚLOHA:
-Vytvor prezentáciu na obhajobu, ktorá bude použiteľná pred komisiou.
+Vytvor prezentáciu na obhajobu, ktorá bude použiteľná pred komisiou a rešpektuje aktívny profil práce aj explicitný pokyn používateľa.
+
+KONTROLA PRED ODOVZDANÍM:
+- názov a téma prezentácie sa musia zhodovať s aktívnym profilom práce,
+- explicitný pokyn používateľa musí byť viditeľne zapracovaný vo výsledku,
+- posudok alebo príloha môže iba doplniť otázku, odpoveď, údaj, tabuľku alebo vizuál k tejto práci,
+- ak je príloha tematicky nesúvisiaca, nesmie sa prejaviť v názve, cieli, metodológii ani výsledkoch prezentácie.
 
 POŽIADAVKY NA POČET A ŠTRUKTÚRU:
 - vytvor približne ${targetSlides} slidov,
@@ -1040,23 +1052,255 @@ function buildCombinedWorkText({
   return truncateText(combined, MAX_WORK_TEXT_CHARS).text;
 }
 
+
+const PROFILE_RELEVANCE_STOP_WORDS = new Set([
+  'praca',
+  'prace',
+  'praci',
+  'pracu',
+  'tema',
+  'temy',
+  'ciel',
+  'ciela',
+  'vyskum',
+  'vyskumu',
+  'analyza',
+  'analyzy',
+  'metodologia',
+  'metodologie',
+  'vysledky',
+  'vysledkov',
+  'bakalarska',
+  'diplomova',
+  'magisterska',
+  'seminarna',
+  'zaverecna',
+  'student',
+  'studentka',
+  'the',
+  'and',
+  'with',
+  'from',
+  'this',
+  'that',
+  'work',
+  'thesis',
+]);
+
+function normalizeRelevanceText(value: string) {
+  return cleanInvisibleCharacters(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getProfileRelevanceTexts(profile: SavedProfile | null) {
+  if (!profile) return [];
+
+  return [
+    profile.title,
+    profile.topic,
+    profile.field,
+    profile.annotation,
+    profile.goal,
+    profile.problem,
+    profile.researchProblem,
+    profile.methodology,
+    profile.hypotheses,
+    profile.researchQuestions,
+    profile.practicalPart,
+    profile.scientificContribution,
+    profile.contribution,
+    ...(profile.keywords || []),
+    ...(profile.keywordsList || []),
+  ]
+    .map((value) => cleanInvisibleCharacters(String(value || '')))
+    .filter(Boolean);
+}
+
+function evaluateTextAgainstProfile(text: string, profile: SavedProfile | null) {
+  if (!profile) {
+    return { relevant: true, score: 0, reason: 'bez-profilu' };
+  }
+
+  const normalizedText = normalizeRelevanceText(text);
+
+  if (!normalizedText) {
+    return { relevant: false, score: 0, reason: 'bez-textu' };
+  }
+
+  const exactAnchors = [profile.title, profile.topic]
+    .map((value) => normalizeRelevanceText(String(value || '')))
+    .filter((value) => value.length >= 12);
+
+  if (exactAnchors.some((anchor) => normalizedText.includes(anchor))) {
+    return { relevant: true, score: 100, reason: 'zhoda-nazvu-alebo-temy' };
+  }
+
+  const tokens = Array.from(
+    new Set(
+      getProfileRelevanceTexts(profile)
+        .flatMap((value) => normalizeRelevanceText(value).split(' '))
+        .filter(
+          (token) =>
+            token.length >= 4 &&
+            !PROFILE_RELEVANCE_STOP_WORDS.has(token) &&
+            !/^\d+$/.test(token),
+        ),
+    ),
+  ).slice(0, 80);
+
+  if (tokens.length === 0) {
+    // Profil nemá dosť údajov na spoľahlivé odmietnutie prílohy.
+    return { relevant: true, score: 0, reason: 'profil-bez-kotiev' };
+  }
+
+  const matchedTokens = tokens.filter((token) =>
+    normalizedText.includes(` ${token} `) ||
+    normalizedText.startsWith(`${token} `) ||
+    normalizedText.endsWith(` ${token}`) ||
+    normalizedText === token,
+  );
+
+  const minimumMatches =
+    tokens.length >= 12
+      ? 3
+      : tokens.length >= 5
+        ? 2
+        : 1;
+
+  return {
+    relevant: matchedTokens.length >= minimumMatches,
+    score: matchedTokens.length,
+    reason:
+      matchedTokens.length >= minimumMatches
+        ? 'profilova-zhoda'
+        : 'slaba-profilova-zhoda',
+  };
+}
+
+function isWorkAttachmentForProfile(
+  file: ReviewFileInfo,
+  profile: SavedProfile | null,
+) {
+  if (!file.extractionAvailable || !file.text.trim()) return false;
+
+  if (
+    file.detectedKind === 'review' ||
+    file.detectedKind === 'image' ||
+    file.detectedKind === 'table'
+  ) {
+    return false;
+  }
+
+  if (!profile) {
+    return file.detectedKind === 'work' || file.detectedKind === 'unknown';
+  }
+
+  return evaluateTextAgainstProfile(file.text, profile).relevant;
+}
+
+function isSupplementalAttachmentForProfile(
+  file: ReviewFileInfo,
+  profile: SavedProfile | null,
+) {
+  if (file.detectedKind === 'image') return true;
+
+  if (file.detectedKind === 'review') {
+    if (!file.extractionAvailable || !file.text.trim()) return false;
+    if (!profile) return true;
+
+    // Posudok sa použije iba vtedy, keď je obsahovo zhodný s aktívnym profilom.
+    // Tým sa zabráni tomu, aby posudok z inej práce zmenil tému obhajoby.
+    return evaluateTextAgainstProfile(file.text, profile).relevant;
+  }
+
+  if (file.detectedKind === 'table') {
+    if (!file.extractionAvailable || !file.text.trim()) return false;
+    return evaluateTextAgainstProfile(file.text, profile).relevant;
+  }
+
+  return false;
+}
+
+function sameCleanText(a: string, b: string) {
+  const left = cleanInvisibleCharacters(a);
+  const right = cleanInvisibleCharacters(b);
+  return Boolean(left && right && left === right);
+}
+
+function appendWarning(current: string | undefined, next: string) {
+  const cleanNext = cleanInvisibleCharacters(next);
+
+  if (!cleanNext) return current;
+  if (!current) return cleanNext;
+
+  return `${current} ${cleanNext}`.trim();
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
 
     const title = cleanClientVisibleText(String(formData.get('title') || ''));
 
+    const explicitInstruction = cleanClientVisibleText(
+      String(
+        formData.get('userInstruction') ||
+          formData.get('instruction') ||
+          formData.get('question') ||
+          '',
+      ),
+    );
+
+    const summaryEntry = formData.get('summary');
+    const textEntry = formData.get('text');
+    const contentEntry = formData.get('content');
+    const messageEntry = formData.get('message');
+
+    /**
+     * Prázdne summary/text je stále platná hodnota. Nepoužívame preto `||`,
+     * pretože pri prázdnom chatovom poli by sa ako summary zobral interný
+     * generovaný prompt z poľa message a server by ho omylom považoval za
+     * text práce.
+     */
     const rawSummary = String(
-      formData.get('summary') ||
-        formData.get('text') ||
-        formData.get('content') ||
-        formData.get('message') ||
-        '',
+      summaryEntry !== null
+        ? summaryEntry
+        : textEntry !== null
+          ? textEntry
+          : contentEntry !== null
+            ? contentEntry
+            : messageEntry !== null
+              ? messageEntry
+              : '',
     );
 
     const summary = cleanClientVisibleText(rawSummary);
     const shortInstructionDetected = isShortInstructionOnly(summary);
-    const instruction = shortInstructionDetected ? summary : '';
+
+    /**
+     * Frontend posiela text chatového poľa cez userInstruction/instruction.
+     * Tento explicitný pokyn má prioritu a nesmie sa zahodiť len preto, že
+     * neobsahuje slová typu "priprav" alebo "vytvor".
+     */
+    const instruction =
+      explicitInstruction ||
+      (shortInstructionDetected ? summary : '');
+
+    /**
+     * Ak je summary totožné s explicitným pokynom, nejde o text práce.
+     * Taký text sa nesmie primiešať do workText a následne prebiť profil.
+     */
+    const summaryForWork =
+      instruction && sameCleanText(summary, instruction)
+        ? ''
+        : shortInstructionDetected
+          ? ''
+          : summary;
 
     const defenseType = cleanClientVisibleText(
       String(formData.get('defenseType') || 'Bakalárska'),
@@ -1078,8 +1322,8 @@ export async function POST(req: NextRequest) {
     ].filter((item): item is File => item instanceof File);
 
     const finalTitle =
-      title ||
       cleanClientVisibleText(profile?.title || '') ||
+      title ||
       cleanClientVisibleText(profile?.topic || '') ||
       'Obhajoba záverečnej práce';
 
@@ -1090,7 +1334,7 @@ export async function POST(req: NextRequest) {
         profile,
         reviewFiles: [],
         hasWorkText: Boolean(
-          summary ||
+          summaryForWork ||
             formData.get('clientExtractedText') ||
             formData.get('attachmentText') ||
             formData.get('attachmentTexts'),
@@ -1120,27 +1364,41 @@ export async function POST(req: NextRequest) {
       ),
     );
 
-    if (clientExtractedText) {
-      const truncated = truncateText(clientExtractedText, MAX_TOTAL_ATTACHMENT_CHARS);
+    const workFiles = reviewFiles.filter((file) =>
+      isWorkAttachmentForProfile(file, profile),
+    );
 
-      reviewFiles.unshift({
-        name: 'Extrahovaný text z klienta',
-        size: Buffer.byteLength(clientExtractedText, 'utf-8'),
-        type: 'text/plain',
-        text: truncated.text,
-        compressed: truncated.truncated,
-        extractionAvailable: true,
-        detectedKind: 'work',
-        warning: truncated.truncated
-          ? 'Extrahovaný text z klienta bol skrátený kvôli veľkosti.'
-          : undefined,
-      });
-    }
+    const supplementalFiles = reviewFiles.filter((file) =>
+      isSupplementalAttachmentForProfile(file, profile),
+    );
+
+    const usedFiles = new Set<ReviewFileInfo>([
+      ...workFiles,
+      ...supplementalFiles,
+    ]);
+
+    const ignoredFiles = reviewFiles.filter(
+      (file) => !usedFiles.has(file),
+    );
+
+    /**
+     * clientExtractedText nemá identitu konkrétneho súboru. Ak už server dostal
+     * reálne File objekty, tento zlúčený text sa pri Obhajobe nepoužije ako
+     * "práca". Pri staršom klientovi bez File objektov ho prijmeme iba vtedy,
+     * keď je zhodný s aktívnym profilom.
+     */
+    const clientTextAllowed =
+      Boolean(clientExtractedText) &&
+      uploadedReviewFiles.length === 0 &&
+      evaluateTextAgainstProfile(clientExtractedText, profile).relevant;
+
+    const acceptedClientExtractedText =
+      clientTextAllowed ? clientExtractedText : '';
 
     const workText = buildCombinedWorkText({
-      summary: shortInstructionDetected ? '' : summary,
-      clientExtractedText,
-      reviewFiles,
+      summary: summaryForWork,
+      clientExtractedText: acceptedClientExtractedText,
+      reviewFiles: workFiles,
     });
 
     const hasWorkText = workText.trim().length >= 600;
@@ -1150,16 +1408,21 @@ export async function POST(req: NextRequest) {
         {
           ok: false,
           error:
-            'Chýba text práce alebo profil práce. Nahrajte Word/PDF/TXT súbor, pošlite clientExtractedText alebo vyberte aktívny profil práce.',
+            'Chýba aktívny profil práce alebo profilovo zhodný text práce. Vyberte profil práce a potom pridajte podklady k tej istej práci.',
         },
         { status: 400 },
       );
     }
 
-    const reviewsBlock = buildReviewsPromptBlock(reviewFiles);
+    const reviewsBlock = buildReviewsPromptBlock(supplementalFiles);
 
     let slides: DefenseSlide[] = [];
-    let warning: string | undefined;
+    let warning: string | undefined =
+      ignoredFiles.length > 0
+        ? `Ignorované nesúvisiace alebo neoverené prílohy: ${ignoredFiles
+            .map((file) => file.name)
+            .join(', ')}. Obhajoba zostala naviazaná na aktívny profil práce.`
+        : undefined;
     let fallbackUsed = false;
 
     try {
@@ -1203,18 +1466,24 @@ export async function POST(req: NextRequest) {
       console.error('DEFENSE_OPENAI_ERROR:', aiError);
 
       fallbackUsed = true;
-      warning = isOpenAiRateLimitError(aiError)
-        ? 'OpenAI dočasne vrátil limit 429/rate limit. Bol použitý náhradný základ prezentácie bez ďalšieho volania AI.'
-        : `AI generovanie prezentácie zlyhalo: ${getErrorMessage(aiError)} Bol použitý náhradný základ prezentácie.`;
+      warning = appendWarning(
+        warning,
+        isOpenAiRateLimitError(aiError)
+          ? 'OpenAI dočasne vrátil limit 429/rate limit. Bol použitý náhradný základ prezentácie bez ďalšieho volania AI.'
+          : `AI generovanie prezentácie zlyhalo: ${getErrorMessage(aiError)} Bol použitý náhradný základ prezentácie.`,
+      );
     }
 
     if (hasWorkText && slides.length < MIN_SLIDES_WITH_WORK_TEXT) {
-      warning = `AI vrátila iba ${slides.length} slidov, hoci bol dostupný text práce. Bol použitý rozšírený základ prezentácie.`;
+      warning = appendWarning(
+        warning,
+        `AI vrátila iba ${slides.length} slidov, hoci bol dostupný text práce. Bol použitý rozšírený základ prezentácie.`,
+      );
       slides = buildFallbackSlides({
         title: finalTitle,
         defenseType,
         profile,
-        reviewFilesCount: reviewFiles.length,
+        reviewFilesCount: supplementalFiles.length,
         hasWorkText,
       });
       fallbackUsed = true;
@@ -1225,12 +1494,14 @@ export async function POST(req: NextRequest) {
         title: finalTitle,
         defenseType,
         profile,
-        reviewFilesCount: reviewFiles.length,
+        reviewFilesCount: supplementalFiles.length,
         hasWorkText,
       });
 
-      warning =
-        'AI nevrátila platné slidy vo formáte JSON. Bol použitý náhradný základ prezentácie.';
+      warning = appendWarning(
+        warning,
+        'AI nevrátila platné slidy vo formáte JSON. Bol použitý náhradný základ prezentácie.',
+      );
       fallbackUsed = true;
     }
 

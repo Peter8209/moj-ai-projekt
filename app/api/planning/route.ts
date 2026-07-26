@@ -1239,18 +1239,34 @@ function getIncompleteStatusSummary(request: PlanningRequest): string {
   }).join("\n");
 }
 
+function getVisiblePlanningProfileType(profile?: SavedProfile | null): string {
+  const candidates = [
+    profile?.schema?.label,
+    profile?.type,
+    profile?.level,
+  ];
+
+  for (const candidate of candidates) {
+    const value = cleanText(candidate, 120);
+    if (!value) continue;
+
+    // ADMIN je interné oprávnenie účtu, nie druh akademickej práce.
+    // Preto sa nesmie dostať do promptu ani používateľského plánovacieho výstupu.
+    if (/^admin(?:istrator|istrátor)?$/i.test(value)) continue;
+
+    return value;
+  }
+
+  return "not specified";
+}
+
 function buildProfileBlock(profile?: SavedProfile | null): string {
   if (!profile) return "No active profile was provided.";
 
   return [
     `Title: ${profile.title || "not specified"}`,
     `Topic: ${profile.topic || "not specified"}`,
-    `Type: ${
-      profile.schema?.label ||
-      profile.type ||
-      profile.level ||
-      "not specified"
-    }`,
+    `Type: ${getVisiblePlanningProfileType(profile)}`,
     `Recommended length: ${
       profile.schema?.recommendedLength ||
       profile.recommendedLength ||

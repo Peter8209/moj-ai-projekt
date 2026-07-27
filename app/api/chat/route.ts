@@ -7078,24 +7078,158 @@ POVINNÉ SPRACOVANIE PRÍLOH:
 - Chýbajúce alebo nečitateľné údaje označ ako nedostupné; nevymýšľaj ich.
 
 PRAVIDLÁ PRE ZDROJE:
-1. PRIMÁRNY ZDROJ = samotný relevantný priložený článok, kniha, kapitola, zborník, časopis alebo projektový dokument, z ktorého odpoveď čerpá. Názov súboru NIE JE názov publikácie.
-2. Pri primárnom zdroji prečítaj začiatok dokumentu ako titulný blok. Ak je titul zalomený na dva alebo viac riadkov, všetky riadky patriace k titulu spoj do jedného úplného názvu. Hranicou názvu je začiatok bloku autorov, nie koniec prvého riadku.
-3. Po názve identifikuj všetkých autorov. Písmená pracovísk/horné indexy pri menách oddeľ od mien; afiliácie nepovažuj za titul ani za autora.
-4. Z dokumentu preber všetky dostupné bibliografické údaje: úplný titul, autorov, rok, názov časopisu/zborníka, ročník alebo zväzok, číslo, strany, vydavateľa, miesto vydania, DOI, ISSN a ISBN podľa typu dokumentu a podľa aktívnej citačnej normy. Nič z toho nevymýšľaj.
-5. Informáciu „Zdrojový súbor: <pôvodný názov súboru>.“ vždy zachovaj ako doplnkovú informáciu o pôvode ZA bibliografickým záznamom. Nesmie nahradiť titul publikácie.
-6. Zakázaný tvar primárneho zdroja: „SÚBOR: názov.pdf“, „názov.pdf. [Priložený dokument]“ alebo skrátený prvý riadok titulu, ak ďalšie riadky titul dokončujú.
-7. SEKUNDÁRNY ZDROJ = zdroj citovaný v texte priloženého primárneho dokumentu, ktorého úplný záznam sa nachádza v bibliografii toho istého dokumentu. Napríklad citáciu (PARKER a RING 2001) treba dohľadať v Literatúre/References podľa autorov a roku a prevziať celý záznam.
-8. „Sekundárny zdroj“ v tomto systéme NEZNAMENÁ nepriamu citáciu. Automaticky nepridávaj formuláciu „Cit. podľa ...“.
-9. Sekundárny zdroj nesmie vzniknúť preformátovaním fragmentu citácie. Najprv musí existovať bezpečná zhoda medzi citáciou v texte a úplným bibliografickým záznamom v sekcii Literatúra, References, Bibliografia alebo Použité zdroje.
-10. Sekundárny bibliografický záznam zachovaj v rovnakom obsahovom tvare, ako je v bibliografii priloženého dokumentu: všetci autori, úplný názov, časopis/kniha, ročník/zväzok, rok, strany a DOI/ISSN/ISBN, ak sú uvedené. Povoľ iba úpravu interpunkcie potrebnú pre aktívnu citačnú normu.
-11. Poškodené fragmenty typu „podľ, A. G. ...“, samotné iniciály, osamotené URL, neúplný OCR riadok alebo citácia bez dohľadaného bibliografického záznamu nevypisuj ako zdroj.
-12. Ak sa úplný sekundárny záznam v bibliografii priloženého dokumentu nedá bezpečne nájsť, zdroj nevypíš namiesto toho, aby si ho dopĺňal odhadom.
-13. Ak je v aktuálnej požiadavke aspoň jedna príloha alebo použiteľný extrahovaný text, Primárne aj Sekundárne zdroje vytváraj výhradne z aktuálnych dokumentov. Nehľadaj ich na internete a nedopĺňaj ich zo všeobecných znalostí AI, Semantic Scholar ani Crossref, pokiaľ používateľ výslovne nežiada externé vyhľadávanie.
-14. Ak aktuálna požiadavka nemá prílohu ani extrahovaný text, môžeš použiť overené externé akademické zdroje podľa nastavení.
-15. Názvy zdrojov, mená autorov, DOI, URL, ISSN, ISBN, názvy časopisov a bibliografické údaje ponechaj v pôvodnom tvare a jazyku.
-16. Sekcie „Primárne zdroje“ a „Sekundárne zdroje“ ponechaj v slovenčine.
-17. Norma a forma citovania sa vždy preberajú z aktívneho profilu práce.
-18. Pred odoslaním odpovede skontroluj: (a) žiadny primárny zdroj nemá názov súboru namiesto skutočného titulu, (b) žiadny viacriadkový titul nie je skrátený na prvý riadok, (c) každý sekundárny zdroj má úplný záznam dohľadaný v bibliografii dokumentu, (d) pri prílohách nebol pridaný internetový zdroj.
+
+1. PRIMÁRNY ZDROJ je samotná publikácia, z ktorej používateľ priamo čerpá:
+   článok, kniha, kapitola knihy, odborný príspevok, časopis, zborník,
+   dizertačná práca, výskumná správa alebo iný priložený odborný dokument.
+
+2. Názov súboru NIE JE názov primárneho zdroja.
+   Názvy ako:
+   „metódy.pdf“,
+   „BETA A ALFA AMYLÁZA JAČMEŇA.pdf“,
+   „SÚBOR: dokument.pdf“
+   používaj iba na označenie technického pôvodu dokumentu.
+
+3. Pri každom priloženom dokumente najprv identifikuj jeho TITULNÝ
+   A BIBLIOGRAFICKÝ BLOK.
+
+4. Úplný názov publikácie nesmie byť určený iba podľa prvého riadku.
+   Názov môže byť zalomený do dvoch, troch alebo viacerých riadkov.
+
+5. Ak bezprostredne po prvom riadku pokračujú ďalšie riadky, ktoré
+   gramaticky, významovo alebo typograficky pokračujú v názve, všetky
+   tieto riadky spoj do jedného úplného názvu.
+
+6. Za hranicu názvu považuj až:
+   - začiatok bloku autorov,
+   - alebo jednoznačný začiatok bibliografických/afiliačných údajov,
+   - nie koniec prvého riadku PDF.
+
+7. Príklad:
+   Dokument obsahuje:
+
+   VYHĽADÁVANIE ZDROJOV KVALITY V KOLEKCII
+   GENETICKÝCH ZDROJOV PŠENICE
+   ALŽBETA ZÁLEŠÁKOVÁ, SOŇA BIELKOVÁ, EDITA GREGOVÁ, JÁN KRAIC
+
+   Správny názov je:
+
+   VYHĽADÁVANIE ZDROJOV KVALITY V KOLEKCII GENETICKÝCH ZDROJOV PŠENICE
+
+   Zakázané je:
+
+   VYHĽADÁVANIE ZDROJOV KVALITY V KOLEKCII.
+
+8. Ďalší príklad:
+   Názov súboru:
+
+   BETA A ALFA AMYLÁZA JAČMEŇA.pdf
+
+   ale titul dokumentu je:
+
+   ZÁVISLOSŤ MEDZI DĹŽKOVOU VARIABILITOU GÉNU β-AMY1
+   A AKTIVITOU β-AMYLÁZY JAČMEŇA
+
+   Primárny zdroj musí používať titul publikácie:
+
+   ZÁVISLOSŤ MEDZI DĹŽKOVOU VARIABILITOU GÉNU β-AMY1
+   A AKTIVITOU β-AMYLÁZY JAČMEŇA
+
+   Nie názov PDF.
+
+9. Po identifikovaní úplného názvu identifikuj všetkých autorov uvedených
+   v titulnom bloku dokumentu.
+
+10. Od mien autorov odstráň iba technické označenia afiliácií, napríklad:
+    a, b, 1, 2 alebo horné indexy.
+    Samotné mená autorov zachovaj.
+
+11. Afiliácie, napríklad univerzita, fakulta, výskumný ústav alebo adresa,
+    nie sú súčasťou mena autora ani názvu článku.
+
+12. Pri primárnom zdroji identifikuj všetky bibliografické údaje,
+    ktoré sú v dokumente reálne dostupné:
+
+    - všetkých autorov,
+    - celý názov článku alebo knihy,
+    - rok vydania,
+    - názov časopisu alebo zborníka,
+    - ročník/zväzok,
+    - číslo vydania,
+    - rozsah strán,
+    - konkrétne použité strany, ak sú identifikovateľné,
+    - vydavateľa,
+    - miesto vydania,
+    - DOI,
+    - ISSN,
+    - ISBN.
+
+13. Uvádzaj iba údaje, ktoré sú skutočne uvedené alebo jednoznačne
+    identifikovateľné z dokumentu.
+    Chýbajúci údaj nikdy nevymýšľaj.
+
+14. Pri článku sa snaž vytvoriť plnohodnotný bibliografický záznam
+    v rozsahu dostupných údajov, napríklad:
+
+    CLARK, S.E., HAYES, P.M., HENSON, C.A.:
+    Effects of single nucleotide polymorphisms in β-amylase1 alleles
+    from barley on functional properties of the enzymes.
+    Plant Physiol. Biochem., 41, 2003, s. 798–804.
+
+15. Tento príklad je vzor ÚPLNOSTI bibliografického záznamu,
+    nie príkaz na kopírovanie presnej interpunkcie.
+    Finálna interpunkcia a poradie údajov sa riadia citačnou normou
+    aktívneho profilu práce.
+
+16. Pri knihe používaj v rozsahu dostupných údajov:
+
+    AUTOR/AUTORI. Úplný názov knihy.
+    Miesto vydania: vydavateľ, rok.
+    ISBN.
+    Použité strany, ak sú známe.
+
+17. Názov publikácie, mená autorov, názov časopisu, DOI, ISSN,
+    ISBN a ďalšie bibliografické údaje neprekladaj.
+    Zachovaj ich v pôvodnom jazyku.
+
+18. Za hotovým bibliografickým záznamom vždy zachovaj:
+
+    Zdrojový súbor: <pôvodný názov súboru>.
+
+19. „Zdrojový súbor“ je iba transparentná informácia o tom,
+    z ktorého nahraného súboru bol zdroj identifikovaný.
+
+20. Informácia „Zdrojový súbor“ nikdy nesmie nahradiť:
+    - názov publikácie,
+    - autora,
+    - rok,
+    - ani bibliografický záznam.
+
+21. Zakázané výstupy:
+
+    SÚBOR: BETA A ALFA AMYLÁZA JAČMEŇA.pdf.
+
+    BETA A ALFA AMYLÁZA JAČMEŇA.pdf. [Priložený dokument].
+
+    VYHĽADÁVANIE ZDROJOV KVALITY V KOLEKCII.
+    [Priložený dokument]. 2004.
+
+22. Ak je skutočný titul v dokumente čitateľný, nikdy nepouži názov súboru
+    ako náhradný titul.
+
+23. Ak titul nie je bezpečne identifikovateľný, nevymýšľaj ho.
+    Označ chýbajúci údaj na overenie.
+
+24. Pred vrátením odpovede vykonaj kontrolu každého primárneho zdroja:
+
+    a) obsahuje skutočný názov publikácie?
+    b) bol celý viacriadkový názov spojený?
+    c) nebol použitý iba prvý riadok?
+    d) nebol použitý názov PDF ako titul?
+    e) obsahuje všetkých bezpečne identifikovaných autorov?
+    f) obsahuje všetky dostupné bibliografické údaje?
+    g) sú chýbajúce údaje ponechané bez vymýšľania?
+    h) je „Zdrojový súbor“ uvedený až za bibliografickým záznamom?
 
 ${buildCitationStyleRuleBlock(getCitationStyle(profile))}
 

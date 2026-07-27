@@ -6731,10 +6731,10 @@ function buildStrictPlanningPrompt(profile: SavedProfile | null) {
 
 function buildVerifiedSourcePackPrompt(externalResearch: ExternalResearchResult) {
   if (!externalResearch.sources.length) {
-    return `POVOLENÉ OVERENÉ EXTERNÉ AKADEMICKÉ ZDROJE:\nNeboli nájdené použiteľné overené externé zdroje.\n\nKRITICKÉ PRAVIDLO:\nAk nie sú nájdené overené externé zdroje a nie sú dostupné úplné zdroje z príloh, nepíš fiktívne citácie. Zakázané sú všeobecné vymyslené citácie typu Smith & Jones, Johnson & Williams, Brown & Davis, Green & White, Taylor & Anderson, Roberts & Hall, Miller & Wilson.`;
+    return `POVOLENÉ OVERENÉ EXTERNÉ AKADEMICKÉ ZDROJE:\nNeboli nájdené použiteľné overené externé zdroje.\n\nKRITICKÉ PRAVIDLO:\nExterné zdroje sú náhradný režim pre požiadavky bez prílohy. Ak je dostupná aktuálna príloha alebo extrahovaný text, primárne a sekundárne zdroje určuj iba z dokumentu. Ak nie sú nájdené overené externé zdroje a nie sú dostupné úplné zdroje z príloh, nepíš fiktívne citácie.`;
   }
 
-  return `POVOLENÉ OVERENÉ EXTERNÉ AKADEMICKÉ ZDROJE:\nTieto zdroje boli nájdené cez Semantic Scholar alebo Crossref. Pri tvorbe akademického textu používaj iba citácie uvedené nižšie alebo úplné zdroje extrahované z relevantných príloh.\n\n${externalResearch.sources.map((source) => `- Citácia autor–rok: ${source.citationText}\n  Bibliografický záznam: ${source.bibliographyText}`).join('\n\n')}\n\nKRITICKÉ PRAVIDLÁ:\n1. V texte používaj iba citácie uvedené vyššie alebo citácie jednoznačne zistené z relevantných príloh.\n2. Nevytváraj fiktívnych autorov, roky, DOI, URL ani vydavateľské údaje.\n3. Ak externý alebo bibliografický zdroj nie je úplný, nepouži ho ako sekundárny citovaný zdroj.`;
+  return `POVOLENÉ OVERENÉ EXTERNÉ AKADEMICKÉ ZDROJE:\nTieto zdroje boli nájdené cez Semantic Scholar alebo Crossref. Použi ich iba v režime bez aktuálnej prílohy alebo keď používateľ výslovne požiadal o externé vyhľadávanie. Ak je aktuálna príloha dostupná, zdrojovanie musí vychádzať z nej a tento externý blok nesmie nahradiť ani dopĺňať jej Primárne a Sekundárne zdroje.\n\n${externalResearch.sources.map((source) => `- Citácia autor–rok: ${source.citationText}\n  Bibliografický záznam: ${source.bibliographyText}`).join('\n\n')}\n\nKRITICKÉ PRAVIDLÁ:\n1. Nevytváraj fiktívnych autorov, roky, DOI, URL ani vydavateľské údaje.\n2. Ak externý bibliografický záznam nie je úplný, nepouži ho ako citovaný zdroj.\n3. Pri aktuálnej prílohe nepoužívaj externý zdroj ako náhradu za zdroj citovaný v dokumente; sekundárny zdroj musí byť dohľadaný v bibliografii toho istého dokumentu.`;
 }
 
 function buildAcademicChapterRules() {
@@ -6751,16 +6751,26 @@ ABSOLÚTNE PRAVIDLÁ:
    - HARVARD: citácie v texte vo forme (Priezvisko, rok), bez referenčných čísel v texte a bez číslovania zdrojov.
    - ISO: citácie v texte vo forme (Priezvisko, rok), bez referenčných čísel v texte a bez číslovania zdrojov.
    - REFERENCIE POD ČIAROU: citácie v texte vo forme [1], [2], [3]; rovnaké čísla musia označovať rovnaké zdroje v záverečnom zozname.
-7. Pri odborných tvrdeniach používaj iba zdroje, ktoré sú dostupné v prílohách, projektových dokumentoch alebo v overených externých výsledkoch.
-8. Nevymýšľaj autorov, roky, DOI, URL, čísla strán ani vydavateľské údaje.
-9. Primárne zdroje sú použité prílohy alebo projektové dokumenty. Pri každom uveď názov, autora prílohy, citačný tvar v texte a bibliografický záznam podľa profilu.
-10. Sekundárne zdroje sú úplné odborné bibliografické záznamy reálne použité v texte.
-11. Zoznam literatúry z priloženého článku nepatrí medzi primárne zdroje; jeho jednotlivé položky možno zaradiť iba medzi sekundárne zdroje a iba vtedy, keď boli vo výstupe skutočne použité.
-12. Názvy zdrojov, mená autorov, DOI, URL a názvy časopisov ponechaj v pôvodnom tvare.
-13. Neúplný bibliografický záznam nevypisuj ako hotový zdroj. Chýbajúci údaj označ vetou: Údaje sú potrebné overiť.
-14. Do literatúry nevkladaj surový OCR text, technické bloky, označenia STRANA/PAGE ani interné údaje systému.
-15. Na konci výstupu musí byť iba jedna dvojica sekcií: Primárne zdroje a Sekundárne zdroje.
-16. Server po vygenerovaní výstupu deterministicky skontroluje citačný režim, odstráni konfliktné číslovanie a zosúladí citácie v texte so záverečným zoznamom zdrojov.`;
+7. Pri odbornej odpovedi s priloženým dokumentom používaj ako zdrojový základ iba obsah aktuálnych príloh a zdroje, ktoré sa v nich skutočne nachádzajú. Internet, všeobecné znalosti AI, Semantic Scholar ani Crossref nepoužívaj na vytváranie Primárnych alebo Sekundárnych zdrojov, pokiaľ používateľ výslovne nepožiada o externé vyhľadávanie.
+8. Ak aktuálna požiadavka nemá žiadnu prílohu ani extrahovaný text, môžeš použiť overené externé akademické zdroje, ak to povoľujú nastavenia.
+9. PRIMÁRNY ZDROJ znamená samotný článok, knihu, kapitolu, zborník, časopis alebo iný dokument, ktorý používateľ priložil a z ktorého sa čerpá. Názov súboru NIE JE názov primárneho zdroja.
+10. Pri identifikácii primárneho zdroja prečítaj titulný blok dokumentu ako celok. Ak je názov zalomený do dvoch alebo viacerých riadkov, spoj všetky po sebe idúce riadky názvu až po začiatok bloku autorov. NIKDY nepouži iba prvý riadok viacriadkového názvu.
+11. Za názvom identifikuj všetkých autorov uvedených v hlavičke. Horné indexy, písmená pracovísk a afiliácie nepovažuj za súčasť mena autora ani za súčasť názvu publikácie. Afiliácie používaj iba na identifikáciu dokumentu, nie ako náhradu bibliografických údajov.
+12. Pri primárnom zdroji použi všetky bibliografické údaje, ktoré sú v dokumente skutočne dostupné: úplný názov, všetkých autorov, rok, názov časopisu alebo zborníka, ročník/zväzok, číslo, rozsah strán, vydavateľa, miesto vydania, DOI, ISSN alebo ISBN podľa typu dokumentu a podľa aktívnej citačnej normy.
+13. Ak dokument obsahuje údaj o konkrétnych stranách, z ktorých sa čerpalo, uveď ich. Nevymýšľaj čísla strán, ISSN, ISBN, DOI, ročník ani číslo.
+14. Za úplný bibliografický záznam primárneho zdroja vždy ponechaj samostatnú informáciu „Zdrojový súbor: <pôvodný názov súboru>.“ Táto informácia slúži iba na transparentné určenie pôvodu a nesmie nahradiť názov článku alebo knihy.
+15. Zakázané je vytvoriť primárny zdroj v tvare „SÚBOR: názov.pdf“, „názov.pdf. [Priložený dokument]“ alebo použiť názov súboru ako titul, ak je skutočný titul v obsahu dokumentu rozpoznateľný.
+16. SEKUNDÁRNY ZDROJ v tomto systéme znamená zdroj citovaný vo vnútri priloženého primárneho dokumentu, napríklad citácia (PARKER a RING 2001), ktorého úplný bibliografický záznam sa nachádza v zozname literatúry toho istého dokumentu.
+17. Pojem „sekundárny zdroj“ tu NEZNAMENÁ nepriamu citáciu typu „Cit. podľa“. Automaticky nepridávaj text „Cit. podľa ...“, ak ho používateľ výslovne nežiada.
+18. Pri sekundárnom zdroji najprv nájdi citáciu použitú v texte primárneho dokumentu a potom ju spáruj podľa autora/autorov a roku s úplným záznamom v sekcii Literatúra, References, Bibliografia alebo Použité zdroje toho istého dokumentu.
+19. Sekundárny zdroj vypíš v rovnakom bibliografickom tvare a s rovnakými údajmi, ako je uvedený v zozname literatúry priloženého dokumentu; povoľ iba nevyhnutnú normalizáciu interpunkcie podľa aktívnej citačnej normy. Nevymýšľaj chýbajúci názov článku, časopis, strany, URL, DOI ani autorov.
+20. Fragment typu „Bairoch, Apweiler (2000)“, „Benson (2000)“, „Ďuriš (2001)“ alebo poškodený OCR úsek NESMIE byť vydaný za hotový sekundárny zdroj, kým sa nenájde jeho úplný záznam v bibliografii dokumentu.
+21. Ak sa úplný bibliografický záznam sekundárneho zdroja v priloženom dokumente nedá bezpečne nájsť, zdroj radšej nevypíš. Nevytváraj bibliografiu z fragmentov, iniciál, URL alebo odhadov.
+22. Pri článku sa snaž zachovať plný tvar: AUTOR/ AUTORI. Úplný názov článku. Názov časopisu, ročník/zväzok, rok, strany, DOI/ISSN, ak sú uvedené. Pri knihe: AUTOR/ AUTORI. Úplný názov knihy. Miesto: vydavateľ, rok, rozsah alebo citované strany, ISBN, ak je uvedené.
+23. Názvy publikácií, mená autorov, názvy časopisov, DOI, URL, ISSN a ISBN ponechaj v pôvodnom jazyku a tvare; neprekladaj ich.
+24. Neúplný alebo poškodený bibliografický záznam nevypisuj ako hotový zdroj. Nevymýšľaj autorov, roky, DOI, URL, ISBN, ISSN ani vydavateľské údaje.
+25. Na konci výstupu musí byť iba jedna dvojica sekcií: Primárne zdroje a Sekundárne zdroje.
+26. Pred odovzdaním výstupu vykonaj kontrolu: každý primárny zdroj má skutočný úplný titul z dokumentu, nie názov súboru; každý sekundárny zdroj je spárovaný s konkrétnou citáciou v texte a s úplným záznamom v bibliografii toho istého dokumentu.`;
 }
 
 function buildAttachmentBlock(attachmentTexts: string[]) {
@@ -6861,9 +6871,16 @@ V tejto požiadavke nebol dostupný žiadny použiteľný extrahovaný text prí
     'ZÁVÄZNÉ PRAVIDLÁ PRE ZDROJE:',
     '- Norma a forma citovania sa vždy preberajú z aktívneho profilu práce.',
     '- Na konci zachovaj samostatné sekcie Primárne zdroje a Sekundárne zdroje.',
-    '- Primárny zdroj je samotný relevantný nahraný dokument alebo projektový dokument. Uveď jeho skutočný názov z hlavičky dokumentu; názov súboru použi iba ako transparentný fallback identifikátor, ak titul z obsahu nemožno bezpečne určiť.',
-    '- Bibliografické položky a citácie obsiahnuté vo vnútri primárneho dokumentu patria medzi sekundárne zdroje, nie medzi primárne.',
-    '- Nevymýšľaj autorov, rok, DOI, URL ani bibliografické údaje.',
+    '- PRIMÁRNY ZDROJ je samotný relevantný priložený článok, kniha, kapitola, zborník alebo iný dokument. Názov súboru nie je názov zdroja.',
+    '- Pri primárnom zdroji prečítaj celý titulný blok. Ak je titul rozdelený do viacerých riadkov, spoj ich do jedného úplného názvu až po začiatok bloku autorov. Nikdy nepouži iba prvý riadok názvu.',
+    '- Pri primárnom zdroji uveď všetkých dostupných autorov a všetky reálne bibliografické údaje: rok, časopis/zborník, ročník, číslo, strany, DOI, ISSN alebo ISBN podľa typu dokumentu a aktívnej normy.',
+    '- „Zdrojový súbor: <názov súboru>.“ ponechaj ako doplnkovú informáciu o pôvode až za bibliografickým záznamom. Nikdy ním nenahrádzaj titul publikácie.',
+    '- SEKUNDÁRNY ZDROJ je zdroj citovaný vo vnútri primárneho dokumentu. Spáruj citáciu v texte podľa autora/autorov a roku s úplným záznamom v bibliografii toho istého dokumentu.',
+    '- Sekundárny zdroj preber z bibliografie priloženého dokumentu v plnom tvare. Nevytváraj ho z fragmentu citácie, OCR útržku, samotnej URL ani z internetu.',
+    '- Termín sekundárny zdroj tu neznamená „Cit. podľa“. Text „Cit. podľa ...“ automaticky nepridávaj.',
+    '- Ak existuje aktuálna príloha alebo extrahovaný text, internet, všeobecné znalosti AI, Semantic Scholar ani Crossref nepoužívaj na dopĺňanie primárnych alebo sekundárnych zdrojov, pokiaľ o externé vyhľadávanie používateľ výslovne nepožiada.',
+    '- Externé akademické zdroje používaj štandardne iba pri požiadavke bez prílohy.',
+    '- Nevymýšľaj autorov, rok, DOI, URL, strany, ISSN, ISBN ani iné bibliografické údaje.',
     `- Ak údaj nie je možné bezpečne určiť, použi presnú vetu: ${REQUIRED_VERIFICATION_NOTICE}`,
     '',
     buildPageLimitInstruction(
@@ -7021,11 +7038,11 @@ ${buildVerifiedSourcePackPrompt(externalResearch)}
 HLAVNÝ POSTUP:
 1. Najvyššiu prioritu má konkrétna požiadavka používateľa. Nerob inú úlohu, než o ktorú používateľ žiada. Ak používateľ žiada 1. kapitolu, píš 1. kapitolu; ak žiada úvod, píš úvod; ak žiada zdroje, rieš zdroje.
 2. Hneď potom rešpektuj aktívny profil práce: názov, tému, cieľ, problém, metodológiu, odbor, jazyk a citačnú normu.
-3. Ako odborný obsahový základ použi najprv relevantnú prílohu alebo projektový dokument. Z prílohy vytiahni odborný obsah, citácie v texte a bibliografiu.
-4. Až následne dopĺňaj cez AI a overené externé akademické zdroje zo Semantic Scholar/Crossref, aby text sedel na profil práce a bol odborne úplný.
+3. Ako odborný obsahový základ použi najprv relevantnú prílohu alebo projektový dokument. Z každej prílohy prečítaj titulný blok, celý viacriadkový názov, autorov a dostupné bibliografické údaje; z textu vyber citácie a z konca dokumentu ich úplné bibliografické záznamy.
+4. Ak aktuálna požiadavka obsahuje prílohu alebo použiteľný extrahovaný text, nedopĺňaj zdroje cez internet, všeobecné znalosti AI, Semantic Scholar ani Crossref. Externé zdroje použi iba bez prílohy alebo na výslovný pokyn používateľa.
 5. V akademickom texte vždy používaj citácie priamo v texte podľa citačnej normy v profile.
-6. Na konci uveď Primárne zdroje a Sekundárne zdroje.
-7. Ak sú k dispozícii zdroje z článku, príloh, projektových dokumentov, Semantic Scholar alebo Crossref, musia byť použité a vypísané úplne.
+6. Na konci uveď Primárne zdroje a Sekundárne zdroje. Primárny zdroj musí mať úplný titul z dokumentu, nie názov súboru; sekundárny zdroj musí byť prevzatý z bibliografie dokumentu po spárovaní s citáciou v texte.
+7. Každý použitý zdroj vypíš úplne a iba na základe údajov, ktoré sú skutočne dostupné v dokumente alebo v povolenom externom zdroji.
 8. Kapitola nesmie byť krátka. Pri žiadosti o kapitolu vytvor rozsiahly akademický text minimálne približne 1 200 slov, ak používateľ neurčil inak.
 9. Pri žiadosti o 1. kapitolu nesmieš vytvoriť abstrakt; vytvor úvodnú kapitolu podľa profilu práce.
 10. Ak je požiadavka všeobecná, napríklad „napíš abstrakt“, „navrhni úvod“, „spracuj kapitolu“, vždy ju aplikuj iba na uzamknutý aktívny profil uvedený vyššie.
@@ -7061,14 +7078,24 @@ POVINNÉ SPRACOVANIE PRÍLOH:
 - Chýbajúce alebo nečitateľné údaje označ ako nedostupné; nevymýšľaj ich.
 
 PRAVIDLÁ PRE ZDROJE:
-1. Primárne zdroje = samotné relevantné nahrané dokumenty alebo projektové dokumenty, z ktorých výstup čerpá. Ako názov primárneho zdroja použi titul identifikovaný v obsahu dokumentu; názov súboru je iba fallback identifikátor, keď titul nemožno bezpečne zistiť.
-2. Sekundárne zdroje = úplné bibliografické zdroje citované v texte primárneho dokumentu alebo priamo použité vo vygenerovanom texte. Každý sekundárny zdroj musí mať aspoň autora, rok a dostatok bibliografických údajov na jednoznačnú identifikáciu.
-3. Ak článok obsahuje zoznam literatúry, nikdy ho nepremiestňuj do primárnych zdrojov; do sekundárnych zdrojov uveď iba tie záznamy, ktoré sú v texte výstupu skutočne citované alebo použité.
-4. Do výstupu nevkladaj neúplné zdroje typu B. (2019), H. (2020), R. (2017), „Údaje sú potrebné overiť.“, „Autor je potrebné overiť“ alebo „Rok chýba“.
-5. Názvy zdrojov, mená autorov, DOI, URL, názvy časopisov a bibliografické údaje ponechaj v pôvodnom tvare. Neprekladaj ich len preto, že používateľ prepne jazyk aplikácie.
-6. Ak je odpoveď v inom jazyku ako jazyk zdroja, prelož iba vysvetľujúci text, nie samotný bibliografický záznam.
-7. Sekcie „Primárne zdroje“ a „Sekundárne zdroje“ ponechaj v slovenčine.
-8. Norma a forma citovania sa vždy preberajú z aktívneho profilu práce.
+1. PRIMÁRNY ZDROJ = samotný relevantný priložený článok, kniha, kapitola, zborník, časopis alebo projektový dokument, z ktorého odpoveď čerpá. Názov súboru NIE JE názov publikácie.
+2. Pri primárnom zdroji prečítaj začiatok dokumentu ako titulný blok. Ak je titul zalomený na dva alebo viac riadkov, všetky riadky patriace k titulu spoj do jedného úplného názvu. Hranicou názvu je začiatok bloku autorov, nie koniec prvého riadku.
+3. Po názve identifikuj všetkých autorov. Písmená pracovísk/horné indexy pri menách oddeľ od mien; afiliácie nepovažuj za titul ani za autora.
+4. Z dokumentu preber všetky dostupné bibliografické údaje: úplný titul, autorov, rok, názov časopisu/zborníka, ročník alebo zväzok, číslo, strany, vydavateľa, miesto vydania, DOI, ISSN a ISBN podľa typu dokumentu a podľa aktívnej citačnej normy. Nič z toho nevymýšľaj.
+5. Informáciu „Zdrojový súbor: <pôvodný názov súboru>.“ vždy zachovaj ako doplnkovú informáciu o pôvode ZA bibliografickým záznamom. Nesmie nahradiť titul publikácie.
+6. Zakázaný tvar primárneho zdroja: „SÚBOR: názov.pdf“, „názov.pdf. [Priložený dokument]“ alebo skrátený prvý riadok titulu, ak ďalšie riadky titul dokončujú.
+7. SEKUNDÁRNY ZDROJ = zdroj citovaný v texte priloženého primárneho dokumentu, ktorého úplný záznam sa nachádza v bibliografii toho istého dokumentu. Napríklad citáciu (PARKER a RING 2001) treba dohľadať v Literatúre/References podľa autorov a roku a prevziať celý záznam.
+8. „Sekundárny zdroj“ v tomto systéme NEZNAMENÁ nepriamu citáciu. Automaticky nepridávaj formuláciu „Cit. podľa ...“.
+9. Sekundárny zdroj nesmie vzniknúť preformátovaním fragmentu citácie. Najprv musí existovať bezpečná zhoda medzi citáciou v texte a úplným bibliografickým záznamom v sekcii Literatúra, References, Bibliografia alebo Použité zdroje.
+10. Sekundárny bibliografický záznam zachovaj v rovnakom obsahovom tvare, ako je v bibliografii priloženého dokumentu: všetci autori, úplný názov, časopis/kniha, ročník/zväzok, rok, strany a DOI/ISSN/ISBN, ak sú uvedené. Povoľ iba úpravu interpunkcie potrebnú pre aktívnu citačnú normu.
+11. Poškodené fragmenty typu „podľ, A. G. ...“, samotné iniciály, osamotené URL, neúplný OCR riadok alebo citácia bez dohľadaného bibliografického záznamu nevypisuj ako zdroj.
+12. Ak sa úplný sekundárny záznam v bibliografii priloženého dokumentu nedá bezpečne nájsť, zdroj nevypíš namiesto toho, aby si ho dopĺňal odhadom.
+13. Ak je v aktuálnej požiadavke aspoň jedna príloha alebo použiteľný extrahovaný text, Primárne aj Sekundárne zdroje vytváraj výhradne z aktuálnych dokumentov. Nehľadaj ich na internete a nedopĺňaj ich zo všeobecných znalostí AI, Semantic Scholar ani Crossref, pokiaľ používateľ výslovne nežiada externé vyhľadávanie.
+14. Ak aktuálna požiadavka nemá prílohu ani extrahovaný text, môžeš použiť overené externé akademické zdroje podľa nastavení.
+15. Názvy zdrojov, mená autorov, DOI, URL, ISSN, ISBN, názvy časopisov a bibliografické údaje ponechaj v pôvodnom tvare a jazyku.
+16. Sekcie „Primárne zdroje“ a „Sekundárne zdroje“ ponechaj v slovenčine.
+17. Norma a forma citovania sa vždy preberajú z aktívneho profilu práce.
+18. Pred odoslaním odpovede skontroluj: (a) žiadny primárny zdroj nemá názov súboru namiesto skutočného titulu, (b) žiadny viacriadkový titul nie je skrátený na prvý riadok, (c) každý sekundárny zdroj má úplný záznam dohľadaný v bibliografii dokumentu, (d) pri prílohách nebol pridaný internetový zdroj.
 
 ${buildCitationStyleRuleBlock(getCitationStyle(profile))}
 
@@ -7082,8 +7109,10 @@ Externé akademické zdroje Semantic Scholar/Crossref: ${settings.useExternalAca
 PRAVIDLO PRE ZDROJE:
 Nikdy neuvádzaj Zedpera, ZEDPERA, Zedpera AI, náš systém, túto aplikáciu ani interný nástroj ako autora, zdroj, publikáciu, databázu, URL, DOI alebo položku v literatúre.
 Zedpera je iba pracovný nástroj používateľa, nie akademický zdroj.
+Ak je priložený dokument, zdrojovanie musí vychádzať z tohto dokumentu: primárny zdroj z jeho titulného/bibliografického bloku a sekundárne zdroje z citácií v texte spárovaných s jeho vlastným zoznamom literatúry.
+Pri priloženom dokumente nevyhľadávaj sekundárne zdroje na internete a nedopĺňaj ich zo všeobecných znalostí modelu.
+Externé overené zdroje zo Semantic Scholar/Crossref používaj iba vtedy, keď aktuálna požiadavka nemá prílohu ani použiteľný extrahovaný text, alebo keď používateľ výslovne žiada externé vyhľadávanie.
 Ak zdroj nie je overiteľný, nepíš ho ako bibliografický záznam.
-Použi iba reálne externé zdroje, prílohy používateľa alebo overené zdroje zo Semantic Scholar/Crossref.
 
 
 FORMÁT:
@@ -7394,38 +7423,92 @@ function appendVerifiedBibliography({
 let cachedAnthropicProvider:
   ReturnType<typeof createAnthropic> | null = null;
 
+/**
+ * Vráti Anthropic API key.
+ *
+ * Primárne používame ANTHROPIC_API_KEY.
+ * CLAUDE_API_KEY zostáva ako spätná kompatibilita.
+ */
+function getAnthropicApiKey(): string {
+  return (
+    toCleanString(
+      process.env.ANTHROPIC_API_KEY,
+    ) ||
+    toCleanString(
+      process.env.CLAUDE_API_KEY,
+    )
+  );
+}
+
+/**
+ * Voliteľný Anthropic auth token.
+ * Použije sa iba vtedy, keď nie je nastavený API key.
+ */
+function getAnthropicAuthToken(): string {
+  return toCleanString(
+    process.env.ANTHROPIC_AUTH_TOKEN,
+  );
+}
+
+/**
+ * Centrálna kontrola dostupnosti Claude.
+ *
+ * Túto funkciu používame aj pre fallback routing,
+ * aby rôzne časti route nekontrolovali env premenné
+ * rozdielnym spôsobom.
+ */
+function hasAnthropicCredentials(): boolean {
+  return Boolean(
+    getAnthropicApiKey() ||
+      getAnthropicAuthToken(),
+  );
+}
+
+/**
+ * Vytvorí jednu serverovú Anthropic provider inštanciu.
+ *
+ * API key sa nikdy neposiela klientovi.
+ * Provider sa cachuje počas životnosti serverového procesu.
+ */
 function getAnthropicProvider() {
   if (cachedAnthropicProvider) {
     return cachedAnthropicProvider;
   }
 
   const apiKey =
-    toCleanString(
-      process.env.ANTHROPIC_API_KEY,
-    ) ||
-    toCleanString(
-      process.env.CLAUDE_API_KEY,
-    );
-  const authToken = toCleanString(
-    process.env.ANTHROPIC_AUTH_TOKEN,
-  );
+    getAnthropicApiKey();
+
+  const authToken =
+    getAnthropicAuthToken();
 
   if (!apiKey && !authToken) {
     throw new Error(
-      'Chýba ANTHROPIC_API_KEY, CLAUDE_API_KEY alebo ANTHROPIC_AUTH_TOKEN pre Claude.',
+      [
+        'Chýba autentifikácia pre Claude.',
+        'Nastav ANTHROPIC_API_KEY.',
+        'Alternatívne je podporovaný CLAUDE_API_KEY alebo ANTHROPIC_AUTH_TOKEN.',
+      ].join(' '),
     );
   }
 
-  cachedAnthropicProvider = createAnthropic(
-    apiKey
-      ? { apiKey }
-      : { authToken },
-  );
+  cachedAnthropicProvider =
+    createAnthropic(
+      apiKey
+        ? {
+            apiKey,
+          }
+        : {
+            authToken,
+          },
+    );
 
   return cachedAnthropicProvider;
 }
 
-function getOpenAiPrimaryModelId() {
+/**
+ * OpenAI model pre Responses API.
+ */
+function getOpenAiPrimaryModelId(): string {
   const explicitlyConfigured =
     toCleanString(
       process.env.OPENAI_RESPONSES_MODEL,
@@ -7443,11 +7526,10 @@ function getOpenAiPrimaryModelId() {
   }
 
   const configuredDefault =
-    toCleanString(AI_DEFAULT_MODEL);
+    toCleanString(
+      AI_DEFAULT_MODEL,
+    );
 
-  // Staršia lokálna konfigurácia používala neplatný názov gpt-5.6.
-  // Pri absencii explicitnej env premennej použijeme verejne dostupný
-  // model podporujúci Responses API.
   if (
     configuredDefault &&
     configuredDefault.toLowerCase() !==
@@ -7459,7 +7541,26 @@ function getOpenAiPrimaryModelId() {
   return 'gpt-5.1';
 }
 
-function getAnthropicPrimaryModelId() {
+/**
+ * Primárny Claude model.
+ *
+ * DÔLEŽITÉ:
+ * ANTHROPIC_MODEL sa musí rešpektovať presne.
+ *
+ * Pôvodný kód obsahoval chybu:
+ *
+ * configuredModel !== 'claude-sonnet-4-6'
+ *
+ * To znamenalo, že pri správnej hodnote
+ * ANTHROPIC_MODEL=claude-sonnet-4-6
+ * sa nakonfigurovaný model NEVRÁTIL.
+ *
+ * Teraz:
+ * 1. ANTHROPIC_MODEL
+ * 2. CLAUDE_MODEL
+ * 3. bezpečný default claude-sonnet-4-6
+ */
+function getAnthropicPrimaryModelId(): string {
   const configuredModel =
     toCleanString(
       process.env.ANTHROPIC_MODEL,
@@ -7468,183 +7569,495 @@ function getAnthropicPrimaryModelId() {
       process.env.CLAUDE_MODEL,
     );
 
-  if (
-    configuredModel &&
-    configuredModel.toLowerCase() !==
-      'claude-sonnet-4-6'
-  ) {
+  if (configuredModel) {
     return configuredModel;
   }
 
-  return 'claude-sonnet-4-20250514';
+  return 'claude-sonnet-4-6';
 }
 
-function getModelByAgent(agent: Agent): ModelResult {
+/**
+ * Model Claude pre čítanie príloh.
+ *
+ * Ak nie je nastavený samostatný attachment model,
+ * použije sa rovnaký model ako pre hlavný Claude chat.
+ */
+function getAnthropicAttachmentModelId(): string {
+  return (
+    toCleanString(
+      process.env.ANTHROPIC_ATTACHMENT_MODEL,
+    ) ||
+    getAnthropicPrimaryModelId()
+  );
+}
+
+/**
+ * Bezpečný diagnostický log.
+ *
+ * Nikdy nevypisuje API key.
+ */
+function logClaudeConfiguration(
+  context: string,
+): void {
+  console.log(
+    'CLAUDE_PROVIDER_CONFIGURATION:',
+    {
+      context,
+
+      model:
+        getAnthropicPrimaryModelId(),
+
+      attachmentModel:
+        getAnthropicAttachmentModelId(),
+
+      apiKeyAvailable:
+        Boolean(
+          getAnthropicApiKey(),
+        ),
+
+      authTokenAvailable:
+        Boolean(
+          getAnthropicAuthToken(),
+        ),
+
+      apiKeySource:
+        toCleanString(
+          process.env.ANTHROPIC_API_KEY,
+        )
+          ? 'ANTHROPIC_API_KEY'
+          : toCleanString(
+                process.env.CLAUDE_API_KEY,
+              )
+            ? 'CLAUDE_API_KEY'
+            : getAnthropicAuthToken()
+              ? 'ANTHROPIC_AUTH_TOKEN'
+              : 'none',
+    },
+  );
+}
+
+/**
+ * Vráti konkrétny AI model podľa agenta,
+ * ktorého zvolil frontend.
+ */
+function getModelByAgent(
+  agent: Agent,
+): ModelResult {
+  // ===================================================
+  // OPENAI
+  // ===================================================
+
   if (agent === 'openai') {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('Chýba OPENAI_API_KEY pre GPT.');
+    if (
+      !toCleanString(
+        process.env.OPENAI_API_KEY,
+      )
+    ) {
+      throw new Error(
+        'Chýba OPENAI_API_KEY pre GPT.',
+      );
     }
 
+    const modelId =
+      getOpenAiPrimaryModelId();
+
     return {
-      model: aiSdkOpenAi(
-        getOpenAiPrimaryModelId(),
-      ),
-      providerLabel: 'GPT',
-      agent: 'openai',
+      model:
+        aiSdkOpenAi(
+          modelId,
+        ),
+
+      providerLabel:
+        'GPT',
+
+      agent:
+        'openai',
     };
   }
 
+  // ===================================================
+  // CLAUDE / ANTHROPIC
+  // ===================================================
+
   if (agent === 'claude') {
+    if (
+      !hasAnthropicCredentials()
+    ) {
+      throw new Error(
+        'Chýba ANTHROPIC_API_KEY pre Claude.',
+      );
+    }
+
+    const modelId =
+      getAnthropicPrimaryModelId();
+
+    logClaudeConfiguration(
+      'primary-model',
+    );
+
     return {
       model:
         getAnthropicProvider()(
-          getAnthropicPrimaryModelId(),
+          modelId,
         ) as any,
-      providerLabel: 'Claude',
-      agent: 'claude',
+
+      providerLabel:
+        'Claude',
+
+      agent:
+        'claude',
     };
   }
 
+  // ===================================================
+  // GEMINI
+  // ===================================================
+
   if (agent === 'gemini') {
-    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    if (
+      !toCleanString(
+        process.env
+          .GOOGLE_GENERATIVE_AI_API_KEY,
+      )
+    ) {
       throw new Error(
         'Chýba GOOGLE_GENERATIVE_AI_API_KEY pre Gemini.',
       );
     }
 
+    const modelId =
+      toCleanString(
+        process.env.GOOGLE_MODEL,
+      ) ||
+      'gemini-2.5-flash';
+
     return {
-      model: google(
-        process.env.GOOGLE_MODEL ||
-          'gemini-2.5-flash',
-      ) as any,
-      providerLabel: 'Gemini',
-      agent: 'gemini',
+      model:
+        google(
+          modelId,
+        ) as any,
+
+      providerLabel:
+        'Gemini',
+
+      agent:
+        'gemini',
     };
   }
+
+  // ===================================================
+  // GROK
+  // ===================================================
 
   if (agent === 'grok') {
-    if (!process.env.XAI_API_KEY) {
-      throw new Error('Chýba XAI_API_KEY pre Grok.');
+    if (
+      !toCleanString(
+        process.env.XAI_API_KEY,
+      )
+    ) {
+      throw new Error(
+        'Chýba XAI_API_KEY pre Grok.',
+      );
     }
 
+    const modelId =
+      toCleanString(
+        process.env.XAI_MODEL,
+      ) ||
+      'grok-3';
+
     return {
-      model: xai(
-        process.env.XAI_MODEL ||
-          'grok-3',
-      ) as any,
-      providerLabel: 'Grok',
-      agent: 'grok',
+      model:
+        xai(
+          modelId,
+        ) as any,
+
+      providerLabel:
+        'Grok',
+
+      agent:
+        'grok',
     };
   }
+
+  // ===================================================
+  // MISTRAL
+  // ===================================================
 
   if (agent === 'mistral') {
-    if (!process.env.MISTRAL_API_KEY) {
-      throw new Error('Chýba MISTRAL_API_KEY pre Mistral.');
+    if (
+      !toCleanString(
+        process.env.MISTRAL_API_KEY,
+      )
+    ) {
+      throw new Error(
+        'Chýba MISTRAL_API_KEY pre Mistral.',
+      );
     }
 
+    const modelId =
+      toCleanString(
+        process.env.MISTRAL_MODEL,
+      ) ||
+      'mistral-small-latest';
+
     return {
-      model: mistral(
-        process.env.MISTRAL_MODEL ||
-          'mistral-small-latest',
-      ) as any,
-      providerLabel: 'Mistral',
-      agent: 'mistral',
+      model:
+        mistral(
+          modelId,
+        ) as any,
+
+      providerLabel:
+        'Mistral',
+
+      agent:
+        'mistral',
     };
   }
 
-  throw new Error(`Neznámy AI agent: ${agent}`);
+  throw new Error(
+    `Neznámy AI agent: ${agent}`,
+  );
 }
 
+/**
+ * Vytvorí zoznam fallback providerov.
+ *
+ * Vybraný primárny agent je vždy vylúčený.
+ * Ak používateľ vybral Claude, Claude sa teda
+ * nepoužije znovu ako vlastný fallback.
+ */
 function getAvailableFallbackModels(
   excludedAgent?: Agent,
 ): ModelResult[] {
-  const candidates: ModelResult[] = [];
+  const candidates:
+    ModelResult[] = [];
 
-  // Predvolené poradie uprednostňuje poskytovateľov, ktorí sú vhodní ako
-  // rýchla technická záloha pri 429/503, preťažení alebo timeoute.
-  // Poradie je možné zmeniť cez AI_FALLBACK_ORDER, napr.:
-  // AI_FALLBACK_ORDER=mistral,grok,openai,gemini,claude
-  const requestedOrder = uniqueArray(
-    String(
-      process.env.AI_FALLBACK_ORDER ||
-        'mistral,grok,openai,gemini,claude',
-    )
-      .split(',')
-      .map((value) => value.trim().toLowerCase()),
-  ).filter((value): value is Agent =>
-    ['openai', 'claude', 'gemini', 'grok', 'mistral'].includes(value),
-  );
+  /**
+   * Predvolené fallback poradie.
+   *
+   * Je možné prepísať:
+   *
+   * AI_FALLBACK_ORDER=
+   * mistral,grok,openai,gemini,claude
+   */
+  const requestedOrder =
+    uniqueArray(
+      String(
+        process.env
+          .AI_FALLBACK_ORDER ||
+          'mistral,grok,openai,gemini,claude',
+      )
+        .split(',')
+        .map(
+          (value) =>
+            value
+              .trim()
+              .toLowerCase(),
+        ),
+    ).filter(
+      (
+        value,
+      ): value is Agent =>
+        [
+          'openai',
+          'claude',
+          'gemini',
+          'grok',
+          'mistral',
+        ].includes(value),
+    );
 
-  const factories: Record<Agent, () => ModelResult | null> = {
-    openai: () =>
-      process.env.OPENAI_API_KEY
-        ? {
-            model: aiSdkOpenAi(
-              getOpenAiPrimaryModelId(),
-            ),
-            providerLabel: 'GPT fallback',
-            agent: 'openai',
-          }
-        : null,
-    gemini: () =>
-      process.env.GOOGLE_GENERATIVE_AI_API_KEY
-        ? {
-            model: google(
-              process.env.GOOGLE_MODEL ||
-                'gemini-2.5-flash',
-            ) as any,
-            providerLabel: 'Gemini fallback',
-            agent: 'gemini',
-          }
-        : null,
-    claude: () =>
-      process.env.ANTHROPIC_API_KEY ||
-      process.env.CLAUDE_API_KEY ||
-      process.env.ANTHROPIC_AUTH_TOKEN
-        ? {
-            model:
-              getAnthropicProvider()(
-                getAnthropicPrimaryModelId(),
-              ) as any,
-            providerLabel: 'Claude fallback',
-            agent: 'claude',
-          }
-        : null,
-    mistral: () =>
-      process.env.MISTRAL_API_KEY
-        ? {
-            model: mistral(
-              process.env.MISTRAL_MODEL ||
-                'mistral-small-latest',
-            ) as any,
-            providerLabel: 'Mistral fallback',
-            agent: 'mistral',
-          }
-        : null,
-    grok: () =>
-      process.env.XAI_API_KEY
-        ? {
-            model: xai(
-              process.env.XAI_MODEL ||
-                'grok-3',
-            ) as any,
-            providerLabel: 'Grok fallback',
-            agent: 'grok',
-          }
-        : null,
+  const factories:
+    Record<
+      Agent,
+      () => ModelResult | null
+    > = {
+    // ===============================================
+    // OPENAI FALLBACK
+    // ===============================================
+
+    openai: () => {
+      if (
+        !toCleanString(
+          process.env.OPENAI_API_KEY,
+        )
+      ) {
+        return null;
+      }
+
+      return {
+        model:
+          aiSdkOpenAi(
+            getOpenAiPrimaryModelId(),
+          ),
+
+        providerLabel:
+          'GPT fallback',
+
+        agent:
+          'openai',
+      };
+    },
+
+    // ===============================================
+    // CLAUDE FALLBACK
+    // ===============================================
+
+    claude: () => {
+      if (
+        !hasAnthropicCredentials()
+      ) {
+        return null;
+      }
+
+      const modelId =
+        getAnthropicPrimaryModelId();
+
+      return {
+        model:
+          getAnthropicProvider()(
+            modelId,
+          ) as any,
+
+        providerLabel:
+          'Claude fallback',
+
+        agent:
+          'claude',
+      };
+    },
+
+    // ===============================================
+    // GEMINI FALLBACK
+    // ===============================================
+
+    gemini: () => {
+      if (
+        !toCleanString(
+          process.env
+            .GOOGLE_GENERATIVE_AI_API_KEY,
+        )
+      ) {
+        return null;
+      }
+
+      return {
+        model:
+          google(
+            toCleanString(
+              process.env.GOOGLE_MODEL,
+            ) ||
+              'gemini-2.5-flash',
+          ) as any,
+
+        providerLabel:
+          'Gemini fallback',
+
+        agent:
+          'gemini',
+      };
+    },
+
+    // ===============================================
+    // GROK FALLBACK
+    // ===============================================
+
+    grok: () => {
+      if (
+        !toCleanString(
+          process.env.XAI_API_KEY,
+        )
+      ) {
+        return null;
+      }
+
+      return {
+        model:
+          xai(
+            toCleanString(
+              process.env.XAI_MODEL,
+            ) ||
+              'grok-3',
+          ) as any,
+
+        providerLabel:
+          'Grok fallback',
+
+        agent:
+          'grok',
+      };
+    },
+
+    // ===============================================
+    // MISTRAL FALLBACK
+    // ===============================================
+
+    mistral: () => {
+      if (
+        !toCleanString(
+          process.env.MISTRAL_API_KEY,
+        )
+      ) {
+        return null;
+      }
+
+      return {
+        model:
+          mistral(
+            toCleanString(
+              process.env.MISTRAL_MODEL,
+            ) ||
+              'mistral-small-latest',
+          ) as any,
+
+        providerLabel:
+          'Mistral fallback',
+
+        agent:
+          'mistral',
+      };
+    },
   };
 
-  for (const candidateAgent of requestedOrder) {
-    if (candidateAgent === excludedAgent) continue;
+  for (
+    const candidateAgent
+    of requestedOrder
+  ) {
+    /**
+     * Nikdy nepoužívame rovnakého providera
+     * ako fallback pre seba samého.
+     */
+    if (
+      candidateAgent ===
+      excludedAgent
+    ) {
+      continue;
+    }
 
     try {
-      const candidate = factories[candidateAgent]();
-      if (candidate) candidates.push(candidate);
+      const candidate =
+        factories[
+          candidateAgent
+        ]();
+
+      if (candidate) {
+        candidates.push(
+          candidate,
+        );
+      }
     } catch (error) {
-      console.warn('CHAT_FALLBACK_MODEL_INIT_ERROR:', {
-        candidateAgent,
-        reason: getErrorMessage(error),
-      });
+      console.warn(
+        'CHAT_FALLBACK_MODEL_INIT_ERROR:',
+        {
+          candidateAgent,
+
+          reason:
+            getErrorMessage(
+              error,
+            ),
+        },
+      );
     }
   }
 
@@ -11723,10 +12136,13 @@ Dodrž:
 - nepoužívaj fiktívne citácie,
 - citácie musia byť priamo v texte,
 - na konci uveď iba jednu dvojicu sekcií: Primárne zdroje a Sekundárne zdroje,
-- primárne zdroje sú samotné relevantné nahrané alebo projektové dokumenty; ich názov preber z hlavičky dokumentu a názov súboru použi iba ako fallback identifikátor,
-- bibliografické záznamy a citácie z vnútra primárneho dokumentu patria medzi sekundárne zdroje; vypíš iba tie, ktoré sú bezpečne identifikované a použité priamo v texte,
+- primárny zdroj je samotný relevantný priložený dokument; jeho titul preber celý z titulného bloku a pri viacriadkovom názve spoj všetky riadky až po blok autorov,
+- názov súboru nikdy nepouži ako titul, pokiaľ je titul dokumentu čitateľný; „Zdrojový súbor: ...“ ponechaj iba ako doplnkovú informáciu za úplným záznamom,
+- pri primárnom zdroji uveď všetkých dostupných autorov a reálne údaje o roku, časopise/zborníku, ročníku, čísle, stranách, DOI, ISSN alebo ISBN,
+- sekundárny zdroj je citácia z textu primárneho dokumentu spárovaná s úplným záznamom v bibliografii toho istého dokumentu; nevytváraj ho z fragmentov a nepridávaj „Cit. podľa ...“,
+- ak je aktuálna príloha dostupná, sekundárne zdroje nehľadaj na internete ani ich nedopĺňaj zo všeobecných znalostí modelu,
 - ak príloha nebola použitá alebo nebola relevantná, nikdy nepíš, že zdroj bol rozpoznaný z prílohy,
-- nepoužívaj iniciály typu H., R., S. ako mená autorov.`,
+- nepoužívaj poškodené iniciály alebo OCR fragmenty ako mená autorov.`,
             maxSystemPromptChars,
           );
 

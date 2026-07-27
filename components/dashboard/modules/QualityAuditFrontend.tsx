@@ -839,15 +839,16 @@ type AttachedFile = {
   uploadedAt?: string;
 
   /**
-   * Textový fallback pre TXT/MD/CSV/RTF. PDF a DOCX sa čítajú na serveri,
-   * aby AI chat nebol závislý od klientského PDF.js workera.
+   * Extrahovaný text prílohy. Pri Audite kvality sa PDF/DOCX najprv skúsi
+   * extrahovať cez /api/extract-text. Pre jednoduché textové formáty ostáva
+   * lokálny browser fallback.
    */
   text?: string;
   content?: string;
 
   /**
-   * Skutočný binárny súbor. Do /api/chat a /api/analyze-data/prepare
-   * sa vždy posiela tento objekt, nie iba názov alebo metadáta.
+   * Skutočný binárny súbor. Samostatné moduly ho posielajú iba vtedy,
+   * keď pre danú prílohu nie je dostupný bezpečne extrahovaný text.
    */
   file?: File;
 
@@ -976,6 +977,16 @@ const maxDataFilesPerRequest = 1;
 
 const maxFileSizeMb = 30;
 const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
+
+/**
+ * Audit kvality používa text extrahovaný cez /api/extract-text ako primárny
+ * prenosový formát. Binárny File ostáva iba ako bezpečný serverový fallback,
+ * aby PDF/DOCX audit nebol závislý od podpory input_file konkrétneho modelu.
+ */
+const qualityAuditExtractionTimeoutMs = 75_000;
+const qualityAuditMaxTextPerFile = 180_000;
+const qualityAuditMaxTotalExtractedText = 240_000;
+const qualityAuditExtractionConcurrency = 2;
 
 /**
  * Toto je iba UI fallback nad e-mailom, ktorý vráti serverový endpoint
@@ -2932,12 +2943,8 @@ function stripModuleExtraSections(text: string, moduleKey: ModuleKey) {
     .replace(/\n*\s*Interná poznámka\s*:?[\s\S]*$/i, "")
     .replace(/\n*\s*Systémová inštrukcia\s*:?[\s\S]*$/i, "")
     .replace(/\n*\s*Toto je systémová informácia\s*:?[\s\S]*$/i, "")
-    .replace(/\bpodľa nahratého súboru\b/gi, "")
-    .replace(/\bpodľa prílohy\b/gi, "")
-    .replace(/\bpoužívateľ nahral súbor\b/gi, "")
-    .replace(/\bdokument obsahuje\b/gi, "")
-    .replace(/\bprompt\b/gi, "")
-    .replace(/\bmodel\b/gi, "")
+    // Nemažeme bežné odborné slová ani formulácie typu „podľa prílohy“.
+    // V audite ide o legitímny obsah a jeho odstránenie poškodzovalo vety.
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -3313,6 +3320,240 @@ async function readClientTextFallback(file: File): Promise<string> {
   }
 }
 
+
+function readQualityExtractedText(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+
+  const record = payload as Record<string, unknown>;
+  const candidates = [
+    record.extractedText,
+    record.text,
+    record.content,
+    record.markdown,
+    record.rawText,
+    (record.data as Record<string, unknown> | undefined)?.extractedText,
+    (record.data as Record<string, unknown> | undefined)?.text,
+    (record.result as Record<string, unknown> | undefined)?.extractedText,
+    (record.result as Record<string, unknown> | undefined)?.text,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return "";
+}
+
+async function extractQualityAuditAttachment(
+  attachment: AttachedFile,
+  requestId: string,
+): Promise<AttachedFile> {
+  const existingText = String(
+    attachment.text || attachment.content || "",
+  ).trim();
+
+  if (existingText) {
+    return {
+      ...attachment,
+      text: existingText.slice(0, qualityAuditMaxTextPerFile),
+      extractionStatus: attachment.extractionStatus || "client",
+      extractedChars: Math.min(existingText.length, qualityAuditMaxTextPerFile),
+    };
+  }
+
+  if (!isBrowserFileLike(attachment.file)) {
+    return {
+      ...attachment,
+      extractionStatus: "failed",
+      extractionMessage:
+        "Súbor nemá dostupný binárny File objekt ani extrahovaný text.",
+    };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(
+    () => controller.abort(),
+    qualityAuditExtractionTimeoutMs,
+  );
+
+  try {
+    const extractionFormData = new FormData();
+    extractionFormData.append(
+      "file",
+      attachment.file,
+      attachment.name || attachment.file.name,
+    );
+    extractionFormData.append("requestId", `${requestId}-extract-${attachment.id}`);
+    extractionFormData.append("detectBibliographicSources", "false");
+    extractionFormData.append("requireAuthorsAndPublications", "false");
+
+    const response = await fetch("/api/extract-text", {
+      method: "POST",
+      body: extractionFormData,
+      credentials: "include",
+      cache: "no-store",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        "X-Request-Id": `${requestId}-extract-${attachment.id}`,
+      },
+    });
+
+    const contentType = response.headers.get("content-type") || "";
+    const payload =
+      contentType.includes("application/json")
+        ? await response.json()
+        : { error: await response.text() };
+
+    if (!response.ok || payload?.ok === false) {
+      const detail =
+        payload?.error ||
+        payload?.message ||
+        `Extrakcia vrátila HTTP ${response.status}.`;
+
+      return {
+        ...attachment,
+        extractionStatus: "ready",
+        extractionMessage:
+          `Text sa nepodarilo predbežne extrahovať (${String(detail)}). ` +
+          "Audit použije bezpečný binárny serverový fallback.",
+      };
+    }
+
+    const extractedText = readQualityExtractedText(payload).slice(
+      0,
+      qualityAuditMaxTextPerFile,
+    );
+
+    if (!extractedText) {
+      return {
+        ...attachment,
+        extractionStatus: "ready",
+        extractionMessage:
+          "Extrakčný endpoint nevrátil text. Audit použije binárny serverový fallback.",
+      };
+    }
+
+    return {
+      ...attachment,
+      text: extractedText,
+      content: extractedText,
+      extractionStatus: "server",
+      extractedChars: extractedText.length,
+      extractionMessage:
+        "Obsah prílohy bol úspešne extrahovaný cez /api/extract-text a pripravený pre Audit kvality.",
+    };
+  } catch (error) {
+    const detail =
+      error instanceof DOMException && error.name === "AbortError"
+        ? `Extrakcia prekročila ${Math.round(
+            qualityAuditExtractionTimeoutMs / 1000,
+          )} sekúnd.`
+        : error instanceof Error
+          ? error.message
+          : "Neznáma chyba extrakcie.";
+
+    return {
+      ...attachment,
+      extractionStatus: "ready",
+      extractionMessage:
+        `${detail} Audit použije bezpečný binárny serverový fallback.`,
+    };
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function prepareQualityAuditAttachments(
+  files: AttachedFile[],
+  requestId: string,
+): Promise<AttachedFile[]> {
+  if (!files.length) return [];
+
+  const prepared = new Array<AttachedFile | null>(files.length).fill(null);
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+
+      if (index >= files.length) return;
+
+      prepared[index] = await extractQualityAuditAttachment(
+        files[index],
+        requestId,
+      );
+    }
+  };
+
+  await Promise.all(
+    Array.from(
+      {
+        length: Math.min(
+          qualityAuditExtractionConcurrency,
+          Math.max(files.length, 1),
+        ),
+      },
+      () => worker(),
+    ),
+  );
+
+  const successfulFiles = prepared.filter(
+    (file): file is AttachedFile => Boolean(file),
+  );
+  const textFilesCount = Math.max(
+    1,
+    successfulFiles.filter((file) =>
+      Boolean(String(file.text || file.content || "").trim()),
+    ).length,
+  );
+  const fairPerFileLimit = Math.min(
+    qualityAuditMaxTextPerFile,
+    Math.max(
+      8_000,
+      Math.floor(
+        qualityAuditMaxTotalExtractedText /
+          textFilesCount,
+      ),
+    ),
+  );
+  let remainingCharacters = qualityAuditMaxTotalExtractedText;
+
+  return successfulFiles.map((file) => {
+    const text = String(file.text || file.content || "").trim();
+
+    if (!text) return file;
+
+    const allowed = Math.max(
+      1,
+      Math.min(
+        text.length,
+        fairPerFileLimit,
+        remainingCharacters,
+      ),
+    );
+    const limited = text.slice(0, allowed);
+    remainingCharacters = Math.max(
+      0,
+      remainingCharacters - limited.length,
+    );
+
+    return {
+      ...file,
+      text: limited,
+      content: limited,
+      extractedChars: limited.length,
+      extractionMessage:
+        limited.length < text.length
+          ? `${file.extractionMessage || "Text bol extrahovaný."} Kontext bol bezpečne skrátený tak, aby dostali priestor aj ostatné prílohy.`
+          : file.extractionMessage,
+    };
+  });
+}
+
 function buildPreparedFilesMetadata(files: AttachedFile[]) {
   return files.map((file) => {
     const extractedText =
@@ -3330,8 +3571,10 @@ function buildPreparedFilesMetadata(files: AttachedFile[]) {
         file.extractionStatus ||
         (extractedText ? "client" : "pending"),
       extractionMethod: extractedText
-        ? "browser-text-fallback"
-        : "server-extraction-required",
+        ? file.extractionStatus === "server"
+          ? "api-extract-text"
+          : "browser-text-fallback"
+        : "server-binary-fallback-required",
       extractionMessage: file.extractionMessage || "",
       extractedText,
     };
@@ -4602,7 +4845,7 @@ export default function QualityAuditFrontend(
     }>;
   } | null>(null);
 
-  const [qualityMode, setQualityMode] = useState("style");
+  const [qualityMode, setQualityMode] = useState("all");
   const [outputMode, setOutputMode] = useState("detailed");
   const [translationFrom, setTranslationFrom] = useState<LanguageCode>("sk");
   const [translationTo, setTranslationTo] = useState<LanguageCode>("hu");
@@ -6648,6 +6891,44 @@ Text emailu:
       const chatRequestId =
         `${moduleRunRequestId}-chat`;
 
+      /**
+       * Audit kvality najprv pripraví text príloh cez existujúci
+       * /api/extract-text. Tým sa PDF/DOCX spracujú rovnako spoľahlivo ako
+       * v AI Chate a samotný /api/audit dostane jednoznačný textový kontext.
+       * Binárny súbor sa pošle iba ako fallback, ak extrakcia zlyhá.
+       */
+      let directAttachedFiles = attachedFiles;
+
+      if (requestedModule === "quality" && attachedFiles.length > 0) {
+        setAttachedFiles(
+          attachedFiles.map((file) => ({
+            ...file,
+            extractionStatus: String(
+              file.text || file.content || "",
+            ).trim()
+              ? file.extractionStatus
+              : "pending",
+            extractionMessage: String(
+              file.text || file.content || "",
+            ).trim()
+              ? file.extractionMessage
+              : "Pripravujem obsah prílohy pre odborný Audit kvality…",
+          })),
+        );
+
+        directAttachedFiles =
+          await prepareQualityAuditAttachments(
+            attachedFiles,
+            chatRequestId,
+          );
+
+        if (!isCurrentModuleRun()) {
+          return;
+        }
+
+        setAttachedFiles(directAttachedFiles);
+      }
+
       const formData = new FormData();
 
       formData.append(
@@ -6680,6 +6961,38 @@ Text emailu:
       formData.append("secondaryInput", secondaryText);
       formData.append("qualityMode", qualityMode);
       formData.append("outputMode", outputMode);
+
+      if (requestedModule === "quality") {
+        formData.append(
+          "userInstruction",
+          userText || secondaryText || "Vykonaj odborný audit priloženého textu.",
+        );
+        formData.append(
+          "instruction",
+          userText || secondaryText || "Vykonaj odborný audit priloženého textu.",
+        );
+        formData.append(
+          "question",
+          userText || secondaryText || "Vykonaj odborný audit priloženého textu.",
+        );
+        formData.append(
+          "checkType",
+          qualityMode === "style"
+            ? "Štylistika a akademický jazyk"
+            : qualityMode === "citations"
+              ? "Citácie a citačná norma"
+              : qualityMode === "logic"
+                ? "Logika, nadväznosť a argumentácia"
+                : "Kompletný odborný audit",
+        );
+        formData.append(
+          "outputType",
+          outputMode === "detailed" ? "Detailná odborná správa" : outputMode,
+        );
+        formData.append("auditScope", "auto");
+        formData.append("maxOutputTokens", "6000");
+      }
+
       formData.append("citationStyle", getCitationStyle(profileForApi));
       formData.append("title", profileForApi?.title || "");
       formData.append("workType", getWorkType(profileForApi));
@@ -6689,37 +7002,58 @@ Text emailu:
       formData.append("profileContext", buildProfileBlock(profileForApi));
       formData.append(
         "attachmentsContext",
-        buildAttachmentBlock(attachedFiles),
+        buildAttachmentBlock(directAttachedFiles),
       );
 
       const preparedFilesMetadata =
         buildPreparedFilesMetadata(
-          attachedFiles,
+          directAttachedFiles,
         );
+
+      const preparedFilesMetadataForRequest =
+        requestedModule === "quality"
+          ? preparedFilesMetadata.map((metadata) => ({
+              ...metadata,
+              extractedText: undefined,
+            }))
+          : preparedFilesMetadata;
 
       formData.append(
         "preparedFilesMetadata",
         JSON.stringify(
-          preparedFilesMetadata,
+          preparedFilesMetadataForRequest,
         ),
       );
 
       formData.append(
         "attachments",
         JSON.stringify(
-          attachedFiles.map((file) => ({
+          directAttachedFiles.map((file) => ({
             id: file.id,
             name: file.name,
+            originalName: file.name,
             size: file.size,
             type: file.type,
-            text: file.text || file.content || "",
+            text:
+              requestedModule === "quality"
+                ? undefined
+                : file.text || file.content || "",
+            content:
+              requestedModule === "quality"
+                ? undefined
+                : file.content || file.text || "",
             extractedText: file.text || file.content || "",
+            binaryAvailable:
+              isBrowserFileLike(file.file) &&
+              !String(file.text || file.content || "").trim(),
+            extractionStatus: file.extractionStatus,
+            extractionMessage: file.extractionMessage,
           })),
         ),
       );
 
       const clientExtractedText =
-        attachedFiles
+        directAttachedFiles
           .map((file) =>
             String(
               file.text ||
@@ -6733,7 +7067,7 @@ Text emailu:
           )
           .slice(0, 120_000);
 
-      if (clientExtractedText) {
+      if (clientExtractedText && requestedModule !== "quality") {
         formData.append(
           "clientExtractedText",
           clientExtractedText,
@@ -6807,11 +7141,13 @@ Text emailu:
       formData.append(
         "filesMetadata",
         JSON.stringify(
-          attachedFiles.map((item) => ({
+          directAttachedFiles.map((item) => ({
             name: item.name,
             size: item.size,
             type: item.type,
             extension: getFileExtension(item.name),
+            extractionStatus: item.extractionStatus,
+            extractedChars: item.extractedChars || 0,
           })),
         ),
       );
@@ -6820,16 +7156,24 @@ Text emailu:
         formData.append("projectId", profileForApi.id);
       }
 
-      attachedFiles.forEach((item) => {
+      directAttachedFiles.forEach((item) => {
         if (!isBrowserFileLike(item.file)) {
           return;
         }
 
+        const hasExtractedText = Boolean(
+          String(item.text || item.content || "").trim(),
+        );
+
         /**
-         * Skutočný File objekt sa odosiela pod jednotným poľom files.
-         * /api/chat prechádza všetky FormData položky, takže obsah dostanú
-         * Claude, OpenAI, Gemini, Mistral aj Grok cez rovnakú extrakciu.
+         * Pri audite neposielame ten istý dokument dvakrát (text + binárny
+         * input_file). Binárny súbor je iba fallback pre prílohy, ktorých text
+         * /api/extract-text nevedel pripraviť.
          */
+        if (requestedModule === "quality" && hasExtractedText) {
+          return;
+        }
+
         formData.append(
           "files",
           item.file,
@@ -6970,7 +7314,7 @@ Text emailu:
             : null;
 
         if (
-          attachedFiles.length > 0 &&
+          directAttachedFiles.length > 0 &&
           attachmentProcessing &&
           isCurrentModuleRun()
         ) {
@@ -7001,9 +7345,9 @@ Text emailu:
               code:
                 "ATTACHMENT_NOT_RECEIVED",
               message:
-                "AI chat neprijal priložený súbor.",
+                "Audit kvality neprijal priložený súbor.",
               detail:
-                "Frontend odoslal požiadavku, ale /api/chat eviduje receivedFiles = 0.",
+                "Frontend odoslal požiadavku, ale /api/audit eviduje receivedFiles = 0.",
             });
           }
 
@@ -7023,29 +7367,22 @@ Text emailu:
           }
 
           setAttachedFiles(
-            (currentFiles) =>
-              currentFiles.map(
-                (file) => ({
-                  ...file,
-                  extractionStatus:
-                    successfullyReadFiles > 0
-                      ? "server"
-                      : file.extractionStatus,
-                  extractedChars:
-                    extractedCharacters > 0
-                      ? extractedCharacters
-                      : file.extractedChars,
-                  extractionMessage:
-                    successfullyReadFiles > 0
-                      ? "Obsah prílohy bol načítaný na serveri a vložený do AI kontextu."
-                      : file.extractionMessage,
-                }),
-              ),
+            directAttachedFiles.map((file) => ({
+              ...file,
+              extractionStatus:
+                file.extractionStatus ||
+                (successfullyReadFiles > 0 ? "server" : "ready"),
+              extractionMessage:
+                file.extractionMessage ||
+                (successfullyReadFiles > 0
+                  ? "Obsah prílohy bol úspešne použitý v Audite kvality."
+                  : undefined),
+            })),
           );
 
           setActiveAttachmentText(
             clientExtractedText ||
-              `Server načítal ${successfullyReadFiles} z ${receivedFiles} príloh a extrahoval ${extractedCharacters} znakov.`,
+              `Audit prijal ${receivedFiles} príloh; použiteľný obsah bol dostupný pre ${successfullyReadFiles} príloh (${extractedCharacters} extrahovaných znakov).`,
           );
         }
 
@@ -7142,10 +7479,12 @@ Text emailu:
           profileTitle: profileForApi?.title || "",
           profileId: profileForApi?.id || null,
           activeModule: requestedModule,
-          attachedFiles: attachedFiles.map((file) => ({
+          attachedFiles: directAttachedFiles.map((file) => ({
             name: file.name,
             size: file.size,
             type: file.type,
+            extractionStatus: file.extractionStatus,
+            extractedChars: file.extractedChars || 0,
           })),
         },
       });

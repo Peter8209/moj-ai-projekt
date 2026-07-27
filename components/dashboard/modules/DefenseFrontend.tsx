@@ -902,6 +902,202 @@ type DefenseSlide = {
     | "closing";
 };
 
+type DefenseWorkspaceMode = "presentation" | "question";
+
+type DefenseQuestionAnswer = {
+  directAnswer: string;
+  oralAnswer: string;
+  keyArguments: string[];
+  defenseStrategy: string[];
+  caveat?: string;
+  followUpQuestions: Array<{
+    question: string;
+    answer: string;
+  }>;
+};
+
+type DefenseChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  answer?: DefenseQuestionAnswer;
+  createdAt: string;
+};
+
+type DefenseQaUi = {
+  presentationTab: string;
+  questionTab: string;
+  questionLabel: string;
+  questionPlaceholder: string;
+  questionButton: string;
+  questionLoading: string;
+  conversationTitle: string;
+  conversationSubtitle: string;
+  directAnswer: string;
+  oralAnswer: string;
+  keyArguments: string;
+  defenseStrategy: string;
+  caveat: string;
+  followUps: string;
+  emptyConversation: string;
+  enterHint: string;
+};
+
+const DEFENSE_QA_UI: Record<LanguageCode, DefenseQaUi> = {
+  sk: {
+    presentationTab: "Pripraviť obhajobu",
+    questionTab: "Otázka komisie",
+    questionLabel: "Otázka od komisie",
+    questionPlaceholder:
+      "Napíšte otázku presne tak, ako ju položila komisia. Napr.: Ako množstvo prijatých bielkovín ovplyvňuje zdravie človeka?",
+    questionButton: "Pripraviť odpoveď",
+    questionLoading: "Pripravujem odpoveď...",
+    conversationTitle: "Tréner obhajoby",
+    conversationSubtitle:
+      "Priama odpoveď, ústna formulácia, argumenty a príprava na doplňujúce otázky.",
+    directAnswer: "Priama odpoveď komisii",
+    oralAnswer: "Ako to povedať pri obhajobe",
+    keyArguments: "Kľúčové argumenty",
+    defenseStrategy: "Ako odpoveď obhájiť",
+    caveat: "Na čo si dať pozor",
+    followUps: "Možné doplňujúce otázky",
+    emptyConversation:
+      "Napíšte otázku od komisie. Asistent pripraví odbornú odpoveď aj spôsob, ako ju sebavedomo obhájiť.",
+    enterHint: "Enter odošle otázku · Shift + Enter pridá nový riadok",
+  },
+  cs: {
+    presentationTab: "Připravit obhajobu",
+    questionTab: "Otázka komise",
+    questionLabel: "Otázka od komise",
+    questionPlaceholder: "Napište otázku přesně tak, jak ji položila komise.",
+    questionButton: "Připravit odpověď",
+    questionLoading: "Připravuji odpověď...",
+    conversationTitle: "Trenér obhajoby",
+    conversationSubtitle: "Přímá odpověď, ústní formulace, argumenty a doplňující otázky.",
+    directAnswer: "Přímá odpověď komisi",
+    oralAnswer: "Jak to říct při obhajobě",
+    keyArguments: "Klíčové argumenty",
+    defenseStrategy: "Jak odpověď obhájit",
+    caveat: "Na co si dát pozor",
+    followUps: "Možné doplňující otázky",
+    emptyConversation: "Napište otázku od komise a připravte si obhajitelnou odpověď.",
+    enterHint: "Enter odešle otázku · Shift + Enter vloží nový řádek",
+  },
+  en: {
+    presentationTab: "Prepare defense",
+    questionTab: "Committee question",
+    questionLabel: "Committee question",
+    questionPlaceholder: "Enter the question exactly as the committee asked it.",
+    questionButton: "Prepare answer",
+    questionLoading: "Preparing answer...",
+    conversationTitle: "Defense coach",
+    conversationSubtitle: "Direct answer, spoken version, arguments, and follow-up preparation.",
+    directAnswer: "Direct answer to the committee",
+    oralAnswer: "How to say it during the defense",
+    keyArguments: "Key arguments",
+    defenseStrategy: "How to defend the answer",
+    caveat: "What to watch out for",
+    followUps: "Likely follow-up questions",
+    emptyConversation: "Enter a committee question to get an answer and a defense strategy.",
+    enterHint: "Enter sends · Shift + Enter adds a new line",
+  },
+  de: {
+    presentationTab: "Verteidigung vorbereiten",
+    questionTab: "Frage der Kommission",
+    questionLabel: "Frage der Kommission",
+    questionPlaceholder: "Geben Sie die Frage genau so ein, wie sie gestellt wurde.",
+    questionButton: "Antwort vorbereiten",
+    questionLoading: "Antwort wird vorbereitet...",
+    conversationTitle: "Verteidigungscoach",
+    conversationSubtitle: "Direkte Antwort, mündliche Formulierung, Argumente und Rückfragen.",
+    directAnswer: "Direkte Antwort an die Kommission",
+    oralAnswer: "So formulieren Sie es mündlich",
+    keyArguments: "Kernargumente",
+    defenseStrategy: "So verteidigen Sie die Antwort",
+    caveat: "Darauf achten",
+    followUps: "Mögliche Rückfragen",
+    emptyConversation: "Geben Sie eine Frage der Kommission ein und bereiten Sie eine sichere Antwort vor.",
+    enterHint: "Enter sendet · Shift + Enter fügt eine neue Zeile ein",
+  },
+  pl: {
+    presentationTab: "Przygotuj obronę",
+    questionTab: "Pytanie komisji",
+    questionLabel: "Pytanie od komisji",
+    questionPlaceholder: "Wpisz pytanie dokładnie tak, jak zadała je komisja.",
+    questionButton: "Przygotuj odpowiedź",
+    questionLoading: "Przygotowuję odpowiedź...",
+    conversationTitle: "Trener obrony",
+    conversationSubtitle: "Bezpośrednia odpowiedź, wersja ustna, argumenty i pytania dodatkowe.",
+    directAnswer: "Bezpośrednia odpowiedź komisji",
+    oralAnswer: "Jak powiedzieć to podczas obrony",
+    keyArguments: "Kluczowe argumenty",
+    defenseStrategy: "Jak obronić odpowiedź",
+    caveat: "Na co uważać",
+    followUps: "Możliwe pytania dodatkowe",
+    emptyConversation: "Wpisz pytanie komisji, aby przygotować odpowiedź i strategię obrony.",
+    enterHint: "Enter wysyła · Shift + Enter dodaje nową linię",
+  },
+  hu: {
+    presentationTab: "Védés előkészítése",
+    questionTab: "Bizottsági kérdés",
+    questionLabel: "A bizottság kérdése",
+    questionPlaceholder: "Írja be a kérdést pontosan úgy, ahogy a bizottság feltette.",
+    questionButton: "Válasz előkészítése",
+    questionLoading: "Válasz készül...",
+    conversationTitle: "Védési tréner",
+    conversationSubtitle: "Közvetlen válasz, szóbeli változat, érvek és kiegészítő kérdések.",
+    directAnswer: "Közvetlen válasz a bizottságnak",
+    oralAnswer: "Így mondd el a védésen",
+    keyArguments: "Kulcsérvek",
+    defenseStrategy: "Így védd meg a választ",
+    caveat: "Erre figyelj",
+    followUps: "Lehetséges kiegészítő kérdések",
+    emptyConversation: "Írj be egy bizottsági kérdést, és készülj fel a meggyőző válaszra.",
+    enterHint: "Enter küld · Shift + Enter új sort ad",
+  },
+};
+
+function normalizeDefenseQuestionAnswer(value: unknown): DefenseQuestionAnswer | null {
+  if (!value || typeof value !== "object") return null;
+
+  const raw = value as Record<string, unknown>;
+  const directAnswer = String(raw.directAnswer || "").trim();
+  const oralAnswer = String(raw.oralAnswer || "").trim();
+
+  if (!directAnswer && !oralAnswer) return null;
+
+  const normalizeList = (list: unknown, limit: number) =>
+    Array.isArray(list)
+      ? list.map((item) => String(item || "").trim()).filter(Boolean).slice(0, limit)
+      : [];
+
+  const followUpQuestions = Array.isArray(raw.followUpQuestions)
+    ? raw.followUpQuestions
+        .map((item) => {
+          if (!item || typeof item !== "object") return null;
+          const row = item as Record<string, unknown>;
+          const question = String(row.question || "").trim();
+          const answer = String(row.answer || "").trim();
+          return question && answer ? { question, answer } : null;
+        })
+        .filter((item): item is { question: string; answer: string } => Boolean(item))
+        .slice(0, 4)
+    : [];
+
+  return {
+    directAnswer: directAnswer || oralAnswer,
+    oralAnswer: oralAnswer || directAnswer,
+    keyArguments: normalizeList(raw.keyArguments, 6),
+    defenseStrategy: normalizeList(raw.defenseStrategy, 6),
+    caveat: String(raw.caveat || "").trim() || undefined,
+    followUpQuestions,
+  };
+}
+
+function createDefenseChatMessageId(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 type SavedProfile = {
   id?: string;
   type?: string;
@@ -4136,6 +4332,12 @@ export default function DefenseFrontend(
   const [isLoading, setIsLoading] = useState(false);
   const [isPptxLoading, setIsPptxLoading] = useState(false);
   const [defenseSlides, setDefenseSlides] = useState<DefenseSlide[]>([]);
+  const [defenseWorkspaceMode, setDefenseWorkspaceMode] =
+    useState<DefenseWorkspaceMode>("presentation");
+  const [, setDefenseQuestionAnswer] =
+    useState<DefenseQuestionAnswer | null>(null);
+  const [defenseChatMessages, setDefenseChatMessages] =
+    useState<DefenseChatMessage[]>([]);
 
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [activeAttachmentText, setActiveAttachmentText] = useState("");
@@ -4144,6 +4346,21 @@ export default function DefenseFrontend(
    * AI školiteľ, Audit kvality a Obhajoba majú vlastné frontendové komponenty.
    * Dashboard sleduje iba ich aktuálny počet príloh pre informačný panel balíka.
    */
+
+  useEffect(() => {
+    if (defenseWorkspaceMode !== "question" || defenseChatMessages.length === 0) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      defenseChatEndRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }, 80);
+
+    return () => window.clearTimeout(timer);
+  }, [defenseChatMessages, defenseWorkspaceMode]);
 
   useEffect(() => {
     const fallbackText = attachedFiles
@@ -4686,6 +4903,7 @@ export default function DefenseFrontend(
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const resultRef = useRef<HTMLDivElement | null>(null);
+  const defenseChatEndRef = useRef<HTMLDivElement | null>(null);
   const mobileToolPanelRef = useRef<HTMLDivElement | null>(null);
 
   const activeModuleInfo = useMemo(() => {
@@ -4807,6 +5025,19 @@ export default function DefenseFrontend(
 
   const activeModulePlaceholder = fixedUi.placeholder;
 
+  const defenseQaUi = DEFENSE_QA_UI[systemLanguage] ?? DEFENSE_QA_UI.sk;
+  const effectiveDefenseInputLabel =
+    activeModule === "defense" && defenseWorkspaceMode === "question"
+      ? defenseQaUi.questionLabel
+      : activeModuleInputLabel;
+  const effectiveDefensePlaceholder =
+    activeModule === "defense" && defenseWorkspaceMode === "question"
+      ? defenseQaUi.questionPlaceholder
+      : activeModulePlaceholder;
+  const effectiveDefenseButtonLabel =
+    activeModule === "defense" && defenseWorkspaceMode === "question"
+      ? defenseQaUi.questionButton
+      : activeModuleButtonLabel;
   const activeModuleCard = t?.dashboardTools?.cards?.[activeTranslationKey];
 
   const activeDashboardModuleTexts =
@@ -4839,6 +5070,10 @@ export default function DefenseFrontend(
   const activeModuleLoadingLabel = `${
     MODULE_PROCESSING_PREFIX[systemLanguage] || MODULE_PROCESSING_PREFIX.sk
   }: ${activeModuleLabel}...`;
+  const effectiveDefenseLoadingLabel =
+    activeModule === "defense" && defenseWorkspaceMode === "question"
+      ? defenseQaUi.questionLoading
+      : activeModuleLoadingLabel;
   const activeModuleActionClassName =
     MODULE_ACTION_CLASS_NAMES[activeModule] ||
     MODULE_ACTION_CLASS_NAMES.supervisor;
@@ -5340,6 +5575,8 @@ export default function DefenseFrontend(
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
     setDefenseSlides([]);
+    setDefenseQuestionAnswer(null);
+    setDefenseChatMessages([]);
   };
 
   useEffect(() => {
@@ -5935,11 +6172,15 @@ Text emailu:
     return Array.from(columns);
   }
 
-  const runModule = async () => {
+  const runModule = async (defenseModeOverride?: DefenseWorkspaceMode) => {
     if (isLoading || billingLoading) return;
 
     const requestedModule =
       activeModuleRef.current;
+    const requestedDefenseMode: DefenseWorkspaceMode =
+      requestedModule === "defense"
+        ? defenseModeOverride ?? defenseWorkspaceMode
+        : "presentation";
 
     const moduleRunRequestId =
       createClientRequestId(
@@ -6086,6 +6327,15 @@ Text emailu:
       userText || secondaryText || attachedFiles.length > 0 || hasUsableProfile,
     );
 
+    if (
+      requestedModule === "defense" &&
+      requestedDefenseMode === "question" &&
+      !userText
+    ) {
+      alert(defenseQaUi.emptyConversation);
+      return;
+    }
+
     if (!hasAnyInput) {
       alert(
         "Najskôr vložte zadanie, text, prílohu alebo vyberte profil práce.",
@@ -6104,12 +6354,19 @@ Text emailu:
 
     setIsLoading(true);
     setResult("");
-    setCanvasText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
 
-    if (requestedModule === "defense") {
-      setDefenseSlides([]);
+    if (requestedModule === "defense" && requestedDefenseMode === "question") {
+      setDefenseQuestionAnswer(null);
+      setCanvasText("");
+      setCanvasOpen(false);
+    } else {
+      setCanvasText("");
+
+      if (requestedModule === "defense") {
+        setDefenseSlides([]);
+      }
     }
 
     // Analýza dát sa zobrazuje výhradne v AnalysisResultsModal.
@@ -6757,6 +7014,13 @@ Text emailu:
       if (requestedModule === "defense") {
         const defenseUserInstruction = userText || secondaryText;
 
+        formData.append("mode", requestedDefenseMode);
+        formData.append(
+          "action",
+          requestedDefenseMode === "question"
+            ? "commission-question"
+            : "presentation",
+        );
         formData.append("userInstruction", defenseUserInstruction);
         formData.append("instruction", defenseUserInstruction);
         formData.append("question", defenseUserInstruction);
@@ -6766,6 +7030,15 @@ Text emailu:
         formData.append("title", profileForApi?.title || "");
         formData.append("defenseType", getWorkType(profileForApi));
         formData.append("workType", getWorkType(profileForApi));
+        formData.append(
+          "conversation",
+          JSON.stringify(
+            defenseChatMessages.slice(-8).map((message) => ({
+              role: message.role,
+              content: message.content,
+            })),
+          ),
+        );
       }
 
       formData.append("profile", JSON.stringify(profileForApi || {}));
@@ -6939,7 +7212,23 @@ Text emailu:
         requestId: chatRequestId,
         module: requestedModule,
         activeModule: requestedModule,
-        action: requestedModule,
+        action:
+          requestedModule === "defense"
+            ? requestedDefenseMode === "question"
+              ? "commission-question"
+              : "presentation"
+            : requestedModule,
+        mode:
+          requestedModule === "defense"
+            ? requestedDefenseMode
+            : requestedModule,
+        conversation:
+          requestedModule === "defense"
+            ? defenseChatMessages.slice(-8).map((message) => ({
+                role: message.role,
+                content: message.content,
+              }))
+            : [],
         featureKey: requiredFeature,
         agent,
         model: agent,
@@ -7050,6 +7339,7 @@ Text emailu:
 
       const contentType = response.headers.get("content-type") || "";
       let fullText = "";
+      let returnedQuestionAnswer: DefenseQuestionAnswer | null = null;
 
       if (contentType.includes("application/json")) {
         const data = await response.json();
@@ -7151,15 +7441,29 @@ Text emailu:
         }
 
         const returnedDefenseSlides =
-          requestedModule === "defense"
+          requestedModule === "defense" && requestedDefenseMode === "presentation"
             ? normalizeDefenseSlides(data?.slides)
             : [];
 
         if (
           requestedModule === "defense" &&
+          requestedDefenseMode === "presentation" &&
           isCurrentModuleRun()
         ) {
           setDefenseSlides(returnedDefenseSlides);
+        }
+
+        if (
+          requestedModule === "defense" &&
+          requestedDefenseMode === "question"
+        ) {
+          returnedQuestionAnswer = normalizeDefenseQuestionAnswer(
+            data?.questionAnswer,
+          );
+
+          if (returnedQuestionAnswer && isCurrentModuleRun()) {
+            setDefenseQuestionAnswer(returnedQuestionAnswer);
+          }
         }
 
         fullText =
@@ -7239,6 +7543,63 @@ Text emailu:
 
       if (!isCurrentModuleRun()) {
         await loadBillingState();
+        return;
+      }
+
+      if (requestedModule === "defense" && requestedDefenseMode === "question") {
+        const assistantContent =
+          returnedQuestionAnswer?.directAnswer || cleaned;
+
+        setResult(cleaned);
+        setCanvasText("");
+        setCanvasOpen(false);
+        setDefenseQuestionAnswer(returnedQuestionAnswer);
+        setDefenseChatMessages((current) => [
+          ...current,
+          {
+            id: createDefenseChatMessageId("user"),
+            role: "user",
+            content: userText,
+            createdAt: new Date().toISOString(),
+          },
+          {
+            id: createDefenseChatMessageId("assistant"),
+            role: "assistant",
+            content: assistantContent,
+            answer: returnedQuestionAnswer || undefined,
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+        setInput("");
+
+        await saveHistoryItem({
+          module: requestedModule,
+          title: `${requestedModuleResultTitle} – otázka komisie`,
+          userMessage: userText,
+          assistantMessage: cleaned,
+          result: {
+            profileTitle: profileForApi?.title || "",
+            profileId: profileForApi?.id || null,
+            activeModule: requestedModule,
+            mode: requestedDefenseMode,
+            questionAnswer: returnedQuestionAnswer || undefined,
+            attachedFiles: attachedFiles.map((file) => ({
+              name: file.name,
+              size: file.size,
+              type: file.type,
+            })),
+          },
+        });
+
+        await loadBillingState();
+
+        setTimeout(() => {
+          defenseChatEndRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest",
+          });
+        }, 120);
+
         return;
       }
 
@@ -8821,51 +9182,303 @@ Text emailu:
               </p>
             </section>
 
+            {activeModule === "defense" ? (
+              <div className="mb-5 rounded-[28px] border border-violet-300/20 bg-gradient-to-br from-violet-500/10 via-purple-500/[0.06] to-slate-950/20 p-2 shadow-xl shadow-violet-950/20">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDefenseWorkspaceMode("presentation")}
+                    aria-pressed={defenseWorkspaceMode === "presentation"}
+                    className={[
+                      "flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-black transition",
+                      defenseWorkspaceMode === "presentation"
+                        ? "border-violet-300/50 bg-violet-500 text-white shadow-lg shadow-violet-950/30"
+                        : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white",
+                    ].join(" ")}
+                  >
+                    <BookOpen className="h-4 w-4" />
+                    <span>{defenseQaUi.presentationTab}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDefenseWorkspaceMode("question")}
+                    aria-pressed={defenseWorkspaceMode === "question"}
+                    className={[
+                      "flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-black transition",
+                      defenseWorkspaceMode === "question"
+                        ? "border-fuchsia-300/50 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-fuchsia-950/30"
+                        : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white",
+                    ].join(" ")}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    <span>{defenseQaUi.questionTab}</span>
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             <label
               htmlFor={dashboardInputId}
               className="mb-2 block text-sm font-black text-slate-200"
             >
-              {activeModuleInputLabel}
+              {effectiveDefenseInputLabel}
             </label>
 
-            <textarea
-              key={`dashboard-textarea-${activeModule}`}
-              id={dashboardInputId}
-              name={dashboardInputId}
-              data-module-input={activeModule}
-              aria-label={activeModuleInputLabel}
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder={activeModulePlaceholder}
-              className="min-h-[240px] w-full resize-y rounded-3xl border border-white/10 bg-[#070b18] px-5 py-5 text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/10"
-            />
+            <div className="relative">
+              <textarea
+                key={`dashboard-textarea-${activeModule}-${defenseWorkspaceMode}`}
+                id={dashboardInputId}
+                name={dashboardInputId}
+                data-module-input={activeModule}
+                aria-label={effectiveDefenseInputLabel}
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    activeModule === "defense" &&
+                    defenseWorkspaceMode === "question" &&
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+
+                    if (!generationBlocked && input.trim()) {
+                      void runModule("question");
+                    }
+                  }
+                }}
+                placeholder={effectiveDefensePlaceholder}
+                className={[
+                  "w-full resize-y rounded-3xl border bg-[#070b18] px-5 py-5 text-sm font-semibold leading-7 text-white placeholder:text-slate-500 outline-none transition focus:ring-4",
+                  activeModule === "defense" && defenseWorkspaceMode === "question"
+                    ? "min-h-[150px] border-violet-300/25 focus:border-fuchsia-400/60 focus:ring-fuchsia-500/10"
+                    : "min-h-[240px] border-white/10 focus:border-violet-400/60 focus:ring-violet-500/10",
+                ].join(" ")}
+              />
+
+              {activeModule === "defense" && defenseWorkspaceMode === "question" ? (
+                <div className="pointer-events-none absolute bottom-3 right-4 rounded-full border border-white/10 bg-slate-950/70 px-3 py-1.5 text-[11px] font-bold text-slate-400 backdrop-blur">
+                  {defenseQaUi.enterHint}
+                </div>
+              ) : null}
+            </div>
 
             {activeModule !== "data" && (
               <button
-                key={`dashboard-action-${activeModule}`}
+                key={`dashboard-action-${activeModule}-${defenseWorkspaceMode}`}
                 type="button"
-                onClick={runModule}
+                onClick={() =>
+                  void runModule(
+                    activeModule === "defense"
+                      ? defenseWorkspaceMode
+                      : undefined,
+                  )
+                }
                 disabled={generationBlocked}
-                aria-label={activeModuleButtonLabel}
+                aria-label={effectiveDefenseButtonLabel}
                 data-module-action={activeModule}
                 className={[
                   "mt-3 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl px-6 py-4 text-sm font-black text-white shadow-lg transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:mr-3 sm:w-auto",
-                  activeModuleActionClassName,
+                  activeModule === "defense" && defenseWorkspaceMode === "question"
+                    ? "bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 shadow-fuchsia-950/30 hover:brightness-110"
+                    : activeModuleActionClassName,
                 ].join(" ")}
               >
                 {isLoading ? (
                   <>
                     <RefreshCcw className="h-4 w-4 animate-spin" />
-                    <span>{activeModuleLoadingLabel}</span>
+                    <span>{effectiveDefenseLoadingLabel}</span>
                   </>
                 ) : (
                   <>
-                    <ActiveModuleActionIcon className="h-4 w-4" />
-                    <span>{activeModuleButtonLabel}</span>
+                    {activeModule === "defense" && defenseWorkspaceMode === "question" ? (
+                      <Send className="h-4 w-4" />
+                    ) : (
+                      <ActiveModuleActionIcon className="h-4 w-4" />
+                    )}
+                    <span>{effectiveDefenseButtonLabel}</span>
                   </>
                 )}
               </button>
             )}
+
+            {activeModule === "defense" && defenseWorkspaceMode === "question" ? (
+              <section
+                ref={resultRef}
+                className="mt-5 overflow-hidden rounded-[30px] border border-violet-300/20 bg-[#070b18] shadow-2xl shadow-violet-950/20"
+                aria-live="polite"
+              >
+                <div className="border-b border-white/10 bg-gradient-to-r from-violet-500/10 via-fuchsia-500/[0.06] to-transparent px-5 py-4 sm:px-6">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-violet-950/30">
+                      <Sparkles className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-base font-black text-white">
+                        {defenseQaUi.conversationTitle}
+                      </h3>
+                      <p className="mt-1 text-xs font-semibold leading-5 text-slate-400 sm:text-sm">
+                        {defenseQaUi.conversationSubtitle}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="max-h-[720px] space-y-5 overflow-y-auto p-4 sm:p-6">
+                  {defenseChatMessages.length === 0 && !isLoading && !result ? (
+                    <div className="rounded-3xl border border-dashed border-violet-300/20 bg-violet-500/[0.05] px-5 py-8 text-center">
+                      <Sparkles className="mx-auto h-6 w-6 text-violet-300" />
+                      <p className="mx-auto mt-3 max-w-2xl text-sm font-semibold leading-6 text-slate-300">
+                        {defenseQaUi.emptyConversation}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {defenseChatMessages.map((message) => {
+                    if (message.role === "user") {
+                      return (
+                        <div key={message.id} className="flex justify-end">
+                          <div className="max-w-[88%] rounded-[24px] rounded-br-md bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 py-4 text-sm font-semibold leading-6 text-white shadow-lg shadow-violet-950/30 sm:max-w-[75%]">
+                            {message.content}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    const answer = message.answer;
+
+                    return (
+                      <div key={message.id} className="flex gap-3">
+                        <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-violet-300/25 bg-violet-500/15 text-violet-200">
+                          <Sparkles className="h-4 w-4" />
+                        </div>
+
+                        <div className="min-w-0 flex-1 space-y-3">
+                          {answer ? (
+                            <>
+                              <div className="rounded-3xl border border-violet-300/20 bg-gradient-to-br from-violet-500/15 via-purple-500/[0.08] to-slate-950/20 p-5">
+                                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-violet-200">
+                                  {defenseQaUi.directAnswer}
+                                </p>
+                                <p className="mt-3 whitespace-pre-wrap text-sm font-semibold leading-7 text-white sm:text-[15px]">
+                                  {answer.directAnswer}
+                                </p>
+                              </div>
+
+                              <div className="rounded-3xl border border-emerald-300/15 bg-emerald-500/[0.07] p-5">
+                                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-emerald-200">
+                                  {defenseQaUi.oralAnswer}
+                                </p>
+                                <p className="mt-3 whitespace-pre-wrap text-sm font-semibold leading-7 text-slate-100">
+                                  {answer.oralAnswer}
+                                </p>
+                              </div>
+
+                              {(answer.keyArguments.length > 0 || answer.defenseStrategy.length > 0) ? (
+                                <div className="grid gap-3 lg:grid-cols-2">
+                                  {answer.keyArguments.length > 0 ? (
+                                    <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+                                      <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-300">
+                                        {defenseQaUi.keyArguments}
+                                      </p>
+                                      <div className="mt-4 space-y-3">
+                                        {answer.keyArguments.map((item, index) => (
+                                          <div key={`${message.id}-arg-${index}`} className="flex gap-3 text-sm font-semibold leading-6 text-slate-200">
+                                            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-violet-500/15 text-xs font-black text-violet-200">
+                                              {index + 1}
+                                            </span>
+                                            <span>{item}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : null}
+
+                                  {answer.defenseStrategy.length > 0 ? (
+                                    <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+                                      <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-300">
+                                        {defenseQaUi.defenseStrategy}
+                                      </p>
+                                      <div className="mt-4 space-y-3">
+                                        {answer.defenseStrategy.map((item, index) => (
+                                          <div key={`${message.id}-strategy-${index}`} className="flex gap-3 text-sm font-semibold leading-6 text-slate-200">
+                                            <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-fuchsia-400" />
+                                            <span>{item}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : null}
+
+                              {answer.caveat ? (
+                                <div className="rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5">
+                                  <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-200">
+                                    {defenseQaUi.caveat}
+                                  </p>
+                                  <p className="mt-2 text-sm font-semibold leading-6 text-amber-50">
+                                    {answer.caveat}
+                                  </p>
+                                </div>
+                              ) : null}
+
+                              {answer.followUpQuestions.length > 0 ? (
+                                <div className="rounded-3xl border border-sky-300/15 bg-sky-500/[0.06] p-5">
+                                  <p className="text-xs font-black uppercase tracking-[0.16em] text-sky-200">
+                                    {defenseQaUi.followUps}
+                                  </p>
+                                  <div className="mt-4 space-y-4">
+                                    {answer.followUpQuestions.map((item, index) => (
+                                      <div key={`${message.id}-follow-${index}`} className="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+                                        <p className="text-sm font-black leading-6 text-white">
+                                          {item.question}
+                                        </p>
+                                        <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">
+                                          {item.answer}
+                                        </p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </>
+                          ) : (
+                            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+                              <p className="whitespace-pre-wrap text-sm font-semibold leading-7 text-slate-100">
+                                {message.content}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {isLoading ? (
+                    <div className="flex gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-violet-300/25 bg-violet-500/15 text-violet-200">
+                        <Sparkles className="h-4 w-4" />
+                      </div>
+                      <div className="inline-flex items-center gap-3 rounded-3xl border border-white/10 bg-white/[0.04] px-5 py-4 text-sm font-bold text-slate-300">
+                        <RefreshCcw className="h-4 w-4 animate-spin text-violet-300" />
+                        <span>{defenseQaUi.questionLoading}</span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {!isLoading && result.startsWith("Chyba:") ? (
+                    <div className="rounded-3xl border border-red-300/20 bg-red-500/10 p-5 text-sm font-semibold leading-6 text-red-100">
+                      {result}
+                    </div>
+                  ) : null}
+
+                  <div ref={defenseChatEndRef} />
+                </div>
+              </section>
+            ) : null}
 
             {activeModule === "data" && (
               <div className="mt-4 rounded-3xl border border-cyan-300/30 bg-gradient-to-br from-cyan-500/10 via-blue-500/10 to-violet-500/10 p-4 shadow-2xl shadow-cyan-950/30">
@@ -9095,7 +9708,7 @@ uroven_sportu`}
                   <button
                     key={`dashboard-action-${activeModule}`}
                     type="button"
-                    onClick={runModule}
+                    onClick={() => void runModule()}
                     disabled={generationBlocked}
                     aria-label={activeModuleButtonLabel}
                     data-module-action={activeModule}
@@ -9159,16 +9772,19 @@ uroven_sportu`}
               Diktovať
             </button>
 
-            <button
-              type="button"
-              onClick={() => setCanvasOpen(true)}
-              className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] sm:mr-3 sm:w-auto"
-            >
-              <Paintbrush className="h-4 w-4" />
-              Canvas
-            </button>
+            {!(activeModule === "defense" && defenseWorkspaceMode === "question") ? (
+              <button
+                type="button"
+                onClick={() => setCanvasOpen(true)}
+                className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] sm:mr-3 sm:w-auto"
+              >
+                <Paintbrush className="h-4 w-4" />
+                Canvas
+              </button>
+            ) : null}
 
-            {(result || canvasText) && (
+            {(result || canvasText) &&
+              !(activeModule === "defense" && defenseWorkspaceMode === "question") && (
               <>
                 <button
                   type="button"

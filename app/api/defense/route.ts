@@ -73,9 +73,24 @@ type ReviewFileInfo = {
   detectedKind?: 'work' | 'review' | 'image' | 'table' | 'unknown';
 };
 
+type DefenseQuestionAnswer = {
+  directAnswer: string;
+  oralAnswer: string;
+  keyArguments: string[];
+  defenseStrategy: string[];
+  caveat?: string;
+  followUpQuestions: Array<{
+    question: string;
+    answer: string;
+  }>;
+};
+
 type DefenseResponse = {
   ok: boolean;
+  mode?: 'presentation' | 'question';
   slides?: DefenseSlide[];
+  questionAnswer?: DefenseQuestionAnswer;
+  answer?: string;
   textOutput?: string;
 
   /**
@@ -778,6 +793,167 @@ function buildPlainTextOutput(slides: DefenseSlide[]) {
     .join('\n\n');
 }
 
+function cleanQuestionVisibleText(value: unknown) {
+  return cleanInvisibleCharacters(String(value || ''))
+    .replace(/\bOpenAI\b/gi, '')
+    .replace(/\bZEDPERA\b/gi, '')
+    .replace(/\bsystémová poznámka\b/gi, '')
+    .replace(/\btechnická poznámka\b/gi, '')
+    .replace(/\bprompt\b/gi, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function normalizeStringList(value: unknown, maxItems = 6) {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => cleanQuestionVisibleText(item))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
+function normalizeQuestionAnswer(value: unknown): DefenseQuestionAnswer | null {
+  if (!value || typeof value !== 'object') return null;
+
+  const raw = value as Record<string, unknown>;
+  const directAnswer = cleanQuestionVisibleText(raw.directAnswer);
+  const oralAnswer = cleanQuestionVisibleText(raw.oralAnswer);
+
+  if (!directAnswer && !oralAnswer) return null;
+
+  const followUpQuestions = Array.isArray(raw.followUpQuestions)
+    ? raw.followUpQuestions
+        .map((item) => {
+          if (!item || typeof item !== 'object') return null;
+          const row = item as Record<string, unknown>;
+          const question = cleanQuestionVisibleText(row.question);
+          const answer = cleanQuestionVisibleText(row.answer);
+          return question && answer ? { question, answer } : null;
+        })
+        .filter(
+          (item): item is { question: string; answer: string } => Boolean(item),
+        )
+        .slice(0, 4)
+    : [];
+
+  return {
+    directAnswer: directAnswer || oralAnswer,
+    oralAnswer: oralAnswer || directAnswer,
+    keyArguments: normalizeStringList(raw.keyArguments, 6),
+    defenseStrategy: normalizeStringList(raw.defenseStrategy, 6),
+    caveat: cleanQuestionVisibleText(raw.caveat) || undefined,
+    followUpQuestions,
+  };
+}
+
+function buildQuestionTextOutput(answer: DefenseQuestionAnswer) {
+  const parts = [answer.directAnswer, '', answer.oralAnswer];
+
+  if (answer.keyArguments.length > 0) {
+    parts.push('', ...answer.keyArguments.map((item) => `• ${item}`));
+  }
+
+  if (answer.defenseStrategy.length > 0) {
+    parts.push('', ...answer.defenseStrategy.map((item) => `• ${item}`));
+  }
+
+  if (answer.caveat) {
+    parts.push('', answer.caveat);
+  }
+
+  if (answer.followUpQuestions.length > 0) {
+    parts.push(
+      '',
+      ...answer.followUpQuestions.flatMap((item) => [
+        `Q: ${item.question}`,
+        `A: ${item.answer}`,
+      ]),
+    );
+  }
+
+  return parts.filter((part, index, array) => {
+    if (part !== '') return true;
+    return index > 0 && array[index - 1] !== '';
+  }).join('\n');
+}
+
+function buildQuestionSystemPrompt() {
+  return `
+Si akademický tréner obhajoby záverečnej práce. Používateľ zadáva otázku, ktorú dostal alebo môže dostať od komisie.
+
+Tvoj cieľ je pripraviť odpoveď, ktorú študent vie reálne povedať pri obhajobe, a zároveň mu vysvetliť logiku odpovede.
+
+Pravidlá:
+- Najprv odpovedz priamo na otázku.
+- Potom priprav prirodzenú ústnu odpoveď približne na 45 až 90 sekúnd.
+- Uveď 3 až 6 kľúčových odborných argumentov.
+- Uveď konkrétnu stratégiu, ako odpoveď obhájiť pred komisiou.
+- Ak je otázka všeobecná, použi spoľahlivé odborné znalosti a nevymýšľaj konkrétne výsledky práce.
+- Ak odpoveď závisí od konkrétnych údajov práce a tieto údaje nie sú dostupné, jasne povedz, čo má študent doplniť, namiesto vymýšľania čísiel.
+- Aktívny profil práce je autoritatívny kontext. Text práce a posudky používaj iba vtedy, keď patria k tej istej práci.
+- Odpoveď má byť vecná, sebavedomá, zrozumiteľná a bez zbytočného akademického balastu.
+- Nevysvetľuj interné fungovanie systému, nepoužívaj technické poznámky a nespomínaj názov AI systému.
+- Vráť iba platný JSON bez markdownu.
+
+Presný formát:
+{
+  "directAnswer": "Priama odborná odpoveď na otázku komisie.",
+  "oralAnswer": "Hotová ústna formulácia, ktorú môže študent povedať pred komisiou.",
+  "keyArguments": ["argument 1", "argument 2", "argument 3"],
+  "defenseStrategy": ["ako začať", "ako zdôvodniť", "ako uzavrieť"],
+  "caveat": "Voliteľné upozornenie na hranice odpovede alebo údaj, ktorý treba doplniť.",
+  "followUpQuestions": [
+    { "question": "Možná doplňujúca otázka", "answer": "Krátka odporúčaná odpoveď" }
+  ]
+}
+`.trim();
+}
+
+function buildQuestionUserPrompt({
+  question,
+  workText,
+  defenseType,
+  profile,
+  reviewsBlock,
+  conversation,
+}: {
+  question: string;
+  workText: string;
+  defenseType: string;
+  profile: SavedProfile | null;
+  reviewsBlock: string;
+  conversation: string;
+}) {
+  return `
+JAZYK ODPOVEDE:
+${profile?.workLanguage || profile?.language || 'slovenčina'}
+
+OTÁZKA KOMISIE – ODPOVEDZ NA ŇU PRIAMO:
+${question}
+
+AKTUÁLNY PROFIL PRÁCE:
+${buildProfilePromptBlock(profile, defenseType)}
+
+DOSTUPNÝ TEXT TEJ ISTEJ PRÁCE:
+${workText || 'Nie je dostupný overený text práce. Pri všeobecnej otázke odpovedz odborne všeobecne. Pri otázke závislej od konkrétnych výsledkov nevymýšľaj údaje.'}
+
+DOPLNKOVÉ PODKLADY / POSUDKY:
+${reviewsBlock}
+
+PREDCHÁDZAJÚCI ROZHOVOR:
+${conversation || 'Bez predchádzajúceho rozhovoru.'}
+
+Priprav odpoveď tak, aby študent vedel:
+1. čo je správna odpoveď,
+2. ako ju povedať komisii,
+3. čím ju odborne zdôvodniť,
+4. na čo si dať pozor,
+5. ako reagovať na pravdepodobné doplňujúce otázky.
+`.trim();
+}
+
 function buildSystemPrompt() {
   return `
 Si odborný akademický asistent pre prípravu obhajoby záverečnej práce.
@@ -1245,6 +1421,34 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
 
+    const requestedModeRaw = cleanInvisibleCharacters(
+      String(formData.get('mode') || formData.get('action') || 'presentation'),
+    ).toLowerCase();
+
+    const requestedMode: 'presentation' | 'question' =
+      requestedModeRaw === 'question' ||
+      requestedModeRaw === 'qa' ||
+      requestedModeRaw === 'commission-question'
+        ? 'question'
+        : 'presentation';
+
+    const conversationRaw = String(formData.get('conversation') || '[]');
+    const conversationItems = safeJsonParse<Array<{ role?: string; content?: string }>>(
+      conversationRaw,
+      [],
+    )
+      .filter((item) => item && typeof item === 'object')
+      .slice(-8)
+      .map((item) => ({
+        role: item.role === 'assistant' ? 'assistant' : 'user',
+        content: cleanQuestionVisibleText(item.content),
+      }))
+      .filter((item) => item.content);
+
+    const conversation = conversationItems
+      .map((item) => `${item.role === 'assistant' ? 'ASISTENT' : 'ŠTUDENT'}: ${item.content}`)
+      .join('\n\n');
+
     const title = cleanClientVisibleText(String(formData.get('title') || ''));
 
     const explicitInstruction = cleanClientVisibleText(
@@ -1328,6 +1532,17 @@ export async function POST(req: NextRequest) {
       'Obhajoba záverečnej práce';
 
     if (!process.env.OPENAI_API_KEY) {
+      if (requestedMode === 'question') {
+        return NextResponse.json<DefenseResponse>(
+          {
+            ok: false,
+            mode: 'question',
+            error: 'AI odpoveď na otázku komisie momentálne nie je dostupná. Skontrolujte OPENAI_API_KEY.',
+          },
+          { status: 503 },
+        );
+      }
+
       const fallback = buildFallbackDefenseResponse({
         finalTitle,
         defenseType,
@@ -1402,19 +1617,142 @@ export async function POST(req: NextRequest) {
     });
 
     const hasWorkText = workText.trim().length >= 600;
+    const reviewsBlock = buildReviewsPromptBlock(supplementalFiles);
+
+    if (requestedMode === 'question') {
+      if (!instruction.trim()) {
+        return NextResponse.json<DefenseResponse>(
+          {
+            ok: false,
+            mode: 'question',
+            error: 'Napíšte otázku od komisie, na ktorú sa má pripraviť odpoveď.',
+          },
+          { status: 400 },
+        );
+      }
+
+      let questionAnswer: DefenseQuestionAnswer | null = null;
+
+      try {
+        const completion = await openai.chat.completions.create({
+          model: MODEL,
+          temperature: 0.18,
+          max_tokens: 2_400,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: buildQuestionSystemPrompt(),
+            },
+            {
+              role: 'user',
+              content: buildQuestionUserPrompt({
+                question: instruction,
+                workText,
+                defenseType,
+                profile,
+                reviewsBlock,
+                conversation,
+              }),
+            },
+          ],
+        });
+
+        const raw = extractJsonObject(
+          completion.choices[0]?.message?.content || '{}',
+        );
+
+        let parsed: unknown = {};
+
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          parsed = {};
+        }
+
+        questionAnswer = normalizeQuestionAnswer(parsed);
+      } catch (aiError) {
+        console.error('DEFENSE_QUESTION_OPENAI_ERROR:', aiError);
+
+        return NextResponse.json<DefenseResponse>(
+          {
+            ok: false,
+            mode: 'question',
+            error: isOpenAiRateLimitError(aiError)
+              ? 'AI je dočasne vyťažená. Skúste otázku odoslať znova o chvíľu.'
+              : `Odpoveď na otázku komisie sa nepodarilo pripraviť: ${getErrorMessage(aiError)}`,
+          },
+          { status: 502 },
+        );
+      }
+
+      if (!questionAnswer) {
+        return NextResponse.json<DefenseResponse>(
+          {
+            ok: false,
+            mode: 'question',
+            error: 'AI nevrátila použiteľnú odpoveď na otázku komisie. Skúste otázku formulovať presnejšie.',
+          },
+          { status: 502 },
+        );
+      }
+
+      const textOutput = buildQuestionTextOutput(questionAnswer);
+      const ignoredWarning =
+        ignoredFiles.length > 0
+          ? `Niektoré nesúvisiace alebo neoverené prílohy sa pri odpovedi nepoužili: ${ignoredFiles
+              .map((file) => file.name)
+              .join(', ')}.`
+          : undefined;
+
+      return NextResponse.json<DefenseResponse>({
+        ok: true,
+        mode: 'question',
+        questionAnswer,
+        answer: questionAnswer.directAnswer,
+        textOutput,
+        output: textOutput,
+        result: textOutput,
+        message: textOutput,
+        text: textOutput,
+        reviewsCount: reviewFiles.length,
+        reviews: reviewFiles.map((file) => ({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          compressed: file.compressed,
+          extractionAvailable: file.extractionAvailable,
+          warning: file.warning,
+          detectedKind: file.detectedKind,
+        })),
+        allowedExports: ['docx', 'pdf', 'pptx'],
+        disallowedExports: ['xlsx'],
+        pptxEndpoint: '/api/defense/pptx',
+        warning: ignoredWarning,
+        meta: {
+          model: MODEL,
+          finalTitle,
+          workTextChars: workText.length,
+          extractedFilesCount: reviewFiles.filter((file) => file.extractionAvailable).length,
+          imageFilesCount: reviewFiles.filter((file) => file.detectedKind === 'image').length,
+          generatedSlidesCount: 0,
+          fallbackUsed: false,
+          shortInstructionDetected,
+        },
+      });
+    }
 
     if (!hasWorkText && !profile?.title && !profile?.topic) {
       return NextResponse.json<DefenseResponse>(
         {
           ok: false,
+          mode: 'presentation',
           error:
             'Chýba aktívny profil práce alebo profilovo zhodný text práce. Vyberte profil práce a potom pridajte podklady k tej istej práci.',
         },
         { status: 400 },
       );
     }
-
-    const reviewsBlock = buildReviewsPromptBlock(supplementalFiles);
 
     let slides: DefenseSlide[] = [];
     let warning: string | undefined =
@@ -1511,6 +1849,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json<DefenseResponse>({
       ok: true,
+      mode: 'presentation',
       slides,
       textOutput,
       output: textOutput,

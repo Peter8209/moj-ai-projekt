@@ -222,6 +222,12 @@ type BibliographicCandidate = {
   title: string | null;
   doi: string | null;
   url: string | null;
+  journal?: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  pages?: string | null;
+  isbn?: string | null;
+  issn?: string | null;
   sourceType: 'book' | 'article' | 'web' | 'software' | 'unknown';
   citationKey?: string;
   inTextCitations?: InTextCitation[];
@@ -229,6 +235,7 @@ type BibliographicCandidate = {
   matchedFromText?: boolean;
   sourceDocumentName?: string | null;
   citedAccordingTo?: string | null;
+  origin?: 'attachment' | 'citation' | 'project' | 'semantic_scholar' | 'crossref' | 'ai' | 'unknown';
 };
 
 type ExtractTextApiResponse = {
@@ -1566,11 +1573,10 @@ function detectSourceType(line: string): BibliographicCandidate['sourceType'] {
     return 'software';
   }
 
-  if (lower.includes('http://') || lower.includes('https://') || lower.includes('www.')) {
-    return 'web';
-  }
+  if (lower.includes('isbn')) return 'book';
 
   if (
+    lower.includes('issn') ||
     lower.includes('doi') ||
     lower.includes('journal') ||
     lower.includes('vol.') ||
@@ -1578,17 +1584,22 @@ function detectSourceType(line: string): BibliographicCandidate['sourceType'] {
     lower.includes('issue') ||
     lower.includes('časopis') ||
     lower.includes('štúdia') ||
-    lower.includes('article')
+    lower.includes('article') ||
+    /\b(?:j\.|plant|cereal|biol\.|physiol\.|breed\.)\b/i.test(line)
   ) {
     return 'article';
+  }
+
+  if (lower.includes('http://') || lower.includes('https://') || lower.includes('www.')) {
+    return 'web';
   }
 
   if (
     lower.includes('vydavateľ') ||
     lower.includes('publisher') ||
-    lower.includes('isbn') ||
     lower.includes('monografia') ||
-    lower.includes('book')
+    lower.includes('book') ||
+    lower.includes('press')
   ) {
     return 'book';
   }
@@ -1598,12 +1609,28 @@ function detectSourceType(line: string): BibliographicCandidate['sourceType'] {
 
 function extractDoi(line: string) {
   const match = line.match(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i);
-  return match?.[0] || null;
+  return match?.[0]?.replace(/[.,;)]$/, '') || null;
 }
 
 function extractUrl(line: string) {
   const match = line.match(/https?:\/\/[^\s)]+|www\.[^\s)]+/i);
-  return match?.[0] || null;
+  return match?.[0]?.replace(/[.,;)]$/, '') || null;
+}
+
+function extractIsbn(line: string) {
+  const match = line.match(/\bISBN(?:-1[03])?\s*:?\s*((?:97[89][\s-]?)?[0-9][0-9\s-]{8,16}[0-9X])\b/i);
+  return match?.[1]?.replace(/\s+/g, '').trim() || null;
+}
+
+function extractIssn(line: string) {
+  const match = line.match(/\bISSN\s*:?\s*([0-9]{4}[\s-]?[0-9]{3}[0-9X])\b/i);
+  return match?.[1]?.replace(/\s+/g, '').replace(/^(\d{4})(\d{4})$/, '$1-$2') || null;
+}
+
+function extractPages(line: string) {
+  const explicit = line.match(/(?:\bs\.|\bstr\.|\bpp\.|\bpages?)\s*:?\s*([0-9]+\s*[–—-]\s*[0-9]+)/i);
+  const generic = line.match(/\b([0-9]{1,4}\s*[–—-]\s*[0-9]{1,4})\b/);
+  return (explicit?.[1] || generic?.[1] || null)?.replace(/\s+/g, '').replace(/[—-]/g, '–') || null;
 }
 
 function extractYear(line: string) {
@@ -1619,100 +1646,173 @@ function extractAuthors(line: string) {
   const normalizedLine = normalizeSlovakCitationText(line);
   const beforeYear = normalizedLine.split(/\b(18|19|20)\d{2}[a-z]?\b/i)[0] || '';
 
-  const cleaned = beforeYear
-    .replace(/\bet al\.?/gi, '')
-    .replace(/\ba kol\.?/gi, '')
+  const authorRegion = beforeYear.includes(':')
+    ? beforeYear.slice(0, beforeYear.indexOf(':'))
+    : beforeYear;
+
+  const cleaned = authorRegion
+    .replace(/\bet\s+al\.?/gi, '')
+    .replace(/\ba\s+kol\.?/gi, '')
+    .replace(/^[-•\d.)\s]+/, '')
     .replace(/\s+/g, ' ')
     .trim();
 
+  if (!cleaned) return [];
+
   const authors: string[] = [];
+  const initialsPattern = /^(?:[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]\.?\s*){1,6}$/;
+  const surnamePattern = /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽA-Za-záäčďéíĺľňóôŕšťúýž.'’\-]{1,80}$/;
 
-  const surnameInitialRegex =
-    /([A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽA-Za-záäčďéíĺľňóôŕšťúýž.' -]{1,60}),\s*((?:[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]\.\s*){1,5})/g;
+  const segments = cleaned
+    .replace(/\s+(?:&|and)\s+/gi, ';')
+    .split(/\s*;\s*/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
 
-  for (const match of cleaned.matchAll(surnameInitialRegex)) {
-    const surname = normalizeAuthorDisplay(match[1] || '');
-    const initials = String(match[2] || '').replace(/\s+/g, ' ').trim();
+  for (const segment of segments) {
+    const tokens = segment
+      .split(/\s*,\s*/)
+      .map((token) => token.trim())
+      .filter(Boolean);
 
-    if (surname) authors.push(`${surname}, ${initials}`.trim());
+    let index = 0;
+    while (index < tokens.length) {
+      const surname = tokens[index] || '';
+      const initials = tokens[index + 1] || '';
+
+      if (surnamePattern.test(surname) && initialsPattern.test(initials)) {
+        authors.push(
+          `${normalizeAuthorDisplay(surname)}, ${normalizeAuthorDisplay(initials)}`,
+        );
+        index += 2;
+        continue;
+      }
+
+      const fullName = normalizeAuthorDisplay(surname);
+      if (
+        fullName.length >= 3 &&
+        fullName.length <= 120 &&
+        /[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]/.test(fullName) &&
+        !/\b(?:http|www\.|doi|isbn|issn|volume|issue|pages?|journal|press)\b/i.test(fullName)
+      ) {
+        authors.push(fullName);
+      }
+
+      index += 1;
+    }
   }
 
-  if (authors.length > 0) return uniqueArray(authors).slice(0, 20);
-
-  const candidates = cleaned
-    .split(/\s*(?:;|&|\ba\b|\band\b)\s*/i)
-    .map((part) => normalizeAuthorDisplay(part))
-    .filter((part) => {
-      if (part.length < 3) return false;
-      if (!/[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]/.test(part)) return false;
-      if (/^(in|from|retrieved|dostupné|available|vol|no|pp)$/i.test(part)) return false;
-
-      return true;
-    });
-
-  return uniqueArray(candidates).slice(0, 20);
+  return uniqueArray(authors).slice(0, 20);
 }
 
 function extractTitle(line: string) {
-  let working = normalizeSlovakCitationText(line.trim());
-
-  working = working.replace(/^[-•\d.)\s]+/, '');
-  working = working.replace(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi, '');
-  working = working.replace(/https?:\/\/[^\s)]+|www\.[^\s)]+/gi, '');
+  let working = normalizeSlovakCitationText(line.trim())
+    .replace(/^[-•\d.)\s]+/, '')
+    .replace(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi, '')
+    .replace(/https?:\/\/[^\s)]+|www\.[^\s)]+/gi, '');
 
   const quoted =
-    working.match(/"([^"]{5,180})"/) ||
-    working.match(/„([^“”]{5,180})“/) ||
-    working.match(/'([^']{5,180})'/);
+    working.match(/"([^"]{5,320})"/) ||
+    working.match(/„([^“”]{5,320})“/) ||
+    working.match(/'([^']{5,320})'/);
 
   if (quoted?.[1]) return quoted[1].trim();
 
-  const afterYear = working
-    .split(/\((18|19|20)\d{2}[a-z]?\)|\b(18|19|20)\d{2}[a-z]?\b/i)
-    .pop();
+  const colonIndex = working.indexOf(':');
+  if (colonIndex > 0 && colonIndex < 280) {
+    const afterColon = working.slice(colonIndex + 1).trim();
+    const titleBeforeJournal = afterColon.match(/^(.+?)[.]\s+(?=[A-Z][A-Za-z. ]{2,80},?\s*\d)/);
+    if (titleBeforeJournal?.[1]) return titleBeforeJournal[1].replace(/\.$/, '').trim().slice(0, 420);
+  }
 
-  if (afterYear && afterYear.trim().length > 8) {
-    return afterYear
-      .replace(/^[).,\s:-]+/, '')
-      .split(/\.\s+/)[0]
-      .trim()
-      .slice(0, 220);
+  const yearMatch = working.match(/\b(?:18|19|20)\d{2}[a-z]?\b/i);
+  if (yearMatch && typeof yearMatch.index === 'number') {
+    const beforeYear = working.slice(0, yearMatch.index).trim();
+    const colon = beforeYear.indexOf(':');
+    const candidate = colon >= 0 ? beforeYear.slice(colon + 1) : beforeYear;
+    const parts = candidate.split(/\.\s+/).map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 2) return parts[0].slice(0, 420);
   }
 
   const parts = working.split('.').map((part) => part.trim()).filter(Boolean);
-
-  if (parts.length >= 2) return parts[1].slice(0, 220);
+  if (parts.length >= 2) return parts[1].slice(0, 420);
 
   return null;
 }
 
+function extractBibliographySectionText(text: string) {
+  const cleaned = cleanAiOutput(text);
+  const heading = /(?:^|\n)\s*(?:ZOZNAM\s+)?(?:POUŽITEJ\s+|POUŽITÁ\s+|POUŽITE\s+)?(?:LITERATÚRA|LITERATURA|BIBLIOGRAFIA|REFERENCES|REFERENCE LIST|POUŽITÉ ZDROJE)\s*:?[ \t]*(?:\n|$)/i;
+  const match = heading.exec(cleaned);
+
+  if (match && typeof match.index === 'number') {
+    return cleaned.slice(match.index + match[0].length).trim();
+  }
+
+  // Bez identifikovanej bibliografie sa text článku nesmie meniť na zoznam
+  // sekundárnych zdrojov. Ako bezpečný OCR fallback akceptujeme iba blok
+  // viacerých bibliografických záznamov v poslednej časti dokumentu.
+  const lines = cleaned
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length < 6) return '';
+
+  const tailStart = Math.floor(lines.length * 0.55);
+  const tail = lines.slice(tailStart);
+  const referenceIndexes = tail
+    .map((line, index) => (looksLikeBibliographicLine(line) ? index : -1))
+    .filter((index) => index >= 0);
+
+  if (referenceIndexes.length < 3) return '';
+
+  return tail.slice(referenceIndexes[0]).join('\n').trim();
+}
+
 function looksLikeBibliographicLine(line: string) {
   const trimmed = normalizeSlovakCitationText(line.trim());
-
-  if (trimmed.length < 20) return false;
+  if (trimmed.length < 20 || trimmed.length > 1800) return false;
+  if (/^(SÚBOR|FILE|STRANA|PAGE|ABSTRAKT|ABSTRACT|KĽÚČOVÉ SLOVÁ|KEYWORDS)\s*:/i.test(trimmed)) return false;
 
   const hasYear = /\b(18|19|20)\d{2}[a-z]?\b|\bn\.d\.\b/i.test(trimmed);
   const hasDoi = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i.test(trimmed);
   const hasUrl = /https?:\/\/|www\./i.test(trimmed);
+  const hasIdentifier = /\b(?:ISBN|ISSN)\b/i.test(trimmed);
+  const hasPages = /(?:\bs\.|\bstr\.|\bpp\.|\bpages?)\s*\d+\s*[–—-]\s*\d+/i.test(trimmed);
   const hasCitationWords =
-    /publisher|journal|doi|isbn|vydavateľ|časopis|university|press|jasp|spss|software|available|dostupné|retrieved|vol\.|volume|issue|pages|pp\.|p\.|s\.|in\s/i.test(
-      trimmed,
-    );
+    /publisher|journal|doi|isbn|issn|vydavateľ|časopis|university|press|available|dostupné|retrieved|vol\.|volume|issue|pages|pp\.|\bs\./i.test(trimmed);
   const hasAuthorPattern =
-    /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽA-Za-záäčďéíĺľňóôŕšťúýž.' -]+,\s*[A-Z]/.test(
-      trimmed,
-    ) ||
-    /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.' -]+\s+\([12]\d{3}\)/.test(
-      trimmed,
-    );
+    /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽA-Za-záäčďéíĺľňóôŕšťúýž.'’ -]+,\s*[A-Z]/.test(trimmed) ||
+    /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž.'’ -]+\s+\([12]\d{3}\)/.test(trimmed);
 
-  return hasDoi || hasUrl || (hasYear && (hasCitationWords || hasAuthorPattern));
+  return hasDoi || hasIdentifier || (hasYear && (hasCitationWords || hasAuthorPattern || hasPages));
+}
+
+function inferJournalVolumeIssue(line: string) {
+  const normalized = normalizeSlovakCitationText(line);
+  const yearMatch = normalized.match(/\b(?:18|19|20)\d{2}[a-z]?\b/i);
+  const beforeYear = yearMatch && typeof yearMatch.index === 'number'
+    ? normalized.slice(0, yearMatch.index).replace(/[,;\s]+$/, '')
+    : normalized;
+  const colonIndex = beforeYear.indexOf(':');
+  const afterAuthors = colonIndex >= 0 ? beforeYear.slice(colonIndex + 1).trim() : beforeYear;
+  const titleSplit = afterAuthors.match(/^(.+?)[.]\s+(.+)$/);
+  const tail = titleSplit?.[2]?.trim() || '';
+  const parts = tail.split(',').map((part) => part.trim()).filter(Boolean);
+  if (!parts.length) return { journal: null, volume: null, issue: null };
+  const last = parts[parts.length - 1] || '';
+  const volumeIssue = last.match(/^(\d+[A-Za-z]?)(?:\s*\(([^)]+)\))?$/);
+  return {
+    journal: (volumeIssue ? parts.slice(0, -1).join(', ') : tail) || null,
+    volume: volumeIssue?.[1] || null,
+    issue: volumeIssue?.[2] || null,
+  };
 }
 
 function extractBibliographicCandidates(text: string) {
-  const cleaned = cleanAiOutput(text);
-
-  const lines = cleaned
+  const bibliographyText = extractBibliographySectionText(text);
+  const lines = bibliographyText
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
@@ -1720,18 +1820,14 @@ function extractBibliographicCandidates(text: string) {
   const joinedMultilineCandidates: string[] = [];
 
   for (let i = 0; i < lines.length; i += 1) {
-    const current = lines[i];
-    const next = lines[i + 1] || '';
-    const next2 = lines[i + 2] || '';
-
-    joinedMultilineCandidates.push(current);
-
-    if (current.length < 220 && next) {
-      joinedMultilineCandidates.push(`${current} ${next}`.trim());
-    }
-
-    if (current.length < 180 && next && next2) {
-      joinedMultilineCandidates.push(`${current} ${next} ${next2}`.trim());
+    const parts = [lines[i]];
+    for (let offset = 0; offset < 5 && i + offset < lines.length; offset += 1) {
+      if (offset > 0) parts.push(lines[i + offset]);
+      const candidate = normalizeSlovakCitationText(parts.join(' '));
+      joinedMultilineCandidates.push(candidate);
+      if (/\b(?:18|19|20)\d{2}[a-z]?\b/i.test(candidate) && /(?:\bs\.|\bstr\.|\bpp\.|\bpages?|doi|isbn|issn|https?:\/\/|www\.)/i.test(candidate)) {
+        break;
+      }
     }
   }
 
@@ -1742,17 +1838,28 @@ function extractBibliographicCandidates(text: string) {
 
     const authors = extractAuthors(line);
     const year = extractYear(line);
-
-    candidates.push({
-      raw: normalizeSlovakCitationText(line).slice(0, 1000),
+    const { journal, volume, issue } = inferJournalVolumeIssue(line);
+    const title = extractTitle(line);
+    const item: BibliographicCandidate = {
+      raw: normalizeSlovakCitationText(line).slice(0, 1600),
       authors,
       year,
-      title: extractTitle(line),
+      title,
       doi: extractDoi(line),
       url: extractUrl(line),
+      journal,
+      volume,
+      issue,
+      pages: extractPages(line),
+      isbn: extractIsbn(line),
+      issn: extractIssn(line),
       sourceType: detectSourceType(line),
       citationKey: authors.length && year ? buildCitationKey(authors, year) : undefined,
-    });
+      origin: 'attachment',
+    };
+
+    const hasIdentity = authors.length > 0 && Boolean(year) && Boolean(title);
+    if (hasIdentity || item.doi || item.isbn || item.issn) candidates.push(item);
   }
 
   return mergeSources(candidates).slice(0, 300);
@@ -1793,10 +1900,19 @@ function mergeSources(sources: BibliographicCandidate[]) {
           : source.title,
       doi: existing.doi || source.doi,
       url: existing.url || source.url,
+      journal: existing.journal || source.journal || null,
+      volume: existing.volume || source.volume || null,
+      issue: existing.issue || source.issue || null,
+      pages: existing.pages || source.pages || null,
+      isbn: existing.isbn || source.isbn || null,
+      issn: existing.issn || source.issn || null,
       sourceType: existing.sourceType !== 'unknown' ? existing.sourceType : source.sourceType,
       inTextCitations: [...(existing.inTextCitations || []), ...(source.inTextCitations || [])],
       occurrenceCount: (existing.occurrenceCount || 0) + (source.occurrenceCount || 0),
       matchedFromText: existing.matchedFromText || source.matchedFromText,
+      sourceDocumentName: existing.sourceDocumentName || source.sourceDocumentName || null,
+      citedAccordingTo: existing.citedAccordingTo || source.citedAccordingTo || null,
+      origin: existing.origin || source.origin || 'unknown',
     });
   }
 
@@ -1810,53 +1926,52 @@ function pairInTextCitationsWithBibliography({
   citations: InTextCitation[];
   bibliography: BibliographicCandidate[];
 }) {
-  const bibliographyByKey = new Map<string, BibliographicCandidate>();
+  const completeBibliography = mergeSources(bibliography);
 
-  for (const item of bibliography) {
-    const key = getSourceCitationKey(item);
+  // Sekundárny zdroj vznikne iba párovaním citácie v texte s plným záznamom
+  // z bibliografie toho istého dokumentu. Samotná citácia „(PARKER a RING 2001)“
+  // nikdy nevytvorí pseudo-bibliografický záznam.
+  return completeBibliography.map((source) => {
+    const sourceAuthors = normalizeAuthors(source.authors);
+    const firstSourceAuthor = normalizeForMatch(
+      sourceAuthors[0]?.replace(/,.*/, '') || '',
+    );
 
-    if (key && !bibliographyByKey.has(key)) bibliographyByKey.set(key, item);
-  }
+    const matchedCitations = citations.filter((citation) => {
+      if (!citation.year || !source.year || citation.year !== source.year) {
+        return false;
+      }
 
-  const result: BibliographicCandidate[] = [];
+      if (citation.key && getSourceCitationKey(source) === citation.key) {
+        return true;
+      }
 
-  for (const citation of citations) {
-    const matched = bibliographyByKey.get(citation.key);
+      const firstCitationAuthor = normalizeForMatch(
+        citation.authors?.[0]?.replace(/,.*/, '') || citation.authorText || '',
+      );
 
-    if (matched) {
-      result.push({
-        ...matched,
-        citationKey: citation.key,
-        inTextCitations: [...(matched.inTextCitations || []), citation],
-        occurrenceCount: (matched.occurrenceCount || 0) + citation.count,
-        matchedFromText: true,
-      });
-      continue;
-    }
-
-    result.push({
-      raw: citation.raw,
-      authors: citation.authors,
-      year: citation.year,
-      title: null,
-      doi: null,
-      url: null,
-      sourceType: 'unknown',
-      citationKey: citation.key,
-      inTextCitations: [citation],
-      occurrenceCount: citation.count,
-      matchedFromText: true,
+      return Boolean(
+        firstSourceAuthor &&
+          firstCitationAuthor &&
+          firstSourceAuthor === firstCitationAuthor,
+      );
     });
-  }
 
-  for (const item of bibliography) {
-    const key = getSourceCitationKey(item);
-    const alreadyIncluded = result.some((source) => getSourceCitationKey(source) === key && key);
-
-    if (!alreadyIncluded) result.push(item);
-  }
-
-  return mergeSources(result);
+    return {
+      ...source,
+      inTextCitations: uniqueArray(
+        [
+          ...(source.inTextCitations || []),
+          ...matchedCitations,
+        ].map((item) => JSON.stringify(item)),
+      ).map((item) => JSON.parse(item) as InTextCitation),
+      occurrenceCount:
+        (source.occurrenceCount || 0) +
+        matchedCitations.reduce((sum, citation) => sum + (citation.count || 1), 0),
+      matchedFromText:
+        Boolean(source.matchedFromText) || matchedCitations.length > 0,
+    };
+  });
 }
 
 function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
@@ -1872,27 +1987,41 @@ function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
           }`
         : '';
 
-      return `${index + 1}. Pôvodný záznam:
-${item.raw}
-
-Autori: ${item.authors.length ? item.authors.join(', ') : 'neuvedené'}
-Rok: ${item.year || 'neuvedené'}
-Názov publikácie / zdroja: ${item.title || 'neuvedené'}
-Typ zdroja: ${item.sourceType}
-DOI: ${item.doi || 'neuvedené'}
-URL: ${item.url || 'neuvedené'}${citationInfo}`;
+      return `${index + 1}. Pôvodný záznam:\n${item.raw}\n\nAutori: ${
+        item.authors.length ? item.authors.join(', ') : 'neuvedené'
+      }\nRok: ${item.year || 'neuvedené'}\nNázov publikácie / zdroja: ${
+        item.title || 'neuvedené'
+      }\nČasopis / zborník: ${item.journal || 'neuvedené'}\nRočník / zväzok: ${
+        item.volume || 'neuvedené'
+      }\nČíslo: ${item.issue || 'neuvedené'}\nStrany: ${item.pages || 'neuvedené'}\nISBN: ${
+        item.isbn || 'neuvedené'
+      }\nISSN: ${item.issn || 'neuvedené'}\nTyp zdroja: ${item.sourceType}\nDOI: ${
+        item.doi || 'neuvedené'
+      }\nURL: ${item.url || 'neuvedené'}\nZdrojový súbor: ${
+        item.sourceDocumentName || 'neuvedené'
+      }${citationInfo}`;
     })
     .join('\n\n');
 }
 
 function normalizeAuthors(value: unknown): string[] {
-  if (Array.isArray(value)) return uniqueArray(value.map((item) => String(item || '')));
-
-  if (typeof value === 'string') {
+  if (Array.isArray(value)) {
     return uniqueArray(
       value
-        .split(/\n|,|;|\band\b|\ba\b/gi)
-        .map((item) => normalizeAuthorDisplay(item.trim())),
+        .map((item) => normalizeAuthorDisplay(String(item || '')))
+        .filter(Boolean),
+    );
+  }
+
+  if (typeof value === 'string') {
+    const structured = extractAuthors(value);
+    if (structured.length) return structured;
+
+    return uniqueArray(
+      value
+        .split(/\n|;|\band\b|\ba\b/gi)
+        .map((item) => normalizeAuthorDisplay(item.trim()))
+        .filter(Boolean),
     );
   }
 
@@ -1914,6 +2043,12 @@ function normalizeDetectedSources(value: unknown): BibliographicCandidate[] {
         title: item?.title ? String(item.title) : null,
         doi: item?.doi ? String(item.doi) : null,
         url: item?.url ? String(item.url) : null,
+        journal: item?.journal ? String(item.journal) : null,
+        volume: item?.volume ? String(item.volume) : null,
+        issue: item?.issue ? String(item.issue) : null,
+        pages: item?.pages ? String(item.pages) : null,
+        isbn: item?.isbn ? String(item.isbn) : null,
+        issn: item?.issn ? String(item.issn) : null,
         sourceType:
           item?.sourceType === 'book' ||
           item?.sourceType === 'article' ||
@@ -1922,7 +2057,13 @@ function normalizeDetectedSources(value: unknown): BibliographicCandidate[] {
           item?.sourceType === 'unknown'
             ? item.sourceType
             : 'unknown',
-        citationKey: authors.length && year ? buildCitationKey(authors, year) : undefined,
+        citationKey: item?.citationKey || (authors.length && year ? buildCitationKey(authors, year) : undefined),
+        inTextCitations: Array.isArray(item?.inTextCitations) ? item.inTextCitations : [],
+        occurrenceCount: typeof item?.occurrenceCount === 'number' ? item.occurrenceCount : 0,
+        matchedFromText: Boolean(item?.matchedFromText),
+        sourceDocumentName: item?.sourceDocumentName ? String(item.sourceDocumentName) : null,
+        citedAccordingTo: item?.citedAccordingTo ? String(item.citedAccordingTo) : null,
+        origin: item?.origin || 'attachment',
       } satisfies BibliographicCandidate;
     })
     .filter((item) => item.raw || item.authors.length || item.title || item.doi || item.url);
@@ -2084,51 +2225,109 @@ async function callExtractTextApi({
   formData.append('mustDecompressBeforeExtraction', compressed ? 'true' : 'false');
   formData.append('detectBibliographicSources', 'true');
   formData.append('requireAuthorsAndPublications', 'true');
+  formData.append('preserveRawBibliography', 'true');
+  formData.append('preserveMultilineTitle', 'true');
+  formData.append('detectIsbnIssn', 'true');
+  formData.append('detectPageRanges', 'true');
 
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(
-    () => controller.abort(),
-    attachmentExtractionTimeoutMs,
-  );
+  /**
+   * /api/extract-text je pomocná predspracovacia fáza. Globálny
+   * ZedperaErrorProvider zachytáva neúspešné fetch() volania na /api/* a
+   * zobrazí technické okno ešte predtým, než má chat šancu použiť lokálny
+   * fallback. Preto tento interný request zámerne neposielame cez fetch().
+   *
+   * XMLHttpRequest sa používa iba pre túto pomocnú extrakciu. Finálne
+   * /api/chat volanie zostáva na fetch(), takže skutočná chyba chatu sa
+   * používateľovi naďalej zobrazí štandardným spôsobom.
+   */
+  const extractionResponse = await new Promise<{
+    status: number;
+    ok: boolean;
+    contentType: string;
+    body: string;
+  }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
 
-  let res: Response;
+    xhr.open('POST', '/api/extract-text', true);
+    xhr.timeout = attachmentExtractionTimeoutMs;
+    xhr.responseType = 'text';
+    xhr.setRequestHeader(
+      'x-zedpera-background-request',
+      'true',
+    );
+    xhr.setRequestHeader(
+      'x-zedpera-error-delay-ms',
+      '300000',
+    );
 
-  try {
-    res = await fetch('/api/extract-text', {
-      method: 'POST',
-      body: formData,
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (
-      error instanceof DOMException &&
-      error.name === 'AbortError'
-    ) {
-      throw new Error(
-        `Extrakcia súboru „${originalName}“ prekročila ${Math.round(
-          attachmentExtractionTimeoutMs / 1000,
-        )} sekúnd. Súbor bude vynechaný a ostatné prílohy sa spracujú ďalej.`,
+    xhr.onload = () => {
+      resolve({
+        status: xhr.status,
+        ok: xhr.status >= 200 && xhr.status < 300,
+        contentType:
+          xhr.getResponseHeader('content-type') || '',
+        body: String(xhr.responseText || ''),
+      });
+    };
+
+    xhr.onerror = () => {
+      reject(
+        new Error(
+          `Nepodarilo sa spojiť s extrakčným endpointom pre súbor „${originalName}“.`,
+        ),
       );
-    }
+    };
 
-    throw error;
-  } finally {
-    window.clearTimeout(timeoutId);
-  }
+    xhr.ontimeout = () => {
+      reject(
+        new Error(
+          `Extrakcia súboru „${originalName}“ prekročila ${Math.round(
+            attachmentExtractionTimeoutMs / 1000,
+          )} sekúnd. Súbor bude vynechaný a ostatné prílohy sa spracujú ďalej.`,
+        ),
+      );
+    };
 
-  const contentType = res.headers.get('content-type') || '';
+    xhr.onabort = () => {
+      reject(
+        new Error(
+          `Extrakcia súboru „${originalName}“ bola prerušená.`,
+        ),
+      );
+    };
+
+    xhr.send(formData);
+  });
 
   let data: ExtractTextApiResponse;
 
-  if (contentType.includes('application/json')) {
-    data = await res.json();
+  if (
+    extractionResponse.contentType.includes(
+      'application/json',
+    )
+  ) {
+    try {
+      data = JSON.parse(
+        extractionResponse.body || '{}',
+      ) as ExtractTextApiResponse;
+    } catch {
+      throw new Error(
+        `Extrakčný endpoint vrátil neplatný JSON pre súbor „${originalName}“.`,
+      );
+    }
   } else {
-    const errorText = await res.text();
-    throw new Error(errorText || `Extrakčný endpoint vrátil neplatnú odpoveď ${res.status}.`);
+    throw new Error(
+      extractionResponse.body ||
+        `Extrakčný endpoint vrátil neplatnú odpoveď ${extractionResponse.status}.`,
+    );
   }
 
-  if (!res.ok || data.ok === false) {
-    throw new Error(data.error || data.message || `Extrakcia zlyhala pre súbor ${originalName}.`);
+  if (!extractionResponse.ok || data.ok === false) {
+    throw new Error(
+      data.error ||
+        data.message ||
+        `Extrakcia zlyhala pre súbor ${originalName}.`,
+    );
   }
 
   const extractedText = extractTextFromExtractApi(data);
@@ -2139,13 +2338,27 @@ async function callExtractTextApi({
 
   const apiDetectedSources = extractSourcesFromExtractApi(data);
   const apiAuthors = extractAuthorsFromExtractApi(data);
-  const apiFormattedSources = extractFormattedSourcesFromExtractApi(data);
   const inTextCitations = extractInTextCitations(extractedText);
   const localDetectedSources = extractBibliographicCandidates(extractedText);
 
+  // Lokálny parser má k dispozícii celý extrahovaný text a cielene číta iba
+  // bibliografiu dokumentu. Má preto prednosť pred staršími metadátami z
+  // /api/extract-text, ktoré mohli vzniknúť z prvého riadku alebo z citácie
+  // v tele článku. API kandidáta použijeme iba ako fallback a len ak má
+  // autora, rok aj názov.
+  const safeApiDetectedSources = apiDetectedSources.filter((source) =>
+    source.authors.length > 0 &&
+    Boolean(source.year) &&
+    Boolean(source.title) &&
+    String(source.raw || '').trim().length >= 30,
+  );
+  const bibliographyCandidates = localDetectedSources.length
+    ? localDetectedSources
+    : safeApiDetectedSources;
+
   const pairedSources = pairInTextCitationsWithBibliography({
     citations: inTextCitations,
-    bibliography: mergeSources([...apiDetectedSources, ...localDetectedSources]),
+    bibliography: bibliographyCandidates,
   });
 
   const mergedSources = mergeSources(pairedSources);
@@ -2163,7 +2376,7 @@ async function callExtractTextApi({
     detectedSources: mergedSources,
     inTextCitations,
     detectedAuthors: mergedAuthors,
-    formattedSources: apiFormattedSources,
+    formattedSources: formatBibliographicCandidates(mergedSources),
     meta: data.meta || {},
   };
 }
@@ -2275,8 +2488,14 @@ function buildMainChatPrompt({
     `Počet odosielaných príloh: ${attachmentCount}.`,
     'Najprv vyťaž údaje, tvrdenia, mená, dátumy, tabuľky, citácie a zdroje z príloh.',
     attachmentCount > 0
-      ? 'Ak sú priložené dokumenty, nevytváraj ani automaticky nedopĺňaj nové zdroje z všeobecných znalostí AI alebo webu. Použi iba obsah príloh a bibliografiu, ktorá sa v nich reálne nachádza; externé zdroje patria do odpovede iba pri výslovnej požiadavke používateľa.'
+      ? 'Ak sú priložené dokumenty, NEVYHĽADÁVAJ sekundárne zdroje na internete a nedopĺňaj ich z pamäte AI. Primárny zdroj je samotný použitý dokument. Sekundárne zdroje smú pochádzať iba z citácií v texte tohto dokumentu a z jeho vlastného zoznamu literatúry.'
       : 'Ak prílohy nie sú priložené, odborné tvrdenia opieraj iba o overiteľné akademické zdroje a nevymýšľaj bibliografické údaje.',
+    attachmentCount > 0
+      ? 'Pri primárnom zdroji identifikuj celý viacriadkový názov publikácie, všetkých bezpečne zistených autorov, rok a dostupné bibliografické údaje (časopis/zborník, ročník, číslo, strany, ISSN/ISBN, DOI). Názov súboru používaj iba ako položku „Zdrojový súbor“, nie ako názov publikácie, ak je titul v dokumente dostupný.'
+      : 'Bez prílohy používaj iba bibliografické záznamy, ktoré možno dôveryhodne overiť.',
+    attachmentCount > 0
+      ? 'Sekundárny zdroj musí byť spárovaný s citáciou v texte dokumentu a vypísaný v rovnakom bibliografickom tvare, v akom je uvedený v zozname použitej literatúry daného dokumentu. Nezostavuj náhradné záznamy iba z mena autora a roku.'
+      : 'Sekundárne zdroje bez prílohy musia obsahovať úplný názov publikácie a dostupné bibliografické údaje.',
     `Citačná norma z profilu práce: ${citationStyle}.`,
     buildCitationStyleInstructions(citationStyle),
     'Na konci vždy zachovaj samostatné sekcie Primárne zdroje a Sekundárne zdroje.',
@@ -3252,6 +3471,10 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
 
         if (!localText) throw apiError;
 
+        // Pomocný /api/extract-text mohol vrátiť napr. 413, ale lokálny
+        // fallback je použiteľný. Takýto medzikrok nie je finálna chyba chatu.
+        clearSystemError();
+
         const localCitations =
           extractInTextCitations(localText);
         const localSources =
@@ -3397,6 +3620,8 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
           preparedSize: item.size,
           warning: message,
         });
+
+        clearSystemError();
 
         return {
           originalId: item.id,
@@ -3573,6 +3798,11 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
               message,
             },
           );
+
+          // Jedna pomocná extrakcia môže zlyhať, pričom ostatné prílohy
+          // zostávajú použiteľné. Blokujúca hláška sa zobrazí až vtedy,
+          // keď zlyhá celá požiadavka alebo server nemá žiadny vstup.
+          clearSystemError();
         }
       }
     };
@@ -4505,6 +4735,13 @@ await saveChatToHistory({
       }
 
       requestSucceeded = !looksLikeError;
+
+      if (requestSucceeded) {
+        // Úspešný finálny výsledok má prednosť pred oneskorenou chybou
+        // pomocnej extrakcie. Používateľ nesmie vidieť hotový text spolu
+        // s technickým modalom pre už zotavený medzikrok.
+        clearSystemError();
+      }
 
       if (
         requestSucceeded &&
@@ -5540,6 +5777,9 @@ ZÁVÄZNÉ PRAVIDLÁ:
                       setCanvasText(event.target.value);
                     }}
                     onSelect={() => handleTextSelection('result')}
+                    onMouseUp={() => handleTextSelection('result')}
+                    onKeyUp={() => handleTextSelection('result')}
+                    onTouchEnd={() => handleTextSelection('result')}
                     className="min-h-[45vh] resize-none rounded-3xl border border-white/10 bg-black/20 p-4 text-sm leading-7 text-slate-100 outline-none focus:border-violet-400/60 md:min-h-[60vh] md:p-6 md:leading-8"
                   />
 
@@ -5592,6 +5832,9 @@ ZÁVÄZNÉ PRAVIDLÁ:
                   value={canvasText}
                   onChange={(event) => setCanvasText(event.target.value)}
                   onSelect={() => handleTextSelection('canvas')}
+                  onMouseUp={() => handleTextSelection('canvas')}
+                  onKeyUp={() => handleTextSelection('canvas')}
+                  onTouchEnd={() => handleTextSelection('canvas')}
                   placeholder="Canvas je zatiaľ prázdny."
                   className="flex-1 resize-none bg-[#050711] p-6 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-600"
                 />

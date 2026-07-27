@@ -132,7 +132,7 @@ type BillingNotice = {
   /**
    * Modulové chyby musia byť naviazané na modul, v ktorom vznikli.
    * Bez tohto údaja by sa po prepnutí mohla zobraziť stará hláška
-   * napríklad pre Obhajobu v sekcii AI školiteľ.
+   * napríklad pre Obhajobu v sekcii AI Konzultant.
    */
   scope?: "global" | "module";
   moduleKey?: ModuleKey;
@@ -1076,15 +1076,15 @@ type ModuleUiTranslations = Record<ModuleKey, ModuleUiText>;
 const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
   sk: {
     supervisor: {
-      label: "AI školiteľ",
-      shortLabel: "AI školiteľ",
-      button: "Spustiť AI školiteľa",
-      inputLabel: "Text alebo zadanie pre AI školiteľa",
+      label: "AI Konzultant",
+      shortLabel: "AI Konzultant",
+      button: "Prepísať a upraviť do akademickej podoby",
+      inputLabel: "Text, poznámky alebo draft na odbornú úpravu",
       placeholder:
-        "Vložte text práce, kapitolu, zadanie, otázku alebo časť, ktorú má AI školiteľ skontrolovať.",
+        "Vložte svoje poznámky, hrubý draft alebo kapitolu, ktorú chcete odborne upraviť a prepísať...",
       intro:
-        "AI školiteľ skontroluje štruktúru, logiku, cieľ, metodológiu, argumentáciu a odbornú kvalitu práce.",
-      resultTitle: "Výstup AI školiteľa",
+        "AI redaktor prepíše, odborne preformuluje a naformátuje vašu prácu do čistej akademickej podoby na základe priložených zdrojov.",
+      resultTitle: "Hotový akademický text",
     },
     quality: {
       label: "Audit kvality",
@@ -1178,15 +1178,15 @@ const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
 
   en: {
     supervisor: {
-      label: "AI Supervisor",
-      shortLabel: "AI Supervisor",
-      button: "Run AI Supervisor",
-      inputLabel: "Text or prompt for AI Supervisor",
+      label: "AI Consultant",
+      shortLabel: "AI Consultant",
+      button: "Rewrite and polish academically",
+      inputLabel: "Text, notes, or draft to improve",
       placeholder:
-        "Insert your paper text, chapter, assignment, question, or section that the AI Supervisor should review.",
+        "Paste your notes, rough draft, or chapter that you want professionally rewritten and polished...",
       intro:
-        "The AI Supervisor checks structure, logic, objective, methodology, argumentation, and academic quality.",
-      resultTitle: "AI Supervisor output",
+        "The AI editor rewrites, academically reformulates, and formats your work into a clean academic version based on the provided sources.",
+      resultTitle: "Final academic text",
     },
     quality: {
       label: "Quality Audit",
@@ -1280,15 +1280,15 @@ const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
 
   cs: {
     supervisor: {
-      label: "AI vedoucí",
-      shortLabel: "AI vedoucí",
-      button: "Spustit AI vedoucího",
-      inputLabel: "Text nebo zadání pro AI vedoucího",
+      label: "AI Konzultant",
+      shortLabel: "AI Konzultant",
+      button: "Přepsat a upravit do akademické podoby",
+      inputLabel: "Text, poznámky nebo draft k odborné úpravě",
       placeholder:
-        "Vložte text práce, kapitolu, zadání, otázku nebo část, kterou má AI vedoucí zkontrolovat.",
+        "Vložte své poznámky, hrubý draft nebo kapitolu, kterou chcete odborně upravit a přepsat...",
       intro:
-        "AI vedoucí zkontroluje strukturu, logiku, cíl, metodologii, argumentaci a odbornou kvalitu práce.",
-      resultTitle: "Výstup AI vedoucího",
+        "AI redaktor text přepíše, odborně přeformuluje a naformátuje do čisté akademické podoby na základě přiložených zdrojů.",
+      resultTitle: "Hotový akademický text",
     },
     quality: {
       label: "Audit kvality",
@@ -1382,15 +1382,15 @@ const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
 
   de: {
     supervisor: {
-      label: "KI-Betreuer",
-      shortLabel: "KI-Betreuer",
-      button: "KI-Betreuer starten",
-      inputLabel: "Text oder Aufgabe für den KI-Betreuer",
+      label: "KI-Berater",
+      shortLabel: "KI-Berater",
+      button: "Akademisch umschreiben und überarbeiten",
+      inputLabel: "Text, Notizen oder Entwurf zur fachlichen Überarbeitung",
       placeholder:
-        "Fügen Sie den Text der Arbeit, ein Kapitel, eine Aufgabe, eine Frage oder einen Abschnitt ein, den der KI-Betreuer prüfen soll.",
+        "Fügen Sie Ihre Notizen, einen Rohentwurf oder ein Kapitel ein, das fachlich überarbeitet und neu formuliert werden soll...",
       intro:
-        "Der KI-Betreuer prüft Struktur, Logik, Ziel, Methodik, Argumentation und fachliche Qualität der Arbeit.",
-      resultTitle: "Ausgabe des KI-Betreuers",
+        "Der KI-Redakteur formuliert Ihren Text fachlich neu und bringt ihn anhand der bereitgestellten Quellen in eine saubere akademische Form.",
+      resultTitle: "Fertiger akademischer Text",
     },
     quality: {
       label: "Qualitätsaudit",
@@ -1484,15 +1484,15 @@ const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
 
   pl: {
     supervisor: {
-      label: "Opiekun AI",
-      shortLabel: "Opiekun AI",
-      button: "Uruchom opiekuna AI",
-      inputLabel: "Tekst lub zadanie dla opiekuna AI",
+      label: "Konsultant AI",
+      shortLabel: "Konsultant AI",
+      button: "Przepisać i opracować akademicko",
+      inputLabel: "Tekst, notatki lub szkic do profesjonalnej redakcji",
       placeholder:
-        "Wklej tekst pracy, rozdział, zadanie, pytanie lub fragment, który opiekun AI ma sprawdzić.",
+        "Wklej notatki, surowy szkic lub rozdział, który chcesz profesjonalnie poprawić i przepisać...",
       intro:
-        "Opiekun AI sprawdza strukturę, logikę, cel, metodologię, argumentację i jakość merytoryczną pracy.",
-      resultTitle: "Wynik opiekuna AI",
+        "Redaktor AI przepisuje, merytorycznie przeformułowuje i formatuje pracę do czystej wersji akademickiej na podstawie dostarczonych źródeł.",
+      resultTitle: "Gotowy tekst akademicki",
     },
     quality: {
       label: "Audyt jakości",
@@ -1586,15 +1586,15 @@ const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
 
   hu: {
     supervisor: {
-      label: "AI témavezető",
-      shortLabel: "AI témavezető",
-      button: "AI témavezető indítása",
-      inputLabel: "Szöveg vagy feladat az AI témavezetőnek",
+      label: "AI konzulens",
+      shortLabel: "AI konzulens",
+      button: "Akadémiai átírás és szerkesztés",
+      inputLabel: "Szakmai szerkesztésre szánt szöveg, jegyzet vagy vázlat",
       placeholder:
-        "Illeszd be a dolgozat szövegét, fejezetet, feladatot, kérdést vagy részt, amelyet az AI témavezető ellenőrizzen.",
+        "Illeszd be a jegyzeteidet, nyers vázlatodat vagy fejezetedet, amelyet szakmailag át szeretnél dolgoztatni és átíratni...",
       intro:
-        "Az AI témavezető ellenőrzi a struktúrát, logikát, célt, módszertant, érvelést és szakmai minőséget.",
-      resultTitle: "AI témavezető eredménye",
+        "Az AI szerkesztő a megadott források alapján átírja, szakmailag újrafogalmazza és tiszta akadémiai formába rendezi a szöveget.",
+      resultTitle: "Kész akadémiai szöveg",
     },
     quality: {
       label: "Minőségi audit",
@@ -1687,6 +1687,123 @@ const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
   },
 };
 
+
+type SupervisorEditorCopy = {
+  feedbackLabel: string;
+  feedbackPlaceholder: string;
+  feedbackHelp: string;
+  optionalLabel: string;
+  workflowEyebrow: string;
+  workflowTitle: string;
+  workflowDescription: string;
+  workflowSteps: readonly [string, string, string];
+};
+
+const SUPERVISOR_EDITOR_COPY: Record<LanguageCode, SupervisorEditorCopy> = {
+  sk: {
+    feedbackLabel: "Pripomienky školiteľa",
+    feedbackPlaceholder:
+      "Voliteľne vložte pripomienky školiteľa, oponenta alebo konzultanta. Napríklad: Rozšír metodiku, doplň logické prechody a presnejšie formuluj cieľ práce.",
+    feedbackHelp:
+      "Pripomienky sa nezobrazia ako posudok. AI Konzultant ich priamo zapracuje do výsledného textu.",
+    optionalLabel: "Voliteľné",
+    workflowEyebrow: "Editor Mode",
+    workflowTitle: "Od draftu k hotovému akademickému textu",
+    workflowDescription:
+      "AI Konzultant nehodnotí text bodmi. Vstup odborne prepíše, zapracuje pripomienky a vráti hotovú verziu pripravenú na ďalšiu prácu.",
+    workflowSteps: [
+      "Vložiť draft alebo poznámky",
+      "Pridať pripomienky školiteľa",
+      "Získať hotový akademický text",
+    ],
+  },
+  cs: {
+    feedbackLabel: "Připomínky vedoucího práce",
+    feedbackPlaceholder:
+      "Volitelně vložte připomínky vedoucího, oponenta nebo konzultanta. Například: Rozšiř metodiku, doplň logické přechody a přesněji formuluj cíl práce.",
+    feedbackHelp:
+      "Připomínky se nevrátí jako posudek. AI Konzultant je přímo zapracuje do výsledného textu.",
+    optionalLabel: "Volitelné",
+    workflowEyebrow: "Editor Mode",
+    workflowTitle: "Od draftu k hotovému akademickému textu",
+    workflowDescription:
+      "AI Konzultant text neboduje. Odborně jej přepíše, zapracuje připomínky a vrátí hotovou verzi.",
+    workflowSteps: [
+      "Vložit draft nebo poznámky",
+      "Přidat připomínky vedoucího",
+      "Získat hotový akademický text",
+    ],
+  },
+  en: {
+    feedbackLabel: "Supervisor feedback",
+    feedbackPlaceholder:
+      "Optionally paste comments from your supervisor, reviewer, or consultant. Example: Expand the methodology, improve transitions, and state the research objective more precisely.",
+    feedbackHelp:
+      "The feedback is not returned as a review. AI Consultant applies it directly to the rewritten text.",
+    optionalLabel: "Optional",
+    workflowEyebrow: "Editor Mode",
+    workflowTitle: "From rough draft to final academic text",
+    workflowDescription:
+      "AI Consultant does not score your work. It rewrites the input, integrates feedback, and returns a polished academic version.",
+    workflowSteps: [
+      "Paste a draft or notes",
+      "Add supervisor feedback",
+      "Get final academic text",
+    ],
+  },
+  de: {
+    feedbackLabel: "Anmerkungen der Betreuung",
+    feedbackPlaceholder:
+      "Optional können Sie Hinweise der Betreuung, Begutachtung oder Beratung einfügen. Beispiel: Methodik erweitern, Übergänge verbessern und das Ziel präziser formulieren.",
+    feedbackHelp:
+      "Die Hinweise werden nicht als Gutachten ausgegeben. Der KI-Berater arbeitet sie direkt in den fertigen Text ein.",
+    optionalLabel: "Optional",
+    workflowEyebrow: "Editor Mode",
+    workflowTitle: "Vom Rohentwurf zum fertigen akademischen Text",
+    workflowDescription:
+      "Der KI-Berater vergibt keine Punkte. Er überarbeitet den Text fachlich, integriert Hinweise und liefert eine fertige akademische Fassung.",
+    workflowSteps: [
+      "Entwurf oder Notizen einfügen",
+      "Hinweise der Betreuung ergänzen",
+      "Fertigen akademischen Text erhalten",
+    ],
+  },
+  pl: {
+    feedbackLabel: "Uwagi promotora",
+    feedbackPlaceholder:
+      "Opcjonalnie wklej uwagi promotora, recenzenta lub konsultanta. Przykład: Rozwiń metodologię, popraw przejścia i precyzyjniej sformułuj cel pracy.",
+    feedbackHelp:
+      "Uwagi nie zostaną zwrócone jako recenzja. Konsultant AI bezpośrednio wprowadzi je do poprawionego tekstu.",
+    optionalLabel: "Opcjonalne",
+    workflowEyebrow: "Editor Mode",
+    workflowTitle: "Od szkicu do gotowego tekstu akademickiego",
+    workflowDescription:
+      "Konsultant AI nie ocenia punktowo. Przepisuje tekst, wdraża uwagi i zwraca gotową wersję akademicką.",
+    workflowSteps: [
+      "Wkleić szkic lub notatki",
+      "Dodać uwagi promotora",
+      "Otrzymać gotowy tekst akademicki",
+    ],
+  },
+  hu: {
+    feedbackLabel: "Témavezetői megjegyzések",
+    feedbackPlaceholder:
+      "Opcionálisan illeszd be a témavezető, bíráló vagy konzulens megjegyzéseit. Például: Bővítsd a módszertant, javítsd az átvezetéseket és pontosítsd a kutatási célt.",
+    feedbackHelp:
+      "A megjegyzések nem bírálatként jelennek meg. Az AI konzulens közvetlenül beépíti őket az átdolgozott szövegbe.",
+    optionalLabel: "Opcionális",
+    workflowEyebrow: "Editor Mode",
+    workflowTitle: "A nyers vázlattól a kész akadémiai szövegig",
+    workflowDescription:
+      "Az AI konzulens nem pontoz. Szakmailag átírja a szöveget, beépíti a megjegyzéseket és kész akadémiai változatot ad vissza.",
+    workflowSteps: [
+      "Vázlat vagy jegyzet beillesztése",
+      "Témavezetői megjegyzések hozzáadása",
+      "Kész akadémiai szöveg átvétele",
+    ],
+  },
+};
+
 function getFixedModuleUi(language?: string): ModuleUiTranslations {
   const safeLanguage: LanguageCode =
     language === "cs" ||
@@ -1730,7 +1847,7 @@ const MODULE_REQUIRED_FEATURE: Record<ModuleKey, FeatureKey> = {
  * Názov tlačidla sa vždy berie z fixedModuleUiByLanguage[language][module].
  * Tieto mapy určujú iba všeobecný priebehový text a farebný variant.
  * Vďaka tomu sa po prepnutí modulu nemôže ponechať názov predchádzajúcej
- * sekcie, napríklad „Spustiť AI školiteľa“ v Audite kvality.
+ * sekcie, napríklad tlačidlo AI Konzultanta v Audite kvality.
  */
 const MODULE_PROCESSING_PREFIX: Record<LanguageCode, string> = {
   sk: "Spracúvam",
@@ -2942,9 +3059,11 @@ function stripModuleExtraSections(text: string, moduleKey: ModuleKey) {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  // AI vedúci, Audit kvality, Obhajoba
+  // AI Konzultant, Audit kvality, Obhajoba
   if (["supervisor", "quality", "audit", "defense"].includes(moduleName)) {
     cleaned = cleaned
+      .replace(/^\s*AI\s+Konzultant\s*[-–—:]*\s*/i, "")
+      .replace(/^\s*AI\s+Consultant\s*[-–—:]*\s*/i, "")
       .replace(/^\s*AI\s+vedúci\s*[-–—:]*\s*/i, "")
       .replace(/^\s*AI\s+veduci\s*[-–—:]*\s*/i, "")
       .replace(/^\s*Ako\s+AI\s+vedúci\s*[-–—:]*\s*/i, "")
@@ -3941,7 +4060,7 @@ function ClickableOptionGroup<T extends string>({
 // ================= PAGE =================
 
 /**
- * Úplne samostatný frontend modulu „AI školiteľ“.
+ * Úplne samostatný frontend modulu „AI Konzultant“.
  *
  * Tento súbor obsahuje vlastný stav, profil práce, entitlementy, limity,
  * prílohy, diktovanie, prompt, priame API volanie, históriu, Canvas a exporty.
@@ -4014,7 +4133,7 @@ export default function AiSupervisorFrontend(
   const [activeAttachmentText, setActiveAttachmentText] = useState("");
 
   /**
-   * AI školiteľ, Audit kvality a Obhajoba majú vlastné frontendové komponenty.
+   * AI Konzultant, Audit kvality a Obhajoba majú vlastné frontendové komponenty.
    * Dashboard sleduje iba ich aktuálny počet príloh pre informačný panel balíka.
    */
 
@@ -4570,14 +4689,16 @@ export default function AiSupervisorFrontend(
 
   const currentFixedModuleUi = getFixedModuleUi(systemLanguage);
   const fixedUi = currentFixedModuleUi[activeModule];
+  const supervisorEditorCopy =
+    SUPERVISOR_EDITOR_COPY[systemLanguage] || SUPERVISOR_EDITOR_COPY.sk;
 
   /**
    * Desktopové moduly zostávajú v pôvodnom rozložení 4 × 2:
    *
-   * ľavý stĺpec:  AI školiteľ, Audit kvality, Obhajoba, Preklad
+   * ľavý stĺpec:  AI Konzultant, Audit kvality, Obhajoba, Preklad
    * pravý stĺpec: Analýza dát, Plánovanie, Emaily, Humanizátor
    *
-   * Samostatné frontendové komponenty AI školiteľa, Auditu kvality a
+   * Samostatné frontendové komponenty AI Konzultanta, Auditu kvality a
    * Obhajoby nemenia poradie navigácie. Dashboard ich iba načítava.
    */
   const desktopModuleItems = dashboardModuleOrder.filter(
@@ -4657,7 +4778,7 @@ export default function AiSupervisorFrontend(
       pageQuota.pageLimitReached);
 
   /**
-   * AI školiteľ, Audit kvality aj Obhajoba sa vykresľujú priamo v tomto
+   * AI Konzultant, Audit kvality aj Obhajoba sa vykresľujú priamo v tomto
    * DashboardClient súbore. Tým nevzniká závislosť od voliteľných komponentov
    * v components/dashboard/modules, ktoré v projekte nemusia existovať.
    *
@@ -4717,8 +4838,10 @@ export default function AiSupervisorFrontend(
     MODULE_ACTION_CLASS_NAMES.supervisor;
 
   const ActiveModuleActionIcon =
-    activeModule === "translation"
-      ? Languages
+    activeModule === "supervisor"
+      ? Sparkles
+      : activeModule === "translation"
+        ? Languages
       : activeModule === "data"
         ? BarChart3
         : activeModule === "emails"
@@ -5404,7 +5527,7 @@ DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
 - Všetky odpovede, nadpisy, vysvetlenia, tabuľky, odporúčania a texty musia byť v tomto jazyku.
 - Výstup píš ako čistý text vhodný do Wordu.
 - Nepíš Markdown znaky ako #, ##, ###, **, *, --- ani kódové bloky.
-- Nevkladaj na úplný začiatok technické nadpisy typu „AI vedúci“, „Audit kvality“, „Obhajoba“, „Výstup“ ani názov modulu.
+- Nevkladaj na úplný začiatok technické nadpisy typu „AI Konzultant", „Audit kvality“, „Obhajoba“, „Výstup“ ani názov modulu.
 - Nepoužívaj poškodené znaky, kódovanie ani nečitateľné symboly.
 - Nevymýšľaj zdroje, autorov, DOI, URL, roky ani vydavateľov.
 - Ak chýba alebo nie je možné bezpečne potvrdiť údaj, napíš presne: Údaje sú potrebné overiť.
@@ -5419,33 +5542,33 @@ DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
       return `
 ${baseRules}
 
-ÚLOHA:
-Správaj sa ako odborný vedúci akademickej práce. Skontroluj logiku, cieľ, výskumný problém, metodológiu, štruktúru, argumentáciu a nadväznosť práce.
+REŽIM:
+AI Konzultant – výkonný akademický editor a redaktor.
 
-POKYN POUŽÍVATEĽA ALEBO TEXT NA KONTROLU:
-${input || "Použi text z priložených dokumentov, ak je dostupný."}
+TOTO NIE JE AUDIT, POSUDOK ANI HODNOTIACI MODUL.
 
-PRAVIDLÁ PRE ČIASTKOVÚ KONTROLU:
-- Ak používateľ žiada skontrolovať iba konkrétnu kapitolu, podkapitolu alebo odsek, hodnotenie obmedz iba na túto časť.
-- Ak je v textovom poli krátky príkaz a samotný text kapitoly nie je dostupný, požiadaj o vloženie textu alebo nahratie dokumentu.
-- Nehodnoť celú prácu, keď používateľ výslovne žiada iba jednu časť.
-- Nepredstieraj kontrolu kapitoly, ktorej obsah nebol vložený ani načítaný z prílohy.
+HLAVNÁ ÚLOHA:
+Priamo prepíš, odborne preformuluj a naformátuj vstup do hotovej akademickej podoby pripravenej na kopírovanie do práce.
 
-ZAČIATOK ODPOVEDE:
-Začni priamo nadpisom:
-Hodnotenie práce: ${activeProfile?.title || "bez názvu"}
+PÔVODNÝ TEXT, DRAFT ALEBO POZNÁMKY:
+${input || "Použi relevantný text z priložených dokumentov, ak je dostupný."}
 
-POVINNÁ ŠTRUKTÚRA:
-1. Celkové hodnotenie práce
-2. Silné stránky
-3. Slabé stránky
-4. Logika a nadväznosť textu
-5. Cieľ, výskumný problém a metodológia
-6. Chýbajúce časti alebo nedostatočne rozpracované miesta
-7. Konkrétne pripomienky vedúceho práce
-8. Odporúčané opravy
-9. Otázky na konzultáciu
-10. Skóre kvality 0–100
+PRIPOMIENKY ŠKOLITEĽA / OPONENTA / KONZULTANTA:
+${secondaryInput || "Neboli zadané samostatné pripomienky."}
+
+ZÁVÄZNÉ PRAVIDLÁ EDITORA:
+1. Nevracaj posudok, hodnotenie, skóre, audit ani zoznam všeobecných odporúčaní.
+2. Nikdy nevytváraj sekcie „Celkové hodnotenie“, „Silné stránky“, „Slabé stránky“, „Skóre 0–100“, „Otázky na konzultáciu“ ani podobné hodnotiace časti.
+3. Nepíš používateľovi „odporúčam prepísať“, „mali by ste doplniť“ alebo „treba upraviť“, ak vieš úpravu vykonať priamo. Úpravu vykonaj.
+4. Pripomienky školiteľa zapracuj priamo do výsledného textu. Neopakuj ich ako komentáre.
+5. Zachovaj odborný význam, fakty, čísla, výsledky, názvy metód a terminológiu. Nevymýšľaj nové výsledky ani údaje.
+6. Oprav gramatiku, štylistiku, logické prechody, nadväznosť odsekov, odbornú terminológiu a akademickú formuláciu.
+7. Ak podklady umožňujú bezpečne doplniť chýbajúci prechod alebo formulovať cieľ či hypotézu, vytvor hotové znenie. Ak na to podklady nestačia, nevymýšľaj faktické tvrdenie.
+8. Existujúce citácie zachovaj, ak sú zrozumiteľné a patria k danému tvrdeniu. Nevymýšľaj autorov, roky, DOI, URL ani bibliografické údaje.
+9. Relevantné prílohy používaj ako faktický podklad. Nerelevantné údaje do textu neprenášaj.
+10. Nevytváraj samostatný zoznam zdrojov ani technický report o prílohách.
+11. Výstup musí byť iba finálny upravený akademický text. Bez úvodu typu „Tu je upravený text“, bez komentára k procesu a bez hodnotenia.
+12. Rešpektuj jazyk práce ${workLanguage} a citačnú normu ${citationStyle}.
 `.trim();
     }
 
@@ -5953,6 +6076,17 @@ Text emailu:
     if (!hasAnyInput) {
       alert(
         "Najskôr vložte zadanie, text, prílohu alebo vyberte profil práce.",
+      );
+      return;
+    }
+
+    if (
+      requestedModule === "supervisor" &&
+      !userText &&
+      attachedFiles.length === 0
+    ) {
+      alert(
+        "AI Konzultant potrebuje text, hrubý draft, poznámky alebo čitateľnú prílohu, ktorú má odborne prepísať.",
       );
       return;
     }
@@ -6579,7 +6713,7 @@ Text emailu:
 
       // =====================================================
       // SAMOSTATNÉ PRIAME API MODULY:
-      // AI školiteľ, Audit, Obhajoba, Preklad, Plánovanie, Emaily
+      // AI Konzultant, Audit, Obhajoba, Preklad, Plánovanie, Emaily
       // =====================================================
       const chatRequestId =
         `${moduleRunRequestId}-chat`;
@@ -6604,7 +6738,10 @@ Text emailu:
       formData.append("interfaceLanguage", systemLanguage);
       formData.append("workLanguage", finalWorkLanguage);
 
-      const directUserInput = userText || secondaryText;
+      const directUserInput =
+        requestedModule === "supervisor"
+          ? userText
+          : userText || secondaryText;
 
       formData.append("message", directUserInput || prompt);
       formData.append("prompt", prompt);
@@ -6613,13 +6750,13 @@ Text emailu:
       formData.append("secondaryInput", secondaryText);
 
       /**
-       * AI školiteľ potrebuje rozlíšiť krátky pokyn od samotného textu práce.
-       * Rovnaký vstup posielame aj ako question; backend ho následne bezpečne
-       * rozdelí na pokyn a hodnotený text. Vďaka tomu funguje aj požiadavka
-       * „skontroluj iba 1. kapitolu“ bez povinnej prílohy.
+       * AI Konzultant je transformačný editor, nie hodnotiaci chat.
+       * Pôvodný text a pripomienky školiteľa preto posielame samostatne.
        */
-      if (requestedModule === "supervisor" && directUserInput) {
-        formData.append("question", directUserInput);
+      if (requestedModule === "supervisor") {
+        formData.append("studentText", userText);
+        formData.append("supervisorFeedback", secondaryText);
+        formData.append("instruction", prompt);
       }
 
       formData.append("profile", JSON.stringify(profileForApi || {}));
@@ -6780,9 +6917,21 @@ Text emailu:
         prompt,
         instruction: prompt,
         input: userText,
-        text: userText || clientExtractedText || prompt,
-        message: userText || secondaryText || prompt,
-        question: userText || secondaryText || prompt,
+        studentText: requestedModule === "supervisor" ? userText : undefined,
+        supervisorFeedback:
+          requestedModule === "supervisor" ? secondaryText : undefined,
+        text:
+          requestedModule === "supervisor"
+            ? userText
+            : userText || clientExtractedText || prompt,
+        message:
+          requestedModule === "supervisor"
+            ? userText || prompt
+            : userText || secondaryText || prompt,
+        question:
+          requestedModule === "supervisor"
+            ? ""
+            : userText || secondaryText || prompt,
         secondaryInput: secondaryText,
         messages: [{ role: "user", content: prompt }],
         language: finalWorkLanguage,
@@ -6974,6 +7123,7 @@ Text emailu:
         }
 
         fullText =
+          data.rewrittenText ||
           data.output ||
           data.result ||
           data.message ||
@@ -8627,6 +8777,61 @@ Text emailu:
               className="min-h-[240px] w-full resize-y rounded-3xl border border-white/10 bg-[#070b18] px-5 py-5 text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/10"
             />
 
+            {activeModule === "supervisor" ? (
+              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+                <section className="rounded-[28px] border border-violet-300/20 bg-gradient-to-br from-violet-500/10 via-purple-500/[0.06] to-fuchsia-500/10 p-5 shadow-2xl shadow-violet-950/20">
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-black text-white">
+                      {supervisorEditorCopy.feedbackLabel}
+                    </span>
+                    <span className="rounded-full border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-violet-200">
+                      {supervisorEditorCopy.optionalLabel}
+                    </span>
+                  </div>
+
+                  <textarea
+                    value={secondaryInput}
+                    onChange={(event) => setSecondaryInput(event.target.value)}
+                    placeholder={supervisorEditorCopy.feedbackPlaceholder}
+                    aria-label={supervisorEditorCopy.feedbackLabel}
+                    className="min-h-[150px] w-full resize-y rounded-2xl border border-white/10 bg-[#050916] px-4 py-4 text-sm font-semibold leading-6 text-white placeholder:text-slate-500 outline-none transition focus:border-fuchsia-400/60 focus:ring-4 focus:ring-fuchsia-500/10"
+                  />
+
+                  <p className="mt-3 text-xs font-semibold leading-5 text-slate-400">
+                    {supervisorEditorCopy.feedbackHelp}
+                  </p>
+                </section>
+
+                <aside className="rounded-[28px] border border-cyan-300/15 bg-gradient-to-br from-cyan-500/[0.08] via-blue-500/[0.05] to-violet-500/10 p-5 shadow-2xl shadow-cyan-950/20">
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">
+                    {supervisorEditorCopy.workflowEyebrow}
+                  </p>
+                  <h3 className="mt-2 text-base font-black text-white">
+                    {supervisorEditorCopy.workflowTitle}
+                  </h3>
+                  <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">
+                    {supervisorEditorCopy.workflowDescription}
+                  </p>
+
+                  <ol className="mt-4 space-y-3">
+                    {supervisorEditorCopy.workflowSteps.map((step, index) => (
+                      <li
+                        key={step}
+                        className="flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-black/20 px-3 py-3"
+                      >
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-xs font-black text-violet-100 ring-1 ring-violet-300/20">
+                          {index + 1}
+                        </span>
+                        <span className="text-xs font-bold leading-5 text-slate-200">
+                          {step}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </aside>
+              </div>
+            ) : null}
+
             {activeModule !== "data" && (
               <button
                 key={`dashboard-action-${activeModule}`}
@@ -9005,9 +9210,13 @@ uroven_sportu`}
           <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/10 bg-[#070a16] shadow-2xl">
             <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
               <div>
-                <h2 className="text-lg font-black text-white">Canvas</h2>
+                <h2 className="text-lg font-black text-white">
+                  {activeModule === "supervisor" ? "Akademický editor" : "Canvas"}
+                </h2>
                 <p className="text-sm font-semibold text-slate-400">
-                  Upravte alebo skopírujte výsledný text.
+                  {activeModule === "supervisor"
+                    ? "Hotový text môžete ešte doladiť, skopírovať alebo exportovať."
+                    : "Upravte alebo skopírujte výsledný text."}
                 </p>
               </div>
 

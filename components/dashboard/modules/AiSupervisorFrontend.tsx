@@ -5533,8 +5533,12 @@ DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
 - Ak chýba alebo nie je možné bezpečne potvrdiť údaj, napíš presne: Údaje sú potrebné overiť.
 - Ak sú priložené súbory, najprv over, či súvisia s aktívnym profilom práce.
 - Ak priložený dokument pravdepodobne nesúvisí s profilom práce, uveď upozornenie, ale pri výslovnej požiadavke používateľa dokument napriek tomu prečítaj a spracuj.
-- Ak príloha súvisí s profilom práce, použi jej extrahovaný text ako hlavný podklad.
-- Ak sú priložené súbory, v závere uveď, z ktorých príloh sa čerpalo.
+- Ak príloha súvisí s profilom práce, použi jej extrahovaný text ako hlavný faktický podklad.
+${
+  moduleKey === "supervisor"
+    ? "- V režime AI Konzultant nevypisuj technický zoznam príloh ani report o zdrojoch; zdroje používaj priamo pri tvorbe textu a zachovaj iba relevantné existujúce citácie."
+    : "- Ak sú priložené súbory, v závere uveď, z ktorých príloh sa čerpalo."
+}
 - Citačná norma: ${citationStyle}.
 `.trim();
 
@@ -5563,11 +5567,11 @@ ZÁVÄZNÉ PRAVIDLÁ EDITORA:
 4. Pripomienky školiteľa zapracuj priamo do výsledného textu. Neopakuj ich ako komentáre.
 5. Zachovaj odborný význam, fakty, čísla, výsledky, názvy metód a terminológiu. Nevymýšľaj nové výsledky ani údaje.
 6. Oprav gramatiku, štylistiku, logické prechody, nadväznosť odsekov, odbornú terminológiu a akademickú formuláciu.
-7. Ak podklady umožňujú bezpečne doplniť chýbajúci prechod alebo formulovať cieľ či hypotézu, vytvor hotové znenie. Ak na to podklady nestačia, nevymýšľaj faktické tvrdenie.
+7. Chýbajúce prechody, ciele, výskumné otázky alebo hypotézy formuluj iba vtedy, keď ich možno bezpečne odvodiť z dodaného zadania, cieľa, metodológie, dát alebo pripomienok. Inak nič nevymýšľaj.
 8. Existujúce citácie zachovaj, ak sú zrozumiteľné a patria k danému tvrdeniu. Nevymýšľaj autorov, roky, DOI, URL ani bibliografické údaje.
 9. Relevantné prílohy používaj ako faktický podklad. Nerelevantné údaje do textu neprenášaj.
-10. Nevytváraj samostatný zoznam zdrojov ani technický report o prílohách.
-11. Výstup musí byť iba finálny upravený akademický text. Bez úvodu typu „Tu je upravený text“, bez komentára k procesu a bez hodnotenia.
+10. Nevytváraj samostatný zoznam odporúčaní, skóre, audit, technický report o prílohách ani komentár k tomu, čo si zmenil.
+11. Výstup musí byť iba finálny upravený akademický text. Môže používať prirodzené názvy kapitol a podkapitol, ale bez úvodu typu „Tu je upravený text“ a bez hodnotenia.
 12. Rešpektuj jazyk práce ${workLanguage} a citačnú normu ${citationStyle}.
 `.trim();
     }
@@ -6756,7 +6760,12 @@ Text emailu:
       if (requestedModule === "supervisor") {
         formData.append("studentText", userText);
         formData.append("supervisorFeedback", secondaryText);
-        formData.append("instruction", prompt);
+        formData.append("editorMode", "rewrite-transform");
+        formData.append("responseShape", "rewrittenText");
+        formData.append(
+          "instruction",
+          "Prepíš vstup do hotového akademického textu a pripomienky zapracuj priamo. Nevracaj audit, skóre ani zoznam odporúčaní.",
+        );
       }
 
       formData.append("profile", JSON.stringify(profileForApi || {}));
@@ -6915,7 +6924,18 @@ Text emailu:
         agent,
         model: agent,
         prompt,
-        instruction: prompt,
+        instruction:
+          requestedModule === "supervisor"
+            ? "rewrite-transform"
+            : prompt,
+        editorMode:
+          requestedModule === "supervisor"
+            ? "rewrite-transform"
+            : undefined,
+        responseShape:
+          requestedModule === "supervisor"
+            ? "rewrittenText"
+            : undefined,
         input: userText,
         studentText: requestedModule === "supervisor" ? userText : undefined,
         supervisorFeedback:
@@ -6933,7 +6953,15 @@ Text emailu:
             ? ""
             : userText || secondaryText || prompt,
         secondaryInput: secondaryText,
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          {
+            role: "user",
+            content:
+              requestedModule === "supervisor"
+                ? userText || "Použi relevantný text z priložených súborov."
+                : prompt,
+          },
+        ],
         language: finalWorkLanguage,
         outputLanguage: finalWorkLanguage,
         systemLanguage,

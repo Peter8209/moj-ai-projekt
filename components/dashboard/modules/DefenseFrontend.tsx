@@ -7011,6 +7011,10 @@ Text emailu:
        * API ho nesmie zameniť za extrahovaný text prílohy ani za celý interný
        * prompt vytvorený na frontende.
        */
+      const hasDefenseAttachments =
+        requestedModule === "defense" &&
+        attachedFiles.some((item) => isBrowserFileLike(item.file));
+
       if (requestedModule === "defense") {
         const defenseUserInstruction = userText || secondaryText;
 
@@ -7027,7 +7031,20 @@ Text emailu:
         formData.append("summary", userText);
         formData.append("text", userText);
         formData.append("content", userText);
-        formData.append("title", profileForApi?.title || "");
+
+        /**
+         * Ak je priložená práca, jej obsah je primárny zdroj identity obhajoby.
+         * Starý názov z aktívneho profilu preto neposielame ako pevný title,
+         * aby nemohol prebiť úplne inú nahratú prácu.
+         */
+        formData.append(
+          "title",
+          hasDefenseAttachments ? "" : profileForApi?.title || "",
+        );
+        formData.append(
+          "attachmentPriority",
+          hasDefenseAttachments ? "primary" : "profile-fallback",
+        );
         formData.append("defenseType", getWorkType(profileForApi));
         formData.append("workType", getWorkType(profileForApi));
         formData.append(
@@ -7078,9 +7095,9 @@ Text emailu:
 
       /**
        * Pri Obhajobe neposielame zlúčený text všetkých príloh ako anonymný
-       * "clientExtractedText". Server musí zachovať identitu jednotlivých
-       * súborov, rozlíšiť prácu od posudku a overiť ich voči aktívnemu profilu.
-       * Inak by jediná nesúvisiaca príloha mohla prepísať tému obhajoby.
+       * "clientExtractedText". Server dostane skutočné File objekty, zachová
+       * identitu jednotlivých súborov a nahratú hlavnú prácu použije ako
+       * autoritatívny obsah bez tematického porovnávania s aktívnym profilom.
        */
       if (clientExtractedText && requestedModule !== "defense") {
         formData.append(
@@ -7126,7 +7143,10 @@ Text emailu:
         "profileSnapshot",
         JSON.stringify({
           id: profileForApi?.id || null,
-          title: profileForApi?.title || "",
+          title:
+            requestedModule === "defense" && hasDefenseAttachments
+              ? ""
+              : profileForApi?.title || "",
           topic: profileForApi?.topic || "",
           type: getWorkType(profileForApi),
           expertise: getExpertise(profileForApi),
@@ -7138,25 +7158,25 @@ Text emailu:
       formData.append("citation", getCitationStyle(profileForApi));
       formData.append("useSemanticScholar", "false");
       formData.append("sourceMode", "none");
-      formData.append(
-        "validateAttachmentsAgainstProfile",
-        requestedModule === "defense" ? "true" : "false",
-      );
+      formData.append("validateAttachmentsAgainstProfile", "false");
       formData.append("requireSourceList", "false");
       formData.append(
         "allowAiKnowledgeFallback",
         requestedModule === "defense" ? "false" : "true",
       );
       formData.append("extractUploadedText", "true");
-      formData.append(
-        "useExtractedTextFirst",
-        requestedModule === "defense" ? "false" : "true",
-      );
+      formData.append("useExtractedTextFirst", "true");
       formData.append("returnExtractedFilesInfo", "true");
 
       if (requestedModule === "defense") {
-        formData.append("profileIsAuthoritative", "true");
-        formData.append("attachmentRole", "supplemental");
+        formData.append(
+          "profileIsAuthoritative",
+          hasDefenseAttachments ? "false" : "true",
+        );
+        formData.append(
+          "attachmentRole",
+          hasDefenseAttachments ? "primary" : "context",
+        );
       }
       formData.append("contextaCitationFormat", "false");
       formData.append("includeSources", "false");
@@ -7257,7 +7277,10 @@ Text emailu:
         activeProfile: profileForApi || null,
         profileSnapshot: {
           id: profileForApi?.id || null,
-          title: profileForApi?.title || "",
+          title:
+            requestedModule === "defense" && hasDefenseAttachments
+              ? ""
+              : profileForApi?.title || "",
           topic: profileForApi?.topic || "",
           type: getWorkType(profileForApi),
           expertise: getExpertise(profileForApi),
@@ -7267,7 +7290,10 @@ Text emailu:
         profileContext: buildProfileBlock(profileForApi),
         projectId: profileForApi?.id || undefined,
         profileId: profileForApi?.id || undefined,
-        title: profileForApi?.title || "",
+        title:
+          requestedModule === "defense" && hasDefenseAttachments
+            ? ""
+            : profileForApi?.title || "",
         workType: getWorkType(profileForApi),
         citation: getCitationStyle(profileForApi),
         citationStyle: getCitationStyle(profileForApi),
@@ -7296,14 +7322,19 @@ Text emailu:
         useCrossref: false,
         appendBibliography: false,
         returnSources: false,
-        validateAttachmentsAgainstProfile: requestedModule === "defense",
+        validateAttachmentsAgainstProfile: false,
         allowAiKnowledgeFallback: requestedModule !== "defense",
         extractUploadedText: true,
-        useExtractedTextFirst: requestedModule !== "defense",
+        useExtractedTextFirst: true,
         returnExtractedFilesInfo: true,
-        profileIsAuthoritative: requestedModule === "defense",
+        profileIsAuthoritative:
+          requestedModule === "defense" ? !hasDefenseAttachments : false,
         attachmentRole:
-          requestedModule === "defense" ? "supplemental" : "context",
+          requestedModule === "defense"
+            ? hasDefenseAttachments
+              ? "primary"
+              : "context"
+            : "context",
         moduleSettings: {
           activeModule: requestedModule,
           qualityMode,

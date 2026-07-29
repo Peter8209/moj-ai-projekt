@@ -3324,22 +3324,65 @@ async function readClientTextFallback(file: File): Promise<string> {
 function readQualityExtractedText(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "";
 
-  const record = payload as Record<string, unknown>;
-  const candidates = [
-    record.extractedText,
-    record.text,
-    record.content,
-    record.markdown,
-    record.rawText,
-    (record.data as Record<string, unknown> | undefined)?.extractedText,
-    (record.data as Record<string, unknown> | undefined)?.text,
-    (record.result as Record<string, unknown> | undefined)?.extractedText,
-    (record.result as Record<string, unknown> | undefined)?.text,
-  ];
+  const textKeys = [
+    "extractedText",
+    "text",
+    "content",
+    "markdown",
+    "rawText",
+    "plainText",
+    "documentText",
+  ] as const;
 
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate.trim();
+  const nestedKeys = [
+    "data",
+    "result",
+    "output",
+    "payload",
+    "document",
+    "file",
+  ] as const;
+
+  const queue: Array<{ value: unknown; depth: number }> = [
+    { value: payload, depth: 0 },
+  ];
+  const visited = new Set<object>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || !current.value || typeof current.value !== "object") {
+      continue;
+    }
+
+    const objectValue = current.value as Record<string, unknown>;
+
+    if (visited.has(objectValue)) {
+      continue;
+    }
+
+    visited.add(objectValue);
+
+    for (const key of textKeys) {
+      const candidate = objectValue[key];
+
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+
+    if (current.depth >= 4) {
+      continue;
+    }
+
+    for (const key of nestedKeys) {
+      const nested = objectValue[key];
+
+      if (nested && typeof nested === "object") {
+        queue.push({
+          value: nested,
+          depth: current.depth + 1,
+        });
+      }
     }
   }
 
@@ -6892,10 +6935,10 @@ Text emailu:
         `${moduleRunRequestId}-chat`;
 
       /**
-       * Audit kvality najprv pripraví text príloh cez existujúci
-       * /api/extract-text. Tým sa PDF/DOCX spracujú rovnako spoľahlivo ako
-       * v AI Chate a samotný /api/audit dostane jednoznačný textový kontext.
-       * Binárny súbor sa pošle iba ako fallback, ak extrakcia zlyhá.
+       * Audit kvality najprv pripraví text KAŽDEJ prílohy cez /api/extract-text.
+       * Zároveň sa serveru odošle aj pôvodný File objekt každej prílohy.
+       * /api/audit potom zvolí extrahovaný text alebo binárny fallback tak,
+       * aby sa žiadna príloha nestratila a tá istá príloha sa nespracovala 2×.
        */
       let directAttachedFiles = attachedFiles;
 
@@ -6927,6 +6970,31 @@ Text emailu:
         }
 
         setAttachedFiles(directAttachedFiles);
+
+        const unavailableAttachments =
+          directAttachedFiles.filter((file) => {
+            const hasExtractedText = Boolean(
+              String(file.text || file.content || "").trim(),
+            );
+
+            return (
+              !hasExtractedText &&
+              !isBrowserFileLike(file.file)
+            );
+          });
+
+        if (unavailableAttachments.length > 0) {
+          throw new DashboardApiError({
+            status: 422,
+            code: "ATTACHMENT_EXTRACTION_FAILED",
+            message:
+              "Niektoré prílohy nie je možné odoslať na Audit kvality.",
+            detail:
+              `Chýba text aj binárny obsah pre: ${unavailableAttachments
+                .map((file) => file.name)
+                .join(", ")}`,
+          });
+        }
       }
 
       const formData = new FormData();
@@ -7011,12 +7079,7 @@ Text emailu:
         );
 
       const preparedFilesMetadataForRequest =
-        requestedModule === "quality"
-          ? preparedFilesMetadata.map((metadata) => ({
-              ...metadata,
-              extractedText: undefined,
-            }))
-          : preparedFilesMetadata;
+        preparedFilesMetadata;
 
       formData.append(
         "preparedFilesMetadata",
@@ -7044,8 +7107,7 @@ Text emailu:
                 : file.content || file.text || "",
             extractedText: file.text || file.content || "",
             binaryAvailable:
-              isBrowserFileLike(file.file) &&
-              !String(file.text || file.content || "").trim(),
+              isBrowserFileLike(file.file),
             extractionStatus: file.extractionStatus,
             extractionMessage: file.extractionMessage,
           })),
@@ -7161,19 +7223,12 @@ Text emailu:
           return;
         }
 
-        const hasExtractedText = Boolean(
-          String(item.text || item.content || "").trim(),
-        );
-
         /**
-         * Pri audite neposielame ten istý dokument dvakrát (text + binárny
-         * input_file). Binárny súbor je iba fallback pre prílohy, ktorých text
-         * /api/extract-text nevedel pripraviť.
+         * Audit kvality odošle serveru KAŽDÝ pôvodný File objekt.
+         * Server následne zvolí pre každú prílohu práve jeden primárny vstup:
+         * extrahovaný text, alebo binárny fallback. Tým sa žiadna príloha
+         * nestratí iba preto, že predbežná extrakcia zlyhala.
          */
-        if (requestedModule === "quality" && hasExtractedText) {
-          return;
-        }
-
         formData.append(
           "files",
           item.file,
@@ -7306,7 +7361,7 @@ Text emailu:
             data,
         );
 
-        const attachmentProcessing =
+        const attachmentProcessing: UnknownRecord | null =
           isUnknownRecord(
             data?.attachmentProcessing,
           )
@@ -7339,50 +7394,140 @@ Text emailu:
               "extracted_characters",
             ) ?? 0;
 
-          if (receivedFiles <= 0) {
+          const processingFiles: UnknownRecord[] =
+            Array.isArray(
+              attachmentProcessing.files,
+            )
+              ? attachmentProcessing.files.filter(
+                  (item: unknown): item is UnknownRecord =>
+                    isUnknownRecord(item),
+                )
+              : [];
+
+          const allAttachmentsProcessed =
+            readBoolean(
+              attachmentProcessing,
+              successfullyReadFiles >=
+                directAttachedFiles.length,
+              "allAttachmentsProcessed",
+              "all_attachments_processed",
+            );
+
+          if (
+            receivedFiles <
+            directAttachedFiles.length
+          ) {
             throw new DashboardApiError({
               status: 422,
               code:
                 "ATTACHMENT_NOT_RECEIVED",
               message:
-                "Audit kvality neprijal priložený súbor.",
+                "Audit kvality neprijal všetky priložené súbory.",
               detail:
-                "Frontend odoslal požiadavku, ale /api/audit eviduje receivedFiles = 0.",
+                `Frontend odoslal ${directAttachedFiles.length} príloh, ale /api/audit eviduje iba ${receivedFiles}.`,
             });
           }
 
           if (
-            successfullyReadFiles <= 0 &&
-            !clientExtractedText
+            successfullyReadFiles <
+              directAttachedFiles.length ||
+            !allAttachmentsProcessed
           ) {
+            const failedNames =
+              processingFiles
+                .filter(
+                  (item) =>
+                    !readBoolean(
+                      item,
+                      false,
+                      "processed",
+                    ),
+                )
+                .map((item) =>
+                  readString(
+                    item,
+                    "name",
+                  ),
+                )
+                .filter(Boolean);
+
             throw new DashboardApiError({
               status: 422,
               code:
                 "ATTACHMENT_EXTRACTION_FAILED",
               message:
-                "Príloha bola prijatá, ale jej obsah sa nepodarilo načítať.",
+                "Audit kvality nespracoval všetky prílohy.",
               detail:
-                "Skontrolujte serverovú extrakciu PDF/DOCX alebo textový fallback.",
+                failedNames.length > 0
+                  ? `Nespracované prílohy: ${failedNames.join(", ")}`
+                  : `Spracovaných bolo ${successfullyReadFiles} z ${directAttachedFiles.length} príloh.`,
             });
           }
 
           setAttachedFiles(
-            directAttachedFiles.map((file) => ({
-              ...file,
-              extractionStatus:
-                file.extractionStatus ||
-                (successfullyReadFiles > 0 ? "server" : "ready"),
-              extractionMessage:
-                file.extractionMessage ||
-                (successfullyReadFiles > 0
-                  ? "Obsah prílohy bol úspešne použitý v Audite kvality."
-                  : undefined),
-            })),
+            directAttachedFiles.map((file) => {
+              const processingItem =
+                processingFiles.find(
+                  (item) => {
+                    const name =
+                      readString(
+                        item,
+                        "name",
+                      );
+                    const size =
+                      readNumber(
+                        item,
+                        "size",
+                      );
+
+                    return (
+                      name ===
+                        file.name &&
+                      (size === null ||
+                        size ===
+                          file.size)
+                    );
+                  },
+                );
+
+              const inputMode =
+                processingItem
+                  ? readString(
+                      processingItem,
+                      "inputMode",
+                      "input_mode",
+                    )
+                  : "";
+
+              const serverExtractedChars =
+                processingItem
+                  ? readNumber(
+                      processingItem,
+                      "extractedCharacters",
+                      "extracted_characters",
+                    ) ?? 0
+                  : file.extractedChars || 0;
+
+              return {
+                ...file,
+                extractionStatus:
+                  "server" as const,
+                extractedChars:
+                  Math.max(
+                    file.extractedChars || 0,
+                    serverExtractedChars,
+                  ),
+                extractionMessage:
+                  inputMode ===
+                  "native-binary"
+                    ? "Príloha bola úspešne odoslaná a spracovaná ako binárny podklad Auditu kvality."
+                    : "Obsah prílohy bol úspešne načítaný a použitý v Audite kvality.",
+              };
+            }),
           );
 
           setActiveAttachmentText(
-            clientExtractedText ||
-              `Audit prijal ${receivedFiles} príloh; použiteľný obsah bol dostupný pre ${successfullyReadFiles} príloh (${extractedCharacters} extrahovaných znakov).`,
+            `Audit úspešne spracoval všetkých ${successfullyReadFiles} z ${receivedFiles} prijatých príloh (${extractedCharacters} extrahovaných znakov; ostatné prílohy boli spracované binárnym fallbackom).`,
           );
         }
 
@@ -9646,7 +9791,7 @@ function FileUploadBox({
                     : file.extractionStatus === "client"
                       ? "Text pripravený"
                       : file.extractionStatus === "ready"
-                        ? "Pripravené"
+                        ? "Čaká na spracovanie"
                         : file.extractionStatus === "failed"
                           ? "Chyba čítania"
                           : "Spracúva sa"}

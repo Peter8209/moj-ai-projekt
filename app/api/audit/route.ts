@@ -50,7 +50,6 @@ const AUDIT_END_MARKER = 'KONIEC AUDITU';
  * zobrazil ako UNKNOWN_ERROR.
  */
 const MIN_TEXT_LENGTH = 1;
-const MIN_EXTRACTED_ATTACHMENT_LENGTH = 50;
 const MAX_AUDIT_ATTACHMENTS = 20;
 const MAX_MANUAL_TEXT_LENGTH = 80_000;
 const MAX_ATTACHMENT_TEXT_LENGTH = 180_000;
@@ -120,6 +119,18 @@ type BinaryAuditFile = {
   type: string;
   size: number;
   bytes: Buffer;
+};
+
+type AttachmentProcessingItem = {
+  id: string | null;
+  name: string;
+  size: number;
+  type: string;
+  extractedCharacters: number;
+  hasExtractedText: boolean;
+  binaryReceived: boolean;
+  processed: boolean;
+  inputMode: 'extracted-text' | 'native-binary' | 'missing';
 };
 
 type ParsedAuditRequest = {
@@ -631,6 +642,111 @@ function getTotalAttachmentTextLength(attachments: UploadedAttachment[]): number
   return attachments.reduce((total, file) => {
     return total + getAttachmentText(file).length;
   }, 0);
+}
+
+function attachmentMatchesBinaryFile(
+  attachment: UploadedAttachment,
+  attachmentIndex: number,
+  binaryFile: BinaryAuditFile,
+): boolean {
+  const name = getAttachmentName(attachment, attachmentIndex);
+  const declaredSize = Number(attachment.size || 0);
+
+  return (
+    name === binaryFile.name &&
+    (!declaredSize || declaredSize === binaryFile.size)
+  );
+}
+
+function buildAttachmentProcessingItems(
+  attachments: UploadedAttachment[],
+  binaryFiles: BinaryAuditFile[],
+): AttachmentProcessingItem[] {
+  const items: AttachmentProcessingItem[] = [];
+  const matchedBinaryIndexes = new Set<number>();
+
+  attachments.forEach((attachment, attachmentIndex) => {
+    const name = getAttachmentName(attachment, attachmentIndex);
+    const type = getAttachmentType(attachment);
+    const size = Math.max(0, Number(attachment.size || 0));
+    const extractedText = getAttachmentText(attachment);
+
+    const binaryIndex = binaryFiles.findIndex((binaryFile, index) => {
+      return (
+        !matchedBinaryIndexes.has(index) &&
+        attachmentMatchesBinaryFile(
+          attachment,
+          attachmentIndex,
+          binaryFile,
+        )
+      );
+    });
+
+    if (binaryIndex >= 0) {
+      matchedBinaryIndexes.add(binaryIndex);
+    }
+
+    const hasExtractedText = Boolean(extractedText.trim());
+    const binaryReceived = binaryIndex >= 0;
+
+    items.push({
+      id: cleanText(attachment.id) || null,
+      name,
+      size,
+      type,
+      extractedCharacters: extractedText.length,
+      hasExtractedText,
+      binaryReceived,
+      processed: hasExtractedText || binaryReceived,
+      inputMode: hasExtractedText
+        ? 'extracted-text'
+        : binaryReceived
+          ? 'native-binary'
+          : 'missing',
+    });
+  });
+
+  binaryFiles.forEach((binaryFile, binaryIndex) => {
+    if (matchedBinaryIndexes.has(binaryIndex)) {
+      return;
+    }
+
+    items.push({
+      id: null,
+      name: binaryFile.name,
+      size: binaryFile.size,
+      type: binaryFile.type || 'application/octet-stream',
+      extractedCharacters: 0,
+      hasExtractedText: false,
+      binaryReceived: true,
+      processed: true,
+      inputMode: 'native-binary',
+    });
+  });
+
+  return items;
+}
+
+function selectBinaryFilesForModel(
+  attachments: UploadedAttachment[],
+  binaryFiles: BinaryAuditFile[],
+): BinaryAuditFile[] {
+  return binaryFiles.filter((binaryFile) => {
+    const matchingAttachment = attachments.find((attachment, index) =>
+      attachmentMatchesBinaryFile(
+        attachment,
+        index,
+        binaryFile,
+      ),
+    );
+
+    /**
+     * Ak už máme extrahovaný text konkrétnej prílohy, model dostane text.
+     * Binárny súbor zostáva na serveri iba ako fallback a neposiela sa modelu
+     * druhýkrát. Tým zabránime duplicitnému spracovaniu tej istej prílohy.
+     */
+    return !matchingAttachment || !getAttachmentText(matchingAttachment).trim();
+  });
 }
 
 function resolveTitle(body: AuditRequest, profile?: SavedProfile | null): string {
@@ -1531,6 +1647,8 @@ KRITICKÉ PRAVIDLÁ:
 18. Výstup musí byť klientsky čistý. Nepíš interné systémové poznámky.
 19. Pri kontrole rokov, dátumov a časových údajov musíš použiť reálny dátum auditu uvedený v časti "REFERENČNÝ DÁTUM AUDITU".
 20. Roky 2025 a 2026 neoznačuj automaticky ako budúcnosť. Ako budúcnosť označ iba roky väčšie ako aktuálny rok ${dateInfo.currentYear}.
+21. Ak sú priložené súbory, KAŽDÚ prílohu považuj za povinný vstup auditu. Žiadnu prílohu neignoruj ani nepreskoč.
+22. Pri viacerých prílohách posudzuj obsah každej samostatne aj vo vzájomnom kontexte a v časti „ROZSAH AUDITU“ uveď názvy všetkých príloh, ktoré boli použité.
 
 ${dateRules}
 
@@ -1552,6 +1670,7 @@ PRAVIDLO ROZSAHU:
 - Rešpektuj presný pokyn používateľa.
 - Ak žiada kontrolu jednej kapitoly alebo jednej časti, neposudzuj celú prácu ako hotový dokument.
 - Ak je dostupný iba krátky úsek textu, vykonaj primerane cielenú kontrolu tohto úseku.
+- Ak sú priložené súbory, spracuj všetky prílohy. Výsledok nesmie byť založený iba na prvej prílohe.
 
 ZDROJ TEXTU:
 ${
@@ -1600,6 +1719,9 @@ PRÍLOHY NA AUDIT:
 ${attachmentsBlock}
 
 POVINNÁ ŠTRUKTÚRA VÝSTUPU:
+
+=== ROZSAH AUDITU ===
+Uveď, aký text bol kontrolovaný. Ak boli priložené súbory, vypíš názvy VŠETKÝCH spracovaných príloh.
 
 === UPOZORNENIA ===
 Ak existuje nesúlad citačnej normy, nesúlad prílohy s profilom, chýbajúci extrahovaný text alebo technický problém, uveď to tu.
@@ -2845,6 +2967,54 @@ export async function POST(
       );
     }
 
+    const attachmentProcessingItems =
+      buildAttachmentProcessingItems(
+        attachments,
+        binaryFiles,
+      );
+
+    const unprocessableAttachments =
+      attachmentProcessingItems.filter(
+        (item) => !item.processed,
+      );
+
+    if (unprocessableAttachments.length > 0) {
+      return createAuditErrorResponse(
+        {
+          requestId,
+          code:
+            'ATTACHMENT_EXTRACTION_FAILED',
+          message:
+            unprocessableAttachments.length === 1
+              ? `Prílohu "${unprocessableAttachments[0].name}" sa nepodarilo načítať.`
+              : `Nepodarilo sa načítať ${unprocessableAttachments.length} príloh.`,
+          detail:
+            'Každá príloha Auditu kvality musí mať extrahovaný text alebo skutočný binárny súbor v multipart poli files.',
+          status: 422,
+          extra: {
+            receivedAttachments,
+            failedAttachments:
+              unprocessableAttachments.map(
+                (item) => item.name,
+              ),
+            files:
+              attachmentProcessingItems,
+          },
+        },
+      );
+    }
+
+    /**
+     * Frontend môže poslať pre istotu aj text aj binárny súbor.
+     * Modelu odošleme binárny obsah iba pri prílohách, kde extrahovaný text
+     * nie je dostupný. Každá príloha tak má práve jeden primárny vstup.
+     */
+    const binaryFilesForModel =
+      selectBinaryFilesForModel(
+        attachments,
+        binaryFiles,
+      );
+
     const attachmentItems =
       buildAttachmentUsageItemsForAudit(
         {
@@ -2971,11 +3141,13 @@ export async function POST(
       receivedAttachments > 0;
 
     const hasUsableAttachmentText =
-      extractedAttachmentTextLength >=
-      MIN_EXTRACTED_ATTACHMENT_LENGTH;
+      attachmentProcessingItems.some(
+        (item) =>
+          item.hasExtractedText,
+      );
 
     const hasBinaryAttachmentInput =
-      binaryFiles.length > 0;
+      binaryFilesForModel.length > 0;
 
     const hasUsableAttachmentInput =
       hasUsableAttachmentText ||
@@ -3149,7 +3321,7 @@ export async function POST(
         .join('\n\n');
 
     const citationAudit =
-      binaryFiles.length >
+      binaryFilesForModel.length >
         0 &&
       !cleanText(
         combinedTextForChecks,
@@ -3242,8 +3414,21 @@ export async function POST(
           'detailed',
         receivedAttachments,
         extractedAttachmentTextLength,
-        binaryFiles:
+        attachmentProcessing:
+          attachmentProcessingItems,
+        binaryFilesReceived:
           binaryFiles.map(
+            (file) => ({
+              name:
+                file.name,
+              size:
+                file.size,
+              type:
+                file.type,
+            }),
+          ),
+        binaryFilesForModel:
+          binaryFilesForModel.map(
             (file) => ({
               name:
                 file.name,
@@ -3270,7 +3455,8 @@ export async function POST(
         prompt,
         maxCompletionTokens,
         dateInfo,
-        binaryFiles,
+        binaryFiles:
+          binaryFilesForModel,
       });
 
     const rawResult =
@@ -3355,62 +3541,44 @@ export async function POST(
         },
       );
 
-    const readableTextNames =
-      attachments
-        .filter(
-          (attachment) =>
-            Boolean(
-              getAttachmentText(
-                attachment,
-              ),
-            ),
-        )
-        .map(
-          (
-            attachment,
-            index,
-          ) =>
-            getAttachmentName(
-              attachment,
-              index,
-            ),
-        );
+    const successfullyReadFiles =
+      attachmentProcessingItems.filter(
+        (item) => item.processed,
+      ).length;
 
-    const successfullyReadFileKeys =
-      new Set<string>(
-        [
-          ...readableTextNames,
-          ...binaryFiles.map(
-            (file) =>
-              file.name,
-          ),
-        ],
-      );
+    const nativeAttachmentFiles =
+      attachmentProcessingItems
+        .filter(
+          (item) =>
+            item.inputMode ===
+            'native-binary',
+        )
+        .map((item) => item.name);
 
     const attachmentProcessing =
       {
         receivedFiles:
           receivedAttachments,
-        successfullyReadFiles:
-          successfullyReadFileKeys.size,
+        successfullyReadFiles,
+        allAttachmentsProcessed:
+          successfullyReadFiles ===
+          receivedAttachments,
         extractedCharacters:
           extractedAttachmentTextLength,
-        nativeAttachmentFiles:
-          binaryFiles.map(
-            (file) =>
-              file.name,
-          ),
+        nativeAttachmentFiles,
         nativeAttachmentRead:
-          binaryFiles.length >
+          binaryFilesForModel.length >
           0,
         serverReadAttachments:
-          successfullyReadFileKeys.size >
+          successfullyReadFiles >
           0,
         mode:
-          binaryFiles.length >
+          binaryFilesForModel.length >
           0
             ? modelResult.providerMode
             : 'extracted-text',
+        files:
+          attachmentProcessingItems,
         warnings:
           visibleWarnings,
       };

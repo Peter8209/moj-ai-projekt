@@ -1955,12 +1955,12 @@ function ProfileWizardModal({
       { key: 'title' as const, label: 'Názov práce', step: 2 },
       { key: 'field' as const, label: 'Odbor / predmet / oblasť', step: 2 },
       { key: 'workLanguage' as const, label: 'Jazyk práce', step: 2 },
+      { key: 'keywordsText' as const, label: 'Kľúčové slová', step: 2 },
       { key: 'annotation' as const, label: 'Anotácia', step: 2 },
       { key: 'goal' as const, label: 'Cieľ práce', step: 3 },
       { key: 'problem' as const, label: 'Výskumný problém', step: 3 },
       { key: 'methodology' as const, label: 'Metodológia', step: 3 },
       { key: 'researchQuestions' as const, label: 'Výskumné otázky', step: 3 },
-      { key: 'keywordsText' as const, label: 'Kľúčové slová', step: 2 },
     ],
     [],
   );
@@ -1972,6 +1972,14 @@ function ProfileWizardModal({
         return !isWizardFieldFilled(item.key, value);
       }),
     [profile, requiredProfileFields],
+  );
+
+  const missingFieldsByStep = useMemo(
+    () => ({
+      2: missingFields.filter((item) => item.step === 2),
+      3: missingFields.filter((item) => item.step === 3),
+    }),
+    [missingFields],
   );
 
   const persistWizardDraftImmediately = (nextProfile: ProfileWizardState) => {
@@ -2029,14 +2037,11 @@ function ProfileWizardModal({
       | ProfileWizardState
       | ((previousProfile: ProfileWizardState) => ProfileWizardState),
   ) => {
-    setProfile((previousProfile) => {
-      const nextProfile =
-        typeof updater === 'function' ? updater(previousProfile) : updater;
-
-      persistWizardDraftImmediately(nextProfile);
-
-      return nextProfile;
-    });
+    // DÔLEŽITÉ: setter React state musí zostať bez side-effectov.
+    // Persistencia, localStorage a CustomEvent-y prebehnú až po commitnutí
+    // nového profilu v useEffect nižšie. Inak by event z tohto setteru
+    // mohol počas renderu ProfileWizardModal spustiť setState v LanguageProvider.
+    setProfile(updater);
   };
 
   const updateProfile = <K extends keyof ProfileWizardState>(
@@ -2353,6 +2358,7 @@ function ProfileWizardModal({
               >
                 <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                   <ClickEditField
+                    fieldKey="title"
                     label="Názov práce"
                     value={profile.title}
                     placeholder="Napr. Vplyv umelej inteligencie na akademické písanie"
@@ -2361,6 +2367,7 @@ function ProfileWizardModal({
                   />
 
                   <ClickEditField
+                    fieldKey="field"
                     label="Odbor / predmet / oblasť"
                     value={profile.field}
                     placeholder="Napr. pedagogika, manažment, informatika"
@@ -2369,6 +2376,7 @@ function ProfileWizardModal({
                   />
 
                   <ClickEditField
+                    fieldKey="supervisor"
                     label="Vedúci práce / školiteľ"
                     value={profile.supervisor}
                     placeholder="Meno vedúceho práce"
@@ -2376,6 +2384,7 @@ function ProfileWizardModal({
                   />
 
                   <ClickEditField
+                    fieldKey="workLanguage"
                     label="Jazyk práce"
                     value={profile.workLanguage}
                     placeholder="sk, cs, en, de, pl, hu"
@@ -2384,6 +2393,7 @@ function ProfileWizardModal({
                   />
 
                   <ClickEditField
+                    fieldKey="keywordsText"
                     label="Kľúčové slová"
                     value={profile.keywordsText}
                     placeholder="AI, akademické písanie, metodológia"
@@ -2392,6 +2402,7 @@ function ProfileWizardModal({
                   />
 
                   <ClickEditField
+                    fieldKey="annotation"
                     label="Anotácia"
                     value={profile.annotation}
                     placeholder="Stručne popíš, o čom práca je."
@@ -2402,7 +2413,7 @@ function ProfileWizardModal({
                 </div>
 
                 <MissingFieldsPanel
-                  missingFields={missingFields}
+                  missingFields={missingFieldsByStep[2]}
                   onGoToStep={setActiveStep}
                 />
               </WizardPanel>
@@ -2416,6 +2427,7 @@ function ProfileWizardModal({
               >
                 <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                   <ClickEditField
+                    fieldKey="goal"
                     label="Cieľ práce"
                     value={profile.goal}
                     placeholder="Čo je cieľom práce?"
@@ -2425,6 +2437,7 @@ function ProfileWizardModal({
                   />
 
                   <ClickEditField
+                    fieldKey="problem"
                     label="Výskumný problém"
                     value={profile.problem}
                     placeholder="Aký problém práca rieši?"
@@ -2434,6 +2447,7 @@ function ProfileWizardModal({
                   />
 
                   <ClickEditField
+                    fieldKey="methodology"
                     label="Metodológia"
                     value={profile.methodology}
                     placeholder={activeTemplate.methodologyHint}
@@ -2443,6 +2457,7 @@ function ProfileWizardModal({
                   />
 
                   <ClickEditField
+                    fieldKey="researchQuestions"
                     label="Výskumné otázky"
                     value={profile.researchQuestions}
                     placeholder="Výskumné otázky"
@@ -2452,6 +2467,7 @@ function ProfileWizardModal({
                   />
 
                   <ClickEditField
+                    fieldKey="hypotheses"
                     label="Hypotézy"
                     value={profile.hypotheses}
                     placeholder="Hypotézy práce"
@@ -2460,6 +2476,7 @@ function ProfileWizardModal({
                   />
 
                   <ClickEditField
+                    fieldKey="practicalPart"
                     label="Praktická / analytická časť"
                     value={profile.practicalPart}
                     placeholder="Popíš praktickú alebo analytickú časť."
@@ -2469,7 +2486,7 @@ function ProfileWizardModal({
                 </div>
 
                 <MissingFieldsPanel
-                  missingFields={missingFields}
+                  missingFields={missingFieldsByStep[3]}
                   onGoToStep={setActiveStep}
                 />
               </WizardPanel>
@@ -2514,6 +2531,7 @@ function ProfileWizardModal({
 
                   <div className="grid gap-3">
                     <ClickEditField
+                      fieldKey="recommendedLength"
                       label="Odporúčaný rozsah"
                       value={profile.recommendedLength}
                       placeholder="Napr. 30 – 50 strán"
@@ -2703,6 +2721,7 @@ function TextField({
 
 
 function ClickEditField({
+  fieldKey,
   label,
   value,
   placeholder,
@@ -2710,6 +2729,7 @@ function ClickEditField({
   multiline = false,
   onChange,
 }: {
+  fieldKey: keyof ProfileWizardState;
   label: string;
   value: string;
   placeholder?: string;
@@ -2717,11 +2737,7 @@ function ClickEditField({
   multiline?: boolean;
   onChange: (value: string) => void;
 }) {
-  const displayValue = getWizardFieldDisplayValue(label, value);
-  const filled =
-    label === 'Kľúčové slová'
-      ? normalizeKeywordsInput(value).length > 0
-      : Boolean(displayValue);
+  const filled = isWizardFieldFilled(fieldKey, value);
   const statusLabel = getWizardFieldStatusLabel(label, filled, required);
 
   const inputClass = `mt-3 w-full rounded-2xl border px-4 py-3 text-sm font-semibold leading-6 text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:bg-white/[0.08] ${
@@ -2747,6 +2763,7 @@ function ClickEditField({
           {label}
         </span>
         <span
+          aria-live="polite"
           className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] ${
             filled
               ? 'bg-emerald-500/15 text-emerald-200'
@@ -2809,9 +2826,12 @@ function MissingFieldsPanel({
             key={`${item.step}-${item.label}`}
             type="button"
             onClick={() => onGoToStep(item.step)}
-            className="rounded-full border border-amber-300/30 bg-amber-400/10 px-3 py-1.5 text-xs font-black text-amber-100 transition hover:bg-amber-400/20"
+            className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/30 bg-amber-400/10 px-3 py-1.5 text-xs font-black text-amber-100 transition hover:bg-amber-400/20"
           >
-            Krok {item.step}: {item.label}
+            <span>Krok</span>
+            <span>{item.step}</span>
+            <span aria-hidden="true" className="text-amber-300/60">•</span>
+            <span>{item.label}</span>
           </button>
         ))}
       </div>

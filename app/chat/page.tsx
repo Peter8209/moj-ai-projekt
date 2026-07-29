@@ -600,6 +600,9 @@ function getFileKindLabel(fileName: string) {
 }
 
 function cleanAiOutput(text: string) {
+  // Zachovávame Markdown nadpisy, odrážky a podčiarkovníky vo vzorcoch.
+  // Predchádzajúca verzia odstraňovala ##/### aj _..._, čím sa správne
+  // štruktúrovaný akademický výstup zmenil na súvislý „wall of text“.
   return String(text || '')
     .replace(/\uFEFF/g, '')
     .replace(/\u200B/g, '')
@@ -610,16 +613,120 @@ function cleanAiOutput(text: string) {
     .replace(/[ţț]/g, 'ž')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/\*(.*?)\*/g, '$1')
-    .replace(/__(.*?)__/g, '$1')
-    .replace(/_(.*?)_/g, '$1')
     .replace(/^\s*[-*_]{3,}\s*$/gm, '')
-    .replace(/```[a-zA-Z]*\n?/g, '')
+    .replace(/```[a-zA-Z0-9_-]*\n?/g, '')
     .replace(/```/g, '')
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
+function renderInlineAcademicText(value: string) {
+  const parts = String(value || '').split(/(\*\*[^*]+\*\*)/g);
+
+  return parts.map((part, index) => {
+    const bold = part.match(/^\*\*(.+)\*\*$/);
+    if (bold?.[1]) {
+      return <strong key={`bold-${index}`} className="font-semibold text-slate-100">{bold[1]}</strong>;
+    }
+    return <span key={`text-${index}`}>{part}</span>;
+  });
+}
+
+function StructuredAcademicText({ text }: { text: string }) {
+  const lines = cleanAiOutput(text).split('\n');
+
+  return (
+    <div className="space-y-1">
+      {lines.map((rawLine, index) => {
+        const line = rawLine.trimEnd();
+        const heading = line.match(/^(#{2,4})\s+(.+)$/);
+        if (heading) {
+          const level = heading[1].length;
+          const headingClass = level === 2
+            ? 'mt-5 mb-2 text-base font-black tracking-tight text-white first:mt-0'
+            : 'mt-4 mb-1.5 text-sm font-bold text-slate-100 first:mt-0';
+          return <div key={`h-${index}`} className={headingClass}>{renderInlineAcademicText(heading[2])}</div>;
+        }
+
+        const bullet = line.match(/^\s*[-•*]\s+(.+)$/);
+        if (bullet) {
+          return (
+            <div key={`b-${index}`} className="flex items-start gap-2 pl-1">
+              <span aria-hidden="true" className="mt-[0.62rem] h-1.5 w-1.5 shrink-0 rounded-full bg-violet-300" />
+              <span className="min-w-0 flex-1">{renderInlineAcademicText(bullet[1])}</span>
+            </div>
+          );
+        }
+
+        const numbered = line.match(/^\s*(\d+[.)])\s+(.+)$/);
+        if (numbered) {
+          return (
+            <div key={`n-${index}`} className="flex items-start gap-2 pl-1">
+              <span className="shrink-0 font-semibold text-violet-200">{numbered[1]}</span>
+              <span className="min-w-0 flex-1">{renderInlineAcademicText(numbered[2])}</span>
+            </div>
+          );
+        }
+
+        if (!line.trim()) return <div key={`sp-${index}`} className="h-2" />;
+
+        return (
+          <p key={`p-${index}`} className="whitespace-pre-wrap">
+            {renderInlineAcademicText(line)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function cleanExtractedAcademicText(value: string) {
+  const normalized = String(value || '')
+    .replace(/\u0000/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\f/g, '\n')
+    .replace(/[ \t]+/g, ' ');
+
+  const lines = normalized.split('\n').map((line) => line.trim());
+  const frequencies = new Map<string, number>();
+
+  for (const line of lines) {
+    if (!line || line.length < 3 || line.length > 160) continue;
+    if (/^(?:LITERATÚRA|LITERATURA|REFERENCES|BIBLIOGRAFIA|ABSTRACT|ABSTRAKT|ÚVOD|INTRODUCTION)$/i.test(line)) continue;
+    const key = normalizeForMatch(line);
+    if (!key) continue;
+    frequencies.set(key, (frequencies.get(key) || 0) + 1);
+  }
+
+  const seenRepeated = new Set<string>();
+  const cleanedLines: string[] = [];
+
+  for (const line of lines) {
+    if (!line) {
+      cleanedLines.push('');
+      continue;
+    }
+
+    if (/^(?:strana|page)\s*\d+(?:\s*(?:z|of)\s*\d+)?$/i.test(line) || /^[-–—]\s*\d{1,4}\s*[-–—]$/.test(line)) {
+      continue;
+    }
+
+    const key = normalizeForMatch(line);
+    const isRepeatedHeaderOrFooter = Boolean(key) && (frequencies.get(key) || 0) >= 3;
+    if (isRepeatedHeaderOrFooter) {
+      if (seenRepeated.has(key)) continue;
+      seenRepeated.add(key);
+    }
+
+    cleanedLines.push(line);
+  }
+
+  return cleanedLines
+    .join('\n')
+    .replace(/([A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž])-\n([a-záäčďéíĺľňóôŕšťúýž])/g, '$1$2')
     .replace(/\n{4,}/g, '\n\n\n')
     .trim();
 }
@@ -1642,6 +1749,29 @@ function extractYear(line: string) {
   return match?.[0]?.replace(/[()]/g, '') || null;
 }
 
+function isPlausibleBibliographicAuthor(value: string) {
+  const cleaned = normalizeAuthorDisplay(value)
+    .replace(/[;,]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned || cleaned.length < 3 || cleaned.length > 100) return false;
+  if (/\d/.test(cleaned)) return false;
+  if (/\b(?:literatúra|literatura|references|reference|journal|press|publisher|university|nitra|genet|chem|biosys|encyclopedia|volume|issue|pages?|doi|issn|isbn|abstract|summary|metóda|metoda)\b/i.test(cleaned)) return false;
+
+  const tokens = cleaned
+    .replace(/[.,]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  const singleLetterTokens = tokens.filter((token) => /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]$/i.test(token));
+  const surnameLikeTokens = tokens.filter((token) => /^[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][A-Za-zÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽáäčďéíĺľňóôŕšťúýž'’\-]{2,}$/i.test(token));
+
+  // Odmietne OCR artefakty typu „Genet., A. I. W. T. A.“ bez reálneho priezviska.
+  if (singleLetterTokens.length >= 3 && surnameLikeTokens.length === 0) return false;
+
+  return surnameLikeTokens.length >= 1 || /,\s*(?:[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ]\.?\s*){1,5}$/i.test(cleaned);
+}
+
 function extractAuthors(line: string) {
   const normalizedLine = normalizeSlovakCitationText(line);
   const beforeYear = normalizedLine.split(/\b(18|19|20)\d{2}[a-z]?\b/i)[0] || '';
@@ -1702,7 +1832,9 @@ function extractAuthors(line: string) {
     }
   }
 
-  return uniqueArray(authors).slice(0, 20);
+  return uniqueArray(authors)
+    .filter(isPlausibleBibliographicAuthor)
+    .slice(0, 20);
 }
 
 function extractTitle(line: string) {
@@ -2330,7 +2462,7 @@ async function callExtractTextApi({
     );
   }
 
-  const extractedText = extractTextFromExtractApi(data);
+  const extractedText = cleanExtractedAcademicText(extractTextFromExtractApi(data));
 
   if (!extractedText.trim()) {
     throw new Error(data.message || `Extrakcia prebehla, ale text zo súboru ${originalName} je prázdny.`);
@@ -2480,27 +2612,54 @@ function buildMainChatPrompt({
       profile?.citation ||
       'ISO',
   );
+  const hasAttachments = attachmentCount > 0;
 
   return [
-    'HLAVNÁ PRACOVNÁ INŠTRUKCIA Z CHAT-PAGE:',
-    `Spracuj požiadavku používateľa pre aktívny profil „${profileTitle}“.`,
+    'REŽIM SOURCE-GROUNDED AKADEMICKÉHO PÍSANIA:',
     `Používateľská požiadavka: ${userInstruction || 'Spracuj priložené dokumenty.'}`,
-    `Počet odosielaných príloh: ${attachmentCount}.`,
-    'Najprv vyťaž údaje, tvrdenia, mená, dátumy, tabuľky, citácie a zdroje z príloh.',
-    attachmentCount > 0
-      ? 'Ak sú priložené dokumenty, NEVYHĽADÁVAJ sekundárne zdroje na internete a nedopĺňaj ich z pamäte AI. Primárny zdroj je samotný použitý dokument. Sekundárne zdroje smú pochádzať iba z citácií v texte tohto dokumentu a z jeho vlastného zoznamu literatúry.'
-      : 'Ak prílohy nie sú priložené, odborné tvrdenia opieraj iba o overiteľné akademické zdroje a nevymýšľaj bibliografické údaje.',
-    attachmentCount > 0
-      ? 'Pri primárnom zdroji identifikuj celý viacriadkový názov publikácie, všetkých bezpečne zistených autorov, rok a dostupné bibliografické údaje (časopis/zborník, ročník, číslo, strany, ISSN/ISBN, DOI). Názov súboru používaj iba ako položku „Zdrojový súbor“, nie ako názov publikácie, ak je titul v dokumente dostupný.'
-      : 'Bez prílohy používaj iba bibliografické záznamy, ktoré možno dôveryhodne overiť.',
-    attachmentCount > 0
-      ? 'Sekundárny zdroj musí byť spárovaný s citáciou v texte dokumentu a vypísaný v rovnakom bibliografickom tvare, v akom je uvedený v zozname použitej literatúry daného dokumentu. Nezostavuj náhradné záznamy iba z mena autora a roku.'
-      : 'Sekundárne zdroje bez prílohy musia obsahovať úplný názov publikácie a dostupné bibliografické údaje.',
+    `Aktívny profil / cieľová práca: „${profileTitle}“.`,
+    `Počet aktuálne priložených dokumentov: ${attachmentCount}.`,
+    '',
+    'HIERARCHIA PODKLADOV:',
+    '1. Presný pokyn používateľa určuje, čo sa má vytvoriť.',
+    hasAttachments
+      ? '2. Aktuálne priložené dokumenty sú primárnym odborným a evidenčným podkladom. Považuj ich za zámerne vybrané používateľom; nevyraďuj ich iba preto, že majú slabú slovnú zhodu s profilom.'
+      : '2. Bez aktuálnej prílohy používaj iba bezpečne dostupný profil a overené akademické zdroje.',
+    '3. Profil určuje cieľové zaradenie textu, jazyk, citačnú normu a – ak je dostupná – štruktúru práce. Profil nesmie prehlušiť konkrétny obsah prílohy.',
+    '',
+    'POVINNÝ INTERNÝ POSTUP PRED PÍSANÍM:',
+    'A. Najprv urč typ výstupu: kapitola, podkapitola, úvod, analýza, prepis alebo iná úloha.',
+    hasAttachments
+      ? 'B. Prečítaj priložený dokument ako celok: titulný blok, abstrakt/súhrn, jadro textu, metodiku, výsledky, diskusiu a bibliografiu. Vytvor si internú mapu: tvrdenie -> miesto v dokumente -> autor/rok -> bibliografický záznam.'
+      : 'B. Bez prílohy pracuj iba s podkladmi, ktoré možno bezpečne overiť.',
+    'C. Ak používateľ žiada kapitolu, nevytváraj lineárny súhrn článku. Syntetizuj odbornú kapitolu, v ktorej je článok zdrojom dôkazov pre relevantné časti textu.',
+    'D. Ak profil obsahuje osnovu alebo názov požadovanej kapitoly, použi ju ako cieľovú štruktúru. Ak ju neobsahuje, vytvor prirodzenú odbornú štruktúru podľa zadania a obsahu prílohy.',
+    'E. Pred odoslaním skontroluj, že každé konkrétne číslo, výsledok, atribúcia autora alebo špecifické vedecké tvrdenie má oporu v dostupnom zdroji.',
+    '',
+    'ŠTÝL AKADEMICKÉHO VÝSTUPU:',
+    'Píš prirodzene, odborne a argumentačne. Text nesmie pôsobiť ako výpis z PDF ani ako generický AI súhrn.',
+    'Pri kapitole používaj číslované akademické nadpisy typu „1. Názov“, „1.1 Podkapitola“, „1.2 Podkapitola“. Markdownové ##/### používaj iba vtedy, keď ich používateľ výslovne žiada.',
+    'Odseky prepájaj logickými prechodmi. Odrážky používaj iba tam, kde ide prirodzene o výpočet, klasifikáciu, kroky alebo vlastnosti.',
+    'Nevkladaj do tela textu technické vety typu „podľa nahratej prílohy“, „AI analyzovala súbor“ alebo opis interného procesu.',
+    '',
+    hasAttachments
+      ? 'ROZŠÍRENIE NAD RÁMEC PRÍLOHY: Je dovolené vytvoriť opatrný všeobecný odborný rámec a prechodové vysvetlenia, aby kapitola bola súvislá. Nesmieš však z pamäte dopĺňať konkrétne čísla, výsledky štúdií, autorov, roky, DOI ani bibliografické odkazy. Ak širšia podkapitola potrebuje aktuálne štatistiky alebo ďalší zdroj, formuluj ju opisne a transparentne uveď, čo treba doplniť z aktuálneho overeného zdroja.'
+      : 'Pri výstupe bez prílohy nevymýšľaj fakty ani bibliografiu a používaj iba overiteľné akademické zdroje.',
+    '',
+    'ZDROJOVÁ PROVENIENCIA:',
+    hasAttachments
+      ? 'Primárny zdroj je samotná použitá publikácia. Identifikuj jej skutočný celý názov, všetkých bezpečne zistených autorov, rok a dostupné bibliografické údaje; názov súboru je iba technická informácia „Zdrojový súbor“.'
+      : 'Bez prílohy používaj iba dôveryhodne overené bibliografické záznamy.',
+    hasAttachments
+      ? 'Ak priložená publikácia cituje inú prácu a túto pôvodnú prácu si priamo nedostal ani nezískal ako overený externý zdroj, zachovaj v texte nepriamu provenienciu – napr. „(Autor, rok, cit. v PrimárnyAutor et al., rok)“ alebo jazykovo ekvivalentný tvar. Netvár sa, že si pôvodnú prácu čítal priamo.'
+      : 'Citácie bez prílohy musia smerovať na reálne overené zdroje.',
+    hasAttachments
+      ? 'Úplný sekundárny bibliografický záznam môže byť použitý iba vtedy, keď sa citácia autor–rok bezpečne spáruje s úplným záznamom v bibliografii prílohy. OCR fragment ani samotné meno a rok nestačia.'
+      : 'Neúplné alebo neisté bibliografické záznamy nepoužívaj.',
     `Citačná norma z profilu práce: ${citationStyle}.`,
     buildCitationStyleInstructions(citationStyle),
-    'Na konci vždy zachovaj samostatné sekcie Primárne zdroje a Sekundárne zdroje.',
-    'Nevymýšľaj zdroje, DOI, URL, autorov ani fakty. Neisté údaje jasne označ na overenie.',
-    'Výsledok musí nadväzovať na aktívny profil, používateľský príkaz a spracovaný obsah príloh.',
+    'Existujúce zdrojovanie zachovaj: na konci ponechaj samostatné sekcie Primárne zdroje a Sekundárne zdroje, pričom backendový register zdrojov je autoritatívny pre bibliografické údaje.',
+    'Nevymýšľaj zdroje, DOI, URL, autorov, roky, čísla strán ani fakty. Pri neistote formuluj obmedzenie namiesto domýšľania.',
   ].join('\n');
 }
 
@@ -3052,7 +3211,7 @@ useEffect(() => {
 
 
 
-const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
+const handleSelectLanguage = (nextLanguage: AppLanguage) => {
   setLanguage(nextLanguage);
 
   localStorage.setItem('zedpera_language', nextLanguage);
@@ -3098,334 +3257,7 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
       detail: nextLanguage,
     }),
   );
-  window.dispatchEvent(
-    new CustomEvent('zedpera-profile-change'),
-  );
-
-  const textToTranslate =
-    result.trim() || canvasText.trim();
-  const hasAttachments =
-    attachedFiles.length > 0;
-
-  if (
-    (!textToTranslate && !hasAttachments) ||
-    isLoading ||
-    isEditingSelection
-  ) {
-    return;
-  }
-
-  clearSystemError();
-
-  try {
-    setIsLoading(true);
-
-    const preparedFiles =
-      await prepareFilesBeforeSend(
-        attachedFiles,
-      );
-    const extractedContext =
-      buildExtractedContext(preparedFiles);
-    const detectedSources =
-      flattenDetectedSources(preparedFiles).slice(
-        0,
-        maxDetectedSourcesForChat,
-      );
-    const detectedAuthors =
-      flattenDetectedAuthors(preparedFiles).slice(
-        0,
-        maxDetectedAuthorsForChat,
-      );
-    const inTextCitations =
-      flattenInTextCitations(preparedFiles).slice(
-        0,
-        maxInTextCitationsForChat,
-      );
-
-    const requestId = createChatRequestId();
-    const formData = new FormData();
-
-    formData.append('requestId', requestId);
-    formData.append('agent', agent);
-    formData.append('module', 'translation');
-    formData.append('language', nextLanguage);
-    formData.append('outputLanguage', nextLanguage);
-    formData.append('systemLanguage', nextLanguage);
-    formData.append('workLanguage', nextLanguage);
-    formData.append(
-      'profile',
-      JSON.stringify(updatedProfile || null),
-    );
-    formData.append(
-      'requireSourceList',
-      'false',
-    );
-    formData.append(
-      'allowAiKnowledgeFallback',
-      'false',
-    );
-    formData.append(
-      'useExternalAcademicSources',
-      'false',
-    );
-    formData.append(
-      'returnExtractedFilesInfo',
-      hasAttachments ? 'true' : 'false',
-    );
-
-    const translationInstruction = [
-      `Prelož celý dostupný obsah do jazyka: ${nextLanguage}.`,
-      textToTranslate
-        ? `TEXT Z EDITORA:\n${textToTranslate}`
-        : '',
-      hasAttachments
-        ? [
-            `PRILOŽENÉ DOKUMENTY: ${attachedFiles.length}.`,
-            'Prelož celý text každej prílohy, nie iba text napísaný v editore.',
-            'Zachovaj poradie dokumentov, nadpisy, odseky, tabuľkové hodnoty a členenie.',
-            'Pred obsahom každej prílohy ponechaj samostatný riadok „Súbor: pôvodný názov“.',
-          ].join('\n')
-        : '',
-      'Neprekladaj mená autorov, citácie, DOI, URL ani bibliografické identifikátory.',
-      'Nevytváraj súhrn a nič nevynechávaj. Vráť iba kompletný preklad.',
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-
-    formData.append(
-      'messages',
-      JSON.stringify([
-        {
-          role: 'user',
-          content: translationInstruction,
-        },
-      ]),
-    );
-
-    formData.append(
-      'clientExtractedText',
-      extractedContext,
-    );
-    formData.append(
-      'clientDetectedSources',
-      JSON.stringify(detectedSources),
-    );
-    formData.append(
-      'clientDetectedAuthors',
-      JSON.stringify(detectedAuthors),
-    );
-    formData.append(
-      'clientInTextCitations',
-      JSON.stringify(inTextCitations),
-    );
-
-    for (const preparedFile of preparedFiles) {
-      formData.append(
-        'files',
-        preparedFile.file,
-        preparedFile.preparedName,
-      );
-    }
-
-    formData.append(
-      'preparedFilesMetadata',
-      JSON.stringify(
-        preparedFiles.map((item) => ({
-          originalId: item.originalId,
-          originalName: item.originalName,
-          originalSize: item.originalSize,
-          originalType: item.originalType,
-          preparedName: item.preparedName,
-          preparedSize: item.preparedSize,
-          preparedType: item.preparedType,
-          compressionMode: item.compressionMode,
-          extractionStatus: item.extractionStatus,
-          extractionMethod: item.extractionMethod,
-          extractionMessage: item.extractionMessage,
-          extractedText: item.extractedText || '',
-          extracted_text: item.extractedText || '',
-          detectedSources: item.detectedSources || [],
-          inTextCitations: item.inTextCitations || [],
-          detectedAuthors: item.detectedAuthors || [],
-          formattedSources: item.formattedSources || '',
-          warning: item.warning || '',
-        })),
-      ),
-    );
-
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      credentials: 'include',
-      cache: 'no-store',
-      headers: {
-        Accept:
-          'application/json, text/plain, text/event-stream',
-        'x-request-id': requestId,
-        'x-zedpera-error-delay-ms': '30000',
-      },
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const apiError = await readZedperaApiError(
-        res,
-        {
-          language,
-          endpoint: '/api/chat',
-          module: 'translation',
-          requestId,
-        },
-      );
-
-      showSystemError(apiError.descriptor);
-
-      if (apiError.status === 401) {
-        router.replace('/login?returnTo=/chat');
-      }
-
-      return;
-    }
-
-    const responseContentType =
-      res.headers.get('content-type') || '';
-    let translatedText = '';
-
-    if (
-      responseContentType.includes(
-        'application/json',
-      )
-    ) {
-      const data = await res.json();
-
-      if (hasAttachments) {
-        const processing =
-          data?.attachmentProcessing || {};
-        const receivedFiles = Number(
-          processing.receivedFiles || 0,
-        );
-        const successfullyReadFiles = Number(
-          processing.successfullyReadFiles || 0,
-        );
-
-        if (
-          successfullyReadFiles <= 0
-        ) {
-          throw new Error(
-            'Prekladač neprečítal ani jednu použiteľnú prílohu.',
-          );
-        }
-
-        if (
-          receivedFiles < attachedFiles.length ||
-          successfullyReadFiles < attachedFiles.length
-        ) {
-          console.warn(
-            'TRANSLATION_PARTIAL_ATTACHMENTS:',
-            {
-              receivedFiles,
-              successfullyReadFiles,
-              requestedFiles:
-                attachedFiles.length,
-            },
-          );
-        }
-      }
-
-      translatedText = String(
-        data.output ||
-          data.result ||
-          data.message ||
-          data.text ||
-          data.answer ||
-          '',
-      ).trim();
-    } else {
-      if (!res.body) {
-        throw new Error(
-          'Prekladač nevrátil použiteľnú odpoveď.',
-        );
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } =
-          await reader.read();
-
-        if (done) break;
-
-        translatedText += decoder.decode(
-          value,
-          { stream: true },
-        );
-      }
-    }
-
-    const streamedError =
-      readStreamedApiError(translatedText);
-
-    if (streamedError) {
-      showSystemError(
-        createZedperaError(
-          String(
-            streamedError.code ||
-              'API_UNAVAILABLE',
-          ),
-          {
-            endpoint: '/api/chat',
-            module: 'translation',
-            requestId:
-              streamedError.requestId ||
-              requestId,
-            serverMessage:
-              streamedError.message ||
-              streamedError.error,
-            serverDetail:
-              streamedError.detail,
-          },
-          { language },
-        ),
-      );
-      return;
-    }
-
-    const cleanedTranslatedText =
-      cleanAiOutput(translatedText);
-
-    if (!cleanedTranslatedText) {
-      throw new Error(
-        'Prekladač nevrátil žiadny preložený text.',
-      );
-    }
-
-    setResult(cleanedTranslatedText);
-    setCanvasText(cleanedTranslatedText);
-
-    if (popupData) {
-      setPopupData(
-        parseSections(cleanedTranslatedText),
-      );
-    }
-  } catch (error) {
-    console.error(
-      'LANGUAGE_TRANSLATION_ERROR:',
-      error,
-    );
-
-    showSystemError(
-      createZedperaErrorFromUnknown(
-        error,
-        {
-          language,
-          endpoint: '/api/chat',
-          module: 'translation',
-        },
-      ),
-    );
-  } finally {
-    setIsLoading(false);
-  }
+  window.dispatchEvent(new CustomEvent('zedpera-profile-change'));
 };
 
   const updateProcessingLog = (id: string, patch: Partial<ProcessingLogItem>) => {
@@ -3464,10 +3296,9 @@ const handleSelectLanguage = async (nextLanguage: AppLanguage) => {
           compressed: false,
         });
       } catch (apiError) {
-        const localText =
-          await readLocalTextFallback(
-            item.file,
-          );
+        const localText = cleanExtractedAcademicText(
+          await readLocalTextFallback(item.file),
+        );
 
         if (!localText) throw apiError;
 
@@ -4217,18 +4048,18 @@ formData.append('profile', JSON.stringify(profileForApi || null));
           ? 'uploaded_documents_first'
           : 'verified_web_sources',
       );
-      formData.append('validateAttachmentsAgainstProfile', 'true');
+      formData.append('validateAttachmentsAgainstProfile', 'false');
       formData.append('requireSourceList', 'true');
 
-      // Pri aktuálne nahratých dokumentoch je zdrojovým základom výhradne ich obsah.
-      // Tým sa zabráni tomu, aby sa ku konkrétnej prílohe primiešali zdroje z pamäte modelu
-      // alebo z externého vyhľadávania a tvárili sa ako zdroje dokumentu.
+      // Pri prílohách ostáva externé vyhľadávanie vypnuté, ale model smie
+      // vytvoriť opatrný všeobecný odborný rámec a prechodové vysvetlenia.
+      // Konkrétne fakty, čísla a citácie však musia zostať ukotvené v prílohách.
       const allowExternalSourcesForThisRequest =
         attachedFiles.length === 0;
 
       formData.append(
         'allowAiKnowledgeFallback',
-        allowExternalSourcesForThisRequest ? 'true' : 'false',
+        'true',
       );
       formData.append('returnExtractedFilesInfo', 'true');
       formData.append('isChapterRequest', isChapterRequest ? 'true' : 'false');
@@ -5413,6 +5244,8 @@ ZÁVÄZNÉ PRAVIDLÁ:
                         >
                           {isPendingAssistant ? (
                             <ThinkingRobot language={language} />
+                          ) : message.role === 'assistant' ? (
+                            <StructuredAcademicText text={message.content} />
                           ) : (
                             message.content
                           )}

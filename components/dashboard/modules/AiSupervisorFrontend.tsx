@@ -1076,15 +1076,15 @@ type ModuleUiTranslations = Record<ModuleKey, ModuleUiText>;
 const fixedModuleUiByLanguage: Record<LanguageCode, ModuleUiTranslations> = {
   sk: {
     supervisor: {
-      label: "AI Konzultant",
-      shortLabel: "AI Konzultant",
-      button: "Prepísať a upraviť do akademickej podoby",
-      inputLabel: "Text, poznámky alebo draft na odbornú úpravu",
+      label: "AI Školiteľ",
+      shortLabel: "AI Školiteľ",
+      button: "Zapracovať pripomienky do celej práce",
+      inputLabel: "Pôvodný text práce alebo kapitoly",
       placeholder:
-        "Vložte svoje poznámky, hrubý draft alebo kapitolu, ktorú chcete odborne upraviť a prepísať...",
+        "Vložte pôvodný text práce alebo kapitoly. Ak nahrávate celý dokument ako prílohu, toto pole môže zostať prázdne.",
       intro:
-        "AI redaktor prepíše, odborne preformuluje a naformátuje vašu prácu do čistej akademickej podoby na základe priložených zdrojov.",
-      resultTitle: "Hotový akademický text",
+        "AI školiteľ cielene zapracuje pripomienky do pôvodného dokumentu bez jeho skracovania na súhrn. Zachová štruktúru, terminológiu, citácie a nezmenené časti práce.",
+      resultTitle: "Kompletný revidovaný dokument",
     },
     quality: {
       label: "Audit kvality",
@@ -1705,16 +1705,16 @@ const SUPERVISOR_EDITOR_COPY: Record<LanguageCode, SupervisorEditorCopy> = {
     feedbackPlaceholder:
       "Voliteľne vložte pripomienky školiteľa, oponenta alebo konzultanta. Napríklad: Rozšír metodiku, doplň logické prechody a presnejšie formuluj cieľ práce.",
     feedbackHelp:
-      "Pripomienky sa nezobrazia ako posudok. AI Konzultant ich priamo zapracuje do výsledného textu.",
-    optionalLabel: "Voliteľné",
-    workflowEyebrow: "Editor Mode",
-    workflowTitle: "Od draftu k hotovému akademickému textu",
+      "Pripomienky môžete vložiť ako text alebo nahrať ako samostatný PDF/DOCX súbor. AI ich zapracuje priamo do príslušných miest práce.",
+    optionalLabel: "Text alebo dokument",
+    workflowEyebrow: "Revision Mode",
+    workflowTitle: "Kompletná revízia práce podľa pripomienok",
     workflowDescription:
-      "AI Konzultant nehodnotí text bodmi. Vstup odborne prepíše, zapracuje pripomienky a vráti hotovú verziu pripravenú na ďalšiu prácu.",
+      "AI školiteľ nesumarizuje prácu. Zachová pôvodnú štruktúru a obsah, upraví iba relevantné miesta a vytvorí aj samostatný protokol vykonaných zmien.",
     workflowSteps: [
-      "Vložiť draft alebo poznámky",
-      "Pridať pripomienky školiteľa",
-      "Získať hotový akademický text",
+      "Vložiť alebo nahrať pôvodnú prácu",
+      "Pridať text alebo dokument s pripomienkami",
+      "Získať revidovanú prácu aj protokol zmien",
     ],
   },
   cs: {
@@ -4130,7 +4130,10 @@ export default function AiSupervisorFrontend(
   const [isLoading, setIsLoading] = useState(false);
 
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [supervisorFeedbackFiles, setSupervisorFeedbackFiles] = useState<AttachedFile[]>([]);
   const [activeAttachmentText, setActiveAttachmentText] = useState("");
+  const [supervisorChangeLog, setSupervisorChangeLog] = useState("");
+  const [supervisorCanvasMode, setSupervisorCanvasMode] = useState<"document" | "changes">("document");
 
   /**
    * AI Konzultant, Audit kvality a Obhajoba majú vlastné frontendové komponenty.
@@ -4677,6 +4680,7 @@ export default function AiSupervisorFrontend(
   const [emailTone, setEmailTone] = useState<EmailTone>("professional");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const supervisorFeedbackFileInputRef = useRef<HTMLInputElement | null>(null);
   const resultRef = useRef<HTMLDivElement | null>(null);
   const mobileToolPanelRef = useRef<HTMLDivElement | null>(null);
 
@@ -4789,7 +4793,9 @@ export default function AiSupervisorFrontend(
    * - stránkové a promptové limity,
    * - volanie /api/chat cez runModule().
    */
-  const visibleAttachmentCount = attachedFiles.length;
+  const visibleAttachmentCount =
+    attachedFiles.length +
+    (activeModule === "supervisor" ? supervisorFeedbackFiles.length : 0);
 
   const activeModuleLabel = fixedUi.label;
 
@@ -4988,6 +4994,9 @@ export default function AiSupervisorFrontend(
     setResult("");
     setCanvasText("");
     setAttachedFiles([]);
+    setSupervisorFeedbackFiles([]);
+    setSupervisorChangeLog("");
+    setSupervisorCanvasMode("document");
     setActiveAttachmentText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
@@ -5135,6 +5144,9 @@ export default function AiSupervisorFrontend(
     setSecondaryInput("");
     setResult("");
     setAttachedFiles([]);
+    setSupervisorFeedbackFiles([]);
+    setSupervisorChangeLog("");
+    setSupervisorCanvasMode("document");
     setActiveAttachmentText("");
     setCanvasText("");
     setAnalysisResult(null);
@@ -5142,6 +5154,10 @@ export default function AiSupervisorFrontend(
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
+    }
+
+    if (supervisorFeedbackFileInputRef.current) {
+      supervisorFeedbackFileInputRef.current.value = "";
     }
   }, [activeModule]);
 
@@ -5244,7 +5260,9 @@ export default function AiSupervisorFrontend(
     const uploadLimit =
       requestedModule === "data"
         ? maxDataFilesPerRequest
-        : effectiveAttachmentLimit;
+        : requestedModule === "supervisor"
+          ? Math.max(0, effectiveAttachmentLimit - supervisorFeedbackFiles.length)
+          : effectiveAttachmentLimit;
 
     const nextFiles =
       requestedModule === "data"
@@ -5305,6 +5323,84 @@ export default function AiSupervisorFrontend(
     }
   };
 
+  const handleSupervisorFeedbackFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    const incomingFiles = Array.from(files);
+    const validFiles: AttachedFile[] = [];
+
+    for (const file of incomingFiles) {
+      if (!isAllowedUploadFile(file)) {
+        alert(`Súbor "${file.name}" má nepodporovaný formát.`);
+        continue;
+      }
+
+      if (file.size > maxFileSizeBytes) {
+        alert(`Súbor "${file.name}" je príliš veľký. Maximum je ${maxFileSizeMb} MB.`);
+        continue;
+      }
+
+      const clientText = await readClientTextFallback(file);
+      validFiles.push({
+        id: createFileId(),
+        name: file.name,
+        size: file.size,
+        type: file.type || "application/octet-stream",
+        file,
+        text: clientText || undefined,
+        extractionStatus: clientText ? "client" : "pending",
+        extractedChars: clientText.length,
+        extractionMessage: clientText
+          ? "Text pripomienok bol načítaný v prehliadači."
+          : "Obsah pripomienok sa načíta na serveri.",
+      });
+    }
+
+    const totalLimit = effectiveAttachmentLimit;
+    const nextFiles = [...supervisorFeedbackFiles];
+    let limitReached = false;
+
+    for (const file of validFiles) {
+      if (attachedFiles.length + nextFiles.length >= totalLimit) {
+        limitReached = true;
+        break;
+      }
+
+      const duplicate = nextFiles.some(
+        (item) =>
+          item.name === file.name &&
+          item.size === file.size &&
+          item.type === file.type,
+      );
+
+      if (!duplicate) nextFiles.push(file);
+    }
+
+    setSupervisorFeedbackFiles(nextFiles);
+
+    if (limitReached) {
+      setBillingNotice({
+        code: hasUnlimitedAccess
+          ? "ATTACHMENT_REQUEST_SAFETY_LIMIT_REACHED"
+          : "ATTACHMENT_LIMIT_REACHED",
+        message: hasUnlimitedAccess
+          ? `V jednej požiadavke je možné technicky spracovať maximálne ${totalLimit} príloh.`
+          : `Váš balík povoľuje maximálne ${totalLimit} príloh spolu pre prácu aj pripomienky.`,
+        purchaseUrl: hasUnlimitedAccess ? "/dashboard" : "/pricing",
+      });
+    }
+
+    if (supervisorFeedbackFileInputRef.current) {
+      supervisorFeedbackFileInputRef.current.value = "";
+    }
+  };
+
+  const removeSupervisorFeedbackFile = (id: string) => {
+    setSupervisorFeedbackFiles((previousFiles) =>
+      previousFiles.filter((file) => file.id !== id),
+    );
+  };
+
   const removeFile = (id: string) => {
     setAttachedFiles((previousFiles) =>
       previousFiles.filter(
@@ -5330,9 +5426,17 @@ export default function AiSupervisorFrontend(
     setResult("");
     setCanvasText("");
     setAttachedFiles([]);
+    setSupervisorFeedbackFiles([]);
+    setSupervisorChangeLog("");
+    setSupervisorCanvasMode("document");
     setActiveAttachmentText("");
     setAnalysisResult(null);
     setAnalysisModalOpen(false);
+
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (supervisorFeedbackFileInputRef.current) {
+      supervisorFeedbackFileInputRef.current.value = "";
+    }
   };
 
   useEffect(() => {
@@ -5552,7 +5656,7 @@ AI Konzultant – výkonný akademický editor a redaktor.
 TOTO NIE JE AUDIT, POSUDOK ANI HODNOTIACI MODUL.
 
 HLAVNÁ ÚLOHA:
-Priamo prepíš, odborne preformuluj a naformátuj vstup do hotovej akademickej podoby pripravenej na kopírovanie do práce.
+Cielene zapracuj pripomienky do pôvodnej práce. Zachovaj kompletný obsah, pôvodnú štruktúru, terminológiu, citácie, tabuľky a nezmenené pasáže; nevytváraj skrátený súhrn.
 
 PÔVODNÝ TEXT, DRAFT ALEBO POZNÁMKY:
 ${input || "Použi relevantný text z priložených dokumentov, ak je dostupný."}
@@ -5570,9 +5674,10 @@ ZÁVÄZNÉ PRAVIDLÁ EDITORA:
 7. Chýbajúce prechody, ciele, výskumné otázky alebo hypotézy formuluj iba vtedy, keď ich možno bezpečne odvodiť z dodaného zadania, cieľa, metodológie, dát alebo pripomienok. Inak nič nevymýšľaj.
 8. Existujúce citácie zachovaj, ak sú zrozumiteľné a patria k danému tvrdeniu. Nevymýšľaj autorov, roky, DOI, URL ani bibliografické údaje.
 9. Relevantné prílohy používaj ako faktický podklad. Nerelevantné údaje do textu neprenášaj.
-10. Nevytváraj samostatný zoznam odporúčaní, skóre, audit, technický report o prílohách ani komentár k tomu, čo si zmenil.
-11. Výstup musí byť iba finálny upravený akademický text. Môže používať prirodzené názvy kapitol a podkapitol, ale bez úvodu typu „Tu je upravený text“ a bez hodnotenia.
-12. Rešpektuj jazyk práce ${workLanguage} a citačnú normu ${citationStyle}.
+10. Nevytváraj skóre, audit ani všeobecný zoznam odporúčaní.
+11. Hlavný výstup je kompletný revidovaný dokument; druhý výstup je samostatný protokol iba skutočne vykonaných zmien a dôvodov.
+12. Neskracuj prácu na súhrn. Každú nezmenenú časť zachovaj a upravuj iba to, čo vyžadujú pripomienky alebo akademická konzistentnosť.
+13. Rešpektuj jazyk práce ${workLanguage} a citačnú normu ${citationStyle}.
 `.trim();
     }
 
@@ -5952,6 +6057,11 @@ Text emailu:
 
     setBillingNotice(null);
 
+    if (requestedModule === "supervisor") {
+      setSupervisorChangeLog("");
+      setSupervisorCanvasMode("document");
+    }
+
     let currentEntitlements = entitlements;
     let currentPageQuota = pageQuota;
 
@@ -6022,7 +6132,9 @@ Text emailu:
       !currentEntitlements.hasUnlimitedAccess &&
       !currentEntitlements.isAdmin &&
       currentEntitlements.attachmentLimit !== null &&
-      attachedFiles.length > currentEntitlements.attachmentLimit
+      attachedFiles.length +
+        (requestedModule === "supervisor" ? supervisorFeedbackFiles.length : 0) >
+        currentEntitlements.attachmentLimit
     ) {
       setBillingNotice({
         code: "ATTACHMENT_LIMIT_REACHED",
@@ -6036,7 +6148,8 @@ Text emailu:
     if (
       currentHasUnlimitedAccess &&
       requestedModule !== "data" &&
-      attachedFiles.length >
+      attachedFiles.length +
+        (requestedModule === "supervisor" ? supervisorFeedbackFiles.length : 0) >
         maxUnlimitedFilesPerRequest
     ) {
       setBillingNotice({
@@ -6074,7 +6187,11 @@ Text emailu:
     );
 
     const hasAnyInput = Boolean(
-      userText || secondaryText || attachedFiles.length > 0 || hasUsableProfile,
+      userText ||
+        secondaryText ||
+        attachedFiles.length > 0 ||
+        supervisorFeedbackFiles.length > 0 ||
+        hasUsableProfile,
     );
 
     if (!hasAnyInput) {
@@ -6760,11 +6877,11 @@ Text emailu:
       if (requestedModule === "supervisor") {
         formData.append("studentText", userText);
         formData.append("supervisorFeedback", secondaryText);
-        formData.append("editorMode", "rewrite-transform");
-        formData.append("responseShape", "rewrittenText");
+        formData.append("editorMode", "feedback-revision");
+        formData.append("responseShape", "revisedDocument+changeLog");
         formData.append(
           "instruction",
-          "Prepíš vstup do hotového akademického textu a pripomienky zapracuj priamo. Nevracaj audit, skóre ani zoznam odporúčaní.",
+          "Zapracuj pripomienky do kompletnej práce bez sumarizácie. Vráť samostatne celý revidovaný dokument a protokol vykonaných zmien.",
         );
       }
 
@@ -6775,6 +6892,13 @@ Text emailu:
         "attachmentsContext",
         buildAttachmentBlock(attachedFiles),
       );
+
+      if (requestedModule === "supervisor") {
+        formData.append(
+          "feedbackAttachmentsContext",
+          buildAttachmentBlock(supervisorFeedbackFiles),
+        );
+      }
 
       const preparedFilesMetadata =
         buildPreparedFilesMetadata(
@@ -6811,6 +6935,26 @@ Text emailu:
         formData.append(
           "extractedText",
           clientExtractedText,
+        );
+      }
+
+      const clientFeedbackExtractedText =
+        requestedModule === "supervisor"
+          ? supervisorFeedbackFiles
+              .map((file) => String(file.text || file.content || "").trim())
+              .filter(Boolean)
+              .join("\n\n-----------------\n\n")
+              .slice(0, 100_000)
+          : "";
+
+      if (clientFeedbackExtractedText) {
+        formData.append(
+          "clientFeedbackExtractedText",
+          clientFeedbackExtractedText,
+        );
+        formData.append(
+          "feedbackExtractedText",
+          clientFeedbackExtractedText,
         );
       }
 
@@ -6877,12 +7021,24 @@ Text emailu:
       formData.append(
         "filesMetadata",
         JSON.stringify(
-          attachedFiles.map((item) => ({
-            name: item.name,
-            size: item.size,
-            type: item.type,
-            extension: getFileExtension(item.name),
-          })),
+          [
+            ...attachedFiles.map((item) => ({
+              name: item.name,
+              size: item.size,
+              type: item.type,
+              extension: getFileExtension(item.name),
+              role: requestedModule === "supervisor" ? "source" : "attachment",
+            })),
+            ...(requestedModule === "supervisor"
+              ? supervisorFeedbackFiles.map((item) => ({
+                  name: item.name,
+                  size: item.size,
+                  type: item.type,
+                  extension: getFileExtension(item.name),
+                  role: "feedback",
+                }))
+              : []),
+          ],
         ),
       );
 
@@ -6901,11 +7057,23 @@ Text emailu:
          * Claude, OpenAI, Gemini, Mistral aj Grok cez rovnakú extrakciu.
          */
         formData.append(
-          "files",
+          requestedModule === "supervisor" ? "sourceFiles" : "files",
           item.file,
           item.name || item.file.name,
         );
       });
+
+      if (requestedModule === "supervisor") {
+        supervisorFeedbackFiles.forEach((item) => {
+          if (!isBrowserFileLike(item.file)) return;
+
+          formData.append(
+            "feedbackFiles",
+            item.file,
+            item.name || item.file.name,
+          );
+        });
+      }
 
       const directApi = DIRECT_MODULE_API[requestedModule];
 
@@ -6926,15 +7094,15 @@ Text emailu:
         prompt,
         instruction:
           requestedModule === "supervisor"
-            ? "rewrite-transform"
+            ? "feedback-revision"
             : prompt,
         editorMode:
           requestedModule === "supervisor"
-            ? "rewrite-transform"
+            ? "feedback-revision"
             : undefined,
         responseShape:
           requestedModule === "supervisor"
-            ? "rewrittenText"
+            ? "revisedDocument+changeLog"
             : undefined,
         input: userText,
         studentText: requestedModule === "supervisor" ? userText : undefined,
@@ -7071,7 +7239,7 @@ Text emailu:
             : null;
 
         if (
-          attachedFiles.length > 0 &&
+          (attachedFiles.length > 0 || supervisorFeedbackFiles.length > 0) &&
           attachmentProcessing &&
           isCurrentModuleRun()
         ) {
@@ -7109,6 +7277,7 @@ Text emailu:
           }
 
           if (
+            requestedModule !== "supervisor" &&
             successfullyReadFiles <= 0 &&
             !clientExtractedText
           ) {
@@ -7123,26 +7292,27 @@ Text emailu:
             });
           }
 
-          setAttachedFiles(
-            (currentFiles) =>
-              currentFiles.map(
-                (file) => ({
-                  ...file,
-                  extractionStatus:
-                    successfullyReadFiles > 0
-                      ? "server"
-                      : file.extractionStatus,
-                  extractedChars:
-                    extractedCharacters > 0
-                      ? extractedCharacters
-                      : file.extractedChars,
-                  extractionMessage:
-                    successfullyReadFiles > 0
-                      ? "Obsah prílohy bol načítaný na serveri a vložený do AI kontextu."
-                      : file.extractionMessage,
-                }),
-              ),
-          );
+          const markFilesAsRead = (currentFiles: AttachedFile[]) =>
+            currentFiles.map((file) => ({
+              ...file,
+              extractionStatus:
+                successfullyReadFiles > 0
+                  ? ("server" as const)
+                  : file.extractionStatus,
+              extractedChars:
+                extractedCharacters > 0
+                  ? extractedCharacters
+                  : file.extractedChars,
+              extractionMessage:
+                successfullyReadFiles > 0
+                  ? "Obsah prílohy bol načítaný na serveri a vložený do AI kontextu."
+                  : file.extractionMessage,
+            }));
+
+          setAttachedFiles(markFilesAsRead);
+          if (requestedModule === "supervisor") {
+            setSupervisorFeedbackFiles(markFilesAsRead);
+          }
 
           setActiveAttachmentText(
             clientExtractedText ||
@@ -7150,7 +7320,15 @@ Text emailu:
           );
         }
 
+        if (requestedModule === "supervisor") {
+          setSupervisorChangeLog(
+            cleanFinalOutput(String(data.changeLog || data.changeProtocol || "")),
+          );
+          setSupervisorCanvasMode("document");
+        }
+
         fullText =
+          data.revisedDocument ||
           data.rewrittenText ||
           data.output ||
           data.result ||
@@ -7226,6 +7404,9 @@ Text emailu:
 
       setResult(cleaned);
       setCanvasText(cleaned);
+      if (requestedModule === "supervisor") {
+        setSupervisorCanvasMode("document");
+      }
       setCanvasOpen(true);
 
       try {
@@ -7473,8 +7654,16 @@ Text emailu:
     [router],
   );
 
+  const getCurrentExportText = () => {
+    if (activeModule === "supervisor" && supervisorCanvasMode === "changes") {
+      return supervisorChangeLog;
+    }
+
+    return stripModuleExtraSections(canvasText || result, activeModule);
+  };
+
   const downloadPdf = () => {
-    const text = stripModuleExtraSections(canvasText || result, activeModule);
+    const text = getCurrentExportText();
 
     if (!text.trim()) {
       alert("Najprv vygenerujte výstup, až potom je možné vytvoriť PDF.");
@@ -7484,7 +7673,9 @@ Text emailu:
     const title =
       activeModule === "defense"
         ? "Prezentácia, sprievodný text a obhajoba"
-        : exportTitle || "ZEDPERA výstup";
+        : activeModule === "supervisor" && supervisorCanvasMode === "changes"
+          ? `${exportTitle || "ZEDPERA"} - protokol zmien`
+          : exportTitle || "ZEDPERA výstup";
 
     const html = createDocHtml(title, text);
 
@@ -7508,12 +7699,16 @@ Text emailu:
   };
 
   const downloadDoc = () => {
-    const text = stripModuleExtraSections(canvasText || result, activeModule);
+    const text = getCurrentExportText();
 
     if (!text.trim()) return;
 
-    const fileBase = sanitizeFileName(exportTitle);
-    const html = createDocHtml(exportTitle, text);
+    const exportName =
+      activeModule === "supervisor" && supervisorCanvasMode === "changes"
+        ? `${exportTitle} - protokol zmien`
+        : exportTitle;
+    const fileBase = sanitizeFileName(exportName);
+    const html = createDocHtml(exportName, text);
 
     downloadBlob({
       content: html,
@@ -8743,9 +8938,14 @@ Text emailu:
               onRemove={removeFile}
               limit={activeUploadLimit}
               unlimited={hasUnlimitedAccess}
-              dataMode={
-                activeModule === "data"
+              dataMode={activeModule === "data"}
+              title={activeModule === "supervisor" ? "Pôvodná práca / kapitola" : "Prílohy"}
+              description={
+                activeModule === "supervisor"
+                  ? "Nahrajte pôvodný dokument, ktorý má AI školiteľ kompletne revidovať. PDF a DOCX sa načítajú na serveri."
+                  : undefined
               }
+              buttonLabel={activeModule === "supervisor" ? "Priložiť pôvodnú prácu" : undefined}
               disabled={
                 (billingLoading && !isAdminDashboardSession) ||
                 !activeModuleAllowed ||
@@ -8758,7 +8958,8 @@ Text emailu:
                     !hasUnlimitedAccess &&
                     pageQuota.pageLimitReached,
                 ) ||
-                attachedFiles.length >=
+                attachedFiles.length +
+                  (activeModule === "supervisor" ? supervisorFeedbackFiles.length : 0) >=
                   activeUploadLimit
               }
             />
@@ -8810,7 +9011,27 @@ Text emailu:
             ) : null}
 
             {activeModule === "supervisor" ? (
-              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+              <div className="mt-4 space-y-4">
+                <section className="rounded-[28px] border border-cyan-300/20 bg-gradient-to-br from-cyan-500/[0.08] via-blue-500/[0.05] to-violet-500/10 p-5 shadow-2xl shadow-cyan-950/20">
+                  <label
+                    htmlFor={dashboardInputId}
+                    className="mb-2 block text-sm font-black text-white"
+                  >
+                    {activeModuleInputLabel}
+                  </label>
+                  <textarea
+                    id={dashboardInputId}
+                    value={input}
+                    onChange={(event) => setInput(event.target.value)}
+                    placeholder={activeModulePlaceholder}
+                    className="min-h-[220px] w-full resize-y rounded-2xl border border-white/10 bg-[#050916] px-4 py-4 text-sm font-semibold leading-6 text-white placeholder:text-slate-500 outline-none transition focus:border-cyan-400/60 focus:ring-4 focus:ring-cyan-500/10"
+                  />
+                  <p className="mt-3 text-xs font-semibold leading-5 text-slate-400">
+                    Môžete vložiť kapitolu priamo sem alebo nahrať celý pôvodný dokument vyššie. AI školiteľ nesmie dokument nahradiť skráteným súhrnom.
+                  </p>
+                </section>
+
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
                 <section className="rounded-[28px] border border-violet-300/20 bg-gradient-to-br from-violet-500/10 via-purple-500/[0.06] to-fuchsia-500/10 p-5 shadow-2xl shadow-violet-950/20">
                   <div className="mb-3 flex flex-wrap items-center gap-2">
                     <span className="text-sm font-black text-white">
@@ -8832,6 +9053,25 @@ Text emailu:
                   <p className="mt-3 text-xs font-semibold leading-5 text-slate-400">
                     {supervisorEditorCopy.feedbackHelp}
                   </p>
+
+                  <div className="mt-4">
+                    <FileUploadBox
+                      files={supervisorFeedbackFiles}
+                      fileInputRef={supervisorFeedbackFileInputRef}
+                      onFiles={handleSupervisorFeedbackFiles}
+                      onRemove={removeSupervisorFeedbackFile}
+                      limit={activeUploadLimit}
+                      unlimited={hasUnlimitedAccess}
+                      dataMode={false}
+                      disabled={
+                        generationBlocked ||
+                        attachedFiles.length + supervisorFeedbackFiles.length >= activeUploadLimit
+                      }
+                      title="Pripomienky v dokumente"
+                      description="Voliteľne nahrajte PDF/DOCX/TXT s pripomienkami školiteľa, oponenta alebo konzultanta."
+                      buttonLabel="Priložiť pripomienky"
+                    />
+                  </div>
                 </section>
 
                 <aside className="rounded-[28px] border border-cyan-300/15 bg-gradient-to-br from-cyan-500/[0.08] via-blue-500/[0.05] to-violet-500/10 p-5 shadow-2xl shadow-cyan-950/20">
@@ -8861,6 +9101,7 @@ Text emailu:
                     ))}
                   </ol>
                 </aside>
+                </div>
               </div>
             ) : null}
 
@@ -9185,12 +9426,29 @@ uroven_sportu`}
 
             <button
               type="button"
-              onClick={() => setCanvasOpen(true)}
+              onClick={() => {
+                if (activeModule === "supervisor") setSupervisorCanvasMode("document");
+                setCanvasOpen(true);
+              }}
               className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-slate-300 transition hover:bg-white/[0.1] sm:mr-3 sm:w-auto"
             >
               <Paintbrush className="h-4 w-4" />
-              Canvas
+              {activeModule === "supervisor" ? "Revidovaný dokument" : "Canvas"}
             </button>
+
+            {activeModule === "supervisor" && supervisorChangeLog ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSupervisorCanvasMode("changes");
+                  setCanvasOpen(true);
+                }}
+                className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 text-sm font-black text-cyan-100 transition hover:bg-cyan-500/20 sm:mr-3 sm:w-auto"
+              >
+                <FileText className="h-4 w-4" />
+                Protokol zmien
+              </button>
+            ) : null}
 
             {(result || canvasText) && (
               <>
@@ -9243,14 +9501,50 @@ uroven_sportu`}
             <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
               <div>
                 <h2 className="text-lg font-black text-white">
-                  {activeModule === "supervisor" ? "Akademický editor" : "Canvas"}
+                  {activeModule === "supervisor"
+                    ? supervisorCanvasMode === "changes"
+                      ? "Protokol vykonaných zmien"
+                      : "Kompletný revidovaný dokument"
+                    : "Canvas"}
                 </h2>
                 <p className="text-sm font-semibold text-slate-400">
                   {activeModule === "supervisor"
-                    ? "Hotový text môžete ešte doladiť, skopírovať alebo exportovať."
+                    ? supervisorCanvasMode === "changes"
+                      ? "Bod po bode: čo bolo v dokumente upravené a prečo."
+                      : "Celý dokument po zapracovaní pripomienok, bez sumarizácie pôvodnej práce."
                     : "Upravte alebo skopírujte výsledný text."}
                 </p>
               </div>
+
+              {activeModule === "supervisor" ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSupervisorCanvasMode("document")}
+                    className={[
+                      "rounded-xl px-3 py-2 text-xs font-black transition",
+                      supervisorCanvasMode === "document"
+                        ? "bg-violet-600 text-white"
+                        : "border border-white/10 bg-white/[0.06] text-slate-300",
+                    ].join(" ")}
+                  >
+                    Dokument
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSupervisorCanvasMode("changes")}
+                    disabled={!supervisorChangeLog}
+                    className={[
+                      "rounded-xl px-3 py-2 text-xs font-black transition disabled:opacity-40",
+                      supervisorCanvasMode === "changes"
+                        ? "bg-cyan-600 text-white"
+                        : "border border-white/10 bg-white/[0.06] text-slate-300",
+                    ].join(" ")}
+                  >
+                    Protokol zmien
+                  </button>
+                </div>
+              ) : null}
 
               <button
                 type="button"
@@ -9263,8 +9557,18 @@ uroven_sportu`}
             </div>
 
             <textarea
-              value={canvasText}
-              onChange={(event) => setCanvasText(event.target.value)}
+              value={
+                activeModule === "supervisor" && supervisorCanvasMode === "changes"
+                  ? supervisorChangeLog
+                  : canvasText
+              }
+              onChange={(event) => {
+                if (activeModule === "supervisor" && supervisorCanvasMode === "changes") {
+                  setSupervisorChangeLog(event.target.value);
+                } else {
+                  setCanvasText(event.target.value);
+                }
+              }}
               className="min-h-0 flex-1 resize-none border-0 bg-[#050814] p-6 text-sm font-semibold leading-7 text-white outline-none"
             />
 
@@ -9272,7 +9576,11 @@ uroven_sportu`}
               <button
                 type="button"
                 onClick={() => {
-                  navigator.clipboard.writeText(canvasText || "");
+                  navigator.clipboard.writeText(
+                    activeModule === "supervisor" && supervisorCanvasMode === "changes"
+                      ? supervisorChangeLog
+                      : canvasText || "",
+                  );
                 }}
                 className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-white transition hover:bg-white/[0.12]"
               >
@@ -9364,6 +9672,9 @@ function FileUploadBox({
   onRemove,
   dataMode,
   disabled,
+  title,
+  description,
+  buttonLabel,
 }: {
   files: AttachedFile[];
   fileInputRef: RefObject<HTMLInputElement | null>;
@@ -9373,6 +9684,9 @@ function FileUploadBox({
   unlimited: boolean;
   dataMode: boolean;
   disabled: boolean;
+  title?: string;
+  description?: string;
+  buttonLabel?: string;
 }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -9390,13 +9704,14 @@ function FileUploadBox({
         <div>
           <div className="flex items-center gap-2 text-sm font-black text-slate-200">
             <UploadCloud className="h-4 w-4 text-violet-300" />
-            Prílohy
+            {title || "Prílohy"}
           </div>
 
           <p className="mt-1 text-xs font-semibold leading-relaxed text-slate-400">
-            {dataMode
-              ? "Načítavané súbory: XLSX, XLS, XLSM a CSV."
-              : "Načítavané súbory: PDF, DOCX, TXT, RTF, ODT, JPG, JPEG, PNG, WEBP, GIF, XLS, XLSX, CSV, PPT a PPTX."}
+            {description ||
+              (dataMode
+                ? "Načítavané súbory: XLSX, XLS, XLSM a CSV."
+                : "Načítavané súbory: PDF, DOCX, TXT, RTF, ODT, JPG, JPEG, PNG, WEBP, GIF, XLS, XLSX, CSV, PPT a PPTX.")}
           </p>
 
           <p className="mt-1 text-xs font-black text-violet-200">
@@ -9411,7 +9726,7 @@ function FileUploadBox({
           className="inline-flex items-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 text-sm font-black text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Paperclip className="h-4 w-4" />
-          Priložiť súbor
+          {buttonLabel || "Priložiť súbor"}
         </button>
       </div>
 

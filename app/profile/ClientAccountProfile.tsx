@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
@@ -122,6 +123,18 @@ const PROFILE_ENDPOINTS = [
 const PAGE_USAGE_ENDPOINT = "/api/usage/pages";
 const ENTITLEMENTS_ENDPOINT = "/api/entitlements/me";
 
+/**
+ * Limity bezplatného balíka.
+ *
+ * Dôležité:
+ * - upravujú iba Free účet,
+ * - platené balíky naďalej používajú hodnoty zo servera,
+ * - administrátor / interný účet zostáva neobmedzený.
+ */
+const FREE_PAGE_LIMIT = 3;
+const FREE_PROMPT_LIMIT = 3;
+const FREE_ATTACHMENT_LIMIT = 3;
+
 const FEATURE_LABELS: Record<string, string> = {
   "ai-supervisor": "AI školiteľ",
   "chapter-generation": "Tvorba kapitol",
@@ -234,6 +247,109 @@ function pickRecord(data: unknown): JsonRecord {
   return data;
 }
 
+/**
+ * Administrátorský stav sa nikdy neurčuje podľa e-mailu, mena ani localStorage.
+ *
+ * Ak frontend potrebuje zobraziť administrátorský profil, musí dostať
+ * dôveryhodný serverový signál:
+ * - isAdmin / is_admin,
+ * - serverovú rolu admin,
+ * - plan_id = admin,
+ * - alebo Supabase app_metadata nastavené serverom.
+ */
+function hasServerAdminMarker(data: JsonRecord): boolean {
+  const appMetadata = isRecord(data.app_metadata)
+    ? data.app_metadata
+    : isRecord(data.appMetadata)
+      ? data.appMetadata
+      : {};
+
+  return (
+    asBoolean(
+      data.isAdmin ??
+        data.is_admin ??
+        data.adminAccess ??
+        data.admin_access ??
+        appMetadata.isAdmin ??
+        appMetadata.is_admin ??
+        false,
+    ) ||
+    isAdminPlanValue(
+      data.role,
+      data.userRole,
+      data.user_role,
+      data.accountRole,
+      data.account_role,
+      data.accessLevel,
+      data.access_level,
+      data.plan,
+      data.planId,
+      data.plan_id,
+      data.package,
+      data.packageName,
+      data.packageLabel,
+      appMetadata.role,
+      appMetadata.user_role,
+      appMetadata.account_role,
+      appMetadata.plan,
+      appMetadata.plan_id,
+      appMetadata.access_level,
+    )
+  );
+}
+
+type AuthIdentitySnapshot = {
+  userId: string;
+  email: string;
+  isAdmin: boolean;
+};
+
+/**
+ * app_metadata v Supabase používateľovi je serverom riadená metadata.
+ * Na rozdiel od user_metadata ju klient nemá používať ako ľubovoľne
+ * meniteľný profilový údaj. Slúži tu iba ako dodatočný serverový signál
+ * pre zobrazenie profilu; samotné API musí oprávnenia stále vynucovať.
+ */
+async function loadAuthenticatedIdentity(): Promise<AuthIdentitySnapshot | null> {
+  try {
+    const supabase = createSupabaseBrowserClient();
+    const { data, error } = await supabase.auth.getUser();
+
+    if (error || !data.user) {
+      return null;
+    }
+
+    const appMetadata = isRecord(data.user.app_metadata)
+      ? data.user.app_metadata
+      : {};
+
+    const isAdmin =
+      asBoolean(
+        appMetadata.isAdmin ??
+          appMetadata.is_admin ??
+          appMetadata.adminAccess ??
+          appMetadata.admin_access ??
+          false,
+      ) ||
+      isAdminPlanValue(
+        appMetadata.role,
+        appMetadata.user_role,
+        appMetadata.account_role,
+        appMetadata.access_level,
+        appMetadata.plan,
+        appMetadata.plan_id,
+      );
+
+    return {
+      userId: cleanText(data.user.id),
+      email: cleanText(data.user.email),
+      isAdmin,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function readFromLocalStorage(): Partial<ClientProfile> {
   if (typeof window === "undefined") return {};
 
@@ -272,14 +388,17 @@ function normalizeClientProfile(
   const data = pickRecord(profileData);
   const local = readFromLocalStorage();
 
-  const plan =
+  // Serverové údaje majú prednosť. LocalStorage je iba zobrazovací fallback
+  // a nikdy sa z neho neurčuje administrátorské oprávnenie.
+  const serverPlan =
     cleanText(data.plan) ||
     cleanText(data.user_plan) ||
     cleanText(data.package) ||
     cleanText(data.packageName) ||
     cleanText(data.selectedPlan) ||
-    cleanText(local.plan) ||
-    "free";
+    cleanText(data.selected_plan);
+
+  const plan = serverPlan || cleanText(local.plan) || "free";
 
   const selectedPlan =
     cleanText(data.selectedPlan) ||
@@ -322,6 +441,98 @@ function normalizeClientProfile(
     ...asArray(data.modules),
   ];
 
+  const profileIsAdmin =
+    hasServerAdminMarker(data) ||
+    isAdminPlanValue(
+      serverPlan,
+      data.role,
+      data.userRole,
+      data.user_role,
+      data.accountRole,
+      data.account_role,
+      data.package,
+      data.packageName,
+      data.packageLabel,
+      data.planLabel,
+    );
+
+  const profileIsFree =
+    !profileIsAdmin &&
+    isFreePlanValue(
+      plan,
+      selectedPlan,
+      data.package,
+      data.packageName,
+      data.packageLabel,
+      data.planLabel,
+    );
+
+  const effectivePlan = profileIsAdmin ? "admin" : profileIsFree ? "free" : plan;
+  const effectiveSelectedPlan = profileIsAdmin
+    ? "admin"
+    : profileIsFree
+      ? "free"
+      : selectedPlan;
+
+  const profileHasUnlimitedAccess =
+    profileIsAdmin ||
+    (!profileIsFree &&
+      asBoolean(
+        data.hasUnlimitedAccess ??
+          data.has_unlimited_access ??
+          data.isUnlimited ??
+          data.is_unlimited ??
+          false,
+      ));
+
+  const rawBasePageLimit =
+    asNumber(data.basePageLimit) ?? asNumber(data.base_page_limit);
+
+  const rawExtraPageLimit =
+    asNumber(data.extraPageLimit) ??
+    asNumber(data.extra_page_limit) ??
+    asNumber(data.extraPages) ??
+    asNumber(data.extra_pages);
+
+  const rawPageLimit =
+    asNumber(data.pageLimit) ??
+    asNumber(data.page_limit) ??
+    asNumber(data.totalPages) ??
+    asNumber(data.total_pages);
+
+  const normalizedBasePageLimit = profileHasUnlimitedAccess
+    ? null
+    : profileIsFree
+      ? FREE_PAGE_LIMIT
+      : rawBasePageLimit;
+
+  const normalizedExtraPageLimit = profileHasUnlimitedAccess
+    ? null
+    : (rawExtraPageLimit ?? 0);
+
+  const normalizedPageLimit = profileHasUnlimitedAccess
+    ? null
+    : profileIsFree
+      ? FREE_PAGE_LIMIT + (normalizedExtraPageLimit ?? 0)
+      : rawPageLimit;
+
+  const normalizedPagesUsed = profileHasUnlimitedAccess
+    ? null
+    : (asNumber(data.pagesUsed) ??
+      asNumber(data.pages_used) ??
+      asNumber(data.usedPages) ??
+      asNumber(data.used_pages));
+
+  const normalizedPagesRemaining = profileHasUnlimitedAccess
+    ? null
+    : (asNumber(data.pagesRemaining) ??
+      asNumber(data.pages_remaining) ??
+      asNumber(data.remainingPages) ??
+      asNumber(data.remaining_pages) ??
+      (normalizedPageLimit !== null
+        ? Math.max(normalizedPageLimit - (normalizedPagesUsed ?? 0), 0)
+        : null));
+
   return {
     id:
       cleanText(data.id) ||
@@ -346,74 +557,63 @@ function normalizeClientProfile(
       cleanText(data.user_email) ||
       cleanText(local.email) ||
       "nezistené",
-    role:
-      cleanText(data.role) ||
-      cleanText(data.userRole) ||
-      cleanText(data.user_role) ||
-      cleanText(local.role) ||
-      "klient",
-    plan,
-    selectedPlan,
-    accountStatus:
-      cleanText(data.accountStatus) ||
-      cleanText(data.status) ||
-      cleanText(data.account_status) ||
-      "aktívny",
-    packageName:
-      cleanText(data.packageName) ||
-      cleanText(data.package_name) ||
-      cleanText(data.package) ||
-      selectedPlan,
-    packageLabel:
-      cleanText(data.packageLabel) ||
-      cleanText(data.package_label) ||
-      cleanText(data.planLabel) ||
-      selectedPlan,
-    credits,
-    usedCredits,
-    remainingCredits,
-    pageLimit:
-      asNumber(data.pageLimit) ??
-      asNumber(data.page_limit) ??
-      asNumber(data.totalPages) ??
-      asNumber(data.total_pages) ??
-      null,
-    basePageLimit:
-      asNumber(data.basePageLimit) ?? asNumber(data.base_page_limit) ?? null,
-    extraPageLimit:
-      asNumber(data.extraPageLimit) ??
-      asNumber(data.extra_page_limit) ??
-      asNumber(data.extraPages) ??
-      asNumber(data.extra_pages) ??
-      null,
-    pagesUsed:
-      asNumber(data.pagesUsed) ??
-      asNumber(data.pages_used) ??
-      asNumber(data.usedPages) ??
-      asNumber(data.used_pages) ??
-      null,
-    pagesRemaining:
-      asNumber(data.pagesRemaining) ??
-      asNumber(data.pages_remaining) ??
-      asNumber(data.remainingPages) ??
-      asNumber(data.remaining_pages) ??
-      null,
-    pageLimitReached: asBoolean(
-      data.pageLimitReached ?? data.page_limit_reached ?? false,
-    ),
-    isAdmin: asBoolean(data.isAdmin ?? data.is_admin ?? false),
-    hasUnlimitedAccess: asBoolean(
-      data.hasUnlimitedAccess ??
-        data.has_unlimited_access ??
-        data.isUnlimited ??
-        data.is_unlimited ??
-        false,
-    ),
-    maxProjects:
-      asNumber(data.maxProjects) ??
-      asNumber(data.projectLimit) ??
-      asNumber(data.max_projects) ??
-      null,
+    role: profileIsAdmin
+      ? "administrátor"
+      : cleanText(data.role) ||
+        cleanText(data.userRole) ||
+        cleanText(data.user_role) ||
+        cleanText(local.role) ||
+        "klient",
+    plan: effectivePlan,
+    selectedPlan: effectiveSelectedPlan,
+    accountStatus: profileIsAdmin
+      ? "aktívny – plný prístup"
+      : profileIsFree
+        ? "aktívny – Free účet"
+        : cleanText(data.accountStatus) ||
+          cleanText(data.status) ||
+          cleanText(data.account_status) ||
+          "aktívny",
+    packageName: profileIsAdmin
+      ? "Administrátorský prístup"
+      : profileIsFree
+        ? "Free účet"
+        : cleanText(data.packageName) ||
+          cleanText(data.package_name) ||
+          cleanText(data.package) ||
+          effectiveSelectedPlan,
+    packageLabel: profileIsAdmin
+      ? "Administrátorský prístup"
+      : profileIsFree
+        ? "Free účet"
+        : cleanText(data.packageLabel) ||
+          cleanText(data.package_label) ||
+          cleanText(data.planLabel) ||
+          effectiveSelectedPlan,
+    credits: profileIsAdmin ? null : credits,
+    usedCredits: profileIsAdmin ? null : usedCredits,
+    remainingCredits: profileIsAdmin ? null : remainingCredits,
+    pageLimit: normalizedPageLimit,
+    basePageLimit: normalizedBasePageLimit,
+    extraPageLimit: normalizedExtraPageLimit,
+    pagesUsed: normalizedPagesUsed,
+    pagesRemaining: normalizedPagesRemaining,
+    pageLimitReached: profileHasUnlimitedAccess
+      ? false
+      : asBoolean(
+          data.pageLimitReached ??
+            data.page_limit_reached ??
+            (normalizedPageLimit !== null &&
+              (normalizedPagesUsed ?? 0) >= normalizedPageLimit),
+        ),
+    isAdmin: profileIsAdmin,
+    hasUnlimitedAccess: profileHasUnlimitedAccess,
+    maxProjects: profileIsAdmin
+      ? null
+      : asNumber(data.maxProjects) ??
+        asNumber(data.projectLimit) ??
+        asNumber(data.max_projects) ??
+        null,
     projectsCount:
       asNumber(data.projectsCount) ??
       asNumber(data.projectCount) ??
@@ -500,9 +700,29 @@ function labelPlan(plan: string) {
   if (value.includes("premium")) return "Premium balíček";
   if (value.includes("pro")) return "Pro balíček";
   if (value.includes("basic")) return "Start Basic";
-  if (value.includes("free")) return "Free balíček";
+  if (value.includes("free")) return "Free účet";
 
   return plan || "Nezadaný balíček";
+}
+
+function isAdminPlanValue(...values: unknown[]): boolean {
+  return values.some((value) => {
+    const normalized = cleanText(value).toLowerCase();
+
+    return (
+      normalized === "admin" ||
+      normalized === "administrator" ||
+      normalized === "administrátor" ||
+      normalized.includes("administrátorsk") ||
+      normalized.includes("administrator access")
+    );
+  });
+}
+
+function isFreePlanValue(...values: unknown[]): boolean {
+  return values.some((value) =>
+    cleanText(value).toLowerCase().includes("free"),
+  );
 }
 
 function normalizeSubscriptionStatus(status: string) {
@@ -598,13 +818,22 @@ function normalizeEntitlements(
 ): EntitlementsSnapshot {
   const data = pickEntitlementsRecord(payload);
 
-  const isAdmin = asBoolean(
-    data.isAdmin ??
-      data.is_admin ??
-      data.adminAccess ??
-      data.admin_access ??
-      false,
-  );
+  const rawPlanId =
+    cleanText(data.planId) || cleanText(data.plan_id) || "free";
+
+  const rawPlanName =
+    cleanText(data.planName) ||
+    cleanText(data.plan_name) ||
+    labelPlan(rawPlanId);
+
+  const isAdmin =
+    asBoolean(
+      data.isAdmin ??
+        data.is_admin ??
+        data.adminAccess ??
+        data.admin_access ??
+        false,
+    ) || isAdminPlanValue(rawPlanId, rawPlanName);
 
   const hasUnlimitedAccess = asBoolean(
     data.hasUnlimitedAccess ??
@@ -617,10 +846,19 @@ function normalizeEntitlements(
     isAdmin,
   );
 
-  const effectiveUnlimitedAccess = isAdmin || hasUnlimitedAccess;
+  const storedPlanId = isAdmin ? "admin" : rawPlanId;
 
-  const storedPlanId =
-    cleanText(data.planId) || cleanText(data.plan_id) || "free";
+  const storedPlanName = isAdmin
+    ? "Administrátorský prístup"
+    : isFreePlanValue(rawPlanId, rawPlanName)
+      ? "Free účet"
+      : rawPlanName;
+
+  const isFreePlan =
+    !isAdmin && isFreePlanValue(storedPlanId, storedPlanName);
+
+  const effectiveUnlimitedAccess =
+    isAdmin || (!isFreePlan && hasUnlimitedAccess);
 
   const planId = isAdmin ? "admin" : storedPlanId;
 
@@ -653,13 +891,26 @@ function normalizeEntitlements(
     ? 0
     : (asNumber(data.promptsUsed) ?? asNumber(data.prompts_used) ?? 0);
 
-  const promptLimit = effectiveUnlimitedAccess ? null : rawPromptLimit;
+  const promptLimit = effectiveUnlimitedAccess
+    ? null
+    : isFreePlan
+      ? FREE_PROMPT_LIMIT
+      : rawPromptLimit;
+
+  const serverPromptsRemaining =
+    asNumber(data.promptsRemaining) ?? asNumber(data.prompts_remaining);
+
+  const calculatedPromptsRemaining =
+    promptLimit !== null ? Math.max(promptLimit - promptsUsed, 0) : null;
 
   const promptsRemaining = effectiveUnlimitedAccess
     ? null
-    : (asNumber(data.promptsRemaining) ??
-      asNumber(data.prompts_remaining) ??
-      (promptLimit !== null ? Math.max(promptLimit - promptsUsed, 0) : null));
+    : promptLimit !== null
+      ? Math.min(
+          serverPromptsRemaining ?? calculatedPromptsRemaining ?? 0,
+          calculatedPromptsRemaining ?? 0,
+        )
+      : serverPromptsRemaining;
 
   const normalizedAddonNames = addonNames.length
     ? addonNames
@@ -676,20 +927,18 @@ function normalizeEntitlements(
     userId: cleanText(data.userId) || cleanText(data.user_id),
     email: cleanText(data.email),
     planId,
-    planName: isAdmin
-      ? "Administrátorský prístup"
-      : cleanText(data.planName) ||
-        cleanText(data.plan_name) ||
-        labelPlan(storedPlanId),
+    planName: isAdmin ? "Administrátorský prístup" : storedPlanName,
     planPriceCents: isAdmin
       ? 0
       : (asNumber(data.planPriceCents) ?? asNumber(data.plan_price_cents)),
     planPageLimit: effectiveUnlimitedAccess
       ? null
-      : (asNumber(data.pageLimit) ??
-        asNumber(data.page_limit) ??
-        asNumber(data.basePageLimit) ??
-        asNumber(data.base_page_limit)),
+      : isFreePlan
+        ? FREE_PAGE_LIMIT
+        : (asNumber(data.pageLimit) ??
+          asNumber(data.page_limit) ??
+          asNumber(data.basePageLimit) ??
+          asNumber(data.base_page_limit)),
     addonIds,
     addonNames: normalizedAddonNames,
     featureKeys,
@@ -706,7 +955,9 @@ function normalizeEntitlements(
         ),
     attachmentLimit: effectiveUnlimitedAccess
       ? null
-      : (asNumber(data.attachmentLimit) ?? asNumber(data.attachment_limit)),
+      : isFreePlan
+        ? FREE_ATTACHMENT_LIMIT
+        : (asNumber(data.attachmentLimit) ?? asNumber(data.attachment_limit)),
     isAdmin,
     hasUnlimitedAccess: effectiveUnlimitedAccess,
     hasDatabaseRecord: asBoolean(
@@ -1009,10 +1260,65 @@ function normalizePageUsageSnapshot(
   };
 }
 
+function promoteProfileToAdmin(profile: ClientProfile): ClientProfile {
+  return {
+    ...profile,
+    role: "administrátor",
+    plan: "admin",
+    selectedPlan: "admin",
+    accountStatus: "aktívny – plný prístup",
+    packageName: "Administrátorský prístup",
+    packageLabel: "Administrátorský prístup",
+    credits: null,
+    usedCredits: null,
+    remainingCredits: null,
+    basePageLimit: null,
+    extraPageLimit: null,
+    pageLimit: null,
+    pagesUsed: null,
+    pagesRemaining: null,
+    pageLimitReached: false,
+    isAdmin: true,
+    hasUnlimitedAccess: true,
+    maxProjects: null,
+    activeServices: Array.from(
+      new Set([
+        ...profile.activeServices,
+        "Administrátorský prístup – všetky moduly",
+      ]),
+    ),
+    activatedFeatures: Array.from(
+      new Set([
+        ...profile.activatedFeatures,
+        ...ALL_FEATURE_KEYS.map(labelFeature),
+      ]),
+    ),
+    subscriptionStatus: "administrátorský účet",
+    subscriptionEndsAt: "",
+  };
+}
+
 function mergePageUsage(
   profile: ClientProfile,
   usageData: unknown,
 ): ClientProfile {
+  /**
+   * Ak už serverový profil alebo Supabase app_metadata potvrdili ADMIN,
+   * číselná odpoveď staršieho /api/usage/pages nesmie účet degradovať na Free.
+   */
+  if (
+    profile.isAdmin ||
+    isAdminPlanValue(
+      profile.role,
+      profile.plan,
+      profile.selectedPlan,
+      profile.packageName,
+      profile.packageLabel,
+    )
+  ) {
+    return promoteProfileToAdmin(profile);
+  }
+
   const usage = normalizePageUsageSnapshot(usageData);
 
   if (!usage) {
@@ -1020,27 +1326,7 @@ function mergePageUsage(
   }
 
   if (usage.isUnlimited) {
-    return {
-      ...profile,
-
-      // Verejný kontrakt endpointu používa isUnlimited ako jednoznačný
-      // indikátor administrátorského stránkového prístupu.
-      isAdmin: true,
-      hasUnlimitedAccess: true,
-      role: "administrátor",
-      plan: "admin",
-      selectedPlan: "admin",
-      accountStatus: "aktívny – plný prístup",
-      packageName: "Administrátorský prístup",
-      packageLabel: "Administrátorský prístup",
-
-      basePageLimit: null,
-      extraPageLimit: null,
-      pageLimit: null,
-      pagesUsed: null,
-      pagesRemaining: null,
-      pageLimitReached: false,
-    };
+    return promoteProfileToAdmin(profile);
   }
 
   return {
@@ -1179,16 +1465,93 @@ async function loadEntitlementsSnapshot(): Promise<EntitlementsLoadResult> {
   }
 }
 
+function promoteEntitlementsToAdmin(
+  entitlements: EntitlementsSnapshot | null,
+  identity?: Partial<AuthIdentitySnapshot> | null,
+): EntitlementsSnapshot {
+  const raw = entitlements?.raw ?? {};
+
+  return {
+    userId: identity?.userId || entitlements?.userId || "",
+    email: identity?.email || entitlements?.email || "",
+    planId: "admin",
+    planName: "Administrátorský prístup",
+    planPriceCents: 0,
+    planPageLimit: null,
+    addonIds: entitlements?.addonIds ?? [],
+    addonNames: Array.from(
+      new Set([
+        ...(entitlements?.addonNames ?? []),
+        "Administrátorský prístup – všetky moduly",
+      ]),
+    ),
+    featureKeys: Array.from(
+      new Set([
+        ...ALL_FEATURE_KEYS,
+        ...(entitlements?.featureKeys ?? []),
+      ]),
+    ),
+    featureLabels: Array.from(
+      new Set([
+        ...ALL_FEATURE_KEYS.map(labelFeature),
+        ...(entitlements?.featureLabels ?? []),
+      ]),
+    ),
+    promptLimit: null,
+    promptsUsed: 0,
+    promptsRemaining: null,
+    promptLimitReached: false,
+    attachmentLimit: null,
+    isAdmin: true,
+    hasUnlimitedAccess: true,
+    hasDatabaseRecord: entitlements?.hasDatabaseRecord ?? true,
+    billingStatus: "admin",
+    activatedAt: entitlements?.activatedAt ?? "",
+    validUntil: "",
+    updatedAt: entitlements?.updatedAt ?? "",
+    source: entitlements?.source ?? "Supabase app_metadata",
+    raw,
+  };
+}
+
 function mergeEntitlementsIntoProfile(
   profile: ClientProfile,
   entitlements: EntitlementsSnapshot,
 ): ClientProfile {
+  const profileIsAdmin =
+    profile.isAdmin ||
+    isAdminPlanValue(
+      profile.role,
+      profile.plan,
+      profile.selectedPlan,
+      profile.packageName,
+      profile.packageLabel,
+    );
+
+  const entitlementIsAdmin =
+    entitlements.isAdmin ||
+    isAdminPlanValue(entitlements.planId, entitlements.planName);
+
+  const effectiveAdmin = profileIsAdmin || entitlementIsAdmin;
+
+  const isFreePlan =
+    !effectiveAdmin &&
+    isFreePlanValue(
+      entitlements.planId,
+      entitlements.planName,
+      profile.plan,
+      profile.selectedPlan,
+    );
+
   const effectiveUnlimitedAccess =
-    entitlements.isAdmin || entitlements.hasUnlimitedAccess;
+    effectiveAdmin ||
+    (!isFreePlan && entitlements.hasUnlimitedAccess);
 
   const basePageLimit = effectiveUnlimitedAccess
     ? null
-    : (profile.basePageLimit ?? entitlements.planPageLimit);
+    : isFreePlan
+      ? FREE_PAGE_LIMIT
+      : (profile.basePageLimit ?? entitlements.planPageLimit);
 
   const extraPageLimit = effectiveUnlimitedAccess
     ? null
@@ -1196,18 +1559,24 @@ function mergeEntitlementsIntoProfile(
 
   const pageLimit = effectiveUnlimitedAccess
     ? null
-    : (profile.pageLimit ??
-      (basePageLimit !== null ? basePageLimit + (extraPageLimit ?? 0) : null));
+    : isFreePlan
+      ? FREE_PAGE_LIMIT + (extraPageLimit ?? 0)
+      : (profile.pageLimit ??
+        (basePageLimit !== null ? basePageLimit + (extraPageLimit ?? 0) : null));
 
-  const effectivePlanId = entitlements.isAdmin
+  const effectivePlanId = effectiveAdmin
     ? "admin"
-    : entitlements.planId || profile.plan;
+    : isFreePlan
+      ? "free"
+      : entitlements.planId || profile.plan;
 
-  const effectivePlanName = entitlements.isAdmin
+  const effectivePlanName = effectiveAdmin
     ? "Administrátorský prístup"
-    : entitlements.planName || profile.packageName;
+    : isFreePlan
+      ? "Free účet"
+      : entitlements.planName || profile.packageName;
 
-  const effectiveFeatures = entitlements.hasUnlimitedAccess
+  const effectiveFeatures = effectiveUnlimitedAccess
     ? ALL_FEATURE_KEYS.map(labelFeature)
     : entitlements.featureLabels;
 
@@ -1221,14 +1590,16 @@ function mergeEntitlementsIntoProfile(
       profile.email !== "nezistené"
         ? profile.email
         : entitlements.email || profile.email,
-    role: entitlements.isAdmin ? "administrátor" : profile.role,
-    isAdmin: entitlements.isAdmin,
+    role: effectiveAdmin ? "administrátor" : profile.role,
+    isAdmin: effectiveAdmin,
     hasUnlimitedAccess: effectiveUnlimitedAccess,
     plan: effectivePlanId,
     selectedPlan: effectivePlanId,
-    accountStatus: effectiveUnlimitedAccess
+    accountStatus: effectiveAdmin
       ? "aktívny – plný prístup"
-      : profile.accountStatus,
+      : isFreePlan
+        ? "aktívny – Free účet"
+        : profile.accountStatus,
     packageName: effectivePlanName,
     packageLabel: effectivePlanName,
     basePageLimit,
@@ -1243,7 +1614,7 @@ function mergeEntitlementsIntoProfile(
       new Set([
         ...profile.activeServices,
         ...entitlements.addonNames,
-        ...(effectiveUnlimitedAccess
+        ...(effectiveAdmin
           ? ["Administrátorský prístup – všetky moduly"]
           : []),
       ]),
@@ -1251,9 +1622,11 @@ function mergeEntitlementsIntoProfile(
     activatedFeatures: Array.from(
       new Set([...profile.activatedFeatures, ...effectiveFeatures]),
     ),
-    subscriptionStatus: effectiveUnlimitedAccess
+    subscriptionStatus: effectiveAdmin
       ? "administrátorský účet"
-      : entitlements.billingStatus || profile.subscriptionStatus,
+      : isFreePlan
+        ? "free"
+        : entitlements.billingStatus || profile.subscriptionStatus,
     subscriptionStartedAt:
       entitlements.activatedAt || profile.subscriptionStartedAt,
     subscriptionEndsAt: effectiveUnlimitedAccess
@@ -1366,17 +1739,43 @@ function formatPageUsageSummary(profile: ClientProfile | null): string {
 }
 
 function formatAttachmentLimit(
+  profile: ClientProfile | null,
   entitlements: EntitlementsSnapshot | null,
 ): string {
+  const effectiveAdmin = Boolean(
+    entitlements?.isAdmin ||
+      isAdminPlanValue(entitlements?.planId, entitlements?.planName) ||
+      profile?.isAdmin,
+  );
+
+  const effectiveUnlimited = Boolean(
+    effectiveAdmin ||
+      entitlements?.hasUnlimitedAccess ||
+      profile?.hasUnlimitedAccess,
+  );
+
+  if (effectiveUnlimited) {
+    return "Neobmedzené";
+  }
+
+  const freeAccount = entitlements
+    ? isFreePlanValue(entitlements.planId, entitlements.planName)
+    : isFreePlanValue(
+        profile?.plan,
+        profile?.selectedPlan,
+        profile?.packageName,
+        profile?.packageLabel,
+      );
+
+  if (freeAccount) {
+    return String(FREE_ATTACHMENT_LIMIT);
+  }
+
   if (!entitlements) {
     return "Nezadané";
   }
 
-  if (
-    entitlements.isAdmin ||
-    entitlements.hasUnlimitedAccess ||
-    entitlements.attachmentLimit === null
-  ) {
+  if (entitlements.attachmentLimit === null) {
     return "Neobmedzené";
   }
 
@@ -1426,10 +1825,30 @@ export default function ClientAccountProfile() {
     setError("");
     setEntitlementsError("");
 
-    const entitlementResult = await loadEntitlementsSnapshot();
+    const [entitlementResult, authIdentity] = await Promise.all([
+      loadEntitlementsSnapshot(),
+      loadAuthenticatedIdentity(),
+    ]);
 
-    setEntitlements(entitlementResult.entitlements);
-    setEntitlementsError(entitlementResult.error);
+    let effectiveEntitlements = entitlementResult.entitlements;
+
+    /**
+     * Ak Supabase serverové app_metadata potvrdia ADMIN, Free fallback
+     * z entitlement endpointu nesmie administrátora degradovať.
+     *
+     * Nejde o kontrolu podľa e-mailu ani mena používateľa.
+     */
+    if (authIdentity?.isAdmin) {
+      effectiveEntitlements = promoteEntitlementsToAdmin(
+        effectiveEntitlements,
+        authIdentity,
+      );
+    }
+
+    setEntitlements(effectiveEntitlements);
+    setEntitlementsError(
+      authIdentity?.isAdmin ? "" : entitlementResult.error,
+    );
 
     let lastError = "";
 
@@ -1454,16 +1873,53 @@ export default function ClientAccountProfile() {
           continue;
         }
 
-        const normalizedProfile = normalizeClientProfile(data, endpoint);
-        const profileWithEntitlements = entitlementResult.entitlements
+        let normalizedProfile = normalizeClientProfile(data, endpoint);
+
+        if (authIdentity?.isAdmin) {
+          normalizedProfile = promoteProfileToAdmin(normalizedProfile);
+        }
+
+        /**
+         * Aj profilový endpoint môže byť autoritatívnym serverovým zdrojom
+         * administrátorskej roly. V takom prípade povýšime aj zobrazované
+         * entitlementy, aby sa v UI nemiešal ADMIN s Free balíkom.
+         */
+        if (normalizedProfile.isAdmin) {
+          effectiveEntitlements = promoteEntitlementsToAdmin(
+            effectiveEntitlements,
+            {
+              userId:
+                authIdentity?.userId ||
+                (normalizedProfile.userId !== "nezistené"
+                  ? normalizedProfile.userId
+                  : ""),
+              email:
+                authIdentity?.email ||
+                (normalizedProfile.email !== "nezistené"
+                  ? normalizedProfile.email
+                  : ""),
+              isAdmin: true,
+            },
+          );
+
+          setEntitlements(effectiveEntitlements);
+          setEntitlementsError("");
+        }
+
+        const profileWithEntitlements = effectiveEntitlements
           ? mergeEntitlementsIntoProfile(
               normalizedProfile,
-              entitlementResult.entitlements,
+              effectiveEntitlements,
             )
           : normalizedProfile;
+
         const normalized = await loadPageUsage(profileWithEntitlements);
 
-        setProfile(normalized);
+        setProfile(
+          normalized.isAdmin
+            ? promoteProfileToAdmin(normalized)
+            : normalized,
+        );
         setLastLoadedAt(new Date().toISOString());
         setState("success");
         return;
@@ -1475,20 +1931,30 @@ export default function ClientAccountProfile() {
       }
     }
 
-    const localFallback = normalizeClientProfile({}, "lokálne údaje");
-    const localWithEntitlements = entitlementResult.entitlements
+    let localFallback = normalizeClientProfile({}, "lokálne údaje");
+
+    if (authIdentity?.isAdmin) {
+      localFallback = promoteProfileToAdmin(localFallback);
+    }
+
+    const localWithEntitlements = effectiveEntitlements
       ? mergeEntitlementsIntoProfile(
           localFallback,
-          entitlementResult.entitlements,
+          effectiveEntitlements,
         )
       : localFallback;
+
     const fallback = await loadPageUsage(localWithEntitlements);
 
-    setProfile(fallback);
+    setProfile(
+      fallback.isAdmin
+        ? promoteProfileToAdmin(fallback)
+        : fallback,
+    );
     setLastLoadedAt(new Date().toISOString());
     setError(
       lastError ||
-        "Klientsky profil sa nepodarilo načítať. Zobrazujem aspoň lokálne uložené údaje.",
+        "Klientsky profil sa nepodarilo načítať. Zobrazujem aspoň bezpečne dostupné údaje účtu.",
     );
     setState("error");
   }, []);
@@ -1575,10 +2041,40 @@ export default function ClientAccountProfile() {
     loadProfile();
   }, [loadProfile]);
 
-  const isAdmin = Boolean(entitlements?.isAdmin || profile?.isAdmin);
+  const isAdmin = useMemo(() => {
+    return Boolean(
+      entitlements?.isAdmin ||
+        isAdminPlanValue(entitlements?.planId, entitlements?.planName) ||
+        profile?.isAdmin ||
+        isAdminPlanValue(
+          profile?.role,
+          profile?.plan,
+          profile?.selectedPlan,
+          profile?.packageName,
+          profile?.packageLabel,
+        ),
+    );
+  }, [entitlements, profile]);
+
+  const isFree = useMemo(() => {
+    if (isAdmin) return false;
+
+    if (entitlements) {
+      return isFreePlanValue(entitlements.planId, entitlements.planName);
+    }
+
+    return isFreePlanValue(
+      profile?.plan,
+      profile?.selectedPlan,
+      profile?.packageName,
+      profile?.packageLabel,
+    );
+  }, [entitlements, isAdmin, profile]);
 
   const hasUnlimitedAccess = Boolean(
-    isAdmin || entitlements?.hasUnlimitedAccess || profile?.hasUnlimitedAccess,
+    isAdmin ||
+      (!isFree &&
+        (entitlements?.hasUnlimitedAccess || profile?.hasUnlimitedAccess)),
   );
 
   const usagePercent = useMemo(() => {
@@ -1612,10 +2108,13 @@ export default function ClientAccountProfile() {
     return profile ? getProfilePlanPriceCents(profile) : null;
   }, [entitlements, profile]);
 
-  const basePages =
-    profile?.basePageLimit ?? entitlements?.planPageLimit ?? null;
+  const basePages = isAdmin
+    ? null
+    : isFree
+      ? FREE_PAGE_LIMIT
+      : profile?.basePageLimit ?? entitlements?.planPageLimit ?? null;
 
-  const extraPages = profile?.extraPageLimit ?? 0;
+  const extraPages = isAdmin ? 0 : profile?.extraPageLimit ?? 0;
 
   const activatedAddons = useMemo(() => {
     if (hasUnlimitedAccess) {
@@ -1639,7 +2138,9 @@ export default function ClientAccountProfile() {
     return Array.from(new Set(values));
   }, [entitlements, hasUnlimitedAccess, profile]);
 
-  const promptUsageSummary = formatPromptUsageSummary(entitlements);
+  const promptUsageSummary = isAdmin
+    ? "Neobmedzený administrátorský prístup"
+    : formatPromptUsageSummary(entitlements);
 
   const pageUsageSummary = formatPageUsageSummary(profile);
 
@@ -1675,19 +2176,23 @@ export default function ClientAccountProfile() {
               <div className="min-w-0">
                 <div className="inline-flex max-w-full flex-wrap items-center gap-2 whitespace-normal rounded-2xl border border-violet-400/30 bg-violet-500/15 px-3 py-1 text-[11px] font-black uppercase leading-5 tracking-[0.14em] text-violet-100 [overflow-wrap:anywhere]">
                   <ShieldCheck size={13} />
-                  {isAdmin ? "Administrátorský účet" : "Účet klienta"}
+                  {isAdmin ? "Administrátorský účet" : isFree ? "Free účet" : "Účet klienta"}
                 </div>
 
                 <h1 className="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">
                   {isAdmin
                     ? "Administrátorský účet a služby"
-                    : "Klientsky účet a služby"}
+                    : isFree
+                      ? "Free účet a služby"
+                      : "Klientsky účet a služby"}
                 </h1>
 
                 <p className="mt-1 max-w-3xl text-sm font-bold leading-6 text-slate-400">
-                  {hasUnlimitedAccess
-                    ? "Administrátorský profil má plný prístup ku všetkým modulom, funkciám, exportom, promptom, stranám a prílohám bez tarifných obmedzení."
-                    : "Klientsky profil zobrazuje účet, balíček, stav služieb, kredity, projekty, odpočet strán, predplatné a dátumy prístupov."}
+                  {isAdmin
+                    ? "Administrátorský profil má plný prístup ku všetkým modulom, funkciám, exportom, promptom, stranám, prílohám a projektom bez tarifných obmedzení."
+                    : isFree
+                      ? `Free účet používa bezplatné limity: ${FREE_PAGE_LIMIT} strany, ${FREE_PROMPT_LIMIT} prompty a ${FREE_ATTACHMENT_LIMIT} prílohy.`
+                      : "Klientsky profil zobrazuje účet, balíček, stav služieb, kredity, projekty, odpočet strán, predplatné a dátumy prístupov."}
                 </p>
               </div>
             </div>
@@ -1716,10 +2221,15 @@ export default function ClientAccountProfile() {
                 Obnoviť údaje
               </button>
 
-              {hasUnlimitedAccess ? (
+              {isAdmin ? (
                 <div className="inline-flex min-h-[48px] min-w-0 max-w-full items-center justify-center whitespace-normal text-center [overflow-wrap:anywhere] gap-2 rounded-2xl border border-violet-300/35 bg-violet-500/15 px-5 text-sm font-black text-violet-50 shadow-lg shadow-violet-950/20">
                   <ShieldCheck size={18} />
-                  Plný prístup
+                  Neobmedzený prístup
+                </div>
+              ) : isFree ? (
+                <div className="inline-flex min-h-[48px] min-w-0 max-w-full items-center justify-center whitespace-normal text-center [overflow-wrap:anywhere] gap-2 rounded-2xl border border-emerald-300/30 bg-emerald-500/10 px-5 text-sm font-black text-emerald-100 shadow-lg shadow-black/20">
+                  <BadgeCheck size={18} />
+                  Free účet
                 </div>
               ) : (
                 <button
@@ -1760,7 +2270,7 @@ export default function ClientAccountProfile() {
           </section>
         ) : null}
 
-        {hasUnlimitedAccess ? (
+        {isAdmin ? (
           <section className="mb-6 rounded-[1.6rem] border border-violet-300/30 bg-gradient-to-r from-violet-600/20 via-blue-600/15 to-fuchsia-600/15 p-5 shadow-xl shadow-black/25">
             <div className="flex min-w-0 items-start gap-3 sm:gap-4">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-500/20 text-violet-100">
@@ -1776,6 +2286,24 @@ export default function ClientAccountProfile() {
                   Tento účet nie je obmedzený balíkom Free. Má sprístupnené
                   všetky moduly, funkcie, exporty, prompty, strany a prílohy.
                   Spotreba sa administrátorovi neodpočítava.
+                </p>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {isFree ? (
+          <section className="mb-6 rounded-[1.6rem] border border-emerald-300/25 bg-emerald-500/10 p-5 shadow-xl shadow-black/25">
+            <div className="flex min-w-0 items-start gap-3 sm:gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-100">
+                <BadgeCheck size={24} />
+              </div>
+
+              <div>
+                <h2 className="text-xl font-black text-white">Free účet je aktívny</h2>
+                <p className="mt-1 text-sm font-bold leading-6 text-emerald-100/85">
+                  Bezplatný účet má limit {FREE_PAGE_LIMIT} strán, {FREE_PROMPT_LIMIT} promptov a {FREE_ATTACHMENT_LIMIT} príloh.
+                  Po vyčerpaní limitov sa zobrazí možnosť rozšíriť účet alebo dokúpiť dostupné služby.
                 </p>
               </div>
             </div>
@@ -1802,7 +2330,7 @@ export default function ClientAccountProfile() {
           </section>
         ) : null}
 
-        {showCancelConfirm && !hasUnlimitedAccess ? (
+        {showCancelConfirm && !hasUnlimitedAccess && !isFree ? (
           <section className="mb-6 rounded-[1.6rem] border border-red-400/30 bg-red-500/10 p-5 shadow-xl shadow-black/25">
             <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
               <div className="flex items-start gap-3">
@@ -1883,37 +2411,45 @@ export default function ClientAccountProfile() {
                 icon={Crown}
                 label="Balíček"
                 value={
-                  hasUnlimitedAccess
+                  isAdmin
                     ? "Administrátorský prístup"
-                    : labelPlan(profile.selectedPlan || profile.plan)
+                    : isFree
+                      ? "Free účet"
+                      : labelPlan(profile.selectedPlan || profile.plan)
                 }
                 helper={
-                  hasUnlimitedAccess
+                  isAdmin
                     ? "Plný prístup bez tarifných obmedzení"
-                    : `Stav účtu: ${profile.accountStatus}`
+                    : isFree
+                      ? `Bezplatný účet · ${FREE_PAGE_LIMIT} strany · ${FREE_PROMPT_LIMIT} prompty · ${FREE_ATTACHMENT_LIMIT} prílohy`
+                      : `Stav účtu: ${profile.accountStatus}`
                 }
               />
 
               <StatCard
                 icon={WalletCards}
-                label="Kredity"
+                label={isFree ? "Prompty" : "Kredity"}
                 value={
-                  hasUnlimitedAccess
+                  isAdmin
                     ? "Neobmedzené"
-                    : profile.remainingCredits !== null
-                      ? `${profile.remainingCredits} zostáva`
-                      : "Nezadané"
+                    : isFree
+                      ? `${entitlements?.promptsRemaining ?? FREE_PROMPT_LIMIT} zostáva`
+                      : profile.remainingCredits !== null
+                        ? `${profile.remainingCredits} zostáva`
+                        : "Nezadané"
                 }
                 helper={
-                  hasUnlimitedAccess
+                  isAdmin
                     ? "Administrátorovi sa spotreba neodpočítava"
-                    : profile.credits !== null
-                      ? `Celkom: ${profile.credits}${
-                          profile.usedCredits !== null
-                            ? ` · použité: ${profile.usedCredits}`
-                            : ""
-                        }`
-                      : "Limit nie je uvedený"
+                    : isFree
+                      ? `${entitlements?.promptsUsed ?? 0} použitých z ${entitlements?.promptLimit ?? FREE_PROMPT_LIMIT}`
+                      : profile.credits !== null
+                        ? `Celkom: ${profile.credits}${
+                            profile.usedCredits !== null
+                              ? ` · použité: ${profile.usedCredits}`
+                              : ""
+                          }`
+                        : "Limit nie je uvedený"
                 }
               />
 
@@ -1938,14 +2474,20 @@ export default function ClientAccountProfile() {
                 icon={FileText}
                 label="Projekty"
                 value={
-                  profile.projectsCount !== null
-                    ? `${profile.projectsCount}`
-                    : "Nezadané"
+                  isAdmin
+                    ? "Neobmedzené"
+                    : profile.projectsCount !== null
+                      ? `${profile.projectsCount}`
+                      : "Nezadané"
                 }
                 helper={
-                  profile.maxProjects !== null
-                    ? `Limit: ${profile.maxProjects}`
-                    : "Limit projektov nie je uvedený"
+                  isAdmin
+                    ? "Bez limitu počtu projektov"
+                    : profile.maxProjects !== null
+                      ? `Limit: ${profile.maxProjects}`
+                      : isFree
+                        ? "Free účet – limit projektov určuje server"
+                        : "Limit projektov nie je uvedený"
                 }
               />
             </section>
@@ -1990,21 +2532,39 @@ export default function ClientAccountProfile() {
                     icon={Crown}
                     label="Názov balíka"
                     value={
-                      entitlements?.planName ||
-                      profile.packageLabel ||
-                      labelPlan(profile.selectedPlan || profile.plan)
+                      isAdmin
+                        ? "Administrátorský prístup"
+                        : isFree
+                          ? "Free účet"
+                          : entitlements?.planName ||
+                            profile.packageLabel ||
+                            labelPlan(profile.selectedPlan || profile.plan)
                     }
-                    helper={`ID balíka: ${entitlements?.planId || profile.selectedPlan || profile.plan}`}
+                    helper={`ID balíka: ${
+                      isAdmin
+                        ? "admin"
+                        : isFree
+                          ? "free"
+                          : entitlements?.planId || profile.selectedPlan || profile.plan
+                    }`}
                   />
 
                   <StatCard
                     icon={WalletCards}
                     label="Cena balíka"
-                    value={formatPlanPrice(planPriceCents, entitlements)}
+                    value={
+                      isAdmin
+                        ? "Interný účet"
+                        : isFree
+                          ? "Bezplatný"
+                          : formatPlanPrice(planPriceCents, entitlements)
+                    }
                     helper={
-                      hasUnlimitedAccess
+                      isAdmin
                         ? "Administrátorský účet nepodlieha platobnému balíku"
-                        : "Cena základného balíka bez samostatných doplnkov"
+                        : isFree
+                          ? "Free účet nemá mesačné predplatné"
+                          : "Cena základného balíka bez samostatných doplnkov"
                     }
                   />
 
@@ -2013,24 +2573,36 @@ export default function ClientAccountProfile() {
                     label="Stav balíka"
                     value={packageStatus}
                     helper={
-                      hasUnlimitedAccess
+                      isAdmin
                         ? "Interný účet s neobmedzeným oprávnením"
-                        : `Predplatné: ${entitlements?.billingStatus || profile.subscriptionStatus}`
+                        : isFree
+                          ? "Bezplatný účet bez plateného predplatného"
+                          : `Predplatné: ${entitlements?.billingStatus || profile.subscriptionStatus}`
                     }
                   />
 
                   <StatCard
                     icon={CalendarClock}
                     label="Dátum aktivácie"
-                    value={formatDateOrUnlimited(
-                      entitlements?.activatedAt ||
-                        profile.subscriptionStartedAt,
-                      hasUnlimitedAccess,
-                    )}
+                    value={
+                      isAdmin
+                        ? formatDateOrUnlimited(
+                            entitlements?.activatedAt || profile.subscriptionStartedAt,
+                            true,
+                          )
+                        : isFree
+                          ? formatDate(profile.createdAt)
+                          : formatDateOrUnlimited(
+                              entitlements?.activatedAt || profile.subscriptionStartedAt,
+                              false,
+                            )
+                    }
                     helper={
-                      hasUnlimitedAccess
+                      isAdmin
                         ? "Administrátorské oprávnenie je aktívne bez tarifného obdobia"
-                        : "Začiatok platnosti aktuálneho balíka"
+                        : isFree
+                          ? "Free účet je aktívny od vytvorenia účtu"
+                          : "Začiatok platnosti aktuálneho balíka"
                     }
                   />
 
@@ -2038,19 +2610,23 @@ export default function ClientAccountProfile() {
                     icon={Clock3}
                     label="Platnosť balíka"
                     value={
-                      hasUnlimitedAccess
+                      isAdmin
                         ? "Bez časového obmedzenia"
-                        : entitlements?.validUntil || profile.subscriptionEndsAt
-                          ? formatDate(
-                              entitlements?.validUntil ||
-                                profile.subscriptionEndsAt,
-                            )
-                          : "Bez uvedeného konca"
+                        : isFree
+                          ? "Bez predplatného"
+                          : entitlements?.validUntil || profile.subscriptionEndsAt
+                            ? formatDate(
+                                entitlements?.validUntil ||
+                                  profile.subscriptionEndsAt,
+                              )
+                            : "Bez uvedeného konca"
                     }
                     helper={
-                      hasUnlimitedAccess
+                      isAdmin
                         ? "Administrátorský prístup sa neriadi platnosťou balíka"
-                        : "Dátum ukončenia alebo obnovy predplatného"
+                        : isFree
+                          ? "Free účet nemá dátum obnovy predplatného"
+                          : "Dátum ukončenia alebo obnovy predplatného"
                     }
                   />
                 </div>
@@ -2272,7 +2848,7 @@ export default function ClientAccountProfile() {
 
                     <div className="mt-6 rounded-[1.4rem] border border-emerald-300/20 bg-emerald-500/10 p-5 text-center">
                       <div className="max-w-full break-words text-2xl font-black leading-tight text-white [overflow-wrap:anywhere] sm:text-3xl">
-                        {formatAttachmentLimit(entitlements)}
+                        {formatAttachmentLimit(profile, entitlements)}
                       </div>
                       <div className="mt-2 text-sm font-black uppercase tracking-[0.14em] text-emerald-100">
                         {hasUnlimitedAccess ? "bez limitu" : "príloh naraz"}
@@ -2504,7 +3080,10 @@ export default function ClientAccountProfile() {
 
                 <DetailRow label="Meno" value={profile.name} />
                 <DetailRow label="Email" value={profile.email} />
-                <DetailRow label="Rola" value={profile.role} />
+                <DetailRow
+                  label="Rola"
+                  value={isAdmin ? "administrátor" : profile.role}
+                />
                 <DetailRow
                   label="Administrátor"
                   value={isAdmin ? "Áno" : "Nie"}
@@ -2524,26 +3103,45 @@ export default function ClientAccountProfile() {
                   }
                 />
                 <DetailRow label="Jazyk" value={profile.language} />
-                <DetailRow label="Stav účtu" value={profile.accountStatus} />
+                <DetailRow
+                  label="Stav účtu"
+                  value={
+                    isAdmin
+                      ? "aktívny – plný prístup"
+                      : isFree
+                        ? "aktívny – Free účet"
+                        : profile.accountStatus
+                  }
+                />
                 <DetailRow
                   label="Balíček"
-                  value={profile.packageLabel || profile.packageName}
+                  value={
+                    isAdmin
+                      ? "Administrátorský prístup"
+                      : isFree
+                        ? "Free účet"
+                        : profile.packageLabel || profile.packageName
+                  }
                 />
                 <DetailRow
                   label="Vybraný plán"
                   value={
-                    hasUnlimitedAccess
+                    isAdmin
                       ? "Administrátorský prístup"
-                      : profile.selectedPlan
+                      : isFree
+                        ? "free"
+                        : profile.selectedPlan
                   }
                 />
                 <DetailRow
                   label="Predplatné"
                   value={
-                    hasUnlimitedAccess
+                    isAdmin
                       ? "Nevzťahuje sa – interný účet"
-                      : entitlements?.billingStatus ||
-                        profile.subscriptionStatus
+                      : isFree
+                        ? "Nevzťahuje sa – Free účet"
+                        : entitlements?.billingStatus ||
+                          profile.subscriptionStatus
                   }
                 />
                 <DetailRow
@@ -2575,7 +3173,7 @@ export default function ClientAccountProfile() {
                   value={formatDate(lastLoadedAt)}
                 />
 
-                {hasUnlimitedAccess ? (
+                {isAdmin ? (
                   <div className="mt-5 rounded-[1.25rem] border border-violet-300/25 bg-violet-500/10 p-4">
                     <div className="flex items-start gap-3">
                       <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-violet-200" />
@@ -2589,6 +3187,23 @@ export default function ClientAccountProfile() {
                           Administrátorský prístup nie je predplatné a nemožno
                           ho zrušiť cez klientsky profil. Oprávnenie sa spravuje
                           serverovo v databáze.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : isFree ? (
+                  <div className="mt-5 rounded-[1.25rem] border border-emerald-300/25 bg-emerald-500/10 p-4">
+                    <div className="flex items-start gap-3">
+                      <BadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-200" />
+
+                      <div>
+                        <div className="text-sm font-black text-white">
+                          Free účet
+                        </div>
+
+                        <p className="mt-1 text-sm font-bold leading-6 text-emerald-100/85">
+                          Free účet nemá platené predplatné, preto ho nie je potrebné rušiť.
+                          Platné sú bezplatné limity účtu a dostupné funkcie vrátené serverom.
                         </p>
                       </div>
                     </div>
@@ -2643,8 +3258,8 @@ export default function ClientAccountProfile() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    {profile.activeServices.length ? (
-                      profile.activeServices.map((service) => (
+                    {activatedAddons.length ? (
+                      activatedAddons.map((service) => (
                         <Pill key={service}>{service}</Pill>
                       ))
                     ) : (
@@ -2673,8 +3288,8 @@ export default function ClientAccountProfile() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    {profile.activatedFeatures.length ? (
-                      profile.activatedFeatures.map((feature) => (
+                    {availableFeatures.length ? (
+                      availableFeatures.map((feature) => (
                         <Pill key={feature}>{feature}</Pill>
                       ))
                     ) : (
@@ -2697,9 +3312,11 @@ export default function ClientAccountProfile() {
                       </h2>
 
                       <p className="text-sm font-bold text-slate-400">
-                        {hasUnlimitedAccess
+                        {isAdmin
                           ? "Administrátorský prístup a dátumy účtu."
-                          : "Dátumy predplatného a posledného prístupu."}
+                          : isFree
+                            ? "Free účet a dátumy používateľského prístupu."
+                            : "Dátumy predplatného a posledného prístupu."}
                       </p>
                     </div>
                   </div>
@@ -2707,17 +3324,21 @@ export default function ClientAccountProfile() {
                   <DetailRow
                     label="Predplatné od"
                     value={
-                      hasUnlimitedAccess
+                      isAdmin
                         ? "Nevzťahuje sa"
-                        : formatDate(profile.subscriptionStartedAt)
+                        : isFree
+                          ? "Bez predplatného"
+                          : formatDate(profile.subscriptionStartedAt)
                     }
                   />
                   <DetailRow
                     label="Predplatné do"
                     value={
-                      hasUnlimitedAccess
+                      isAdmin
                         ? "Bez časového obmedzenia"
-                        : formatDate(profile.subscriptionEndsAt)
+                        : isFree
+                          ? "Bez predplatného"
+                          : formatDate(profile.subscriptionEndsAt)
                     }
                   />
                   <DetailRow
@@ -2748,14 +3369,18 @@ export default function ClientAccountProfile() {
                 icon={ShieldCheck}
                 label="Prístup"
                 value={
-                  hasUnlimitedAccess
+                  isAdmin
                     ? "Plný administrátorský prístup"
-                    : profile.role
+                    : isFree
+                      ? "Free účet"
+                      : profile.role
                 }
                 helper={
-                  hasUnlimitedAccess
+                  isAdmin
                     ? "Všetky moduly a limity sú odomknuté"
-                    : "Rola klienta v systéme"
+                    : isFree
+                      ? "Bezplatný používateľský účet"
+                      : "Rola klienta v systéme"
                 }
               />
 

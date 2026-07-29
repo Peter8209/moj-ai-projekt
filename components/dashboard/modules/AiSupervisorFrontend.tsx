@@ -8786,24 +8786,28 @@ Text emailu:
               </p>
             </section>
 
-            <label
-              htmlFor={dashboardInputId}
-              className="mb-2 block text-sm font-black text-slate-200"
-            >
-              {activeModuleInputLabel}
-            </label>
+            {activeModule !== "supervisor" ? (
+              <>
+                <label
+                  htmlFor={dashboardInputId}
+                  className="mb-2 block text-sm font-black text-slate-200"
+                >
+                  {activeModuleInputLabel}
+                </label>
 
-            <textarea
-              key={`dashboard-textarea-${activeModule}`}
-              id={dashboardInputId}
-              name={dashboardInputId}
-              data-module-input={activeModule}
-              aria-label={activeModuleInputLabel}
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder={activeModulePlaceholder}
-              className="min-h-[240px] w-full resize-y rounded-3xl border border-white/10 bg-[#070b18] px-5 py-5 text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/10"
-            />
+                <textarea
+                  key={`dashboard-textarea-${activeModule}`}
+                  id={dashboardInputId}
+                  name={dashboardInputId}
+                  data-module-input={activeModule}
+                  aria-label={activeModuleInputLabel}
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  placeholder={activeModulePlaceholder}
+                  className="min-h-[240px] w-full resize-y rounded-3xl border border-white/10 bg-[#070b18] px-5 py-5 text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/10"
+                />
+              </>
+            ) : null}
 
             {activeModule === "supervisor" ? (
               <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">

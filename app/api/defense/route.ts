@@ -87,6 +87,8 @@ type DefenseQuestionAnswer = {
 
 type DefenseResponse = {
   ok: boolean;
+  code?: string;
+  detail?: string;
   mode?: 'presentation' | 'question';
   slides?: DefenseSlide[];
   questionAnswer?: DefenseQuestionAnswer;
@@ -890,9 +892,10 @@ Pravidlá:
 - Potom priprav prirodzenú ústnu odpoveď približne na 45 až 90 sekúnd.
 - Uveď 3 až 6 kľúčových odborných argumentov.
 - Uveď konkrétnu stratégiu, ako odpoveď obhájiť pred komisiou.
-- Ak je dostupný extrahovaný text nahratej práce, tento text je autoritatívny obsah aj identita práce, aj keby sa nezhodoval s aktívnym profilom.
-- Aktívny profil používaj iba ako doplnkový alebo záložný kontext, najmä pre jazyk a formálne nastavenia. Konfliktný názov, tému, cieľ, metodológiu alebo výsledky z profilu ignoruj.
-- Ak text nahratej práce nie je dostupný, môžeš vychádzať z aktívneho profilu.
+- Aktívny profil je autoritatívna identita obhajovanej práce.
+- Nahratý text práce môže byť použitý iba vtedy, keď patrí k aktívnemu profilu; tematický súlad overuje server ešte pred týmto generovaním.
+- Profil určuje názov/tému práce, cieľ, odbor a ostatný rámec. Nahratý text slúži na doplnenie konkrétneho obsahu, výsledkov a formulácií tej istej práce.
+- Ak text práce nie je dostupný, vychádzaj z aktívneho profilu a nevymýšľaj chýbajúce konkrétne výsledky.
 - Posudky, tabuľky a vizuály sú doplnkové podklady; nesmú prebiť hlavný text nahratej práce.
 - Ak je otázka všeobecná, použi spoľahlivé odborné znalosti a nevymýšľaj konkrétne výsledky práce.
 - Ak odpoveď závisí od konkrétnych údajov práce a tieto údaje nie sú dostupné, jasne povedz, čo má študent doplniť, namiesto vymýšľania čísiel.
@@ -936,11 +939,11 @@ ${profile?.workLanguage || profile?.language || 'slovenčina'}
 OTÁZKA KOMISIE – ODPOVEDZ NA ŇU PRIAMO:
 ${question}
 
-AKTUÁLNY PROFIL PRÁCE – IBA DOPLNKOVÝ / ZÁLOŽNÝ KONTEXT:
+AKTUÁLNY PROFIL PRÁCE – AUTORITATÍVNY KONTEXT:
 ${buildProfilePromptBlock(profile, defenseType)}
 
-HLAVNÝ TEXT NAHRATEJ PRÁCE – AK JE DOSTUPNÝ, JE AUTORITATÍVNY:
-${workText || 'Text nahratej práce nie je dostupný. V takom prípade použi profil iba ako záložný kontext a pri otázke závislej od konkrétnych výsledkov nevymýšľaj údaje.'}
+TEXT PRÁCE OVERENÝ VOČI AKTÍVNEMU PROFILU:
+${workText || 'Text práce nie je dostupný. Vychádzaj z aktívneho profilu a pri otázke závislej od konkrétnych výsledkov nevymýšľaj údaje.'}
 
 DOPLNKOVÉ PODKLADY / POSUDKY:
 ${reviewsBlock}
@@ -969,20 +972,20 @@ Tvojou úlohou je vytvoriť čistý výstup pre klienta:
 - reakcie na otázky a pripomienky komisie.
 
 PRÍSNA HIERARCHIA KONTEXTU:
-1. Explicitný pokyn používateľa z chatového poľa je povinná požiadavka na aktuálnu obhajobu a nesmie byť ignorovaný.
-2. Ak je dostupný extrahovaný text nahratej práce, TENTO TEXT JE AUTORITATÍVNA KOTVA identity aj obsahu práce. Z neho urč názov, tému, cieľ, výskumný problém, metodológiu, výsledky, diskusiu, prínos a limity.
-3. Aktívny profil práce je iba doplnkový alebo záložný kontext. Použi ho najmä pre jazyk, typ práce a formálne nastavenia. Ak sa profil obsahovo líši od nahratej práce, konfliktné údaje profilu ignoruj.
-4. Posudky, otázky komisie, tabuľky a vizuály sú doplnkové podklady. Nesmú prebiť hlavný text nahratej práce.
-5. Nahratú hlavnú prácu nikdy neodmietni iba preto, že sa tematicky nezhoduje s aktívnym profilom. Práve nahratý dokument môže byť úplne iná práca a výsledok sa musí zmeniť podľa neho.
-6. Iba keď žiadny použiteľný text práce nie je nahratý, vychádzaj z aktívneho profilu.
+1. Aktívny profil práce je autoritatívna identita obhajoby a určuje, ku ktorej práci sa výstup viaže.
+2. Explicitný pokyn používateľa musí súvisieť s touto obhajobou a je povinné ho vykonať.
+3. Nahratý text práce sa používa ako detailný obsah iba po úspešnom serverovom overení súvisu s aktívnym profilom.
+4. Ak sa niektorý údaj v overenom texte a profile líši, drž sa profilu pri identite práce a textu pri konkrétnych výsledkoch tej istej práce; nevytváraj hybrid dvoch rôznych prác.
+5. Posudky, otázky komisie, tabuľky a vizuály sú doplnkové podklady k tej istej práci.
+6. Ak chýba detailný text práce, vychádzaj z profilu a chýbajúce výsledky nevymýšľaj.
 
 Ak používateľ žiada zakomponovať otázku alebo pripomienku z posudku:
 - zapracuj ju do slidu s otázkami komisie alebo vytvor samostatný slide,
 - priprav stručnú odbornú odpoveď do speakerNotes,
-- odpoveď ukotvi prednostne v hlavnom texte nahratej práce a až potom v doplnkovom profile,
+- odpoveď ukotvi v aktívnom profile a v texte práce, ktorý bol voči tomuto profilu overený,
 - nevygeneruj iba všeobecnú prezentáciu bez vykonania požadovanej úpravy.
 
-Ak je dostupný text práce z nahraného Word/PDF/TXT/RTF/CSV/XLSX súboru alebo clientExtractedText, používaj ho ako hlavný obsah práce bez profilovej tematickej validácie.
+Ak je dostupný text práce z nahraného Word/PDF/TXT/RTF/CSV/XLSX súboru alebo clientExtractedText, používaj ho iba po úspešnom overení, že súvisí s aktívnym profilom práce.
 Krátku vetu používateľa typu „priprav prezentáciu podľa priloženej práce“ považuj iba za pokyn, nie za obsah práce.
 Nikdy nevytvor iba 2 slidy, ak je dostupný text práce alebo dlhší extrahovaný obsah.
 
@@ -1041,31 +1044,31 @@ Vytvor profesionálnu prezentáciu na obhajobu záverečnej práce.
 JAZYK VÝSTUPU:
 ${profile?.workLanguage || profile?.language || 'slovenčina'}
 
-NÁZOV / IDENTITA PRÁCE – ZÁLOŽNÝ ÚDAJ Z UI ALEBO PROFILU:
+NÁZOV / IDENTITA PRÁCE – ZÁVÄZNÝ ÚDAJ Z AKTÍVNEHO PROFILU:
 ${title}
 
 TYP OBHAJOBY:
 ${defenseType}
 
-AKTUÁLNY PROFIL PRÁCE – IBA DOPLNKOVÝ / ZÁLOŽNÝ KONTEXT:
+AKTUÁLNY PROFIL PRÁCE – AUTORITATÍVNY KONTEXT:
 ${buildProfilePromptBlock(profile, defenseType)}
 
 POKYN POUŽÍVATEĽA – POVINNÉ VYKONAŤ:
 ${instruction || (hasWorkText ? 'Priprav obhajobu podľa nahratej práce.' : 'Priprav obhajobu podľa dostupného profilu práce.')}
 
-HLAVNÝ TEXT NAHRATEJ PRÁCE – AK JE DOSTUPNÝ, JE AUTORITATÍVNY:
-${workText || 'Text nahratej práce nie je dostupný. Až vtedy vychádzaj z profilu práce a nevymýšľaj chýbajúce údaje.'}
+TEXT PRÁCE OVERENÝ VOČI AKTÍVNEMU PROFILU:
+${workText || 'Text práce nie je dostupný. Vychádzaj z profilu práce a nevymýšľaj chýbajúce konkrétne údaje.'}
 
 DOPLNKOVÉ PODKLADY – POSUDKY, OTÁZKY, TABUĽKY A VIZUÁLY:
 ${reviewsBlock}
 
 HLAVNÁ ÚLOHA:
-Vytvor prezentáciu na obhajobu použiteľnú pred komisiou. Ak je dostupný hlavný text nahratej práce, celý obsah obhajoby musí vychádzať z neho; profil slúži iba ako doplnok.
+Vytvor prezentáciu na obhajobu použiteľnú pred komisiou. Celý výstup musí patriť k aktívnemu profilu; overený text práce používaj na jeho konkrétne rozpracovanie.
 
 KONTROLA PRED ODOVZDANÍM:
-- ak je dostupný hlavný text nahratej práce, názov, téma, cieľ, metodológia, výsledky, diskusia, prínos aj limity odvoď z tohto textu,
-- ak sa nahratá práca líši od profilu, konfliktné údaje profilu ignoruj a prezentáciu vytvor podľa nahratej práce,
-- profil môže doplniť iba údaje, ktoré v hlavnom texte chýbajú a nie sú s ním v rozpore,
+- názov, téma a identita práce musia vždy zodpovedať aktívnemu profilu,
+- overený text práce použi na cieľ, metodológiu, výsledky, diskusiu, prínos a limity, pokiaľ ide o tú istú prácu,
+- pri rozpore, ktorý by naznačoval inú prácu, nič nekombinuj ani nevymýšľaj; server má taký vstup odmietnuť ešte pred generovaním,
 - explicitný pokyn používateľa musí byť viditeľne zapracovaný vo výsledku,
 - posudky, tabuľky a vizuály používaj ako doplnkové podklady a nesmie nimi byť prepísaná identita hlavnej práce.
 
@@ -1266,16 +1269,322 @@ function getAttachmentTitleHint(files: ReviewFileInfo[]) {
 }
 
 
+type ProfileRelationResult = {
+  related: boolean;
+  confidence: number;
+  reason: string;
+  source: 'profile-only' | 'heuristic' | 'ai';
+};
+
+function hasUsableDefenseProfile(
+  profile: SavedProfile | null,
+): profile is SavedProfile {
+  if (!profile) return false;
+
+  return Boolean(
+    cleanClientVisibleText(profile.title || '') ||
+      cleanClientVisibleText(profile.topic || ''),
+  );
+}
+
+function normalizeRelationText(value: string) {
+  return cleanInvisibleCharacters(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const RELATION_STOP_WORDS = new Set([
+  'praca', 'prace', 'bakalarska', 'diplomova', 'magisterska', 'zaverecna',
+  'tema', 'nazov', 'ciel', 'vyskum', 'vyskumna', 'vysledky', 'metodologia',
+  'analyza', 'teoria', 'teoreticka', 'prakticka', 'student', 'studenta',
+  'obhajoba', 'prezentacia', 'odbor', 'problem', 'otazka', 'otazky', 'hypoteza',
+  'hypotezy', 'system', 'model', 'profil', 'podla', 'ktory', 'ktora', 'ktore',
+  'tento', 'tato', 'toto', 'preto', 'alebo', 'medzi', 'vyuzitie', 'pouzitie',
+]);
+
+function meaningfulRelationTokens(value: string) {
+  return normalizeRelationText(value)
+    .split(' ')
+    .filter((token) => token.length >= 4 && !RELATION_STOP_WORDS.has(token));
+}
+
+function buildProfileRelationText(profile: SavedProfile) {
+  return [
+    profile.title,
+    profile.topic,
+    profile.field,
+    profile.annotation,
+    profile.goal,
+    profile.problem,
+    profile.researchProblem,
+    profile.methodology,
+    profile.researchQuestions,
+    profile.hypotheses,
+    profile.practicalPart,
+    profile.scientificContribution,
+    profile.contribution,
+    ...(profile.keywords || []),
+    ...(profile.keywordsList || []),
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function getLexicalProfileRelation(
+  profile: SavedProfile,
+  candidateText: string,
+): ProfileRelationResult | null {
+  const profileText = buildProfileRelationText(profile);
+  const profileTokens = Array.from(new Set(meaningfulRelationTokens(profileText)));
+  const candidateTokens = new Set(meaningfulRelationTokens(candidateText));
+
+  const normalizedCandidate = normalizeRelationText(candidateText);
+  const normalizedTitle = normalizeRelationText(profile.title || '');
+  const normalizedTopic = normalizeRelationText(profile.topic || '');
+
+  if (
+    (normalizedTitle.length >= 12 && normalizedCandidate.includes(normalizedTitle)) ||
+    (normalizedTopic.length >= 12 && normalizedCandidate.includes(normalizedTopic))
+  ) {
+    return {
+      related: true,
+      confidence: 0.99,
+      reason: 'Text obsahuje názov alebo tému aktívneho profilu.',
+      source: 'heuristic',
+    };
+  }
+
+  if (profileTokens.length < 2 || candidateTokens.size < 2) return null;
+
+  const shared = profileTokens.filter((token) => candidateTokens.has(token));
+  const requiredShared = Math.max(2, Math.min(5, Math.ceil(profileTokens.length * 0.12)));
+
+  if (shared.length >= requiredShared) {
+    return {
+      related: true,
+      confidence: Math.min(0.96, 0.78 + shared.length * 0.03),
+      reason: `Text zdieľa s profilom ${shared.length} významových pojmov.`,
+      source: 'heuristic',
+    };
+  }
+
+  if (candidateText.length >= 2_000 && profileTokens.length >= 4 && shared.length === 0) {
+    return {
+      related: false,
+      confidence: 0.9,
+      reason: 'V rozsiahlejšom texte sa nenašli významové pojmy aktívneho profilu.',
+      source: 'heuristic',
+    };
+  }
+
+  return null;
+}
+
+function isGenericDefenseInstruction(value: string, mode: 'presentation' | 'question') {
+  const text = normalizeRelationText(value);
+  if (!text) return true;
+
+  if (mode === 'presentation') {
+    const stripped = text
+      .replace(/\b(priprav|vytvor|sprav|urob)\b/g, ' ')
+      .replace(/\b(obhajobu|prezentaciu|slidy|slide|snímky|snimky)\b/g, ' ')
+      .replace(/\b(podla|z|k|na|pre)\b/g, ' ')
+      .replace(/\b(prilozenej|nahratej|aktualnej|tejto)\b/g, ' ')
+      .replace(/\b(prace|praci|profilu|profil)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!stripped) return true;
+  }
+
+  if (mode === 'question' && text.length <= 240) {
+    const defenseTerms = [
+      'metod', 'vysled', 'ciel', 'hypotez', 'vzorka', 'respondent', 'limit',
+      'prinos', 'vybral', 'zvolil', 'overil', 'meral', 'interpret', 'komisi',
+      'prace', 'praci', 'vyskumn',
+    ];
+    const conversationalDefenseTerms = [
+      'vysvetli', 'rozved', 'podrobnejs', 'strucnejs', 'preformul', 'povedat',
+      'odpoved', 'argument', 'dopln', 'zjednodus',
+    ];
+
+    if (
+      defenseTerms.some((term) => text.includes(term)) ||
+      conversationalDefenseTerms.some((term) => text.includes(term))
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function classifyCandidateAgainstProfile({
+  profile,
+  candidateText,
+  contextLabel,
+}: {
+  profile: SavedProfile;
+  candidateText: string;
+  contextLabel: string;
+}): Promise<ProfileRelationResult> {
+  const cleanCandidate = cleanInvisibleCharacters(candidateText);
+
+  if (!cleanCandidate) {
+    return {
+      related: true,
+      confidence: 1,
+      reason: `${contextLabel}: bez samostatného obsahu na kontrolu.`,
+      source: 'profile-only',
+    };
+  }
+
+  const heuristic = getLexicalProfileRelation(profile, cleanCandidate);
+  if (heuristic?.related && heuristic.confidence >= 0.9) {
+    return {
+      ...heuristic,
+      reason: `${contextLabel}: ${heuristic.reason}`,
+    };
+  }
+
+  if (!process.env.OPENAI_API_KEY) {
+    if (heuristic) {
+      return {
+        ...heuristic,
+        reason: `${contextLabel}: ${heuristic.reason}`,
+      };
+    }
+
+    return {
+      related: false,
+      confidence: 0.5,
+      reason: `${contextLabel}: súvis s profilom sa bez dostupnej AI validácie nepodarilo spoľahlivo overiť.`,
+      source: 'heuristic',
+    };
+  }
+
+  try {
+    const compactCandidate = truncateText(cleanCandidate, 22_000).text;
+    const completion = await openai.chat.completions.create({
+      model: MODEL,
+      temperature: 0,
+      max_tokens: 420,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: `Si validačný klasifikátor akademickej obhajoby. Aktívny profil je záväzná identita práce. Rozhodni, či kontrolovaný vstup patrí k tej istej práci alebo je priamou otázkou/pokynom k jej obhajobe. Parafráza, synonymá a iný jazyk sú prípustné. Všeobecné otázky o metodike, výsledkoch, limitoch alebo prínose obhajovanej práce považuj za súvisiace. Ak však vstup zjavne rieši inú prácu, inú odbornú tému alebo úplne inú požiadavku, musí byť related=false. Vráť iba JSON: {"related": boolean, "confidence": number od 0 do 1, "reason": "stručný dôvod"}.`,
+        },
+        {
+          role: 'user',
+          content: `AKTÍVNY PROFIL:\n${buildProfilePromptBlock(profile, profile.type || profile.schema?.label || 'záverečná práca')}\n\nTYP KONTROLY: ${contextLabel}\n\nKONTROLOVANÝ VSTUP:\n${compactCandidate}`,
+        },
+      ],
+    });
+
+    const raw = extractJsonObject(completion.choices[0]?.message?.content || '{}');
+    const parsed = safeJsonParse<Record<string, unknown>>(raw, {});
+    const related = parsed.related === true;
+    const confidenceRaw = Number(parsed.confidence);
+    const confidence = Number.isFinite(confidenceRaw)
+      ? Math.max(0, Math.min(1, confidenceRaw))
+      : 0.5;
+    const reason = cleanClientVisibleText(String(parsed.reason || ''));
+
+    if (typeof parsed.related === 'boolean') {
+      return {
+        related,
+        confidence,
+        reason: `${contextLabel}: ${
+          reason ||
+          (related
+            ? 'vstup súvisí s aktívnym profilom.'
+            : 'vstup nesúvisí s aktívnym profilom.')
+        }`,
+        source: 'ai',
+      };
+    }
+  } catch (error) {
+    console.warn('DEFENSE_PROFILE_RELATION_CHECK_WARNING:', getErrorMessage(error));
+  }
+
+  if (heuristic) {
+    return {
+      ...heuristic,
+      reason: `${contextLabel}: ${heuristic.reason}`,
+    };
+  }
+
+  return {
+    related: false,
+    confidence: 0.5,
+    reason: `${contextLabel}: súvis s aktívnym profilom sa nepodarilo spoľahlivo overiť.`,
+    source: 'heuristic',
+  };
+}
+
+async function checkProfileRelation({
+  profile,
+  mode,
+  instruction,
+  workText,
+  supplementalFiles,
+}: {
+  profile: SavedProfile;
+  mode: 'presentation' | 'question';
+  instruction: string;
+  workText: string;
+  supplementalFiles: ReviewFileInfo[];
+}): Promise<ProfileRelationResult> {
+  const supplementalText = supplementalFiles
+    .filter((file) => file.extractionAvailable && file.text.trim())
+    .map((file) => `${file.name}\n${truncateText(file.text, 4_000).text}`)
+    .join('\n\n');
+
+  const evidenceText = [workText, supplementalText]
+    .filter(Boolean)
+    .join('\n\n');
+
+  if (evidenceText.trim()) {
+    const evidenceRelation = await classifyCandidateAgainstProfile({
+      profile,
+      candidateText: evidenceText,
+      contextLabel: 'Dokumenty a podklady',
+    });
+
+    if (!evidenceRelation.related) return evidenceRelation;
+  }
+
+  if (!isGenericDefenseInstruction(instruction, mode) && instruction.trim()) {
+    const instructionRelation = await classifyCandidateAgainstProfile({
+      profile,
+      candidateText: instruction,
+      contextLabel: mode === 'question' ? 'Otázka komisie' : 'Pokyn používateľa',
+    });
+
+    if (!instructionRelation.related) return instructionRelation;
+
+    return instructionRelation;
+  }
+
+  return {
+    related: true,
+    confidence: 1,
+    reason: evidenceText.trim()
+      ? 'Dokumenty súvisia s aktívnym profilom a pokyn je všeobecný pre obhajobu.'
+      : 'Obhajoba vychádza z aktívneho profilu a všeobecného pokynu.',
+    source: evidenceText.trim() ? 'ai' : 'profile-only',
+  };
+}
+
 function isWorkAttachmentForProfile(
   file: ReviewFileInfo,
   _profile: SavedProfile | null,
 ) {
-  /**
-   * Pri Obhajobe je nahratá práca autoritatívna sama o sebe.
-   * NESMIE sa odmietnuť iba preto, že sa tematicky nezhoduje s aktívnym
-   * profilom. Presne takáto profilová validácia spôsobovala, že po nahratí
-   * úplne inej práce vznikol rovnaký výstup ako z pôvodného profilu.
-   */
   if (!file.extractionAvailable || !file.text.trim()) return false;
 
   if (
@@ -1293,11 +1602,6 @@ function isSupplementalAttachmentForProfile(
   file: ReviewFileInfo,
   _profile: SavedProfile | null,
 ) {
-  /**
-   * Posudky, tabuľky a obrázky sú doplnkové podklady k aktuálnej požiadavke.
-   * Ani pri nich nerobíme profilovú tematickú bránu. Identitu práce určuje
-   * nahratý hlavný dokument; profil je iba fallback, keď hlavný dokument nie je.
-   */
   if (file.detectedKind === 'image') return true;
 
   if (file.detectedKind === 'review' || file.detectedKind === 'table') {
@@ -1424,6 +1728,21 @@ export async function POST(req: NextRequest) {
 
     const profile = safeJsonParse<SavedProfile | null>(activeProfileRaw, null);
 
+    if (!hasUsableDefenseProfile(profile)) {
+      return NextResponse.json<DefenseResponse>(
+        {
+          ok: false,
+          code: 'DEFENSE_PROFILE_REQUIRED',
+          mode: requestedMode,
+          error:
+            'Obhajoba musí byť prepojená s aktívnym profilom práce. Najprv vyberte alebo vytvorte profil s názvom alebo témou práce.',
+          detail:
+            'Bez aktívneho profilu sa obhajoba negeneruje, aby sa výstup nemohol priradiť k nesprávnej práci.',
+        },
+        { status: 400 },
+      );
+    }
+
     const uploadedReviewFiles = [
       ...formData.getAll('reviews'),
       ...formData.getAll('files'),
@@ -1471,8 +1790,7 @@ export async function POST(req: NextRequest) {
 
     /**
      * Starší klient môže poslať už extrahovaný text bez File objektu.
-     * Aj v tomto režime ho prijmeme bez porovnávania s profilom, pretože
-     * nahratý obsah má pri Obhajobe prednosť pred profilom.
+     * Aj tento text sa pred použitím overí voči aktívnemu profilu.
      */
     const clientTextAllowed =
       Boolean(clientExtractedText) && uploadedReviewFiles.length === 0;
@@ -1524,10 +1842,39 @@ export async function POST(req: NextRequest) {
     const hasPrimaryAttachment =
       workFiles.length > 0 || Boolean(acceptedClientExtractedText);
 
+    const relation = await checkProfileRelation({
+      profile,
+      mode: requestedMode,
+      instruction,
+      workText,
+      supplementalFiles,
+    });
+
+    if (!relation.related) {
+      const isUnverified = relation.confidence < 0.7;
+
+      return NextResponse.json<DefenseResponse>(
+        {
+          ok: false,
+          code: isUnverified
+            ? 'DEFENSE_PROFILE_RELATION_UNVERIFIED'
+            : 'DEFENSE_PROFILE_MISMATCH',
+          mode: requestedMode,
+          error: isUnverified
+            ? 'Súvis zadania alebo príloh s aktívnym profilom sa nepodarilo spoľahlivo overiť. Obhajoba nebola vygenerovaná.'
+            : 'Zadanie alebo nahratá práca nesúvisí s aktívnym profilom. Obhajoba nebola vygenerovaná.',
+          detail: `${relation.reason} Aktívny profil: ${profile.title || profile.topic || 'bez názvu'}. Vyberte správny profil alebo použite podklady patriace k tomuto profilu.`,
+        },
+        { status: 422 },
+      );
+    }
+
     const attachmentTitleHint = getAttachmentTitleHint(workFiles);
-    const finalTitle = hasPrimaryAttachment
-      ? attachmentTitleHint || 'Obhajoba podľa nahratej práce'
-      : profileFallbackTitle;
+    const finalTitle =
+      cleanClientVisibleText(profile.title || '') ||
+      cleanClientVisibleText(profile.topic || '') ||
+      attachmentTitleHint ||
+      profileFallbackTitle;
 
     const reviewsBlock = buildReviewsPromptBlock(supplementalFiles);
 
@@ -1546,7 +1893,7 @@ export async function POST(req: NextRequest) {
       const fallback = buildFallbackDefenseResponse({
         finalTitle,
         defenseType,
-        profile: hasPrimaryAttachment ? null : profile,
+        profile,
         reviewFiles,
         hasWorkText,
         warning:
@@ -1759,7 +2106,7 @@ export async function POST(req: NextRequest) {
       slides = buildFallbackSlides({
         title: finalTitle,
         defenseType,
-        profile: hasPrimaryAttachment ? null : profile,
+        profile,
         reviewFilesCount: supplementalFiles.length,
         hasWorkText,
       });
@@ -1770,7 +2117,7 @@ export async function POST(req: NextRequest) {
       slides = buildFallbackSlides({
         title: finalTitle,
         defenseType,
-        profile: hasPrimaryAttachment ? null : profile,
+        profile,
         reviewFilesCount: supplementalFiles.length,
         hasWorkText,
       });

@@ -3613,6 +3613,15 @@ function isBrowserFileLike(value: unknown): value is File {
   );
 }
 
+function hasDefenseProfileIdentity(profile: SavedProfile | null): boolean {
+  if (!profile) return false;
+
+  return Boolean(
+    String(profile.title || "").trim() ||
+      String(profile.topic || "").trim(),
+  );
+}
+
 function createClientRequestId(prefix = "defense"): string {
   const id =
     typeof crypto !== "undefined" &&
@@ -4298,6 +4307,15 @@ export default function DefenseFrontend(
   const agent = defaultAgent;
   const { t } = useLanguage();
 
+  /**
+   * Profil odovzdaný spoločným runtime je prvý zdroj aktívneho profilu.
+   * LocalStorage zostáva iba fallback pre samostatné otvorenie modulu.
+   */
+  const runtimeProfile = useMemo(
+    () => normalizeProfile(_runtimeProps.profile),
+    [_runtimeProps.profile],
+  );
+
   const [activeModule, setActiveModule] = useState<ModuleKey>(moduleKey);
 
   /**
@@ -4324,7 +4342,9 @@ export default function DefenseFrontend(
     }
   }, [activeModule, moduleKey]);
 
-  const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(null);
+  const [activeProfile, setActiveProfile] = useState<SavedProfile | null>(
+    runtimeProfile,
+  );
 
   const [input, setInput] = useState("");
   const [secondaryInput, setSecondaryInput] = useState("");
@@ -5303,6 +5323,33 @@ export default function DefenseFrontend(
   }
 
   useEffect(() => {
+    if (!runtimeProfile) return;
+
+    const currentSystemLanguage = getStoredSystemLanguage();
+    const normalizedRuntimeProfile = prepareProfileForApi(
+      runtimeProfile,
+      currentSystemLanguage,
+    );
+
+    if (!normalizedRuntimeProfile) return;
+
+    setActiveProfile(normalizedRuntimeProfile);
+
+    try {
+      localStorage.setItem(
+        "active_profile",
+        JSON.stringify(normalizedRuntimeProfile),
+      );
+      localStorage.setItem(
+        "profile",
+        JSON.stringify(normalizedRuntimeProfile),
+      );
+    } catch {
+      // Modul funguje aj bez localStorage.
+    }
+  }, [runtimeProfile]);
+
+  useEffect(() => {
     function handleActiveProfileChanged(event: Event) {
       const customEvent = event as CustomEvent<SavedProfile>;
 
@@ -5352,7 +5399,7 @@ export default function DefenseFrontend(
     const active = normalizeProfile(safeJsonParse<any>(activeRaw));
     const profile = normalizeProfile(safeJsonParse<any>(profileRaw));
 
-    const selectedProfile = active || profile || null;
+    const selectedProfile = runtimeProfile || active || profile || null;
 
     const profileWithLanguage = prepareProfileForApi(
       selectedProfile,
@@ -5368,7 +5415,7 @@ export default function DefenseFrontend(
       );
       localStorage.setItem("profile", JSON.stringify(profileWithLanguage));
     }
-  }, []);
+  }, [runtimeProfile]);
 
   useEffect(() => {
     setInput("");
@@ -5776,7 +5823,7 @@ DÔLEŽITÉ PRAVIDLÁ PRE VŠETKY MODULY:
 - Nevymýšľaj zdroje, autorov, DOI, URL, roky ani vydavateľov.
 - Ak chýba alebo nie je možné bezpečne potvrdiť údaj, napíš presne: Údaje sú potrebné overiť.
 - Ak sú priložené súbory, najprv over, či súvisia s aktívnym profilom práce.
-- Ak priložený dokument pravdepodobne nesúvisí s profilom práce, uveď upozornenie, ale pri výslovnej požiadavke používateľa dokument napriek tomu prečítaj a spracuj.
+- Ak priložený dokument nesúvisí s aktívnym profilom práce, nesmie sa použiť na vytvorenie obhajoby pre tento profil.
 - Ak príloha súvisí s profilom práce, použi jej extrahovaný text ako hlavný podklad.
 - Ak sú priložené súbory, v závere uveď, z ktorých príloh sa čerpalo.
 - Citačná norma: ${citationStyle}.
@@ -5933,7 +5980,7 @@ Priprav kompletnú obhajobu práce. Musí vzniknúť aj prezentácia, aj sprievo
 AKTÍVNY PROFIL PRÁCE JE HLAVNÁ KOTVA:
 - názov, téma, typ práce, odbor, cieľ, metodológia a jazyk sa vždy riadia aktívnym profilom práce,
 - príloha nesmie zmeniť tému ani názov práce,
-- nesúvisiacu prílohu ignoruj,
+- ak príloha alebo používateľský pokyn nesúvisí s aktívnym profilom, obhajobu negeneruj a zobraz jasnú informáciu, že vstup s profilom nesúvisí,
 - posudok alebo otázky komisie používaj iba ako doplnkový podklad k aktívnej práci.
 
 POKYN POUŽÍVATEĽA:
@@ -5943,7 +5990,7 @@ POVINNÉ SPRACOVANIE POKYNU:
 - ak používateľ žiada doplniť otázku z posudku, pripomienku, odpoveď alebo konkrétnu úpravu obhajoby, túto požiadavku musíš zapracovať,
 - negeneruj iba všeobecnú prezentáciu a neignoruj text z chatového poľa,
 - otázku z posudku vlož do časti otázok komisie a priprav k nej vecnú odpoveď naviazanú na profil práce a dostupný text práce,
-- ak pokyn používateľa odporuje nesúvisiacej prílohe, uprednostni aktívny profil práce a samotný pokyn.
+- pokyn používateľa spracuj iba vtedy, keď ide o obhajobu aktívneho profilu; nesúvisiacu požiadavku nepripájaj k tejto práci.
 
 ZAČIATOK ODPOVEDE:
 Začni priamo názvom práce:
@@ -6380,6 +6427,18 @@ Text emailu:
       persistSystemLanguage(systemLanguage);
 
       const profileForApi = prepareProfileForApi(activeProfile, systemLanguage);
+
+      if (
+        requestedModule === "defense" &&
+        !hasDefenseProfileIdentity(profileForApi)
+      ) {
+        throw new DashboardApiError({
+          status: 400,
+          code: "DEFENSE_PROFILE_REQUIRED",
+          message:
+            "Obhajoba musí byť prepojená s aktívnym profilom práce. Najprv vyberte alebo vytvorte profil s názvom alebo témou práce.",
+        });
+      }
 
       const finalWorkLanguage = getWorkLanguage(profileForApi);
       const prompt = buildModulePrompt(requestedModule);
@@ -7033,18 +7092,13 @@ Text emailu:
         formData.append("content", userText);
 
         /**
-         * Ak je priložená práca, jej obsah je primárny zdroj identity obhajoby.
-         * Starý názov z aktívneho profilu preto neposielame ako pevný title,
-         * aby nemohol prebiť úplne inú nahratú prácu.
+         * Aktívny profil je záväzná identita obhajovanej práce. Nahratá práca
+         * musí patriť k tomuto profilu; server ju pred generovaním tematicky
+         * overí a pri nesúlade vráti DEFENSE_PROFILE_MISMATCH.
          */
-        formData.append(
-          "title",
-          hasDefenseAttachments ? "" : profileForApi?.title || "",
-        );
-        formData.append(
-          "attachmentPriority",
-          hasDefenseAttachments ? "primary" : "profile-fallback",
-        );
+        formData.append("title", profileForApi?.title || "");
+        formData.append("attachmentPriority", "profile-validated");
+        formData.append("enforceProfileRelation", "true");
         formData.append("defenseType", getWorkType(profileForApi));
         formData.append("workType", getWorkType(profileForApi));
         formData.append(
@@ -7096,8 +7150,7 @@ Text emailu:
       /**
        * Pri Obhajobe neposielame zlúčený text všetkých príloh ako anonymný
        * "clientExtractedText". Server dostane skutočné File objekty, zachová
-       * identitu jednotlivých súborov a nahratú hlavnú prácu použije ako
-       * autoritatívny obsah bez tematického porovnávania s aktívnym profilom.
+       * identitu jednotlivých súborov a overí ich súvis s aktívnym profilom.
        */
       if (clientExtractedText && requestedModule !== "defense") {
         formData.append(
@@ -7143,10 +7196,7 @@ Text emailu:
         "profileSnapshot",
         JSON.stringify({
           id: profileForApi?.id || null,
-          title:
-            requestedModule === "defense" && hasDefenseAttachments
-              ? ""
-              : profileForApi?.title || "",
+          title: profileForApi?.title || "",
           topic: profileForApi?.topic || "",
           type: getWorkType(profileForApi),
           expertise: getExpertise(profileForApi),
@@ -7158,7 +7208,10 @@ Text emailu:
       formData.append("citation", getCitationStyle(profileForApi));
       formData.append("useSemanticScholar", "false");
       formData.append("sourceMode", "none");
-      formData.append("validateAttachmentsAgainstProfile", "false");
+      formData.append(
+        "validateAttachmentsAgainstProfile",
+        requestedModule === "defense" ? "true" : "false",
+      );
       formData.append("requireSourceList", "false");
       formData.append(
         "allowAiKnowledgeFallback",
@@ -7169,13 +7222,10 @@ Text emailu:
       formData.append("returnExtractedFilesInfo", "true");
 
       if (requestedModule === "defense") {
-        formData.append(
-          "profileIsAuthoritative",
-          hasDefenseAttachments ? "false" : "true",
-        );
+        formData.append("profileIsAuthoritative", "true");
         formData.append(
           "attachmentRole",
-          hasDefenseAttachments ? "primary" : "context",
+          hasDefenseAttachments ? "profile-evidence" : "profile-context",
         );
       }
       formData.append("contextaCitationFormat", "false");
@@ -7277,10 +7327,7 @@ Text emailu:
         activeProfile: profileForApi || null,
         profileSnapshot: {
           id: profileForApi?.id || null,
-          title:
-            requestedModule === "defense" && hasDefenseAttachments
-              ? ""
-              : profileForApi?.title || "",
+          title: profileForApi?.title || "",
           topic: profileForApi?.topic || "",
           type: getWorkType(profileForApi),
           expertise: getExpertise(profileForApi),
@@ -7290,10 +7337,7 @@ Text emailu:
         profileContext: buildProfileBlock(profileForApi),
         projectId: profileForApi?.id || undefined,
         profileId: profileForApi?.id || undefined,
-        title:
-          requestedModule === "defense" && hasDefenseAttachments
-            ? ""
-            : profileForApi?.title || "",
+        title: profileForApi?.title || "",
         workType: getWorkType(profileForApi),
         citation: getCitationStyle(profileForApi),
         citationStyle: getCitationStyle(profileForApi),
@@ -7322,18 +7366,18 @@ Text emailu:
         useCrossref: false,
         appendBibliography: false,
         returnSources: false,
-        validateAttachmentsAgainstProfile: false,
+        validateAttachmentsAgainstProfile: requestedModule === "defense",
+        enforceProfileRelation: requestedModule === "defense",
         allowAiKnowledgeFallback: requestedModule !== "defense",
         extractUploadedText: true,
         useExtractedTextFirst: true,
         returnExtractedFilesInfo: true,
-        profileIsAuthoritative:
-          requestedModule === "defense" ? !hasDefenseAttachments : false,
+        profileIsAuthoritative: requestedModule === "defense",
         attachmentRole:
           requestedModule === "defense"
             ? hasDefenseAttachments
-              ? "primary"
-              : "context"
+              ? "profile-evidence"
+              : "profile-context"
             : "context",
         moduleSettings: {
           activeModule: requestedModule,
@@ -7695,6 +7739,24 @@ Text emailu:
 
         if (!isCurrentModuleRun()) {
           await loadBillingState();
+          return;
+        }
+
+        if (
+          error.code === "DEFENSE_PROFILE_MISMATCH" ||
+          error.code === "DEFENSE_PROFILE_REQUIRED" ||
+          error.code === "DEFENSE_PROFILE_RELATION_UNVERIFIED"
+        ) {
+          setBillingNotice(null);
+          setDefenseSlides([]);
+          setDefenseQuestionAnswer(null);
+          setCanvasText("");
+          setCanvasOpen(false);
+          setResult(
+            [error.message, error.detail || ""]
+              .filter(Boolean)
+              .join("\n\n"),
+          );
           return;
         }
 

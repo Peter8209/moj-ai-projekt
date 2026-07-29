@@ -45,7 +45,240 @@ export type SendOrderConfirmationEmailResult = {
   reason: string | null;
 };
 
-const EMAIL_SUBJECT = "Tvoja objednávka je potvrdená – vitaj v Zedpere";
+
+type EmailLanguage = "sk" | "cs" | "en" | "de" | "pl" | "hu";
+
+type EmailStep = {
+  title: string;
+  text: string;
+};
+
+type OrderEmailCopy = {
+  subject: string;
+  preheader: string;
+  headingLine1: string;
+  headingLine2: string;
+  greeting: (customerName: string) => string;
+  thankYou: string;
+  intro1: string;
+  intro2: string;
+  stepsIntro: string;
+  steps: EmailStep[];
+  closing: string;
+  team: string;
+  cta: string;
+  footer: string;
+  orderSummaryTitle: string;
+  orderNumber: string;
+  paidAmount: string;
+  fallbackOrderName: string;
+};
+
+const EMAIL_COPY: Record<EmailLanguage, OrderEmailCopy> = {
+  sk: {
+    subject: "Tvoja objednávka je potvrdená – vitaj v Zedpere",
+    preheader: "Tvoja objednávka bola úspešne potvrdená a zakúpený prístup je pripravený.",
+    headingLine1: "Tvoja objednávka je potvrdená,",
+    headingLine2: "vitaj v Zedpere",
+    greeting: (customerName) => customerName ? `Čau ${customerName},` : "Čau,",
+    thankYou: "ďakujeme za prejavenú dôveru a využitie našich služieb.",
+    intro1: "Zedpera je úplne prvý akademický nástroj, s ktorým napíšeš celú prácu od teoretickej až po praktickú časť. Nevymýšľa si zdroje, negeneruje robotické texty, ale vytvára kvalitné výstupy, ktoré môžeš reálne použiť. Ušetrí ti množstvo času, nahradí školiteľa a dokonale ťa pripraví na obhajobu. Celú prácu napíšeš za pár dní bez akéhokoľvek podvádzania.",
+    intro2: "Zedpera sa stane tvojím osobným asistentom. Vychádza z tvojich zdrojov. Ak žiadne nemáš, nevadí, vyhľadáš ich u nás v databáze. Nemusíš byť technicky zdatný, systém je jednoduchý a zvládne ho naozaj každý.",
+    stepsIntro: "Vitaj v Zedpere! Tu je 11 krokov, ako získať z platformy maximum a napísať skvelú prácu:",
+    steps: [
+      { title: "Nastav si profil práce.", text: "Čím viac informácií o téme a zadaní vyplníš, tým relevantnejšie výstupy dostaneš." },
+      { title: "Pracuj so zdrojmi.", text: "Ak máš vlastné zdroje, vlož ich priamo do chatu. Ak ešte hľadáš, využi našu sekciu Zdroje." },
+      { title: "Prekladaj okamžite.", text: "Našiel si skvelý zdroj v angličtine? Prelož si ho priamo u nás bez prepínania okien." },
+      { title: "Vedúci práce k dispozícii 24/7.", text: "Keď sa zasekneš alebo školiteľ neodpisuje, náš pomocník je tu pre teba vždy, keď potrebuješ radu." },
+      { title: "Audit kvality na počkanie.", text: "Chceš vedieť, či je tvoj text v poriadku? Spusti audit a za pár sekúnd získaš spätnú väzbu, čo vylepšiť." },
+      { title: "Analýza dát v kocke.", text: "Nahraj dáta v Exceli a nechaj si pripraviť štatistiky, grafy či testovanie hypotéz. Štatistu už nebudeš potrebovať." },
+      { title: "Humanizácia textu.", text: "Potrebuješ upraviť tón práce, aby pôsobila prirodzenejšie? Náš nástroj ti pomôže upraviť štylistiku podľa potreby." },
+      { title: "Komunikácia na úrovni.", text: "Potrebuješ napísať vedúcemu práce? Zedpera ti pomôže sformulovať profesionálny e-mail, ktorý určite zaujme." },
+      { title: "Plánovanie bez stresu.", text: "Využi náš plánovač, ktorý ti rozvrhne prácu na menšie úlohy, aby si všetky termíny stihol s prehľadom." },
+      { title: "Záverečná príprava na obhajobu.", text: "Nahraj hotovú prácu do systému a vygeneruj si kompletnú obhajobu vrátane poznámok k prezentácii." },
+      { title: "Máš hotovo!", text: "Gratulujeme, zvládol si to." },
+    ],
+    closing: "Držíme palce pri písaní aj obhajobe.",
+    team: "Tím Zedpera",
+    cta: "Pusti sa do toho",
+    footer: "Tento e-mail bol odoslaný automaticky po potvrdení objednávky.",
+    orderSummaryTitle: "Údaje o objednávke",
+    orderNumber: "Číslo objednávky",
+    paidAmount: "Uhradená suma",
+    fallbackOrderName: "Objednávka ZEDPERA",
+  },
+  cs: {
+    subject: "Tvoje objednávka je potvrzena – vítej v Zedpeře",
+    preheader: "Tvoje objednávka byla úspěšně potvrzena a zakoupený přístup je připraven.",
+    headingLine1: "Tvoje objednávka je potvrzena,",
+    headingLine2: "vítej v Zedpeře",
+    greeting: (customerName) => customerName ? `Ahoj ${customerName},` : "Ahoj,",
+    thankYou: "děkujeme za projevenou důvěru a využití našich služeb.",
+    intro1: "Zedpera je akademický nástroj, se kterým zvládneš celou práci od teoretické až po praktickou část. Nevymýšlí si zdroje, negeneruje robotické texty, ale vytváří kvalitní výstupy, které můžeš skutečně použít. Ušetří ti spoustu času, pomůže ti jako osobní vedoucí a důkladně tě připraví na obhajobu. Celou práci můžeš připravit během několika dnů bez jakéhokoli podvádění.",
+    intro2: "Zedpera se stane tvým osobním asistentem. Vychází z tvých zdrojů. Pokud žádné nemáš, nevadí – můžeš je vyhledat v naší databázi. Nemusíš být technicky zdatný, systém je jednoduchý a zvládne ho opravdu každý.",
+    stepsIntro: "Vítej v Zedpeře! Tady je 11 kroků, jak z platformy získat maximum a napsat skvělou práci:",
+    steps: [
+      { title: "Nastav si profil práce.", text: "Čím více informací o tématu a zadání vyplníš, tím relevantnější výstupy dostaneš." },
+      { title: "Pracuj se zdroji.", text: "Máš-li vlastní zdroje, vlož je přímo do chatu. Pokud je teprve hledáš, využij naši sekci Zdroje." },
+      { title: "Překládej okamžitě.", text: "Našel jsi skvělý zdroj v angličtině? Přelož si ho přímo u nás bez přepínání oken." },
+      { title: "Vedoucí práce k dispozici 24/7.", text: "Když se zasekneš nebo vedoucí neodpovídá, náš pomocník je tu pro tebe vždy, když potřebuješ poradit." },
+      { title: "Audit kvality na počkání.", text: "Chceš vědět, jestli je tvůj text v pořádku? Spusť audit a během několika sekund získáš zpětnou vazbu, co vylepšit." },
+      { title: "Analýza dat v kostce.", text: "Nahraj data v Excelu a nech si připravit statistiky, grafy nebo testování hypotéz. Statistika už nebudeš potřebovat." },
+      { title: "Humanizace textu.", text: "Potřebuješ upravit tón práce, aby působila přirozeněji? Náš nástroj ti pomůže upravit styl podle potřeby." },
+      { title: "Komunikace na úrovni.", text: "Potřebuješ napsat vedoucímu práce? Zedpera ti pomůže formulovat profesionální e-mail, který zaujme." },
+      { title: "Plánování bez stresu.", text: "Využij náš plánovač, který rozdělí práci na menší úkoly, abys všechny termíny zvládl s přehledem." },
+      { title: "Závěrečná příprava na obhajobu.", text: "Nahraj hotovou práci do systému a vygeneruj si kompletní obhajobu včetně poznámek k prezentaci." },
+      { title: "Máš hotovo!", text: "Gratulujeme, zvládl jsi to." },
+    ],
+    closing: "Držíme palce při psaní i obhajobě.",
+    team: "Tým Zedpera",
+    cta: "Pusť se do toho",
+    footer: "Tento e-mail byl odeslán automaticky po potvrzení objednávky.",
+    orderSummaryTitle: "Údaje o objednávce",
+    orderNumber: "Číslo objednávky",
+    paidAmount: "Uhrazená částka",
+    fallbackOrderName: "Objednávka ZEDPERA",
+  },
+  en: {
+    subject: "Your order is confirmed – welcome to Zedpera",
+    preheader: "Your order has been successfully confirmed and your purchased access is ready.",
+    headingLine1: "Your order is confirmed,",
+    headingLine2: "welcome to Zedpera",
+    greeting: (customerName) => customerName ? `Hi ${customerName},` : "Hi,",
+    thankYou: "thank you for your trust and for choosing our services.",
+    intro1: "Zedpera is an academic tool that helps you create your entire paper, from the theoretical section to the practical part. It does not invent sources or generate robotic text; instead, it creates high-quality outputs you can genuinely use. It saves you a great deal of time, acts as your personal academic assistant, and helps you prepare thoroughly for your defense. You can complete your paper in just a few days without any cheating.",
+    intro2: "Zedpera becomes your personal assistant and works with your own sources. If you do not have any yet, that is fine – you can find them in our database. You do not need to be technically skilled; the system is simple and designed so that anyone can use it.",
+    stepsIntro: "Welcome to Zedpera! Here are 11 steps to get the most from the platform and write an excellent paper:",
+    steps: [
+      { title: "Set up your paper profile.", text: "The more information you provide about your topic and assignment, the more relevant your results will be." },
+      { title: "Work with sources.", text: "If you have your own sources, upload them directly to the chat. If you are still searching, use our Sources section." },
+      { title: "Translate instantly.", text: "Found a great source in another language? Translate it directly in Zedpera without switching windows." },
+      { title: "Academic supervisor available 24/7.", text: "When you get stuck or your supervisor does not reply, our assistant is always available when you need guidance." },
+      { title: "Quality audit on demand.", text: "Want to know whether your text is good enough? Run the audit and receive feedback within seconds on what to improve." },
+      { title: "Data analysis made simple.", text: "Upload your Excel data and generate statistics, charts, or hypothesis tests. You will not need a separate statistician." },
+      { title: "Text humanization.", text: "Need your paper to sound more natural? Our tool helps you adjust the tone and style as needed." },
+      { title: "Professional communication.", text: "Need to write to your supervisor? Zedpera helps you create a professional e-mail that makes a strong impression." },
+      { title: "Stress-free planning.", text: "Use our planner to break your work into smaller tasks so you can meet every deadline with confidence." },
+      { title: "Final defense preparation.", text: "Upload your finished paper and generate complete defense materials, including presentation notes." },
+      { title: "You are done!", text: "Congratulations, you made it." },
+    ],
+    closing: "We wish you every success with your writing and defense.",
+    team: "The Zedpera Team",
+    cta: "Get started",
+    footer: "This e-mail was sent automatically after your order was confirmed.",
+    orderSummaryTitle: "Order details",
+    orderNumber: "Order number",
+    paidAmount: "Amount paid",
+    fallbackOrderName: "ZEDPERA order",
+  },
+  de: {
+    subject: "Deine Bestellung ist bestätigt – willkommen bei Zedpera",
+    preheader: "Deine Bestellung wurde erfolgreich bestätigt und dein gekaufter Zugang ist bereit.",
+    headingLine1: "Deine Bestellung ist bestätigt,",
+    headingLine2: "willkommen bei Zedpera",
+    greeting: (customerName) => customerName ? `Hallo ${customerName},` : "Hallo,",
+    thankYou: "vielen Dank für dein Vertrauen und dafür, dass du unsere Dienste nutzt.",
+    intro1: "Zedpera ist ein akademisches Werkzeug, mit dem du deine gesamte Arbeit von der Theorie bis zum praktischen Teil erstellen kannst. Es erfindet keine Quellen und erzeugt keine roboterhaften Texte, sondern hochwertige Ergebnisse, die du tatsächlich verwenden kannst. Du sparst viel Zeit, erhältst einen persönlichen akademischen Assistenten und kannst dich gründlich auf deine Verteidigung vorbereiten. Deine Arbeit kannst du in wenigen Tagen fertigstellen – ohne zu schummeln.",
+    intro2: "Zedpera wird zu deinem persönlichen Assistenten und arbeitet mit deinen eigenen Quellen. Wenn du noch keine hast, ist das kein Problem – du kannst sie in unserer Datenbank suchen. Du musst technisch nicht versiert sein; das System ist einfach und wirklich für jeden geeignet.",
+    stepsIntro: "Willkommen bei Zedpera! Hier sind 11 Schritte, mit denen du das Maximum aus der Plattform holst und eine hervorragende Arbeit schreibst:",
+    steps: [
+      { title: "Richte dein Arbeitsprofil ein.", text: "Je mehr Informationen du zu Thema und Aufgabenstellung angibst, desto relevanter werden deine Ergebnisse." },
+      { title: "Arbeite mit Quellen.", text: "Wenn du eigene Quellen hast, lade sie direkt in den Chat. Wenn du noch suchst, nutze unseren Bereich Quellen." },
+      { title: "Übersetze sofort.", text: "Du hast eine großartige Quelle in einer anderen Sprache gefunden? Übersetze sie direkt bei uns, ohne zwischen Fenstern zu wechseln." },
+      { title: "Akademischer Betreuer rund um die Uhr.", text: "Wenn du nicht weiterkommst oder dein Betreuer nicht antwortet, ist unser Assistent jederzeit für dich da." },
+      { title: "Qualitätsaudit auf Knopfdruck.", text: "Möchtest du wissen, ob dein Text passt? Starte das Audit und erhalte innerhalb weniger Sekunden Feedback zu möglichen Verbesserungen." },
+      { title: "Datenanalyse kompakt.", text: "Lade deine Excel-Daten hoch und erstelle Statistiken, Diagramme oder Hypothesentests. Einen separaten Statistiker brauchst du nicht mehr." },
+      { title: "Texthumanisierung.", text: "Soll deine Arbeit natürlicher klingen? Unser Tool hilft dir, Ton und Stil entsprechend anzupassen." },
+      { title: "Professionelle Kommunikation.", text: "Du musst deinem Betreuer schreiben? Zedpera hilft dir, eine professionelle E-Mail zu formulieren, die überzeugt." },
+      { title: "Stressfreie Planung.", text: "Nutze unseren Planer, der deine Arbeit in kleinere Aufgaben aufteilt, damit du alle Fristen im Blick behältst." },
+      { title: "Abschließende Vorbereitung auf die Verteidigung.", text: "Lade deine fertige Arbeit hoch und erstelle vollständige Unterlagen für die Verteidigung einschließlich Präsentationsnotizen." },
+      { title: "Fertig!", text: "Herzlichen Glückwunsch, du hast es geschafft." },
+    ],
+    closing: "Wir wünschen dir viel Erfolg beim Schreiben und bei der Verteidigung.",
+    team: "Dein Zedpera-Team",
+    cta: "Jetzt loslegen",
+    footer: "Diese E-Mail wurde nach der Bestätigung deiner Bestellung automatisch versendet.",
+    orderSummaryTitle: "Bestelldetails",
+    orderNumber: "Bestellnummer",
+    paidAmount: "Bezahlter Betrag",
+    fallbackOrderName: "ZEDPERA-Bestellung",
+  },
+  pl: {
+    subject: "Twoje zamówienie zostało potwierdzone – witaj w Zedpera",
+    preheader: "Twoje zamówienie zostało pomyślnie potwierdzone, a zakupiony dostęp jest już gotowy.",
+    headingLine1: "Twoje zamówienie zostało potwierdzone,",
+    headingLine2: "witaj w Zedpera",
+    greeting: (customerName) => customerName ? `Cześć ${customerName},` : "Cześć,",
+    thankYou: "dziękujemy za zaufanie i skorzystanie z naszych usług.",
+    intro1: "Zedpera to narzędzie akademickie, z którym przygotujesz całą pracę – od części teoretycznej aż po praktyczną. Nie wymyśla źródeł i nie generuje sztucznych, robotycznych tekstów, lecz tworzy wysokiej jakości materiały, które możesz realnie wykorzystać. Oszczędza mnóstwo czasu, działa jak osobisty asystent akademicki i kompleksowo przygotowuje do obrony. Całą pracę możesz przygotować w kilka dni, bez żadnego oszukiwania.",
+    intro2: "Zedpera stanie się Twoim osobistym asystentem i pracuje na podstawie Twoich źródeł. Jeśli jeszcze ich nie masz, nic nie szkodzi – wyszukasz je w naszej bazie. Nie musisz być osobą techniczną; system jest prosty i naprawdę każdy może z niego korzystać.",
+    stepsIntro: "Witaj w Zedpera! Oto 11 kroków, dzięki którym wykorzystasz platformę w pełni i napiszesz świetną pracę:",
+    steps: [
+      { title: "Ustaw profil pracy.", text: "Im więcej informacji o temacie i wymaganiach podasz, tym bardziej trafne wyniki otrzymasz." },
+      { title: "Pracuj ze źródłami.", text: "Jeśli masz własne źródła, dodaj je bezpośrednio do czatu. Jeśli dopiero ich szukasz, skorzystaj z sekcji Źródła." },
+      { title: "Tłumacz od razu.", text: "Znalazłeś świetne źródło w innym języku? Przetłumacz je bezpośrednio u nas, bez przełączania okien." },
+      { title: "Promotor dostępny 24/7.", text: "Gdy utkniesz lub promotor nie odpowiada, nasz asystent jest dostępny zawsze, kiedy potrzebujesz wskazówki." },
+      { title: "Audyt jakości od ręki.", text: "Chcesz sprawdzić, czy Twój tekst jest w porządku? Uruchom audyt i w kilka sekund otrzymasz informację, co warto poprawić." },
+      { title: "Analiza danych w prosty sposób.", text: "Prześlij dane z Excela i przygotuj statystyki, wykresy lub testy hipotez. Nie będziesz już potrzebować osobnego statystyka." },
+      { title: "Humanizacja tekstu.", text: "Chcesz, aby praca brzmiała bardziej naturalnie? Nasze narzędzie pomoże dostosować ton i styl do potrzeb." },
+      { title: "Profesjonalna komunikacja.", text: "Musisz napisać do promotora? Zedpera pomoże Ci przygotować profesjonalną wiadomość e-mail, która zrobi dobre wrażenie." },
+      { title: "Planowanie bez stresu.", text: "Skorzystaj z planera, który podzieli pracę na mniejsze zadania, aby wszystkie terminy były pod kontrolą." },
+      { title: "Końcowe przygotowanie do obrony.", text: "Prześlij gotową pracę i wygeneruj kompletne materiały do obrony, w tym notatki do prezentacji." },
+      { title: "Gotowe!", text: "Gratulacje, udało Ci się." },
+    ],
+    closing: "Trzymamy kciuki za pisanie i obronę.",
+    team: "Zespół Zedpera",
+    cta: "Zaczynamy",
+    footer: "Ta wiadomość e-mail została wysłana automatycznie po potwierdzeniu zamówienia.",
+    orderSummaryTitle: "Szczegóły zamówienia",
+    orderNumber: "Numer zamówienia",
+    paidAmount: "Zapłacona kwota",
+    fallbackOrderName: "Zamówienie ZEDPERA",
+  },
+  hu: {
+    subject: "Megrendelésed visszaigazolva – üdvözlünk a Zedperában",
+    preheader: "Megrendelésed sikeresen visszaigazolva, a megvásárolt hozzáférés készen áll.",
+    headingLine1: "Megrendelésed visszaigazolva,",
+    headingLine2: "üdvözlünk a Zedperában",
+    greeting: (customerName) => customerName ? `Szia ${customerName},` : "Szia,",
+    thankYou: "köszönjük a bizalmadat és hogy szolgáltatásainkat választottad.",
+    intro1: "A Zedpera egy akadémiai eszköz, amellyel a teljes dolgozatodat elkészítheted az elméleti résztől egészen a gyakorlati részig. Nem talál ki forrásokat és nem gépies szövegeket generál, hanem valóban felhasználható, minőségi eredményeket készít. Rengeteg időt takarít meg, személyes akadémiai asszisztensként segít, és alaposan felkészít a védésre. A teljes dolgozatot akár néhány nap alatt elkészítheted csalás nélkül.",
+    intro2: "A Zedpera a személyes asszisztenseddé válik, és a saját forrásaidból dolgozik. Ha még nincsenek forrásaid, az sem gond – megkeresheted őket az adatbázisunkban. Nem kell műszaki beállítottságúnak lenned; a rendszer egyszerű, és valóban bárki tudja használni.",
+    stepsIntro: "Üdvözlünk a Zedperában! Íme 11 lépés, amellyel a legtöbbet hozhatod ki a platformból és kiváló dolgozatot írhatsz:",
+    steps: [
+      { title: "Állítsd be a dolgozat profilját.", text: "Minél több információt adsz meg a témáról és a feladatról, annál relevánsabb eredményeket kapsz." },
+      { title: "Dolgozz forrásokkal.", text: "Ha vannak saját forrásaid, töltsd fel őket közvetlenül a chatbe. Ha még keresel, használd a Források részt." },
+      { title: "Fordíts azonnal.", text: "Találtál egy nagyszerű idegen nyelvű forrást? Fordítsd le közvetlenül nálunk, ablakváltás nélkül." },
+      { title: "Akadémiai témavezető 24/7.", text: "Ha elakadsz vagy a témavezetőd nem válaszol, asszisztensünk bármikor rendelkezésedre áll, amikor tanácsra van szükséged." },
+      { title: "Minőségi audit azonnal.", text: "Szeretnéd tudni, rendben van-e a szöveged? Indíts auditot, és néhány másodperc alatt visszajelzést kapsz a javítandó részekről." },
+      { title: "Adatelemzés egyszerűen.", text: "Töltsd fel az Excel-adataidat, és készíts statisztikákat, grafikonokat vagy hipotézisvizsgálatokat. Külön statisztikusra nem lesz szükséged." },
+      { title: "Szöveghumanizálás.", text: "Szeretnéd, hogy a dolgozat természetesebben hangozzon? Eszközünk segít a hangnem és a stílus megfelelő alakításában." },
+      { title: "Professzionális kommunikáció.", text: "Írnod kell a témavezetődnek? A Zedpera segít professzionális e-mailt megfogalmazni." },
+      { title: "Stresszmentes tervezés.", text: "Használd a tervezőnket, amely kisebb feladatokra bontja a munkát, hogy minden határidőt átláthatóan teljesíts." },
+      { title: "Végső felkészülés a védésre.", text: "Töltsd fel a kész dolgozatot, és generálj teljes védési anyagot, beleértve a prezentációs jegyzeteket is." },
+      { title: "Kész vagy!", text: "Gratulálunk, sikerült." },
+    ],
+    closing: "Sok sikert kívánunk az íráshoz és a védéshez.",
+    team: "A Zedpera csapata",
+    cta: "Kezdj hozzá",
+    footer: "Ezt az e-mailt a megrendelés visszaigazolása után automatikusan küldtük.",
+    orderSummaryTitle: "Megrendelés adatai",
+    orderNumber: "Megrendelés száma",
+    paidAmount: "Fizetett összeg",
+    fallbackOrderName: "ZEDPERA-megrendelés",
+  },
+};
+
+function getEmailLanguage(locale: string): EmailLanguage {
+  const normalized = locale.toLowerCase();
+
+  if (normalized.startsWith("cs")) return "cs";
+  if (normalized.startsWith("en")) return "en";
+  if (normalized.startsWith("de")) return "de";
+  if (normalized.startsWith("pl")) return "pl";
+  if (normalized.startsWith("hu")) return "hu";
+  return "sk";
+}
 
 const DEFAULT_LOCALE = "sk-SK";
 const DEFAULT_CURRENCY = "eur";
@@ -256,6 +489,7 @@ function getOrderLines(
   session: Stripe.Checkout.Session,
   planId: PaidPlanId | null,
   addonIds: AddonId[],
+  copy: OrderEmailCopy,
 ): OrderLine[] {
   const lineItems = session.line_items?.data || [];
 
@@ -311,7 +545,7 @@ function getOrderLines(
 
   if (fallbackLines.length === 0) {
     fallbackLines.push({
-      name: "Objednávka ZEDPERA",
+      name: copy.fallbackOrderName,
       quantity: 1,
       amountCents: session.amount_total,
       currency: session.currency || DEFAULT_CURRENCY,
@@ -326,11 +560,13 @@ function createOrderSummaryText({
   paymentReference,
   session,
   locale,
+  copy,
 }: {
   lines: OrderLine[];
   paymentReference: string;
   session: Stripe.Checkout.Session;
   locale: string;
+  copy: OrderEmailCopy;
 }): string {
   const rows = lines.map((line) => {
     const amount = formatMoney(line.amountCents, line.currency, locale);
@@ -343,10 +579,10 @@ function createOrderSummaryText({
   const total = formatMoney(session.amount_total, session.currency, locale);
 
   return [
-    "ÚDAJE O OBJEDNÁVKE",
-    `Číslo objednávky: ${paymentReference}`,
+    copy.orderSummaryTitle.toUpperCase(),
+    `${copy.orderNumber}: ${paymentReference}`,
     ...rows,
-    total ? `Uhradená suma: ${total}` : null,
+    total ? `${copy.paidAmount}: ${total}` : null,
   ]
     .filter((value): value is string => Boolean(value))
     .join("\n");
@@ -357,11 +593,13 @@ function createOrderSummaryHtml({
   paymentReference,
   session,
   locale,
+  copy,
 }: {
   lines: OrderLine[];
   paymentReference: string;
   session: Stripe.Checkout.Session;
   locale: string;
+  copy: OrderEmailCopy;
 }): string {
   const rows = lines
     .map((line) => {
@@ -426,7 +664,7 @@ function createOrderSummaryHtml({
               font-weight:700;
             "
           >
-            Údaje o objednávke
+            ${escapeHtml(copy.orderSummaryTitle)}
           </div>
 
           <div
@@ -437,7 +675,7 @@ function createOrderSummaryHtml({
               line-height:1.5;
             "
           >
-            Číslo objednávky:
+            ${escapeHtml(copy.orderNumber)}:
             <strong style="color:#334155;">
               ${escapeHtml(paymentReference)}
             </strong>
@@ -464,7 +702,7 @@ function createOrderSummaryHtml({
                         font-weight:700;
                       "
                     >
-                      Uhradená suma
+                      ${escapeHtml(copy.paidAmount)}
                     </td>
                     <td
                       align="right"
@@ -493,58 +731,43 @@ function createPlainTextEmail({
   customerName,
   loginUrl,
   orderSummary,
+  copy,
 }: {
   customerName: string;
   loginUrl: string;
   orderSummary: string;
+  copy: OrderEmailCopy;
 }): string {
-  const greeting = customerName ? `Čau ${customerName},` : "Čau,";
+  const greeting = copy.greeting(customerName);
+  const steps = copy.steps
+    .map((step, index) => `${index + 1}. ${step.title} ${step.text}`)
+    .join("\n\n");
 
   return `
-Tvoja objednávka je potvrdená, vitaj v Zedpere
+${copy.subject}
 
 ${greeting}
 
-ďakujeme za prejavenú dôveru a využitie našich služieb.
+${copy.thankYou}
 
-Zedpera je úplne prvý akademický nástroj, s ktorým napíšeš celú prácu od teoretickej až po praktickú časť. Nevymýšľa si zdroje, negeneruje robotické texty, ale vytvára kvalitné výstupy, ktoré môžeš reálne použiť. Ušetrí ti množstvo času, nahradí školiteľa a dokonale ťa pripraví na obhajobu. Celú prácu napíšeš za pár dní bez akéhokoľvek podvádzania.
+${copy.intro1}
 
-Zedpera sa stane tvojím osobným asistentom. Vychádza z tvojich zdrojov. Ak žiadne nemáš, nevadí, vyhľadáš ich u nás v databáze. Nemusíš byť technicky zdatný, systém je jednoduchý a zvládne ho naozaj každý.
+${copy.intro2}
 
 ${orderSummary}
 
-Vitaj v Zedpere! Tu je 11 krokov, ako získať z platformy maximum a napísať skvelú prácu:
+${copy.stepsIntro}
 
-1. Nastav si profil práce. Čím viac informácií o téme a zadaní vyplníš, tým relevantnejšie výstupy dostaneš.
+${steps}
 
-2. Pracuj so zdrojmi. Ak máš vlastné zdroje, vlož ich priamo do chatu. Ak ešte hľadáš, využi našu sekciu Zdroje.
+${copy.closing}
 
-3. Prekladaj okamžite. Našiel si skvelý zdroj v angličtine? Prelož si ho priamo u nás bez prepínania okien.
+${copy.team}
 
-4. Vedúci práce k dispozícii 24/7. Keď sa zasekneš alebo školiteľ neodpisuje, náš pomocník je tu pre teba vždy, keď potrebuješ radu.
-
-5. Audit kvality na počkanie. Chceš vedieť, či je tvoj text v poriadku? Spusti audit a za pár sekúnd získaš spätnú väzbu, čo vylepšiť.
-
-6. Analýza dát v kocke. Nahraj dáta v Exceli a nechaj nás pripraviť štatistiky, grafy či testovanie hypotéz. Štatistu už nebudeš potrebovať.
-
-7. Humanizácia textu. Potrebuješ upraviť tón práce, aby pôsobila prirodzenejšie? Náš nástroj ti pomôže upraviť štylistiku podľa potreby.
-
-8. Komunikácia na úrovni. Potrebuješ napísať vedúcemu práce? Zedpera ti pomôže sformulovať profesionálny e-mail, ktorý určite zaujme.
-
-9. Plánovanie bez stresu. Využi náš plánovač, ktorý ti rozvrhne prácu na menšie úlohy, aby si všetky termíny stihol s prehľadom.
-
-10. Záverečná príprava na obhajobu. Nahraj hotovú prácu do systému a vygeneruj si kompletnú obhajobu vrátane poznámok k prezentácii.
-
-11. Máš hotovo! Gratulujeme, zvládol si to.
-
-Držíme palce pri písaní aj obhajobe.
-
-Tím Zedpera
-
-Pusti sa do toho:
+${copy.cta}:
 ${loginUrl}
 
-Tento e-mail bol odoslaný automaticky po potvrdení objednávky.
+${copy.footer}
   `.trim();
 }
 
@@ -554,83 +777,27 @@ function createHtmlEmail({
   loginUrl,
   orderSummaryHtml,
   appUrl,
+  language,
+  copy,
 }: {
   customerName: string;
   logoUrl: string;
   loginUrl: string;
   orderSummaryHtml: string;
   appUrl: string;
+  language: EmailLanguage;
+  copy: OrderEmailCopy;
 }): string {
-  const greeting = customerName ? `Čau ${escapeHtml(customerName)},` : "Čau,";
+  const greeting = copy.greeting(customerName);
 
-  const steps = [
-    {
-      title: "Nastav si profil práce.",
-      text: "Čím viac informácií o téme a zadaní vyplníš, tým relevantnejšie výstupy dostaneš.",
-    },
-    {
-      title: "Pracuj so zdrojmi.",
-      text: "Ak máš vlastné zdroje, vlož ich priamo do chatu. Ak ešte hľadáš, využi našu sekciu Zdroje.",
-    },
-    {
-      title: "Prekladaj okamžite.",
-      text: "Našiel si skvelý zdroj v angličtine? Prelož si ho priamo u nás bez prepínania okien.",
-    },
-    {
-      title: "Vedúci práce k dispozícii 24/7.",
-      text: "Keď sa zasekneš alebo školiteľ neodpisuje, náš pomocník je tu pre teba vždy, keď potrebuješ radu.",
-    },
-    {
-      title: "Audit kvality na počkanie.",
-      text: "Chceš vedieť, či je tvoj text v poriadku? Spusti audit a za pár sekúnd získaš spätnú väzbu, čo vylepšiť.",
-    },
-    {
-      title: "Analýza dát v kocke.",
-      text: "Nahraj dáta v Exceli a nechaj nás pripraviť štatistiky, grafy či testovanie hypotéz. Štatistu už nebudeš potrebovať.",
-    },
-    {
-      title: "Humanizácia textu.",
-      text: "Potrebuješ upraviť tón práce, aby pôsobila prirodzenejšie? Náš nástroj ti pomôže upraviť štylistiku podľa potreby.",
-    },
-    {
-      title: "Komunikácia na úrovni.",
-      text: "Potrebuješ napísať vedúcemu práce? Zedpera ti pomôže sformulovať profesionálny e-mail, ktorý určite zaujme.",
-    },
-    {
-      title: "Plánovanie bez stresu.",
-      text: "Využi náš plánovač, ktorý ti rozvrhne prácu na menšie úlohy, aby si všetky termíny stihol s prehľadom.",
-    },
-    {
-      title: "Záverečná príprava na obhajobu.",
-      text: "Nahraj hotovú prácu do systému a vygeneruj si kompletnú obhajobu vrátane poznámok k prezentácii.",
-    },
-    {
-      title: "Máš hotovo!",
-      text: "Gratulujeme, zvládol si to.",
-    },
-  ];
-
-  const stepsHtml = steps
+  const stepsHtml = copy.steps
     .map(
       (step, index) => `
         <tr>
-          <td
-            valign="top"
-            style="padding:0 0 16px;"
-          >
-            <table
-              role="presentation"
-              width="100%"
-              cellspacing="0"
-              cellpadding="0"
-              border="0"
-            >
+          <td valign="top" style="padding:0 0 16px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
               <tr>
-                <td
-                  valign="top"
-                  width="38"
-                  style="width:38px;padding:1px 12px 0 0;"
-                >
+                <td valign="top" width="38" style="width:38px;padding:1px 12px 0 0;">
                   <div
                     style="
                       width:30px;
@@ -655,9 +822,7 @@ function createHtmlEmail({
                     line-height:1.65;
                   "
                 >
-                  <strong style="color:#111827;">
-                    ${escapeHtml(step.title)}
-                  </strong>
+                  <strong style="color:#111827;">${escapeHtml(step.title)}</strong>
                   ${escapeHtml(step.text)}
                 </td>
               </tr>
@@ -670,16 +835,13 @@ function createHtmlEmail({
 
   return `
 <!doctype html>
-<html lang="sk">
+<html lang="${escapeHtml(language)}">
   <head>
     <meta charset="utf-8">
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1"
-    >
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
     <meta name="supported-color-schemes" content="light">
-    <title>${escapeHtml(EMAIL_SUBJECT)}</title>
+    <title>${escapeHtml(copy.subject)}</title>
   </head>
 
   <body
@@ -700,17 +862,10 @@ function createHtmlEmail({
         color:transparent;
       "
     >
-      Tvoja objednávka bola úspešne potvrdená a zakúpený prístup je pripravený.
+      ${escapeHtml(copy.preheader)}
     </div>
 
-    <table
-      role="presentation"
-      width="100%"
-      cellspacing="0"
-      cellpadding="0"
-      border="0"
-      style="width:100%;background:#f3f5f8;"
-    >
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f3f5f8;">
       <tr>
         <td align="center" style="padding:32px 12px;">
           <table
@@ -730,10 +885,7 @@ function createHtmlEmail({
             "
           >
             <tr>
-              <td
-                align="center"
-                style="padding:36px 34px 16px;"
-              >
+              <td align="center" style="padding:36px 34px 16px;">
                 <img
                   src="${escapeHtml(logoUrl)}"
                   alt="ZEDPERA"
@@ -769,33 +921,14 @@ function createHtmlEmail({
                     text-align:center;
                   "
                 >
-                  Tvoja objednávka je potvrdená,<br>
-                  vitaj v Zedpere
+                  ${escapeHtml(copy.headingLine1)}<br>
+                  ${escapeHtml(copy.headingLine2)}
                 </h1>
 
-                <p style="margin:0 0 18px;">
-                  ${greeting}
-                </p>
-
-                <p style="margin:0 0 18px;">
-                  ďakujeme za prejavenú dôveru a využitie našich služieb.
-                </p>
-
-                <p style="margin:0 0 18px;">
-                  Zedpera je úplne prvý akademický nástroj, s ktorým napíšeš
-                  celú prácu od teoretickej až po praktickú časť. Nevymýšľa si
-                  zdroje, negeneruje robotické texty, ale vytvára kvalitné
-                  výstupy, ktoré môžeš reálne použiť. Ušetrí ti množstvo času,
-                  nahradí školiteľa a dokonale ťa pripraví na obhajobu. Celú
-                  prácu napíšeš za pár dní bez akéhokoľvek podvádzania.
-                </p>
-
-                <p style="margin:0 0 28px;">
-                  Zedpera sa stane tvojím osobným asistentom. Vychádza z tvojich
-                  zdrojov. Ak žiadne nemáš, nevadí, vyhľadáš ich u nás v
-                  databáze. Nemusíš byť technicky zdatný, systém je jednoduchý
-                  a zvládne ho naozaj každý.
-                </p>
+                <p style="margin:0 0 18px;">${escapeHtml(greeting)}</p>
+                <p style="margin:0 0 18px;">${escapeHtml(copy.thankYou)}</p>
+                <p style="margin:0 0 18px;">${escapeHtml(copy.intro1)}</p>
+                <p style="margin:0 0 28px;">${escapeHtml(copy.intro2)}</p>
 
                 ${orderSummaryHtml}
 
@@ -807,35 +940,17 @@ function createHtmlEmail({
                     line-height:1.4;
                   "
                 >
-                  Vitaj v Zedpere! Tu je 11 krokov, ako získať z platformy
-                  maximum a napísať skvelú prácu:
+                  ${escapeHtml(copy.stepsIntro)}
                 </h2>
 
-                <table
-                  role="presentation"
-                  width="100%"
-                  cellspacing="0"
-                  cellpadding="0"
-                  border="0"
-                >
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                   ${stepsHtml}
                 </table>
 
-                <p style="margin:16px 0 10px;">
-                  Držíme palce pri písaní aj obhajobe.
-                </p>
+                <p style="margin:16px 0 10px;">${escapeHtml(copy.closing)}</p>
+                <p style="margin:0 0 28px;"><strong style="color:#111827;">${escapeHtml(copy.team)}</strong></p>
 
-                <p style="margin:0 0 28px;">
-                  <strong style="color:#111827;">Tím Zedpera</strong>
-                </p>
-
-                <table
-                  role="presentation"
-                  width="100%"
-                  cellspacing="0"
-                  cellpadding="0"
-                  border="0"
-                >
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                   <tr>
                     <td align="center">
                       <a
@@ -852,7 +967,7 @@ function createHtmlEmail({
                           border-radius:10px;
                         "
                       >
-                        Pusti sa do toho
+                        ${escapeHtml(copy.cta)}
                       </a>
                     </td>
                   </tr>
@@ -872,13 +987,10 @@ function createHtmlEmail({
                   line-height:1.6;
                 "
               >
-                Tento e-mail bol odoslaný automaticky po potvrdení objednávky.
+                ${escapeHtml(copy.footer)}
                 <br>
                 ZEDPERA ·
-                <a
-                  href="${escapeHtml(appUrl)}"
-                  style="color:#475569;text-decoration:underline;"
-                >
+                <a href="${escapeHtml(appUrl)}" style="color:#475569;text-decoration:underline;">
                   www.zedpera.com
                 </a>
               </td>
@@ -945,15 +1057,23 @@ export async function sendOrderConfirmationEmail(
   }
 
   const locale = normalizeLocale(input.locale);
+  const language = getEmailLanguage(locale);
+  const copy = EMAIL_COPY[language];
   const customerName = getCustomerName(input.session);
-  const loginUrl = `${appUrl}/login`;
-  const orderLines = getOrderLines(input.session, input.planId, input.addonIds);
+  const loginUrl = `${appUrl}/login?lang=${encodeURIComponent(language)}`;
+  const orderLines = getOrderLines(
+    input.session,
+    input.planId,
+    input.addonIds,
+    copy,
+  );
 
   const orderSummaryText = createOrderSummaryText({
     lines: orderLines,
     paymentReference: input.paymentReference,
     session: input.session,
     locale,
+    copy,
   });
 
   const orderSummaryHtml = createOrderSummaryHtml({
@@ -961,6 +1081,7 @@ export async function sendOrderConfirmationEmail(
     paymentReference: input.paymentReference,
     session: input.session,
     locale,
+    copy,
   });
 
   const html = createHtmlEmail({
@@ -969,12 +1090,15 @@ export async function sendOrderConfirmationEmail(
     loginUrl,
     orderSummaryHtml,
     appUrl,
+    language,
+    copy,
   });
 
   const text = createPlainTextEmail({
     customerName,
     loginUrl,
     orderSummary: orderSummaryText,
+    copy,
   });
 
   const bcc =
@@ -994,13 +1118,17 @@ export async function sendOrderConfirmationEmail(
       to: [recipient],
       ...(bcc ? { bcc } : {}),
       ...(replyTo ? { reply_to: replyTo } : {}),
-      subject: EMAIL_SUBJECT,
+      subject: copy.subject,
       html,
       text,
       tags: [
         {
           name: "email_type",
           value: "order_confirmation",
+        },
+        {
+          name: "language",
+          value: language,
         },
         {
           name: "stripe_mode",

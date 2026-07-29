@@ -186,6 +186,13 @@ type BibliographicCandidate = {
   pages?: string | null;
   isbn?: string | null;
   issn?: string | null;
+  publisher?: string | null;
+  edition?: string | null;
+  place?: string | null;
+  publicationDate?: string | null;
+  accessDate?: string | null;
+  totalPages?: number | null;
+  usedPages?: string | null;
   sourceType: 'book' | 'article' | 'web' | 'software' | 'unknown';
   citationKey?: string;
   inTextCitations?: InTextCitation[];
@@ -225,6 +232,7 @@ type PreparedFileMetadata = {
   extractionStatus?: string;
   extractionMethod?: string;
   extractionMessage?: string;
+  pageCount?: number | null;
   detectedSourcesCount?: number;
   detectedSources?: BibliographicCandidate[];
   inTextCitations?: InTextCitation[];
@@ -267,6 +275,7 @@ type ExtractedAttachment = {
   extractedText: string;
   extractedChars: number;
   extractedPreview: string;
+  pageCount?: number | null;
   status: string;
   error?: string | null;
   warning?: string | null;
@@ -488,7 +497,9 @@ function cleanExtractedAcademicText(value: string): string {
       continue;
     }
 
-    if (/^(?:strana|page)\s*\d+(?:\s*(?:z|of)\s*\d+)?$/i.test(line) || /^[-–—]\s*\d{1,4}\s*[-–—]$/.test(line)) {
+    // Označenia strán typu „STRANA 12“ / „PAGE 12“ zachovávame,
+    // aby bolo možné spätne overiť konkrétne použité strany.
+    if (/^[-–—]\s*\d{1,4}\s*[-–—]$/.test(line)) {
       continue;
     }
 
@@ -852,7 +863,7 @@ function buildCitationStyleRuleBlock(
     `AKTÍVNY CITAČNÝ REŽIM: ${normalizedStyle}.`,
     'V texte používaj výhradne citačný tvar (Priezvisko, rok).',
     'V texte nepoužívaj referenčné čísla [1], [2], [3].',
-    'V sekciách Primárne zdroje a Sekundárne zdroje nepoužívaj poradové ani referenčné čísla.',
+    'V sekciách Primárne zdroje a Sekundárne / doplnkové zdroje nepoužívaj poradové ani referenčné čísla.',
     'Bibliografické záznamy formátuj podľa aktívnej normy z profilu práce.',
   ].join('\n');
 }
@@ -2228,6 +2239,13 @@ function normalizeBibliographicCandidates(value: unknown): BibliographicCandidat
         pages: item?.pages ? String(item.pages) : null,
         isbn: item?.isbn ? String(item.isbn) : null,
         issn: item?.issn ? String(item.issn) : null,
+        publisher: item?.publisher ? String(item.publisher) : null,
+        edition: item?.edition ? String(item.edition) : null,
+        place: item?.place ? String(item.place) : null,
+        publicationDate: item?.publicationDate ? String(item.publicationDate) : null,
+        accessDate: item?.accessDate ? String(item.accessDate) : null,
+        totalPages: Number.isFinite(Number(item?.totalPages)) ? Number(item.totalPages) : null,
+        usedPages: item?.usedPages ? String(item.usedPages) : null,
         sourceType: ['book', 'article', 'web', 'software', 'unknown'].includes(item?.sourceType) ? item.sourceType : 'unknown',
         citationKey: item?.citationKey || (authors.length && year ? buildCitationKey(authors, year) : undefined),
         inTextCitations: Array.isArray(item?.inTextCitations) ? item.inTextCitations : [],
@@ -2259,6 +2277,13 @@ function mergeBibliographicCandidates(...groups: Array<BibliographicCandidate[] 
         pages: item.pages || null,
         isbn: item.isbn || null,
         issn: item.issn || null,
+        publisher: item.publisher || null,
+        edition: item.edition || null,
+        place: item.place || null,
+        publicationDate: item.publicationDate || null,
+        accessDate: item.accessDate || null,
+        totalPages: item.totalPages || null,
+        usedPages: item.usedPages || null,
         sourceType: item.sourceType || 'unknown',
         citationKey: item.citationKey || (authors.length && year ? buildCitationKey(authors, year) : undefined),
         inTextCitations: Array.isArray(item.inTextCitations) ? item.inTextCitations : [],
@@ -2295,6 +2320,13 @@ function mergeBibliographicCandidates(...groups: Array<BibliographicCandidate[] 
         pages: existing.pages || normalizedItem.pages,
         isbn: existing.isbn || normalizedItem.isbn,
         issn: existing.issn || normalizedItem.issn,
+        publisher: existing.publisher || normalizedItem.publisher,
+        edition: existing.edition || normalizedItem.edition,
+        place: existing.place || normalizedItem.place,
+        publicationDate: existing.publicationDate || normalizedItem.publicationDate,
+        accessDate: existing.accessDate || normalizedItem.accessDate,
+        totalPages: existing.totalPages || normalizedItem.totalPages,
+        usedPages: existing.usedPages || normalizedItem.usedPages,
         sourceType: existing.sourceType !== 'unknown' ? existing.sourceType : normalizedItem.sourceType,
         citationKey: existing.citationKey || normalizedItem.citationKey,
         inTextCitations: [...(existing.inTextCitations || []), ...(normalizedItem.inTextCitations || [])],
@@ -2337,7 +2369,9 @@ function extractAuthorsFromCandidates(candidates: BibliographicCandidate[]) {
 }
 
 function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
-  if (!candidates.length) return 'Neboli automaticky detegované žiadne bibliografické záznamy.';
+  if (!candidates.length) {
+    return 'Neboli automaticky detegované žiadne bibliografické záznamy.';
+  }
 
   return candidates
     .slice(0, maxDetectedSourcesPerAttachment)
@@ -2345,8 +2379,13 @@ function formatBibliographicCandidates(candidates: BibliographicCandidate[]) {
       const citationInfo = item.inTextCitations?.length
         ? `\nCitácie v texte: ${item.inTextCitations.map((citation) => citation.raw).join('; ')}\nPočet výskytov v texte: ${item.occurrenceCount || item.inTextCitations.length}`
         : '';
+      const totalExtent = item.totalPages
+        ? `${item.totalPages} strán`
+        : item.pages
+          ? `rozsah ${item.pages}`
+          : 'neuvedené';
 
-      return `${index + 1}. Pôvodný záznam:\n${item.raw || 'neuvedené'}\n\nAutori: ${cleanValidAuthors(item.authors || []).join(', ') || 'Údaje sú potrebné overiť.'}\nRok: ${item.year || REQUIRED_VERIFICATION_NOTICE}\nNázov publikácie / zdroja: ${item.title || REQUIRED_VERIFICATION_NOTICE}\nČasopis / zdroj: ${item.journal || 'neuvedené'}\nTyp zdroja: ${item.sourceType}\nDOI: ${item.doi || 'neuvedené'}\nURL: ${item.url || 'neuvedené'}${citationInfo}`;
+      return `${index + 1}. Pôvodný záznam:\n${item.raw || 'neuvedené'}\n\nAutor/autori: ${cleanValidAuthors(item.authors || []).join('; ') || 'neuvedený'}\nRok: ${item.year || 'neuvedený'}\nCelý názov zdroja: ${item.title || 'neuvedený'}\nČasopis / zborník: ${item.journal || 'neuvedené'}\nVydavateľstvo: ${item.publisher || 'neuvedené'}\nMiesto vydania: ${item.place || 'neuvedené'}\nVydanie: ${item.edition || 'neuvedené'}\nRočník / zväzok: ${item.volume || 'neuvedené'}\nČíslo: ${item.issue || 'neuvedené'}\nCelkový rozsah / rozsah článku: ${totalExtent}\nPoužité strany: ${item.usedPages || 'nepodarilo sa spoľahlivo identifikovať'}\nISBN: ${item.isbn || 'neuvedené'}\nISSN: ${item.issn || 'neuvedené'}\nTyp zdroja: ${item.sourceType}\nDOI: ${item.doi || 'neuvedené'}\nURL: ${item.url || 'neuvedené'}\nDátum publikovania: ${item.publicationDate || 'neuvedené'}\nDátum prístupu: ${item.accessDate || 'neuvedené'}\nPríloha / zdrojový dokument: ${item.sourceDocumentName || 'neuvedené'}${citationInfo}`;
     })
     .join('\n\n');
 }
@@ -2739,6 +2778,8 @@ function removeExistingSourceTail(text: string) {
     'Primarne zdroje',
     'Sekundárne zdroje',
     'Sekundarne zdroje',
+    'Sekundárne / doplnkové zdroje',
+    'Sekundarne / doplnkove zdroje',
     'Použitá literatúra',
     'Pouzita literatura',
     'Použité zdroje',
@@ -2780,7 +2821,7 @@ function getPrimarySecondaryHeadingPositions(text: string) {
   }> = [];
 
   const headingRegex =
-    /(^|\n|[.!?]\s+)(Primárne zdroje|Primarne zdroje|Sekundárne zdroje|Sekundarne zdroje)\s*(?=\n|$)/gi;
+    /(^|\n|[.!?]\s+)(Primárne zdroje|Primarne zdroje|Sekundárne(?:\s*\/\s*doplnkové)? zdroje|Sekundarne(?:\s*\/\s*doplnkove)? zdroje)\s*(?=\n|$)/gi;
 
   let match: RegExpExecArray | null;
 
@@ -3166,6 +3207,93 @@ function formatPrimaryInTextCitation({
     : `(${firstAuthor}, ${year})`;
 }
 
+function extractExplicitMetadataValue(
+  text: string,
+  labels: string[],
+): string | null {
+  const escapedLabels = labels
+    .map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  const match = normalizeText(text).match(
+    new RegExp(`(?:^|\\n)\\s*(?:${escapedLabels})\\s*[:\\-]\\s*([^\\n]{2,180})`, 'i'),
+  );
+  return match?.[1]?.trim() || null;
+}
+
+function extractVerifiedUsedPagesFromGeneratedOutput({
+  generatedText,
+  file,
+}: {
+  generatedText: string;
+  file: ExtractedAttachment;
+}): string | null {
+  const pageMarkers = new Set<number>();
+  const markerRegex = /(?:^|\n)\s*(?:STRANA|PAGE)\s*(\d{1,5})(?:\s*(?:z|of)\s*\d{1,5})?\s*(?=\n|$)/gi;
+  let markerMatch: RegExpExecArray | null;
+
+  while ((markerMatch = markerRegex.exec(file.extractedText || '')) !== null) {
+    const page = Number(markerMatch[1]);
+    if (Number.isInteger(page) && page > 0) pageMarkers.add(page);
+  }
+
+  if (!pageMarkers.size) return null;
+
+  let scope = normalizeText(generatedText || '');
+  const originalName = normalizeAttachmentDocumentName(
+    file.originalName || file.name || file.preparedName || '',
+  );
+  const normalizedScope = normalizeForSemanticMatch(scope);
+  const normalizedFileName = normalizeForSemanticMatch(originalName);
+  const fileIndex = normalizedFileName
+    ? normalizedScope.lastIndexOf(normalizedFileName)
+    : -1;
+
+  if (fileIndex >= 0) {
+    // Index v normalizovanom texte nie je znakovo identický s originálom,
+    // preto berieme bezpečné širšie okno od konca zdrojového výstupu.
+    scope = scope.slice(Math.max(0, scope.length - 5000));
+  }
+
+  const matches = Array.from(
+    scope.matchAll(/(?:Použité\s+strany|Used\s+pages)\s*:\s*(?:s\.|pp?\.)?\s*([0-9][0-9\s,;–—-]{0,120})/gi),
+  );
+  const rawValue = matches.at(-1)?.[1]?.trim();
+  if (!rawValue) return null;
+
+  const requestedPages = new Set<number>();
+  const normalizedParts: string[] = [];
+
+  for (const rawPart of rawValue.split(/[,;]/)) {
+    const part = rawPart.trim().replace(/—/g, '–').replace(/-/g, '–');
+    if (!part) continue;
+    const range = part.match(/^(\d{1,5})\s*–\s*(\d{1,5})$/);
+    if (range) {
+      const start = Number(range[1]);
+      const end = Number(range[2]);
+      if (!Number.isInteger(start) || !Number.isInteger(end) || end < start || end - start > 300) {
+        return null;
+      }
+      for (let page = start; page <= end; page += 1) requestedPages.add(page);
+      normalizedParts.push(`${start}–${end}`);
+      continue;
+    }
+
+    if (/^\d{1,5}$/.test(part)) {
+      const page = Number(part);
+      requestedPages.add(page);
+      normalizedParts.push(String(page));
+      continue;
+    }
+
+    return null;
+  }
+
+  if (!requestedPages.size) return null;
+  if (Array.from(requestedPages).some((page) => !pageMarkers.has(page))) return null;
+
+  return `s. ${normalizedParts.join(', ')}`;
+}
+
 function extractAttachmentPrimaryMetadata(file: ExtractedAttachment) {
   const header = normalizeText(file.extractedText || file.extractedPreview || '').slice(0, 14000);
   const lines = header.split('\n').map((line) => normalizeText(line).replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 80);
@@ -3181,7 +3309,69 @@ function extractAttachmentPrimaryMetadata(file: ExtractedAttachment) {
     url: extractUrl(header),
     isbn: extractIsbn(header),
     issn: extractIssn(header),
+    publisher: extractExplicitMetadataValue(header, ['Vydavateľstvo', 'Vydavateľ', 'Publisher', 'Published by']),
+    edition: extractExplicitMetadataValue(header, ['Vydanie', 'Edition']),
+    place: extractExplicitMetadataValue(header, ['Miesto vydania', 'Place of publication', 'Publication place']),
+    publicationDate: extractExplicitMetadataValue(header, ['Dátum publikovania', 'Published', 'Publication date']),
+    accessDate: null as string | null,
+    totalPages: file.pageCount || null,
+    usedPages: null as string | null,
   };
+}
+
+function getPrimarySourceTypeLabel(metadata: ReturnType<typeof extractAttachmentPrimaryMetadata>): string {
+  if (metadata.isbn) return 'kniha / monografia';
+  if (metadata.journal || metadata.issn) return 'odborný alebo vedecký článok';
+  if (metadata.url && !metadata.doi) return 'webový / online zdroj';
+  return 'odborný dokument';
+}
+
+function formatPrimaryStructuredSource({
+  documentName,
+  authors,
+  year,
+  metadata,
+  originalFileName,
+}: {
+  documentName: string;
+  authors: string[];
+  year: string | null;
+  metadata: ReturnType<typeof extractAttachmentPrimaryMetadata>;
+  originalFileName: string;
+}): string {
+  const safeAuthors = cleanValidAuthors(authors);
+  const typeLabel = getPrimarySourceTypeLabel(metadata);
+  const usedPages = metadata.usedPages || (
+    typeLabel === 'webový / online zdroj'
+      ? 'neuplatňuje sa – zdroj nemá stránkovanie'
+      : 'nepodarilo sa spoľahlivo identifikovať'
+  );
+  const lines = [
+    `Autor/autori: ${safeAuthors.length ? safeAuthors.join('; ') : 'neuvedený'}`,
+    `Rok: ${year || 'neuvedený'}`,
+    `Názov: ${documentName || 'neuvedený'}`,
+    `Typ zdroja: ${typeLabel}`,
+  ];
+
+  if (metadata.journal) lines.push(`Časopis / zborník: ${metadata.journal}`);
+  if (metadata.publisher) lines.push(`Vydavateľstvo: ${metadata.publisher}`);
+  if (metadata.place) lines.push(`Miesto vydania: ${metadata.place}`);
+  if (metadata.edition) lines.push(`Vydanie: ${metadata.edition}`);
+  if (metadata.volume) lines.push(`Ročník / zväzok: ${metadata.volume}`);
+  if (metadata.issue) lines.push(`Číslo: ${metadata.issue}`);
+  if (metadata.pages) lines.push(`Rozsah článku / kapitoly: s. ${metadata.pages}`);
+  if (metadata.totalPages) lines.push(`Celkový rozsah dokumentu: ${metadata.totalPages} strán`);
+  lines.push(`Použité strany: ${usedPages}`);
+  if (metadata.isbn) lines.push(`ISBN: ${metadata.isbn}`);
+  if (metadata.issn) lines.push(`ISSN: ${metadata.issn}`);
+  if (metadata.doi) lines.push(`DOI: ${metadata.doi}`);
+  if (metadata.url) lines.push(`URL: ${metadata.url}`);
+  if (metadata.publicationDate) lines.push(`Dátum publikovania: ${metadata.publicationDate}`);
+  if (metadata.accessDate) lines.push(`Dátum prístupu: ${metadata.accessDate}`);
+
+  // Táto položka musí zostať absolútne posledná.
+  lines.push(`Príloha / zdrojový dokument: ${originalFileName || 'neuvedené'}`);
+  return lines.join('\n');
 }
 
 function formatPrimaryBibliographicCitation({
@@ -3197,7 +3387,9 @@ function formatPrimaryBibliographicCitation({
   citationStyle: string;
   metadata: ReturnType<typeof extractAttachmentPrimaryMetadata>;
 }) {
-  const title = normalizeAttachmentTitleFromFileName(documentName);
+  const title = documentName.startsWith('neuvedený')
+    ? ''
+    : normalizeAttachmentTitleFromFileName(documentName);
   const safeAuthors = cleanValidAuthors(authors);
 
   if (safeAuthors.length && year && title) {
@@ -3226,8 +3418,9 @@ function formatPrimaryBibliographicCitation({
   // Pri neúplnej hlavičke radšej priznáme chýbajúce metadata, než aby sme
   // z názvu súboru alebo OCR artefaktov vymysleli autora či rok.
   const authorText = safeAuthors.length ? `${safeAuthors.join('; ')}. ` : '';
+  const titleText = title ? `${title}.` : '[Názov sa nepodarilo spoľahlivo identifikovať].';
   const yearText = year ? ` ${year}.` : '';
-  return `${authorText}${title}.${yearText} [Priložený dokument; neúplné bibliografické údaje – ${REQUIRED_VERIFICATION_NOTICE}]`
+  return `${authorText}${titleText}${yearText} [Priložený dokument; neúplné bibliografické údaje – ${REQUIRED_VERIFICATION_NOTICE}]`
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -3425,7 +3618,6 @@ function buildPrimaryCitationRecords({
   // Primárny zdroj je samotný nahraný dokument, nie jeho zoznam literatúry.
   // Bibliografické položky z dokumentu sa spracujú nižšie ako sekundárne zdroje.
   void detectedSourcesForOutput;
-  void generatedText;
 
   const normalizedCitationStyle =
     normalizeCitationStyle(
@@ -3445,12 +3637,7 @@ function buildPrimaryCitationRecords({
         extractAttachmentTitleFromFirstPages(
           file,
         ) ||
-        normalizeAttachmentTitleFromFileName(
-          file.originalName ||
-            file.name ||
-            file.preparedName ||
-            '',
-        );
+        'neuvedený – nepodarilo sa spoľahlivo identifikovať';
 
       const authors =
         extractAttachmentAuthorsFromFirstPages(
@@ -3462,6 +3649,10 @@ function buildPrimaryCitationRecords({
         );
 
       const metadata = extractAttachmentPrimaryMetadata(file);
+      metadata.usedPages = extractVerifiedUsedPagesFromGeneratedOutput({
+        generatedText,
+        file,
+      });
       const bibliography =
         formatPrimaryBibliographicCitation({
           documentName,
@@ -3475,9 +3666,13 @@ function buildPrimaryCitationRecords({
         file.originalName || file.name || file.preparedName || '',
       );
 
-      const displayText = originalFileName
-        ? `${bibliography} Zdrojový súbor: ${originalFileName}.`
-        : bibliography;
+      const displayText = formatPrimaryStructuredSource({
+        documentName,
+        authors,
+        year,
+        metadata,
+        originalFileName,
+      });
 
       return {
         documentName,
@@ -3853,6 +4048,8 @@ type FinalCitationRecord = {
   authors: string[];
   year: string | null;
   number: number;
+  sourceDocumentName?: string | null;
+  origin?: SourceOrigin;
 };
 
 function getCitationFamilyName(
@@ -3884,6 +4081,74 @@ function buildAuthorYearCitationForRecord(
   return record.authors.length > 1
     ? `(${familyName} et al., ${record.year})`
     : `(${familyName}, ${record.year})`;
+}
+
+function findUsageContextForCitationRecord(
+  record: FinalCitationRecord,
+  generatedText: string,
+): string {
+  const lines = normalizeText(generatedText)
+    .split('\n')
+    .map((line) => line.trim());
+  const familyName = getCitationFamilyName(record.authors);
+  const year = record.year || '';
+  const numericMarker = `[${record.number}]`;
+
+  let matchIndex = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line) continue;
+    const authorYearMatch = Boolean(
+      familyName &&
+      year &&
+      normalizeForSemanticMatch(line).includes(normalizeForSemanticMatch(familyName)) &&
+      line.includes(year),
+    );
+    const numericMatch = line.includes(numericMarker);
+    if (authorYearMatch || numericMatch) {
+      matchIndex = index;
+      break;
+    }
+  }
+
+  if (matchIndex >= 0) {
+    for (let index = matchIndex; index >= 0; index -= 1) {
+      const heading = lines[index]
+        .replace(/^#{1,6}\s*/, '')
+        .trim();
+      if (/^\d+(?:\.\d+)*\.?\s+\S/.test(heading)) {
+        return `kapitola / podkapitola „${heading.slice(0, 180)}“`;
+      }
+    }
+
+    return 'odsek akademického textu, v ktorom je zdroj citovaný';
+  }
+
+  return 'odborný podklad použitý pri tvorbe výstupu; presnú časť sa nepodarilo spoľahlivo identifikovať';
+}
+
+function formatSecondaryStructuredSource(
+  record: FinalCitationRecord,
+  generatedText: string,
+): string {
+  const isExternal =
+    record.origin === 'semantic_scholar' ||
+    record.origin === 'crossref';
+  const sourceOrigin = isExternal
+    ? 'neuplatňuje sa – overený externý doplnkový akademický zdroj'
+    : record.sourceDocumentName ||
+      'nepodarilo sa spoľahlivo identifikovať';
+
+  return [
+    `${isExternal ? 'Doplnkový zdroj' : 'Sekundárny zdroj'}:`,
+    record.bibliography,
+    '',
+    'Použité v práci:',
+    findUsageContextForCitationRecord(record, generatedText),
+    '',
+    'Prevzaté / identifikované z primárneho zdroja:',
+    sourceOrigin,
+  ].join('\n');
 }
 
 function buildAllSecondaryCitationRecords({
@@ -3955,6 +4220,8 @@ function buildAllSecondaryCitationRecords({
         source.authors || [],
       ),
       year: source.year || null,
+      sourceDocumentName: source.sourceDocumentName || null,
+      origin: source.origin || 'unknown',
     });
   }
 
@@ -4019,6 +4286,8 @@ function buildUsedSecondaryCitationRecords({
       authors: [],
       year: null,
       number: index + 1,
+      sourceDocumentName: null,
+      origin: 'unknown' as SourceOrigin,
     }))
     .filter(
       (record) =>
@@ -4194,7 +4463,7 @@ function appendPrimaryFootnoteWhenMissing({
 
       return (
         value.length >= 80 &&
-        !/^(Primárne zdroje|Sekundárne zdroje)/i.test(
+        !/^(Primárne zdroje|Sekundárne(?:\s*\/\s*doplnkové)? zdroje)/i.test(
           value,
         )
       );
@@ -4340,20 +4609,29 @@ function formatCitationAwareSourceBlock({
 }): string {
   if (!records.length) return '';
 
-  const footnoteMode =
-    isFootnoteCitationStyle(
-      citationStyle,
-    );
+  const footnoteMode = isFootnoteCitationStyle(citationStyle);
+  let primaryOrdinal = 0;
+  let secondaryOrdinal = 0;
 
   return records
-    .map((record) =>
-      formatMultilineSourceItem({
-        text: record.displayText,
-        prefix: footnoteMode
-          ? `[${record.number}] `
-          : '- ',
-      }),
-    )
+    .map((record) => {
+      const isPrimary = record.kind === 'primary';
+      const ordinal = isPrimary
+        ? (primaryOrdinal += 1)
+        : (secondaryOrdinal += 1);
+      const isExternal =
+        record.origin === 'semantic_scholar' ||
+        record.origin === 'crossref';
+      const itemLabel = isPrimary
+        ? `Primárny zdroj č. ${ordinal}`
+        : `${isExternal ? 'Doplnkový zdroj' : 'Sekundárny zdroj'} č. ${ordinal}`;
+      const prefix = footnoteMode ? `[${record.number}] ` : '';
+
+      return formatMultilineSourceItem({
+        text: `${itemLabel}\n${record.displayText}`,
+        prefix,
+      });
+    })
     .filter(Boolean)
     .join('\n\n');
 }
@@ -4478,7 +4756,7 @@ function buildCitationAwareFinalOutput({
       citationStyle:
         normalizedStyle,
       generatedText:
-        bodyWithoutSources,
+        cleanedText,
     }).map((record, index) => ({
       kind: 'primary' as const,
       displayText:
@@ -4658,6 +4936,11 @@ function buildCitationAwareFinalOutput({
       );
   }
 
+  const secondaryRecordsForDisplay = finalSecondaryRecords.map((record) => ({
+    ...record,
+    displayText: formatSecondaryStructuredSource(record, normalizedBody),
+  }));
+
   const primaryBlock =
     formatCitationAwareSourceBlock({
       records:
@@ -4673,7 +4956,7 @@ function buildCitationAwareFinalOutput({
 
   const secondaryBlock =
     formatCitationAwareSourceBlock({
-      records: finalSecondaryRecords,
+      records: secondaryRecordsForDisplay,
       citationStyle: normalizedStyle,
     }) ||
     (extractedFiles.length === 0
@@ -4685,7 +4968,7 @@ function buildCitationAwareFinalOutput({
     '',
     primaryBlock,
     '',
-    'Sekundárne zdroje',
+    'Sekundárne / doplnkové zdroje',
     '',
     secondaryBlock,
   ].join('\n');
@@ -4813,7 +5096,7 @@ function formatPrimaryAndSecondarySourcesOnly(
     : 'Neuvedené.';
 
   return finalizeSourceSections(
-    `Primárne zdroje\n\n${primaryText}\n\nSekundárne zdroje\n\n${secondaryText}`.trim(),
+    `Primárne zdroje\n\n${primaryText}\n\nSekundárne / doplnkové zdroje\n\n${secondaryText}`.trim(),
   );
 }
 
@@ -5743,6 +6026,9 @@ async function extractTextFromSingleFile(file: UploadedFile, preparedFilesMetada
     isGzip: gzip,
     warning: preparedMetadata?.warning || null,
     formattedSources: metadataFormattedSources,
+    pageCount: Number.isFinite(Number(preparedMetadata?.pageCount))
+      ? Number(preparedMetadata?.pageCount)
+      : null,
   };
 
   if (!isSupportedAttachment(file)) {
@@ -6636,7 +6922,7 @@ function buildVerifiedSourcePackPrompt(externalResearch: ExternalResearchResult)
     return `POVOLENÉ OVERENÉ EXTERNÉ AKADEMICKÉ ZDROJE:\nNeboli nájdené použiteľné overené externé zdroje.\n\nKRITICKÉ PRAVIDLO:\nExterné zdroje sú náhradný režim pre požiadavky bez prílohy. Ak je dostupná aktuálna príloha alebo extrahovaný text, primárne a sekundárne zdroje určuj iba z dokumentu. Ak nie sú nájdené overené externé zdroje a nie sú dostupné úplné zdroje z príloh, nepíš fiktívne citácie.`;
   }
 
-  return `POVOLENÉ OVERENÉ EXTERNÉ AKADEMICKÉ ZDROJE:\nTieto zdroje boli nájdené cez Semantic Scholar alebo Crossref. Použi ich iba v režime bez aktuálnej prílohy alebo keď používateľ výslovne požiadal o externé vyhľadávanie. Ak je aktuálna príloha dostupná, zdrojovanie musí vychádzať z nej a tento externý blok nesmie nahradiť ani dopĺňať jej Primárne a Sekundárne zdroje.\n\n${externalResearch.sources.map((source) => `- Citácia autor–rok: ${source.citationText}\n  Bibliografický záznam: ${source.bibliographyText}`).join('\n\n')}\n\nKRITICKÉ PRAVIDLÁ:\n1. Nevytváraj fiktívnych autorov, roky, DOI, URL ani vydavateľské údaje.\n2. Ak externý bibliografický záznam nie je úplný, nepouži ho ako citovaný zdroj.\n3. Pri aktuálnej prílohe nepoužívaj externý zdroj ako náhradu za zdroj citovaný v dokumente; sekundárny zdroj musí byť dohľadaný v bibliografii toho istého dokumentu.`;
+  return `POVOLENÉ OVERENÉ EXTERNÉ AKADEMICKÉ ZDROJE:\nTieto zdroje boli nájdené cez Semantic Scholar alebo Crossref. Použi ich iba v režime bez aktuálnej prílohy alebo keď používateľ výslovne požiadal o externé vyhľadávanie. Ak je aktuálna príloha dostupná, zdrojovanie musí vychádzať z nej a tento externý blok nesmie nahradiť ani dopĺňať jej Primárne a Sekundárne / doplnkové zdroje.\n\n${externalResearch.sources.map((source) => `- Citácia autor–rok: ${source.citationText}\n  Bibliografický záznam: ${source.bibliographyText}`).join('\n\n')}\n\nKRITICKÉ PRAVIDLÁ:\n1. Nevytváraj fiktívnych autorov, roky, DOI, URL ani vydavateľské údaje.\n2. Ak externý bibliografický záznam nie je úplný, nepouži ho ako citovaný zdroj.\n3. Pri aktuálnej prílohe nepoužívaj externý zdroj ako náhradu za zdroj citovaný v dokumente; sekundárny zdroj musí byť dohľadaný v bibliografii toho istého dokumentu.`;
 }
 
 function buildAcademicChapterRules() {
@@ -6683,7 +6969,7 @@ ZDROJE A CITÁCIE:
 25. Úplný sekundárny bibliografický záznam môže byť použitý iba vtedy, keď sa jeho autor/rok bezpečne spáruje s úplným záznamom v bibliografii tej istej prílohy. OCR fragment, samotné meno a rok alebo neúplný útržok nestačia.
 26. Internet, Semantic Scholar, Crossref ani iné externé zdroje nepridávaj k aktuálnej prílohe automaticky. Externé vyhľadávanie sa použije iba bez prílohy alebo na výslovný pokyn používateľa.
 27. Všeobecné odborné znalosti možno použiť iba ako nekonkrétny spojovací a vysvetľujúci rámec. Nesmú vytvárať nové bibliografické identity, čísla ani údajné výsledky štúdií.
-28. Na konci zachovaj jednu dvojicu sekcií „Primárne zdroje“ a „Sekundárne zdroje“. Bibliografické údaje v týchto sekciách musí potvrdiť existujúci zdrojový register backendu.
+28. Na konci zachovaj jednu dvojicu sekcií „Primárne zdroje“ a „Sekundárne / doplnkové zdroje“. Do primárnych patria iba priamo použité dokumenty; do sekundárnych / doplnkových iba reálne použité zdroje identifikované cez primárny zdroj alebo transparentne overené externe. Bibliografické údaje musí potvrdiť existujúci zdrojový register backendu.
 
 KONTROLA PRED ODOSLANÍM:
 29. Výstup zodpovedá požadovanej kapitole, nie iba téme profilu.
@@ -6986,10 +7272,10 @@ Ak skutočné údaje dostupné nie sú,
 nevymýšľaj ich.
 
 ==================================================
-10. SEKUNDÁRNE ZDROJE
+10. SEKUNDÁRNE / DOPLNKOVÉ ZDROJE
 ==================================================
 
-Sekundárnym zdrojom je zdroj citovaný vo vnútri primárneho dokumentu.
+Sekundárnym zdrojom je zdroj citovaný vo vnútri primárneho dokumentu; doplnkovým zdrojom je transparentne označený, skutočne použitý a overený externý zdroj, ak je externé vyhľadávanie v danom režime povolené.
 
 Použi ho iba vtedy,
 ak ho možno spoľahlivo spárovať s jeho bibliografickým záznamom.
@@ -7221,7 +7507,14 @@ V tejto požiadavke nebol dostupný žiadny použiteľný extrahovaný text prí
     '',
     'ZÁVÄZNÉ PRAVIDLÁ PRE ZDROJE:',
     '- Norma a forma citovania sa vždy preberajú z aktívneho profilu práce.',
-    '- Na konci zachovaj samostatné sekcie Primárne zdroje a Sekundárne zdroje.',
+    '- PRIMÁRNE ZDROJE: uvádzaj iba publikácie/dokumenty, z ktorých sa pri tvorbe konkrétneho výstupu skutočne čerpalo.',
+    '- Pri každom primárnom zdroji používaj povinné poradie: Autor/autori -> Rok -> celý Názov -> typ a dostupné identifikačné údaje -> Celkový rozsah/rozsah článku -> Použité strany -> Vydanie/Ročník/Číslo -> Príloha / zdrojový dokument ako úplne posledná položka.',
+    '- Pre knihu zachovaj ISBN a dostupné vydavateľstvo/vydanie; pre článok názov časopisu, ISSN/eISSN, DOI, ročník, číslo a rozsah strán; pre web presnú URL a dostupný dátum publikovania/prístupu. Nič z toho nevymýšľaj.',
+    '- Rozlišuj rozsah celého zdroja od strán skutočne použitých pri tvorbe textu. Použité strany uvádzaj iba vtedy, keď ich možno spoľahlivo identifikovať. Bez stránkovania uveď „neuplatňuje sa – zdroj nemá stránkovanie“; pri neistote „nepodarilo sa spoľahlivo identifikovať“.',
+    '- Položka „Príloha / zdrojový dokument“ musí byť pri každom primárnom zdroji vždy posledná a musí ukazovať pôvodný súbor alebo overenú URL, z ktorej sa čerpalo.',
+    '- SEKUNDÁRNE / DOPLNKOVÉ ZDROJE: nekopíruj celý zoznam literatúry primárneho dokumentu. Zaraď iba úplné bibliografické záznamy tých zdrojov, ktoré boli reálne použité pri tvorbe konkrétneho výstupu.',
+    '- Pri každom sekundárnom/doplnkovom zdroji zachovaj celý bibliografický záznam, uveď kde/na čo bol v práci použitý a z ktorého primárneho zdroja bol identifikovaný. Ak ide o overený externý zdroj bez prílohy, transparentne ho označ ako doplnkový externý zdroj.',
+    '- Na konci zachovaj samostatné sekcie Primárne zdroje a Sekundárne / doplnkové zdroje.',
     '- PRIMÁRNY ZDROJ je samotný relevantný priložený článok, kniha, kapitola, zborník alebo iný dokument. Názov súboru nie je názov zdroja.',
     '- Pri primárnom zdroji prečítaj celý titulný blok. Ak je titul rozdelený do viacerých riadkov, spoj ich do jedného úplného názvu až po začiatok bloku autorov. Nikdy nepouži iba prvý riadok názvu.',
     '- Pri primárnom zdroji uveď všetkých dostupných autorov a všetky reálne bibliografické údaje: rok, časopis/zborník, ročník, číslo, strany, DOI, ISSN alebo ISBN podľa typu dokumentu a aktívnej normy.',
@@ -7375,7 +7668,7 @@ HLAVNÝ POSTUP:
 6. Ak aktuálna požiadavka obsahuje prílohu alebo použiteľný extrahovaný text, nedopĺňaj bibliografické zdroje cez internet, Semantic Scholar ani Crossref, pokiaľ používateľ výslovne nepožiada o externé vyhľadávanie.
 7. V akademickom texte používaj citácie priamo v texte podľa citačnej normy profilu a zachovaj pravdivú provenienciu zdroja.
 8. Zdroj citovaný iba vo vnútri priloženého dokumentu neprezentuj ako priamo prečítaný; pri jeho tvrdení použi nepriamu provenienciu typu „cit. v“ / „as cited in“, kým originál nebol samostatne sprístupnený alebo overený.
-9. Na konci uveď Primárne zdroje a Sekundárne zdroje. Bibliografické záznamy musia vychádzať iba z dostupného zdrojového registra.
+9. Na konci uveď Primárne zdroje a Sekundárne / doplnkové zdroje. Bibliografické záznamy musia vychádzať iba z dostupného zdrojového registra.
 10. Kapitola má byť plnohodnotná a primerane rozsiahla, ale nesmie sa umelo naťahovať vymysleným obsahom.
 11. Pri žiadosti o 1. kapitolu nevytváraj abstrakt. Použi názov prvej kapitoly zo štruktúry profilu; ak chýba, odvoď ho zo zadania a prílohy.
 12. Nikdy nepreberaj názov, tému alebo cieľ z iného profilu ani zo starej histórie chatu.
@@ -7582,8 +7875,8 @@ Ak zdroj nie je overiteľný, nepíš ho ako bibliografický záznam.
 
 
 FORMÁT:
-Ak je kapitola: akademický text s citáciami v odsekoch, potom Primárne zdroje a Sekundárne zdroje.
-Ak je iba zdroje: vráť iba Primárne zdroje a Sekundárne zdroje.
+Ak je kapitola: akademický text s citáciami v odsekoch, potom Primárne zdroje a Sekundárne / doplnkové zdroje.
+Ak je iba zdroje: vráť iba Primárne zdroje a Sekundárne / doplnkové zdroje.
 Ak nejde o kapitolu, použi sekcie === VÝSTUP ===, === ANALÝZA ===, === SKÓRE ===, === ODPORÚČANIA ===, === POUŽITÉ ZDROJE A AUTORI ===.`;
 
   return limitText(prompt, maxSystemPromptChars);
@@ -7638,7 +7931,7 @@ function buildInTextCitationFromSource(source: BibliographicCandidate) {
 function extractNumericCitationsFromText(text: string) {
   const cleaned = normalizeText(text || '');
   const sourceSectionStart = cleaned.search(
-    /\n\s*(Primárne zdroje|Primarne zdroje|Sekundárne zdroje|Sekundarne zdroje|Použitá literatúra|Použité zdroje|Literatúra|Bibliografia|References)\s*\n/i,
+    /\n\s*(Primárne zdroje|Primarne zdroje|Sekundárne(?:\s*\/\s*doplnkové)? zdroje|Sekundarne(?:\s*\/\s*doplnkove)? zdroje|Použitá literatúra|Použité zdroje|Literatúra|Bibliografia|References)\s*\n/i,
   );
 
   const body =
@@ -8866,7 +9159,7 @@ function limitOutputPreservingSourceTail(
     '',
     'Zdrojový zoznam sa nezmestil do zostávajúceho stránkového limitu.',
     '',
-    'Sekundárne zdroje',
+    'Sekundárne / doplnkové zdroje',
     '',
     'Zdrojový zoznam sa nezmestil do zostávajúceho stránkového limitu.',
   ].join('\n');
@@ -8949,19 +9242,21 @@ function extractSourceSectionsForResponse(value: string): {
     };
   }
 
+  const primaryHeadingEnd = cleaned.indexOf('\n', primary.index);
+  const secondaryHeadingEnd = cleaned.indexOf('\n', secondary.index);
+  const primaryBodyStart = primaryHeadingEnd >= 0
+    ? primaryHeadingEnd + 1
+    : secondary.lineStart;
+  const secondaryBodyStart = secondaryHeadingEnd >= 0
+    ? secondaryHeadingEnd + 1
+    : cleaned.length;
+
   const primarySources = cleaned
-    .slice(
-      primary.index +
-        'Primárne zdroje'.length,
-      secondary.lineStart,
-    )
+    .slice(primaryBodyStart, secondary.lineStart)
     .trim();
 
   const secondarySources = cleaned
-    .slice(
-      secondary.index +
-        'Sekundárne zdroje'.length,
-    )
+    .slice(secondaryBodyStart)
     .trim();
 
   return {
@@ -12241,7 +12536,7 @@ Dodrž:
 - pri kapitolách používaj zdroje z relevantných príloh, projektových dokumentov alebo overené zdroje zo Semantic Scholar/Crossref,
 - nepoužívaj fiktívne citácie,
 - citácie musia byť priamo v texte,
-- na konci uveď iba jednu dvojicu sekcií: Primárne zdroje a Sekundárne zdroje,
+- na konci uveď iba jednu dvojicu sekcií: Primárne zdroje a Sekundárne / doplnkové zdroje,
 - primárny zdroj je samotný relevantný priložený dokument; jeho titul preber celý z titulného bloku a pri viacriadkovom názve spoj všetky riadky až po blok autorov,
 - názov súboru nikdy nepouži ako titul, pokiaľ je titul dokumentu čitateľný; „Zdrojový súbor: ...“ ponechaj iba ako doplnkovú informáciu za úplným záznamom,
 - pri primárnom zdroji uveď všetkých dostupných autorov a reálne údaje o roku, časopise/zborníku, ročníku, čísle, stranách, DOI, ISSN alebo ISBN,

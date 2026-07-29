@@ -1819,9 +1819,10 @@ function actionFor(
     case "capacity":
       return {
         actionLabel: labels.capacity,
-        actionUrl:
-          cleanText(context.purchaseUrl) ||
-          "/pricing#doplnkove-sluzby",
+        // Kapacitné limity smerujú priamo na hlavnú ponuku balíkov.
+        // Zámerne ignorujeme staršie purchaseUrl s #doplnkove-sluzby,
+        // aby CTA vždy otvorilo /pricing.
+        actionUrl: "/pricing",
       };
     case "back":
       return {

@@ -353,6 +353,20 @@ export default function ZedperaErrorAlert({
 
   const { Icon, palette } = visual;
 
+  /**
+   * CTA pre navýšenie kapacity musí mať maximálny kontrast.
+   * Ostatné primárne akcie si zachovávajú farebnú paletu podľa závažnosti.
+   */
+  const primaryButtonClassName =
+    error.actionKind === "capacity"
+      ? "border border-white bg-white text-black shadow-lg shadow-black/20 hover:bg-slate-100"
+      : palette.primaryButton;
+
+  const primaryFocusRingClassName =
+    error.actionKind === "capacity"
+      ? "focus-visible:ring-white"
+      : palette.focusRing;
+
   const referenceId =
     error.requestId || error.errorId || "";
 
@@ -673,8 +687,8 @@ export default function ZedperaErrorAlert({
                 href={error.actionUrl}
                 className={[
                   "inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
-                  palette.primaryButton,
-                  palette.focusRing,
+                  primaryButtonClassName,
+                  primaryFocusRingClassName,
                 ].join(" ")}
               >
                 {error.actionKind === "back" ? (
@@ -694,8 +708,8 @@ export default function ZedperaErrorAlert({
                 }
                 className={[
                   "inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
-                  palette.primaryButton,
-                  palette.focusRing,
+                  primaryButtonClassName,
+                  primaryFocusRingClassName,
                 ].join(" ")}
               >
                 {error.actionKind === "retry" ? (

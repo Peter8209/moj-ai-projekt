@@ -125,16 +125,15 @@ const mainPlans: MainPlan[] = [
     name: 'FREE VERZIA',
     priceCents: 0,
     period: 'bez platby',
-    scope: `${PLANS.free.pageLimit} strany · ${PLANS.free.attachmentLimit} príloha · ${PLANS.free.promptLimit ?? 0} AI prompty`,
+    scope: `${PLANS.free.pageLimit} strany, ${PLANS.free.attachmentLimit} prílohy, ${PLANS.free.promptLimit ?? 0} prompty`,
     badge: 'Bezplatné vyskúšanie',
     description:
-      'Základná verzia na vyskúšanie systému bez platobnej karty a bez aktivácie predplatného.',
+      'Základná verzia bez použitia platobnej karty a aktivácie predplatného.',
     isFree: true,
     features: [
-      `${PLANS.free.pageLimit} strany spracovaného výstupu`,
-      `${PLANS.free.attachmentLimit} nahraná príloha`,
+      `Vytvorenie prvých ${PLANS.free.pageLimit} strán práce`,
+      'AI pomoc pri písaní jednotlivých kapitol',
       `${PLANS.free.promptLimit ?? 0} skúšobné AI prompty`,
-      'Základné vyskúšanie AI chatu',
       'Bez platobnej karty',
     ],
   },
@@ -143,11 +142,12 @@ const mainPlans: MainPlan[] = [
     name: 'SEMINÁRNA PRÁCA',
     priceCents: 3900,
     period: 'mesačne',
-    scope: `Rozsah do ${PLANS['seminar-work'].pageLimit} strán`,
+    scope: `${PLANS['seminar-work'].pageLimit} strán / spracovanie ${PLANS['seminar-work'].attachmentLimit} príloh`,
     badge: 'Pre kratšie akademické práce',
     description:
       'Mesačný balík pre seminárne, ročníkové, zápočtové a kratšie odborné práce.',
     features: [
+      `Obsah práce + ${PLANS['seminar-work'].attachmentLimit} nahraných príloh`,
       'AI pomoc pri písaní jednotlivých kapitol',
       'Návrh štruktúry a osnovy',
       'Metodické vedenie počas spracovania',
@@ -163,12 +163,13 @@ const mainPlans: MainPlan[] = [
     name: 'BAKALÁRSKA PRÁCA',
     priceCents: 14900,
     period: 'mesačne',
-    scope: `Rozsah do ${PLANS['bachelor-thesis'].pageLimit} strán`,
+    scope: `${PLANS['bachelor-thesis'].pageLimit} strán / spracovanie ${PLANS['bachelor-thesis'].attachmentLimit} príloh`,
     badge: 'Najobľúbenejší balík',
     description:
       'Kompletná mesačná podpora od zadania a osnovy až po prípravu na obhajobu bakalárskej práce.',
     highlighted: true,
     features: [
+      `Obsah práce + ${PLANS['bachelor-thesis'].attachmentLimit} nahraných príloh`,
       'Tvorba a úprava jednotlivých kapitol',
       'Metodické vedenie počas celého písania',
       'Kontrola kvality, logiky a konzistentnosti',
@@ -182,14 +183,15 @@ const mainPlans: MainPlan[] = [
   },
   {
     id: 'master-thesis',
-    name: 'DIPLOMOVÁ / MAGISTERSKÁ PRÁCA',
+    name: 'DIPLOMOVÁ / DIZERTAČNÁ PRÁCA',
     priceCents: 18900,
     period: 'mesačne',
-    scope: `Rozsah do ${PLANS['master-thesis'].pageLimit} strán`,
+    scope: `${PLANS['master-thesis'].pageLimit} strán / spracovanie ${PLANS['master-thesis'].attachmentLimit} príloh`,
     badge: 'Najkomplexnejší balík',
     description:
       'Najvyšší mesačný balík pre rozsiahle záverečné práce, pokročilú metodiku, analýzu dát a obhajobu.',
     features: [
+      `Obsah práce + ${PLANS['master-thesis'].attachmentLimit} nahraných príloh`,
       'Tvorba a úprava celej záverečnej práce',
       'Pokročilé metodické vedenie',
       'Kontrola odbornosti a konzistentnosti',
@@ -214,6 +216,7 @@ const oneTimeAddons: OneTimeAddon[] = [
     description:
       'Jednorazové sprístupnenie nástrojov na prípravu, štatistické spracovanie, vizualizáciu a export dát.',
     features: [
+      `+ ${ADDONS['data-analysis'].extraAttachments} prílohy`,
       'Čistenie a príprava dát',
       'Spracovanie dotazníkov',
       'Deskriptívna štatistika',
@@ -230,9 +233,9 @@ const oneTimeAddons: OneTimeAddon[] = [
     priceCents: ADDONS['extra-20'].priceCents,
     period: 'jednorazová platba',
     description:
-      'Jednorazové navýšenie dostupného rozsahu aktuálneho projektu o ďalších 20 strán.',
+      `Jednorazové navýšenie dostupného rozsahu aktuálneho projektu o ďalších ${ADDONS['extra-20'].extraPages} strán a ${ADDONS['extra-20'].extraAttachments} príloh.`,
     features: [
-      `Navýšenie limitu o ${ADDONS['extra-20'].extraPages} strán`,
+      `+ ${ADDONS['extra-20'].extraPages} strán + ${ADDONS['extra-20'].extraAttachments} príloh`,
       'Použitie v aktuálnom projekte',
       'Bez zmeny hlavného mesačného plánu',
     ],
@@ -243,9 +246,9 @@ const oneTimeAddons: OneTimeAddon[] = [
     priceCents: ADDONS['extra-40'].priceCents,
     period: 'jednorazová platba',
     description:
-      'Jednorazové navýšenie dostupného rozsahu aktuálneho projektu o ďalších 40 strán.',
+      `Jednorazové navýšenie dostupného rozsahu aktuálneho projektu o ďalších ${ADDONS['extra-40'].extraPages} strán a ${ADDONS['extra-40'].extraAttachments} príloh.`,
     features: [
-      `Navýšenie limitu o ${ADDONS['extra-40'].extraPages} strán`,
+      `+ ${ADDONS['extra-40'].extraPages} strán + ${ADDONS['extra-40'].extraAttachments} príloh`,
       'Použitie v aktuálnom projekte',
       'Bez zmeny hlavného mesačného plánu',
     ],
@@ -256,9 +259,9 @@ const oneTimeAddons: OneTimeAddon[] = [
     priceCents: ADDONS['extra-60'].priceCents,
     period: 'jednorazová platba',
     description:
-      'Jednorazové navýšenie dostupného rozsahu aktuálneho projektu o ďalších 60 strán.',
+      `Jednorazové navýšenie dostupného rozsahu aktuálneho projektu o ďalších ${ADDONS['extra-60'].extraPages} strán a ${ADDONS['extra-60'].extraAttachments} príloh.`,
     features: [
-      `Navýšenie limitu o ${ADDONS['extra-60'].extraPages} strán`,
+      `+ ${ADDONS['extra-60'].extraPages} strán + ${ADDONS['extra-60'].extraAttachments} príloh`,
       'Použitie v aktuálnom projekte',
       'Bez zmeny hlavného mesačného plánu',
     ],
@@ -549,7 +552,7 @@ export default function PricingPage() {
             <p className="mt-4 max-w-4xl text-base leading-7 text-slate-300 sm:text-lg">
               Vyberte si balík podľa typu akademickej práce a požadovaného
               rozsahu. K dispozícii sú aj jednorazové doplnky na analýzu dát
-              alebo rozšírenie aktuálneho projektu o ďalšie strany.
+              alebo rozšírenie aktuálneho projektu o ďalšie strany a prílohy.
             </p>
 
           </div>
@@ -578,7 +581,7 @@ export default function PricingPage() {
               const loadingKey = plan.isFree
                 ? null
                 : `plan:${plan.id}`;
-              const isLoading = loadingCheckout === loadingKey;
+              const isLoading = loadingKey !== null && loadingCheckout === loadingKey;
 
               return (
                 <article
@@ -708,7 +711,7 @@ export default function PricingPage() {
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             {oneTimeAddons.map((addon) => {
               const loadingKey = `addon:${addon.id}`;
-              const isLoading = loadingCheckout === loadingKey;
+              const isLoading = loadingKey !== null && loadingCheckout === loadingKey;
 
               return (
                 <article

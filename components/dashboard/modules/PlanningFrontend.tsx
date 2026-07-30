@@ -2188,6 +2188,14 @@ const DIRECT_MODULE_API: Partial<Record<ModuleKey, DirectModuleApiConfig>> = {
 
 const ORIGINALITY_PROTOCOL_STORAGE_KEY = "zedpera_originality_protocol_result";
 
+const MODULES_WITHOUT_PRIMARY_TEXT_INPUT = new Set<ModuleKey>([
+  "defense",
+  "translation",
+  "planning",
+  "emails",
+  "humanizer",
+]);
+
 const allowedFileExtensions = [
   ".pdf",
   ".doc",
@@ -9996,7 +10004,7 @@ Text emailu:
           />
           ) : null}
 
-          <div className="px-4 pt-4 sm:px-6 xl:px-8">
+          <div className="mx-auto w-full max-w-6xl px-4 pt-4 sm:px-6 xl:px-8">
             {false ? (
             <button
               type="button"
@@ -10019,7 +10027,7 @@ Text emailu:
                     <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-300">
                       Aktívny balík
                     </p>
-                    <h2 className="mt-1 break-words text-lg font-black leading-tight text-white">
+                    <h2 className="mt-1 text-base font-black leading-tight text-white sm:text-lg sm:whitespace-nowrap">
                       {entitlements.planName}
                     </h2>
                     {(entitlements.addonNames ?? []).length > 0 ? (
@@ -10043,12 +10051,12 @@ Text emailu:
                     "mt-4 grid gap-3",
                     activeModule === "planning" || activeModule === "emails"
                       ? "sm:grid-cols-2"
-                      : "sm:grid-cols-3",
+                      : "sm:grid-cols-2 xl:grid-cols-3",
                   ].join(" ")}
                 >
                   <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
                     <p className="text-xs font-bold text-slate-400">Strany</p>
-                    <p className="mt-1 font-black text-white">
+                    <p className="mt-1 text-sm font-black leading-tight text-white sm:text-base">
                       {hasUnlimitedAccess
                         ? "Neobmedzené"
                         : `${pageQuota.pagesRemaining ?? 0} zostáva z ${pageQuota.pageLimit ?? 0}`}
@@ -10062,7 +10070,7 @@ Text emailu:
 
                   <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
                     <p className="text-xs font-bold text-slate-400">Prompty</p>
-                    <p className="mt-1 font-black text-white">
+                    <p className="mt-1 text-sm font-black leading-tight text-white sm:text-base">
                       {hasUnlimitedAccess || entitlements.promptLimit === null
                         ? "Neobmedzené"
                         : `${entitlements.promptsRemaining ?? 0} zostáva z ${entitlements.promptLimit}`}
@@ -10076,7 +10084,7 @@ Text emailu:
                         Prílohy
                       </p>
 
-                      <p className="mt-1 font-black text-white">
+                      <p className="mt-1 text-sm font-black leading-tight text-white sm:text-base">
                         {hasUnlimitedAccess
                           ? "Neobmedzené"
                           : `${visibleAttachmentCount} / ${effectiveAttachmentLimit}`}
@@ -10353,24 +10361,28 @@ Text emailu:
                   </p>
                 </section>
 
-                <label
-                  htmlFor={dashboardInputId}
-                  className="mb-2 block text-sm font-black text-slate-200"
-                >
-                  {activeModuleInputLabel}
-                </label>
+                {!MODULES_WITHOUT_PRIMARY_TEXT_INPUT.has(activeModule) ? (
+                  <>
+                    <label
+                      htmlFor={dashboardInputId}
+                      className="mb-2 block text-sm font-black text-slate-200"
+                    >
+                      {activeModuleInputLabel}
+                    </label>
 
-                <textarea
-                  key={`dashboard-textarea-${activeModule}`}
-                  id={dashboardInputId}
-                  name={dashboardInputId}
-                  data-module-input={activeModule}
-                  aria-label={activeModuleInputLabel}
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  placeholder={activeModulePlaceholder}
-                  className="min-h-[240px] w-full resize-y rounded-3xl border border-white/10 bg-[#070b18] px-5 py-5 text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/10"
-                />
+                    <textarea
+                      key={`dashboard-textarea-${activeModule}`}
+                      id={dashboardInputId}
+                      name={dashboardInputId}
+                      data-module-input={activeModule}
+                      aria-label={activeModuleInputLabel}
+                      value={input}
+                      onChange={(event) => setInput(event.target.value)}
+                      placeholder={activeModulePlaceholder}
+                      className="min-h-[240px] w-full resize-y rounded-3xl border border-white/10 bg-[#070b18] px-5 py-5 text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/10"
+                    />
+                  </>
+                ) : null}
               </>
             )}
 

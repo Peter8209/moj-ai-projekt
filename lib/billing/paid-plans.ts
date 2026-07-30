@@ -1,46 +1,31 @@
-import type { PlanId } from '@/lib/billing/catalog';
+import {
+  getStripePriceId as getCatalogStripePriceId,
+  isPaidPlanId as isCatalogPaidPlanId,
+  isPlanId as isCatalogPlanId,
+  type PaidPlanId as CatalogPaidPlanId,
+  type PlanId,
+} from '@/lib/billing/catalog';
 
+/**
+ * Spätne kompatibilný zoznam platených hlavných plánov.
+ * Limity, ceny a Stripe konfigurácia majú jediný zdroj pravdy v catalog.ts.
+ */
 export const PAID_PLAN_IDS = [
   'seminar-work',
   'bachelor-thesis',
   'master-thesis',
-] as const;
+] as const satisfies readonly CatalogPaidPlanId[];
 
-export type PaidPlanId = (typeof PAID_PLAN_IDS)[number];
+export type PaidPlanId = CatalogPaidPlanId;
 
 export function isPaidPlanId(value: unknown): value is PaidPlanId {
-  return (
-    typeof value === 'string' &&
-    PAID_PLAN_IDS.includes(value as PaidPlanId)
-  );
+  return isCatalogPaidPlanId(value);
 }
 
 export function getStripePriceId(planId: PaidPlanId): string {
-  const priceIdByPlan: Record<PaidPlanId, string | undefined> = {
-    'seminar-work': process.env.STRIPE_PRICE_SEMINAR_WORK,
-    'bachelor-thesis':
-      process.env.STRIPE_PRICE_BACHELOR_THESIS,
-    'master-thesis':
-      process.env.STRIPE_PRICE_MASTER_THESIS,
-  };
-
-  const priceId = priceIdByPlan[planId];
-
-  if (!priceId) {
-    throw new Error(
-      `Pre balík "${planId}" nie je nastavené Stripe Price ID.`,
-    );
-  }
-
-  return priceId;
+  return getCatalogStripePriceId(planId);
 }
 
 export function isPlanId(value: unknown): value is PlanId {
-  return (
-    value === 'free' ||
-    value === 'seminar-work' ||
-    value === 'bachelor-thesis' ||
-    value === 'master-thesis' ||
-    value === 'admin'
-  );
+  return isCatalogPlanId(value);
 }

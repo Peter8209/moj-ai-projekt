@@ -33,7 +33,8 @@ const LARGE_FILE_LIMIT_BYTES = 12 * 1024 * 1024;
 const REVISION_CHUNK_TARGET_CHARS = 20_000;
 const REVISION_CHUNK_HARD_MAX_CHARS = 24_000;
 const REVISION_CONTEXT_CHARS = 1_200;
-const MIN_ACCEPTABLE_REWRITE_RATIO = 0.58;
+const MIN_ACCEPTABLE_REWRITE_RATIO = 0.78;
+const MIN_PARAGRAPH_RETENTION_RATIO = 0.7;
 const MAX_PARALLEL_REVISIONS = 2;
 
 const REVISED_TEXT_START = '<<<REVISED_TEXT>>>';
@@ -160,6 +161,7 @@ type SupervisorResponse = {
     chunkCount: number;
     retriedChunks: number;
     minimumRewriteRatio: number;
+    changedChunks: number;
   };
 };
 
@@ -330,6 +332,17 @@ function uniqueFiles(values: FormDataEntryValue[]): File[] {
   return result;
 }
 
+function looksLikeFeedbackFileName(fileName: string): boolean {
+  const normalized = fileName
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  return /(pripomien|komentar|comment|feedback|review|oponent|skolitel|supervisor|posudok|revision)/i.test(
+    normalized,
+  );
+}
+
 async function extractUploadedFile(file: File): Promise<ExtractedAttachment> {
   const name = file.name || 'bez-nazvu';
   const type = file.type || 'application/octet-stream';
@@ -484,8 +497,12 @@ async function parseRequest(request: NextRequest): Promise<SupervisorRequestPayl
     const explicitFeedbackFiles = uniqueFiles([
       ...formData.getAll('feedbackFiles'),
       ...formData.getAll('feedbackFile'),
+      ...formData.getAll('feedbackAttachments'),
       ...formData.getAll('commentFiles'),
+      ...formData.getAll('commentAttachments'),
       ...formData.getAll('reviewFiles'),
+      ...formData.getAll('reviewerFiles'),
+      ...formData.getAll('supervisorFiles'),
     ]);
 
     const legacyFiles = uniqueFiles([
@@ -494,6 +511,13 @@ async function parseRequest(request: NextRequest): Promise<SupervisorRequestPayl
       ...formData.getAll('attachments'),
       ...formData.getAll('attachment'),
     ]);
+
+    const legacyFeedbackFiles = legacyFiles.filter((file) =>
+      looksLikeFeedbackFileName(file.name || ''),
+    );
+    const legacySourceFiles = legacyFiles.filter(
+      (file) => !looksLikeFeedbackFileName(file.name || ''),
+    );
 
     return {
       studentText: getStringFromFormData(formData, [
@@ -536,8 +560,10 @@ async function parseRequest(request: NextRequest): Promise<SupervisorRequestPayl
           formData.get('activeProfile') ||
           formData.get('profileSnapshot'),
       ),
-      sourceFiles: explicitSourceFiles.length ? explicitSourceFiles : legacyFiles,
-      feedbackFiles: explicitFeedbackFiles,
+      sourceFiles: explicitSourceFiles.length ? explicitSourceFiles : legacySourceFiles,
+      feedbackFiles: explicitFeedbackFiles.length
+        ? explicitFeedbackFiles
+        : legacyFeedbackFiles,
     };
   }
 
@@ -832,35 +858,47 @@ function buildSystemPrompt(params: {
 }): string {
   return `
 Si AI školiteľ platformy Zedpera v režime PRESNÁ REVÍZIA PODĽA PRIPOMIENOK.
-Si akademický editor, ktorý upravuje existujúcu záverečnú prácu, nie sumarizátor.
+Si akademický editor dokumentu. Tvojou úlohou NIE JE sumarizovať, hodnotiť ani vysvetľovať prácu, ale FYZICKY ZAPRACOVAŤ pripomienky do pôvodného textu.
 
-HLAVNÝ CIEĽ:
-Zapracovať pripomienky školiteľa/oponenta cielene a kontextovo do pôvodného dokumentu tak, aby sa zachovala pôvodná štruktúra, odborný význam, terminológia, citácie, tabuľky, číslovanie a rozsah obsahu všade, kde pripomienky nevyžadujú zmenu.
+ZÁKLADNÝ PRINCÍP:
+Pripomienka je špecifikácia zmeny. Najprv urč, čo presne požaduje, potom nájdi miesto v aktuálnom úseku a vykonaj konkrétnu editáciu priamo v texte.
+
+POVINNÉ SPRÁVANIE:
+- „doplň / rozšír / vysvetli“ = vlož požadovaný obsah na správne miesto; ak chýba fakt, vlož „Údaj je potrebné doplniť: …“.
+- „oprav / zmeň / preformuluj“ = nahraď chybnú formuláciu opravenou formuláciou priamo v dokumente.
+- „odstráň / vynechaj“ = odstráň iba požadovanú časť a oprav nadväznosť viet.
+- „presuň“ = zmeň umiestnenie obsahu, nie iba slovne opíš, že by sa mal presunúť.
+- „zjednoť terminológiu / čas / osobu / citačný štýl“ = vykonaj zmenu na všetkých relevantných miestach aktuálneho úseku.
+- Ak pripomienka obsahuje konkrétny citát, slovné spojenie, názov kapitoly, číslo tabuľky, hypotézy alebo sekcie, ber to ako kotvu a uprav presne dané miesto.
 
 ABSOLÚTNE PRAVIDLÁ:
 - NESKRACUJ dokument na súhrn, abstrakt, osnovu ani krátku prepracovanú verziu.
-- NEVYNECHÁVAJ odseky, podkapitoly, tabuľky, názvy tabuliek/grafov, citácie, výsledky alebo metodické informácie iba preto, aby bol text kratší.
-- NEPREPISUJ časti, ktorých sa pripomienka netýka, viac než je potrebné pre akademický štýl, konzistentnosť alebo nadväznosť.
+- NIKDY nenahrádzaj pôvodný text komentárom typu „bolo upravené“, „odporúčam“, „je potrebné doplniť“ mimo prípadu, keď skutočne chýba nedodaný fakt.
+- NEVYNECHÁVAJ odseky, podkapitoly, tabuľky, názvy tabuliek/grafov, citácie, výsledky alebo metodické informácie, pokiaľ ich odstránenie výslovne nevyžaduje pripomienka.
+- Časti, ktorých sa žiadna pripomienka netýka, zachovaj čo najvernejšie, ideálne verbatim. Nerob samoúčelnú jazykovú parafrázu celého úseku.
 - Každý spracovaný úsek musí po revízii reprezentovať celý obsah vstupného úseku, nie jeho zhrnutie.
 - Zachovaj poradie kapitol a podkapitol. Číslovanie oprav iba vtedy, ak je chyba jednoznačná z textu alebo pripomienky.
-- Zachovaj existujúce fakty, čísla, štatistiky, názvy nástrojov, výsledky a citácie. Ak sú rozporné, nevymýšľaj správnu hodnotu. Oprav iba to, čo sa dá bezpečne určiť z dodaného dokumentu.
-- Nevymýšľaj nové zdroje, DOI, URL, roky, bibliografické údaje, etické schválenie, termín zberu, miesto zberu, typ výberu participantov, validovanú jazykovú verziu nástroja ani iný chýbajúci fakt.
-- Ak pripomienka vyžaduje fakt, ktorý v podkladoch nie je, vlož na presné miesto neutrálne označenie „Údaj je potrebné doplniť: …“ a uveď čo chýba.
-- Pri citlivej téme sebapoškodzovania používaj vecný, neutrálny a nehodnotiaci jazyk.
-- Pri reliabilite alebo metodologickom probléme vykonaj odbornú interpretáciu iba z hodnôt, ktoré sú v texte.
+- Zachovaj existujúce fakty, čísla, štatistiky, názvy nástrojov, výsledky a citácie. Ak sú rozporné, nevymýšľaj správnu hodnotu.
+- Nevymýšľaj nové zdroje, DOI, URL, roky, bibliografické údaje, etické schválenie, termín alebo miesto zberu ani iný chýbajúci fakt.
+- Ak pripomienka vyžaduje fakt, ktorý v podkladoch nie je, vlož na presné miesto neutrálne označenie „Údaj je potrebné doplniť: …“ a uveď, čo chýba.
+- Pri reliabilite alebo metodologickom probléme interpretuj iba hodnoty, ktoré sú v podkladoch.
 - Formuláciu „hypotézu potvrdzujeme/nepotvrdzujeme“ nahraď metodologicky primeraným vyjadrením o podpore alebo nepodpore hypotézy výsledkami.
 - Existujúce citácie zachovaj. Citačný štýl: ${params.citationStyle}.
 - Jazyk výsledku: ${params.outputLanguage}.
 
+KONTROLA PRED ODOVZDANÍM:
+1. Skontroluj každú pripomienku, ktorá sa vzťahuje na aktuálny úsek.
+2. Over, že výsledok obsahuje skutočnú úpravu textu, nie iba opis odporúčania.
+3. Over, že neboli stratené nesúvisiace odseky, fakty, čísla ani citácie.
+4. Ak sa na aktuálny úsek nevzťahuje žiadna pripomienka, vráť pôvodný úsek BEZ PREPISOVANIA a do protokolu uveď „BEZ_ZMENY – žiadna pripomienka sa na tento úsek nevzťahuje.“
+
 VÝSTUP MÁ VŽDY DVE ČASTI V PRESNOM FORMÁTE:
 ${REVISED_TEXT_START}
-kompletný revidovaný text aktuálneho úseku
+kompletný výsledný text aktuálneho úseku po priamom zapracovaní pripomienok
 ${REVISED_TEXT_END}
 ${CHANGE_LOG_START}
-stručný protokol iba skutočne vykonaných zmien v tomto úseku; každý bod: miesto/sekcia – čo sa upravilo – prečo
+iba reálne vykonané zmeny; každý bod: miesto/sekcia – pripomienka – konkrétne vykonaná úprava
 ${CHANGE_LOG_END}
-
-V protokole neuvádzaj všeobecné odporúčania. Uvádzaj len zmeny, ktoré si naozaj vykonal, a prípady, kde bolo potrebné vložiť označenie chýbajúceho faktu.
 `.trim();
 }
 
@@ -871,41 +909,52 @@ function buildChunkUserPrompt(params: {
   profileBlock: string;
   strictRetry: boolean;
 }): string {
+  const feedbackInstruction = params.feedback
+    ? params.feedback
+    : '[Neboli dodané žiadne pripomienky. Vráť AKTUÁLNY ÚSEK presne bez obsahovej ani štylistickej zmeny.]';
+
   return `
 ÚLOHA:
-Reviduj iba označený AKTUÁLNY ÚSEK dokumentu, ale uplatni všetky globálne pripomienky, ktoré sa na tento úsek vzťahujú.
-Toto je úsek ${params.chunk.index + 1} z ${params.chunkCount}. Výsledný revidovaný text musí zostať obsahovo úplný voči AKTUÁLNEMU ÚSEKU.
+Toto je úsek ${params.chunk.index + 1} z ${params.chunkCount}. Urob chirurgickú revíziu podľa pripomienok.
+
+DÔLEŽITÉ:
+- Najprv si interne spáruj každú relevantnú pripomienku s konkrétnym miestom v CURRENT_CHUNK.
+- Potom text na danom mieste skutočne prepíš, oprav, doplň, odstráň alebo presuň podľa významu pripomienky.
+- Nevracaj vysvetlenie toho, čo by sa malo urobiť. V REVISED_TEXT musí byť už hotová opravená verzia dokumentu.
+- Čokoľvek mimo rozsahu pripomienok zachovaj čo najpresnejšie podľa originálu.
+- Ak sa pripomienka na CURRENT_CHUNK nevzťahuje, CURRENT_CHUNK neparafrázuj.
 
 AKTÍVNY PROFIL PRÁCE:
 ${params.profileBlock}
 
 PRIPOMIENKY ŠKOLITEĽA / OPONENTA / KONZULTANTA:
 <<<FEEDBACK>>>
-${params.feedback || '[Bez samostatných pripomienok; vykonaj iba potrebnú akademickú jazykovú revíziu bez skracovania.]'}
+${feedbackInstruction}
 <<<END_FEEDBACK>>>
 
-KONTEXT PRED ÚSEKOM – LEN PRE NADVÄZNOSŤ, NEOPAKUJ HO VO VÝSTUPE:
+KONTEXT PRED ÚSEKOM – iba na orientáciu, nesmie sa kopírovať do výsledku:
 <<<PREVIOUS_CONTEXT>>>
 ${params.chunk.previousContext || '[Začiatok dokumentu]'}
 <<<END_PREVIOUS_CONTEXT>>>
 
-AKTUÁLNY ÚSEK, KTORÝ MUSÍŠ CELÝ REVIDOVAŤ:
+AKTUÁLNY ÚSEK, KTORÝ SA MÁ PRIAMO EDITOVAŤ:
 <<<CURRENT_CHUNK>>>
 ${params.chunk.text}
 <<<END_CURRENT_CHUNK>>>
 
-KONTEXT PO ÚSEKU – LEN PRE NADVÄZNOSŤ, NEOPAKUJ HO VO VÝSTUPE:
+KONTEXT PO ÚSEKU – iba na orientáciu, nesmie sa kopírovať do výsledku:
 <<<NEXT_CONTEXT>>>
 ${params.chunk.nextContext || '[Koniec dokumentu]'}
 <<<END_NEXT_CONTEXT>>>
 
 ${
   params.strictRetry
-    ? 'KRITICKÁ OPRAVA: Predchádzajúci výstup bol príliš krátky alebo hodnotiaci. Teraz zachovaj všetky obsahové jednotky, odseky, nadpisy, čísla, citácie a metodické informácie aktuálneho úseku. Nesumarizuj.'
+    ? `KRITICKÁ OPRAVA PREDCHÁDZAJÚCEHO POKUSU:
+Predchádzajúca odpoveď nebola prijateľná. Nesmieš sumarizovať ani len opísať pripomienky. Zachovaj celý CURRENT_CHUNK a každú relevantnú pripomienku aplikuj priamo do konkrétnej vety, odseku, tabuľky alebo sekcie. Nesúvisiaci text nechaj nedotknutý.`
     : ''
 }
 
-Vráť presne formát REVISED_TEXT + CHANGE_LOG definovaný systémovou inštrukciou.
+Vráť iba presný formát REVISED_TEXT + CHANGE_LOG definovaný systémovou inštrukciou.
 `.trim();
 }
 
@@ -920,19 +969,22 @@ function extractBetween(value: string, start: string, end: string): string {
 
 function parseChunkOutput(raw: string): { revisedText: string; changeLog: string } {
   const cleaned = cleanEditorOutput(raw);
-  const revisedText = cleanEditorOutput(
-    extractBetween(cleaned, REVISED_TEXT_START, REVISED_TEXT_END),
-  );
-  const changeLog = cleanInvisibleCharacters(
-    extractBetween(cleaned, CHANGE_LOG_START, CHANGE_LOG_END),
-  );
+  const hasRevisedStart = cleaned.includes(REVISED_TEXT_START);
+  const hasRevisedEnd = cleaned.includes(REVISED_TEXT_END);
+  const hasLogStart = cleaned.includes(CHANGE_LOG_START);
+  const hasLogEnd = cleaned.includes(CHANGE_LOG_END);
 
-  if (revisedText) return { revisedText, changeLog };
+  if (!hasRevisedStart || !hasRevisedEnd || !hasLogStart || !hasLogEnd) {
+    return { revisedText: '', changeLog: '' };
+  }
 
-  // Fallback pre prípad, že model zabudne delimitery, ale stále vráti použiteľný text.
   return {
-    revisedText: cleaned,
-    changeLog: '',
+    revisedText: cleanEditorOutput(
+      extractBetween(cleaned, REVISED_TEXT_START, REVISED_TEXT_END),
+    ),
+    changeLog: cleanInvisibleCharacters(
+      extractBetween(cleaned, CHANGE_LOG_START, CHANGE_LOG_END),
+    ),
   };
 }
 
@@ -1005,6 +1057,30 @@ function rewriteRatio(source: string, revised: string): number {
   return revised.length / source.length;
 }
 
+function meaningfulParagraphCount(value: string): number {
+  return cleanInvisibleCharacters(value)
+    .split(/\n{2,}/g)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 80).length;
+}
+
+function paragraphRetentionRatio(source: string, revised: string): number {
+  const sourceParagraphs = meaningfulParagraphCount(source);
+  if (sourceParagraphs < 3) return 1;
+  return meaningfulParagraphCount(revised) / sourceParagraphs;
+}
+
+function normalizeForComparison(value: string): string {
+  return cleanInvisibleCharacters(value)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function hasMaterialTextChange(source: string, revised: string): boolean {
+  return normalizeForComparison(source) !== normalizeForComparison(revised);
+}
+
 async function reviseOneChunk(params: {
   chunk: RevisionChunk;
   chunkCount: number;
@@ -1032,6 +1108,7 @@ async function reviseOneChunk(params: {
       ...parsed,
       finishReason: generated.finishReason,
       ratio: rewriteRatio(params.chunk.text, parsed.revisedText),
+      paragraphRatio: paragraphRetentionRatio(params.chunk.text, parsed.revisedText),
     };
   };
 
@@ -1043,7 +1120,9 @@ async function reviseOneChunk(params: {
     attempt.finishReason === 'length' ||
     looksLikeAuditOutput(attempt.revisedText) ||
     (params.chunk.text.length > 4_000 &&
-      attempt.ratio < MIN_ACCEPTABLE_REWRITE_RATIO);
+      attempt.ratio < MIN_ACCEPTABLE_REWRITE_RATIO) ||
+    (meaningfulParagraphCount(params.chunk.text) >= 3 &&
+      attempt.paragraphRatio < MIN_PARAGRAPH_RETENTION_RATIO);
 
   if (needsRetry) {
     retried = true;
@@ -1073,6 +1152,16 @@ async function reviseOneChunk(params: {
     throw new Error(
       `Úsek ${params.chunk.index + 1} bol modelom neprimerane skrátený ` +
         `(pomer ${(attempt.ratio * 100).toFixed(0)} %). Výstup bol zastavený, aby sa používateľovi nevrátil súhrn namiesto kompletnej práce.`,
+    );
+  }
+
+  if (
+    meaningfulParagraphCount(params.chunk.text) >= 3 &&
+    attempt.paragraphRatio < MIN_PARAGRAPH_RETENTION_RATIO
+  ) {
+    throw new Error(
+      `Úsek ${params.chunk.index + 1} stratil príliš veľa pôvodných odsekov. ` +
+        'Výstup bol zastavený, pretože sa podobal na sumarizáciu namiesto priamej revízie.',
     );
   }
 
@@ -1222,6 +1311,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const unreadableFeedback = feedbackAttachments.filter(
+      (attachment) => !attachment.extractionAvailable && !attachment.imageDataUrl,
+    );
+
+    if (
+      payload.feedbackFiles.length > 0 &&
+      unreadableFeedback.length > 0 &&
+      !payload.clientFeedbackExtractedText
+    ) {
+      return NextResponse.json<SupervisorResponse>(
+        {
+          ok: false,
+          error:
+            `Niektoré súbory s pripomienkami sa nepodarilo načítať (${unreadableFeedback.map((item) => item.name).join(', ')}). ` +
+            'AI školiteľ nesmie pokračovať bez pripomienok, pretože by iba všeobecne prepisoval pôvodnú prácu. Použite DOCX, textové PDF alebo vložte pripomienky priamo.',
+          warning: appendWarnings(unreadableFeedback),
+        },
+        { status: 422 },
+      );
+    }
+
     const sourceAttachmentBlock = buildAttachmentTextBlock(
       sourceAttachments,
       payload.clientExtractedText,
@@ -1271,9 +1381,11 @@ export async function POST(request: NextRequest) {
     const systemPrompt = buildSystemPrompt({ outputLanguage, citationStyle });
 
     let revisions: ChunkRevision[] = [];
+    let revisionChunks: RevisionChunk[] = [];
 
     if (sourceDocument) {
       const chunks = splitIntoRevisionChunks(sourceDocument);
+      revisionChunks = chunks;
       if (!chunks.length) {
         throw new Error('Pôvodný dokument sa nepodarilo rozdeliť na spracovateľné úseky.');
       }
@@ -1315,6 +1427,11 @@ export async function POST(request: NextRequest) {
       revisions.map((revision) => revision.revisedText).join('\n\n'),
     );
     const changeLog = normalizeChangeLog(revisions);
+    const changedChunks = revisionChunks.length
+      ? revisions.filter((revision, index) =>
+          hasMaterialTextChange(revisionChunks[index]?.text || '', revision.revisedText),
+        ).length
+      : revisions.length;
 
     if (!revisedDocument) {
       throw new Error('AI školiteľ nevrátil použiteľný revidovaný dokument.');
@@ -1335,7 +1452,13 @@ export async function POST(request: NextRequest) {
       ...revisions.map((revision) => revision.lengthRatio),
     );
 
-    const warning = appendWarnings(allAttachments);
+    let warning = appendWarnings(allAttachments);
+
+    if (feedback.trim() && changedChunks === 0) {
+      const noChangeWarning =
+        'Boli dodané pripomienky, ale model nevykonal žiadnu textovú zmenu. Skontrolujte, či pripomienky obsahujú konkrétne kotvy alebo či frontend posiela pripomienkové súbory cez feedbackFiles.';
+      warning = warning ? `${warning} ${noChangeWarning}` : noChangeWarning;
+    }
 
     return NextResponse.json<SupervisorResponse>({
       ok: true,
@@ -1370,6 +1493,7 @@ export async function POST(request: NextRequest) {
         chunkCount: revisions.length,
         retriedChunks,
         minimumRewriteRatio,
+        changedChunks,
       },
     });
   } catch (error) {

@@ -11,6 +11,22 @@ type CheckoutButtonProps = {
   className?: string;
 };
 
+type CheckoutResponse = {
+  url?: string;
+  error?: string;
+  displayMessage?: string;
+};
+
+function createRequestId(planId: PaidPlanId): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `checkout-plan-${planId}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
+}
+
 export default function CheckoutButton({
   planId,
   locale = 'sk',
@@ -18,9 +34,7 @@ export default function CheckoutButton({
   className,
 }: CheckoutButtonProps) {
   const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(
-    null,
-  );
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   async function startCheckout() {
     if (isLoading) {
@@ -30,6 +44,8 @@ export default function CheckoutButton({
     setIsLoading(true);
     setErrorMessage(null);
 
+    const requestId = createRequestId(planId);
+
     try {
       const response = await fetch('/api/payments/checkout', {
         method: 'POST',
@@ -37,19 +53,31 @@ export default function CheckoutButton({
         cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'Idempotency-Key': requestId,
         },
         body: JSON.stringify({
+          checkoutType: 'plan',
+          plan: planId,
           planId,
+          addons: [],
+          addonIds: [],
           locale,
+          requestId,
+          checkoutRequestId: requestId,
         }),
       });
 
-      const result = (await response.json().catch(() => null)) as
-        | {
-            url?: string;
-            error?: string;
-          }
-        | null;
+      const rawBody = await response.text();
+      let result: CheckoutResponse | null = null;
+
+      if (rawBody) {
+        try {
+          result = JSON.parse(rawBody) as CheckoutResponse;
+        } catch {
+          result = { error: rawBody };
+        }
+      }
 
       if (response.status === 401) {
         const returnUrl = `/?lang=${encodeURIComponent(
@@ -72,7 +100,8 @@ export default function CheckoutButton({
 
       if (!response.ok || !result?.url) {
         throw new Error(
-          result?.error ||
+          result?.displayMessage ||
+            result?.error ||
             'Nepodarilo sa pripraviť platobnú stránku.',
         );
       }

@@ -14,10 +14,10 @@
  *   a následne sa odovzdajú pomocným funkciám v tomto katalógu.
  * - FREE zostáva verejným balíkom pre bežných používateľov. ADMIN sa nikdy
  *   nesmie prepnúť na FREE, zobrazovať vo verejnom cenníku ani poslať do Stripe.
- * - Počet príloh je vždy naviazaný na počet dostupných strán:
- *   1 dostupná strana = 1 dostupná príloha.
- * - Doplnky Extra 20/40/60 preto pridávajú rovnaký počet strán aj príloh.
- * - Doplnok Analýza dát nepridáva strany ani prílohy.
+ * - Limity strán a príloh sú samostatné a nesmú sa navzájom odpočítavať.
+ * - Jedna úspešne nahraná príloha odpočíta vždy 1 prílohu bez ohľadu na počet jej strán.
+ * - Doplnky Extra 20/40/60 pridávajú samostatne definovaný počet strán a príloh.
+ * - Doplnok Analýza dát nepridáva strany, ale pridáva 2 prílohy.
  */
 
 // =====================================================
@@ -84,8 +84,8 @@ export type CurrencyCode = 'EUR';
 /**
  * Režim príloh určuje, ako sa attachmentLimit interpretuje:
  *
- * - per-package-purchase: limit príloh je naviazaný na efektívny limit strán
- *   aktívneho balíka a doplnkov; každý prijatý súbor odpočíta 1 prílohu,
+ * - per-package-purchase: limit príloh je samostatná kvóta aktívneho balíka
+ *   a doplnkov; každý úspešne prijatý súbor odpočíta presne 1 prílohu,
  * - unlimited: interný ADMIN má neobmedzené strany aj prílohy.
  *
  * Technický počet súborov v jednej HTTP požiadavke sa rieši samostatne.
@@ -99,7 +99,13 @@ export type AttachmentQuotaMode =
  * Umožní bezpečne odlíšiť staršie nákupy od nového balíkového počítadla.
  */
 export const ATTACHMENT_QUOTA_VERSION =
-  '2026-07-page-linked-v2' as const;
+  '2026-07-independent-attachments-v3' as const;
+
+/** Absolútny technický strop veľkosti jednej prílohy. */
+export const MAX_ATTACHMENT_FILE_BYTES = 50 * 1024 * 1024;
+
+/** Maximálny počet strán jedného PDF dokumentu. */
+export const MAX_ATTACHMENT_PDF_PAGES = 100;
 
 export type StripePriceEnvironmentKey =
   | 'STRIPE_PRICE_SEMINAR_WORK'
@@ -127,8 +133,7 @@ type PlanDefinitionBase = {
   /**
    * ZÁKLADNÝ počet príloh plánu pred pripočítaním doplnkov.
    *
-   * Pri všetkých verejných plánoch sa musí rovnať pageLimit:
-   * 1 dostupná strana = 1 dostupná príloha.
+   * Ide o samostatnú kvótu nezávislú od pageLimit.
    *
    * Efektívny limit príloh sa vypočíta ako:
    * base attachmentLimit + extraAttachments z doplnkov.
@@ -218,9 +223,7 @@ export type AddonDefinition = {
 
   /**
    * Počet dodatočných príloh aktivovaných doplnkom.
-   *
-   * Musí sa rovnať extraPages. Takto každá dokúpená strana zároveň
-   * pridá jednu ďalšiu prílohu.
+   * Táto hodnota je nezávislá od extraPages.
    */
   extraAttachments: number;
 
@@ -384,12 +387,12 @@ export const PLANS = {
     name: 'Seminárna práca',
     shortName: 'Seminárna práca',
     description:
-      'Mesačné predplatné pre seminárne, ročníkové a zápočtové práce do 15 normostrán a 15 príloh.',
+      'Mesačné predplatné pre seminárne, ročníkové, zápočtové a kratšie odborné práce do 15 normostrán so spracovaním 12 príloh.',
     priceCents: 3900,
     currency: 'EUR',
     pageLimit: 15,
     promptLimit: null,
-    attachmentLimit: 15,
+    attachmentLimit: 12,
     attachmentQuotaMode: 'per-package-purchase',
     hasUnlimitedAccess: false,
     features: [...CORE_WRITING_FEATURES],
@@ -408,12 +411,12 @@ export const PLANS = {
     name: 'Bakalárska práca',
     shortName: 'Bakalárska práca',
     description:
-      'Mesačné predplatné pre bakalársku prácu do 50 normostrán a 50 príloh vrátane základnej analýzy dát a prípravy na obhajobu.',
+      'Kompletná mesačná podpora pre bakalársku prácu do 50 normostrán so spracovaním 40 príloh, od zadania a osnovy až po prípravu na obhajobu.',
     priceCents: 14900,
     currency: 'EUR',
     pageLimit: 50,
     promptLimit: null,
-    attachmentLimit: 50,
+    attachmentLimit: 40,
     attachmentQuotaMode: 'per-package-purchase',
     hasUnlimitedAccess: false,
     features: [
@@ -433,15 +436,15 @@ export const PLANS = {
   'master-thesis': {
     id: 'master-thesis',
     kind: 'plan',
-    name: 'Diplomová / magisterská práca',
-    shortName: 'Diplomová práca',
+    name: 'Diplomová / dizertačná práca',
+    shortName: 'Diplomová / dizertačná práca',
     description:
-      'Mesačné predplatné pre diplomové a magisterské práce do 70 normostrán a 70 príloh vrátane kompletnej analýzy dát a obhajoby.',
+      'Najvyšší mesačný balík pre rozsiahle záverečné práce do 70 normostrán so spracovaním 60 príloh, pokročilú metodiku, analýzu dát a obhajobu.',
     priceCents: 18900,
     currency: 'EUR',
     pageLimit: 70,
     promptLimit: null,
-    attachmentLimit: 70,
+    attachmentLimit: 60,
     attachmentQuotaMode: 'per-package-purchase',
     hasUnlimitedAccess: false,
     features: [
@@ -487,7 +490,13 @@ export const PLANS = {
     stripePriceEnvKey: null,
     sortOrder: 999,
   },
-} as const satisfies Record<PlanId, PlanDefinition>;
+} as const satisfies {
+  free: FreePlanDefinition;
+  'seminar-work': PaidPlanDefinition;
+  'bachelor-thesis': PaidPlanDefinition;
+  'master-thesis': PaidPlanDefinition;
+  admin: AdminPlanDefinition;
+};
 
 // =====================================================
 // DOPLNKY
@@ -500,11 +509,11 @@ export const ADDONS = {
     name: 'Analýza dát',
     shortName: 'Analýza dát',
     description:
-      'Kompletné spracovanie štatistickej časti vrátane čistenia dát, deskriptívnej štatistiky, tvorby škál, subškál, reliability, normality, korelácií, testov a grafov. Doplnok nemení limit strán ani príloh.',
+      'Kompletné spracovanie štatistickej časti vrátane čistenia dát, deskriptívnej štatistiky, tvorby škál, subškál, reliability, normality, korelácií, testov a grafov. Doplnok nepridáva strany a pridáva 2 prílohy.',
     priceCents: 8900,
     currency: 'EUR',
     extraPages: 0,
-    extraAttachments: 0,
+    extraAttachments: 2,
     features: [...COMPLETE_DATA_FEATURES],
     purchasable: true,
     checkoutMode: 'payment',
@@ -519,11 +528,11 @@ export const ADDONS = {
     name: 'Extra 20 strán',
     shortName: '+20 strán',
     description:
-      'Rozšírenie aktuálneho projektu a používateľského balíka o ďalších 20 normostrán a 20 príloh.',
+      'Rozšírenie aktuálneho projektu a používateľského balíka o ďalších 20 normostrán a 10 príloh.',
     priceCents: 4900,
     currency: 'EUR',
     extraPages: 20,
-    extraAttachments: 20,
+    extraAttachments: 10,
     features: [],
     purchasable: true,
     checkoutMode: 'payment',
@@ -538,11 +547,11 @@ export const ADDONS = {
     name: 'Extra 40 strán',
     shortName: '+40 strán',
     description:
-      'Rozšírenie aktuálneho projektu a používateľského balíka o ďalších 40 normostrán a 40 príloh.',
+      'Rozšírenie aktuálneho projektu a používateľského balíka o ďalších 40 normostrán a 25 príloh.',
     priceCents: 8900,
     currency: 'EUR',
     extraPages: 40,
-    extraAttachments: 40,
+    extraAttachments: 25,
     features: [],
     purchasable: true,
     checkoutMode: 'payment',
@@ -557,11 +566,11 @@ export const ADDONS = {
     name: 'Extra 60 strán',
     shortName: '+60 strán',
     description:
-      'Rozšírenie aktuálneho projektu a používateľského balíka o ďalších 60 normostrán a 60 príloh.',
+      'Rozšírenie aktuálneho projektu a používateľského balíka o ďalších 60 normostrán a 40 príloh.',
     priceCents: 12900,
     currency: 'EUR',
     extraPages: 60,
-    extraAttachments: 60,
+    extraAttachments: 40,
     features: [],
     purchasable: true,
     checkoutMode: 'payment',
@@ -1016,8 +1025,7 @@ export function getExtraPagesForAddons(
 /**
  * Vráti počet dodatočných príloh z doplnkov.
  *
- * Autoritatívne pravidlo katalógu:
- * extraAttachments sa musí rovnať extraPages.
+ * Hodnota extraAttachments je samostatná a nezávislá od extraPages.
  */
 export function getExtraAttachmentsForAddons(
   addonIds: readonly AddonId[],
@@ -1045,8 +1053,8 @@ export function getTotalPageLimit(
 /**
  * Vráti efektívny celkový limit príloh.
  *
- * Limit príloh je vždy rovnaký ako celkový limit strán:
- * základný plán + doplnky Extra 20/40/60.
+ * Limit príloh sa počíta samostatne ako základný limit plánu
+ * plus prílohy pridané jednorazovými doplnkami.
  */
 export function getTotalAttachmentLimit(
   planId: PlanId,
@@ -1066,11 +1074,10 @@ export function getTotalAttachmentLimit(
 }
 
 /**
- * Overí katalógový invariant 1 strana = 1 príloha.
- *
+ * Overí, že kvóty strán a príloh sú platné samostatné nezáporné hodnoty.
  * Funkcia je vhodná pre build testy a serverové health-checky.
  */
-export function validatePageAttachmentParity(): {
+export function validateIndependentQuotaConfiguration(): {
   valid: boolean;
   errors: string[];
 } {
@@ -1079,24 +1086,24 @@ export function validatePageAttachmentParity(): {
   for (const planId of ALL_PLAN_IDS) {
     const plan = PLANS[planId];
 
-    if (plan.pageLimit !== plan.attachmentLimit) {
-      errors.push(
-        `Plán ${planId}: pageLimit (${String(
-          plan.pageLimit,
-        )}) sa nerovná attachmentLimit (${String(
-          plan.attachmentLimit,
-        )}).`,
-      );
+    if (plan.pageLimit !== null && plan.pageLimit < 0) {
+      errors.push(`Plán ${planId}: pageLimit nesmie byť záporný.`);
+    }
+
+    if (plan.attachmentLimit !== null && plan.attachmentLimit < 0) {
+      errors.push(`Plán ${planId}: attachmentLimit nesmie byť záporný.`);
     }
   }
 
   for (const addonId of ADDON_IDS) {
     const addon = ADDONS[addonId];
 
-    if (addon.extraPages !== addon.extraAttachments) {
-      errors.push(
-        `Doplnok ${addonId}: extraPages (${addon.extraPages}) sa nerovná extraAttachments (${addon.extraAttachments}).`,
-      );
+    if (addon.extraPages < 0) {
+      errors.push(`Doplnok ${addonId}: extraPages nesmie byť záporný.`);
+    }
+
+    if (addon.extraAttachments < 0) {
+      errors.push(`Doplnok ${addonId}: extraAttachments nesmie byť záporný.`);
     }
   }
 
@@ -1107,13 +1114,24 @@ export function validatePageAttachmentParity(): {
 }
 
 /**
+ * @deprecated Zachované iba kvôli spätnej kompatibilite starších importov.
+ * Nová logika už NEVYŽADUJE rovnosť strán a príloh.
+ */
+export function validatePageAttachmentParity(): {
+  valid: boolean;
+  errors: string[];
+} {
+  return validateIndependentQuotaConfiguration();
+}
+
+/**
  * Vráti autoritatívne nastavenie balíkovej kvóty príloh.
  *
  * Hodnota attachmentLimit je efektívna celková kvóta príloh:
- * základný limit plánu + prílohy z doplnkov Extra 20/40/60.
+ * základný limit plánu + prílohy z jednorazových doplnkov.
  *
- * Musí sa rovnať efektívnemu limitu strán. Samotný stav použité/zostáva
- * sa vedie v serverovom počítadle a zobrazuje sa v profile.
+ * Kvóta príloh je nezávislá od limitu strán. Samotný stav použité/zostáva
+ * sa musí viesť v samostatnom serverovom počítadle.
  */
 function isReadonlyAddonIdArray(
   value: readonly AddonId[] | EntitlementAccessOptions,
@@ -1203,10 +1221,9 @@ export function getAttachmentLimitForPlan(
  * Pri administrátorovi sú všetky hodnoty null, čo znamená neobmedzený
  * prístup.
  *
- * Pri ostatných plánoch platí:
- * pageLimit === attachmentLimit.
+ * Pri ostatných plánoch sú pageLimit a attachmentLimit dve nezávislé kvóty.
  *
- * Samotné odpočítavanie strán a príloh musí vykonávať serverová API vrstva.
+ * Samotné odpočítavanie strán a príloh musí vykonávať serverová API vrstva oddelene.
  * Počítadlá sa môžu používateľovi zobrazovať iba v profile.
  */
 export function getEffectiveEntitlementLimits(
@@ -1311,6 +1328,54 @@ export function entitlementsIncludeFeature(
   return addonIds.some((addonId) =>
     addonIncludesFeature(addonId, feature),
   );
+}
+
+export function getPageLimitExhaustedMessage(planId: PlanId): string {
+  if (planId === 'admin') {
+    return '';
+  }
+
+  const limit = PLANS[planId].pageLimit;
+
+  if (limit === null) {
+    return '';
+  }
+
+  if (planId === 'free') {
+    return `Vyčerpali ste celkový počet strán Free verzie (${limit} / ${limit} strán). Pre ďalšie generovanie si aktivujte vhodný balík.`;
+  }
+
+  return `Vyčerpali ste celkový počet strán vášho balíka (${limit} / ${limit} strán). Na napísanie ďalšieho textu si musíte zakúpiť jednorazový doplnkový balík strán, alebo počkať na začiatok ďalšieho mesiaca, kedy sa vám predplatné automaticky obnoví a limity vyčistia.`;
+}
+
+export function getAttachmentLimitExhaustedMessage(planId: PlanId): string {
+  if (planId === 'admin') {
+    return '';
+  }
+
+  const limit = PLANS[planId].attachmentLimit;
+
+  if (limit === null) {
+    return '';
+  }
+
+  if (planId === 'free') {
+    return `Vyčerpali ste maximálny počet príloh Free verzie (${limit} / ${limit} príloh). Pre ďalšie prílohy si aktivujte vhodný balík.`;
+  }
+
+  if (planId === 'master-thesis') {
+    return `Vyčerpali ste maximálny počet príloh vášho balíka (${limit} / ${limit} príloh). Na nahranie nových zdrojov si musíte počkať na začiatok ďalšieho mesiaca, kedy sa vám predplatné automaticky obnoví a limity vyčistia.`;
+  }
+
+  return `Vyčerpali ste maximálny počet príloh vášho balíka (${limit} / ${limit} príloh). Na nahranie nových zdrojov si musíte počkať na začiatok ďalšieho mesiaca, kedy sa vám predplatné automaticky obnoví a limity vyčistia, prípadne prejsť na vyšší balík.`;
+}
+
+export function getAttachmentTooLargeMessage(): string {
+  return 'Nahraný súbor prekračuje maximálnu povolenú veľkosť 50 MB.';
+}
+
+export function getAttachmentTooManyPagesMessage(): string {
+  return `Nahraný dokument obsahuje viac ako ${MAX_ATTACHMENT_PDF_PAGES} strán. Nahrajte iba relevantné kapitoly alebo dokument rozdeľte na menšie časti. Jedna príloha môže obsahovať maximálne ${MAX_ATTACHMENT_PDF_PAGES} strán.`;
 }
 
 /**

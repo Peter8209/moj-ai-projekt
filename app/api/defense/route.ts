@@ -618,19 +618,83 @@ function buildProfilePromptBlock(profile: SavedProfile | null, defenseType: stri
 `.trim();
 }
 
+function getFallbackWorkSection(
+  workText: string,
+  keywords: string[],
+  maxChars = 280,
+) {
+  const paragraphs = cleanInvisibleCharacters(workText)
+    .split(/\n{1,}/)
+    .map((part) => cleanClientVisibleText(part))
+    .filter((part) => part.length >= 24);
+
+  if (!paragraphs.length) return '';
+
+  const normalizedKeywords = keywords.map((keyword) =>
+    keyword
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase(),
+  );
+
+  for (let index = 0; index < paragraphs.length; index += 1) {
+    const paragraph = paragraphs[index];
+    const normalized = paragraph
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+
+    if (!normalizedKeywords.some((keyword) => normalized.includes(keyword))) {
+      continue;
+    }
+
+    const candidate =
+      paragraph.length <= 140 && paragraphs[index + 1]
+        ? `${paragraph}: ${paragraphs[index + 1]}`
+        : paragraph;
+
+    return cleanClientVisibleText(candidate).slice(0, maxChars).trim();
+  }
+
+  return '';
+}
+
+function getFallbackWorkOverview(workText: string, maxChars = 280) {
+  const paragraph = cleanInvisibleCharacters(workText)
+    .split(/\n{1,}/)
+    .map((part) => cleanClientVisibleText(part))
+    .find((part) => part.length >= 60);
+
+  return (paragraph || '').slice(0, maxChars).trim();
+}
+
 function buildFallbackSlides({
   title,
   defenseType,
   profile,
   reviewFilesCount,
   hasWorkText,
+  workText,
 }: {
   title: string;
   defenseType: string;
   profile: SavedProfile | null;
   reviewFilesCount: number;
   hasWorkText: boolean;
+  workText: string;
 }): DefenseSlide[] {
+  const overview = getFallbackWorkOverview(workText);
+  const goal = getFallbackWorkSection(workText, ['cieľ', 'ciel', 'goal', 'objective']);
+  const problem = getFallbackWorkSection(workText, ['výskumný problém', 'vyskumny problem', 'research problem', 'problem']);
+  const questions = getFallbackWorkSection(workText, ['výskumné otázky', 'vyskumne otazky', 'research questions', 'hypotéz', 'hypotez', 'hypothes']);
+  const theory = getFallbackWorkSection(workText, ['teoret', 'theor', 'literat']);
+  const methodology = getFallbackWorkSection(workText, ['metodol', 'methodol', 'metód', 'metod']);
+  const results = getFallbackWorkSection(workText, ['výsled', 'vysled', 'result', 'zisten', 'finding']);
+  const discussion = getFallbackWorkSection(workText, ['diskusi', 'discussion', 'interpret']);
+  const contribution = getFallbackWorkSection(workText, ['prínos', 'prinos', 'contribution', 'benefit']);
+  const limitations = getFallbackWorkSection(workText, ['limit', 'obmedz', 'limitation']);
+  const conclusion = getFallbackWorkSection(workText, ['záver', 'zaver', 'conclusion', 'summary']);
+
   const baseSlides: DefenseSlide[] = [
     {
       title: title || 'Obhajoba záverečnej práce',
@@ -646,7 +710,7 @@ function buildFallbackSlides({
     {
       title: 'Význam a aktuálnosť témy',
       bullets: [
-        profile?.annotation || 'Vysvetlenie, prečo je téma odborné alebo prakticky dôležitá',
+        overview || 'Význam témy doplň podľa hlavného textu nahranej práce.',
         'Prepojenie témy s odborom a praxou',
         'Stručné pomenovanie riešeného problému',
       ],
@@ -657,8 +721,8 @@ function buildFallbackSlides({
     {
       title: 'Cieľ práce',
       bullets: [
-        profile?.goal || 'Hlavný cieľ práce je potrebné doplniť',
-        profile?.problem || profile?.researchProblem || 'Riešený problém je potrebné doplniť',
+        goal || 'Hlavný cieľ sa nepodarilo bezpečne identifikovať v nahranej práci.',
+        problem || 'Riešený problém sa nepodarilo bezpečne identifikovať v nahranej práci.',
         'Prepojenie cieľa s metodologickým postupom',
       ],
       speakerNotes: 'Pomenujte hlavný cieľ práce a vysvetlite, ako nadväzuje na riešený problém.',
@@ -668,8 +732,8 @@ function buildFallbackSlides({
     {
       title: 'Výskumné otázky alebo hypotézy',
       bullets: [
-        profile?.researchQuestions || 'Výskumné otázky je potrebné doplniť',
-        profile?.hypotheses || 'Hypotézy je potrebné doplniť, ak boli súčasťou práce',
+        questions || 'Výskumné otázky alebo hypotézy doplň podľa nahranej práce.',
+        'Nevymýšľaj otázky ani hypotézy, ktoré v nahranej práci nie sú uvedené.',
         'Otázky alebo hypotézy majú byť priamo prepojené s cieľom práce',
       ],
       speakerNotes: 'Stručne ukážte, čo práca overovala alebo na čo hľadala odpoveď.',
@@ -679,7 +743,7 @@ function buildFallbackSlides({
     {
       title: 'Teoretické východiská',
       bullets: [
-        'Stručné zhrnutie kľúčových pojmov a teoretických rámcov',
+        theory || 'Kľúčové teoretické východiská doplň podľa nahranej práce.',
         'Prepojenie teórie s cieľom práce',
         'Použité zdroje a odborné prístupy uviesť iba vecne',
       ],
@@ -690,7 +754,7 @@ function buildFallbackSlides({
     {
       title: 'Metodológia',
       bullets: [
-        profile?.methodology || 'Metodologický postup je potrebné doplniť',
+        methodology || 'Metodologický postup doplň podľa nahranej práce.',
         'Charakteristika výskumného alebo analytického postupu',
         'Zdôvodnenie zvolených metód',
       ],
@@ -701,7 +765,7 @@ function buildFallbackSlides({
     {
       title: 'Výsledky práce',
       bullets: [
-        hasWorkText ? 'Zhrnutie hlavných výsledkov podľa spracovaného textu práce' : 'Výsledky je potrebné doplniť podľa finálneho textu práce',
+        results || (hasWorkText ? 'Hlavné výsledky vyber z nahranej práce.' : 'Výsledky nie sú dostupné.'),
         'Vyzdvihnutie najdôležitejších zistení',
         'Prepojenie výsledkov s cieľom a otázkami práce',
       ],
@@ -712,7 +776,7 @@ function buildFallbackSlides({
     {
       title: 'Diskusia a interpretácia výsledkov',
       bullets: [
-        'Vysvetlenie významu hlavných zistení',
+        discussion || 'Interpretáciu výsledkov doplň výhradne podľa nahranej práce.',
         'Porovnanie s cieľom práce a teoretickými východiskami',
         'Vecné zhodnotenie, čo výsledky znamenajú',
       ],
@@ -723,7 +787,7 @@ function buildFallbackSlides({
     {
       title: 'Prínos práce',
       bullets: [
-        profile?.scientificContribution || profile?.contribution || 'Odborný alebo praktický prínos je potrebné doplniť',
+        contribution || 'Odborný alebo praktický prínos doplň podľa nahranej práce.',
         'Možnosti využitia výsledkov v praxi alebo ďalšom výskume',
         'Zvýraznenie vlastného prínosu autora práce',
       ],
@@ -734,7 +798,7 @@ function buildFallbackSlides({
     {
       title: 'Limity práce',
       bullets: [
-        'Vecné pomenovanie obmedzení práce',
+        limitations || 'Limity práce doplň podľa nahranej práce; nevymýšľaj ich.',
         'Vysvetlenie, ako limity ovplyvňujú interpretáciu výsledkov',
         'Návrhy na ďalšie skúmanie alebo dopracovanie',
       ],
@@ -763,8 +827,8 @@ function buildFallbackSlides({
     {
       title: 'Záver obhajoby',
       bullets: [
-        'Zhrnutie cieľa a spôsobu riešenia práce',
-        'Zhrnutie hlavných výsledkov a prínosu',
+        conclusion || goal || 'Záver zhrň podľa nahranej práce.',
+        results || contribution || 'Hlavné výsledky a prínos zhrň podľa nahranej práce.',
         'Poďakovanie komisii za pozornosť',
       ],
       speakerNotes: 'Ukončite obhajobu stručne, vecne a sebavedomo.',
@@ -892,10 +956,10 @@ Pravidlá:
 - Potom priprav prirodzenú ústnu odpoveď približne na 45 až 90 sekúnd.
 - Uveď 3 až 6 kľúčových odborných argumentov.
 - Uveď konkrétnu stratégiu, ako odpoveď obhájiť pred komisiou.
-- Aktívny profil je autoritatívna identita obhajovanej práce.
-- Nahratý text práce môže byť použitý iba vtedy, keď patrí k aktívnemu profilu; tematický súlad overuje server ešte pred týmto generovaním.
-- Profil určuje názov/tému práce, cieľ, odbor a ostatný rámec. Nahratý text slúži na doplnenie konkrétneho obsahu, výsledkov a formulácií tej istej práce.
-- Ak text práce nie je dostupný, vychádzaj z aktívneho profilu a nevymýšľaj chýbajúce konkrétne výsledky.
+- Nahratý text práce je hlavný zdroj odborného obsahu, výsledkov, metodológie a formulácií obhajoby.
+- Aktívny profil je povinný doplnkový kontext identity práce, jazyka, typu práce a údajov o projekte.
+- Nahratý text práce používaj iba vtedy, keď patrí k aktívnemu profilu; tematický súlad overuje server ešte pred týmto generovaním.
+- Ak sa profil a nahraná práca rozchádzajú v konkrétnom odbornom obsahu, nevymýšľaj kompromis. Pri prezentácii je obsah nahranej práce rozhodujúci; profil slúži na identitu a kontext.
 - Posudky, tabuľky a vizuály sú doplnkové podklady; nesmú prebiť hlavný text nahratej práce.
 - Ak je otázka všeobecná, použi spoľahlivé odborné znalosti a nevymýšľaj konkrétne výsledky práce.
 - Ak odpoveď závisí od konkrétnych údajov práce a tieto údaje nie sú dostupné, jasne povedz, čo má študent doplniť, namiesto vymýšľania čísiel.
@@ -939,11 +1003,11 @@ ${profile?.workLanguage || profile?.language || 'slovenčina'}
 OTÁZKA KOMISIE – ODPOVEDZ NA ŇU PRIAMO:
 ${question}
 
-AKTUÁLNY PROFIL PRÁCE – AUTORITATÍVNY KONTEXT:
+AKTÍVNY PROFIL PRÁCE – DOPLNKOVÝ KONTEXT A IDENTITA:
 ${buildProfilePromptBlock(profile, defenseType)}
 
-TEXT PRÁCE OVERENÝ VOČI AKTÍVNEMU PROFILU:
-${workText || 'Text práce nie je dostupný. Vychádzaj z aktívneho profilu a pri otázke závislej od konkrétnych výsledkov nevymýšľaj údaje.'}
+NAHRATÁ PRÁCA – HLAVNÝ OBSAHOVÝ ZDROJ:
+${workText || 'Text práce nie je dostupný. Pri otázke závislej od konkrétnych výsledkov nevymýšľaj údaje a používaj profil iba ako kontext.'}
 
 DOPLNKOVÉ PODKLADY / POSUDKY:
 ${reviewsBlock}
@@ -972,12 +1036,13 @@ Tvojou úlohou je vytvoriť čistý výstup pre klienta:
 - reakcie na otázky a pripomienky komisie.
 
 PRÍSNA HIERARCHIA KONTEXTU:
-1. Aktívny profil práce je autoritatívna identita obhajoby a určuje, ku ktorej práci sa výstup viaže.
-2. Explicitný pokyn používateľa musí súvisieť s touto obhajobou a je povinné ho vykonať.
-3. Nahratý text práce sa používa ako detailný obsah iba po úspešnom serverovom overení súvisu s aktívnym profilom.
-4. Ak sa niektorý údaj v overenom texte a profile líši, drž sa profilu pri identite práce a textu pri konkrétnych výsledkoch tej istej práce; nevytváraj hybrid dvoch rôznych prác.
-5. Posudky, otázky komisie, tabuľky a vizuály sú doplnkové podklady k tej istej práci.
-6. Ak chýba detailný text práce, vychádzaj z profilu a chýbajúce výsledky nevymýšľaj.
+1. Nahratá práca je hlavný a rozhodujúci zdroj odborného obsahu prezentácie: cieľa, metodológie, výsledkov, diskusie, prínosu, limitov a záverov.
+2. Aktívny profil práce je povinný kontext identity, jazyka, typu práce, odboru a údajov o projekte. Nesmie nahradiť obsah nahranej práce.
+3. Explicitný pokyn používateľa musí súvisieť s touto obhajobou a je povinné ho vykonať.
+4. Server pred generovaním overí, že nahratá práca patrí k aktívnemu profilu.
+5. Ak sa niektorý konkrétny odborný údaj v overenom texte a profile líši, pri obsahu prezentácie sa drž nahranej práce; profil používaj na identitu a kontext. Nevytváraj hybrid dvoch rôznych prác.
+6. Posudky, otázky komisie, tabuľky a vizuály sú doplnkové podklady k tej istej práci.
+7. Prezentáciu negeneruj iba z profilu. Ak hlavný text nahranej práce chýba, server má požiadavku odmietnuť.
 
 Ak používateľ žiada zakomponovať otázku alebo pripomienku z posudku:
 - zapracuj ju do slidu s otázkami komisie alebo vytvor samostatný slide,
@@ -1050,24 +1115,25 @@ ${title}
 TYP OBHAJOBY:
 ${defenseType}
 
-AKTUÁLNY PROFIL PRÁCE – AUTORITATÍVNY KONTEXT:
+AKTÍVNY PROFIL PRÁCE – DOPLNKOVÝ KONTEXT A IDENTITA:
 ${buildProfilePromptBlock(profile, defenseType)}
 
 POKYN POUŽÍVATEĽA – POVINNÉ VYKONAŤ:
-${instruction || (hasWorkText ? 'Priprav obhajobu podľa nahratej práce.' : 'Priprav obhajobu podľa dostupného profilu práce.')}
+${instruction || 'Priprav obhajobu podľa nahranej práce a aktívny profil použi ako doplnkový kontext.'}
 
-TEXT PRÁCE OVERENÝ VOČI AKTÍVNEMU PROFILU:
-${workText || 'Text práce nie je dostupný. Vychádzaj z profilu práce a nevymýšľaj chýbajúce konkrétne údaje.'}
+NAHRATÁ PRÁCA – HLAVNÝ A ROZHODUJÚCI OBSAHOVÝ ZDROJ:
+${workText || 'Text nahranej práce nie je dostupný. Prezentáciu z profilu samotného nevytváraj.'}
 
 DOPLNKOVÉ PODKLADY – POSUDKY, OTÁZKY, TABUĽKY A VIZUÁLY:
 ${reviewsBlock}
 
 HLAVNÁ ÚLOHA:
-Vytvor prezentáciu na obhajobu použiteľnú pred komisiou. Celý výstup musí patriť k aktívnemu profilu; overený text práce používaj na jeho konkrétne rozpracovanie.
+Vytvor prezentáciu na obhajobu použiteľnú pred komisiou. Odborný obsah vytvor z nahranej práce. Aktívny profil použi súbežne ako kontext identity, jazyka, typu práce a doplňujúcich údajov.
 
 KONTROLA PRED ODOVZDANÍM:
-- názov, téma a identita práce musia vždy zodpovedať aktívnemu profilu,
-- overený text práce použi na cieľ, metodológiu, výsledky, diskusiu, prínos a limity, pokiaľ ide o tú istú prácu,
+- odborný obsah prezentácie musí vychádzať z nahranej práce,
+- názov, téma a identita musia byť kompatibilné s aktívnym profilom,
+- nahratú prácu použi na cieľ, metodológiu, výsledky, diskusiu, prínos a limity,
 - pri rozpore, ktorý by naznačoval inú prácu, nič nekombinuj ani nevymýšľaj; server má taký vstup odmietnuť ešte pred generovaním,
 - explicitný pokyn používateľa musí byť viditeľne zapracovaný vo výsledku,
 - posudky, tabuľky a vizuály používaj ako doplnkové podklady a nesmie nimi byť prepísaná identita hlavnej práce.
@@ -1154,6 +1220,7 @@ function buildFallbackDefenseResponse({
   profile,
   reviewFiles,
   hasWorkText,
+  workText,
   warning,
   model = MODEL,
   shortInstructionDetected = false,
@@ -1163,6 +1230,7 @@ function buildFallbackDefenseResponse({
   profile: SavedProfile | null;
   reviewFiles: ReviewFileInfo[];
   hasWorkText: boolean;
+  workText: string;
   warning: string;
   model?: string;
   shortInstructionDetected?: boolean;
@@ -1173,6 +1241,7 @@ function buildFallbackDefenseResponse({
     profile,
     reviewFilesCount: reviewFiles.length,
     hasWorkText,
+    workText,
   });
 
   const textOutput = buildPlainTextOutput(slides);
@@ -1204,7 +1273,7 @@ function buildFallbackDefenseResponse({
     meta: {
       model,
       finalTitle,
-      workTextChars: 0,
+      workTextChars: workText.length,
       extractedFilesCount,
       imageFilesCount,
       generatedSlidesCount: slides.length,
@@ -1576,7 +1645,7 @@ async function checkProfileRelation({
     confidence: 1,
     reason: evidenceText.trim()
       ? 'Dokumenty súvisia s aktívnym profilom a pokyn je všeobecný pre obhajobu.'
-      : 'Obhajoba vychádza z aktívneho profilu a všeobecného pokynu.',
+      : 'Aktívny profil je dostupný ako kontext; pre prezentáciu je zároveň povinná nahraná práca.',
     source: evidenceText.trim() ? 'ai' : 'profile-only',
   };
 }
@@ -1842,6 +1911,26 @@ export async function POST(req: NextRequest) {
     const hasPrimaryAttachment =
       workFiles.length > 0 || Boolean(acceptedClientExtractedText);
 
+    /**
+     * Prezentácia Obhajoby sa nesmie vytvoriť iba z aktívneho profilu.
+     * Profil je povinný kontext, ale hlavný odborný obsah musí pochádzať
+     * z nahranej a textovo spracovateľnej práce.
+     */
+    if (requestedMode === 'presentation' && !hasPrimaryAttachment) {
+      return NextResponse.json<DefenseResponse>(
+        {
+          ok: false,
+          code: 'DEFENSE_ATTACHMENT_REQUIRED',
+          mode: 'presentation',
+          error:
+            'Pre vytvorenie obhajoby nahrajte PDF, Word alebo inú podporovanú prílohu s textom práce. Aktívny profil sa použije spolu s prílohou ako doplnkový kontext, nie ako náhrada práce.',
+          detail:
+            'Obhajoba sa generuje z nahranej práce. Profil dopĺňa identitu, jazyk, typ práce a projektové údaje.',
+        },
+        { status: 400 },
+      );
+    }
+
     const relation = await checkProfileRelation({
       profile,
       mode: requestedMode,
@@ -1896,6 +1985,7 @@ export async function POST(req: NextRequest) {
         profile,
         reviewFiles,
         hasWorkText,
+        workText,
         warning:
           'Chýba OPENAI_API_KEY v .env.local. Bol použitý náhradný základ prezentácie bez volania AI.',
         model: 'fallback-no-openai-key',
@@ -2028,15 +2118,18 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (!hasWorkText && !profile?.title && !profile?.topic) {
+    if (!hasWorkText) {
       return NextResponse.json<DefenseResponse>(
         {
           ok: false,
+          code: 'DEFENSE_WORK_TEXT_REQUIRED',
           mode: 'presentation',
           error:
-            'Chýba čitateľný text práce aj použiteľný profil. Nahrajte PDF/Word/TXT/RTF dokument s textom práce alebo vyberte profil.',
+            'Z nahranej prílohy sa nepodarilo získať použiteľný text práce. Obhajoba sa nevygenerovala iba z profilu.',
+          detail:
+            'Nahrajte čitateľný PDF, Word, TXT alebo RTF dokument s obsahom práce. Aktívny profil zostáva doplnkovým kontextom.',
         },
-        { status: 400 },
+        { status: 422 },
       );
     }
 
@@ -2109,6 +2202,7 @@ export async function POST(req: NextRequest) {
         profile,
         reviewFilesCount: supplementalFiles.length,
         hasWorkText,
+        workText,
       });
       fallbackUsed = true;
     }
@@ -2120,6 +2214,7 @@ export async function POST(req: NextRequest) {
         profile,
         reviewFilesCount: supplementalFiles.length,
         hasWorkText,
+        workText,
       });
 
       warning = appendWarning(

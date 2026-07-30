@@ -943,6 +943,73 @@ type DefenseQaUi = {
   enterHint: string;
 };
 
+type DefenseProfileUi = {
+  title: string;
+  active: string;
+  noProfile: string;
+  type: string;
+  field: string;
+  language: string;
+  supervisor: string;
+};
+
+const DEFENSE_PROFILE_UI: Record<LanguageCode, DefenseProfileUi> = {
+  sk: {
+    title: "Aktuálny vybraný profil",
+    active: "Aktívny",
+    noProfile: "Nie je vybraný žiadny profil práce.",
+    type: "Typ práce",
+    field: "Odbor",
+    language: "Jazyk práce",
+    supervisor: "Vedúci práce",
+  },
+  cs: {
+    title: "Aktuálně vybraný profil",
+    active: "Aktivní",
+    noProfile: "Není vybrán žádný profil práce.",
+    type: "Typ práce",
+    field: "Obor",
+    language: "Jazyk práce",
+    supervisor: "Vedoucí práce",
+  },
+  en: {
+    title: "Currently selected profile",
+    active: "Active",
+    noProfile: "No work profile is currently selected.",
+    type: "Work type",
+    field: "Field",
+    language: "Work language",
+    supervisor: "Supervisor",
+  },
+  de: {
+    title: "Aktuell ausgewähltes Profil",
+    active: "Aktiv",
+    noProfile: "Derzeit ist kein Arbeitsprofil ausgewählt.",
+    type: "Art der Arbeit",
+    field: "Fachgebiet",
+    language: "Sprache der Arbeit",
+    supervisor: "Betreuer",
+  },
+  pl: {
+    title: "Aktualnie wybrany profil",
+    active: "Aktywny",
+    noProfile: "Nie wybrano obecnie żadnego profilu pracy.",
+    type: "Typ pracy",
+    field: "Dziedzina",
+    language: "Język pracy",
+    supervisor: "Promotor",
+  },
+  hu: {
+    title: "Jelenleg kiválasztott profil",
+    active: "Aktív",
+    noProfile: "Jelenleg nincs kiválasztva munkaprofil.",
+    type: "Munka típusa",
+    field: "Szakterület",
+    language: "A munka nyelve",
+    supervisor: "Témavezető",
+  },
+};
+
 const DEFENSE_QA_UI: Record<LanguageCode, DefenseQaUi> = {
   sk: {
     presentationTab: "Pripraviť obhajobu",
@@ -1184,6 +1251,14 @@ const DIRECT_MODULE_API: Partial<Record<ModuleKey, DirectModuleApiConfig>> = {
 };
 
 const ORIGINALITY_PROTOCOL_STORAGE_KEY = "zedpera_originality_protocol_result";
+
+const MODULES_WITHOUT_PRIMARY_TEXT_INPUT = new Set<ModuleKey>([
+  "defense",
+  "translation",
+  "planning",
+  "emails",
+  "humanizer",
+]);
 
 const allowedFileExtensions = [
   ".pdf",
@@ -5046,6 +5121,8 @@ export default function DefenseFrontend(
   const activeModulePlaceholder = fixedUi.placeholder;
 
   const defenseQaUi = DEFENSE_QA_UI[systemLanguage] ?? DEFENSE_QA_UI.sk;
+  const defenseProfileUi =
+    DEFENSE_PROFILE_UI[systemLanguage] ?? DEFENSE_PROFILE_UI.sk;
   const effectiveDefenseInputLabel =
     activeModule === "defense" && defenseWorkspaceMode === "question"
       ? defenseQaUi.questionLabel
@@ -9032,7 +9109,7 @@ Text emailu:
           />
           ) : null}
 
-          <div className="px-4 pt-4 sm:px-6 xl:px-8">
+          <div className="mx-auto w-full max-w-6xl px-4 pt-4 sm:px-6 xl:px-8">
             {false ? (
             <button
               type="button"
@@ -9055,7 +9132,7 @@ Text emailu:
                     <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-300">
                       Aktívny balík
                     </p>
-                    <h2 className="mt-1 break-words text-lg font-black leading-tight text-white">
+                    <h2 className="mt-1 text-base font-black leading-tight text-white sm:text-lg sm:whitespace-nowrap">
                       {entitlements.planName}
                     </h2>
                     {(entitlements.addonNames ?? []).length > 0 ? (
@@ -9074,10 +9151,10 @@ Text emailu:
                   </button>
                 </div>
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
                     <p className="text-xs font-bold text-slate-400">Strany</p>
-                    <p className="mt-1 font-black text-white">
+                    <p className="mt-1 text-sm font-black leading-tight text-white sm:text-base">
                       {hasUnlimitedAccess
                         ? "Neobmedzené"
                         : `${pageQuota.pagesRemaining ?? 0} zostáva z ${pageQuota.pageLimit ?? 0}`}
@@ -9091,7 +9168,7 @@ Text emailu:
 
                   <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
                     <p className="text-xs font-bold text-slate-400">Prompty</p>
-                    <p className="mt-1 font-black text-white">
+                    <p className="mt-1 text-sm font-black leading-tight text-white sm:text-base">
                       {hasUnlimitedAccess || entitlements.promptLimit === null
                         ? "Neobmedzené"
                         : `${entitlements.promptsRemaining ?? 0} zostáva z ${entitlements.promptLimit}`}
@@ -9101,7 +9178,7 @@ Text emailu:
                   <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
                     <p className="text-xs font-bold text-slate-400">Prílohy</p>
 
-                    <p className="mt-1 font-black text-white">
+                    <p className="mt-1 text-sm font-black leading-tight text-white sm:text-base">
                       {hasUnlimitedAccess
                         ? "Neobmedzené"
                         : `${visibleAttachmentCount} / ${effectiveAttachmentLimit}`}
@@ -9224,6 +9301,98 @@ Text emailu:
             </div>
           )}
 
+          {activeModule === "defense" ? (
+            <section
+              className="mb-4 rounded-3xl border border-violet-300/20 bg-gradient-to-r from-violet-500/10 via-purple-500/[0.06] to-transparent p-4 shadow-xl shadow-violet-950/10"
+              aria-label={defenseProfileUi.title}
+            >
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-violet-300/20 bg-violet-500/15 text-violet-200">
+                  <User className="h-5 w-5" aria-hidden="true" />
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-violet-200">
+                      {defenseProfileUi.title}
+                    </p>
+
+                    {activeProfile ? (
+                      <span className="rounded-full border border-emerald-300/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-200">
+                        {defenseProfileUi.active}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {activeProfile ? (
+                    <>
+                      <h3 className="mt-2 break-words text-base font-black leading-tight text-white sm:text-lg">
+                        {activeProfile.title ||
+                          activeProfile.topic ||
+                          "Profil práce"}
+                      </h3>
+
+                      {activeProfile.title &&
+                      activeProfile.topic &&
+                      activeProfile.topic !== activeProfile.title ? (
+                        <p className="mt-1 break-words text-sm font-semibold leading-5 text-slate-400">
+                          {activeProfile.topic}
+                        </p>
+                      ) : null}
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {(activeProfile.schema?.label || activeProfile.type) ? (
+                          <span className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold text-slate-200">
+                            <span className="text-slate-500">
+                              {defenseProfileUi.type}:{" "}
+                            </span>
+                            {activeProfile.schema?.label || activeProfile.type}
+                          </span>
+                        ) : null}
+
+                        {activeProfile.field ? (
+                          <span className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold text-slate-200">
+                            <span className="text-slate-500">
+                              {defenseProfileUi.field}:{" "}
+                            </span>
+                            {activeProfile.field}
+                          </span>
+                        ) : null}
+
+                        {(activeProfile.workLanguage ||
+                          activeProfile.language) ? (
+                          <span className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold text-slate-200">
+                            <span className="text-slate-500">
+                              {defenseProfileUi.language}:{" "}
+                            </span>
+                            {String(
+                              activeProfile.workLanguage ||
+                                activeProfile.language ||
+                                "",
+                            ).toUpperCase()}
+                          </span>
+                        ) : null}
+
+                        {activeProfile.supervisor ? (
+                          <span className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold text-slate-200">
+                            <span className="text-slate-500">
+                              {defenseProfileUi.supervisor}:{" "}
+                            </span>
+                            {activeProfile.supervisor}
+                          </span>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="mt-2 text-sm font-bold text-amber-200">
+                      {defenseProfileUi.noProfile}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </section>
+          ) : null}
+
           {activeModule !== "humanizer" && (
             <FileUploadBox
               files={attachedFiles}
@@ -9311,52 +9480,56 @@ Text emailu:
               </div>
             ) : null}
 
-            <label
-              htmlFor={dashboardInputId}
-              className="mb-2 block text-sm font-black text-slate-200"
-            >
-              {effectiveDefenseInputLabel}
-            </label>
+            {!MODULES_WITHOUT_PRIMARY_TEXT_INPUT.has(activeModule) ? (
+              <>
+                <label
+                  htmlFor={dashboardInputId}
+                  className="mb-2 block text-sm font-black text-slate-200"
+                >
+                  {effectiveDefenseInputLabel}
+                </label>
 
-            <div className="relative">
-              <textarea
-                key={`dashboard-textarea-${activeModule}-${defenseWorkspaceMode}`}
-                id={dashboardInputId}
-                name={dashboardInputId}
-                data-module-input={activeModule}
-                aria-label={effectiveDefenseInputLabel}
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (
-                    activeModule === "defense" &&
-                    defenseWorkspaceMode === "question" &&
-                    event.key === "Enter" &&
-                    !event.shiftKey &&
-                    !event.nativeEvent.isComposing
-                  ) {
-                    event.preventDefault();
+                <div className="relative">
+                  <textarea
+                    key={`dashboard-textarea-${activeModule}-${defenseWorkspaceMode}`}
+                    id={dashboardInputId}
+                    name={dashboardInputId}
+                    data-module-input={activeModule}
+                    aria-label={effectiveDefenseInputLabel}
+                    value={input}
+                    onChange={(event) => setInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (
+                        activeModule === "defense" &&
+                        defenseWorkspaceMode === "question" &&
+                        event.key === "Enter" &&
+                        !event.shiftKey &&
+                        !event.nativeEvent.isComposing
+                      ) {
+                        event.preventDefault();
 
-                    if (!generationBlocked && input.trim()) {
-                      void runModule("question");
-                    }
-                  }
-                }}
-                placeholder={effectiveDefensePlaceholder}
-                className={[
-                  "w-full resize-y rounded-3xl border bg-[#070b18] px-5 py-5 text-sm font-semibold leading-7 text-white placeholder:text-slate-500 outline-none transition focus:ring-4",
-                  activeModule === "defense" && defenseWorkspaceMode === "question"
-                    ? "min-h-[150px] border-violet-300/25 focus:border-fuchsia-400/60 focus:ring-fuchsia-500/10"
-                    : "min-h-[240px] border-white/10 focus:border-violet-400/60 focus:ring-violet-500/10",
-                ].join(" ")}
-              />
+                        if (!generationBlocked && input.trim()) {
+                          void runModule("question");
+                        }
+                      }
+                    }}
+                    placeholder={effectiveDefensePlaceholder}
+                    className={[
+                      "w-full resize-y rounded-3xl border bg-[#070b18] px-5 py-5 text-sm font-semibold leading-7 text-white placeholder:text-slate-500 outline-none transition focus:ring-4",
+                      activeModule === "defense" && defenseWorkspaceMode === "question"
+                        ? "min-h-[150px] border-violet-300/25 focus:border-fuchsia-400/60 focus:ring-fuchsia-500/10"
+                        : "min-h-[240px] border-white/10 focus:border-violet-400/60 focus:ring-violet-500/10",
+                    ].join(" ")}
+                  />
 
-              {activeModule === "defense" && defenseWorkspaceMode === "question" ? (
-                <div className="pointer-events-none absolute bottom-3 right-4 rounded-full border border-white/10 bg-slate-950/70 px-3 py-1.5 text-[11px] font-bold text-slate-400 backdrop-blur">
-                  {defenseQaUi.enterHint}
+                  {activeModule === "defense" && defenseWorkspaceMode === "question" ? (
+                    <div className="pointer-events-none absolute bottom-3 right-4 rounded-full border border-white/10 bg-slate-950/70 px-3 py-1.5 text-[11px] font-bold text-slate-400 backdrop-blur">
+                      {defenseQaUi.enterHint}
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
+              </>
+            ) : null}
 
             {activeModule !== "data" && (
               <button

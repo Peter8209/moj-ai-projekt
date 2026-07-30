@@ -2683,7 +2683,7 @@ function buildMainChatPrompt({
       : 'B. Bez prílohy pracuj iba s podkladmi, ktoré možno bezpečne overiť.',
     'C. Ak používateľ žiada kapitolu, nevytváraj lineárny súhrn článku. Syntetizuj odbornú kapitolu, v ktorej je článok zdrojom dôkazov pre relevantné časti textu.',
     'D. Ak profil obsahuje osnovu alebo názov požadovanej kapitoly, použi ju ako cieľovú štruktúru. Ak ju neobsahuje, vytvor prirodzenú odbornú štruktúru podľa zadania a obsahu prílohy.',
-    'E. Pred odoslaním skontroluj, že každé konkrétne číslo, výsledok, atribúcia autora alebo špecifické vedecké tvrdenie má oporu v dostupnom zdroji.',
+    'E. Pred odoslaním skontroluj, že každé konkrétne číslo, výsledok, atribúcia autora alebo špecifické vedecké tvrdenie má oporu v dostupnom zdroji a že citácia je vložená priamo do toho odseku, ktorého tvrdenie podporuje.',
     '',
     'ŠTÝL AKADEMICKÉHO VÝSTUPU:',
     'Píš prirodzene, odborne a argumentačne. Text nesmie pôsobiť ako výpis z PDF ani ako generický AI súhrn.',
@@ -2692,7 +2692,7 @@ function buildMainChatPrompt({
     'Nevkladaj do tela textu technické vety typu „podľa nahratej prílohy“, „AI analyzovala súbor“ alebo opis interného procesu.',
     '',
     hasAttachments
-      ? 'ROZŠÍRENIE NAD RÁMEC PRÍLOHY: Je dovolené vytvoriť opatrný všeobecný odborný rámec a prechodové vysvetlenia, aby kapitola bola súvislá. Nesmieš však z pamäte dopĺňať konkrétne čísla, výsledky štúdií, autorov, roky, DOI ani bibliografické odkazy. Ak širšia podkapitola potrebuje aktuálne štatistiky alebo ďalší zdroj, formuluj ju opisne a transparentne uveď, čo treba doplniť z aktuálneho overeného zdroja.'
+      ? 'PRI AKTUÁLNEJ PRÍLOHE JE ZAKÁZANÉ DOPĹŇAŤ ODBORNÉ FAKTY Z PAMÄTE MODELU. Dovolené sú iba jazykové prechody a štylistické spojenia bez nových vecných tvrdení. Každé odborné tvrdenie, číslo, výsledok, autor, rok alebo bibliografický údaj musí vychádzať z aktuálnej prílohy a musí byť citovaný priamo v texte.'
       : 'Pri výstupe bez prílohy nevymýšľaj fakty ani bibliografiu a používaj iba overiteľné akademické zdroje.',
     '',
     'ZDROJOVÁ PROVENIENCIA:',
@@ -2707,11 +2707,11 @@ function buildMainChatPrompt({
       : 'Neúplné alebo neisté bibliografické záznamy nepoužívaj.',
     `Citačná norma z profilu práce: ${citationStyle}.`,
     buildCitationStyleInstructions(citationStyle),
-    'Existujúce zdrojovanie zachovaj: na konci ponechaj samostatné sekcie Primárne zdroje a Sekundárne / doplnkové zdroje, pričom backendový register zdrojov je autoritatívny pre bibliografické údaje.',
-    'PRIMÁRNE ZDROJE – povinné poradie údajov pri každom skutočne použitom zdroji: Autor/autori; Rok; celý Názov; typ zdroja a dostupné identifikátory (časopis + ISSN/eISSN, kniha + ISBN, DOI, web + presná URL a dostupný dátum publikovania/prístupu); Celkový rozsah alebo rozsah článku; Použité strany; Vydanie/Ročník/Číslo; Príloha / zdrojový dokument úplne na konci.',
-    'Pri použitých stranách uvádzaj iba reálne identifikované strany. Ak zdroj nemá stránkovanie, uveď „neuplatňuje sa – zdroj nemá stránkovanie“. Ak stranu nemožno spoľahlivo určiť, uveď „nepodarilo sa spoľahlivo identifikovať“.',
-    'SEKUNDÁRNE / DOPLNKOVÉ ZDROJE – nikdy nekopíruj celý zoznam literatúry primárneho dokumentu. Uveď iba úplné bibliografické záznamy zdrojov, ktoré boli reálne použité pri tvorbe textu. Pri každom zachovaj celý záznam, uveď kde/na čo bol v práci použitý a z ktorého primárneho zdroja bol identifikovaný.',
-    'Príloha / zdrojový dokument musí byť pri primárnom zdroji vždy posledná položka. Nevymýšľaj zdroje, DOI, URL, autorov, roky, ISBN, ISSN, rozsahy ani čísla strán; pri neistote použi presný transparentný stav namiesto domýšľania.',
+    'Na konci ponechaj samostatné sekcie Primárne zdroje a Sekundárne / doplnkové zdroje. V oboch sekciách vypisuj iba hotové bibliografické záznamy podľa aktívnej citačnej normy; nevypisuj interné polia, diagnostické poznámky ani formulárové položky typu Autor/autori, Rok, Názov, Typ zdroja, Použité strany alebo Príloha / zdrojový dokument.',
+    'PRIMÁRNE ZDROJE – každý skutočne použitý primárny dokument zapíš ako jeden štandardný bibliografický záznam podľa normy profilu, napr. AUTOR(I): Názov. Časopis / vydavateľské údaje, ročník, rok, strany, DOI/ISBN/ISSN podľa dostupnosti. Nevypisuj pomocné názvy polí.',
+    'Strany, ročník, číslo, DOI, ISBN, ISSN, vydavateľa alebo URL vlož priamo do bibliografického záznamu iba vtedy, keď sú bezpečne dostupné. Chýbajúci údaj nevymýšľaj a nevytváraj kvôli nemu osobitný diagnostický riadok.',
+    'SEKUNDÁRNE / DOPLNKOVÉ ZDROJE – uveď iba úplné bibliografické záznamy zdrojov, ktoré boli reálne citované v texte a bezpečne spárované s bibliografiou primárneho dokumentu. Nevypisuj k nim komentár „Použité v práci“, „Prevzaté z“ ani internú provenienciu; tá patrí iba do interného spracovania.',
+    'Citácie musia byť priamo v texte a každý zdroj uvedený na konci musí mať väzbu na citáciu v texte. Nevymýšľaj zdroje, DOI, URL, autorov, roky, ISBN, ISSN, rozsahy ani čísla strán. Interný názov súboru používaj iba na serverové párovanie, nie ako viditeľnú položku bibliografie.',
   ].join('\n');
 }
 
@@ -4106,15 +4106,15 @@ formData.append('profile', JSON.stringify(profileForApi || null));
       formData.append('validateAttachmentsAgainstProfile', 'false');
       formData.append('requireSourceList', 'true');
 
-      // Pri prílohách ostáva externé vyhľadávanie vypnuté, ale model smie
-      // vytvoriť opatrný všeobecný odborný rámec a prechodové vysvetlenia.
-      // Konkrétne fakty, čísla a citácie však musia zostať ukotvené v prílohách.
+      // Pri prílohách ostáva externé vyhľadávanie aj odborný fallback z pamäte vypnutý.
+      // Model smie vytvárať iba jazykové prechody bez nových vecných tvrdení;
+      // fakty, čísla, autori a citácie musia zostať ukotvené v prílohách.
       const allowExternalSourcesForThisRequest =
         attachedFiles.length === 0;
 
       formData.append(
         'allowAiKnowledgeFallback',
-        'true',
+        allowExternalSourcesForThisRequest ? 'true' : 'false',
       );
       formData.append('returnExtractedFilesInfo', 'true');
       formData.append('isChapterRequest', isChapterRequest ? 'true' : 'false');

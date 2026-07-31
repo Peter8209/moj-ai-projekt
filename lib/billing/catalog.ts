@@ -3,7 +3,10 @@
  *
  * Dôležité:
  * - Stripe Price ID sa NEUKLADAJÚ priamo do zdrojového kódu.
- * - V katalógu je uložený iba názov environment premennej.
+ * - Každá platená položka používa JEDEN Stripe Price ID; ďalšie meny sú
+ *   nakonfigurované na tom istom Price objekte cez Stripe currency_options.
+ * - V katalógu je uložený iba názov environment premennej. Neexistujú samostatné
+ *   ENV premenné typu *_EUR, *_CZK, *_PLN alebo *_HUF.
  * - Skutočná hodnota price_... sa načíta výhradne na serveri cez process.env.
  * - Platené hlavné balíky sú mesačné predplatné.
  * - Doplnky zostávajú samostatné platby, pretože predstavujú jednorazové
@@ -941,9 +944,11 @@ export function getStripePriceEnvironmentKey(
  * app/api/payments/checkout/route.ts
  *
  * Upozornenie:
+ * - Každá položka má presne jeden Price ID z ENV; lokalizované meny sú
+ *   uložené na tom istom Stripe Price objekte v currency_options.
  * - Price ID pre seminar-work, bachelor-thesis a master-thesis musí byť
  *   v Stripe vytvorené ako recurring monthly price.
- * - Price ID pre doplnky môže zostať jednorazové.
+ * - Price ID pre doplnky musí byť jednorazové (one_time).
  */
 export function getStripePriceId(
   itemId: PurchasableCatalogId,

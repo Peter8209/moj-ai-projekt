@@ -7,6 +7,11 @@ import {
   type AddonId,
   type PlanId,
 } from "@/lib/billing/catalog";
+import {
+  normalizeLocale,
+  type AppLocale,
+  type CheckoutCurrency,
+} from "@/lib/billing/checkout-locale";
 import { applySuccessfulPagePurchase } from "@/lib/page-plan-activation";
 import { sendOrderConfirmationEmail } from "@/lib/email/order-confirmation";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -105,7 +110,31 @@ const VALID_ADDON_IDS = new Set<AddonId>(Object.keys(ADDONS) as AddonId[]);
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const EXPECTED_CURRENCY = "eur";
+/**
+ * Rovnaká verzia politiky ako v /api/payments/checkout.
+ * Nové checkout session sa validujú striktne podľa jazyka rozhrania.
+ * Staršie rozpracované session bez tejto značky zostávajú spätne kompatibilné.
+ */
+const CURRENCY_POLICY_VERSION = "interface-v1";
+
+function getInterfaceCheckoutCurrency(
+  locale: AppLocale,
+): CheckoutCurrency | undefined {
+  switch (locale) {
+    case "sk":
+    case "de":
+      return "eur";
+    case "cs":
+      return "czk";
+    case "pl":
+      return "pln";
+    case "hu":
+      return "huf";
+    case "en":
+    default:
+      return undefined;
+  }
+}
 
 const FULFILLED_MARKER_KEY = "zedpera_fulfilled";
 const FULFILLED_EVENT_KEY = "zedpera_fulfilled_event_id";
@@ -207,6 +236,118 @@ function readMetadataValue(metadata: MetadataRecord, keys: string[]): string {
   }
 
   return "";
+}
+
+type CurrencyValidationResult =
+  | {
+      ok: true;
+      locale: AppLocale;
+      actualCurrency: string;
+      expectedCurrency: CheckoutCurrency | null;
+      declaredCurrency: string;
+      strict: boolean;
+    }
+  | {
+      ok: false;
+      reason: "missing_currency" | "currency_locale_mismatch" | "currency_metadata_mismatch";
+      detail: string;
+    };
+
+function validateCheckoutCurrency(
+  session: Stripe.Checkout.Session,
+): CurrencyValidationResult {
+  const metadata = normalizeMetadata(session.metadata);
+  const rawLocale = readMetadataValue(metadata, ["locale", "language", "lang"]);
+  const locale = normalizeLocale(rawLocale || "sk");
+  const expectedCurrency = getInterfaceCheckoutCurrency(locale) || null;
+  const actualCurrency = String(session.currency || "").trim().toLowerCase();
+  const declaredCurrency = readMetadataValue(metadata, [
+    "checkout_currency",
+    "checkoutCurrency",
+  ]).toLowerCase();
+  const policyVersion = readMetadataValue(metadata, [
+    "currency_policy_version",
+    "currencyPolicyVersion",
+  ]);
+
+  /**
+   * Prísna kontrola sa aplikuje iba na session vytvorené novou verziou
+   * checkout route. Tým sa nerozbijú už otvorené/rozpracované staršie platby.
+   */
+  const strict = policyVersion === CURRENCY_POLICY_VERSION;
+
+  if (!actualCurrency) {
+    return {
+      ok: false,
+      reason: "missing_currency",
+      detail: "Stripe Checkout Session neobsahuje menu platby.",
+    };
+  }
+
+  if (!strict) {
+    return {
+      ok: true,
+      locale,
+      actualCurrency,
+      expectedCurrency,
+      declaredCurrency,
+      strict: false,
+    };
+  }
+
+  /**
+   * Pre SK/CS/DE/PL/HU je mena deterministická podľa rozhrania.
+   * EN používa AUTO, preto sa pri angličtine akceptuje reálna mena,
+   * ktorú Stripe zvolil podľa zákazníka a dostupných currency_options.
+   */
+  if (expectedCurrency && actualCurrency !== expectedCurrency) {
+    return {
+      ok: false,
+      reason: "currency_locale_mismatch",
+      detail:
+        `Locale ${locale} vyžaduje ${expectedCurrency.toUpperCase()}, ` +
+        `ale Stripe Session používa ${actualCurrency.toUpperCase()}.`,
+    };
+  }
+
+  if (
+    expectedCurrency &&
+    declaredCurrency &&
+    declaredCurrency !== "auto" &&
+    declaredCurrency !== expectedCurrency
+  ) {
+    return {
+      ok: false,
+      reason: "currency_metadata_mismatch",
+      detail:
+        `Metadata checkout_currency=${declaredCurrency.toUpperCase()} ` +
+        `nezodpovedajú locale ${locale} (${expectedCurrency.toUpperCase()}).`,
+    };
+  }
+
+  if (
+    !expectedCurrency &&
+    declaredCurrency &&
+    declaredCurrency !== "auto" &&
+    actualCurrency !== declaredCurrency
+  ) {
+    return {
+      ok: false,
+      reason: "currency_metadata_mismatch",
+      detail:
+        `Stripe Session používa ${actualCurrency.toUpperCase()}, ` +
+        `ale metadata deklarujú ${declaredCurrency.toUpperCase()}.`,
+    };
+  }
+
+  return {
+    ok: true,
+    locale,
+    actualCurrency,
+    expectedCurrency,
+    declaredCurrency,
+    strict: true,
+  };
 }
 
 function getObjectId(
@@ -1406,15 +1547,14 @@ async function handleCheckoutSucceeded({
     };
   }
 
-  if (
-    session.currency &&
-    session.currency.toLowerCase() !== EXPECTED_CURRENCY
-  ) {
+  const currencyValidation = validateCheckoutCurrency(session);
+
+  if (!currencyValidation.ok) {
     return {
       processed: false,
-      reason: "unsupported_currency",
+      reason: currencyValidation.reason,
       objectId: session.id,
-      detail: `Unsupported currency: ${session.currency}`,
+      detail: currencyValidation.detail,
     };
   }
 
@@ -1533,6 +1673,11 @@ async function handleCheckoutSucceeded({
     eventId,
     sessionId: session.id,
     checkoutMode: session.mode,
+    locale: currencyValidation.locale,
+    currency: currencyValidation.actualCurrency.toUpperCase(),
+    expectedCurrency:
+      currencyValidation.expectedCurrency?.toUpperCase() || "AUTO",
+    currencyPolicyStrict: currencyValidation.strict,
     paymentReference,
     userId: result.userId,
     planId: result.effectivePlanId,

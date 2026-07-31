@@ -11,17 +11,27 @@ import {
   PLANS,
   type AddonId,
   type PlanId,
+  type PurchasableCatalogId,
 } from '@/lib/billing/catalog';
+import {
+  CHECKOUT_LOCALIZATION,
+  getCheckoutLocalization,
+  normalizeLocale,
+  type AppLocale,
+} from '@/lib/billing/checkout-locale';
+import {
+  DEFAULT_CATALOG_CURRENCY,
+  getCheckoutCurrencyForLocale,
+  type CheckoutCurrency,
+} from '@/lib/currency';
+import { getStripe } from '@/lib/stripe';
+import { createStripeLineItems } from '@/lib/stripe/prices';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const maxDuration = 60;
-
-// Stripe klient sa neinicializuje na top-level, aby build nespadol
-// pri chýbajúcej STRIPE_SECRET_KEY počas zostavovania aplikácie.
-let stripeClient: Stripe | null = null;
 
 // ============================================================
 // TYPES
@@ -88,11 +98,44 @@ type CheckoutLineItem = NonNullable<
   CheckoutSessionCreateParams['line_items']
 >[number];
 
+
+type CheckoutMode = 'payment' | 'subscription';
+
+type StripeErrorInfo = {
+  message: string;
+  type: string | null;
+  code: string | null;
+  param: string | null;
+  requestId: string | null;
+  statusCode: number | null;
+};
+
+type StripePriceDiagnostic = {
+  catalogItemId: PurchasableCatalogId;
+  priceId: string;
+  active: boolean;
+  livemode: boolean;
+  defaultCurrency: string;
+  supportedCurrencies: string[];
+  recurring: boolean;
+  interval: string | null;
+};
+
+type StripeCustomerResolution = {
+  customerId: string;
+  source: 'stored' | 'existing' | 'created';
+  staleStoredCustomerId?: string;
+};
+
 // ============================================================
 // CATALOG CONSTANTS
 // ============================================================
 
-const CURRENCY = 'eur' as const;
+/**
+ * Verzia politiky, ktorá viaže menu Stripe Checkout na jazyk rozhrania.
+ * Samotné mapovanie je centralizované v lib/currency.ts.
+ */
+const CURRENCY_POLICY_VERSION = 'interface-v2-multicurrency-price';
 
 const NO_STORE_HEADERS = {
   'Cache-Control':
@@ -105,17 +148,8 @@ const REQUEST_ID_PATTERN = /^[a-zA-Z0-9_.:-]+$/;
 const MAX_REQUEST_ID_LENGTH = 180;
 const CHECKOUT_SOURCE = 'zedpera';
 const CHECKOUT_CATALOG_VERSION = '2026-07';
-
-const SUPPORTED_LOCALES = [
-  'sk',
-  'cs',
-  'en',
-  'de',
-  'pl',
-  'hu',
-] as const;
-
-type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
+const CHECKOUT_SESSION_EXPIRY_SECONDS = 31 * 60;
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1']);
 
 const VALID_PLAN_IDS = new Set<PlanId>(
   Object.keys(PLANS) as PlanId[],
@@ -152,14 +186,6 @@ function normalizeEmail(value: unknown): string {
   return normalizeString(value).toLowerCase();
 }
 
-function normalizeLocale(value: unknown): SupportedLocale {
-  const normalized = normalizeString(value).toLowerCase();
-
-  return SUPPORTED_LOCALES.includes(normalized as SupportedLocale)
-    ? (normalized as SupportedLocale)
-    : 'sk';
-}
-
 function uniqueValues<T>(values: T[]): T[] {
   return Array.from(new Set(values));
 }
@@ -184,61 +210,72 @@ function isProduction(): boolean {
   return process.env.NODE_ENV === 'production';
 }
 
-function getSafeErrorDetail(message: string): Record<string, string> {
-  return isProduction() ? {} : { detail: message };
-}
 
-function isActiveEntitlement(billingStatus: string | null): boolean {
-  const normalizedStatus = normalizeString(billingStatus).toLowerCase();
-
-  // Pri starších záznamoch môže byť billing_status prázdny. Ak je používateľovi
-  // uložený platený plan_id, prázdny stav neblokujeme iba kvôli migrácii dát.
-  if (!normalizedStatus) {
-    return true;
-  }
-
-  return !new Set([
-    'canceled',
-    'cancelled',
-    'expired',
-    'failed',
-    'inactive',
-    'past_due',
-    'revoked',
-    'unpaid',
-  ]).has(normalizedStatus);
-}
-
-function normalizeCurrentPlanId(value: unknown): PlanId {
+function normalizeBaseUrl(value: string): string {
   const normalized = normalizeString(value);
 
-  if (isKnownPlanId(normalized)) {
-    return normalized;
+  if (!normalized) {
+    return '';
   }
 
-  return 'free';
+  const withProtocol =
+    normalized.startsWith('http://') || normalized.startsWith('https://')
+      ? normalized
+      : `https://${normalized}`;
+
+  try {
+    const url = new URL(withProtocol);
+
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return '';
+    }
+
+    return url.origin.replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
 }
 
-function getBaseUrl(): string {
-  const rawBaseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    process.env.NEXT_PUBLIC_BASE_URL ||
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
-    process.env.VERCEL_URL ||
-    'http://localhost:3000';
+function getBaseUrl(request?: Request): string {
+  /*
+   * Pri lokálnom vývoji musí Stripe po úspechu/cancel vrátiť používateľa späť
+   * na localhost, aj keď .env.local obsahuje produkčný NEXT_PUBLIC_SITE_URL.
+   * V produkcii sa naopak request Host nepoužíva ako zdroj redirect URL.
+   */
+  if (!isProduction() && request) {
+    try {
+      const requestUrl = new URL(request.url);
 
-  const withProtocol =
-    rawBaseUrl.startsWith('http://') || rawBaseUrl.startsWith('https://')
-      ? rawBaseUrl
-      : `https://${rawBaseUrl}`;
+      if (LOCAL_HOSTNAMES.has(requestUrl.hostname)) {
+        return requestUrl.origin.replace(/\/+$/, '');
+      }
+    } catch {
+      // Pokračujeme na nakonfigurovanú URL nižšie.
+    }
+  }
 
-  return withProtocol.replace(/\/+$/, '');
+  const candidates = [
+    process.env.NEXT_PUBLIC_SITE_URL,
+    process.env.NEXT_PUBLIC_BASE_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    process.env.VERCEL_URL,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeBaseUrl(candidate || '');
+
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return 'http://localhost:3000';
 }
 
 function getSuccessUrl(
   baseUrl: string,
-  locale: SupportedLocale,
+  locale: AppLocale,
 ): string {
   return (
     `${baseUrl}/payment/success` +
@@ -249,7 +286,7 @@ function getSuccessUrl(
 
 function getCancelUrl(
   baseUrl: string,
-  locale: SupportedLocale,
+  locale: AppLocale,
 ): string {
   return (
     `${baseUrl}/pricing` +
@@ -258,25 +295,14 @@ function getCancelUrl(
   );
 }
 
-function getFreeDashboardUrl(baseUrl: string): string {
-  return `${baseUrl}/dashboard?plan=free`;
-}
-
-function getStripe(): Stripe {
-  const secretKey = normalizeString(process.env.STRIPE_SECRET_KEY);
-
-  if (!secretKey) {
-    throw new Error('STRIPE_CONFIG_MISSING: Missing STRIPE_SECRET_KEY');
-  }
-
-  if (!stripeClient) {
-    stripeClient = new Stripe(secretKey, {
-      maxNetworkRetries: 2,
-      timeout: 20_000,
-    });
-  }
-
-  return stripeClient;
+function getFreeDashboardUrl(
+  baseUrl: string,
+  locale: AppLocale,
+): string {
+  return (
+    `${baseUrl}/dashboard?plan=free` +
+    `&lang=${encodeURIComponent(locale)}`
+  );
 }
 
 // ============================================================
@@ -426,7 +452,7 @@ function resolveCheckoutRequestId(
   const requestId =
     bodyRequestId ||
     headerRequestId ||
-    `auto-${Math.floor(Date.now() / 60_000)}`;
+    `auto-${randomUUID()}`;
 
   if (
     requestId.length > MAX_REQUEST_ID_LENGTH ||
@@ -442,89 +468,23 @@ function resolveCheckoutRequestId(
 // STRIPE PRICE HELPERS
 // ============================================================
 
-function toEnvironmentSuffix(value: string): string {
-  return value.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
-}
+/**
+ * Price ID sa vyberá výhradne podľa položky katalógu. Menu nemení Price ID;
+ * podporu konkrétnej meny overuje lib/stripe/prices.ts cez currency_options.
+ */
+function getCheckoutCatalogItemIds(
+  planId: PlanId | null,
+  addonIds: AddonId[],
+): PurchasableCatalogId[] {
+  const itemIds: PurchasableCatalogId[] = [];
 
-function getStripePriceIdForPlan(planId: PlanId): string {
-  const key = `STRIPE_PLAN_PRICE_${toEnvironmentSuffix(planId)}`;
-  return normalizeString(process.env[key]);
-}
-
-function getStripePriceIdForAddon(addonId: AddonId): string {
-  const key = `STRIPE_ADDON_PRICE_${toEnvironmentSuffix(addonId)}`;
-  return normalizeString(process.env[key]);
-}
-
-function createPlanLineItem(
-  planId: PlanId,
-): CheckoutLineItem {
-  const plan = PLANS[planId];
-  const stripePriceId = getStripePriceIdForPlan(planId);
-
-  if (stripePriceId) {
-    return {
-      price: stripePriceId,
-      quantity: 1,
-    };
+  if (planId && planId !== 'free' && planId !== 'admin') {
+    itemIds.push(planId);
   }
 
-  return {
-    quantity: 1,
-    price_data: {
-      currency: CURRENCY,
-      unit_amount: plan.priceCents,
-      product_data: {
-        name: `ZEDPERA – ${plan.name}`,
-        description: [
-          `${plan.pageLimit} strán`,
-          plan.promptLimit === null
-            ? 'neobmedzené prompty'
-            : `${plan.promptLimit} prompty`,
-          `${plan.attachmentLimit} príloh`,
-        ].join(' • '),
-        metadata: {
-          item_type: 'plan',
-          catalog_id: plan.id,
-        },
-      },
-    },
-  };
-}
+  itemIds.push(...addonIds);
 
-function createAddonLineItem(
-  addonId: AddonId,
-): CheckoutLineItem {
-  const addon = ADDONS[addonId];
-  const stripePriceId = getStripePriceIdForAddon(addonId);
-
-  if (stripePriceId) {
-    return {
-      price: stripePriceId,
-      quantity: 1,
-    };
-  }
-
-  const description =
-    addon.extraPages > 0
-      ? `Navýšenie limitu o ${addon.extraPages} strán`
-      : 'Rozšírenie funkcií účtu ZEDPERA';
-
-  return {
-    quantity: 1,
-    price_data: {
-      currency: CURRENCY,
-      unit_amount: addon.priceCents,
-      product_data: {
-        name: `ZEDPERA – ${addon.name}`,
-        description,
-        metadata: {
-          item_type: 'addon',
-          catalog_id: addon.id,
-        },
-      },
-    },
-  };
+  return itemIds;
 }
 
 function getPurchaseType(
@@ -570,6 +530,171 @@ function getPurchasedExtraPages(addonIds: AddonId[]): number {
   );
 }
 
+
+function getLineItemPriceId(lineItem: CheckoutLineItem): string {
+  if (
+    isRecord(lineItem) &&
+    typeof lineItem.price === 'string' &&
+    lineItem.price.trim()
+  ) {
+    return lineItem.price.trim();
+  }
+
+  throw new Error(
+    'STRIPE_LINE_ITEM_PRICE_MISSING: Checkout line item neobsahuje Price ID.',
+  );
+}
+
+function getPriceSupportedCurrencies(price: Stripe.Price): string[] {
+  return uniqueValues([
+    normalizeString(price.currency).toLowerCase(),
+    ...Object.keys(price.currency_options || {}).map((currency) =>
+      currency.toLowerCase(),
+    ),
+  ]).filter(Boolean);
+}
+
+function isPaidPlanCatalogItem(
+  itemId: PurchasableCatalogId,
+): boolean {
+  return VALID_PLAN_IDS.has(itemId as PlanId);
+}
+
+async function validateStripeCheckoutPrices({
+  stripe,
+  checkoutItemIds,
+  lineItems,
+  checkoutCurrency,
+  checkoutMode,
+}: {
+  stripe: Stripe;
+  checkoutItemIds: PurchasableCatalogId[];
+  lineItems: CheckoutLineItem[];
+  checkoutCurrency: CheckoutCurrency | undefined;
+  checkoutMode: CheckoutMode;
+}): Promise<StripePriceDiagnostic[]> {
+  if (checkoutItemIds.length !== lineItems.length) {
+    throw new Error(
+      `STRIPE_LINE_ITEM_COUNT_MISMATCH: catalog=${checkoutItemIds.length}; stripe=${lineItems.length}`,
+    );
+  }
+
+  const diagnostics = await Promise.all(
+    lineItems.map(async (lineItem, index): Promise<StripePriceDiagnostic> => {
+      const catalogItemId = checkoutItemIds[index];
+      const priceId = getLineItemPriceId(lineItem);
+
+      let price: Stripe.Price;
+
+      try {
+        price = await stripe.prices.retrieve(priceId, {
+          expand: ['currency_options'],
+        });
+      } catch (error: unknown) {
+        const info = getStripeErrorInfo(error);
+
+        if (info.code === 'resource_missing') {
+          throw new Error(
+            `STRIPE_PRICE_NOT_FOUND: ${catalogItemId} -> ${priceId}. ` +
+              'Price ID neexistuje v aktuálnom Stripe TEST/LIVE režime.',
+          );
+        }
+
+        throw error;
+      }
+
+      if (!price.active) {
+        throw new Error(
+          `STRIPE_PRICE_INACTIVE: ${catalogItemId} -> ${price.id}`,
+        );
+      }
+
+      const supportedCurrencies = getPriceSupportedCurrencies(price);
+      const expectedRecurring = isPaidPlanCatalogItem(catalogItemId);
+      const recurring = Boolean(price.recurring);
+
+      if (expectedRecurring && !recurring) {
+        throw new Error(
+          `STRIPE_PRICE_TYPE_MISMATCH: ${catalogItemId} -> ${price.id} ` +
+            'musí byť recurring Price, ale Stripe ho eviduje ako one-time.',
+        );
+      }
+
+      if (!expectedRecurring && recurring) {
+        throw new Error(
+          `STRIPE_PRICE_TYPE_MISMATCH: ${catalogItemId} -> ${price.id} ` +
+            'musí byť one-time Price, ale Stripe ho eviduje ako recurring.',
+        );
+      }
+
+      /*
+       * ZEDPERA platené plány sú mesačné subscriptions. One-time doplnky
+       * nemajú recurring.interval. Ak by sa interval v katalógu neskôr zmenil,
+       * zmeňte toto pravidlo spolu s lib/billing/catalog.ts a Stripe Price.
+       */
+      if (
+        expectedRecurring &&
+        price.recurring &&
+        price.recurring.interval !== 'month'
+      ) {
+        throw new Error(
+          `STRIPE_PRICE_INTERVAL_MISMATCH: ${catalogItemId} -> ${price.id}; ` +
+            `očakávané=month; stripe=${price.recurring.interval}`,
+        );
+      }
+
+      if (
+        checkoutCurrency &&
+        !supportedCurrencies.includes(checkoutCurrency.toLowerCase())
+      ) {
+        throw new Error(
+          `STRIPE_PRICE_CURRENCY_UNSUPPORTED: ${catalogItemId} -> ${price.id}; ` +
+            `požadovaná=${checkoutCurrency}; dostupné=${supportedCurrencies.join(',') || 'none'}`,
+        );
+      }
+
+      return {
+        catalogItemId,
+        priceId: price.id,
+        active: price.active,
+        livemode: price.livemode,
+        defaultCurrency: price.currency.toLowerCase(),
+        supportedCurrencies,
+        recurring,
+        interval: price.recurring?.interval || null,
+      };
+    }),
+  );
+
+  const defaultCurrencies = uniqueValues(
+    diagnostics.map((item) => item.defaultCurrency),
+  );
+
+  if (defaultCurrencies.length > 1) {
+    throw new Error(
+      `STRIPE_PRICE_DEFAULT_CURRENCY_MISMATCH: ${diagnostics
+        .map((item) => `${item.catalogItemId}=${item.defaultCurrency}`)
+        .join('; ')}`,
+    );
+  }
+
+  const recurringCount = diagnostics.filter((item) => item.recurring).length;
+
+  if (checkoutMode === 'subscription' && recurringCount < 1) {
+    throw new Error(
+      'STRIPE_PRICE_TYPE_MISMATCH: subscription checkout neobsahuje žiadny recurring Price.',
+    );
+  }
+
+  if (checkoutMode === 'payment' && recurringCount > 0) {
+    throw new Error(
+      'STRIPE_PRICE_TYPE_MISMATCH: payment checkout nesmie obsahovať recurring Price.',
+    );
+  }
+
+  return diagnostics;
+}
+
 function buildMetadata({
   userId,
   email,
@@ -577,13 +702,15 @@ function buildMetadata({
   addonIds,
   requestId,
   locale,
+  checkoutCurrency,
 }: {
   userId: string;
   email: string;
   planId: PlanId | null;
   addonIds: AddonId[];
   requestId: string;
-  locale: SupportedLocale;
+  locale: AppLocale;
+  checkoutCurrency: CheckoutCurrency | undefined;
 }): StripeMetadata {
   const purchaseType = getPurchaseType(planId, addonIds);
   const basePages = getPurchasedBasePages(planId);
@@ -600,6 +727,9 @@ function buildMetadata({
     base_pages: String(basePages),
     extra_pages: String(extraPages),
     catalog_total_cents: String(totalCents),
+    catalog_currency: DEFAULT_CATALOG_CURRENCY,
+    checkout_currency: checkoutCurrency || 'auto',
+    currency_policy_version: CURRENCY_POLICY_VERSION,
     checkout_request_id: requestId,
     catalog_version: CHECKOUT_CATALOG_VERSION,
     locale,
@@ -613,16 +743,23 @@ function createIdempotencyKey({
   planId,
   addonIds,
   requestId,
+  locale,
+  checkoutCurrency,
 }: {
   userId: string;
   planId: PlanId | null;
   addonIds: AddonId[];
   requestId: string;
+  locale: AppLocale;
+  checkoutCurrency: CheckoutCurrency | undefined;
 }): string {
   const source = [
     userId || 'guest',
     planId || 'addon-only',
     [...addonIds].sort().join(','),
+    locale,
+    checkoutCurrency || 'auto',
+    CURRENCY_POLICY_VERSION,
     requestId,
   ].join('|');
 
@@ -669,21 +806,29 @@ async function getOrCreateStripeCustomer({
   stripe: Stripe;
   userId: string;
   email: string;
-}): Promise<Stripe.Customer> {
+}): Promise<{
+  customer: Stripe.Customer;
+  source: 'existing' | 'created';
+}> {
   const customers = await stripe.customers.list({
     email,
     limit: 100,
   });
 
   const matchingCustomer = customers.data.find(
-    (customer) => customer.metadata?.user_id === userId,
+    (customer) =>
+      customer.metadata?.user_id === userId ||
+      customer.metadata?.supabase_user_id === userId,
   );
 
   if (matchingCustomer) {
-    return matchingCustomer;
+    return {
+      customer: matchingCustomer,
+      source: 'existing',
+    };
   }
 
-  return stripe.customers.create(
+  const customer = await stripe.customers.create(
     {
       email,
       metadata: {
@@ -696,38 +841,184 @@ async function getOrCreateStripeCustomer({
       idempotencyKey: `zedpera_customer_${userId}`,
     },
   );
+
+  return {
+    customer,
+    source: 'created',
+  };
+}
+
+async function resolveStripeCustomerForCheckout({
+  stripe,
+  userId,
+  email,
+  storedCustomerId,
+}: {
+  stripe: Stripe;
+  userId: string;
+  email: string;
+  storedCustomerId: string;
+}): Promise<StripeCustomerResolution> {
+  if (storedCustomerId) {
+    try {
+      const customer = await stripe.customers.retrieve(storedCustomerId);
+
+      if (!customer.deleted) {
+        return {
+          customerId: customer.id,
+          source: 'stored',
+        };
+      }
+    } catch (error: unknown) {
+      const info = getStripeErrorInfo(error);
+
+      /*
+       * Typický prípad pri prepnutí sk_test_ <-> sk_live_: Supabase má uložené
+       * cus_ ID z druhého Stripe režimu. Checkout preto nesmie slepo použiť
+       * staré ID, ale vytvorí/nájde zákazníka v aktuálnom režime.
+       */
+      if (info.code !== 'resource_missing') {
+        throw error;
+      }
+
+      console.warn('ZEDPERA_STALE_STRIPE_CUSTOMER', {
+        userId,
+        storedCustomerId,
+        stripeRequestId: info.requestId,
+      });
+    }
+  }
+
+  const {
+    customer,
+    source,
+  } = await getOrCreateStripeCustomer({
+    stripe,
+    userId,
+    email,
+  });
+
+  return {
+    customerId: customer.id,
+    source,
+    ...(storedCustomerId
+      ? { staleStoredCustomerId: storedCustomerId }
+      : {}),
+  };
 }
 
 // ============================================================
 // ERROR HELPERS
 // ============================================================
 
+function readNestedErrorRecord(error: unknown): Record<string, unknown> {
+  if (!isRecord(error)) {
+    return {};
+  }
+
+  if (isRecord(error.raw)) {
+    return {
+      ...error.raw,
+      ...error,
+    };
+  }
+
+  return error;
+}
+
+function getStripeErrorInfo(error: unknown): StripeErrorInfo {
+  const record = readNestedErrorRecord(error);
+
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof record.message === 'string'
+        ? record.message
+        : 'Unknown checkout error';
+
+  const statusCode =
+    typeof record.statusCode === 'number'
+      ? record.statusCode
+      : typeof record.status === 'number'
+        ? record.status
+        : null;
+
+  return {
+    message,
+    type:
+      typeof record.type === 'string'
+        ? record.type
+        : null,
+    code:
+      typeof record.code === 'string'
+        ? record.code
+        : null,
+    param:
+      typeof record.param === 'string'
+        ? record.param
+        : null,
+    requestId:
+      typeof record.requestId === 'string'
+        ? record.requestId
+        : typeof record.request_id === 'string'
+          ? record.request_id
+          : null,
+    statusCode,
+  };
+}
+
 function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (isRecord(error) && typeof error.message === 'string') {
-    return error.message;
-  }
-
-  return 'Unknown checkout error';
+  return getStripeErrorInfo(error).message;
 }
 
 function getStripeErrorCode(error: unknown): string | null {
-  if (!isRecord(error)) {
-    return null;
+  const info = getStripeErrorInfo(error);
+  return info.code || info.type;
+}
+
+function getDevelopmentErrorPayload(
+  error: unknown,
+): Record<string, string | number | null> {
+  if (isProduction()) {
+    return {};
   }
 
-  if (typeof error.code === 'string') {
-    return error.code;
+  const info = getStripeErrorInfo(error);
+
+  return {
+    detail: info.message,
+    stripeType: info.type,
+    stripeCode: info.code,
+    stripeParam: info.param,
+    stripeRequestId: info.requestId,
+    stripeStatusCode: info.statusCode,
+  };
+}
+
+function getCheckoutFailureMessage(error: unknown): string {
+  const info = getStripeErrorInfo(error);
+  const detail = info.message;
+
+  if (isProduction()) {
+    return 'Stripe Checkout sa nepodarilo vytvoriť.';
   }
 
-  if (typeof error.type === 'string') {
-    return error.type;
+  if (info.param) {
+    return `Stripe Checkout sa nepodarilo vytvoriť: ${detail} [${info.param}]`;
   }
 
-  return null;
+  return `Stripe Checkout sa nepodarilo vytvoriť: ${detail}`;
+}
+
+function withDevelopmentDetail(
+  productionMessage: string,
+  detail: string,
+): string {
+  if (isProduction() || !detail) {
+    return productionMessage;
+  }
+
+  return `${productionMessage} Detail: ${detail}`;
 }
 
 // ============================================================
@@ -739,10 +1030,14 @@ export async function GET() {
     ok: true,
     route: '/api/payments/checkout',
     message: 'ZEDPERA checkout endpoint is running.',
-    mode: 'payment',
+    modes: ['payment', 'subscription'],
+    currencyPolicyVersion: CURRENCY_POLICY_VERSION,
+    catalogCurrency: DEFAULT_CATALOG_CURRENCY.toUpperCase(),
+    environment: isProduction() ? 'production' : 'development',
     freeRedirect: '/dashboard?plan=free',
     successRedirect: '/payment/success?session_id={CHECKOUT_SESSION_ID}',
-    cancelRedirect: '/pricing?canceled=1',
+    cancelRedirect: '/pricing?payment=cancelled&lang={locale}',
+    localization: CHECKOUT_LOCALIZATION,
     plans: (Object.keys(PLANS) as PlanId[])
       .filter((planId) => planId !== 'admin')
       .map((planId) => ({
@@ -818,6 +1113,17 @@ export async function POST(request: Request) {
     const rawAddons = getRawAddons(body);
     const normalizedRequestedPlan = normalizeString(rawPlan);
 
+    const locale = normalizeLocale(
+      firstDefined(body.locale, body.language, body.lang),
+    );
+    const checkoutLocalization = getCheckoutLocalization(locale);
+
+    /**
+     * Menu platby sa určuje výhradne podľa aktuálnej jazykovej mutácie ZEDPERA.
+     * Nepreberá sa z klienta ani z predchádzajúcej Stripe session.
+     */
+    const checkoutCurrency = getCheckoutCurrencyForLocale(locale);
+
     // ADMIN je interný systémový balík. Nesmie sa vytvoriť Stripe Checkout
     // ani Stripe metadata, ktoré by ho mohli priradiť používateľovi nákupom.
     if (normalizedRequestedPlan === 'admin') {
@@ -876,13 +1182,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const baseUrl = getBaseUrl();
+    const baseUrl = getBaseUrl(request);
     const isFreeSelection = normalizedRequestedPlan === 'free';
 
     // Free balík nevytvára Stripe Checkout a nevyžaduje prihlásenie.
     // Samotný dashboard musí pre anonymného používateľa uplatniť free limity.
     if (isFreeSelection && addonIds.length === 0) {
-      const redirectUrl = getFreeDashboardUrl(baseUrl);
+      const redirectUrl = getFreeDashboardUrl(baseUrl, locale);
 
       return createJsonResponse({
         ok: true,
@@ -892,7 +1198,8 @@ export async function POST(request: Request) {
         planId: 'free' as const,
         url: redirectUrl,
         redirectUrl,
-        redirectPath: '/dashboard?plan=free',
+        redirectPath:
+          `/dashboard?plan=free&lang=${encodeURIComponent(locale)}`,
         message:
           'Free balík nevyžaduje Stripe platbu. Používateľ môže pokračovať priamo do dashboardu.',
       });
@@ -949,28 +1256,61 @@ export async function POST(request: Request) {
     }
 
     const stripe = getStripe();
-    const locale = normalizeLocale(
-      firstDefined(body.locale, body.language, body.lang),
-    );
 
-    let stripeCustomerId = normalizeString(
-      currentEntitlement?.stripe_customer_id,
-    );
+    let stripeCustomerId = '';
+    let customerResolution: StripeCustomerResolution | null = null;
 
-    if (isAuthenticated && !stripeCustomerId) {
-      const customer = await getOrCreateStripeCustomer({
+    if (isAuthenticated) {
+      customerResolution = await resolveStripeCustomerForCheckout({
         stripe,
         userId,
         email,
+        storedCustomerId: normalizeString(
+          currentEntitlement?.stripe_customer_id,
+        ),
       });
 
-      stripeCustomerId = customer.id;
+      stripeCustomerId = customerResolution.customerId;
     }
 
-    const lineItems: CheckoutLineItem[] = [
-      ...(planId ? [createPlanLineItem(planId)] : []),
-      ...addonIds.map(createAddonLineItem),
-    ];
+    const checkoutItemIds = getCheckoutCatalogItemIds(
+      planId,
+      addonIds,
+    );
+
+    // Platený hlavný balík je recurring subscription. Doplnky sú one-time.
+    // Stripe oficiálne podporuje mixed cart v subscription mode:
+    // recurring plán + one-time doplnky sa vyúčtujú na prvej faktúre.
+    const checkoutMode: CheckoutMode = planId
+      ? 'subscription'
+      : 'payment';
+
+    const lineItems: CheckoutLineItem[] = await createStripeLineItems(
+      stripe,
+      checkoutItemIds,
+      checkoutCurrency,
+    );
+
+    const priceDiagnostics = await validateStripeCheckoutPrices({
+      stripe,
+      checkoutItemIds,
+      lineItems,
+      checkoutCurrency,
+      checkoutMode,
+    });
+
+    if (!isProduction()) {
+      console.info('ZEDPERA_CHECKOUT_PREFLIGHT_OK', {
+        errorId,
+        requestId,
+        locale,
+        checkoutCurrency: checkoutCurrency || 'auto',
+        checkoutMode,
+        checkoutItemIds,
+        priceDiagnostics,
+        customerResolution,
+      });
+    }
 
     const metadata = buildMetadata({
       userId,
@@ -979,30 +1319,50 @@ export async function POST(request: Request) {
       addonIds,
       requestId,
       locale,
+      checkoutCurrency: checkoutCurrency,
     });
 
     const successUrl = getSuccessUrl(baseUrl, locale);
     const cancelUrl = getCancelUrl(baseUrl, locale);
 
     const sessionParams: CheckoutSessionCreateParams = {
-      mode: 'payment',
+      mode: checkoutMode,
       line_items: lineItems,
       success_url: successUrl,
       cancel_url: cancelUrl,
       metadata,
-      payment_intent_data: {
-        metadata,
-        ...(email ? { receipt_email: email } : {}),
-      },
       allow_promotion_codes: true,
       billing_address_collection: 'auto',
       automatic_tax: {
         enabled: false,
       },
-      locale: 'auto',
-      submit_type: 'pay',
-      expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
+      locale: checkoutLocalization.stripeLocale,
+      expires_at: Math.floor(Date.now() / 1000) + CHECKOUT_SESSION_EXPIRY_SECONDS,
     };
+
+    if (checkoutMode === 'subscription') {
+      sessionParams.subscription_data = {
+        metadata,
+      };
+    } else {
+      sessionParams.payment_intent_data = {
+        metadata,
+        ...(email ? { receipt_email: email } : {}),
+      };
+      sessionParams.submit_type = 'pay';
+    }
+
+    /**
+     * Jazyk rozhrania určuje menu platby:
+     * SK -> EUR, CS/CZ -> CZK, DE -> EUR, PL -> PLN, HU -> HUF.
+     * EN zostáva v režime AUTO a Stripe môže použiť lokálnu menu zákazníka.
+     *
+     * Pri explicitnej mene musia všetky použité Stripe Price objekty
+     * obsahovať danú menu v currency_options.
+     */
+    if (checkoutCurrency) {
+      sessionParams.currency = checkoutCurrency;
+    }
 
     if (userId) {
       sessionParams.client_reference_id = userId;
@@ -1015,8 +1375,11 @@ export async function POST(request: Request) {
         name: 'auto',
       };
     } else {
-      // Bez zákazníka Stripe zobrazí e-mailové pole priamo v Checkout.
-      sessionParams.customer_creation = 'always';
+      // Pri subscription mode Stripe zákazníka vytvorí automaticky. Parameter
+      // customer_creation je preto nastavovaný iba pre jednorazovú platbu.
+      if (checkoutMode === 'payment') {
+        sessionParams.customer_creation = 'always';
+      }
 
       if (email) {
         sessionParams.customer_email = email;
@@ -1028,6 +1391,8 @@ export async function POST(request: Request) {
       planId,
       addonIds,
       requestId,
+      locale,
+      checkoutCurrency,
     });
 
     const session = await stripe.checkout.sessions.create(
@@ -1063,7 +1428,7 @@ export async function POST(request: Request) {
       redirectUrl: session.url,
       sessionId: session.id,
       requestId,
-      mode: 'payment',
+      mode: checkoutMode,
       purchaseType,
 
       planId,
@@ -1071,8 +1436,17 @@ export async function POST(request: Request) {
       addonIds,
       addonNames: addonIds.map((addonId) => ADDONS[addonId].name),
 
-      currency: CURRENCY.toUpperCase(),
+      currency:
+        (
+          session.currency ||
+          checkoutCurrency ||
+          DEFAULT_CATALOG_CURRENCY
+        ).toUpperCase(),
+      catalogCurrency: DEFAULT_CATALOG_CURRENCY.toUpperCase(),
+      currencyPolicyVersion: CURRENCY_POLICY_VERSION,
+      requestedCheckoutCurrency: checkoutCurrency?.toUpperCase() || 'AUTO',
       catalogTotalCents: totalCents,
+      stripeAmountTotal: session.amount_total,
       basePages: getPurchasedBasePages(planId),
       extraPages: getPurchasedExtraPages(addonIds),
 
@@ -1080,16 +1454,27 @@ export async function POST(request: Request) {
       cancelUrl,
       locale,
       authenticated: isAuthenticated,
+      ...(!isProduction()
+        ? {
+            priceDiagnostics,
+            customerResolution,
+          }
+        : {}),
     });
   } catch (error: unknown) {
     const detail = getErrorMessage(error);
+    const stripeInfo = getStripeErrorInfo(error);
     const stripeCode = getStripeErrorCode(error);
 
     console.error('ZEDPERA_CHECKOUT_ERROR', {
       errorId,
       requestId: requestId || null,
       detail,
+      stripeType: stripeInfo.type,
       stripeCode,
+      stripeParam: stripeInfo.param,
+      stripeRequestId: stripeInfo.requestId,
+      stripeStatusCode: stripeInfo.statusCode,
       error,
     });
 
@@ -1150,7 +1535,7 @@ export async function POST(request: Request) {
             'Nepodarilo sa overiť aktuálny používateľský balík.',
           errorId,
           ...(requestId ? { requestId } : {}),
-          ...getSafeErrorDetail(detail),
+          ...getDevelopmentErrorPayload(error),
         },
         { status: 500 },
       );
@@ -1165,7 +1550,87 @@ export async function POST(request: Request) {
           message: 'Nepodarilo sa bezpečne overiť aktuálne prihlásenie.',
           errorId,
           ...(requestId ? { requestId } : {}),
-          ...getSafeErrorDetail(detail),
+          ...getDevelopmentErrorPayload(error),
+        },
+        { status: 500 },
+      );
+    }
+
+    if (detail.includes('STRIPE_PRICE_NOT_FOUND')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'STRIPE_PRICE_NOT_FOUND',
+          code: 'STRIPE_PRICE_NOT_FOUND',
+          message: withDevelopmentDetail(
+            'Stripe Price ID neexistuje v aktuálnom Stripe režime. Skontrolujte, či nepoužívate LIVE Price ID so sk_test_ kľúčom alebo TEST Price ID so sk_live_ kľúčom.',
+            detail,
+          ),
+          errorId,
+          ...(requestId ? { requestId } : {}),
+          ...getDevelopmentErrorPayload(error),
+        },
+        { status: 500 },
+      );
+    }
+
+    if (
+      detail.includes('STRIPE_LINE_ITEM_PRICE_MISSING') ||
+      detail.includes('STRIPE_LINE_ITEM_COUNT_MISMATCH')
+    ) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'STRIPE_LINE_ITEM_CONFIGURATION_INVALID',
+          code: 'STRIPE_LINE_ITEM_CONFIGURATION_INVALID',
+          message: withDevelopmentDetail(
+            'Interné mapovanie katalógu na Stripe line items je neplatné. Skontrolujte lib/stripe/prices.ts a Price ID pre všetky kupované položky.',
+            detail,
+          ),
+          errorId,
+          ...(requestId ? { requestId } : {}),
+          ...getDevelopmentErrorPayload(error),
+        },
+        { status: 500 },
+      );
+    }
+
+    if (detail.includes('STRIPE_PRICE_CURRENCY_UNSUPPORTED')) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'STRIPE_PRICE_CURRENCY_UNSUPPORTED',
+          code: 'STRIPE_PRICE_CURRENCY_UNSUPPORTED',
+          message: withDevelopmentDetail(
+            'Stripe Price existuje, ale nepodporuje menu vybranú pre aktuálny jazyk. Doplňte túto menu do currency_options na tom istom Price objekte.',
+            detail,
+          ),
+          errorId,
+          ...(requestId ? { requestId } : {}),
+          ...getDevelopmentErrorPayload(error),
+        },
+        { status: 400 },
+      );
+    }
+
+    if (
+      detail.includes('STRIPE_PRICE_TYPE_MISMATCH') ||
+      detail.includes('STRIPE_PRICE_INTERVAL_MISMATCH') ||
+      detail.includes('STRIPE_PRICE_INACTIVE') ||
+      detail.includes('STRIPE_PRICE_DEFAULT_CURRENCY_MISMATCH')
+    ) {
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'STRIPE_PRICE_CONFIGURATION_INVALID',
+          code: 'STRIPE_PRICE_CONFIGURATION_INVALID',
+          message: withDevelopmentDetail(
+            'Stripe Price konfigurácia nezodpovedá katalógu ZEDPERA. Skontrolujte aktivitu Price, recurring/one-time typ, mesačný interval a rovnakú default menu všetkých položiek.',
+            detail,
+          ),
+          errorId,
+          ...(requestId ? { requestId } : {}),
+          ...getDevelopmentErrorPayload(error),
         },
         { status: 500 },
       );
@@ -1177,11 +1642,34 @@ export async function POST(request: Request) {
           ok: false,
           error: 'STRIPE_CONFIG_MISSING',
           code: 'STRIPE_CONFIG_MISSING',
-          message:
+          message: withDevelopmentDetail(
             'Platobná brána nie je správne nakonfigurovaná.',
+            detail,
+          ),
           errorId,
           ...(requestId ? { requestId } : {}),
-          ...getSafeErrorDetail(detail),
+          ...getDevelopmentErrorPayload(error),
+        },
+        { status: 500 },
+      );
+    }
+
+    if (stripeInfo.code === 'resource_missing') {
+      const missingParam = stripeInfo.param || '';
+
+      return createJsonResponse(
+        {
+          ok: false,
+          error: 'STRIPE_RESOURCE_MISSING',
+          code: 'STRIPE_RESOURCE_MISSING',
+          message: missingParam.includes('customer')
+            ? 'Stripe Customer neexistuje v aktuálnom TEST/LIVE režime. Route sa ho pokúsila obnoviť; skontrolujte Stripe kľúč a uložené stripe_customer_id.'
+            : missingParam.includes('price')
+              ? 'Stripe Price neexistuje v aktuálnom TEST/LIVE režime. Skontrolujte Price ID a Stripe Secret Key.'
+              : 'Stripe nenašiel požadovaný objekt. Skontrolujte, či všetky Stripe ID patria do rovnakého TEST/LIVE režimu ako použitý Secret Key.',
+          errorId,
+          ...(requestId ? { requestId } : {}),
+          ...getDevelopmentErrorPayload(error),
         },
         { status: 500 },
       );
@@ -1199,11 +1687,10 @@ export async function POST(request: Request) {
         code: unavailable ? 'STRIPE_UNAVAILABLE' : 'CHECKOUT_FAILED',
         message: unavailable
           ? 'Platobná brána je dočasne nedostupná. Skúste požiadavku zopakovať.'
-          : 'Stripe Checkout sa nepodarilo vytvoriť.',
+          : getCheckoutFailureMessage(error),
         errorId,
         ...(requestId ? { requestId } : {}),
-        ...getSafeErrorDetail(detail),
-        ...(!isProduction() && stripeCode ? { stripeCode } : {}),
+        ...getDevelopmentErrorPayload(error),
       },
       { status: unavailable ? 503 : 500 },
     );

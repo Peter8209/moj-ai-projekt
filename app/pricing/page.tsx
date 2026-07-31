@@ -522,60 +522,19 @@ export default function PricingPage() {
             Menu
           </button>
 
-          <div className="hidden text-sm font-semibold text-slate-400 sm:block">
-            Mesačné plány a jednorazové doplnky
-          </div>
-
           <button
             type="button"
             onClick={goToDashboard}
             className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-purple-400/30 bg-purple-600/20 px-4 py-2 text-sm font-bold text-purple-100 transition hover:bg-purple-600/30"
           >
             <ArrowLeft size={18} />
-            Späť do menu
+            Návrat do menu
           </button>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl space-y-12 px-4 py-10 pb-32 sm:px-6 lg:px-8">
         <section>
-          <div className="mb-8">
-            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-sm font-semibold text-purple-200">
-              <Crown size={16} />
-              Cenník ZEDPERA
-            </div>
-
-            <h1 className="max-w-5xl text-4xl font-black tracking-tight text-white sm:text-5xl lg:text-6xl">
-              Vyberte hlavný mesačný plán alebo samostatný jednorazový doplnok
-            </h1>
-
-            <p className="mt-4 max-w-4xl text-base leading-7 text-slate-300 sm:text-lg">
-              Vyberte si balík podľa typu akademickej práce a požadovaného
-              rozsahu. K dispozícii sú aj jednorazové doplnky na analýzu dát
-              alebo rozšírenie aktuálneho projektu o ďalšie strany a prílohy.
-            </p>
-
-          </div>
-        </section>
-
-        <section>
-          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <div className="inline-flex items-center gap-2 text-purple-300">
-                <Crown size={21} />
-                <h2 className="text-2xl font-black text-white sm:text-3xl">
-                  Hlavné mesačné plány
-                </h2>
-              </div>
-
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
-                Vyberte si plán podľa typu a rozsahu pripravovanej akademickej
-                práce.
-              </p>
-            </div>
-
-          </div>
-
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
             {visibleMainPlans.map((plan) => {
               const loadingKey = plan.isFree
